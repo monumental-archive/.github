@@ -26,6 +26,14 @@ several gates is not starved; ORG_TEST_WORKERS sets it, and 1 runs the
 suite serially in this one process, as plain unittest does. Failfast
 (`-f`) also runs serially: stopping at the first failure is an order.
 
+After each root it prints what the root cost (#1732), below the result
+line so a red run reads the same above it: the ten slowest test files
+with their seconds (the sum of their tests' durations, which unittest
+collects), the root's CPU-seconds (the sum over files), the worker
+count and the root's wall time. When GITHUB_STEP_SUMMARY names a file,
+the same block is appended there, each line escaped as
+workflow_command escapes outside text, so a name cannot add a line.
+
 Coverage needs nothing from here: a worker is `python3`, started with
 this process's environment, so the measurement's start-up hook reaches
 it as it reaches any child, and its data file is its own (`parallel =
@@ -38,12 +46,14 @@ import os
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
+import time
 import unittest
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, TypedDict, override
 from warnings import catch_warnings, simplefilter
 
+import workflow_command
 from decoded import UndecodableError, load_json
 
 if TYPE_CHECKING:
@@ -67,6 +77,9 @@ ACTIONS: dict[str, Action] = {
 # workstation running several gates at once should keep cores to spare.
 WORKER_CAP = 8
 WORKERS = "ORG_TEST_WORKERS"
+# How many of a root's slowest files its cost block names.
+SLOWEST = 10
+SUMMARY = "GITHUB_STEP_SUMMARY"
 
 # Where the process was last sent. A deleted directory has no name to
 # ask for, so the last successful `os.chdir` is the only way to say
@@ -106,6 +119,22 @@ def where() -> str | None:
     return None
 
 
+def file_of(test: unittest.TestCase) -> str:
+    """Name the test file a test came from, as discovery names modules.
+
+    An import that failed is a test of unittest's own whose method is
+    named for the module that would not import: it is that file's.
+
+    Returns:
+        The module name.
+
+    """
+    module = type(test).__module__
+    if module == unittest.loader.__name__:
+        return test.id().rpartition(".")[2]
+    return module
+
+
 def workers() -> int:
     """Read the worker count: ORG_TEST_WORKERS, or the cores up to the cap.
 
@@ -134,7 +163,31 @@ def _left(message: str) -> None:
 
 
 class GuardedResult(unittest.TextTestResult):
-    """unittest's text result, plus the working-directory check."""
+    """unittest's text result, plus the working-directory check.
+
+    It also holds what the root cost: each file's seconds, the workers
+    it ran on and its wall time, for the block printed after it.
+    """
+
+    files: dict[str, float]
+    workers = 1
+    wall = 0.0
+
+    @override
+    def startTestRun(self) -> None:
+        """Start the run as unittest does, with nothing yet spent."""
+        super().startTestRun()
+        self.files = {}
+
+    @override
+    def addDuration(self, test: unittest.TestCase, elapsed: float) -> None:
+        """Collect the duration as unittest does, and add it to its file."""
+        super().addDuration(test, elapsed)
+        self.spend(file_of(test), elapsed)
+
+    def spend(self, file: str, seconds: float) -> None:
+        """Add seconds to a file's total."""
+        self.files[file] = self.files.get(file, 0.0) + seconds
 
     @override
     def stopTest(self, test: unittest.TestCase) -> None:
@@ -335,8 +388,9 @@ class GuardedRunner(unittest.TextTestRunner):
 
         """
         count = workers()
+        began = time.perf_counter()
         if count == 1 or self.failfast or not isinstance(test, unittest.TestSuite):
-            return super().run(test)
+            return costed(super().run(test), 1, began)
         spec: Spec = {
             "module": "",
             "path": sys.path,
@@ -346,7 +400,65 @@ class GuardedRunner(unittest.TextTestRunner):
             "tb_locals": self.tb_locals,
             "warnings": self.warnings,
         }
-        return super().run(Parallel(plan(test), spec, count))
+        return costed(super().run(Parallel(plan(test), spec, count)), count, began)
+
+
+def costed(
+    result: unittest.TextTestResult, count: int, began: float
+) -> unittest.TextTestResult:
+    """Record the workers a run used and its wall time on its result.
+
+    Returns:
+        The result.
+
+    """
+    if isinstance(result, GuardedResult):
+        result.workers = count
+        result.wall = time.perf_counter() - began
+    return result
+
+
+def slowest_first(item: tuple[str, float]) -> tuple[float, str]:
+    """Order a file's seconds slowest first, then by name.
+
+    Returns:
+        The sort key.
+
+    """
+    return -item[1], item[0]
+
+
+def cost(result: GuardedResult, root: str) -> list[str]:
+    """Write the block that says what a root cost.
+
+    Returns:
+        Its lines: a heading, the slowest files slowest first with their
+        seconds, and the root's CPU-seconds, workers and wall time.
+
+    """
+    ranked = sorted(result.files.items(), key=slowest_first)
+    shown = min(SLOWEST, len(ranked))
+    heading = f"the {shown} slowest of {len(ranked)} test files, seconds"
+    lines = [f"cost of {root}: {heading}"]
+    lines += [f"  {seconds:8.2f}  {name}" for name, seconds in ranked[:SLOWEST]]
+    cpu = sum(result.files.values())
+    plural = "" if result.workers == 1 else "s"
+    lines.append(
+        f"cost of {root}: {cpu:.2f} CPU-seconds, "
+        f"{result.workers} worker{plural}, {result.wall:.2f} s wall"
+    )
+    return lines
+
+
+def report(result: GuardedResult, root: str) -> None:
+    """Print a root's cost, and append it to the job summary if there is one."""
+    lines = [workflow_command.escape_data(line) for line in cost(result, root)]
+    sys.stderr.write("\n" + "\n".join(lines) + "\n")
+    sys.stderr.flush()
+    summary = os.environ.get(SUMMARY, "")
+    if summary:
+        with Path(summary).open("a", encoding="utf-8") as out:
+            out.write("```text\n" + "\n".join(lines) + "\n```\n")
 
 
 def work(spec: Path) -> subprocess.CompletedProcess[str]:
@@ -399,6 +511,8 @@ def merge(
     result.skipped.extend((Reported(d), reason) for d, reason in got["skipped"])
     result.unexpectedSuccesses.extend(Reported(d) for d in got["unexpectedSuccesses"])
     result.collectedDurations.extend((d, s) for d, s in got["durations"])
+    if isinstance(result, GuardedResult):
+        result.spend(module, sum(s for _, s in got["durations"]))
 
 
 class WorkerRunner(GuardedRunner):
@@ -674,6 +788,9 @@ def main(argv: list[str]) -> int:
         exit=False,
     )
     result = program.result
+    if isinstance(result, GuardedResult):
+        start: object = getattr(program, "start", None)
+        report(result, start if isinstance(start, str) else "the run")
     if not result.wasSuccessful():
         return 1
     if result.testsRun == 0 and not result.skipped:

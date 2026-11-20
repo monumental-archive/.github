@@ -9,7 +9,10 @@ it names; the clean rows assert that the runner is otherwise
 parallel rows (#1623) assert that running each file in a worker of its
 own changes nothing a reader sees but the time: the same tests, the
 same failures in full, the same summary and status as one process, and
-under coverage the same figure.
+under coverage the same figure. The cost rows (#1732) assert the block
+printed after each root's result: its slowest files slowest first, its
+CPU-seconds, workers and wall time, and the same block in the job
+summary when there is one; every other row compares what is above it.
 """
 
 import io
@@ -33,6 +36,12 @@ BASH = hermetic.tool("bash")
 GIT = hermetic.tool("git")
 # unittest prints its own timing; two runs never agree on it.
 TIMING = re.compile(r"Ran (\d+ tests?) in \d+\.\d+s")
+# The cost block the runner prints last (#1732), after a blank line.
+COST = re.compile(
+    r"\n(cost of .+: the \d+ slowest of \d+ test files, seconds\n"
+    r"(?:  .*\n)*"
+    r"cost of .+: [0-9.]+ CPU-seconds, \d+ workers?, [0-9.]+ s wall\n)\Z"
+)
 
 LEAKS = """\
 import os
@@ -69,6 +78,22 @@ class T(unittest.TestCase):
 
     def test_two(self):
         self.assertTrue(True)
+"""
+
+# A file whose one test takes a known time; FAILS adds a failing test.
+SLEEPS = """\
+import time
+import unittest
+
+
+class T(unittest.TestCase):
+    def test_sleeps(self):
+        time.sleep({seconds})
+"""
+
+FAILS = """
+    def test_wrong(self):
+        self.assertEqual(1, 2)
 """
 
 FAILING = """\
@@ -239,6 +264,79 @@ def planted(module: object) -> bool:
     ))
 
 
+def split_cost(stderr: str) -> tuple[str, list[str]]:
+    """Split the runner's stderr at the cost block it prints last.
+
+    Returns:
+        What is above the block, and the block's lines.
+
+    Raises:
+        AssertionError: when there is no block at the end.
+
+    """
+    found = COST.search(stderr)
+    if found is None:
+        msg = f"no cost block at the end of:\n{stderr}"
+        raise AssertionError(msg)
+    return stderr[: found.start()], stderr[found.start(1) :].splitlines()
+
+
+def files(block: list[str]) -> list[tuple[str, float]]:
+    """Read the block's file rows: each module and its seconds, in order.
+
+    Returns:
+        The rows between the heading and the totals.
+
+    """
+    out: list[tuple[str, float]] = []
+    for line in block[1:-1]:
+        seconds, name = line.split()
+        out.append((name, float(seconds)))
+    return out
+
+
+def totals(block: list[str], root: str) -> tuple[float, str, float]:
+    """Read the block's last line: CPU-seconds, workers, wall seconds.
+
+    Returns:
+        The CPU-seconds, the workers phrase and the wall seconds.
+
+    Raises:
+        AssertionError: when the line does not name the root.
+
+    """
+    head = f"cost of {root}: "
+    if not block[-1].startswith(head):
+        msg = f"the totals do not name {root}: {block[-1]}"
+        raise AssertionError(msg)
+    cpu, workers, wall = block[-1].removeprefix(head).split(", ")
+    return (
+        float(cpu.removesuffix(" CPU-seconds")),
+        workers,
+        float(wall.removesuffix(" s wall")),
+    )
+
+
+def written_files(base: pathlib.Path) -> list[pathlib.Path]:
+    """List the files under a scratch tree, less Python's bytecode caches.
+
+    Returns:
+        Every path below `base`, sorted.
+
+    """
+    return sorted(p for p in base.rglob("*") if "__pycache__" not in p.parts)
+
+
+def above(stderr: str) -> str:
+    """Return what the runner printed above its cost block.
+
+    Returns:
+        The text before the block, which is unittest's own.
+
+    """
+    return split_cost(stderr)[0]
+
+
 def call(argv: list[str], env: dict[str, str]) -> hermetic.Called:
     """Call the runner's `main` in this process (#1696).
 
@@ -263,8 +361,8 @@ def call(argv: list[str], env: dict[str, str]) -> hermetic.Called:
             del sys.modules[name]
 
 
-class Runner(unittest.TestCase):
-    """The runner over planted modules."""
+class Planted(unittest.TestCase):
+    """Planted trees and the ways a row runs them; no rows of its own."""
 
     def tree(self, **modules: str) -> tuple[pathlib.Path, pathlib.Path]:
         """Write modules into a scratch tree beside a starting directory.
@@ -325,6 +423,7 @@ class Runner(unittest.TestCase):
         *flags: str,
         workers: str = "3",
         pids: pathlib.Path | None = None,
+        summary: pathlib.Path | None = None,
     ) -> hermetic.Called:
         """Run the planted tree through the guarded runner, in this process.
 
@@ -343,6 +442,8 @@ class Runner(unittest.TestCase):
             ORG_TEST_WORKERS=workers,
             PIDS=str(pids or ""),
         )
+        if summary is not None:
+            env["GITHUB_STEP_SUMMARY"] = str(summary)
         return call(
             [
                 "discover",
@@ -351,6 +452,10 @@ class Runner(unittest.TestCase):
             ],
             env,
         )
+
+
+class Runner(Planted):
+    """The runner over planted modules."""
 
     def test_a_deleted_directory_is_an_error_on_the_test_that_left_it(self) -> None:
         """The leaking test is the ERROR, by name; the next one passes."""
@@ -396,7 +501,7 @@ class Runner(unittest.TestCase):
                 self.assertEqual(ours.returncode, plain.returncode)
                 self.assertEqual(ours.stdout, plain.stdout)
                 self.assertEqual(
-                    TIMING.sub(r"Ran \1", ours.stderr),
+                    TIMING.sub(r"Ran \1", above(ours.stderr)),
                     TIMING.sub(r"Ran \1", plain.stderr),
                 )
 
@@ -442,8 +547,8 @@ class Runner(unittest.TestCase):
                 self.assertEqual(parallel.returncode, serial.returncode)
                 self.assertEqual(parallel.stdout, serial.stdout)
                 self.assertEqual(
-                    TIMING.sub(r"Ran \1", parallel.stderr),
-                    TIMING.sub(r"Ran \1", serial.stderr),
+                    TIMING.sub(r"Ran \1", above(parallel.stderr)),
+                    TIMING.sub(r"Ran \1", above(serial.stderr)),
                 )
                 self.assertIn(
                     "FAILED (failures=1, errors=2, skipped=1, expected failures=1, "
@@ -536,6 +641,115 @@ class Runner(unittest.TestCase):
                 self.assertEqual(
                     r.stderr, f"unittest-guarded: worker spec {spec} is unreadable\n"
                 )
+
+
+class Cost(Planted):
+    """What a root cost, printed after its result (#1732)."""
+
+    def costed(
+        self, start: pathlib.Path, workers: str, summary: pathlib.Path | None = None
+    ) -> tuple[hermetic.Called, str, list[str]]:
+        """Run the planted tree and split its stderr at the cost block.
+
+        Returns:
+            The run, what is above the block, and the block's lines.
+
+        """
+        r = self.guarded(start, workers=workers, summary=summary)
+        top, block = split_cost(r.stderr)
+        return r, top, block
+
+    def test_the_cost_names_the_slowest_files_first(self) -> None:
+        """After the result, passing or failing: slowest first, then totals."""
+        sleeps = {"test_quick": 0.1, "test_slow": 0.4, "test_middle": 0.25}
+        for failing, workers in ((f, w) for f in (False, True) for w in ("1", "3")):
+            with self.subTest(failing=failing, workers=workers):
+                start, root = self.tree(**{
+                    name: SLEEPS.format(seconds=seconds)
+                    + (FAILS if failing and name == "test_quick" else "")
+                    for name, seconds in sleeps.items()
+                })
+                r, top, block = self.costed(start, workers)
+                self.assertEqual(r.returncode, int(failing), r.stderr)
+                result = "FAILED (failures=1)" if failing else "OK"
+                self.assertTrue(top.endswith(f"\n{result}\n"), r.stderr)
+                self.assertEqual(
+                    block[0], f"cost of {root}: the 3 slowest of 3 test files, seconds"
+                )
+                named = files(block)
+                order = [pair[0] for pair in named]
+                slowest: list[str] = ["test_slow", "test_middle", "test_quick"]
+                self.assertEqual(order, slowest)
+                for name, seconds in named:
+                    self.assertGreaterEqual(seconds, sleeps[name])
+                cpu, used, wall = totals(block, str(root))
+                self.assertAlmostEqual(cpu, sum(s for _, s in named), delta=0.02)
+                self.assertGreaterEqual(wall, max(sleeps.values()))
+                self.assertEqual(
+                    used, f"{workers} worker{'' if workers == '1' else 's'}"
+                )
+
+    def test_the_cost_names_at_most_ten_files(self) -> None:
+        """Twelve files: the ten slowest are named, all twelve are counted."""
+        start, root = self.tree(**{f"test_f{n:02d}": CLEAN for n in range(12)})
+        r, _, block = self.costed(start, "3")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(
+            block[0], f"cost of {root}: the 10 slowest of 12 test files, seconds"
+        )
+        self.assertEqual(len(block), 12)
+
+    def test_an_import_that_fails_is_costed_by_its_module(self) -> None:
+        """A file that will not import is named as itself, never as unittest's."""
+        start, _ = self.tree(
+            test_broken="import no_such_module_planted\n", test_clean=CLEAN
+        )
+        for workers in ("1", "3"):
+            with self.subTest(workers=workers):
+                _, _, block = self.costed(start, workers)
+                names = sorted(pair[0] for pair in files(block))
+                both: list[str] = ["test_broken", "test_clean"]
+                self.assertEqual(names, both)
+
+    def test_the_cost_goes_to_the_job_summary_when_there_is_one(self) -> None:
+        """Set, the block is appended there; unset, nothing else is written."""
+        start, _ = self.tree(test_clean=CLEAN)
+        summary = start.parent / "summary.md"
+        summary.write_text("before\n", encoding="utf-8")
+        _, _, block = self.costed(start, "3", summary)
+        self.assertEqual(
+            summary.read_text(encoding="utf-8"),
+            "before\n```text\n" + "\n".join(block) + "\n```\n",
+        )
+        summary.unlink()
+        before = written_files(start.parent)
+        _, _, block = self.costed(start, "3")
+        self.assertTrue(block)
+        self.assertEqual(written_files(start.parent), before)
+
+    def test_a_name_with_a_newline_stays_on_its_line(self) -> None:
+        """Outside text is escaped as workflow_command escapes it: one line."""
+        start, _ = self.tree()
+        root = start / "sui\nte"
+        root.mkdir()
+        (root / "test_clean.py").write_text(CLEAN, encoding="utf-8")
+        summary = start.parent / "summary.md"
+        env = hermetic.env(
+            START=str(pathlib.Path.cwd()), GITHUB_STEP_SUMMARY=str(summary)
+        )
+        r = call(
+            ["discover", "--start-directory", str(root), "--pattern", "test_*.py"], env
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        escaped = str(start / "sui%0Ate")
+        _, block = split_cost(r.stderr)
+        self.assertEqual(
+            block[0], f"cost of {escaped}: the 1 slowest of 1 test files, seconds"
+        )
+        self.assertTrue(block[-1].startswith(f"cost of {escaped}: "), block[-1])
+        self.assertIn(
+            f"\ncost of {escaped}: the 1 slowest", summary.read_text(encoding="utf-8")
+        )
 
 
 # A worker outcome every field of which reads; the rows below spoil one.
@@ -642,7 +856,7 @@ class Shapes(unittest.TestCase):
         r = self.guarded(start)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("Ran 2 tests in", r.stderr)
-        self.assertTrue(r.stderr.rstrip().endswith("OK"), r.stderr)
+        self.assertTrue(above(r.stderr).endswith("\nOK\n"), r.stderr)
 
     def test_no_worker_count_takes_the_cores_up_to_the_cap(self) -> None:
         """Unset, the count is the machine's, and the suite runs as usual."""
@@ -650,7 +864,7 @@ class Shapes(unittest.TestCase):
         r = self.guarded(start, workers="")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("Ran 4 tests in", r.stderr)
-        self.assertTrue(r.stderr.rstrip().endswith("OK"), r.stderr)
+        self.assertTrue(above(r.stderr).endswith("\nOK\n"), r.stderr)
 
     def test_a_spec_with_no_warnings_action_runs_its_module(self) -> None:
         """An absent action is valid: the worker runs and writes its outcome."""
@@ -697,6 +911,31 @@ class Parts(unittest.TestCase):
         suite = loader.loadTestsFromModule(module)
         self.assertEqual(suite.countTestCases(), 1)
         self.assertEqual(loader.modules[id(suite)], ("planted_module", suite))
+
+    def test_a_test_s_file_is_its_module_or_the_one_that_failed(self) -> None:
+        """A test is its module's; a failed import is the module it names."""
+        missing = "no_such_module_planted"
+        failed = next(iter(unittest.TestLoader().loadTestsFromName(missing)))
+        if not isinstance(failed, unittest.TestCase):
+            self.fail(f"unittest loaded {failed!r} for a failed import")
+        rows: list[tuple[unittest.TestCase, str]] = [
+            (self, __name__),
+            (failed, missing),
+        ]
+        for test, file in rows:
+            with self.subTest(file=file):
+                self.assertEqual(ug.file_of(test), file)
+
+    def test_a_duration_is_collected_and_added_to_its_file(self) -> None:
+        """Unittest's list still gets it; the file's total adds it up."""
+        stream = ug.GuardedRunner(stream=io.StringIO(), verbosity=0).stream
+        result = ug.GuardedResult(stream, descriptions=True, verbosity=0)
+        result.startTestRun()
+        result.addDuration(self, 0.25)
+        result.addDuration(self, 0.5)
+        self.assertEqual(len(result.collectedDurations), 2)
+        spent: dict[str, float] = {__name__: 0.75}
+        self.assertEqual(result.files, spent)
 
     def test_a_reported_test_is_its_description(self) -> None:
         """A worker's test prints as its description, with no docstring line."""
