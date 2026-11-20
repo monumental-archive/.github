@@ -24,6 +24,6 @@ name = "local"
 [audit-mutants]
 tests = [
   "mise/test_*.py",
-  "release/**/test_*.py",
+  "release/test_*.py",
   ".github/rekor-monitor/test_*.py",
 ]
