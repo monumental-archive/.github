@@ -7,10 +7,15 @@
 # Renovate's custom manager in renovate.json keeps tag AND digest current
 # together — the pairing that makes pinning safe. A pinned-but-stale base
 # would be worse than a floating one.
+#
+# The keys ARE the canon's support matrix, and a consumer's pgNN features
+# are held to them by lint:gate-surface. A major enters by adding its key
+# and leaves by deleting it at its upstream final release
+# (postgresql.org/support/versioning) — both reviewed changes. An
+# end-of-life server is stale whatever its digest; 14 left this way at
+# 14.25, its final release (#1845).
 
 [build]
-# renovate: pgrx-base-image
-"14" = "postgres:14-bookworm@sha256:a54c8b1e143b22f16b0fd3e249e9297a6f08828a143ee7108b1b5ca51f352765"
 # renovate: pgrx-base-image
 "15" = "postgres:15-bookworm@sha256:72ccb1ad4dc9d5813ea40a8c1c87af746f16658fb029c17fe570ea9b881f68b3"
 # renovate: pgrx-base-image
@@ -21,8 +26,6 @@
 "18" = "postgres:18-bookworm@sha256:ece55f7868da684e400f82f1030a050718adbdd65c23aa500c486f6e2950dc0f"
 
 [smoke]
-# renovate: pgrx-base-image
-"14" = "postgres:14-trixie@sha256:980b7cb415aa0f812f65bdec8f6f599be408d8ed9c83ffcaa12650eac397b264"
 # renovate: pgrx-base-image
 "15" = "postgres:15-trixie@sha256:5a407822929c3789ff5154d3d35bd7e2090318149344c8a3d4ca942b035822ed"
 # renovate: pgrx-base-image

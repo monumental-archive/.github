@@ -210,11 +210,11 @@ class Stage(unittest.TestCase):
 
     def test_a_tarball_without_extension(self) -> None:
         """No share/postgresql/<major>/extension: refused by path."""
-        shown = self.plant("14", "amd64", share=False)
-        result = self.stage("14")
+        shown = self.plant("15", "amd64", share=False)
+        result = self.stage("15")
         self.assertEqual(1, result.returncode)
         self.assertEqual(
-            f"::error::{shown} has no pkgroot/usr/share/postgresql/14/extension\n",
+            f"::error::{shown} has no pkgroot/usr/share/postgresql/15/extension\n",
             result.stderr,
         )
 
