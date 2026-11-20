@@ -13,9 +13,9 @@
 # exercised code in the org, where a guard that skips when it should run
 # looks precisely like success.
 #
-# Every tool the belt's tasks use is the org's, pinned in mise/config.toml
-# beside mise/mise.lock. The one tool below is the canon's OWN: its suite
-# needs it, and no belt task does (the belt pins no Go, by decision).
+# No `[tools]` here on purpose: every tool this repo uses is the org's,
+# pinned in mise/config.toml beside mise.lock, and a second tool table
+# would be a second place for a pin to live.
 
 # The pin every task-defining config in the org owes, restated here because
 # this file defines a task (#700). The belt supplies the same string as
@@ -26,16 +26,6 @@
 # default is `sh`, which is dash on an Ubuntu runner.
 [task_config]
 shell = "bash -euo pipefail -c"
-
-# Go, for the canon's own suite (#1651): the go coverage leg's rows run
-# real `go test`, `go run` and `go tool covdata`, because only real Go
-# shows its own merge of the counters and the overwrite a single profile
-# path suffers. Exact, locked in the mise.lock beside this file, at the
-# version stele pins, so the org runs one Go. The gate installs it for
-# this repository's `test`: a repository's own pin is never disabled
-# (gate_tools.py).
-[tools]
-go = "1.27.4"
 
 [tasks.test]
 description = "The belt's Python helpers and release scripts (stdlib unittest)"
