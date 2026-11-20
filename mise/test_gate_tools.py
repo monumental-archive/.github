@@ -268,6 +268,21 @@ def venv_command(line: str) -> str | None:
     return positionals[1] if len(positionals) > 1 else None
 
 
+def python_calls(text: str, commands: list[str]) -> bool:
+    """Say whether Python source spawns one of the commands.
+
+    A helper that imports no subprocess spawns nothing; one that does
+    names its command as a quoted list element (`["shfmt", "-d", f]`).
+
+    Returns:
+        True when it does.
+
+    """
+    if not re.search(r"^(?:import|from) subprocess", text, re.MULTILINE):
+        return False
+    return any(re.search(rf'[\[(,]\s*"{re.escape(c)}"', text) for c in commands)
+
+
 def first_call(lines: list[tuple[str, str]], cmds: list[str]) -> int | None:
     """Find where an expanded body first calls one of the commands.
 
@@ -282,7 +297,7 @@ def first_call(lines: list[tuple[str, str]], cmds: list[str]) -> int | None:
             break
         if kind.startswith("py:"):
             src = _source(kind[3:])
-            if gate_tools.python_calls(src, cmds) or "python3" in cmds:
+            if python_calls(src, cmds) or "python3" in cmds:
                 return i
             if kind == f"py:{TOOL_PYTHON}" and venv_command(lines[i - 1][1]) in cmds:
                 return i

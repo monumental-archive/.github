@@ -98,7 +98,7 @@ class Declaration(unittest.TestCase):
     @given(admissible())
     def test_admissible_has_no_problem(self, document: dict[str, object]) -> None:
         """Identity domains at "all", any order: nothing to say."""
-        problems = bc.declaration_problems(document, DOMAINS.identity)
+        problems = bc.declaration(document, DOMAINS.identity)[1]
         self.assertEqual(problems, list[str]())
 
     @given(admissible(), DOMAIN, VALUE)
@@ -107,7 +107,7 @@ class Declaration(unittest.TestCase):
     ) -> None:
         """A non-identity domain, or a value other than "all", is named."""
         table(document, "linter", "domains")[domain] = value
-        problems = bc.declaration_problems(document, DOMAINS.identity)
+        problems = bc.declaration(document, DOMAINS.identity)[1]
         allowed = domain in DOMAINS.identity and value == "all"
         self.assertEqual(problems == [], allowed, problems)
 
@@ -116,7 +116,7 @@ class Declaration(unittest.TestCase):
     @example(DOMAINS_STRING)
     def test_any_json_is_judged(self, document: object) -> None:
         """A list of problems, never a traceback."""
-        self.assertIsInstance(bc.declaration_problems(document, DOMAINS.identity), list)
+        self.assertIsInstance(bc.declaration(document, DOMAINS.identity)[1], list)
 
 
 class Omissions(unittest.TestCase):

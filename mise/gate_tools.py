@@ -152,21 +152,6 @@ def _call_pattern(commands: tuple[str, ...]) -> re.Pattern[str]:
     return pattern
 
 
-def python_calls(text: str, commands: list[str]) -> bool:
-    """Say whether Python source spawns one of the commands.
-
-    A helper that imports no subprocess spawns nothing; one that does
-    names its command as a quoted list element (`["shfmt", "-d", f]`).
-
-    Returns:
-        True when it does.
-
-    """
-    if not re.search(r"^(?:import|from) subprocess", text, re.MULTILINE):
-        return False
-    return any(re.search(rf'[\[(,]\s*"{re.escape(c)}"', text) for c in commands)
-
-
 def matches(pattern: str, path: str) -> bool:
     """Match a path against one pathspec, with git's default meaning.
 

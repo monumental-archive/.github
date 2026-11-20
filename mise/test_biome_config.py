@@ -131,7 +131,7 @@ class DeclarationProblemsTest(unittest.TestCase):
             The refusals.
 
         """
-        problems = biome_config.declaration_problems(document, DELIVERED.identity)
+        problems = biome_config.declaration(document, DELIVERED.identity)[1]
         self.assertEqual(not problems, admissible, msg=f"{document} -> {problems}")
         return problems
 
@@ -534,10 +534,10 @@ class TestFileOverrideTest(unittest.TestCase):
 
     def test_a_repository_may_not_declare_an_override_of_its_own(self) -> None:
         """The widening a repo would reach for is refused by name (#695)."""
-        problems = biome_config.declaration_problems(
+        problems = biome_config.declaration(
             {"overrides": [{"includes": ["src/**"], "linter": {"rules": {}}}]},
             DELIVERED.identity,
-        )
+        )[1]
         self.assertTrue(problems)
         self.assertIn("overrides", problems[0])
 
