@@ -172,7 +172,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
-          version: 2026.11.7
+          version: 2026.11.8
           cache: false
           # Only what this job's steps call (#1333): the release path is
           # uncached, so every tool in scope is paid for on every run.
@@ -293,7 +293,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
-          version: 2026.11.7
+          version: 2026.11.8
           cache: false
           # Only what this job's steps call (#1333): the release path is
           # uncached, so every tool in scope is paid for on every run.
@@ -480,7 +480,7 @@ jobs:
         # cache in a job that holds the decision's signing identity.
         uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
-          version: 2026.11.7
+          version: 2026.11.8
           cache: false
           # Only what this job's steps call (#1333): the release path is
           # uncached, so every tool in scope is paid for on every run.
