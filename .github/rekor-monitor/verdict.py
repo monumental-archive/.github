@@ -154,7 +154,7 @@ def outstanding(report: Report) -> tuple[bool, str]:
     return False, f"advanced; outstanding {left} ({stopped})"
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str]) -> int:
     """Judge one leg.
 
     Returns:
@@ -176,4 +176,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

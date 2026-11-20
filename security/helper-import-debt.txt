@@ -19,18 +19,6 @@
 #
 # Generated from the tree by the lint's own reader (mise/in_process.py),
 # never typed.
-.github/rekor-monitor/findings.py:already_filed	# #1699
-.github/rekor-monitor/findings.py:file_all	# #1699
-.github/rekor-monitor/findings.py:gh	# #1699
-.github/rekor-monitor/findings.py:main	# #1699
-.github/rekor-monitor/standing_issue.py:behind	# #1699
-.github/rekor-monitor/standing_issue.py:caught_up	# #1699
-.github/rekor-monitor/standing_issue.py:gh	# #1699
-.github/rekor-monitor/standing_issue.py:keep	# #1699
-.github/rekor-monitor/standing_issue.py:main	# #1699
-.github/rekor-monitor/standing_issue.py:open_standing	# #1699
-.github/rekor-monitor/standing_issue.py:standing_issues	# #1699
-.github/rekor-monitor/verdict.py:main	# #1699
 release/attach_publish.py:converge	# #1698
 release/attach_publish.py:gh	# #1698
 release/attach_publish.py:main	# #1698

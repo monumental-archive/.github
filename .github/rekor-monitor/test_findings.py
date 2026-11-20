@@ -2,8 +2,10 @@
 """findings.py against a stub `gh` on PATH (#1250, #1339).
 
 The stub records every argv and answers `issue list` from the row's
-canned search result (or fails). Each row runs the helper as the
-workflow does and asserts what gh received and the message printed.
+canned search result (or fails). Each row calls the helper's `main` in
+this process, the row's environment in place for the call (#1673,
+#1699), and asserts what gh received and the message printed; one row,
+the script row, starts it as the workflow does.
 
 The reports start from stele v0.24.0's own output (testdata/SOURCE.md).
 No live run produced a finding, so the finding rows add `findings` to a
@@ -17,7 +19,7 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess  # ruff: ignore[suspicious-subprocess-import] - the helper is run as the workflow runs it
+import subprocess  # ruff: ignore[suspicious-subprocess-import] - the script row runs the helper as the workflow does
 import sys
 import tempfile
 import unittest
@@ -27,6 +29,7 @@ from pathlib import Path
 # come first.
 sys.path.append(str(Path(__file__).resolve().parents[2] / "mise"))
 
+import findings
 import hermetic
 
 HERE = Path(__file__).resolve().parent
@@ -102,8 +105,24 @@ class Harness(unittest.TestCase):
             STUB_LIST="[]",
         )
 
-    def run_helper(self, **env: str) -> subprocess.CompletedProcess[str]:
-        """Write the report and run the helper as the workflow does.
+    def run_helper(self, **env: str) -> hermetic.Called:
+        """Write the report and call the helper's main in this process.
+
+        The process's environment is the row's for the call (the stub gh
+        first on PATH, the repository, the stub's own variables), so gh
+        is started as the workflow starts it (#1673, #1699).
+
+        Returns:
+            Its exit status and output, captured.
+
+        """
+        if self.doc is not None:
+            self.report.write_text(json.dumps(self.doc), encoding="utf-8")
+        argv = ["--report", str(self.report), "--run-url", RUN]
+        return hermetic.call_main(lambda: findings.main(argv), env={**self.env, **env})
+
+    def run_script(self, **env: str) -> subprocess.CompletedProcess[str]:
+        """Write the report and start the helper as the workflow does.
 
         Returns:
             The finished process.
@@ -317,8 +336,12 @@ class Findings(Harness):
         )
 
     def test_no_repository(self) -> None:
-        """GITHUB_REPOSITORY unset: exit 2 by name, gh never called."""
-        proc = self.run_helper(GITHUB_REPOSITORY="")
+        """GITHUB_REPOSITORY unset: exit 2 by name, gh never called.
+
+        The script row (#1673): the helper started as the workflow starts
+        it, reading its arguments and exiting with the documented status.
+        """
+        proc = self.run_script(GITHUB_REPOSITORY="")
         self.assertEqual(proc.returncode, 2)
         self.assertEqual(self.gh_calls(), [])
         self.assertEqual(proc.stderr.strip(), "findings: GITHUB_REPOSITORY is not set")
