@@ -22,11 +22,13 @@ import re
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
-import tomllib
 import unittest
+from typing import override
 
+import decoded
 import git_decoy as gd
 import hermetic
+import typed_std
 
 _HERE = pathlib.Path(__file__).resolve().parent
 
@@ -90,8 +92,24 @@ def body() -> str:
         The bash source mise runs.
 
     """
-    config = tomllib.loads((_HERE.parent / "mise.toml").read_text(encoding="utf-8"))
-    return config["tasks"]["test"]["run"]
+    config = decoded.load_toml((_HERE.parent / "mise.toml").read_text(encoding="utf-8"))
+    tasks = decoded.as_object(config["tasks"], "the [tasks] table")
+    return decoded.as_str(decoded.as_object(tasks["test"], "test")["run"], "the run")
+
+
+def roots() -> list[str]:
+    """Read the discovery roots the `test` task names.
+
+    Returns:
+        Each `--start-directory` argument, in order.
+
+    """
+    found: list[str] = []
+    for match in ROOT_RE.finditer(body()):
+        root = typed_std.group(match, 1)
+        if root is not None:
+            found.append(root)
+    return found
 
 
 def throwaway(root: pathlib.Path) -> pathlib.Path:
@@ -146,7 +164,7 @@ class Task(unittest.TestCase):
         # ones planted here.
         for test in hermetic.belt(tree / "mise").glob("test_*.py"):
             test.unlink()
-        for root in ROOT_RE.findall(body()):
+        for root in roots():
             (tree / root).mkdir(parents=True, exist_ok=True)
             (tree / root / "test_ok.py").write_text(PASSING, encoding="utf-8")
         leaky = LEAKY.replace("{ENV}", SCRUB if scrubbed else "None")
@@ -200,6 +218,7 @@ class Task(unittest.TestCase):
 class Helper(unittest.TestCase):
     """`run` names each kind of change a leak can make."""
 
+    @override
     def setUp(self) -> None:
         """Plant a decoy in a scratch directory."""
         tmp = tempfile.TemporaryDirectory()

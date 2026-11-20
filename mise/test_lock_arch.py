@@ -13,6 +13,9 @@ import unittest
 import hermetic
 import lock_arch
 
+# A lock with nothing to name, as a typed list.
+NO_CANDIDATES: list[str] = []
+
 
 class TestAssetArch(unittest.TestCase):
     """The architecture a release asset's filename claims."""
@@ -156,7 +159,7 @@ class TestCandidates(unittest.TestCase):
             'url = "https://github.com/wasm-bindgen/wasm-pack/releases/'
             'download/v0.15.0/wasm-pack-v0.15.0-aarch64-apple-darwin.tar.gz"\n'
         )
-        self.assertEqual(lock_arch.candidates(path), [])
+        self.assertEqual(lock_arch.candidates(path), NO_CANDIDATES)
 
     def test_unjudgeable_asset_is_not_reported(self) -> None:
         """No architecture in the name means no disagreement to claim."""
@@ -167,7 +170,7 @@ class TestCandidates(unittest.TestCase):
             'url = "https://github.com/koalaman/shellcheck/releases/'
             'download/v0.11.0/shellcheck-v0.11.0.zip"\n'
         )
-        self.assertEqual(lock_arch.candidates(path), [])
+        self.assertEqual(lock_arch.candidates(path), NO_CANDIDATES)
 
     def test_an_unreadable_lock_is_named_and_skipped(self) -> None:
         """Not TOML, or `tools` not a table: said by name, no candidate."""
@@ -179,7 +182,7 @@ class TestCandidates(unittest.TestCase):
                 path = self._lock(body)
                 err = io.StringIO()
                 with contextlib.redirect_stderr(err):
-                    self.assertEqual(lock_arch.candidates(path), [])
+                    self.assertEqual(lock_arch.candidates(path), NO_CANDIDATES)
                 self.assertTrue(
                     err.getvalue().startswith(f"lock-arch: cannot read {path}: {said}"),
                     err.getvalue(),
@@ -187,7 +190,7 @@ class TestCandidates(unittest.TestCase):
 
     def test_empty_lock_is_clean(self) -> None:
         """A lock with no tools is not an error."""
-        self.assertEqual(lock_arch.candidates(self._lock("[tools]\n")), [])
+        self.assertEqual(lock_arch.candidates(self._lock("[tools]\n")), NO_CANDIDATES)
 
 
 DEFECT = (

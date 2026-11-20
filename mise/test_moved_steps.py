@@ -22,6 +22,7 @@ import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
 import unittest
 from pathlib import Path
+from typing import override
 
 import hermetic
 
@@ -58,6 +59,7 @@ class VexDecisions(unittest.TestCase):
 
     SCRIPT = HERE / "vex-decisions.sh"
 
+    @override
     def setUp(self) -> None:
         """Make a repository with no decisions yet."""
         tmp = tempfile.TemporaryDirectory()
@@ -115,17 +117,15 @@ class VexDecisions(unittest.TestCase):
         self.decide("a", "b")
         done = self.decisions()
         self.assertEqual((done.returncode, done.stdout), (0, ""), done.stderr)
-        self.assertEqual(
-            self.out.read_text("utf-8").split("\0"),
-            [
-                "--unsigned-only",
-                "--store",
-                "o/r",
-                "--decision=security/vex/a.openvex.json",
-                "--decision=security/vex/b.openvex.json",
-                "",
-            ],
-        )
+        argv: list[str] = [
+            "--unsigned-only",
+            "--store",
+            "o/r",
+            "--decision=security/vex/a.openvex.json",
+            "--decision=security/vex/b.openvex.json",
+            "",
+        ]
+        self.assertEqual(self.out.read_text("utf-8").split("\0"), argv)
 
     def test_nothing_to_sign_is_a_notice_and_no_arguments(self) -> None:
         """No decisions: the notice, no arguments written, exit 0."""
@@ -195,6 +195,7 @@ def plant(root: Path, *, policy: bool = True) -> Path:
 class SourceAttestResolve(unittest.TestCase):
     """.github/actions/source-attest/resolve.sh, in a planted canon tree."""
 
+    @override
     def setUp(self) -> None:
         """Make a scratch directory, a runner temp and a GITHUB_ENV."""
         tmp = tempfile.TemporaryDirectory()

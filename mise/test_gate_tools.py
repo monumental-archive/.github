@@ -36,18 +36,18 @@ stdlib `unittest`, matching the other mise/test_*.py.
 
 import contextlib
 import dataclasses
-import functools
 import io
 import re
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
-import tomllib
 import unittest
 from pathlib import Path
 
+import decoded
 import gate_tools
 import hermetic
+import typed_std
 
 CANON = Path(__file__).resolve().parent.parent
 BELT = CANON / "mise"
@@ -74,17 +74,53 @@ SCRIPT = re.compile(r"(?<![\w.-])([\w-]+\.(?:sh|py))\b")
 SKIP = re.compile(r"\bexit 0\b")
 
 
-def belt() -> dict:
+# A task, as the belt's config decodes it; and every task by name.
+Task = dict[str, object]
+Tasks = dict[str, Task]
+
+
+def belt() -> dict[str, object]:
     """Read the belt's config.
 
     Returns:
         mise/config.toml, decoded.
 
     """
-    return tomllib.loads((BELT / "config.toml").read_text("utf-8"))
+    return decoded.load_toml((BELT / "config.toml").read_text("utf-8"))
 
 
-def body(task: dict) -> str:
+def belt_tasks() -> Tasks:
+    """Read the belt's tasks.
+
+    Returns:
+        Each task of mise/config.toml by name, decoded.
+
+    """
+    tasks = decoded.as_object(belt()["tasks"], "the belt's [tasks]")
+    return {name: decoded.as_object(task, name) for name, task in tasks.items()}
+
+
+def belt_tools() -> dict[str, object]:
+    """Read the belt's tool pins.
+
+    Returns:
+        mise/config.toml's [tools], decoded.
+
+    """
+    return decoded.as_object(belt()["tools"], "the belt's [tools]")
+
+
+def found(pattern: re.Pattern[str] | str, text: str) -> list[str]:
+    """Read every match's first group, as `re.findall` gives one group.
+
+    Returns:
+        The group's text per match, "" where it took no part.
+
+    """
+    return [typed_std.group(m, 1) or "" for m in re.finditer(pattern, text)]
+
+
+def body(task: Task) -> str:
     """Read a task's run text.
 
     Returns:
@@ -95,10 +131,11 @@ def body(task: dict) -> str:
     run = task.get("run", "")
     if isinstance(run, str):
         return run
-    return "\n".join(entry for entry in run if isinstance(entry, str))
+    entries = decoded.as_array(run, "a task's run")
+    return "\n".join(entry for entry in entries if isinstance(entry, str))
 
 
-def reached(name: str, tasks: dict) -> list[str]:
+def reached(name: str, tasks: Tasks) -> list[str]:
     """Name the tasks a task runs: its `depends`, and `mise run <name>`.
 
     Returns:
@@ -106,9 +143,14 @@ def reached(name: str, tasks: dict) -> list[str]:
 
     """
     task = tasks[name]
-    out = []
-    for dep in task.get("depends", []):
-        dep_name = dep if isinstance(dep, str) else dep.get("task", "")
+    out: list[str] = []
+    depends = decoded.as_array(task["depends"], name) if "depends" in task else []
+    for dep in depends:
+        dep_name = (
+            dep
+            if isinstance(dep, str)
+            else decoded.as_str(decoded.as_object(dep, name).get("task", ""), name)
+        )
         if dep_name.endswith("*"):
             out += [t for t in tasks if t.startswith(dep_name[:-1])]
         elif dep_name in tasks:
@@ -118,11 +160,11 @@ def reached(name: str, tasks: dict) -> list[str]:
         for ln in gate_tools.strip_literals(body(task)).splitlines()
         if not re.match(r"\s*#", ln)
     )
-    out += [t for t in re.findall(r"mise run ([\w:-]+)", code) if t in tasks]
+    out += [t for t in found(r"mise run ([\w:-]+)", code) if t in tasks]
     return out
 
 
-def closure(names: list[str], tasks: dict) -> list[str]:
+def closure(names: list[str], tasks: Tasks) -> list[str]:
     """Name every task the given tasks reach, themselves included.
 
     Returns:
@@ -140,7 +182,7 @@ def closure(names: list[str], tasks: dict) -> list[str]:
     return sorted(seen)
 
 
-def gate_tasks(tasks: dict | None = None) -> list[str]:
+def gate_tasks(tasks: Tasks | None = None) -> list[str]:
     """Name every task the gate reaches.
 
     Returns:
@@ -149,7 +191,7 @@ def gate_tasks(tasks: dict | None = None) -> list[str]:
         tree, so `derivation` charges its calls to the dispatcher.
 
     """
-    tasks = tasks if tasks is not None else belt()["tasks"]
+    tasks = tasks if tasks is not None else belt_tasks()
     return closure([t for t in tasks if t.startswith("lint:")] + list(ROOTS), tasks)
 
 
@@ -166,7 +208,7 @@ def expand(text: str, seen: set[str]) -> list[tuple[str, str]]:
         if re.match(r"\s*#", line):
             continue
         out.append(("sh", line))
-        for name in SCRIPT.findall(gate_tools.strip_literals(line) + " " + line):
+        for name in found(SCRIPT, gate_tools.strip_literals(line) + " " + line):
             path = BELT / name
             if name in seen or not path.is_file():
                 continue
@@ -178,9 +220,13 @@ def expand(text: str, seen: set[str]) -> list[tuple[str, str]]:
     return out
 
 
-@functools.cache
+_SOURCES: dict[str, str] = {}
+
+
 def _source(name: str) -> str:
-    return (BELT / name).read_text("utf-8")
+    if name not in _SOURCES:
+        _SOURCES[name] = (BELT / name).read_text("utf-8")
+    return _SOURCES[name]
 
 
 def first_call(lines: list[tuple[str, str]], cmds: list[str]) -> int | None:
@@ -224,25 +270,31 @@ def guard_paths(lines: list[tuple[str, str]]) -> set[str]:
         The literal pathspecs; "*" where `git ls-files` lists every file.
 
     """
-    found: set[str] = set()
+    paths: set[str] = set()
     # A `\`-continued command is one command: lint:biome's selection runs
     # onto a second line, and reading line by line lost `*.json` and the
     # rest of it (#1410: biome disabled on stele, which tracks JSON only).
     joined = re.sub(r"\\\n", " ", "\n".join(text for _, text in lines))
     for text in joined.splitlines():
-        for seg in re.findall(r"git ls-files([^|)>;&]*)", text):
-            words = re.findall(r'"([^"]*)"|\'([^\']*)\'|(\S+)', seg)
-            words = [a or b or c for a, b, c in words]
+        for seg in found(r"git ls-files([^|)>;&]*)", text):
+            words = [
+                typed_std.group(m, 1)
+                or typed_std.group(m, 2)
+                or typed_std.group(m, 3)
+                or ""
+                for m in re.finditer(r'"([^"]*)"|\'([^\']*)\'|(\S+)', seg)
+            ]
             dynamic = any("$" in w for w in words)
             kept = [w for w in words if not w.startswith(("-", ":!", "$")) and w]
             kept = [w for w in kept if "$" not in w and w != "\\"]
-            found.update(kept or ([] if dynamic else ["*"]))
-        found.update(re.findall(r'compgen -G "([^"$]+)"', text))
-        found.update(re.findall(r"-[fde] ([\w./-]+)", text))
-    return found
+            every: list[str] = ["*"]
+            paths.update(kept or ([] if dynamic else every))
+        paths.update(found(r'compgen -G "([^"$]+)"', text))
+        paths.update(found(r"-[fde] ([\w./-]+)", text))
+    return paths
 
 
-def derivation(tasks: dict | None = None) -> dict[str, list[tuple[str, str]]]:
+def derivation(tasks: Tasks | None = None) -> dict[str, list[tuple[str, str]]]:
     """Find, for every belt tool, each gate task that calls it and its guard.
 
     Returns:
@@ -250,20 +302,20 @@ def derivation(tasks: dict | None = None) -> dict[str, list[tuple[str, str]]]:
         call comes before any skip, else its pathspecs joined by spaces.
 
     """
-    tasks = tasks if tasks is not None else belt()["tasks"]
+    tasks = tasks if tasks is not None else belt_tasks()
     table = gate_tools.load_table()
-    tools = belt()["tools"]
+    tools = belt_tools()
     out: dict[str, list[tuple[str, str]]] = {key: [] for key in tools}
     gate = gate_tasks(tasks)
     for name in gate:
         lines = expand(body(tasks[name]), set())
         skip = first_skip(lines)
         guard = guard_paths(lines[: skip + 1]) if skip is not None else set()
-        inner = []
+        inner: list[list[tuple[str, str]]] = []
         if name in DISPATCH:
             prefixes = DISPATCH[name]
-            inner = closure([t for t in tasks if t.startswith(prefixes)], tasks)
-            inner = [expand(body(tasks[t]), set()) for t in inner]
+            dispatched = closure([t for t in tasks if t.startswith(prefixes)], tasks)
+            inner = [expand(body(tasks[t]), set()) for t in dispatched]
         for key in tools:
             cmds = gate_tools.commands(key, table.get(key, gate_tools.Row()))
             at = first_call(lines, cmds)
@@ -327,19 +379,23 @@ class Table(unittest.TestCase):
 
     def test_table_names_every_belt_tool(self) -> None:
         """One row per [tools] key, no more, no fewer."""
-        self.assertEqual(sorted(belt()["tools"]), sorted(gate_tools.load_table()))
+        tools = sorted(belt_tools())
+        rows = sorted(gate_tools.load_table())
+        self.assertEqual(tools, rows)
 
     def test_table_holds_the_tasks(self) -> None:
         """The real table against the real task bodies."""
-        self.assertEqual([], drift(gate_tools.load_table(), derivation()))
+        none: list[str] = []
+        self.assertEqual(none, drift(gate_tools.load_table(), derivation()))
 
     def test_every_dynamic_dispatch_is_named(self) -> None:
         """A task that runs a computed task name is in DISPATCH."""
-        tasks = belt()["tasks"]
+        tasks = belt_tasks()
         dynamic = sorted(
             t for t in tasks if re.search(r'mise run "\$\{?\w+\}?"', body(tasks[t]))
         )
-        self.assertEqual(sorted(DISPATCH), dynamic)
+        named = sorted(DISPATCH)
+        self.assertEqual(named, dynamic)
 
     def test_a_new_tool_call_is_named(self) -> None:
         """Planted: a lint starts calling a tool the table has no row for."""
@@ -369,7 +425,7 @@ class Table(unittest.TestCase):
 
     def test_a_call_before_the_guard_is_named(self) -> None:
         """Planted: a task calls a conditional tool before it can skip."""
-        tasks = belt()["tasks"]
+        tasks = belt_tasks()
         tasks["lint:hadolint"] = {
             "run": "hadolint --version\n" + body(tasks["lint:hadolint"])
         }
@@ -383,7 +439,7 @@ class Table(unittest.TestCase):
 
     def test_a_planted_task_call_is_named(self) -> None:
         """Planted: a new lint calls golangci-lint behind no guard."""
-        tasks = belt()["tasks"]
+        tasks = belt_tasks()
         tasks["lint:planted"] = {"run": "golangci-lint run ./..."}
         self.assertIn(
             (
@@ -409,9 +465,11 @@ class Table(unittest.TestCase):
             '[[ -n ${files} ]] || {\n  echo "x: skipped"\n  exit 0\n}\n',
             set(),
         )
-        self.assertEqual(
-            {"*.js", "*.json", "*.css"}, guard_paths(lines[: first_skip(lines) + 1])
-        )
+        skip = first_skip(lines)
+        if skip is None:
+            self.fail("the planted body never skips")
+        selected: set[str] = {"*.js", "*.json", "*.css"}
+        self.assertEqual(selected, guard_paths(lines[: skip + 1]))
 
     def test_xargs_and_cargo_subcommands_are_calls(self) -> None:
         """`xargs -0 tool` and `cargo deny` are calls."""
@@ -432,20 +490,22 @@ class Table(unittest.TestCase):
         derivation above, which only looks for the tools the belt has.
         So the callers are found by the command's own name.
         """
-        tasks = belt()["tasks"]
+        tasks = belt_tasks()
         callers = [
             name
             for name in gate_tasks(tasks)
             if first_call(expand(body(tasks[name]), set()), ["jq"]) is not None
         ]
-        self.assertNotEqual([], callers)
+        none: list[str] = []
+        self.assertNotEqual(none, callers)
         table = gate_tools.load_table()
         providers = [
             key
-            for key in belt()["tools"]
+            for key in belt_tools()
             if "jq" in gate_tools.commands(key, table.get(key, gate_tools.Row()))
         ]
-        self.assertEqual(["jq"], providers, f"gate tasks call jq: {callers}")
+        jq: list[str] = ["jq"]
+        self.assertEqual(jq, providers, f"gate tasks call jq: {callers}")
 
 
 def clean_env() -> dict[str, str]:
@@ -596,8 +656,9 @@ class Helper(unittest.TestCase):
         gate would install it for this repository alone; the belt pins
         no language, and the canon pins none either.
         """
-        config = tomllib.loads((CANON / "mise.toml").read_text("utf-8"))
-        self.assertEqual({}, config.get("tools", {}), "the canon's mise.toml pins")
+        config = decoded.load_toml((CANON / "mise.toml").read_text("utf-8"))
+        none: dict[str, object] = {}
+        self.assertEqual(none, config.get("tools", none), "the canon's mise.toml pins")
 
     def test_the_disable_env(self) -> None:
         """The left-out keys, sorted, and their digest; nothing for none."""
@@ -731,15 +792,15 @@ class Refusals(unittest.TestCase):
                 encoding="utf-8",
             )
             got = gate_tools.load_table(table)
-        self.assertEqual(
-            {
-                "a": gate_tools.Row(tasks=("lint:a",), when=(), needs=("b",)),
-                "b": gate_tools.Row(run=("b1",)),
-            },
-            got,
-        )
-        self.assertEqual(["b1"], gate_tools.commands("b", got["b"]))
-        self.assertEqual(["a"], gate_tools.commands("a", got["a"]))
+        rows: dict[str, gate_tools.Row] = {
+            "a": gate_tools.Row(tasks=("lint:a",), when=(), needs=("b",)),
+            "b": gate_tools.Row(run=("b1",)),
+        }
+        self.assertEqual(rows, got)
+        b1: list[str] = ["b1"]
+        self.assertEqual(b1, gate_tools.commands("b", got["b"]))
+        a: list[str] = ["a"]
+        self.assertEqual(a, gate_tools.commands("a", got["a"]))
 
 
 if __name__ == "__main__":
