@@ -419,7 +419,7 @@ class IcuPerMajor(Planted):
             "CFLAGS": "parent-c",
             "PLANT_LH": "18",
         }
-        shapes = (
+        shapes: tuple[tuple[str, dict[str, str], str, tuple[int, ...]], ...] = (
             ("plain, side by side", {"ORG_PGRX_MAJOR": ""}, "17,18", (17, 18)),
             ("one major", {}, "18", (18,)),
         )
@@ -431,9 +431,8 @@ class IcuPerMajor(Planted):
                     Path(f"{self.log}.icu").unlink(missing_ok=True)
                     done, _ = self.run_pgrx(**(parent | env))
                     self.assertEqual(0, done.returncode, done.stderr)
-                    self.assertEqual(
-                        [f"icu-check [{checked}]", *self.flags(*majors)], self.icu()
-                    )
+                    want: list[str] = [f"icu-check [{checked}]", *self.flags(*majors)]
+                    self.assertEqual(want, self.icu())
                     (self.tree / ".coverage-floor").unlink(missing_ok=True)
 
 

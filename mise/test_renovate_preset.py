@@ -146,6 +146,10 @@ def recursive(
     return out
 
 
+# A manager that takes nothing, as a typed list.
+NONE: list[str] = []
+
+
 def versions(dep: str, content: str) -> list[str]:
     """Extract what the manager naming `dep` would look up in `content`.
 
@@ -164,22 +168,21 @@ class Managers(unittest.TestCase):
 
     def test_postgres_five_entries_yield_the_last_four(self) -> None:
         """The native manager has 18.7.0; the regex one the other four."""
-        self.assertEqual(
-            versions(POSTGRES, POSTGRES_FIVE),
-            ["17.11.1", "16.15.1", "15.19.1", "14.24.1"],
-        )
+        last_four: list[str] = ["17.11.1", "16.15.1", "15.19.1", "14.24.1"]
+        self.assertEqual(versions(POSTGRES, POSTGRES_FIVE), last_four)
 
     def test_postgres_one_string_yields_none(self) -> None:
         """A one-version pin is the native manager's alone (rust's array too)."""
-        self.assertEqual(versions(POSTGRES, POSTGRES_ONE), [])
+        self.assertEqual(versions(POSTGRES, POSTGRES_ONE), NONE)
 
     def test_icu_two_tables_yield_the_second(self) -> None:
         """The native manager has 78.3; the regex one 79.1."""
-        self.assertEqual(versions(ICU, ICU_TWO), ["79.1"])
+        regex_only: list[str] = ["79.1"]
+        self.assertEqual(versions(ICU, ICU_TWO), regex_only)
 
     def test_icu_one_table_yields_none(self) -> None:
         """A one-table pin, as edtf tracks it, is the native manager's alone."""
-        self.assertEqual(versions(ICU, ICU_ONE), [])
+        self.assertEqual(versions(ICU, ICU_ONE), NONE)
 
     def test_shape(self) -> None:
         """Recursive, github-releases, and the file pattern hits mise.toml."""
@@ -234,7 +237,8 @@ class Rules(unittest.TestCase):
         for name in (POSTGRES, f"aqua:{POSTGRES}"):
             with self.subTest(name=name):
                 groups = [r["groupName"] for r in self.rules(name) if "groupName" in r]
-                self.assertEqual(groups, ["postgresql-binaries"])
+                group: list[str] = ["postgresql-binaries"]
+                self.assertEqual(groups, group)
 
     def test_postgres_major_disabled(self) -> None:
         """A new major is a new entry, added by hand with its crate feature."""
