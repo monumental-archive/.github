@@ -69,7 +69,11 @@ printf 'cargo-semver-checks %s\\n' "$*" >> "${PLANT_LOG}"
 """
 PGRX_ENV_STUB = """
 org_pgrx_provision() {
-  printf 'provision %s|%s\\n' "$1" "$2" >> "${PLANT_LOG}"
+  {
+    printf 'provision'
+    (($# == 0)) || printf ' [%s]' "$@"
+    printf '\\n'
+  } >> "${PLANT_LOG}"
   return "${PLANT_PROVISION:-0}"
 }
 """
@@ -327,7 +331,7 @@ class Judgment(Planted):
             [
                 "cargo metadata --no-deps --format-version 1 --locked",
                 f"curl {INDEX}/ed/tf/edtf-postgres",
-                f"provision {LABEL}|",
+                "provision",
                 *[at("edtf-postgres", m) for m in MAJORS],
             ],
         )

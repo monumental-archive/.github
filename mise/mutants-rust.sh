@@ -169,7 +169,7 @@ for c in ${pgrx[@]+"${pgrx[@]}"}; do
     . "${belt}/pgrx-env.sh"
     # shellcheck disable=SC2310  # deliberate: a failed provisioning reds
     # this crate and the run still reports the rest
-    org_pgrx_provision "${label}" "" || provisioned=failed
+    org_pgrx_provision || provisioned=failed
   fi
   if [[ ${provisioned} != ok ]]; then
     printf 'red\t%s\n' "${c} at ${major}: no Postgres could be provisioned" >> "${runs}"

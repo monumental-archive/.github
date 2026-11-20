@@ -65,7 +65,11 @@ esac
 CARGO_MUTANTS_STUB = "#!/usr/bin/env bash\nexit 99\n"
 PGRX_ENV_STUB = """
 org_pgrx_provision() {
-  printf 'provision %s|%s\\n' "$1" "$2" >> "${PLANT_LOG}"
+  {
+    printf 'provision'
+    (($# == 0)) || printf ' [%s]' "$@"
+    printf '\\n'
+  } >> "${PLANT_LOG}"
   return "${PLANT_PROVISION:-0}"
 }
 """
@@ -540,7 +544,7 @@ class Pgrx(Planted):
                 "cargo mutants --list --no-config --package alpha",
                 "cargo mutants --list --package alpha",
                 "cargo mutants --output OUT --package alpha",
-                f"provision {LABEL}|",
+                "provision",
                 "cargo mutants --list --no-config --package ext --features pg_test",
                 "cargo mutants --list --package ext --features pg_test",
                 "cargo mutants --output OUT --package ext --features pg_test",
@@ -562,7 +566,7 @@ class Pgrx(Planted):
                 *RED,
             ],
         )
-        self.assertNotIn(f"provision {LABEL}|", log)
+        self.assertEqual([c for c in log if c.startswith("provision")], [])
 
     def test_failed_provisioning_is_red(self) -> None:
         """No Postgres: the extension is red, never skipped."""

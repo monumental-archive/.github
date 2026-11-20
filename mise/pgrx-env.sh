@@ -230,7 +230,7 @@ org_pgrx_init_locked() { # usage: org_pgrx_init_locked <home> <init args…>, un
   return "${status}"
 }
 
-org_pgrx_provision() { # usage: org_pgrx_provision <label> <held-out members>
+org_pgrx_provision() { # usage: org_pgrx_provision
   # For a caller that compiles the WHOLE workspace rather than naming the
   # extension (#917): the mutation and semver audits. A workspace-wide
   # cargo run reaches a pgrx crate exactly as `cargo pgrx test` does, and
@@ -239,21 +239,13 @@ org_pgrx_provision() { # usage: org_pgrx_provision <label> <held-out members>
   # had registered a pg_config at all.
   #
   # The extension is DERIVED here as everywhere else, from the same file,
-  # so a repository declares nothing. Which is also why a held-out list
-  # that names one is refused rather than honoured: COVERAGE_EXCLUDE was
-  # the last place a repository still declared a pgrx crate, and an
-  # exclusion there is CLIPPY_EXCLUDE under a better name — a coverage
-  # floor derived from a surface missing an entire published artifact.
-  # COVERAGE_EXCLUDE itself is removed (#1653) and refused by name by the
-  # Rust coverage legs; both callers here, the mutation and semver audits,
-  # pass an empty held-out list.
+  # so a repository declares nothing.
   #
   # A workspace with no extension returns before sourcing anything else,
   # so it pays for one `cargo metadata` and nothing more.
-  local label="$1" held="$2"
   local belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: conf.d symlink)}"
-  local metadata surface installed plan record spec kind crate_majors _dir member
-  local majors="" named=""
+  local metadata surface installed plan record _spec kind crate_majors _dir
+  local majors=""
   # One step per assignment, never a pipeline inside `$(...)`: this file
   # is sourced, so it cannot rely on its caller having set pipefail, and
   # a failed derivation that arrived as an empty surface would read as a
@@ -261,21 +253,10 @@ org_pgrx_provision() { # usage: org_pgrx_provision <label> <held-out members>
   metadata=$(cargo metadata --no-deps --format-version 1 --locked) || return 1
   : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
   surface=$("${ORG_PYTHON}" "${belt}/gate_surface.py" <<< "${metadata}") || return 1
-  while IFS=$'\t' read -r record spec kind crate_majors _dir; do
+  while IFS=$'\t' read -r record _spec kind crate_majors _dir; do
     [[ ${record} == crate && ${kind} == pgrx ]] || continue
-    for member in ${held}; do
-      [[ ${member} != "${spec%@*}" ]] || named="${named} ${member}"
-    done
     majors="${majors}${majors:+,}${crate_majors}"
   done <<< "${surface}"
-  if [[ -n ${named} ]]; then
-    echo "${label}: COVERAGE_EXCLUDE names a pgrx extension:${named}" >&2
-    echo "  delete it from the list. The belt gives this task a Postgres, so the" >&2
-    echo "  crate is measurable, and a floor that leaves out a published crate is" >&2
-    echo "  a floor for something other than what ships (#917). Then re-derive:" >&2
-    echo "    mise run coverage:adopt" >&2
-    return 1
-  fi
   [[ -n ${majors} ]] || return 0
   org_pgrx_darwin_flags || return 1
   installed=$(mise ls "aqua:theseus-rs/postgresql-binaries" --json) || return 1

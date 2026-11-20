@@ -140,7 +140,7 @@ while IFS=$'\t' read -r record spec kind crate_majors _dir; do
     . "${belt}/pgrx-env.sh"
     # shellcheck disable=SC2310  # deliberate: a failed provisioning reds its
     # majors below and the crates after it are still judged
-    org_pgrx_provision "${label}" "" || provisioned=failed
+    org_pgrx_provision || provisioned=failed
   fi
   for major in $(tr ',' ' ' <<< "${crate_majors}"); do
     if [[ ${provisioned} != ok ]]; then
