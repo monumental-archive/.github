@@ -33,7 +33,6 @@ if TYPE_CHECKING:
 HERE = Path(__file__).resolve().parent
 CANON = HERE.parent
 BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
 URL = "https://example.invalid/x"
 # The calls typeshed answers as `Any`, made only in typed_std.py.
 OPENS = frozenset({"urllib.request.urlopen", "urllib.request.OpenerDirector.open"})
@@ -311,14 +310,7 @@ class TheLaw(unittest.TestCase):
 
     def test_the_tree_holds_the_law(self) -> None:
         """Every tracked Python file opens URLs through typed_std."""
-        # ruff: ignore[subprocess-without-shell-equals-true]
-        listed = subprocess.run(
-            [GIT, "-C", str(CANON), "ls-files", "--", "*.py"],
-            capture_output=True,
-            text=True,
-            check=True,
-            env=hermetic.env(),
-        ).stdout.split()
+        listed = hermetic.tracked(CANON, "*.py")
         breaches = [
             f"{path}:{line}: opens a URL outside {HOME}"
             for path in listed
