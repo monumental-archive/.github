@@ -54,8 +54,6 @@ MOVING = frozenset({
     ".github/rekor-monitor/test_findings.py",
     ".github/rekor-monitor/test_standing_issue.py",
     ".github/rekor-monitor/test_verdict.py",
-    "mise/prop_coverage_js_runner.py",
-    "mise/prop_deny_skips.py",
     "mise/prop_security_config.py",
     "mise/test_action_lints.py",
     "mise/test_audit_scheduled.py",
