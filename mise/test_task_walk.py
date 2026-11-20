@@ -303,6 +303,11 @@ class Mise(unittest.TestCase):
         self.assertIsNone(tw.mise_json("tasks", "info", "gone"))
         self.assertIsNone(tw.mise_json("tasks", "info", "bad"))
 
+    def test_walk_mise_walks_from_a_named_root(self) -> None:
+        """`walk_mise` asks mise for each task it reaches, from the root named."""
+        walked = tw.walk_mise("x")
+        self.assertEqual(("echo hi",), tuple(step.script for step in walked.steps))
+
     def test_no_mise_on_path_is_none(self) -> None:
         """Without mise there is nothing to ask."""
         with mock.patch.dict(os.environ, {"PATH": ""}):
