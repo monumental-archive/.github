@@ -18,16 +18,22 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import build_go_commands as commands
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
 
+if TYPE_CHECKING:
+    import random
+
 # An import path as `go list` prints one; lowercase, as the shipped
 # names are on a case-sensitive runner.
 ELEMENT = st.from_regex(r"[a-z0-9][a-z0-9._-]{0,6}", fullmatch=True)
 IMPORT_PATH = st.lists(ELEMENT, min_size=1, max_size=4).map("/".join)
+# Two packages, one binary name.
+CLASHING: list[str] = ["example.com/a/tool", "example.com/b/tool"]
 
 
 def run_build(pkgs: list[str]) -> tuple[str | None, list[str], list[str]]:
@@ -70,9 +76,9 @@ class SameNameRefused(unittest.TestCase):
         st.lists(IMPORT_PATH, min_size=1, max_size=6, unique=True),
         st.randoms(use_true_random=False),
     )
-    @example(["example.com/a/tool", "example.com/b/tool"], None)
+    @example(CLASHING, None)
     def test_refused_exactly_on_a_shared_last_element(
-        self, pkgs: list[str], shuffle: object
+        self, pkgs: list[str], shuffle: random.Random | None
     ) -> None:
         """A shared element is refused by name; distinct ones each build."""
         if shuffle is not None:
@@ -87,7 +93,8 @@ class SameNameRefused(unittest.TestCase):
         else:
             self.assertIsNone(refused)
             self.assertEqual(built, pkgs)
-            self.assertEqual(staged, sorted(names))
+            want: list[str] = sorted(names)
+            self.assertEqual(staged, want)
 
 
 if __name__ == "__main__":
