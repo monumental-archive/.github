@@ -498,9 +498,9 @@ jobs:
     needs: python-properties-seed
     runs-on: ubuntu-26.04
     # Eight legs by position, not by directory: a repository may keep
-    # every property under one (#1631). Measured 2026-11-19 at 1 h 13 min
-    # for the canon's 191 properties in one job (run 44628248927); the
-    # bound is provisional until this shape's own run is read.
+    # every property under one (#1631). Measured on the canon's 58 files,
+    # audit run 44669302615 (2026-11-20): the slowest leg took 10m14s,
+    # so 60 is five times it rounded up to ten minutes.
     timeout-minutes: 60
     strategy:
       fail-fast: false

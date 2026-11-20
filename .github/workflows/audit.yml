@@ -303,9 +303,10 @@ jobs:
     needs: plan
     if: needs.plan.outputs.legs == 'first'
     runs-on: ubuntu-26.04
-    # Eight legs by position, one seed (#1631): measured 2026-11-19 at
-    # 1 h 13 min for 191 properties in one job (run 44628248927). The
-    # bound is provisional until this shape's own run is read.
+    # Eight legs by position, one seed (#1631). Measured on this shape,
+    # audit run 44669302615 (2026-11-20, 58 files): the slowest leg took
+    # 10m14s, so 60 is five times it rounded up to ten minutes. One job
+    # had taken 1 h 13 min for the same properties (run 44628248927).
     timeout-minutes: 60
     strategy:
       fail-fast: false
