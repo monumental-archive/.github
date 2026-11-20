@@ -332,7 +332,11 @@ class MappingShape(Rows):
             ('[smoke]\n"16" = 16\n', f"smoke.16 in {self.NAME} is not a reference"),
             ("floor = false\n", f"[floor] in {self.NAME} is not a table"),
         ):
-            for argv in (("pgrx-extension", "16"), ("base-images",)):
+            modes: tuple[tuple[str, ...], ...] = (
+                ("pgrx-extension", "16"),
+                ("base-images",),
+            )
+            for argv in modes:
                 with self.subTest(text=text, mode=argv[0]):
                     self.refused(
                         (argv[0], self.mapping(text), *argv[1:]), f"::error::{said}"
@@ -395,7 +399,8 @@ class RequestedMajors(unittest.TestCase):
 
     def test_a_clean_list_is_returned_in_order(self) -> None:
         """The order requested is the order returned."""
-        self.assertEqual(matrix.requested_majors("18,14,16"), ["18", "14", "16"])
+        majors: list[str] = ["18", "14", "16"]
+        self.assertEqual(matrix.requested_majors("18,14,16"), majors)
 
 
 class BaseImages(Rows):
