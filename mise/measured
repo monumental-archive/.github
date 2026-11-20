@@ -27,8 +27,12 @@
 #            measured into the run's directory.
 #   plpgsql  ORG_PLPGSQL_COVERAGE names the report the suite's teardown
 #            writes, in the run directory.
+#   go       in a tree with go.mod, GOFLAGS gains the cover flags and
+#            `-exec=<belt>/go-test-exec`, and GOCOVERDIR names the run's
+#            directory, so every test binary writes its counters there
+#            (#1651).
 #
-# Go (#1651) and Rust (#1653) add their own here.
+# Rust (#1653) adds its own here.
 #
 # coverage:check reads the run directory after `test` ends. A
 # repository whose suite does not run through this script leaves no
@@ -124,6 +128,76 @@ RC
     *":${run}/hook:"*) ;;
     *) export PYTHONPATH="${run}/hook${PYTHONPATH:+:${PYTHONPATH}}" ;;
   esac
+fi
+
+# go: the measurement, merged into the command's own environment (#1651).
+# GOFLAGS gains `-cover -coverpkg=./... -covermode=atomic` and
+# `-exec=<belt>/go-test-exec`, and GOCOVERDIR names the run's `go`
+# directory: every test binary `go test` starts writes its counters there
+# through go-test-exec, from any number of `go test` runs, and the go leg
+# merges them with `go tool covdata`. -coverpkg=./... (#652): a statement
+# only a neighbouring package's tests run is still covered. -covermode=
+# atomic: Go refuses `set` under -race. Commands that are not `go test`
+# ignore the flags (measured: go build, vet and list exit 0).
+#
+# A test command that measures itself another way would replace what this
+# rests on: a flag on the command line wins over GOFLAGS (measured), and a
+# GOCOVERDIR of its own would take the counters elsewhere. So its own
+# -cover, -coverprofile, -coverpkg, -covermode or -exec, on a `go test` in
+# this command or already in GOFLAGS, and a GOCOVERDIR already set, are
+# refused here by name, before anything runs.
+refuse_go() { # usage: refuse_go <where> <what>
+  echo "measured: $2 $1, which would measure Go a second way or" >&2
+  echo "  replace the measurement's own (#1651); drop it: the go leg measures every" >&2
+  echo "  go test with -cover -coverpkg=./... -covermode=atomic into the run" >&2
+  exit 1
+}
+refuse_cover_flag() { # usage: refuse_cover_flag <where> <word>; refuses a measuring flag
+  # One dash or two: go takes either spelling of a flag.
+  local flag=${2#-}
+  case "-${flag#-}" in
+    -cover | -cover=* | -coverprofile | -coverprofile=* | -coverpkg | -coverpkg=*) refuse_go "$1" "$2" ;;
+    -covermode | -covermode=* | -exec | -exec=*) refuse_go "$1" "$2" ;;
+    *) ;;
+  esac
+}
+if [[ -f ${root}/go.mod ]]; then
+  if [[ -n ${GOCOVERDIR:-} ]]; then
+    refuse_go "is set (GOCOVERDIR=${GOCOVERDIR})" "the environment's GOCOVERDIR"
+  fi
+  read -ra words <<< "${GOFLAGS:-}"
+  for word in ${words[@]+"${words[@]}"}; do
+    refuse_cover_flag "is in GOFLAGS" "${word}"
+  done
+  # The words of each argument, read the way a shell would split them: a
+  # go test starts a span that ends at `-args` (the test's own
+  # arguments follow) or at a command separator.
+  prev="" in_test=""
+  for arg in "$@"; do
+    read -ra words <<< "${arg}"
+    for word in ${words[@]+"${words[@]}"}; do
+      case "${word}" in
+        ";" | "&&" | "||" | "|" | -args) in_test="" ;;
+        test) [[ ${prev##*/} != go ]] || in_test=1 ;;
+        *)
+          if [[ -n ${in_test} ]]; then
+            refuse_cover_flag "on its go test" "${word}"
+          fi
+          ;;
+      esac
+      [[ ${word} != *";" ]] || in_test=""
+      prev=${word}
+    done
+  done
+  # GOFLAGS is split on spaces and takes no quoting (go help environment).
+  if [[ ${run} == *" "* || ${belt} == *" "* ]]; then
+    echo "measured: '${run}' or '${belt}' holds a space, which GOFLAGS cannot carry" >&2
+    exit 1
+  fi
+  mkdir -p "${run}/go"
+  export GOCOVERDIR="${run}/go"
+  cover="-cover -coverpkg=./... -covermode=atomic -exec=${belt}/go-test-exec"
+  export GOFLAGS="${GOFLAGS:+${GOFLAGS} }${cover}"
 fi
 
 # plpgsql: one report per run; a value already set is kept.

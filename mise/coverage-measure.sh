@@ -256,12 +256,35 @@ if [[ -f go.mod && ${legs} =~ ^(all|go)$ ]]; then
     echo "${label}: go.mod present but go missing — pin go in mise.toml" >&2
     exit 1
   fi
+  # The repository's own `test` run, measured where it ran (#1651, #1667):
+  # `measured` appended the cover flags and go-test-exec to the GOFLAGS
+  # the test command had, so the figure is the run the gate trusts, with
+  # its -race and its own flags, and the suite runs once. Every test
+  # process wrote its counters into the run's `go` directory, and
+  # `go tool covdata` merges them into one profile here.
+  #
   # -coverpkg=./... (#652). Without it a statement exercised only by a
   # NEIGHBOURING package's tests scores uncovered, so the gate enforces a
   # number below what the tests prove — measured at 0.5 points and 51
   # statements on stele, which is a floor's worth of understatement in a
   # repository whose floor is the point.
-  go test ./... -coverpkg=./... -coverprofile="${out}/coverage.txt" -covermode=atomic >&2
+  go_test=$(mise tasks info test --json 2> /dev/null) || go_test=""
+  if [[ -n ${go_test} ]]; then
+    counters=("${ORG_COVERAGE_RUN:-/nonexistent}"/go/covcounters.*)
+    if [[ -z ${ORG_COVERAGE_RUN:-} || ! -e ${counters[0]} ]]; then
+      echo "${label}: the test task ran no measured Go — its test command runs" >&2
+      cat >&2 << 'REMEDY'
+  through "${ORG_BELT_DIR}/measured" (#1651), or no suite ran under mise
+REMEDY
+      exit 1
+    fi
+    go tool covdata textfmt -i="${ORG_COVERAGE_RUN}/go" -o="${out}/coverage.txt" >&2
+  else
+    # No `test` task: nothing says what the repository's suite is, so the
+    # leg measures `go test ./...` itself, and says so.
+    echo "${label}: go: no test task: measuring \`go test ./...\`" >&2
+    go test ./... -coverpkg=./... -coverprofile="${out}/coverage.txt" -covermode=atomic >&2
+  fi
   go_pct=$(go tool cover -func="${out}/coverage.txt" | awk '/^total:/ { sub(/%/, "", $3); print $3 }')
   if [[ -z ${go_pct} ]]; then
     echo "${label}: could not read a total from the Go profile — a" >&2

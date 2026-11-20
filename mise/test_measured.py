@@ -285,5 +285,92 @@ class CoverageIsAskedOncePerRun(unittest.TestCase):
                 )
 
 
+GO_COVER = "-cover -coverpkg=./... -covermode=atomic -exec={belt}/go-test-exec"
+GO_REFUSAL = (
+    "which would measure Go a second way or\n"
+    "  replace the measurement's own (#1651); drop it: the go leg measures every\n"
+    "  go test with -cover -coverpkg=./... -covermode=atomic into the run\n"
+)
+
+
+class GoMerged(unittest.TestCase):
+    """In a tree with go.mod, the cover flags join the command's GOFLAGS (#1651)."""
+
+    @staticmethod
+    def go_run(tmp: str, argv: list[str], **given: str) -> tuple[Path, str, int]:
+        """Run `measured` in a floored Go tree.
+
+        Returns:
+            The run's directory, and what the command printed or refused.
+
+        """
+        tree = plant(Path(tmp), floor=True)
+        (tree / "go.mod").write_text("module example.com/x\n", encoding="utf-8")
+        run_dir = Path(tmp) / "run"
+        out = run(tree, argv, ORG_COVERAGE_RUN=str(run_dir), **given)
+        return run_dir, out.stdout + out.stderr, out.returncode
+
+    def test_the_tasks_own_goflags_are_kept_in_front(self) -> None:
+        """The task's -trimpath stays; the cover flags and the program follow."""
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir, out, status = self.go_run(tmp, DUMP, GOFLAGS="-trimpath")
+            self.assertEqual(0, status, out)
+            seen = environment(out)
+            self.assertEqual("-trimpath " + GO_COVER.format(belt=BELT), seen["GOFLAGS"])
+            self.assertEqual(str(run_dir / "go"), seen["GOCOVERDIR"])
+            self.assertTrue((run_dir / "go").is_dir())
+
+    def test_no_go_mod_leaves_goflags_alone(self) -> None:
+        """A tree that is not Go is handed no Go flag."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = plant(Path(tmp), floor=True)
+            out = run(tree, DUMP, ORG_COVERAGE_RUN=str(Path(tmp) / "run"), GOFLAGS="-x")
+            self.assertEqual(0, out.returncode, out.stderr)
+            seen = environment(out.stdout)
+            self.assertEqual("-x", seen["GOFLAGS"])
+            self.assertNotIn("GOCOVERDIR", seen)
+
+    def test_a_measuring_flag_of_the_tasks_own_is_refused(self) -> None:
+        """On its `go test`, in either spelling, or already in GOFLAGS."""
+        for argv, given, named in (
+            (
+                ["go", "test", "./...", "-coverprofile=x.out"],
+                {},
+                "-coverprofile=x.out on its go test",
+            ),
+            ([SH, "-c", "go test --cover ./..."], {}, "--cover on its go test"),
+            (
+                [SH, "-c", "go vet ./... && /usr/local/go/bin/go test -exec=x ./..."],
+                {},
+                "-exec=x on its go test",
+            ),
+            (
+                ["go", "test", "./..."],
+                {"GOFLAGS": "-covermode=set"},
+                "-covermode=set is in GOFLAGS",
+            ),
+            (
+                ["go", "test", "./..."],
+                {"GOCOVERDIR": "/elsewhere"},
+                "the environment's GOCOVERDIR is set (GOCOVERDIR=/elsewhere)",
+            ),
+        ):
+            with self.subTest(named=named), tempfile.TemporaryDirectory() as tmp:
+                _, out, status = self.go_run(tmp, argv, **given)
+                self.assertEqual(1, status, out)
+                self.assertEqual(f"measured: {named}, {GO_REFUSAL}", out)
+
+    def test_words_outside_a_go_test_are_not_go_flags(self) -> None:
+        """`find -exec` and an `-args` tail are the command's, not go's."""
+        for line in (
+            "find . -name go.mod -exec true \\; ; printf ok",
+            "printf ok; exit 0; go test ./... -args -cover",
+        ):
+            with self.subTest(line=line), tempfile.TemporaryDirectory() as tmp:
+                _, out, status = self.go_run(tmp, [SH, "-c", line])
+                self.assertEqual(0, status, out)
+                self.assertEqual("ok", out)
+
+
 if __name__ == "__main__":
     unittest.main()

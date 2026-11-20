@@ -220,6 +220,12 @@ floor it runs the command unchanged. A suite that does not run through
 `measured` measures nothing, and a floor whose record names that leg
 is red by name.
 
+A Go suite runs the same way, with the repository's own flags:
+`"${ORG_BELT_DIR}/measured" go test -race ./...`. Every `go test` the
+command starts is measured (#1651), so the command names no
+`-cover`, `-coverprofile`, `-coverpkg`, `-covermode` or `-exec` of its
+own; `measured` refuses one by name.
+
 ### What a pull request pays
 
 The gate stays fast and deterministic. A mechanism enters `ci` only
