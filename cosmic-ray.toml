@@ -1,0 +1,29 @@
+# The canon adopts audit:mutants' Python leg (#1354, #1771): this file
+# is the adoption, read by cosmic-ray and by the belt's
+# mise/mutants-python.sh. cosmic-ray mutates the tracked files under
+# `module-path` in place, one mutant at a time; `test-command` runs ONE
+# test file, the leg filling `{test}`, `{dir}` and `{name}`; `tests`
+# are git pathspecs for the test files. A survivor is killed by an
+# assertion or excluded at its site with `# pragma: no mutate -- <why>`.
+[cosmic-ray]
+module-path = ["mise", "release", ".github/rekor-monitor"]
+timeout = 120.0
+# The tests are what judges a mutant, not what is judged. Python's
+# `**` skips dot-directories, so rekor-monitor's are named again.
+excluded-modules = [
+  "**/test_*.py",
+  "**/prop_*.py",
+  ".github/rekor-monitor/test_*.py",
+  ".github/rekor-monitor/prop_*.py",
+]
+test-command = "python3 -m unittest discover -s {dir} -p {name} -f"
+
+[cosmic-ray.distributor]
+name = "local"
+
+[audit-mutants]
+tests = [
+  "mise/test_*.py",
+  "release/test_*.py",
+  ".github/rekor-monitor/test_*.py",
+]

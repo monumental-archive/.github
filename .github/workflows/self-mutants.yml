@@ -6,8 +6,8 @@
 # because the canon calls its own workflow at the running commit rather
 # than pinning a release of itself (the gate.yml and self-level.yml
 # convention). Named `self-mutants.yml` because `repo-mutants.yml` is
-# the callee. The canon adopts Python only (pyproject.toml's
-# `[tool.mutmut]`); every other language's jobs are skipped here.
+# the callee. The canon adopts Python only (a root `cosmic-ray.toml`,
+# #1771); every other language's jobs are skipped here.
 ---
 name: self-mutants
 

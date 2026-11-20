@@ -17,7 +17,8 @@
 # cron and never the gate. The measure is no unexplained surviving
 # mutant, never a score; adoption is each language's own config file in
 # the repository (`.cargo/mutants.toml` for Rust, a pattern-free root
-# `.gomuignore` for Go, a root `stryker.config.json` for TypeScript),
+# `.gomuignore` for Go, a root `cosmic-ray.toml` for Python, a root
+# `stryker.config.json` for TypeScript),
 # and a repository that
 # adopts nothing has every leg skip clean by name. The belt's
 # `audit:mutants` task runs one leg per language (mise/mutants-*.sh).
@@ -66,16 +67,11 @@ jobs:
         with:
           persist-credentials: false
 
-      # Python's adoption is a SECTION, not a file: pyproject.toml is in
-      # most Python repositories whether they adopt or not.
-      - name: Python adopts with [tool.mutmut] (or setup.cfg [mutmut])
+      - name: Python adopts with a tracked root cosmic-ray.toml
         id: python
-        run: |
-          adopted=false
-          if grep -qs '^\[tool\.mutmut\]' pyproject.toml || grep -qs '^\[mutmut\]' setup.cfg; then
-            adopted=true
-          fi
-          echo "adopted=${adopted}" >> "${GITHUB_OUTPUT}"
+        env:
+          ADOPTED: ${{ hashFiles('cosmic-ray.toml') != '' }}
+        run: echo "adopted=${ADOPTED}" >> "${GITHUB_OUTPUT}"
 
       - name: Rust adopts with a tracked .cargo/mutants.toml
         id: rust
@@ -279,13 +275,15 @@ jobs:
           SUMMARIES: ${{ runner.temp }}/mutants-summaries
         run: bash .org-canon/mise/mutation-totals.sh "${SUMMARIES}" go
 
-  mutants-python:
-    name: mutants / python
+  mutants-python-plan:
+    name: mutants / python plan
     needs: adoption
     if: needs.adoption.outputs.python == 'true'
     runs-on: ubuntu-26.04
-    # One job: mutmut 3.8.1 cannot shard. No timeout of its own yet: it
-    # is set from the canon's first run on a runner (#1354).
+    # Once per run (#1771): every mutant, sorted, and each test file run
+    # alone under coverage for its time and the lines it executes. The
+    # shards judge from this plan and never list or measure again. No
+    # timeout of its own yet: #1530 sets it from the first run.
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
@@ -305,34 +303,115 @@ jobs:
           version: 2026.11.8
           cache: false
 
-      # The belt pins mutmut `lazy`, so the bare install above — and
-      # every gate and release job — skips it. This job is the one
-      # place it is installed, on the belt's pinned Python (#1354).
-      - name: Install mutmut, by name
-        run: mise install pipx:mutmut
+      # The belt pins cosmic-ray `lazy`, so the bare install above — and
+      # every gate and release job — skips it. The Python jobs are the
+      # one place it is installed, on the belt's pinned Python (#1771).
+      - name: Install cosmic-ray, by name
+        run: mise install pipx:cosmic-ray
+
+      - name: List every mutant and measure every test file
+        env:
+          MUTANTS_LEG: python
+          MUTANTS_SHARD: plan
+          MUTANTS_PLAN: ${{ runner.temp }}/mutants-plan
+        run: mise run audit:mutants
+
+      - name: Keep the plan for the shards
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mutants-python-plan
+          path: ${{ runner.temp }}/mutants-plan/plan.json
+          if-no-files-found: error
+          retention-days: 7
+
+  mutants-python:
+    name: mutants / python shard ${{ matrix.shard }}
+    needs:
+      - adoption
+      - mutants-python-plan
+    if: needs.adoption.outputs.python == 'true'
+    runs-on: ubuntu-26.04
+    # The count is written twice, here and in MUTANTS_SHARDS below; move
+    # both together. One mutant at a time per checkout: the shards are
+    # the parallelism. No fail-fast: every shard reports its own
+    # survivors. The count and the timeout are #1530's, from the first
+    # run measured on a runner.
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        shard:
+          - 0
+          - 1
+          - 2
+          - 3
+          - 4
+          - 5
+          - 6
+          - 7
+          - 8
+          - 9
+          - 10
+          - 11
+          - 12
+          - 13
+          - 14
+          - 15
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
+      MUTANTS_SHARDS: "16"
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
+        with:
+          version: 2026.11.8
+          cache: false
+
+      - name: Install cosmic-ray, by name
+        run: mise install pipx:cosmic-ray
+
+      - name: Collect the plan
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: mutants-python-plan
+          path: ${{ runner.temp }}/mutants-plan
 
       # The leg writes its counts for the totals job into the summary
       # directory (it creates it) as python.tsv.
-      - name: Mutate, and name every unexplained survivor
+      - name: Mutate this shard, in place, and name every unexplained survivor
         env:
           MUTANTS_LEG: python
-          MUTANTS_SHARD: 0/1
+          MUTANTS_SHARD: ${{ matrix.shard }}/${{ env.MUTANTS_SHARDS }}
+          MUTANTS_PLAN: ${{ runner.temp }}/mutants-plan
           MUTANTS_SUMMARY_DIR: ${{ runner.temp }}/mutants-summary
         run: mise run audit:mutants
 
-      - name: Keep the counts for the totals
+      # Survivors or not: the totals job needs every shard's counts. A
+      # shard whose run judged nothing writes none, and is named there.
+      - name: Keep this shard's counts for the totals
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: mutants-python-summary-0
+          name: mutants-python-summary-${{ matrix.shard }}
           path: ${{ runner.temp }}/mutants-summary/
           if-no-files-found: ignore
           retention-days: 7
 
   mutants-python-totals:
     name: mutants / python totals
-    # The same one answer every language states, from its own job. A
-    # run that judged nothing writes no counts and is named here.
+    # One answer across Python's shards, whatever they did, wherever
+    # Python adopts. A shard that judged nothing writes no counts and is
+    # named here.
     needs:
       - adoption
       - mutants-python
@@ -342,13 +421,13 @@ jobs:
       - name: Resolve the canon tree (the ref the caller pinned)
         uses: $/.github/actions/canon
 
-      - name: Collect the counts
+      - name: Collect every shard's counts
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: mutants-python-summary-*
           path: ${{ runner.temp }}/mutants-summaries
 
-      - name: State the totals
+      - name: State the totals across shards
         env:
           SUMMARIES: ${{ runner.temp }}/mutants-summaries
         run: bash .org-canon/mise/mutation-totals.sh "${SUMMARIES}" python

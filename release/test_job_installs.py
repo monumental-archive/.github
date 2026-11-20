@@ -219,8 +219,8 @@ DYNAMIC = {
     "mise/embedded_shell.py": "splats its shfmt argv from a list",
     "mise/git_decoy.py": "runs its caller's command against a decoy repository",
     "mise/hermetic.py": "splats its caller's pathspecs into the git ls-files argv",
-    "mise/mutants_python.py": "asks mutmut's own interpreter, read from its"
-    " installed script, where mutmut lives",
+    "mise/mutants_python.py": "runs the repository's own test-command,"
+    " filled per test file, and cosmic-ray on each mutant",
     "mise/with_lock.py": "runs its caller's command under the lock",
     "mise/unittest_guarded.py": "starts itself as a worker under the"
     " interpreter it runs on (#1623)",

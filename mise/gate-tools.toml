@@ -250,8 +250,8 @@ when = ["*.sql", "scaffold/"]
 tasks = []
 when = []
 
-[tools."pipx:mutmut"]
-# audit:mutants only, and pinned lazy: no bare install builds it (#1354).
+[tools."pipx:cosmic-ray"]
+# audit:mutants only, and pinned lazy: no bare install builds it (#1771).
 tasks = []
 when = []
 
