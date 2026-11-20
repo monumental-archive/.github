@@ -30,7 +30,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from typing import override
+from typing import TypedDict, Unpack, override
 
 import decoded
 import hermetic
@@ -399,11 +399,38 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
     return done, tmp
 
 
+class VitestPlant(TypedDict, total=False):
+    """`run_task`'s keyword parameters but the three `refused` sets."""
+
+    py: str
+    branches: str
+    go: str | None
+    floor: bool
+    test_task: bool
+    ts: str
+    ts_branches: str
+    depends: dict[str, str] | None
+    go_profile: bool
+    captured_test: str | None
+    reports_dir: bool | str
+    commit: bool
+    measured: bool
+    python_measured: bool
+
+
+class Plant(VitestPlant, total=False):
+    """The facts a row may plant: every `run_task` keyword parameter."""
+
+    python: bool
+    typescript: str | None
+    test_run: str | None
+
+
 class CoverageTaskCase(unittest.TestCase):
     """Runs a task and removes the planted tree afterwards."""
 
     def run_task(
-        self, task: str, **plant: str | bool | dict[str, str] | None
+        self, task: str, **plant: Unpack[Plant]
     ) -> tuple[subprocess.CompletedProcess[str], Path]:
         """Run a task and schedule its tree for removal.
 
@@ -411,7 +438,7 @@ class CoverageTaskCase(unittest.TestCase):
             The finished process and the planted tree.
 
         """
-        done, tmp = run_task(task, **plant)  # type: ignore[arg-type]
+        done, tmp = run_task(task, **plant)
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
         return done, tmp / "tree"
 
@@ -639,14 +666,14 @@ class TypeScriptRows(CoverageTaskCase):
         self.assertIn("no measurable language", done.stdout)
         self.assertNotIn("vitest suite ran", done.stderr)
 
-    def refused(self, run: str, message: str, **plant: object) -> None:
+    def refused(self, run: str, message: str, **plant: Unpack[VitestPlant]) -> None:
         """Assert a test task whose vitest command is refused, by message."""
         done, _ = self.run_task(
             "coverage:check",
             python=False,
             typescript="vitest",
             test_run=run,
-            **plant,  # type: ignore[arg-type]
+            **plant,
         )
         self.assertEqual(1, done.returncode, done.stderr)
         self.assertIn(message, done.stderr)

@@ -32,6 +32,7 @@ import tempfile
 import unittest
 from decimal import Decimal
 from pathlib import Path
+from typing import TypedDict, Unpack
 
 import coverage_floor as cf
 import decoded
@@ -278,11 +279,25 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
     return done, tmp
 
 
+class Plant(TypedDict, total=False):
+    """The facts a row may plant: `run_task`'s keyword parameters."""
+
+    floor: str | None
+    go_mod: bool
+    counts: str
+    pkgs: str
+    built: str
+    running: str
+    gobco: str
+    fail: str
+    silent: bool
+
+
 class GoBranchCase(unittest.TestCase):
     """Runs a task and removes the planted tree afterwards."""
 
     def run_task(
-        self, task: str = TASK, **plant: str | bool | None
+        self, task: str = TASK, **plant: Unpack[Plant]
     ) -> tuple[subprocess.CompletedProcess[str], Path, list[str]]:
         """Run a task and schedule its tree for removal.
 
@@ -291,7 +306,7 @@ class GoBranchCase(unittest.TestCase):
             per gobco call: the package, its arguments, and its `go`.
 
         """
-        done, tmp = run_task(task, **plant)  # type: ignore[arg-type]
+        done, tmp = run_task(task, **plant)
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
         calls = (tmp / "gobco.log").read_text(encoding="utf-8").splitlines()
         return done, tmp, calls

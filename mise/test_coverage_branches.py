@@ -27,6 +27,7 @@ import tempfile
 import unittest
 from decimal import Decimal
 from pathlib import Path
+from typing import TypedDict, Unpack
 
 import coverage_floor as cf
 import decoded
@@ -224,11 +225,24 @@ BRANCH_ONLY: list[str] = [BRANCH_RUN]
 LINE_THEN_BRANCH: list[str] = [LINE_RUN, BRANCH_RUN]
 
 
+class Plant(TypedDict, total=False):
+    """The facts a row may plant: `run_task`'s keyword parameters."""
+
+    floor: str | None
+    cargo_toml: bool
+    branches: str
+    count: str
+    lines: str
+    toolchain: str | None
+    installed: str | None
+    exclude: str
+
+
 class BranchCase(unittest.TestCase):
     """Runs a task and removes the planted tree afterwards."""
 
     def run_task(
-        self, task: str, **plant: str | bool | None
+        self, task: str, **plant: Unpack[Plant]
     ) -> tuple[subprocess.CompletedProcess[str], Path, list[str]]:
         """Run a task and schedule its tree for removal.
 
@@ -238,7 +252,7 @@ class BranchCase(unittest.TestCase):
             the reports directory written as `<reports>`.
 
         """
-        done, tmp = run_task(task, **plant)  # type: ignore[arg-type]
+        done, tmp = run_task(task, **plant)
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
         log = (tmp / "llvm-cov.log").read_text(encoding="utf-8")
         calls = log.replace(str(tmp / "reports"), "<reports>").splitlines()
