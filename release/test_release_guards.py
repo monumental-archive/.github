@@ -45,18 +45,45 @@ import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import override
 from unittest.mock import patch
 
 # Appended, so this file's own directory and the standard library
 # come first.
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
+import decoded
 import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
 RELEASE = CANON / "release"
 TESTDATA = RELEASE / "testdata"
 BASH = hermetic.tool("bash")
+
+
+def dumps(value: object) -> str:
+    """Encode a planted document as JSON.
+
+    Returns:
+        The JSON text.
+
+    """
+    return json.dumps(value)
+
+
+def commit_input(request: Path) -> dict[str, object]:
+    """Read the createCommitOnBranch input a run sent the forge.
+
+    Returns:
+        The mutation's `variables.input` object.
+
+    """
+    text = request.read_text(encoding="utf-8")
+    sent = decoded.as_object(decoded.load_json(text), "the request")
+    variables = decoded.as_object(sent["variables"], "variables")
+    return decoded.as_object(variables["input"], "variables.input")
+
+
 GIT = hermetic.optional_tool("git")
 JQ = hermetic.optional_tool("jq")
 STELE = hermetic.optional_tool("stele")
@@ -530,11 +557,13 @@ class HermeticEnvironment(unittest.TestCase):
         planted = {"VERSION": "1.69.4", "PLAN": "{}", "APP_SLUG": "canon-release"}
         with patch.dict(os.environ, planted), TemporaryDirectory() as d:
             env = hermetic_env(Path(d))
-        self.assertEqual([], sorted(set(planted) & set(env)))
+        leaked = sorted(set(planted) & set(env))
+        self.assertEqual(list[str](), leaked)
 
     def test_a_row_still_states_its_own_input(self) -> None:
         """Overrides are how a row gives a fixture an input."""
-        with patch.dict(os.environ, {"VERSION": "1.69.4"}), TemporaryDirectory() as d:
+        planted = {"VERSION": "1.69.4"}
+        with patch.dict(os.environ, planted), TemporaryDirectory() as d:
             env = hermetic_env(Path(d), VERSION="2.0.0")
         self.assertEqual("2.0.0", env["VERSION"])
 
@@ -622,7 +651,6 @@ class RustBuildInputs(unittest.TestCase):
         self.assertEqual(1, result.returncode)
         self.assertIn("PLAN_CLASS is set but PLAN_DOC_PREFIX is not", result.stdout)
 
-    @unittest.skipUnless(JQ, "jq reads cargo's metadata")
     def test_the_build_is_handed_fat_lto(self) -> None:
         """Release builds link with fat LTO, the fourth determinism input (#778).
 
@@ -631,6 +659,8 @@ class RustBuildInputs(unittest.TestCase):
         same tree, so the repro gate failed on iiif-server. A stand-in
         cargo records what the build step was handed and stops there.
         """
+        if not JQ:
+            self.skipTest("jq reads cargo's metadata")
         with TemporaryDirectory() as d:
             root = Path(d)
             stubs = root / "stubs"
@@ -665,9 +695,14 @@ class RustBuildInputs(unittest.TestCase):
             self.assertEqual("fat", seen.read_text())
 
 
-@unittest.skipUnless(JQ, "jq reads the plan document")
 class OpenReleasePrInputs(unittest.TestCase):
     """`open-release-pr.sh` is plumbing, and refuses to plumb blind."""
+
+    @override
+    def setUp(self) -> None:
+        """Skip unless jq is installed."""
+        if not JQ:
+            self.skipTest("jq reads the plan document")
 
     REQUIRED = ("PLAN", "GH_TOKEN", "GITHUB_REPOSITORY", "GITHUB_SHA", "APP_SLUG")
 
@@ -942,7 +977,6 @@ class ReleaseForge:
         }
 
 
-@unittest.skipUnless(JQ, "jq reads the plan document")
 class OpenReleasePrHead(ReleaseForge, unittest.TestCase):
     """A run acts only for the commit the default branch is at (#1260).
 
@@ -953,7 +987,7 @@ class OpenReleasePrHead(ReleaseForge, unittest.TestCase):
     """
 
     OID = "c" * 40
-    PROCEEDED = (
+    PROCEEDED: tuple[str, ...] = (
         "graphql head",
         f"GET repos/{FORGE_REPO}/git/ref/heads/release-staging/next",
         f"POST repos/{FORGE_REPO}/git/refs",
@@ -967,8 +1001,11 @@ class OpenReleasePrHead(ReleaseForge, unittest.TestCase):
         f"DELETE repos/{FORGE_REPO}/git/refs/heads/release-staging/next",
     )
 
+    @override
     def setUp(self) -> None:
         """Lay out the stubbed forge and a plan with something to release."""
+        if not JQ:
+            self.skipTest("jq reads the plan document")
         super().setUp()
         self.plan = self.root / "plan.json"
         self.plan.write_text(
@@ -993,15 +1030,17 @@ class OpenReleasePrHead(ReleaseForge, unittest.TestCase):
         inputs.update(env)
         return run_script("open-release-pr.sh", cwd or self.root, **inputs)
 
-    @unittest.skipUnless(OPEN_PR_PARSES, "this bash cannot parse the PR body")
     def test_head_at_the_planned_commit_proceeds_as_today(self) -> None:
         """The branch has not moved: the PR is opened exactly as before."""
+        if not OPEN_PR_PARSES:
+            self.skipTest("this bash cannot parse the PR body")
         self.forge(self.PLANNED)
         result = self.run_executor()
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertIn("opened the release PR for v1.0.0", result.stdout)
         self.assertNotIn("moved", result.stdout)
-        self.assertEqual(list(self.PROCEEDED), self.calls())
+        want = list(self.PROCEEDED)
+        self.assertEqual(want, self.calls())
 
     def test_a_refused_call_names_itself_and_what_the_forge_said(self) -> None:
         """A 403 says which call was refused and carries the headers (#633).
@@ -1068,7 +1107,7 @@ class OpenReleasePrHead(ReleaseForge, unittest.TestCase):
         self.assertTrue(
             request.exists(), "no release commit was requested:\n" + result.stderr
         )
-        message = json.loads(request.read_text())["variables"]["input"]["message"]
+        message = decoded.as_object(commit_input(request)["message"], "message")
         self.assertEqual(
             "Signed-off-by: org-tag-mint[bot]"
             " <4242+org-tag-mint[bot]@users.noreply.github.com>",
@@ -1088,8 +1127,8 @@ class OpenReleasePrHead(ReleaseForge, unittest.TestCase):
         """
         old = "sql/demo--1.0.0--next.sql"
         new = "sql/demo--1.0.0--1.1.0.sql"
-        plan = json.loads(self.plan.read_text())
-        plan["commit"]["additions"] = [old, new]
+        plan = decoded.as_object(decoded.load_json(self.plan.read_text()), "plan")
+        decoded.as_object(plan["commit"], "commit")["additions"] = [old, new]
         self.plan.write_text(json.dumps(plan))
         (self.root / "sql").mkdir()
         (self.root / new).write_text("-- upgrade\n")
@@ -1099,9 +1138,13 @@ class OpenReleasePrHead(ReleaseForge, unittest.TestCase):
         self.assertTrue(
             request.exists(), "no release commit was requested:\n" + result.stderr
         )
-        changes = json.loads(request.read_text())["variables"]["input"]["fileChanges"]
-        self.assertEqual([new], [a["path"] for a in changes["additions"]])
-        self.assertEqual([{"path": old}], changes["deletions"])
+        changes = decoded.as_object(commit_input(request)["fileChanges"], "fileChanges")
+        additions = decoded.as_array(changes["additions"], "additions")
+        paths = [decoded.as_object(a, "an addition")["path"] for a in additions]
+        added: list[object] = [new]
+        self.assertEqual(added, paths)
+        deleted: list[object] = [{"path": old}]
+        self.assertEqual(deleted, changes["deletions"])
 
     def test_head_moved_writes_nothing_and_says_why(self) -> None:
         """The measured race: the branch moved while the run was planning."""
@@ -1113,15 +1156,17 @@ class OpenReleasePrHead(ReleaseForge, unittest.TestCase):
             " the run for that commit maintains the Release PR\n",
             result.stdout,
         )
-        self.assertEqual(["graphql head"], self.calls())
+        want: list[str] = ["graphql head"]
+        self.assertEqual(want, self.calls())
 
-    @unittest.skipUnless(OPEN_PR_PARSES, "this bash cannot parse the PR body")
     def test_the_body_says_where_the_release_was_planned(self) -> None:
         """The PR body ends in `Planned-At: <planned commit>` (#1472).
 
         The squash takes the body, so the release commit carries the
         commit it was planned from, and lint:release-planned reads it.
         """
+        if not OPEN_PR_PARSES:
+            self.skipTest("this bash cannot parse the PR body")
         self.forge(self.PLANNED)
         result = self.run_executor()
         self.assertEqual(0, result.returncode, result.stderr)
@@ -1154,7 +1199,7 @@ class OpenReleasePrHead(ReleaseForge, unittest.TestCase):
         (self.state / "queued").write_text(move + "\n")
         (self.state / "open").write_text("77\n")
         (self.state / "view").write_text(
-            json.dumps({
+            dumps({
                 "number": 77,
                 "id": "PR_kwDOqueued",
                 "body": f"Notes.\n\nPlanned-At: {self.OLD_PLAN}\n",
@@ -1162,7 +1207,6 @@ class OpenReleasePrHead(ReleaseForge, unittest.TestCase):
         )
         return move, [*self.PROCEEDED[:7], move]
 
-    @unittest.skipUnless(OPEN_PR_PARSES, "this bash cannot parse the PR body")
     def test_a_queued_release_pr_is_dequeued_and_regenerated(self) -> None:
         """The 422 for a queued branch: dequeue, move, say so (#1504).
 
@@ -1171,6 +1215,8 @@ class OpenReleasePrHead(ReleaseForge, unittest.TestCase):
         run that met this 422 exited without moving it and no later push
         came. Main's script stops at the 422.
         """
+        if not OPEN_PR_PARSES:
+            self.skipTest("this bash cannot parse the PR body")
         move, before = self.queue_release_pr()
         (self.state / "ahead").write_text("3\n")
         self.forge(self.PLANNED)
@@ -1186,20 +1232,18 @@ class OpenReleasePrHead(ReleaseForge, unittest.TestCase):
             'dequeuePullRequest(input: {id: "PR_kwDOqueued"})',
             (self.state / "dequeue-request").read_text(),
         )
-        self.assertEqual(
-            [
-                *before,
-                "pr view release/next",
-                f"GET repos/{FORGE_REPO}/compare/{self.OLD_PLAN}...{self.PLANNED}",
-                "graphql dequeuePullRequest",
-                move,
-                "pr list",
-                "pr edit 77",
-                "pr comment 77",
-                f"DELETE repos/{FORGE_REPO}/git/refs/heads/release-staging/next",
-            ],
-            self.calls(),
-        )
+        want: list[str] = [
+            *before,
+            "pr view release/next",
+            f"GET repos/{FORGE_REPO}/compare/{self.OLD_PLAN}...{self.PLANNED}",
+            "graphql dequeuePullRequest",
+            move,
+            "pr list",
+            "pr edit 77",
+            "pr comment 77",
+            f"DELETE repos/{FORGE_REPO}/git/refs/heads/release-staging/next",
+        ]
+        self.assertEqual(want, self.calls())
         self.assertFalse(any("enqueue" in c.lower() for c in self.calls()))
         body = (self.state / "body").read_text(encoding="utf-8")
         self.assertEqual(f"Planned-At: {self.PLANNED}", body.splitlines()[-1])
@@ -1217,16 +1261,14 @@ class OpenReleasePrHead(ReleaseForge, unittest.TestCase):
             " regenerates it\n",
             result.stdout,
         )
-        self.assertEqual(
-            [
-                *before,
-                "pr view release/next",
-                f"GET repos/{FORGE_REPO}/compare/{self.OLD_PLAN}...{self.PLANNED}",
-                "graphql dequeuePullRequest",
-                f"DELETE repos/{FORGE_REPO}/git/refs/heads/release-staging/next",
-            ],
-            self.calls(),
-        )
+        want: list[str] = [
+            *before,
+            "pr view release/next",
+            f"GET repos/{FORGE_REPO}/compare/{self.OLD_PLAN}...{self.PLANNED}",
+            "graphql dequeuePullRequest",
+            f"DELETE repos/{FORGE_REPO}/git/refs/heads/release-staging/next",
+        ]
+        self.assertEqual(want, self.calls())
 
     def test_a_dequeue_that_fails_otherwise_is_red(self) -> None:
         """A 502 on the dequeue is a failure by name, not a permission."""
@@ -1269,12 +1311,15 @@ class OpenReleasePrHead(ReleaseForge, unittest.TestCase):
                     result.stderr,
                 )
                 self.assertEqual("", result.stdout)
-                self.assertEqual(["graphql head"], self.calls())
+                want: list[str] = ["graphql head"]
+                self.assertEqual(want, self.calls())
 
-    @unittest.skipUnless(OPEN_PR_PARSES, "this bash cannot parse the PR body")
-    @unittest.skipUnless(GIT, "the refresh compares against a checkout")
     def test_a_release_refresh_compares_the_checked_out_commit(self) -> None:
         """On release: published, GITHUB_SHA is the tag; HEAD is the plan's."""
+        if not OPEN_PR_PARSES:
+            self.skipTest("this bash cannot parse the PR body")
+        if not GIT:
+            self.skipTest("the refresh compares against a checkout")
         repo = self.root / "repo"
         repo.mkdir()
         home = self.root / ".home"
@@ -1356,7 +1401,8 @@ class CloseReleasePr(ReleaseForge, unittest.TestCase):
         (self.state / "open").write_text("245\n")
         result = self.close()
         self.assertEqual(0, result.returncode, result.stderr)
-        self.assertEqual(["graphql head", "pr list", "pr close 245"], self.calls())
+        want: list[str] = ["graphql head", "pr list", "pr close 245"]
+        self.assertEqual(want, self.calls())
         self.assertEqual(
             f"main holds nothing to release at {self.PLANNED};"
             " closed by the release workflow",
@@ -1372,7 +1418,8 @@ class CloseReleasePr(ReleaseForge, unittest.TestCase):
         self.assertEqual(
             f"no open Release PR on {self.BRANCH}; nothing to close\n", result.stdout
         )
-        self.assertEqual(["graphql head", "pr list"], self.calls())
+        want: list[str] = ["graphql head", "pr list"]
+        self.assertEqual(want, self.calls())
 
     def test_head_moved_closes_nothing(self) -> None:
         """A stale run must not close a PR a newer run just opened."""
@@ -1385,7 +1432,8 @@ class CloseReleasePr(ReleaseForge, unittest.TestCase):
             " the run for that commit maintains the Release PR\n",
             result.stdout,
         )
-        self.assertEqual(["graphql head"], self.calls())
+        want: list[str] = ["graphql head"]
+        self.assertEqual(want, self.calls())
         self.assertEqual("", self.comment(246))
 
     def test_a_head_read_that_fails_closes_nothing_and_fails(self) -> None:
@@ -1398,7 +1446,8 @@ class CloseReleasePr(ReleaseForge, unittest.TestCase):
             f"FAIL: could not read the default branch head of {self.REPO}",
             result.stderr,
         )
-        self.assertEqual(["graphql head"], self.calls())
+        want: list[str] = ["graphql head"]
+        self.assertEqual(want, self.calls())
 
     def test_a_list_that_fails_is_never_read_as_none_open(self) -> None:
         """An unread list would leave the stale PR looking like the quiet case."""
@@ -1411,7 +1460,8 @@ class CloseReleasePr(ReleaseForge, unittest.TestCase):
             result.stderr,
         )
         self.assertNotIn("nothing to close", result.stdout)
-        self.assertEqual(["graphql head", "pr list"], self.calls())
+        want: list[str] = ["graphql head", "pr list"]
+        self.assertEqual(want, self.calls())
 
     def test_each_required_input_is_named_when_it_is_missing(self) -> None:
         """No default branch name, repository or commit: each is named."""
@@ -1430,11 +1480,9 @@ class CloseReleasePr(ReleaseForge, unittest.TestCase):
                 result = run_script("close-release-pr.sh", self.root, **inputs)
                 self.assertEqual(1, result.returncode, result.stdout)
                 self.assertIn(missing, result.stderr)
-                self.assertEqual([], self.calls())
+                self.assertEqual(list[str](), self.calls())
 
 
-@unittest.skipUnless(STELE, "stele derives the plan tag-release.sh reads")
-@unittest.skipUnless(GIT, "the fixture is a git repository")
 class TagReleaseRefusals(unittest.TestCase):
     """`tag-release.sh` decides whether a commit may be tagged at all.
 
@@ -1497,8 +1545,13 @@ class TagReleaseRefusals(unittest.TestCase):
             RUNNER_TEMP=str(repo / ".rt"),
         )
 
+    @override
     def setUp(self) -> None:
         """Nothing shared; each row builds the history it is about."""
+        if not STELE:
+            self.skipTest("stele derives the plan tag-release.sh reads")
+        if not GIT:
+            self.skipTest("the fixture is a git repository")
 
     def test_an_ordinary_commit_is_not_a_release_commit(self) -> None:
         """A workflow_dispatch on main must not mint a tag for an unprepared tree.
@@ -1579,7 +1632,6 @@ TAG_REFUSED = (
 )
 
 
-@unittest.skipUnless(STELE, "stele derives the plan tag-release.sh reads")
 class TagReleasePush(unittest.TestCase):
     """What `tag-release.sh` says when the tag push itself fails (#1322).
 
@@ -1587,6 +1639,12 @@ class TagReleasePush(unittest.TestCase):
     a stand-in signer, and an `origin` whose pre-receive hook answers
     the way GitHub answered edtf's v1.3.5 push.
     """
+
+    @override
+    def setUp(self) -> None:
+        """Skip unless stele is installed."""
+        if not STELE:
+            self.skipTest("stele derives the plan tag-release.sh reads")
 
     def _run(self, hook: str) -> tuple[subprocess.CompletedProcess[str], str, str]:
         """Run the tag step against a remote whose hook prints `hook`.
@@ -1658,7 +1716,8 @@ class TagReleasePush(unittest.TestCase):
         result, local, pushed = self._run(WORKFLOW_REFUSAL)
         self.assertEqual(1, result.returncode, result.stderr)
         errors = [ln for ln in result.stdout.splitlines() if ln.startswith("::")]
-        self.assertEqual([TAG_REFUSED.rstrip("\n")], errors)
+        want: list[str] = [TAG_REFUSED.rstrip("\n")]
+        self.assertEqual(want, errors)
         self.assertTrue(result.stdout.endswith(TAG_REFUSED), result.stdout)
         self.assertNotIn("pushed v1.1.0", result.stdout)
         self.assertNotIn("GH013", result.stderr)
@@ -1732,8 +1791,6 @@ esac
 """
 
 
-@unittest.skipUnless(STELE, "stele derives the plan tag-release.sh reads")
-@unittest.skipUnless(JQ, "jq drives the forge stub")
 class TagReleaseUpgradePath(unittest.TestCase):
     """The mint guard acts on previous_release.py's predecessor (#1592).
 
@@ -1743,6 +1800,14 @@ class TagReleaseUpgradePath(unittest.TestCase):
     a maintenance release marked latest was checked in place of the
     newest. Each row reaches the push or stops before signing.
     """
+
+    @override
+    def setUp(self) -> None:
+        """Skip unless stele and jq is installed."""
+        if not STELE:
+            self.skipTest("stele derives the plan tag-release.sh reads")
+        if not JQ:
+            self.skipTest("jq drives the forge stub")
 
     def _run(
         self, listing: str, sql_at: str, latest: str, subject: str, *extra: str
@@ -1952,7 +2017,8 @@ class InventoryStepWiring(unittest.TestCase):
         """The binaries directory goes in; the list comes out unchanged."""
         result, argv, root = self._run(binaries=True, plans=0, variants="")
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
-        self.assertEqual(["derive", "inventories"], argv[:2])
+        want: list[str] = ["derive", "inventories"]
+        self.assertEqual(want, argv[:2])
         self.assertEqual(str(root / ".bins"), argv[argv.index("--binaries-dir") + 1])
         self.assertNotIn("--variants", argv)
         self.assertEqual("1.69.1", argv[argv.index("--machinery-version") + 1])
@@ -1965,9 +2031,8 @@ class InventoryStepWiring(unittest.TestCase):
         """Go's flag parser stops at the first operand: plans go last."""
         result, argv, _ = self._run(binaries=False, plans=2, variants="16,17")
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
-        self.assertEqual(
-            ["plans/sbom-plan-0/plan.json", "plans/sbom-plan-1/plan.json"], argv[-2:]
-        )
+        want: list[str] = ["plans/sbom-plan-0/plan.json", "plans/sbom-plan-1/plan.json"]
+        self.assertEqual(want, argv[-2:])
         self.assertEqual("16,17", argv[argv.index("--variants") + 1])
         self.assertNotIn("--binaries-dir", argv)
         self.assertTrue(all(a.startswith("plans/") for a in argv[-2:]))

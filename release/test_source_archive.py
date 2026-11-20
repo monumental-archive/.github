@@ -196,7 +196,8 @@ class Builds(unittest.TestCase):
         self.assertEqual(
             f"::notice::{base}.tar.gz: 5 entries, digest {sha(data)}\n", run.stdout
         )
-        self.assertEqual([f"{base}.tar.gz"], run.shipped)
+        shipped: list[str] = [f"{base}.tar.gz"]
+        self.assertEqual(shipped, run.shipped)
         archives = [x for x in run.git if x.startswith("archive")]
         self.assertEqual(2, len(archives))
         self.assertEqual(
@@ -211,7 +212,8 @@ class Builds(unittest.TestCase):
         data = tarball(2)
         run = run_helper((data, data), tracked=2, repo="monumental-archive/.github")
         self.assertEqual(0, run.returncode, run.stdout + run.stderr)
-        self.assertEqual([f"github-{VERSION}.tar.gz"], run.shipped)
+        shipped: list[str] = [f"github-{VERSION}.tar.gz"]
+        self.assertEqual(shipped, run.shipped)
 
     def test_more_than_half_the_tracked_files_is_enough(self) -> None:
         """Four entries for seven tracked files: 4 > 7 // 2."""

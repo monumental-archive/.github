@@ -53,6 +53,7 @@ import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import override
 
 # Appended, so this file's own directory and the standard library
 # come first.
@@ -194,9 +195,14 @@ def a_function(name: str, returns: str = "INT /* i32 */", args: str = "") -> str
     )
 
 
-@unittest.skipUnless(PYTHON, "python3 runs the extracted generator")
 class TheGuardArithmetic(unittest.TestCase):
     """The psql guard must fit 80 columns AND stay one line (#792, #801)."""
+
+    @override
+    def setUp(self) -> None:
+        """Skip unless python3 is installed."""
+        if not PYTHON:
+            self.skipTest("python3 runs the extracted generator")
 
     def test_the_real_derived_script_is_reproduced_byte_for_byte(self) -> None:
         """The oracle row: real inputs, real published output.
@@ -229,7 +235,7 @@ class TheGuardArithmetic(unittest.TestCase):
         with TemporaryDirectory() as d:
             _, script = Derivation(d).run(REAL_PREV, REAL_NEW)
         too_long = [line for line in script.splitlines() if len(line) > GUARD_COLUMNS]
-        self.assertEqual([], too_long)
+        self.assertEqual(list[str](), too_long)
 
     def test_the_longest_name_that_fits_is_emitted_at_exactly_eighty(self) -> None:
         """The ceiling is a measured boundary, not a rounded one."""
@@ -255,7 +261,6 @@ class TheGuardArithmetic(unittest.TestCase):
         self.assertEqual("", script)
 
 
-@unittest.skipUnless(PYTHON, "python3 runs the extracted generator")
 class TheStatementDecisions(unittest.TestCase):
     """What the diff of two generated schemas is allowed to become.
 
@@ -264,6 +269,12 @@ class TheStatementDecisions(unittest.TestCase):
     COMMENT/GRANT/REVOKE are always replayable, and everything else is
     opaque — fine while identical, underivable otherwise.
     """
+
+    @override
+    def setUp(self) -> None:
+        """Skip unless python3 is installed."""
+        if not PYTHON:
+            self.skipTest("python3 runs the extracted generator")
 
     def test_identical_schemas_derive_a_library_only_release(self) -> None:
         """No DDL at all is a valid answer, and says which release it was."""
@@ -521,11 +532,6 @@ class TheFloorBlock(unittest.TestCase):
             )
 
 
-@unittest.skip(
-    "blocked by #813: the loadable-guard oracle needs the belt-provisioned "
-    "PostgreSQL #813 owns, and #772 refuses to build a second provisioning "
-    "for it. Unskip when #813 lands, pointing SERVER at its mechanism."
-)
 class TheLoadableGuardOracle(unittest.TestCase):
     r"""Does a real PostgreSQL accept the file, and not merely a linter.
 
@@ -541,6 +547,15 @@ class TheLoadableGuardOracle(unittest.TestCase):
     LOAD, and v1.58.2's must FAIL. A one-directional oracle would have
     passed for v1.58.2 too.
     """
+
+    @override
+    def setUp(self) -> None:
+        """Skip every row until the oracle has a server to ask."""
+        self.skipTest(
+            "blocked by #813: the loadable-guard oracle needs the belt-provisioned "
+            "PostgreSQL #813 owns, and #772 refuses to build a second provisioning "
+            "for it. Unskip when #813 lands, pointing SERVER at its mechanism."
+        )
 
     def test_the_current_guard_loads(self) -> None:
         """CREATE EXTENSION then ALTER EXTENSION UPDATE over the derived file."""

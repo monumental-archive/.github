@@ -22,6 +22,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import override
 
 # Appended, so this file's own directory and the standard library
 # come first.
@@ -29,6 +30,17 @@ sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
 import hermetic
 import repro_resolve
+
+
+def dumps(value: object) -> str:
+    """Encode a planted document as JSON.
+
+    Returns:
+        The JSON text.
+
+    """
+    return json.dumps(value)
+
 
 HELPER = pathlib.Path(__file__).resolve().parent / "repro_resolve.py"
 STUB_GH = """#!/usr/bin/env bash
@@ -61,6 +73,7 @@ TYPED = {"schema": 5, "entries": [{"name": "tool-1.2.3-linux.tar.gz"}]}
 class ReadTheLatestRelease(unittest.TestCase):
     """Each row: the latest release, and what the step handed on."""
 
+    @override
     def setUp(self) -> None:
         """Give each row a working directory, fixtures and a stub `gh`."""
         self.tmp = pathlib.Path(tempfile.mkdtemp())
@@ -145,7 +158,7 @@ class ReadTheLatestRelease(unittest.TestCase):
 
     def test_schema_one_manifest_is_not_handed_on(self) -> None:
         """An untyped manifest would seal CANNOT_JUDGE (exit 4): withheld."""
-        done, out = self.resolve(manifest=json.dumps({"schema": 1}))
+        done, out = self.resolve(manifest=dumps({"schema": 1}))
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
         self.assertIn("manifest<<MANIFEST_EOF\n\nMANIFEST_EOF\n", out)
         self.assertIn(
@@ -156,7 +169,7 @@ class ReadTheLatestRelease(unittest.TestCase):
 
     def test_entries_with_no_name_are_not_typing(self) -> None:
         """A first entry with no name answers nothing either."""
-        done, out = self.resolve(manifest=json.dumps({"entries": [{"type": "x"}]}))
+        done, out = self.resolve(manifest=dumps({"entries": [{"type": "x"}]}))
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
         self.assertIn("manifest<<MANIFEST_EOF\n\nMANIFEST_EOF\n", out)
 
@@ -213,7 +226,7 @@ class ReadTheLatestRelease(unittest.TestCase):
         """
         for entries in (True, {"": None}, "abc"):
             with self.subTest(entries=entries):
-                done, out = self.resolve(manifest=json.dumps({"entries": entries}))
+                done, out = self.resolve(manifest=dumps({"entries": entries}))
                 self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
                 self.assertEqual(
                     done.stdout,

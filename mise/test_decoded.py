@@ -116,8 +116,6 @@ MOVING = frozenset({
     "release/test_prepare_release.py",
     "release/test_publish_rust_crate.py",
     "release/test_registry.py",
-    "release/test_release_guards.py",
-    "release/test_security_release.py",
     "settings/test_repo_baseline.py",
 })
 
