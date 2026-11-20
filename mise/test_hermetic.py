@@ -14,6 +14,7 @@ gate as `mise run test`.
 """
 
 import ast
+import functools
 import os
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
@@ -421,15 +422,36 @@ class Environments:
         return out
 
 
+@functools.cache
+def source() -> Path:
+    """Name the repository's source once per run (#1726).
+
+    Returns:
+        `hermetic.source(CANON)`: the checkout, never mutmut's copy.
+
+    """
+    return hermetic.source(CANON)
+
+
+def source_text(path: str) -> str:
+    """Read a tracked file as its author wrote it (#1726).
+
+    Returns:
+        The text under `source()`, never mutmut's rewritten copy.
+
+    """
+    return (source() / path).read_text(encoding="utf-8")
+
+
 def listed_test_files() -> list[str]:
     """Name every test file in the four discovery roots.
 
     Returns:
-        Their paths, relative to the canon.
+        Their paths, relative to the repository's source.
 
     """
     return hermetic.tracked(
-        CANON,
+        source(),
         *(f"{r}/test_*.py" for r in ROOTS),
         *(f"{r}/prop_*.py" for r in ROOTS),
     )
@@ -714,6 +736,24 @@ class Tracked(unittest.TestCase):
         # ruff: ignore[subprocess-without-shell-equals-true]
         subprocess.run([GIT, *args], cwd=self.root, env=hermetic.env(), check=True)
 
+    def test_the_source_of_a_checkout_is_its_root(self) -> None:
+        """A law reading a checkout reads the checkout (#1726)."""
+        self.assertEqual(self.root, hermetic.source(self.root))
+
+    def test_the_source_of_a_copy_is_the_top_of_its_repository(self) -> None:
+        """A law reading from mutmut's copy reads the author's files (#1726)."""
+        self.assertEqual(self.root, hermetic.source(self.copy))
+
+    def test_no_repository_is_red_by_name(self) -> None:
+        """A root outside any repository is refused, never guessed."""
+        outside = Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(shutil.rmtree, outside)
+        with self.assertRaises(RuntimeError) as raised:
+            hermetic.source(outside)
+        self.assertIn(
+            f"hermetic.source: {outside} is in no git repository", str(raised.exception)
+        )
+
     def test_a_gitignored_copy_lists_what_the_checkout_lists(self) -> None:
         """The row that fails before #1618: the copy's listing was empty."""
         specs = (":!vendor/**", "*.py", "*.sh")
@@ -922,7 +962,7 @@ class TheLaw(unittest.TestCase):
             f"{path}:{line}"
             for path in listed_test_files()
             if path not in EXCEPTED
-            for line in copies((CANON / path).read_text(encoding="utf-8"))
+            for line in copies(source_text(path))
         ]
         self.assertEqual([], offenders)
 
@@ -932,9 +972,7 @@ class TheLaw(unittest.TestCase):
             f"{path}:{line}"
             for path in listed_test_files()
             if path not in EXCEPTED
-            for line in Environments(
-                (CANON / path).read_text(encoding="utf-8")
-            ).built_by_hand()
+            for line in Environments(source_text(path)).built_by_hand()
         ]
         self.assertEqual([], offenders)
 
@@ -1108,7 +1146,7 @@ class TheLaw(unittest.TestCase):
             f"{path}:{line}"
             for path in listed_test_files()
             if path not in EXCEPTED
-            for line in which_calls((CANON / path).read_text(encoding="utf-8"))
+            for line in which_calls(source_text(path))
         ]
         self.assertEqual(list[str](), offenders)
 
@@ -1167,7 +1205,7 @@ class TheLaw(unittest.TestCase):
             f"{path}:{line}"
             for path in listed_test_files()
             if path not in EXCEPTED
-            for line in plants_from_tree((CANON / path).read_text(encoding="utf-8"))
+            for line in plants_from_tree(source_text(path))
         ]
         self.assertEqual(list[str](), offenders)
 
@@ -1233,7 +1271,7 @@ class TheLaw(unittest.TestCase):
         offenders = [
             f"{path}:{line}"
             for path in listed_test_files()
-            for line in plain_listings((CANON / path).read_text(encoding="utf-8"))
+            for line in plain_listings(source_text(path))
         ]
         self.assertEqual([], offenders)
 

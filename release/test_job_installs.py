@@ -57,6 +57,18 @@ CANON = Path(__file__).resolve().parent.parent
 WORKFLOWS = CANON / ".github" / "workflows"
 
 
+def source() -> Path:
+    """Name the tree a law over the canon's own files reads (#1726).
+
+    Returns:
+        `hermetic.source(CANON)`: the checkout, or the repository's top
+        from mutmut's copy, where the files are as their authors wrote
+        them. Rows that run the copied files keep `CANON`.
+
+    """
+    return hermetic.source(CANON)
+
+
 # Item 4 of #1333: the scheduled audits and the level checks keep their
 # installs. Everything else uncached is on the release, publish or
 # continuous path and is held here.
@@ -545,10 +557,11 @@ def helpers() -> dict[str, str]:
         Path relative to the canon -> text, tests excluded.
 
     """
+    root = source()
     return {
         f"{home}/{p.name}": p.read_text("utf-8")
         for home in ("release", "mise")
-        for p in sorted((CANON / home).glob("*.py"))
+        for p in sorted((root / home).glob("*.py"))
         if not p.name.startswith("test_")
     }
 
@@ -714,7 +727,7 @@ def whole_config(workflow: str, job_id: str, job: list[str]) -> list[str]:
     ]
 
 
-def readers(path: Path, text: str) -> list[str]:
+def readers(path: Path, text: str, root: Path = CANON) -> list[str]:
     """Name a reader of a caller's mise config other than the one reader.
 
     Returns:
@@ -727,7 +740,7 @@ def readers(path: Path, text: str) -> list[str]:
         return []
     return [
         (
-            f"{path.relative_to(CANON)}: reads a caller's mise config itself;"
+            f"{path.relative_to(root)}: reads a caller's mise config itself;"
             " read it through release/caller_pins.py (#1333)"
         )
     ]
@@ -740,7 +753,7 @@ class Coverage(unittest.TestCase):
         """Every uncached mise-action job outside item 4 is a row."""
         found = sorted(
             (path.name, job_id)
-            for path in WORKFLOWS.glob("*.yml")
+            for path in (source() / ".github" / "workflows").glob("*.yml")
             if path.name not in OUT_OF_SCOPE
             for job_id, job in jobs(path.read_text("utf-8")).items()
             if any(uncached(s) for s in mise_steps(job))
@@ -1394,12 +1407,13 @@ class OneReader(unittest.TestCase):
 
     def test_no_other_reader_in_release_or_the_workflows(self) -> None:
         """Every script under release/ and every workflow, read whole."""
+        root = source()
         paths = [
-            *sorted((CANON / "release").glob("*.sh")),
-            *sorted((CANON / "release").glob("*.py")),
-            *sorted(WORKFLOWS.glob("*.yml")),
+            *sorted((root / "release").glob("*.sh")),
+            *sorted((root / "release").glob("*.py")),
+            *sorted((root / ".github" / "workflows").glob("*.yml")),
         ]
-        found = [ln for p in paths for ln in readers(p, p.read_text("utf-8"))]
+        found = [ln for p in paths for ln in readers(p, p.read_text("utf-8"), root)]
         self.assertEqual([], found)
 
     def test_a_planted_reader_is_named(self) -> None:
@@ -1450,7 +1464,7 @@ def tracked_helpers() -> set[str]:
         The names of the canon's tracked `*.py`.
 
     """
-    return {Path(p).name for p in hermetic.tracked(CANON, "*.py")}
+    return {Path(p).name for p in hermetic.tracked(source(), "*.py")}
 
 
 def action_job(text: str) -> list[str]:
@@ -1552,8 +1566,10 @@ def workflow_and_action_texts() -> dict[str, str]:
         Path relative to the canon -> text.
 
     """
-    paths = [*sorted(WORKFLOWS.glob("*.yml")), *sorted(ACTIONS.glob("*/action.yml"))]
-    return {str(p.relative_to(CANON)): p.read_text("utf-8") for p in paths}
+    root = source()
+    workflows, actions = root / ".github" / "workflows", root / ".github" / "actions"
+    paths = [*sorted(workflows.glob("*.yml")), *sorted(actions.glob("*/action.yml"))]
+    return {str(p.relative_to(root)): p.read_text("utf-8") for p in paths}
 
 
 PLANTED_JOB = """jobs:
@@ -1750,17 +1766,19 @@ class PopulationToken(unittest.TestCase):
 
     def test_no_stele_org_step_reads_on_the_job_token(self) -> None:
         """The tree: every `stele ... --org` step holds a minted token."""
+        root = source()
         texts = {
-            str(p.relative_to(CANON)): p.read_text("utf-8")
-            for p in sorted(WORKFLOWS.glob("*.yml"))
+            str(p.relative_to(root)): p.read_text("utf-8")
+            for p in sorted((root / ".github" / "workflows").glob("*.yml"))
         }
         self.assertEqual([], population_reads_on_job_token(texts))
 
     def test_the_scan_reaches_the_population_reads(self) -> None:
         """Not vacuous: the tree's population reads are all in view."""
+        root = source()
         texts = {
-            str(p.relative_to(CANON)): p.read_text("utf-8")
-            for p in sorted(WORKFLOWS.glob("*.yml"))
+            str(p.relative_to(root)): p.read_text("utf-8")
+            for p in sorted((root / ".github" / "workflows").glob("*.yml"))
         }
         planted = {
             rel: text.replace("steps.token.outputs.token", "github.token")
@@ -1933,22 +1951,24 @@ class EnvironmentSecrets(unittest.TestCase):
 
     def test_every_job_declares_its_secrets_environment(self) -> None:
         """The tree: no tracked workflow reads a key it is not issued."""
+        root = source()
         texts = {
-            rel: (CANON / rel).read_text("utf-8")
-            for rel in hermetic.tracked(CANON, ".github/workflows/*.yml")
+            rel: (root / rel).read_text("utf-8")
+            for rel in hermetic.tracked(root, ".github/workflows/*.yml")
         }
         self.assertEqual([], secrets_outside_environment(texts))
 
     def test_the_scan_reaches_the_environment_jobs(self) -> None:
         """Not vacuous: stripping every declaration names each reader."""
+        root = source()
         texts = {
             rel: re.sub(
                 r"^    environment: .*\n",
                 "",
-                (CANON / rel).read_text("utf-8"),
+                (root / rel).read_text("utf-8"),
                 flags=re.MULTILINE,
             )
-            for rel in hermetic.tracked(CANON, ".github/workflows/*.yml")
+            for rel in hermetic.tracked(root, ".github/workflows/*.yml")
         }
         found = secrets_outside_environment(texts)
         self.assertIn(
@@ -2101,9 +2121,10 @@ class DefaultBranchByName(unittest.TestCase):
 
     def test_no_workflow_or_template_names_the_branch(self) -> None:
         """Every workflow and workflow template, read whole."""
+        root = source()
         paths = sorted(
             path
-            for home in (WORKFLOWS, CANON / "workflow-templates")
+            for home in (root / ".github" / "workflows", root / "workflow-templates")
             for pattern in ("*.yml", "*.yaml")
             for path in home.glob(pattern)
         )
@@ -2111,7 +2132,7 @@ class DefaultBranchByName(unittest.TestCase):
             hit
             for path in paths
             for hit in literal_branches(
-                str(path.relative_to(CANON)), path.read_text("utf-8")
+                str(path.relative_to(root)), path.read_text("utf-8")
             )
         ]
         self.assertEqual([], found)

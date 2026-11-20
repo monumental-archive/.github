@@ -276,7 +276,7 @@ class Canon(unittest.TestCase):
         The row that fails before #1522: seven `_SPEC is None` guards
         carried a coverage pragma.
         """
-        root = _HERE.parent
+        root = hermetic.source(_HERE.parent)
         listing = hermetic.tracked(
             root, ":!vendor/**", "*.py", "*.rs", "*.go", "*.ts", "*.js", **GIT_CONFIG
         )

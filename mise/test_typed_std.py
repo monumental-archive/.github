@@ -310,12 +310,13 @@ class TheLaw(unittest.TestCase):
 
     def test_the_tree_holds_the_law(self) -> None:
         """Every tracked Python file opens URLs through typed_std."""
-        listed = hermetic.tracked(CANON, "*.py")
+        root = hermetic.source(CANON)
+        listed = hermetic.tracked(root, "*.py")
         breaches = [
             f"{path}:{line}: opens a URL outside {HOME}"
             for path in listed
             if path != HOME
-            for line in opens((CANON / path).read_text(encoding="utf-8"))
+            for line in opens((root / path).read_text(encoding="utf-8"))
         ]
         none: list[str] = []
         self.assertEqual(none, breaches)

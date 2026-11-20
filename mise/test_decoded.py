@@ -402,7 +402,7 @@ class TheLaw(unittest.TestCase):
     def test_the_tree_holds_the_law(self) -> None:
         """No unlisted parse, and no listed file that has moved."""
         none: list[str] = []
-        self.assertEqual(none, judge(CANON))
+        self.assertEqual(none, judge(hermetic.source(CANON)))
 
     def test_the_list_holds_files_that_exist(self) -> None:
         """MOVING names tracked paths, never a finding or a pattern."""

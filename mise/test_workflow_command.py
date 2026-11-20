@@ -234,7 +234,7 @@ class TheLaw(unittest.TestCase):
 
     def test_only_the_module_writes_one(self) -> None:
         """Every finding is a file and line to route through the module."""
-        self.assertEqual(findings(CANON), list[str]())
+        self.assertEqual(findings(hermetic.source(CANON)), list[str]())
 
     def test_the_law_sees_each_shape(self) -> None:
         """A literal, an f-string head and a concatenation are each found."""

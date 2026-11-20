@@ -27,6 +27,7 @@ from contextlib import redirect_stderr
 from pathlib import Path
 from unittest import mock
 
+import hermetic
 import plan_producers as pp
 
 REPO = Path(__file__).resolve().parent.parent
@@ -118,10 +119,14 @@ def delivered() -> tuple[pp.Policy, dict[str, str]]:
         The decoded policy and the workflow files the check reads.
 
     """
-    policy = pp.read_policy(json.loads(POLICY.read_text(encoding="utf-8")))
-    paths = [*sorted(WORKFLOWS.glob("build-*.yml")), WORKFLOWS / "publish.yml"]
+    # The repository's source, never mutmut's copy (#1726).
+    root = hermetic.source(REPO)
+    policy_file = root / POLICY.relative_to(REPO)
+    policy = pp.read_policy(json.loads(policy_file.read_text(encoding="utf-8")))
+    workflows = root / WORKFLOWS.relative_to(REPO)
+    paths = [*sorted(workflows.glob("build-*.yml")), workflows / "publish.yml"]
     return policy, {
-        str(p.relative_to(REPO)): p.read_text(encoding="utf-8") for p in paths
+        str(p.relative_to(root)): p.read_text(encoding="utf-8") for p in paths
     }
 
 
