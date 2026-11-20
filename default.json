@@ -159,6 +159,12 @@
       "commitMessageTopic": "semver"
     },
     {
+      "description": "mise's conda backend installs an unqualified `conda:` tool from its default channel, conda-forge (`mise settings get conda.channel`), but Renovate's mise manager hands the conda datasource the bare name and the default registry names no channel, so every lookup failed `no-result` (#1743). This states mise's own default; a repository that sets another `conda.channel` states that channel in its own renovate.json.",
+      "matchManagers": ["mise"],
+      "matchDatasources": ["conda"],
+      "registryUrls": ["https://api.anaconda.org/package/conda-forge/"]
+    },
+    {
       "description": "Routine updates merge themselves once aged and green; majors always get a human.",
       "matchUpdateTypes": ["patch", "minor", "pin", "digest", "pinDigest"],
       "automerge": true
