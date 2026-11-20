@@ -20,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from typing import override
 
 import hermetic
 import squash_message
@@ -47,6 +48,7 @@ PASSES = "squash-message: title and body mint a conforming commit\n"
 class SquashMessage(unittest.TestCase):
     """Each row: a title and body, and the commit the merge would mint."""
 
+    @override
     def setUp(self) -> None:
         """Give each row its own runner temp and stub `mise`."""
         self.tmp = pathlib.Path(tempfile.mkdtemp())
