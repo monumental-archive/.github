@@ -3,8 +3,8 @@
 
 The helper: a variable the suite's process carries reaches a fixture
 only if INHERITED or a named tool extension names it; a row's override
-always does. Its reader names the files a tree tracks, from a checkout
-or from a gitignored copy of the tree inside it (#1618). The law: no
+always does. Its reader names the files a checkout tracks (#1618).
+The law: no
 test file in the four discovery roots builds a fixture's environment by
 copying the caller's, or asks git for a plain listing of what a tree
 tracks instead of calling hermetic.tracked (#1618).
@@ -14,7 +14,6 @@ gate as `mise run test`.
 """
 
 import ast
-import functools
 import os
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
@@ -422,36 +421,25 @@ class Environments:
         return out
 
 
-@functools.cache
-def source() -> Path:
-    """Name the repository's source once per run (#1726).
-
-    Returns:
-        `hermetic.source(CANON)`: the checkout, never mutmut's copy.
-
-    """
-    return hermetic.source(CANON)
-
-
 def source_text(path: str) -> str:
-    """Read a tracked file as its author wrote it (#1726).
+    """Read a tracked file of the canon.
 
     Returns:
-        The text under `source()`, never mutmut's rewritten copy.
+        The file's text.
 
     """
-    return (source() / path).read_text(encoding="utf-8")
+    return (CANON / path).read_text(encoding="utf-8")
 
 
 def listed_test_files() -> list[str]:
     """Name every test file in the four discovery roots.
 
     Returns:
-        Their paths, relative to the repository's source.
+        Their paths, relative to the canon.
 
     """
     return hermetic.tracked(
-        source(),
+        CANON,
         *(f"{r}/test_*.py" for r in ROOTS),
         *(f"{r}/prop_*.py" for r in ROOTS),
     )
@@ -711,79 +699,39 @@ class Env(unittest.TestCase):
 
 
 class Tracked(unittest.TestCase):
-    """hermetic.tracked, in a checkout and in a copy of it (#1618)."""
+    """hermetic.tracked, in a checkout (#1618)."""
 
     def setUp(self) -> None:
-        """Plant a repository whose tree mutmut's way copies into `mutants/`."""
+        """Plant a repository with tracked files in and out of `vendor/`."""
         self.root = Path(tempfile.mkdtemp()).resolve()
         self.addCleanup(shutil.rmtree, self.root)
-        for name in ("a.py", "pkg/b.py", "pkg/c.sh", "vendor/v.py", "uncopied.py"):
+        for name in ("a.py", "pkg/b.py", "pkg/c.sh", "vendor/v.py", "d.py"):
             (self.root / name).parent.mkdir(parents=True, exist_ok=True)
             (self.root / name).write_text("x\n", encoding="utf-8")
-        (self.root / ".gitignore").write_text("mutants/\n", encoding="utf-8")
         self.git("init", "-q")
         self.git("add", ".")
-        # The copy: every tracked file but one, and one file only the
-        # copy holds, the way mutmut writes mutants/.
-        self.copy = self.root / "mutants"
-        for name in ("a.py", "pkg/b.py", "pkg/c.sh", "vendor/v.py", ".gitignore"):
-            (self.copy / name).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy(self.root / name, self.copy / name)
-        (self.copy / "mutmut-only.py").write_text("x\n", encoding="utf-8")
 
     def git(self, *args: str) -> None:
         """Run git in the planted repository."""
         # ruff: ignore[subprocess-without-shell-equals-true]
         subprocess.run([GIT, *args], cwd=self.root, env=hermetic.env(), check=True)
 
-    def test_the_source_of_a_checkout_is_its_root(self) -> None:
-        """A law reading a checkout reads the checkout (#1726)."""
-        self.assertEqual(self.root, hermetic.source(self.root))
-
-    def test_the_source_of_a_copy_is_the_top_of_its_repository(self) -> None:
-        """A law reading from mutmut's copy reads the author's files (#1726)."""
-        self.assertEqual(self.root, hermetic.source(self.copy))
-
-    def test_no_repository_is_red_by_name(self) -> None:
-        """A root outside any repository is refused, never guessed."""
-        outside = Path(tempfile.mkdtemp()).resolve()
-        self.addCleanup(shutil.rmtree, outside)
-        with self.assertRaises(RuntimeError) as raised:
-            hermetic.source(outside)
-        self.assertIn(
-            f"hermetic.source: {outside} is in no git repository", str(raised.exception)
-        )
-
-    def test_a_gitignored_copy_lists_what_the_checkout_lists(self) -> None:
-        """The row that fails before #1618: the copy's listing was empty."""
+    def test_a_checkout_lists_what_git_tracks(self) -> None:
+        """The pathspecs select from the tracked files, excludes kept."""
         specs = (":!vendor/**", "*.py", "*.sh")
         self.assertEqual(
             hermetic.tracked(self.root, *specs),
-            ["a.py", "pkg/b.py", "pkg/c.sh", "uncopied.py"],
+            ["a.py", "d.py", "pkg/b.py", "pkg/c.sh"],
         )
-        self.assertEqual(
-            hermetic.tracked(self.copy, *specs), ["a.py", "pkg/b.py", "pkg/c.sh"]
-        )
-
-    def test_a_subdirectory_pathspec_is_anchored_at_the_top(self) -> None:
-        """`pkg/*.py` from the copy names the copy's `pkg/b.py`."""
-        self.assertEqual(hermetic.tracked(self.copy, "pkg/*.py"), ["pkg/b.py"])
 
     def test_an_empty_listing_is_red_by_name(self) -> None:
         """Files asked for and none listed is never a pass."""
         with self.assertRaises(RuntimeError) as raised:
-            hermetic.tracked(self.copy, "*.rs")
+            hermetic.tracked(self.root, "*.rs")
         self.assertEqual(
             str(raised.exception),
-            f"hermetic.tracked: git lists no tracked file under {self.copy}"
+            f"hermetic.tracked: git lists no tracked file under {self.root}"
             " for ['*.rs']",
-        )
-
-    def test_magic_is_kept_and_anchored(self) -> None:
-        """Every pathspec gains `top`, and keeps its own magic."""
-        self.assertEqual(
-            [hermetic.top(s) for s in ("*.py", ":!v/**", ":^v", ":(glob)**/x")],
-            [":(top)*.py", ":(top,exclude)v/**", ":(top,exclude)v", ":(top,glob)**/x"],
         )
 
 

@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Name every mutmut pragma that is a real comment (#1354).
+"""Name every mutation pragma that is a real comment (#1354).
 
 audit:mutants' Python leg holds each `# pragma: no mutate` to a reason
 written at its site. It used to find them with `git grep`, which also
 matched the pragma TEXT inside string literals — the canon's own first
 run went red on its test file's fixtures, which plant pragmas in strings
-to test the rule. mutmut reads pragmas from comments only (libcst
-`Comment` nodes, mutmut 3.8.1 `pragma_handling`), so this asks Python's
-own tokenizer for COMMENT tokens and nothing else.
+to test the rule. The leg's pragma is a comment, never string text,
+so this asks Python's own tokenizer for COMMENT tokens and nothing
+else.
 
-Usage: mutmut_pragmas.py FILE... Prints one `file<TAB>line<TAB>comment`
+Usage: mutation_pragmas.py FILE... Prints one `file<TAB>line<TAB>comment`
 record per pragma comment, in file order. A file the tokenizer cannot
 read is named on stderr and the exit status is 1: an unreadable file is
 a site nobody checked, never a skip.
@@ -19,11 +19,11 @@ import sys
 import tokenize
 from pathlib import Path
 
-NAME = "mutmut-pragmas"
+NAME = "mutation-pragmas"
 
 
 def pragmas(path: Path) -> list[tuple[int, str]]:
-    """Find the mutmut pragma comments in one file.
+    """Find the mutation pragma comments in one file.
 
     Returns:
         (line, comment text) for every COMMENT token naming the pragma.

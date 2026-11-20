@@ -100,7 +100,7 @@ candidates=$(git grep -l -E 'pragma:.*no mutate' -- ':!vendor/**' '*.py' || true
 if [[ -n ${candidates} ]]; then
   files=()
   while IFS= read -r f; do files+=("${f}"); done <<< "${candidates}"
-  "${ORG_PYTHON}" "${belt}/mutmut_pragmas.py" "${files[@]}" > "${scratch}/pragmas.tsv"
+  "${ORG_PYTHON}" "${belt}/mutation_pragmas.py" "${files[@]}" > "${scratch}/pragmas.tsv"
 fi
 "${helper[@]}" pragmas "${scratch}/pragmas.tsv"
 

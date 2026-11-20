@@ -734,7 +734,7 @@ class NoSiteAsksForTheLatestRelease(unittest.TestCase):
 
     def test_no_untagged_release_view(self) -> None:
         """Every `gh release view` in release/ names the release it reads."""
-        root = hermetic.source(CANON)
+        root = CANON
         tracked = hermetic.tracked(root, "release")
         found = []
         for path in tracked:

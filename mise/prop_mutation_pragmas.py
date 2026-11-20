@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""mutmut_pragmas.py's pragma finder, on modules nobody wrote down.
+"""mutation_pragmas.py's pragma finder, on modules nobody wrote down.
 
-The properties of `test_mutmut_pragmas.py`'s fixed rows (#1548), over
+The properties of `test_mutation_pragmas.py`'s fixed rows (#1548), over
 generated modules:
 
 - Invariance (V): a pragma is reported exactly when it is a comment,
@@ -21,7 +21,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-import mutmut_pragmas as mp
+import mutation_pragmas as mp
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given

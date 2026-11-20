@@ -569,7 +569,7 @@ class Helper(unittest.TestCase):
         """The canon runs lint:scaffold-assembly, which runs every task."""
         table = gate_tools.load_table()
         reached = {k for k, r in table.items() if r.when != ()}
-        self.assertEqual(reached, install(hermetic.source(CANON)) & reached)
+        self.assertEqual(reached, install(CANON) & reached)
 
     def test_a_caller_task_brings_a_belt_tool(self) -> None:
         """A repository's own task calling hadolint gets it installed."""

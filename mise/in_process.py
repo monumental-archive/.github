@@ -1,20 +1,6 @@
 #!/usr/bin/env python3
 """The law: a helper's logic is tested in the process that runs the tests (#1673).
 
-mutmut runs a mutant only when the function's `__module__` equals the
-module in the mutant's name (mutmut 3.8.1, `trampoline.py:109`), and a
-script's functions are in `__main__`. So a function whose tests only run
-its helper as a script in a child process never runs a mutant, whatever
-the child's environment carries, and its mutants come out "no tests":
-mutmut keeps its statistics in the process that runs the tests.
-Coverage and the type checker see the same gap. Measured 2026-11-20 on
-a two-file project (`answer(n): return n + 1`, mutant `n - 1`):
-
-    run as a script, MUTANT_UNDER_TEST unset           prints 2
-    run as a script, the mutant's own name             prints 2, the original
-    run as a script, `__main__.` + the mutant's name   prints 0
-    imports the module, the mutant's own name          prints 0, the mutant
-
 THE UNIT IS THE FUNCTION, AND REACH IS FOLLOWED (amendment on #1673). A
 helper is every tracked `.py` outside `vendor/` that is not a
 `test_*.py` or `prop_*.py`, wherever it lives (the law names no
@@ -68,10 +54,7 @@ HEADER = f"""\
 # Helper import debt (#1673): every function or method of a tracked
 # Python helper (outside vendor/, not a test_*.py or prop_*.py) that no
 # test reaches in-process, as the tree had it when lint:in-process
-# landed. A function reached only through a script in a child process is
-# one mutation cannot judge (mutmut runs a mutant only in the module it was
-# named for, never in a script's `__main__`), and coverage and the type
-# checker cannot see it. mise/in_process.py says what reaches a function.
+# landed. mise/in_process.py says what reaches a function.
 #
 # The list only shrinks. lint:in-process is red on an unreached function
 # that is not listed, and on an entry whose function is now reached or is

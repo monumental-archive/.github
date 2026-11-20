@@ -65,10 +65,7 @@ def tracked_helpers() -> set[str]:
         The names of the canon's tracked `*.py`.
 
     """
-    # The repository's source, never mutmut's copy (#1726).
-    return {
-        pathlib.Path(p).name for p in hermetic.tracked(hermetic.source(CANON), "*.py")
-    }
+    return {pathlib.Path(p).name for p in hermetic.tracked(CANON, "*.py")}
 
 
 def bodies(text: str) -> dict[str, str]:

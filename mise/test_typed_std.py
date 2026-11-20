@@ -310,7 +310,7 @@ class TheLaw(unittest.TestCase):
 
     def test_the_tree_holds_the_law(self) -> None:
         """Every tracked Python file opens URLs through typed_std."""
-        root = hermetic.source(CANON)
+        root = CANON
         listed = hermetic.tracked(root, "*.py")
         breaches = [
             f"{path}:{line}: opens a URL outside {HOME}"

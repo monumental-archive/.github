@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Tests for mutmut_pragmas.py's refusal of a file it cannot read (#1555).
+"""Tests for mutation_pragmas.py's refusal of a file it cannot read (#1555).
 
-The regression row of the defect `prop_mutmut_pragmas.py` found: a file
+The regression row of the defect `prop_mutation_pragmas.py` found: a file
 whose bytes are not UTF-8 past its encoding line raised
 UnicodeDecodeError out of `main`, a traceback that also left every later
 file unread, where the contract is the file named on stderr and exit 1.
@@ -16,7 +16,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-import mutmut_pragmas as mp
+import mutation_pragmas as mp
 
 HERE = Path(__file__).resolve().parent
 
@@ -35,7 +35,7 @@ class Unreadable(unittest.TestCase):
             with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
                 status = mp.main([str(bad), str(good)])
         self.assertEqual(status, 1)
-        self.assertIn(f"mutmut-pragmas: {bad}: could not tokenize:", err.getvalue())
+        self.assertIn(f"mutation-pragmas: {bad}: could not tokenize:", err.getvalue())
         self.assertEqual(out.getvalue(), f"{good}\t1\t# pragma: no mutate\n")
 
 
