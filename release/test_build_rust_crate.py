@@ -69,6 +69,7 @@ from tempfile import TemporaryDirectory
 # come first.
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
+import decoded
 import hermetic
 import package_crates
 
@@ -318,12 +319,39 @@ def steps(job: Job, *, script: bool) -> Run:
             log.read_text().splitlines() if log.exists() else [],
             sorted(p.name for p in package.glob("*.crate")),
             outputs.read_text(),
-            json.loads(plan.read_text()) if plan.exists() else [],
+            read_plan(plan),
         )
+
+
+def read_plan(plan: Path) -> list[dict[str, object]]:
+    """Read the plan the step wrote, if it wrote one.
+
+    Returns:
+        Its entries; none when there is no plan.
+
+    """
+    if not plan.exists():
+        return []
+    listed = decoded.as_array(
+        decoded.load_json(plan.read_text(encoding="utf-8")), "the plan"
+    )
+    return [decoded.as_object(e, "a plan entry") for e in listed]
 
 
 ALL = sorted(f"{m}-{VERSION}.crate" for m in MEMBERS)
 EXCLUDE = f" --exclude {UNCOMPILABLE}"
+# The one verified run of a workspace packaged with no exclusion.
+ONE_RUN: list[str] = ["package --workspace --locked"]
+
+
+def subject_lines(stdout: str) -> list[str]:
+    """Keep the lines that say a crate is not a release subject.
+
+    Returns:
+        Those lines, in order.
+
+    """
+    return [x for x in stdout.splitlines() if "release subject" in x]
 
 
 class PackageStepIsTheHelper(unittest.TestCase):
@@ -342,27 +370,23 @@ class PackageAnExcludedMember(unittest.TestCase):
         """Ship the extension edtf excludes, uncompiled."""
         run = run_steps(EXCLUDE)
         self.assertEqual(0, run.returncode, run.stdout + run.stderr)
-        self.assertEqual(
-            [
-                f"package --workspace --locked --exclude {UNCOMPILABLE}",
-                "package --workspace --locked --no-verify",
-            ],
-            run.cargo,
-        )
+        cargo: list[str] = [
+            f"package --workspace --locked --exclude {UNCOMPILABLE}",
+            "package --workspace --locked --no-verify",
+        ]
+        self.assertEqual(cargo, run.cargo)
         self.assertEqual(ALL, run.packaged)
         self.assertEqual(
             "".join(f"{digest(m)}  {m}-{VERSION}.crate\n" for m in sorted(MEMBERS)),
             run.manifest(),
         )
-        self.assertIn(
-            {
-                "class": "rust-crate",
-                "doc": f"sbom-cargo-{UNCOMPILABLE}-crate",
-                "artifact": f"{UNCOMPILABLE}-crate",
-                "params": {"cargoPackage": UNCOMPILABLE},
-            },
-            run.plan,
-        )
+        entry: dict[str, object] = {
+            "class": "rust-crate",
+            "doc": f"sbom-cargo-{UNCOMPILABLE}-crate",
+            "artifact": f"{UNCOMPILABLE}-crate",
+            "params": {"cargoPackage": UNCOMPILABLE},
+        }
+        self.assertIn(entry, run.plan)
         self.assertEqual(len(MEMBERS), len(run.plan))
 
     def test_a_crate_rewritten_differently_fails_naming_both(self) -> None:
@@ -392,7 +416,8 @@ class PackageAnExcludedMember(unittest.TestCase):
         self.assertEqual(
             "::error::cargo package wrote no crate to verify\n", run.stdout
         )
-        self.assertEqual([f"package --workspace --locked{flags}"], run.cargo)
+        cargo: list[str] = [f"package --workspace --locked{flags}"]
+        self.assertEqual(cargo, run.cargo)
         self.assertEqual("", run.outputs)
 
     def test_a_failing_cargo_fails_the_step_with_its_status(self) -> None:
@@ -403,7 +428,7 @@ class PackageAnExcludedMember(unittest.TestCase):
         run = steps(Job(""), script=True)
         self.assertEqual(101, run.returncode)
         self.assertIn("failed to compile pgrx-pg-sys", run.stderr)
-        self.assertEqual(["package --workspace --locked"], run.cargo)
+        self.assertEqual(ONE_RUN, run.cargo)
         self.assertEqual("", run.outputs)
 
 
@@ -415,8 +440,9 @@ class PackageWithoutExclusion(unittest.TestCase):
         compiles = ("edtf-core", "edtf-cli")
         run = run_steps("", members=compiles)
         self.assertEqual(0, run.returncode, run.stdout + run.stderr)
-        self.assertEqual(["package --workspace --locked"], run.cargo)
-        self.assertEqual(sorted(f"{m}-{VERSION}.crate" for m in compiles), run.packaged)
+        self.assertEqual(ONE_RUN, run.cargo)
+        packaged: list[str] = sorted(f"{m}-{VERSION}.crate" for m in compiles)
+        self.assertEqual(packaged, run.packaged)
         self.assertEqual(
             "".join(f"{digest(m)}  {m}-{VERSION}.crate\n" for m in sorted(compiles)),
             run.manifest(),
@@ -426,7 +452,7 @@ class PackageWithoutExclusion(unittest.TestCase):
         """Whitespace-only flags take the one-run branch too."""
         run = run_steps("  ", members=("edtf-core",))
         self.assertEqual(0, run.returncode, run.stdout + run.stderr)
-        self.assertEqual(["package --workspace --locked"], run.cargo)
+        self.assertEqual(ONE_RUN, run.cargo)
 
 
 class SubjectsAreWhatCratesIoReceives(unittest.TestCase):
@@ -440,23 +466,26 @@ class SubjectsAreWhatCratesIoReceives(unittest.TestCase):
             publish={"edtf-cli": ["crates-io"], "edtf-internal": []},
         )
         self.assertEqual(0, run.returncode, run.stdout + run.stderr)
-        self.assertEqual(["package --workspace --locked"], run.cargo)
-        self.assertEqual(
-            [
-                (
-                    f"edtf-internal-{VERSION}.crate is not published to crates.io"
-                    " (publish key); not a release subject"
-                )
-            ],
-            [x for x in run.stdout.splitlines() if "release subject" in x],
-        )
+        self.assertEqual(ONE_RUN, run.cargo)
+        said: list[str] = [
+            (
+                f"edtf-internal-{VERSION}.crate is not published to crates.io"
+                " (publish key); not a release subject"
+            )
+        ]
+        self.assertEqual(said, subject_lines(run.stdout))
         ships = ("edtf-cli", "edtf-core")
-        self.assertEqual([f"{m}-{VERSION}.crate" for m in ships], run.packaged)
+        packaged: list[str] = [f"{m}-{VERSION}.crate" for m in ships]
+        self.assertEqual(packaged, run.packaged)
         self.assertEqual(
             "".join(f"{digest(m)}  {m}-{VERSION}.crate\n" for m in ships),
             run.manifest(),
         )
-        self.assertEqual(list(ships), [x["params"]["cargoPackage"] for x in run.plan])
+        planned: list[object] = [
+            decoded.as_object(x["params"], "params")["cargoPackage"] for x in run.plan
+        ]
+        shipped: list[object] = list(ships)
+        self.assertEqual(shipped, planned)
 
     def test_another_registry_only_is_not_a_subject(self) -> None:
         """A member publishing elsewhere is not crates.io's to serve."""
@@ -464,24 +493,25 @@ class SubjectsAreWhatCratesIoReceives(unittest.TestCase):
             "", members=("edtf-core", "edtf-mirror"), publish={"edtf-mirror": ["x"]}
         )
         self.assertEqual(0, run.returncode, run.stdout + run.stderr)
-        self.assertEqual([f"edtf-core-{VERSION}.crate"], run.packaged)
-        self.assertEqual(
-            [
-                (
-                    f"edtf-mirror-{VERSION}.crate is not published to crates.io"
-                    " (publish key); not a release subject"
-                )
-            ],
-            [x for x in run.stdout.splitlines() if "release subject" in x],
-        )
+        packaged: list[str] = [f"edtf-core-{VERSION}.crate"]
+        self.assertEqual(packaged, run.packaged)
+        said: list[str] = [
+            (
+                f"edtf-mirror-{VERSION}.crate is not published to crates.io"
+                " (publish key); not a release subject"
+            )
+        ]
+        self.assertEqual(said, subject_lines(run.stdout))
 
     def test_an_excluded_publish_false_member_is_removed_too(self) -> None:
         """Packaged by the --no-verify run, then cut like any other."""
         run = run_steps(EXCLUDE, publish={UNCOMPILABLE: []})
         self.assertEqual(0, run.returncode, run.stdout + run.stderr)
-        self.assertEqual(
-            [f"edtf-cli-{VERSION}.crate", f"edtf-core-{VERSION}.crate"], run.packaged
-        )
+        packaged: list[str] = [
+            f"edtf-cli-{VERSION}.crate",
+            f"edtf-core-{VERSION}.crate",
+        ]
+        self.assertEqual(packaged, run.packaged)
         self.assertNotIn(UNCOMPILABLE, run.manifest())
 
     def test_a_named_crate_cargo_did_not_write_fails_by_name(self) -> None:

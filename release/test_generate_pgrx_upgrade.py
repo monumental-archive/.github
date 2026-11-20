@@ -56,11 +56,13 @@ import textwrap
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import ClassVar, NamedTuple, override
 
 # Appended, so this file's own directory and the standard library
 # come first.
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
+import decoded
 import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
@@ -328,6 +330,53 @@ class Repo:
         )
 
 
+class Release(NamedTuple):
+    """One release of a captured listing, as the script reads it."""
+
+    tag: str
+    draft: bool
+    assets: list[str]
+
+
+def releases(name: str) -> list[Release]:
+    """Read a captured `gh api repos/<r>/releases` listing.
+
+    Returns:
+        Each release's tag, draft flag and asset names, in listing order.
+
+    Raises:
+        UndecodableError: a release whose draft flag is not a boolean.
+
+    """
+    listed = decoded.load_json((TESTDATA / name).read_text())
+    out: list[Release] = []
+    for item in decoded.as_array(listed, name):
+        release = decoded.as_object(item, f"a release in {name}")
+        draft = release["draft"]
+        if not isinstance(draft, bool):
+            msg = f"a draft flag in {name} is not a boolean"
+            raise decoded.UndecodableError(msg)
+        assets = [
+            decoded.as_str(decoded.as_object(a, "an asset")["name"], "an asset name")
+            for a in decoded.as_array(release["assets"], "assets")
+        ]
+        out.append(Release(decoded.as_str(release["tag_name"], "a tag"), draft, assets))
+    return out
+
+
+class NeedsJq(unittest.TestCase):
+    """Rows that drive the gh stub, which jq answers; no rows of its own."""
+
+    @override
+    def setUp(self) -> None:
+        """Skip the row where jq is missing."""
+        if not JQ:
+            self.skipTest("jq is a belt tool and drives the gh stub")
+        super().setUp()
+
+
+# A list that holds nothing: assets, args.
+NOTHING: list[str] = []
 # The eleven published edtf versions, plus the burned 1.3.0 the failed
 # release left behind. Endpoints only; the bodies are irrelevant here.
 EDTF_EDGES = [
@@ -345,8 +394,7 @@ EDTF_EDGES = [
 ]
 
 
-@unittest.skipUnless(JQ, "jq is a belt tool and drives the gh stub")
-class SelectsThePredecessor(unittest.TestCase):
+class SelectsThePredecessor(NeedsJq):
     """The three cases the old code collapsed into one."""
 
     def test_burned_head_falls_back_to_the_newest_installable(self) -> None:
@@ -365,14 +413,13 @@ class SelectsThePredecessor(unittest.TestCase):
         edtf-postgres-v1.2.3, would turn every test above into a tautology
         without failing. So assert the fixture's shape, not just its use.
         """
-        data = json.loads((TESTDATA / "edtf-releases.json").read_text())
-        by_tag = {r["tag_name"]: r for r in data}
+        by_tag = {r.tag: r for r in releases("edtf-releases.json")}
         burned = by_tag["v1.3.0"]
-        self.assertTrue(burned["draft"], "v1.3.0 must still be the burn draft")
-        self.assertEqual([], burned["assets"], "v1.3.0 must carry nothing")
-        carried = by_tag["edtf-postgres-v1.2.3"]["assets"]
+        self.assertTrue(burned.draft, "v1.3.0 must still be the burn draft")
+        self.assertEqual(NOTHING, burned.assets, "v1.3.0 must carry nothing")
+        carried = by_tag["edtf-postgres-v1.2.3"].assets
         self.assertTrue(
-            any(a["name"].startswith("edtf_postgres-1.2.3-pg") for a in carried),
+            any(a.startswith("edtf_postgres-1.2.3-pg") for a in carried),
             "the real predecessor must still carry its tarballs",
         )
 
@@ -429,10 +476,15 @@ class ReadsThePinsThroughTheOneReader(unittest.TestCase):
 INNER_RUN = "PGRX_HARNESS_INNER_RUN"
 
 
-@unittest.skipUnless(JQ, "jq is a belt tool and drives the gh stub")
-@unittest.skipIf(os.environ.get(INNER_RUN), "the inner run: this row spawned it")
-class LeavesTheCallersGitAlone(unittest.TestCase):
+class LeavesTheCallersGitAlone(NeedsJq):
     """#857, planted: the hazard itself, run for real on every gate."""
+
+    @override
+    def setUp(self) -> None:
+        """Skip the row in the inner run, which this row spawned."""
+        if os.environ.get(INNER_RUN):
+            self.skipTest("the inner run: this row spawned it")
+        super().setUp()
 
     def test_a_linked_worktrees_index_is_byte_identical_afterwards(self) -> None:
         """Run the whole suite the way a `pre-push` hook in a worktree does.
@@ -531,8 +583,7 @@ def entries(written: str) -> list[str]:
     return [line for line in written.splitlines() if not line.startswith("#")]
 
 
-@unittest.skipUnless(JQ, "jq is a belt tool and drives the gh stub")
-class WritesTheInstallableSet(unittest.TestCase):
+class WritesTheInstallableSet(NeedsJq):
     """#825: the forge walk is recorded, because the gate cannot repeat it.
 
     Selection asks which versions a non-draft release CARRIES. That is
@@ -548,7 +599,8 @@ class WritesTheInstallableSet(unittest.TestCase):
             repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.1", EDTF_EDGES)
             repo.derive("1.3.1", "1.3.0", "edtf-releases.json")
             written = written_record(repo.root)
-        self.assertEqual(["edtf_postgres 1.2.3 1.1.2 1.1.0"], entries(written))
+        want: list[str] = ["edtf_postgres 1.2.3 1.1.2 1.1.0"]
+        self.assertEqual(want, entries(written))
 
     def test_the_burned_head_is_absent_and_that_is_the_whole_point(self) -> None:
         """1.3.0 is in the graph, carried by nothing, and must not appear.
@@ -584,7 +636,8 @@ class WritesTheInstallableSet(unittest.TestCase):
             repo = Repo(d, "demo_pg", "demo-pg", "1.1.0", [("1.0.0", "1.0.1")])
             repo.derive("1.1.0", "1.0.1", "stele-releases.json")
             written = written_record(repo.root)
-        self.assertEqual(["demo_pg"], entries(written))
+        want: list[str] = ["demo_pg"]
+        self.assertEqual(want, entries(written))
 
     def test_it_rides_the_release_commit(self) -> None:
         """A record the Release PR does not carry never reaches the gate.
@@ -620,7 +673,6 @@ class WritesTheInstallableSet(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertIn(f"files={RECORD}", emitted)
 
-    @unittest.skipUnless(CARGO, "the lint resolves the crate version with cargo")
     def test_the_lint_reads_exactly_what_this_wrote(self) -> None:
         """End to end, across the two scripts that must agree on the name.
 
@@ -629,6 +681,8 @@ class WritesTheInstallableSet(unittest.TestCase):
         notice a rename on one side: the lint would simply find no
         record and take its interim path, in green, forever.
         """
+        if not CARGO:
+            self.skipTest("the lint resolves the crate version with cargo")
         edges = [("1.1.0", "1.1.2"), ("1.1.2", "1.2.3")]
         with TemporaryDirectory() as d:
             repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.2.3", edges)
@@ -685,8 +739,7 @@ class WritesTheInstallableSet(unittest.TestCase):
         self.assertIn("installable set recorded v1.2.3", linted.stdout)
 
 
-@unittest.skipUnless(JQ, "jq is a belt tool and drives the gh stub")
-class TagHistoryShapes(unittest.TestCase):
+class TagHistoryShapes(NeedsJq):
     """The three tag histories the predecessor search must tell apart (#762).
 
     Selection succeeds silently — the script prints no tag on the happy
@@ -742,23 +795,21 @@ class TagHistoryShapes(unittest.TestCase):
         release, would leave the rows above asserting nothing while
         staying green.
         """
-        lab = json.loads((TESTDATA / "release-lab-releases.json").read_text())
         carriers = [
-            r["tag_name"]
-            for r in lab
-            if not r["draft"]
-            and any(a["name"].startswith("lab_pg-0.28.1-pg") for a in r["assets"])
+            r.tag
+            for r in releases("release-lab-releases.json")
+            if not r.draft and any(a.startswith("lab_pg-0.28.1-pg") for a in r.assets)
         ]
+        want: list[str] = ["v0.28.1"]
         self.assertEqual(
-            ["v0.28.1"], carriers, "the v*-scheme predecessor must still be v0.28.1"
+            want, carriers, "the v*-scheme predecessor must still be v0.28.1"
         )
-        self.assertEqual(
-            [], json.loads((TESTDATA / "signer-releases.json").read_text())
-        )
-        edtf = json.loads((TESTDATA / "edtf-releases.json").read_text())
+        none: list[Release] = []
+        self.assertEqual(none, releases("signer-releases.json"))
+        tags = [r.tag for r in releases("edtf-releases.json")]
         self.assertNotIn(
             "v1.2.3",
-            [r["tag_name"] for r in edtf],
+            tags,
             "edtf's imported scheme is the point: no v1.2.3 release object",
         )
 
@@ -772,11 +823,16 @@ def captured_edges(tag: str) -> list[tuple[str, str]]:
     """
     edge = re.compile(r"^edtf_postgres--(\d+\.\d+\.\d+)--(\d+\.\d+\.\d+)\.sql$")
     names = (TESTDATA / f"edtf-sql-{tag}.txt").read_text().split()
-    return [m.groups() for m in map(edge.match, names) if m]
+    pairs: list[tuple[str, str]] = []
+    for m in map(edge.match, names):
+        if m:
+            # Both groups always take part, so the default is never used.
+            frm, to = m.groups("")
+            pairs.append((frm, to))
+    return pairs
 
 
-@unittest.skipUnless(JQ, "jq is a belt tool and drives the gh stub")
-class AsksTheOnePredecessor(unittest.TestCase):
+class AsksTheOnePredecessor(NeedsJq):
     """The derivation acts on previous_release.py's answer (#1592).
 
     edtf on 2026-11-19: v1.3.5 published and carries its tarballs, the
@@ -797,25 +853,22 @@ class AsksTheOnePredecessor(unittest.TestCase):
         self.assertIn("deriving edtf_postgres: 1.3.5 -> 1.3.6", result.stdout)
         self.assertIn("release download v1.3.5", result.stderr)
         self.assertNotIn("NOTE:", result.stdout)
-        self.assertEqual(
-            ["edtf_postgres 1.3.5 1.3.4 1.2.3 1.1.2 1.1.0"], entries(written)
-        )
+        want: list[str] = ["edtf_postgres 1.3.5 1.3.4 1.2.3 1.1.2 1.1.0"]
+        self.assertEqual(want, entries(written))
 
     def test_the_captures_carry_the_shapes_they_are_named_for(self) -> None:
         """Guard the guard: v1.3.5 carries tarballs, its burned drafts none."""
-        data = json.loads((TESTDATA / "edtf-releases-v1.3.5.json").read_text())
-        by_tag = {r["tag_name"]: r for r in data}
+        by_tag = {r.tag: r for r in releases("edtf-releases-v1.3.5.json")}
         for burned in ("v1.3.0", "v1.3.1", "v1.3.2", "v1.3.3"):
-            self.assertTrue(by_tag[burned]["draft"], burned)
-            self.assertEqual([], by_tag[burned]["assets"], burned)
-        names = [a["name"] for a in by_tag["v1.3.5"]["assets"]]
+            self.assertTrue(by_tag[burned].draft, burned)
+            self.assertEqual(NOTHING, by_tag[burned].assets, burned)
+        names = by_tag["v1.3.5"].assets
         self.assertIn("edtf_postgres-1.3.5-pg18-linux-amd64.tar.gz", names)
         self.assertIn(("1.2.3", "1.3.0"), captured_edges("v1.3.1"))
         self.assertNotIn(("1.2.3", "1.3.0"), captured_edges("v1.2.3"))
 
 
-@unittest.skipUnless(JQ, "jq is a belt tool and drives the gh stub")
-class DerivesOnTheOlderLine(unittest.TestCase):
+class DerivesOnTheOlderLine(NeedsJq):
     """Releasing 1.2.5 beside a published 1.3.0 derives from 1.2.4 (#1592).
 
     The listing is authored, in the REST shape the captures have: no
@@ -826,7 +879,7 @@ class DerivesOnTheOlderLine(unittest.TestCase):
     def test_the_derivation_starts_below_the_version(self) -> None:
         """1.2.4 on v1.2.4, and no NOTE calls 1.3.0 uninstallable."""
         tarball = "lab_pg-{}-pg18-linux-amd64.tar.gz"
-        listing = [
+        listing: list[dict[str, object]] = [
             {"assets": [{"name": tarball.format(v)}], "draft": False, "tag_name": t}
             for v, t in (("1.3.0", "v1.3.0"), ("1.2.4", "v1.2.4"))
         ]
@@ -874,8 +927,7 @@ NO_ROOT = (
 )
 
 
-@unittest.skipUnless(JQ, "jq is a belt tool and drives the gh stub")
-class ReadsThePreviousArchive(unittest.TestCase):
+class ReadsThePreviousArchive(NeedsJq):
     """Every top level the predecessor's archive may have (#780, #1274).
 
     #1274 packs the tarball from `pkgroot/` alone: the CloudNativePG
@@ -1070,7 +1122,7 @@ class InstallsHeadersAtTheImagesServer(unittest.TestCase):
             " headers — move the image pin in docker/pgrx-base-images.toml\n",
             result.stdout,
         )
-        self.assertEqual([], args)
+        self.assertEqual(NOTHING, args)
 
     def test_refuses_a_build_that_moved_the_server(self) -> None:
         """An install that upgrades the server is caught after the fact."""
@@ -1127,10 +1179,11 @@ def postgres_bindir() -> Path | None:
     """
     if override := os.environ.get("PG_BINDIR"):
         return Path(override)
-    found = sorted(
-        Path("/usr/lib/postgresql").glob("*/bin/initdb"),
-        key=lambda p: int(p.parent.parent.name),
-    )
+
+    def major(initdb: Path) -> int:
+        return int(initdb.parent.parent.name)
+
+    found = sorted(Path("/usr/lib/postgresql").glob("*/bin/initdb"), key=major)
     return found[-1].parent if found else None
 
 
@@ -1163,6 +1216,16 @@ class LiveServer(unittest.TestCase):
     Holds no rows itself, so the loader never starts it on its own.
     """
 
+    # False where this machine has no Postgres: every row skips by name.
+    running: ClassVar[bool] = False
+    bindir: ClassVar[Path]
+    tmp: ClassVar[TemporaryDirectory[str]]
+    data: ClassVar[Path]
+    sock: ClassVar[Path]
+    num: ClassVar[int]
+    version: ClassVar[str]
+
+    @override
     @classmethod
     def setUpClass(cls) -> None:
         """Start a throwaway server on a private socket, no TCP.
@@ -1172,21 +1235,24 @@ class LiveServer(unittest.TestCase):
                 where a skip would read like a pass.
 
         """
+        if not (PG_BIN or ON_RUNNER):
+            return
         if PG_BIN is None:
             msg = "the gate's runner carries no /usr/lib/postgresql/*/bin"
             raise AssertionError(msg)
+        cls.bindir = PG_BIN
         cls.tmp = TemporaryDirectory()
         tmp = Path(cls.tmp.name)
         cls.data = tmp / "data"
         cls.sock = tmp
-        run = [str(PG_BIN / "initdb"), "-D", str(cls.data), "-A", "trust"]
+        run = [str(cls.bindir / "initdb"), "-D", str(cls.data), "-A", "trust"]
         # ruff: ignore[subprocess-without-shell-equals-true]
         subprocess.run([*run, "-U", "postgres", "-N"], check=True, capture_output=True)
         opts = f"-c listen_addresses= -k {cls.sock}"
         # ruff: ignore[subprocess-without-shell-equals-true]
         subprocess.run(
             [
-                str(PG_BIN / "pg_ctl"),
+                str(cls.bindir / "pg_ctl"),
                 "-D",
                 str(cls.data),
                 "-o",
@@ -1201,13 +1267,31 @@ class LiveServer(unittest.TestCase):
         )
         cls.num = int(cls.psql("SHOW server_version_num").stdout.strip())
         cls.version = cls.psql("SHOW server_version").stdout.strip()
+        cls.running = True
 
+    @override
+    def setUp(self) -> None:
+        """Skip the row where this machine has no Postgres to start."""
+        if not self.running:
+            self.skipTest("no Postgres on this machine")
+        super().setUp()
+
+    @override
     @classmethod
     def tearDownClass(cls) -> None:
         """Stop the server and drop its directory."""
+        if not cls.running:
+            return
         # ruff: ignore[subprocess-without-shell-equals-true]
         subprocess.run(
-            [str(PG_BIN / "pg_ctl"), "-D", str(cls.data), "-m", "immediate", "stop"],
+            [
+                str(cls.bindir / "pg_ctl"),
+                "-D",
+                str(cls.data),
+                "-m",
+                "immediate",
+                "stop",
+            ],
             check=False,
             capture_output=True,
         )
@@ -1228,7 +1312,7 @@ class LiveServer(unittest.TestCase):
         # ruff: ignore[subprocess-without-shell-equals-true]
         return subprocess.run(
             [
-                str(PG_BIN / "psql"),
+                str(cls.bindir / "psql"),
                 "-X",
                 "-q",
                 "-tA",
@@ -1248,7 +1332,6 @@ class LiveServer(unittest.TestCase):
         )
 
 
-@unittest.skipUnless(PG_BIN or ON_RUNNER, "no Postgres on this machine")
 class WarnsBelowTheFloor(LiveServer):
     """The floor block alone, against a live server (#1274).
 
@@ -1314,7 +1397,6 @@ def snapshot_sql(text: str) -> str:
     return match.group(1)
 
 
-@unittest.skipUnless(PG_BIN or ON_RUNNER, "no Postgres on this machine")
 class SnapshotReadsTheCatalog(LiveServer):
     """The shipped snapshot query, against a live server (#1324).
 
@@ -1473,7 +1555,11 @@ class ProofReadsBeforeItCompares(unittest.TestCase):
                     )
                 )
             )
-            script = container.sub(lambda m: f"{root}{m.group(0)}", script)
+
+            def rooted(m: re.Match[str]) -> str:
+                return f"{root}{m.group(0)}"
+
+            script = container.sub(rooted, script)
             log = root / "psql.log"
             env = hermetic_env(
                 root,

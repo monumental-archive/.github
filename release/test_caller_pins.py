@@ -167,21 +167,19 @@ class Refusals(unittest.TestCase):
         """Two missing inputs, two lines: one run names both remedies."""
         code, out, err = install('[tools]\njq = "1.8.2"\n', "rust", "cargo-auditable")
         self.assertEqual((1, ""), (code, out))
-        self.assertEqual(
-            [
-                (
-                    "::error::rust missing — pin rust in this repository's mise"
-                    " config; it is a build input of every class that ships a Rust"
-                    " binary"
-                ),
-                (
-                    "::error::cargo-auditable missing — pin cargo-auditable in this"
-                    " repository's mise config; it is a build input of every class"
-                    " that ships a Rust binary"
-                ),
-            ],
-            err.splitlines(),
-        )
+        want: list[str] = [
+            (
+                "::error::rust missing — pin rust in this repository's mise"
+                " config; it is a build input of every class that ships a Rust"
+                " binary"
+            ),
+            (
+                "::error::cargo-auditable missing — pin cargo-auditable in this"
+                " repository's mise config; it is a build input of every class"
+                " that ships a Rust binary"
+            ),
+        ]
+        self.assertEqual(want, err.splitlines())
 
     def test_an_empty_version_is_missing(self) -> None:
         """An empty list or table pins nothing."""
@@ -228,7 +226,8 @@ class Refusals(unittest.TestCase):
                 )
                 with tempfile.TemporaryDirectory() as tmp:
                     (Path(tmp) / "mise.toml").write_text(config, "utf-8")
-                    self.assertEqual(set(), caller_pins.pinned_names(Path(tmp)))
+                    none: set[str] = set()
+                    self.assertEqual(none, caller_pins.pinned_names(Path(tmp)))
 
     def test_the_other_config_names_are_read(self) -> None:
         """`.mise.toml` and `mise/config.toml` are configs too."""

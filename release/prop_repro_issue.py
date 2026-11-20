@@ -17,6 +17,7 @@ Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
 """
 
+import dataclasses
 import unittest
 
 import repro_issue as repro
@@ -48,29 +49,32 @@ VERDICT = (
 )
 
 
-@st.composite
-def runs(draw: st.DrawFn) -> repro.Run:
-    """Draw one failed audit run.
+def run_of(drawn: tuple[str, str, str, str, str]) -> repro.Run:
+    """Make one failed audit run of its drawn fields.
 
     Returns:
         The run.
 
     """
-    run_id = draw(RUN_ID)
+    run_id, tag, cls, manifest, compare = drawn
     return repro.Run(
-        tag=draw(TAG),
-        cls=draw(CLASS),
-        manifest=draw(MANIFEST),
-        compare=draw(COMPARE),
+        tag=tag,
+        cls=cls,
+        manifest=manifest,
+        compare=compare,
         run_id=run_id,
         run_url=f"https://github.com/o/r/actions/runs/{run_id}",
     )
 
 
+# One failed audit run.
+RUNS = st.tuples(RUN_ID, TAG, CLASS, MANIFEST, COMPARE).map(run_of)
+
+
 class NamesTheComparisonOnlyWhenItFailed(unittest.TestCase):
     """V: a verdict is worded exactly when the comparison failed."""
 
-    @given(runs())
+    @given(RUNS)
     @example(repro.Run("v1.0.0", "go-binary", "", "skipped", "7", "https://x/7"))
     @example(repro.Run("v1.0.0", "go-binary", " \n", "failure", "7", "https://x/7"))
     def test_verdict_exactly_on_failure(self, run: repro.Run) -> None:
@@ -90,10 +94,10 @@ class NamesTheComparisonOnlyWhenItFailed(unittest.TestCase):
         self.assertTrue(title.endswith(f"(run {run.run_id})"), title)
         self.assertIn(run.run_url, body)
 
-    @given(runs())
+    @given(RUNS)
     def test_scope_follows_the_manifest(self, run: repro.Run) -> None:
         """Per-class scope iff the manifest is not blank."""
-        failed = repro.Run(**{**run.__dict__, "compare": "failure"})
+        failed = dataclasses.replace(run, compare="failure")
         _, body = repro.issue(failed)
         scoped = f"Judged population: the {run.cls} artifacts {run.tag} published."
         self.assertEqual(scoped in body, bool(run.manifest.strip()), run)

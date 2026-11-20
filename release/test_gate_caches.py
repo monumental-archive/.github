@@ -41,6 +41,8 @@ CI = CANON / ".github" / "workflows" / "ci.yml"
 # the design conditions say no release, publish or continuous job gains
 # one.
 CACHE_JOBS = {"gate", "pgrx"}
+# A workflow with nothing to report.
+NONE: list[str] = []
 
 DEFAULT_REF = "format('refs/heads/{0}', github.event.repository.default_branch)"
 SAVE = f"${{{{ github.event_name == 'push' && github.ref == {DEFAULT_REF} }}}}"
@@ -256,7 +258,7 @@ class Real(unittest.TestCase):
 
     def test_ci_conforms(self) -> None:
         """No breach in the real workflow."""
-        self.assertEqual([], findings(real()))
+        self.assertEqual(NONE, findings(real()))
 
     def test_every_job_has_its_caches(self) -> None:
         """The two jobs each restore and save their tool cache."""
@@ -439,7 +441,7 @@ class LegCaches(unittest.TestCase):
 
     def test_the_real_gate_conforms(self) -> None:
         """Two build legs keyed by leg, one tool-cache saver."""
-        self.assertEqual([], leg_cache_findings(real()))
+        self.assertEqual(NONE, leg_cache_findings(real()))
 
     def test_planted_breaches_are_named(self) -> None:
         """Each property broken once on the real file, by its message."""
@@ -493,7 +495,8 @@ class LegCaches(unittest.TestCase):
         ]
         for label, (old, new), message in rows:
             with self.subTest(row=label):
-                self.assertEqual([message], leg_cache_findings(plant(old, new)))
+                want: list[str] = [message]
+                self.assertEqual(want, leg_cache_findings(plant(old, new)))
 
 
 def install_key_findings(text: str) -> list[str]:
@@ -530,7 +533,7 @@ class InstallKeys(unittest.TestCase):
 
     def test_the_real_jobs_agree(self) -> None:
         """The legs key by their own install list."""
-        self.assertEqual([], install_key_findings(real()))
+        self.assertEqual(NONE, install_key_findings(real()))
 
     def test_the_listed_jobs_pass_their_list(self) -> None:
         """The listed job names a list; the gate names none."""
@@ -554,16 +557,14 @@ class InstallKeys(unittest.TestCase):
             f"          install_args: {listed} {pins}",
             f"          install_args: {listed} typos {pins}",
         )
-        self.assertEqual(
-            [
-                (
-                    f"pgrx: the cache key digests '{listed} {pins}'"
-                    " and the job installs"
-                    f" '{listed} typos {pins}'"
-                )
-            ],
-            install_key_findings(text),
-        )
+        want: list[str] = [
+            (
+                f"pgrx: the cache key digests '{listed} {pins}'"
+                " and the job installs"
+                f" '{listed} typos {pins}'"
+            )
+        ]
+        self.assertEqual(want, install_key_findings(text))
 
 
 if __name__ == "__main__":
