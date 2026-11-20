@@ -35,6 +35,7 @@ import unittest
 from pathlib import Path
 
 import hermetic
+import typed_std
 
 CANON = Path(__file__).resolve().parents[1]
 WRITER = CANON / "mise" / "workflow-command.sh"
@@ -166,7 +167,7 @@ def guarded_printf(rest: str) -> bool:
     fmt, _ = split
     for line in fmt.split("\\n"):
         head = line.lstrip(" \t")
-        conversions = CONVERSION.findall(line)
+        conversions = [typed_std.group(m) or "" for m in CONVERSION.finditer(line)]
         if COMMAND_LINE.match(head):
             if conversions:
                 return False
@@ -190,7 +191,7 @@ def rule_two(line: str) -> bool:
         return False
     if "$(" in line[: found.start() + 1]:
         return False
-    verb, rest = found.groups()
+    verb, rest = typed_std.group(found, 1) or "", typed_std.group(found, 2) or ""
     if NOT_THE_LOG.search(rest) or not ("$" in rest or "`" in rest):
         return False
     return verb == "echo" or not guarded_printf(rest)
@@ -225,8 +226,8 @@ def units(path: Path, text: str) -> list[list[tuple[int, str]]]:
 
     """
     lines = list(enumerate(text.split("\n"), 1))
+    out: list[list[tuple[int, str]]] = []
     if path.suffix in {".yml", ".yaml"}:
-        out = []
         for i, (_, line) in enumerate(lines):
             if re.match(r"^\s+run: [|>]", line):
                 depth = len(line) - len(line.lstrip())
@@ -238,7 +239,7 @@ def units(path: Path, text: str) -> list[list[tuple[int, str]]]:
                 out.append(body)
         return out
     if path.suffix == ".toml":
-        out, current = [], []
+        current: list[tuple[int, str]] = []
         for n, line in lines:
             if line.startswith("[tasks."):
                 out.append(current)
@@ -433,7 +434,8 @@ class TheLaw(unittest.TestCase):
             (3, '} >> "${GITHUB_ENV}"'),
             (4, 'echo "${x}"'),
         ]
-        self.assertEqual(grouped(unit), {2})
+        want: set[int] = {2}
+        self.assertEqual(grouped(unit), want)
 
     def test_clippy_lint_names_are_no_command(self) -> None:
         """`clippy::all` holds `::` and a name, but opens nothing."""
@@ -447,10 +449,8 @@ class TheLaw(unittest.TestCase):
             'echo "::error::a literal command"\n'
             "printf '  planned: %q\\n' \"${v}\""
         )
-        self.assertEqual(
-            out.splitlines(),
-            ["::error::a literal command", "  planned: $'a\\n::error::x'"],
-        )
+        want: list[str] = ["::error::a literal command", "  planned: $'a\\n::error::x'"]
+        self.assertEqual(out.splitlines(), want)
 
     def test_rule_two_reads_only_units_that_print_a_command(self) -> None:
         """A step that prints no command may echo its text as it likes."""

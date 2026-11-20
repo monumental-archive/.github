@@ -26,6 +26,7 @@ import tempfile
 import unittest
 from unittest import mock
 
+import decoded
 import hermetic
 import unittest_guarded as ug
 
@@ -798,12 +799,8 @@ def run_worker(spec: pathlib.Path) -> hermetic.Called:
     return call(["--worker", str(spec)], hermetic.env())
 
 
-class Shapes(unittest.TestCase):
+class Shapes(Planted):
     """Every wrong shape the outcome and spec readers refuse (#1659)."""
-
-    tree = Runner.tree
-    run_with = staticmethod(Runner.run_with)
-    guarded = staticmethod(Runner.guarded)
 
     def test_each_wrong_outcome_field_is_an_error_on_its_file(self) -> None:
         """One field of the wrong shape reds the file, whichever it is."""
@@ -872,9 +869,15 @@ class Shapes(unittest.TestCase):
         spec = write_spec(start, patterns=["*one"])
         r = run_worker(spec)
         self.assertEqual(r.returncode, 0, r.stderr)
-        outcome = json.loads(spec.with_suffix(".out").read_text(encoding="utf-8"))
+        outcome = decoded.as_object(
+            decoded.load_json(spec.with_suffix(".out").read_text(encoding="utf-8")),
+            "outcome",
+        )
         self.assertEqual(1, outcome["run"])
-        self.assertEqual([], outcome["errors"] + outcome["failures"])
+        errors = decoded.as_array(outcome["errors"], "errors")
+        failures = decoded.as_array(outcome["failures"], "failures")
+        none: list[object] = []
+        self.assertEqual(none, errors + failures)
 
 
 class Parts(unittest.TestCase):
@@ -906,7 +909,8 @@ class Parts(unittest.TestCase):
                 """Hold."""
 
         module = type(sys)("planted_module")
-        vars(module)["Case"] = Case
+        namespace: dict[str, object] = vars(module)
+        namespace["Case"] = Case
         loader = ug.RecordingLoader()
         suite = loader.loadTestsFromModule(module)
         self.assertEqual(suite.countTestCases(), 1)

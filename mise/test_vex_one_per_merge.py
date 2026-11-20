@@ -19,10 +19,11 @@ gate as `mise run test`.
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
-import tomllib
 import unittest
 from pathlib import Path
+from typing import override
 
+import decoded
 import hermetic
 import vex_one_per_merge
 
@@ -46,8 +47,9 @@ def body() -> str:
         The bash the task runs.
 
     """
-    with (BELT / "config.toml").open("rb") as handle:
-        return tomllib.load(handle)["tasks"][TASK]["run"]
+    config = decoded.load_toml((BELT / "config.toml").read_bytes())
+    task = decoded.as_object(decoded.as_object(config["tasks"], "tasks")[TASK], TASK)
+    return decoded.as_str(task["run"], f"{TASK}.run")
 
 
 class Tree:
@@ -155,6 +157,7 @@ class Tree:
 class OnePerMerge(unittest.TestCase):
     """The commits ahead of origin/main change at most one decision."""
 
+    @override
     def setUp(self) -> None:
         """Plant a tree whose default branch holds one decision."""
         tmp = tempfile.TemporaryDirectory()
@@ -293,6 +296,7 @@ class NoneTracked(unittest.TestCase):
 class Listing(unittest.TestCase):
     """vex-attest.yml's signing list is the lint's own reader (#1615)."""
 
+    @override
     def setUp(self) -> None:
         """Plant a tree whose default branch holds two decisions."""
         tmp = tempfile.TemporaryDirectory()
@@ -316,23 +320,27 @@ class Listing(unittest.TestCase):
         """Moved and edited: new bytes at a new name, so it is signed."""
         self.tree.git("mv", A, C)
         self.tree.commit(C)
-        self.assertEqual(self.listed(), [C])
+        want: list[str] = [C]
+        self.assertEqual(self.listed(), want)
 
     def test_a_pure_rename_is_listed(self) -> None:
         """Moved alone: listed, and the store decides if its bytes are held."""
         self.tree.git("mv", A, C)
         self.tree.commit()
-        self.assertEqual(self.listed(), [C])
+        want: list[str] = [C]
+        self.assertEqual(self.listed(), want)
 
     def test_a_deletion_is_not_listed(self) -> None:
         """Removed: nothing to sign."""
         self.tree.commit(remove=(A,))
-        self.assertEqual(self.listed(), [])
+        none: list[str] = []
+        self.assertEqual(self.listed(), none)
 
     def test_the_count_and_the_listing_agree(self) -> None:
         """Two changed: the gate reds on two, and the listing names the two."""
         self.tree.commit(A, B)
-        self.assertEqual(self.listed(), [A, B])
+        want: list[str] = [A, B]
+        self.assertEqual(self.listed(), want)
         done = self.tree.run()
         self.assertEqual(done.returncode, 1, done.stdout)
         self.assertIn(f"  {A}\n  {B}\n", done.stderr)

@@ -27,12 +27,13 @@ import os
 import re
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
-import tomllib
 import unittest
+from dataclasses import dataclass
 from pathlib import Path
-from types import SimpleNamespace
 
+import decoded
 import hermetic
+import typed_std
 import typescript_properties as tp
 
 CANON = Path(__file__).resolve().parent.parent
@@ -41,10 +42,23 @@ BASH = hermetic.tool("bash")
 GIT = hermetic.tool("git")
 PYTHON = hermetic.tool("python3")
 
-CONFIG = tomllib.loads((BELT / "config.toml").read_text(encoding="utf-8"))
-GATE = CONFIG["tasks"]["test:typescript-properties"]["run"]
-AUDIT = CONFIG["tasks"]["audit:typescript-properties"]["run"]
-LINT = CONFIG["tasks"]["lint:typescript-properties"]["run"]
+CONFIG = decoded.load_toml((BELT / "config.toml").read_text(encoding="utf-8"))
+TASKS = decoded.as_object(CONFIG["tasks"], "tasks")
+
+
+def run_body(name: str) -> str:
+    """Read one belt task's `run` body.
+
+    Returns:
+        The bash the task runs.
+
+    """
+    return decoded.as_str(decoded.as_object(TASKS[name], name)["run"], f"{name}.run")
+
+
+GATE = run_body("test:typescript-properties")
+AUDIT = run_body("audit:typescript-properties")
+LINT = run_body("lint:typescript-properties")
 
 # pnpm's shape, the proving repository's lockfile format.
 LOCK_BOTH = "packages:\n\n  fast-check@4.9.0:\n    x\n\n  vitest@4.1.12:\n    x\n"
@@ -135,8 +149,48 @@ def plant(root: Path, files: dict[str, str], *, runner: bool) -> None:
         stub.chmod(0o755)
 
 
-class Ran(SimpleNamespace):
+@dataclass(frozen=True)
+class Ran:
     """A finished body: exit status, output, and what the stub saw."""
+
+    returncode: int
+    stdout: str
+    stderr: str
+    root: str
+    argv: list[str] | None
+    seed: str | None
+    runs: str | None
+    wrapper: str | None
+
+    def handed(self) -> list[str]:
+        """Read what the runner was handed, where a row needs it to have run.
+
+        Returns:
+            The runner's arguments.
+
+        Raises:
+            AssertionError: the runner never ran.
+
+        """
+        if self.argv is None:
+            msg = "the runner never ran"
+            raise AssertionError(msg)
+        return self.argv
+
+    def written(self) -> str:
+        """Read the wrapper config, where a row needs the runner to have run.
+
+        Returns:
+            The wrapper's text.
+
+        Raises:
+            AssertionError: the runner never ran.
+
+        """
+        if self.wrapper is None:
+            msg = "the runner never ran"
+            raise AssertionError(msg)
+        return self.wrapper
 
 
 def run(
@@ -306,12 +360,13 @@ class Gate(unittest.TestCase):
         done = run(GATE, GATE_FILES)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual((done.seed, done.runs), ("1336", "200"))
-        self.assertEqual(done.argv[:3], ["run", "--root", done.root])
-        self.assertEqual(done.argv[3], "-c")
-        self.assertTrue(done.argv[4].endswith("/org-property.config.mts"), done.argv)
-        self.assertEqual(
-            args_after_config(done.argv), ["src/a.prop.test.ts", "src/b.prop.test.tsx"]
-        )
+        argv = done.handed()
+        head: list[str] = ["run", "--root", done.root]
+        self.assertEqual(argv[:3], head)
+        self.assertEqual(argv[3], "-c")
+        self.assertTrue(argv[4].endswith("/org-property.config.mts"), argv)
+        filters: list[str] = ["src/a.prop.test.ts", "src/b.prop.test.tsx"]
+        self.assertEqual(args_after_config(argv), filters)
         self.assertEqual(
             done.stdout,
             "test:typescript-properties: seed 1336, 200 runs per property,"
@@ -322,7 +377,10 @@ class Gate(unittest.TestCase):
     def test_two_runs_hand_the_runner_the_same_seed(self) -> None:
         """Deterministic: the seed does not move between runs."""
         first, second = run(GATE, GATE_FILES), run(GATE, GATE_FILES)
-        self.assertEqual((first.seed, first.argv[5:]), (second.seed, second.argv[5:]))
+        self.assertEqual(
+            (first.seed, first.handed()[5:]),
+            (second.seed, second.handed()[5:]),
+        )
 
     def test_the_gate_ignores_a_given_seed(self) -> None:
         """ORG_PROPERTY_SEED is the audit's replay, never the gate's."""
@@ -334,16 +392,17 @@ class Gate(unittest.TestCase):
         done = run(GATE, GATE_FILES)
         self.assertIn(
             f"import * as repo from {json.dumps(done.root + '/vitest.config.ts')};",
-            done.wrapper,
+            done.written(),
         )
         self.assertIn(
-            'const files = ["src/a.prop.test.ts", "src/b.prop.test.tsx"];', done.wrapper
+            'const files = ["src/a.prop.test.ts", "src/b.prop.test.tsx"];',
+            done.written(),
         )
-        self.assertIn('exclude: ["**/node_modules/**", "**/.git/**"]', done.wrapper)
+        self.assertIn('exclude: ["**/node_modules/**", "**/.git/**"]', done.written())
         self.assertRegex(
-            done.wrapper, r'setupFiles: \[\.\.\.prior, ".*/org-property-setup\.mts"\]'
+            done.written(), r'setupFiles: \[\.\.\.prior, ".*/org-property-setup\.mts"\]'
         )
-        self.assertIn("test.projects", done.wrapper)
+        self.assertIn("test.projects", done.written())
 
     def test_no_repository_config_still_runs(self) -> None:
         """No vitest config: the wrapper stands alone, named so."""
@@ -351,8 +410,8 @@ class Gate(unittest.TestCase):
         done = run(GATE, files)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertIn("200 runs per property, no vitest config\n", done.stdout)
-        self.assertIn("let config: any = {};", done.wrapper)
-        self.assertNotIn("import * as repo", done.wrapper)
+        self.assertIn("let config: any = {};", done.written())
+        self.assertNotIn("import * as repo", done.written())
 
     def test_vitest_config_wins_over_vite_config(self) -> None:
         """Follow vitest's own lookup order: vitest.config.* first."""
@@ -443,7 +502,7 @@ class Audit(unittest.TestCase):
             done.stdout,
         )
         self.assertIsNotNone(printed, done.stdout)
-        self.assertEqual(done.seed, printed.group(1))
+        self.assertEqual(done.seed, typed_std.group(printed, 1) if printed else None)
 
     def test_a_failure_says_where_the_example_lands(self) -> None:
         """Red at a seed: the seed and the remedy, on stderr."""
