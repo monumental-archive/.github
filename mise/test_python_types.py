@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""audit:python-types runs mypy on the belt's terms (#1604).
+"""lint:python-types runs mypy on the belt's terms (#1604).
 
 Each row runs the task's own `run` body, read from mise/config.toml, in
 a planted git tree, against a belt directory holding this tree's
@@ -8,9 +8,8 @@ pin). The STUB rows put a `mypy` on PATH that records its arguments and
 prints and exits as the row says: they hold the task's wiring, which
 mypy cannot see. The REAL rows run the belt's pinned mypy over planted
 files, for what the delivered config makes mypy refuse; they run where
-that mypy is installed and skip where the gate disables it, which is
-every tree until the task is renamed `lint:python-types` and its
-gate-tools row names it (#1604's last pull request).
+that mypy is installed and skip where the gate disables it: a tree
+with no tracked `.py` or `.pyi`, by its gate-tools row.
 
 stdlib `unittest`, matching the other mise/test_*.py; run through the
 gate as `mise run test`.
@@ -33,7 +32,7 @@ import python_types_seams
 BELT = Path(__file__).resolve().parent
 BASH = hermetic.tool("bash")
 GIT = hermetic.tool("git")
-LABEL = "audit:python-types"
+LABEL = "lint:python-types"
 # What the seam guard says of every type-ignore comment, coded or bare.
 IGNORED = "`# type: ignore` hides a finding; type the code instead"
 
@@ -421,6 +420,22 @@ class TheConfig(unittest.TestCase):
         done = run({"a.py": text})
         self.assertEqual(1, done.returncode)
         self.assertIn('a.py:5: error: Expression has type "Any"  [misc]', done.stdout)
+
+    def test_an_untyped_fixture_builder_is_red(self) -> None:
+        """A test's data builder with no signature reds the gate (#1604).
+
+        The shape #1604 ran down: a function that builds test data with
+        no signature. It fails before the rename, with no such task.
+        """
+        text = "def build(name):\n    return {'name': name}\n"
+        done = run({"test_a.py": text})
+        self.assertEqual(1, done.returncode)
+        self.assertIn(
+            "test_a.py:1: error: Function is missing a type annotation"
+            "  [no-untyped-def]",
+            done.stdout,
+        )
+        self.assertIn(f"{LABEL}: mypy exited 1", done.stderr)
 
     def test_an_unused_suppression_is_red(self) -> None:
         """A coded ignore that suppresses nothing is mypy's unused-ignore."""

@@ -598,8 +598,7 @@ python = "3.15.2"
 # docs/tooling-verdicts.md. The SEVENTH pipx: exception: PyPI-only, no
 # aqua package; its five dependencies are unhashed in mise.lock, as
 # Hypothesis's one is. The config is delivered (mise/mypy.ini) and
-# audit:python-types runs it; the task enters `ci` as
-# lint:python-types once the canon's findings are run down.
+# lint:python-types runs it, in `ci`.
 "pipx:mypy" = "2.4.1"
 
 # Canonical tasks: available in every repo via the global layer. Repos may
@@ -1990,9 +1989,9 @@ dir = "{{cwd}}"
 #
 # Two files that would be one module under the derived import roots are
 # refused too (#1737), by python_roots.py's own check, the one
-# audit:python-types runs before mypy: a second file of a module name
-# is red at the pull request, never first in the weekly audit. Its
-# printed roots go nowhere here.
+# lint:python-types runs before mypy: a second file of a module name
+# is red by name here, before mypy stops on it. Its printed roots go
+# nowhere here.
 run = '''
 files=$(git ls-files ':!vendor/**' "*.py" "*.pyi")
 [[ -n ${files} ]] || { echo "lint:python-module-names: no Python tracked, skipped" && exit 0; }
@@ -2009,6 +2008,18 @@ IFS=$'\n' read -r -d '' -a args < <(printf '%s\0' "${files}")
   exit 1
 }
 echo "lint:python-module-names: ok"
+'''
+
+[tasks."lint:python-types"]
+description = "Type-check tracked Python with mypy at its strictest, the belt's config"
+dir = "{{cwd}}"
+# #1604: mypy over every tracked .py/.pyi, mise/mypy.ini delivered, and
+# the seams mypy lets through refused (python-types.sh says which):
+# every `# type: ignore`, coded or bare, an inline `# mypy:` and
+# `no_type_check`. Staged as audit:python-types while the canon's
+# findings were run down, one lane per slice; in `ci` since the last.
+run = '''
+"${ORG_BELT_DIR}/python-types.sh" lint:python-types
 '''
 
 [tasks."lint:action-pins"]
@@ -8195,21 +8206,6 @@ dir = "{{cwd}}"
 # reruns the exact search. The cron never pushes.
 run = '''
 "${ORG_BELT_DIR}/python-properties.sh" audit
-'''
-
-[tasks."audit:python-types"]
-description = "Type-check tracked Python with mypy at its strictest, the belt's config (enters ci as lint:python-types)"
-dir = "{{cwd}}"
-# #1604: mypy over every tracked .py/.pyi, mise/mypy.ini delivered, and
-# the seams mypy lets through refused (python-types.sh says which).
-# STAGED, not advisory: outside `ci`, run by the canon's Monday audit
-# (audit.yml, red until the canon conforms; lint:audit-scheduled
-# refuses an audit task no workflow runs). It is here so the canon's
-# findings can be run down against the real task, one lane per
-# directory; the pull request that clears the last renames it
-# `lint:python-types`, which `ci` collects, and drops the audit leg.
-run = '''
-"${ORG_BELT_DIR}/python-types.sh" audit:python-types
 '''
 
 [tasks."audit:typescript-properties"]

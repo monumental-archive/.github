@@ -349,35 +349,6 @@ jobs:
       - name: Run every Python property at a random seed
         run: mise run audit:python-properties
 
-  python-types:
-    name: audit / python types, staged before lint:python-types
-    needs: plan
-    if: needs.plan.outputs.legs == 'first'
-    runs-on: ubuntu-26.04
-    env:
-      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
-      MISE_LOCKED: "1"
-      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/mise/config.toml
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Install mise and the pinned toolchain
-        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
-        with:
-          version: 2026.11.8
-          cache: false
-
-      # #1604: mypy at the belt's strictest over the canon's own Python,
-      # red until its findings are run down. The pull request that clears
-      # the last renames the task lint:python-types, which `ci` collects,
-      # and deletes this leg. Tree-local, the python-properties leg's
-      # reason; no API reads.
-      - name: Type-check the tracked Python
-        run: mise run audit:python-types
-
   typescript-properties:
     name: audit / typescript properties at a random seed
     needs: plan

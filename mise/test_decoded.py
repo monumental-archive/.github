@@ -10,14 +10,9 @@ The law: no tracked `.py` parses JSON or TOML outside `mise/decoded.py`.
 It is read from the syntax tree with import aliases resolved, so
 `import json as j`, `from json import loads` and
 `from tomllib import load as l` are each the same parse; `json.dumps`
-writes and is free. MOVING lists the files not yet moved, one per line,
-and may only shrink: an unlisted file with a parse is red by file and
-line. A listed file with no parse is red until it is dropped once
-`stale` is on; the gate holds it off until #1604's last step, which
-turns it on and drops every moved file in one edit (owner, #1604), so
-the slices do not conflict on the list. The conformance issues filed
-from #1604 empty it; the one that empties it deletes it (#1544's
-shape: it holds files, never findings).
+writes and is free. A parse anywhere else is red by file and line. The
+list of files not yet moved (#1544's shape) was emptied by #1604's
+slices and deleted by its last step, so no file is excused.
 
 stdlib `unittest`, matching the other mise/test_*.py; run through the
 gate as `mise run test`.
@@ -51,52 +46,6 @@ PARSES = frozenset({
 
 # The one file that parses.
 LOADER = "mise/decoded.py"
-
-# Files that still parse a document themselves. Only shrinks.
-MOVING = frozenset({
-    ".github/rekor-monitor/test_findings.py",
-    ".github/rekor-monitor/test_standing_issue.py",
-    ".github/rekor-monitor/test_verdict.py",
-    "mise/prop_security_config.py",
-    "mise/test_action_lints.py",
-    "mise/test_audit_scheduled.py",
-    "mise/test_belt_shell.py",
-    "mise/test_bestpractices_drift.py",
-    "mise/test_coverage_go_branches.py",
-    "mise/test_coverage_js_runner.py",
-    "mise/test_coverage_tasks.py",
-    "mise/test_dco.py",
-    "mise/test_deny_skips.py",
-    "mise/test_derive_badges.py",
-    "mise/test_gate_tools.py",
-    "mise/test_git_decoy.py",
-    "mise/test_go_fuzz_seeds.py",
-    "mise/test_hook_jobs.py",
-    "mise/test_lock_platforms.py",
-    "mise/test_pg_schema.py",
-    "mise/test_plan_producers.py",
-    "mise/test_plpgsql_coverage.py",
-    "mise/test_python_module_names.py",
-    "mise/test_python_properties.py",
-    "mise/test_python_types.py",
-    "mise/test_release_phases.py",
-    "mise/test_release_planned.py",
-    "mise/test_rust_lint.py",
-    "mise/test_security_config.py",
-    "mise/test_signer_pin.py",
-    "mise/test_subject_budget.py",
-    "mise/test_typescript_properties.py",
-    "mise/test_unittest_guarded.py",
-    "mise/test_vex_one_per_merge.py",
-    "mise/test_zizmor_signer.py",
-    "release/test_build_rust_crate.py",
-    "release/test_generate_pgrx_upgrade.py",
-    "release/test_job_installs.py",
-    "release/test_mint_doi.py",
-    "release/test_release_guards.py",
-    "release/test_security_release.py",
-    "settings/test_repo_baseline.py",
-})
 
 
 def dotted(node: ast.expr) -> str | None:
@@ -162,32 +111,19 @@ def parses(text: str) -> list[int]:
     return sorted(found)
 
 
-def judge(root: Path, *, stale: bool) -> list[str]:
-    """Hold the tracked Python under root to the law and its list.
-
-    `stale` reds a listed file that no longer parses; the gate holds it
-    off until #1604's last step (owner, #1604).
+def judge(root: Path) -> list[str]:
+    """Hold the tracked Python under root to the law.
 
     Returns:
-        One line per breach: an unlisted parse by file and line, or,
-        with `stale`, a listed file that no longer parses.
+        One line per parse outside the loader, by file and line.
 
     """
-    listed = hermetic.tracked(root, "*.py")
     out: list[str] = []
-    for path in listed:
+    for path in hermetic.tracked(root, "*.py"):
         if path == LOADER:
             continue
         lines = parses((root / path).read_text(encoding="utf-8"))
-        if path in MOVING and not lines and stale:
-            out.append(f"{path}: moved: drop it from the list")
-        elif path not in MOVING:
-            out.extend(f"{path}:{line}: parses outside {LOADER}" for line in lines)
-    if stale:
-        out.extend(
-            f"{path}: moved: drop it from the list"
-            for path in sorted(MOVING - set(listed))
-        )
+        out.extend(f"{path}:{line}: parses outside {LOADER}" for line in lines)
     return out
 
 
@@ -379,16 +315,12 @@ class Readers(unittest.TestCase):
 
 
 class TheLaw(unittest.TestCase):
-    """Only decoded.py parses; the list of files not yet moved only shrinks."""
+    """Only decoded.py parses, and no file is excused."""
 
     def test_the_tree_holds_the_law(self) -> None:
-        """No unlisted parse; a listed file that has moved waits (#1604)."""
+        """No tracked file parses a document outside decoded.py."""
         none: list[str] = []
-        self.assertEqual(none, judge(CANON, stale=False))
-
-    def test_the_list_holds_files_that_exist(self) -> None:
-        """MOVING names tracked paths, never a finding or a pattern."""
-        self.assertTrue(all(p.endswith(".py") for p in MOVING))
+        self.assertEqual(none, judge(CANON))
 
     def test_each_spelling_is_a_parse(self) -> None:
         """Every import spelling of a parse is found on its own line."""

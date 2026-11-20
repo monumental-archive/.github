@@ -202,6 +202,7 @@ tasks = [
   "lint:plan-producers",
   "lint:python-module-names",
   "lint:python-target",
+  "lint:python-types",
   "lint:rust",
   "lint:scaffold-assembly",
   "lint:shell-embedded",
@@ -305,13 +306,17 @@ when = ["*.py", "Cargo.toml", "go.mod", "package.json"]
 
 [tools."pipx:hypothesis"]
 # test:python-properties (#1332): its guard is a tracked prop_*.py, and
-# git's default pathspec lets `*` cross a slash.
-tasks = ["test:python-properties"]
-when = ["*prop_*.py"]
+# git's default pathspec lets `*` cross a slash. lint:python-types
+# (#1604) types a property file against Hypothesis's own venv, so its
+# guard, any tracked .py or .pyi, installs it too.
+tasks = [
+  "lint:python-types",
+  "lint:scaffold-assembly",
+  "test:python-properties",
+]
+when = ["*.py", "*.pyi", "*prop_*.py", "scaffold/"]
 
 [tools."pipx:mypy"]
-# audit:python-types only (#1604): no gate task calls it until the task
-# is renamed lint:python-types, whose row is then `when = ["*.py",
-# "*.pyi"]`, the task's own guard.
-tasks = []
-when = []
+# lint:python-types (#1604): its guard is a tracked .py or .pyi.
+tasks = ["lint:python-types", "lint:scaffold-assembly"]
+when = ["*.py", "*.pyi", "scaffold/"]

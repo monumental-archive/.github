@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Type-check a repository's tracked Python with mypy at its strictest.
-# Org canon — the body of `audit:python-types` (#1604), which becomes
-# `lint:python-types`, collected by `ci`, once the canon's own findings
-# are run down. The label it prints is its one argument.
+# Org canon — the body of `lint:python-types` (#1604), collected by
+# `ci`. The label it prints is its one argument.
 #
 # The config is the belt's (mise/mypy.ini), passed with --config-file,
 # which replaces discovery: a repository's own mypy config is not read.
