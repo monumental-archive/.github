@@ -31,9 +31,19 @@ the belt delivers, #1604) resolves in any repository. It must hold at
 least one
 Hypothesis test: a property file with no property is a check that looks
 like success. The output is the tests in file and name order and their
-outcome, then every failure's traceback — Hypothesis prints the shrunk
-falsifying example in it — and no timings, so a passing gate run is
-byte-identical to the next.
+outcome, each file's printed as that file finishes, then every
+failure's traceback — Hypothesis prints the shrunk falsifying example
+in it. The gate prints no timings, so a passing gate run is
+byte-identical to the next; the audit prints each file's elapsed
+seconds after its tests, so its bound is measured from its own log
+(#1631).
+
+ORG_PROPERTY_SHARD=k/n takes one shard of the files (#1631, the
+mutation leg's MUTANTS_SHARD form): the files sorted, every n-th
+starting at the k-th. Unset is every file, as given. A value that is
+not k/n with k < n is refused by name; a shard that holds no file says
+so and exits 0. The audit runs n legs with one seed, each a shard, so a
+week's properties finish in the time of the slowest leg.
 
 Usage:
   python_properties.py gate|audit FILE...
@@ -46,7 +56,9 @@ import importlib.util
 import inspect
 import os
 import random
+import re
 import sys
+import time
 import traceback
 import unittest
 from pathlib import Path
@@ -66,6 +78,8 @@ MIN_ARGS = 2
 # The belt: typed_hypothesis.py sits beside this runner.
 BELT = Path(__file__).resolve().parent
 LABELS = {"gate": "test:python-properties", "audit": "audit:python-properties"}
+# k/n in ASCII digits, n at least one; k < n is checked on the numbers.
+SHARD = re.compile(r"([0-9]+)/([1-9][0-9]*)")
 # Typed here: register_profile takes its settings as `**kwargs: Any`.
 SUPPRESSED: list[HealthCheck] = [HealthCheck.too_slow]
 
@@ -242,6 +256,30 @@ def run_file(
             report.failures.append(f"{path}: {test.id()}\n{text}")
 
 
+class ShardError(ValueError):
+    """An ORG_PROPERTY_SHARD this runner cannot read."""
+
+
+def shard_of(files: list[Path], spec: str) -> list[Path]:
+    """Take the files one shard runs.
+
+    Returns:
+        Every file, as given, when `spec` is empty; else the files
+        sorted, every n-th starting at the k-th, for `spec` = `k/n`.
+
+    Raises:
+        ShardError: `spec` is not k/n with k < n.
+
+    """
+    if not spec:
+        return files
+    found = SHARD.fullmatch(spec)
+    if found is None or int(found[1]) >= int(found[2]):
+        msg = f"ORG_PROPERTY_SHARD='{spec}' is not k/n with k < n"
+        raise ShardError(msg)
+    return sorted(files, key=str)[int(found[1]) :: int(found[2])]
+
+
 def run(profile_name: str, files: list[Path]) -> int:
     """Load the profile, import every file, run every test.
 
@@ -260,9 +298,14 @@ def run(profile_name: str, files: list[Path]) -> int:
         print(f"{label}: seed {chosen} (reproduce: ORG_PROPERTY_SEED={chosen})")
     report = Report()
     for index, path in enumerate(files):
+        started, printed = time.monotonic(), len(report.lines)
         run_file(path, index, settings.get_profile(profile_name), chosen, report)
-    for line in report.lines:
-        print(line)
+        for line in report.lines[printed:]:
+            print(line, flush=True)
+        if chosen is not None:
+            spent = time.monotonic() - started
+            count = len(report.lines) - printed
+            print(f"{path}: {count} test(s) in {spent:.1f}s", flush=True)
     for text in report.failures:
         print(f"\n{text}", file=sys.stderr)
     for text in report.refused:
@@ -290,7 +333,19 @@ def main(argv: list[str]) -> int:
     if len(args) < MIN_ARGS or args[0] not in LABELS:
         print("usage: python_properties.py gate|audit FILE...", file=sys.stderr)
         return EXIT_USAGE
-    return run(args[0], [Path(a) for a in args[1:]])
+    label, spec = LABELS[args[0]], os.environ.get("ORG_PROPERTY_SHARD", "")
+    files = [Path(a) for a in args[1:]]
+    try:
+        chosen = shard_of(files, spec)
+    except ShardError as bad:
+        print(f"{label}: {bad}", file=sys.stderr)
+        return EXIT_USAGE
+    if not chosen:
+        print(f"{label}: shard {spec} holds none of the {len(files)} file(s), skipped")
+        return 0
+    if spec:
+        print(f"{label}: shard {spec}, {len(chosen)} of {len(files)} file(s)")
+    return run(args[0], chosen)
 
 
 if __name__ == "__main__":
