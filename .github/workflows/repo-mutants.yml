@@ -334,11 +334,11 @@ jobs:
     # The count is written twice, here and in MUTANTS_SHARDS below; move
     # both together. One mutant at a time per checkout: the shards are
     # the parallelism. No fail-fast: every shard reports its own
-    # survivors. 360 minutes, the hosted maximum, is the measuring
-    # setting: it lets every shard finish, so a run records each
-    # shard's true time. #1530's item 2 sets the final count and
-    # timeout from that run.
-    timeout-minutes: 360
+    # survivors. The count and the timeout are #1530's, from run
+    # 44809148364: its slowest of 16 shards took 171m45s, so 48 shards
+    # put the slowest under 60 minutes with margin, and the timeout is
+    # about three times that, rounded up (owner's word, 2026-11-21).
+    timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix:
@@ -359,11 +359,43 @@ jobs:
           - 13
           - 14
           - 15
+          - 16
+          - 17
+          - 18
+          - 19
+          - 20
+          - 21
+          - 22
+          - 23
+          - 24
+          - 25
+          - 26
+          - 27
+          - 28
+          - 29
+          - 30
+          - 31
+          - 32
+          - 33
+          - 34
+          - 35
+          - 36
+          - 37
+          - 38
+          - 39
+          - 40
+          - 41
+          - 42
+          - 43
+          - 44
+          - 45
+          - 46
+          - 47
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
       MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
-      MUTANTS_SHARDS: "16"
+      MUTANTS_SHARDS: "48"
     steps:
       - name: Check out caller repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
