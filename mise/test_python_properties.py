@@ -321,5 +321,29 @@ class Properties(unittest.TestCase):
         )
 
 
+class Script(unittest.TestCase):
+    """The one row that starts the runner as a process: the script contract.
+
+    Its in-process rows are prop_python_properties.py's: the runner
+    imports Hypothesis, which only the belt's Hypothesis venv carries.
+    """
+
+    def test_the_runner_runs_as_a_script(self) -> None:
+        """No file named: the usage line on stderr, exit 2."""
+        venv = Path(os.path.realpath(hermetic.tool("hypothesis"))).parent
+        # ruff: ignore[subprocess-without-shell-equals-true]
+        done = subprocess.run(
+            [str(venv / "python"), str(BELT / "python_properties.py"), "gate"],
+            env=hermetic.env(),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(
+            (done.returncode, done.stdout, done.stderr),
+            (2, "", "usage: python_properties.py gate|audit FILE...\n"),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

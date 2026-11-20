@@ -376,13 +376,21 @@ def walked_command(label: str, root: str) -> int:
     return vitest_command(label, walked)
 
 
-def main(tracked: list[str]) -> int:
-    """Print the runner line for the tree in the working directory.
+def main(argv: list[str]) -> int:
+    """Print the runner line for the tree, or answer `--vitest-command`.
+
+    `--vitest-command <label> <task>` walks the task (walked_command);
+    any other arguments are the tracked files among package.json and
+    the lockfiles.
 
     Returns:
-        0, or 1 when the root package.json is not readable JSON.
+        0, or 1 when the root package.json is not readable JSON;
+        walked_command's status for `--vitest-command`.
 
     """
+    if argv[:1] == ["--vitest-command"]:
+        return walked_command(argv[1], argv[2])
+    tracked = argv
     if "package.json" not in tracked:
         return 0
     try:
@@ -408,6 +416,4 @@ def main(tracked: list[str]) -> int:
 
 
 if __name__ == "__main__":
-    if sys.argv[1:2] == ["--vitest-command"]:
-        sys.exit(walked_command(sys.argv[2], sys.argv[3]))
     sys.exit(main(sys.argv[1:]))

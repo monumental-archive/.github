@@ -464,6 +464,8 @@ class WorkerRunner(GuardedRunner):
 
 # A decoded [description, text] or [description, seconds] has two items.
 PAIR = 2
+# unittest's exit status when no test ran and none was skipped.
+NO_TESTS = 5
 
 
 def load(path: Path) -> object:
@@ -649,21 +651,35 @@ def worker(spec_path: Path) -> None:
     ).run(suite)
 
 
-def main() -> None:
-    """Hand the command line to unittest, with the guarded result."""
-    if sys.argv[1:2] == ["--worker"]:
-        worker(Path(sys.argv[2]))
-        return
+def main(argv: list[str]) -> int:
+    """Hand the command line to unittest, with the guarded result.
+
+    Returns:
+        unittest's own exit status: 1 for a failure, 5 when no test ran
+        and none was skipped, else 0; a worker returns 0 once it has
+        written its outcome.
+
+    """
+    if argv[:1] == ["--worker"]:
+        worker(Path(argv[1]))
+        return 0
     # `python3 -m unittest` puts the working directory first on the
     # import path; a script puts its own directory there. Match -m.
     sys.path[0] = START
-    unittest.main(
+    program = unittest.main(
         module=None,
-        argv=["python3 -m unittest", *sys.argv[1:]],
+        argv=["python3 -m unittest", *argv],
         testLoader=LOADER,
         testRunner=GuardedRunner,
+        exit=False,
     )
+    result = program.result
+    if not result.wasSuccessful():
+        return 1
+    if result.testsRun == 0 and not result.skipped:
+        return NO_TESTS
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main(sys.argv[1:]))

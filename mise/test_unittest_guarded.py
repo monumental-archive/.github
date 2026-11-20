@@ -12,15 +12,19 @@ same failures in full, the same summary and status as one process, and
 under coverage the same figure.
 """
 
+import io
 import json
+import os
 import pathlib
 import re
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 import hermetic
+import unittest_guarded as ug
 
 _HERE = pathlib.Path(__file__).resolve().parent
 RUNNER = _HERE / "unittest_guarded.py"
@@ -147,8 +151,10 @@ import pathlib
 import sys
 import unittest
 
-OUT = pathlib.Path(sys.argv[2]).with_suffix(".out")
-atexit.register(OUT.write_text, {body!r}, encoding="utf-8")
+# The worker is the process this spoils: its argv is `--worker <spec>`.
+if sys.argv[1:2] == ["--worker"]:
+    OUT = pathlib.Path(sys.argv[2]).with_suffix(".out")
+    atexit.register(OUT.write_text, {body!r}, encoding="utf-8")
 
 
 class T(unittest.TestCase):
@@ -218,6 +224,45 @@ exit 1
 """
 
 
+def planted(module: object) -> bool:
+    """Say whether a module was imported from outside this canon and Python.
+
+    Returns:
+        True for a module a row planted in a scratch tree.
+
+    """
+    file: object = getattr(module, "__file__", None)
+    return isinstance(file, str) and not file.startswith((
+        str(_HERE.parent),
+        sys.prefix,
+        sys.base_prefix,
+    ))
+
+
+def call(argv: list[str], env: dict[str, str]) -> hermetic.Called:
+    """Call the runner's `main` in this process (#1696).
+
+    `hermetic.call_main` makes `env` the process environment for the call,
+    so the workers the runner starts inherit it as they did, and reads a
+    worker's refusal, `sys.exit(message)`, as Python reports it. Beside
+    it, `sys.argv` is the script's, which a planted module may read; the
+    search path is put back after, and the planted modules leave
+    `sys.modules`, so the next row's tree imports its own.
+
+    Returns:
+        The status, and what the runner wrote to each stream.
+
+    """
+    search = sys.path[:]
+    try:
+        with mock.patch.object(sys, "argv", [str(RUNNER), *argv]):
+            return hermetic.call_main(lambda: ug.main(argv), env=env)
+    finally:
+        sys.path[:] = search
+        for name in [n for n, m in sys.modules.items() if planted(m)]:
+            del sys.modules[name]
+
+
 class Runner(unittest.TestCase):
     """The runner over planted modules."""
 
@@ -274,17 +319,37 @@ class Runner(unittest.TestCase):
             check=False,
         )
 
+    @staticmethod
     def guarded(
-        self, start: pathlib.Path, *flags: str, workers: str = "3"
-    ) -> subprocess.CompletedProcess[str]:
-        """Run the planted tree through the guarded runner.
+        start: pathlib.Path,
+        *flags: str,
+        workers: str = "3",
+        pids: pathlib.Path | None = None,
+    ) -> hermetic.Called:
+        """Run the planted tree through the guarded runner, in this process.
+
+        The discovery the script rows ran from `start` with a relative
+        `suite` is run here on its absolute path, so this process never
+        leaves its own directory: the runner judges every test against it,
+        and a planted test's START is that directory.
 
         Returns:
-            The finished process.
+            The status, and what the runner wrote to each stream.
 
         """
-        return self.run_with(
-            start, [sys.executable, str(RUNNER)], *flags, workers=workers
+        env = hermetic.env(
+            START=str(pathlib.Path.cwd()),
+            ELSEWHERE=str(start.parent / "elsewhere"),
+            ORG_TEST_WORKERS=workers,
+            PIDS=str(pids or ""),
+        )
+        return call(
+            [
+                "discover",
+                *flags,
+                *("--start-directory", str(start / "suite"), "--pattern", "test_*.py"),
+            ],
+            env,
         )
 
     def test_a_deleted_directory_is_an_error_on_the_test_that_left_it(self) -> None:
@@ -310,8 +375,10 @@ class Runner(unittest.TestCase):
         r = self.guarded(start)
         self.assertEqual(r.returncode, 1, r.stderr)
         self.assertIn("ERROR: test_moves (test_moves.T.test_moves)", r.stderr)
+        # The worker starts where this process is, and judges against it.
         self.assertIn(
-            f"left the process in {start.parent / 'elsewhere'} (moved from {start})",
+            f"left the process in {start.parent / 'elsewhere'}"
+            f" (moved from {pathlib.Path.cwd()})",
             r.stderr,
         )
 
@@ -336,7 +403,7 @@ class Runner(unittest.TestCase):
     def test_verbosity_reaches_the_runner(self) -> None:
         """`-v` still prints one line per test: unittest builds the runner."""
         start, _ = self.tree(test_clean=CLEAN)
-        r = self.run_with(start, [sys.executable, str(RUNNER)], "-v")
+        r = self.guarded(start, "-v")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("test_one (test_clean.T.test_one) ... ok", r.stderr)
 
@@ -391,9 +458,7 @@ class Runner(unittest.TestCase):
             with self.subTest(workers=workers):
                 pids = start.parent / f"pids-{workers}"
                 pids.mkdir()
-                r = self.run_with(
-                    start, [sys.executable, str(RUNNER)], workers=workers, pids=pids
-                )
+                r = self.guarded(start, workers=workers, pids=pids)
                 self.assertEqual(r.returncode, 0, r.stderr)
                 seen = {p.read_text(encoding="utf-8") for p in pids.iterdir()}
                 self.assertEqual(len(list(pids.iterdir())), 3)
@@ -441,8 +506,19 @@ class Runner(unittest.TestCase):
                 self.assertIn("Ran 3 tests in", r.stderr)
                 self.assertIn("FAILED (errors=1)", r.stderr)
 
+    def test_a_tree_with_no_test_exits_as_unittest_does(self) -> None:
+        """Nothing ran and nothing was skipped: unittest's own status, 5."""
+        start, _ = self.tree(test_empty="import unittest\n")
+        r = self.guarded(start)
+        self.assertEqual(r.returncode, 5, r.stderr)
+        self.assertIn("NO TESTS RAN", r.stderr)
+
     def test_an_unreadable_spec_stops_the_worker_by_name(self) -> None:
-        """A worker handed a spec it cannot read exits 1, naming the file."""
+        """A worker handed a spec it cannot read exits 1, naming the file.
+
+        The runner's one script row (#1696): it starts as a process, reads
+        its arguments and exits with the documented status.
+        """
         start, _ = self.tree(test_clean=CLEAN)
         spec = start.parent / "bad.json"
         for body in ("{", '{"module": 1}'):
@@ -498,24 +574,14 @@ def write_spec(start: pathlib.Path, **fields: object) -> pathlib.Path:
     return spec
 
 
-def run_worker(
-    start: pathlib.Path, spec: pathlib.Path
-) -> subprocess.CompletedProcess[str]:
-    """Run one worker over a spec, as the parent would.
+def run_worker(spec: pathlib.Path) -> hermetic.Called:
+    """Run one worker over a spec, as the parent would, in this process.
 
     Returns:
-        The finished worker.
+        The status, and what the worker wrote to each stream.
 
     """
-    # ruff: ignore[subprocess-without-shell-equals-true]
-    return subprocess.run(
-        [sys.executable, str(RUNNER), "--worker", str(spec)],
-        cwd=start,
-        env=hermetic.env(),
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    return call(["--worker", str(spec)], hermetic.env())
 
 
 class Shapes(unittest.TestCase):
@@ -523,7 +589,7 @@ class Shapes(unittest.TestCase):
 
     tree = Runner.tree
     run_with = staticmethod(Runner.run_with)
-    guarded = Runner.guarded
+    guarded = staticmethod(Runner.guarded)
 
     def test_each_wrong_outcome_field_is_an_error_on_its_file(self) -> None:
         """One field of the wrong shape reds the file, whichever it is."""
@@ -564,7 +630,7 @@ class Shapes(unittest.TestCase):
         ):
             with self.subTest(field=field):
                 spec = write_spec(start, **{field: value})
-                r = run_worker(start, spec)
+                r = run_worker(spec)
                 self.assertEqual(r.returncode, 1, r.stderr)
                 self.assertEqual(
                     r.stderr, f"unittest-guarded: worker spec {spec} is unreadable\n"
@@ -590,11 +656,53 @@ class Shapes(unittest.TestCase):
         """An absent action is valid: the worker runs and writes its outcome."""
         start, _ = self.tree(test_clean=CLEAN)
         spec = write_spec(start, patterns=["*one"])
-        r = run_worker(start, spec)
+        r = run_worker(spec)
         self.assertEqual(r.returncode, 0, r.stderr)
         outcome = json.loads(spec.with_suffix(".out").read_text(encoding="utf-8"))
         self.assertEqual(1, outcome["run"])
         self.assertEqual([], outcome["errors"] + outcome["failures"])
+
+
+class Parts(unittest.TestCase):
+    """The hooks unittest itself calls, each called here by name (#1696)."""
+
+    def test_stop_test_names_a_moved_directory_and_puts_it_back(self) -> None:
+        """A test that leaves elsewhere is an ERROR naming both directories."""
+        stream = ug.GuardedRunner(stream=io.StringIO(), verbosity=0).stream
+        result = ug.GuardedResult(stream, descriptions=True, verbosity=0)
+        case = unittest.FunctionTestCase(lambda: None)
+        with tempfile.TemporaryDirectory() as elsewhere:
+            result.startTest(case)
+            os.chdir(elsewhere)
+            result.stopTest(case)
+            self.assertEqual(str(pathlib.Path.cwd()), ug.START)
+        ((test, text),) = result.errors
+        self.assertIs(test, case)
+        self.assertIn(
+            f"LeftTheProcessError: left the process in"
+            f" {pathlib.Path(elsewhere).resolve()} (moved from {ug.START})",
+            text,
+        )
+
+    def test_the_loader_records_each_module_s_suite(self) -> None:
+        """The loader answers unittest's suite and records it by its id."""
+
+        class Case(unittest.TestCase):
+            def test_one(self) -> None:
+                """Hold."""
+
+        module = type(sys)("planted_module")
+        vars(module)["Case"] = Case
+        loader = ug.RecordingLoader()
+        suite = loader.loadTestsFromModule(module)
+        self.assertEqual(suite.countTestCases(), 1)
+        self.assertEqual(loader.modules[id(suite)], ("planted_module", suite))
+
+    def test_a_reported_test_is_its_description(self) -> None:
+        """A worker's test prints as its description, with no docstring line."""
+        reported = ug.Reported("test_one (test_clean.T.test_one)")
+        self.assertEqual(str(reported), "test_one (test_clean.T.test_one)")
+        self.assertIsNone(reported.shortDescription())
 
 
 class Measured(unittest.TestCase):

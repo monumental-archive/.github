@@ -317,6 +317,17 @@ class Planted(unittest.TestCase):
         )
         (self.show / SURVIVOR).write_text(DIFF, encoding="utf-8")
 
+    def hook_step(self, hook: Path, where: Path) -> None:
+        """Run the leg's `hook` step in this process, from WHERE (#1696).
+
+        The environment the leg hands the step is this process's for the
+        call (`hermetic.call_main`, restored after).
+        """
+        done = hermetic.call_main(
+            lambda: helper.main(["hook", str(hook)]), env=self.env, cwd=where
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+
     def run_leg(self, **env: str) -> tuple[subprocess.CompletedProcess[str], list[str]]:
         """Run the leg in the planted tree.
 
@@ -728,7 +739,11 @@ class ChildProcesses(Planted):
         self.assertEqual(log, ["mutmut run", "mutmut results --all true"])
 
     def test_the_hook_appends_never_prepends(self) -> None:
-        """The child's own imports resolve first; mutmut's directory comes last."""
+        """The child's own imports resolve first; mutmut's directory comes last.
+
+        The helper's one script row (#1696): it starts as a process, reads
+        its arguments and exits 0 with the hook written.
+        """
         hook = self.tmp / "hook"
         # ruff: ignore[subprocess-without-shell-equals-true]
         done = subprocess.run(
@@ -816,16 +831,7 @@ class ChildConfiguration(Planted):
 
         """
         hook = self.tmp / "hook"
-        # ruff: ignore[subprocess-without-shell-equals-true]
-        done = subprocess.run(
-            [sys.executable, str(BELT / "mutants_python.py"), "hook", str(hook)],
-            cwd=where,
-            env=self.env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        self.assertEqual(done.returncode, 0, done.stderr)
+        self.hook_step(hook, where)
         return hook
 
     def test_with_1503s_hook_the_child_cannot_find_the_configuration(self) -> None:
@@ -931,16 +937,7 @@ class MutatedCopy(Planted):
         """The helper's test, run as mutmut's statistics pass runs it, passes."""
         copy = self.copy()
         hook = self.tmp / "hook"
-        # ruff: ignore[subprocess-without-shell-equals-true]
-        written = subprocess.run(
-            [sys.executable, str(BELT / "mutants_python.py"), "hook", str(hook)],
-            cwd=self.tree,
-            env=self.env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        self.assertEqual(written.returncode, 0, written.stderr)
+        self.hook_step(hook, self.tree)
         done = subprocess.run(
             [sys.executable, "-m", "unittest", "test_helper"],
             cwd=copy,

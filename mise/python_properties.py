@@ -279,14 +279,14 @@ def run(profile_name: str, files: list[Path]) -> int:
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str]) -> int:
     """Read the profile name and the files.
 
     Returns:
         The run's exit status.
 
     """
-    args = sys.argv[1:] if argv is None else argv
+    args = argv
     if len(args) < MIN_ARGS or args[0] not in LABELS:
         print("usage: python_properties.py gate|audit FILE...", file=sys.stderr)
         return EXIT_USAGE
@@ -294,4 +294,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

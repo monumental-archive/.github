@@ -19,6 +19,7 @@ import tomllib
 import unittest
 from pathlib import Path
 
+import coverage_exclusions as ce
 import hermetic
 
 _HERE = Path(__file__).resolve().parent
@@ -62,21 +63,15 @@ QUOTED = [
 ]
 
 
-def helper(root: Path, *paths: str) -> subprocess.CompletedProcess[str]:
-    """Run the helper over `paths`, relative to `root`.
+def helper(root: Path, *paths: str) -> hermetic.Called:
+    """Call the helper's `main` in this process over `paths`, from `root` (#1696).
 
     Returns:
-        The finished process.
+        The status `main` returned and what it wrote to each stream.
 
     """
-    # ruff: ignore[subprocess-without-shell-equals-true]
-    return subprocess.run(
-        [sys.executable, str(HELPER)],
-        input="\n".join(paths) + "\n",
-        cwd=root,
-        capture_output=True,
-        text=True,
-        check=False,
+    return hermetic.call_main(
+        lambda: ce.main([]), cwd=root, stdin="\n".join(paths) + "\n"
     )
 
 
@@ -125,6 +120,24 @@ class Markers(unittest.TestCase):
         """A marker in a file of a language the belt does not measure passes."""
         r = helper(self.plant("notes.md", f"{PRAGMA} cover\n"), "notes.md")
         self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(
+            r.stdout, "lint:coverage-exclusions: 1 file(s), no coverage exclusions\n"
+        )
+
+    def test_the_helper_runs_as_a_script(self) -> None:
+        """The script contract: it reads stdin, reports, and exits 1 on a marker."""
+        name, body, rule = MARKERS[0]
+        # ruff: ignore[subprocess-without-shell-equals-true]
+        r = subprocess.run(
+            [sys.executable, str(HELPER)],
+            input=f"{name}\n",
+            cwd=self.plant(name, body),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn(f"{name}:1: {rule}\n", r.stderr)
 
 
 def task_body() -> str:
