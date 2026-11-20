@@ -5521,15 +5521,28 @@ env = { SHELLCHECK_OPTS = "--enable=all --external-sources --extended-analysis=t
 # reported as an unknown label. Remove it with the first, at the next
 # actionlint release. Anchored to those two labels: any other unknown
 # label — a typo included — still goes red.
+#
+# shellcheck is told where `.org-canon` is (#1715): a step that sources
+# the canon tree (`. .org-canon/mise/workflow-command.sh`, #1660) was
+# followed on the runner, where the canon action links it, and not on a
+# laptop, which then said nothing about what the runner reds. A
+# directory of this run's own holds `.org-canon` as a link to the belt's
+# canon tree and goes on exit; nothing is written in the working tree.
 run = '''
-if compgen -G ".github/workflows/*.y*ml" > /dev/null; then
-  actionlint -color -ignore "specifying action \"\\$/" -ignore 'label "ubuntu-26\.04(-arm)?" is unknown' || {
-    echo "lint:actions: actionlint findings above — fixed by hand; fix:actions only re-pins uses: (pinact)" >&2
-    exit 1
-  }
-else
+if ! compgen -G ".github/workflows/*.y*ml" > /dev/null; then
   echo "lint:actions: no workflows, skipped"
+  exit 0
 fi
+rc=0
+src=$(mktemp -d)
+trap 'rc=$?; rm -rf "${src}"; [ -n "${org_done:-}" ] || [ "${rc}" -ne 0 ] || rc=1; exit "${rc}"' EXIT
+ln -s "${ORG_CANON_DIR}" "${src}/.org-canon"
+SHELLCHECK_OPTS="${SHELLCHECK_OPTS:-} --source-path=${src}" \
+  actionlint -color -ignore "specifying action \"\\$/" -ignore 'label "ubuntu-26\.04(-arm)?" is unknown' || {
+  echo "lint:actions: actionlint findings above — fixed by hand; fix:actions only re-pins uses: (pinact)" >&2
+  exit 1
+}
+org_done=1
 '''
 
 [tasks."release:preview"]
