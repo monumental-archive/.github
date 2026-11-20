@@ -10,12 +10,12 @@ stdlib `unittest`, matching the other mise/test_*.py; run through the
 gate as `mise run test`.
 """
 
-import json
 import os
 import re
 import tempfile
 import unittest
 from pathlib import Path
+from typing import override
 from unittest import mock
 
 import decoded
@@ -23,7 +23,7 @@ import hermetic
 import task_walk as tw
 
 HERE = Path(__file__).resolve().parent
-CAPTURE: object = json.loads(
+CAPTURE: object = decoded.load_json(
     (HERE / "testdata" / "task-references" / "tasks-info.json").read_text("utf-8")
 )
 
@@ -281,6 +281,7 @@ esac
 class Mise(unittest.TestCase):
     """The walk's questions to mise, against a stub on PATH (#1659)."""
 
+    @override
     def setUp(self) -> None:
         """Put the stub, and nothing else, on PATH."""
         tmp = tempfile.TemporaryDirectory()
@@ -290,13 +291,13 @@ class Mise(unittest.TestCase):
         stub.chmod(0o755)
         bash = hermetic.tool("bash")
         (Path(tmp.name) / "bash").symlink_to(bash)
-        patcher = mock.patch.dict(os.environ, {"PATH": tmp.name})
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        path: dict[str, str] = {"PATH": tmp.name}
+        self.enterContext(mock.patch.dict(os.environ, path))
 
     def test_task_names_keeps_only_named_rows(self) -> None:
         """A row with no string name is not a task."""
-        self.assertEqual(["a"], tw.task_names())
+        want: list[str] = ["a"]
+        self.assertEqual(want, tw.task_names())
 
     def test_an_answer_mise_cannot_give_is_none(self) -> None:
         """A failed question and an unreadable answer both read as none."""
@@ -306,11 +307,13 @@ class Mise(unittest.TestCase):
     def test_walk_mise_walks_from_a_named_root(self) -> None:
         """`walk_mise` asks mise for each task it reaches, from the root named."""
         walked = tw.walk_mise("x")
-        self.assertEqual(("echo hi",), tuple(step.script for step in walked.steps))
+        scripts: tuple[str, ...] = tuple(step.script for step in walked.steps)
+        self.assertEqual(("echo hi",), scripts)
 
     def test_no_mise_on_path_is_none(self) -> None:
         """Without mise there is nothing to ask."""
-        with mock.patch.dict(os.environ, {"PATH": ""}):
+        path: dict[str, str] = {"PATH": ""}
+        with mock.patch.dict(os.environ, path):
             self.assertIsNone(tw.mise_json("tasks", "ls"))
 
 
@@ -320,7 +323,8 @@ class Fields(unittest.TestCase):
     def test_a_single_script_is_one_entry(self) -> None:
         """`run` as a string is that one script."""
         walked = tw.walk("x", {"x": {"run": "echo hi"}}.get, list)
-        self.assertEqual(("echo hi",), tuple(step.script for step in walked.steps))
+        scripts: tuple[str, ...] = tuple(step.script for step in walked.steps)
+        self.assertEqual(("echo hi",), scripts)
 
     def test_a_field_of_no_documented_form_is_refused(self) -> None:
         """A number where entries belong is named, never read as none."""
