@@ -38,6 +38,7 @@ import contextlib
 import dataclasses
 import io
 import re
+import shlex
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
@@ -232,7 +233,39 @@ def _source(name: str) -> str:
 # The belt's venv check (#1788): `tool_python.py LABEL COMMAND` finds
 # COMMAND on PATH and runs the venv's interpreter beside it, so the line
 # uses COMMAND's tool though COMMAND is an argument there.
-TOOL_PYTHON = re.compile(r'tool_python\.py"?\s+(?:"[^"]*"|\S+)\s+"?([\w.-]+)')
+TOOL_PYTHON = "tool_python.py"
+
+
+def venv_command(line: str) -> str | None:
+    """Read the COMMAND a line hands `tool_python.py`.
+
+    The line is split into shell words; the words after the script, up
+    to the first shell operator, are its arguments. `--site` and its
+    value go, in either form and wherever they stand; the second
+    positional left is COMMAND.
+
+    Returns:
+        COMMAND, or None where the line runs no `tool_python.py` or
+        hands it no COMMAND.
+
+    """
+    lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
+    words = list(lexer)
+    starts = [i for i, w in enumerate(words) if w.endswith(TOOL_PYTHON)]
+    if not starts:
+        return None
+    positionals: list[str] = []
+    skip = False
+    for word in words[starts[0] + 1 :]:
+        if word and all(c in lexer.punctuation_chars for c in word):
+            break
+        if skip:
+            skip = False
+        elif word == "--site":
+            skip = True
+        elif not word.startswith("--site="):
+            positionals.append(word)
+    return positionals[1] if len(positionals) > 1 else None
 
 
 def first_call(lines: list[tuple[str, str]], cmds: list[str]) -> int | None:
@@ -251,12 +284,7 @@ def first_call(lines: list[tuple[str, str]], cmds: list[str]) -> int | None:
             src = _source(kind[3:])
             if gate_tools.python_calls(src, cmds) or "python3" in cmds:
                 return i
-            ran = (
-                found(TOOL_PYTHON, lines[i - 1][1])
-                if kind == "py:tool_python.py"
-                else []
-            )
-            if any(cmd in cmds for cmd in ran):
+            if kind == f"py:{TOOL_PYTHON}" and venv_command(lines[i - 1][1]) in cmds:
                 return i
     return at
 
@@ -497,18 +525,23 @@ class Table(unittest.TestCase):
 
     def test_the_venv_check_uses_its_command(self) -> None:
         """`tool_python.py LABEL COMMAND` uses COMMAND's tool (#1788)."""
-        for text in (
-            'v=$("${ORG_PYTHON}" "${belt}/tool_python.py" "${label}" hypothesis)',
-            '"${ORG_PYTHON}" "${belt}/tool_python.py" x hypothesis --site hypothesis',
+        run = '"${ORG_PYTHON}" "${belt}/tool_python.py"'
+        for text, used in (
+            (f'v=$({run} "${{label}}" hypothesis) || exit 1', True),
+            (f"{run} x hypothesis --site hypothesis > /dev/null || exit 1", True),
+            (f"{run} --site hypothesis x hypothesis", True),
+            (f"{run} --site=hypothesis x hypothesis", True),
+            (f"{run} x coverage --site hypothesis", False),
+            (f"{run} --site hypothesis x coverage", False),
+            (f"{run} --site=x y hypothesis", True),
+            (f"{run} x coverage", False),
         ):
             with self.subTest(text=text):
-                self.assertEqual(1, first_call(expand(text, set()), ["hypothesis"]))
-        self.assertIsNone(
-            first_call(
-                expand('"${ORG_PYTHON}" "${belt}/tool_python.py" x coverage', set()),
-                ["hypothesis"],
-            )
-        )
+                at = first_call(expand(text, set()), ["hypothesis"])
+                self.assertEqual(1 if used else None, at)
+        # A shell operator ends the arguments: the words after it are
+        # another command's, not a COMMAND.
+        self.assertIsNone(venv_command(f"v=$({run} x) || y hypothesis"))
 
     def test_jq_the_gate_calls_is_a_pinned_belt_tool(self) -> None:
         """Jq was a gate dependency that was never pinned (#390).
