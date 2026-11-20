@@ -140,7 +140,6 @@ release/build_go_commands.py:main	# #1698
 release/check_go_stamps.py:check_staged	# #1698
 release/check_go_stamps.py:git	# #1698
 release/check_go_stamps.py:main	# #1698
-release/coverage_figures.py:main	# #1692
 release/mint_doi.py:_NoRedirect.redirect_request	# #1698
 release/package_crates.py:main	# #1698
 release/pgrx/previous_release.py:answer	# #1698
