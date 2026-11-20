@@ -77,16 +77,23 @@ esac
 
 GO = """\
 #!/usr/bin/env bash
-case "$1" in
-  test)
-    # The profile `go test -coverprofile` writes, unless the row plants
-    # a run that wrote none.
+out=""
+for arg in "$@"; do
+  case "${arg}" in -coverprofile=* | -o=*) out=${arg#*=} ;; *) ;; esac
+done
+case "$1 ${2:-}" in
+  "test "*)
+    # The profile `go test -coverprofile` writes (a tree with no test
+    # task), unless the row plants a run that wrote none.
     [[ -z ${STUB_GO_NO_PROFILE:-} ]] || exit 0
-    for arg in "$@"; do
-      [[ ${arg} != -coverprofile=* ]] || echo "mode: atomic" > "${arg#*=}"
-    done
+    [[ -z ${out} ]] || echo "mode: atomic" > "${out}"
     ;;
-  tool) printf 'total:\\t(statements)\\t%s%%\\n' "${STUB_GO}" ;;
+  "tool covdata")
+    # The merged profile of the run's counters (#1651).
+    [[ -z ${STUB_GO_NO_PROFILE:-} ]] || exit 0
+    echo "mode: atomic" > "${out}"
+    ;;
+  "tool cover") printf 'total:\\t(statements)\\t%s%%\\n' "${STUB_GO}" ;;
   *) exit 1 ;;
 esac
 """
@@ -268,16 +275,21 @@ def measuring_step(task: str) -> str:
     return decoded.as_str(steps[-1], f"{task}'s last step")
 
 
-def plant_run(run: Path) -> None:
-    """Leave a run's directory as `measured` leaves it (#1667).
+def plant_run(run: Path, *, python: bool = True) -> None:
+    """Leave a run's directory as `measured` leaves it (#1667, #1651).
 
     The suite ran through `measured`, which wrote the run's rc file and
-    coverage.py's data; the stub `coverage` reads neither, but the leg
-    finds them.
+    coverage.py's data, and each Go test process its counters; the stub
+    `coverage` and `go` read none of them, but the legs find them.
+    `python` False leaves out coverage.py's data: a Python suite that ran
+    outside `measured`.
     """
-    (run / "python").mkdir(parents=True)
-    (run / "coverage.rc").write_text("[run]\n", encoding="utf-8")
-    (run / "python" / ".coverage.stub").write_text("", encoding="utf-8")
+    (run / "go").mkdir(parents=True)
+    (run / "go" / "covcounters.stub").write_text("", encoding="utf-8")
+    if python:
+        (run / "python").mkdir()
+        (run / "coverage.rc").write_text("[run]\n", encoding="utf-8")
+        (run / "python" / ".coverage.stub").write_text("", encoding="utf-8")
 
 
 def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fact
@@ -299,6 +311,7 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
     reports_dir: bool | str = True,
     commit: bool = False,
     measured: bool = True,
+    python_measured: bool = True,
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
     """Run one coverage task's body in a planted tree with stub tools.
 
@@ -309,7 +322,8 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
     variable unset, as on a developer's machine; a path names that.
     `commit` commits the planted tree, so `git status` reads what the
     run changed. `measured` leaves the run's directory as a suite run
-    through `measured` does (#1667); False, as one that ran outside it.
+    through `measured` does (#1667); False, as one that ran outside it;
+    `python_measured` False, with Go's counters and no Python data.
 
     Returns:
         The finished process, and a snapshot directory holding the
@@ -374,7 +388,7 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
     env |= reports_env(tmp, reports_dir=reports_dir)
     env["ORG_COVERAGE_RUN"] = str(tmp / "run")
     if measured:
-        plant_run(tmp / "run")
+        plant_run(tmp / "run", python=python_measured)
     init_tree(tree, env, tracked, commit=commit)
     done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
         [BASH, "-euo", "pipefail", "-c", measuring_step(task)],
@@ -422,7 +436,7 @@ class CheckRows(CoverageTaskCase):
 
     def test_python_run_outside_measured_reports_no_figure(self) -> None:
         """A suite that ran outside `measured`: no python figure, by name."""
-        done, _ = self.run_task("coverage:check", go="91.0", measured=False)
+        done, _ = self.run_task("coverage:check", go="91.0", python_measured=False)
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertIn(
             "coverage:check: python: the test run measured no Python — its test"
@@ -1341,6 +1355,211 @@ class ChildFromAnotherDirectory(unittest.TestCase):
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertEqual("python 100.0\npython-branches 100.0\n", done.stdout)
         self.assertTrue(wrote)
+
+
+class GoLegRows(CoverageTaskCase):
+    """The go leg reads the test task's own run, or says it measures itself."""
+
+    def test_no_test_task_measures_go_test_itself_by_name(self) -> None:
+        """go.mod and no test task: today's command, named."""
+        done, _ = self.run_task(
+            "coverage:check", go="93.0", python=False, test_task=False
+        )
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertIn(
+            "coverage:check: go: no test task: measuring `go test ./...`", done.stderr
+        )
+        self.assertIn(
+            "coverage:check: go leg holds the floor 80.0 (93.0%)", done.stdout
+        )
+
+    def test_a_run_with_no_counters_is_refused_by_name(self) -> None:
+        """A test task whose run measured no Go: refused, no figure."""
+        done, _ = self.run_task(
+            "coverage:check", go="93.0", python=False, measured=False
+        )
+        self.assertEqual(1, done.returncode)
+        self.assertIn(
+            "coverage:check: the test task ran no measured Go — its test command"
+            ' runs\n  through "${ORG_BELT_DIR}/measured" (#1651), or no suite ran'
+            " under mise\n",
+            done.stderr,
+        )
+        self.assertNotIn("go leg holds", done.stdout)
+
+
+# A Go toolchain for the rows below, enough to follow the mechanism: `go
+# test` records the GOFLAGS it was given, then starts a planted test
+# binary through the `-exec` program GOFLAGS names, with the leading
+# arguments go 1.27.4 hands one; `tool covdata` writes the merged
+# profile, `tool cover` the planted total. STUB_GO_FAIL fails the suite
+# after it ran.
+GO_EXEC = """\
+#!/usr/bin/env bash
+out=""
+for arg in "$@"; do
+  case "${arg}" in -o=*) out=${arg#*=} ;; *) ;; esac
+done
+case "$1 ${2:-}" in
+  "test "*)
+    echo "${GOFLAGS:-}" >> "${STUB_DIR}/goflags.log"
+    program=""
+    for flag in ${GOFLAGS:-}; do
+      case "${flag}" in -exec=*) program=${flag#*=} ;; *) ;; esac
+    done
+    ${program} "${STUB_DIR}/pkg.test" -test.paniconexit0 \\
+      "-test.gocoverdir=${STUB_DIR}/go-build" -test.timeout=10m0s
+    [[ -z ${STUB_GO_FAIL:-} ]] || exit 1
+    ;;
+  "tool covdata") echo "mode: atomic" > "${out}" ;;
+  "tool cover") printf 'total:\\t(statements)\\t%s%%\\n' "${STUB_GO}" ;;
+  *) exit 1 ;;
+esac
+"""
+# A test binary: its counters land in the last -test.gocoverdir it is
+# given, as Go's flag package takes the last.
+PKG_TEST = """\
+#!/usr/bin/env bash
+dir=""
+for arg in "$@"; do
+  case "${arg}" in -test.gocoverdir=*) dir=${arg#*=} ;; *) ;; esac
+done
+mkdir -p "${dir}"
+: > "${dir}/covcounters.stub.$$"
+: > "${dir}/covmeta.stub"
+"""
+
+
+class GoOneRun(unittest.TestCase):
+    """coverage:check under a real mise reads the Go suite's one run (#1651)."""
+
+    def plant(self, base: Path, *, command: str) -> Path:
+        """Plant a Go-shaped tree whose test task sets GOFLAGS and counts runs.
+
+        Returns:
+            The tree.
+
+        """
+        tree = base / "tree"
+        tree.mkdir()
+        stubs = base / "stubs"
+        stubs.mkdir()
+        for path, text in ((stubs / "go", GO_EXEC), (base / "pkg.test", PKG_TEST)):
+            path.write_text(text, encoding="utf-8")
+            path.chmod(0o755)
+        (tree / "go.mod").write_text("module example.com/x\n", encoding="utf-8")
+        (tree / ".coverage-floor").write_text(FLOOR, encoding="utf-8")
+        (tree / "mise.toml").write_text(
+            '[task_config]\nshell = "bash -euo pipefail -c"\n'
+            '[tasks.test]\nenv = { GOFLAGS = "-trimpath" }\n'
+            f"run = '''\necho ran >> ../counter\n{command}\n'''\n",
+            encoding="utf-8",
+        )
+        env = hermetic.env()
+        for argv in ([GIT, "init", "-q"], [GIT, "add", "-A"]):
+            subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+                argv, cwd=tree, env=env, check=True
+            )
+        self.stubs = stubs
+        return tree
+
+    def check(self, tree: Path, **given: str) -> subprocess.CompletedProcess[str]:
+        """Run `mise run coverage:check` in the tree, the belt global.
+
+        Returns:
+            The finished run.
+
+        """
+        base = tree.parent
+        config = base / "config"
+        config.mkdir()
+        (base / "tmp").mkdir()
+        env = hermetic.env(
+            MISE_CONFIG_DIR=str(config),
+            XDG_CONFIG_HOME=str(config),
+            MISE_GLOBAL_CONFIG_FILE=str(BELT / "config.toml"),
+            MISE_TRUSTED_CONFIG_PATHS=f"{base}:{BELT.parent}",
+            MISE_OFFLINE="1",
+            MISE_YES="1",
+            MISE_AUTO_INSTALL="0",
+            MISE_TASK_RUN_AUTO_INSTALL="0",
+            TMPDIR=str(base / "tmp"),
+            STUB_DIR=str(base),
+            STUB_GO="91.0",
+            **given,
+        )
+        env["PATH"] = f"{self.stubs}{os.pathsep}{env['PATH']}"
+        return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+            [hermetic.tool("mise"), "run", "coverage:check"],
+            cwd=tree,
+            env=env,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=600,
+        )
+
+    MEASURED = '"${ORG_BELT_DIR}/measured" go test -race ./...'
+
+    def test_the_task_runs_once_measured_with_its_own_goflags(self) -> None:
+        """Counter 1, the go figure held, the task's GOFLAGS kept and extended."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = self.plant(Path(tmp), command=self.MEASURED)
+            done = self.check(tree)
+            out = done.stdout + done.stderr
+            self.assertEqual(0, done.returncode, out)
+            runs = (Path(tmp) / "counter").read_text("utf-8").splitlines()
+            self.assertEqual(["ran"], runs)
+            self.assertIn("coverage:check: go leg holds the floor 80.0 (91.0%)", out)
+            self.assertEqual(
+                "-trimpath -cover -coverpkg=./... -covermode=atomic"
+                f" -exec={BELT}/go-test-exec\n",
+                (Path(tmp) / "goflags.log").read_text("utf-8"),
+            )
+            counters = list((Path(tmp) / "tmp").glob("org-coverage-*/go/covcounters.*"))
+            self.assertEqual(1, len(counters), out)
+
+    def test_two_go_test_runs_in_one_command_both_land(self) -> None:
+        """Each `go test` writes counters of its own: nothing is overwritten."""
+        with tempfile.TemporaryDirectory() as tmp:
+            command = (
+                '"${ORG_BELT_DIR}/measured" bash -c'
+                " 'go test ./a/... && go test ./b/...'"
+            )
+            tree = self.plant(Path(tmp), command=command)
+            done = self.check(tree)
+            out = done.stdout + done.stderr
+            self.assertEqual(0, done.returncode, out)
+            counters = list((Path(tmp) / "tmp").glob("org-coverage-*/go/covcounters.*"))
+            self.assertEqual(2, len(counters), out)
+
+    def test_a_failing_suite_holds_no_figure_though_counters_exist(self) -> None:
+        """The suite's status gates the figure: `test` red, nothing read."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = self.plant(Path(tmp), command=self.MEASURED)
+            done = self.check(tree, STUB_GO_FAIL="1")
+            out = done.stdout + done.stderr
+            self.assertNotEqual(0, done.returncode, out)
+            self.assertNotIn("go leg holds", out)
+            self.assertIn("[test] ERROR task failed", out)
+            counters = list((Path(tmp) / "tmp").glob("org-coverage-*/go/covcounters.*"))
+            self.assertEqual(1, len(counters), out)
+
+    def test_the_tasks_own_coverprofile_is_refused_by_name(self) -> None:
+        """A -coverprofile of its own on `go test`: refused before it runs."""
+        with tempfile.TemporaryDirectory() as tmp:
+            command = self.MEASURED + " -coverprofile=own.out"
+            tree = self.plant(Path(tmp), command=command)
+            done = self.check(tree)
+            out = done.stdout + done.stderr
+            self.assertNotEqual(0, done.returncode, out)
+            self.assertIn(
+                "measured: -coverprofile=own.out on its go test, which would"
+                " measure Go a second way",
+                out,
+            )
+            self.assertFalse((Path(tmp) / "goflags.log").exists())
 
 
 if __name__ == "__main__":

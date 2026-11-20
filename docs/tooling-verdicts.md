@@ -2204,6 +2204,42 @@ a Go release ships that gomu cannot type-check or build against, or when
 a gomu release adds coverage or a per-site exclusion of its own (the leg
 would then defer to it).
 
+**The go statement leg measures the repository's own `go test`**
+(#1651). The leg ran a command of its own, `go test ./...
+-coverpkg=./... -coverprofile=… -covermode=atomic`, a second run of the
+suite without the repository's flags. Measured on stele at `1d775be`,
+whose `test` is `go test -race ./...` with `GOFLAGS=-trimpath`: the
+task's own command with the cover flags gave the same 15884 of 16450
+statements, the identical covered blocks, in 91 s against the leg's
+85 s plus the plain run's 100 s.
+
+The flags reach the repository's command through `measured` (#1667),
+appended to the GOFLAGS the command has: `-cover -coverpkg=./...
+-covermode=atomic -exec=<belt>/go-test-exec`. Measured on go 1.27.4:
+
+- A `-coverprofile` in GOFLAGS names one path, and two `go test` runs
+  in one command overwrite it; the figure reads low and nothing is red.
+  So no profile path is used.
+- `go test` ignores GOCOVERDIR, and sets it, per test process, to a
+  temporary directory of its own. `-test.gocoverdir` cannot go through
+  GOFLAGS ("unknown flag").
+- `-exec` can. go starts each test binary through the program, handing
+  it go's own `-test.gocoverdir` among the leading `-test.*` arguments.
+  go-test-exec adds `-test.gocoverdir=$ORG_COVERAGE_RUN/go` after them,
+  and the later flag wins. Every test process then writes its counters
+  into the run's directory, named by hash, process and time. Two
+  separate `go test` runs left two counter files, and `go tool covdata
+  textfmt` merged them into one atomic profile covering both. Under
+  `-race`, atomic mode, the same holds.
+- `go build`, `go vet` and `go list` ignore the flags. `-exec` also
+  applies to `go run`, so a binary that is not `*.test` runs unchanged.
+
+A `-cover`, `-coverprofile`, `-coverpkg`, `-covermode` or `-exec` of
+the test command's own, on a `go test` in the command or in GOFLAGS, and
+a GOCOVERDIR already set, are refused by `measured` by name: each would
+measure a second way or replace the program this rests on. A tree with
+go.mod and no `test` task keeps the leg's own command, named.
+
 **gobco, the Go branch figure, chosen against gocoverageplus** (#1546,
 under #1336's property 2, "takes every decision both ways"). Go's own
 `go test -cover` counts statements, and an `if` with no `else` has no

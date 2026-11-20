@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# The program `go` runs each binary through under a measured run (#1651).
+#
+# `measured` appends `-exec=<belt>/go-test-exec` to GOFLAGS, beside
+# `-cover -coverpkg=./... -covermode=atomic`, and names the run's
+# directory as GOCOVERDIR. `go test` then starts every test binary as
+#
+#   go-test-exec <dir>/<pkg>.test -test.<flag>… [the test's own arguments]
+#
+# handing it a `-test.gocoverdir` of go's own temporary directory among
+# the leading `-test.*` arguments, and setting GOCOVERDIR to that same
+# directory for the process (measured on go 1.27.4: this program sees
+# go's directory there, not the one `measured` named). So the run's
+# directory is read from the belt's own ORG_COVERAGE_RUN, which go passes
+# through. For a `*.test` binary this inserts
+# `-test.gocoverdir=$ORG_COVERAGE_RUN/go` after those leading arguments,
+# where the later flag wins, so every test process writes its counters
+# into the run's directory, named by hash, process and time: any number
+# of `go test` runs, from any shell, script or task, are measured and
+# nothing is overwritten. It is never put after the
+# test's own arguments or an `-args` tail, which reach the test as they
+# were given.
+#
+# `-exec` applies to `go run` too: any binary that is not `*.test` runs
+# unchanged, so a program that parses its own flags is never handed a
+# test flag. Built with `-cover`, it writes its counters into GOCOVERDIR
+# itself.
+set -euo pipefail
+
+if [[ $# -eq 0 ]]; then
+  echo "go-test-exec: no binary — go runs it as <binary> [<argument>…]" >&2
+  exit 2
+fi
+binary=$1
+shift
+
+case "${binary}" in
+  *.test)
+    : "${ORG_COVERAGE_RUN:?unset — the belt names the run directory (#1667)}"
+    lead=()
+    while [[ $# -gt 0 && $1 == -test.* ]]; do
+      lead+=("$1")
+      shift
+    done
+    exec "${binary}" ${lead[@]+"${lead[@]}"} "-test.gocoverdir=${ORG_COVERAGE_RUN}/go" "$@"
+    ;;
+  *)
+    exec "${binary}" "$@"
+    ;;
+esac
