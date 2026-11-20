@@ -235,6 +235,14 @@ hold() { # usage: hold <leg lines>
   [[ -z ${low} ]]
 }
 
+# The leg lines this run held, beside its reports (#1692): the gate's
+# pgrx job keeps them for the release job, which derives the floor from
+# them instead of measuring the extension again. Written after hold, so
+# a leg below the floor keeps nothing.
+keep() { # usage: keep <leg lines>
+  printf '%s\n' "$1" > "${reports}/coverage-figures.txt"
+}
+
 if [[ ${runs} != *" "* ]]; then
   # One run: in the foreground, in the workspace's own target directory,
   # so a fan-out leg's cargo cache is the ordinary one (a measured run
@@ -247,6 +255,7 @@ if [[ ${runs} != *" "* ]]; then
   if [[ -n ${measured} ]]; then
     line=$(measure_one "${dir}" "${crate}" "${one}")
     hold "${line}"
+    keep "${line}"
   else
     (cd "${dir}" && cargo pgrx test "pg${one}")
   fi
@@ -300,6 +309,7 @@ fi
 if [[ -n ${measured} ]]; then
   lines=$(cat "${logs}"/*.leg)
   hold "${lines}"
+  keep "${lines}"
 fi
 echo "${label}: ${count} suite run(s):${tested}"
 org_done=1

@@ -124,10 +124,10 @@ belt_dir=$(dirname "${BASH_SOURCE[0]}")
 # below.
 legs="${2:-all}"
 case "${legs}" in
-  all | go | rust | rust-branches | pgrx | python | typescript | plpgsql | probe | reports) ;;
+  all | go | rust | rust-branches | pgrx | pgrx-majors | python | typescript | plpgsql | probe | reports) ;;
   *)
     echo "${label}: unknown leg selector '${legs}' — expected all, go, rust," \
-      "rust-branches, pgrx, python, typescript, plpgsql, probe, reports or runs-test" >&2
+      "rust-branches, pgrx, pgrx-majors, python, typescript, plpgsql, probe, reports or runs-test" >&2
     exit 1
     ;;
 esac
@@ -152,7 +152,7 @@ formatless=(plpgsql plpgsql-branches)
 # The leg lines a `reports` run printed, as a file in the same
 # directory: what the gate keeps for the release job (#1622).
 figures=coverage-figures.txt
-if [[ ${legs} != probe ]]; then
+if [[ ${legs} != probe && ${legs} != pgrx-majors ]]; then
   # Completion-guarded (#1233): on bash 3.2 a script with an EXIT trap
   # that dies on an unset variable would otherwise exit 0. One trap for
   # every directory the run makes: the legs below only set theirs.
@@ -317,6 +317,19 @@ pgrx_surface() {
   done <<< "${surface}"
   pgrx_majors=$(tr ',' '\n' <<< "${pgrx_majors}" | sed '/^$/d' | sort -un)
 }
+
+# `pgrx-majors` (#1692) prints the majors the `pgrx` selector measures,
+# one per line, from the same derivation, and measures nothing: the
+# release path reads each major's figure the gate's pgrx job kept, and
+# needs the list to know it read them all. Nothing in a tree with no
+# extension.
+if [[ ${legs} == pgrx-majors ]]; then
+  if [[ -f Cargo.toml ]]; then
+    pgrx_surface
+    [[ -z ${pgrx_majors} ]] || printf '%s\n' "${pgrx_majors}"
+  fi
+  exit 0
+fi
 
 # The Rust measurement surface, shared by the `rust` and `rust-branches`
 # legs (#1359) so the line figure and the branch figure are taken over

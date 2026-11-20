@@ -19,6 +19,7 @@ stdlib `unittest`, matching the other release/test_*.py; run through
 the gate as `mise run test`.
 """
 
+import contextlib
 import io
 import json
 import shutil
@@ -29,6 +30,7 @@ import unittest
 import zipfile
 from pathlib import Path
 from typing import override
+from unittest import mock
 
 import coverage_figures as figures
 
@@ -235,15 +237,158 @@ class Figures(unittest.TestCase):
             self.assertIn(said, str(raised.exception))
 
 
-# The forge: answers from files the row planted beside it, and records
-# every call. A path with no planted answer fails as gh does.
+class OneLeg(unittest.TestCase):
+    """A pgrx job's figure: its own name, and exactly its leg (#1692)."""
+
+    def test_the_name_carries_the_leg(self) -> None:
+        """`coverage-figures-pgrx-pg17-<sha>` beside the gate's own."""
+        self.assertEqual(f"coverage-figures-{SHA}", figures.name(SHA))
+        self.assertEqual(
+            f"coverage-figures-pgrx-pg17-{SHA}", figures.name(SHA, "pgrx-pg17")
+        )
+
+    def test_choose_reads_the_legs_name_only(self) -> None:
+        """The gate's artifact is not pg17's, and pg17's is."""
+        gate = artifact(SHA, SHA, ident=1, run=10)
+        pg17 = {
+            **artifact(SHA, SHA, ident=2, run=20),
+            "name": figures.name(SHA, "pgrx-pg17"),
+        }
+        got = figures.choose(listing(gate, pg17), SHA, "pgrx-pg17")
+        self.assertEqual(figures.Choice(2, 20), got)
+        with self.assertRaises(figures.RefusedError) as raised:
+            figures.choose(listing(gate), SHA, "pgrx-pg17")
+        self.assertIn(
+            f"no unexpired gate artifact coverage-figures-pgrx-pg17-{SHA}",
+            str(raised.exception),
+        )
+
+    def test_exactly_the_leg(self) -> None:
+        """Its line alone; another major's, or a second line, is refused."""
+        self.assertEqual(
+            "pgrx-pg17 96.5\n", figures.figures("pgrx-pg17 96.5\n", "pgrx-pg17")
+        )
+        for text, said in (
+            ("pgrx-pg18 96.5\n", "holds pgrx-pg18, not exactly pgrx-pg17"),
+            (
+                "pgrx-pg17 96.5\npython 90.0\n",
+                "holds pgrx-pg17 python, not exactly pgrx-pg17",
+            ),
+        ):
+            with (
+                self.subTest(text=text),
+                self.assertRaises(figures.RefusedError) as raised,
+            ):
+                figures.figures(text, "pgrx-pg17")
+            self.assertIn(said, str(raised.exception))
+
+    def test_the_command_line_takes_only_a_pgrx_leg(self) -> None:
+        """A third argument is `pgrx-pg<major>` or a usage error."""
+        self.assertEqual(2, figures.main(["figures", SHA, "python"]))
+
+
+class CommandLine(unittest.TestCase):
+    """main(), in process: each subcommand over what is piped to it."""
+
+    @staticmethod
+    def main(argv: list[str], data: bytes) -> tuple[int, str, str]:
+        """Run the command line with `data` as its standard input.
+
+        Returns:
+            The exit status, stdout and stderr.
+
+        """
+        with tempfile.TemporaryFile() as piped:
+            piped.write(data)
+            piped.seek(0)
+            out, err = io.StringIO(), io.StringIO()
+            with (
+                mock.patch.object(figures, "STDIN", piped.fileno()),
+                contextlib.redirect_stdout(out),
+                contextlib.redirect_stderr(err),
+            ):
+                status = figures.main(argv)
+        return status, out.getvalue(), err.getvalue()
+
+    def test_each_subcommand_answers(self) -> None:
+        """choose, judge and figures print what the script reads."""
+        listed = json.dumps(listing(artifact(SHA, SHA))).encode()
+        ran = json.dumps(run_record(SHA)).encode()
+        for argv, data, said in (
+            (["choose", SHA], listed, "14582536594 44631546473\n"),
+            (
+                ["judge", SHA],
+                ran,
+                "https://github.com/monumental-archive/.github/actions/runs/44631546473\n",
+            ),
+            (["figures", SHA], zipped(LEGS), LEGS),
+            (
+                ["figures", SHA, "pgrx-pg17"],
+                zipped("pgrx-pg17 96.5\n"),
+                "pgrx-pg17 96.5\n",
+            ),
+        ):
+            with self.subTest(argv=argv):
+                self.assertEqual((0, said, ""), self.main(argv, data))
+
+    def test_a_refusal_is_one_line_and_status_one(self) -> None:
+        """The reason, labelled, on stderr; nothing on stdout."""
+        status, out, err = self.main(
+            ["judge", SHA], json.dumps(run_record(OTHER)).encode()
+        )
+        self.assertEqual((1, ""), (status, out))
+        self.assertEqual(
+            f"release:coverage-floor: not reading the gate's figures:"
+            f" run 44631546473 is for {OTHER}, not {SHA}\n",
+            err,
+        )
+
+    def test_a_forge_answer_that_is_not_json_is_refused(self) -> None:
+        """decoded.py's refusal becomes the step's."""
+        status, _, err = self.main(["choose", SHA], b"<html>rate limited</html>")
+        self.assertEqual(1, status)
+        self.assertIn("the forge answered with something that is not JSON", err)
+
+    def test_usage_errors_are_status_two(self) -> None:
+        """No sha, a short sha, an unknown command, a leg that is not pgrx."""
+        for argv in (
+            ["choose"],
+            ["choose", "abc"],
+            ["measure", SHA],
+            ["figures", SHA, "python"],
+        ):
+            with self.subTest(argv=argv):
+                status, out, err = self.main(argv, b"")
+                self.assertEqual((2, ""), (status, out))
+                self.assertIn("usage: coverage_figures.py", err)
+
+
+def no_cache(_directory: str, names: list[str]) -> set[str]:
+    """Leave Python's byte-code caches out of a copied tree.
+
+    Returns:
+        The names to skip.
+
+    """
+    return {name for name in names if name == "__pycache__"}
+
+
+# The forge: answers from files the row planted beside it, keyed by the
+# artifact's name, the run's id and the artifact's id, and records every
+# call. A path with no planted answer fails as gh does.
 GH = """\
 #!/usr/bin/env bash
 echo "$*" >> "${STUB_DIR}/gh.log"
 case "$2" in
-  */artifacts\\?name=*) f=listing.json ;;
-  */runs/*) f=run.json ;;
-  */artifacts/*/zip) f=figures.zip ;;
+  */artifacts\\?name=*)
+    n=${2#*name=}
+    f="listing-${n%%&*}.json"
+    ;;
+  */runs/*) f="run-${2##*/}.json" ;;
+  */artifacts/*/zip)
+    a=${2%/zip}
+    f="zip-${a##*/}.zip"
+    ;;
   *) f=none ;;
 esac
 if [[ -f ${STUB_DIR}/${f} ]]; then
@@ -254,26 +399,39 @@ echo "gh: Not Found (HTTP 404)" >&2
 exit 1
 """
 
-# The measurement: `probe` names the python leg, `pgrx` prints no leg
-# (no extension); a measurement prints the planted legs, or fails loudly
-# where the row says nothing may be measured.
+# The measurement: `probe` names the python leg and `pgrx-majors` the
+# planted majors; a measurement (`all` or `pgrx`) prints the planted
+# legs, or fails loudly where the row says nothing may be measured.
 MEASURE = """\
 #!/usr/bin/env bash
-if [[ $2 == probe ]]; then
-  echo python
-  exit 0
-fi
-# The pgrx legs (#1656): this tree has no extension, so none.
-if [[ $2 == pgrx ]]; then
-  exit 0
-fi
-echo measured >> "${STUB_DIR}/measured.log"
+case "$2" in
+  probe)
+    echo python
+    exit 0
+    ;;
+  pgrx-majors)
+    [[ -z ${STUB_MAJORS:-} ]] || printf '%s\\n' ${STUB_MAJORS}
+    exit 0
+    ;;
+  *) ;;
+esac
+echo "${2:-all}" >> "${STUB_DIR}/measured.log"
 if [[ -n ${STUB_NO_MEASURE:-} ]]; then
-  echo "the stub measurement was called" >&2
+  echo "the stub measurement (${2:-all}) was called" >&2
   exit 97
 fi
-printf '%s' "${STUB_LEGS}"
+if [[ $2 == pgrx ]]; then
+  printf '%s' "${STUB_PGRX_LEGS}"
+else
+  printf '%s' "${STUB_LEGS}"
+fi
 """
+
+PGRX_LEGS = "pgrx-pg17 96.5\npgrx-pg18 96.25\n"
+# What the stub measurement was asked for: the gate's legs, or the
+# extension's.
+MEASURED_ALL: list[str] = ["all"]
+MEASURED_PGRX: list[str] = ["pgrx"]
 
 
 class Derive(unittest.TestCase):
@@ -292,9 +450,7 @@ class Derive(unittest.TestCase):
         # The belt whole, as the release job has it: a helper that comes
         # to import another belt module finds it, and only the
         # measurement below is a stub.
-        shutil.copytree(
-            CANON / "mise", canon / "mise", ignore=shutil.ignore_patterns("__pycache__")
-        )
+        shutil.copytree(CANON / "mise", canon / "mise", ignore=no_cache)
         self.stubs = self.base / "stubs"
         self.stubs.mkdir()
         for path, text in (
@@ -341,17 +497,45 @@ class Derive(unittest.TestCase):
             capture_output=True,
             text=True,
         ).stdout.strip()
+        self.next_id = 100
 
-    def plant(self, **answers: object) -> None:
-        """Write the forge's answers: listing, run, and the figures zip."""
-        for name, answer in answers.items():
-            path = self.base / ("figures.zip" if name == "zip" else f"{name}.json")
-            if isinstance(answer, bytes):
-                path.write_bytes(answer)
-            else:
-                path.write_text(json.dumps(answer), encoding="utf-8")
+    def offer(self, leg: str, text: str, *, kept_by: str = "") -> int:
+        """Plant one artifact: its listing, the run that kept it, its zip.
 
-    def derive(self, *, measure: bool) -> subprocess.CompletedProcess[str]:
+        `leg` is "" for the gate job's figures, else `pgrx-pg<major>`;
+        `kept_by` is the commit the keeping run was for (this one unless
+        named).
+
+        Returns:
+            The run's id, which the step's log names.
+
+        """
+        self.next_id += 1
+        ident = self.next_id
+        name = figures.name(self.sha, leg)
+        entry = artifact(self.sha, kept_by or self.sha, ident=ident, run=ident)
+        entry["name"] = name
+        record = run_record(kept_by or self.sha)
+        record["id"] = ident
+        record["html_url"] = f"https://example.invalid/runs/{ident}"
+        (self.base / f"listing-{name}.json").write_text(
+            json.dumps(listing(entry)), encoding="utf-8"
+        )
+        (self.base / f"run-{ident}.json").write_text(
+            json.dumps(record), encoding="utf-8"
+        )
+        (self.base / f"zip-{ident}.zip").write_bytes(zipped(text))
+        return ident
+
+    def none_for(self, leg: str = "") -> None:
+        """Plant an empty listing for one artifact name: none was kept."""
+        (self.base / f"listing-{figures.name(self.sha, leg)}.json").write_text(
+            json.dumps(listing()), encoding="utf-8"
+        )
+
+    def derive(
+        self, *, measure: bool, majors: str = ""
+    ) -> subprocess.CompletedProcess[str]:
         """Run the step as the release job does.
 
         Returns:
@@ -364,6 +548,8 @@ class Derive(unittest.TestCase):
             GITHUB_REPOSITORY="monumental-archive/.github",
             STUB_DIR=str(self.base),
             STUB_LEGS=LEGS,
+            STUB_PGRX_LEGS=PGRX_LEGS,
+            STUB_MAJORS=majors,
         )
         # Any token: the stub forge reads none. Not a literal, so no
         # credential is written in the source.
@@ -381,47 +567,44 @@ class Derive(unittest.TestCase):
             check=False,
         )
 
-    def measured(self) -> bool:
-        """Say whether the stub measurement was called.
+    def measured(self) -> list[str]:
+        """Read which measurements the stub was asked for.
 
         Returns:
-            True when it was.
+            The selectors, in order; empty when nothing was measured.
 
         """
-        return (self.base / "measured.log").exists()
+        log = self.base / "measured.log"
+        return log.read_text(encoding="utf-8").split() if log.exists() else []
 
     def test_the_commits_artifact_is_read_and_nothing_measured(self) -> None:
         """The figure the gate kept becomes the floor; the step measures nothing."""
-        self.plant(
-            listing=listing(artifact(self.sha, self.sha)),
-            run=run_record(self.sha),
-            zip=zipped(LEGS),
-        )
+        run = self.offer("", LEGS)
         done = self.derive(measure=False)
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertFalse(self.measured(), done.stderr)
         self.assertIn(
-            f"release:coverage-floor: read the gate's figures for {self.sha} from"
-            " https://github.com/monumental-archive/.github/actions/runs/44631546473",
+            f"release:coverage-floor: read coverage-figures-{self.sha} from"
+            f" https://example.invalid/runs/{run}",
             done.stderr,
         )
         self.assertNotIn("measuring", done.stderr)
 
     def test_another_commits_artifact_is_refused_and_the_step_measures(self) -> None:
         """Never a floor from another commit's figure."""
-        self.plant(listing=listing(artifact(self.sha, OTHER)))
+        self.offer("", LEGS, kept_by=OTHER)
         done = self.derive(measure=True)
         self.assertEqual(0, done.returncode, done.stderr)
-        self.assertTrue(self.measured())
+        self.assertEqual(MEASURED_ALL, self.measured())
         self.assertIn(f"was kept by a run of {OTHER}, not {self.sha}", done.stderr)
         self.assertIn(f"release:coverage-floor: measuring {self.sha}", done.stderr)
 
     def test_no_artifact_measures_saying_so(self) -> None:
         """A repository with no queue, or a run that kept nothing."""
-        self.plant(listing=listing())
+        self.none_for()
         done = self.derive(measure=True)
         self.assertEqual(0, done.returncode, done.stderr)
-        self.assertTrue(self.measured())
+        self.assertEqual(MEASURED_ALL, self.measured())
         self.assertIn(
             f"not reading the gate's figures: no unexpired gate artifact"
             f" coverage-figures-{self.sha}",
@@ -436,21 +619,78 @@ class Derive(unittest.TestCase):
         for read in (True, False):
             with self.subTest(read=read):
                 (self.tree / ".coverage-floor").write_text(before, encoding="utf-8")
-                self.plant(
-                    listing=listing(artifact(self.sha, self.sha))
-                    if read
-                    else listing(),
-                    run=run_record(self.sha),
-                    zip=zipped(LEGS),
-                )
+                if read:
+                    self.offer("", LEGS)
+                else:
+                    self.none_for()
                 done = self.derive(measure=not read)
                 self.assertEqual(0, done.returncode, done.stderr)
-                self.assertEqual(not read, self.measured(), done.stderr)
                 written[read] = (self.tree / ".coverage-floor").read_text(
                     encoding="utf-8"
                 )
         self.assertEqual(written[True], written[False])
         self.assertIn("v1.1.0", written[True])
+
+    def test_every_majors_figure_is_read_and_nothing_measured(self) -> None:
+        """Each pgrx job's figure read, each run named: no measurement (#1692)."""
+        self.offer("", LEGS)
+        runs = {
+            major: self.offer(f"pgrx-pg{major}", line + "\n")
+            for major, line in (("17", "pgrx-pg17 96.5"), ("18", "pgrx-pg18 96.25"))
+        }
+        done = self.derive(measure=False, majors="17 18")
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertFalse(self.measured(), done.stderr)
+        for major, run in runs.items():
+            self.assertIn(
+                "release:coverage-floor: read"
+                f" coverage-figures-pgrx-pg{major}-{self.sha}"
+                f" from https://example.invalid/runs/{run}",
+                done.stderr,
+            )
+        floor = (self.tree / ".coverage-floor").read_text(encoding="utf-8")
+        self.assertIn("v1.1.0", floor)
+
+    def test_a_missing_major_measures_the_extension_naming_it(self) -> None:
+        """pg18's job kept nothing: every major is measured, pg18 named."""
+        self.offer("", LEGS)
+        self.offer("pgrx-pg17", "pgrx-pg17 96.5\n")
+        self.none_for("pgrx-pg18")
+        done = self.derive(measure=True, majors="17 18")
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertEqual(MEASURED_PGRX, self.measured())
+        self.assertIn(
+            "release:coverage-floor: no figure read for the extension at pg18;"
+            " measuring every major",
+            done.stderr,
+        )
+
+    def test_a_figure_for_another_major_is_refused(self) -> None:
+        """pg18's artifact holding pg17's line is not pg18's figure."""
+        self.offer("", LEGS)
+        self.offer("pgrx-pg17", "pgrx-pg17 96.5\n")
+        self.offer("pgrx-pg18", "pgrx-pg17 96.5\n")
+        done = self.derive(measure=True, majors="17 18")
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertEqual(MEASURED_PGRX, self.measured())
+        self.assertIn(
+            "coverage-figures.txt holds pgrx-pg17, not exactly pgrx-pg18", done.stderr
+        )
+        self.assertIn("no figure read for the extension at pg18", done.stderr)
+
+    def test_another_commits_major_is_refused(self) -> None:
+        """A pgrx job of another commit kept pg17's figure: refused, measured."""
+        self.offer("", LEGS)
+        self.offer("pgrx-pg17", "pgrx-pg17 96.5\n", kept_by=OTHER)
+        self.offer("pgrx-pg18", "pgrx-pg18 96.25\n")
+        done = self.derive(measure=True, majors="17 18")
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertEqual(MEASURED_PGRX, self.measured())
+        self.assertIn(
+            f"coverage-figures-pgrx-pg17-{self.sha} was kept by a run of {OTHER}",
+            done.stderr,
+        )
+        self.assertIn("no figure read for the extension at pg17", done.stderr)
 
 
 if __name__ == "__main__":

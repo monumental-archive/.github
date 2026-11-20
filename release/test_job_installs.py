@@ -1096,6 +1096,30 @@ class CoverageFigures(unittest.TestCase):
             with self.subTest(caller=path.name):
                 self.assertRegex(path.read_text("utf-8"), r"\n {6}actions: read\b")
 
+    def test_each_pgrx_job_keeps_its_figure(self) -> None:
+        """The pgrx job: the two events, the name with major and commit (#1692)."""
+        job = load("ci.yml")["pgrx"]
+        kept = step(job, "Keep the leg's coverage figure for the release")
+        self.assertIn("github.event_name == 'merge_group'", kept)
+        self.assertIn("github.event_name == 'push'", kept)
+        self.assertIn(
+            "github.ref == format('refs/heads/{0}',"
+            " github.event.repository.default_branch)",
+            kept,
+        )
+        self.assertNotIn("pull_request", kept)
+        self.assertIn(
+            "name: coverage-figures-pgrx-pg${{ matrix.major }}-${{ github.sha }}", kept
+        )
+        self.assertIn(
+            "path: ${{ runner.temp }}/coverage-reports/coverage-figures.txt", kept
+        )
+        names = [line.strip() for line in job if line.strip().startswith("- name:")]
+        self.assertLess(
+            names.index("- name: Run the extension's suite at this major"),
+            names.index("- name: Keep the leg's coverage figure for the release"),
+        )
+
     def test_the_figures_step_follows_the_gate(self) -> None:
         """Kept only after `mise run ci` passed: a red gate keeps nothing."""
         job = load("ci.yml")["gate"]
@@ -1880,7 +1904,14 @@ class GateCoverageReports(unittest.TestCase):
         """The leg's suite writes where its artifact step reads (#1656)."""
         leg = steps(load("ci.yml")["pgrx"])
         runs = [s for s in leg if s.get("run", "").strip() == "mise run test:pgrx"]
-        keeps = [s for s in leg if "upload-artifact" in s.get("uses", "")]
+        # The badge's report upload; the figures the release reads are
+        # kept by a step of their own (#1692), held in CoverageFigures.
+        keeps = [
+            s
+            for s in leg
+            if "upload-artifact" in s.get("uses", "")
+            and s.get("with.name", "").startswith("coverage-reports")
+        ]
         self.assertEqual(1, len(runs))
         self.assertEqual(1, len(keeps))
         self.assertEqual(self.REPORTS, runs[0].get("env.ORG_COVERAGE_REPORTS"))
