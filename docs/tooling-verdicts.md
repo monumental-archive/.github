@@ -3783,6 +3783,33 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
   the install prior: it is an npm package, the belt carries no Node
   (tsc is native), and the PyPI wrapper downloads Node and pyright at
   run time. *Reopen:* a native, checksummed pyright release.
+- **The gate's guess at a repository's own tools** (#1410, #1785) —
+  `mise/gate_tools.py` reads a repository's own task bodies with a
+  regex to see which belt tools they call, and disables the rest; a
+  call it misses is "command not found" in that repository's gate.
+  The design that removes the guess is mise's `lazy` tools: the
+  conditional belt tools pinned `lazy`, the table still installing
+  what the tree needs by name, and anything it did not predict
+  installed the first time something runs it. Probed 2026-11-20 on
+  mise 2026.11.8 in a scratch config: a bare `mise install` skips a
+  lazy tool; two tasks calling one for the first time at once both
+  pass (one installs, the other waits on the install lock); a call
+  through a Python `subprocess` or `xargs … bash -c` installs it; a
+  lazy `pipx:` tool installs its lazy `uv` first; with no network
+  the first use fails by name; under `MISE_LOCKED=1` a tool outside
+  the lockfile is refused; and `MISE_TASK_RUN_AUTO_INSTALL=false`
+  does not turn it off. Not built, because nothing it fixes has
+  happened: the guess is needed in two repositories and no miss is
+  recorded, an unpredicted tool would download on every run outside
+  the tool cache, a developer's bare `mise install` would stop
+  installing those tools, and #1410 refused first-use installs as
+  the main path. Dropping the table as well is worse: the tool cache
+  is saved before the gate runs and shared by its three legs, so it
+  would need a save after the run and a key per leg, and a tool a
+  tree starts using would download on every run until the belt's
+  lockfile changed, the shape #1414 fixed. *Reopen:* a repository's
+  gate red on a belt tool its own task calls and the guess did not
+  see.
 
 ## Watched, as filed issues
 
