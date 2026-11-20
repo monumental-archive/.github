@@ -89,8 +89,8 @@ def plant_belt(tree: Path) -> Path:
     return belt
 
 
-class WhereTheBeltIs(unittest.TestCase):
-    """Each row: the carriers planted, and which one answers."""
+class Planted(unittest.TestCase):
+    """A repository and one tree for each carrier; the rows are below."""
 
     def setUp(self) -> None:
         """Plant a repository and one tree for each carrier."""
@@ -111,6 +111,7 @@ class WhereTheBeltIs(unittest.TestCase):
         self.cache = plant_belt(self.tmp / "cache" / "org-belt" / ("a" * 40))
         self.machine = plant_belt(self.tmp / "checkout")
         self.global_file: str | None = None
+        self.git_vars: dict[str, str] = {}
 
     def own_tree(self) -> Path:
         """Make the repository itself a canon tree.
@@ -147,7 +148,7 @@ class WhereTheBeltIs(unittest.TestCase):
             The run.
 
         """
-        extra = {"XDG_CONFIG_HOME": str(self.xdg)}
+        extra = {"XDG_CONFIG_HOME": str(self.xdg)} | self.git_vars
         if self.global_file is not None:
             extra["MISE_GLOBAL_CONFIG_FILE"] = self.global_file
         if path is not None:
@@ -169,6 +170,10 @@ class WhereTheBeltIs(unittest.TestCase):
         done = self.resolve(where)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(done.stdout, f"{belt}\n" if belt else "")
+
+
+class WhereTheBeltIs(Planted):
+    """Each row: the carriers planted, and which one answers."""
 
     def test_ci_carrier_wins_over_all_three(self) -> None:
         """1. MISE_GLOBAL_CONFIG_FILE, with every other carrier present."""
@@ -229,6 +234,83 @@ class WhereTheBeltIs(unittest.TestCase):
         done = self.resolve(self.link_dir(), path=str(bare))
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(done.stdout, f"{self.machine}\n")
+
+
+class UnderAHook(Planted):
+    """The same question with git's own variables exported (#1744).
+
+    git hands a hook GIT_DIR, and in a linked worktree no GIT_WORK_TREE
+    beside it; the answer must not depend on either.
+    """
+
+    def worktree(self) -> Path:
+        """Add a linked worktree with its own belt link, as a lane has.
+
+        Returns:
+            The worktree's `.config/mise/conf.d`, where mise runs the exec.
+
+        """
+        env = hermetic.env(self.home)
+        git = hermetic.tool("git")
+        run(
+            [git, "commit", "-q", "--allow-empty", "-m", "c"],
+            self.repo,
+            env,
+            check=True,
+        )
+        tree = self.tmp / "lane"
+        run([git, "worktree", "add", "-q", str(tree)], self.repo, env, check=True)
+        conf = tree / ".config" / "mise" / "conf.d"
+        conf.mkdir(parents=True)
+        (conf / "belt.toml").symlink_to(self.cache / "config.toml")
+        return conf
+
+    def hook_git_dir(self, conf: Path) -> str:
+        """Name the git directory a hook in that worktree is handed.
+
+        Returns:
+            The worktree's own git directory, absolute.
+
+        """
+        done = run(
+            [hermetic.tool("git"), "rev-parse", "--absolute-git-dir"],
+            conf,
+            hermetic.env(self.home),
+            check=True,
+        )
+        return done.stdout.strip()
+
+    def test_a_hook_in_a_linked_worktree_reads_its_link(self) -> None:
+        """GIT_DIR with no work tree, as git hands a hook there (#1744)."""
+        conf = self.worktree()
+        self.machine_link()
+        self.git_vars = {"GIT_DIR": self.hook_git_dir(conf)}
+        self.assert_answers(self.cache, conf)
+
+    def test_a_hook_that_names_its_work_tree_reads_its_link(self) -> None:
+        """GIT_DIR and GIT_WORK_TREE both exported: the same answer."""
+        conf = self.worktree()
+        self.machine_link()
+        self.git_vars = {
+            "GIT_DIR": self.hook_git_dir(conf),
+            "GIT_WORK_TREE": str(conf.parents[2]),
+        }
+        self.assert_answers(self.cache, conf)
+
+    def test_a_hook_with_its_own_index_reads_its_link(self) -> None:
+        """GIT_INDEX_FILE beside GIT_DIR, as a commit hook is handed."""
+        conf = self.worktree()
+        self.machine_link()
+        git_dir = self.hook_git_dir(conf)
+        self.git_vars = {"GIT_DIR": git_dir, "GIT_INDEX_FILE": f"{git_dir}/index"}
+        self.assert_answers(self.cache, conf)
+
+    def test_a_foreign_git_dir_does_not_move_the_canon_tree(self) -> None:
+        """2 under a hook: the canon's own tree still answers from mise/."""
+        own = self.own_tree()
+        self.machine_link()
+        self.git_vars = {"GIT_DIR": str(self.repo / ".git")}
+        self.assert_answers(own, own)
 
 
 if __name__ == "__main__":

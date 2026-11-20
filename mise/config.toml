@@ -148,6 +148,14 @@ unix_default_inline_shell_args = "bash -euo pipefail -c"
 # `<canon>/mise` for the canon's own file. So `git rev-parse` in 2 and 3
 # names the clone the config belongs to; the machine's copy runs in its
 # own conf.d, outside any clone, and finds only 4.
+# git's own repository variables are unset for that one question
+# (#1744). A hook in a linked worktree is handed GIT_DIR with no
+# GIT_WORK_TREE, and git then calls the directory it stands in the top
+# level: conf.d itself, where no link is found, so the machine's belt
+# answered every pre-push from a worktree. Unset, git discovers the
+# clone from the directory, which is what 2 and 3 mean. The list is
+# git's own (`rev-parse --local-env-vars`), not one written here, and
+# the unset lives inside the command substitution, so nothing leaks.
 # The belt is identified by a file only the belt has (clippy.toml), so no
 # link's NAME in the machine's conf.d is assumed. Empty when the belt
 # did not arrive — which is not a quiet state: `ci` is itself
@@ -165,7 +173,7 @@ unix_default_inline_shell_args = "bash -euo pipefail -c"
 # not-found branches are therefore `if`-guarded, never bare AND-lists whose
 # failure errexit promotes to a crash, and `git` and `readlink`, which may
 # be absent or find nothing, end in `|| true`.
-ORG_BELT_DIR = '''{{ exec(command=`d="${MISE_GLOBAL_CONFIG_FILE:-}"; if [ -z "$d" ]; then t=$(git rev-parse --show-toplevel 2>/dev/null || true); if [ -n "$t" ] && [ -f "$t/mise/config.toml" ] && [ -f "$t/mise/clippy.toml" ]; then d="$t/mise/config.toml"; elif [ -n "$t" ] && [ -L "$t/.config/mise/conf.d/belt.toml" ]; then l=$(readlink "$t/.config/mise/conf.d/belt.toml" || true); case "$l" in /*) ;; *) l="$t/.config/mise/conf.d/$l" ;; esac; if [ -f "$(dirname "$l")/clippy.toml" ]; then d="$l"; fi; fi; fi; if [ -z "$d" ]; then for f in "${XDG_CONFIG_HOME:-$HOME/.config}"/mise/conf.d/*.toml; do t=$(readlink "$f" 2>/dev/null || echo "$f"); if [ -f "$(dirname "$t")/clippy.toml" ]; then d="$t"; break; fi; done; fi; if [ -n "$d" ] && [ -d "$(dirname "$d")" ]; then cd "$(dirname "$d")" && pwd; fi`) }}'''
+ORG_BELT_DIR = '''{{ exec(command=`d="${MISE_GLOBAL_CONFIG_FILE:-}"; if [ -z "$d" ]; then t=$(unset $(git rev-parse --local-env-vars 2>/dev/null || true); git rev-parse --show-toplevel 2>/dev/null || true); if [ -n "$t" ] && [ -f "$t/mise/config.toml" ] && [ -f "$t/mise/clippy.toml" ]; then d="$t/mise/config.toml"; elif [ -n "$t" ] && [ -L "$t/.config/mise/conf.d/belt.toml" ]; then l=$(readlink "$t/.config/mise/conf.d/belt.toml" || true); case "$l" in /*) ;; *) l="$t/.config/mise/conf.d/$l" ;; esac; if [ -f "$(dirname "$l")/clippy.toml" ]; then d="$l"; fi; fi; fi; if [ -z "$d" ]; then for f in "${XDG_CONFIG_HOME:-$HOME/.config}"/mise/conf.d/*.toml; do t=$(readlink "$f" 2>/dev/null || echo "$f"); if [ -f "$(dirname "$t")/clippy.toml" ]; then d="$t"; break; fi; done; fi; if [ -n "$d" ] && [ -d "$(dirname "$d")" ]; then cd "$(dirname "$d")" && pwd; fi`) }}'''
 # WHERE THE CANON TREE IS, derived from the belt and never resolved a
 # second time. The belt is one directory inside the canon; the tasks
 # that need the canon proper need what sits BESIDE it — slsa/ policies,
