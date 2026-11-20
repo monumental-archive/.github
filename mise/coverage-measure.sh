@@ -43,8 +43,10 @@
 # `rust-branches` (#1359) is a leg of its own and never part of `all`:
 # branch instrumentation needs a nightly, and the gate runs none. It
 # measures on the dated nightly the repository declares as
-# FUZZ_TOOLCHAIN, over the same workspace and exclusions as the `rust`
-# leg — one function below, not a copy — and prints
+# FUZZ_TOOLCHAIN, with a build and a command of its own: an instrumented
+# nightly build cannot share the gate's stable run (#1653). It reads the
+# same surface as the `rust` leg — the llvm-tools assertion and the pgrx
+# extensions held out, one function below, not a copy — and prints
 # `rust-branches <percent>` for the Monday audit and `coverage:adopt`.
 #
 # The python and plpgsql legs run no suite (#1667). The repository's own
@@ -296,18 +298,23 @@ fi
 
 # The workspace's pgrx extensions, from gate_surface.py, the derivation
 # every pgrx task reads (#813): sets `pgrx_names` (space-separated crate
-# names) and `pgrx_majors` (one major per line, sorted). Empty in a
-# workspace with none, which pays for one `cargo metadata`.
+# names), `pgrx_majors` (one major per line, sorted), `pgrx_dirs` (each
+# extension's directory relative to the workspace root, one per line) and
+# `workspace_root`. Empty in a workspace with none, which pays for one
+# `cargo metadata`.
 pgrx_surface() {
-  local metadata surface record spec kind majors _dir
+  local metadata surface record spec kind majors dir
   pgrx_names=""
   pgrx_majors=""
+  pgrx_dirs=""
   metadata=$(cargo metadata --no-deps --format-version 1 --locked) || exit 1
+  workspace_root=$(jq -r '.workspace_root // empty' <<< "${metadata}") || exit 1
   surface=$("${ORG_PYTHON}" "${belt_dir}/gate_surface.py" <<< "${metadata}") || exit 1
-  while IFS=$'\t' read -r record spec kind majors _dir; do
+  while IFS=$'\t' read -r record spec kind majors dir; do
     [[ ${record} == crate && ${kind} == pgrx ]] || continue
     pgrx_names="${pgrx_names} ${spec%@*}"
     pgrx_majors="${pgrx_majors}${pgrx_majors:+,}${majors}"
+    pgrx_dirs="${pgrx_dirs}${dir}"$'\n'
   done <<< "${surface}"
   pgrx_majors=$(tr ',' '\n' <<< "${pgrx_majors}" | sed '/^$/d' | sort -un)
 }
@@ -325,13 +332,41 @@ if [[ ${legs} == pgrx-majors ]]; then
   exit 0
 fi
 
+# regex_quote <text>: the text as a regex matching it literally, every
+# metacharacter of the regex crate's syntax escaped (`--ignore-filename-
+# regex` is read by cargo-llvm-cov, in Rust).
+regex_quote() {
+  local text="$1" quoted="" char i
+  for ((i = 0; i < ${#text}; i++)); do
+    char=${text:i:1}
+    case "${char}" in
+      [][\\.*^\$+?\(\){}\|]) quoted+="\\${char}" ;;
+      *) quoted+=${char} ;;
+    esac
+  done
+  printf '%s' "${quoted}"
+}
+
 # The Rust measurement surface, shared by the `rust` and `rust-branches`
-# legs (#1359) so the line figure and the branch figure are taken over
-# one workspace: the llvm-tools assertion for the toolchain the leg
-# runs on, and the members held out. Sets `excludes`. The toolchain is
-# empty for the repository's stable pin.
+# legs (#1359): the llvm-tools assertion for the toolchain the leg runs
+# on, and the pgrx extensions held out. Sets `excludes` (rust-branches'
+# `--exclude` list) and pgrx_surface's variables. The toolchain is empty
+# for the repository's stable pin.
 rust_surface() {
-  local toolchain="$1" member name installed
+  local toolchain="$1" name installed
+  # COVERAGE_EXCLUDE is removed (#1653). The rust leg measures what the
+  # test task's own command builds, so a member it leaves out is left out
+  # by that command, where a reviewer reads it; a second list beside it
+  # is a second statement of the same surface, which drifts. Refused by
+  # name in both legs, whatever it names.
+  if [[ -n ${COVERAGE_EXCLUDE:-} ]]; then
+    echo "${label}: COVERAGE_EXCLUDE is set (${COVERAGE_EXCLUDE}) — it is removed (#1653):" >&2
+    echo "  the rust leg measures what the test task's own command builds, so the command" >&2
+    echo "  says what it leaves out (cargo test --workspace --exclude <member>); delete" >&2
+    echo "  the variable from mise.toml's [env] (a pgrx extension needs no line: test:pgrx" >&2
+    echo "  measures it)" >&2
+    exit 1
+  fi
   # No task-time rustup, by rule: a component installed mid-run races
   # every other task driving the toolchain (measured twice on the lab's
   # v0.18.0 release PR, #117). llvm-tools is a declared build input —
@@ -356,47 +391,59 @@ rust_surface() {
   # (#1652). It leaves this leg's surface, so its lines are counted once,
   # by the leg that can cover them — and this leg needs no Postgres.
   pgrx_surface
-  # COVERAGE_EXCLUDE ([env] in the repository's mise.toml): workspace
-  # members whose tests cannot run on the gate runner. Never a pgrx
-  # extension: the belt measures that through test:pgrx (#917, #1656),
-  # and a list that names one states a hole that is not there.
   excludes=""
-  for member in ${COVERAGE_EXCLUDE:-}; do
-    for name in ${pgrx_names}; do
-      [[ ${member} != "${name}" ]] || {
-        echo "${label}: COVERAGE_EXCLUDE names the pgrx extension ${member} — delete it from the" >&2
-        echo "  list: the extension is measured through test:pgrx, never held out (#917, #1656)" >&2
-        exit 1
-      }
-    done
-    excludes="${excludes} --exclude ${member}"
-  done
   for name in ${pgrx_names}; do excludes="${excludes} --exclude ${name}"; done
 }
 
 if [[ -f Cargo.toml && ${legs} =~ ^(all|rust)$ ]]; then
   rust_surface ""
-  # `--json --summary-only` rather than `--fail-under-lines`: the release
-  # path needs the NUMBER, and a leg that only ever answers pass/fail
-  # cannot derive a floor. The comparison is unchanged — measured against
-  # a fixture, --fail-under-lines 61.5 passes and 61.6 fails at
-  # `.data[0].totals.lines.percent` 61.53846153846154, so comparing the
-  # extracted percentage is the same test with the number visible.
+  # The repository's own `test` run, measured where it ran (#1653): its
+  # test command ran through `measured`, which instrumented every cargo it
+  # started into the directory rust-coverage-env.sh derives, so the figure
+  # is the build the gate tests, its features and doctests counted, and
+  # the suite runs once. This leg builds and runs nothing: under the same
+  # environment, `cargo llvm-cov report` renders what that run wrote.
+  # coverage:check depends on `test`, so a suite that failed never
+  # reaches here: `report` itself exits 0 after a failed run (probed), and
+  # a lower figure from a failed suite could become a floor.
   #
-  # The run writes lcov.info, the report Codecov receives, and the
-  # number is read out of that same file (#1528): one run is both the
-  # floor's measurement and the badge's upload, where they were two
-  # `cargo llvm-cov` runs in two jobs. `cargo llvm-cov report` cannot
-  # render a second format from the run instead: it takes no
-  # `--exclude`, so it would report the members COVERAGE_EXCLUDE left
-  # out. Lines found and hit (LF, LH) summed over every file are the
+  # shellcheck source=mise/rust-coverage-env.sh
+  . "${belt_dir}/rust-coverage-env.sh"
+  org_rust_coverage_env "${label}"
+  # Profiles count only when this run's `measured` made its marker: the
+  # profiles of an earlier run whose command no longer runs through it
+  # would otherwise read as this one's.
+  if [[ -z ${ORG_COVERAGE_RUN:-} || ! -d ${ORG_COVERAGE_RUN}/rust ]] \
+    || ! compgen -G "$(dirname "${LLVM_PROFILE_FILE:-/nonexistent/x}")/*.profraw" > /dev/null; then
+    echo "${label}: the test task ran no measured Rust — its test command runs" >&2
+    cat >&2 << 'REMEDY'
+  through "${ORG_BELT_DIR}/measured" (#1653), or no suite ran under mise
+REMEDY
+    exit 1
+  fi
+  # The extension's files leave the report by path (#1656): `report`
+  # takes no `--exclude`, and the command may well have built it. Each
+  # extension's directory under the workspace root, every regex
+  # metacharacter escaped; the root package's own targets where the
+  # extension is the root package.
+  ignore=()
+  while IFS= read -r dir; do
+    [[ -n ${dir} && ${dir} != - ]] || continue
+    if [[ ${dir} == . ]]; then
+      at=$(regex_quote "${workspace_root}")
+      ignore+=(--ignore-filename-regex "^${at}/(src|tests|benches|examples)/|^${at}/build\.rs$")
+    else
+      at=$(regex_quote "${workspace_root}/${dir}")
+      ignore+=(--ignore-filename-regex "^${at}/")
+    fi
+  done <<< "${pgrx_dirs}"
+  cargo llvm-cov report ${ignore[@]+"${ignore[@]}"} --lcov --output-path "${out}/lcov.info" >&2
+  # The number is read out of lcov.info, the report Codecov receives
+  # (#1528): one run is both the floor's measurement and the badge's
+  # upload. Lines found and hit (LF, LH) summed over every file are the
   # json summary's `.data[0].totals.lines` count and covered: measured
-  # equal on a two-member workspace, 7/17 whole and 5/11 with one
-  # member excluded.
-  #
-  # shellcheck disable=SC2086  # ${excludes} is a built '--exclude <member>' list,
-  # which cargo must receive as separate arguments
-  cargo llvm-cov --workspace --locked ${excludes} --lcov --output-path "${out}/lcov.info" >&2
+  # equal on a two-member workspace, 7/17 whole and 5/11 with one member
+  # excluded.
   rust_pct=$(awk -F: '
     $1 == "LF" { found += $2 }
     $1 == "LH" { hit += $2 }

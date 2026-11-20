@@ -244,6 +244,9 @@ org_pgrx_provision() { # usage: org_pgrx_provision <label> <held-out members>
   # the last place a repository still declared a pgrx crate, and an
   # exclusion there is CLIPPY_EXCLUDE under a better name — a coverage
   # floor derived from a surface missing an entire published artifact.
+  # COVERAGE_EXCLUDE itself is removed (#1653) and refused by name by the
+  # Rust coverage legs; both callers here, the mutation and semver audits,
+  # pass an empty held-out list.
   #
   # A workspace with no extension returns before sourcing anything else,
   # so it pays for one `cargo metadata` and nothing more.

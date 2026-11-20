@@ -31,8 +31,12 @@
 #            `-exec=<belt>/go-test-exec`, and GOCOVERDIR names the run's
 #            directory, so every test binary writes its counters there
 #            (#1651).
-#
-# Rust (#1653) adds its own here.
+#   rust     in a tree with Cargo.toml, CARGO_TARGET_DIR names a directory
+#            of the measurement's own and what `cargo llvm-cov show-env`
+#            prints for it is exported (rust-coverage-env.sh), so every
+#            cargo the command starts is instrumented there; the first
+#            call in the run removes the profiles earlier runs left
+#            (#1653).
 #
 # coverage:check reads the run directory after `test` ends. A
 # repository whose suite does not run through this script leaves no
@@ -198,6 +202,58 @@ if [[ -f ${root}/go.mod ]]; then
   export GOCOVERDIR="${run}/go"
   cover="-cover -coverpkg=./... -covermode=atomic -exec=${belt}/go-test-exec"
   export GOFLAGS="${GOFLAGS:+${GOFLAGS} }${cover}"
+fi
+
+# rust: the repository's own command, instrumented (#1653). CARGO_TARGET_DIR
+# names `<target_directory>/llvm-cov-target` and what `cargo llvm-cov
+# show-env` prints for it is exported, in that order (rust-coverage-env.sh,
+# shared with the rust leg, says why): every cargo the command starts
+# builds instrumented into that directory and writes its profiles there,
+# from any number of cargo runs, features, doctests and all. The rust leg
+# renders them with `cargo llvm-cov report` and builds nothing.
+#
+# The instrumentation rides RUSTC_WRAPPER and LLVM_PROFILE_FILE, in a
+# target directory of its own. A test command that sets any of the three
+# would replace what this rests on, and one that runs `cargo llvm-cov`
+# measures itself a second way: each is refused here by name, before
+# anything runs.
+refuse_rust() { # usage: refuse_rust <what>
+  echo "measured: $1, which would measure Rust a second way or" >&2
+  echo "  replace the measurement's own (#1653); drop it: the rust leg measures every" >&2
+  echo "  cargo the test command starts, instrumented into a target directory of its own" >&2
+  exit 1
+}
+if [[ -f ${root}/Cargo.toml ]]; then
+  for name in CARGO_TARGET_DIR RUSTC_WRAPPER LLVM_PROFILE_FILE; do
+    if [[ -n ${!name:-} ]]; then
+      refuse_rust "the environment's ${name} is set (${name}=${!name})"
+    fi
+  done
+  # The words of each argument, read the way a shell would split them: a
+  # `cargo` (a `+toolchain` may follow it) then `llvm-cov`, or the
+  # subcommand's own binary.
+  prev=""
+  for arg in "$@"; do
+    read -ra words <<< "${arg}"
+    for word in ${words[@]+"${words[@]}"}; do
+      case "${word##*/}" in
+        cargo-llvm-cov) refuse_rust "${word} is in the test command" ;;
+        llvm-cov) [[ ${prev##*/} != cargo ]] || refuse_rust "cargo llvm-cov is in the test command" ;;
+        *) ;;
+      esac
+      [[ ${word} == +* ]] || prev=${word}
+    done
+  done
+  # shellcheck source=mise/rust-coverage-env.sh
+  . "${belt}/rust-coverage-env.sh"
+  org_rust_coverage_env measured
+  # Old profiles go once per run, by its first call: a restored cache or
+  # an earlier run cannot add to the figure, and a second call in the same
+  # run keeps the first one's. mkdir is the marker, and atomic, so of two
+  # calls starting side by side exactly one cleans.
+  if mkdir "${run}/rust" 2> /dev/null; then
+    cargo llvm-cov clean --profraw-only >&2 || exit 1
+  fi
 fi
 
 # plpgsql: one report per run; a value already set is kept.

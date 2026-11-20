@@ -29,7 +29,7 @@ honestly blocked on.
 | rekor-monitor (org-owned workflow) | Fulcio certificate-log watch for forged signer identities (#1237), run by `stele assert signer-certificates` (#1339) — the reason the id-token rule was narrowed |
 | Renovate (org preset, zero-age canon fan-out) | Pin freshness; the release-age quarantine |
 | OSV via `audit:blast-radius` | Malicious-package and advisory sweep over every published SBOM |
-| cargo-llvm-cov + `.coverage-floor` ratchet | Derived coverage floor in the gate (`coverage:check`), re-derived by the release path, codecov badge feed off-gate; Rust branches as a floor of their own (`rust-branches`, #1359), measured with `--branch` on the repo's dated nightly and held by the Monday audit (`audit:coverage-branches`), never the gate |
+| cargo-llvm-cov + `.coverage-floor` ratchet | Derived coverage floor in the gate (`coverage:check`), measured on the repository's own `test` run through `measured` and rendered by `cargo llvm-cov report` (#1653), re-derived by the release path, codecov badge feed off-gate; Rust branches as a floor of their own (`rust-branches`, #1359), measured with `--branch` on the repo's dated nightly and held by the Monday audit (`audit:coverage-branches`), never the gate |
 | coverage.py (`pipx:` backend via aqua-backed uv) | The `python` and `python-branches` legs of the same ratchet (#1331): the repository's own `test` task run under coverage, child processes included, statements and branches |
 | vitest's own coverage provider (the repository's, not the belt's) | The `typescript` and `typescript-branches` legs of the same ratchet (#1357): the repository's vitest under the provider its lockfile pins, lines and branches; the belt pins neither |
 | plpgsql_check (the repository's test stack, never a published image; the belt pins nothing) | The `plpgsql` and `plpgsql-branches` legs of the same ratchet (#1547): `mise/plpgsql_coverage.py` reads the profiler's statement and branch coverage in the suite's teardown, through the repository's own `psql` |
@@ -2251,6 +2251,59 @@ a GOCOVERDIR already set, are refused by `measured` by name: each would
 measure a second way or replace the program this rests on. A tree with
 go.mod and no `test` task keeps the leg's own command, named.
 
+**The rust leg measures the repository's own `test` task, once**
+(#1653). The leg ran a build and a command of its own, `cargo llvm-cov
+--workspace --locked …`: a second build and a second run of the suite,
+with the belt's flags and not the repository's, no doctest and none of
+its features. Measured cold on 2026-11-19: release-lab's `test` took
+9 s, the leg 86 s, the task's own command instrumented 10 s; edtf's
+25 s, 89 s and 27 to 29 s. Apart from the pgrx crate every file's
+covered lines were identical between the two forms.
+
+`measured` instruments the command where it runs. In a tree with
+`Cargo.toml` it exports CARGO_TARGET_DIR as
+`<target_directory>/llvm-cov-target` (the directory `cargo llvm-cov`
+itself uses) and then what `cargo llvm-cov show-env --sh` prints for
+it, so every cargo the command starts builds instrumented there; the
+rust leg runs `cargo llvm-cov report` under the same environment and
+builds nothing. The two share one sourced derivation,
+`mise/rust-coverage-env.sh`. Measured with cargo-llvm-cov 0.9.1 on
+release-lab:
+
+- The order is the mechanism. With CARGO_TARGET_DIR exported first,
+  LLVM_PROFILE_FILE is under it: the task's command wrote 3 profiles
+  and `report` rendered 24 lines in 3 files. Exported after, the
+  profiles went to the repository's own `target/` and `report` failed.
+- A directory of its own, never the plain build's. The
+  instrumentation rides RUSTC_WRAPPER, which cargo's fingerprint does
+  not see: an instrumented run into a directory a plain `cargo test`
+  had just built reused its binaries and wrote no profile.
+- `report` exits 0 after a failed suite. The suite's exit status gates
+  the figure: `coverage:check` depends on `test`, so mise never runs
+  it after a red one.
+
+The first `measured` call in a run removes old profiles (`cargo llvm-cov
+clean --profraw-only`), its marker a directory in the run's directory,
+so a restored cache or an earlier run cannot add to the figure and a
+second call in the same run keeps the first one's profiles. The leg
+reads profiles only beside that marker: no profile, or none from this
+run, is red by name, naming the `measured` prefix (#1666). A pgrx
+extension the command builds leaves the report by path
+(`--ignore-filename-regex` over the extension's directory): its
+functions run in the Postgres backend and `test:pgrx` measures them.
+COVERAGE_EXCLUDE is removed: the command says what it leaves out, and
+the variable set is refused by name in both Rust legs. A CARGO_TARGET_DIR,
+RUSTC_WRAPPER or LLVM_PROFILE_FILE already set in the command's
+environment, or `cargo llvm-cov` in the command, is refused by
+`measured` by name, before anything runs. The `rust-branches` leg keeps
+a build and a command of its own: an instrumented nightly build cannot
+share the stable run. Rejected, so they are not re-proposed: adding
+`--all-features` to the belt's command (#1623), sharing `target/` with
+the plain build, a per-repository coverage-command variable (#1357),
+keeping the belt's own command where `test` does not use `measured`,
+reading the report whatever the suite's exit status, and a front for
+`cargo` on PATH (measured and withdrawn on #1667).
+
 **gobco, the Go branch figure, chosen against gocoverageplus** (#1546,
 under #1336's property 2, "takes every decision both ways"). Go's own
 `go test -cover` counts statements, and an `if` with no `else` has no
@@ -3472,8 +3525,10 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
   gate keeps its line leg and the branch figure is measured on the
   Monday cron: `audit:coverage-branches` in `repo-audit.yml`, on the
   nightly the repository already declares as `FUZZ_TOOLCHAIN` (no new
-  toolchain), over the workspace and exclusions the `rust` leg derives
-  (one function in `mise/coverage-measure.sh`). Its floor is a second
+  toolchain), with its own build over the workspace, the pgrx
+  extensions held out as the `rust` leg holds them (one function in
+  `mise/coverage-measure.sh`; #1653 took the `rust` leg onto the
+  repository's own run, which a nightly build cannot share). Its floor is a second
   line of `.coverage-floor`, `rust-branches <percent>`, derived by
   `coverage:adopt` from a measurement under the same law and band as
   the main floor; the release path carries it unchanged, since it

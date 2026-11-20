@@ -372,5 +372,175 @@ class GoMerged(unittest.TestCase):
                 self.assertEqual("ok", out)
 
 
+# A stand-in cargo, enough to follow the Rust mechanism (#1653): it logs
+# each call with the CARGO_TARGET_DIR it was started with, answers `cargo
+# metadata` with the planted tree's target directory, and `llvm-cov
+# show-env` as cargo-llvm-cov 0.9.1 does: the profile path is under the
+# CARGO_TARGET_DIR it is given, or under `target/` without one (probed on
+# release-lab). STUB_NO_TARGET answers a metadata with no target
+# directory.
+CARGO = """#!/usr/bin/env bash
+echo "$* | CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-}" >> "${STUB_LOG}"
+case "$1 ${2:-}" in
+  "metadata --no-deps")
+    if [[ -n ${STUB_NO_TARGET:-} ]]; then
+      echo '{"packages": []}'
+    else
+      printf '{"target_directory": "%s/target"}\\n' "${PWD}"
+    fi
+    ;;
+  "llvm-cov show-env")
+    dir=${CARGO_TARGET_DIR:-${PWD}/target}
+    echo "export LLVM_PROFILE_FILE='${dir}/tree-%p-%8m.profraw'"
+    echo "export RUSTC_WRAPPER=/stub/cargo-llvm-cov"
+    echo "export CARGO_LLVM_COV_TARGET_DIR=${dir}"
+    ;;
+  "llvm-cov clean") ;;
+  *) ;;
+esac
+"""
+# What a row expects when the stand-in cargo was never called.
+NO_CALLS: list[str] = []
+RUST_REFUSAL = (
+    "which would measure Rust a second way or\n"
+    "  replace the measurement's own (#1653); drop it: the rust leg measures every\n"
+    "  cargo the test command starts, instrumented into a target directory of its own\n"
+)
+
+
+class RustInstrumented(unittest.TestCase):
+    """In a tree with Cargo.toml the command's own cargo is instrumented (#1653)."""
+
+    @staticmethod
+    def rust_run(
+        tmp: str, argv: list[str], *, run_name: str = "run", **given: str
+    ) -> tuple[Path, subprocess.CompletedProcess[str], list[str]]:
+        """Run `measured` in a floored Rust tree, beside a stand-in cargo.
+
+        Returns:
+            The tree, the finished process, and cargo's log of calls.
+
+        """
+        base = Path(tmp)
+        tree = base / "tree"
+        if not tree.exists():
+            tree = plant(base, floor=True)
+            (tree / "Cargo.toml").write_text("[workspace]\n", encoding="utf-8")
+            stubs = base / "stubs"
+            stubs.mkdir()
+            (stubs / "cargo").write_text(CARGO, encoding="utf-8")
+            (stubs / "cargo").chmod(0o755)
+        log = base / "cargo.log"
+        path = f"{base / 'stubs'}{os.pathsep}{os.environ['PATH']}"
+        out = run(
+            tree,
+            argv,
+            ORG_COVERAGE_RUN=str(base / run_name),
+            PATH=path,
+            STUB_LOG=str(log),
+            **given,
+        )
+        calls = log.read_text().splitlines() if log.exists() else []
+        return tree.resolve(), out, calls
+
+    def test_the_target_directory_is_set_before_show_env_is_asked(self) -> None:
+        """`<target>/llvm-cov-target`, exported, then show-env asked under it."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tree, out, calls = self.rust_run(tmp, DUMP)
+            self.assertEqual(0, out.returncode, out.stderr)
+            seen = environment(out.stdout)
+            target = f"{tree}/target/llvm-cov-target"
+            self.assertEqual(target, seen["CARGO_TARGET_DIR"])
+            self.assertEqual(f"{target}/tree-%p-%8m.profraw", seen["LLVM_PROFILE_FILE"])
+            self.assertEqual("/stub/cargo-llvm-cov", seen["RUSTC_WRAPPER"])
+            self.assertIn(f"llvm-cov show-env --sh | CARGO_TARGET_DIR={target}", calls)
+
+    def test_old_profiles_are_cleaned_once_per_run(self) -> None:
+        """Two calls in one run clean once; the next run cleans again."""
+        with tempfile.TemporaryDirectory() as tmp:
+            calls: list[str] = []
+            for run_name in ("run", "run", "next"):
+                _, out, calls = self.rust_run(tmp, DUMP, run_name=run_name)
+                self.assertEqual(0, out.returncode, out.stderr)
+            target = f"{Path(tmp).resolve()}/tree/target/llvm-cov-target"
+            cleaned = [c for c in calls if c.startswith("llvm-cov clean")]
+            twice: list[str] = [
+                f"llvm-cov clean --profraw-only | CARGO_TARGET_DIR={target}"
+            ] * 2
+            self.assertEqual(twice, cleaned)
+
+    def test_no_cargo_toml_is_handed_no_rust_environment(self) -> None:
+        """A floored tree that is not Rust: no cargo is asked anything."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = plant(Path(tmp), floor=True)
+            out = run(tree, DUMP, ORG_COVERAGE_RUN=str(Path(tmp) / "run"))
+            self.assertEqual(0, out.returncode, out.stderr)
+            seen = environment(out.stdout)
+            self.assertNotIn("CARGO_TARGET_DIR", seen)
+            self.assertNotIn("LLVM_PROFILE_FILE", seen)
+
+    def test_a_metadata_with_no_target_directory_is_refused(self) -> None:
+        """Nowhere to measure into: refused by name, and nothing runs."""
+        with tempfile.TemporaryDirectory() as tmp:
+            _, out, calls = self.rust_run(
+                tmp, [SH, "-c", "echo ran"], STUB_NO_TARGET="1"
+            )
+            self.assertEqual(1, out.returncode)
+            self.assertEqual(
+                "measured: cargo metadata named no target_directory — nowhere to"
+                " measure Rust into\n",
+                out.stderr,
+            )
+            self.assertEqual("", out.stdout)
+            self.assertNotIn("show-env", "\n".join(calls))
+
+    def test_a_task_that_measures_itself_is_refused(self) -> None:
+        """Item 10's four, by message, before cargo is asked anything."""
+        cargo_cmd = [SH, "-c", "cargo test && cargo llvm-cov --lcov"]
+        for argv, given, named in (
+            (
+                DUMP,
+                {"CARGO_TARGET_DIR": "/own"},
+                "the environment's CARGO_TARGET_DIR is set (CARGO_TARGET_DIR=/own)",
+            ),
+            (
+                DUMP,
+                {"RUSTC_WRAPPER": "sccache"},
+                "the environment's RUSTC_WRAPPER is set (RUSTC_WRAPPER=sccache)",
+            ),
+            (
+                DUMP,
+                {"LLVM_PROFILE_FILE": "/own/%p.profraw"},
+                (
+                    "the environment's LLVM_PROFILE_FILE is set"
+                    " (LLVM_PROFILE_FILE=/own/%p.profraw)"
+                ),
+            ),
+            (cargo_cmd, {}, "cargo llvm-cov is in the test command"),
+            (
+                ["/usr/bin/cargo", "+nightly", "llvm-cov", "test"],
+                {},
+                "cargo llvm-cov is in the test command",
+            ),
+            (
+                ["/opt/bin/cargo-llvm-cov", "llvm-cov", "test"],
+                {},
+                "/opt/bin/cargo-llvm-cov is in the test command",
+            ),
+        ):
+            with self.subTest(named=named), tempfile.TemporaryDirectory() as tmp:
+                _, out, calls = self.rust_run(tmp, argv, **given)
+                self.assertEqual(1, out.returncode, out.stderr)
+                self.assertEqual(f"measured: {named}, {RUST_REFUSAL}", out.stderr)
+                self.assertEqual(NO_CALLS, calls)
+
+    def test_llvm_cov_outside_a_cargo_is_not_refused(self) -> None:
+        """A word `llvm-cov` no cargo starts is the command's own."""
+        with tempfile.TemporaryDirectory() as tmp:
+            _, out, _ = self.rust_run(tmp, [SH, "-c", "echo llvm-cov"])
+            self.assertEqual(0, out.returncode, out.stderr)
+            self.assertEqual("llvm-cov\n", out.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

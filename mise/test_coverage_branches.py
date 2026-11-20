@@ -60,19 +60,26 @@ rust-branches 70.0
 """
 
 # cargo: `metadata` is a workspace with no pgrx extension, so the shared
-# provisioning returns after one call; `llvm-cov` logs its argv and the
-# toolchain it ran under, and prints the planted totals. With `--branch`
-# it reports branches; without, branches read as an uninstrumented run
-# does (count 0, measured on stable 1.97.1). With `--lcov` (the line leg
-# since #1528) it writes the report to `--output-path` instead, the
-# planted line figure as lines hit of 100 found.
+# provisioning returns after one call; `llvm-cov show-env` answers as
+# cargo-llvm-cov 0.9.1 does, unlogged; every other `llvm-cov` logs its
+# argv and the toolchain it ran under, and prints the planted totals.
+# With `--branch` it reports branches; without, branches read as an
+# uninstrumented run does (count 0, measured on stable 1.97.1). With
+# `--lcov` (the line leg's `report`, #1528, #1653) it writes the report
+# to `--output-path` instead, the planted line figure as lines hit of
+# 100 found.
 CARGO = """\
 #!/usr/bin/env bash
 case "$1" in
   metadata)
-    echo '{"packages": [], "workspace_members": [], "workspace_root": "/w"}'
+    printf '{"packages": [], "workspace_members": [], "workspace_root": "%s",' "${PWD}"
+    printf ' "target_directory": "%s/target"}\\n' "${PWD}"
     ;;
   llvm-cov)
+    if [[ $2 == show-env ]]; then
+      echo "export LLVM_PROFILE_FILE='${CARGO_TARGET_DIR}/tree-%p-%8m.profraw'"
+      exit 0
+    fi
     echo "${RUSTUP_TOOLCHAIN:-stable} $*" >> "${STUB_LOG}"
     if [[ " $* " == *" --lcov "* ]]; then
       out=""
@@ -163,6 +170,12 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
     if cargo_toml:
         (tree / "Cargo.toml").write_text("[workspace]\n", encoding="utf-8")
         tracked.append("Cargo.toml")
+        # What the test task's measured `cargo test` left (#1653): this
+        # run's marker and one profile.
+        (tmp / "run" / "rust").mkdir(parents=True)
+        profiles = tree / "target" / "llvm-cov-target"
+        profiles.mkdir(parents=True)
+        (profiles / "tree-1-1.profraw").write_text("", encoding="utf-8")
     if floor is not None:
         (tree / ".coverage-floor").write_text(floor, encoding="utf-8")
         tracked.append(".coverage-floor")
@@ -179,6 +192,7 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
         "STUB_LINES": lines,
         "STUB_INSTALLED": installed or "",
         "COVERAGE_EXCLUDE": exclude,
+        "ORG_COVERAGE_RUN": str(tmp / "run"),
         # Outside the tree, as the gate job names it (#1628).
         "ORG_COVERAGE_REPORTS": str(tmp / "reports"),
     }
@@ -202,10 +216,9 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
     return done, tmp
 
 
-# The line leg's one call, its report in the row's reports directory.
-LINE_RUN = (
-    "stable llvm-cov --workspace --locked --lcov --output-path <reports>/lcov.info"
-)
+# The line leg's one call, its report in the row's reports directory:
+# it renders the test task's own measured run (#1653).
+LINE_RUN = "stable llvm-cov report --lcov --output-path <reports>/lcov.info"
 
 
 class BranchCase(unittest.TestCase):
@@ -281,19 +294,17 @@ class AuditRows(BranchCase):
         )
         self.assertEqual([], calls)
 
-    def test_the_exclusions_are_the_rust_legs(self) -> None:
-        """COVERAGE_EXCLUDE reaches the branch run as it reaches the line run."""
+    def test_coverage_exclude_is_refused_as_the_rust_leg_refuses_it(self) -> None:
+        """The removed variable reds the branch run by name, before any run (#1653)."""
         done, _, calls = self.run_task(self.TASK, exclude="lab-wasm lab-cli")
-        self.assertEqual(0, done.returncode, done.stderr)
-        self.assertEqual(
-            [
-                (
-                    f"{NIGHTLY} llvm-cov --workspace --locked --exclude lab-wasm"
-                    " --exclude lab-cli --branch --json --summary-only"
-                ),
-            ],
-            calls,
+        self.assertEqual(1, done.returncode, done.stderr)
+        self.assertIn(
+            "audit:coverage-branches: COVERAGE_EXCLUDE is set (lab-wasm lab-cli) —"
+            " it is removed (#1653):\n  the rust leg measures what the test task's"
+            " own command builds, so the command\n",
+            done.stderr,
         )
+        self.assertEqual([], calls)
 
     def test_an_undeclared_nightly_reds_by_name(self) -> None:
         """A committed line with no FUZZ_TOOLCHAIN cannot be held, and says so."""

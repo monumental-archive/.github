@@ -2,7 +2,8 @@
 """Table tests for test:pgrx's measured run, mise/pgrx-test.sh (#1656).
 
 A pgrx extension's functions run inside the Postgres backend, which the
-rust leg's `cargo llvm-cov --workspace` never collected from, so every
+rust leg's `cargo llvm-cov --workspace` never collected from (the leg
+now reads the test task's own run, #1653), so every
 line of one read as zero (#1652: 0 of 18 on release-lab, 0 of 143 on
 edtf). Its own suite is the only thing that executes it, so where the
 repository holds a `.coverage-floor`, test:pgrx builds each major's run
@@ -94,10 +95,6 @@ case "$1 $2" in
     ;;
   "llvm-cov clean") ;;
   "llvm-cov report") lcov ;;
-  "llvm-cov --workspace")
-    printf 'SF:%s/crates/core/src/lib.rs\nLF:10\nLH:9\nend_of_record\n' "${PWD}" \
-      > "${out}"
-    ;;
   "pgrx test")
     [[ -z ${PLANT_FAIL:-} ]] || exit 101
     if [[ -z ${PLANT_NO_PROFILE:-} && -n ${LLVM_PROFILE_FILE:-} ]]; then
@@ -426,11 +423,27 @@ class PlainOrRefused(Planted):
 class CoverageTasks(Planted):
     """coverage:check leaves the extension to test:pgrx; `pgrx` measures it."""
 
+    def measured_run(self) -> dict[str, str]:
+        """Leave what the test task's measured `cargo test` leaves (#1653).
+
+        Returns:
+            The run's directory, as the belt's `[env]` names it.
+
+        """
+        run = self.tmp / "run"
+        (run / "rust").mkdir(parents=True)
+        profiles = self.tree / "target" / "llvm-cov-target"
+        profiles.mkdir(parents=True)
+        (profiles / "lab-1-1.profraw").touch()
+        return {"ORG_COVERAGE_RUN": str(run)}
+
     def test_check_runs_no_suite_names_the_legs_and_excludes_the_crate(self) -> None:
-        """Zero suite runs, both majors named, lab-pg out of the rust leg."""
+        """Zero suite runs, both majors named, lab-pg's files out of the report."""
         self.floor()
         body = task_body("coverage:check")
-        done, log = self.run_bash(["-c", body])
+        done, log = self.run_bash(
+            ["-c", body], PLANT_LF="10", PLANT_LH="9", **self.measured_run()
+        )
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertEqual(NOTHING, self.suites(log))
         for major in MAJORS:
@@ -438,25 +451,32 @@ class CoverageTasks(Planted):
                 f"coverage:check: pgrx-pg{major}: measured and held by test:pgrx",
                 done.stderr,
             )
-        (workspace,) = [ln for ln in log if ln.startswith("cargo llvm-cov --workspace")]
-        self.assertTrue(
-            workspace.startswith(
-                "cargo llvm-cov --workspace --locked --exclude lab-pg --lcov"
-            ),
-            workspace,
+        (report,) = [ln for ln in log if ln.startswith("cargo llvm-cov report")]
+        ext = "".join(
+            f"\\{c}" if c in "[]\\.*^$+?(){}|" else c
+            for c in str(self.tree / "crates" / "lab-pg")
         )
+        self.assertTrue(
+            report.startswith(
+                f"cargo llvm-cov report --ignore-filename-regex ^{ext}/ --lcov"
+            ),
+            report,
+        )
+        built = [ln for ln in log if ln.startswith("cargo llvm-cov --workspace")]
+        self.assertEqual(NOTHING, built)
         self.assertIn(
             "coverage:check: rust leg holds the floor 80.0 (90%)", done.stdout
         )
 
     def test_coverage_exclude_naming_the_extension_is_refused(self) -> None:
-        """A list that names it states a hole that is not there."""
+        """The removed variable is refused whatever it names (#1653)."""
         self.floor()
         body = task_body("coverage:check")
         done, _ = self.run_bash(["-c", body], COVERAGE_EXCLUDE="lab-pg")
         self.assertEqual(1, done.returncode)
         self.assertIn(
-            "coverage:check: COVERAGE_EXCLUDE names the pgrx extension lab-pg",
+            "coverage:check: COVERAGE_EXCLUDE is set (lab-pg) — it is removed"
+            " (#1653):\n",
             done.stderr,
         )
 
