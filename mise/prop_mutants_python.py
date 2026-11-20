@@ -1,101 +1,129 @@
 #!/usr/bin/env python3
-"""mutants_python.py's readers, on configs and listings nobody wrote.
+"""mutants_python.py's readers, on dumps, pragmas and plans nobody wrote.
 
-The properties of `test_mutants_python.py`'s fixed rows (#1555), over
-generated adoption configs, pragma records, results and diffs:
+The properties of `test_mutants_python.py`'s fixed rows (#1555, #1771):
 
-- Invariance (V): in either dialect (pyproject's `[tool.mutmut]` TOML
-  list, setup.cfg's indented value), an exclusion entry is a finding
-  exactly when no comment line stands directly above it, named at its
-  own line under its own key; a reasoned entry is counted instead.
-  Adding the reason clears it, removing it reds. Another section's
-  lists are never read.
-- Invariance (V): a pragma is reasoned exactly when ` -- ` and a word
-  follow it, and an `end` pragma owes nothing.
-- Round trip (T): a `mutmut results` listing reads back as its
-  killed, surviving and unjudged tallies; a mutant name built from a
-  function, or a method, reads back as that function (#1555: a method
-  whose name began `x_` lost the prefix).
-- Round trip (T): a survivor's removed line is found at its own line,
-  after its function's `def`.
-- Refusal (R): `scan`, `pragmas`, `read_results` and `read_show` read
-  any text and never raise.
+- Invariance (V): `cosmic-ray dump` read in any line order is the same
+  sorted list; the sort is (path, operator, occurrence).
+- Invariance (V): shards k/N for k in 0..N-1 judge every mutant
+  exactly once, each shard in the list's order.
+- Invariance (V): a pragma is reasoned exactly when it is the line form
+  and ` -- ` and a word follow it; `block`, `start` and `end` are each
+  refused by name.
+- Round trip (T): a shard spelt `k/N` reads back as (k, N) exactly when
+  0 <= k < N; a plan written by the leg's writer reads back as its
+  mutants, tests and line map.
+- Round trip (T): a line inside a statement maps to that statement's
+  first line, never past the line itself.
+- Refusal (R): `read_pragmas`, `read_dump` and `statement_lines` read
+  any text and never raise anything but the decoder's named refusal.
 
 Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
 """
 
+import contextlib
+import json
+import operator
 import unittest
 
+import decoded
 import mutants_python as mp
-from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
 
-KEY = st.sampled_from(["do_not_mutate", "do_not_mutate_patterns", "only_mutate"])
-ENTRY = st.from_regex(r"[a-z_*./]{1,12}", fullmatch=True)
 IDENT = st.from_regex(r"[a-z][a-z0-9_]{0,8}", fullmatch=True)
-Finding = tuple[int, str, str]
+MUTANT = st.builds(
+    mp.Mutant,
+    path=IDENT.map("{}.py".format),
+    operator=IDENT.map("core/{}".format),
+    occurrence=st.integers(0, 50),
+    line=st.integers(1, 500),
+    function=IDENT,
+    statement=st.integers(1, 500),
+)
+MUTANTS = st.lists(
+    MUTANT, max_size=12, unique_by=lambda m: (m.path, m.operator, m.occurrence)
+)
 
 
-@st.composite
-def config(draw: st.DrawFn, dialect: str) -> tuple[str, list[Finding], int]:
-    """Write an adoption config with exclusion lists.
+def dump_line(m: mp.Mutant) -> str:
+    """Write a mutant as one `cosmic-ray dump` line.
 
     Returns:
-        The text, the expected findings, and the reasoned count.
+        The JSON line.
 
     """
-    section = mp.SECTIONS[dialect]
-    lines = ["[other]", "do_not_mutate = [", '  "not.read",', "]", section]
-    findings: list[Finding] = []
-    reasoned = 0
-    for key in draw(st.lists(KEY, unique=True, max_size=3)):
-        lines.append(f"{key} = [" if dialect == "pyproject.toml" else f"{key} =")
-        for entry in draw(st.lists(ENTRY, max_size=4)):
-            explained = draw(st.booleans())
-            if explained:
-                mark = (
-                    "#" if dialect == "pyproject.toml" else draw(st.sampled_from("#;"))
-                )
-                lines.append(f"  {mark} {draw(ENTRY)} is equivalent")
-                if dialect == "pyproject.toml":
-                    lines += [""] * draw(st.integers(0, 1))
-            spelt = f'"{entry}",' if dialect == "pyproject.toml" else entry
-            lines.append(f"  {spelt}")
-            if explained:
-                reasoned += 1
-            else:
-                findings.append((len(lines), key, spelt.rstrip(",")))
-        if dialect == "pyproject.toml":
-            lines.append("]")
-        else:
-            lines.append("")
-    lines += ["[after]", "only_mutate = [", '  "not.read",', "]"]
-    return "\n".join(lines) + "\n", findings, reasoned
+    spec = {
+        "module_path": m.path,
+        "operator_name": m.operator,
+        "occurrence": m.occurrence,
+        "start_pos": [m.line, 0],
+        "end_pos": [m.line, 1],
+        "operator_args": {},
+        "definition_name": m.function,
+    }
+    return json.dumps([{"job_id": "j", "mutations": [spec]}, None])
 
 
-class Exclusions(unittest.TestCase):
-    """Each entry without a reason, by line and key."""
+def bare(m: mp.Mutant) -> mp.Mutant:
+    """Drop the statement line, which the dump does not carry.
 
-    @given(st.sampled_from(sorted(mp.SECTIONS)).flatmap(config))
-    def test_exactly_the_unexplained_entries(self, drawn: tuple) -> None:
-        """Named at their lines; reasoned ones counted; others unread."""
-        text, findings, reasoned = drawn
-        section = next(s for s in mp.SECTIONS.values() if s in text.splitlines())
-        got = mp.scan(text, section)
-        self.assertEqual(got.findings, findings, text)
-        self.assertEqual(got.listed, reasoned)
+    Returns:
+        The mutant as `read_dump` reads it.
 
-    @given(st.text(max_size=200), st.sampled_from(sorted(mp.SECTIONS.values())))
-    def test_any_text_is_scanned(self, text: str, section: str) -> None:
-        """Findings and a count, never a traceback."""
-        got = mp.scan(text, section)
-        self.assertGreaterEqual(got.listed, 0)
+    """
+    return mp.Mutant(m.path, m.operator, m.occurrence, m.line, m.function)
+
+
+class Dump(unittest.TestCase):
+    """The dump, in any order, is one sorted list."""
+
+    @given(
+        MUTANTS.flatmap(
+            lambda ms: st.tuples(
+                st.just(ms), st.permutations([dump_line(m) for m in ms])
+            )
+        )
+    )
+    def test_order_does_not_matter(
+        self, drawn: tuple[list[mp.Mutant], list[str]]
+    ) -> None:
+        """Lines in any order read back sorted by (path, operator, occurrence)."""
+        mutants, lines = drawn
+        got = mp.read_dump("\n".join(lines) + "\n")
+        self.assertEqual(got, sorted(bare(m) for m in mutants))
+        keys = [(m.path, m.operator, m.occurrence) for m in got]
+        self.assertEqual(keys, sorted(keys))
+
+    @given(st.text(max_size=200))
+    def test_any_text_is_read_or_refused_by_name(self, text: str) -> None:
+        """A list, or the decoder's own refusal."""
+        with contextlib.suppress(decoded.UndecodableError):
+            self.assertIsInstance(mp.read_dump(text), list)
+
+
+class Shards(unittest.TestCase):
+    """k/N partitions the sorted list."""
+
+    @given(MUTANTS, st.integers(1, 8))
+    def test_every_mutant_exactly_once(self, mutants: list[mp.Mutant], n: int) -> None:
+        """The shards' union is the list, each mutant in one shard."""
+        ordered = sorted(mutants)
+        shards = [mp.shard_of(ordered, k, n) for k in range(n)]
+        self.assertEqual(sorted(m for s in shards for m in s), ordered)
+        for shard in shards:
+            self.assertEqual(shard, sorted(shard))
+
+    @given(st.integers(0, 40), st.integers(0, 40))
+    def test_spelling_round_trips(self, k: int, n: int) -> None:
+        """`k/N` reads back exactly when 0 <= k < N."""
+        expected = (k, n) if k < n else None
+        self.assertEqual(mp.parse_shard(f"{k}/{n}"), expected)
 
 
 class Pragmas(unittest.TestCase):
-    """A reason after ` -- `, or `end`."""
+    """The line form, with a reason after ` -- `."""
 
     @given(
         st.lists(
@@ -106,96 +134,103 @@ class Pragmas(unittest.TestCase):
                 st.one_of(st.just(""), IDENT.map(" -- {}".format)),
             ),
             max_size=6,
+            unique_by=operator.itemgetter(0, 1),
         )
     )
-    def test_reasoned_or_bare(self, rows: list[tuple]) -> None:
-        """Bare sites by file:line; `end` never owes a reason."""
+    def test_reasoned_refused_or_by_form(
+        self, rows: list[tuple[str, int, str, str]]
+    ) -> None:
+        """Reasoned sites read back; every other one is refused by its site."""
         text = "".join(
             f"{f}.py\t{n}\t# pragma: no mutate{word}{reason}\n"
             for f, n, word, reason in rows
         )
-        sites, bare = mp.pragmas(text)
-        owed = [(f, n, r) for f, n, w, r in rows if w != " end"]
-        self.assertEqual(sites, sum(1 for _, _, r in owed if r))
-        self.assertEqual(bare, [f"{f}.py:{n}" for f, n, r in owed if not r])
-
-    @given(st.text(max_size=200))
-    def test_any_text_is_read(self, text: str) -> None:
-        """A count and a list, never a traceback."""
-        sites, bare = mp.pragmas(text)
-        self.assertGreaterEqual(sites, 0)
-        self.assertIsInstance(bare, list)
-
-
-STATE = st.sampled_from([
-    *sorted(mp.KILLED),
-    *sorted(mp.SURVIVED),
-    "suspicious",
-    "skipped",
-    "not checked",
-])
-
-
-class Results(unittest.TestCase):
-    """The listing's tallies, and the function behind each mutant."""
-
-    @given(st.lists(st.tuples(IDENT, IDENT, st.integers(1, 99), STATE), max_size=8))
-    def test_tallies_read_back(self, rows: list[tuple]) -> None:
-        """Killed, survivors in order, the rest unjudged."""
-        text = "".join(f"    pkg.{m}.x_{f}__mutmut_{n}: {s}\n" for m, f, n, s in rows)
-        got = mp.read_results(text)
-        self.assertEqual(got.total, len(rows))
-        self.assertEqual(got.killed, sum(1 for *_, s in rows if s in mp.KILLED))
+        got = mp.read_pragmas(text)
         self.assertEqual(
-            got.survivors,
-            [
-                (s, f"pkg.{m}.x_{f}__mutmut_{n}")
-                for m, f, n, s in rows
-                if s in mp.SURVIVED
-            ],
+            got.reasoned, {(f"{f}.py", n) for f, n, w, r in rows if not w and r}
         )
-        self.assertEqual(got.total, got.killed + len(got.survivors) + got.unjudged)
-
-    @given(IDENT, IDENT, st.one_of(st.none(), IDENT), st.integers(1, 99))
-    @example("a", "x_", "a", 1)
-    def test_function_of_round_trip(
-        self, module: str, func: str, cls: str | None, n: int
-    ) -> None:
-        """A function's or a method's mutant names it."""
-        name = f"x_{func}" if cls is None else f"xǁ{cls}ǁ{func}"
-        self.assertEqual(mp.function_of(f"pkg.{module}.{name}__mutmut_{n}"), func)
+        refused = [(f, n, w, r) for f, n, w, r in rows if w or not r]
+        self.assertEqual(len(got.refused), len(refused))
+        for (f, n, w, _), message in zip(refused, got.refused, strict=True):
+            self.assertTrue(message.startswith(f"{f}.py:{n}: "), message)
+            if w:
+                self.assertIn(f"no mutate{w} — only the line form", message)
 
     @given(st.text(max_size=200))
     def test_any_text_is_read(self, text: str) -> None:
-        """Tallies and a diff, never a traceback."""
-        self.assertGreaterEqual(mp.read_results(text).total, 0)
-        self.assertIsInstance(mp.read_show(text).file, str)
+        """Sites and refusals, never a traceback."""
+        got = mp.read_pragmas(text)
+        self.assertIsInstance(got.refused, list)
 
 
-class Locate(unittest.TestCase):
-    """The removed line, after its own def."""
+class Statements(unittest.TestCase):
+    """A line maps to the first line of the statement that holds it."""
+
+    @given(st.lists(st.integers(0, 3), min_size=1, max_size=6), st.data())
+    def test_continuation_lines_map_to_their_call(
+        self, extra: list[int], data: st.DataObject
+    ) -> None:
+        """Each line of a call spread over lines maps to the call's first."""
+        lines: list[str] = []
+        firsts: list[tuple[int, int]] = []
+        for n, more in enumerate(extra):
+            first = len(lines) + 1
+            lines.append(f"v{n} = f(" if more else f"v{n} = f()")
+            lines += ["    0," for _ in range(more)]
+            if more:
+                lines.append(")")
+            firsts.append((first, len(lines)))
+        spans = mp.statement_lines("\n".join(lines) + "\n")
+        first, last = data.draw(st.sampled_from(firsts))
+        line = data.draw(st.integers(first, last))
+        self.assertEqual(mp.statement_of(spans, line), first)
+
+    @given(st.text(max_size=200), st.integers(1, 50))
+    def test_any_source_never_maps_past_the_line(self, text: str, line: int) -> None:
+        """Never a traceback, never a later line."""
+        self.assertLessEqual(mp.statement_of(mp.statement_lines(text), line), line)
+
+
+class Plan(unittest.TestCase):
+    """What the writer writes, the reader reads."""
 
     @given(
-        st.lists(IDENT, min_size=1, max_size=4, unique=True),
+        MUTANTS,
+        st.lists(st.tuples(IDENT, st.integers(0, 10**6)), max_size=5),
         st.data(),
     )
-    def test_survivor_line(self, funcs: list[str], data: st.DataObject) -> None:
-        """The first line reading as the removed one at or after the def."""
-        lines: list[str] = []
-        where: dict[str, tuple[int, int]] = {}
-        for func in funcs:
-            lines.append(f"def {func}(x):")
-            start = len(lines)
-            body = data.draw(st.lists(IDENT, min_size=1, max_size=3, unique=True))
-            lines += [f"    {b} = x" for b in body]
-            where[func] = (start, start + 1)
-        func = data.draw(st.sampled_from(funcs))
-        start, first = where[func]
-        removed = lines[first - 1]
+    def test_round_trip(
+        self,
+        mutants: list[mp.Mutant],
+        tests: list[tuple[str, int]],
+        data: st.DataObject,
+    ) -> None:
+        """Mutants, tests and the line map come back as they went."""
+        lines: dict[str, dict[str, list[int]]] = {}
+        for m in mutants:
+            if tests:
+                indices = data.draw(
+                    st.lists(st.integers(0, len(tests) - 1), max_size=3)
+                )
+                lines.setdefault(m.path, {})[str(m.statement)] = indices
+        text = mp.to_json({
+            "head": "abc",
+            "command": "t {test}",
+            "mutants": [
+                [m.path, m.operator, m.occurrence, m.line, m.function, m.statement]
+                for m in mutants
+            ],
+            "tests": [list(t) for t in tests],
+            "lines": lines,
+        })
+        got = mp.read_plan(text)
+        self.assertEqual((got.head, got.command), ("abc", "t {test}"))
+        self.assertEqual(got.mutants, sorted(mutants))
+        self.assertEqual(got.tests, tests)
         self.assertEqual(
-            mp.locate("\n".join(lines) + "\n", func, removed + "  "), first
+            got.lines,
+            {(p, int(n)): v for p, per in lines.items() for n, v in per.items()},
         )
-        self.assertEqual(mp.locate("\n".join(lines) + "\n", func, "nowhere()"), start)
 
 
 if __name__ == "__main__":

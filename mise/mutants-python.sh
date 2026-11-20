@@ -1,66 +1,57 @@
 #!/usr/bin/env bash
-# The Python leg of `audit:mutants` (#1354): would the suite fail if the
-# code were wrong? Org canon. mutmut changes the code one site at a time
-# and runs the tests that reach it; a mutant the tests still pass is a
-# SURVIVOR, and a survivor is a named line to fix.
+# The Python leg of `audit:mutants` (#1354, #1771): would the suite fail
+# if the code were wrong? Org canon. cosmic-ray changes the TRACKED FILE
+# IN PLACE, one mutant at a time, and runs the repository's own tests
+# against it; a mutant the tests still pass is a SURVIVOR, and a
+# survivor is a named line to fix. No copy of the tree, no rewritten
+# imports, nothing a child process must be handed: a helper run as a
+# script in a child is judged like one a test imports.
 #
 # THE MEASURE IS "NO UNEXPLAINED SURVIVOR", NEVER A SCORE (#1336). Red
 # while any mutant is neither killed by an assertion nor excluded, with
 # a reason, at its site in the repository.
 #
-# ADOPTION IS THE TOOL'S OWN CONFIG. A repository adopts by tracking
-# `[tool.mutmut]` in pyproject.toml (or `[mutmut]` in setup.cfg), which
-# also names the paths to mutate and where the tests are: the roots stay
-# the repository's, never the belt's. Without it this skips clean, by
-# name.
+# ADOPTION IS `cosmic-ray.toml`, TRACKED AT THE REPOSITORY'S ROOT:
+# cosmic-ray's own `[cosmic-ray]` table (`module-path`,
+# `excluded-modules`, `test-command`, which runs ONE test file: the leg
+# fills `{test}`, `{dir}` and `{name}`) and the leg's `[audit-mutants]`
+# (`tests`, git pathspecs for the test files). The roots and the suite
+# stay the repository's. Without it this skips clean, by name.
 #
-# EVERY EXCLUSION CARRIES ITS REASON, at the site:
+# EVERY EXCLUSION CARRIES ITS REASON, at the site, on the mutant's first
+# line:
+#     x = 3  # pragma: no mutate -- the fixture's width, no caller
+# Only the line form exists: `block`, `start` and `end` are red by name.
 #
-#   - `# pragma: no mutate` (and its `block` and `start` forms) carries
-#     the reason in the same comment, after ` -- `:
-#         x = 3  # pragma: no mutate -- the fixture's width, no caller
-#     mutmut 3.8.1 reads only the first word after `no mutate`, so the
-#     reason never changes what is excluded. `end` closes a region and
-#     needs none.
-#   - every entry of the config's `do_not_mutate`,
-#     `do_not_mutate_patterns` and `only_mutate` lists sits on its own
-#     line with a `#` line above it saying why.
-#   - `mutate_only_covered_lines = true` is refused: it drops every line
-#     no test runs, which is exactly where the survivors are, with no
-#     reason anywhere.
+# THE PLAN, once per run: a dirty tracked tree under `module-path` is
+# refused; every mutant is listed and sorted; each test file is run
+# alone under coverage, for its time and the lines it executes (child
+# processes included). A mutant's tests are the files that execute its
+# first line, fastest first; none is "no tests", and nothing runs. Each
+# is limited to three times its planned time, at least 10 s, and
+# running over is a kill. The module's cached bytecode is removed around
+# each mutant, and the file must equal git's afterwards.
 #
-# WHAT COUNTS. From `mutmut results --all true`, one status per mutant:
-# killed, timeout, caught by type check and segfault are killed (the
-# suite noticed); survived and "no tests" are survivors — a mutant no
-# test reaches is the least explained of all; anything else
-# (suspicious, skipped, not checked, interrupted) was never judged and
-# is red by name.
+# WHAT COUNTS: killed, incompetent and a time limit are killed;
+# survived and "no tests" are survivors; any other worker outcome was
+# never judged and is red by name. EXCLUDED counts the mutants on
+# reasoned pragma lines, across the whole population.
 #
-# EXCLUDED COUNTS SITES, not mutants: mutmut never generates an excluded
-# mutant, so what there is to count is the reasoned pragmas and list
-# entries. The summary line says so.
+# SHARDS: MUTANTS_SHARD=k/N judges every mutant whose position in the
+# sorted list is k modulo N; 0/1 is all. `plan` writes the plan into
+# MUTANTS_PLAN and stops (repo-mutants.yml's plan job); a shard with
+# MUTANTS_PLAN set judges from the plan there. Unset, the plan is made
+# in scratch first. One mutant at a time per checkout, always.
 #
-# mutmut has no sharding (3.8.1 has no option for it), so the leg runs
-# whole: a shard other than 0/1 is red, never a silent re-run of
-# everything.
+# AN EXIT TRAP restores any file under `module-path` that differs from
+# git, whatever ended the run, once the clean-tree check has passed.
 #
 # THIS FILE IS THE SEQUENCE; mutants_python.py READS AND JUDGES (#1486).
-# The config's exclusion lists, the pragma reason rule, the mapping of
-# mutmut's states and the line locator are calls to the helper, so they
-# come under the canon's coverage figure and its own mutation run.
-#
-# Prints each survivor (file:line, the mutant, the changed line) and one
-# summary line: mutants, killed, survived, excluded.
 set -euo pipefail
 : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
 
 label="audit:mutants: python"
-
 shard="${MUTANTS_SHARD:-0/1}"
-if [[ ${shard} != 0/1 ]]; then
-  echo "${label}: MUTANTS_SHARD='${shard}' — mutmut cannot shard; the python jobs run one shard, 0/1" >&2
-  exit 1
-fi
 
 summary() { # summary <row>: the counts the totals job reads
   [[ -n ${MUTANTS_SUMMARY_DIR:-} ]] || return 0
@@ -68,31 +59,42 @@ summary() { # summary <row>: the counts the totals job reads
   printf '%s\n' "$1" > "${MUTANTS_SUMMARY_DIR}/python.tsv"
 }
 
-config=""
-if git ls-files --error-unmatch pyproject.toml > /dev/null 2>&1 \
-  && grep -q '^\[tool\.mutmut\]' pyproject.toml; then
-  config=pyproject.toml
-elif git ls-files --error-unmatch setup.cfg > /dev/null 2>&1 \
-  && grep -q '^\[mutmut\]' setup.cfg; then
-  config=setup.cfg
-fi
-if [[ -z ${config} ]]; then
-  echo "${label}: no [tool.mutmut] in a tracked pyproject.toml (or [mutmut] in setup.cfg), skipped"
-  summary "0/1"$'\t'"skipped"
+config=cosmic-ray.toml
+if ! git ls-files --error-unmatch "${config}" > /dev/null 2>&1; then
+  echo "${label}: no ${config} tracked at the repository's root, skipped"
+  [[ ${shard} == plan ]] || summary "${shard}"$'\t'"skipped"
   exit 0
 fi
 
 belt="${ORG_BELT_DIR:?unset — no belt}"
+helper=("${ORG_PYTHON}" "${belt}/mutants_python.py")
+listed=$("${helper[@]}" paths "${config}")
+paths=()
+while IFS= read -r p; do paths+=("${p}"); done <<< "${listed}"
+
+# Restores only after the clean-tree check passed: before it, a
+# difference is the user's own edit, never the leg's mutant.
+restore() {
+  [[ -n ${mutating:-} ]] || return 0
+  local f changed
+  changed=$(git diff --name-only -- "${paths[@]}") || changed=""
+  [[ -n ${changed} ]] || return 0
+  while IFS= read -r f; do
+    git restore -- "${f}"
+    echo "${label}: ${f} differed from git at exit — restored" >&2
+  done <<< "${changed}"
+}
 # The status survives the cleanup, and a run that died before its last
 # statement is red even on bash 3.2, where an unset-variable death under
 # an EXIT trap exits 0 (#1233).
 rc=0
 scratch=$(mktemp -d)
-trap 'rc=$?; rm -rf "${scratch}"; [ -n "${org_done:-}" ] || [ "${rc}" -ne 0 ] || rc=1; exit "${rc}"' EXIT
+trap 'rc=$?; restore; rm -rf "${scratch}"; [ -n "${org_done:-}" ] || [ "${rc}" -ne 0 ] || rc=1; exit "${rc}"' EXIT
 
 # Pragmas in every tracked Python file. `git grep` narrows the files;
-# the tokenizer decides, since mutmut reads pragmas from COMMENTS only
-# and a string that spells one (a test fixture) is not a site.
+# the tokenizer decides, since a string that spells one (a test fixture)
+# is not a site. Every exclusion carries its reason, or this is red
+# before anything runs.
 candidates=$(git grep -l -E 'pragma:.*no mutate' -- ':!vendor/**' '*.py' || true)
 : > "${scratch}/pragmas.tsv"
 if [[ -n ${candidates} ]]; then
@@ -100,38 +102,32 @@ if [[ -n ${candidates} ]]; then
   while IFS= read -r f; do files+=("${f}"); done <<< "${candidates}"
   "${ORG_PYTHON}" "${belt}/mutmut_pragmas.py" "${files[@]}" > "${scratch}/pragmas.tsv"
 fi
-# Every exclusion carries its reason, or this is red before mutmut runs.
-excluded=$("${ORG_PYTHON}" "${belt}/mutants_python.py" exclusions "${config}" "${scratch}/pragmas.tsv")
+"${helper[@]}" pragmas "${scratch}/pragmas.tsv"
 
-command -v mutmut > /dev/null || {
-  echo "${label}: mutmut missing — the belt pins it lazy; install it by name:" >&2
-  echo "    mise install pipx:mutmut" >&2
+command -v cosmic-ray > /dev/null || {
+  echo "${label}: cosmic-ray missing — the belt pins it lazy; install it by name:" >&2
+  echo "    mise install pipx:cosmic-ray" >&2
   exit 1
 }
 
-# Children of the run can import mutmut (#1354 item 3): a test that
-# runs a helper as `python3 helper.py` runs its mutated copy, which
-# imports mutmut's trampoline. The hook APPENDS mutmut's site directory
-# to sys.path in every Python the run starts; mutants_python.py derives
-# the directory from the installed tool.
-"${ORG_PYTHON}" "${belt}/mutants_python.py" hook "${scratch}/hook"
-status=0
-PYTHONPATH="${scratch}/hook${PYTHONPATH:+:${PYTHONPATH}}" mutmut run || status=$?
-if [[ ${status} -ne 0 ]]; then
-  echo "${label}: mutmut run exited ${status} — nothing judged (a failing unmutated suite exits 1)" >&2
-  exit 1
+plan="${MUTANTS_PLAN:-${scratch}/plan}"
+if [[ ${shard} == plan ]]; then
+  : "${MUTANTS_PLAN:?unset — MUTANTS_SHARD=plan writes the plan there}"
+  "${helper[@]}" plan "${config}" "${plan}"
+  org_done=1
+  exit 0
+fi
+if [[ -z ${MUTANTS_PLAN:-} ]]; then
+  "${helper[@]}" plan "${config}" "${plan}"
+else
+  # The plan job checked its own checkout; a shard checks its own.
+  changed=$(git status --porcelain --untracked-files=no -- "${paths[@]}")
+  if [[ -n ${changed} ]]; then
+    echo "${label}: the tracked tree differs from git under module-path — refused" >&2
+    exit 1
+  fi
 fi
 
-mutmut results --all true > "${scratch}/results.txt"
-# Each survivor's diff, in the order the helper names them; the helper
-# finds the line in the file, since the diff counts from the function.
-"${ORG_PYTHON}" "${belt}/mutants_python.py" survivors "${scratch}/results.txt" > "${scratch}/survivors.txt"
-mkdir "${scratch}/shows"
-i=0
-while IFS= read -r name; do
-  i=$((i + 1))
-  mutmut show "${name}" > "${scratch}/shows/${i}.diff"
-done < "${scratch}/survivors.txt"
-"${ORG_PYTHON}" "${belt}/mutants_python.py" verdict "${scratch}/results.txt" "${scratch}/shows" \
-  --excluded "${excluded}"
+mutating=1
+"${helper[@]}" judge "${plan}" "${scratch}/pragmas.tsv" "${shard}" "${scratch}/runs"
 org_done=1

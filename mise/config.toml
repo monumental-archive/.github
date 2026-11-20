@@ -582,20 +582,25 @@ python = "3.15.2"
 # The tool venv is built on the `python` pin above, never one uv
 # fetched — the measurement runs the tests on that interpreter.
 "pipx:coverage" = "7.17.3"
-# Mutation testing for Python (#1354): `audit:mutants`' Python leg.
-# mutmut 3.8.1, PyPI-only (no aqua package), so the FIFTH pipx:
-# exception, on the same checksummed uv under the UV_* floor env and
-# the `python` pin above: measured 2026-11-18, its tool venv's
-# interpreter is this pin's 3.15.2 (pyvenv.cfg `home`), and libcst,
-# setproctitle and coverage arrive as cp315 wheels; pyyaml 6.0.3 (a
-# dependency) has no cp315 wheel and builds its pure-Python fallback
-# from the sdist, no compiler needed. pytest rides inside mutmut's own
-# venv as its runner and nothing in a repository imports it (#364).
+# Mutation testing for Python (#1354, #1771): `audit:mutants`' Python
+# leg. cosmic-ray 8.9.0, which mutates the tracked file IN PLACE, one
+# mutant at a time, and runs the repository's own tests against it: no
+# copy of the tree, nothing a child process must be handed (mutmut
+# 3.8.1, the tool before it, names a mutant by package path and could
+# never judge flat-script helpers — docs/tooling-verdicts.md).
+# PyPI-only (no aqua package), so the FIFTH pipx: exception, on the
+# same checksummed uv under the UV_* floor env and the `python` pin
+# above: its tool venv's interpreter is this pin (pyvenv.cfg `home`),
+# 27 packages, one (`yattag`) built from its sdist, no compiler needed.
+# The tool never runs the suite's imports: `mutate-and-test` runs the
+# repository's own `test-command`, on the belt's python3.
 #
 # LAZY, the cargo-mutants precedent (#1355): a bare `mise install` —
 # the gate, every job without a named list — skips it, and only
-# repo-mutants.yml's `mutants-python` job installs it, by name.
-"pipx:mutmut" = { version = "3.8.1", lazy = true, lazy_bins = ["mutmut"] }
+# repo-mutants.yml's `mutants-python` jobs install it, by name.
+"pipx:cosmic-ray" = { version = "8.9.0", lazy = true, lazy_bins = [
+  "cosmic-ray",
+] }
 # Mutation testing for TypeScript (#1358): `audit:mutants`' TypeScript
 # leg, mise/mutants-typescript.sh, runs StrykerJS — and pins nothing
 # here. StrykerJS is the repository's, from its own lockfile under its

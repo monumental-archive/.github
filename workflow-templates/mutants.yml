@@ -3,8 +3,8 @@
 # is sharded, is repo-mutants.yml's business, so a leg the canon adds
 # later reaches this repository on its next pin bump with nothing to
 # edit here. A repository adopts a language by tracking that tool's own
-# config: `.cargo/mutants.toml` for Rust, a `[tool.mutmut]` table in
-# `pyproject.toml` (or `[mutmut]` in `setup.cfg`) for Python, and a root
+# config: `.cargo/mutants.toml` for Rust, a root `cosmic-ray.toml` for
+# Python (#1771), and a root
 # `.gomuignore` with no pattern for Go (#1356), and a root
 # `stryker.config.json` for TypeScript (#1358). Without one every leg
 # skips clean by name. Its own workflow, apart from the audit, so a

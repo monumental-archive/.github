@@ -3,12 +3,12 @@
 
 A leg reaches the Python processes a suite starts through a
 `sitecustomize.py` on PYTHONPATH: coverage's measurement starts the
-tracer in each (coverage_measure.sh), the mutation leg makes mutmut
-importable in each (mutants_python.py `hook`). Python imports only the
-FIRST `sitecustomize` it finds, so nested legs shadowed each other:
-coverage's hook, prepended inside the mutated suite, hid the leg's, and
-the mutated helper could not import mutmut. A repository's own
-`sitecustomize` was hidden by either.
+tracer in each (coverage_measure.sh), and the mutation leg's plan
+does the same per test file (mutants_python.py `plan`). Python imports
+only the FIRST `sitecustomize` it finds, so nested legs shadowed each
+other (#1542: coverage's hook, prepended inside a mutated suite, hid
+the mutation leg's), and a repository's own `sitecustomize` was hidden
+by either.
 
 Every belt hook is written here, with the leg's work first and then the
 chain: the next `sitecustomize` on `sys.path` after the hook's own

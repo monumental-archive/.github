@@ -1021,6 +1021,10 @@ checksum_source = "mise-versions"
 url = "https://github.com/lycheeverse/lychee/releases/download/lychee-v0.24.2/lychee-x86_64-pc-windows-msvc.zip"
 url_api = "https://api.github.com/repos/lycheeverse/lychee/releases/assets/409959491"
 
+[[tools."pipx:cosmic-ray"]]
+version = "8.9.0"
+backend = "pipx:cosmic-ray"
+
 [[tools."pipx:coverage"]]
 version = "7.17.3"
 backend = "pipx:coverage"
@@ -1028,10 +1032,6 @@ backend = "pipx:coverage"
 [[tools."pipx:hypothesis"]]
 version = "6.170.15"
 backend = "pipx:hypothesis"
-
-[[tools."pipx:mutmut"]]
-version = "3.8.1"
-backend = "pipx:mutmut"
 
 [[tools."pipx:mypy"]]
 version = "2.4.1"

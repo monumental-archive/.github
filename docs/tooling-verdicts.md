@@ -55,7 +55,7 @@ honestly blocked on.
 | cargo-machete (`github:` backend, upstream sha256s) | Unused Rust dependencies in the gate (`lint:machete`, static) — proven first in a consumer |
 | cargo-semver-checks (`github:` backend, TOFU checksum) | Public API vs published baseline (`audit:semver` — network, Monday cron, per repo) — proven first in a consumer |
 | cargo-mutants (`cargo:` backend, compiled `--locked`, pinned `lazy`) | Rust mutation testing (`audit:mutants`' Rust leg — its own weekly workflow, `repo-mutants.yml`, never the gate or the audit): no unexplained surviving mutant, never a score; adoption is a tracked `.cargo/mutants.toml`, each exclusion an `exclude_re` entry under a `#` reason (#1355) — proven first on release-lab |
-| mutmut (`pipx:` backend, belt Python, pinned `lazy`) | Python mutation testing (`audit:mutants`' Python leg — its own jobs in `repo-mutants.yml`, never the gate or the audit): no unexplained surviving mutant; adoption is `[tool.mutmut]` in a tracked `pyproject.toml` (or `setup.cfg`), each exclusion a `# pragma: no mutate -- <reason>` at its site or a reasoned list entry (#1354) — proven first on the canon |
+| cosmic-ray (`pipx:` backend, belt Python, pinned `lazy`) | Python mutation testing (`audit:mutants`' Python leg — its own jobs in `repo-mutants.yml`, never the gate or the audit): no unexplained surviving mutant; adoption is a tracked root `cosmic-ray.toml`, each exclusion a `# pragma: no mutate -- <reason>` on the mutant's line; mutates the tracked file in place, one mutant at a time, against the test files coverage shows reaching it (#1771; mutmut refused, #1354) |
 | StrykerJS (the repository's own, from its lockfile; the belt pins nothing) | TypeScript mutation testing (`audit:mutants`' TypeScript leg — its own jobs in `repo-mutants.yml`, never the gate or the audit): no unexplained surviving mutant; adoption is a tracked root `stryker.config.json`, each exclusion a `// Stryker disable next-line <Mutator>: <reason>` at its site; run `--inPlace` (#1358) — proven first on monumental-archive |
 | cargo-auditable (`github:rust-secure-code/cargo-auditable`, repo-side pin, upstream sha256s) | Release build input of every class that ships a Rust binary (#1334), prebuilt where the `cargo:` backend compiled it per job (187–252 s on edtf v1.3.5). Not `aqua:`: mise's baked registry has no entry (mise 2026.11.6: `no aqua-registry found for rust-secure-code/cargo-auditable`). `mise lock` at 0.7.7 records, for all four platforms, checksums equal to upstream's `.tar.xz.sha256` files (measured 2026-11-17); on Linux mise selects the `unknown-linux-gnu` asset, not musl. A locked install took 2.9 s. Reopen when a mise release's baked aqua registry carries the package |
 | sqlfluff (`pipx:` backend via aqua-backed uv) | SQL lint in the gate (`lint:sql`, all core rules, dialect postgres) + `fix:sql` — proven first in monumental-archive-db |
@@ -2704,7 +2704,92 @@ runner):
   code pays anyway. Every Python child of the statistics pass pays
   it once.
 
-*Reopen:* mutmut gaining sharding (shard the Python job like Rust's).
+*Superseded* by the cosmic-ray verdict below (#1771): no run of mutmut
+ever judged the canon.
+
+**mutmut refused for flat scripts; cosmic-ray as `audit:mutants`'
+Python leg** (#1771, overruling #1354's "do not switch tools for it",
+which was written before any run got past its baseline). The measure
+is still no unexplained surviving mutant, never a score.
+
+Why mutmut cannot judge the canon, measured 2026-11-20 on mutmut 3.8.1
+and Python 3.15.2. Nine dispatched `self-mutants` runs stopped before
+one mutant ran. mutmut's generation step over an export of `44c38eee`
+mutated 135 files into 25,370 mutants, each named from the file's
+path (`mise.typed_std.x_urlopen__mutmut_1`), while the canon's tests
+import the same file as `typed_std`. mutmut runs a mutant only when the
+two names are equal (`mutation/trampoline.py`), and its statistics key
+on the same name; no tracked `.py` file imports a helper by a qualified
+name. In a scratch project in four layouts, helpers in a named
+directory imported flat (the canon's layout) stopped with "tests
+recorded trampoline hits but none match any mutant key", 9 of 9 not
+checked; the three other layouts judged. None of mutmut's 27
+configuration keys names an import root: `.`, `src` and `source` are
+hard-coded (`utils/file_utils.py`). So every adopter whose code is
+flat scripts in a named directory gets "nothing judged": the stranger
+test fails.
+
+cosmic-ray 8.9.0 mutates the tracked file in place, one mutant at a
+time, and runs the repository's own tests against it: no copy of the
+tree, no rewritten imports, nothing a child process must be handed.
+Measured 2026-11-20 on Python 3.15.2:
+
+- **The pin.** `pipx:cosmic-ray` at 8.9.0, exact and `lazy`, on the
+  route mutmut used. It installs from PyPI into a venv on the belt's
+  Python (`pyvenv.cfg` `home` is the pin's 3.15.2, so the
+  hidden-Python trap does not bite): 28 distributions, cosmic-ray and
+  27 dependencies, one (`yattag`) built from its sdist with no
+  compiler. Only `repo-mutants.yml`'s Python jobs install it.
+- **What it reaches.** The whole canon is 16,892 mutants in 77 helper
+  files. The stock operators put at least one mutant in 727 of the
+  816 functions and methods (mutmut: 787); strings, return values and
+  calls would need operators of our own, a plugin package and the
+  owner's decision.
+- **The canon's shape.** A scratch project with flat helpers in a
+  named directory, one function reached only through a child script
+  started with `-S` and its own `PYTHONPATH`: baseline green first
+  time, 34 mutants, all judged, the child-only function's mutants
+  killed. Two canon helpers against their own test files:
+  `mise/squash_message.py` 52 mutants, 47 killed, 5 survived, 24 s;
+  `mise/subject_budget.py` 577, 429 killed, 148 survived, 139 s. The
+  tree was clean after both. The leg itself reproduced the first on
+  the Mac, judging each mutant against the test files coverage shows
+  reaching its line: 52, 47, 5, in 80 s.
+- **The bytecode trap.** The first scratch run reported 13 survivors,
+  9 of them wrong: a mutant the same size as the last, written in the
+  same second, is served from the cached `.pyc` (Python checks the
+  source's size and its mtime in seconds). The leg removes the
+  module's own cached bytecode before and after each mutant; with it,
+  4 survivors, each real.
+- **Continuation lines.** Coverage reports a statement at its first
+  line, so a mutant on the second line of a call read as a line no
+  test executes (12 of `squash_message.py`'s 52). The leg judges a
+  mutant by the statement that holds its first line.
+- **Exclusion at the site.** `# pragma: no mutate -- <reason>` on the
+  mutant's first line, read by the leg's tokenizer, never by
+  `cr-filter-pragma`, which matches the raw line, strings included.
+  Only the line form exists.
+- **`excluded-modules`** is Python's `glob.glob(…, recursive=True)`,
+  whose `**` skips dot-directories: `**/test_*.py` left the seven
+  `.github/rekor-monitor` test and property files in the list. A
+  mutant in a file `tests` matches is red by name.
+- **Cost and shards.** Every helper's same-named test file, timed alone
+  and weighed by its mutants: at most 24.4 core-hours on an M1. Of
+  2,789 mutants measured against 29 of 133 test files, 64% are reached
+  by one file, 30% by two or three, 4% by none. So the leg runs only
+  the files that reach a mutant's line, fastest first, each limited to
+  three times its planned time; one plan job lists and measures, and
+  16 shards of 120 minutes judge (#1530 sets the final count).
+
+Rejected: reshaping the helpers into a package for mutmut (419 import
+lines in 245 files, and it would still copy the tree); carrying mutmut
+to children (#1758, which never reaches the naming stop); poodle 1.4.0
+(it copies the source folder); `cosmic-ray exec` with one whole-suite
+command (16,892 suite runs); "a helper's own test file" as the rule (a
+naming rule, and 1,403 mutants sit in helpers with none).
+
+*Reopen:* a cosmic-ray release that stops mutating in place, or a tool
+that judges flat scripts with sharding of its own.
 
 **StrykerJS as `audit:mutants`' TypeScript leg** (#1358, under the
 testing standard of #1336; the shape is the other legs'). The measure
