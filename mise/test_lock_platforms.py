@@ -22,7 +22,7 @@ gate as `mise run test`, which `ci` collects.
 
 import contextlib
 import io
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -140,10 +140,10 @@ def lint(
             path = root / rel
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text, encoding="utf-8")
-        subprocess.run([GIT, "init", "-q"], cwd=root, env=env, check=True)  # ruff: ignore[subprocess-without-shell-equals-true]
+        subprocess.run([GIT, "init", "-q"], cwd=root, env=env, check=True)
         if files:
-            subprocess.run([GIT, "add", "--", *files], cwd=root, env=env, check=True)  # ruff: ignore[subprocess-without-shell-equals-true]
-        return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+            subprocess.run([GIT, "add", "--", *files], cwd=root, env=env, check=True)
+        return subprocess.run(
             [BASH, "-euo", "pipefail", "-c", BODY],
             cwd=root,
             env=env,
@@ -160,9 +160,9 @@ def plant(root: Path, files: dict[str, str], untracked: dict[str, str]) -> None:
         path = root / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
-    subprocess.run([GIT, "init", "-q"], cwd=root, env=env, check=True)  # ruff: ignore[subprocess-without-shell-equals-true]
+    subprocess.run([GIT, "init", "-q"], cwd=root, env=env, check=True)
     if files:
-        subprocess.run([GIT, "add", "--", *files], cwd=root, env=env, check=True)  # ruff: ignore[subprocess-without-shell-equals-true]
+        subprocess.run([GIT, "add", "--", *files], cwd=root, env=env, check=True)
 
 
 def check(
@@ -523,7 +523,7 @@ class Script(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             plant(root, tree(), {})
-            done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+            done = subprocess.run(
                 [
                     *(PYTHON, str(BELT / "lock_platforms.py")),
                     *("--defaults", str(DEFAULTS), "--config", "mise.toml"),

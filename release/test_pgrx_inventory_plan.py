@@ -16,7 +16,6 @@ stdlib `unittest`, matching the rest of release/. Run through the gate
 as `mise run test`, which `ci` collects.
 """
 
-# ruff: ignore[suspicious-subprocess-import]
 import subprocess
 import sys
 import unittest
@@ -88,7 +87,6 @@ def run_helper(
         env = hermetic.env()
         if prefix is not None:
             env["PLAN_DOC_PREFIX"] = prefix
-        # ruff: ignore[subprocess-without-shell-equals-true]
         result = subprocess.run(
             [str(HELPER), *args],
             env=env,

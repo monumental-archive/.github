@@ -65,7 +65,7 @@ import contextlib
 import io
 import os
 import shutil
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -215,7 +215,6 @@ def tracked(root: Path | str, *pathspecs: str, **overrides: str) -> list[str]:
     if git is None:
         msg = "hermetic.tracked: git is not on PATH"
         raise RuntimeError(msg)
-    # ruff: ignore[subprocess-without-shell-equals-true]
     listed = subprocess.run(
         [
             git,

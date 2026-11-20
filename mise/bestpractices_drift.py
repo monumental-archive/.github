@@ -33,7 +33,7 @@ import argparse
 import json
 import re
 import shutil
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 from pathlib import Path
 
@@ -224,7 +224,7 @@ def fetch(url: str, repo: str) -> tuple[str, str]:
     if shutil.which("curl") is None:
         message = "curl missing"
         raise FileNotFoundError(message)
-    done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+    done = subprocess.run(
         # ruff: ignore[start-process-with-partial-path] - curl is resolved on PATH, as audit:badges runs it
         [
             "curl",

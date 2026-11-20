@@ -29,7 +29,7 @@ import os
 import re
 import shutil
 import signal
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import tempfile
 import time
 import unittest
@@ -95,7 +95,6 @@ class InitCase(unittest.TestCase):
             f'. "{ENV_SH}"\n'
             "printf 'pg\\t18\\t/opt/pg18/bin/pg_config\\n' | org_pgrx_init\n"
         )
-        # ruff: ignore[subprocess-without-shell-equals-true]
         return subprocess.Popen(
             [BASH, "-euo", "pipefail", "-c", script],
             env=self.env | env,
@@ -237,7 +236,6 @@ class Majors(unittest.TestCase):
             'majors=$(org_pgrx_union <<< "${pairs}")\n'
             'printf \'%s\\n\' "${pairs}" "union=${majors}"\n'
         )
-        # ruff: ignore[subprocess-without-shell-equals-true]
         return subprocess.run(
             [BASH, "-euo", "pipefail", "-c", script],
             input=surface,
@@ -281,7 +279,6 @@ class Majors(unittest.TestCase):
     def test_a_major_that_is_no_number_is_red_by_name(self) -> None:
         """A line whose major is not a number stops the union, named."""
         script = f'. "{ENV_SH}"\norg_pgrx_union'
-        # ruff: ignore[subprocess-without-shell-equals-true]
         done = subprocess.run(
             [BASH, "-euo", "pipefail", "-c", script],
             input="first@0.1.0\t17\nsecond@0.1.0\tpg16\n",
@@ -470,7 +467,6 @@ class IcuCase(unittest.TestCase):
 
         """
         parent = {"BINDGEN_EXTRA_CLANG_ARGS": "parent-b", "CFLAGS": "parent-c"}
-        # ruff: ignore[subprocess-without-shell-equals-true]
         return subprocess.run(
             [BASH, "-euo", "pipefail", "-c", f'. "{ENV_SH}"\n{script}'],
             env=self.env | parent | env,

@@ -18,7 +18,7 @@ gate as `mise run test`.
 """
 
 import re
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -61,7 +61,6 @@ def check(subject: str) -> subprocess.CompletedProcess[str]:
     with tempfile.TemporaryDirectory() as tmp:
         message = Path(tmp) / "COMMIT_EDITMSG"
         message.write_text(subject + "\n", encoding="utf-8")
-        # ruff: ignore[subprocess-without-shell-equals-true]
         return subprocess.run(
             [BASH, str(BELT / "committed.sh"), "--commit-file", str(message)],
             cwd=tmp,

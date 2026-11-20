@@ -18,8 +18,6 @@ as `mise run test`, which `ci` collects.
 import hashlib
 import json
 import os
-
-# ruff: ignore[suspicious-subprocess-import]
 import subprocess
 import sys
 import unittest
@@ -109,7 +107,7 @@ def run_helper(manifest: object, mode: str = "ok") -> Run:
             STUB_MODE=mode,
             STUB_TARBALL=TARBALL,
         )
-        result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        result = subprocess.run(
             [HELPER],
             env=env,
             capture_output=True,

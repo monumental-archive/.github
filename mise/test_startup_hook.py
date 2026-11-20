@@ -14,7 +14,7 @@ gate as `mise run test`.
 
 import io
 import shutil
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -157,7 +157,6 @@ class Chain(unittest.TestCase):
     def test_the_command_line_writes_the_hook_from_stdin(self) -> None:
         """The shell's form: work on stdin, directory named."""
         directory = self.tmp / "cli"
-        # ruff: ignore[subprocess-without-shell-equals-true]
         done = subprocess.run(
             [sys.executable, str(Path(startup_hook.__file__)), str(directory)],
             input=logs("cli"),

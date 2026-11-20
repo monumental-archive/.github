@@ -17,7 +17,7 @@ import json
 import os
 import pathlib
 import shutil
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -122,7 +122,7 @@ class ReadTheLatestRelease(unittest.TestCase):
         )
         done: subprocess.CompletedProcess[str] | hermetic.Called
         if script:
-            done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+            done = subprocess.run(
                 [sys.executable, str(HELPER)],
                 cwd=self.work,
                 env=env,

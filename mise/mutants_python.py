@@ -45,7 +45,7 @@ import operator
 import os
 import shlex
 import shutil
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
@@ -92,7 +92,6 @@ def git(*args: str) -> subprocess.CompletedProcess[str]:
         The finished process, its output captured as text.
 
     """
-    # ruff: ignore[subprocess-without-shell-equals-true]
     return subprocess.run(
         [which("git"), *args], capture_output=True, text=True, check=False
     )
@@ -464,7 +463,6 @@ def executed(plan: Path) -> dict[str, dict[str, list[int]]]:
     """
     rc = write_rc(plan, "")
     out = plan / "coverage" / "lines.json"
-    # ruff: ignore[subprocess-without-shell-equals-true]
     combined = subprocess.run(
         [which("coverage"), "combine", f"--rcfile={rc}", "-q"],
         capture_output=True,
@@ -473,7 +471,6 @@ def executed(plan: Path) -> dict[str, dict[str, list[int]]]:
     )
     if combined.returncode != 0:
         return {}
-    # ruff: ignore[subprocess-without-shell-equals-true]
     subprocess.run(
         [
             which("coverage"),
@@ -524,7 +521,6 @@ def measure(index: int, test: str, template: str, plan: Path) -> Measured:
         "PYTHONPATH": f"{hook}{os.pathsep}{inherited}" if inherited else hook,
     }
     start = time.monotonic()
-    # ruff: ignore[subprocess-without-shell-equals-true]
     done = subprocess.run(
         test_argv(template, test),
         env=env,
@@ -559,14 +555,12 @@ def plan_mutants(config: Path, plan: Path, found: Adoption) -> list[Mutant] | No
 
     """
     session = plan / "session.sqlite"
-    # ruff: ignore[subprocess-without-shell-equals-true]
     init = subprocess.run(
         [which("cosmic-ray"), "init", str(config), str(session)],
         capture_output=True,
         text=True,
         check=False,
     )
-    # ruff: ignore[subprocess-without-shell-equals-true]
     dump = subprocess.run(
         [which("cosmic-ray"), "dump", str(session)],
         capture_output=True,
@@ -949,7 +943,6 @@ def mutate_and_test(mutant: Mutant, command: str) -> tuple[str, str]:
         the worker's own) and cosmic-ray's diff.
 
     """
-    # ruff: ignore[subprocess-without-shell-equals-true]
     done = subprocess.run(
         [
             which("cosmic-ray"),

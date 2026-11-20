@@ -21,7 +21,7 @@ gate as `mise run test`.
 """
 
 import re
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -68,7 +68,6 @@ class ScaffoldedChangelogLints(unittest.TestCase):
                 preamble.rstrip("\n") + "\n\n" + section().rstrip("\n") + "\n",
                 encoding="utf-8",
             )
-            # ruff: ignore[subprocess-without-shell-equals-true]
             done = subprocess.run(
                 [RUMDL, "check", "--config", str(BELT / "rumdl.toml"), "CHANGELOG.md"],
                 cwd=tmp,

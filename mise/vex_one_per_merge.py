@@ -42,7 +42,7 @@ prints one decision per line and exits 0.
 import argparse
 import os
 import shutil
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 from pathlib import Path
 
@@ -61,7 +61,6 @@ def git(*args: str) -> str:
         git's standard output.
 
     """
-    # ruff: ignore[subprocess-without-shell-equals-true]
     return subprocess.run(
         [GIT, *args], capture_output=True, text=True, check=True
     ).stdout
@@ -126,7 +125,6 @@ def count() -> int:
             " holds the entries queued ahead of it, skipped"
         )
         return 0
-    # ruff: ignore[subprocess-without-shell-equals-true]
     known = subprocess.run(
         [GIT, "rev-parse", "--verify", "-q", f"{BASE}^{{commit}}"],
         capture_output=True,

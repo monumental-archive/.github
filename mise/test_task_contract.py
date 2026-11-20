@@ -34,7 +34,7 @@ the gate as `mise run test`, which `ci` collects.
 
 import re
 import shutil
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import tempfile
 import unittest
 from fnmatch import fnmatchcase
@@ -434,7 +434,7 @@ class Selection(unittest.TestCase):
             The finished process.
 
         """
-        return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        return subprocess.run(
             [BASH, "-euo", "pipefail", "-c", run_of("audit:mutants")],
             cwd=self.belt,
             env=hermetic.env(ORG_BELT_DIR=str(self.belt), **env),
@@ -567,7 +567,6 @@ def plant(base: Path, name: str, *, floor: bool = True, measured: bool = True) -
         (tree / ".coverage-floor").write_text(FLOOR, encoding="utf-8")
     env = hermetic.env()
     for argv in ([GIT, "init", "-q"], [GIT, "add", "-A"]):
-        # ruff: ignore[subprocess-without-shell-equals-true]
         subprocess.run(argv, cwd=tree, env=env, check=True)
     return tree
 
@@ -607,7 +606,6 @@ class OneRun(unittest.TestCase):
             MISE_AUTO_INSTALL="0",
             MISE_TASK_RUN_AUTO_INSTALL="0",
         )
-        # ruff: ignore[subprocess-without-shell-equals-true]
         return subprocess.run(
             [str(found), "run", task],
             cwd=tree,

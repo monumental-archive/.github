@@ -55,7 +55,7 @@ import hashlib
 import os
 import re
 import shutil
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -347,7 +347,6 @@ def tracked_files(root: Path) -> list[str]:
     # No `GIT_*` variable: git exports GIT_DIR to hooks in a linked
     # worktree, and `-C` does not outrank it (#857).
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-    # ruff: ignore[subprocess-without-shell-equals-true]
     out = subprocess.run(
         [GIT, "-C", str(root), "ls-files", "-z"],
         capture_output=True,

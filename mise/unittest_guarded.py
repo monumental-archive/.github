@@ -43,7 +43,7 @@ output and exit status are otherwise unittest's own.
 
 import json
 import os
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import tempfile
 import time
@@ -468,7 +468,6 @@ def work(spec: Path) -> subprocess.CompletedProcess[str]:
         The finished worker.
 
     """
-    # ruff: ignore[subprocess-without-shell-equals-true]
     return subprocess.run(
         [sys.executable, SELF, "--worker", str(spec)],
         capture_output=True,

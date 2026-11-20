@@ -33,7 +33,7 @@ stdlib `unittest`, the belt's one test idiom. Run through the gate as
 import json
 import os
 import shutil
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -243,9 +243,7 @@ class Planted(unittest.TestCase):
 
     def git(self, *args: str) -> None:
         """Run git in the planted tree, scrubbed of the caller's git state."""
-        subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-            [GIT, *args], cwd=self.tree, env=clean_env(), check=True
-        )
+        subprocess.run([GIT, *args], cwd=self.tree, env=clean_env(), check=True)
 
     def write(self, name: str, text: str) -> None:
         """Write and track one file in the planted tree."""
@@ -305,7 +303,7 @@ class Planted(unittest.TestCase):
             The completed process.
 
         """
-        return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        return subprocess.run(
             [BASH, str(SCRIPT)],
             cwd=self.tree,
             env=self.env,
@@ -1048,7 +1046,6 @@ class Script(unittest.TestCase):
 
     def test_the_helper_runs_as_a_script(self) -> None:
         """`build-go` with an equal build: it reads its arguments and exits 0."""
-        # ruff: ignore[subprocess-without-shell-equals-true]
         done = subprocess.run(
             [
                 sys.executable,

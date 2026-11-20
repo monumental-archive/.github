@@ -20,8 +20,6 @@ the lock's descriptor, and exits with the command's own status.
 import argparse
 import fcntl
 import os
-
-# ruff: ignore[suspicious-subprocess-import]
 import subprocess
 import sys
 import time
@@ -89,7 +87,6 @@ def main(argv: list[str]) -> int:
         print(message, file=sys.stderr)
         return TIMED_OUT
     try:
-        # ruff: ignore[subprocess-without-shell-equals-true]
         return subprocess.run(command, check=False).returncode
     finally:
         os.close(fd)

@@ -33,8 +33,6 @@ stdlib only.
 from __future__ import annotations
 
 import os
-
-# ruff: ignore[suspicious-subprocess-import]
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -115,7 +113,6 @@ def main() -> int:
             run_url=f"{env['GITHUB_SERVER_URL']}/{repo}/actions/runs/{run_id}",
         )
     )
-    # ruff: ignore[subprocess-without-shell-equals-true]
     return subprocess.run(
         # ruff: ignore[start-process-with-partial-path]
         ["gh", "issue", "create", "--repo", repo, "--title", title, "--body", body],

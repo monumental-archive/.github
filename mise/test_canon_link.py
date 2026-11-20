@@ -15,8 +15,6 @@ from __future__ import annotations
 import os
 import pathlib
 import shutil
-
-# ruff: ignore[suspicious-subprocess-import]
 import subprocess
 import tempfile
 import unittest
@@ -66,7 +64,6 @@ class LinkTheCanonTree(unittest.TestCase):
 
         """
         bash = hermetic.tool("bash")
-        # ruff: ignore[subprocess-without-shell-equals-true]
         return subprocess.run(
             [bash, str(script)],
             env=hermetic.env(

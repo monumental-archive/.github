@@ -68,7 +68,7 @@ from __future__ import annotations
 import argparse
 import re
 import shlex
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -369,7 +369,6 @@ def formatted(source: str) -> str | None:
 
     """
     shell, tera = shellify(source)
-    # ruff: ignore[subprocess-without-shell-equals-true]
     result = subprocess.run(
         [*SHFMT, "-"],
         input=shell,
@@ -405,7 +404,6 @@ def findings(
         tmp.write(head + shell)
         name = tmp.name
     try:
-        # ruff: ignore[subprocess-without-shell-equals-true]
         fmt = subprocess.run(
             [*SHFMT, "-d", name],
             capture_output=True,
@@ -420,7 +418,6 @@ def findings(
         args = ["shellcheck", f"--rcfile={ORG_RCFILE}"]
         for source_path in source_paths:
             args += ["--source-path", source_path]
-        # ruff: ignore[subprocess-without-shell-equals-true]
         lint = subprocess.run(
             [*args, "--format=gcc", name],
             capture_output=True,

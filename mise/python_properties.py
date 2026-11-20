@@ -71,7 +71,7 @@ import inspect
 import os
 import random
 import re
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import time
 import traceback
@@ -346,7 +346,7 @@ def fan_out(profile_name: str, files: list[Path], count: int) -> int:
 
     def child(k: int) -> subprocess.CompletedProcess[str]:
         shard = {"ORG_PROPERTY_SHARD": f"{k}/{count}"}
-        return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        return subprocess.run(
             argv, env=environ | shard, capture_output=True, text=True, check=False
         )
 

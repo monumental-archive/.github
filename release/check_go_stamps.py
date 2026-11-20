@@ -20,8 +20,6 @@ Exit status: 0 every stamp holds, 1 refused, else go's or git's own.
 """
 
 import re
-
-# ruff: ignore[suspicious-subprocess-import]
 import subprocess
 import sys
 from pathlib import Path
@@ -81,7 +79,6 @@ def go(*args: str) -> str:
         Its standard output.
 
     """
-    # ruff: ignore[subprocess-without-shell-equals-true]
     return finished(
         subprocess.run(
             # ruff: ignore[start-process-with-partial-path] - the caller's pinned go, on PATH
@@ -100,7 +97,6 @@ def git(*args: str) -> str:
         Its standard output.
 
     """
-    # ruff: ignore[subprocess-without-shell-equals-true]
     return finished(
         subprocess.run(
             # ruff: ignore[start-process-with-partial-path] - the runner's git

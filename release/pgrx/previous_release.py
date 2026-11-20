@@ -67,7 +67,7 @@ import argparse
 import datetime as dt
 import re
 import shutil
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 from pathlib import Path
 from typing import NamedTuple
@@ -211,7 +211,6 @@ def listing(repo: str) -> tuple[int, list[tuple[str, str]]]:
         status is a failed read and never a first publish.
 
     """
-    # ruff: ignore[subprocess-without-shell-equals-true]
     result = subprocess.run(
         [GH, "api", f"repos/{repo}/releases", "--paginate", "--jq", LISTING_JQ],
         stdin=subprocess.DEVNULL,
@@ -308,7 +307,6 @@ def fetch(args: Args) -> int:
         )
         return 0
     asset = f"{name}-{prev.version}-pg{args.pg}-linux-{args.arch}.tar.gz"
-    # ruff: ignore[subprocess-without-shell-equals-true]
     download = subprocess.run(
         [
             GH,
@@ -332,7 +330,6 @@ def fetch(args: Args) -> int:
         )
         return 0
     Path(args.dest).mkdir(parents=True, exist_ok=True)
-    # ruff: ignore[subprocess-without-shell-equals-true]
     extract = subprocess.run([TAR, "-xzf", args.tarball, "-C", args.dest], check=False)
     if extract.returncode != 0:
         return extract.returncode

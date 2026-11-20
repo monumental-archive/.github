@@ -19,8 +19,6 @@ as `mise run test`, which `ci` collects.
 """
 
 import os
-
-# ruff: ignore[suspicious-subprocess-import]
 import subprocess
 import sys
 import unittest
@@ -95,7 +93,6 @@ def run_helper(mains: str, broken: str = "", *, script: bool = False) -> Run:
         )
         result: subprocess.CompletedProcess[str] | hermetic.Called
         if script:
-            # ruff: ignore[subprocess-without-shell-equals-true]
             result = subprocess.run(
                 [str(HELPER)],
                 env=env,

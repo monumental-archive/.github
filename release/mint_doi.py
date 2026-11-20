@@ -32,7 +32,7 @@ import json
 import os
 import pathlib
 import re
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import time
 import urllib.error
@@ -549,7 +549,7 @@ def gh(env: Mapping[str, str], *args: str) -> subprocess.CompletedProcess[bytes]
         The finished process, stdout and stderr captured.
 
     """
-    return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+    return subprocess.run(
         ["gh", *args],  # ruff: ignore[start-process-with-partial-path] - gh is the runner's, resolved on PATH
         env=dict(env),
         capture_output=True,

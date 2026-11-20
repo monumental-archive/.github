@@ -26,7 +26,7 @@ stdlib `unittest`, the belt's one test idiom. Run through the gate as
 import json
 import os
 import shutil
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -233,9 +233,7 @@ def calls(*mutants: tuple[str, str, int]) -> list[str]:
 
 def git_in(tree: Path, *args: str) -> None:
     """Run git in a planted tree, scrubbed of the caller's git state."""
-    subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-        [GIT, *args], cwd=tree, env=hermetic.env(), check=True
-    )
+    subprocess.run([GIT, *args], cwd=tree, env=hermetic.env(), check=True)
 
 
 def git_out(tree: Path, *args: str) -> str:
@@ -245,7 +243,7 @@ def git_out(tree: Path, *args: str) -> str:
         Its output, stripped.
 
     """
-    return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+    return subprocess.run(
         [GIT, *args],
         cwd=tree,
         env=hermetic.env(),
@@ -401,7 +399,7 @@ class Planted(unittest.TestCase):
 
         """
         self.log.write_text("", encoding="utf-8")
-        done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        done = subprocess.run(
             [*under, BASH, str(SCRIPT)],
             cwd=self.tree,
             env=self.env | env,
@@ -1067,7 +1065,6 @@ class Refusals(Planted):
         )
         stub.chmod(0o755)
         python3 = hermetic.tool("python3", path=self.env["PATH"])
-        # ruff: ignore[subprocess-without-shell-equals-true]
         suite = subprocess.run(
             [python3, "-c", "import sys; print(sys.version)"],
             env=self.env,

@@ -14,7 +14,7 @@ stdlib `unittest`, matching the other mise/test_*.py; run through the
 gate as `mise run test`. Every git call passes a scrubbed environment.
 """
 
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -48,7 +48,6 @@ def run(tree: Path, home: Path) -> subprocess.CompletedProcess[str]:
         The finished run.
 
     """
-    # ruff: ignore[subprocess-without-shell-equals-true]
     return subprocess.run(
         [BASH, "-euo", "pipefail", "-c", body()],
         cwd=tree,
@@ -76,9 +75,7 @@ def lint(files: list[str]) -> subprocess.CompletedProcess[str]:
             path = tree / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("x = 1\n", encoding="utf-8")
-        # ruff: ignore[subprocess-without-shell-equals-true]
         subprocess.run([GIT, "init", "-q"], cwd=tree, env=env, check=True)
-        # ruff: ignore[subprocess-without-shell-equals-true]
         subprocess.run([GIT, "add", "."], cwd=tree, env=env, check=True)
         return run(tree, root / "home")
 

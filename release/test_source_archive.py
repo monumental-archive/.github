@@ -21,8 +21,6 @@ import gzip
 import hashlib
 import io
 import os
-
-# ruff: ignore[suspicious-subprocess-import]
 import subprocess
 import sys
 import tarfile
@@ -134,7 +132,6 @@ def run_helper(
         )
         result: subprocess.CompletedProcess[str] | hermetic.Called
         if script:
-            # ruff: ignore[subprocess-without-shell-equals-true]
             result = subprocess.run(
                 [HELPER],
                 env=env,

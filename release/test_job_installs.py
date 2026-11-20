@@ -37,7 +37,7 @@ import copy
 import io
 import re
 import shlex
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import tempfile
 import tokenize
@@ -505,7 +505,7 @@ def code(text: str) -> str:
     if text in REDUCED:
         return REDUCED[text]
     source = text.encode("utf-8")
-    parsed = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+    parsed = subprocess.run(
         [hermetic.tool("shfmt"), "--to-json"],
         input=source,
         capture_output=True,
@@ -1559,10 +1559,11 @@ class PythonCode(unittest.TestCase):
     """A Python helper's comments are not code, wherever they sit (#1496)."""
 
     def test_an_inline_suppression_is_not_a_call(self) -> None:
-        """Measured on #1490: `# ruff: ignore[...]` after an import."""
+        """Measured on #1490: `# ruff: ignore[...]` after the code."""
         helper = (
-            "import subprocess  # ruff: ignore[suspicious-subprocess-import]\n"
-            'subprocess.run(["git", "status"], check=True)\n'
+            "import subprocess\n"
+            'subprocess.run(["git", "status"], check=True)'
+            "  # ruff: ignore[start-process-with-partial-path]\n"
         )
         reduced, _, _ = python_code(helper)
         self.assertEqual(

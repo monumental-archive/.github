@@ -32,8 +32,6 @@ Exit status: 0 packaged, 1 refused, else cargo's own failing status.
 
 import hashlib
 import os
-
-# ruff: ignore[suspicious-subprocess-import]
 import subprocess
 import sys
 from pathlib import Path
@@ -65,7 +63,6 @@ def cargo(*args: str) -> None:
         CargoFailedError: cargo exited non-zero.
 
     """
-    # ruff: ignore[subprocess-without-shell-equals-true]
     done = subprocess.run(
         # ruff: ignore[start-process-with-partial-path] - the job's pinned cargo, on PATH
         ["cargo", *args],
@@ -116,7 +113,6 @@ def published() -> list[tuple[str, str]]:
         CargoFailedError: the helper failed; it said why.
 
     """
-    # ruff: ignore[subprocess-without-shell-equals-true]
     done = subprocess.run(
         [str(HERE / "crates-io-members.sh")],
         stdout=subprocess.PIPE,

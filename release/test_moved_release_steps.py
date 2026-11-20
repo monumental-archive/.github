@@ -23,7 +23,7 @@ as `mise run test`.
 
 import json
 import os
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -95,7 +95,7 @@ class Script(unittest.TestCase):
             STUB_LOG=str(self.log),
             **env,
         )
-        return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        return subprocess.run(
             [BASH, str(script)],
             cwd=self.work,
             env=full,
@@ -172,10 +172,10 @@ class Containers(Script):
     def test_the_build_mounts_the_canon_and_the_writer(self) -> None:
         """One docker run, build-root.sh in the build image."""
         self.stub("docker")
-        subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        subprocess.run(
             [GIT, "init", "-q"], cwd=self.work, check=True, env=hermetic.env()
         )
-        subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        subprocess.run(
             [GIT, "commit", "-q", "--allow-empty", "-m", "c"],
             cwd=self.work,
             check=True,

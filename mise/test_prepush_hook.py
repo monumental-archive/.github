@@ -31,7 +31,7 @@ gate as `mise run test`, which `ci` collects.
 """
 
 import os
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -154,7 +154,7 @@ class PrePushGate(unittest.TestCase):
             The finished process, stdout and stderr captured as text.
 
         """
-        return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        return subprocess.run(
             [hermetic.tool("git"), *args],
             cwd=cwd,
             env=self.env,
@@ -196,7 +196,7 @@ class PrePushGate(unittest.TestCase):
 
     def install(self, clone: Path) -> None:
         """Install the hooks; lefthook fetches the canon remote here."""
-        done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        done = subprocess.run(
             [hermetic.tool("lefthook"), "install"],
             cwd=clone,
             env=self.env,

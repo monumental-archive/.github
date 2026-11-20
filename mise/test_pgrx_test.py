@@ -29,7 +29,7 @@ stdlib `unittest`, the belt's one test idiom. Run through the gate as
 import json
 import os
 import re
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -228,9 +228,7 @@ class Planted(unittest.TestCase):
 
     def git(self, *args: str) -> None:
         """Run git in the planted tree, scrubbed of the caller's git state."""
-        subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-            [GIT, *args], cwd=self.tree, env=hermetic.env(), check=True
-        )
+        subprocess.run([GIT, *args], cwd=self.tree, env=hermetic.env(), check=True)
 
     def floor(self) -> None:
         """Commit a derived floor of 80.0 to the planted tree."""
@@ -245,7 +243,7 @@ class Planted(unittest.TestCase):
             The finished process and the stubs' call log.
 
         """
-        done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        done = subprocess.run(
             [BASH, *argv],
             cwd=self.tree,
             env=self.env | env,
@@ -342,7 +340,7 @@ class MeasuredRun(Planted):
                 done, _ = self.run_pgrx(PLANT_LH="17", **named)
                 self.assertEqual(0, done.returncode, done.stderr)
                 self.assertIn("pgrx-pg18 94.44444444444444", done.stdout.splitlines())
-                status = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+                status = subprocess.run(
                     [GIT, "status", "--porcelain"],
                     cwd=self.tree,
                     env=hermetic.env(),

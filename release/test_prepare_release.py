@@ -56,7 +56,7 @@ Run through the gate as `mise run test`, which `ci` collects.
 """
 
 import os
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import textwrap
 import unittest
@@ -204,7 +204,6 @@ class Tree:
 
     def git(self, *args: str) -> None:
         """Run one git command in the fixture, failing the test if it does."""
-        # ruff: ignore[subprocess-without-shell-equals-true]
         subprocess.run(
             [GIT, *args],
             cwd=self.root,
@@ -215,7 +214,6 @@ class Tree:
 
     def cargo(self, *args: str) -> None:
         """Run one cargo command in the fixture."""
-        # ruff: ignore[subprocess-without-shell-equals-true]
         subprocess.run(
             [hermetic.tool("cargo"), *args],
             cwd=self.root,
@@ -254,7 +252,6 @@ class Tree:
                 path = "fuzz_targets/t.rs"
                 """),
         )
-        # ruff: ignore[subprocess-without-shell-equals-true]
         subprocess.run(
             [hermetic.tool("cargo"), "generate-lockfile", "--offline"],
             cwd=self.root / "fuzz",
@@ -277,7 +274,6 @@ class Tree:
         runner_temp.mkdir(exist_ok=True)
         outputs = self.root / ".outputs"
         outputs.write_text("")
-        # ruff: ignore[subprocess-without-shell-equals-true]
         result = subprocess.run(
             [BASH, str(SCRIPT)],
             cwd=self.root,

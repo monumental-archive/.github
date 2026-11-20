@@ -16,7 +16,7 @@ gate as `mise run test`.
 import ast
 import os
 import shutil
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -739,7 +739,6 @@ class Tracked(unittest.TestCase):
 
     def git(self, *args: str) -> None:
         """Run git in the planted repository."""
-        # ruff: ignore[subprocess-without-shell-equals-true]
         subprocess.run([GIT, *args], cwd=self.root, env=hermetic.env(), check=True)
 
     def test_a_checkout_lists_what_git_tracks(self) -> None:
@@ -921,7 +920,6 @@ class Belt(unittest.TestCase):
     @staticmethod
     def git(cwd: Path, *args: str) -> None:
         """Run git in a scratch canon."""
-        # ruff: ignore[subprocess-without-shell-equals-true]
         subprocess.run([GIT, *args], cwd=cwd, env=hermetic.env(), check=True)
 
 

@@ -24,7 +24,7 @@ import contextlib
 import io
 import json
 import shutil
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -149,9 +149,7 @@ class Planted(unittest.TestCase):
 
     def git(self, *args: str) -> None:
         """Run git in the planted tree, scrubbed of the caller's git state."""
-        subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-            [GIT, *args], cwd=self.tree, env=hermetic.env(), check=True
-        )
+        subprocess.run([GIT, *args], cwd=self.tree, env=hermetic.env(), check=True)
 
     def track(self, path: str, text: str) -> None:
         """Write a file into the planted tree and track it."""
@@ -181,7 +179,7 @@ class Planted(unittest.TestCase):
             The finished process and the stub's call log.
 
         """
-        done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        done = subprocess.run(
             [BASH, str(SCRIPT)],
             cwd=self.tree,
             env=self.env | env,
@@ -241,7 +239,7 @@ class Adoption(Planted):
         self.plant(*KILLED)
         env = dict(self.env)
         del env["CI"]
-        done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        done = subprocess.run(
             [BASH, str(SCRIPT)],
             cwd=self.tree,
             env=env,
@@ -761,7 +759,6 @@ class Script(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp, "stryker.config.json")
             path.write_text(json.dumps(CONFIG), encoding="utf-8")
-            # ruff: ignore[subprocess-without-shell-equals-true]
             done = subprocess.run(
                 [
                     sys.executable,

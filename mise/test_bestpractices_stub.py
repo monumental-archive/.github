@@ -23,7 +23,7 @@ gate as `mise run test`, which `ci` collects.
 
 import json
 import re
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -86,13 +86,9 @@ def lint(text: str, path: str = STUB_PATH) -> subprocess.CompletedProcess[str]:
         target.write_text(text, encoding="utf-8")
         env = hermetic.env()
         env |= {"ORG_BELT_DIR": str(BELT), "ORG_CANON_DIR": str(CANON)}
-        subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-            [GIT, "init", "-q"], cwd=tmp, env=env, check=True
-        )
-        subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-            [GIT, "add", path], cwd=tmp, env=env, check=True
-        )
-        done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        subprocess.run([GIT, "init", "-q"], cwd=tmp, env=env, check=True)
+        subprocess.run([GIT, "add", path], cwd=tmp, env=env, check=True)
+        done = subprocess.run(
             [BASH, "-euo", "pipefail", "-c", BODY],
             cwd=tmp,
             env=env,

@@ -43,8 +43,6 @@ import contextlib
 import json
 import os
 import pathlib
-
-# ruff: ignore[suspicious-subprocess-import]
 import subprocess
 import sys
 
@@ -78,7 +76,6 @@ def gh(*args: str, capture: bool = False, quiet: bool = False) -> str:
         SystemExit: `gh` failed, with its exit status.
 
     """
-    # ruff: ignore[subprocess-without-shell-equals-true]
     done = subprocess.run(
         # ruff: ignore[start-process-with-partial-path]
         ["gh", *args],
@@ -176,7 +173,6 @@ def converge(tag: str, repo: str) -> None:
     typed = build_subjects(pathlib.Path(PUBLISHED_MANIFEST))
     subjects = [name for name in typed if name]
     if not subjects:
-        # ruff: ignore[subprocess-without-shell-equals-true]
         same = subprocess.run(
             # ruff: ignore[start-process-with-partial-path]
             ["diff", "-u", str(published), str(rebuilt)],
@@ -223,7 +219,6 @@ def publish(tag: str, repo: str, *, dry_run: bool) -> None:
             "KIND": "rehearsal",
             "RUN_URL": f"{server}/{repo}/actions/runs/{run_id}",
         }
-        # ruff: ignore[subprocess-without-shell-equals-true]
         recorded = subprocess.run([str(HERE / "record-draft.sh")], env=env, check=False)
         if recorded.returncode != 0:
             raise SystemExit(recorded.returncode)

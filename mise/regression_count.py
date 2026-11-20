@@ -33,7 +33,7 @@ import os
 import pathlib
 import re
 import shutil
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 from typing import TYPE_CHECKING
 
@@ -210,7 +210,6 @@ def git(repo: pathlib.Path, *args: str) -> str:
         GitError: git exited non-zero; its stderr is the message.
 
     """
-    # ruff: ignore[subprocess-without-shell-equals-true]
     proc = subprocess.run(
         [GIT, "-C", str(repo), "-c", "core.quotePath=false", *args],
         capture_output=True,

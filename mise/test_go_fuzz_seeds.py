@@ -27,7 +27,7 @@ stdlib `unittest`, the belt's one test idiom. Run through the gate as
 
 import os
 import shutil
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -146,7 +146,6 @@ class GoFuzzSeeds(unittest.TestCase):
 
     def git(self, *args: str) -> None:
         """Run git in the planted checkout."""
-        # ruff: ignore[subprocess-without-shell-equals-true]
         subprocess.run([GIT, *args], cwd=self.root, env=CLEAN_ENV, check=True)
 
     def module(self, rel: str, listing: str, *, status: int = 0) -> Path:
@@ -180,7 +179,6 @@ class GoFuzzSeeds(unittest.TestCase):
             "PATH": os.pathsep.join(path),
             "PLANT_LOG": str(self.log),
         }
-        # ruff: ignore[subprocess-without-shell-equals-true]
         done = subprocess.run(
             [BASH, "-euo", "pipefail", "-c", task_body("lint:go-fuzz-seeds")],
             cwd=self.root,

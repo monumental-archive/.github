@@ -29,7 +29,7 @@ run through the gate as `mise run test`, which `ci` collects.
 import json
 import os
 import shutil
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -156,9 +156,7 @@ class Planted(unittest.TestCase):
 
     def git(self, *args: str) -> None:
         """Run git in the planted tree."""
-        subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-            [GIT, *args], cwd=self.tree, env=self.env, check=True
-        )
+        subprocess.run([GIT, *args], cwd=self.tree, env=self.env, check=True)
 
     def plant(self, files: dict[str, str]) -> None:
         """Write and track files in the planted tree."""
@@ -175,7 +173,7 @@ class Planted(unittest.TestCase):
             The finished process.
 
         """
-        return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        return subprocess.run(
             [BASH, "-euo", "pipefail", "-c", body(task)],
             cwd=self.tree,
             env=self.env,
@@ -191,7 +189,7 @@ class Planted(unittest.TestCase):
             The paths it prints.
 
         """
-        done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        done = subprocess.run(
             [
                 BASH,
                 "-euo",
@@ -436,7 +434,7 @@ class CanonSources(Planted):
             `git status --porcelain --untracked-files=all`.
 
         """
-        return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        return subprocess.run(
             [GIT, "status", "--porcelain", "--untracked-files=all"],
             cwd=self.tree,
             env=self.env,

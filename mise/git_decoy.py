@@ -30,7 +30,7 @@ import hashlib
 import os
 import pathlib
 import shutil
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 from typing import NamedTuple
 
@@ -67,7 +67,6 @@ def git(decoy: pathlib.Path, *args: str) -> str:
         git's standard output.
 
     """
-    # ruff: ignore[subprocess-without-shell-equals-true]
     return subprocess.run(
         [GIT, "-C", str(decoy), *args],
         env={**scrubbed(), **_IDENTITY},
@@ -170,7 +169,6 @@ def run(decoy: pathlib.Path, command: list[str]) -> int:
         "GIT_DIR": str(decoy / ".git"),
         "GIT_INDEX_FILE": str(decoy / ".git" / "index"),
     }
-    # ruff: ignore[subprocess-without-shell-equals-true]
     status = subprocess.run(command, env=env, check=False).returncode
     found = changes(decoy, before, state(decoy))
     if found:

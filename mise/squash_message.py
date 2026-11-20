@@ -26,8 +26,6 @@ from __future__ import annotations
 import os
 import pathlib
 import string
-
-# ruff: ignore[suspicious-subprocess-import]
 import subprocess
 import sys
 

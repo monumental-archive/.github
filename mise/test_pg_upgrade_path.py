@@ -49,7 +49,7 @@ test framework as a fourth thing to port.
 Run through the gate as `mise run test`, which `ci` collects.
 """
 
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import textwrap
 import unittest
 from pathlib import Path
@@ -145,7 +145,7 @@ class Tree:
 
     def git(self, *args: str) -> None:
         """Run one git command against this tree, and nothing else (#857)."""
-        subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        subprocess.run(
             [GIT, *args],
             cwd=self.root,
             env=clean_env(),
@@ -166,7 +166,7 @@ class Tree:
 
         """
         env = clean_env()
-        subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        subprocess.run(
             [
                 hermetic.tool("cargo"),
                 "generate-lockfile",
@@ -179,7 +179,7 @@ class Tree:
             check=True,
             capture_output=True,
         )
-        return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        return subprocess.run(
             [BASH, str(SCRIPT)],
             cwd=self.root,
             env=env,

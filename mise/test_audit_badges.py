@@ -31,7 +31,7 @@ import json
 import os
 import re
 import shutil
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -169,9 +169,7 @@ class Planted(unittest.TestCase):
             ORG_PYTHON=os.environ.get("ORG_PYTHON") or sys.executable,
         )
         for argv in (["init", "-q"], ["add", "security/identity.toml"]):
-            subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-                [GIT, *argv], cwd=self.tree, env=self.env, check=True
-            )
+            subprocess.run([GIT, *argv], cwd=self.tree, env=self.env, check=True)
         self.stubs = tmp / "stubs"
         bindir = tmp / "bin"
         for where in (self.stubs, bindir):
@@ -197,7 +195,7 @@ class Planted(unittest.TestCase):
             The finished process.
 
         """
-        return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        return subprocess.run(
             [BASH, "-euo", "pipefail", "-c", body()],
             cwd=self.tree,
             env=self.env,

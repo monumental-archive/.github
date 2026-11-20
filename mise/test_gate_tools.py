@@ -39,7 +39,7 @@ import dataclasses
 import io
 import re
 import shlex
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -605,9 +605,7 @@ def git_tree(files: dict[str, str]) -> Path:
     for path, text in files.items():
         (root / path).parent.mkdir(parents=True, exist_ok=True)
         (root / path).write_text(text, "utf-8")
-    # ruff: ignore[subprocess-without-shell-equals-true]
     subprocess.run([GIT, "-C", str(root), "init", "-q"], check=True, env=clean_env())
-    # ruff: ignore[subprocess-without-shell-equals-true]
     subprocess.run([GIT, "-C", str(root), "add", "-A"], check=True, env=clean_env())
     return root
 
@@ -756,7 +754,6 @@ class Helper(unittest.TestCase):
             with self.subTest(root=root), tempfile.TemporaryDirectory() as d:
                 env_file = Path(d) / "env"
                 env_file.write_text("")
-                # ruff: ignore[subprocess-without-shell-equals-true]
                 result = subprocess.run(
                     [
                         sys.executable,
@@ -788,7 +785,6 @@ class Helper(unittest.TestCase):
             stub = text.replace('[tools."aqua:hadolint/hadolint"]', "[x]")
             belt = hermetic.belt(d, stubs={"gate-tools.toml": stub})
             table = belt / "gate-tools.toml"
-            # ruff: ignore[subprocess-without-shell-equals-true]
             result = subprocess.run(
                 [
                     sys.executable,

@@ -21,8 +21,6 @@ Exit status: 0 built, 1 refused, else git's own failing status.
 
 import hashlib
 import os
-
-# ruff: ignore[suspicious-subprocess-import]
 import subprocess
 import sys
 import tarfile
@@ -64,7 +62,6 @@ def git(*args: str) -> str:
         GitFailedError: git exited non-zero.
 
     """
-    # ruff: ignore[subprocess-without-shell-equals-true]
     done = subprocess.run(
         # ruff: ignore[start-process-with-partial-path] - the runner's git, on PATH
         ["git", *args],

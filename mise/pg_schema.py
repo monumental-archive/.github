@@ -33,12 +33,10 @@ Usage:
     pg_schema.py write <raw.sql> <snapshot>   (fix:pg-schema)
 """
 
-# Asking git whether the snapshot is tracked IS part of the judgment, so
-# the subprocess rules are answered at their sites, not configured away.
 import difflib
 import re
 import shutil
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 from pathlib import Path
 
@@ -75,7 +73,6 @@ def tracked(path: str) -> bool:
         True when `git ls-files --error-unmatch` finds it.
 
     """
-    # ruff: ignore[subprocess-without-shell-equals-true]
     result = subprocess.run(
         [GIT, "ls-files", "--error-unmatch", "--", path],
         capture_output=True,

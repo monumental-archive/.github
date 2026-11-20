@@ -18,7 +18,7 @@ gate as `mise run test`.
 """
 
 import os
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -62,10 +62,8 @@ class TrivyScansTrackedFilesOnly(unittest.TestCase):
             tree = root / "repo"
             tree.mkdir()
             env = hermetic.env(root / "home")
-            # ruff: ignore[subprocess-without-shell-equals-true]
             subprocess.run([GIT, "init", "-q"], cwd=tree, env=env, check=True)
             (tree / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
-            # ruff: ignore[subprocess-without-shell-equals-true]
             subprocess.run([GIT, "add", "Dockerfile"], cwd=tree, env=env, check=True)
             toolbelt = tree / ".org-toolbelt"
             toolbelt.mkdir()
@@ -77,7 +75,6 @@ class TrivyScansTrackedFilesOnly(unittest.TestCase):
             log = root / "trivy.log"
             env["PATH"] = f"{bindir}{os.pathsep}{env['PATH']}"
             env["TRIVY_LOG"] = str(log)
-            # ruff: ignore[subprocess-without-shell-equals-true]
             done = subprocess.run(
                 [BASH, "-euo", "pipefail", "-c", body()],
                 cwd=tree,

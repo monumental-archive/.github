@@ -31,7 +31,7 @@ from __future__ import annotations
 import json
 import re
 import shutil
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -313,7 +313,7 @@ def mise_json(*args: str) -> object:
     """
     if shutil.which("mise") is None:
         return None
-    # ruff: ignore[subprocess-without-shell-equals-true, start-process-with-partial-path]
+    # ruff: ignore[start-process-with-partial-path]
     r = subprocess.run(
         ["mise", *args, "--json"], capture_output=True, text=True, check=False
     )

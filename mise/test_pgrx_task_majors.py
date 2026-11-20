@@ -25,7 +25,7 @@ GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. stdlib
 
 import re
 import shutil
-import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -165,7 +165,7 @@ class TwoExtensions(unittest.TestCase):
             The finished process.
 
         """
-        return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        return subprocess.run(
             [BASH, "-c", body(task)],
             cwd=self.tree,
             env=self.env,

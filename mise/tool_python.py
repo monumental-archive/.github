@@ -29,8 +29,6 @@ Stdlib only.
 import argparse
 import os
 import shutil
-
-# ruff: ignore[suspicious-subprocess-import]
 import subprocess
 import sys
 from pathlib import Path
@@ -56,7 +54,6 @@ def ask(python: str, code: str, *args: str) -> str:
 
     """
     try:
-        # ruff: ignore[subprocess-without-shell-equals-true]
         done = subprocess.run(
             [python, "-c", code, *args],
             capture_output=True,

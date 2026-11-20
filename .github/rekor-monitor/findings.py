@@ -31,7 +31,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
-import subprocess  # ruff: ignore[suspicious-subprocess-import] - gh is the forge client this workflow uses
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -237,7 +237,7 @@ def gh(*args: str) -> str:
         FindingsError: gh exited non-zero.
 
     """
-    proc = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - fixed argv, no shell
+    proc = subprocess.run(
         ["gh", *args],  # ruff: ignore[start-process-with-partial-path] - gh is resolved on PATH, as in the workflow
         capture_output=True,
         text=True,
