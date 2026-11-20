@@ -39,7 +39,6 @@ import shlex
 import sys
 import tempfile
 import tokenize
-import tomllib
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -51,6 +50,7 @@ import caller_pins
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
 import call_names
+import decoded
 import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
@@ -222,14 +222,34 @@ DYNAMIC = {
 PRE_INSTALL = {"caller_pins.py"}
 
 
-def belt() -> dict:
+def strings(*items: str) -> list[str]:
+    """List the given strings, typed as strings for the assertions.
+
+    Returns:
+        The strings, in order.
+
+    """
+    return list(items)
+
+
+def belt() -> dict[str, object]:
     """Read the belt's config.
 
     Returns:
         mise/config.toml, decoded.
 
     """
-    return tomllib.loads((CANON / "mise" / "config.toml").read_text("utf-8"))
+    return decoded.load_toml((CANON / "mise" / "config.toml").read_text("utf-8"))
+
+
+def belt_table(name: str) -> dict[str, object]:
+    """Read one table of the belt's config.
+
+    Returns:
+        mise/config.toml's `[name]`, or an empty table when there is none.
+
+    """
+    return decoded.as_object(belt().get(name, {}), f"[{name}]")
 
 
 def belt_tools() -> dict[str, str]:
@@ -239,7 +259,7 @@ def belt_tools() -> dict[str, str]:
         Command name to the key as mise/config.toml writes it.
 
     """
-    return {caller_pins.tool_name(key): key for key in belt()["tools"]}
+    return {caller_pins.tool_name(key): key for key in belt_table("tools")}
 
 
 def jobs(text: str) -> dict[str, list[str]]:
@@ -426,7 +446,7 @@ def constants(tree: ast.Module) -> dict[str, str]:
             and isinstance(node.targets[0], ast.Name)
         ):
             continue
-        value = node.value
+        value: ast.expr | None = node.value
         if isinstance(value, ast.BoolOp) and isinstance(value.op, ast.Or):
             value = which_or(value.values)
         if isinstance(value, ast.Constant) and isinstance(value.value, str):
@@ -580,10 +600,13 @@ def scripts(text: str, seen: set[str]) -> str:
         The code of every canon script and belt task the text reaches,
         transitively, each once.
 
+    Raises:
+        UndecodableError: a reached task whose run is not text.
+
     """
     out = []
-    tasks = belt().get("tasks", {})
-    for name in re.findall(r"[\w-]+\.(?:sh|py)\b", text):
+    tasks = belt_table("tasks")
+    for name in [m.group() for m in re.finditer(r"[\w-]+\.(?:sh|py)\b", text)]:
         if name in seen or name in PRE_INSTALL:
             continue
         for home in ("release", "mise"):
@@ -607,8 +630,14 @@ def scripts(text: str, seen: set[str]) -> str:
         if task in seen:
             continue
         seen.add(task)
-        run = tasks[task]["run"]
-        body = code(run if isinstance(run, str) else "\n".join(run))
+        run = decoded.as_object(tasks[task], f"[tasks.{task}]")["run"]
+        if isinstance(run, str):
+            body = code(run)
+        elif decoded.is_strings(run):
+            body = code("\n".join(run))
+        else:
+            msg = f"[tasks.{task}] run is neither a string nor strings"
+            raise decoded.UndecodableError(msg)
         out += [body, scripts(body, seen)]
     return "\n".join(out)
 
@@ -766,14 +795,15 @@ class Coverage(unittest.TestCase):
             if any(uncached(s) for s in mise_steps(job))
             and not tool_cache_restored(job)
         )
-        self.assertEqual(sorted(IN_SCOPE), found)
+        scoped: list[tuple[str, str]] = sorted(IN_SCOPE)
+        self.assertEqual(scoped, found)
 
     def test_every_job_names_its_list(self) -> None:
         """No job installs the whole config, and none can be empty."""
         for workflow, job_id in IN_SCOPE:
             job = load(workflow)[job_id]
             with self.subTest(workflow=workflow, job=job_id):
-                self.assertEqual([], whole_config(workflow, job_id, job))
+                self.assertEqual(strings(), whole_config(workflow, job_id, job))
                 if (workflow, job_id) not in WHOLE_CONFIG:
                     keys, needed, _ = installs(job)
                     self.assertTrue(keys or needed, "an empty list installs all")
@@ -794,12 +824,10 @@ class Coverage(unittest.TestCase):
             if "install_args:" not in ln
         ]
         self.assertEqual(
-            [
-                (
-                    "attach-release.yml attach: installs the whole mise config;"
-                    " name its tools in install_args (#1333)"
-                )
-            ],
+            strings(
+                "attach-release.yml attach: installs the whole mise config;"
+                " name its tools in install_args (#1333)"
+            ),
             whole_config("attach-release.yml", "attach", job),
         )
 
@@ -810,7 +838,8 @@ class Coverage(unittest.TestCase):
             for job_id, job in load("ci.yml").items()
             if mise_steps(job)
         )
-        self.assertEqual(sorted([*GATE_LISTS, *GATE_WHOLE]), found)
+        gated: list[tuple[str, str]] = sorted([*GATE_LISTS, *GATE_WHOLE])
+        self.assertEqual(gated, found)
 
     def test_the_gate_lists_are_lists(self) -> None:
         """The legs name their tools; the gate does not."""
@@ -825,12 +854,13 @@ class Coverage(unittest.TestCase):
 
     def test_every_belt_key_is_a_belt_key(self) -> None:
         """A misspelt key would install nothing and say nothing."""
-        known = set(belt()["tools"])
+        known = set(belt_table("tools"))
         listed = [j for j in IN_SCOPE if j not in WHOLE_CONFIG]
         for workflow, job_id in [*listed, *GATE_LISTS]:
             with self.subTest(workflow=workflow, job=job_id):
                 keys, _, _ = installs(load(workflow)[job_id])
-                self.assertEqual([], [k for k in keys if k not in known])
+                unknown: list[str] = [k for k in keys if k not in known]
+                self.assertEqual(strings(), unknown)
 
 
 class JobInstalls(unittest.TestCase):
@@ -841,7 +871,7 @@ class JobInstalls(unittest.TestCase):
         for workflow, job_id in [j for j in IN_SCOPE if j not in WHOLE_CONFIG]:
             with self.subTest(workflow=workflow, job=job_id):
                 self.assertEqual(
-                    [], uninstalled(workflow, job_id, load(workflow)[job_id])
+                    strings(), uninstalled(workflow, job_id, load(workflow)[job_id])
                 )
 
     def test_the_tag_job_installs_three_belt_tools(self) -> None:
@@ -862,7 +892,9 @@ class JobInstalls(unittest.TestCase):
             for ln in load("release.yml")["tag"]
         ]
         self.assertEqual(
-            ["release.yml tag: calls aqua:sigstore/gitsign and does not install it"],
+            strings(
+                "release.yml tag: calls aqua:sigstore/gitsign and does not install it"
+            ),
             uninstalled("release.yml", "tag", job),
         )
 
@@ -873,12 +905,10 @@ class JobInstalls(unittest.TestCase):
             for ln in load("build-rust-binary.yml")["build"]
         ]
         self.assertEqual(
-            [
-                (
-                    "build-rust-binary.yml build: calls cargo-auditable and does not"
-                    " install it"
-                )
-            ],
+            strings(
+                "build-rust-binary.yml build: calls cargo-auditable and does not"
+                " install it"
+            ),
             uninstalled("build-rust-binary.yml", "build", job),
         )
 
@@ -890,12 +920,10 @@ class JobInstalls(unittest.TestCase):
             "        run: cosign verify-blob dist/checksums.txt",
         ]
         self.assertEqual(
-            [
-                (
-                    "attach-release.yml attach: calls aqua:sigstore/cosign and does not"
-                    " install it"
-                )
-            ],
+            strings(
+                "attach-release.yml attach: calls aqua:sigstore/cosign and does not"
+                " install it"
+            ),
             uninstalled("attach-release.yml", "attach", job),
         )
 
@@ -907,12 +935,10 @@ class JobInstalls(unittest.TestCase):
             "        run: stele derive vex --out dist/x.json",
         ]
         self.assertEqual(
-            [
-                (
-                    "attach-release.yml attach: calls aqua:google/osv-scanner and does"
-                    " not install it"
-                )
-            ],
+            strings(
+                "attach-release.yml attach: calls aqua:google/osv-scanner and does"
+                " not install it"
+            ),
             uninstalled("attach-release.yml", "attach", job),
         )
 
@@ -925,7 +951,7 @@ class JobInstalls(unittest.TestCase):
             "          # cosign could verify this one day",
             "          true",
         ]
-        self.assertEqual([], uninstalled("attach-release.yml", "attach", job))
+        self.assertEqual(strings(), uninstalled("attach-release.yml", "attach", job))
 
 
 class GateInstalls(unittest.TestCase):
@@ -936,7 +962,7 @@ class GateInstalls(unittest.TestCase):
         for workflow, job_id in GATE_LISTS:
             with self.subTest(job=job_id):
                 self.assertEqual(
-                    [], uninstalled(workflow, job_id, load(workflow)[job_id])
+                    strings(), uninstalled(workflow, job_id, load(workflow)[job_id])
                 )
 
     def test_no_gate_list_is_undone_by_mise_run(self) -> None:
@@ -944,7 +970,7 @@ class GateInstalls(unittest.TestCase):
         for workflow, job_id in GATE_LISTS:
             with self.subTest(job=job_id):
                 self.assertEqual(
-                    [], auto_installs(workflow, job_id, load(workflow)[job_id])
+                    strings(), auto_installs(workflow, job_id, load(workflow)[job_id])
                 )
 
     def test_a_leg_that_lets_mise_run_install_is_named(self) -> None:
@@ -955,12 +981,10 @@ class GateInstalls(unittest.TestCase):
             if "MISE_TASK_RUN_AUTO_INSTALL" not in ln
         ]
         self.assertEqual(
-            [
-                (
-                    "ci.yml pgrx: runs `mise run`, which installs every tool the"
-                    ' config pins unless MISE_TASK_RUN_AUTO_INSTALL is "false"'
-                )
-            ],
+            strings(
+                "ci.yml pgrx: runs `mise run`, which installs every tool the"
+                ' config pins unless MISE_TASK_RUN_AUTO_INSTALL is "false"'
+            ),
             auto_installs("ci.yml", "pgrx", job),
         )
 
@@ -1000,7 +1024,7 @@ class GateInstalls(unittest.TestCase):
             ln.replace("rust cargo-pgrx >>", "rust >>") for ln in load("ci.yml")["pgrx"]
         ]
         self.assertEqual(
-            ["ci.yml pgrx: calls cargo-pgrx and does not install it"],
+            strings("ci.yml pgrx: calls cargo-pgrx and does not install it"),
             uninstalled("ci.yml", "pgrx", job),
         )
 
@@ -1008,7 +1032,7 @@ class GateInstalls(unittest.TestCase):
         """Planted: no `--major`, so no Postgres for pgrx_postgres.py."""
         job = [ln for ln in load("ci.yml")["pgrx"] if "--major" not in ln]
         self.assertEqual(
-            ["ci.yml pgrx: calls postgresql-binaries and does not install it"],
+            strings("ci.yml pgrx: calls postgresql-binaries and does not install it"),
             uninstalled("ci.yml", "pgrx", job),
         )
 
@@ -1020,7 +1044,7 @@ class GateInstalls(unittest.TestCase):
             "        run: cargo fuzz build --sanitizer none",
         ]
         self.assertEqual(
-            ["ci.yml pgrx: calls cargo-fuzz and does not install it"],
+            strings("ci.yml pgrx: calls cargo-fuzz and does not install it"),
             uninstalled("ci.yml", "pgrx", job),
         )
 
@@ -1032,7 +1056,7 @@ class GateInstalls(unittest.TestCase):
             "        run: typos --format brief",
         ]
         self.assertEqual(
-            ["ci.yml pgrx: calls typos and does not install it"],
+            strings("ci.yml pgrx: calls typos and does not install it"),
             uninstalled("ci.yml", "pgrx", job),
         )
 
@@ -1157,7 +1181,9 @@ class GateUploadMeasuresNothing(unittest.TestCase):
         """The real job: download, list, hand to Codecov."""
         for (workflow, job_id), why in GATE_NONE.items():
             with self.subTest(job=job_id, why=why):
-                self.assertEqual([], measures(workflow, job_id, load(workflow)[job_id]))
+                self.assertEqual(
+                    strings(), measures(workflow, job_id, load(workflow)[job_id])
+                )
 
     def test_the_upload_that_hung_on_main_is_named(self) -> None:
         """Planted: the job as it was, re-measuring with five tools."""
@@ -1173,10 +1199,10 @@ class GateUploadMeasuresNothing(unittest.TestCase):
         ]
         found = measures("ci.yml", "coverage-upload", job)
         self.assertEqual(
-            [
+            strings(
                 "ci.yml coverage-upload: installs tools with jdx/mise-action",
                 "ci.yml coverage-upload: runs a mise task",
-            ],
+            ),
             found[:2],
         )
         # Followed into coverage:check and the measurement it runs.
@@ -1191,16 +1217,17 @@ class GateUploadMeasuresNothing(unittest.TestCase):
             "        run: cargo llvm-cov --workspace --lcov --output-path lcov.info",
         ]
         self.assertEqual(
-            [
+            strings(
                 "ci.yml coverage-upload: calls aqua:taiki-e/cargo-llvm-cov",
                 "ci.yml coverage-upload: calls rust",
-            ],
+            ),
             measures("ci.yml", "coverage-upload", job),
         )
 
     def test_no_gate_job_is_both_listed_and_measureless(self) -> None:
         """A job is a list, the whole config, or nothing: one of them."""
-        self.assertEqual(set(), set(GATE_NONE) & {*GATE_LISTS, *GATE_WHOLE})
+        none: set[tuple[str, str]] = set()
+        self.assertEqual(none, set(GATE_NONE) & {*GATE_LISTS, *GATE_WHOLE})
 
 
 # The line a named-list job carries at job level (#1412). mise's
@@ -1238,19 +1265,17 @@ class TaskAutoInstall(unittest.TestCase):
         for workflow, job_id in IN_SCOPE:
             with self.subTest(workflow=workflow, job=job_id):
                 job = load(workflow)[job_id]
-                self.assertEqual([], task_auto_install(workflow, job_id, job))
+                self.assertEqual(strings(), task_auto_install(workflow, job_id, job))
 
     def test_a_job_without_the_setting_is_named(self) -> None:
         """Planted: the SBOM job, which runs audit:deny, loses the line."""
         job = [ln for ln in load("publish.yml")["sbom"] if ln != NO_TASK_INSTALL]
         self.assertEqual(
-            [
-                (
-                    "publish.yml sbom: installs a named list but leaves mise's task"
-                    ' auto-install on; set MISE_TASK_RUN_AUTO_INSTALL: "false" in'
-                    " the job's env (#1412)"
-                )
-            ],
+            strings(
+                "publish.yml sbom: installs a named list but leaves mise's task"
+                ' auto-install on; set MISE_TASK_RUN_AUTO_INSTALL: "false" in'
+                " the job's env (#1412)"
+            ),
             task_auto_install("publish.yml", "sbom", job),
         )
 
@@ -1261,12 +1286,10 @@ class TaskAutoInstall(unittest.TestCase):
             for ln in load("publish.yml")["sbom"]
         ]
         self.assertEqual(
-            [
-                (
-                    "publish.yml sbom: calls aqua:EmbarkStudios/cargo-deny and does"
-                    " not install it"
-                )
-            ],
+            strings(
+                "publish.yml sbom: calls aqua:EmbarkStudios/cargo-deny and does"
+                " not install it"
+            ),
             uninstalled("publish.yml", "sbom", job),
         )
 
@@ -1364,19 +1387,19 @@ class UnsetMessages(unittest.TestCase):
     def test_a_local_assignment_message_is_not_a_call(self) -> None:
         """`local x="${V:?…}"`, the pgrx-env.sh shape."""
         helper = 'f() {\n  local x="${V:?run: lefthook run post-checkout}"\n}\n'
-        self.assertEqual([], planted_shell(helper))
+        self.assertEqual(strings(), planted_shell(helper))
 
     def test_a_colon_command_message_is_not_a_call(self) -> None:
         """`: "${V:?…}"`, the identity.sh shape."""
         helper = ': "${V:?run: lefthook run post-checkout}"\n'
-        self.assertEqual([], planted_shell(helper))
+        self.assertEqual(strings(), planted_shell(helper))
 
     def test_a_sourced_path_message_is_not_a_call(self) -> None:
         """`. "${V:?…}/f.sh"`, the audit-badges.sh shape; `?` alone too."""
         for op in (":?", "?"):
             with self.subTest(op=op):
                 helper = f'. "${{V{op}run: lefthook run post-checkout}}/f.sh"\n'
-                self.assertEqual([], planted_shell(helper))
+                self.assertEqual(strings(), planted_shell(helper))
 
     def test_a_substitution_in_a_message_is_a_call(self) -> None:
         """`${V:?$(lefthook …)}`: the shell runs it, so it stays code."""
@@ -1428,7 +1451,7 @@ class ArgvCalls(unittest.TestCase):
             'print(["ruff", "check"])\n'
             'subprocess.run(["git", "status"], check=True)\n'
         )
-        self.assertEqual([], planted_uninstalled(helper))
+        self.assertEqual(strings(), planted_uninstalled(helper))
 
     def test_every_import_form_is_read(self) -> None:
         """An aliased module and an imported function, all four calls."""
@@ -1446,19 +1469,19 @@ class ArgvCalls(unittest.TestCase):
     def test_the_dynamic_helpers_are_the_named_ones(self) -> None:
         """The real tree: every unreadable argv is named, and only those."""
         found = {name for name, text in helpers().items() if python_code(text)[2]}
-        self.assertEqual(sorted(DYNAMIC), sorted(found))
-        self.assertEqual([], unreadable(helpers()))
+        named: list[str] = sorted(DYNAMIC)
+        unread: list[str] = sorted(found)
+        self.assertEqual(named, unread)
+        self.assertEqual(strings(), unreadable(helpers()))
 
     def test_an_unnamed_dynamic_helper_is_red_by_name(self) -> None:
         """A new helper that runs a variable is named, with its call."""
         helper = "import subprocess\n\n\ndef go(args):\n    subprocess.run(args)\n"
         self.assertEqual(
-            [
-                (
-                    "release/planted.py: runs a command this check cannot read"
-                    " (line 5: args); name it in DYNAMIC with why"
-                )
-            ],
+            strings(
+                "release/planted.py: runs a command this check cannot read"
+                " (line 5: args); name it in DYNAMIC with why"
+            ),
             unreadable({"release/planted.py": helper}),
         )
 
@@ -1475,7 +1498,7 @@ class OneReader(unittest.TestCase):
             *sorted((root / ".github" / "workflows").glob("*.yml")),
         ]
         found = [ln for p in paths for ln in readers(p, p.read_text("utf-8"), root)]
-        self.assertEqual([], found)
+        self.assertEqual(strings(), found)
 
     def test_a_planted_reader_is_named(self) -> None:
         """Planted: the inline reader the pgrx build carried before #1333."""
@@ -1485,13 +1508,11 @@ class OneReader(unittest.TestCase):
             '          pgrx = tools.get("cargo:cargo-pgrx", "")\n'
         )
         self.assertEqual(
-            [
-                (
-                    ".github/workflows/build-pgrx-extension.yml: reads a caller's"
-                    " mise config itself; read it through release/caller_pins.py"
-                    " (#1333)"
-                )
-            ],
+            strings(
+                ".github/workflows/build-pgrx-extension.yml: reads a caller's"
+                " mise config itself; read it through release/caller_pins.py"
+                " (#1333)"
+            ),
             readers(path, text),
         )
 
@@ -1648,7 +1669,8 @@ class BeltPython(unittest.TestCase):
     def test_every_helper_start_names_org_python(self) -> None:
         """The tree: no step starts a tracked helper any other way."""
         self.assertEqual(
-            [], interpreter_findings(workflow_and_action_texts(), tracked_helpers())
+            strings(),
+            interpreter_findings(workflow_and_action_texts(), tracked_helpers()),
         )
 
     def test_the_scan_reaches_the_helper_starts(self) -> None:
@@ -1670,13 +1692,11 @@ class BeltPython(unittest.TestCase):
             '          python3 .org-canon/release/registry.py push --image "${IMAGE}"\n'
         )
         self.assertEqual(
-            [
-                (
-                    ".github/workflows/x.yml build: step 'Push the image' starts"
-                    " registry.py with the runner's python3; run it as"
-                    ' "${ORG_PYTHON}" registry.py (#1543)'
-                )
-            ],
+            strings(
+                ".github/workflows/x.yml build: step 'Push the image' starts"
+                " registry.py with the runner's python3; run it as"
+                ' "${ORG_PYTHON}" registry.py (#1543)'
+            ),
             interpreter_findings({".github/workflows/x.yml": text}, {"registry.py"}),
         )
 
@@ -1691,7 +1711,7 @@ class BeltPython(unittest.TestCase):
             '            --tag "${TAG}")\n'
         )
         self.assertEqual(
-            [
+            strings(
                 (
                     ".github/workflows/x.yml build: step 'Attach' starts"
                     " attach_publish.py by its own first line; run it as"
@@ -1702,7 +1722,7 @@ class BeltPython(unittest.TestCase):
                     " previous_release.py by its own first line; run it as"
                     ' "${ORG_PYTHON}" previous_release.py (#1543)'
                 ),
-            ],
+            ),
             interpreter_findings(
                 {".github/workflows/x.yml": text},
                 {"attach_publish.py", "previous_release.py"},
@@ -1717,13 +1737,11 @@ class BeltPython(unittest.TestCase):
             '      run: python3 "${GITHUB_ACTION_PATH}/derive.py"\n'
         )
         self.assertEqual(
-            [
-                (
-                    ".github/actions/x/action.yml runs: step 'Derive' starts"
-                    " derive.py with the runner's python3; run it as"
-                    ' "${ORG_PYTHON}" derive.py (#1543)'
-                )
-            ],
+            strings(
+                ".github/actions/x/action.yml runs: step 'Derive' starts"
+                " derive.py with the runner's python3; run it as"
+                ' "${ORG_PYTHON}" derive.py (#1543)'
+            ),
             interpreter_findings({".github/actions/x/action.yml": text}, {"derive.py"}),
         )
 
@@ -1737,13 +1755,11 @@ class BeltPython(unittest.TestCase):
             "        uses: $/.github/actions/canon\n"
         )
         self.assertEqual(
-            [
-                (
-                    ".github/workflows/x.yml plan: step 'Plan' uses ORG_PYTHON and no"
-                    " step before it runs $/.github/actions/canon, which exports it"
-                    " (#1543)"
-                )
-            ],
+            strings(
+                ".github/workflows/x.yml plan: step 'Plan' uses ORG_PYTHON and no"
+                " step before it runs $/.github/actions/canon, which exports it"
+                " (#1543)"
+            ),
             interpreter_findings({".github/workflows/x.yml": text}, {"matrix.py"}),
         )
 
@@ -1762,7 +1778,7 @@ class BeltPython(unittest.TestCase):
             "          # python3 .org-canon/release/registry.py tag\n"
         )
         self.assertEqual(
-            [],
+            strings(),
             interpreter_findings(
                 {".github/workflows/x.yml": text}, {"registry.py", "gate_tools.py"}
             ),
@@ -1832,7 +1848,7 @@ class PopulationToken(unittest.TestCase):
             str(p.relative_to(root)): p.read_text("utf-8")
             for p in sorted((root / ".github" / "workflows").glob("*.yml"))
         }
-        self.assertEqual([], population_reads_on_job_token(texts))
+        self.assertEqual(strings(), population_reads_on_job_token(texts))
 
     def test_the_scan_reaches_the_population_reads(self) -> None:
         """Not vacuous: the tree's population reads are all in view."""
@@ -1882,7 +1898,7 @@ class PopulationToken(unittest.TestCase):
             "          gh release list --org-less\n",
         }
         self.assertEqual(
-            ["a.yml: a / Read", "b.yml: b / Read", "c.yml: c / Read"],
+            strings("a.yml: a / Read", "b.yml: b / Read", "c.yml: c / Read"),
             population_reads_on_job_token(texts),
         )
 
@@ -1915,9 +1931,10 @@ class PopulationGrants(unittest.TestCase):
     def test_the_vex_attest_mint_names_three_reads(self) -> None:
         """Contents, metadata and attestations: no review history."""
         _, mint = mint_step("vex-attest.yml", "plan")
-        self.assertEqual(
-            VEX_GRANTS, {k: v for k, v in mint.items() if k.startswith("with.perm")}
-        )
+        grants: dict[str, str] = {
+            k: v for k, v in mint.items() if k.startswith("with.perm")
+        }
+        self.assertEqual(VEX_GRANTS, grants)
 
 
 class VexAttestToken(unittest.TestCase):
@@ -1940,9 +1957,9 @@ class VexAttestToken(unittest.TestCase):
         _, mint = mint_step("vex-attest.yml", "plan")
         _, audit = mint_step("audit.yml", "blast-radius")
         keys = ("uses", "with.client-id", "with.private-key", "with.owner")
-        self.assertEqual(
-            {k: audit.get(k) for k in keys}, {k: mint.get(k) for k in keys}
-        )
+        audits: dict[str, str | None] = {k: audit.get(k) for k in keys}
+        mints: dict[str, str | None] = {k: mint.get(k) for k in keys}
+        self.assertEqual(audits, mints)
 
     def test_the_signing_jobs_never_see_the_token(self) -> None:
         """Only the plan job names the App or its token."""
@@ -1993,7 +2010,7 @@ def secrets_outside_environment(texts: dict[str, str]) -> list[str]:
         `workflow: job reads SECRET outside environment ENV` per finding.
 
     """
-    found = []
+    found: list[str] = []
     for rel, text in sorted(texts.items()):
         for job_id, job in jobs(text).items():
             body = "\n".join(ln for ln in job if not ln.strip().startswith("#"))
@@ -2017,7 +2034,7 @@ class EnvironmentSecrets(unittest.TestCase):
             rel: (root / rel).read_text("utf-8")
             for rel in hermetic.tracked(root, ".github/workflows/*.yml")
         }
-        self.assertEqual([], secrets_outside_environment(texts))
+        self.assertEqual(strings(), secrets_outside_environment(texts))
 
     def test_the_scan_reaches_the_environment_jobs(self) -> None:
         """Not vacuous: stripping every declaration names each reader."""
@@ -2056,10 +2073,10 @@ class EnvironmentSecrets(unittest.TestCase):
             "e.yml": "jobs:\n  e:\n" + step + "        # secrets.AUDIT_TOKEN\n",
         }
         self.assertEqual(
-            [
+            strings(
                 "a.yml: a reads AUDIT_TOKEN outside environment audit",
                 "b.yml: b reads AUDIT_TOKEN outside environment audit",
-            ],
+            ),
             secrets_outside_environment(texts),
         )
 
@@ -2218,12 +2235,13 @@ class GateLegs(unittest.TestCase):
 
     def test_the_real_gate_conforms(self) -> None:
         """A matrix of the three, each one-leg step carrying its leg."""
-        self.assertEqual([], leg_findings(ci_text()))
+        self.assertEqual(strings(), leg_findings(ci_text()))
 
     def test_one_job_and_no_copies(self) -> None:
         """One matrix job, not three copied ones."""
         found = jobs(ci_text())
-        self.assertEqual([], [j for j in found if j.startswith("gate-")])
+        copies: list[str] = [j for j in found if j.startswith("gate-")]
+        self.assertEqual(strings(), copies)
 
     def test_planted_breaches_are_named(self) -> None:
         """Each property broken once on the real file, by its message."""
@@ -2329,7 +2347,7 @@ class GateLegs(unittest.TestCase):
         ]
         for label, (old, new), message in rows:
             with self.subTest(row=label):
-                self.assertEqual([message], leg_findings(planted(old, new)))
+                self.assertEqual(strings(message), leg_findings(planted(old, new)))
 
 
 # A default-branch test compares the ref with the event's own name for
@@ -2410,22 +2428,22 @@ class DefaultBranchByName(unittest.TestCase):
                 str(path.relative_to(root)), path.read_text("utf-8")
             )
         ]
-        self.assertEqual([], found)
+        self.assertEqual(strings(), found)
 
     def test_a_literal_ref_is_refused_by_line(self) -> None:
         """The form ci.yml carried at three sites before #1693."""
         text = "jobs:\n" + self.PUSH % "github.ref == 'refs/heads/main'"
-        self.assertEqual(["x.yml:3"], literal_branches("x.yml", text))
+        self.assertEqual(strings("x.yml:3"), literal_branches("x.yml", text))
 
     def test_a_literal_ref_name_is_refused(self) -> None:
         """The short name is the same test."""
         text = "jobs:\n" + self.PUSH % "github.ref_name == 'main'"
-        self.assertEqual(["x.yml:3"], literal_branches("x.yml", text))
+        self.assertEqual(strings("x.yml:3"), literal_branches("x.yml", text))
 
     def test_the_literal_first_and_not_equal_are_refused(self) -> None:
         """Operand order and the operator do not change what is named."""
         text = "jobs:\n" + self.PUSH % "'refs/heads/trunk' != github.ref"
-        self.assertEqual(["x.yml:3"], literal_branches("x.yml", text))
+        self.assertEqual(strings("x.yml:3"), literal_branches("x.yml", text))
 
     def test_a_folded_condition_names_the_literal_line(self) -> None:
         """The coverage-upload job's shape: the literal three lines down."""
@@ -2435,7 +2453,7 @@ class DefaultBranchByName(unittest.TestCase):
             "      && github.ref == 'refs/heads/main' }}\n"
             "    runs-on: ubuntu-26.04\n"
         )
-        self.assertEqual(["x.yml:6"], literal_branches("x.yml", text))
+        self.assertEqual(strings("x.yml:6"), literal_branches("x.yml", text))
 
     def test_the_default_branch_form_is_allowed(self) -> None:
         """The event's own name for the branch."""
@@ -2443,12 +2461,12 @@ class DefaultBranchByName(unittest.TestCase):
             "github.ref == format('refs/heads/{0}',"
             " github.event.repository.default_branch)"
         )
-        self.assertEqual([], literal_branches("x.yml", text))
+        self.assertEqual(strings(), literal_branches("x.yml", text))
 
     def test_a_tag_literal_is_not_a_branch(self) -> None:
         """A tag ref is not a default-branch test."""
         text = "jobs:\n" + self.PUSH % "github.ref != 'refs/tags/v1'"
-        self.assertEqual([], literal_branches("x.yml", text))
+        self.assertEqual(strings(), literal_branches("x.yml", text))
 
     def test_an_identity_string_outside_an_if_is_not_matched(self) -> None:
         """The source-attest identity is a signed name, not a condition."""
@@ -2457,7 +2475,7 @@ class DefaultBranchByName(unittest.TestCase):
             "  REF: ${{ github.ref == 'refs/heads/main' }}\n"
             "jobs:\n" + self.PUSH % "true"
         )
-        self.assertEqual([], literal_branches("x.yml", text))
+        self.assertEqual(strings(), literal_branches("x.yml", text))
 
 
 if __name__ == "__main__":
