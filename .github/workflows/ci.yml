@@ -283,7 +283,7 @@ jobs:
         id: tool-key
         env:
           ORG_MISE_CONFIG_HASH: ${{ hashFiles(env.ORG_MISE_CONFIG_GLOBS) }}
-        run: '"${ORG_PYTHON}" .org-canon/mise/gate_cache_key.py mise-v2 .org-canon'
+        run: '"${ORG_PYTHON}" .org-canon/mise/gate_cache_key.py tool mise-v2 .org-canon'
 
       # unattested-path: this gate signs and publishes nothing, so the
       # cold-build rule (#117, docs/release.md) permits caches exactly
@@ -397,6 +397,22 @@ jobs:
           key: gate-go-v2-${{ matrix.leg }}-${{ runner.os }}-${{ hashFiles('go.sum') }}
           restore-keys: ${{ env.ORG_GATE_CACHE_FALLBACK == 'true' && format('gate-go-v2-{0}-{1}-', matrix.leg, runner.os) || '' }}
 
+      # THE CARGO CACHES NAME THEIR COMPILER (#1864). `target` is what
+      # the compiler that built it made, and a key on Cargo.lock alone
+      # restored the old compiler's objects after a toolchain bump that
+      # left Cargo.lock unchanged: cargo built the new ones beside them
+      # and llvm-cov read both — edtf's Rust 1.100 bump measured 70.1%
+      # coverage over a 1.97.1 target, 99.3% over a clean one. This is
+      # the sha256 of the full `rustc -vV` (release, commit, LLVM, host)
+      # of the rustc the install step put on PATH, the one the tasks
+      # build with. In the key, a bump misses; in the fallback prefix, a
+      # pull request falls back only to an entry the same compiler
+      # filled. No rustc is a red step, never an empty digest.
+      - name: Name the compiler the cargo caches hold
+        id: rustc
+        if: ${{ matrix.leg != 'properties' && hashFiles('Cargo.lock') != '' }}
+        run: '"${ORG_PYTHON}" .org-canon/mise/gate_cache_key.py cargo'
+
       # unattested-path: same standing as the Go caches above — this
       # gate signs and publishes nothing, cargo checks every registry
       # source against Cargo.lock, and GitHub scopes cache writes per
@@ -419,6 +435,8 @@ jobs:
       # The lint and test legs only, each under a name of its own
       # (#1740): clippy's `target` and the test build's are different
       # contents, so one shared entry would hold whichever leg saved it.
+      # The key and its fallback carry the compiler's digest before
+      # Cargo.lock's hash (#1864), named in the step above.
       - name: Restore the cargo caches (unsigned gate only)
         id: cargo-cache
         if: ${{ matrix.leg != 'properties' && hashFiles('Cargo.lock') != '' }}
@@ -428,8 +446,11 @@ jobs:
             ~/.cargo/registry
             ~/.pgrx/config.toml
             target
-          key: gate-cargo-${{ matrix.leg }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: ${{ env.ORG_GATE_CACHE_FALLBACK == 'true' && format('gate-cargo-{0}-{1}-', matrix.leg, runner.os) || '' }}
+          key: gate-cargo-${{ matrix.leg }}-${{ runner.os }}-${{ steps.rustc.outputs.digest }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: >-
+            ${{ env.ORG_GATE_CACHE_FALLBACK == 'true'
+            && format('gate-cargo-{0}-{1}-{2}-', matrix.leg, runner.os, steps.rustc.outputs.digest)
+            || '' }}
 
       # PRs squash-merge, and the PERMANENT commit message is the PR
       # title with GitHub's " (#N)" appended, then the PR body — neither
@@ -640,7 +661,7 @@ jobs:
           ORG_PGRX_MAJOR: ${{ matrix.major }}
           ORG_TOOL_INSTALL: jq aqua:taiki-e/cargo-llvm-cov ${{ steps.pins.outputs.install }}
         run: |
-          "${ORG_PYTHON}" .org-canon/mise/gate_cache_key.py "mise-pgrx-v1-pg${ORG_PGRX_MAJOR}" \
+          "${ORG_PYTHON}" .org-canon/mise/gate_cache_key.py tool "mise-pgrx-v1-pg${ORG_PGRX_MAJOR}" \
             .org-canon --install "${ORG_TOOL_INSTALL}"
       # unattested-path: this gate signs and publishes nothing, so the
       # cold-build rule (#117, docs/release.md) permits the tool cache
@@ -679,13 +700,21 @@ jobs:
           path: ${{ steps.tool-key.outputs.dir }}
           key: ${{ steps.tool-cache.outputs.cache-primary-key }}
 
+      # The compiler the cargo caches hold (#1864), as in the `gate`
+      # job: this leg's own Rust, from the list it installed.
+      - name: Name the compiler the cargo caches hold
+        id: rustc
+        run: '"${ORG_PYTHON}" .org-canon/mise/gate_cache_key.py cargo'
+
       # unattested-path: this gate signs and publishes nothing, so the
       # cold-build rule (#117, docs/release.md) permits the cargo cache
       # exactly here. Keyed per major, because each major's build of the
       # extension is its own artifact set; cargo checks registry sources
       # against Cargo.lock, so a poisoned entry cannot change what
       # compiles. ~/.pgrx/config.toml rides with `target`, as in the
-      # `gate` job and for the reason given there (#1165).
+      # `gate` job and for the reason given there (#1165). The key and
+      # its fallback carry the compiler's digest before Cargo.lock's
+      # hash, as there (#1864).
       - name: Restore the cargo caches (unsigned gate only)
         id: cargo-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -694,10 +723,11 @@ jobs:
             ~/.cargo/registry
             ~/.pgrx/config.toml
             target
-          key: gate-pgrx-${{ matrix.major }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          key: gate-pgrx-${{ matrix.major }}-${{ runner.os }}-${{ steps.rustc.outputs.digest }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: >-
             ${{ env.ORG_GATE_CACHE_FALLBACK == 'true'
-            && format('gate-pgrx-{0}-{1}-', matrix.major, runner.os) || '' }}
+            && format('gate-pgrx-{0}-{1}-{2}-', matrix.major, runner.os, steps.rustc.outputs.digest)
+            || '' }}
 
       - name: Run the extension's suite at this major
         env:
