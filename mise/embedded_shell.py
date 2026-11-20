@@ -30,6 +30,8 @@ handed to them.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import os
 import re
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
@@ -65,7 +67,7 @@ SHELL_RE = re.compile(r"^(\s*)(- )?shell:\s*([a-z0-9 {}$.-]+)\s*$")
 NAME_RE = re.compile(r"^(\s*)(- )?name:\s*(.*?)\s*$")
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator, Iterator
 
 SHFMT = ["shfmt", "-i", "2", "-bn", "-ci", "-sr", "-s"]
 
@@ -95,6 +97,63 @@ ORG_RCFILE = Path(__file__).resolve().parent / "shellcheckrc"
 GCC_FIELDS = 4
 
 SHELLCHECK_EXCLUDE = "SC1091,SC2194,SC2050,SC2153,SC2154,SC2157,SC2043"
+# A step that sources the canon tree (`. .org-canon/mise/…`, #1660). The
+# runner has `.org-canon` (the canon action links it); a laptop does not,
+# so shellcheck is told where it is (#1715). And SC1091, the one finding
+# that would say a source was not followed, is excluded above as
+# actionlint excludes it, so a source the canon does not hold is
+# refused here by name.
+CANON_SOURCE_RE = re.compile(r"""^\s*(?:\.|source)\s+["']?\.org-canon/([^"'\s;]+)""")
+
+
+def canon_dir() -> Path:
+    """Name the canon tree: ORG_CANON_DIR, or the tree this belt is in.
+
+    Returns:
+        The directory `.org-canon` stands for.
+
+    """
+    named = os.environ.get("ORG_CANON_DIR")
+    return Path(named) if named else Path(__file__).resolve().parents[1]
+
+
+@contextlib.contextmanager
+def canon_source_path() -> Generator[Path]:
+    """Make a directory of this run's own holding `.org-canon`.
+
+    Shellcheck resolves `. .org-canon/<path>` against `--source-path`,
+    so a laptop, which has no `.org-canon`, follows the same file the
+    runner does. Nothing is written in the working tree, and the
+    directory goes when the run does.
+
+    Yields:
+        The directory to pass as `--source-path`.
+
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        (Path(tmp) / ".org-canon").symlink_to(canon_dir())
+        yield Path(tmp)
+
+
+def unfollowed(path: Path, lineno: int, src: str, *, folded: bool) -> list[str]:
+    """Refuse a step that sources a canon file the canon does not hold.
+
+    Returns:
+        One line per such source: the file, its line and the path.
+
+    """
+    canon = canon_dir()
+    out: list[str] = []
+    for offset, line in enumerate(src.splitlines()):
+        found = CANON_SOURCE_RE.match(line)
+        if found and not (canon / found.group(1)).is_file():
+            at = lineno if folded else lineno + offset
+            out.append(
+                f"{path}:{at}: sources .org-canon/{found.group(1)}, which the"
+                f" canon tree ({canon}) does not hold: shellcheck cannot"
+                " follow it, and SC1091 is not shown (#1715)"
+            )
+    return out
 
 
 def step_shell(lines: list[str], run_idx: int, key_indent: int) -> str:
@@ -435,8 +494,12 @@ def findings(gcc: str, path: Path, lineno: int, *, folded: bool) -> list[str]:
     return out
 
 
-def check(path: Path, *, fmt: bool, lint: bool) -> list[str]:
+def check(
+    path: Path, *, fmt: bool, lint: bool, source_path: Path | None = None
+) -> list[str]:
     """Run shfmt and shellcheck over one file's embedded blocks.
+
+    `source_path` is where shellcheck finds `.org-canon` (#1715).
 
     Returns:
         One human-readable line per finding.
@@ -444,6 +507,8 @@ def check(path: Path, *, fmt: bool, lint: bool) -> list[str]:
     """
     out: list[str] = []
     for lineno, src, folded in blocks(path):
+        if lint:
+            out += unfollowed(path, lineno, src, folded=folded)
         with tempfile.NamedTemporaryFile(
             "w",
             suffix=".sh",
@@ -471,6 +536,7 @@ def check(path: Path, *, fmt: bool, lint: bool) -> list[str]:
                     [
                         "shellcheck",
                         f"--rcfile={ORG_RCFILE}",
+                        *([f"--source-path={source_path}"] if source_path else []),
                         "--exclude",
                         SHELLCHECK_EXCLUDE,
                         "--format=gcc",
@@ -976,8 +1042,14 @@ def main(argv: list[str]) -> int:
         return 0
 
     findings: list[str] = []
-    for f in args.files:
-        findings += check(Path(f), fmt=not args.no_format, lint=not args.no_lint)
+    with canon_source_path() as source_path:
+        for f in args.files:
+            findings += check(
+                Path(f),
+                fmt=not args.no_format,
+                lint=not args.no_lint,
+                source_path=source_path,
+            )
     for line in findings:
         print(line, file=sys.stderr)
     if findings:
