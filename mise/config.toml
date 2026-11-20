@@ -1962,7 +1962,7 @@ echo "lint:python-target: ${target} <= ${actual}, ok"
 '''
 
 [tasks."lint:python-module-names"]
-description = "Every tracked Python file is named as a module: no hyphen, so it can be imported"
+description = "Every tracked Python file is named as a module: no hyphen, and no two files one module"
 dir = "{{cwd}}"
 # A file named `caller-pins.py` is not a module name: nothing can import
 # it, so every test loaded it by path and a type checker saw the result
@@ -1970,12 +1970,15 @@ dir = "{{cwd}}"
 # The canon's 59 were renamed; this keeps a new one from arriving. By
 # name, every one; ruff's N999 does not fire on a file outside a
 # package (measured on 0.17.5), which is every belt helper.
+#
+# Two files that would be one module under the derived import roots are
+# refused too (#1737), by python_roots.py's own check, the one
+# audit:python-types runs before mypy: a second file of a module name
+# is red at the pull request, never first in the weekly audit. Its
+# printed roots go nowhere here.
 run = '''
 files=$(git ls-files ':!vendor/**' "*.py" "*.pyi")
-[[ -n ${files} ]] || {
-  echo "lint:python-module-names: no Python tracked, skipped"
-  exit 0
-}
+[[ -n ${files} ]] || { echo "lint:python-module-names: no Python tracked, skipped" && exit 0; }
 bad=$(awk -F/ '$NF ~ /-/' <<< "${files}")
 if [[ -n ${bad} ]]; then
   echo "lint:python-module-names: not a module name, so nothing can import it (#1634):" >&2
@@ -1983,6 +1986,11 @@ if [[ -n ${bad} ]]; then
   echo "  name it with underscores in place of the hyphens" >&2
   exit 1
 fi
+IFS=$'\n' read -r -d '' -a args < <(printf '%s\0' "${files}")
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/python_roots.py" "${ORG_BELT_DIR}" "${args[@]}" > /dev/null || {
+  echo "lint:python-module-names: rename one of each pair above so every module name is one file's" >&2
+  exit 1
+}
 echo "lint:python-module-names: ok"
 '''
 

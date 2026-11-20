@@ -200,6 +200,7 @@ tasks = [
   "lint:pg-schema",
   "lint:pg-upgrade-path",
   "lint:plan-producers",
+  "lint:python-module-names",
   "lint:python-target",
   "lint:rust",
   "lint:scaffold-assembly",

@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-"""lint:python-module-names refuses a hyphenated Python file (#1634).
+"""lint:python-module-names refuses a file nothing can import by name.
 
-Each row runs the task's own `run` body, read from mise/config.toml,
-under bash in a planted git tree, and asserts its message: a planted
-hyphenated file is red by name, a tree of module names is green, a
-tree with no Python skips. The canon's own tree is the last row.
+A hyphenated file is not a module name (#1634); two files that would be
+one module under the derived import roots reach only one of them on an
+import (#1737), refused by python_roots.py's own check. Each row runs
+the task's own `run` body, read from mise/config.toml, under bash in a
+planted git tree with the belt as ORG_BELT_DIR, and asserts its
+message: each planted defect is red by name, a tree of module names is
+green, a tree with no Python skips. The canon's own tree is the last
+row.
 
 stdlib `unittest`, matching the other mise/test_*.py; run through the
 gate as `mise run test`. Every git call passes a scrubbed environment.
@@ -35,6 +39,24 @@ def body() -> str:
         return tomllib.load(handle)["tasks"][TASK]["run"]
 
 
+def run(tree: Path, home: Path) -> subprocess.CompletedProcess[str]:
+    """Run the lint's body in a tree, with the belt as ORG_BELT_DIR.
+
+    Returns:
+        The finished run.
+
+    """
+    # ruff: ignore[subprocess-without-shell-equals-true]
+    return subprocess.run(
+        [BASH, "-euo", "pipefail", "-c", body()],
+        cwd=tree,
+        env=hermetic.env(home, ORG_BELT_DIR=str(BELT)),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
 def lint(files: list[str]) -> subprocess.CompletedProcess[str]:
     """Plant a tree tracking files and run the lint in it.
 
@@ -56,15 +78,7 @@ def lint(files: list[str]) -> subprocess.CompletedProcess[str]:
         subprocess.run([GIT, "init", "-q"], cwd=tree, env=env, check=True)
         # ruff: ignore[subprocess-without-shell-equals-true]
         subprocess.run([GIT, "add", "."], cwd=tree, env=env, check=True)
-        # ruff: ignore[subprocess-without-shell-equals-true]
-        return subprocess.run(
-            [BASH, "-euo", "pipefail", "-c", body()],
-            cwd=tree,
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        return run(tree, root / "home")
 
 
 class PythonModuleNames(unittest.TestCase):
@@ -88,6 +102,26 @@ class PythonModuleNames(unittest.TestCase):
             done.stderr,
         )
 
+    def test_two_files_that_are_one_module_are_red_by_name(self) -> None:
+        """One basename in two roots is one module: both are named (#1737)."""
+        done = lint(["mise/test_steps.py", "release/test_steps.py"])
+        self.assertEqual(1, done.returncode)
+        self.assertEqual("", done.stdout)
+        self.assertEqual(
+            "python_roots: these tracked files would be one module,"
+            " so an import of that name reaches only one of them:\n"
+            "  test_steps: mise/test_steps, release/test_steps\n"
+            f"{TASK}: rename one of each pair above so every module"
+            " name is one file's\n",
+            done.stderr,
+        )
+
+    def test_a_stub_beside_its_module_is_one_module(self) -> None:
+        """A `.pyi` beside its own `.py` is that module's stub."""
+        done = lint(["mise/helper.py", "mise/helper.pyi"])
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertEqual(f"{TASK}: ok\n", done.stdout)
+
     def test_module_names_are_green(self) -> None:
         """A tree of module names passes."""
         done = lint(["mise/module_name.py", "my-tools/fine_name.py"])
@@ -105,6 +139,13 @@ class PythonModuleNames(unittest.TestCase):
         done = lint([])
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertEqual(f"{TASK}: no Python tracked, skipped\n", done.stdout)
+
+    def test_the_canon_tree_is_green(self) -> None:
+        """The canon's own tracked Python passes both halves."""
+        with tempfile.TemporaryDirectory() as tmp:
+            done = run(BELT.parent, Path(tmp) / "home")
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertEqual(f"{TASK}: ok\n", done.stdout)
 
 
 if __name__ == "__main__":
