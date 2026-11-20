@@ -210,6 +210,92 @@ class UnchangedConfigKeepsItsTime(InitCase):
         self.assertNotEqual(OLD, int(config.stat().st_mtime))
 
 
+# gate_surface.py's records: two extensions, one plain crate between
+# them, and an excluded extension that no task builds (#1795).
+TWO_EXTENSIONS = (
+    "crate\tfirst@0.1.0\tpgrx\t15,16,17\tfirst\n"
+    "crate\tplain@0.1.0\tplain\t-\tplain\n"
+    "crate\tsecond@0.1.0\tpgrx\t14,15,16\tsecond\n"
+    "excluded\theld@0.1.0\tpgrx\t18\theld\n"
+)
+
+
+class Majors(unittest.TestCase):
+    """Each extension's major and their union, derived once (#1795)."""
+
+    @staticmethod
+    def derive(surface: str) -> subprocess.CompletedProcess[str]:
+        """Run both functions as a task does, over `surface` on stdin.
+
+        Returns:
+            The finished bash: the pairs, then `union=` and the union.
+
+        """
+        script = (
+            f'. "{ENV_SH}"\n'
+            "pairs=$(org_pgrx_highest)\n"
+            'majors=$(org_pgrx_union <<< "${pairs}")\n'
+            'printf \'%s\\n\' "${pairs}" "union=${majors}"\n'
+        )
+        # ruff: ignore[subprocess-without-shell-equals-true]
+        return subprocess.run(
+            [BASH, "-euo", "pipefail", "-c", script],
+            input=surface,
+            env=hermetic.env(),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def test_two_extensions_each_at_its_own_highest(self) -> None:
+        """Two extensions: a line each at its highest, and the union of both.
+
+        The excluded extension and the plain crate print nothing.
+        """
+        done = self.derive(TWO_EXTENSIONS)
+        self.assertEqual(0, done.returncode, done.stderr)
+        want = ["first@0.1.0\t17", "second@0.1.0\t16", "union=16,17"]
+        self.assertEqual(want, done.stdout.splitlines())
+        self.assertEqual("", done.stderr)
+
+    def test_a_shared_highest_is_registered_once(self) -> None:
+        """Two extensions at the same highest major name it once."""
+        surface = "crate\ta@1.0.0\tpgrx\t15,16,17\ta\ncrate\tb@1.0.0\tpgrx\t17\tb\n"
+        done = self.derive(surface)
+        self.assertEqual(0, done.returncode, done.stderr)
+        want = ["a@1.0.0\t17", "b@1.0.0\t17", "union=17"]
+        self.assertEqual(want, done.stdout.splitlines())
+
+    def test_no_extension_yields_nothing(self) -> None:
+        """Plain crates and an excluded extension: no pairs, no majors."""
+        surface = (
+            "crate\tplain@0.1.0\tplain\t-\tplain\n"
+            "excluded\theld@0.1.0\tpgrx\t18\theld\n"
+        )
+        done = self.derive(surface)
+        self.assertEqual(0, done.returncode, done.stderr)
+        want = ["", "union="]
+        self.assertEqual(want, done.stdout.splitlines())
+        self.assertEqual("", done.stderr)
+
+    def test_a_major_that_is_no_number_is_red_by_name(self) -> None:
+        """A line whose major is not a number stops the union, named."""
+        script = f'. "{ENV_SH}"\norg_pgrx_union'
+        # ruff: ignore[subprocess-without-shell-equals-true]
+        done = subprocess.run(
+            [BASH, "-euo", "pipefail", "-c", script],
+            input="first@0.1.0\t17\nsecond@0.1.0\tpg16\n",
+            env=hermetic.env(),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(1, done.returncode)
+        self.assertEqual("", done.stdout)
+        want = ["pgrx-env: second@0.1.0 names no Postgres major: 'pg16'"]
+        self.assertEqual(want, done.stderr.splitlines())
+
+
 # `mise ls <package> --json`, answered from the listing a row planted
 # for that package, and `uname -s` answering the kernel a row names
 # (Darwin unless planted otherwise), so the Mac branch runs anywhere.
@@ -679,8 +765,7 @@ class WithIcu(IcuCase):
     def test_prepare_is_the_sdk_and_the_check(self) -> None:
         """The SDK for every major, and one red naming each missing ICU."""
         done = self.bash(
-            'org_pgrx_darwin_prepare "x:17,y:18"\n'
-            'echo "$BINDGEN_EXTRA_CLANG_ARGS|$CFLAGS"'
+            'org_pgrx_darwin_prepare "17,18"\necho "$BINDGEN_EXTRA_CLANG_ARGS|$CFLAGS"'
         )
         self.assertEqual(0, done.returncode, done.stderr)
         want = ["-isysroot /sdk parent-b|-isysroot /sdk parent-c"]

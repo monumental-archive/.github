@@ -3379,27 +3379,33 @@ cargo fetch --locked
 # populations (#813).
 surface=$(cargo metadata --no-deps --format-version 1 --locked \
   | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/gate_surface.py" --exclude "${CLIPPY_EXCLUDE:-}")
+# Each extension and the major it is fixed at, and the majors to
+# register, from the belt's one derivation (#1795): the gate's lint and
+# this pass build each extension at the same major. Sourcing defines
+# functions and runs nothing. One step per assignment, so a failed
+# derivation is never an empty list.
+. "${ORG_BELT_DIR}/pgrx-env.sh"
+pairs=$(org_pgrx_highest <<< "${surface}")
+majors=$(org_pgrx_union <<< "${pairs}")
 excludes=""
 fixing=""
 excluded=""
-extensions=""
-ext_majors=""
-while IFS=$'\t' read -r record spec kind majors _dir; do
+while IFS=$'\t' read -r record spec kind _majors _dir; do
   [[ -n ${spec} ]] || continue
   name="${spec%@*}"
   if [[ ${record} == excluded ]]; then
     excludes="${excludes} --exclude ${name}"
     excluded="${excluded} ${name}"
-  elif [[ ${kind} == pgrx ]]; then
-    # Held out of the workspace pass and fixed in its own below: its pgNN
-    # features contradict each other, so --all-features cannot compile it.
-    excludes="${excludes} --exclude ${name}"
-    extensions="${extensions} ${name}"
-    ext_majors="${majors}"
-  else
+  elif [[ ${kind} != pgrx ]]; then
     fixing="${fixing} ${name}"
   fi
 done <<< "${surface}"
+# The extensions are held out of the workspace pass and fixed in their
+# own below: their pgNN features contradict each other, so
+# --all-features cannot compile one.
+while IFS=$'\t' read -r spec _major; do
+  [[ -z ${spec} ]] || excludes="${excludes} --exclude ${spec%@*}"
+done <<< "${pairs}"
 # shellcheck disable=SC2086  # all three hold whole flag words, which
 # cargo and clippy must receive as separate arguments
 cargo clippy --fix --allow-dirty --workspace ${excludes} ${features} --locked -- ${ladder}
@@ -3408,23 +3414,24 @@ echo "fix:rust:${fixing:- none} rewritten where clippy could"
 # the gate now lints, which is the asymmetry #691 named wearing a new
 # hat: a finding a developer cannot ask the machine to fix is a finding
 # they will fix by hand or not at all.
-if [[ -n ${extensions} ]]; then
-  . "${ORG_BELT_DIR}/pgrx-env.sh"
-  # The SDK, and the ICU headers of the major it builds (#1774).
-  org_pgrx_darwin_prepare "${ext_majors##*,}"
+if [[ -n ${pairs} ]]; then
+  # The SDK, and the ICU headers of every major it builds (#1774).
+  org_pgrx_darwin_prepare "${majors}"
   mise ls "aqua:theseus-rs/postgresql-binaries" --json \
-    | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/pgrx_postgres.py" --majors "${ext_majors}" \
+    | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/pgrx_postgres.py" --majors "${majors}" \
     | org_pgrx_init
-  for name in ${extensions}; do
+  fixed=""
+  # Read on descriptor 3, so cargo's standard input is not the list.
+  while IFS=$'\t' read -r -u 3 spec major; do
+    fixed="${fixed} ${spec%@*}(pg${major})"
     # shellcheck disable=SC2086  # ${ladder} holds whole flag words
     # --allow-dirty for the reason the workspace pass carries it, and
     # doubly so here: the workspace pass ran first and wrote. In a
-    # subshell holding its major's ICU headers (#1774).
-    org_pgrx_with_icu "${ext_majors##*,}" cargo clippy --fix --allow-dirty -p "${name}" --no-deps --all-targets \
-      --locked --no-default-features --features "pg${ext_majors##*,}" \
-      -- ${ladder}
-  done
-  echo "fix:rust: pgrx extension(s) fixed at pg${ext_majors##*,}:${extensions}"
+    # subshell holding its own major's ICU headers (#1774).
+    org_pgrx_with_icu "${major}" cargo clippy --fix --allow-dirty -p "${spec%@*}" --no-deps --all-targets \
+      --locked --no-default-features --features "pg${major}" -- ${ladder}
+  done 3<<< "${pairs}"
+  echo "fix:rust: pgrx extension(s) fixed:${fixed}"
 fi
 [[ -z ${excluded} ]] || echo "fix:rust: excluded by CLIPPY_EXCLUDE:${excluded}"
 echo "fix:rust: applied what is machine-applicable — the rest is judgement"
@@ -3514,24 +3521,26 @@ cargo fetch --locked
 mise ls rust --json > "${tmp}/toolchains.json"
 cargo metadata --no-deps --format-version 1 --locked > "${tmp}/metadata.json"
 # The belt's one derivation says which members are pgrx extensions and at
-# which majors (#813); a pgrx crate cannot be compiled with
+# which majors (#813), and pgrx-env.sh says, once, which major each is
+# built at (#1795): its highest, the same major lint:pg-clippy and
+# fix:rust build it at. A pgrx crate cannot be compiled with
 # --all-features, so its own flags ride the plan rather than this task
-# guessing. `${major##*,}` is the highest declared, the same choice
-# lint:pg-clippy makes and for the same reason.
-pgrx=""
-extensions=""
-# Assigned before the loop reads it, never spliced in as `<<< "$(...)"`:
-# a command substitution's failure is discarded, so a red derivation
-# would arrive as an EMPTY here-string and this task would report having
-# verified a workspace it never saw (SC2312, and the fail-open shape the
-# gate exists to refuse).
+# guessing.
+#
+# Each derivation is assigned before anything reads it, never spliced in
+# as `<<< "$(...)"`: a command substitution's failure is discarded, so a
+# red derivation would arrive as an EMPTY here-string and this task would
+# report having verified a workspace it never saw (SC2312, and the
+# fail-open shape the gate exists to refuse).
 surface=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/gate_surface.py" \
   --exclude "${CLIPPY_EXCLUDE:-}" < "${tmp}/metadata.json")
-while IFS=$'\t' read -r record spec kind majors _dir; do
-  [[ ${record} == crate && ${kind} == pgrx ]] || continue
-  extensions="${extensions} ${spec%@*}"
-  pgrx="${pgrx}${pgrx:+,}${spec%@*}:${majors##*,}"
-done <<< "${surface}"
+. "${ORG_BELT_DIR}/pgrx-env.sh"
+pairs=$(org_pgrx_highest <<< "${surface}")
+majors=$(org_pgrx_union <<< "${pairs}")
+pgrx=""
+while IFS=$'\t' read -r spec major; do
+  [[ -z ${spec} ]] || pgrx="${pgrx}${pgrx:+,}${spec%@*}:${major}"
+done <<< "${pairs}"
 plan=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/msrv_plan.py" \
   --toolchains "${tmp}/toolchains.json" --exclude "${CLIPPY_EXCLUDE:-}" \
   --pgrx "${pgrx}" < "${tmp}/metadata.json")
@@ -3543,11 +3552,9 @@ plan=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/msrv_plan.py" \
 # A pgrx crate needs a Postgres before it can be compiled at all, at the
 # MSRV exactly as at the stable pin. Provisioned only when one is in the
 # plan, so a repo without an extension pays nothing.
-if [[ -n ${extensions} && ${plan} == *"--features pg"* ]]; then
-  . "${ORG_BELT_DIR}/pgrx-env.sh"
+if [[ -n ${pairs} && ${plan} == *"--features pg"* ]]; then
   # The SDK, and every extension's ICU headers checked (#1774).
-  org_pgrx_darwin_prepare "${pgrx}"
-  majors="${pgrx##*:}"
+  org_pgrx_darwin_prepare "${majors}"
   mise ls "aqua:theseus-rs/postgresql-binaries" --json \
     | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/pgrx_postgres.py" --majors "${majors}" \
     | org_pgrx_init > /dev/null
@@ -3642,19 +3649,18 @@ command -v cargo > /dev/null || {
   exit 1
 }
 cargo fetch --locked
-specs=""
-majors=""
-# Assigned first: a `<<< "$(...)"` discards the derivation's exit status,
-# so a red derivation would read as a workspace with no extension and
-# this task would skip clean having checked nothing.
+# Assigned first, one step per assignment: a `<<< "$(...)"` discards the
+# derivation's exit status, so a red derivation would read as a
+# workspace with no extension and this task would skip clean having
+# checked nothing. Each extension's major, and the majors to register,
+# come from pgrx-env.sh, written once for every task that builds one
+# (#1795).
 surface=$(cargo metadata --no-deps --format-version 1 --locked \
   | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/gate_surface.py" --exclude "${CLIPPY_EXCLUDE:-}")
-while IFS=$'\t' read -r record spec kind crate_majors _dir; do
-  [[ ${record} == crate && ${kind} == pgrx ]] || continue
-  specs="${specs} ${spec}:${crate_majors##*,}"
-  majors="${majors}${majors:+,}${crate_majors##*,}"
-done <<< "${surface}"
-[[ -n ${specs} ]] || {
+. "${ORG_BELT_DIR}/pgrx-env.sh"
+pairs=$(org_pgrx_highest <<< "${surface}")
+majors=$(org_pgrx_union <<< "${pairs}")
+[[ -n ${pairs} ]] || {
   echo "lint:pg-clippy: no pgrx extension tracked, skipped"
   exit 0
 }
@@ -3671,7 +3677,6 @@ export CLIPPY_CONF_DIR="${ORG_BELT_DIR}"
 # cannot escape (the reason is written at the list, in clippy-ladder.sh).
 ladder=$(org_clippy_pgrx_ladder)
 contradiction_count=$(org_clippy_pgrx_contradiction_count)
-. "${ORG_BELT_DIR}/pgrx-env.sh"
 # The SDK, and every major's ICU headers checked (#1774).
 org_pgrx_darwin_prepare "${majors}"
 mise ls "aqua:theseus-rs/postgresql-binaries" --json \
@@ -3679,9 +3684,8 @@ mise ls "aqua:theseus-rs/postgresql-binaries" --json \
   | org_pgrx_init > /dev/null
 count=0
 linted=""
-for entry in ${specs}; do
-  spec="${entry%:*}"
-  major="${entry##*:}"
+# Read on descriptor 3, so cargo's standard input is not the list.
+while IFS=$'\t' read -r -u 3 spec major; do
   count=$((count + 1))
   linted="${linted} ${spec%@*}(pg${major})"
   # shellcheck disable=SC2086  # ${ladder} holds whole flag WORDS, which
@@ -3689,7 +3693,7 @@ for entry in ${specs}; do
   # own major's ICU headers (#1774), so none reaches the next major.
   org_pgrx_with_icu "${major}" cargo clippy -p "${spec}" --no-deps --all-targets --locked --keep-going \
     --no-default-features --features "pg${major}" -- ${ladder}
-done
+done 3<<< "${pairs}"
 echo "lint:pg-clippy: ${count} extension(s) linted:${linted}"
 echo "lint:pg-clippy: clean at every group (restriction minus ${contradiction_count} named contradictions)"
 '''
