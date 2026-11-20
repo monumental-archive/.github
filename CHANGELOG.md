@@ -10,6 +10,57 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.70.7](https://github.com/monumental-archive/.github/compare/v1.70.6...v1.70.7) - 2026-11-20
+
+### Fixed
+
+- serve ICU headers per Postgres major on a Mac ([#1794](https://github.com/monumental-archive/.github/pull/1794))
+- hold MOVING's stale entries until #1604 lands (#1604) ([#1816](https://github.com/monumental-archive/.github/pull/1816))
+- red every type-ignore comment, coded ones too (#1604) ([#1826](https://github.com/monumental-archive/.github/pull/1826))
+- re-export pinned_names from gate_tools (#1604) ([#1828](https://github.com/monumental-archive/.github/pull/1828))
+- gate mypy as lint:python-types (#1604) ([#1830](https://github.com/monumental-archive/.github/pull/1830))
+- remove lint:in-process, a law with no reason left (#1790) ([#1834](https://github.com/monumental-archive/.github/pull/1834))
+- cap each mutant test file's processes ([#1836](https://github.com/monumental-archive/.github/pull/1836))
+- read every block header in steps() (#1837) ([#1839](https://github.com/monumental-archive/.github/pull/1839))
+- read prose from the shell parser in job-installs (#1785) ([#1841](https://github.com/monumental-archive/.github/pull/1841))
+- derive each pgrx extension's major once (#1795) ([#1842](https://github.com/monumental-archive/.github/pull/1842))
+- restore each file a python mutant writes (#1832) ([#1835](https://github.com/monumental-archive/.github/pull/1835))
+- ask the tool-venv interpreter check in one helper (#1788) ([#1844](https://github.com/monumental-archive/.github/pull/1844))
+
+### Documentation
+
+- record the gate's lazy-tools design (#1785) ([#1825](https://github.com/monumental-archive/.github/pull/1825))
+
+### Testing
+
+- type slice 1's property files to zero (#1604) ([#1799](https://github.com/monumental-archive/.github/pull/1799))
+- type slice 5's test files under strict mypy (#1604) ([#1798](https://github.com/monumental-archive/.github/pull/1798))
+- type slice 17's property files to zero (#1604) ([#1803](https://github.com/monumental-archive/.github/pull/1803))
+- type slice 21's test files at mypy's strictest (#1604) ([#1801](https://github.com/monumental-archive/.github/pull/1801))
+- bring slice 9's tests to zero mypy findings (#1604) ([#1796](https://github.com/monumental-archive/.github/pull/1796))
+- type slice 14 test files to zero (#1604) ([#1804](https://github.com/monumental-archive/.github/pull/1804))
+- type slice 2's property files to zero (#1604) ([#1805](https://github.com/monumental-archive/.github/pull/1805))
+- type slice 23's property files at mypy's strictest (#1604) ([#1813](https://github.com/monumental-archive/.github/pull/1813))
+- type slice 7's test files under strict mypy (#1604) ([#1815](https://github.com/monumental-archive/.github/pull/1815))
+- type slice 13, test_subject_budget, to zero (#1604) ([#1797](https://github.com/monumental-archive/.github/pull/1797))
+- type slice 6's test files under strict mypy (#1604) ([#1824](https://github.com/monumental-archive/.github/pull/1824))
+- type slice 24's test files at mypy's strictest (#1604) ([#1818](https://github.com/monumental-archive/.github/pull/1818))
+- bring slice 10's tests to zero mypy findings (#1604) ([#1811](https://github.com/monumental-archive/.github/pull/1811))
+- bring slice 12's tests to zero mypy findings (#1604) ([#1823](https://github.com/monumental-archive/.github/pull/1823))
+- bring slice 11's tests to zero mypy findings (#1604) ([#1821](https://github.com/monumental-archive/.github/pull/1821))
+- type slice 19's files to zero (#1604) ([#1817](https://github.com/monumental-archive/.github/pull/1817))
+- type slice 15 test files to zero (#1604) ([#1808](https://github.com/monumental-archive/.github/pull/1808))
+- type slice 18's files to zero (#1604) ([#1814](https://github.com/monumental-archive/.github/pull/1814))
+- type slice 3's test files to zero (#1604) ([#1809](https://github.com/monumental-archive/.github/pull/1809))
+- type slice 20's files to zero (#1604) ([#1822](https://github.com/monumental-archive/.github/pull/1822))
+- type slice 22's test files at mypy's strictest (#1604) ([#1806](https://github.com/monumental-archive/.github/pull/1806))
+- type slice 4's test files to zero (#1604) ([#1819](https://github.com/monumental-archive/.github/pull/1819))
+- type slice 8's test files under strict mypy (#1604) ([#1820](https://github.com/monumental-archive/.github/pull/1820))
+- type slice 16, test_zizmor_signer, to zero (#1604) ([#1812](https://github.com/monumental-archive/.github/pull/1812))
+- type the coverage rows' planted keywords (#1604) ([#1827](https://github.com/monumental-archive/.github/pull/1827))
+- type slice 25's test files under strict mypy (#1604) ([#1829](https://github.com/monumental-archive/.github/pull/1829))
+- let every python shard finish at 360 minutes (#1530) ([#1843](https://github.com/monumental-archive/.github/pull/1843))
+
 ## [1.70.6](https://github.com/monumental-archive/.github/compare/v1.70.5...v1.70.6) - 2026-11-20
 
 ### Changed
