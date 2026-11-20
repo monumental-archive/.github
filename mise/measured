@@ -114,7 +114,7 @@ if command -v coverage > /dev/null; then
     # repository's own and Codecov maps them without a fix-up.
     cat > "${run}/coverage.rc.$$" << RC
 [run]
-branch = true
+branch = false
 parallel = true
 source = ${root}
 data_file = ${run}/python/.coverage
