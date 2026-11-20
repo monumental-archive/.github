@@ -1,10 +1,6 @@
 #!/usr/bin/env python3
 """The law: a helper's logic is tested in the process that runs the tests (#1673).
 
-A function whose tests only run its helper as a script in a child
-process is called only in that child, never in the process that runs
-the tests, and coverage and the type checker see that gap.
-
 THE UNIT IS THE FUNCTION, AND REACH IS FOLLOWED (amendment on #1673). A
 helper is every tracked `.py` outside `vendor/` that is not a
 `test_*.py` or `prop_*.py`, wherever it lives (the law names no
@@ -58,9 +54,7 @@ HEADER = f"""\
 # Helper import debt (#1673): every function or method of a tracked
 # Python helper (outside vendor/, not a test_*.py or prop_*.py) that no
 # test reaches in-process, as the tree had it when lint:in-process
-# landed. A function reached only through a script in a child process is
-# one coverage and the type checker cannot see. mise/in_process.py says
-# what reaches a function.
+# landed. mise/in_process.py says what reaches a function.
 #
 # The list only shrinks. lint:in-process is red on an unreached function
 # that is not listed, and on an entry whose function is now reached or is

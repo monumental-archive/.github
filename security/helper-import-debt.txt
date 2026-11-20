@@ -1,9 +1,7 @@
 # Helper import debt (#1673): every function or method of a tracked
 # Python helper (outside vendor/, not a test_*.py or prop_*.py) that no
 # test reaches in-process, as the tree had it when lint:in-process
-# landed. A function reached only through a script in a child process is
-# one coverage and the type checker cannot see. mise/in_process.py says
-# what reaches a function.
+# landed. mise/in_process.py says what reaches a function.
 #
 # The list only shrinks. lint:in-process is red on an unreached function
 # that is not listed, and on an entry whose function is now reached or is

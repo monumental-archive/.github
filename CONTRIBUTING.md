@@ -142,16 +142,13 @@ own work and adds the task that runs it to its row.
 
 A helper's logic is tested in the process that runs the tests: its
 tests import it and call its functions, and `main(argv)` where the
-command line is the unit, so coverage and the type checker both see
-the call. Running the helper as a script stays, as one end-to-end row
-per helper that holds the script contract: it starts, reads its
-arguments and exits with the documented status, which only a real
-process can show.
+command line is the unit. Running the helper as a script stays, as
+one end-to-end row per helper that holds the script contract: it
+starts, reads its arguments and exits with the documented status,
+which only a real process can show.
 
-Why: a function reached only through a script in a child process is
-one coverage and the type checker cannot see. `lint:in-process` holds
-the rule per function, following what each reached function names;
-the functions not yet reached are listed in
+`lint:in-process` holds the rule per function, following what each
+reached function names; the functions not yet reached are listed in
 `security/helper-import-debt.txt`, which only shrinks ([#1673]).
 
 [#1673]: https://github.com/monumental-archive/.github/issues/1673

@@ -2334,8 +2334,6 @@ files=$(git ls-files ':!vendor/**' "*mise.toml" "*mise.*.toml" \
 description = "Every helper function is reached in-process from a test, or listed as debt that only shrinks"
 dir = "{{cwd}}"
 # A helper's logic is tested in the process that runs the tests (#1673).
-# A function reached only by running its helper as a script in a child
-# process is one coverage and the type checker cannot see.
 # mise/in_process.py reads the syntax trees of every tracked .py outside
 # vendor/, naming no directory, and says what reaches a function; the
 # unreached are listed in security/helper-import-debt.txt, which only
