@@ -46,8 +46,11 @@ from typed_std import group
 # literal (`|`) or folded (`>`), any chomping or indentation indicator,
 # and an optional trailing comment (`run: | # zizmor: ...`). The line
 # ceiling counts all of them (#1352) — a header it could not read would
-# be an opt-out by punctuation.
-RUN_RE = re.compile(r"^(\s*)(- )?run: ([|>](?:[+-]?[1-9]?|[1-9][+-]))(\s+#.*)?\s*$")
+# be an opt-out by punctuation. BLOCK_HEADER is the header alone, the
+# one grammar every reader of a step uses (#1837): its first group is
+# the indicator, its second the comment.
+BLOCK_HEADER = r"([|>](?:[+-]?[1-9]?|[1-9][+-]))(\s+#.*)?"
+RUN_RE = re.compile(rf"^(\s*)(- )?run: {BLOCK_HEADER}\s*$")
 # How each header is linted (#1396). A literal block (`|`, any chomping
 # or indentation indicator) is the script bash runs, so shfmt and
 # shellcheck both read it. A folded block (`>`) has its lines joined
