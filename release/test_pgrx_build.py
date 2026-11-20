@@ -29,6 +29,7 @@ import tarfile
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import override
 from unittest import mock
 
 # Appended, so this file's own directory and the standard library
@@ -46,6 +47,16 @@ BASH = hermetic.tool("bash")
 ON_RUNNER = os.environ.get("GITHUB_ACTIONS") == "true"
 # What a helper's run answered: a child's, or an in-process call's.
 type Done = subprocess.CompletedProcess[str] | hermetic.Called
+
+
+def strings(*items: str) -> list[str]:
+    """List the given strings, typed as strings for the assertions.
+
+    Returns:
+        The strings, in order.
+
+    """
+    return list(items)
 
 
 def run(
@@ -104,6 +115,7 @@ def filled(ext: str, version: str, xy: str, num: str) -> str:
 class FloorBlock(unittest.TestCase):
     """floor.sh against an extension directory as the package lays it out."""
 
+    @override
     def setUp(self) -> None:
         """Lay out a control, the install script and the upgrade scripts."""
         self.tmp = TemporaryDirectory()
@@ -118,6 +130,7 @@ class FloorBlock(unittest.TestCase):
         ):
             (self.extdir / script).write_text(GENERATED)
 
+    @override
     def tearDown(self) -> None:
         """Drop the directory."""
         self.tmp.cleanup()
@@ -185,7 +198,9 @@ class FloorBlock(unittest.TestCase):
             script.unlink()
         result = self.floor()
         self.assertEqual(0, result.returncode, result.stderr)
-        self.assertEqual([], list(self.extdir.glob("*.sql")))
+        none: list[Path] = []
+        left: list[Path] = list(self.extdir.glob("*.sql"))
+        self.assertEqual(none, left)
 
 
 # --------------------------------------------------------------------
@@ -263,14 +278,16 @@ def release(tag: str, *assets: str, draft: bool = False) -> dict[str, object]:
     }
 
 
-@unittest.skipUnless(JQ, "jq is a belt tool and drives the gh stub")
 class PreviousRelease(unittest.TestCase):
     """The rows share one directory: a stub gh, a crate, a log."""
 
     CRATE = "crates/demo-ext"
 
+    @override
     def setUp(self) -> None:
         """Put a stub gh first on PATH and a crate at CRATE."""
+        if not JQ:
+            self.skipTest("jq is a belt tool and drives the gh stub")
         self.tmp = TemporaryDirectory()
         self.root = Path(self.tmp.name)
         bindir = self.root / "bin"
@@ -288,6 +305,7 @@ class PreviousRelease(unittest.TestCase):
             "STUB_TARBALL": "",
         }
 
+    @override
     def tearDown(self) -> None:
         """Drop the directory."""
         self.tmp.cleanup()
@@ -635,7 +653,7 @@ class OnePredecessor(PreviousRelease):
         tarball = self.root / "asset.tar.gz"
         with tarfile.open(tarball, "w:gz") as tar:
             tar.add(self.sql, arcname="pkgroot")
-        dest = ("--tarball", str(self.root / "prev.tar.gz"))
+        dest: tuple[str, ...] = ("--tarball", str(self.root / "prev.tar.gz"))
         dest += ("--dest", str(self.root / "prevroot"))
         cell = ("--pg", "18", "--arch", "arm64", *dest)
         result = self.previous("fetch", *cell, version="1.3.1", tarball=str(tarball))
@@ -657,6 +675,7 @@ class OlderLine(PreviousRelease):
     A release on the newer line, 1.3.1, upgrades from 1.3.0.
     """
 
+    @override
     def setUp(self) -> None:
         """Publish 1.2.4 and 1.3.0, each on its own `v` release."""
         super().setUp()
@@ -748,7 +767,7 @@ class NoSiteAsksForTheLatestRelease(unittest.TestCase):
                 f"{path}:{text.count(chr(10), 0, hit.start()) + 1}"
                 for hit in self.UNTAGGED.finditer(text)
             ]
-        self.assertEqual([], found)
+        self.assertEqual(strings(), found)
 
 
 # --------------------------------------------------------------------
@@ -777,6 +796,7 @@ CONTAINER_STUBS = {
 class ContainerScripts(unittest.TestCase):
     """The rows share the stub functions and a call log."""
 
+    @override
     def setUp(self) -> None:
         """Stub functions; PG 18, demo_ext, 1.1.0 to 1.2.0."""
         self.tmp = TemporaryDirectory()
@@ -795,6 +815,7 @@ class ContainerScripts(unittest.TestCase):
             "UNTRUSTED_SMOKE": "",
         }
 
+    @override
     def tearDown(self) -> None:
         """Drop the directory."""
         self.tmp.cleanup()
@@ -824,7 +845,7 @@ class ContainerScripts(unittest.TestCase):
         result = self.script("smoke.sh")
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual(
-            [
+            strings(
                 (
                     "cp -a /pkgroot/usr/lib/postgresql/18/lib/."
                     " /usr/lib/postgresql/18/lib/"
@@ -834,7 +855,7 @@ class ContainerScripts(unittest.TestCase):
                     " /usr/share/postgresql/18/extension/"
                 ),
                 "su postgres -s /bin/bash /pgrx/smoke-cluster.sh",
-            ],
+            ),
             self.logged(),
         )
 
@@ -861,14 +882,14 @@ class ContainerScripts(unittest.TestCase):
         lib = "/usr/lib/postgresql/18/lib"
         ext = "/usr/share/postgresql/18/extension"
         self.assertEqual(
-            [
+            strings(
                 f"cp -a /prev{lib}/. {lib}/",
                 f"cp -a /prev{ext}/. {ext}/",
                 "su postgres -s /bin/bash /pgrx/upgrade-cluster.sh create",
                 f"cp -a /new{lib}/. {lib}/",
                 f"cp -a /new{ext}/. {ext}/",
                 "su postgres -s /bin/bash /pgrx/upgrade-cluster.sh update",
-            ],
+            ),
             self.logged(),
         )
 
@@ -878,13 +899,13 @@ class ContainerScripts(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual("upgraded 1.1.0 -> 1.2.0\n", result.stdout)
         self.assertEqual(
-            [
+            strings(
                 "psql -c ALTER EXTENSION demo_ext UPDATE TO '1.2.0';",
                 (
                     "psql -tA -c SELECT extversion FROM pg_extension"
                     " WHERE extname = 'demo_ext';"
                 ),
-            ],
+            ),
             self.logged(),
         )
 
@@ -1014,14 +1035,16 @@ SHIMS = {
 }
 
 
-@unittest.skipUnless(elf_tools_present(), SKIP_ELF)
 class DebugSplit(unittest.TestCase):
     """debug-split.sh over pkgroot/usr/lib/postgresql/18/lib/demo_ext.so."""
 
     REL = "usr/lib/postgresql/18/lib/demo_ext.so"
 
+    @override
     def setUp(self) -> None:
         """Build a package root holding one real library with .dep-v0."""
+        if not elf_tools_present():
+            self.skipTest(SKIP_ELF)
         self.tmp = TemporaryDirectory()
         self.root = Path(self.tmp.name)
         self.pkgroot = self.root / "pkgroot"
@@ -1029,6 +1052,7 @@ class DebugSplit(unittest.TestCase):
         self.so.parent.mkdir(parents=True)
         build_library(self.so, SOURCE)
 
+    @override
     def tearDown(self) -> None:
         """Drop the directory."""
         self.tmp.cleanup()
@@ -1124,17 +1148,20 @@ class DebugSplit(unittest.TestCase):
         )
 
 
-@unittest.skipUnless(elf_tools_present(), SKIP_ELF)
 class GlibcFloor(unittest.TestCase):
     """glibc-floor.sh over a real library, against floors either side."""
 
+    @override
     def setUp(self) -> None:
         """Make an empty package root."""
+        if not elf_tools_present():
+            self.skipTest(SKIP_ELF)
         self.tmp = TemporaryDirectory()
         self.pkgroot = Path(self.tmp.name) / "pkgroot"
         self.lib = self.pkgroot / "usr" / "lib" / "demo_ext.so"
         self.lib.parent.mkdir(parents=True)
 
+    @override
     def tearDown(self) -> None:
         """Drop the directory."""
         self.tmp.cleanup()

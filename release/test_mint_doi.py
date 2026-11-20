@@ -98,6 +98,7 @@ from __future__ import annotations
 import base64
 import contextlib
 import copy
+import functools
 import http.client
 import io
 import json
@@ -111,7 +112,7 @@ from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING, Self, override
 from unittest import mock
 
 import mint_doi
@@ -120,12 +121,17 @@ import mint_doi
 # come first.
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
+import decoded
 import hermetic
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
 CANON = Path(__file__).resolve().parent.parent
+# A JSON object as the fake and the helper exchange it.
+Doc = dict[str, object]
+# An empty list, whatever it would hold: requests, writes, entries.
+NOTHING: list[object] = []
 HELPER = CANON / "release" / "mint_doi.py"
 TESTDATA = CANON / "release" / "testdata"
 DRAFT = TESTDATA / "zenodo-rdm-draft.json"
@@ -164,6 +170,16 @@ esac
 """
 
 
+def strings(*items: str) -> list[str]:
+    """List the given strings, typed as strings for the assertions.
+
+    Returns:
+        The strings, in order.
+
+    """
+    return list(items)
+
+
 def citation(licence: str, concept: str | None = None) -> str:
     """Render this repository's CITATION.cff with `licence`.
 
@@ -194,14 +210,56 @@ def citation(licence: str, concept: str | None = None) -> str:
     return "\n".join(out) + "\n"
 
 
-def recorded(path: Path) -> dict:
+def recorded(path: Path) -> object:
     """Read a recorded response.
 
     Returns:
         The parsed body.
 
     """
-    return json.loads(path.read_text(encoding="utf-8"))
+    return decoded.load_json(path.read_text(encoding="utf-8"))
+
+
+def recorded_object(path: Path) -> Doc:
+    """Read a recorded response that is one object.
+
+    Returns:
+        The parsed body.
+
+    """
+    return decoded.as_object(recorded(path), str(path))
+
+
+def objects(value: object, where: str) -> list[Doc]:
+    """Narrow a decoded value to an array of objects.
+
+    Returns:
+        The objects, in order.
+
+    """
+    return [decoded.as_object(v, where) for v in decoded.as_array(value, where)]
+
+
+def at(doc: object, *keys: str) -> object:
+    """Walk nested objects by key.
+
+    Returns:
+        The value at the end of the walk.
+
+    """
+    for key in keys:
+        doc = decoded.as_object(doc, key)[key]
+    return doc
+
+
+def body_of(sent: str | bytes) -> Doc:
+    """Read a request body the helper sent as one JSON object.
+
+    Returns:
+        The object.
+
+    """
+    return decoded.as_object(decoded.load_json(sent), "the request body")
 
 
 @dataclass
@@ -223,25 +281,25 @@ class Zenodo:
     titles: object = field(default_factory=list)
     title_pages: list[object] | None = None
     titles_by_query: dict[str, object] | None = None
-    drafts: list[dict] = field(default_factory=list)
-    latest: dict[str, dict] = field(default_factory=dict)
+    drafts: list[Doc] = field(default_factory=list)
+    latest: dict[str, Doc] = field(default_factory=dict)
     redirect: bool = False
-    records: dict[str, dict | None] = field(default_factory=dict)
+    records: dict[str, Doc | None] = field(default_factory=dict)
     collapse: bool = False
     publish: str = "ok"
     deposition: str = "101"
-    published_record: dict | None = None
+    published_record: Doc | None = None
     appear_after: int = 0
     create_body: object = None
     newversion_body: object = None
     draft_body: object = None
-    publish_body: dict | None = None
-    stale: dict = field(default_factory=dict)
+    publish_body: Doc | None = None
+    stale: Doc = field(default_factory=dict)
     log: list[tuple[str, str, str]] = field(default_factory=list)
     bodies: list[bytes] = field(default_factory=list)
     base: str = ""
 
-    def deposit(self, rid: str) -> dict:
+    def deposit(self, rid: str) -> Doc:
         """Answer a deposition the way #1246's stub did.
 
         Returns:
@@ -270,7 +328,10 @@ class Zenodo:
             (status, JSON body, headers).
 
         """
-        params = dict(kv.split("=", 1) for kv in query.split("&"))
+        params: dict[str, str] = {}
+        for kv in query.split("&"):
+            key, _, value = kv.partition("=")
+            params[key] = value
         if self.titles_by_query is not None:
             got = self.titles_by_query.get(params["q"])
             if got is None:
@@ -294,7 +355,7 @@ class Zenodo:
 
         """
         text = json.dumps(body).replace("@BASE@", self.base)
-        return json.loads(text.replace(ORIGIN, self.base))
+        return decoded.load_json(text.replace(ORIGIN, self.base))
 
     def route(  # ruff: ignore[complex-structure, too-many-return-statements, too-many-branches] - one table of routes
         self, method: str, path: str, accept: str, body: bytes
@@ -335,11 +396,12 @@ class Zenodo:
             return 200, {}, {}
         if path == f"/api/records/{self.deposition}/draft":
             if method == "GET" and accept == RDM:
-                return 200, recorded(DRAFT), {}
+                return 200, recorded_object(DRAFT), {}
             if method == "PUT" and accept == RDM:
-                sent = json.loads(body)
+                sent = body_of(body)
                 if self.collapse:
-                    sent["metadata"]["rights"] = sent["metadata"]["rights"][:1]
+                    meta = decoded.as_object(sent["metadata"], "metadata")
+                    meta["rights"] = decoded.as_array(meta["rights"], "rights")[:1]
                 return 200, sent, {}
         if method == "POST" and path == f"{dep}/actions/publish":
             if self.publish == "fail":
@@ -377,12 +439,12 @@ class Zenodo:
         if method == "GET" and base.startswith("/api/records/"):
             rid = base.rsplit("/", 1)[1]
             if accept != RDM:
-                rec = self.records.get(f"plain/{rid}")
-                return (200, rec, {}) if rec else (404, {}, {})
+                plain = self.records.get(f"plain/{rid}")
+                return (200, plain, {}) if plain else (404, {}, {})
             if rid not in self.records:
                 return 404, {"status": 404}, {}
-            rec = self.records[rid]
-            return (200, rec, {}) if rec is not None else (503, {}, {})
+            rdm = self.records[rid]
+            return (200, rdm, {}) if rdm is not None else (503, {}, {})
         return 418, {"refused": f"{method} {path}"}, {}
 
     def land(self) -> None:
@@ -403,6 +465,7 @@ class Fake:
         lock = threading.Lock()
 
         class Handler(BaseHTTPRequestHandler):
+            @override
             def log_message(self, *_: object) -> None:
                 pass
 
@@ -506,7 +569,7 @@ class Run:
 
         """
         (i,) = self.made("PUT", f"/api/deposit/depositions/{rid}")
-        return json.loads(self.bodies[i])["metadata"]
+        return decoded.as_object(at(body_of(self.bodies[i]), "metadata"), "metadata")
 
 
 def stub_zenodo(published: str, concept: str | None) -> Zenodo:
@@ -521,10 +584,10 @@ def stub_zenodo(published: str, concept: str | None) -> Zenodo:
         "both": [{"id": "mit"}, {"id": "apache-2.0"}],
         "one": [{"id": "mit"}],
     }
-    record = None
+    record: Doc | None = None
     if published in rights:
-        record = recorded(DRAFT)
-        record["metadata"]["rights"] = rights[published]
+        record = recorded_object(DRAFT)
+        decoded.as_object(record["metadata"], "metadata")["rights"] = rights[published]
     z = Zenodo(records={"101": record})
     if concept is not None:
         z.latest["100"] = {
@@ -636,10 +699,11 @@ class TheFixturesAreTheRealShapes(unittest.TestCase):
 
     def test_the_draft_is_the_collapsed_read_back(self) -> None:
         """The fixture is a draft whose rights a legacy PUT collapsed to one."""
-        draft = json.loads(DRAFT.read_text())
+        draft = recorded_object(DRAFT)
         self.assertTrue(draft["is_draft"])
         self.assertFalse(draft["is_published"])
-        self.assertEqual([r["id"] for r in draft["metadata"]["rights"]], ["mit"])
+        ids = [r["id"] for r in objects(at(draft, "metadata", "rights"), "rights")]
+        self.assertEqual(ids, strings("mit"))
 
     def test_the_citation_is_a_first_mint(self) -> None:
         """The rendered citation has no concept identifier and the row's licence."""
@@ -654,6 +718,7 @@ class OneId(unittest.TestCase):
 
     run_: Run
 
+    @override
     @classmethod
     def setUpClass(cls) -> None:
         """Run the helper once for every row of the class."""
@@ -674,7 +739,9 @@ class OneId(unittest.TestCase):
     def test_the_vocabulary_is_asked_for_the_one_id(self) -> None:
         """The vocabulary is asked for exactly the one id."""
         asked = [u for m, u, _ in self.run_.requests if "/vocabularies/" in u]
-        self.assertEqual(asked, ["https://zenodo.org/api/vocabularies/licenses/0bsd"])
+        self.assertEqual(
+            asked, strings("https://zenodo.org/api/vocabularies/licenses/0bsd")
+        )
 
     def test_the_legacy_licence_is_the_id(self) -> None:
         """The legacy deposit carries the id, lowercased."""
@@ -682,9 +749,12 @@ class OneId(unittest.TestCase):
 
     def test_no_rdm_request_and_no_sentence(self) -> None:
         """One id makes no InvenioRDM request and adds no sentence."""
-        self.assertEqual(self.run_.made("GET", "/api/records/"), [])
-        self.assertEqual(self.run_.made("PUT", "/api/records/"), [])
-        self.assertNotIn("Licensed under", self.run_.legacy_metadata()["description"])
+        self.assertEqual(self.run_.made("GET", "/api/records/"), NOTHING)
+        self.assertEqual(self.run_.made("PUT", "/api/records/"), NOTHING)
+        description = decoded.as_str(
+            self.run_.legacy_metadata()["description"], "description"
+        )
+        self.assertNotIn("Licensed under", description)
 
 
 class TwoIds(unittest.TestCase):
@@ -692,6 +762,7 @@ class TwoIds(unittest.TestCase):
 
     run_: Run
 
+    @override
     @classmethod
     def setUpClass(cls) -> None:
         """Run the helper once for every row of the class."""
@@ -704,18 +775,17 @@ class TwoIds(unittest.TestCase):
     def test_the_vocabulary_is_asked_for_each_before_any_deposit(self) -> None:
         """Each id is checked, in order, before the deposit is created."""
         asked = self.run_.made("GET", "/api/vocabularies/licenses/")
-        self.assertEqual(
-            [self.run_.requests[i][1].rsplit("/", 1)[1] for i in asked],
-            ["mit", "apache-2.0"],
-        )
+        ids: list[str] = [self.run_.requests[i][1].rsplit("/", 1)[1] for i in asked]
+        self.assertEqual(ids, strings("mit", "apache-2.0"))
         create = min(self.run_.made("POST", "/api/deposit/depositions"))
         self.assertLess(max(asked), create)
 
     def test_the_description_quotes_the_expression_exactly(self) -> None:
         """The description ends quoting the expression as written."""
-        self.assertTrue(
-            self.run_.legacy_metadata()["description"].endswith(" " + SENTENCE)
+        description = decoded.as_str(
+            self.run_.legacy_metadata()["description"], "description"
         )
+        self.assertTrue(description.endswith(" " + SENTENCE))
 
     def test_the_rights_are_both_ids_and_land_before_the_publish(self) -> None:
         """Both ids go on the draft after the legacy PUT, before the publish."""
@@ -729,18 +799,20 @@ class TwoIds(unittest.TestCase):
         self.assertLess(put, publish)
         self.assertEqual(self.run_.requests[get][2], RDM)
         self.assertEqual(self.run_.requests[put][2], RDM)
-        sent = json.loads(self.run_.bodies[put])
-        both = [{"id": "mit"}, {"id": "apache-2.0"}]
-        self.assertEqual(sent["metadata"]["rights"], both)
-        self.assertEqual(set(sent), {"metadata", "files"})
+        sent = body_of(self.run_.bodies[put])
+        both: list[object] = [{"id": "mit"}, {"id": "apache-2.0"}]
+        self.assertEqual(at(sent, "metadata", "rights"), both)
+        keys: set[str] = {"metadata", "files"}
+        sent_keys: set[str] = set(sent)
+        self.assertEqual(sent_keys, keys)
 
     def test_the_rest_of_the_draft_is_sent_back_unchanged(self) -> None:
         """Only rights changes in what is sent back."""
         (put,) = self.run_.made("PUT", "/api/records/101/draft")
-        sent = json.loads(self.run_.bodies[put])
-        draft = json.loads(DRAFT.read_text())
-        sent["metadata"].pop("rights")
-        draft["metadata"].pop("rights")
+        sent = body_of(self.run_.bodies[put])
+        draft = recorded_object(DRAFT)
+        decoded.as_object(sent["metadata"], "metadata").pop("rights")
+        decoded.as_object(draft["metadata"], "metadata").pop("rights")
         self.assertEqual(sent["metadata"], draft["metadata"])
         self.assertEqual(sent["files"], draft["files"])
 
@@ -760,7 +832,7 @@ class TwoIds(unittest.TestCase):
         self.assertEqual(run.returncode, 0, run.stdout)
         self.assertIn(
             "Licensed under the SPDX expression MIT AND Apache-2.0,",
-            run.legacy_metadata()["description"],
+            decoded.as_str(run.legacy_metadata()["description"], "description"),
         )
 
 
@@ -803,7 +875,7 @@ class ThePublishedRecord(unittest.TestCase):
         )
         self.assertEqual(run.returncode, 1, run.stdout)
         self.assertIn(SHORT, run.stdout)
-        self.assertEqual(run.made("POST", "/api/deposit/depositions"), [])
+        self.assertEqual(run.made("POST", "/api/deposit/depositions"), NOTHING)
         self.assertEqual(len(run.published_reads()), 1)
 
     def test_a_rerun_over_a_published_record_with_both_is_green(self) -> None:
@@ -811,7 +883,7 @@ class ThePublishedRecord(unittest.TestCase):
         run = run_helper("MIT OR Apache-2.0", concept="10.5281/zenodo.100")
         self.assertEqual(run.returncode, 0, run.stdout)
         self.assertIn("::notice::DOI 10.5281/zenodo.101", run.stdout)
-        self.assertEqual(run.made("POST", "/api/deposit/depositions"), [])
+        self.assertEqual(run.made("POST", "/api/deposit/depositions"), NOTHING)
         self.assertEqual(len(run.published_reads()), 1)
 
     def test_one_id_never_reads_the_published_record(self) -> None:
@@ -819,7 +891,7 @@ class ThePublishedRecord(unittest.TestCase):
         for concept in (None, "10.5281/zenodo.100"):
             run = run_helper("0BSD", published="fail", concept=concept)
             self.assertEqual(run.returncode, 0, run.stdout)
-            self.assertEqual(run.published_reads(), [])
+            self.assertEqual(run.published_reads(), NOTHING)
 
 
 class Refusals(unittest.TestCase):
@@ -829,7 +901,7 @@ class Refusals(unittest.TestCase):
         """Assert a red run, its message, and that no deposit was created."""
         self.assertEqual(run.returncode, 1, run.stdout)
         self.assertIn(message, run.stdout)
-        self.assertEqual(run.made("POST", "/api/deposit/depositions"), [])
+        self.assertEqual(run.made("POST", "/api/deposit/depositions"), NOTHING)
 
     def test_with_is_refused_by_name(self) -> None:
         """WITH refuses, naming the operator."""
@@ -868,7 +940,7 @@ class Refusals(unittest.TestCase):
         self.assertEqual(run.returncode, 1, run.stdout)
         self.assertIn('the draft\'s licences read back as ["mit"]', run.stdout)
         self.assertEqual(
-            run.made("POST", "/api/deposit/depositions/101/actions/publish"), []
+            run.made("POST", "/api/deposit/depositions/101/actions/publish"), NOTHING
         )
 
 
@@ -897,6 +969,26 @@ def captured(name: str) -> object:
     return recorded(Path(str(CAPTURE).format(name)))
 
 
+def captured_object(name: str) -> Doc:
+    """Read one captured body that is one object.
+
+    Returns:
+        The parsed body.
+
+    """
+    return decoded.as_object(captured(name), name)
+
+
+def captured_list(name: str) -> list[Doc]:
+    """Read one captured body that is an array of objects.
+
+    Returns:
+        The objects, in order.
+
+    """
+    return objects(captured(name), name)
+
+
 def canon_zenodo(**kw: object) -> Zenodo:
     """Serve the canon's concept from the recorded and captured answers.
 
@@ -911,16 +1003,16 @@ def canon_zenodo(**kw: object) -> Zenodo:
         The fake's answers.
 
     """
-    prev = recorded(CANON_LATEST)
+    prev = recorded_object(CANON_LATEST)
     nxt = copy.deepcopy(prev)
     nxt.update(id=int(CANON_DRAFT), recid=CANON_DRAFT)
     nxt["doi"] = f"10.5281/zenodo.{CANON_DRAFT}"
-    nxt["metadata"]["version"] = "1.68.5"
+    decoded.as_object(nxt["metadata"], "metadata")["version"] = "1.68.5"
     z = Zenodo(
         latest={CANON_CONCEPT: prev},
         redirect=True,
         records={f"plain/{CANON_PREV}": prev, f"plain/{CANON_DRAFT}": nxt},
-        drafts=captured("drafts-before"),
+        drafts=captured_list("drafts-before"),
         newversion_body=captured("newversion"),
         draft_body=captured("newversion"),
         deposition=CANON_DRAFT,
@@ -959,11 +1051,11 @@ def edtf_zenodo() -> Zenodo:
         InvenioRDM read-back.
 
     """
-    prev = recorded(EDTF_LATEST)
+    prev = recorded_object(EDTF_LATEST)
     return Zenodo(
         latest={EDTF_CONCEPT: prev},
         redirect=True,
-        records={EDTF_PREV: recorded(EDTF_RDM), f"plain/{EDTF_PREV}": prev},
+        records={EDTF_PREV: recorded_object(EDTF_RDM), f"plain/{EDTF_PREV}": prev},
     )
 
 
@@ -1021,73 +1113,76 @@ class TheRecordedResponses(unittest.TestCase):
 
     def test_the_canon_latest_is_its_concepts_published_version(self) -> None:
         """The canon's concept resolves to a published 0bsd v1.68.4."""
-        rec = recorded(CANON_LATEST)
+        rec = recorded_object(CANON_LATEST)
         self.assertEqual(rec["conceptrecid"], CANON_CONCEPT)
         self.assertEqual(rec["conceptdoi"], f"10.5281/zenodo.{CANON_CONCEPT}")
-        self.assertEqual(rec["metadata"]["version"], "1.68.4")
+        self.assertEqual(at(rec, "metadata", "version"), "1.68.4")
         self.assertTrue(rec["submitted"])
-        rdm = recorded(CANON_RDM)
-        self.assertEqual([r["id"] for r in rdm["metadata"]["rights"]], ["0bsd"])
+        rdm = recorded_object(CANON_RDM)
+        ids = [r["id"] for r in objects(at(rdm, "metadata", "rights"), "rights")]
+        self.assertEqual(ids, strings("0bsd"))
 
     def test_edtf_latest_is_published_with_both_licences(self) -> None:
         """Edtf's concept resolves to v1.3.5, whose record states both ids."""
-        rec = recorded(EDTF_LATEST)
+        rec = recorded_object(EDTF_LATEST)
         self.assertEqual(rec["conceptrecid"], EDTF_CONCEPT)
         self.assertEqual(str(rec["id"]), EDTF_PREV)
-        self.assertEqual(rec["metadata"]["version"], "1.3.5")
-        rdm = recorded(EDTF_RDM)
+        self.assertEqual(at(rec, "metadata", "version"), "1.3.5")
+        rdm = recorded_object(EDTF_RDM)
         self.assertTrue(rdm["is_published"])
-        self.assertEqual(
-            [r["id"] for r in rdm["metadata"]["rights"]], ["mit", "apache-2.0"]
-        )
+        ids = [r["id"] for r in objects(at(rdm, "metadata", "rights"), "rights")]
+        self.assertEqual(ids, strings("mit", "apache-2.0"))
 
     def test_newversion_answers_an_unsubmitted_draft_with_the_old_file(
         self,
     ) -> None:
         """C3: a draft of the concept, carrying v1.68.4's tarball."""
-        draft = captured("newversion")
-        self.assertIsInstance(draft, dict)
-        assert isinstance(draft, dict)  # ruff: ignore[assert] - narrows the type
+        self.assertIsInstance(captured("newversion"), dict)
+        draft = captured_object("newversion")
         self.assertEqual(str(draft["id"]), CANON_DRAFT)
         self.assertEqual(draft["conceptrecid"], CANON_CONCEPT)
         self.assertFalse(draft["submitted"])
-        self.assertEqual(draft["links"]["latest_draft"], f"{ORIGIN}{DEP}/{CANON_DRAFT}")
         self.assertEqual(
-            [(f["id"], f["filename"]) for f in draft["files"]],
-            [(INHERITED, ".github-1.68.4.tar.gz")],
+            at(draft, "links", "latest_draft"), f"{ORIGIN}{DEP}/{CANON_DRAFT}"
         )
+        files: list[tuple[object, object]] = [
+            (f["id"], f["filename"]) for f in objects(draft["files"], "files")
+        ]
+        inherited: list[tuple[object, object]] = [(INHERITED, ".github-1.68.4.tar.gz")]
+        self.assertEqual(files, inherited)
 
     def test_the_draft_listing_answers_the_published_record_too(self) -> None:
         """C2: `status=draft` also lists the published v1.68.4."""
-        (rec,) = captured("drafts-before")
+        (rec,) = captured_list("drafts-before")
         self.assertTrue(rec["submitted"])
         self.assertEqual(str(rec["id"]), CANON_PREV)
-        (draft,) = captured("drafts-during")
+        (draft,) = captured_list("drafts-during")
         self.assertFalse(draft["submitted"])
         self.assertEqual(str(draft["id"]), CANON_DRAFT)
 
     def test_the_deleted_draft_is_gone(self) -> None:
         """C9: after the DELETE, the draft reads as a missing identifier."""
-        self.assertEqual(
-            captured("draft-gone"),
-            {"status": 404, "message": "The persistent identifier does not exist."},
-        )
-        self.assertEqual(captured("draft-after-file-delete")["files"], [])
+        gone: Doc = {
+            "status": 404,
+            "message": "The persistent identifier does not exist.",
+        }
+        self.assertEqual(captured("draft-gone"), gone)
+        self.assertEqual(captured_object("draft-after-file-delete")["files"], NOTHING)
 
     def test_only_the_full_title_finds_the_record(self) -> None:
         """M1-M4 (#1389): the repo name finds nothing, the full title finds it.
 
         C1, the same repo-name query in the capture run, answered `[]` too.
         """
-        self.assertEqual(captured("titles"), [])
-        self.assertEqual(measured("present-github"), [])
-        self.assertEqual(measured("present-edtf"), [])
+        self.assertEqual(captured("titles"), NOTHING)
+        self.assertEqual(measured("present-github"), NOTHING)
+        self.assertEqual(measured("present-edtf"), NOTHING)
         for name, rid, title in (
             ("full-github", CANON_PREV, CANON_REPO),
             ("full-edtf", EDTF_PREV, "monumental-archive/edtf"),
         ):
             with self.subTest(name):
-                (rec,) = measured(name)
+                (rec,) = objects(measured(name), name)
                 self.assertEqual((str(rec["id"]), rec["title"]), (rid, title))
                 self.assertTrue(rec["submitted"])
 
@@ -1105,8 +1200,9 @@ class AlreadyPublished(unittest.TestCase):
             run.stdout,
         )
         self.assertIn("**Already published**", run.summary)
-        self.assertEqual(run.writes(), [])
-        self.assertEqual(run.published_reads(CANON_PREV), [run.requests[-1]])
+        self.assertEqual(run.writes(), NOTHING)
+        last: list[tuple[str, str, str]] = [run.requests[-1]]
+        self.assertEqual(run.published_reads(CANON_PREV), last)
         self.assertEqual(run.requests[-1][2], "")
 
     def test_edtf_converges_after_verifying_both_licences(self) -> None:
@@ -1120,7 +1216,7 @@ class AlreadyPublished(unittest.TestCase):
         self.assertEqual(run.returncode, 0, run.stdout)
         self.assertIn(f"::notice::DOI 10.5281/zenodo.{EDTF_PREV}", run.stdout)
         self.assertIn("this run converged on it (#484)", run.summary)
-        self.assertEqual(run.writes(), [])
+        self.assertEqual(run.writes(), NOTHING)
         self.assertIn(("GET", f"{ORIGIN}/api/records/{EDTF_PREV}", RDM), run.requests)
 
 
@@ -1129,6 +1225,7 @@ class ALaterMint(unittest.TestCase):
 
     run_: Run
 
+    @override
     @classmethod
     def setUpClass(cls) -> None:
         """Run the helper once for every row of the class."""
@@ -1155,7 +1252,7 @@ class ALaterMint(unittest.TestCase):
         """Newversion is asked of the resolved record; no title guard runs."""
         path = f"{DEP}/{CANON_PREV}/actions/newversion"
         self.assertEqual(len(self.run_.made("POST", path)), 1)
-        self.assertEqual(self.run_.made("GET", f"{DEP}?q=title"), [])
+        self.assertEqual(self.run_.made("GET", f"{DEP}?q=title"), NOTHING)
         self.assertNotIn(("POST", f"{ORIGIN}{DEP}", ""), self.run_.requests)
 
     def test_the_draft_is_read_from_latest_draft(self) -> None:
@@ -1170,10 +1267,11 @@ class ALaterMint(unittest.TestCase):
         (gone,) = self.run_.made("DELETE", f"{DEP}/{CANON_DRAFT}/files/{INHERITED}")
         (put,) = self.run_.made("PUT", f"{BUCKET}/.github-1.68.5.tar.gz")
         self.assertLess(gone, put)
-        self.assertEqual(
-            [r for r in self.run_.requests if r[0] == "DELETE"],
-            [self.run_.requests[gone]],
-        )
+        deletes: list[tuple[str, str, str]] = [
+            r for r in self.run_.requests if r[0] == "DELETE"
+        ]
+        only: list[tuple[str, str, str]] = [self.run_.requests[gone]]
+        self.assertEqual(deletes, only)
 
     def test_the_new_draft_carries_this_release(self) -> None:
         """The tarball and metadata go to the captured draft, then publish."""
@@ -1196,7 +1294,8 @@ class ALaterMint(unittest.TestCase):
         the record. The helper sends what the record states.
         """
         meta = self.run_.legacy_metadata(CANON_DRAFT)
-        self.assertEqual(meta["creators"], [{"name": "Allen, Carl"}])
+        creators: list[object] = [{"name": "Allen, Carl"}]
+        self.assertEqual(meta["creators"], creators)
 
     def test_two_licences_go_on_the_new_draft(self) -> None:
         """A later mint with two ids sets the rights on the captured draft."""
@@ -1212,9 +1311,9 @@ class ALaterMint(unittest.TestCase):
         (put,) = run.made("PUT", f"/api/records/{CANON_DRAFT}/draft")
         (publish,) = run.made("POST", f"{DEP}/{CANON_DRAFT}/actions/publish")
         self.assertLess(put, publish)
-        sent = json.loads(run.bodies[put])
-        both = [{"id": "mit"}, {"id": "apache-2.0"}]
-        self.assertEqual(sent["metadata"]["rights"], both)
+        sent = body_of(run.bodies[put])
+        both: list[object] = [{"id": "mit"}, {"id": "apache-2.0"}]
+        self.assertEqual(at(sent, "metadata", "rights"), both)
 
 
 class StaleDrafts(unittest.TestCase):
@@ -1226,7 +1325,9 @@ class StaleDrafts(unittest.TestCase):
         self.assertEqual(run.returncode, 0, run.stdout)
         self.assertNotIn("deleting stale", run.stdout)
         deleted = [r[1] for r in run.requests if r[0] == "DELETE"]
-        self.assertEqual(deleted, [f"{ORIGIN}{DEP}/{CANON_DRAFT}/files/{INHERITED}"])
+        self.assertEqual(
+            deleted, strings(f"{ORIGIN}{DEP}/{CANON_DRAFT}/files/{INHERITED}")
+        )
 
     def test_a_stale_draft_is_deleted_before_newversion(self) -> None:
         """C5 as captured holds an interrupted run's draft: it goes first.
@@ -1242,9 +1343,10 @@ class StaleDrafts(unittest.TestCase):
             " left by an interrupted run",
             run.stdout,
         )
+        target: tuple[str, str] = ("DELETE", f"{ORIGIN}{DEP}/{CANON_DRAFT}")
         (stale,) = [
             i for i, r in enumerate(run.requests)
-            if r[:2] == ("DELETE", f"{ORIGIN}{DEP}/{CANON_DRAFT}")
+            if (r[0], r[1]) == target
         ]  # fmt: skip
         (newv,) = run.made("POST", f"{DEP}/{CANON_PREV}/actions/newversion")
         self.assertLess(stale, newv)
@@ -1252,19 +1354,20 @@ class StaleDrafts(unittest.TestCase):
     def test_both_together_delete_only_the_draft(self) -> None:
         """C2 and C5 in one listing: the published record is never touched."""
         z = canon_zenodo(
-            drafts=[*captured("drafts-before"), *captured("drafts-during")]
+            drafts=[*captured_list("drafts-before"), *captured_list("drafts-during")]
         )
         run = canon_run(z)
         self.assertEqual(run.returncode, 0, run.stdout)
         deleted = [r[1] for r in run.requests if r[0] == "DELETE"]
         self.assertEqual(
             deleted,
-            [
+            strings(
                 f"{ORIGIN}{DEP}/{CANON_DRAFT}",
                 f"{ORIGIN}{DEP}/{CANON_DRAFT}/files/{INHERITED}",
-            ],
+            ),
         )
-        self.assertFalse([u for u in deleted if CANON_PREV in u])
+        touched: list[str] = [u for u in deleted if CANON_PREV in u]
+        self.assertFalse(touched)
 
 
 class LostPublishResponse(unittest.TestCase):
@@ -1276,7 +1379,8 @@ class LostPublishResponse(unittest.TestCase):
         self.assertEqual(run.returncode, 0, run.stdout)
         self.assertIn(f"::notice::DOI 10.5281/zenodo.{CANON_DRAFT}", run.stdout)
         self.assertIn("**Published despite a lost response**", run.summary)
-        self.assertEqual(run.pauses, [20])
+        one_pause: list[float] = [20]
+        self.assertEqual(run.pauses, one_pause)
         (publish,) = run.made("POST", f"{DEP}/{CANON_DRAFT}/actions/publish")
         latest = run.made("GET", f"/api/records/{CANON_CONCEPT}/versions/latest")
         self.assertEqual(len([i for i in latest if i > publish]), 2)
@@ -1291,7 +1395,8 @@ class LostPublishResponse(unittest.TestCase):
             run.stdout,
         )
         self.assertNotIn("::notice::DOI", run.stdout)
-        self.assertEqual(run.pauses, [20, 20])
+        two_pauses: list[float] = [20, 20]
+        self.assertEqual(run.pauses, two_pauses)
         (publish,) = run.made("POST", f"{DEP}/{CANON_DRAFT}/actions/publish")
         latest = run.made("GET", f"/api/records/{CANON_CONCEPT}/versions/latest")
         self.assertEqual(len([i for i in latest if i > publish]), 3)
@@ -1368,7 +1473,7 @@ class FirstMintGuards(unittest.TestCase):
             " before minting again",
             run.stdout,
         )
-        self.assertEqual(run.writes(), [])
+        self.assertEqual(run.writes(), NOTHING)
         (listing,) = run.made("GET", f"{DEP}?")
         self.assertEqual(
             run.requests[listing][1],
@@ -1386,7 +1491,7 @@ class FirstMintGuards(unittest.TestCase):
         self.assertIn(
             "::error::a submitted deposition already bears this title", run.stdout
         )
-        self.assertEqual(run.writes(), [])
+        self.assertEqual(run.writes(), NOTHING)
 
     def test_the_old_query_answer_could_never_refuse(self) -> None:
         """M1, what `title:".github"` answered: nothing, so a mint went on."""
@@ -1405,7 +1510,7 @@ class FirstMintGuards(unittest.TestCase):
 
     def test_a_title_on_a_later_page_refuses(self) -> None:
         """Page 1 full of unsubmitted drafts, the minted title on page 2."""
-        (draft,) = captured("drafts-during")
+        (draft,) = captured_list("drafts-during")
         z = first_mint_zenodo([])
         z.title_pages = [[draft] * mint_doi.LISTING_PAGE, captured("drafts-before")]
         run = run_helper("0BSD", zenodo=z, version="1.68.5", repo=CANON_REPO)
@@ -1414,11 +1519,11 @@ class FirstMintGuards(unittest.TestCase):
             "::error::a submitted deposition already bears this title", run.stdout
         )
         self.assertEqual(len(run.made("GET", f"{DEP}?q=title")), 2)
-        self.assertEqual(run.writes(), [])
+        self.assertEqual(run.writes(), NOTHING)
 
     def test_a_listing_page_that_cannot_be_read_refuses(self) -> None:
         """Page 2 answers 503 on every try: refused, nothing created."""
-        (draft,) = captured("drafts-during")
+        (draft,) = captured_list("drafts-during")
         z = first_mint_zenodo([])
         z.title_pages = [[draft] * mint_doi.LISTING_PAGE, 503]
         run = run_helper("0BSD", zenodo=z, version="1.68.5", repo=CANON_REPO)
@@ -1431,11 +1536,11 @@ class FirstMintGuards(unittest.TestCase):
             " is never checked against part of it",
             run.stdout,
         )
-        self.assertEqual(run.writes(), [])
+        self.assertEqual(run.writes(), NOTHING)
 
     def test_a_listing_still_full_at_the_page_bound_refuses(self) -> None:
         """Full pages to the bound: the bound refuses, never passes."""
-        (draft,) = captured("drafts-during")
+        (draft,) = captured_list("drafts-during")
         z = first_mint_zenodo([])
         z.title_pages = [[draft] * mint_doi.LISTING_PAGE] * 3
         with mock.patch.object(mint_doi, "LISTING_MAX_PAGES", 3):
@@ -1446,7 +1551,7 @@ class FirstMintGuards(unittest.TestCase):
             run.stdout,
         )
         self.assertEqual(len(run.made("GET", f"{DEP}?q=title")), 3)
-        self.assertEqual(run.writes(), [])
+        self.assertEqual(run.writes(), NOTHING)
 
     def test_a_vocabulary_answering_500_refuses_as_unchecked(self) -> None:
         """A 500 is retried as transient, then refused; no deposit."""
@@ -1460,7 +1565,7 @@ class FirstMintGuards(unittest.TestCase):
             run.stdout,
         )
         self.assertEqual(len(run.made("GET", "/api/vocabularies/licenses/0bsd")), 6)
-        self.assertEqual(run.writes(), [])
+        self.assertEqual(run.writes(), NOTHING)
 
     def test_no_authors_refuses_before_any_request(self) -> None:
         """A citation with no authors is red by name; Zenodo is never asked."""
@@ -1476,7 +1581,7 @@ class FirstMintGuards(unittest.TestCase):
             " never an account name",
             run.stdout,
         )
-        self.assertEqual(run.requests, [])
+        self.assertEqual(run.requests, NOTHING)
 
     def test_no_citation_refuses_by_name(self) -> None:
         """Gh failing to fetch CITATION.cff is red, naming the tag."""
@@ -1487,7 +1592,7 @@ class FirstMintGuards(unittest.TestCase):
             " from REUSE.toml (fix:citation; lint:citation gates this upstream)",
             run.stdout,
         )
-        self.assertEqual(run.requests, [])
+        self.assertEqual(run.requests, NOTHING)
 
     def test_a_failed_read_refuses_though_its_body_decodes(self) -> None:
         """Gh's exit status decides, never the decoder (#103).
@@ -1503,7 +1608,7 @@ class FirstMintGuards(unittest.TestCase):
             " from REUSE.toml (fix:citation; lint:citation gates this upstream)",
             run.stdout,
         )
-        self.assertEqual(run.requests, [])
+        self.assertEqual(run.requests, NOTHING)
 
     def test_a_concept_doi_without_a_record_id_refuses(self) -> None:
         """A recorded concept DOI must end in a Zenodo record id."""
@@ -1525,7 +1630,7 @@ class FirstMintGuards(unittest.TestCase):
             " published version",
             run.stdout,
         )
-        self.assertEqual(run.writes(), [])
+        self.assertEqual(run.writes(), NOTHING)
 
 
 # ---------------------------------------------------------------------
@@ -1546,7 +1651,7 @@ class ReadCitation(unittest.TestCase):
     def test_the_canons_own_citation(self) -> None:
         """The canon's own CITATION.cff reads as itself."""
         got = mint_doi.read_citation((CANON / "CITATION.cff").read_text())
-        self.assertEqual(got.creators, ["Allen, Carl"])
+        self.assertEqual(got.creators, strings("Allen, Carl"))
         self.assertEqual(got.licence, "0BSD")
         self.assertEqual(got.concept_doi, "10.5281/zenodo.21913604")
 
@@ -1677,7 +1782,9 @@ class AnswerShapes(unittest.TestCase):
             ({"links": links}, f"{what} has no id"),
         ):
             with self.subTest(value=value):
-                self.refused(lambda v=value: mint_doi.deposition(v, what), message)
+                self.refused(
+                    functools.partial(mint_doi.deposition, value, what), message
+                )
 
     def test_a_deposition_reads_its_id_links_and_files(self) -> None:
         """The shape the step reads, an id that is not a string compact."""
@@ -1701,7 +1808,7 @@ class AnswerShapes(unittest.TestCase):
             ({"metadata": []}, f"{where} is not an object"),
         ):
             with self.subTest(value=value):
-                with self.assertRaises(mint_doi.decoded.UndecodableError) as caught:
+                with self.assertRaises(decoded.UndecodableError) as caught:
                     mint_doi.rights_ids(value, where)
                 self.assertEqual(message, str(caught.exception))
 
@@ -1732,7 +1839,7 @@ class AnswerShapes(unittest.TestCase):
             "::error::an entry of the deposition listing (q=title:", run.stdout
         )
         self.assertIn(") is not an object", run.stdout)
-        self.assertEqual(run.writes(), [])
+        self.assertEqual(run.writes(), NOTHING)
 
 
 if __name__ == "__main__":
