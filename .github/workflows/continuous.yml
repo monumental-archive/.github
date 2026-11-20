@@ -330,7 +330,10 @@ jobs:
           for arch in amd64 arm64; do
             digest=$(cat "digests/${arch}" 2> /dev/null || echo "")
             [[ ${digest} =~ ^sha256:[0-9a-f]{64}$ ]] \
-              || { org_error "no ${arch} digest to inventory; refusing to decide about a partial image"; exit 1; }
+              || {
+                org_error "no ${arch} digest to inventory; refusing to decide about a partial image"
+                exit 1
+              }
             trivy image --config /dev/null --format spdx-json --output "dist/${arch}.spdx.json" "${image}@${digest}"
             subjects="${subjects}${subjects:+,}$(jq -r '.name' "dist/${arch}.spdx.json")=dist/${arch}.spdx.json"
           done
