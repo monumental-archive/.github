@@ -14,15 +14,19 @@ exactly like a floor check that works.
 
 import io
 import json
+import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
+import decoded
 import tsconfig_dials
 
 FLAGS_FILE = Path(__file__).with_name("tsc-flags.txt")
 REQUIRED, UNREADABLE = tsconfig_dials.dials(FLAGS_FILE)
+# What a row expects when nothing is unreadable or nothing is found.
+NONE: list[str] = []
 
 
 def flags(*lines: str) -> Path:
@@ -42,7 +46,7 @@ class DeliveredFlagsTest(unittest.TestCase):
 
     def test_every_flag_is_readable(self) -> None:
         """A flag this check cannot compare is a dial nobody enforces."""
-        self.assertEqual(UNREADABLE, [])
+        self.assertEqual(UNREADABLE, NONE)
 
     def test_the_level_is_not_empty(self) -> None:
         """An empty level would pass every config in the org."""
@@ -84,11 +88,13 @@ class DialsTest(unittest.TestCase):
         required, unreadable = tsconfig_dials.dials(
             flags("--strict", "--allowUnreachableCode false", "--noEmit true"),
         )
-        self.assertEqual(unreadable, [])
-        self.assertEqual(
-            required,
-            {"strict": True, "allowUnreachableCode": False, "noEmit": True},
-        )
+        self.assertEqual(unreadable, NONE)
+        want: dict[str, bool] = {
+            "strict": True,
+            "allowUnreachableCode": False,
+            "noEmit": True,
+        }
+        self.assertEqual(required, want)
 
     def test_comments_and_blanks_are_not_dials(self) -> None:
         """The file is mostly prose; none of it may become a dial."""
@@ -100,8 +106,9 @@ class DialsTest(unittest.TestCase):
                 "# adjudicated: noImplicitAny — implied by --strict",
             ),
         )
-        self.assertEqual(unreadable, [])
-        self.assertEqual(required, {"strict": True})
+        self.assertEqual(unreadable, NONE)
+        want: dict[str, bool] = {"strict": True}
+        self.assertEqual(required, want)
 
     def test_a_value_the_check_cannot_compare_stops_it(self) -> None:
         """Guessing at an unknown shape would leave a dial unenforced."""
@@ -126,7 +133,7 @@ class JudgeTest(unittest.TestCase):
                 {"strict": True, "skipLibCheck": False},
                 {"strict": True, "skipLibCheck": False},
             ),
-            [],
+            NONE,
         )
 
     def test_an_absent_dial_fails(self) -> None:
@@ -138,7 +145,10 @@ class JudgeTest(unittest.TestCase):
 
     def test_a_weaker_dial_fails_in_both_polarities(self) -> None:
         """`false` where the org wants true, and true where it wants false."""
-        pairs = (({"strict": False}, True), ({"skipLibCheck": True}, False))
+        pairs: tuple[tuple[dict[str, object], bool], ...] = (
+            ({"strict": False}, True),
+            ({"skipLibCheck": True}, False),
+        )
         for stated, want in pairs:
             with self.subTest(stated=stated):
                 key = next(iter(stated))
@@ -158,7 +168,7 @@ class JudgeTest(unittest.TestCase):
                 {"strict": True, "noImplicitAny": True, "target": "es2025"},
                 {"strict": True},
             ),
-            [],
+            NONE,
         )
 
     def test_a_non_boolean_value_counts_as_weaker(self) -> None:
@@ -169,14 +179,19 @@ class JudgeTest(unittest.TestCase):
     def test_findings_keep_the_flags_file_order(self) -> None:
         """The report reads in the order the org states its level."""
         findings = tsconfig_dials.judge({}, {"a": True, "b": True, "c": True})
-        self.assertEqual([f.split('"')[1] for f in findings], ["a", "b", "c"])
+        keys: list[str] = [f.split('"')[1] for f in findings]
+        want: list[str] = ["a", "b", "c"]
+        self.assertEqual(keys, want)
 
 
 class MainTest(unittest.TestCase):
     """End to end, through the entry point the belt task pipes into."""
 
     @staticmethod
-    def invoke(resolved: object, flags_file: Path | None = None) -> tuple:
+    def invoke(
+        resolved: object,
+        flags_file: Path | None = None,
+    ) -> tuple[int, str, str]:
         """Run the checker over one resolved config.
 
         Returns:
@@ -191,13 +206,13 @@ class MainTest(unittest.TestCase):
         ]
         out, err = io.StringIO(), io.StringIO()
         stdin = io.StringIO(json.dumps(resolved) if resolved is not None else "{")
-        original = tsconfig_dials.sys.stdin
-        tsconfig_dials.sys.stdin = stdin
+        original = sys.stdin
+        sys.stdin = stdin
         try:
             with redirect_stdout(out), redirect_stderr(err):
                 status = tsconfig_dials.main(argv)
         finally:
-            tsconfig_dials.sys.stdin = original
+            sys.stdin = original
         return status, out.getvalue(), err.getvalue()
 
     def test_a_config_at_the_org_level_passes(self) -> None:
@@ -208,7 +223,7 @@ class MainTest(unittest.TestCase):
 
     def test_the_scaffold_stub_passes_its_own_check(self) -> None:
         """A scaffold that fails the org's gate is worse than none."""
-        stub = json.loads(
+        stub = decoded.load_json(
             (Path(__file__).parents[1] / "scaffold" / "tsconfig.json").read_text(
                 encoding="utf-8",
             ),
@@ -246,7 +261,8 @@ class MainTest(unittest.TestCase):
 
     def test_a_resolved_config_that_is_not_an_object_fails(self) -> None:
         """The shrunk example, `[]`: a sentence, not AttributeError (#1555)."""
-        for resolved in ([], 1, "x"):
+        shapes: tuple[object, ...] = ([], 1, "x")
+        for resolved in shapes:
             with self.subTest(resolved=resolved):
                 status, _out, err = self.invoke(resolved)
                 self.assertEqual(status, 1)

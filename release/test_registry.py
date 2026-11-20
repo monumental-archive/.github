@@ -49,13 +49,31 @@ import sys
 import threading
 import unittest
 import urllib.error
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import ClassVar
+from typing import ClassVar, NotRequired, TypedDict, override
 from unittest import mock
 
 import registry
+
+# Appended, so this file's own directory and the standard library
+# come first.
+sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
+
+import decoded
+
+
+def dumps(value: object) -> str:
+    """Encode a planted document as JSON.
+
+    Returns:
+        The JSON text.
+
+    """
+    return json.dumps(value)
+
 
 HERE = Path(__file__).resolve().parent
 TESTDATA = HERE / "testdata"
@@ -70,7 +88,7 @@ GH_TOKEN = "actions-token"  # ruff: ignore[hardcoded-password-string] - a stand-
 ACTOR = "release-bot"
 AMD = "sha256:" + "a" * 64
 ARM = "sha256:" + "b" * 64
-FACTS = json.dumps({
+FACTS = dumps({
     "org.opencontainers.image.version": "1.2.3",
     "org.opencontainers.image.revision": "0123456789abcdef",
 })
@@ -112,14 +130,31 @@ else:
 '''
 
 
+class Logged(TypedDict):
+    """One request the fake was sent, as it logged it."""
+
+    method: str
+    path: str
+    headers: dict[str, str]
+    body: NotRequired[bytes]
+
+
+class Call(TypedDict):
+    """One docker call, as the stub logged it."""
+
+    argv: list[str]
+    stdin: str | None
+
+
 class Fake(BaseHTTPRequestHandler):
     """ghcr.io's token endpoint and manifest routes, nothing else."""
 
     manifests: ClassVar[dict[tuple[str, str], tuple[bytes, str]]] = {}
-    log: ClassVar[list[dict]] = []
-    token_body: ClassVar[bytes] = json.dumps({"token": TOKEN}).encode()
+    log: ClassVar[list[Logged]] = []
+    token_body: ClassVar[bytes] = dumps({"token": TOKEN}).encode()
     rewrite: ClassVar[bool] = False
 
+    @override
     def log_message(self, *_: object) -> None:
         """Keep the test output clean."""
 
@@ -165,7 +200,7 @@ class Fake(BaseHTTPRequestHandler):
             Fake.log.append({
                 "method": "GET",
                 "path": self.path,
-                "headers": dict(self.headers),
+                "headers": dict(self.headers.items()),
             })
         if self.path.startswith("/token?"):
             self.answer(200, Fake.token_body, "application/json")
@@ -190,7 +225,7 @@ class Fake(BaseHTTPRequestHandler):
         Fake.log.append({
             "method": "PUT",
             "path": self.path,
-            "headers": dict(self.headers),
+            "headers": dict(self.headers.items()),
             "body": body,
         })
         route = self.route()
@@ -214,17 +249,17 @@ class Fake(BaseHTTPRequestHandler):
 class Harness(unittest.TestCase):
     """A fresh fake, a stub docker on PATH, and the step's environment."""
 
+    @override
     def setUp(self) -> None:
         """Start the fake and lay out the stub."""
         Fake.manifests = {}
         Fake.log = []
-        Fake.token_body = json.dumps({"token": TOKEN}).encode()
+        Fake.token_body = dumps({"token": TOKEN}).encode()
         Fake.rewrite = False
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Fake)
         self.origin = f"http://127.0.0.1:{self.server.server_port}"
         threading.Thread(
-            target=self.server.serve_forever,
-            kwargs={"poll_interval": 0.01},
+            target=lambda: self.server.serve_forever(poll_interval=0.01),
             daemon=True,
         ).start()
         self.addCleanup(self.server.server_close)
@@ -266,7 +301,7 @@ class Harness(unittest.TestCase):
             code = registry.main(list(argv), self.env, origin=self.origin)
         return code, out.getvalue()
 
-    def docker_calls(self) -> list[dict]:
+    def docker_calls(self) -> list[Call]:
         """Read the stub's log.
 
         Returns:
@@ -276,7 +311,25 @@ class Harness(unittest.TestCase):
         log = Path(self.env["STUB_LOG"])
         if not log.exists():
             return []
-        return [json.loads(ln) for ln in log.read_text("utf-8").splitlines()]
+        calls: list[Call] = []
+        for ln in log.read_text("utf-8").splitlines():
+            call = decoded.as_object(decoded.load_json(ln), "a docker call")
+            argv = decoded.as_array(call["argv"], "argv")
+            stdin = call["stdin"]
+            calls.append({
+                "argv": [decoded.as_str(a, "an argument") for a in argv],
+                "stdin": None if stdin is None else decoded.as_str(stdin, "stdin"),
+            })
+        return calls
+
+    def argvs(self) -> list[list[str]]:
+        """Read each docker call's argv from the stub's log.
+
+        Returns:
+            One argv per docker call, in order.
+
+        """
+        return [c["argv"] for c in self.docker_calls()]
 
     def version(self, text: str) -> None:
         """Make the stub's `buildx version` print `text`."""
@@ -302,13 +355,17 @@ class BuildxFloor(Harness):
 
     def test_the_captured_version_passes(self) -> None:
         """Buildx v0.36.1-desktop.1, as captured, is above the floor."""
-        self.assertIsNone(registry.buildx_floor(VERSION.read_text("utf-8")))
+        try:
+            registry.buildx_floor(VERSION.read_text("utf-8"))
+        except registry.RefusedError as e:
+            self.fail(f"refused: {e}")
 
     def test_the_floor_itself_passes(self) -> None:
         """0.12.0 is the floor, not below it."""
-        self.assertIsNone(
+        try:
             registry.buildx_floor("github.com/docker/buildx v0.12.0 abc\n")
-        )
+        except registry.RefusedError as e:
+            self.fail(f"refused: {e}")
 
     def test_refusals(self) -> None:
         """Below the floor, or no version: the old step's exact words."""
@@ -338,10 +395,9 @@ class BuildxFloor(Harness):
             "--tag",
             "1.2.3",
         )
-        self.assertEqual(
-            [c["argv"] for c in self.docker_calls()], [["buildx", "version"]]
-        )
-        self.assertEqual(Fake.log, [])
+        only: list[list[str]] = [["buildx", "version"]]
+        self.assertEqual(self.argvs(), only)
+        self.assertEqual(Fake.log, list[Logged]())
 
     def test_a_pgrx_push_refuses_below_the_floor(self) -> None:
         """The pgrx index carries annotations, so its push asserts the floor."""
@@ -350,9 +406,8 @@ class BuildxFloor(Harness):
             "buildx 0.11 < 0.12: index annotations would be dropped silently",
             *pgrx_push(self.tmp),
         )
-        self.assertEqual(
-            [c["argv"] for c in self.docker_calls()], [["buildx", "version"]]
-        )
+        only: list[list[str]] = [["buildx", "version"]]
+        self.assertEqual(self.argvs(), only)
 
 
 class Facts(Harness):
@@ -360,25 +415,23 @@ class Facts(Harness):
 
     def test_pairs_keep_the_map_order(self) -> None:
         """Labels and annotations follow the map, one flag per fact."""
-        self.assertEqual(
-            registry.fact_flags(FACTS, labels=True, index=True),
-            [
-                "--label",
-                "org.opencontainers.image.version=1.2.3",
-                "--label",
-                "org.opencontainers.image.revision=0123456789abcdef",
-                "--annotation",
-                "index:org.opencontainers.image.version=1.2.3",
-                "--annotation",
-                "index:org.opencontainers.image.revision=0123456789abcdef",
-            ],
-        )
+        want: list[str] = [
+            "--label",
+            "org.opencontainers.image.version=1.2.3",
+            "--label",
+            "org.opencontainers.image.revision=0123456789abcdef",
+            "--annotation",
+            "index:org.opencontainers.image.version=1.2.3",
+            "--annotation",
+            "index:org.opencontainers.image.revision=0123456789abcdef",
+        ]
+        self.assertEqual(registry.fact_flags(FACTS, labels=True, index=True), want)
 
     def test_non_string_values_render_as_compact_json(self) -> None:
         r"""A number or an object reads as jq's `\(.value)` wrote it."""
+        want: list[str] = ["a=1", 'b={"c":[1,"x"]}', "d=e f"]
         self.assertEqual(
-            registry.facts_pairs('{"a": 1, "b": {"c": [1, "x"]}, "d": "e f"}'),
-            ["a=1", 'b={"c":[1,"x"]}', "d=e f"],
+            registry.facts_pairs('{"a": 1, "b": {"c": [1, "x"]}, "d": "e f"}'), want
         )
 
     def test_facts_that_are_not_an_object_refuse(self) -> None:
@@ -458,93 +511,87 @@ class Push(Harness):
 
     def test_a_per_architecture_push(self) -> None:
         """Labels only, no floor, the raw digest in <digests>/<arch>."""
-        self.env["STUB_META"] = json.dumps({"containerimage.digest": AMD})
+        self.env["STUB_META"] = dumps({"containerimage.digest": AMD})
         code, out = self.run_helper(*oci_push(self.tmp))
         self.assertEqual(code, 0, out)
         calls = self.docker_calls()
-        self.assertEqual(
-            calls[0],
-            {
-                "argv": ["login", "ghcr.io", "-u", ACTOR, "--password-stdin"],
-                "stdin": GH_TOKEN,
-            },
-        )
-        self.assertEqual(
-            calls[1]["argv"],
-            [
-                "buildx",
-                "build",
-                "--file",
-                "ctx/Dockerfile",
-                "--label",
-                "org.opencontainers.image.version=1.2.3",
-                "--label",
-                "org.opencontainers.image.revision=0123456789abcdef",
-                "--provenance=false",
-                "--sbom=false",
-                "--output",
-                OUTSPEC.format("ghcr.io/some-owner/some-image"),
-                "--metadata-file",
-                str(self.tmp / "meta.json"),
-                "ctx",
-            ],
-        )
+        login: Call = {
+            "argv": ["login", "ghcr.io", "-u", ACTOR, "--password-stdin"],
+            "stdin": GH_TOKEN,
+        }
+        self.assertEqual(calls[0], login)
+        build: list[str] = [
+            "buildx",
+            "build",
+            "--file",
+            "ctx/Dockerfile",
+            "--label",
+            "org.opencontainers.image.version=1.2.3",
+            "--label",
+            "org.opencontainers.image.revision=0123456789abcdef",
+            "--provenance=false",
+            "--sbom=false",
+            "--output",
+            OUTSPEC.format("ghcr.io/some-owner/some-image"),
+            "--metadata-file",
+            str(self.tmp / "meta.json"),
+            "ctx",
+        ]
+        self.assertEqual(calls[1]["argv"], build)
         self.assertEqual(len(calls), 2)
         self.assertEqual((self.tmp / "digests" / "amd64").read_text("utf-8"), AMD)
         self.assertEqual(out, f"::notice::amd64 pushed as {AMD}\n")
 
     def test_a_pgrx_index_push(self) -> None:
         """Both platforms, labels and index annotations, a JSON record."""
-        self.env["STUB_META"] = json.dumps({"containerimage.digest": AMD})
+        self.env["STUB_META"] = dumps({"containerimage.digest": AMD})
         code, out = self.run_helper(*pgrx_push(self.tmp))
         self.assertEqual(code, 0, out)
-        argv = [c["argv"] for c in self.docker_calls()]
-        self.assertEqual(argv[0], ["buildx", "version"])
+        argv = self.argvs()
+        version: list[str] = ["buildx", "version"]
+        self.assertEqual(argv[0], version)
         self.assertEqual(argv[1][0], "login")
-        self.assertEqual(
-            argv[2],
-            [
-                "buildx",
-                "build",
-                "--file",
-                ".org-canon/docker/pgrx-artifact.Dockerfile",
-                "--platform",
-                "linux/amd64,linux/arm64",
-                "--label",
-                "org.opencontainers.image.version=1.2.3",
-                "--label",
-                "org.opencontainers.image.revision=0123456789abcdef",
-                "--annotation",
-                "index:org.opencontainers.image.version=1.2.3",
-                "--annotation",
-                "index:org.opencontainers.image.revision=0123456789abcdef",
-                "--provenance=false",
-                "--sbom=false",
-                "--output",
-                OUTSPEC.format("ghcr.io/some-owner/lab_pg"),
-                "--metadata-file",
-                str(self.tmp / "meta.json"),
-                ".",
-            ],
-        )
-        record = json.loads((self.tmp / "digests" / "pg17.json").read_text("utf-8"))
-        self.assertEqual(
-            record,
-            {
-                "pg": "17",
-                "image": "ghcr.io/some-owner/lab_pg",
-                "tag": "1.2.3-pg17-artifact",
-                "digest": AMD,
-            },
-        )
+        build: list[str] = [
+            "buildx",
+            "build",
+            "--file",
+            ".org-canon/docker/pgrx-artifact.Dockerfile",
+            "--platform",
+            "linux/amd64,linux/arm64",
+            "--label",
+            "org.opencontainers.image.version=1.2.3",
+            "--label",
+            "org.opencontainers.image.revision=0123456789abcdef",
+            "--annotation",
+            "index:org.opencontainers.image.version=1.2.3",
+            "--annotation",
+            "index:org.opencontainers.image.revision=0123456789abcdef",
+            "--provenance=false",
+            "--sbom=false",
+            "--output",
+            OUTSPEC.format("ghcr.io/some-owner/lab_pg"),
+            "--metadata-file",
+            str(self.tmp / "meta.json"),
+            ".",
+        ]
+        self.assertEqual(argv[2], build)
+        written = (self.tmp / "digests" / "pg17.json").read_text("utf-8")
+        record = decoded.as_object(decoded.load_json(written), "the record")
+        want: dict[str, object] = {
+            "pg": "17",
+            "image": "ghcr.io/some-owner/lab_pg",
+            "tag": "1.2.3-pg17-artifact",
+            "digest": AMD,
+        }
+        self.assertEqual(record, want)
         self.assertEqual(out, f"::notice::pg17 index {AMD}\n")
 
     def test_no_digest_from_the_push(self) -> None:
         """Absent, malformed or missing metadata: each message, no record."""
         rows = [
-            json.dumps({"containerimage.digest": "sha256:abc"}),
-            json.dumps({"containerimage.digest": AMD.upper()}),
-            json.dumps({"image.name": "x"}),
+            dumps({"containerimage.digest": "sha256:abc"}),
+            dumps({"containerimage.digest": AMD.upper()}),
+            dumps({"image.name": "x"}),
             "not json",
             None,
         ]
@@ -564,7 +611,7 @@ class Push(Harness):
 
     def test_a_failed_build_refuses_on_its_status(self) -> None:
         """The build's exit status is not masked by the metadata read."""
-        self.env["STUB_META"] = json.dumps({"containerimage.digest": AMD})
+        self.env["STUB_META"] = dumps({"containerimage.digest": AMD})
         self.env["STUB_BUILD_RC"] = "1"
         self.refused("docker buildx build --file exited 1", *oci_push(self.tmp))
         self.assertFalse((self.tmp / "digests" / "amd64").exists())
@@ -573,6 +620,7 @@ class Push(Harness):
 class Assemble(Harness):
     """assemble-oci-index.yml: the index, by digest, proven by the registry."""
 
+    @override
     def setUp(self) -> None:
         """Lay out both per-architecture digests, as the download leaves them."""
         super().setUp()
@@ -598,24 +646,23 @@ class Assemble(Harness):
         index = "sha256:" + hashlib.sha256(body).hexdigest()
         code, out = self.assemble()
         self.assertEqual(code, 0, out)
-        argv = [c["argv"] for c in self.docker_calls()]
-        self.assertEqual(argv[0], ["buildx", "version"])
+        argv = self.argvs()
+        version: list[str] = ["buildx", "version"]
+        self.assertEqual(argv[0], version)
         self.assertEqual(argv[1][0], "login")
-        self.assertEqual(
-            argv[2],
-            [
-                "buildx",
-                "imagetools",
-                "create",
-                "--dry-run",
-                "--annotation",
-                "index:org.opencontainers.image.version=1.2.3",
-                "--annotation",
-                "index:org.opencontainers.image.revision=0123456789abcdef",
-                f"ghcr.io/some-owner/some-image@{AMD}",
-                f"ghcr.io/some-owner/some-image@{ARM}",
-            ],
-        )
+        create: list[str] = [
+            "buildx",
+            "imagetools",
+            "create",
+            "--dry-run",
+            "--annotation",
+            "index:org.opencontainers.image.version=1.2.3",
+            "--annotation",
+            "index:org.opencontainers.image.revision=0123456789abcdef",
+            f"ghcr.io/some-owner/some-image@{AMD}",
+            f"ghcr.io/some-owner/some-image@{ARM}",
+        ]
+        self.assertEqual(argv[2], create)
         token, put = Fake.log
         self.assertEqual(
             token["path"],
@@ -662,10 +709,9 @@ class Assemble(Harness):
                 self.refused(
                     message, "assemble", "--digests", str(self.digests), "--tag", "1"
                 )
-                self.assertEqual(
-                    [c["argv"] for c in self.docker_calls()], [["buildx", "version"]]
-                )
-                self.assertEqual(Fake.log, [])
+                only: list[list[str]] = [["buildx", "version"]]
+                self.assertEqual(self.argvs(), only)
+                self.assertEqual(Fake.log, list[Logged]())
 
     def test_a_trailing_newline_on_the_digest_file_is_read_as_cat_read_it(self) -> None:
         """`$(cat f)` dropped trailing newlines; so does the helper."""
@@ -685,7 +731,7 @@ class Assemble(Harness):
                     " refusing to guess the manifest bytes\n",
                     out,
                 )
-                self.assertEqual(Fake.log, [])
+                self.assertEqual(Fake.log, list[Logged]())
 
     def test_a_media_type_that_is_not_an_oci_index(self) -> None:
         """A Docker list has no annotations field: refused, nothing PUT."""
@@ -705,7 +751,7 @@ class Assemble(Harness):
                     " not an OCI image index\n",
                     out,
                 )
-                self.assertEqual(Fake.log, [])
+                self.assertEqual(Fake.log, list[Logged]())
 
     def test_a_registry_answering_another_digest_for_the_index(self) -> None:
         """The registry stored other bytes: refused, no outputs written."""
@@ -762,7 +808,9 @@ class Assemble(Harness):
                     "--tag",
                     "1.2.3",
                 )
-                self.assertEqual([e["method"] for e in Fake.log], ["GET"])
+                methods = [e["method"] for e in Fake.log]
+                want: list[str] = ["GET"]
+                self.assertEqual(methods, want)
 
 
 def gated(tag: str = "1.2.3", digest: str | None = None) -> str:
@@ -775,7 +823,7 @@ def gated(tag: str = "1.2.3", digest: str | None = None) -> str:
     body = DRY_RUN.read_bytes()[:-1]
     real = "sha256:" + hashlib.sha256(body).hexdigest()
     Fake.manifests["some-owner/some-image", real] = (body, OCI_INDEX)
-    return json.dumps([
+    return dumps([
         {
             "image": "ghcr.io/some-owner/some-image",
             "tag": tag,
@@ -783,6 +831,17 @@ def gated(tag: str = "1.2.3", digest: str | None = None) -> str:
             "extra": "ignored",
         }
     ])
+
+
+def gated_entry(images: str) -> dict[str, object]:
+    """Read the first entry of an `images` input.
+
+    Returns:
+        Its object, as tag-images.yml's input carries it.
+
+    """
+    entries = decoded.as_array(decoded.load_json(images), "images")
+    return decoded.as_object(entries[0], "an image")
 
 
 class Tag(Harness):
@@ -801,7 +860,7 @@ class Tag(Harness):
     def test_the_gated_bytes_go_up_under_the_tag(self) -> None:
         """GET by digest, PUT the same bytes and type to the tag."""
         images = gated()
-        digest = json.loads(images)[0]["digest"]
+        digest = decoded.as_str(gated_entry(images)["digest"], "digest")
         code, out = self.tag(images)
         self.assertEqual(code, 0, out)
         token, get, put = Fake.log
@@ -823,11 +882,11 @@ class Tag(Harness):
             "not json",
             "{}",
             "[]",
-            json.dumps(entry),
-            json.dumps([entry, 1]),
-            json.dumps([{**entry, "digest": None}]),
-            json.dumps([{"image": "ghcr.io/a/b", "tag": "1"}]),
-            json.dumps([{**entry, "tag": 1}]),
+            dumps(entry),
+            dumps([entry, 1]),
+            dumps([{**entry, "digest": None}]),
+            dumps([{"image": "ghcr.io/a/b", "tag": "1"}]),
+            dumps([{**entry, "tag": 1}]),
             # #1556: nested past the parser's depth, a RecursionError before.
             "[" * 100_000,
         ]
@@ -835,7 +894,7 @@ class Tag(Harness):
             with self.subTest(images=images[:60]):
                 self.env["UNTRUSTED_IMAGES"] = images
                 self.refused(message, "tag")
-                self.assertEqual(Fake.log, [])
+                self.assertEqual(Fake.log, list[Logged]())
 
     def test_field_whitelists(self) -> None:
         """Each field's whitelist, each message; nothing is requested."""
@@ -862,22 +921,22 @@ class Tag(Harness):
         ]
         for change, message in rows:
             with self.subTest(change=change):
-                self.env["UNTRUSTED_IMAGES"] = json.dumps([{**ok, **change}])
+                self.env["UNTRUSTED_IMAGES"] = dumps([{**ok, **change}])
                 self.refused(message, "tag")
-                self.assertEqual(Fake.log, [])
+                self.assertEqual(Fake.log, list[Logged]())
 
     def test_a_bad_later_entry_refuses_before_the_first_is_tagged(self) -> None:
         """Validation is whole-input: no tag lands from a refused input."""
-        first = json.loads(gated())[0]
+        first = gated_entry(gated())
         bad = {**first, "tag": "1 2"}
-        self.env["UNTRUSTED_IMAGES"] = json.dumps([first, bad])
+        self.env["UNTRUSTED_IMAGES"] = dumps([first, bad])
         self.refused("implausible tag", "tag")
-        self.assertEqual(Fake.log, [])
+        self.assertEqual(Fake.log, list[Logged]())
 
     def test_a_tag_that_resolves_to_another_digest(self) -> None:
         """The registry stored other bytes under the tag: refused."""
         images = gated()
-        digest = json.loads(images)[0]["digest"]
+        digest = decoded.as_str(gated_entry(images)["digest"], "digest")
         Fake.rewrite = True
         stored = DRY_RUN.read_bytes()[:-1].replace(
             b'"schemaVersion": 2', b'"schemaVersion":2'
@@ -899,7 +958,9 @@ class Tag(Harness):
         self.assertRegex(
             out, rf"::error::GET http://\S+/manifests/{ARM} answered 404\n"
         )
-        self.assertEqual([e["method"] for e in Fake.log], ["GET", "GET"])
+        methods = [e["method"] for e in Fake.log]
+        want: list[str] = ["GET", "GET"]
+        self.assertEqual(methods, want)
 
 
 class Environment(Harness):
@@ -913,36 +974,34 @@ class Environment(Harness):
         machine, and the one request it is asked for goes to ghcr.io.
         """
         self.env["REGISTRY_URL"] = "https://attacker.example"
-        self.env["UNTRUSTED_IMAGES"] = json.dumps([
+        self.env["UNTRUSTED_IMAGES"] = dumps([
             {"image": "ghcr.io/a/b", "tag": "1.2.3", "digest": AMD}
         ])
         opened: list[str] = []
 
-        def refuse(req: object, **_: object) -> None:
+        def refuse(req: urllib.request.Request, **_: object) -> None:
             opened.append(req.full_url)
             reason = "no network in this row"
             raise urllib.error.URLError(reason)
 
         out = io.StringIO()
         with (
-            mock.patch.object(registry.typed_std.urllib.request, "urlopen", refuse),
+            mock.patch.object(urllib.request, "urlopen", refuse),
             contextlib.redirect_stdout(out),
         ):
             code = registry.main(["tag"], self.env)
         self.assertEqual(code, 1)
-        self.assertEqual(
-            opened,
-            ["https://ghcr.io/token?scope=repository:a/b:pull,push&service=ghcr.io"],
-        )
+        want: list[str] = [
+            "https://ghcr.io/token?scope=repository:a/b:pull,push&service=ghcr.io"
+        ]
+        self.assertEqual(opened, want)
         self.assertNotIn("attacker", out.getvalue())
 
     def test_an_answer_that_is_not_a_response_is_refused(self) -> None:
         """What answered is not an HTTP response: refused by name (#1682)."""
         url = "https://ghcr.io/v2/a/b/manifests/1"
         with (
-            mock.patch.object(
-                registry.typed_std.urllib.request, "urlopen", return_value=None
-            ),
+            mock.patch.object(urllib.request, "urlopen", return_value=None),
             self.assertRaises(registry.RefusedError) as caught,
         ):
             registry.Registry.request("GET", url, {})

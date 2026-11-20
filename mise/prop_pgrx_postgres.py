@@ -21,20 +21,35 @@ the ordinary suite (`mise run test`) never imports this file.
 import tempfile
 import unittest
 from pathlib import Path
+from typing import TypedDict
 
 import pgrx_postgres as pp
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
 
+
+class EntryDoc(TypedDict):
+    """One entry of `mise ls --json` for the postgres tool."""
+
+    version: str
+    active: bool
+    installed: bool
+
+
 MAJOR = st.integers(13, 19)
-ENTRY = st.fixed_dictionaries({
-    "version": st.tuples(MAJOR, st.integers(0, 20), st.integers(0, 9)).map(
-        lambda v: "{}.{}.{}".format(*v)
-    ),
-    "active": st.booleans(),
-    "installed": st.booleans(),
-})
+VERSION: st.SearchStrategy[str] = st.tuples(
+    MAJOR, st.integers(0, 20), st.integers(0, 9)
+).map(lambda v: "{}.{}.{}".format(*v))
+ENTRY: st.SearchStrategy[EntryDoc] = st.builds(
+    EntryDoc, version=VERSION, active=st.booleans(), installed=st.booleans()
+)
+ANY_VERSION: st.SearchStrategy[str] = st.text(max_size=8)
+ANY_ENTRY: st.SearchStrategy[EntryDoc] = st.builds(
+    EntryDoc, version=ANY_VERSION, active=st.booleans(), installed=st.booleans()
+)
+# A version whose major is a digit Python reads but int() refuses.
+SUPERSCRIPT: list[EntryDoc] = [{"version": "²", "active": True, "installed": True}]
 
 
 class Pinned(unittest.TestCase):
@@ -42,7 +57,7 @@ class Pinned(unittest.TestCase):
 
     @given(st.data(), st.lists(ENTRY, max_size=6))
     def test_active_installed_serve_in_any_order(
-        self, data: st.DataObject, listing: list[dict]
+        self, data: st.DataObject, listing: list[EntryDoc]
     ) -> None:
         """Served majors and absent versions, whatever the order."""
         shuffled = data.draw(st.permutations(listing))
@@ -53,30 +68,24 @@ class Pinned(unittest.TestCase):
             for e in listing
             if e["active"] and e["installed"]
         }
-        self.assertEqual(set(found), majors)
-        self.assertEqual(set(found_two), majors)
-        self.assertEqual(
-            sorted(absent),
-            sorted(e["version"] for e in listing if e["active"] and not e["installed"]),
+        served, served_two = set(found), set(found_two)
+        self.assertEqual(served, majors)
+        self.assertEqual(served_two, majors)
+        absent_sorted = sorted(absent)
+        uninstalled = sorted(
+            e["version"] for e in listing if e["active"] and not e["installed"]
         )
-        self.assertEqual(sorted(absent), sorted(absent_two))
+        self.assertEqual(absent_sorted, uninstalled)
+        absent_two_sorted = sorted(absent_two)
+        self.assertEqual(absent_sorted, absent_two_sorted)
 
 
 class Refusal(unittest.TestCase):
     """Any listing is read."""
 
-    @given(
-        st.lists(
-            st.fixed_dictionaries({
-                "version": st.text(max_size=8),
-                "active": st.booleans(),
-                "installed": st.booleans(),
-            }),
-            max_size=4,
-        )
-    )
-    @example([{"version": "²", "active": True, "installed": True}])
-    def test_any_versions(self, listing: list[dict]) -> None:
+    @given(st.lists(ANY_ENTRY, max_size=4))
+    @example(SUPERSCRIPT)
+    def test_any_versions(self, listing: list[EntryDoc]) -> None:
         """Majors are ints; nothing raises."""
         found, _ = pp.pinned(pp.entries(listing))
         self.assertTrue(all(isinstance(m, int) for m in found))
@@ -89,7 +98,7 @@ class Plan(unittest.TestCase):
     def test_all_or_nothing(self, declared: set[int], served: set[int]) -> None:
         """Records for all declared majors, or findings and no record."""
         with tempfile.TemporaryDirectory() as scratch:
-            listing = []
+            listing: list[dict[str, object]] = []
             for major in served:
                 root = Path(scratch) / str(major)
                 (root / "bin").mkdir(parents=True)
@@ -103,14 +112,14 @@ class Plan(unittest.TestCase):
             records, findings = pp.plan(sorted(declared), pp.entries(listing))
         missing = declared - served
         if missing:
-            self.assertEqual(records, [])
+            self.assertEqual(records, list[str]())
             for major in missing:
                 self.assertTrue(any(f.startswith(f"pg{major} ") for f in findings))
         else:
-            self.assertEqual(findings, [])
-            self.assertEqual(
-                [r.split("\t")[1] for r in records], [str(m) for m in sorted(declared)]
-            )
+            self.assertEqual(findings, list[str]())
+            planned = [r.split("\t")[1] for r in records]
+            majors = [str(m) for m in sorted(declared)]
+            self.assertEqual(planned, majors)
 
 
 if __name__ == "__main__":

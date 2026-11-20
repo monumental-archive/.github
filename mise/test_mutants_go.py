@@ -38,7 +38,9 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import override
 
+import decoded
 import hermetic
 import mutants_go
 
@@ -181,6 +183,7 @@ def measuring(count: int = 2) -> str:
 class Planted(unittest.TestCase):
     """A planted module, a real GOROOT, a shim first on PATH, stub gomu."""
 
+    @override
     def setUp(self) -> None:
         """Plant the module, the stubs and the default answers."""
         self.tmp = Path(tempfile.mkdtemp())
@@ -350,7 +353,8 @@ class Adoption(Planted):
             "  record an equivalent mutant at its site instead:"
             " //mutants:equivalent <type> <reason>\n",
         )
-        self.assertEqual(self.calls("gomu"), [])
+        none: list[str] = []
+        self.assertEqual(self.calls("gomu"), none)
 
     def test_a_pattern_in_a_nested_gomuignore_is_red_by_name(self) -> None:
         """Gomu walks up from each file, so a nested file applies too."""
@@ -359,7 +363,8 @@ class Adoption(Planted):
         got = self.run_leg()
         self.assertEqual(got.returncode, 1)
         self.assertIn(f"{LABEL}: pattern in a/.gomuignore:1: a.go\n", got.stderr)
-        self.assertEqual(self.calls("gomu"), [])
+        none: list[str] = []
+        self.assertEqual(self.calls("gomu"), none)
 
 
 class Verdicts(Planted):
@@ -477,7 +482,8 @@ class Verdicts(Planted):
         """The report said killedMutants 0 beside nine KILLED results (0.3.0)."""
         self.adopt()
         self.clean_reports()
-        body = json.loads((self.reports / "a.json").read_text(encoding="utf-8"))
+        text = (self.reports / "a.json").read_text(encoding="utf-8")
+        body = decoded.as_object(decoded.load_json(text), "a.json")
         body |= {"killedMutants": 0, "statistics": {"killed": 0, "survived": 9}}
         (self.reports / "a.json").write_text(json.dumps(body), encoding="utf-8")
         got = self.run_leg()
@@ -559,7 +565,8 @@ class Verdicts(Planted):
             "FAIL\texample.com/p/a\n"
             f"{LABEL}: the suite fails before any mutant (go test exited 1)\n",
         )
-        self.assertEqual(self.calls("gomu"), [])
+        none: list[str] = []
+        self.assertEqual(self.calls("gomu"), none)
 
 
 class Records(Planted):
@@ -680,7 +687,9 @@ class Toolchain(Planted):
         self.clean_reports()
         got = self.run_leg()
         self.assertEqual(got.returncode, 0, got.stderr)
-        self.assertEqual(set(self.calls("sees")), {f"sees {self.goroot}/bin/go"})
+        want = {f"sees {self.goroot}/bin/go"}
+        seen = set(self.calls("sees"))
+        self.assertEqual(seen, want)
 
     def test_gomu_is_called_per_file_non_incremental_with_one_worker(self) -> None:
         """Each file, absolute; the timeout from the package's own test time."""
@@ -689,13 +698,11 @@ class Toolchain(Planted):
         got = self.run_leg()
         self.assertEqual(got.returncode, 0, got.stderr)
         tail = "--incremental=false --output json --fail-on-gate=false"
-        self.assertEqual(
-            self.calls("gomu"),
-            [
-                f"gomu run {self.root}/a/a.go --workers 1 --timeout 30 {tail}",
-                f"gomu run {self.root}/b/b.go --workers 1 --timeout 124 {tail}",
-            ],
-        )
+        want = [
+            f"gomu run {self.root}/a/a.go --workers 1 --timeout 30 {tail}",
+            f"gomu run {self.root}/b/b.go --workers 1 --timeout 124 {tail}",
+        ]
+        self.assertEqual(self.calls("gomu"), want)
 
     def test_gomu_finds_the_root_gomuignore_from_the_scratch_directory(
         self,
@@ -705,7 +712,8 @@ class Toolchain(Planted):
         self.clean_reports()
         got = self.run_leg()
         self.assertEqual(got.returncode, 0, got.stderr)
-        self.assertEqual(self.calls("ignore"), [f"ignore {self.root}/.gomuignore"] * 2)
+        want = [f"ignore {self.root}/.gomuignore"] * 2
+        self.assertEqual(self.calls("ignore"), want)
         self.assertNotIn(f"cwd {self.root}", self.calls("cwd"))
 
     def test_a_mise_shim_is_resolved_to_the_binary(self) -> None:
@@ -739,7 +747,8 @@ class Toolchain(Planted):
             " repository's go:\n"
             "    mise install go:github.com/sivchari/gomu/cmd/gomu\n",
         )
-        self.assertEqual(self.calls("gomu"), [])
+        none: list[str] = []
+        self.assertEqual(self.calls("gomu"), none)
 
     def test_a_gomu_built_with_the_same_go_runs(self) -> None:
         """Equal build and toolchain versions pass the check."""
@@ -863,6 +872,7 @@ class Main(unittest.TestCase):
     package `a` holds `a.go`, lines 3-5 covered and 9 not.
     """
 
+    @override
     def setUp(self) -> None:
         """Plant the scratch tables for one package and an empty report."""
         tmp = tempfile.TemporaryDirectory()

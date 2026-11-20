@@ -18,9 +18,9 @@ Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
 """
 
-import tomllib
 import unittest
 
+import decoded
 import deny_skips as ds
 from hypothesis import example
 from hypothesis import strategies as st
@@ -31,8 +31,7 @@ VERSION = st.one_of(st.just(""), st.from_regex(r"@[0-9]\.[0-9]{1,2}", fullmatch=
 Drawn = tuple[str, list[tuple[str, str]], list[str]]
 
 
-@st.composite
-def config(draw: st.DrawFn) -> Drawn:
+def draw_config(draw: st.DrawFn) -> Drawn:
     """Draw a deny.toml with one skip entry per line.
 
     Returns:
@@ -69,6 +68,9 @@ def config(draw: st.DrawFn) -> Drawn:
     return "\n".join(text) + "\n", ordered, denied
 
 
+config = st.composite(draw_config)
+
+
 def crate(item: object) -> str:
     """Name the crate an entry declares, as written.
 
@@ -76,7 +78,9 @@ def crate(item: object) -> str:
         The spec.
 
     """
-    return item["crate"] if isinstance(item, dict) else item
+    if decoded.is_object(item):
+        return decoded.as_str(item.get("crate"), "crate")
+    return decoded.as_str(item, "entry")
 
 
 class Variants(unittest.TestCase):
@@ -86,7 +90,7 @@ class Variants(unittest.TestCase):
     def test_entries_in_order(self, drawn: Drawn) -> None:
         """Every skip and skip-tree entry, in declaration order."""
         text, skips, _ = drawn
-        self.assertEqual(ds.entries(tomllib.loads(text)), skips)
+        self.assertEqual(ds.entries(decoded.load_toml(text)), skips)
 
     @given(config())
     @example((
@@ -105,12 +109,18 @@ class Variants(unittest.TestCase):
         lines = text.splitlines(keepends=True)
         for key, spec in skips:
             kept = ds.variant_without(lines, key, spec)
-            self.assertIsNotNone(kept, (key, spec))
-            back = tomllib.loads("".join(kept))["bans"]
+            if kept is None:
+                self.fail(f"no variant without {key} {spec}")
+            bans = decoded.load_toml("".join(kept))["bans"]
+            back = decoded.as_object(bans, "bans")
             for other in ds.SKIP_KEYS:
                 expected = [s for k, s in skips if k == other and (k, s) != (key, spec)]
-                self.assertEqual([crate(i) for i in back.get(other, [])], expected)
-            self.assertEqual([crate(i) for i in back.get("deny", [])], denied)
+                read = decoded.as_array(back.get(other, []), other)
+                crates = [crate(i) for i in read]
+                self.assertEqual(crates, expected)
+            deny = decoded.as_array(back.get("deny", []), "deny")
+            denied_back = [crate(i) for i in deny]
+            self.assertEqual(denied_back, denied)
 
 
 if __name__ == "__main__":

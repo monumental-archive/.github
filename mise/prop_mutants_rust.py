@@ -26,8 +26,10 @@ from typed_hypothesis import given
 ENTRY = st.from_regex(r"[a-z_:]{1,12}", fullmatch=True)
 
 
-@st.composite
-def config(draw: st.DrawFn) -> tuple[str, list[tuple[int, str, str]]]:
+Drawn = tuple[str, list[tuple[int, str, str]]]
+
+
+def draw_config(draw: st.DrawFn) -> Drawn:
     """Write exclusion arrays, some entries with a reason above them.
 
     Returns:
@@ -35,7 +37,7 @@ def config(draw: st.DrawFn) -> tuple[str, list[tuple[int, str, str]]]:
 
     """
     lines = ["# cargo-mutants configuration", ""]
-    expected = []
+    expected: list[tuple[int, str, str]] = []
     for key in draw(
         st.lists(st.sampled_from(["exclude_re", "exclude_globs"]), unique=True)
     ):
@@ -55,11 +57,14 @@ def config(draw: st.DrawFn) -> tuple[str, list[tuple[int, str, str]]]:
     return "\n".join(lines) + "\n", expected
 
 
+config = st.composite(draw_config)
+
+
 class Reasons(unittest.TestCase):
     """Each entry without a reason, by line and key."""
 
     @given(config())
-    def test_exactly_the_unexplained_entries(self, drawn: tuple) -> None:
+    def test_exactly_the_unexplained_entries(self, drawn: Drawn) -> None:
         """Named at their lines; explained ones never."""
         text, expected = drawn
         self.assertEqual(mr.unexplained(text), expected, text)

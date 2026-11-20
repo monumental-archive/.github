@@ -10,8 +10,8 @@ true of every repository, and every answer that is not `?` cites that
 control by a URL under the canon repository. The lint holds it there.
 
 The body under test is the task's own `run` string, read out of
-mise/config.toml with tomllib and run by bash in a planted git tree,
-not a copy of it, so a change to the lint has to face these rows.
+mise/config.toml with decoded.load_toml and run by bash in a planted git
+tree, not a copy of it, so a change to the lint has to face these rows.
 
 Each red row asserts the message, not just the exit status: a planted
 row scored on exit alone can pass for the wrong reason. The green rows
@@ -25,10 +25,10 @@ import json
 import re
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
-import tomllib
 import unittest
 from pathlib import Path
 
+import decoded
 import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
@@ -64,8 +64,10 @@ def body() -> str:
         The task body; it carries no Tera, so it renders as written.
 
     """
-    config = tomllib.loads((BELT / "config.toml").read_text(encoding="utf-8"))
-    return config["tasks"]["lint:bestpractices"]["run"]
+    config = decoded.load_toml((BELT / "config.toml").read_text(encoding="utf-8"))
+    tasks = decoded.as_object(config["tasks"], "the belt's [tasks]")
+    task = decoded.as_object(tasks["lint:bestpractices"], "lint:bestpractices")
+    return decoded.as_str(task["run"], "lint:bestpractices's run")
 
 
 BODY = body()
@@ -114,12 +116,12 @@ def planted(edit: dict[str, str | None]) -> str:
             plant nothing.
 
     """
-    data = json.loads(STUB)
+    data = decoded.as_object(decoded.load_json(STUB), "the stub")
     missing = sorted(set(edit) - set(data))
     if missing:
         message = f"the stub carries no {missing!r}"
         raise ValueError(message)
-    out = {}
+    out: dict[str, object] = {}
     for key, value in data.items():
         new = edit.get(key, value)
         if new is not None:
@@ -138,11 +140,13 @@ def kept(criterion: str) -> str:
             plant a change to an answer that is not there.
 
     """
-    data = json.loads(STUB)
+    data = decoded.as_object(decoded.load_json(STUB), "the stub")
     if data.get(f"{criterion}_status", "?") == "?":
         message = f"{criterion} is not a pre-set answer in the stub"
         raise ValueError(message)
-    return data[f"{criterion}_justification"]
+    return decoded.as_str(
+        data[f"{criterion}_justification"], f"{criterion}_justification"
+    )
 
 
 class Green(unittest.TestCase):
@@ -227,7 +231,7 @@ class Red(unittest.TestCase):
 
     def test_a_file_not_one_key_per_line_is_red(self) -> None:
         """The check reads lines; a layout it cannot read is red by name."""
-        text = json.dumps(json.loads(STUB)) + "\n"
+        text = json.dumps(decoded.load_json(STUB)) + "\n"
         keys = STUB.count('_status": ')
         self.assert_red(
             text,

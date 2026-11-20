@@ -25,6 +25,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import decoded
 import inventory_plan as inventory
 from hypothesis import example
 from hypothesis import strategies as st
@@ -34,13 +35,29 @@ CRATE = st.from_regex(r"[A-Za-z][A-Za-z0-9_-]{0,15}", fullmatch=True)
 MAJOR = st.integers(10, 99).map(str)
 PREFIX = st.text(max_size=12)
 # TOML has no null; floats add nothing the reader branches on.
-VALUE = st.recursive(
-    st.booleans() | st.integers() | st.text(max_size=8),
-    lambda inner: (
-        st.lists(inner, max_size=3)
-        | st.dictionaries(st.text(max_size=4), inner, max_size=3)
-    ),
-    max_leaves=8,
+SCALAR: st.SearchStrategy[object] = st.one_of(
+    st.booleans(), st.integers(), st.text(max_size=8)
+)
+
+
+def nested(inner: st.SearchStrategy[object]) -> st.SearchStrategy[object]:
+    """Wrap values in an array or a table.
+
+    Returns:
+        The strategy one level deeper.
+
+    """
+    arrays: st.SearchStrategy[object] = st.lists(inner, max_size=3)
+    tables: st.SearchStrategy[object] = st.dictionaries(
+        st.text(max_size=4), inner, max_size=3
+    )
+    return arrays | tables
+
+
+VALUE: st.SearchStrategy[object] = st.recursive(SCALAR, nested, max_leaves=8)
+# A `[package]` with any of the two keys the reader takes.
+PACKAGE: st.SearchStrategy[object] = st.dictionaries(
+    st.sampled_from(["name", "version"]), VALUE, max_size=2
 )
 
 
@@ -57,10 +74,11 @@ def toml_value(value: object) -> str:
         text = str(value)
     elif isinstance(value, str):
         text = json.dumps(value, ensure_ascii=False).replace("\x7f", "\\u007f")
-    elif isinstance(value, list):
+    elif decoded.is_array(value):
         text = "[" + ", ".join(toml_value(v) for v in value) + "]"
     else:
-        pairs = (f"{toml_value(str(k))} = {toml_value(v)}" for k, v in value.items())
+        table = decoded.as_object(value, "a drawn value")
+        pairs = (f"{toml_value(str(k))} = {toml_value(v)}" for k, v in table.items())
         text = "{" + ", ".join(pairs) + "}"
     return text
 
@@ -90,7 +108,9 @@ def run_step(manifest: str, major: str, prefix: str) -> tuple[int, str, object]:
             else:
                 os.environ["PLAN_DOC_PREFIX"] = saved
         written = Path(tmp) / "plan" / "plan.json"
-        plan = json.loads(written.read_text("utf-8")) if written.is_file() else None
+        plan = None
+        if written.is_file():
+            plan = decoded.load_json(written.read_text("utf-8"))
     return code, out.getvalue(), plan
 
 
@@ -109,23 +129,21 @@ class NameKeptUnderAnyPrefix(unittest.TestCase):
             )
             plans = [inventory.plan(Path(tmp), major, p) for p in (one, other)]
         for prefix, (entry,) in zip((one, other), plans, strict=True):
-            self.assertEqual(entry["params"]["cargoPackage"], crate)
+            params = decoded.as_object(entry["params"], "params")
+            self.assertEqual(params["cargoPackage"], crate)
             self.assertEqual(entry["artifact"], f"{crate}-pg{major}")
             self.assertEqual(entry["doc"], f"{prefix}{crate}-pg{major}")
-        self.assertEqual(
-            {k: v for k, v in plans[0][0].items() if k != "doc"},
-            {k: v for k, v in plans[1][0].items() if k != "doc"},
-        )
+        undocumented: list[dict[str, object]] = [
+            {k: v for k, v in plan[0].items() if k != "doc"} for plan in plans
+        ]
+        self.assertEqual(undocumented[0], undocumented[1])
 
 
 class AnyManifest(unittest.TestCase):
     """R: any TOML manifest is planned or refused by name."""
 
     @given(
-        st.one_of(
-            st.dictionaries(st.sampled_from(["name", "version"]), VALUE, max_size=2),
-            VALUE,
-        ),
+        st.one_of(PACKAGE, VALUE),
         MAJOR,
     )
     @example(1, "16")

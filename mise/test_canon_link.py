@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from typing import override
 
 import hermetic
 
@@ -45,6 +46,7 @@ def plant(root: pathlib.Path, *, config: bool = True) -> pathlib.Path:
 class LinkTheCanonTree(unittest.TestCase):
     """Each row: where the tree resolved, and what the step did."""
 
+    @override
     def setUp(self) -> None:
         """Give each row a scratch root and a workspace."""
         self.tmp = pathlib.Path(tempfile.mkdtemp()).resolve()

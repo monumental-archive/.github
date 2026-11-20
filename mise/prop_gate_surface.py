@@ -60,18 +60,20 @@ class Majors(unittest.TestCase):
         """Sorted majors, in any feature or dependency order."""
         pgrx = kind == "pgrx"
         names = [*deps, "pgrx"] if pgrx else [d for d in deps if d != "pgrx"]
-        pkg = {
-            "features": {f: [] for f in data.draw(st.permutations(features))},
+        declared: dict[str, list[str]] = {
+            f: [] for f in data.draw(st.permutations(features))
+        }
+        pkg: dict[str, object] = {
+            "features": declared,
             "dependencies": [{"name": n} for n in data.draw(st.permutations(names))],
         }
         expected = sorted(
             int(f[2:]) for f in features if f[2:].isdigit() and f.startswith("pg")
         )
-        self.assertEqual(gs.majors(gs.package(pkg)), expected if pgrx else [])
+        self.assertEqual(gs.majors(gs.package(pkg)), expected if pgrx else list[int]())
 
 
-@st.composite
-def stub(draw: st.DrawFn) -> tuple[str, dict[str, str]]:
+def draw_stub(draw: st.DrawFn) -> tuple[str, dict[str, str]]:
     """Write a publish stub's `with:` block among other text.
 
     Returns:
@@ -96,6 +98,9 @@ def stub(draw: st.DrawFn) -> tuple[str, dict[str, str]]:
         )
     lines.append("    secrets: inherit")
     return "\n".join(lines) + "\n", keys
+
+
+stub = st.composite(draw_stub)
 
 
 class Stub(unittest.TestCase):
@@ -149,15 +154,27 @@ class Stub(unittest.TestCase):
             self.assertFalse(one & set(excluded))
 
 
-JSON = st.recursive(
-    st.none() | st.booleans() | st.integers() | st.text(max_size=8),
-    lambda inner: (
-        st.lists(inner, max_size=3)
-        | st.dictionaries(st.text(max_size=8), inner, max_size=3)
-    ),
-    max_leaves=10,
+SCALAR: st.SearchStrategy[object] = (
+    st.none() | st.booleans() | st.integers() | st.text(max_size=8)
 )
-PACKAGE = st.fixed_dictionaries(
+
+
+def nested(inner: st.SearchStrategy[object]) -> st.SearchStrategy[object]:
+    """Wrap values in an array or an object.
+
+    Returns:
+        The strategy one level deeper.
+
+    """
+    arrays: st.SearchStrategy[object] = st.lists(inner, max_size=3)
+    objects: st.SearchStrategy[object] = st.dictionaries(
+        st.text(max_size=8), inner, max_size=3
+    )
+    return arrays | objects
+
+
+JSON: st.SearchStrategy[object] = st.recursive(SCALAR, nested, max_leaves=10)
+PACKAGE: st.SearchStrategy[dict[str, object]] = st.fixed_dictionaries(
     {},
     optional={
         "id": st.one_of(NAME, JSON),
@@ -170,7 +187,7 @@ PACKAGE = st.fixed_dictionaries(
         "manifest_path": st.one_of(st.just("/ws/a/Cargo.toml"), JSON),
     },
 )
-METADATA = st.fixed_dictionaries(
+METADATA: st.SearchStrategy[dict[str, object]] = st.fixed_dictionaries(
     {},
     optional={
         "workspace_root": st.one_of(st.just("/ws"), JSON),
@@ -180,12 +197,18 @@ METADATA = st.fixed_dictionaries(
 )
 
 
+DOCUMENT: st.SearchStrategy[object] = st.one_of(JSON, METADATA)
+# An array for a document, and a package that is not an object.
+NO_DOCUMENT: list[object] = []
+NUMBER_PACKAGE: dict[str, object] = {"packages": [1], "workspace_members": []}
+
+
 class Refusal(unittest.TestCase):
     """Any metadata document: the surface, or a refusal by name."""
 
-    @given(st.one_of(JSON, METADATA))
-    @example([])
-    @example({"packages": [1], "workspace_members": []})
+    @given(DOCUMENT)
+    @example(NO_DOCUMENT)
+    @example(NUMBER_PACKAGE)
     def test_main_answers_any_document(self, doc: object) -> None:
         """0, or 1 with the reason on stderr."""
         out, err = io.StringIO(), io.StringIO()

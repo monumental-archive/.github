@@ -25,9 +25,18 @@ from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
 
-SEGMENT = st.from_regex(r"[a-z0-9_.-]{1,6}", fullmatch=True).filter(
-    lambda s: s not in {".", ".."}
-)
+
+def named(segment: str) -> bool:
+    """Tell whether a path segment names something, not `.` or `..`.
+
+    Returns:
+        True when it does.
+
+    """
+    return segment not in {".", ".."}
+
+
+SEGMENT = st.from_regex(r"[a-z0-9_.-]{1,6}", fullmatch=True).filter(named)
 PATH = st.lists(SEGMENT, min_size=1, max_size=4)
 COMMAND = st.sampled_from(["shfmt", "taplo", "cargo-deny", "jq"])
 SHELLISH = st.text(alphabet="ab $'\"\\\n#|;()`", max_size=120)

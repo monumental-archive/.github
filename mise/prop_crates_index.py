@@ -26,6 +26,9 @@ from typed_hypothesis import given
 
 # crates.io names: ASCII letters, digits, `-` and `_`, letter first.
 NAME = st.from_regex(r"[A-Za-z][A-Za-z0-9_-]{0,63}", fullmatch=True)
+# An argument list with an empty name, and one with no name at all.
+URL_AND_EMPTY: list[str] = ["url", ""]
+URL_ONLY: list[str] = ["url"]
 
 
 def bucket(lower: str) -> str:
@@ -68,8 +71,8 @@ class Refusal(unittest.TestCase):
     """Any argument list gets an answer by name."""
 
     @given(st.lists(st.text(max_size=20), max_size=3))
-    @example(["url", ""])
-    @example(["url"])
+    @example(URL_AND_EMPTY)
+    @example(URL_ONLY)
     def test_main_answers_any_argv(self, argv: list[str]) -> None:
         """A URL and 0, or a refusal on stderr and 2."""
         out, err = io.StringIO(), io.StringIO()

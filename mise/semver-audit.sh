@@ -142,14 +142,29 @@ while IFS=$'\t' read -r record spec kind crate_majors _dir; do
     # majors below and the crates after it are still judged
     org_pgrx_provision || provisioned=failed
   fi
+  icu=ok
+  if [[ ${provisioned} == ok ]]; then
+    # shellcheck disable=SC2310  # deliberate: a missing pin reds this
+    # crate's majors below and the crates after it are still judged
+    org_pgrx_darwin_icu_check "${crate_majors}" || icu=failed
+  fi
   for major in $(tr ',' ' ' <<< "${crate_majors}"); do
     if [[ ${provisioned} != ok ]]; then
       verdicts+=("${label}: ${crate} at pg${major}: no Postgres could be provisioned, red")
       red=1
       continue
     fi
+    if [[ ${icu} != ok ]]; then
+      verdicts+=("${label}: ${crate} at pg${major}: no ICU headers pinned for every major (above), red")
+      red=1
+      continue
+    fi
     echo "${label}: judging ${crate} at pg${major}"
-    if cargo-semver-checks check-release -p "${crate}" \
+    # In a subshell holding this major's ICU headers (#1774), so one
+    # major's include path never reaches the next.
+    # shellcheck disable=SC2310  # deliberate: the judgment's status is
+    # the verdict, and a red major does not stop the next
+    if org_pgrx_with_icu "${major}" cargo-semver-checks check-release -p "${crate}" \
       --only-explicit-features --features "pg${major}"; then
       verdicts+=("${label}: ${crate} at pg${major}: judged clean")
     else
