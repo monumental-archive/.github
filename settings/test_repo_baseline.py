@@ -30,11 +30,13 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import ClassVar, override
 
 # Appended, so this file's own directory and the standard library
 # come first.
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
+import decoded
 import hermetic
 
 HERE = Path(__file__).resolve().parent
@@ -43,14 +45,48 @@ SCRIPT = HERE / "repo-baseline.sh"
 BASH = hermetic.tool("bash")
 ORG = "monumental-archive"
 
-BASELINE = json.loads((HERE / "repo-baseline.json").read_text(encoding="utf-8"))
-QUEUE = json.loads((HERE / "merge-queue.json").read_text(encoding="utf-8"))
-ROSTER = [
-    r["repo"]
-    for r in json.loads((CANON / "slsa" / "assert-policy.json").read_text())[
-        "population"
-    ]["repositories"]
-]
+
+def read_object(path: Path) -> dict[str, object]:
+    """Read a tracked JSON document that holds one object.
+
+    Returns:
+        The object.
+
+    """
+    text = path.read_text(encoding="utf-8")
+    return decoded.as_object(decoded.load_json(text), path.name)
+
+
+def roster() -> list[str]:
+    """Read the population the assert policy names.
+
+    Returns:
+        Each repository's name, in the policy's order.
+
+    """
+    policy = read_object(CANON / "slsa" / "assert-policy.json")
+    population = decoded.as_object(policy["population"], "population")
+    listed = decoded.as_array(population["repositories"], "repositories")
+    return [
+        decoded.as_str(decoded.as_object(r, "a repository")["repo"], "repo")
+        for r in listed
+    ]
+
+
+def labels() -> list[dict[str, object]]:
+    """Read the baseline's labels.
+
+    Returns:
+        Each label's object.
+
+    """
+    listed = decoded.as_array(BASELINE["labels"], "labels")
+    return [decoded.as_object(label, "a label") for label in listed]
+
+
+BASELINE = read_object(HERE / "repo-baseline.json")
+QUEUE = read_object(HERE / "merge-queue.json")
+ROSTER = roster()
 APPS = ("renovate", "monumental-archive-tag-mint", "codecov")
 LISTING = f"orgs/{ORG}/repos?per_page=100"
 PACKAGES = f"orgs/{ORG}/packages?package_type=container&per_page=100"
@@ -126,8 +162,9 @@ class Forge:
                 "visibility": "public",
             }
             self.answer(f"repos/{ORG}/{repo}", settings)
-            for label in BASELINE["labels"]:
-                self.answer(f"repos/{ORG}/{repo}/labels/{label['name']}", label)
+            for label in labels():
+                name = decoded.as_str(label["name"], "a label's name")
+                self.answer(f"repos/{ORG}/{repo}/labels/{name}", label)
             self.answer(
                 f"repos/{ORG}/{repo}/actions/oidc/customization/sub",
                 {"use_immutable_subject": True},
@@ -212,15 +249,17 @@ class Forge:
         log = self.root / "calls"
         if not log.exists():
             return []
-        return [
-            tuple(line.split("\t", 1))  # type: ignore[misc]
-            for line in log.read_text(encoding="utf-8").splitlines()
-        ]
+        calls: list[tuple[str, str]] = []
+        for line in log.read_text(encoding="utf-8").splitlines():
+            token, args = line.split("\t", 1)
+            calls.append((token, args))
+        return calls
 
 
 class ForgeCase(unittest.TestCase):
     """A row with a fresh clean org."""
 
+    @override
     def setUp(self) -> None:
         """Build the clean org in a temporary directory."""
         tmp = tempfile.TemporaryDirectory()
@@ -231,7 +270,11 @@ class ForgeCase(unittest.TestCase):
 class CleanOrg(unittest.TestCase):
     """What a check of a clean org reads and says: one run, three rows."""
 
+    forge: ClassVar[Forge]
+    done: ClassVar[subprocess.CompletedProcess[str]]
+
     @classmethod
+    @override
     def setUpClass(cls) -> None:
         """Check the clean org once; every row reads the same run."""
         tmp = tempfile.TemporaryDirectory()
@@ -273,7 +316,8 @@ class CleanOrg(unittest.TestCase):
         an environment, and cannot read them.
         """
         tokens = [t for t, a in self.forge.calls() if PACKAGES in a]
-        self.assertEqual(["packages-token"], tokens)
+        want: list[str] = ["packages-token"]
+        self.assertEqual(want, tokens)
 
 
 class PublishEnvironment(ForgeCase):
