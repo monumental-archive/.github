@@ -60,21 +60,24 @@ POSTGRES_ONE = """\
 rust = ["1.95.0", "1.94.1"]
 "aqua:theseus-rs/postgresql-binaries" = "18.7.0"
 """
-ICU_TWO = """\
-[tools]
-"github:unicode-org/icu" = [
-  { version = "78.3", version_prefix = "release-", asset_pattern = "icu4c-*-sources.tgz", os = ["macos"] },
-  { version = "79.1", version_prefix = "release-", asset_pattern = "icu4c-*-sources.tgz", os = ["macos"] },
-]
-"github:rust-secure-code/cargo-auditable" = "0.7.7"
-"""
-ICU_ONE = """\
-[tools]
-"github:unicode-org/icu" = { version = "78.3", version_prefix = "release-", asset_pattern = "icu4c-*-sources.tgz", os = [
-  "macos",
-] }
-"github:rust-secure-code/cargo-auditable" = "0.7.7"
-"""
+# The keys after `version`, as tracked; joined below so each fixture
+# line is the tracked line, byte for byte, within the line limit here.
+ICU_KEYS = 'version_prefix = "release-", asset_pattern = "icu4c-*-sources.tgz"'
+ICU_TWO = (
+    "[tools]\n"
+    '"github:unicode-org/icu" = [\n'
+    f'  {{ version = "78.3", {ICU_KEYS}, os = ["macos"] }},\n'
+    f'  {{ version = "79.1", {ICU_KEYS}, os = ["macos"] }},\n'
+    "]\n"
+    '"github:rust-secure-code/cargo-auditable" = "0.7.7"\n'
+)
+ICU_ONE = (
+    "[tools]\n"
+    f'"github:unicode-org/icu" = {{ version = "78.3", {ICU_KEYS}, os = [\n'
+    '  "macos",\n'
+    "] }\n"
+    '"github:rust-secure-code/cargo-auditable" = "0.7.7"\n'
+)
 
 
 def preset() -> dict:
