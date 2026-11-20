@@ -89,7 +89,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
-          version: 2026.11.7
+          version: 2026.11.8
           # The same reasoning as the release jobs: what this decides
           # ends in a signed release, so no tool cache.
           cache: false

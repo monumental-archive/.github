@@ -125,7 +125,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
-          version: 2026.11.7
+          version: 2026.11.8
           cache: false
 
       # The job's own token, as in repo-audit.yml (#1344): this
@@ -154,7 +154,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
-          version: 2026.11.7
+          version: 2026.11.8
           cache: false
 
       - name: Audit workflows online
@@ -185,7 +185,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
-          version: 2026.11.7
+          version: 2026.11.8
           cache: false
 
       - name: Verify pin comments and release age
@@ -216,7 +216,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
-          version: 2026.11.7
+          version: 2026.11.8
           cache: false
 
       - name: Verify each locked asset is built for the platform it names
@@ -251,7 +251,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
-          version: 2026.11.7
+          version: 2026.11.8
           cache: false
 
       - name: Regenerate each lock in scratch and diff it
@@ -288,7 +288,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
-          version: 2026.11.7
+          version: 2026.11.8
           cache: false
 
       # Tree-local, beside lock-idempotent and for its reason: this
@@ -338,7 +338,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
-          version: 2026.11.7
+          version: 2026.11.8
           cache: false
 
       # Tree-local, beside regression-tests and for its reason: this
@@ -367,7 +367,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
-          version: 2026.11.7
+          version: 2026.11.8
           cache: false
 
       # #1604: mypy at the belt's strictest over the canon's own Python,
@@ -396,7 +396,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
-          version: 2026.11.7
+          version: 2026.11.8
           cache: false
 
       # Tree-local, beside python-properties and for its reason: this
@@ -427,7 +427,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
-          version: 2026.11.7
+          version: 2026.11.8
           cache: false
 
       - name: Check the template pins against shipped canon
@@ -451,7 +451,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
-          version: 2026.11.7
+          version: 2026.11.8
           cache: false
 
       - name: Check every canon reference against the latest canon tag
@@ -487,7 +487,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
-          version: 2026.11.7
+          version: 2026.11.8
           cache: false
 
       - name: Check every org repo's canon references from the canon
@@ -533,7 +533,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
-          version: 2026.11.7
+          version: 2026.11.8
           cache: false
 
       - name: Check biome's nursery rules against the ones the org names
@@ -589,7 +589,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
-          version: 2026.11.7
+          version: 2026.11.8
           cache: false
 
       - name: Walk every published SBOM and report the blast radius
@@ -642,7 +642,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
-          version: 2026.11.7
+          version: 2026.11.8
           cache: false
 
       - name: Prove nothing ships unattested
@@ -682,7 +682,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
-          version: 2026.11.7
+          version: 2026.11.8
           cache: false
 
       - name: Reconcile the belt's allowlist with the live org setting
@@ -717,7 +717,7 @@ jobs:
         id: mise
         uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
-          version: 2026.11.7
+          version: 2026.11.8
           cache: false
 
       - name: Mint the audit App's read token
@@ -765,7 +765,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
-          version: 2026.11.7
+          version: 2026.11.8
           cache: false
 
       - name: Reconcile the declared surface with the signer and its callers
@@ -798,7 +798,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
-          version: 2026.11.7
+          version: 2026.11.8
           cache: false
 
       - name: Enumerate the population against the required stub set
@@ -842,7 +842,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
-          version: 2026.11.7
+          version: 2026.11.8
           cache: false
 
       - name: Resolve every version and run citation in docs/
@@ -893,7 +893,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
-          version: 2026.11.7
+          version: 2026.11.8
           cache: false
 
       - name: Walk every founded chain and verify each link
@@ -944,7 +944,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
-          version: 2026.11.7
+          version: 2026.11.8
           cache: false
 
       - name: Check every org release tag against the signing epoch
@@ -1002,7 +1002,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
-          version: 2026.11.7
+          version: 2026.11.8
           cache: false
 
       - name: Check every draft release for its record
@@ -1026,7 +1026,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
-          version: 2026.11.7
+          version: 2026.11.8
           cache: false
 
       - name: Compare the live SLSA source matrix with the pinned snapshot
@@ -1075,7 +1075,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
-          version: 2026.11.7
+          version: 2026.11.8
           cache: false
 
       - name: Check every consumer grant against canon HEAD's requirements
@@ -1111,7 +1111,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
-          version: 2026.11.7
+          version: 2026.11.8
           cache: false
 
       - name: Re-check every shield against its source of truth
@@ -1145,7 +1145,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
-          version: 2026.11.7
+          version: 2026.11.8
           cache: false
 
       # Tree-local by the #681 test (#1536): the subject is this
