@@ -17,6 +17,50 @@
 # leaves the extension out, and `test:pgrx` measures it, each major's
 # run built instrumented where the repository holds a floor.
 
+org_pgrx_highest() { # usage: org_pgrx_highest < gate_surface.py's records
+  # WHICH MAJOR EACH EXTENSION IS BUILT AT, derived once (#1795). The
+  # tasks that compile one extension per major they name (lint:pg-clippy,
+  # fix:rust's extension pass, lint:msrv) build each at its HIGHEST
+  # declared major: that is where a newly deprecated API surfaces first,
+  # and test:pgrx compiles every major anyway. Written in each task it
+  # was three copies, and two of them kept only the last extension's
+  # major, so a workspace with two extensions built both at one.
+  #
+  # One line per extension, `<spec><TAB><highest major>`, the major the
+  # last of the record's comma-separated majors (gate_surface.py writes
+  # them ascending). A record that is excluded, or a crate that is not an
+  # extension, prints nothing; so does a workspace with no extension.
+  local record spec kind majors _dir
+  while IFS=$'\t' read -r record spec kind majors _dir; do
+    [[ ${record} == crate && ${kind} == pgrx ]] || continue
+    printf '%s\t%s\n' "${spec}" "${majors##*,}"
+  done
+  return 0
+}
+
+org_pgrx_union() { # usage: org_pgrx_union < org_pgrx_highest's lines
+  # The majors those builds need registered, each once, ascending,
+  # comma-separated: what org_pgrx_darwin_prepare and pgrx_postgres.py
+  # --majors take. Nothing for no extension. A major that is not a
+  # number reds by name rather than reaching pgrx as a feature it has
+  # never heard of.
+  local spec major joined="" registered=()
+  while IFS=$'\t' read -r spec major; do
+    [[ -n ${spec} || -n ${major} ]] || continue
+    if [[ ! ${major} =~ ^[1-9][0-9]*$ ]]; then
+      echo "pgrx-env: ${spec} names no Postgres major: '${major}'" >&2
+      return 1
+    fi
+    registered[major]=1
+  done
+  # An indexed array lists its indices ascending: the sort and the
+  # de-duplication are bash's own.
+  for major in "${!registered[@]}"; do
+    joined="${joined}${joined:+,}${major}"
+  done
+  [[ -z ${joined} ]] || echo "${joined}"
+}
+
 org_pgrx_darwin_flags() { # correct the SDK the prebuilt pg_config names
   # MEASURED, and the one real cost of the aqua-backed mechanism. The
   # prebuilt macOS `pg_config` reports its BUILD machine's flags:
@@ -114,8 +158,6 @@ org_pgrx_darwin_icu_check() { # usage: org_pgrx_darwin_icu_check <Postgres major
   kernel=$(uname -s)
   [[ ${kernel} == "Darwin" ]] || return 0
   for major in ${1//,/ }; do
-    # lint:msrv hands its plan's `name:major` pairs; the name is not read.
-    major="${major##*:}"
     icu=$(org_pgrx_darwin_icu_of "${major}") || return 1
     [[ -n ${icu} ]] || continue
     if [[ " ${seen} " == *" ${icu} "* ]]; then
