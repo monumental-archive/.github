@@ -45,9 +45,11 @@ LABEL = "audit:mutants: python"
 # The stand-in, in cosmic-ray 8.9.0's shape. PLANT_MUTANTS maps
 # "PATH OPERATOR OCCURRENCE" to what the mutant does: `replace` (the old
 # and new text), `worker` (a worker outcome other than normal), `leave`
-# (the file is not restored) and `kill_parent` (the judge dies mid-
-# mutant). The command runs as cosmic-ray runs it: split with shlex,
-# PYTHONDONTWRITEBYTECODE set, PLANT_UNDER_MUTANT set for the tests.
+# (the file is not restored), `kill_parent` (the judge dies mid-
+# mutant) and `silent` (cosmic-ray exits 3 and prints nothing).
+# PLANT_INIT_FAILS makes `init` fail. The command runs as cosmic-ray
+# runs it: split with shlex, PYTHONDONTWRITEBYTECODE set,
+# PLANT_UNDER_MUTANT set for the tests.
 STAND_IN = """#!{python}
 import json
 import os
@@ -62,6 +64,9 @@ logged = args[:4] if args[0] == "mutate-and-test" else args[:1]
 with open(os.environ["PLANT_LOG"], "a", encoding="utf-8") as log:
     log.write("cosmic-ray " + " ".join(logged) + "\\n")
 if args[0] == "init":
+    if os.environ.get("PLANT_INIT_FAILS"):
+        sys.stderr.write("planted init failure\\n")
+        sys.exit(2)
     Path(args[2]).write_text("", encoding="utf-8")
     sys.exit(0)
 if args[0] == "dump":
@@ -70,6 +75,8 @@ if args[0] == "dump":
 path, operator, occurrence, command = args[1:5]
 plan = json.loads(Path(os.environ["PLANT_MUTANTS"]).read_text(encoding="utf-8"))
 mutant = plan.get(f"{path} {operator} {occurrence}", {})
+if mutant.get("silent"):
+    sys.exit(3)
 if "worker" in mutant:
     print(json.dumps({"worker_outcome": mutant["worker"], "output": None,
                       "test_outcome": None, "diff": None}))
@@ -179,6 +186,23 @@ def git_in(tree: Path, *args: str) -> None:
     subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
         [GIT, *args], cwd=tree, env=hermetic.env(), check=True
     )
+
+
+def git_out(tree: Path, *args: str) -> str:
+    """Ask git in a planted tree.
+
+    Returns:
+        Its output, stripped.
+
+    """
+    return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        [GIT, *args],
+        cwd=tree,
+        env=hermetic.env(),
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
 
 
 def init_tree(tree: Path) -> None:
@@ -778,6 +802,230 @@ class Order(Planted):
         )
 
 
+class Refusals(Planted):
+    """Each way the plan or the judge refuses, by name (#1771)."""
+
+    def plan_in_process(self, **env: str) -> tuple[hermetic.Called, list[str]]:
+        """Run the plan step in this process, in the planted tree.
+
+        Returns:
+            What it returned and wrote, and the stand-in's call log.
+
+        """
+        done = hermetic.call_main(
+            lambda: helper.main(["plan", "cosmic-ray.toml", str(self.tmp / "plan")]),
+            env=self.env | env,
+            cwd=self.tree,
+        )
+        return done, self.log.read_text(encoding="utf-8").splitlines()
+
+    def test_adoption_without_its_tables_is_named(self) -> None:
+        """No `[cosmic-ray]`, no module paths, no tests: each red by name."""
+        for text, message in (
+            ('[audit-mutants]\ntests = ["t"]\n', "[cosmic-ray] is not an object"),
+            (
+                CONFIG.replace('module-path = ["pkg"]', "module-path = []"),
+                "module-path names no paths",
+            ),
+            (
+                CONFIG.replace('tests = ["pkg/test_*.py"]', "tests = []"),
+                "[audit-mutants] tests names no test files",
+            ),
+        ):
+            config = self.tmp / "cosmic-ray.toml"
+            config.write_text(text, encoding="utf-8")
+            done = hermetic.call_main(
+                lambda: helper.main(["paths", str(self.tmp / "cosmic-ray.toml")]),
+                env=self.env,
+            )
+            self.assertEqual(
+                (done.returncode, done.stdout, done.stderr),
+                (1, "", f"{LABEL}: {config}: {message}\n"),
+            )
+
+    def test_cosmic_ray_failing_to_list_is_named(self) -> None:
+        """`init` fails: red, with cosmic-ray's own words; nothing measured."""
+        self.plant([ITEM_KILLED])
+        done, log = self.plan_in_process(PLANT_INIT_FAILS="1")
+        self.assertEqual(
+            (done.returncode, done.stderr),
+            (
+                1,
+                (
+                    f"{LABEL}: cosmic-ray could not list the mutants (init, dump):\n"
+                    "planted init failure\n"
+                ),
+            ),
+        )
+        self.assertEqual(log, calls())
+
+    def test_dump_of_two_mutations_is_named(self) -> None:
+        """A work item of two mutations is refused, at its own line."""
+        two = json.dumps([
+            {
+                "job_id": "j",
+                "mutations": [
+                    decoded.as_array(decoded.load_json(ITEM_KILLED), "item")[0],
+                    decoded.as_array(decoded.load_json(ITEM_SURVIVOR), "item")[0],
+                ],
+            },
+            None,
+        ])
+        self.plant(["", two])
+        done, log = self.plan_in_process()
+        self.assertEqual(
+            (done.returncode, done.stderr),
+            (1, f"{LABEL}: cosmic-ray dump: dump line 2 holds 2 mutations, not one\n"),
+        )
+        self.assertEqual(log, calls())
+
+    def test_coverage_missing_is_named(self) -> None:
+        """No `coverage` on the path: red by name, no test file run."""
+        self.plant([ITEM_KILLED])
+        path = os.pathsep.join(
+            d
+            for d in self.env["PATH"].split(os.pathsep)
+            if not Path(d, "coverage").exists()
+        )
+        done, log = self.plan_in_process(PATH=path)
+        self.assertEqual(
+            (done.returncode, done.stderr),
+            (
+                1,
+                (
+                    f"{LABEL}: coverage missing — the belt pins it; the plan"
+                    " measures each test file\n"
+                ),
+            ),
+        )
+        self.assertEqual(log, calls())
+        self.assertEqual(self.ran.read_text(encoding="utf-8"), "")
+
+    def test_coverage_on_another_python_is_named(self) -> None:
+        """Coverage's interpreter is not the suite's python3: red by name."""
+        self.plant([ITEM_KILLED])
+        stub = self.bins / "coverage"
+        stub.write_text(
+            "#!/bin/sh\n"
+            "echo '  coverage_module: /nowhere/coverage/__init__.py'\n"
+            "echo '  executable: /usr/bin/false'\n",
+            encoding="utf-8",
+        )
+        stub.chmod(0o755)
+        python3 = hermetic.tool("python3", path=self.env["PATH"])
+        # ruff: ignore[subprocess-without-shell-equals-true]
+        suite = subprocess.run(
+            [python3, "-c", "import sys; print(sys.version)"],
+            env=self.env,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        done, _ = self.plan_in_process()
+        self.assertEqual(
+            (done.returncode, done.stderr),
+            (
+                1,
+                (
+                    f"{LABEL}: coverage runs on 'no interpreter' but the suite's"
+                    f" python3 is '{suite}' — the tool venv must be built on the"
+                    " belt's python pin (reinstall: mise install -f pipx:coverage)\n"
+                ),
+            ),
+        )
+
+    def test_suite_that_writes_no_coverage_reaches_nothing(self) -> None:
+        """A test command coverage never sees: every mutant is "no tests"."""
+        self.plant(
+            [ITEM_KILLED],
+            config=CONFIG.replace(
+                "python3 -m unittest discover -s {dir} -p {name} -f", "true {test}"
+            ),
+        )
+        done, log = self.run_leg()
+        self.assertEqual(done.returncode, 1)
+        self.assertIn(
+            f"{LABEL}: no tests: pkg/mod.py:2: {ADD} #0 (answer): return x + 1\n",
+            done.stdout,
+        )
+        self.assertEqual(log, calls())
+
+    def test_coverage_report_unread_reaches_nothing(self) -> None:
+        """`coverage json` writes no report: the line map is empty, not a crash."""
+        self.plant([ITEM_KILLED])
+        real = hermetic.tool("coverage", path=self.env["PATH"])
+        stub = self.bins / "coverage"
+        stub.write_text(
+            f'#!/bin/sh\n[ "$1" = json ] && exit 0\nexec {real} "$@"\n',
+            encoding="utf-8",
+        )
+        stub.chmod(0o755)
+        done, _ = self.plan_in_process()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        plan = decoded.as_object(
+            decoded.load_json((self.tmp / "plan" / "plan.json").read_bytes()), "plan"
+        )
+        self.assertEqual(plan.get("lines"), {})
+
+    def test_silent_cosmic_ray_is_never_judged(self) -> None:
+        """cosmic-ray printing no result: red by name, with its exit status."""
+        plan = self.shared([KILLED], {f"pkg/mod.py {ADD} 0": {"silent": True}})
+        done, log = self.run_leg(MUTANTS_PLAN=str(plan))
+        self.assertEqual(done.returncode, 1)
+        self.assertEqual(
+            done.stderr,
+            f"{LABEL}: never judged: pkg/mod.py:2: {ADD} #0 (answer):"
+            " worker outcome 'cosmic-ray exited 3'\n",
+        )
+        self.assertEqual(log, judged(KILLED))
+
+    def test_plan_of_another_commit_is_refused(self) -> None:
+        """A shard's checkout is not the plan's commit: red by name."""
+        plan = self.shared([KILLED])
+        before = git_out(self.tree, "rev-parse", "HEAD")
+        self.git("commit", "-q", "--allow-empty", "-m", "later")
+        after = git_out(self.tree, "rev-parse", "HEAD")
+        done, log = self.run_leg(MUTANTS_PLAN=str(plan))
+        self.assertEqual(done.returncode, 1)
+        self.assertEqual(
+            done.stderr,
+            f"{LABEL}: the plan is of {before}, but this checkout is {after}\n",
+        )
+        self.assertEqual(log, [])
+
+    def test_long_shard_says_how_far_it_is(self) -> None:
+        """Every hundred mutants, one progress line."""
+        plan = self.shared([UNREACHED])
+        document = decoded.as_object(
+            decoded.load_json((plan / "plan.json").read_bytes()), "plan"
+        )
+        document["mutants"] = [
+            ["pkg/mod.py", MUL, n, 6, "unreached", 6] for n in range(100)
+        ]
+        (plan / "plan.json").write_text(json.dumps(document), encoding="utf-8")
+        done, log = self.run_leg(MUTANTS_PLAN=str(plan))
+        self.assertEqual(done.returncode, 1)
+        self.assertEqual(
+            done.stderr.splitlines(), [f"{LABEL}: judged 100 of 100", *RED]
+        )
+        self.assertTrue(
+            done.stdout.endswith(
+                f"{LABEL}: 100 mutants, 0 killed, 100 survived, 0 excluded\n"
+            )
+        )
+        self.assertEqual(log, [])
+
+    def test_report_without_a_summary_directory(self) -> None:
+        """No MUTANTS_SUMMARY_DIR: the summary line, and no counts file."""
+        env = {k: v for k, v in self.env.items() if k != "MUTANTS_SUMMARY_DIR"}
+        done = hermetic.call_main(lambda: helper.report([], 0, "0/1"), env=env)
+        self.assertEqual(
+            (done.returncode, done.stdout),
+            (0, f"{LABEL}: 0 mutants, 0 killed, 0 survived, 0 excluded\n"),
+        )
+        self.assertFalse(self.summary.exists())
+
+
 class Bytecode(unittest.TestCase):
     """The cache trap, with no stand-in (#1771)."""
 
@@ -838,6 +1086,32 @@ class Readers(unittest.TestCase):
             ["run", "a b", "test_c.py x", "a b/test_c.py"],
         )
         self.assertEqual(helper.test_argv("t {dir}", "test_c.py"), ["t", "."])
+
+    def test_pragma_on_no_line_number_is_neither(self) -> None:
+        """A record whose line is not a number is no site and no refusal."""
+        found = helper.read_pragmas("f.py\tx\t# pragma: no mutate -- why\n")
+        self.assertEqual((found.reasoned, found.refused), (set(), []))
+
+    def test_unreadable_source_reads_as_nothing(self) -> None:
+        """A file that cannot be read: its line is empty, its statement the line."""
+        missing = "nowhere/gone.py"
+        self.assertEqual(helper.source_line(missing, 1), "")
+        placed = helper.with_statements([helper.Mutant(missing, ADD, 0, 7, "f")])
+        self.assertEqual(placed[0].statement, 7)
+
+    def test_plan_with_a_line_that_is_no_number_is_refused(self) -> None:
+        """The line map's keys are line numbers, or the plan is refused."""
+        text = json.dumps({
+            "head": "h",
+            "command": "c",
+            "mutants": [],
+            "tests": [],
+            "lines": {"a.py": {"x": [0]}},
+        })
+        with self.assertRaisesRegex(
+            decoded.UndecodableError, r"^a\.py: line 'x' is not a number$"
+        ):
+            helper.read_plan(text)
 
     def test_statement_of_a_continuation_line(self) -> None:
         """The innermost statement holding the line; the line when none does."""
