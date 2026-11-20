@@ -11,10 +11,13 @@ It is read from the syntax tree with import aliases resolved, so
 `import json as j`, `from json import loads` and
 `from tomllib import load as l` are each the same parse; `json.dumps`
 writes and is free. MOVING lists the files not yet moved, one per line,
-and may only shrink: a listed file with no parse is red until it is
-dropped, and an unlisted file with one is red by file and line. The
-conformance issues filed from #1604 empty it; the one that empties it
-deletes it (#1544's shape: it holds files, never findings).
+and may only shrink: an unlisted file with a parse is red by file and
+line. A listed file with no parse is red until it is dropped once
+`stale` is on; the gate holds it off until #1604's last step, which
+turns it on and drops every moved file in one edit (owner, #1604), so
+the slices do not conflict on the list. The conformance issues filed
+from #1604 empty it; the one that empties it deletes it (#1544's
+shape: it holds files, never findings).
 
 stdlib `unittest`, matching the other mise/test_*.py; run through the
 gate as `mise run test`.
@@ -170,12 +173,15 @@ def parses(text: str) -> list[int]:
     return sorted(found)
 
 
-def judge(root: Path) -> list[str]:
+def judge(root: Path, *, stale: bool) -> list[str]:
     """Hold the tracked Python under root to the law and its list.
 
+    `stale` reds a listed file that no longer parses; the gate holds it
+    off until #1604's last step (owner, #1604).
+
     Returns:
-        One line per breach: an unlisted parse by file and line, or a
-        listed file that no longer parses.
+        One line per breach: an unlisted parse by file and line, or,
+        with `stale`, a listed file that no longer parses.
 
     """
     listed = hermetic.tracked(root, "*.py")
@@ -184,13 +190,15 @@ def judge(root: Path) -> list[str]:
         if path == LOADER:
             continue
         lines = parses((root / path).read_text(encoding="utf-8"))
-        if path in MOVING and not lines:
+        if path in MOVING and not lines and stale:
             out.append(f"{path}: moved: drop it from the list")
         elif path not in MOVING:
             out.extend(f"{path}:{line}: parses outside {LOADER}" for line in lines)
-    out.extend(
-        f"{path}: moved: drop it from the list" for path in sorted(MOVING - set(listed))
-    )
+    if stale:
+        out.extend(
+            f"{path}: moved: drop it from the list"
+            for path in sorted(MOVING - set(listed))
+        )
     return out
 
 
@@ -385,9 +393,9 @@ class TheLaw(unittest.TestCase):
     """Only decoded.py parses; the list of files not yet moved only shrinks."""
 
     def test_the_tree_holds_the_law(self) -> None:
-        """No unlisted parse, and no listed file that has moved."""
+        """No unlisted parse; a listed file that has moved waits (#1604)."""
         none: list[str] = []
-        self.assertEqual(none, judge(CANON))
+        self.assertEqual(none, judge(CANON, stale=False))
 
     def test_the_list_holds_files_that_exist(self) -> None:
         """MOVING names tracked paths, never a finding or a pattern."""
