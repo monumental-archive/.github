@@ -6,13 +6,14 @@ generated measurements, provenances and floor files:
 
 - Round trip (T): a rendered file parses back to the record that
   rendered it: the measurement quantised, the floor that measurement
-  minus the band (never below 0), the provenance, and each separate
-  leg likewise.
+  minus the band (never below 0, never above the cap, #1786), the
+  provenance, and each separate leg likewise.
 - Idempotence (I): quantising twice is quantising once, and never
   rounds up.
-- Invariance (V): the floor only rises: a write over a derived file
-  either refuses and leaves it byte for byte, or writes a floor no
-  lower than the one it replaced.
+- Invariance (V): the floor never falls: a write over a derived file
+  refuses, leaving it byte for byte, exactly when the measurement is
+  below the floor, and otherwise writes a floor no lower than the one
+  it replaced.
 - Refusal (R): `parse` and `legs` read any text and answer with a
   record or their own problems, never a traceback.
 
@@ -51,10 +52,11 @@ def floor(measured: Decimal) -> Decimal:
     """Derive a floor from a measurement, as the law states it.
 
     Returns:
-        The quantised measurement minus the band, never below zero.
+        The quantised measurement minus the band, never below zero and
+        never above the cap.
 
     """
-    return max(cf.FLOOR_MIN, cf.quantise(measured) - cf.BAND)
+    return min(cf.FLOOR_CAP, max(cf.FLOOR_MIN, cf.quantise(measured) - cf.BAND))
 
 
 class RoundTrip(unittest.TestCase):
@@ -104,11 +106,13 @@ class Quantise(unittest.TestCase):
 
 
 class Ratchet(unittest.TestCase):
-    """The floor only rises."""
+    """The floor never falls, and the release holds the gate's line."""
 
     @given(PERCENT, PERCENT, PROVENANCE)
     @example(Decimal(50), Decimal("51.99"), "x")
     @example(Decimal(50), Decimal(52), "x")
+    @example(Decimal(50), Decimal("47.99"), "x")
+    @example(Decimal("94.3"), Decimal("94.2"), "x")
     def test_refuses_unchanged_or_rises(
         self, first: Decimal, second: Decimal, provenance: str
     ) -> None:
@@ -123,9 +127,9 @@ class Ratchet(unittest.TestCase):
             ):
                 status = cf.write(path, second, provenance, adopt=False)
             after = path.read_text(encoding="utf-8")
+        self.assertEqual(bool(status), cf.quantise(second) < floor(first))
         if status:
             self.assertEqual(after, before)
-            self.assertLess(cf.quantise(second), floor(first) + cf.BAND)
         else:
             self.assertGreaterEqual(cf.parse(after)[0].floor, floor(first))
 

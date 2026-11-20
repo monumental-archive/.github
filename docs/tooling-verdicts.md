@@ -3346,7 +3346,9 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
   `mise/coverage_floor.py` re-derives it at every release as
   `measured - 2`, it only rises, a release measuring below
   `floor + band` fails loudly, and a hand edit that disagrees with the
-  file's own record is refused as drift rather than repaired. The
+  file's own record is refused as drift rather than repaired (since
+  #1786 the floor is capped at 90 and the release holds the floor
+  itself, the gate's line, not `floor + band`). The
   measurement moved to `mise/coverage-measure.sh`, shared by the gate
   and the release path so the two cannot enforce and derive from
   different flags. Adoption stays opt-in and is now a measurement

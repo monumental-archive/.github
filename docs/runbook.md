@@ -105,7 +105,8 @@ written for two moments: wiring a repository in, and a release going wrong.
 10. **Score-ready extras**, so the repository badges the day it lands:
     run `mise run coverage:adopt` to commit a `.coverage-floor` (the
     floor is DERIVED STATE, #652: the task measures the repo and writes
-    `measured - 2`, the release path re-derives it at every release, and
+    `min(90, measured - 2)`, the release path re-derives it at every
+    release and never lowers it, and
     the gate's `coverage:check` enforces it and refuses a hand edit as
     drift — Silver wants ≥ 80) and pass the `codecov-token`
     secret to the ci stub for the badge feed; copy

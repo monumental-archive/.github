@@ -159,17 +159,30 @@ measures the tree being released — through
 [`mise/coverage-measure.sh`](../mise/coverage-measure.sh), the same
 measurement `coverage:check` enforces, so the gate and the derivation
 can never come from different flags — and writes
-`floor = measured - band`, band 2 points. The file rides the release
-commit as an `EXTRA_FILES` addition, exactly like the derived pgrx
-upgrade scripts.
+`floor = min(90, measured - band)`, band 2 points. The file rides the
+release commit as an `EXTRA_FILES` addition, exactly like the derived
+pgrx upgrade scripts.
 
-The law is a ratchet: **the floor only rises.** A release measuring
-below `floor + band` FAILS here, in the Release PR, before a version
-number is spent; the resolution is tests, or a human consciously
-re-setting the floor with a recorded reason (`reset: <why>` in place of
-the derivation record). Between releases a pull request may spend the
-band — that is what the band is for — but by release time the ceiling
-must be back at or above the previous release's measurement.
+The law is a ratchet: **the floor never falls.** A release measuring
+below the floor FAILS here, in the Release PR, before a version number
+is spent; the resolution is tests, or a human consciously re-setting
+the floor with a recorded reason (`reset: <why>` in place of the
+derivation record). A release measuring within the band keeps the floor
+and its record as they stand; one measuring higher raises it.
+
+The release holds the line the gate holds — the floor itself — and not
+`floor + band` (#1786). The canon releases on every push to main, so a
+release line above the gate's let a pull request pass its gate and then
+red main: three pushes running at 94.2 against a demanded 94.3, the
+same defect as #1659. What merges green now releases green.
+
+**The cap is 90** (#1786, ruled 2026-11-20). No floor is derived above
+it: above 90 coverage moves freely, and the floor stops chasing the
+ceiling towards 100. A floor written before the cap — above 90, agreeing
+with its record's uncapped derivation — is not drift: `coverage:check`
+enforces it at 90 and the next release rewrites it, so the canon bump
+reds no repository. The legs held apart (`rust-branches`,
+`go-branches`) live under the same cap and the same law.
 
 It was a hand-typed number until the org measured what that costs:
 stele's ceiling fell 6.5 points in two days with four features landed,

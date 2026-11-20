@@ -345,7 +345,7 @@ class AuditRows(BranchCase):
         self.assertEqual(1, done.returncode)
         self.assertIn(
             "rust-branches floor 60.0 disagrees with its own record: measured"
-            " 72.0 minus band 2 is 70.0.",
+            " 72.0 under band 2 and the cap 90 derives 70.0.",
             done.stderr,
         )
         self.assertEqual([], calls)
@@ -415,12 +415,11 @@ class AdoptRows(BranchCase):
         )
 
     def test_adopt_cannot_lower_the_branch_line(self) -> None:
-        """Below its floor plus the band, nothing is written."""
-        done, tree, _ = self.run_task("coverage:adopt", branches="71.9")
+        """Below its floor, nothing is written."""
+        done, tree, _ = self.run_task("coverage:adopt", branches="69.9")
         self.assertEqual(1, done.returncode)
         self.assertIn(
-            "coverage-floor: rust-branches measured 71.9% is below its floor"
-            " 70.0% plus the 2-point band.",
+            "coverage-floor: rust-branches measured 69.9% is below its floor 70.0%.",
             done.stderr,
         )
         self.assertEqual(
