@@ -168,8 +168,17 @@ def scan(path: str) -> list[Finding]:
     return []
 
 
-def main() -> None:
-    """Scan the paths on stdin and report."""
+def main(argv: list[str]) -> int:
+    """Scan the paths on stdin and report.
+
+    The paths come on stdin, one per line; `argv` carries nothing the
+    lint reads, as its task passes none.
+
+    Returns:
+        0 when no path holds an exclusion, 1 otherwise.
+
+    """
+    del argv
     paths = [p for p in typed_std.stdin_text().splitlines() if p]
     found = [f for p in paths for f in scan(p)]
     for finding in found:
@@ -182,9 +191,10 @@ def main() -> None:
             "  code, or delete code no test can reach. There is no allow-list.",
             file=sys.stderr,
         )
-        sys.exit(1)
+        return 1
     print(f"lint:coverage-exclusions: {len(paths)} file(s), no coverage exclusions")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main(sys.argv[1:]))

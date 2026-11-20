@@ -16,9 +16,12 @@ gate as `mise run test`.
 import contextlib
 import io
 import json
+import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import coverage_js_runner as cj
 import task_walk as tw
@@ -148,6 +151,65 @@ class Main(unittest.TestCase):
             (0, "unsupported jest\n", ""),
             self.main(["package.json"], {"package.json": manifest}),
         )
+
+
+class VitestCommand(unittest.TestCase):
+    """`--vitest-command <label> <task>`, through main in this process (#1696)."""
+
+    def call(self, walked: tw.Walk | tw.RefusedError) -> tuple[int, str, str]:
+        """Call main with the walk mise would answer replaced by `walked`.
+
+        Returns:
+            The status, stdout and stderr.
+
+        """
+
+        def walk_mise(root: str) -> tw.Walk:
+            self.assertEqual(root, "test")
+            if isinstance(walked, tw.RefusedError):
+                raise walked
+            return walked
+
+        out, err = io.StringIO(), io.StringIO()
+        with (
+            mock.patch.object(cj.task_walk, "walk_mise", walk_mise),
+            contextlib.redirect_stdout(out),
+            contextlib.redirect_stderr(err),
+        ):
+            status = cj.main(["--vitest-command", "coverage:check", "test"])
+        return status, out.getvalue(), err.getvalue()
+
+    def test_the_walked_vitest_command_is_printed(self) -> None:
+        """The one vitest run of the walked steps, as JSON."""
+        walked = tw.Walk(("test",), (tw.Step("test", "web", "pnpm exec vitest run"),))
+        status, out, err = self.call(walked)
+        self.assertEqual((0, ""), (status, err))
+        self.assertEqual(json.loads(out), {"dir": "web", "args": ["run"]})
+
+    def test_a_walk_refused_is_named_under_the_leg(self) -> None:
+        """The walk's refusal, with the leg's label, and exit 1."""
+        refused = tw.RefusedError("task 'test' is a file task")
+        self.assertEqual(
+            (1, "", "coverage:check: typescript: task 'test' is a file task\n"),
+            self.call(refused),
+        )
+
+
+class Script(unittest.TestCase):
+    """The one row that starts the helper as a process: the script contract."""
+
+    def test_the_helper_runs_as_a_script(self) -> None:
+        """No tracked package.json: it starts, prints nothing and exits 0."""
+        with tempfile.TemporaryDirectory() as tmp:
+            # ruff: ignore[subprocess-without-shell-equals-true]
+            done = subprocess.run(
+                [sys.executable, str(HERE / "coverage_js_runner.py"), "yarn.lock"],
+                cwd=tmp,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertEqual((0, "", ""), (done.returncode, done.stdout, done.stderr))
 
 
 if __name__ == "__main__":

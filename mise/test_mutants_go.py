@@ -30,12 +30,16 @@ stdlib `unittest`, the belt's one test idiom. Run through the gate as
 `mise run test`, which `ci` collects.
 """
 
+import contextlib
+import io
 import json
 import os
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import sys
 import tempfile
 import unittest
+from dataclasses import dataclass
 from pathlib import Path
 
 import hermetic
@@ -843,6 +847,226 @@ class BuildGo(unittest.TestCase):
         """No version, or one `go version` would not print, is not trusted."""
         self.assertTrue(mutants_go.older("", "go1.27.4"))
         self.assertTrue(mutants_go.older("devel +abc123", "go1.27.4"))
+
+
+@dataclass(frozen=True)
+class Done:
+    """What an in-process call to the helper returned and wrote."""
+
+    returncode: int
+    stdout: str
+    stderr: str
+
+
+def call(argv: list[str]) -> Done:
+    """Call the helper's `main` in this process (#1696).
+
+    Returns:
+        The status `main` returned and what it wrote to each stream.
+
+    """
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        status = mutants_go.main(argv)
+    return Done(status, out.getvalue(), err.getvalue())
+
+
+class Main(unittest.TestCase):
+    """The verdict half over a planted scratch directory, in this process.
+
+    The scratch directory is what mutants-go.sh leaves for the helper:
+    package `a` holds `a.go`, lines 3-5 covered and 9 not.
+    """
+
+    def setUp(self) -> None:
+        """Plant the scratch tables for one package and an empty report."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name, "tree")
+        self.scratch = Path(tmp.name, "scratch")
+        (self.scratch / "reports").mkdir(parents=True)
+        package = f"{MODULE}/a\t{self.root}/a\ta.go\n"
+        self.write("all.tsv", package)
+        self.write("shard.tsv", package)
+        self.write("files.tsv", f"{MODULE}/a\t{self.root}/a/a.go\n")
+        self.write("cover.out", f"mode: set\n{MODULE}/a/a.go:3.1,5.2 1 1\n")
+        for name in ("gomu.log", "runs.log", "records.txt"):
+            self.write(name, "")
+        self.summary = Path(tmp.name, "summary")
+
+    def write(self, name: str, text: str) -> None:
+        """Write one file of the scratch directory."""
+        (self.scratch / name).write_text(text, encoding="utf-8")
+
+    def results(self, *rows: tuple[str, int, str]) -> None:
+        """Plant gomu's report for a.go: (status, line, type) per mutant."""
+        body = {
+            "totalMutants": len(rows),
+            "results": [
+                {
+                    "mutant": {
+                        "filePath": f"{self.root}/a/a.go",
+                        "line": line,
+                        "column": 9,
+                        "type": kind,
+                    },
+                    "status": status,
+                }
+                for status, line, kind in rows
+            ],
+        }
+        self.write("reports/1.json", json.dumps(body))
+
+    def judge(self) -> Done:
+        """Call main as the shell half does, its summary directory planted.
+
+        Returns:
+            What main returned and wrote.
+
+        """
+        return call([
+            "--label",
+            LABEL,
+            "--where",
+            "",
+            "--shard",
+            "whole",
+            "--root",
+            str(self.root),
+            "--scratch",
+            str(self.scratch),
+            "--summary-dir",
+            str(self.summary),
+        ])
+
+    @staticmethod
+    def line(*counts: int) -> str:
+        """Spell the summary line.
+
+        Returns:
+            Total, killed, survived, not covered, not viable, excluded.
+
+        """
+        total, killed, survived, uncovered, viable, excluded = counts
+        return (
+            f"{LABEL}: {total} mutants, {killed} killed, {survived} survived,"
+            f" {uncovered} not covered, {viable} not viable, {excluded} excluded\n"
+        )
+
+    def test_a_clean_shard_is_green_and_writes_its_counts(self) -> None:
+        """Every mutant killed: exit 0, the summary, go.tsv."""
+        self.results(("KILLED", 4, "arithmetic"), ("TIMED_OUT", 5, "branch"))
+        self.assertEqual(self.judge(), Done(0, self.line(2, 2, 0, 0, 0, 0), ""))
+        self.assertEqual(
+            (self.summary / "go.tsv").read_text(encoding="utf-8"), "whole\t2\t2\t0\t0\n"
+        )
+
+    def test_a_covered_survivor_and_an_uncovered_one_are_red(self) -> None:
+        """Survived on line 4 is a survivor; on line 9 it is not covered."""
+        self.results(("SURVIVED", 4, "arithmetic"), ("SURVIVED", 9, "return"))
+        done = self.judge()
+        self.assertEqual(done.returncode, 1)
+        self.assertEqual(
+            done.stdout,
+            f"{LABEL}: survived: a/a.go:4:9 arithmetic\n"
+            f"{LABEL}: not covered: a/a.go:9:9 return\n" + self.line(2, 0, 1, 1, 0, 0),
+        )
+        self.assertEqual(done.stderr, RED_TAIL)
+
+    def test_a_record_at_the_site_explains_its_survivor(self) -> None:
+        """A sound record of the survivor's type, trailing its line, is excluded."""
+        self.results(("SURVIVED", 4, "arithmetic"), ("KILLED", 5, "branch"))
+        self.write(
+            "records.txt",
+            "a/a.go:4:\treturn x + y //mutants:equivalent arithmetic same value\n",
+        )
+        self.assertEqual(self.judge(), Done(0, self.line(2, 1, 0, 0, 0, 1), ""))
+
+    def test_a_malformed_and_a_stale_record_are_red_by_name(self) -> None:
+        """No reason is malformed; a sound record over nothing is stale."""
+        self.results(("KILLED", 4, "arithmetic"))
+        self.write(
+            "records.txt",
+            "a/a.go:3://mutants:equivalent arithmetic\n"
+            "a/a.go:5:\tx++ //mutants:equivalent branch why\n",
+        )
+        done = self.judge()
+        self.assertEqual(done.returncode, 1)
+        self.assertEqual(
+            done.stderr,
+            f"{LABEL}: a/a.go:3: //mutants:equivalent arithmetic gives no reason\n"
+            f"{LABEL}: a/a.go:5: //mutants:equivalent branch is stale: nothing"
+            " survives at line 5 — delete it\n" + RED_TAIL,
+        )
+
+    def test_a_skipped_file_and_a_failed_run_are_not_judged(self) -> None:
+        """The skip line gomu printed and the shell's failed-run line, each named."""
+        self.results(("KILLED", 4, "arithmetic"))
+        self.write("gomu.log", "  a.go (error: no package)\n")
+        self.write("runs.log", "a/a.go: gomu exited 2\n")
+        done = self.judge()
+        self.assertEqual(done.returncode, 1)
+        self.assertEqual(
+            done.stderr,
+            f"{LABEL}: not judged: a.go (error: no package)\n"
+            f"{LABEL}: not judged: a/a.go: gomu exited 2\n" + RED_TAIL,
+        )
+        self.assertFalse((self.summary / "go.tsv").exists())
+
+    def test_build_go_refuses_an_older_gomu(self) -> None:
+        """`build-go` names the gomu, both Go releases and the rebuild."""
+        done = call([
+            "build-go",
+            "--label",
+            LABEL,
+            "--gomu",
+            "/bin/gomu",
+            "--built",
+            "go1.24.13",
+            "--running",
+            "go1.27.4",
+        ])
+        self.assertEqual(done.returncode, 1)
+        self.assertEqual(
+            done.stderr,
+            f"{LABEL}: /bin/gomu was built with go1.24.13, older than the go1.27.4"
+            " it runs under —\n"
+            "  it cannot read this toolchain's export data; rebuild it with the"
+            " repository's go:\n"
+            "    mise install go:github.com/sivchari/gomu/cmd/gomu\n",
+        )
+
+    def test_build_go_passes_an_equal_gomu_silently(self) -> None:
+        """The same release: exit 0, nothing printed."""
+        argv = ["build-go", "--label", LABEL, "--gomu", "g", "--built", "go1.27"]
+        self.assertEqual(call([*argv, "--running", "go1.27.0"]), Done(0, "", ""))
+
+
+class Script(unittest.TestCase):
+    """The one row that starts the helper as a process: the script contract."""
+
+    def test_the_helper_runs_as_a_script(self) -> None:
+        """`build-go` with an equal build: it reads its arguments and exits 0."""
+        # ruff: ignore[subprocess-without-shell-equals-true]
+        done = subprocess.run(
+            [
+                sys.executable,
+                str(BELT / "mutants_go.py"),
+                "build-go",
+                "--label",
+                LABEL,
+                "--gomu",
+                "g",
+                "--built",
+                "go1.27.4",
+                "--running",
+                "go1.27.4",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual((0, "", ""), (done.returncode, done.stdout, done.stderr))
 
 
 if __name__ == "__main__":

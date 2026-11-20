@@ -386,7 +386,7 @@ class Args(argparse.Namespace):
     summary_dir: str
 
 
-def main() -> int:
+def main(argv: list[str]) -> int:
     """Answer `config` or `verdict`.
 
     Returns:
@@ -401,11 +401,11 @@ def main() -> int:
     verdict = sub.add_parser("verdict")
     verdict.add_argument("path")
     verdict.add_argument("--summary-dir", default="")
-    args = parser.parse_args(namespace=Args())
+    args = parser.parse_args(argv, namespace=Args())
     if args.command == "config":
         return check_config(args.path, args.label)
     return judge(args.path, args.label, args.summary_dir)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

@@ -177,7 +177,7 @@ class BuildArgs(argparse.Namespace):
     running: str
 
 
-def parse_args() -> Args:
+def parse_args(argv: list[str]) -> Args:
     """Read the shell half's arguments.
 
     Returns:
@@ -187,7 +187,7 @@ def parse_args() -> Args:
     parser = argparse.ArgumentParser()
     for name in ("label", "where", "shard", "root", "scratch", "summary-dir"):
         parser.add_argument(f"--{name}", required=True)
-    return parser.parse_args(namespace=Args())
+    return parser.parse_args(argv, namespace=Args())
 
 
 def read_result(item: object, where: str) -> Result:
@@ -534,16 +534,16 @@ def report_number(path: Path) -> int:
     return int(path.stem)
 
 
-def main() -> int:
+def main(argv: list[str]) -> int:
     """Judge one shard, or answer `build-go`.
 
     Returns:
         0 when nothing is unexplained, 1 otherwise.
 
     """
-    if sys.argv[1:2] == ["build-go"]:
-        return build_go(sys.argv[2:])
-    args = parse_args()
+    if argv[:1] == ["build-go"]:
+        return build_go(argv[1:])
+    args = parse_args(argv)
     scratch = Path(args.scratch)
     shard = read_shard(args)
     verdict = Verdict()
@@ -566,4 +566,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

@@ -25,8 +25,10 @@ import io
 import json
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import sys
 import tempfile
 import unittest
+from dataclasses import dataclass
 from pathlib import Path
 
 import hermetic
@@ -680,6 +682,144 @@ class Shapes(unittest.TestCase):
                 self.assertEqual(
                     err.getvalue(), f"{LABEL}: no readable report at {path}: {why}\n"
                 )
+
+
+@dataclass(frozen=True)
+class Done:
+    """What an in-process call to the helper returned and wrote."""
+
+    returncode: int
+    stdout: str
+    stderr: str
+
+
+def call(argv: list[str]) -> Done:
+    """Call the helper's `main` in this process (#1696).
+
+    Returns:
+        The status `main` returned and what it wrote to each stream.
+
+    """
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        status = mutants_typescript.main(["--label", LABEL, *argv])
+    return Done(status, out.getvalue(), err.getvalue())
+
+
+class Main(unittest.TestCase):
+    """`config` and `verdict` through main, in this process (#1696)."""
+
+    def write(self, name: str, value: object) -> Path:
+        """Write one JSON document into a scratch directory.
+
+        Returns:
+            Its path.
+
+        """
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = Path(tmp.name, name)
+        path.write_text(json.dumps(value), encoding="utf-8")
+        return path
+
+    def test_a_sound_config_passes_silently(self) -> None:
+        """No refused setting: exit 0, nothing printed."""
+        done = call(["config", str(self.write("stryker.config.json", CONFIG))])
+        self.assertEqual(done, Done(0, "", ""))
+
+    def test_each_refused_setting_is_red_by_name(self) -> None:
+        """Each Refusals row's setting, named with the site mark."""
+        for setting, message in Refusals.ROWS:
+            with self.subTest(setting=setting):
+                path = self.write("stryker.config.json", CONFIG | setting)
+                done = call(["config", str(path)])
+                self.assertEqual(done.returncode, 1)
+                self.assertEqual(
+                    done.stderr.splitlines(),
+                    [
+                        f"{LABEL}: {path} {message}",
+                        (
+                            f"{LABEL}: record each equivalent mutant at its site"
+                            f" instead: {MARK}"
+                        ),
+                    ],
+                )
+
+    def test_incremental_is_refused_as_deferred(self) -> None:
+        """`incremental: true`, with the reason it is deferred."""
+        path = self.write("stryker.config.json", CONFIG | {"incremental": True})
+        done = call(["config", str(path)])
+        self.assertEqual(done.returncode, 1)
+        self.assertEqual(
+            done.stderr,
+            f"{LABEL}: {path} sets `incremental` — a runner has no earlier results,"
+            " so it would read as on and do nothing; the leg runs every mutant every"
+            " week (deferred, #1358)\n",
+        )
+
+    def test_an_unreadable_config_is_red(self) -> None:
+        """Not JSON: named, exit 1."""
+        path = self.write("stryker.config.json", 0)
+        path.write_text("{ mutate: [", encoding="utf-8")
+        done = call(["config", str(path)])
+        self.assertEqual(done.returncode, 1)
+        self.assertTrue(
+            done.stderr.startswith(f"{LABEL}: {path} is not readable JSON: "),
+            done.stderr,
+        )
+
+    def test_a_clean_verdict_writes_its_counts(self) -> None:
+        """Killed and timed out: exit 0, the summary line, typescript.tsv."""
+        path = self.write("mutation.json", report(*KILLED))
+        summary = path.parent / "summary"
+        done = call(["verdict", str(path), "--summary-dir", str(summary)])
+        self.assertEqual(
+            done,
+            Done(
+                0,
+                f"{LABEL}: 2 mutants, 2 killed, 0 survived, 0 not covered,"
+                " 0 not viable, 0 excluded\n",
+                "",
+            ),
+        )
+        self.assertEqual(
+            (summary / "typescript.tsv").read_text(encoding="utf-8"),
+            "0/1\t2\t2\t0\t0\n",
+        )
+
+    def test_a_survivor_is_red_and_writes_its_counts(self) -> None:
+        """A survivor is printed by site, and the red tail follows."""
+        path = self.write("mutation.json", report(mutant("Survived", 3)))
+        done = call(["verdict", str(path)])
+        self.assertEqual(done.returncode, 1)
+        self.assertEqual(
+            done.stdout.splitlines()[0],
+            f"{LABEL}: survived: src/add.ts:3:54: ArithmeticOperator: a - b",
+        )
+        self.assertEqual(done.stderr, RED_TAIL + "\n")
+
+
+class Script(unittest.TestCase):
+    """The one row that starts the helper as a process: the script contract."""
+
+    def test_the_helper_runs_as_a_script(self) -> None:
+        """It reads its arguments, judges a sound config and exits 0."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp, "stryker.config.json")
+            path.write_text(json.dumps(CONFIG), encoding="utf-8")
+            # ruff: ignore[subprocess-without-shell-equals-true]
+            done = subprocess.run(
+                [
+                    sys.executable,
+                    str(BELT / "mutants_typescript.py"),
+                    "config",
+                    str(path),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertEqual((0, "", ""), (done.returncode, done.stdout, done.stderr))
 
 
 if __name__ == "__main__":

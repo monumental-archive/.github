@@ -10,6 +10,8 @@ decoded from the belt's config in a scratch repository, every git call
 with a scrubbed environment (#857). The last row is the canon itself.
 """
 
+import contextlib
+import io
 import os
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
@@ -17,8 +19,11 @@ import sys
 import tempfile
 import tomllib
 import unittest
+from dataclasses import dataclass
 from pathlib import Path
+from unittest import mock
 
+import coverage_exclusions as ce
 import hermetic
 
 _HERE = Path(__file__).resolve().parent
@@ -62,22 +67,31 @@ QUOTED = [
 ]
 
 
-def helper(root: Path, *paths: str) -> subprocess.CompletedProcess[str]:
-    """Run the helper over `paths`, relative to `root`.
+@dataclass(frozen=True)
+class Done:
+    """What an in-process call to the helper returned and wrote."""
+
+    returncode: int
+    stdout: str
+    stderr: str
+
+
+def helper(root: Path, *paths: str) -> Done:
+    """Call the helper's `main` in this process over `paths`, from `root` (#1696).
 
     Returns:
-        The finished process.
+        The status `main` returned and what it wrote to each stream.
 
     """
-    # ruff: ignore[subprocess-without-shell-equals-true]
-    return subprocess.run(
-        [sys.executable, str(HELPER)],
-        input="\n".join(paths) + "\n",
-        cwd=root,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    out, err = io.StringIO(), io.StringIO()
+    with (
+        mock.patch("sys.stdin", io.StringIO("\n".join(paths) + "\n")),
+        contextlib.chdir(root),
+        contextlib.redirect_stdout(out),
+        contextlib.redirect_stderr(err),
+    ):
+        status = ce.main([])
+    return Done(status, out.getvalue(), err.getvalue())
 
 
 class Markers(unittest.TestCase):
@@ -125,6 +139,24 @@ class Markers(unittest.TestCase):
         """A marker in a file of a language the belt does not measure passes."""
         r = helper(self.plant("notes.md", f"{PRAGMA} cover\n"), "notes.md")
         self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(
+            r.stdout, "lint:coverage-exclusions: 1 file(s), no coverage exclusions\n"
+        )
+
+    def test_the_helper_runs_as_a_script(self) -> None:
+        """The script contract: it reads stdin, reports, and exits 1 on a marker."""
+        name, body, rule = MARKERS[0]
+        # ruff: ignore[subprocess-without-shell-equals-true]
+        r = subprocess.run(
+            [sys.executable, str(HELPER)],
+            input=f"{name}\n",
+            cwd=self.plant(name, body),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn(f"{name}:1: {rule}\n", r.stderr)
 
 
 def task_body() -> str:

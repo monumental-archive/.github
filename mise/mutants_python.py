@@ -598,7 +598,7 @@ class Args(argparse.Namespace):
     excluded: int
 
 
-def parse_args(argv: list[str] | None) -> Args:
+def parse_args(argv: list[str]) -> Args:
     """Read the subcommand and its arguments.
 
     Returns:
@@ -619,7 +619,7 @@ def parse_args(argv: list[str] | None) -> Args:
     return parser.parse_args(argv, namespace=Args())
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str]) -> int:
     """Run one step.
 
     Returns:
@@ -637,4 +637,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))
