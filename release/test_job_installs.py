@@ -1856,6 +1856,114 @@ class VexAttestToken(unittest.TestCase):
             self.assertNotIn("steps.token", text, job_id)
 
 
+# Each environment's secrets, as the forge issues them (measured
+# 2026-11-20: the repository and the organisation hold none of these).
+ENVIRONMENT_SECRETS = {
+    "audit": ("AUDIT_APP_PRIVATE_KEY", "AUDIT_TOKEN", "PACKAGES_TOKEN"),
+    "source-attest": ("SOURCE_RULES_TOKEN",),
+}
+
+
+def declared_environment(job: list[str]) -> str | None:
+    """Read a job's `environment:`, in either of its two forms.
+
+    Returns:
+        The environment's name, or None where the job declares none.
+
+    """
+    for i, line in enumerate(job):
+        key, _, value = line.partition(":")
+        if key != "    environment":
+            continue
+        if value.strip():
+            return value.split("#")[0].strip()
+        for inner in job[i + 1 :]:
+            if inner.startswith("      name:"):
+                return inner.partition(":")[2].split("#")[0].strip()
+            if not inner.startswith("      "):
+                break
+    return None
+
+
+def secrets_outside_environment(texts: dict[str, str]) -> list[str]:
+    """Name each job that reads an environment's secret outside it (#1602).
+
+    A secret that lives only in an environment is issued to a job that
+    declares that environment, and to any other job as an empty string.
+
+    Returns:
+        `workflow: job reads SECRET outside environment ENV` per finding.
+
+    """
+    found = []
+    for rel, text in sorted(texts.items()):
+        for job_id, job in jobs(text).items():
+            body = "\n".join(ln for ln in job if not ln.strip().startswith("#"))
+            has = declared_environment(job)
+            found.extend(
+                f"{rel}: {job_id} reads {name} outside environment {env}"
+                for env, names in ENVIRONMENT_SECRETS.items()
+                for name in names
+                if f"secrets.{name}" in body and has != env
+            )
+    return found
+
+
+class EnvironmentSecrets(unittest.TestCase):
+    """A job reading an environment's secret declares it (#1602)."""
+
+    def test_every_job_declares_its_secrets_environment(self) -> None:
+        """The tree: no tracked workflow reads a key it is not issued."""
+        texts = {
+            rel: (CANON / rel).read_text("utf-8")
+            for rel in hermetic.tracked(CANON, ".github/workflows/*.yml")
+        }
+        self.assertEqual([], secrets_outside_environment(texts))
+
+    def test_the_scan_reaches_the_environment_jobs(self) -> None:
+        """Not vacuous: stripping every declaration names each reader."""
+        texts = {
+            rel: re.sub(
+                r"^    environment: .*\n",
+                "",
+                (CANON / rel).read_text("utf-8"),
+                flags=re.MULTILINE,
+            )
+            for rel in hermetic.tracked(CANON, ".github/workflows/*.yml")
+        }
+        found = secrets_outside_environment(texts)
+        self.assertIn(
+            ".github/workflows/vex-attest.yml: plan reads AUDIT_APP_PRIVATE_KEY"
+            " outside environment audit",
+            found,
+        )
+        self.assertIn(
+            ".github/workflows/source-attest.yml: claims reads"
+            " SOURCE_RULES_TOKEN outside environment source-attest",
+            found,
+        )
+        self.assertGreaterEqual(len(found), 10)
+
+    def test_each_form_and_a_wrong_environment_are_read(self) -> None:
+        """Planted: none, the wrong one, both forms, a comment."""
+        step = "    steps:\n      - run: x\n        env:\n"
+        key = "          K: ${{ secrets.AUDIT_TOKEN }}\n"
+        texts = {
+            "a.yml": "jobs:\n  a:\n" + step + key,
+            "b.yml": "jobs:\n  b:\n    environment: publish\n" + step + key,
+            "c.yml": "jobs:\n  c:\n    environment: audit # why\n" + step + key,
+            "d.yml": "jobs:\n  d:\n    environment:\n      name: audit\n" + step + key,
+            "e.yml": "jobs:\n  e:\n" + step + "        # secrets.AUDIT_TOKEN\n",
+        }
+        self.assertEqual(
+            [
+                "a.yml: a reads AUDIT_TOKEN outside environment audit",
+                "b.yml: b reads AUDIT_TOKEN outside environment audit",
+            ],
+            secrets_outside_environment(texts),
+        )
+
+
 class GateCoverageReports(unittest.TestCase):
     """The gate keeps coverage:check's reports from outside the tree (#1628).
 
