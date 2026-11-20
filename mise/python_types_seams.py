@@ -8,14 +8,15 @@ still lower it, measured on mypy 2.4.1, and mypy reports none of them:
 - an inline `# mypy:` comment sets options for its file, so
   `# mypy: ignore-errors`, `allow-any-expr` or `disable-error-code`
   turns the org's checks off one file at a time;
-- a bare `# type: ignore` before the first statement ignores the whole
-  module, and `ignore-without-code` does not fire on it (it fires on a
-  bare one anywhere else, so naming every bare one here costs nothing);
+- a `# type: ignore` hides a finding: a bare one before the first
+  statement ignores the whole module, and `ignore-without-code` does
+  not fire on it; a coded `# type: ignore[<code>]` hides its one
+  finding, and mypy reds it only once it suppresses nothing;
 - `typing.no_type_check` skips the body it decorates, silently, even
   under `disallow_any_decorated`.
 
-The per-line `# type: ignore[<code>]` is the one suppression left: it
-names its rule, and mypy reds it once it suppresses nothing.
+No suppression is left (owner, #1604): every `# type: ignore`, coded or
+bare, is a finding here, and the code is typed instead.
 
 Comments are read with `tokenize` and names with `ast`, so a marker
 inside a string is not a finding. A file that cannot be decoded,
@@ -33,12 +34,13 @@ import tokenize
 from pathlib import Path
 
 INLINE = re.compile(r"#\s*mypy\s*:")
-BARE_IGNORE = re.compile(r"#\s*type\s*:\s*ignore(?!\s*\[)")
+IGNORE = re.compile(r"#\s*type\s*:\s*ignore\b")
+IGNORED = "`# type: ignore` hides a finding; type the code instead"
 SKIPPERS = frozenset({"no_type_check", "no_type_check_decorator"})
 
 
 def comment_findings(text: str) -> list[tuple[int, str]]:
-    """Name the inline configs and bare ignores among a file's comments.
+    """Name the inline configs and the type ignores among a file's comments.
 
     Returns:
         (line, reason) pairs, in file order.
@@ -51,8 +53,8 @@ def comment_findings(text: str) -> list[tuple[int, str]]:
         line = tok.start[0]
         if INLINE.match(tok.string):
             out.append((line, "an inline `# mypy:` comment sets options for its file"))
-        elif BARE_IGNORE.search(tok.string):
-            out.append((line, "`# type: ignore` names no error code"))
+        elif IGNORE.search(tok.string):
+            out.append((line, IGNORED))
     return out
 
 

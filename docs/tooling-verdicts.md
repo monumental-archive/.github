@@ -2042,14 +2042,15 @@ Proven by running 2.4.1:
   task reds any line mypy prints about the config file.
 - **Three seams in a source file lower the level and mypy reports none
   of them**: an inline `# mypy:` comment (`ignore-errors`,
-  `allow-any-expr`, `disable-error-code`); a bare `# type: ignore`
-  before the first statement, which ignores the module and which
-  `ignore-without-code` does not fire on; and `typing.no_type_check`,
-  silent even under `disallow_any_decorated`. `mise/python_types_seams.py`
-  names each, read with `tokenize` and `ast` so the text in a string
-  is not a finding. The one suppression left is
-  `# type: ignore[<code>]`: it names its rule, and `unused-ignore`
-  reds it once it suppresses nothing.
+  `allow-any-expr`, `disable-error-code`); a `# type: ignore`, which
+  hides a finding (a bare one before the first statement ignores the
+  module, and `ignore-without-code` does not fire on it); and
+  `typing.no_type_check`, silent even under `disallow_any_decorated`.
+  `mise/python_types_seams.py` names each, read with `tokenize` and
+  `ast` so the text in a string is not a finding. No suppression is
+  left (owner, #1604): a coded `# type: ignore[<code>]` is red too,
+  since mypy reds it only once it suppresses nothing, and while it
+  suppresses it hides the finding; the code is typed instead.
 - **Hyphenated names and `importlib` loads (#1634).** No checker
   follows a `spec_from_file_location` load, so a helper loaded that
   way was a `ModuleType` and every use of it untyped: 2,439 findings.
