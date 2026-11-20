@@ -13,7 +13,8 @@ The code under test is `release/repro_issue.py`, which the step runs as
 its one command (#1386), with a stub `gh` first on PATH that records
 its arguments. The three rows below were written against the step's
 `run:` block cut out of the YAML; they are carried over row for row and
-now run the helper the step ships.
+now call the helper's `main` in this process (#1698). One row starts
+the helper as the step does instead: the script contract.
 
 stdlib `unittest`, matching the other tests here. Run through the gate
 as `mise run test`, which `ci` collects.
@@ -33,6 +34,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
 import hermetic
+import repro_issue
 
 HELPER = pathlib.Path(__file__).resolve().parent / "repro_issue.py"
 RUN_URL = "https://github.com/monumental-archive/lab/actions/runs/42044978939"
@@ -79,8 +81,12 @@ class FileAnIssue(unittest.TestCase):
         gh.chmod(0o755)
         self.bindir = bindir
 
-    def file(self, outcome: str, manifest: str = "{}") -> tuple[str, str]:
-        """Run the lifted step with the compare step's `outcome`.
+    def file(
+        self, outcome: str, manifest: str = "{}", *, script: bool = False
+    ) -> tuple[str, str]:
+        """Run the helper with the compare step's `outcome`.
+
+        In this process unless `script`, which starts it as the step does.
 
         Returns:
             The title and body the step handed to `gh issue create`.
@@ -100,14 +106,22 @@ class FileAnIssue(unittest.TestCase):
             GITHUB_REPOSITORY="monumental-archive/lab",
             GITHUB_RUN_ID="42044978939",
         )
-        proc = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-            [sys.executable, str(HELPER)],
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=60,
-        )
+        proc: subprocess.CompletedProcess[str] | hermetic.Called
+        if script:
+            proc = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+                [sys.executable, str(HELPER)],
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=60,
+            )
+        else:
+
+            def call() -> int:
+                return repro_issue.main()
+
+            proc = hermetic.call_main(call, env=env)
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         args = args_file.read_text(encoding="utf-8").split("\0")[:-1]
         self.assertEqual(
@@ -119,8 +133,11 @@ class FileAnIssue(unittest.TestCase):
         return args[5], args[7]
 
     def test_failure_is_a_verdict_and_files_as_before(self) -> None:
-        """A comparison that ran and failed keeps its title and body."""
-        title, body = self.file("failure")
+        """A comparison that ran and failed keeps its title and body.
+
+        The script row: the helper started as the step starts it.
+        """
+        title, body = self.file("failure", script=True)
         self.assertEqual(title, VERDICT_TITLE)
         self.assertEqual(body, VERDICT_BODY)
 

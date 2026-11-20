@@ -2,9 +2,11 @@
 """Run `release/repro_resolve.py` against a stub `gh` (#1386).
 
 `repro-check.yml`'s "Read the latest release" step is now one call to
-the helper. These rows run it as the step does, with a stub `gh` first
-on PATH answering from the row's fixtures, and read back what it wrote
-to `GITHUB_OUTPUT`. Every refusal row asserts the step's message.
+the helper. These rows call its `main` in this process (#1698), with a
+stub `gh` first on PATH answering from the row's fixtures, and read
+back what it wrote to `GITHUB_OUTPUT`. Every refusal row asserts the
+step's message. One row starts the helper as the step does instead:
+the script contract (it starts, and exits with gh's message).
 
 stdlib `unittest`, matching the other tests here.
 """
@@ -26,6 +28,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
 import hermetic
+import repro_resolve
 
 HELPER = pathlib.Path(__file__).resolve().parent / "repro_resolve.py"
 STUB_GH = """#!/usr/bin/env bash
@@ -78,8 +81,11 @@ class ReadTheLatestRelease(unittest.TestCase):
         *,
         checksums: str | None = CHECKSUMS,
         manifest: str | None = None,
-    ) -> tuple[subprocess.CompletedProcess[str], str]:
+        script: bool = False,
+    ) -> tuple[subprocess.CompletedProcess[str] | hermetic.Called, str]:
         """Run the helper against a latest release in the given state.
+
+        In this process unless `script`, which starts it as the step does.
 
         Returns:
             The run, and what it appended to `GITHUB_OUTPUT`.
@@ -101,15 +107,23 @@ class ReadTheLatestRelease(unittest.TestCase):
             GITHUB_REPOSITORY="example/project",
             GITHUB_OUTPUT=str(output),
         )
-        done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-            [sys.executable, str(HELPER)],
-            cwd=self.work,
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=60,
-        )
+        done: subprocess.CompletedProcess[str] | hermetic.Called
+        if script:
+            done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+                [sys.executable, str(HELPER)],
+                cwd=self.work,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=60,
+            )
+        else:
+
+            def call() -> int:
+                return repro_resolve.main()
+
+            done = hermetic.call_main(call, env=env, cwd=self.work)
         return done, output.read_text(encoding="utf-8")
 
     def test_typed_release_hands_its_manifest_on(self) -> None:
@@ -173,8 +187,11 @@ class ReadTheLatestRelease(unittest.TestCase):
         self.assertEqual(out, "")
 
     def test_absent_checksums_fails_with_gh(self) -> None:
-        """A release with no checksums asset fails the download, as gh does."""
-        done, out = self.resolve(checksums=None)
+        """A release with no checksums asset fails the download, as gh does.
+
+        The script row: gh's message is on the child's own stderr.
+        """
+        done, out = self.resolve(checksums=None, script=True)
         self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
         self.assertIn("release asset not found", done.stderr)
         self.assertEqual(out, "")

@@ -9,6 +9,8 @@ first on PATH for the tag's tarball and CITATION.cff. The fake refuses
 any route it does not know (HTTP 418), so a request the helper should
 not make reads as a failure, not a pass. Requests are logged with the
 production origin, `https://zenodo.org`, in place of the fake's.
+One row (#1698) starts the helper as the step does instead, against the
+same fake: the script contract.
 
 THE FIRST 23 ROWS are #1246's (`OneId`, `TwoIds`, `ThePublishedRecord`,
 `Refusals`, `TheFixturesAreTheRealShapes`), kept row for row from when
@@ -96,12 +98,15 @@ from __future__ import annotations
 import base64
 import contextlib
 import copy
+import http.client
 import io
 import json
 import os
+import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import threading
 import unittest
+import urllib.request
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -542,6 +547,7 @@ def run_helper(  # ruff: ignore[too-many-arguments] - one knob per row family
     repo: str = "monumental-archive/edtf",
     cff: str | None = None,
     cff_status: int = 0,
+    script: bool = False,
 ) -> Run:
     """Run the helper with CITATION.cff stating `licence`.
 
@@ -557,6 +563,8 @@ def run_helper(  # ruff: ignore[too-many-arguments] - one knob per row family
         repo: the repository releasing.
         cff: the whole CITATION.cff, overriding `licence` and `concept`.
         cff_status: gh's exit status on the CITATION.cff read.
+        script: start the helper as the step does, rather than call its
+            `main` in this process; its two streams are read as one.
 
     Returns:
         The run's status, output and the fake's request log.
@@ -589,12 +597,25 @@ def run_helper(  # ruff: ignore[too-many-arguments] - one knob per row family
             STUB_CFF_STATUS=str(cff_status),
         )
         out = io.StringIO()
-        with (
-            mock.patch.object(mint_doi, "pause", pauses.append),
-            contextlib.redirect_stdout(out),
-            contextlib.redirect_stderr(out),
-        ):
-            code = mint_doi.main(["--pipeline", PIPELINE], env)
+        if script:
+            done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+                [sys.executable, str(HELPER), "--pipeline", PIPELINE],
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                check=False,
+                timeout=60,
+            )
+            code = done.returncode
+            out.write(done.stdout)
+        else:
+            with (
+                mock.patch.object(mint_doi, "pause", pauses.append),
+                contextlib.redirect_stdout(out),
+                contextlib.redirect_stderr(out),
+            ):
+                code = mint_doi.main(["--pipeline", PIPELINE], env)
         text = summary.read_text() if summary.exists() else ""
     return Run(
         code,
@@ -642,6 +663,13 @@ class OneId(unittest.TestCase):
         """The helper exits green with the stub's DOI."""
         self.assertEqual(self.run_.returncode, 0, self.run_.stdout)
         self.assertIn("DOI 10.5281/zenodo.101", self.run_.stdout)
+
+    def test_the_script_mints_as_the_step_runs_it(self) -> None:
+        """The script row (#1698): started as the step starts it, same answer."""
+        run = run_helper("0BSD", script=True)
+        self.assertEqual(run.returncode, 0, run.stdout)
+        self.assertIn("DOI 10.5281/zenodo.101", run.stdout)
+        self.assertEqual(run.requests, self.run_.requests)
 
     def test_the_vocabulary_is_asked_for_the_one_id(self) -> None:
         """The vocabulary is asked for exactly the one id."""
@@ -937,6 +965,55 @@ def edtf_zenodo() -> Zenodo:
         redirect=True,
         records={EDTF_PREV: recorded(EDTF_RDM), f"plain/{EDTF_PREV}": prev},
     )
+
+
+def no_redirect_handler() -> type[urllib.request.HTTPRedirectHandler]:
+    """Find the helper's own redirect handler, the authenticated opener's.
+
+    Returns:
+        The one `HTTPRedirectHandler` subclass the helper defines.
+
+    """
+    (handler,) = (
+        c
+        for c in urllib.request.HTTPRedirectHandler.__subclasses__()
+        if c.__module__ == mint_doi.__name__
+    )
+    return handler
+
+
+class TheTokenNeverFollowsARedirect(unittest.TestCase):
+    """An authenticated call answered with a 3xx stops there (#1698)."""
+
+    def test_the_handler_makes_no_new_request(self) -> None:
+        """Asked for the redirected request, as urllib asks, it makes none.
+
+        urllib then raises the 3xx as an `HTTPError`, so the token is
+        never sent on to the redirect's target.
+        """
+        old = urllib.request.Request(
+            "https://zenodo.org/api/records/1/versions/latest",
+            headers={"Authorization": "Bearer stub-token"},
+        )
+        new = no_redirect_handler()().redirect_request(
+            old,
+            io.BytesIO(),
+            301,
+            "Moved Permanently",
+            http.client.HTTPMessage(),
+            "https://zenodo.org/api/records/2",
+        )
+        self.assertIsNone(new)
+
+    def test_an_authenticated_read_is_not_followed(self) -> None:
+        """The 301 is the answer, though its target would answer 200."""
+        z = edtf_zenodo()
+        with Fake(z):
+            client = mint_doi.Zenodo(z.base, "stub-token", "stub-agent")
+            url = f"{z.base}/api/records/{EDTF_CONCEPT}/versions/latest"
+            with self.assertRaises(mint_doi.HttpError) as caught:
+                client.idem("GET", url)
+        self.assertEqual(f"GET {url}: HTTP 301", str(caught.exception))
 
 
 class TheRecordedResponses(unittest.TestCase):

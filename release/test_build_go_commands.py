@@ -7,10 +7,12 @@ before go runs (an untracked path stamps vcs.modified=true), so it
 records the tree's real path in ORG_CANON_TREE and the step runs the
 helper from there; one row holds both halves of that wiring.
 
-WHAT RUNS. The helper itself, by its path in this tree, from a module
-directory with no `.org-canon` link (as on the runner), with a stub
-`go` first on PATH. The stub answers `list` with the row's main
-packages, one per line, and `build -o OUT PKG` by writing OUT.
+WHAT RUNS. The helper's `main`, called in this process (#1698) from a
+module directory with no `.org-canon` link (as on the runner), with a
+stub `go` first on PATH. The stub answers `list` with the row's main
+packages, one per line, and `build -o OUT PKG` by writing OUT. One row
+starts the helper by its path in this tree instead: the script
+contract (it starts, and exits with go's own status and message).
 
 stdlib `unittest`, matching the rest of release/. Run through the gate
 as `mise run test`, which `ci` collects.
@@ -30,6 +32,7 @@ from tempfile import TemporaryDirectory
 # come first.
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
+import build_go_commands
 import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
@@ -64,8 +67,10 @@ class Run:
     staged: list[str]
 
 
-def run_helper(mains: str, broken: str = "") -> Run:
+def run_helper(mains: str, broken: str = "", *, script: bool = False) -> Run:
     """Run the helper on a module whose `go list` prints `mains`.
+
+    In this process unless `script`, which starts it by its path.
 
     Returns:
         Its status, output, the go log and what staged/ holds.
@@ -85,15 +90,23 @@ def run_helper(mains: str, broken: str = "") -> Run:
             STUB_MAINS=mains,
             STUB_BROKEN=broken,
         )
-        # ruff: ignore[subprocess-without-shell-equals-true]
-        result = subprocess.run(
-            [str(HELPER)],
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-            cwd=work,
-        )
+        result: subprocess.CompletedProcess[str] | hermetic.Called
+        if script:
+            # ruff: ignore[subprocess-without-shell-equals-true]
+            result = subprocess.run(
+                [str(HELPER)],
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+                cwd=work,
+            )
+        else:
+
+            def call() -> int:
+                return build_go_commands.main()
+
+            result = hermetic.call_main(call, env=env, cwd=work)
         staged = work / "staged"
         return Run(
             result.returncode,
@@ -186,9 +199,14 @@ class Refuses(unittest.TestCase):
         self.assertNotIn("build -o staged/tool example.com/m/internal/tool", run.go)
 
     def test_a_failing_build_fails_the_step_with_its_status(self) -> None:
-        """The failing build's status and message; none after it is built."""
+        """The failing build's status and message; none after it is built.
+
+        The script row: go's message is on the child's own stderr.
+        """
         run = run_helper(
-            "example.com/m/cmd/a\nexample.com/m/cmd/b\n", broken="example.com/m/cmd/a"
+            "example.com/m/cmd/a\nexample.com/m/cmd/b\n",
+            broken="example.com/m/cmd/a",
+            script=True,
         )
         self.assertEqual(1, run.returncode)
         self.assertEqual("example.com/m/cmd/a: undefined: x\n", run.stderr)

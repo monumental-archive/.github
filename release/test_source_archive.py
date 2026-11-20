@@ -4,8 +4,10 @@
 #1384 moved the step "Build the archive twice and prove determinism"
 out of build-source-archive.yml into the helper, refusals unchanged.
 
-WHAT RUNS. The helper itself, as the job runs it, through a
-`.org-canon` link to this tree, with a stub `git` first on PATH. The
+WHAT RUNS. The helper's `main`, called in this process (#1698), with a
+stub `git` first on PATH. One row starts the helper as the job runs it
+instead, through a `.org-canon` link to this tree: the script contract
+(it starts, and exits with git's own status and message). The
 stub answers `archive` by copying the row's planted .tar.gz for each
 call in turn (the first build, then the check build) to the `-o` path,
 and `ls-files` with the row's count of tracked paths. The archives are
@@ -34,6 +36,7 @@ from tempfile import TemporaryDirectory
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
 import hermetic
+import source_archive
 
 CANON = Path(__file__).resolve().parent.parent
 WORKFLOW = CANON / ".github" / "workflows" / "build-source-archive.yml"
@@ -97,8 +100,11 @@ def run_helper(
     repo: str = "monumental-archive/edtf",
     *,
     fail: bool = False,
+    script: bool = False,
 ) -> Run:
     """Run the helper with two planted builds and a tracked count.
+
+    In this process unless `script`, which starts it as the job does.
 
     Returns:
         Its status, output, the git log and what dist/ holds.
@@ -125,15 +131,23 @@ def run_helper(
             STUB_TRACKED=str(tracked),
             STUB_FAIL="1" if fail else "",
         )
-        # ruff: ignore[subprocess-without-shell-equals-true]
-        result = subprocess.run(
-            [HELPER],
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-            cwd=work,
-        )
+        result: subprocess.CompletedProcess[str] | hermetic.Called
+        if script:
+            # ruff: ignore[subprocess-without-shell-equals-true]
+            result = subprocess.run(
+                [HELPER],
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+                cwd=work,
+            )
+        else:
+
+            def call() -> int:
+                return source_archive.main()
+
+            result = hermetic.call_main(call, env=env, cwd=work)
         dist = work / "dist"
         return Run(
             result.returncode,
@@ -239,9 +253,12 @@ class Refuses(unittest.TestCase):
         )
 
     def test_a_failing_git_fails_the_step_with_its_status(self) -> None:
-        """A tag git cannot archive: git's status and message."""
+        """A tag git cannot archive: git's status and message.
+
+        The script row: git's message is on the child's own stderr.
+        """
         data = tarball(1)
-        run = run_helper((data, data), tracked=1, fail=True)
+        run = run_helper((data, data), tracked=1, fail=True, script=True)
         self.assertEqual(128, run.returncode)
         self.assertEqual("fatal: not a valid object\n", run.stderr)
         self.assertEqual("", run.stdout)

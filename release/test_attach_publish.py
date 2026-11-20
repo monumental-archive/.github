@@ -2,11 +2,14 @@
 """Run `release/attach_publish.py` against a stub `gh` (#1386).
 
 `attach-release.yml`'s "Attach and publish" step is now one call to the
-helper. These rows run it as the step does, from a working directory
-holding `dist/`, with a stub `gh` first on PATH that records every call
-and answers from the row's fixtures: the release's draft state, the
-published `checksums.txt` and, when the release has one, its evidence
-manifest. Every refusal row asserts the step's message.
+helper. These rows call its `main` in this process (#1698), from a
+working directory holding `dist/`, with a stub `gh` first on PATH that
+records every call and answers from the row's fixtures: the release's
+draft state, the published `checksums.txt` and, when the release has
+one, its evidence manifest. Every refusal row asserts the step's
+message. One row starts the helper as the step does instead: the
+script contract, and the one row whose assertions read `diff`'s own
+output, which only a child's stdout carries.
 
 The rehearsal row runs the real `release/record-draft.sh`, so the
 record it writes is the one a kept draft carries.
@@ -30,6 +33,7 @@ from pathlib import Path
 # come first.
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
+import attach_publish
 import hermetic
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -120,8 +124,11 @@ class AttachAndPublish(unittest.TestCase):
         published: str = REBUILT,
         manifest: dict | None = None,
         dry_run: str = "false",
-    ) -> tuple[subprocess.CompletedProcess[str], list[list[str]]]:
+        script: bool = False,
+    ) -> tuple[subprocess.CompletedProcess[str] | hermetic.Called, list[list[str]]]:
         """Run the helper against a release in the given state.
+
+        In this process unless `script`, which starts it as the step does.
 
         Returns:
             The run, and every `gh` call's arguments.
@@ -145,15 +152,23 @@ class AttachAndPublish(unittest.TestCase):
             GITHUB_SERVER_URL="https://github.com",
             GITHUB_RUN_ID="42",
         )
-        done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-            [sys.executable, str(HELPER)],
-            cwd=self.work,
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=60,
-        )
+        done: subprocess.CompletedProcess[str] | hermetic.Called
+        if script:
+            done = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+                [sys.executable, str(HELPER)],
+                cwd=self.work,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=60,
+            )
+        else:
+
+            def call() -> int:
+                return attach_publish.main()
+
+            done = hermetic.call_main(call, env=env, cwd=self.work)
         lines = log.read_text(encoding="utf-8").splitlines() if log.is_file() else []
         return done, [line.split("\0")[:-1] for line in lines]
 
@@ -178,9 +193,12 @@ class AttachAndPublish(unittest.TestCase):
         self.assertNotIn("release upload", subcommands(calls))
 
     def test_checksums_differ_without_typing(self) -> None:
-        """No manifest: any differing asset refuses the resume."""
+        """No manifest: any differing asset refuses the resume.
+
+        The script row: `diff`'s lines are on the child's own stdout.
+        """
         resigned = REBUILT.replace("cccc", "dddd")
-        done, calls = self.publish("false", published=resigned)
+        done, calls = self.publish("false", published=resigned, script=True)
         self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
         self.assertIn("-dddd  attestations.intoto.jsonl", done.stdout)
         self.assertIn("+cccc  attestations.intoto.jsonl", done.stdout)

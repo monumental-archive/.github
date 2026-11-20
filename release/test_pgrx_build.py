@@ -7,6 +7,8 @@ It now lives in release/pgrx/ as plain scripts the containers run from
 the pinned canon tree, and in release/pgrx/previous_release.py on the
 runner. Each guard branch is a row here, and every refusal row asserts
 its message, word for word, against the wording the workflow carried.
+previous_release.py's rows call its `main` in this process (#1698);
+one starts it as the workflow does instead, the script contract.
 
 The debug-split and glibc rows run the real binutils over a small real
 shared library built here, so they need `cc`, `readelf`, `objcopy` and
@@ -27,18 +29,23 @@ import tarfile
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 # Appended, so this file's own directory and the standard library
 # come first.
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
+sys.path.append(str(Path(__file__).resolve().parent / "pgrx"))
 
 import hermetic
+import previous_release
 
 CANON = Path(__file__).resolve().parent.parent
 PGRX = CANON / "release" / "pgrx"
 PREVIOUS = PGRX / "previous_release.py"
 BASH = hermetic.tool("bash")
 ON_RUNNER = os.environ.get("GITHUB_ACTIONS") == "true"
+# What a helper's run answered: a child's, or an in-process call's.
+type Done = subprocess.CompletedProcess[str] | hermetic.Called
 
 
 def run(
@@ -269,6 +276,7 @@ class PreviousRelease(unittest.TestCase):
         bindir = self.root / "bin"
         bindir.mkdir()
         stub(bindir, "gh", GH_STUB)
+        self.gh = bindir / "gh"
         self.sql = self.root / self.CRATE / "sql"
         self.sql.mkdir(parents=True)
         self.log = self.root / "gh.log"
@@ -296,18 +304,44 @@ class PreviousRelease(unittest.TestCase):
         for name in files:
             (self.sql / name).write_text("")
 
+    def helper(
+        self, args: list[str], env: dict[str, str], *, script: bool = False
+    ) -> Done:
+        """Run the helper on `args` in the row's directory.
+
+        In this process unless `script`, which starts it by its path. The
+        helper resolves `gh` on PATH once, at import, so the call is
+        given the stub the child would have found first on its PATH.
+
+        Returns:
+            What the run answered.
+
+        """
+        if script:
+            return run([str(PREVIOUS), *args], env, cwd=self.root)
+
+        def call() -> int:
+            return previous_release.main(args)
+
+        with mock.patch.object(previous_release, "GH", str(self.gh)):
+            return hermetic.call_main(call, env=hermetic.env(**env), cwd=self.root)
+
     def previous(
-        self, mode: str, *extra: str, version: str = "1.2.0", **stubs: str
-    ) -> subprocess.CompletedProcess[str]:
+        self,
+        mode: str,
+        *extra: str,
+        version: str = "1.2.0",
+        **stubs: str,
+    ) -> Done:
         """Run the helper at `version` for CRATE.
 
         Returns:
-            The completed process.
+            What the run answered.
 
         """
         env = {**self.env, **{f"STUB_{k.upper()}": v for k, v in stubs.items()}}
-        argv = [str(PREVIOUS), mode, "--repo", "acme/demo", "--version", version]
-        return run([*argv, "--crate-dir", self.CRATE, *extra], env, cwd=self.root)
+        args = [mode, "--repo", "acme/demo", "--version", version]
+        return self.helper([*args, "--crate-dir", self.CRATE, *extra], env)
 
     def gh_calls(self) -> list[str]:
         """Each gh invocation, its arguments joined by spaces.
@@ -392,8 +426,12 @@ class ControlFileRefusal(PreviousRelease):
         )
 
     def test_a_failed_listing_read_is_red(self) -> None:
-        """Gh failing on the listing is a red with gh's own words, never a pass."""
-        result = self.previous("guard")
+        """Gh failing on the listing is a red with gh's own words, never a pass.
+
+        The script row: gh's words are on the child's own stderr.
+        """
+        args = ["guard", "--repo", "acme/demo", "--version", "1.2.0"]
+        result = self.helper([*args, "--crate-dir", self.CRATE], self.env, script=True)
         self.assertEqual(1, result.returncode)
         self.assertEqual("", result.stdout)
         self.assertEqual("HTTP 502\n", result.stderr)
@@ -404,11 +442,11 @@ class PreviousTarball(PreviousRelease):
 
     CELL = ("--pg", "18", "--arch", "arm64")
 
-    def fetch(self, **stubs: str) -> subprocess.CompletedProcess[str]:
+    def fetch(self, **stubs: str) -> Done:
         """Fetch for pg18/arm64 into the row's directory.
 
         Returns:
-            The completed process.
+            What the run answered.
 
         """
         dest = (
@@ -515,17 +553,16 @@ class OnePredecessor(PreviousRelease):
         names = (TESTDATA / f"edtf-sql-{sql_at}.txt").read_text().split()
         self.graph(*names, *extra)
 
-    def predecessor(self, version: str) -> subprocess.CompletedProcess[str]:
+    def predecessor(self, version: str) -> Done:
         """Ask the helper for edtf_postgres's predecessor of `version`.
 
         Returns:
-            The completed process.
+            What the run answered.
 
         """
-        argv = [str(PREVIOUS), "predecessor", "--repo", "acme/demo"]
         control = f"{self.CRATE}/edtf_postgres.control"
-        argv += ["--version", version, "--control", control]
-        return run(argv, self.env, cwd=self.root)
+        args = ["predecessor", "--repo", "acme/demo", "--version", version]
+        return self.helper([*args, "--control", control], self.env)
 
     def test_an_imported_tag_scheme_yields_the_published_predecessor(self) -> None:
         """At import, 1.2.3 sits on `edtf-postgres-v1.2.3` (main: none)."""
@@ -632,17 +669,16 @@ class OlderLine(PreviousRelease):
         )
         self.graph("demo_ext--1.2.3--1.2.4.sql", "demo_ext--1.2.4--1.3.0.sql")
 
-    def predecessor(self, version: str) -> subprocess.CompletedProcess[str]:
+    def predecessor(self, version: str) -> Done:
         """Ask the helper for demo_ext's predecessor of `version`.
 
         Returns:
-            The completed process.
+            What the run answered.
 
         """
-        argv = [str(PREVIOUS), "predecessor", "--repo", "acme/demo"]
         control = f"{self.CRATE}/demo_ext.control"
-        argv += ["--version", version, "--control", control]
-        return run(argv, self.env, cwd=self.root)
+        args = ["predecessor", "--repo", "acme/demo", "--version", version]
+        return self.helper([*args, "--control", control], self.env)
 
     def test_each_line_yields_its_own_predecessor(self) -> None:
         """1.2.5 comes from 1.2.4 on v1.2.4; 1.3.1 from 1.3.0 on v1.3.0."""
@@ -654,6 +690,24 @@ class OlderLine(PreviousRelease):
                 result = self.predecessor(version)
                 self.assertEqual(0, result.returncode, result.stderr)
                 self.assertEqual(want, result.stdout)
+
+    def test_the_record_names_what_the_forge_carries(self) -> None:
+        """`record`: the carried versions written, the predecessor printed.
+
+        1.2.3 is in the graph but on no release, so it is not recorded;
+        releasing 1.3.1, the predecessor is 1.3.0 on v1.3.0 (#825, #1592).
+        """
+        out = self.root / ".pgrx-installable"
+        control = f"{self.CRATE}/demo_ext.control"
+        args = ["record", "--repo", "acme/demo", "--version", "1.3.1"]
+        result = self.helper([*args, "--out", str(out), control], self.env)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual("demo_ext\t1.3.0\tv1.3.0\n", result.stdout)
+        written = out.read_text(encoding="utf-8")
+        self.assertTrue(written.startswith("# pgrx installable versions"), written)
+        self.assertTrue(
+            written.endswith("# derived: v1.3.1\ndemo_ext 1.3.0 1.2.4\n"), written
+        )
 
     def test_the_guard_owes_no_downgrade_path(self) -> None:
         """Releasing 1.2.5 with 1.2.4--1.2.5 present passes; 1.3.0 is not asked."""

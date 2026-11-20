@@ -19,22 +19,3 @@
 #
 # Generated from the tree by the lint's own reader (mise/in_process.py),
 # never typed.
-release/attach_publish.py:converge	# #1698
-release/attach_publish.py:gh	# #1698
-release/attach_publish.py:main	# #1698
-release/attach_publish.py:publish	# #1698
-release/build_go_commands.py:main	# #1698
-release/check_go_stamps.py:check_staged	# #1698
-release/check_go_stamps.py:git	# #1698
-release/check_go_stamps.py:main	# #1698
-release/mint_doi.py:_NoRedirect.redirect_request	# #1698
-release/package_crates.py:main	# #1698
-release/pgrx/previous_release.py:answer	# #1698
-release/pgrx/previous_release.py:fetch	# #1698
-release/pgrx/previous_release.py:guard	# #1698
-release/pgrx/previous_release.py:listing	# #1698
-release/pgrx/previous_release.py:main	# #1698
-release/pgrx/previous_release.py:record	# #1698
-release/repro_issue.py:main	# #1698
-release/repro_resolve.py:main	# #1698
-release/source_archive.py:main	# #1698
