@@ -390,19 +390,36 @@ def code(text: str) -> str:
     """Reduce shell to the lines that can call a tool.
 
     Comment lines go, and so does prose a reader would mistake for a
-    call: a line that only prints (`echo`, `printf`) and a line that only
-    assigns a double-quoted literal (the `emsg+=` remedy lines).
+    call: a line that only prints (`echo`, `printf`), a line that only
+    assigns a double-quoted literal (the `emsg+=` remedy lines), and the
+    message of a `${NAME:?message}` or `${NAME?message}` expansion, which
+    the shell prints and never runs (#1782). A message holding a command
+    substitution stays, because the shell runs that.
 
     Returns:
         The text that remains.
 
     """
+    text = re.sub(r"(\$\{\w+:?\?)([^}\n]*)\}", unset_message, text)
     kept = [
         ln
         for ln in text.splitlines()
         if not re.match(r"\s*(#|echo\b|printf\b|[\w]+\+?=\")", ln)
     ]
     return "\n".join(kept)
+
+
+def unset_message(found: re.Match[str]) -> str:
+    """Blank one `${NAME:?message}`'s message unless the shell runs it.
+
+    Returns:
+        The expansion with its message gone, or as it was when the
+        message holds `$(` or a backtick.
+
+    """
+    if "$(" in found.group(2) or "`" in found.group(2):
+        return found.group(0)
+    return f"{found.group(1)}}}"
 
 
 def constants(tree: ast.Module) -> dict[str, str]:
@@ -1325,6 +1342,60 @@ def planted_uninstalled(helper: str) -> list[str]:
         ]
         with mock.patch(f"{__name__}.CANON", root):
             return uninstalled("attach-release.yml", "attach", job)
+
+
+UNSET_RED = ["attach-release.yml attach: calls lefthook and does not install it"]
+
+
+def planted_shell(helper: str) -> list[str]:
+    """Plant `helper` as release/planted-call.sh and read the attach job (#1782).
+
+    Returns:
+        What `uninstalled` says about the attach job running it.
+
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        root = hermetic.canon(tmp, stubs={"release/planted-call.sh": helper})
+        job = [
+            *load("attach-release.yml")["attach"],
+            "      - name: Planted",
+            '        run: bash "${GITHUB_WORKSPACE}/release/planted-call.sh"',
+        ]
+        with mock.patch(f"{__name__}.CANON", root):
+            return uninstalled("attach-release.yml", "attach", job)
+
+
+class UnsetMessages(unittest.TestCase):
+    """A `${NAME:?message}` message is prose, not a call (#1782).
+
+    Each planted shell helper names lefthook, which the attach job does
+    not install, in the message of an unset expansion. The shell prints
+    that message and exits; it runs nothing in it.
+    """
+
+    def test_a_local_assignment_message_is_not_a_call(self) -> None:
+        """`local x="${V:?…}"`, the pgrx-env.sh shape."""
+        helper = 'f() {\n  local x="${V:?run: lefthook run post-checkout}"\n}\n'
+        self.assertEqual([], planted_shell(helper))
+
+    def test_a_colon_command_message_is_not_a_call(self) -> None:
+        """`: "${V:?…}"`, the identity.sh shape."""
+        helper = ': "${V:?run: lefthook run post-checkout}"\n'
+        self.assertEqual([], planted_shell(helper))
+
+    def test_a_sourced_path_message_is_not_a_call(self) -> None:
+        """`. "${V:?…}/f.sh"`, the audit-badges.sh shape; `?` alone too."""
+        for op in (":?", "?"):
+            with self.subTest(op=op):
+                helper = f'. "${{V{op}run: lefthook run post-checkout}}/f.sh"\n'
+                self.assertEqual([], planted_shell(helper))
+
+    def test_a_substitution_in_a_message_is_a_call(self) -> None:
+        """`${V:?$(lefthook …)}`: the shell runs it, so it stays code."""
+        for sub in ("$(lefthook version)", "`lefthook version`"):
+            with self.subTest(sub=sub):
+                helper = f': "${{V:?{sub}}}"\n'
+                self.assertEqual(UNSET_RED, planted_shell(helper))
 
 
 class ArgvCalls(unittest.TestCase):
