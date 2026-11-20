@@ -46,6 +46,11 @@ jobs:
       # `contents: read` is the whole grant either of them buys. Each
       # callee job declares the scope it consumes (#850).
       contents: read
+      # Passed through to release.yml's release-pr job, whose coverage
+      # floor step reads the coverage figures the gate kept for the
+      # commit (the `coverage-figures-<sha>` artifact) instead of
+      # measuring it again (#1622). Read-only.
+      actions: read # the gate's coverage figures for this commit, read-only (#1622)
       # Passed through to release.yml's tag job, where gitsign spends it
       # on the keyless tag signature (#349 S4) — the callee's
       # capability-boundary marker carries the argument.
