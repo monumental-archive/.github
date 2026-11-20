@@ -714,6 +714,24 @@ class Tracked(unittest.TestCase):
         # ruff: ignore[subprocess-without-shell-equals-true]
         subprocess.run([GIT, *args], cwd=self.root, env=hermetic.env(), check=True)
 
+    def test_the_source_of_a_checkout_is_its_root(self) -> None:
+        """A law reading a checkout reads the checkout (#1726)."""
+        self.assertEqual(self.root, hermetic.source(self.root))
+
+    def test_the_source_of_a_copy_is_the_top_of_its_repository(self) -> None:
+        """A law reading from mutmut's copy reads the author's files (#1726)."""
+        self.assertEqual(self.root, hermetic.source(self.copy))
+
+    def test_no_repository_is_red_by_name(self) -> None:
+        """A root outside any repository is refused, never guessed."""
+        outside = Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(shutil.rmtree, outside)
+        with self.assertRaises(RuntimeError) as raised:
+            hermetic.source(outside)
+        self.assertIn(
+            f"hermetic.source: {outside} is in no git repository", str(raised.exception)
+        )
+
     def test_a_gitignored_copy_lists_what_the_checkout_lists(self) -> None:
         """The row that fails before #1618: the copy's listing was empty."""
         specs = (":!vendor/**", "*.py", "*.sh")

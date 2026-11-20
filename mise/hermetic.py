@@ -234,7 +234,8 @@ def tracked(root: Path | str, *pathspecs: str, **overrides: str) -> list[str]:
     the tracked names; a name is kept when the file exists under `root`,
     so a copy is judged on what was copied into it. In a checkout that
     is exactly `git ls-files` at its top. The listing runs under `env`,
-    with the row's `overrides`.
+    with the row's `overrides`. A law that READS the files to judge them
+    lists `source(root)` instead (#1726): in a copy, those are mutmut's.
 
     Returns:
         The names, in git's order.
@@ -273,6 +274,44 @@ def tracked(root: Path | str, *pathspecs: str, **overrides: str) -> list[str]:
         )
         raise RuntimeError(msg)
     return names
+
+
+def source(root: Path | str) -> Path:
+    """Name the directory whose files a source-reading law judges (#1726).
+
+    A law about the repository's source reads the repository's source.
+    In a checkout, or a scratch repository a row built, that is `root`.
+    In a copy of the tree inside the repository, such as mutmut's
+    `mutants/`, it is the repository's top, where the files are as their
+    authors wrote them: in the copy mutmut has rewritten every helper,
+    and a law reading it judges mutmut's generated code. `tracked`
+    answers a different question: what a copy holds, for rows that run
+    the copied files.
+
+    Returns:
+        `root`, or the top of the repository it sits in when that is
+        another directory.
+
+    Raises:
+        RuntimeError: git is not on PATH, or `root` is in no repository.
+
+    """
+    git = shutil.which("git")
+    if git is None:
+        msg = "hermetic.source: git is not on PATH"
+        raise RuntimeError(msg)
+    # ruff: ignore[subprocess-without-shell-equals-true]
+    asked = subprocess.run(
+        [git, "-C", str(root), "rev-parse", "--show-toplevel"],
+        env=env(),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if asked.returncode != 0:
+        msg = f"hermetic.source: {root} is in no git repository: {asked.stderr.strip()}"
+        raise RuntimeError(msg)
+    return Path(asked.stdout.strip()).resolve()
 
 
 @dataclass(frozen=True)

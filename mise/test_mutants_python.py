@@ -27,6 +27,7 @@ from pathlib import Path
 from unittest import mock
 
 import hermetic
+import in_process
 import mutants_python as helper
 
 BELT = Path(__file__).resolve().parent
@@ -932,6 +933,27 @@ class MutatedCopy(Planted):
             self.tree / "mutants",
             stubs={"helper.py": MUTATED_HELPER, "test_helper.py": HELPER_TEST},
         )
+
+    def test_a_law_in_the_copy_reads_the_authors_source(self) -> None:
+        """The in-process law, run from mutmut's copy, judges the author's helper.
+
+        `answer` is owed and listed as debt. In the copy mutmut has
+        rewritten it: `answer` is a trampoline and its body lives on as
+        `x_answer__mutmut_orig` and `x_answer__mutmut_1`, which the debt
+        file does not list. Read there, the law named mutmut's generated
+        functions and the statistics pass stopped (self-mutants run
+        44660681702, #1726).
+        """
+        debt = "helper.py:answer\t# #1726 planted\n"
+        self.track("helper.py", "def answer(n):\n    return n + 1\n")
+        self.track(in_process.DEBT, debt)
+        copy = self.copy()
+        (copy / in_process.DEBT).parent.mkdir(parents=True)
+        (copy / in_process.DEBT).write_text(debt, encoding="utf-8")
+        found = in_process.check(copy, ["helper.py"])
+        self.assertIn("helper.py:x_answer__mutmut_1", " ".join(found))
+        self.assertEqual(self.tree.resolve(), hermetic.source(copy))
+        self.assertEqual([], in_process.check(hermetic.source(copy), ["helper.py"]))
 
     def test_the_statistics_environment_passes(self) -> None:
         """The helper's test, run as mutmut's statistics pass runs it, passes."""
