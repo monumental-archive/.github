@@ -28,6 +28,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import override
 
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
@@ -49,9 +50,20 @@ cat > /dev/null || true
 """
 
 
+def strings(*items: str) -> list[str]:
+    """List the given strings, typed as strings for the assertions.
+
+    Returns:
+        The strings, in order.
+
+    """
+    return list(items)
+
+
 class Script(unittest.TestCase):
     """A scratch directory, stub tools, and the script run in it."""
 
+    @override
     def setUp(self) -> None:
         """Make the scratch directory and its stub bin."""
         tmp = tempfile.TemporaryDirectory()
@@ -177,11 +189,12 @@ class Containers(Script):
         )
         self.assertEqual(done.returncode, 0, done.stderr)
         (argv,) = self.calls()
-        self.assertEqual(argv[:3], ["docker", "run", "--rm"])
+        self.assertEqual(argv[:3], strings("docker", "run", "--rm"))
         self.mounts(argv)
         self.assertIn("VERSION=1.2.3", argv)
         self.assertEqual(
-            argv[-3:], ["postgres:17@sha256:planted", "bash", "/pgrx/build-root.sh"]
+            argv[-3:],
+            strings("postgres:17@sha256:planted", "bash", "/pgrx/build-root.sh"),
         )
 
     def fetcher(self, prev: str) -> str:
@@ -224,7 +237,7 @@ class Containers(Script):
         self.assertIn("NAME=edtf_pg", argv)
         self.assertIn("PREV=1.0.0", argv)
         self.assertEqual(
-            argv[-3:], ["postgres:16@sha256:smoke", "bash", "/pgrx/upgrade.sh"]
+            argv[-3:], strings("postgres:16@sha256:smoke", "bash", "/pgrx/upgrade.sh")
         )
         self.assertEqual(
             done.stdout, "::notice::pg16/amd64: 1.0.0 -> 1.1.0 upgrade executed\n"
@@ -234,7 +247,8 @@ class Containers(Script):
         """No version fetched: no container, nothing printed, exit 0."""
         done = self.upgrade("")
         self.assertEqual((done.returncode, done.stdout), (0, ""), done.stderr)
-        self.assertEqual(self.calls(), [])
+        none: list[list[str]] = []
+        self.assertEqual(self.calls(), none)
 
 
 class WasmPlan(Script):
@@ -262,15 +276,16 @@ class WasmPlan(Script):
             PLAN_DOC_PREFIX="sbom-npm-",
         )
         self.assertEqual(done.returncode, 0, done.stderr)
+        plan: list[object] = [
+            {
+                "class": "wasm-npm",
+                "doc": "sbom-npm-edtf-wasm",
+                "params": {"cargoPackage": "edtf-wasm"},
+            }
+        ]
         self.assertEqual(
             decoded.load_json((self.work / "plan" / "plan.json").read_text("utf-8")),
-            [
-                {
-                    "class": "wasm-npm",
-                    "doc": "sbom-npm-edtf-wasm",
-                    "params": {"cargoPackage": "edtf-wasm"},
-                }
-            ],
+            plan,
         )
         self.assertEqual(
             done.stdout,
@@ -324,7 +339,7 @@ class Inventory(Script):
         done = self.run_inventory({"amd64": SHA, "arm64": SHA})
         self.assertEqual(done.returncode, 0, done.stderr)
         tools = [argv[0] for argv in self.calls()]
-        self.assertEqual(tools, ["docker", "trivy", "trivy", "stele"])
+        self.assertEqual(tools, strings("docker", "trivy", "trivy", "stele"))
         ref = f"ghcr.io/org/repo@{SHA}"
         self.assertEqual(
             self.output.read_text("utf-8"),
@@ -340,7 +355,8 @@ class Inventory(Script):
             "::error::no arm64 digest to inventory; refusing to decide about a"
             " partial image\n",
         )
-        self.assertNotIn("stele", [argv[0] for argv in self.calls()])
+        called: list[str] = [argv[0] for argv in self.calls()]
+        self.assertNotIn("stele", called)
 
 
 if __name__ == "__main__":

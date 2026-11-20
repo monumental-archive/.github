@@ -57,6 +57,16 @@ printf '%s\\n' "${STUB_TARBALL}"
 """
 
 
+def strings(*items: str) -> list[str]:
+    """List the given strings, typed as strings for the assertions.
+
+    Returns:
+        The strings, in order.
+
+    """
+    return list(items)
+
+
 @dataclass
 class Run:
     """What the helper did."""
@@ -169,7 +179,7 @@ class Packs(unittest.TestCase):
         self.assertEqual(0, run.returncode, run.stdout + run.stderr)
         line = f"{SUM}  {TARBALL}"
         self.assertEqual(f"{line}\n", run.stdout)
-        self.assertEqual([f"pack {run.pkg} --silent"], run.npm)
+        self.assertEqual(strings(f"pack {run.pkg} --silent"), run.npm)
         self.assertEqual(
             f"subjects<<SUBJECTS_EOF\n{line}\nSUBJECTS_EOF\n"
             f"package=edtf-wasm@{VERSION}\n"
@@ -197,7 +207,7 @@ class Refuses(unittest.TestCase):
         """Hold a refusal: status 1, the message alone, no pack, no outputs."""
         self.assertEqual(1, run.returncode)
         self.assertEqual(message, run.stdout)
-        self.assertEqual([], run.npm)
+        self.assertEqual(strings(), run.npm)
         self.assertEqual("", run.outputs)
 
     def test_another_repository_is_refused_with_the_remedy(self) -> None:
@@ -245,7 +255,8 @@ class Refuses(unittest.TestCase):
 
         Both died with an AttributeError traceback before.
         """
-        for manifest in (0, []):
+        manifests: tuple[object, ...] = (0, [])
+        for manifest in manifests:
             with self.subTest(manifest=manifest):
                 self.assert_refused(
                     run_helper(manifest),
