@@ -37,8 +37,7 @@ ARCH = st.sampled_from(sorted(KEY_ARCH))
 SOURCE = st.tuples(st.tuples(OWNER, TOOL).map("/".join), TAG)
 
 
-@st.composite
-def asset(draw: st.DrawFn, os_family: str, arch_family: str) -> str:
+def draw_asset(draw: st.DrawFn, os_family: str, arch_family: str) -> str:
     """Name an asset for an OS and architecture, in either order.
 
     Returns:
@@ -51,6 +50,9 @@ def asset(draw: st.DrawFn, os_family: str, arch_family: str) -> str:
     sep = draw(st.sampled_from(["-", "_", "."]))
     first, second = (arch, plat) if draw(st.booleans()) else (plat, arch)
     return f"{tool}{sep}1.0{sep}{first}{sep}{second}.tar.gz"
+
+
+asset = st.composite(draw_asset)
 
 
 def url(repo: str, tag: str, name: str) -> str:
@@ -86,9 +88,11 @@ class Judge(unittest.TestCase):
         name = data.draw(asset(os_family, other))
         value = {"url": url(*source, name)}
         line = la.entry_line(LOCK, "t", f"platforms.{os_family}-{arch}", value)
-        self.assertIsNotNone(line, name)
+        if line is None:
+            self.fail(name)
         fields = line.split("\t")
-        self.assertEqual(fields[4:7], [name, *source])
+        named = [name, *source]
+        self.assertEqual(fields[4:7], named)
         native = data.draw(asset(os_family, arch))
         self.assertTrue(re.search(fields[7], native.lower()), (fields[7], native))
 
@@ -105,13 +109,28 @@ class ReleaseSource(unittest.TestCase):
         )
 
 
-JSON = st.recursive(
-    st.none() | st.booleans() | st.integers() | st.text(max_size=20),
-    lambda inner: (
-        st.lists(inner, max_size=3)
-        | st.dictionaries(st.text(max_size=5), inner, max_size=3)
-    ),
-    max_leaves=8,
+SCALAR: st.SearchStrategy[object] = (
+    st.none() | st.booleans() | st.integers() | st.text(max_size=20)
+)
+
+
+def nested(inner: st.SearchStrategy[object]) -> st.SearchStrategy[object]:
+    """Wrap values in an array or an object.
+
+    Returns:
+        The strategy one level deeper.
+
+    """
+    arrays: st.SearchStrategy[object] = st.lists(inner, max_size=3)
+    objects: st.SearchStrategy[object] = st.dictionaries(
+        st.text(max_size=5), inner, max_size=3
+    )
+    return arrays | objects
+
+
+JSON: st.SearchStrategy[object] = st.recursive(SCALAR, nested, max_leaves=8)
+ENTRY: st.SearchStrategy[object] = st.one_of(
+    JSON, st.fixed_dictionaries({"url": st.text(max_size=80)})
 )
 
 
@@ -122,7 +141,7 @@ class Refusal(unittest.TestCase):
         st.one_of(
             st.text(max_size=30), st.text(max_size=20).map("platforms.{}".format)
         ),
-        st.one_of(JSON, st.fixed_dictionaries({"url": st.text(max_size=80)})),
+        ENTRY,
     )
     def test_entry_line_answers_anything(self, key: str, value: object) -> None:
         """A candidate line or None."""
