@@ -10,6 +10,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.70.5](https://github.com/monumental-archive/.github/compare/v1.70.4...v1.70.5) - 2026-11-20
+
+### Fixed
+
+- look up mise conda tools on conda-forge (#1743) ([#1748](https://github.com/monumental-archive/.github/pull/1748))
+- update jdx/mise to 2026.11.8 ([#1751](https://github.com/monumental-archive/.github/pull/1751))
+- update monumental-archive/signer to 8e69dcf ([#1750](https://github.com/monumental-archive/.github/pull/1750))
+- run zizmor at the auditor persona in the gate (#1719) ([#1752](https://github.com/monumental-archive/.github/pull/1752))
+- refuse two files of one module name at the gate (#1737) ([#1749](https://github.com/monumental-archive/.github/pull/1749))
+- find the clone's belt link under a git hook (#1744) ([#1753](https://github.com/monumental-archive/.github/pull/1753))
+- read the repository's source in every law (#1726) ([#1755](https://github.com/monumental-archive/.github/pull/1755))
+- replace each per-clone link by rename (#1731) ([#1756](https://github.com/monumental-archive/.github/pull/1756))
+- take the go toolchain out of the canon (#1733) ([#1759](https://github.com/monumental-archive/.github/pull/1759))
+- run the gate as three legs side by side (#1740) ([#1762](https://github.com/monumental-archive/.github/pull/1762))
+- print each root's slowest test files (#1732) ([#1763](https://github.com/monumental-archive/.github/pull/1763))
+- measure rust coverage on the test task's own run (#1653) ([#1761](https://github.com/monumental-archive/.github/pull/1761))
+- fan the property runner out over its own shards (#1741) ([#1764](https://github.com/monumental-archive/.github/pull/1764))
+
+### Testing
+
+- call the release helpers in-process (#1698) ([#1765](https://github.com/monumental-archive/.github/pull/1765))
+
 ## [1.70.4](https://github.com/monumental-archive/.github/compare/v1.70.3...v1.70.4) - 2026-11-20
 
 ### Changed
