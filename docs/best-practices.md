@@ -52,7 +52,7 @@ criterion would notice; the audit's red is what says the form is owed.
 | --- | --- | --- |
 | `access_continuity` | Met | [continuity.md](continuity.md) — succession + break-glass |
 | `build_repeatable` | Met wherever the publish stub declares any class | the repro gate blocks every release on a bit-for-bit rebuild (#118); the scheduled repro-check re-verifies published history from cold. **This includes `source-archive`** — see the trap below. N/A only for a continuous repo that publishes nothing |
-| `test_statement_coverage80` | Met per repo once its `.coverage-floor` ≥ 80; the floor is derived (`measured - 2`, rising only, #652), so it holds without anyone maintaining it. For the canon, **Met since 2026-11-18 (#1331)**: 94.9% of its Python statements under a floor of 89.1 — see the coverage section below | canonical `coverage:check` ratchet in the gate, Rust, Go, Python and TypeScript legs, gated on `.coverage-floor` so a repo with no measurable corpus skips clean |
+| `test_statement_coverage80` | Met per repo once its `.coverage-floor` ≥ 80; the floor is derived (`min(90, measured - 2)`, never falling, #652, #1786), so it holds without anyone maintaining it. For the canon, **Met since 2026-11-18 (#1331)**: 94.9% of its Python statements under a floor of 89.1 — see the coverage section below | canonical `coverage:check` ratchet in the gate, Rust, Go, Python and TypeScript legs, gated on `.coverage-floor` so a repo with no measurable corpus skips clean |
 | `signed_releases` | Met | Sigstore evidence bundle on every release |
 | `version_semver` / `version_tags` | Met | `stele derive version` + App-minted `v*` tags |
 | `version_tags_signed` | Met | the tag objects **are** signed — Sigstore keyless, by the release workflow. See the `no_user` trap below |
@@ -108,8 +108,9 @@ Silver now stands on one remaining MUST:
 that no belt-legal tool could measure moved to stele (#392), where
 `go test -cover -coverpkg=./...` supplies the number, `.coverage-floor`
 ratchets it, and the codecov shield renders it. The floor is derived
-state since #652 — the release machinery writes it as `measured - 2`
-and it only rises — so the criterion is met by a number nothing hand
+state since #652 — the release machinery writes it as
+`min(90, measured - 2)` and it never falls (#1786) — so the criterion
+is met by a number nothing hand
 maintains rather than by one nobody was watching.
 
 **The canon measures itself since 2026-11-18 (#1331).** The sentence

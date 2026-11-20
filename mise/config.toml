@@ -342,9 +342,9 @@ ruff = "0.17.5"
 # gate — deterministic (local run against a committed number), guarded
 # on the repo's manifests, skip-clean everywhere else. Best Practices
 # Silver requires >=80% statement coverage. The floor is DERIVED STATE
-# since #652: the release machinery writes it as `measured - band` and
-# it only ever rises, so it can no longer drift below a ceiling nobody
-# is watching.
+# since #652: the release machinery writes it as
+# `min(90, measured - band)` and it never falls (#1786), so it can no
+# longer drift below a ceiling nobody is watching.
 "aqua:taiki-e/cargo-llvm-cov" = "0.9.1"
 # The dependency track (docs/dependency-track.md). cargo-deny is the gate
 # half (bans+licenses+sources, deterministic over the lock) and the
@@ -6804,9 +6804,11 @@ dir = "{{cwd}}"
 # Optional, as in `ci`: a tree with no `test` task measures through its
 # own commands (go, rust, typescript) or skips.
 depends = [{ task = "test", optional = true }]
-# The ratchet: the floor is DERIVED STATE that only rises (#652). The
-# release machinery writes it as `measured - band` and commits it with
-# the release; this task enforces it, and refuses a floor that disagrees
+# The ratchet: the floor is DERIVED STATE that never falls (#652). The
+# release machinery writes it as `min(90, measured - band)` and commits
+# it with the release, holding the same line this task holds, so what
+# merges green releases green (#1786); this task enforces it, and
+# refuses a floor that disagrees
 # with its own record as DRIFT rather than repairing it — a floor found
 # wrong is evidence the machinery was bypassed. It was a hand-typed
 # number until the org measured what that costs: stele's ceiling fell

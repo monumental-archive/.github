@@ -430,7 +430,7 @@ class AuditRows(GoBranchCase):
         self.assertEqual(1, done.returncode)
         self.assertIn(
             "go-branches floor 60.0 disagrees with its own record: measured"
-            " 82.0 minus band 2 is 80.0.",
+            " 82.0 under band 2 and the cap 90 derives 80.0.",
             done.stderr,
         )
         self.assertEqual([], calls)
@@ -473,7 +473,7 @@ class AdoptRows(GoBranchCase):
         done, tmp, calls = self.run_task("coverage:adopt", floor=None)
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertIn(
-            "coverage-floor: adopted .coverage-floor at 93.0 (measured 95.0),"
+            "coverage-floor: adopted .coverage-floor at 90 (measured 95.0),"
             " go-branches 82.0 (measured 84.0)\n",
             done.stdout,
         )
@@ -487,12 +487,11 @@ class AdoptRows(GoBranchCase):
         self.assertEqual(2, len(calls))
 
     def test_adopt_cannot_lower_the_go_branches_line(self) -> None:
-        """Below its floor plus the band, nothing is written."""
-        done, tmp, _ = self.run_task("coverage:adopt", counts="a=5/8 b=35/42")
+        """Below its floor, nothing is written."""
+        done, tmp, _ = self.run_task("coverage:adopt", counts="a=5/8 b=34/42")
         self.assertEqual(1, done.returncode)
         self.assertIn(
-            "coverage-floor: go-branches measured 80.0% is below its floor"
-            " 80.0% plus the 2-point band.",
+            "coverage-floor: go-branches measured 78.0% is below its floor 80.0%.",
             done.stderr,
         )
         self.assertEqual(

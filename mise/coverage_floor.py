@@ -8,12 +8,14 @@ red and nothing noticed, because the committed floor sat well below
 where anyone would have set it and the headroom became a landing zone.
 
 So the floor is DERIVED STATE. The release machinery measures the tree,
-writes `floor = measured - band`, and the floor only ever rises; a
-release measuring below `floor + band` fails loudly rather than lowering
-anything. Between releases a pull request may spend the band — that is
-what the band is for — but by release time the ceiling must be back at
-or above the previous release's measurement, and the session that spent
-it writes the tests while the reason is still in context.
+writes `floor = min(cap, measured - band)`, and the floor never falls.
+The release holds the same line the gate holds — the floor itself — so
+a pull request that passes the gate can never red the release on main
+(#1786; holding the release to `floor + band` did exactly that, three
+pushes running, at 94.2 against 94.3). A release measuring within the
+band keeps the floor and its record as they stand; one measuring higher
+raises it. The cap, 90, is the org's line: above it coverage moves
+freely, and the floor stops chasing the ceiling towards 100.
 
 Two entry points, one definition:
 
@@ -82,6 +84,13 @@ STEP = Decimal("0.1")
 FLOOR_MIN = Decimal(0)
 FLOOR_MAX = Decimal(100)
 
+# The cap (#1786, ruled 2026-11-20): no floor is derived above 90. Org
+# policy like the band, so a constant here and never a repository
+# setting. A floor written before the cap — above 90, agreeing with its
+# record's uncapped derivation — is not drift: it is enforced at the cap
+# and the next release rewrites it, so the canon bump reds no consumer.
+FLOOR_CAP = Decimal(90)
+
 # The record fields, in the order a written file states them.
 BAND_KEY = "band"
 MEASURED_KEY = "measured"
@@ -105,21 +114,23 @@ TEMPLATE = """\
 # Coverage floor -- DERIVED STATE, not a number to edit (#652).
 #
 # The release machinery re-derives this file at every release:
-# floor = measured - band, and the floor only rises. A release whose
-# measurement falls below floor + band FAILS, loudly; the resolution is
-# tests, or a conscious reset recorded in place of the derivation below
-# (replace the `measured` and `derived` lines with `reset: <reason>`).
+# floor = min({cap}, measured - band), and the floor never falls. A
+# release whose measurement falls below the floor FAILS, loudly; the
+# resolution is tests, or a conscious reset recorded in place of the
+# derivation below (replace the `measured` and `derived` lines with
+# `reset: <reason>`).
 # `coverage:check` refuses a floor that disagrees with this record as
 # drift, and never repairs it. `legs` names the legs the floor holds
 # (#1666): a leg it names that a run measures nothing of is red, and a
 # leg leaves it only through a line `dropped: <leg> <why>`.
 #
 # band: {band}
-# measured: {measured}
-# derived: {provenance}
-# legs: {legs}
+{record}# legs: {legs}
 {floor}
 """
+
+DERIVED_RECORD = "# measured: {measured}\n# derived: {provenance}\n"
+RESET_RECORD = "# reset: {reason}\n"
 
 # A leg the record names is demanded at every `coverage:check` (#1666):
 # the floor was derived with it, so a run that measures none of it is
@@ -168,6 +179,33 @@ class Record(NamedTuple):
     legs: tuple[str, ...] | None = None
     # Leg name to the reason it was consciously dropped.
     dropped: dict[str, str] | None = None
+
+
+def derive_floor(measured: Decimal, band: Decimal = BAND) -> Decimal:
+    """Cut a floor from a measurement: the one statement of the law.
+
+    Returns:
+        `measured - band`, never below 0 and never above the cap.
+
+    """
+    return min(FLOOR_CAP, max(FLOOR_MIN, measured - band))
+
+
+def enforced(floor: Decimal, measured: Decimal, band: Decimal) -> Decimal | None:
+    """Hold a stated floor to the measurement its record states.
+
+    The capped derivation agrees; so does the uncapped one a floor
+    written before the cap carries (#1786), which is enforced at the cap
+    until the next release rewrites it.
+
+    Returns:
+        The floor to enforce, or None when the floor is drift.
+
+    """
+    uncapped = max(FLOOR_MIN, measured - band)
+    if floor not in {derive_floor(measured, band), uncapped}:
+        return None
+    return min(floor, FLOOR_CAP)
 
 
 def quantise(value: Decimal) -> Decimal:
@@ -259,17 +297,18 @@ def separate_of(
         if measured is None or not FLOOR_MIN <= measured <= FLOOR_MAX:
             problems.append(f"{key} {record[key]!r} is not a percentage")
             continue
-        expected = max(FLOOR_MIN, measured - band)
-        if floor != expected:
+        holds = enforced(floor, measured, band)
+        if holds is None:
             problems.append(
                 f"{leg} floor {floor} disagrees with its own record: "
-                f"measured {measured} minus band {band} is {expected}. "
+                f"measured {measured} under band {band} and the cap "
+                f"{FLOOR_CAP} derives {derive_floor(measured, band)}. "
                 "Refused as drift and never repaired — restore the "
                 "derivation, or delete both lines and re-derive with "
                 "`mise run coverage:adopt`",
             )
             continue
-        held[leg] = (floor, measured)
+        held[leg] = (holds, measured)
     if problems:
         return None, problems
     return held, []
@@ -343,7 +382,7 @@ def reset_form(
                 "conscious because it is recorded: `reset: <why>`"
             ),
         ]
-    return Record(floor, band, None, record.get(DERIVED_KEY), reset), []
+    return Record(min(floor, FLOOR_CAP), band, None, record.get(DERIVED_KEY), reset), []
 
 
 def derived_form(
@@ -361,19 +400,20 @@ def derived_form(
     if measured is None or not FLOOR_MIN <= measured <= FLOOR_MAX:
         return None, [f"measured {record[MEASURED_KEY]!r} is not a percentage"]
 
-    expected = max(FLOOR_MIN, measured - band)
-    if floor != expected:
+    holds = enforced(floor, measured, band)
+    if holds is None:
         return None, [
             (
                 f"floor {floor} disagrees with its own record: measured "
-                f"{measured} minus band {band} is {expected}. A floor "
+                f"{measured} under band {band} and the cap {FLOOR_CAP} "
+                f"derives {derive_floor(measured, band)}. A floor "
                 "found wrong is evidence the machinery was bypassed, so "
                 "this is refused as drift and never repaired — restore "
                 "the derivation, or record a conscious reset by replacing "
                 "the `measured` and `derived` lines with `reset: <why>`"
             ),
         ]
-    return Record(floor, band, measured, record.get(DERIVED_KEY), None), []
+    return Record(holds, band, measured, record.get(DERIVED_KEY), None), []
 
 
 def main_form(
@@ -527,8 +567,14 @@ def render(
     provenance: str,
     separate: dict[str, Decimal] | None = None,
     legs: list[str] | None = None,
+    *,
+    reset: tuple[Decimal, str] | None = None,
 ) -> str:
     """Write the file the derivation describes.
+
+    `reset` carries a conscious reset through a release that does not
+    raise it — its floor and reason — in place of the derived record;
+    `measured` and `provenance` are then not written.
 
     Returns:
         The whole file, band comment and all, with a section for each
@@ -536,12 +582,18 @@ def render(
 
     """
     quantised = quantise(measured)
+    if reset is None:
+        main = DERIVED_RECORD.format(measured=quantised, provenance=provenance)
+        floor = derive_floor(quantised)
+    else:
+        main = RESET_RECORD.format(reason=reset[1])
+        floor = reset[0]
     text = TEMPLATE.format(
+        cap=FLOOR_CAP,
         band=BAND,
-        measured=quantised,
-        provenance=provenance,
+        record=main,
         legs=" ".join(legs or ()),
-        floor=max(FLOOR_MIN, quantised - BAND),
+        floor=floor,
     )
     if not legs:
         text = text.replace("# legs: \n", "")
@@ -553,7 +605,7 @@ def render(
             leg=leg,
             measured_key=MEASURED_KEY,
             measured=leg_measured,
-            floor=max(FLOOR_MIN, leg_measured - BAND),
+            floor=derive_floor(leg_measured),
         )
     return text
 
@@ -602,16 +654,35 @@ def ratchet_separate(record: Record, separate: dict[str, Decimal]) -> bool:
         if leg not in holds:
             continue
         floor = holds[leg][0]
-        if quantise(measured) < floor + BAND:
+        if quantise(measured) < floor:
             print(
                 f"{NAME}: {leg} measured {quantise(measured)}% is below its "
-                f"floor {floor}% plus the {BAND}-point band. The floor only "
-                f"rises, so nothing is written: write the tests that put "
-                f"{leg} back to {floor + BAND}%",
+                f"floor {floor}%. The floor never falls, so nothing is "
+                f"written: write the tests that put {leg} back to {floor}%",
                 file=sys.stderr,
             )
             held = False
     return held
+
+
+def carried(record: Record, fresh: dict[str, Decimal]) -> dict[str, Decimal]:
+    """Choose the measurement each SEPARATE leg's line is written from.
+
+    A fresh figure that raises (or keeps) the leg's floor is written; one
+    within the band keeps the measurement the record states, so the line
+    never falls; a leg this run did not measure is carried as it stands.
+
+    Returns:
+        Leg name to the measurement its line records.
+
+    """
+    holds = record.separate or {}
+    rising = {
+        leg: measured
+        for leg, measured in fresh.items()
+        if leg not in holds or derive_floor(quantise(measured)) >= holds[leg][0]
+    }
+    return {leg: m for leg, (_, m) in holds.items()} | rising
 
 
 def write(  # ruff: ignore[too-many-arguments] -- one keyword per part of a measurement
@@ -640,10 +711,10 @@ def write(  # ruff: ignore[too-many-arguments] -- one keyword per part of a meas
 
     """
     quantised = quantise(measured)
-    derived = max(FLOOR_MIN, quantised - BAND)
+    derived = derive_floor(quantised)
     fresh = dict(separate or {})
     noted = "".join(
-        f", {leg} {max(FLOOR_MIN, quantise(m) - BAND)} (measured {quantise(m)})"
+        f", {leg} {derive_floor(quantise(m))} (measured {quantise(m)})"
         for leg, m in fresh.items()
     )
 
@@ -673,15 +744,17 @@ def write(  # ruff: ignore[too-many-arguments] -- one keyword per part of a meas
         print(f"{NAME}: rewrote {path} at {derived} (measured {quantised}){noted}")
         return 0
 
-    main_held = quantised >= record.floor + BAND
+    # The gate's line, not `floor + band` (#1786): the release holds what
+    # every merged pull request already held, so it cannot red main.
+    main_held = quantised >= record.floor
     if not main_held:
         print(
             f"{NAME}: measured {quantised}% is below the floor "
-            f"{record.floor}% plus the {BAND}-point band. The floor only "
-            "rises, so this release FAILS rather than lowering it: write "
-            f"the tests that put the ceiling back to {record.floor + BAND}%, "
-            "or consciously reset the floor by replacing the `measured` "
-            f"and `derived` lines of {path} with `reset: <why>`",
+            f"{record.floor}%. The floor never falls, so this release "
+            "FAILS rather than lowering it: write the tests that put it "
+            f"back to {record.floor}%, or consciously reset the floor by "
+            "replacing the `measured` and `derived` lines of "
+            f"{path} with `reset: <why>`",
             file=sys.stderr,
         )
     # Every leg is judged before anything returns, so one run names every
@@ -690,14 +763,26 @@ def write(  # ruff: ignore[too-many-arguments] -- one keyword per part of a meas
     if not ratchet_separate(record, fresh) or not main_held or not kept_legs:
         return 1
 
-    # The ratchet passed, so `measured - band >= floor` holds by
-    # arithmetic: the new floor cannot be below the old one. Asserting
-    # that again here would be a second definition of the same law, with
-    # its own way of being wrong. A SEPARATE leg this run did not measure
-    # keeps the measurement its record states.
-    kept = {leg: m for leg, (_, m) in (record.separate or {}).items()} | fresh
-    path.write_text(render(measured, provenance, kept, legs), encoding="utf-8")
-    print(f"{NAME}: floor {record.floor} -> {derived} (measured {quantised}){noted}")
+    kept = carried(record, fresh)
+    if derived >= record.floor:
+        text = render(measured, provenance, kept, legs)
+        print(
+            f"{NAME}: floor {record.floor} -> {derived} (measured {quantised}){noted}",
+        )
+    else:
+        # Within the band: the floor never falls, so the main record is
+        # written as it stands — its measurement, or its reset — and only
+        # the legs and the lines held apart move.
+        if record.reset is not None or record.measured is None:
+            reset = (record.floor, record.reset or "")
+            text = render(quantised, "", kept, legs, reset=reset)
+        else:
+            text = render(record.measured, record.derived or "", kept, legs)
+        print(
+            f"{NAME}: floor {record.floor} held (measured {quantised}, "
+            f"within the {BAND}-point band){noted}",
+        )
+    path.write_text(text, encoding="utf-8")
     return 0
 
 
