@@ -48,12 +48,13 @@ import signal
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
-import tomllib
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from typing import override
 from unittest import mock
 
+import decoded
 import hermetic
 import pg_schema
 
@@ -191,11 +192,11 @@ def shift_lines(text: str, by: int) -> str:
         The text with each `-- <path>.rs:<line>` annotation moved by `by`.
 
     """
-    return re.sub(
-        r"(\.rs:)(\d+)",
-        lambda m: f"{m.group(1)}{int(m.group(2)) + by}",
-        text,
-    )
+
+    def moved(match: re.Match[str]) -> str:
+        return f"{match.expand(r'\1')}{int(match.expand(r'\2')) + by}"
+
+    return re.sub(r"(\.rs:)(\d+)", moved, text)
 
 
 def reorder(text: str) -> str:
@@ -282,14 +283,13 @@ def git(root: Path, *args: str) -> None:
 class InRepo(unittest.TestCase):
     """A fresh git repository as the working directory for each row."""
 
+    @override
     def setUp(self) -> None:
         """Make the repository and the extension directory, and enter it."""
         self.root = Path(tempfile.mkdtemp())
         git(self.root, "init", "-q")
         (self.root / "crates" / "ext").mkdir(parents=True)
-        env = mock.patch.dict(os.environ, scrubbed(), clear=True)
-        env.start()
-        self.addCleanup(env.stop)
+        self.enterContext(mock.patch.dict(os.environ, scrubbed(), clear=True))
         self.addCleanup(os.chdir, Path.cwd())
         os.chdir(self.root)
 
@@ -515,8 +515,10 @@ def task_body(name: str) -> str:
         The body with any `{% raw %}` / `{% endraw %}` lines removed.
 
     """
-    config = tomllib.loads((BELT / "config.toml").read_text(encoding="utf-8"))
-    run = config["tasks"][name]["run"]
+    config = decoded.load_toml((BELT / "config.toml").read_text(encoding="utf-8"))
+    tasks = decoded.as_object(config["tasks"], "the belt's [tasks]")
+    task = decoded.as_object(tasks[name], name)
+    run = decoded.as_str(task["run"], f"{name}'s run")
     return "".join(
         line
         for line in run.splitlines(keepends=True)
@@ -539,6 +541,7 @@ class SqlSkipsOwnedSnapshots(unittest.TestCase):
     reds 1; a root crate's path left as `./schema.snapshot.sql` reds 1.
     """
 
+    @override
     def setUp(self) -> None:
         """Make a repository, the shims, and an empty member list.
 
@@ -559,7 +562,7 @@ class SqlSkipsOwnedSnapshots(unittest.TestCase):
             shim.chmod(0o755)
         self.log = self.shims / "sqlfluff.log"
         self.metadata = self.shims / "metadata.json"
-        self.packages: list[dict] = []
+        self.packages: list[dict[str, object]] = []
 
     def member(self, where: str, *, pgrx: bool) -> None:
         """Plant a tracked crate, an extension when `pgrx` is set."""
@@ -568,11 +571,14 @@ class SqlSkipsOwnedSnapshots(unittest.TestCase):
         (crate / "Cargo.toml").write_text("[package]\n", encoding="utf-8")
         git(self.root, "add", str(Path(where) / "Cargo.toml"))
         name = Path(where).name if where != "." else "rootext"
+        features: dict[str, list[str]] = (
+            {"pg17": [], "pg18": [], "pg_test": []} if pgrx else {}
+        )
         self.packages.append({
             "id": f"path+file://{crate}#0.1.0",
             "name": name,
             "version": "0.1.0",
-            "features": {"pg17": [], "pg18": [], "pg_test": []} if pgrx else {},
+            "features": features,
             "dependencies": [{"name": "pgrx" if pgrx else "serde"}],
             "manifest_path": str(crate / "Cargo.toml"),
         })
@@ -591,7 +597,7 @@ class SqlSkipsOwnedSnapshots(unittest.TestCase):
             handed (empty when it never ran).
 
         """
-        doc = {
+        doc: dict[str, object] = {
             "workspace_root": str(self.root),
             "workspace_members": [pkg["id"] for pkg in self.packages],
             "packages": self.packages,
@@ -649,7 +655,8 @@ class SqlSkipsOwnedSnapshots(unittest.TestCase):
         self.sql("crates/ext/sql/ext--0.1.0--0.2.0.sql", CLEAN_SQL)
         status, out, err, handed = self.run_task("lint:sql")
         self.assertEqual((status, err), (0, ""))
-        self.assertEqual(handed, ["crates/ext/sql/ext--0.1.0--0.2.0.sql"])
+        want = ["crates/ext/sql/ext--0.1.0--0.2.0.sql"]
+        self.assertEqual(handed, want)
         self.assertIn(
             "lint:sql: 1 file(s) linted, 1 pg-schema snapshot(s) left to "
             "lint:pg-schema\n",
@@ -663,7 +670,8 @@ class SqlSkipsOwnedSnapshots(unittest.TestCase):
         self.sql("sql/up.sql", CLEAN_SQL)
         status, _, err, handed = self.run_task("lint:sql")
         self.assertEqual((status, err), (0, ""))
-        self.assertEqual(handed, ["sql/up.sql"])
+        want = ["sql/up.sql"]
+        self.assertEqual(handed, want)
 
     def test_same_name_outside_an_extension_is_still_linted(self) -> None:
         """Derived from the crates, never matched by filename."""
@@ -674,10 +682,8 @@ class SqlSkipsOwnedSnapshots(unittest.TestCase):
         self.sql("db/schema.snapshot.sql", CLEAN_SQL)
         status, out, err, handed = self.run_task("lint:sql")
         self.assertEqual(status, 1)
-        self.assertEqual(
-            handed,
-            ["crates/plain/schema.snapshot.sql", "db/schema.snapshot.sql"],
-        )
+        want = ["crates/plain/schema.snapshot.sql", "db/schema.snapshot.sql"]
+        self.assertEqual(handed, want)
         self.assertIn("crates/plain/schema.snapshot.sql] FAIL", out)
         self.assertIn("lint:sql: findings above", err)
 
@@ -688,7 +694,8 @@ class SqlSkipsOwnedSnapshots(unittest.TestCase):
         self.sql("db/up.sql", CLEAN_SQL)
         status, _, _, handed = self.run_task("lint:sql")
         self.assertEqual(status, 1)
-        self.assertEqual(handed, ["crates/plain/schema.snapshot.sql", "db/up.sql"])
+        want = ["crates/plain/schema.snapshot.sql", "db/up.sql"]
+        self.assertEqual(handed, want)
 
     def test_no_cargo_manifest_excludes_nothing_and_asks_no_cargo(self) -> None:
         """No Cargo.toml tracked: the shim would exit 101 if asked."""
@@ -696,7 +703,8 @@ class SqlSkipsOwnedSnapshots(unittest.TestCase):
         self.sql("db/up.sql", CLEAN_SQL)
         status, out, err, handed = self.run_task("lint:sql")
         self.assertEqual((status, err), (0, ""))
-        self.assertEqual(handed, ["db/up.sql", "schema.snapshot.sql"])
+        want = ["db/up.sql", "schema.snapshot.sql"]
+        self.assertEqual(handed, want)
         self.assertIn("lint:sql: 2 file(s) linted, 0 pg-schema", out)
 
     def test_only_belt_owned_sql_skips_without_sqlfluff(self) -> None:
@@ -726,7 +734,8 @@ class SqlSkipsOwnedSnapshots(unittest.TestCase):
         self.sql(SNAPSHOT, LAB_SNAPSHOT)
         self.sql("crates/plain/schema.snapshot.sql", LAB_SNAPSHOT)
         status, _, _, handed = self.run_task("fix:sql")
-        self.assertEqual(handed, ["crates/plain/schema.snapshot.sql"])
+        want = ["crates/plain/schema.snapshot.sql"]
+        self.assertEqual(handed, want)
         self.assertEqual(
             (self.root / SNAPSHOT).read_text(encoding="utf-8"),
             LAB_SNAPSHOT,

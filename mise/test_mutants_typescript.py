@@ -29,6 +29,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import override
 
 import hermetic
 import mutants_typescript
@@ -57,7 +58,7 @@ fi
 exit "${PLANT_STATUS:-0}"
 """
 
-CONFIG = {
+CONFIG: dict[str, object] = {
     "testRunner": "vitest",
     "plugins": ["@stryker-mutator/vitest-runner"],
     "mutate": ["src/**/*.ts"],
@@ -73,14 +74,14 @@ def mutant(
     mutator: str = "ArithmeticOperator",
     replacement: str = "a - b",
     reason: str | None = None,
-) -> dict:
+) -> dict[str, object]:
     """Spell one mutant as StrykerJS 10.1.1's JSON report does.
 
     Returns:
         The mutant object.
 
     """
-    found = {
+    found: dict[str, object] = {
         "id": str(line),
         "mutatorName": mutator,
         "replacement": replacement,
@@ -97,7 +98,7 @@ def mutant(
     return found
 
 
-def report(*mutants: dict) -> dict:
+def report(*mutants: dict[str, object]) -> dict[str, object]:
     """Wrap mutants in a report of one file, `src/add.ts`.
 
     Returns:
@@ -123,6 +124,7 @@ KILLED = (mutant("Killed", 1), mutant("Timeout", 2, mutator="BlockStatement"))
 class Planted(unittest.TestCase):
     """A planted tree and a stub StrykerJS; the rows are in the classes below."""
 
+    @override
     def setUp(self) -> None:
         """Plant a git tree, the stub and its answers."""
         self.tmp = Path(tempfile.mkdtemp())
@@ -165,7 +167,7 @@ class Planted(unittest.TestCase):
         stub.write_text(STRYKER_STUB, encoding="utf-8")
         stub.chmod(0o755)
 
-    def plant(self, *mutants: dict, config: object = None) -> None:
+    def plant(self, *mutants: dict[str, object], config: object = None) -> None:
         """Adopt, install the stub, commit, and plant the report."""
         self.track("stryker.config.json", json.dumps(config or CONFIG))
         self.install()
@@ -206,12 +208,10 @@ class Adoption(Planted):
         """No stryker.config.json: exit 0, named, nothing called, skipped counted."""
         done, log = self.run_leg()
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(
-            done.stdout.splitlines(),
-            [f"{LABEL}: no stryker.config.json tracked, skipped"],
-        )
+        want = [f"{LABEL}: no stryker.config.json tracked, skipped"]
+        self.assertEqual(done.stdout.splitlines(), want)
         self.assertEqual(done.stderr, "")
-        self.assertEqual(log, [])
+        self.assertEqual(log, list[str]())
         self.assertEqual(self.counts(), "0/1\tskipped\n")
 
     def test_an_untracked_config_is_not_adoption(self) -> None:
@@ -222,21 +222,19 @@ class Adoption(Planted):
         done, log = self.run_leg()
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertIn("skipped", done.stdout)
-        self.assertEqual(log, [])
+        self.assertEqual(log, list[str]())
 
     def test_a_config_in_another_form_is_red_never_skipped(self) -> None:
         """A tracked stryker.config.mjs is adoption the leg cannot read: red."""
         self.track("stryker.config.mjs", "export default {};\n")
         done, log = self.run_leg()
         self.assertEqual(done.returncode, 1)
-        self.assertEqual(
-            done.stderr.splitlines(),
-            [
-                f"{LABEL}: a StrykerJS config the leg cannot read: stryker.config.mjs",
-                "  the leg reads stryker.config.json only; move the config there",
-            ],
-        )
-        self.assertEqual(log, [])
+        want = [
+            f"{LABEL}: a StrykerJS config the leg cannot read: stryker.config.mjs",
+            "  the leg reads stryker.config.json only; move the config there",
+        ]
+        self.assertEqual(done.stderr.splitlines(), want)
+        self.assertEqual(log, list[str]())
 
     def test_a_workstation_is_refused_by_name(self) -> None:
         """No CI: adopted, the leg refuses before anything runs."""
@@ -252,19 +250,17 @@ class Adoption(Planted):
             check=False,
         )
         self.assertEqual(done.returncode, 1)
-        self.assertEqual(
-            done.stderr.splitlines(),
-            [
-                (
-                    f"{LABEL}: CI is unset — mutants run in place with the tree's own"
-                    " environment,"
-                ),
-                (
-                    "  so this leg runs on a runner only (repo-mutants.yml), never a"
-                    " workstation"
-                ),
-            ],
-        )
+        want = [
+            (
+                f"{LABEL}: CI is unset — mutants run in place with the tree's own"
+                " environment,"
+            ),
+            (
+                "  so this leg runs on a runner only (repo-mutants.yml), never a"
+                " workstation"
+            ),
+        ]
+        self.assertEqual(done.stderr.splitlines(), want)
         self.assertEqual(self.log.read_text(encoding="utf-8"), "")
 
     def test_stryker_missing_is_red_by_name(self) -> None:
@@ -272,42 +268,38 @@ class Adoption(Planted):
         self.track("stryker.config.json", json.dumps(CONFIG))
         done, _log = self.run_leg()
         self.assertEqual(done.returncode, 1)
-        self.assertEqual(
-            done.stderr.splitlines(),
-            [
-                (
-                    f"{LABEL}: stryker.config.json is tracked but"
-                    " node_modules/.bin/stryker"
-                    " is missing — add"
-                ),
-                (
-                    "  @stryker-mutator/core and its runner plugin to devDependencies,"
-                    " and install"
-                ),
-            ],
-        )
+        want = [
+            (
+                f"{LABEL}: stryker.config.json is tracked but"
+                " node_modules/.bin/stryker"
+                " is missing — add"
+            ),
+            (
+                "  @stryker-mutator/core and its runner plugin to devDependencies,"
+                " and install"
+            ),
+        ]
+        self.assertEqual(done.stderr.splitlines(), want)
 
     def test_a_shard_other_than_whole_is_red(self) -> None:
         """StrykerJS cannot shard: 1/2 is red before anything runs."""
         done, log = self.run_leg(MUTANTS_SHARD="1/2")
         self.assertEqual(done.returncode, 1)
-        self.assertEqual(
-            done.stderr.splitlines(),
-            [
-                (
-                    f"{LABEL}: MUTANTS_SHARD='1/2' — StrykerJS cannot shard; the"
-                    " typescript"
-                    " job runs one shard, 0/1"
-                )
-            ],
-        )
-        self.assertEqual(log, [])
+        want = [
+            (
+                f"{LABEL}: MUTANTS_SHARD='1/2' — StrykerJS cannot shard; the"
+                " typescript"
+                " job runs one shard, 0/1"
+            )
+        ]
+        self.assertEqual(done.stderr.splitlines(), want)
+        self.assertEqual(log, list[str]())
 
 
 class Refusals(Planted):
     """A config that excludes mutants with no reason at a site is red."""
 
-    ROWS = (
+    ROWS: tuple[tuple[dict[str, object], str], ...] = (
         (
             {"mutator": {"excludedMutations": ["StringLiteral"]}},
             (
@@ -350,34 +342,30 @@ class Refusals(Planted):
                 self.plant(*KILLED, config=CONFIG | setting)
                 done, log = self.run_leg()
                 self.assertEqual(done.returncode, 1)
-                self.assertEqual(
-                    done.stderr.splitlines(),
-                    [
-                        f"{LABEL}: stryker.config.json {message}",
-                        (
-                            f"{LABEL}: record each equivalent mutant at its site"
-                            f" instead: {MARK}"
-                        ),
-                    ],
-                )
-                self.assertEqual(log, [])
+                want = [
+                    f"{LABEL}: stryker.config.json {message}",
+                    (
+                        f"{LABEL}: record each equivalent mutant at its site"
+                        f" instead: {MARK}"
+                    ),
+                ]
+                self.assertEqual(done.stderr.splitlines(), want)
+                self.assertEqual(log, list[str]())
 
     def test_incremental_is_refused_as_deferred(self) -> None:
         """`incremental: true` is red by name, with the reason it is deferred."""
         self.plant(*KILLED, config=CONFIG | {"incremental": True})
         done, log = self.run_leg()
         self.assertEqual(done.returncode, 1)
-        self.assertEqual(
-            done.stderr.splitlines(),
-            [
-                (
-                    f"{LABEL}: stryker.config.json sets `incremental` — a runner has no"
-                    " earlier results, so it would read as on and do nothing; the leg"
-                    " runs every mutant every week (deferred, #1358)"
-                )
-            ],
-        )
-        self.assertEqual(log, [])
+        want = [
+            (
+                f"{LABEL}: stryker.config.json sets `incremental` — a runner has no"
+                " earlier results, so it would read as on and do nothing; the leg"
+                " runs every mutant every week (deferred, #1358)"
+            )
+        ]
+        self.assertEqual(done.stderr.splitlines(), want)
+        self.assertEqual(log, list[str]())
 
     def test_a_config_that_is_not_json_is_red(self) -> None:
         """An unreadable config is red, never a skip."""
@@ -390,11 +378,12 @@ class Refusals(Planted):
             ),
             done.stderr,
         )
-        self.assertEqual(log, [])
+        self.assertEqual(log, list[str]())
 
     def test_a_config_that_is_not_an_object_is_red(self) -> None:
         """A JSON list is no config."""
-        self.assertEqual(mutants_typescript.refusals([]), ["is not a JSON object"])
+        want = ["is not a JSON object"]
+        self.assertEqual(mutants_typescript.refusals([]), want)
 
 
 class Verdict(Planted):
@@ -405,17 +394,16 @@ class Verdict(Planted):
         self.plant(*KILLED)
         done, log = self.run_leg()
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(
-            done.stdout.splitlines(),
-            [
-                (
-                    f"{LABEL}: 2 mutants, 2 killed, 0 survived, 0 not covered,"
-                    " 0 not viable, 0 excluded"
-                )
-            ],
-        )
+        want = [
+            (
+                f"{LABEL}: 2 mutants, 2 killed, 0 survived, 0 not covered,"
+                " 0 not viable, 0 excluded"
+            )
+        ]
+        self.assertEqual(done.stdout.splitlines(), want)
         self.assertEqual(done.stderr, "")
-        self.assertEqual(log, [CALL])
+        want = [CALL]
+        self.assertEqual(log, want)
         self.assertEqual(self.counts(), "0/1\t2\t2\t0\t0\n")
         self.assertFalse((self.tree / "reports/mutation/mutation.json").exists())
 
@@ -424,17 +412,16 @@ class Verdict(Planted):
         self.plant(*KILLED, mutant("Survived", 7))
         done, _ = self.run_leg()
         self.assertEqual(done.returncode, 1)
-        self.assertEqual(
-            done.stdout.splitlines(),
-            [
-                f"{LABEL}: survived: src/add.ts:7:54: ArithmeticOperator: a - b",
-                (
-                    f"{LABEL}: 3 mutants, 2 killed, 1 survived, 0 not covered,"
-                    " 0 not viable, 0 excluded"
-                ),
-            ],
-        )
-        self.assertEqual(done.stderr.splitlines(), [RED_TAIL])
+        want = [
+            f"{LABEL}: survived: src/add.ts:7:54: ArithmeticOperator: a - b",
+            (
+                f"{LABEL}: 3 mutants, 2 killed, 1 survived, 0 not covered,"
+                " 0 not viable, 0 excluded"
+            ),
+        ]
+        self.assertEqual(done.stdout.splitlines(), want)
+        want = [RED_TAIL]
+        self.assertEqual(done.stderr.splitlines(), want)
         self.assertEqual(self.counts(), "0/1\t3\t2\t1\t0\n")
 
     def test_a_mutant_no_test_reaches_is_not_covered_and_red(self) -> None:
@@ -444,16 +431,14 @@ class Verdict(Planted):
         )
         done, _ = self.run_leg()
         self.assertEqual(done.returncode, 1)
-        self.assertEqual(
-            done.stdout.splitlines(),
-            [
-                f"{LABEL}: not covered: src/add.ts:9:54: BlockStatement: {{}}",
-                (
-                    f"{LABEL}: 3 mutants, 2 killed, 0 survived, 1 not covered,"
-                    " 0 not viable, 0 excluded"
-                ),
-            ],
-        )
+        want = [
+            f"{LABEL}: not covered: src/add.ts:9:54: BlockStatement: {{}}",
+            (
+                f"{LABEL}: 3 mutants, 2 killed, 0 survived, 1 not covered,"
+                " 0 not viable, 0 excluded"
+            ),
+        ]
+        self.assertEqual(done.stdout.splitlines(), want)
         self.assertEqual(self.counts(), "0/1\t3\t2\t1\t0\n")
 
     def test_an_excluded_survivor_with_a_reason_is_green_and_counted(self) -> None:
@@ -461,15 +446,13 @@ class Verdict(Planted):
         self.plant(*KILLED, mutant("Ignored", 4, reason="zero is either sign here"))
         done, _ = self.run_leg()
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(
-            done.stdout.splitlines(),
-            [
-                (
-                    f"{LABEL}: 3 mutants, 2 killed, 0 survived, 0 not covered,"
-                    " 0 not viable, 1 excluded"
-                )
-            ],
-        )
+        want = [
+            (
+                f"{LABEL}: 3 mutants, 2 killed, 0 survived, 0 not covered,"
+                " 0 not viable, 1 excluded"
+            )
+        ]
+        self.assertEqual(done.stdout.splitlines(), want)
         self.assertEqual(self.counts(), "0/1\t3\t2\t0\t1\n")
 
     def test_an_exclusion_without_its_reason_is_red(self) -> None:
@@ -477,47 +460,41 @@ class Verdict(Planted):
         self.plant(*KILLED, mutant("Ignored", 4, reason="Ignored using a comment"))
         done, _ = self.run_leg()
         self.assertEqual(done.returncode, 1)
-        self.assertEqual(
-            done.stderr.splitlines(),
-            [
-                (
-                    f"{LABEL}: excluded without a reason: src/add.ts:4:54:"
-                    " ArithmeticOperator: a - b"
-                ),
-                RED_TAIL,
-            ],
-        )
+        want = [
+            (
+                f"{LABEL}: excluded without a reason: src/add.ts:4:54:"
+                " ArithmeticOperator: a - b"
+            ),
+            RED_TAIL,
+        ]
+        self.assertEqual(done.stderr.splitlines(), want)
 
     def test_a_compile_error_is_not_viable_never_killed(self) -> None:
         """CompileError is counted on its own; green, killed unchanged."""
         self.plant(*KILLED, mutant("CompileError", 5))
         done, _ = self.run_leg()
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(
-            done.stdout.splitlines(),
-            [
-                (
-                    f"{LABEL}: 3 mutants, 2 killed, 0 survived, 0 not covered,"
-                    " 1 not viable, 0 excluded"
-                )
-            ],
-        )
+        want = [
+            (
+                f"{LABEL}: 3 mutants, 2 killed, 0 survived, 0 not covered,"
+                " 1 not viable, 0 excluded"
+            )
+        ]
+        self.assertEqual(done.stdout.splitlines(), want)
 
     def test_a_runtime_error_is_not_judged_and_writes_no_counts(self) -> None:
         """RuntimeError was not judged: red, and the totals get nothing."""
         self.plant(*KILLED, mutant("RuntimeError", 6))
         done, _ = self.run_leg()
         self.assertEqual(done.returncode, 1)
-        self.assertEqual(
-            done.stderr.splitlines(),
-            [
-                (
-                    f"{LABEL}: not judged: RuntimeError: src/add.ts:6:54:"
-                    " ArithmeticOperator: a - b"
-                ),
-                RED_TAIL,
-            ],
-        )
+        want = [
+            (
+                f"{LABEL}: not judged: RuntimeError: src/add.ts:6:54:"
+                " ArithmeticOperator: a - b"
+            ),
+            RED_TAIL,
+        ]
+        self.assertEqual(done.stderr.splitlines(), want)
         self.assertFalse((self.summary / "typescript.tsv").exists())
 
     def test_an_empty_report_is_not_judged(self) -> None:
@@ -539,13 +516,11 @@ class Run(Planted):
         self.plant(*KILLED)
         done, _ = self.run_leg(PLANT_STATUS="3", PLANT_OUTPUT="no TestRunner plugins")
         self.assertEqual(done.returncode, 1)
-        self.assertEqual(
-            done.stderr.splitlines(),
-            [
-                f"{LABEL}: StrykerJS exited 3 — nothing judged; its output:",
-                "    no TestRunner plugins",
-            ],
-        )
+        want = [
+            f"{LABEL}: StrykerJS exited 3 — nothing judged; its output:",
+            "    no TestRunner plugins",
+        ]
+        self.assertEqual(done.stderr.splitlines(), want)
 
     def test_no_report_is_red(self) -> None:
         """A zero exit with no report is red; a stale report is not read."""
@@ -556,11 +531,10 @@ class Run(Planted):
         self.planted.write_text("", encoding="utf-8")
         done, log = self.run_leg()
         self.assertEqual(done.returncode, 1)
-        self.assertEqual(
-            done.stderr.splitlines(),
-            [f"{LABEL}: StrykerJS wrote no reports/mutation/mutation.json"],
-        )
-        self.assertEqual(log, [CALL])
+        want = [f"{LABEL}: StrykerJS wrote no reports/mutation/mutation.json"]
+        self.assertEqual(done.stderr.splitlines(), want)
+        want = [CALL]
+        self.assertEqual(log, want)
 
     def test_a_dirty_tree_is_refused_before_the_run(self) -> None:
         """Uncommitted tracked changes: red, and StrykerJS never runs."""
@@ -568,34 +542,28 @@ class Run(Planted):
         (self.tree / "src/add.ts").write_text("// edited\n", encoding="utf-8")
         done, log = self.run_leg()
         self.assertEqual(done.returncode, 1)
-        self.assertEqual(
-            done.stderr.splitlines(),
-            [
-                f"{LABEL}: uncommitted:  M src/add.ts",
-                (
-                    "  the leg mutates tracked files in place; it runs on a clean tree"
-                    " only"
-                ),
-            ],
-        )
-        self.assertEqual(log, [])
+        want = [
+            f"{LABEL}: uncommitted:  M src/add.ts",
+            ("  the leg mutates tracked files in place; it runs on a clean tree only"),
+        ]
+        self.assertEqual(done.stderr.splitlines(), want)
+        self.assertEqual(log, list[str]())
 
     def test_a_tree_left_changed_is_red(self) -> None:
         """A run that leaves a tracked file changed is red, whatever it judged."""
         self.plant(*KILLED)
         done, log = self.run_leg(PLANT_DIRTY=str(self.tree / "src/add.ts"))
         self.assertEqual(done.returncode, 1)
-        self.assertEqual(
-            done.stderr.splitlines(),
-            [
-                f"{LABEL}: left changed after the run:  M src/add.ts",
-                (
-                    "  StrykerJS did not restore the tree it mutated in place; restore"
-                    " it with git"
-                ),
-            ],
-        )
-        self.assertEqual(log, [CALL])
+        want = [
+            f"{LABEL}: left changed after the run:  M src/add.ts",
+            (
+                "  StrykerJS did not restore the tree it mutated in place; restore"
+                " it with git"
+            ),
+        ]
+        self.assertEqual(done.stderr.splitlines(), want)
+        want = [CALL]
+        self.assertEqual(log, want)
 
     def test_untracked_files_do_not_block_the_run(self) -> None:
         """An untracked .env is not the tree's: the run goes ahead, in place."""
@@ -603,7 +571,8 @@ class Run(Planted):
         (self.tree / ".env").write_text("SECRET=1\n", encoding="utf-8")
         done, log = self.run_leg()
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(log, [CALL])
+        want = [CALL]
+        self.assertEqual(log, want)
 
     def test_a_tracked_report_is_refused(self) -> None:
         """The leg replaces StrykerJS's report; it never deletes a tracked file."""
@@ -611,17 +580,15 @@ class Run(Planted):
         self.plant(*KILLED)
         done, log = self.run_leg()
         self.assertEqual(done.returncode, 1)
-        self.assertEqual(
-            done.stderr.splitlines(),
-            [
-                (
-                    f"{LABEL}: reports/mutation/mutation.json is tracked; it is"
-                    " StrykerJS's"
-                    " output, and the leg replaces it"
-                )
-            ],
-        )
-        self.assertEqual(log, [])
+        want = [
+            (
+                f"{LABEL}: reports/mutation/mutation.json is tracked; it is"
+                " StrykerJS's"
+                " output, and the leg replaces it"
+            )
+        ]
+        self.assertEqual(done.stderr.splitlines(), want)
+        self.assertEqual(log, list[str]())
 
 
 class Shapes(unittest.TestCase):
@@ -723,16 +690,14 @@ class Main(unittest.TestCase):
                 path = self.write("stryker.config.json", CONFIG | setting)
                 done = call(["config", str(path)])
                 self.assertEqual(done.returncode, 1)
-                self.assertEqual(
-                    done.stderr.splitlines(),
-                    [
-                        f"{LABEL}: {path} {message}",
-                        (
-                            f"{LABEL}: record each equivalent mutant at its site"
-                            f" instead: {MARK}"
-                        ),
-                    ],
-                )
+                want = [
+                    f"{LABEL}: {path} {message}",
+                    (
+                        f"{LABEL}: record each equivalent mutant at its site"
+                        f" instead: {MARK}"
+                    ),
+                ]
+                self.assertEqual(done.stderr.splitlines(), want)
 
     def test_incremental_is_refused_as_deferred(self) -> None:
         """`incremental: true`, with the reason it is deferred."""
