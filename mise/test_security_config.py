@@ -31,15 +31,19 @@ stdlib `unittest`, the belt's one test idiom.
 
 import copy
 import io
-import json
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest import mock
 
+import decoded
 import security_config as sc
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 HERE = Path(__file__).parent
 DATA = HERE / "testdata" / "security-config"
@@ -61,7 +65,7 @@ def load(path: Path) -> object:
         The parsed value.
 
     """
-    return json.loads(path.read_text(encoding="utf-8"))
+    return decoded.load_json(path.read_text(encoding="utf-8"))
 
 
 class Live:
@@ -95,7 +99,9 @@ def records(*, agreeing_private: bool = True) -> sc.Records:
         The inputs the task passes.
 
     """
-    private = load(TREE / "security" / "org-private.json")
+    private = decoded.as_object(
+        load(TREE / "security" / "org-private.json"), "org-private.json"
+    )
     if agreeing_private:
         # The live repository has security updates on; see the module
         # docstring. Every other field is the tree's own record.
@@ -105,6 +111,40 @@ def records(*, agreeing_private: bool = True) -> sc.Records:
         private=private,
         roster=load(TREE / "slsa" / "assert-policy.json"),
     )
+
+
+def rows_of(live: Live, endpoint: str) -> list[object]:
+    """Read one answer's body as the list of rows a case edits in place.
+
+    Returns:
+        The body itself, not a copy.
+
+    """
+    _, body = live.answers[endpoint]
+    return decoded.as_array(body, endpoint)
+
+
+def body_of(live: Live, endpoint: str) -> dict[str, object]:
+    """Read one answer's body as the object a case edits in place.
+
+    Returns:
+        The body itself, not a copy.
+
+    """
+    _, body = live.answers[endpoint]
+    return decoded.as_object(body, endpoint)
+
+
+def field(value: object, *path: str) -> object:
+    """Follow keys down through nested objects, as `value[a][b]` does.
+
+    Returns:
+        The value at the end of the path.
+
+    """
+    for key in path:
+        value = decoded.as_object(value, key)[key]
+    return value
 
 
 def run(live: Live, recs: sc.Records) -> tuple[int, str, str]:
@@ -190,10 +230,10 @@ class SecurityConfigTest(unittest.TestCase):
         """A public roster member missing from the attachment list is named."""
         live = Live()
         ep = ATTACHED
-        _, rows = live.answers[ep]
+        rows = rows_of(live, ep)
         live.answers[ep] = (
             200,
-            [r for r in rows if r["repository"]["name"] != "stele"],
+            [r for r in rows if field(r, "repository", "name") != "stele"],
         )
         rc, _, err = run(live, records())
         self.assertEqual(rc, 1)
@@ -207,10 +247,10 @@ class SecurityConfigTest(unittest.TestCase):
         """Attached but not enforced is red with its status."""
         live = Live()
         ep = ATTACHED
-        _, rows = live.answers[ep]
+        rows = rows_of(live, ep)
         for r in rows:
-            if r["repository"]["name"] == "edtf":
-                r["status"] = "failed"
+            if field(r, "repository", "name") == "edtf":
+                decoded.as_object(r, "a row")["status"] = "failed"
         live.answers[ep] = (200, rows)
         rc, _, err = run(live, records())
         self.assertEqual(rc, 1)
@@ -224,8 +264,9 @@ class SecurityConfigTest(unittest.TestCase):
         """The metered product switched on by one click is named."""
         live = Live()
         ep = PRIVATE
-        _, body = live.answers[ep]
-        body["security_and_analysis"]["secret_scanning"]["status"] = "enabled"
+        body = body_of(live, ep)
+        scanning = field(body, "security_and_analysis", "secret_scanning")
+        decoded.as_object(scanning, "secret_scanning")["status"] = "enabled"
         live.answers[ep] = (200, body)
         rc, _, err = run(live, records())
         self.assertEqual(rc, 1)
@@ -249,7 +290,7 @@ class SecurityConfigTest(unittest.TestCase):
         """A private member on the public configuration bills, and is named."""
         live = Live()
         ep = ATTACHED
-        _, rows = live.answers[ep]
+        rows = rows_of(live, ep)
         rows.append({
             "status": "enforced",
             "repository": {"name": "monumental-archive", "private": True},
@@ -288,7 +329,7 @@ class SecurityConfigTest(unittest.TestCase):
         """Without admin GitHub omits the block; that is blind, not clean."""
         live = Live()
         ep = PRIVATE
-        _, body = live.answers[ep]
+        body = body_of(live, ep)
         del body["security_and_analysis"]
         live.answers[ep] = (200, body)
         rc, out, err = run(live, records())
@@ -304,8 +345,10 @@ class SecurityConfigTest(unittest.TestCase):
         """With no default for new public repositories there is nothing to describe."""
         live = Live()
         ep = DEFAULTS
-        _, rows = live.answers[ep]
-        rows[0]["default_for_new_repos"] = "private_and_internal"
+        rows = rows_of(live, ep)
+        decoded.as_object(rows[0], "[0]")["default_for_new_repos"] = (
+            "private_and_internal"
+        )
         live.answers[ep] = (200, rows)
         rc, _, err = run(live, records())
         self.assertEqual(rc, 1)
@@ -317,8 +360,8 @@ class SecurityConfigTest(unittest.TestCase):
         """A roster repository the listing lacks is named."""
         live = Live()
         ep = LISTING
-        _, rows = live.answers[ep]
-        live.answers[ep] = (200, [r for r in rows if r["name"] != "signer"])
+        rows = rows_of(live, ep)
+        live.answers[ep] = (200, [r for r in rows if field(r, "name") != "signer"])
         rc, _, err = run(live, records())
         self.assertEqual(rc, 1)
         self.assertIn("signer: in the roster and not in the org listing", err)
@@ -332,41 +375,43 @@ class ShapeTest(unittest.TestCase):
         roster = load(TREE / "slsa" / "assert-policy.json")
         names = sc.roster_names
         repos = "population.repositories"
-        rows = [
-            (sc.read_records, ([], {}, roster), "org-default.json is not an object"),
-            (sc.read_records, ({}, 1, roster), "org-private.json is not an object"),
-            (names, ([],), "the roster is not an object"),
-            (names, ({"population": []},), "population is not an object"),
-            (names, ({"population": {}},), f"{repos} is absent or empty"),
+        rows: list[tuple[Callable[[], object], str]] = [
             (
-                names,
-                ({"population": {"repositories": []}},),
+                lambda: sc.read_records([], {}, roster),
+                "org-default.json is not an object",
+            ),
+            (
+                lambda: sc.read_records({}, 1, roster),
+                "org-private.json is not an object",
+            ),
+            (lambda: names([]), "the roster is not an object"),
+            (lambda: names({"population": []}), "population is not an object"),
+            (lambda: names({"population": {}}), f"{repos} is absent or empty"),
+            (
+                lambda: names({"population": {"repositories": []}}),
                 f"{repos} is absent or empty",
             ),
             (
-                names,
-                ({"population": {"repositories": ["x"]}},),
+                lambda: names({"population": {"repositories": ["x"]}}),
                 f"{repos}[0] is not an object",
             ),
             (
-                names,
-                ({"population": {"repositories": [{"r": 1}]}},),
+                lambda: names({"population": {"repositories": [{"r": 1}]}}),
                 f"{repos}[0].repo is not a string",
             ),
             (
-                sc.repo_status,
-                ({"k": {"status": 1}}, "k"),
+                lambda: sc.repo_status({"k": {"status": 1}}, "k"),
                 "security_and_analysis.k.status is not a string",
             ),
-            (sc.pages, ("e", {}), "e: the pages is not a list"),
-            (sc.pages, ("e", [[1], 2]), "e: a page is not a list"),
+            (lambda: sc.pages("e", {}), "e: the pages is not a list"),
+            (lambda: sc.pages("e", [[1], 2]), "e: a page is not a list"),
         ]
-        for call, args, message in rows:
+        for call, message in rows:
             with (
                 self.subTest(message=message),
-                self.assertRaises(sc.decoded.UndecodableError) as cm,
+                self.assertRaises(decoded.UndecodableError) as cm,
             ):
-                call(*args)
+                call()
             self.assertEqual(str(cm.exception), message)
 
     def test_status_readings(self) -> None:
@@ -374,7 +419,8 @@ class ShapeTest(unittest.TestCase):
         self.assertEqual(sc.repo_status({"k": {"status": "on"}}, "k"), "on")
         self.assertIsNone(sc.repo_status({"k": {}}, "k"))
         self.assertIsNone(sc.repo_status({"k": "on"}, "k"))
-        self.assertEqual(sc.pages("e", [[1], [], [2, 3]]), [1, 2, 3])
+        flat: list[object] = [1, 2, 3]
+        self.assertEqual(sc.pages("e", [[1], [], [2, 3]]), flat)
 
     def test_live_answers(self) -> None:
         """Each live field the audit reads, wrongly shaped in turn."""
@@ -409,7 +455,7 @@ class ShapeTest(unittest.TestCase):
             audit = sc.Audit(OWNER, records(), live)
             with (
                 self.subTest(message=message),
-                self.assertRaises(sc.decoded.UndecodableError) as cm,
+                self.assertRaises(decoded.UndecodableError) as cm,
             ):
                 audit.run()
             self.assertEqual(str(cm.exception), message)
@@ -418,13 +464,13 @@ class ShapeTest(unittest.TestCase):
         """A duplicate key in gh's output is refused with the endpoint."""
         done = subprocess.CompletedProcess([], 0, stdout='{"a": 1, "a": 2}', stderr="")
         with (
-            mock.patch.object(sc.subprocess, "run", return_value=done),
-            self.assertRaises(sc.decoded.UndecodableError) as cm,
+            mock.patch.object(subprocess, "run", return_value=done),
+            self.assertRaises(decoded.UndecodableError) as cm,
         ):
             sc.gh_fetch("x/y")
         self.assertEqual(str(cm.exception), 'x/y: duplicate key "a"')
         pages = subprocess.CompletedProcess([], 0, stdout="[[1], [2]]", stderr="")
-        with mock.patch.object(sc.subprocess, "run", return_value=pages):
+        with mock.patch.object(subprocess, "run", return_value=pages):
             self.assertEqual(sc.gh_fetch("x/y", paginate=True), (200, [1, 2]))
 
     def test_main_reports_a_refusal_as_an_unreadable_input(self) -> None:

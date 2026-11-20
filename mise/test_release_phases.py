@@ -28,10 +28,10 @@ gate as `mise run test`, which `ci` collects.
 
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
-import tomllib
 import unittest
 from pathlib import Path
 
+import decoded
 import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
@@ -149,8 +149,10 @@ def body() -> str:
         The task body with the `{% raw %}` / `{% endraw %}` lines removed.
 
     """
-    config = tomllib.loads((BELT / "config.toml").read_text(encoding="utf-8"))
-    run = config["tasks"]["lint:release-phases"]["run"]
+    config = decoded.load_toml((BELT / "config.toml").read_text(encoding="utf-8"))
+    tasks = decoded.as_object(config["tasks"], "the belt's [tasks]")
+    task = decoded.as_object(tasks["lint:release-phases"], "lint:release-phases")
+    run = decoded.as_str(task["run"], "the task's run")
     return "".join(
         line
         for line in run.splitlines(keepends=True)

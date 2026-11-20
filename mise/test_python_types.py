@@ -20,11 +20,12 @@ import os
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
-import tomllib
 import unittest
 from dataclasses import dataclass
 from pathlib import Path
+from typing import override
 
+import decoded
 import hermetic
 import python_roots
 import python_types_seams
@@ -54,8 +55,7 @@ def belt() -> dict[str, object]:
         mise/config.toml, decoded.
 
     """
-    with (BELT / "config.toml").open("rb") as handle:
-        return tomllib.load(handle)
+    return decoded.load_toml((BELT / "config.toml").read_bytes())
 
 
 def body() -> str:
@@ -108,6 +108,11 @@ def real_mypy() -> str | None:
         [found, "--version"], capture_output=True, text=True, check=False
     )
     return found if done.stdout.split()[1:2] == [pinned()] else None
+
+
+# Each looked up once, at import, as the skip decorators they replace did.
+MYPY = real_mypy()
+HYPOTHESIS = hermetic.optional_tool("hypothesis")
 
 
 @dataclass(frozen=True)
@@ -188,7 +193,7 @@ class TheWiring(unittest.TestCase):
         done = run({"README.md": "x\n"}, stub={})
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertEqual(f"{LABEL}: no Python tracked, skipped\n", done.stdout)
-        self.assertEqual([], done.args)
+        self.assertEqual(list[str](), done.args)
 
     def test_the_delivered_config_missing_is_red(self) -> None:
         """No mypy.ini in the belt: red by name, mypy never asked."""
@@ -198,7 +203,7 @@ class TheWiring(unittest.TestCase):
             f"{LABEL}: <belt>/mypy.ini is missing — the belt did not arrive\n",
             done.stderr,
         )
-        self.assertEqual([], done.args)
+        self.assertEqual(list[str](), done.args)
 
     def test_a_mypy_that_is_not_the_pin_is_red(self) -> None:
         """A stale install is named with the pin, before it checks anything."""
@@ -208,14 +213,16 @@ class TheWiring(unittest.TestCase):
             f"{LABEL}: mypy 0.0.1 is running but the belt pins '{pinned()}'\n",
             done.stderr,
         )
-        self.assertEqual([], done.args)
+        self.assertEqual(list[str](), done.args)
 
     def test_the_belt_config_is_the_one_passed(self) -> None:
         """The stub gets --config-file <belt>/mypy.ini and every tracked file."""
         done = run({**CLEAN, "mypy.ini": "[mypy]\nignore_errors = True\n"}, stub={})
         self.assertEqual(0, done.returncode, done.stderr)
-        self.assertEqual(["--config-file", "<belt>/mypy.ini"], done.args[:2])
-        self.assertEqual(["a.py"], done.args[4:])
+        config = ["--config-file", "<belt>/mypy.ini"]
+        files = ["a.py"]
+        self.assertEqual(config, done.args[:2])
+        self.assertEqual(files, done.args[4:])
         self.assertIn(f"{LABEL}: 1 file(s) clean under mypy {pinned()}\n", done.stdout)
 
     def test_a_finding_is_red(self) -> None:
@@ -271,7 +278,7 @@ class TheWiring(unittest.TestCase):
         self.assertEqual(1, done.returncode)
         self.assertIn("  helper: a/helper, b/helper\n", done.stderr)
         self.assertIn(f"{LABEL}: rename one of each pair above", done.stderr)
-        self.assertEqual([], done.args)
+        self.assertEqual(list[str](), done.args)
 
     def test_a_coded_ignore_is_not_a_seam(self) -> None:
         """`# type: ignore[<code>]` names its rule and passes the helper."""
@@ -402,9 +409,14 @@ class TheHelpers(unittest.TestCase):
         )
 
 
-@unittest.skipUnless(real_mypy(), "the belt's pinned mypy is not installed here")
 class TheConfig(unittest.TestCase):
     """What the delivered config makes the pinned mypy refuse."""
+
+    @override
+    def setUp(self) -> None:
+        """Skip the row where the belt's pinned mypy is not installed."""
+        if not MYPY:
+            self.skipTest("the belt's pinned mypy is not installed here")
 
     def test_a_finding_is_red(self) -> None:
         """An unvalidated json value is refused where it is read."""
@@ -491,12 +503,16 @@ class Holds(unittest.TestCase):
 """
 
 
-@unittest.skipUnless(real_mypy(), "the belt's pinned mypy is not installed here")
-@unittest.skipUnless(
-    hermetic.optional_tool("hypothesis"), "the belt's Hypothesis is not installed here"
-)
 class TheTypedGiven(unittest.TestCase):
     """The belt's `given` under the unmodified config (#1604)."""
+
+    @override
+    def setUp(self) -> None:
+        """Skip the row where the pinned mypy or the belt's Hypothesis is absent."""
+        if not MYPY:
+            self.skipTest("the belt's pinned mypy is not installed here")
+        if not HYPOTHESIS:
+            self.skipTest("the belt's Hypothesis is not installed here")
 
     def test_a_property_is_clean(self) -> None:
         """No finding on the decorator or the decorated test."""

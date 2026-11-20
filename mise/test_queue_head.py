@@ -30,6 +30,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from typing import override
 
 import hermetic
 import queue_head
@@ -224,6 +225,7 @@ def start_helper(
 class QueueHead(unittest.TestCase):
     """Each row: a merge group, and the pull request it was queued from."""
 
+    @override
     def setUp(self) -> None:
         """Give each row its own scratch directory."""
         self.tmp = pathlib.Path(tempfile.mkdtemp())
@@ -528,12 +530,9 @@ class Workflow(unittest.TestCase):
             step + "\n",
         )
         runs = [line for line in step.splitlines() if line.startswith("        run:")]
-        self.assertEqual(
-            runs,
-            # Under the belt's Python (#1543).
-            ["        run: '\"${ORG_PYTHON}\" .org-canon/mise/queue_head.py'"],
-            step,
-        )
+        # Under the belt's Python (#1543).
+        want = ["        run: '\"${ORG_PYTHON}\" .org-canon/mise/queue_head.py'"]
+        self.assertEqual(runs, want, step)
         for key, value in (
             ("ORG_QUEUE_BASE", "github.event.merge_group.base_sha"),
             ("ORG_QUEUE_GROUP", "github.event.merge_group.head_sha"),

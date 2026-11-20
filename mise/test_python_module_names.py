@@ -16,10 +16,10 @@ gate as `mise run test`. Every git call passes a scrubbed environment.
 
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
-import tomllib
 import unittest
 from pathlib import Path
 
+import decoded
 import hermetic
 
 BELT = Path(__file__).resolve().parent
@@ -35,8 +35,10 @@ def body() -> str:
         The bash the task runs.
 
     """
-    with (BELT / "config.toml").open("rb") as handle:
-        return tomllib.load(handle)["tasks"][TASK]["run"]
+    config = decoded.load_toml((BELT / "config.toml").read_bytes())
+    tasks = decoded.as_object(config["tasks"], "the belt's [tasks]")
+    task = decoded.as_object(tasks[TASK], TASK)
+    return decoded.as_str(task["run"], "the task's run")
 
 
 def run(tree: Path, home: Path) -> subprocess.CompletedProcess[str]:

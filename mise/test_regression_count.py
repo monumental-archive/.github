@@ -14,7 +14,7 @@ import pathlib
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
 import unittest
-from typing import ClassVar
+from typing import ClassVar, override
 from unittest import mock
 
 import hermetic
@@ -111,12 +111,12 @@ class Repo:
 class RepoCase(unittest.TestCase):
     """A row with a fresh repository and an isolated git."""
 
+    @override
     def setUp(self) -> None:
         """Isolate git's config, then build the repository."""
         clean = hermetic.env()
-        patcher = mock.patch.dict(os.environ, {**clean, **_GIT_ENV}, clear=True)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        isolated: dict[str, str] = {**clean, **_GIT_ENV}
+        self.enterContext(mock.patch.dict(os.environ, isolated, clear=True))
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.repo = Repo(pathlib.Path(tmp.name))
@@ -290,7 +290,7 @@ class TestNotACodeFix(RepoCase):
         self.repo.commit("test: f", {"test_a.py": "1\n"})
         self.repo.commit('Revert "fix: f"', {"a.py": "2\n"})
         self.repo.commit("fixup: f", {"a.py": "3\n"})
-        self.assertEqual(self.repo.verdicts(), {})
+        self.assertEqual(self.repo.verdicts(), dict[str, tuple[str, str]]())
 
 
 class TestMergeAndUnclassifiable(RepoCase):
@@ -308,7 +308,9 @@ class TestMergeAndUnclassifiable(RepoCase):
             "merge", "--quiet", "--no-ff", "-m", "fix: merge the topic", "topic"
         )
         got = self.repo.verdicts()
-        self.assertEqual(set(got), {"fix: merge the topic"})
+        subjects = set(got)
+        want = {"fix: merge the topic"}
+        self.assertEqual(subjects, want)
         self.assertEqual(got["fix: merge the topic"], (rc.TEST_ADDED, "src/a_test.go"))
 
     def test_merge_without_a_test(self) -> None:
@@ -356,9 +358,9 @@ class TestMergeAndUnclassifiable(RepoCase):
             run_git(tmp, "add", "a.py")
             run_git(tmp, "commit", "--quiet", "-m", "fix: first")
             got = rc.measure(root)
-        self.assertEqual(
-            [(c.subject, c.verdict) for c in got], [("fix: first", rc.NO_TEST)]
-        )
+        found = [(c.subject, c.verdict) for c in got]
+        want = [("fix: first", rc.NO_TEST)]
+        self.assertEqual(found, want)
 
 
 class TestReport(RepoCase):

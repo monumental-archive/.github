@@ -18,6 +18,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest import mock
 
 import pgrx_postgres
 
@@ -48,7 +49,7 @@ def entry(
     active: bool = True,
     installed: bool = True,
     **kwargs: bool,
-) -> dict:
+) -> dict[str, object]:
     """Build one entry of `mise ls <pkg> --json`.
 
     Returns:
@@ -80,42 +81,47 @@ class PinnedTest(unittest.TestCase):
     def test_an_active_installed_pin_counts(self) -> None:
         """The ordinary state after `mise install`."""
         found, absent = pgrx_postgres.pinned(pgrx_postgres.entries([entry("18.6.0")]))
-        self.assertEqual(sorted(found), [18])
-        self.assertEqual(absent, [])
+        want = [18]
+        majors = sorted(found)
+        self.assertEqual(majors, want)
+        self.assertEqual(absent, list[str]())
 
     def test_a_package_installed_by_hand_is_not_a_pin(self) -> None:
         """It would pass on this laptop and be absent in CI."""
         found, _absent = pgrx_postgres.pinned(
             pgrx_postgres.entries([entry("18.6.0", active=False)])
         )
-        self.assertEqual(found, {})
+        self.assertEqual(found, dict[int, pgrx_postgres.Entry]())
 
     def test_a_declared_pin_not_installed_is_held_apart(self) -> None:
         """The remedy is `mise install`, not an edit to mise.toml."""
         found, absent = pgrx_postgres.pinned(
             pgrx_postgres.entries([entry("18.6.0", installed=False)])
         )
-        self.assertEqual(found, {})
-        self.assertEqual(absent, ["18.6.0"])
+        self.assertEqual(found, dict[int, pgrx_postgres.Entry]())
+        want = ["18.6.0"]
+        self.assertEqual(absent, want)
 
     def test_the_major_is_the_leading_component(self) -> None:
         """14.24.0 serves pg14; the patch is the repo's to choose."""
         found, _absent = pgrx_postgres.pinned(
             pgrx_postgres.entries([entry("14.24.0"), entry("17.11.0")])
         )
-        self.assertEqual(sorted(found), [14, 17])
+        want = [14, 17]
+        majors = sorted(found)
+        self.assertEqual(majors, want)
 
     def test_a_version_with_no_numeric_major_is_not_a_postgres(self) -> None:
         """Refuse rather than guess at a shape the package does not use."""
         found, _absent = pgrx_postgres.pinned(pgrx_postgres.entries([entry("latest")]))
-        self.assertEqual(found, {})
+        self.assertEqual(found, dict[int, pgrx_postgres.Entry]())
 
     def test_a_non_ascii_digit_is_not_a_major(self) -> None:
         """`²` passes str.isdigit, and int() refuses it (#1555)."""
         found, _absent = pgrx_postgres.pinned(
             pgrx_postgres.entries([entry("²"), entry("\u0661\u0667.1.0")])
         )
-        self.assertEqual(found, {})
+        self.assertEqual(found, dict[int, pgrx_postgres.Entry]())
 
 
 class PgConfigTest(unittest.TestCase):
@@ -154,7 +160,7 @@ class PlanTest(unittest.TestCase):
         records, findings = pgrx_postgres.plan(
             [14, 15, 16, 17, 18], pgrx_postgres.entries(listing)
         )
-        self.assertEqual(findings, [])
+        self.assertEqual(findings, list[str]())
         self.assertEqual(len(records), 5)
         self.assertTrue(records[0].startswith("pg\t14\t"))
 
@@ -163,7 +169,7 @@ class PlanTest(unittest.TestCase):
         records, findings = pgrx_postgres.plan(
             [17, 18], pgrx_postgres.entries([entry("18.6.0")])
         )
-        self.assertEqual(records, [])
+        self.assertEqual(records, list[str]())
         self.assertTrue(any("pg17" in line for line in findings))
         self.assertTrue(any("mise.toml" in line for line in findings))
 
@@ -179,14 +185,14 @@ class PlanTest(unittest.TestCase):
         records, findings = pgrx_postgres.plan(
             [17, 18], pgrx_postgres.entries([entry("18.6.0")])
         )
-        self.assertEqual(records, [])
+        self.assertEqual(records, list[str]())
         self.assertTrue(findings)
 
     def test_a_pin_the_crate_does_not_declare_is_not_a_finding(self) -> None:
         """A spare pin is waste, never a wrong answer."""
         listing = [entry("18.6.0"), entry("14.24.0")]
         _records, findings = pgrx_postgres.plan([18], pgrx_postgres.entries(listing))
-        self.assertEqual(findings, [])
+        self.assertEqual(findings, list[str]())
 
     def test_a_pin_that_is_not_installed_is_named_in_the_remedy(self) -> None:
         """Otherwise the remedy reads as an edit that changes nothing."""
@@ -199,7 +205,7 @@ class MainTest(unittest.TestCase):
     """The whole check. Mutation: treat an empty --majors as success."""
 
     @staticmethod
-    def invoke(majors: str, listing: object) -> tuple:
+    def invoke(majors: str, listing: object) -> tuple[int, str, str]:
         """Run the provisioner over one listing.
 
         Returns:
@@ -207,15 +213,13 @@ class MainTest(unittest.TestCase):
 
         """
         out, err = io.StringIO(), io.StringIO()
-        original = pgrx_postgres.sys.stdin
-        pgrx_postgres.sys.stdin = io.StringIO(
-            json.dumps(listing) if listing is not None else "{",
-        )
-        try:
-            with redirect_stdout(out), redirect_stderr(err):
-                status = pgrx_postgres.main(["--majors", majors])
-        finally:
-            pgrx_postgres.sys.stdin = original
+        stdin = io.StringIO(json.dumps(listing) if listing is not None else "{")
+        with (
+            mock.patch("sys.stdin", stdin),
+            redirect_stdout(out),
+            redirect_stderr(err),
+        ):
+            status = pgrx_postgres.main(["--majors", majors])
         return status, out.getvalue(), err.getvalue()
 
     def test_a_served_major_prints_its_record(self) -> None:
@@ -247,10 +251,11 @@ class MainTest(unittest.TestCase):
     def test_a_listing_of_the_wrong_shape_is_red_by_where(self) -> None:
         """Not a list, or an entry not an object: named, never a crash."""
         cmd = "pgrx-postgres: `mise ls aqua:theseus-rs/postgresql-binaries`"
-        for listing, where in (
+        cases: tuple[tuple[object, str], ...] = (
             ({"version": "18.6.0"}, "the listing is not a list"),
             (["18.6.0"], "listing[0] is not an object"),
-        ):
+        )
+        for listing, where in cases:
             with self.subTest(where=where):
                 status, out, err = self.invoke("18", listing)
                 self.assertEqual((1, "", f"{cmd}: {where}\n"), (status, out, err))

@@ -22,10 +22,10 @@ gate as `mise run test`.
 import os
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import tempfile
-import tomllib
 import unittest
 from pathlib import Path
 
+import decoded
 import hermetic
 
 BELT = Path(__file__).resolve().parent
@@ -89,8 +89,10 @@ def body() -> str:
         The bash the task runs.
 
     """
-    with (BELT / "config.toml").open("rb") as handle:
-        return tomllib.load(handle)["tasks"]["lint:rust"]["run"]
+    config = decoded.load_toml((BELT / "config.toml").read_bytes())
+    tasks = decoded.as_object(config["tasks"], "the belt's [tasks]")
+    task = decoded.as_object(tasks["lint:rust"], "lint:rust")
+    return decoded.as_str(task["run"], "the task's run")
 
 
 class EveryMemberIsLinted(unittest.TestCase):
@@ -144,7 +146,8 @@ class EveryMemberIsLinted(unittest.TestCase):
     ) -> None:
         """Clippy reached every member and named the red one."""
         self.assertEqual(101, done.returncode, done.stdout + done.stderr)
-        self.assertEqual([f"{m}@1.3.3" for m in MEMBERS], asked)
+        want = [f"{m}@1.3.3" for m in MEMBERS]
+        self.assertEqual(want, asked)
         self.assertIn(
             f"lint:rust: 6 crate(s) linted: {' '.join(MEMBERS)}\n", done.stdout
         )

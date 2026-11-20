@@ -28,7 +28,6 @@ import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 import tempfile
-import tomllib
 import unittest
 from dataclasses import dataclass
 from pathlib import Path
@@ -37,14 +36,15 @@ from unittest import mock
 import hermetic
 import plpgsql_coverage as pc
 import test_coverage_tasks
-from decoded import as_array, as_object, load_json
+from decoded import as_array, as_object, as_str, load_json, load_toml
 
 CANON = Path(__file__).resolve().parent.parent
 BELT = CANON / "mise"
 HELPER = BELT / "plpgsql_coverage.py"
 BASH = hermetic.tool("bash")
 GIT = hermetic.tool("git")
-CONFIG = tomllib.loads((BELT / "config.toml").read_text(encoding="utf-8"))
+CONFIG = load_toml((BELT / "config.toml").read_text(encoding="utf-8"))
+TASKS = as_object(CONFIG["tasks"], "the belt's [tasks]")
 
 CLAUSE = "LANGUAGE plpgsql"
 
@@ -536,9 +536,9 @@ class LintRows(Collecting):
         self.assertEqual("plpgsql 60.00\nplpgsql-branches 66.66\n", read.stdout)
         document = as_object(load_json(self.report.read_text("utf-8")), "report")
         functions = as_array(document.get("functions"), "functions")
-        self.assertEqual(
-            [[], []], [as_object(f, "function").get("findings") for f in functions]
-        )
+        findings = [as_object(f, "function").get("findings") for f in functions]
+        none: list[object] = [[], []]
+        self.assertEqual(none, findings)
         self.assertEqual("101 0\n102 0\n", (self.answers / "linted").read_text("utf-8"))
 
     def test_an_error_is_red_by_function_and_line(self) -> None:
@@ -926,9 +926,8 @@ class LegRows(unittest.TestCase):
         # The test task, for the read of it the python leg makes; the
         # check never runs it.
         task = tmp / "task.json"
-        task.write_text(
-            json.dumps({"dir": str(tree), "run": ["echo suite ran >&2"]}), "utf-8"
-        )
+        suite: dict[str, object] = {"dir": str(tree), "run": ["echo suite ran >&2"]}
+        task.write_text(json.dumps(suite), "utf-8")
         env = stub_env(
             stubs,
             answers,
@@ -947,7 +946,8 @@ class LegRows(unittest.TestCase):
             python=any(name.endswith(".py") for name in files),
             collects=collects,
         )
-        script = CONFIG["tasks"]["coverage:check"]["run"]
+        check = as_object(TASKS["coverage:check"], "coverage:check")
+        script = as_str(check["run"], "coverage:check's run")
         return run([BASH, "-euo", "pipefail", "-c", script], env, tree)
 
     PYTHON_HELD = (
@@ -1112,9 +1112,8 @@ class ReadsTheRunRows(unittest.TestCase):
         tree.mkdir()
         defs = tmp / "tasks"
         defs.mkdir()
-        (defs / "test.json").write_text(
-            json.dumps({"dir": str(tree), "run": ["echo suite ran >&2"]}), "utf-8"
-        )
+        suite: dict[str, object] = {"dir": str(tree), "run": ["echo suite ran >&2"]}
+        (defs / "test.json").write_text(json.dumps(suite), "utf-8")
         tracked = ["schema.sql"]
         (tree / "schema.sql").write_text(f"CREATE FUNCTION f() {CLAUSE};\n", "utf-8")
         if python:
