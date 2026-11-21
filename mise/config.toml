@@ -992,6 +992,11 @@ dir = "{{cwd}}"
 # judged once per declared major, a crate crates.io has never seen is
 # named as not judged, and a failed index lookup is red, never a skip.
 # The helper's header says why each.
+#
+# This is the read of the registry, after the fact. The DECLARATION is
+# held before merge: break:check (#1906) measures each pull request
+# against its own base, on the same population, and an undeclared break
+# is red on the pull request.
 run = 'bash "${ORG_BELT_DIR}/semver-audit.sh"'
 
 [tasks."lint:pg-upgrade-path"]
@@ -2642,6 +2647,18 @@ parents=$(git rev-list --parents -n 1 HEAD | wc -w)
 if [[ ${parents} -gt 2 ]]; then tip="HEAD^2"; fi
 "${ORG_BELT_DIR}/committed.sh" "origin/main..${tip}"
 '''
+
+[tasks."break:check"]
+description = "Hold a pull request's title to what the change breaks (#1906)"
+dir = "{{cwd}}"
+# Outside the lint: namespace on purpose, as commits:check is: it is
+# meaningless without a pull request's title and its merge commit, so
+# `ci` never collects it. ci.yml's "The title declares what the change
+# breaks" step runs it on every pull request, in the test leg, for every
+# author. PR_TITLE and PR_BODY arrive in the environment; an unset
+# PR_TITLE is red by name. The helper's header says what is measured
+# and why each.
+run = 'bash "${ORG_BELT_DIR}/break-check.sh"'
 
 [tasks."commits:check"]
 description = "Hold ONE commit message (ORG_COMMIT_MSG_FILE) to the commit canon"
