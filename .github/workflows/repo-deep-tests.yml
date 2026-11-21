@@ -28,8 +28,41 @@ permissions:
   contents: read
 
 jobs:
+  # Which jobs below apply to this tree (#1891), decided from
+  # `git ls-files` and mise/audit-legs.toml before any runner installs a
+  # toolchain: each conditional job's `if:` reads one output, so a
+  # repository without its language shows it skipped, not run-and-
+  # skipped. A job of its own because `hashFiles` is step-only
+  # (repo-mutants.yml's `adoption`); mise/test_audit_legs.py holds the
+  # table and the `if:`s to the tasks' own guards.
+  applies:
+    name: which jobs apply
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    outputs:
+      fuzz: ${{ steps.applies.outputs.fuzz }}
+      coverage-branches: ${{ steps.applies.outputs.coverage-branches }}
+      coverage-go-branches: ${{ steps.applies.outputs.coverage-go-branches }}
+      python-properties-seed: ${{ steps.applies.outputs.python-properties-seed }}
+      python-properties: ${{ steps.applies.outputs.python-properties }}
+      typescript-properties: ${{ steps.applies.outputs.typescript-properties }}
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      - name: Decide which jobs apply
+        id: applies
+        run: '"${ORG_PYTHON}" .org-canon/mise/audit_legs.py repo-deep-tests >> "${GITHUB_OUTPUT}"'
+
   fuzz:
     name: fuzz targets survive a bounded run
+    needs: applies
+    if: ${{ needs.applies.outputs.fuzz == 'true' }}
     runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
@@ -101,6 +134,8 @@ jobs:
 
   coverage-branches:
     name: rust branch coverage holds its floor
+    needs: applies
+    if: ${{ needs.applies.outputs.coverage-branches == 'true' }}
     runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
@@ -132,6 +167,8 @@ jobs:
 
   coverage-go-branches:
     name: go condition coverage holds its floor
+    needs: applies
+    if: ${{ needs.applies.outputs.coverage-go-branches == 'true' }}
     runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
@@ -172,6 +209,8 @@ jobs:
   # finding in any shard reruns with one ORG_PROPERTY_SEED.
   python-properties-seed:
     name: draw the python property seed
+    needs: applies
+    if: ${{ needs.applies.outputs.python-properties-seed == 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions: {}
@@ -187,7 +226,10 @@ jobs:
 
   python-properties:
     name: python properties hold at a random seed (${{ matrix.shard }}/8)
-    needs: python-properties-seed
+    needs:
+      - applies
+      - python-properties-seed
+    if: ${{ needs.applies.outputs.python-properties == 'true' }}
     runs-on: ubuntu-26.04
     # Eight legs by position, not by directory: a repository may keep
     # every property under one (#1631). Measured on the canon's 58 files,
@@ -240,6 +282,8 @@ jobs:
 
   typescript-properties:
     name: typescript properties hold at a random seed
+    needs: applies
+    if: ${{ needs.applies.outputs.typescript-properties == 'true' }}
     runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
@@ -291,6 +335,7 @@ jobs:
   report:
     name: Report red jobs
     needs:
+      - applies
       - fuzz
       - coverage-branches
       - coverage-go-branches

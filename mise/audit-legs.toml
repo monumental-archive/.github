@@ -1,0 +1,78 @@
+# When each scheduled job applies to a repository (#1891). One table
+# per reusable subject workflow, named for its file, and one row per job
+# in it (its `applies` and `report` jobs excepted). The workflow's
+# `applies` job runs mise/audit_legs.py over `git ls-files`, before any
+# runner installs a toolchain, and each conditional job carries
+# `if: needs.applies.outputs.<job> == 'true'`: a repository without the
+# job's language shows it skipped, never run-and-skipped.
+#
+#   when   tracked-file pathspecs, git's default meaning (#1410's,
+#          through gate_tools.matches): the job applies when one names a
+#          tracked file; absent = every repository
+#   floor  a leg that must also be recorded in the tracked
+#          .coverage-floor, read through coverage_floor.py's parser
+#
+# The rows are derived, not remembered: mise/test_audit_legs.py reads
+# each job's `mise run audit:*` tasks and the belt scripts they run, and
+# fails when a row's `when` misses a pathspec a task's guard tests, when
+# a job whose task is guarded carries no `if:`, or when a row conditions
+# a job whose task runs before any guard. A job with no task (the seed
+# draw) takes the guards of the jobs that need it.
+#
+# repo-own-audits.yml has no `applies` job: whether a repository
+# defines an `audit:*` task is a question only mise can answer.
+
+[repo-dependencies.deny]
+when = ["Cargo.lock", "*/Cargo.lock"]
+
+[repo-dependencies.go-vulns]
+when = ["go.mod", "*/go.mod", "*/*/go.mod"]
+
+[repo-dependencies.actions]
+when = [".github/workflows/*.y*ml"]
+
+[repo-dependencies.action-pins]
+when = [".github/workflows/*.y*ml", "*action.y*ml"]
+
+[repo-dependencies.lock-arch]
+when = ["mise.lock", "*/mise.lock"]
+
+[repo-dependencies.lock-idempotent]
+when = ["mise.lock", "*/mise.lock"]
+
+[repo-deep-tests.fuzz]
+# audit:fuzz on fuzz/, audit:go-fuzz on a go.mod: one job runs both.
+when = ["fuzz/", "go.mod", "*/go.mod", "*/*/go.mod"]
+
+[repo-deep-tests.coverage-branches]
+when = ["Cargo.toml"]
+floor = "rust-branches"
+
+[repo-deep-tests.coverage-go-branches]
+when = ["go.mod"]
+floor = "go-branches"
+
+[repo-deep-tests.python-properties-seed]
+when = ["*prop_*.py"]
+
+[repo-deep-tests.python-properties]
+when = ["*prop_*.py"]
+
+[repo-deep-tests.typescript-properties]
+# The task's guard is a lockfile holding fast-check (#1357), not the
+# property files: no lockfile, nothing can be a property.
+when = ["pnpm-lock.yaml", "package-lock.json", "yarn.lock", "bun.lock"]
+
+[repo-public-api.semver]
+when = ["Cargo.toml", "*/Cargo.toml"]
+
+[repo-records.links]
+# audit:links has no skip exit: it runs everywhere.
+
+[repo-records.bestpractices]
+when = [".bestpractices.json"]
+
+[repo-records.regression-tests]
+# Its subject is the history, which every repository has.
+
+[repo-own-audits.repo-audits]
