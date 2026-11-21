@@ -229,13 +229,21 @@ else.* No clippy flag can beat a source attribute: a crate-level
 `#![allow(clippy::pedantic)]` silences every level the task sets and
 exits 0, and `-F` only downgrades that to a warning it still exits 0 on.
 `--force-warn` defeats attributes but is capped at warn, so it cannot
-fail a gate. What closes it is restriction's own `allow_attributes` and
-`allow_attributes_without_reason` — both arriving with the group — which
-together make `#[allow]` a hard error and an unreasoned suppression a
-hard error, leaving `#[expect]`, which errors the moment it stops being
-needed. `lint:rust` additionally greps tracked sources for crate-level
-group suppression, which is policing rather than construction, and is
-named as such.
+fail a gate. Two checks close it together. restriction's own
+`allow_attributes` and `allow_attributes_without_reason` — both
+arriving with the group — make an OUTER `#[allow]` (plain or under
+`cfg_attr`) a hard error and an unreasoned suppression a hard error.
+They see nothing else: an inner `#![allow(…)]`, plain or under
+`cfg_attr`, and an `allow` level in a manifest's `[lints.*]` or
+`[workspace.lints.*]` tables compile past them and exit 0 under the
+belt's own command (measured, #1857; a `[lints.rust]` allow silences
+rustc's lint today, since `-D warnings` raises only warn-level lints).
+So `lint:rust` refuses those forms itself, over tracked files:
+`rust_suppressions.py` lexes the sources and reads every `Cargo.toml`
+with `tomllib`. What is left is `#[expect]`, inner or outer, which
+errors the moment it stops being needed. The task also refuses
+crate-level suppression of a whole group by name. Both are policing
+rather than construction, and are named as such.
 
 **rustfmt, and why its maximum is smaller than it looks** (#445). The
 format half of `lint:rust`, sharing the task with clippy on the
