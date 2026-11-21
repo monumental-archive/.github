@@ -20,7 +20,7 @@ report is not stele's signer-certificates report, a finding's subject is
 not a CT index, or a forge read or write fails.
 
 Usage:
-  findings.py --report FILE --run-url URL
+  certificate_issues.py --report FILE --run-url URL
 
 The repository is GITHUB_REPOSITORY; no organisation, repository or log
 is named here. Stdlib only, and `gh` on PATH.
@@ -117,7 +117,7 @@ def read_report(path: Path) -> Report:
         )
         raise FindingsError(msg)
     # Not UTF-8, past the parser's digit limit or its depth: each was a
-    # traceback, exit 1, until prop_findings.py read bytes (#1557).
+    # traceback, exit 1, until prop_certificate_issues.py read bytes (#1557).
     try:
         report = decoded.load_json(path.read_bytes())
     except decoded.UndecodableError as err:

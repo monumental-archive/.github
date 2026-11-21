@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""findings.py against a stub `gh` on PATH (#1250, #1339).
+"""certificate_issues.py against a stub `gh` on PATH (#1250, #1339).
 
 The stub records every argv and answers `issue list` from the row's
 canned search result (or fails). Each row calls the helper's `main` in
@@ -30,12 +30,12 @@ from typing import override
 # come first.
 sys.path.append(str(Path(__file__).resolve().parents[2] / "mise"))
 
+import certificate_issues
 import decoded
-import findings
 import hermetic
 
 HERE = Path(__file__).resolve().parent
-HELPER = HERE / "findings.py"
+HELPER = HERE / "certificate_issues.py"
 DATA = HERE / "testdata"
 
 REPO = "example-owner/example-repo"
@@ -125,7 +125,9 @@ class Harness(unittest.TestCase):
         if self.write_report:
             self.report.write_text(json.dumps(self.doc), encoding="utf-8")
         argv = ["--report", str(self.report), "--run-url", RUN]
-        return hermetic.call_main(lambda: findings.main(argv), env={**self.env, **env})
+        return hermetic.call_main(
+            lambda: certificate_issues.main(argv), env={**self.env, **env}
+        )
 
     def run_script(self, **env: str) -> subprocess.CompletedProcess[str]:
         """Write the report and start the helper as the workflow does.
@@ -163,7 +165,7 @@ class Harness(unittest.TestCase):
 
 
 class Findings(Harness):
-    """One row per guard branch of findings.py."""
+    """One row per guard branch of certificate_issues.py."""
 
     def test_no_findings_files_nothing(self) -> None:
         """The real report, no findings: exit 0, gh never called."""
@@ -214,7 +216,7 @@ class Findings(Harness):
     def test_one_condition_twice_is_one_line(self) -> None:
         """Two findings of one condition: one line, both reasons (#1557).
 
-        prop_findings.py's shrunk example was two findings with no
+        prop_certificate_issues.py's shrunk example was two findings with no
         condition at all, written as two lines that each named "".
         """
         self.doc["findings"] = [
@@ -304,7 +306,7 @@ class Findings(Harness):
     def test_report_not_utf8(self) -> None:
         """A report that is not UTF-8: exit 2 by name, never a traceback.
 
-        prop_findings.py's shrunk example (#1557): the one byte 0x80.
+        prop_certificate_issues.py's shrunk example (#1557): the one byte 0x80.
         """
         self.write_report = False
         self.report.write_bytes(b"\x80")
@@ -362,7 +364,7 @@ class Findings(Harness):
 
 
 class Decoded(Harness):
-    """Each document findings.py reads is decoded where it is read (#1683)."""
+    """Each document certificate_issues.py reads is decoded where it is read (#1683)."""
 
     def test_a_search_answer_that_is_not_a_list_of_issues(self) -> None:
         """Each wrong shape of the search's answer: exit 2 by name."""

@@ -19,6 +19,7 @@ from __future__ import annotations
 import http.server
 import json
 import os
+import re
 import sys
 import tempfile
 import threading
@@ -27,8 +28,10 @@ from pathlib import Path
 from typing import override
 
 import decoded
+import findings as writer
 import hermetic
 import standing_issue as standing
+import typed_std
 
 REPO = "example-owner/example-repo"
 WORKFLOW = "slsa"
@@ -241,7 +244,11 @@ class Stubbed(unittest.TestCase):
         (self.logs / f"{number}.log").write_text(text, encoding="utf-8")
 
     def run_report(
-        self, *, ref: str = "refs/heads/main", default: str = "main"
+        self,
+        *,
+        ref: str = "refs/heads/main",
+        default: str = "main",
+        findings: Path | None = None,
     ) -> hermetic.Called:
         """Run the report as the job runs it.
 
@@ -259,6 +266,8 @@ class Stubbed(unittest.TestCase):
             "--default-branch",
             default,
         ]
+        if findings is not None:
+            argv += ["--findings", str(findings)]
         return hermetic.call_main(lambda: standing.main(argv), env=self.env)
 
     def gh_calls(self) -> list[list[str]]:
@@ -650,6 +659,253 @@ class Body(unittest.TestCase):
         cut = standing.tail(logged(*["y" * width for _ in range(60)])).text
         self.assertLessEqual(len(cut), standing.TAIL_CHARS)
         same(self, {len(line) for line in cut.splitlines()}, {width})
+
+
+def records(directory: Path, name: str, *found: standing.Finding) -> None:
+    """Write a findings file as the writer appends it.
+
+    The record is mise/findings.py's own encoding, so the report reads
+    what the writer writes.
+    """
+    directory.mkdir(parents=True, exist_ok=True)
+    with (directory / name).open("a", encoding="utf-8") as out:
+        for f in found:
+            out.write(writer.record(f.task, f.subject, f.message, f.detail) + "\n")
+
+
+def red_job(number: int, tail: standing.Excerpt | None) -> standing.Entry:
+    """Build a red job's entry with a given excerpt.
+
+    Returns:
+        The entry.
+
+    """
+    url = f"https://github.com/{REPO}/actions/runs/{RUN_ID}/job/{number}"
+    job_of = standing.Job(number, f"job {number}", "completed", "failure", url)
+    return standing.Entry(job_of, tail, None if tail else "the log could not be read")
+
+
+DENY = standing.Finding(
+    "audit:deny",
+    "chrono@0.4.45",
+    "RUSTSEC-2026-0543 is undecided",
+    ("reached through object_store 0.14.2",),
+)
+SPELL = standing.Finding("lint:typos", "README.md", "a word is misspelt")
+LOOSE = standing.Finding("audit:deny", "", "a pin is loose")
+
+
+class FindingsBody(unittest.TestCase):
+    """The body written from the run's findings files (#1890)."""
+
+    @override
+    def setUp(self) -> None:
+        """Give each row a findings directory."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = Path(tmp.name) / "findings"
+
+    def red(
+        self,
+        entries: list[standing.Entry],
+        previous: str | None = None,
+    ) -> str:
+        """Write a body from this row's findings files.
+
+        Returns:
+            The body.
+
+        """
+        before = None if previous is None else standing.Issue(42, previous)
+        return standing.body(
+            standing.Red(WORKFLOW, "main", RUN, FIRST, 2),
+            entries,
+            standing.read_findings(self.dir),
+            standing.seen_hashes(before),
+        )
+
+    def test_two_tasks_give_two_sections_with_counts(self) -> None:
+        """Two tasks' records: one `###` per task, in name order, counted."""
+        records(self.dir, "a.jsonl", SPELL, DENY)
+        records(self.dir, "b.jsonl", LOOSE)
+        text = self.red([red_job(1, None)])
+        self.assertIn("## Findings\n", text)
+        self.assertIn("### audit:deny (2)\n", text)
+        self.assertIn("### lint:typos (1)\n", text)
+        self.assertLess(text.index("### audit:deny"), text.index("### lint:typos"))
+        self.assertLess(text.index("## Findings"), text.index("## Red jobs"))
+        self.assertIn("- chrono@0.4.45: RUSTSEC-2026-0543 is undecided\n", text)
+        self.assertIn("- a pin is loose\n", text)
+        self.assertIn(
+            "  <details><summary>detail</summary>\n\n"
+            "  ```text\n  reached through object_store 0.14.2\n  ```\n\n"
+            "  </details>\n",
+            text,
+        )
+        last = text.splitlines()[-1]
+        self.assertRegex(
+            last, r"^<!-- findings: [0-9a-f]{16} [0-9a-f]{16} [0-9a-f]{16} -->$"
+        )
+
+    def test_a_hash_in_the_previous_body_is_still_red(self) -> None:
+        """One of three hashes carried: one still red, two new."""
+        third = standing.Finding("audit:deny", "time@0.3.0", "RUSTSEC-2026-0001")
+        records(self.dir, "a.jsonl", DENY, LOOSE, third)
+        before = f"...\n<!-- findings: 0123456789abcdef {LOOSE.digest} -->"
+        text = self.red([red_job(1, None)], before)
+        section = text[text.index("### audit:deny (3)") : text.index("## Red jobs")]
+        new, still = section.split("#### Still red")
+        self.assertIn("#### New in this run", new)
+        same(self, new.count("\n- "), 2)
+        self.assertIn("- chrono@0.4.45:", new)
+        self.assertIn("- time@0.3.0:", new)
+        same(self, still.count("\n- "), 1)
+        self.assertIn("- a pin is loose", still)
+
+    def test_no_previous_line_makes_every_finding_new(self) -> None:
+        """A previous body with no findings line: every finding is new."""
+        records(self.dir, "a.jsonl", DENY, LOOSE)
+        text = self.red([red_job(1, None)], previous(FIRST, 1))
+        self.assertIn("#### New in this run", text)
+        self.assertNotIn("#### Still red", text)
+
+    def test_a_job_with_a_record_points_at_its_findings(self) -> None:
+        """A step with a record points above; one without shows its output."""
+        records(self.dir, "a.jsonl", DENY)
+        deny = standing.tail(
+            logged(
+                "##[group]Run mise run audit:deny",
+                "mise run audit:deny",
+                "##[endgroup]",
+                "denied",
+                "##[error]Process completed with exit code 1.",
+            )
+        )
+        other = standing.tail(
+            logged(
+                "##[group]Run mise run lint:caller",
+                "mise run lint:caller",
+                "##[endgroup]",
+                "caller grant missing",
+                "##[error]Process completed with exit code 1.",
+            )
+        )
+        text = self.red([red_job(1, deny), red_job(2, other)])
+        first = text[text.index("### job 1") : text.index("### job 2")]
+        second = text[text.index("### job 2") :]
+        self.assertIn("Its findings are above, under <code>audit:deny</code>.", first)
+        self.assertNotIn("denied", first)
+        self.assertIn("_No finding was recorded._", second)
+        self.assertIn("```text\ncaller grant missing\n```", second)
+
+    def test_a_step_of_two_tasks_is_matched_by_either(self) -> None:
+        """A step that ran two tasks, seen by their `[task] ` prefixes."""
+        log = logged(
+            "##[group]Run mise run ci:lint",
+            "mise run ci:lint",
+            "##[endgroup]",
+            "[lint:typos] $ typos",
+            "[lint:shell] $ shfmt",
+            "[lint:shell] ERROR task failed",
+            "##[error]Process completed with exit code 1.",
+        )
+        cut = standing.tail(log)
+        same(self, cut.tasks, frozenset({"ci:lint", "lint:typos", "lint:shell"}))
+        for found in (SPELL, standing.Finding("lint:shell", "a.sh", "unformatted")):
+            with self.subTest(task=found.task):
+                self.dir.joinpath("a.jsonl").unlink(missing_ok=True)
+                records(self.dir, "a.jsonl", found)
+                text = self.red([red_job(1, cut)])
+                self.assertIn(f"under <code>{found.task}</code>.", text)
+                self.assertNotIn("No finding was recorded", text)
+
+    def test_a_malformed_line_is_counted(self) -> None:
+        """Lines that are not a record are counted in the body, not fatal."""
+        records(self.dir, "a.jsonl", DENY)
+        with (self.dir / "a.jsonl").open("a", encoding="utf-8") as out:
+            out.write("not json\n")
+            out.write('{"v": 1, "task": "t", "subject": "", "message": "m"}\n')
+            out.write(
+                '{"v": 2, "task": "t", "subject": "", "message": "m", "detail": []}\n'
+            )
+            out.write("\n")
+        (self.dir / "b.jsonl").write_bytes(b"\x80\n")
+        found = standing.read_findings(self.dir)
+        same(self, found.records, (DENY,))
+        same(self, found.unreadable, 4)
+        text = self.red([red_job(1, None)])
+        self.assertIn(
+            "4 line(s) of the findings files were not a record and are not counted.",
+            text,
+        )
+        self.assertIn("### audit:deny (1)", text)
+
+    def test_five_thousand_records_stay_under_the_limit(self) -> None:
+        """5,000 records: details, then findings dropped, the count stated."""
+        many = [
+            standing.Finding(
+                f"lint:t{n % 7}",
+                f"file{n}.py",
+                f"finding {n} " + "m" * 40,
+                (f"detail {n}",),
+            )
+            for n in range(5000)
+        ]
+        records(self.dir, "a.jsonl", *many)
+        text = self.red([red_job(1, None)])
+        self.assertLess(len(text), standing.BODY_LIMIT)
+        self.assertIn("Detail dropped for the last 5000 finding(s)", text)
+        match = re.search(r"The last (\d+) finding\(s\) are not shown", text)
+        if match is None:
+            self.fail("the dropped findings are not counted")
+        dropped = int(typed_std.group(match, 1) or "0")
+        shown = text.count("\n- file")
+        same(self, shown + dropped, 5000)
+        self.assertGreater(shown, 0)
+        last = text.splitlines()[-1]
+        hashes = last.removeprefix("<!-- findings: ").removesuffix(" -->").split()
+        same(self, len(hashes), shown)
+
+    def test_markup_in_a_record_is_text(self) -> None:
+        """A message cannot open a comment, so it cannot forge the hash line."""
+        records(
+            self.dir, "a.jsonl", standing.Finding("t", "<b>", "<!-- findings: x -->")
+        )
+        text = self.red([red_job(1, None)])
+        self.assertIn("- &lt;b&gt;: &lt;!-- findings: x --&gt;\n", text)
+        same(self, text.count("<!-- findings:"), 1)
+
+    def test_an_empty_directory_writes_the_body_without_findings(self) -> None:
+        """No record and no unreadable line: the body is the one without findings."""
+        self.dir.mkdir()
+        entries = [red_job(1, standing.Excerpt("out", "mise run audit:deny"))]
+        red = standing.Red(WORKFLOW, "main", RUN, FIRST, 2)
+        same(self, self.red(entries), standing.body(red, entries))
+        self.assertNotIn("## Findings", self.red(entries))
+        self.assertNotIn("<!-- findings:", self.red(entries))
+
+
+class FindingsReport(Stubbed):
+    """`--findings` end to end: the records reach the body gh is sent."""
+
+    def test_records_reach_the_issue(self) -> None:
+        """The run's records are listed, and the red job points at them."""
+        found = self.dir / "findings"
+        records(
+            found, "job.jsonl", standing.Finding("lint:caller", "edtf", "caller-grant")
+        )
+        proc = self.run_report(findings=found)
+        same(self, proc.returncode, 0, proc.stderr)
+        text = self.body_of(self.gh_calls()[3])
+        self.assertIn("### lint:caller (1)\n", text)
+        self.assertIn("- edtf: caller-grant\n", text)
+        self.assertIn("Its findings are above, under <code>lint:caller</code>.", text)
+
+    def test_without_the_flag_no_findings_are_read(self) -> None:
+        """No `--findings`: the body has no findings section."""
+        proc = self.run_report()
+        same(self, proc.returncode, 0, proc.stderr)
+        self.assertNotIn("## Findings", self.body_of(self.gh_calls()[3]))
 
 
 if __name__ == "__main__":
