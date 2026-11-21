@@ -473,19 +473,10 @@ class MainTest(unittest.TestCase):
         self.assertEqual(status, 1)
         self.assertIn("not installed", err)
 
-    def test_no_declaration_anywhere_plans_nothing(self) -> None:
-        """The skip the task turns into "no crate declares rust-version"."""
-        status, out, err = self.invoke(
-            metadata(member("stele-core"), member("stele-cli")),
-            [pin("1.97.1")],
-        )
-        self.assertEqual(status, 0, msg=err)
-        self.assertEqual(out.strip(), "")
-
     def test_every_promise_excluded_plans_notes_and_no_check(self) -> None:
-        """A repo whose only declaring crate the gate cannot compile."""
+        """A repo whose only crate the gate cannot compile."""
         status, out, err = self.invoke(
-            metadata(member("lab-core"), member("lab-pg", "1.82")),
+            metadata(member("lab-pg", "1.82")),
             [pin("1.97.1")],
             exclude="lab-pg",
         )
@@ -930,28 +921,88 @@ class RuleTest(unittest.TestCase):
         self.assertIn("the crate may not raise it", said)
         self.assertIn("declares less than it\n  needs, and is held back", said)
 
-    def test_an_excluded_member_is_not_held_to_the_rule(self) -> None:
-        """Off the compile surface it is unverified, and noted as such."""
+    def test_an_excluded_member_declaring_another_number_is_red(self) -> None:
+        """#1909: CLIPPY_EXCLUDE keeps a crate out of the compile, not the rule."""
         status, out, err = self.invoke(
             converted("1.82"), [pin("1.85.0")], exclude="edtf-core", floor=TRIXIE
         )
+        self.assertEqual((status, out), (1, ""))
+        self.assertIn(
+            "edtf-core@1.3.5 declares rust-version 1.82; the rule derives 1.85: "
+            f"the floor: Debian stable's rustc is {TRIXIE}",
+            err,
+        )
+
+    def test_an_excluded_member_at_its_number_is_noted_not_checked(self) -> None:
+        """Held to the rule, it is still unverified at the number, and says so."""
+        status, out, err = self.invoke(
+            converted("1.85"), [pin("1.85.0")], exclude="edtf-core", floor=TRIXIE
+        )
         self.assertEqual(status, 0, msg=err)
         self.assertTrue(out.startswith("note\t"))
+        self.assertIn("unverified", out)
+        self.assertNotIn("check\t", out)
+
+    def test_a_member_declaring_nothing_is_red_at_the_floor(self) -> None:
+        """#1909: leaving the field out is not a way to make no promise."""
+        core, app = member("edtf-core", "1.85", "1.3.5"), member("app")
+        doc = metadata(
+            core,
+            app,
+            nodes=[node(core, edge(SERDE)), node(app, edge(SERDE)), node(SERDE)],
+            extra=(SERDE,),
+        )
+        status, out, err = self.invoke(doc, [pin("1.85.0")], floor=TRIXIE)
+        self.assertEqual((status, out), (1, ""))
+        self.assertIn(
+            "app@1.3.1 declares no rust-version; the rule derives 1.85: the floor: "
+            f"Debian stable's rustc is {TRIXIE}",
+            err,
+        )
+        self.assertNotIn("edtf-core", err)
+        self.assertIn("a crate declaring none included", err)
+
+    def test_a_member_declaring_nothing_is_red_at_its_dependency(self) -> None:
+        """#1909: the number named is the derived one, dependency and all."""
+        status, out, err = self.invoke(
+            converted("", SERDE, PGRX), [pin("1.96.0")], floor=TRIXIE
+        )
+        self.assertEqual((status, out), (1, ""))
+        self.assertIn(
+            "edtf-core@1.3.5 declares no rust-version; the rule derives 1.96: "
+            "`pgrx 0.19.3` requires it",
+            err,
+        )
+
+    def test_a_workspace_declaring_nothing_is_red_per_member(self) -> None:
+        """#1909: once the skip "no crate declares rust-version"."""
+        status, out, err = self.invoke(
+            metadata(member("stele-core"), member("stele-cli")),
+            [pin("1.97.1")],
+            floor=TRIXIE,
+        )
+        self.assertEqual((status, out), (1, ""))
+        said = [line for line in err.splitlines() if "declares no" in line]
+        want: list[str] = [
+            f"  {name}@1.3.1 declares no rust-version; the rule derives 1.85: "
+            f"the floor: Debian stable's rustc is {TRIXIE}"
+            for name in ("stele-core", "stele-cli")
+        ]
+        self.assertEqual(said, want)
 
     def test_a_member_reached_through_another_lends_no_number(self) -> None:
         """lab-cli reaches lab-core; only lab-core's dependencies count.
 
-        Here the reached member promises 1.99 and is off the compile
-        surface, so only the reaching member is held to the rule: were the
-        reached one's own number counted, app would derive 1.99.
+        Here the reached member promises 1.99 and nothing it reaches
+        declares more than the floor, so it is the one finding: were its
+        own number counted, app would derive 1.99 and be a second.
         """
         app, ext = member("app", "1.85"), member("ext", "1.99")
         doc = metadata(app, ext, nodes=[node(app, edge(ext)), node(ext)])
-        status, out, err = self.invoke(
-            doc, [pin("1.85.0")], exclude="ext", floor=TRIXIE
-        )
-        self.assertEqual(status, 0, msg=err)
-        self.assertIn("check\t1.85.0\tdefault\tapp@1.3.1", out)
+        status, out, err = self.invoke(doc, [pin("1.85.0")], floor=TRIXIE)
+        self.assertEqual((status, out), (1, ""))
+        self.assertIn("ext@1.3.1 declares rust-version 1.99; the rule derives", err)
+        self.assertNotIn("app@", err)
 
     def test_metadata_without_a_resolve_graph_is_red(self) -> None:
         """`--no-deps` metadata would derive every number as the floor."""

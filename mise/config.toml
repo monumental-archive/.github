@@ -3508,12 +3508,16 @@ dir = "{{cwd}}"
 # rust-version is EXACTLY the higher of the floor — the major.minor of
 # Debian stable's rustc, tracked in mise/rust-floor.toml and bumped by
 # Renovate's deb datasource — and the highest rust-version a non-member
-# package its normal and build dependencies reach declares, over this
-# same compile surface. Exactly, because an inequality is a number
-# somebody still picks; a crate's own code never raises it. msrv_plan.py
-# reds a declared number that differs, naming the one it should be and
-# why, before anything compiles; the pin check then holds the MSRV
-# toolchain to it unchanged. A dependency that needs more than it
+# package its normal and build dependencies reach declares. Exactly,
+# because an inequality is a number somebody still picks; a crate's own
+# code never raises it. msrv_plan.py reds a declared number that
+# differs, naming the one it should be and why, before anything
+# compiles; the pin check then holds the MSRV toolchain to it unchanged.
+# Every workspace member is held to it (#1909): one that declares no
+# rust-version is a finding naming the number to declare, so a workspace
+# declaring nothing is red rather than skipped, and a member
+# CLIPPY_EXCLUDE keeps out of the compile is still held to its number,
+# only unverified at it. A dependency that needs more than it
 # declares fails the compile at the derived number, and the remedy says
 # the crate may not raise it: the dependency is held back. Moving a
 # promise can surface clippy's MSRV-gated lints (past 1.83,
@@ -3586,11 +3590,6 @@ done <<< "${pairs}"
 plan=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/msrv_plan.py" \
   --toolchains "${tmp}/toolchains.json" --exclude "${CLIPPY_EXCLUDE:-}" \
   --pgrx "${pgrx}" --floor "${ORG_BELT_DIR}/rust-floor.toml" < "${tmp}/metadata.json")
-[[ -n ${plan} ]] || {
-  echo "lint:msrv: no crate declares rust-version, skipped"
-  org_done=1
-  exit 0
-}
 # A pgrx crate needs a Postgres before it can be compiled at all, at the
 # MSRV exactly as at the stable pin. Provisioned only when one is in the
 # plan, so a repo without an extension pays nothing.
