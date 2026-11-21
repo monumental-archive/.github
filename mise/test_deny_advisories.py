@@ -12,7 +12,8 @@ the exact message. `test_a_bare_id_is_red_by_name` fails before #1926,
 when there was no such rule.
 
 `audit:deny`, the task's own `run` string read out of mise/config.toml
-and run by bash in a planted git tree, over stub `cargo`, `cargo-deny`
+(which runs mise/deny-audit.sh from ORG_BELT_DIR, this belt) and run
+by bash in a planted git tree, over stub `cargo`, `cargo-deny`
 and `stele` (the form test_semver_audit.py uses). The stubs log their
 arguments; cargo hands `cargo deny` to cargo-deny as cargo does;
 cargo-deny writes its JSON to stderr and exits 1, as the real one does
@@ -46,7 +47,7 @@ ADVISORY = "RUSTSEC-2021-0127"
 # What the audit body reaches for besides the stubs, linked into a PATH
 # of its own so a row cannot reach a real cargo or stele; cp is the
 # stele stub's, keeping the scan the task deletes.
-TOOLS = ("git", "mktemp", "rm", "cp")
+TOOLS = ("bash", "git", "mktemp", "rm", "cp")
 
 
 def refused(*advisories: str) -> str:
