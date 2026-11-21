@@ -74,6 +74,35 @@ LABELS: list[str] = [
 ]
 
 
+def issues(*found: tuple[int, str, str]) -> str:
+    """Write an `issue list` answer.
+
+    Returns:
+        The JSON gh would print.
+
+    """
+    listing: list[dict[str, object]] = [
+        {"number": n, "title": title, "body": body} for n, title, body in found
+    ]
+    return json.dumps(listing)
+
+
+def labels(*names: str) -> str:
+    """Write a `label list` answer.
+
+    Returns:
+        The JSON gh would print.
+
+    """
+    listing: list[dict[str, str]] = [{"name": name} for name in names]
+    return json.dumps(listing)
+
+
+def same[T](case: unittest.TestCase, got: T, want: T, msg: str = "") -> None:
+    """Assert two values equal, `want` typed by `got` (mypy.ini: no Any)."""
+    case.assertEqual(got, want, msg or None)
+
+
 def job(
     number: int, name: str, conclusion: str | None, status: str = "completed"
 ) -> dict[str, object]:
@@ -154,7 +183,7 @@ class Rows(unittest.TestCase):
             GITHUB_SERVER_URL="https://github.com",
             STUB_CALLS=str(self.calls),
             STUB_LIST="[]",
-            STUB_LABELS=json.dumps([{"name": "hold"}, {"name": "red-check"}]),
+            STUB_LABELS=labels("hold", "red-check"),
         )
         self.jobs([job(1, "plan", "success"), job(2, "caller permissions", "failure")])
         self.log(
@@ -227,15 +256,13 @@ class Rows(unittest.TestCase):
     def test_red_creates_with_title_and_label(self) -> None:
         """Red, none open: one issue, exact title, the label."""
         proc = self.run_report()
-        self.assertEqual(proc.returncode, 0, proc.stderr)
+        same(self, proc.returncode, 0, proc.stderr)
         calls = self.gh_calls()
-        self.assertEqual(calls[:4], [JOBS, LIST, log_api(2), LABELS])
-        self.assertEqual(len(calls), 5)
+        same(self, calls[:4], [JOBS, LIST, log_api(2), LABELS])
+        same(self, len(calls), 5)
         create = calls[4]
-        self.assertEqual(
-            create[:6], ["issue", "create", "--repo", REPO, "--title", TITLE]
-        )
-        self.assertEqual(create[-2:], ["--label", "red-check"])
+        same(self, create[:6], ["issue", "create", "--repo", REPO, "--title", TITLE])
+        same(self, create[-2:], ["--label", "red-check"])
         text = self.body_of(create)
         self.assertIn(f"- Latest red run: {RUN}\n", text)
         self.assertIn(f"- Red since: {RUN}\n", text)
@@ -251,15 +278,13 @@ class Rows(unittest.TestCase):
 
     def test_red_with_one_open_replaces_and_keeps_since(self) -> None:
         """Red, one open: its body is replaced, Red since kept, the run counted."""
-        self.env["STUB_LIST"] = json.dumps([
-            {"number": 42, "title": TITLE, "body": previous(FIRST, 3)}
-        ])
+        self.env["STUB_LIST"] = issues((42, TITLE, previous(FIRST, 3)))
         proc = self.run_report()
-        self.assertEqual(proc.returncode, 0, proc.stderr)
+        same(self, proc.returncode, 0, proc.stderr)
         calls = self.gh_calls()
-        self.assertEqual(calls[:3], [JOBS, LIST, log_api(2)])
-        self.assertEqual(len(calls), 4)
-        self.assertEqual(calls[3][:5], ["issue", "edit", "42", "--repo", REPO])
+        same(self, calls[:3], [JOBS, LIST, log_api(2)])
+        same(self, len(calls), 4)
+        same(self, calls[3][:5], ["issue", "edit", "42", "--repo", REPO])
         text = self.body_of(calls[3])
         self.assertIn(f"- Red since: {FIRST}\n", text)
         self.assertIn(f"- Latest red run: {RUN}\n", text)
@@ -268,32 +293,28 @@ class Rows(unittest.TestCase):
 
     def test_same_run_is_counted_once(self) -> None:
         """A second report in one run does not count the run twice."""
-        self.env["STUB_LIST"] = json.dumps([
-            {"number": 42, "title": TITLE, "body": previous(FIRST, 3, RUN)}
-        ])
+        self.env["STUB_LIST"] = issues((42, TITLE, previous(FIRST, 3, RUN)))
         proc = self.run_report()
-        self.assertEqual(proc.returncode, 0, proc.stderr)
+        same(self, proc.returncode, 0, proc.stderr)
         self.assertIn("- Red runs: 3\n", self.body_of(self.gh_calls()[3]))
 
     def test_green_closes_with_the_run(self) -> None:
         """Every job green or skipped, one open: closed, naming the run."""
         self.jobs([job(1, "plan", "success"), job(2, "source-vsa", "skipped")])
-        self.env["STUB_LIST"] = json.dumps([
-            {"number": 42, "title": TITLE, "body": previous(FIRST, 3)}
-        ])
+        self.env["STUB_LIST"] = issues((42, TITLE, previous(FIRST, 3)))
         proc = self.run_report()
-        self.assertEqual(proc.returncode, 0, proc.stderr)
+        same(self, proc.returncode, 0, proc.stderr)
         comment = f"Green: {RUN} ran every job green or skipped."
         closed = ["issue", "close", "42", "--repo", REPO, "--comment", comment]
-        self.assertEqual(self.gh_calls(), [JOBS, LIST, closed])
+        same(self, self.gh_calls(), [JOBS, LIST, closed])
         self.assertIn("green: closed #42", proc.stdout)
 
     def test_green_with_none_open_writes_nothing(self) -> None:
         """Green, none open: the two reads and nothing else."""
         self.jobs([job(1, "plan", "success")])
         proc = self.run_report()
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual(self.gh_calls(), [JOBS, LIST])
+        same(self, proc.returncode, 0, proc.stderr)
+        same(self, self.gh_calls(), [JOBS, LIST])
         self.assertIn("green: no red-check issue open", proc.stdout)
 
     def test_cancelled_job_is_neither(self) -> None:
@@ -304,12 +325,10 @@ class Rows(unittest.TestCase):
         holds for every reporting workflow.
         """
         self.jobs([job(1, "plan", "success"), job(2, "drafts", "cancelled")])
-        self.env["STUB_LIST"] = json.dumps([
-            {"number": 42, "title": TITLE, "body": previous(FIRST, 3)}
-        ])
+        self.env["STUB_LIST"] = issues((42, TITLE, previous(FIRST, 3)))
         proc = self.run_report()
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual(self.gh_calls(), [JOBS])
+        same(self, proc.returncode, 0, proc.stderr)
+        same(self, self.gh_calls(), [JOBS])
         self.assertIn(
             "neither red nor green yet, nothing changed: drafts (cancelled)",
             proc.stdout,
@@ -318,8 +337,8 @@ class Rows(unittest.TestCase):
     def test_other_branch_calls_nothing(self) -> None:
         """A run on another branch changes nothing, and asks nothing."""
         proc = self.run_report(ref="refs/heads/feature")
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual(self.gh_calls(), [])
+        same(self, proc.returncode, 0, proc.stderr)
+        same(self, self.gh_calls(), [])
         self.assertIn(
             "refs/heads/feature is not the default branch (main)", proc.stdout
         )
@@ -328,8 +347,8 @@ class Rows(unittest.TestCase):
         """A listing that fails exits 2 by name and files nothing."""
         self.env["STUB_LIST_FAIL"] = "1"
         proc = self.run_report()
-        self.assertEqual(proc.returncode, 2)
-        self.assertEqual(self.gh_calls(), [JOBS, LIST])
+        same(self, proc.returncode, 2)
+        same(self, self.gh_calls(), [JOBS, LIST])
         self.assertIn(
             "gh issue list failed (exit 1): HTTP 502: Bad Gateway; nothing was filed",
             proc.stderr,
@@ -337,39 +356,35 @@ class Rows(unittest.TestCase):
 
     def test_two_open_is_a_named_error(self) -> None:
         """Two open issues with the title: a named error, never a third."""
-        listing = [
-            {"number": n, "title": TITLE, "body": previous(FIRST, 1)} for n in (41, 42)
-        ]
-        self.env["STUB_LIST"] = json.dumps(listing)
+        both = [(n, TITLE, previous(FIRST, 1)) for n in (41, 42)]
+        self.env["STUB_LIST"] = issues(*both)
         proc = self.run_report()
-        self.assertEqual(proc.returncode, 2)
-        self.assertEqual(self.gh_calls(), [JOBS, LIST])
+        same(self, proc.returncode, 2)
+        same(self, self.gh_calls(), [JOBS, LIST])
         self.assertIn(
             f"2 open issues are titled exactly '{TITLE}' (#41, #42)", proc.stderr
         )
 
     def test_resembling_title_is_not_the_issue(self) -> None:
         """A title that only resembles is never edited."""
-        self.env["STUB_LIST"] = json.dumps([
-            {"number": 7, "title": f"{TITLE} again", "body": ""}
-        ])
+        self.env["STUB_LIST"] = issues((7, f"{TITLE} again", ""))
         proc = self.run_report()
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual(self.gh_calls()[-1][:2], ["issue", "create"])
+        same(self, proc.returncode, 0, proc.stderr)
+        same(self, self.gh_calls()[-1][:2], ["issue", "create"])
 
     def test_missing_label_is_created_from_the_baseline(self) -> None:
         """No red-check label: created from settings/repo-baseline.json first."""
-        self.env["STUB_LABELS"] = json.dumps([{"name": "hold"}])
+        self.env["STUB_LABELS"] = labels("hold")
         proc = self.run_report()
-        self.assertEqual(proc.returncode, 0, proc.stderr)
+        same(self, proc.returncode, 0, proc.stderr)
         label = standing.label_definition()
         made = [
             "label", "create", "red-check", "--repo", REPO,
             "--color", str(label["color"]), "--description", str(label["description"]),
         ]  # fmt: skip
         calls = self.gh_calls()
-        self.assertEqual(calls[4], made)
-        self.assertEqual(calls[5][:2], ["issue", "create"])
+        same(self, calls[4], made)
+        same(self, calls[5][:2], ["issue", "create"])
         self.assertIn("created the red-check label; opened", proc.stdout)
 
     def test_unfinished_sibling_changes_nothing(self) -> None:
@@ -378,12 +393,10 @@ class Rows(unittest.TestCase):
             job(1, "records / links", "success"),
             job(3, "citations", None, "in_progress"),
         ])
-        self.env["STUB_LIST"] = json.dumps([
-            {"number": 42, "title": TITLE, "body": previous(FIRST, 3)}
-        ])
+        self.env["STUB_LIST"] = issues((42, TITLE, previous(FIRST, 3)))
         proc = self.run_report()
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual(self.gh_calls(), [JOBS])
+        same(self, proc.returncode, 0, proc.stderr)
+        same(self, self.gh_calls(), [JOBS])
         self.assertIn("neither red nor green yet", proc.stdout)
 
     def test_timed_out_is_red(self) -> None:
@@ -391,14 +404,14 @@ class Rows(unittest.TestCase):
         self.jobs([job(4, "watch (leg 1)", "timed_out")])
         self.log(4, logged("reading"))
         proc = self.run_report()
-        self.assertEqual(proc.returncode, 0, proc.stderr)
+        same(self, proc.returncode, 0, proc.stderr)
         self.assertIn("```text\nreading\n```", self.body_of(self.gh_calls()[-1]))
 
     def test_unreadable_log_is_named(self) -> None:
         """A log the forge will not serve is named in the entry, not fatal."""
         self.jobs([job(5, "drafts", "failure")])
         proc = self.run_report()
-        self.assertEqual(proc.returncode, 0, proc.stderr)
+        same(self, proc.returncode, 0, proc.stderr)
         self.assertIn(
             "_Log tail unknown: the log could not be read: gh api repos/",
             self.body_of(self.gh_calls()[-1]),
@@ -437,7 +450,7 @@ class Body(unittest.TestCase):
     def test_two_red_jobs_two_entries(self) -> None:
         """Two red jobs give two entries, each with its tail."""
         text = self.red([self.entry(1, "first tail"), self.entry(2, "second tail")])
-        self.assertEqual(text.count("<summary>log tail</summary>"), 2)
+        same(self, text.count("<summary>log tail</summary>"), 2)
         self.assertLess(text.index("### job 1"), text.index("first tail"))
         self.assertLess(text.index("first tail"), text.index("### job 2"))
         self.assertLess(text.index("### job 2"), text.index("second tail"))
@@ -464,14 +477,14 @@ class Body(unittest.TestCase):
         lines = [f"\x1b[36mline {n}\x1b[0m" for n in range(100)]
         log = logged(*lines, "##[error]boom", "after", "##[error]again")
         cut = standing.tail(log).splitlines()
-        self.assertEqual(cut, [f"line {n}" for n in range(40, 100)])
+        same(self, cut, [f"line {n}" for n in range(40, 100)])
 
     def test_tail_is_at_most_four_thousand(self) -> None:
         """A tail longer than 4,000 characters keeps its last whole lines."""
         width = 199
         cut = standing.tail(logged(*["y" * width for _ in range(60)]))
         self.assertLessEqual(len(cut), standing.TAIL_CHARS)
-        self.assertEqual({len(line) for line in cut.splitlines()}, {width})
+        same(self, {len(line) for line in cut.splitlines()}, {width})
 
 
 if __name__ == "__main__":

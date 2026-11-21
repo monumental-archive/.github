@@ -44,6 +44,11 @@ HELPER = "mise/standing_issue.py"
 Mapping = dict[str, object]
 
 
+def same[T](case: unittest.TestCase, got: T, want: T, msg: str = "") -> None:
+    """Assert two values equal, `want` typed by `got` (mypy.ini: no Any)."""
+    case.assertEqual(got, want, msg or None)
+
+
 def scheduled(document: Mapping) -> bool:
     """Say whether a workflow has a `schedule:` trigger.
 
@@ -209,7 +214,7 @@ class Canon(unittest.TestCase):
 
     def test_every_scheduled_workflow_reports(self) -> None:
         """Every workflow the set computes ends with `report`; every stub grants."""
-        self.assertEqual(problems(CANON), [])
+        same(self, problems(CANON), [])
 
     def test_the_set_is_not_empty(self) -> None:
         """The computation reaches direct workflows and the stubs' callees."""
@@ -244,13 +249,12 @@ class Planted(unittest.TestCase):
 
     def test_as_built_passes(self) -> None:
         """A report needing both jobs passes."""
-        self.assertEqual(
-            self.plant(REPORT.format(needs="      - one\n      - two")), []
-        )
+        same(self, self.plant(REPORT.format(needs="      - one\n      - two")), [])
 
     def test_no_report_job(self) -> None:
         """A scheduled workflow with no report job is red by name."""
-        self.assertEqual(
+        same(
+            self,
             self.plant(""),
             ["planted.yml: the last job is not `report` (it is ['two'])"],
         )
@@ -258,7 +262,7 @@ class Planted(unittest.TestCase):
     def test_needs_misses_a_job(self) -> None:
         """A report whose needs: misses a job names the job."""
         found = self.plant(REPORT.format(needs="      - one"))
-        self.assertEqual(found, ["planted.yml: report's needs: misses two"])
+        same(self, found, ["planted.yml: report's needs: misses two"])
 
     def test_cancelled_run_reaches_the_helper(self) -> None:
         """A helper step without the cancelled guard is red by name."""
@@ -266,7 +270,8 @@ class Planted(unittest.TestCase):
             "      - if: ${{ !cancelled() }}\n        run", "      - run"
         )
         found = self.plant(report)
-        self.assertEqual(
+        same(
+            self,
             found,
             [f"planted.yml: report's {HELPER} step is not if: {NOT_CANCELLED}"],
         )
@@ -288,7 +293,8 @@ class Planted(unittest.TestCase):
                 "jobs:\n  call:\n    uses: ./.github/workflows/callee.yml\n"
             )
             (root / WORKFLOWS / "stub.yml").write_text(stub, encoding="utf-8")
-            self.assertEqual(
+            same(
+                self,
                 problems(root),
                 [
                     "stub.yml: call does not grant issues: write",

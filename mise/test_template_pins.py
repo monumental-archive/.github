@@ -45,6 +45,11 @@ TAIL = [
 ]
 
 
+def same[T](case: unittest.TestCase, got: T, want: T, msg: str = "") -> None:
+    """Assert two values equal, `want` typed by `got` (mypy.ini: no Any)."""
+    case.assertEqual(got, want, msg or None)
+
+
 def body() -> str:
     """Read lint:template-pins' run body from the belt's config.
 
@@ -169,36 +174,36 @@ class Pins(unittest.TestCase):
         """No workflow-templates/: the task says it skipped."""
         shutil.rmtree(self.tree / "workflow-templates")
         done = self.task()
-        self.assertEqual(done.returncode, 0, done.stderr)
+        same(self, done.returncode, 0, done.stderr)
         skipped = ["lint:template-pins: no workflow-templates/, skipped"]
-        self.assertEqual(done.stdout.splitlines(), skipped)
+        same(self, done.stdout.splitlines(), skipped)
 
     def test_canon_action_pin_passes(self) -> None:
         """The canon action, at a released SHA, is scorecard's one pin."""
         self.plant(SCORECARD, template(ACTION, self.sha))
         done = self.task()
-        self.assertEqual(done.returncode, 0, done.stderr)
+        same(self, done.returncode, 0, done.stderr)
         expected = (
             "lint:template-pins: 1 pins at one ancestor SHA, scorecard calls no"
             " reusable, released as v1.0.0"
         )
-        self.assertEqual(done.stdout.splitlines(), [expected])
+        same(self, done.stdout.splitlines(), [expected])
 
     def test_reusable_workflow_pin_is_red(self) -> None:
         """A reusable workflow pinned in scorecard.yml is red by message."""
         self.plant(SCORECARD, template(REUSABLE, self.sha))
         done = self.helper(SCORECARD)
-        self.assertEqual(done.returncode, 1)
+        same(self, done.returncode, 1)
         violation = f"{SCORECARD}(pins a reusable workflow: self-contained by design)"
-        self.assertEqual(done.stderr.splitlines(), red(violation))
+        same(self, done.stderr.splitlines(), red(violation))
 
     def test_short_sha_is_red(self) -> None:
         """A pin that is not 40 hex is red by message."""
         self.plant(STUB, template(REUSABLE, self.sha[:12]))
         done = self.helper(STUB)
-        self.assertEqual(done.returncode, 1)
+        same(self, done.returncode, 1)
         violation = f"{STUB}(pin is not a full 40-hex SHA)"
-        self.assertEqual(done.stderr.splitlines(), red(violation))
+        same(self, done.stderr.splitlines(), red(violation))
 
     def test_foreign_history_is_red(self) -> None:
         """A SHA HEAD does not contain is red, and names no release."""
@@ -208,9 +213,9 @@ class Pins(unittest.TestCase):
         self.git("checkout", "-q", home)
         self.plant(STUB, template(REUSABLE, foreign))
         done = self.helper(STUB)
-        self.assertEqual(done.returncode, 1)
+        same(self, done.returncode, 1)
         violation = f"{STUB}({foreign[:8]} not an ancestor of HEAD)"
-        self.assertEqual(done.stderr.splitlines(), red(violation))
+        same(self, done.stderr.splitlines(), red(violation))
 
     def test_templates_disagree_is_red(self) -> None:
         """Two templates on two SHAs are red, both named."""
@@ -218,40 +223,40 @@ class Pins(unittest.TestCase):
         self.plant(STUB, template(REUSABLE, self.sha))
         self.plant(SCORECARD, template(ACTION, newer))
         done = self.helper(STUB, SCORECARD)
-        self.assertEqual(done.returncode, 1)
+        same(self, done.returncode, 1)
         violation = f"(templates disagree, 2 distinct SHAs: {self.sha} {newer})"
-        self.assertEqual(done.stderr.splitlines(), red(violation))
+        same(self, done.stderr.splitlines(), red(violation))
 
     def test_unreleased_sha_is_red(self) -> None:
         """An ancestor no tag names is red: a pin names a release."""
         untagged = self.commit()
         self.plant(STUB, template(REUSABLE, untagged))
         done = self.helper(STUB)
-        self.assertEqual(done.returncode, 1)
+        same(self, done.returncode, 1)
         violation = (
             f"({untagged[:8]} names no released tag — pins must name a release,"
             " not any ancestor)"
         )
-        self.assertEqual(done.stderr.splitlines(), red(violation))
+        same(self, done.stderr.splitlines(), red(violation))
 
     def test_no_tags_skips_the_release_check_by_name(self) -> None:
         """A clone with no tags says it skipped the released-tag check."""
         self.git("tag", "-d", "v1.0.0")
         self.plant(STUB, template(REUSABLE, self.sha))
         done = self.helper(STUB)
-        self.assertEqual(done.returncode, 0, done.stderr)
+        same(self, done.returncode, 0, done.stderr)
         expected = (
             "lint:template-pins: 1 pins at one ancestor SHA, scorecard calls no"
             " reusable, released as (no tags in this clone, released-tag check"
             " skipped)"
         )
-        self.assertEqual(done.stdout.splitlines(), [expected])
+        same(self, done.stdout.splitlines(), [expected])
 
     def test_not_utf8_is_an_error(self) -> None:
         """A template that is not UTF-8 is refused by name, exit 2."""
         self.plant(STUB, b"jobs: \xff\n")
         done = self.helper(STUB)
-        self.assertEqual(done.returncode, template_pins.EXIT_ERROR)
+        same(self, done.returncode, template_pins.EXIT_ERROR)
         self.assertTrue(
             done.stderr.startswith(
                 f"lint:template-pins: {STUB}: cannot be read as UTF-8:"
@@ -262,13 +267,21 @@ class Pins(unittest.TestCase):
     def test_no_canon_is_a_usage_error(self) -> None:
         """No canon, or one missing its owner or repository: exit 2."""
         usage = "lint:template-pins: usage: template_pins.py OWNER/REPO TEMPLATE..."
-        for argv in ([], ["/repo", STUB], ["owner/", STUB]):
+        calls: list[list[str]] = [[], ["/repo", STUB], ["owner/", STUB]]
+        for argv in calls:
             with self.subTest(argv=argv):
-                done = hermetic.call_main(
-                    lambda argv=argv: template_pins.main(argv), env=self.env
-                )
-                self.assertEqual(done.returncode, template_pins.EXIT_ERROR)
-                self.assertEqual(done.stderr.splitlines(), [usage])
+                done = self.refused(argv)
+                same(self, done.returncode, template_pins.EXIT_ERROR)
+                same(self, done.stderr.splitlines(), [usage])
+
+    def refused(self, argv: list[str]) -> hermetic.Called:
+        """Call the helper's main with a command line of the row's.
+
+        Returns:
+            The status and what it printed.
+
+        """
+        return hermetic.call_main(lambda: template_pins.main(argv), env=self.env)
 
 
 if __name__ == "__main__":

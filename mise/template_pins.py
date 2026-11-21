@@ -40,6 +40,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import typed_std
+
 GIT = shutil.which("git") or "git"
 EXIT_RED = 1
 EXIT_ERROR = 2
@@ -85,10 +87,10 @@ def template_pins(path: Path, text: str, canon: str) -> tuple[list[str], list[st
     shas: list[str] = []
     for line in lines:
         match = SHA.search(line)
-        if match is None:
+        sha = typed_std.group(match, 1) if match else None
+        if sha is None:
             bad.append(f"{path}(pin is not a full 40-hex SHA)")
             continue
-        sha = match.group(1)
         shas.append(sha)
         if git("merge-base", "--is-ancestor", sha, "HEAD").returncode != 0:
             bad.append(f"{path}({sha[:8]} not an ancestor of HEAD)")

@@ -57,6 +57,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import decoded
+import typed_std
 
 EXIT_ERROR = 2
 LABEL = "red-check"
@@ -355,7 +356,7 @@ def fenced(text: str) -> str:
         The text in a backtick fence longer than any run inside it.
 
     """
-    longest = max((len(m) for m in BACKTICKS.findall(text)), default=0)
+    longest = max((m.end() - m.start() for m in BACKTICKS.finditer(text)), default=0)
     fence = "`" * max(3, longest + 1)
     return f"{fence}text\n{text}\n{fence}"
 
@@ -438,6 +439,17 @@ def body(red: Red, entries: list[Entry]) -> str:
         dropped += 1
 
 
+def field(line: re.Pattern[str], body: str) -> str | None:
+    """Read one `- Name: value` line of an earlier body.
+
+    Returns:
+        The value, or None when the body has no such line.
+
+    """
+    match = line.search(body)
+    return typed_std.group(match, 1) if match else None
+
+
 def carried(previous: Issue | None, run_url: str) -> tuple[str, int]:
     """Carry "Red since" and the run count forward from the last body.
 
@@ -447,12 +459,10 @@ def carried(previous: Issue | None, run_url: str) -> tuple[str, int]:
     """
     if previous is None:
         return run_url, 1
-    since_match = RED_SINCE.search(previous.body)
-    since = since_match.group(1) if since_match else "unknown: not in the previous body"
-    runs_match = RED_RUNS.search(previous.body)
-    latest = LATEST.search(previous.body)
-    runs = int(runs_match.group(1)) if runs_match else 0
-    if not (latest and latest.group(1) == run_url):
+    since = field(RED_SINCE, previous.body) or "unknown: not in the previous body"
+    counted = field(RED_RUNS, previous.body)
+    runs = int(counted) if counted else 0
+    if field(LATEST, previous.body) != run_url:
         runs += 1
     return since, max(runs, 1)
 
