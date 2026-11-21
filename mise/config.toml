@@ -4808,7 +4808,7 @@ while IFS= read -r m; do
     echo "audit:go-vulns: ${m} names no module" >&2
     exit 1
   }
-  stele assert advisories --scan "${scan}" --vex "${vex}" --subject "${module}"
+  "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/stele_findings.py" assert advisories --scan "${scan}" --vex "${vex}" --subject "${module}"
 done <<< "${mods}"
 org_done=1
 '''
@@ -4852,7 +4852,7 @@ command -v stele > /dev/null || {
   exit 1
 }
 : "${GITHUB_REPOSITORY_OWNER:?audit:blast-radius walks an org the environment names (#579) — Actions sets it; a local run exports it}"
-stele assert blast-radius \
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/stele_findings.py" assert blast-radius \
   --org "${GITHUB_REPOSITORY_OWNER}" \
   --policy slsa/assert-policy.json \
   --vex security/vex
@@ -4896,7 +4896,7 @@ command -v stele > /dev/null || {
   exit 1
 }
 : "${GITHUB_REPOSITORY_OWNER:?audit:attestations walks an org the environment names (#579) — Actions sets it; a local run exports it}"
-stele assert evidence \
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/stele_findings.py" assert evidence \
   --org "${GITHUB_REPOSITORY_OWNER}" \
   --policy slsa/assert-policy.json \
   --depth full \
@@ -4939,7 +4939,7 @@ command -v stele > /dev/null || {
   exit 1
 }
 : "${GITHUB_REPOSITORY_OWNER:?audit:source-vsa walks an org the environment names (#579) — Actions sets it; a local run exports it}"
-stele assert chains \
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/stele_findings.py" assert chains \
   --org "${GITHUB_REPOSITORY_OWNER}" \
   --policy slsa/assert-policy.json \
   --verify-policy slsa/verify-policy.json
@@ -7184,7 +7184,7 @@ command -v stele > /dev/null || {
   exit 1
 }
 : "${GITHUB_REPOSITORY_OWNER:?audit:caller-permissions walks an org the environment names (#579) — Actions sets it; a local run exports it}"
-if ! stele assert permissions \
+if ! "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/stele_findings.py" assert permissions \
   --policy slsa/assert-policy.json \
   --tree . \
   --org "${GITHUB_REPOSITORY_OWNER}"; then
@@ -7414,7 +7414,7 @@ command -v stele > /dev/null || {
   exit 1
 }
 : "${GITHUB_REPOSITORY_OWNER:?audit:release-tags walks an org the environment names (#579) — Actions sets it; a local run exports it}"
-stele assert tags \
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/stele_findings.py" assert tags \
   --org "${GITHUB_REPOSITORY_OWNER}" \
   --policy slsa/assert-policy.json
 '''
@@ -9479,7 +9479,7 @@ command -v stele > /dev/null || {
   echo "lint:caller-permissions: stele missing from the belt" >&2
   exit 1
 }
-if ! stele assert permissions \
+if ! "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/stele_findings.py" assert permissions \
   --policy "${ORG_CANON_DIR}/slsa/assert-policy.json" \
   --tree "${ORG_CANON_DIR}" \
   --callers .; then
