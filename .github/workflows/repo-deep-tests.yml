@@ -1,5 +1,6 @@
 # A repository's tests run deeper than the gate can afford: bounded
-# fuzz runs (audit:fuzz, audit:go-fuzz, #316, #445), the Rust branch and
+# fuzz runs, one runner per target (audit:fuzz, audit:go-fuzz, #316,
+# #445, #1899), the Rust branch and
 # Go condition coverage floors (audit:coverage-branches, #1359;
 # audit:coverage-go-branches, #1546), and every property at a fresh
 # random seed (audit:python-properties, #1332; audit:typescript-
@@ -7,7 +8,9 @@
 # instrumented run, so none is the deterministic gate. A red here is a
 # test that found something, and nothing else (#1858: one workflow per
 # subject, named for what a red means). The mutation run has its own
-# workflow for the same reason (repo-mutants.yml, #1355).
+# workflow for the same reason (repo-mutants.yml, #1355). Every job runs
+# nightly (#1899): since #1897 keeps what a search finds, search time
+# accumulates, and the random-seed properties search as the fuzzers do.
 #
 # Every leg skips clean where its language or its floor line is
 # absent, so the stub stays universal. Callers pin by full SHA from
@@ -43,13 +46,16 @@ jobs:
   # repository without its language shows it skipped, not run-and-
   # skipped. A job of its own because `hashFiles` is step-only
   # (repo-mutants.yml's `adoption`); mise/test_audit_legs.py holds the
-  # table and the `if:`s to the tasks' own guards.
+  # table and the `if:`s to the tasks' own guards. `fuzz-targets` is the
+  # fuzz job's matrix (#1899): the targets the coverage floor measures
+  # (#1896), and `fuzz` is false where there are none.
   applies:
     name: which jobs apply
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     outputs:
       fuzz: ${{ steps.applies.outputs.fuzz }}
+      fuzz-targets: ${{ steps.applies.outputs.fuzz-targets }}
       coverage-branches: ${{ steps.applies.outputs.coverage-branches }}
       coverage-go-branches: ${{ steps.applies.outputs.coverage-go-branches }}
       python-properties-seed: ${{ steps.applies.outputs.python-properties-seed }}
@@ -68,11 +74,22 @@ jobs:
         id: applies
         run: '"${ORG_PYTHON}" .org-canon/mise/audit_legs.py repo-deep-tests >> "${GITHUB_OUTPUT}"'
 
+  # One runner per fuzz target (#1899), each searched for FUZZ_SECONDS
+  # (the belt's 1800 default; Go halves it between its plain and race
+  # passes), so the wall time no longer grows with the number of
+  # targets. fail-fast off: one target's crash never cancels another's
+  # search. 60 minutes is the 30-minute search with the build, the
+  # measurement of each candidate and the install beside it.
   fuzz:
-    name: fuzz targets survive a bounded run
+    name: fuzz ${{ matrix.kind }} ${{ matrix.target }} survives a bounded run
     needs: applies
     if: ${{ needs.applies.outputs.fuzz == 'true' }}
     runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.applies.outputs.fuzz-targets) }}
     outputs:
       staged: ${{ steps.kept.outputs.staged }}
       summary: ${{ steps.kept.outputs.summary }}
@@ -80,6 +97,8 @@ jobs:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
       MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
+      FUZZ_TARGET: ${{ matrix.target }}
+      FUZZ_PACKAGE: ${{ matrix.package }}
     steps:
       # Every branch, so origin/fuzz-corpus is there when an unmerged
       # proposal is: the search builds on it (#1897), reading only its
@@ -103,10 +122,11 @@ jobs:
       # default — on the nightly the repo declares as FUZZ_TOOLCHAIN
       # (#445). Time-bound and non-deterministic, so it lives here, never
       # the gate (#316); the gate's lint:fuzz-build still proves the
-      # targets compile, on stable. A repo with no fuzz/ skips clean.
-      # What it keeps (#1897) is staged under ORG_FUZZ_CANDIDATES, and
-      # its per-target summary written to ORG_FUZZ_SUMMARY.
-      - name: Run every fuzz target for a bounded interval
+      # targets compile, on stable. FUZZ_TARGET names this runner's one
+      # target. What it keeps (#1897) is staged under
+      # ORG_FUZZ_CANDIDATES, and its summary written to ORG_FUZZ_SUMMARY.
+      - name: Run the fuzz target for a bounded interval
+        if: ${{ matrix.kind == 'rust' }}
         env:
           ORG_FUZZ_CANDIDATES: ${{ runner.temp }}/fuzz-corpus-candidates
           ORG_FUZZ_SUMMARY: ${{ runner.temp }}/fuzz-corpus-summary.md
@@ -116,8 +136,10 @@ jobs:
       # there is no extra binary, no sanitizer flag and no nightly — but
       # the same two properties put it here rather than in the gate. It is
       # time-bound (the documented -fuzztime default is to run forever)
-      # and it writes. A repo with no Go fuzz target skips clean.
-      - name: Run every Go fuzz target for a bounded interval
+      # and it writes. FUZZ_TARGET and FUZZ_PACKAGE name this runner's
+      # one target.
+      - name: Run the Go fuzz target for a bounded interval
+        if: ${{ matrix.kind == 'go' }}
         env:
           ORG_FUZZ_CANDIDATES: ${{ runner.temp }}/fuzz-corpus-candidates
           ORG_FUZZ_SUMMARY: ${{ runner.temp }}/fuzz-corpus-summary.md
@@ -134,13 +156,13 @@ jobs:
           SUMMARY: ${{ runner.temp }}/fuzz-corpus-summary.md
         run: .org-canon/release/propose-fuzz-corpus.sh handover
 
-      # The one artifact (#1897), replacing the two 30-day reproducer
-      # uploads: every staged file at its repository path.
+      # One artifact per target (#1897, #1899), replacing the two 30-day
+      # reproducer uploads: every staged file at its repository path.
       - name: Upload what the search kept
         if: ${{ !cancelled() && steps.kept.outputs.staged == 'true' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: fuzz-corpus-candidates
+          name: fuzz-corpus-candidates-${{ matrix.kind }}-${{ matrix.target }}
           path: ${{ runner.temp }}/fuzz-corpus-candidates/
           if-no-files-found: error
           retention-days: 30
@@ -165,10 +187,13 @@ jobs:
       - name: Resolve the canon tree (the ref the caller pinned)
         uses: $/.github/actions/canon
 
+      # Every target's artifact into one tree (#1899): each file is at
+      # its repository path, so the targets' files never collide.
       - name: Download what the search kept
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: fuzz-corpus-candidates
+          pattern: fuzz-corpus-candidates-*
+          merge-multiple: true
           path: ${{ runner.temp }}/fuzz-corpus-candidates
 
       - name: Refuse any path outside the two corpus shapes

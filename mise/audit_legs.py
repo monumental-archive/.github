@@ -24,10 +24,20 @@ A job applies when:
   leg. A floor this cannot parse is left to the job, whose task reds on
   it by name.
 
+A job that runs one runner per entry of a list read from the tree
+(MATRICES) applies only where the list is not empty, and the list is an
+output of its own: `repo-deep-tests`'s `fuzz` job runs one runner per
+fuzz target (#1899), from `fuzz-targets`. The list is the one
+`coverage-measure.sh`'s `fuzz_targets` measures (#1896): every `[[bin]]`
+of a tracked fuzz/Cargo.toml, and every `func Fuzz…(… *testing.F)` in a
+tracked `_test.go` of the root module. A target the gate's floor holds
+is a target the nightly search runs, and no other.
+
     audit_legs.py [--root DIR] [--table FILE] WORKFLOW
         prints `<job>=true|false` for every row of WORKFLOW (the file's
-        stem, `repo-deep-tests`) on stdout, for $GITHUB_OUTPUT, and the
-        reason for each on stderr.
+        stem, `repo-deep-tests`) on stdout, for $GITHUB_OUTPUT, then
+        `<output>=<JSON list>` for each of its matrices, and the reason
+        for each job on stderr.
 
 The table test (`mise/test_audit_legs.py`) holds the table to the
 tasks: every guarded job has a row no narrower than its task's guard,
@@ -35,7 +45,11 @@ and an `if:` on it.
 """
 
 import argparse
+import json
+import posixpath
+import re
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -47,6 +61,15 @@ import workflow_command
 HERE = Path(__file__).resolve().parent
 TABLE = HERE / "audit-legs.toml"
 FLOOR = ".coverage-floor"
+FUZZ_MANIFEST = "fuzz/Cargo.toml"
+# coverage-measure.sh's own sed, line by line.
+GO_FUZZ = re.compile(
+    r"^func (Fuzz[A-Z0-9_][A-Za-z0-9_]*|Fuzz)\([A-Za-z_][A-Za-z0-9_]* \*testing\.F\)",
+    re.MULTILINE,
+)
+
+# One runner's entry: `kind`, `target` and, for Go, `package`.
+Target = dict[str, str]
 
 
 @dataclass(frozen=True)
@@ -152,6 +175,97 @@ def applies(rows: dict[str, Row], root: Path, tracked: list[str]) -> dict[str, s
     return reasons
 
 
+def bin_names(manifest: bytes) -> list[str]:
+    """Read a fuzz crate manifest's `[[bin]]` names, in order.
+
+    A manifest that is not TOML, or a `[[bin]]` with no string name,
+    raises decoded's UndecodableError, naming the field.
+
+    Returns:
+        The names.
+
+    """
+    bins = decoded.as_array(decoded.load_toml(manifest).get("bin", []), "[[bin]]")
+    names: list[str] = []
+    for i, entry in enumerate(bins, 1):
+        name = decoded.as_object(entry, f"[[bin]] {i}").get("name")
+        names.append(decoded.as_str(name, f"[[bin]] {i}.name"))
+    return names
+
+
+def fuzz_targets(root: Path, tracked: list[str]) -> list[Target]:
+    """List the fuzz targets, as coverage-measure.sh's `fuzz_targets` does.
+
+    Rust: each `[[bin]]` name of a tracked fuzz/Cargo.toml, in its
+    order. Go, where go.mod is tracked: each `func Fuzz…(… *testing.F)`
+    in a tracked `_test.go` outside vendor/ and outside every nested
+    module, with its file's directory as `package` (`.` at the root).
+
+    Returns:
+        One entry per target.
+
+    Raises:
+        UndecodableError: fuzz/Cargo.toml is not TOML, or a `[[bin]]`
+            has no string name; the text names the file.
+
+    """
+    found: list[Target] = []
+    if FUZZ_MANIFEST in tracked:
+        try:
+            names = bin_names((root / FUZZ_MANIFEST).read_bytes())
+        except decoded.UndecodableError as err:
+            msg = f"{FUZZ_MANIFEST}: {err}"
+            raise decoded.UndecodableError(msg) from None
+        found += [{"kind": "rust", "target": name} for name in names]
+    if "go.mod" not in tracked:
+        return found
+    nested = [p.removesuffix("go.mod") for p in tracked if p.endswith("/go.mod")]
+    for path in tracked:
+        if not path.endswith("_test.go") or path.startswith("vendor/"):
+            continue
+        package = posixpath.dirname(path) or "."
+        if any(f"{package}/".startswith(module) for module in nested):
+            continue
+        text = (root / path).read_text(encoding="utf-8")
+        found += [
+            {"kind": "go", "target": match.group(1), "package": package}
+            for match in GO_FUZZ.finditer(text)
+        ]
+    return found
+
+
+# Workflow stem to job id to the job's list output, how the list is
+# read, and why the job is skipped when the list is empty.
+Enumerate = Callable[[Path, list[str]], list[Target]]
+MATRICES: dict[str, dict[str, tuple[str, Enumerate, str]]] = {
+    "repo-deep-tests": {
+        "fuzz": ("fuzz-targets", fuzz_targets, "no fuzz target is declared"),
+    },
+}
+
+
+def matrices(
+    workflow: str, reasons: dict[str, str], root: Path, tracked: list[str]
+) -> tuple[dict[str, str], dict[str, list[Target]]]:
+    """Read each matrix job's list, and skip the job where it is empty.
+
+    Returns:
+        The reasons, a matrix job with an empty list skipped; and each
+        list output to its entries. A list that cannot be read raises
+        its reader's UndecodableError (`fuzz_targets`).
+
+    """
+    reasons = dict(reasons)
+    lists: dict[str, list[Target]] = {}
+    for job, (output, enumerate_, empty) in MATRICES.get(workflow, {}).items():
+        if job not in reasons:
+            continue
+        lists[output] = enumerate_(root, tracked)
+        if reasons[job].startswith("applies") and not lists[output]:
+            reasons[job] = f"skipped: {empty}"
+    return reasons, lists
+
+
 class Args(argparse.Namespace):
     """The command line, typed where argparse writes it."""
 
@@ -164,7 +278,8 @@ def main(argv: list[str] | None = None) -> int:
     """Print one output per job of the workflow.
 
     Returns:
-        0, or 1 when the table cannot be read or has no such workflow.
+        0, or 1 when the table cannot be read or has no such workflow,
+        or a matrix's list cannot be read.
 
     """
     parser = argparse.ArgumentParser(prog="audit_legs.py")
@@ -184,10 +299,19 @@ def main(argv: list[str] | None = None) -> int:
             stream=sys.stderr,
         )
         return 1
-    reasons = applies(rows, args.root, gate_tools.tracked_files(args.root))
+    tracked = gate_tools.tracked_files(args.root)
+    try:
+        reasons, lists = matrices(
+            args.workflow, applies(rows, args.root, tracked), args.root, tracked
+        )
+    except decoded.UndecodableError as err:
+        workflow_command.error(f"audit-legs: {err}", stream=sys.stderr)
+        return 1
     for job, why in reasons.items():
         print(f"audit-legs: {job}: {why}", file=sys.stderr)
         print(f"{job}={'true' if why.startswith('applies') else 'false'}")
+    for output, entries in lists.items():
+        print(f"{output}={json.dumps(entries, separators=(',', ':'))}")
     return 0
 
 

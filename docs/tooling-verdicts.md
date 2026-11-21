@@ -3863,10 +3863,21 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
   checker would only re-verify constants the generator wrote. *Reopen:*
   hand-authored CFF fields beyond `title`, or a consumer requiring CFF
   features the generator does not emit.
-- **ClusterFuzzLite** — unnecessary for any targeted score, with a
-  real cost surface ([`slsa-reference.md`](slsa-reference.md)).
-  *Reopen:* fuzzing becomes a target (Best Practices beyond the
-  current aim).
+- **ClusterFuzzLite, refused (re-decided #1899, 2026-11-21).** For
+  Rust and Go it drives the engines the belt already runs: libFuzzer
+  through cargo-fuzz (`audit:fuzz`) and Go's native fuzzer
+  (`audit:go-fuzz`). What it would add is a schedule and a corpus
+  store, and the org now has both: #1897 keeps what a search finds as
+  a reviewed pull request into the tracked corpus, and #1899 runs the
+  search nightly, one runner per target, thirty minutes each. Its
+  costs are unchanged: a Dockerfile on a Google-hosted base image
+  (`gcr.io/oss-fuzz-base/base-builder:v1`, a floating tag), `gcr.io`
+  egress and a Docker dependency
+  ([`slsa-reference.md`](slsa-reference.md)). A 24-hour comparison
+  run against the belt's task was rejected: both sides run the same
+  engine, so it would measure only that more time finds more.
+  *Reopen:* a Rust or Go engine or sanitizer ClusterFuzzLite runs that
+  the belt cannot.
 - **harden-runner** — retracted deliberately after measured breakage;
   required by nothing the org targets; the full argument lives in
   [`release.md`](release.md) ("No runner-hardening agent"). *Reopen:*

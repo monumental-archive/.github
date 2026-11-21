@@ -50,6 +50,10 @@ BASH = hermetic.tool("bash")
 GIT = hermetic.tool("git")
 SEARCH_LIB = BELT / "fuzz-search-lib.sh"
 WORKFLOW = CANON / ".github" / "workflows" / "repo-deep-tests.yml"
+STUBS = (
+    CANON / "workflow-templates" / "deep-tests.yml",
+    CANON / ".github" / "workflows" / "self-deep-tests.yml",
+)
 HOST = "x86_64-unknown-linux-gnu"
 NIGHTLY = "nightly-2026-11-01"
 
@@ -70,7 +74,8 @@ esac
 # Present on PATH, never run: `cargo fuzz` goes through cargo.
 CARGO_FUZZ = "#!/usr/bin/env bash\nexit 99\n"
 
-# cargo: `fuzz list` the one target; `fuzz run` the search or the merge;
+# cargo: `fuzz list` the targets (STUB_TARGETS, else the one); `fuzz
+# run` the search or the merge;
 # `fuzz coverage` writes a profile naming the corpus it replayed.
 CARGO = """\
 #!/usr/bin/env bash
@@ -79,7 +84,7 @@ case "$1 ${2:-}" in
   "metadata --no-deps")
     printf '{"target_directory": "%s/fuzz/target"}\\n' "${PWD}"
     ;;
-  "fuzz list") echo parse_marker ;;
+  "fuzz list") printf '%s\\n' ${STUB_TARGETS:-parse_marker} ;;
   "fuzz run")
     target=$6 first=$7 second=$8
     if [[ " $* " == *" -merge=1 "* ]]; then
@@ -170,6 +175,8 @@ FUZZ_MANIFEST = (
     '[package]\nname = "probe-fuzz"\nversion = "0.0.0"\n\n[workspace]\n\n'
     '[[bin]]\nname = "parse_marker"\npath = "fuzz_targets/parse_marker.rs"\n'
 )
+SECOND_TARGET = '\n[[bin]]\nname = "parse_date"\npath = "fuzz_targets/parse_date.rs"\n'
+
 
 GO_TEST = """\
 package policy
@@ -299,6 +306,27 @@ class SearchCase(unittest.TestCase):
         self.write("fuzz/Cargo.toml", FUZZ_MANIFEST)
         self.write("fuzz/fuzz_targets/parse_marker.rs", "#![no_main]\n")
         self.write("fuzz/corpus/parse_marker/seed", "seed")
+
+    def rust_two(self) -> None:
+        """Plant a fuzz crate with two targets, each with a tracked seed."""
+        self.rust()
+        self.write("fuzz/Cargo.toml", FUZZ_MANIFEST + SECOND_TARGET)
+        self.write("fuzz/fuzz_targets/parse_date.rs", "#![no_main]\n")
+        self.write("fuzz/corpus/parse_date/seed", "seed")
+        self.env["STUB_TARGETS"] = "parse_marker parse_date"
+
+    def searched(self) -> list[str]:
+        """Read which Rust targets the search ran, in order.
+
+        Returns:
+            The target of each `cargo fuzz run … -max_total_time` call.
+
+        """
+        return [
+            line.split(" ")[5]
+            for line in self.log("cargo")
+            if "-max_total_time" in line
+        ]
 
     def go(self) -> None:
         """Plant a Go module with one fuzz target and one tracked seed."""
@@ -464,6 +492,103 @@ class GoSearch(SearchCase):
         )
 
 
+class Selection(SearchCase):
+    """FUZZ_TARGET picks one runner's target; FUZZ_SECONDS is its budget (#1899)."""
+
+    def test_fuzz_target_set_runs_that_target_alone(self) -> None:
+        """Of two targets, FUZZ_TARGET's is the only one searched."""
+        self.rust_two()
+        self.env["FUZZ_TARGET"] = "parse_date"
+        result = self.run_task("audit:fuzz")
+        self.assertEqual(0, result.returncode, result.stderr)
+        same(self, ["parse_date"], self.searched())
+        self.assertIn("- `parse_date` (fuzz-parse-date):", result.stdout)
+        self.assertNotIn("- `parse_marker`", result.stdout)
+
+    def test_fuzz_target_unset_runs_every_target(self) -> None:
+        """With no FUZZ_TARGET, a local run searches every target in turn."""
+        self.rust_two()
+        result = self.run_task("audit:fuzz")
+        self.assertEqual(0, result.returncode, result.stderr)
+        same(self, ["parse_marker", "parse_date"], self.searched())
+
+    def test_an_unknown_rust_target_is_red_naming_it(self) -> None:
+        """A name cargo fuzz list does not print is red, and nothing is searched."""
+        self.rust_two()
+        self.env["FUZZ_TARGET"] = "parse_time"
+        result = self.run_task("audit:fuzz")
+        self.assertEqual(1, result.returncode, result.stdout)
+        self.assertIn(
+            "audit:fuzz: FUZZ_TARGET 'parse_time' is no fuzz target of"
+            " fuzz/Cargo.toml (cargo fuzz list: parse_marker parse_date)",
+            result.stderr,
+        )
+        same(self, [], self.searched())
+
+    def test_a_rust_target_with_no_fuzz_crate_is_red_naming_it(self) -> None:
+        """A named target on a tree with no fuzz/ is red, not skipped."""
+        self.write("Cargo.toml", "[workspace]\n")
+        self.env["FUZZ_TARGET"] = "parse_marker"
+        result = self.run_task("audit:fuzz")
+        self.assertEqual(1, result.returncode, result.stdout)
+        self.assertIn(
+            "audit:fuzz: FUZZ_TARGET 'parse_marker' is no fuzz target of this"
+            " tree (no fuzz/)",
+            result.stderr,
+        )
+
+    def test_a_go_target_is_picked_by_name_and_package(self) -> None:
+        """FUZZ_TARGET and FUZZ_PACKAGE name the package directory's target."""
+        self.go()
+        self.env |= {"FUZZ_TARGET": "FuzzLoad", "FUZZ_PACKAGE": "internal/policy"}
+        result = self.run_task("audit:go-fuzz")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("- `FuzzLoad` in example.com/x/internal/policy", result.stdout)
+
+    def test_an_unknown_go_target_is_red_naming_it(self) -> None:
+        """A Go target in a package that does not hold it is red, naming both."""
+        self.go()
+        self.env |= {"FUZZ_TARGET": "FuzzLoad", "FUZZ_PACKAGE": "cmd/x"}
+        result = self.run_task("audit:go-fuzz")
+        self.assertEqual(1, result.returncode, result.stdout)
+        self.assertIn(
+            "audit:go-fuzz: FUZZ_TARGET 'FuzzLoad' in 'cmd/x' is no fuzz target"
+            " of this tree's Go packages",
+            result.stderr,
+        )
+        self.assertFalse(any(c.startswith("test -fuzz") for c in self.log("go")))
+
+    def test_the_go_task_passes_half_the_budget_to_each_pass(self) -> None:
+        """FUZZ_SECONDS 300: the plain and the race pass are 150s each."""
+        self.go()
+        result = self.run_task("audit:go-fuzz")
+        self.assertEqual(0, result.returncode, result.stderr)
+        passes = [c for c in self.log("go") if " -fuzz " in f" {c} "]
+        self.assertEqual(2, len(passes), passes)
+        for call in passes:
+            with self.subTest(call=call):
+                self.assertIn("-fuzztime 150s", call)
+        self.assertTrue(passes[1].startswith("test -race"), passes)
+        self.assertIn("last new coverage at 3s of 150s", result.stdout)
+
+    def test_the_budget_is_thirty_minutes_by_default(self) -> None:
+        """FUZZ_SECONDS unset: 1800s for a Rust target, 900s a pass for Go."""
+        del self.env["FUZZ_SECONDS"]
+        self.rust()
+        self.go()
+        rust = self.run_task("audit:fuzz")
+        self.assertEqual(0, rust.returncode, rust.stderr)
+        search = next(line for line in self.log("cargo") if "-max_total_time" in line)
+        self.assertTrue(search.endswith("-- -max_total_time=1800"), search)
+        go = self.run_task("audit:go-fuzz")
+        self.assertEqual(0, go.returncode, go.stderr)
+        passes = [c for c in self.log("go") if " -fuzz " in f" {c} "]
+        self.assertTrue(passes)
+        for call in passes:
+            with self.subTest(call=call):
+                self.assertIn("-fuzztime 900s", call)
+
+
 class RunLength(unittest.TestCase):
     """The summary says when a run was still finding new code (item 5)."""
 
@@ -616,6 +741,76 @@ class Handover(unittest.TestCase):
         handed = self.handover({"fuzz/corpus/t/abc": "x"})
         self.assertEqual("true", handed["staged"])
         self.assertEqual("- `t`: kept 1", handed["summary"])
+
+
+class OneRunnerPerTarget(unittest.TestCase):
+    """The fuzz job is a matrix over the applies job's list, run nightly (#1899)."""
+
+    def test_the_fuzz_matrix_is_the_applies_output(self) -> None:
+        """One leg per listed target, none cancelled by another, 60 minutes each."""
+        jobs = workflow_yaml.jobs(workflow_yaml.document(WORKFLOW))
+        fuzz = jobs["fuzz"]
+        strategy = decoded.as_object(fuzz["strategy"], "strategy")
+        self.assertIsInstance(strategy["fail-fast"], bool)
+        self.assertFalse(strategy["fail-fast"])
+        matrix = decoded.as_object(strategy["matrix"], "matrix")
+        keys: list[str] = list(matrix)
+        same(self, ["include"], keys)
+        self.assertEqual(
+            "${{ fromJSON(needs.applies.outputs.fuzz-targets) }}", matrix["include"]
+        )
+        self.assertEqual(60, fuzz["timeout-minutes"])
+        outputs = decoded.as_object(jobs["applies"]["outputs"], "outputs")
+        self.assertEqual(
+            "${{ steps.applies.outputs.fuzz-targets }}", outputs["fuzz-targets"]
+        )
+        env = decoded.as_object(fuzz["env"], "env")
+        self.assertEqual("${{ matrix.target }}", env["FUZZ_TARGET"])
+        self.assertEqual("${{ matrix.package }}", env["FUZZ_PACKAGE"])
+        # Each leg runs its own language's task alone.
+        tasks: list[tuple[str, str]] = [
+            (decoded.as_str(s["run"], "run"), decoded.as_str(s.get("if"), "if"))
+            for s in workflow_yaml.steps(fuzz)
+            if "mise run audit:" in str(s.get("run", ""))
+        ]
+        want: list[tuple[str, str]] = [
+            ("mise run audit:fuzz", "${{ matrix.kind == 'rust' }}"),
+            ("mise run audit:go-fuzz", "${{ matrix.kind == 'go' }}"),
+        ]
+        self.assertEqual(want, tasks)
+
+    def test_the_stubs_run_every_night(self) -> None:
+        """The template and the canon's own stub carry a daily cron, no other."""
+        for path in STUBS:
+            on = decoded.as_object(workflow_yaml.document(path)["on"], "on")
+            crons = [
+                decoded.as_str(decoded.as_object(e, "schedule")["cron"], "cron")
+                for e in decoded.as_array(on["schedule"], "schedule")
+            ]
+            with self.subTest(stub=path.name):
+                self.assertEqual(1, len(crons), crons)
+                self.assertRegex(crons[0], r"^[0-9]+ [0-9]+ \* \* \*$")
+
+    def test_each_target_uploads_its_own_artifact_and_propose_takes_all(self) -> None:
+        """Upload by kind and target; propose downloads every one into one tree."""
+        upload = decoded.as_object(step(Handover.UPLOAD)["with"], "with")
+        self.assertEqual(
+            "fuzz-corpus-candidates-${{ matrix.kind }}-${{ matrix.target }}",
+            upload["name"],
+        )
+        jobs = workflow_yaml.jobs(workflow_yaml.document(WORKFLOW))
+        downloads = [
+            decoded.as_object(s["with"], "with")
+            for s in workflow_yaml.steps(jobs["propose"])
+            if "download-artifact" in str(s.get("uses", ""))
+        ]
+        self.assertEqual(1, len(downloads))
+        self.assertEqual("fuzz-corpus-candidates-*", downloads[0]["pattern"])
+        self.assertIsInstance(downloads[0]["merge-multiple"], bool)
+        self.assertTrue(downloads[0]["merge-multiple"])
+        self.assertNotIn("name", downloads[0])
+        # propose is one job, never a matrix.
+        self.assertNotIn("strategy", jobs["propose"])
 
 
 class ProposeRunsNoRepositoryCode(unittest.TestCase):
