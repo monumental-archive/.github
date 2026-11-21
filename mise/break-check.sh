@@ -50,12 +50,12 @@
 set -euo pipefail
 
 label="break:check"
+: "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
 [[ -n ${PR_TITLE+set} ]] || {
   printf '%s%s\n' "${label}: PR_TITLE is unset — the gate step sets it from the pull request," \
     " and without it there is no declaration to hold" >&2
   exit 1
 }
-: "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
 belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
 
 manifests=$(git ls-files ':!vendor/**' "Cargo.toml" "*/Cargo.toml")
