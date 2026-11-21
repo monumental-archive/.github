@@ -10,6 +10,30 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.72.0](https://github.com/monumental-archive/.github/compare/v1.71.1...v1.72.0) - 2026-11-21
+
+### Added
+
+- derive each crate's rust-version from debian and its deps ([#1908](https://github.com/monumental-archive/.github/pull/1908))
+- report each scheduled run in one red-check issue ([#1912](https://github.com/monumental-archive/.github/pull/1912))
+
+### Fixed
+
+- update monumental-archive/signer to 8e4d3b0 ([#1881](https://github.com/monumental-archive/.github/pull/1881))
+- group pgrx's packages by their source url ([#1892](https://github.com/monumental-archive/.github/pull/1892))
+- decode the plan's majors as json in both consumers ([#1893](https://github.com/monumental-archive/.github/pull/1893))
+- refuse suppressions clippy cannot see in lint:rust ([#1894](https://github.com/monumental-archive/.github/pull/1894))
+- split the weekly audit into one workflow per subject ([#1900](https://github.com/monumental-archive/.github/pull/1900))
+- name every coverage directory for its compiler ([#1895](https://github.com/monumental-archive/.github/pull/1895))
+- require and replay a committed fuzz corpus ([#1904](https://github.com/monumental-archive/.github/pull/1904))
+- split the canon's scheduled legs into subject workflows ([#1907](https://github.com/monumental-archive/.github/pull/1907))
+- run the slsa walks once, not in two groups ([#1913](https://github.com/monumental-archive/.github/pull/1913))
+- decide each scheduled job's applicability before its runner ([#1915](https://github.com/monumental-archive/.github/pull/1915))
+
+### Documentation
+
+- point the lab's major range at the mapping (#1902) ([#1905](https://github.com/monumental-archive/.github/pull/1905))
+
 ## [1.71.1](https://github.com/monumental-archive/.github/compare/v1.71.0...v1.71.1) - 2026-11-21
 
 ### Fixed
