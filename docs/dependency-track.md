@@ -56,8 +56,7 @@ The policy, maximally defensible:
   constraints, or by waiting on the upstream bump. Where upstream truly
   forces a duplicate, the exit is a written `[[bans.skip]]` entry citing
   the upstream issue: an exception with a name and a reason, in one
-  place, exactly like the advisory `ignore` entries that cite their VEX
-  statements. Since #445 that exception also EXPIRES: `lint:deny` removes
+  place, the repository whose tree it describes. Since #445 that exception also EXPIRES: `lint:deny` removes
   each skip in turn and re-runs, so an entry that has stopped doing
   anything fails the gate by name rather than sitting there forever.
 
@@ -84,11 +83,23 @@ obligation, so it runs from `repo-dependencies.yml` via each repo's
 own `dependencies.yml` stub — which means adoption is per repo and enumerated
 nowhere the way `audit:source-vsa` enumerates chains (#349 finding 8
 holds that open; an `audit:adoption` over the population is the
-recorded follow-up). Every
-`ignore` entry carries a `reason` and must cite the VEX statement that
-records the decision — the config format itself enforces the L2 shape
-(`severity-threshold` and lint-level knobs were removed upstream;
-everything errors, and a written ignore is the only exit).
+recorded follow-up).
+
+**Its exit is the canon's decision, written once (#1926)** — the
+`audit:go-vulns` mechanism. cargo-deny's JSON (`--format json`, on
+stderr) goes to `stele assert advisories --scanner cargo-deny`, which
+joins each finding against [`security/vex/`](../security/vex/) on the
+exact (advisory, package, version) triple. cargo-deny's own exit
+status is not read: it is 1 for a finding and a failure alike, and a
+scan that did not finish is stele's `CANNOT_JUDGE`.
+
+A repository keeps **no advisory `ignore`** in its `deny.toml`:
+`lint:deny` refuses one in the gate, naming it. cargo-deny's `ignore`
+is keyed by the advisory alone, so it excused the advisory at every
+version, and it was a second copy of a decision the canon holds —
+an ignore with no decision stayed green, a decision with no ignore
+stayed red. An entry keyed by `crate` (a yanked version) names no
+advisory and is not refused.
 
 ### The cron: `audit:go-vulns` (Go advisories)
 
@@ -210,8 +221,8 @@ modes at once (`security/vex/README.md` states the contract and the
 version dialect).
 
 There is no second bookkeeping: the VEX **is** the triage record.
-`audit:deny` ignores cite it; blast-radius joins on it; releases derive
-from it.
+`audit:deny` and `audit:go-vulns` join on it through stele;
+blast-radius joins on it; releases derive from it.
 
 Delivery, shaped by immutability: published releases cannot gain assets,
 so a post-hoc decision reaches consumers on two surfaces — the signed
@@ -282,9 +293,9 @@ went out eleven seconds after this very gate went red. The
 same job then runs `audit:deny` against the tagged lock (#211): the
 identical belt task the Monday cron runs, so cargo-deny reads RustSec
 directly (no OSV import lag) and additionally refuses yanked crates,
-with the triage record unchanged — every `ignore` in `deny.toml`
-carries a reason citing its VEX statement, so the exit is a written
-decision and only its timing moves. Neither leg has a warn path: a
+with the triage record unchanged — stele joins the scan against
+`security/vex/`, so the exit is a written decision and only its timing
+moves. Neither leg has a warn path: a
 warning here converts the control into a log line (the #118 rule). A
 Tuesday advisory against a Wednesday release is triaged on Wednesday or
 the release does not happen. The Monday sweeps over *already-published*

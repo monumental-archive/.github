@@ -52,9 +52,9 @@ allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 
 [advisories]
 # Defaults are already maximal: every advisory class errors. The only
-# exit is a written `ignore` entry — reason required, citing the VEX
-# statement in the canon's security/vex/ that records the decision
-# (the L2 contract: known, decided, written down).
-ignore = [
-  # { id = "RUSTSEC-0000-0000", reason = "see security/vex/<file> — <one line>" },
-]
+# exit is the decision in the canon's security/vex/, keyed by advisory,
+# package and version: audit:deny hands cargo-deny's scan to stele,
+# which judges it against those decisions (the L2 contract: known,
+# decided, written down — once). Write no `ignore` here: an advisory
+# ignore is a second copy keyed by the advisory alone, and lint:deny
+# refuses it (#1926).

@@ -68,7 +68,10 @@ toil and the drift hazard this keying removes.
 - **No `not_affected` without the blast-radius query behind it** — a
   signed wrong `not_affected` suppresses consumers' scanner findings on
   our word.
-- Every `deny.toml` advisory `ignore` cites its statement here.
+- A decision here is the only exit for an advisory: `audit:deny` and
+  `audit:go-vulns` have stele join each scan against these documents,
+  and `lint:deny` refuses an advisory `ignore` in a `deny.toml`
+  (#1926).
 - One decision per document, one document per merge: enforced before
   the merge by `lint:vex-one-per-merge` in the gate, and on the push to
   main by `vex-attest.yml` as the backstop. Both print one sentence,
