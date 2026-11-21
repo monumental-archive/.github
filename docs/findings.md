@@ -37,8 +37,10 @@ One JSON object on one line:
 | `detail` | A list of lines. May be empty. |
 
 A finding's identity is its task, subject and message. The report keeps
-a short hash of each identity in the issue's body, so a finding seen
-in the previous run reads as still red and any other as new.
+a short hash of the identity of each finding the issue shows in its
+body. A finding listed in the issue's previous body reads as still red;
+any other is new. So a finding the body's size limit cut is new when a
+later run first shows it.
 
 ## Where records go
 

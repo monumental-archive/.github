@@ -58,7 +58,9 @@ not a record is counted, and the body says how many. `## Findings`
 lists each task's findings, its name in order, those new in this run
 apart from those still red: a finding is its task, subject and
 message, and the body ends with a comment line carrying the first 16
-hex characters of each one's SHA-256, which the next run reads back. A
+hex characters of the SHA-256 of each finding the body shows, which the
+next run reads back. New means not listed in this issue's previous
+body: a finding the limit cut is new when a later run first shows it. A
 red job whose failing step ran a task with a record (named after
 `mise run ` in the step's name, or in a `[<task>] ` prefix of its
 output) points at its findings; any other shows its failing step's
