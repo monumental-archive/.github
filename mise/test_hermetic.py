@@ -837,6 +837,27 @@ class Tool(unittest.TestCase):
             )
 
 
+class Rustc(unittest.TestCase):
+    """hermetic.rustc prints hermetic.rustc_verbose (#1877)."""
+
+    def test_the_stand_in_prints_the_text_for_its_toolchain(self) -> None:
+        """Unset is `stable`; RUSTUP_TOOLCHAIN names the release."""
+        bin_dir = Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(shutil.rmtree, bin_dir)
+        stub = str(hermetic.rustc(bin_dir))
+        rows = (("", "stable"), ("nightly-2026-07-20", "nightly-2026-07-20"))
+        for given, toolchain in rows:
+            with self.subTest(toolchain=toolchain):
+                env = hermetic.env()
+                env.pop("RUSTUP_TOOLCHAIN", None)
+                if given:
+                    env["RUSTUP_TOOLCHAIN"] = given
+                done = subprocess.run(
+                    [stub, "-vV"], env=env, capture_output=True, text=True, check=True
+                )
+                self.assertEqual(hermetic.rustc_verbose(toolchain), done.stdout)
+
+
 class Belt(unittest.TestCase):
     """hermetic.belt and hermetic.canon (#1714)."""
 

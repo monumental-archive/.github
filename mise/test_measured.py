@@ -13,6 +13,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import gate_cache_key
 import hermetic
 
 BELT = Path(__file__).resolve().parent
@@ -428,6 +429,10 @@ case "$1 ${2:-}" in
   *) ;;
 esac
 """
+# The directory digest of the stand-in `rustc` the rows run beside
+# (#1877), under the `stable` toolchain they set.
+STABLE = gate_cache_key.directory_digest(hermetic.rustc_verbose("stable"))
+
 # What a row expects when the stand-in cargo was never called.
 NO_CALLS: list[str] = []
 RUST_REFUSAL = (
@@ -459,6 +464,7 @@ class RustInstrumented(unittest.TestCase):
             stubs.mkdir()
             (stubs / "cargo").write_text(CARGO, encoding="utf-8")
             (stubs / "cargo").chmod(0o755)
+            hermetic.rustc(stubs)
         log = base / "cargo.log"
         path = f"{base / 'stubs'}{os.pathsep}{os.environ['PATH']}"
         out = run(
@@ -467,18 +473,18 @@ class RustInstrumented(unittest.TestCase):
             ORG_COVERAGE_RUN=str(base / run_name),
             PATH=path,
             STUB_LOG=str(log),
-            **given,
+            **({"RUSTUP_TOOLCHAIN": "stable"} | given),
         )
         calls = log.read_text().splitlines() if log.exists() else []
         return tree.resolve(), out, calls
 
     def test_the_target_directory_is_set_before_show_env_is_asked(self) -> None:
-        """`<target>/llvm-cov-target`, exported, then show-env asked under it."""
+        """`<target>/llvm-cov-target-<digest>`, exported, then show-env under it."""
         with tempfile.TemporaryDirectory() as tmp:
             tree, out, calls = self.rust_run(tmp, DUMP)
             self.assertEqual(0, out.returncode, out.stderr)
             seen = environment(out.stdout)
-            target = f"{tree}/target/llvm-cov-target"
+            target = f"{tree}/target/llvm-cov-target-{STABLE}"
             self.assertEqual(target, seen["CARGO_TARGET_DIR"])
             self.assertEqual(f"{target}/tree-%p-%8m.profraw", seen["LLVM_PROFILE_FILE"])
             self.assertEqual("/stub/cargo-llvm-cov", seen["RUSTC_WRAPPER"])
@@ -491,12 +497,31 @@ class RustInstrumented(unittest.TestCase):
             for run_name in ("run", "run", "next"):
                 _, out, calls = self.rust_run(tmp, DUMP, run_name=run_name)
                 self.assertEqual(0, out.returncode, out.stderr)
-            target = f"{Path(tmp).resolve()}/tree/target/llvm-cov-target"
+            target = f"{Path(tmp).resolve()}/tree/target/llvm-cov-target-{STABLE}"
             cleaned = [c for c in calls if c.startswith("llvm-cov clean")]
             twice: list[str] = [
                 f"llvm-cov clean --profraw-only | CARGO_TARGET_DIR={target}"
             ] * 2
             self.assertEqual(twice, cleaned)
+
+    def test_two_compilers_measure_into_two_directories(self) -> None:
+        """Two `rustc` differing only in `release:`: two directories (#1877).
+
+        On main both exported `<target>/llvm-cov-target`, so a bump's
+        executables landed beside the old compiler's and the report read
+        both.
+        """
+        seen = []
+        for release in ("1.97.1", "1.100.0"):
+            with tempfile.TemporaryDirectory() as tmp, self.subTest(release=release):
+                tree, out, _ = self.rust_run(tmp, DUMP, RUSTUP_TOOLCHAIN=release)
+                self.assertEqual(0, out.returncode, out.stderr)
+                verbose = hermetic.rustc_verbose(release)
+                digest = gate_cache_key.directory_digest(verbose)
+                target = environment(out.stdout)["CARGO_TARGET_DIR"]
+                self.assertEqual(f"{tree}/target/llvm-cov-target-{digest}", target)
+                seen.append(target.rsplit("/", 1)[1])
+        self.assertNotEqual(seen[0], seen[1])
 
     def test_no_cargo_toml_is_handed_no_rust_environment(self) -> None:
         """A floored tree that is not Rust: no cargo is asked anything."""

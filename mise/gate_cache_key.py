@@ -88,6 +88,17 @@ places the digest before the Cargo.lock hash, in the key and in the
 fallback prefix alike: a toolchain change misses, and a fallback only
 ever restores an entry the same compiler filled. No `rustc` is red,
 never an empty digest: the step runs only where a cargo cache does.
+
+EVERY COVERAGE DIRECTORY NAMES ITS COMPILER (#1877). The cache key keeps
+a restore from mixing compilers, but not a directory that persists: a
+developer's `target/`, a reused worktree. Rust 1.100 moved test
+executables from `deps/` to `build/*/out/`, so a bump left 1.97.1's
+beside 1.100.0's and `cargo llvm-cov report` read both (99.37% fresh,
+95.77% over the mixed directory, on edtf). So `digest` prints the first
+16 hex characters of the same digest, for the `rustc` on PATH (under
+RUSTUP_TOOLCHAIN when the caller sets it), and every coverage
+CARGO_TARGET_DIR ends in it: a compiler change is a new, empty
+directory. Same red branches as `cargo`.
 """
 
 import argparse
@@ -246,6 +257,21 @@ def rustc_digest(verbose: str) -> str:
     return hashlib.sha256(verbose.encode()).hexdigest()
 
 
+# How much of the digest a directory name carries (#1877): 64 bits, so
+# two compilers colliding is not a case anyone meets.
+DIGEST_HEX = 16
+
+
+def directory_digest(verbose: str) -> str:
+    """Shorten a compiler's digest for a directory name (#1877).
+
+    Returns:
+        The first DIGEST_HEX hex characters of `rustc_digest(verbose)`.
+
+    """
+    return rustc_digest(verbose)[:DIGEST_HEX]
+
+
 def rustc_verbose() -> str:
     """Ask the `rustc` on PATH for its full version.
 
@@ -259,8 +285,8 @@ def rustc_verbose() -> str:
     """
     if shutil.which(RUSTC) is None:
         msg = (
-            "no rustc on PATH: a job that restores a cargo cache must name"
-            " the compiler that fills it"
+            "no rustc on PATH: a cargo cache or a coverage directory must"
+            " name the compiler that fills it"
         )
         raise ValueError(msg)
     done = subprocess.run([RUSTC, "-vV"], capture_output=True, text=True, check=False)
@@ -301,6 +327,9 @@ def parse(argv: list[str] | None) -> Args:
         help="the job's install_args, for a job that installs a list (#1408)",
     )
     caches.add_parser("cargo", help="digest the compiler the cargo caches hold")
+    caches.add_parser(
+        "digest", help="print the compiler's short digest, for a directory (#1877)"
+    )
     return parser.parse_args(argv, namespace=Args())
 
 
@@ -329,6 +358,22 @@ def cargo(env: dict[str, str]) -> int:
     return 0
 
 
+def digest() -> int:
+    """Print the compiler's short digest, for a coverage directory (#1877).
+
+    Returns:
+        0, or 1 with the reason on stderr and nothing on stdout.
+
+    """
+    try:
+        short = directory_digest(rustc_verbose())
+    except (OSError, ValueError) as err:
+        print(f"{NAME}: {err}", file=sys.stderr)
+        return 1
+    print(short)
+    return 0
+
+
 def main(argv: list[str] | None = None, now: float | None = None) -> int:
     """Write a cache's names to GITHUB_OUTPUT.
 
@@ -340,6 +385,8 @@ def main(argv: list[str] | None = None, now: float | None = None) -> int:
     env = dict(os.environ)
     if args.cache == "cargo":
         return cargo(env)
+    if args.cache == "digest":
+        return digest()
     try:
         workflow = args.canon / ".github" / "workflows" / "ci.yml"
         version = mise_version(workflow.read_text("utf-8"))

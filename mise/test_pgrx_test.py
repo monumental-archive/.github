@@ -36,6 +36,7 @@ import unittest
 from pathlib import Path
 from typing import override
 
+import gate_cache_key
 import hermetic
 
 BELT = Path(__file__).resolve().parent
@@ -140,6 +141,10 @@ PGRX_POSTGRES_STUB = "print('plan')\n"
 
 MAJORS = [17, 18]
 
+# The directory digest of the stand-in `rustc` the rows run beside
+# (#1877), under the `stable` toolchain they set.
+STABLE = gate_cache_key.directory_digest(hermetic.rustc_verbose("stable"))
+
 # What a row expects when a stub was never called, typed so the
 # comparison carries no Any.
 NOTHING: list[str] = []
@@ -194,6 +199,7 @@ class Planted(unittest.TestCase):
         }.items():
             (bins / name).write_text(body, encoding="utf-8")
             (bins / name).chmod(0o755)
+        hermetic.rustc(bins)
         self.belt = hermetic.belt(
             self.tmp / "belt",
             stubs={
@@ -219,6 +225,7 @@ class Planted(unittest.TestCase):
             "PATH": f"{bins}{os.pathsep}{os.environ['PATH']}",
             "ORG_BELT_DIR": str(self.belt),
             "ORG_PYTHON": sys.executable,
+            "RUSTUP_TOOLCHAIN": "stable",
             "PLANT_LOG": str(self.log),
             "PLANT_METADATA": str(metadata),
         }
@@ -291,7 +298,8 @@ class MeasuredRun(Planted):
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertIn("pgrx-pg18 94.44444444444444", done.stdout.splitlines())
         (suite,) = self.suites(log)
-        target = self.tree / "target" / "llvm-cov-pgrx-pg18"
+        # The major's directory names its compiler too (#1877).
+        target = self.tree / "target" / f"llvm-cov-pgrx-pg18-{STABLE}"
         self.assertIn(f"|cwd={self.tree / 'crates' / 'lab-pg'}|", suite)
         self.assertIn(f"|target={target}|", suite)
         self.assertIn(f"|profile={target}/lab-%p-%m.profraw", suite)
@@ -416,8 +424,8 @@ class MeasuredRun(Planted):
             ln.split("|target=")[1].split("|")[0] for ln in self.suites(log)
         )
         want = [
-            str(self.tree / "target" / "llvm-cov-pgrx-pg17"),
-            str(self.tree / "target" / "llvm-cov-pgrx-pg18"),
+            str(self.tree / "target" / f"llvm-cov-pgrx-pg17-{STABLE}"),
+            str(self.tree / "target" / f"llvm-cov-pgrx-pg18-{STABLE}"),
         ]
         self.assertEqual(want, targets)
 
@@ -533,7 +541,7 @@ class CoverageTasks(Planted):
         """
         run = self.tmp / "run"
         (run / "rust").mkdir(parents=True)
-        profiles = self.tree / "target" / "llvm-cov-target"
+        profiles = self.tree / "target" / f"llvm-cov-target-{STABLE}"
         profiles.mkdir(parents=True)
         (profiles / "lab-1-1.profraw").touch()
         return {"ORG_COVERAGE_RUN": str(run)}

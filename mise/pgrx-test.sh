@@ -185,7 +185,9 @@ measure_one() { # usage: measure_one <dir> <crate> <major>
     # rides RUSTC_WRAPPER, which cargo's fingerprint does not see, so in a
     # directory a plain build used it reuses uninstrumented binaries and
     # writes no profile at all.
-    export CARGO_TARGET_DIR="${root}/llvm-cov-${leg}"
+    # And of its own compiler (#1877, rust-coverage-env.sh says why).
+    compiler=$("${ORG_PYTHON}" "${belt}/gate_cache_key.py" digest) || exit 1
+    export CARGO_TARGET_DIR="${root}/llvm-cov-${leg}-${compiler}"
     # shellcheck disable=SC2310  # it returns 1 on every failure, explicitly
     org_pgrx_darwin_icu "${one}" || exit 1
     envs=$(cargo llvm-cov show-env --sh) || exit 1

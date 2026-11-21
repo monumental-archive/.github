@@ -197,12 +197,13 @@ if [[ -f ${root}/go.mod ]]; then
 fi
 
 # rust: the repository's own command, instrumented (#1653). CARGO_TARGET_DIR
-# names `<target_directory>/llvm-cov-target` and what `cargo llvm-cov
-# show-env` prints for it is exported, in that order (rust-coverage-env.sh,
-# shared with the rust leg, says why): every cargo the command starts
-# builds instrumented into that directory and writes its profiles there,
-# from any number of cargo runs, features, doctests and all. The rust leg
-# renders them with `cargo llvm-cov report` and builds nothing.
+# names `<target_directory>/llvm-cov-target-<digest of rustc -vV>` (#1877)
+# and what `cargo llvm-cov show-env` prints for it is exported, in that
+# order (rust-coverage-env.sh, shared with the rust leg, says why): every
+# cargo the command starts builds instrumented into that directory and
+# writes its profiles there, from any number of cargo runs, features,
+# doctests and all. The rust leg renders them with `cargo llvm-cov
+# report` and builds nothing.
 #
 # The instrumentation rides RUSTC_WRAPPER and LLVM_PROFILE_FILE, in a
 # target directory of its own. A test command that sets any of the three

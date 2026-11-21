@@ -2347,10 +2347,11 @@ covered lines were identical between the two forms.
 
 `measured` instruments the command where it runs. In a tree with
 `Cargo.toml` it exports CARGO_TARGET_DIR as
-`<target_directory>/llvm-cov-target` (the directory `cargo llvm-cov`
-itself uses) and then what `cargo llvm-cov show-env --sh` prints for
-it, so every cargo the command starts builds instrumented there; the
-rust leg runs `cargo llvm-cov report` under the same environment and
+`<target_directory>/llvm-cov-target-<digest>` (#1877: `<digest>` is
+the first 16 hex of the sha256 of `rustc -vV`, `gate_cache_key.py
+digest`) and then what `cargo llvm-cov show-env --sh` prints for it,
+so every cargo the command starts builds instrumented there; the rust
+leg runs `cargo llvm-cov report` under the same environment and
 builds nothing. The two share one sourced derivation,
 `mise/rust-coverage-env.sh`. Measured with cargo-llvm-cov 0.9.1 on
 release-lab:
@@ -2366,6 +2367,16 @@ release-lab:
 - `report` exits 0 after a failed suite. The suite's exit status gates
   the figure: `coverage:check` depends on `test`, so mise never runs
   it after a red one.
+- A directory of its own compiler (#1877). `report` reads every test
+  executable in the directory, and Rust 1.100 moved them from `deps/`
+  to `build/*/out/`, so a bump left 1.97.1's beside 1.100.0's: edtf
+  measured 99.37% fresh and 95.77% over the mixed directory, and a
+  longer-lived worktree 70.12%, the figure CI took over a stale cache
+  in #1864. Every coverage directory (this one, each pgrx major's, the
+  nightly `rust-branches` leg's) ends in its compiler's digest, so a
+  compiler change is a new, empty directory. Nothing prunes the old
+  one: the stable and nightly legs run side by side in one tree, and
+  `cargo clean` removes it.
 
 The first `measured` call in a run removes old profiles (`cargo llvm-cov
 clean --profraw-only`), its marker a directory in the run's directory,
