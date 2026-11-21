@@ -39,7 +39,7 @@ mise/config.toml	lint:go	31	# #1544 unassigned
 mise/config.toml	lint:tsc-flags	25	# #1544 unassigned
 mise/config.toml	lint:types	77	# #1544 unassigned
 mise/config.toml	lint:tsconfig-dials	32	# #1544 unassigned
-mise/config.toml	lint:scaffold-assembly	155	# #1544 unassigned
+mise/config.toml	lint:scaffold-assembly	149	# #1544 unassigned
 mise/config.toml	lint:go-tidy	21	# #1544 unassigned
 mise/config.toml	lint:go-fuzz-seeds	39	# #1544 unassigned
 mise/config.toml	fix:go	16	# #1544 unassigned
