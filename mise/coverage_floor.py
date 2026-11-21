@@ -51,12 +51,14 @@ repository's choice.
 """
 
 import argparse
+import json
 import re
 import sys
 from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from pathlib import Path
 from typing import NamedTuple
 
+import decoded
 import typed_std
 
 NAME = "coverage-floor"
@@ -121,6 +123,8 @@ LEG_FIELDS = 2
 GATE_JOB = "gate"
 PGRX_LEG = re.compile(r"pgrx-pg([1-9][0-9]*)")
 PGRX_JOB = re.compile(r"pgrx:([1-9][0-9]*)")
+# A Postgres major as the plan spells one: digits, no leading zero.
+MAJOR = re.compile(r"[1-9][0-9]*")
 
 TEMPLATE = """\
 # Coverage floor -- DERIVED STATE, not a number to edit (#652).
@@ -982,27 +986,64 @@ def hold(path: Path, label: str, source: str, jobs: frozenset[str]) -> int:
     return status
 
 
-def planned(path: Path, label: str, majors: str) -> int:
+def planned_majors(text: str) -> list[str]:
+    """Decode the plan's majors output: a JSON array of major strings (#1880).
+
+    The plan writes `pgrx-plan.sh`'s stdout as it is, and this is the
+    one reader of it: no shell takes the JSON apart first.
+
+    Returns:
+        The majors, in the plan's order.
+
+    Raises:
+        decoded.UndecodableError: not JSON, not an array, or an element
+            that is not a string spelling a canonical major.
+
+    """
+    value = decoded.as_array(decoded.load_json(text), "the value")
+    majors: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            msg = f"{json.dumps(item)} is not a string"
+            raise decoded.UndecodableError(msg)
+        if not MAJOR.fullmatch(item):
+            msg = f"{json.dumps(item)} is not a canonical major"
+            raise decoded.UndecodableError(msg)
+        majors.append(item)
+    return majors
+
+
+def planned(path: Path, label: str, majors_json: str) -> int:
     """Hold the floor's record to this run's plan (#1875).
 
     Every recorded leg must have its owning job planned: the gate job
-    always is, and `pgrx:NN` is when NN is among `majors`, the
-    comma-separated list the plan made. Run by the `plan` job, before
-    any leg starts, so a recorded leg no job will measure is red once,
-    by name, rather than judged by no one.
+    always is, and `pgrx:NN` is when NN is among the majors the plan
+    made, `majors_json` being `pgrx-plan.sh`'s output verbatim (#1880).
+    Run by the `plan` job, before any leg starts, so a recorded leg no
+    job will measure is red once, by name, rather than judged by no one.
 
     Returns:
         0 when every recorded leg has a planned owner (and when there is
-        no floor or no record), else 1.
+        no floor or no record), else 1; 1 for majors that do not decode.
 
     """
+    try:
+        majors = planned_majors(majors_json)
+    except decoded.UndecodableError as exc:
+        print(
+            f"{label}: the planned majors '{majors_json}' are not a JSON array "
+            f"of canonical major strings: {exc}",
+            file=sys.stderr,
+        )
+        return 1
     if not path.exists():
         return 0
     record, problems = parse(path.read_text(encoding="utf-8"))
     if record is None:
         complain(problems, path)
         return 1
-    jobs = {GATE_JOB} | {f"pgrx:{major}" for major in majors.split(",") if major}
+    jobs = {GATE_JOB} | {f"pgrx:{major}" for major in majors}
+    listed = ",".join(majors) or "none"
     dropped = record.dropped or {}
     orphaned = [
         leg
@@ -1012,7 +1053,7 @@ def planned(path: Path, label: str, majors: str) -> int:
     for leg in orphaned:
         print(
             f"{label}: the floor records {leg}, measured by the {owner(leg)} "
-            f"job, and this run plans none (planned majors: {majors or 'none'})",
+            f"job, and this run plans none (planned majors: {listed})",
             file=sys.stderr,
         )
         print(needs(leg), file=sys.stderr)
@@ -1028,7 +1069,7 @@ class Args(argparse.Namespace):
     provenance: str
     label: str
     job: list[str]
-    majors: str
+    majors_json: str
     adopt: bool
 
 
@@ -1073,9 +1114,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     plan.add_argument("--label", required=True)
     plan.add_argument(
-        "--majors",
+        "--majors-json",
         required=True,
-        help="the planned Postgres majors, comma-separated (empty for none)",
+        help="the plan's majors output verbatim: a JSON array of major strings",
     )
     writer.add_argument(
         "--adopt",
@@ -1090,7 +1131,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "hold":
         return hold(args.path, args.label, typed_std.stdin_text(), frozenset(args.job))
     if args.command == "planned":
-        return planned(args.path, args.label, args.majors)
+        return planned(args.path, args.label, args.majors_json)
     return derive(args.path, typed_std.stdin_text(), args.provenance, adopt=args.adopt)
 
 

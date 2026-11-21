@@ -34,7 +34,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from typing import override
+from typing import ClassVar, override
 
 import hermetic
 
@@ -145,7 +145,9 @@ MAJORS = [17, 18]
 NOTHING: list[str] = []
 
 
-def package(name: str, root: Path, *, pgrx: bool) -> dict[str, object]:
+def package(
+    name: str, root: Path, *, pgrx: bool, majors: tuple[int, ...] = tuple(MAJORS)
+) -> dict[str, object]:
     """Plant one workspace member as `cargo metadata` reports it.
 
     Returns:
@@ -158,7 +160,7 @@ def package(name: str, root: Path, *, pgrx: bool) -> dict[str, object]:
         features = {
             "default": ["pg18"],
             "pg_test": [],
-            **{f"pg{m}": [f"pgrx/pg{m}"] for m in MAJORS},
+            **{f"pg{m}": [f"pgrx/pg{m}"] for m in majors},
         }
         deps = [{"name": "pgrx"}]
     return {
@@ -175,6 +177,9 @@ def package(name: str, root: Path, *, pgrx: bool) -> dict[str, object]:
 
 class Planted(unittest.TestCase):
     """A planted extension-shaped tree, a stub PATH and a belt."""
+
+    # The majors the planted extension declares.
+    declares: ClassVar[tuple[int, ...]] = tuple(MAJORS)
 
     @override
     def setUp(self) -> None:
@@ -205,7 +210,7 @@ class Planted(unittest.TestCase):
         self.log.touch()
         metadata = self.tmp / "metadata.json"
         packages = [
-            package("lab-pg", self.tree, pgrx=True),
+            package("lab-pg", self.tree, pgrx=True, majors=self.declares),
             package("core", self.tree, pgrx=False),
         ]
         document: dict[str, object] = {
@@ -616,6 +621,46 @@ class CoverageTasks(Planted):
         ])
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertNotIn("below the derived floor", done.stderr)
+
+
+class FannedPlan(Planted):
+    """`ORG_PGRX_FANNED` is the plan's JSON, decoded, never parsed in shell (#1880).
+
+    The value is pgrx-plan.sh's stdout as the workflow hands it on: a
+    JSON array of major strings. The rows feed the producer's own
+    output in, and refuse what is not that shape by name.
+    """
+
+    declares: ClassVar[tuple[int, ...]] = (15, 16, 17, 18)
+
+    def test_the_producers_stdout_holds_against_the_declaration(self) -> None:
+        """pgrx-plan.sh's literal stdout for pg15 to pg18 is the planned list."""
+        plan, _ = self.run_bash([
+            str(BELT / "pgrx-plan.sh"),
+            str(BELT.parent),
+        ])
+        self.assertEqual(0, plan.returncode, plan.stderr)
+        self.assertEqual('["15","16","17","18"]\n', plan.stdout)
+        done, log = self.run_pgrx(ORG_PGRX_FANNED=plan.stdout)
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertIn(
+            "test:pgrx: run by the gate's fan-out, one leg per major: 15,16,17,18",
+            done.stdout,
+        )
+        self.assertEqual(NOTHING, self.suites(log))
+
+    def test_a_value_that_is_not_the_plans_shape_is_refused(self) -> None:
+        """A number, a bare string and a comma list are each refused by name."""
+        for value in ("[15]", '"15"', "15,16"):
+            with self.subTest(value):
+                done, log = self.run_pgrx(ORG_PGRX_FANNED=value)
+                self.assertEqual(1, done.returncode)
+                self.assertEqual(
+                    f"test:pgrx: ORG_PGRX_FANNED '{value}' is not a JSON array of"
+                    " canonical major strings\n",
+                    done.stderr,
+                )
+                self.assertEqual(NOTHING, self.suites(log))
 
 
 if __name__ == "__main__":

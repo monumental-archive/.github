@@ -89,7 +89,17 @@ normalise() {
 declared=$(normalise "${declared}")
 
 if [[ ${mode} == test && -n ${ORG_PGRX_FANNED+set} ]]; then
-  planned=$(normalise "${ORG_PGRX_FANNED}")
+  # The plan's output as pgrx-plan.sh wrote it, a JSON array of major
+  # strings, decoded by jq, the tool that wrote it: normalise takes the
+  # comma list, never the JSON (#1880). Slurped, so exactly one document.
+  planned=$(jq -sr 'if length == 1 and (.[0] | type == "array" and all(.[];
+      type == "string" and test("\\A[1-9][0-9]*\\z")))
+    then .[0] | join(",") else error("refused") end' \
+    <<< "${ORG_PGRX_FANNED}" 2> /dev/null) || {
+    echo "${label}: ORG_PGRX_FANNED '${ORG_PGRX_FANNED}' is not a JSON array of canonical major strings" >&2
+    exit 1
+  }
+  planned=$(normalise "${planned}")
   if [[ ${planned} != "${declared}" ]]; then
     echo "${label}: the gate planned legs for majors [${planned}]; the crate declares [${declared}]" >&2
     echo "  the legs are planned before the toolchain exists and checked here, where it" >&2

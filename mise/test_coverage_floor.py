@@ -21,15 +21,21 @@ Run through the gate as `mise run test`, which `ci` collects.
 
 import argparse
 import io
+import json
+import os
+import re
+import subprocess
 import sys
+import textwrap
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from decimal import Decimal
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING, Self, override
 
 import coverage_floor as cf
+import hermetic
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -1171,7 +1177,7 @@ class TestOwners(unittest.TestCase):
             (
                 "a recorded major the plan dropped",
                 "rust pgrx-pg14 pgrx-pg15",
-                "15,16,17,18",
+                '["15","16","17","18"]',
                 (
                     1,
                     "",
@@ -1183,7 +1189,7 @@ class TestOwners(unittest.TestCase):
             (
                 "no major planned at all",
                 "rust pgrx-pg15",
-                "",
+                "[]",
                 (
                     1,
                     "",
@@ -1195,7 +1201,7 @@ class TestOwners(unittest.TestCase):
             (
                 "every recorded leg owned",
                 "rust python pgrx-pg15 pgrx-pg18",
-                "15,16,17,18",
+                '["15","16","17","18"]',
                 (0, "", ""),
             ),
         ):
@@ -1213,14 +1219,75 @@ class TestOwners(unittest.TestCase):
             ("no floor", None),
         ):
             with self.subTest(name), Tree(text) as tree:
-                self.assertEqual((0, "", ""), run(cf.planned, tree.path, "plan", "15"))
+                self.assertEqual(
+                    (0, "", ""), run(cf.planned, tree.path, "plan", '["15"]')
+                )
 
     def test_the_plan_refuses_a_floor_off_its_record(self) -> None:
         """Drift is the same refusal in the plan as everywhere else."""
         with Tree(record("88.0")) as tree:
-            status, _, err = run(cf.planned, tree.path, "plan", "15")
+            status, _, err = run(cf.planned, tree.path, "plan", '["15"]')
         self.assertEqual(1, status)
         self.assertIn("coverage-floor:", err)
+
+    def test_the_plan_decodes_its_majors_as_json(self) -> None:
+        """`--majors-json` is the plan's array of major strings, or red (#1880).
+
+        Every refusal names the value as given, and none reaches the
+        floor: a value the helper cannot read plans nothing.
+        """
+        refused = (
+            "plan: the planned majors '{value}' are not a JSON array of"
+            " canonical major strings: {why}\n"
+        )
+        for name, legs, majors, want in (
+            ("no major", "rust", "[]", (0, "", "")),
+            ("one major", "rust pgrx-pg15", '["15"]', (0, "", "")),
+            (
+                "two majors",
+                "rust pgrx-pg15 pgrx-pg16",
+                '["15","16"]',
+                (0, "", ""),
+            ),
+            (
+                "a number, not a string",
+                "rust",
+                "[15]",
+                (1, "", refused.format(value="[15]", why="15 is not a string")),
+            ),
+            (
+                "a leading zero",
+                "rust",
+                '["015"]',
+                (
+                    1,
+                    "",
+                    refused.format(
+                        value='["015"]', why='"015" is not a canonical major'
+                    ),
+                ),
+            ),
+            (
+                "a string, not an array",
+                "rust",
+                '"15"',
+                (1, "", refused.format(value='"15"', why="the value is not a list")),
+            ),
+            (
+                "not JSON at all",
+                "rust",
+                "15,16",
+                (
+                    1,
+                    "",
+                    refused.format(
+                        value="15,16", why="Extra data: line 1 column 3 (char 2)"
+                    ),
+                ),
+            ),
+        ):
+            with self.subTest(name), Tree(owned_record(legs)) as tree:
+                self.assertEqual(want, run(cf.planned, tree.path, "plan", majors))
 
     def test_one_owner_per_leg_family(self) -> None:
         """`pgrx-pgNN` strictly is the pgrx job; every other leg the gate's."""
@@ -1251,7 +1318,7 @@ class TestOwners(unittest.TestCase):
                 cf.job_of(text)
 
     def test_the_command_line_reaches_both_checks(self) -> None:
-        """`hold --job` and `planned --majors`, as the callers invoke them."""
+        """`hold --job` and `planned --majors-json`, as the callers invoke them."""
         with Tree(owned_record("rust pgrx-pg15")) as tree:
             stdin = sys.stdin
             sys.stdin = io.StringIO("pgrx-pg15 95\n")
@@ -1278,12 +1345,181 @@ class TestOwners(unittest.TestCase):
                     "planned",
                     "--label",
                     "plan",
-                    "--majors",
-                    "16",
+                    "--majors-json",
+                    '["16"]',
                 ],
             )
         self.assertEqual((0, "lbl: pgrx-pg15 leg holds the floor 90 (95%)\n", ""), held)
         self.assertEqual(1, plan[0])
+
+
+# The canon tree this suite belongs to: its `mise/` and its workflows.
+CANON = Path(__file__).resolve().parent.parent
+BASH = hermetic.tool("bash")
+# The `plan` job's step, exactly as ci.yml runs it.
+PLAN_STEP = re.compile(r"^ {8}id: plan\n {8}run: \|\n((?: {10}.*\n)*)", re.MULTILINE)
+# A cargo that answers `metadata` with the planted workspace, and nothing else.
+CARGO_STUB = """#!/usr/bin/env bash
+[[ "$1 $2" == "metadata --no-deps" ]] || exit 99
+cat "${PLANT_METADATA}"
+"""
+PLANNED = (15, 16, 17, 18)
+
+
+# Each record the plan rows plant, and what `planned` says of it:
+# (name, legs, status, stderr).
+PLAN_ROWS: tuple[tuple[str, str, int, str], ...] = (
+    (
+        "every planned major recorded",
+        "rust pgrx-pg15 pgrx-pg16 pgrx-pg17 pgrx-pg18",
+        0,
+        "",
+    ),
+    (
+        "a recorded major the plan does not make",
+        "rust pgrx-pg14 pgrx-pg15",
+        1,
+        "plan: the floor records pgrx-pg14, measured by the pgrx:14 job,"
+        " and this run plans none (planned majors: 15,16,17,18)\n"
+        + NO_OWNER.format(leg="pgrx-pg14"),
+    ),
+)
+
+
+def plan_step() -> str:
+    """Read the `plan` step's `run:` block out of the canon's ci.yml.
+
+    Returns:
+        The block, dedented, as bash runs it.
+
+    Raises:
+        LookupError: the step is gone.
+
+    """
+    text = (CANON / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    found = PLAN_STEP.search(text)
+    if found is None:
+        msg = "no `id: plan` step with a `run: |` block in ci.yml"
+        raise LookupError(msg)
+    return textwrap.dedent(found.group(1))
+
+
+class TestThePlanFeedsTheHelper(unittest.TestCase):
+    """pgrx-plan.sh's real output, read by `planned` as the plan passes it (#1880).
+
+    The rows the helper's own table holds are hand-written; these run
+    the producer against a workspace declaring pg15 to pg18 and hand
+    its stdout on, so a format the two disagree on is red here. The
+    canon's own gate cannot reach it: the canon has no pgrx crate.
+    """
+
+    @override
+    def setUp(self) -> None:
+        """Plant a workspace with one extension declaring pg15 to pg18."""
+        tmp = TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tmp = Path(tmp.name).resolve()
+        self.tree = self.tmp / "tree"
+        self.tree.mkdir()
+        (self.tree / "Cargo.toml").write_text("[workspace]\n", encoding="utf-8")
+        (self.tree / ".org-canon").symlink_to(CANON)
+        bins = self.tmp / "bin"
+        bins.mkdir()
+        (bins / "cargo").write_text(CARGO_STUB, encoding="utf-8")
+        (bins / "cargo").chmod(0o755)
+        root = self.tree / "crates" / "ext"
+        ext: dict[str, object] = {
+            "id": f"path+file://{root}#ext@1.0.0",
+            "name": "ext",
+            "version": "1.0.0",
+            "publish": None,
+            "dependencies": [{"name": "pgrx"}],
+            "features": {
+                "default": ["pg18"],
+                "pg_test": [],
+                **{f"pg{m}": [f"pgrx/pg{m}"] for m in PLANNED},
+            },
+            "targets": [{"kind": ["lib"], "crate_types": ["lib"]}],
+            "manifest_path": f"{root}/Cargo.toml",
+        }
+        metadata = self.tmp / "metadata.json"
+        document: dict[str, object] = {
+            "packages": [ext],
+            "workspace_members": [ext["id"]],
+            "workspace_root": str(self.tree),
+            "target_directory": str(self.tree / "target"),
+        }
+        metadata.write_text(json.dumps(document), encoding="utf-8")
+        self.output = self.tmp / "github-output"
+        self.output.touch()
+        self.env = hermetic.env() | {
+            "PATH": f"{bins}{os.pathsep}{os.environ['PATH']}",
+            "ORG_PYTHON": sys.executable,
+            "PLANT_METADATA": str(metadata),
+            "GITHUB_OUTPUT": str(self.output),
+        }
+
+    def run_in_tree(self, argv: list[str]) -> subprocess.CompletedProcess[str]:
+        """Run a command in the planted tree.
+
+        Returns:
+            The finished process.
+
+        """
+        return subprocess.run(
+            argv,
+            cwd=self.tree,
+            env=self.env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def floor(self, legs: str) -> None:
+        """Commit a floor recording `legs` to the planted tree."""
+        (self.tree / ".coverage-floor").write_text(owned_record(legs), encoding="utf-8")
+
+    def test_the_producers_stdout_is_the_helpers_input(self) -> None:
+        """pgrx-plan.sh's literal stdout, given to `planned --majors-json`."""
+        plan = self.run_in_tree([
+            BASH,
+            str(CANON / "mise" / "pgrx-plan.sh"),
+            str(CANON),
+        ])
+        self.assertEqual(0, plan.returncode, plan.stderr)
+        self.assertEqual('["15","16","17","18"]\n', plan.stdout)
+        for name, legs, status, err in PLAN_ROWS:
+            with self.subTest(name):
+                self.floor(legs)
+                done = self.run_in_tree([
+                    sys.executable,
+                    str(CANON / "mise" / "coverage_floor.py"),
+                    "planned",
+                    "--label",
+                    "plan",
+                    "--majors-json",
+                    plan.stdout,
+                ])
+                self.assertEqual(
+                    (status, "", err), (done.returncode, done.stdout, done.stderr)
+                )
+
+    def test_the_plan_step_hands_the_producer_to_the_helper(self) -> None:
+        """ci.yml's own `plan` step, producer to helper, in the planted tree."""
+        for name, legs, status, err in PLAN_ROWS:
+            with self.subTest(name):
+                self.floor(legs)
+                done = self.run_in_tree([BASH, "-c", plan_step()])
+                self.assertEqual(status, done.returncode, done.stderr)
+                self.assertEqual(err, done.stderr)
+
+    def test_the_plan_step_passes_the_majors_verbatim(self) -> None:
+        """No parameter expansion takes the plan's JSON apart in the step."""
+        body = plan_step()
+        expansions = [m.group(0) for m in re.finditer(r"\$\{[^}]*majors[^}]*\}", body)]
+        verbatim: list[str] = ["${majors}"] * len(expansions)
+        self.assertEqual(verbatim, expansions)
+        self.assertIn('planned \\\n  --label plan --majors-json "${majors}"\n', body)
 
 
 if __name__ == "__main__":
