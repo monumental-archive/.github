@@ -3014,9 +3014,19 @@ whole-population figure (a shard is cut after exclusion), reported the
 same by every shard and taken once. The first runner run
 (release-lab, run 44205918375, 2026-11-18) measured shards of 5m02s to
 6m54s, mostly the cold toolchain install (163-221 s) and lab-pg's pgrx
-baseline. The Rust jobs keep four shards and take a 25-minute
-timeout, about three times the slowest; a larger consumer's run is
-what moves either. Locally the leg was proven only against real
+baseline. The larger consumer's run moved both (edtf #107, run
+44840394536, 2026-11-21): 1535 mutants, 1300 killed, 130 survived,
+12 excluded, shard jobs of 12m36s to 22m47s. The spread was the
+default slice sharding: a slice is a run of whole files, so one shard
+held only edtf-core (16 minutes of mutation) and another mostly
+edtf-normalize (six). The leg now passes `--sharding round-robin` to
+the listing and the run alike, as the Go and Python legs already cut
+theirs; measured on edtf's population, round-robin gives each of four
+shards the same crate mix (193 edtf-core, about 115 edtf-normalize,
+45 edtf-calendars, and so on). Each shard pays about five minutes of
+installs and about 2.5 of pgrx baseline, so more shards buy little:
+four stay, about 19 minutes each, and the timeout is 60 minutes,
+about three times that. Locally the leg was proven only against real
 output on a small crate — five survivors red by name, then green with
 five counted excluded under a reasoned `exclude_re` entry, then the
 same crate across four shards and their totals. *Reopen:* upstream

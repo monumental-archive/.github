@@ -34,10 +34,10 @@
 # jobs.<job_id>.steps.*").
 #
 # Rust is SHARDED FROM THE START (owner's ruling): four shards, each
-# judging its slice and naming its own survivors, then one job stating
-# the answer across them. The count and the timeout are adjusted from
-# the first run measured on a runner — release-lab's dispatched run —
-# and recorded on the issue.
+# judging every fourth mutant (round-robin, like Go and Python) and
+# naming its own survivors, then one job stating the answer across them.
+# The count and the timeout are set from the largest consumer's run
+# (edtf #107), recorded on the job below.
 # No inputs, by design — zero caller-controlled expansion.
 ---
 name: repo-mutants
@@ -98,11 +98,16 @@ jobs:
     runs-on: ubuntu-26.04
     # The count is written twice, here and in MUTANTS_SHARDS below; move
     # both together. No fail-fast: every shard reports its own survivors.
-    # The timeout is about three times the slowest shard of the first
-    # runner run (release-lab, run 44205918375: 6m54s, of which 3.5 min
-    # was the cold toolchain install), rounded up for the installs'
-    # spread (163-221 s). Recorded on #1355; move it from a larger run.
-    timeout-minutes: 25
+    # Set from edtf's first run (edtf #107, run 44840394536, 1535
+    # mutants): about 5 minutes of fixed cost per shard (toolchain and
+    # cargo-mutants installs), 44.7 minutes of workspace mutation across
+    # the four, and about 2.5 minutes for the pgrx crate, mostly its
+    # baseline. Contiguous slices made those shards 12m36s to 22m47s;
+    # round-robin cuts every shard the same mix, about 19 minutes each.
+    # More shards would buy little: each pays the fixed cost and the
+    # pgrx baseline again. Four stay; the timeout is about three times
+    # 19 minutes.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
