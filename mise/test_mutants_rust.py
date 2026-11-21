@@ -600,8 +600,8 @@ class Shards(Planted):
             "MUTANTS_SUMMARY_DIR": str(self.tmp / "summary"),
         }
 
-    def test_shard_runs_its_slice_and_reports_its_counts(self) -> None:
-        """--shard reaches the run; the summary line and file name the shard."""
+    def test_shard_runs_its_round_robin_share_and_reports_its_counts(self) -> None:
+        """Round-robin --shard cuts listing and run; summary names the shard."""
         self.plant(
             package("alpha", str(self.tree)),
             shard=NAMES[:2],
@@ -620,8 +620,11 @@ class Shards(Planted):
             METADATA,
             "cargo mutants --list --no-config --package alpha",
             "cargo mutants --list --package alpha",
-            "cargo mutants --list --shard 1/4 --package alpha",
-            "cargo mutants --output OUT --shard 1/4 --package alpha",
+            ("cargo mutants --list --shard 1/4 --sharding round-robin --package alpha"),
+            (
+                "cargo mutants --output OUT --shard 1/4 --sharding round-robin"
+                " --package alpha"
+            ),
         ]
         self.assertEqual(self.calls(log), want)
         self.assertEqual(self.summary(), "1/4\t2\t1\t1\t0\n")
@@ -641,7 +644,11 @@ class Shards(Planted):
         ]
         self.assertEqual(done.stdout.splitlines(), want)
         self.assertNotIn(
-            "cargo mutants --output OUT --shard 3/4 --package alpha", self.calls(log)
+            (
+                "cargo mutants --output OUT --shard 3/4 --sharding round-robin"
+                " --package alpha"
+            ),
+            self.calls(log),
         )
         self.assertEqual(self.summary(), "3/4\t0\t0\t0\t0\n")
 

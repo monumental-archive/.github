@@ -51,14 +51,24 @@ config=".cargo/mutants.toml"
 # the leg; unset, the whole population (a local run). Anything else is
 # red rather than read as "whole": a typo would quietly run every mutant
 # n times over.
+#
+# A shard takes every n-th mutant (round-robin), as the Go and Python
+# legs do, never cargo-mutants' default contiguous slice. A slice is a
+# run of whole files, so one shard gets the slowest crate entire: on
+# edtf (#107, run 44840394536) one slice was all edtf-core and took 16
+# minutes of mutation, while another, mostly edtf-normalize, took six.
+# Listing and run are both cut by these flags, or the plan would name
+# mutants the run never tests.
 shard="${MUTANTS_SHARD:-}"
 where=""
+sharding=()
 if [[ -n ${shard} ]]; then
   if [[ ! ${shard} =~ ^([0-9]+)/([1-9][0-9]*)$ ]] || ((BASH_REMATCH[1] >= BASH_REMATCH[2])); then
     echo "${label}: MUTANTS_SHARD='${shard}' is not k/n with k < n" >&2
     exit 1
   fi
   where=", shard ${shard}"
+  sharding=(--shard "${shard}" --sharding round-robin)
 fi
 
 if ! git ls-files --error-unmatch "${config}" > /dev/null 2>&1; then
@@ -136,15 +146,13 @@ mutate() {
   cargo mutants --list "$@" > "${out}/listed.txt"
   local here=""
   if [[ -n ${shard} ]]; then
-    cargo mutants --list --shard "${shard}" "$@" > "${out}/here.txt"
+    cargo mutants --list "${sharding[@]}" "$@" > "${out}/here.txt"
     here="${out}/here.txt"
   fi
   "${ORG_PYTHON}" "${belt}/mutants_rust.py" plan --name "${name}" --where "${where}" --dir "${out}" \
     --all "${out}/all.txt" --listed "${out}/listed.txt" --here "${here}"
   printf 'run\t%s\t%s\n' "${name}" "${out}" >> "${runs}"
   [[ ! -e ${out}/empty ]] || return 0
-  local sharding=()
-  [[ -z ${shard} ]] || sharding=(--shard "${shard}")
   cargo mutants --output "${out}" ${sharding[@]+"${sharding[@]}"} "$@" || status=$?
   echo "${status}" > "${out}/status"
 }
