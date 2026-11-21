@@ -41,11 +41,28 @@
 # The count and the timeout are set from the largest consumer's run
 # (edtf #107), recorded on the job below.
 # No inputs, by design — zero caller-controlled expansion.
+# One secret: the gate's atlas-token, exported as ATLAS_TOKEN on every
+# step that runs the suite, as ci.yml's gate step does (#1927;
+# mise/test_audit_legs.py holds the three to each other).
 ---
 name: repo-mutants
 
 "on":
-  workflow_call: {}
+  workflow_call:
+    secrets:
+      atlas-token:
+        # forwarding: discretionary — only repos whose tests apply a schema through Atlas Pro carry the secret
+        description: >
+          Atlas Cloud token, exported as ATLAS_TOKEN for the ci job.
+          Optional: absent, nothing reads it. atlas.hcl in a repo that
+          pins a Cloud org for Pro surfaces makes every `atlas` call
+          demand a login, including the one its integration tests make
+          to apply the schema — so a repo that lost this on import
+          (monumental-archive) had a test gate that could never go green
+          (#830). The credential is the repository's own, scoped by
+          Atlas to its org; the gate still forwards nothing it was not
+          handed.
+        required: false
 permissions:
   contents: read
 
@@ -153,6 +170,7 @@ jobs:
           MUTANTS_LEG: rust
           MUTANTS_SHARD: ${{ matrix.shard }}/${{ env.MUTANTS_SHARDS }}
           MUTANTS_SUMMARY_DIR: ${{ runner.temp }}/mutants-summary
+          ATLAS_TOKEN: ${{ secrets.atlas-token }}
         run: mise run audit:mutants
 
       # Survivors or not: the totals job needs every shard's counts. A
@@ -245,6 +263,7 @@ jobs:
           MUTANTS_LEG: go
           MUTANTS_SHARD: ${{ matrix.shard }}/${{ env.MUTANTS_SHARDS }}
           MUTANTS_SUMMARY_DIR: ${{ runner.temp }}/mutants-summary
+          ATLAS_TOKEN: ${{ secrets.atlas-token }}
         run: mise run audit:mutants
 
       # Survivors or not: the totals job needs every shard's counts. A
@@ -321,6 +340,7 @@ jobs:
           MUTANTS_LEG: python
           MUTANTS_SHARD: plan
           MUTANTS_PLAN: ${{ runner.temp }}/mutants-plan
+          ATLAS_TOKEN: ${{ secrets.atlas-token }}
         run: mise run audit:mutants
 
       - name: Keep the plan for the shards
@@ -435,6 +455,7 @@ jobs:
           MUTANTS_SHARD: ${{ matrix.shard }}/${{ env.MUTANTS_SHARDS }}
           MUTANTS_PLAN: ${{ runner.temp }}/mutants-plan
           MUTANTS_SUMMARY_DIR: ${{ runner.temp }}/mutants-summary
+          ATLAS_TOKEN: ${{ secrets.atlas-token }}
         run: mise run audit:mutants
 
       # Survivors or not: the totals job needs every shard's counts. A
@@ -522,6 +543,7 @@ jobs:
           MUTANTS_LEG: typescript
           MUTANTS_SHARD: 0/1
           MUTANTS_SUMMARY_DIR: ${{ runner.temp }}/mutants-summary
+          ATLAS_TOKEN: ${{ secrets.atlas-token }}
         run: mise run audit:mutants
 
       - name: Keep the counts for the totals

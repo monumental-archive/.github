@@ -25,6 +25,12 @@ to the targets coverage-measure.sh's `fuzz_targets` measures (#1896)
 on one planted tree: a target the floor holds is a target the nightly
 search runs.
 
+The scheduled workflows that run a repository's own code
+(repo-deep-tests.yml, repo-mutants.yml) are held to ci.yml's gate step
+(#1927): every secret that step exports, they declare and export under
+the same name on every step that runs `mise run`. A secret added to the
+gate and not to them is named here.
+
 stdlib `unittest`, matching the other mise/test_*.py.
 """
 
@@ -439,6 +445,143 @@ class Derivation(unittest.TestCase):
             " its row carries no `when`",
             drift(audit_legs.load_table(), documents),
         )
+
+
+# The scheduled workflows that run a repository's own code, which must
+# hand it every secret the gate's step hands it (#1927).
+TESTS_RUN = ("repo-deep-tests", "repo-mutants")
+GATE_STEP = "Run the gate"
+SECRET = re.compile(r"^\$\{\{ secrets\.([\w-]+) \}\}$")
+MISE_RUN = re.compile(r"\bmise run ")
+
+
+def gate_secrets(ci: Document) -> dict[str, str]:
+    """Read the secrets ci.yml's gate step exports.
+
+    Returns:
+        Each secret to the variable it is exported as, in file order.
+
+    Raises:
+        AssertionError: no job carries the step.
+
+    """
+    for job in workflow_yaml.jobs(ci).values():
+        for step in workflow_yaml.steps(job):
+            if step.get("name") != GATE_STEP:
+                continue
+            env = decoded.as_object(step.get("env", {}), "env")
+            exported: dict[str, str] = {}
+            for variable, value in env.items():
+                found = SECRET.match(decoded.as_str(value, variable))
+                if found:
+                    exported[found.group(1)] = variable
+            return exported
+    msg = f"ci.yml has no step named {GATE_STEP!r}"
+    raise AssertionError(msg)
+
+
+def secret_drift(ci: Document, documents: dict[str, Document]) -> list[str]:
+    """Hold each test-running workflow to the gate's secrets.
+
+    Returns:
+        One line per secret a workflow does not declare, and per
+        `mise run` step that does not export it under the gate's name.
+
+    """
+    found: list[str] = []
+    exported = gate_secrets(ci)
+    for stem in TESTS_RUN:
+        document = documents[stem]
+        on = decoded.as_object(document.get("on", {}), "on")
+        call = decoded.as_object(on.get("workflow_call") or {}, "workflow_call")
+        declared = decoded.as_object(call.get("secrets") or {}, "secrets")
+        for secret, variable in exported.items():
+            if secret not in declared:
+                found.append(f"{stem}.yml does not declare the gate's secret {secret}")
+            want = f"${{{{ secrets.{secret} }}}}"
+            for job_id, job in workflow_yaml.jobs(document).items():
+                for step in workflow_yaml.steps(job):
+                    run = decoded.as_str(step.get("run", ""), "run")
+                    if not MISE_RUN.search(run):
+                        continue
+                    env = decoded.as_object(step.get("env", {}), "env")
+                    if env.get(variable) != want:
+                        name = decoded.as_str(step.get("name", run), "name")
+                        found.append(
+                            f"{stem}.yml: {job_id} step {name!r} runs `mise run`"
+                            f" without {variable}: {want}"
+                        )
+    return found
+
+
+def read_ci() -> Document:
+    """Read ci.yml.
+
+    Returns:
+        Its document.
+
+    """
+    return workflow_yaml.document(WORKFLOWS / "ci.yml")
+
+
+def read_tests_run() -> dict[str, Document]:
+    """Read the workflows that run a repository's tests outside the gate.
+
+    Returns:
+        Workflow stem to its document.
+
+    """
+    return {
+        stem: workflow_yaml.document(WORKFLOWS / f"{stem}.yml") for stem in TESTS_RUN
+    }
+
+
+class GateSecrets(unittest.TestCase):
+    """The scheduled runs hand the tests what the gate hands them."""
+
+    def test_the_gate_exports_the_atlas_token(self) -> None:
+        """The reading finds what #830 put on the gate's step."""
+        want = {"atlas-token": "ATLAS_TOKEN"}
+        self.assertEqual(want, gate_secrets(read_ci()))
+
+    def test_every_test_run_carries_the_gate_secrets(self) -> None:
+        """The real workflows declare and export every gate secret."""
+        none: list[str] = []
+        self.assertEqual(none, secret_drift(read_ci(), read_tests_run()))
+
+    def test_a_second_gate_secret_is_named(self) -> None:
+        """Planted: the gate's step exports a secret no other declares."""
+        ci = read_ci()
+        for job in workflow_yaml.jobs(ci).values():
+            for step in workflow_yaml.steps(job):
+                if step.get("name") == GATE_STEP:
+                    env = decoded.as_object(step["env"], "env")
+                    env["PLANTED"] = "${{ secrets.planted-token }}"
+        got = secret_drift(ci, read_tests_run())
+        self.assertEqual(
+            "repo-deep-tests.yml does not declare the gate's secret planted-token",
+            got[0],
+        )
+        self.assertIn(
+            "repo-mutants.yml does not declare the gate's secret planted-token",
+            got,
+        )
+
+    def test_a_step_without_the_export_is_named(self) -> None:
+        """Planted: one `mise run` step loses its ATLAS_TOKEN."""
+        documents = read_tests_run()
+        job = workflow_yaml.jobs(documents["repo-deep-tests"])["coverage-branches"]
+        for step in workflow_yaml.steps(job):
+            if "env" in step:
+                del decoded.as_object(step["env"], "env")["ATLAS_TOKEN"]
+        want = [
+            (
+                "repo-deep-tests.yml: coverage-branches step 'Hold the Rust"
+                " branch-coverage floor' runs `mise run` without ATLAS_TOKEN:"
+                " ${{ secrets.atlas-token }}"
+            )
+        ]
+        self.assertEqual(want, secret_drift(read_ci(), documents))
 
 
 def git_tree(files: dict[str, str]) -> Path:

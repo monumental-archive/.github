@@ -21,8 +21,11 @@
 #       uses: monumental-archive/.github/.github/workflows/repo-deep-tests.yml@<sha> # vX.Y.Z
 #
 # The canon calls it at its running commit from self-deep-tests.yml.
-# No inputs, by design — zero caller-controlled expansion. One secret:
-# the release App's key, which only the `propose` job reads (#1897).
+# No inputs, by design — zero caller-controlled expansion. Two secrets:
+# the release App's key, which only the `propose` job reads (#1897),
+# and the gate's atlas-token, exported as ATLAS_TOKEN on every step
+# that runs the repository's code, as ci.yml's gate step does (#1927;
+# mise/test_audit_legs.py holds the three to each other).
 ---
 name: repo-deep-tests
 
@@ -35,6 +38,19 @@ name: repo-deep-tests
         # run that staged something mints a token, and that step then
         # fails naming the missing key.
         description: Tag-mint App private key (the propose job's token)
+        required: false
+      atlas-token:
+        # forwarding: discretionary — only repos whose tests apply a schema through Atlas Pro carry the secret
+        description: >
+          Atlas Cloud token, exported as ATLAS_TOKEN for the ci job.
+          Optional: absent, nothing reads it. atlas.hcl in a repo that
+          pins a Cloud org for Pro surfaces makes every `atlas` call
+          demand a login, including the one its integration tests make
+          to apply the schema — so a repo that lost this on import
+          (monumental-archive) had a test gate that could never go green
+          (#830). The credential is the repository's own, scoped by
+          Atlas to its org; the gate still forwards nothing it was not
+          handed.
         required: false
 permissions:
   contents: read
@@ -127,6 +143,7 @@ jobs:
         env:
           ORG_FUZZ_CANDIDATES: ${{ runner.temp }}/fuzz-corpus-candidates
           ORG_FUZZ_SUMMARY: ${{ runner.temp }}/fuzz-corpus-summary/${{ matrix.leg }}.md
+          ATLAS_TOKEN: ${{ secrets.atlas-token }}
         run: mise run audit:fuzz
 
       # The Go half (#445): the fuzzing engine ships in the toolchain, so
@@ -140,6 +157,7 @@ jobs:
         env:
           ORG_FUZZ_CANDIDATES: ${{ runner.temp }}/fuzz-corpus-candidates
           ORG_FUZZ_SUMMARY: ${{ runner.temp }}/fuzz-corpus-summary/${{ matrix.leg }}.md
+          ATLAS_TOKEN: ${{ secrets.atlas-token }}
         run: mise run audit:go-fuzz
 
       # Whether the search passed or failed (a crash is what most needs
@@ -290,6 +308,8 @@ jobs:
       # pull request is the cost the gate declines. Local only, so no
       # token. Skips clean with no Cargo.toml or no such line.
       - name: Hold the Rust branch-coverage floor
+        env:
+          ATLAS_TOKEN: ${{ secrets.atlas-token }}
         run: mise run audit:coverage-branches
 
   coverage-go-branches:
@@ -330,6 +350,8 @@ jobs:
       # cost. Local only, so no token. Skips clean with no go.mod or no
       # such line.
       - name: Hold the Go condition-coverage floor
+        env:
+          ATLAS_TOKEN: ${{ secrets.atlas-token }}
         run: mise run audit:coverage-go-branches
 
   # One seed for every leg of the property job (#1631), drawn once so a
@@ -405,6 +427,8 @@ jobs:
       # upload, since the log carries both. Skips clean with no
       # prop_*.py tracked.
       - name: Run every Python property at a random seed
+        env:
+          ATLAS_TOKEN: ${{ secrets.atlas-token }}
         run: mise run audit:python-properties
 
   typescript-properties:
@@ -452,6 +476,8 @@ jobs:
       # a fixed example of its property with its fix and the gate
       # replays it. Skips clean where no lockfile holds fast-check.
       - name: Run every TypeScript property at a random seed
+        env:
+          ATLAS_TOKEN: ${{ secrets.atlas-token }}
         run: mise run audit:typescript-properties
 
   # Every scheduled workflow ends here (#1887): while a run on the
