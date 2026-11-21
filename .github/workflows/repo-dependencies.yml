@@ -1,0 +1,230 @@
+# A repository's dependencies and the pins that fetch them, held to the
+# live feeds and registries: the Rust advisory feed (audit:deny), Go's
+# reachable vulnerabilities (audit:go-vulns, #392), zizmor's online
+# action audits and the truth of each action pin's comment
+# (audit:actions, audit:action-pins), and each mise lock against the
+# platforms it names and against what `mise lock` writes today
+# (audit:lock-arch, audit:lock-idempotent, #904). Network-bound, so
+# never the deterministic gate. A red here is a dependency or a pin
+# that needs a decision, and nothing else (#1858: one workflow per
+# subject, named for what a red means).
+#
+# Every leg walks the tree it runs in — `git ls-files`,
+# `.github/workflows/`, the lockfile — so each is a property of the
+# caller's OWN TREE and runs from the caller (#681, #704). Callers pin
+# by full SHA from their own `dependencies` stub
+# (workflow-templates/dependencies.yml):
+#
+#   jobs:
+#     dependencies:
+#       uses: monumental-archive/.github/.github/workflows/repo-dependencies.yml@<sha> # vX.Y.Z
+#
+# The canon calls it at its running commit from self-dependencies.yml.
+# No inputs, by design — zero caller-controlled expansion.
+---
+name: repo-dependencies
+
+"on":
+  workflow_call: {}
+permissions:
+  contents: read
+
+jobs:
+  deny:
+    name: no undecided advisory in the Rust lock
+    runs-on: ubuntu-26.04
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
+        with:
+          version: 2026.11.8
+          cache: false
+
+      - name: Check the advisory feed against the lock
+        run: mise run audit:deny
+
+  go-vulns:
+    name: no reachable Go vulnerability
+    runs-on: ubuntu-26.04
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
+        with:
+          version: 2026.11.8
+          cache: false
+
+      # Call-graph-aware advisory scan against https://vuln.go.dev —
+      # network-bound and feed-dependent, so it lives here, never the
+      # gate (#392). A repo with no go.mod skips clean.
+      - name: Check reachable Go vulnerabilities
+        run: mise run audit:go-vulns
+
+  actions:
+    name: workflows pass the online action audits
+    runs-on: ubuntu-26.04
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
+        with:
+          version: 2026.11.8
+          cache: false
+
+      - name: Audit workflows online
+        env:
+          # zizmor's API-backed audits — impostor-commit,
+          # known-vulnerable-actions, ref-confusion, typosquat-uses,
+          # stale-action-refs — are the ones the gate's --offline run
+          # structurally cannot perform, so until #681 they ran against
+          # no consumer at all. The default token is enough: they read
+          # public advisory and commit data. It is passed rather than
+          # assumed because the task FAILS CLOSED without it (#310
+          # finding 3) — a tokenless zizmor degrades to offline, skips
+          # every audit this job exists for, and still prints "No
+          # findings to report".
+          GH_TOKEN: ${{ github.token }}
+        run: mise run audit:actions
+
+  action-pins:
+    name: action pin comments match their tags and age
+    runs-on: ubuntu-26.04
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
+        with:
+          version: 2026.11.8
+          cache: false
+
+      - name: Verify pin comments and release age
+        env:
+          # The third per-tree network check, and the last one that was
+          # scheduled in the canon alone (#681 named it tree-local and
+          # #704's widening is what moved it). pinact resolves each
+          # pinned SHA back to its tag to prove the version comment tells
+          # the truth, and reads publish dates for the release-age floor;
+          # `git ls-files` scopes it to whatever tree it runs in. The
+          # gate's offline leg (lint:action-pins) can do neither — it can
+          # only see that a comment exists — so until this leg, no
+          # consumer's pin comments had been checked against the tags
+          # they claim. Both are public reads; the default token serves.
+          GITHUB_TOKEN: ${{ github.token }}
+        run: mise run audit:action-pins
+
+  lock-arch:
+    name: locked assets match the platform they name
+    runs-on: ubuntu-26.04
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
+        with:
+          version: 2026.11.8
+          cache: false
+
+      - name: Verify each locked asset is built for the platform it names
+        env:
+          # Tree-local by the same test as the three legs above: the
+          # subject is this repository's own mise.lock, reached through
+          # `git ls-files`. The gate cannot answer it — a lock entry
+          # naming `macos-arm64` while resolving an x86_64 asset is a
+          # disagreement the diff shows, but whether it is a DEFECT
+          # depends on whether upstream publishes a native asset at all,
+          # and that lives in a release listing. A public read; the
+          # default token serves.
+          GH_TOKEN: ${{ github.token }}
+        run: mise run audit:lock-arch
+
+  lock-idempotent:
+    name: each lock is what mise lock writes today
+    runs-on: ubuntu-26.04
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
+        with:
+          version: 2026.11.8
+          cache: false
+
+      - name: Regenerate each lock in scratch and diff it
+        env:
+          # Tree-local by the same test as lock-arch above: the subject
+          # is this repository's own mise.lock, reached through
+          # `git ls-files`, and the question is whole-file (#904) — is
+          # it what `mise lock` resolves today? The registry is the
+          # resolver, so this is network and never the gate. It WILL
+          # red whenever upstream changes a registry mapping, and that
+          # cost was accepted on #904: a red asks for the #899-style
+          # proof that the newly resolved assets run, not just a
+          # regenerated file. Public reads; the default token serves.
+          GITHUB_TOKEN: ${{ github.token }}
+        run: mise run audit:lock-idempotent
+...

@@ -73,7 +73,11 @@ WORKFLOWS = CANON / ".github" / "workflows"
 # continuous path and is held here.
 OUT_OF_SCOPE = {
     "audit.yml",
-    "repo-audit.yml",
+    "repo-deep-tests.yml",
+    "repo-dependencies.yml",
+    "repo-own-audits.yml",
+    "repo-public-api.yml",
+    "repo-records.yml",
     "repo-mutants.yml",
     "level.yml",
     "level-assert.yml",

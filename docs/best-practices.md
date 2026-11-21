@@ -27,7 +27,7 @@ single pull request shipped `GOVERNANCE.md`, two new `SECURITY.md`
 sections and `CONTRIBUTING.md` item 3. `audit:badges` watches
 `badge_percentage_0` and `lost_*` — it cannot see a document that turns
 an Unmet criterion Met. `audit:bestpractices` (#1536), a Monday leg of
-`audit.yml` here and of `repo-audit.yml` in every caller, compares each
+`repo-records.yml`, called here and in every repository, compares each
 `_status` and `_justification` in the repository's `.bestpractices.json`
 with the entry its README's shield names, and is red by criterion on
 any difference. Re-score into the file whenever a change lands that a
@@ -95,8 +95,8 @@ Silver now stands on one remaining MUST:
   `test` commit cannot move it, and the backfill is counted from the
   checklist by hand.
 
-  `audit:regression-tests`, a Monday leg of `audit.yml` and
-  `repo-audit.yml`, prints the four lists and puts the six-month ratio
+  `audit:regression-tests`, a Monday leg of `repo-records.yml`,
+  prints the four lists and puts the six-month ratio
   and the last seven days' "no test" fixes in the job summary. It is a
   report and exits 0 whatever the ratio: a diff cannot tell a bug fix
   from a `fix`-typed pin bump, so a gate on it would need an opt-out.

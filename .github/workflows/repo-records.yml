@@ -1,0 +1,133 @@
+# What a repository's tree says about the world, held to the world:
+# its tracked links resolve (audit:links, #681), its best practices
+# entry matches its .bestpractices.json (audit:bestpractices, #1536),
+# and its history reports the fixes that came with a regression test
+# (audit:regression-tests, #1335). A red here is a record that no
+# longer matches what it describes, and nothing else (#1858: one
+# workflow per subject, named for what a red means).
+#
+# Link liveness was once scheduled in the canon alone and so only ever
+# walked the canon (#681): `audit:links` builds its corpus from
+# `git ls-files`, so it is a property of the caller's OWN TREE and runs
+# from the caller. Callers pin by full SHA from their own `records`
+# stub (workflow-templates/records.yml):
+#
+#   jobs:
+#     records:
+#       uses: monumental-archive/.github/.github/workflows/repo-records.yml@<sha> # vX.Y.Z
+#
+# The canon calls it at its running commit from self-records.yml.
+# No inputs, by design — zero caller-controlled expansion.
+---
+name: repo-records
+
+"on":
+  workflow_call: {}
+permissions:
+  contents: read
+
+jobs:
+  links:
+    name: tracked links resolve
+    runs-on: ubuntu-26.04
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
+        with:
+          version: 2026.11.8
+          cache: false
+
+      # Link liveness over the caller's own tracked markdown. Network-
+      # bound and a property of the internet rather than the diff, so it
+      # is an audit and never the gate. The belt's lychee.toml arrives
+      # with the canon and is passed explicitly, so a repo-local
+      # lychee.toml cannot quietly outrank it; `.lycheeignore` remains
+      # the repo's own per-link escape (#681). A repo with no tracked
+      # markdown skips clean. The job's own token lets lychee ask the
+      # API whether a failed github.com link's repository exists, so a
+      # private repository's links to itself pass (#1344). It reads
+      # this repository and nothing else private; a dead path inside a
+      # private repository is taken on trust, the most lychee can do.
+      - name: Check links
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: mise run audit:links
+
+  bestpractices:
+    name: best practices entry matches its file
+    runs-on: ubuntu-26.04
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
+        with:
+          version: 2026.11.8
+          cache: false
+
+      # Tree-local by the #681 test (#1536): this repository's own
+      # .bestpractices.json against the bestpractices.dev entry its
+      # README's shield names. Red names each criterion the published
+      # entry has not caught up with, and the step is re-entering the
+      # form from the file, never editing the file. One anonymous read
+      # of bestpractices.dev, so no token. Skips clean with no tracked
+      # file or no shield.
+      - name: Compare the published entry with .bestpractices.json
+        run: mise run audit:bestpractices
+
+  regression-tests:
+    name: report fixes with and without a regression test
+    runs-on: ubuntu-26.04
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
+    steps:
+      # Full history: the leg reads six months of commits, and the
+      # helper refuses a shallow clone rather than print a ratio over
+      # whatever one commit's depth happened to fetch (#1335).
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
+        with:
+          version: 2026.11.8
+          cache: false
+
+      # Tree-local by the #681 test: the subject is this repository's
+      # own history. A report, never red on the ratio (#1335): the six-
+      # month share of fix commits that came with a test, and the last
+      # seven days' that did not, go to the job summary. Local git
+      # only, so no token.
+      - name: Report fixes with and without a regression test
+        run: mise run audit:regression-tests
+...

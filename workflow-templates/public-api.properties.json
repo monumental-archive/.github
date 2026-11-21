@@ -1,0 +1,5 @@
+{
+  "name": "Org public API compatibility",
+  "description": "The monumental-archive weekly public API check against the latest published release, via the shared reusable workflow.",
+  "categories": ["ci"]
+}

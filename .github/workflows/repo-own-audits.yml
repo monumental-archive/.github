@@ -1,0 +1,66 @@
+# The audit:* tasks a repository defines in its own mise.toml, every
+# one collected and run (`mise run audit`, #704). The belt's own legs
+# each have a subject workflow; this one is the caller's, so a red
+# here is one of the repository's own checks, and nothing else (#1858:
+# one workflow per subject, named for what a red means).
+# lint:audit-scheduled accepts a caller of this workflow as the
+# scheduler of every audit task the repository defines.
+#
+# Callers pin by full SHA from their own `own-audits` stub
+# (workflow-templates/own-audits.yml):
+#
+#   jobs:
+#     own-audits:
+#       uses: monumental-archive/.github/.github/workflows/repo-own-audits.yml@<sha> # vX.Y.Z
+#
+# The canon defines no audit task outside its belt, so it has no
+# caller of this. No inputs, by design — zero caller-controlled
+# expansion.
+---
+name: repo-own-audits
+
+"on":
+  workflow_call: {}
+permissions:
+  contents: read
+
+jobs:
+  repo-audits:
+    name: this repository's own audit tasks pass
+    runs-on: ubuntu-26.04
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
+        with:
+          version: 2026.11.8
+          cache: false
+
+      # The `lint:*` symmetry the audit surface went without (#704). Every
+      # leg above is a BELT task named by hand, so an `audit:<name>` a
+      # consumer defined in its own mise.toml was run by nothing, ever —
+      # the task existed, `mise run` found it, and no cron called it.
+      # `mise run audit` collects the CALLER's audit tasks (the ones mise
+      # reports as non-global) and runs each, so a repo declares a
+      # network-bound check and this leg runs it with no canon change.
+      # Skips clean in a repo that defines none.
+      #
+      # NO TOKEN, deliberately. What a collected task needs is unknown to
+      # the canon, and an ambient credential handed to every future
+      # caller task is a grant nobody decided. A task that needs one
+      # fails closed and its need is settled here, with a reason, the way
+      # every other leg's env was.
+      - name: Run every audit:* this repository defines
+        run: mise run audit
+...

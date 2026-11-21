@@ -620,10 +620,13 @@ class WorkflowShape(unittest.TestCase):
     """Both property jobs are bounded, sharded and share one seed (#1631)."""
 
     def test_both_jobs_carry_a_bound_eight_shards_and_one_seed(self) -> None:
-        """A timeout, shards 0..7 as k/8, and the seed from a planning job."""
+        """A timeout, shards 0..7 as k/8, and the seed from a planning job.
+
+        One job since #1858: the canon runs the consumers' workflow
+        through self-deep-tests.yml rather than a copy of the job.
+        """
         seeds = {
-            "audit.yml": "needs.plan.outputs.property-seed",
-            "repo-audit.yml": "needs.python-properties-seed.outputs.seed",
+            "repo-deep-tests.yml": "needs.python-properties-seed.outputs.seed",
         }
         for workflow, seed in seeds.items():
             with self.subTest(workflow=workflow):

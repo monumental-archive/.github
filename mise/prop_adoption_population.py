@@ -127,7 +127,7 @@ def printed(members: list[MemberDoc]) -> str:
     sys.stdin = io.StringIO(doc)
     try:
         with contextlib.redirect_stdout(out):
-            status = ap.main([])
+            status = ap.main(["canon"])
     finally:
         sys.stdin = old
     if status != 0:
@@ -139,11 +139,18 @@ def printed(members: list[MemberDoc]) -> str:
 class Obligations(unittest.TestCase):
     """Membership derives the obligations."""
 
-    @given(MEMBER)
-    def test_what_a_member_owes(self, member: MemberDoc) -> None:
+    @given(st.tuples(MEMBER, st.booleans()))
+    def test_what_a_member_owes(self, case: tuple[MemberDoc, bool]) -> None:
         """Each artifact owed exactly when its condition holds."""
-        owed = {artifact for artifact, _ in ap.obligations(ap.Member.of(member, "m"))}
-        self.assertLessEqual({"ci", "audit"}, owed)
+        member, is_canon = case
+        canon = member["repo"] if is_canon else f"{member['repo']}-canon"
+        owed = {
+            artifact for artifact, _ in ap.obligations(ap.Member.of(member, "m"), canon)
+        }
+        self.assertLessEqual({"ci", "dependencies", "deep-tests", "records"}, owed)
+        self.assertNotIn("audit", owed)
+        self.assertEqual("public-api" in owed, not is_canon)
+        self.assertEqual("own-audits" in owed, not is_canon)
         public = member["visibility"] != "private"
         self.assertEqual("scorecard" in owed, public)
         self.assertEqual("dependency-review" in owed, public)

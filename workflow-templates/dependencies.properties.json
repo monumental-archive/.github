@@ -1,0 +1,5 @@
+{
+  "name": "Org dependency checks",
+  "description": "The monumental-archive weekly dependency checks: advisory feeds, online action audits, action pins and lock freshness, via the shared reusable workflow.",
+  "categories": ["ci"]
+}

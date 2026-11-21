@@ -32,6 +32,13 @@ from contextlib import redirect_stderr, redirect_stdout
 import adoption_population as ap
 
 EVERY = ["build", "source", "dependency"]
+# The canon's own repository name, as main() is handed it from
+# security/identity.toml. Members here are named for their role, so
+# the canon's is `canon`.
+CANON = "canon"
+# The five subject stubs every member but the canon owes (#1858).
+SUBJECTS = ["dependencies", "deep-tests", "records", "public-api", "own-audits"]
+STUBS = {f"{s}.yml" for s in SUBJECTS}
 
 
 def member(
@@ -85,7 +92,7 @@ def run_main(doc: object, *argv: str) -> tuple[int, str, str]:
     sys.stdin = io.StringIO(doc if isinstance(doc, str) else json.dumps(doc))
     try:
         with redirect_stdout(out), redirect_stderr(err):
-            code = ap.main(list(argv))
+            code = ap.main(list(argv) or [CANON])
     finally:
         sys.stdin = saved
     return code, out.getvalue(), err.getvalue()
@@ -102,13 +109,27 @@ class TestObligations(unittest.TestCase):
             The owed artifact names, in derivation order.
 
         """
-        return [name for name, _ in ap.obligations(ap.Member.of(m, "m"))]
+        return [name for name, _ in ap.obligations(ap.Member.of(m, "m"), CANON)]
+
+    @staticmethod
+    def unmet(m: dict[str, object], present: set[str]) -> list[str]:
+        """Name each owed artifact no present workflow satisfies.
+
+        audit:adoption's own test: an artifact is met when any one of
+        its names is a file in the member's .github/workflows.
+
+        Returns:
+            The unmet artifact names, in derivation order.
+
+        """
+        owed = ap.obligations(ap.Member.of(m, "m"), CANON)
+        return [name for name, names in owed if not present & set(names)]
 
     def test_public_full_member_owes_everything(self) -> None:
         """A public, tagged member on every track owes the whole set."""
         expected = [
             "ci",
-            "audit",
+            *SUBJECTS,
             "scorecard",
             "dependency-review",
             "source-attest",
@@ -116,7 +137,7 @@ class TestObligations(unittest.TestCase):
             "publish",
         ]
         self.assertEqual(
-            self.names(member(tagged=True)),
+            self.names(member("app", tagged=True)),
             expected,
         )
 
@@ -129,22 +150,23 @@ class TestObligations(unittest.TestCase):
         """Privacy removes what cannot run, and nothing else."""
         owed = self.names(member(visibility="private"))
         self.assertIn("ci", owed)
-        self.assertIn("audit", owed)
+        self.assertIn("records", owed)
         self.assertNotIn("scorecard", owed)
         self.assertNotIn("dependency-review", owed)
 
     def test_exclusion_still_owes_the_hygiene_that_asks_no_track_question(self) -> None:
         """An exclusion narrows EVIDENCE, and evidence only (stele#181)."""
-        expected = ["ci", "audit", "scorecard", "dependency-review"]
+        expected = ["ci", *SUBJECTS, "scorecard", "dependency-review"]
         self.assertEqual(
-            self.names(member(tracks=[])),
+            self.names(member("app", tracks=[])),
             expected,
         )
 
-    def test_the_private_exclusion_owes_exactly_two(self) -> None:
+    def test_the_private_exclusion_owes_the_gate_and_the_subjects(self) -> None:
         """monumental-archive's live shape: four opt-out rows before, none after."""
-        expected = ["ci", "audit"]
-        self.assertEqual(self.names(member(tracks=[], visibility="private")), expected)
+        expected = ["ci", *SUBJECTS]
+        private = member("app", tracks=[], visibility="private")
+        self.assertEqual(self.names(private), expected)
 
     def test_source_only_member_owes_source_attest(self) -> None:
         """A member bearing SOURCE owes the source chain's evidence."""
@@ -168,10 +190,46 @@ class TestObligations(unittest.TestCase):
 
     def test_alternate_names_are_offered(self) -> None:
         """The canon's self-* variants and gate.yml satisfy the same obligations."""
-        owed = dict(ap.obligations(ap.Member.of(member(tagged=True), "m")))
+        owed = dict(ap.obligations(ap.Member.of(member(tagged=True), "m"), CANON))
         self.assertIn("gate.yml", owed["ci"])
         self.assertIn("self-release.yml", owed["release"])
         self.assertIn("self-dependency-review.yml", owed["dependency-review"])
+        self.assertIn("self-dependencies.yml", owed["dependencies"])
+        self.assertIn("self-deep-tests.yml", owed["deep-tests"])
+        self.assertIn("self-records.yml", owed["records"])
+
+    def test_the_retired_stub_alone_names_the_five(self) -> None:
+        """A member still on the single audit stub owes all five (#1858)."""
+        app = member("app", tracks=[], visibility="private")
+        unmet = self.unmet(app, {"ci.yml", "audit.yml"})
+        self.assertEqual(unmet, SUBJECTS)
+
+    def test_the_five_stubs_pass(self) -> None:
+        """A member carrying the five subject stubs owes nothing more."""
+        app = member("app", tracks=[], visibility="private")
+        none: list[str] = []
+        self.assertEqual(self.unmet(app, {"ci.yml", *STUBS}), none)
+
+    def test_a_set_missing_records_names_it(self) -> None:
+        """Four of the five: the one missing is named, and only it."""
+        app = member("app", tracks=[], visibility="private")
+        present = {"ci.yml", *STUBS} - {"records.yml"}
+        expected = ["records"]
+        self.assertEqual(self.unmet(app, present), expected)
+
+    def test_the_canon_passes_on_its_three_self_callers(self) -> None:
+        """The canon's identity owes three subjects, met by self-* (#1858)."""
+        canon = member(CANON, tracks=[], visibility="private")
+        present = {
+            "gate.yml",
+            "self-dependencies.yml",
+            "self-deep-tests.yml",
+            "self-records.yml",
+        }
+        none: list[str] = []
+        self.assertEqual(self.unmet(canon, present), none)
+        self.assertNotIn("public-api", self.names(canon))
+        self.assertNotIn("own-audits", self.names(canon))
 
 
 # Documents this reader refuses, each with the message it must print.
@@ -253,8 +311,10 @@ class TestMain(unittest.TestCase):
         repos = ["app", "canon", "signer"]
         listed = list(owed)
         self.assertEqual(repos, listed)
-        app = ["ci", "audit"]
+        app = ["ci", *SUBJECTS]
         self.assertEqual(owed["app"], app)
+        self.assertNotIn("public-api", owed["canon"])
+        self.assertIn("public-api", owed["signer"])
         self.assertIn("release", owed["canon"])
         self.assertNotIn("release", owed["signer"])
         self.assertIn("source-attest", owed["signer"])
@@ -269,13 +329,26 @@ class TestMain(unittest.TestCase):
                 self.assertEqual("", out)
                 self.assertTrue(err.startswith(f"adoption-population: {message}"), err)
 
-    def test_arguments_are_refused(self) -> None:
+    def test_arguments_other_than_the_canon_are_refused(self) -> None:
         """The roster is no input any more: a caller passing one is told."""
         code, out, err = run_main(document(member()), "--roster", "x.json")
         self.assertEqual((2, ""), (code, out))
         self.assertEqual(
-            "adoption-population: takes no arguments, got ['--roster', 'x.json']\n",
+            "adoption-population: takes the canon's repository name and nothing"
+            " else, got ['--roster', 'x.json']\n",
             err,
+        )
+
+    def test_an_empty_canon_name_is_refused(self) -> None:
+        """An identity read that failed leaves an empty name: refused."""
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            code = ap.main([""])
+        self.assertEqual((2, ""), (code, out.getvalue()))
+        self.assertEqual(
+            "adoption-population: takes the canon's repository name and nothing"
+            " else, got ['']\n",
+            err.getvalue(),
         )
 
 
