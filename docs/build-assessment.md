@@ -95,16 +95,19 @@ set, which converts "we attest" into "nothing ships unattested".
 repository: version controlled, public, gated by its own `gate.yml` on
 every pull request, every `uses:` pinned to a full commit SHA under the
 org's `sha_pinning_required` policy, and the Actions allowlist set with
-`verified_allowed: false` so a third-party action cannot run at all. Shared
-workflow changes are proven in `release-lab` — four artifact classes
-across PG 14–18 — before any production repo moves its pin. Stated
-precisely, because the ordering matters to a reader judging this
-control: a change to the release path executes first in this
-repository's own release, which publishes a single class, and only then
-in the lab at full width. Both are cheap in version numbers by design,
-so the control is not that a change ran somewhere safe first; it is that
-consumers move last, and that every irreversible step sits behind the
-commit point (`.github@v1.24.0`, #367). Communications are GitHub's TLS.
+`verified_allowed: false` so a third-party action cannot run at all. The
+canon runs its own release path first: a change to the release path
+executes in this repository's own release, which publishes a single
+class, and that is the smoke test of the machinery. `release-lab`
+publishes four artifact classes at every Postgres major
+`docker/pgrx-base-images.toml` maps, but **a lab release is not a gate**
+(ruled 2026-11-14): Renovate moves every repository's pin as soon as a
+canon tag exists, and a lab release is cut on purpose only for a change
+specific to a class the canon's own release does not ship. Canon tags
+are cheap in version numbers by design, so the control is not that a
+change ran somewhere safe first; it is that consumers move last, and
+that every irreversible step sits behind the commit point
+(`.github@v1.24.0`, #367). Communications are GitHub's TLS.
 
 **Creating build environments.** The control plane does not share a
 filesystem with build environments; caller artifacts reach the signing job

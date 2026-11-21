@@ -169,7 +169,8 @@ a release-path change sit unreleased to be argued about.
 
 What the canon does **not** prove is breadth: one class is a smoke test.
 `release-lab` publishes `rust-binary,oci-image,wasm-npm,pgrx-extension`
-across PG 14–18 at `dry-run: false`. **A lab release is not a gate**
+at every Postgres major `docker/pgrx-base-images.toml` maps, at
+`dry-run: false`. **A lab release is not a gate**
 (ruled 2026-11-14): it was the first step of every release-path change
 while a wrong one could drain the org's API budget, and it is no
 longer. Renovate moves every repository's pin as soon as a canon tag

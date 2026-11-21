@@ -1561,8 +1561,8 @@ machinery cannot be rehearsed elsewhere (a consumer may not pin an
 untagged canon SHA, publish accepts only `v*` tags, and
 `self-publish.yml` requests no `dry-run`), so it is released and
 watched: one class, minutes, a version number nobody pins if it reddens.
-The **release lab** (`release-lab`) publishes four classes across
-PG 14–18 and is where a change specific to one of those classes is
-tried; it is not a gate, and no repository waits on it to move its
-pin (ruled 2026-11-14).
+The **release lab** (`release-lab`) publishes four classes at every
+Postgres major `docker/pgrx-base-images.toml` maps, and is where a
+change specific to one of those classes is tried; it is not a gate,
+and no repository waits on it to move its pin (ruled 2026-11-14).
 See MAINTENANCE.md, "The seam rule".
