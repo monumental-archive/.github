@@ -286,7 +286,10 @@ class Planted(unittest.TestCase):
 
     def test_a_save_in_a_fourth_job(self) -> None:
         """A save step added to the plan job is a cache outside the three."""
-        notice = '          org_notice "pgrx legs planned: ${majors}"\n'
+        # The plan job's last step ends where the gate job's header begins:
+        # the save goes in as the plan job's final step, after whatever
+        # its run block holds.
+        gate = "  # Everything the gate runs except the extension's own suite"
         save = (
             "      - name: Save the plan cache (default branch only)\n"
             "        if: ${{ env.ORG_GATE_CACHE_SAVE == 'true' && always() }}\n"
@@ -297,7 +300,7 @@ class Planted(unittest.TestCase):
             "          key: ${{ steps.plan-cache.outputs.cache-primary-key }}\n"
         )
         self.assert_named(
-            plant(notice, notice + save),
+            plant(gate, save + gate),
             "plan: 'Save the plan cache (default branch only)' is a cache outside"
             " ['gate', 'pgrx']",
         )

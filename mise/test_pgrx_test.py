@@ -382,10 +382,9 @@ class MeasuredRun(Planted):
         (self.tree / ".coverage-floor").write_text(record, encoding="utf-8")
         done, _ = self.run_pgrx(PLANT_LH="18")
         self.assertEqual(0, done.returncode, done.stderr)
-        self.assertEqual(
-            ["pgrx-pg18 100"],
-            [ln for ln in done.stdout.splitlines() if ln.startswith("pgrx-pg")],
-        )
+        want: list[str] = ["pgrx-pg18 100"]
+        got = [ln for ln in done.stdout.splitlines() if ln.startswith("pgrx-pg")]
+        self.assertEqual(want, got)
         self.assertIn(
             "test:pgrx: pgrx-pg18 leg holds the floor 80.0 (100%)", done.stderr
         )
