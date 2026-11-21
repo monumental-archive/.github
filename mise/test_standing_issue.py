@@ -152,7 +152,7 @@ class Forge(http.server.BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     @override
-    def log_message(self, format: str, *args: object) -> None:
+    def log_message(self, *_: object) -> None:
         """Keep the test output quiet."""
 
 
