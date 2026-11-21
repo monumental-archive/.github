@@ -7999,8 +7999,9 @@ dir = "{{cwd}}"
 # corpus (fuzz/corpus/<target>/, committed) is curated by humans and the
 # cron never pushes. The gate holds the corpus, not this comment (#1889):
 # lint:fuzz-build reds a target with no tracked seed and replays every
-# seed once on each pull request, so this run always starts from it. docs/best-practices.md answers `dynamic_analysis`
-# accordingly and refuses to claim it for a CI gate.
+# seed once on each pull request, so this run always starts from it.
+# docs/best-practices.md answers `dynamic_analysis` accordingly and
+# refuses to claim it for a CI gate.
 #
 # The nightly is DECLARED by the repo, never discovered: a task that used
 # ASan where a nightly happened to exist and fell back silently otherwise

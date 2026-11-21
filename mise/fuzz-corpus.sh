@@ -17,6 +17,9 @@
 # The tracked files (links followed) are copied to a scratch directory and
 # only that directory is handed to cargo fuzz run, so libFuzzer never sees
 # the tree's corpus directory and an untracked local find is never run.
+# cargo-fuzz passes -artifact_prefix=fuzz/artifacts/<target>/, where
+# libFuzzer writes a crashing input even under -runs=0; libFuzzer takes the
+# last value given, so the replay names the scratch directory after it.
 #
 # Usage: fuzz-corpus.sh <count>, the target count the task measured, for
 # the closing line.
@@ -69,7 +72,7 @@ fi
 
 failed=0
 for target in "${replay[@]}"; do
-  if ! report=$(cargo fuzz run -s none "${target}" "${scratch}/${target}" -- -runs=0 2>&1); then
+  if ! report=$(cargo fuzz run -s none "${target}" "${scratch}/${target}" -- -runs=0 -artifact_prefix="${scratch}/" 2>&1); then
     echo "lint:fuzz-build: fuzz target '${target}' fails on its committed corpus — libFuzzer says:" >&2
     printf '%s\n' "${report}" >&2
     failed=1

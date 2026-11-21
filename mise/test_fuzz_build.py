@@ -29,7 +29,9 @@ exit as libFuzzer does on a crashing input. That half lives in
 mise/fuzz-corpus.sh, which the body calls. Mutation-checked against it:
 the replay handed fuzz/corpus/<target> reds 3 rows, a failed replay
 ignored reds 2, the listing read with `find` in place of `git ls-files`
-reds 3, and a missing corpus ignored reds 3.
+reds 3, and a missing corpus ignored reds 3. A crashing seed's artifact
+goes to the scratch directory too (`-artifact_prefix=`, after cargo-fuzz's
+own, so it wins), never into fuzz/artifacts/.
 
 Mutation-checked, one mutant at a time against the task body: every
 failure called stale reds 2 rows, none called stale reds 2, matching
@@ -208,6 +210,7 @@ ONE_PROBE: list[str] = [PROBE]
 # What a replay is given, before and after its target and directory.
 RUN_HEAD: list[str] = ["fuzz", "run", "-s", "none"]
 RUN_TAIL: list[str] = ["--", "-runs=0"]
+ARTIFACT_FLAG = "-artifact_prefix="
 # (target, the seeds its replay saw), per replay in order.
 BOTH_SEEDED: list[tuple[str, str]] = [("parse", "./a "), ("round_trip", "./b ")]
 NESTED_SEEDED: list[tuple[str, str]] = [
@@ -308,7 +311,9 @@ class FuzzBuild(unittest.TestCase):
         for run, seeds in zip(runs, listed, strict=True):
             words = run.split(" ")
             self.assertEqual(words[:4], RUN_HEAD, run)
-            self.assertEqual(words[6:], RUN_TAIL, run)
+            self.assertEqual(words[6:8], RUN_TAIL, run)
+            self.assertEqual(len(words), 9, run)
+            self.assertTrue(words[8].startswith(ARTIFACT_FLAG), run)
             self.assertTrue(seeds.startswith("seeds:"), seeds)
             out.append((words[4], Path(words[5]), seeds.removeprefix("seeds:")))
         return out
@@ -443,6 +448,24 @@ class FuzzBuild(unittest.TestCase):
         self.assertEqual(status, 1)
         self.assertEqual(err, UNRESOLVED_HEAD + text)
         self.assertEqual(calls, ONE_PROBE)
+
+    def test_a_crash_artifact_lands_in_the_scratch_directory(self) -> None:
+        """LibFuzzer's -artifact_prefix names the scratch copy, never the tree."""
+        self.manifest(MANIFEST + WORKSPACE)
+        self.seed("parse", "a", "CRASH")
+        self.seed("round_trip", "b", "y")
+        status, _, _, calls = self.run_lint()
+        self.assertEqual(status, 1)
+        replays = self.replays(calls)
+        self.assertEqual(len(replays), 2)
+        for line, (_, directory, _) in zip(
+            [c for c in calls if c.startswith("fuzz run ")], replays, strict=True
+        ):
+            prefix = Path(line.split(" ")[8].removeprefix(ARTIFACT_FLAG))
+            self.assertTrue(line.endswith("/"), line)
+            self.assertEqual(prefix, directory.parent)
+            self.assertFalse(prefix.resolve().is_relative_to(self.root), line)
+            self.assertNotIn("fuzz/artifacts", line)
 
 
 if __name__ == "__main__":
