@@ -366,7 +366,38 @@ class MeasuredRun(Planted):
         done, _ = self.run_pgrx(PLANT_LH="18")
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertIn("pgrx-pg18 100", done.stdout.splitlines())
-        self.assertIn("test:pgrx: pgrx-pg18 holds the floor 80.0 (100%)", done.stderr)
+        self.assertIn(
+            "test:pgrx: pgrx-pg18 leg holds the floor 80.0 (100%)", done.stderr
+        )
+
+    def test_the_hold_is_coverage_floor_py_scoped_to_its_major(self) -> None:
+        """End to end (#1875): one holder, judging only the job's own legs.
+
+        The floor records the gate's rust leg and both majors. The pg18
+        job reports pg18 alone and holds: pg17 is the pg17 job's and rust
+        the gate's. The hold is coverage_floor.py's (its line, its
+        drift refusal), not a second comparison in the script.
+        """
+        record = FLOOR.replace("80.0\n", "# legs: rust pgrx-pg17 pgrx-pg18\n80.0\n")
+        (self.tree / ".coverage-floor").write_text(record, encoding="utf-8")
+        done, _ = self.run_pgrx(PLANT_LH="18")
+        self.assertEqual(0, done.returncode, done.stderr)
+        want: list[str] = ["pgrx-pg18 100"]
+        got = [ln for ln in done.stdout.splitlines() if ln.startswith("pgrx-pg")]
+        self.assertEqual(want, got)
+        self.assertIn(
+            "test:pgrx: pgrx-pg18 leg holds the floor 80.0 (100%)", done.stderr
+        )
+        self.assertNotIn("measured none", done.stderr)
+        # The floor read is coverage_floor.py's, so a floor off its own
+        # record is refused here as everywhere (the measured 82.0 derives
+        # 80.0; 81.0 is drift).
+        (self.tree / ".coverage-floor").write_text(
+            record.replace("80.0\n", "81.0\n"), encoding="utf-8"
+        )
+        done, _ = self.run_pgrx(PLANT_LH="18")
+        self.assertEqual(1, done.returncode)
+        self.assertIn("coverage-floor:", done.stderr)
 
     def test_every_declared_major_side_by_side_holds_its_own(self) -> None:
         """The local form: each major its own target dir and its own line."""
@@ -376,6 +407,11 @@ class MeasuredRun(Planted):
         lines = done.stdout.splitlines()
         self.assertIn("pgrx-pg17 100", lines)
         self.assertIn("pgrx-pg18 100", lines)
+        for major in MAJORS:
+            self.assertIn(
+                f"test:pgrx: pgrx-pg{major} leg holds the floor 80.0 (100%)",
+                done.stderr,
+            )
         targets = sorted(
             ln.split("|target=")[1].split("|")[0] for ln in self.suites(log)
         )

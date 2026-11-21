@@ -156,6 +156,13 @@ jobs:
           majors=$(.org-canon/mise/pgrx-plan.sh .org-canon)
           echo "majors=${majors}" >> "${GITHUB_OUTPUT}"
           org_notice "pgrx legs planned: ${majors}"
+          # Every leg the floor records has its owning job planned
+          # (#1875): the gate job always, `pgrx-pgNN` only with NN among
+          # the majors above. Each job judges only the legs it owns, so
+          # a recorded leg no job will measure is red here, by name.
+          listed=${majors//[\[\]]/}
+          "${ORG_PYTHON}" .org-canon/mise/coverage_floor.py planned \
+            --label plan --majors "${listed}"
   # Everything the gate runs except the extension's own suite, which the
   # `pgrx` legs below run one major each. This was the job named `ci`;
   # that name now belongs to the final job, because `ci / ci` is the one
