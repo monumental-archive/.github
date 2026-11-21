@@ -105,10 +105,16 @@ org_fuzz_timing() {
 }
 
 # org_fuzz_summary <line>: one line of the run's summary, printed, and
-# appended to ORG_FUZZ_SUMMARY when it is set (the pull request's body).
+# appended to ORG_FUZZ_SUMMARY when it is set (the pull request's body),
+# its directory made first: each runner writes a file of its own in one
+# (#1899), so the propose job's merged download keeps every one.
 org_fuzz_summary() {
   echo "$1"
-  [[ -z ${ORG_FUZZ_SUMMARY:-} ]] || echo "$1" >> "${ORG_FUZZ_SUMMARY}"
+  [[ -n ${ORG_FUZZ_SUMMARY:-} ]] || return 0
+  if ! mkdir -p -- "$(dirname -- "${ORG_FUZZ_SUMMARY}")" || ! echo "$1" >> "${ORG_FUZZ_SUMMARY}"; then
+    echo "could not write the summary to ${ORG_FUZZ_SUMMARY}" >&2
+    return 1
+  fi
 }
 
 # org_fuzz_proposed <repository dir> <dest>: copies the files an

@@ -19,7 +19,11 @@ unconditional. A job that runs no task (the seed draw) exists for the
 jobs that need it and takes their guards.
 
 The helper's rows are trees the scheduled runs meet: an empty tree, a
-Rust-only tree shaped like edtf, a Go tree, and the canon's own.
+Rust-only tree shaped like edtf, a Go tree, and the canon's own. The
+fuzz job's runner list (#1899) has rows of its own, and one holding it
+to the targets coverage-measure.sh's `fuzz_targets` measures (#1896)
+on one planted tree: a target the floor holds is a target the nightly
+search runs.
 
 stdlib `unittest`, matching the other mise/test_*.py.
 """
@@ -29,6 +33,7 @@ import copy
 import io
 import re
 import subprocess
+import sys
 import tempfile
 import unittest
 from dataclasses import dataclass
@@ -46,6 +51,8 @@ import workflow_yaml
 CANON = Path(__file__).resolve().parent.parent
 WORKFLOWS = CANON / ".github" / "workflows"
 GIT = hermetic.tool("git")
+BASH = hermetic.tool("bash")
+MEASURE = CANON / "mise" / "coverage-measure.sh"
 
 # The jobs that are the shape, not a subject: the decision itself, and
 # the red-check report every scheduled workflow ends with (#1887).
@@ -262,10 +269,11 @@ def job_drift(
             )
         return out
     outputs = sorted(decoded.as_object(applies.get("outputs", {}), "outputs"))
-    if outputs != sorted(conditional):
+    lists = [output for output, _, _ in audit_legs.MATRICES.get(stem, {}).values()]
+    if outputs != sorted(conditional + lists):
         out.append(
             f"{stem}.yml: applies declares {' '.join(outputs)}; the conditional"
-            f" rows are {' '.join(sorted(conditional))}"
+            f" rows and lists are {' '.join(sorted(conditional + lists))}"
         )
     runs = " ".join(
         decoded.as_str(s.get("run", ""), "run") for s in workflow_yaml.steps(applies)
@@ -360,7 +368,7 @@ class Derivation(unittest.TestCase):
         )
         self.assertIn(
             "repo-records.yml: applies declares bestpractices; the conditional"
-            " rows are bestpractices links",
+            " rows and lists are bestpractices links",
             got,
         )
 
@@ -462,6 +470,25 @@ def floor_file(*legs: str) -> str:
     )
 
 
+def raw_outputs(root: Path, workflow: str) -> dict[str, str]:
+    """Run the helper's CLI over a tree.
+
+    Returns:
+        Each output to its value, as $GITHUB_OUTPUT would read it.
+
+    Raises:
+        AssertionError: the helper exited non-zero.
+
+    """
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+        status = audit_legs.main(["--root", str(root), workflow])
+    if status != 0:
+        msg = f"audit_legs.py {workflow} exited {status}"
+        raise AssertionError(msg)
+    return dict(line.split("=", 1) for line in out.getvalue().splitlines())
+
+
 def outputs(root: Path, workflow: str) -> dict[str, bool]:
     """Run the helper's CLI over a tree.
 
@@ -498,12 +525,35 @@ def every(root: Path) -> dict[str, bool]:
 # edtf's shape (run 44825163551): a Rust workspace with a pgrx crate,
 # its fuzz crate, locks, workflows and records, and no Python,
 # TypeScript or Go.
+def fuzz_manifest(*targets: str) -> str:
+    """Write a fuzz crate's manifest with one `[[bin]]` per target.
+
+    Returns:
+        The manifest.
+
+    """
+    bins = "".join(
+        f'\n[[bin]]\nname = "{t}"\npath = "fuzz_targets/{t}.rs"\n' for t in targets
+    )
+    return f'[package]\nname = "x-fuzz"\n\n[workspace]\n{bins}'
+
+
+GO_FUZZ_TEST = """\
+package policy
+
+import "testing"
+
+func FuzzLoad(f *testing.F) {
+\tf.Fuzz(func(t *testing.T, b []byte) {})
+}
+"""
+
 EDTF = {
     "Cargo.toml": "[workspace]\n",
     "Cargo.lock": "",
     "crates/edtf/Cargo.toml": "[package]\n",
     "crates/edtf-pg/Cargo.toml": "[package]\n",
-    "fuzz/Cargo.toml": "[package]\n",
+    "fuzz/Cargo.toml": fuzz_manifest("parse", "roundtrip"),
     "fuzz/Cargo.lock": "",
     "deny.toml": "",
     "mise.toml": "",
@@ -516,6 +566,7 @@ EDTF = {
 GO = {
     "go.mod": "module x\n",
     "cmd/x/main.go": "package main\n",
+    "internal/policy/x_test.go": GO_FUZZ_TEST,
     ".github/workflows/ci.yml": "on: push\n",
     ".coverage-floor": floor_file("go-branches"),
 }
@@ -612,6 +663,195 @@ class Helper(unittest.TestCase):
                 rows = audit_legs.load_table()["repo-deep-tests"]
                 reasons = audit_legs.applies(rows, root, gate_tools.tracked_files(root))
                 self.assertEqual(want, reasons["coverage-go-branches"])
+
+
+# Every shape the enumeration meets: two Rust targets, a root-package
+# and a nested-package Go target, the bare `Fuzz` name, a helper that
+# takes no *testing.F, a nested module's target (#1899), a vendored one
+# at the root and one in the nested module, and an untracked one. All
+# but the vendored, the helper and the untracked are measured, so run.
+PLANTED_TARGETS = {
+    "fuzz/Cargo.toml": fuzz_manifest("parse", "roundtrip"),
+    "go.mod": "module example.com/x\n",
+    "x_test.go": "package x\n\nfunc Fuzz(f *testing.F) {}\n",
+    "internal/policy/x_test.go": GO_FUZZ_TEST
+    + "\nfunc FuzzHelper(t *testing.T) {}\nfunc FuzzSave(f *testing.F) {}\n",
+    "tools/go.mod": "module example.com/x/tools\n",
+    "tools/gen/gen_test.go": "package gen\n\nfunc FuzzGen(f *testing.F) {}\n",
+    "vendor/y/y_test.go": "package y\n\nfunc FuzzY(f *testing.F) {}\n",
+    "tools/vendor/z/z_test.go": "package z\n\nfunc FuzzZ(f *testing.F) {}\n",
+}
+
+
+# One target as both enumerations name it: leg, kind, package, name and
+# module.
+Record = tuple[str, str, str, str, str]
+
+
+class FuzzTargets(unittest.TestCase):
+    """The fuzz job runs one runner per target the floor measures (#1899)."""
+
+    def test_two_bins_and_one_go_target_emit_three_entries(self) -> None:
+        """Two [[bin]]s and FuzzLoad in internal/policy: three entries, fuzz on.
+
+        Against the helper before #1899 there is no `fuzz-targets`
+        output, so this row fails there.
+        """
+        got = raw_outputs(
+            git_tree({
+                "fuzz/Cargo.toml": fuzz_manifest("parse", "roundtrip"),
+                "go.mod": "module example.com/x\n",
+                "internal/policy/x_test.go": GO_FUZZ_TEST,
+            }),
+            "repo-deep-tests",
+        )
+        want: list[audit_legs.Target] = [
+            {"kind": "rust", "target": "parse", "leg": "fuzz-parse"},
+            {"kind": "rust", "target": "roundtrip", "leg": "fuzz-roundtrip"},
+            {
+                "kind": "go",
+                "target": "FuzzLoad",
+                "leg": "fuzz-internal-policy-load",
+                "package": "internal/policy",
+                "module": ".",
+            },
+        ]
+        entries = decoded.as_array(decoded.load_json(got["fuzz-targets"]), "list")
+        got_entries: list[dict[str, object]] = [
+            decoded.as_object(e, "entry") for e in entries
+        ]
+        self.assertEqual(want, got_entries)
+        self.assertEqual("true", got["fuzz"])
+
+    def test_a_tree_with_neither_emits_an_empty_list(self) -> None:
+        """No fuzz crate and no Go fuzz target: `[]`, and fuzz is off."""
+        trees: list[dict[str, str]] = [
+            {},
+            {**GO, "internal/policy/x_test.go": "package policy\n"},
+        ]
+        for files in trees:
+            got = raw_outputs(git_tree(files), "repo-deep-tests")
+            with self.subTest(files=" ".join(sorted(files))):
+                self.assertEqual("[]", got["fuzz-targets"])
+                self.assertEqual("false", got["fuzz"])
+
+    def test_a_fuzz_crate_with_no_bin_is_skipped_by_name(self) -> None:
+        """fuzz/ applies by the table, but no [[bin]] means no runner."""
+        root = git_tree({"fuzz/Cargo.toml": fuzz_manifest()})
+        rows = audit_legs.load_table()["repo-deep-tests"]
+        tracked = gate_tools.tracked_files(root)
+        reasons, lists = audit_legs.matrices(
+            "repo-deep-tests", audit_legs.applies(rows, root, tracked), root, tracked
+        )
+        self.assertEqual("skipped: no fuzz target is declared", reasons["fuzz"])
+        names: list[str] = list(lists)
+        want: list[str] = ["fuzz-targets"]
+        self.assertEqual(want, names)
+        self.assertEqual(0, len(lists["fuzz-targets"]))
+
+    def test_an_unreadable_fuzz_manifest_is_red_naming_it(self) -> None:
+        """A fuzz/Cargo.toml that will not parse fails the applies job by name."""
+        for text, message in (
+            ("[[bin]\n", "fuzz/Cargo.toml: "),
+            ("[[bin]]\npath = 'x.rs'\n", "fuzz/Cargo.toml: [[bin]] 1.name is not"),
+        ):
+            root = git_tree({"fuzz/Cargo.toml": text})
+            err = io.StringIO()
+            with (
+                contextlib.redirect_stderr(err),
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                status = audit_legs.main(["--root", str(root), "repo-deep-tests"])
+            with self.subTest(text=text):
+                self.assertEqual(1, status)
+                self.assertTrue(
+                    err.getvalue().startswith(f"::error::audit-legs: {message}"),
+                    err.getvalue(),
+                )
+
+    def test_the_list_is_the_targets_the_floor_measures(self) -> None:
+        """audit_legs.py and coverage-measure.sh's fuzz_targets agree on one tree."""
+        root = git_tree(PLANTED_TARGETS)
+        (root / "internal" / "policy" / "y_test.go").write_text(
+            "package policy\n\nfunc FuzzUntracked(f *testing.F) {}\n", "utf-8"
+        )
+        listed: list[Record] = [
+            (
+                t["leg"],
+                t["kind"],
+                t.get("package", "-"),
+                t["target"],
+                t.get("module", "-"),
+            )
+            for t in audit_legs.fuzz_targets(root, gate_tools.tracked_files(root))
+        ]
+        want: list[Record] = [
+            ("fuzz-parse", "rust", "-", "parse", "-"),
+            ("fuzz-roundtrip", "rust", "-", "roundtrip", "-"),
+            ("fuzz-internal-policy-load", "go", "internal/policy", "FuzzLoad", "."),
+            ("fuzz-internal-policy-save", "go", "internal/policy", "FuzzSave", "."),
+            ("fuzz-tools-gen-gen", "go", "tools/gen", "FuzzGen", "tools"),
+            ("fuzz-", "go", ".", "Fuzz", "."),
+        ]
+        self.assertEqual(want, listed)
+        self.assertEqual(listed, measured_targets(root))
+
+    def test_two_packages_sharing_a_fuzz_name_get_two_legs(self) -> None:
+        """a/FuzzLoad and b/FuzzLoad: two entries, two legs, two artifacts."""
+        root = git_tree({
+            "go.mod": "module example.com/x\n",
+            "a/a_test.go": GO_FUZZ_TEST,
+            "b/b_test.go": GO_FUZZ_TEST,
+        })
+        entries = audit_legs.fuzz_targets(root, gate_tools.tracked_files(root))
+        legs: list[str] = [t["leg"] for t in entries]
+        targets: list[str] = [t["target"] for t in entries]
+        want_legs: list[str] = ["fuzz-a-load", "fuzz-b-load"]
+        want_targets: list[str] = ["FuzzLoad", "FuzzLoad"]
+        floor: list[str] = [record[0] for record in measured_targets(root)]
+        self.assertEqual(want_legs, legs)
+        self.assertEqual(want_targets, targets)
+        self.assertEqual(legs, floor)
+
+
+def measured_targets(root: Path) -> list[Record]:
+    """Run coverage-measure.sh's own `fuzz_targets` over a tree.
+
+    The function is read out of the script, between its line and the
+    next closing brace in column one, and run with the libraries it
+    sources: the enumeration, not the measurement.
+
+    Returns:
+        Each target as (leg, kind, package directory or `-`, name,
+        module directory or `-`).
+
+    Raises:
+        AssertionError: the script defines no such function.
+
+    """
+    text = MEASURE.read_text(encoding="utf-8")
+    found = re.search(r"^fuzz_targets\(\) \{\n.*?^\}\n", text, re.MULTILINE | re.DOTALL)
+    if found is None:
+        msg = f"{MEASURE} defines no fuzz_targets function"
+        raise AssertionError(msg)
+    script = (
+        f'. "{CANON / "mise" / "fuzz-corpus-lib.sh"}"\n'
+        f'. "{CANON / "mise" / "fuzz-measure-lib.sh"}"\n'
+        f"{found.group(0)}"
+        'label=probe\nfuzz_targets\nprintf "%s" "${fuzz_found}"\n'
+    )
+    run = subprocess.run(
+        [BASH, "-euo", "pipefail", "-c", script],
+        cwd=root,
+        env=hermetic.env() | {"ORG_PYTHON": sys.executable},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    records = [line.split(" ") for line in run.stdout.splitlines() if line]
+    return [
+        (leg, kind, where, name, module) for leg, kind, where, name, module in records
+    ]
 
 
 class Refusals(unittest.TestCase):

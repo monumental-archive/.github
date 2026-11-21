@@ -8010,7 +8010,7 @@ echo "audit:signer-surface: ${n} declared type(s), allowlist and callers agree"
 '''
 
 [tasks."audit:fuzz"]
-description = "Run every fuzz target for a bounded interval (network/time-bound, never the gate)"
+description = "Run every fuzz target, or FUZZ_TARGET alone, for a bounded interval (network/time-bound, never the gate)"
 dir = "{{cwd}}"
 # The runtime half (#316), at cargo-fuzz's own defaults since #445:
 # AddressSanitizer, which is what `-s address` means and what the tool
@@ -8023,9 +8023,12 @@ dir = "{{cwd}}"
 # the gate, in the repos that actually fuzz. `--careful` comes with it:
 # std rebuilt with debug assertions and extra const-UB and init checks.
 #
-# WHAT THIS IS AND IS NOT. A bounded weekly run from a committed corpus
-# is a smoke test, not a proof — fuzzing is sampling, and no arrangement
-# of it is correct by construction. What it finds is never merged
+# WHAT THIS IS AND IS NOT. A bounded run from a committed corpus is a
+# smoke test, not a proof — fuzzing is sampling, and no arrangement of
+# it is correct by construction. Since #1899 it runs nightly, one runner
+# per target (repo-deep-tests.yml's matrix sets FUZZ_TARGET), thirty
+# minutes each: FUZZ_SECONDS defaults to 1800 and is the belt's, not a
+# repository's, and with what #1897 keeps the search time accumulates. What it finds is never merged
 # unreviewed (#445), and since #1897 it is not thrown away either: the
 # inputs that raise the target's corpus figure, and every crash, are
 # staged (fuzz-search-lib.sh) and repo-deep-tests.yml's `propose` job
@@ -8113,7 +8116,7 @@ echo "audit:coverage-go-branches: go-branches holds the floor ${floor} (${pct#go
 '''
 
 [tasks."audit:go-fuzz"]
-description = "Run every Go fuzz target for a bounded interval (time-bound, never the gate)"
+description = "Run every Go fuzz target, or FUZZ_TARGET in FUZZ_PACKAGE alone, for a bounded interval (time-bound, never the gate)"
 dir = "{{cwd}}"
 # The runtime half (#445), the Go mirror of audit:fuzz — and cheaper to
 # stand up, because the fuzzing engine is in the toolchain: no extra
@@ -8138,12 +8141,14 @@ dir = "{{cwd}}"
 # find different things — the plain pass explores for panics and logic
 # failures, the race pass observes concurrency in targets whose code is
 # concurrent at all. Choosing one would drop a class of finding; the
-# org's answer to instrumentation cost on a free weekly cron is more
-# seconds, not fewer checks (#445, the --careful ruling). Wall time is
-# 2 x FUZZ_SECONDS per target, which is a number, not a constraint.
+# org's answer to instrumentation cost on a free nightly cron is more
+# seconds, not fewer checks (#445, the --careful ruling). FUZZ_SECONDS
+# is the target's whole budget (#1899), half to each pass, so a Go
+# target fits the same 30-minute runner as a Rust one.
 #
-# WHAT THIS IS AND IS NOT, as with the Rust half: a bounded weekly run is
-# a smoke test, not a proof. What makes it worth running is where a
+# WHAT THIS IS AND IS NOT, as with the Rust half: a bounded nightly run,
+# one runner per target (FUZZ_TARGET and FUZZ_PACKAGE, #1899), is a
+# smoke test, not a proof. What makes it worth running is where a
 # finding LANDS — the engine writes the failing input into
 # testdata/fuzz/<Target>/, and the gate's lint:go-fuzz-seeds replays it
 # from then on. The cron finds it once; the committed corpus keeps it

@@ -125,6 +125,11 @@ class Forge(unittest.TestCase):
         self.state.mkdir()
         self.artifact = self.tmp / "artifact"
         self.artifact.mkdir()
+        self.summaries = self.tmp / "summaries"
+        self.summaries.mkdir()
+        (self.summaries / "rust-parse_marker.md").write_text(
+            "- `parse_marker`: corpus 10% to 11%\n", encoding="utf-8"
+        )
         stubs = self.tmp / "stubs"
         stubs.mkdir()
         (stubs / "gh").write_text(GH, encoding="utf-8")
@@ -141,7 +146,7 @@ class Forge(unittest.TestCase):
             "DEFAULT_BRANCH": "main",
             "APP_SLUG": "org-tag-mint",
             "CANDIDATES": str(self.artifact),
-            "SUMMARY": "- `parse_marker`: corpus 10% to 11%",
+            "SUMMARIES": str(self.summaries),
         }
 
     def plant(self, path: str, text: str = "x") -> Path:
@@ -342,6 +347,93 @@ class Proposal(Forge):
         self.assertNotIn(f"POST repos/{REPO}/git/refs", self.calls())
         same(self, ["pr list", "pr edit"], self.calls()[-2:])
         self.assertIn("updated PR #17", result.stdout)
+
+
+class Runners(Forge):
+    """One runner per target (#1899): every staging runner reaches the PR."""
+
+    def runner(self, name: str, files: dict[str, str]) -> None:
+        """Run one fuzz runner's hand-over, then its two uploads' `if:`.
+
+        A runner whose hand-over says `staged=true` uploads its stage
+        into the candidates tree and its summary into the summaries
+        tree, as the propose job's merged downloads lay them out.
+
+        """
+        stage = self.tmp / "runners" / name / "stage"
+        stage.mkdir(parents=True)
+        for path, text in files.items():
+            (stage / path).parent.mkdir(parents=True, exist_ok=True)
+            (stage / path).write_text(text, encoding="utf-8")
+        summary = self.tmp / "runners" / name / f"{name}.md"
+        summary.write_text(f"- `{name}`: {len(files)} kept\n", encoding="utf-8")
+        output = self.tmp / "runners" / name / "output"
+        subprocess.run(
+            [BASH, str(PROPOSE), "handover"],
+            env=self.env
+            | {
+                "CANDIDATES": str(stage),
+                "SUMMARY": str(summary),
+                "GITHUB_OUTPUT": str(output),
+                "GITHUB_STEP_SUMMARY": str(self.tmp / "runners" / name / "page"),
+            },
+            capture_output=True,
+            check=True,
+        )
+        if output.read_text(encoding="utf-8") != "staged=true\n":
+            return
+        shutil.copytree(stage, self.artifact, dirs_exist_ok=True)
+        shutil.copy(summary, self.summaries / summary.name)
+
+    def test_two_staging_runners_and_one_quiet_one_make_one_proposal(self) -> None:
+        """Both staging runners' files are committed, both summaries in the body."""
+        (self.summaries / "rust-parse_marker.md").unlink()
+        self.runner("go-FuzzLoad", {"internal/policy/testdata/fuzz/FuzzLoad/f1": "g"})
+        self.runner("rust-parse_date", {})
+        self.runner("rust-parse_marker", {"fuzz/corpus/parse_marker/abc": "r"})
+        result = self.run_script("propose")
+        self.assertEqual(0, result.returncode, result.stderr)
+        changes = decoded.as_object(self.commit()["fileChanges"], "fileChanges")
+        paths = [
+            decoded.as_str(decoded.as_object(e, "addition")["path"], "path")
+            for e in decoded.as_array(changes["additions"], "additions")
+        ]
+        same(
+            self,
+            [
+                "fuzz/corpus/parse_marker/abc",
+                "internal/policy/testdata/fuzz/FuzzLoad/f1",
+            ],
+            paths,
+        )
+        body = (self.state / "body").read_text(encoding="utf-8")
+        self.assertIn("- `go-FuzzLoad`: 1 kept\n- `rust-parse_marker`: 1 kept\n", body)
+        self.assertNotIn("parse_date", body)
+
+    def test_no_candidates_means_no_mint_and_no_forge_call(self) -> None:
+        """No runner staged: the propose job's reader says so, and stops it green."""
+        self.env["CANDIDATES"] = str(self.tmp / "never-downloaded")
+        output = self.tmp / "output"
+        self.env["GITHUB_OUTPUT"] = str(output)
+        result = self.run_script("staged")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual("staged=false\n", output.read_text(encoding="utf-8"))
+        self.assertEqual(
+            "nothing staged: no runner kept an input or a crash, so nothing is"
+            " proposed\n",
+            result.stdout,
+        )
+        same(self, [], self.calls())
+
+    def test_a_downloaded_candidate_lets_the_proposal_run(self) -> None:
+        """One file in the merged tree: staged=true, and nothing else said."""
+        self.plant("fuzz/corpus/parse_marker/abc")
+        output = self.tmp / "output"
+        self.env["GITHUB_OUTPUT"] = str(output)
+        result = self.run_script("staged")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual("staged=true\n", output.read_text(encoding="utf-8"))
+        self.assertEqual("", result.stdout)
 
 
 class PullRequestCalls(Forge):

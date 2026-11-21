@@ -1613,6 +1613,35 @@ class TestFuzzLegs(unittest.TestCase):
             err,
         )
 
+    def test_the_bare_fuzz_leg_is_held_apart(self) -> None:
+        """`fuzz-`, a root target named exactly `Fuzz`, is a fuzz leg (#1899)."""
+        bare = "fuzz-"
+        with Tree(None) as tree:
+            status, _, err = run(
+                cf.derive,
+                tree.path,
+                f"go 93.0\n{bare} 40.0\n",
+                "coverage:adopt",
+                adopt=True,
+            )
+            parsed, _ = clean(tree.written())
+        self.assertEqual((0, ""), (status, err))
+        # Not in the minimum: the main floor is go's alone.
+        self.assertEqual((Decimal(90), ("go",)), (parsed.floor, parsed.legs))
+        self.assertIn(bare, separate(parsed))
+        with Tree(record("83.4")) as tree:
+            status, out, err = run(
+                cf.hold, tree.path, "lbl", f"rust 86.0\n{bare} 40.0\n", GATE
+            )
+        self.assertEqual(1, status)
+        self.assertEqual("lbl: rust leg holds the floor 83.4 (86.0%)\n", out)
+        self.assertEqual(
+            f"lbl: {bare}: the fuzz target has no line in {tree.path} —"
+            " every fuzz target is a leg of the floor (#1896): run `mise run"
+            f" coverage:adopt` and commit {tree.path}\n",
+            err,
+        )
+
     def test_a_target_is_held_to_its_own_line(self) -> None:
         """Above the main floor is not enough: below its own line is red."""
         text = record("83.4") + fuzz_line(MARKER, "88", "90.0")

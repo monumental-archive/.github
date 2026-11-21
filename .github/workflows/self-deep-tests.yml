@@ -12,8 +12,9 @@ name: deep-tests
 
 "on":
   schedule:
-    # Mondays 07:00 UTC, the canon's own Monday slot.
-    - cron: 0 7 * * 1
+    # Every night at 07:00 UTC, the canon's own slot (#1899): a search
+    # that keeps what it finds is worth running every night.
+    - cron: 0 7 * * *
   workflow_dispatch: {}
 permissions:
   contents: read

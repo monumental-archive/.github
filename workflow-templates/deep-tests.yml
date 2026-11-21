@@ -9,8 +9,9 @@ name: deep-tests
 
 "on":
   schedule:
-    # Mondays 06:00 UTC, beside the other subject stubs.
-    - cron: 0 6 * * 1
+    # Every night at 06:00 UTC (#1899): since #1897 keeps what a search
+    # finds, search time accumulates, and nightly is the one schedule.
+    - cron: 0 6 * * *
   workflow_dispatch: {}
 permissions:
   contents: read

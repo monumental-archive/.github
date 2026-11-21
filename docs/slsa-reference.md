@@ -654,10 +654,16 @@ fuzzer scores the full 10.
 
 Consequence, and it removes a planned cost rather than adding one: a Rust
 repository with `cargo-fuzz` targets already scores Fuzzing 10/10, so
-**ClusterFuzzLite is unnecessary** for that score. Its cost — a
-`.clusterfuzzlite/` directory, a Dockerfile on `gcr.io/oss-fuzz-base/
-base-builder:v1` (a floating tag, against this org's pinning rule), new
-`gcr.io` egress and a Docker dependency — buys nothing here. A repository
+**ClusterFuzzLite is refused** (re-decided in #1899). For Rust and Go
+it drives the same engines the belt already runs, libFuzzer through
+cargo-fuzz and Go's native fuzzer, so what it adds is a schedule and a
+corpus store. The org has both: #1897 keeps what a search finds in the
+repository as a reviewed pull request, and #1899 runs the search
+nightly, one runner per fuzz target, thirty minutes each. Its costs
+are unchanged — a `.clusterfuzzlite/` directory, a Dockerfile on
+`gcr.io/oss-fuzz-base/base-builder:v1` (a Google-hosted base image on a
+floating tag, against this org's pinning rule), new `gcr.io` egress
+and a Docker dependency — and they buy nothing here. A repository
 with no code to fuzz, such as the continuous-archetype image repo, has no
 route to this score and is capped at 0 by subject matter rather than by
 engineering.

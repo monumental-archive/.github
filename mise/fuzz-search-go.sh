@@ -6,9 +6,16 @@
 # by fuzz-measure-lib.sh's org_fuzz_measure, the coverage floor's own
 # measurement.
 #
-# Run from the repository root, under the belt (ORG_PYTHON);
-# FUZZ_SECONDS bounds each run (default 60). Every step is checked where
-# it is taken, as the libraries' are: a failing target is named and the
+# Run from the repository root, under the belt (ORG_PYTHON).
+# FUZZ_SECONDS is each target's whole budget, the belt's and no
+# repository's (#1899): 1800 by default, and Go gives half to its plain pass
+# and half to its race pass.
+# FUZZ_TARGET, where set, names the one target to search, as
+# repo-deep-tests.yml's matrix runs it, one runner per target. With FUZZ_PACKAGE, the directory of its
+# package (`.` at the root), as audit_legs.py's `fuzz-targets` lists it.
+# Unset, every target is searched, as a local run does; a name the
+# search cannot find is red, naming it. Every step is checked where it
+# is taken, as the libraries' are: a failing target is named and the
 # run goes on to the next, so one crash never hides another's finds.
 set -uo pipefail
 
@@ -25,11 +32,25 @@ cleanup() {
   done
   [[ -z ${work} ]] || rm -rf -- "${work}"
 }
+# The budget of each target (#1899).
+budget=1800
+
+# unknown <task> <what>: FUZZ_TARGET names no target the task can find.
+unknown() {
+  local in=""
+  [[ -z ${FUZZ_PACKAGE:-} ]] || in=" in '${FUZZ_PACKAGE}'"
+  echo "$1: FUZZ_TARGET '${FUZZ_TARGET}'${in} is no fuzz target $2" >&2
+  echo "  repo-deep-tests.yml's matrix lists the targets audit_legs.py reads from the tree;" >&2
+  echo "  a local run names one of the targets, or leaves FUZZ_TARGET unset to run every one" >&2
+  exit 1
+}
+
 rc=0
 trap 'rc=$?; cleanup; [ -n "${org_done:-}" ] || [ "${rc}" -ne 0 ] || rc=1; exit "${rc}"' EXIT
 
-mods=$(git ls-files ':!vendor/**' "go.mod" "*/go.mod" "*/*/go.mod") || exit 1
+mods=$(git ls-files ':!vendor/**' ':!*/vendor/*' "go.mod" "*/go.mod") || exit 1
 [[ -n ${mods} ]] || {
+  [[ -z ${FUZZ_TARGET:-} ]] || unknown audit:go-fuzz "of this tree (no go.mod tracked)"
   echo "audit:go-fuzz: no go.mod tracked, skipped"
   org_done=1
   exit 0
@@ -53,7 +74,9 @@ command -v go > /dev/null || {
   echo "audit:go-fuzz: go.mod present but go missing — pin go in mise.toml" >&2
   exit 1
 }
-secs="${FUZZ_SECONDS:-60}"
+# The target's whole budget, half to each pass.
+secs="${FUZZ_SECONDS:-${budget}}"
+half=$((secs / 2))
 # Go replays a target's seeds from its package's testdata alone, so a
 # proposed seed and each candidate are placed there while it is
 # measured and removed after: the tree is left as found, but for a
@@ -70,13 +93,15 @@ while IFS= read -r m; do
     targets=$(cd "${d}" && go test -list '^Fuzz' "${pkg}" 2> /dev/null) || targets=""
     while IFS= read -r target; do
       [[ ${target} == Fuzz* ]] || continue
-      ran=$((ran + 1))
+      [[ -z ${FUZZ_TARGET:-} || ${target} == "${FUZZ_TARGET}" ]] || continue
       if ! pdir=$(cd "${d}" && go list -f '{{.Dir}}' "${pkg}"); then
         failed="${failed} ${pkg}.${target}(list)"
         continue
       fi
       rel=${pdir#"${root}"/}
       [[ ${pdir} != "${root}" ]] || rel=.
+      [[ -z ${FUZZ_PACKAGE:-} || ${rel} == "${FUZZ_PACKAGE}" ]] || continue
+      ran=$((ran + 1))
       seeds="${rel}/testdata/fuzz/${target}"
       [[ ${rel} != . ]] || seeds="testdata/fuzz/${target}"
       log="${work}/${ran}"
@@ -95,11 +120,11 @@ while IFS= read -r m; do
         failed="${failed} ${pkg}.${target}(cache)"
         continue
       fi
-      echo "audit:go-fuzz: ${target} in ${pkg} for ${secs}s, plain"
-      (cd "${d}" && go test -fuzz "^${target}\$" -fuzztime "${secs}s" "${pkg}") 2>&1 \
+      echo "audit:go-fuzz: ${target} in ${pkg} for ${half}s, plain"
+      (cd "${d}" && go test -fuzz "^${target}\$" -fuzztime "${half}s" "${pkg}") 2>&1 \
         | tee "${log}.plain" || failed="${failed} ${pkg}.${target}(plain)"
-      echo "audit:go-fuzz: ${target} in ${pkg} for ${secs}s, race detector on"
-      (cd "${d}" && CGO_ENABLED=1 go test -race -fuzz "^${target}\$" -fuzztime "${secs}s" "${pkg}") 2>&1 \
+      echo "audit:go-fuzz: ${target} in ${pkg} for ${half}s, race detector on"
+      (cd "${d}" && CGO_ENABLED=1 go test -race -fuzz "^${target}\$" -fuzztime "${half}s" "${pkg}") 2>&1 \
         | tee "${log}.race" || failed="${failed} ${pkg}.${target}(race)"
       # A failing input Go wrote among the seeds: staged as crash-<name>
       # and moved out of the tree, where it would fail the measurement.
@@ -117,20 +142,15 @@ while IFS= read -r m; do
       cache=$(cd "${d}" && go env GOCACHE) || exit 1
       cache="${cache}/fuzz/${pkg}/${target}"
       candidates=()
-      found=0
       list_dir "${cache}" || exit 1
       while IFS= read -r name; do
         [[ -n ${name} ]] || continue
         candidates+=("${cache}/${name}")
-        found=$((found + 1))
       done <<< "${listing}"
-      # The coverage floor's fuzz leg measures the root module's targets
-      # (#1896); a nested module's finds have no figure to raise.
-      if [[ ${d} != . ]]; then
-        org_fuzz_summary "- \`${target}\` in ${pkg}: ${found} find(s) not measured (nested module),\
- ${crashes} crash(es)"
-        continue
-      fi
+      # Every module's targets are measured (#1899): rel is the package
+      # directory from the repository root, and org_fuzz_measure runs
+      # in the module that owns it, as the coverage floor's fuzz leg
+      # does.
       if [[ ${rel} == . ]]; then
         leg=$(org_fuzz_leg_name "${target#Fuzz}") || exit 1
       else
@@ -143,14 +163,15 @@ while IFS= read -r m; do
       fi
       read -r from to n <<< "${kept}"
       last=$(org_fuzz_last_new go "${log}.plain") || exit 1
-      plain=$(org_fuzz_timing "${last}" "${secs}") || exit 1
+      plain=$(org_fuzz_timing "${last}" "${half}") || exit 1
       last=$(org_fuzz_last_new go "${log}.race") || exit 1
-      race=$(org_fuzz_timing "${last}" "${secs}") || exit 1
+      race=$(org_fuzz_timing "${last}" "${half}") || exit 1
       org_fuzz_summary "- \`${target}\` in ${pkg} (${leg}): corpus ${from}% to ${to}%,\
  ${n} input(s) kept, ${crashes} crash(es); plain: ${plain}; race: ${race}"
     done <<< "${targets}"
   done <<< "${pkgs}"
 done <<< "${mods}"
+[[ ${ran} -gt 0 || -z ${FUZZ_TARGET:-} ]] || unknown audit:go-fuzz "of this tree's Go packages"
 [[ ${ran} -gt 0 ]] || {
   echo "audit:go-fuzz: no Go fuzz targets, skipped"
   org_done=1
@@ -163,5 +184,5 @@ if [[ -n ${failed} ]]; then
   echo "  to propose; its original name is in the output above" >&2
   exit 1
 fi
-echo "audit:go-fuzz: ${ran} target(s) ran ${secs}s clean"
+echo "audit:go-fuzz: ${ran} target(s) ran ${half}s plain and ${half}s raced, clean"
 org_done=1
