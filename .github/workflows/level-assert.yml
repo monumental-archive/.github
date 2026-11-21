@@ -53,9 +53,9 @@ name: slsa-level-board
   schedule:
     # Mondays 05:30 UTC — after the stubs' own weekly 05:00 run, so a
     # healthy branch is half an hour old rather than seven days, and
-    # before the audit reads the shields. Ninety minutes clear of the
-    # audit's first group (07:00), because this walk and those legs
-    # draw one App installation's hourly budget (#1169).
+    # before the audit reads the shields. Ninety minutes clear of
+    # slsa.yml (07:00), because this walk and those legs draw one App
+    # installation's hourly budget (#1169).
     - cron: 30 5 * * 1
   workflow_dispatch: {}
 permissions:
