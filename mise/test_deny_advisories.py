@@ -149,7 +149,8 @@ class DenyAdvisories(unittest.TestCase):
         """ORG_FINDINGS set: one record per advisory, through findings.py."""
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "deny.toml"
-            path.write_text(f'[advisories]\nignore = ["{ADVISORY}"]\n', encoding="utf-8")
+            text = f'[advisories]\nignore = ["{ADVISORY}"]\n'
+            path.write_text(text, encoding="utf-8")
             records = Path(tmp) / "findings.jsonl"
             env = hermetic.env(MISE_TASK_NAME="lint:deny", ORG_FINDINGS=str(records))
             done = hermetic.call_main(
@@ -157,21 +158,18 @@ class DenyAdvisories(unittest.TestCase):
             )
             lines = records.read_text(encoding="utf-8").splitlines()
         self.assertEqual(done.returncode, 1)
-        self.assertEqual(
-            [json.loads(line) for line in lines],
-            [
-                {
-                    "v": 1,
-                    "task": "lint:deny",
-                    "subject": ADVISORY,
-                    "message": "an advisory ignore in deny.toml",
-                    "detail": [
-                        "delete the entry: the decision is the canon's security/vex/ file",
-                        "for that advisory and package version, which audit:deny reads",
-                    ],
-                }
-            ],
-        )
+        detail = [line.strip() for line in refused(ADVISORY).splitlines()[1:]]
+        want: list[object] = [
+            {
+                "v": 1,
+                "task": "lint:deny",
+                "subject": ADVISORY,
+                "message": "an advisory ignore in deny.toml",
+                "detail": detail,
+            }
+        ]
+        got = [decoded.load_json(line) for line in lines]
+        self.assertEqual(got, want)
 
 
 def task_body(name: str) -> str:
@@ -227,13 +225,14 @@ def report(verdict: str, found: list[dict[str, str]]) -> str:
         One JSON document of the schema stele_findings.py reads.
 
     """
-    return json.dumps({
+    doc: dict[str, object] = {
         "schema": 9,
         "target": "assert advisories",
         "subject": "Cargo.lock",
         "verdict": verdict,
         "findings": found,
-    })
+    }
+    return json.dumps(doc)
 
 
 UNDECIDED = {
@@ -281,7 +280,11 @@ class AuditDeny(unittest.TestCase):
         self.git("add", "Cargo.lock", "deny.toml")
 
     def audit(
-        self, *, rc: int = 0, verdict: str = "PASS", found: list[dict[str, str]] | None = None
+        self,
+        *,
+        rc: int = 0,
+        verdict: str = "PASS",
+        found: list[dict[str, str]] | None = None,
     ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
         """Run the task body with stele answering `verdict` and exiting `rc`.
 
@@ -333,17 +336,15 @@ class AuditDeny(unittest.TestCase):
         done, calls = self.audit()
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(done.stdout, f"{TASK}: stele: PASS\n")
-        self.assertEqual(
-            calls[:3],
-            [
-                "cargo fetch --locked --quiet",
-                "cargo deny --format json check advisories",
-                "cargo-deny deny --format json check advisories",
-            ],
-        )
+        want = [
+            "cargo fetch --locked --quiet",
+            "cargo deny --format json check advisories",
+            "cargo-deny deny --format json check advisories",
+        ]
+        self.assertEqual(calls[:3], want)
 
     def test_an_undecided_finding_is_red(self) -> None:
-        """stele exits 1: the task is red, the finding named."""
+        """A stele exit of 1: the task is red, the finding named."""
         self.plant()
         done, _ = self.audit(rc=1, verdict="FAIL", found=[UNDECIDED])
         self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
@@ -359,7 +360,8 @@ class AuditDeny(unittest.TestCase):
         done, calls = self.audit()
         self.assertEqual(done.returncode, 0, done.stderr)
         args = self.stele_call(calls).split(" ")
-        self.assertEqual(args[:3], ["assert", "advisories", "--json"])
+        head = ["assert", "advisories", "--json"]
+        self.assertEqual(args[:3], head)
         self.assertEqual(args[args.index("--scanner") + 1], "cargo-deny")
         self.assertEqual(
             args[args.index("--vex") + 1], str(self.canon / "security" / "vex")
@@ -377,7 +379,7 @@ class AuditDeny(unittest.TestCase):
         done, calls = self.audit()
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(done.stdout, f"{TASK}: no Cargo.lock tracked, skipped\n")
-        self.assertEqual(calls, [])
+        self.assertEqual(len(calls), 0, calls)
 
     def test_no_vex_directory_is_red_by_name(self) -> None:
         """The canon's decisions did not arrive: red before any scan."""
@@ -388,11 +390,12 @@ class AuditDeny(unittest.TestCase):
         vex = self.canon / "security" / "vex"
         self.assertEqual(
             done.stderr,
-            f"{TASK}: {vex} is not a directory, so the org's triage decisions cannot be read\n"
+            f"{TASK}: {vex} is not a directory,"
+            " so the org's triage decisions cannot be read\n"
             "  the org belt did not arrive: CI sets MISE_GLOBAL_CONFIG_FILE,"
             " locally run: lefthook run post-checkout\n",
         )
-        self.assertEqual(calls, [])
+        self.assertEqual(len(calls), 0, calls)
 
 
 if __name__ == "__main__":
