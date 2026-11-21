@@ -143,7 +143,7 @@ if [[ ${legs} != probe && ${legs} != pgrx-majors ]]; then
   # Completion-guarded (#1233): on bash 3.2 a script with an EXIT trap
   # that dies on an unset variable would otherwise exit 0. One trap for
   # every directory the run makes: the legs below only set theirs.
-  cleanup() { rm -rf "${ts_work:-}" "${scratch:-}" "${fuzz_work:-}" "${fuzz_made:-}"; }
+  cleanup() { rm -rf "${ts_work:-}" "${scratch:-}" "${fuzz_work:-}"; }
   rc=0
   trap 'rc=$?; cleanup; [ -n "${org_done:-}" ] || [ "${rc}" -ne 0 ] || rc=1; exit "${rc}"' EXIT
   out=${ORG_COVERAGE_REPORTS:-}
@@ -697,14 +697,9 @@ if [[ -n ${run} && ${legs} =~ ^(all|plpgsql)$ && -f ${run}/plpgsql-coverage.json
     totals "${label}" "${run}/plpgsql-coverage.json" || exit 1
 fi
 
-# fuzz_leg_name <name>: a fuzz target's leg (#1896), `fuzz-<name>`
-# lower-cased, every character but [a-z0-9] turned into `-`, so it fits
-# coverage_floor.py's leg grammar whatever the target is called.
-fuzz_leg_name() {
-  local name
-  name=$(LC_ALL=C tr '[:upper:]' '[:lower:]' <<< "$1")
-  printf 'fuzz-%s\n' "${name//[^a-z0-9]/-}"
-}
+# The fuzz legs' names and their measurement (#1896, #1897).
+# shellcheck source=mise/fuzz-corpus-lib.sh
+. "${belt_dir}/fuzz-corpus-lib.sh"
 
 # The fuzz targets, enumerated before any is measured, so two that
 # derive one leg are refused before a minute is spent building: one
@@ -722,7 +717,7 @@ for b in tomllib.load(open(sys.argv[1], "rb")).get("bin", []):
     }
     while IFS= read -r target; do
       [[ -n ${target} ]] || continue
-      fuzz_found+="$(fuzz_leg_name "${target}") rust - ${target}"$'\n'
+      fuzz_found+="$(org_fuzz_leg_name "${target}") rust - ${target}"$'\n'
     done <<< "${manifest}"
   fi
   # Tracked files are read from a work tree; outside one there are none,
@@ -743,9 +738,9 @@ for b in tomllib.load(open(sys.argv[1], "rb")).get("bin", []):
     while IFS= read -r name; do
       [[ -n ${name} ]] || continue
       if [[ ${dir} == . ]]; then
-        n=$(fuzz_leg_name "${name#Fuzz}")
+        n=$(org_fuzz_leg_name "${name#Fuzz}")
       else
-        n=$(fuzz_leg_name "${dir}-${name#Fuzz}")
+        n=$(org_fuzz_leg_name "${dir}-${name#Fuzz}")
       fi
       fuzz_found+="${n} go ${dir} ${name}"$'\n'
     done <<< "${names}"
@@ -780,6 +775,9 @@ if [[ ${legs} =~ ^(all|fuzz)$ ]]; then
   [[ -z ${clash} ]] || exit 1
 fi
 
+# The measurement itself is org_fuzz_measure (fuzz-corpus-lib.sh), the
+# one the scheduled search (#1897) keeps a find by: this leg hands it
+# the tracked copy, the search that copy plus a candidate.
 if [[ ${legs} =~ ^(all|fuzz)$ && ${fuzz_found} == *" rust "* ]]; then
   llvm_tools ""
   if ! command -v cargo-fuzz > /dev/null; then
@@ -788,69 +786,12 @@ if [[ ${legs} =~ ^(all|fuzz)$ && ${fuzz_found} == *" rust "* ]]; then
     exit 1
   fi
   fuzz_work=$(mktemp -d)
-  # The tracked sources, the figure's surface: everything the repository
-  # tracks as Rust outside the harnesses themselves, by absolute path as
-  # cargo records it. A file the target does not link counts nothing,
-  # and nothing outside the repository (registry, toolchain, generated
-  # code) is named.
-  root=$(pwd -P)
-  sources=()
-  tracked_rs=$(git ls-files -- '*.rs' ':!fuzz/fuzz_targets/**') || exit 1
-  while IFS= read -r file; do
-    [[ -z ${file} ]] || sources+=("${root}/${file}")
-  done <<< "${tracked_rs}"
-  verbose=$(rustc -vV) || exit 1
-  host=$(sed -n 's/^host: //p' <<< "${verbose}")
-  sysroot=$(rustc --print sysroot) || exit 1
-  llvm_cov="${sysroot}/lib/rustlib/${host}/bin/llvm-cov"
-  if [[ -z ${host} || ! -x ${llvm_cov} ]]; then
-    echo "${label}: no llvm-cov at ${llvm_cov} — the llvm-tools component is declared but" >&2
-    echo "  its binaries are not where the toolchain keeps them" >&2
-    exit 1
-  fi
-  # A build directory of the compiler's own (#1877), beside the fuzz
-  # crate's other builds: a toolchain bump is a new, empty directory,
-  # never an old compiler's binary read as this one's.
-  fuzz_metadata=$(cargo metadata --no-deps --format-version 1 --locked --manifest-path fuzz/Cargo.toml) || exit 1
-  fuzz_target_dir=$(jq -r '.target_directory // empty' <<< "${fuzz_metadata}") || exit 1
-  if [[ -z ${fuzz_target_dir} ]]; then
-    echo "${label}: cargo metadata named no target_directory for fuzz/ — nowhere to build into" >&2
-    exit 1
-  fi
-  compiler=$("${ORG_PYTHON}" "${belt_dir}/gate_cache_key.py" digest) || exit 1
-  build="${fuzz_target_dir}/coverage-${compiler}"
-  # cargo fuzz coverage writes its profiles under fuzz/coverage/<target>/
-  # and offers no other place; a directory this run made is removed by the
-  # EXIT trap, and a target's stale raw profiles are cleared before its
-  # run, which would otherwise merge into this one's.
-  [[ -e fuzz/coverage ]] || fuzz_made=${PWD}/fuzz/coverage
-  # shellcheck source=mise/fuzz-corpus-lib.sh
-  . "${belt_dir}/fuzz-corpus-lib.sh"
   while read -r leg kind _ target; do
     [[ ${kind} == rust ]] || continue
     # A copy that fails says why itself and ends the run (errexit).
-    copied=$(org_fuzz_corpus_copy "${target}" "${fuzz_work}/${target}")
-    if [[ ${copied} == 0 ]]; then
-      echo "${label}: ${leg}: fuzz target '${target}' has no committed corpus — a" >&2
-      echo "  measurement that reads nothing must not become a floor (lint:fuzz-build names the remedy)" >&2
-      exit 1
-    fi
-    rm -rf -- "fuzz/coverage/${target}/raw"
-    if ! cargo fuzz coverage -s none --target-dir "${build}" "${target}" "${fuzz_work}/${target}" >&2; then
-      echo "${label}: ${leg}: cargo fuzz coverage failed replaying the committed corpus (above)" >&2
-      exit 1
-    fi
-    totals=$("${llvm_cov}" export -summary-only \
-      -instr-profile="fuzz/coverage/${target}/coverage.profdata" \
-      "${build}/${host}/release/${target}" ${sources[@]+"${sources[@]}"} \
-      | jq -r '.data[0].totals.lines | "\(.count) \(.covered)"') || totals=""
-    read -r count covered <<< "${totals}"
-    if [[ ! ${count:-} =~ ^[0-9]+$ || ! ${covered:-} =~ ^[0-9]+$ || ${count} == 0 ]]; then
-      echo "${label}: ${leg}: llvm-cov counted no tracked line (count '${count:-absent}') — a" >&2
-      echo "  measurement that reads nothing must not become a floor" >&2
-      exit 1
-    fi
-    awk -v leg="${leg}" -v n="${count}" -v c="${covered}" 'BEGIN { printf "%s %.16g\n", leg, c * 100 / n }'
+    org_fuzz_corpus_copy "${target}" "${fuzz_work}/${target}" > /dev/null
+    pct=$(org_fuzz_measure "${label}" "${leg}" rust "${target}" "${fuzz_work}/${target}")
+    echo "${leg} ${pct}"
   done <<< "${fuzz_found}"
 fi
 
@@ -859,29 +800,9 @@ if [[ ${legs} =~ ^(all|fuzz)$ && ${fuzz_found} == *" go "* ]]; then
     echo "${label}: go.mod present but go missing — pin go in mise.toml" >&2
     exit 1
   fi
-  fuzz_work=${fuzz_work:-$(mktemp -d)}
   while read -r leg kind dir name; do
     [[ ${kind} == go ]] || continue
-    # The module's packages the target's package imports, itself included:
-    # the code its seeds can reach.
-    pkgs=$(go list -deps -f '{{if and .Module .Module.Main}}{{.ImportPath}}{{end}}' "./${dir}") || exit 1
-    coverpkg=$(sed '/^$/d' <<< "${pkgs}" | paste -sd, -)
-    if [[ -z ${coverpkg} ]]; then
-      echo "${label}: ${leg}: go list named no package of the module for ./${dir}" >&2
-      exit 1
-    fi
-    profile="${fuzz_work}/${leg}.out"
-    if ! go test -count=1 -run "^${name}\$" -coverpkg="${coverpkg}" \
-      -coverprofile="${profile}" "./${dir}" >&2; then
-      echo "${label}: ${leg}: ${name}'s seed corpus failed under measurement (above)" >&2
-      exit 1
-    fi
-    pct=$(go tool cover -func="${profile}" | awk '/^total:/ { sub(/%/, "", $3); print $3 }')
-    if [[ -z ${pct} ]]; then
-      echo "${label}: ${leg}: could not read a total from the Go profile — a" >&2
-      echo "  measurement that reads nothing must not become a floor" >&2
-      exit 1
-    fi
+    pct=$(org_fuzz_measure "${label}" "${leg}" go "${dir}" "${name}")
     echo "${leg} ${pct}"
   done <<< "${fuzz_found}"
 fi

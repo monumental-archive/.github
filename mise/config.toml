@@ -8025,10 +8025,12 @@ dir = "{{cwd}}"
 #
 # WHAT THIS IS AND IS NOT. A bounded weekly run from a committed corpus
 # is a smoke test, not a proof — fuzzing is sampling, and no arrangement
-# of it is correct by construction. A campaign that accumulates would be
-# standing infrastructure, which the org does not run by choice, so the
-# corpus (fuzz/corpus/<target>/, committed) is curated by humans and the
-# cron never pushes. The gate holds the corpus, not this comment (#1889):
+# of it is correct by construction. What it finds is never merged
+# unreviewed (#445), and since #1897 it is not thrown away either: the
+# inputs that raise the target's corpus figure, and every crash, are
+# staged (fuzz-search-lib.sh) and repo-deep-tests.yml's `propose` job
+# opens them as a pull request. The task itself never pushes and never
+# writes the tracked corpus. The gate holds the corpus (#1889):
 # lint:fuzz-build reds a target with no tracked seed and replays every
 # seed once on each pull request, so this run always starts from it.
 # docs/best-practices.md answers `dynamic_analysis` accordingly and
@@ -8039,55 +8041,7 @@ dir = "{{cwd}}"
 # would vary its enforcement by machine, which is the failure this belt
 # closes everywhere else.
 run = '''
-[[ -d fuzz && -f fuzz/Cargo.toml ]] || {
-  echo "audit:fuzz: no fuzz/, skipped"
-  exit 0
-}
-command -v cargo-fuzz > /dev/null || {
-  echo "audit:fuzz: cargo-fuzz missing (pin cargo:cargo-fuzz in mise.toml)" >&2
-  exit 1
-}
-if [[ -z ${FUZZ_TOOLCHAIN:-} ]]; then
-  echo "audit:fuzz: FUZZ_TOOLCHAIN is not declared — sanitized fuzzing needs a nightly toolchain" >&2
-  echo "  AddressSanitizer is cargo-fuzz's default and needs -Zsanitizer, so stable cannot run it" >&2
-  echo "  declare BOTH toolchains in this repo's mise.toml (mise holds and locks both):" >&2
-  echo "    [tools]" >&2
-  echo '    rust = ["1.xx.x", "nightly-YYYY-MM-DD"]' >&2
-  echo "    [env]" >&2
-  echo '    FUZZ_TOOLCHAIN = "nightly-YYYY-MM-DD"' >&2
-  echo "  a dated nightly, never bare 'nightly' — a moving channel is not a pinned input" >&2
-  exit 1
-fi
-if ! toolchains=$(rustup toolchain list 2> /dev/null) || ! grep -q "^${FUZZ_TOOLCHAIN}" <<< "${toolchains}"; then
-  echo "audit:fuzz: FUZZ_TOOLCHAIN='${FUZZ_TOOLCHAIN}' is declared but not installed" >&2
-  echo "  it rides the rust pin in mise.toml so it installs before tasks run, never mid-run" >&2
-  exit 1
-fi
-# --careful implies -Zbuild-std, which rebuilds the standard library from
-# source and fails without rust-src. Asserted with a remedy rather than
-# discovered halfway through a build, the llvm-tools/clippy pattern.
-if ! src=$(rustup component list --installed --toolchain "${FUZZ_TOOLCHAIN}" 2> /dev/null) || ! grep -q "^rust-src" <<< "${src}"; then
-  echo "audit:fuzz: the nightly lacks rust-src, which --careful needs (it implies -Zbuild-std)" >&2
-  echo "  components ride the pin, so declare them there rather than adding them by hand:" >&2
-  echo "    rust = [\"1.xx.x\", { version = \"${FUZZ_TOOLCHAIN}\", components = \"rust-src\" }]" >&2
-  exit 1
-fi
-secs="${FUZZ_SECONDS:-60}"
-targets=$(cargo fuzz list)
-failed=""
-while IFS= read -r target; do
-  [[ -n ${target} ]] || continue
-  echo "audit:fuzz: ${target} for ${secs}s under AddressSanitizer (${FUZZ_TOOLCHAIN})"
-  RUSTUP_TOOLCHAIN="${FUZZ_TOOLCHAIN}" cargo fuzz run -s address --careful "${target}" \
-    -- -max_total_time="${secs}" || failed="${failed} ${target}"
-done <<< "${targets}"
-if [[ -n ${failed} ]]; then
-  echo "audit:fuzz: crashing target(s):${failed}" >&2
-  echo "  the reproducer is fuzz/artifacts/<target>/crash-<hash>, uploaded by repo-deep-tests.yml" >&2
-  echo "  replay it with: cargo fuzz run <target> fuzz/artifacts/<target>/crash-<hash>" >&2
-  exit 1
-fi
-echo "audit:fuzz: all targets ran ${secs}s clean under ASan"
+bash "${ORG_BELT_DIR}/fuzz-search.sh" rust
 '''
 
 [tasks."audit:coverage-branches"]
@@ -8194,49 +8148,10 @@ dir = "{{cwd}}"
 # testdata/fuzz/<Target>/, and the gate's lint:go-fuzz-seeds replays it
 # from then on. The cron finds it once; the committed corpus keeps it
 # found. The cron never pushes: a machine-generated input is proposed to
-# a human, never merged by one.
+# a human as a pull request (#1897, repo-deep-tests.yml's `propose`),
+# never merged by one.
 run = '''
-set -euo pipefail
-mods=$(git ls-files ':!vendor/**' "go.mod" "*/go.mod" "*/*/go.mod")
-[[ -n ${mods} ]] || {
-  echo "audit:go-fuzz: no go.mod tracked, skipped"
-  exit 0
-}
-command -v go > /dev/null || {
-  echo "audit:go-fuzz: go.mod present but go missing — pin go in mise.toml" >&2
-  exit 1
-}
-secs="${FUZZ_SECONDS:-60}"
-failed=""
-ran=0
-while IFS= read -r m; do
-  [[ -n ${m} ]] || continue
-  d=$(dirname "${m}")
-  while IFS= read -r pkg; do
-    [[ -n ${pkg} ]] || continue
-    while IFS= read -r target; do
-      [[ -n ${target} ]] || continue
-      ran=$((ran + 1))
-      echo "audit:go-fuzz: ${target} in ${pkg} for ${secs}s, plain"
-      (cd "${d}" && go test -fuzz "^${target}\$" -fuzztime "${secs}s" "${pkg}") \
-        || failed="${failed} ${pkg}.${target}(plain)"
-      echo "audit:go-fuzz: ${target} in ${pkg} for ${secs}s, race detector on"
-      (cd "${d}" && CGO_ENABLED=1 go test -race -fuzz "^${target}\$" -fuzztime "${secs}s" "${pkg}") \
-        || failed="${failed} ${pkg}.${target}(race)"
-    done < <((cd "${d}" && go test -list '^Fuzz' "${pkg}" 2> /dev/null) | grep '^Fuzz' || true)
-  done < <((cd "${d}" && go list ./... 2> /dev/null) || true)
-done <<< "${mods}"
-[[ ${ran} -gt 0 ]] || {
-  echo "audit:go-fuzz: no Go fuzz targets, skipped"
-  exit 0
-}
-if [[ -n ${failed} ]]; then
-  echo "audit:go-fuzz: crashing target(s):${failed}" >&2
-  echo "  the failing input is named in the output above, under testdata/fuzz/<Target>/" >&2
-  echo "  repo-deep-tests.yml keeps it as an artifact; commit it and it becomes the regression" >&2
-  exit 1
-fi
-echo "audit:go-fuzz: ${ran} target(s) ran ${secs}s clean"
+bash "${ORG_BELT_DIR}/fuzz-search.sh" go
 '''
 
 [tasks."audit:python-properties"]

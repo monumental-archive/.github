@@ -29,4 +29,6 @@ jobs:
       issues: write # the callee's report job: its workflow's red-check issue (#1887)
       actions: read # the callee's report job: the run's job list and job logs (#1887)
     uses: ./.github/workflows/repo-deep-tests.yml # zizmor: ignore[self-repository]
+    secrets:
+      app-private-key: ${{ secrets.TAG_MINT_APP_PRIVATE_KEY }} # the propose job's token (#1897)
 ...

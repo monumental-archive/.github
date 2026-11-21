@@ -32,7 +32,7 @@ mise/config.toml	lint:exec-bits	19	# #1544 unassigned
 mise/config.toml	lint:deny	30	# #1544 unassigned
 mise/config.toml	lint:rust	134	# #1544 unassigned
 mise/config.toml	fix:rust	61	# #1544 unassigned
-mise/config.toml	lint:msrv	75	# #1544 unassigned
+mise/config.toml	lint:msrv	70	# #1544 unassigned
 mise/config.toml	lint:pg-clippy	43	# #1544 unassigned
 mise/config.toml	lint:gate-surface	23	# #1544 unassigned
 mise/config.toml	lint:go	31	# #1544 unassigned
@@ -74,9 +74,7 @@ mise/config.toml	audit:drafts	131	# #1544 unassigned
 mise/config.toml	audit:citations	79	# #1544 unassigned
 mise/config.toml	audit:adoption	110	# #1544 unassigned
 mise/config.toml	audit:signer-surface	65	# #1544 unassigned
-mise/config.toml	audit:fuzz	46	# #1544 unassigned
 mise/config.toml	audit:coverage-branches	20	# #1544 unassigned
-mise/config.toml	audit:go-fuzz	41	# #1544 unassigned
 mise/config.toml	lint:citation	25	# #1544 unassigned
 mise/config.toml	lint:bestpractices	54	# #1544 unassigned
 mise/config.toml	lint:badges	28	# #1544 unassigned
