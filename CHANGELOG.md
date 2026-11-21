@@ -10,6 +10,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.71.1](https://github.com/monumental-archive/.github/compare/v1.71.0...v1.71.1) - 2026-11-21
+
+### Fixed
+
+- unlink every planted stub before writing it (#1869) ([#1871](https://github.com/monumental-archive/.github/pull/1871))
+- update monumental-archive/signer to e0e7b86 ([#1873](https://github.com/monumental-archive/.github/pull/1873))
+- judge each coverage leg in the one job that owns it ([#1876](https://github.com/monumental-archive/.github/pull/1876))
+
+### Testing
+
+- run python mutants in 48 shards of 180 min (#1530) ([#1870](https://github.com/monumental-archive/.github/pull/1870))
+- cut rust mutant shards round-robin, 60 min timeout ([#1878](https://github.com/monumental-archive/.github/pull/1878))
+
 ## [1.71.0](https://github.com/monumental-archive/.github/compare/v1.70.7...v1.71.0) - 2026-11-20
 
 ### Added
