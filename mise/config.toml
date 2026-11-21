@@ -501,7 +501,7 @@ python = "3.15.2"
 # the repository's own go, gomu's route: gobco parses the source with the
 # go/parser it was built with, so a build older than the running Go is
 # refused by the leg. LAZY, so only the audit job that names it installs
-# it; repo-audit.yml's `coverage-go-branches` installs it by name.
+# it; repo-deep-tests.yml's `coverage-go-branches` installs it by name.
 "go:github.com/rillig/gobco" = { version = "1.3.4", lazy = true, lazy_bins = [
   "gobco",
 ] }
@@ -710,8 +710,8 @@ dir = "{{cwd}}"
 # The third member of the `ci` / `fix` trio, and the one the org went
 # without (#704). `ci` collects `lint:*` by wildcard, so a repo adds a
 # deterministic check and the gate runs it with no workflow change.
-# There was no such collection on the audit side: repo-audit.yml named
-# belt legs one by one and every one of them was a BELT task, so a task
+# There was no such collection on the audit side: the repository-side
+# audit workflow named belt legs one by one and every one of them was a BELT task, so a task
 # a consumer defined in its own mise.toml was run by nothing, ever. The
 # failure mode was silence — `mise run` finds the task, and no cron
 # calls it.
@@ -730,8 +730,8 @@ dir = "{{cwd}}"
 # each other, because they are separate GitHub jobs. Collecting into
 # one job would have quietly lost that property, so it is restored by
 # hand here. Nothing is continue-on-error: measured while building
-# this, `continue-on-error` appears nowhere in repo-audit.yml or
-# audit.yml, so there is no per-leg tolerance ruling for a collected
+# this, `continue-on-error` appears nowhere in the repository-side
+# subject workflows or audit.yml, so there is no per-leg tolerance ruling for a collected
 # task to be inconsistent with. A red audit task reds the audit.
 run = '''
 . "${ORG_BELT_DIR}/own-audits.sh"
@@ -4926,8 +4926,8 @@ dir = "{{cwd}}"
 #
 # Tree-local by the #681 test: the subject is this repository's own
 # file and the entry its own README's shield names, so the leg runs in
-# repo-audit.yml for every caller and in the canon's audit.yml for the
-# canon. Every `_status` and `_justification` the file carries is
+# repo-records.yml, for every caller and for the canon
+# (self-records.yml). Every `_status` and `_justification` the file carries is
 # compared, and a difference is red by criterion. THE FILE IS THE
 # SOURCE: the step a red names is re-entering the form from the file,
 # never editing the file to match the site.
@@ -4952,9 +4952,9 @@ readme=$(git ls-files | awk 'tolower($0) ~ /^readme(\.md|\.markdown)?$/ && !seen
 description = "Check links in tracked markdown (lychee — network, not in ci)"
 dir = "{{cwd}}"
 # audit:*, not lint:*: link liveness is a property of the internet, not the
-# diff. Runs on demand locally and on a schedule in CI — in the canon's
-# audit.yml and, since #681, in repo-audit.yml for every consumer too:
-# this walk is `git ls-files` in whatever repository it runs in, so the
+# diff. Runs on demand locally and on a schedule in CI — in
+# repo-records.yml, for every consumer since #681 and for the canon
+# through self-records.yml (#1858): this walk is `git ls-files` in whatever repository it runs in, so the
 # canon scheduling it only ever checked the canon.
 #
 # --config, and it is load-bearing rather than tidy: lychee
@@ -7744,7 +7744,9 @@ dir = "{{cwd}}"
 # not apply" and "has not got" are different sentences, and only the
 # second is debt.
 # The canon's self-* variants and gate.yml satisfy the same
-# obligations under their canonical alternate names.
+# obligations under their canonical alternate names, and the canon's
+# own name — read from security/identity.toml — is what spares it the
+# two subjects it has none of (public-api, own-audits; #1858).
 run = '''
 git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
   echo "audit:adoption: no tracked security/identity.toml, not the canon, skipped"
@@ -7789,10 +7791,10 @@ fi
 unlisted=$(jq -r '.reconciliation.undeclared[]' <<< "${population}")
 absent=$(jq -r '.reconciliation.unlisted[]' <<< "${population}")
 repos=$(jq -r '.members[].repo' <<< "${population}")
-derive="${ORG_BELT_DIR}/adoption_population.py"
+. "${ORG_BELT_DIR}/identity.sh"
+canon=$(org_identity repo)
 optout="security/adoption-optout.txt"
-fail=""
-blind=""
+fail="" blind=""
 checked=0
 seen=$(mktemp -d)
 for repo in ${repos}; do
@@ -7816,7 +7818,7 @@ done
 # tracks (#505, #354, #693). A disagreeing roster prints no members, so
 # it derives nothing and the reconciliation below says why.
 owed=""
-if [[ -n ${repos} ]] && ! owed=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${derive}" <<< "${population}"); then
+if [[ -n ${repos} ]] && ! owed=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/adoption_population.py" "${canon}" <<< "${population}"); then
   echo "audit:adoption: the population document was refused, so no obligations were derived" >&2
   exit 1
 fi
@@ -8034,7 +8036,7 @@ while IFS= read -r target; do
 done <<< "${targets}"
 if [[ -n ${failed} ]]; then
   echo "audit:fuzz: crashing target(s):${failed}" >&2
-  echo "  the reproducer is fuzz/artifacts/<target>/crash-<hash>, uploaded by repo-audit.yml" >&2
+  echo "  the reproducer is fuzz/artifacts/<target>/crash-<hash>, uploaded by repo-deep-tests.yml" >&2
   echo "  replay it with: cargo fuzz run <target> fuzz/artifacts/<target>/crash-<hash>" >&2
   exit 1
 fi
@@ -8184,7 +8186,7 @@ done <<< "${mods}"
 if [[ -n ${failed} ]]; then
   echo "audit:go-fuzz: crashing target(s):${failed}" >&2
   echo "  the failing input is named in the output above, under testdata/fuzz/<Target>/" >&2
-  echo "  repo-audit.yml keeps it as an artifact; commit it and it becomes the regression" >&2
+  echo "  repo-deep-tests.yml keeps it as an artifact; commit it and it becomes the regression" >&2
   exit 1
 fi
 echo "audit:go-fuzz: ${ran} target(s) ran ${secs}s clean"
@@ -9107,8 +9109,9 @@ dir = "{{cwd}}"
 # fixed #356). This is the join: red on any audit:* task with no
 # `mise run audit:<name>` occurrence anywhere in .github/workflows/.
 # Anywhere, so the schedulers are whichever files run one: audit.yml,
-# publish.yml, repo-audit.yml, and repo-mutants.yml for audit:mutants,
-# which runs apart from the audit so a survivor never reds it (#1355).
+# publish.yml, the repo-*.yml subject workflows (#1858), and
+# repo-mutants.yml for audit:mutants, which runs apart so a survivor
+# never reds another subject's run (#1355).
 # mise/test_audit_scheduled.py holds the message to those names.
 # Deliberately no opt-out row — an unscheduled audit task IS the
 # defect; a task nobody should run should not exist. Linted, not
@@ -9131,10 +9134,12 @@ dir = "{{cwd}}"
 #
 # Half 2 is this repository's OWN audit tasks, and it runs everywhere.
 # A repo-defined audit task is satisfied by a workflow that runs it
-# directly, or by one that calls repo-audit.yml — whose collecting leg
-# runs every audit:* the caller defines (#704). Naming repo-audit.yml
-# as a satisfying answer is not a loophole: it is the mechanism that
-# made the property true for consumers in the first place.
+# directly, or by one that calls repo-own-audits.yml — whose one leg
+# collects and runs every audit:* the caller defines (#704). Naming
+# repo-own-audits.yml as a satisfying answer is not a loophole: it is
+# the mechanism that makes the property true for consumers. It is the
+# ONLY collecting workflow (#1858): a caller of any other subject
+# workflow runs the belt's legs and none of the repository's own.
 run = '''
 status=0
 
@@ -9154,8 +9159,8 @@ if [[ -f mise/config.toml ]]; then
     status=1
   elif [[ -n ${bad} ]]; then
     echo "lint:audit-scheduled: belt audit task(s) no workflow ever runs:${bad}" >&2
-    echo "  schedule each in .github/workflows/ (audit.yml, publish.yml," >&2
-    echo "  repo-audit.yml or repo-mutants.yml) or delete the task — a check" >&2
+    echo "  schedule each in .github/workflows/ (audit.yml, publish.yml, a" >&2
+    echo "  repo-*.yml subject workflow or repo-mutants.yml) or delete the task — a check" >&2
     echo "  nobody runs is a claim, not a check (#358 seam 1)." >&2
     status=1
   else
@@ -9174,9 +9179,9 @@ if ! compgen -G ".github/workflows/*.y*ml" > /dev/null; then
   while IFS= read -r t; do
     [[ -n ${t} ]] && echo "    ${t}" >&2
   done <<< "${own}"
-  echo "  wire the audit stub (workflow-templates/audit.yml) — it calls" >&2
-  echo "  repo-audit.yml, whose collecting leg runs every audit:* this" >&2
-  echo "  repository defines (#704)." >&2
+  echo "  wire the own-audits stub (workflow-templates/own-audits.yml) —" >&2
+  echo "  it calls repo-own-audits.yml, whose one leg runs every audit:*" >&2
+  echo "  this repository defines (#704, #1858)." >&2
   exit 1
 fi
 . "${ORG_BELT_DIR}/identity.sh"
@@ -9185,7 +9190,7 @@ canon_repo=$(org_identity repo)
 canon="${canon_owner}/${canon_repo}"
 canon_re="${canon//./\\.}"
 collected=0
-grep -rEq "uses:[[:space:]]*(${canon_re}/|\./)\.github/workflows/repo-audit\.ya?ml" \
+grep -rEq "uses:[[:space:]]*(${canon_re}/|\./)\.github/workflows/repo-own-audits\.ya?ml" \
   .github/workflows/ && collected=1
 missing=""
 own_count=0
@@ -9197,13 +9202,13 @@ while IFS= read -r t; do
 done <<< "${own}"
 if [[ -n ${missing} ]]; then
   echo "lint:audit-scheduled: repo-defined audit task(s) no workflow runs:${missing}" >&2
-  echo "  wire the audit stub (workflow-templates/audit.yml), which calls" >&2
-  echo "  repo-audit.yml and collects every audit:* this repository defines," >&2
+  echo "  wire the own-audits stub (workflow-templates/own-audits.yml), which" >&2
+  echo "  calls repo-own-audits.yml and runs every audit:* this repository defines," >&2
   echo "  or run each from a workflow here — or delete the task. A check" >&2
   echo "  nobody runs is a claim, not a check (#358 seam 1, #704)." >&2
   status=1
 elif [[ ${collected} -eq 1 ]]; then
-  echo "lint:audit-scheduled: ${own_count} repo-defined audit task(s), collected by repo-audit.yml"
+  echo "lint:audit-scheduled: ${own_count} repo-defined audit task(s), collected by repo-own-audits.yml"
 else
   echo "lint:audit-scheduled: ${own_count} repo-defined audit task(s), each run by a workflow here"
 fi

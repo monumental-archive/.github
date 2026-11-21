@@ -1,0 +1,5 @@
+{
+  "name": "Org repository audit tasks",
+  "description": "The monumental-archive weekly run of every audit task this repository defines, via the shared reusable workflow.",
+  "categories": ["ci"]
+}

@@ -1,0 +1,5 @@
+{
+  "name": "Org deep tests",
+  "description": "The monumental-archive weekly deep tests: bounded fuzzing, branch and condition coverage floors, and random-seed properties, via the shared reusable workflow.",
+  "categories": ["ci"]
+}

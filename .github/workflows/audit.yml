@@ -2,9 +2,9 @@
 # deliberately excludes. Failures here page via the Actions UI/notifications
 # rather than blocking merges.
 #
-# WHAT BELONGS HERE RATHER THAN IN repo-audit.yml, stated once because a
-# leg landing on the wrong side of it is invisible from inside the canon
-# (#704). A leg belongs here when its subject is the ORG or a
+# WHAT BELONGS HERE RATHER THAN IN THE repo-*.yml SUBJECT WORKFLOWS,
+# stated once because a leg landing on the wrong side of it is
+# invisible from inside the canon (#704). A leg belongs here when its subject is the ORG or a
 # CANON-OWNED artefact: it enumerates the population (adoption,
 # org-pins, drafts, release-tags, signer-surface, caller-permissions,
 # source-vsa, attestations, blast-radius, badges), reads an org setting
@@ -18,13 +18,16 @@
 # Measured while classifying these legs for #704 and filed as #738,
 # rather than asserted away here.
 #
-# A leg belongs in repo-audit.yml when its subject is a REPOSITORY'S OWN
-# TREE — `git ls-files`, `.github/workflows/`, the lockfile. That test
-# is what #681 and #704 applied: links, actions and action-pins were
-# scheduled here, walked whatever tree they ran in, and so had only ever
-# audited this one. They keep their jobs here as well, because this
-# repository is also a repository: it does not call repo-audit.yml, so
-# these are how its OWN tree is walked.
+# A leg belongs in a repo-*.yml subject workflow (repo-dependencies,
+# repo-deep-tests, repo-public-api, repo-records, repo-own-audits) when
+# its subject is a REPOSITORY'S OWN TREE — `git ls-files`,
+# `.github/workflows/`, the lockfile. That test is what #681 and #704
+# applied: links, actions and action-pins were scheduled here, walked
+# whatever tree they ran in, and so had only ever audited this one. This
+# repository is also a repository, and its own tree is walked by
+# calling those same workflows from self-dependencies.yml,
+# self-deep-tests.yml and self-records.yml (#1858), never by a second
+# copy of their jobs here.
 #
 # audit:canon-pins stays here and is the one deliberate exception: it IS
 # tree-local, and audit:org-pins performs the same check for every repo
@@ -107,277 +110,6 @@ jobs:
           echo "legs=${legs}" >> "${GITHUB_OUTPUT}"
   # The legs. Every one `needs: plan` and names its group; a leg added
   # without that pair would run in both hours.
-  links:
-    name: audit / links
-    needs: plan
-    if: needs.plan.outputs.legs == 'first'
-    runs-on: ubuntu-26.04
-    env:
-      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
-      MISE_LOCKED: "1"
-      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/mise/config.toml
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Install mise and the pinned toolchain
-        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
-        with:
-          version: 2026.11.8
-          cache: false
-
-      # The job's own token, as in repo-audit.yml (#1344): this
-      # repository is public, so it changes nothing here but keeps the
-      # two links legs alike.
-      - name: Check links
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: mise run audit:links
-
-  actions:
-    name: audit / actions (online)
-    needs: plan
-    if: needs.plan.outputs.legs == 'first'
-    runs-on: ubuntu-26.04
-    env:
-      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
-      MISE_LOCKED: "1"
-      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/mise/config.toml
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Install mise and the pinned toolchain
-        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
-        with:
-          version: 2026.11.8
-          cache: false
-
-      - name: Audit workflows online
-        env:
-          # zizmor's API-backed audits — impostor-commit,
-          # known-vulnerable-actions, ref-confusion, typosquat-uses,
-          # stale-action-refs — are skipped by the gate's --offline run and
-          # would otherwise execute nowhere. The default token is enough:
-          # they read public advisory and commit data.
-          GH_TOKEN: ${{ github.token }}
-        run: mise run audit:actions
-
-  action-pins:
-    name: audit / action pin comments and age
-    needs: plan
-    if: needs.plan.outputs.legs == 'first'
-    runs-on: ubuntu-26.04
-    env:
-      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
-      MISE_LOCKED: "1"
-      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/mise/config.toml
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Install mise and the pinned toolchain
-        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
-        with:
-          version: 2026.11.8
-          cache: false
-
-      - name: Verify pin comments and release age
-        env:
-          # pinact resolves each pinned SHA back to its tag to prove the
-          # version comment tells the truth, and reads publish dates for
-          # the release-age floor. Both are public reads, so the default
-          # token suffices. The gate's offline leg (lint:action-pins)
-          # cannot do either — it can only see that a comment exists.
-          GITHUB_TOKEN: ${{ github.token }}
-        run: mise run audit:action-pins
-
-  lock-arch:
-    name: audit / locked assets match the platform they name
-    needs: plan
-    if: needs.plan.outputs.legs == 'first'
-    runs-on: ubuntu-26.04
-    env:
-      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
-      MISE_LOCKED: "1"
-      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/mise/config.toml
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Install mise and the pinned toolchain
-        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
-        with:
-          version: 2026.11.8
-          cache: false
-
-      - name: Verify each locked asset is built for the platform it names
-        env:
-          # Tree-local, and here for the reason links and action-pins are
-          # here as well: this repository does not call repo-audit.yml,
-          # so this job is how its OWN mise.lock is walked. The consumer
-          # side is the matching leg in repo-audit.yml.
-          #
-          # The network half is a release listing — whether upstream
-          # publishes a native asset for the platform at all, which is
-          # what separates a defect from a package that only ever
-          # shipped amd64. A public read; the default token serves.
-          GH_TOKEN: ${{ github.token }}
-        run: mise run audit:lock-arch
-
-  lock-idempotent:
-    name: audit / each lock is what mise lock writes today
-    needs: plan
-    if: needs.plan.outputs.legs == 'first'
-    runs-on: ubuntu-26.04
-    env:
-      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
-      MISE_LOCKED: "1"
-      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/mise/config.toml
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Install mise and the pinned toolchain
-        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
-        with:
-          version: 2026.11.8
-          cache: false
-
-      - name: Regenerate each lock in scratch and diff it
-        env:
-          # Tree-local, beside lock-arch and for its reason: this
-          # repository does not call repo-audit.yml, so this job is how
-          # its OWN mise/mise.lock is walked; the consumer side is the
-          # matching leg there. The whole-file question (#904): is the
-          # committed lock what `mise lock` resolves today? Network —
-          # the registry is the resolver — so never the gate. It WILL
-          # red whenever upstream changes a registry mapping, and that
-          # cost was accepted on #904: a red asks for the #899-style
-          # proof that the newly resolved assets run, not just a
-          # regenerated file. Public reads; the default token serves.
-          GITHUB_TOKEN: ${{ github.token }}
-        run: mise run audit:lock-idempotent
-
-  regression-tests:
-    name: audit / fixes that came with a regression test
-    needs: plan
-    if: needs.plan.outputs.legs == 'first'
-    runs-on: ubuntu-26.04
-    env:
-      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
-      MISE_LOCKED: "1"
-      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/mise/config.toml
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          fetch-depth: 0
-
-      - name: Install mise and the pinned toolchain
-        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
-        with:
-          version: 2026.11.8
-          cache: false
-
-      # Tree-local, beside lock-idempotent and for its reason: this
-      # repository does not call repo-audit.yml, so this job is how its
-      # OWN history is read; the consumer side is the matching leg
-      # there. Local git only, no API reads, so either group would do
-      # and the first is the one with room. A report, never red on the
-      # ratio (#1335); full history because the helper refuses a
-      # shallow clone.
-      - name: Report fixes with and without a regression test
-        run: mise run audit:regression-tests
-
-  python-properties:
-    name: audit / python properties at a random seed (${{ matrix.shard }}/8)
-    needs: plan
-    if: needs.plan.outputs.legs == 'first'
-    runs-on: ubuntu-26.04
-    # Eight legs by position, one seed (#1631). Measured on this shape,
-    # audit run 44669302615 (2026-11-20, 58 files): the slowest leg took
-    # 10m14s, so 60 is five times it rounded up to ten minutes. One job
-    # had taken 1 h 13 min for the same properties (run 44628248927).
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        shard:
-          - 0
-          - 1
-          - 2
-          - 3
-          - 4
-          - 5
-          - 6
-          - 7
-    env:
-      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
-      MISE_LOCKED: "1"
-      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/mise/config.toml
-      ORG_PROPERTY_SHARD: ${{ matrix.shard }}/8
-      ORG_PROPERTY_SEED: ${{ needs.plan.outputs.property-seed }}
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Install mise and the pinned toolchain
-        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
-        with:
-          version: 2026.11.8
-          cache: false
-
-      # Tree-local, beside regression-tests and for its reason: this
-      # repository does not call repo-audit.yml, so this job is how its
-      # OWN prop_*.py files meet a random seed; the consumer side is the
-      # matching leg there (#1332). No API reads, so either group would
-      # do and the first is the one with room.
-      - name: Run every Python property at a random seed
-        run: mise run audit:python-properties
-
-  typescript-properties:
-    name: audit / typescript properties at a random seed
-    needs: plan
-    if: needs.plan.outputs.legs == 'first'
-    runs-on: ubuntu-26.04
-    env:
-      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
-      MISE_LOCKED: "1"
-      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/mise/config.toml
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Install mise and the pinned toolchain
-        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
-        with:
-          version: 2026.11.8
-          cache: false
-
-      # Tree-local, beside python-properties and for its reason: this
-      # repository does not call repo-audit.yml, so this job is how its
-      # OWN *.prop.test.* files would meet a random seed; the consumer
-      # side is the matching leg there (#1549). It skips clean today:
-      # the canon tracks no lockfile holding fast-check.
-      - name: Run every TypeScript property at a random seed
-        run: mise run audit:typescript-properties
-
   template-pins:
     name: audit / template pin staleness
     needs: plan
@@ -1097,37 +829,6 @@ jobs:
           # or a shield nothing here checks (#316 finding 5).
           GH_TOKEN: ${{ github.token }}
         run: mise run audit:badges
-
-  bestpractices:
-    name: audit / best practices entry matches its file
-    needs: plan
-    if: needs.plan.outputs.legs == 'first'
-    runs-on: ubuntu-26.04
-    env:
-      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
-      MISE_LOCKED: "1"
-      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/mise/config.toml
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Install mise and the pinned toolchain
-        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
-        with:
-          version: 2026.11.8
-          cache: false
-
-      # Tree-local by the #681 test (#1536): the subject is this
-      # repository's own .bestpractices.json and the entry its README's
-      # shield names, so this job is how the canon's own entry is held
-      # and repo-audit.yml carries the matching leg. One anonymous read
-      # of bestpractices.dev, no GitHub API, so no token. Red names each
-      # criterion the published entry has not caught up with; the step
-      # is re-entering the form from the file.
-      - name: Compare the published entry with .bestpractices.json
-        run: mise run audit:bestpractices
 
   baseline-drift:
     name: audit / repo settings drift

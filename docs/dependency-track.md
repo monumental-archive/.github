@@ -79,9 +79,9 @@ by the lock, so gate eligibility holds.
 
 `cargo deny check advisories` — RustSec feed, network-bound, structurally
 outside the gate. It runs on the Monday cadence but NOT in the canon's
-`audit.yml` beside links and settings drift: it is a per-repo
-obligation, so it runs from `repo-audit.yml` via each repo's own
-`audit.yml` stub — which means adoption is per repo and enumerated
+`audit.yml` beside settings drift: it is a per-repo
+obligation, so it runs from `repo-dependencies.yml` via each repo's
+own `dependencies.yml` stub — which means adoption is per repo and enumerated
 nowhere the way `audit:source-vsa` enumerates chains (#349 finding 8
 holds that open; an `audit:adoption` over the population is the
 recorded follow-up). Every
@@ -289,7 +289,7 @@ warning here converts the control into a log line (the #118 rule). A
 Tuesday advisory against a Wednesday release is triaged on Wednesday or
 the release does not happen. The Monday sweeps over *already-published*
 releases — which no release-time gate can cover — remain: `audit:deny`
-from `repo-audit.yml` via each repo's audit stub, and
+from `repo-dependencies.yml` via each repo's `dependencies` stub, and
 `audit:blast-radius` from the canon's own `audit.yml`.
 
 ### Which publish shapes the commit point covers

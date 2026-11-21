@@ -26,12 +26,22 @@ no track vocabulary, no rule for an absent or empty `tracks`, no
 listing — and reads that document on stdin. What it keeps is the one
 thing that is the canon's: which house workflows a member owes.
 
-  ci, audit               every member, always. These ask no track
-                          question — they are hygiene a repository
+  ci, dependencies,       every member, always. These ask no track
+  deep-tests, records     question — they are hygiene a repository
                           owes whatever it publishes, and `ci` is owed
                           by one that publishes nothing. Being listed
                           at all is what puts a repository under them
-                          (stele#181).
+                          (stele#181). The scheduled checks are one
+                          stub per subject, each required (#1858);
+                          the single `audit.yml` stub they replaced
+                          satisfies none of them.
+
+  public-api, own-audits  every member but the canon itself (the
+                          repository named on the command line, read
+                          from security/identity.toml). The canon
+                          publishes no API with a registry baseline
+                          and defines no audit task outside its belt,
+                          so it has no subject for either (#1858).
 
   scorecard               members the forge does not list as private.
                           Scorecard scores a public repository and
@@ -77,7 +87,14 @@ SCHEMA = 9
 # artifact -> acceptable workflow filenames. The canon's self-* variants
 # and gate.yml satisfy the same obligations under alternate names.
 CI = ("ci.yml", "gate.yml")
-AUDIT = ("audit.yml",)
+# The scheduled checks, one stub per subject (#1858). No list offers
+# `audit.yml`: the stub they replaced satisfies nothing, so a member
+# that has not swapped is named with every subject it owes.
+DEPENDENCIES = ("dependencies.yml", "self-dependencies.yml")
+DEEP_TESTS = ("deep-tests.yml", "self-deep-tests.yml")
+PUBLIC_API = ("public-api.yml",)
+RECORDS = ("records.yml", "self-records.yml")
+OWN_AUDITS = ("own-audits.yml",)
 SCORECARD = ("scorecard.yml",)
 SOURCE_ATTEST = ("source-attest.yml",)
 DEPENDENCY_REVIEW = ("dependency-review.yml", "self-dependency-review.yml")
@@ -187,14 +204,24 @@ def by_repo(member: Member) -> str:
     return member.repo
 
 
-def obligations(member: Member) -> list[tuple[str, tuple[str, ...]]]:
+def obligations(member: Member, canon: str) -> list[tuple[str, tuple[str, ...]]]:
     """Derive what one member owes from what its membership makes apply.
+
+    `canon` is the canon's own repository name: the one member that owes
+    no `public-api` or `own-audits` stub, having no subject for either.
 
     Returns:
         Each owed artifact with the workflow filenames that satisfy it.
 
     """
-    owed: list[tuple[str, tuple[str, ...]]] = [("ci", CI), ("audit", AUDIT)]
+    owed: list[tuple[str, tuple[str, ...]]] = [
+        ("ci", CI),
+        ("dependencies", DEPENDENCIES),
+        ("deep-tests", DEEP_TESTS),
+        ("records", RECORDS),
+    ]
+    if member.repo != canon:
+        owed.extend((("public-api", PUBLIC_API), ("own-audits", OWN_AUDITS)))
     if member.visibility != "private":
         owed.extend(
             (("scorecard", SCORECARD), ("dependency-review", DEPENDENCY_REVIEW)),
@@ -209,20 +236,27 @@ def obligations(member: Member) -> list[tuple[str, tuple[str, ...]]]:
 def main(argv: list[str] | None = None) -> int:
     """Print every derived obligation, one per line, from stdin.
 
+    The one argument is the canon's own repository name (#1858).
+
     Returns:
-        0 on success, 2 when the document is refused.
+        0 on success, 2 when the arguments or the document are refused.
 
     """
-    if argv:
-        print(f"adoption-population: takes no arguments, got {argv}", file=sys.stderr)
+    if argv is None or len(argv) != 1 or not argv[0]:
+        print(
+            "adoption-population: takes the canon's repository name and nothing"
+            f" else, got {argv}",
+            file=sys.stderr,
+        )
         return 2
+    canon = argv[0]
     try:
         members = load_members(sys.stdin)
     except RefusalError as exc:
         print(f"adoption-population: {exc}", file=sys.stderr)
         return 2
     for member in sorted(members, key=by_repo):
-        for artifact, names in obligations(member):
+        for artifact, names in obligations(member, canon):
             print(f"OWES\t{member.repo}\t{artifact}\t{'|'.join(names)}")
     return 0
 

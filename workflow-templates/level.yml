@@ -16,7 +16,7 @@
 # permanently grey cell off the board. The canon's declared population
 # must agree, and the canon's weekly sweep reds if the two disagree.
 ---
-name: level
+name: slsa-levels
 
 # zizmor's `dangerous-triggers` audit fires on the `workflow_run`
 # below, at high confidence, and it is right to by default: that

@@ -1,0 +1,58 @@
+# A repository's public API against its latest published release
+# (audit:semver, #1341): a break the version number does not declare
+# is a red here. It reads the registry's baseline, so it is network and
+# never the deterministic gate. A red here is an API change the version
+# does not admit, and nothing else (#1858: one workflow per subject,
+# named for what a red means).
+#
+# Callers pin by full SHA from their own `public-api` stub
+# (workflow-templates/public-api.yml):
+#
+#   jobs:
+#     public-api:
+#       uses: monumental-archive/.github/.github/workflows/repo-public-api.yml@<sha> # vX.Y.Z
+#
+# The canon publishes no API with a registry baseline, so it has no
+# caller of this. No inputs, by design — zero caller-controlled
+# expansion.
+---
+name: repo-public-api
+
+"on":
+  workflow_call: {}
+permissions:
+  contents: read
+
+jobs:
+  semver:
+    name: the public API is compatible with the published release
+    runs-on: ubuntu-26.04
+    # Measured (#1341): edtf's whole judgment, five pgrx majors built twice
+    # each (the crate and its baseline) plus its plain crates, took 706s on
+    # an M1 Pro (8 cores) with a cold target directory; the toolchain install
+    # took 4 minutes on the runner (edtf run 43884069155). The runner
+    # builds slower than the Mac, so the ceiling is about three times the
+    # sum: a hung build stops here, a slow one does not.
+    timeout-minutes: 50
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
+        with:
+          version: 2026.11.8
+          cache: false
+
+      - name: Check the public API against the latest published release
+        run: mise run audit:semver
+...

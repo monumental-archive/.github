@@ -1,0 +1,5 @@
+{
+  "name": "Org records",
+  "description": "The monumental-archive weekly records check: tracked links, the best practices entry and the regression-test report, via the shared reusable workflow.",
+  "categories": ["ci"]
+}

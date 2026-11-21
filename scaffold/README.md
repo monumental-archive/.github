@@ -150,7 +150,7 @@ it and never will; see the entry below.
   engine writes the failing input into `testdata/fuzz/<Target>/`, and
   from that moment plain `go test` fails on it — so **commit that
   file**: it is the regression test, and the gate replays it forever
-  after. `repo-audit.yml` keeps it as an artifact when the cron goes
+  after. `repo-deep-tests.yml` keeps it as an artifact when the cron goes
   red, because the runner is ephemeral and a crash nobody can retrieve
   is a crash nobody can act on. The cron never pushes it for you.
   Seed corpora belong in `f.Add(...)` or `testdata/fuzz/<Target>/`, and

@@ -2458,7 +2458,8 @@ record the gate as calling a tool it never runs.
 *Where it runs.* Item 2's rule, from the measured cost: 6.15 times
 `go test` is far over the fifth of `coverage:check` the gate allows, so
 the figure is held by `audit:coverage-go-branches` on the Monday cron in
-`repo-audit.yml`, beside the Rust branch floor, and never in the gate.
+`repo-deep-tests.yml`, beside the Rust branch floor, and never in the
+gate.
 Its floor is a second line of `.coverage-floor`, `go-branches
 <percent>`, derived by `coverage:adopt` under the same law and band as
 `rust-branches` and carried through by the release path. Chosen by the
@@ -2707,9 +2708,10 @@ baseline it checks against is whatever crates.io currently publishes,
 fetched at run time, and "the gate is deterministic" is a
 rule-that-must-not-be-broken — a red that can arrive with no local
 change is a property of the feed, the exact class `audit:*` exists
-for. So it rides `repo-audit.yml` beside `audit:deny` on the Monday
-cron, per repo. A red means the public API diverged from the latest
-release beyond what the next version number admits: fix the API or
+for. So it rides the Monday cron, per repo, in `repo-public-api.yml`
+(#1858; it rode `audit:deny`'s workflow until then). A red means the
+public API diverged from the latest release beyond what the next
+version number admits: fix the API or
 bump the major — never both silently. Guarded to publishable crates
 (`publish = false` has no registry baseline). Backend honesty: no aqua
 package and, unlike machete, no upstream checksum assets either — the
@@ -3002,7 +3004,7 @@ where `.cargo/mutants.toml` is tracked, since a repository with no Rust
 has no cargo to build it with. **Its own workflow, not an audit leg** (owner's
 ruling): `repo-mutants.yml`, called from each repository's
 `workflow-templates/mutants.yml` stub on its own Monday slot (07:00,
-the audit's is 06:00). Folded into `repo-audit.yml`, one survivor
+the audit's is 06:00). Folded into the weekly audit, one survivor
 turned the whole weekly audit red and nobody could tell what else had
 passed; apart, each run's result means one thing. **Each language has
 its own jobs** in that file — `mutants-rust` and `mutants-rust-totals`
@@ -3741,7 +3743,7 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
   run on a nightly would double a Rust repository's test time on every
   pull request and put a nightly in the deterministic gate, so the
   gate keeps its line leg and the branch figure is measured on the
-  Monday cron: `audit:coverage-branches` in `repo-audit.yml`, on the
+  Monday cron: `audit:coverage-branches` in `repo-deep-tests.yml`, on the
   nightly the repository already declares as `FUZZ_TOOLCHAIN` (no new
   toolchain), with its own build over the workspace, the pgrx
   extensions held out as the `rust` leg holds them (one function in

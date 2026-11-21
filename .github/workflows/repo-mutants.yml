@@ -1,17 +1,19 @@
 # The repo-side weekly mutation run (#1355, under #1336's testing
 # standard): would the suite fail if the code were wrong? Callers pin by
-# full SHA, repo-audit.yml-style, from their own scheduled stub
+# full SHA, ci.yml-style, from their own scheduled stub
 # (workflow-templates/mutants.yml):
 #
 #   jobs:
 #     mutants:
 #       uses: monumental-archive/.github/.github/workflows/repo-mutants.yml@<sha> # vX.Y.Z
 #
-# ITS OWN WORKFLOW, NOT A LEG OF repo-audit.yml (owner's ruling on
-# #1355). A mutation run's red is a survivor to kill, and folded into the
-# audit it turned the whole weekly audit red, so nobody could tell what
-# else had passed. The audit's result keeps meaning what it meant; this
-# file's result means one thing: is there an unexplained survivor.
+# ITS OWN WORKFLOW, NOT A LEG OF ANOTHER (owner's ruling on #1355). A
+# mutation run's red is a survivor to kill, and folded into the weekly
+# audit it turned the whole of it red, so nobody could tell what else
+# had passed. This file's result means one thing: is there an
+# unexplained survivor. #1858 applied the same rule to the rest: every
+# scheduled check is one workflow per subject, named for what a red
+# means.
 #
 # A mutation run repeats the suite once per mutant, which is why it is a
 # cron and never the gate. The measure is no unexplained surviving
