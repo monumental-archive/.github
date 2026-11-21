@@ -151,7 +151,7 @@ class Forge(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    # ruff: ignore[builtin-argument-shadowing] - http.server names the parameter
+    @override
     def log_message(self, format: str, *args: object) -> None:
         """Keep the test output quiet."""
 
@@ -198,8 +198,13 @@ class Stubbed(unittest.TestCase):
         self.logs = self.dir / "logs"
         self.logs.mkdir()
         self.seen: list[tuple[str, str | None]] = []
-        handler = type("Served", (Forge,), {"logs": self.logs, "seen": self.seen})
-        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+
+        class Served(Forge):
+            """The row's own forge: its logs and what it saw."""
+
+        Served.logs = self.logs
+        Served.seen = self.seen
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Served)
         threading.Thread(target=server.serve_forever, daemon=True).start()
         self.addCleanup(server.server_close)
         self.addCleanup(server.shutdown)
@@ -471,9 +476,13 @@ class Logs(Stubbed):
         """The log comes from the endpoint; gh never reads one."""
         proc = self.run_report()
         same(self, proc.returncode, 0, proc.stderr)
-        for call in self.gh_calls():
-            self.assertFalse(call[:1] == ["api"] and call[-1].endswith("/logs"), call)
-            self.assertNotEqual(call[:2], ["run", "view"], call)
+        reads = [
+            call
+            for call in self.gh_calls()
+            if call[:2] == ["run", "view"]
+            or (call[:1] == ["api"] and call[-1].endswith("/logs"))
+        ]
+        same(self, reads, [])
         self.assertIn("caller-grant", self.body_of(self.gh_calls()[-1]))
 
     def test_token_never_reaches_the_blob_host(self) -> None:
