@@ -46,7 +46,13 @@ later run first shows it.
 
 `ORG_FINDINGS` names the file. Unset or empty, a writer prints the
 finding and records nothing, so a check run by hand behaves as it
-always has. Set, the writer creates the file's directory and appends
+always has.
+
+On a runner the belt's `[env]` names it for every `mise run`:
+`${RUNNER_TEMP}/findings/<job>-<16 random hex>.jsonl`, unless the
+caller set one. Each job that runs a belt task uploads that directory,
+and the report job downloads every job's into one (#1933). Off a
+runner it is empty. Set, the writer creates the file's directory and appends
 one line per finding.
 
 A record that cannot be appended is said in one more line on stderr

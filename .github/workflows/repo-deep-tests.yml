@@ -162,6 +162,16 @@ jobs:
           ATLAS_TOKEN: ${{ secrets.atlas-token }}
         run: mise run audit:go-fuzz
 
+      # This job's findings records, for the report job (#1933).
+      - name: Hand the findings to the report job
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: findings-${{ github.job }}-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/findings/
+          if-no-files-found: ignore
+          retention-days: 1
+
       # Whether the search passed or failed (a crash is what most needs
       # keeping): the summary goes to the job's own page, and the step's
       # `staged` output says whether this runner has anything to hand
@@ -314,6 +324,16 @@ jobs:
           ATLAS_TOKEN: ${{ secrets.atlas-token }}
         run: mise run audit:coverage-branches
 
+      # This job's findings records, for the report job (#1933).
+      - name: Hand the findings to the report job
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: findings-${{ github.job }}-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/findings/
+          if-no-files-found: ignore
+          retention-days: 1
+
   coverage-go-branches:
     name: go condition coverage holds its floor
     needs: applies
@@ -355,6 +375,16 @@ jobs:
         env:
           ATLAS_TOKEN: ${{ secrets.atlas-token }}
         run: mise run audit:coverage-go-branches
+
+      # This job's findings records, for the report job (#1933).
+      - name: Hand the findings to the report job
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: findings-${{ github.job }}-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/findings/
+          if-no-files-found: ignore
+          retention-days: 1
 
   # One seed for every leg of the property job (#1631), drawn once so a
   # finding in any shard reruns with one ORG_PROPERTY_SEED.
@@ -433,6 +463,16 @@ jobs:
           ATLAS_TOKEN: ${{ secrets.atlas-token }}
         run: mise run audit:python-properties
 
+      # This job's findings records, for the report job (#1933).
+      - name: Hand the findings to the report job
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: findings-${{ github.job }}-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/findings/
+          if-no-files-found: ignore
+          retention-days: 1
+
   typescript-properties:
     name: typescript properties hold at a random seed
     needs: applies
@@ -482,6 +522,16 @@ jobs:
           ATLAS_TOKEN: ${{ secrets.atlas-token }}
         run: mise run audit:typescript-properties
 
+      # This job's findings records, for the report job (#1933).
+      - name: Hand the findings to the report job
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: findings-${{ github.job }}-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/findings/
+          if-no-files-found: ignore
+          retention-days: 1
+
   rust-properties:
     name: rust properties hold at a random seed
     needs: applies
@@ -519,6 +569,16 @@ jobs:
           ATLAS_TOKEN: ${{ secrets.atlas-token }}
         run: mise run audit:rust-properties
 
+      # This job's findings records, for the report job (#1933).
+      - name: Hand the findings to the report job
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: findings-${{ github.job }}-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/findings/
+          if-no-files-found: ignore
+          retention-days: 1
+
   # Every scheduled workflow ends here (#1887): while a run on the
   # default branch has a red job, one issue titled "<workflow> is red"
   # and labelled red-check holds each red job and its log tail; the next
@@ -554,6 +614,16 @@ jobs:
       - name: Resolve the canon tree and the belt's Python
         uses: $/.github/actions/canon
 
+      # Every job's findings records, in one directory (#1933): each job
+      # that ran a belt task handed its own on.
+      - name: Collect the findings every job recorded
+        if: ${{ !cancelled() }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: findings-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/findings
+
       # A cancelled run changes nothing: the job still runs (always()),
       # this step does not.
       - name: Keep the red-check issue
@@ -567,5 +637,6 @@ jobs:
         run: |
           "${ORG_PYTHON}" .org-canon/mise/standing_issue.py --workflow "${WORKFLOW}" \
             --run-id "${RUN_ID}" --ref "${REF}" \
-            --default-branch "${DEFAULT_BRANCH}"
+            --default-branch "${DEFAULT_BRANCH}" \
+            --findings "${RUNNER_TEMP}/findings"
 ...

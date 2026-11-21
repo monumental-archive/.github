@@ -716,8 +716,12 @@ class Handover(unittest.TestCase):
     def test_the_uploads_run_when_the_search_failed(self) -> None:
         """The hand-over and both uploads run whether or not the search passed."""
         self.assertEqual("${{ !cancelled() }}", step(self.KEPT)["if"])
+        # The findings hand-over (#1933) is held by test_findings_handoff.
         uploads = [
-            s for s in fuzz_steps() if "upload-artifact" in str(s.get("uses", ""))
+            s
+            for s in fuzz_steps()
+            if "upload-artifact" in str(s.get("uses", ""))
+            and s.get("name") != "Hand the findings to the report job"
         ]
         same(
             self,
