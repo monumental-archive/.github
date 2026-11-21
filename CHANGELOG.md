@@ -10,6 +10,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.74.0](https://github.com/monumental-archive/.github/compare/v1.73.0...v1.74.0) - 2026-11-21
+
+### Added
+
+- hold rust property tests to the belt's seed ([#1943](https://github.com/monumental-archive/.github/pull/1943))
+
+### Fixed
+
+- hand the scheduled test runs the gate's atlas-token ([#1937](https://github.com/monumental-archive/.github/pull/1937))
+- update monumental-archive/signer to cd4cfbf ([#1938](https://github.com/monumental-archive/.github/pull/1938))
+- refuse text after a breaking-change footer (#1924) ([#1941](https://github.com/monumental-archive/.github/pull/1941))
+- show the failing step's output in red-check issues ([#1942](https://github.com/monumental-archive/.github/pull/1942))
+
 ## [1.73.0](https://github.com/monumental-archive/.github/compare/v1.72.0...v1.73.0) - 2026-11-21
 
 ### Added
