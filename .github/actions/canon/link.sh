@@ -5,7 +5,8 @@
 # runs from the action's own path, because it is the step that makes
 # the canon tree available: it cannot be a canon helper under mise/ or
 # release/, and it stays shell because it runs before any tool is
-# installed and must depend on nothing.
+# installed and must depend on nothing the runner does not carry (bash,
+# coreutils, and git, which every runner image carries).
 #
 # The tree is the one `$/.github/actions/canon` was resolved from: this
 # script's own directory, three levels down from the tree's root. The
@@ -15,6 +16,8 @@
 # Inputs: CANON_REPOSITORY, GITHUB_REPOSITORY, GITHUB_SHA,
 # GITHUB_WORKSPACE, GITHUB_OUTPUT. Output: `ref`, the canon ref this run
 # resolved.
+# Side effect: when the workspace is in a git repository, `.org-canon`
+# is listed in that clone's info/exclude.
 set -euo pipefail
 : "${CANON_REPOSITORY:?CANON_REPOSITORY must be set (action.yml passes the canon repository)}"
 : "${GITHUB_REPOSITORY:?}"
@@ -52,5 +55,23 @@ case "${root}" in
     ;;
 esac
 ln -sfn "${root}" "${GITHUB_WORKSPACE}/.org-canon"
+# The link is never part of the caller's tree, so git is told so where
+# the link is made: an untracked path in a checkout is a modified tree
+# to every tool that asks git (go stamps vcs.modified=true; #1944), and
+# a step that unlinked it mid-job left the job two names for one tree.
+# info/exclude is the clone's own, never committed; --git-path resolves
+# it through a worktree to the common dir, and --show-prefix anchors the
+# entry where the workspace sits in the repository. No repository here
+# means nothing reads the link as a change, so there is nothing to
+# write. safe.directory on the command line, so a container job whose
+# workspace another uid owns is still read.
+if prefix="$(git -c safe.directory='*' -C "${GITHUB_WORKSPACE}" rev-parse --show-prefix 2> /dev/null)"; then
+  exclude="$(git -c safe.directory='*' -C "${GITHUB_WORKSPACE}" rev-parse --path-format=absolute --git-path info/exclude)"
+  entry="/${prefix}.org-canon"
+  if ! grep -qxF -- "${entry}" "${exclude}" 2> /dev/null; then
+    mkdir -p -- "$(dirname -- "${exclude}")"
+    printf '%s\n' "${entry}" >> "${exclude}"
+  fi
+fi
 org_say "canon resolved: ${ref} at ${root}"
 echo "ref=${ref}" >> "${GITHUB_OUTPUT}"

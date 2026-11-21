@@ -2,13 +2,14 @@
 """Run release/build_go_commands.py, the go-binary build, on a stub go.
 
 #1384 moved the step "Build every command" out of build-go-binary.yml
-into the helper, refusals unchanged. The pins step unlinks .org-canon
-before go runs (an untracked path stamps vcs.modified=true), so it
-records the tree's real path in ORG_CANON_TREE and the step runs the
-helper from there; one row holds both halves of that wiring.
+into the helper, refusals unchanged. The job names the canon tree one
+way, `.org-canon`, from its first step to its last: the canon action
+lists the link in the clone's info/exclude, so go never stamps it as a
+change, and no step unlinks it (#1944, where a step that did left two
+later steps sourcing a path that was gone).
 
 WHAT RUNS. The helper's `main`, called in this process (#1698) from a
-module directory with no `.org-canon` link (as on the runner), with a
+module directory with no `.org-canon` link (go list skips dot paths), with a
 stub `go` first on PATH. The stub answers `list` with the row's main
 packages, one per line, and `build -o OUT PKG` by writing OUT. One row
 starts the helper by its path in this tree instead: the script
@@ -135,22 +136,14 @@ def step(name: str) -> dict[str, object]:
 
 
 class BuildStepIsTheHelper(unittest.TestCase):
-    """The job runs the helper these rows run, from the recorded tree."""
+    """The job runs the helper these rows run, through the one link."""
 
     def test_the_shipped_step_calls_the_helper(self) -> None:
-        """The run: is the call alone, by the recorded tree."""
+        """The run: is the call alone, through `.org-canon`."""
         body = step("Build every command")["run"]
         self.assertEqual(
-            '"${ORG_PYTHON}" "${ORG_CANON_TREE}/release/build_go_commands.py"\n',
-            body,
+            '"${ORG_PYTHON}" .org-canon/release/build_go_commands.py\n', body
         )
-
-    def test_the_pins_step_records_the_tree_before_unlinking(self) -> None:
-        """ORG_CANON_TREE is written, then the link goes."""
-        body = str(step("Read the caller's pinned build inputs")["run"])
-        record = body.index('echo "ORG_CANON_TREE=${tree}" >> "${GITHUB_ENV}"')
-        self.assertLess(body.index("tree=$(realpath .org-canon)"), record)
-        self.assertLess(record, body.index("rm -- .org-canon"))
 
 
 class Builds(unittest.TestCase):

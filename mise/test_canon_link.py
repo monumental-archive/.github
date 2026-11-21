@@ -41,6 +41,17 @@ def plant(root: pathlib.Path, *, config: bool = True) -> pathlib.Path:
     return root / ".github" / "actions" / "canon" / "link.sh"
 
 
+def excluded(gitdir: pathlib.Path) -> str:
+    """Read the clone's info/exclude lines that name the link.
+
+    Returns:
+        Those lines, in order, one per line.
+
+    """
+    lines = (gitdir / "info" / "exclude").read_text(encoding="utf-8")
+    return "\n".join(line for line in lines.splitlines() if "org-canon" in line)
+
+
 class LinkTheCanonTree(unittest.TestCase):
     """Each row: where the tree resolved, and what the step did."""
 
@@ -107,6 +118,93 @@ class LinkTheCanonTree(unittest.TestCase):
         self.assertEqual(done.stdout, f"canon resolved: {SHA} at {root}\n")
         self.assertEqual(self.output.read_text(encoding="utf-8"), f"ref={SHA}\n")
         self.assertEqual(self.linked(), root)
+
+    def git(self, *args: str, cwd: pathlib.Path | None = None) -> str:
+        """Run git as a row's caller would, in the workspace by default.
+
+        Returns:
+            Its standard output.
+
+        """
+        return subprocess.run(
+            [hermetic.tool("git"), "-c", "commit.gpgsign=false", *args],
+            cwd=cwd or self.workspace,
+            env=hermetic.env(self.tmp / "home", PATH=os.environ["PATH"]),
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=60,
+        ).stdout
+
+    def checkout(self, repo: pathlib.Path) -> None:
+        """Make `repo` a clone with one commit, as actions/checkout leaves it."""
+        repo.mkdir(parents=True, exist_ok=True)
+        self.git("init", "-q", cwd=repo)
+        (repo / "main.go").write_text("package main\n", encoding="utf-8")
+        self.git("add", "main.go", cwd=repo)
+        self.git("commit", "-q", "-m", "init", cwd=repo)
+
+    def assert_clean(self, root: pathlib.Path) -> None:
+        """Git reports nothing changed: go would stamp vcs.modified=false."""
+        self.assertEqual(self.git("status", "--porcelain", cwd=root), "")
+
+    def test_a_checkout_does_not_see_the_link_as_a_change(self) -> None:
+        """The link is in the clone's info/exclude, so the tree is clean.
+
+        #1944: the go-binary build unlinked `.org-canon` mid-job because an
+        untracked path stamps every binary vcs.modified=true, and two later
+        steps still sourced through the link that was gone.
+        """
+        self.checkout(self.workspace)
+        root = self.tmp / "_actions" / "example-org" / ".github" / "v1.69.0"
+        done = self.link(plant(root), "someone/consumer")
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertEqual(self.linked(), root)
+        self.assertEqual(excluded(self.workspace / ".git"), "/.org-canon")
+        self.assert_clean(self.workspace)
+
+    def test_a_second_link_writes_no_second_line(self) -> None:
+        """The action can run twice in a job; the exclude holds one line."""
+        self.checkout(self.workspace)
+        root = self.tmp / "_actions" / "example-org" / ".github" / "v1.69.0"
+        script = plant(root)
+        for _ in range(2):
+            done = self.link(script, "someone/consumer")
+            self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertEqual(excluded(self.workspace / ".git"), "/.org-canon")
+        self.assert_clean(self.workspace)
+
+    def test_a_workspace_inside_a_repository_is_anchored_where_it_sits(self) -> None:
+        """A checkout one level up: the entry names the workspace's path."""
+        clone = self.tmp / "clone"
+        self.checkout(clone)
+        self.workspace = clone / "sub"
+        self.workspace.mkdir()
+        root = self.tmp / "_actions" / "example-org" / ".github" / "v1.69.0"
+        done = self.link(plant(root), "someone/consumer")
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertEqual(excluded(clone / ".git"), "/sub/.org-canon")
+        self.assert_clean(clone)
+
+    def test_a_worktree_is_excluded_through_the_common_dir(self) -> None:
+        """Git reads info/exclude from the common dir, not the worktree's."""
+        clone = self.tmp / "clone"
+        self.checkout(clone)
+        self.git("worktree", "add", "-q", str(self.workspace / "wt"), cwd=clone)
+        self.workspace /= "wt"
+        root = self.tmp / "_actions" / "example-org" / ".github" / "v1.69.0"
+        done = self.link(plant(root), "someone/consumer")
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertEqual(excluded(clone / ".git"), "/.org-canon")
+        self.assert_clean(self.workspace)
+
+    def test_a_workspace_in_no_repository_is_linked_and_nothing_written(self) -> None:
+        """No clone: the link is made and there is no exclude to write."""
+        root = self.tmp / "_actions" / "example-org" / ".github" / "v1.69.0"
+        done = self.link(plant(root), "someone/consumer")
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertEqual(self.linked(), root)
+        self.assertFalse((self.workspace / ".git").exists())
 
     def test_another_repository_off_an_actions_path_is_refused(self) -> None:
         """A shape the action does not understand is refused, not guessed."""
