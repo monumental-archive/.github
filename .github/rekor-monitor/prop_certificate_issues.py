@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""findings.py's titles and report reading, on inputs nobody wrote down.
+"""certificate_issues.py's titles and report reading, on inputs nobody wrote down.
 
-The properties of `test_findings.py`'s fixed rows (#1332):
+The properties of `test_certificate_issues.py`'s fixed rows (#1332):
 
 - A title and its dedup pattern round-trip: `filed_title(n)` matches the
   title filed for CT index n, whatever conditions it names, and never
@@ -32,8 +32,8 @@ import unittest
 from pathlib import Path
 from typing import override
 
+import certificate_issues
 import decoded
-import findings
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
@@ -114,17 +114,19 @@ def condition_lines(index: int, group: list[dict[str, object]], log: str) -> lis
     """
     # body() takes decoded findings; decode each as read_finding does.
     typed = [
-        findings.Finding(index, str(f.get("assertion", "")), str(f.get("detail", "")))
+        certificate_issues.Finding(
+            index, str(f.get("assertion", "")), str(f.get("detail", ""))
+        )
         for f in group
     ]
-    text = findings.body(index, typed, log, "https://example.invalid/run")
+    text = certificate_issues.body(index, typed, log, "https://example.invalid/run")
     lines = text.split("\n")
     head = lines.index(HEAD)
     return lines[head + 1 : lines.index("", head)]
 
 
 TARGET_FIELD: dict[str, st.SearchStrategy[object]] = {
-    "target": st.just(findings.TARGET)
+    "target": st.just(certificate_issues.TARGET)
 }
 FINDINGS_FIELD: dict[str, st.SearchStrategy[object]] = {
     "findings": st.one_of(st.lists(FINDING, max_size=5), JSON)
@@ -135,12 +137,15 @@ REPORT: st.SearchStrategy[object] = st.one_of(
 )
 # Fixed examples: a finding that is no object, a subject that is no
 # string, and findings that are no list.
-NOT_AN_OBJECT: dict[str, object] = {"target": findings.TARGET, "findings": [1]}
+NOT_AN_OBJECT: dict[str, object] = {
+    "target": certificate_issues.TARGET,
+    "findings": [1],
+}
 NUMBER_SUBJECT: dict[str, object] = {
-    "target": findings.TARGET,
+    "target": certificate_issues.TARGET,
     "findings": [{"subject": 5}],
 }
-NOT_A_LIST: dict[str, object] = {"target": findings.TARGET, "findings": "ab"}
+NOT_A_LIST: dict[str, object] = {"target": certificate_issues.TARGET, "findings": "ab"}
 # One condition filed twice, and a detail that tries to add a line.
 TWICE: list[dict[str, object]] = [{"assertion": "chain", "detail": "a"}] * 2
 SMUGGLED: list[dict[str, object]] = [
@@ -160,11 +165,15 @@ class TitleRoundTrip(unittest.TestCase):
     ) -> None:
         """Index n's pattern matches n's title, never another index's."""
         self.assertTrue(
-            findings.filed_title(index).match(findings.title(index, conditions))
+            certificate_issues.filed_title(index).match(
+                certificate_issues.title(index, conditions)
+            )
         )
         if other != index:
             self.assertIsNone(
-                findings.filed_title(other).match(findings.title(index, conditions))
+                certificate_issues.filed_title(other).match(
+                    certificate_issues.title(index, conditions)
+                )
             )
 
 
@@ -190,8 +199,10 @@ class ReportReading(unittest.TestCase):
         """Only FindingsError escapes; a grouping holds each finding once."""
         self.path.write_text(dumps(report), encoding="utf-8")
         try:
-            grouped = findings.by_certificate(findings.read_report(self.path))
-        except findings.FindingsError:
+            grouped = certificate_issues.by_certificate(
+                certificate_issues.read_report(self.path)
+            )
+        except certificate_issues.FindingsError:
             return
         given_findings = decoded.as_object(report, "the report").get("findings")
         listed = decoded.as_array(given_findings, "findings") if given_findings else []
@@ -209,8 +220,8 @@ class ReportReading(unittest.TestCase):
         """Whatever bytes the file holds: a report, or FindingsError."""
         self.path.write_bytes(content)
         try:
-            findings.read_report(self.path)
-        except findings.FindingsError:
+            certificate_issues.read_report(self.path)
+        except certificate_issues.FindingsError:
             return
 
 
@@ -238,7 +249,8 @@ class BodyConditions(unittest.TestCase):
         self.assertEqual(len(lines), len(conditions), lines)
         for line, condition in zip(lines, conditions, strict=True):
             self.assertTrue(
-                line.startswith(f"- **{findings.one_line(condition)}**: "), line
+                line.startswith(f"- **{certificate_issues.one_line(condition)}**: "),
+                line,
             )
 
 

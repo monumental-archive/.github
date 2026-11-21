@@ -2,7 +2,7 @@
 """Judge one leg of the signer-identity watch (#1339).
 
 Each leg of rekor-monitor.yml runs `stele assert signer-certificates`
-once, files the report's findings (findings.py) and saves the checkpoint
+once, files the report's findings (certificate_issues.py) and saves the checkpoint
 only when they are filed. This says whether the leg is green, from
 stele's exit status, its report and whether the checkpoint was saved.
 It files nothing: the standing issue is the run's, judged once after the

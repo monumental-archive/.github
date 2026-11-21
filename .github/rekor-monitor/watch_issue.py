@@ -4,7 +4,7 @@
 rekor-monitor.yml reads Fulcio's certificate log in legs, each one run of
 `stele assert signer-certificates` from stele's checkpoint (#1339). Each
 leg is judged on its own (verdict.py), and a certificate that does not
-reconcile files its own issue (findings.py). This runs once, after the
+reconcile files its own issue (certificate_issues.py). This runs once, after the
 last leg, and asks one question of stele's own checkpoint files: did
 this run gain on the log? The outstanding count is the checkpoint's
 tree size minus its `next`, the first index not yet judged.
