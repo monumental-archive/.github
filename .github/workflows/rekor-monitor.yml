@@ -237,7 +237,9 @@ jobs:
         id: findings
         env:
           GH_TOKEN: ${{ github.token }}
-        run: '"${ORG_PYTHON}" .github/rekor-monitor/certificate_issues.py --report "${RUNNER_TEMP}/report.json" --run-url "${RUN_URL}"'
+        run: |
+          "${ORG_PYTHON}" .github/rekor-monitor/certificate_issues.py \
+            --report "${RUNNER_TEMP}/report.json" --run-url "${RUN_URL}"
 
       # unattested-path: the save half of the checkpoint restore
       # marked above — same cache, same reasoning: this workflow
