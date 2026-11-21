@@ -16,6 +16,11 @@
       "name": "hold",
       "color": "b60205",
       "description": "Stops the scheduled security release from merging this Release PR"
+    },
+    {
+      "name": "red-check",
+      "color": "d93f0b",
+      "description": "A scheduled workflow is red on the default branch; the body names each red job"
     }
   ]
 }
