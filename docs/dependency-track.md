@@ -56,9 +56,10 @@ The policy, maximally defensible:
   constraints, or by waiting on the upstream bump. Where upstream truly
   forces a duplicate, the exit is a written `[[bans.skip]]` entry citing
   the upstream issue: an exception with a name and a reason, in one
-  place, the repository whose tree it describes. Since #445 that exception also EXPIRES: `lint:deny` removes
-  each skip in turn and re-runs, so an entry that has stopped doing
-  anything fails the gate by name rather than sitting there forever.
+  place, the repository whose tree it describes. Since #445 that
+  exception also EXPIRES: `lint:deny` removes each skip in turn and
+  re-runs, so an entry that has stopped doing anything fails the gate
+  by name rather than sitting there forever.
 
   **This file is the org's only statement of that policy.**
   `clippy::multiple_crate_versions` (cargo group) asserts the same rule
