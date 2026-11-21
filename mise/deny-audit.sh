@@ -55,5 +55,6 @@ cargo fetch --locked --quiet
 # `|| true`: the status is 1 for a finding and a failure alike, so it is
 # no verdict; stele judges the scan, an unfinished one CANNOT_JUDGE.
 cargo deny --format json check advisories 2> "${scan}" || true
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${belt}/stele_findings.py" assert advisories --scanner cargo-deny --scan "${scan}" --vex "${vex}" --subject Cargo.lock
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${belt}/stele_findings.py" assert advisories \
+  --scanner cargo-deny --scan "${scan}" --vex "${vex}" --subject Cargo.lock
 org_done=1
