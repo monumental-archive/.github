@@ -25,7 +25,8 @@
 # repository holds a `.coverage-floor`, each major's run is built
 # instrumented, renders the extension crate's own report as
 # `lcov-pgrx-pgNN.info` (outside the tree, #1628), prints
-# `pgrx-pgNN <percent>` and holds that major to the floor by itself: a
+# `pgrx-pgNN <percent>` and holds that major to the floor by itself,
+# through coverage_floor.py as the job owning that leg (#1875): a
 # major's figure is over the lines its
 # own build compiled, so per-major code counts in exactly the majors
 # that build it. No floor: the plain run, untouched. The suite's exit
@@ -222,21 +223,19 @@ measure_one() { # usage: measure_one <dir> <crate> <major>
   )
 }
 
-# Prints the leg lines, and in the gate holds each to the floor by name.
-hold() { # usage: hold <leg lines>
-  local leg pct low=""
-  while read -r leg pct; do
-    [[ -n ${leg} ]] || continue
-    echo "${leg} ${pct}"
-    [[ -n ${floor} ]] || continue
-    if awk -v p="${pct}" -v f="${floor}" 'BEGIN { exit !(p < f) }'; then
-      echo "${label}: ${leg}: ${pct}% is below the derived floor ${floor}%" >&2
-      low=1
-    else
-      echo "${label}: ${leg} holds the floor ${floor} (${pct}%)" >&2
-    fi
-  done <<< "$1"
-  [[ -z ${low} ]]
+# Prints the leg lines, and in the gate holds them to the floor through
+# coverage_floor.py, the one holder (#1875), as the job that owns each
+# major this run measured: a leg below the floor is red, and so is a
+# major the floor records and this run did not report. Its hold lines go
+# to stderr, so stdout stays the leg lines the `pgrx` selector reads.
+hold() { # usage: hold <leg lines> <major>...
+  local lines="$1" one jobs=()
+  shift
+  printf '%s\n' "${lines}"
+  [[ -n ${floor} ]] || return 0
+  for one in "$@"; do jobs+=(--job "pgrx:${one}"); done
+  "${ORG_PYTHON}" "${belt}/coverage_floor.py" hold --label "${label}" ${jobs[@]+"${jobs[@]}"} \
+    <<< "${lines}" >&2
 }
 
 # The leg lines this run held, beside its reports (#1692): the gate's
@@ -258,7 +257,7 @@ if [[ ${runs} != *" "* ]]; then
   echo "${label}: ${dir} at pg${one}"
   if [[ -n ${measured} ]]; then
     line=$(measure_one "${dir}" "${crate}" "${one}")
-    hold "${line}"
+    hold "${line}" "${one}"
     keep "${line}"
   else
     (cd "${dir}" && org_pgrx_with_icu "${one}" cargo pgrx test "pg${one}")
@@ -312,7 +311,9 @@ if [[ -n ${failed} ]]; then
 fi
 if [[ -n ${measured} ]]; then
   lines=$(cat "${logs}"/*.leg)
-  hold "${lines}"
+  majors=()
+  for run in ${runs}; do majors+=("${run##*:}"); done
+  hold "${lines}" "${majors[@]}"
   keep "${lines}"
 fi
 echo "${label}: ${count} suite run(s):${tested}"

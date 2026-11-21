@@ -19,6 +19,7 @@ fourth thing to port, and nothing is added to the belt to run this.
 Run through the gate as `mise run test`, which `ci` collects.
 """
 
+import argparse
 import io
 import sys
 import unittest
@@ -596,7 +597,7 @@ class TestCap(unittest.TestCase):
     def test_the_gate_holds_the_cap(self) -> None:
         """A legacy floor of 92.3: a leg at 91 holds."""
         with Tree(record("92.3", measured="94.3")) as tree:
-            status, out, err = run(cf.hold, tree.path, "lbl", "python 91.0\n")
+            status, out, err = run(cf.hold, tree.path, "lbl", "python 91.0\n", GATE)
         self.assertEqual(
             (0, "lbl: python leg holds the floor 90 (91.0%)\n", ""),
             (status, out, err),
@@ -909,6 +910,10 @@ class TestMain(unittest.TestCase):
         self.assertEqual(parsed.floor, Decimal("84.8"))
 
 
+# The gate job, as coverage:check names itself to the hold (#1875).
+GATE = frozenset({cf.GATE_JOB})
+
+
 def legs_record(floor: str, legs: str, *extra: str) -> str:
     """Build a derived floor file that names its legs (#1666).
 
@@ -946,7 +951,7 @@ class TestLegsRecord(unittest.TestCase):
                 text = legs_record("83.4", f"python {leg}")
                 with Tree(text) as tree:
                     status, out, err = run(
-                        cf.hold, tree.path, "coverage:check", "python 86.0\n"
+                        cf.hold, tree.path, "coverage:check", "python 86.0\n", GATE
                     )
                 self.assertEqual(1, status)
                 self.assertEqual(
@@ -962,7 +967,11 @@ class TestLegsRecord(unittest.TestCase):
         """A new leg is held now and joins the record at the derivation."""
         with Tree(legs_record("83.4", "python")) as tree:
             status, out, err = run(
-                cf.hold, tree.path, "coverage:check", "python 86.0\nplpgsql 87.5\n"
+                cf.hold,
+                tree.path,
+                "coverage:check",
+                "python 86.0\nplpgsql 87.5\n",
+                GATE,
             )
         self.assertEqual((0, ""), (status, err))
         self.assertEqual(
@@ -977,7 +986,11 @@ class TestLegsRecord(unittest.TestCase):
         """Every leg is judged; the one below is named."""
         with Tree(legs_record("83.4", "python plpgsql")) as tree:
             status, _, err = run(
-                cf.hold, tree.path, "coverage:check", "python 86.0\nplpgsql 80.1\n"
+                cf.hold,
+                tree.path,
+                "coverage:check",
+                "python 86.0\nplpgsql 80.1\n",
+                GATE,
             )
         self.assertEqual(1, status)
         self.assertEqual(
@@ -988,13 +1001,13 @@ class TestLegsRecord(unittest.TestCase):
         """A recorded leg consciously dropped is not red when it is gone."""
         text = legs_record("83.4", "python plpgsql", "# dropped: plpgsql moved out")
         with Tree(text) as tree:
-            status, _, err = run(cf.hold, tree.path, "lbl", "python 86.0\n")
+            status, _, err = run(cf.hold, tree.path, "lbl", "python 86.0\n", GATE)
         self.assertEqual((0, ""), (status, err))
 
     def test_no_legs_record_demands_nothing(self) -> None:
         """Every floor today: held, none demanded, nothing named."""
         with Tree(record("83.4")) as tree:
-            status, out, err = run(cf.hold, tree.path, "lbl", "python 86.0\n")
+            status, out, err = run(cf.hold, tree.path, "lbl", "python 86.0\n", GATE)
         self.assertEqual(
             (0, "lbl: python leg holds the floor 83.4 (86.0%)\n", ""),
             (status, out, err),
@@ -1061,7 +1074,7 @@ class TestLegsRecord(unittest.TestCase):
     def test_no_floor_holds_nothing(self) -> None:
         """Without a floor file there is nothing to hold or demand."""
         with Tree(None) as tree:
-            self.assertEqual((0, "", ""), run(cf.hold, tree.path, "lbl", ""))
+            self.assertEqual((0, "", ""), run(cf.hold, tree.path, "lbl", "", GATE))
 
     def test_legs_prints_the_record(self) -> None:
         """One leg a line; nothing for no file or no record."""
@@ -1073,6 +1086,204 @@ class TestLegsRecord(unittest.TestCase):
             self.assertEqual((0, "", ""), run(cf.recorded_legs, tree.path))
         with Tree(None) as tree:
             self.assertEqual((0, "", ""), run(cf.recorded_legs, tree.path))
+
+
+def owned_record(legs: str) -> str:
+    """Build a floor of 90 that records `legs` (#1875).
+
+    Returns:
+        The file text.
+
+    """
+    return record("90", measured="92.0").replace("\n90\n", f"\n# legs: {legs}\n90\n")
+
+
+PGRX15 = frozenset({"pgrx:15"})
+NO_OWNER = REMEDY.replace("{needs}", "restore what the leg measures")
+
+
+class TestOwners(unittest.TestCase):
+    """One owner per leg, and each job judges only its own (#1875)."""
+
+    def test_hold_judges_only_the_calling_jobs_legs(self) -> None:
+        """One row per branch of the scoped hold, each red row's message."""
+        for name, legs, source, jobs, want in (
+            (
+                "gate scope: a recorded pgrx leg is the pgrx job's",
+                "rust pgrx-pg15",
+                "rust 99\n",
+                GATE,
+                (0, "lbl: rust leg holds the floor 90 (99%)\n", ""),
+            ),
+            (
+                "gate scope: a recorded gate leg not measured is red",
+                "rust python",
+                "rust 99\n",
+                GATE,
+                (
+                    1,
+                    "lbl: rust leg holds the floor 90 (99%)\n",
+                    "lbl: the floor was derived with python and this run"
+                    " measured none\n"
+                    + REMEDY.format(needs=cf.NEEDS["python"], leg="python"),
+                ),
+            ),
+            (
+                "pgrx scope: its recorded major not measured is red",
+                "rust pgrx-pg15",
+                "",
+                PGRX15,
+                (
+                    1,
+                    "",
+                    "lbl: the floor was derived with pgrx-pg15 and this run"
+                    " measured none\n" + NO_OWNER.format(leg="pgrx-pg15"),
+                ),
+            ),
+            (
+                "pgrx scope: its major above the floor holds",
+                "rust pgrx-pg15",
+                "pgrx-pg15 95\n",
+                PGRX15,
+                (0, "lbl: pgrx-pg15 leg holds the floor 90 (95%)\n", ""),
+            ),
+            (
+                "pgrx scope: its major below the floor is red",
+                "rust pgrx-pg15",
+                "pgrx-pg15 80\n",
+                PGRX15,
+                (1, "", "lbl: pgrx-pg15: 80% is below the derived floor 90%\n"),
+            ),
+            (
+                "pgrx scope: another major, and the gate's legs, are not its own",
+                "rust pgrx-pg15 pgrx-pg16",
+                "pgrx-pg15 95\n",
+                PGRX15,
+                (0, "lbl: pgrx-pg15 leg holds the floor 90 (95%)\n", ""),
+            ),
+        ):
+            with self.subTest(name), Tree(owned_record(legs)) as tree:
+                self.assertEqual(want, run(cf.hold, tree.path, "lbl", source, jobs))
+
+    def test_the_plan_holds_the_record_to_its_planned_jobs(self) -> None:
+        """Every recorded leg needs its owner planned; red by name if not."""
+        for name, legs, majors, want in (
+            (
+                "a recorded major the plan dropped",
+                "rust pgrx-pg14 pgrx-pg15",
+                "15,16,17,18",
+                (
+                    1,
+                    "",
+                    "plan: the floor records pgrx-pg14, measured by the pgrx:14"
+                    " job, and this run plans none (planned majors:"
+                    " 15,16,17,18)\n" + NO_OWNER.format(leg="pgrx-pg14"),
+                ),
+            ),
+            (
+                "no major planned at all",
+                "rust pgrx-pg15",
+                "",
+                (
+                    1,
+                    "",
+                    "plan: the floor records pgrx-pg15, measured by the pgrx:15"
+                    " job, and this run plans none (planned majors: none)\n"
+                    + NO_OWNER.format(leg="pgrx-pg15"),
+                ),
+            ),
+            (
+                "every recorded leg owned",
+                "rust python pgrx-pg15 pgrx-pg18",
+                "15,16,17,18",
+                (0, "", ""),
+            ),
+        ):
+            with self.subTest(name), Tree(owned_record(legs)) as tree:
+                self.assertEqual(want, run(cf.planned, tree.path, "plan", majors))
+
+    def test_the_plan_accepts_a_dropped_leg_and_no_floor(self) -> None:
+        """A dropped leg needs no owner; no floor, or no record, needs none."""
+        dropped = owned_record("rust pgrx-pg14").replace(
+            "\n90\n", "\n# dropped: pgrx-pg14 postgres 14 dropped\n90\n"
+        )
+        for name, text in (
+            ("dropped", dropped),
+            ("no record", record("90", measured="92.0")),
+            ("no floor", None),
+        ):
+            with self.subTest(name), Tree(text) as tree:
+                self.assertEqual((0, "", ""), run(cf.planned, tree.path, "plan", "15"))
+
+    def test_the_plan_refuses_a_floor_off_its_record(self) -> None:
+        """Drift is the same refusal in the plan as everywhere else."""
+        with Tree(record("88.0")) as tree:
+            status, _, err = run(cf.planned, tree.path, "plan", "15")
+        self.assertEqual(1, status)
+        self.assertIn("coverage-floor:", err)
+
+    def test_one_owner_per_leg_family(self) -> None:
+        """`pgrx-pgNN` strictly is the pgrx job; every other leg the gate's."""
+        for leg, job in (
+            ("rust", "gate"),
+            ("go", "gate"),
+            ("python", "gate"),
+            ("python-branches", "gate"),
+            ("typescript", "gate"),
+            ("plpgsql", "gate"),
+            ("pgrx-pg15", "pgrx:15"),
+            ("pgrx-pg100", "pgrx:100"),
+            ("pgrx-pg015", "gate"),
+            ("pgrx-pg", "gate"),
+            ("pgrx-15", "gate"),
+            ("pgrx-pg15-branches", "gate"),
+            ("xpgrx-pg15", "gate"),
+        ):
+            with self.subTest(leg):
+                self.assertEqual(job, cf.owner(leg))
+
+    def test_a_job_is_named_strictly(self) -> None:
+        """`hold --job` takes `gate` or `pgrx:<major>` and nothing else."""
+        self.assertEqual("gate", cf.job_of("gate"))
+        self.assertEqual("pgrx:15", cf.job_of("pgrx:15"))
+        for text in ("pgrx", "pgrx:", "pgrx:015", "pgrx-pg15", "Gate"):
+            with self.subTest(text), self.assertRaises(argparse.ArgumentTypeError):
+                cf.job_of(text)
+
+    def test_the_command_line_reaches_both_checks(self) -> None:
+        """`hold --job` and `planned --majors`, as the callers invoke them."""
+        with Tree(owned_record("rust pgrx-pg15")) as tree:
+            stdin = sys.stdin
+            sys.stdin = io.StringIO("pgrx-pg15 95\n")
+            try:
+                held = run(
+                    cf.main,
+                    [
+                        "--path",
+                        str(tree.path),
+                        "hold",
+                        "--label",
+                        "lbl",
+                        "--job",
+                        "pgrx:15",
+                    ],
+                )
+            finally:
+                sys.stdin = stdin
+            plan = run(
+                cf.main,
+                [
+                    "--path",
+                    str(tree.path),
+                    "planned",
+                    "--label",
+                    "plan",
+                    "--majors",
+                    "16",
+                ],
+            )
+        self.assertEqual((0, "lbl: pgrx-pg15 leg holds the floor 90 (95%)\n", ""), held)
+        self.assertEqual(1, plan[0])
 
 
 if __name__ == "__main__":

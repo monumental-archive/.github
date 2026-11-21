@@ -6871,7 +6871,9 @@ depends = [{ task = "test", optional = true }]
 # measures and holds each major in its own pgrx job. The measurement
 # leaves the extension out of the rust leg and names those legs
 # (`pgrx-pgNN: measured and held by test:pgrx`); the suite runs zero
-# times here.
+# times here. The hold judges only the recorded legs this job owns
+# (#1875, `--job gate`): a recorded `pgrx-pgNN` is the pgrx job's to
+# judge, and the plan job holds the record to the jobs it planned.
 run = '''
 floor=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/coverage_floor.py" read) || exit 1
 tracked=$(git ls-files -- '*.py' && "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/coverage_floor.py" legs) || tracked=""
@@ -6890,7 +6892,7 @@ if [[ -z ${applies} ]]; then
 fi
 legs=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:check reports) || exit 1
 upload=${legs##*$'\n'} legs=${legs%$'\n'*}
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/coverage_floor.py" hold --label coverage:check <<< "${legs}" || exit 1
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/coverage_floor.py" hold --label coverage:check --job gate <<< "${legs}" || exit 1
 echo "${upload}"
 '''
 

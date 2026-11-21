@@ -110,6 +110,18 @@ KEYS = frozenset(
 
 LEG_FIELDS = 2
 
+# Which job measures a leg, and so judges it (#1875). The floor's record
+# is checked in every job that measures a leg, and each job judges only
+# the recorded legs it owns: one owner per leg, derived from the leg's
+# name, the same names the derivation writes. `pgrx-pgNN` is the gate's
+# `pgrx` job at major NN (#1656), spelled `pgrx:NN`; every other leg is
+# the gate job's. Strict: no other spelling of a pgrx leg routes to the
+# pgrx job, so a misspelt one is the gate job's, which never measures
+# it, and red by name.
+GATE_JOB = "gate"
+PGRX_LEG = re.compile(r"pgrx-pg([1-9][0-9]*)")
+PGRX_JOB = re.compile(r"pgrx:([1-9][0-9]*)")
+
 TEMPLATE = """\
 # Coverage floor -- DERIVED STATE, not a number to edit (#652).
 #
@@ -861,6 +873,51 @@ def recorded_legs(path: Path) -> int:
     return 0
 
 
+def owner(leg: str) -> str:
+    """Name the one job that measures a leg (#1875).
+
+    Returns:
+        `pgrx:NN` for `pgrx-pgNN`, else the gate job.
+
+    """
+    pgrx = PGRX_LEG.fullmatch(leg)
+    return f"pgrx:{pgrx.group(1)}" if pgrx else GATE_JOB
+
+
+def job_of(text: str) -> str:
+    """Read a job as `hold --job` names it: `gate` or `pgrx:NN`.
+
+    Returns:
+        The job.
+
+    Raises:
+        argparse.ArgumentTypeError: any other spelling.
+
+    """
+    if text == GATE_JOB or PGRX_JOB.fullmatch(text):
+        return text
+    msg = f"{text!r} is not a job: `{GATE_JOB}` or `pgrx:<major>`"
+    raise argparse.ArgumentTypeError(msg)
+
+
+def unaccounted(record: Record, label: str, legs: list[str]) -> list[str]:
+    """Name each recorded leg in `legs` that is not dropped, with its remedy.
+
+    Returns:
+        The legs named, empty when there is none.
+
+    """
+    dropped = record.dropped or {}
+    missing = [leg for leg in legs if leg not in dropped]
+    for leg in missing:
+        print(
+            f"{label}: the floor was derived with {leg} and this run measured none",
+            file=sys.stderr,
+        )
+        print(needs(leg), file=sys.stderr)
+    return missing
+
+
 def needs(leg: str) -> str:
     """Name what a leg needs to report, for the line after its refusal.
 
@@ -876,14 +933,15 @@ def needs(leg: str) -> str:
     )
 
 
-def hold(path: Path, label: str, source: str) -> int:
+def hold(path: Path, label: str, source: str, jobs: frozenset[str]) -> int:
     """Hold this run's legs to the floor, and the floor's legs to this run.
 
-    Every measured leg is held to the floor. A leg the record names that
-    this run did not measure is red by name (#1666); a measured leg the
-    record does not name is held like any other and named, since it
-    joins the record at the next derivation. A file with no `legs:`
-    record demands no leg.
+    Every measured leg is held to the floor. A leg the record names, owned
+    by one of `jobs` (the calling job), that this run did not measure is
+    red by name (#1666); a recorded leg another job owns is that job's to
+    judge (#1875). A measured leg the record does not name is held like
+    any other and named, since it joins the record at the next
+    derivation. A file with no `legs:` record demands no leg.
 
     Returns:
         0 when every leg holds and every recorded leg reported (and when
@@ -916,17 +974,49 @@ def hold(path: Path, label: str, source: str) -> int:
                 f"{label}: {leg}: not yet in the floor's record: it joins at "
                 "the next derivation",
             )
+    owned = [
+        leg for leg in record.legs or () if owner(leg) in jobs and leg not in names
+    ]
+    if unaccounted(record, label, owned):
+        status = 1
+    return status
+
+
+def planned(path: Path, label: str, majors: str) -> int:
+    """Hold the floor's record to this run's plan (#1875).
+
+    Every recorded leg must have its owning job planned: the gate job
+    always is, and `pgrx:NN` is when NN is among `majors`, the
+    comma-separated list the plan made. Run by the `plan` job, before
+    any leg starts, so a recorded leg no job will measure is red once,
+    by name, rather than judged by no one.
+
+    Returns:
+        0 when every recorded leg has a planned owner (and when there is
+        no floor or no record), else 1.
+
+    """
+    if not path.exists():
+        return 0
+    record, problems = parse(path.read_text(encoding="utf-8"))
+    if record is None:
+        complain(problems, path)
+        return 1
+    jobs = {GATE_JOB} | {f"pgrx:{major}" for major in majors.split(",") if major}
     dropped = record.dropped or {}
-    for leg in record.legs or ():
-        if leg in names or leg in dropped:
-            continue
+    orphaned = [
+        leg
+        for leg in record.legs or ()
+        if owner(leg) not in jobs and leg not in dropped
+    ]
+    for leg in orphaned:
         print(
-            f"{label}: the floor was derived with {leg} and this run measured none",
+            f"{label}: the floor records {leg}, measured by the {owner(leg)} "
+            f"job, and this run plans none (planned majors: {majors or 'none'})",
             file=sys.stderr,
         )
         print(needs(leg), file=sys.stderr)
-        status = 1
-    return status
+    return 1 if orphaned else 0
 
 
 class Args(argparse.Namespace):
@@ -937,6 +1027,8 @@ class Args(argparse.Namespace):
     leg: str | None
     provenance: str
     label: str
+    job: list[str]
+    majors: str
     adopt: bool
 
 
@@ -967,6 +1059,24 @@ def main(argv: list[str] | None = None) -> int:
         help="hold `<leg> <percent>` lines on stdin to the floor and its record",
     )
     holder.add_argument("--label", required=True)
+    holder.add_argument(
+        "--job",
+        type=job_of,
+        action="append",
+        required=True,
+        help="a job the caller is (`gate` or `pgrx:<major>`): the recorded "
+        "legs it owns are the ones it must report",
+    )
+    plan = sub.add_parser(
+        "planned",
+        help="hold the floor's recorded legs to the jobs this run plans",
+    )
+    plan.add_argument("--label", required=True)
+    plan.add_argument(
+        "--majors",
+        required=True,
+        help="the planned Postgres majors, comma-separated (empty for none)",
+    )
     writer.add_argument(
         "--adopt",
         action="store_true",
@@ -978,7 +1088,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "legs":
         return recorded_legs(args.path)
     if args.command == "hold":
-        return hold(args.path, args.label, typed_std.stdin_text())
+        return hold(args.path, args.label, typed_std.stdin_text(), frozenset(args.job))
+    if args.command == "planned":
+        return planned(args.path, args.label, args.majors)
     return derive(args.path, typed_std.stdin_text(), args.provenance, adopt=args.adopt)
 
 
