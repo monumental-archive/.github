@@ -695,6 +695,7 @@ jobs:
   # and labelled red-check holds each red job and its log tail; the next
   # green run closes it. mise/standing_issue.py has the outcomes. Only
   # `needs:` names the jobs above, so it grows with them.
+  # phase: record
   report:
     name: Report red jobs
     needs:
