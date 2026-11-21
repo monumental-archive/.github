@@ -176,7 +176,11 @@ class Planted(unittest.TestCase):
         return subprocess.run(
             [BASH, "-euo", "pipefail", "-c", body(task)],
             cwd=self.tree,
-            env=self.env,
+            # As mise runs a body: the task's name, which the finding
+            # writer reads (#1890), and the belt's BASH_ENV, which
+            # gives the body the writer (#1934).
+            env=self.env
+            | {"MISE_TASK_NAME": task, "BASH_ENV": str(BELT / "findings.sh")},
             capture_output=True,
             text=True,
             check=False,
