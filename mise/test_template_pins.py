@@ -260,11 +260,15 @@ class Pins(unittest.TestCase):
         )
 
     def test_no_canon_is_a_usage_error(self) -> None:
-        """A call that names no canon is refused, exit 2."""
-        done = hermetic.call_main(lambda: template_pins.main([]), env=self.env)
-        self.assertEqual(done.returncode, template_pins.EXIT_ERROR)
+        """No canon, or one missing its owner or repository: exit 2."""
         usage = "lint:template-pins: usage: template_pins.py OWNER/REPO TEMPLATE..."
-        self.assertEqual(done.stderr.splitlines(), [usage])
+        for argv in ([], ["/repo", STUB], ["owner/", STUB]):
+            with self.subTest(argv=argv):
+                done = hermetic.call_main(
+                    lambda argv=argv: template_pins.main(argv), env=self.env
+                )
+                self.assertEqual(done.returncode, template_pins.EXIT_ERROR)
+                self.assertEqual(done.stderr.splitlines(), [usage])
 
 
 if __name__ == "__main__":

@@ -155,7 +155,10 @@ def main(argv: list[str]) -> int:
         usage or read error.
 
     """
-    if len(argv) < 1 or "/" not in argv[0]:
+    # identity.sh names a missing field on stderr and prints nothing, so
+    # an empty owner or repository arrives here as "/x" or "x/".
+    owner, _, repo = argv[0].partition("/") if argv else ("", "", "")
+    if not owner or not repo:
         print(
             "lint:template-pins: usage: template_pins.py OWNER/REPO TEMPLATE...",
             file=sys.stderr,

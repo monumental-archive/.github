@@ -9507,8 +9507,8 @@ compgen -G "workflow-templates/*.y*ml" > /dev/null || {
   exit 0
 }
 . "${ORG_BELT_DIR}/identity.sh"
-owner=$(org_identity owner) || exit 1
-repo=$(org_identity repo) || exit 1
+owner=$(org_identity owner)
+repo=$(org_identity repo)
 "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/template_pins.py" "${owner}/${repo}" \
   workflow-templates/*.y*ml
 '''
