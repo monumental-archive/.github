@@ -3161,30 +3161,13 @@ echo "lint:rust: formatting clean"
 # `tomllib` over every tracked Cargo.toml, never a grep. An inner
 # `#![expect(...)]` stays legal: it reports when it is not needed.
 #
-# A crate-level allow of a whole GROUP is refused first, by name, with
-# its own message: it silences every flag above and exits 0 (measured —
-# even `-F` only warns about it), and the expect of a group is refused
-# with it, because an expect of a whole group excuses everything.
-groups="all|pedantic|nursery|cargo|restriction|style|complexity|perf|correctness|suspicious"
-blanket=""
-while IFS= read -r f; do
-  [[ -n ${f} ]] || continue
-  if grep -qE "^[[:space:]]*#!\\[(allow|expect)\\([^]]*clippy::(${groups})\\b" "${f}"; then
-    blanket="${blanket} ${f}"
-  fi
-done <<< "${rs}"
-if [[ -n ${blanket} ]]; then
-  echo "lint:rust: crate-level suppression of a whole clippy group:${blanket}" >&2
-  echo "  a group allow silences every level this task sets and the gate still goes green" >&2
-  echo "  suppress one lint at the narrowest scope instead, with a reason:" >&2
-  echo '    #[expect(clippy::the_lint, reason = "why this code is right as written")]' >&2
-  echo "  an expect fails once it stops being needed; an allow rots silently" >&2
-  exit 1
-fi
-if ! printf '%s\n' "${manifests}" "${rs}" \
-  | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/rust_suppressions.py"; then
-  exit 1
-fi
+# A crate-level allow of a whole GROUP is refused first, by the same
+# helper, with its own message: it silences every flag above and exits
+# 0 (measured — even `-F` only warns about it), and the expect of a
+# group is refused with it, because an expect of a whole group excuses
+# everything.
+printf '%s\n' "${manifests}" "${rs}" \
+  | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/rust_suppressions.py" || exit 1
 # Members that cannot build on a gate runner are declared, never implied:
 # reading `default-members` instead would let a repo drop a crate from
 # linting by editing an unrelated field. CLIPPY_EXCLUDE ([env] in the

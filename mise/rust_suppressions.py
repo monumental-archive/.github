@@ -23,6 +23,10 @@ then the remedy, and exits 1; prints nothing and exits 0 when clean.
 A tracked path missing from the working tree is not a build input and
 is passed over, as the task's other per-file checks pass it over.
 
+A crate-level allow or expect of a whole clippy GROUP is refused before
+any of that, line by line, with its own message: the grep `lint:rust`
+ran in its body until the body's line debt asked for it here (#1857).
+
 The source scan is a small lexer, not a line grep: rustfmt breaks a
 long `#![cfg_attr(…)]` across lines, and a doc comment, a string or a
 block comment can hold the text `#![allow(` without being an
@@ -41,6 +45,21 @@ INNER = re.compile(r"#\s*!\s*\[")
 RAW_OPEN = re.compile(r'(#*)"')
 IDENT = re.compile(r"[A-Za-z0-9_]+")
 MANIFEST = "Cargo.toml"
+# A crate-level allow or expect of a whole clippy group: line by line,
+# the grep this replaced, and refused first with its own message.
+GROUPS = (
+    "all|pedantic|nursery|cargo|restriction|style|complexity|perf"
+    "|correctness|suspicious"
+)
+GROUP = re.compile(
+    rf"^[^\S\n]*#!\[(allow|expect)\([^]\n]*clippy::({GROUPS})\b", re.MULTILINE
+)
+GROUP_MESSAGE = (
+    "  a group allow silences every level this task sets and the gate still goes green",
+    "  suppress one lint at the narrowest scope instead, with a reason:",
+    '    #[expect(clippy::the_lint, reason = "why this code is right as written")]',
+    "  an expect fails once it stops being needed; an allow rots silently",
+)
 REMEDY = (
     "lint:rust: a suppression clippy cannot see is not the org's exception mechanism",
     "  suppress one lint at the narrowest scope instead, with a reason:",
@@ -264,6 +283,23 @@ def findings(path: Path) -> list[str]:
     return [f"{path}:{line}: {attr}" for line, attr in inner_allows(text)]
 
 
+def group_suppressed(path: Path) -> bool:
+    """Say whether a source suppresses a whole clippy group crate-wide.
+
+    Returns:
+        True when a line opens `#![allow(` or `#![expect(` naming a
+        group; False for a manifest or a path not in the tree.
+
+    """
+    if path.name == MANIFEST:
+        return False
+    try:
+        text = path.read_bytes().decode("utf-8", errors="replace")
+    except FileNotFoundError:
+        return False
+    return GROUP.search(text) is not None
+
+
 def main() -> int:
     """Check every path on stdin and report what clippy cannot see.
 
@@ -271,10 +307,19 @@ def main() -> int:
         A process exit status: 0 clean, 1 on any finding or refusal.
 
     """
+    names = [name for name in stdin_text().splitlines() if name]
+    blanket = [name for name in names if group_suppressed(Path(name))]
+    if blanket:
+        print(
+            "lint:rust: crate-level suppression of a whole clippy group:"
+            + "".join(f" {name}" for name in blanket),
+            file=sys.stderr,
+        )
+        for line in GROUP_MESSAGE:
+            print(line, file=sys.stderr)
+        return 1
     found: list[str] = []
-    for name in stdin_text().splitlines():
-        if not name:
-            continue
+    for name in names:
         try:
             found.extend(findings(Path(name)))
         except UndecodableError as error:

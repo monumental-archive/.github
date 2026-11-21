@@ -143,6 +143,30 @@ class Manifests(unittest.TestCase):
                 self.assertEqual(NO_KEYS, rsup.manifest_allows(decoded.load_toml(text)))
 
 
+class Groups(unittest.TestCase):
+    """The whole-group grep, moved here from the task body."""
+
+    def test_a_group_suppression_is_found_on_its_own_line(self) -> None:
+        """Allow and expect of a group; a lint named after one is not."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cases = {
+                "allow.rs": ("  #![allow(clippy::pedantic)]\n", True),
+                "expect.rs": (
+                    '#![expect(dead_code, clippy::all, reason = "x")]\n',
+                    True,
+                ),
+                "lint.rs": ("#![expect(clippy::cargo_common_metadata)]\n", False),
+                "split.rs": ("#![allow(x,\n  clippy::pedantic)]\n", False),
+            }
+            for name, (text, want) in cases.items():
+                with self.subTest(name=name):
+                    (root / name).write_text(text)
+                    self.assertEqual(want, rsup.group_suppressed(root / name))
+            self.assertFalse(rsup.group_suppressed(root / "Cargo.toml"))
+            self.assertFalse(rsup.group_suppressed(root / "gone.rs"))
+
+
 class Main(unittest.TestCase):
     """The command: paths on stdin, findings and remedy on stderr."""
 
