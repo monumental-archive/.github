@@ -1422,7 +1422,7 @@ class TestThePlanFeedsTheHelper(unittest.TestCase):
         self.tree = self.tmp / "tree"
         self.tree.mkdir()
         (self.tree / "Cargo.toml").write_text("[workspace]\n", encoding="utf-8")
-        (self.tree / ".org-canon").symlink_to(CANON)
+        self.canon = hermetic.canon(self.tree / ".org-canon")
         bins = self.tmp / "bin"
         bins.mkdir()
         (bins / "cargo").write_text(CARGO_STUB, encoding="utf-8")
@@ -1483,8 +1483,8 @@ class TestThePlanFeedsTheHelper(unittest.TestCase):
         """pgrx-plan.sh's literal stdout, given to `planned --majors-json`."""
         plan = self.run_in_tree([
             BASH,
-            str(CANON / "mise" / "pgrx-plan.sh"),
-            str(CANON),
+            str(self.canon / "mise" / "pgrx-plan.sh"),
+            str(self.canon),
         ])
         self.assertEqual(0, plan.returncode, plan.stderr)
         self.assertEqual('["15","16","17","18"]\n', plan.stdout)
@@ -1493,7 +1493,7 @@ class TestThePlanFeedsTheHelper(unittest.TestCase):
                 self.floor(legs)
                 done = self.run_in_tree([
                     sys.executable,
-                    str(CANON / "mise" / "coverage_floor.py"),
+                    str(self.canon / "mise" / "coverage_floor.py"),
                     "planned",
                     "--label",
                     "plan",
