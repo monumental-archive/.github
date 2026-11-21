@@ -81,7 +81,9 @@ def population(root: Path) -> tuple[list[Path], list[tuple[Path, str]]]:
     """
     targets: set[Path] = set()
     stubs: list[tuple[Path, str]] = []
-    files = sorted((root / WORKFLOWS).glob("*.yml")) + sorted((root / TEMPLATES).glob("*.yml"))
+    files = sorted((root / WORKFLOWS).glob("*.yml")) + sorted(
+        (root / TEMPLATES).glob("*.yml")
+    )
     for path in files:
         document = workflow_yaml.document(path)
         if not scheduled(document):
@@ -109,11 +111,17 @@ def report_problems(path: Path) -> list[str]:
     jobs = workflow_yaml.jobs(workflow_yaml.document(path))
     names = list(jobs)
     if not names or names[-1] != "report":
-        return [f"{path.name}: the last job is not `report` (it is {names[-1:] or 'none'})"]
+        return [
+            f"{path.name}: the last job is not `report` (it is {names[-1:] or 'none'})"
+        ]
     job = jobs["report"]
     problems: list[str] = []
     needs = job.get("needs")
-    listed = [needs] if isinstance(needs, str) else list(decoded.as_array(needs or [], "needs"))
+    listed = (
+        [needs]
+        if isinstance(needs, str)
+        else list(decoded.as_array(needs or [], "needs"))
+    )
     missing = [n for n in names[:-1] if n not in listed]
     if missing:
         problems.append(f"{path.name}: report's needs: misses {', '.join(missing)}")
@@ -123,7 +131,9 @@ def report_problems(path: Path) -> list[str]:
     if not helper:
         problems.append(f"{path.name}: report runs no {HELPER}")
     elif any(s.get("if") != NOT_CANCELLED for s in helper):
-        problems.append(f"{path.name}: report's {HELPER} step is not if: {NOT_CANCELLED}")
+        problems.append(
+            f"{path.name}: report's {HELPER} step is not if: {NOT_CANCELLED}"
+        )
     problems += grant_problems(path, "report", job)
     return problems
 
@@ -213,7 +223,8 @@ class Canon(unittest.TestCase):
 class Planted(unittest.TestCase):
     """A planted scheduled workflow, red by message."""
 
-    def plant(self, report: str) -> list[str]:
+    @staticmethod
+    def plant(report: str) -> list[str]:
         """Write a planted workflow and check its tree.
 
         Returns:
@@ -223,16 +234,23 @@ class Planted(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / WORKFLOWS).mkdir(parents=True)
-            (root / WORKFLOWS / "planted.yml").write_text(PLANTED.format(report=report), encoding="utf-8")
+            (root / WORKFLOWS / "planted.yml").write_text(
+                PLANTED.format(report=report), encoding="utf-8"
+            )
             return problems(root)
 
     def test_as_built_passes(self) -> None:
         """A report needing both jobs passes."""
-        self.assertEqual(self.plant(REPORT.format(needs="      - one\n      - two")), [])
+        self.assertEqual(
+            self.plant(REPORT.format(needs="      - one\n      - two")), []
+        )
 
     def test_no_report_job(self) -> None:
         """A scheduled workflow with no report job is red by name."""
-        self.assertEqual(self.plant(""), ["planted.yml: the last job is not `report` (it is ['two'])"])
+        self.assertEqual(
+            self.plant(""),
+            ["planted.yml: the last job is not `report` (it is ['two'])"],
+        )
 
     def test_needs_misses_a_job(self) -> None:
         """A report whose needs: misses a job names the job."""
@@ -241,22 +259,38 @@ class Planted(unittest.TestCase):
 
     def test_cancelled_run_reaches_the_helper(self) -> None:
         """A helper step without the cancelled guard is red by name."""
-        report = REPORT.format(needs="      - one\n      - two").replace("      - if: ${{ !cancelled() }}\n        run", "      - run")
+        report = REPORT.format(needs="      - one\n      - two").replace(
+            "      - if: ${{ !cancelled() }}\n        run", "      - run"
+        )
         found = self.plant(report)
-        self.assertEqual(found, ["planted.yml: report's mise/standing_issue.py step is not if: ${{ !cancelled() }}"])
+        self.assertEqual(
+            found,
+            [f"planted.yml: report's {HELPER} step is not if: {NOT_CANCELLED}"],
+        )
 
     def test_stub_without_grants(self) -> None:
         """A scheduled stub that calls a reporting workflow must grant both."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / WORKFLOWS).mkdir(parents=True)
-            text = PLANTED.format(report=REPORT.format(needs="      - one\n      - two"))
-            (root / WORKFLOWS / "callee.yml").write_text(text.replace("schedule:\n    - cron: 0 6 * * 1", "workflow_call: {}"), encoding="utf-8")
-            stub = '---\nname: stub\n"on":\n  schedule:\n    - cron: 0 6 * * 1\njobs:\n  call:\n    uses: ./.github/workflows/callee.yml\n'
+            text = PLANTED.format(
+                report=REPORT.format(needs="      - one\n      - two")
+            )
+            (root / WORKFLOWS / "callee.yml").write_text(
+                text.replace("schedule:\n    - cron: 0 6 * * 1", "workflow_call: {}"),
+                encoding="utf-8",
+            )
+            stub = (
+                '---\nname: stub\n"on":\n  schedule:\n    - cron: 0 6 * * 1\n'
+                "jobs:\n  call:\n    uses: ./.github/workflows/callee.yml\n"
+            )
             (root / WORKFLOWS / "stub.yml").write_text(stub, encoding="utf-8")
             self.assertEqual(
                 problems(root),
-                ["stub.yml: call does not grant issues: write", "stub.yml: call does not grant actions: read"],
+                [
+                    "stub.yml: call does not grant issues: write",
+                    "stub.yml: call does not grant actions: read",
+                ],
             )
 
 

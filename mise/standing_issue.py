@@ -217,7 +217,8 @@ def one(found: list[Issue], title: str) -> Issue | None:
     """
     if len(found) > 1:
         numbers = ", ".join(f"#{i.number}" for i in found)
-        msg = f"{len(found)} open issues are titled exactly {title!r} ({numbers}): close all but one"
+        msg = f"{len(found)} open issues are titled exactly {title!r} ({numbers})"
+        msg += ": close all but one"
         raise StandingIssueError(msg)
     return found[0] if found else None
 
@@ -233,7 +234,9 @@ def label_definition() -> dict[str, object]:
 
     """
     try:
-        doc = decoded.as_object(decoded.load_json(BASELINE.read_bytes()), "the baseline")
+        doc = decoded.as_object(
+            decoded.load_json(BASELINE.read_bytes()), "the baseline"
+        )
         for at, item in enumerate(decoded.as_array(doc.get("labels"), "labels")):
             label = decoded.as_object(item, f"labels[{at}]")
             if label.get("name") == LABEL:
@@ -251,6 +254,9 @@ def ensure_label(repo: str) -> str:
     Returns:
         What was done, for the run's log.
 
+    Raises:
+        StandingIssueError: the label list is not a list of labels.
+
     """
     out = gh("label", "list", "--repo", repo, "--limit", "1000", "--json", "name")
     try:
@@ -266,7 +272,17 @@ def ensure_label(repo: str) -> str:
     label = label_definition()
     colour = decoded.as_str(label.get("color"), "the label's color")
     description = decoded.as_str(label.get("description"), "the label's description")
-    gh("label", "create", LABEL, "--repo", repo, "--color", colour, "--description", description)
+    gh(
+        "label",
+        "create",
+        LABEL,
+        "--repo",
+        repo,
+        "--color",
+        colour,
+        "--description",
+        description,
+    )
     return f"created the {LABEL} label; "
 
 
@@ -296,7 +312,9 @@ def jobs(repo: str, run_id: str) -> list[Job]:
                     id=decoded.as_int(item.get("id"), f"job {at}: id"),
                     name=decoded.as_str(item.get("name"), f"job {at}: name"),
                     status=decoded.as_str(item.get("status"), f"job {at}: status"),
-                    conclusion="" if conclusion is None else decoded.as_str(conclusion, f"job {at}: conclusion"),
+                    conclusion=""
+                    if conclusion is None
+                    else decoded.as_str(conclusion, f"job {at}: conclusion"),
                     url=decoded.as_str(item.get("html_url"), f"job {at}: html_url"),
                 )
             )
@@ -317,7 +335,11 @@ def tail(log: str) -> str:
     """
     lines = [COLOUR.sub("", TIMESTAMP.sub("", line)) for line in log.splitlines()]
     first = next((at for at, line in enumerate(lines) if ERROR_MARK in line), None)
-    window = lines[max(0, first - TAIL_LINES) : first] if first is not None else lines[-TAIL_LINES:]
+    window = (
+        lines[max(0, first - TAIL_LINES) : first]
+        if first is not None
+        else lines[-TAIL_LINES:]
+    )
     text = "\n".join(window)
     if len(text) > TAIL_CHARS:
         text = text[-TAIL_CHARS:]
@@ -391,11 +413,11 @@ def body(red: Red, entries: list[Entry]) -> str:
     while True:
         keep = len(entries) - dropped
         parts = [entry(e, drop=at >= keep) for at, e in enumerate(entries)]
+        plural = "s" if len(entries) != 1 else ""
         lines = [
-            f"The latest run of {red.workflow} on {red.branch} ended with "
-            f"{len(entries)} red job{'s' if len(entries) != 1 else ''}. Every red run",
-            "replaces this body; the next run with every job green or skipped",
-            "closes this issue.",
+            f"The latest run of {red.workflow} on {red.branch} ended with",
+            f"{len(entries)} red job{plural}. Every red run replaces this body;",
+            "the next run with every job green or skipped closes this issue.",
             "",
             f"- Latest red run: {red.run_url}",
             f"- Red since: {red.since}",
@@ -403,7 +425,13 @@ def body(red: Red, entries: list[Entry]) -> str:
             "",
         ]
         if dropped:
-            lines += [f"Log tails dropped for the last {dropped} job(s): the body would pass {BODY_LIMIT:,} characters.", ""]
+            lines += [
+                (
+                    f"Log tails dropped for the last {dropped} job(s): the body would"
+                    f" pass {BODY_LIMIT:,} characters."
+                ),
+                "",
+            ]
         text = "\n".join([*lines, "## Red jobs", "", *parts])
         if len(text) < BODY_LIMIT or dropped >= len(entries):
             return text
@@ -479,7 +507,9 @@ def report(repo: str, args: Args, run_url: str) -> str:
     unfinished = [j for j in every if j.status != "completed"]
     others = [j for j in every if j.status == "completed" and j.conclusion not in GREEN]
     if len(unfinished) > 1 or others:
-        names = ", ".join(f"{j.name} ({j.conclusion or j.status})" for j in [*others, *unfinished[1:]])
+        names = ", ".join(
+            f"{j.name} ({j.conclusion or j.status})" for j in [*others, *unfinished[1:]]
+        )
         return f"neither red nor green yet, nothing changed: {names}"
     return keep_green(repo, args.workflow, run_url)
 
@@ -519,7 +549,8 @@ def main(argv: list[str]) -> int:
     try:
         branch = default_branch(repo, args.default_branch)
         if args.ref != f"refs/heads/{branch}":
-            print(f"red-check: {args.ref} is not the default branch ({branch}); nothing changed")
+            where = f"{args.ref} is not the default branch ({branch})"
+            print(f"red-check: {where}; nothing changed")
             return 0
         done = report(repo, args, run_url)
     except StandingIssueError as err:
