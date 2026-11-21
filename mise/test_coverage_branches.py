@@ -31,6 +31,7 @@ from typing import TypedDict, Unpack
 
 import coverage_floor as cf
 import decoded
+import gate_cache_key
 import hermetic
 
 CANON = Path(__file__).resolve().parent.parent
@@ -39,6 +40,11 @@ BASH = hermetic.tool("bash")
 GIT = hermetic.tool("git")
 
 NIGHTLY = "nightly-2026-07-20"
+
+# The directory digests of the stand-in `rustc` (#1877): the stable
+# leg's, with no RUSTUP_TOOLCHAIN, and the declared nightly's.
+STABLE = gate_cache_key.directory_digest(hermetic.rustc_verbose("stable"))
+NIGHTLY_DIR = gate_cache_key.directory_digest(hermetic.rustc_verbose(NIGHTLY))
 
 BRANCH_RUN = f"{NIGHTLY} llvm-cov --workspace --locked --branch --json --summary-only"
 SKIP = "audit:coverage-branches: no rust-branches line in .coverage-floor, skipped\n"
@@ -64,7 +70,9 @@ rust-branches 70.0
 # uninstrumented run does (count 0, measured on stable 1.97.1). With
 # `--lcov` (the line leg's `report`, #1528, #1653) it writes the report
 # to `--output-path` instead, the planted line figure as lines hit of
-# 100 found.
+# 100 found. Each logged call also writes the directory it was started
+# with to `<log>.target`, cargo-llvm-cov's own default when
+# CARGO_TARGET_DIR is unset (#1877).
 CARGO = """\
 #!/usr/bin/env bash
 case "$1" in
@@ -78,6 +86,7 @@ case "$1" in
       exit 0
     fi
     echo "${RUSTUP_TOOLCHAIN:-stable} $*" >> "${STUB_LOG}"
+    echo "${CARGO_TARGET_DIR:-${PWD}/target/llvm-cov-target}" >> "${STUB_LOG}.target"
     if [[ " $* " == *" --lcov "* ]]; then
       out=""
       while [[ $# -gt 0 ]]; do
@@ -144,6 +153,7 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
     toolchain: str | None = NIGHTLY,
     installed: str | None = NIGHTLY,
     exclude: str = "",
+    plant_old: str = "",
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
     """Run one task's body in a planted Rust tree with stub tools.
 
@@ -160,8 +170,10 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
     for name, text in (("cargo", CARGO), ("rustup", RUSTUP)):
         (stubs / name).write_text(text, encoding="utf-8")
         (stubs / name).chmod(0o755)
+    hermetic.rustc(stubs)
     log = tmp / "llvm-cov.log"
     log.touch()
+    (tmp / "llvm-cov.log.target").touch()
 
     tracked = []
     if cargo_toml:
@@ -170,9 +182,15 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
         # What the test task's measured `cargo test` left (#1653): this
         # run's marker and one profile.
         (tmp / "run" / "rust").mkdir(parents=True)
-        profiles = tree / "target" / "llvm-cov-target"
+        profiles = tree / "target" / f"llvm-cov-target-{STABLE}"
         profiles.mkdir(parents=True)
         (profiles / "tree-1-1.profraw").write_text("", encoding="utf-8")
+    if plant_old:
+        # Another compiler's directories, full (#1877): cargo-llvm-cov's
+        # own default and one named for the digest `plant_old`.
+        for name in ("llvm-cov-target", f"llvm-cov-target-{plant_old}"):
+            (tree / "target" / name).mkdir(parents=True)
+            (tree / "target" / name / "old-compiler-test").write_text("", "utf-8")
     if floor is not None:
         (tree / ".coverage-floor").write_text(floor, encoding="utf-8")
         tracked.append(".coverage-floor")
@@ -232,6 +250,7 @@ class Plant(TypedDict, total=False):
     toolchain: str | None
     installed: str | None
     exclude: str
+    plant_old: str
 
 
 class BranchCase(unittest.TestCase):
@@ -426,6 +445,46 @@ class AdoptRows(BranchCase):
         self.assertEqual(
             MAIN + BRANCH, (tree / ".coverage-floor").read_text(encoding="utf-8")
         )
+
+
+class Directories(BranchCase):
+    """Each leg measures into its own compiler's directory (#1877)."""
+
+    @staticmethod
+    def targets(tree: Path) -> list[str]:
+        """Read the directory each logged `cargo llvm-cov` call started in.
+
+        Returns:
+            One per call, in order.
+
+        """
+        log = tree.parent / "llvm-cov.log.target"
+        return log.read_text(encoding="utf-8").splitlines()
+
+    def test_the_nightly_leg_measures_into_the_nightlys_directory(self) -> None:
+        """Never the stable leg's: on main it was unset, so the same one."""
+        done, tree, calls = self.run_task("audit:coverage-branches")
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertEqual(BRANCH_ONLY, calls)
+        target = tree.resolve() / "target"
+        (nightly,) = self.targets(tree)
+        self.assertEqual(str(target / f"llvm-cov-target-{NIGHTLY_DIR}"), nightly)
+        self.assertNotEqual(str(target / f"llvm-cov-target-{STABLE}"), nightly)
+
+    def test_a_pre_filled_directory_is_never_measured_into(self) -> None:
+        """Another compiler's directories, planted full: neither is this run's.
+
+        On main the nightly leg measured into `target/llvm-cov-target`,
+        the directory planted full here.
+        """
+        other = gate_cache_key.directory_digest(hermetic.rustc_verbose("1.97.1"))
+        done, tree, _ = self.run_task("audit:coverage-branches", plant_old=other)
+        self.assertEqual(0, done.returncode, done.stderr)
+        target = tree.resolve() / "target"
+        planted = {target / "llvm-cov-target", target / f"llvm-cov-target-{other}"}
+        (used,) = self.targets(tree)
+        self.assertNotIn(Path(used), planted)
+        self.assertFalse((Path(used) / "old-compiler-test").exists())
 
 
 if __name__ == "__main__":

@@ -59,6 +59,17 @@ A test that needs a belt or a canon tree of its own gets the whole one
 A hand-kept list of the files a helper reads goes stale the day it
 gains an import or starts a sibling. No test links or copies a path
 from the belt or the canon itself; `test_hermetic.py` holds them to it.
+
+A row that runs a coverage script gets a stand-in compiler (#1877):
+
+    hermetic.rustc(stubs)                          # stubs/rustc
+    hermetic.rustc_verbose("nightly-2026-07-20")   # what it prints
+
+Every coverage directory ends in a digest of `rustc -vV`, so the name is
+the row's own fact only if the compiler is: the suite's own, or none on
+a machine without Rust, would make it the machine's. The stand-in
+answers for RUSTUP_TOOLCHAIN, `stable` when unset, as the rustup proxy
+selects, so a leg's per-command toolchain reaches it.
 """
 
 import contextlib
@@ -287,6 +298,40 @@ def call_main(
             if isinstance(code, str):
                 print(code, file=sys.stderr)
     return Called(status, out.getvalue(), err.getvalue())
+
+
+def rustc_verbose(toolchain: str = "stable") -> str:
+    """Render what the stand-in `rustc -vV` prints for a toolchain (#1877).
+
+    Returns:
+        The text: only its release line names the toolchain.
+
+    """
+    return (
+        "rustc (hermetic stand-in)\nbinary: rustc\nhost: x86_64-unknown-linux-gnu\n"
+        f"release: {toolchain}\nLLVM version: 21.1.2\n"
+    )
+
+
+# The stand-in's script: rustc_verbose's text, for RUSTUP_TOOLCHAIN.
+RUSTC_STUB = """#!/bin/sh
+t=${RUSTUP_TOOLCHAIN:-stable}
+printf 'rustc (hermetic stand-in)\\nbinary: rustc\\nhost: x86_64-unknown-linux-gnu\\n'
+printf 'release: %s\\nLLVM version: 21.1.2\\n' "$t"
+"""
+
+
+def rustc(bin_dir: Path) -> Path:
+    """Write the stand-in `rustc` into a row's stub directory (#1877).
+
+    Returns:
+        Its path.
+
+    """
+    stub = bin_dir / "rustc"
+    stub.write_text(RUSTC_STUB, encoding="utf-8")
+    stub.chmod(0o755)
+    return stub
 
 
 def plant(dest: Path, names: list[str], prefix: str, stubs: Mapping[str, str]) -> Path:

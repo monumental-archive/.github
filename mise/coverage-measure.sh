@@ -299,9 +299,9 @@ fi
 # The workspace's pgrx extensions, from gate_surface.py, the derivation
 # every pgrx task reads (#813): sets `pgrx_names` (space-separated crate
 # names), `pgrx_majors` (one major per line, sorted), `pgrx_dirs` (each
-# extension's directory relative to the workspace root, one per line) and
-# `workspace_root`. Empty in a workspace with none, which pays for one
-# `cargo metadata`.
+# extension's directory relative to the workspace root, one per line),
+# `workspace_root` and `target_directory`. Empty in a workspace with
+# none, which pays for one `cargo metadata`.
 pgrx_surface() {
   local metadata surface record spec kind majors dir
   pgrx_names=""
@@ -309,6 +309,7 @@ pgrx_surface() {
   pgrx_dirs=""
   metadata=$(cargo metadata --no-deps --format-version 1 --locked) || exit 1
   workspace_root=$(jq -r '.workspace_root // empty' <<< "${metadata}") || exit 1
+  target_directory=$(jq -r '.target_directory // empty' <<< "${metadata}") || exit 1
   surface=$("${ORG_PYTHON}" "${belt_dir}/gate_surface.py" <<< "${metadata}") || exit 1
   while IFS=$'\t' read -r record spec kind majors dir; do
     [[ ${record} == crate && ${kind} == pgrx ]] || continue
@@ -493,9 +494,20 @@ if [[ -f Cargo.toml && ${legs} == rust-branches ]]; then
   # pin's value into the task env, and only a command-scoped assignment
   # beats it (the lint:msrv shape).
   #
+  # The nightly's own directory (#1877): unset, cargo-llvm-cov falls back
+  # to `target/llvm-cov-target`, where the stable leg's executables are,
+  # and reports both. Named for the nightly's `rustc -vV` as the stable
+  # leg's is for its own (rust-coverage-env.sh), so the two never meet.
+  compiler=$(RUSTUP_TOOLCHAIN="${FUZZ_TOOLCHAIN}" "${ORG_PYTHON}" "${belt_dir}/gate_cache_key.py" digest) || exit 1
+  if [[ -z ${target_directory} ]]; then
+    echo "${label}: cargo metadata named no target_directory — nowhere to measure Rust into" >&2
+    exit 1
+  fi
   # shellcheck disable=SC2086  # ${excludes} is a built '--exclude <member>' list,
   # which cargo must receive as separate arguments
-  report=$(RUSTUP_TOOLCHAIN="${FUZZ_TOOLCHAIN}" cargo llvm-cov --workspace --locked ${excludes} --branch --json --summary-only)
+  report=$(CARGO_TARGET_DIR="${target_directory}/llvm-cov-target-${compiler}" \
+    RUSTUP_TOOLCHAIN="${FUZZ_TOOLCHAIN}" \
+    cargo llvm-cov --workspace --locked ${excludes} --branch --json --summary-only)
   # A count of 0 is refused, never floored: an uninstrumented run reports
   # `branches` as count 0, percent 0 (measured on stable 1.97.1 without
   # --branch), so a zero count is the shape of a run that measured no

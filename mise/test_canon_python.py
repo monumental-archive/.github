@@ -271,6 +271,11 @@ def run_without(argv: list[str], value: str | None) -> subprocess.CompletedProce
         )
 
 
+# Sourced, never run: run as a script each only defines its functions and
+# exits 0, so each proves its refusal by calling them after sourcing.
+SOURCED = {"pgrx-env.sh", "rust-coverage-env.sh"}
+
+
 class AnUnsetOrgPythonIsRefused(unittest.TestCase):
     """A script that starts a helper names ORG_PYTHON when it is missing."""
 
@@ -286,7 +291,7 @@ class AnUnsetOrgPythonIsRefused(unittest.TestCase):
     def test_every_script_refuses_an_unset_or_empty_org_python(self) -> None:
         """Run each one: red, with ORG_PYTHON named, before anything else."""
         for script in starters():
-            if script.name == "pgrx-env.sh":
+            if script.name in SOURCED:
                 continue
             for value in (None, ""):
                 with self.subTest(script=script.name, value=value):
@@ -310,6 +315,16 @@ class AnUnsetOrgPythonIsRefused(unittest.TestCase):
         for value in (None, ""):
             with self.subTest(value=value):
                 done = run_without([bash(), "-c", init], value)
+                self.assertNotEqual(done.returncode, 0, done.stdout)
+                self.assertIn(REFUSAL, done.stderr)
+
+    def test_the_sourced_coverage_env_refuses_an_unset_org_python(self) -> None:
+        """rust-coverage-env.sh is sourced: its function refuses (#1877)."""
+        env_sh = CANON / "mise" / "rust-coverage-env.sh"
+        call = f'. "{env_sh}"; org_rust_coverage_env measured'
+        for value in (None, ""):
+            with self.subTest(value=value):
+                done = run_without([bash(), "-c", call], value)
                 self.assertNotEqual(done.returncode, 0, done.stdout)
                 self.assertIn(REFUSAL, done.stderr)
 

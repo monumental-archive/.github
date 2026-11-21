@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import TypedDict, Unpack, override
 
 import decoded
+import gate_cache_key
 import hermetic
 import workflow_yaml
 
@@ -1188,10 +1189,15 @@ COVERAGE_EXCLUDE_REFUSAL = (
 )
 
 
+# The directory digest of the stand-in `rustc` the Rust rows run beside
+# (#1877), under the `stable` toolchain they set.
+STABLE = gate_cache_key.directory_digest(hermetic.rustc_verbose("stable"))
+
+
 def plant_rust_run(tree: Path, run: Path) -> None:
     """Leave what a measured cargo test leaves: the run's marker, one profile."""
     (run / "rust").mkdir(parents=True)
-    profiles = tree / "target" / "llvm-cov-target"
+    profiles = tree / "target" / f"llvm-cov-target-{STABLE}"
     profiles.mkdir(parents=True)
     (profiles / "tree-1-1.profraw").write_text("", encoding="utf-8")
 
@@ -1221,12 +1227,14 @@ class MeasureSelectors(unittest.TestCase):
             for name, text in (("rustup", rustup), ("cargo", CARGO)):
                 (stubs / name).write_text(text, encoding="utf-8")
                 (stubs / name).chmod(0o755)
+            hermetic.rustc(stubs)
             (tree / "Cargo.toml").write_text("[workspace]\n", encoding="utf-8")
             plant_rust_run(tree, Path(tmp) / "run")
             env = hermetic.env()
             env |= {
                 "ORG_BELT_DIR": str(BELT),
                 "ORG_COVERAGE_RUN": str(Path(tmp) / "run"),
+                "RUSTUP_TOOLCHAIN": "stable",
                 "PATH": f"{stubs}{os.pathsep}{env.get('PATH', '')}",
                 "STUB_DIR": tmp,
                 "STUB_FILES": "a.rs:13:8 b.rs:0:0",
@@ -1260,6 +1268,7 @@ class MeasureSelectors(unittest.TestCase):
             for name, text in (("rustup", RUSTUP), ("cargo", CARGO), ("go", GO)):
                 (stubs / name).write_text(text, encoding="utf-8")
                 (stubs / name).chmod(0o755)
+            hermetic.rustc(stubs)
             (tree / "Cargo.toml").write_text("[workspace]\n", encoding="utf-8")
             (tree / "go.mod").write_text("module example.com/x\n", encoding="utf-8")
             plant_rust_run(tree, Path(tmp) / "run")
@@ -1267,6 +1276,7 @@ class MeasureSelectors(unittest.TestCase):
             env |= {
                 "ORG_BELT_DIR": str(BELT),
                 "ORG_COVERAGE_RUN": str(Path(tmp) / "run"),
+                "RUSTUP_TOOLCHAIN": "stable",
                 "PATH": f"{stubs}{os.pathsep}{env.get('PATH', '')}",
                 "STUB_DIR": tmp,
                 "STUB_FILES": "a.rs:200:123",
@@ -1312,17 +1322,20 @@ class RustLegGuards(unittest.TestCase):
         for name, text in (("rustup", RUSTUP), ("cargo", CARGO)):
             (stubs / name).write_text(text, encoding="utf-8")
             (stubs / name).chmod(0o755)
+        hermetic.rustc(stubs)
         (tree / "Cargo.toml").write_text("[workspace]\n", encoding="utf-8")
         plant_rust_run(tree, run)
         if not marker:
             (run / "rust").rmdir()
         if not profile:
-            (tree / "target" / "llvm-cov-target" / "tree-1-1.profraw").unlink()
+            profiles = tree / "target" / f"llvm-cov-target-{STABLE}"
+            (profiles / "tree-1-1.profraw").unlink()
         env = hermetic.env()
         env |= {
             "ORG_BELT_DIR": str(BELT),
             "ORG_COVERAGE_RUN": str(run),
             "ORG_COVERAGE_REPORTS": str(base / "reports"),
+            "RUSTUP_TOOLCHAIN": "stable",
             "PATH": f"{stubs}{os.pathsep}{env.get('PATH', '')}",
             "STUB_DIR": tmp,
             "STUB_FILES": "src/lib.rs:10:0 crates/core/src/lib.rs:10:9",
@@ -1823,6 +1836,7 @@ class RustOneRun(unittest.TestCase):
         for name, text in (("cargo", CARGO), ("rustup", RUSTUP)):
             (stubs / name).write_text(text, encoding="utf-8")
             (stubs / name).chmod(0o755)
+        hermetic.rustc(stubs)
         (tree / "Cargo.toml").write_text("[workspace]\n", encoding="utf-8")
         (tree / ".coverage-floor").write_text(FLOOR, encoding="utf-8")
         (tree / "mise.toml").write_text(
@@ -1856,6 +1870,7 @@ class RustOneRun(unittest.TestCase):
             MISE_TASK_RUN_AUTO_INSTALL="0",
             TMPDIR=str(base / "tmp"),
             STUB_DIR=str(base),
+            RUSTUP_TOOLCHAIN="stable",
             **({"STUB_FILES": "crates/core/src/lib.rs:20:18"} | given),
         )
         env["PATH"] = f"{self.stubs}{os.pathsep}{env['PATH']}"

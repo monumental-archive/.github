@@ -476,5 +476,77 @@ class Compiler(unittest.TestCase):
         self.assertIn("-vV exited 1: toolchain 1.100.0 is not installed", err)
 
 
+def digest_main(path: str) -> tuple[int, str, str]:
+    """Run `digest` with PATH set to `path`, as a coverage script does.
+
+    Returns:
+        The exit code, its stdout and its stderr.
+
+    """
+    out, err = io.StringIO(), io.StringIO()
+    env: dict[str, str] = {"PATH": path}
+    with (
+        mock.patch.dict(os.environ, env, clear=True),
+        redirect_stdout(out),
+        redirect_stderr(err),
+    ):
+        code = gate_cache_key.main(["digest"])
+    return code, out.getvalue(), err.getvalue()
+
+
+class Directory(unittest.TestCase):
+    """Every coverage directory names its compiler (#1877)."""
+
+    def digest_of(self, script: str) -> tuple[int, str, str]:
+        """Run `digest` beside a `rustc` that runs `script`.
+
+        Returns:
+            The exit code, its stdout and its stderr.
+
+        """
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        return digest_main(rustc_on_path(Path(tmp.name), script))
+
+    def test_the_same_rustc_gives_the_same_sixteen_hex(self) -> None:
+        """One `rustc -vV`, one directory: the cache key's digest, cut to 16."""
+        printed = f"printf '%s' '{RUSTC}'"
+        first, second = self.digest_of(printed), self.digest_of(printed)
+        whole = hashlib.sha256(RUSTC.encode()).hexdigest()
+        self.assertEqual((0, f"{whole[:16]}\n", ""), first)
+        self.assertEqual(first, second)
+
+    def test_a_different_release_gives_a_different_directory(self) -> None:
+        """1.97.1 and 1.100.0 differ only in `release:`: two directories."""
+        bumped = RUSTC.replace("release: 1.97.1", "release: 1.100.0")
+        old = self.digest_of(f"printf '%s' '{RUSTC}'")
+        new = self.digest_of(f"printf '%s' '{bumped}'")
+        self.assertEqual((0, 0), (old[0], new[0]))
+        self.assertRegex(new[1], r"^[0-9a-f]{16}\n$")
+        self.assertNotEqual(old[1], new[1])
+
+    def test_no_rustc_is_red(self) -> None:
+        """No compiler: red by name, and no directory printed."""
+        with tempfile.TemporaryDirectory() as tmp:
+            code, out, err = digest_main(tmp)
+        self.assertEqual((1, ""), (code, out))
+        self.assertIn("gate-cache-key: no rustc on PATH", err)
+
+    def test_a_failing_rustc_is_red(self) -> None:
+        """A rustup proxy with no toolchain: red by its message."""
+        script = "echo 'toolchain nightly-2026-07-20 is not installed' >&2; exit 1"
+        code, out, err = self.digest_of(script)
+        self.assertEqual((1, ""), (code, out))
+        self.assertIn(
+            "-vV exited 1: toolchain nightly-2026-07-20 is not installed", err
+        )
+
+    def test_no_release_line_is_red(self) -> None:
+        """Output naming no compiler names no directory."""
+        code, out, err = self.digest_of("echo 'binary: rustc'")
+        self.assertEqual((1, ""), (code, out))
+        self.assertIn("printed no release line", err)
+
+
 if __name__ == "__main__":
     unittest.main()
