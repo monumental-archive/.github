@@ -36,6 +36,11 @@
       "semanticCommitType": "fix"
     },
     {
+      "description": "The rust-version floor is delivered to every consumer's lint:msrv from the canon tree, so a Debian stable bump is a change to shipped bytes and mints `fix` (#668, #1850). Selected by file for the reason the base-image rule above is: every regex manager is `custom.regex`, and default.json's two raise the canon's own pin.",
+      "matchFileNames": ["mise/rust-floor.toml"],
+      "semanticCommitType": "fix"
+    },
+    {
       "description": "THE LOOP GUARD, load-bearing and not a restatement. Measured 2026-08-21: source-attest.yml pins `monumental-archive/.github/.github/actions/source-attest@<sha> # v1.51.0`, so the canon's own pin is raised by the github-actions manager and the wholesale rule above WOULD flip it to `fix` — a release mints a tag, the tag opens a self-pin bump, the bump derives a release, and nothing terminates it. It stays `chore(canon)`: the release-neutral scope of the two-config contract (#227, MAINTENANCE.md's post-release window), where the notes convention leaves the scope unmapped and the silent-types rule keeps it out of the version decision, so a self-pin bump justifies no version. Last in the list because later wins and every rule above it is wholesale by manager. Stated here in full rather than inherited from default.json's first-party rule, on this config's own law (#576): a guard whose only reason lives in another file is a guard the next edit to this one cannot see.",
       "matchPackageNames": ["monumental-archive/.github"],
       "semanticCommitType": "chore",
@@ -51,6 +56,18 @@
         "# renovate: pgrx-base-image\\n\"[0-9]+\" = \"(?<depName>postgres):(?<currentValue>[a-z0-9.-]+)@(?<currentDigest>sha256:[a-f0-9]{64})\""
       ],
       "datasourceTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "description": "The floor of every org crate's rust-version is Debian stable's rustc (#1850). The deb datasource's `suite=stable` is a rolling alias, so the next Debian stable arrives here as a pull request; deb versioning compares the package versions as Debian does, revision and repack suffix included.",
+      "managerFilePatterns": ["/^mise/rust-floor\\.toml$/"],
+      "matchStrings": [
+        "# renovate: debian-stable-rustc\\ndebian_stable_rustc = \"(?<currentValue>[^\"]+)\""
+      ],
+      "depNameTemplate": "rustc",
+      "datasourceTemplate": "deb",
+      "registryUrlTemplate": "https://deb.debian.org/debian?suite=stable&components=main&binaryArch=amd64",
+      "versioningTemplate": "deb"
     }
   ]
 }

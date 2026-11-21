@@ -43,6 +43,7 @@ line="cargo $*"
 [[ -z ${RUSTUP_TOOLCHAIN:-} ]] || line="${line} {${RUSTUP_TOOLCHAIN}}"
 printf '%s\n' "${line}" >> "${PLANT_LOG}"
 [[ $1 != metadata ]] || echo '{}'
+[[ $1 != check || -z ${PLANT_CHECK_FAILS:-} ]] || exit 101
 exit 0
 """
 GIT_STUB = """#!/usr/bin/env bash
@@ -62,12 +63,12 @@ echo '[]'
 PYTHON_STUB = r"""#!/usr/bin/env bash
 script=$(basename "$1")
 shift
-cat > /dev/null
+[[ $1 == --failed ]] || cat > /dev/null
 printf '%s %s\n' "${script}" "$*" >> "${PLANT_LOG}"
 case ${script} in
   gate_surface.py) cat "${PLANT_SURFACE}" ;;
   pgrx_postgres.py) printf 'pg\t16\t/pg16/pg_config\npg\t17\t/pg17/pg_config\n' ;;
-  msrv_plan.py) cat "${PLANT_PLAN}" ;;
+  msrv_plan.py) [[ $1 != --failed ]] || exit 1; cat "${PLANT_PLAN}" ;;
   *) exit 99 ;;
 esac
 """
@@ -230,11 +231,12 @@ class TwoExtensions(unittest.TestCase):
         want = [
             "cargo fetch --locked",
             "mise ls rust --json",
-            METADATA,
+            # The whole graph, resolved with the gate's features (#1850).
+            "cargo metadata --format-version 1 --locked --all-features",
             "gate_surface.py --exclude ",
             (
                 "msrv_plan.py --toolchains <tmp>/toolchains.json --exclude "
-                " --pgrx first:17,second:16"
+                f" --pgrx first:17,second:16 --floor {self.belt}/rust-floor.toml"
             ),
             *REGISTER,
             f"{check} --features pg17 -p first@0.1.0 [-Iicu-pg17] {{1.82.0}}",
@@ -246,6 +248,21 @@ class TwoExtensions(unittest.TestCase):
             "lint:msrv: compiling at 1.82.0: second@0.1.0",
             "lint:msrv: 2 declared minimum(s) compiled at the toolchain they name",
         ]
+        self.assertEqual(said, done.stdout.splitlines())
+
+    def test_lint_msrv_red_compile_says_the_rule_and_keeps_its_status(self) -> None:
+        """A red compile at the derived number runs item 4's remedy (#1850).
+
+        From the EXIT trap, for the group that failed and no other, and
+        the task exits with cargo's own status rather than the remedy's.
+        """
+        self.env["PLANT_CHECK_FAILS"] = "1"
+        done = self.run_task("lint:msrv")
+        self.assertEqual(101, done.returncode, done.stderr)
+        failed = [line for line in self.logged() if "--failed" in line]
+        want: list[str] = ["msrv_plan.py --failed 1.82.0 first@0.1.0"]
+        self.assertEqual(want, failed)
+        said = ["lint:msrv: compiling at 1.82.0: first@0.1.0"]
         self.assertEqual(said, done.stdout.splitlines())
 
 
