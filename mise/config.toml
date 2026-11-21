@@ -3142,28 +3142,32 @@ if [[ ${fmt_status} -ne 0 ]]; then
   exit 1
 fi
 echo "lint:rust: formatting clean"
-# The one suppression clippy itself cannot forbid: a crate-level allow of
-# a whole group silences every flag above and exits 0 (measured — even
-# `-F` only warns about it). A narrow, reasoned
-# `#[expect(clippy::x, reason = "...")]` is the exception mechanism, and
-# restriction's allow_attributes + allow_attributes_without_reason —
-# both enabled by the group — make it the ONLY one that compiles.
-groups="all|pedantic|nursery|cargo|restriction|style|complexity|perf|correctness|suspicious"
-blanket=""
-while IFS= read -r f; do
-  [[ -n ${f} ]] || continue
-  if grep -qE "^[[:space:]]*#!\\[(allow|expect)\\([^]]*clippy::(${groups})\\b" "${f}"; then
-    blanket="${blanket} ${f}"
-  fi
-done <<< "${rs}"
-if [[ -n ${blanket} ]]; then
-  echo "lint:rust: crate-level suppression of a whole clippy group:${blanket}" >&2
-  echo "  a group allow silences every level this task sets and the gate still goes green" >&2
-  echo "  suppress one lint at the narrowest scope instead, with a reason:" >&2
-  echo '    #[expect(clippy::the_lint, reason = "why this code is right as written")]' >&2
-  echo "  an expect fails once it stops being needed; an allow rots silently" >&2
-  exit 1
-fi
+# EVERY SUPPRESSION IS AN `expect`, and two checks make that true
+# together (#1857). A narrow, reasoned
+# `#[expect(clippy::x, reason = "...")]` is the exception mechanism:
+# it errors once the lint it excuses stops firing, and an allow never
+# does. restriction's allow_attributes + allow_attributes_without_reason
+# — both enabled by the group — refuse an OUTER `#[allow]`, plain or
+# under cfg_attr, and an unreasoned one. They see nothing else. An inner
+# `#![allow(...)]` (plain or under cfg_attr, any lint) and an `allow`
+# level in a manifest's `[lints.*]` or `[workspace.lints.*]` both
+# compile past them under this task's own command and exit 0 (measured,
+# #1857): a `[lints.rust]` allow silences rustc's lint today, because
+# `-D warnings` raises warn-level lints and leaves an allowed one alone,
+# and a `[lints.clippy]` allow is one flag-order change from silencing
+# clippy's. rust_suppressions.py refuses both forms, over the same
+# tracked files: a lexer over the sources, since rustfmt breaks a long
+# cfg_attr across lines and a doc comment can hold the text, and
+# `tomllib` over every tracked Cargo.toml, never a grep. An inner
+# `#![expect(...)]` stays legal: it reports when it is not needed.
+#
+# A crate-level allow of a whole GROUP is refused first, by the same
+# helper, with its own message: it silences every flag above and exits
+# 0 (measured — even `-F` only warns about it), and the expect of a
+# group is refused with it, because an expect of a whole group excuses
+# everything.
+printf '%s\n' "${manifests}" "${rs}" \
+  | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/rust_suppressions.py" || exit 1
 # Members that cannot build on a gate runner are declared, never implied:
 # reading `default-members` instead would let a repo drop a crate from
 # linting by editing an unrelated field. CLIPPY_EXCLUDE ([env] in the

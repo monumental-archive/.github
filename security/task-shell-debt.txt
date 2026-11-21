@@ -30,7 +30,7 @@ mise/config.toml	lint:commits	24	# #1544 unassigned
 mise/config.toml	lint:dco	24	# #1544 unassigned
 mise/config.toml	lint:exec-bits	19	# #1544 unassigned
 mise/config.toml	lint:deny	30	# #1544 unassigned
-mise/config.toml	lint:rust	148	# #1544 unassigned
+mise/config.toml	lint:rust	134	# #1544 unassigned
 mise/config.toml	fix:rust	61	# #1544 unassigned
 mise/config.toml	lint:msrv	76	# #1544 unassigned
 mise/config.toml	lint:pg-clippy	43	# #1544 unassigned
