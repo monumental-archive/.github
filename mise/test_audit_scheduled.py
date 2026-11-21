@@ -79,7 +79,9 @@ def groups(document: dict[str, object]) -> tuple[dict[str, str], list[str]]:
     found: dict[str, str] = {}
     ungrouped: list[str] = []
     for job_id, job in workflow_yaml.jobs(document).items():
-        if job_id == "plan":
+        # `plan` opens the run and `report` (#1887) ends it; neither is a
+        # leg, and the report reads only this run's own job list.
+        if job_id in {"plan", "report"}:
             continue
         group = GROUPS.get(str(job.get("if")))
         if job.get("needs") != "plan" or group is None:
