@@ -365,6 +365,33 @@ class MeasureRows(FuzzCase):
         tracked: list[str] = [f"{self.tree}/src/lib.rs"]
         self.assertEqual(tracked, sources)
 
+    def test_no_environment_variable_narrows_or_redirects_the_leg(self) -> None:
+        """The search's measurement is a function, not a knob on the gate (#1897).
+
+        A repository's mise.toml [env] reaches this script in the gate, so
+        a variable that named the targets or the corpus would be a seam in
+        the floor. The names a first draft used change nothing.
+        """
+        self.rust("parse_marker", "round_trip")
+        self.go()
+        plain = self.measure()
+        self.env |= {
+            "ORG_FUZZ_ONLY": "rust - round_trip",
+            "ORG_FUZZ_CORPUS": str(self.tmp / "elsewhere"),
+        }
+        knobbed = self.measure()
+        self.assertEqual(0, knobbed.returncode, knobbed.stderr)
+        self.assertEqual(plain.stdout, knobbed.stdout)
+        self.assertEqual(
+            "fuzz-parse-marker 100\nfuzz-round-trip 75\n"
+            "fuzz-internal-policy-load 43.6\n",
+            knobbed.stdout,
+        )
+        replayed = [
+            line for line in self.log("cargo") if line.startswith("fuzz coverage ")
+        ]
+        self.assertFalse(any("elsewhere" in line for line in replayed), replayed)
+
     def test_the_build_directory_carries_the_compiler_digest(self) -> None:
         """`--target-dir` is named for the rustc that builds (#1877)."""
         self.rust("parse_marker")

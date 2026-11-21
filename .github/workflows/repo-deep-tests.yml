@@ -18,12 +18,21 @@
 #       uses: monumental-archive/.github/.github/workflows/repo-deep-tests.yml@<sha> # vX.Y.Z
 #
 # The canon calls it at its running commit from self-deep-tests.yml.
-# No inputs, by design — zero caller-controlled expansion.
+# No inputs, by design — zero caller-controlled expansion. One secret:
+# the release App's key, which only the `propose` job reads (#1897).
 ---
 name: repo-deep-tests
 
 "on":
-  workflow_call: {}
+  workflow_call:
+    secrets:
+      app-private-key:
+        # forwarding: universal
+        # Not required, so a stub that predates it still runs: only a
+        # run that staged something mints a token, and that step then
+        # fails naming the missing key.
+        description: Tag-mint App private key (the propose job's token)
+        required: false
 permissions:
   contents: read
 
@@ -64,15 +73,22 @@ jobs:
     needs: applies
     if: ${{ needs.applies.outputs.fuzz == 'true' }}
     runs-on: ubuntu-26.04
+    outputs:
+      staged: ${{ steps.kept.outputs.staged }}
+      summary: ${{ steps.kept.outputs.summary }}
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
       MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
     steps:
+      # Every branch, so origin/fuzz-corpus is there when an unmerged
+      # proposal is: the search builds on it (#1897), reading only its
+      # corpus paths, as data.
       - name: Check out caller repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
 
       - name: Resolve the canon tree (the ref the caller pinned)
         uses: $/.github/actions/canon
@@ -88,24 +104,13 @@ jobs:
       # (#445). Time-bound and non-deterministic, so it lives here, never
       # the gate (#316); the gate's lint:fuzz-build still proves the
       # targets compile, on stable. A repo with no fuzz/ skips clean.
+      # What it keeps (#1897) is staged under ORG_FUZZ_CANDIDATES, and
+      # its per-target summary written to ORG_FUZZ_SUMMARY.
       - name: Run every fuzz target for a bounded interval
+        env:
+          ORG_FUZZ_CANDIDATES: ${{ runner.temp }}/fuzz-corpus-candidates
+          ORG_FUZZ_SUMMARY: ${{ runner.temp }}/fuzz-corpus-summary.md
         run: mise run audit:fuzz
-
-      # A crash the cron cannot hand back is a crash nobody can act on:
-      # libFuzzer writes the reproducing input to fuzz/artifacts/ and the
-      # runner is ephemeral, so before this the audit reported a path on a
-      # machine that no longer existed. Failure only — a clean run has
-      # nothing to keep, and the corpus is deliberately NOT uploaded:
-      # it is human-curated in-tree, and shipping machine-generated inputs
-      # back would invite merging what nobody reviewed (#445).
-      - name: Keep the reproducer when a target crashes
-        if: failure()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: fuzz-artifacts-${{ github.run_id }}
-          path: fuzz/artifacts/
-          if-no-files-found: ignore
-          retention-days: 30
 
       # The Go half (#445): the fuzzing engine ships in the toolchain, so
       # there is no extra binary, no sanitizer flag and no nightly — but
@@ -113,24 +118,84 @@ jobs:
       # time-bound (the documented -fuzztime default is to run forever)
       # and it writes. A repo with no Go fuzz target skips clean.
       - name: Run every Go fuzz target for a bounded interval
+        env:
+          ORG_FUZZ_CANDIDATES: ${{ runner.temp }}/fuzz-corpus-candidates
+          ORG_FUZZ_SUMMARY: ${{ runner.temp }}/fuzz-corpus-summary.md
         run: mise run audit:go-fuzz
 
-      # Go writes the failing input into the package's own
-      # testdata/fuzz/<Target>/ rather than a dedicated artifacts
-      # directory, so this necessarily carries the committed seed corpus
-      # along with the new crasher. That is accepted rather than worked
-      # around: the run's output names the exact file, and a filter that
-      # tried to separate the two would be guessing at which of the
-      # runner's files were new. Failure only, same as the Rust half, and
-      # the cron still never pushes.
-      - name: Keep the failing input when a Go target crashes
-        if: failure()
+      # Whether the search passed or failed (a crash is what most needs
+      # keeping): the summary goes to the job's own page and, with
+      # `staged`, to the propose job. Nothing staged, nothing handed on.
+      - name: Hand what the search kept to the propose job
+        id: kept
+        if: ${{ !cancelled() }}
+        env:
+          CANDIDATES: ${{ runner.temp }}/fuzz-corpus-candidates
+          SUMMARY: ${{ runner.temp }}/fuzz-corpus-summary.md
+        run: .org-canon/release/propose-fuzz-corpus.sh handover
+
+      # The one artifact (#1897), replacing the two 30-day reproducer
+      # uploads: every staged file at its repository path.
+      - name: Upload what the search kept
+        if: ${{ !cancelled() && steps.kept.outputs.staged == 'true' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: go-fuzz-corpus-${{ github.run_id }}
-          path: "**/testdata/fuzz/**"
-          if-no-files-found: ignore
+          name: fuzz-corpus-candidates
+          path: ${{ runner.temp }}/fuzz-corpus-candidates/
+          if-no-files-found: error
           retention-days: 30
+
+  # What the search kept becomes a reviewed pull request (#1897), opened
+  # by a job that runs NO repository code: no checkout, no mise, cargo
+  # or go, and the artifact downloaded outside the workspace after the
+  # canon tree is linked. It is the only job here to mint a token, and
+  # it mints it only after every path in the artifact has been held to
+  # the two corpus shapes: the artifact was written by the job that ran
+  # the repository's code, so its paths are input, not instructions.
+  # Also when the fuzz job failed, since a crash is staged then.
+  propose:
+    name: propose what the search kept
+    needs: fuzz
+    if: ${{ !cancelled() && needs.fuzz.outputs.staged == 'true' }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: read # the canon action's own install; every write is the App's
+    steps:
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      - name: Download what the search kept
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: fuzz-corpus-candidates
+          path: ${{ runner.temp }}/fuzz-corpus-candidates
+
+      - name: Refuse any path outside the two corpus shapes
+        env:
+          CANDIDATES: ${{ runner.temp }}/fuzz-corpus-candidates
+        run: .org-canon/release/propose-fuzz-corpus.sh check
+
+      # The release App (TAG_MINT_APP_CLIENT_ID): it already holds these
+      # two grants. With no owner or repositories named, the token is
+      # for this repository alone.
+      - name: Mint the proposal token
+        id: token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.TAG_MINT_APP_CLIENT_ID }}
+          private-key: ${{ secrets.app-private-key }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Commit the inputs to fuzz-corpus and open its pull request
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          APP_SLUG: ${{ steps.token.outputs.app-slug }}
+          CANDIDATES: ${{ runner.temp }}/fuzz-corpus-candidates
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          SUMMARY: ${{ needs.fuzz.outputs.summary }}
+        run: .org-canon/release/propose-fuzz-corpus.sh propose
 
   coverage-branches:
     name: rust branch coverage holds its floor
@@ -337,6 +402,7 @@ jobs:
     needs:
       - applies
       - fuzz
+      - propose
       - coverage-branches
       - coverage-go-branches
       - python-properties-seed

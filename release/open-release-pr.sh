@@ -9,12 +9,8 @@
 # prepare-release.sh emitted. What remains is API plumbing, and it is here
 # rather than in the engine because it is capability, not judgment.
 #
-# The commit is created through GitHub's API rather than with `git commit`,
-# because org repositories require signed commits and a runner has no signing
-# key. A locally-made commit is `verified: false`, and the Release PR is then
-# unmergeable. Commits created via the API are signed by GitHub with its own
-# key, and createCommitOnBranch writes every file in a single commit, which
-# the REST contents endpoint cannot do.
+# The commit is created through GitHub's API, signed by GitHub, by the
+# shared helper release/signed-commit.sh, which says why.
 #
 # The branch is updated to the commit being released on every run, so the PR
 # always shows the release that would happen if it were merged now. It is
@@ -60,35 +56,11 @@ done
 . "$(dirname "${BASH_SOURCE[0]}")/planned-head.sh"
 require_planned_head
 
-# Every forge call this script cannot survive names itself when it is
-# refused (#633). The step died four times on `gh: Resource not accessible
-# by integration (HTTP 403)` and nothing else: no line said which of its
-# calls was refused, so a red that reads as a permissions fact could not be
-# traced to a call, let alone a cause. This is not a retry — a refused call
-# still fails the run, exactly as before. It adds what the forge said about
-# the refusal: the status, the request id GitHub support can look up, and
-# the permissions the endpoint would have accepted.
-#
-# `--include` goes last so the call still reads as the call; gh prints the
-# response headers, a blank line, then the body any `--jq` has filtered.
-#
-# A refused call also leaves the forge's whole answer in `forge_refusal`,
-# for the one caller that tells one refusal from another.
-forge() {
-  local what=$1 out status=0
-  shift
-  out=$(gh api "$@" --include) || status=$?
-  if ((status != 0)); then
-    forge_refusal=${out}
-    {
-      echo "FAIL: could not ${what}"
-      tr -d '\r' <<< "${out}" \
-        | grep -iE '^(HTTP/|x-github-request-id:|x-accepted-github-permissions:)' || true
-    } >&2
-    return "${status}"
-  fi
-  awk 'body { print; next } /^\r?$/ { body = 1 }' <<< "${out}"
-}
+# The forge calls and the signed commit (#633, #1897): forge names a
+# refused call, and org_signed_commit writes the release commit and
+# proves it signed.
+# shellcheck source=release/signed-commit.sh
+. "$(dirname "${BASH_SOURCE[0]}")/signed-commit.sh"
 
 if gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${staging}" > /dev/null 2>&1; then
   forge "move the staging ref ${staging} to ${GITHUB_SHA}" \
@@ -100,6 +72,7 @@ else
     --method POST -f "ref=refs/heads/${staging}" -f sha="${GITHUB_SHA}" > /dev/null
 fi
 cleanup() {
+  rm -f -- "${changes:-}"
   gh api "repos/${GITHUB_REPOSITORY}/git/refs/heads/${staging}" \
     --method DELETE > /dev/null 2>&1 || true
 }
@@ -130,8 +103,8 @@ signoff="Signed-off-by: ${bot}"
 # A plan addition that no longer exists on disk is the old half of a rename
 # and rides the commit as a deletion; the plan already states deletions of
 # its own.
-request=$(
-  PLAN="${PLAN}" STAGING="${staging}" TITLE="${title}" SIGNOFF="${signoff}" python3 - << 'PY'
+changes=$(mktemp)
+PLAN="${PLAN}" python3 - > "${changes}" << 'PY'
 import base64, json, os
 
 with open(os.environ["PLAN"], "rb") as handle:
@@ -154,46 +127,11 @@ for path in paths:
             {"path": path, "contents": base64.b64encode(handle.read()).decode()}
         )
 
-print(json.dumps({
-    "query": (
-        "mutation($input: CreateCommitOnBranchInput!) {"
-        "  createCommitOnBranch(input: $input) { commit { oid } }"
-        "}"
-    ),
-    "variables": {
-        "input": {
-            "branch": {
-                "repositoryNameWithOwner": os.environ["GITHUB_REPOSITORY"],
-                "branchName": os.environ["STAGING"],
-            },
-            "message": {
-                "headline": os.environ["TITLE"],
-                "body": os.environ["SIGNOFF"],
-            },
-            "fileChanges": {"additions": additions, "deletions": deletions},
-            "expectedHeadOid": os.environ["GITHUB_SHA"],
-        }
-    },
-}))
+print(json.dumps({"additions": additions, "deletions": deletions}))
 PY
-)
 
-oid=$(printf '%s' "${request}" \
-  | forge "create the release commit on ${staging}" graphql --input - \
-    --jq '.data.createCommitOnBranch.commit.oid')
-if [[ -z ${oid} ]]; then
-  echo "FAIL: the API returned no commit" >&2
-  exit 1
-fi
-
-# Prove the point of all this rather than assuming it.
-verified=$(forge "read back the release commit ${oid}" \
-  "repos/${GITHUB_REPOSITORY}/commits/${oid}" \
-  --jq '.commit.verification.verified')
-if [[ ${verified} != "true" ]]; then
-  echo "FAIL: release commit ${oid} is unsigned; the PR would be unmergeable" >&2
-  exit 1
-fi
+oid=$(org_signed_commit "release commit" "${staging}" "${GITHUB_SHA}" \
+  "${title}" "${signoff}" "${changes}")
 
 # Takes the Release PR out of the merge queue (#1504), setting `dequeued`
 # to the line the run logs and comments once the PR is regenerated. A
@@ -230,8 +168,7 @@ dequeue_queued_pr() {
   # shellcheck disable=SC2310  # forge's status is the answer, read below
   if ! forge "take #${number} out of the merge queue" graphql \
     -f query="${mutation}" > /dev/null; then
-    if grep -qE '^HTTP/[0-9.]+ 403|"type": *"FORBIDDEN"|Resource not accessible by integration' \
-      <<< "${forge_refusal}"; then
+    if forge_refused '^HTTP/[0-9.]+ 403|"type": *"FORBIDDEN"|Resource not accessible by integration'; then
       echo "the forge refused to take #${number} out of the merge queue;" \
         "it stays planned at ${planned:-an older commit}; the next push" \
         "to the default branch regenerates it"
@@ -270,8 +207,8 @@ if gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${branch}" > /dev/null 2>&1;
   forge_refusal=""
   # shellcheck disable=SC2310  # forge's status is the answer, read below
   if ! move_branch; then
-    if ! grep -qE '^HTTP/[0-9.]+ 422' <<< "${forge_refusal}" \
-      || ! grep -qF 'queued for merging cannot be updated' <<< "${forge_refusal}"; then
+    if ! forge_refused '^HTTP/[0-9.]+ 422' \
+      || ! forge_refused 'queued for merging cannot be updated'; then
       exit 1
     fi
     dequeue_queued_pr
