@@ -55,4 +55,46 @@ jobs:
 
       - name: Check the public API against the latest published release
         run: mise run audit:semver
+
+  # Every scheduled workflow ends here (#1887): while a run on the
+  # default branch has a red job, one issue titled "<workflow> is red"
+  # and labelled red-check holds each red job and its log tail; the next
+  # green run closes it. mise/standing_issue.py has the outcomes. Only
+  # `needs:` names the jobs above, so it grows with them.
+  report:
+    name: Report red jobs
+    needs:
+      - semver
+    if: ${{ always() }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: read # the checkout
+      issues: write # the workflow's one red-check issue
+      actions: read # the run's job list and each red job's log
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The belt's Python as ORG_PYTHON and the canon tree at
+      # .org-canon, the ref this run resolved (#165, #1543).
+      - name: Resolve the canon tree and the belt's Python
+        uses: $/.github/actions/canon
+
+      # A cancelled run changes nothing: the job still runs (always()),
+      # this step does not.
+      - name: Keep the red-check issue
+        if: ${{ !cancelled() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WORKFLOW: ${{ github.workflow }}
+          RUN_ID: ${{ github.run_id }}
+          REF: ${{ github.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          "${ORG_PYTHON}" .org-canon/mise/standing_issue.py --workflow "${WORKFLOW}" \
+            --run-id "${RUN_ID}" --ref "${REF}" \
+            --default-branch "${DEFAULT_BRANCH}"
 ...

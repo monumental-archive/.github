@@ -31,4 +31,6 @@ jobs:
       id-token: write # an OIDC token for this run
       attestations: write # this repository's attestations, read and write
       artifact-metadata: write # this repository's artifact storage records, read and write
+      issues: write # the callee's report job: its workflow's red-check issue (#1887)
+      actions: read # the callee's report job: the run's job list and job logs (#1887)
 ...

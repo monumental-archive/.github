@@ -87,6 +87,8 @@ jobs:
       # lint:caller-permissions checks it against what the callee
       # asks).
       contents: write # pushes this repository's cells to its own levels branch
+      issues: write # the callee's report job: its workflow's red-check issue (#1887)
+      actions: read # the callee's report job: the run's job list and job logs (#1887)
     uses: ./.github/workflows/level.yml # zizmor: ignore[self-repository]
     with:
       tracks: build source dependency

@@ -197,11 +197,18 @@ def problems(text: str) -> list[str]:
         document = workflow_yaml.document(path)
     found = run_wide(document)
     by_id = workflow_yaml.jobs(document)
-    if sorted(by_id) != ["alert", "start", "watch"]:
-        return [*found, f"the jobs are {sorted(by_id)}, not start, watch and alert"]
+    # `report` is every scheduled workflow's last job (#1887), held by
+    # mise/test_report_job.py; this file holds the legs' shape.
+    if sorted(by_id) != ["alert", "report", "start", "watch"]:
+        expected = "start, watch, alert and report"
+        return [*found, f"the jobs are {sorted(by_id)}, not {expected}"]
     found += leg_wide(by_id["watch"])
     return found + ends(by_id["start"], by_id["alert"])
 
+
+# The alert's `needs:` and the line after it; the report job's (#1887)
+# lists more jobs, so this reaches the alert's alone.
+AFTER_LEGS = "    if: ${{ always() }}\n    runs-on"
 
 # Each row: what is planted (old, new) and the one message it must earn.
 ROWS = [
@@ -268,8 +275,8 @@ ROWS = [
         "the run's starting checkpoint is not kept aside",
     ),
     (
-        "    needs:\n      - start\n      - watch\n",
-        "    needs:\n      - watch\n",
+        f"    needs:\n      - start\n      - watch\n{AFTER_LEGS}",
+        f"    needs:\n      - watch\n{AFTER_LEGS}",
         "the alert does not run once after the last leg",
     ),
     (
@@ -278,14 +285,17 @@ ROWS = [
         "the alert does not read both checkpoints",
     ),
     (
-        "\n...\n",
-        "\n      - uses: actions/cache/save@x\n...\n",
+        '            --run-url "${RUN_URL}"\n',
+        '            --run-url "${RUN_URL}"\n      - uses: actions/cache/save@x\n',
         "the alert saves a checkpoint",
     ),
     (
         "\n  alert:\n",
         "\n  alerts:\n",
-        "the jobs are ['alerts', 'start', 'watch'], not start, watch and alert",
+        (
+            "the jobs are ['alerts', 'report', 'start', 'watch'],"
+            " not start, watch, alert and report"
+        ),
     ),
 ]
 
