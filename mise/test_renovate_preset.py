@@ -38,6 +38,9 @@ PRESET = Path(__file__).resolve().parent.parent / "default.json"
 MISE_FILES = "/(^|/)mise\\.toml$/"
 POSTGRES = "theseus-rs/postgresql-binaries"
 ICU = "unicode-org/icu"
+# Renovate trims a GitHub sourceUrl to owner/repo, so this is the form
+# it compares, whatever crates.io carries (#1867).
+PGRX = "https://github.com/pgcentralfoundation/pgrx"
 
 # What RE2 refuses that Python accepts: lookahead and lookbehind, atomic
 # groups, numbered and named backreferences.
@@ -251,6 +254,56 @@ class Rules(unittest.TestCase):
                     and r.get("enabled") is False
                 ]
                 self.assertEqual(len(off), 1)
+
+
+def pgrx_groups(rules: list[object]) -> list[str]:
+    """Collect the groupName of every rule keyed on pgrx's source.
+
+    Returns:
+        One entry per matching rule, in preset order.
+
+    Raises:
+        AssertionError: when no rule matches the source.
+
+    """
+    groups: list[str] = []
+    for raw in rules:
+        r = decoded.as_object(raw, "packageRules[]")
+        urls = decoded.as_array(r.get("matchSourceUrls", []), "matchSourceUrls")
+        if PGRX in urls:
+            groups.append(decoded.as_str(r.get("groupName", ""), "groupName"))
+    if not groups:
+        msg = f"default.json: no packageRule matches the source {PGRX}"
+        raise AssertionError(msg)
+    return groups
+
+
+class Pgrx(unittest.TestCase):
+    """pgrx's packages release together, so they move as one set (#1867)."""
+
+    def test_pgrx_grouped_by_source(self) -> None:
+        """Exactly one rule matches pgrx's source, and it groups as pgrx."""
+        raw = decoded.as_array(preset()["packageRules"], "packageRules")
+        group: list[str] = ["pgrx"]
+        self.assertEqual(pgrx_groups(raw), group)
+
+    def test_pgrx_rule_removed_is_refused(self) -> None:
+        """Planted: the preset without the rule reds, by name."""
+        raw = decoded.as_array(preset()["packageRules"], "packageRules")
+        kept = [
+            r
+            for r in raw
+            if PGRX
+            not in decoded.as_array(
+                decoded.as_object(r, "packageRules[]").get("matchSourceUrls", []),
+                "matchSourceUrls",
+            )
+        ]
+        self.assertEqual(len(kept), len(raw) - 1)
+        with self.assertRaisesRegex(
+            AssertionError, r"no packageRule matches the source .*/pgrx$"
+        ):
+            pgrx_groups(kept)
 
 
 if __name__ == "__main__":

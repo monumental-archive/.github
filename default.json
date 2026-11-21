@@ -69,6 +69,11 @@
       "enabled": false
     },
     {
+      "description": "pgrx ships as one monorepo release: the pgrx crate, the pgrx-tests dev-dependency and the cargo-pgrx build input must stay at one version, and apart none passes alone (#1867). Keyed on the source, as Renovate's own monorepo grouping is, so every package pgrx publishes joins the group. Renovate trims a GitHub sourceUrl to owner/repo, so crates.io's trailing slash never reaches the comparison.",
+      "matchSourceUrls": ["https://github.com/pgcentralfoundation/pgrx"],
+      "groupName": "pgrx"
+    },
+    {
       "description": "39 as minted, 10 past: #1334's prebuilt key, which every Rust repository adopts from the scaffold (#1393).",
       "matchPackageNames": [
         "github:rust-secure-code/cargo-auditable",
