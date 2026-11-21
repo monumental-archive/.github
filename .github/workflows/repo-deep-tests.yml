@@ -90,9 +90,6 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(needs.applies.outputs.fuzz-targets) }}
-    outputs:
-      staged: ${{ steps.kept.outputs.staged }}
-      summary: ${{ steps.kept.outputs.summary }}
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
@@ -129,7 +126,7 @@ jobs:
         if: ${{ matrix.kind == 'rust' }}
         env:
           ORG_FUZZ_CANDIDATES: ${{ runner.temp }}/fuzz-corpus-candidates
-          ORG_FUZZ_SUMMARY: ${{ runner.temp }}/fuzz-corpus-summary.md
+          ORG_FUZZ_SUMMARY: ${{ runner.temp }}/fuzz-corpus-summary/${{ matrix.kind }}-${{ matrix.target }}.md
         run: mise run audit:fuzz
 
       # The Go half (#445): the fuzzing engine ships in the toolchain, so
@@ -142,18 +139,21 @@ jobs:
         if: ${{ matrix.kind == 'go' }}
         env:
           ORG_FUZZ_CANDIDATES: ${{ runner.temp }}/fuzz-corpus-candidates
-          ORG_FUZZ_SUMMARY: ${{ runner.temp }}/fuzz-corpus-summary.md
+          ORG_FUZZ_SUMMARY: ${{ runner.temp }}/fuzz-corpus-summary/${{ matrix.kind }}-${{ matrix.target }}.md
         run: mise run audit:go-fuzz
 
       # Whether the search passed or failed (a crash is what most needs
-      # keeping): the summary goes to the job's own page and, with
-      # `staged`, to the propose job. Nothing staged, nothing handed on.
+      # keeping): the summary goes to the job's own page, and the step's
+      # `staged` output says whether this runner has anything to hand
+      # on. The job has no `outputs:` (#1899): a matrix job's outputs
+      # are last-writer-wins, so one runner's `staged=false` would hide
+      # another's finds. Each runner hands on through its own artifacts.
       - name: Hand what the search kept to the propose job
         id: kept
         if: ${{ !cancelled() }}
         env:
           CANDIDATES: ${{ runner.temp }}/fuzz-corpus-candidates
-          SUMMARY: ${{ runner.temp }}/fuzz-corpus-summary.md
+          SUMMARY: ${{ runner.temp }}/fuzz-corpus-summary/${{ matrix.kind }}-${{ matrix.target }}.md
         run: .org-canon/release/propose-fuzz-corpus.sh handover
 
       # One artifact per target (#1897, #1899), replacing the two 30-day
@@ -167,6 +167,17 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      # This runner's summary, a file named for its target, so the
+      # propose job's merged download keeps every runner's.
+      - name: Upload what the search says it kept
+        if: ${{ !cancelled() && steps.kept.outputs.staged == 'true' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fuzz-corpus-summary-${{ matrix.kind }}-${{ matrix.target }}
+          path: ${{ runner.temp }}/fuzz-corpus-summary/
+          if-no-files-found: error
+          retention-days: 30
+
   # What the search kept becomes a reviewed pull request (#1897), opened
   # by a job that runs NO repository code: no checkout, no mise, cargo
   # or go, and the artifact downloaded outside the workspace after the
@@ -174,11 +185,14 @@ jobs:
   # it mints it only after every path in the artifact has been held to
   # the two corpus shapes: the artifact was written by the job that ran
   # the repository's code, so its paths are input, not instructions.
-  # Also when the fuzz job failed, since a crash is staged then.
+  # Also when the fuzz job failed, since a crash is staged then. It runs
+  # whenever the fuzz job ran (#1899): whether any runner staged
+  # something is read from the downloads, never from the matrix's
+  # outputs, and with nothing staged it ends green before the mint.
   propose:
     name: propose what the search kept
     needs: fuzz
-    if: ${{ !cancelled() && needs.fuzz.outputs.staged == 'true' }}
+    if: ${{ !cancelled() && needs.fuzz.result != 'skipped' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
@@ -196,7 +210,25 @@ jobs:
           merge-multiple: true
           path: ${{ runner.temp }}/fuzz-corpus-candidates
 
+      # Every staging runner's summary into a tree of its own, so the
+      # path check reads the candidates and nothing else.
+      - name: Download what the search says it kept
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: fuzz-corpus-summary-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/fuzz-corpus-summaries
+
+      # A pattern that matched nothing downloads nothing: then no runner
+      # staged anything, and the job ends here, green, before the mint.
+      - name: Read whether any runner staged anything
+        id: staged
+        env:
+          CANDIDATES: ${{ runner.temp }}/fuzz-corpus-candidates
+        run: .org-canon/release/propose-fuzz-corpus.sh staged
+
       - name: Refuse any path outside the two corpus shapes
+        if: ${{ steps.staged.outputs.staged == 'true' }}
         env:
           CANDIDATES: ${{ runner.temp }}/fuzz-corpus-candidates
         run: .org-canon/release/propose-fuzz-corpus.sh check
@@ -206,6 +238,7 @@ jobs:
       # for this repository alone.
       - name: Mint the proposal token
         id: token
+        if: ${{ steps.staged.outputs.staged == 'true' }}
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           client-id: ${{ vars.TAG_MINT_APP_CLIENT_ID }}
@@ -214,12 +247,13 @@ jobs:
           permission-pull-requests: write
 
       - name: Commit the inputs to fuzz-corpus and open its pull request
+        if: ${{ steps.staged.outputs.staged == 'true' }}
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
           APP_SLUG: ${{ steps.token.outputs.app-slug }}
           CANDIDATES: ${{ runner.temp }}/fuzz-corpus-candidates
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          SUMMARY: ${{ needs.fuzz.outputs.summary }}
+          SUMMARIES: ${{ runner.temp }}/fuzz-corpus-summaries
         run: .org-canon/release/propose-fuzz-corpus.sh propose
 
   coverage-branches:

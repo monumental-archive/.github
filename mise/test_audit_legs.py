@@ -781,7 +781,7 @@ def measured_targets(root: Path) -> list[tuple[str, str, str]]:
     """Run coverage-measure.sh's own `fuzz_targets` over a tree.
 
     The function is read out of the script, between its line and the
-    next closing brace in column one, and run with the library it
+    next closing brace in column one, and run with the libraries it
     sources: the enumeration, not the measurement.
 
     Returns:

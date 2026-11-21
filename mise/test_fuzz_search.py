@@ -672,29 +672,42 @@ def step(name: str) -> dict[str, object]:
 
 
 class Handover(unittest.TestCase):
-    """What the fuzz job hands the propose job, and when (items 3, 4)."""
+    """What a fuzz runner hands the propose job, and when (items 3, 4; #1899)."""
 
     KEPT = "Hand what the search kept to the propose job"
     UPLOAD = "Upload what the search kept"
+    UPLOAD_SUMMARY = "Upload what the search says it kept"
 
-    def test_the_upload_runs_when_the_search_failed(self) -> None:
-        """Both the hand-over and the upload run whether or not the search passed."""
+    def test_the_uploads_run_when_the_search_failed(self) -> None:
+        """The hand-over and both uploads run whether or not the search passed."""
         self.assertEqual("${{ !cancelled() }}", step(self.KEPT)["if"])
-        self.assertEqual(
-            "${{ !cancelled() && steps.kept.outputs.staged == 'true' }}",
-            step(self.UPLOAD)["if"],
-        )
         uploads = [
             s for s in fuzz_steps() if "upload-artifact" in str(s.get("uses", ""))
         ]
-        self.assertEqual(1, len(uploads))
-        self.assertEqual(self.UPLOAD, uploads[0].get("name"))
+        same(
+            self,
+            [self.UPLOAD, self.UPLOAD_SUMMARY],
+            [decoded.as_str(s.get("name"), "name") for s in uploads],
+        )
+        for upload in uploads:
+            with self.subTest(upload=upload.get("name")):
+                self.assertEqual(
+                    "${{ !cancelled() && steps.kept.outputs.staged == 'true' }}",
+                    upload["if"],
+                )
 
-    def handover(self, files: dict[str, str]) -> dict[str, str]:
+    def test_the_fuzz_job_hands_nothing_on_through_job_outputs(self) -> None:
+        """A matrix's job outputs are last-writer-wins, so the job has none."""
+        jobs = workflow_yaml.jobs(workflow_yaml.document(WORKFLOW))
+        self.assertNotIn("outputs", jobs["fuzz"])
+        self.assertNotIn("needs.fuzz.outputs", WORKFLOW.read_text(encoding="utf-8"))
+
+    def handover(self, files: dict[str, str]) -> tuple[str, str, str]:
         """Run the hand-over step's own script over a planted stage.
 
         Returns:
-            The step outputs it wrote.
+            What it wrote to GITHUB_OUTPUT, to the step summary, and to
+            its standard output.
 
         """
         tmp = Path(tempfile.mkdtemp())
@@ -706,41 +719,43 @@ class Handover(unittest.TestCase):
             (stage / name).write_text(text, encoding="utf-8")
         (tmp / "summary.md").write_text("- `t`: kept 1\n", encoding="utf-8")
         output = tmp / "output"
+        page = tmp / "step-summary"
         command = decoded.as_str(step(self.KEPT)["run"], "run")
         self.assertEqual(
             ".org-canon/release/propose-fuzz-corpus.sh handover", command.strip()
         )
-        subprocess.run(
+        run = subprocess.run(
             [BASH, str(CANON / "release" / "propose-fuzz-corpus.sh"), "handover"],
             env=hermetic.env()
             | {
                 "CANDIDATES": str(stage),
                 "SUMMARY": str(tmp / "summary.md"),
                 "GITHUB_OUTPUT": str(output),
-                "GITHUB_STEP_SUMMARY": str(tmp / "step-summary"),
+                "GITHUB_STEP_SUMMARY": str(page),
             },
             capture_output=True,
+            text=True,
             check=True,
         )
-        text = output.read_text(encoding="utf-8")
-        found = re.search(r"summary<<(\S+)\n(.*?)\n\1\n", text, re.DOTALL)
-        staged = re.search(r"^staged=(\S+)$", text, re.MULTILINE)
-        return {
-            "staged": staged.group(1) if staged else "",
-            "summary": found.group(2) if found else "",
-        }
+        return (
+            output.read_text(encoding="utf-8"),
+            page.read_text(encoding="utf-8"),
+            run.stdout,
+        )
 
     def test_a_run_that_finds_nothing_uploads_nothing(self) -> None:
-        """An empty stage hands over staged=false, which skips the upload."""
-        handed = self.handover({})
-        self.assertEqual("false", handed["staged"])
-        self.assertEqual("", handed["summary"])
+        """An empty stage writes staged=false, which skips both uploads."""
+        output, page, said = self.handover({})
+        self.assertEqual("staged=false\n", output)
+        self.assertEqual("- `t`: kept 1\n", page)
+        self.assertEqual("the search staged nothing; nothing to propose\n", said)
 
-    def test_a_staged_file_hands_over_the_summary(self) -> None:
-        """A staged file hands over staged=true and the per-target summary."""
-        handed = self.handover({"fuzz/corpus/t/abc": "x"})
-        self.assertEqual("true", handed["staged"])
-        self.assertEqual("- `t`: kept 1", handed["summary"])
+    def test_a_staged_file_says_so_and_keeps_its_summary_on_the_page(self) -> None:
+        """staged=true is the one output; the summary goes to the page, not it."""
+        output, page, said = self.handover({"fuzz/corpus/t/abc": "x"})
+        self.assertEqual("staged=true\n", output)
+        self.assertEqual("- `t`: kept 1\n", page)
+        self.assertIn("the propose job opens them as a pull request", said)
 
 
 class OneRunnerPerTarget(unittest.TestCase):
@@ -793,10 +808,17 @@ class OneRunnerPerTarget(unittest.TestCase):
 
     def test_each_target_uploads_its_own_artifact_and_propose_takes_all(self) -> None:
         """Upload by kind and target; propose downloads every one into one tree."""
-        upload = decoded.as_object(step(Handover.UPLOAD)["with"], "with")
-        self.assertEqual(
-            "fuzz-corpus-candidates-${{ matrix.kind }}-${{ matrix.target }}",
-            upload["name"],
+        names: list[str] = [
+            decoded.as_str(decoded.as_object(step(n)["with"], "with")["name"], "name")
+            for n in (Handover.UPLOAD, Handover.UPLOAD_SUMMARY)
+        ]
+        same(
+            self,
+            [
+                "fuzz-corpus-candidates-${{ matrix.kind }}-${{ matrix.target }}",
+                "fuzz-corpus-summary-${{ matrix.kind }}-${{ matrix.target }}",
+            ],
+            names,
         )
         jobs = workflow_yaml.jobs(workflow_yaml.document(WORKFLOW))
         downloads = [
@@ -804,11 +826,21 @@ class OneRunnerPerTarget(unittest.TestCase):
             for s in workflow_yaml.steps(jobs["propose"])
             if "download-artifact" in str(s.get("uses", ""))
         ]
-        self.assertEqual(1, len(downloads))
-        self.assertEqual("fuzz-corpus-candidates-*", downloads[0]["pattern"])
-        self.assertIsInstance(downloads[0]["merge-multiple"], bool)
-        self.assertTrue(downloads[0]["merge-multiple"])
-        self.assertNotIn("name", downloads[0])
+        got: list[str] = [
+            f"{d.get('pattern')} {d.get('path')} {d.get('merge-multiple')}"
+            for d in downloads
+        ]
+        temp = "${{ runner.temp }}"
+        same(
+            self,
+            [
+                f"fuzz-corpus-candidates-* {temp}/fuzz-corpus-candidates True",
+                f"fuzz-corpus-summary-* {temp}/fuzz-corpus-summaries True",
+            ],
+            got,
+        )
+        for download in downloads:
+            self.assertNotIn("name", download)
         # propose is one job, never a matrix.
         self.assertNotIn("strategy", jobs["propose"])
 
@@ -845,6 +877,37 @@ class ProposeRunsNoRepositoryCode(unittest.TestCase):
             names.index("Refuse any path outside the two corpus shapes"),
             names.index("Mint the proposal token"),
         )
+
+    def test_with_nothing_staged_there_is_no_mint_and_no_proposal(self) -> None:
+        """Propose runs whenever fuzz ran; check, mint and propose wait on staged."""
+        jobs = workflow_yaml.jobs(workflow_yaml.document(WORKFLOW))
+        self.assertEqual(
+            "${{ !cancelled() && needs.fuzz.result != 'skipped' }}",
+            jobs["propose"]["if"],
+        )
+        steps = workflow_yaml.steps(jobs["propose"])
+        names = [decoded.as_str(s.get("name"), "name") for s in steps]
+        reader = names.index("Read whether any runner staged anything")
+        self.assertEqual(
+            ".org-canon/release/propose-fuzz-corpus.sh staged",
+            decoded.as_str(steps[reader]["run"], "run").strip(),
+        )
+        self.assertEqual("staged", steps[reader]["id"])
+        gated: list[str] = [
+            n
+            for n, s in zip(names, steps, strict=True)
+            if s.get("if") == "${{ steps.staged.outputs.staged == 'true' }}"
+        ]
+        same(
+            self,
+            [
+                "Refuse any path outside the two corpus shapes",
+                "Mint the proposal token",
+                "Commit the inputs to fuzz-corpus and open its pull request",
+            ],
+            gated,
+        )
+        self.assertTrue(all(names.index(g) > reader for g in gated))
 
     def test_only_propose_mints_a_token(self) -> None:
         """No other job of the workflow mints a token or writes with one."""

@@ -4,12 +4,18 @@
 # runs no repository code and is the only job of that workflow to mint a
 # token.
 #
-#   propose-fuzz-corpus.sh handover  (the fuzz job) say whether it staged
+#   propose-fuzz-corpus.sh handover  (a fuzz runner) say whether it staged
+#   propose-fuzz-corpus.sh staged    (propose) say whether any runner did
 #   propose-fuzz-corpus.sh check     refuse any entry outside the shapes
 #   propose-fuzz-corpus.sh propose   check, then commit and open the PR
 #
-# CANDIDATES is the downloaded `fuzz-corpus-candidates` artifact: each
-# file at its repository path. That artifact was written by the job that
+# The fuzz job is one runner per target (#1899), and a matrix job's
+# outputs are last-writer-wins, so nothing reaches `propose` through
+# them. Each runner that staged something uploads two artifacts of its
+# own, `fuzz-corpus-candidates-<kind>-<target>` and
+# `fuzz-corpus-summary-<kind>-<target>`, and `propose` downloads every
+# one of each into two trees. CANDIDATES is the merged candidates tree:
+# each file at its repository path. That artifact was written by the job that
 # ran the repository's code, so its paths are input, not instructions.
 # The whole artifact is refused, red and naming each path, unless every
 # entry is a regular file at
@@ -24,10 +30,11 @@
 # on the branch `fuzz-corpus`: on its head when it exists, so a night's
 # finds accumulate until reviewed, else created from the default
 # branch's head. Then it opens the branch's pull request, or updates the
-# open one, with SUMMARY, the search's per-target summary, as its body.
+# open one, with every file of SUMMARIES, the merged summaries tree, in
+# name order as its body.
 #
 # Inputs: CANDIDATES; for `propose` also GH_TOKEN (the release App's
-# token), APP_SLUG, GITHUB_REPOSITORY, DEFAULT_BRANCH and SUMMARY.
+# token), APP_SLUG, GITHUB_REPOSITORY, DEFAULT_BRANCH and SUMMARIES.
 set -euo pipefail
 
 branch=fuzz-corpus
@@ -104,34 +111,36 @@ check() {
   fi
 }
 
-# handover: the fuzz job's last word to the propose job, run whether the
-# search passed or failed. SUMMARY (a file here) goes to the job's own
-# page; when CANDIDATES holds a file, `staged=true` and the summary go to
-# GITHUB_OUTPUT, behind a random delimiter, since the search's job wrote
-# it. Otherwise `staged=false`, and nothing is uploaded or proposed.
-handover() {
-  : "${CANDIDATES:?}" "${SUMMARY:?}" "${GITHUB_OUTPUT:?}" "${GITHUB_STEP_SUMMARY:?}"
-  local first="" delimiter random
-  if [[ -f ${SUMMARY} ]]; then
-    cat -- "${SUMMARY}" >> "${GITHUB_STEP_SUMMARY}"
-  fi
+# staged: the step output `staged=true` when CANDIDATES holds a file,
+# else `staged=false` (also when it is absent: a download whose pattern
+# matched nothing makes no directory). A step output, never a job one.
+# Sets `any` to the same word.
+staged() {
+  : "${CANDIDATES:?}" "${GITHUB_OUTPUT:?}"
+  local first=""
   if [[ -d ${CANDIDATES} ]]; then
     first=$(find "${CANDIDATES}" -type f -print -quit)
   fi
-  if [[ -z ${first} ]]; then
-    echo "staged=false" >> "${GITHUB_OUTPUT}"
-    echo "the search staged nothing; nothing to propose"
-    return 0
+  any=true
+  [[ -n ${first} ]] || any=false
+  echo "staged=${any}" >> "${GITHUB_OUTPUT}"
+}
+
+# handover: a fuzz runner's last word, run whether the search passed or
+# failed. SUMMARY (this runner's file) goes to the job's own page, and
+# `staged` tells the two upload steps whether there is anything to hand
+# the propose job.
+handover() {
+  : "${SUMMARY:?}" "${GITHUB_STEP_SUMMARY:?}"
+  if [[ -f ${SUMMARY} ]]; then
+    cat -- "${SUMMARY}" >> "${GITHUB_STEP_SUMMARY}"
   fi
-  random=$(od -An -N16 -tx1 /dev/urandom)
-  delimiter="summary-${random//[^0-9a-f]/}"
-  {
-    echo "staged=true"
-    echo "summary<<${delimiter}"
-    if [[ -f ${SUMMARY} ]]; then cat -- "${SUMMARY}"; fi
-    echo "${delimiter}"
-  } >> "${GITHUB_OUTPUT}"
-  echo "the search staged inputs; the propose job opens them as a pull request"
+  staged
+  if [[ ${any} == true ]]; then
+    echo "the search staged inputs; the propose job opens them as a pull request"
+  else
+    echo "the search staged nothing; nothing to propose"
+  fi
 }
 
 propose() {
@@ -139,7 +148,8 @@ propose() {
   : "${GITHUB_REPOSITORY:?}"
   : "${DEFAULT_BRANCH:?}"
   : "${APP_SLUG:?APP_SLUG must be set (the create-github-app-token app-slug output)}"
-  local head base bot_id bot changes path contents oid existing body
+  : "${SUMMARIES:?SUMMARIES must be set (the downloaded fuzz-corpus-summary-* tree)}"
+  local head base bot_id bot changes path contents oid existing body summary
   # shellcheck source=release/signed-commit.sh
   . "$(dirname "${BASH_SOURCE[0]}")/signed-commit.sh"
 
@@ -176,10 +186,19 @@ propose() {
   rm -f -- "${changes}"
   echo "committed ${oid} to ${branch}, signature verified"
 
+  # Every runner's summary, in name order: one file per target that
+  # staged something.
+  summary=""
+  if [[ -d ${SUMMARIES} ]]; then
+    summary=$(
+      find "${SUMMARIES}" -type f -print0 | LC_ALL=C sort -z \
+        | while IFS= read -r -d '' path; do cat -- "${path}"; done
+    )
+  fi
   body=$(
     printf '%s\n\n' "The scheduled fuzz search kept these inputs (#1897):" \
       "each raised its target's corpus coverage, or crashed it."
-    printf '%s\n\n' "${SUMMARY:-}"
+    printf '%s\n\n' "${summary}"
     printf '%s\n' "A crash- file keeps the gate red until its fix is pushed here."
   )
   # No checkout here, so no git remote for gh to read the repository
@@ -203,6 +222,11 @@ case "${1:-}" in
   handover)
     handover
     ;;
+  staged)
+    staged
+    [[ ${any} == true ]] \
+      || echo "nothing staged: no runner kept an input or a crash, so nothing is proposed"
+    ;;
   check)
     check
     echo "the artifact holds ${#files[@]} corpus file(s), every one at a corpus path"
@@ -212,7 +236,7 @@ case "${1:-}" in
     propose
     ;;
   *)
-    echo "usage: propose-fuzz-corpus.sh handover|check|propose" >&2
+    echo "usage: propose-fuzz-corpus.sh handover|staged|check|propose" >&2
     exit 1
     ;;
 esac
