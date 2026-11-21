@@ -6949,7 +6949,7 @@ run = [
 ]
 
 [tasks."lint:fuzz-build"]
-description = "Fuzz targets still compile (cargo-fuzz, sanitizer none, stable toolchain); repos without fuzz/ skip clean"
+description = "Fuzz targets compile (cargo-fuzz, sanitizer none, stable), each has a committed corpus, and the corpus replays clean; repos without fuzz/ skip clean"
 dir = "{{cwd}}"
 # The deterministic half of the fuzz machinery (#316): a fuzz target
 # that no longer compiles is dead code wearing a Scorecard point, and
@@ -6959,9 +6959,23 @@ dir = "{{cwd}}"
 # mid-run rustup, no network resolution, no second toolchain pin.
 # libFuzzer without a sanitizer still surfaces panics, which in a
 # memory-safe crate is the failure class that exists; ASan-on-nightly
-# is the reopen for FFI-heavy code (tooling-verdicts.md). Running the
+# is the reopen for FFI-heavy code (tooling-verdicts.md). FUZZING the
 # targets is time-bound and non-deterministic, so it lives in
 # audit:fuzz, never here — the gate stays deterministic.
+#
+# What the gate does run is the committed corpus (#1889). Every [[bin]]
+# in fuzz/Cargo.toml must have at least one TRACKED file under
+# fuzz/corpus/<target>/, and each is run through the target once with
+# no mutation (`-runs=0`), so the corpus is the regression suite — the
+# Rust half of lint:go-fuzz-seeds. Before this the contract lived in
+# audit:fuzz's comment and nothing held it: six of the org's seven Rust
+# targets fuzzed from an empty corpus every Monday, green. The tracked
+# files (links followed) are copied to a scratch directory and only that
+# directory is handed to cargo fuzz run, so the lint never writes into
+# the tree's corpus and never replays an untracked local find. The
+# replay reuses the `-s none` build above, so nothing is rebuilt. That
+# half lives in fuzz-corpus.sh, the body being over lint:task-shell's
+# ceiling already.
 # cargo-fuzz is asserted with a remedy, never installed mid-run — the
 # coverage:check/llvm-tools pattern.
 run = '''
@@ -7031,7 +7045,8 @@ if ! probe=$(cargo metadata --locked --manifest-path fuzz/Cargo.toml --format-ve
 fi
 cargo fuzz build -s none
 count=$(cargo fuzz list | wc -l | tr -d ' ')
-echo "lint:fuzz-build: ${count} target(s) build, lockfile current"
+# The committed corpus, then its replay (#1889): fuzz-corpus.sh.
+bash "${ORG_BELT_DIR}/fuzz-corpus.sh" "${count}"
 '''
 
 [tasks."audit:action-pins"]
@@ -7982,7 +7997,9 @@ dir = "{{cwd}}"
 # of it is correct by construction. A campaign that accumulates would be
 # standing infrastructure, which the org does not run by choice, so the
 # corpus (fuzz/corpus/<target>/, committed) is curated by humans and the
-# cron never pushes. docs/best-practices.md answers `dynamic_analysis`
+# cron never pushes. The gate holds the corpus, not this comment (#1889):
+# lint:fuzz-build reds a target with no tracked seed and replays every
+# seed once on each pull request, so this run always starts from it. docs/best-practices.md answers `dynamic_analysis`
 # accordingly and refuses to claim it for a CI gate.
 #
 # The nightly is DECLARED by the repo, never discovered: a task that used
