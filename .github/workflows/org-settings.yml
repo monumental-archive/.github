@@ -11,11 +11,9 @@ name: org-settings
 
 "on":
   schedule:
-    # Mondays 07:00 UTC, the first hour of the canon's Monday API
-    # budget (#1169), beside slsa.yml's first group. Every leg here was
-    # a first-hour leg of the one workflow these were split from
-    # (#1884), and none moved: the second hour is slsa.yml's source
-    # walks alone.
+    # Mondays 07:00 UTC, beside slsa.yml, which runs once at the same
+    # hour (#1888). Every leg here was a leg of the one workflow these
+    # were split from (#1884).
     - cron: 0 7 * * 1
   workflow_dispatch: {}
 permissions:

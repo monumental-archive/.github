@@ -41,29 +41,28 @@ name: slsa
 
 "on":
   schedule:
-    # Mondays, in TWO groups ninety minutes apart, and the gap is the
-    # point (#1169). Measured 2026-11-14, each leg alone and to the
-    # end: attestations 2,389 REST requests, source-vsa 2,556,
-    # release-tags 473+, blast-radius 427, caller-permissions 103 —
-    # about 5,950 between them, against the 5,000 an hour one
-    # installation is served. Run together they starve each other
-    # whoever owns the token. So the source walks (source-vsa,
-    # release-tags, blast-radius: about 3,500) take the second hour and
-    # everything else the first. level-assert.yml (3,736) keeps 05:30
-    # for the same reason. Ninety minutes rather than sixty because a
-    # scheduled run starts late more often than on time. The `plan`
-    # job is the ONLY reader of these two strings.
+    # Mondays 07:00 UTC, once, beside org-settings.yml, pins-and-belt.yml,
+    # badges.yml and the canon's records (#1888). These legs ran in two
+    # groups ninety minutes apart until 2026-11-21, for an API budget
+    # measured on 2026-11-14 (#1169) that stele#384 then took away: it
+    # moved both git-history walks off the REST API to one `git fetch`.
+    # Measured 2026-11-21, both groups dispatched back to back on main at
+    # 1bed67d7 inside 33 minutes, on one App installation, beside those
+    # four workflows dispatched at the same time:
+    #
+    #   job                                         2026-11-14  2026-11-21
+    #   every release has its evidence set          22m31s      27m, green
+    #   every source chain link verifies            15m53s      1m26s, PASS
+    #   every release tag is inside the signing     2m54s,      49s, green
+    #     epoch                                     incomplete
+    #   no published SBOM carries an undecided      7m16s       5m51s, green
+    #     advisory
+    #
+    # (runs 44920569773 and 44921606612). No job's log in either run
+    # carries a 403, a 429, a rate-limit message, a retry or a
+    # CANNOT_JUDGE. A throttled leg ends CANNOT_JUDGE by name.
     - cron: 0 7 * * 1
-    - cron: 30 8 * * 1
-  workflow_dispatch:
-    inputs:
-      legs:
-        description: Which group to run — never both in one hour (#1169)
-        type: choice
-        default: first
-        options:
-          - first
-          - second
+  workflow_dispatch: {}
 permissions:
   contents: read
 
@@ -72,42 +71,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  plan:
-    name: which group this run is
-    runs-on: ubuntu-26.04
-    permissions: {}
-    outputs:
-      legs: ${{ steps.pick.outputs.legs }}
-    steps:
-      - name: Name the group, or fail by name
-        id: pick
-        env:
-          SCHEDULE: ${{ github.event.schedule }}
-          LEGS: ${{ inputs.legs }}
-        # One place maps a trigger to a group, and an unknown trigger is
-        # RED here rather than a leg that quietly never runs: every
-        # other job gates on this output, so a cron edited above and
-        # not below would otherwise skip half the audit in a green run.
-        run: |
-          set -euo pipefail
-          case "${SCHEDULE:-dispatch:${LEGS}}" in
-            "0 7 * * 1" | dispatch:first) legs=first ;;
-            "30 8 * * 1" | dispatch:second) legs=second ;;
-            *)
-              # No canon tree in this job: the command is a literal, and the
-              # outside text follows on a plain line, never at its start (#1660).
-              echo "::error::slsa: no group is declared for this trigger — add it to the plan job"
-              printf '  trigger: %q\n' "${SCHEDULE:-dispatch:${LEGS}}"
-              exit 1
-              ;;
-          esac
-          echo "legs=${legs}" >> "${GITHUB_OUTPUT}"
-  # The legs. Every one `needs: plan` and names its group; a leg added
-  # without that pair would run in both hours.
   attestation-coverage:
     name: every release has its evidence set
-    needs: plan
-    if: needs.plan.outputs.legs == 'first'
     runs-on: ubuntu-26.04
     # Environment-scoped, like org-pins: this leg walks the POPULATION,
     # which has a private member, and the default token is served a
@@ -159,8 +124,6 @@ jobs:
 
   signer-surface:
     name: every signing capability has a live caller
-    needs: plan
-    if: needs.plan.outputs.legs == 'first'
     runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
@@ -188,8 +151,6 @@ jobs:
 
   caller-permissions:
     name: every caller grants what the canon's workflows ask
-    needs: plan
-    if: needs.plan.outputs.legs == 'first'
     runs-on: ubuntu-26.04
     # Environment-scoped, like org-pins: this leg walks the POPULATION,
     # which has a private member, and the default token is served a
@@ -241,8 +202,6 @@ jobs:
 
   spec-drift:
     name: the pinned SLSA source matrix matches upstream
-    needs: plan
-    if: needs.plan.outputs.legs == 'first'
     runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
@@ -268,8 +227,6 @@ jobs:
 
   drafts:
     name: every draft release has its record
-    needs: plan
-    if: needs.plan.outputs.legs == 'first'
     runs-on: ubuntu-26.04
     # Environment-scoped for the same reason baseline-drift is: the token
     # this needs is org-wide, and a secret referenced repo-wide is
@@ -319,8 +276,6 @@ jobs:
 
   source-vsa:
     name: every source chain link verifies
-    needs: plan
-    if: needs.plan.outputs.legs == 'second'
     runs-on: ubuntu-26.04
     # Environment-scoped, like org-pins: this leg walks the POPULATION,
     # which has a private member, and the default token is served a
@@ -370,8 +325,6 @@ jobs:
 
   release-tags:
     name: every release tag is inside the signing epoch
-    needs: plan
-    if: needs.plan.outputs.legs == 'second'
     runs-on: ubuntu-26.04
     # Environment-scoped, like org-pins: this leg walks the POPULATION,
     # which has a private member, and the default token is served a
@@ -423,8 +376,6 @@ jobs:
 
   blast-radius:
     name: no published SBOM carries an undecided advisory
-    needs: plan
-    if: needs.plan.outputs.legs == 'second'
     runs-on: ubuntu-26.04
     # Environment-scoped, like org-pins: this leg walks the POPULATION,
     # which has a private member, and the default token is served a
