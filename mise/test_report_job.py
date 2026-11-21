@@ -8,7 +8,9 @@ workflow that a scheduled workflow calls, from .github/workflows/
 (`<owner>/.github/.github/workflows/<file>@<sha>`). A scheduled
 workflow whose every job is such a call is a stub: the job lives in
 the workflow it calls. One with a job of its own carries the job
-itself, so a stub that also has one (self-records.yml) holds both.
+itself, so a stub that also has one (self-records.yml) holds both, and
+a self-contained template (scorecard.yml) carries it as the canon's own
+copy does.
 
 Each one's last job is `report`, its `needs:` names every other job,
 it runs `if: ${{ always() }}` and holds the two grants. Each scheduled
@@ -96,7 +98,7 @@ def population(root: Path) -> tuple[list[Path], list[tuple[Path, str]]]:
                 continue
             targets.add(root / WORKFLOWS / called)
             stubs.append((path, name))
-        if own and path.parent == root / WORKFLOWS:
+        if own:
             targets.add(path)
     return sorted(targets), stubs
 
@@ -218,6 +220,7 @@ class Canon(unittest.TestCase):
         self.assertIn("self-records.yml", names)
         self.assertNotIn("self-deep-tests.yml", names)
         self.assertIn((CANON / TEMPLATES / "records.yml", "records"), stubs)
+        self.assertIn(CANON / TEMPLATES / "scorecard.yml", targets)
 
 
 class Planted(unittest.TestCase):

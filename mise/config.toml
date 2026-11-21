@@ -9495,16 +9495,20 @@ fi
 '''
 
 [tasks."lint:template-pins"]
-description = "Workflow templates pin one SHA that is an ancestor of HEAD; scorecard stays pinless"
+description = "Workflow templates pin one released SHA; scorecard pins no reusable workflow"
 dir = "{{cwd}}"
 # Found by the #28 pre-close audit: all five templates sat a day behind
 # canon, predating three shipped fixes, with nothing anywhere going red — a
 # repo standing up from the templates would have inherited known bugs. The
 # deterministic properties are: every pin is a full SHA that is an ancestor
 # of HEAD (never unmerged or foreign history), all pinned templates agree
-# on ONE SHA (stub pins move together), and scorecard.yml carries no org
-# pin at all (it is self-contained by design — Scorecard's publish
-# validation rejects reusables). Deliberately NOT required: pin == HEAD —
+# on ONE SHA (stub pins move together), and scorecard.yml calls no
+# reusable workflow (it is self-contained by design — Scorecard's publish
+# validation rejects reusables). Its one canon pin is the canon action
+# (.github/actions/canon), which its `report` job needs for the belt's
+# Python and mise/standing_issue.py (#1887, owner's ruling 2026-11-21);
+# that pin is held to the same released SHA as every other. Deliberately
+# NOT required: pin == HEAD —
 # that would couple every canon commit to a template touch. Staleness
 # within merged history is the scheduled audit's judgement call, not the
 # gate's.
@@ -9524,8 +9528,9 @@ count=0
 for f in workflow-templates/*.y*ml; do
   lines=$(grep -E "uses:[[:space:]]*${canon_re}/" "${f}" || true)
   if [[ ${f##*/} == scorecard.* ]]; then
-    [[ -z ${lines} ]] || bad="${bad} ${f}(must stay pinless: self-contained by design)"
-    continue
+    reusable=$(grep -vE "uses:[[:space:]]*${canon_re}/\.github/actions/canon@" <<< "${lines}" || true)
+    [[ -z ${reusable} ]] || bad="${bad} ${f}(pins a reusable workflow: self-contained by design)"
+    lines=$(grep -E "uses:[[:space:]]*${canon_re}/\.github/actions/canon@" <<< "${lines}" || true)
   fi
   [[ -n ${lines} ]] || continue
   while IFS= read -r line; do
@@ -9567,10 +9572,11 @@ fi
 if [[ -n ${bad} ]]; then
   echo "lint:template-pins: template pin violations:${bad}" >&2
   echo "  templates pin one merged, RELEASED canon SHA and move together" >&2
-  echo "  (#111, #233); scorecard.yml never pins a reusable." >&2
+  echo "  (#111, #233); scorecard.yml pins the canon action alone, never a" >&2
+  echo "  reusable workflow (#1887)." >&2
   exit 1
 fi
-echo "lint:template-pins: ${count} pins at one ancestor SHA, scorecard pinless, released as${released}"
+echo "lint:template-pins: ${count} pins at one ancestor SHA, scorecard calls no reusable, released as${released}"
 '''
 
 [tasks."lint:runner-pin"]
