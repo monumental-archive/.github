@@ -10,6 +10,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.75.0](https://github.com/monumental-archive/.github/compare/v1.74.0...v1.75.0) - 2026-11-21
+
+### Added
+
+- record stele's findings through one adapter ([#1949](https://github.com/monumental-archive/.github/pull/1949))
+- hand every job's findings to the report job ([#1950](https://github.com/monumental-archive/.github/pull/1950))
+
+### Fixed
+
+- update monumental-archive/stele to v0.28.1 ([#1954](https://github.com/monumental-archive/.github/pull/1954))
+- judge the rust lock through stele, refuse advisory ignores ([#1957](https://github.com/monumental-archive/.github/pull/1957))
+
 ## [1.74.0](https://github.com/monumental-archive/.github/compare/v1.73.0...v1.74.0) - 2026-11-21
 
 ### Added
