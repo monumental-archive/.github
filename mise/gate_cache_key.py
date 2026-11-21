@@ -285,8 +285,8 @@ def rustc_verbose() -> str:
     """
     if shutil.which(RUSTC) is None:
         msg = (
-            "no rustc on PATH: a cargo cache or a coverage directory must"
-            " name the compiler that fills it"
+            "no rustc on PATH: a cargo cache or a measurement directory"
+            " must name the compiler that fills it"
         )
         raise ValueError(msg)
     done = subprocess.run([RUSTC, "-vV"], capture_output=True, text=True, check=False)
