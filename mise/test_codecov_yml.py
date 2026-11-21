@@ -51,6 +51,10 @@ def body() -> str:
 
 
 BODY = body()
+# As mise runs the body: the task's name, which the finding writer
+# reads (#1890), and the belt's BASH_ENV, which gives the body the
+# writer (#1934).
+AS_MISE = {"MISE_TASK_NAME": NAME, "BASH_ENV": str(BELT / "findings.sh")}
 
 
 def lint(files: dict[str, str]) -> subprocess.CompletedProcess[str]:
@@ -62,7 +66,7 @@ def lint(files: dict[str, str]) -> subprocess.CompletedProcess[str]:
     """
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
-        env = hermetic.env()
+        env = hermetic.env(**AS_MISE)
         for rel, text in files.items():
             path = root / rel
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -140,7 +144,7 @@ class CodecovYml(unittest.TestCase):
         """Tracked files only: an untracked config is not the tree's."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            env = hermetic.env()
+            env = hermetic.env(**AS_MISE)
             subprocess.run([GIT, "init", "-q"], cwd=root, env=env, check=True)
             (root / "codecov.yml").write_text(EDTF, encoding="utf-8")
             done = subprocess.run(

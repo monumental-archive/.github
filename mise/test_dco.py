@@ -65,7 +65,11 @@ def run(message: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [BASH, "-euo", "pipefail", "-c", body()],
             cwd=root,
-            env=env,
+            # As mise runs a body: the task's name, which the finding writer
+            # reads (#1890), and the belt's BASH_ENV, which gives the body the
+            # writer (#1934).
+            env=env
+            | {"MISE_TASK_NAME": "lint:dco", "BASH_ENV": str(BELT / "findings.sh")},
             capture_output=True,
             text=True,
             check=False,

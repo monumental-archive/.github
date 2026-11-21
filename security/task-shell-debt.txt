@@ -22,7 +22,7 @@ mise/config.toml	fix:sql	20	# #1544 unassigned
 mise/config.toml	lint:yaml	21	# #1544 unassigned
 mise/config.toml	lint:biome	51	# #1544 unassigned
 mise/config.toml	fix:biome	32	# #1544 unassigned
-mise/config.toml	lint:biome-domains	79	# #1544 unassigned
+mise/config.toml	lint:biome-domains	78	# #1544 unassigned
 mise/config.toml	lint:python-target	28	# #1544 unassigned
 mise/config.toml	lint:shell	28	# #1544 unassigned
 mise/config.toml	lint:belt-tree	63	# #1544 unassigned

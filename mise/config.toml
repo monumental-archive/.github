@@ -864,22 +864,22 @@ files=$(git ls-files ":!vendor/**" "*.toml")
 }
 tracked=$(git ls-files "taplo.toml" "*/taplo.toml" ".taplo.toml" "*/.taplo.toml")
 if [[ -n ${tracked} ]]; then
-  echo "lint:toml: the belt delivers the org TOML format; a repo must not track its own" >&2
   # shellcheck disable=SC2001  # an anchored per-line indent; ${x//from/to} has no line anchor
-  sed 's/^/  tracked: /' <<< "${tracked}" >&2
-  echo "  git rm --cached it: --config replaces it, so it changes nothing and reads as if it did" >&2
-  echo "  its exclude globs steer taplo's walker, which the belt never uses — the file list is git's" >&2
+  IFS=$'\n' read -r -d '' -a detail < <(sed 's/^/tracked: /' <<< "${tracked}") || true
+  org_finding "" "the belt delivers the org TOML format; a repo must not track its own" ${detail[@]+"${detail[@]}"} \
+    "git rm --cached it: --config replaces it, so it changes nothing and reads as if it did" \
+    "its exclude globs steer taplo's walker, which the belt never uses — the file list is git's"
   exit 1
 fi
 config="${ORG_BELT_DIR}/taplo-org.toml"
 [[ -r ${config} ]] || {
-  echo "lint:toml: the org TOML format is not readable at ${config}" >&2
-  echo "  taplo only WARNS on an unreadable --config and formats on at its own defaults, so a" >&2
-  echo "  belt that did not arrive would produce a green run at a level nobody chose." >&2
+  org_finding "" "the org TOML format is not readable at ${config}" \
+    "taplo only WARNS on an unreadable --config and formats on at its own defaults, so a" \
+    "belt that did not arrive would produce a green run at a level nobody chose."
   exit 1
 }
 xargs taplo fmt --config "${config}" --check --diff <<< "${files}" || {
-  echo "lint:toml: formatting differs from the org's — run fix:toml" >&2
+  org_finding "" "formatting differs from the org's — run fix:toml"
   exit 1
 }
 xargs taplo lint --config "${config}" <<< "${files}"
@@ -915,7 +915,7 @@ run = '''
 files=$(git ls-files ":!vendor/**" "*.md" "*.markdown")
 if [[ -n ${files} ]]; then
   xargs rumdl check --config "${ORG_BELT_DIR}/rumdl.toml" <<< "${files}" || {
-    echo "lint:markdown: findings above — run fix:markdown for the fixable ones; the rest by hand" >&2
+    org_finding "" "findings above — run fix:markdown for the fixable ones; the rest by hand"
     exit 1
   }
 else
@@ -989,7 +989,7 @@ done <<< "${tracked}"
   exit 0
 }
 xargs sqlfluff lint --config "${ORG_BELT_DIR}/sqlfluff.cfg" <<< "${files}" || {
-  echo "lint:sql: findings above — run fix:sql for the fixable ones; the rest by hand" >&2
+  org_finding "" "findings above — run fix:sql for the fixable ones; the rest by hand"
   exit 1
 }
 count=$(wc -l <<< "${files}" | tr -d " ")
@@ -1160,8 +1160,8 @@ files=$(git ls-files ':!vendor/**')
   exit 0
 }
 if ! git ls-files --error-unmatch ".editorconfig" > /dev/null 2>&1; then
-  echo "lint:editorconfig: no .editorconfig tracked — copy scaffold/.editorconfig (#403)" >&2
-  echo "  without it every editorconfig-checker check vacuously passes" >&2
+  org_finding "" "no .editorconfig tracked — copy scaffold/.editorconfig (#403)" \
+    "without it every editorconfig-checker check vacuously passes"
   exit 1
 fi
 xargs editorconfig-checker --disable-indent-size <<< "${files}"
@@ -1734,18 +1734,18 @@ files=$(git ls-files ':!vendor/**' "*.js" "*.jsx" "*.mjs" "*.cjs" "*.ts" "*.tsx"
 }
 tracked=$(git ls-files "biome.jsonc" "*/biome.json" "*/biome.jsonc")
 if [[ -n ${tracked} ]]; then
-  echo "lint:biome: a repo declares its biome domains in a root biome.json and nowhere else" >&2
   # shellcheck disable=SC2001  # an anchored per-line indent; ${x//from/to} has no line anchor
-  sed 's/^/  tracked: /' <<< "${tracked}" >&2
-  echo "  a nested config takes root:false + extends and may then switch a rule off in one" >&2
-  echo "  subtree — biome's own monorepo guide demonstrates exactly that; the org has no" >&2
-  echo "  such surface. A .jsonc root is refused for the plainer reason: one shape, one name." >&2
+  IFS=$'\n' read -r -d '' -a detail < <(sed 's/^/tracked: /' <<< "${tracked}") || true
+  org_finding "" "a repo declares its biome domains in a root biome.json and nowhere else" ${detail[@]+"${detail[@]}"} \
+    "a nested config takes root:false + extends and may then switch a rule off in one" \
+    "subtree — biome's own monorepo guide demonstrates exactly that; the org has no" \
+    "such surface. A .jsonc root is refused for the plainer reason: one shape, one name."
   exit 1
 fi
 generated="biome-org.generated.json"
 generated_tracked=$(git ls-files "${generated}")
 if [[ -n ${generated_tracked} ]]; then
-  echo "lint:biome: ${generated} is tracked; the belt writes it for the length of one run" >&2
+  org_finding "" "${generated} is tracked; the belt writes it for the length of one run"
   exit 1
 fi
 rc=0
@@ -1763,15 +1763,15 @@ counts=$(jq -r '[.summary.errors, .summary.warnings, .summary.infos] | @tsv' "${
 read -r errors warnings infos <<< "${counts}"
 for n in "${errors}" "${warnings}" "${infos}"; do
   [[ ${n} =~ ^[0-9]+$ ]] && continue
-  echo "lint:biome: biome's JSON summary is not the shape this task reads — the reporter is" >&2
-  echo "  experimental and may move in a PATCH release, so a shape change fails rather than" >&2
-  echo "  silently counting zero. Re-read the reporter output and update the task." >&2
+  org_finding "" "biome's JSON summary is not the shape this task reads — the reporter is" \
+    "experimental and may move in a PATCH release, so a shape change fails rather than" \
+    "silently counting zero. Re-read the reporter output and update the task."
   exit 1
 done
 if [[ $((errors + warnings + infos)) -ne 0 ]]; then
   xargs biome ci --config-path "${generated}" <<< "${files}" || true
-  echo "lint:biome: ${errors} error(s), ${warnings} warning(s), ${infos} info(s) — every severity fails" >&2
-  echo "  run fix:biome for what biome can write; the rest is by hand" >&2
+  org_finding "" "${errors} error(s), ${warnings} warning(s), ${infos} info(s) — every severity fails" \
+    "run fix:biome for what biome can write; the rest is by hand"
   exit 1
 fi
 count=$(wc -l <<< "${files}" | tr -d ' ')
@@ -1867,7 +1867,7 @@ table=$(git ls-files "mise/biome-domains.tsv")
   exit 0
 }
 command -v biome > /dev/null || {
-  echo "lint:biome-domains: biome missing from the belt" >&2
+  org_finding "" "biome missing from the belt"
   exit 1
 }
 problems=""
@@ -1905,11 +1905,10 @@ while IFS=$'\t' read -r domain kind rule triggers; do
   }
 done < "${table}"
 if [[ -n ${problems} ]]; then
-  echo "lint:biome-domains: the table no longer matches the pinned biome" >&2
-  # shellcheck disable=SC2001  # an anchored per-line indent; ${x//from/to} has no line anchor
-  sed '/^$/d; s/^/  /' <<< "${problems}" >&2
+  IFS=$'\n' read -r -d '' -a detail <<< "${problems}" || true
   # shellcheck disable=SC2016  # the backticks quote a command NAME in prose
-  echo '  re-derive it from `biome explain` — a repo claims domains through this file' >&2
+  org_finding "" "the table no longer matches the pinned biome" ${detail[@]+"${detail[@]}"} \
+    're-derive it from `biome explain` — a repo claims domains through this file'
   exit 1
 fi
 version=$(biome --version | awk '{print $2}')
@@ -1926,10 +1925,9 @@ named=$(jq -r '.linter.rules.nursery // {} | keys[]' mise/biome-org.json | sort)
 recorded=$(awk -F'\t' '!/^#/ && NF { print $1 }' "${nursery}" | sort)
 drift=$(comm -3 <(echo "${named}") <(echo "${recorded}"))
 if [[ -n ${drift} ]]; then
-  echo "lint:biome-domains: the nursery table and the org config name different rules" >&2
-  comm -23 <(echo "${named}") <(echo "${recorded}") | sed 's/^/  enforced but unmapped: /' >&2
-  comm -13 <(echo "${named}") <(echo "${recorded}") | sed 's/^/  mapped but not enforced: /' >&2
-  echo "  an unmapped rule escapes its domain and runs in every repo whatever the repo is" >&2
+  IFS=$'\n' read -r -d '' -a detail < <(awk -F'\t' '$1 != "" { print "enforced but unmapped: " $1 } $1 == "" { m[++n] = "mapped but not enforced: " $2 } END { for (i = 1; i <= n; i++) print m[i] }' <<< "${drift}") || true
+  org_finding "" "the nursery table and the org config name different rules" ${detail[@]+"${detail[@]}"} \
+    "an unmapped rule escapes its domain and runs in every repo whatever the repo is"
   exit 1
 fi
 nrows=0
@@ -1947,11 +1945,10 @@ while IFS=$'\t' read -r rule domain; do
   }
 done < "${nursery}"
 if [[ -n ${problems} ]]; then
-  echo "lint:biome-domains: the nursery table no longer matches the pinned biome" >&2
-  # shellcheck disable=SC2001  # an anchored per-line indent; ${x//from/to} has no line anchor
-  sed '/^$/d; s/^/  /' <<< "${problems}" >&2
+  IFS=$'\n' read -r -d '' -a detail <<< "${problems}" || true
   # shellcheck disable=SC2016  # the backticks quote a command NAME in prose
-  echo '  re-derive it from `biome explain` — a wrong row is a rule in the wrong repo' >&2
+  org_finding "" "the nursery table no longer matches the pinned biome" ${detail[@]+"${detail[@]}"} \
+    're-derive it from `biome explain` — a wrong row is a rule in the wrong repo'
   exit 1
 fi
 echo "lint:biome-domains: ${rows} domains and ${nrows} nursery rules agree with biome ${version}"
@@ -1978,11 +1975,11 @@ files=$(git ls-files ':!vendor/**' "*.py" "*.pyi")
   exit 0
 }
 xargs ruff check --config "${ORG_BELT_DIR}/ruff.toml" <<< "${files}" || {
-  echo "lint:python: findings above — run fix:python for ruff's safe fixes; the rest by hand" >&2
+  org_finding "" "findings above — run fix:python for ruff's safe fixes; the rest by hand"
   exit 1
 }
 xargs ruff format --config "${ORG_BELT_DIR}/ruff.toml" --check <<< "${files}" || {
-  echo "lint:python: formatting differs from the org's — run fix:python" >&2
+  org_finding "" "formatting differs from the org's — run fix:python"
   exit 1
 }
 '''
@@ -2010,7 +2007,7 @@ files=$(git ls-files ':!vendor/**' "*.py" "*.pyi")
 # this check skip clean — the vacuous skip it exists to prevent.
 cfg="${ORG_BELT_DIR}/ruff.toml"
 [[ -f ${cfg} ]] || {
-  echo "lint:python-target: the belt's ruff.toml is missing — the belt did not arrive" >&2
+  org_finding "" "the belt's ruff.toml is missing — the belt did not arrive"
   exit 1
 }
 target=$(grep -oE '^target-version[[:space:]]*=[[:space:]]*"py[0-9]+"' "${cfg}" | grep -oE 'py[0-9]+')
@@ -2028,8 +2025,8 @@ tmin=${t#?}
 amaj=${a%"${a#?}"}
 amin=${a#?}
 if ((tmaj > amaj || (tmaj == amaj && 10#${tmin} > 10#${amin}))); then
-  echo "lint:python-target: ${cfg} targets ${target} but the pinned interpreter is ${actual}" >&2
-  echo "  ruff's pyupgrade rules would rewrite this code into syntax ${actual} cannot execute" >&2
+  org_finding "" "${cfg} targets ${target} but the pinned interpreter is ${actual}" \
+    "ruff's pyupgrade rules would rewrite this code into syntax ${actual} cannot execute"
   exit 1
 fi
 echo "lint:python-target: ${target} <= ${actual}, ok"
@@ -2055,14 +2052,14 @@ files=$(git ls-files ':!vendor/**' "*.py" "*.pyi")
 [[ -n ${files} ]] || { echo "lint:python-module-names: no Python tracked, skipped" && exit 0; }
 bad=$(awk -F/ '$NF ~ /-/' <<< "${files}")
 if [[ -n ${bad} ]]; then
-  echo "lint:python-module-names: not a module name, so nothing can import it (#1634):" >&2
-  awk '{ print "  " $0 }' <<< "${bad}" >&2
-  echo "  name it with underscores in place of the hyphens" >&2
+  IFS=$'\n' read -r -d '' -a detail <<< "${bad}" || true
+  org_finding "" "not a module name, so nothing can import it (#1634):" ${detail[@]+"${detail[@]}"} \
+    "name it with underscores in place of the hyphens"
   exit 1
 fi
 IFS=$'\n' read -r -d '' -a args < <(printf '%s\0' "${files}")
 "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/python_roots.py" "${ORG_BELT_DIR}" "${args[@]}" > /dev/null || {
-  echo "lint:python-module-names: rename one of each pair above so every module name is one file's" >&2
+  org_finding "" "rename one of each pair above so every module name is one file's"
   exit 1
 }
 echo "lint:python-module-names: ok"
@@ -2195,22 +2192,22 @@ files=$(git ls-files ':!vendor/**' | xargs shfmt --find)
 }
 tracked=$(git ls-files ".shellcheckrc" "*/.shellcheckrc")
 if [[ -n ${tracked} ]]; then
-  echo "lint:shell: the belt delivers the org's shellcheck settings; a repo must not track its own" >&2
   # shellcheck disable=SC2001  # an anchored per-line indent; ${x//from/to} has no line anchor
-  sed 's/^/  tracked: /' <<< "${tracked}" >&2
-  echo "  git rm --cached it: --rcfile beats discovery, so it changes nothing and reads as if it did" >&2
-  echo "  a check genuinely wrong for one site takes a # shellcheck disable=SCxxxx there, with a reason" >&2
+  IFS=$'\n' read -r -d '' -a detail < <(sed 's/^/tracked: /' <<< "${tracked}") || true
+  org_finding "" "the belt delivers the org's shellcheck settings; a repo must not track its own" ${detail[@]+"${detail[@]}"} \
+    "git rm --cached it: --rcfile beats discovery, so it changes nothing and reads as if it did" \
+    "a check genuinely wrong for one site takes a # shellcheck disable=SCxxxx there, with a reason"
   exit 1
 fi
 rc="${ORG_BELT_DIR}/shellcheckrc"
 [[ -r ${rc} ]] || {
-  echo "lint:shell: the org shellcheck config is not readable at ${rc}" >&2
-  echo "  shellcheck only WARNS on an unreadable --rcfile and lints on at its defaults, so a" >&2
-  echo "  belt that did not arrive would produce a clean run instead of a red one. Checked here." >&2
+  org_finding "" "the org shellcheck config is not readable at ${rc}" \
+    "shellcheck only WARNS on an unreadable --rcfile and lints on at its defaults, so a" \
+    "belt that did not arrive would produce a clean run instead of a red one. Checked here."
   exit 1
 }
 xargs shfmt -i 2 -bn -ci -sr -s -d <<< "${files}" || {
-  echo "lint:shell: formatting differs from the org's — run fix:shell" >&2
+  org_finding "" "formatting differs from the org's — run fix:shell"
   exit 1
 }
 xargs shellcheck --rcfile="${rc}" <<< "${files}"
@@ -2499,20 +2496,20 @@ if [[ -n ${own} && -d ${own_dir} ]]; then
   got="${own_dir}/${own##*/}"
 fi
 if [[ ${got} != "${want}" ]]; then
-  echo "lint:belt-tree: the task bodies running this gate come from" >&2
-  echo "  another tree's belt, not this one's (#1232):" >&2
-  echo "    Source:       ${own}" >&2
-  echo "    this tree's:  ${want}" >&2
-  echo "  mise loaded a config above this tree. Re-run with the ceiling:" >&2
-  echo "${remedy}" >&2
+  org_finding "" "the task bodies running this gate come from" \
+    "another tree's belt, not this one's (#1232):" \
+    "  Source:       ${own}" \
+    "  this tree's:  ${want}" \
+    "mise loaded a config above this tree. Re-run with the ceiling:" \
+    "${remedy#  }"
   exit 1
 fi
 echo "lint:belt-tree: task bodies from ${own}"
 if [[ -z ${ORG_BELT_DIR:-} || ! -d ${ORG_BELT_DIR} ]]; then
-  echo "lint:belt-tree: ORG_BELT_DIR is unset or names no directory —" >&2
-  echo "  the belt cannot locate itself, so no delivered config any task" >&2
-  echo "  reads is trustworthy. Re-run pinned to the tree under test:" >&2
-  echo "${remedy}" >&2
+  org_finding "" "ORG_BELT_DIR is unset or names no directory —" \
+    "the belt cannot locate itself, so no delivered config any task" \
+    "reads is trustworthy. Re-run pinned to the tree under test:" \
+    "${remedy#  }"
   exit 1
 fi
 if command -v sha256sum > /dev/null 2>&1; then
@@ -2542,16 +2539,16 @@ if [[ ${tree_belt} == "${run_belt}" ]]; then
   echo "lint:belt-tree: the belt answering is this tree's belt"
   exit 0
 fi
-echo "lint:belt-tree: the belt answering this gate is NOT the belt in" >&2
-echo "  this tree, so the gate is measuring a different revision of the" >&2
-echo "  canon than the one you are changing (#867)." >&2
-echo "    this tree's belt: ${PWD}/mise (${tree_belt:0:12})" >&2
-echo "    belt answering:   ${ORG_BELT_DIR} (${run_belt:0:12})" >&2
-echo "  Re-run pinned to the tree under test:" >&2
-echo "${remedy}" >&2
-echo "  Which belt supplies a task BODY is a separate resolution that can" >&2
-echo "  disagree with this one — read the Source line of:" >&2
-echo "    mise tasks info <task>" >&2
+org_finding "" "the belt answering this gate is NOT the belt in" \
+  "this tree, so the gate is measuring a different revision of the" \
+  "canon than the one you are changing (#867)." \
+  "  this tree's belt: ${PWD}/mise (${tree_belt:0:12})" \
+  "  belt answering:   ${ORG_BELT_DIR} (${run_belt:0:12})" \
+  "Re-run pinned to the tree under test:" \
+  "${remedy#  }" \
+  "Which belt supplies a task BODY is a separate resolution that can" \
+  "disagree with this one — read the Source line of:" \
+  "  mise tasks info <task>"
 exit 1
 '''
 
@@ -2841,8 +2838,8 @@ while read -r sha; do
   grep -qF "<${email}>" <<< "${signoffs}" || bad="${bad} ${sha:0:8}"
 done <<< "${shas}"
 if [[ -n ${bad} ]]; then
-  echo "lint:dco: commits missing a sign-off matching their author:${bad}" >&2
-  echo "  fix with: git commit -s   (or: git rebase --signoff origin/main)" >&2
+  org_finding "" "commits missing a sign-off matching their author:${bad}" \
+    "fix with: git commit -s   (or: git rebase --signoff origin/main)"
   exit 1
 fi
 echo "lint:dco: ${count} commits signed off"
@@ -2868,9 +2865,9 @@ while IFS= read -r f; do
   [[ ${mode} == "100755" ]] || bad="${bad} ${f}(${mode})"
 done <<< "${files}"
 if [[ -n ${bad} ]]; then
-  echo "lint:exec-bits: tracked scripts missing the executable bit:${bad}" >&2
-  echo "  workflows exec these by path; a lost mode is exit 126 after the tag" >&2
-  echo "  fix with: chmod +x <file> && git add <file>" >&2
+  org_finding "" "tracked scripts missing the executable bit:${bad}" \
+    "workflows exec these by path; a lost mode is exit 126 after the tag" \
+    "fix with: chmod +x <file> && git add <file>"
   exit 1
 fi
 count=$(wc -l <<< "${files}" | tr -d " ")
@@ -2895,12 +2892,10 @@ run = '''
 # Brace expansion names all twelve; git ls-files prints the tracked ones.
 found=$(git ls-files -- {,dev/,.github/}{codecov,.codecov}.{yml,yaml})
 if [[ -n ${found} ]]; then
-  {
-    echo "lint:codecov-yml: tracked Codecov config overrides the org's Global YAML:"
-    while IFS= read -r f; do echo "  ${f}"; done <<< "${found}"
-    echo "  the org turns Codecov's statuses off once, org-wide (#1532);"
-    echo "  remove the file; docs/runbook.md's Codecov entry holds the rule"
-  } >&2
+  IFS=$'\n' read -r -d '' -a detail <<< "${found}" || true
+  org_finding "" "tracked Codecov config overrides the org's Global YAML:" "${detail[@]}" \
+    "the org turns Codecov's statuses off once, org-wide (#1532);" \
+    "remove the file; docs/runbook.md's Codecov entry holds the rule"
   exit 1
 fi
 echo "lint:codecov-yml: no Codecov config tracked; the org's Global YAML applies"
@@ -3026,7 +3021,7 @@ manifests=$(git ls-files ':!vendor/**' "Cargo.toml" "*/Cargo.toml")
 # is a broken toolchain, and skipping would be the vacuous-success
 # failure.
 command -v cargo > /dev/null || {
-  echo "lint:rust: Cargo.toml present but cargo missing — pin rust in mise.toml" >&2
+  org_finding "" "Cargo.toml present but cargo missing — pin rust in mise.toml"
   exit 1
 }
 # clippy is a rustup COMPONENT of the repo's own pin, not a belt binary.
@@ -3037,9 +3032,9 @@ command -v cargo > /dev/null || {
 # toolchain (measured twice on the lab's v0.18.0 release PR, #117).
 installed=$(rustup component list --installed 2> /dev/null) || installed=""
 if ! grep -q "^clippy" <<< "${installed}"; then
-  echo "lint:rust: clippy component missing — declare it with the rust pin in mise.toml:" >&2
-  echo '  rust = { version = "1.xx.x", components = "clippy,rustfmt,llvm-tools" }' >&2
-  echo "  (installed with the toolchain, before tasks run — never mid-run)" >&2
+  org_finding "" "clippy component missing — declare it with the rust pin in mise.toml:" \
+    'rust = { version = "1.xx.x", components = "clippy,rustfmt,llvm-tools" }' \
+    "(installed with the toolchain, before tasks run — never mid-run)"
   exit 1
 fi
 # The knobs are org policy, so a repo-local clippy.toml is a silent
@@ -3078,10 +3073,10 @@ if git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1; then
 fi
 local_conf=$(git ls-files "${conf_spec[@]}")
 if [[ -n ${local_conf} ]]; then
-  echo "lint:rust: repo-local Rust tool configuration is not the org's:${local_conf}" >&2
-  echo "  the knobs live in the canon's mise/clippy.toml and mise/rustfmt.toml," >&2
-  echo "  delivered through CLIPPY_CONF_DIR and rustfmt's --config-path" >&2
-  echo "  a setting this repo genuinely needs is argued into the canon, not kept locally" >&2
+  org_finding "" "repo-local Rust tool configuration is not the org's:${local_conf}" \
+    "the knobs live in the canon's mise/clippy.toml and mise/rustfmt.toml," \
+    "delivered through CLIPPY_CONF_DIR and rustfmt's --config-path" \
+    "a setting this repo genuinely needs is argued into the canon, not kept locally"
   exit 1
 fi
 # Locate the canon's clippy.toml. CI sets MISE_GLOBAL_CONFIG_FILE to it;
@@ -3098,8 +3093,8 @@ trap 'rc=$?; rm -f "${out}" "${fmt_out}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] 
 # rustfmt is a rustup component of the repo's own pin exactly like clippy,
 # asserted with a remedy and never installed.
 if ! grep -q "^rustfmt" <<< "${installed}"; then
-  echo "lint:rust: rustfmt component missing — declare it with the rust pin in mise.toml:" >&2
-  echo '  rust = { version = "1.xx.x", components = "clippy,rustfmt,llvm-tools" }' >&2
+  org_finding "" "rustfmt component missing — declare it with the rust pin in mise.toml:" \
+    'rust = { version = "1.xx.x", components = "clippy,rustfmt,llvm-tools" }'
   exit 1
 fi
 # Formatting suppression, held to the same standard as clippy's — except
@@ -3120,10 +3115,10 @@ while IFS= read -r f; do
   fi
 done <<< "${rs}"
 if [[ -n ${skips} ]]; then
-  echo "lint:rust: formatting suppressed without a written decision:${skips}" >&2
-  echo "  #![rustfmt::skip] exempts an entire file — never allowed" >&2
-  echo "  #[rustfmt::skip] must carry a '// rustfmt-skip: <why>' marker above it" >&2
-  echo "  rustfmt has no #[expect] analogue, so the comment is the only thing a reviewer sees" >&2
+  org_finding "" "formatting suppressed without a written decision:${skips}" \
+    "#![rustfmt::skip] exempts an entire file — never allowed" \
+    "#[rustfmt::skip] must carry a '// rustfmt-skip: <why>' marker above it" \
+    "rustfmt has no #[expect] analogue, so the comment is the only thing a reviewer sees"
   exit 1
 fi
 # `cargo fmt` rather than a tracked-file list — the lint:go deviation with
@@ -3142,12 +3137,12 @@ cargo fmt --all --check -- --config-path "${ORG_BELT_DIR}/rustfmt.toml" > "${fmt
 # the warnings are the check and the exit code is only half of it.
 if grep -q "^Warning" "${fmt_out}"; then
   cat "${fmt_out}" >&2
-  echo "lint:rust: rustfmt warned — an ignored option means a weaker format, silently" >&2
+  org_finding "" "rustfmt warned — an ignored option means a weaker format, silently"
   exit 1
 fi
 if [[ ${fmt_status} -ne 0 ]]; then
   cat "${fmt_out}" >&2
-  echo "lint:rust: formatting differs from the org's — run 'mise run fix:rust'" >&2
+  org_finding "" "formatting differs from the org's — run 'mise run fix:rust'"
   exit 1
 fi
 echo "lint:rust: formatting clean"
@@ -3255,7 +3250,7 @@ cargo fetch --locked
 surface=$(cargo metadata --no-deps --format-version 1 --locked \
   | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/gate_surface.py" --exclude "${CLIPPY_EXCLUDE:-}")
 [[ -n ${surface} ]] || {
-  echo "lint:rust: a Cargo.toml is tracked but cargo metadata names no workspace member" >&2
+  org_finding "" "a Cargo.toml is tracked but cargo metadata names no workspace member"
   exit 1
 }
 out=$(mktemp)
@@ -3294,10 +3289,10 @@ done <<< "${surface}"
 # gets its own pass (measured, both). No repo in the org sets
 # CLIPPY_FEATURES today, so this is a signpost and not a migration.
 if grep -q "does not contain this feature" "${out}"; then
-  echo "lint:rust: CLIPPY_FEATURES names a feature some crate in this workspace lacks" >&2
-  echo "  every crate is linted as its own package (#726), so the value has to be one" >&2
-  echo "  each member accepts — --all-features, or --no-default-features — and a crate" >&2
-  echo "  that genuinely cannot take it is named in CLIPPY_EXCLUDE instead" >&2
+  org_finding "" "CLIPPY_FEATURES names a feature some crate in this workspace lacks" \
+    "every crate is linted as its own package (#726), so the value has to be one" \
+    "each member accepts — --all-features, or --no-default-features — and a crate" \
+    "that genuinely cannot take it is named in CLIPPY_EXCLUDE instead"
   exit 1
 fi
 # A lint name rustc does not recognise is warning E0602, and `-D
@@ -3308,8 +3303,8 @@ fi
 # excluded starts firing — but the run must say WHY rather than leave a
 # maintainer reading a contradiction that looks like a false positive.
 if grep -qE "E0602|has been renamed to" "${out}"; then
-  echo "lint:rust: a lint name above is unknown to this toolchain (see E0602/renamed above)" >&2
-  echo "  clippy renamed or removed it — update the exclusion list in mise/config.toml" >&2
+  org_finding "" "a lint name above is unknown to this toolchain (see E0602/renamed above)" \
+    "clippy renamed or removed it — update the exclusion list in mise/config.toml"
   exit 1
 fi
 # The population, printed before the verdict and in BOTH directions, so
@@ -3319,7 +3314,7 @@ echo "lint:rust: ${count} crate(s) linted:${linted}"
 [[ -z ${extensions} ]] || echo "lint:rust: pgrx extension(s), linted by lint:pg-clippy:${extensions}"
 [[ -z ${excluded} ]] || echo "lint:rust: excluded by CLIPPY_EXCLUDE:${excluded}"
 if [[ -n ${red} ]]; then
-  echo "lint:rust: red:${red}" >&2
+  org_finding "" "red:${red}"
   exit "${status}"
 fi
 echo "lint:rust: clean at every group (restriction minus ${contradiction_count} named contradictions)"
@@ -3547,7 +3542,7 @@ manifests=$(git ls-files ':!vendor/**' "Cargo.toml" "*/Cargo.toml")
 # is a broken toolchain, and skipping would be the vacuous-success
 # failure.
 command -v cargo > /dev/null || {
-  echo "lint:msrv: Cargo.toml present but cargo missing — pin rust in mise.toml" >&2
+  org_finding "" "Cargo.toml present but cargo missing — pin rust in mise.toml"
   exit 1
 }
 # The pins this reads are mise's own account of them, so mise itself is
@@ -3555,7 +3550,7 @@ command -v cargo > /dev/null || {
 # because the alternative to a red here is a check that silently sees no
 # pins and calls a repo unpinned.
 command -v mise > /dev/null || {
-  echo "lint:msrv: mise missing — the toolchain pins this reads are mise's" >&2
+  org_finding "" "mise missing — the toolchain pins this reads are mise's"
   exit 1
 }
 tmp=$(mktemp -d)
@@ -3638,7 +3633,7 @@ while IFS=$'\t' read -r kind first own rest; do
       compiling=""
       ;;
     *)
-      echo "lint:msrv: unreadable plan record from msrv_plan.py: ${kind}" >&2
+      org_finding "" "unreadable plan record from msrv_plan.py: ${kind}"
       exit 1
       ;;
   esac
@@ -3695,7 +3690,7 @@ manifests=$(git ls-files ':!vendor/**' "Cargo.toml" "*/Cargo.toml")
   exit 0
 }
 command -v cargo > /dev/null || {
-  echo "lint:pg-clippy: Cargo.toml present but cargo missing — pin rust in mise.toml" >&2
+  org_finding "" "Cargo.toml present but cargo missing — pin rust in mise.toml"
   exit 1
 }
 cargo fetch --locked
@@ -3717,8 +3712,8 @@ majors=$(org_pgrx_union <<< "${pairs}")
 # clippy is a rustup COMPONENT of the repo's own pin, asserted with a
 # remedy and never installed mid-run — the lint:rust reasoning verbatim.
 if ! installed=$(rustup component list --installed 2> /dev/null) || ! grep -q "^clippy" <<< "${installed}"; then
-  echo "lint:pg-clippy: clippy component missing — declare it with the rust pin in mise.toml:" >&2
-  echo '  rust = { version = "1.xx.x", components = "clippy,rustfmt,llvm-tools" }' >&2
+  org_finding "" "clippy component missing — declare it with the rust pin in mise.toml:" \
+    'rust = { version = "1.xx.x", components = "clippy,rustfmt,llvm-tools" }'
   exit 1
 fi
 export CLIPPY_CONF_DIR="${ORG_BELT_DIR}"
@@ -3929,7 +3924,7 @@ manifests=$(git ls-files ':!vendor/**' "Cargo.toml" "*/Cargo.toml")
   exit 0
 }
 command -v cargo > /dev/null || {
-  echo "lint:gate-surface: Cargo.toml present but cargo missing — pin rust in mise.toml" >&2
+  org_finding "" "Cargo.toml present but cargo missing — pin rust in mise.toml"
   exit 1
 }
 surface=$(cargo metadata --no-deps --format-version 1 --locked \
@@ -3990,11 +3985,11 @@ mods=$(git ls-files ':!vendor/**' "go.mod" "*/go.mod" "*/*/go.mod")
 # A repo with a go.mod has go pinned as a build input; go absent is a
 # broken toolchain, and skipping would be the vacuous-success failure.
 command -v go > /dev/null || {
-  echo "lint:go: go.mod present but go missing — pin go in mise.toml" >&2
+  org_finding "" "go.mod present but go missing — pin go in mise.toml"
   exit 1
 }
 command -v golangci-lint > /dev/null || {
-  echo "lint:go: golangci-lint missing from the belt" >&2
+  org_finding "" "golangci-lint missing from the belt"
   exit 1
 }
 # The one language config that stays repo-side: it names the module path
@@ -4002,8 +3997,8 @@ command -v golangci-lint > /dev/null || {
 # own packages. Per-repo CONTENT, like deny.toml's skips — the belt can
 # deliver a config, not invent a repo's identity (#445).
 if ! git ls-files --error-unmatch ".golangci.yml" > /dev/null 2>&1; then
-  echo "lint:go: Go is tracked but no .golangci.yml is — copy scaffold/.golangci.yml (#392)" >&2
-  echo "  without it golangci-lint runs its five default linters, not the org's default: all" >&2
+  org_finding "" "Go is tracked but no .golangci.yml is — copy scaffold/.golangci.yml (#392)" \
+    "without it golangci-lint runs its five default linters, not the org's default: all"
   exit 1
 fi
 count=0
@@ -4013,7 +4008,7 @@ while IFS= read -r m; do
   d=$(dirname "${m}")
   cache="$(cd "${d}" && git rev-parse --absolute-git-dir)/golangci-lint"
   (cd "${d}" && export GOLANGCI_LINT_CACHE="${cache}" && golangci-lint run) || {
-    echo "lint:go: ${d}: findings above — run fix:go for the fixable ones and the format; the rest by hand" >&2
+    org_finding "${d}" "findings above — run fix:go for the fixable ones and the format; the rest by hand"
     exit 1
   }
 done <<< "${mods}"
@@ -4040,12 +4035,12 @@ dir = "{{cwd}}"
 run = '''
 set -euo pipefail
 command -v tsc > /dev/null || {
-  echo "lint:tsc-flags: tsc missing from the belt" >&2
+  org_finding "" "tsc missing from the belt"
   exit 1
 }
 list="${ORG_BELT_DIR}/tsc-flags.txt"
 [[ -f ${list} ]] || {
-  echo "lint:tsc-flags: ${list} missing from the belt" >&2
+  org_finding "" "${list} missing from the belt"
   exit 1
 }
 known=$({
@@ -4057,10 +4052,9 @@ have=$(tsc --all | sed -n '/^### Type Checking/,/^### Watch/p' \
   | awk '/^--/{name=$1} /^type: boolean/{print name}' | tr -d ',' | sort -u)
 unruled=$(comm -23 <(echo "${have}") <(echo "${known}"))
 if [[ -n ${unruled} ]]; then
-  echo "lint:tsc-flags: ${version} has type-checking options the org has not ruled on:" >&2
-  # shellcheck disable=SC2001  # an anchored per-line indent; ${x//from/to} has no line anchor
-  sed 's/^/  /' <<< "${unruled}" >&2
-  echo "  pass it in mise/tsc-flags.txt, or add an '# adjudicated:' line saying why not" >&2
+  IFS=$'\n' read -r -d '' -a detail <<< "${unruled}" || true
+  org_finding "" "${version} has type-checking options the org has not ruled on:" ${detail[@]+"${detail[@]}"} \
+    "pass it in mise/tsc-flags.txt, or add an '# adjudicated:' line saying why not"
   exit 1
 fi
 echo "lint:tsc-flags: every type-checking option of ${version} is passed or ruled"
@@ -4115,12 +4109,12 @@ ts=$(git ls-files ':!vendor/**' "*.ts" "*.tsx" "*.mts" "*.cts")
 cfgs=$(git ls-files ':!vendor/**' "tsconfig.json" "*/tsconfig.json" "*/*/tsconfig.json" \
   "*/*/*/tsconfig.json")
 if [[ -z ${cfgs} ]]; then
-  echo "lint:types: TypeScript is tracked but no tsconfig.json is — copy scaffold/tsconfig.json" >&2
-  echo "  tsc refuses a file list when a project exists, so a project is how the org checks" >&2
+  org_finding "" "TypeScript is tracked but no tsconfig.json is — copy scaffold/tsconfig.json" \
+    "tsc refuses a file list when a project exists, so a project is how the org checks"
   exit 1
 fi
 command -v tsc > /dev/null || {
-  echo "lint:types: tsc missing from the belt" >&2
+  org_finding "" "tsc missing from the belt"
   exit 1
 }
 # The suppression ladder, and it is clippy's exactly. @ts-expect-error is
@@ -4133,35 +4127,33 @@ command -v tsc > /dev/null || {
 # belt greps, exactly as it does for clippy's crate-level allows.
 banned=$(xargs grep -Hn '@ts-nocheck' <<< "${ts}" || true)
 if [[ -n ${banned} ]]; then
-  echo "lint:types: @ts-nocheck disables checking for an entire file" >&2
-  # shellcheck disable=SC2001  # an anchored per-line indent; ${x//from/to} has no line anchor
-  sed 's/^/  /' <<< "${banned}" >&2
-  echo "  use @ts-expect-error with a written reason on the single line that needs it" >&2
+  IFS=$'\n' read -r -d '' -a detail <<< "${banned}" || true
+  org_finding "" "@ts-nocheck disables checking for an entire file" ${detail[@]+"${detail[@]}"} \
+    "use @ts-expect-error with a written reason on the single line that needs it"
   exit 1
 fi
 bare=$(xargs grep -Hn '@ts-expect-error[[:space:]]*$' <<< "${ts}" || true)
 if [[ -n ${bare} ]]; then
-  echo "lint:types: @ts-expect-error without a written reason" >&2
-  # shellcheck disable=SC2001  # an anchored per-line indent; ${x//from/to} has no line anchor
-  sed 's/^/  /' <<< "${bare}" >&2
-  echo "  the compiler retires the directive when the error goes; it cannot supply the why" >&2
+  IFS=$'\n' read -r -d '' -a detail <<< "${bare}" || true
+  org_finding "" "@ts-expect-error without a written reason" ${detail[@]+"${detail[@]}"} \
+    "the compiler retires the directive when the error goes; it cannot supply the why"
   exit 1
 fi
 # shellcheck disable=SC2086  # the file list is newline-separated on purpose
 refs=$(grep -l '"references"' ${cfgs} || true)
 if [[ -n ${refs} ]]; then
-  echo "lint:types: project references are not supported org-wide" >&2
   # shellcheck disable=SC2001  # an anchored per-line indent; ${x//from/to} has no line anchor
-  sed 's/^/  declares references: /' <<< "${refs}" >&2
-  echo "  tsc -b refuses the org's compiler flags (TS5094), so following references would" >&2
-  echo "  mean checking at whatever level the repo chose. Give each project its own config." >&2
+  IFS=$'\n' read -r -d '' -a detail < <(sed 's/^/declares references: /' <<< "${refs}") || true
+  org_finding "" "project references are not supported org-wide" ${detail[@]+"${detail[@]}"} \
+    "tsc -b refuses the org's compiler flags (TS5094), so following references would" \
+    "mean checking at whatever level the repo chose. Give each project its own config."
   exit 1
 fi
 pkgs=$(git ls-files "package.json" "*/package.json")
 if [[ -n ${pkgs} && ! -d node_modules ]]; then
-  echo "lint:types: dependencies are not installed, so their types cannot be read" >&2
-  echo "  install from the tracked lockfile before checking (a check against absent types" >&2
-  echo "  is not a weaker check, it is a green one that resolved nothing)" >&2
+  org_finding "" "dependencies are not installed, so their types cannot be read" \
+    "install from the tracked lockfile before checking (a check against absent types" \
+    "is not a weaker check, it is a green one that resolved nothing)"
   exit 1
 fi
 flags=()
@@ -4186,11 +4178,10 @@ sed "s|^${PWD}/||" "${tmp}/seen" | sort -u > "${tmp}/checked"
 sort -u <<< "${ts}" > "${tmp}/tracked"
 escaped=$(comm -23 "${tmp}/tracked" "${tmp}/checked")
 if [[ -n ${escaped} ]]; then
-  echo "lint:types: tracked TypeScript that no project checks" >&2
-  # shellcheck disable=SC2001  # an anchored per-line indent; ${x//from/to} has no line anchor
-  sed 's/^/  /' <<< "${escaped}" >&2
-  echo "  add it to a project's include, or give it a project — an excluded file is" >&2
-  echo "  unchecked, and the gate cannot tell that apart from checked-and-clean" >&2
+  IFS=$'\n' read -r -d '' -a detail <<< "${escaped}" || true
+  org_finding "" "tracked TypeScript that no project checks" ${detail[@]+"${detail[@]}"} \
+    "add it to a project's include, or give it a project — an excluded file is" \
+    "unchecked, and the gate cannot tell that apart from checked-and-clean"
   exit 1
 fi
 covered=$(wc -l < "${tmp}/tracked" | tr -d ' ')
@@ -4258,7 +4249,7 @@ cfgs=$(git ls-files ':!vendor/**' "tsconfig.json" "*/tsconfig.json" "*/*/tsconfi
   exit 0
 }
 command -v tsc > /dev/null || {
-  echo "lint:tsconfig-dials: tsc missing from the belt" >&2
+  org_finding "" "tsc missing from the belt"
   exit 1
 }
 tmp=$(mktemp -d)
@@ -4269,9 +4260,8 @@ while IFS= read -r cfg; do
   [[ -n ${cfg} ]] || continue
   count=$((count + 1))
   if ! tsc -p "${cfg}" --showConfig > "${tmp}/resolved.json" 2> "${tmp}/err"; then
-    echo "lint:tsconfig-dials: ${cfg} does not resolve" >&2
-    # shellcheck disable=SC2001  # an anchored per-line indent; ${x//from/to} has no line anchor
-    sed 's/^/  /' "${tmp}/err" >&2
+    IFS=$'\n' read -r -d '' -a detail < "${tmp}/err" || true
+    org_finding "" "${cfg} does not resolve" ${detail[@]+"${detail[@]}"}
     rc=1
     continue
   fi
@@ -4279,7 +4269,7 @@ while IFS= read -r cfg; do
     --name "${cfg}" < "${tmp}/resolved.json" || rc=1
 done <<< "${cfgs}"
 [[ ${rc} -eq 0 ]] || {
-  echo "lint:tsconfig-dials: ${count} config(s) checked, at least one below the org's level" >&2
+  org_finding "" "${count} config(s) checked, at least one below the org's level"
   exit 1
 }
 org_done=1
@@ -4325,7 +4315,7 @@ tracked=$(git ls-files "scaffold/")
   exit 0
 }
 command -v mise > /dev/null || {
-  echo "lint:scaffold-assembly: mise missing from the belt" >&2
+  org_finding "" "mise missing from the belt"
   exit 1
 }
 # THE BELT UNDER TEST IS THIS COMMIT'S, not the one the machine happens
@@ -4337,8 +4327,8 @@ command -v mise > /dev/null || {
 # copy is the answer, in CI and on a laptop alike.
 belt="${PWD}/mise/config.toml"
 git ls-files --error-unmatch "mise/config.toml" > /dev/null 2>&1 || {
-  echo "lint:scaffold-assembly: scaffold/ is tracked but mise/config.toml is not" >&2
-  echo "  the assembled repository is run against this repository's own belt" >&2
+  org_finding "" "scaffold/ is tracked but mise/config.toml is not" \
+    "the assembled repository is run against this repository's own belt"
   exit 1
 }
 # stub:destination. A tracked stub must appear here or in the list
@@ -4382,9 +4372,9 @@ while IFS= read -r f; do
   missing="${missing} ${stub}"
 done <<< "${tracked}"
 if [[ -n ${missing} ]]; then
-  echo "lint:scaffold-assembly: tracked stub(s) the assembly does not name:${missing}" >&2
-  echo "  add each to the assembled list with a destination, or to the declined list with" >&2
-  echo "  the reason — an unnamed stub is one nothing ever runs" >&2
+  org_finding "" "tracked stub(s) the assembly does not name:${missing}" \
+    "add each to the assembled list with a destination, or to the declined list with" \
+    "the reason — an unnamed stub is one nothing ever runs"
   exit 1
 fi
 tmp=$(mktemp -d)
@@ -4395,7 +4385,7 @@ while IFS=: read -r stub dest; do
   [[ -n ${stub} ]] || continue
   mkdir -p "${tmp}/$(dirname "${dest}")"
   cp "scaffold/${stub}" "${tmp}/${dest}" || {
-    echo "lint:scaffold-assembly: scaffold/${stub} is tracked but unreadable here" >&2
+    org_finding "" "scaffold/${stub} is tracked but unreadable here"
     exit 1
   }
   count=$((count + 1))
@@ -4418,7 +4408,7 @@ clean=(env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE -u GIT_OBJECT_DIRECTORY
   "${clean[@]}" git commit -q -m "chore: assemble a repository from the scaffold" \
     -m "Signed-off-by: scaffold probe <probe@invalid>"
 ) || {
-  echo "lint:scaffold-assembly: the scratch repository could not be committed" >&2
+  org_finding "" "the scratch repository could not be committed"
   exit 1
 }
 # Every belt linter reads `git ls-files`, so an uncommitted tree measures
@@ -4447,8 +4437,8 @@ run_task() { # task -> 0, or 1 with the task's own words on stderr
     MISE_TRUSTED_CONFIG_PATHS="${tmp}" mise run "${task}" 2>&1); then
     return 0
   fi
-  echo "lint:scaffold-assembly: ${task} spoke:" >&2
-  grep -v "^mise WARN" <<< "${out}" | tail -20 | sed 's/^/    /' >&2
+  IFS=$'\n' read -r -d '' -a detail < <(grep -v "^mise WARN" <<< "${out}" | tail -20 | sed 's/^/  /') || true
+  org_finding "" "${task} spoke:" ${detail[@]+"${detail[@]}"}
   return 1
 }
 tasks_named() { # prefix -> the belt's task names, one per line
@@ -4494,11 +4484,11 @@ done <<< "${fix_tasks}"
 # A run that enumerated nothing and reported success would be this check
 # announcing that it checked nothing — the belt always has both families.
 [[ ${fixers} -gt 0 ]] || {
-  echo "lint:scaffold-assembly: the belt named no fix:* tasks inside the assembled repo" >&2
+  org_finding "" "the belt named no fix:* tasks inside the assembled repo"
   exit 1
 }
 if [[ ${rc} -ne 0 ]]; then
-  echo "lint:scaffold-assembly: a fixer failed on a repository built from scaffold/" >&2
+  org_finding "" "a fixer failed on a repository built from scaffold/"
   exit 1
 fi
 gates=0
@@ -4509,13 +4499,13 @@ while IFS= read -r task; do
   run_task "${task}" || rc=1
 done <<< "${gate_tasks}"
 [[ ${gates} -gt 0 ]] || {
-  echo "lint:scaffold-assembly: the belt named no lint:* tasks inside the assembled repo" >&2
+  org_finding "" "the belt named no lint:* tasks inside the assembled repo"
   exit 1
 }
 if [[ ${rc} -ne 0 ]]; then
-  echo "lint:scaffold-assembly: a repository built from scaffold/ fails the org's gate" >&2
-  echo "  the task above is what spoke — a red is a defect in scaffold/ only if the task" >&2
-  echo "  is judging a stub; read what it said before changing anything" >&2
+  org_finding "" "a repository built from scaffold/ fails the org's gate" \
+    "the task above is what spoke — a red is a defect in scaffold/ only if the task" \
+    "is judging a stub; read what it said before changing anything"
   exit 1
 fi
 echo "lint:scaffold-assembly: ${fixers} fixer(s) then ${gates} gate task(s), all green"
@@ -4550,7 +4540,7 @@ mods=$(git ls-files ':!vendor/**' "go.mod" "*/go.mod" "*/*/go.mod")
   exit 0
 }
 command -v go > /dev/null || {
-  echo "lint:go-tidy: go.mod present but go missing — pin go in mise.toml" >&2
+  org_finding "" "go.mod present but go missing — pin go in mise.toml"
   exit 1
 }
 count=0
@@ -4558,8 +4548,8 @@ while IFS= read -r m; do
   [[ -n ${m} ]] || continue
   count=$((count + 1))
   if ! (cd "$(dirname "${m}")" && go mod tidy -diff); then
-    echo "lint:go-tidy: ${m} does not match the source — apply the diff above" >&2
-    echo "  mise run fix:go-tidy" >&2
+    org_finding "" "${m} does not match the source — apply the diff above" \
+      "mise run fix:go-tidy"
     exit 1
   fi
 done <<< "${mods}"
@@ -4632,7 +4622,7 @@ mods=$(git ls-files ':!vendor/**' "go.mod" "*/go.mod" "*/*/go.mod")
   exit 0
 }
 command -v go > /dev/null || {
-  echo "lint:go-fuzz-seeds: go.mod present but go missing — pin go in mise.toml" >&2
+  org_finding "" "go.mod present but go missing — pin go in mise.toml"
   exit 1
 }
 total=0
@@ -4641,7 +4631,7 @@ while IFS= read -r m; do
   d=$(dirname "${m}")
   listed=$(cd "${d}" && go test -list '^Fuzz' ./...) || {
     printf '%s\n' "${listed}" >&2
-    echo "lint:go-fuzz-seeds: go test -list failed in ${d} — the fuzz targets cannot be enumerated" >&2
+    org_finding "" "go test -list failed in ${d} — the fuzz targets cannot be enumerated"
     exit 1
   }
   n=$(grep -c '^Fuzz' <<< "${listed}" || true)
@@ -4650,12 +4640,12 @@ while IFS= read -r m; do
   owners=$(awk '/^Fuzz/ { n++ } /^ok[ \t]/ { if (n) printf "%s ", $2; n = 0 }' <<< "${listed}")
   [[ -n ${owners} ]] || {
     printf '%s\n' "${listed}" >&2
-    echo "lint:go-fuzz-seeds: ${n} target(s) listed in ${d} but no package line owns them" >&2
+    org_finding "" "${n} target(s) listed in ${d} but no package line owns them"
     exit 1
   }
   read -ra pkgs <<< "${owners}"
   (cd "${d}" && go test -race -run '^Fuzz' "${pkgs[@]}") || {
-    echo "lint:go-fuzz-seeds: a seed corpus failed in ${d} — packages run: ${pkgs[*]}" >&2
+    org_finding "" "a seed corpus failed in ${d} — packages run: ${pkgs[*]}"
     exit 1
   }
 done <<< "${mods}"
@@ -5605,7 +5595,7 @@ trap 'rc=$?; rm -rf "${src}"; [ -n "${org_done:-}" ] || [ "${rc}" -ne 0 ] || rc=
 ln -s "${ORG_CANON_DIR}" "${src}/.org-canon"
 SHELLCHECK_OPTS="${SHELLCHECK_OPTS:-} --source-path=${src}" \
   actionlint -color -ignore "specifying action \"\\$/" -ignore 'label "ubuntu-26\.04(-arm)?" is unknown' || {
-  echo "lint:actions: actionlint findings above — fixed by hand; fix:actions only re-pins uses: (pinact)" >&2
+  org_finding "" "actionlint findings above — fixed by hand; fix:actions only re-pins uses: (pinact)"
   exit 1
 }
 org_done=1
@@ -5644,7 +5634,7 @@ run = '''
   exit 0
 }
 command -v stele > /dev/null || {
-  echo "lint:version-mirrors: stele missing from the belt" >&2
+  org_finding "" "stele missing from the belt"
   exit 1
 }
 stele derive bump --git-dir . --check
@@ -5704,7 +5694,7 @@ root=$(git ls-files ':!vendor/**' "Cargo.toml")
 # is a broken toolchain, and skipping would be the vacuous-success
 # failure this task exists to refuse.
 command -v cargo > /dev/null || {
-  echo "lint:workspace-inherit: Cargo.toml tracked but cargo missing — pin rust in mise.toml" >&2
+  org_finding "" "Cargo.toml tracked but cargo missing — pin rust in mise.toml"
   exit 1
 }
 cargo fetch --locked
@@ -5785,28 +5775,28 @@ for f in .github/workflows/*.y*ml; do
 done
 status=0
 if [[ -n ${bad} ]]; then
-  echo "lint:gate-stub: gate caller's pull_request trigger lacks the edited type," >&2
-  echo "  so title/base edits keep a stale verdict (#427). Set" >&2
-  echo "  types: [opened, synchronize, reopened, edited] in:${bad}" >&2
+  org_finding "" "gate caller's pull_request trigger lacks the edited type," \
+    "so title/base edits keep a stale verdict (#427). Set" \
+    "types: [opened, synchronize, reopened, edited] in:${bad}"
   status=1
 fi
 if [[ -n ${unqueued} ]]; then
-  echo "lint:gate-stub: gate caller has no merge_group trigger, so the merge" >&2
-  echo "  queue's own run never starts and a queued pull request waits for a" >&2
-  echo '  check that cannot report (#1117). Under "on": add' >&2
-  echo "    merge_group:" >&2
-  echo "      types:" >&2
-  echo "        - checks_requested" >&2
-  echo "  in:${unqueued}" >&2
+  org_finding "" "gate caller has no merge_group trigger, so the merge" \
+    "queue's own run never starts and a queued pull request waits for a" \
+    'check that cannot report (#1117). Under "on": add' \
+    "  merge_group:" \
+    "    types:" \
+    "      - checks_requested" \
+    "in:${unqueued}"
   status=1
 fi
 if [[ -n ${ungrouped} ]]; then
-  echo "lint:gate-stub: gate caller's concurrency group is shared: a merged pull" >&2
-  echo "  request's event cancels the push gate (#1195), a push replaces the one" >&2
-  echo "  pending (#1617). Run mise run fix:gate-stub, or set under concurrency:" >&2
-  echo "    group: \${{ github.workflow }}-\${{ ${want_group} }}" >&2
-  echo "    cancel-in-progress: ${want_cancel}" >&2
-  echo "  in:${ungrouped}" >&2
+  org_finding "" "gate caller's concurrency group is shared: a merged pull" \
+    "request's event cancels the push gate (#1195), a push replaces the one" \
+    "pending (#1617). Run mise run fix:gate-stub, or set under concurrency:" \
+    "  group: \${{ github.workflow }}-\${{ ${want_group} }}" \
+    "  cancel-in-progress: ${want_cancel}" \
+    "in:${ungrouped}"
   status=1
 fi
 [[ ${status} -eq 0 ]] || exit 1

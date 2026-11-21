@@ -609,6 +609,11 @@ class SqlSkipsOwnedSnapshots(unittest.TestCase):
             "PLANT_METADATA": str(self.metadata),
             "PLANT_SQLFLUFF": hermetic.tool("sqlfluff"),
             "PLANT_SQLFLUFF_LOG": str(self.log),
+            # As mise runs a body: the task's name, which the finding writer
+            # reads (#1890), and the belt's BASH_ENV, which gives the body the
+            # writer (#1934).
+            "MISE_TASK_NAME": task,
+            "BASH_ENV": str(BELT / "findings.sh"),
         }
         done = subprocess.run(
             [BASH, "-euo", "pipefail", "-c", task_body(task)],

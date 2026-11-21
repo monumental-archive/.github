@@ -51,7 +51,15 @@ def run(tree: Path, home: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [BASH, "-euo", "pipefail", "-c", body()],
         cwd=tree,
-        env=hermetic.env(home, ORG_BELT_DIR=str(BELT)),
+        # As mise runs a body: the task's name, which the finding writer
+        # reads (#1890), and the belt's BASH_ENV, which gives the body the
+        # writer (#1934).
+        env=hermetic.env(
+            home,
+            ORG_BELT_DIR=str(BELT),
+            MISE_TASK_NAME=TASK,
+            BASH_ENV=str(BELT / "findings.sh"),
+        ),
         capture_output=True,
         text=True,
         check=False,
