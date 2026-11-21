@@ -33,14 +33,13 @@
 # file cannot rely on its caller's pipefail.
 org_rust_coverage_env() {
   local label="$1" metadata target compiler envs
+  # The belt Python names the compiler (#1877): refused first, as every
+  # helper start is (test_canon_python).
+  : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
   metadata=$(cargo metadata --no-deps --format-version 1 --locked) || return 1
   target=$(jq -r '.target_directory // empty' <<< "${metadata}") || return 1
   if [[ -z ${target} ]]; then
     echo "${label}: cargo metadata named no target_directory — nowhere to measure Rust into" >&2
-    return 1
-  fi
-  if [[ -z ${ORG_PYTHON:-} ]]; then
-    echo "${label}: ORG_PYTHON is unset — the belt Python names the compiler (CI: the canon action)" >&2
     return 1
   fi
   compiler=$("${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/gate_cache_key.py" digest) || return 1

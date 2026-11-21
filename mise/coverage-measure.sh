@@ -505,7 +505,9 @@ if [[ -f Cargo.toml && ${legs} == rust-branches ]]; then
   fi
   # shellcheck disable=SC2086  # ${excludes} is a built '--exclude <member>' list,
   # which cargo must receive as separate arguments
-  report=$(CARGO_TARGET_DIR="${target_directory}/llvm-cov-target-${compiler}" RUSTUP_TOOLCHAIN="${FUZZ_TOOLCHAIN}" cargo llvm-cov --workspace --locked ${excludes} --branch --json --summary-only)
+  report=$(CARGO_TARGET_DIR="${target_directory}/llvm-cov-target-${compiler}" \
+    RUSTUP_TOOLCHAIN="${FUZZ_TOOLCHAIN}" \
+    cargo llvm-cov --workspace --locked ${excludes} --branch --json --summary-only)
   # A count of 0 is refused, never floored: an uninstrumented run reports
   # `branches` as count 0, percent 0 (measured on stable 1.97.1 without
   # --branch), so a zero count is the shape of a run that measured no
