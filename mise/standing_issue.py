@@ -29,30 +29,49 @@ than one means a job outside this workflow's `needs:` is still running
 later report in the same run has the last word. A run is counted once,
 by its URL, however many reports in it write the body.
 
-Each red job's entry carries the tail of its log: the last 60 lines
-before its first `##[error]` line (the last 60 when it has none),
-timestamps and colour codes stripped, at most 4,000 characters, fenced
-so no line in it can close the fence. The body stays under 60,000
-characters: tails are dropped from the last job upwards, and the body
-says so. The label is created from settings/repo-baseline.json's
+Each red job's entry carries its failing step's output, whole (#1925),
+found from the runner's own markers: the step is the last `##[group]Run `
+before the first `##[error]` line, its output runs from after that
+group's first `##[endgroup]` (the command and its environment) to the
+next `##[group]Run `, a `Post job cleanup.` line or the end of the log.
+An `##[error]` line is kept without its marker; the runner's own
+`Process completed with exit code <n>.` is dropped. The entry names the
+step. Output over 200 lines or 12,000 characters shows its end, whole
+lines, under a line counting the earlier lines not shown. A log with no
+`##[error]` line, or none after a `##[group]Run ` line, shows its last
+60 lines, at most 4,000 characters. Each line drops its timestamp and
+its colour codes. The log is the job-log endpoint's own answer, read
+over HTTPS with GH_TOKEN and its redirect followed, the token on an
+unredirected header so it never reaches the blob host; no gh is in the
+log path (`gh run view --log` refuses while the run, this job's own,
+is in progress, and `gh api` refuses a text body carrying escapes). A
+log that cannot be read is named in its entry. The excerpt is fenced
+so no line in it can close the fence. The body stays
+under 60,000 characters: excerpts are dropped from the last job
+upwards, and the body says so. The label is created from settings/repo-baseline.json's
 definition when the repository does not have it.
 
 Usage:
   standing_issue.py --workflow NAME --run-id ID --ref REF
                     [--default-branch BRANCH]
 
-The repository is GITHUB_REPOSITORY, the server GITHUB_SERVER_URL.
+The repository is GITHUB_REPOSITORY, the server GITHUB_SERVER_URL, the
+API GITHUB_API_URL (https://api.github.com when unset).
 Exit 0 when the issue was kept (or nothing was to change), 2 when a
-read or write failed. Stdlib only, and `gh` on PATH.
+read or write failed. Stdlib only, and `gh` on PATH for every read but
+the logs.
 """
 
 from __future__ import annotations
 
 import argparse
+import html
 import os
 import re
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -67,14 +86,21 @@ RED = frozenset({"failure", "timed_out"})
 GREEN = frozenset({"success", "skipped"})
 TAIL_LINES = 60
 TAIL_CHARS = 4000
+STEP_LINES = 200
+STEP_CHARS = 12000
+LOG_TIMEOUT = 60
 BODY_LIMIT = 60000
 ERROR_MARK = "##[error]"
+STEP_MARK = "##[group]Run "
+GROUP_END = "##[endgroup]"
+CLEANUP = "Post job cleanup."
 
 RED_SINCE = re.compile(r"^- Red since: (.+)$", re.MULTILINE)
 LATEST = re.compile(r"^- Latest red run: (.+)$", re.MULTILINE)
 RED_RUNS = re.compile(r"^- Red runs: (\d+)$", re.MULTILINE)
 TIMESTAMP = re.compile(r"^﻿?\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z ?")
 COLOUR = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
+EXITED = re.compile(r"^Process completed with exit code \d+\.$")
 BACKTICKS = re.compile(r"`+")
 
 
@@ -102,11 +128,23 @@ class Job:
 
 
 @dataclass(frozen=True)
+class Excerpt:
+    """What a red job's entry shows of its log.
+
+    `step` names the failing step; None when the log marks none, and
+    the text is then the log's last lines.
+    """
+
+    text: str
+    step: str | None = None
+
+
+@dataclass(frozen=True)
 class Entry:
-    """A red job as the issue shows it: name, link, and its log tail."""
+    """A red job as the issue shows it: name, link, and its excerpt."""
 
     job: Job
-    tail: str | None
+    tail: Excerpt | None
     missing: str | None
 
 
@@ -325,28 +363,110 @@ def jobs(repo: str, run_id: str) -> list[Job]:
     return found
 
 
-def tail(log: str) -> str:
-    """Cut a job's log to what the issue shows.
+def cleaned(line: str) -> str:
+    """Read one log line down to what the step wrote.
 
     Returns:
-        The last TAIL_LINES lines before the first error line (the last
-        TAIL_LINES when there is none), timestamps and colour codes
-        stripped, at most TAIL_CHARS characters, whole lines kept.
+        The line without its timestamp and colour codes.
 
     """
-    lines = [COLOUR.sub("", TIMESTAMP.sub("", line)) for line in log.splitlines()]
-    first = next((at for at, line in enumerate(lines) if ERROR_MARK in line), None)
-    window = (
-        lines[max(0, first - TAIL_LINES) : first]
-        if first is not None
-        else lines[-TAIL_LINES:]
-    )
-    text = "\n".join(window)
+    return COLOUR.sub("", TIMESTAMP.sub("", line))
+
+
+def last_lines(lines: list[str]) -> Excerpt:
+    """Keep a log's last lines, when it marks no failing step.
+
+    Returns:
+        The last TAIL_LINES lines, at most TAIL_CHARS characters, whole
+        lines kept.
+
+    """
+    text = "\n".join(lines[-TAIL_LINES:])
     if len(text) > TAIL_CHARS:
         text = text[-TAIL_CHARS:]
         cut = text.find("\n")
         text = text[cut + 1 :] if cut >= 0 else text
-    return text
+    return Excerpt(text)
+
+
+def step_output(lines: list[str]) -> list[str]:
+    """Read a failing step's output as the step wrote it.
+
+    Returns:
+        Each line, an error line without its marker, the runner's own
+        exit line dropped.
+
+    """
+    shown: list[str] = []
+    for line in lines:
+        if line.startswith(ERROR_MARK):
+            said = line.removeprefix(ERROR_MARK)
+            if EXITED.match(said):
+                continue
+            shown.append(said)
+        else:
+            shown.append(line)
+    return shown
+
+
+def ending(lines: list[str]) -> str:
+    """Keep a step's output whole, or its end under a count of the rest.
+
+    Returns:
+        Every line when within STEP_LINES lines and STEP_CHARS
+        characters; else the last whole lines within both, under a line
+        saying how many earlier lines are not shown.
+
+    """
+    kept: list[str] = []
+    size = 0
+    for line in reversed(lines):
+        grown = size + len(line) + (1 if kept else 0)
+        if len(kept) >= STEP_LINES or grown > STEP_CHARS:
+            break
+        kept.append(line)
+        size = grown
+    kept.reverse()
+    hidden = len(lines) - len(kept)
+    if not hidden:
+        return "\n".join(kept)
+    return "\n".join([f"({hidden} earlier lines not shown)", *kept])
+
+
+def tail(log: str) -> Excerpt:
+    """Cut a job's log to what the issue shows.
+
+    Returns:
+        The failing step's output and its name, found from the runner's
+        markers; the log's last lines when it marks no failing step.
+
+    """
+    lines = [cleaned(line) for line in log.splitlines()]
+    first = next(
+        (at for at, line in enumerate(lines) if line.startswith(ERROR_MARK)), None
+    )
+    if first is None:
+        return last_lines(lines)
+    start = next(
+        (at for at in range(first - 1, -1, -1) if lines[at].startswith(STEP_MARK)),
+        None,
+    )
+    if start is None:
+        return last_lines(lines)
+    header_end = next(
+        (at for at in range(start + 1, first) if lines[at].startswith(GROUP_END)),
+        start,
+    )
+    stop = next(
+        (
+            at
+            for at in range(first, len(lines))
+            if lines[at].startswith(STEP_MARK) or lines[at] == CLEANUP
+        ),
+        len(lines),
+    )
+    output = step_output(lines[header_end + 1 : stop])
+    return Excerpt(ending(output), lines[start].removeprefix(STEP_MARK).strip())
 
 
 def fenced(text: str) -> str:
@@ -361,15 +481,48 @@ def fenced(text: str) -> str:
     return f"{fence}text\n{text}\n{fence}"
 
 
+def job_log(repo: str, job_id: int) -> str:
+    """Read a job's log from the job-log endpoint, its redirect followed.
+
+    Returns:
+        The log text.
+
+    Raises:
+        StandingIssueError: no token, or the read failed.
+
+    """
+    token = os.environ.get("GH_TOKEN", "")
+    api = (os.environ.get("GITHUB_API_URL") or "https://api.github.com").rstrip("/")
+    path = f"repos/{repo}/actions/jobs/{job_id}/logs"
+    if not token:
+        msg = f"GET {path}: GH_TOKEN is not set"
+        raise StandingIssueError(msg)
+    # ruff: ignore[suspicious-url-open-usage] - the API base is the runner's own GITHUB_API_URL
+    request = urllib.request.Request(f"{api}/{path}")
+    request.add_header("Accept", "application/vnd.github+json")
+    request.add_header("X-GitHub-Api-Version", "2022-11-28")
+    # Unredirected: the token goes to the API, never to the blob host.
+    request.add_unredirected_header("Authorization", f"Bearer {token}")
+    try:
+        with typed_std.urlopen(request, timeout=LOG_TIMEOUT) as answer:
+            return answer.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as err:
+        msg = f"GET {path} answered HTTP {err.code}"
+        raise StandingIssueError(msg) from err
+    except (OSError, typed_std.NotAResponseError) as err:
+        msg = f"GET {path} failed: {err}"
+        raise StandingIssueError(msg) from err
+
+
 def read_tail(repo: str, job: Job) -> Entry:
-    """Fetch a red job's log and cut its tail.
+    """Fetch a red job's log and cut its excerpt.
 
     Returns:
         The entry; a log that cannot be read is named, never fatal.
 
     """
     try:
-        log = gh("api", f"repos/{repo}/actions/jobs/{job.id}/logs")
+        log = job_log(repo, job.id)
     except StandingIssueError as err:
         return Entry(job, None, f"the log could not be read: {err}")
     return Entry(job, tail(log), None)
@@ -383,13 +536,17 @@ def entry(item: Entry, *, drop: bool) -> str:
 
     """
     head = f"### {item.job.name}\n\n[{item.job.conclusion}]({item.job.url})\n"
+    summary = "log tail"
     if drop:
         shown = f"_Log tail dropped: the body would pass {BODY_LIMIT:,} characters._"
     elif item.tail is None:
         shown = f"_Log tail unknown: {item.missing}_"
+    elif item.tail.step is None:
+        shown = fenced(item.tail.text or "(the log is empty)")
     else:
-        shown = fenced(item.tail or "(no lines before the first error line)")
-    return f"{head}\n<details><summary>log tail</summary>\n\n{shown}\n\n</details>\n"
+        summary = f"failing step: <code>{html.escape(item.tail.step)}</code>"
+        shown = fenced(item.tail.text or "(the step printed nothing)")
+    return f"{head}\n<details><summary>{summary}</summary>\n\n{shown}\n\n</details>\n"
 
 
 @dataclass(frozen=True)
