@@ -188,13 +188,13 @@ def step(name: str) -> dict[str, object]:
 
 
 class StampStepIsTheHelper(unittest.TestCase):
-    """The job runs the helper these rows run, from the recorded tree."""
+    """The job runs the helper these rows run, through the one link."""
 
     def test_the_shipped_step_calls_the_helper(self) -> None:
-        """The run: is the call alone, by the recorded tree."""
+        """The run: is the call alone, through `.org-canon`."""
         body = step("Refuse a binary whose stamp is not the released commit")["run"]
         self.assertEqual(
-            '"${ORG_PYTHON}" "${ORG_CANON_TREE}/release/check_go_stamps.py"\n', body
+            '"${ORG_PYTHON}" .org-canon/release/check_go_stamps.py\n', body
         )
 
 

@@ -182,12 +182,6 @@ jobs:
           "${ORG_PYTHON}" .org-canon/release/caller_pins.py install \
             --input-of "the go-binary class" \
             go >> "${GITHUB_OUTPUT}"
-          # Unlinked before go runs: an untracked path in the tree stamps
-          # every binary vcs.modified=true, which the stamp check refuses.
-          # The tree itself stays reachable for the build step's helper.
-          tree=$(realpath .org-canon)
-          echo "ORG_CANON_TREE=${tree}" >> "${GITHUB_ENV}"
-          rm -- .org-canon
       - name: Install mise and the caller's pinned toolchain
         uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
@@ -238,20 +232,20 @@ jobs:
           go test ./...
       - name: Build every command
         # Every main package `go list` names, refusing none and a binary
-        # name two would share. Run from the tree the pins step recorded:
-        # the .org-canon link is gone by now. release/build_go_commands.py.
+        # name two would share. The .org-canon link stays: the canon
+        # action lists it in the clone's info/exclude, so go never sees
+        # it as a change (#1944). release/build_go_commands.py.
         run: |
-          "${ORG_PYTHON}" "${ORG_CANON_TREE}/release/build_go_commands.py"
+          "${ORG_PYTHON}" .org-canon/release/build_go_commands.py
       - name: Refuse a binary whose stamp is not the released commit
         # Go embeds the module list and the VCS facts in every binary —
         # the artifact-carries-its-inventory property this class rests on
         # (stele#7) — so each staged binary's stamp must be the released
-        # commit, from a clean tree, carrying its modules. Run from the
-        # tree the pins step recorded: no belt on a build leg, and the
-        # .org-canon link is gone by now. release/check_go_stamps.py
-        # (#1371).
+        # commit, from a clean tree, carrying its modules: the canon
+        # action keeps its own link out of what git calls the tree
+        # (#1944). release/check_go_stamps.py (#1371).
         run: |
-          "${ORG_PYTHON}" "${ORG_CANON_TREE}/release/check_go_stamps.py"
+          "${ORG_PYTHON}" .org-canon/release/check_go_stamps.py
       - name: Smoke the binaries
         if: ${{ inputs.smoke-test != '' && !inputs.repro }}
         env:
