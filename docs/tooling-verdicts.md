@@ -35,6 +35,7 @@ honestly blocked on.
 | plpgsql_check (the repository's test stack, never a published image; the belt pins nothing) | The `plpgsql` and `plpgsql-branches` legs of the same ratchet (#1547): `mise/plpgsql_coverage.py` reads the profiler's statement and branch coverage in the suite's teardown, through the repository's own `psql` |
 | Hypothesis (`pipx:` backend via aqua-backed uv) | Python property testing (#1332): every tracked `prop_*.py`, fixed seed in the gate (`test:python-properties`), random seed and wider bounds on the Monday cron (`audit:python-properties`) |
 | fast-check (the repository's, not the belt's) | TypeScript property testing (#1549): every tracked `*.prop.test.{ts,tsx,mts,cts}` under the repository's own vitest, fixed seed in the gate (`test:typescript-properties`), random seed and 10,000 runs on the Monday cron (`audit:typescript-properties`); `lint:typescript-properties` refuses an import outside a property file and a restated seed; the belt pins neither tool |
+| proptest (the repository's, not the belt's) | Rust property testing (#1930): the repository's own `test` task draws from seed 1 in the gate (the belt's `[env]` sets `PROPTEST_RNG_SEED`), and from a fresh printed seed on the nightly run (`audit:rust-properties`); `lint:rust-properties` refuses a locked proptest below 1.7.0, which ignores the variable; the belt pins nothing |
 | cargo-fuzz (`cargo:` backend) | Fuzz targets: in the gate (`lint:fuzz-build`, stable, no sanitizer) a build proof, a committed corpus required per target, and that corpus replayed once with no mutation (#1889); bounded runs under AddressSanitizer on the cron (`audit:fuzz`, repo-declared nightly), starting from the corpus the gate holds |
 | reuse (`pipx:` backend via aqua-backed uv) | REUSE-spec compliance in the gate (`lint:reuse`), pre-registration |
 | uv (`aqua:astral-sh/uv`) | The installer behind every `pipx:` belt tool; carries the org's release-age floor into Python |
@@ -3354,6 +3355,61 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
   refused in the issue. *Reopen:* vitest accepting `setupFiles` on
   its command line (the wrapper retires), or fast-check reading a seed
   from the environment.
+- **proptest, adopted for Rust property testing (#1930,
+  2026-11-21), the repository's own.** The Rust half of property 3
+  (#1336), #1332's and #1549's split: a fixed seed in the gate, a
+  drawn one on the scheduled run. The belt pins nothing: proptest is
+  the repository's dependency, and its tests run in the repository's
+  own `test` task. Measured on edtf `2fc6191`, its three
+  `tests/props.rs` under cargo-llvm-cov: two runs as the gate ran them
+  covered 2,192 and then 2,204 of 2,881 lines and reached different
+  functions (43 and then 39 unreached); two runs with
+  `PROPTEST_RNG_SEED=1` were identical to the execution count of every
+  function. So the gate was not deterministic for a repository with
+  proptest. Proptest 1.12.0 (what edtf and iiif-server lock), on
+  scratch crates:
+  - `PROPTEST_RNG_SEED=1` twice drew the same inputs; unset twice,
+    different ones.
+  - A seed written in the test (`rng_seed: RngSeed::Fixed(99)`) loses
+    to the environment's: at seeds 1 and 2 the test drew different
+    inputs. So no rule refuses a seed in code.
+  - `PROPTEST_CASES=20` beats `ProptestConfig::with_cases(7)`. Raising
+    it is not safe: at `PROPTEST_CASES=20000`, edtf's
+    `masked_date_values_equal_brute_force` aborts with "Too many global
+    rejects" (5,665 successes, 1,024 rejects), the reject limit being a
+    fixed 1,024 whatever the case count. So the scheduled run sets no
+    case count; its depth is a fresh seed every night.
+  - A planted rare failure at 256 cases: seed 2 fails with
+    `x = 91777`, twice the same; seeds 1 and 3 to 12 pass. With the
+    regression file seed 2 wrote kept, seed 1 fails on `x = 91777`:
+    the committed `*.proptest-regressions` line is replayed first.
+  - `timeout: 5` in a test's config, with the `fork` and `timeout`
+    features and a 60 ms body, fails; with `PROPTEST_TIMEOUT=0` it
+    passes. Without those features the variable changes nothing.
+  - `PROPTEST_RNG_SEED=notanumber` exits 0 with random inputs,
+    silently. The belt's value is a number in both branches of its
+    template, and the audit refuses a seed that is not a u64.
+  - The variable is absent from proptest's
+    `src/test_runner/config.rs` at v1.4.0, v1.5.0 and v1.6.0 and
+    present from v1.7.0 (read at each release tag): hence the lint.
+  - Through mise 2026.11.8, the two `[env]` lines in a scratch copy of
+    the belt: `mise run test` twice drew seed 1's inputs; a
+    `PROPTEST_RNG_SEED=2` the caller exported changed nothing; a
+    scratch `audit:rust-properties` printed two different seeds and
+    drew different inputs; `ORG_PROPERTY_SEED=2` twice drew the same.
+  - edtf's whole `test` command, built, at seed 1: 14 s on the Mac.
+  The belt's `[env]` sets `PROPTEST_RNG_SEED` from `ORG_PROPERTY_SEED`,
+  `1` when unset (every gate run), and `PROPTEST_TIMEOUT=0`.
+  `audit:rust-properties` draws 64 bits, prints the seed first and
+  runs `ORG_PROPERTY_SEED=<n> mise run test`; a failure's input is
+  committed as proptest's own regression line, with its fix. Refused
+  in the issue: a naming rule and a gate leg of their own (they would
+  leave the Rust coverage leg's run), a larger case count on the
+  scheduled run, a rule refusing a seed or case count in a test, each
+  repository setting its own seed, a random seed in the gate, and
+  running only the property tests on the scheduled run. *Reopen:*
+  proptest dropping or renaming `PROPTEST_RNG_SEED`, or a reject limit
+  that scales with the case count.
 - **atheris, refused (#1332, 2026-11-17).** The one Python fuzzer
   Scorecard's `Fuzzing` check detects (the literal `import atheris`,
   ossf/scorecard `checks/raw/fuzzing.go`). It cannot be installed

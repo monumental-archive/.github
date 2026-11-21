@@ -808,6 +808,60 @@ class Helper(unittest.TestCase):
                 self.assertEqual(want, reasons["coverage-go-branches"])
 
 
+PROPTEST_LOCK = 'version = 4\n\n[[package]]\nname = "proptest"\nversion = "1.12.0"\n'
+RAND_LOCK = 'version = 4\n\n[[package]]\nname = "rand"\nversion = "0.9.0"\n'
+
+
+class RustProperties(unittest.TestCase):
+    """The rust-properties job runs where a lock holds proptest (#1930)."""
+
+    def test_a_lock_holding_proptest_runs_the_job(self) -> None:
+        """At the root, or a workspace member's own lock."""
+        for name in ("Cargo.lock", "crates/a/Cargo.lock"):
+            with self.subTest(name=name):
+                got = outputs(git_tree({name: PROPTEST_LOCK}), "repo-deep-tests")
+                self.assertTrue(got["rust-properties"])
+
+    def test_a_lock_without_proptest_skips_the_job(self) -> None:
+        """A Cargo.lock alone is not a property, nor a vendored proptest."""
+        for files in (
+            {"Cargo.lock": RAND_LOCK},
+            {"Cargo.lock": RAND_LOCK, "vendor/x/Cargo.lock": PROPTEST_LOCK},
+            {},
+        ):
+            with self.subTest(files=" ".join(files)):
+                got = outputs(git_tree(files), "repo-deep-tests")
+                self.assertFalse(got["rust-properties"])
+
+    def test_the_skip_names_what_was_read(self) -> None:
+        """The reason says the lock was read and held no proptest."""
+        root = git_tree({"Cargo.lock": RAND_LOCK})
+        tracked = gate_tools.tracked_files(root)
+        rows = audit_legs.load_table()["repo-deep-tests"]
+        reasons = audit_legs.refine(
+            "repo-deep-tests", audit_legs.applies(rows, root, tracked), root, tracked
+        )
+        self.assertEqual(
+            "skipped: no tracked Cargo.lock locks proptest", reasons["rust-properties"]
+        )
+
+    def test_the_job_is_gated_and_runs_the_audit(self) -> None:
+        """repo-deep-tests.yml's job reads the output and runs the task."""
+        document = workflow_yaml.document(WORKFLOWS / "repo-deep-tests.yml")
+        job = workflow_yaml.jobs(document)["rust-properties"]
+        self.assertEqual(
+            "needs.applies.outputs.rust-properties == 'true'", condition(job)
+        )
+        self.assertIn("applies", needs_of(job))
+        runs = [
+            decoded.as_str(step.get("run", ""), "run")
+            for step in workflow_yaml.steps(job)
+        ]
+        self.assertIn("mise run audit:rust-properties", runs)
+        report = workflow_yaml.jobs(document)["report"]
+        self.assertIn("rust-properties", needs_of(report))
+
+
 # Every shape the enumeration meets: two Rust targets, a root-package
 # and a nested-package Go target, the bare `Fuzz` name, a helper that
 # takes no *testing.F, a nested module's target (#1899), a vendored one

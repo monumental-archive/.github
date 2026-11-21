@@ -226,6 +226,7 @@ tasks = [
   "lint:python-target",
   "lint:python-types",
   "lint:rust",
+  "lint:rust-properties",
   "lint:scaffold-assembly",
   "lint:shell-embedded",
   "lint:sql",

@@ -34,6 +34,11 @@ tracked `_test.go` of any tracked Go module, the root's or a nested
 one's. A target the gate's floor holds
 is a target the nightly search runs, and no other.
 
+A job whose task reads a file's CONTENT before it runs (REFINES)
+applies only where the content says so: `repo-deep-tests`'s
+`rust-properties` job runs where a tracked Cargo.lock locks proptest
+(#1930), answered by rust_properties.py, the reading its task uses.
+
     audit_legs.py [--root DIR] [--table FILE] WORKFLOW
         prints `<job>=true|false` for every row of WORKFLOW (the file's
         stem, `repo-deep-tests`) on stdout, for $GITHUB_OUTPUT, then
@@ -58,6 +63,7 @@ from pathlib import Path
 import coverage_floor
 import decoded
 import gate_tools
+import rust_properties
 import workflow_command
 
 HERE = Path(__file__).resolve().parent
@@ -325,6 +331,35 @@ def matrices(
     return reasons, lists
 
 
+# Workflow stem to job id to what the job's task reads in the tree, and
+# why the job is skipped when it finds nothing.
+Predicate = Callable[[Path, list[str]], bool]
+REFINES: dict[str, dict[str, tuple[Predicate, str]]] = {
+    "repo-deep-tests": {
+        "rust-properties": (
+            rust_properties.locks_proptest,
+            "no tracked Cargo.lock locks proptest",
+        ),
+    },
+}
+
+
+def refine(
+    workflow: str, reasons: dict[str, str], root: Path, tracked: list[str]
+) -> dict[str, str]:
+    """Skip each content-read job where its task would find nothing.
+
+    Returns:
+        The reasons, a job its predicate refuses skipped.
+
+    """
+    reasons = dict(reasons)
+    for job, (holds, empty) in REFINES.get(workflow, {}).items():
+        if reasons.get(job, "").startswith("applies") and not holds(root, tracked):
+            reasons[job] = f"skipped: {empty}"
+    return reasons
+
+
 class Args(argparse.Namespace):
     """The command line, typed where argparse writes it."""
 
@@ -363,6 +398,7 @@ def main(argv: list[str] | None = None) -> int:
         reasons, lists = matrices(
             args.workflow, applies(rows, args.root, tracked), args.root, tracked
         )
+        reasons = refine(args.workflow, reasons, args.root, tracked)
     except decoded.UndecodableError as err:
         workflow_command.error(f"audit-legs: {err}", stream=sys.stderr)
         return 1

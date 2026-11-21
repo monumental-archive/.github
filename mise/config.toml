@@ -226,6 +226,24 @@ UV_INDEX_STRATEGY = "first-index"
 # the tool venv's pyvenv.cfg before and after.
 UV_NO_MANAGED_PYTHON = "1"
 UV_PYTHON_DOWNLOADS = "never"
+# THE GATE'S PROPTEST SEED (#1930). A Rust property test (proptest)
+# draws a fresh seed on every run unless told otherwise, and it runs
+# inside each repository's own `test` task, so a gate that leaves it
+# unset judges different inputs on every run of one commit: measured on
+# edtf, two runs covered 2,192 and then 2,204 lines. proptest reads its
+# seed from PROPTEST_RNG_SEED (from 1.7.0; lint:rust-properties refuses
+# an older one), so the belt sets it here, where every `mise run`
+# reaches it: ORG_PROPERTY_SEED when set, which only
+# audit:rust-properties does, and `1` otherwise, which is every gate
+# run. An exported PROPTEST_RNG_SEED loses to this line, so the seed is
+# changed through ORG_PROPERTY_SEED alone. PROPTEST_TIMEOUT=0 switches
+# off a test's wall-clock timeout, which would make a slow runner's
+# verdict differ from a fast one's; on a crate built without proptest's
+# `timeout` feature it changes nothing. No case count is set: a larger
+# PROPTEST_CASES aborts a correct test on proptest's fixed reject limit
+# (docs/tooling-verdicts.md).
+PROPTEST_RNG_SEED = "{{ get_env(name='ORG_PROPERTY_SEED', default='1') }}"
+PROPTEST_TIMEOUT = "0"
 
 [task_config]
 # Tasks are written in bash (guards use [[ ]] and <<<); mise's own default
@@ -3869,6 +3887,20 @@ dir = "{{cwd}}"
 # lockfile holds fast-check.
 run = '''
 "${ORG_BELT_DIR}/typescript-properties.sh" lint
+'''
+
+[tasks."lint:rust-properties"]
+description = "Every tracked Cargo.lock locks proptest at 1.7.0 or later, the first that reads the belt's seed"
+dir = "{{cwd}}"
+# The gate half of #1930. The belt's `[env]` sets PROPTEST_RNG_SEED, so
+# a repository's own `test` task draws the same proptest inputs on every
+# gate run; a proptest below 1.7.0 ignores the variable without a word,
+# and the gate would draw a fresh seed every run with nothing red.
+# Reads lock files only (mise/rust_properties.py, tomllib), every
+# tracked Cargo.lock outside vendor/. Red by file and version; skips
+# clean, by name, where no tracked lock holds proptest.
+run = '''
+"${ORG_BELT_DIR}/rust-properties.sh" lint
 '''
 
 [tasks."lint:gate-surface"]
@@ -8194,6 +8226,30 @@ dir = "{{cwd}}"
 # ORG_PROPERTY_SEED reruns the exact search. The cron never pushes.
 run = '''
 "${ORG_BELT_DIR}/typescript-properties.sh" audit
+'''
+
+[tasks."audit:rust-properties"]
+description = "The repository's own test task at a random proptest seed, printed first (nightly cron, never the gate)"
+dir = "{{cwd}}"
+# The cron half of #1930, `audit:typescript-properties` in shape: the
+# gate draws proptest's inputs from seed 1 (the belt's `[env]`), this
+# draws a fresh seed, ORG_PROPERTY_SEED when set, prints it before
+# anything runs, and runs `mise run test` under it with the
+# repository's own case counts. Not the gate, because a random seed is
+# not deterministic. Proptest has no naming rule of its own: its seed
+# reaches it where the tests already are, so the properties stay in
+# the run the Rust coverage leg measures.
+#
+# WHERE A FINDING LANDS: the log carries the seed and proptest's
+# minimal failing input. `ORG_PROPERTY_SEED=<n> mise run test`
+# reproduces it and writes proptest's own line into the
+# *.proptest-regressions file beside the test; that line is committed
+# with the fix, and every later run, the gate's included, replays it
+# first. The cron never pushes. Skips clean, by name, where no tracked
+# Cargo.lock locks proptest; red, naming the lock file, where one does
+# and the repository defines no `test` task.
+run = '''
+"${ORG_BELT_DIR}/rust-properties.sh" audit
 '''
 
 [tasks."audit:mutants"]
