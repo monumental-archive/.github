@@ -117,8 +117,10 @@ LEG_NAME = re.compile(r"[a-z][a-z0-9-]*")
 # The legs held as floors of their own rather than in the minimum.
 SEPARATE = ("rust-branches", "go-branches")
 # A fuzz target's leg (#1896): a floor of its own like SEPARATE's, one
-# per target, named by coverage-measure.sh's derivation.
-FUZZ_LEG = re.compile(r"fuzz-[a-z0-9-]+")
+# per target, named by coverage-measure.sh's derivation. That derivation
+# gives a root target named exactly `Fuzz` the bare `fuzz-`, so the name
+# after the dash may be empty (#1899).
+FUZZ_LEG = re.compile(r"fuzz-[a-z0-9-]*")
 KEYS = frozenset({BAND_KEY, MEASURED_KEY, DERIVED_KEY, RESET_KEY, LEGS_KEY})
 
 LEG_FIELDS = 2
