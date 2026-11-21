@@ -57,6 +57,16 @@ jobs:
           GH_TOKEN: ${{ secrets.AUDIT_TOKEN }}
         run: mise run audit:actions-allowlist
 
+      # This job's findings records, for the report job (#1933).
+      - name: Hand the findings to the report job
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: findings-${{ github.job }}-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/findings/
+          if-no-files-found: ignore
+          retention-days: 1
+
   security-config:
     name: the security records match the live org
     runs-on: ubuntu-26.04
@@ -111,6 +121,16 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
         run: mise run audit:security-config
+
+      # This job's findings records, for the report job (#1933).
+      - name: Hand the findings to the report job
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: findings-${{ github.job }}-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/findings/
+          if-no-files-found: ignore
+          retention-days: 1
 
   baseline-drift:
     name: every repository matches the settings baseline
@@ -193,6 +213,16 @@ jobs:
           GH_TOKEN: ${{ secrets.AUDIT_TOKEN }}
         run: mise run audit:adoption
 
+      # This job's findings records, for the report job (#1933).
+      - name: Hand the findings to the report job
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: findings-${{ github.job }}-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/findings/
+          if-no-files-found: ignore
+          retention-days: 1
+
   # Every scheduled workflow ends here (#1887): while a run on the
   # default branch has a red job, one issue titled "<workflow> is red"
   # and labelled red-check holds each red job and its log tail; the next
@@ -223,6 +253,16 @@ jobs:
       - name: Resolve the canon tree and the belt's Python
         uses: $/.github/actions/canon
 
+      # Every job's findings records, in one directory (#1933): each job
+      # that ran a belt task handed its own on.
+      - name: Collect the findings every job recorded
+        if: ${{ !cancelled() }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: findings-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/findings
+
       # A cancelled run changes nothing: the job still runs (always()),
       # this step does not.
       - name: Keep the red-check issue
@@ -236,5 +276,6 @@ jobs:
         run: |
           "${ORG_PYTHON}" .org-canon/mise/standing_issue.py --workflow "${WORKFLOW}" \
             --run-id "${RUN_ID}" --ref "${REF}" \
-            --default-branch "${DEFAULT_BRANCH}"
+            --default-branch "${DEFAULT_BRANCH}" \
+            --findings "${RUNNER_TEMP}/findings"
 ...
