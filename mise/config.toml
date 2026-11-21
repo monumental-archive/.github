@@ -2902,78 +2902,21 @@ dir = "{{cwd}}"
 # included — is now fully installed before any task runs (#117:
 # coverage:check asserts llvm-tools as a declared build input instead of
 # installing it), and cargo's own locking handles concurrent fetches.
-# The gate half of the dependency track (docs/dependency-track.md).
-# Deterministic: the outcome is a function of Cargo.lock + the committed
-# deny.toml. `cargo fetch --locked` first — fetching pinned inputs is the
-# same category as fetching the toolchain. Advisories are deliberately
-# NOT here: RustSec is a moving feed, so they live in audit:deny.
-run = '''
-locks=$(git ls-files ':!vendor/**' "Cargo.lock" "*/Cargo.lock")
-[[ -n ${locks} ]] || {
-  echo "lint:deny: no Cargo.lock tracked, skipped"
-  exit 0
-}
-# A repo with a lock has rust pinned as a build input; cargo absent is a
-# broken toolchain, and skipping would be the vacuous-success failure.
-command -v cargo > /dev/null || {
-  echo "lint:deny: Cargo.lock present but cargo missing — pin rust in mise.toml" >&2
-  exit 1
-}
-[[ -f deny.toml ]] || {
-  echo "lint:deny: Cargo.lock present but no deny.toml — copy scaffold/deny.toml from the canon" >&2
-  exit 1
-}
-cargo fetch --locked
-cargo deny check bans licenses sources
-# An exception that outlives its cause is the failure `#[expect]` was
-# chosen to prevent everywhere else, and cargo-deny does not have that
-# property: a `skip`/`skip-tree` entry matching nothing is silent
-# (measured). So necessity is tested rather than assumed — each declared
-# skip is removed in turn and the check re-run. A variant that still
-# passes proves its entry does nothing, and the gate names it. The
-# helper resolves from the belt, which is where the org's policy lives;
-# a repo running without the canon cannot quietly skip this.
-helper="${ORG_BELT_DIR}/deny_skips.py"
-variants=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${helper}" deny.toml)
-stale=""
-while IFS=$'\t' read -r name variant; do
-  [[ -n ${name} ]] || continue
-  if cargo deny --config "${variant}" check bans > /dev/null 2>&1; then
-    stale="${stale} ${name}"
-  fi
-done <<< "${variants}"
-if [[ -n ${stale} ]]; then
-  echo "lint:deny: duplicate-version skip no longer needed:${stale}" >&2
-  echo "  the check passes without it, so the upstream lag it was written for is over" >&2
-  echo "  delete the entry from deny.toml — an exception that outlives its cause is not a decision" >&2
-  exit 1
-fi
-'''
+# The gate half of the dependency track (docs/dependency-track.md):
+# bans, licenses and sources over the lock, each `[[bans.skip]]` tested
+# for necessity, and no advisory `ignore` (#1926). The body is
+# mise/deny-lint.sh, which says why each step is there.
+run = 'bash "${ORG_BELT_DIR}/deny-lint.sh"'
 
 [tasks."audit:deny"]
-description = "Dependency advisories (cargo-deny + RustSec — network, not in ci)"
+description = "Dependency advisories (cargo-deny + RustSec, judged by stele against the canon's VEX — network, not in ci)"
 dir = "{{cwd}}"
 # audit:*, not lint:*: a new advisory fails unrelated work, which is a
-# property of the feed, not the diff. Every `ignore` in deny.toml carries
-# a reason and cites the VEX statement recording the decision — the L2
-# exit is a written decision, never an override.
-run = '''
-locks=$(git ls-files ':!vendor/**' "Cargo.lock" "*/Cargo.lock")
-[[ -n ${locks} ]] || {
-  echo "audit:deny: no Cargo.lock tracked, skipped"
-  exit 0
-}
-command -v cargo > /dev/null || {
-  echo "audit:deny: Cargo.lock present but cargo missing — pin rust in mise.toml" >&2
-  exit 1
-}
-[[ -f deny.toml ]] || {
-  echo "audit:deny: Cargo.lock present but no deny.toml — copy scaffold/deny.toml from the canon" >&2
-  exit 1
-}
-cargo fetch --locked
-cargo deny check advisories
-'''
+# property of the feed, not the diff. The exit is the canon's decision
+# in security/vex/, written once: cargo-deny's scan is judged by `stele
+# assert advisories`, as audit:go-vulns is, and a repository keeps no
+# advisory `ignore` (#1926). The body is mise/deny-audit.sh.
+run = 'bash "${ORG_BELT_DIR}/deny-audit.sh"'
 
 [tasks."lint:rust"]
 description = "Rust lint + format check (clippy at every group, restriction minus named contradictions; rustfmt at its stable maximum)"
