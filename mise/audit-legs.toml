@@ -44,6 +44,10 @@ when = ["mise.lock", "*/mise.lock"]
 # audit:fuzz on fuzz/, audit:go-fuzz on a go.mod: one job runs both.
 when = ["fuzz/", "go.mod", "*/go.mod", "*/*/go.mod"]
 
+[repo-deep-tests.propose]
+# Runs no task, so no `when`: it opens what the fuzz job kept (#1897),
+# and its `if:` waits on that job's `staged` output.
+
 [repo-deep-tests.coverage-branches]
 when = ["Cargo.toml"]
 floor = "rust-branches"

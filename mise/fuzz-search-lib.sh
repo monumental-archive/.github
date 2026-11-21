@@ -6,7 +6,7 @@
 # The search never writes a find into the tracked corpus. A find is a
 # candidate, and a candidate is kept only when it raises its target's
 # line coverage as the coverage floor's fuzz leg measures it
-# (org_fuzz_measure in fuzz-corpus-lib.sh, #1896), one at a time in
+# (org_fuzz_measure in fuzz-measure-lib.sh, #1896), one at a time in
 # name order. A crashing
 # input is kept as well. What is kept is STAGED: copied under the stage
 # directory at the path it would have in the repository, which
@@ -144,7 +144,7 @@ org_fuzz_proposed() {
 # org_fuzz_select <label> <leg> <dir> <stage dir> <measure...> -- <candidate...>
 #
 # Keeps the candidates that raise the figure (#1897 item 2). <measure>
-# is org_fuzz_measure's arguments after the leg (fuzz-corpus-lib.sh,
+# is org_fuzz_measure's arguments after the leg (fuzz-measure-lib.sh,
 # the measurement the coverage floor's fuzz leg makes): `rust <target>
 # <dir>`, or `go <package dir> <Fuzz name>` with <dir> that package's
 # testdata/fuzz/<Fuzz name>. It measures <dir> as it is, then adds each

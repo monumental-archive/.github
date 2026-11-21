@@ -8041,7 +8041,7 @@ dir = "{{cwd}}"
 # would vary its enforcement by machine, which is the failure this belt
 # closes everywhere else.
 run = '''
-bash "${ORG_BELT_DIR}/fuzz-search.sh" rust
+bash "${ORG_BELT_DIR}/fuzz-search-rust.sh"
 '''
 
 [tasks."audit:coverage-branches"]
@@ -8151,7 +8151,7 @@ dir = "{{cwd}}"
 # a human as a pull request (#1897, repo-deep-tests.yml's `propose`),
 # never merged by one.
 run = '''
-bash "${ORG_BELT_DIR}/fuzz-search.sh" go
+bash "${ORG_BELT_DIR}/fuzz-search-go.sh"
 '''
 
 [tasks."audit:python-properties"]

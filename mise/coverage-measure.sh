@@ -700,6 +700,8 @@ fi
 # The fuzz legs' names and their measurement (#1896, #1897).
 # shellcheck source=mise/fuzz-corpus-lib.sh
 . "${belt_dir}/fuzz-corpus-lib.sh"
+# shellcheck source=mise/fuzz-measure-lib.sh
+. "${belt_dir}/fuzz-measure-lib.sh"
 
 # The fuzz targets, enumerated before any is measured, so two that
 # derive one leg are refused before a minute is spent building: one
@@ -775,7 +777,7 @@ if [[ ${legs} =~ ^(all|fuzz)$ ]]; then
   [[ -z ${clash} ]] || exit 1
 fi
 
-# The measurement itself is org_fuzz_measure (fuzz-corpus-lib.sh), the
+# The measurement itself is org_fuzz_measure (fuzz-measure-lib.sh), the
 # one the scheduled search (#1897) keeps a find by: this leg hands it
 # the tracked copy, the search that copy plus a candidate.
 if [[ ${legs} =~ ^(all|fuzz)$ && ${fuzz_found} == *" rust "* ]]; then
