@@ -20,6 +20,23 @@ Nothing reads a finding back out of a log.
    reported nothing through a writer, or a stranger's own audit task,
    is shown as the output of the step that failed.
 
+## How the writer reaches a task
+
+A belt task body never sources `mise/findings.sh`. The belt's `[env]`
+names it in `BASH_ENV`, beside the belt (`${ORG_BELT_DIR}/findings.sh`),
+and bash sources that file before it runs any non-interactive script.
+So every task body under the belt's shell (`bash -euo pipefail -c`),
+and every bash a body starts, can call `org_finding` and
+`org_finding_annotated`. It holds locally through the clone's belt
+link and in CI through `MISE_GLOBAL_CONFIG_FILE`, as `ORG_BELT_DIR`
+does. With no belt, `BASH_ENV` is empty and nothing is sourced. A
+`sh` script never reads it.
+
+A test that runs a body by hand sets `BASH_ENV` and `MISE_TASK_NAME`,
+as mise does. The cost, accepted by the owner (#1934): a fault in
+`findings.sh` or `workflow-command.sh` reaches every bash under the
+belt's environment.
+
 ## The record
 
 One JSON object on one line:

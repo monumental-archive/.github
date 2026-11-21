@@ -206,6 +206,19 @@ ORG_COVERAGE_RUN = "{{ get_env(name='TMPDIR', default='') | default(value='/tmp'
 # The exec runs only on a runner: Tera renders the branch it takes.
 # The file is not made here; a writer makes it with its first record.
 ORG_FINDINGS = "{% if env.ORG_FINDINGS %}{{ env.ORG_FINDINGS }}{% elif env.RUNNER_TEMP %}{{ env.RUNNER_TEMP }}/findings/{{ env.GITHUB_JOB }}-{{ exec(command='od -An -N8 -tx1 /dev/urandom | tr -d \" \\n\"') }}.jsonl{% endif %}"
+# THE FINDINGS WRITER, IN EVERY TASK (#1934, owner's ruling): bash
+# sources the file BASH_ENV names before it runs a non-interactive
+# script, so every task body (`bash -euo pipefail -c`, [task_config]
+# below) and every bash a task starts can call `org_finding` and
+# `org_finding_annotated` with no source line of its own. A source line
+# per body would grow every body lint:task-shell holds to its debt.
+# The file is the belt's own (mise/findings.sh), located through
+# ORG_BELT_DIR like every delivered config, so it holds through the
+# conf.d link locally and MISE_GLOBAL_CONFIG_FILE in CI. Empty when the
+# belt did not arrive, and an empty BASH_ENV sources nothing. The cost,
+# accepted: a fault in findings.sh or workflow-command.sh reaches every
+# bash under the belt's environment. A `sh` script is unaffected.
+BASH_ENV = "{% if env.ORG_BELT_DIR %}{{ env.ORG_BELT_DIR }}/findings.sh{% endif %}"
 # The org's seven-day release-age floor, extended to Python.
 #
 # `minimum_release_age = "168h"` above governs how mise resolves a tool's
@@ -4734,22 +4747,22 @@ mods=$(git ls-files ':!vendor/**' "go.mod" "*/go.mod" "*/*/go.mod")
   exit 0
 }
 command -v go > /dev/null || {
-  echo "audit:go-vulns: go.mod present but go missing — pin go in mise.toml" >&2
+  org_finding "" "go.mod present but go missing — pin go in mise.toml"
   exit 1
 }
 command -v govulncheck > /dev/null || {
-  echo "audit:go-vulns: govulncheck missing — pin it as a build input:" >&2
-  echo '  mise.toml: "go:golang.org/x/vuln/cmd/govulncheck" = "<version>"' >&2
+  org_finding "" "govulncheck missing — pin it as a build input:" \
+    'mise.toml: "go:golang.org/x/vuln/cmd/govulncheck" = "<version>"'
   exit 1
 }
 command -v stele > /dev/null || {
-  echo "audit:go-vulns: stele missing from the belt" >&2
+  org_finding "" "stele missing from the belt"
   exit 1
 }
 vex="${ORG_CANON_DIR}/security/vex"
 [[ -d ${vex} ]] || {
-  echo "audit:go-vulns: ${vex} is not a directory, so the org's triage decisions cannot be read" >&2
-  echo "  the org belt did not arrive: CI sets MISE_GLOBAL_CONFIG_FILE, locally run: lefthook run post-checkout" >&2
+  org_finding "" "${vex} is not a directory, so the org's triage decisions cannot be read" \
+    "the org belt did not arrive: CI sets MISE_GLOBAL_CONFIG_FILE, locally run: lefthook run post-checkout"
   exit 1
 }
 scan=$(mktemp)
@@ -4761,12 +4774,12 @@ while IFS= read -r m; do
   status=0
   (cd "${d}" && govulncheck -json ./...) > "${scan}" || status=$?
   if [[ ${status} -ne 0 ]]; then
-    echo "audit:go-vulns: ${d}: govulncheck exited ${status} — the scan did not complete" >&2
+    org_finding "${d}" "govulncheck exited ${status} — the scan did not complete"
     exit "${status}"
   fi
   module=$(awk '/^module /{print $2; exit}' "${m}")
   [[ -n ${module} ]] || {
-    echo "audit:go-vulns: ${m} names no module" >&2
+    org_finding "" "${m} names no module"
     exit 1
   }
   "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/stele_findings.py" assert advisories --scan "${scan}" --vex "${vex}" --subject "${module}"
@@ -4800,16 +4813,16 @@ for f in slsa/assert-policy.json security/vex; do
   [[ -e ${f} ]] || missing="${missing} ${f}"
 done
 [[ -z ${missing} ]] || {
-  echo "audit:blast-radius: on the canon, and input(s) this leg reads are missing:${missing}" >&2
-  echo "  a canon-only audit reds on a missing input, never skips (#738)." >&2
+  org_finding "" "on the canon, and input(s) this leg reads are missing:${missing}" \
+    "a canon-only audit reds on a missing input, never skips (#738)."
   exit 1
 }
 command -v osv-scanner > /dev/null || {
-  echo "audit:blast-radius: osv-scanner missing from the belt" >&2
+  org_finding "" "osv-scanner missing from the belt"
   exit 1
 }
 command -v stele > /dev/null || {
-  echo "audit:blast-radius: stele missing from the belt" >&2
+  org_finding "" "stele missing from the belt"
   exit 1
 }
 : "${GITHUB_REPOSITORY_OWNER:?audit:blast-radius walks an org the environment names (#579) — Actions sets it; a local run exports it}"
@@ -4844,16 +4857,16 @@ for f in slsa/assert-policy.json slsa/verify-policy.json; do
   [[ -e ${f} ]] || missing="${missing} ${f}"
 done
 [[ -z ${missing} ]] || {
-  echo "audit:attestations: on the canon, and input(s) this leg reads are missing:${missing}" >&2
-  echo "  a canon-only audit reds on a missing input, never skips (#738)." >&2
+  org_finding "" "on the canon, and input(s) this leg reads are missing:${missing}" \
+    "a canon-only audit reds on a missing input, never skips (#738)."
   exit 1
 }
 command -v gh > /dev/null || {
-  echo "audit:attestations: gh missing" >&2
+  org_finding "" "gh missing"
   exit 1
 }
 command -v stele > /dev/null || {
-  echo "audit:attestations: stele missing from the belt" >&2
+  org_finding "" "stele missing from the belt"
   exit 1
 }
 : "${GITHUB_REPOSITORY_OWNER:?audit:attestations walks an org the environment names (#579) — Actions sets it; a local run exports it}"
@@ -4891,12 +4904,12 @@ for f in slsa/assert-policy.json slsa/verify-policy.json; do
   [[ -e ${f} ]] || missing="${missing} ${f}"
 done
 [[ -z ${missing} ]] || {
-  echo "audit:source-vsa: on the canon, and input(s) this leg reads are missing:${missing}" >&2
-  echo "  a canon-only audit reds on a missing input, never skips (#738)." >&2
+  org_finding "" "on the canon, and input(s) this leg reads are missing:${missing}" \
+    "a canon-only audit reds on a missing input, never skips (#738)."
   exit 1
 }
 command -v stele > /dev/null || {
-  echo "audit:source-vsa: stele missing from the belt" >&2
+  org_finding "" "stele missing from the belt"
   exit 1
 }
 : "${GITHUB_REPOSITORY_OWNER:?audit:source-vsa walks an org the environment names (#579) — Actions sets it; a local run exports it}"
@@ -5030,16 +5043,16 @@ compgen -G ".github/workflows/*.y*ml" > /dev/null || {
   exit 0
 }
 [[ -n ${GH_TOKEN:-} ]] || {
-  echo "audit:actions: GH_TOKEN is unset — the offline run skips every" >&2
-  echo "  API-backed audit this task exists for; refusing to pass blind" >&2
+  org_finding "" "GH_TOKEN is unset — the offline run skips every" \
+    "API-backed audit this task exists for; refusing to pass blind"
   exit 1
 }
 . "${ORG_BELT_DIR}/identity.sh"
 signer_wf=$(org_identity signer-workflow)
 blind() {
   if grep -q "running in offline mode" "$1"; then
-    echo "audit:actions: zizmor degraded to offline despite GH_TOKEN —" >&2
-    echo "  the online audits did not run; a green result would be blind" >&2
+    org_finding "" "zizmor degraded to offline despite GH_TOKEN —" \
+      "the online audits did not run; a green result would be blind"
     exit 1
   fi
 }
@@ -5096,11 +5109,11 @@ sha=$(grep -hoE "uses:[[:space:]]*${canon_re}/[^@]+@[0-9a-f]{40}" \
 }
 pins=$(wc -l <<< "${sha}" | tr -d " ")
 if [[ ${pins} -gt 1 ]]; then
-  echo "audit:template-pins: templates pin more than one SHA (lint:template-pins should have failed)" >&2
+  org_finding "" "templates pin more than one SHA (lint:template-pins should have failed)"
   exit 1
 fi
 if ! git cat-file -e "${sha}^{commit}" 2> /dev/null; then
-  echo "audit:template-pins: pinned SHA ${sha:0:8} not in local history (shallow clone?)" >&2
+  org_finding "" "pinned SHA ${sha:0:8} not in local history (shallow clone?)"
   exit 1
 fi
 drift=$(git diff --name-only "${sha}..HEAD" -- .github/workflows/ mise/)
@@ -5127,10 +5140,10 @@ if [[ -n ${drift} ]]; then
       exit 0
     fi
   fi
-  echo "audit:template-pins: pin ${sha:0:8} misses shipped canon changes:" >&2
-  git log --no-decorate --oneline "${sha}..HEAD" -- .github/workflows/ mise/ | sed "s/^/  /" >&2
-  echo "  a repo standing up from the templates would not get these —" >&2
-  echo "  bump the template pins to current canon (see #110, #111)." >&2
+  IFS=$'\n' read -r -d '' -a detail < <(git log --no-decorate --oneline "${sha}..HEAD" -- .github/workflows/ mise/) || true
+  org_finding "" "pin ${sha:0:8} misses shipped canon changes:" ${detail[@]+"${detail[@]}"} \
+    "a repo standing up from the templates would not get these —" \
+    "bump the template pins to current canon (see #110, #111)."
   exit 1
 fi
 echo "audit:template-pins: pin ${sha:0:8} carries all shipped workflow and belt changes"
@@ -5245,17 +5258,17 @@ if [[ -n ${stale} ]]; then
     exit 0
   fi
   if [[ ${red} -eq 1 ]]; then
-    echo "audit:canon-pins: references behind canon ${latest}, MEASURED over the 24h grace (oldest $((oldest / 3600))h):${stale}" >&2
-    echo "  Outside the post-release grace — Renovate should have bumped" >&2
-    echo "  these within one bot cycle. Check the Renovate dashboard and" >&2
-    echo "  default.json's first-party rules before bumping by hand" >&2
-    echo "  (#133, #290, #310)." >&2
+    org_finding "" "references behind canon ${latest}, MEASURED over the 24h grace (oldest $((oldest / 3600))h):${stale}" \
+      "Outside the post-release grace — Renovate should have bumped" \
+      "these within one bot cycle. Check the Renovate dashboard and" \
+      "default.json's first-party rules before bumping by hand" \
+      "(#133, #290, #310)."
   fi
   if [[ -n ${unmeasured} ]]; then
-    echo "audit:canon-pins: staleness age UNKNOWN — the lookup failed, no duration was measured:${unmeasured}" >&2
-    echo "  Unknown staleness is not fresh (fail closed), but it is not" >&2
-    echo "  'over 24h' either — fix the read (GH_TOKEN present? API up?)" >&2
-    echo "  and re-run before concluding anything about Renovate (#349 f11)." >&2
+    org_finding "" "staleness age UNKNOWN — the lookup failed, no duration was measured:${unmeasured}" \
+      "Unknown staleness is not fresh (fail closed), but it is not" \
+      "'over 24h' either — fix the read (GH_TOKEN present? API up?)" \
+      "and re-run before concluding anything about Renovate (#349 f11)."
   fi
   exit 1
 fi
@@ -5304,15 +5317,15 @@ git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
   exit 0
 }
 command -v gh > /dev/null || {
-  echo "audit:org-pins: gh missing" >&2
+  org_finding "" "gh missing"
   exit 1
 }
 [[ -n ${GH_TOKEN:-} ]] || {
-  echo "audit:org-pins: GH_TOKEN is unset — CANNOT_JUDGE. This walk lists," >&2
-  echo "  clones and reads tags for every member of the population, and a" >&2
-  echo "  private member is invisible without a credential. A tokenless run" >&2
-  echo "  would clone what it can and print the rest as findings against" >&2
-  echo "  repositories it never saw (#692)." >&2
+  org_finding "" "GH_TOKEN is unset — CANNOT_JUDGE. This walk lists," \
+    "clones and reads tags for every member of the population, and a" \
+    "private member is invisible without a credential. A tokenless run" \
+    "would clone what it can and print the rest as findings against" \
+    "repositories it never saw (#692)."
   exit 1
 }
 : "${GITHUB_REPOSITORY_OWNER:?audit:org-pins walks an org the environment names (#579) — Actions sets it; a local run exports it}"
@@ -5342,9 +5355,9 @@ repos=$(gh api "orgs/${GITHUB_REPOSITORY_OWNER}/repos" --paginate --jq '.[].name
 # tree with no tracked roster is refused by name, never trusted on the
 # listing's own say-so.
 git ls-files --error-unmatch slsa/assert-policy.json > /dev/null 2>&1 || {
-  echo "audit:org-pins: no tracked slsa/assert-policy.json — the roster names" >&2
-  echo "  the population, and without it an unseen repository cannot be told" >&2
-  echo "  from a clean one." >&2
+  org_finding "" "no tracked slsa/assert-policy.json — the roster names" \
+    "the population, and without it an unseen repository cannot be told" \
+    "from a clean one."
   exit 1
 }
 "${ORG_BELT_DIR}/roster-reconcile.sh" audit:org-pins slsa/assert-policy.json <<< "${repos}"
@@ -5388,18 +5401,18 @@ for repo in ${repos}; do
   done <<< "${claims}"
 done
 if [[ -n ${unreadable} ]]; then
-  echo "audit:org-pins: CANNOT_JUDGE — the token could not read:${unreadable}" >&2
-  echo "  This is a statement about the credential, NOT a finding against" >&2
-  echo "  those repositories: the walk never saw them, so it knows nothing" >&2
-  echo "  about their canon references. Red because unknown is not clean" >&2
-  echo "  (#266). Grant the token Contents: read on every member of the" >&2
-  echo "  population — a private member needs it (#692)." >&2
+  org_finding "" "CANNOT_JUDGE — the token could not read:${unreadable}" \
+    "This is a statement about the credential, NOT a finding against" \
+    "those repositories: the walk never saw them, so it knows nothing" \
+    "about their canon references. Red because unknown is not clean" \
+    "(#266). Grant the token Contents: read on every member of the" \
+    "population — a private member needs it (#692)."
   exit 1
 fi
 if [[ -n ${failed} ]]; then
-  echo "audit:org-pins: cloned clean and carry no canon reference:${failed}" >&2
-  echo "  Every org repo pins the canon by construction (scaffold/), so" >&2
-  echo "  zero references means the repo — or this extraction — is broken." >&2
+  org_finding "" "cloned clean and carry no canon reference:${failed}" \
+    "Every org repo pins the canon by construction (scaffold/), so" \
+    "zero references means the repo — or this extraction — is broken."
   exit 1
 fi
 if [[ -n ${stale} ]]; then
@@ -5431,10 +5444,10 @@ if [[ -n ${stale} ]]; then
     echo "  cycle (#227, #310). Red only past the 24h grace."
     exit 0
   fi
-  echo "audit:org-pins: references behind canon ${latest} for over 24h:${stale}" >&2
-  echo "  Renovate should have bumped these within one bot cycle — check" >&2
-  echo "  that repo's Renovate dashboard and default.json's first-party" >&2
-  echo "  rules before bumping by hand (#133, #290, #310)." >&2
+  org_finding "" "references behind canon ${latest} for over 24h:${stale}" \
+    "Renovate should have bumped these within one bot cycle — check" \
+    "that repo's Renovate dashboard and default.json's first-party" \
+    "rules before bumping by hand (#133, #290, #310)."
   exit 1
 fi
 echo "audit:org-pins: ${total} canon references across ${seen_repos} repos, all at ${latest}"
@@ -5476,10 +5489,9 @@ upstream=$(jq -r '(.["$defs"] // .definitions).Nursery.properties | keys[]
 named=$(jq -r '.linter.rules.nursery // {} | keys[]' "${cfg}" | sort)
 missing=$(comm -23 <(echo "${upstream}") <(echo "${named}"))
 if [[ -n ${missing} ]]; then
-  echo "audit:biome-rules: biome ${version} has nursery rules the org config does not name:" >&2
-  # shellcheck disable=SC2001  # an anchored per-line indent; ${x//from/to} has no line anchor
-  sed 's/^/  /' <<< "${missing}" >&2
-  echo "  add them to mise/biome-org.json — an unnamed nursery rule is simply not enforced" >&2
+  IFS=$'\n' read -r -d '' -a detail <<< "${missing}" || true
+  org_finding "" "biome ${version} has nursery rules the org config does not name:" "${detail[@]}" \
+    "add them to mise/biome-org.json — an unnamed nursery rule is simply not enforced"
   exit 1
 fi
 # The same fail-open direction one level up (#695). A domain the table
@@ -5494,11 +5506,10 @@ if [[ -f ${table} ]]; then
   recorded=$(awk -F'\t' '!/^#/ && NF { print $1 }' "${table}" | sort)
   unnamed=$(comm -23 <(echo "${shipped}") <(echo "${recorded}"))
   if [[ -n ${unnamed} ]]; then
-    echo "audit:biome-rules: biome ${version} has rule domains the org table does not name:" >&2
-    # shellcheck disable=SC2001  # an anchored per-line indent; ${x//from/to} has no line anchor
-    sed 's/^/  /' <<< "${unnamed}" >&2
-    echo "  add each to mise/biome-domains.tsv as identity or org — an unnamed domain runs" >&2
-    echo "  its rules in every repo regardless of what the repo is" >&2
+    IFS=$'\n' read -r -d '' -a detail <<< "${unnamed}" || true
+    org_finding "" "biome ${version} has rule domains the org table does not name:" "${detail[@]}" \
+      "add each to mise/biome-domains.tsv as identity or org — an unnamed domain runs" \
+      "its rules in every repo regardless of what the repo is"
     exit 1
   fi
 fi
@@ -6450,7 +6461,7 @@ git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
   exit 0
 }
 command -v gh > /dev/null || {
-  echo "audit:actions-allowlist: gh missing" >&2
+  org_finding "" "gh missing"
   exit 1
 }
 # The read comes first, and a read that fails is its own red — never an
@@ -6464,13 +6475,13 @@ command -v gh > /dev/null || {
 . "${ORG_BELT_DIR}/identity.sh"
 canon_owner=$(org_identity owner)
 if ! live=$(gh api "orgs/${canon_owner}/actions/permissions/selected-actions" 2> /dev/null); then
-  echo "audit:actions-allowlist: could not read orgs/${canon_owner}/actions/permissions/selected-actions" >&2
-  echo "  no comparison was made — this red is 'unreadable', not 'drifted'." >&2
-  echo "  The endpoint needs an org-admin-capable token (AUDIT_TOKEN)." >&2
+  org_finding "" "could not read orgs/${canon_owner}/actions/permissions/selected-actions" \
+    "no comparison was made — this red is 'unreadable', not 'drifted'." \
+    "The endpoint needs an org-admin-capable token (AUDIT_TOKEN)."
   exit 1
 fi
 jq -e '.patterns_allowed | type == "array"' <<< "${live}" > /dev/null || {
-  echo "audit:actions-allowlist: the endpoint answered without patterns_allowed — refusing to compare against null" >&2
+  org_finding "" "the endpoint answered without patterns_allowed — refusing to compare against null"
   exit 1
 }
 live_patterns=$(jq -r '.patterns_allowed | sort | join(" ")' <<< "${live}")
@@ -6484,7 +6495,7 @@ belt_list=$(org_actions_allowed "${canon_owner}")
 belt_patterns=$(awk '$0 != "actions/*" && $0 != "github/*"' <<< "${belt_list}" \
   | LC_ALL=C sort | tr "\n" " " | sed "s| $||")
 if [[ -z ${belt_patterns} ]]; then
-  echo "audit:actions-allowlist: mise/actions-allowed.sh names no pattern beyond the GitHub owners; refusing to compare" >&2
+  org_finding "" "mise/actions-allowed.sh names no pattern beyond the GitHub owners; refusing to compare"
   exit 1
 fi
 fail=""
@@ -6495,9 +6506,9 @@ jq -e '.github_owned_allowed == true' <<< "${live}" > /dev/null \
 jq -e '.verified_allowed == false' <<< "${live}" > /dev/null \
   || fail="${fail}; verified_allowed is true — the Marketplace badge is not a supply-chain control"
 if [[ -n ${fail} ]]; then
-  echo "audit:actions-allowlist: ${fail}" >&2
-  echo "  reconcile mise/actions-allowed.sh and security/README.md" >&2
-  echo "  with the live setting, or put the live setting back" >&2
+  org_finding "" "${fail}" \
+    "reconcile mise/actions-allowed.sh and security/README.md" \
+    "with the live setting, or put the live setting back"
   exit 1
 fi
 echo "audit:actions-allowlist: live org allowlist matches the belt"
@@ -6524,18 +6535,18 @@ git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
 # Canon-only, so a missing input is red by name, never a skip (#738).
 for f in security/org-default.json security/org-private.json slsa/assert-policy.json; do
   [[ -f ${f} ]] || {
-    echo "audit:security-config: ${f} missing — it is an input this audit holds to live" >&2
+    org_finding "" "${f} missing — it is an input this audit holds to live"
     exit 1
   }
 done
 command -v gh > /dev/null || {
-  echo "audit:security-config: gh missing" >&2
+  org_finding "" "gh missing"
   exit 1
 }
 [[ -n ${GH_TOKEN:-} ]] || {
-  echo "audit:security-config: GH_TOKEN is unset — CANNOT_JUDGE. The reads need" >&2
-  echo "  organisation permission Administration: read and repository" >&2
-  echo "  permission Administration: read (#1213)." >&2
+  org_finding "" "GH_TOKEN is unset — CANNOT_JUDGE. The reads need" \
+    "organisation permission Administration: read and repository" \
+    "permission Administration: read (#1213)."
   exit 1
 }
 . "${ORG_BELT_DIR}/identity.sh"
@@ -7136,12 +7147,12 @@ git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
   exit 0
 }
 [[ -f slsa/assert-policy.json ]] || {
-  echo "audit:caller-permissions: on the canon, and the input this leg reads is missing: slsa/assert-policy.json" >&2
-  echo "  a canon-only audit reds on a missing input, never skips (#738)." >&2
+  org_finding "" "on the canon, and the input this leg reads is missing: slsa/assert-policy.json" \
+    "a canon-only audit reds on a missing input, never skips (#738)."
   exit 1
 }
 command -v stele > /dev/null || {
-  echo "audit:caller-permissions: stele missing from the belt" >&2
+  org_finding "" "stele missing from the belt"
   exit 1
 }
 : "${GITHUB_REPOSITORY_OWNER:?audit:caller-permissions walks an org the environment names (#579) — Actions sets it; a local run exports it}"
@@ -7149,9 +7160,9 @@ if ! "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/stele_findings.py" as
   --policy slsa/assert-policy.json \
   --tree . \
   --org "${GITHUB_REPOSITORY_OWNER}"; then
-  echo "audit:caller-permissions: a consumer's grant is below what canon" >&2
-  echo "  HEAD's callee asks for — its next pin bump dies as" >&2
-  echo "  startup_failure. Fix the stub before or with the bump (#358)." >&2
+  org_finding "" "a consumer's grant is below what canon" \
+    "HEAD's callee asks for — its next pin bump dies as" \
+    "startup_failure. Fix the stub before or with the bump (#358)."
   exit 1
 fi
 '''
@@ -7182,29 +7193,29 @@ for f in slsa/spec-source-matrix.txt slsa/requirements.toml; do
   [[ -e ${f} ]] || missing="${missing} ${f}"
 done
 [[ -z ${missing} ]] || {
-  echo "audit:spec-drift: on the canon, and input(s) this leg reads are missing:${missing}" >&2
-  echo "  a canon-only audit reds on a missing input, never skips (#738)." >&2
+  org_finding "" "on the canon, and input(s) this leg reads are missing:${missing}" \
+    "a canon-only audit reds on a missing input, never skips (#738)."
   exit 1
 }
 if ! page=$(curl -sfL "https://slsa.dev/spec/v1.2/source-requirements"); then
-  echo "audit:spec-drift: could not fetch the spec page — nothing was compared" >&2
+  org_finding "" "could not fetch the spec page — nothing was compared"
   exit 1
 fi
 live=$(tr -d "\n" <<< "${page}" \
   | awk 'BEGIN{RS="<tr "} /^id="/ { id=$0; sub(/^id="/,"",id); sub(/".*/,"",id); n=gsub(/<td>✓/,""); print id, n }')
 if [[ -z ${live} ]]; then
-  echo "audit:spec-drift: extracted zero requirement rows — the page shape changed;" >&2
-  echo "  that is itself drift: re-derive the extraction and re-map (#349 S2)" >&2
+  org_finding "" "extracted zero requirement rows — the page shape changed;" \
+    "that is itself drift: re-derive the extraction and re-map (#349 S2)"
   exit 1
 fi
 pinned=$(grep -v "^#" slsa/spec-source-matrix.txt)
 pinned_sorted=$(sort <<< "${pinned}")
 live_sorted=$(sort <<< "${live}")
 if [[ ${pinned_sorted} != "${live_sorted}" ]]; then
-  echo "audit:spec-drift: the spec's requirement matrix moved:" >&2
-  diff <(echo "${pinned_sorted}") <(echo "${live_sorted}") | sed "s/^/  /" >&2 || true
-  echo "  re-map slsa/requirements.toml against the spec, then re-pin" >&2
-  echo "  slsa/spec-source-matrix.txt (#349 S2, the #203 lesson)" >&2
+  IFS=$'\n' read -r -d '' -a detail < <(diff <(echo "${pinned_sorted}") <(echo "${live_sorted}") || true) || true
+  org_finding "" "the spec's requirement matrix moved:" "${detail[@]}" \
+    "re-map slsa/requirements.toml against the spec, then re-pin" \
+    "slsa/spec-source-matrix.txt (#349 S2, the #203 lesson)"
   exit 1
 fi
 # COVERAGE, the half the comparison above cannot see (#123 finding 3).
@@ -7216,7 +7227,7 @@ fi
 # the [[declined]] ids covers every id in the pin, and that no mapping
 # names an id the pin does not have (a renamed anchor left behind).
 command -v taplo > /dev/null || {
-  echo "audit:spec-drift: taplo missing from the belt" >&2
+  org_finding "" "taplo missing from the belt"
   exit 1
 }
 reqs=$(taplo get -f slsa/requirements.toml -o json)
@@ -7234,13 +7245,13 @@ while IFS= read -r id; do
 done <<< "${mapped}"
 if [[ -n ${uncovered} || -n ${stale} ]]; then
   [[ -n ${uncovered} ]] && {
-    echo "audit:spec-drift: spec requirement(s) neither mapped nor declined:${uncovered}" >&2
-    echo "  add spec_ids to the discharging [[source]] row, or a [[declined]]" >&2
-    echo "  entry naming the decision — silence is the defect (#123 finding 3)" >&2
+    org_finding "" "spec requirement(s) neither mapped nor declined:${uncovered}" \
+      "add spec_ids to the discharging [[source]] row, or a [[declined]]" \
+      "entry naming the decision — silence is the defect (#123 finding 3)"
   }
   [[ -n ${stale} ]] && {
-    echo "audit:spec-drift: mapping names id(s) the spec does not have:${stale}" >&2
-    echo "  an anchor was renamed or removed; re-map against the live page" >&2
+    org_finding "" "mapping names id(s) the spec does not have:${stale}" \
+      "an anchor was renamed or removed; re-map against the live page"
   }
   exit 1
 fi
@@ -7361,17 +7372,17 @@ git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
   exit 0
 }
 [[ -f slsa/assert-policy.json ]] || {
-  echo "audit:release-tags: on the canon, and the input this leg reads is missing: slsa/assert-policy.json" >&2
-  echo "  the epochs are policy data, so without it no tag can be judged;" >&2
-  echo "  a canon-only audit reds on a missing input, never skips (#738)." >&2
+  org_finding "" "on the canon, and the input this leg reads is missing: slsa/assert-policy.json" \
+    "the epochs are policy data, so without it no tag can be judged;" \
+    "a canon-only audit reds on a missing input, never skips (#738)."
   exit 1
 }
 command -v gh > /dev/null || {
-  echo "audit:release-tags: gh missing" >&2
+  org_finding "" "gh missing"
   exit 1
 }
 command -v stele > /dev/null || {
-  echo "audit:release-tags: stele missing from the belt" >&2
+  org_finding "" "stele missing from the belt"
   exit 1
 }
 : "${GITHUB_REPOSITORY_OWNER:?audit:release-tags walks an org the environment names (#579) — Actions sets it; a local run exports it}"
@@ -7428,7 +7439,7 @@ git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
   exit 0
 }
 command -v gh > /dev/null || {
-  echo "audit:drafts: gh missing" >&2
+  org_finding "" "gh missing"
   exit 1
 }
 : "${GITHUB_REPOSITORY_OWNER:?audit:drafts walks an org the environment names (#579) — Actions sets it; a local run exports it}"
@@ -7470,8 +7481,8 @@ if [[ -z ${probe_repo} ]]; then
   probe_repo=$(gh repo view --json nameWithOwner --jq .nameWithOwner 2> /dev/null) || probe_repo=""
 fi
 [[ -n ${probe_repo} ]] || {
-  echo "audit:drafts: cannot name the repository this audit runs from, so there is" >&2
-  echo "  nowhere to prove draft visibility. Refusing to judge unproven." >&2
+  org_finding "" "cannot name the repository this audit runs from, so there is" \
+    "nowhere to prove draft visibility. Refusing to judge unproven."
   exit 1
 }
 # Not v-prefixed, deliberately: nothing here creates a tag (a draft's tag
@@ -7497,14 +7508,14 @@ if ! probe_id=$(gh api "repos/${probe_repo}/releases" -X POST \
   -f name="audit:drafts visibility probe" \
   -f body="${probe_body}" \
   -F draft=true --jq .id 2> "${probe_err}"); then
-  echo "audit:drafts: could not create the visibility probe in ${probe_repo} —" >&2
-  echo "  draft visibility is unproven, so no listing is believed and no count" >&2
-  echo "  is reported. A number from a blind token is worse than no number." >&2
-  sed 's/^/    /' "${probe_err}" >&2
+  IFS=$'\n' read -r -d '' -a detail < <(sed 's/^/  /' "${probe_err}") || true
   rm -f "${probe_err}"
-  echo "  The token needs Contents: read and write on the audited repositories" >&2
-  echo "  — read to see drafts at all, write to make the one that proves it." >&2
-  echo "  slsa.yml carries the environment-scoped AUDIT_TOKEN for this." >&2
+  org_finding "" "could not create the visibility probe in ${probe_repo} —" \
+    "draft visibility is unproven, so no listing is believed and no count" \
+    "is reported. A number from a blind token is worse than no number." ${detail[@]+"${detail[@]}"} \
+    "The token needs Contents: read and write on the audited repositories" \
+    "— read to see drafts at all, write to make the one that proves it." \
+    "slsa.yml carries the environment-scoped AUDIT_TOKEN for this."
   exit 1
 fi
 rm -f "${probe_err}"
@@ -7531,35 +7542,34 @@ done
 probe_deleted="yes"
 gh api -X DELETE "repos/${probe_repo}/releases/${probe_id}" > /dev/null 2>&1 || probe_deleted=""
 if [[ -z ${probe_seen} ]]; then
-  echo "audit:drafts: this token cannot see draft releases." >&2
-  echo "  The probe draft ${probe_repo}@${probe_tag} was created and GitHub's own" >&2
-  echo "  release listing did not return it — the listing is being filtered, and" >&2
-  echo "  an empty listing from a filtered token is indistinguishable from a" >&2
-  echo "  clean org (#604). Refusing to report a count nobody could trust." >&2
-  echo "  Fix the token grant (Contents: read on every audited repository), not" >&2
-  echo "  this check: no permission bit is a proof of visibility, so there is" >&2
-  echo "  nothing here to loosen." >&2
-  [[ -n ${probe_deleted} ]] || {
-    echo "  The probe draft could not be deleted either — remove it by hand:" >&2
-    echo "    gh api -X DELETE repos/${probe_repo}/releases/${probe_id}" >&2
-  }
+  hand=()
+  [[ -n ${probe_deleted} ]] || hand=("The probe draft could not be deleted either — remove it by hand:"
+    "  gh api -X DELETE repos/${probe_repo}/releases/${probe_id}")
+  org_finding "" "this token cannot see draft releases." \
+    "The probe draft ${probe_repo}@${probe_tag} was created and GitHub's own" \
+    "release listing did not return it — the listing is being filtered, and" \
+    "an empty listing from a filtered token is indistinguishable from a" \
+    "clean org (#604). Refusing to report a count nobody could trust." \
+    "Fix the token grant (Contents: read on every audited repository), not" \
+    "this check: no permission bit is a proof of visibility, so there is" \
+    "nothing here to loosen." ${hand[@]+"${hand[@]}"}
   exit 1
 fi
 if [[ -z ${probe_deleted} ]]; then
-  echo "audit:drafts: could not delete the visibility probe" >&2
-  echo "  ${probe_repo}@${probe_tag} (release id ${probe_id})." >&2
-  echo "  It carries a draft-record marker, so it will not be reported as" >&2
-  echo "  unexplained residue — but residue is what it is. Delete it:" >&2
-  echo "    gh api -X DELETE repos/${probe_repo}/releases/${probe_id}" >&2
+  org_finding "" "could not delete the visibility probe" \
+    "${probe_repo}@${probe_tag} (release id ${probe_id})." \
+    "It carries a draft-record marker, so it will not be reported as" \
+    "unexplained residue — but residue is what it is. Delete it:" \
+    "  gh api -X DELETE repos/${probe_repo}/releases/${probe_id}"
   exit 1
 fi
 if ! population=$(gh api "orgs/${GITHUB_REPOSITORY_OWNER}/repos" --paginate \
   --jq '.[] | select(.archived or .fork | not) | .name' 2> /dev/null); then
-  echo "audit:drafts: could not enumerate the org's repositories — no population, no audit" >&2
+  org_finding "" "could not enumerate the org's repositories — no population, no audit"
   exit 1
 fi
 [[ -n ${population} ]] || {
-  echo "audit:drafts: the org listing named zero repositories — the walk is broken, not the org" >&2
+  org_finding "" "the org listing named zero repositories — the walk is broken, not the org"
   exit 1
 }
 now=$(date -u +%s)
@@ -7578,7 +7588,7 @@ for repo in ${population}; do
       | [.tag_name, (.created_at | fromdateiso8601 | tostring),
          (((.body // "") | contains("<!-- draft-record:")) | tostring)]
       | @tsv' 2> /dev/null); then
-    echo "audit:drafts: could not list ${repo}'s releases — unreadable is never clean" >&2
+    org_finding "" "could not list ${repo}'s releases — unreadable is never clean"
     exit 1
   fi
   walked=$((walked + 1))
@@ -7600,12 +7610,12 @@ for repo in ${population}; do
   done <<< "${listing}"
 done
 if [[ -n ${unexplained} ]]; then
-  echo "audit:drafts: ${walked} repo(s) walked, drafts that explain nothing:${unexplained}" >&2
-  echo "  a draft nobody can classify by looking is why this check exists (#597)." >&2
-  echo "  Record it — do not delete it: the draft is the only artifact of a" >&2
-  echo "  failed attempt other than run logs, which expire at 90 days." >&2
-  echo "    REPO=${GITHUB_REPOSITORY_OWNER}/<repo> TAG=<vX.Y.Z> KIND=burn \\" >&2
-  echo "      RUN_URL=<the run that burned it> release/record-draft.sh" >&2
+  org_finding "" "${walked} repo(s) walked, drafts that explain nothing:${unexplained}" \
+    "a draft nobody can classify by looking is why this check exists (#597)." \
+    "Record it — do not delete it: the draft is the only artifact of a" \
+    "failed attempt other than run logs, which expire at 90 days." \
+    "  REPO=${GITHUB_REPOSITORY_OWNER}/<repo> TAG=<vX.Y.Z> KIND=burn \\" \
+    "    RUN_URL=<the run that burned it> release/record-draft.sh"
   exit 1
 fi
 echo "audit:drafts: visibility proven in ${probe_repo}, ${walked} repo(s) walked, ${drafts} draft(s): ${recorded} recorded, ${young} in flight"
@@ -7670,28 +7680,28 @@ git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
 # tracked markdown reds too — resolving zero citations out of zero
 # documents is the "read nothing, report clean" shape, not a clean org.
 [[ -d docs ]] || {
-  echo "audit:citations: on the canon, and the input this leg walks is missing: docs/" >&2
-  echo "  a canon-only audit reds on a missing input, never skips (#738)." >&2
+  org_finding "" "on the canon, and the input this leg walks is missing: docs/" \
+    "a canon-only audit reds on a missing input, never skips (#738)."
   exit 1
 }
 docs=$(git ls-files ':!vendor/**' "docs/*.md")
 [[ -n ${docs} ]] || {
-  echo "audit:citations: on the canon, and docs/ holds no tracked markdown —" >&2
-  echo "  there is nothing to resolve, so there is nothing to report clean (#738)." >&2
+  org_finding "" "on the canon, and docs/ holds no tracked markdown —" \
+    "there is nothing to resolve, so there is nothing to report clean (#738)."
   exit 1
 }
 command -v gh > /dev/null || {
-  echo "audit:citations: gh missing" >&2
+  org_finding "" "gh missing"
   exit 1
 }
 : "${GITHUB_REPOSITORY_OWNER:?audit:citations walks an org the environment names (#579) — Actions sets it; a local run exports it}"
 if ! repos=$(gh api "orgs/${GITHUB_REPOSITORY_OWNER}/repos" --paginate --jq '.[].name' 2> /dev/null); then
-  echo "audit:citations: could not enumerate org repos — nothing was resolved" >&2
+  org_finding "" "could not enumerate org repos — nothing was resolved"
   exit 1
 fi
 [[ -n ${repos} ]] || {
-  echo "audit:citations: the org listing named zero repositories — the walk is" >&2
-  echo "  broken, not the docs, and nothing was resolved" >&2
+  org_finding "" "the org listing named zero repositories — the walk is" \
+    "broken, not the docs, and nothing was resolved"
   exit 1
 }
 # One alternation of live repository names — no literal list of repos in
@@ -7754,9 +7764,9 @@ while IFS= read -r r; do
   run URL cited in docs/ does not resolve: https://${r}"
 done <<< "${runs}"
 if [[ -n ${fail} ]]; then
-  echo "audit:citations: citations that resolve to nothing:${fail}" >&2
-  echo "  a citation is a claim about the record — correct the document" >&2
-  echo "  or the record, never leave them disagreeing (#349 finding 2)" >&2
+  org_finding "" "citations that resolve to nothing:${fail}" \
+    "a citation is a claim about the record — correct the document" \
+    "or the record, never leave them disagreeing (#349 finding 2)"
   exit 1
 fi
 dn=$(wc -l <<< "${docs}" | tr -d ' ')
@@ -7808,24 +7818,24 @@ git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
 }
 roster="slsa/assert-policy.json"
 [[ -f ${roster} ]] || {
-  echo "audit:adoption: ${roster} missing — the roster IS the population," >&2
-  echo "  so without it there is nothing to walk (#693); a canon-only audit" >&2
-  echo "  reds on a missing input, never skips (#738)" >&2
+  org_finding "" "${roster} missing — the roster IS the population," \
+    "so without it there is nothing to walk (#693); a canon-only audit" \
+    "reds on a missing input, never skips (#738)"
   exit 1
 }
 command -v gh > /dev/null || {
-  echo "audit:adoption: gh missing" >&2
+  org_finding "" "gh missing"
   exit 1
 }
 command -v stele > /dev/null || {
-  echo "audit:adoption: stele missing from the belt — it holds the population" >&2
+  org_finding "" "stele missing from the belt — it holds the population"
   exit 1
 }
 [[ -n ${GH_TOKEN:-} ]] || {
-  echo "audit:adoption: GH_TOKEN is unset — CANNOT_JUDGE. The population" >&2
-  echo "  contains a private member, and a credential that cannot see it" >&2
-  echo "  enumerates a short org and reports the difference as adoption" >&2
-  echo "  gaps (#692)." >&2
+  org_finding "" "GH_TOKEN is unset — CANNOT_JUDGE. The population" \
+    "contains a private member, and a credential that cannot see it" \
+    "enumerates a short org and reports the difference as adoption" \
+    "gaps (#692)."
   exit 1
 }
 : "${GITHUB_REPOSITORY_OWNER:?audit:adoption walks an org the environment names (#579) — Actions sets it; a local run exports it}"
@@ -7838,8 +7848,8 @@ rc=0
 population=$(stele derive population --policy "${roster}" \
   --org "${GITHUB_REPOSITORY_OWNER}") || rc=$?
 if [[ ${rc} -ne 0 && ${rc} -ne 1 ]]; then
-  echo "audit:adoption: stele derive population exited ${rc} — CANNOT_JUDGE" >&2
-  echo "  (no population, no reconciliation: the roster would go unchecked)" >&2
+  org_finding "" "stele derive population exited ${rc} — CANNOT_JUDGE" \
+    "(no population, no reconciliation: the roster would go unchecked)"
   exit 1
 fi
 unlisted=$(jq -r '.reconciliation.undeclared[]' <<< "${population}")
@@ -7873,7 +7883,7 @@ done
 # it derives nothing and the reconciliation below says why.
 owed=""
 if [[ -n ${repos} ]] && ! owed=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/adoption_population.py" "${canon}" <<< "${population}"); then
-  echo "audit:adoption: the population document was refused, so no obligations were derived" >&2
+  org_finding "" "the population document was refused, so no obligations were derived"
   exit 1
 fi
 while IFS=$'\t' read -r _ repo artifact names; do
@@ -7895,37 +7905,37 @@ while IFS=$'\t' read -r _ repo artifact names; do
   ${repo}: missing ${artifact} (no workflow named ${names}) and no opt-out row"
 done <<< "${owed}"
 if [[ -n ${blind} ]]; then
-  echo "audit:adoption: CANNOT_JUDGE — could not read .github/workflows in:${blind}" >&2
-  echo "  The walk never saw these repositories, so it knows nothing about" >&2
-  echo "  what they have adopted. Red because unknown is not clean (#266)," >&2
-  echo "  but this is the credential's failure, not theirs: grant the token" >&2
-  echo "  Contents: read on every member of the population (#692)." >&2
+  org_finding "" "CANNOT_JUDGE — could not read .github/workflows in:${blind}" \
+    "The walk never saw these repositories, so it knows nothing about" \
+    "what they have adopted. Red because unknown is not clean (#266)," \
+    "but this is the credential's failure, not theirs: grant the token" \
+    "Contents: read on every member of the population (#692)."
   exit 1
 fi
 reconciled=0
 if [[ -n ${unlisted} ]]; then
-  echo "audit:adoption: in the org and NOT in the roster:" >&2
-  while IFS= read -r name; do echo "  ${name}" >&2; done <<< "${unlisted}"
-  echo "  The roster is the org's statement of its own shape, so a" >&2
-  echo "  repository missing from it is walked by nothing and covered by" >&2
-  echo "  no claim. Declare it in ${roster} — with its tracks, or with an" >&2
-  echo "  empty track list and a reason if it is an exclusion — or" >&2
-  echo "  transfer it out (#266, #693)." >&2
+  IFS=$'\n' read -r -d '' -a detail <<< "${unlisted}" || true
+  org_finding "" "in the org and NOT in the roster:" "${detail[@]}" \
+    "The roster is the org's statement of its own shape, so a" \
+    "repository missing from it is walked by nothing and covered by" \
+    "no claim. Declare it in ${roster} — with its tracks, or with an" \
+    "empty track list and a reason if it is an exclusion — or" \
+    "transfer it out (#266, #693)."
   reconciled=1
 fi
 if [[ -n ${absent} ]]; then
-  echo "audit:adoption: declared in the roster and NOT in the org listing:" >&2
-  while IFS= read -r name; do echo "  ${name}" >&2; done <<< "${absent}"
-  echo "  Either the repository is gone and the roster is stale, or the" >&2
-  echo "  token cannot see it — both are red, and neither is clean." >&2
+  IFS=$'\n' read -r -d '' -a detail <<< "${absent}" || true
+  org_finding "" "declared in the roster and NOT in the org listing:" "${detail[@]}" \
+    "Either the repository is gone and the roster is stale, or the" \
+    "token cannot see it — both are red, and neither is clean."
   reconciled=1
 fi
 if [[ -n ${fail} ]]; then
-  echo "audit:adoption: population gaps:${fail}" >&2
-  echo "  wire the stub per docs/runbook.md, or record the exception in" >&2
-  echo "  ${optout} as 'repo artifact YYYY-MM-DD reason' (#349 S7, #266)." >&2
-  echo "  An artifact a repository's declared membership does not make" >&2
-  echo "  applicable never reaches this list and needs no row (#693)." >&2
+  org_finding "" "population gaps:${fail}" \
+    "wire the stub per docs/runbook.md, or record the exception in" \
+    "${optout} as 'repo artifact YYYY-MM-DD reason' (#349 S7, #266)." \
+    "An artifact a repository's declared membership does not make" \
+    "applicable never reaches this list and needs no row (#693)."
   reconciled=1
 fi
 # One red never hides another: an undeclared repository and a missing
@@ -7955,14 +7965,14 @@ git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
   exit 0
 }
 [[ -f security/signing-surface.toml ]] || {
-  echo "audit:signer-surface: on the canon, and the input this leg reads is missing: security/signing-surface.toml" >&2
-  echo "  the declaration is one half of the reconciliation, so without it" >&2
-  echo "  there is nothing to compare the signer against; a canon-only audit" >&2
-  echo "  reds on a missing input, never skips (#738)." >&2
+  org_finding "" "on the canon, and the input this leg reads is missing: security/signing-surface.toml" \
+    "the declaration is one half of the reconciliation, so without it" \
+    "there is nothing to compare the signer against; a canon-only audit" \
+    "reds on a missing input, never skips (#738)."
   exit 1
 }
 command -v gh > /dev/null || {
-  echo "audit:signer-surface: gh missing" >&2
+  org_finding "" "gh missing"
   exit 1
 }
 . "${ORG_BELT_DIR}/identity.sh"
@@ -7971,7 +7981,7 @@ signer_repo="${signer_wf%%/.github/*}"
 signer_path="${signer_wf#"${signer_repo}"/}"
 if ! signer=$(gh api "repos/${signer_repo}/contents/${signer_path}" \
   -H "Accept: application/vnd.github.raw" 2> /dev/null); then
-  echo "audit:signer-surface: could not read the signer's sign.yml — no comparison was made" >&2
+  org_finding "" "could not read the signer's sign.yml — no comparison was made"
   exit 1
 fi
 # The allowlist arms: URL-shaped case patterns inside the validate step.
@@ -8011,9 +8021,9 @@ done <<< "${rows}"
 [[ ${n} -gt 0 ]] || fail="${fail}
   signing-surface.toml declares no rows — an empty declaration declares nothing"
 if [[ -n ${fail} ]]; then
-  echo "audit:signer-surface: the surface and its callers disagree:${fail}" >&2
-  echo "  reconcile security/signing-surface.toml with the signer's case" >&2
-  echo "  statement and the callers' predicate-type lines (#349 S5)" >&2
+  org_finding "" "the surface and its callers disagree:${fail}" \
+    "reconcile security/signing-surface.toml with the signer's case" \
+    "statement and the callers' predicate-type lines (#349 S5)"
   exit 1
 fi
 echo "audit:signer-surface: ${n} declared type(s), allowlist and callers agree"
@@ -8086,11 +8096,11 @@ floor=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/coverage_floor.py"
 measured=$("${ORG_BELT_DIR}/coverage-measure.sh" audit:coverage-branches rust-branches) || exit 1
 read -r leg pct <<< "${measured}"
 if [[ ${leg:-} != rust-branches || -z ${pct:-} ]]; then
-  echo "audit:coverage-branches: the measurement printed no rust-branches figure — a check that reads nothing must not pass" >&2
+  org_finding "" "the measurement printed no rust-branches figure — a check that reads nothing must not pass"
   exit 1
 fi
 if awk -v p="${pct}" -v f="${floor}" 'BEGIN { exit !(p < f) }'; then
-  echo "audit:coverage-branches: rust-branches: ${pct}% is below the derived floor ${floor}%" >&2
+  org_finding "rust-branches" "${pct}% is below the derived floor ${floor}%"
   exit 1
 fi
 echo "audit:coverage-branches: rust-branches holds the floor ${floor} (${pct}%)"
@@ -8119,7 +8129,7 @@ floor=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/coverage_floor.py"
 }
 pct=$("${ORG_BELT_DIR}/coverage-go-branches.sh" audit:coverage-go-branches) || exit 1
 if [[ ${pct} != "go-branches "* ]] || awk -v p="${pct#go-branches }" -v f="${floor}" 'BEGIN { exit !(p < f) }'; then
-  echo "audit:coverage-go-branches: go-branches: ${pct#go-branches }% is below the derived floor ${floor}%" >&2
+  org_finding "go-branches" "${pct#go-branches }% is below the derived floor ${floor}%"
   exit 1
 fi
 echo "audit:coverage-go-branches: go-branches holds the floor ${floor} (${pct#go-branches }%)"
@@ -8774,8 +8784,8 @@ locks=$(git ls-files ':!vendor/**' "mise.lock" "*/mise.lock")
   exit 0
 }
 command -v gh > /dev/null || {
-  echo "audit:lock-arch: gh is missing — CANNOT_JUDGE. This check asks a" >&2
-  echo "  release which assets it published; without gh it cannot ask." >&2
+  org_finding "" "gh is missing — CANNOT_JUDGE. This check asks a" \
+    "release which assets it published; without gh it cannot ask."
   exit 1
 }
 candidates=$(printf '%s\n' "${locks}" | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/lock_arch.py")
@@ -8803,8 +8813,8 @@ failed=""
 while IFS=$'\t' read -r lock tool platform declared_plat asset repo tag pattern; do
   [[ -n ${lock} ]] || continue
   assets=$(gh api "repos/${repo}/releases/tags/${tag}" --jq '.assets[].name' 2> /dev/null) || {
-    echo "audit:lock-arch: CANNOT_JUDGE ${repo}@${tag} — the release listing did not read" >&2
-    echo "  (rate limit, or a tag that no longer exists). Not judged, not passed." >&2
+    org_finding "" "CANNOT_JUDGE ${repo}@${tag} — the release listing did not read" \
+      "(rate limit, or a tag that no longer exists). Not judged, not passed."
     exit 1
   }
   native=$(grep -Ei "${pattern}" <<< "${assets}" | sed -n 1p || true)
@@ -8834,24 +8844,24 @@ while IFS=$'\t' read -r lock tool platform declared_plat asset repo tag pattern;
     continue
   fi
   failed="${failed} ${tool}[${platform}]"
-  echo "audit:lock-arch: ${tool} [${platform}] in ${lock} resolves ${asset}," >&2
-  echo "  but ${repo}@${tag} publishes ${native} — the lock names an" >&2
-  echo "  architecture it does not carry." >&2
+  org_finding "" "${tool} [${platform}] in ${lock} resolves ${asset}," \
+    "but ${repo}@${tag} publishes ${native} — the lock names an" \
+    "architecture it does not carry."
 done <<< "${candidates}"
 stale=""
 for a in ${declared}; do
   [[ " ${used} " == *" ${a} "* ]] || stale="${stale} ${a}"
 done
 if [[ -n ${stale} ]]; then
-  echo "audit:lock-arch: allowance(s) matching nothing:${stale}" >&2
-  echo "  the defect they carry is gone; delete the line and its issue reference" >&2
+  org_finding "" "allowance(s) matching nothing:${stale}" \
+    "the defect they carry is gone; delete the line and its issue reference"
   exit 1
 fi
 if [[ -n ${failed} ]]; then
-  echo "audit:lock-arch: lock entries naming an architecture they do not carry:${failed}" >&2
-  echo "  a native asset exists for each. Correct the resolution — the belt's" >&2
-  echo "  mise/aqua-registry.yaml is the delivered channel for an aqua package —" >&2
-  echo "  or file the defect and carry a dated allowance beside the others." >&2
+  org_finding "" "lock entries naming an architecture they do not carry:${failed}" \
+    "a native asset exists for each. Correct the resolution — the belt's" \
+    "mise/aqua-registry.yaml is the delivered channel for an aqua package —" \
+    "or file the defect and carry a dated allowance beside the others."
   exit 1
 fi
 echo "audit:lock-arch: ok"
@@ -8907,9 +8917,9 @@ locks=$(git ls-files ':!vendor/**' "mise.lock" "*/mise.lock")
 }
 belt="${ORG_BELT_DIR:-}"
 [[ -n ${belt} && -f ${belt}/config.toml ]] || {
-  echo "audit:lock-idempotent: CANNOT_JUDGE — the belt did not arrive" >&2
-  echo "  (ORG_BELT_DIR is empty). Every lock was resolved under the belt's" >&2
-  echo "  settings, so a run without it would judge a different resolver." >&2
+  org_finding "" "CANNOT_JUDGE — the belt did not arrive" \
+    "(ORG_BELT_DIR is empty). Every lock was resolved under the belt's" \
+    "settings, so a run without it would judge a different resolver."
   exit 1
 }
 belt=$(cd "${belt}" && pwd -P)
@@ -8937,9 +8947,9 @@ while IFS= read -r lock; do
     copied=1
   done
   [[ ${copied} -eq 1 ]] || {
-    echo "audit:lock-idempotent: ${lock} has no tracked config beside it —" >&2
-    echo "  nothing to regenerate it from. A lock without its config is a" >&2
-    echo "  stray; delete it or commit the config that produced it." >&2
+    org_finding "" "${lock} has no tracked config beside it —" \
+      "nothing to regenerate it from. A lock without its config is a" \
+      "stray; delete it or commit the config that produced it."
     drifted="${drifted} ${lock}"
     continue
   }
@@ -8953,8 +8963,8 @@ while IFS= read -r lock; do
       MISE_TRUSTED_CONFIG_PATHS="${scratch}" \
       mise lock > "${scratch}/log" 2>&1); then
     cat "${scratch}/log" >&2
-    echo "audit:lock-idempotent: CANNOT_JUDGE ${lock} — \`mise lock\` failed in" >&2
-    echo "  scratch (above). Not judged, not passed." >&2
+    org_finding "" "CANNOT_JUDGE ${lock} — \`mise lock\` failed in" \
+      "scratch (above). Not judged, not passed."
     exit 1
   fi
   fresh="${work}/${d}/mise.lock"
@@ -8974,33 +8984,32 @@ while IFS= read -r lock; do
   named=$(awk -F'\t' '$0 == "--" { side++; next }
     side == 0 { a[$1] = $2; next } side == 1 { f[$1] = $2 }
     END {
-      for (k in a) if (!(k in f)) print "  " k " (dropped)"; else if (a[k] != f[k]) print "  " k
-      for (k in f) if (!(k in a)) print "  " k " (added)"
+      for (k in a) if (!(k in f)) print k " (dropped)"; else if (a[k] != f[k]) print k
+      for (k in f) if (!(k in a)) print k " (added)"
     }' "${scratch}/blocks" | sort)
-  echo "audit:lock-idempotent: ${lock} is NOT what \`mise lock\` writes today." >&2
   if [[ -n ${named} ]]; then
-    echo "  entries that moved (tool#occurrence):" >&2
-    echo "${named}" >&2
+    IFS=$'\n' read -r -d '' -a detail <<< "entries that moved (tool#occurrence):"$'\n'"${named}" || true
   else
-    echo "  the difference is outside every [[tools.*]] entry:" >&2
+    detail=("the difference is outside every [[tools.*]] entry:")
   fi
-  diff -u "${lock}" "${fresh}" | sed 's/^/    /' >&2 || true
+  while IFS= read -r line; do detail+=("  ${line}"); done < <(diff -u "${lock}" "${fresh}" || true)
+  org_finding "" "${lock} is NOT what \`mise lock\` writes today." "${detail[@]}"
 done <<< "${locks}"
 after=$(git status --porcelain=v1 --untracked-files=all)
 if [[ ${before} != "${after}" ]]; then
-  echo "audit:lock-idempotent: the working tree CHANGED during the check —" >&2
-  echo "  it must run entirely in scratch. Before:" >&2
-  echo "${before:-    (clean)}" >&2
-  echo "  After:" >&2
-  echo "${after:-    (clean)}" >&2
+  detail=("it must run entirely in scratch. Before:")
+  while IFS= read -r line; do detail+=("  ${line}"); done <<< "${before:-(clean)}"
+  detail+=("After:")
+  while IFS= read -r line; do detail+=("  ${line}"); done <<< "${after:-(clean)}"
+  org_finding "" "the working tree CHANGED during the check —" "${detail[@]}"
   exit 1
 fi
 if [[ -n ${drifted} ]]; then
-  echo "audit:lock-idempotent: drifted from today's resolution:${drifted}" >&2
-  echo "  Regenerating is not the whole fix, and that is the accepted cost" >&2
-  echo "  (#904): prove the newly resolved assets actually run (#899 ran every" >&2
-  echo "  binary in ubuntu:24.04 on both architectures), then commit the lock" >&2
-  echo "  in a change of its own." >&2
+  org_finding "" "drifted from today's resolution:${drifted}" \
+    "Regenerating is not the whole fix, and that is the accepted cost" \
+    "(#904): prove the newly resolved assets actually run (#899 ran every" \
+    "binary in ubuntu:24.04 on both architectures), then commit the lock" \
+    "in a change of its own."
   exit 1
 fi
 echo "audit:lock-idempotent: ok — ${n} lock(s), working tree unchanged"

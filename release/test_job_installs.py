@@ -475,8 +475,9 @@ def installs(job: Job) -> tuple[list[str], list[str], list[str]]:
     return keys, needed, optional
 
 
-# The commands whose arguments the shell prints (#1785).
-PRINTS = frozenset({"echo", "printf"})
+# The commands whose arguments the shell prints (#1785): and the
+# finding writers, whose arguments are a finding's text (#1934).
+PRINTS = frozenset({"echo", "printf", "org_finding", "org_finding_annotated"})
 # The expansion operators whose word is a message the shell prints.
 UNSET_OPS = frozenset({":?", "?"})
 # The nodes inside a printed span the shell still runs.
