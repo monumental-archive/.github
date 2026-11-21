@@ -51,9 +51,25 @@ under 60,000 characters: excerpts are dropped from the last job
 upwards, and the body says so. The label is created from settings/repo-baseline.json's
 definition when the repository does not have it.
 
+With `--findings DIR` the body is also written from the run's findings
+(#1890, docs/findings.md): every `*.jsonl` in DIR, one record per line
+as mise/findings.sh and mise/findings.py append them. A line that is
+not a record is counted, and the body says how many. `## Findings`
+lists each task's findings, its name in order, those new in this run
+apart from those still red: a finding is its task, subject and
+message, and the body ends with a comment line carrying the first 16
+hex characters of each one's SHA-256, which the next run reads back. A
+red job whose failing step ran a task with a record (named after
+`mise run ` in the step's name, or in a `[<task>] ` prefix of its
+output) points at its findings; any other shows its failing step's
+output under "no finding was recorded". Over the limit, step outputs
+go first, then detail blocks, then findings from the end of the list,
+each said with how many. Without the flag, or with no record and no
+unreadable line in DIR, the body is as above.
+
 Usage:
   standing_issue.py --workflow NAME --run-id ID --ref REF
-                    [--default-branch BRANCH]
+                    [--default-branch BRANCH] [--findings DIR]
 
 The repository is GITHUB_REPOSITORY, the server GITHUB_SERVER_URL, the
 API GITHUB_API_URL (https://api.github.com when unset).
@@ -65,7 +81,9 @@ the logs.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import html
+import json
 import os
 import re
 import subprocess
@@ -74,6 +92,10 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 import decoded
 import typed_std
@@ -102,6 +124,15 @@ TIMESTAMP = re.compile(r"^﻿?\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z ?")
 COLOUR = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 EXITED = re.compile(r"^Process completed with exit code \d+\.$")
 BACKTICKS = re.compile(r"`+")
+# The tasks a failing step ran: `mise run <task>` in its name, and the
+# `[<task>] ` prefix mise writes before a task's own lines.
+RUN_TASK = re.compile(r"(?:^|\s)mise run ([^\s;&|]+)")
+TASK_PREFIX = re.compile(r"^\[([^\]\s]+)\] ")
+# The last line of a body written from findings: each one's hash.
+HASHES = re.compile(r"^<!-- findings: ([0-9a-f ]*) -->$", re.MULTILINE)
+HASH_LENGTH = 16
+RECORD_KEYS = frozenset({"v", "task", "subject", "message", "detail"})
+RECORD_VERSION = 1
 
 
 class StandingIssueError(Exception):
@@ -132,11 +163,13 @@ class Excerpt:
     """What a red job's entry shows of its log.
 
     `step` names the failing step; None when the log marks none, and
-    the text is then the log's last lines.
+    the text is then the log's last lines. `tasks` are the tasks the
+    failing step ran, read from its name and its whole output.
     """
 
     text: str
     step: str | None = None
+    tasks: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -148,6 +181,40 @@ class Entry:
     missing: str | None
 
 
+@dataclass(frozen=True)
+class Finding:
+    """One record a check wrote through a findings writer (#1890)."""
+
+    task: str
+    subject: str
+    message: str
+    detail: tuple[str, ...] = ()
+
+    @property
+    def digest(self) -> str:
+        """Hash the finding's identity: its task, subject and message.
+
+        Returns:
+            The first HASH_LENGTH hex characters of its SHA-256.
+
+        """
+        fields: list[str] = [self.task, self.subject, self.message]
+        identity = json.dumps(
+            fields,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(identity.encode()).hexdigest()[:HASH_LENGTH]
+
+
+@dataclass(frozen=True)
+class Findings:
+    """Every record in a run's findings files, and the lines that were not."""
+
+    records: tuple[Finding, ...]
+    unreadable: int
+
+
 class Args(argparse.Namespace):
     """The command line, typed."""
 
@@ -155,6 +222,7 @@ class Args(argparse.Namespace):
     run_id: str
     ref: str
     default_branch: str
+    findings: str | None
 
 
 def gh(*args: str) -> str:
@@ -466,7 +534,29 @@ def tail(log: str) -> Excerpt:
         len(lines),
     )
     output = step_output(lines[header_end + 1 : stop])
-    return Excerpt(ending(output), lines[start].removeprefix(STEP_MARK).strip())
+    step = lines[start].removeprefix(STEP_MARK).strip()
+    return Excerpt(ending(output), step, step_tasks(step, output))
+
+
+def step_tasks(step: str, output: list[str]) -> frozenset[str]:
+    """Name the tasks a failing step ran.
+
+    Returns:
+        Each task named after `mise run ` in the step's name, and each
+        named in a `[<task>] ` prefix of its output.
+
+    """
+    named: set[str] = set()
+    for match in RUN_TASK.finditer(step):
+        task = typed_std.group(match, 1)
+        if task:
+            named.add(task)
+    for line in output:
+        prefixed = TASK_PREFIX.match(line)
+        task = typed_std.group(prefixed, 1) if prefixed else None
+        if task:
+            named.add(task)
+    return frozenset(named)
 
 
 def fenced(text: str) -> str:
@@ -528,14 +618,193 @@ def read_tail(repo: str, job: Job) -> Entry:
     return Entry(job, tail(log), None)
 
 
-def entry(item: Entry, *, drop: bool) -> str:
+def record(line: bytes) -> Finding | None:
+    """Read one line of a findings file as a record.
+
+    Returns:
+        The finding, or None when the line is not a record with the
+        five keys, each of its type.
+
+    """
+    try:
+        item = decoded.as_object(decoded.load_json(line), "the record")
+        if set(item) != RECORD_KEYS or item["v"] != RECORD_VERSION:
+            return None
+        detail = item["detail"]
+        if not decoded.is_strings(detail):
+            return None
+        return Finding(
+            decoded.as_str(item["task"], "task"),
+            decoded.as_str(item["subject"], "subject"),
+            decoded.as_str(item["message"], "message"),
+            tuple(detail),
+        )
+    except decoded.UndecodableError:
+        return None
+
+
+def read_findings(directory: Path) -> Findings:
+    """Read every record in a run's findings files.
+
+    Returns:
+        The records, file by file in name order, and how many lines (or
+        files that could not be read) were not records. A blank line is
+        neither. A directory that is not there holds none.
+
+    """
+    records: list[Finding] = []
+    unreadable = 0
+    for path in sorted(directory.glob("*.jsonl")):
+        try:
+            data = path.read_bytes()
+        except OSError:
+            unreadable += 1
+            continue
+        for line in data.splitlines():
+            if not line.strip():
+                continue
+            found = record(line)
+            if found is None:
+                unreadable += 1
+            else:
+                records.append(found)
+    return Findings(tuple(records), unreadable)
+
+
+def seen_hashes(previous: Issue | None) -> frozenset[str] | None:
+    """Read the hashes the previous body ended with.
+
+    Returns:
+        Each hash, or None when the previous body has no findings line.
+
+    """
+    if previous is None:
+        return None
+    last: str | None = None
+    for match in HASHES.finditer(previous.body):
+        last = typed_std.group(match, 1)
+    if last is None:
+        return None
+    return frozenset(last.split())
+
+
+@dataclass(frozen=True)
+class Listed:
+    """A finding as the body lists it: new in this run, or still red."""
+
+    finding: Finding
+    new: bool
+
+
+@dataclass(frozen=True)
+class Listing:
+    """The run's findings in the order the body lists them."""
+
+    items: tuple[Listed, ...]
+    tasks: frozenset[str]
+    unreadable: int
+
+
+def listing(findings: Findings | None, seen: frozenset[str] | None) -> Listing | None:
+    """Order the findings: by task name, the new before those still red.
+
+    A finding recorded twice (the same task, subject and message) is
+    listed once.
+
+    Returns:
+        The listing, or None without findings files or with nothing in
+        them, so the body is written without findings.
+
+    """
+    if findings is None or not (findings.records or findings.unreadable):
+        return None
+    unique: dict[str, Finding] = {}
+    for found in findings.records:
+        unique.setdefault(found.digest, found)
+    known = seen or frozenset()
+    items = [Listed(f, f.digest not in known) for f in unique.values()]
+    items.sort(key=lambda i: (i.finding.task, not i.new))
+    tasks = frozenset(f.task for f in unique.values())
+    return Listing(tuple(items), tasks, findings.unreadable)
+
+
+def one_line(text: str) -> str:
+    """Write a field of a record as one line of the body, HTML escaped.
+
+    Returns:
+        The text with its line breaks as spaces and `<`, `>`, `&` and
+        quotes escaped, so it can open no comment, tag or line.
+
+    """
+    return html.escape(" ".join(text.splitlines()))
+
+
+def listed_finding(item: Finding, *, detail: bool) -> str:
+    """Write one finding as a list item, its detail collapsed under it.
+
+    Returns:
+        The item's lines.
+
+    """
+    said = one_line(item.message)
+    line = f"- {one_line(item.subject)}: {said}" if item.subject else f"- {said}"
+    if not (detail and item.detail):
+        return f"{line}\n"
+    block = f"<details><summary>detail</summary>\n\n{fenced(chr(10).join(item.detail))}"
+    indented = "\n".join(f"  {x}" if x else "" for x in block.splitlines())
+    return f"{line}\n\n{indented}\n\n  </details>\n"
+
+
+def findings_section(found: Listing, shown: int, details: int) -> str:
+    """Write `## Findings`: each task's findings, new apart from still red.
+
+    Returns:
+        The section, listing the first `shown` findings, the first
+        `details` of them with their detail.
+
+    """
+    counts: dict[str, int] = {}
+    for item in found.items:
+        counts[item.finding.task] = counts.get(item.finding.task, 0) + 1
+    parts = ["## Findings", ""]
+    if found.unreadable:
+        parts += [
+            (
+                f"{found.unreadable} line(s) of the findings files were not a record"
+                " and are not counted."
+            ),
+            "",
+        ]
+    task: str | None = None
+    group: bool | None = None
+    for at, item in enumerate(found.items[:shown]):
+        if item.finding.task != task:
+            task, group = item.finding.task, None
+            parts += [f"### {one_line(task)} ({counts[task]})", ""]
+        if item.new != group:
+            group = item.new
+            parts += ["#### New in this run" if item.new else "#### Still red", ""]
+        parts.append(listed_finding(item.finding, detail=at < details))
+    return "\n".join(parts)
+
+
+def entry(item: Entry, *, drop: bool, recorded: frozenset[str] | None = None) -> str:
     """Write one red job's entry.
+
+    `recorded` is every task with a finding, when the body is written
+    from findings: a job whose failing step ran one points at them.
 
     Returns:
         The job's name, its link and its collapsed log tail.
 
     """
     head = f"### {item.job.name}\n\n[{item.job.conclusion}]({item.job.url})\n"
+    ran = (item.tail.tasks if item.tail else frozenset()) & (recorded or frozenset())
+    if ran:
+        named = ", ".join(f"<code>{html.escape(t)}</code>" for t in sorted(ran))
+        return f"{head}\nIts findings are above, under {named}.\n"
+    if recorded is not None:
+        head += "\n_No finding was recorded._\n"
     summary = "log tail"
     if drop:
         shown = f"_Log tail dropped: the body would pass {BODY_LIMIT:,} characters._"
@@ -560,40 +829,110 @@ class Red:
     runs: int
 
 
-def body(red: Red, entries: list[Entry]) -> str:
+@dataclass(frozen=True)
+class Cut:
+    """What a body leaves out to stay under BODY_LIMIT, each counted from the end."""
+
+    tails: int = 0
+    details: int = 0
+    findings: int = 0
+
+
+def compose(red: Red, entries: list[Entry], found: Listing | None, cut: Cut) -> str:
+    """Write the body with what `cut` leaves out.
+
+    Returns:
+        The body.
+
+    """
+    keep = len(entries) - cut.tails
+    recorded = found.tasks if found else None
+    parts = [
+        entry(e, drop=at >= keep, recorded=recorded) for at, e in enumerate(entries)
+    ]
+    plural = "s" if len(entries) != 1 else ""
+    lines = [
+        f"The latest run of {red.workflow} on {red.branch} ended with",
+        f"{len(entries)} red job{plural}. Every red run replaces this body;",
+        "the next run with every job green or skipped closes this issue.",
+        "",
+        f"- Latest red run: {red.run_url}",
+        f"- Red since: {red.since}",
+        f"- Red runs: {red.runs}",
+        "",
+    ]
+    limit = f"the body would pass {BODY_LIMIT:,} characters."
+    if cut.tails:
+        lines += [f"Log tails dropped for the last {cut.tails} job(s): {limit}", ""]
+    if cut.details:
+        lines += [f"Detail dropped for the last {cut.details} finding(s): {limit}", ""]
+    if cut.findings:
+        lines += [f"The last {cut.findings} finding(s) are not shown: {limit}", ""]
+    if found is None:
+        return "\n".join([*lines, "## Red jobs", "", *parts])
+    shown = len(found.items) - cut.findings
+    details = len(found.items) - cut.details
+    hashes = " ".join(i.finding.digest for i in found.items[:shown])
+    return "\n".join([
+        *lines,
+        findings_section(found, shown, details),
+        "## Red jobs",
+        "",
+        *parts,
+        f"<!-- findings: {hashes} -->",
+    ])  # fmt: skip
+
+
+def least(fits: Callable[[int], bool], top: int) -> int | None:
+    """Find the fewest left out, from 0 to `top`, that fits.
+
+    Returns:
+        The least count that fits, or None when even `top` does not.
+
+    """
+    if not fits(top):
+        return None
+    low, high = 0, top
+    while low < high:
+        mid = (low + high) // 2
+        if fits(mid):
+            high = mid
+        else:
+            low = mid + 1
+    return low
+
+
+def body(
+    red: Red,
+    entries: list[Entry],
+    findings: Findings | None = None,
+    seen: frozenset[str] | None = None,
+) -> str:
     """Write the red-check issue's body, under BODY_LIMIT characters.
 
     Returns:
-        The body; tails dropped from the last job upwards when needed.
+        The body; step outputs dropped from the last job upwards, then
+        detail blocks, then findings, from the end of the list.
 
     """
-    dropped = 0
-    while True:
-        keep = len(entries) - dropped
-        parts = [entry(e, drop=at >= keep) for at, e in enumerate(entries)]
-        plural = "s" if len(entries) != 1 else ""
-        lines = [
-            f"The latest run of {red.workflow} on {red.branch} ended with",
-            f"{len(entries)} red job{plural}. Every red run replaces this body;",
-            "the next run with every job green or skipped closes this issue.",
-            "",
-            f"- Latest red run: {red.run_url}",
-            f"- Red since: {red.since}",
-            f"- Red runs: {red.runs}",
-            "",
-        ]
-        if dropped:
-            lines += [
-                (
-                    f"Log tails dropped for the last {dropped} job(s): the body would"
-                    f" pass {BODY_LIMIT:,} characters."
-                ),
-                "",
-            ]
-        text = "\n".join([*lines, "## Red jobs", "", *parts])
-        if len(text) < BODY_LIMIT or dropped >= len(entries):
-            return text
-        dropped += 1
+    found = listing(findings, seen)
+    jobs_cut = len(entries)
+    count = len(found.items) if found else 0
+
+    def text(cut: Cut) -> str:
+        return compose(red, entries, found, cut)
+
+    def fits(cut: Cut) -> bool:
+        return len(text(cut)) < BODY_LIMIT
+
+    for tails in range(jobs_cut + 1):
+        if fits(Cut(tails)):
+            return text(Cut(tails))
+    details = least(lambda n: fits(Cut(jobs_cut, n)), count)
+    if details is not None:
+        return text(Cut(jobs_cut, details))
+    dropped = least(lambda n: fits(Cut(jobs_cut, count, n)), count)
+    return text(Cut(jobs_cut, count, count if dropped is None else dropped))
 
 
 def field(line: re.Pattern[str], body: str) -> str | None:
@@ -624,7 +963,9 @@ def carried(previous: Issue | None, run_url: str) -> tuple[str, int]:
     return since, max(runs, 1)
 
 
-def keep_red(repo: str, red_jobs: list[Job], red: Red) -> str:
+def keep_red(
+    repo: str, red_jobs: list[Job], red: Red, findings: Findings | None = None
+) -> str:
     """Create the red-check issue, or replace its body in place.
 
     Returns:
@@ -635,7 +976,12 @@ def keep_red(repo: str, red_jobs: list[Job], red: Red) -> str:
     found = one(open_issues(repo, title), title)
     since, runs = carried(found, red.run_url)
     entries = [read_tail(repo, job) for job in red_jobs]
-    text = body(Red(red.workflow, red.branch, red.run_url, since, runs), entries)
+    text = body(
+        Red(red.workflow, red.branch, red.run_url, since, runs),
+        entries,
+        findings,
+        seen_hashes(found),
+    )
     if found is None:
         made = ensure_label(repo)
         create(repo, title, text, (LABEL,))
@@ -670,7 +1016,9 @@ def report(repo: str, args: Args, run_url: str) -> str:
     red_jobs = [j for j in every if j.status == "completed" and j.conclusion in RED]
     branch = args.ref.removeprefix("refs/heads/")
     if red_jobs:
-        return keep_red(repo, red_jobs, Red(args.workflow, branch, run_url, run_url, 1))
+        findings = read_findings(Path(args.findings)) if args.findings else None
+        red = Red(args.workflow, branch, run_url, run_url, 1)
+        return keep_red(repo, red_jobs, red, findings)
     unfinished = [j for j in every if j.status != "completed"]
     others = [j for j in every if j.status == "completed" and j.conclusion not in GREEN]
     if len(unfinished) > 1 or others:
@@ -706,6 +1054,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--ref", required=True)
     parser.add_argument("--default-branch", default="")
+    parser.add_argument("--findings", default=None)
     args = parser.parse_args(argv, namespace=Args())
     repo = os.environ.get("GITHUB_REPOSITORY", "")
     if not repo:
