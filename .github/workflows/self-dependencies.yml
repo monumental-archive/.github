@@ -26,5 +26,7 @@ jobs:
   dependencies:
     permissions:
       contents: read # this repository's contents, read-only
+      issues: write # the callee's report job: its workflow's red-check issue (#1887)
+      actions: read # the callee's report job: the run's job list and job logs (#1887)
     uses: ./.github/workflows/repo-dependencies.yml # zizmor: ignore[self-repository]
 ...

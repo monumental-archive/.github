@@ -9495,82 +9495,22 @@ fi
 '''
 
 [tasks."lint:template-pins"]
-description = "Workflow templates pin one SHA that is an ancestor of HEAD; scorecard stays pinless"
+description = "Workflow templates pin one released SHA; scorecard pins no reusable workflow"
 dir = "{{cwd}}"
-# Found by the #28 pre-close audit: all five templates sat a day behind
-# canon, predating three shipped fixes, with nothing anywhere going red — a
-# repo standing up from the templates would have inherited known bugs. The
-# deterministic properties are: every pin is a full SHA that is an ancestor
-# of HEAD (never unmerged or foreign history), all pinned templates agree
-# on ONE SHA (stub pins move together), and scorecard.yml carries no org
-# pin at all (it is self-contained by design — Scorecard's publish
-# validation rejects reusables). Deliberately NOT required: pin == HEAD —
-# that would couple every canon commit to a template touch. Staleness
-# within merged history is the scheduled audit's judgement call, not the
-# gate's.
+# Every canon pin in workflow-templates/ is one full SHA, an ancestor of
+# HEAD, that names a released tag; scorecard.yml pins the canon action
+# alone, never a reusable workflow. mise/template_pins.py has the rules
+# and their history (#28, #233, #1887); the canon is the identity's.
 run = '''
 compgen -G "workflow-templates/*.y*ml" > /dev/null || {
   echo "lint:template-pins: no workflow-templates/, skipped"
   exit 0
 }
 . "${ORG_BELT_DIR}/identity.sh"
-canon_owner=$(org_identity owner)
-canon_repo=$(org_identity repo)
-canon="${canon_owner}/${canon_repo}"
-canon_re="${canon//./\\.}"
-bad=""
-shas=""
-count=0
-for f in workflow-templates/*.y*ml; do
-  lines=$(grep -E "uses:[[:space:]]*${canon_re}/" "${f}" || true)
-  if [[ ${f##*/} == scorecard.* ]]; then
-    [[ -z ${lines} ]] || bad="${bad} ${f}(must stay pinless: self-contained by design)"
-    continue
-  fi
-  [[ -n ${lines} ]] || continue
-  while IFS= read -r line; do
-    sha=$(grep -oE "@[0-9a-f]{40}" <<< "${line}" | tr -d "@")
-    if [[ -z ${sha} ]]; then
-      bad="${bad} ${f}(pin is not a full 40-hex SHA)"
-      continue
-    fi
-    count=$((count + 1))
-    git merge-base --is-ancestor "${sha}" HEAD 2> /dev/null \
-      || bad="${bad} ${f}(${sha:0:8} not an ancestor of HEAD)"
-    case " ${shas} " in *" ${sha} "*) ;; *) shas="${shas} ${sha}" ;; esac
-  done <<< "${lines}"
-done
-n=$(wc -w <<< "${shas}" | tr -d " ")
-[[ ${n} -le 1 ]] || bad="${bad} (templates disagree, ${n} distinct SHAs:${shas})"
-# Ancestor-of-HEAD is the weaker property (#233). What a copier depends
-# on is that the pin names a RELEASED commit — tagged, published through
-# the signer, evidence attached, immutable. An untagged mid-history
-# commit satisfies "ancestor" and shouldn't: nothing was ever cut from
-# it, so there is nothing to verify and nothing that survives a rebuild.
-# The gate's checkout fetches tags for exactly this (ci.yml, fetch-tags).
-released=""
-anytag=$(git tag --list "v[0-9]*" | sed -n 1p)
-if [[ -n ${anytag} ]]; then
-  for sha in ${shas}; do
-    tag=$(git tag --points-at "${sha}" --list "v[0-9]*" | sed -n 1p)
-    if [[ -z ${tag} ]]; then
-      bad="${bad} (${sha:0:8} names no released tag — pins must name a release, not any ancestor)"
-    else
-      released="${released} ${tag}"
-    fi
-  done
-else
-  # A repo before its first release has nothing to point at. Honest skip,
-  # named — never a silent pass.
-  released=" (no tags in this clone, released-tag check skipped)"
-fi
-if [[ -n ${bad} ]]; then
-  echo "lint:template-pins: template pin violations:${bad}" >&2
-  echo "  templates pin one merged, RELEASED canon SHA and move together" >&2
-  echo "  (#111, #233); scorecard.yml never pins a reusable." >&2
-  exit 1
-fi
-echo "lint:template-pins: ${count} pins at one ancestor SHA, scorecard pinless, released as${released}"
+owner=$(org_identity owner)
+repo=$(org_identity repo)
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/template_pins.py" "${owner}/${repo}" \
+  workflow-templates/*.y*ml
 '''
 
 [tasks."lint:runner-pin"]

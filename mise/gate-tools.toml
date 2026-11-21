@@ -231,6 +231,7 @@ tasks = [
   "lint:sql",
   "lint:subject-budget",
   "lint:task-shell",
+  "lint:template-pins",
   "lint:tsconfig-dials",
   "lint:typescript-properties",
   "lint:vex-one-per-merge",
