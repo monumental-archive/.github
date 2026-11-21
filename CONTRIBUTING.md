@@ -102,7 +102,7 @@ own work and adds the task that runs it to its row.
 |---|---|---|---|---|
 | 1 | Fails when any behaviour changes | covered lines nothing checks | mutation testing, weekly | Python: `audit:mutants` (cosmic-ray, in place; adopt with a root `cosmic-ray.toml`) [#1354] [#1771], Rust: `audit:mutants` (cargo-mutants; adopt with `.cargo/mutants.toml`) [#1355], Go: `audit:mutants` (gomu; adopt with an empty root `.gomuignore`) [#1356], TypeScript [#1358] |
 | 2 | Takes every decision both ways | the untaken `else` | branch coverage | Python [#1331], Rust [#1359], TypeScript [#1357], PL/pgSQL (`plpgsql-branches`, plpgsql_check in the repository's test stack; adopt with one teardown call; its static check of every function body, every check on, rides the same report [#1605]) [#1547], Go: `audit:coverage-go-branches` (gobco's condition coverage, the `go-branches` floor; [tooling verdict][go-branches]) [#1546] |
-| 3 | Varies its inputs | the input nobody wrote down | property and fuzz testing | Rust, Go and Python exist (`lint:fuzz-build`, `audit:fuzz`, `audit:go-fuzz`; Hypothesis in `prop_*.py` files, `test:python-properties` and `audit:python-properties`, [#1332]); TypeScript in `*.prop.test.*` files (fast-check, the repository's own; `test:typescript-properties` and `audit:typescript-properties`, [#1549]) |
+| 3 | Varies its inputs | the input nobody wrote down | property and fuzz testing | Rust, Go and Python exist (`lint:fuzz-build`, `audit:fuzz`, `audit:go-fuzz`; Rust proptest in the repository's own `test` task, at the belt's seed in the gate, `lint:rust-properties` and `audit:rust-properties`, [#1930]; Hypothesis in `prop_*.py` files, `test:python-properties` and `audit:python-properties`, [#1332]); TypeScript in `*.prop.test.*` files (fast-check, the repository's own; `test:typescript-properties` and `audit:typescript-properties`, [#1549]) |
 | 4 | Asserts the exact outcome | tests green for the wrong reason | a written rule; property 1's mechanism catches a breach | this section |
 | 5 | Runs on real artifacts, on both platforms | the fixture's imagined world | a written rule: a recorded real artifact outranks a hand-written fixture; the gate already runs on Linux and the Mac | this section |
 | 6 | Reproduces each bug before the fix | the same bug, twice | the regression line in every defect's Done-when; a weekly report; a backfill per repository | [#1335], the canon [#1360], [signer#86], [iiif-server#212] |
@@ -122,6 +122,7 @@ own work and adds the task that runs it to its row.
 [#1549]: https://github.com/monumental-archive/.github/issues/1549
 [#1605]: https://github.com/monumental-archive/.github/issues/1605
 [#1771]: https://github.com/monumental-archive/.github/issues/1771
+[#1930]: https://github.com/monumental-archive/.github/issues/1930
 [go-branches]: docs/tooling-verdicts.md
 [signer#86]: https://github.com/monumental-archive/signer/issues/86
 [iiif-server#212]: https://github.com/monumental-archive/iiif-server/issues/212

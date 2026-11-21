@@ -67,6 +67,12 @@ when = ["*prop_*.py"]
 # property files: no lockfile, nothing can be a property.
 when = ["pnpm-lock.yaml", "package-lock.json", "yarn.lock", "bun.lock"]
 
+[repo-deep-tests.rust-properties]
+# The task's guard is a tracked Cargo.lock; audit_legs.py's REFINES
+# then reads it, and the job applies only where one locks proptest
+# (#1930), through rust_properties.py, the reading the task uses.
+when = ["Cargo.lock", "*/Cargo.lock"]
+
 [repo-public-api.semver]
 when = ["Cargo.toml", "*/Cargo.toml"]
 

@@ -4,8 +4,9 @@
 # Go condition coverage floors (audit:coverage-branches, #1359;
 # audit:coverage-go-branches, #1546), and every property at a fresh
 # random seed (audit:python-properties, #1332; audit:typescript-
-# properties, #1549). Each is time-bound, random or a second
-# instrumented run, so none is the deterministic gate. A red here is a
+# properties, #1549; audit:rust-properties, #1930). Each is
+# time-bound, random or a second instrumented run, so none is the
+# deterministic gate. A red here is a
 # test that found something, and nothing else (#1858: one workflow per
 # subject, named for what a red means). The mutation run has its own
 # workflow for the same reason (repo-mutants.yml, #1355). Every job runs
@@ -77,6 +78,7 @@ jobs:
       python-properties-seed: ${{ steps.applies.outputs.python-properties-seed }}
       python-properties: ${{ steps.applies.outputs.python-properties }}
       typescript-properties: ${{ steps.applies.outputs.typescript-properties }}
+      rust-properties: ${{ steps.applies.outputs.rust-properties }}
     steps:
       - name: Check out caller repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -480,6 +482,43 @@ jobs:
           ATLAS_TOKEN: ${{ secrets.atlas-token }}
         run: mise run audit:typescript-properties
 
+  rust-properties:
+    name: rust properties hold at a random seed
+    needs: applies
+    if: ${{ needs.applies.outputs.rust-properties == 'true' }}
+    runs-on: ubuntu-26.04
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
+        with:
+          version: 2026.11.8
+          cache: false
+
+      # The cron half of #1930: the repository's own `test` task at a
+      # fresh proptest seed, with its own case counts. The gate draws
+      # from seed 1 (the belt's `[env]`); here the seed prints first and
+      # a failure prints proptest's minimal failing input:
+      # ORG_PROPERTY_SEED=<n> mise run test writes it into the
+      # *.proptest-regressions file beside the test, committed with the
+      # fix, and the gate replays it. Applies where a tracked Cargo.lock
+      # locks proptest (audit_legs.py's `rust-properties`).
+      - name: Run the repository's tests at a random proptest seed
+        env:
+          ATLAS_TOKEN: ${{ secrets.atlas-token }}
+        run: mise run audit:rust-properties
+
   # Every scheduled workflow ends here (#1887): while a run on the
   # default branch has a red job, one issue titled "<workflow> is red"
   # and labelled red-check holds each red job and its log tail; the next
@@ -496,6 +535,7 @@ jobs:
       - python-properties-seed
       - python-properties
       - typescript-properties
+      - rust-properties
     if: ${{ always() }}
     runs-on: ubuntu-26.04
     timeout-minutes: 10
