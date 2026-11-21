@@ -139,13 +139,11 @@ class OwnTasks(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.tmp)
         self.tree = self.tmp / "tree"
         (self.tree / ".github" / "workflows").mkdir(parents=True)
-        belt = self.tmp / "belt"
-        belt.mkdir()
-        (belt / "own-audits.sh").write_text(OWN_AUDIT_STUB, encoding="utf-8")
-        shutil.copy(BELT / "identity.sh", belt / "identity.sh")
+        belt = hermetic.belt(self.tmp / "belt", stubs={"own-audits.sh": OWN_AUDIT_STUB})
+        canon = hermetic.canon(self.tmp / "canon", "security/identity.toml")
         self.env = hermetic.env() | {
             "ORG_BELT_DIR": str(belt),
-            "ORG_CANON_DIR": str(BELT.parent),
+            "ORG_CANON_DIR": str(canon),
         }
 
     def caller(self, name: str, callee: str) -> None:
