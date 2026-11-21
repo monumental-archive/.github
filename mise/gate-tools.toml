@@ -232,6 +232,7 @@ tasks = [
   "lint:subject-budget",
   "lint:task-shell",
   "lint:template-pins",
+  "lint:test-adoption",
   "lint:tsconfig-dials",
   "lint:typescript-properties",
   "lint:vex-one-per-merge",

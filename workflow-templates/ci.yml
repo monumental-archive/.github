@@ -55,4 +55,10 @@ jobs:
       # the one gate finding).
       contents: read # this repository's contents, read-only
     uses: monumental-archive/.github/.github/workflows/ci.yml@3e15514956c601fe255b9ab5f4f1c0663cc3db1b # v1.72.0
+    secrets:
+      # The coverage badge feed: a repository that ships a measured
+      # language tracks a .coverage-floor (lint:test-adoption, #1910),
+      # and fix:badges refuses a floor no workflow feeds. The upload
+      # skips clean in a repository with no floor. The org secret.
+      codecov-token: ${{ secrets.CODECOV_TOKEN }}
 ...

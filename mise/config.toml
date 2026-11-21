@@ -4377,38 +4377,9 @@ while IFS=: read -r stub dest; do
   }
   count=$((count + 1))
 done <<< "${assembled}"
-# The probe's own scaffolding, which is NOT the scaffold: the smallest
-# repository the stubs describe. Kept minimal and listed in the report,
-# because anything added here can draw findings of its own — a
-# hand-written package.json did exactly that while this was being built.
-#   LICENSE      — lint:licence asks only that the choice was MADE, and
-#                  the choice is the one thing a stub cannot make (#214);
-#                  the canon's own 0BSD text stands in for one.
-#   package.json — `"type": "module"`, without which nodenext reads a
-#                  .ts file as CommonJS and verbatimModuleSyntax refuses
-#                  its export (TS1287). No dependencies, so the empty
-#                  node_modules below is what "installed" means here —
-#                  lint:types otherwise refuses a tracked package.json
-#                  whose dependencies are absent, which is that guard
-#                  working rather than anything about scaffold/.
-#   src/<ext>/   — one extensionless relative import per TypeScript
-#                  source extension: #758's shape, and the one line that
-#                  makes the fixer/checker pair speak. TWO extensions,
-#                  because #868 was `.js` being right for one of them and
-#                  wrong for the other — a probe that varies neither
-#                  proves neither. Each pair gets its own directory: with
-#                  helper.ts and helper.mts side by side, `./helper` is
-#                  ambiguous and tsc names the wrong counterpart.
-mkdir -p "${tmp}/node_modules"
-cp LICENSE "${tmp}/LICENSE"
-printf '{\n  "name": "scaffold-probe",\n  "private": true,\n  "type": "module"\n}\n' \
-  > "${tmp}/package.json"
-for ext in ts mts; do
-  mkdir -p "${tmp}/src/${ext}"
-  printf 'export const helped = (): string => "probe";\n' > "${tmp}/src/${ext}/helper.${ext}"
-  printf 'import { helped } from "./helper";\n\nexport const main = (): string => helped();\n' \
-    > "${tmp}/src/${ext}/index.${ext}"
-done
+# The probe's own files, which are NOT the scaffold: mise/scaffold-probe.sh
+# says what each is and why. This commit's copy, as with the belt above.
+"${PWD}/mise/scaffold-probe.sh" "${tmp}"
 # GIT_DIR, GIT_INDEX_FILE and GIT_WORK_TREE override the working
 # directory, so an inherited one would make this `git init` and commit
 # write into the CALLING repository instead of the scratch tree. Scrubbed
@@ -4470,6 +4441,9 @@ done <<< "${declined}"
 echo "  added by the probe, not the scaffold: LICENSE, package.json, src/ts/ and"
 echo "    src/mts/ (an index and a helper each), an empty node_modules/ — the"
 echo "    repository declares no dependencies, so that is what installed means here"
+echo "  added by the probe, not the scaffold: stryker.config.json and .coverage-floor"
+echo "    (a repository shipping TypeScript adopts both, #1910) and .github/workflows/ci.yml"
+echo "    (workflow-templates/ci.yml verbatim, the gate stub a new repository copies)"
 echo "  not exercised: .tsx and .cts — the scaffold's tsconfig declares no jsx, which"
 echo "    a .tsx file needs (TS6142), and under verbatimModuleSyntax +"
 echo "    erasableSyntaxOnly a .cts file can hold no module syntax at all (#868)"
@@ -6837,6 +6811,22 @@ files=$(git ls-files ':!vendor/**' '*.py' '*.pyi' '*.rs' '*.go' \
 }
 "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/coverage_exclusions.py" <<< "${files}"
 '''
+
+[tasks."lint:test-adoption"]
+description = "A repository that ships Rust, Go, Python or TypeScript tracks its mutation file and a .coverage-floor (#1910)"
+dir = "{{cwd}}"
+# audit:mutants and coverage:check are adopted by a tracked file, and
+# each skips clean, by name, where the file is absent: a repository
+# could ship a language with no mutation run and no floor, green
+# (#1910). The tree says what a repository ships, so the rule reads it
+# — file names only, nothing opened — and names, per missing file, the
+# language, one file that ships it, and the remedy. The language table
+# and each row's mutation leg live in mise/testing_adoption.py; its
+# test reads each leg's guard, so the two cannot name different files.
+# What an adoption file must contain stays each leg's business. No
+# repository list and no small-code exemption: a repository that does
+# not want the obligation does not ship the language.
+run = 'git ls-files | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/testing_adoption.py"'
 
 [tasks."coverage:check"]
 description = "Enforce the derived coverage floor (.coverage-floor); repos without one skip clean"
