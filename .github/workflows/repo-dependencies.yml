@@ -30,8 +30,41 @@ permissions:
   contents: read
 
 jobs:
+  # Which jobs below apply to this tree (#1891), decided from
+  # `git ls-files` and mise/audit-legs.toml before any runner installs a
+  # toolchain: each conditional job's `if:` reads one output, so a
+  # repository without its language shows it skipped, not run-and-
+  # skipped. A job of its own because `hashFiles` is step-only
+  # (repo-mutants.yml's `adoption`); mise/test_audit_legs.py holds the
+  # table and the `if:`s to the tasks' own guards.
+  applies:
+    name: which jobs apply
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    outputs:
+      deny: ${{ steps.applies.outputs.deny }}
+      go-vulns: ${{ steps.applies.outputs.go-vulns }}
+      actions: ${{ steps.applies.outputs.actions }}
+      action-pins: ${{ steps.applies.outputs.action-pins }}
+      lock-arch: ${{ steps.applies.outputs.lock-arch }}
+      lock-idempotent: ${{ steps.applies.outputs.lock-idempotent }}
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      - name: Decide which jobs apply
+        id: applies
+        run: '"${ORG_PYTHON}" .org-canon/mise/audit_legs.py repo-dependencies >> "${GITHUB_OUTPUT}"'
+
   deny:
     name: no undecided advisory in the Rust lock
+    needs: applies
+    if: ${{ needs.applies.outputs.deny == 'true' }}
     runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
@@ -57,6 +90,8 @@ jobs:
 
   go-vulns:
     name: no reachable Go vulnerability
+    needs: applies
+    if: ${{ needs.applies.outputs.go-vulns == 'true' }}
     runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
@@ -85,6 +120,8 @@ jobs:
 
   actions:
     name: workflows pass the online action audits
+    needs: applies
+    if: ${{ needs.applies.outputs.actions == 'true' }}
     runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
@@ -122,6 +159,8 @@ jobs:
 
   action-pins:
     name: action pin comments match their tags and age
+    needs: applies
+    if: ${{ needs.applies.outputs.action-pins == 'true' }}
     runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
@@ -159,6 +198,8 @@ jobs:
 
   lock-arch:
     name: locked assets match the platform they name
+    needs: applies
+    if: ${{ needs.applies.outputs.lock-arch == 'true' }}
     runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
@@ -194,6 +235,8 @@ jobs:
 
   lock-idempotent:
     name: each lock is what mise lock writes today
+    needs: applies
+    if: ${{ needs.applies.outputs.lock-idempotent == 'true' }}
     runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
@@ -236,6 +279,7 @@ jobs:
   report:
     name: Report red jobs
     needs:
+      - applies
       - deny
       - go-vulns
       - actions

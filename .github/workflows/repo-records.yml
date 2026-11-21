@@ -27,6 +27,32 @@ permissions:
   contents: read
 
 jobs:
+  # Which jobs below apply to this tree (#1891), decided from
+  # `git ls-files` and mise/audit-legs.toml before any runner installs a
+  # toolchain: each conditional job's `if:` reads one output, so a
+  # repository without its language shows it skipped, not run-and-
+  # skipped. A job of its own because `hashFiles` is step-only
+  # (repo-mutants.yml's `adoption`); mise/test_audit_legs.py holds the
+  # table and the `if:`s to the tasks' own guards.
+  applies:
+    name: which jobs apply
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    outputs:
+      bestpractices: ${{ steps.applies.outputs.bestpractices }}
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      - name: Decide which jobs apply
+        id: applies
+        run: '"${ORG_PYTHON}" .org-canon/mise/audit_legs.py repo-records >> "${GITHUB_OUTPUT}"'
+
   links:
     name: tracked links resolve
     runs-on: ubuntu-26.04
@@ -67,6 +93,8 @@ jobs:
 
   bestpractices:
     name: best practices entry matches its file
+    needs: applies
+    if: ${{ needs.applies.outputs.bestpractices == 'true' }}
     runs-on: ubuntu-26.04
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
@@ -139,6 +167,7 @@ jobs:
   report:
     name: Report red jobs
     needs:
+      - applies
       - links
       - bestpractices
       - regression-tests

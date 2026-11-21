@@ -24,8 +24,36 @@ permissions:
   contents: read
 
 jobs:
+  # Which jobs below apply to this tree (#1891), decided from
+  # `git ls-files` and mise/audit-legs.toml before any runner installs a
+  # toolchain: each conditional job's `if:` reads one output, so a
+  # repository without its language shows it skipped, not run-and-
+  # skipped. A job of its own because `hashFiles` is step-only
+  # (repo-mutants.yml's `adoption`); mise/test_audit_legs.py holds the
+  # table and the `if:`s to the tasks' own guards.
+  applies:
+    name: which jobs apply
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    outputs:
+      semver: ${{ steps.applies.outputs.semver }}
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      - name: Decide which jobs apply
+        id: applies
+        run: '"${ORG_PYTHON}" .org-canon/mise/audit_legs.py repo-public-api >> "${GITHUB_OUTPUT}"'
+
   semver:
     name: the public API is compatible with the published release
+    needs: applies
+    if: ${{ needs.applies.outputs.semver == 'true' }}
     runs-on: ubuntu-26.04
     # Measured (#1341): edtf's whole judgment, five pgrx majors built twice
     # each (the crate and its baseline) plus its plain crates, took 706s on
@@ -64,6 +92,7 @@ jobs:
   report:
     name: Report red jobs
     needs:
+      - applies
       - semver
     if: ${{ always() }}
     runs-on: ubuntu-26.04
