@@ -85,9 +85,10 @@
 # lint:fuzz-build replays) and replayed by `cargo fuzz coverage -s none`
 # into a build directory of its compiler (#1877); the figure is
 # llvm-cov's over the tracked sources outside fuzz/fuzz_targets/. Go:
-# every `func Fuzz…(… *testing.F)` in a tracked _test.go of the root
-# module, `go test -run '^<Name>$'` (which replays exactly the seed
-# corpus) with -coverpkg naming the module's packages its package
+# every `func Fuzz…(… *testing.F)` in a tracked _test.go of any tracked
+# module, the root's or a nested go.mod's (#1899; vendor/ excluded),
+# `go test -run '^<Name>$'` run in its module (which replays exactly the
+# seed corpus) with -coverpkg naming that module's packages its package
 # imports. Two targets deriving one leg name are red, naming both.
 #
 # Invoked directly, never through a nested `mise run`: a nested mise
@@ -705,10 +706,12 @@ fi
 
 # The fuzz targets, enumerated before any is measured, so two that
 # derive one leg are refused before a minute is spent building: one
-# record per target in `fuzz_found`, `<leg> <kind> <where> <name>`,
-# kind `rust` (where `-`) or `go` (where the package directory).
+# record per target in `fuzz_found`, `<leg> <kind> <where> <name>
+# <module>`, kind `rust` (where and module `-`) or `go` (where the
+# package directory, module the directory of the go.mod that owns it,
+# both from the repository root).
 fuzz_targets() {
-  local manifest target files nested file dir names name mod n
+  local manifest target files mods file dir names name mod m module n
   fuzz_found=""
   if [[ -f fuzz/Cargo.toml ]]; then
     manifest=$("${ORG_PYTHON}" -c 'import sys, tomllib
@@ -719,23 +722,32 @@ for b in tomllib.load(open(sys.argv[1], "rb")).get("bin", []):
     }
     while IFS= read -r target; do
       [[ -n ${target} ]] || continue
-      fuzz_found+="$(org_fuzz_leg_name "${target}") rust - ${target}"$'\n'
+      fuzz_found+="$(org_fuzz_leg_name "${target}") rust - ${target} -"$'\n'
     done <<< "${manifest}"
   fi
   # Tracked files are read from a work tree; outside one there are none,
   # as the python leg reads it. Inside one, a listing that fails is red,
   # never a shorter list.
-  [[ -f go.mod ]] && git rev-parse --is-inside-work-tree > /dev/null 2>&1 || return 0
-  # The root module's tracked tests only: a nested module is its own, and
-  # the go leg measures the root one.
-  files=$(git ls-files -- '*_test.go' ':!vendor/**') || exit 1
-  nested=$(git ls-files -- '*/go.mod') || exit 1
+  git rev-parse --is-inside-work-tree > /dev/null 2>&1 || return 0
+  # Every tracked module's tests, each owned by the deepest go.mod above
+  # it, as Go itself resolves a package's module; a test no module owns
+  # is no target. Nothing under a vendor/ directory.
+  mods=$(git ls-files -- 'go.mod' '*/go.mod' ':!vendor/**' ':!*/vendor/*') || exit 1
+  [[ -n ${mods} ]] || return 0
+  files=$(git ls-files -- '*_test.go' ':!vendor/**' ':!*/vendor/*') || exit 1
   while IFS= read -r file; do
     [[ -n ${file} ]] || continue
     dir=$(dirname "${file}")
+    module=""
     while IFS= read -r mod; do
-      [[ -z ${mod} || ${dir}/ != "$(dirname "${mod}")"/* ]] || continue 2
-    done <<< "${nested}"
+      m=$(dirname "${mod}")
+      if [[ ${m} == . ]]; then
+        [[ -n ${module} ]] || module=.
+      elif [[ ${dir}/ == "${m}"/* && (${module} == . || ${#m} -gt ${#module}) ]]; then
+        module=${m}
+      fi
+    done <<< "${mods}"
+    [[ -n ${module} ]] || continue
     names=$(sed -nE 's/^func (Fuzz[A-Z0-9_][A-Za-z0-9_]*|Fuzz)\([A-Za-z_][A-Za-z0-9_]* \*testing\.F\).*/\1/p' "${file}") || exit 1
     while IFS= read -r name; do
       [[ -n ${name} ]] || continue
@@ -744,7 +756,7 @@ for b in tomllib.load(open(sys.argv[1], "rb")).get("bin", []):
       else
         n=$(org_fuzz_leg_name "${dir}-${name#Fuzz}")
       fi
-      fuzz_found+="${n} go ${dir} ${name}"$'\n'
+      fuzz_found+="${n} go ${dir} ${name} ${module}"$'\n'
     done <<< "${names}"
   done <<< "${files}"
 }
@@ -762,9 +774,9 @@ if [[ ${legs} =~ ^(all|fuzz)$ ]]; then
   fuzz_targets
   # Two targets, one leg: red, naming both, before anything is built.
   clash=""
-  while read -r leg kind where name; do
+  while read -r leg kind where name _; do
     [[ -n ${leg} ]] || continue
-    while read -r other okind owhere oname; do
+    while read -r other okind owhere oname _; do
       [[ ${other} == "${leg}" && "${okind} ${owhere} ${oname}" != "${kind} ${where} ${name}" ]] || continue
       [[ " ${clash} " != *" ${leg} "* ]] || continue
       clash+=" ${leg}"
@@ -788,7 +800,7 @@ if [[ ${legs} =~ ^(all|fuzz)$ && ${fuzz_found} == *" rust "* ]]; then
     exit 1
   fi
   fuzz_work=$(mktemp -d)
-  while read -r leg kind _ target; do
+  while read -r leg kind _ target _; do
     [[ ${kind} == rust ]] || continue
     # A copy that fails says why itself and ends the run (errexit).
     org_fuzz_corpus_copy "${target}" "${fuzz_work}/${target}" > /dev/null
@@ -802,7 +814,7 @@ if [[ ${legs} =~ ^(all|fuzz)$ && ${fuzz_found} == *" go "* ]]; then
     echo "${label}: go.mod present but go missing — pin go in mise.toml" >&2
     exit 1
   fi
-  while read -r leg kind dir name; do
+  while read -r leg kind dir name _; do
     [[ ${kind} == go ]] || continue
     pct=$(org_fuzz_measure "${label}" "${leg}" go "${dir}" "${name}")
     echo "${leg} ${pct}"

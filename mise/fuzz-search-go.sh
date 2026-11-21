@@ -48,7 +48,7 @@ unknown() {
 rc=0
 trap 'rc=$?; cleanup; [ -n "${org_done:-}" ] || [ "${rc}" -ne 0 ] || rc=1; exit "${rc}"' EXIT
 
-mods=$(git ls-files ':!vendor/**' "go.mod" "*/go.mod" "*/*/go.mod") || exit 1
+mods=$(git ls-files ':!vendor/**' ':!*/vendor/*' "go.mod" "*/go.mod") || exit 1
 [[ -n ${mods} ]] || {
   [[ -z ${FUZZ_TARGET:-} ]] || unknown audit:go-fuzz "of this tree (no go.mod tracked)"
   echo "audit:go-fuzz: no go.mod tracked, skipped"
@@ -142,20 +142,15 @@ while IFS= read -r m; do
       cache=$(cd "${d}" && go env GOCACHE) || exit 1
       cache="${cache}/fuzz/${pkg}/${target}"
       candidates=()
-      found=0
       list_dir "${cache}" || exit 1
       while IFS= read -r name; do
         [[ -n ${name} ]] || continue
         candidates+=("${cache}/${name}")
-        found=$((found + 1))
       done <<< "${listing}"
-      # The coverage floor's fuzz leg measures the root module's targets
-      # (#1896); a nested module's finds have no figure to raise.
-      if [[ ${d} != . ]]; then
-        org_fuzz_summary "- \`${target}\` in ${pkg}: ${found} find(s) not measured (nested module),\
- ${crashes} crash(es)"
-        continue
-      fi
+      # Every module's targets are measured (#1899): rel is the package
+      # directory from the repository root, and org_fuzz_measure runs
+      # in the module that owns it, as the coverage floor's fuzz leg
+      # does.
       if [[ ${rel} == . ]]; then
         leg=$(org_fuzz_leg_name "${target#Fuzz}") || exit 1
       else

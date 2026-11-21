@@ -29,9 +29,12 @@ org_fuzz_leg_name() {
 # Rust: <corpus> replayed by `cargo fuzz coverage -s none` into a build
 # directory of its compiler (#1877); the figure is llvm-cov's over the
 # tracked sources outside fuzz/fuzz_targets/. A fuzz/coverage it made is
-# removed before it returns. Go: `go test -run '^<name>$'`, which
-# replays exactly the package's seed corpus (f.Add and its testdata),
-# with -coverpkg naming the module's packages the package imports.
+# removed before it returns. Go: <package dir> is from the repository
+# root; the module is the nearest directory above it holding a go.mod,
+# the root's or a nested one's (#1899), and `go test -run '^<name>$'`,
+# which replays exactly the package's seed corpus (f.Add and its
+# testdata), runs inside that module on the package's path relative to
+# it, with -coverpkg naming the module's packages the package imports.
 #
 # Needs ORG_PYTHON, and for Rust cargo-fuzz and llvm-tools, which the
 # caller checks. Returns 1, naming <leg> and the step, on any failure.
@@ -116,10 +119,22 @@ org__fuzz_measure_rust() {
 }
 
 org__fuzz_measure_go() {
-  local label=$1 leg=$2 dir=$3 name=$4 pkgs pkg coverpkg="" work cover pct="" status=0
+  local label=$1 leg=$2 dir=$3 name=$4 module rel pkgs pkg coverpkg="" work cover pct="" status=0
+  # The package's module, as Go resolves it: the nearest go.mod above.
+  module=${dir}
+  while [[ ! -f ${module}/go.mod ]]; do
+    if [[ ${module} == . ]]; then
+      echo "${label}: ${leg}: no go.mod above ${dir} — no module owns ${name}" >&2
+      return 1
+    fi
+    module=$(dirname "${module}")
+  done
+  rel=${dir#"${module}"/}
+  [[ ${module} != "${dir}" ]] || rel=.
   # The module's packages the target's package imports, itself included:
   # the code its seeds can reach.
-  pkgs=$(go list -deps -f '{{if and .Module .Module.Main}}{{.ImportPath}}{{end}}' "./${dir}") || return 1
+  pkgs=$(cd "${module}" && go list -deps -f '{{if and .Module .Module.Main}}{{.ImportPath}}{{end}}' "./${rel}") \
+    || return 1
   while IFS= read -r pkg; do
     [[ -z ${pkg} ]] || coverpkg+="${coverpkg:+,}${pkg}"
   done <<< "${pkgs}"
@@ -128,13 +143,13 @@ org__fuzz_measure_go() {
     return 1
   fi
   work=$(mktemp -d) || return 1
-  if ! go test -count=1 -run "^${name}\$" -coverpkg="${coverpkg}" \
-    -coverprofile="${work}/${leg}.out" "./${dir}" >&2; then
+  if ! (cd "${module}" && go test -count=1 -run "^${name}\$" -coverpkg="${coverpkg}" \
+    -coverprofile="${work}/${leg}.out" "./${rel}") >&2; then
     echo "${label}: ${leg}: ${name}'s seed corpus failed under measurement (above)" >&2
     status=1
   fi
   if ((status == 0)); then
-    cover=$(go tool cover -func="${work}/${leg}.out") || cover=""
+    cover=$(cd "${module}" && go tool cover -func="${work}/${leg}.out") || cover=""
     pct=$(awk '/^total:/ { sub(/%/, "", $3); print $3 }' <<< "${cover}")
   fi
   rm -rf -- "${work}"

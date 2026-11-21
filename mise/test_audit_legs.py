@@ -667,8 +667,9 @@ class Helper(unittest.TestCase):
 
 # Every shape the enumeration meets: two Rust targets, a root-package
 # and a nested-package Go target, the bare `Fuzz` name, a helper that
-# takes no *testing.F, a nested module's target, a vendored one, and an
-# untracked one. Only the first four are measured, so only they run.
+# takes no *testing.F, a nested module's target (#1899), a vendored one
+# at the root and one in the nested module, and an untracked one. All
+# but the vendored, the helper and the untracked are measured, so run.
 PLANTED_TARGETS = {
     "fuzz/Cargo.toml": fuzz_manifest("parse", "roundtrip"),
     "go.mod": "module example.com/x\n",
@@ -678,6 +679,7 @@ PLANTED_TARGETS = {
     "tools/go.mod": "module example.com/x/tools\n",
     "tools/gen/gen_test.go": "package gen\n\nfunc FuzzGen(f *testing.F) {}\n",
     "vendor/y/y_test.go": "package y\n\nfunc FuzzY(f *testing.F) {}\n",
+    "tools/vendor/z/z_test.go": "package z\n\nfunc FuzzZ(f *testing.F) {}\n",
 }
 
 
@@ -701,7 +703,12 @@ class FuzzTargets(unittest.TestCase):
         want: list[audit_legs.Target] = [
             {"kind": "rust", "target": "parse"},
             {"kind": "rust", "target": "roundtrip"},
-            {"kind": "go", "target": "FuzzLoad", "package": "internal/policy"},
+            {
+                "kind": "go",
+                "target": "FuzzLoad",
+                "package": "internal/policy",
+                "module": ".",
+            },
         ]
         entries = decoded.as_array(decoded.load_json(got["fuzz-targets"]), "list")
         got_entries: list[dict[str, object]] = [
@@ -762,22 +769,23 @@ class FuzzTargets(unittest.TestCase):
         (root / "internal" / "policy" / "y_test.go").write_text(
             "package policy\n\nfunc FuzzUntracked(f *testing.F) {}\n", "utf-8"
         )
-        listed: list[tuple[str, str, str]] = [
-            (t["kind"], t.get("package", "-"), t["target"])
+        listed: list[tuple[str, str, str, str]] = [
+            (t["kind"], t.get("package", "-"), t["target"], t.get("module", "-"))
             for t in audit_legs.fuzz_targets(root, gate_tools.tracked_files(root))
         ]
-        want: list[tuple[str, str, str]] = [
-            ("rust", "-", "parse"),
-            ("rust", "-", "roundtrip"),
-            ("go", "internal/policy", "FuzzLoad"),
-            ("go", "internal/policy", "FuzzSave"),
-            ("go", ".", "Fuzz"),
+        want: list[tuple[str, str, str, str]] = [
+            ("rust", "-", "parse", "-"),
+            ("rust", "-", "roundtrip", "-"),
+            ("go", "internal/policy", "FuzzLoad", "."),
+            ("go", "internal/policy", "FuzzSave", "."),
+            ("go", "tools/gen", "FuzzGen", "tools"),
+            ("go", ".", "Fuzz", "."),
         ]
         self.assertEqual(want, listed)
         self.assertEqual(listed, measured_targets(root))
 
 
-def measured_targets(root: Path) -> list[tuple[str, str, str]]:
+def measured_targets(root: Path) -> list[tuple[str, str, str, str]]:
     """Run coverage-measure.sh's own `fuzz_targets` over a tree.
 
     The function is read out of the script, between its line and the
@@ -785,7 +793,8 @@ def measured_targets(root: Path) -> list[tuple[str, str, str]]:
     sources: the enumeration, not the measurement.
 
     Returns:
-        Each target as (kind, package directory or `-`, name).
+        Each target as (kind, package directory or `-`, name, module
+        directory or `-`).
 
     Raises:
         AssertionError: the script defines no such function.
@@ -811,7 +820,7 @@ def measured_targets(root: Path) -> list[tuple[str, str, str]]:
         check=True,
     )
     records = [line.split(" ") for line in run.stdout.splitlines() if line]
-    return [(kind, where, name) for _, kind, where, name in records]
+    return [(kind, where, name, module) for _, kind, where, name, module in records]
 
 
 class Refusals(unittest.TestCase):

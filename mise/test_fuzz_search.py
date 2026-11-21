@@ -127,24 +127,29 @@ printf '{"data": [{"totals": {"lines": {"count": 100, "covered": %s}}}]}\\n' \\
   "$((10 + n))"
 """
 
-# go: one package with FuzzLoad. `test -fuzz` writes the planted finds
-# into the fuzz cache and prints the planted log; with STUB_GO_CRASH the
-# plain pass writes a failing input among the seeds and fails. The
-# measurement reads the seeds, and refuses a failing input among them,
-# as the real replay would.
+# go: one package with FuzzLoad, at STUB_GO_PKG in the module it is run
+# in (default internal/policy), imported as STUB_GO_IMPORT. Each call is
+# also logged with the directory it ran in, to go-dir.log. `test -fuzz`
+# writes the planted finds into the fuzz cache and prints the planted
+# log; with STUB_GO_CRASH the plain pass writes a failing input among
+# the seeds and fails. The measurement reads the seeds, and refuses a
+# failing input among them, as the real replay would.
 GO = """\
 #!/usr/bin/env bash
 echo "$*" >> "${STUB_DIR}/go.log"
-seeds="${PWD}/internal/policy/testdata/fuzz/FuzzLoad"
-cache="${STUB_GOCACHE}/fuzz/example.com/x/internal/policy/FuzzLoad"
+echo "${PWD} $*" >> "${STUB_DIR}/go-dir.log"
+dir=${STUB_GO_PKG:-internal/policy}
+import=${STUB_GO_IMPORT:-example.com/x/internal/policy}
+seeds="${PWD}/${dir}/testdata/fuzz/FuzzLoad"
+cache="${STUB_GOCACHE}/fuzz/${import}/FuzzLoad"
 out=""
 for arg in "$@"; do
   case "${arg}" in -coverprofile=* | -func=*) out=${arg#*=} ;; *) ;; esac
 done
 case "$1 ${2:-}" in
-  "list ./...") echo example.com/x/internal/policy ;;
-  "list -f") echo "${PWD}/internal/policy" ;;
-  "list -deps") echo example.com/x/internal/policy ;;
+  "list ./...") echo "${import}" ;;
+  "list -f") echo "${PWD}/${dir}" ;;
+  "list -deps") echo "${import}" ;;
   "test -list") echo FuzzLoad ;;
   "clean -fuzzcache") rm -rf "${STUB_GOCACHE}/fuzz" ;;
   "env GOCACHE") echo "${STUB_GOCACHE}" ;;
@@ -490,6 +495,36 @@ class GoSearch(SearchCase):
         self.assertEqual(
             status, self.git("status", "--porcelain", "--untracked-files=all")
         )
+
+
+class NestedModule(SearchCase):
+    """A target in a nested module is searched and measured in it (#1899)."""
+
+    def test_a_nested_target_runs_and_is_measured_in_its_module(self) -> None:
+        """tools/ is its own module: every go call for its target runs there."""
+        self.write("tools/go.mod", "module example.com/x/tools\n")
+        self.write("tools/gen/gen_test.go", GO_TEST.replace("policy", "gen"))
+        self.write("tools/gen/testdata/fuzz/FuzzLoad/seed", "go test fuzz v1\n")
+        self.env |= {"STUB_GO_PKG": "gen", "STUB_GO_IMPORT": "example.com/x/tools/gen"}
+        self.find("bbb-raise", "raise\n")
+        result = self.run_task("audit:go-fuzz")
+        self.assertEqual(0, result.returncode, result.stderr)
+        same(self, ["tools/gen/testdata/fuzz/FuzzLoad/bbb-raise"], self.staged())
+        self.assertIn(
+            "- `FuzzLoad` in example.com/x/tools/gen (fuzz-tools-gen-load):"
+            " corpus 10.0% to 11.0%, 1 input(s) kept",
+            result.stdout,
+        )
+        calls = self.log("go-dir")
+        module = f"{self.tree}/tools"
+        for verb in ("test -fuzz", "test -race", "test -count=1", "list -deps"):
+            ran = [c for c in calls if c.split(" ", 1)[1].startswith(verb)]
+            with self.subTest(verb=verb):
+                self.assertTrue(ran, calls)
+                for call in ran:
+                    self.assertEqual(module, call.split(" ", 1)[0], call)
+        measured = next(c for c in calls if " test -count=1 " in c)
+        self.assertTrue(measured.endswith(" ./gen"), measured)
 
 
 class Selection(SearchCase):

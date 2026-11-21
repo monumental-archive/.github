@@ -30,7 +30,8 @@ output of its own: `repo-deep-tests`'s `fuzz` job runs one runner per
 fuzz target (#1899), from `fuzz-targets`. The list is the one
 `coverage-measure.sh`'s `fuzz_targets` measures (#1896): every `[[bin]]`
 of a tracked fuzz/Cargo.toml, and every `func Fuzz…(… *testing.F)` in a
-tracked `_test.go` of the root module. A target the gate's floor holds
+tracked `_test.go` of any tracked Go module, the root's or a nested
+one's. A target the gate's floor holds
 is a target the nightly search runs, and no other.
 
     audit_legs.py [--root DIR] [--table FILE] WORKFLOW
@@ -68,7 +69,8 @@ GO_FUZZ = re.compile(
     re.MULTILINE,
 )
 
-# One runner's entry: `kind`, `target` and, for Go, `package`.
+# One runner's entry: `kind`, `target` and, for Go, `package` and
+# `module` (directories from the repository root).
 Target = dict[str, str]
 
 
@@ -197,9 +199,11 @@ def fuzz_targets(root: Path, tracked: list[str]) -> list[Target]:
     """List the fuzz targets, as coverage-measure.sh's `fuzz_targets` does.
 
     Rust: each `[[bin]]` name of a tracked fuzz/Cargo.toml, in its
-    order. Go, where go.mod is tracked: each `func Fuzz…(… *testing.F)`
-    in a tracked `_test.go` outside vendor/ and outside every nested
-    module, with its file's directory as `package` (`.` at the root).
+    order. Go: each `func Fuzz…(… *testing.F)` in a tracked `_test.go`
+    under no vendor/ directory, with its file's directory as `package`
+    (`.` at the root) and as `module` the deepest tracked go.mod's
+    directory above it, as Go resolves a package's module. A test no
+    tracked module owns is no target.
 
     Returns:
         One entry per target.
@@ -217,21 +221,54 @@ def fuzz_targets(root: Path, tracked: list[str]) -> list[Target]:
             msg = f"{FUZZ_MANIFEST}: {err}"
             raise decoded.UndecodableError(msg) from None
         found += [{"kind": "rust", "target": name} for name in names]
-    if "go.mod" not in tracked:
-        return found
-    nested = [p.removesuffix("go.mod") for p in tracked if p.endswith("/go.mod")]
+    modules = [
+        posixpath.dirname(p) or "."
+        for p in tracked
+        if posixpath.basename(p) == "go.mod" and not vendored(p)
+    ]
     for path in tracked:
-        if not path.endswith("_test.go") or path.startswith("vendor/"):
+        if not path.endswith("_test.go") or vendored(path):
             continue
         package = posixpath.dirname(path) or "."
-        if any(f"{package}/".startswith(module) for module in nested):
+        module = owner(package, modules)
+        if module is None:
             continue
         text = (root / path).read_text(encoding="utf-8")
         found += [
-            {"kind": "go", "target": match.group(1), "package": package}
+            {
+                "kind": "go",
+                "target": match.group(1),
+                "package": package,
+                "module": module,
+            }
             for match in GO_FUZZ.finditer(text)
         ]
     return found
+
+
+def vendored(path: str) -> bool:
+    """Say whether a tracked path is under a vendor/ directory.
+
+    Returns:
+        True for `vendor/…` and `…/vendor/…`.
+
+    """
+    return "vendor" in path.split("/")[:-1]
+
+
+def owner(package: str, modules: list[str]) -> str | None:
+    """Find the module a package directory belongs to.
+
+    Returns:
+        The deepest module directory at or above it, `.` for the root;
+        None when no module owns it.
+
+    """
+    owning = [m for m in modules if m == "." or f"{package}/".startswith(f"{m}/")]
+    nested = [m for m in owning if m != "."]
+    if nested:
+        return max(nested, key=len)
+    return "." if owning else None
 
 
 # Workflow stem to job id to the job's list output, how the list is

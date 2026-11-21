@@ -123,6 +123,7 @@ exit 1
 GO = """\
 #!/usr/bin/env bash
 echo "$*" >> "${STUB_DIR}/go.log"
+echo "${PWD} $*" >> "${STUB_DIR}/go-dir.log"
 out=""
 for arg in "$@"; do
   case "${arg}" in -coverprofile=* | -func=*) out=${arg#*=} ;; *) ;; esac
@@ -364,6 +365,29 @@ class MeasureRows(FuzzCase):
         sources = self.log("llvm-cov")[0].split(" ")[4:]
         tracked: list[str] = [f"{self.tree}/src/lib.rs"]
         self.assertEqual(tracked, sources)
+
+    def test_a_nested_module_target_is_measured_in_its_module(self) -> None:
+        """tools/ is a module of its own: go runs there, on ./gen (#1899)."""
+        self.write("tools/go.mod", "module example.com/x/tools\n")
+        self.write("tools/gen/gen_test.go", GO_TEST.replace("policy", "gen"))
+        done = self.measure()
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertEqual("fuzz-tools-gen-load 43.6\n", done.stdout)
+        module = f"{self.tree}/tools"
+        calls = self.log("go-dir")
+        want: list[str] = [
+            f"{module} list -deps",
+            f"{module} test -count=1",
+            f"{module} tool cover",
+        ]
+        got: list[str] = [" ".join(c.split(" ")[:3]) for c in calls]
+        self.assertEqual(want, got)
+        ran = calls[1].split(" ")
+        self.assertEqual(
+            "-coverpkg=example.com/x/internal/policy,example.com/x/internal/lib",
+            ran[5],
+        )
+        self.assertEqual("./gen", ran[-1])
 
     def test_no_environment_variable_narrows_or_redirects_the_leg(self) -> None:
         """The search's measurement is a function, not a knob on the gate (#1897).
