@@ -73,6 +73,15 @@ picks, and picking is how the numbers above happened. A crate's own code
 never raises it either. Code that needs a newer compiler waits for the
 floor or a dependency to move.
 
+EVERY MEMBER, DECLARING OR NOT (#1909). The rule's surface is every
+workspace member, not the compile surface: deriving a number compiles
+nothing. A member that declares no `rust-version` is a finding naming the
+number it must declare, since leaving the field out would otherwise be the
+one way to make no promise and pass; inheritance from `[workspace.package]`
+counts as declaring, as cargo metadata resolves it. A member CLIPPY_EXCLUDE
+keeps off the compile surface is held to its number like any other, and
+stays unverified at it until #813 widens the surface.
+
 A DEPENDENCY THAT NEEDS MORE THAN IT DECLARES IS NOT TAKEN. The derived
 number stays where the declarations put it, and the compile at that number
 fails: that red is the rule working, and `compile_failure` says so rather
@@ -446,29 +455,37 @@ def derive(
 def derivations(
     metadata: object,
     workspace: list[Package],
-    surface: list[Package],
     floor: Floor,
 ) -> list[str]:
-    """Compare each member on the compile surface with the derived number.
+    """Compare every workspace member with the derived number.
+
+    Every member, not only those that declare one or that the gate
+    compiles (#1909): deriving a number compiles nothing, so the compile
+    surface has no say in who is held to it, and leaving the field out
+    is not a way to make no promise.
 
     Returns:
-        One line per member of `surface` whose declared rust-version
-        differs from the one the rule derives, naming both and why. An
-        UndecodableError from the graph or a reached declaration passes
-        through.
+        One line per member whose rust-version differs from the one the
+        rule derives, or that declares none, naming the derived number
+        and why. An UndecodableError from the graph or a reached
+        declaration passes through.
 
     """
     packages, edges = graph(metadata)
     ours = {pkg.id for pkg in workspace}
     outside = {i: p for i, p in packages.items() if i not in ours}
     found: list[str] = []
-    for pkg in surface:
+    for pkg in workspace:
         want = derive(pkg.id, outside, edges, floor)
-        if parse_version(pkg.rust_version) != want.version:
+        said = (
+            f"declares rust-version {pkg.rust_version}"
+            if pkg.rust_version
+            else "declares no rust-version"
+        )
+        if not pkg.rust_version or parse_version(pkg.rust_version) != want.version:
             found.append(
-                f"{pkg.name}@{pkg.version} declares rust-version "
-                f"{pkg.rust_version}; the rule derives {want.written}: "
-                f"{want.reason}",
+                f"{pkg.name}@{pkg.version} {said}; the rule derives "
+                f"{want.written}: {want.reason}",
             )
     return found
 
@@ -591,8 +608,9 @@ def rule_remedy() -> list[str]:
 
     """
     return [
-        "  set each rust-version in Cargo.toml to the number derived, and the",
-        "  MSRV pin in mise.toml to match it",
+        "  declare each rust-version in Cargo.toml as exactly the number",
+        "  derived, a crate declaring none included, and the MSRV pin in",
+        "  mise.toml to match it",
         "  the number is derived, never chosen: the higher of Debian stable's",
         "  rustc (mise/rust-floor.toml in the canon) and the highest",
         "  rust-version the crate's normal and build dependencies declare;",
@@ -661,30 +679,32 @@ def read_inputs(
 def rule(
     metadata: object,
     workspace: list[Package],
-    exclude: set[str],
     floor_file: Path,
 ) -> bool:
-    """Hold every promise on the compile surface to the derived number.
+    """Hold every workspace member to the derived number.
+
+    A member CLIPPY_EXCLUDE keeps off the compile surface is held like
+    any other: the exclusion says what the gate cannot compile, not
+    which number the crate may promise (#1909).
 
     Returns:
-        True when every one matches; False having said on stderr which
-        do not, or which input could not be read.
+        True when every member declares exactly it; False having said on
+        stderr which do not, or which input could not be read.
 
     """
-    surface = [p for p in workspace if p.rust_version and p.name not in exclude]
     try:
         floor = read_floor(floor_file.read_text(encoding="utf-8"))
     except (OSError, UndecodableError) as bad:
         print(f"{NAME}: the floor file {floor_file}: {bad}", file=sys.stderr)
         return False
     try:
-        found = derivations(metadata, workspace, surface, floor)
+        found = derivations(metadata, workspace, floor)
     except UndecodableError as bad:
         print(f"{NAME}: cargo metadata: {bad}", file=sys.stderr)
         return False
     if found:
         print(
-            f"{NAME}: a declared minimum differs from the one the rule derives",
+            f"{NAME}: a minimum is undeclared or differs from the one the rule derives",
             file=sys.stderr,
         )
         for line in [*(f"  {f}" for f in found), *rule_remedy()]:
@@ -726,7 +746,7 @@ def main(argv: list[str] | None = None) -> int:
         for line in unreadable:
             print(f"  {line}", file=sys.stderr)
         return 1
-    if not rule(metadata, workspace, exclude, args.floor):
+    if not rule(metadata, workspace, args.floor):
         return 1
     return plan(groups, unreachable, pinned_toolchains, features(args.pgrx))
 
