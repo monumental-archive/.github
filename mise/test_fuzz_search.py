@@ -850,8 +850,8 @@ class OneRunnerPerTarget(unittest.TestCase):
         same(
             self,
             [
-                "fuzz-corpus-candidates-${{ matrix.kind }}-${{ matrix.target }}",
-                "fuzz-corpus-summary-${{ matrix.kind }}-${{ matrix.target }}",
+                "fuzz-corpus-candidates-${{ matrix.leg }}",
+                "fuzz-corpus-summary-${{ matrix.leg }}",
             ],
             names,
         )

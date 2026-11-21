@@ -81,7 +81,7 @@ jobs:
   # search. 60 minutes is the 30-minute search with the build, the
   # measurement of each candidate and the install beside it.
   fuzz:
-    name: fuzz ${{ matrix.kind }} ${{ matrix.target }} survives a bounded run
+    name: fuzz ${{ matrix.leg }} survives a bounded run
     needs: applies
     if: ${{ needs.applies.outputs.fuzz == 'true' }}
     runs-on: ubuntu-26.04
@@ -126,7 +126,7 @@ jobs:
         if: ${{ matrix.kind == 'rust' }}
         env:
           ORG_FUZZ_CANDIDATES: ${{ runner.temp }}/fuzz-corpus-candidates
-          ORG_FUZZ_SUMMARY: ${{ runner.temp }}/fuzz-corpus-summary/${{ matrix.kind }}-${{ matrix.target }}.md
+          ORG_FUZZ_SUMMARY: ${{ runner.temp }}/fuzz-corpus-summary/${{ matrix.leg }}.md
         run: mise run audit:fuzz
 
       # The Go half (#445): the fuzzing engine ships in the toolchain, so
@@ -139,7 +139,7 @@ jobs:
         if: ${{ matrix.kind == 'go' }}
         env:
           ORG_FUZZ_CANDIDATES: ${{ runner.temp }}/fuzz-corpus-candidates
-          ORG_FUZZ_SUMMARY: ${{ runner.temp }}/fuzz-corpus-summary/${{ matrix.kind }}-${{ matrix.target }}.md
+          ORG_FUZZ_SUMMARY: ${{ runner.temp }}/fuzz-corpus-summary/${{ matrix.leg }}.md
         run: mise run audit:go-fuzz
 
       # Whether the search passed or failed (a crash is what most needs
@@ -153,16 +153,19 @@ jobs:
         if: ${{ !cancelled() }}
         env:
           CANDIDATES: ${{ runner.temp }}/fuzz-corpus-candidates
-          SUMMARY: ${{ runner.temp }}/fuzz-corpus-summary/${{ matrix.kind }}-${{ matrix.target }}.md
+          SUMMARY: ${{ runner.temp }}/fuzz-corpus-summary/${{ matrix.leg }}.md
         run: .org-canon/release/propose-fuzz-corpus.sh handover
 
       # One artifact per target (#1897, #1899), replacing the two 30-day
       # reproducer uploads: every staged file at its repository path.
+      # Named by the target's floor leg, which the coverage floor's clash
+      # check holds unique, so two Go packages sharing a Fuzz name never
+      # share an artifact.
       - name: Upload what the search kept
         if: ${{ !cancelled() && steps.kept.outputs.staged == 'true' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: fuzz-corpus-candidates-${{ matrix.kind }}-${{ matrix.target }}
+          name: fuzz-corpus-candidates-${{ matrix.leg }}
           path: ${{ runner.temp }}/fuzz-corpus-candidates/
           if-no-files-found: error
           retention-days: 30
@@ -173,7 +176,7 @@ jobs:
         if: ${{ !cancelled() && steps.kept.outputs.staged == 'true' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: fuzz-corpus-summary-${{ matrix.kind }}-${{ matrix.target }}
+          name: fuzz-corpus-summary-${{ matrix.leg }}
           path: ${{ runner.temp }}/fuzz-corpus-summary/
           if-no-files-found: error
           retention-days: 30

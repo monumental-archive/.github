@@ -683,6 +683,11 @@ PLANTED_TARGETS = {
 }
 
 
+# One target as both enumerations name it: leg, kind, package, name and
+# module.
+Record = tuple[str, str, str, str, str]
+
+
 class FuzzTargets(unittest.TestCase):
     """The fuzz job runs one runner per target the floor measures (#1899)."""
 
@@ -701,11 +706,12 @@ class FuzzTargets(unittest.TestCase):
             "repo-deep-tests",
         )
         want: list[audit_legs.Target] = [
-            {"kind": "rust", "target": "parse"},
-            {"kind": "rust", "target": "roundtrip"},
+            {"kind": "rust", "target": "parse", "leg": "fuzz-parse"},
+            {"kind": "rust", "target": "roundtrip", "leg": "fuzz-roundtrip"},
             {
                 "kind": "go",
                 "target": "FuzzLoad",
+                "leg": "fuzz-internal-policy-load",
                 "package": "internal/policy",
                 "module": ".",
             },
@@ -769,23 +775,46 @@ class FuzzTargets(unittest.TestCase):
         (root / "internal" / "policy" / "y_test.go").write_text(
             "package policy\n\nfunc FuzzUntracked(f *testing.F) {}\n", "utf-8"
         )
-        listed: list[tuple[str, str, str, str]] = [
-            (t["kind"], t.get("package", "-"), t["target"], t.get("module", "-"))
+        listed: list[Record] = [
+            (
+                t["leg"],
+                t["kind"],
+                t.get("package", "-"),
+                t["target"],
+                t.get("module", "-"),
+            )
             for t in audit_legs.fuzz_targets(root, gate_tools.tracked_files(root))
         ]
-        want: list[tuple[str, str, str, str]] = [
-            ("rust", "-", "parse", "-"),
-            ("rust", "-", "roundtrip", "-"),
-            ("go", "internal/policy", "FuzzLoad", "."),
-            ("go", "internal/policy", "FuzzSave", "."),
-            ("go", "tools/gen", "FuzzGen", "tools"),
-            ("go", ".", "Fuzz", "."),
+        want: list[Record] = [
+            ("fuzz-parse", "rust", "-", "parse", "-"),
+            ("fuzz-roundtrip", "rust", "-", "roundtrip", "-"),
+            ("fuzz-internal-policy-load", "go", "internal/policy", "FuzzLoad", "."),
+            ("fuzz-internal-policy-save", "go", "internal/policy", "FuzzSave", "."),
+            ("fuzz-tools-gen-gen", "go", "tools/gen", "FuzzGen", "tools"),
+            ("fuzz-", "go", ".", "Fuzz", "."),
         ]
         self.assertEqual(want, listed)
         self.assertEqual(listed, measured_targets(root))
 
+    def test_two_packages_sharing_a_fuzz_name_get_two_legs(self) -> None:
+        """a/FuzzLoad and b/FuzzLoad: two entries, two legs, two artifacts."""
+        root = git_tree({
+            "go.mod": "module example.com/x\n",
+            "a/a_test.go": GO_FUZZ_TEST,
+            "b/b_test.go": GO_FUZZ_TEST,
+        })
+        entries = audit_legs.fuzz_targets(root, gate_tools.tracked_files(root))
+        legs: list[str] = [t["leg"] for t in entries]
+        targets: list[str] = [t["target"] for t in entries]
+        want_legs: list[str] = ["fuzz-a-load", "fuzz-b-load"]
+        want_targets: list[str] = ["FuzzLoad", "FuzzLoad"]
+        floor: list[str] = [record[0] for record in measured_targets(root)]
+        self.assertEqual(want_legs, legs)
+        self.assertEqual(want_targets, targets)
+        self.assertEqual(legs, floor)
 
-def measured_targets(root: Path) -> list[tuple[str, str, str, str]]:
+
+def measured_targets(root: Path) -> list[Record]:
     """Run coverage-measure.sh's own `fuzz_targets` over a tree.
 
     The function is read out of the script, between its line and the
@@ -793,8 +822,8 @@ def measured_targets(root: Path) -> list[tuple[str, str, str, str]]:
     sources: the enumeration, not the measurement.
 
     Returns:
-        Each target as (kind, package directory or `-`, name, module
-        directory or `-`).
+        Each target as (leg, kind, package directory or `-`, name,
+        module directory or `-`).
 
     Raises:
         AssertionError: the script defines no such function.
@@ -820,7 +849,9 @@ def measured_targets(root: Path) -> list[tuple[str, str, str, str]]:
         check=True,
     )
     records = [line.split(" ") for line in run.stdout.splitlines() if line]
-    return [(kind, where, name, module) for _, kind, where, name, module in records]
+    return [
+        (leg, kind, where, name, module) for leg, kind, where, name, module in records
+    ]
 
 
 class Refusals(unittest.TestCase):

@@ -49,6 +49,7 @@ import argparse
 import json
 import posixpath
 import re
+import string
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -69,8 +70,12 @@ GO_FUZZ = re.compile(
     re.MULTILINE,
 )
 
-# One runner's entry: `kind`, `target` and, for Go, `package` and
-# `module` (directories from the repository root).
+ASCII_LOWER = str.maketrans(string.ascii_uppercase, string.ascii_lowercase)
+
+# One runner's entry: `kind`, `target`, its floor `leg` and, for Go,
+# `package` and `module` (directories from the repository root). The
+# leg is unique per target (coverage-measure.sh refuses two that derive
+# one), so it names the runner's artifacts.
 Target = dict[str, str]
 
 
@@ -220,7 +225,9 @@ def fuzz_targets(root: Path, tracked: list[str]) -> list[Target]:
         except decoded.UndecodableError as err:
             msg = f"{FUZZ_MANIFEST}: {err}"
             raise decoded.UndecodableError(msg) from None
-        found += [{"kind": "rust", "target": name} for name in names]
+        found += [
+            {"kind": "rust", "target": name, "leg": leg_name(name)} for name in names
+        ]
     modules = [
         posixpath.dirname(p) or "."
         for p in tracked
@@ -234,16 +241,31 @@ def fuzz_targets(root: Path, tracked: list[str]) -> list[Target]:
         if module is None:
             continue
         text = (root / path).read_text(encoding="utf-8")
-        found += [
-            {
+        for match in GO_FUZZ.finditer(text):
+            name = str(match.group(1))
+            short = name.removeprefix("Fuzz")
+            found.append({
                 "kind": "go",
-                "target": match.group(1),
+                "target": name,
+                "leg": leg_name(short if package == "." else f"{package}-{short}"),
                 "package": package,
                 "module": module,
-            }
-            for match in GO_FUZZ.finditer(text)
-        ]
+            })
     return found
+
+
+def leg_name(name: str) -> str:
+    """Derive a fuzz target's floor leg, as fuzz-measure-lib.sh does.
+
+    `org_fuzz_leg_name`: `fuzz-<name>`, ASCII-lower-cased, every
+    character but [a-z0-9] turned into `-`.
+
+    Returns:
+        The leg.
+
+    """
+    lowered = name.translate(ASCII_LOWER)
+    return "fuzz-" + re.sub(r"[^a-z0-9]", "-", lowered)
 
 
 def vendored(path: str) -> bool:

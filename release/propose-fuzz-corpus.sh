@@ -12,8 +12,8 @@
 # The fuzz job is one runner per target (#1899), and a matrix job's
 # outputs are last-writer-wins, so nothing reaches `propose` through
 # them. Each runner that staged something uploads two artifacts of its
-# own, `fuzz-corpus-candidates-<kind>-<target>` and
-# `fuzz-corpus-summary-<kind>-<target>`, and `propose` downloads every
+# own, `fuzz-corpus-candidates-<leg>` and `fuzz-corpus-summary-<leg>`
+# (the target's floor leg, unique per target), and `propose` downloads every
 # one of each into two trees. CANDIDATES is the merged candidates tree:
 # each file at its repository path. That artifact was written by the job that
 # ran the repository's code, so its paths are input, not instructions.
