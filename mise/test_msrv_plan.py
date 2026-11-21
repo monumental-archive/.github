@@ -51,22 +51,105 @@ def member(
 
 
 def metadata(
-    *packages: dict[str, object], foreign: dict[str, object] | None = None
+    *packages: dict[str, object],
+    foreign: dict[str, object] | None = None,
+    nodes: list[dict[str, object]] | None = None,
+    extra: tuple[dict[str, object], ...] = (),
 ) -> dict[str, object]:
     """Build a cargo metadata document whose members are the packages given.
 
     Returns:
-        The document, optionally carrying one package that is NOT a
-        workspace member — a dependency cargo also reports.
+        The document, optionally carrying packages that are NOT workspace
+        members — dependencies cargo also reports — and a resolve graph:
+        the nodes given, or one per package with no edges.
 
     """
-    listed = list(packages)
+    listed = [*packages, *extra]
     if foreign is not None:
         listed.append(foreign)
     return {
         "workspace_members": [pkg["id"] for pkg in packages],
         "packages": listed,
+        "resolve": {
+            "nodes": nodes if nodes is not None else [node(p) for p in listed],
+        },
     }
+
+
+def dependency(
+    name: str, promise: str | None, version: str = "1.0.0"
+) -> dict[str, object]:
+    """Build one non-member package as cargo metadata reports it.
+
+    Returns:
+        The package object, its id registry-shaped.
+
+    """
+    return {
+        "id": f"registry+https://github.com/rust-lang/crates.io-index#{name}@{version}",
+        "name": name,
+        "version": version,
+        "rust_version": promise,
+    }
+
+
+def edge(
+    pkg: dict[str, object],
+    *kinds: str | None,
+    target: str | None = None,
+    name: str | None = None,
+) -> dict[str, object]:
+    """Build one resolve edge in the shape cargo 1.97.1 gives.
+
+    Measured on a scratch workspace with path dependencies of every kind:
+    a normal edge's kind is null, a build edge's "build", a dev edge's
+    "dev"; a `[target.'cfg(windows)'.dependencies]` entry carries its cfg
+    in `target`; a renamed dependency's `name` is the rename, with
+    hyphens as underscores, and only `pkg` says which package it is; and a
+    dependency declared under two kinds is ONE edge with two `dep_kinds`.
+
+    Returns:
+        The edge, one `dep_kinds` entry per kind given (normal if none).
+
+    """
+    said = kinds or (None,)
+    return {
+        "name": name or str(pkg["name"]).replace("-", "_"),
+        "pkg": pkg["id"],
+        "dep_kinds": [{"kind": kind, "target": target} for kind in said],
+    }
+
+
+def node(pkg: dict[str, object], *deps: dict[str, object]) -> dict[str, object]:
+    """Build one resolve node.
+
+    Returns:
+        The node for pkg, with the edges given.
+
+    """
+    return {"id": pkg["id"], "deps": list(deps)}
+
+
+def floor_file(debian: str) -> Path:
+    """Write a floor file holding one Debian rustc package version.
+
+    Returns:
+        Its path.
+
+    """
+    path = Path(tempfile.mkdtemp()) / "rust-floor.toml"
+    path.write_text(
+        f'# renovate: debian-stable-rustc\ndebian_stable_rustc = "{debian}"\n',
+        encoding="utf-8",
+    )
+    return path
+
+
+# Debian 13's, the floor the canon records today (#1850).
+TRIXIE = "1.85.1+dfsg1-1+deb13u1"
+# A floor at the promise the pin rows below were written for, so they
+# keep testing the pin and nothing else.
+PIN_ROWS_FLOOR = "1.82.0+dfsg3-1"
 
 
 def pin(
@@ -91,6 +174,21 @@ def typed(packages: list[dict[str, object]]) -> list[msrv_plan.Package]:
 
     """
     return [msrv_plan.package(p, decoded.as_str(p["name"], "name")) for p in packages]
+
+
+def two_minimums() -> dict[str, object]:
+    """Build a workspace whose two members derive two different minimums.
+
+    Returns:
+        `a` at the pin rows' floor, and `b` at 1.90 because a dependency
+        it reaches declares 1.90.
+
+    """
+    a, b = member("a", "1.82"), member("b", "1.90")
+    needs = dependency("needs", "1.90")
+    return metadata(
+        a, b, foreign=needs, nodes=[node(a), node(b, edge(needs)), node(needs)]
+    )
 
 
 class ParseVersionTest(unittest.TestCase):
@@ -295,6 +393,7 @@ class MainTest(unittest.TestCase):
         listing: object,
         exclude: str = "",
         pgrx: str = "",
+        floor: str = PIN_ROWS_FLOOR,
     ) -> tuple[int, str, str]:
         """Run the planner over one workspace and one toolchain listing.
 
@@ -307,7 +406,10 @@ class MainTest(unittest.TestCase):
             json.dumps(listing) if listing is not None else "{",
             encoding="utf-8",
         )
-        argv = ["--toolchains", str(path), "--exclude", exclude, "--pgrx", pgrx]
+        argv = [
+            *("--toolchains", str(path), "--floor", str(floor_file(floor))),
+            *("--exclude", exclude, "--pgrx", pgrx),
+        ]
         out, err = io.StringIO(), io.StringIO()
         stdin = io.StringIO(json.dumps(doc) if doc is not None else "{")
         with (
@@ -406,7 +508,7 @@ class MainTest(unittest.TestCase):
     def test_two_minimums_plan_two_checks(self) -> None:
         """Each at its own pin; neither verified by the other's toolchain."""
         status, out, err = self.invoke(
-            metadata(member("a", "1.82"), member("b", "1.90")),
+            two_minimums(),
             [pin("1.82.0"), pin("1.90.0")],
         )
         want = ["check\t1.82.0\tdefault\ta@1.3.1", "check\t1.90.0\tdefault\tb@1.3.1"]
@@ -416,7 +518,7 @@ class MainTest(unittest.TestCase):
     def test_one_uncovered_minimum_reds_the_whole_plan(self) -> None:
         """A partial plan would compile half a promise and report success."""
         status, out, _err = self.invoke(
-            metadata(member("a", "1.82"), member("b", "1.90")),
+            two_minimums(),
             [pin("1.82.0")],
         )
         self.assertEqual(status, 1)
@@ -508,6 +610,369 @@ class MainTest(unittest.TestCase):
         status, _out, err = self.invoke(metadata(member("a", "1.82")), None)
         self.assertEqual(status, 1)
         self.assertIn("did not give JSON", err)
+
+
+# The workspace the edge filter was measured on (#1850): cargo 1.97.1's
+# `cargo metadata --format-version 1 --locked --all-features` over two
+# members and path dependencies of every kind, reproduced here edge for
+# edge. Each dependency declares a different number, so the derived one
+# says which edge was followed.
+APP = member("app", "1.85", "0.1.0")
+TOOL = member("tool", "1.85", "0.1.0")
+PLAIN = dependency("plain", "1.70")
+DEEP = dependency("deep", "1.87", "0.1.0")
+RENAMED = dependency("renamed", "1.80", "2.1.0")
+OPTIONAL = dependency("optional", "1.88", "0.5.0")
+UNDECLARED = dependency("undeclared", None, "0.2.0")
+WINONLY = dependency("winonly", "1.90", "0.3.0")
+BUILDER = dependency("builder", "1.86", "0.9.0")
+DEVONLY = dependency("devonly", "1.99", "4.0.0")
+SHAPES = (PLAIN, DEEP, RENAMED, OPTIONAL, UNDECLARED, WINONLY, BUILDER, DEVONLY)
+APP_EDGES = {
+    "plain": edge(PLAIN),
+    "renamed": edge(RENAMED, name="other_name"),
+    "optional": edge(OPTIONAL),
+    "undeclared": edge(UNDECLARED),
+    "tool": edge(TOOL),
+    "winonly": edge(WINONLY, target="cfg(windows)"),
+    "builder": edge(BUILDER, "build"),
+    "devonly": edge(DEVONLY, "dev"),
+}
+# A floor below every dependency above, so the derived number is always
+# a dependency's and says which edge was followed.
+LOW = ((1, 60, 0), "1.60.0+dfsg1-1")
+
+
+def shapes(
+    *keep: str,
+    tool: tuple[dict[str, object], ...] = (),
+    more: tuple[dict[str, object], ...] = (),
+    devonly: tuple[dict[str, object], ...] = (),
+) -> dict[str, object]:
+    """Build the measured workspace with only some of app's edges.
+
+    Returns:
+        The metadata document: app keeps the named edges (all when none
+        are named); tool has its dev edge and the edges given; devonly has
+        the edges given; `more` are further non-member packages.
+
+    """
+    chosen = [e for k, e in APP_EDGES.items() if not keep or k in keep]
+    nodes = [
+        node(APP, *chosen),
+        node(TOOL, edge(DEVONLY, "dev"), *tool),
+        node(PLAIN, edge(DEEP)),
+        node(DEVONLY, *devonly),
+        *(node(p) for p in (*SHAPES, *more) if p["name"] not in {"plain", "devonly"}),
+    ]
+    return metadata(APP, TOOL, nodes=nodes, extra=(*SHAPES, *more))
+
+
+def derived(
+    doc: dict[str, object], name: str, floor: msrv_plan.Floor | None = None
+) -> msrv_plan.Derived:
+    """Derive one member of a document the way the check does.
+
+    Returns:
+        What the rule derives for the member named.
+
+    """
+    workspace = msrv_plan.members(doc)
+    packages, edges = msrv_plan.graph(doc)
+    ours = {pkg.id for pkg in workspace}
+    outside = {i: p for i, p in packages.items() if i not in ours}
+    start = next(pkg.id for pkg in workspace if pkg.name == name)
+    return msrv_plan.derive(start, outside, edges, floor or msrv_plan.Floor(*LOW))
+
+
+class EdgeFilterTest(unittest.TestCase):
+    """Which edges the derivation follows, on the measured shapes.
+
+    Mutations, each observed red: follow dev edges (four rows), follow
+    only untargeted edges (two), key edges by `name` rather than `pkg`
+    (ten here, one in RuleTest, one in MainTest), stop at the first hop
+    (two).
+    """
+
+    def test_every_kind_together_derives_the_highest_followed(self) -> None:
+        """The measured workspace: winonly's 1.90, never devonly's 1.99."""
+        got = derived(shapes(), "app")
+        self.assertEqual((got.version, got.written), ((1, 90, 0), "1.90"))
+        self.assertEqual(got.reason, "`winonly 0.3.0` requires it")
+
+    def test_a_target_specific_dependency_counts(self) -> None:
+        """A cfg(windows) dependency is part of the promise to Windows users."""
+        self.assertEqual(derived(shapes("winonly"), "app").version, (1, 90, 0))
+
+    def test_a_dev_only_dependency_does_not_count(self) -> None:
+        """Tool's one dependency is dev: nothing is reached, the floor holds."""
+        got = derived(shapes(), "tool")
+        self.assertEqual(got.version, (1, 60, 0))
+        self.assertIn("the floor", got.reason)
+
+    def test_a_dev_edge_is_not_walked_through(self) -> None:
+        """What a dev dependency needs is no more the promise than it is."""
+        heavy = dependency("heavy", "1.98")
+        doc = shapes("devonly", more=(heavy,), devonly=(edge(heavy),))
+        self.assertEqual(derived(doc, "app").version, (1, 60, 0))
+
+    def test_a_renamed_dependency_counts_as_the_package_it_is(self) -> None:
+        """`other_name` is only the extern name; the finding names renamed."""
+        got = derived(shapes("renamed"), "app")
+        self.assertEqual(got.reason, "`renamed 2.1.0` requires it")
+
+    def test_an_optional_dependency_the_features_enable_counts(self) -> None:
+        """--all-features put the edge in the graph, so it is followed."""
+        self.assertEqual(derived(shapes("optional"), "app").version, (1, 88, 0))
+
+    def test_a_build_dependency_counts(self) -> None:
+        """A build script is compiled by the consumer's toolchain too."""
+        self.assertEqual(derived(shapes("builder"), "app").version, (1, 86, 0))
+
+    def test_a_transitive_dependency_counts(self) -> None:
+        """Plain declares 1.70 and reaches deep at 1.87."""
+        got = derived(shapes("plain"), "app")
+        self.assertEqual(got.reason, "`deep 0.1.0` requires it")
+
+    def test_an_edge_both_dev_and_normal_counts(self) -> None:
+        """Cargo gives one edge two kinds; the normal one decides."""
+        both = edge(DEVONLY, "dev", None)
+        doc = metadata(APP, foreign=DEVONLY, nodes=[node(APP, both), node(DEVONLY)])
+        self.assertEqual(derived(doc, "app").version, (1, 99, 0))
+
+    def test_an_undeclared_dependency_moves_nothing(self) -> None:
+        """A dependency that declares nothing is held back by the compile."""
+        self.assertEqual(derived(shapes("undeclared"), "app").version, (1, 60, 0))
+
+    def test_a_member_contributes_its_dependencies_not_its_number(self) -> None:
+        """The member app reaches tool, whose own 1.85 is no dependency's."""
+        self.assertEqual(derived(shapes("tool"), "app").version, (1, 60, 0))
+        via = dependency("via", "1.95")
+        raised = shapes("tool", tool=(edge(via),), more=(via,))
+        self.assertEqual(derived(raised, "app").version, (1, 95, 0))
+
+    def test_a_tie_names_the_same_dependency_every_run(self) -> None:
+        """Two at the highest number: the lower name, whatever the order."""
+        one, two = dependency("zeta", "1.90"), dependency("alpha", "1.90")
+        for order in ((one, two), (two, one)):
+            with self.subTest(first=order[0]["name"]):
+                doc = metadata(
+                    APP,
+                    nodes=[node(APP, *(edge(d) for d in order)), node(one), node(two)],
+                    extra=order,
+                )
+                got = derived(doc, "app").reason
+                self.assertEqual(got, "`alpha 1.0.0` requires it")
+
+    def test_the_floor_wins_a_tie_with_a_dependency(self) -> None:
+        """The floor holds the number whatever the dependency says."""
+        doc = metadata(APP, foreign=PLAIN, nodes=[node(APP, edge(PLAIN)), node(PLAIN)])
+        floor = msrv_plan.Floor((1, 70, 0), "1.70.0+dfsg1-1")
+        self.assertIn("the floor", derived(doc, "app", floor).reason)
+
+    def test_a_kind_cargo_did_not_have_is_refused(self) -> None:
+        """Following or dropping it unseen would move every number."""
+        doc = metadata(
+            APP, foreign=PLAIN, nodes=[node(APP, edge(PLAIN, "proc")), node(PLAIN)]
+        )
+        with self.assertRaisesRegex(decoded.UndecodableError, "'proc' is not one"):
+            msrv_plan.graph(doc)
+
+    def test_an_edge_with_no_kinds_is_refused(self) -> None:
+        """Pre-1.41 cargo gave none; this cannot tell what it is."""
+        bare = {"name": "plain", "pkg": PLAIN["id"], "dep_kinds": []}
+        doc = metadata(APP, foreign=PLAIN, nodes=[node(APP, bare), node(PLAIN)])
+        with self.assertRaisesRegex(decoded.UndecodableError, "dep_kinds is empty"):
+            msrv_plan.graph(doc)
+
+    def test_a_reached_declaration_that_is_not_a_version_is_refused(self) -> None:
+        """Cargo would not have accepted it; guessing would move the number."""
+        odd = dependency("odd", "1.x")
+        doc = metadata(APP, foreign=odd, nodes=[node(APP, edge(odd)), node(odd)])
+        with self.assertRaisesRegex(decoded.UndecodableError, "odd 1.0.0 declares"):
+            derived(doc, "app")
+
+
+class FloorTest(unittest.TestCase):
+    """Reading the floor file.
+
+    Mutation: take the whole upstream version as the floor, patch and all
+    (two rows red, two more in RuleTest).
+    """
+
+    def test_debian_stables_rustc_is_its_major_minor(self) -> None:
+        """Debian 13's package: the revision and repack say nothing."""
+        got = msrv_plan.read_floor(floor_file(TRIXIE).read_text(encoding="utf-8"))
+        self.assertEqual(got, msrv_plan.Floor((1, 85, 0), TRIXIE))
+
+    def test_the_forms_debian_writes_are_read(self) -> None:
+        """An epoch, a tilde, a bare upstream: all name one compiler."""
+        for debian, want in (
+            ("1:1.85.1+dfsg1-1", (1, 85, 0)),
+            ("1.90.0~beta.1-1", (1, 90, 0)),
+            ("1.85.1", (1, 85, 0)),
+        ):
+            with self.subTest(debian=debian):
+                text = f'debian_stable_rustc = "{debian}"'
+                self.assertEqual(msrv_plan.read_floor(text).version, want)
+
+    def test_what_is_not_a_rustc_package_version_is_refused(self) -> None:
+        """A floor this cannot read must not become a floor of zero."""
+        for text, said in (
+            ('debian_stable_rustc = "1.85"', "not a Debian rustc"),
+            ('debian_stable_rustc = "rustc-1.85.1"', "not a Debian rustc"),
+            ('debian_stable_rustc = "1.85.1 trixie"', "not a Debian rustc"),
+            ("rustc = 1", "debian_stable_rustc is not a string"),
+            ("debian_stable_rustc = ", ""),
+        ):
+            with (
+                self.subTest(text=text),
+                self.assertRaisesRegex(decoded.UndecodableError, said),
+            ):
+                msrv_plan.read_floor(text)
+
+    def test_the_canon_floor_file_reads(self) -> None:
+        """The tracked file itself, so a Renovate bump cannot break it."""
+        text = (Path(__file__).parent / "rust-floor.toml").read_text(encoding="utf-8")
+        self.assertGreaterEqual(msrv_plan.read_floor(text).version, (1, 85, 0))
+
+
+def converted(promise: str, *deps: dict[str, object]) -> dict[str, object]:
+    """Build one member reaching each dependency given directly.
+
+    Returns:
+        The metadata document.
+
+    """
+    core = member("edtf-core", promise, "1.3.5")
+    nodes = [node(core, *(edge(d) for d in deps)), *(node(d) for d in deps)]
+    return metadata(core, nodes=nodes, extra=deps)
+
+
+SERDE = dependency("serde_derive", "1.71", "1.0.228")
+WASM_BINDGEN = dependency("wasm-bindgen", "1.81", "0.2.130")
+PGRX = dependency("pgrx", "1.96", "0.19.3")
+
+
+class RuleTest(unittest.TestCase):
+    """The promise is exactly the derived number (#1850).
+
+    Mutations, each observed red: hold the promise to at least the
+    derived number rather than exactly (one row), drop the floor term
+    (three here, one in EdgeFilterTest), drop the dependency term (one
+    here, nine in EdgeFilterTest, one in MainTest), count a reached
+    member's own number (one).
+    """
+
+    invoke = staticmethod(MainTest.invoke)
+
+    def test_promise_below_the_floor_is_a_finding(self) -> None:
+        """Before #1883 edtf promised 1.82, which no distribution ships."""
+        status, out, err = self.invoke(
+            converted("1.82", SERDE), [pin("1.82.0")], floor=TRIXIE
+        )
+        self.assertEqual((status, out), (1, ""))
+        self.assertIn(
+            "edtf-core@1.3.5 declares rust-version 1.82; the rule derives 1.85: "
+            f"the floor: Debian stable's rustc is {TRIXIE}",
+            err,
+        )
+        self.assertIn("never chosen", err)
+        self.assertIn("missing_const_for_fn", err)
+
+    def test_promise_above_the_floor_with_no_dependency_reason_is_a_finding(
+        self,
+    ) -> None:
+        """release-lab before #1883: 1.97 for a crate needing 1.81."""
+        status, out, err = self.invoke(
+            converted("1.97", WASM_BINDGEN), [pin("1.97.0")], floor=TRIXIE
+        )
+        self.assertEqual((status, out), (1, ""))
+        self.assertIn(
+            "declares rust-version 1.97; the rule derives 1.85: the floor", err
+        )
+
+    def test_promise_raised_by_a_dependency_passes_and_names_it(self) -> None:
+        """lab-pg: 1.96 because pgrx 0.19.3 declares it, and says so."""
+        status, out, err = self.invoke(
+            converted("1.96", SERDE, PGRX), [pin("1.96.0")], floor=TRIXIE
+        )
+        self.assertEqual(status, 0, msg=err)
+        self.assertEqual(out.strip(), "check\t1.96.0\tdefault\tedtf-core@1.3.5")
+        floor = msrv_plan.Floor((1, 85, 0), TRIXIE)
+        self.assertEqual(
+            derived(converted("1.96", SERDE, PGRX), "edtf-core", floor).reason,
+            "`pgrx 0.19.3` requires it",
+        )
+        status, _out, err = self.invoke(
+            converted("1.85", SERDE, PGRX), [pin("1.85.0")], floor=TRIXIE
+        )
+        self.assertEqual(status, 1)
+        self.assertIn("the rule derives 1.96: `pgrx 0.19.3` requires it", err)
+
+    def test_promise_at_the_floor_passes(self) -> None:
+        """The edtf crates after #1883: 1.85, every dependency declaring less."""
+        status, out, err = self.invoke(
+            converted("1.85", SERDE, WASM_BINDGEN), [pin("1.85.0")], floor=TRIXIE
+        )
+        self.assertEqual(status, 0, msg=err)
+        self.assertEqual(out.strip(), "check\t1.85.0\tdefault\tedtf-core@1.3.5")
+
+    def test_compile_failure_at_the_derived_number_names_the_rule(self) -> None:
+        """Item 4: the red is the rule working, and the remedy says so."""
+        err = io.StringIO()
+        with redirect_stderr(err):
+            status = msrv_plan.main(["--failed", "1.85.0", "edtf-core@1.3.5"])
+        said = err.getvalue()
+        self.assertEqual(status, 1)
+        self.assertIn("edtf-core@1.3.5 failed to compile at 1.85.0,", said)
+        self.assertIn("the rust-version the rule derives", said)
+        self.assertIn("the crate may not raise it", said)
+        self.assertIn("declares less than it\n  needs, and is held back", said)
+
+    def test_an_excluded_member_is_not_held_to_the_rule(self) -> None:
+        """Off the compile surface it is unverified, and noted as such."""
+        status, out, err = self.invoke(
+            converted("1.82"), [pin("1.85.0")], exclude="edtf-core", floor=TRIXIE
+        )
+        self.assertEqual(status, 0, msg=err)
+        self.assertTrue(out.startswith("note\t"))
+
+    def test_a_member_reached_through_another_lends_no_number(self) -> None:
+        """lab-cli reaches lab-core; only lab-core's dependencies count.
+
+        Here the reached member promises 1.99 and is off the compile
+        surface, so only the reaching member is held to the rule: were the
+        reached one's own number counted, app would derive 1.99.
+        """
+        app, ext = member("app", "1.85"), member("ext", "1.99")
+        doc = metadata(app, ext, nodes=[node(app, edge(ext)), node(ext)])
+        status, out, err = self.invoke(
+            doc, [pin("1.85.0")], exclude="ext", floor=TRIXIE
+        )
+        self.assertEqual(status, 0, msg=err)
+        self.assertIn("check\t1.85.0\tdefault\tapp@1.3.1", out)
+
+    def test_metadata_without_a_resolve_graph_is_red(self) -> None:
+        """`--no-deps` metadata would derive every number as the floor."""
+        doc = converted("1.85")
+        doc.pop("resolve")
+        status, _out, err = self.invoke(doc, [pin("1.85.0")], floor=TRIXIE)
+        self.assertEqual(status, 1)
+        self.assertIn("no resolve graph", err)
+
+    def test_an_unreadable_floor_file_is_red_and_named(self) -> None:
+        """No floor is not a floor of zero."""
+        status, _out, err = self.invoke(
+            converted("1.85"), [pin("1.85.0")], floor="1.85"
+        )
+        self.assertEqual(status, 1)
+        self.assertIn("the floor file", err)
+
+    def test_planning_without_the_floor_is_refused(self) -> None:
+        """The rule has no opt-out, so neither has the command line."""
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            msrv_plan.main(["--toolchains", "x"])
 
 
 if __name__ == "__main__":

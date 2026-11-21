@@ -1,0 +1,14 @@
+# The floor of every org crate's rust-version (#1850). lint:msrv holds
+# each crate's declared number to EXACTLY the higher of this floor and
+# the highest rust-version its normal and build dependencies declare;
+# msrv_plan.py reads this file from the canon tree and says why.
+#
+# The value is Debian stable's rustc package version, verbatim, and only
+# its major.minor is the floor. Renovate's custom manager in renovate.json
+# reads the marker below with the deb datasource on the `stable` suite, a
+# rolling alias, so the next Debian stable arrives as a pull request here.
+# That pull request reds every consumer still declaring the old floor:
+# the crates convert first, each in its own repository, as #1883 did.
+
+# renovate: debian-stable-rustc
+debian_stable_rustc = "1.85.1+dfsg1-1+deb13u1"

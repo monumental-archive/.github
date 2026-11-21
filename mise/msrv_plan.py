@@ -40,9 +40,55 @@ excluded there while promising an MSRV is therefore UNVERIFIED, which is a
 real hole and is printed as one on every run rather than left silent.
 #813 is what closes it: when the gate's compile surface widens to the
 publish path's, this check widens with it and no edit here is needed.
+
+WHAT THE NUMBER IS, AND NOT ONLY THAT IT IS KEPT (#1850). Every org crate
+picked a `rust-version`, none wrote down why, and none had a rule for when
+it moves: edtf promised 1.82, a version no supported distribution ships;
+release-lab promised 1.97 to crates whose dependencies needed 1.81; and a
+dependency raising the real minimum stayed green until a compile happened
+to catch it. So the number is derived, never chosen. A member's
+`rust-version` is EXACTLY the higher of:
+
+- THE FLOOR, the major.minor of the rustc Debian stable ships, read from
+  `mise/rust-floor.toml` in the canon tree. Debian stable because it is one
+  number a user can install and it moves on its own schedule, the way
+  Postgres majors leave at end of life (#1845); Renovate's deb datasource
+  follows the `stable` alias, so the next Debian release arrives as a pull
+  request against that file. Ubuntu's LTS ships below what the org's
+  dependencies already need, and its versioned `rustc-1.xx` packages make
+  "the Ubuntu rustc" ambiguous.
+- THE HIGHEST `rust-version` DECLARED by a non-member package the member
+  reaches through NORMAL AND BUILD edges of the locked graph — cargo's own
+  `resolve`, with the gate's features (CLIPPY_FEATURES) so an optional
+  dependency the gate compiles is reached and one it never enables is not.
+  Dev edges are not followed, as the compile below follows none: a consumer
+  never builds a crate's test harness. Edges are followed by package id,
+  so a renamed dependency counts as the package it is, and on every
+  target, because a platform-conditional dependency is still part of the
+  promise to the users of that platform. A member reached through another
+  member contributes that member's dependencies, never its own number.
+
+Exactly, not at most or at least: an inequality is a number someone still
+picks, and picking is how the numbers above happened. A crate's own code
+never raises it either. Code that needs a newer compiler waits for the
+floor or a dependency to move.
+
+A DEPENDENCY THAT NEEDS MORE THAN IT DECLARES IS NOT TAKEN. The derived
+number stays where the declarations put it, and the compile at that number
+fails: that red is the rule working, and `compile_failure` says so rather
+than letting the remedy read as "raise the promise". The pull request that
+brought the dependency stays red until it declares what it needs, the
+floor passes it, or another version is chosen. There is no opt-out and no
+per-crate override.
+
+MOVING A PROMISE CAN SURFACE NEW CLIPPY FINDINGS. clippy gates some lints
+on the declared `rust-version`: raising one past 1.83 turns on
+`missing_const_for_fn`, and edtf's conversion to 1.85 (#1883) had to make
+five functions `const fn`. Those are fixed in code, never suppressed.
 """
 
 import argparse
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -54,10 +100,24 @@ from decoded import (
     as_str,
     is_strings,
     load_json,
+    load_toml,
 )
 from typed_std import stdin_text
 
 NAME = "msrv-plan"
+
+# The floor file's one key, and the shape of a Debian rustc package version
+# it holds: an optional epoch, then the upstream major.minor the floor is.
+# `1.85.1+dfsg1-1+deb13u1` is Debian 13's; the revision and repack suffix
+# say nothing about which compiler it is.
+FLOOR_KEY = "debian_stable_rustc"
+DEBIAN_RUSTC = re.compile(r"(?:[0-9]+:)?([0-9]+)\.([0-9]+)\.[0-9]+(?:[+~-][^\s]*)?")
+
+# The kinds cargo metadata gives a dependency edge. `null` is a normal
+# dependency; a kind outside these is one cargo grew, and following or
+# dropping it unseen would change every derived number silently.
+FOLLOWED_KINDS = (None, "build")
+KNOWN_KINDS = (None, "build", "dev")
 
 # A `rust-version` is a bare partial version — major.minor or
 # major.minor.patch — and cargo rejects anything else in the manifest. A
@@ -69,19 +129,51 @@ VERSION_PARTS = (2, 3)
 class Args(argparse.Namespace):
     """The parsed command line, typed."""
 
-    toolchains: Path
+    toolchains: Path | None
+    floor: Path | None
     exclude: str
     pgrx: str
+    failed: list[str] | None
 
 
 @dataclass(frozen=True)
 class Package:
-    """One workspace member, as cargo metadata reports it."""
+    """One package, as cargo metadata reports it."""
 
     name: str
     version: str
-    # The declared minimum, "" where the member declares none.
+    # The declared minimum, "" where the package declares none.
     rust_version: str
+    # Cargo's package id, the key of its resolve graph.
+    id: str = ""
+
+    def order(self) -> tuple[str, str]:
+        """Sort key: by name, then version.
+
+        Returns:
+            The key.
+
+        """
+        return (self.name, self.version)
+
+
+@dataclass(frozen=True)
+class Floor:
+    """Debian stable's rustc, as the floor file records it."""
+
+    version: tuple[int, int, int]
+    # The package version verbatim, so a finding can name its source.
+    debian: str
+
+
+@dataclass(frozen=True)
+class Derived:
+    """The rust-version the rule derives for one member, and why."""
+
+    version: tuple[int, int, int]
+    # As it is to be written in Cargo.toml.
+    written: str
+    reason: str
 
 
 @dataclass(frozen=True)
@@ -102,10 +194,12 @@ def package(raw: object, where: str) -> Package:
     """
     obj = as_object(raw, where)
     promise = obj.get("rust_version")
+    package_id = obj.get("id")
     return Package(
         name=as_str(obj.get("name"), f"{where}.name"),
         version=as_str(obj.get("version"), f"{where}.version"),
         rust_version=as_str(promise, f"{where}.rust_version") if promise else "",
+        id=package_id if isinstance(package_id, str) else "",
     )
 
 
@@ -196,6 +290,186 @@ def members(metadata: object) -> list[Package]:
             continue
         if pkg.get("name") and pkg.get("version"):
             found.append(package(pkg, where))
+    return found
+
+
+def read_floor(text: str) -> Floor:
+    """Read Debian stable's rustc from the floor file.
+
+    Returns:
+        The floor: the package's major.minor, zero-padded, and the
+        package version as recorded.
+
+    Raises:
+        UndecodableError: the file is not TOML, lacks the key, or holds
+            a version that is not a Debian rustc package's.
+
+    """
+    debian = as_str(load_toml(text).get(FLOOR_KEY), FLOOR_KEY)
+    match = DEBIAN_RUSTC.fullmatch(debian)
+    if match is None:
+        msg = f'{FLOOR_KEY} = "{debian}" is not a Debian rustc package version'
+        raise UndecodableError(msg)
+    return Floor((int(match.group(1)), int(match.group(2)), 0), debian)
+
+
+def followed(dep: dict[str, object], where: str) -> bool:
+    """Say whether one resolve edge is part of the promise.
+
+    Returns:
+        True when any of its kinds is normal or build, on any target.
+
+    Raises:
+        UndecodableError: the edge carries no kinds, or one cargo did not
+            have when this was written.
+
+    """
+    kinds = as_array(dep.get("dep_kinds"), f"{where}.dep_kinds")
+    if not kinds:
+        msg = f"{where}.dep_kinds is empty"
+        raise UndecodableError(msg)
+    found = False
+    for index, raw in enumerate(kinds):
+        kind = as_object(raw, f"{where}.dep_kinds[{index}]").get("kind")
+        if kind not in KNOWN_KINDS:
+            msg = f"{where}.dep_kinds[{index}].kind {kind!r} is not one this reads"
+            raise UndecodableError(msg)
+        found = found or kind in FOLLOWED_KINDS
+    return found
+
+
+def graph(metadata: object) -> tuple[dict[str, Package], dict[str, list[str]]]:
+    """Read every package and the normal and build edges between them.
+
+    Returns:
+        Each package by id, and each package id mapped to the ids its
+        normal and build dependencies resolve to.
+
+    Raises:
+        UndecodableError: the document is not that shape, naming where —
+            including a document with no resolve graph, which is what
+            `cargo metadata --no-deps` gives.
+
+    """
+    doc = as_object(metadata, "cargo metadata")
+    packages: dict[str, Package] = {}
+    for index, raw in enumerate(as_array(doc.get("packages") or [], "packages")):
+        pkg = package(raw, f"packages[{index}]")
+        packages[pkg.id] = pkg
+    resolve = doc.get("resolve")
+    if resolve is None:
+        msg = "no resolve graph: the dependencies were not read (--no-deps?)"
+        raise UndecodableError(msg)
+    edges: dict[str, list[str]] = {}
+    nodes = as_array(as_object(resolve, "resolve").get("nodes"), "resolve.nodes")
+    for index, raw in enumerate(nodes):
+        where = f"resolve.nodes[{index}]"
+        node = as_object(raw, where)
+        out = edges.setdefault(as_str(node.get("id"), f"{where}.id"), [])
+        for at, dep_raw in enumerate(as_array(node.get("deps"), f"{where}.deps")):
+            dep = as_object(dep_raw, f"{where}.deps[{at}]")
+            if followed(dep, f"{where}.deps[{at}]"):
+                out.append(as_str(dep.get("pkg"), f"{where}.deps[{at}].pkg"))
+    return packages, edges
+
+
+def reached(start: str, edges: dict[str, list[str]]) -> set[str]:
+    """Walk the normal and build edges out of one package.
+
+    Returns:
+        Every package id reachable from start, start itself excluded.
+
+    """
+    seen: set[str] = set()
+    todo = [start]
+    while todo:
+        for dep in edges.get(todo.pop(), []):
+            if dep not in seen and dep != start:
+                seen.add(dep)
+                todo.append(dep)
+    return seen
+
+
+def derive(
+    start: str,
+    packages: dict[str, Package],
+    edges: dict[str, list[str]],
+    floor: Floor,
+) -> Derived:
+    """Derive one member's rust-version from the floor and its graph.
+
+    `packages` holds the non-member packages only: a member reached
+    through another contributes its dependencies, never its own number.
+
+    Returns:
+        The higher of the floor and the highest rust-version a non-member
+        package reached through normal and build edges declares; the
+        floor where they tie, since it holds the number regardless.
+
+    Raises:
+        UndecodableError: a reached package declares a rust-version that
+            is not a bare version, which cargo would not have accepted.
+
+    """
+    best: Package | None = None
+    best_version = floor.version
+    # Walked in name order so that, of two dependencies declaring the same
+    # highest number, the one named is the same on every run.
+    for pkg in sorted(
+        (packages[dep] for dep in reached(start, edges) if dep in packages),
+        key=Package.order,
+    ):
+        if not pkg.rust_version:
+            continue
+        version = parse_version(pkg.rust_version)
+        if version is None:
+            msg = (
+                f"{pkg.name} {pkg.version} declares rust-version "
+                f'"{pkg.rust_version}", which is not a bare version'
+            )
+            raise UndecodableError(msg)
+        # Strictly above: where a dependency ties the floor, the floor
+        # holds the number regardless of it.
+        if version > best_version:
+            best, best_version = pkg, version
+    if best is None:
+        return Derived(
+            floor.version,
+            f"{floor.version[0]}.{floor.version[1]}",
+            f"the floor: Debian stable's rustc is {floor.debian}",
+        )
+    return Derived(
+        best_version, best.rust_version, f"`{best.name} {best.version}` requires it"
+    )
+
+
+def derivations(
+    metadata: object,
+    workspace: list[Package],
+    surface: list[Package],
+    floor: Floor,
+) -> list[str]:
+    """Compare each member on the compile surface with the derived number.
+
+    Returns:
+        One line per member of `surface` whose declared rust-version
+        differs from the one the rule derives, naming both and why. An
+        UndecodableError from the graph or a reached declaration passes
+        through.
+
+    """
+    packages, edges = graph(metadata)
+    ours = {pkg.id for pkg in workspace}
+    outside = {i: p for i, p in packages.items() if i not in ours}
+    found: list[str] = []
+    for pkg in surface:
+        want = derive(pkg.id, outside, edges, floor)
+        if parse_version(pkg.rust_version) != want.version:
+            found.append(
+                f"{pkg.name}@{pkg.version} declares rust-version "
+                f"{pkg.rust_version}; the rule derives {want.written}: "
+                f"{want.reason}",
+            )
     return found
 
 
@@ -309,12 +583,57 @@ def features(declared: str) -> dict[str, str]:
     return chosen
 
 
-def read_inputs(listing_file: Path) -> tuple[list[Package], list[Toolchain]] | None:
+def rule_remedy() -> list[str]:
+    """Say how a promise that differs from the rule is mended.
+
+    Returns:
+        The lines after the findings, already indented for the caller.
+
+    """
+    return [
+        "  set each rust-version in Cargo.toml to the number derived, and the",
+        "  MSRV pin in mise.toml to match it",
+        "  the number is derived, never chosen: the higher of Debian stable's",
+        "  rustc (mise/rust-floor.toml in the canon) and the highest",
+        "  rust-version the crate's normal and build dependencies declare;",
+        "  a crate's own code never raises it",
+        "  raising it past 1.83 turns on clippy's MSRV-gated lints",
+        "  (missing_const_for_fn): fix what they find in code, never suppress",
+    ]
+
+
+def compile_failure(toolchain: str, specs: str) -> list[str]:
+    """Say what a red compile at the derived number means.
+
+    The check above has already held each promise to the derived number,
+    so the toolchain that failed IS that number. Raising the promise is
+    the remedy a reader reaches for, and the one the rule refuses.
+
+    Returns:
+        The lines of the finding.
+
+    """
+    return [
+        f"{NAME}: {specs} failed to compile at {toolchain},",
+        "  the rust-version the rule derives",
+        "  the crate may not raise it: the number is the higher of Debian",
+        "  stable's rustc and the highest rust-version its normal and build",
+        "  dependencies declare, and its own code never moves it",
+        "  a dependency that fails to compile here declares less than it",
+        "  needs, and is held back: keep the version it replaced, or choose",
+        "  another, until it declares what it needs or the floor passes it",
+    ]
+
+
+def read_inputs(
+    listing_file: Path,
+) -> tuple[object, list[Package], list[Toolchain]] | None:
     """Decode cargo metadata on stdin and `mise ls rust` from its file.
 
     Returns:
-        The workspace's members and the toolchain entries, or None
-        having said on stderr which document was refused and why.
+        The metadata document, the workspace's members and the toolchain
+        entries, or None having said on stderr which document was refused
+        and why.
 
     """
     try:
@@ -333,10 +652,44 @@ def read_inputs(listing_file: Path) -> tuple[list[Package], list[Toolchain]] | N
         print(f"{NAME}: cargo metadata: {bad}", file=sys.stderr)
         return None
     try:
-        return workspace, toolchains(listing)
+        return metadata, workspace, toolchains(listing)
     except UndecodableError as bad:
         print(f"{NAME}: `mise ls rust`: {bad}", file=sys.stderr)
         return None
+
+
+def rule(
+    metadata: object,
+    workspace: list[Package],
+    exclude: set[str],
+    floor_file: Path,
+) -> bool:
+    """Hold every promise on the compile surface to the derived number.
+
+    Returns:
+        True when every one matches; False having said on stderr which
+        do not, or which input could not be read.
+
+    """
+    surface = [p for p in workspace if p.rust_version and p.name not in exclude]
+    try:
+        floor = read_floor(floor_file.read_text(encoding="utf-8"))
+    except (OSError, UndecodableError) as bad:
+        print(f"{NAME}: the floor file {floor_file}: {bad}", file=sys.stderr)
+        return False
+    try:
+        found = derivations(metadata, workspace, surface, floor)
+    except UndecodableError as bad:
+        print(f"{NAME}: cargo metadata: {bad}", file=sys.stderr)
+        return False
+    if found:
+        print(
+            f"{NAME}: a declared minimum differs from the one the rule derives",
+            file=sys.stderr,
+        )
+        for line in [*(f"  {f}" for f in found), *rule_remedy()]:
+            print(line, file=sys.stderr)
+    return not found
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -347,28 +700,50 @@ def main(argv: list[str] | None = None) -> int:
 
     """
     parser = argparse.ArgumentParser(description="the org's MSRV verification plan")
-    parser.add_argument("--toolchains", type=Path, required=True)
+    parser.add_argument("--toolchains", type=Path)
+    parser.add_argument("--floor", type=Path)
     parser.add_argument("--exclude", default="")
     parser.add_argument("--pgrx", default="")
+    parser.add_argument("--failed", nargs=2, metavar=("TOOLCHAIN", "SPECS"))
     args = parser.parse_args(argv, namespace=Args())
+
+    if args.failed:
+        for line in compile_failure(*args.failed):
+            print(line, file=sys.stderr)
+        return 1
+    if args.toolchains is None or args.floor is None:
+        parser.error("--toolchains and --floor are required to plan")
 
     inputs = read_inputs(args.toolchains)
     if inputs is None:
         return 1
-    workspace, pinned_toolchains = inputs
+    metadata, workspace, pinned_toolchains = inputs
 
-    groups, unreachable, unreadable = promises(
-        workspace,
-        set(args.exclude.split()),
-    )
+    exclude = set(args.exclude.split())
+    groups, unreachable, unreadable = promises(workspace, exclude)
     if unreadable:
         print(f"{NAME}: a declared minimum this check cannot compare", file=sys.stderr)
         for line in unreadable:
             print(f"  {line}", file=sys.stderr)
         return 1
+    if not rule(metadata, workspace, exclude, args.floor):
+        return 1
+    return plan(groups, unreachable, pinned_toolchains, features(args.pgrx))
 
+
+def plan(
+    groups: dict[tuple[int, int, int], list[str]],
+    unreachable: list[str],
+    pinned_toolchains: list[Toolchain],
+    extensions: dict[str, str],
+) -> int:
+    """Emit one check per declared minimum, or the pins that disagree.
+
+    Returns:
+        A process exit status.
+
+    """
     pinned, absent = pins(pinned_toolchains)
-    extensions = features(args.pgrx)
     records = [f"note\t{line}" for line in unreachable]
     findings: list[str] = []
     for version, specs in sorted(groups.items()):
