@@ -85,6 +85,16 @@ if [[ $1 == api ]]; then
   exit 0
 fi
 if [[ $1 == pr ]]; then
+  # No checkout in the propose job: a call naming no repository is the
+  # one gh refuses there ("not a git repository").
+  repo=""
+  for ((i = 1; i < $#; i++)); do
+    [[ ${!i} != --repo ]] || { j=$((i + 1)); repo=${!j}; }
+  done
+  if [[ ${repo} != "${GITHUB_REPOSITORY}" ]]; then
+    echo "failed to run git: fatal: not a git repository" >&2
+    exit 1
+  fi
   log pr "$2"
   if [[ $2 == list ]]; then cat "${STATE}/open" 2> /dev/null; fi
   while [[ $# -gt 0 ]]; do
@@ -332,6 +342,35 @@ class Proposal(Forge):
         self.assertNotIn(f"POST repos/{REPO}/git/refs", self.calls())
         same(self, ["pr list", "pr edit"], self.calls()[-2:])
         self.assertIn("updated PR #17", result.stdout)
+
+
+class PullRequestCalls(Forge):
+    """The job has no checkout, so each `gh pr` call names the repository."""
+
+    def test_a_pr_call_without_the_repository_is_refused_by_the_stub(self) -> None:
+        """The stub answers as gh does outside a git repository."""
+        result = subprocess.run(
+            [str(self.tmp / "stubs" / "gh"), "pr", "list", "--head", "fuzz-corpus"],
+            env=self.env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(1, result.returncode, result.stdout)
+        self.assertEqual(
+            "failed to run git: fatal: not a git repository\n", result.stderr
+        )
+
+    def test_every_pr_call_of_a_proposal_names_the_repository(self) -> None:
+        """Opened, then updated: both runs pass the stub's --repo check."""
+        self.plant("fuzz/corpus/parse_marker/abc")
+        opened = self.run_script("propose")
+        self.assertEqual(0, opened.returncode, opened.stderr)
+        same(self, ["pr list", "pr create"], self.calls()[-2:])
+        (self.state / "open").write_text("17\n", encoding="utf-8")
+        updated = self.run_script("propose")
+        self.assertEqual(0, updated.returncode, updated.stderr)
+        same(self, ["pr list", "pr edit"], self.calls()[-2:])
 
 
 class SignedCommit(Forge):

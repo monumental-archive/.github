@@ -182,12 +182,16 @@ propose() {
     printf '%s\n\n' "${SUMMARY:-}"
     printf '%s\n' "A crash- file keeps the gate red until its fix is pushed here."
   )
-  existing=$(gh pr list --head "${branch}" --state open --json number --jq '.[0].number // empty')
+  # No checkout here, so no git remote for gh to read the repository
+  # from: every pull-request call names it.
+  existing=$(gh pr list --repo "${GITHUB_REPOSITORY}" --head "${branch}" --state open \
+    --json number --jq '.[0].number // empty')
   if [[ -n ${existing} ]]; then
-    gh pr edit "${existing}" --title "${title}" --body "${body}"
+    gh pr edit "${existing}" --repo "${GITHUB_REPOSITORY}" --title "${title}" --body "${body}"
     echo "updated PR #${existing}"
   else
-    gh pr create --head "${branch}" --base "${DEFAULT_BRANCH}" --title "${title}" --body "${body}"
+    gh pr create --repo "${GITHUB_REPOSITORY}" --head "${branch}" --base "${DEFAULT_BRANCH}" \
+      --title "${title}" --body "${body}"
     echo "opened the fuzz corpus PR"
   fi
 }
