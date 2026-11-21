@@ -87,7 +87,7 @@ ask_old=""
 # `if` leg before judging, a `case` leg as what it switches on. A
 # `case` leg whose evidence is the status itself passes the status.
 #
-# The audit runs weekly (audit.yml, Monday 07:00), so `Age` beyond a
+# The audit runs weekly (badges.yml, Monday 07:00), so `Age` beyond a
 # week is older than the run before this one.
 audit_week=604800
 ask_headers=$(mktemp)

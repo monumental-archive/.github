@@ -7,6 +7,11 @@
 # than pinning a release of itself (the gate.yml and self-mutants.yml
 # convention). Named `self-records.yml` because `repo-records.yml` is
 # the callee.
+#
+# And one job no other repository has: `citations`, which resolves
+# every version and run cited in this repository's own docs/. Its
+# subject is this repository's records, so it runs here rather than in
+# the org-side workflows it came from (#1884).
 ---
 name: records
 
@@ -27,4 +32,31 @@ jobs:
     permissions:
       contents: read # this repository's contents, read-only
     uses: ./.github/workflows/repo-records.yml # zizmor: ignore[self-repository]
+
+  citations:
+    name: docs citations resolve
+    runs-on: ubuntu-26.04
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/mise/config.toml
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
+        with:
+          version: 2026.11.8
+          cache: false
+
+      - name: Resolve every version and run citation in docs/
+        # #349 finding 2: the docs cited a tag that never existed and it
+        # survived two audits — a citation is a claim about the record,
+        # so it gets checked like one.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: mise run audit:citations
 ...

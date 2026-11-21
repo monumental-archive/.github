@@ -32,7 +32,7 @@ gate — the full set, with meanings, is the `ORG_SOURCE_` table in
 
 - Ruleset edits are possible only in the GitHub UI by an org owner;
   every edit is timestamped by GitHub and the Monday audit
-  (`audit.yml`, repo-settings drift) compares live settings against
+  (`org-settings.yml`, repo-settings drift) compares live settings against
   the recorded baseline, so silent drift surfaces on a cadence.
 - A single maintainer *can* tamper with controls — there is one human
   (see Administration). The design compensates with observability,

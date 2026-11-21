@@ -113,7 +113,8 @@ the publish path's own advisory checks.
 
 ## Done when
 
-The canon's \`audit / advisory blast radius\` no longer names
+The canon's \`slsa\` leg \`no published SBOM carries an undecided
+advisory\` no longer names
 \`${supported}\`.
 EOF
       )

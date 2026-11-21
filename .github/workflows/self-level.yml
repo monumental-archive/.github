@@ -18,7 +18,7 @@
 # it must not be dispatched until the other three have repointed their
 # shields at their own branches.
 ---
-name: self-level
+name: slsa-levels
 
 # zizmor's `dangerous-triggers` audit fires on the `workflow_run`
 # below, at high confidence, and it is right to by default: that

@@ -60,7 +60,7 @@ name: base-attest
       # approval set the moment this workflow merges.
       - .github/workflows/base-attest.yml
   schedule:
-    # Mondays 05:20 UTC, before audit.yml's sweep reads the results.
+    # Mondays 05:20 UTC, before slsa.yml's first group reads the results.
     - cron: 20 5 * * 1
   workflow_dispatch: {}
 permissions: {}

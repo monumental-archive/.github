@@ -47,7 +47,7 @@
 # and the comparison included (#1379). This workflow fetches the
 # published branches and reads their dates.
 ---
-name: level-assert
+name: slsa-level-board
 
 "on":
   schedule:
@@ -79,7 +79,7 @@ jobs:
     # claims` failed on main in three repositories — it reads the
     # ruleset through a PAT in the same bucket. An App installation
     # has a budget of its own. The cron keeps 05:30 so that budget's
-    # hour is over before audit.yml's first group starts at 07:00.
+    # hour is over before the canon's first Monday group starts at 07:00.
     # Environment-scoped like the audit legs: the key is drawable only
     # by a job that declares the environment.
     environment: audit

@@ -72,13 +72,17 @@ WORKFLOWS = CANON / ".github" / "workflows"
 # installs. Everything else uncached is on the release, publish or
 # continuous path and is held here.
 OUT_OF_SCOPE = {
-    "audit.yml",
+    "badges.yml",
+    "org-settings.yml",
+    "pins-and-belt.yml",
+    "slsa.yml",
     "repo-deep-tests.yml",
     "repo-dependencies.yml",
     "repo-own-audits.yml",
     "repo-public-api.yml",
     "repo-records.yml",
     "repo-mutants.yml",
+    "self-records.yml",
     "level.yml",
     "level-assert.yml",
 }
@@ -2323,7 +2327,7 @@ class VexAttestToken(unittest.TestCase):
     def test_the_mint_mirrors_the_audit_walks(self) -> None:
         """Same pin, same client and key, owner scope as the audit's mint."""
         _, mint = mint_step("vex-attest.yml", "plan")
-        _, audit = mint_step("audit.yml", "blast-radius")
+        _, audit = mint_step("slsa.yml", "blast-radius")
         self.assertEqual(field(audit, "uses"), field(mint, "uses"))
         keys = ("client-id", "private-key", "owner")
         audits: dict[str, str | None] = {k: inputs(audit).get(k) for k in keys}

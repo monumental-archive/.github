@@ -266,7 +266,7 @@ Monday walk. Activation is per repo, lab first:
    token before wiring it in — `gh api
    repos/monumental-archive/<repo>/rulesets/<tag-ruleset-id>` must
    return `bypass_actors` alongside the rules. The environment scoping is the
-   `audit.yml` `baseline-drift` pattern: only the claims job — which
+   `org-settings.yml` `baseline-drift` pattern: only the claims job — which
    holds no `id-token` and no `contents: write` — is ever issued the
    secret, so the token and the signing identity never share a job.
 2. Copy the template over the repo's inert stub — same path, new

@@ -1,0 +1,65 @@
+# Badge truth across the org — scheduled, network-touching, and named
+# for what a red means: a shield says something its source no longer
+# says (#1884). Failures page via the Actions UI and notifications
+# rather than blocking merges.
+#
+# Split out of the workflow once named `audit` by subject (#1884); which
+# legs belong on the canon's side rather than in a repo-*.yml subject
+# workflow is stated once, in slsa.yml.
+---
+name: badges
+
+"on":
+  schedule:
+    # Mondays 07:00 UTC, the first hour of the canon's Monday API
+    # budget (#1169), beside slsa.yml's first group. Every leg here was
+    # a first-hour leg of the one workflow these were split from
+    # (#1884), and none moved: the second hour is slsa.yml's source
+    # walks alone.
+    - cron: 0 7 * * 1
+  workflow_dispatch: {}
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  badges:
+    name: every badge says what its source says
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read # README and .badge-states reads across org repos
+      # The anonymous REST endpoint 401s even for public containers
+      # (#316 addendum C, measured), so the existence check needs auth.
+      packages: read # the ghcr leg asks whether the named package exists
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/mise/config.toml
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
+        with:
+          version: 2026.11.8
+          cache: false
+
+      - name: Re-check every shield against its source of truth
+        env:
+          # README reads across org repos; the default token reads
+          # public content plus (packages: read) the container-package
+          # existence checks. Red means a shield asserting something
+          # its issuer no longer says (#215) — a score below its floor,
+          # a lost baseline, a non-compliant REUSE status, a package or
+          # workflow shield over nothing, a fair-software dot the
+          # evidence contradicts, a badge block not machine-rendered,
+          # or a shield nothing here checks (#316 finding 5).
+          GH_TOKEN: ${{ github.token }}
+        run: mise run audit:badges
+...

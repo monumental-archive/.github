@@ -251,7 +251,7 @@ class Green(unittest.TestCase):
         """Only a caller of ci.yml owes the group."""
         other = planted(
             "uses: monumental-archive/.github/.github/workflows/ci.yml@",
-            "uses: monumental-archive/.github/.github/workflows/audit.yml@",
+            "uses: monumental-archive/.github/.github/workflows/slsa.yml@",
         )
         self.assert_ok(other.replace(GROUP, OLD_GROUP).replace(CANCEL, OLD_CANCEL))
 
@@ -395,7 +395,7 @@ class Fix(unittest.TestCase):
         """Only a caller of ci.yml is the fixer's."""
         other = planted(
             "uses: monumental-archive/.github/.github/workflows/ci.yml@",
-            "uses: monumental-archive/.github/.github/workflows/audit.yml@",
+            "uses: monumental-archive/.github/.github/workflows/slsa.yml@",
         ).replace(GROUP, OLD_GROUP)
         done, after = fixed(other)
         self.assertEqual(done.returncode, 0, done.stderr)
