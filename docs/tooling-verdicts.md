@@ -35,7 +35,7 @@ honestly blocked on.
 | plpgsql_check (the repository's test stack, never a published image; the belt pins nothing) | The `plpgsql` and `plpgsql-branches` legs of the same ratchet (#1547): `mise/plpgsql_coverage.py` reads the profiler's statement and branch coverage in the suite's teardown, through the repository's own `psql` |
 | Hypothesis (`pipx:` backend via aqua-backed uv) | Python property testing (#1332): every tracked `prop_*.py`, fixed seed in the gate (`test:python-properties`), random seed and wider bounds on the Monday cron (`audit:python-properties`) |
 | fast-check (the repository's, not the belt's) | TypeScript property testing (#1549): every tracked `*.prop.test.{ts,tsx,mts,cts}` under the repository's own vitest, fixed seed in the gate (`test:typescript-properties`), random seed and 10,000 runs on the Monday cron (`audit:typescript-properties`); `lint:typescript-properties` refuses an import outside a property file and a restated seed; the belt pins neither tool |
-| cargo-fuzz (`cargo:` backend) | Fuzz targets: build proof in the gate (`lint:fuzz-build`, stable, no sanitizer), bounded runs under AddressSanitizer on the cron (`audit:fuzz`, repo-declared nightly) |
+| cargo-fuzz (`cargo:` backend) | Fuzz targets: in the gate (`lint:fuzz-build`, stable, no sanitizer) a build proof, a committed corpus required per target, and that corpus replayed once with no mutation (#1889); bounded runs under AddressSanitizer on the cron (`audit:fuzz`, repo-declared nightly), starting from the corpus the gate holds |
 | reuse (`pipx:` backend via aqua-backed uv) | REUSE-spec compliance in the gate (`lint:reuse`), pre-registration |
 | uv (`aqua:astral-sh/uv`) | The installer behind every `pipx:` belt tool; carries the org's release-age floor into Python |
 | jq (`aqua:jqlang/jq`) | JSON on the command line for eleven belt tasks, one of them in the gate |
@@ -3375,9 +3375,14 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
   was running the tool below its default rather than below its maximum —
   a harder thing to justify. What resolves it is splitting by task class
   rather than by tool: `lint:fuzz-build` stays in the gate, on stable,
-  `-s none`, proving only that targets still COMPILE — a compile check
+  `-s none`, proving that targets still COMPILE — a compile check
   needs no sanitizer — while the sanitized run moves entirely to
-  `audit:fuzz` on the Monday cron, where fuzzing already belonged. The
+  `audit:fuzz` on the Monday cron, where fuzzing already belonged.
+  (Since #1889 the gate also holds the corpus the cron starts from:
+  every target needs a tracked file under `fuzz/corpus/<target>/`, and
+  `lint:fuzz-build` replays each once, `-runs=0`, from a scratch copy.
+  The contract had been a sentence in `audit:fuzz`'s comment, and six
+  of seven Rust targets were fuzzing from an empty corpus, green.) The
   gate therefore never sees a nightly, and the second toolchain lands
   only in repos that actually fuzz, declared in their own mise.toml.
   Measured before adopting: mise holds and locks both toolchains
