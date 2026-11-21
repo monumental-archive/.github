@@ -496,12 +496,15 @@ def every(root: Path) -> dict[str, bool]:
 
 
 # edtf's shape (run 44825163551): a Rust workspace with a pgrx crate,
-# its locks, workflows and records, and no Python, TypeScript or Go.
+# its fuzz crate, locks, workflows and records, and no Python,
+# TypeScript or Go.
 EDTF = {
     "Cargo.toml": "[workspace]\n",
     "Cargo.lock": "",
     "crates/edtf/Cargo.toml": "[package]\n",
     "crates/edtf-pg/Cargo.toml": "[package]\n",
+    "fuzz/Cargo.toml": "[package]\n",
+    "fuzz/Cargo.lock": "",
     "deny.toml": "",
     "mise.toml": "",
     "mise.lock": "",
@@ -546,6 +549,7 @@ class Helper(unittest.TestCase):
                 self.assertFalse(got[job])
         for job in (
             "deny",
+            "fuzz",
             "semver",
             "coverage-branches",
             "actions",
@@ -555,7 +559,6 @@ class Helper(unittest.TestCase):
         ):
             with self.subTest(job=job):
                 self.assertTrue(got[job])
-        self.assertFalse(got["fuzz"])
 
     def test_a_go_tree(self) -> None:
         """go.mod brings the Go jobs and fuzz, and nothing Rust."""
