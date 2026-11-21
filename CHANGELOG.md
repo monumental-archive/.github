@@ -10,6 +10,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.73.0](https://github.com/monumental-archive/.github/compare/v1.72.0...v1.73.0) - 2026-11-21
+
+### Added
+
+- require mutation and coverage adoption files in the gate ([#1921](https://github.com/monumental-archive/.github/pull/1921))
+- hold every fuzz target's corpus depth in the coverage floor ([#1922](https://github.com/monumental-archive/.github/pull/1922))
+- propose what the scheduled fuzz search finds ([#1928](https://github.com/monumental-archive/.github/pull/1928))
+- run the deep tests nightly, one runner per fuzz target ([#1929](https://github.com/monumental-archive/.github/pull/1929))
+
+### Fixed
+
+- hold every member to the derived rust-version ([#1917](https://github.com/monumental-archive/.github/pull/1917))
+- update first-party canon ([#1918](https://github.com/monumental-archive/.github/pull/1918))
+- read a python helper through its syntax tree alone ([#1919](https://github.com/monumental-archive/.github/pull/1919))
+
 ## [1.72.0](https://github.com/monumental-archive/.github/compare/v1.71.1...v1.72.0) - 2026-11-21
 
 ### Added
