@@ -983,14 +983,12 @@ class RuleTest(unittest.TestCase):
         )
         self.assertEqual((status, out), (1, ""))
         said = [line for line in err.splitlines() if "declares no" in line]
-        self.assertEqual(
-            said,
-            [
-                f"  {name}@1.3.1 declares no rust-version; the rule derives 1.85: "
-                f"the floor: Debian stable's rustc is {TRIXIE}"
-                for name in ("stele-core", "stele-cli")
-            ],
-        )
+        want: list[str] = [
+            f"  {name}@1.3.1 declares no rust-version; the rule derives 1.85: "
+            f"the floor: Debian stable's rustc is {TRIXIE}"
+            for name in ("stele-core", "stele-cli")
+        ]
+        self.assertEqual(said, want)
 
     def test_a_member_reached_through_another_lends_no_number(self) -> None:
         """lab-cli reaches lab-core; only lab-core's dependencies count.
