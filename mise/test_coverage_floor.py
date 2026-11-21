@@ -1290,7 +1290,11 @@ class TestOwners(unittest.TestCase):
                 self.assertEqual(want, run(cf.planned, tree.path, "plan", majors))
 
     def test_one_owner_per_leg_family(self) -> None:
-        """`pgrx-pgNN` strictly is the pgrx job; every other leg the gate's."""
+        """`pgrx-pgNN` strictly is the pgrx job; every other leg the gate's.
+
+        Every `fuzz-*` leg among them (#1896): coverage:check in the gate
+        job measures it.
+        """
         for leg, job in (
             ("rust", "gate"),
             ("go", "gate"),
@@ -1305,6 +1309,8 @@ class TestOwners(unittest.TestCase):
             ("pgrx-15", "gate"),
             ("pgrx-pg15-branches", "gate"),
             ("xpgrx-pg15", "gate"),
+            ("fuzz-parse-marker", "gate"),
+            ("fuzz-internal-policy-load", "gate"),
         ):
             with self.subTest(leg):
                 self.assertEqual(job, cf.owner(leg))
@@ -1520,6 +1526,157 @@ class TestThePlanFeedsTheHelper(unittest.TestCase):
         verbatim: list[str] = ["${majors}"] * len(expansions)
         self.assertEqual(verbatim, expansions)
         self.assertIn('planned \\\n  --label plan --majors-json "${majors}"\n', body)
+
+
+def fuzz_line(leg: str, floor: str, measured: str) -> str:
+    """Render a fuzz target's section by hand (#1896).
+
+    Returns:
+        The record line and the floor line.
+
+    """
+    return f"# {leg} measured: {measured}\n{leg} {floor}\n"
+
+
+MARKER = "fuzz-parse-marker"
+NO_LINES: dict[str, tuple[Decimal, Decimal]] = {}
+LOAD = "fuzz-internal-policy-load"
+FUZZ_NEEDS = REMEDY.format(needs=cf.NEEDS["fuzz"], leg=MARKER)
+
+
+class TestFuzzLegs(unittest.TestCase):
+    """Each fuzz target is a floor line of its own, held in the gate (#1896)."""
+
+    def test_render_round_trips_every_target(self) -> None:
+        """Each target's line parses back to the derivation it states."""
+        text = cf.render(
+            Decimal("93.0"),
+            "coverage:adopt",
+            {MARKER: Decimal(100), LOAD: Decimal("43.69")},
+            ["go"],
+        )
+        parsed, problems = clean(text)
+        self.assertEqual(problems, NO_PROBLEMS)
+        lines: dict[str, tuple[Decimal, Decimal]] = {
+            LOAD: (Decimal("41.6"), Decimal("43.6")),
+            MARKER: (Decimal(90), Decimal("100.0")),
+        }
+        self.assertEqual(lines, separate(parsed))
+        self.assertIn(fuzz_line(LOAD, "41.6", "43.6"), text)
+
+    def test_a_target_is_not_in_the_minimum(self) -> None:
+        """A shallow corpus does not drag the main floor down."""
+        with Tree(None) as tree:
+            status, out, err = run(
+                cf.derive,
+                tree.path,
+                f"go 93.0\n{LOAD} 43.6\n",
+                "coverage:adopt",
+                adopt=True,
+            )
+            parsed, _ = clean(tree.written())
+        self.assertEqual((0, ""), (status, err))
+        self.assertEqual(
+            f"coverage-floor: adopted {tree.path} at 90 (measured 93.0),"
+            f" {LOAD} 41.6 (measured 43.6)\n",
+            out,
+        )
+        self.assertEqual((Decimal(90), ("go",)), (parsed.floor, parsed.legs))
+
+    def test_a_hand_edited_line_is_drift(self) -> None:
+        """A line typed over its record is refused, never repaired."""
+        parsed, problems = cf.parse(record("83.4") + fuzz_line(MARKER, "50", "43.6"))
+        self.assertIsNone(parsed)
+        refused: list[str] = [
+            (
+                f"{MARKER} floor 50 disagrees with its own record: measured"
+                " 43.6 under band 2 and the cap 90 derives 41.6. Refused as"
+                " drift and never repaired — restore the derivation, or"
+                " delete both lines and re-derive with `mise run"
+                " coverage:adopt`"
+            )
+        ]
+        self.assertEqual(refused, problems)
+
+    def test_a_target_with_no_line_is_red_naming_it(self) -> None:
+        """Measured and unrecorded: red, the remedy coverage:adopt."""
+        with Tree(record("83.4")) as tree:
+            status, out, err = run(
+                cf.hold, tree.path, "lbl", f"rust 86.0\n{MARKER} 100\n", GATE
+            )
+        self.assertEqual(1, status)
+        self.assertEqual("lbl: rust leg holds the floor 83.4 (86.0%)\n", out)
+        self.assertEqual(
+            f"lbl: {MARKER}: the fuzz target has no line in {tree.path} —"
+            " every fuzz target is a leg of the floor (#1896): run `mise run"
+            f" coverage:adopt` and commit {tree.path}\n",
+            err,
+        )
+
+    def test_a_target_is_held_to_its_own_line(self) -> None:
+        """Above the main floor is not enough: below its own line is red."""
+        text = record("83.4") + fuzz_line(MARKER, "88", "90.0")
+        for name, figure, want in (
+            (
+                "holds",
+                "90.0",
+                (0, f"lbl: {MARKER} leg holds its floor 88 (90.0%)\n", ""),
+            ),
+            (
+                "below",
+                "87.9",
+                (1, "", f"lbl: {MARKER}: 87.9% is below its derived floor 88%\n"),
+            ),
+        ):
+            with self.subTest(name), Tree(text) as tree:
+                self.assertEqual(
+                    want, run(cf.hold, tree.path, "lbl", f"{MARKER} {figure}\n", GATE)
+                )
+
+    def test_a_recorded_target_the_gate_measures_none_of_is_red(self) -> None:
+        """The gate job owns the line; a pgrx job does not judge it."""
+        text = record("83.4") + fuzz_line(MARKER, "88", "90.0")
+        with Tree(text) as tree:
+            gate = run(cf.hold, tree.path, "lbl", "", GATE)
+            pgrx = run(cf.hold, tree.path, "lbl", "", PGRX15)
+        self.assertEqual(
+            (
+                1,
+                "",
+                f"lbl: the floor was derived with {MARKER} and this run measured"
+                " none\n" + FUZZ_NEEDS,
+            ),
+            gate,
+        )
+        self.assertEqual((0, "", ""), pgrx)
+
+    def test_a_vanished_target_leaves_only_through_dropped(self) -> None:
+        """A derivation without the target refuses; with `dropped:` the line goes."""
+        text = record("83.4") + fuzz_line(MARKER, "88", "90.0")
+        with Tree(text) as tree:
+            status, _, err = run(cf.derive, tree.path, "rust 86.0\n", "v1", adopt=False)
+        self.assertEqual(1, status)
+        self.assertEqual(
+            f"coverage-floor: the floor records {MARKER} and this derivation"
+            " measured none. A leg leaves the record only on purpose: restore"
+            f" what it measures, or add `# dropped: {MARKER} <reason>` to"
+            f" {tree.path}\n",
+            err,
+        )
+        why = f"# dropped: {MARKER} target removed\n"
+        dropped = text.replace("83.4\n", f"{why}83.4\n", 1)
+        with Tree(dropped) as tree:
+            status, _, err = run(cf.derive, tree.path, "rust 86.0\n", "v1", adopt=False)
+            parsed, _ = clean(tree.written())
+        self.assertEqual((0, ""), (status, err))
+        self.assertEqual(NO_LINES, separate(parsed))
+
+    def test_the_legs_record_never_names_a_target(self) -> None:
+        """A target keeps its own line; `legs:` naming one is refused."""
+        parsed, problems = cf.parse(legs_record("83.4", f"go {MARKER}"))
+        self.assertIsNone(parsed)
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("is not a list of distinct main-floor legs", problems[0])
 
 
 if __name__ == "__main__":

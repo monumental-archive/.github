@@ -21,9 +21,16 @@
 # libFuzzer writes a crashing input even under -runs=0; libFuzzer takes the
 # last value given, so the replay names the scratch directory after it.
 #
+# The copy is org_fuzz_corpus_copy (fuzz-corpus-lib.sh), the one the
+# coverage floor's fuzz leg measures through (#1896), so the corpus
+# replayed here and the corpus measured there cannot differ.
+#
 # Usage: fuzz-corpus.sh <count>, the target count the task measured, for
 # the closing line.
 set -euo pipefail
+
+# shellcheck source=mise/fuzz-corpus-lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/fuzz-corpus-lib.sh"
 
 count="${1:?usage: fuzz-corpus.sh <target count>}"
 if ! targets=$(python3 -c 'import sys, tomllib
@@ -42,17 +49,8 @@ replay=()
 seeds=0
 while IFS= read -r target; do
   [[ -n ${target} ]] || continue
-  if ! git ls-files -z -- "fuzz/corpus/${target}/" > "${scratch}/.list"; then
-    echo "lint:fuzz-build: git ls-files failed listing fuzz/corpus/${target}/" >&2
-    exit 1
-  fi
-  n=0
-  while IFS= read -r -d '' file; do
-    dest="${scratch}/${target}/${file#"fuzz/corpus/${target}/"}"
-    mkdir -p "${dest%/*}"
-    cp -L -- "${file}" "${dest}"
-    n=$((n + 1))
-  done < "${scratch}/.list"
+  # A copy that fails says why itself and ends the run (errexit).
+  n=$(org_fuzz_corpus_copy "${target}" "${scratch}/${target}")
   if ((n == 0)); then
     missing+=("${target}")
   else

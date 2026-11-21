@@ -6905,6 +6905,13 @@ depends = [{ task = "test", optional = true }]
 # times here. The hold judges only the recorded legs this job owns
 # (#1875, `--job gate`): a recorded `pgrx-pgNN` is the pgrx job's to
 # judge, and the plan job holds the record to the jobs it planned.
+#
+# Every fuzz target is a leg too, owned by this job (#1896): the
+# measurement's `fuzz` leg replays each target's committed corpus once
+# and prints `fuzz-<name> <percent>`, and each is held to a floor line
+# of its own, never to the main floor. A target with no line in the
+# floor is red by name, the remedy `mise run coverage:adopt`: a target
+# nobody measures is the defect, so there is no grace.
 run = '''
 floor=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/coverage_floor.py" read) || exit 1
 tracked=$(git ls-files -- '*.py' && "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/coverage_floor.py" legs) || tracked=""
@@ -6962,6 +6969,12 @@ dir = "{{cwd}}"
 # selector) and inside the minimum: the gate holds each major to the
 # floor in its own pgrx job, so the floor is derived from them too. The
 # selector prints nothing where there is no extension.
+#
+# Every fuzz target gets its own `fuzz-<name>` line (#1896), measured in
+# the same `all` run that coverage:check makes, under the same law: one
+# floor per target, so a target whose corpus rots cannot hide behind one
+# that grows. A target that no longer exists leaves the floor only
+# through a `dropped:` line.
 #
 # A sequence, not one script (#1667): adoption measures the repository's
 # own `test` run, through `measured`, which measures only a tree whose

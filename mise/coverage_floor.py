@@ -44,6 +44,17 @@ through unchanged. `go-branches` (#1546), gobco's Go condition
 coverage, is held apart the same way and for the same reason: the gate
 never runs it, so it is the Monday audit's (`read --leg go-branches`).
 
+Every fuzz target is a leg too (#1896): `fuzz-<name>`, the line coverage
+of replaying its committed corpus once. Each is a line of its own,
+`fuzz-<name> <floor>` with its own `fuzz-<name> measured:` record, under
+the same band and the same law — one per target, because a target whose
+corpus rots would hide behind one that grows in a shared minimum, and
+apart from the main floor, because a corpus's depth and a suite's are
+different numbers. Unlike the lines above they are held in the gate:
+`coverage:check` measures them, and a target it measures that has no
+line is red, with `coverage:adopt` as the remedy — a target nobody
+measures is the defect.
+
 Opt-in is unchanged: a repository with no `.coverage-floor` owes nothing
 and skips clean in both directions. The belt offers the mechanism; the
 committed file is the repository's adoption and its number is the
@@ -105,21 +116,54 @@ DROPPED_KEY = "dropped"
 LEG_NAME = re.compile(r"[a-z][a-z0-9-]*")
 # The legs held as floors of their own rather than in the minimum.
 SEPARATE = ("rust-branches", "go-branches")
-KEYS = frozenset(
-    {BAND_KEY, MEASURED_KEY, DERIVED_KEY, RESET_KEY, LEGS_KEY}
-    | {f"{leg} {MEASURED_KEY}" for leg in SEPARATE},
-)
+# A fuzz target's leg (#1896): a floor of its own like SEPARATE's, one
+# per target, named by coverage-measure.sh's derivation.
+FUZZ_LEG = re.compile(r"fuzz-[a-z0-9-]+")
+KEYS = frozenset({BAND_KEY, MEASURED_KEY, DERIVED_KEY, RESET_KEY, LEGS_KEY})
 
 LEG_FIELDS = 2
+
+
+def fuzz(leg: str) -> bool:
+    """Say whether a leg is a fuzz target's (#1896).
+
+    Returns:
+        True for `fuzz-<name>`.
+
+    """
+    return FUZZ_LEG.fullmatch(leg) is not None
+
+
+def apart(leg: str) -> bool:
+    """Say whether a leg is held as a floor of its own, not in the minimum.
+
+    Returns:
+        True for a SEPARATE leg and for every fuzz target's.
+
+    """
+    return leg in SEPARATE or fuzz(leg)
+
+
+def record_key(key: str) -> bool:
+    """Say whether a comment's key is one the record states.
+
+    Returns:
+        True for the main record's keys and `<leg> measured` of a leg
+        held apart.
+
+    """
+    leg, _, rest = key.partition(" ")
+    return key in KEYS or (rest == MEASURED_KEY and apart(leg))
+
 
 # Which job measures a leg, and so judges it (#1875). The floor's record
 # is checked in every job that measures a leg, and each job judges only
 # the recorded legs it owns: one owner per leg, derived from the leg's
 # name, the same names the derivation writes. `pgrx-pgNN` is the gate's
 # `pgrx` job at major NN (#1656), spelled `pgrx:NN`; every other leg is
-# the gate job's. Strict: no other spelling of a pgrx leg routes to the
-# pgrx job, so a misspelt one is the gate job's, which never measures
-# it, and red by name.
+# the gate job's, every `fuzz-*` leg among them (#1896). Strict: no
+# other spelling of a pgrx leg routes to the pgrx job, so a misspelt one
+# is the gate job's, which never measures it, and red by name.
 GATE_JOB = "gate"
 PGRX_LEG = re.compile(r"pgrx-pg([1-9][0-9]*)")
 PGRX_JOB = re.compile(r"pgrx:([1-9][0-9]*)")
@@ -168,12 +212,24 @@ NEEDS = {
         '"${ORG_BELT_DIR}/measured" and its teardown to call '
         "plpgsql_coverage.py collect while ORG_PLPGSQL_COVERAGE is set"
     ),
+    "fuzz": (
+        "a fuzz leg needs its target: a [[bin]] of fuzz/Cargo.toml, or a "
+        "`func Fuzz…` in a tracked _test.go"
+    ),
 }
 
 SEPARATE_TEMPLATE = """\
 #
 # {leg}: a floor of its own (#1359), measured off the gate and held by
 # the Monday audit, under the same band and the same law.
+# {leg} {measured_key}: {measured}
+{leg} {floor}
+"""
+
+FUZZ_TEMPLATE = """\
+#
+# {leg}: a fuzz target's committed corpus, replayed once (#1896), a
+# floor of its own held by coverage:check, under the same band and law.
 # {leg} {measured_key}: {measured}
 {leg} {floor}
 """
@@ -187,8 +243,9 @@ class Record(NamedTuple):
     measured: Decimal | None
     derived: str | None
     reset: str | None
-    # Leg name to (floor, measured) for each SEPARATE leg the file holds;
-    # `parse` always sets it, so None is only the unparsed default.
+    # Leg name to (floor, measured) for each leg held apart the file holds
+    # (SEPARATE and fuzz); `parse` always sets it, so None is only the
+    # unparsed default.
     separate: dict[str, tuple[Decimal, Decimal]] | None = None
     # The main-floor legs the record names (#1666); None for a file that
     # predates the record, which demands no leg until its next derivation.
@@ -256,42 +313,47 @@ def fields(text: str) -> tuple[dict[str, str], list[str], list[str]]:
     Returns:
         The `key: value` pairs stated in comments, every non-comment,
         non-blank line in the order they appear, and of those apart the
-        lines that open with a SEPARATE leg's name.
+        lines that open with the name of a leg held apart.
 
     """
     record: dict[str, str] = {}
     bare: list[str] = []
-    apart: list[str] = []
+    held: list[str] = []
     for raw in text.splitlines():
         line = raw.strip()
         if not line:
             continue
         if not line.startswith("#"):
-            (apart if line.split()[0] in SEPARATE else bare).append(line)
+            (held if apart(line.split()[0]) else bare).append(line)
             continue
         key, sep, value = line.lstrip("#").strip().partition(":")
-        if sep and key.strip() in KEYS:
+        if sep and record_key(key.strip()):
             record[key.strip()] = value.strip()
-    return record, bare, apart
+    return record, bare, held
 
 
 def separate_of(
     record: dict[str, str],
-    apart: list[str],
+    lines_apart: list[str],
     band: Decimal,
 ) -> tuple[dict[str, tuple[Decimal, Decimal]] | None, list[str]]:
-    """Read the SEPARATE legs' lines and hold each to its own record.
+    """Read the lines of the legs held apart and hold each to its own record.
 
     Returns:
         Leg name to (floor, measured), or None with every problem found.
 
     """
     lines: dict[str, list[str]] = {}
-    for line in apart:
+    for line in lines_apart:
         lines.setdefault(line.split()[0], []).append(line)
+    stated_fuzz = {leg for leg in lines if fuzz(leg)} | {
+        key.removesuffix(f" {MEASURED_KEY}")
+        for key in record
+        if key.endswith(f" {MEASURED_KEY}") and fuzz(key.split()[0])
+    }
     held: dict[str, tuple[Decimal, Decimal]] = {}
     problems: list[str] = []
-    for leg in SEPARATE:
+    for leg in (*SEPARATE, *sorted(stated_fuzz)):
         key = f"{leg} {MEASURED_KEY}"
         stated = lines.get(leg, [])
         if not stated and key not in record:
@@ -512,7 +574,7 @@ def legs_of(record: dict[str, str]) -> tuple[tuple[str, ...] | None, list[str]]:
     named = tuple(stated.split())
     if not named:
         return None, ["records `legs:` with no leg: the line names every leg it holds"]
-    bad = [leg for leg in named if not LEG_NAME.fullmatch(leg) or leg in SEPARATE]
+    bad = [leg for leg in named if not LEG_NAME.fullmatch(leg) or apart(leg)]
     if bad or len(set(named)) != len(named):
         return None, [
             (
@@ -594,7 +656,7 @@ def render(
 
     Returns:
         The whole file, band comment and all, with a section for each
-        SEPARATE leg given (leg name to its measurement).
+        leg held apart that is given (leg name to its measurement).
 
     """
     quantised = quantise(measured)
@@ -613,11 +675,12 @@ def render(
     )
     if not legs:
         text = text.replace("# legs: \n", "")
-    for leg in SEPARATE:
-        if separate is None or leg not in separate:
+    given = separate or {}
+    for leg in (*SEPARATE, *sorted(leg for leg in given if fuzz(leg))):
+        if leg not in given:
             continue
-        leg_measured = quantise(separate[leg])
-        text += SEPARATE_TEMPLATE.format(
+        leg_measured = quantise(given[leg])
+        text += (FUZZ_TEMPLATE if fuzz(leg) else SEPARATE_TEMPLATE).format(
             leg=leg,
             measured_key=MEASURED_KEY,
             measured=leg_measured,
@@ -657,7 +720,7 @@ def read(path: Path, leg: str | None = None) -> int:
 
 
 def ratchet_separate(record: Record, separate: dict[str, Decimal]) -> bool:
-    """Hold each freshly measured SEPARATE leg to the floor it already has.
+    """Hold each freshly measured leg held apart to the floor it already has.
 
     Returns:
         True when every leg may be rewritten, False (with the reason
@@ -682,11 +745,14 @@ def ratchet_separate(record: Record, separate: dict[str, Decimal]) -> bool:
 
 
 def carried(record: Record, fresh: dict[str, Decimal]) -> dict[str, Decimal]:
-    """Choose the measurement each SEPARATE leg's line is written from.
+    """Choose the measurement each line held apart is written from.
 
     A fresh figure that raises (or keeps) the leg's floor is written; one
     within the band keeps the measurement the record states, so the line
-    never falls; a leg this run did not measure is carried as it stands.
+    never falls; a SEPARATE leg this run did not measure is carried as it
+    stands. A fuzz leg is not (#1896): every derivation measures every
+    target, so one it did not measure is gone, and reaches here only
+    through its `dropped:` line (record_holds).
 
     Returns:
         Leg name to the measurement its line records.
@@ -698,7 +764,7 @@ def carried(record: Record, fresh: dict[str, Decimal]) -> dict[str, Decimal]:
         for leg, measured in fresh.items()
         if leg not in holds or derive_floor(quantise(measured)) >= holds[leg][0]
     }
-    return {leg: m for leg, (_, m) in holds.items()} | rising
+    return {leg: m for leg, (_, m) in holds.items() if not fuzz(leg)} | rising
 
 
 def write(  # ruff: ignore[too-many-arguments] -- one keyword per part of a measurement
@@ -716,9 +782,10 @@ def write(  # ruff: ignore[too-many-arguments] -- one keyword per part of a meas
     the `legs:` record. A leg the record names that this run did not
     measure refuses the derivation unless a `dropped:` line names it.
 
-    `separate` is the SEPARATE legs measured this time; a leg the file
-    already holds and this run did not measure is carried through as it
-    stands, so a release measuring on stable keeps the nightly's figure.
+    `separate` is the legs held apart measured this time; a SEPARATE leg
+    the file already holds and this run did not measure is carried
+    through as it stands, so a release measuring on stable keeps the
+    nightly's figure. A fuzz leg is never carried (#1896).
 
     Returns:
         0 when the file was written or the repository owes nothing, and 1
@@ -775,7 +842,7 @@ def write(  # ruff: ignore[too-many-arguments] -- one keyword per part of a meas
         )
     # Every leg is judged before anything returns, so one run names every
     # refusal rather than the first.
-    kept_legs = record_holds(record, legs or [], path)
+    kept_legs = record_holds(record, [*(legs or []), *fresh], path)
     if not ratchet_separate(record, fresh) or not main_held or not kept_legs:
         return 1
 
@@ -802,8 +869,18 @@ def write(  # ruff: ignore[too-many-arguments] -- one keyword per part of a meas
     return 0
 
 
+def recorded(record: Record) -> list[str]:
+    """Name every leg the record demands a measurement of.
+
+    Returns:
+        The `legs:` record's legs, then each fuzz target's line (#1896).
+
+    """
+    return [*(record.legs or ()), *(leg for leg in record.separate or {} if fuzz(leg))]
+
+
 def record_holds(record: Record, legs: list[str], path: Path) -> bool:
-    """Hold a derivation to the legs the record names (#1666).
+    """Hold a derivation to the legs the record names (#1666, #1896).
 
     Returns:
         True when every recorded leg was measured or is consciously
@@ -812,7 +889,7 @@ def record_holds(record: Record, legs: list[str], path: Path) -> bool:
     """
     dropped = record.dropped or {}
     missing = [
-        leg for leg in record.legs or () if leg not in legs and leg not in dropped
+        leg for leg in recorded(record) if leg not in legs and leg not in dropped
     ]
     for leg in missing:
         print(
@@ -835,8 +912,8 @@ def derive(path: Path, source: str, provenance: str, *, adopt: bool) -> int:
     if problems:
         complain(problems, path)
         return 1
-    measured = [(leg, pct) for leg, pct in every if leg not in SEPARATE]
-    separate = {leg: pct for leg, pct in every if leg in SEPARATE}
+    measured = [(leg, pct) for leg, pct in every if not apart(leg)]
+    separate = {leg: pct for leg, pct in every if apart(leg)}
     if not measured:
         print(
             f"{NAME}: no leg was measured — a derivation that reads "
@@ -881,7 +958,8 @@ def owner(leg: str) -> str:
     """Name the one job that measures a leg (#1875).
 
     Returns:
-        `pgrx:NN` for `pgrx-pgNN`, else the gate job.
+        `pgrx:NN` for `pgrx-pgNN`, else the gate job: every `fuzz-*` leg
+        is measured by coverage:check in the gate job (#1896).
 
     """
     pgrx = PGRX_LEG.fullmatch(leg)
@@ -929,7 +1007,7 @@ def needs(leg: str) -> str:
         The remedy line.
 
     """
-    family = leg.removesuffix("-branches")
+    family = "fuzz" if fuzz(leg) else leg.removesuffix("-branches")
     what = NEEDS.get(family, "restore what the leg measures")
     return (
         f"  {what}; or record the leg's removal on purpose: "
@@ -965,6 +1043,10 @@ def hold(path: Path, label: str, source: str, jobs: frozenset[str]) -> int:
     status = 0
     names = [leg for leg, _ in measured]
     for leg, pct in measured:
+        if fuzz(leg):
+            if not hold_fuzz(record, label, path, (leg, pct)):
+                status = 1
+            continue
         if pct < record.floor:
             print(
                 f"{label}: {leg}: {pct}% is below the derived floor {record.floor}%",
@@ -978,12 +1060,42 @@ def hold(path: Path, label: str, source: str, jobs: frozenset[str]) -> int:
                 f"{label}: {leg}: not yet in the floor's record: it joins at "
                 "the next derivation",
             )
-    owned = [
-        leg for leg in record.legs or () if owner(leg) in jobs and leg not in names
-    ]
+    owned = [leg for leg in recorded(record) if owner(leg) in jobs and leg not in names]
     if unaccounted(record, label, owned):
         status = 1
     return status
+
+
+def hold_fuzz(
+    record: Record, label: str, path: Path, measured: tuple[str, Decimal]
+) -> bool:
+    """Hold one fuzz target's figure to its own line (#1896).
+
+    A target with no line is red: there is no grace, because a target
+    nobody measures is the defect the leg exists to end.
+
+    Returns:
+        True when the target has a line and holds it.
+
+    """
+    leg, pct = measured
+    held = (record.separate or {}).get(leg)
+    if held is None:
+        print(
+            f"{label}: {leg}: the fuzz target has no line in {path} — every "
+            "fuzz target is a leg of the floor (#1896): run `mise run "
+            f"coverage:adopt` and commit {path}",
+            file=sys.stderr,
+        )
+        return False
+    if pct < held[0]:
+        print(
+            f"{label}: {leg}: {pct}% is below its derived floor {held[0]}%",
+            file=sys.stderr,
+        )
+        return False
+    print(f"{label}: {leg} leg holds its floor {held[0]} ({pct}%)")
+    return True
 
 
 def planned_majors(text: str) -> list[str]:
