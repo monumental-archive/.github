@@ -880,7 +880,7 @@ def compose(red: Red, entries: list[Entry], found: Listing | None, cut: Cut) -> 
         "",
         *parts,
         f"<!-- findings: {hashes} -->",
-    ])  # fmt: skip
+    ])
 
 
 def least(fits: Callable[[int], bool], top: int) -> int | None:

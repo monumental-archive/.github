@@ -772,16 +772,24 @@ class FindingsBody(unittest.TestCase):
     def test_a_job_with_a_record_points_at_its_findings(self) -> None:
         """A step with a record points above; one without shows its output."""
         records(self.dir, "a.jsonl", DENY)
-        deny = standing.tail(logged(
-            "##[group]Run mise run audit:deny", "mise run audit:deny",
-            "##[endgroup]", "denied",
-            "##[error]Process completed with exit code 1.",
-        ))  # fmt: skip
-        other = standing.tail(logged(
-            "##[group]Run mise run lint:caller", "mise run lint:caller",
-            "##[endgroup]", "caller grant missing",
-            "##[error]Process completed with exit code 1.",
-        ))  # fmt: skip
+        deny = standing.tail(
+            logged(
+                "##[group]Run mise run audit:deny",
+                "mise run audit:deny",
+                "##[endgroup]",
+                "denied",
+                "##[error]Process completed with exit code 1.",
+            )
+        )
+        other = standing.tail(
+            logged(
+                "##[group]Run mise run lint:caller",
+                "mise run lint:caller",
+                "##[endgroup]",
+                "caller grant missing",
+                "##[error]Process completed with exit code 1.",
+            )
+        )
         text = self.red([red_job(1, deny), red_job(2, other)])
         first = text[text.index("### job 1") : text.index("### job 2")]
         second = text[text.index("### job 2") :]
@@ -793,11 +801,14 @@ class FindingsBody(unittest.TestCase):
     def test_a_step_of_two_tasks_is_matched_by_either(self) -> None:
         """A step that ran two tasks, seen by their `[task] ` prefixes."""
         log = logged(
-            "##[group]Run mise run ci:lint", "mise run ci:lint", "##[endgroup]",
-            "[lint:typos] $ typos", "[lint:shell] $ shfmt",
+            "##[group]Run mise run ci:lint",
+            "mise run ci:lint",
+            "##[endgroup]",
+            "[lint:typos] $ typos",
+            "[lint:shell] $ shfmt",
             "[lint:shell] ERROR task failed",
             "##[error]Process completed with exit code 1.",
-        )  # fmt: skip
+        )
         cut = standing.tail(log)
         same(self, cut.tasks, frozenset({"ci:lint", "lint:typos", "lint:shell"}))
         for found in (SPELL, standing.Finding("lint:shell", "a.sh", "unformatted")):
@@ -833,11 +844,13 @@ class FindingsBody(unittest.TestCase):
         """5,000 records: details, then findings dropped, the count stated."""
         many = [
             standing.Finding(
-                f"lint:t{n % 7}", f"file{n}.py", f"finding {n} " + "m" * 40,
+                f"lint:t{n % 7}",
+                f"file{n}.py",
+                f"finding {n} " + "m" * 40,
                 (f"detail {n}",),
             )
             for n in range(5000)
-        ]  # fmt: skip
+        ]
         records(self.dir, "a.jsonl", *many)
         text = self.red([red_job(1, None)])
         self.assertLess(len(text), standing.BODY_LIMIT)
