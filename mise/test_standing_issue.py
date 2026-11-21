@@ -145,14 +145,14 @@ class Rows(unittest.TestCase):
         """Serve a job's log."""
         (self.logs / f"{number}.log").write_text(text, encoding="utf-8")
 
-    def run_report(self, *, ref: str = "refs/heads/main", default: str = "main", cancelled: str = "false") -> hermetic.Called:
+    def run_report(self, *, ref: str = "refs/heads/main", default: str = "main") -> hermetic.Called:
         """Run the report as the job runs it.
 
         Returns:
             The status and what it printed.
 
         """
-        argv = ["--workflow", WORKFLOW, "--run-id", RUN_ID, "--ref", ref, "--default-branch", default, "--cancelled", cancelled]
+        argv = ["--workflow", WORKFLOW, "--run-id", RUN_ID, "--ref", ref, "--default-branch", default]
         env = {**self.env, "STUB_LOGS": str(self.logs)}
         return hermetic.call_main(lambda: standing.main(argv), env=env)
 
@@ -239,12 +239,19 @@ class Rows(unittest.TestCase):
         self.assertEqual(self.gh_calls(), [JOBS, LIST])
         self.assertIn("green: no red-check issue open", proc.stdout)
 
-    def test_cancelled_run_calls_nothing(self) -> None:
-        """A cancelled run changes nothing, and asks nothing."""
-        proc = self.run_report(cancelled="true")
+    def test_cancelled_job_is_neither(self) -> None:
+        """A cancelled job and no red one: nothing changes past the read.
+
+        A cancelled RUN never reaches here: the step that runs the
+        helper is `if: ${{ !cancelled() }}`, which test_report_job.py
+        holds for every reporting workflow.
+        """
+        self.jobs([job(1, "plan", "success"), job(2, "drafts", "cancelled")])
+        self.env["STUB_LIST"] = json.dumps([{"number": 42, "title": TITLE, "body": previous(FIRST, 3)}])
+        proc = self.run_report()
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual(self.gh_calls(), [])
-        self.assertIn("red-check: the run was cancelled; nothing changed", proc.stdout)
+        self.assertEqual(self.gh_calls(), [JOBS])
+        self.assertIn("neither red nor green yet, nothing changed: drafts (cancelled)", proc.stdout)
 
     def test_other_branch_calls_nothing(self) -> None:
         """A run on another branch changes nothing, and asks nothing."""

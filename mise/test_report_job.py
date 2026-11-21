@@ -36,6 +36,8 @@ LOCAL = re.compile(r"^\./\.github/workflows/([^/@]+)$")
 REMOTE = re.compile(r"^[^/]+/\.github/\.github/workflows/([^/@]+)@")
 GRANTS = {"issues": "write", "actions": "read"}
 ALWAYS = "${{ always() }}"
+NOT_CANCELLED = "${{ !cancelled() }}"
+HELPER = "mise/standing_issue.py"
 
 Mapping = dict[str, object]
 
@@ -117,6 +119,11 @@ def report_problems(path: Path) -> list[str]:
         problems.append(f"{path.name}: report's needs: misses {', '.join(missing)}")
     if job.get("if") != ALWAYS:
         problems.append(f"{path.name}: report runs if: {job.get('if')!r}, not {ALWAYS}")
+    helper = [s for s in workflow_yaml.steps(job) if HELPER in str(s.get("run", ""))]
+    if not helper:
+        problems.append(f"{path.name}: report runs no {HELPER}")
+    elif any(s.get("if") != NOT_CANCELLED for s in helper):
+        problems.append(f"{path.name}: report's {HELPER} step is not if: {NOT_CANCELLED}")
     problems += grant_problems(path, "report", job)
     return problems
 
@@ -163,7 +170,8 @@ REPORT = """\
       issues: write
       actions: read
     steps:
-      - run: "true"
+      - if: ${{{{ !cancelled() }}}}
+        run: .org-canon/mise/standing_issue.py
 """
 
 PLANTED = """\
@@ -230,6 +238,12 @@ class Planted(unittest.TestCase):
         """A report whose needs: misses a job names the job."""
         found = self.plant(REPORT.format(needs="      - one"))
         self.assertEqual(found, ["planted.yml: report's needs: misses two"])
+
+    def test_cancelled_run_reaches_the_helper(self) -> None:
+        """A helper step without the cancelled guard is red by name."""
+        report = REPORT.format(needs="      - one\n      - two").replace("      - if: ${{ !cancelled() }}\n        run", "      - run")
+        found = self.plant(report)
+        self.assertEqual(found, ["planted.yml: report's mise/standing_issue.py step is not if: ${{ !cancelled() }}"])
 
     def test_stub_without_grants(self) -> None:
         """A scheduled stub that calls a reporting workflow must grant both."""

@@ -13,7 +13,8 @@ The second is the `report` job every scheduled workflow ends with. It
 reads the run's own job list and keeps one issue titled exactly
 `<workflow> is red`, labelled `red-check`:
 
-  cancelled run                   nothing changes.
+  cancelled run                   nothing changes: the job's step that
+                                  runs this is `if: !cancelled()`.
   run not on the default branch   nothing changes; gh is never called.
   a job failed or timed out       no open issue: create it; one open:
                                   replace its body, keeping "Red since".
@@ -38,7 +39,7 @@ definition when the repository does not have it.
 
 Usage:
   standing_issue.py --workflow NAME --run-id ID --ref REF
-                    [--default-branch BRANCH] [--cancelled true|false]
+                    [--default-branch BRANCH]
 
 The repository is GITHUB_REPOSITORY, the server GITHUB_SERVER_URL.
 Exit 0 when the issue was kept (or nothing was to change), 2 when a
@@ -115,7 +116,6 @@ class Args(argparse.Namespace):
     run_id: str
     ref: str
     default_branch: str
-    cancelled: str
 
 
 def gh(*args: str) -> str:
@@ -509,15 +509,11 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--ref", required=True)
     parser.add_argument("--default-branch", default="")
-    parser.add_argument("--cancelled", default="false")
     args = parser.parse_args(argv, namespace=Args())
     repo = os.environ.get("GITHUB_REPOSITORY", "")
     if not repo:
         print("red-check: GITHUB_REPOSITORY is not set", file=sys.stderr)
         return EXIT_ERROR
-    if args.cancelled == "true":
-        print("red-check: the run was cancelled; nothing changed")
-        return 0
     server = os.environ.get("GITHUB_SERVER_URL") or "https://github.com"
     run_url = f"{server}/{repo}/actions/runs/{args.run_id}"
     try:

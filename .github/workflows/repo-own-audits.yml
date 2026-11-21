@@ -91,16 +91,18 @@ jobs:
       - name: Resolve the canon tree and the belt's Python
         uses: $/.github/actions/canon
 
+      # A cancelled run changes nothing: the job still runs (always()),
+      # this step does not.
       - name: Keep the red-check issue
+        if: ${{ !cancelled() }}
         env:
           GH_TOKEN: ${{ github.token }}
           WORKFLOW: ${{ github.workflow }}
           RUN_ID: ${{ github.run_id }}
           REF: ${{ github.ref }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          CANCELLED: ${{ cancelled() }}
         run: |
           "${ORG_PYTHON}" .org-canon/mise/standing_issue.py --workflow "${WORKFLOW}" \
-            --run-id "${RUN_ID}" --ref "${REF}" --default-branch "${DEFAULT_BRANCH}" \
-            --cancelled "${CANCELLED}"
+            --run-id "${RUN_ID}" --ref "${REF}" \
+            --default-branch "${DEFAULT_BRANCH}"
 ...
