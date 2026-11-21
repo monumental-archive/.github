@@ -57,13 +57,15 @@ GIT = hermetic.tool("git")
 
 
 # What `ci` runs besides the `lint:*` wildcard (its `depends`), and the
-# task the gate job's squash-message step runs.
+# tasks the gate job's own steps run: the squash-message step's
+# commits:check and the declared-break step's break:check (#1906).
 ROOTS = (
     "coverage:check",
     "test:pgrx",
     "test:python-properties",
     "test:typescript-properties",
     "commits:check",
+    "break:check",
 )
 
 # Tasks that run other tasks by a name computed at run time, and the

@@ -1523,7 +1523,10 @@ in that repository's history for that day.
   automation** — it is set by hand, once, as a deliberate commitment.
 - An MSRV bump is a minor version, never a patch.
 - chore/ci/docs/style/test commits alone never produce a release.
-- Published crates gate on `cargo-semver-checks` in CI.
+- Published crates gate on `break:check` in CI (#1906): each pull
+  request is measured against its own base (`cargo-semver-checks`, and
+  a pgrx crate's features and tracked `schema.snapshot.sql`), and a
+  break its title and body do not declare is red on the pull request.
 
 ## When something goes wrong
 

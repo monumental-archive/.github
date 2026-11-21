@@ -55,7 +55,7 @@ honestly blocked on.
 | gitleaks (`aqua:gitleaks/gitleaks`) | Secret scanning at commit depth in the gate (`lint:gitleaks`, full history, `--redact`) |
 | hadolint (`aqua:hadolint/hadolint`) | Dockerfile lint in the gate (`lint:hadolint`), every severity fails (`--failure-threshold style`) |
 | cargo-machete (`github:` backend, upstream sha256s) | Unused Rust dependencies in the gate (`lint:machete`, static) — proven first in a consumer |
-| cargo-semver-checks (`github:` backend, TOFU checksum) | Public API vs published baseline (`audit:semver` — network, Monday cron, per repo) — proven first in a consumer |
+| cargo-semver-checks (`github:` backend, TOFU checksum) | Public API vs published baseline (`audit:semver` — network, Monday cron, per repo), and vs a pull request's base (`break:check`, the gate's test leg, #1906) — proven first in a consumer |
 | cargo-mutants (`cargo:` backend, compiled `--locked`, pinned `lazy`) | Rust mutation testing (`audit:mutants`' Rust leg — its own weekly workflow, `repo-mutants.yml`, never the gate or the audit): no unexplained surviving mutant, never a score; adoption is a tracked `.cargo/mutants.toml`, each exclusion an `exclude_re` entry under a `#` reason (#1355) — proven first on release-lab |
 | cosmic-ray (`pipx:` backend, belt Python, pinned `lazy`) | Python mutation testing (`audit:mutants`' Python leg — its own jobs in `repo-mutants.yml`, never the gate or the audit): no unexplained surviving mutant; adoption is a tracked root `cosmic-ray.toml`, each exclusion a `# pragma: no mutate -- <reason>` on the mutant's line; mutates the tracked file in place, one mutant at a time, against the test files coverage shows reaching it (#1771; mutmut refused, #1354) |
 | StrykerJS (the repository's own, from its lockfile; the belt pins nothing) | TypeScript mutation testing (`audit:mutants`' TypeScript leg — its own jobs in `repo-mutants.yml`, never the gate or the audit): no unexplained surviving mutant; adoption is a tracked root `stryker.config.json`, each exclusion a `// Stryker disable next-line <Mutator>: <reason>` at its site; run `--inPlace` (#1358) — proven first on monumental-archive |
@@ -2735,6 +2735,33 @@ shape). Unprovable in the canon — no Rust. *Reopen:* an aqua package
 or upstream sha256 assets appearing; or the release path growing a
 pre-tag semver leg so the break is caught at the version decision
 rather than the Monday after.
+
+**cargo-semver-checks in the gate, as `break:check`** (#1906). The
+audit speaks after the merge; the declaration is made on the pull
+request, so that is where it is held. The gate's test leg measures
+each pull request against `HEAD^1`, its merge commit's base, and an
+undeclared break is red there. Measured 2026-11-21 on 0.51.0, network
+off (`CARGO_NET_OFFLINE=true`):
+
+- On edtf at ea076f6, `-p edtf-core --baseline-rev 'ea076f6^'`:
+  `--release-type patch` exit 0 in 12 s, then `minor` exit 0 in 2 s.
+  The baseline can be any commit, not only a tag.
+- On a scratch crate at 0.3.0, each commit against its parent at
+  `--release-type minor`: an added `pub fn` exits 0; a removed
+  `pub fn` exits 100 ("semver requires new major version"); a removed
+  feature exits 100. `--release-type major` exits 0 for all three. So
+  the answer does not depend on the crate's version, and the tool
+  measures breaks, not additions: exit 100 is a break, any exit but 0
+  and 100 is "could not be measured", never a pass.
+- With the default target directory, inside the tree, the second run
+  fails: "package `zx` is ambiguous", naming the tool's own baseline
+  clone under `target/semver-checks/`. With `CARGO_TARGET_DIR` outside
+  the tree it does not, so the task sets one.
+- edtf's audit job (run 44916195524): the four ordinary library crates
+  took 31 s in total; `edtf-postgres` about 2.5 minutes per Postgres
+  major. A pgrx crate's Rust API is therefore not built in the gate:
+  its contract is the features it is built with and its tracked
+  `schema.snapshot.sql`, both read from files.
 
 **mutmut as `audit:mutants`' Python leg** (#1354, under #1336's
 testing standard; the shape is cargo-mutants', below). The measure is

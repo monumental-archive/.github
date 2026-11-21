@@ -14,9 +14,9 @@
 #     43886371474) — every crate before its first publish is in it.
 #
 # So the population is cargo's own account of the workspace, read through
-# gate_surface.py — the one derivation of which crates are pgrx and which
-# majors each declares — and each crate gets one verdict per thing that
-# can be judged:
+# mise/rust-api-population.sh — which takes gate_surface.py's derivation
+# of which crates are pgrx and which majors each declares — and each
+# crate gets one verdict per thing that can be judged:
 #
 #   - `publish` false (cargo reports `[]`): not published, skipped;
 #   - `publish` naming registries but not crates.io: not judged, said so;
@@ -59,34 +59,20 @@ command -v cargo > /dev/null || {
 }
 
 # Assigned one step each: an empty here-string from a failed derivation
-# would read as a workspace with nothing to judge.
+# would read as a workspace with nothing to judge. The population is the
+# belt's one account of which crates have an API to judge, shared with
+# break:check (#1906): mise/rust-api-population.sh.
 metadata=$(cargo metadata --no-deps --format-version 1 --locked)
-surface=$("${ORG_PYTHON}" "${belt}/gate_surface.py" <<< "${metadata}")
-# Per member: where it may be published, as cargo resolved it (`null` is
-# anywhere, `[]` is `publish = false`, a list names registries, crates.io
-# as `crates-io`), and whether it has a target the tool can judge (the
-# kinds above). Never an empty field — see gate_surface.py on tabs.
-where=$(jq -r '
-  .workspace_members as $ids
-  | .packages[]
-  | select(.id as $id | $ids | index($id))
-  | [.name, (if .publish == null then "any"
-             elif (.publish | length) == 0 then "none"
-             elif (.publish | index("crates-io")) then "any"
-             else (.publish | join(",")) end),
-     (if any(.targets[].kind[]; IN("lib", "rlib", "dylib", "cdylib", "staticlib"))
-      then "lib" else "nolib" end)]
-  | @tsv' <<< "${metadata}")
+# shellcheck source=mise/rust-api-population.sh
+. "${belt}/rust-api-population.sh"
+population=$(org_rust_api_population "${metadata}")
 
 verdicts=()
 red=0
 provisioned=""
-while IFS=$'\t' read -r record spec kind crate_majors _dir; do
-  [[ ${record} == crate ]] || continue
-  crate="${spec%@*}"
-  target=$(awk -F '\t' -v n="${crate}" '$1 == n { print $2 }' <<< "${where}")
-  library=$(awk -F '\t' -v n="${crate}" '$1 == n { print $3 }' <<< "${where}")
-  if [[ -z ${target} || -z ${library} ]]; then
+while IFS=$'\t' read -r crate target library kind crate_majors; do
+  [[ -n ${crate} ]] || continue
+  if [[ ${target} == - || ${library} == - ]]; then
     verdicts+=("${label}: ${crate}: cargo reports no publish setting or targets for it, red")
     red=1
     continue
@@ -172,7 +158,7 @@ while IFS=$'\t' read -r record spec kind crate_majors _dir; do
       red=1
     fi
   done
-done <<< "${surface}"
+done <<< "${population}"
 
 [[ ${#verdicts[@]} -gt 0 ]] || {
   echo "${label}: no crate in the workspace, skipped"

@@ -83,6 +83,7 @@ when = []
 [tools.jq]
 # lint:audit-scheduled calls it with no guard.
 tasks = [
+  "break:check",
   "coverage:check",
   "lint:audit-scheduled",
   "lint:badges",
@@ -204,6 +205,7 @@ when = []
 [tools.python]
 # Every belt helper; lint:subject-budget runs one with no guard.
 tasks = [
+  "break:check",
   "coverage:check",
   "lint:badges",
   "lint:bash-portability",
@@ -272,9 +274,9 @@ tasks = ["lint:scaffold-assembly", "lint:sql"]
 when = ["*.sql", "scaffold/"]
 
 [tools."github:obi1kenobi/cargo-semver-checks"]
-# audit:semver only.
-tasks = []
-when = []
+# break:check, the gate's pull-request step (#1906); audit:semver too.
+tasks = ["break:check"]
+when = ["*/Cargo.toml", "Cargo.toml"]
 
 [tools."pipx:cosmic-ray"]
 # audit:mutants only, and pinned lazy: no bare install builds it (#1771).
