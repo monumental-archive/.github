@@ -188,12 +188,13 @@ patch. Spend them freely rather than reasoning about what might break.
 
 What the canon's release does **not** prove is breadth. It exercises one
 class, so it is a smoke test of the machinery. `release-lab` publishes
-`rust-binary,oci-image,wasm-npm,pgrx-extension` across PG 14–18 with
-`dry-run: false` — "the full-width proof in substance", as its own stub
-says. **A lab release is not a gate** (ruled 2026-11-14). It used to be
-the second step of every release-path change, before any production
-repository moved; that order dates from when a wrong change could
-drain the org's API budget. Now the gate, the tests and the canon's
+`rust-binary,oci-image,wasm-npm,pgrx-extension` at every Postgres major
+`docker/pgrx-base-images.toml` maps, with `dry-run: false` — "the
+full-width proof in substance", as its own stub says. **A lab release
+is not a gate** (ruled 2026-11-14). It used to be the second step of
+every release-path change, before any production repository moved;
+that order dates from when a wrong change could drain the org's API
+budget. Now the gate, the tests and the canon's
 own release are the proof for most changes, and Renovate moves every
 repository's pin as soon as the tag exists. Cut a lab release on
 purpose only when a change is specific to a class the canon does not

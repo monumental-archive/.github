@@ -663,7 +663,8 @@ ref that is not a `v*` tag, and `self-publish.yml` requests no
 number and no consumer — spend them as freely as lab patch numbers
 (`.github@v1.24.0` published with its verdict leg red;
 `.github@v1.24.1` fixed it, #367). The canon proves the machinery runs;
-the lab, publishing four classes across PG 14–18, proves it works.
+the lab, publishing four classes at every Postgres major
+`docker/pgrx-base-images.toml` maps, proves it works.
 
 The `audit` workflow runs one at a time, and the forge holds a single
 pending run behind it: a second dispatch while one waits cancels the
