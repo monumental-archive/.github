@@ -6,7 +6,7 @@ once, files the report's findings (findings.py) and saves the checkpoint
 only when they are filed. This says whether the leg is green, from
 stele's exit status, its report and whether the checkpoint was saved.
 It files nothing: the standing issue is the run's, judged once after the
-last leg (standing_issue.py).
+last leg (watch_issue.py).
 
   0, saved      judged to the head: green.
   1, saved      a certificate did not reconcile (each has its issue): red.

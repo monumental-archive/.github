@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""standing_issue.py's checkpoints and verdict, on inputs nobody wrote down.
+"""watch_issue.py's checkpoints and verdict, on inputs nobody wrote down.
 
-The properties of `test_standing_issue.py`'s fixed rows (#1557):
+The properties of `test_watch_issue.py`'s fixed rows (#1557):
 
 - R: reading a checkpoint never raises, whatever bytes the file holds,
   and what it read is judged and written into a body without raising.
@@ -29,7 +29,7 @@ import unittest
 from pathlib import Path
 from typing import override
 
-import standing_issue as standing
+import watch_issue as standing
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given

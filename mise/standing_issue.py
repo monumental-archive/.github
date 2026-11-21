@@ -6,7 +6,7 @@ issue", proved by the signer-identity watch (#1353) and moved here so
 there is no second copy: list every open issue, match the title
 exactly (never a search's ranking), create it or replace its body in
 place, close it with one comment. A listing that fails raises by name,
-and the caller files nothing. .github/rekor-monitor/standing_issue.py
+and the caller files nothing. .github/rekor-monitor/watch_issue.py
 keeps its own judgment and imports these.
 
 The second is the `report` job every scheduled workflow ends with. It

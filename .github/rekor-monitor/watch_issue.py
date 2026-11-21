@@ -27,7 +27,7 @@ find it. A listing that fails exits 2 by name and files nothing: a
 failed read never opens a second issue.
 
 Usage:
-  standing_issue.py --start FILE --start-kept true|false|""
+  watch_issue.py --start FILE --start-kept true|false|""
                     --checkpoint FILE --legs RESULT --run-url URL
 
 The repository is GITHUB_REPOSITORY; no organisation, repository or log
@@ -40,17 +40,18 @@ import argparse
 import datetime as dt
 import os
 import re
-import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-# The canon's one writer of workflow commands, in mise/ (#1660).
+# The canon's one writer of workflow commands (#1660) and its one keeper
+# of a standing issue (#1887), in mise/.
 # Appended, so this file's own directory and the standard library
 # come first.
 sys.path.append(str(Path(__file__).resolve().parents[2] / "mise"))
 
 import decoded
+import standing_issue
 import workflow_command
 
 TITLE = "rekor-monitor: the signer-identity watch is behind"
@@ -62,10 +63,6 @@ BEHIND_SINCE = re.compile(r"^- Behind since: (.+)$", re.MULTILINE)
 RUNS_BEHIND = re.compile(r"^- Runs behind since it opened: (\d+)$", re.MULTILINE)
 
 
-class StandingIssueError(Exception):
-    """A read or write that could not complete; the run must go red."""
-
-
 class Args(argparse.Namespace):
     """The command line, typed."""
 
@@ -74,14 +71,6 @@ class Args(argparse.Namespace):
     checkpoint: Path
     legs: str
     run_url: str
-
-
-@dataclass(frozen=True)
-class Issue:
-    """An open standing issue, as the forge lists it."""
-
-    number: int
-    body: str
 
 
 @dataclass(frozen=True)
@@ -132,7 +121,7 @@ def read_checkpoint(path: Path) -> Checkpoint:
     # Not strict JSON (a `next` of Infinity, JSON nested past the parser's
     # depth), a field that is not an integer, or a timestamp past the
     # platform's range (overflow, OS and value errors): each was a
-    # traceback until prop_standing_issue.py (#1557), and each is one
+    # traceback until prop_watch_issue.py (#1557), and each is one
     # refusal. decoded.UndecodableError is a ValueError.
     try:
         return decode_checkpoint(path.read_bytes())
@@ -199,76 +188,6 @@ def gained(start_next: int, start_left: int, end_next: int, end_left: int) -> Ou
     return Outcome(red=False, why=f"gaining: {counts}", standing=None)
 
 
-def gh(*args: str) -> str:
-    """Run gh and return its output.
-
-    Returns:
-        gh's standard output.
-
-    Raises:
-        StandingIssueError: gh exited non-zero.
-
-    """
-    proc = subprocess.run(
-        ["gh", *args],  # ruff: ignore[start-process-with-partial-path] - gh is resolved on PATH, as in the workflow
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if proc.returncode != 0:
-        verb = " ".join(args[:2])
-        detail = proc.stderr.strip() or "no output"
-        msg = f"gh {verb} failed (exit {proc.returncode}): {detail}"
-        raise StandingIssueError(msg)
-    return proc.stdout
-
-
-def open_standing(repo: str) -> list[Issue]:
-    """List the open issues titled exactly TITLE.
-
-    Returns:
-        Each open issue whose title is exactly the standing title.
-
-    Raises:
-        StandingIssueError: the listing could not be read, or an issue in
-            it has no number or a body that is not text.
-
-    """
-    out = gh(
-        "issue", "list", "--repo", repo, "--state", "open",
-        "--limit", "1000", "--json", "number,title,body",
-    )  # fmt: skip
-    try:
-        answer = decoded.load_json(out)
-    except decoded.UndecodableError as err:
-        msg = f"gh issue list answered something that is not JSON: {err}"
-        raise StandingIssueError(msg) from err
-    try:
-        return standing_issues(answer)
-    except decoded.UndecodableError as err:
-        msg = f"gh issue list answered something that is not a list of issues: {err}"
-        raise StandingIssueError(msg) from err
-
-
-def standing_issues(answer: object) -> list[Issue]:
-    """Decode the listing's issues titled exactly TITLE.
-
-    Returns:
-        Each one's number and body; a body the forge left empty is "".
-
-    """
-    found: list[Issue] = []
-    for at, item in enumerate(decoded.as_array(answer, "the answer")):
-        issue = decoded.as_object(item, f"issue {at}")
-        if issue.get("title") != TITLE:
-            continue
-        number = decoded.as_int(issue.get("number"), f"issue {at}: number")
-        text = issue.get("body")
-        text = "" if text is None else decoded.as_str(text, f"issue {at}: body")
-        found.append(Issue(number, text))
-    return found
-
-
 def count(n: int | None, missing: str | None) -> str:
     """Format a count for a person, or name its absence.
 
@@ -332,10 +251,10 @@ def behind(repo: str, end: Checkpoint, run: Run) -> str:
         What was done, for the run's log.
 
     """
-    found = open_standing(repo)
+    found = standing_issue.open_issues(repo, TITLE)
     if not found:
         text = body(end, run, run.url, 1)
-        gh("issue", "create", "--repo", repo, "--title", TITLE, "--body", text)
+        standing_issue.create(repo, TITLE, text)
         return "opened the standing issue"
     issue = found[0]
     previous = issue.body
@@ -344,9 +263,8 @@ def behind(repo: str, end: Checkpoint, run: Run) -> str:
     count_match = RUNS_BEHIND.search(previous)
     runs = int(count_match.group(1)) + 1 if count_match else 1
     text = body(end, run, since, runs)
-    number = str(issue.number)
-    gh("issue", "edit", number, "--repo", repo, "--body", text)
-    return f"updated the standing issue #{number} ({runs} runs behind)"
+    standing_issue.replace(repo, issue.number, text)
+    return f"updated the standing issue #{issue.number} ({runs} runs behind)"
 
 
 def caught_up(repo: str, end: Checkpoint, run_url: str) -> str:
@@ -356,13 +274,13 @@ def caught_up(repo: str, end: Checkpoint, run_url: str) -> str:
         What was done, for the run's log.
 
     """
-    found = open_standing(repo)
+    found = standing_issue.open_issues(repo, TITLE)
     if not found:
         return "no standing issue open"
     size = count(end.size, end.missing)
     comment = f"Caught up: {run_url} judged the log to its head, tree size {size}."
     for issue in found:
-        gh("issue", "close", str(issue.number), "--repo", repo, "--comment", comment)
+        standing_issue.close(repo, issue.number, comment)
     return "closed " + ", ".join(f"#{i.number}" for i in found)
 
 
@@ -406,7 +324,7 @@ def main(argv: list[str]) -> int:
     run = Run(start_count(start, args.start_kept), outcome.why, args.legs, args.run_url)
     try:
         done = keep(repo, outcome.standing, end, run)
-    except StandingIssueError as err:
+    except standing_issue.StandingIssueError as err:
         print(f"standing-issue: {err}; nothing was filed", file=sys.stderr)
         return EXIT_ERROR
     print(f"standing-issue: {done}")
