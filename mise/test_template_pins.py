@@ -126,8 +126,10 @@ class Scorecard(unittest.TestCase):
                 " self-contained by design)"
             ),
             "  templates pin one merged, RELEASED canon SHA and move together",
-            "  (#111, #233); scorecard.yml pins the canon action alone, never a",
-            "  reusable workflow (#1887).",
+            (
+                "  (#111, #233); scorecard.yml pins the canon action, never a"
+                " reusable (#1887)."
+            ),
         ]
         self.assertEqual(done.stderr.splitlines(), expected)
 

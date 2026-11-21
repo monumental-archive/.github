@@ -9528,8 +9528,8 @@ count=0
 for f in workflow-templates/*.y*ml; do
   lines=$(grep -E "uses:[[:space:]]*${canon_re}/" "${f}" || true)
   if [[ ${f##*/} == scorecard.* ]]; then
-    reusable=$(grep -vE "uses:[[:space:]]*${canon_re}/\.github/actions/canon@" <<< "${lines}" || true)
-    [[ -z ${reusable} ]] || bad="${bad} ${f}(pins a reusable workflow: self-contained by design)"
+    [[ -z $(grep -vE "uses:[[:space:]]*${canon_re}/\.github/actions/canon@" <<< "${lines}") ]] \
+      || bad="${bad} ${f}(pins a reusable workflow: self-contained by design)"
     lines=$(grep -E "uses:[[:space:]]*${canon_re}/\.github/actions/canon@" <<< "${lines}" || true)
   fi
   [[ -n ${lines} ]] || continue
@@ -9572,8 +9572,7 @@ fi
 if [[ -n ${bad} ]]; then
   echo "lint:template-pins: template pin violations:${bad}" >&2
   echo "  templates pin one merged, RELEASED canon SHA and move together" >&2
-  echo "  (#111, #233); scorecard.yml pins the canon action alone, never a" >&2
-  echo "  reusable workflow (#1887)." >&2
+  echo "  (#111, #233); scorecard.yml pins the canon action, never a reusable (#1887)." >&2
   exit 1
 fi
 echo "lint:template-pins: ${count} pins at one ancestor SHA, scorecard calls no reusable, released as${released}"
