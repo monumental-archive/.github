@@ -1,0 +1,197 @@
+# The org's settings against their records — scheduled, network-touching,
+# and named for what a red means: a live org or repository setting has
+# drifted from what this repository records (#1884). Failures page via
+# the Actions UI and notifications rather than blocking merges.
+#
+# Split out of the workflow once named `audit` by subject (#1884); which
+# legs belong on the canon's side rather than in a repo-*.yml subject
+# workflow is stated once, in slsa.yml.
+---
+name: org-settings
+
+"on":
+  schedule:
+    # Mondays 07:00 UTC, the first hour of the canon's Monday API
+    # budget (#1169), beside slsa.yml's first group. Every leg here was
+    # a first-hour leg of the one workflow these were split from
+    # (#1884), and none moved: the second hour is slsa.yml's source
+    # walks alone.
+    - cron: 0 7 * * 1
+  workflow_dispatch: {}
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  actions-allowlist:
+    name: the actions allowlist matches the live org
+    runs-on: ubuntu-26.04
+    # Same environment discipline as repo-settings drift, and for the
+    # same reason: `orgs/{org}/actions/permissions/selected-actions` is
+    # an org-scoped read the default job token CANNOT perform. The old
+    # comment here claimed the opposite, and the leg spent its CI life
+    # comparing the belt against `null` — asserting drift that did not
+    # exist and equally ready to assert clean that was not measured
+    # (#349 finding 10). A leg's token must be able to perform its read,
+    # or its only honest output is "I could not read".
+    environment: audit
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/mise/config.toml
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
+        with:
+          version: 2026.11.8
+          cache: false
+
+      - name: Reconcile the belt's allowlist with the live org setting
+        env:
+          GH_TOKEN: ${{ secrets.AUDIT_TOKEN }}
+        run: mise run audit:actions-allowlist
+
+  security-config:
+    name: the security records match the live org
+    runs-on: ubuntu-26.04
+    # #1213: the records in security/ against the live org — the
+    # derived default configuration both ways, its attachments, and the
+    # private member's effective settings. About a dozen requests, all
+    # reads. The code-security endpoints and a repository's
+    # security_and_analysis need Administration: read on the
+    # organisation and on the repositories, which the default job token
+    # cannot have.
+    environment: audit
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/mise/config.toml
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install mise and the pinned toolchain
+        id: mise
+        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
+        with:
+          version: 2026.11.8
+          cache: false
+
+      - name: Mint the audit App's read token
+        id: token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.AUDIT_APP_CLIENT_ID }}
+          private-key: ${{ secrets.AUDIT_APP_PRIVATE_KEY }}
+          # Read, and only what this leg reads: the org listing, the
+          # code security configurations, and each repository's
+          # security settings. Named so the token cannot widen when the
+          # App's grants do.
+          permission-metadata: read
+          permission-organization-administration: read
+          permission-administration: read
+          # Every repository in the installation: the subject is the
+          # population.
+          owner: ${{ github.repository_owner }} # zizmor: ignore[github-app]
+
+      - name: Hold the security records to the live org
+        # Runs after a refused mint too: until the App holds both
+        # Administration grants the mint is refused, and the leg's
+        # honest output is the CANNOT_JUDGE line naming them, not a
+        # bare mint failure (#1213).
+        if: ${{ !cancelled() && steps.mise.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+        run: mise run audit:security-config
+
+  baseline-drift:
+    name: every repository matches the settings baseline
+    runs-on: ubuntu-26.04
+    # The secret lives in this environment, not repo-wide: an org-admin
+    # token referenced ambiently is drawable by any job anyone adds to
+    # any workflow here; scoped to the environment, only jobs that
+    # declare it are ever issued the secret (zizmor secrets-outside-env,
+    # the audit persona's one standing finding).
+    environment: audit
+    permissions:
+      contents: read
+    env:
+      # The default token sees only the public view of repo metadata.
+      # AUDIT_TOKEN is a fine-grained PAT (all org repos, Administration:
+      # read AND write — the merge-settings fields in GET /repos are only
+      # returned to push/admin-capable identities, and the fine-grained
+      # read-only grant does not qualify; verified empirically 2026-08-09).
+      # It also carries Contents: read AND write, which this job does not
+      # need and the drafts job cannot work without (#604) — do not narrow
+      # the token to what this one line describes. And Issues: read, for
+      # the baseline label read, needed only on the private member: a
+      # public repository's labels need no grant (#1263).
+      GH_TOKEN: ${{ secrets.AUDIT_TOKEN }}
+      # Fine-grained PATs offer no Packages permission (measured
+      # 2026-08-12), so the org-packages visibility check carries its own
+      # minimal classic PAT: read:packages, nothing else.
+      PACKAGES_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check every repo against the baseline
+        run: ./settings/repo-baseline.sh check
+  adoption:
+    name: every repository carries its required workflows
+    runs-on: ubuntu-26.04
+    # Environment-scoped for the same reason drafts and baseline-drift
+    # are: the token this needs is org-wide, and a secret referenced
+    # repo-wide is drawable by any job anyone adds to any workflow here.
+    environment: audit
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/mise/config.toml
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
+        with:
+          version: 2026.11.8
+          cache: false
+
+      - name: Enumerate the population against the required stub set
+        # #349 S7, the #266 rule for every obligation: a repo missing a
+        # stub with no opt-out row is a red, never a silence.
+        env:
+          # NOT github.token: this reconciles the roster against the org
+          # listing by name in both directions and then reads every
+          # member's .github/workflows and tags, and the population
+          # contains a PRIVATE member (#692). The default job token is
+          # entitled in THIS repository alone — measured 2026-08-21, the
+          # listing it is served returns 8 of the org's 9 repositories,
+          # omitting exactly the private one, and contents reads on that
+          # member are 404. A roster member the listing does not confirm
+          # is reported ABSENT and never walked, so the leg reds every
+          # Monday on the credential rather than answering anything
+          # about that member's adoption. What the token must be able to
+          # do is Contents: read on EVERY member of the population,
+          # private ones included; AUDIT_TOKEN is the org-wide
+          # fine-grained PAT this workflow already carries for reads the
+          # public view cannot serve, and is set to All repositories
+          # (#749).
+          GH_TOKEN: ${{ secrets.AUDIT_TOKEN }}
+        run: mise run audit:adoption
+...

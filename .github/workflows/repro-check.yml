@@ -31,7 +31,7 @@
 # takes minutes of compile time and proves a property of the release,
 # not of a diff.
 ---
-name: repro-check
+name: reproducible-builds
 
 "on":
   workflow_call:

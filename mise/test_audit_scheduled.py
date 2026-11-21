@@ -18,6 +18,12 @@ collected by repo-own-audits.yml and by nothing else. A tree whose only
 caller is that workflow passes; a tree whose only caller is the retired
 single audit workflow is red, by name.
 
+The rows that matter for #1884: slsa.yml is the one canon workflow whose
+legs span both hours of the Monday API budget (#1169). Every leg but
+`plan` needs `plan` and names its group, and the second group is the
+three source walks and nothing else. A leg with no group would run in
+both hours, so a planted one is red, by name.
+
 GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. stdlib `unittest`,
 run through the gate as `mise run test`, which `ci` collects.
 """
@@ -31,6 +37,7 @@ from typing import override
 
 import decoded
 import hermetic
+import workflow_yaml
 
 BELT = Path(__file__).resolve().parent
 BASH = hermetic.tool("bash")
@@ -42,6 +49,10 @@ PIN = "6d6916fcdaa4e632bd12af51e8240af6b597d75e # v1.71.1"
 # tree-wide search for its name stays empty outside CHANGELOG.md.
 RETIRED = "repo-" + "audit.yml"
 CONFIG = '[tasks."audit:fuzz"]\nrun = "x"\n\n[tasks."audit:mutants"]\nrun = "x"\n'
+SLSA = BELT.parent / ".github" / "workflows" / "slsa.yml"
+# The source walks: about 3,500 of the Monday's 5,950 requests (#1169).
+SECOND = ["source-vsa", "release-tags", "blast-radius"]
+GROUPS = {f"needs.plan.outputs.legs == '{g}'": g for g in ("first", "second")}
 
 
 def body() -> str:
@@ -55,6 +66,59 @@ def body() -> str:
     tasks = decoded.as_object(config["tasks"], "tasks")
     task = decoded.as_object(tasks["lint:audit-scheduled"], "lint:audit-scheduled")
     return decoded.as_str(task["run"], "lint:audit-scheduled.run")
+
+
+def groups(document: dict[str, object]) -> tuple[dict[str, str], list[str]]:
+    """Read each leg's group, and name each leg that has none.
+
+    Returns:
+        Leg to group, and one finding per leg with no `needs: plan` or
+        no group `if:`.
+
+    """
+    found: dict[str, str] = {}
+    ungrouped: list[str] = []
+    for job_id, job in workflow_yaml.jobs(document).items():
+        if job_id == "plan":
+            continue
+        group = GROUPS.get(str(job.get("if")))
+        if job.get("needs") != "plan" or group is None:
+            ungrouped.append(
+                f"slsa.yml: {job_id} names no group, so it runs in both hours"
+            )
+            continue
+        found[job_id] = group
+    return found, ungrouped
+
+
+class SlsaGroups(unittest.TestCase):
+    """slsa.yml's legs keep their hours (#1169, #1884)."""
+
+    def test_every_leg_needs_the_plan_and_names_its_group(self) -> None:
+        """The tree: no leg of slsa.yml runs in both hours."""
+        found, ungrouped = groups(workflow_yaml.document(SLSA))
+        none: list[str] = []
+        self.assertEqual(none, ungrouped)
+        self.assertEqual(8, len(found))
+
+    def test_the_second_hour_is_the_source_walks_alone(self) -> None:
+        """Exactly the three source walks are in group `second`."""
+        found, _ = groups(workflow_yaml.document(SLSA))
+        second: list[str] = sorted(j for j, group in found.items() if group == "second")
+        want: list[str] = sorted(SECOND)
+        self.assertEqual(want, second)
+
+    def test_a_leg_with_no_group_is_red_by_name(self) -> None:
+        """A planted leg with no `needs`/`if` pair is named."""
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp)
+        planted = tmp / "slsa.yml"
+        leg = "  stray:\n    runs-on: ubuntu-26.04\n    steps:\n      - run: x\n"
+        text = SLSA.read_text(encoding="utf-8")
+        planted.write_text(text.replace("\njobs:\n", "\njobs:\n" + leg, 1), "utf-8")
+        _, ungrouped = groups(workflow_yaml.document(planted))
+        want: list[str] = ["slsa.yml: stray names no group, so it runs in both hours"]
+        self.assertEqual(want, ungrouped)
 
 
 class Scheduled(unittest.TestCase):
@@ -119,7 +183,10 @@ class Scheduled(unittest.TestCase):
                 "lint:audit-scheduled: belt audit task(s) no workflow ever runs:"
                 " audit:mutants"
             ),
-            "  schedule each in .github/workflows/ (audit.yml, publish.yml, a",
+            (
+                "  schedule each in .github/workflows/ (slsa.yml or a sibling,"
+                " publish.yml, a"
+            ),
             (
                 "  repo-*.yml subject workflow or repo-mutants.yml) or delete the"
                 " task — a check"

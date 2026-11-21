@@ -9,7 +9,7 @@
 # the callee. The canon adopts Python only (a root `cosmic-ray.toml`,
 # #1771); every other language's jobs are skipped here.
 ---
-name: self-mutants
+name: mutation-tests
 
 "on":
   schedule:

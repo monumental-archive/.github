@@ -731,7 +731,7 @@ dir = "{{cwd}}"
 # one job would have quietly lost that property, so it is restored by
 # hand here. Nothing is continue-on-error: measured while building
 # this, `continue-on-error` appears nowhere in the repository-side
-# subject workflows or audit.yml, so there is no per-leg tolerance ruling for a collected
+# subject workflows or the canon's org-side ones, so there is no per-leg tolerance ruling for a collected
 # task to be inconsistent with. A red audit task reds the audit.
 run = '''
 . "${ORG_BELT_DIR}/own-audits.sh"
@@ -7421,11 +7421,11 @@ command -v gh > /dev/null || {
 # probing with a stronger one would prove a capability nobody uses.
 #
 # What the probe proves is the grant of ONE token, which is the whole
-# contract: audit.yml wires the org-wide fine-grained AUDIT_TOKEN,
+# contract: slsa.yml wires the org-wide fine-grained AUDIT_TOKEN,
 # whose permissions are uniform across its repository selection. A
 # token whose capability varies per repository — `github.token`, push-
 # capable in its own repo and nowhere else — is out of contract, and
-# audit.yml says so at the wiring.
+# slsa.yml says so at the wiring.
 probe_repo="${GITHUB_REPOSITORY:-}"
 if [[ -z ${probe_repo} ]]; then
   probe_repo=$(gh repo view --json nameWithOwner --jq .nameWithOwner 2> /dev/null) || probe_repo=""
@@ -7465,7 +7465,7 @@ if ! probe_id=$(gh api "repos/${probe_repo}/releases" -X POST \
   rm -f "${probe_err}"
   echo "  The token needs Contents: read and write on the audited repositories" >&2
   echo "  — read to see drafts at all, write to make the one that proves it." >&2
-  echo "  audit.yml carries the environment-scoped AUDIT_TOKEN for this." >&2
+  echo "  slsa.yml carries the environment-scoped AUDIT_TOKEN for this." >&2
   exit 1
 fi
 rm -f "${probe_err}"
@@ -9121,19 +9121,21 @@ echo "lint:nested-permissions: ${checked} workflow(s) with uses: jobs clean"
 description = "Every audit:* task has a workflow that runs it (a check nobody runs is no check)"
 dir = "{{cwd}}"
 # Seam 1 of #358: which audit legs run was one fact derived at two sites
-# — the task list here and the job list in audit.yml — with no join.
+# — the task list here and the job list in the one audit workflow of
+# the day — with no join.
 # Both `audit:release-tags` and `audit:spec-drift` shipped as tasks,
 # were cited in prose as enforcing, and NO workflow ran either (#354,
 # fixed #356). This is the join: red on any audit:* task with no
 # `mise run audit:<name>` occurrence anywhere in .github/workflows/.
-# Anywhere, so the schedulers are whichever files run one: audit.yml,
-# publish.yml, the repo-*.yml subject workflows (#1858), and
+# Anywhere, so the schedulers are whichever files run one: the canon's
+# org-side subject workflows (slsa.yml, org-settings.yml,
+# pins-and-belt.yml, badges.yml; #1884), publish.yml, the repo-*.yml subject workflows (#1858), and
 # repo-mutants.yml for audit:mutants, which runs apart so a survivor
 # never reds another subject's run (#1355).
 # mise/test_audit_scheduled.py holds the message to those names.
 # Deliberately no opt-out row — an unscheduled audit task IS the
 # defect; a task nobody should run should not exist. Linted, not
-# generated: generating audit.yml from the task list would mean
+# generated: generating the scheduling workflows from the task list would mean
 # templating workflow YAML, and audit legs legitimately carry per-leg
 # permissions and env the task list cannot express.
 #
@@ -9177,7 +9179,7 @@ if [[ -f mise/config.toml ]]; then
     status=1
   elif [[ -n ${bad} ]]; then
     echo "lint:audit-scheduled: belt audit task(s) no workflow ever runs:${bad}" >&2
-    echo "  schedule each in .github/workflows/ (audit.yml, publish.yml, a" >&2
+    echo "  schedule each in .github/workflows/ (slsa.yml or a sibling, publish.yml, a" >&2
     echo "  repo-*.yml subject workflow or repo-mutants.yml) or delete the task — a check" >&2
     echo "  nobody runs is a claim, not a check (#358 seam 1)." >&2
     status=1

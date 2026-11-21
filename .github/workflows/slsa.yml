@@ -1,0 +1,482 @@
+# The canon's SLSA checks across the org — scheduled, network-touching,
+# and named for what a red means: the org's SLSA evidence does not hold
+# (#1884). Failures page via the Actions UI and notifications rather
+# than blocking merges.
+#
+# These legs, and those of org-settings.yml, pins-and-belt.yml and
+# badges.yml, were one workflow named `audit` until #1884; a red read
+# "Run failed: audit" and could be any of eighteen. Each file is now one
+# subject, and each job is named for the fact that holds when it is
+# green.
+#
+# WHAT BELONGS IN THESE FOUR RATHER THAN IN THE repo-*.yml SUBJECT
+# WORKFLOWS, stated once here because a leg landing on the wrong side
+# of it is invisible from inside the canon (#704). A leg belongs on
+# this side when its subject is the ORG or a CANON-OWNED artefact: it
+# enumerates the population (adoption, org-pins, drafts, release-tags,
+# signer-surface, caller-permissions, source-vsa, attestations,
+# blast-radius, badges), reads an org setting (actions-allowlist,
+# security-config), or reads something only this repository holds —
+# the belt's own config (biome-rules), the workflow templates
+# (template-pins), the pinned SLSA matrix (spec-drift). Those guard on
+# a canon-owned artefact, and lint:canon-policy (#579) is the join that
+# stops a deleted one turning them into silent skips — for the paths it
+# holds. It holds three, so the join has gaps: `docs`, `security/vex`
+# and `slsa/spec-source-matrix.txt` are guarded on and held by nothing.
+# Measured while classifying these legs for #704 and filed as #738,
+# rather than asserted away here.
+#
+# A leg belongs in a repo-*.yml subject workflow (repo-dependencies,
+# repo-deep-tests, repo-public-api, repo-records, repo-own-audits) when
+# its subject is a REPOSITORY'S OWN TREE — `git ls-files`,
+# `.github/workflows/`, the lockfile. That test is what #681 and #704
+# applied: links, actions and action-pins were scheduled here, walked
+# whatever tree they ran in, and so had only ever audited this one. This
+# repository is also a repository, and its own tree is walked by
+# calling those same workflows from self-dependencies.yml,
+# self-deep-tests.yml and self-records.yml (#1858), never by a second
+# copy of their jobs here.
+---
+name: slsa
+
+"on":
+  schedule:
+    # Mondays, in TWO groups ninety minutes apart, and the gap is the
+    # point (#1169). Measured 2026-11-14, each leg alone and to the
+    # end: attestations 2,389 REST requests, source-vsa 2,556,
+    # release-tags 473+, blast-radius 427, caller-permissions 103 —
+    # about 5,950 between them, against the 5,000 an hour one
+    # installation is served. Run together they starve each other
+    # whoever owns the token. So the source walks (source-vsa,
+    # release-tags, blast-radius: about 3,500) take the second hour and
+    # everything else the first. level-assert.yml (3,736) keeps 05:30
+    # for the same reason. Ninety minutes rather than sixty because a
+    # scheduled run starts late more often than on time. The `plan`
+    # job is the ONLY reader of these two strings.
+    - cron: 0 7 * * 1
+    - cron: 30 8 * * 1
+  workflow_dispatch:
+    inputs:
+      legs:
+        description: Which group to run — never both in one hour (#1169)
+        type: choice
+        default: first
+        options:
+          - first
+          - second
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: which group this run is
+    runs-on: ubuntu-26.04
+    permissions: {}
+    outputs:
+      legs: ${{ steps.pick.outputs.legs }}
+    steps:
+      - name: Name the group, or fail by name
+        id: pick
+        env:
+          SCHEDULE: ${{ github.event.schedule }}
+          LEGS: ${{ inputs.legs }}
+        # One place maps a trigger to a group, and an unknown trigger is
+        # RED here rather than a leg that quietly never runs: every
+        # other job gates on this output, so a cron edited above and
+        # not below would otherwise skip half the audit in a green run.
+        run: |
+          set -euo pipefail
+          case "${SCHEDULE:-dispatch:${LEGS}}" in
+            "0 7 * * 1" | dispatch:first) legs=first ;;
+            "30 8 * * 1" | dispatch:second) legs=second ;;
+            *)
+              # No canon tree in this job: the command is a literal, and the
+              # outside text follows on a plain line, never at its start (#1660).
+              echo "::error::audit: no group is declared for this trigger — add it to the plan job"
+              printf '  trigger: %q\n' "${SCHEDULE:-dispatch:${LEGS}}"
+              exit 1
+              ;;
+          esac
+          echo "legs=${legs}" >> "${GITHUB_OUTPUT}"
+  # The legs. Every one `needs: plan` and names its group; a leg added
+  # without that pair would run in both hours.
+  attestation-coverage:
+    name: every release has its evidence set
+    needs: plan
+    if: needs.plan.outputs.legs == 'first'
+    runs-on: ubuntu-26.04
+    # Environment-scoped, like org-pins: this leg walks the POPULATION,
+    # which has a private member, and the default token is served a
+    # listing without it — so the population guard trips and the leg is
+    # CANNOT_JUDGE every Monday (#803, #1142).
+    environment: audit
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/mise/config.toml
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Mint the audit App's read token
+        id: token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.AUDIT_APP_CLIENT_ID }}
+          private-key: ${{ secrets.AUDIT_APP_PRIVATE_KEY }}
+          # Read, and only what the walks read: releases, tags and
+          # trees; the attestation store; review history. Named here so
+          # the token cannot widen when the App's own grants do.
+          permission-contents: read
+          permission-metadata: read
+          permission-attestations: read
+          permission-pull-requests: read
+          # Every repository in the installation, on purpose: the
+          # subject of these walks IS the population.
+          owner: ${{ github.repository_owner }} # zizmor: ignore[github-app]
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
+        with:
+          version: 2026.11.8
+          cache: false
+
+      - name: Prove nothing ships unattested
+        env:
+          # Release and package enumeration plus attestation-store reads
+          # across org repos, the private member included. Red
+          # means an artifact shipped without its evidence set — a
+          # missing SBOM asset, class bundle, continuous-digest
+          # attestation, or base-image approval (#117).
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+        run: mise run audit:attestations
+
+  signer-surface:
+    name: every signing capability has a live caller
+    needs: plan
+    if: needs.plan.outputs.legs == 'first'
+    runs-on: ubuntu-26.04
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/mise/config.toml
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
+        with:
+          version: 2026.11.8
+          cache: false
+
+      - name: Reconcile the declared surface with the signer and its callers
+        # #349 S5: a signing capability with no live caller reddens here
+        # instead of waiting a year for an audit to read the file. The
+        # signer repo is public; the default token reads it.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: mise run audit:signer-surface
+
+  caller-permissions:
+    name: every caller grants what the canon's workflows ask
+    needs: plan
+    if: needs.plan.outputs.legs == 'first'
+    runs-on: ubuntu-26.04
+    # Environment-scoped, like org-pins: this leg walks the POPULATION,
+    # which has a private member, and the default token is served a
+    # listing without it — so the population guard trips and the leg is
+    # CANNOT_JUDGE every Monday (#803, #1142).
+    environment: audit
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/mise/config.toml
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Mint the audit App's read token
+        id: token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.AUDIT_APP_CLIENT_ID }}
+          private-key: ${{ secrets.AUDIT_APP_PRIVATE_KEY }}
+          # Read, and only what the walks read: releases, tags and
+          # trees; the attestation store; review history. Named here so
+          # the token cannot widen when the App's own grants do.
+          permission-contents: read
+          permission-metadata: read
+          permission-attestations: read
+          permission-pull-requests: read
+          # Every repository in the installation, on purpose: the
+          # subject of these walks IS the population.
+          owner: ${{ github.repository_owner }} # zizmor: ignore[github-app]
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
+        with:
+          version: 2026.11.8
+          cache: false
+
+      - name: Check every consumer grant against canon HEAD's requirements
+        # Seam 2 of #358, org-wide half: a consumer whose uses: grant is
+        # below what a callee's jobs ask for dies as startup_failure on
+        # its next pin bump, and Renovate bumps the SHA without touching
+        # the stub body. A finding is a forecast, not an outage. Reads
+        # every consumer's workflow files, the private member's too.
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+        run: mise run audit:caller-permissions
+
+  spec-drift:
+    name: the pinned SLSA source matrix matches upstream
+    needs: plan
+    if: needs.plan.outputs.legs == 'first'
+    runs-on: ubuntu-26.04
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/mise/config.toml
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
+        with:
+          version: 2026.11.8
+          cache: false
+
+      - name: Compare the live SLSA source matrix with the pinned snapshot
+        # Same gap as release-tags: slsa/requirements.toml names this task
+        # as what compares it against upstream, and nothing ran it. The
+        # spec page is fetched anonymously; no token needed.
+        run: mise run audit:spec-drift
+
+  drafts:
+    name: every draft release has its record
+    needs: plan
+    if: needs.plan.outputs.legs == 'first'
+    runs-on: ubuntu-26.04
+    # Environment-scoped for the same reason baseline-drift is: the token
+    # this needs is org-wide, and a secret referenced repo-wide is
+    # drawable by any job anyone adds to any workflow here.
+    environment: audit
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/mise/config.toml
+      # NOT github.token, and the difference is the audit: GitHub serves
+      # draft releases only to entitled identities, and the default token
+      # is entitled in THIS repository alone — every other repo's drafts
+      # would come back as an empty list with a 200. AUDIT_TOKEN is the
+      # org-wide fine-grained PAT this workflow already carries for reads
+      # the public view cannot serve.
+      #
+      # The task does not take that on trust. Before believing any
+      # listing it creates an ephemeral draft in this repository, asserts
+      # it comes back in the same listing, and deletes it (#604) — the
+      # grant it needs for that is Contents: read AND write on the
+      # audited repos: read to see drafts at all, write to make the one
+      # draft that proves the read. The measured grant, not the
+      # documented one, is what this task now depends on; the documented
+      # one is how it came to report zero against thirty-two.
+      #
+      # What the probe proves is the grant of ONE token, so the token
+      # here must be one whose permissions are uniform across the org.
+      # A fine-grained org-wide PAT is; github.token — capable in its
+      # own repository and nowhere else — would pass the probe here and
+      # then walk the other three repos blind. That is the contract, and
+      # it is the reason this line names a secret rather than a default.
+      GH_TOKEN: ${{ secrets.AUDIT_TOKEN }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
+        with:
+          version: 2026.11.8
+          cache: false
+
+      - name: Check every draft release for its record
+        run: mise run audit:drafts
+
+  source-vsa:
+    name: every source chain link verifies
+    needs: plan
+    if: needs.plan.outputs.legs == 'second'
+    runs-on: ubuntu-26.04
+    # Environment-scoped, like org-pins: this leg walks the POPULATION,
+    # which has a private member, and the default token is served a
+    # listing without it — so the population guard trips and the leg is
+    # CANNOT_JUDGE every Monday (#803, #1142).
+    environment: audit
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/mise/config.toml
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Mint the audit App's read token
+        id: token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.AUDIT_APP_CLIENT_ID }}
+          private-key: ${{ secrets.AUDIT_APP_PRIVATE_KEY }}
+          # Read, and only what the walks read: releases, tags and
+          # trees; the attestation store; review history. Named here so
+          # the token cannot widen when the App's own grants do.
+          permission-contents: read
+          permission-metadata: read
+          permission-attestations: read
+          permission-pull-requests: read
+          # Every repository in the installation, on purpose: the
+          # subject of these walks IS the population.
+          owner: ${{ github.repository_owner }} # zizmor: ignore[github-app]
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
+        with:
+          version: 2026.11.8
+          cache: false
+
+      - name: Walk every founded chain and verify each link
+        env:
+          # Enumerates the population, private member included; history,
+          # notes and Sigstore bundles are public. Red means a hole or a link that fails the
+          # published root of trust (#207).
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+        run: mise run audit:source-vsa
+
+  release-tags:
+    name: every release tag is inside the signing epoch
+    needs: plan
+    if: needs.plan.outputs.legs == 'second'
+    runs-on: ubuntu-26.04
+    # Environment-scoped, like org-pins: this leg walks the POPULATION,
+    # which has a private member, and the default token is served a
+    # listing without it — so the population guard trips and the leg is
+    # CANNOT_JUDGE every Monday (#803, #1142).
+    environment: audit
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/mise/config.toml
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Mint the audit App's read token
+        id: token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.AUDIT_APP_CLIENT_ID }}
+          private-key: ${{ secrets.AUDIT_APP_PRIVATE_KEY }}
+          # Read, and only what the walks read: releases, tags and
+          # trees; the attestation store; review history. Named here so
+          # the token cannot widen when the App's own grants do.
+          permission-contents: read
+          permission-metadata: read
+          permission-attestations: read
+          permission-pull-requests: read
+          # Every repository in the installation, on purpose: the
+          # subject of these walks IS the population.
+          owner: ${{ github.repository_owner }} # zizmor: ignore[github-app]
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
+        with:
+          version: 2026.11.8
+          cache: false
+
+      - name: Check every org release tag against the signing epoch
+        # #349 S4. The task shipped with #353 and docs already cite it as
+        # enforcing the epoch forward, but nothing scheduled it — a check
+        # no workflow runs is a check nobody runs (#354). Enumerates
+        # the population, private member included; the tags, notes and
+        # Sigstore bundles it then reads are public.
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+        run: mise run audit:release-tags
+
+  blast-radius:
+    name: no published SBOM carries an undecided advisory
+    needs: plan
+    if: needs.plan.outputs.legs == 'second'
+    runs-on: ubuntu-26.04
+    # Environment-scoped, like org-pins: this leg walks the POPULATION,
+    # which has a private member, and the default token is served a
+    # listing without it — so the population guard trips and the leg is
+    # CANNOT_JUDGE every Monday (#803, #1142).
+    # The token is the audit App's, not AUDIT_TOKEN (#1169): this is
+    # one of five legs that only READ and that cost hundreds or
+    # thousands of requests, and a personal token shares its hour with
+    # every repo's source attestation. The legs still on AUDIT_TOKEN
+    # are the cheap ones (under 30 requests each) and the two that
+    # need a WRITE grant the App is deliberately not given.
+    environment: audit
+    env:
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+      MISE_LOCKED: "1"
+      MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/mise/config.toml
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Mint the audit App's read token
+        id: token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.AUDIT_APP_CLIENT_ID }}
+          private-key: ${{ secrets.AUDIT_APP_PRIVATE_KEY }}
+          # Read, and only what the walks read: releases, tags and
+          # trees; the attestation store; review history. Named here so
+          # the token cannot widen when the App's own grants do.
+          permission-contents: read
+          permission-metadata: read
+          permission-attestations: read
+          permission-pull-requests: read
+          # Every repository in the installation, on purpose: the
+          # subject of these walks IS the population.
+          owner: ${{ github.repository_owner }} # zizmor: ignore[github-app]
+
+      - name: Install mise and the pinned toolchain
+        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
+        with:
+          version: 2026.11.8
+          cache: false
+
+      - name: Walk every published SBOM and report the blast radius
+        env:
+          # Release enumeration and asset download across org repos, the
+          # private member included. Red means a NEW,
+          # UNDECIDED advisory (no VEX in security/vex/), a failed asset
+          # verification, an unreadable SBOM, or a missed canary — the
+          # decided findings are in the summary, not the failure.
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+        run: mise run audit:blast-radius
+...

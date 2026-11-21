@@ -72,9 +72,12 @@ shared lives here and nowhere else. Five layers:
    SHA, and `$/.github/actions/canon` delivers the toolbelt at that same
    resolution, #165),
    `gate.yml`
-   (this repo self-applies it), `audit.yml` (Monday cron: link check +
-   repo-settings drift), `self-release.yml` (this repo versions itself
-   with its own release machinery via local `uses:` — canon tags are what
+   (this repo self-applies it), the Monday crons, one workflow per
+   subject (`slsa.yml`, `org-settings.yml`, `pins-and-belt.yml`,
+   `badges.yml`, and the `repo-*.yml` subjects the canon calls on
+   itself through `self-*.yml`; #1858, #1884), `self-release.yml`
+   (this repo versions itself with its own release machinery via
+   local `uses:` — canon tags are what
    every consumer pin, lefthook ref and preset reference resolve to, and
    what Renovate fans out; see #133, MAINTENANCE.md).
 5. **Settings as code**: `docs/rulesets.md` (the org-level branch + tag

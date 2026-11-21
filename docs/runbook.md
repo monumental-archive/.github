@@ -666,12 +666,14 @@ number and no consumer — spend them as freely as lab patch numbers
 the lab, publishing four classes at every Postgres major
 `docker/pgrx-base-images.toml` maps, proves it works.
 
-The `audit` workflow runs one at a time, and the forge holds a single
-pending run behind it: a second dispatch while one waits cancels the
-waiting one with no job run (three were lost that way on 2026-11-19
-— issue 1617). That is deliberate — it bounds the API budget an
-audit spends — so when an audit is already running or pending, read that
-run (`gh run list --workflow audit.yml --repo <repo>`) instead of
-dispatching again. The forge's `queue: max` would keep every pending
-dispatch; it is recorded on the actionlint watch (issue 1116) as the
-key `audit` takes once actionlint accepts it, which today it rejects.
+Each scheduled workflow (`slsa.yml`, `org-settings.yml`,
+`pins-and-belt.yml`, `badges.yml` and the `repo-*.yml` subjects) runs
+one at a time, and the forge holds a single pending run behind it: a
+second dispatch while one waits cancels the waiting one with no job
+run (three were lost that way on 2026-11-19 — issue 1617). That is
+deliberate — it bounds the API budget a run spends — so when one is
+already running or pending, read that run
+(`gh run list --workflow <file> --repo <repo>`) instead of dispatching
+again. The forge's `queue: max` would keep every pending dispatch; it
+is recorded on the actionlint watch (issue 1116) as the key these
+workflows take once actionlint accepts it, which today it rejects.
