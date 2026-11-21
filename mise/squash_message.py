@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import os
 import pathlib
+import re
 import string
 import subprocess
 import sys
@@ -33,6 +34,14 @@ import workflow_command
 
 # What bash's [[:space:]] matches: a body of only these is empty.
 SPACE = frozenset(string.whitespace)
+
+# stele's footer line (`internal/convcommit`, Conventional Commits §8):
+# a token, or the one spaced token, then ": " or " #". Leftmost-first
+# alternation, as Go's regexp reads it.
+FOOTER = re.compile(r"(BREAKING CHANGE|[A-Za-z0-9-]+)(?:: | #)")
+# The tokens whose value is the break's description (§12, §16); upper
+# case only, as stele's §15 reading has it.
+BREAKING_TOKENS = ("BREAKING CHANGE", "BREAKING-CHANGE")
 
 
 class StepError(Exception):
@@ -64,6 +73,82 @@ def header_line(body: str) -> None:
                 " splices the queue squash commit's signature after that line, the"
                 " commit is unverifiable and the queue drops the pull request"
                 " (#1529) — reword the BODY so no line starts with 'committer'"
+            )
+            raise StepError(msg)
+
+
+def _breaking_span(lines: list[str]) -> tuple[int, int] | None:
+    """Find the breaking-change footer as the release engine reads it.
+
+    Returns:
+        The footer's first and one-past-last line index, or None.
+
+    """
+    footers = [(i, m[1]) for i, line in enumerate(lines) if (m := FOOTER.match(line))]
+    for at, (start, token) in enumerate(footers):
+        if token in BREAKING_TOKENS:
+            end = footers[at + 1][0] if at + 1 < len(footers) else len(lines)
+            return start, end
+    return None
+
+
+def breaking(body: str) -> list[str]:
+    """Read a body's breaking-change footer as stele reads it (#1924).
+
+    stele's `internal/convcommit` reads line by line (Conventional
+    Commits §10): the footer section starts at the first line that is a
+    token and a separator, and each footer's value runs to the next such
+    line, or to the end — blank lines and paragraphs included. Of all
+    footer values, only the break's is ever rendered: it is the
+    "Breaking" entry of the release notes.
+
+    Returns:
+        The lines of the first `BREAKING CHANGE` or `BREAKING-CHANGE`
+        footer, from its token line up to the next footer line or the
+        end; empty when the body has none.
+
+    """
+    lines = body.split("\n")
+    span = _breaking_span(lines)
+    if span is None:
+        return []
+    start, end = span
+    return lines[start:end]
+
+
+def breaking_footer(body: str) -> None:
+    """Refuse text the release notes would publish as part of the break.
+
+    Everything from a `BREAKING CHANGE:` footer to the next footer is
+    the break's description in the release notes, so a paragraph after
+    it — a session's attribution line, most often — is published as
+    part of the breaking-change notice, in a changelog the tag keeps
+    (edtf#316). A blank line inside the footer followed by more text is
+    that shape; trailing blank lines are not. Text after any other
+    footer stays allowed: nothing renders those values.
+
+    Raises:
+        StepError: The breaking-change footer carries text after a
+            blank line.
+
+    """
+    lines = body.split("\n")
+    span = _breaking_span(lines)
+    if span is None:
+        return
+    start, end = span
+    blank = False
+    for index in range(start, end):
+        line = lines[index]
+        if not line.strip():
+            blank = True
+        elif blank:
+            msg = (
+                f"PR body line {index + 1} follows a blank line inside the BREAKING"
+                f" CHANGE footer: {line!r} — everything from a `BREAKING CHANGE:`"
+                " footer to the next footer is the break's description in the"
+                " release notes — move that text above the footer, so the footer"
+                " and any footers after it end the body"
             )
             raise StepError(msg)
 
@@ -104,6 +189,7 @@ def compose(title: str, body: str, number: str) -> str:
     message = f"{title} (#{number})\n"
     body = body.replace("\r", "")
     header_line(body)
+    breaking_footer(body)
     if any(c not in SPACE for c in body):
         message += f"\n{body}\n"
     return message
