@@ -7788,9 +7788,9 @@ unlisted=$(jq -r '.reconciliation.undeclared[]' <<< "${population}")
 absent=$(jq -r '.reconciliation.unlisted[]' <<< "${population}")
 repos=$(jq -r '.members[].repo' <<< "${population}")
 . "${ORG_BELT_DIR}/identity.sh"
+canon=$(org_identity repo)
 optout="security/adoption-optout.txt"
-fail=""
-blind=""
+fail="" blind=""
 checked=0
 seen=$(mktemp -d)
 for repo in ${repos}; do
@@ -7814,7 +7814,7 @@ done
 # tracks (#505, #354, #693). A disagreeing roster prints no members, so
 # it derives nothing and the reconciliation below says why.
 owed=""
-if [[ -n ${repos} ]] && ! owed=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/adoption_population.py" "$(org_identity repo)" <<< "${population}"); then
+if [[ -n ${repos} ]] && ! owed=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/adoption_population.py" "${canon}" <<< "${population}"); then
   echo "audit:adoption: the population document was refused, so no obligations were derived" >&2
   exit 1
 fi
