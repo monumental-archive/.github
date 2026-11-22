@@ -448,30 +448,50 @@ class Shards(unittest.TestCase):
         )
 
 
-# A property file that takes SLEEP seconds to import and says which
-# process imported it, so a row can tell one process from four, and
-# when its sleep began and ended, on the clock every process shares.
-SLEEP = 1.5
-SLEEPS = f"""\
+# A property file that meets its siblings before it finishes importing,
+# and says which process imported it, so a row can tell one process
+# from four. Each writes its pid into the directory PLANT_MEET names,
+# then waits until PLANT_PARTIES pid files are there. Run in turn, the
+# first can never meet the rest: past PLANT_CEILING seconds it fails,
+# and marks the rendezvous broken so the files after it fail at once.
+# Four files finishing at all proves they ran at once; no clock decides
+# the verdict.
+CEILING = 60
+MEETS = f"""\
 import os
 import sys
 import time
 import unittest
+from pathlib import Path
 from hypothesis import strategies as st
 from typed_hypothesis import given
 
 print("pid", os.getpid(), file=sys.stderr)
-began = time.time()
-time.sleep({SLEEP})
-print("slept", began, time.time(), file=sys.stderr)
+meet = Path(os.environ["PLANT_MEET"])
+parties = int(os.environ["PLANT_PARTIES"])
+ceiling = float(os.environ.get("PLANT_CEILING", "{CEILING}"))
+(meet / str(os.getpid())).touch()
+began = time.monotonic()
+while True:
+    if (meet / "broken").exists():
+        raise RuntimeError("rendezvous broken")
+    met = sum(1 for p in meet.iterdir() if p.name.isdigit())
+    if met >= parties:
+        break
+    if time.monotonic() - began > ceiling:
+        (meet / "broken").touch()
+        raise RuntimeError(
+            f"rendezvous timed out: {{met}} of {{parties}} after {{ceiling:g}} s"
+        )
+    time.sleep(0.01)
 
 
-class Sleeps(unittest.TestCase):
+class Meets(unittest.TestCase):
     @given(st.integers())
     def test_double_is_even(self, n):
         self.assertEqual((2 * n) % 2, 0)
 """
-FOUR = {f"{d}/prop_{d}.py": SLEEPS for d in "abcd"}
+FOUR = {f"{d}/prop_{d}.py": MEETS for d in "abcd"}
 
 
 def ran(name: str, index: int) -> str:
@@ -483,12 +503,12 @@ def ran(name: str, index: int) -> str:
     """
     return (
         f"{name}/prop_{name}.py:"
-        f" prop_{index}_prop_{name}.Sleeps.test_double_is_even ... ok\n"
+        f" prop_{index}_prop_{name}.Meets.test_double_is_even ... ok\n"
     )
 
 
 def pids(stderr: str) -> set[str]:
-    """Read the processes the SLEEPS files were imported in.
+    """Read the processes the MEETS files were imported in.
 
     Returns:
         Each distinct pid printed.
@@ -497,34 +517,26 @@ def pids(stderr: str) -> set[str]:
     return {line for line in stderr.splitlines() if line.startswith("pid ")}
 
 
-def span(stderr: str) -> float:
-    """Measure the wall time the SLEEPS files' sleeps took together.
-
-    Process start-up is left out: on a loaded machine it can outweigh
-    the sleeps, and it says nothing about whether the files overlapped.
-    Run in turn, the span is at least the sleeps' sum.
-
-    Returns:
-        From the first sleep's start to the last sleep's end, seconds.
-
-    """
-    slept = [
-        [float(word) for word in line.split()[1:]]
-        for line in stderr.splitlines()
-        if line.startswith("slept ")
-    ]
-    return max(end for _, end in slept) - min(began for began, _ in slept)
-
-
 class FanOut(unittest.TestCase):
     """No shard named: the runner fans out over its own shards (#1741)."""
 
+    def meet(self, parties: int, **env: str) -> dict[str, str]:
+        """Name a fresh rendezvous for `parties` files.
+
+        Returns:
+            The environment the MEETS files read, plus `env`.
+
+        """
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        return {"PLANT_MEET": scratch.name, "PLANT_PARTIES": str(parties)} | env
+
     def test_four_files_run_side_by_side_in_shard_order(self) -> None:
-        """Four sleeping files: less wall time than their sum, in order."""
-        done = run(GATE, FOUR, tool_dir=real_tool_dir(), env={"ORG_TEST_WORKERS": "8"})
+        """Four files that wait for each other all finish, in shard order."""
+        done = run(
+            GATE, FOUR, tool_dir=real_tool_dir(), env=self.meet(4, ORG_TEST_WORKERS="8")
+        )
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(done.stderr.count("slept "), 4, done.stderr)
-        self.assertLess(span(done.stderr), 4 * SLEEP, done.stderr)
         self.assertEqual(len(pids(done.stderr)), 4, done.stderr)
         self.assertEqual(
             done.stdout,
@@ -537,12 +549,32 @@ class FanOut(unittest.TestCase):
             + "test:python-properties: 4 test(s) in 4 file(s) held\n",
         )
 
+    def test_files_run_in_turn_never_meet(self) -> None:
+        """ORG_TEST_WORKERS=1 over files that wait for four: the ceiling fails it."""
+        done = run(
+            GATE,
+            FOUR,
+            tool_dir=real_tool_dir(),
+            env=self.meet(4, ORG_TEST_WORKERS="1", PLANT_CEILING="2"),
+        )
+        self.assertEqual(done.returncode, 1, done.stderr)
+        self.assertIn(
+            "test:python-properties: a/prop_a.py: could not be imported\n",
+            done.stderr,
+        )
+        self.assertEqual(
+            done.stderr.count("RuntimeError: rendezvous timed out: 1 of 4 after 2 s\n"),
+            1,
+            done.stderr,
+        )
+
     def test_one_worker_runs_every_file_in_one_process(self) -> None:
         """ORG_TEST_WORKERS=1: no shard, one pid, files loaded in turn."""
-        done = run(GATE, FOUR, tool_dir=real_tool_dir(), env={"ORG_TEST_WORKERS": "1"})
+        done = run(
+            GATE, FOUR, tool_dir=real_tool_dir(), env=self.meet(1, ORG_TEST_WORKERS="1")
+        )
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(len(pids(done.stderr)), 1, done.stderr)
-        self.assertGreaterEqual(span(done.stderr), 4 * SLEEP, done.stderr)
         self.assertEqual(
             done.stdout,
             "".join(ran(name, i) for i, name in enumerate("abcd"))
@@ -555,7 +587,7 @@ class FanOut(unittest.TestCase):
             GATE,
             FOUR,
             tool_dir=real_tool_dir(),
-            env={"ORG_TEST_WORKERS": "8", "ORG_PROPERTY_SHARD": "0/1"},
+            env=self.meet(1, ORG_TEST_WORKERS="8", ORG_PROPERTY_SHARD="0/1"),
         )
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(len(pids(done.stderr)), 1, done.stderr)

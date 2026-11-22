@@ -927,10 +927,19 @@ class Shards(Planted):
 
 
 class Order(Planted):
-    """A mutant's tests run fastest first, stopping at the first failure."""
+    """A mutant's tests run fastest first, stopping at the first failure.
 
-    def test_faster_file_first_and_its_failure_stops_the_second(self) -> None:
-        """Two files execute the line; the faster kills it; the other never runs."""
+    The times are planted in `plan.json`, so the order the row sees
+    follows the recorded measurements, never how busy the host is.
+    """
+
+    def judge_with_times(self, millis: dict[str, int]) -> hermetic.Called:
+        """Plan two files, record `millis` as their times, and judge.
+
+        Returns:
+            What the judge returned.
+
+        """
         self.plant(
             [ITEM_KILLED, ITEM_SURVIVOR],
             {
@@ -938,27 +947,48 @@ class Order(Planted):
                 f"pkg/mod.py {NUM} 0": SURVIVES,
             },
         )
-        # Named so that sorting by name would run the slow one first.
-        self.track("pkg/test_a.py", TEST.format(sleep=0.25, name="test_a"))
+        self.track("pkg/test_a.py", TEST.format(sleep=0, name="test_a"))
         self.git("rm", "-q", "pkg/test_mod.py")
         self.track("pkg/test_b.py", TEST.format(sleep=0, name="test_b"))
         self.git("commit", "-q", "-m", "two files")
         plan = self.tmp / "plan"
         self.assertEqual(self.call("plan", "cosmic-ray.toml", str(plan)).returncode, 0)
+        document = decoded.as_object(
+            decoded.load_json((plan / "plan.json").read_bytes()), "plan"
+        )
+        recorded = [
+            decoded.as_str(decoded.as_array(row, "a test")[0], "a test's file")
+            for row in decoded.as_array(document.get("tests"), "tests")
+        ]
+        self.assertEqual(sorted(recorded), sorted(millis))
+        document["tests"] = [[test, millis[test]] for test in recorded]
+        (plan / "plan.json").write_text(json.dumps(document), encoding="utf-8")
         pragmas = self.tmp / "pragmas.tsv"
         pragmas.touch()
         judged = self.call(
             "judge", str(plan), str(pragmas), "0/1", str(self.tmp / "runs")
         )
         self.assertEqual(judged.returncode, 1)
+        self.assertIn(
+            f"{LABEL}: survived: pkg/mod.py:2: {NUM} #0 (answer)", judged.stdout
+        )
+        return judged
+
+    def test_faster_file_first_and_its_failure_stops_the_second(self) -> None:
+        """Two files execute the line; the faster kills it; the other never runs."""
+        # Named so that sorting by name would run the slow one first.
+        self.judge_with_times({"pkg/test_a.py": 900, "pkg/test_b.py": 100})
         # Sorted by operator, the survivor (NumberReplacer) is judged first
         # and ran both files, fast first; the killed mutant ran the fast
         # file alone.
         want = ["test_b", "test_a", "test_b"]
         self.assertEqual(self.ran.read_text(encoding="utf-8").splitlines(), want)
-        self.assertIn(
-            f"{LABEL}: survived: pkg/mod.py:2: {NUM} #0 (answer)", judged.stdout
-        )
+
+    def test_the_order_follows_the_recorded_times(self) -> None:
+        """The opposite times give the opposite order."""
+        self.judge_with_times({"pkg/test_a.py": 100, "pkg/test_b.py": 900})
+        want = ["test_a", "test_b", "test_a"]
+        self.assertEqual(self.ran.read_text(encoding="utf-8").splitlines(), want)
 
 
 class Refusals(Planted):

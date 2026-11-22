@@ -659,8 +659,28 @@ class Cost(Planted):
         top, block = split_cost(r.stderr)
         return r, top, block
 
-    def test_the_cost_names_the_slowest_files_first(self) -> None:
-        """After the result, passing or failing: slowest first, then totals."""
+    def test_the_cost_lists_the_slowest_files_first(self) -> None:
+        """Planted seconds: listed slowest first, then the totals."""
+        result = ug.GuardedResult(io.StringIO(), descriptions=True, verbosity=1)
+        result.files = {"test_quick": 0.1, "test_slow": 0.4, "test_middle": 0.25}
+        result.workers = 3
+        result.wall = 0.5
+        block = ug.cost(result, "tests")
+        want = [
+            "cost of tests: the 3 slowest of 3 test files, seconds",
+            "      0.40  test_slow",
+            "      0.25  test_middle",
+            "      0.10  test_quick",
+            "cost of tests: 0.75 CPU-seconds, 3 workers, 0.50 s wall",
+        ]
+        self.assertEqual(block, want)
+
+    def test_the_cost_follows_the_result(self) -> None:
+        """After the result, passing or failing: each file, then totals.
+
+        The order is the planted row's: measured seconds can invert
+        under load, so this row asserts only lower bounds.
+        """
         sleeps = {"test_quick": 0.1, "test_slow": 0.4, "test_middle": 0.25}
         for failing, workers in ((f, w) for f in (False, True) for w in ("1", "3")):
             with self.subTest(failing=failing, workers=workers):
@@ -677,9 +697,8 @@ class Cost(Planted):
                     block[0], f"cost of {root}: the 3 slowest of 3 test files, seconds"
                 )
                 named = files(block)
-                order = [pair[0] for pair in named]
-                slowest: list[str] = ["test_slow", "test_middle", "test_quick"]
-                self.assertEqual(order, slowest)
+                names = sorted(pair[0] for pair in named)
+                self.assertEqual(names, sorted(sleeps))
                 for name, seconds in named:
                     self.assertGreaterEqual(seconds, sleeps[name])
                 cpu, used, wall = totals(block, str(root))
