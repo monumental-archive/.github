@@ -43,9 +43,14 @@ org_task "${label}"
 belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
 
 # git's default pathspec lets `*` cross a slash, so this lists every
-# `prop_*.py` at any depth; awk keeps the ones whose NAME starts prop_.
-files=$(git ls-files ':!vendor/**' '*prop_*.py' | awk -F/ '$NF ~ /^prop_.*\.py$/')
-[[ -n ${files} ]] || {
+# `prop_*.py` at any depth; the loop keeps the ones whose NAME starts
+# prop_.
+listed=() && org_tracked_read listed ':!vendor/**' '*prop_*.py'
+args=()
+for f in ${listed[@]+"${listed[@]}"}; do
+  [[ ${f##*/} != prop_*.py ]] || args+=("${f}")
+done
+[[ -n ${args[0]+set} ]] || {
   echo "${label}: no prop_*.py tracked, skipped"
   exit 0
 }
@@ -56,11 +61,17 @@ if [[ ${profile} == gate ]]; then
   # carries Hypothesis source as a string is not an importer. The
   # belt's own runner and its typed `given` are the two other files
   # that may.
-  others=$(git ls-files ':!vendor/**' '*.py' \
-    | awk -F/ '$NF !~ /^prop_.*\.py$/ && $0 != "mise/python_properties.py" && $0 != "mise/typed_hypothesis.py"')
+  python=() && org_tracked_read python ':!vendor/**' '*.py'
+  ordinary=()
+  for f in ${python[@]+"${python[@]}"}; do
+    case ${f} in
+      */prop_*.py | prop_*.py | mise/python_properties.py | mise/typed_hypothesis.py) ;;
+      *) ordinary+=("${f}") ;;
+    esac
+  done
   leaks=""
-  if [[ -n ${others} ]]; then
-    leaks=$(tr '\n' '\0' <<< "${others}" | xargs -0 "${ORG_PYTHON}" "${belt}/hypothesis_imports.py")
+  if [[ -n ${ordinary[0]+set} ]]; then
+    leaks=$(printf '%s\0' "${ordinary[@]}" | xargs -0 "${ORG_PYTHON}" "${belt}/hypothesis_imports.py")
   fi
   if [[ -n ${leaks} ]]; then
     detail=()
@@ -74,7 +85,7 @@ if [[ ${profile} == gate ]]; then
   # is typed `Callable[..., None]`, which the belt's mypy reds on every
   # property, and the typed one also refuses a strategy that does not
   # match its parameter.
-  untyped=$(tr '\n' '\0' <<< "${files}" | xargs -0 "${ORG_PYTHON}" "${belt}/hypothesis_imports.py" --given)
+  untyped=$(printf '%s\0' "${args[@]}" | xargs -0 "${ORG_PYTHON}" "${belt}/hypothesis_imports.py" --given)
   if [[ -n ${untyped} ]]; then
     detail=()
     while IFS= read -r file; do detail+=("${file}"); done <<< "${untyped}"
@@ -93,8 +104,4 @@ fi
 venv_python=$("${ORG_PYTHON}" "${belt}/tool_python.py" "${label}" hypothesis) || exit 1
 "${ORG_PYTHON}" "${belt}/tool_python.py" "${label}" hypothesis --site hypothesis > /dev/null || exit 1
 
-args=()
-while IFS= read -r f; do
-  args+=("${f}")
-done <<< "${files}"
 "${venv_python}" "${belt}/python_properties.py" "${profile}" "${args[@]}"

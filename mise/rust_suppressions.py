@@ -16,7 +16,7 @@ command:
   allow loses to the belt's later `-D` flags today and would win the
   day the flag order changed. One rule for every tool's table.
 
-Reads tracked paths, one per line, on stdin: each `Cargo.toml` is
+Reads tracked paths, NUL-separated on stdin (`org_tracked`, #1986): each `Cargo.toml` is
 decoded with `tomllib` (through `decoded`, never grepped), every other
 path is read as Rust source. Prints one finding per line to stderr,
 then the remedy, and exits 1; prints nothing and exits 0 when clean.
@@ -39,7 +39,7 @@ from pathlib import Path
 
 import findings as writer
 from decoded import UndecodableError, is_object, load_toml
-from typed_std import stdin_text
+from tracked import stdin_paths
 
 ALLOW = re.compile(r"\ballow\s*\(")
 INNER = re.compile(r"#\s*!\s*\[")
@@ -308,7 +308,7 @@ def main() -> int:
         A process exit status: 0 clean, 1 on any finding or refusal.
 
     """
-    names = [name for name in stdin_text().splitlines() if name]
+    names = stdin_paths()
     blanket = [name for name in names if group_suppressed(Path(name))]
     if blanket:
         writer.finding(

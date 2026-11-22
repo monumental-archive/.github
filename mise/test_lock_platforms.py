@@ -196,7 +196,7 @@ def check(
             )
         except RuntimeError:
             names = []  # the body's listing is empty here too
-        listing = "".join(f"{name}\n" for name in names)
+        listing = "".join(f"{name}\0" for name in names)
         return hermetic.call_main(
             lambda: lock_platforms.main([
                 "--defaults",
@@ -537,7 +537,7 @@ class Script(unittest.TestCase):
                 ],
                 cwd=root,
                 env=hermetic.env(MISE_TASK_NAME=NAME),
-                input=f"{STUB_PATH}\n",
+                input=f"{STUB_PATH}\0",
                 capture_output=True,
                 text=True,
                 check=False,

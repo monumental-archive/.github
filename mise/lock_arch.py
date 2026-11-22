@@ -10,8 +10,8 @@ an x86_64 binary's checksum (#811). That is a pin describing a platform
 other than the one it names, and it is silent — the install succeeds,
 the binary runs under emulation, and the lock looks complete.
 
-Reads lock paths on stdin, one per line. Prints one TAB-separated
-candidate per disagreeing entry:
+Reads lock paths on stdin, NUL-separated (`org_tracked`, #1986).
+Prints one TAB-separated candidate per disagreeing entry:
 
     lock  tool  platform  declared  asset  repo  tag  native_regex
 
@@ -29,7 +29,7 @@ import pathlib
 import sys
 
 from decoded import UndecodableError, as_object, is_object, load_toml
-from typed_std import stdin_text
+from tracked import stdin_paths
 
 # Architecture tokens as they appear in release asset names, longest
 # first so `x86_64` is decided before `x86` and `aarch64` before `arm`.
@@ -235,10 +235,7 @@ def main(argv: list[str]) -> int:
 
     """
     del argv  # the entries arrive on stdin, not as arguments
-    for raw in stdin_text().splitlines():
-        name = raw.strip()
-        if not name:
-            continue
+    for name in stdin_paths():
         path = pathlib.Path(name)
         if not path.is_file():
             continue

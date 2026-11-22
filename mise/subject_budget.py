@@ -14,8 +14,9 @@ The model: for every dependency this repo declares, render the widest
 subject the org's owned template could mint for it, and hold that to the
 ceiling. A dependency that passes cannot produce a title that does not.
 
-Reads the tracked file list on stdin, the belt convention: the task
-enumerates with `git ls-files` and the helper consumes, so the walk obeys
+Reads the tracked file list on stdin, NUL-separated, the belt
+convention: the task enumerates with `org_tracked` (#1986) and the
+helper consumes, so the walk obeys
 the standing rule in one place and this script starts no processes.
 """
 
@@ -29,6 +30,7 @@ from typing import TYPE_CHECKING, NamedTuple
 import decoded
 import findings as writer
 import typed_std
+from tracked import stdin_paths
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -1265,7 +1267,7 @@ def main() -> int:
         0 when every declared dependency fits, 1 when any does not.
 
     """
-    files = [Path(line) for line in typed_std.stdin_text().split("\n") if line]
+    files = [Path(path) for path in stdin_paths()]
     if Path("renovate.json") not in files:
         print("lint:subject-budget: no renovate.json tracked, skipped")
         return 0

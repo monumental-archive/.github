@@ -40,7 +40,6 @@ import gate_tools
 import hermetic
 
 BELT = Path(__file__).resolve().parent
-BASH = hermetic.tool("bash")
 GIT = hermetic.tool("git")
 SHA = "0123456789abcdef0123456789abcdef01234567"
 CHECKOUT = f"actions/checkout@{SHA} # v6.0.0"
@@ -184,27 +183,26 @@ class Planted(unittest.TestCase):
         )
 
     def selected(self) -> list[str]:
-        """Run the one selection in the planted tree.
+        """Run the one selection in the planted tree, as a task body does.
 
         Returns:
-            The paths it prints.
+            The paths it prints, NUL-separated (#1986).
 
         """
+        as_mise = hermetic.task_run(
+            "lint:zizmor",
+            '. "${ORG_BELT_DIR}/action-files.sh"; files=() && action_files files;'
+            ' printf "%s\\0" "${files[@]}"',
+        )
         done = subprocess.run(
-            [
-                BASH,
-                "-euo",
-                "pipefail",
-                "-c",
-                '. "${ORG_BELT_DIR}/action-files.sh"; action_files',
-            ],
+            as_mise.argv,
             cwd=self.tree,
-            env=self.env,
+            env=self.env | as_mise.env,
             capture_output=True,
             text=True,
             check=True,
         )
-        return done.stdout.splitlines()
+        return [path for path in done.stdout.split("\0") if path]
 
 
 class ActionsAllowed(Planted):

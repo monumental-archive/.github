@@ -260,7 +260,7 @@ class LicenceTexts(unittest.TestCase):
         with contextlib.redirect_stderr(err):
             self.assertEqual(2, lt.main(["licence_texts.py", "extra"]))
         self.assertEqual(
-            f"{TASK}: usage: git ls-files -z | licence_texts.py\n", err.getvalue()
+            f"{TASK}: usage: org_tracked | licence_texts.py\n", err.getvalue()
         )
 
 

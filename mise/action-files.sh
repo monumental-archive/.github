@@ -14,15 +14,16 @@
 # `.github/actions/<name>/action.yml` is. Naming a second fixed
 # directory was rejected: the next layout would be a third.
 #
-# Tracked files only (git ls-files), never a walker, and vendor/ is not
-# ours to lint. The pathspecs keep git's default meaning, the one
-# mise/gate-tools.toml's `when` rows speak, so the gate installs pinact
-# and zizmor wherever this selects a file; `*action.y*ml` also reaches
-# `my-action.yml`, and the filter keeps exact file names only. git runs
-# on its own, so its failure is the caller's failure; awk, not grep, so
-# no match is an empty list, never an exit status.
-action_files() { # usage: action_files -> one path per line on stdout
-  local listed
-  listed=$(git ls-files ':!vendor/**' ".github/workflows/*.y*ml" "*action.y*ml") || return
-  awk '/^\.github\/workflows\/.*\.y.*ml$/ || /(^|\/)action\.ya?ml$/' <<< "${listed}"
+# Tracked files only (org_tracked_read, #1986), never a walker, and
+# vendor/ is not ours to lint. The pathspecs name the file names
+# exactly, in git's default meaning: `.github/workflows/*.y*ml` (at any
+# depth below it), `action.yml` / `action.yaml` at the root, and
+# `*/action.yml` / `*/action.yaml` at any depth, which no
+# `my-action.yml` matches. mise/gate-tools.toml's `when` rows name the
+# wider `*action.y*ml`, so the gate installs pinact and zizmor wherever
+# this selects a file. The caller names the array it fills; git's
+# failure is the function's.
+action_files() { # usage: <array>=() && action_files <array>
+  org_tracked_read "$1" ':!vendor/**' ".github/workflows/*.y*ml" \
+    action.yml action.yaml "*/action.yml" "*/action.yaml"
 }

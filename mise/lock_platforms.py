@@ -15,8 +15,8 @@ Usage:
     lock_platforms.py --defaults <canon publish.yml> --config <mise config>
                       --lock <mise.lock> < workflow-paths
 
-The workflows, one path per line on stdin, are the repository's tracked
-ones; the jobs among them that call the canon's publish.yml are the
+The workflows, NUL-separated on stdin (`org_tracked`, #1986), are the
+repository's tracked ones; the jobs among them that call the canon's publish.yml are the
 publish stub. The declared
 targets are read, never guessed: the stub's own `binary-targets:` /
 `go-targets:` when it sets them, else the default the canon's
@@ -37,7 +37,7 @@ import sys
 
 import findings
 from decoded import UndecodableError, as_object, is_array, is_object, load_toml
-from typed_std import stdin_text
+from tracked import stdin_paths
 
 NAME = "lint:lock-platforms"
 
@@ -404,7 +404,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--config", required=True, type=pathlib.Path)
     parser.add_argument("--lock", required=True, type=pathlib.Path)
     args = parser.parse_args(argv, namespace=Args())
-    workflows = [pathlib.Path(line) for line in stdin_text().splitlines() if line]
+    workflows = [pathlib.Path(path) for path in stdin_paths()]
     try:
         platforms, stubs = declared(workflows, canon_defaults(args.defaults))
     except UnreadableError as err:

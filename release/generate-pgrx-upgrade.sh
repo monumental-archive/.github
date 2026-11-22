@@ -246,9 +246,11 @@ for control in "${controls[@]}"; do
   # read-only, so the traversal bit is set here, once, on the host.
   chmod 755 "${work}"
   mkdir -p "${work}/prevroot" "${work}/out"
-  # The writers of findings and workflow commands, where both containers
+  # The writers of findings and workflow commands, and the tracked-file
+  # producer the findings writer sources (#1986), where both containers
   # read /work.
-  cp "${canon}/mise/findings.sh" "${canon}/mise/workflow-command.sh" "${work}/"
+  cp "${canon}/mise/findings.sh" "${canon}/mise/workflow-command.sh" \
+    "${canon}/mise/tracked.sh" "${work}/"
 
   echo "deriving ${name}: ${prev} -> ${VERSION} (pg${pg})"
   gh release download "${prev_tag}" --repo "${GITHUB_REPOSITORY}" \

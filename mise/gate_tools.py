@@ -5,7 +5,8 @@ The gate job used to install the whole belt in every repository and then
 skip the lints that did not apply: 34 tools for 74 lints, 29 of which
 printed "skipped" on stele. `mise/gate-tools.toml` says, for every tool
 the belt pins, the tracked-file condition under which some gate task that
-calls it does not skip; this helper reads `git ls-files` against it.
+calls it does not skip; this helper reads the tracked files (mise/tracked.py)
+against it.
 
 A tool is needed when any of:
 
@@ -54,8 +55,6 @@ import fnmatch
 import hashlib
 import os
 import re
-import shutil
-import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -69,10 +68,10 @@ import caller_pins
 import decoded
 import findings
 import typed_std
+from tracked import tracked as git_tracked
 
 HERE = Path(__file__).resolve().parent
 TABLE = HERE / "gate-tools.toml"
-GIT = shutil.which("git") or "git"
 
 # mise's own homes for a repository's tasks, besides its config's [tasks].
 TASK_DIRS = (
@@ -341,19 +340,11 @@ def tracked_files(root: Path) -> list[str]:
     """List the tree's tracked files.
 
     Returns:
-        `git ls-files` in the root, one path per entry.
+        The tracked files in the root, from mise/tracked.py (#1986),
+        which keeps every `GIT_*` variable from git (#857).
 
     """
-    # No `GIT_*` variable: git exports GIT_DIR to hooks in a linked
-    # worktree, and `-C` does not outrank it (#857).
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-    out = subprocess.run(
-        [GIT, "-C", str(root), "ls-files", "-z"],
-        capture_output=True,
-        check=True,
-        env=env,
-    ).stdout.decode("utf-8", errors="replace")
-    return [p for p in out.split("\0") if p]
+    return git_tracked(root=root)
 
 
 class Args(argparse.Namespace):

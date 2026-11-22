@@ -50,8 +50,9 @@ CLEAN_ENV = {
 
 # What the body reaches for besides go, and `cat` for the stub, linked
 # into a PATH of their own so the go-missing row can leave go off it on
-# any machine.
-TOOLS = ("git", "dirname", "grep", "awk", "cat")
+# any machine. `mktemp` and `rm` are org_tracked_read's: it files the
+# tracked list before reading it (#1986).
+TOOLS = ("git", "dirname", "grep", "awk", "cat", "mktemp", "rm")
 
 # Stands in for go. `test -list` prints the planted listing and exits
 # with the planted status; the run prints a seed failure naming each

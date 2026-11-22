@@ -86,14 +86,16 @@ summary() { # summary <row>: the counts the totals job reads
   printf '%s\n' "$1" > "${MUTANTS_SUMMARY_DIR}/typescript.tsv"
 }
 
-others=$(git ls-files -- 'stryker.conf.*' 'stryker.config.*' '.stryker.conf.*' \
-  | grep -v -x -F "${adoption}" || true)
-if [[ -n ${others} ]]; then
-  while IFS= read -r item; do
-    [[ -n ${item} ]] || continue
+configs=() && org_tracked_read configs 'stryker.conf.*' 'stryker.config.*' '.stryker.conf.*'
+others=()
+for f in ${configs[@]+"${configs[@]}"}; do
+  [[ ${f} == "${adoption}" ]] || others+=("${f}")
+done
+if [[ -n ${others[0]+set} ]]; then
+  for item in "${others[@]}"; do
     org_finding "typescript" "a StrykerJS config the leg cannot read: ${item}" \
       "the leg reads ${adoption} only; move the config there"
-  done <<< "${others}"
+  done
   exit 1
 fi
 if ! git ls-files --error-unmatch -- "${adoption}" > /dev/null 2>&1; then

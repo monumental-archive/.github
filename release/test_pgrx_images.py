@@ -42,6 +42,7 @@ CANON = RELEASE.parent
 WRITER_MOUNT = (
     f"-v {CANON}/mise/findings.sh:/opt/org/findings.sh:ro"
     f" -v {CANON}/mise/workflow-command.sh:/opt/org/workflow-command.sh:ro"
+    f" -v {CANON}/mise/tracked.sh:/opt/org/tracked.sh:ro"
     " -e ORG_FINDINGS_WRITER=/opt/org/findings.sh"
 )
 STAGE = RELEASE / "pgrx_images.py"

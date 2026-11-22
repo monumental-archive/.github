@@ -57,8 +57,12 @@ unknown() {
 rc=0
 trap 'rc=$?; cleanup; [ -n "${org_done:-}" ] || [ "${rc}" -ne 0 ] || rc=1; exit "${rc}"' EXIT
 
-mods=$(git ls-files ':!vendor/**' ':!*/vendor/*' "go.mod" "*/go.mod") || exit 1
-[[ -n ${mods} ]] || {
+# A listing that fails is red, never a shorter list: this script runs
+# without errexit, so the failure is carried by `|| exit 1`, and
+# org_tracked_read returns 1 on every failure path itself.
+mods=()
+org_tracked_read mods ':!vendor/**' ':!*/vendor/*' "go.mod" "*/go.mod" || exit 1
+[[ -n ${mods[0]+set} ]] || {
   [[ -z ${FUZZ_TARGET:-} ]] || unknown audit:go-fuzz "of this tree (no go.mod tracked)"
   echo "audit:go-fuzz: no go.mod tracked, skipped"
   org_done=1
@@ -93,8 +97,7 @@ half=$((secs / 2))
 org_fuzz_stage_dir || exit 1
 work=$(mktemp -d) || exit 1
 root=$(pwd -P) || exit 1
-while IFS= read -r m; do
-  [[ -n ${m} ]] || continue
+for m in "${mods[@]}"; do
   d=$(dirname "${m}")
   pkgs=$(cd "${d}" && go list ./... 2> /dev/null) || pkgs=""
   while IFS= read -r pkg; do
@@ -179,7 +182,7 @@ while IFS= read -r m; do
  ${n} input(s) kept, ${crashes} crash(es); plain: ${plain}; race: ${race}"
     done <<< "${targets}"
   done <<< "${pkgs}"
-done <<< "${mods}"
+done
 [[ ${ran} -gt 0 || -z ${FUZZ_TARGET:-} ]] || unknown audit:go-fuzz "of this tree's Go packages"
 [[ ${ran} -gt 0 ]] || {
   echo "audit:go-fuzz: no Go fuzz targets, skipped"

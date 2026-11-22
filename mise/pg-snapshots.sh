@@ -29,8 +29,8 @@ unset org__here
 
 belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
 
-manifests=$(git ls-files ':!vendor/**' "Cargo.toml" "*/Cargo.toml")
-[[ -n ${manifests} ]] || exit 0
+manifests=() && org_tracked_read manifests ':!vendor/**' "Cargo.toml" "*/Cargo.toml"
+[[ -n ${manifests[0]+set} ]] || exit 0
 command -v cargo > /dev/null || {
   org_finding "" "Cargo.toml present but cargo missing — pin rust in mise.toml"
   exit 1
@@ -49,7 +49,7 @@ while IFS=$'\t' read -r record spec kind majors dir; do
     exit 1
   }
   # A crate at the workspace root is `.`; the path is spelled the way
-  # `git ls-files` spells it, because lint:sql compares the two as text.
+  # `org_tracked` spells it, because lint:sql compares the two as text.
   snapshot="${dir}/schema.snapshot.sql"
   [[ ${dir} != "." ]] || snapshot="schema.snapshot.sql"
   printf '%s\t%s\t%s\t%s\n' "${snapshot}" "${spec%@*}" "${majors##*,}" "${dir}"

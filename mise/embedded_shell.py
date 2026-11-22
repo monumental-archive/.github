@@ -3,7 +3,7 @@
 
 The gap this closes, measured rather than assumed:
 
-  - shfmt cannot see inside YAML. `git ls-files | xargs shfmt --find`
+  - shfmt cannot see inside YAML. `org_tracked | xargs -0 shfmt --find`
     returns zero workflow files, so 2584 lines of shell in `run:` blocks
     were never formatted by anything. That is where the 268-character
     lines came from.

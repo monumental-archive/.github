@@ -9,9 +9,9 @@ inside the job, after the runner and the install were spent.
 
 `mise/audit-legs.toml` says, for every job of the reusable subject
 workflows, the tracked-file condition under which its task does not
-skip. Each workflow's first job, `applies`, runs this helper over
-`git ls-files` with no toolchain installed, and each conditional job
-carries `if: needs.applies.outputs.<job> == 'true'`, so GitHub skips it
+skip. Each workflow's first job, `applies`, runs this helper over the
+tracked files (mise/tracked.py) with no toolchain installed, and each
+conditional job carries `if: needs.applies.outputs.<job> == 'true'`, so GitHub skips it
 without starting a runner. The pathspec meaning and the tracked-file
 listing are #1410's (`gate_tools.matches`, `gate_tools.tracked_files`):
 one matcher, not two.

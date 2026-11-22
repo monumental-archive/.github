@@ -55,6 +55,7 @@ import decoded
 import findings
 import startup_hook
 import tool_python
+from tracked import tracked as git_tracked
 
 LABEL = "audit:mutants: python"
 EXIT_RED = 1
@@ -382,8 +383,7 @@ def git_files(*pathspecs: str) -> list[str]:
         The paths, sorted.
 
     """
-    listed = git("ls-files", "-z", "--", *pathspecs).stdout
-    return sorted(p for p in listed.split("\0") if p)
+    return sorted(git_tracked(*pathspecs))
 
 
 def dirty(module_paths: list[str]) -> list[str]:

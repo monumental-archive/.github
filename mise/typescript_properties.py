@@ -43,7 +43,8 @@ Subcommands, run from the repository root:
                              property file and each property file that
                              restates the seed or run count
   stage DIR [CONFIG]         writes the wrapper and setup file into
-                             DIR; the property files come on stdin
+                             DIR; the property files come on stdin,
+                             NUL-separated (org_tracked, #1986)
   verify REPORT FILE...      exits 1 unless every FILE ran, with at
                              least one test, in vitest's JSON report
   collected LIST FILE...     exits 1, printing each, when a FILE is in
@@ -62,6 +63,7 @@ import coverage_js_runner
 import decoded
 import findings
 import typed_std
+from tracked import stdin_paths
 
 EXIT_USAGE = 2
 # stage takes a directory and, optionally, the config; verify a report
@@ -356,7 +358,7 @@ def main(argv: list[str]) -> int:
     if command == "lint":
         return lint(args)
     if command == "stage" and len(args) in STAGE_ARGS:
-        files = [line for line in typed_std.stdin_text().splitlines() if line]
+        files = stdin_paths()
         return stage(args[0], args[1] if len(args) > 1 else None, files)
     if command == "verify" and len(args) >= VERIFY_MIN_ARGS:
         return verify(args[0], args[1:])

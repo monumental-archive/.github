@@ -44,16 +44,19 @@ names it in `BASH_ENV`, beside the belt (`${ORG_BELT_DIR}/findings.sh`),
 and bash sources that file before it runs any non-interactive script.
 So every task body under the belt's shell (`bash --norc -euo pipefail -c`),
 and every bash a body starts, can call `org_finding` and
-`org_finding_annotated`. It holds locally through the clone's belt
-link and in CI through `MISE_GLOBAL_CONFIG_FILE`, as `ORG_BELT_DIR`
-does. With no belt, `BASH_ENV` is empty and nothing is sourced. A
-`sh` script never reads it.
+`org_finding_annotated`, and `org_tracked` and `org_tracked_read`,
+the one producer of the tracked-file list (`mise/tracked.sh`, #1986).
+It holds locally through the clone's belt link and in CI through
+`MISE_GLOBAL_CONFIG_FILE`, as `ORG_BELT_DIR` does. With no belt,
+`BASH_ENV` is empty and nothing is sourced. A `sh` script never reads
+it.
 
 A test that runs a body by hand gets the shell and the variables
 mise gives it from `hermetic.task_run`. Loading the writer runs no
 command, so a bash whose `PATH` holds nothing still has it. The cost,
-accepted by the owner (#1934): a fault in `findings.sh` or
-`workflow-command.sh` reaches every bash under the belt's environment.
+accepted by the owner (#1934): a fault in `findings.sh`,
+`workflow-command.sh` or `tracked.sh` reaches every bash under the
+belt's environment.
 
 A script that knows its task names it with `org_task <task>` once it
 has the writer (#1979). Under `mise run` the name mise gave stands;

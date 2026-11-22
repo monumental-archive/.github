@@ -47,6 +47,7 @@ import sys
 from pathlib import Path
 
 import findings
+import tracked
 
 GIT = shutil.which("git") or "git"
 DECISIONS = "security/vex/*.openvex.json"
@@ -118,7 +119,7 @@ def count() -> int:
         0: at most one, or skipped. 1: more than one.
 
     """
-    if not git("ls-files", "--", DECISIONS).strip():
+    if not tracked.tracked(DECISIONS):
         print(f"{NAME}: no VEX decisions tracked, skipped")
         return 0
     if os.environ.get("GITHUB_EVENT_NAME") == "merge_group":

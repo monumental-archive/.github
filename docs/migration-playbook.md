@@ -219,7 +219,8 @@ a fresh session **started in the target repo's checkout**.
 - `pull_request` CI sits on a synthetic merge commit; `lint:commits`
   already handles it. Do not "fix" ranges per-repo.
 - Tool walkers find lefthook's remote cache inside `.git/`; belt tasks
-  use `git ls-files`. Repo-added lint tasks must do the same.
+  read the tracked files from `org_tracked`, NUL-separated (#1986).
+  Repo-added lint tasks must do the same.
 - Fine-grained PATs are REST-only, and Administration needs read+write
   to see merge-settings fields.
 - Transferred repos inherit **nothing** automatically: not the security

@@ -46,9 +46,11 @@ printf '%s\n' "${line}" >> "${PLANT_LOG}"
 [[ $1 != check || -z ${PLANT_CHECK_FAILS:-} ]] || exit 101
 exit 0
 """
+# Answers the belt's one producer of the tracked list (#1986) and
+# nothing else: `git -c core.quotePath=false ls-files -z -- …`.
 GIT_STUB = """#!/usr/bin/env bash
-[[ $1 == ls-files ]] || exit 99
-echo Cargo.toml
+[[ "$1 $2 $3 $4" == "-c core.quotePath=false ls-files -z" ]] || exit 99
+printf 'Cargo.toml\\0'
 """
 RUSTUP_STUB = """#!/usr/bin/env bash
 [[ $* == "component list --installed" ]] || exit 99
@@ -162,10 +164,15 @@ class TwoExtensions(unittest.TestCase):
             The finished process.
 
         """
+        # BASH_ENV, as the belt's [env] sets it, so the body has the
+        # writer and org_tracked_read (#1986); `--norc`, as the belt's
+        # shell has it, is what lets BASH_ENV through whatever stdin is
+        # (hermetic.task_run).
+        as_mise = hermetic.task_run(task, body(task))
         return subprocess.run(
-            [BASH, "-c", body(task)],
+            [BASH, "--norc", "-c", body(task)],
             cwd=self.tree,
-            env=self.env,
+            env=self.env | as_mise.env,
             capture_output=True,
             text=True,
             check=False,

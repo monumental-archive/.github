@@ -47,6 +47,10 @@
 # starts, a Python helper above all, records under the same name rather
 # than its own file's. A name mise gave wins.
 #
+# It also loads `org_tracked` (mise/tracked.sh, #1986), the one producer
+# of the tracked-file list, so every task body and every bash a body
+# starts has it.
+#
 # Loading this file runs no command (#1934): under BASH_ENV every bash
 # sources it, whatever its PATH holds, so the directory is found by
 # parameter expansion alone. A path with no slash is in this directory.
@@ -55,6 +59,8 @@ org__findings_dir=${BASH_SOURCE[0]%/*}
 [[ ${org__findings_dir} != "${BASH_SOURCE[0]}" ]] || org__findings_dir=.
 # shellcheck source=mise/workflow-command.sh
 . "${org__findings_dir:-}/workflow-command.sh"
+# shellcheck source=mise/tracked.sh
+. "${org__findings_dir:-}/tracked.sh"
 unset org__findings_dir
 
 # A belt that is not the one this tree pins answers for nothing (#1988).

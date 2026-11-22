@@ -29,9 +29,9 @@ unset org__here
 org_fuzz_corpus_copy() {
   local target="$1" dest="$2" list file to copied=0
   list=$(mktemp) || return 1
-  if ! git ls-files -z -- "fuzz/corpus/${target}/" > "${list}"; then
+  if ! org_tracked "fuzz/corpus/${target}/" > "${list}"; then
     rm -f -- "${list}"
-    org_finding "" "git ls-files failed listing fuzz/corpus/${target}/"
+    org_finding "" "git could not list the tracked fuzz/corpus/${target}/"
     return 1
   fi
   while IFS= read -r -d '' file; do

@@ -60,8 +60,8 @@ case "${mode}" in
 esac
 belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
 
-manifests=$(git ls-files ':!vendor/**' "Cargo.toml" "*/Cargo.toml")
-[[ -n ${manifests} ]] || {
+manifests=() && org_tracked_read manifests ':!vendor/**' "Cargo.toml" "*/Cargo.toml"
+[[ -n ${manifests[0]+set} ]] || {
   echo "${label}: no Cargo.toml tracked, skipped"
   exit 0
 }
