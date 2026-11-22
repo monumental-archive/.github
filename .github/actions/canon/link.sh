@@ -27,14 +27,16 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 # A tree without the belt is refused before anything is read from it,
 # so its one command is a literal and the path follows on a plain line.
-if [[ ! -f "${root}/mise/config.toml" || ! -f "${root}/mise/workflow-command.sh" ]]; then
-  echo "::error::the resolved canon tree has no mise/config.toml or mise/workflow-command.sh — not a canon tree"
+if [[ ! -f "${root}/mise/config.toml" || ! -f "${root}/mise/findings.sh" ]]; then
+  echo "::error::the resolved canon tree has no mise/config.toml or mise/findings.sh — not a canon tree"
   printf '  resolved: %q\n' "${root}"
   exit 1
 fi
-# The canon's one writer of workflow commands (#1660), in this tree.
-# shellcheck source=mise/workflow-command.sh
-. "${root}/mise/workflow-command.sh"
+# The canon's finding writer (#1890, #1934), in this tree: it reports
+# through the one writer of workflow commands (#1660) beside it. No task
+# runs this script, so a finding names the script's own file name.
+# shellcheck source=mise/findings.sh
+. "${root}/mise/findings.sh"
 case "${root}" in
   */_actions/"${CANON_REPOSITORY}"/*)
     # Remote resolution: the path segment under _actions is the ref the
@@ -48,7 +50,7 @@ case "${root}" in
     if [[ ${GITHUB_REPOSITORY} != "${CANON_REPOSITORY}" ]]; then
       emsg="canon action resolved to '${root}' in ${GITHUB_REPOSITORY} — not an _actions path and not a canon"
       emsg+=" self-call"
-      org_error "${emsg}"
+      org_finding_annotated "" "${emsg}"
       exit 1
     fi
     ref="${GITHUB_SHA}"

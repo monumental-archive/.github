@@ -168,8 +168,8 @@ class InstallTheBeltsPython(unittest.TestCase):
         done = self.install(status=1)
         self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
         self.assertEqual(
-            done.stdout,
-            f"::error::the belt's python: mise could not install python {VERSION}"
+            done.stderr,
+            f"::error::python.sh: mise could not install python {VERSION}"
             f" from {self.root / 'mise' / 'mise.lock'}\n",
         )
         self.assertEqual(self.env_file.read_text(encoding="utf-8"), "")
@@ -180,8 +180,8 @@ class InstallTheBeltsPython(unittest.TestCase):
         done = self.install()
         self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
         self.assertEqual(
-            done.stdout,
-            f"::error::the belt's python: {self.root / 'mise' / 'mise.lock'} does"
+            done.stderr,
+            f"::error::python.sh: {self.root / 'mise' / 'mise.lock'} does"
             f" not hold python {VERSION} (it holds '3.15.1'), so the install"
             " cannot be checked\n",
         )
@@ -194,8 +194,8 @@ class InstallTheBeltsPython(unittest.TestCase):
         done = self.install()
         self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
         self.assertEqual(
-            done.stdout,
-            f"::error::the belt's python: {self.root / 'mise' / 'config.toml'}"
+            done.stderr,
+            f"::error::python.sh: {self.root / 'mise' / 'config.toml'}"
             " does not pin exactly one python version\n",
         )
         self.assertEqual(self.calls(), "")
@@ -206,9 +206,8 @@ class InstallTheBeltsPython(unittest.TestCase):
         done = self.install()
         self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
         self.assertEqual(
-            done.stdout,
-            f"::error::the belt's python: {self.python} is not an executable"
-            " interpreter\n",
+            done.stderr,
+            f"::error::python.sh: {self.python} is not an executable interpreter\n",
         )
         self.assertEqual(self.env_file.read_text(encoding="utf-8"), "")
 

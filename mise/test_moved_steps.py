@@ -243,12 +243,12 @@ class SourceAttestResolve(unittest.TestCase):
         root = self.tmp / "_actions" / "monumental-archive" / ".github" / "v1.2.3"
         done = self.resolve(plant(root), "sign")
         self.assertEqual(
-            (done.returncode, done.stdout),
+            (done.returncode, done.stderr),
             (
                 1,
                 (
-                    "::error::source-attest stage must be 'claims' or 'attest', got"
-                    " 'sign' (#240)\n"
+                    "::error::resolve.sh: source-attest stage must be 'claims' or"
+                    " 'attest', got 'sign' (#240)\n"
                 ),
             ),
         )
@@ -259,9 +259,9 @@ class SourceAttestResolve(unittest.TestCase):
         done = self.resolve(plant(root), "attest")
         self.assertEqual(done.returncode, 1)
         self.assertEqual(
-            done.stdout,
-            f"::error::source-attest resolved to '{root}' in someone/consumer —"
-            " not an _actions path and not a canon self-call\n",
+            done.stderr,
+            f"::error::resolve.sh: source-attest resolved to '{root}' in"
+            " someone/consumer — not an _actions path and not a canon self-call\n",
         )
 
     def test_the_canon_calling_itself_names_the_running_commit(self) -> None:
@@ -277,8 +277,8 @@ class SourceAttestResolve(unittest.TestCase):
         done = self.resolve(plant(root, policy=False), "claims")
         self.assertEqual(done.returncode, 1)
         self.assertEqual(
-            done.stdout,
-            f"::error::resolved canon tree at '{root}' has no"
+            done.stderr,
+            f"::error::resolve.sh: resolved canon tree at '{root}' has no"
             " slsa/verify-policy.json\n",
         )
 

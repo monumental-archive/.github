@@ -212,9 +212,9 @@ class LinkTheCanonTree(unittest.TestCase):
         done = self.link(plant(root), "someone/consumer")
         self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
         self.assertEqual(
-            done.stdout,
-            f"::error::canon action resolved to '{root}' in someone/consumer — not"
-            " an _actions path and not a canon self-call\n",
+            done.stderr,
+            f"::error::link.sh: canon action resolved to '{root}' in"
+            " someone/consumer — not an _actions path and not a canon self-call\n",
         )
         self.assertEqual(self.output.read_text(encoding="utf-8"), "")
         self.assertIsNone(self.linked())
@@ -224,7 +224,7 @@ class LinkTheCanonTree(unittest.TestCase):
         root = self.tmp / "_actions" / "someone" / "fork" / "v1.0.0"
         done = self.link(plant(root), "someone/consumer")
         self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
-        self.assertIn("not an _actions path and not a canon self-call", done.stdout)
+        self.assertIn("not an _actions path and not a canon self-call", done.stderr)
         self.assertIsNone(self.linked())
 
     def test_a_tree_with_no_belt_config_is_refused(self) -> None:
@@ -235,7 +235,7 @@ class LinkTheCanonTree(unittest.TestCase):
         self.assertEqual(
             done.stdout,
             "::error::the resolved canon tree has no mise/config.toml or"
-            " mise/workflow-command.sh — not a canon tree\n"
+            " mise/findings.sh — not a canon tree\n"
             f"  resolved: {root}\n",
         )
         self.assertEqual(self.output.read_text(encoding="utf-8"), "")
