@@ -30,6 +30,7 @@ from pathlib import Path
 
 import decoded
 import hermetic
+import workflow_yaml
 
 CANON = Path(__file__).resolve().parent.parent
 BELT = CANON / "mise"
@@ -448,6 +449,42 @@ class CoverageShield(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(done.stderr, "")
         self.assertNotIn("codecov.io", block)
+
+    def test_a_floor_no_workflow_feeds_is_refused_with_a_remedy_that_parses(
+        self,
+    ) -> None:
+        """The printed remedy is the template's `secrets:`, as YAML (#1923).
+
+        It was a flow mapping holding `${{`, which opens a second
+        mapping, so a stub pasted from it did not parse. The remedy's
+        lines are decoded under `jobs.ci` by the belt's reader and must
+        equal the `ci` job's `secrets` in the template a new repository
+        copies, so they cannot drift from it.
+        """
+        done, block = render({".coverage-floor": "80\n"})
+        self.assertEqual(done.returncode, 1)
+        self.assertEqual(
+            "fix:badges: .coverage-floor is tracked and no workflow passes "
+            "codecov-token — the coverage shield has no producer\n"
+            "  add under the gate stub's ci job:\n"
+            "    secrets:\n"
+            "      codecov-token: ${{ secrets.CODECOV_TOKEN }}\n",
+            done.stderr,
+        )
+        self.assertEqual("", block)
+        lines = done.stderr.splitlines()
+        remedy = lines[lines.index("  add under the gate stub's ci job:") + 1 :]
+        template = workflow_yaml.jobs(
+            workflow_yaml.document(CANON / "workflow-templates" / "ci.yml")
+        )["ci"]
+        with tempfile.TemporaryDirectory() as tmp:
+            stub = Path(tmp) / "gate.yml"
+            stub.write_text(
+                "jobs:\n  ci:\n" + "".join(f"{ln}\n" for ln in remedy),
+                encoding="utf-8",
+            )
+            pasted = workflow_yaml.jobs(workflow_yaml.document(stub))["ci"]
+        self.assertEqual(template["secrets"], pasted["secrets"])
 
 
 if __name__ == "__main__":
