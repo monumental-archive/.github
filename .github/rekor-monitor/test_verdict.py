@@ -21,6 +21,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import override
+from unittest import mock
 
 # Appended, so this file's own directory and the standard library
 # come first.
@@ -81,6 +82,22 @@ def finding(index: int, condition: str) -> dict[str, object]:
     return {"subject": f"CT index {index}", "assertion": condition, "detail": "x"}
 
 
+def call(argv: list[str]) -> hermetic.Called:
+    """Call the helper's main in this process, as the leg starts it.
+
+    The leg runs the script by path with no mise task around it, so the
+    finding writer names the script (#1934): argv[0] is its path, and
+    the environment is the allow-list's, never the running suite's
+    MISE_TASK_NAME or ORG_FINDINGS.
+
+    Returns:
+        Its exit status and output, captured.
+
+    """
+    with mock.patch.object(sys, "argv", [str(HELPER), *argv]):
+        return hermetic.call_main(lambda: verdict.main(argv), env=hermetic.env())
+
+
 class Verdict(unittest.TestCase):
     """One row per branch of verdict.judge()."""
 
@@ -103,7 +120,7 @@ class Verdict(unittest.TestCase):
         text = json.dumps(doc) if doc is not None else ""
         self.report.write_text(text, encoding="utf-8")
         argv = ["--exit-code", code, "--report", str(self.report), "--saved", saved]
-        return hermetic.call_main(lambda: verdict.main(argv))
+        return call(argv)
 
     def test_judged_to_the_head(self) -> None:
         """Exit 0, saved: green."""
@@ -121,8 +138,8 @@ class Verdict(unittest.TestCase):
         proc = self.run_helper("1", doc)
         self.assertEqual(proc.returncode, 1)
         self.assertEqual(
-            proc.stdout.strip(),
-            "::error::2 finding(s): a certificate did not reconcile;"
+            proc.stderr.strip(),
+            "::error::verdict.py: 2 finding(s): a certificate did not reconcile;"
             " each has its issue",
         )
 
@@ -142,8 +159,8 @@ class Verdict(unittest.TestCase):
         proc = self.run_helper("4", doc)
         self.assertEqual(proc.returncode, 1)
         self.assertEqual(
-            proc.stdout.strip(),
-            "::error::1 finding(s): a certificate did not reconcile;"
+            proc.stderr.strip(),
+            "::error::verdict.py: 1 finding(s): a certificate did not reconcile;"
             " each has its issue",
         )
 
@@ -152,8 +169,8 @@ class Verdict(unittest.TestCase):
         proc = self.run_helper("4", load("report-budget.json"))
         self.assertEqual(proc.returncode, 1)
         self.assertEqual(
-            proc.stdout.strip(),
-            "::error::the checkpoint did not advance: stele judged nothing"
+            proc.stderr.strip(),
+            "::error::verdict.py: the checkpoint did not advance: stele judged nothing"
             f" ({STOPPED})",
         )
 
@@ -162,9 +179,10 @@ class Verdict(unittest.TestCase):
         proc = self.run_helper("", None, saved="false")
         self.assertEqual(proc.returncode, 1)
         self.assertEqual(
-            proc.stdout.strip(),
-            "::error::stele did not finish: no exit status was recorded (a step"
-            " before it failed, or the leg was cancelled or timed out)",
+            proc.stderr.strip(),
+            "::error::verdict.py: stele did not finish: no exit status was"
+            " recorded (a step before it failed, or the leg was cancelled or"
+            " timed out)",
         )
 
     def test_no_report_is_red(self) -> None:
@@ -172,8 +190,8 @@ class Verdict(unittest.TestCase):
         proc = self.run_helper("2", None, saved="false")
         self.assertEqual(proc.returncode, 1)
         self.assertEqual(
-            proc.stdout.strip(),
-            "::error::stele exited 2 and the checkpoint was not saved:"
+            proc.stderr.strip(),
+            "::error::verdict.py: stele exited 2 and the checkpoint was not saved:"
             " stele wrote no report",
         )
 
@@ -182,8 +200,8 @@ class Verdict(unittest.TestCase):
         proc = self.run_helper("0", load("report-pass.json"), saved="false")
         self.assertEqual(proc.returncode, 1)
         self.assertEqual(
-            proc.stdout.strip(),
-            "::error::stele exited 0 and the checkpoint was not saved:"
+            proc.stderr.strip(),
+            "::error::verdict.py: stele exited 0 and the checkpoint was not saved:"
             " a finding could not be filed",
         )
 
@@ -191,7 +209,7 @@ class Verdict(unittest.TestCase):
         """A saved leg that exited 3: red, named."""
         proc = self.run_helper("3", load("report-budget.json"))
         self.assertEqual(proc.returncode, 1)
-        self.assertEqual(proc.stdout.strip(), "::error::stele exited 3")
+        self.assertEqual(proc.stderr.strip(), "::error::verdict.py: stele exited 3")
 
     def test_facts_not_stele_shape_is_red(self) -> None:
         """Saved, a finding, facts that are not stele's: red, not green.
@@ -205,8 +223,8 @@ class Verdict(unittest.TestCase):
         proc = self.run_helper("0", doc)
         self.assertEqual(proc.returncode, 1)
         self.assertEqual(
-            proc.stdout.strip(),
-            "::error::stele exited 0 and its report could not be judged:"
+            proc.stderr.strip(),
+            "::error::verdict.py: stele exited 0 and its report could not be judged:"
             " the report could not be read",
         )
 
@@ -221,12 +239,14 @@ class Verdict(unittest.TestCase):
             sys.executable, str(HELPER), "--exit-code", "0",
             "--report", str(self.report), "--saved", "true",
         ]  # fmt: skip
-        proc = subprocess.run(argv, capture_output=True, text=True, check=False)
+        proc = subprocess.run(
+            argv, env=hermetic.env(), capture_output=True, text=True, check=False
+        )
         self.assertEqual(proc.returncode, 1, proc.stderr)
-        self.assertEqual(proc.stderr, "")
+        self.assertEqual(proc.stdout, "")
         self.assertEqual(
-            proc.stdout.strip(),
-            "::error::stele exited 0 and its report could not be judged:"
+            proc.stderr.strip(),
+            "::error::verdict.py: stele exited 0 and its report could not be judged:"
             " the report could not be read",
         )
 
@@ -250,13 +270,13 @@ class Verdict(unittest.TestCase):
         for why, text in rows.items():
             with self.subTest(why=why):
                 self.report.write_text(text, encoding="utf-8")
-                proc = hermetic.call_main(lambda: verdict.main(argv))
+                proc = call(argv)
                 self.assertEqual(proc.returncode, 1, proc.stderr)
-                self.assertEqual(proc.stderr, "")
+                self.assertEqual(proc.stdout, "")
                 self.assertEqual(
-                    proc.stdout.strip(),
-                    "::error::stele exited 0 and its report could not be judged:"
-                    " the report could not be read",
+                    proc.stderr.strip(),
+                    "::error::verdict.py: stele exited 0 and its report could not"
+                    " be judged: the report could not be read",
                 )
 
     def test_report_from_another_target(self) -> None:
@@ -266,8 +286,8 @@ class Verdict(unittest.TestCase):
         proc = self.run_helper("4", doc, saved="false")
         self.assertEqual(proc.returncode, 1)
         self.assertEqual(
-            proc.stdout.strip(),
-            "::error::stele exited 4 and the checkpoint was not saved:"
+            proc.stderr.strip(),
+            "::error::verdict.py: stele exited 4 and the checkpoint was not saved:"
             " the report is not stele's assert signer-certificates report",
         )
 

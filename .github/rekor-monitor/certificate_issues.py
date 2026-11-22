@@ -36,11 +36,13 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-# The canon's one document loader, in mise/ (#1676). Appended, so this
-# file's own directory and the standard library come first.
+# The canon's one document loader (#1676) and its finding writer
+# (#1890), in mise/. Appended, so this file's own directory and the
+# standard library come first.
 sys.path.append(str(Path(__file__).resolve().parents[2] / "mise"))
 
 import decoded
+import findings
 
 TARGET = "assert signer-certificates"
 EXIT_ERROR = 2
@@ -291,18 +293,18 @@ def file_all(repo: str, report: Report, run_url: str) -> list[str]:
 
     """
     done: list[str] = []
-    for index, findings in sorted(by_certificate(report).items()):
+    for index, found in sorted(by_certificate(report).items()):
         existing = already_filed(repo, index)
         if existing is not None:
             done.append(f"CT index {index}: already filed as #{existing}")
             continue
         conditions: list[str] = []
-        for f in findings:
+        for f in found:
             if f.assertion not in conditions:
                 conditions.append(f.assertion)
         gh(
             "issue", "create", "--repo", repo, "--title", title(index, conditions),
-            "--body", body(index, findings, report.log, run_url),
+            "--body", body(index, found, report.log, run_url),
         )  # fmt: skip
         done.append(f"CT index {index}: filed ({', '.join(conditions)})")
     return done
@@ -321,12 +323,12 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv, namespace=Args())
     repo = os.environ.get("GITHUB_REPOSITORY", "")
     if not repo:
-        print("findings: GITHUB_REPOSITORY is not set", file=sys.stderr)
+        findings.finding("", "GITHUB_REPOSITORY is not set")
         return EXIT_ERROR
     try:
         done = file_all(repo, read_report(args.report), args.run_url)
     except FindingsError as err:
-        print(f"findings: {err}; the checkpoint is not saved", file=sys.stderr)
+        findings.finding("", f"{err}; the checkpoint is not saved")
         return EXIT_ERROR
     for line in done:
         print(f"findings: {line}")

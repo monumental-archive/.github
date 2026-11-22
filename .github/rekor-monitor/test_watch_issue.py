@@ -24,6 +24,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import override
+from unittest import mock
 
 # Appended, so this file's own directory and the standard library
 # come first.
@@ -174,7 +175,10 @@ class Rows(unittest.TestCase):
         if listing is not None:
             full["STUB_LIST"] = json.dumps(listing)
         argv = self.arguments(kept)
-        return hermetic.call_main(lambda: standing.main(argv), env=full)
+        # The alert job runs the script by path with no mise task around
+        # it, so the finding writer names the script (#1934).
+        with mock.patch.object(sys, "argv", [str(HELPER), *argv]):
+            return hermetic.call_main(lambda: standing.main(argv), env=full)
 
     def run_script(self, **env: str) -> subprocess.CompletedProcess[str]:
         """Start the helper as the alert job does.
@@ -236,7 +240,7 @@ class StandingIssue(Rows):
         self.assertIn(f"- Latest run behind: {RUN}\n", text)
         self.assertIn("- Runs behind since it opened: 1\n", text)
         self.assertIn("standing-issue: opened the standing issue", proc.stdout)
-        self.assertIn(f"::error::{why}", proc.stdout)
+        self.assertIn(f"::error::watch_issue.py: {why}", proc.stderr)
 
     def test_one_open_edits_it(self) -> None:
         """One open: edit that number, keep "behind since", count the run."""
@@ -281,7 +285,8 @@ class StandingIssue(Rows):
         self.assertEqual(self.gh_calls(), listed)
         self.assertEqual(
             proc.stderr.strip(),
-            "standing-issue: gh issue list failed (exit 1): HTTP 502: Bad Gateway;"
+            f"watch_issue.py: {REPO}: gh issue list failed (exit 1):"
+            " HTTP 502: Bad Gateway;"
             " nothing was filed",
         )
 
@@ -330,7 +335,10 @@ class StandingIssue(Rows):
         founded = "none counted: this run founded the checkpoint"
         self.assertIn(f"{STARTED}{founded}\n", text)
         self.assertIn(f"{NOW}{missing}", text)
-        self.assertIn("::error::the newest checkpoint: no checkpoint file", proc.stdout)
+        self.assertIn(
+            "::error::watch_issue.py: the newest checkpoint: no checkpoint file",
+            proc.stderr,
+        )
 
     def test_unreadable_checkpoint_is_named(self) -> None:
         """A newest checkpoint that is not stele's: red, named as unreadable."""
@@ -366,9 +374,10 @@ class StandingIssue(Rows):
         proc = self.run_helper([])
         self.assertEqual(proc.returncode, 1, proc.stderr)
         self.assertIn(
-            "::error::the checkpoint the run started from was not kept"
+            "::error::watch_issue.py: the checkpoint the run started from was"
+            " not kept"
             " (the checkpoint file could not be read)",
-            proc.stdout,
+            proc.stderr,
         )
 
     def test_nested_past_the_parser_is_unreadable(self) -> None:
@@ -377,8 +386,9 @@ class StandingIssue(Rows):
         proc = self.run_helper([])
         self.assertEqual(proc.returncode, 1, proc.stderr)
         self.assertIn(
-            "::error::the newest checkpoint: the checkpoint file could not be read",
-            proc.stdout,
+            "::error::watch_issue.py: the newest checkpoint: the checkpoint file"
+            " could not be read",
+            proc.stderr,
         )
 
     def test_start_not_kept_is_named(self) -> None:
@@ -388,9 +398,10 @@ class StandingIssue(Rows):
         text = self.gh_calls()[1][7]
         self.assertIn(f"{STARTED}unknown: the start job did not finish\n", text)
         self.assertIn(
-            "::error::the checkpoint the run started from was not kept"
+            "::error::watch_issue.py: the checkpoint the run started from was"
+            " not kept"
             " (the start job did not finish)",
-            proc.stdout,
+            proc.stderr,
         )
 
     def test_previous_body_unreadable(self) -> None:
@@ -412,7 +423,7 @@ class StandingIssue(Rows):
         self.assertEqual(proc.returncode, 2)
         self.assertEqual(self.gh_calls(), list[list[str]]())
         self.assertEqual(
-            proc.stderr.strip(), "standing-issue: GITHUB_REPOSITORY is not set"
+            proc.stderr.strip(), "watch_issue.py: GITHUB_REPOSITORY is not set"
         )
 
 
@@ -475,9 +486,10 @@ class Gaining(Rows):
         self.assertEqual(proc.returncode, 1, proc.stderr)
         self.assertEqual(self.gh_calls()[1][:6], CREATE)
         self.assertIn(
-            "::error::the checkpoint the run started from was not kept"
+            "::error::watch_issue.py: the checkpoint the run started from was"
+            " not kept"
             " (no checkpoint file)",
-            proc.stdout,
+            proc.stderr,
         )
 
 
@@ -503,9 +515,9 @@ class Decoded(Rows):
                 proc = self.run_helper([])
                 self.assertEqual(proc.returncode, 1, proc.stderr)
                 self.assertIn(
-                    "::error::the newest checkpoint:"
+                    "::error::watch_issue.py: the newest checkpoint:"
                     " the checkpoint file could not be read",
-                    proc.stdout,
+                    proc.stderr,
                 )
 
     def test_a_listing_that_is_not_a_list_of_issues(self) -> None:
@@ -527,7 +539,8 @@ class Decoded(Rows):
                 self.assertEqual(proc.returncode, 2)
                 self.assertEqual(
                     proc.stderr.strip(),
-                    "standing-issue: gh issue list answered something that is not"
+                    f"watch_issue.py: {REPO}: gh issue list answered something"
+                    " that is not"
                     f" a list of issues: {why}; nothing was filed",
                 )
 
@@ -537,7 +550,8 @@ class Decoded(Rows):
         self.assertEqual(proc.returncode, 2)
         self.assertEqual(
             proc.stderr.strip(),
-            "standing-issue: gh issue list answered something that is not JSON:"
+            f"watch_issue.py: {REPO}: gh issue list answered something that"
+            " is not JSON:"
             ' duplicate key "a"; nothing was filed',
         )
 

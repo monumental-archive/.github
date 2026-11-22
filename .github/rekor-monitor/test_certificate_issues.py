@@ -25,6 +25,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import override
+from unittest import mock
 
 # Appended, so this file's own directory and the standard library
 # come first.
@@ -125,9 +126,12 @@ class Harness(unittest.TestCase):
         if self.write_report:
             self.report.write_text(json.dumps(self.doc), encoding="utf-8")
         argv = ["--report", str(self.report), "--run-url", RUN]
-        return hermetic.call_main(
-            lambda: certificate_issues.main(argv), env={**self.env, **env}
-        )
+        # The leg runs the script by path with no mise task around it, so
+        # the finding writer names the script (#1934).
+        with mock.patch.object(sys, "argv", [str(HELPER), *argv]):
+            return hermetic.call_main(
+                lambda: certificate_issues.main(argv), env={**self.env, **env}
+            )
 
     def run_script(self, **env: str) -> subprocess.CompletedProcess[str]:
         """Write the report and start the helper as the workflow does.
@@ -265,7 +269,8 @@ class Findings(Harness):
         self.assertEqual(self.gh_calls(), searched)
         self.assertEqual(
             proc.stderr.strip(),
-            "findings: gh issue list failed (exit 1): HTTP 502: Bad Gateway;"
+            "certificate_issues.py:"
+            " gh issue list failed (exit 1): HTTP 502: Bad Gateway;"
             " the checkpoint is not saved",
         )
 
@@ -276,7 +281,8 @@ class Findings(Harness):
         self.assertEqual(proc.returncode, 2)
         self.assertEqual(
             proc.stderr.strip(),
-            "findings: gh issue create failed (exit 1): HTTP 403: Resource not"
+            "certificate_issues.py:"
+            " gh issue create failed (exit 1): HTTP 403: Resource not"
             " accessible by integration; the checkpoint is not saved",
         )
 
@@ -289,7 +295,8 @@ class Findings(Harness):
         self.assertEqual(self.gh_calls(), list[list[str]]())
         self.assertEqual(
             proc.stderr.strip(),
-            "findings: stele wrote no report: it refused before judging (its reason"
+            "certificate_issues.py:"
+            " stele wrote no report: it refused before judging (its reason"
             " is in its own step); the checkpoint is not saved",
         )
 
@@ -300,7 +307,7 @@ class Findings(Harness):
         self.report.write_text(text, encoding="utf-8")
         proc = self.run_helper()
         self.assertEqual(proc.returncode, 2)
-        prefix = "findings: stele's report is not JSON: "
+        prefix = "certificate_issues.py: stele's report is not JSON: "
         self.assertTrue(proc.stderr.startswith(prefix))
 
     def test_report_not_utf8(self) -> None:
@@ -313,7 +320,9 @@ class Findings(Harness):
         proc = self.run_helper()
         self.assertEqual(proc.returncode, 2, proc.stderr)
         self.assertTrue(
-            proc.stderr.startswith("findings: stele's report is not JSON: ")
+            proc.stderr.startswith(
+                "certificate_issues.py: stele's report is not JSON: "
+            )
         )
 
     def test_report_nested_past_the_parser(self) -> None:
@@ -323,7 +332,9 @@ class Findings(Harness):
         proc = self.run_helper()
         self.assertEqual(proc.returncode, 2, proc.stderr)
         self.assertTrue(
-            proc.stderr.startswith("findings: stele's report is not JSON: ")
+            proc.stderr.startswith(
+                "certificate_issues.py: stele's report is not JSON: "
+            )
         )
 
     def test_report_from_another_target(self) -> None:
@@ -333,7 +344,8 @@ class Findings(Harness):
         self.assertEqual(proc.returncode, 2)
         self.assertEqual(
             proc.stderr.strip(),
-            "findings: the report is not stele's assert signer-certificates report;"
+            "certificate_issues.py:"
+            " the report is not stele's assert signer-certificates report;"
             " the checkpoint is not saved",
         )
 
@@ -347,7 +359,8 @@ class Findings(Harness):
         self.assertEqual(self.gh_calls(), list[list[str]]())
         self.assertEqual(
             proc.stderr.strip(),
-            "findings: a finding's subject is not a CT index: 'population';"
+            "certificate_issues.py:"
+            " a finding's subject is not a CT index: 'population';"
             " the checkpoint is not saved",
         )
 
@@ -360,7 +373,9 @@ class Findings(Harness):
         proc = self.run_script(GITHUB_REPOSITORY="")
         self.assertEqual(proc.returncode, 2)
         self.assertEqual(self.gh_calls(), list[list[str]]())
-        self.assertEqual(proc.stderr.strip(), "findings: GITHUB_REPOSITORY is not set")
+        self.assertEqual(
+            proc.stderr.strip(), "certificate_issues.py: GITHUB_REPOSITORY is not set"
+        )
 
 
 class Decoded(Harness):
@@ -384,7 +399,8 @@ class Decoded(Harness):
                 self.assertEqual(proc.returncode, 2)
                 self.assertEqual(
                     proc.stderr.strip(),
-                    "findings: gh issue list answered something that is not a list"
+                    "certificate_issues.py:"
+                    " gh issue list answered something that is not a list"
                     f" of issues: {why}; the checkpoint is not saved",
                 )
 
@@ -395,7 +411,7 @@ class Decoded(Harness):
         self.assertEqual(proc.returncode, 2)
         self.assertEqual(
             proc.stderr.strip(),
-            "findings: gh issue list answered something that is not JSON:"
+            "certificate_issues.py: gh issue list answered something that is not JSON:"
             ' duplicate key "a"; the checkpoint is not saved',
         )
 
@@ -409,7 +425,8 @@ class Decoded(Harness):
                 self.assertEqual(proc.returncode, 2)
                 self.assertEqual(
                     proc.stderr.strip(),
-                    f"findings: the report's findings are not a list: {value!r};"
+                    "certificate_issues.py:"
+                    f" the report's findings are not a list: {value!r};"
                     " the checkpoint is not saved",
                 )
 
@@ -421,7 +438,8 @@ class Decoded(Harness):
         self.assertEqual(proc.returncode, 2)
         self.assertEqual(
             proc.stderr.strip(),
-            'findings: stele\'s report is not JSON: duplicate key "target";'
+            "certificate_issues.py:"
+            ' stele\'s report is not JSON: duplicate key "target";'
             " the checkpoint is not saved",
         )
 
