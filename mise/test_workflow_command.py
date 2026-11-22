@@ -26,6 +26,7 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from typing import TYPE_CHECKING
+from unittest import mock
 
 import hermetic
 import workflow_command
@@ -214,7 +215,12 @@ class AHelperQuotingOutsideText(unittest.TestCase):
             table = Path(tmp) / "pgrx-base-images.toml"
             table.write_text("[build]\n", "utf-8")
             err = io.StringIO()
-            with redirect_stdout(io.StringIO()), redirect_stderr(err):
+            with (
+                hermetic.as_task(""),
+                mock.patch.object(sys, "argv", ["pgrx_images.py"]),
+                redirect_stdout(io.StringIO()),
+                redirect_stderr(err),
+            ):
                 code = pgrx_images.main([
                     "base-image",
                     "--pg",
@@ -225,7 +231,8 @@ class AHelperQuotingOutsideText(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertEqual(
             err.getvalue(),
-            f"::error::pga%0A::error::b has no build image in {table}\n",
+            f"::error::pgrx_images.py: pga%0A::error::b has no build image in"
+            f" {table}\n",
         )
 
 

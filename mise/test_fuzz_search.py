@@ -892,6 +892,8 @@ class ProposeRunsNoRepositoryCode(unittest.TestCase):
         "$/.github/actions/canon",
         "actions/download-artifact@",
         "actions/create-github-app-token@",
+        # The job's findings records, handed to the report job (#1934).
+        "actions/upload-artifact@",
     )
 
     def test_propose_runs_only_the_canon_and_never_repository_code(self) -> None:

@@ -15,6 +15,7 @@ arguments, and the Postgres-major branch (below 18, no path proof).
 stdlib `unittest`, matching the other release/test_*.py.
 """
 
+import contextlib
 import io
 import os
 import shutil
@@ -26,6 +27,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import override
+from unittest import mock
 
 # Appended, so this file's own directory and the standard library
 # come first.
@@ -49,6 +51,22 @@ BASH = hermetic.tool("bash")
 
 VERSION = "1.2.3"
 CRATE = "crates/edtf-postgres"
+
+
+_NAMED = contextlib.ExitStack()
+
+
+def setUpModule() -> None:
+    """Name the helper by its file, as a run outside mise does (#1934).
+
+    An in-process call reads argv, whatever task runs this suite, and
+    records nothing.
+    """
+    _NAMED.enter_context(mock.patch.object(sys, "argv", ["pgrx_images.py"]))
+    for key in ("MISE_TASK_NAME", "ORG_FINDINGS"):
+        if key in os.environ:
+            _NAMED.callback(os.environ.__setitem__, key, os.environ.pop(key))
+    unittest.addModuleCleanup(_NAMED.close)
 
 
 def tarball(path: Path, members: dict[str, bytes], links: dict[str, str]) -> None:

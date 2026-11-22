@@ -35,12 +35,14 @@ import io
 import os
 import posixpath
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest import mock
 
+import hermetic
 import previous_release as previous
 from hypothesis import example
 from hypothesis import strategies as st
@@ -57,6 +59,21 @@ TAG = st.one_of(
     VERSION.map("v{}".format),
     st.from_regex(r"[a-z-]{1,8}v[0-9.]{1,6}", fullmatch=True),
 )
+
+
+def as_helper() -> contextlib.ExitStack:
+    """Run the helper as a run outside mise does, recording nothing (#1934).
+
+    The writer names it by its file, whatever task runs this suite.
+
+    Returns:
+        The patches, entered by the caller's `with`.
+
+    """
+    stack = contextlib.ExitStack()
+    stack.enter_context(hermetic.as_task(""))
+    stack.enter_context(mock.patch.object(sys, "argv", ["previous_release.py"]))
+    return stack
 
 
 def not_dots(segment: str) -> bool:
@@ -184,14 +201,16 @@ def quietly(
     """Run a mode with its output captured, `subprocess.run` faked.
 
     Returns:
-        Its status and stdout.
+        Its status and what it printed, both streams as the job log shows
+        them: a refusal is a finding, on stderr (#1934).
 
     """
     out = io.StringIO()
     with (
+        as_helper(),
         mock.patch.object(subprocess, "run", run),
         contextlib.redirect_stdout(out),
-        contextlib.redirect_stderr(io.StringIO()),
+        contextlib.redirect_stderr(out),
     ):
         code = call()
     return code, out.getvalue()
@@ -261,7 +280,8 @@ class GuardRefusesExactly(unittest.TestCase):
         # 1 is the model's refusal alone, which needs a predecessor.
         if want == 1 and prev is not None:
             self.assertIn(
-                f"::error::no upgrade path {script} from published {prev[0]}"
+                f"::error::previous_release.py: no upgrade path {script} from"
+                f" published {prev[0]}"
                 f" ({prev[1]})",
                 out,
             )

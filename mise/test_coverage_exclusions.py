@@ -242,7 +242,8 @@ class MissingSibling(unittest.TestCase):
         """Run one helper copied into a tree that lacks its sibling.
 
         `beside` names the files copied with it: the finding writer, for
-        a helper that reports the missing sibling through it.
+        a helper that reports the missing sibling through it. A name with
+        a slash is a path from the canon root, copied to the same path.
 
         Returns:
             The finished process.
@@ -254,7 +255,11 @@ class MissingSibling(unittest.TestCase):
         target.parent.mkdir(parents=True)
         shutil.copy(source, target)
         for name in beside:
-            shutil.copy(source.parent / name, target.parent / name)
+            if "/" in name:
+                (Path(tmp.name) / name).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy(_HERE.parent / name, Path(tmp.name) / name)
+            else:
+                shutil.copy(source.parent / name, target.parent / name)
         return subprocess.run(
             [sys.executable, str(target), "--help"],
             capture_output=True,
@@ -280,12 +285,16 @@ class MissingSibling(unittest.TestCase):
     def test_publish_crates_without_crates_index(self) -> None:
         """publish_crates.py names mise/crates_index.py and exits non-zero."""
         r = self.alone(
-            _HERE.parent / "release" / "publish_crates.py", "release/publish_crates.py"
+            _HERE.parent / "release" / "publish_crates.py",
+            "release/publish_crates.py",
+            "mise/findings.py",
+            "mise/workflow_command.py",
         )
         self.assertNotEqual(r.returncode, 0)
         self.assertEqual(
             r.stderr,
-            "publish-crates: mise/crates_index.py did not arrive in the canon tree\n",
+            "lint:bash-portability: mise/crates_index.py did not arrive in the"
+            " canon tree\n",
         )
 
 

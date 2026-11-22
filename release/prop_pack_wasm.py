@@ -22,10 +22,13 @@ import contextlib
 import io
 import json
 import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
+import hermetic
 import pack_wasm as pack
 from hypothesis import example
 from hypothesis import strategies as st
@@ -34,6 +37,21 @@ from typed_hypothesis import given
 # A GitHub owner and repository name (GitHub drops a `.git` ending
 # from a repository's name, so none is drawn).
 OWNER = st.from_regex(r"[A-Za-z0-9][A-Za-z0-9-]{0,10}", fullmatch=True)
+
+
+def as_helper() -> contextlib.ExitStack:
+    """Run the helper as a run outside mise does, recording nothing (#1934).
+
+    The writer names it by its file, whatever task runs this suite.
+
+    Returns:
+        The patches, entered by the caller's `with`.
+
+    """
+    stack = contextlib.ExitStack()
+    stack.enter_context(hermetic.as_task(""))
+    stack.enter_context(mock.patch.object(sys, "argv", ["pack_wasm.py"]))
+    return stack
 
 
 def a_name(name: str) -> bool:
@@ -164,7 +182,8 @@ def run_step(package_json: str) -> tuple[int, str]:
     """Run the pack step on a crate whose pkg/package.json is the text.
 
     Returns:
-        The exit status and stdout.
+        The exit status and what it printed, both streams as the job log
+        shows them: a refusal is a finding, on stderr (#1934).
 
     """
 
@@ -188,7 +207,11 @@ def run_step(package_json: str) -> tuple[int, str]:
         out = io.StringIO()
         os.chdir(tmp)
         try:
-            with contextlib.redirect_stdout(out):
+            with (
+                as_helper(),
+                contextlib.redirect_stdout(out),
+                contextlib.redirect_stderr(out),
+            ):
                 code = pack.main(env)
         finally:
             os.chdir(here)
@@ -220,7 +243,7 @@ class AnyPackageJson(unittest.TestCase):
         code, out = run_step(package_json)
         if code != 0:
             self.assertEqual(code, 1)
-            self.assertTrue(out.startswith("::error::"), out)
+            self.assertTrue(out.startswith("::error::pack_wasm.py: "), out)
             self.assertEqual(out.count("\n"), 1, out)
 
 
