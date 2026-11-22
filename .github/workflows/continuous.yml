@@ -170,7 +170,7 @@ jobs:
         uses: $/.github/actions/canon
 
       - name: Install mise and the pinned toolchain
-        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
+        uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
         with:
           version: 2026.11.8
           cache: false
@@ -291,7 +291,7 @@ jobs:
             --input-of "the release's advisory triage" \
             --if-pinned rust --if-pinned go --if-pinned govulncheck >> "${GITHUB_OUTPUT}"
       - name: Install mise and the pinned toolchain
-        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
+        uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
         with:
           version: 2026.11.8
           cache: false
@@ -488,7 +488,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         # stele, which judges the proof and writes the decision. No tool
         # cache in a job that holds the decision's signing identity.
-        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
+        uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
         with:
           version: 2026.11.8
           cache: false

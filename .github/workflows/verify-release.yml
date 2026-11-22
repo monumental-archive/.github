@@ -252,7 +252,7 @@ jobs:
       # emit source-vsa` signs through. One step per job, so bytes mode
       # carries the two small binaries too.
       - name: Install the belt's stele, jq and cosign
-        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
+        uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
         env:
           MISE_GLOBAL_CONFIG_FILE: ${{ steps.canon.outputs.path }}/mise/config.toml
           MISE_TRUSTED_CONFIG_PATHS: ${{ steps.canon.outputs.path }}
