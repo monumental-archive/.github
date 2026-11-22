@@ -8,10 +8,15 @@
 #
 #   debug-split.sh PKGROOT DEBUGROOT
 set -euo pipefail
-# The canon's one writer of workflow commands (#1660): the copy the
-# container run mounts and names, or this tree's own on the runner.
-# shellcheck source=mise/workflow-command.sh
-. "${ORG_WORKFLOW_COMMAND:-$(dirname "${BASH_SOURCE[0]}")/../../mise/workflow-command.sh}"
+# The canon's writer of findings (#1934), which brings its one writer of
+# workflow commands (#1660): the copy the container run mounts and
+# names, beside its writer of workflow commands, or this tree's own on
+# the runner, found with no command run.
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${ORG_FINDINGS_WRITER:-${org__here}/../../mise/findings.sh}"
+unset org__here
 pkgroot=$1
 debugroot=$2
 mkdir -p "${debugroot}"
@@ -38,12 +43,12 @@ while IFS= read -r -d "" so; do
   [[ ${sections} != *" .symtab "* ]] || bad+=("still has .symtab")
   ((before == after)) || bad+=("${after} dynamic functions, ${before} before the split")
   if ((${#bad[@]})); then
-    org_error "${rel} after the split: ${bad[*]}"
+    org_finding_annotated "" "${rel} after the split: ${bad[*]}"
     exit 1
   fi
   org_notice "${rel}: split and stripped, ${after} dynamic functions, .dep-v0 kept"
 done < <(find "${pkgroot}" -type f -name "*.so" -print0)
 if ((libs == 0)); then
-  org_error "no shared library under ${pkgroot} to split"
+  org_finding_annotated "" "no shared library under ${pkgroot} to split"
   exit 1
 fi

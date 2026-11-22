@@ -621,7 +621,7 @@ class RustBuildInputs(unittest.TestCase):
         with TemporaryDirectory() as d:
             result = run_script("rust-build.sh", Path(d), STAGE_DIR="stage")
         self.assertEqual(1, result.returncode)
-        self.assertIn("rust-build: TARGET is unset", result.stdout)
+        self.assertIn("rust-build: TARGET is unset", result.stderr)
 
     def test_the_stage_directory_is_required(self) -> None:
         """Two callers stage differently; neither inherits a default."""
@@ -630,7 +630,7 @@ class RustBuildInputs(unittest.TestCase):
                 "rust-build.sh", Path(d), TARGET="x86_64-unknown-linux-musl"
             )
         self.assertEqual(1, result.returncode)
-        self.assertIn("rust-build: STAGE_DIR is unset", result.stdout)
+        self.assertIn("rust-build: STAGE_DIR is unset", result.stderr)
 
     def test_a_plan_class_without_a_document_prefix_is_refused(self) -> None:
         """A plan names a document; the prefix says what the artifact IS.
@@ -647,7 +647,7 @@ class RustBuildInputs(unittest.TestCase):
                 PLAN_CLASS="oci-image",
             )
         self.assertEqual(1, result.returncode)
-        self.assertIn("PLAN_CLASS is set but PLAN_DOC_PREFIX is not", result.stdout)
+        self.assertIn("PLAN_CLASS is set but PLAN_DOC_PREFIX is not", result.stderr)
 
     def test_the_build_is_handed_fat_lto(self) -> None:
         """Release builds link with fat LTO, the fourth determinism input (#778).
@@ -748,7 +748,7 @@ class OpenReleasePrInputs(unittest.TestCase):
             )
             result = run_script("open-release-pr.sh", Path(d), **self._full_env(plan))
         self.assertEqual(1, result.returncode)
-        self.assertIn("FAIL: the plan states no branch", result.stderr)
+        self.assertIn("open-release-pr.sh: the plan states no branch", result.stderr)
 
 
 # `gh` for the Release-PR rows: a forge that answers every call
@@ -1080,10 +1080,10 @@ class OpenReleasePrHead(ReleaseForge, unittest.TestCase):
                 self.assertEqual(1, result.returncode, result.stdout)
                 self.assertEqual(
                     "gh: Resource not accessible by integration (HTTP 403)\n"
-                    f"FAIL: could not {what}\n"
-                    "HTTP/2.0 403 Forbidden\n"
-                    "X-Github-Request-Id: STUB:633\n"
-                    "X-Accepted-Github-Permissions: contents=write\n",
+                    f"open-release-pr.sh: could not {what}\n"
+                    "  HTTP/2.0 403 Forbidden\n"
+                    "  X-Github-Request-Id: STUB:633\n"
+                    "  X-Accepted-Github-Permissions: contents=write\n",
                     result.stderr,
                 )
                 self.assertEqual("", result.stdout)
@@ -1277,8 +1277,8 @@ class OpenReleasePrHead(ReleaseForge, unittest.TestCase):
         self.assertEqual(1, result.returncode, result.stdout)
         self.assertEqual("", result.stdout)
         self.assertIn(
-            "FAIL: could not take #77 out of the merge queue\n"
-            "HTTP/2.0 502 Bad Gateway\n",
+            "open-release-pr.sh: could not take #77 out of the merge queue\n"
+            "  HTTP/2.0 502 Bad Gateway\n",
             result.stderr,
         )
 
@@ -1291,8 +1291,9 @@ class OpenReleasePrHead(ReleaseForge, unittest.TestCase):
         self.assertEqual(1, result.returncode, result.stdout)
         self.assertEqual("", result.stdout)
         self.assertIn(
-            f"FAIL: could not move release/next to the release commit {self.OID}\n"
-            "HTTP/2.0 403 Forbidden\n",
+            f"open-release-pr.sh: could not move release/next to the release commit"
+            f" {self.OID}\n"
+            "  HTTP/2.0 403 Forbidden\n",
             result.stderr,
         )
 
@@ -1305,7 +1306,8 @@ class OpenReleasePrHead(ReleaseForge, unittest.TestCase):
                 result = self.run_executor()
                 self.assertEqual(1, result.returncode, result.stdout)
                 self.assertIn(
-                    f"FAIL: could not read the default branch head of {self.REPO}",
+                    f"open-release-pr.sh: could not read the default branch head of"
+                    f" {self.REPO}",
                     result.stderr,
                 )
                 self.assertEqual("", result.stdout)
@@ -1440,7 +1442,8 @@ class CloseReleasePr(ReleaseForge, unittest.TestCase):
         result = self.close()
         self.assertEqual(1, result.returncode, result.stdout)
         self.assertIn(
-            f"FAIL: could not read the default branch head of {self.REPO}",
+            f"close-release-pr.sh: could not read the default branch head of"
+            f" {self.REPO}",
             result.stderr,
         )
         want: list[str] = ["graphql head"]
@@ -1453,7 +1456,8 @@ class CloseReleasePr(ReleaseForge, unittest.TestCase):
         result = self.close()
         self.assertEqual(1, result.returncode, result.stdout)
         self.assertIn(
-            f"FAIL: could not list the open pull requests on {self.BRANCH}",
+            f"close-release-pr.sh: could not list the open pull requests on"
+            f" {self.BRANCH}",
             result.stderr,
         )
         self.assertNotIn("nothing to close", result.stdout)
@@ -1616,7 +1620,8 @@ WORKFLOW_REFUSAL = (
 )
 
 TAG_REFUSED = (
-    "::error::the push of v1.1.0 was refused: a workflow-changing commit"
+    "::error::tag-release.sh: the push of v1.1.0 was refused: a workflow-changing"
+    " commit"
     " reached the default branch after the release commit, so its workflow"
     " files differ from the release commit's, and GitHub will not let the"
     " tag-mint App create a ref that would change them. v1.1.0 has not been"
@@ -1709,10 +1714,10 @@ class TagReleasePush(unittest.TestCase):
         """GitHub's workflows-permission refusal becomes one ::error and a remedy."""
         result, local, pushed = self._run(WORKFLOW_REFUSAL)
         self.assertEqual(1, result.returncode, result.stderr)
-        errors = [ln for ln in result.stdout.splitlines() if ln.startswith("::")]
+        errors = [ln for ln in result.stderr.splitlines() if ln.startswith("::")]
         want: list[str] = [TAG_REFUSED.rstrip("\n")]
         self.assertEqual(want, errors)
-        self.assertTrue(result.stdout.endswith(TAG_REFUSED), result.stdout)
+        self.assertTrue(result.stderr.endswith(TAG_REFUSED), result.stderr)
         self.assertNotIn("pushed v1.1.0", result.stdout)
         self.assertNotIn("GH013", result.stderr)
         self.assertEqual("", local)
@@ -1724,7 +1729,7 @@ class TagReleasePush(unittest.TestCase):
         self.assertEqual(1, result.returncode, result.stderr)
         self.assertIn("remote: error: some other rule said no", result.stderr)
         self.assertIn("[remote rejected] v1.1.0 -> v1.1.0", result.stderr)
-        self.assertNotIn("::error::", result.stdout)
+        self.assertNotIn("::error::", result.stderr)
         self.assertNotIn("pushed v1.1.0", result.stdout)
         self.assertEqual("v1.1.0\n", local)
         self.assertEqual("", pushed)
@@ -1875,7 +1880,7 @@ class TagReleaseUpgradePath(unittest.TestCase):
         )
         self.assertEqual(1, result.returncode, result.stdout)
         self.assertIn(
-            "FAIL: refusing to mint v1.3.0 — no upgrade path"
+            "tag-release.sh: refusing to mint v1.3.0 — no upgrade path"
             " crates/edtf-postgres/sql/edtf_postgres--1.2.3--1.3.0.sql from"
             " published 1.2.3 (edtf-postgres-v1.2.3)\n"
             "  The Release PR derived its path before edtf-postgres-v1.2.3"
@@ -1902,7 +1907,7 @@ class TagReleaseUpgradePath(unittest.TestCase):
         self.assertEqual(1, result.returncode, result.stdout)
         self.assertIn(
             "HTTP 502\n"
-            "FAIL: refusing to mint v1.3.0 — the release listing could not be"
+            "tag-release.sh: refusing to mint v1.3.0 — the release listing could not be"
             " read\n  to find edtf_postgres's predecessor; nothing was minted,"
             " re-run this job.\n",
             result.stderr,

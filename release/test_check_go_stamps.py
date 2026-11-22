@@ -18,6 +18,7 @@ stdlib `unittest`, matching the rest of release/. Run through the gate
 as `mise run test`, which `ci` collects.
 """
 
+import contextlib
 import os
 import subprocess
 import sys
@@ -25,6 +26,7 @@ import unittest
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 # Appended, so this file's own directory and the standard library
 # come first.
@@ -47,6 +49,21 @@ case $1 in
   *) echo "go stub: refusing $*" >&2; exit 2 ;;
 esac
 """
+
+
+_NAMED = contextlib.ExitStack()
+
+
+def setUpModule() -> None:
+    """Name the helper by its file, as a run outside mise does (#1934).
+
+    An in-process call reads argv, whatever task runs this suite.
+    """
+    _NAMED.enter_context(mock.patch.object(sys, "argv", ["check_go_stamps.py"]))
+    for key in ("MISE_TASK_NAME", "ORG_FINDINGS"):
+        if key in os.environ:
+            _NAMED.callback(os.environ.__setitem__, key, os.environ.pop(key))
+    unittest.addModuleCleanup(_NAMED.close)
 
 
 def info(
@@ -214,7 +231,10 @@ class Refuses(unittest.TestCase):
     def assert_refused(self, run: Run, want: str) -> None:
         """Hold one refusal to its exit status and its exact line."""
         self.assertEqual(1, run.returncode, run.stderr)
-        self.assertEqual(f"::error::{want}\n", run.stdout.replace(run.head, "HEAD"))
+        self.assertEqual(
+            f"::error::check_go_stamps.py: {want}\n",
+            run.stderr.replace(run.head, "HEAD"),
+        )
 
     def test_another_revision_is_refused(self) -> None:
         """Bytes built from some other commit."""
@@ -273,7 +293,7 @@ class Refuses(unittest.TestCase):
     def test_the_first_bad_binary_in_name_order_is_named(self) -> None:
         """staged/ is read in name order, as the shell's glob read it."""
         run = run_helper({"b": info("{head}", "true"), "a": info("f" * 40)})
-        self.assertIn("::error::a: stamped revision", run.stdout)
+        self.assertIn("::error::check_go_stamps.py: a: stamped revision", run.stderr)
 
     def test_an_empty_staged_directory_is_refused(self) -> None:
         """Nothing built is nothing checked, and never a pass."""

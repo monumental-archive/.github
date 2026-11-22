@@ -15,6 +15,7 @@ stdlib `unittest`, matching the rest of release/. Run through the gate
 as `mise run test`, which `ci` collects.
 """
 
+import contextlib
 import hashlib
 import json
 import os
@@ -24,6 +25,7 @@ import unittest
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 # Appended, so this file's own directory and the standard library
 # come first.
@@ -54,6 +56,21 @@ case ${STUB_MODE} in
 esac
 printf '%s\\n' "${STUB_TARBALL}"
 """
+
+
+_NAMED = contextlib.ExitStack()
+
+
+def setUpModule() -> None:
+    """Name the helper by its file, as a run outside mise does (#1934).
+
+    An in-process call reads argv, whatever task runs this suite.
+    """
+    _NAMED.enter_context(mock.patch.object(sys, "argv", ["pack_wasm.py"]))
+    for key in ("MISE_TASK_NAME", "ORG_FINDINGS"):
+        if key in os.environ:
+            _NAMED.callback(os.environ.__setitem__, key, os.environ.pop(key))
+    unittest.addModuleCleanup(_NAMED.close)
 
 
 def strings(*items: str) -> list[str]:
@@ -149,7 +166,8 @@ def refusal(repo_url: str) -> str:
 
     """
     return (
-        f"::error::package.json repository is '{repo_url}', npm provenance"
+        f"::error::pack_wasm.py: package.json repository is '{repo_url}', npm"
+        f" provenance"
         f" requires '{WANT}' — set repository = \"{WANT}\" in the crate's"
         " Cargo.toml (canon: [workspace.package] repository with"
         " repository.workspace = true)\n"
@@ -206,9 +224,12 @@ class Refuses(unittest.TestCase):
     """One row per refusal; nothing is packed or output after one."""
 
     def assert_refused(self, run: Run, message: str) -> None:
-        """Hold a refusal: status 1, the message alone, no pack, no outputs."""
+        """Hold a refusal: status 1, the message alone, no pack, no outputs.
+
+        The message is a finding, so it is on stderr (#1934).
+        """
         self.assertEqual(1, run.returncode)
-        self.assertEqual(message, run.stdout)
+        self.assertEqual(message, run.stderr)
         self.assertEqual(strings(), run.npm)
         self.assertEqual("", run.outputs)
 
@@ -231,20 +252,20 @@ class Refuses(unittest.TestCase):
         """The package would publish under a version the tag does not name."""
         run = run_helper(package(version="1.3.3"))
         self.assert_refused(
-            run, f"::error::package.json says 1.3.3, tag says {VERSION}\n"
+            run, f"::error::pack_wasm.py: package.json says 1.3.3, tag says {VERSION}\n"
         )
 
     def test_no_version_is_refused(self) -> None:
         """A missing version reads as null, as jq read it."""
         run = run_helper(package(version=None))
         self.assert_refused(
-            run, f"::error::package.json says null, tag says {VERSION}\n"
+            run, f"::error::pack_wasm.py: package.json says null, tag says {VERSION}\n"
         )
 
     def test_a_repository_spanning_lines_stays_one_error(self) -> None:
         """A newline in the caller's text is escaped (#1556's audit seed).
 
-        A repository of one newline split the `::error::` line in two,
+        A repository of one newline split the `::error::pack_wasm.py: ` line in two,
         and the second line was the caller's, free to be a workflow
         command.
         """
@@ -262,7 +283,8 @@ class Refuses(unittest.TestCase):
             with self.subTest(manifest=manifest):
                 self.assert_refused(
                     run_helper(manifest),
-                    "::error::crates/edtf-wasm/pkg/package.json is not a JSON object\n",
+                    "::error::pack_wasm.py: crates/edtf-wasm/pkg/package.json is not"
+                    " a JSON object\n",
                 )
 
 
@@ -273,14 +295,18 @@ class EmptyPack(unittest.TestCase):
         """A zero-byte file is nothing to publish."""
         run = run_helper(package(), mode="empty")
         self.assertEqual(1, run.returncode)
-        self.assertEqual("::error::npm pack produced nothing\n", run.stdout)
+        self.assertEqual(
+            "::error::pack_wasm.py: npm pack produced nothing\n", run.stderr
+        )
         self.assertEqual("", run.outputs)
 
     def test_no_tarball_named_is_refused(self) -> None:
         """A pack that names no tarball is nothing to publish."""
         run = run_helper(package(), mode="silent")
         self.assertEqual(1, run.returncode)
-        self.assertEqual("::error::npm pack produced nothing\n", run.stdout)
+        self.assertEqual(
+            "::error::pack_wasm.py: npm pack produced nothing\n", run.stderr
+        )
         self.assertEqual("", run.outputs)
 
     def test_a_failing_npm_fails_the_step_with_its_status(self) -> None:

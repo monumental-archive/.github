@@ -22,10 +22,11 @@ set -euo pipefail
 : "${ARCH:?}"
 : "${SMOKE_IMAGE:?}"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-writer="$(cd "${here}/../../mise" && pwd -P)/workflow-command.sh"
-# The canon's one writer of workflow commands (#1660), in this tree.
-# shellcheck source=mise/workflow-command.sh
-. "${writer}"
+writers="$(cd "${here}/../../mise" && pwd -P)"
+# The canon's writer of findings (#1934), which brings its one writer
+# of workflow commands (#1660), in this tree.
+# shellcheck source=mise/findings.sh
+. "${writers}/findings.sh"
 prev=$("${ORG_PYTHON}" "${here}/previous_release.py" fetch \
   --repo "${GITHUB_REPOSITORY}" --version "${UNTRUSTED_VERSION}" \
   --crate-dir "${UNTRUSTED_CRATE_DIR}" --pg "${PG}" --arch "${ARCH}" \
@@ -38,7 +39,8 @@ docker run --rm \
   --volume /tmp/prevroot/pkgroot:/prev:ro \
   --volume /tmp/out/pkgroot:/new:ro \
   --volume "${here}:/pgrx:ro" \
-  --volume "${writer}:/opt/org/workflow-command.sh:ro" \
-  --env ORG_WORKFLOW_COMMAND=/opt/org/workflow-command.sh \
+  --volume "${writers}/findings.sh:/opt/org/findings.sh:ro" \
+  --volume "${writers}/workflow-command.sh:/opt/org/workflow-command.sh:ro" \
+  --env ORG_FINDINGS_WRITER=/opt/org/findings.sh \
   "${SMOKE_IMAGE}" bash /pgrx/upgrade.sh
 org_notice "pg${PG}/${ARCH}: ${prev} -> ${UNTRUSTED_VERSION} upgrade executed"

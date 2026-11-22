@@ -74,7 +74,7 @@ from typing import NamedTuple
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
 import decoded
-import workflow_command
+import findings
 
 ARCHES = ("amd64", "arm64")
 
@@ -274,7 +274,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         sys.stdout.write(run(args))
     except RefusalError as refusal:
-        workflow_command.error(str(refusal), stream=sys.stderr)
+        findings.finding("", str(refusal), annotate=True)
         return 1
     return 0
 

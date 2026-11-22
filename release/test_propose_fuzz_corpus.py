@@ -36,6 +36,8 @@ import hermetic
 RELEASE = Path(__file__).resolve().parent
 PROPOSE = RELEASE / "propose-fuzz-corpus.sh"
 SIGNED = RELEASE / "signed-commit.sh"
+# The finding writer every caller of signed-commit.sh sources (#1934).
+WRITER = RELEASE.parent / "mise" / "findings.sh"
 BASH = hermetic.tool("bash")
 REPO = "monumental-archive/under-test"
 OID = "c" * 40
@@ -209,9 +211,10 @@ class Refusals(Forge):
         result = self.run_script("propose")
         self.assertEqual(1, result.returncode, result.stdout)
         self.assertEqual(
-            "FAIL: refused .github/workflows/x.yml: outside"
+            "propose-fuzz-corpus.sh: refused .github/workflows/x.yml: outside"
             " fuzz/corpus/<target>/<file> and <dirs>/testdata/fuzz/Fuzz<Name>/<file>\n"
-            "FAIL: the artifact is refused whole; nothing is committed\n",
+            "propose-fuzz-corpus.sh: the artifact is refused whole; nothing is"
+            " committed\n",
             result.stderr,
         )
         same(self, [], self.calls())
@@ -223,7 +226,8 @@ class Refusals(Forge):
         result = self.run_script("propose")
         self.assertEqual(1, result.returncode, result.stdout)
         self.assertIn(
-            "FAIL: refused fuzz/corpus/t/abc: a symbolic link\n", result.stderr
+            "propose-fuzz-corpus.sh: refused fuzz/corpus/t/abc: a symbolic link\n",
+            result.stderr,
         )
         self.assertIn("nothing is committed", result.stderr)
         same(self, [], self.calls())
@@ -262,7 +266,8 @@ class Refusals(Forge):
         result = self.run_script("check")
         self.assertEqual(1, result.returncode, result.stdout)
         self.assertEqual(
-            "FAIL: the artifact holds no file; nothing to propose\n", result.stderr
+            "propose-fuzz-corpus.sh: the artifact holds no file; nothing to propose\n",
+            result.stderr,
         )
         same(self, [], self.calls())
 
@@ -482,10 +487,11 @@ class SignedCommit(Forge):
                 BASH,
                 "-c",
                 (
-                    f'. "{SIGNED}"; '
+                    f'. "{WRITER}"; . "{SIGNED}"; '
                     'org_signed_commit "fuzz corpus commit" b "$1" h "" "$2"'
                 ),
-                "t",
+                # $0, the caller's name, which the writer names.
+                PROPOSE.name,
                 MAIN,
                 str(changes),
             ],
@@ -509,7 +515,7 @@ class SignedCommit(Forge):
         self.assertEqual(1, result.returncode, result.stdout)
         self.assertEqual("", result.stdout)
         self.assertEqual(
-            f"FAIL: fuzz corpus commit {OID} is unsigned;"
+            f"propose-fuzz-corpus.sh: fuzz corpus commit {OID} is unsigned;"
             " the PR would be unmergeable\n",
             result.stderr,
         )
@@ -519,7 +525,9 @@ class SignedCommit(Forge):
         (self.state / "oid").write_text("", encoding="utf-8")
         result = self.helper()
         self.assertEqual(1, result.returncode, result.stdout)
-        self.assertEqual("FAIL: the API returned no commit\n", result.stderr)
+        self.assertEqual(
+            "propose-fuzz-corpus.sh: the API returned no commit\n", result.stderr
+        )
 
 
 if __name__ == "__main__":

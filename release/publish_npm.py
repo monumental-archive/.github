@@ -52,6 +52,7 @@ from typing import TYPE_CHECKING
 # come first.
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
+import findings
 import typed_std
 import workflow_command
 
@@ -145,18 +146,22 @@ def run(package: str, env: Mapping[str, str], cwd: Path) -> int:
     """
     have = npm(env, cwd, "--version").stdout.strip()
     if version_key(have) < version_key(NEED):
-        workflow_command.error(
+        findings.finding(
+            "",
             f"npm {have} < {NEED}; trusted publishing needs {NEED}+"
-            " — bump the pin in this repository's mise config"
+            " — bump the pin in this repository's mise config",
+            annotate=True,
         )
         return 1
     if not env.get("ACTIONS_ID_TOKEN_REQUEST_URL") or not env.get(
         "ACTIONS_ID_TOKEN_REQUEST_TOKEN"
     ):
-        workflow_command.error(
+        findings.finding(
+            "",
             "the OIDC token endpoint is absent from this job's environment,"
             " so npm cannot use trusted publishing — every job in the call chain must"
-            " grant id-token: write, including the caller's own job in its repository"
+            " grant id-token: write, including the caller's own job in its repository",
+            annotate=True,
         )
         return 1
     say(f"trusted publishing: npm {have}, OIDC endpoint present")
@@ -174,7 +179,9 @@ def run(package: str, env: Mapping[str, str], cwd: Path) -> int:
         if not p.name.startswith(".")
     )
     if len(tarballs) != 1:
-        workflow_command.error(f"expected exactly one tarball, found {len(tarballs)}")
+        findings.finding(
+            "", f"expected exactly one tarball, found {len(tarballs)}", annotate=True
+        )
         return 1
 
     rc = npm(

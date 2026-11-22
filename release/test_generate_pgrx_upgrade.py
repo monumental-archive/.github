@@ -452,16 +452,18 @@ class ReadsThePinsThroughTheOneReader(unittest.TestCase):
     """The pins come from release/caller_pins.py, as the build leg's do (#1333)."""
 
     def test_an_unpinned_cargo_pgrx_is_refused_with_its_remedy(self) -> None:
-        """The reader names the tool, the script keeps its own FAIL line."""
+        """The reader names the tool, the script keeps its own finding."""
         with TemporaryDirectory() as d:
             repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.1", EDTF_EDGES)
             (repo.root / "mise.toml").write_text('[tools]\nrust = "1.97.1"\n')
             result = repo.derive("1.3.1", "1.3.0", "edtf-releases.json")
         self.assertEqual(1, result.returncode)
         self.assertIn(
-            "::error::cargo-pgrx missing — pin cargo-pgrx in this repository's"
-            " mise config; it is a build input of the pgrx-extension class\n"
-            "FAIL: rust and cargo:cargo-pgrx must be pinned in this"
+            "::error::caller_pins.py: cargo-pgrx missing — pin cargo-pgrx in this"
+            " repository's mise config; it is a build input of the"
+            " pgrx-extension class\n"
+            "generate-pgrx-upgrade.sh: rust and cargo:cargo-pgrx must be pinned"
+            " in this"
             " repository's mise config\n",
             result.stderr,
         )
@@ -919,7 +921,8 @@ PREV_FILES = [
     "usr/share/postgresql/18/extension/lab_pg--0.28.1.sql",
 ]
 NO_ROOT = (
-    "FAIL: v0.28.1 tarball has no usr/lib/postgresql/18/lib under its package root"
+    "generate-pgrx-upgrade.sh: v0.28.1 tarball has no usr/lib/postgresql/18/lib"
+    " under its package root"
 )
 
 
@@ -951,13 +954,13 @@ class ReadsThePreviousArchive(NeedsJq):
         result = self.run_with("pkgroot", PREV_FILES)
         self.assertIn("deriving lab_pg: 0.28.1 -> 0.29.0 (pg18)", result.stdout)
         self.assertIn("docker stub: refusing 'run --rm", result.stderr)
-        self.assertNotIn("FAIL:", result.stderr)
+        self.assertNotIn("generate-pgrx-upgrade.sh: ", result.stderr)
 
     def test_an_imported_archive_packed_from_root(self) -> None:
         """An imported repository's tarball carries `./usr/...` directly."""
         result = self.run_with(".", PREV_FILES)
         self.assertIn("docker stub: refusing 'run --rm", result.stderr)
-        self.assertNotIn("FAIL:", result.stderr)
+        self.assertNotIn("generate-pgrx-upgrade.sh: ", result.stderr)
 
     def test_neither_layout_is_refused_by_name(self) -> None:
         """A root holding neither shape stops before any container."""
@@ -970,7 +973,8 @@ class ReadsThePreviousArchive(NeedsJq):
         """A package root without the previous schema stops before a build."""
         result = self.run_with("pkgroot", PREV_FILES[:2])
         self.assertIn(
-            "FAIL: v0.28.1 tarball carries no generated schema lab_pg--0.28.1.sql",
+            "generate-pgrx-upgrade.sh: v0.28.1 tarball carries no generated schema"
+            " lab_pg--0.28.1.sql",
             result.stderr,
         )
         self.assertNotIn("docker stub", result.stderr)
@@ -1029,9 +1033,10 @@ def run_header_install(
         The completed process and the arguments apt-get received.
 
     """
-    # Both sites source the canon's writer of workflow commands (#1660)
-    # before this block; the cut-out block is given it the same way.
-    writer = CANON / "mise" / "workflow-command.sh"
+    # Both sites source the canon's writer of findings (#1934), which
+    # brings its writer of workflow commands (#1660), before this block;
+    # the cut-out block is given it the same way.
+    writer = CANON / "mise" / "findings.sh"
     block = f'. "{writer}"\n' + "\n".join(header_install(SCRIPT.read_text()))
     with TemporaryDirectory() as d:
         tmp = Path(d)
@@ -1055,6 +1060,8 @@ def run_header_install(
             STUB_SERVED=str(tmp / "served"),
             STUB_ARGS=str(tmp / "args"),
             STUB_MOVE_TO=move_to,
+            # The name the derivation's build container gives its findings.
+            MISE_TASK_NAME="generate-pgrx-upgrade.sh",
         )
         result = subprocess.run(
             [BASH, "-euo", "pipefail", "-c", block],
@@ -1137,10 +1144,11 @@ class InstallsHeadersAtTheImagesServer(unittest.TestCase):
         result, args = run_header_install(["postgresql-server-dev-18=18.7-1.pgdg120+1"])
         self.assertEqual(1, result.returncode)
         self.assertEqual(
-            "::error::image postgres:18-bookworm@sha256:planted carries server"
+            "::error::generate-pgrx-upgrade.sh: image"
+            " postgres:18-bookworm@sha256:planted carries server"
             " 18.6-1.pgdg120+1; the apt repository no longer serves its"
             " headers — move the image pin in docker/pgrx-base-images.toml\n",
-            result.stdout,
+            result.stderr,
         )
         self.assertEqual(NOTHING, args)
 
@@ -1152,9 +1160,9 @@ class InstallsHeadersAtTheImagesServer(unittest.TestCase):
         )
         self.assertEqual(1, result.returncode)
         self.assertEqual(
-            "::error::the build moved the server from 18.6-1.pgdg120+1"
-            " to 18.7-1.pgdg120+1\n",
-            result.stdout,
+            "::error::generate-pgrx-upgrade.sh: the build moved the server"
+            " from 18.6-1.pgdg120+1 to 18.7-1.pgdg120+1\n",
+            result.stderr,
         )
 
 
@@ -1548,10 +1556,11 @@ class ProofReadsBeforeItCompares(unittest.TestCase):
             (root / "work" / "snapshot.sql").write_text(
                 snapshot_sql(SCRIPT.read_text()), encoding="utf-8"
             )
-            # The writer the real run copies into /work (#1660).
-            (root / "work" / "workflow-command.sh").write_bytes(
-                (CANON / "mise" / "workflow-command.sh").read_bytes()
-            )
+            # The writers the real run copies into /work (#1660, #1934).
+            for writer in ("findings.sh", "workflow-command.sh"):
+                (root / "work" / writer).write_bytes(
+                    (CANON / "mise" / writer).read_bytes()
+                )
             script = proof_sh(SCRIPT.read_text())
             # One pass, never a replace() per prefix: on Linux the scratch
             # root is itself under /tmp/, so a later replace() rewrote the
@@ -1617,9 +1626,9 @@ class ProofReadsBeforeItCompares(unittest.TestCase):
                 result, _ = self.run_proof(upgraded, fresh)
                 self.assertEqual(1, result.returncode)
                 self.assertEqual(
-                    f"::error::{empty} catalog snapshot of demo_ext is empty"
-                    " — the proof read nothing\n",
-                    result.stdout,
+                    f"::error::generate-pgrx-upgrade.sh: {empty} catalog snapshot"
+                    " of demo_ext is empty — the proof read nothing\n",
+                    result.stderr,
                 )
 
     def test_equal_snapshots_pass_with_the_object_count(self) -> None:
@@ -1637,12 +1646,11 @@ class ProofReadsBeforeItCompares(unittest.TestCase):
         result, _ = self.run_proof(ROW_A, ROW_A + ROW_B)
         self.assertEqual(1, result.returncode)
         self.assertIn("+" + ROW_B, result.stdout)
-        self.assertTrue(
-            result.stdout.endswith(
-                "::error::upgraded demo_ext catalog differs from a fresh 1.1.0"
-                " install — the derived script is unsound; see the diff above\n"
-            ),
-            result.stdout,
+        self.assertEqual(
+            "::error::generate-pgrx-upgrade.sh: upgraded demo_ext catalog differs"
+            " from a fresh 1.1.0 install — the derived script is unsound; see the"
+            " diff above\n",
+            result.stderr,
         )
 
     def test_every_psql_call_stops_on_error(self) -> None:

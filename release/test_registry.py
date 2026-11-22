@@ -64,6 +64,20 @@ sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
 import decoded
 
+_NAMED = contextlib.ExitStack()
+
+
+def setUpModule() -> None:
+    """Name the helper by its file, as a run outside mise does (#1934).
+
+    An in-process call reads argv, whatever task runs this suite.
+    """
+    _NAMED.enter_context(mock.patch.object(sys, "argv", ["registry.py"]))
+    for key in ("MISE_TASK_NAME", "ORG_FINDINGS"):
+        if key in os.environ:
+            _NAMED.callback(os.environ.__setitem__, key, os.environ.pop(key))
+    unittest.addModuleCleanup(_NAMED.close)
+
 
 def dumps(value: object) -> str:
     """Encode a planted document as JSON.
@@ -293,11 +307,12 @@ class Harness(unittest.TestCase):
         """Run the helper as a step does.
 
         Returns:
-            Its exit status and what it printed.
+            Its exit status and what it printed, both streams as the job
+            log shows them: a refusal is a finding, on stderr (#1934).
 
         """
         out = io.StringIO()
-        with contextlib.redirect_stdout(out):
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
             code = registry.main(list(argv), self.env, origin=self.origin)
         return code, out.getvalue()
 
@@ -347,7 +362,7 @@ class Harness(unittest.TestCase):
         """Assert the helper refuses with exactly `message`."""
         code, out = self.run_helper(*argv)
         self.assertEqual(code, 1, out)
-        self.assertIn(f"::error::{message}\n", out)
+        self.assertIn(f"::error::registry.py: {message}\n", out)
 
 
 class BuildxFloor(Harness):
@@ -727,7 +742,8 @@ class Assemble(Harness):
                 code, out = self.assemble()
                 self.assertEqual(code, 1, out)
                 self.assertIn(
-                    "::error::imagetools --dry-run output does not end in a newline;"
+                    "::error::registry.py: imagetools --dry-run output does not end"
+                    " in a newline;"
                     " refusing to guess the manifest bytes\n",
                     out,
                 )
@@ -747,7 +763,7 @@ class Assemble(Harness):
                 code, out = self.assemble()
                 self.assertEqual(code, 1, out)
                 self.assertIn(
-                    f"::error::the assembled index is '{shown}',"
+                    f"::error::registry.py: the assembled index is '{shown}',"
                     " not an OCI image index\n",
                     out,
                 )
@@ -764,7 +780,7 @@ class Assemble(Harness):
         code, out = self.assemble()
         self.assertEqual(code, 1, out)
         self.assertIn(
-            f"::error::the registry answered {answered}"
+            f"::error::registry.py: the registry answered {answered}"
             f" for the index pushed as {index}\n",
             out,
         )
@@ -777,7 +793,7 @@ class Assemble(Harness):
         code, out = self.assemble()
         self.assertEqual(code, 1, out)
         self.assertIn(
-            "::error::the registry answered no digest"
+            "::error::registry.py: the registry answered no digest"
             f" for the index pushed as {index}\n",
             out,
         )
@@ -790,7 +806,7 @@ class Assemble(Harness):
         self.assertEqual(code, 1, out)
         self.assertRegex(
             out,
-            r"::error::PUT http://127\.0\.0\.1:\d+/v2/some-owner/some-image"
+            r"::error::registry.py: PUT http://127\.0\.0\.1:\d+/v2/some-owner/some-image"
             r"/manifests/sha256:[0-9a-f]{64} answered 401\n",
         )
 
@@ -945,7 +961,8 @@ class Tag(Harness):
         code, out = self.tag(images)
         self.assertEqual(code, 1, out)
         self.assertIn(
-            f"::error::ghcr.io/some-owner/some-image:1.2.3 resolves to {resolved},"
+            f"::error::registry.py: ghcr.io/some-owner/some-image:1.2.3 resolves to"
+            f" {resolved},"
             f" gated {digest}\n",
             out,
         )
@@ -956,7 +973,7 @@ class Tag(Harness):
         code, out = self.tag(gated(digest=ARM))
         self.assertEqual(code, 1, out)
         self.assertRegex(
-            out, rf"::error::GET http://\S+/manifests/{ARM} answered 404\n"
+            out, rf"::error::registry.py: GET http://\S+/manifests/{ARM} answered 404\n"
         )
         methods = [e["method"] for e in Fake.log]
         want: list[str] = ["GET", "GET"]
@@ -988,6 +1005,7 @@ class Environment(Harness):
         with (
             mock.patch.object(urllib.request, "urlopen", refuse),
             contextlib.redirect_stdout(out),
+            contextlib.redirect_stderr(out),
         ):
             code = registry.main(["tag"], self.env)
         self.assertEqual(code, 1)

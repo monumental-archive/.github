@@ -77,6 +77,7 @@ sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 try:
     import crates_index
     import decoded
+    import findings
     import typed_std
     import workflow_command
 except ModuleNotFoundError as missing:
@@ -388,9 +389,11 @@ def run(env: Mapping[str, str], cwd: Path, fetch: Fetch = http) -> int:
             crate = target_dir / "package" / f"{name}-{version}.crate"
             local = hashlib.sha256(crate.read_bytes()).hexdigest()
             if local != cksum:
-                workflow_command.error(
+                findings.finding(
+                    "",
                     f"{name} {version} is on crates.io with checksum"
-                    f" {cksum}, but this tree packages {local}"
+                    f" {cksum}, but this tree packages {local}",
+                    annotate=True,
                 )
                 mismatched = True
                 continue
@@ -424,10 +427,10 @@ def main() -> int:
     try:
         return run(os.environ, Path.cwd())
     except RefusalError as e:
-        workflow_command.error(str(e))
+        findings.finding("", str(e), annotate=True)
         return 1
     except CommandError as e:
-        workflow_command.error(f"{' '.join(e.argv)} exited {e.returncode}")
+        findings.finding("", f"{' '.join(e.argv)} exited {e.returncode}", annotate=True)
         return e.returncode
 
 

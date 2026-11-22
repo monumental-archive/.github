@@ -43,6 +43,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 try:
     import decoded
+    import findings
 except ModuleNotFoundError as missing:
     if missing.name != "decoded":
         raise
@@ -275,10 +276,10 @@ def main(argv: list[str]) -> int:
         or not re.fullmatch(r"[0-9a-f]{40}", argv[1])
         or (len(argv) == max(ARGS) and not ONE_LEG.fullmatch(argv[-1]))
     ):
-        print(
+        findings.finding(
+            "",
             f"usage: coverage_figures.py {{{','.join(commands)}}} <40-hex sha>"
             " [pgrx-pg<major>]",
-            file=sys.stderr,
         )
         return 2
     leg = argv[2] if len(argv) == max(ARGS) else ""

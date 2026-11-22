@@ -77,6 +77,7 @@ from typing import NamedTuple
 # come first.
 sys.path.append(str(Path(__file__).resolve().parents[2] / "mise"))
 
+import findings
 import workflow_command
 
 # The runner's own, resolved on PATH once.
@@ -259,9 +260,11 @@ def guard(repo: str, version: str, crate_dir: str) -> int:
         return 0
     upgrade = f"{crate_dir}/sql/{name}--{prev.version}--{version}.sql"
     if not Path(upgrade).is_file():
-        workflow_command.error(
+        findings.finding(
+            "",
             f"no upgrade path {upgrade} from published {prev.version}"
-            f" ({prev.tag}) — existing installations would be stranded"
+            f" ({prev.tag}) — existing installations would be stranded",
+            annotate=True,
         )
         return 1
     workflow_command.notice(f"upgrade path {prev.version} -> {version} present")

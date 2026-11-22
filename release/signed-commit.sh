@@ -40,11 +40,13 @@ forge() {
   out=$(gh api "$@" --include) || status=$?
   if ((status != 0)); then
     forge_refusal=${out}
-    {
-      echo "FAIL: could not ${what}"
-      tr -d '\r' <<< "${out}" \
-        | grep -iE '^(HTTP/|x-github-request-id:|x-accepted-github-permissions:)' || true
-    } >&2
+    local -a said=()
+    local line
+    while IFS= read -r line; do
+      said+=("${line}")
+    done < <(tr -d '\r' <<< "${out}" \
+      | grep -iE '^(HTTP/|x-github-request-id:|x-accepted-github-permissions:)' || true)
+    org_finding "" "could not ${what}" ${said[@]+"${said[@]}"}
     return "${status}"
   fi
   awk 'body { print; next } /^\r?$/ { body = 1 }' <<< "${out}"
@@ -88,14 +90,14 @@ org_signed_commit() {
         expectedHeadOid: $head
       }}
     }') || {
-    echo "FAIL: could not build the ${noun} request from ${changes}" >&2
+    org_finding "" "could not build the ${noun} request from ${changes}"
     return 1
   }
   oid=$(printf '%s' "${request}" \
     | forge "create the ${noun} on ${branch}" graphql --input - \
       --jq '.data.createCommitOnBranch.commit.oid') || return 1
   if [[ -z ${oid} ]]; then
-    echo "FAIL: the API returned no commit" >&2
+    org_finding "" "the API returned no commit"
     return 1
   fi
   # Prove the point of all this rather than assuming it.
@@ -103,7 +105,7 @@ org_signed_commit() {
     "repos/${GITHUB_REPOSITORY}/commits/${oid}" \
     --jq '.commit.verification.verified') || return 1
   if [[ ${verified} != "true" ]]; then
-    echo "FAIL: ${noun} ${oid} is unsigned; the PR would be unmergeable" >&2
+    org_finding "" "${noun} ${oid} is unsigned; the PR would be unmergeable"
     return 1
   fi
   printf '%s\n' "${oid}"

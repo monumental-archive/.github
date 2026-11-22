@@ -19,6 +19,13 @@ set -euo pipefail
 : "${GITHUB_REPOSITORY:?}"
 : "${GITHUB_SHA:?}"
 
+# The writer of findings in this tree, found with no command run (#1934).
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${org__here}/../mise/findings.sh"
+unset org__here
+
 # The same head check open-release-pr.sh makes: a stale run must not
 # close a PR a newer run has just opened.
 # shellcheck source=release/planned-head.sh
@@ -29,7 +36,7 @@ require_planned_head
 # leave the stale PR standing and look exactly like the quiet case.
 if ! open=$(gh pr list --repo "${GITHUB_REPOSITORY}" --head "${RELEASE_BRANCH}" \
   --state open --json number --jq '.[].number'); then
-  echo "FAIL: could not list the open pull requests on ${RELEASE_BRANCH}" >&2
+  org_finding "" "could not list the open pull requests on ${RELEASE_BRANCH}"
   exit 1
 fi
 if [[ -z ${open} ]]; then

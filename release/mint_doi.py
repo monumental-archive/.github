@@ -47,11 +47,12 @@ from urllib.parse import quote
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[1] / "mise"))
 
 import decoded
+import findings
 import typed_std
 import workflow_command
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Iterable, Mapping
 
 RDM = "application/vnd.inveniordm.v1+json"
 # curl's transient set, which `--retry` without `--retry-all-errors`
@@ -92,7 +93,12 @@ FIRST_CONCEPT = "first release — concept DOI equals this version"
 
 
 class RefusedError(Exception):
-    """A refusal: printed as one error workflow command, exit 1."""
+    """A refusal: one annotated finding, its cause the detail, exit 1."""
+
+    def __init__(self, message: str, detail: Iterable[str] = ()) -> None:
+        """Keep the refusal and the lines that say what caused it."""
+        super().__init__(message)
+        self.detail = list(detail)
 
 
 class HttpError(Exception):
@@ -646,12 +652,11 @@ class Mint:
                 f"the published record {recid}",
             )
         except (HttpError, decoded.UndecodableError) as e:
-            print(e, file=sys.stderr)
             msg = (
                 f"the published record {recid} could not be read back — the"
                 f" licences of DOI {doi} are unverified"
             )
-            raise RefusedError(msg) from e
+            raise RefusedError(msg, [str(e)]) from e
         if got != want:
             msg = (
                 f"the published record's licences read back as {got}, not {want}"
@@ -1063,9 +1068,9 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None) ->
     try:
         return mint.run(args.pipeline)
     except RefusedError as e:
-        workflow_command.error(str(e))
+        findings.finding("", str(e), e.detail, annotate=True)
     except (HttpError, ValueError, KeyError, TypeError) as e:
-        workflow_command.error(f"{type(e).__name__}: {e}")
+        findings.finding("", f"{type(e).__name__}: {e}", annotate=True)
     return 1
 
 

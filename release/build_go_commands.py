@@ -25,7 +25,7 @@ from pathlib import Path
 # come first.
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
-import workflow_command
+import findings
 
 MAINS = '{{if eq .Name "main"}}{{.ImportPath}}{{end}}'
 
@@ -96,7 +96,7 @@ def main() -> int:
     try:
         build()
     except RefusedError as e:
-        workflow_command.error(str(e))
+        findings.finding("", str(e), annotate=True)
         return 1
     except GoFailedError as e:
         return e.status

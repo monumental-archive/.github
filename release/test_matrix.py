@@ -18,11 +18,15 @@ as those runs read it, so a Renovate roll of the live file moves nothing
 here.
 """
 
+import contextlib
 import io
+import os
+import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest import mock
 
 import matrix
 
@@ -32,6 +36,21 @@ MAPPING = str(TESTDATA / "pgrx-base-images.toml")
 NOTHING = "a release that builds nothing is not a release"
 NO_IMAGE = "has no digest-pinned base image in docker/pgrx-base-images.toml"
 GO_HINT = "canon targets only (<goos>-<goarch>)"
+
+
+_NAMED = contextlib.ExitStack()
+
+
+def setUpModule() -> None:
+    """Name the helper by its file, as a run outside mise does (#1934).
+
+    An in-process call reads argv, whatever task runs this suite.
+    """
+    _NAMED.enter_context(mock.patch.object(sys, "argv", ["matrix.py"]))
+    for key in ("MISE_TASK_NAME", "ORG_FINDINGS"):
+        if key in os.environ:
+            _NAMED.callback(os.environ.__setitem__, key, os.environ.pop(key))
+    unittest.addModuleCleanup(_NAMED.close)
 
 
 def run(*argv: str) -> tuple[int, str, str]:
@@ -167,28 +186,29 @@ class Targets(Rows):
                 with self.subTest(cls=cls, request=request):
                     self.refused(
                         ("targets", cls, request),
-                        f"::error::no targets requested — {NOTHING}",
+                        f"::error::matrix.py: no targets requested — {NOTHING}",
                     )
 
     def test_an_unknown_go_target_names_the_go_form(self) -> None:
         """The Go hint names the target form."""
         self.refused(
             ("targets", "go-binary", "linux-amd64,plan9-386"),
-            f"::error::unknown target plan9-386; {GO_HINT}",
+            f"::error::matrix.py: unknown target plan9-386; {GO_HINT}",
         )
 
     def test_an_unknown_rust_target_is_refused(self) -> None:
         """The Rust hint is bare."""
         self.refused(
             ("targets", "rust-binary", "x86_64-pc-windows-msvc"),
-            "::error::unknown target x86_64-pc-windows-msvc; canon targets only",
+            "::error::matrix.py: unknown target x86_64-pc-windows-msvc; canon targets"
+            " only",
         )
 
     def test_another_class_target_is_unknown(self) -> None:
         """The tables are per class: a Go target is no Rust target."""
         self.refused(
             ("targets", "rust-binary", "linux-amd64"),
-            "::error::unknown target linux-amd64; canon targets only",
+            "::error::matrix.py: unknown target linux-amd64; canon targets only",
         )
 
     def test_an_empty_field_is_an_unknown_target(self) -> None:
@@ -197,7 +217,7 @@ class Targets(Rows):
             with self.subTest(request=request):
                 self.refused(
                     ("targets", "go-binary", request),
-                    f"::error::unknown target ; {GO_HINT}",
+                    f"::error::matrix.py: unknown target ; {GO_HINT}",
                 )
 
     def test_a_duplicate_is_refused(self) -> None:
@@ -206,14 +226,14 @@ class Targets(Rows):
             with self.subTest(request=request):
                 self.refused(
                     ("targets", "go-binary", request),
-                    "::error::duplicate target requested",
+                    "::error::matrix.py: duplicate target requested",
                 )
 
     def test_an_unknown_target_is_named_before_a_duplicate(self) -> None:
         """The shell checked every target before counting duplicates."""
         self.refused(
             ("targets", "go-binary", "linux-amd64,linux-amd64,plan9-386"),
-            f"::error::unknown target plan9-386; {GO_HINT}",
+            f"::error::matrix.py: unknown target plan9-386; {GO_HINT}",
         )
 
     def test_the_request_splits_as_the_shell_split_it(self) -> None:
@@ -239,7 +259,7 @@ class PgrxExtension(Rows):
             with self.subTest(request=request):
                 self.refused(
                     ("pgrx-extension", MAPPING, request),
-                    f"::error::no PG majors requested — {NOTHING}",
+                    f"::error::matrix.py: no PG majors requested — {NOTHING}",
                 )
 
     def test_a_major_with_no_pinned_base_image_is_refused(self) -> None:
@@ -248,7 +268,7 @@ class PgrxExtension(Rows):
             with self.subTest(major=major):
                 self.refused(
                     ("pgrx-extension", MAPPING, f"14,{major}"),
-                    f"::error::pg{major} {NO_IMAGE}",
+                    f"::error::matrix.py: pg{major} {NO_IMAGE}",
                 )
 
     def test_a_non_numeric_major_is_refused(self) -> None:
@@ -257,7 +277,7 @@ class PgrxExtension(Rows):
             with self.subTest(major=major):
                 self.refused(
                     ("pgrx-extension", MAPPING, f"{major},14"),
-                    f"::error::{major} is not a PG major",
+                    f"::error::matrix.py: {major} is not a PG major",
                 )
 
     def test_a_major_pinned_for_one_role_only_is_refused(self) -> None:
@@ -271,21 +291,21 @@ class PgrxExtension(Rows):
             with self.subTest(text=text):
                 self.refused(
                     ("pgrx-extension", self.mapping(text), "14"),
-                    f"::error::pg14 {NO_IMAGE}",
+                    f"::error::matrix.py: pg14 {NO_IMAGE}",
                 )
 
     def test_a_duplicate_is_refused(self) -> None:
         """The same major twice."""
         self.refused(
             ("pgrx-extension", MAPPING, "16,17,16"),
-            "::error::duplicate PG major requested",
+            "::error::matrix.py: duplicate PG major requested",
         )
 
     def test_a_duplicate_is_named_before_an_unpinned_major(self) -> None:
         """The request's own rules run before the mapping's pins (#1531)."""
         self.refused(
             ("pgrx-extension", MAPPING, "16,13,16"),
-            "::error::duplicate PG major requested",
+            "::error::matrix.py: duplicate PG major requested",
         )
 
     def test_each_major_builds_on_both_arches(self) -> None:
@@ -323,7 +343,9 @@ class MappingShape(Rows):
         """Named as not TOML, with the parser's reason."""
         code, out, err = run("pgrx-extension", self.mapping("[build\n"), "16")
         self.assertEqual((code, out), (1, ""))
-        self.assertTrue(err.startswith(f"::error::{self.NAME} is not TOML: "), err)
+        self.assertTrue(
+            err.startswith(f"::error::matrix.py: {self.NAME} is not TOML: "), err
+        )
 
     def test_each_wrong_shape_is_refused_by_name(self) -> None:
         """A role or the floor that is not a table, a pin that is not a string."""
@@ -339,7 +361,8 @@ class MappingShape(Rows):
             for argv in modes:
                 with self.subTest(text=text, mode=argv[0]):
                     self.refused(
-                        (argv[0], self.mapping(text), *argv[1:]), f"::error::{said}"
+                        (argv[0], self.mapping(text), *argv[1:]),
+                        f"::error::matrix.py: {said}",
                     )
 
 
@@ -352,7 +375,7 @@ class PgrxImages(Rows):
             with self.subTest(request=request):
                 self.refused(
                     ("pgrx-images", request),
-                    f"::error::no PG majors requested — {NOTHING}",
+                    f"::error::matrix.py: no PG majors requested — {NOTHING}",
                 )
 
     def test_a_non_numeric_major_is_refused(self) -> None:
@@ -361,18 +384,18 @@ class PgrxImages(Rows):
             with self.subTest(major=major):
                 self.refused(
                     ("pgrx-images", f"14,{major}"),
-                    f"::error::{major} is not a PG major",
+                    f"::error::matrix.py: {major} is not a PG major",
                 )
 
     def test_an_empty_field_is_not_a_major(self) -> None:
         """A leading empty field is kept, and refused."""
-        self.refused(("pgrx-images", ",14"), "::error:: is not a PG major")
+        self.refused(("pgrx-images", ",14"), "::error::matrix.py:  is not a PG major")
 
     def test_a_duplicate_is_refused(self) -> None:
         """The same major twice would build and push one image twice (#1531)."""
         self.refused(
             ("pgrx-images", "14,14"),
-            "::error::duplicate PG major requested",
+            "::error::matrix.py: duplicate PG major requested",
         )
 
 
@@ -412,7 +435,7 @@ class BaseImages(Rows):
             with self.subTest(ref=ref):
                 self.refused(
                     ("base-images", self.mapping(f'[smoke]\n"14" = "{ref}"\n')),
-                    f"smoke.14: no digest in {ref!r}",
+                    f"matrix.py: smoke.14: no digest in {ref!r}",
                 )
 
     def test_an_empty_file_is_refused(self) -> None:
@@ -421,7 +444,8 @@ class BaseImages(Rows):
             with self.subTest(text=text):
                 self.refused(
                     ("base-images", self.mapping(text)),
-                    "::error::no pinned base images found — an empty approval"
+                    "::error::matrix.py: no pinned base images found — an empty"
+                    " approval"
                     " set approves nothing",
                 )
 
@@ -464,7 +488,7 @@ class CommandLine(unittest.TestCase):
             with self.subTest(argv=argv):
                 code, out, err = run(*argv)
                 self.assertEqual((code, out), (2, ""))
-                self.assertTrue(err.startswith("usage: matrix.py targets"))
+                self.assertTrue(err.startswith("matrix.py: usage: matrix.py targets"))
 
 
 if __name__ == "__main__":

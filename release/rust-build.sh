@@ -73,9 +73,11 @@
 #   SOURCE_DATE_EPOCH      normally supplied by the caller; derived from
 #                          the checked-out commit when it is not
 set -euo pipefail
-# The canon's one writer of workflow commands (#1660), in this tree.
-# shellcheck source=mise/workflow-command.sh
-. "$(dirname "${BASH_SOURCE[0]}")/../mise/workflow-command.sh"
+# The canon's writer of findings (#1934), which brings its one writer
+# of workflow commands (#1660), in this tree.
+# shellcheck source=mise/findings.sh
+. "$(dirname "${BASH_SOURCE[0]}")/../mise/findings.sh"
+: "${MISE_TASK_NAME:=rust-build}"
 
 target="${TARGET:-}"
 package="${PACKAGE:-}"
@@ -87,15 +89,15 @@ plan_artifact_suffix="${PLAN_ARTIFACT_SUFFIX:-}"
 plan_dir="${PLAN_DIR:-plan}"
 
 [[ -n ${target} ]] || {
-  org_error "rust-build: TARGET is unset"
+  org_finding_annotated "" "TARGET is unset"
   exit 1
 }
 [[ -n ${stage_dir} ]] || {
-  org_error "rust-build: STAGE_DIR is unset"
+  org_finding_annotated "" "STAGE_DIR is unset"
   exit 1
 }
 if [[ -n ${plan_class} && -z ${plan_doc_prefix} ]]; then
-  org_error "rust-build: PLAN_CLASS is set but PLAN_DOC_PREFIX is not — a plan names a document"
+  org_finding_annotated "" "PLAN_CLASS is set but PLAN_DOC_PREFIX is not — a plan names a document"
   exit 1
 fi
 
@@ -113,7 +115,7 @@ if [[ -n ${package} ]]; then
   present=$(jq -r --arg p "${package}" \
     '[.packages[] | select(.name == $p) | .name] | length' <<< "${meta}")
   if [[ ${present} != "1" ]]; then
-    org_error "rust-build: ${present} workspace package(s) named '${package}'"
+    org_finding_annotated "" "${present} workspace package(s) named '${package}'"
     exit 1
   fi
   build_flags+=(--package "${package}")
@@ -150,7 +152,7 @@ fi
 command -v cargo-auditable > /dev/null || {
   emsg="cargo-auditable missing — pin cargo-auditable in this repository's mise config; it is a build"
   emsg+=" input of every class that ships a Rust binary"
-  org_error "${emsg}"
+  org_finding_annotated "" "${emsg}"
   exit 1
 }
 
@@ -214,14 +216,14 @@ while IFS= read -r b; do
   if [[ -n ${b} ]]; then bins+=("${b}"); fi
 done <<< "${bin_list}"
 if ((${#bins[@]} == 0)); then
-  org_error "rust-build: no bin targets in scope — nothing to ship"
+  org_finding_annotated "" "no bin targets in scope — nothing to ship"
   exit 1
 fi
 mkdir -p "${stage_dir}"
 for b in "${bins[@]}"; do
   src="target/${target}/release/${b}"
   if [[ ! -x ${src} ]]; then
-    org_error "rust-build: expected binary ${src} was not produced"
+    org_finding_annotated "" "expected binary ${src} was not produced"
     exit 1
   fi
   install -m 0755 "${src}" "${stage_dir}/${b}"

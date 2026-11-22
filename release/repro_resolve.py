@@ -39,6 +39,7 @@ import sys
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[1] / "mise"))
 
 import decoded
+import findings
 import workflow_command
 
 CHECKSUMS = pathlib.Path("checksums.txt")
@@ -175,7 +176,7 @@ def main() -> int:
     try:
         tag, outputs = resolve(os.environ["GITHUB_REPOSITORY"])
     except StepError as err:
-        workflow_command.error(str(err))
+        findings.finding("", str(err), annotate=True)
         return 1
     with pathlib.Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as out:
         out.write(outputs)

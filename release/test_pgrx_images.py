@@ -179,7 +179,8 @@ class Stage(unittest.TestCase):
         result = self.stage("18")
         self.assertEqual(1, result.returncode)
         self.assertEqual(
-            "::error::missing tarballs/edtf_postgres-1.2.3-pg18-linux-amd64.tar.gz"
+            "::error::pgrx_images.py: missing"
+            " tarballs/edtf_postgres-1.2.3-pg18-linux-amd64.tar.gz"
             " — the extension build did not produce this cell\n",
             result.stderr,
         )
@@ -190,7 +191,8 @@ class Stage(unittest.TestCase):
         result = self.stage("18")
         self.assertEqual(1, result.returncode)
         self.assertEqual(
-            "::error::missing tarballs/edtf_postgres-1.2.3-pg18-linux-arm64.tar.gz"
+            "::error::pgrx_images.py: missing"
+            " tarballs/edtf_postgres-1.2.3-pg18-linux-arm64.tar.gz"
             " — the extension build did not produce this cell\n",
             result.stderr,
         )
@@ -202,7 +204,8 @@ class Stage(unittest.TestCase):
         result = self.stage("16")
         self.assertEqual(1, result.returncode)
         self.assertEqual(
-            f"::error::{shown} has no pkgroot/usr/lib/postgresql/16/lib\n",
+            f"::error::pgrx_images.py: {shown} has no"
+            f" pkgroot/usr/lib/postgresql/16/lib\n",
             result.stderr,
         )
         image_lib = self.root / "staged" / "amd64" / "image" / "lib"
@@ -214,7 +217,8 @@ class Stage(unittest.TestCase):
         result = self.stage("15")
         self.assertEqual(1, result.returncode)
         self.assertEqual(
-            f"::error::{shown} has no pkgroot/usr/share/postgresql/15/extension\n",
+            f"::error::pgrx_images.py: {shown} has no"
+            f" pkgroot/usr/share/postgresql/15/extension\n",
             result.stderr,
         )
 
@@ -270,7 +274,8 @@ class BaseImage(unittest.TestCase):
         )
         self.assertEqual(1, result.returncode)
         self.assertEqual(
-            f"::error::pg13 has no build image in {TABLE}\n", result.stderr
+            f"::error::pgrx_images.py: pg13 has no build image in {TABLE}\n",
+            result.stderr,
         )
 
     def test_a_table_that_is_not_majors_to_references(self) -> None:
@@ -301,7 +306,7 @@ class BaseImage(unittest.TestCase):
                     CANON,
                 )
                 self.assertEqual(
-                    (1, f"::error::{want.format(t=table)}\n"),
+                    (1, f"::error::pgrx_images.py: {want.format(t=table)}\n"),
                     (result.returncode, result.stderr),
                 )
 
@@ -393,7 +398,8 @@ class ConsumerDockerfile(unittest.TestCase):
         result = render("copy", IMAGE + ":1.2.3-pg17-artifact", build_image("17"), "17")
         self.assertEqual((1, ""), (result.returncode, result.stdout))
         self.assertEqual(
-            f"::error::the extension image {IMAGE}:1.2.3-pg17-artifact is not"
+            f"::error::pgrx_images.py: the extension image"
+            f" {IMAGE}:1.2.3-pg17-artifact is not"
             " pinned by digest (@sha256:); the consumer proof builds only from"
             " pinned references\n",
             result.stderr,
@@ -404,7 +410,8 @@ class ConsumerDockerfile(unittest.TestCase):
         result = render("path", PINNED, "postgres:18-bookworm", "18")
         self.assertEqual((1, ""), (result.returncode, result.stdout))
         self.assertEqual(
-            "::error::the base image postgres:18-bookworm is not pinned by digest"
+            "::error::pgrx_images.py: the base image postgres:18-bookworm is not"
+            " pinned by digest"
             " (@sha256:); the consumer proof builds only from pinned references\n",
             result.stderr,
         )
@@ -534,7 +541,9 @@ class Proof(unittest.TestCase):
         """No [build] row: refused before any docker call."""
         result, lines = self.prove("13")
         self.assertEqual(1, result.returncode)
-        self.assertIn("::error::pg13 has no build image in", result.stderr)
+        self.assertIn(
+            "::error::pgrx_images.py: pg13 has no build image in", result.stderr
+        )
         self.assertEqual(list[str](), lines)
 
     def test_a_record_without_a_digest_builds_nothing(self) -> None:
@@ -542,7 +551,8 @@ class Proof(unittest.TestCase):
         result, lines = self.prove("18", digest="")
         self.assertEqual(1, result.returncode)
         self.assertIn(
-            f"::error::the extension image {IMAGE}@ is not pinned by digest",
+            f"::error::pgrx_images.py: the extension image {IMAGE}@ is not pinned by"
+            f" digest",
             result.stderr,
         )
         self.assertEqual(list[str](), lines)
@@ -602,7 +612,8 @@ class ExtensionName(unittest.TestCase):
         result = extension_name(self.tree)
         self.assertEqual((1, ""), (result.returncode, result.stdout))
         self.assertEqual(
-            f"::error::{self.tree} holds no extension control file; the artifact"
+            f"::error::pgrx_images.py: {self.tree} holds no extension control file;"
+            f" the artifact"
             " image ships no extension for the consumer proof to create\n",
             result.stderr,
         )
@@ -614,7 +625,8 @@ class ExtensionName(unittest.TestCase):
         result = extension_name(self.tree)
         self.assertEqual((1, ""), (result.returncode, result.stdout))
         self.assertEqual(
-            f"::error::{self.tree} holds 2 extension control files (amcheck,"
+            f"::error::pgrx_images.py: {self.tree} holds 2 extension control files"
+            f" (amcheck,"
             " edtf_postgres); the consumer proof creates the one extension the"
             " artifact image ships and cannot tell which\n",
             result.stderr,

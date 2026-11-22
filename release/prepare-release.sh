@@ -21,6 +21,13 @@
 # Leaves the working tree modified; open-release-pr.sh commits it via the API.
 set -euo pipefail
 
+# The writer of findings in this tree, found with no command run (#1934).
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${org__here}/../mise/findings.sh"
+unset org__here
+
 emit() {
   if [[ -n ${GITHUB_OUTPUT:-} ]]; then
     echo "$1" >> "${GITHUB_OUTPUT}"
@@ -84,10 +91,13 @@ stele derive release-plan \
 
 # A refused plan is a document saying why, carrying no instructions an
 # executor could half-run. Surface every cause rather than the first.
-refusals=$(jq -r '(.refusals // [])[] | "  " + .cause + ": " + .detail' "${plan}")
+refusals=$(jq -r '(.refusals // [])[] | .cause + ": " + .detail' "${plan}")
 if [[ -n ${refusals} ]]; then
-  echo "FAIL: the release plan refuses:" >&2
-  echo "${refusals}" >&2
+  refused=()
+  while IFS= read -r line; do
+    refused+=("${line}")
+  done <<< "${refusals}"
+  org_finding "" "the release plan refuses:" "${refused[@]}"
   exit 1
 fi
 
@@ -134,9 +144,9 @@ fi
 # refusal, not a rename.
 stubs=$(git ls-files '*--next.sql')
 if [[ -n ${stubs} ]]; then
-  echo "FAIL: --next.sql stubs are retired; upgrade scripts are derived by" >&2
-  echo "release/generate-pgrx-upgrade.sh. Delete: ${stubs}" >&2
-  echo "(A data migration for this cycle belongs in sql/next-data.sql.)" >&2
+  org_finding "" "--next.sql stubs are retired; upgrade scripts are derived by" \
+    "release/generate-pgrx-upgrade.sh. Delete: ${stubs}" \
+    "(A data migration for this cycle belongs in sql/next-data.sql.)"
   exit 1
 fi
 

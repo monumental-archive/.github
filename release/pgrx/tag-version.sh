@@ -10,9 +10,13 @@
 set -euo pipefail
 : "${UNTRUSTED_VERSION:?}"
 : "${UNTRUSTED_CRATE_DIR:?}"
-# The canon's one writer of workflow commands (#1660), in this tree.
-# shellcheck source=mise/workflow-command.sh
-. "$(dirname "${BASH_SOURCE[0]}")/../../mise/workflow-command.sh"
+# The canon's writer of findings (#1934), in this tree, found with no
+# command run.
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${org__here}/../../mise/findings.sh"
+unset org__here
 manifest=$(
   python3 - "${UNTRUSTED_CRATE_DIR}/Cargo.toml" << 'PY'
 import sys
@@ -30,6 +34,6 @@ print(v)
 PY
 )
 if [[ ${manifest} != "${UNTRUSTED_VERSION}" ]]; then
-  org_error "tag says ${UNTRUSTED_VERSION}, manifest says ${manifest}"
+  org_finding_annotated "" "tag says ${UNTRUSTED_VERSION}, manifest says ${manifest}"
   exit 1
 fi

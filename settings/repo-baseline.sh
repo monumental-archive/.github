@@ -10,6 +10,14 @@
 # Run `check` any time; run `apply` after creating or transferring a repo.
 set -euo pipefail
 
+# The writer of findings in this tree, found with no command run (#1934).
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${org__here}/../mise/findings.sh"
+unset org__here
+: "${MISE_TASK_NAME:=repo-baseline}"
+
 org="monumental-archive"
 
 # Every read goes through one shape, because a bare `gh` failure is the
@@ -53,10 +61,10 @@ api_probe() {
   if [[ -n ${absent} && ${said} == *"${absent}"* ]]; then
     return 1
   fi
-  echo "drift: cannot read ${what}"
-  echo "       endpoint: ${endpoint}"
-  echo "       needs:    ${grant}"
-  echo "       gh said:  ${said}"
+  org_finding "" "cannot read ${what}" \
+    "endpoint: ${endpoint}" \
+    "needs:    ${grant}" \
+    "gh said:  ${said}"
   return 2
 }
 
@@ -72,9 +80,9 @@ api_write() {
     return 0
   fi
   said="$(head -1 "${api_err}")"
-  echo "failed: ${what}" >&2
-  echo "        needs:   ${grant}" >&2
-  echo "        gh said: ${said}" >&2
+  org_finding "" "failed: ${what}" \
+    "needs:   ${grant}" \
+    "gh said: ${said}"
   return 1
 }
 
@@ -130,7 +138,7 @@ api_probe "the org's repository listing" \
   "" "orgs/${org}/repos?per_page=100" --paginate --jq '.[].name' \
   || listing_status=$?
 if [[ ${listing_status} -ne 0 ]]; then
-  echo "repo-baseline: nothing was checked — the population is unreadable." >&2
+  org_finding "" "nothing was checked — the population is unreadable."
   exit 1
 fi
 repos="${api_body}"
@@ -294,7 +302,7 @@ for repo in ${repos}; do
         want="$(jq -r --arg k "${key}" '.[$k]' "${baseline}")"
         have="$(jq -r --arg k "${key}" '.[$k]' <<< "${actual}")"
         if [[ ${want} != "${have}" ]]; then
-          echo "drift: ${repo}.${key} = ${have} (baseline: ${want})"
+          org_finding "" "${repo}.${key} = ${have} (baseline: ${want})"
           drift=1
         fi
       done
@@ -312,15 +320,15 @@ for repo in ${repos}; do
             want="$(jq -S '{name, color, description}' <<< "${label}")"
             have="$(jq -S '{name, color, description}' <<< "${api_body}")"
             if [[ ${want} != "${have}" ]]; then
-              echo "drift: ${repo}'s ${label_name} label is not the baseline's"
-              echo "       — run: settings/repo-baseline.sh apply"
+              org_finding "" "${repo}'s ${label_name} label is not the baseline's" \
+                "— run: settings/repo-baseline.sh apply"
               diff <(printf '%s\n' "${want}") <(printf '%s\n' "${have}") \
                 | sed -n 's/^[<>]/       &/p' || true
               drift=1
             fi
             ;;
           1)
-            echo "drift: ${repo} has no ${label_name} label — run: settings/repo-baseline.sh apply"
+            org_finding "" "${repo} has no ${label_name} label — run: settings/repo-baseline.sh apply"
             drift=1
             ;;
           *) drift=1 ;;
@@ -335,7 +343,7 @@ for repo in ${repos}; do
       if [[ ${oidc_status} -ne 0 ]]; then
         drift=1
       elif [[ ${api_body} != "true" ]]; then
-        echo "drift: ${repo} OIDC sub claim is not immutable (${api_body})"
+        org_finding "" "${repo} OIDC sub claim is not immutable (${api_body})"
         drift=1
       fi
       # Two reads, two absences, and they mean opposite things: no
@@ -353,7 +361,7 @@ for repo in ${repos}; do
             || env_status=$?
           case ${env_status} in
             1)
-              echo "drift: ${repo} has publish.yml but no publish environment"
+              org_finding "" "${repo} has publish.yml but no publish environment"
               drift=1
               ;;
             2) drift=1 ;;
@@ -369,7 +377,7 @@ for repo in ${repos}; do
       # here instead: if the org setting ever regresses, this goes red.
       signoff="$(jq -r '.web_commit_signoff_required' <<< "${actual}")"
       if [[ ${signoff} != "true" ]]; then
-        echo "drift: ${repo} web commit signoff is ${signoff} (org enforcement regressed?)"
+        org_finding "" "${repo} web commit signoff is ${signoff} (org enforcement regressed?)"
         drift=1
       fi
       # CLASSIC branch protection on the default branch (#761). It is a
@@ -405,11 +413,11 @@ for repo in ${repos}; do
             [(.required_status_checks.contexts // [])[],
              (.required_status_checks.checks // [])[].context]
             | unique | join(", ")' <<< "${api_body}")"
-          echo "drift: ${repo} has CLASSIC branch protection on ${branch}"
-          echo "       required contexts: ${contexts:-(none)}"
-          echo "       delete it in Settings -> Branches. The org rulesets are"
-          echo "       the enforcement; a context no workflow reports blocks"
-          echo "       every PR with nothing able to satisfy it (#761)."
+          org_finding "" "${repo} has CLASSIC branch protection on ${branch}" \
+            "required contexts: ${contexts:-(none)}" \
+            "delete it in Settings -> Branches. The org rulesets are" \
+            "the enforcement; a context no workflow reports blocks" \
+            "every PR with nothing able to satisfy it (#761)."
           drift=1
           ;;
         2) drift=1 ;;
@@ -465,31 +473,31 @@ for repo in ${repos}; do
             want="$(jq -S "${queue_shape}" "${queue_ruleset}")"
             have="$(jq -S "${queue_shape}" <<< "${api_body}")"
             if [[ ${want} != "${have}" ]]; then
-              echo "drift: ${repo}'s ${queue_name} ruleset is not the baseline's"
-              echo "       (settings/merge-queue.json) — run: settings/repo-baseline.sh apply"
+              org_finding "" "${repo}'s ${queue_name} ruleset is not the baseline's" \
+                "(settings/merge-queue.json) — run: settings/repo-baseline.sh apply"
               diff <(printf '%s\n' "${want}") <(printf '%s\n' "${have}") \
                 | sed -n 's/^[<>]/       &/p' || true
               drift=1
             fi
             continue
           fi
-          echo "drift: ${repo} carries its OWN ruleset '${rs_name}'"
-          echo "       target ${rs_target}, enforcement ${rs_state}, source ${rs_source}"
-          echo "       delete it in Settings -> Rules. The org rules are the"
-          echo "       enforcement (docs/rulesets.md); a repo's own is either"
-          echo "       redundant with them or contradicts them (#876)."
+          org_finding "" "${repo} carries its OWN ruleset '${rs_name}'" \
+            "target ${rs_target}, enforcement ${rs_state}, source ${rs_source}" \
+            "delete it in Settings -> Rules. The org rules are the" \
+            "enforcement (docs/rulesets.md); a repo's own is either" \
+            "redundant with them or contradicts them (#876)."
           drift=1
         done < <(jq -r '.[] | [.id, .name, .target, .enforcement, .source_type]
           | @tsv' <<< "${own_rulesets}")
         if [[ ${visibility} == "public" && ${queue_seen} -eq 0 ]]; then
-          echo "drift: ${repo} has no ${queue_name} ruleset, so its pull requests"
-          echo "       still need a rebase to merge — run: settings/repo-baseline.sh apply"
+          org_finding "" "${repo} has no ${queue_name} ruleset, so its pull requests" \
+            "still need a rebase to merge — run: settings/repo-baseline.sh apply"
           drift=1
         fi
       fi
       ;;
     *)
-      echo "unknown mode: ${mode}" >&2
+      org_finding "" "unknown mode: ${mode}"
       exit 2
       ;;
   esac
@@ -542,17 +550,17 @@ if [[ ${mode} == check ]]; then
     case "${selection}" in
       all) ;;
       "")
-        echo "drift: App ${app} is not installed on the org"
-        echo "       install it across all repositories:"
-        echo "       https://github.com/organizations/${org}/settings/installations"
+        org_finding "" "App ${app} is not installed on the org" \
+          "install it across all repositories:" \
+          "https://github.com/organizations/${org}/settings/installations"
         drift=1
         ;;
       *)
-        echo "drift: App ${app} installation is '${selection}', not 'all'"
-        echo "       set it back to All repositories:"
-        echo "       https://github.com/organizations/${org}/settings/installations"
-        echo "       A selected installation strands every repo off the list —"
-        echo "       its first release dies on an unreadable 404 (#757)."
+        org_finding "" "App ${app} installation is '${selection}', not 'all'" \
+          "set it back to All repositories:" \
+          "https://github.com/organizations/${org}/settings/installations" \
+          "A selected installation strands every repo off the list —" \
+          "its first release dies on an unreadable 404 (#757)."
         drift=1
         ;;
     esac
@@ -584,7 +592,7 @@ if [[ ${mode} == check ]]; then
     # absent or lacks the scope this check is doing nothing, and a check
     # that quietly does nothing is worse than no check — it manufactures
     # the impression of coverage.
-    echo "drift: cannot read org packages (is PACKAGES_TOKEN set, with read:packages?)"
+    org_finding "" "cannot read org packages (is PACKAGES_TOKEN set, with read:packages?)"
     drift=1
     packages='[]'
   fi
@@ -594,8 +602,8 @@ if [[ ${mode} == check ]]; then
   while IFS=$'\t' read -r name visibility repo_private; do
     [[ -n ${name} ]] || continue
     if [[ ${repo_private} == "false" && ${visibility} != "public" ]]; then
-      echo "drift: package ${name} is ${visibility}, but its repository is public"
-      echo "       fix in the package settings — no API sets this"
+      org_finding "" "package ${name} is ${visibility}, but its repository is public" \
+        "fix in the package settings — no API sets this"
       drift=1
     fi
     # NOT `.repository.private // true`: jq's `//` falls through on false

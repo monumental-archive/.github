@@ -332,7 +332,8 @@ class PublishEnvironment(ForgeCase):
         self.forge.publish_yml(repo, "on:\n  workflow_call:\n    inputs: {}\n")
         done = self.forge.check()
         self.assertNotIn(
-            f"drift: {repo} has publish.yml but no publish environment", done.stdout
+            f"repo-baseline: {repo} has publish.yml but no publish environment",
+            done.stderr,
         )
         self.assertEqual(0, done.returncode, done.stdout + done.stderr)
 
@@ -342,7 +343,8 @@ class PublishEnvironment(ForgeCase):
         self.forge.publish_yml(repo, "on:\n  push:\n    tags: ['v*']\n")
         done = self.forge.check()
         self.assertIn(
-            f"drift: {repo} has publish.yml but no publish environment\n", done.stdout
+            f"repo-baseline: {repo} has publish.yml but no publish environment\n",
+            done.stderr,
         )
         self.assertEqual(1, done.returncode)
 
@@ -362,8 +364,9 @@ class Signoff(ForgeCase):
         self.forge.answer(f"repos/{ORG}/{repo}", settings)
         done = self.forge.check()
         self.assertIn(
-            f"drift: {repo} web commit signoff is false (org enforcement regressed?)\n",
-            done.stdout,
+            f"repo-baseline: {repo} web commit signoff is false"
+            " (org enforcement regressed?)\n",
+            done.stderr,
         )
 
 
@@ -382,17 +385,15 @@ class RefusedRead(ForgeCase):
         done = self.forge.check()
         self.assertEqual(1, done.returncode)
         self.assertEqual(
-            "drift: cannot read the org's repository listing\n"
-            f"       endpoint: {LISTING}\n"
-            "       needs:    an org owner's token — a fine-grained PAT scoped"
+            "repo-baseline: cannot read the org's repository listing\n"
+            f"  endpoint: {LISTING}\n"
+            "  needs:    an org owner's token — a fine-grained PAT scoped"
             " to SELECTED repositories is refused here\n"
-            f"       gh said:  {said}\n",
-            done.stdout,
-        )
-        self.assertEqual(
+            f"  gh said:  {said}\n"
             "repo-baseline: nothing was checked — the population is unreadable.\n",
             done.stderr,
         )
+        self.assertEqual("", done.stdout)
 
 
 if __name__ == "__main__":

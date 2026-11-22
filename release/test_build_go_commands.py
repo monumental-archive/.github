@@ -19,6 +19,7 @@ stdlib `unittest`, matching the rest of release/. Run through the gate
 as `mise run test`, which `ci` collects.
 """
 
+import contextlib
 import os
 import subprocess
 import sys
@@ -26,6 +27,7 @@ import unittest
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 # Appended, so this file's own directory and the standard library
 # come first.
@@ -56,6 +58,21 @@ case $1 in
   *) echo "go stub: refusing $*" >&2; exit 2 ;;
 esac
 """
+
+
+_NAMED = contextlib.ExitStack()
+
+
+def setUpModule() -> None:
+    """Name the helper by its file, as a run outside mise does (#1934).
+
+    An in-process call reads argv, whatever task runs this suite.
+    """
+    _NAMED.enter_context(mock.patch.object(sys, "argv", ["build_go_commands.py"]))
+    for key in ("MISE_TASK_NAME", "ORG_FINDINGS"):
+        if key in os.environ:
+            _NAMED.callback(os.environ.__setitem__, key, os.environ.pop(key))
+    unittest.addModuleCleanup(_NAMED.close)
 
 
 @dataclass
@@ -179,8 +196,9 @@ class Refuses(unittest.TestCase):
         run = run_helper("\n\n")
         self.assertEqual(1, run.returncode)
         self.assertEqual(
-            "::error::no main packages in this module — go-binary is the wrong class\n",
-            run.stdout,
+            "::error::build_go_commands.py: no main packages in this module —"
+            " go-binary is the wrong class\n",
+            run.stderr,
         )
         self.assertEqual(NOTHING, run.staged)
 
@@ -189,8 +207,9 @@ class Refuses(unittest.TestCase):
         run = run_helper("example.com/m/cmd/tool\nexample.com/m/internal/tool\n")
         self.assertEqual(1, run.returncode)
         self.assertEqual(
-            "::error::two main packages both build a binary named tool\n",
-            run.stdout,
+            "::error::build_go_commands.py: two main packages both build a binary"
+            " named tool\n",
+            run.stderr,
         )
         staged: list[str] = ["tool"]
         self.assertEqual(staged, run.staged)

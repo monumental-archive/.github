@@ -55,6 +55,7 @@ stdlib `unittest`, matching the rest of release/. Run through the gate
 as `mise run test`, which `ci` collects.
 """
 
+import contextlib
 import hashlib
 import json
 import os
@@ -64,6 +65,7 @@ import unittest
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 # Appended, so this file's own directory and the standard library
 # come first.
@@ -121,6 +123,21 @@ for m in ${STUB_MEMBERS}; do
   cp "${src}" target/package/
 done
 """
+
+
+_NAMED = contextlib.ExitStack()
+
+
+def setUpModule() -> None:
+    """Name the helper by its file, as a run outside mise does (#1934).
+
+    An in-process call reads argv, whatever task runs this suite.
+    """
+    _NAMED.enter_context(mock.patch.object(sys, "argv", ["package_crates.py"]))
+    for key in ("MISE_TASK_NAME", "ORG_FINDINGS"):
+        if key in os.environ:
+            _NAMED.callback(os.environ.__setitem__, key, os.environ.pop(key))
+    unittest.addModuleCleanup(_NAMED.close)
 
 
 def step_body(name: str) -> str:
@@ -390,10 +407,11 @@ class PackageAnExcludedMember(unittest.TestCase):
         run = run_steps(EXCLUDE, second={"edtf-core": planted})
         self.assertNotEqual(0, run.returncode)
         self.assertEqual(
-            f"::error::edtf-core-{VERSION}.crate changed when packaged again"
+            f"::error::package_crates.py: edtf-core-{VERSION}.crate changed when"
+            f" packaged again"
             f" without verifying: {digest('edtf-core')} verified,"
             f" {hashlib.sha256(planted).hexdigest()} now\n",
-            run.stdout,
+            run.stderr,
         )
         self.assertEqual("", run.outputs)
 
@@ -401,7 +419,7 @@ class PackageAnExcludedMember(unittest.TestCase):
         """Only crates the verified run wrote are compared."""
         run = run_steps(EXCLUDE, second={UNCOMPILABLE: b"first written here\n"})
         self.assertEqual(0, run.returncode, run.stdout + run.stderr)
-        self.assertNotIn("::error::", run.stdout)
+        self.assertNotIn("::error::package_crates.py: ", run.stderr)
 
     def test_a_verified_run_that_wrote_nothing_is_refused(self) -> None:
         """Every member excluded leaves nothing to compare (#1384)."""
@@ -409,7 +427,8 @@ class PackageAnExcludedMember(unittest.TestCase):
         run = run_steps(flags)
         self.assertEqual(1, run.returncode)
         self.assertEqual(
-            "::error::cargo package wrote no crate to verify\n", run.stdout
+            "::error::package_crates.py: cargo package wrote no crate to verify\n",
+            run.stderr,
         )
         cargo: list[str] = [f"package --workspace --locked{flags}"]
         self.assertEqual(cargo, run.cargo)
@@ -514,9 +533,9 @@ class SubjectsAreWhatCratesIoReceives(unittest.TestCase):
         run = run_steps("", members=("edtf-core", "edtf-cli"), unwritten=("edtf-cli",))
         self.assertNotEqual(0, run.returncode)
         self.assertEqual(
-            f"::error::edtf-cli {VERSION} publishes to crates.io,"
+            f"::error::package_crates.py: edtf-cli {VERSION} publishes to crates.io,"
             f" but cargo package wrote no edtf-cli-{VERSION}.crate\n",
-            run.stdout,
+            run.stderr,
         )
         self.assertEqual("", run.outputs)
 

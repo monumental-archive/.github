@@ -53,6 +53,7 @@ from typing import TYPE_CHECKING
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
 import decoded
+import findings
 import typed_std
 import workflow_command
 
@@ -710,7 +711,7 @@ def main(
     try:
         return args.run(reg, args)
     except RefusedError as e:
-        workflow_command.error(str(e))
+        findings.finding("", str(e), annotate=True)
     return 1
 
 

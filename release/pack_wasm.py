@@ -37,7 +37,7 @@ from typing import TYPE_CHECKING
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
 import decoded
-import workflow_command
+import findings
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -216,7 +216,7 @@ def main(env: Mapping[str, str] | None = None) -> int:
     try:
         outputs = pack(env)
     except RefusedError as e:
-        workflow_command.error(str(e))
+        findings.finding("", str(e), annotate=True)
         return 1
     except NpmFailedError as e:
         return e.status
