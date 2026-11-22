@@ -64,7 +64,7 @@ mise/config.toml	lint:from-digests	20	# #1544 unassigned
 mise/config.toml	lint:installer-pinned	20	# #1544 unassigned
 mise/config.toml	lint:cold-attested	100	# #1544 unassigned
 mise/config.toml	coverage:check	19	# #1544 unassigned
-mise/config.toml	lint:fuzz-build	41	# #1544 unassigned
+mise/config.toml	lint:fuzz-build	40	# #1544 unassigned
 mise/config.toml	audit:caller-permissions	23	# #1544 unassigned
 mise/config.toml	audit:spec-drift	65	# #1544 unassigned
 mise/config.toml	lint:tracks	31	# #1544 unassigned

@@ -814,7 +814,7 @@ while IFS= read -r t; do
   mise run "${t}" || failed="${failed} ${t}"
 done <<< "${tasks}"
 if [[ -n ${failed} ]]; then
-  echo "audit: repo-defined audit task(s) failed:${failed}" >&2
+  org_finding "" "repo-defined audit task(s) failed:${failed}"
   exit 1
 fi
 echo "audit: ${count} repo-defined audit task(s), all green"
@@ -911,7 +911,7 @@ files=$(git ls-files ":!vendor/**" "*.toml")
 }
 config="${ORG_BELT_DIR}/taplo-org.toml"
 [[ -r ${config} ]] || {
-  echo "fix:toml: the org TOML format is not readable at ${config}" >&2
+  org_finding "" "the org TOML format is not readable at ${config}"
   exit 1
 }
 xargs taplo fmt --config "${config}" <<< "${files}"
@@ -1821,18 +1821,18 @@ files=$(git ls-files ':!vendor/**' "*.js" "*.jsx" "*.mjs" "*.cjs" "*.ts" "*.tsx"
 }
 tracked=$(git ls-files "biome.jsonc" "*/biome.json" "*/biome.jsonc")
 if [[ -n ${tracked} ]]; then
-  echo "fix:biome: a repo declares its biome domains in a root biome.json and nowhere else" >&2
   # shellcheck disable=SC2001  # an anchored per-line indent; ${x//from/to} has no line anchor
-  sed 's/^/  tracked: /' <<< "${tracked}" >&2
-  echo "  a nested config takes root:false + extends and may then switch a rule off in one" >&2
-  echo "  subtree — biome's own monorepo guide demonstrates exactly that; the org has no" >&2
-  echo "  such surface. A .jsonc root is refused for the plainer reason: one shape, one name." >&2
+  IFS=$'\n' read -r -d '' -a detail < <(sed 's/^/tracked: /' <<< "${tracked}") || true
+  org_finding "" "a repo declares its biome domains in a root biome.json and nowhere else" ${detail[@]+"${detail[@]}"} \
+    "a nested config takes root:false + extends and may then switch a rule off in one" \
+    "subtree — biome's own monorepo guide demonstrates exactly that; the org has no" \
+    "such surface. A .jsonc root is refused for the plainer reason: one shape, one name."
   exit 1
 fi
 generated="biome-org.generated.json"
 generated_tracked=$(git ls-files "${generated}")
 if [[ -n ${generated_tracked} ]]; then
-  echo "fix:biome: ${generated} is tracked; the belt writes it for the length of one run" >&2
+  org_finding "" "${generated} is tracked; the belt writes it for the length of one run"
   exit 1
 fi
 rc=0
@@ -2732,7 +2732,7 @@ dir = "{{cwd}}"
 # as text — $1 is never set inside a task body (measured on 2026.8.3).
 run = '''
 if [[ -z ${ORG_COMMIT_MSG_FILE:-} || ! -f ${ORG_COMMIT_MSG_FILE} ]]; then
-  echo "commits:check: set ORG_COMMIT_MSG_FILE to a commit-message file" >&2
+  org_finding "" "set ORG_COMMIT_MSG_FILE to a commit-message file"
   exit 1
 fi
 "${ORG_BELT_DIR}/committed.sh" --commit-file "${ORG_COMMIT_MSG_FILE}"
@@ -3367,13 +3367,13 @@ manifests=$(git ls-files ':!vendor/**' "Cargo.toml" "*/Cargo.toml")
   exit 0
 }
 command -v cargo > /dev/null || {
-  echo "fix:rust: Cargo.toml present but cargo missing — pin rust in mise.toml" >&2
+  org_finding "" "Cargo.toml present but cargo missing — pin rust in mise.toml"
   exit 1
 }
 installed=$(rustup component list --installed 2> /dev/null) || installed=""
 for component in clippy rustfmt; do
   grep -q "^${component}" <<< "${installed}" && continue
-  echo "fix:rust: ${component} component missing — declare it with the rust pin in mise.toml" >&2
+  org_finding "" "${component} component missing — declare it with the rust pin in mise.toml"
   exit 1
 done
 export CLIPPY_CONF_DIR="${ORG_BELT_DIR}"
@@ -4686,7 +4686,7 @@ mods=$(git ls-files ':!vendor/**' "go.mod" "*/go.mod" "*/*/go.mod")
   exit 0
 }
 command -v go > /dev/null || {
-  echo "fix:go: go.mod present but go missing — pin go in mise.toml" >&2
+  org_finding "" "go.mod present but go missing — pin go in mise.toml"
   exit 1
 }
 while IFS= read -r m; do
