@@ -18,10 +18,13 @@ Those rows run `main` with `run_zizmor` answering the array (#1955).
 
 `Records` asserts what remains is recorded, read back from
 ORG_FINDINGS: subject the first location's file, message `<ident>:
-<desc>`, detail the severity and each location with its line; the
+<the first line of the first location's feature>` (the owner's ruling
+on #1955), detail `desc`, the severity and each location with its
+line; the
 token and offline-degradation findings; zizmor's status as the exit.
 `PinnedZizmor` runs the belt's zizmor `--offline` on a planted
-workflow. `Task` runs `audit:actions`' own body over a stub zizmor:
+workflow, and two unpinned `uses:` in one file are two records with
+two messages. `Task` runs `audit:actions`' own body over a stub zizmor:
 one run, the record, zizmor's 11; a clean run, 0. Against
 `origin/main` the `Records` and `Task` record rows fail.
 
@@ -466,8 +469,9 @@ class Records(unittest.TestCase):
                 "v": 1,
                 "task": TASK,
                 "subject": path,
-                "message": "stale-action-refs: commit hash does not point to a Git tag",
+                "message": "stale-action-refs: sign:",
                 "detail": [
+                    "commit hash does not point to a Git tag",
                     "severity: Low",
                     f"{path}:640: this job",
                     f"{path}:643: this job",
@@ -570,14 +574,19 @@ jobs:
 class PinnedZizmor(unittest.TestCase):
     """The belt's pinned zizmor, `--offline`, on a planted workflow."""
 
-    def test_an_unpinned_action_is_the_record(self) -> None:
-        """One unpinned `uses:`: the record read back, zizmor's 14."""
+    def judged(self, workflow: str) -> tuple[int, list[object], str]:
+        """Run the CLI over the belt's zizmor on one planted workflow.
+
+        Returns:
+            The status, the records read back, and stderr.
+
+        """
         if hermetic.optional_tool("zizmor") is None:
             self.skipTest("the belt's zizmor is not on PATH")
         tmp = Path(tempfile.mkdtemp()).resolve()
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
         (tmp / ".github" / "workflows").mkdir(parents=True)
-        (tmp / ".github" / "workflows" / "a.yml").write_text(WORKFLOW, encoding="utf-8")
+        (tmp / ".github" / "workflows" / "a.yml").write_text(workflow, encoding="utf-8")
         file = tmp / "findings.jsonl"
         done = subprocess.run(
             [
@@ -600,15 +609,23 @@ class PinnedZizmor(unittest.TestCase):
             cwd=tmp,
             check=False,
         )
-        self.assertEqual(14, done.returncode, done.stderr)
+        lines = file.read_text(encoding="utf-8").splitlines() if file.exists() else []
+        got: list[object] = [decoded.load_json(line) for line in lines]
+        return done.returncode, got, done.stderr
+
+    def test_an_unpinned_action_is_the_record(self) -> None:
+        """One unpinned `uses:`: the record read back, zizmor's 14."""
+        status, got, err = self.judged(WORKFLOW)
+        self.assertEqual(14, status, err)
         path = ".github/workflows/a.yml"
         want: list[object] = [
             {
                 "v": 1,
                 "task": TASK,
                 "subject": path,
-                "message": "unpinned-uses: unpinned action reference",
+                "message": "unpinned-uses: uses: actions/setup-go@v5",
                 "detail": [
+                    "unpinned action reference",
                     "severity: High",
                     f"{path}:12: this step",
                     (
@@ -618,9 +635,19 @@ class PinnedZizmor(unittest.TestCase):
                 ],
             }
         ]
-        lines = file.read_text(encoding="utf-8").splitlines()
-        got: list[object] = [decoded.load_json(line) for line in lines]
         self.assertEqual(want, got)
+
+    def test_two_of_one_audit_in_one_file_are_two_messages(self) -> None:
+        """Two unpinned `uses:` in one file: two records, two messages."""
+        two = WORKFLOW + "      - uses: actions/setup-node@v4\n"
+        status, got, err = self.judged(two)
+        self.assertEqual(14, status, err)
+        messages = [decoded.as_object(r, "a record")["message"] for r in got]
+        want: list[object] = [
+            "unpinned-uses: uses: actions/setup-go@v5",
+            "unpinned-uses: uses: actions/setup-node@v4",
+        ]
+        self.assertEqual(want, messages)
 
 
 STUB = """\
