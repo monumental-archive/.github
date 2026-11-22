@@ -10,6 +10,55 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.76.0](https://github.com/monumental-archive/.github/compare/v1.75.0...v1.76.0) - 2026-11-22
+
+### Added
+
+- record audit:links' broken links from lychee (#1955) ([#1969](https://github.com/monumental-archive/.github/pull/1969))
+- keep one red-check issue per red job (#1966) ([#1974](https://github.com/monumental-archive/.github/pull/1974))
+- record audit:action-pins' findings from pinact (#1955) ([#1971](https://github.com/monumental-archive/.github/pull/1971))
+- record audit:actions' findings from zizmor (#1955) ([#1978](https://github.com/monumental-archive/.github/pull/1978))
+- record a rust equivalent mutant at its site (#1987) ([#1992](https://github.com/monumental-archive/.github/pull/1992))
+- serve postgres 19 from the pgrx base-image mapping ([#1999](https://github.com/monumental-archive/.github/pull/1999))
+
+### Changed
+
+- write the audit tasks' findings through org_finding ([#1956](https://github.com/monumental-archive/.github/pull/1956))
+- write the first lint tasks' findings through org_finding ([#1960](https://github.com/monumental-archive/.github/pull/1960))
+- write the later lint tasks' findings through org_finding ([#1961](https://github.com/monumental-archive/.github/pull/1961))
+- write the other tasks' findings through org_finding ([#1963](https://github.com/monumental-archive/.github/pull/1963))
+- write the belt scripts' findings through org_finding ([#1965](https://github.com/monumental-archive/.github/pull/1965))
+- route rekor and docker findings through writers (#1934) ([#1972](https://github.com/monumental-archive/.github/pull/1972))
+- write a-l helpers' findings through the writer (#1934) ([#1975](https://github.com/monumental-archive/.github/pull/1975))
+- write workflow findings through the writer (#1934) ([#1973](https://github.com/monumental-archive/.github/pull/1973))
+- write m-z helpers' findings through the writer (#1934) ([#1982](https://github.com/monumental-archive/.github/pull/1982))
+- write release/ and settings/ findings by writer (#1934) ([#1980](https://github.com/monumental-archive/.github/pull/1980))
+
+### Fixed
+
+- update monumental-archive/signer to 8b1eea0 ([#1962](https://github.com/monumental-archive/.github/pull/1962))
+- print the codecov-token remedy as block yaml (#1923) ([#1968](https://github.com/monumental-archive/.github/pull/1968))
+- update jdx/mise-action to v5.2.9 ([#1970](https://github.com/monumental-archive/.github/pull/1970))
+- report a stalled signer-identity watch once (#1967) ([#1983](https://github.com/monumental-archive/.github/pull/1983))
+- update github:bnjbvr/cargo-machete to v0.10.1 ([#1914](https://github.com/monumental-archive/.github/pull/1914))
+- export a script's task name to its children (#1979) ([#1989](https://github.com/monumental-archive/.github/pull/1989))
+- record a character utf-8 cannot carry as its escape (#1984) ([#1990](https://github.com/monumental-archive/.github/pull/1990))
+- link the belt at every hook, refuse another pin's belt ([#1993](https://github.com/monumental-archive/.github/pull/1993))
+- give each pgrx build its own postgres, never run pgrx init ([#1996](https://github.com/monumental-archive/.github/pull/1996))
+- have the writer name its findings file, every job upload it ([#1998](https://github.com/monumental-archive/.github/pull/1998))
+- capture each producer before its loop reads it (#2001) ([#2002](https://github.com/monumental-archive/.github/pull/2002))
+- hold sc2310 off in the shellcheck level, check two callees ([#2005](https://github.com/monumental-archive/.github/pull/2005))
+- exclude single_call_fn and tests_outside_test_module ([#2003](https://github.com/monumental-archive/.github/pull/2003))
+- list every linter's files from one tracked-file producer ([#2006](https://github.com/monumental-archive/.github/pull/2006))
+
+### Documentation
+
+- give a mutation survivor a third outcome, delete it ([#1985](https://github.com/monumental-archive/.github/pull/1985))
+
+### Testing
+
+- decide three belt rows without a clock ([#1991](https://github.com/monumental-archive/.github/pull/1991))
+
 ## [1.75.0](https://github.com/monumental-archive/.github/compare/v1.74.0...v1.75.0) - 2026-11-21
 
 ### Added
