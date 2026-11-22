@@ -33,7 +33,7 @@ unset org__here
 : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
 label=coverage:adopt
 # The task this script reports for, where mise named none (#1934).
-: "${MISE_TASK_NAME:=${label}}"
+org_task "${label}"
 belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
 
 case "${1:-}" in

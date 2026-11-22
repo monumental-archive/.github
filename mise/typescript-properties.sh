@@ -51,7 +51,7 @@ case "${profile}" in
     ;;
 esac
 # The task this script reports for, where mise named none (#1934).
-: "${MISE_TASK_NAME:=${label}}"
+org_task "${label}"
 belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
 
 # The lockfile decides, as for the coverage leg (#1357): no fast-check

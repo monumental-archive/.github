@@ -275,9 +275,7 @@ class Planted(unittest.TestCase):
         """
         return self.run_bash(
             [str(self.belt / "pgrx-test.sh"), *args],
-            # MISE_TASK_NAME: what mise gives the task's body, and so the
-            # helpers it starts.
-            **({"ORG_PGRX_MAJOR": "18", "MISE_TASK_NAME": "test:pgrx"} | env),
+            **({"ORG_PGRX_MAJOR": "18"} | env),
         )
 
     @staticmethod

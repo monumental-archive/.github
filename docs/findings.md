@@ -55,6 +55,14 @@ command, so a bash whose `PATH` holds nothing still has it. The cost,
 accepted by the owner (#1934): a fault in `findings.sh` or
 `workflow-command.sh` reaches every bash under the belt's environment.
 
+A script that knows its task names it with `org_task <task>` once it
+has the writer (#1979). Under `mise run` the name mise gave stands;
+run outside it, by a person, a test or a workflow step, the script's
+own name is exported, so every child it starts, a Python helper above
+all, records under the task rather than its own file name. The
+function exports; a site written as a bare `${MISE_TASK_NAME:=…}`
+would name the task to the script alone.
+
 ## A program that cannot call the writer
 
 An awk program, or any program that is not shell, prints its findings
@@ -82,6 +90,11 @@ One JSON object on one line:
 | `subject` | What the finding is about: a file, a repository, a crate, an advisory. May be empty. |
 | `message` | One line. |
 | `detail` | A list of lines. May be empty. |
+
+A character that UTF-8 cannot carry (a lone surrogate, as Python's
+`os.fsdecode` makes of a file name that is not UTF-8) is recorded as
+its backslash escape, `\udcff`, as it is printed, so the log line and
+the record are the same text (#1984).
 
 A finding's identity is its task, subject and message. The report keeps
 a short hash of the identity of each finding an issue shows in its

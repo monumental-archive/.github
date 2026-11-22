@@ -30,7 +30,7 @@ org__here=${BASH_SOURCE[0]%/*}
 . "${org__here}/findings.sh"
 unset org__here
 # The task this script reports for, where mise named none (#1934).
-: "${MISE_TASK_NAME:=lint:input-forwarding}"
+org_task "lint:input-forwarding"
 
 files=$(git ls-files ':!vendor/**' ".github/workflows/*.y*ml")
 [[ -n ${files} ]] || {

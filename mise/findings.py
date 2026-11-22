@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The Python writer of findings (#1890).
+r"""The Python writer of findings (#1890).
 
 mise/findings.sh is the shell writer; docs/findings.md is the rule both
 serve. A finding is printed for the person reading the log, and
@@ -21,6 +21,11 @@ record is the same.
 inherits. Where mise named none, it is `GITHUB_JOB` when the running
 script is a workflow step's own (a file directly under `RUNNER_TEMP`),
 else the running script's file name.
+
+A character UTF-8 cannot carry (a lone surrogate, as `os.fsdecode`
+makes of a file name that is not UTF-8) is printed and recorded as its
+backslash escape, `\udcff`: the line and the record are the same text,
+and the append cannot fail on an encoding (#1984).
 
 A record that cannot be appended is said in one more stderr line and
 raises nothing: the finding was printed, and the report falls back to
@@ -84,6 +89,19 @@ def record(task: str, subject: str, message: str, detail: Iterable[str]) -> str:
     return json.dumps(fields, ensure_ascii=False)
 
 
+def _text(s: str) -> str:
+    """Write each character UTF-8 cannot carry as its backslash escape.
+
+    The text stderr prints (its error handler is `backslashreplace`),
+    so the log line and the record are the same text (#1984).
+
+    Returns:
+        The text, every character encodable as UTF-8.
+
+    """
+    return s.encode("utf-8", "backslashreplace").decode("utf-8")
+
+
 def _say(text: str) -> None:
     """Print one plain log line to stderr, as mise/workflow-command.sh's org_say.
 
@@ -121,8 +139,10 @@ def finding(
     annotate: bool = False,
 ) -> None:
     """Print one finding and record it."""
-    task = task_name()
-    lines = list(detail)
+    task = _text(task_name())
+    subject = _text(subject)
+    message = _text(message)
+    lines = [_text(line) for line in detail]
     head = f"{task}: {subject}: {message}" if subject else f"{task}: {message}"
     if annotate:
         workflow_command.error(head, stream=sys.stderr)

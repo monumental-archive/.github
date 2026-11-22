@@ -49,7 +49,7 @@ unset org__here
 
 label="test:pgrx"
 # The task this script reports for, where mise named none (#1934).
-: "${MISE_TASK_NAME:=${label}}"
+org_task "${label}"
 mode="${1:-test}"
 case "${mode}" in
   test | measure) ;;

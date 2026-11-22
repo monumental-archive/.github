@@ -39,7 +39,7 @@ case "${profile}" in
     ;;
 esac
 # The task this script reports for, where mise named none (#1934).
-: "${MISE_TASK_NAME:=${label}}"
+org_task "${label}"
 belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
 
 # git's default pathspec lets `*` cross a slash, so this lists every

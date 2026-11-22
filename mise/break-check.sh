@@ -58,7 +58,7 @@ unset org__here
 
 label="break:check"
 # The task this script reports for, where mise named none (#1934).
-: "${MISE_TASK_NAME:=${label}}"
+org_task "${label}"
 : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
 [[ -n ${PR_TITLE+set} ]] || {
   org_finding "" "PR_TITLE is unset — the gate step sets it from the pull request, and without it there is no declaration to hold"

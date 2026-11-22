@@ -33,7 +33,21 @@ import matrix
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
-from workflow_command import escape_data as escaped
+from workflow_command import escape_data
+
+
+def escaped(text: str) -> str:
+    """Write the caller's text as the writer prints it.
+
+    A character UTF-8 cannot carry becomes its backslash escape
+    (#1984), then the runner's escaping applies (#1660).
+
+    Returns:
+        The text as it appears in the `::error::` line.
+
+    """
+    return escape_data(text.encode("utf-8", "backslashreplace").decode("utf-8"))
+
 
 CLASS = st.sampled_from(sorted(matrix.TARGETS))
 MAJOR = st.integers(10, 99).map(str)

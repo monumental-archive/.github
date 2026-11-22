@@ -33,7 +33,7 @@ org__here=${BASH_SOURCE[0]%/*}
 . "${org__here}/findings.sh"
 unset org__here
 # The task this script reports for, where mise named none (#1934).
-: "${MISE_TASK_NAME:=audit:badges}"
+org_task "audit:badges"
 
 # The ratcheted floors are this leg's own data, and the task's guard no
 # longer stands in for them (#738): a Scorecard shield judged against a

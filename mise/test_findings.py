@@ -16,7 +16,9 @@ finding is still printed, one more line names the failure, and the
 status is 0; the annotated entry prints `::error::` with the runner's
 escaping; `task` is `MISE_TASK_NAME` when set; the job when the script is a
 workflow step's own (directly under `RUNNER_TEMP`); the script's file
-name otherwise.
+name otherwise. A character UTF-8 cannot carry, a lone surrogate in the
+message or the subject, is printed and recorded as its backslash
+escape, and the status is 0 (#1984).
 
 stdlib `unittest`, matching the rest of mise/.
 """
@@ -558,6 +560,44 @@ class LinesRows(unittest.TestCase):
             with self.subTest(bash=label):
                 done = self.feed(bash, f"{US}last")
                 self.assertEqual(done.stderr, "lint:demo: last\n")
+
+
+UNENCODABLE = f"""import os
+import sys
+sys.path.insert(0, {str(MISE)!r})
+import findings
+findings.finding(os.fsdecode(b"bad\\xffname"), "x\\ud800y")
+"""
+
+
+class UnencodableRows(unittest.TestCase):
+    """A lone surrogate is recorded as its backslash escape (#1984)."""
+
+    def test_a_lone_surrogate_is_recorded_as_printed(self) -> None:
+        """Exit 0, one record json.loads reads, the stderr line the same text."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            file = root / "out" / "job.jsonl"
+            reporter = root / "reporter.py"
+            reporter.write_text(UNENCODABLE, encoding="utf-8")
+            done = subprocess.run(
+                [sys.executable, str(reporter)],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                env=hermetic.env(
+                    MISE_TASK_NAME="t", ORG_FINDINGS=str(file), PYTHONUTF8="1"
+                ),
+                check=False,
+                cwd=root,
+            )
+            self.assertEqual(done.returncode, 0, done.stderr)
+            lines = file.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(lines), 1)
+            got = decoded.as_object(decoded.load_json(lines[0]), "a record")
+            self.assertEqual(got["message"], "x\\ud800y")
+            self.assertEqual(got["subject"], "bad\\udcffname")
+            self.assertEqual(done.stderr, "t: bad\\udcffname: x\\ud800y\n")
 
 
 if __name__ == "__main__":
