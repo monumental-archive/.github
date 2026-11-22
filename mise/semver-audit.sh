@@ -78,7 +78,27 @@ population=$(org_rust_api_population "${metadata}")
 
 verdicts=()
 red=0
+# The Postgres every judgment builds with, once, and only when the
+# workspace has an extension: org_pgrx_provision checks every major's
+# pin and names the default major, which an ordinary crate's judgment
+# compiles an extension at if it reaches one, its ICU headers checked
+# first (#1940). A failed provisioning reds the extensions' majors
+# below, and the crates after it are still judged.
+# shellcheck source=mise/pgrx-env.sh
+. "${belt}/pgrx-env.sh"
 provisioned=""
+default=""
+if [[ ${population} == *$'\t'pgrx$'\t'* ]]; then
+  provisioned=ok
+  # shellcheck disable=SC2310  # deliberate: see above
+  org_pgrx_provision default || provisioned=failed
+fi
+default_icu=ok
+# shellcheck disable=SC2310  # deliberate: a missing pin reds the
+# ordinary crates below and the extensions are still judged
+if [[ -n ${default} ]] && ! org_pgrx_darwin_icu_check "${default}"; then
+  default_icu=failed
+fi
 while IFS=$'\t' read -r crate target library kind crate_majors; do
   [[ -n ${crate} ]] || continue
   if [[ ${target} == - || ${library} == - ]]; then
@@ -117,8 +137,15 @@ while IFS=$'\t' read -r crate target library kind crate_majors; do
   fi
 
   if [[ ${kind} != pgrx ]]; then
+    if [[ ${default_icu} != ok ]]; then
+      verdicts+=("${label}: ${crate}: no ICU headers pinned for pg${default}, the workspace's default major (above), red")
+      red=1
+      continue
+    fi
     echo "${label}: judging ${crate}"
-    if cargo-semver-checks check-release -p "${crate}"; then
+    # shellcheck disable=SC2310  # deliberate: the judgment's status is
+    # the verdict, and a red crate does not stop the next
+    if org_pgrx_major "${default}" cargo-semver-checks check-release -p "${crate}"; then
       verdicts+=("${label}: ${crate}: judged clean")
     else
       verdicts+=("${label}: ${crate}: judged red")
@@ -127,16 +154,6 @@ while IFS=$'\t' read -r crate target library kind crate_majors; do
     continue
   fi
 
-  # The provisioning every other pgrx task uses, once, and only when a
-  # pgrx crate has a baseline to be judged against.
-  if [[ -z ${provisioned} ]]; then
-    provisioned=ok
-    # shellcheck source=mise/pgrx-env.sh
-    . "${belt}/pgrx-env.sh"
-    # shellcheck disable=SC2310  # deliberate: a failed provisioning reds its
-    # majors below and the crates after it are still judged
-    org_pgrx_provision || provisioned=failed
-  fi
   icu=ok
   if [[ ${provisioned} == ok ]]; then
     # shellcheck disable=SC2310  # deliberate: a missing pin reds this
@@ -155,11 +172,11 @@ while IFS=$'\t' read -r crate target library kind crate_majors; do
       continue
     fi
     echo "${label}: judging ${crate} at pg${major}"
-    # In a subshell holding this major's ICU headers (#1774), so one
-    # major's include path never reaches the next.
+    # In a subshell holding this major's ICU headers and Postgres (#1774,
+    # #1940), so one major's never reaches the next.
     # shellcheck disable=SC2310  # deliberate: the judgment's status is
     # the verdict, and a red major does not stop the next
-    if org_pgrx_with_icu "${major}" cargo-semver-checks check-release -p "${crate}" \
+    if org_pgrx_major "${major}" cargo-semver-checks check-release -p "${crate}" \
       --only-explicit-features --features "pg${major}"; then
       verdicts+=("${label}: ${crate} at pg${major}: judged clean")
     else

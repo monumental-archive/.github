@@ -6,9 +6,10 @@
 # The tasks that compile a pgrx extension — `lint:pg-clippy`,
 # `test:pgrx`, `fix:rust`'s extension pass, and the workspace-wide
 # mutation and semver audits — each need the same two things first: a
-# `pg_config` per declared major registered with pgrx, and, on macOS, a
-# correction to flags the prebuilt Postgres recorded on somebody else's
-# machine. Written in each they would drift; written here they cannot.
+# Postgres of each major they build, theirs alone (#1940), and, on
+# macOS, a correction to flags the prebuilt Postgres recorded on
+# somebody else's machine. Written in each they would drift; written
+# here they cannot.
 #
 # The coverage measurement is no longer among them (#1656). It compiled
 # the extension under `cargo llvm-cov --workspace` (#917), but the
@@ -45,23 +46,23 @@ org_pgrx_highest() { # usage: org_pgrx_highest < gate_surface.py's records
 }
 
 org_pgrx_union() { # usage: org_pgrx_union < org_pgrx_highest's lines
-  # The majors those builds need registered, each once, ascending,
+  # The majors those builds need, each once, ascending,
   # comma-separated: what org_pgrx_darwin_prepare and pgrx_postgres.py
   # --majors take. Nothing for no extension. A major that is not a
   # number reds by name rather than reaching pgrx as a feature it has
   # never heard of.
-  local spec major joined="" registered=()
+  local spec major joined="" wanted=()
   while IFS=$'\t' read -r spec major; do
     [[ -n ${spec} || -n ${major} ]] || continue
     if [[ ! ${major} =~ ^[1-9][0-9]*$ ]]; then
       org_finding "" "${spec} names no Postgres major: '${major}'"
       return 1
     fi
-    registered[major]=1
+    wanted[major]=1
   done
   # An indexed array lists its indices ascending: the sort and the
   # de-duplication are bash's own.
-  for major in "${!registered[@]}"; do
+  for major in "${!wanted[@]}"; do
     joined="${joined}${joined:+,}${major}"
   done
   [[ -z ${joined} ]] || echo "${joined}"
@@ -196,17 +197,188 @@ org_pgrx_darwin_prepare() { # usage: org_pgrx_darwin_prepare <Postgres majors, c
   org_pgrx_darwin_icu_check "$1"
 }
 
-org_pgrx_with_icu() { # usage: org_pgrx_with_icu <Postgres major, or empty> <command…>
-  # One command that compiles the extension, run in a subshell holding
-  # that major's ICU headers (#1774): the include path is the major's own
-  # and ends with the command, so the next major starts from the caller's
-  # flags. Empty: a command that compiles no Postgres, run as it is.
+org_pgrx_major() { # usage: org_pgrx_major <Postgres major, or empty> <command…>
+  # One command that compiles the extension at one Postgres major, run in
+  # a subshell holding that major's ICU headers (#1774) and its Postgres
+  # (#1940): both end with the command, so the next major starts from the
+  # caller's environment. Empty: a command that compiles no Postgres, run
+  # as it is.
   local major="$1"
   shift
   (
-    [[ -z ${major} ]] || org_pgrx_darwin_icu "${major}" || exit 1
+    [[ -z ${major} ]] || org_pgrx_major_env "${major}" || exit 1
     "$@"
   )
+}
+
+org_pgrx_major_env() { # usage: org_pgrx_major_env <Postgres major>, in the subshell that builds it
+  # What org_pgrx_major exports, for a subshell that runs more than one
+  # command at the major (test:pgrx's measured run): the ICU headers,
+  # then the Postgres.
+  org_pgrx_darwin_icu "$1" || return 1
+  org_pgrx_postgres "$1"
+}
+
+org_pgrx_postgres() { # usage: org_pgrx_postgres <Postgres major>, in the subshell that builds it
+  # NO PGRX TASK WRITES OR READS STATE ANOTHER TASK CAN SEE (#1940).
+  # pgrx finds its Postgres in ${PGRX_HOME}/config.toml, which `cargo
+  # pgrx init` writes, and installs the extension it tests into that
+  # Postgres. Both were one per machine: every init rewrote the file
+  # while other tasks' builds digested it ("config.toml changed after
+  # inspection", pgrx 0.20), and two worktrees testing one extension
+  # overwrote each other's library in the one install. Two locks, a
+  # timestamp restore and a cache line managed that sharing; this ends
+  # it. The belt never runs `cargo pgrx init`. Instead:
+  #
+  #   - PGRX_PG_CONFIG_PATH names this major's pg_config. pgrx-pg-config
+  #     takes it in place of the file, and `cargo pgrx test`, `cargo
+  #     pgrx schema`, the build script and pgrx-tests all read it.
+  #   - PGRX_HOME is an empty directory nothing writes: bindgen tracks
+  #     config.toml only when it is a file, and none ever exists there.
+  #     The value is the same on every call, so it never changes a
+  #     build's fingerprint (PGRX_HOME is a recorded input), and pgrx
+  #     0.20 watches the directory itself, so it is made once with a
+  #     fixed, old mtime (org__pgrx_home): made fresh on a runner whose
+  #     `target` came from the cache, a new mtime rebuilt pgrx-pg-sys
+  #     and everything above it on every run (measured on #1940:
+  #     1m36s against 3.1s).
+  #   - The pg_config is a CLONE of the pinned install, one per cargo
+  #     target directory (org__pgrx_clone). Tasks that share a target
+  #     directory share a clone, so they give pgrx one
+  #     PGRX_PG_CONFIG_PATH and never rebuild each other; tasks that
+  #     install (test:pgrx, coverage, mutants) build in target
+  #     directories of their own, so each installs into its own clone.
+  #
+  # The pinned install is pgrx_postgres.py's answer for the major, the
+  # same check that reds a declared major with no pin.
+  : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
+  local belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
+  local installed plan record major where source="" target key cache clone
+  installed=$(mise ls "aqua:theseus-rs/postgresql-binaries" --json) || return 1
+  plan=$("${ORG_PYTHON}" "${belt}/pgrx_postgres.py" --majors "$1" <<< "${installed}") || return 1
+  while IFS=$'\t' read -r record major where; do
+    [[ ${record} == pg && ${major} == "$1" ]] || continue
+    source=${where}
+  done <<< "${plan}"
+  if [[ ${source} != */bin/pg_config ]]; then
+    org_finding "" "pg$1: pgrx_postgres.py named no pg_config under a bin/ directory: '${source}'"
+    return 1
+  fi
+  target=$(org__pgrx_target) || return 1
+  key=$(org__pgrx_key "${target}") || return 1
+  cache="${XDG_CACHE_HOME:-${HOME}/.cache}/org-belt"
+  org__pgrx_home "${cache}/pgrx-home" || return 1
+  clone=$(org__pgrx_clone "${source%/bin/pg_config}" "${cache}/pgrx-postgres/${key}/pg$1") || return 1
+  export PGRX_PG_CONFIG_PATH="${clone}/bin/pg_config"
+  export PGRX_HOME="${cache}/pgrx-home"
+}
+
+org__pgrx_target() { # prints the absolute cargo target directory of the command about to run
+  # CARGO_TARGET_DIR when set, as cargo reads it, relative to here; else
+  # cargo's own answer, which also follows build.target-dir.
+  local target="${CARGO_TARGET_DIR:-}" metadata
+  if [[ -z ${target} ]]; then
+    metadata=$(cargo metadata --no-deps --format-version 1) || return 1
+    target=$(jq -r '.target_directory // empty' <<< "${metadata}") || return 1
+    if [[ -z ${target} ]]; then
+      org_finding "" "cargo metadata reported no target_directory"
+      return 1
+    fi
+  fi
+  [[ ${target} == /* ]] || target="${PWD}/${target}"
+  echo "${target}"
+}
+
+org__pgrx_key() { # usage: org__pgrx_key <path>; prints the first 16 hex of its sha256
+  local sum
+  if command -v sha256sum > /dev/null; then
+    sum=$(printf '%s' "$1" | sha256sum) || return 1
+  else
+    sum=$(printf '%s' "$1" | shasum -a 256) || return 1
+  fi
+  if [[ ! ${sum} =~ ^([0-9a-f]{16})[0-9a-f]{48}([[:space:]]|$) ]]; then
+    org_finding "" "could not hash the target directory '$1': '${sum}'"
+    return 1
+  fi
+  echo "${BASH_REMATCH[1]}"
+}
+
+org__pgrx_home() { # usage: org__pgrx_home <directory>; makes it once, empty, with a fixed old mtime
+  # Made as `<directory>.<random>`, dated, and published by
+  # org__pgrx_publish, so no task ever sees it with a new mtime: 2000-01-01
+  # UTC is older than any build, so the watched path never reads as
+  # changed. Two tasks racing both publish (rename(2) replaces an EMPTY
+  # directory), and either one is the same empty, dated directory.
+  local tmp
+  [[ ! -d $1 ]] || return 0
+  mkdir -p "${1%/*}" || return 1
+  tmp=$(mktemp -d "$1.XXXXXX") || return 1
+  TZ=UTC touch -t 200001010000 "${tmp}" || {
+    rm -rf "${tmp}"
+    return 1
+  }
+  org__pgrx_publish "${tmp}" "$1" || rm -rf "${tmp}"
+  [[ -d $1 ]]
+}
+
+org__pgrx_publish() { # usage: org__pgrx_publish <made directory> <name>; status 0 when it took the name
+  # A directory renamed onto its name: rename(2) of a directory creates
+  # the name or fails when a non-empty directory holds it, atomically, so
+  # the loser of a race for a clone removes its own and uses the
+  # winner's. Not a
+  # symbolic link (`ln -sn`, the belt tree's pattern): pg_config resolves
+  # links, so behind one pgrx saw the random `<name>.<random>` path, a
+  # new one on every runner, and rebuilt (#1940). Python's, because
+  # macOS mv has no -T and would move the directory INTO an existing
+  # one.
+  "${ORG_PYTHON}" -c 'import os, sys; os.rename(sys.argv[1], sys.argv[2])' "$1" "$2" 2> /dev/null
+}
+
+org__pgrx_clone() { # usage: org__pgrx_clone <install directory> <directory holding its clones>; prints the clone
+  # MADE ONCE, THEN REUSED. Cloned beside its final name as
+  # `<name>.<random>` and published by renaming it onto the name
+  # (org__pgrx_publish), so its real path is the same on every machine
+  # and every run. `cp -c` is an APFS clone on Darwin (0.67 s for pg16's
+  # 261 MB, measured on #1940); Linux has no clone on ext4, and
+  # `--reflink=auto` copies there, about a second. `-p` keeps the
+  # install's mtimes: pgrx watches the include directories, and a clone
+  # made fresh on a runner must not read as newer than the cached build.
+  #
+  # The install directory's name carries the full version and target
+  # triple, so a Postgres pin that moves makes a new clone, and the
+  # publish removes the clones of other versions of this major: what
+  # else is under this directory. A `<name>.<random>` that is not
+  # published yet is another task's clone in progress, and is left.
+  local source="$1" dir="$2" name dest tmp kernel entry copied=0
+  name=${source##*/}
+  dest="${dir}/${name}"
+  if [[ ! -x ${dest}/bin/pg_config ]]; then
+    mkdir -p "${dir}" || return 1
+    tmp=$(mktemp -d "${dest}.XXXXXX") || return 1
+    kernel=$(uname -s)
+    if [[ ${kernel} == Darwin ]]; then
+      cp -cRp "${source}/." "${tmp}" && copied=1
+    else
+      cp -Rp --reflink=auto "${source}/." "${tmp}" && copied=1
+    fi
+    if [[ ${copied} -ne 1 ]]; then
+      rm -rf "${tmp}"
+      org_finding "" "could not clone the pinned Postgres ${source} to ${tmp}"
+      return 1
+    fi
+    if org__pgrx_publish "${tmp}" "${dest}"; then
+      for entry in "${dir}"/*; do
+        [[ ${entry} == "${dest}" || ${entry} == "${dest}".* ]] || rm -rf "${entry}"
+      done
+    else
+      rm -rf "${tmp}"
+    fi
+  fi
+  if [[ ! -x ${dest}/bin/pg_config ]]; then
+    org_finding "" "${dest} holds no bin/pg_config — remove it, and the next task clones it again"
+    return 1
+  fi
+  echo "${dest}"
 }
 
 org_pgrx_darwin_icu_of() { # usage: org_pgrx_darwin_icu_of <Postgres major>; prints its ICU major
@@ -309,123 +481,37 @@ org_pgrx_darwin_icu_pin() { # usage: org_pgrx_darwin_icu_pin <ICU majors to add�
   echo "  ]"
 }
 
-org_pgrx_init() { # usage: org_pgrx_init < records from pgrx_postgres.py
-  # Registers every major in one call. Measured: five majors, including
-  # the initdb each one needs, in 17 seconds — so this is run per task
-  # rather than cached, and re-running it is idempotent.
-  local args=() record major where
-  while IFS=$'\t' read -r record major where; do
-    [[ ${record} == "pg" && -n ${major} && -n ${where} ]] || continue
-    args+=("--pg${major}" "${where}")
-  done
-  if [[ ${#args[@]} -eq 0 ]]; then
-    org_finding "" "no Postgres to register — the plan was empty"
-    return 1
-  fi
-  command -v cargo-pgrx > /dev/null || {
-    org_finding "" "cargo-pgrx missing — a pgrx crate pins it as a build input:" \
-      '"cargo:cargo-pgrx" = "0.19.2"   # must equal the pgrx dependency'
-    return 1
-  }
-  # ONE INIT AT A TIME. `ci` starts every task that needs a Postgres
-  # together, and each registers the same majors into the same
-  # PGRX_HOME. `cargo pgrx init` is idempotent run after run and not run
-  # beside run: two of them both find no data directory, both call
-  # initdb, and the loser dies on
-  #
-  #   initdb: error: directory ".../.pgrx/data-16" exists but is not empty
-  #
-  # Measured on the runner the first time coverage joined the three that
-  # were already there (release-lab#311) — never locally, where the
-  # tasks had only been run one after another. So the init is serialised
-  # with an exclusive lock on a file beside PGRX_HOME. The waiter then
-  # runs its own init over a finished home, which is the idempotent case.
-  #
-  # The lock is the KERNEL's (#1481): `with_lock.py` holds an `flock` for
-  # as long as the locked command runs, and the kernel releases it when
-  # the holder exits, killed included — mise stops the sibling tasks
-  # when one fails. #1140's `mkdir` lock named its holder in a pid file
-  # and let a waiter remove a lock whose holder `kill -0` called dead;
-  # on a Linux runner two inits then ran at once with that lock in place
-  # (#1481). A guess at liveness is the defect, so nothing here guesses:
-  # no pid, no stale branch, and only the holder ever lets the lock go.
-  # `flock(1)` would do the same and macOS does not ship it. A new name,
-  # `.init.flock`, so a directory the old lock left behind cannot stand
-  # where the file must be. The ten-minute bound is the helper's timeout.
-  local home="${PGRX_HOME:-${HOME}/.pgrx}"
-  local lock="${home}.init.flock"
-  mkdir -p "$(dirname "${home}")"
-  : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
-  "${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/with_lock.py" --timeout 600 \
-    --message "waited ten minutes for another task's Postgres init (${lock})" \
-    "${lock}" -- bash -euo pipefail -c \
-    "$(declare -f org_pgrx_init_locked); org_pgrx_init_locked \"\$@\"" \
-    org_pgrx_init_locked "${home}" "${args[@]}"
-}
-
-org_pgrx_init_locked() { # usage: org_pgrx_init_locked <home> <init args…>, under the lock
-  local home="$1" status=0
-  shift
-  # AN INIT THAT CHANGED NOTHING MUST NOT LOOK LIKE A CHANGE (#1165).
-  # pgrx-pg-sys's build script declares `rerun-if-changed` on
-  # ${PGRX_HOME}/config.toml, and `cargo pgrx init` rewrites that file
-  # on every call — same registrations, new timestamp. Cargo compares
-  # timestamps, so every task that initialised re-ran bindgen and
-  # recompiled pgrx-pg-sys, pgrx, pgrx-tests and the extension, whatever
-  # the target directory already held. Measured with cargo's own
-  # fingerprint log on a second, unchanged `test:pgrx`:
-  #
-  #   dirty: FsStatusOutdated(StaleItem(ChangedFile {
-  #     stale: ".../.pgrx/config.toml" ... }))
-  #
-  # and on the runner as 65 of a leg's 70 seconds, on an exact cache hit.
-  #
-  # So the file's timestamp is kept when its registrations are the ones
-  # it already had. Compared as a sorted set: pgrx writes the majors in
-  # hash order, which differs run to run and means nothing. A real
-  # change — a major added, a Postgres pin moved, which moves the
-  # pg_config path — differs in content, keeps its new timestamp and
-  # rebuilds, which is the case the build script declared the file for.
-  local config="${home}/config.toml" before=""
-  if [[ -f ${config} ]]; then
-    before=$(mktemp) || before=""
-    [[ -z ${before} ]] || cp -p "${config}" "${before}" || {
-      rm -f "${before}"
-      before=""
-    }
-  fi
-  cargo pgrx init "$@" || status=$?
-  if [[ -n ${before} ]]; then
-    # One step per assignment: a sort that failed must read as "changed"
-    # and keep the new timestamp, never as two empty, equal sets.
-    local was="" now=""
-    if [[ ${status} -eq 0 && -f ${config} ]] \
-      && was=$(LC_ALL=C sort "${before}") \
-      && now=$(LC_ALL=C sort "${config}") \
-      && [[ -n ${was} && ${was} == "${now}" ]]; then
-      touch -r "${before}" "${config}"
-    fi
-    rm -f "${before}"
-  fi
-  return "${status}"
-}
-
-org_pgrx_provision() { # usage: org_pgrx_provision
+org_pgrx_provision() { # usage: org_pgrx_provision <variable>; sets it to the default major
   # For a caller that compiles the WHOLE workspace rather than naming the
   # extension (#917): the mutation and semver audits. A workspace-wide
   # cargo run reaches a pgrx crate exactly as `cargo pgrx test` does, and
-  # `cargo llvm-cov --workspace` was the first such path, with no Postgres: measured on release-lab, it died in pgrx-bindgen on
+  # `cargo llvm-cov --workspace` was the first such path, with no
+  # Postgres: measured on release-lab, it died in pgrx-bindgen on
   # "'inttypes.h' file not found" on macOS, and on a cold runner nothing
-  # had registered a pg_config at all.
+  # had a pg_config for it at all.
+  #
+  # Such a run builds each extension at its DEFAULT major, the one `pgNN`
+  # its `default` feature names, derived as mutants_rust.py's
+  # default_major does. So this corrects the SDK, checks every declared
+  # major has its pin, and sets the variable the caller names to that
+  # major (the digits) for it to run its workspace command through
+  # `org_pgrx_major` with (#1940). Into a variable, not on stdout: the
+  # SDK correction is exported into the caller's shell, which a command
+  # substitution's subshell would lose. The name must be none of this
+  # function's locals, which would take the value instead. Two extensions defaulting to
+  # different majors are red: cargo unifies their features in one build,
+  # and pgrx compiles one major.
   #
   # The extension is DERIVED here as everywhere else, from the same file,
   # so a repository declares nothing.
   #
   # A workspace with no extension returns before sourcing anything else,
-  # so it pays for one `cargo metadata` and nothing more.
+  # so it pays for one `cargo metadata` and nothing more, and leaves the
+  # variable empty: its workspace command runs as it is.
   local belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
-  local metadata surface installed plan record _spec kind crate_majors _dir
-  local majors=""
+  local metadata surface installed record spec kind crate_majors _dir crate_default
+  local majors="" defaults=""
+  printf -v "$1" '%s' ""
   # One step per assignment, never a pipeline inside `$(...)`: this file
   # is sourced, so it cannot rely on its caller having set pipefail, and
   # a failed derivation that arrived as an empty surface would read as a
@@ -433,13 +519,21 @@ org_pgrx_provision() { # usage: org_pgrx_provision
   metadata=$(cargo metadata --no-deps --format-version 1 --locked) || return 1
   : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
   surface=$("${ORG_PYTHON}" "${belt}/gate_surface.py" <<< "${metadata}") || return 1
-  while IFS=$'\t' read -r record _spec kind crate_majors _dir; do
+  while IFS=$'\t' read -r record spec kind crate_majors _dir; do
     [[ ${record} == crate && ${kind} == pgrx ]] || continue
     majors="${majors}${majors:+,}${crate_majors}"
+    crate_default=$("${ORG_PYTHON}" "${belt}/mutants_rust.py" default-major "${spec%@*}" <<< "${metadata}") || return 1
+    [[ -z ${crate_default} || " ${defaults} " == *" ${crate_default#pg} "* ]] \
+      || defaults="${defaults}${defaults:+ }${crate_default#pg}"
   done <<< "${surface}"
   [[ -n ${majors} ]] || return 0
+  if [[ ${defaults} == *" "* ]]; then
+    org_finding "" "the workspace's extensions default to different majors: ${defaults// /, }" \
+      "a workspace-wide build unifies their features, and pgrx compiles one major"
+    return 1
+  fi
   org_pgrx_darwin_flags || return 1
   installed=$(mise ls "aqua:theseus-rs/postgresql-binaries" --json) || return 1
-  plan=$("${ORG_PYTHON}" "${belt}/pgrx_postgres.py" --majors "${majors}" <<< "${installed}") || return 1
-  org_pgrx_init <<< "${plan}" > /dev/null
+  "${ORG_PYTHON}" "${belt}/pgrx_postgres.py" --majors "${majors}" <<< "${installed}" > /dev/null || return 1
+  printf -v "$1" '%s' "${defaults}"
 }

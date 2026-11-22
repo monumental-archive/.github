@@ -429,16 +429,10 @@ jobs:
       # branch only, for the Go cache's reason: a fallback restored and
       # saved back under a new key is the growth #1330 measured.
       #
-      # ~/.pgrx/config.toml rides with `target` because the two are one
-      # unit (#1165): pgrx-pg-sys's build script declares
-      # `rerun-if-changed` on that file, so a restored `target` beside
-      # a config.toml written fresh this run is a cache that hits and
-      # then recompiles pgrx-pg-sys and everything above it — measured
-      # as 65 of a leg's 70 seconds. Restored together, the file keeps
-      # the timestamp the cached build was made against, and
-      # `org_pgrx_init` keeps it when the registrations are unchanged.
-      # A path that does not exist — every repository without an
-      # extension — is skipped by the action.
+      # No pgrx file rides with `target` (#1940): the belt registers no
+      # Postgres in a config.toml, and each build's Postgres is a clone
+      # of the pinned install under ~/.cache/org-belt, outside `target`,
+      # remade by the task, so the entry stays the size of `target`.
       #
       # The lint and test legs only, each under a name of its own
       # (#1740): clippy's `target` and the test build's are different
@@ -452,7 +446,6 @@ jobs:
         with:
           path: |
             ~/.cargo/registry
-            ~/.pgrx/config.toml
             target
           key: gate-cargo-${{ matrix.leg }}-${{ runner.os }}-${{ steps.rustc.outputs.digest }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: >-
@@ -611,7 +604,6 @@ jobs:
         with:
           path: |
             ~/.cargo/registry
-            ~/.pgrx/config.toml
             target
           key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
 
@@ -740,17 +732,15 @@ jobs:
       # exactly here. Keyed per major, because each major's build of the
       # extension is its own artifact set; cargo checks registry sources
       # against Cargo.lock, so a poisoned entry cannot change what
-      # compiles. ~/.pgrx/config.toml rides with `target`, as in the
-      # `gate` job and for the reason given there (#1165). The key and
-      # its fallback carry the compiler's digest before Cargo.lock's
-      # hash, as there (#1864).
+      # compiles. Nothing pgrx writes rides with `target`, as in the
+      # `gate` job (#1940). The key and its fallback carry the
+      # compiler's digest before Cargo.lock's hash, as there (#1864).
       - name: Restore the cargo caches (unsigned gate only)
         id: cargo-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
-            ~/.pgrx/config.toml
             target
           key: gate-pgrx-${{ matrix.major }}-${{ runner.os }}-${{ steps.rustc.outputs.digest }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: >-
@@ -812,7 +802,6 @@ jobs:
         with:
           path: |
             ~/.cargo/registry
-            ~/.pgrx/config.toml
             target
           key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
 

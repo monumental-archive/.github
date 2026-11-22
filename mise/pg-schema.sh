@@ -89,9 +89,9 @@ command -v cargo-pgrx > /dev/null || {
 # shellcheck source=mise/pgrx-env.sh
 . "${belt}/pgrx-env.sh"
 org_pgrx_darwin_prepare "${majors}"
+# Every major's pin checked before anything compiles (#1940).
 installed=$(mise ls "aqua:theseus-rs/postgresql-binaries" --json)
-plan=$("${ORG_PYTHON}" "${belt}/pgrx_postgres.py" --majors "${majors}" <<< "${installed}")
-org_pgrx_init <<< "${plan}" > /dev/null
+"${ORG_PYTHON}" "${belt}/pgrx_postgres.py" --majors "${majors}" <<< "${installed}" > /dev/null
 
 # The raw output lands under the target directory cargo already ignores,
 # where a reader can open it after a red.
@@ -107,8 +107,9 @@ for target in "${targets[@]}"; do
   dir="${rest%%:*}"
   snapshot="${rest#*:}"
   raw="${out}/${name}.raw.sql"
-  # With its own major's ICU headers, in a subshell (#1774).
-  org_pgrx_with_icu "${major}" cargo pgrx schema "pg${major}" --package "${name}" \
+  # With its own major's ICU headers and Postgres, in a subshell
+  # (#1774, #1940).
+  org_pgrx_major "${major}" cargo pgrx schema "pg${major}" --package "${name}" \
     --manifest-path "${dir}/Cargo.toml" \
     --no-default-features --features "pg${major}" --out "${raw}"
   if "${ORG_PYTHON}" "${belt}/pg_schema.py" "${mode}" "${raw}" "${snapshot}"; then

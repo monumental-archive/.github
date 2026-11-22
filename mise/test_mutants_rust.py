@@ -90,30 +90,36 @@ case "$*" in
 esac
 """
 CARGO_MUTANTS_STUB = "#!/usr/bin/env bash\nexit 99\n"
-# The real org_pgrx_with_icu, read out of pgrx-env.sh rather than
+# The real org_pgrx_major, read out of pgrx-env.sh rather than
 # written again here: its subshell is the property the rows rely on.
-WITH_ICU = re.search(
-    r"^org_pgrx_with_icu\(\) \{.*?^\}\n",
+WITH_MAJOR = re.search(
+    r"^org_pgrx_major\(\) \{.*?^\}\n",
     (BELT / "pgrx-env.sh").read_text(encoding="utf-8"),
     re.MULTILINE | re.DOTALL,
 )
-if WITH_ICU is None:
-    msg = "org_pgrx_with_icu is gone from pgrx-env.sh"
+if WITH_MAJOR is None:
+    msg = "org_pgrx_major is gone from pgrx-env.sh"
     raise LookupError(msg)
 PGRX_ENV_STUB = """
 org_pgrx_provision() {
+  local into=$1
+  shift
   {
     printf 'provision'
     (($# == 0)) || printf ' [%s]' "$@"
     printf '\\n'
   } >> "${PLANT_LOG}"
+  printf -v "$into" '%s' "${PLANT_DEFAULT:-}"
   return "${PLANT_PROVISION:-0}"
 }
 # The per-major ICU headers (#1774): the check answers PLANT_ICU_CHECK,
 # and the headers are a mark the stub cargo could show.
 org_pgrx_darwin_icu_check() { return "${PLANT_ICU_CHECK:-0}"; }
-org_pgrx_darwin_icu() { export BINDGEN_EXTRA_CLANG_ARGS="-Iicu-pg$1"; }
-""" + WITH_ICU.group(0)
+org_pgrx_major_env() {
+  printf 'major %s\\n' "$1" >> "${PLANT_LOG}"
+  export BINDGEN_EXTRA_CLANG_ARGS="-Iicu-pg$1"
+}
+""" + WITH_MAJOR.group(0)
 
 SURVIVOR = "src/lib.rs:12:5: replace answer -> u32 with 0"
 NAMES = [
@@ -363,7 +369,7 @@ class Verdict(Planted):
     def test_clean(self) -> None:
         """Every mutant killed: exit 0 and the summary line."""
         self.plant(package("alpha", str(self.tree)), result=outcomes(3, 3, 0))
-        done, log = self.run_leg()
+        done, log = self.run_leg(PLANT_DEFAULT="18")
         self.assertEqual(done.returncode, 0, done.stderr)
         want = [
             f"{LABEL}: mutating workspace (3 mutants, 0 excluded)",
@@ -714,7 +720,7 @@ class Pgrx(Planted):
             package("ext", root, default=["pg18"]),
             result=outcomes(3, 3, 0),
         )
-        done, log = self.run_leg()
+        done, log = self.run_leg(PLANT_DEFAULT="18")
         self.assertEqual(done.returncode, 0, done.stderr)
         want = [
             f"{LABEL}: mutating workspace (3 mutants, 0 excluded)",
@@ -728,10 +734,14 @@ class Pgrx(Planted):
         self.assertEqual(done.stdout.splitlines(), want)
         want = [
             METADATA,
+            # Provisioned once, before the workspace run, which compiles
+            # at the default major it names (#1940).
+            "provision",
+            "major 18",
             "cargo mutants --list --no-config --package alpha",
             "cargo mutants --list --package alpha",
             "cargo mutants --output OUT --package alpha",
-            "provision",
+            "major 18",
             "cargo mutants --list --no-config --package ext --features pg_test",
             "cargo mutants --list --package ext --features pg_test",
             "cargo mutants --output OUT --package ext --features pg_test",
@@ -751,8 +761,8 @@ class Pgrx(Planted):
             *RED,
         ]
         self.assertEqual(done.stderr.splitlines(), want)
-        provisioned = [c for c in log if c.startswith("provision")]
-        self.assertEqual(provisioned, list[str]())
+        mutated = [c for c in log if "--package ext" in c]
+        self.assertEqual(mutated, list[str]())
 
     def test_failed_provisioning_is_red(self) -> None:
         """No Postgres: the extension is red, never skipped."""

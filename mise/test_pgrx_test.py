@@ -116,27 +116,26 @@ MISE_STUB = """#!/usr/bin/env bash
 [[ $1 == ls ]] && echo '{}' && exit 0
 exit 1
 """
-# The real org_pgrx_with_icu, read out of pgrx-env.sh rather than
+# The real org_pgrx_major, read out of pgrx-env.sh rather than
 # written again here: its subshell is the property the rows rely on.
-WITH_ICU = re.search(
-    r"^org_pgrx_with_icu\(\) \{.*?^\}\n",
+WITH_MAJOR = re.search(
+    r"^org_pgrx_major\(\) \{.*?^\}\n",
     (BELT / "pgrx-env.sh").read_text(encoding="utf-8"),
     re.MULTILINE | re.DOTALL,
 )
-if WITH_ICU is None:
-    msg = "org_pgrx_with_icu is gone from pgrx-env.sh"
+if WITH_MAJOR is None:
+    msg = "org_pgrx_major is gone from pgrx-env.sh"
     raise LookupError(msg)
 PGRX_ENV_STUB = """
-org_pgrx_init() { cat > /dev/null; }
 # The SDK and the check (#1774): logs the majors it was asked for. Each
 # run adds its own major's mark to both flags, which the stub cargo
 # logs, so a run that saw another major's would show it.
 org_pgrx_darwin_prepare() { printf 'icu-check [%s]\\n' "$1" >> "${PLANT_LOG}.icu"; }
-org_pgrx_darwin_icu() {
+org_pgrx_major_env() {
   export BINDGEN_EXTRA_CLANG_ARGS="-Iicu-pg$1 ${BINDGEN_EXTRA_CLANG_ARGS:-}"
   export CFLAGS="-Iicu-pg$1 ${CFLAGS:-}"
 }
-""" + WITH_ICU.group(0)
+""" + WITH_MAJOR.group(0)
 PGRX_POSTGRES_STUB = "print('plan')\n"
 
 MAJORS = [17, 18]

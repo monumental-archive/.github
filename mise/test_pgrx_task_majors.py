@@ -80,11 +80,9 @@ org_clippy_pgrx_contradiction_count() { echo 0; }
 PGRX_ENV_STUB = f"""
 . "{BELT / "pgrx-env.sh"}"
 org_pgrx_darwin_prepare() {{ printf 'prepare %s\\n' "$*" >> "${{PLANT_LOG}}"; }}
-org_pgrx_darwin_icu() {{ export BINDGEN_EXTRA_CLANG_ARGS="-Iicu-pg$1"; }}
-org_pgrx_init() {{
-  cat > /dev/null
-  echo init >> "${{PLANT_LOG}}"
-}}
+# A major's ICU headers and Postgres (#1774, #1940): a mark the stub
+# cargo could show, and no clone made.
+org_pgrx_major_env() {{ export BINDGEN_EXTRA_CLANG_ARGS="-Iicu-pg$1"; }}
 """
 SURFACE = (
     "crate\tfirst@0.1.0\tpgrx\t15,16,17\tfirst\n"
@@ -100,7 +98,6 @@ REGISTER = [
     "prepare 16,17",
     "mise ls aqua:theseus-rs/postgresql-binaries --json",
     "pgrx_postgres.py --majors 16,17",
-    "init",
 ]
 
 

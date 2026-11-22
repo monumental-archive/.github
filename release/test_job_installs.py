@@ -184,8 +184,8 @@ CALLER_COMMANDS = {
 }
 
 # Calls a tool's name never appears in: the Postgres a pgrx task runs is
-# located by pgrx_postgres.py from `mise ls` and registered with
-# `cargo pgrx init`, both by path.
+# located by pgrx_postgres.py from `mise ls` and handed to pgrx as a
+# clone's pg_config (#1940), both by path.
 PROVISIONS = {
     r"pgrx_postgres\.py": ["postgresql-binaries"],
 }
@@ -223,7 +223,6 @@ DYNAMIC = {
     "mise/hermetic.py": "splats its caller's pathspecs into the git ls-files argv",
     "mise/mutants_python.py": "runs the repository's own test-command,"
     " filled per test file, and cosmic-ray on each mutant",
-    "mise/with_lock.py": "runs its caller's command under the lock",
     "mise/unittest_guarded.py": "starts itself as a worker under the"
     " interpreter it runs on (#1623)",
     "mise/python_properties.py": "starts itself on each shard under the"
@@ -1304,13 +1303,14 @@ class GateInstalls(unittest.TestCase):
         pgrx-env.sh's comments name `coverage:check` and its siblings.
         `scripts()` once reassigned the text it searched for task names to
         each followed file's whole source, comments included, so a step
-        sourcing it seemed to reach coverage-measure.sh and call Go.
+        sourcing it seemed to reach coverage-measure.sh and call Go. It
+        runs no `cargo pgrx` since #1940: the tasks that source it do.
         """
         job: Job = {
             "steps": [{"name": "Planted", "run": '. "${ORG_BELT_DIR}/pgrx-env.sh"'}]
         }
         self.assertEqual(
-            ({"jq"}, {"rust", "cargo-pgrx", "postgresql-binaries"}),
+            ({"jq"}, {"rust", "postgresql-binaries"}),
             calls(job, carries=True),
         )
 
