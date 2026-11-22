@@ -147,7 +147,12 @@ class Derivation:
             args.append(str(self.root / "next-data.sql"))
         prev_v, new_v = versions
         env = hermetic.env(
-            EXT_NAME=ext, PREV_V=prev_v, NEW_V=new_v, ORG_MISE_DIR=str(CANON / "mise")
+            EXT_NAME=ext,
+            PREV_V=prev_v,
+            NEW_V=new_v,
+            ORG_MISE_DIR=str(CANON / "mise"),
+            # The name the script hands its heredoc (#1934).
+            MISE_TASK_NAME="generate-pgrx-upgrade.sh",
         )
         result = subprocess.run(
             [hermetic.tool("python3"), str(self.source), *args],
@@ -449,11 +454,11 @@ def floor_block(version: str = "0.27.0") -> str:
 
 
 PREV_REFUSED = (
-    "FAIL: previous schema lab_pg--0.27.0.sql uses the reserved"
+    "generate-pgrx-upgrade.sh: previous schema lab_pg--0.27.0.sql uses the reserved"
     " $pgrx_floor$ tag other than as its one leading floor block\n"
 )
 NEW_REFUSED = (
-    "FAIL: candidate schema lab_pg--0.28.1.sql carries the reserved"
+    "generate-pgrx-upgrade.sh: candidate schema lab_pg--0.28.1.sql carries the reserved"
     " $pgrx_floor$ tag; the floor block is packaging, never schema\n"
 )
 

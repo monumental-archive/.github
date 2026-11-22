@@ -387,6 +387,13 @@ sys.path.insert(0, os.environ["ORG_MISE_DIR"])
 import findings
 import workflow_command
 
+
+def refuse(message):
+    """Say why the derivation stops, as one finding, then exit 1 (#1934)."""
+    findings.finding("", message)
+    sys.exit(1)
+
+
 prev_path, new_path, out_path = sys.argv[1:4]
 data_path = sys.argv[4] if len(sys.argv) > 4 else ""
 ext = os.environ["EXT_NAME"]
@@ -411,7 +418,7 @@ def strip_leading_comments(stmt):
         if stmt.startswith("/*"):
             end = stmt.find("*/")
             if end < 0:
-                sys.exit(f"FAIL: unterminated block comment: {stmt[:200]!r}")
+                refuse(f"unterminated block comment: {stmt[:200]!r}")
             stmt = stmt[end + 2:].lstrip()
         elif stmt.startswith("--"):
             nl = stmt.find("\n")
@@ -438,7 +445,7 @@ def split_statements(text):
             if stmt:
                 stmts.append(stmt)
     if strip_leading_comments("\n".join(buf)):
-        sys.exit(f"FAIL: unterminated statement in generated schema: {buf[0][:200]!r}")
+        refuse(f"unterminated statement in generated schema: {buf[0][:200]!r}")
     return stmts
 
 
@@ -459,7 +466,7 @@ def paren_span(text, start):
             depth -= 1
             if depth == 0:
                 return i
-    sys.exit(f"FAIL: unbalanced parentheses in: {text[:200]!r}")
+    refuse(f"unbalanced parentheses in: {text[:200]!r}")
 
 
 # pgrx emits "CREATE  FUNCTION" (double space): match on \s+, always.
@@ -535,7 +542,7 @@ def classify(stmt):
             rest = n[len(prefix):]
             m = re.match(r"[^\s(;]+", rest)
             if not m:
-                sys.exit(f"FAIL: cannot name {kind} in: {n[:200]!r}")
+                refuse(f"cannot name {kind} in: {n[:200]!r}")
             return ("named", (kind, m.group(0)), n)
     for prefix in REPLAY:
         if u.startswith(prefix):
@@ -580,14 +587,14 @@ floor = FLOOR_BLOCK.match(prev_text)
 if floor:
     prev_text = prev_text[floor.end():]
 if FLOOR_TAG in prev_text:
-    sys.exit(
-        f"FAIL: previous schema {ext}--{prev_v}.sql uses the reserved"
+    refuse(
+        f"previous schema {ext}--{prev_v}.sql uses the reserved"
         f" ${FLOOR_TAG}$ tag other than as its one leading floor block"
     )
 new_text = read(new_path)
 if FLOOR_TAG in new_text:
-    sys.exit(
-        f"FAIL: candidate schema {ext}--{new_v}.sql carries the reserved"
+    refuse(
+        f"candidate schema {ext}--{new_v}.sql carries the reserved"
         f" ${FLOOR_TAG}$ tag; the floor block is packaging, never schema"
     )
 prev_stmts = split_statements(prev_text)
@@ -711,8 +718,8 @@ if data_path:
 # instead of emitting a file that either the linter or the server rejects.
 guard_fixed = len("\\echo Use ALTER EXTENSION  UPDATE to load this file. \\quit")
 if guard_fixed + len(ext) > 80:
-    sys.exit(
-        f"generate-pgrx-upgrade: the psql guard would exceed 80 columns: "
+    refuse(
+        f"the psql guard would exceed 80 columns: "
         f"{guard_fixed} + len('{ext}') = {guard_fixed + len(ext)} > 80. "
         f"The guard must stay one line (only \\echo lines are ignored by the "
         f"extension loader), so shorten the extension name or re-shape the "
