@@ -86,12 +86,14 @@ if WITH_MAJOR is None:
     raise LookupError(msg)
 PGRX_ENV_STUB = """
 org_pgrx_provision() {
+  local into=$1
+  shift
   {
     printf 'provision'
     (($# == 0)) || printf ' [%s]' "$@"
     printf '\\n'
   } >> "${PLANT_LOG}"
-  org_pgrx_default_major=${PLANT_DEFAULT:-}
+  printf -v "$into" '%s' "${PLANT_DEFAULT:-}"
   return "${PLANT_PROVISION:-0}"
 }
 # The per-major ICU headers (#1774): the check answers PLANT_ICU_CHECK,

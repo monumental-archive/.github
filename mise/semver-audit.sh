@@ -91,8 +91,7 @@ default=""
 if [[ ${population} == *$'\t'pgrx$'\t'* ]]; then
   provisioned=ok
   # shellcheck disable=SC2310  # deliberate: see above
-  org_pgrx_provision || provisioned=failed
-  [[ ${provisioned} != ok ]] || default=${org_pgrx_default_major}
+  org_pgrx_provision default || provisioned=failed
 fi
 default_icu=ok
 # shellcheck disable=SC2310  # deliberate: a missing pin reds the

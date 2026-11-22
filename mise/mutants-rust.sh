@@ -181,8 +181,7 @@ if [[ ${#pgrx[@]} -gt 0 ]]; then
   provisioned=ok
   # shellcheck disable=SC2310  # deliberate: a failed provisioning reds
   # each extension and the run still reports the rest
-  org_pgrx_provision || provisioned=failed
-  [[ ${provisioned} != ok ]] || default=${org_pgrx_default_major}
+  org_pgrx_provision default || provisioned=failed
 fi
 
 if [[ ${#plain[@]} -gt 0 ]]; then

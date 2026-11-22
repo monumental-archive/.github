@@ -481,7 +481,7 @@ org_pgrx_darwin_icu_pin() { # usage: org_pgrx_darwin_icu_pin <ICU majors to addâ
   echo "  ]"
 }
 
-org_pgrx_provision() { # usage: org_pgrx_provision; sets org_pgrx_default_major
+org_pgrx_provision() { # usage: org_pgrx_provision <variable>; sets it to the default major
   # For a caller that compiles the WHOLE workspace rather than naming the
   # extension (#917): the mutation and semver audits. A workspace-wide
   # cargo run reaches a pgrx crate exactly as `cargo pgrx test` does, and
@@ -493,9 +493,12 @@ org_pgrx_provision() { # usage: org_pgrx_provision; sets org_pgrx_default_major
   # Such a run builds each extension at its DEFAULT major, the one `pgNN`
   # its `default` feature names, derived as mutants_rust.py's
   # default_major does. So this corrects the SDK, checks every declared
-  # major has its pin, and sets org_pgrx_default_major to that major (the
-  # digits) for the caller to run its workspace command through
-  # `org_pgrx_major` with (#1940). Two extensions defaulting to
+  # major has its pin, and sets the variable the caller names to that
+  # major (the digits) for it to run its workspace command through
+  # `org_pgrx_major` with (#1940). Into a variable, not on stdout: the
+  # SDK correction is exported into the caller's shell, which a command
+  # substitution's subshell would lose. The name must be none of this
+  # function's locals, which would take the value instead. Two extensions defaulting to
   # different majors are red: cargo unifies their features in one build,
   # and pgrx compiles one major.
   #
@@ -503,12 +506,12 @@ org_pgrx_provision() { # usage: org_pgrx_provision; sets org_pgrx_default_major
   # so a repository declares nothing.
   #
   # A workspace with no extension returns before sourcing anything else,
-  # so it pays for one `cargo metadata` and nothing more, and leaves
-  # org_pgrx_default_major empty: its workspace command runs as it is.
+  # so it pays for one `cargo metadata` and nothing more, and leaves the
+  # variable empty: its workspace command runs as it is.
   local belt="${ORG_BELT_DIR:?unset â€” no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
-  local metadata surface installed record spec kind crate_majors _dir default
+  local metadata surface installed record spec kind crate_majors _dir crate_default
   local majors="" defaults=""
-  org_pgrx_default_major=""
+  printf -v "$1" '%s' ""
   # One step per assignment, never a pipeline inside `$(...)`: this file
   # is sourced, so it cannot rely on its caller having set pipefail, and
   # a failed derivation that arrived as an empty surface would read as a
@@ -519,8 +522,9 @@ org_pgrx_provision() { # usage: org_pgrx_provision; sets org_pgrx_default_major
   while IFS=$'\t' read -r record spec kind crate_majors _dir; do
     [[ ${record} == crate && ${kind} == pgrx ]] || continue
     majors="${majors}${majors:+,}${crate_majors}"
-    default=$("${ORG_PYTHON}" "${belt}/mutants_rust.py" default-major "${spec%@*}" <<< "${metadata}") || return 1
-    [[ -z ${default} || " ${defaults} " == *" ${default#pg} "* ]] || defaults="${defaults}${defaults:+ }${default#pg}"
+    crate_default=$("${ORG_PYTHON}" "${belt}/mutants_rust.py" default-major "${spec%@*}" <<< "${metadata}") || return 1
+    [[ -z ${crate_default} || " ${defaults} " == *" ${crate_default#pg} "* ]] \
+      || defaults="${defaults}${defaults:+ }${crate_default#pg}"
   done <<< "${surface}"
   [[ -n ${majors} ]] || return 0
   if [[ ${defaults} == *" "* ]]; then
@@ -531,6 +535,5 @@ org_pgrx_provision() { # usage: org_pgrx_provision; sets org_pgrx_default_major
   org_pgrx_darwin_flags || return 1
   installed=$(mise ls "aqua:theseus-rs/postgresql-binaries" --json) || return 1
   "${ORG_PYTHON}" "${belt}/pgrx_postgres.py" --majors "${majors}" <<< "${installed}" > /dev/null || return 1
-  # shellcheck disable=SC2034  # read by the caller, which sourced this file
-  org_pgrx_default_major=${defaults}
+  printf -v "$1" '%s' "${defaults}"
 }

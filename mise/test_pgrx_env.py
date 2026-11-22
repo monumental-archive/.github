@@ -44,7 +44,11 @@ CARGO_STUB = r"""#!/usr/bin/env bash
 printf '%s|%s|%s\n' "$*" "${PGRX_PG_CONFIG_PATH:-}" "${PGRX_HOME:-}" \
   >> "${PLANT_ROOT}/cargo.log"
 if [[ $1 == metadata ]]; then
-  printf '{"target_directory": "%s"}\n' "${PLANT_TARGET}"
+  if [[ -n ${PLANT_METADATA:-} ]]; then
+    cat "${PLANT_METADATA}"
+  else
+    printf '{"target_directory": "%s"}\n' "${PLANT_TARGET}"
+  fi
 fi
 """
 # `mise ls` of the Postgres package: the planted listing.
@@ -58,12 +62,11 @@ OLD = 946684800  # 2000-01-01 00:00 UTC
 RACERS = 6
 
 
-class OwnPostgres(unittest.TestCase):
-    """No pgrx task writes or reads state another can see (#1940).
+class PostgresCase(unittest.TestCase):
+    """A stand-in cargo and a planted Postgres install (#1940).
 
-    A stand-in cargo and a planted Postgres install (its `bin/pg_config`
-    and a file beside it). The kernel and `cp` are the machine's own, so
-    the clone is the one the task makes.
+    The install is its `bin/pg_config` and a file beside it. The kernel
+    and `cp` are the machine's own, so the clone is the one a task makes.
     """
 
     @override
@@ -154,6 +157,10 @@ class OwnPostgres(unittest.TestCase):
         code, _, err = self.bash("org_pgrx_major 16 cargo build", **env)
         self.assertEqual(0, code, err)
         return self.seen()[-1]
+
+
+class OwnPostgres(PostgresCase):
+    """No pgrx task writes or reads state another can see (#1940)."""
 
     def test_the_build_sees_its_clone_and_an_empty_home(self) -> None:
         """PGRX_PG_CONFIG_PATH is a clone under the target's hash; no init.
@@ -262,6 +269,100 @@ class OwnPostgres(unittest.TestCase):
         self.assertIn("no Postgres 17.x is pinned", err)
         none: list[list[str]] = []
         self.assertEqual(none, self.seen())
+
+
+def member(name: str, root: Path, default: list[str] | None) -> dict[str, object]:
+    """Spell one workspace member as `cargo metadata` reports it.
+
+    A `default` makes it a pgrx extension declaring pg17 and pg18, with
+    that list as its `default` feature.
+
+    Returns:
+        The package record.
+
+    """
+    features: dict[str, list[str]] = {"default": []}
+    deps: list[dict[str, str]] = []
+    if default is not None:
+        features = {"default": default, "pg17": [], "pg18": []}
+        deps = [{"name": "pgrx"}]
+    return {
+        "id": f"path+file://{root}/{name}#{name}@1.0.0",
+        "name": name,
+        "version": "1.0.0",
+        "publish": None,
+        "dependencies": deps,
+        "features": features,
+        "targets": [{"kind": ["lib"], "crate_types": ["lib"]}],
+        "manifest_path": f"{root}/{name}/Cargo.toml",
+    }
+
+
+class Provision(PostgresCase):
+    """org_pgrx_provision names the workspace's default major (#1940).
+
+    The real function, gate_surface.py and mutants_rust.py over planted
+    metadata: what a workspace-wide caller runs its command at.
+    """
+
+    def plant(self, **members: list[str] | None) -> dict[str, str]:
+        """Plant a workspace of `members` and pins of pg17 and pg18.
+
+        Returns:
+            The environment that points the stand-in cargo at it.
+
+        """
+        root = self.root / "work"
+        packages = [member(name, root, d) for name, d in members.items()]
+        metadata = {
+            "packages": packages,
+            "workspace_members": [p["id"] for p in packages],
+            "workspace_root": str(root),
+        }
+        path = self.root / "metadata.json"
+        path.write_text(json.dumps(metadata), encoding="utf-8")
+        listing = []
+        for version in ("17.6.0", "18.1.0"):
+            where = self.root / "pg" / version
+            (where / "bin").mkdir(parents=True)
+            (where / "bin" / "pg_config").write_text("#!/usr/bin/env bash\n")
+            (where / "bin" / "pg_config").chmod(0o755)
+            listing.append(entry(version, where))
+        (self.root / "pg.json").write_text(json.dumps(listing), encoding="utf-8")
+        return {"PLANT_METADATA": str(path)}
+
+    def provision(self, env: dict[str, str]) -> tuple[int, str, str]:
+        """Run it into a caller variable named `default`, as the callers do.
+
+        Returns:
+            (exit status, stdout, stderr).
+
+        """
+        return self.bash(
+            "default=unset\nrc=0\norg_pgrx_provision default || rc=$?\n"
+            'echo "rc=${rc} default=[${default}]"',
+            **env,
+        )
+
+    def test_one_extension_names_its_default(self) -> None:
+        """An extension defaulting to pg18 beside a plain crate: 18."""
+        env = self.plant(plain=None, ext=["pg18"])
+        code, out, err = self.provision(env)
+        self.assertEqual((0, "rc=0 default=[18]\n"), (code, out), err)
+
+    def test_no_extension_leaves_it_empty(self) -> None:
+        """No extension: nothing provisioned, the command runs as it is."""
+        env = self.plant(plain=None)
+        code, out, err = self.provision(env)
+        self.assertEqual((0, "rc=0 default=[]\n"), (code, out), err)
+
+    def test_two_defaults_are_red_by_name(self) -> None:
+        """Two extensions at different defaults: one build cannot hold both."""
+        env = self.plant(first=["pg17"], second=["pg18"])
+        code, out, err = self.provision(env)
+        self.assertEqual((0, "rc=1 default=[]\n"), (code, out), err)
+        want = f"{TASK}: the workspace's extensions default to different majors: 17, 18"
+        self.assertEqual(want, err.splitlines()[0])
 
 
 # gate_surface.py's records: two extensions, one plain crate between
