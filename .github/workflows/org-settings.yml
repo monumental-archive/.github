@@ -166,9 +166,6 @@ jobs:
           persist-credentials: false
 
       - name: Check every repo against the baseline
-        # A script outside `mise run` names its findings file (#1934).
-        env:
-          ORG_FINDINGS: ${{ runner.temp }}/findings/${{ github.job }}-${{ strategy.job-index }}.jsonl
         run: ./settings/repo-baseline.sh check
 
       # This job's findings records, for the report job (#1933).

@@ -1,44 +1,39 @@
 #!/usr/bin/env python3
 """Every job hands its findings to the report job (#1933).
 
-A belt check appends its findings to the file ORG_FINDINGS names
-(docs/findings.md), and the belt's `[env]` names that file on every
-`mise run` a runner makes.
-Jobs of one run share nothing unless the workflow hands it on, so in
-every workflow whose `report` job runs mise/standing_issue.py:
+A finding's writer names its own records file on a runner, under
+`${RUNNER_TEMP}/findings/` (docs/findings.md, #1976), whatever ran it:
+`mise run`, a workflow step, a script run bare. Jobs of one run share
+nothing unless the workflow hands it on, so in every workflow whose
+`report` job runs mise/standing_issue.py:
 
-- every job with a step that runs `mise run` uploads
-  `${{ runner.temp }}/findings/` after its last such step, as
-  `findings-<job>-<index>`, unless the run was cancelled;
+- every job with `steps` that does not run the helper ends with the
+  upload of `${{ runner.temp }}/findings/`, as `findings-<job>-<index>`,
+  unless the run was cancelled (#1976). Which jobs write records is
+  not read from their `run:` text: every job is in the set, so no way
+  of writing a record falls outside it. A job that calls a reusable
+  workflow has no steps and is not in the set;
 - the report job downloads every `findings-*` artifact into one
   directory before the helper runs, and passes it as `--findings`.
 
 The set is computed from the files, never listed. A planted workflow
 missing either half is red by message, naming the workflow and the job.
-The item-1 rows run `mise run` under the belt and read what it named.
 
 stdlib `unittest`, run through the gate as `mise run test`.
 """
 
 from __future__ import annotations
 
-import re
-import shutil
-import subprocess
 import tempfile
 import unittest
 from pathlib import Path
-from typing import override
 
 import decoded
-import hermetic
 import workflow_yaml
 
 CANON = Path(__file__).resolve().parent.parent
-BELT = CANON / "mise" / "config.toml"
 WORKFLOWS = Path(".github") / "workflows"
 HELPER = "mise/standing_issue.py"
-MISE_RUN = re.compile(r"\bmise run\b")
 UPLOAD = "actions/upload-artifact@"
 DOWNLOAD = "actions/download-artifact@"
 NOT_CANCELLED = "${{ !cancelled() }}"
@@ -47,7 +42,7 @@ UPLOAD_PATH = "${{ runner.temp }}/findings/"
 PATTERN = "findings-*"
 DOWNLOAD_PATH = "${{ runner.temp }}/findings"
 FLAG = '--findings "${RUNNER_TEMP}/findings"'
-EARLY = "uploads its findings before its last `mise run` step"
+NOT_LAST = "the findings upload is not the job's last step"
 
 Step = dict[str, object]
 
@@ -108,24 +103,30 @@ def population(root: Path) -> list[Path]:
 
 
 def upload_problems(where: str, steps: list[Step]) -> list[str]:
-    """Check a job that runs `mise run` hands on its findings.
+    """Check a job ends by handing on its findings.
+
+    The upload is the step that uploads under the findings name or
+    from the findings path, so one whose name or path differs is still
+    found, and said.
 
     Returns:
         One message per way the job is not as built; empty when it is.
 
     """
-    last = max(i for i, s in enumerate(steps) if MISE_RUN.search(run_text(s)))
     uploads = [
         i
         for i, s in enumerate(steps)
-        if uses(s, UPLOAD) and given(s).get("name") == NAME
+        if uses(s, UPLOAD)
+        and (given(s).get("name") == NAME or given(s).get("path") == UPLOAD_PATH)
     ]
     if not uploads:
-        return [f"{where}: runs `mise run` and uploads no {NAME}"]
-    if all(i < last for i in uploads):
-        return [f"{where}: {EARLY}"]
-    step = steps[next(i for i in uploads if i > last)]
+        return [f"{where}: uploads no {NAME}"]
+    if uploads[-1] != len(steps) - 1:
+        return [f"{where}: {NOT_LAST}"]
+    step = steps[uploads[-1]]
     problems = []
+    if given(step).get("name") != NAME:
+        problems.append(f"{where}: the findings upload's name is not {NAME}")
     if given(step).get("path") != UPLOAD_PATH:
         problems.append(f"{where}: the findings upload's path is not {UPLOAD_PATH}")
     if step.get("if") != NOT_CANCELLED:
@@ -176,7 +177,7 @@ def problems(root: Path) -> list[str]:
             where = f"{path.name}: {name}"
             if name == "report":
                 found += download_problems(where, steps)
-            elif any(MISE_RUN.search(run_text(s)) for s in steps):
+            elif steps and not any(HELPER in run_text(s) for s in steps):
                 found += upload_problems(where, steps)
     return found
 
@@ -204,6 +205,11 @@ CHECK = """\
       - run: mise run audit:thing
 """
 
+# A step that records through a writer outside `mise run`.
+PLAIN = """\
+      - run: .org-canon/settings/repo-baseline.sh check
+"""
+
 HELPER_STEP = """\
       - if: ${{ !cancelled() }}
         run: .org-canon/mise/standing_issue.py --findings "${RUNNER_TEMP}/findings"
@@ -224,12 +230,10 @@ jobs:
   check:
     runs-on: ubuntu-26.04
     steps:
-{check}  quiet:
-    runs-on: ubuntu-26.04
-    steps:
-      - run: "true"
+{check}  called:
+    uses: ./.github/workflows/callee.yml
   report:
-    needs: [check, quiet]
+    needs: [check, called]
     if: ${{{{ always() }}}}
     runs-on: ubuntu-26.04
     steps:
@@ -240,7 +244,7 @@ class Canon(unittest.TestCase):
     """The canon's own workflows."""
 
     def test_every_job_hands_its_findings_on(self) -> None:
-        """Every job that runs `mise run` uploads; every report reads them."""
+        """Every job uploads as its last step; every report reads them."""
         same(self, problems(CANON), [])
 
     def test_the_set_is_the_reporting_workflows(self) -> None:
@@ -280,15 +284,45 @@ class Planted(unittest.TestCase):
         same(
             self,
             self.plant(CHECK, DOWNLOAD_STEP + HELPER_STEP),
-            [f"planted.yml: check: runs `mise run` and uploads no {NAME}"],
+            [f"planted.yml: check: uploads no {NAME}"],
         )
 
-    def test_an_upload_before_the_last_check(self) -> None:
-        """An upload placed before the last `mise run` step is red by name."""
+    def test_a_plain_run_job_with_no_upload(self) -> None:
+        """A job that records only through a plain `run:` step is in the set."""
         same(
             self,
-            self.plant(CHECK + UPLOAD_STEP + CHECK, DOWNLOAD_STEP + HELPER_STEP),
-            [f"planted.yml: check: {EARLY}"],
+            self.plant(PLAIN, DOWNLOAD_STEP + HELPER_STEP),
+            [f"planted.yml: check: uploads no {NAME}"],
+        )
+
+    def test_a_job_with_no_steps_is_not_in_the_set(self) -> None:
+        """A job that calls a reusable workflow uploads nothing and passes."""
+        same(self, self.plant(PLAIN + UPLOAD_STEP, DOWNLOAD_STEP + HELPER_STEP), [])
+
+    def test_an_upload_that_is_not_last(self) -> None:
+        """An upload with a step after it is red by name."""
+        same(
+            self,
+            self.plant(PLAIN + UPLOAD_STEP + PLAIN, DOWNLOAD_STEP + HELPER_STEP),
+            [f"planted.yml: check: {NOT_LAST}"],
+        )
+
+    def test_an_upload_under_another_name(self) -> None:
+        """An upload of the findings path under another name is red by name."""
+        renamed = UPLOAD_STEP.replace(NAME, "findings-${{ github.job }}")
+        same(
+            self,
+            self.plant(PLAIN + renamed, DOWNLOAD_STEP + HELPER_STEP),
+            [f"planted.yml: check: the findings upload's name is not {NAME}"],
+        )
+
+    def test_an_upload_from_another_path(self) -> None:
+        """An upload under the findings name from another path is red by name."""
+        moved = UPLOAD_STEP.replace(UPLOAD_PATH, "${{ runner.temp }}/out/")
+        same(
+            self,
+            self.plant(PLAIN + moved, DOWNLOAD_STEP + HELPER_STEP),
+            [f"planted.yml: check: the findings upload's path is not {UPLOAD_PATH}"],
         )
 
     def test_an_upload_that_runs_only_on_success(self) -> None:
@@ -322,94 +356,6 @@ class Planted(unittest.TestCase):
             self,
             self.plant(CHECK + UPLOAD_STEP, DOWNLOAD_STEP + BARE_HELPER_STEP),
             [f"planted.yml: report: {HELPER} is not passed {FLAG}"],
-        )
-
-
-SHOW = """\
-[tasks.show]
-run = 'printf "%s\\n" "${ORG_FINDINGS-<unset>}"'
-"""
-
-
-class NameTheFile(unittest.TestCase):
-    """The belt's `[env]` names the job's findings file, run as a job runs it."""
-
-    @override
-    def setUp(self) -> None:
-        """Plant a tree with one task that prints ORG_FINDINGS."""
-        self.tmp = Path(tempfile.mkdtemp()).resolve()
-        self.addCleanup(shutil.rmtree, self.tmp)
-        self.tree = self.tmp / "tree"
-        self.tree.mkdir()
-        (self.tree / "mise.toml").write_text(SHOW, encoding="utf-8")
-        self.config = self.tmp / "config"
-        self.config.mkdir()
-        self.temp = self.tmp / "runner-temp"
-        self.temp.mkdir()
-
-    def named(self, **given: str) -> str:
-        """Run `mise run show` with the belt as the global config.
-
-        Returns:
-            What the task printed for ORG_FINDINGS.
-
-        """
-        done = subprocess.run(
-            [hermetic.tool("mise"), "run", "show"],
-            cwd=self.tree,
-            env=hermetic.env(
-                MISE_CONFIG_DIR=str(self.config),
-                XDG_CONFIG_HOME=str(self.config),
-                MISE_GLOBAL_CONFIG_FILE=str(BELT),
-                MISE_TRUSTED_CONFIG_PATHS=f"{self.tmp}:{CANON}",
-                MISE_OFFLINE="1",
-                MISE_YES="1",
-                MISE_AUTO_INSTALL="0",
-                MISE_TASK_RUN_AUTO_INSTALL="0",
-                **given,
-            ),
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=600,
-        )
-        same(self, done.returncode, 0, done.stdout + done.stderr)
-        return done.stdout.removesuffix("\n")
-
-    def on_a_runner(self) -> str:
-        """Run the task as a matrix leg of the job `mutants-rust` does.
-
-        Returns:
-            The file the belt named.
-
-        """
-        return self.named(RUNNER_TEMP=str(self.temp), GITHUB_JOB="mutants-rust")
-
-    def test_the_file_is_the_jobs_own_under_the_runner_temp(self) -> None:
-        """The path is under findings/, named for the job, and ends .jsonl."""
-        path = Path(self.on_a_runner())
-        same(self, path.parent, self.temp / "findings")
-        self.assertRegex(path.name, r"^mutants-rust-[0-9a-f]{16}\.jsonl$")
-        self.assertFalse(path.exists(), "the file is a writer's to create")
-
-    def test_two_runs_name_two_files(self) -> None:
-        """Two legs of one matrix share GITHUB_JOB and never a file."""
-        self.assertNotEqual(self.on_a_runner(), self.on_a_runner())
-
-    def test_off_a_runner_it_is_empty(self) -> None:
-        """No RUNNER_TEMP: empty, so a writer prints and records nothing."""
-        same(self, self.named(), "")
-
-    def test_a_value_the_caller_set_is_kept(self) -> None:
-        """A caller's own ORG_FINDINGS wins, on a runner or off one."""
-        mine = str(self.tmp / "mine.jsonl")
-        same(
-            self,
-            self.named(
-                ORG_FINDINGS=mine, RUNNER_TEMP=str(self.temp), GITHUB_JOB="badges"
-            ),
-            mine,
         )
 
 

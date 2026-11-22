@@ -11,7 +11,10 @@ For each writer: a finding with a subject, one without, one with two
 detail lines, and one whose message holds a quote, a backslash, a tab
 and a non-ASCII character print the belt's form and append a record
 that `json.loads` reads back to the same values; with `ORG_FINDINGS`
-unset nothing is written; with it naming a path under a file the
+unset off a runner, or empty, nothing is written; unset on a runner
+(`RUNNER_TEMP` and `GITHUB_JOB` set) the record goes to
+`${RUNNER_TEMP}/findings/<job>-<16 hex>.jsonl`, and two findings of one
+process to one file (#1976); with it naming a path under a file the
 finding is still printed, one more line names the failure, and the
 status is 0; the annotated entry prints `::error::` with the runner's
 escaping; `task` is `MISE_TASK_NAME` when set; the job when the script is a
@@ -23,6 +26,7 @@ escape, and the status is 0 (#1984).
 stdlib `unittest`, matching the rest of mise/.
 """
 
+import re
 import subprocess
 import sys
 import tempfile
@@ -46,6 +50,9 @@ if [[ $entry == annotated ]]; then
 else
   org_finding "$@"
 fi
+if [[ $entry == twice ]]; then
+  org_finding "$@"
+fi
 """
 
 PYTHON_REPORTER = f"""import sys
@@ -54,7 +61,11 @@ import findings
 findings.finding(
     sys.argv[2], sys.argv[3], sys.argv[4:], annotate=sys.argv[1] == "annotated"
 )
+if sys.argv[1] == "twice":
+    findings.finding(sys.argv[2], sys.argv[3], sys.argv[4:])
 """
+
+JOB_FILE = re.compile(r"^mutants-rust-[0-9a-f]{16}\.jsonl$")
 
 AWKWARD = 'say "hi" \\ there\tnaïve ✓'
 
@@ -241,7 +252,7 @@ class FindingRows(unittest.TestCase):
                 self.assertFalse(any(self.root.rglob("*.jsonl")))
 
     def test_empty_records_nothing(self) -> None:
-        """An empty ORG_FINDINGS is unset."""
+        """An empty ORG_FINDINGS records nothing, on a runner too."""
         for writer in writers():
             with self.subTest(writer=writer.name):
                 done = writer.run(
@@ -251,6 +262,8 @@ class FindingRows(unittest.TestCase):
                     "y",
                     MISE_TASK_NAME="lint:demo",
                     ORG_FINDINGS="",
+                    RUNNER_TEMP=str(self.root / "runner"),
+                    GITHUB_JOB="mutants-rust",
                 )
                 self.assertEqual(done.returncode, 0, done.stderr)
                 self.assertEqual(done.stderr, "lint:demo: x: y\n")
@@ -421,6 +434,103 @@ def bashes() -> list[tuple[str, str]]:
     if SYSTEM_BASH.exists():
         out.append(("/bin/bash", str(SYSTEM_BASH)))
     return out
+
+
+def records(file: Path) -> list[dict[str, object]]:
+    """Read back every record in a file.
+
+    Returns:
+        The records, in order.
+
+    """
+    return [
+        decoded.as_object(decoded.load_json(line), "a record")
+        for line in file.read_text(encoding="utf-8").splitlines()
+    ]
+
+
+class RunnerRows(unittest.TestCase):
+    """Where each writer records on a runner, ORG_FINDINGS unset (#1976)."""
+
+    @override
+    def setUp(self) -> None:
+        """Give each row a directory of its own."""
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.root = Path(self.dir.name)
+
+    def on_a_runner(self, writer: Writer, entry: str) -> list[Path]:
+        """Run one call as a job's step does, ORG_FINDINGS unset (#1976).
+
+        Returns:
+            Every file under the runner's temp, the findings directory's.
+
+        """
+        temp = self.root / "runner"
+        temp.mkdir(exist_ok=True)
+        for old in temp.rglob("*.jsonl"):
+            old.unlink()
+        done = writer.run(
+            self.root,
+            entry,
+            "s",
+            "m",
+            "d",
+            MISE_TASK_NAME="lint:demo",
+            RUNNER_TEMP=str(temp),
+            GITHUB_JOB="mutants-rust",
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        files = sorted(p for p in temp.rglob("*") if p.is_file())
+        for file in files:
+            self.assertEqual(file.parent, temp / "findings")
+            self.assertRegex(file.name, JOB_FILE)
+        return files
+
+    def test_on_a_runner_the_writer_names_the_file(self) -> None:
+        """Unset on a runner: one record in findings/<job>-<16 hex>.jsonl."""
+        for writer in writers():
+            with self.subTest(writer=writer.name):
+                files = self.on_a_runner(writer, "plain")
+                self.assertEqual(len(files), 1, files)
+                expected: list[dict[str, object]] = [
+                    {
+                        "v": 1,
+                        "task": "lint:demo",
+                        "subject": "s",
+                        "message": "m",
+                        "detail": ["d"],
+                    }
+                ]
+                self.assertEqual(records(files[0]), expected)
+
+    def test_one_process_writes_one_file(self) -> None:
+        """Two findings of one process land in one file, in order."""
+        for writer in writers():
+            with self.subTest(writer=writer.name):
+                files = self.on_a_runner(writer, "twice")
+                self.assertEqual(len(files), 1, files)
+                self.assertEqual(len(records(files[0])), 2)
+
+    def test_two_processes_write_two_files(self) -> None:
+        """Two legs of one matrix share GITHUB_JOB and never a file."""
+        for writer in writers():
+            with self.subTest(writer=writer.name):
+                first = self.on_a_runner(writer, "plain")
+                temp = self.root / "runner"
+                done = writer.run(
+                    self.root,
+                    "plain",
+                    "s",
+                    "m",
+                    MISE_TASK_NAME="lint:demo",
+                    RUNNER_TEMP=str(temp),
+                    GITHUB_JOB="mutants-rust",
+                )
+                self.assertEqual(done.returncode, 0, done.stderr)
+                both = sorted(temp.rglob("*.jsonl"))
+                self.assertEqual(len(both), 2, both)
+                self.assertIn(first[0], both)
 
 
 class LoadingRows(unittest.TestCase):

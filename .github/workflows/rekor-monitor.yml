@@ -100,6 +100,16 @@ jobs:
           path: run-start.json
           key: ct-start-${{ github.run_id }}-${{ github.run_attempt }}
 
+      # This job's findings records, for the report job (#1933).
+      - name: Hand the findings to the report job
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: findings-${{ github.job }}-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/findings/
+          if-no-files-found: ignore
+          retention-days: 1
+
   watch:
     name: Watch the log for the signer identity (leg ${{ matrix.leg }})
     needs: start
@@ -233,14 +243,10 @@ jobs:
       # its CT index, from the report's findings whatever its verdict: a
       # leg that stopped partway carries the findings of every chunk it
       # finished, and the next leg starts past them.
-      # The helpers run outside `mise run`, so each step names its own
-      # findings file (#1934): the belt's [env] names one only for a
-      # `mise run`.
       - name: File an issue for each certificate that did not reconcile
         id: findings
         env:
           GH_TOKEN: ${{ github.token }}
-          ORG_FINDINGS: ${{ runner.temp }}/findings/${{ github.job }}-${{ strategy.job-index }}.jsonl
         run: |
           "${ORG_PYTHON}" .github/rekor-monitor/certificate_issues.py \
             --report "${RUNNER_TEMP}/report.json" --run-url "${RUN_URL}"
@@ -285,7 +291,6 @@ jobs:
         env:
           CODE: ${{ steps.stele.outputs.code }}
           SAVED: ${{ steps.save.outcome == 'success' }}
-          ORG_FINDINGS: ${{ runner.temp }}/findings/${{ github.job }}-${{ strategy.job-index }}.jsonl
         run: |
           "${ORG_PYTHON}" .github/rekor-monitor/verdict.py --exit-code "${CODE}" \
             --report "${RUNNER_TEMP}/report.json" --saved "${SAVED}"
@@ -351,13 +356,11 @@ jobs:
           pattern: watch-report-*
           path: ${{ runner.temp }}/reports
 
-      # The helper runs outside `mise run`, so the step names its own
-      # findings file (#1934). --legs is the watch job's matrix length:
+      # --legs is the watch job's matrix length:
       # a leg that handed no report on is counted as "no report".
       - name: Judge whether the run gained on the log
         env:
           KEPT: ${{ needs.start.outputs.kept }}
-          ORG_FINDINGS: ${{ runner.temp }}/findings/${{ github.job }}-${{ strategy.job-index }}.jsonl
         run: |
           "${ORG_PYTHON}" .github/rekor-monitor/gain.py --start run-start.json \
             --start-kept "${KEPT}" --checkpoint checkpoint.json \

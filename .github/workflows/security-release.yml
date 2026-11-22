@@ -80,11 +80,8 @@ jobs:
 
       - name: Read the caller's pinned build inputs
         # The caller's config decides the versions; the canon decides
-        # which tools (#1333). One reader, release/caller_pins.py. A
-        # helper outside `mise run` names its findings file (#1934).
+        # which tools (#1333). One reader, release/caller_pins.py.
         id: pins
-        env:
-          ORG_FINDINGS: ${{ runner.temp }}/findings/${{ github.job }}-${{ strategy.job-index }}.jsonl
         run: |
           "${ORG_PYTHON}" .org-canon/release/caller_pins.py install \
             --input-of "the release's advisory triage" \
@@ -109,8 +106,6 @@ jobs:
         # tree judged below is the tree that would be tagged — version
         # mirrors and refreshed lockfiles included.
         id: prepare
-        env:
-          ORG_FINDINGS: ${{ runner.temp }}/findings/${{ github.job }}-${{ strategy.job-index }}.jsonl
         run: .org-canon/release/prepare-release.sh
 
       - name: Decide
@@ -120,7 +115,6 @@ jobs:
           PLAN: ${{ steps.prepare.outputs.plan }}
           ORG_CANON_DIR: ${{ github.workspace }}/.org-canon
           FILE_ISSUE: "true"
-          ORG_FINDINGS: ${{ runner.temp }}/findings/${{ github.job }}-${{ strategy.job-index }}.jsonl
         run: |
           if [[ -z ${PLAN} ]]; then
             echo "security-release: no — nothing to release: main carries no releasable change since the last tag"
@@ -187,6 +181,16 @@ jobs:
           gh pr merge "${PR}" --repo "${GITHUB_REPOSITORY}" --squash
           gh pr comment "${PR}" --repo "${GITHUB_REPOSITORY}" --body \
             "Merged by the scheduled security release: ${REASON}."
+
+      # This job's findings records, for the report job (#1933).
+      - name: Hand the findings to the report job
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: findings-${{ github.job }}-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/findings/
+          if-no-files-found: ignore
+          retention-days: 1
 
   # Every scheduled workflow ends here (#1887), with one issue per red
   # job (#1966): for each red job of a run on the default branch, one

@@ -72,6 +72,9 @@ def setUpModule() -> None:
     for key in ("MISE_TASK_NAME", "ORG_FINDINGS"):
         if key in os.environ:
             _NAMED.callback(os.environ.__setitem__, key, os.environ.pop(key))
+    # Empty, not unset: unset on a runner records to the job's file (#1976).
+    os.environ["ORG_FINDINGS"] = ""
+    _NAMED.callback(os.environ.pop, "ORG_FINDINGS", None)
     unittest.addModuleCleanup(_NAMED.close)
 
 

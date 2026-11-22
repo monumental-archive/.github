@@ -8,8 +8,11 @@ one JSON object on one line,
 
     {"v": 1, "task": …, "subject": …, "message": …, "detail": […]}
 
-appended to the file `ORG_FINDINGS` names. Unset or empty, nothing is
-recorded.
+appended to the file the writer names (#1976): `ORG_FINDINGS` when it
+is set and not empty; unset on a runner (`RUNNER_TEMP` and `GITHUB_JOB`
+both set), `${RUNNER_TEMP}/findings/${GITHUB_JOB}-<16 lowercase
+hex>.jsonl`, the hex drawn once per process on its first record. Empty,
+or unset off a runner, nothing is recorded.
 
 `finding(subject, message, detail)` prints to stderr `<task>: <subject>:
 <message>` (or `<task>: <message>` with an empty subject), then each
@@ -38,6 +41,7 @@ workflow_command: `sys.path.append` of the sibling root, then
 
 import json
 import os
+import secrets
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -48,6 +52,10 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
 VERSION = 1
+
+# This process's suffix of the job's findings file, drawn on its first
+# record: two processes of one job never share a file (#1976).
+_drawn: list[str] = []
 
 
 def task_name() -> str:
@@ -117,12 +125,33 @@ def _say(text: str) -> None:
     print(text, file=sys.stderr, flush=True)
 
 
+def records_file() -> Path | None:
+    """Name the file this process's records are appended to (#1976).
+
+    Returns:
+        `ORG_FINDINGS` when it is set and not empty; unset on a runner,
+        `<RUNNER_TEMP>/findings/<GITHUB_JOB>-<16 hex>.jsonl`, the hex
+        drawn once per process; else None, and nothing is recorded.
+
+    """
+    named = os.environ.get("ORG_FINDINGS")
+    if named is not None:
+        return Path(named) if named else None
+    temp = os.environ.get("RUNNER_TEMP", "")
+    job = os.environ.get("GITHUB_JOB", "")
+    if not (temp and job):
+        return None
+    if not _drawn:
+        _drawn.append(secrets.token_hex(8))
+    return Path(temp) / "findings" / f"{job}-{_drawn[0]}.jsonl"
+
+
 def _append(task: str, line: str) -> None:
-    """Append a record to ORG_FINDINGS, saying on stderr when it cannot."""
-    file = os.environ.get("ORG_FINDINGS", "")
-    if not file:
+    """Append a record to the writer's file, saying on stderr when it cannot."""
+    path = records_file()
+    if path is None:
         return
-    path = Path(file)
+    file = str(path)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as out:

@@ -61,6 +61,16 @@ jobs:
         id: applies
         run: '"${ORG_PYTHON}" .org-canon/mise/audit_legs.py repo-dependencies >> "${GITHUB_OUTPUT}"'
 
+      # This job's findings records, for the report job (#1933).
+      - name: Hand the findings to the report job
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: findings-${{ github.job }}-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/findings/
+          if-no-files-found: ignore
+          retention-days: 1
+
   deny:
     name: no undecided advisory in the Rust lock
     needs: applies

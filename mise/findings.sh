@@ -9,8 +9,13 @@
 #
 #   {"v": 1, "task": …, "subject": …, "message": …, "detail": […]}
 #
-# appended to the file ORG_FINDINGS names. Unset or empty, nothing is
-# recorded. The record is encoded by the belt's jq, never by hand.
+# appended to the file the writer names (#1976): ORG_FINDINGS when it is
+# set and not empty; unset on a runner (RUNNER_TEMP and GITHUB_JOB both
+# set), ${RUNNER_TEMP}/findings/${GITHUB_JOB}-<16 lowercase hex>.jsonl,
+# the hex drawn on the shell's first record and kept in a variable that
+# is not exported, so each shell writes a file of its own. Empty, or
+# unset off a runner, nothing is recorded. The record is encoded by the
+# belt's jq, never by hand.
 #
 #   org_finding <subject> <message> [<detail>…]
 #   org_finding_annotated <subject> <message> [<detail>…]
@@ -52,12 +57,26 @@ org__findings_dir=${BASH_SOURCE[0]%/*}
 . "${org__findings_dir:-}/workflow-command.sh"
 unset org__findings_dir
 
-# Append one record to ORG_FINDINGS. Says why on stderr when it cannot.
+# Append one record to the writer's file (#1976). Says why on stderr
+# when it cannot.
 org__finding_record() {
   local task=$1 subject=$2 message=$3
   shift 3
-  local file=${ORG_FINDINGS:-}
-  [[ -n ${file} ]] || return 0
+  local file
+  if [[ -n ${ORG_FINDINGS+set} ]]; then
+    file=${ORG_FINDINGS}
+  elif [[ -n ${RUNNER_TEMP:-} && -n ${GITHUB_JOB:-} ]]; then
+    if [[ -z ${org__findings_hex:-} ]]; then
+      org__findings_hex=$(od -An -N8 -tx1 /dev/urandom 2>&1 | tr -d ' \n') || true
+    fi
+    if [[ ! ${org__findings_hex} =~ ^[0-9a-f]{16}$ ]]; then
+      org_say "${task}: the finding was not recorded: no file suffix: ${org__findings_hex}" >&2
+      org__findings_hex=
+      return 0
+    fi
+    file=${RUNNER_TEMP%/}/findings/${GITHUB_JOB}-${org__findings_hex}.jsonl
+  fi
+  [[ -n ${file:-} ]] || return 0
   local record
   if ! record=$(jq -cn \
     --arg task "${task}" --arg subject "${subject}" --arg message "${message}" \
