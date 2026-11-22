@@ -577,7 +577,7 @@ class Runner(Planted):
                 r = self.guarded(start, workers=value)
                 self.assertEqual(r.returncode, 1, r.stderr)
                 self.assertIn(
-                    f"unittest-guarded: ORG_TEST_WORKERS={value!r} is not a worker "
+                    f"{RUNNER.name}: ORG_TEST_WORKERS={value!r} is not a worker "
                     "count (1 or more)",
                     r.stderr,
                 )
@@ -639,7 +639,7 @@ class Runner(Planted):
                 )
                 self.assertEqual(r.returncode, 1, r.stderr)
                 self.assertEqual(
-                    r.stderr, f"unittest-guarded: worker spec {spec} is unreadable\n"
+                    r.stderr, f"{RUNNER.name}: worker spec {spec} is unreadable\n"
                 )
 
 
@@ -843,7 +843,7 @@ class Shapes(Planted):
                 r = run_worker(spec)
                 self.assertEqual(r.returncode, 1, r.stderr)
                 self.assertEqual(
-                    r.stderr, f"unittest-guarded: worker spec {spec} is unreadable\n"
+                    r.stderr, f"{RUNNER.name}: worker spec {spec} is unreadable\n"
                 )
 
     def test_a_file_with_no_tests_is_planned_as_nothing(self) -> None:
