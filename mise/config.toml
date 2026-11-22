@@ -3569,7 +3569,7 @@ rc=0
 # A red compile is at the DERIVED number, which the plan has already
 # held each promise to, so msrv_plan.py says what that means (#1850) and
 # the remedy never reads as "raise the promise". Said from the trap so
-# the compile below runs as a plain command, `set -e` intact (SC2310).
+# the compile below runs as a plain command, `set -e` intact.
 trap 'rc=$?; rm -rf "${tmp}"; [[ -z ${compiling:-} ]] || "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/msrv_plan.py" --failed "${first}" "${rest}" || :; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 cargo fetch --locked
 mise ls rust --json > "${tmp}/toolchains.json"
@@ -4493,8 +4493,8 @@ while IFS= read -r task; do
   [[ -n ${task} ]] || continue
   grep -qxF "${task}" <<< "${skipped}" && continue
   fixers=$((fixers + 1))
-  # shellcheck disable=SC2310  # deliberate: every task runs and the failures are
-  # collected, so one red task cannot hide the rest (the `audit` task's ruling)
+  # Every task runs and the failures are collected, so one red task cannot
+  # hide the rest (the `audit` task's ruling).
   run_task "${task}" || rc=1
 done <<< "${fix_tasks}"
 # A run that enumerated nothing and reported success would be this check
@@ -4511,7 +4511,6 @@ gates=0
 while IFS= read -r task; do
   [[ -n ${task} ]] || continue
   gates=$((gates + 1))
-  # shellcheck disable=SC2310  # deliberate, as above
   run_task "${task}" || rc=1
 done <<< "${gate_tasks}"
 [[ ${gates} -gt 0 ]] || {
@@ -5562,7 +5561,9 @@ dir = "{{cwd}}"
 # the delivered config, so this line is a floor under a check that already
 # holds the code to the file. Keep it equal to mise/shellcheckrc anyway —
 # a floor that disagrees with the ceiling is a puzzle for the next reader.
-env = { SHELLCHECK_OPTS = "--enable=all --external-sources --extended-analysis=true" }
+# That includes the file's one held-off check: `--exclude=SC2310` is the
+# file's SC2310 entry in flag form (#1997; measured, the flag does the same).
+env = { SHELLCHECK_OPTS = "--enable=all --exclude=SC2310 --external-sources --extended-analysis=true" }
 # Guard: actionlint exits 3 when a repo has no workflow YAML (including an
 # existing-but-empty workflows directory).
 # The -ignore is a documented exception in the capability-boundary
@@ -6325,8 +6326,7 @@ mkdir -p "${blind}/branches" "${blind}/rulesets"
 cp "${rules}/branches/main.json" "${blind}/branches/"
 cp "${rules}"/rulesets/*.json "${blind}/rulesets/"
 jq '[.[] | select(.target != "tag")]' "${rules}/rulesets.json" > "${blind}/rulesets.json"
-# shellcheck disable=SC2310  # deliberate predicate: this asserts that derive
-# REFUSES, so suspending set -e around it is the whole point of the test
+# This asserts that derive REFUSES a blind read.
 if out=$(derive "${tmp}/blind" "${tmp}/blind.json" 2>&1); then
   org_finding "" "a blind tag read was accepted — the blindness guard is gone (#240)"
   exit 1
@@ -6346,8 +6346,6 @@ for f in "${rules}"/rulesets/*.json; do
       then .bypass_actors += [{actor_id: 1, actor_type: "OrganizationAdmin", bypass_mode: "always"}]
       else . end' "${f}" > "${lapsed}/rulesets/$(basename "${f}")"
 done
-# shellcheck disable=SC2310  # deliberate predicate: the || branch reports the
-# failure with its own message, so set -e has nothing to add
 derive "${tmp}/lapsed" "${tmp}/lapsed.json" || {
   org_finding "" "a readable-but-lapsed ruleset failed the run — a lapse must under-claim (#240)"
   exit 1

@@ -348,6 +348,32 @@ class PublishEnvironment(ForgeCase):
         )
         self.assertEqual(1, done.returncode)
 
+    def test_an_undecodable_publish_yml_is_unreadable(self) -> None:
+        """A publish.yml that does not decode is unreadable, not an entry (#1997).
+
+        The decode was unchecked inside a function whose status both
+        callers read in a condition, where bash suspends `set -e`: a
+        failed `base64 -d` printed its error and returned 0, "entry
+        workflow", so check read the repository as one that needs a
+        publish environment and apply created one.
+        """
+        repo = ROSTER[0]
+        self.forge.answer(
+            f"repos/{ORG}/{repo}/contents/.github/workflows/publish.yml",
+            {"content": "@not base64@"},
+        )
+        done = self.forge.check()
+        self.assertIn(
+            f"repo-baseline: cannot read {repo}'s publish.yml:"
+            " publish.yml did not decode\n",
+            done.stderr,
+        )
+        self.assertNotIn("has publish.yml but no publish environment", done.stderr)
+        touched = [a for _, a in self.forge.calls() if "environments/publish" in a]
+        want: list[str] = []
+        self.assertEqual(want, touched)
+        self.assertEqual(1, done.returncode)
+
 
 class Signoff(ForgeCase):
     """The org-enforced commit signoff is read back, not assumed (#104)."""

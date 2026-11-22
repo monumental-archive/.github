@@ -96,7 +96,6 @@ api_write() {
 # repository — a missing grant presenting as a clean repo.
 publish_yml_is_entry() {
   local status=0 decoded
-  # shellcheck disable=SC2310  # api_probe manages its own exit status
   api_probe "${1}'s publish.yml" "Contents: read" "Not Found" \
     "repos/${org}/${1}/contents/.github/workflows/publish.yml" \
     --jq '.content' || status=$?
@@ -106,7 +105,16 @@ publish_yml_is_entry() {
   # Consume the whole stream rather than `| grep -q`, which exits at the
   # first match and loses the upstream `printf` the SIGPIPE race — that
   # printed `write error: Broken pipe` on green runs (#862).
-  decoded="$(printf '%s\n' "${api_body}" | base64 -d)"
+  # Checked here, because both callers read this function's status in a
+  # condition, where bash suspends `set -e` inside it (#1997): a failed
+  # decode is an unreadable publish.yml, never an entry workflow.
+  if ! decoded="$(printf '%s\n' "${api_body}" | base64 -d 2> "${api_err}")"; then
+    local said
+    said="$(head -1 "${api_err}")"
+    org_finding "" "cannot read ${1}'s publish.yml: publish.yml did not decode" \
+      "base64 said: ${said}"
+    return 2
+  fi
   if [[ ${decoded} == *workflow_call* ]]; then
     return 1
   fi
@@ -132,7 +140,6 @@ mode="${1:?usage: repo-baseline.sh check|apply}"
 # nothing (#862), so it is attributed and fatal: with no population
 # there is no check to run, and continuing would report a clean org.
 listing_status=0
-# shellcheck disable=SC2310  # api_probe manages its own exit status
 api_probe "the org's repository listing" \
   "an org owner's token — a fine-grained PAT scoped to SELECTED repositories is refused here" \
   "" "orgs/${org}/repos?per_page=100" --paginate --jq '.[].name' \
@@ -189,7 +196,6 @@ for repo in ${repos}; do
       while IFS= read -r label <&3; do
         label_name="$(jq -r '.name' <<< "${label}")"
         label_status=0
-        # shellcheck disable=SC2310  # api_probe manages its own exit status
         api_probe "${repo}'s ${label_name} label" "Issues: read" "Not Found" \
           "repos/${org}/${repo}/labels/${label_name}" || label_status=$?
         case ${label_status} in
@@ -235,7 +241,6 @@ for repo in ${repos}; do
       # settings change nobody asked for, and skipping it where one does
       # leaves a release to fail at its publish step.
       entry=0
-      # shellcheck disable=SC2310  # publish_yml_is_entry manages its own exit status
       publish_yml_is_entry "${repo}" || entry=$?
       case ${entry} in
         0)
@@ -254,7 +259,6 @@ for repo in ${repos}; do
       # decides, and it is read rather than assumed: an unreadable
       # repository gets no ruleset written on a guess.
       vis_status=0
-      # shellcheck disable=SC2310  # api_probe manages its own exit status
       api_probe "${repo}'s visibility" "Metadata: read" "" \
         "repos/${org}/${repo}" --jq '.visibility' || vis_status=$?
       if [[ ${vis_status} -ne 0 ]]; then
@@ -266,7 +270,6 @@ for repo in ${repos}; do
         continue
       fi
       own_status=0
-      # shellcheck disable=SC2310  # api_probe manages its own exit status
       api_probe "${repo}'s own rulesets" "Administration: read" "" \
         "repos/${org}/${repo}/rulesets?includes_parents=false" \
         --jq "[.[] | select(.name == \"${queue_name}\") | .id] | first // empty" \
@@ -290,7 +293,6 @@ for repo in ${repos}; do
       # Every check below reads this body, so an unreadable repo skips to
       # the next one — counted as drift, never passed over.
       repo_status=0
-      # shellcheck disable=SC2310  # api_probe manages its own exit status
       api_probe "${repo}'s settings" "Administration: read" "" \
         "repos/${org}/${repo}" || repo_status=$?
       if [[ ${repo_status} -ne 0 ]]; then
@@ -312,7 +314,6 @@ for repo in ${repos}; do
       while IFS= read -r label <&3; do
         label_name="$(jq -r '.name' <<< "${label}")"
         label_status=0
-        # shellcheck disable=SC2310  # api_probe manages its own exit status
         api_probe "${repo}'s ${label_name} label" "Issues: read" "Not Found" \
           "repos/${org}/${repo}/labels/${label_name}" || label_status=$?
         case ${label_status} in
@@ -335,7 +336,6 @@ for repo in ${repos}; do
         esac
       done 3<<< "${labels}"
       oidc_status=0
-      # shellcheck disable=SC2310  # api_probe manages its own exit status
       api_probe "${repo}'s OIDC subject customisation" \
         "Administration: read" "" \
         "repos/${org}/${repo}/actions/oidc/customization/sub" \
@@ -350,12 +350,10 @@ for repo in ${repos}; do
       # publish.yml is clean, no publish environment under one is drift.
       # Neither may be inferred from a failed read (#862).
       entry=0
-      # shellcheck disable=SC2310  # publish_yml_is_entry manages its own exit status
       publish_yml_is_entry "${repo}" || entry=$?
       case ${entry} in
         0)
           env_status=0
-          # shellcheck disable=SC2310  # api_probe manages its own exit status
           api_probe "${repo}'s publish environment" "Administration: read" \
             "Not Found" "repos/${org}/${repo}/environments/publish" \
             || env_status=$?
@@ -401,7 +399,6 @@ for repo in ${repos}; do
       # of helpful. The remedy is the settings page.
       branch="$(jq -r '.default_branch' <<< "${actual}")"
       prot_status=0
-      # shellcheck disable=SC2310  # api_probe manages its own exit status
       api_probe "${repo}'s classic branch protection" \
         "Administration: read" "Branch not protected" \
         "repos/${org}/${repo}/branches/${branch}/protection" || prot_status=$?
@@ -445,7 +442,6 @@ for repo in ${repos}; do
       # Reported, never deleted, like its two siblings (#761, #751).
       visibility="$(jq -r '.visibility' <<< "${actual}")"
       rulesets_status=0
-      # shellcheck disable=SC2310  # api_probe manages its own exit status
       api_probe "${repo}'s own rulesets" "Administration: read" "" \
         "repos/${org}/${repo}/rulesets?includes_parents=false" \
         || rulesets_status=$?
@@ -462,7 +458,6 @@ for repo in ${repos}; do
             queue_seen=1
             # The listing carries no rules, so the ruleset is read whole.
             queue_status=0
-            # shellcheck disable=SC2310  # api_probe manages its own exit status
             api_probe "${repo}'s ${queue_name} ruleset" "Administration: read" "" \
               "repos/${org}/${repo}/rulesets/${rs_id}" || queue_status=$?
             if [[ ${queue_status} -ne 0 ]]; then
@@ -532,7 +527,6 @@ if [[ ${mode} == check ]]; then
   # installed" lines nothing measured, and a check that invents findings
   # is read once and ignored.
   apps_status=0
-  # shellcheck disable=SC2310  # api_probe manages its own exit status
   api_probe "the org's App installations" \
     "an org owner's token (check AUDIT_TOKEN)" "" \
     "orgs/${org}/installations?per_page=100" || apps_status=$?

@@ -207,16 +207,16 @@ provisioned=""
 default=""
 if [[ ${#pgrx[@]} -gt 0 ]]; then
   provisioned=ok
-  # shellcheck disable=SC2310  # deliberate: a failed provisioning reds
-  # each extension and the run still reports the rest
+  # A failed provisioning reds each extension and the run still reports
+  # the rest.
   org_pgrx_provision default || provisioned=failed
 fi
 
 if [[ ${#plain[@]} -gt 0 ]]; then
   flags=()
   for c in "${plain[@]}"; do flags+=(--package "${c}"); done
-  # shellcheck disable=SC2310  # deliberate: a missing pin reds the
-  # workspace run and the run still reports the rest
+  # A missing pin reds the workspace run and the run still reports the
+  # rest.
   if [[ -n ${default} ]] && ! org_pgrx_darwin_icu_check "${default}"; then
     printf 'red\t%s\n' "workspace at pg${default}: no ICU headers for it are pinned (above)" >> "${runs}"
   else
@@ -235,8 +235,7 @@ for c in ${pgrx[@]+"${pgrx[@]}"}; do
     printf 'red\t%s\n' "${c} at ${major}: no Postgres could be provisioned" >> "${runs}"
     continue
   fi
-  # shellcheck disable=SC2310  # deliberate: a missing pin reds this crate
-  # and the run still reports the rest
+  # A missing pin reds this crate and the run still reports the rest.
   if ! org_pgrx_darwin_icu_check "${major#pg}"; then
     printf 'red\t%s\n' "${c} at ${major}: no ICU headers for it are pinned (above)" >> "${runs}"
     continue
