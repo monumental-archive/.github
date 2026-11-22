@@ -46,7 +46,6 @@ mise/config.toml	audit:go-vulns	45	# #1544 unassigned
 mise/config.toml	audit:blast-radius	26	# #1544 unassigned
 mise/config.toml	audit:attestations	27	# #1544 unassigned
 mise/config.toml	audit:source-vsa	22	# #1544 unassigned
-mise/config.toml	audit:actions	37	# #1544 unassigned
 mise/config.toml	audit:template-pins	45	# #1544 unassigned
 mise/config.toml	audit:canon-pins	83	# #1544 unassigned
 mise/config.toml	audit:org-pins	127	# #1544 unassigned

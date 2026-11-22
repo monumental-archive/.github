@@ -14,6 +14,19 @@ Two fixtures, both zizmor 1.32.0's own `--format=json
 
 Every other row is derived from one of those real findings by changing
 one field, so each kept or dropped case is planted alone, not invented.
+Those rows run `main` with `run_zizmor` answering the array (#1955).
+
+`Records` asserts what remains is recorded, read back from
+ORG_FINDINGS: subject the first location's file, message `<ident>:
+<the first line of the first Primary location's feature>` (the
+owner's ruling on #1955; Hidden and Related are context), detail
+`desc`, the severity and each location with its line; the token and
+offline-degradation findings; zizmor's status as the exit.
+`PinnedZizmor` runs the belt's zizmor `--offline` on a planted
+workflow, and two unpinned `uses:` in one file are two records with
+two messages. `Task` runs `audit:actions`' own body over a stub zizmor:
+one run, the record, zizmor's 11; a clean run, 0. Against
+`origin/main` the `Records` and `Task` record rows fail.
 
 stdlib `unittest`, matching the other mise/test_*.py. Run through the
 gate as `mise run test`, which `ci` collects.
@@ -22,13 +35,19 @@ gate as `mise run test`, which `ci` collects.
 import copy
 import io
 import json
+import os
+import shutil
+import subprocess
 import sys
+import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from typing import override
 from unittest import mock
 
 import decoded
+import hermetic
 import zizmor_signer as signer
 
 HERE = Path(__file__).resolve().parent
@@ -82,24 +101,39 @@ MISMATCH = fixture("zizmor-1.32.0-ref-version-mismatch.json")
 SIGNER_WORKFLOW = "monumental-archive/signer/.github/workflows/sign.yml"
 SIGNER_REF = SIGNER_WORKFLOW + "@cffec9441210d46f237099d8785098aacf5b8273"
 MISMATCH_REF = SIGNER_WORKFLOW + "@0d6c6e297684c8ba401fb9c212532628fe552148"
+TASK = "audit:actions"
+ARGS = ["--persona=auditor", ".github/workflows/"]
+# A GH_TOKEN value: the rows never reach the API.
+STANDIN = "a token"
 
 
-def run(findings: object, workflow: str = SIGNER_WORKFLOW) -> tuple[int, str, str]:
-    """Run the CLI on a finding array.
+def run(
+    findings: object,
+    workflow: str = SIGNER_WORKFLOW,
+    *,
+    status: int | None = None,
+) -> tuple[int, str, str]:
+    """Run the CLI with zizmor answering a finding array.
+
+    zizmor's status is 14 for any answer but an empty array, unless the
+    row names one.
 
     Returns:
         The exit status, what it printed, and what it printed to stderr.
 
     """
     out, err = io.StringIO(), io.StringIO()
-    stdin = io.StringIO(json.dumps(findings))
+    code = status if status is not None else (14 if findings != [] else 0)
+    ran = signer.Ran(code, json.dumps(findings).encode(), b"")
+    env = {"GH_TOKEN": "a token", "MISE_TASK_NAME": TASK, "ORG_FINDINGS": ""}
     with (
-        mock.patch.object(sys, "stdin", stdin),
+        mock.patch.object(signer, "run_zizmor", return_value=ran),
+        mock.patch.dict(os.environ, env),
         redirect_stdout(out),
         redirect_stderr(err),
     ):
-        status = signer.main(["--signer-workflow", workflow])
-    return status, out.getvalue(), err.getvalue()
+        code = signer.main(["--signer-workflow", workflow, *ARGS])
+    return code, out.getvalue(), err.getvalue()
 
 
 def repointed(finding: dict[str, object], reference: str) -> dict[str, object]:
@@ -202,7 +236,7 @@ class RefVersionMismatch(unittest.TestCase):
             "someone-else/signer/",
         )
         status, out, err = run([other])
-        self.assertEqual(1, status)
+        self.assertEqual(14, status)
         self.assertIn("0 ref-version-mismatch finding(s) on the signer dropped", out)
         self.assertIn("1 finding(s) remain: ref-version-mismatch", err)
 
@@ -212,7 +246,7 @@ class RefVersionMismatch(unittest.TestCase):
         none: list[str] = []
         self.assertEqual(none, signer.references(blind))
         status, _, err = run([blind])
-        self.assertEqual(1, status)
+        self.assertEqual(14, status)
         self.assertIn("1 finding(s) remain: ref-version-mismatch", err)
 
     def test_the_comment_alone_is_not_read_as_a_reference(self) -> None:
@@ -222,7 +256,7 @@ class RefVersionMismatch(unittest.TestCase):
             loc for loc in locations(blind) if symbolic(loc)["kind"] == "Primary"
         ]
         status, _, err = run([blind])
-        self.assertEqual(1, status)
+        self.assertEqual(14, status)
         self.assertIn("1 finding(s) remain: ref-version-mismatch", err)
 
     def test_a_uses_in_prose_is_not_a_reference(self) -> None:
@@ -246,7 +280,7 @@ class RefVersionMismatch(unittest.TestCase):
             "    with:\n      - uses: actions/checkout@v4\n",
         )
         status, _, err = run([two])
-        self.assertEqual(1, status)
+        self.assertEqual(14, status)
         self.assertIn("1 finding(s) remain: ref-version-mismatch", err)
 
     def test_another_audit_on_the_signer_is_kept(self) -> None:
@@ -254,7 +288,7 @@ class RefVersionMismatch(unittest.TestCase):
         other_rule = copy.deepcopy(MISMATCH[0])
         other_rule["ident"] = "unpinned-uses"
         status, _, err = run([other_rule])
-        self.assertEqual(1, status)
+        self.assertEqual(14, status)
         self.assertIn("1 finding(s) remain: unpinned-uses", err)
 
 
@@ -268,7 +302,7 @@ class Kept(unittest.TestCase):
             "monumental-archive/other/.github/workflows/sign.yml@" + "a" * 40,
         )
         status, out, err = run([other])
-        self.assertEqual(1, status)
+        self.assertEqual(14, status)
         self.assertIn("0 stale-action-refs finding(s) on the signer dropped", out)
         self.assertIn("1 finding(s) remain: stale-action-refs", err)
 
@@ -276,7 +310,7 @@ class Kept(unittest.TestCase):
         """A stale third-party action pin is exactly what the audit is for."""
         third = repointed(REAL[0], "actions/checkout@" + "b" * 40)
         status, _, err = run([*REAL, third])
-        self.assertEqual(1, status)
+        self.assertEqual(14, status)
         self.assertIn("1 finding(s) remain", err)
 
     def test_a_repository_that_only_shares_the_prefix_is_kept(self) -> None:
@@ -285,14 +319,14 @@ class Kept(unittest.TestCase):
             REAL[0],
             "monumental-archive/signer-fork/.github/workflows/sign.yml@" + "c" * 40,
         )
-        self.assertEqual(1, run([near])[0])
+        self.assertEqual(14, run([near])[0])
 
     def test_another_audit_on_the_signer_is_kept(self) -> None:
         """The exemption is one rule wide, not the signer wide."""
         other_rule = copy.deepcopy(REAL[0])
         other_rule["ident"] = "impostor-commit"
         status, _, err = run([other_rule])
-        self.assertEqual(1, status)
+        self.assertEqual(14, status)
         self.assertIn("remain: impostor-commit", err)
 
     def test_a_finding_with_no_readable_reference_is_kept(self) -> None:
@@ -300,11 +334,14 @@ class Kept(unittest.TestCase):
         blind = copy.deepcopy(REAL[0])
         for location in locations(blind):
             symbolic(location)["kind"] = "Related"
-        self.assertEqual(1, run([blind])[0])
+        status, out, err = run([blind])
+        self.assertEqual(1, status)
+        self.assertIn("findings[0]: no location is Primary", err)
+        self.assertEqual("", out)
 
     def test_a_reference_without_a_ref_is_kept(self) -> None:
         """A Primary feature with no `@` is not a reference."""
-        self.assertEqual(1, run([repointed(REAL[0], "monumental-archive/signer")])[0])
+        self.assertEqual(14, run([repointed(REAL[0], "monumental-archive/signer")])[0])
 
 
 class Matching(unittest.TestCase):
@@ -329,49 +366,394 @@ class Matching(unittest.TestCase):
 
 
 class Refusals(unittest.TestCase):
-    """Inputs the filter will not guess about."""
+    """Reports the filter will not guess about: exit 1, by name, no record."""
 
     def test_a_signer_declaration_with_no_repository_is_refused(self) -> None:
         """A declaration that names no owner/repo cannot exempt anything."""
         status, _, err = run(REAL, workflow="signer")
-        self.assertEqual(2, status)
+        self.assertEqual(1, status)
         self.assertIn("names no owner/repository", err)
 
-    def test_a_finding_of_the_wrong_shape_is_kept_not_raised(self) -> None:
-        """The shrunk examples: kept and reported, never a traceback (#1555)."""
-        shapes: tuple[dict[str, object], ...] = (
-            {"ident": []},
-            {"ident": "stale-action-refs", "locations": [{"symbolic": "x"}]},
-            {"ident": "stale-action-refs", "locations": 5},
-            {
-                "ident": "stale-action-refs",
-                "locations": [{"symbolic": {"kind": "Primary"}, "concrete": 1}],
-            },
+    def test_a_finding_of_the_wrong_shape_is_refused_not_raised(self) -> None:
+        """The shrunk examples (#1555): refused by name, never a traceback."""
+        shapes: tuple[tuple[dict[str, object], str], ...] = (
+            ({"ident": []}, "findings[0]: ident is not a string"),
+            (
+                {"ident": "stale-action-refs", "locations": [{"symbolic": "x"}]},
+                "findings[0]: desc is not a string",
+            ),
+            (
+                {"ident": "stale-action-refs", "desc": "d", "locations": 5},
+                "findings[0]: determinations is not an object",
+            ),
+            (
+                {
+                    "ident": "stale-action-refs",
+                    "desc": "d",
+                    "determinations": {"severity": "Low"},
+                    "locations": [{"symbolic": {"kind": "Primary"}, "concrete": 1}],
+                },
+                "findings[0]: locations[0]: symbolic.key is not an object",
+            ),
         )
-        for finding in shapes:
+        for finding, said in shapes:
             with self.subTest(finding=finding):
                 status, _, err = run([finding])
                 self.assertEqual(1, status)
-                self.assertIn("1 finding(s) remain", err)
+                self.assertIn(
+                    f"{TASK}: zizmor exited 14: the output is not zizmor's report:"
+                    f" {said}",
+                    err,
+                )
 
-    def test_a_process_with_no_stdin_is_refused_by_name(self) -> None:
-        """No standard input is a refusal, never a traceback (#1681)."""
-        err = io.StringIO()
-        with (
-            mock.patch.object(sys, "stdin", None),
-            redirect_stdout(io.StringIO()),
-            redirect_stderr(err),
-        ):
-            status = signer.main(["--signer-workflow", SIGNER_WORKFLOW])
-        self.assertEqual(2, status)
-        self.assertEqual(
-            err.getvalue(),
-            "zizmor-signer: no standard input: the process was started without one\n",
+    def test_a_finding_with_no_primary_location_is_refused(self) -> None:
+        """A remaining finding with no location at fault: refused by name."""
+        third = repointed(REAL[0], "actions/checkout@" + "d" * 40)
+        for location in locations(third):
+            symbolic(location)["kind"] = "Hidden"
+        status, _, err = run([third])
+        self.assertEqual(1, status)
+        self.assertIn(
+            f"{TASK}: zizmor exited 14: the output is not zizmor's report:"
+            " findings[0]: no location is Primary",
+            err,
         )
 
     def test_input_that_is_not_the_finding_array_is_refused(self) -> None:
         """A SARIF document or an error object is not silently empty."""
-        self.assertEqual(2, run({"runs": []})[0])
+        status, out, err = run({"runs": []})
+        self.assertEqual(1, status)
+        self.assertIn("it is not zizmor's finding array", err)
+        self.assertEqual("", out)
+
+
+class Records(unittest.TestCase):
+    """What remains is recorded; zizmor runs once, its status the exit."""
+
+    @override
+    def setUp(self) -> None:
+        """Lay out the findings file and the environment a task gives."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.file = Path(tmp.name) / "findings" / "job.jsonl"
+        self.env = {
+            "GH_TOKEN": "a token",
+            "MISE_TASK_NAME": TASK,
+            "ORG_FINDINGS": str(self.file),
+        }
+
+    def main(self, ran: signer.Ran) -> tuple[int, str, str, mock.MagicMock]:
+        """Run the CLI with zizmor answering `ran`.
+
+        Returns:
+            The status, stdout, stderr, and the stand-in zizmor.
+
+        """
+        out, err = io.StringIO(), io.StringIO()
+        with (
+            mock.patch.object(signer, "run_zizmor", return_value=ran) as fake,
+            mock.patch.dict(os.environ, self.env),
+            redirect_stdout(out),
+            redirect_stderr(err),
+        ):
+            status = signer.main(["--signer-workflow", SIGNER_WORKFLOW, *ARGS])
+        return status, out.getvalue(), err.getvalue(), fake
+
+    def records(self) -> list[object]:
+        """Read every record appended.
+
+        Returns:
+            The records, in order; none when the file was not written.
+
+        """
+        if not self.file.exists():
+            return []
+        lines = self.file.read_text(encoding="utf-8").splitlines()
+        return [decoded.load_json(line) for line in lines]
+
+    def test_a_remaining_finding_is_one_record(self) -> None:
+        """A third-party stale ref: one record, its lines, zizmor's 11.
+
+        Its Hidden location (the job) comes first: the subject is that
+        location's file, the message the Primary location's source.
+        """
+        third = repointed(REAL[0], "actions/checkout@" + "d" * 40)
+        both: list[dict[str, object]] = [*REAL, third]
+        doc = json.dumps(both).encode()
+        status, out, err, fake = self.main(signer.Ran(11, doc, b" INFO zizmor\n"))
+        self.assertEqual(11, status, err)
+        fake.assert_called_once_with(ARGS)
+        path = ".github/workflows/continuous.yml"
+        want: list[object] = [
+            {
+                "v": 1,
+                "task": TASK,
+                "subject": path,
+                "message": "stale-action-refs: actions/checkout@" + "d" * 40,
+                "detail": [
+                    "commit hash does not point to a Git tag",
+                    "severity: Low",
+                    f"{path}:640: this job",
+                    f"{path}:643: this job",
+                ],
+            }
+        ]
+        self.assertEqual(want, self.records())
+        self.assertTrue(err.startswith(" INFO zizmor\n"), err)
+        self.assertIn(f"{TASK}: 1 finding(s) remain: stale-action-refs", err)
+        self.assertIn("10 stale-action-refs finding(s) on the signer dropped", out)
+
+    def test_all_dropped_is_no_record_and_green(self) -> None:
+        """Every finding the signer's: no record, 0, though zizmor said 11."""
+        status, _, err, _ = self.main(signer.Ran(11, json.dumps(REAL).encode(), b""))
+        self.assertEqual(0, status, err)
+        self.assertFalse(self.records())
+
+    def test_a_clean_run_is_green(self) -> None:
+        """No findings: no record, zizmor's 0."""
+        status, _, err, _ = self.main(signer.Ran(0, b"[]", b""))
+        self.assertEqual(0, status, err)
+        self.assertFalse(self.records())
+
+    def test_zizmor_failing_is_its_status_and_its_stderr(self) -> None:
+        """A status outside 0 and 10-14: zizmor's, its stderr, no record."""
+        status, _, err, _ = self.main(signer.Ran(2, b"", b"error: bad input\n"))
+        self.assertEqual(2, status)
+        self.assertEqual("error: bad input\n", err)
+        self.assertFalse(self.records())
+
+    def test_no_token_is_a_finding_before_zizmor_runs(self) -> None:
+        """GH_TOKEN unset: the blindness finding, 1, zizmor never run."""
+        self.env["GH_TOKEN"] = ""
+        status, _, _, fake = self.main(signer.Ran(0, b"[]", b""))
+        self.assertEqual(1, status)
+        fake.assert_not_called()
+        want: list[object] = [
+            {
+                "v": 1,
+                "task": TASK,
+                "subject": "",
+                "message": "GH_TOKEN is unset — the offline run skips every",
+                "detail": [
+                    "API-backed audit this task exists for; refusing to pass blind"
+                ],
+            }
+        ]
+        self.assertEqual(want, self.records())
+
+    def test_an_offline_degradation_is_a_finding(self) -> None:
+        """Zizmor dropped to offline: its stderr, the finding, 1."""
+        said = b" WARN zizmor: running in offline mode\n"
+        status, _, err, _ = self.main(signer.Ran(0, b"[]", said))
+        self.assertEqual(1, status)
+        self.assertTrue(err.startswith(said.decode()), err)
+        want: list[object] = [
+            {
+                "v": 1,
+                "task": TASK,
+                "subject": "",
+                "message": "zizmor degraded to offline despite GH_TOKEN —",
+                "detail": [
+                    "the online audits did not run; a green result would be blind"
+                ],
+            }
+        ]
+        self.assertEqual(want, self.records())
+
+    def test_no_zizmor_is_refused_by_name(self) -> None:
+        """No zizmor on PATH: refused by name, 1, no record."""
+        with mock.patch.object(signer, "ZIZMOR", "/nonexistent/zizmor"):
+            out, err = io.StringIO(), io.StringIO()
+            with (
+                mock.patch.dict(os.environ, self.env),
+                redirect_stdout(out),
+                redirect_stderr(err),
+            ):
+                status = signer.main(["--signer-workflow", SIGNER_WORKFLOW])
+        self.assertEqual(1, status)
+        self.assertIn(f"{TASK}: zizmor is not on PATH", err.getvalue())
+        self.assertFalse(self.records())
+
+
+WORKFLOW = """\
+name: a
+on: push
+permissions: {}
+concurrency:
+  group: a
+  cancel-in-progress: true
+jobs:
+  a:
+    name: a
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/setup-go@v5
+"""
+
+
+class PinnedZizmor(unittest.TestCase):
+    """The belt's pinned zizmor, `--offline`, on a planted workflow."""
+
+    def judged(self, workflow: str) -> tuple[int, list[object], str]:
+        """Run the CLI over the belt's zizmor on one planted workflow.
+
+        Returns:
+            The status, the records read back, and stderr.
+
+        """
+        if hermetic.optional_tool("zizmor") is None:
+            self.skipTest("the belt's zizmor is not on PATH")
+        tmp = Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        (tmp / ".github" / "workflows").mkdir(parents=True)
+        (tmp / ".github" / "workflows" / "a.yml").write_text(workflow, encoding="utf-8")
+        file = tmp / "findings.jsonl"
+        done = subprocess.run(
+            [
+                sys.executable,
+                str(HERE / "zizmor_signer.py"),
+                "--signer-workflow",
+                SIGNER_WORKFLOW,
+                "--offline",
+                *ARGS,
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=hermetic.env(
+                GH_TOKEN=STANDIN,
+                MISE_TASK_NAME=TASK,
+                ORG_FINDINGS=str(file),
+                PYTHONUTF8="1",
+            ),
+            cwd=tmp,
+            check=False,
+        )
+        lines = file.read_text(encoding="utf-8").splitlines() if file.exists() else []
+        got: list[object] = [decoded.load_json(line) for line in lines]
+        return done.returncode, got, done.stderr
+
+    def test_an_unpinned_action_is_the_record(self) -> None:
+        """One unpinned `uses:`: the record read back, zizmor's 14."""
+        status, got, err = self.judged(WORKFLOW)
+        self.assertEqual(14, status, err)
+        path = ".github/workflows/a.yml"
+        want: list[object] = [
+            {
+                "v": 1,
+                "task": TASK,
+                "subject": path,
+                "message": "unpinned-uses: actions/setup-go@v5",
+                "detail": [
+                    "unpinned action reference",
+                    "severity: High",
+                    f"{path}:12: this step",
+                    (
+                        f"{path}:12: action is not pinned to a hash"
+                        " (required by blanket policy)"
+                    ),
+                ],
+            }
+        ]
+        self.assertEqual(want, got)
+
+    def test_two_of_one_audit_in_one_file_are_two_messages(self) -> None:
+        """Two unpinned `uses:` in one file: two records, two messages."""
+        two = WORKFLOW + "      - uses: actions/setup-node@v4\n"
+        status, got, err = self.judged(two)
+        self.assertEqual(14, status, err)
+        messages = [decoded.as_object(r, "a record")["message"] for r in got]
+        want: list[object] = [
+            "unpinned-uses: actions/setup-go@v5",
+            "unpinned-uses: actions/setup-node@v4",
+        ]
+        self.assertEqual(want, messages)
+
+
+STUB = """\
+import os, sys
+with open(os.environ["STUB_LOG"], "a", encoding="utf-8") as log:
+    log.write("\\t".join(sys.argv[1:]) + "\\n")
+with open(os.environ["STUB_DOC"], encoding="utf-8") as doc:
+    sys.stdout.write(doc.read())
+sys.exit(int(os.environ["STUB_RC"]))
+"""
+
+
+class Task(unittest.TestCase):
+    """audit:actions' own body over a stub zizmor, in a planted tree."""
+
+    def run_task(
+        self, document: object, status: int
+    ) -> subprocess.CompletedProcess[str]:
+        """Plant a workflow and the canon's identity, then run the body.
+
+        Returns:
+            The finished process.
+
+        """
+        tmp = Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        root = tmp / "tree"
+        (root / ".github" / "workflows").mkdir(parents=True)
+        (root / ".github" / "workflows" / "a.yml").write_text("on: push\n")
+        (root / "security").mkdir()
+        (root / "security" / "identity.toml").write_text(
+            f'signer-workflow = "{SIGNER_WORKFLOW}"\n', encoding="utf-8"
+        )
+        bin_dir = tmp / "bin"
+        bin_dir.mkdir()
+        stub = bin_dir / "zizmor"
+        stub.write_text(f"#!{sys.executable}\n{STUB}", encoding="utf-8")
+        stub.chmod(0o755)
+        doc = tmp / "doc.json"
+        doc.write_text(json.dumps(document), encoding="utf-8")
+        self.log = tmp / "zizmor.log"
+        self.file = tmp / "findings.jsonl"
+        config = decoded.load_toml((HERE / "config.toml").read_bytes())
+        tasks = decoded.as_object(config["tasks"], "tasks")
+        body = decoded.as_str(decoded.as_object(tasks[TASK], TASK)["run"], "run")
+        run = hermetic.task_run(TASK, body)
+        return subprocess.run(
+            run.argv,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=hermetic.env(
+                **run.env,
+                PATH=f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+                ORG_BELT_DIR=str(HERE),
+                ORG_CANON_DIR=str(root),
+                ORG_PYTHON=sys.executable,
+                ORG_FINDINGS=str(self.file),
+                GH_TOKEN=STANDIN,
+                STUB_LOG=str(self.log),
+                STUB_DOC=str(doc),
+                STUB_RC=str(status),
+                PYTHONUTF8="1",
+            ),
+            cwd=root,
+            check=False,
+        )
+
+    def test_a_remaining_finding_is_recorded_and_zizmor_s_red(self) -> None:
+        """A third-party stale ref: one record, zizmor's 11, one run."""
+        third = repointed(REAL[0], "actions/checkout@" + "d" * 40)
+        done = self.run_task([third], 11)
+        self.assertEqual(11, done.returncode, done.stderr)
+        logged: list[str] = self.log.read_text(encoding="utf-8").splitlines()
+        once: list[str] = ["--format=json\t--persona=auditor\t.github/workflows/"]
+        self.assertEqual(logged, once)
+        lines = self.file.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(1, len(lines))
+        record = decoded.as_object(decoded.load_json(lines[0]), "the record")
+        self.assertEqual(".github/workflows/continuous.yml", record["subject"])
+
+    def test_a_clean_run_is_no_record_and_green(self) -> None:
+        """No findings: no record, 0."""
+        done = self.run_task([], 0)
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertFalse(self.file.exists())
 
 
 if __name__ == "__main__":

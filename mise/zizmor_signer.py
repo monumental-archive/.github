@@ -28,21 +28,63 @@ Primary feature is the comment, `main`). A finding whose reference
 cannot be read is kept, so a change in zizmor's output reds rather than
 hides.
 
-Reads zizmor's `--format=json` array on stdin. Exits 0 when nothing is
-left to report, 1 when findings remain, 2 when the input is not that
-array.
+Usage:
+  zizmor_signer.py --signer-workflow <ref> [<zizmor's arguments>...]
+
+runs `zizmor --format=json <arguments>` once (#1955), its stderr passed
+through unchanged, and decodes the finding array it writes to stdout.
+Each finding that remains after the drop goes through
+mise/findings.py: the subject is its first location's file, the
+message `<ident>: <the first line of the feature of the first Primary
+location, trimmed>` (the owner's ruling on #1955: `desc` is one text
+per audit, so it is no identity; Hidden and Related locations are
+context, and a finding with no Primary location is refused), the
+detail its `desc`, its severity and each location as
+`<file>:<line>: <annotation>`. The line is never in the subject or the
+message, so an edit above a finding does not make it new. There is
+no second, human-mode run: the records print the findings.
+
+FAIL CLOSED ON BLINDNESS (#310 finding 3): without GH_TOKEN zizmor
+silently degrades to offline, skipping every audit `audit:actions`
+exists to run, and still exits 0. So no GH_TOKEN is a finding and 1
+before zizmor runs, and zizmor's own offline-degradation line on stderr
+is a finding and 1 after: a present but rejected token degrades the
+same way, and only zizmor knows.
+
+The exit status is zizmor's own: 0 when nothing remains (a run whose
+findings were all the signer's is clean), its 10-14 by severity when
+findings remain, and any other status, zizmor failing, with no report
+read. The refusals exit 1, each by name and recording nothing: no
+zizmor on PATH, a signer declaration naming no repository, output that
+is not zizmor's finding array, and a remaining finding not of the
+shape read here. A zizmor pin whose report moves turns the task red
+until this moves with it.
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import re
+import shutil
+import subprocess
 import sys
 from dataclasses import dataclass
 from typing import Self
 
 import decoded
-from typed_std import NoStdinError, group, stdin_text
+import findings as writer
+from decoded import UndecodableError
+from typed_std import group
+
+# The belt's zizmor, as PATH answers it; read as the command by the job
+# install law (release/test_job_installs.py).
+ZIZMOR = shutil.which("zizmor") or "zizmor"
+EXIT_REFUSED = 1
+# zizmor's statuses for a run with findings, one per severity.
+FINDINGS = range(10, 15)
+# What zizmor prints on stderr when it has dropped to offline.
+OFFLINE = b"running in offline mode"
 
 # Each exempt audit, the location kind that carries its reference, and
 # why the finding is true but not a defect on the signer.
@@ -181,7 +223,7 @@ def signer_repository(workflow: str) -> str:
     return repo
 
 
-def array(value: object) -> list[Finding] | None:
+def array(value: object) -> list[dict[str, object]] | None:
     """Read zizmor's array: every item a finding object.
 
     Returns:
@@ -190,12 +232,122 @@ def array(value: object) -> list[Finding] | None:
     """
     if not decoded.is_array(value):
         return None
-    findings: list[Finding] = []
+    found: list[dict[str, object]] = []
     for item in value:
         if not decoded.is_object(item):
             return None
-        findings.append(Finding.of(item))
-    return findings
+        found.append(item)
+    return found
+
+
+@dataclass(frozen=True)
+class Record:
+    """One remaining finding, as the writer records it."""
+
+    ident: str
+    subject: str
+    message: str
+    detail: tuple[str, ...]
+
+
+def message(ident: str, feature: str) -> str:
+    """Write a remaining finding's message (owner's ruling on #1955).
+
+    zizmor's `desc` is one text per audit, so two findings of an audit
+    in one file would read the same; the first line of the feature of
+    its first Primary location, the source zizmor marks at fault, tells
+    them apart. Hidden and Related locations are context.
+
+    Returns:
+        `<ident>: <the feature's first line, trimmed>`.
+
+    """
+    first = feature.splitlines()[0] if feature.strip() else ""
+    return f"{ident}: {first.strip()}"
+
+
+@dataclass(frozen=True)
+class Place:
+    """One location of a finding, as the record reads it."""
+
+    path: str  # the file
+    line: str  # `<file>:<line>: <annotation>`
+    kind: str  # Primary marks the location at fault; the rest are context
+    feature: str  # the source the location covers
+
+
+def place(item: object, where: str) -> Place:
+    """Read one location: its file, line and annotation, kind and source.
+
+    Returns:
+        The location; zizmor's rows count from 0, its lines from 1.
+
+    """
+    location = decoded.as_object(item, where)
+    symbolic = decoded.as_object(location.get("symbolic"), f"{where}: symbolic")
+    key = decoded.as_object(symbolic.get("key"), f"{where}: symbolic.key")
+    local = decoded.as_object(key.get("Local"), f"{where}: symbolic.key.Local")
+    path = decoded.as_str(local.get("verbatim_path"), f"{where}: verbatim_path")
+    note = decoded.as_str(symbolic.get("annotation"), f"{where}: annotation")
+    concrete = decoded.as_object(location.get("concrete"), f"{where}: concrete")
+    span = decoded.as_object(concrete.get("location"), f"{where}: location")
+    start = decoded.as_object(span.get("start_point"), f"{where}: start_point")
+    row = decoded.as_int(start.get("row"), f"{where}: start_point.row")
+    feature = decoded.as_str(concrete.get("feature"), f"{where}: feature")
+    kind = decoded.as_str(symbolic.get("kind"), f"{where}: symbolic.kind")
+    return Place(path, f"{path}:{row + 1}: {note}", kind, feature)
+
+
+def record(finding: dict[str, object], where: str) -> Record:
+    """Read one remaining finding into its record.
+
+    Returns:
+        Its first location's file; its message; and its `desc`, its
+        severity and each location with its line.
+
+    Raises:
+        UndecodableError: the finding is not of the shape read here.
+
+    """
+    ident = decoded.as_str(finding.get("ident"), f"{where}: ident")
+    desc = decoded.as_str(finding.get("desc"), f"{where}: desc")
+    judged = decoded.as_object(
+        finding.get("determinations"), f"{where}: determinations"
+    )
+    severity = decoded.as_str(judged.get("severity"), f"{where}: severity")
+    listed = decoded.as_array(finding.get("locations"), f"{where}: locations")
+    if not listed:
+        msg = f"{where}: locations is empty"
+        raise UndecodableError(msg)
+    places = [place(p, f"{where}: locations[{at}]") for at, p in enumerate(listed)]
+    primary = next((p for p in places if p.kind == "Primary"), None)
+    if primary is None:
+        msg = f"{where}: no location is Primary"
+        raise UndecodableError(msg)
+    detail = (desc, f"severity: {severity}", *(p.line for p in places))
+    return Record(ident, places[0].path, message(ident, primary.feature), detail)
+
+
+@dataclass(frozen=True)
+class Ran:
+    """What one zizmor run gave back."""
+
+    status: int
+    stdout: bytes
+    stderr: bytes
+
+
+def run_zizmor(args: list[str]) -> Ran:
+    """Run zizmor once in its JSON mode.
+
+    Returns:
+        Its status, stdout and stderr.
+
+    """
+    ran = subprocess.run(
+        [ZIZMOR, "--format=json", *args], capture_output=True, check=False
+    )
+    return Ran(ran.returncode, ran.stdout, ran.stderr)
 
 
 class Args(argparse.Namespace):
@@ -204,12 +356,70 @@ class Args(argparse.Namespace):
     signer_workflow: str
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Filter zizmor's findings read from stdin.
+def read(ran: Ran, signer: str) -> tuple[list[Finding], list[Record]]:
+    """Decode zizmor's array, every remaining finding read before any is recorded.
 
     Returns:
-        0 when nothing remains to report, 1 when findings remain, 2 on
-        input that is not zizmor's JSON array.
+        The signer's findings, dropped, and a record for each other.
+
+    Raises:
+        UndecodableError: the output is not zizmor's finding array, or a
+            remaining finding is not of the shape read here.
+
+    """
+    listed = array(decoded.load_json(ran.stdout))
+    if listed is None:
+        msg = "it is not zizmor's finding array"
+        raise UndecodableError(msg)
+    live = [f for f in listed if f.get("ignored") is not True]
+    held = [(f, on_signer(Finding.of(f), signer)) for f in live]
+    kept = [f for f, on in held if not on]
+    records = [record(f, f"findings[{at}]") for at, f in enumerate(kept)]
+    return [Finding.of(f) for f, on in held if on], records
+
+
+def judge(task: str, ran: Ran, signer: str) -> int:
+    """Drop the signer's findings, record the rest.
+
+    Returns:
+        0 when nothing remains, zizmor's status when findings do, and
+        EXIT_REFUSED when the report is not one read here.
+
+    """
+    try:
+        dropped, records = read(ran, signer)
+    except UndecodableError as err:
+        print(
+            f"{task}: zizmor exited {ran.status}:"
+            f" the output is not zizmor's report: {err}",
+            file=sys.stderr,
+        )
+        return EXIT_REFUSED
+    for audit, (_, why) in AUDITS.items():
+        count = sum(1 for f in dropped if f.ident == audit)
+        print(
+            f"{task}: {count} {audit} finding(s) on the signer dropped"
+            f" ({signer} {why})",
+            flush=True,
+        )
+    for each in records:
+        writer.finding(each.subject, each.message, each.detail)
+    if not records:
+        return 0
+    idents = sorted({r.ident for r in records})
+    print(
+        f"{task}: {len(records)} finding(s) remain: {', '.join(idents)}",
+        file=sys.stderr,
+    )
+    return ran.status if ran.status in FINDINGS else EXIT_REFUSED
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Run zizmor online, drop the signer's findings, record the rest.
+
+    Returns:
+        zizmor's status; 0 when nothing remains; EXIT_REFUSED on a blind
+        run or a refusal.
 
     """
     parser = argparse.ArgumentParser(description=__doc__)
@@ -218,34 +428,38 @@ def main(argv: list[str] | None = None) -> int:
         required=True,
         help="the signer's workflow ref, from security/identity.toml",
     )
-    args = parser.parse_args(argv, namespace=Args())
+    # Every argument the parser does not name is zizmor's, in order.
+    args, rest = parser.parse_known_args(argv, namespace=Args())
+    task = writer.task_name()
     try:
         signer = signer_repository(args.signer_workflow)
-        findings = array(decoded.load_json(stdin_text()))
-    except (ValueError, NoStdinError) as err:  # UndecodableError is a ValueError
-        print(f"zizmor-signer: {err}", file=sys.stderr)
-        return 2
-    if findings is None:
-        print("zizmor-signer: input is not zizmor's finding array", file=sys.stderr)
-        return 2
-
-    live = [f for f in findings if not f.ignored]
-    dropped = [f for f in live if on_signer(f, signer)]
-    kept = [f for f in live if not on_signer(f, signer)]
-    for audit, (_, why) in AUDITS.items():
-        count = sum(1 for f in dropped if f.ident == audit)
-        print(
-            f"audit:actions: {count} {audit} finding(s) on the signer dropped"
-            f" ({signer} {why})",
+    except ValueError as err:
+        print(f"{task}: {err}", file=sys.stderr)
+        return EXIT_REFUSED
+    if not os.environ.get("GH_TOKEN"):
+        writer.finding(
+            "",
+            "GH_TOKEN is unset — the offline run skips every",
+            ["API-backed audit this task exists for; refusing to pass blind"],
         )
-    if kept:
-        idents = sorted({f.ident for f in kept})
-        print(
-            f"audit:actions: {len(kept)} finding(s) remain: {', '.join(idents)}",
-            file=sys.stderr,
+        return EXIT_REFUSED
+    try:
+        ran = run_zizmor(rest)
+    except FileNotFoundError:
+        print(f"{task}: zizmor is not on PATH", file=sys.stderr)
+        return EXIT_REFUSED
+    sys.stderr.write(ran.stderr.decode("utf-8", "replace"))
+    sys.stderr.flush()
+    if OFFLINE in ran.stderr:
+        writer.finding(
+            "",
+            "zizmor degraded to offline despite GH_TOKEN —",
+            ["the online audits did not run; a green result would be blind"],
         )
-        return 1
-    return 0
+        return EXIT_REFUSED
+    if ran.status != 0 and ran.status not in FINDINGS:
+        return ran.status
+    return judge(task, ran, signer)
 
 
 if __name__ == "__main__":

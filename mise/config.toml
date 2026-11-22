@@ -5046,49 +5046,21 @@ dir = "{{cwd}}"
 # every reference in the signer's repository, read from
 # security/identity.toml, never written here. A second comment on the
 # `uses:` line was measured and hides the pin from Renovate; a
-# zizmor.yml ignore would hide a real third-party finding. The
-# green path is one JSON run; when anything remains, zizmor runs again
-# in its own format so the finding is shown as zizmor writes it.
+# zizmor.yml ignore would hide a real third-party finding.
+#
+# zizmor runs once, in its JSON mode, through zizmor_signer.py (#1955):
+# the token check, the offline-degradation check, the drop, and a
+# finding record for each finding that remains, subject its file and
+# its lines in the detail. The exit status is zizmor's own. There is no
+# second, human-mode run: the records print the findings.
 run = '''
 compgen -G ".github/workflows/*.y*ml" > /dev/null || {
   echo "audit:actions: no workflows, skipped"
   exit 0
 }
-[[ -n ${GH_TOKEN:-} ]] || {
-  org_finding "" "GH_TOKEN is unset — the offline run skips every" \
-    "API-backed audit this task exists for; refusing to pass blind"
-  exit 1
-}
 . "${ORG_BELT_DIR}/identity.sh"
 signer_wf=$(org_identity signer-workflow)
-blind() {
-  if grep -q "running in offline mode" "$1"; then
-    org_finding "" "zizmor degraded to offline despite GH_TOKEN —" \
-      "the online audits did not run; a green result would be blind"
-    exit 1
-  fi
-}
-err=$(mktemp)
-json=$(mktemp)
-status=0
-zizmor --persona=auditor --format=json .github/workflows/ > "${json}" 2> "${err}" || status=$?
-blind "${err}"
-# 0 is clean and 10-14 are findings by severity; anything else is zizmor
-# failing, and its output is no finding list to filter.
-if ((status != 0 && (status < 10 || status > 14))); then
-  cat "${err}" >&2
-  exit "${status}"
-fi
-left=0
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/zizmor_signer.py" --signer-workflow "${signer_wf}" < "${json}" || left=$?
-((left == 0)) && exit 0
-((left == 1)) || exit "${left}"
-status=0
-zizmor --persona=auditor .github/workflows/ 2> "${err}" || status=$?
-cat "${err}" >&2
-blind "${err}"
-((status != 0)) || status=1
-exit "${status}"
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/zizmor_signer.py" --signer-workflow "${signer_wf}" --persona=auditor .github/workflows/
 '''
 
 [tasks."audit:template-pins"]
