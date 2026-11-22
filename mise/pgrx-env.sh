@@ -236,7 +236,12 @@ org_pgrx_postgres() { # usage: org_pgrx_postgres <Postgres major>, in the subshe
   #   - PGRX_HOME is an empty directory nothing writes: bindgen tracks
   #     config.toml only when it is a file, and none ever exists there.
   #     The value is the same on every call, so it never changes a
-  #     build's fingerprint (PGRX_HOME is a recorded input).
+  #     build's fingerprint (PGRX_HOME is a recorded input), and pgrx
+  #     0.20 watches the directory itself, so it is made once with a
+  #     fixed, old mtime (org__pgrx_home): made fresh on a runner whose
+  #     `target` came from the cache, a new mtime rebuilt pgrx-pg-sys
+  #     and everything above it on every run (measured on #1940:
+  #     1m36s against 3.1s).
   #   - The pg_config is a CLONE of the pinned install, one per cargo
   #     target directory (org__pgrx_clone). Tasks that share a target
   #     directory share a clone, so they give pgrx one
@@ -262,7 +267,7 @@ org_pgrx_postgres() { # usage: org_pgrx_postgres <Postgres major>, in the subshe
   target=$(org__pgrx_target) || return 1
   key=$(org__pgrx_key "${target}") || return 1
   cache="${XDG_CACHE_HOME:-${HOME}/.cache}/org-belt"
-  mkdir -p "${cache}/pgrx-home" || return 1
+  org__pgrx_home "${cache}/pgrx-home" || return 1
   clone=$(org__pgrx_clone "${source%/bin/pg_config}" "${cache}/pgrx-postgres/${key}/pg$1") || return 1
   export PGRX_PG_CONFIG_PATH="${clone}/bin/pg_config"
   export PGRX_HOME="${cache}/pgrx-home"
@@ -298,14 +303,46 @@ org__pgrx_key() { # usage: org__pgrx_key <path>; prints the first 16 hex of its 
   echo "${BASH_REMATCH[1]}"
 }
 
+org__pgrx_home() { # usage: org__pgrx_home <directory>; makes it once, empty, with a fixed old mtime
+  # Made as `<directory>.<random>`, dated, and published by
+  # org__pgrx_publish, so no task ever sees it with a new mtime: 2000-01-01
+  # UTC is older than any build, so the watched path never reads as
+  # changed. Two tasks racing both publish (rename(2) replaces an EMPTY
+  # directory), and either one is the same empty, dated directory.
+  local tmp
+  [[ ! -d $1 ]] || return 0
+  mkdir -p "${1%/*}" || return 1
+  tmp=$(mktemp -d "$1.XXXXXX") || return 1
+  TZ=UTC touch -t 200001010000 "${tmp}" || {
+    rm -rf "${tmp}"
+    return 1
+  }
+  org__pgrx_publish "${tmp}" "$1" || rm -rf "${tmp}"
+  [[ -d $1 ]]
+}
+
+org__pgrx_publish() { # usage: org__pgrx_publish <made directory> <name>; status 0 when it took the name
+  # A directory renamed onto its name: rename(2) of a directory creates
+  # the name or fails when a non-empty directory holds it, atomically, so
+  # the loser of a race for a clone removes its own and uses the
+  # winner's. Not a
+  # symbolic link (`ln -sn`, the belt tree's pattern): pg_config resolves
+  # links, so behind one pgrx saw the random `<name>.<random>` path, a
+  # new one on every runner, and rebuilt (#1940). Python's, because
+  # macOS mv has no -T and would move the directory INTO an existing
+  # one.
+  "${ORG_PYTHON}" -c 'import os, sys; os.rename(sys.argv[1], sys.argv[2])' "$1" "$2" 2> /dev/null
+}
+
 org__pgrx_clone() { # usage: org__pgrx_clone <install directory> <directory holding its clones>; prints the clone
   # MADE ONCE, THEN REUSED. Cloned beside its final name as
-  # `<name>.<random>` and published with `ln -sn`, the belt cache's
-  # pattern (lefthook/org-hooks.yml): with no -f it creates the name or
-  # fails, atomically, so the loser of a race removes its own clone and
-  # uses the winner's. `cp -c` is an APFS clone on Darwin (0.67 s for
-  # pg16's 261 MB, measured on #1940); Linux has no clone on ext4, and
-  # `--reflink=auto` copies there, about a second.
+  # `<name>.<random>` and published by renaming it onto the name
+  # (org__pgrx_publish), so its real path is the same on every machine
+  # and every run. `cp -c` is an APFS clone on Darwin (0.67 s for pg16's
+  # 261 MB, measured on #1940); Linux has no clone on ext4, and
+  # `--reflink=auto` copies there, about a second. `-p` keeps the
+  # install's mtimes: pgrx watches the include directories, and a clone
+  # made fresh on a runner must not read as newer than the cached build.
   #
   # The install directory's name carries the full version and target
   # triple, so a Postgres pin that moves makes a new clone, and the
@@ -320,16 +357,16 @@ org__pgrx_clone() { # usage: org__pgrx_clone <install directory> <directory hold
     tmp=$(mktemp -d "${dest}.XXXXXX") || return 1
     kernel=$(uname -s)
     if [[ ${kernel} == Darwin ]]; then
-      cp -cR "${source}/." "${tmp}" && copied=1
+      cp -cRp "${source}/." "${tmp}" && copied=1
     else
-      cp -R --reflink=auto "${source}/." "${tmp}" && copied=1
+      cp -Rp --reflink=auto "${source}/." "${tmp}" && copied=1
     fi
     if [[ ${copied} -ne 1 ]]; then
       rm -rf "${tmp}"
       org_finding "" "could not clone the pinned Postgres ${source} to ${tmp}"
       return 1
     fi
-    if ln -sn "${tmp}" "${dest}" 2> /dev/null; then
+    if org__pgrx_publish "${tmp}" "${dest}"; then
       for entry in "${dir}"/*; do
         [[ ${entry} == "${dest}" || ${entry} == "${dest}".* ]] || rm -rf "${entry}"
       done

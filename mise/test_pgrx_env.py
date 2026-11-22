@@ -53,6 +53,7 @@ PG_MISE_STUB = r"""#!/usr/bin/env bash
 cat "${PLANT_ROOT}/pg.json"
 """
 INSTALL = "postgresql-16.16.0-x86_64-unknown-linux-gnu"
+OLD = 946684800  # 2000-01-01 00:00 UTC
 # The race row: this many tasks clone one new Postgres at once.
 RACERS = 6
 
@@ -95,7 +96,11 @@ class OwnPostgres(unittest.TestCase):
         config.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
         config.chmod(0o755)
         (where / name / "share").mkdir()
-        (where / name / "share" / "marker").write_text("pinned\n", encoding="utf-8")
+        marker = where / name / "share" / "marker"
+        marker.write_text("pinned\n", encoding="utf-8")
+        # Dated in the past, as an extracted archive is, so a copy that
+        # dropped the date would show it.
+        os.utime(marker, (OLD - 86400, OLD - 86400))
         listing = [entry("16.16.0", where)]
         (self.root / "pg.json").write_text(json.dumps(listing), encoding="utf-8")
 
@@ -170,6 +175,17 @@ class OwnPostgres(unittest.TestCase):
         self.assertEqual(str(clone / "bin" / "pg_config"), config)
         self.assertEqual("pinned\n", (clone / "share" / "marker").read_text())
         self.assertEqual(str(self.cache / "org-belt" / "pgrx-home"), home)
+        # Real paths with the install's dates, and a home dated 2000:
+        # made fresh on a runner, neither reads as newer than a cached
+        # build (#1940).
+        self.assertFalse(clone.is_symlink())
+        self.assertEqual(str(clone), str(clone.resolve()))
+        marker = self.root / "pg" / "16.16.0" / INSTALL / "share" / "marker"
+        self.assertEqual(
+            marker.stat().st_mtime_ns,
+            (clone / "share" / "marker").stat().st_mtime_ns,
+        )
+        self.assertEqual(OLD, int(Path(home).stat().st_mtime))
         entries = [entry.name for entry in Path(home).iterdir()]
         empty: list[str] = []
         self.assertEqual(empty, entries)
@@ -206,13 +222,13 @@ class OwnPostgres(unittest.TestCase):
         paths = {call[1] for call in self.seen() if call[0] == "build"}
         self.assertEqual(1, len(paths), paths)
         held = Path(paths.pop()).parent.parent
-        published = held.resolve()
-        # The published name and the clone it names, and nothing else:
-        # every loser removed its own `<name>.<random>`.
-        names = sorted(p.name for p in held.parent.iterdir())
-        want = sorted([INSTALL, published.name])
+        # The published clone, a directory under its own name, and
+        # nothing else: every loser removed its own `<name>.<random>`.
+        names = [p.name for p in held.parent.iterdir()]
+        want = [INSTALL]
         self.assertEqual(want, names)
-        self.assertEqual("pinned\n", (published / "share" / "marker").read_text())
+        self.assertFalse(held.is_symlink())
+        self.assertEqual("pinned\n", (held / "share" / "marker").read_text())
 
     def test_a_moved_pin_removes_the_old_clone_and_keeps_other_majors(self) -> None:
         """Another version of this major is removed; another major's is not."""
