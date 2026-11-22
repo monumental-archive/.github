@@ -30,6 +30,9 @@ from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
 
+# The Done-when's oracle is the writer's own `_text` (#1984).
+TEXT = findings._text  # ruff: ignore[private-member-access] - the oracle is _text
+
 
 class OneRecordReadsBack(unittest.TestCase):
     """R: one line, read back as the text the log line shows."""
@@ -58,9 +61,9 @@ class OneRecordReadsBack(unittest.TestCase):
             {
                 "v": findings.VERSION,
                 "task": "lint:demo",
-                "subject": findings._text(subject),  # noqa: SLF001
-                "message": findings._text(message),  # noqa: SLF001
-                "detail": [findings._text(line) for line in detail],  # noqa: SLF001
+                "subject": TEXT(subject),
+                "message": TEXT(message),
+                "detail": [TEXT(line) for line in detail],
             },
         )
 

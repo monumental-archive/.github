@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The Python writer of findings (#1890).
+r"""The Python writer of findings (#1890).
 
 mise/findings.sh is the shell writer; docs/findings.md is the rule both
 serve. A finding is printed for the person reading the log, and
@@ -24,7 +24,7 @@ else the running script's file name.
 
 A character UTF-8 cannot carry (a lone surrogate, as `os.fsdecode`
 makes of a file name that is not UTF-8) is printed and recorded as its
-backslash escape, `\\udcff`: the line and the record are the same text,
+backslash escape, `\udcff`: the line and the record are the same text,
 and the append cannot fail on an encoding (#1984).
 
 A record that cannot be appended is said in one more stderr line and
