@@ -280,10 +280,11 @@ class FuzzBuild(unittest.TestCase):
             "PLANT_REFUSAL": str(self.refusal),
             "ORG_BELT_DIR": str(BELT),
         }
+        as_mise = hermetic.task_run("lint:fuzz-build", task_body("lint:fuzz-build"))
         done = subprocess.run(
-            [BASH, "-euo", "pipefail", "-c", task_body("lint:fuzz-build")],
+            as_mise.argv,
             cwd=self.root,
-            env=env,
+            env=env | as_mise.env,
             capture_output=True,
             text=True,
             check=False,
@@ -417,7 +418,7 @@ class FuzzBuild(unittest.TestCase):
                 self.refuse(text)
                 status, out, err, calls = self.run_lint()
                 self.assertEqual((status, out), (1, ""))
-                self.assertEqual(err, STALE_HEAD + text + STALE_REMEDY)
+                self.assertEqual(err, STALE_HEAD + STALE_REMEDY + text)
                 self.assertEqual(calls, ONE_PROBE)
 
     def test_no_workspace_table_reds_before_the_probe(self) -> None:

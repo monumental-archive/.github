@@ -25,17 +25,30 @@ Nothing reads a finding back out of a log.
 A belt task body never sources `mise/findings.sh`. The belt's `[env]`
 names it in `BASH_ENV`, beside the belt (`${ORG_BELT_DIR}/findings.sh`),
 and bash sources that file before it runs any non-interactive script.
-So every task body under the belt's shell (`bash -euo pipefail -c`),
+So every task body under the belt's shell (`bash --norc -euo pipefail -c`),
 and every bash a body starts, can call `org_finding` and
 `org_finding_annotated`. It holds locally through the clone's belt
 link and in CI through `MISE_GLOBAL_CONFIG_FILE`, as `ORG_BELT_DIR`
 does. With no belt, `BASH_ENV` is empty and nothing is sourced. A
 `sh` script never reads it.
 
-A test that runs a body by hand sets `BASH_ENV` and `MISE_TASK_NAME`,
-as mise does. The cost, accepted by the owner (#1934): a fault in
-`findings.sh` or `workflow-command.sh` reaches every bash under the
-belt's environment.
+A test that runs a body by hand gets the shell and the variables
+mise gives it from `hermetic.task_run`. Loading the writer runs no
+command, so a bash whose `PATH` holds nothing still has it. The cost,
+accepted by the owner (#1934): a fault in `findings.sh` or
+`workflow-command.sh` reaches every bash under the belt's environment.
+
+## A program that cannot call the writer
+
+An awk program, or any program that is not shell, prints its findings
+to stdout and pipes them into `org_finding_lines`: one finding per
+line, its fields the subject, the message and each detail line,
+separated by the unit separator (`\037`), never a tab, since bash's
+`read` collapses empty tab-separated fields. Each line is one
+`org_finding` call. A line with no separator is not a finding and goes
+to stdout as a plain line (`org_say`), so the program's own summary
+still prints. Under
+`pipefail` the program's status is the pipeline's.
 
 ## The record
 

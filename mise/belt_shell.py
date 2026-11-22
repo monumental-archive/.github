@@ -296,7 +296,7 @@ def read(path: Path) -> Config:
 def prelude(shell: str, env: Sequence[str]) -> str:
     """Build the header that makes an extracted body faithful to mise.
 
-    `bash -euo pipefail -c` becomes a bash shebang plus
+    `bash --norc -euo pipefail -c` becomes a bash shebang plus
     `set -euo pipefail`; the exported names are what `[env]` supplies,
     exported rather than assigned so an unused one is not itself a
     finding.
@@ -307,7 +307,9 @@ def prelude(shell: str, env: Sequence[str]) -> str:
     """
     parts = shlex.split(shell)
     interp = Path(parts[0]).name if parts else ""
-    flags = [p for p in parts[1:] if p != "-c"]
+    # A long option (`--norc`) is the interpreter's invocation, not a
+    # `set` option: `set --norc` is not shell.
+    flags = [p for p in parts[1:] if p != "-c" and not p.startswith("--")]
     head = f"#!/usr/bin/env {interp}\n"
     if flags:
         head += f"set {' '.join(flags)}\n"

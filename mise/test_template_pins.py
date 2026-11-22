@@ -161,10 +161,11 @@ class Pins(unittest.TestCase):
             The finished process.
 
         """
+        as_mise = hermetic.task_run("lint:template-pins", body())
         return subprocess.run(
-            [BASH, "-euo", "pipefail", "-c", body()],
+            as_mise.argv,
             cwd=self.tree,
-            env=self.env,
+            env=self.env | as_mise.env,
             capture_output=True,
             text=True,
             check=False,

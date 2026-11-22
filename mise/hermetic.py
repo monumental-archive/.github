@@ -29,6 +29,11 @@ A test that lists the canon's own tree calls `tracked`, never `git
 ls-files` itself, so every listing runs under the same environment and
 an empty one is red by name.
 
+A row that runs a belt task's body runs it as mise does (#1934):
+
+    run = hermetic.task_run("lint:dco", body)
+    subprocess.run(run.argv, env=hermetic.env(home) | run.env, ...)
+
 A test finds the tools it runs here too (#1684):
 
     BASH = hermetic.tool("bash")                  # absolute, or raises
@@ -75,6 +80,7 @@ selects, so a leg's per-command toolchain reaches it.
 import contextlib
 import io
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -82,6 +88,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest import mock
+
+import decoded
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
@@ -206,6 +214,38 @@ def env(
     }
     out |= overrides
     return out
+
+
+@dataclass(frozen=True)
+class TaskRun:
+    """How mise runs one task body: the command line and what it adds."""
+
+    argv: list[str]
+    env: dict[str, str]
+
+
+def task_run(name: str, body: str) -> TaskRun:
+    """Give a harness what mise gives a belt task body (#1934).
+
+    `argv` is the belt's `[task_config]` shell, read from the belt's
+    config and split as mise splits it, its interpreter found by `tool`,
+    then the body. `env` is what a row merges into its environment:
+    MISE_TASK_NAME, the task's name, which the finding writer reads
+    (#1890), and BASH_ENV, the belt's findings.sh, which the belt's
+    `[env]` names so every body has `org_finding`. No SHLVL: the shell's
+    `--norc` is what lets BASH_ENV through without one.
+
+    Returns:
+        The command line and the variables.
+
+    """
+    config = decoded.load_toml((CANON / "mise" / "config.toml").read_bytes())
+    table = decoded.as_object(config["task_config"], "task_config")
+    words = shlex.split(decoded.as_str(table["shell"], "task_config.shell"))
+    return TaskRun(
+        [tool(words[0]), *words[1:], body],
+        {"MISE_TASK_NAME": name, "BASH_ENV": str(CANON / "mise" / "findings.sh")},
+    )
 
 
 def tracked(root: Path | str, *pathspecs: str, **overrides: str) -> list[str]:

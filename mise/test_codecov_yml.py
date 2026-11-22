@@ -51,10 +51,6 @@ def body() -> str:
 
 
 BODY = body()
-# As mise runs the body: the task's name, which the finding writer
-# reads (#1890), and the belt's BASH_ENV, which gives the body the
-# writer (#1934).
-AS_MISE = {"MISE_TASK_NAME": NAME, "BASH_ENV": str(BELT / "findings.sh")}
 
 
 def lint(files: dict[str, str]) -> subprocess.CompletedProcess[str]:
@@ -66,7 +62,7 @@ def lint(files: dict[str, str]) -> subprocess.CompletedProcess[str]:
     """
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
-        env = hermetic.env(**AS_MISE)
+        env = hermetic.env()
         for rel, text in files.items():
             path = root / rel
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -74,10 +70,11 @@ def lint(files: dict[str, str]) -> subprocess.CompletedProcess[str]:
         subprocess.run([GIT, "init", "-q"], cwd=root, env=env, check=True)
         if files:
             subprocess.run([GIT, "add", "--", *files], cwd=root, env=env, check=True)
+        as_mise = hermetic.task_run(NAME, BODY)
         return subprocess.run(
-            [BASH, "-euo", "pipefail", "-c", BODY],
+            as_mise.argv,
             cwd=root,
-            env=env,
+            env=env | as_mise.env,
             capture_output=True,
             text=True,
             check=False,
@@ -144,13 +141,14 @@ class CodecovYml(unittest.TestCase):
         """Tracked files only: an untracked config is not the tree's."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            env = hermetic.env(**AS_MISE)
+            env = hermetic.env()
             subprocess.run([GIT, "init", "-q"], cwd=root, env=env, check=True)
             (root / "codecov.yml").write_text(EDTF, encoding="utf-8")
+            as_mise = hermetic.task_run(NAME, BODY)
             done = subprocess.run(
-                [BASH, "-euo", "pipefail", "-c", BODY],
+                as_mise.argv,
                 cwd=root,
-                env=env,
+                env=env | as_mise.env,
                 capture_output=True,
                 text=True,
                 check=False,

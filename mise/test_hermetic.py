@@ -722,6 +722,17 @@ class Env(unittest.TestCase):
         with self.assertRaises(KeyError):
             hermetic.env(tools=("no-such-tool",))
 
+    def test_a_task_body_runs_under_the_belt_shell_and_writer(self) -> None:
+        """task_run: the [task_config] shell, the task's name, the writer."""
+        writer = hermetic.CANON / "mise" / "findings.sh"
+        run = hermetic.task_run("lint:demo", "true")
+        want: dict[str, str] = {"MISE_TASK_NAME": "lint:demo", "BASH_ENV": str(writer)}
+        self.assertEqual(want, run.env)
+        bash: str = hermetic.tool("bash")
+        argv: list[str] = [bash, "--norc", "-euo", "pipefail", "-c", "true"]
+        self.assertEqual(argv, run.argv)
+        self.assertTrue(writer.is_file())
+
 
 class Tracked(unittest.TestCase):
     """hermetic.tracked, in a checkout (#1618)."""

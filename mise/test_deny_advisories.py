@@ -305,10 +305,11 @@ class AuditDeny(unittest.TestCase):
             ORG_FINDINGS="",
             MISE_TASK_NAME=TASK,
         )
+        as_mise = hermetic.task_run(TASK, task_body(TASK))
         done = subprocess.run(
-            [BASH, "-euo", "pipefail", "-c", task_body(TASK)],
+            as_mise.argv,
             cwd=self.root,
-            env=env,
+            env=env | as_mise.env,
             capture_output=True,
             text=True,
             check=False,

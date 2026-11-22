@@ -364,5 +364,157 @@ class FindingRows(unittest.TestCase):
                 self.assertEqual(messages, expected)
 
 
+def bashes() -> list[tuple[str, str]]:
+    """List the shell writer's bashes: the belt's, and /bin/bash.
+
+    Returns:
+        Each bash's label and path.
+
+    """
+    out = [("belt bash", hermetic.tool("bash"))]
+    if SYSTEM_BASH.exists():
+        out.append(("/bin/bash", str(SYSTEM_BASH)))
+    return out
+
+
+class LoadingRows(unittest.TestCase):
+    """Sourcing the shell writer runs no command (#1934)."""
+
+    def test_an_empty_path_still_loads_the_writer(self) -> None:
+        """PATH empty: no output, status 0, org_finding defined."""
+        for label, bash in bashes():
+            for how, source, cwd in (
+                ("absolute", str(SHELL_WRITER), None),
+                ("no slash", SHELL_WRITER.name, SHELL_WRITER.parent),
+            ):
+                with self.subTest(bash=label, path=how):
+                    done = subprocess.run(
+                        [
+                            bash,
+                            "--norc",
+                            "-euo",
+                            "pipefail",
+                            "-c",
+                            f'. "{source}"; declare -F org_finding > /dev/null',
+                        ],
+                        capture_output=True,
+                        text=True,
+                        env=hermetic.env(PATH=""),
+                        cwd=cwd,
+                        check=False,
+                    )
+                    self.assertEqual(
+                        (done.returncode, done.stdout, done.stderr), (0, "", "")
+                    )
+
+
+LINES_READER = f""". "{SHELL_WRITER}"
+org_finding_lines
+"""
+US = "\037"
+NO_RECORDS: list[dict[str, object]] = []
+
+
+class LinesRows(unittest.TestCase):
+    """org_finding_lines: one finding per stdin line, unit-separated (#1934)."""
+
+    @override
+    def setUp(self) -> None:
+        """Give each row a directory of its own."""
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.file = Path(self.dir.name) / "out" / "job.jsonl"
+
+    def feed(self, bash: str, text: str) -> subprocess.CompletedProcess[str]:
+        """Pipe `text` into org_finding_lines under one bash.
+
+        Returns:
+            The finished process.
+
+        """
+        self.file.unlink(missing_ok=True)
+        return subprocess.run(
+            [bash, "-euo", "pipefail", "-c", LINES_READER],
+            input=text,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=hermetic.env(
+                MISE_TASK_NAME="lint:demo", ORG_FINDINGS=str(self.file), PYTHONUTF8="1"
+            ),
+            check=False,
+        )
+
+    def records(self) -> list[dict[str, object]]:
+        """Read back every record the row appended.
+
+        Returns:
+            The records, in order; none when no file was written.
+
+        """
+        if not self.file.exists():
+            return NO_RECORDS
+        return [
+            decoded.as_object(decoded.load_json(line), "a record")
+            for line in self.file.read_text(encoding="utf-8").splitlines()
+        ]
+
+    def test_each_line_is_one_finding(self) -> None:
+        """Empty subject, detail, a tab in the message: printed and recorded."""
+        text = f"{US}no subject\nf.yml{US}is wrong{US}first{US}second\ns{US}a\tb\n"
+        printed = (
+            "lint:demo: no subject\n"
+            "lint:demo: f.yml: is wrong\n  first\n  second\n"
+            "lint:demo: s: a\tb\n"
+        )
+        none: list[str] = []
+        expected: list[dict[str, object]] = [
+            {
+                "v": 1,
+                "task": "lint:demo",
+                "subject": "",
+                "message": "no subject",
+                "detail": none,
+            },
+            {
+                "v": 1,
+                "task": "lint:demo",
+                "subject": "f.yml",
+                "message": "is wrong",
+                "detail": ["first", "second"],
+            },
+            {
+                "v": 1,
+                "task": "lint:demo",
+                "subject": "s",
+                "message": "a\tb",
+                "detail": none,
+            },
+        ]
+        for label, bash in bashes():
+            with self.subTest(bash=label):
+                done = self.feed(bash, text)
+                self.assertEqual((done.returncode, done.stdout), (0, ""))
+                self.assertEqual(done.stderr, printed)
+                self.assertEqual(self.records(), expected)
+
+    def test_a_line_with_no_separator_is_passed_through(self) -> None:
+        """A program's own summary goes to stdout and records nothing."""
+        for label, bash in bashes():
+            with self.subTest(bash=label):
+                done = self.feed(bash, "all clean\n")
+                self.assertEqual(
+                    (done.returncode, done.stdout, done.stderr), (0, "all clean\n", "")
+                )
+                self.assertEqual(self.records(), NO_RECORDS)
+
+    def test_a_last_line_without_a_newline_is_read(self) -> None:
+        """The final finding is not lost for want of a newline."""
+        for label, bash in bashes():
+            with self.subTest(bash=label):
+                done = self.feed(bash, f"{US}last")
+                self.assertEqual(done.stderr, "lint:demo: last\n")
+
+
 if __name__ == "__main__":
     unittest.main()

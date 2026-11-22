@@ -169,10 +169,11 @@ def run(
                 (bindir / "hypothesis").chmod(0o755)
             env["PATH"] = f"{bindir}{os.pathsep}{env['PATH']}"
             env |= {"STUB_LOG": str(log), "STUB_VERSION": pinned(), **stub}
+        as_mise = hermetic.task_run("lint:python-types", body())
         done = subprocess.run(
-            [BASH, "-euo", "pipefail", "-c", body()],
+            as_mise.argv,
             cwd=tree,
-            env=env,
+            env=env | as_mise.env,
             capture_output=True,
             text=True,
             check=False,

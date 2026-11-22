@@ -86,10 +86,11 @@ def lint(files: dict[str, str]) -> subprocess.CompletedProcess[str]:
             path.write_text(text, encoding="utf-8")
         subprocess.run([GIT, "init", "-q"], cwd=tree, env=env, check=True)
         subprocess.run([GIT, "add", "--", *files], cwd=tree, env=env, check=True)
+        as_mise = hermetic.task_run("lint:signer-pin", body())
         return subprocess.run(
-            [BASH, "-euo", "pipefail", "-c", body()],
+            as_mise.argv,
             cwd=tree,
-            env=env,
+            env=env | as_mise.env,
             capture_output=True,
             text=True,
             check=False,

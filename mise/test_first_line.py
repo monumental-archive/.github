@@ -63,10 +63,11 @@ class FirstLineOfALongListing(unittest.TestCase):
             subprocess.run([GIT, "add", "."], cwd=tree, env=env, check=True)
             listing = "".join(f"{name}\n" for name in hermetic.tracked(tree))
             self.assertGreater(len(listing.encode()), 8 * 65536)
+            as_mise = hermetic.task_run("lint:licence", body())
             done = subprocess.run(
-                [BASH, "-euo", "pipefail", "-c", body()],
+                as_mise.argv,
                 cwd=tree,
-                env=env,
+                env=env | as_mise.env,
                 capture_output=True,
                 text=True,
                 check=False,

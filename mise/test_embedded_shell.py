@@ -918,10 +918,11 @@ def run_task(root: Path, name: str) -> subprocess.CompletedProcess[str]:
 
     """
     env = {**CLEAN_ENV, "ORG_BELT_DIR": str(_HERE)}
+    as_mise = hermetic.task_run(name, task_body(name))
     return subprocess.run(
-        [BASH, "-euo", "pipefail", "-c", task_body(name)],
+        as_mise.argv,
         cwd=root,
-        env=env,
+        env=env | as_mise.env,
         capture_output=True,
         text=True,
         check=False,

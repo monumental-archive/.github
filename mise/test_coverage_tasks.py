@@ -386,10 +386,11 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
     if measured:
         plant_run(tmp / "run", python=python_measured)
     init_tree(tree, env, tracked, commit=commit)
+    as_mise = hermetic.task_run(task, measuring_step(task))
     done = subprocess.run(
-        [BASH, "-euo", "pipefail", "-c", measuring_step(task)],
+        as_mise.argv,
         cwd=tree,
-        env=env,
+        env=env | as_mise.env,
         capture_output=True,
         text=True,
         check=False,

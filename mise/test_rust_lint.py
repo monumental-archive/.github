@@ -136,14 +136,9 @@ class EveryMemberIsLinted(unittest.TestCase):
                 (bindir / name).write_text(text, encoding="utf-8")
                 (bindir / name).chmod(0o755)
             log = root / "clippy.log"
-            # As mise runs a body: the task's name, which the finding writer
-            # reads (#1890), and the belt's BASH_ENV, which gives the body the
-            # writer (#1934).
             env = hermetic.env(
                 root / "home",
                 ORG_BELT_DIR=str(BELT),
-                MISE_TASK_NAME="lint:rust",
-                BASH_ENV=str(BELT / "findings.sh"),
             )
             subprocess.run([GIT, "init", "-q"], cwd=tree, env=env, check=True)
             subprocess.run([GIT, "add", "."], cwd=tree, env=env, check=True)
@@ -151,10 +146,11 @@ class EveryMemberIsLinted(unittest.TestCase):
             env["STUB_METADATA"] = str(METADATA)
             env["CLIPPY_LOG"] = str(log)
             env |= stub
+            as_mise = hermetic.task_run("lint:rust", body())
             done = subprocess.run(
-                [BASH, "-euo", "pipefail", "-c", body()],
+                as_mise.argv,
                 cwd=tree,
-                env=env,
+                env=env | as_mise.env,
                 capture_output=True,
                 text=True,
                 check=False,

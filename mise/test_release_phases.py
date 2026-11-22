@@ -176,10 +176,11 @@ def lint(workflow: str, name: str = "publish.yml") -> subprocess.CompletedProces
         (flows / name).write_text(workflow, encoding="utf-8")
         env = hermetic.env()
         env |= {"ORG_BELT_DIR": str(BELT), "ORG_CANON_DIR": str(CANON)}
+        as_mise = hermetic.task_run("lint:release-phases", BODY)
         return subprocess.run(
-            [BASH, "-euo", "pipefail", "-c", BODY],
+            as_mise.argv,
             cwd=tmp,
-            env=env,
+            env=env | as_mise.env,
             capture_output=True,
             text=True,
             check=False,

@@ -178,16 +178,14 @@ class GoFuzzSeeds(unittest.TestCase):
         env = CLEAN_ENV | {
             "PATH": os.pathsep.join(path),
             "PLANT_LOG": str(self.log),
-            # As mise runs a body: the task's name, which the finding writer
-            # reads (#1890), and the belt's BASH_ENV, which gives the body the
-            # writer (#1934).
-            "MISE_TASK_NAME": "lint:go-fuzz-seeds",
-            "BASH_ENV": str(BELT / "findings.sh"),
         }
+        as_mise = hermetic.task_run(
+            "lint:go-fuzz-seeds", task_body("lint:go-fuzz-seeds")
+        )
         done = subprocess.run(
-            [BASH, "-euo", "pipefail", "-c", task_body("lint:go-fuzz-seeds")],
+            as_mise.argv,
             cwd=self.root,
-            env=env,
+            env=env | as_mise.env,
             capture_output=True,
             text=True,
             check=False,

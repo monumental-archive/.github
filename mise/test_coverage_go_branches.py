@@ -264,13 +264,11 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
     subprocess.run([GIT, "init", "-q"], cwd=tree, env=env, check=True)
     if tracked:
         subprocess.run([GIT, "add", *tracked], cwd=tree, env=env, check=True)
+    as_mise = hermetic.task_run(task, measuring_step(task))
     done = subprocess.run(
-        [BASH, "-euo", "pipefail", "-c", measuring_step(task)],
+        as_mise.argv,
         cwd=tree,
-        # As mise runs a body: the task's name, which the finding writer
-        # reads (#1890), and the belt's BASH_ENV, which gives the body
-        # the writer (#1934).
-        env=env | {"MISE_TASK_NAME": task, "BASH_ENV": str(BELT / "findings.sh")},
+        env=env | as_mise.env,
         capture_output=True,
         text=True,
         check=False,

@@ -947,7 +947,8 @@ class LegRows(unittest.TestCase):
         )
         check = as_object(TASKS["coverage:check"], "coverage:check")
         script = as_str(check["run"], "coverage:check's run")
-        return run([BASH, "-euo", "pipefail", "-c", script], env, tree)
+        as_mise = hermetic.task_run("coverage:check", script)
+        return run(as_mise.argv, env | as_mise.env, tree)
 
     PYTHON_HELD = (
         "coverage:check: python leg holds the floor 80.0 (90.0%)\n"
