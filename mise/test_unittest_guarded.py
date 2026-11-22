@@ -661,7 +661,9 @@ class Cost(Planted):
 
     def test_the_cost_lists_the_slowest_files_first(self) -> None:
         """Planted seconds: listed slowest first, then the totals."""
-        result = ug.GuardedResult(io.StringIO(), descriptions=True, verbosity=1)
+        # The runner wraps the stream as unittest's results expect it.
+        stream = ug.GuardedRunner(stream=io.StringIO()).stream
+        result = ug.GuardedResult(stream, descriptions=True, verbosity=1)
         result.files = {"test_quick": 0.1, "test_slow": 0.4, "test_middle": 0.25}
         result.workers = 3
         result.wall = 0.5
@@ -697,8 +699,9 @@ class Cost(Planted):
                     block[0], f"cost of {root}: the 3 slowest of 3 test files, seconds"
                 )
                 named = files(block)
-                names = sorted(pair[0] for pair in named)
-                self.assertEqual(names, sorted(sleeps))
+                names: list[str] = sorted(pair[0] for pair in named)
+                planted: list[str] = sorted(sleeps)
+                self.assertEqual(names, planted)
                 for name, seconds in named:
                     self.assertGreaterEqual(seconds, sleeps[name])
                 cpu, used, wall = totals(block, str(root))

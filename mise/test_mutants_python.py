@@ -960,8 +960,11 @@ class Order(Planted):
             decoded.as_str(decoded.as_array(row, "a test")[0], "a test's file")
             for row in decoded.as_array(document.get("tests"), "tests")
         ]
-        self.assertEqual(sorted(recorded), sorted(millis))
-        document["tests"] = [[test, millis[test]] for test in recorded]
+        planted: list[str] = sorted(millis)
+        found: list[str] = sorted(recorded)
+        self.assertEqual(found, planted)
+        rows: list[list[str | int]] = [[test, millis[test]] for test in recorded]
+        document["tests"] = rows
         (plan / "plan.json").write_text(json.dumps(document), encoding="utf-8")
         pragmas = self.tmp / "pragmas.tsv"
         pragmas.touch()
