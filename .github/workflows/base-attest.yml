@@ -97,7 +97,7 @@ jobs:
           "${ORG_PYTHON}" release/matrix.py base-images docker/pgrx-base-images.toml \
             >> "${GITHUB_OUTPUT}"
   attest:
-    name: Attest ${{ matrix.role }} base pg${{ matrix.pg }}
+    name: Attest the base image (${{ matrix.role }} pg${{ matrix.pg }})
     needs: plan
     strategy:
       # One image's failure must not hide the approval state of the rest.
@@ -195,11 +195,12 @@ jobs:
           predicate-type: https://monumental-archive.github.io/attestations/base-image-approval/v1
           predicate-path: predicate.json
 
-  # Every scheduled workflow ends here (#1887): while a run on the
-  # default branch has a red job, one issue titled "<workflow> is red"
-  # and labelled red-check holds each red job and its log tail; the next
-  # green run closes it. mise/standing_issue.py has the outcomes. Only
-  # `needs:` names the jobs above, so it grows with them.
+  # Every scheduled workflow ends here (#1887), with one issue per red
+  # job (#1966): for each red job of a run on the default branch, one
+  # issue titled "red: <job> (<workflow>)" and labelled red-check holds
+  # its findings and each red leg's log tail; the next run with every
+  # leg green or skipped closes it. mise/standing_issue.py has the
+  # outcomes. Only `needs:` names the jobs above, so it grows with them.
   report:
     name: Report red jobs
     needs:
@@ -210,7 +211,7 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read # the checkout
-      issues: write # the workflow's one red-check issue
+      issues: write # each red job's red-check issue
       actions: read # the run's job list and each red job's log
     steps:
       - name: Check out repository
