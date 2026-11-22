@@ -242,8 +242,7 @@ class MissingSibling(unittest.TestCase):
         """Run one helper copied into a tree that lacks its sibling.
 
         `beside` names the files copied with it: the finding writer, for
-        a helper that reports the missing sibling through it. A name with
-        a slash is a path from the canon root, copied to the same path.
+        a helper that reports the missing sibling through it.
 
         Returns:
             The finished process.
@@ -255,11 +254,7 @@ class MissingSibling(unittest.TestCase):
         target.parent.mkdir(parents=True)
         shutil.copy(source, target)
         for name in beside:
-            if "/" in name:
-                (Path(tmp.name) / name).parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy(_HERE.parent / name, Path(tmp.name) / name)
-            else:
-                shutil.copy(source.parent / name, target.parent / name)
+            shutil.copy(source.parent / name, target.parent / name)
         return subprocess.run(
             [sys.executable, str(target), "--help"],
             capture_output=True,
@@ -284,11 +279,21 @@ class MissingSibling(unittest.TestCase):
 
     def test_publish_crates_without_crates_index(self) -> None:
         """publish_crates.py names mise/crates_index.py and exits non-zero."""
-        r = self.alone(
-            _HERE.parent / "release" / "publish_crates.py",
-            "release/publish_crates.py",
-            "mise/findings.py",
-            "mise/workflow_command.py",
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        helper = "release/publish_crates.py"
+        # A stub of its own text, so the helper resolves its siblings in
+        # this tree; the writer beside it, the missing sibling removed.
+        root = hermetic.canon(
+            tmp.name, stubs={helper: (_HERE.parent / helper).read_text()}
+        )
+        (root / "mise" / "crates_index.py").unlink()
+        r = subprocess.run(
+            [sys.executable, str(root / helper), "--help"],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=hermetic.env(MISE_TASK_NAME="lint:bash-portability"),
         )
         self.assertNotEqual(r.returncode, 0)
         self.assertEqual(
