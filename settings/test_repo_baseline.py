@@ -348,6 +348,32 @@ class PublishEnvironment(ForgeCase):
         )
         self.assertEqual(1, done.returncode)
 
+    def test_an_undecodable_publish_yml_is_unreadable(self) -> None:
+        """A publish.yml that does not decode is unreadable, not an entry (#1997).
+
+        The decode was unchecked inside a function whose status both
+        callers read in a condition, where bash suspends `set -e`: a
+        failed `base64 -d` printed its error and returned 0, "entry
+        workflow", so check read the repository as one that needs a
+        publish environment and apply created one.
+        """
+        repo = ROSTER[0]
+        self.forge.answer(
+            f"repos/{ORG}/{repo}/contents/.github/workflows/publish.yml",
+            {"content": "@not base64@"},
+        )
+        done = self.forge.check()
+        self.assertIn(
+            f"repo-baseline: cannot read {repo}'s publish.yml:"
+            " publish.yml did not decode\n",
+            done.stderr,
+        )
+        self.assertNotIn("has publish.yml but no publish environment", done.stderr)
+        touched = [a for _, a in self.forge.calls() if "environments/publish" in a]
+        want: list[str] = []
+        self.assertEqual(want, touched)
+        self.assertEqual(1, done.returncode)
+
 
 class Signoff(ForgeCase):
     """The org-enforced commit signoff is read back, not assumed (#104)."""
@@ -394,6 +420,44 @@ class RefusedRead(ForgeCase):
             done.stderr,
         )
         self.assertEqual("", done.stdout)
+
+
+class UnparsableBody(ForgeCase):
+    """A body the check cannot parse is not a clean org (#2001).
+
+    The loops read jq's rows through process substitution, so a jq
+    that failed read as no rows, and the check printed its clean line.
+    """
+
+    def assert_not_clean(self, done: subprocess.CompletedProcess[str]) -> None:
+        """Assert the run stopped nonzero and never said it found no drift."""
+        self.assertNotEqual(0, done.returncode, done.stdout + done.stderr)
+        self.assertNotIn("no drift", done.stdout)
+
+    def test_an_unparsable_packages_body_is_not_clean(self) -> None:
+        """The org's packages served as an object, not a list."""
+        self.forge.answer(PACKAGES, {"a": 1})
+        self.assert_not_clean(self.forge.check())
+
+    def test_an_unparsable_rulesets_body_is_not_clean(self) -> None:
+        """A repository's own rulesets served as an object, not a list.
+
+        The repository is private: a public one with no rows read still
+        drifts on its missing merge-queue ruleset, which would hide the
+        unparsable body behind a finding about something else.
+        """
+        repo = ROSTER[0]
+        settings = {k: v for k, v in BASELINE.items() if k != "labels"}
+        settings |= {
+            "web_commit_signoff_required": True,
+            "default_branch": "main",
+            "visibility": "private",
+        }
+        self.forge.answer(f"repos/{ORG}/{repo}", settings)
+        self.forge.answer(
+            f"repos/{ORG}/{repo}/rulesets?includes_parents=false", {"a": 1}
+        )
+        self.assert_not_clean(self.forge.check())
 
 
 if __name__ == "__main__":

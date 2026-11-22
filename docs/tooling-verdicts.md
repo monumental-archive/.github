@@ -62,7 +62,7 @@ honestly blocked on.
 | `lint:test-adoption` (the belt's own rule, `mise/testing_adoption.py`; no tool) | Adoption is required, not opt-in (#1910): the four mutation legs and `coverage:check` skip clean where their file is absent, so the gate requires the file — a repository that ships Rust (a `Cargo.toml` outside `vendor/` and `fuzz/`), Go (a root `go.mod`), Python (a `*.py` that is not `test_*.py`, `prop_*.py` or `conftest.py`) or TypeScript (a source that is not a declaration, test or spec) tracks that language's mutation file above and a `.coverage-floor`, red by name otherwise; file names only, nothing opened; what each file holds stays its leg's business |
 | cargo-auditable (`github:rust-secure-code/cargo-auditable`, repo-side pin, upstream sha256s) | Release build input of every class that ships a Rust binary (#1334), prebuilt where the `cargo:` backend compiled it per job (187–252 s on edtf v1.3.5). Not `aqua:`: mise's baked registry has no entry (mise 2026.11.6: `no aqua-registry found for rust-secure-code/cargo-auditable`). `mise lock` at 0.7.7 records, for all four platforms, checksums equal to upstream's `.tar.xz.sha256` files (measured 2026-11-17); on Linux mise selects the `unknown-linux-gnu` asset, not musl. A locked install took 2.9 s. Reopen when a mise release's baked aqua registry carries the package |
 | sqlfluff (`pipx:` backend via aqua-backed uv) | SQL lint in the gate (`lint:sql`, all core rules, dialect postgres) + `fix:sql` — proven first in monumental-archive-db |
-| shellcheck + shfmt over mise task bodies (`mise/belt_shell.py`) | The third shell surface in the gate (`lint:belt-shell`) at `--enable=all` with nothing excluded, this file's own tasks included — plus `fix:belt-shell` |
+| shellcheck + shfmt over mise task bodies (`mise/belt_shell.py`) | The third shell surface in the gate (`lint:belt-shell`) at the delivered level (`enable=all`, SC2310 held off, #1997), this file's own tasks included — plus `fix:belt-shell` |
 | clippy (rustup component of the repo's own pin) | Rust lint in the gate (`lint:rust`): every group at deny, restriction minus thirteen named contradictions, `-D warnings`, org knobs in the canon's `mise/clippy.toml`, every workspace member linted as its own package — plus `fix:rust` |
 | rustfmt (rustup component of the repo's own pin) | Rust format check in the gate (`lint:rust`, same task): the canon's `mise/rustfmt.toml` at rustfmt's **stable** maximum, `style_edition` pinned — plus `fix:rust` |
 | a second pinned `rust` toolchain (`core:rust`, repo-side) | The declared minimum compiled in the gate (`lint:msrv`): every crate declaring `rust-version` is built at a pin of exactly that version, and `mise/msrv_plan.py` holds `Cargo.toml` and `mise.toml` in agreement about which version that is |
@@ -2656,6 +2656,37 @@ shellcheck's default `style`, which is already the lowest — and
 `--check-sourced` is left off with its reason recorded in the file:
 every tracked script is linted directly, so it duplicates findings
 rather than adding any.
+
+Ten of the eleven optional checks are on. check-set-e-suppressed
+(SC2310) is held off in the delivered level, once (#1997): it reports
+each call of a function in an `if`, `!`, `&&` or `||`, because bash
+suspends `set -e` inside a function called that way, and the belt
+records a red and carries on exactly so. It stood suppressed at all 31
+of its sites. Measured on shellcheck 0.11.0 with the delivered rcfile,
+it cannot do the job those directives credited it with: it reports
+the call and never reads the callee, so a function whose
+`base64 -d` is unchecked and one that checks every step get the same
+words; it is silent in any file that does not itself `set -e`, which
+is every sourced library (`mise/pgrx-env.sh` calls functions in
+conditions some 25 times, unseen); and bash has no conforming form
+for record-and-carry-on — a `try "$@"` helper hides the call and
+leaves `set -e` off inside, and `( set -e; f )` restores it and loses
+every variable the callee sets for its caller. It fired at the two
+real defects behind its sites (`publish_yml_is_entry`'s unchecked
+decode, `belt-current.sh`'s unchecked `sort -V`) in the same words as
+the 29 careful ones, and caught neither. `lint:actions` restates the
+exclusion as `--exclude=SC2310`, since it runs under `--norc`.
+
+The rule this leaves in `mise/shellcheckrc`: a check leaves that file
+only when it is measured wrong as a class — it cannot separate its
+true findings from its false ones, and every site suppresses it — and
+the entry carries that measurement; a check wrong at one site still
+gets a site directive with a reason. The law SC2310 stood in for, and
+that no linter reads: **a function whose status is read checks each
+of its own steps and returns a status for each failure**, because
+bash suspends `set -e` inside it. Tests are what reach that property —
+`settings/test_repo_baseline.py` serves a publish.yml that does not
+decode — not a directive at the call.
 
 **editorconfig-checker, and the `.editorconfig` it lands with** (#403).
 The point of doing it second: the file is the org's first *written*

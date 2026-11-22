@@ -64,12 +64,10 @@ emit() {
 # directory holding a checked-in <ext>.control file. No control files, no
 # extension crates, nothing to derive — skip clean, per belt convention.
 controls=()
-# shellcheck disable=SC2312  # process substitution: capturing first would
-# turn an empty result into one blank line, which is a worse bug than the
-# masked status. The producing command is git/jq over local state.
+tracked_controls=$(git ls-files '*.control')
 while IFS= read -r tracked_control; do
   [[ -n ${tracked_control} ]] && controls+=("${tracked_control}")
-done < <(git ls-files '*.control')
+done <<< "${tracked_controls}"
 if ((${#controls[@]} == 0)); then
   echo "no extension control files tracked; pgrx upgrade derivation not applicable"
   emit "files="

@@ -405,13 +405,15 @@ class ShellEmbedded(Planted):
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
 
 
-# A step sourcing the canon's writer and calling it in an && list, where
-# set -e is off (SC2310): the runner red #1710 met, which a laptop with
-# no `.org-canon` never saw (#1715).
+# A step sourcing the canon's writer and calling org_error with no
+# arguments, which it reads: SC2119, a finding shellcheck can make only
+# once it has followed the source into the canon. Unfollowed, the same
+# line gives SC1091 alone (#1715, #1997). The runner red #1710 met was
+# such a source, which a laptop with no `.org-canon` never saw.
 SOURCED = [
     "set -euo pipefail",
     ". .org-canon/mise/workflow-command.sh",
-    '[[ -n ${X:-} ]] || { org_error "no X" && exit 1; }',
+    "[[ -n ${X:-} ]] || { org_error; exit 1; }",
 ]
 
 
@@ -446,14 +448,14 @@ class CanonSources(Planted):
         ).stdout
 
     def test_lint_actions_follows_the_canon_source(self) -> None:
-        """SC2310 is named, with no `.org-canon` in the tree."""
+        """SC2119 is named, with no `.org-canon` in the tree."""
         self.plant({".github/workflows/w.yml": template("Refuse", SOURCED)})
         before = self.porcelain()
         self.assertFalse((self.tree / ".org-canon").exists())
         self.env |= task_env("lint:actions")
         done = self.run_task("lint:actions")
         self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
-        self.assertIn("SC2310", done.stdout + done.stderr)
+        self.assertIn("SC2119", done.stdout + done.stderr)
         self.assertEqual(self.porcelain(), before)
 
     def test_lint_shell_embedded_follows_the_canon_source(self) -> None:
@@ -463,7 +465,7 @@ class CanonSources(Planted):
         done = self.run_task("lint:shell-embedded")
         self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
         self.assertIn(".github/workflows/w.yml:10:", done.stderr)
-        self.assertIn("[SC2310]", done.stderr)
+        self.assertIn("[SC2119]", done.stderr)
         self.assertEqual(self.porcelain(), before)
 
     def test_a_source_the_canon_does_not_hold_is_red_by_name(self) -> None:
