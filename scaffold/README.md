@@ -108,8 +108,9 @@ it and never will; see the entry below.
 - `renovate.json` — extends the org preset
 - `lefthook.yml` — pulls the org git hooks by remote. Once per clone:
   `lefthook install`, then `lefthook run post-checkout`, which links
-  `.config/mise/` to the belt the gate stub pins (#1686); the hooks keep
-  that link current on every checkout, merge and rebase after
+  `.config/mise/` to the belt the gate stub pins (#1686); every hook
+  relinks first after that, and every belt task refuses another pin's
+  belt (#1988)
 - no `committed.toml`: the commit canon is delivered (#576). A repo that
   restricts its commit SCOPES declares them as `ORG_COMMIT_SCOPES` in
   `mise.toml` `[env]` and the belt composes the two — the rules have one

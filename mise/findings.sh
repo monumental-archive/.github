@@ -40,6 +40,17 @@
 # sources it, whatever its PATH holds, so the directory is found by
 # parameter expansion alone. A path with no slash is in this directory.
 
+# A belt that is not the one this tree pins answers for nothing (#1988).
+# The belt's [env] sets ORG_BELT_REFUSED to one line when the belt came
+# by the clone's link and names another pin's tree; empty otherwise.
+# Checked first, before this file loads anything, and with builtins
+# only: BASH_ENV sources this file before every task body, so this is
+# every belt task's refusal, ci included.
+if [[ -n ${ORG_BELT_REFUSED:-} ]]; then
+  printf '%s\n' "${ORG_BELT_REFUSED}" >&2
+  exit 1
+fi
+
 org__findings_dir=${BASH_SOURCE[0]%/*}
 [[ ${org__findings_dir} != "${BASH_SOURCE[0]}" ]] || org__findings_dir=.
 # shellcheck source=mise/workflow-command.sh
