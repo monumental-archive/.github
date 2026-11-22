@@ -316,6 +316,41 @@ class EverySuppressionIsAnExpect(unittest.TestCase):
         self.assert_passed(planted)
 
 
+class TheLadderNamesItsContradictions(unittest.TestCase):
+    """The ladder excludes single_call_fn and tests_outside_test_module (#1995).
+
+    Both were suppressed at every site in every Rust repository: the
+    first contradicts `too_many_lines` and cannot see a caller in
+    another crate, a wasm host or a macro; the second demands a module
+    that gates nothing in the `tests/` targets where it fires. The row
+    sources the real mise/clippy-ladder.sh, so a name dropped from the
+    list, or a pgrx-only list reintroduced beside it, goes red here.
+    """
+
+    def ladder(self, call: str) -> str:
+        """Source the belt's ladder and print one function's output."""
+        done = subprocess.run(
+            [BASH, "-c", f'. "$1" && {call}', "ladder", str(BELT / "clippy-ladder.sh")],
+            capture_output=True,
+            text=True,
+            env=hermetic.env(),
+            check=False,
+        )
+        self.assertEqual(0, done.returncode, done.stdout + done.stderr)
+        return done.stdout
+
+    def test_the_ladder_allows_both_lints(self) -> None:
+        """org_clippy_ladder prints an `-A` for each of the two."""
+        words = self.ladder("org_clippy_ladder").split()
+        allowed = [b for a, b in zip(words, words[1:], strict=False) if a == "-A"]
+        self.assertIn("clippy::single_call_fn", allowed)
+        self.assertIn("clippy::tests_outside_test_module", allowed)
+
+    def test_the_count_is_thirteen(self) -> None:
+        """org_clippy_contradiction_count prints 13."""
+        self.assertEqual("13\n", self.ladder("org_clippy_contradiction_count"))
+
+
 class TheStubOutlivesItsReader(unittest.TestCase):
     """The rustup stub answers 0 even when nobody reads it (#1623)."""
 
