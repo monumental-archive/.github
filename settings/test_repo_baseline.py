@@ -404,7 +404,7 @@ class UnparsableBody(ForgeCase):
     """
 
     def assert_not_clean(self, done: subprocess.CompletedProcess[str]) -> None:
-        """The run stops nonzero and never says it found no drift."""
+        """Assert the run stopped nonzero and never said it found no drift."""
         self.assertNotEqual(0, done.returncode, done.stdout + done.stderr)
         self.assertNotIn("no drift", done.stdout)
 
