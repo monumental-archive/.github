@@ -7113,6 +7113,12 @@ dir = "{{cwd}}"
 # Python dependencies; an action pin could name a release minutes old.
 # Passed on the command line, not in .pinact.yaml, so it holds in
 # consumer repos that carry no config and so the number has one home.
+#
+# pinact runs once, in its SARIF mode, through pinact_findings.py: each
+# result is a finding record (#1955), subject the file and the line in
+# the detail, and the exit status is pinact's own. The names go on one
+# command line, not through xargs: a split list is two reports and
+# xargs' 123 in place of pinact's status.
 run = '''
 set -euo pipefail
 . "${ORG_BELT_DIR}/action-files.sh"
@@ -7121,8 +7127,9 @@ files=$(action_files)
   echo "audit:action-pins: no workflows or actions, skipped"
   exit 0
 }
-xargs pinact run --config "${ORG_BELT_DIR}/pinact.yaml" --fix=false --verify-comment --verify-min-age <<< "${files}"
-echo "audit:action-pins: ok"
+names=()
+while IFS= read -r name; do names+=("${name}"); done <<< "${files}"
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/pinact_findings.py" --config "${ORG_BELT_DIR}/pinact.yaml" --fix=false --verify-comment --verify-min-age "${names[@]}"
 '''
 
 [tasks."audit:caller-permissions"]
