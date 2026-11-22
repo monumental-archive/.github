@@ -329,30 +329,33 @@ roll-forward.
   the push to the signer repository that minted it (`signer-branch`
   names a commit off its default branch, or one no branch holds).
   Reconciled certificates are in the run's log, one line each.
-- **rekor-monitor: the signer-identity watch is behind** (one standing
-  issue, its body replaced by every run that does not gain, closed by a
-  run that judges to the head): stele reads Fulcio's certificate log
-  from its checkpoint in up to fourteen sequential legs a run, and the
-  run did not gain on the log (#1353, #1339). Gaining is counted in
-  entries, from stele's own checkpoint: outstanding is its tree size
-  minus `next`, the first index not yet judged. The body names the
-  next index, the tree head, the outstanding count when the run
-  started and now, and the legs' result. A backlog alone is not this
-  issue: a run whose outstanding count fell is gaining. What opens it:
-  a run that did not advance the checkpoint (the log or the forge
-  throttled through every leg, reads that did not complete, every leg
-  killed before its save, stele refusing to start), and a run that
-  advanced but ended with no fewer entries outstanding than it started
-  with. A leg killed before its save persists nothing; the next leg
-  judges the range again. A tree head that does not extend the
-  checkpoint's is refused by name and the checkpoint is left as it
-  was: that is the log misbehaving, not the watch. A run with no
-  checkpoint refuses to start, by name; dispatch the workflow with
-  `start-at` set to the next index the last saved checkpoint recorded
-  (the alert job prints the newest checkpoint's next index every run),
-  never the log's head, which skips the unread range. `start-at` is
-  refused while a checkpoint exists, and only the first leg is given
-  it.
+- **red: the signer-identity watch is gaining on the log
+  (signer-identity-watch)** (the `gaining` job's red-check issue,
+  #1966; its finding is "the signer-identity watch is behind", #1967):
+  stele reads Fulcio's certificate log from its checkpoint in up to
+  fourteen sequential legs a run, and the run did not gain on the log
+  (#1353, #1339). Gaining is counted in entries, from stele's own
+  checkpoint: outstanding is its tree size minus `next`, the first
+  index not yet judged. The finding names the next index, the tree
+  head, the outstanding count when the run started and now, this
+  run's outcome, and each reason a leg stopped with the number of legs
+  that gave it (stele's `stopped` fact; "no report" for a leg that
+  handed none on). A backlog alone is not this issue: a run whose
+  outstanding count fell is gaining. What makes the job red: a run
+  that did not advance the checkpoint (the log or the forge throttled
+  through every leg, reads that did not complete, every leg killed
+  before its save, stele refusing to start), and a run that advanced
+  but ended with no fewer entries outstanding than it started with. A
+  leg is red only for its own failure, never for judging nothing. A
+  leg killed before its save persists nothing; the next leg judges
+  the range again. A tree head that does not extend the checkpoint's
+  is refused by name and the checkpoint is left as it was: that is the
+  log misbehaving, not the watch. A run with no checkpoint refuses to
+  start, by name; dispatch the workflow with `start-at` set to the
+  next index the last saved checkpoint recorded (the gaining job
+  prints the newest checkpoint's next index every run), never the
+  log's head, which skips the unread range. `start-at` is refused
+  while a checkpoint exists, and only the first leg is given it.
 - **Never watched (recorded 2026-11-15, #1237)**: issuance to the
   signer identity before the certificate-log checkpoint was founded.
   The Rekor scan this replaced completed no run after 2026-10-18, so

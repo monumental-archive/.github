@@ -12,8 +12,8 @@ The properties of `test_verdict.py`'s fixed rows (#1557):
   saved flag, finding count, the report's `judged` fact and whether the
   report could be read: no status is red, not saved is red, a report
   that could not be read is red, any finding is red whatever the exit
-  code, 0 is green, 4 is green exactly when stele judged something,
-  and anything else is red.
+  code, 0 and 4 are green whether or not stele judged anything
+  (#1967), and anything else is red.
 - V: a report that holds a finding is red whatever the exit code and
   however the rest of the report reads. A saved report whose facts were
   not stele's shape read as unreadable with no findings, and judged
@@ -258,10 +258,8 @@ class Table(unittest.TestCase):
             self.assertEqual(why, verdict.KILLED)
         elif not leg["saved"] or missing or leg["found"]:
             expected = True
-        elif code == "0":
+        elif code in {"0", "4"}:
             expected = False
-        elif code == "4":
-            expected = judged in {None, "none"}
         else:
             expected = True
         self.assertEqual(red, expected, why)

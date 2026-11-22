@@ -1,23 +1,21 @@
 #!/usr/bin/env python3
-"""watch_issue.py's checkpoints and verdict, on inputs nobody wrote down.
+"""gain.py's checkpoints, verdict and reasons, on inputs nobody wrote down.
 
-The properties of `test_watch_issue.py`'s fixed rows (#1557):
+The properties of `test_gain.py`'s fixed rows (#1557, #1967):
 
 - R: reading a checkpoint never raises, whatever bytes the file holds,
-  and what it read is judged and written into a body without raising.
-  A checkpoint it cannot read is a `Checkpoint` naming why, and the run
-  goes red behind. A `next` of Infinity, a timestamp past the platform's
-  range and JSON nested past the parser's depth each raised a traceback
-  until this file found them.
+  and what it read is judged and written into the finding's detail
+  without raising. A checkpoint it cannot read is a `Checkpoint` naming
+  why, and the run goes red behind. A `next` of Infinity, a timestamp
+  past the platform's range and JSON nested past the parser's depth
+  each raised a traceback until this file found them.
 - V: with both checkpoints read and the newest short of the log's head,
-  the run is red exactly when `next` did not advance, and gaining
-  (nothing to keep) exactly when it advanced and the outstanding count
-  fell. At the head it is caught up whatever the start; a founding run
-  is green. The head's timestamp never changes the verdict.
-- T: what the body writes as "Behind since" and "Runs behind since it
-  opened", the next run reads back to the same value. Both are read
-  from one line of the previous body, so the values written are lines:
-  a run URL and the forge's job results, never text that spans lines.
+  the run is green exactly when it advanced and the outstanding count
+  fell. At the head it is green whatever the start; a founding run is
+  green. The head's timestamp never changes the verdict.
+- C: whatever the legs' reports hold, the reason lines count every leg
+  once: their counts sum to the number of legs, a leg with no report
+  counted as one.
 
 Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
@@ -29,7 +27,8 @@ import unittest
 from pathlib import Path
 from typing import override
 
-import watch_issue as standing
+import gain
+import verdict
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
@@ -86,14 +85,16 @@ def encoded(value: object) -> bytes:
     return json.dumps(value).encode()
 
 
-def one_line(text: str) -> bool:
-    """Say whether a drawn text holds no newline.
+def stopped_report(reason: str) -> bytes:
+    """Write a report in stele's shape that stopped for a reason.
 
     Returns:
-        True for a single line.
+        The file's bytes.
 
     """
-    return "\n" not in text
+    fact: dict[str, object] = {"name": "stopped", "value": reason}
+    report: dict[str, object] = {"target": verdict.TARGET, "facts": [fact]}
+    return json.dumps(report).encode()
 
 
 JSON: st.SearchStrategy[object] = st.recursive(SCALAR, nested, max_leaves=12)
@@ -115,8 +116,12 @@ CONTENT = st.one_of(
     CHECKPOINT.map(encoded),
 )
 KEPT = st.sampled_from(["true", "false", ""]) | st.text(max_size=5)
-# A line: what the workflow passes as a run URL or the legs' results.
-LINE = st.text(min_size=1, max_size=40).filter(one_line)
+# A leg's report: any bytes, or stele's shape stopped for one of a few
+# reasons, so reasons repeat across legs.
+REPORT = st.one_of(
+    CONTENT,
+    st.sampled_from(["throttled", "budget", ""]).map(stopped_report),
+)
 POSITION = st.integers(0, 10**12)
 MILLIS = st.integers(0, 4 * 10**12)
 # A checkpoint stele could write: next index, tree size, head time (ms).
@@ -152,7 +157,7 @@ class Scratch(unittest.TestCase):
         self.scratch.cleanup()
 
     @staticmethod
-    def read(path: Path, content: bytes) -> standing.Checkpoint:
+    def read(path: Path, content: bytes) -> gain.Checkpoint:
         """Write a checkpoint file and read it back.
 
         Returns:
@@ -160,7 +165,7 @@ class Scratch(unittest.TestCase):
 
         """
         path.write_bytes(content)
-        return standing.read_checkpoint(path)
+        return gain.read_checkpoint(path)
 
 
 class Reading(Scratch):
@@ -183,20 +188,17 @@ class Reading(Scratch):
         first = self.read(self.start, start)
         last = self.read(self.end, end)
         for point in (first, last):
-            self.assertIsInstance(point, standing.Checkpoint)
+            self.assertIsInstance(point, gain.Checkpoint)
             read = (point.next, point.size, point.when)
             if point.missing is None:
                 self.assertNotIn(None, read)
             else:
                 self.assertEqual(read, (None, None, None))
-        outcome = standing.judge(first, kept, last)
+        outcome = gain.judge(first, kept, last)
         if last.missing is not None:
             self.assertTrue(outcome.red)
-            self.assertEqual(outcome.standing, "behind")
-        run = standing.Run(
-            standing.start_count(first, kept), outcome.why, "success", "u"
-        )
-        standing.body(last, run, "u", 1)
+        lines = gain.detail(gain.start_count(first, kept), last, outcome.why, [])
+        self.assertEqual(len(lines), 5)
 
 
 class Gained(Scratch):
@@ -209,78 +211,67 @@ class Gained(Scratch):
     def test_gained_exactly_when_advanced(
         self, start: tuple[int, int, int], end: tuple[int, int, int]
     ) -> None:
-        """Red when not advanced; gaining when advanced and the count fell."""
+        """Green exactly when advanced and the count fell."""
         (start_next, start_size, _), (end_next, end_size, end_ms) = start, end
         first = self.read(self.start, doc(start))
         last = self.read(self.end, doc(end))
-        outcome = standing.judge(first, "true", last)
+        outcome = gain.judge(first, "true", last)
         if end_size == end_next:
-            self.assertEqual((outcome.red, outcome.standing), (False, "caught-up"))
+            self.assertEqual(outcome, gain.Outcome(red=False, why=gain.AT_HEAD))
             return
         advanced = end_next > start_next
-        self.assertEqual(outcome.red, not advanced, outcome.why)
         fell = (end_size - end_next) < (start_size - start_next)
-        gaining = outcome.standing is None
-        self.assertEqual(gaining, advanced and fell, outcome.why)
-        if not gaining:
-            self.assertEqual(outcome.standing, "behind")
+        self.assertEqual(outcome.red, not (advanced and fell), outcome.why)
         # The head's time is not a position: moving it changes nothing.
         moved = self.read(self.end, doc((end_next, end_size, end_ms // 2)))
-        self.assertEqual(standing.judge(first, "true", moved), outcome)
+        self.assertEqual(gain.judge(first, "true", moved), outcome)
 
     @given(CONTENT, KEPT, POSITION, MILLIS)
     def test_head_is_caught_up(
         self, start: bytes, kept: str, size: int, millis: int
     ) -> None:
-        """At the head: caught up and green, whatever the start."""
+        """At the head: green, whatever the start."""
         first = self.read(self.start, start)
         last = self.read(self.end, doc((size, size, millis)))
-        outcome = standing.judge(first, kept, last)
-        self.assertEqual((outcome.red, outcome.standing), (False, "caught-up"))
+        outcome = gain.judge(first, kept, last)
+        self.assertEqual(outcome, gain.Outcome(red=False, why=gain.AT_HEAD))
 
     @given(CONTENT, POINT)
     def test_founding_run_is_green(
         self, start: bytes, end: tuple[int, int, int]
     ) -> None:
-        """No checkpoint kept at the start: green, nothing to keep, unless at head."""
-        nxt, size, _ = end
+        """No checkpoint kept at the start: green."""
         first = self.read(self.start, start)
         last = self.read(self.end, doc(end))
-        outcome = standing.judge(first, "false", last)
-        self.assertFalse(outcome.red)
-        if size != nxt:
-            self.assertIsNone(outcome.standing)
+        self.assertFalse(gain.judge(first, "false", last).red)
 
 
-class BodyRoundTrip(unittest.TestCase):
-    """T: the two values an edit carries forward read back unchanged."""
+# An empty report, one nested past the parser, and one of another shape.
+MIXED: list[bytes] = [b"", DEEP, b"[]"]
 
-    @given(POINT, st.tuples(LINE, LINE, LINE), st.integers(1, 10**9), KEPT)
-    @example((5, 10, 0), ("u", "success", "u"), 1, "true")
-    def test_since_and_runs_round_trip(
-        self,
-        point: tuple[int, int, int],
-        lines: tuple[str, str, str],
-        runs: int,
-        kept: str,
-    ) -> None:
-        """Written into a body, read back by the next run's edit."""
-        url, legs, since = lines
+
+class Counted(unittest.TestCase):
+    """C: every leg is counted once, whatever its report holds."""
+
+    @given(st.lists(REPORT, max_size=6), st.integers(0, 4))
+    @example(MIXED, 0)
+    def test_counts_sum_to_the_legs(self, contents: list[bytes], extra: int) -> None:
+        """The reason lines' counts sum to the legs; no line is empty."""
+        legs = len(contents) + extra
         with tempfile.TemporaryDirectory() as scratch:
-            path = Path(scratch) / "checkpoint.json"
-            path.write_bytes(doc(point))
-            end = standing.read_checkpoint(path)
-        outcome = standing.judge(end, kept, end)
-        run = standing.Run(standing.start_count(end, kept), outcome.why, legs, url)
-        text = standing.body(end, run, since, runs)
-        since_match = standing.BEHIND_SINCE.search(text)
-        runs_match = standing.RUNS_BEHIND.search(text)
-        if since_match is None:
-            self.fail("the body carries no behind-since line")
-        if runs_match is None:
-            self.fail("the body carries no runs-behind line")
-        self.assertEqual(since_match.group(1), since)
-        self.assertEqual(int(runs_match.group(1)), runs)
+            reports = Path(scratch)
+            for leg, content in enumerate(contents, start=1):
+                path = reports / f"watch-report-{leg}" / "report.json"
+                path.parent.mkdir()
+                path.write_bytes(content)
+            lines = gain.reasons(reports, legs)
+        total = 0
+        for line in lines:
+            n = int(line.split(" ", 1)[0])
+            self.assertGreater(n, 0, line)
+            total += n
+        self.assertEqual(total, legs)
+        self.assertEqual(len(set(lines)), len(lines))
 
 
 if __name__ == "__main__":

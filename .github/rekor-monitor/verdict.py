@@ -5,15 +5,17 @@ Each leg of rekor-monitor.yml runs `stele assert signer-certificates`
 once, files the report's findings (certificate_issues.py) and saves the checkpoint
 only when they are filed. This says whether the leg is green, from
 stele's exit status, its report and whether the checkpoint was saved.
-It files nothing: the standing issue is the run's, judged once after the
-last leg (watch_issue.py).
+A leg is red only for its own failure (#1967): whether the run gained
+on the log is judged once, after the last leg (gain.py), and reported
+there, never once per leg.
 
   0, saved      judged to the head: green.
   1, saved      a certificate did not reconcile (each has its issue): red.
-  4, saved      a range is outstanding: green when the leg advanced the
-                checkpoint, red when it did not. A finding in the report
-                is red whatever the exit code: a certificate that does not
-                reconcile is what this watch exists to raise.
+  4, saved      a range is outstanding: green whether or not the leg
+                judged anything, stele's `stopped` fact printed either
+                way. A finding in the report is red whatever the exit
+                code: a certificate that does not reconcile is what this
+                watch exists to raise.
   anything else red: stele did not finish, exited otherwise, the
                 checkpoint was not saved (no report was written, or a
                 finding could not be filed), or the report could not be
@@ -143,13 +145,13 @@ def outstanding(report: Report) -> tuple[bool, str]:
     """Decide a saved leg that ended with a range outstanding (exit 4).
 
     Returns:
-        Red when it judged nothing, green when it advanced; stele's
-        reason for stopping either way.
+        Green whether or not it judged anything (gain.py judges the
+        run's gain once); stele's reason for stopping either way.
 
     """
     stopped = report.facts.get("stopped", "no reason given")
     if report.facts.get("judged", "none") == "none":
-        return True, f"the checkpoint did not advance: stele judged nothing ({stopped})"
+        return False, f"stele judged nothing ({stopped})"
     left = report.facts.get("outstanding", "unknown")
     return False, f"advanced; outstanding {left} ({stopped})"
 
