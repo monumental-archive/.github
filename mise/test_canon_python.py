@@ -254,7 +254,7 @@ def run_without(argv: list[str], value: str | None) -> subprocess.CompletedProce
 
     """
     with tempfile.TemporaryDirectory() as tmp:
-        env = hermetic.env(tmp, PGRX_HOME=f"{tmp}/p")
+        env = hermetic.env(tmp)
         # The row decides ORG_PYTHON: unset, or the value it names.
         env.pop("ORG_PYTHON", None)
         if value is not None:
@@ -302,18 +302,11 @@ class AnUnsetOrgPythonIsRefused(unittest.TestCase):
     def test_the_sourced_provisioner_refuses_an_unset_org_python(self) -> None:
         """pgrx-env.sh is sourced: its helper call refuses at the call."""
         env_sh = CANON / "mise" / "pgrx-env.sh"
-        stubs = pathlib.Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, stubs)
-        (stubs / "cargo-pgrx").write_text("#!/bin/sh\n", encoding="utf-8")
-        (stubs / "cargo-pgrx").chmod(0o755)
-        # One plan record, so the init reaches its helper call.
-        init = (
-            f'PATH="{stubs}:${{PATH}}"; . "{env_sh}";'
-            " printf 'pg\\t17\\t/nowhere/pg_config\\n' | org_pgrx_init"
-        )
+        # A major's Postgres is found through pgrx_postgres.py (#1940).
+        postgres = f'. "{env_sh}"; org_pgrx_postgres 17'
         for value in (None, ""):
             with self.subTest(value=value):
-                done = run_without([bash(), "-c", init], value)
+                done = run_without([bash(), "-c", postgres], value)
                 self.assertNotEqual(done.returncode, 0, done.stdout)
                 self.assertIn(REFUSAL, done.stderr)
 

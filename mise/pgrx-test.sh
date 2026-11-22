@@ -155,9 +155,11 @@ cargo fetch --locked
 # The SDK, and every major's ICU headers checked before anything
 # compiles (#1774); each run below adds its own major's.
 org_pgrx_darwin_prepare "${only:-${declared}}"
+# Every major's pin checked before anything compiles; each run below
+# takes its own major's Postgres, a clone of that pin for its target
+# directory, through org_pgrx_major (#1940).
 installed=$(mise ls "aqua:theseus-rs/postgresql-binaries" --json)
-plan=$("${ORG_PYTHON}" "${belt}/pgrx_postgres.py" --majors "${only:-${declared}}" <<< "${installed}")
-org_pgrx_init <<< "${plan}" > /dev/null
+"${ORG_PYTHON}" "${belt}/pgrx_postgres.py" --majors "${only:-${declared}}" <<< "${installed}" > /dev/null
 
 # The runs this invocation owes, as `dir:major`.
 runs=""
@@ -207,8 +209,10 @@ measure_one() { # usage: measure_one <dir> <crate> <major>
     # And of its own compiler (#1877, rust-coverage-env.sh says why).
     compiler=$("${ORG_PYTHON}" "${belt}/gate_cache_key.py" digest) || exit 1
     export CARGO_TARGET_DIR="${root}/llvm-cov-${leg}-${compiler}"
+    # Its major's ICU headers and Postgres, after the target directory
+    # the Postgres clone is chosen by (#1940).
     # shellcheck disable=SC2310  # it returns 1 on every failure, explicitly
-    org_pgrx_darwin_icu "${one}" || exit 1
+    org_pgrx_major_env "${one}" || exit 1
     envs=$(cargo llvm-cov show-env --sh) || exit 1
     eval "${envs}"
     # pgrx deletes the data directory on shutdown, and that is every
@@ -281,7 +285,7 @@ if [[ ${runs} != *" "* ]]; then
     hold "${line}" "${one}"
     keep "${line}"
   else
-    (cd "${dir}" && org_pgrx_with_icu "${one}" cargo pgrx test "pg${one}")
+    (cd "${dir}" && org_pgrx_major "${one}" cargo pgrx test "pg${one}")
   fi
   echo "${label}: 1 suite run: ${dir}(pg${one})"
   org_done=1
@@ -305,7 +309,7 @@ for run in ${runs}; do
   else
     (
       cd "${dir}"
-      CARGO_TARGET_DIR="${root}/pgrx-pg${one}" org_pgrx_with_icu "${one}" cargo pgrx test "pg${one}"
+      CARGO_TARGET_DIR="${root}/pgrx-pg${one}" org_pgrx_major "${one}" cargo pgrx test "pg${one}"
     ) > "${logs}/pg${one}.log" 2>&1 &
   fi
   pids="${pids} $!:${dir}:${one}"

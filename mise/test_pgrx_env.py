@@ -1,18 +1,12 @@
 #!/usr/bin/env python3
-"""Tests for pgrx-env.sh's `org_pgrx_init`, against a stand-in cargo (#1360).
+"""Tests for pgrx-env.sh, against stand-in tools (#1360).
 
-`org_pgrx_init` registers each declared Postgres with `cargo pgrx init`.
-Its fixes here are logic around that call rather than anything a live
-Postgres has to show, so a stand-in `cargo` that records what happened
-is enough to hold them:
-
-- #1140, #1481: tasks the gate runs in parallel each initialised at
-  once, and two inits beside each other both call initdb. One at a
-  time, under a lock the kernel holds, which a killed holder cannot
-  strand.
-- #1173: `cargo pgrx init` rewrites `config.toml` on every call, and the
-  new timestamp made cargo rebuild pgrx-pg-sys on an exact cache hit.
-  An init that changed no registration keeps the old timestamp.
+`org_pgrx_major` runs one cargo call at one Postgres major with that
+major's own Postgres: `PGRX_PG_CONFIG_PATH` names a clone of the pinned
+install, one per cargo target directory, and `PGRX_HOME` an empty
+directory, so no pgrx task writes or reads state another task can see
+and the belt never runs `cargo pgrx init` (#1940). A stand-in `cargo`
+that logs what it was given, over a planted install, holds that.
 
 And `org_pgrx_darwin_icu`, against stand-in `pg_config`s and a
 stand-in `mise ls` (#1774): on a Mac each Postgres major gets the ICU
@@ -24,14 +18,13 @@ task sources it. stdlib `unittest`, matching the other mise/test_*.py;
 run through the gate as `mise run test`.
 """
 
+import hashlib
 import json
 import os
 import re
 import shutil
-import signal
 import subprocess
 import tempfile
-import time
 import unittest
 from pathlib import Path
 from typing import override
@@ -44,172 +37,215 @@ BASH = hermetic.tool("bash")
 # task that sourced it (#1934), here test:pgrx.
 TASK = "test:pgrx"
 
-# `cargo pgrx init` as far as these rows need it: it logs its start and
-# end around $STUB_HOLD seconds of work (two by default), so two inits
-# that ran together log start, start, end, end, and it writes
-# config.toml from $NEW_CONFIG, the way pgrx rewrites it on every call.
+# A stand-in cargo that logs, per call, its arguments and the two
+# variables pgrx reads its Postgres from, and answers `cargo metadata`
+# with the target directory a row planted.
 CARGO_STUB = r"""#!/usr/bin/env bash
-[[ $1 == pgrx && $2 == init ]] || exit 1
-echo start >> "${PGRX_HOME}.log"
-sleep "${STUB_HOLD:-2}"
-mkdir -p "${PGRX_HOME}"
-if [[ -n ${NEW_CONFIG:-} ]]; then
-  printf '%s' "${NEW_CONFIG}" > "${PGRX_HOME}/config.toml"
+printf '%s|%s|%s\n' "$*" "${PGRX_PG_CONFIG_PATH:-}" "${PGRX_HOME:-}" \
+  >> "${PLANT_ROOT}/cargo.log"
+if [[ $1 == metadata ]]; then
+  printf '{"target_directory": "%s"}\n' "${PLANT_TARGET}"
 fi
-echo end >> "${PGRX_HOME}.log"
 """
+# `mise ls` of the Postgres package: the planted listing.
+PG_MISE_STUB = r"""#!/usr/bin/env bash
+[[ $1 == ls && $2 == aqua:theseus-rs/postgresql-binaries && $3 == --json ]] || exit 1
+cat "${PLANT_ROOT}/pg.json"
+"""
+INSTALL = "postgresql-16.16.0-x86_64-unknown-linux-gnu"
+# The race row: this many tasks clone one new Postgres at once.
+RACERS = 6
 
-OLD = 946684800  # 2000-01-01, far from any timestamp a row writes
 
+class OwnPostgres(unittest.TestCase):
+    """No pgrx task writes or reads state another can see (#1940).
 
-class InitCase(unittest.TestCase):
-    """A row with a stub cargo and its own PGRX_HOME."""
+    A stand-in cargo and a planted Postgres install (its `bin/pg_config`
+    and a file beside it). The kernel and `cp` are the machine's own, so
+    the clone is the one the task makes.
+    """
 
     @override
     def setUp(self) -> None:
-        """Lay out the stand-ins and an empty PGRX_HOME location."""
+        """Plant the install, its listing and the stand-ins."""
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        root = Path(tmp.name)
-        self.root = root
-        bindir = root / "bin"
+        self.root = Path(tmp.name).resolve()
+        bindir = self.root / "bin"
         bindir.mkdir()
-        for name, body in (
-            ("cargo", CARGO_STUB),
-            ("cargo-pgrx", "#!/usr/bin/env bash\nexit 0\n"),
-        ):
+        for name, body in (("cargo", CARGO_STUB), ("mise", PG_MISE_STUB)):
             (bindir / name).write_text(body, encoding="utf-8")
             (bindir / name).chmod(0o755)
-        self.home = root / "pgrx"
-        env = hermetic.env(MISE_TASK_NAME=TASK)
-        self.env = env | {
+        self.install(self.root / "pg" / "16.16.0", INSTALL)
+        self.cache = self.root / "cache"
+        self.target = self.root / "work" / "target"
+        self.env = hermetic.env(MISE_TASK_NAME=TASK) | {
             "PATH": f"{bindir}{os.pathsep}{os.environ['PATH']}",
-            "PGRX_HOME": str(self.home),
+            "PLANT_ROOT": str(self.root),
+            "PLANT_TARGET": str(self.target),
+            "XDG_CACHE_HOME": str(self.cache),
+            "ORG_BELT_DIR": str(ENV_SH.parent),
         }
 
-    def init(self, *, group: bool = False, **env: str) -> subprocess.Popen[str]:
-        """Start one task's `org_pgrx_init` for Postgres 18.
+    def install(self, where: Path, name: str) -> None:
+        """Plant one pinned install of pg16, nested as the package extracts."""
+        bindir = where / name / "bin"
+        bindir.mkdir(parents=True)
+        config = bindir / "pg_config"
+        config.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+        config.chmod(0o755)
+        (where / name / "share").mkdir()
+        (where / name / "share" / "marker").write_text("pinned\n", encoding="utf-8")
+        listing = [entry("16.16.0", where)]
+        (self.root / "pg.json").write_text(json.dumps(listing), encoding="utf-8")
+
+    def start(self, script: str, **env: str) -> subprocess.Popen[str]:
+        """Start bash on `script` after sourcing pgrx-env.sh, in the work tree.
 
         Returns:
             The running bash.
 
         """
-        script = (
-            f'. "{ENV_SH}"\n'
-            "printf 'pg\\t18\\t/opt/pg18/bin/pg_config\\n' | org_pgrx_init\n"
-        )
+        work = self.root / "work"
+        work.mkdir(exist_ok=True)
         return subprocess.Popen(
-            [BASH, "-euo", "pipefail", "-c", script],
+            [BASH, "-euo", "pipefail", "-c", f'. "{ENV_SH}"\n{script}'],
             env=self.env | env,
-            cwd=self.root,
+            cwd=work,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            start_new_session=group,
         )
 
-    @staticmethod
-    def finish(task: subprocess.Popen[str]) -> tuple[int, str]:
-        """Wait for one init and close its pipes.
+    def bash(self, script: str, **env: str) -> tuple[int, str, str]:
+        """Run `script` to the end.
 
         Returns:
-            (exit status, stderr).
+            (exit status, stdout, stderr).
 
         """
-        code = task.wait(timeout=120)
-        err = task.stderr.read() if task.stderr else ""
-        for pipe in (task.stdout, task.stderr):
-            if pipe:
-                pipe.close()
-        return code, err
+        task = self.start(script, **env)
+        out, err = task.communicate(timeout=120)
+        return task.returncode, out, err
 
-    def log(self) -> list[str]:
-        """Read what the stand-in cargo recorded.
+    def seen(self) -> list[list[str]]:
+        """Read the stand-in cargo's log.
 
         Returns:
-            One line per event, in order.
+            One [arguments, PGRX_PG_CONFIG_PATH, PGRX_HOME] per call.
 
         """
-        path = Path(f"{self.home}.log")
-        return path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+        log = self.root / "cargo.log"
+        lines = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+        return [line.split("|") for line in lines]
 
+    def built(self, **env: str) -> list[str]:
+        """Run one `org_pgrx_major 16 cargo build` and read what the build saw.
 
-class OneInitAtATime(InitCase):
-    """Parallel tasks initialise in turn, never together (#1140, #1481)."""
+        Returns:
+            The build's [arguments, PGRX_PG_CONFIG_PATH, PGRX_HOME].
 
-    def test_two_tasks_never_init_at_once(self) -> None:
-        """The gate starts several pgrx tasks together; their inits queue.
-
-        With #1140's `mkdir` lock this logged start, start, end, end on
-        a Linux runner (#1481): the waiters judged the holder by pid.
         """
-        tasks = [self.init(), self.init()]
-        results = [self.finish(t) for t in tasks]
-        codes = [code for code, _ in results]
-        both_clean = [0, 0]
-        self.assertEqual(both_clean, codes, results)
-        want = ["start", "end", "start", "end"]
-        self.assertEqual(want, self.log(), results)
-
-    def test_a_killed_holder_does_not_strand_the_next_init(self) -> None:
-        """A holder killed mid-init takes the lock with it.
-
-        The holder is killed mid-init. The next init proceeds at once
-        rather than waiting out the ten-minute bound.
-        """
-        holder = self.init(group=True, STUB_HOLD="60")
-        deadline = time.monotonic() + 30
-        while self.log() != ["start"]:
-            self.assertLess(time.monotonic(), deadline, "the holder never started")
-            time.sleep(0.1)
-        os.killpg(holder.pid, signal.SIGKILL)
-        self.finish(holder)
-        started = time.monotonic()
-        code, err = self.finish(self.init(STUB_HOLD="0"))
+        code, _, err = self.bash("org_pgrx_major 16 cargo build", **env)
         self.assertEqual(0, code, err)
-        self.assertLess(time.monotonic() - started, 20, err)
-        want = ["start", "start", "end"]
-        self.assertEqual(want, self.log())
+        return self.seen()[-1]
 
+    def test_the_build_sees_its_clone_and_an_empty_home(self) -> None:
+        """PGRX_PG_CONFIG_PATH is a clone under the target's hash; no init.
 
-class UnchangedConfigKeepsItsTime(InitCase):
-    """An init that registered nothing new does not touch the timestamp (#1173)."""
-
-    def plant(self, text: str) -> Path:
-        """Write an existing config.toml with an old timestamp.
-
-        Returns:
-            The file's path.
-
+        Red at 1c4fbe22: the belt ran `cargo pgrx init` and pgrx read
+        the one config.toml every task on the machine rewrote.
         """
-        self.home.mkdir()
-        config = self.home / "config.toml"
-        config.write_text(text, encoding="utf-8")
-        os.utime(config, (OLD, OLD))
-        return config
-
-    def run_init(self, new: str) -> None:
-        """Run one init whose cargo writes `new` and wait for it."""
-        task = self.init(NEW_CONFIG=new)
-        code = task.wait(timeout=60)
-        if task.stdout is None or task.stderr is None:
-            self.fail("init was started without its pipes")
-        err = task.stderr.read()
-        task.stdout.close()
-        task.stderr.close()
+        code, out, err = self.bash(
+            "org_pgrx_major 16 cargo build\n"
+            'echo "after|${PGRX_PG_CONFIG_PATH:-}|${PGRX_HOME:-}"'
+        )
         self.assertEqual(0, code, err)
+        self.assertEqual("after||\n", out, "the variables outlived the command")
+        calls = self.seen()
+        args, config, home = calls[-1]
+        self.assertEqual("build", args)
+        key = hashlib.sha256(str(self.target).encode()).hexdigest()[:16]
+        clone = self.cache / "org-belt" / "pgrx-postgres" / key / "pg16" / INSTALL
+        self.assertEqual(str(clone / "bin" / "pg_config"), config)
+        self.assertEqual("pinned\n", (clone / "share" / "marker").read_text())
+        self.assertEqual(str(self.cache / "org-belt" / "pgrx-home"), home)
+        entries = [entry.name for entry in Path(home).iterdir()]
+        empty: list[str] = []
+        self.assertEqual(empty, entries)
+        self.assertFalse(any(c[0].startswith("pgrx init") for c in calls), calls)
+        # The pinned install itself is never written.
+        pinned = self.root / "pg" / "16.16.0" / INSTALL
+        untouched = ["marker"]
+        written = sorted(p.name for p in (pinned / "share").iterdir())
+        self.assertEqual(untouched, written)
 
-    def test_same_registrations_in_another_order_keep_the_old_time(self) -> None:
-        """The majors come in hash order; the set is what counts."""
-        config = self.plant('[configs]\npg17 = "/a"\npg18 = "/b"\n')
-        self.run_init('[configs]\npg18 = "/b"\npg17 = "/a"\n')
-        self.assertEqual(OLD, int(config.stat().st_mtime))
+    def test_one_target_one_clone_two_targets_two(self) -> None:
+        """CARGO_TARGET_DIR picks the clone: the same one twice, another apart."""
+        first = self.built(CARGO_TARGET_DIR=str(self.root / "a"))[1]
+        again = self.built(CARGO_TARGET_DIR=str(self.root / "a"))[1]
+        other = self.built(CARGO_TARGET_DIR=str(self.root / "b"))[1]
+        self.assertEqual(first, again)
+        self.assertNotEqual(first, other)
+        # Relative, it is the directory cargo would use: under the cwd.
+        relative = self.built(CARGO_TARGET_DIR="a")[1]
+        key = hashlib.sha256(str(self.root / "work" / "a").encode()).hexdigest()[:16]
+        self.assertIn(f"/pgrx-postgres/{key}/", relative)
+        # Unset, cargo's own answer, and no other call to cargo.
+        unset = self.built()[1]
+        key = hashlib.sha256(str(self.target).encode()).hexdigest()[:16]
+        self.assertIn(f"/pgrx-postgres/{key}/", unset)
 
-    def test_a_changed_registration_takes_the_new_time(self) -> None:
-        """A moved pg_config is a real change and must rebuild."""
-        config = self.plant('[configs]\npg18 = "/b"\n')
-        self.run_init('[configs]\npg18 = "/c"\n')
-        self.assertNotEqual(OLD, int(config.stat().st_mtime))
+    def test_racing_tasks_leave_one_published_clone(self) -> None:
+        """Tasks cloning one new Postgres at once publish one; losers clean up."""
+        tasks = [self.start("org_pgrx_major 16 cargo build") for _ in range(RACERS)]
+        errors = [t.communicate(timeout=120)[1] for t in tasks]
+        codes = [t.wait() for t in tasks]
+        clean = [0] * RACERS
+        self.assertEqual(clean, codes, errors)
+        paths = {call[1] for call in self.seen() if call[0] == "build"}
+        self.assertEqual(1, len(paths), paths)
+        held = Path(paths.pop()).parent.parent
+        published = held.resolve()
+        # The published name and the clone it names, and nothing else:
+        # every loser removed its own `<name>.<random>`.
+        names = sorted(p.name for p in held.parent.iterdir())
+        want = sorted([INSTALL, published.name])
+        self.assertEqual(want, names)
+        self.assertEqual("pinned\n", (published / "share" / "marker").read_text())
+
+    def test_a_moved_pin_removes_the_old_clone_and_keeps_other_majors(self) -> None:
+        """Another version of this major is removed; another major's is not."""
+        old = self.built()[1]
+        held = Path(old).parent.parent.parent
+        # Another major's clone under the same target, made by its task.
+        other = held.parent / "pg17" / "postgresql-17.6.0-x"
+        other.mkdir(parents=True)
+        # The pin moves: a new install name for the same major.
+        moved = "postgresql-16.17.0-x86_64-unknown-linux-gnu"
+        self.install(self.root / "pg" / "16.17.0", moved)
+        new = self.built()[1]
+        self.assertEqual(str(held / moved / "bin" / "pg_config"), new)
+        names = [p.name for p in held.iterdir()]
+        self.assertNotIn(INSTALL, names)
+        self.assertFalse(any(n.startswith(f"{INSTALL}.") for n in names), names)
+        self.assertTrue(other.is_dir())
+
+    def test_no_major_runs_the_command_as_it_is(self) -> None:
+        """Empty: no Postgres looked up, nothing exported, nothing cloned."""
+        code, _, err = self.bash("org_pgrx_major '' cargo check")
+        self.assertEqual(0, code, err)
+        want = [["check", "", ""]]
+        self.assertEqual(want, self.seen())
+        self.assertFalse(self.cache.exists())
+
+    def test_an_unpinned_major_runs_nothing(self) -> None:
+        """No pin for the major: red in pgrx_postgres.py's words, no command."""
+        code, _, err = self.bash("org_pgrx_major 17 cargo build")
+        self.assertEqual(1, code)
+        self.assertIn("no Postgres 17.x is pinned", err)
+        none: list[list[str]] = []
+        self.assertEqual(none, self.seen())
 
 
 # gate_surface.py's records: two extensions, one plain crate between
@@ -716,7 +752,7 @@ class NoIcuNamed(IcuCase):
 
 
 class WithIcu(IcuCase):
-    """org_pgrx_with_icu: one command, its major's headers, then gone."""
+    """org_pgrx_major: one command, its major's headers, then gone."""
 
     @override
     def setUp(self) -> None:
@@ -725,13 +761,23 @@ class WithIcu(IcuCase):
         self.postgres({"17.6.0": homebrew(78), "18.1.0": homebrew(79)})
         self.icu({"78.3": True, "79.1": True})
 
+    @override
+    def bash(self, script: str, **env: str) -> subprocess.CompletedProcess[str]:
+        """Run `script` with the Postgres half a no-op: OwnPostgres holds it.
+
+        Returns:
+            The finished bash.
+
+        """
+        return super().bash(f"org_pgrx_postgres() {{ :; }}\n{script}", **env)
+
     def test_each_command_sees_its_own_and_the_parent_keeps_its_flags(self) -> None:
         """Sequential commands: no major's include path reaches the next."""
         show = "bash -c 'echo \"$0|$BINDGEN_EXTRA_CLANG_ARGS|$CFLAGS\"'"
         done = self.bash(
-            f"org_pgrx_with_icu 17 {show} pg17\n"
-            f"org_pgrx_with_icu 18 {show} pg18\n"
-            f"org_pgrx_with_icu '' {show} plain\n"
+            f"org_pgrx_major 17 {show} pg17\n"
+            f"org_pgrx_major 18 {show} pg18\n"
+            f"org_pgrx_major '' {show} plain\n"
             'echo "parent|$BINDGEN_EXTRA_CLANG_ARGS|$CFLAGS"'
         )
         self.assertEqual(0, done.returncode, done.stderr)
@@ -749,7 +795,7 @@ class WithIcu(IcuCase):
     def test_missing_headers_run_nothing(self) -> None:
         """A major whose headers are not pinned reds before its command."""
         self.icu({"78.3": True})
-        done = self.bash("org_pgrx_with_icu 18 echo ran")
+        done = self.bash("org_pgrx_major 18 echo ran")
         self.assertEqual(1, done.returncode)
         self.assertEqual("", done.stdout)
         self.assertEqual(other_pinned(18, 79, "78.3"), done.stderr.splitlines()[0])
@@ -757,7 +803,7 @@ class WithIcu(IcuCase):
     def test_the_command_status_is_its_own(self) -> None:
         """A failed compile is the helper's failure, in a condition too."""
         done = self.bash(
-            "if org_pgrx_with_icu 17 false; then echo ok; else echo red $?; fi"
+            "if org_pgrx_major 17 false; then echo ok; else echo red $?; fi"
         )
         self.assertEqual((0, "red 1\n"), (done.returncode, done.stdout))
 
@@ -780,19 +826,21 @@ class WithIcu(IcuCase):
 
 # Every site that compiles the extension (#1774), and how many compiles
 # each runs with a major's headers: test:pgrx runs a suite three ways,
-# one of them in a subshell of its own (measure_one).
+# one of them in a subshell of its own (measure_one), and each
+# workspace-wide audit runs its workspace command at the default major
+# org_pgrx_provision names beside its per-extension one (#1940).
 SITES = {
     "mise/pgrx-test.sh": 3,
     "mise/pg-schema.sh": 1,
-    "mise/mutants-rust.sh": 1,
-    "mise/semver-audit.sh": 1,
+    "mise/mutants-rust.sh": 2,
+    "mise/semver-audit.sh": 2,
     "fix:rust": 1,
     "lint:msrv": 1,
     "lint:pg-clippy": 1,
 }
 CANON = ENV_SH.parent.parent
 COMPILE = re.compile(r"\bcargo(-semver-checks)? |\bmutate ")
-CALL = re.compile(r'\borg_pgrx_(with_icu|darwin_icu) "')
+CALL = re.compile(r'\borg_pgrx_major(_env)? "')
 CHECK = re.compile(r"\borg_pgrx_darwin_(prepare|icu_check) ")
 BODY = "^run = '''\n(.*?)^'''$"
 
@@ -871,9 +919,10 @@ class NoLeak(unittest.TestCase):
 
     A subshell cannot change its parent's BINDGEN_EXTRA_CLANG_ARGS or
     CFLAGS, which WithIcu and MixedIcuSet show in bash. Here every site
-    is read for that shape: each compile goes through org_pgrx_with_icu,
-    whose subshell ends with the command, or adds the headers itself
-    inside a subshell that compiles after it. And the check runs first.
+    is read for that shape: each compile goes through org_pgrx_major,
+    whose subshell ends with the command, or adds the headers (and the
+    Postgres, #1940) itself with org_pgrx_major_env inside a subshell
+    that compiles after it. And the check runs first.
     """
 
     def test_every_compile_carries_its_major_in_a_subshell(self) -> None:
@@ -896,7 +945,7 @@ class NoLeak(unittest.TestCase):
                     return
                 self.assertLess(first_check.start(), first_call.start())
                 for at in hits:
-                    if "org_pgrx_with_icu" in lines[at]:
+                    if "org_pgrx_major " in lines[at]:
                         self.assertRegex(command(lines, at), COMPILE)
                         continue
                     block = subshell(lines, at)

@@ -168,27 +168,41 @@ mutate() {
   echo "${status}" > "${out}/status"
 }
 
+# The Postgres a workspace-wide run builds the extensions with, once,
+# and only when there is an extension: org_pgrx_provision checks every
+# major's pin and names the default major, which the workspace run
+# compiles them at if it reaches them, its ICU headers checked first
+# (#1940).
+# shellcheck source=mise/pgrx-env.sh
+. "${belt}/pgrx-env.sh"
+provisioned=""
+default=""
+if [[ ${#pgrx[@]} -gt 0 ]]; then
+  provisioned=ok
+  # shellcheck disable=SC2310  # deliberate: a failed provisioning reds
+  # each extension and the run still reports the rest
+  org_pgrx_provision || provisioned=failed
+  [[ ${provisioned} != ok ]] || default=${org_pgrx_default_major}
+fi
+
 if [[ ${#plain[@]} -gt 0 ]]; then
   flags=()
   for c in "${plain[@]}"; do flags+=(--package "${c}"); done
-  mutate "workspace" "${flags[@]}"
+  # shellcheck disable=SC2310  # deliberate: a missing pin reds the
+  # workspace run and the run still reports the rest
+  if [[ -n ${default} ]] && ! org_pgrx_darwin_icu_check "${default}"; then
+    printf 'red\t%s\n' "workspace at pg${default}: no ICU headers for it are pinned (above)" >> "${runs}"
+  else
+    org_pgrx_major "${default}" mutate "workspace" "${flags[@]}"
+  fi
 fi
 
-provisioned=""
 for c in ${pgrx[@]+"${pgrx[@]}"}; do
   major=$(default_major "${c}")
   if [[ -z ${major} ]]; then
     printf 'red\t%s: %s\n' "${c}" \
       "a pgrx extension whose default features name no single pgNN — it is mutated under its default major" >> "${runs}"
     continue
-  fi
-  if [[ -z ${provisioned} ]]; then
-    provisioned=ok
-    # shellcheck source=mise/pgrx-env.sh
-    . "${belt}/pgrx-env.sh"
-    # shellcheck disable=SC2310  # deliberate: a failed provisioning reds
-    # this crate and the run still reports the rest
-    org_pgrx_provision || provisioned=failed
   fi
   if [[ ${provisioned} != ok ]]; then
     printf 'red\t%s\n' "${c} at ${major}: no Postgres could be provisioned" >> "${runs}"
@@ -201,8 +215,9 @@ for c in ${pgrx[@]+"${pgrx[@]}"}; do
     continue
   fi
   echo "${label}: ${c} is a pgrx extension, mutated under its default major, ${major}"
-  # In a subshell holding that major's ICU headers (#1774).
-  org_pgrx_with_icu "${major#pg}" mutate "${c}-${major}" --package "${c}" --features pg_test
+  # In a subshell holding that major's ICU headers and Postgres (#1774,
+  # #1940).
+  org_pgrx_major "${major#pg}" mutate "${c}-${major}" --package "${c}" --features pg_test
 done
 
 if [[ ${#plain[@]} -eq 0 && ${#pgrx[@]} -eq 0 ]]; then

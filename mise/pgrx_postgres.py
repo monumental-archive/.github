@@ -7,7 +7,7 @@ server headers bindgen parses, and `initdb`. Measured on both platforms
 before anything was written (the measurement is recorded on #813):
 `aqua:theseus-rs/postgresql-binaries` is an aqua-registry package with
 per-asset checksums, it installs in 2-8s, it carries `include/server`,
-`cargo pgrx init` accepts its `pg_config` in about a second, and edtf's
+pgrx accepts its `pg_config` in about a second, and edtf's
 extension suite passes at pg14-pg18 against it on macOS and on the
 runner with **no apt or brew package installed**.
 

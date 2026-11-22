@@ -3443,11 +3443,12 @@ echo "fix:rust:${fixing:- none} rewritten where clippy could"
 # hat: a finding a developer cannot ask the machine to fix is a finding
 # they will fix by hand or not at all.
 if [[ -n ${pairs} ]]; then
-  # The SDK, and the ICU headers of every major it builds (#1774).
+  # The SDK, and the ICU headers and Postgres pin of every major it
+  # builds, checked before anything compiles (#1774, #1940).
   org_pgrx_darwin_prepare "${majors}"
   mise ls "aqua:theseus-rs/postgresql-binaries" --json \
     | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/pgrx_postgres.py" --majors "${majors}" \
-    | org_pgrx_init
+      > /dev/null
   fixed=""
   # Read on descriptor 3, so cargo's standard input is not the list.
   while IFS=$'\t' read -r -u 3 spec major; do
@@ -3455,8 +3456,9 @@ if [[ -n ${pairs} ]]; then
     # shellcheck disable=SC2086  # ${ladder} holds whole flag words
     # --allow-dirty for the reason the workspace pass carries it, and
     # doubly so here: the workspace pass ran first and wrote. In a
-    # subshell holding its own major's ICU headers (#1774).
-    org_pgrx_with_icu "${major}" cargo clippy --fix --allow-dirty -p "${spec%@*}" --no-deps --all-targets \
+    # subshell holding its own major's ICU headers and Postgres (#1774,
+    # #1940).
+    org_pgrx_major "${major}" cargo clippy --fix --allow-dirty -p "${spec%@*}" --no-deps --all-targets \
       --locked --no-default-features --features "pg${major}" -- ${ladder}
   done 3<<< "${pairs}"
   echo "fix:rust: pgrx extension(s) fixed:${fixed}"
@@ -3604,14 +3606,16 @@ plan=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/msrv_plan.py" \
   --toolchains "${tmp}/toolchains.json" --exclude "${CLIPPY_EXCLUDE:-}" \
   --pgrx "${pgrx}" --floor "${ORG_BELT_DIR}/rust-floor.toml" < "${tmp}/metadata.json")
 # A pgrx crate needs a Postgres before it can be compiled at all, at the
-# MSRV exactly as at the stable pin. Provisioned only when one is in the
-# plan, so a repo without an extension pays nothing.
+# MSRV exactly as at the stable pin: each compile takes its own through
+# org_pgrx_major (#1940), and every major's pin is checked here first,
+# only when one is in the plan, so a repo without an extension pays
+# nothing.
 if [[ -n ${pairs} && ${plan} == *"--features pg"* ]]; then
   # The SDK, and every extension's ICU headers checked (#1774).
   org_pgrx_darwin_prepare "${majors}"
   mise ls "aqua:theseus-rs/postgresql-binaries" --json \
     | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/pgrx_postgres.py" --majors "${majors}" \
-    | org_pgrx_init > /dev/null
+      > /dev/null
 fi
 checked=0
 while IFS=$'\t' read -r kind first own rest; do
@@ -3637,8 +3641,9 @@ while IFS=$'\t' read -r kind first own rest; do
       # WORDS, which cargo must receive as separate arguments. A pgrx
       # group's own flags are `--no-default-features --features pgNN`, so
       # their digits are its one major, compiled in a subshell holding
-      # that major's ICU headers (#1774); `default` has none and adds none.
-      RUSTUP_TOOLCHAIN="${first}" org_pgrx_with_icu "${own//[!0-9]/}" cargo check --locked ${use} ${flags}
+      # that major's ICU headers and Postgres (#1774, #1940); `default`
+      # has none and adds none.
+      RUSTUP_TOOLCHAIN="${first}" org_pgrx_major "${own//[!0-9]/}" cargo check --locked ${use} ${flags}
       compiling=""
       ;;
     *)
@@ -3731,11 +3736,12 @@ export CLIPPY_CONF_DIR="${ORG_BELT_DIR}"
 # cannot escape (the reason is written at the list, in clippy-ladder.sh).
 ladder=$(org_clippy_pgrx_ladder)
 contradiction_count=$(org_clippy_pgrx_contradiction_count)
-# The SDK, and every major's ICU headers checked (#1774).
+# The SDK, and every major's ICU headers and Postgres pin checked
+# (#1774, #1940).
 org_pgrx_darwin_prepare "${majors}"
 mise ls "aqua:theseus-rs/postgresql-binaries" --json \
   | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/pgrx_postgres.py" --majors "${majors}" \
-  | org_pgrx_init > /dev/null
+    > /dev/null
 count=0
 linted=""
 # Read on descriptor 3, so cargo's standard input is not the list.
@@ -3744,8 +3750,9 @@ while IFS=$'\t' read -r -u 3 spec major; do
   linted="${linted} ${spec%@*}(pg${major})"
   # shellcheck disable=SC2086  # ${ladder} holds whole flag WORDS, which
   # clippy must receive as separate arguments. In a subshell holding its
-  # own major's ICU headers (#1774), so none reaches the next major.
-  org_pgrx_with_icu "${major}" cargo clippy -p "${spec}" --no-deps --all-targets --locked --keep-going \
+  # own major's ICU headers and Postgres (#1774, #1940), so none reaches
+  # the next major.
+  org_pgrx_major "${major}" cargo clippy -p "${spec}" --no-deps --all-targets --locked --keep-going \
     --no-default-features --features "pg${major}" -- ${ladder}
 done 3<<< "${pairs}"
 echo "lint:pg-clippy: ${count} extension(s) linted:${linted}"

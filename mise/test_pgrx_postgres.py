@@ -232,7 +232,7 @@ class MainTest(unittest.TestCase):
         return status, out.getvalue(), err.getvalue()
 
     def test_a_served_major_prints_its_record(self) -> None:
-        """What the task reads to build its `cargo pgrx init` line."""
+        """What org_pgrx_postgres reads to find the pg_config it clones."""
         status, out, err = self.invoke("18", [entry("18.6.0")])
         self.assertEqual(status, 0, msg=err)
         self.assertTrue(out.startswith("pg\t18\t"))
