@@ -22,10 +22,12 @@ gate as `mise run test`, which `ci` collects.
 """
 
 import contextlib
+import os
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import decoded
 import hermetic
@@ -224,9 +226,21 @@ class Producers(unittest.TestCase):
         self.assertEqual(WANT, got)
 
     def test_tracked_lists_the_working_directory_by_pathspec(self) -> None:
-        """No root: the working directory's tree; a pathspec narrows it."""
+        """No root: the working directory's tree; a pathspec narrows it.
+
+        The call inherits the environment, so it gets the fixture's: the
+        suite runs under mise/git_decoy.py (#1463), which sets GIT_DIR
+        and GIT_INDEX_FILE at an empty decoy repository, and an
+        inheriting call would list the decoy's index. Production carries
+        those two only in a git hook (pre-commit runs lint:typos,
+        pre-push runs ci), where they name the repository the task runs
+        in, so the list is that repository's own.
+        """
         tree = self.planted()
-        with contextlib.chdir(tree):
+        with (
+            contextlib.chdir(tree),
+            mock.patch.dict(os.environ, hermetic.env(tree.parent / "home"), clear=True),
+        ):
             narrowed: list[str] = tracked.tracked("é*")
             every: list[str] = sorted(tracked.tracked())
         self.assertEqual(list[str]([ACCENTED]), narrowed)

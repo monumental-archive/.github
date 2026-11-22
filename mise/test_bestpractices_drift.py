@@ -215,18 +215,20 @@ class Green(unittest.TestCase):
     def test_the_readme_probe_reads_to_the_end_and_masks_nothing(self) -> None:
         """No early-exit reader and no `|| true` on the probe (#1637).
 
-        The row above passes with the old probe too: its `grep`
+        The row above passes with an early-exit probe too: its `grep`
         block-buffers into the pipe and reads `git ls-files` to the
         end, and whatever dies after the first match, `head` has
         already printed it (measured with 16,384 case variants of a
         README behind a 237 kB listing). So the form is what is held:
-        the one reader that matches, keeps the first and reads on.
+        the whole list is read into an array by `org_tracked_read`
+        (#1986), which writes git's output to a file before reading it,
+        and the first element is the one compared.
         """
         probe = next(line for line in BODY.splitlines() if line.startswith("readme="))
         self.assertEqual(
             probe,
-            "readme=$(git ls-files | awk"
-            " 'tolower($0) ~ /^readme(\\.md|\\.markdown)?$/ && !seen++')",
+            "readme=() && org_tracked_read readme"
+            " ':(icase)readme' ':(icase)readme.md' ':(icase)readme.markdown'",
         )
 
     def test_a_null_justification_equals_an_empty_one(self) -> None:
