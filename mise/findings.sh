@@ -15,6 +15,7 @@
 #   org_finding <subject> <message> [<detail>…]
 #   org_finding_annotated <subject> <message> [<detail>…]
 #   <program> | org_finding_lines
+#   org_task <task>
 #
 # Each prints to stderr `<task>: <subject>: <message>` (or `<task>:
 # <message>` with an empty subject), then each detail line indented two
@@ -35,6 +36,11 @@
 # separator is not a finding and goes to stdout through `org_say`, so the
 # program's own summary still prints and cannot open a workflow command.
 # It returns 0; under pipefail the program's status is the pipeline's.
+#
+# `org_task` states the task a script reports for, where mise named
+# none (#1979): it exports MISE_TASK_NAME, so every child the script
+# starts, a Python helper above all, records under the same name rather
+# than its own file's. A name mise gave wins.
 #
 # Loading this file runs no command (#1934): under BASH_ENV every bash
 # sources it, whatever its PATH holds, so the directory is found by
@@ -101,6 +107,8 @@ org__finding() {
 
 org_finding() { org__finding 0 "$@"; }
 org_finding_annotated() { org__finding 1 "$@"; }
+
+org_task() { export MISE_TASK_NAME="${MISE_TASK_NAME:-$1}"; }
 
 org_finding_lines() {
   local line

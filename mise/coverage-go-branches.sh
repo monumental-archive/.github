@@ -34,7 +34,7 @@ unset org__here
 # actually ran.
 label="${1:-coverage:go-branches}"
 # The task this script reports for, where mise named none (#1934).
-: "${MISE_TASK_NAME:=${label}}"
+org_task "${label}"
 
 if [[ ! -f go.mod ]]; then
   org_finding "" "no go.mod — the go-branches leg measures a Go module"

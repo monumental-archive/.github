@@ -22,7 +22,7 @@ org__here=${BASH_SOURCE[0]%/*}
 . "${org__here}/findings.sh"
 unset org__here
 # The task this script reports for, where mise named none (#1934).
-: "${MISE_TASK_NAME:=fix:badges}"
+org_task "fix:badges"
 # Refused before any early exit, so a missing interpreter is never a
 # clean skip (#1565): project_licence.py runs under it below.
 : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"

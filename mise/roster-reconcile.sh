@@ -35,7 +35,7 @@ unset org__here
 caller="${1:?usage: roster-reconcile.sh <caller> <roster.json> < listing}"
 roster="${2:?usage: roster-reconcile.sh <caller> <roster.json> < listing}"
 # The task this script reports for, where mise named none (#1934).
-: "${MISE_TASK_NAME:=${caller}}"
+org_task "${caller}"
 
 [[ -f ${roster} ]] || {
   org_finding "" "no roster at ${roster} — the population is named there, and" \

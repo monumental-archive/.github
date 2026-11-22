@@ -53,7 +53,7 @@ unset org__here
 
 name=lint:vendored
 # The task this script reports for, where mise named none (#1934).
-: "${MISE_TASK_NAME:=${name}}"
+org_task "${name}"
 
 if command -v sha256sum > /dev/null 2>&1; then
   sha256=(sha256sum)

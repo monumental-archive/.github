@@ -127,8 +127,7 @@ def render(
             path = root / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text, encoding="utf-8")
-        # The task's name, as mise gives it to the script's helpers (#1979).
-        env = hermetic.env(MISE_TASK_NAME="fix:badges")
+        env = hermetic.env()
         env |= {"ORG_BELT_DIR": str(BELT), "ORG_CANON_DIR": str(CANON)}
         if policy is not None:
             fake = Path(tmp) / "canon"

@@ -26,7 +26,7 @@ org__here=${BASH_SOURCE[0]%/*}
 . "${org__here}/findings.sh"
 unset org__here
 # The task this script reports for, where mise named none (#1934).
-: "${MISE_TASK_NAME:=fix:tracks}"
+org_task "fix:tracks"
 
 command -v taplo > /dev/null || {
   org_finding "" "taplo missing from the belt"

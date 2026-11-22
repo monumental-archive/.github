@@ -15,7 +15,7 @@ org__here=${BASH_SOURCE[0]%/*}
 . "${org__here}/findings.sh"
 unset org__here
 # The task this script reports for, where mise named none (#1934).
-: "${MISE_TASK_NAME:=lint:belt-current}"
+org_task "lint:belt-current"
 
 canon="${ORG_CANON_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
 status=0

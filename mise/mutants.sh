@@ -18,7 +18,7 @@ org__here=${BASH_SOURCE[0]%/*}
 . "${org__here}/findings.sh"
 unset org__here
 # The task this script reports for, where mise named none (#1934).
-: "${MISE_TASK_NAME:=audit:mutants}"
+org_task "audit:mutants"
 
 belt="${ORG_BELT_DIR:?unset — no belt}"
 red=""
