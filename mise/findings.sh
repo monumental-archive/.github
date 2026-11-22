@@ -52,6 +52,18 @@ org__findings_dir=${BASH_SOURCE[0]%/*}
 . "${org__findings_dir:-}/workflow-command.sh"
 unset org__findings_dir
 
+# A belt that is not the one this tree pins answers for nothing (#1988).
+# The belt's [env] sets ORG_BELT_REFUSED to one line when the belt came
+# by the clone's link and names another pin's tree; empty otherwise.
+# Checked first, once the writer is loaded (its org_say is builtins
+# only, and every line of outside text reaches the log through it), and
+# with builtins only: BASH_ENV sources this file before every task body,
+# so this is every belt task's refusal, ci included.
+if [[ -n ${ORG_BELT_REFUSED:-} ]]; then
+  org_say "${ORG_BELT_REFUSED}" >&2
+  exit 1
+fi
+
 # Append one record to ORG_FINDINGS. Says why on stderr when it cannot.
 org__finding_record() {
   local task=$1 subject=$2 message=$3

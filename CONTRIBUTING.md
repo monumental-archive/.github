@@ -22,8 +22,10 @@ executable form:
 1. Copy nothing, configure nothing: once per clone, run
    `lefthook install && lefthook run post-checkout`, which links the clone
    to the toolbelt its gate pins, then `mise trust && mise install`, and
-   the full toolchain arrives pinned. The hooks keep the link current on
-   every checkout, merge and rebase after that.
+   the full toolchain arrives pinned. Every hook relinks before it runs
+   anything else (commit, push, checkout, merge and rebase), and every
+   belt task refuses, naming both shas, when the belt answering is not
+   the one the clone pins.
 
    A clone that was never linked has no belt (`mise run ci` reports no
    such task): there is no machine-wide belt to fall back on, and
