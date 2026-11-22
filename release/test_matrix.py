@@ -23,7 +23,6 @@ import io
 import os
 import sys
 import tempfile
-import tomllib
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -348,15 +347,16 @@ class PgrxExtension(Rows):
         )
         code, out, err = run("pgrx-extension", str(TRACKED), "19")
         self.assertEqual((code, err), (0, notices))
-        pins = tomllib.loads(TRACKED.read_text("utf-8"))
-        images = f'"build":"{pins["build"]["19"]}","smoke":"{pins["smoke"]["19"]}"'
+        pins = matrix.load(TRACKED)
+        build, smoke = pins.roles["build"]["19"], pins.roles["smoke"]["19"]
+        images = f'"build":"{build}","smoke":"{smoke}"'
         amd = f'{{"pg":"19","arch":"amd64","runner":"ubuntu-24.04",{images}}}'
         arm = f'{{"pg":"19","arch":"arm64","runner":"ubuntu-24.04-arm",{images}}}'
         self.assertEqual(
             out,
             f'matrix={{"include":[{amd},{arm}]}}\n'
             'expected=["19-amd64","19-arm64"]\n'
-            f"floor={pins['floor']['glibc']}\n",
+            f"floor={pins.floor}\n",
         )
 
 
