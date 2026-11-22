@@ -235,14 +235,27 @@ class Adapter(unittest.TestCase):
         ]
         same(self, got, want)
 
+    def refusal(self) -> tuple[object, str]:
+        """Read the one record a refusal leaves: its own (#1934).
+
+        Returns:
+            Its subject and message; stele's findings are never recorded.
+
+        """
+        got = self.records()
+        same(self, len(got), 1)
+        return got[0]["subject"], str(got[0]["message"])
+
     def test_another_schema_is_refused_by_name(self) -> None:
-        """Schema 10: refused, both numbers named, exit 1, no record."""
+        """Schema 10: refused, both numbers named, exit 1, only that recorded."""
         done = self.run_adapter(report("PASS", schema=10), 0)
         same(self, done.returncode, 1, done.stderr)
         self.assertIn(
             "the report is schema 10; this adapter reads schema 9", done.stderr
         )
-        same(self, self.records(), [])
+        subject, message = self.refusal()
+        same(self, subject, "")
+        self.assertIn("the report is schema 10", message)
         same(self, done.stdout, "")
 
     def test_output_that_is_not_json_is_refused_by_name(self) -> None:
@@ -254,10 +267,12 @@ class Adapter(unittest.TestCase):
             " the output is not stele's report",
             done.stderr,
         )
-        same(self, self.records(), [])
+        subject, message = self.refusal()
+        same(self, subject, "")
+        self.assertIn("exited 3: the output is not stele's report", message)
 
     def test_a_malformed_finding_records_none(self) -> None:
-        """One entry that is not a finding: refused before any is recorded."""
+        """One entry that is not a finding: refused before any of stele's is."""
         entries: list[dict[str, object]] = [
             {"subject": "a", "assertion": "fine"},
             {"subject": "b"},
@@ -265,7 +280,8 @@ class Adapter(unittest.TestCase):
         done = self.run_adapter(report("FAIL", *entries), 1)
         same(self, done.returncode, 1, done.stderr)
         self.assertIn("findings[1]: assertion", done.stderr)
-        same(self, self.records(), [])
+        _, message = self.refusal()
+        self.assertIn("findings[1]: assertion", message)
 
     def test_stele_s_status_is_the_exit(self) -> None:
         """A status of 2 from stele with a PASS document exits 2."""
@@ -292,11 +308,11 @@ class Adapter(unittest.TestCase):
         self.assertFalse(self.log.exists())
 
     def test_no_stele_is_refused_by_name(self) -> None:
-        """No stele on PATH: refused by name, exit 1, no record."""
+        """No stele on PATH: refused by name, exit 1, only that recorded."""
         done = self.run_adapter(report("PASS"), 0, path=str(self.dir / "empty"))
         same(self, done.returncode, 1, done.stderr)
         self.assertIn("stele is not on PATH", done.stderr)
-        same(self, self.records(), [])
+        same(self, self.refusal(), ("stele assert inventory", "stele is not on PATH"))
 
     def test_the_pinned_stele_gives_the_one_record(self) -> None:
         """A versionless PURL, judged by stele itself: the quoted record."""

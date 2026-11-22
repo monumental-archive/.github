@@ -45,12 +45,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import decoded
+import findings
 import typed_std
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
 LABEL = "audit:mutants: rust"
+# The leg's language: the subject of its findings, as LABEL names it.
+LANGUAGE = "rust"
 CONFIG = ".cargo/mutants.toml"
 # The statuses that mean cargo-mutants judged every mutant it was given:
 # 0 (all caught), 2 (survivors), 3 (timeouts). Anything else judged
@@ -144,17 +147,17 @@ def reasons(config: Path) -> int:
     text = config.read_text(encoding="utf-8", errors="replace")
     found = unexplained(text)
     for number, key, entry in found:
-        print(
-            f"{LABEL}: {config}:{number}: {key} entry {entry}"
-            " has no # reason line above it",
-            file=sys.stderr,
+        findings.finding(
+            LANGUAGE,
+            f"{config}:{number}: {key} entry {entry} has no # reason line above it",
+            [
+                (
+                    "an exclusion records a mutant the suite cannot kill;"
+                    " say why, one # line above each entry"
+                )
+            ],
         )
     if found:
-        print(
-            "  an exclusion records a mutant the suite cannot kill;"
-            " say why, one # line above each entry",
-            file=sys.stderr,
-        )
         return EXIT_RED
     return 0
 
@@ -443,7 +446,7 @@ def report(args: Args) -> int:
     for survivor in verdict.survivors:
         print(f"{LABEL}: survived: {survivor}")
     for run in verdict.runs:
-        print(f"{LABEL}: {run}", file=sys.stderr)
+        findings.finding(LANGUAGE, str(run))
     scope = args.where.removeprefix(",")
     scope = f"{scope}:" if scope else ""
     print(
@@ -459,15 +462,15 @@ def report(args: Args) -> int:
             encoding="utf-8",
         )
     if red(verdict):
-        print(
-            f"{LABEL}: red — kill each survivor with an assertion,"
-            f" or record it in {CONFIG}",
-            file=sys.stderr,
-        )
-        print(
-            "  as an exclude_re entry under a # line"
-            " saying why the mutant is equivalent",
-            file=sys.stderr,
+        findings.finding(
+            LANGUAGE,
+            f"red — kill each survivor with an assertion, or record it in {CONFIG}",
+            [
+                (
+                    "as an exclude_re entry under a # line"
+                    " saying why the mutant is equivalent"
+                )
+            ],
         )
         return EXIT_RED
     return 0
@@ -509,7 +512,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             packages = read_metadata(decoded.load_json(typed_std.stdin_text()))
         except decoded.UndecodableError as err:
-            print(f"{LABEL}: cargo metadata: {err}", file=sys.stderr)
+            findings.finding(LANGUAGE, f"cargo metadata: {err}")
             return EXIT_RED
         print(default_major(packages, args.name))
         return 0

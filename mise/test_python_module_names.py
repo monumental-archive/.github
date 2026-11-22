@@ -112,7 +112,7 @@ class PythonModuleNames(unittest.TestCase):
         self.assertEqual(1, done.returncode)
         self.assertEqual("", done.stdout)
         self.assertEqual(
-            "python_roots: these tracked files would be one module,"
+            f"lint:python-module-names: these tracked files would be one module,"
             " so an import of that name reaches only one of them:\n"
             "  test_steps: mise/test_steps, release/test_steps\n"
             f"{TASK}: rename one of each pair above so every module"

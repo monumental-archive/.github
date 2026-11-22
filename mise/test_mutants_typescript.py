@@ -34,6 +34,15 @@ from typing import override
 import hermetic
 import mutants_typescript
 
+# The task that runs the helper, whose name its findings carry (#1934).
+TASK = "audit:mutants"
+
+
+def setUpModule() -> None:
+    """Run every row as the task does, recording no finding."""
+    unittest.enterModuleContext(hermetic.as_task(TASK))
+
+
 BELT = Path(__file__).resolve().parent
 SCRIPT = BELT / "mutants-typescript.sh"
 BASH = hermetic.tool("bash")
@@ -137,6 +146,7 @@ class Planted(unittest.TestCase):
         self.planted.touch()
         self.summary = self.tmp / "summary"
         self.env = hermetic.env(
+            MISE_TASK_NAME=TASK,
             PLANT_LOG=str(self.log),
             PLANT_REPORT=str(self.planted),
             MUTANTS_SUMMARY_DIR=str(self.summary),

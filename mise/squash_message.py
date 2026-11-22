@@ -30,7 +30,7 @@ import string
 import subprocess
 import sys
 
-import workflow_command
+import findings
 
 # What bash's [[:space:]] matches: a body of only these is empty.
 SPACE = frozenset(string.whitespace)
@@ -233,7 +233,7 @@ def main(argv: list[str]) -> int:
         path.write_text(message, encoding="utf-8")
         check(path, number)
     except StepError as err:
-        workflow_command.error(str(err))
+        findings.finding("", str(err), annotate=True)
         return 1
     print("squash-message: title and body mint a conforming commit")
     return 0

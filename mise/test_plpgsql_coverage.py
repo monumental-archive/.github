@@ -38,6 +38,15 @@ import plpgsql_coverage as pc
 import test_coverage_tasks
 from decoded import as_array, as_object, as_str, load_json, load_toml
 
+# The task that runs the helper, whose name its findings carry (#1934).
+TASK = "leg"
+
+
+def setUpModule() -> None:
+    """Run every row as the task does, recording no finding."""
+    unittest.enterModuleContext(hermetic.as_task(TASK))
+
+
 CANON = Path(__file__).resolve().parent.parent
 BELT = CANON / "mise"
 HELPER = BELT / "plpgsql_coverage.py"
@@ -202,7 +211,7 @@ def stub_env(stubs: Path, answers: Path, **planted: str) -> dict[str, str]:
         The environment.
 
     """
-    env = hermetic.env()
+    env = hermetic.env(MISE_TASK_NAME=TASK)
     return (
         env
         | {
@@ -448,7 +457,7 @@ class HelperRows(Collecting):
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
         read = call(
             ["totals", "leg", str(tmp / "none.json")],
-            hermetic.env(),
+            hermetic.env(MISE_TASK_NAME=TASK),
             tmp,
         )
         self.assertEqual(1, read.returncode)
@@ -477,7 +486,7 @@ class HelperRows(Collecting):
         planted.write_text(json.dumps(document), encoding="utf-8")
         read = call(
             ["totals", "leg", str(planted)],
-            hermetic.env(),
+            hermetic.env(MISE_TASK_NAME=TASK),
             tmp,
         )
         self.assertEqual(1, read.returncode)
@@ -500,7 +509,7 @@ class HelperRows(Collecting):
         )
         self.assertEqual(1, done.returncode)
         self.assertEqual(
-            "plpgsql-coverage: ORG_PLPGSQL_COVERAGE is not set — the leg sets"
+            f"{TASK}: ORG_PLPGSQL_COVERAGE is not set — the leg sets"
             " it; call collect only then\n",
             done.stderr,
         )
@@ -644,7 +653,7 @@ class LintRows(Collecting):
         planted.write_text(json.dumps(document), encoding="utf-8")
         read = call(
             ["totals", "leg", str(planted)],
-            hermetic.env(),
+            hermetic.env(MISE_TASK_NAME=TASK),
             tmp,
         )
         self.assertEqual(1, read.returncode)
@@ -790,7 +799,7 @@ class RefusalRows(Collecting):
         planted.write_text(text, encoding="utf-8")
         return call(
             ["totals", "leg", str(planted)],
-            hermetic.env(),
+            hermetic.env(MISE_TASK_NAME=TASK),
             tmp,
         )
 
@@ -866,10 +875,14 @@ class RefusalRows(Collecting):
         """No subcommand, or an unknown one, is exit 2 with the usage."""
         for argv in ([], ["measure", "leg"]):
             with self.subTest(argv=argv):
-                done = run([sys.executable, str(HELPER), *argv], hermetic.env(), CANON)
+                done = run(
+                    [sys.executable, str(HELPER), *argv],
+                    hermetic.env(MISE_TASK_NAME=TASK),
+                    CANON,
+                )
                 self.assertEqual(2, done.returncode)
                 self.assertEqual(
-                    "usage: plpgsql-coverage collect <conninfo>"
+                    f"{TASK}: usage: plpgsql-coverage collect <conninfo>"
                     " | totals <label> <report>\n",
                     done.stderr,
                 )

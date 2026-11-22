@@ -154,7 +154,7 @@ def main(argv: list[str]) -> int:
     """
     task = findings.task_name()
     if len(argv) < NAMED or argv[0] != "assert":
-        print(f"{task}: {USAGE}", file=sys.stderr)
+        findings.finding("", USAGE)
         return EXIT_REFUSED
     target, rest = argv[1], argv[NAMED:]
     named = f"stele assert {target}"
@@ -165,12 +165,12 @@ def main(argv: list[str]) -> int:
             check=False,
         )
     except FileNotFoundError:
-        print(f"{task}: {named}: stele is not on PATH", file=sys.stderr)
+        findings.finding(named, "stele is not on PATH")
         return EXIT_REFUSED
     try:
         report = read_report(ran.stdout)
     except NotAReportError as err:
-        print(f"{task}: {named} exited {ran.returncode}: {err}", file=sys.stderr)
+        findings.finding("", f"{named} exited {ran.returncode}: {err}")
         return EXIT_REFUSED
     for each in report.findings:
         findings.finding(each.subject, each.message, each.detail)

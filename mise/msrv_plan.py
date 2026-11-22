@@ -102,6 +102,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+import findings as writer
 from decoded import (
     UndecodableError,
     as_array,
@@ -112,8 +113,6 @@ from decoded import (
     load_toml,
 )
 from typed_std import stdin_text
-
-NAME = "msrv-plan"
 
 # The floor file's one key, and the shape of a Debian rustc package version
 # it holds: an optional epoch, then the upstream major.minor the floor is.
@@ -632,7 +631,7 @@ def compile_failure(toolchain: str, specs: str) -> list[str]:
 
     """
     return [
-        f"{NAME}: {specs} failed to compile at {toolchain},",
+        f"{specs} failed to compile at {toolchain},",
         "  the rust-version the rule derives",
         "  the crate may not raise it: the number is the higher of Debian",
         "  stable's rustc and the highest rust-version its normal and build",
@@ -658,21 +657,19 @@ def read_inputs(
         metadata = load_json(stdin_text())
         listing = load_json(listing_file.read_text(encoding="utf-8"))
     except UndecodableError as bad:
-        print(
-            f"{NAME}: cargo metadata or `mise ls rust` did not give JSON",
-            file=sys.stderr,
+        writer.finding(
+            "", "cargo metadata or `mise ls rust` did not give JSON", [str(bad)]
         )
-        print(f"  {bad}", file=sys.stderr)
         return None
     try:
         workspace = members(metadata)
     except UndecodableError as bad:
-        print(f"{NAME}: cargo metadata: {bad}", file=sys.stderr)
+        writer.finding("cargo metadata", str(bad))
         return None
     try:
         return metadata, workspace, toolchains(listing)
     except UndecodableError as bad:
-        print(f"{NAME}: `mise ls rust`: {bad}", file=sys.stderr)
+        writer.finding("`mise ls rust`", str(bad))
         return None
 
 
@@ -695,20 +692,19 @@ def rule(
     try:
         floor = read_floor(floor_file.read_text(encoding="utf-8"))
     except (OSError, UndecodableError) as bad:
-        print(f"{NAME}: the floor file {floor_file}: {bad}", file=sys.stderr)
+        writer.finding(f"the floor file {floor_file}", str(bad))
         return False
     try:
         found = derivations(metadata, workspace, floor)
     except UndecodableError as bad:
-        print(f"{NAME}: cargo metadata: {bad}", file=sys.stderr)
+        writer.finding("cargo metadata", str(bad))
         return False
     if found:
-        print(
-            f"{NAME}: a minimum is undeclared or differs from the one the rule derives",
-            file=sys.stderr,
+        writer.finding(
+            "",
+            "a minimum is undeclared or differs from the one the rule derives",
+            [*found, *(line.removeprefix("  ") for line in rule_remedy())],
         )
-        for line in [*(f"  {f}" for f in found), *rule_remedy()]:
-            print(line, file=sys.stderr)
     return not found
 
 
@@ -728,8 +724,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv, namespace=Args())
 
     if args.failed:
-        for line in compile_failure(*args.failed):
-            print(line, file=sys.stderr)
+        head, *rest = compile_failure(*args.failed)
+        writer.finding("", head, [line.removeprefix("  ") for line in rest])
         return 1
     if args.toolchains is None or args.floor is None:
         parser.error("--toolchains and --floor are required to plan")
@@ -742,9 +738,7 @@ def main(argv: list[str] | None = None) -> int:
     exclude = set(args.exclude.split())
     groups, unreachable, unreadable = promises(workspace, exclude)
     if unreadable:
-        print(f"{NAME}: a declared minimum this check cannot compare", file=sys.stderr)
-        for line in unreadable:
-            print(f"  {line}", file=sys.stderr)
+        writer.finding("", "a declared minimum this check cannot compare", unreadable)
         return 1
     if not rule(metadata, workspace, args.floor):
         return 1
@@ -784,17 +778,11 @@ def plan(
             if spec.split("@")[0] in extensions
         )
     if findings:
-        print(
-            f"{NAME}: the declared minimum and the pinned toolchain disagree",
-            file=sys.stderr,
-        )
-        for line in findings:
-            print(f"  {line}", file=sys.stderr)
         if absent:
-            print(
-                f"  ({', '.join(absent)} is pinned but not installed)",
-                file=sys.stderr,
-            )
+            findings.append(f"({', '.join(absent)} is pinned but not installed)")
+        writer.finding(
+            "", "the declared minimum and the pinned toolchain disagree", findings
+        )
         return 1
 
     print("\n".join(records))

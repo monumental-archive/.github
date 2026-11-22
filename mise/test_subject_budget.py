@@ -25,18 +25,29 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Self
 from unittest import mock
 
 import decoded
+import hermetic
 import subject_budget as sb
 import typed_std
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from types import TracebackType
 
 # What Renovate appends to an advisory subject, and what default.json
 # writes out explicitly since #667. Eleven columns.
+# The task that runs the helper, whose name its findings carry (#1934).
+TASK = "lint:subject-budget"
+
+
+def setUpModule() -> None:
+    """Run every row as the task does, recording no finding."""
+    unittest.enterModuleContext(hermetic.as_task(TASK))
+
+
 SUFFIX = "[SECURITY]"
 
 # A minimal preset in the shape default.json now has: all five message
@@ -59,6 +70,50 @@ PRESET: dict[str, object] = {
 # the comparison states the element type it is checking.
 NO_FINDINGS: list[sb.Finding] = []
 NO_DEPS: list[sb.Dep] = []
+
+
+class Stops:
+    """Expect the task to stop: exit 1, its finding said on stderr (#1934).
+
+    The refusal is a finding, written through the writer; `said` is what
+    it printed, without the final newline.
+    """
+
+    def __init__(self, case: unittest.TestCase) -> None:
+        """Hold the row that expects the stop."""
+        self.case = case
+        self.said = ""
+        self._err = io.StringIO()
+        self._redirect = redirect_stderr(self._err)
+
+    def __enter__(self) -> Self:
+        """Start capturing stderr.
+
+        Returns:
+            This expectation, to read `said` from afterwards.
+
+        """
+        self._redirect.__enter__()
+        return self
+
+    def __exit__(
+        self,
+        kind: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> bool:
+        """Stop capturing, and hold the block to a stop with status 1.
+
+        Returns:
+            True: the expected stop is swallowed.
+
+        """
+        self._redirect.__exit__(kind, exc, tb)
+        self.said = self._err.getvalue().rstrip("\n")
+        if not isinstance(exc, SystemExit):
+            self.case.fail(f"the task did not stop: {exc!r}")
+        self.case.assertEqual(1, exc.code, self.said)
+        return True
 
 
 def dep(name: str, current: str = "v1.0.0", manager: str = "mise") -> sb.Dep:
@@ -348,16 +403,16 @@ class TestEffective(ResolutionCase):
         """
         incomplete = preset()
         del incomplete["commitMessageExtra"]
-        with self.assertRaises(SystemExit) as caught:
+        with Stops(self) as caught:
             sb.effective(owned(incomplete), dep("ruff"))
-        self.assertIn("commitMessageExtra", str(caught.exception))
+        self.assertIn("commitMessageExtra", caught.said)
 
     def test_every_missing_field_is_named_at_once(self) -> None:
         """The error lists all absent fields, not just the first."""
-        with self.assertRaises(SystemExit) as caught:
+        with Stops(self) as caught:
             sb.effective(owned({"packageRules": []}), dep("ruff"))
         for field in sb.MESSAGE_CONFIG:
-            self.assertIn(field, str(caught.exception))
+            self.assertIn(field, caught.said)
 
 
 class TestRepoRules(ResolutionCase):
@@ -449,9 +504,9 @@ class TestRepoRules(ResolutionCase):
         thin = preset()
         del thin["commitMessageAction"]
         repo = [{"matchPackageNames": ["*"], "commitMessageAction": "bump"}]
-        with self.assertRaises(SystemExit) as caught:
+        with Stops(self) as caught:
             sb.effective(owned(thin, repo), dep("ruff"))
-        self.assertIn("commitMessageAction", str(caught.exception))
+        self.assertIn("commitMessageAction", caught.said)
 
     def test_judge_goes_red_on_a_widening_repo_rule_and_green_without(
         self,
@@ -556,12 +611,12 @@ class TestRepoTopLevel(ResolutionCase):
         """
         thin = preset()
         del thin["semanticCommitType"]
-        with self.assertRaises(SystemExit) as caught:
+        with Stops(self) as caught:
             sb.effective(
                 owned(thin, repo_top={"semanticCommitType": "chore"}),
                 dep("ruff"),
             )
-        self.assertIn("semanticCommitType", str(caught.exception))
+        self.assertIn("semanticCommitType", caught.said)
 
     def test_judge_goes_red_on_a_widening_top_level_field_and_green_without(
         self,
@@ -747,9 +802,9 @@ class TestUnmodellableMatchers(unittest.TestCase):
             ],
         )
         del thin["semanticCommitScope"]
-        with self.assertRaises(SystemExit) as caught:
+        with Stops(self) as caught:
             sb.effective(owned(thin), dep("ruff"))
-        self.assertIn("semanticCommitScope", str(caught.exception))
+        self.assertIn("semanticCommitScope", caught.said)
 
 
 class TestRender(unittest.TestCase):
@@ -884,9 +939,9 @@ class TestAdvisorySubject(unittest.TestCase):
         upstream default from memory, eleven columns wide, which is the
         failure #576 exists to kill.
         """
-        with self.assertRaises(SystemExit) as caught:
+        with Stops(self) as caught:
             sb.advisory_suffix(sb.decode_config({}), sb.decode_config({}))
-        self.assertIn("commitMessageSuffix", str(caught.exception))
+        self.assertIn("commitMessageSuffix", caught.said)
 
     def test_the_suffix_renders_last_before_the_pull_request_tail(
         self,
@@ -1074,10 +1129,10 @@ class TestConfigRefusals(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "renovate.json"
             path.write_text('{"packageRules": {}}', encoding="utf-8")
-            with self.assertRaises(SystemExit) as caught:
+            with Stops(self) as caught:
                 sb.read_config(path, [])
         self.assertEqual(
-            str(caught.exception),
+            caught.said,
             f"lint:subject-budget: {path}: packageRules is not a list",
         )
 
@@ -1143,12 +1198,10 @@ class TestCeiling(unittest.TestCase):
                 with (
                     self.subTest(text=text),
                     mock.patch.dict(os.environ, env),
-                    self.assertRaises(SystemExit) as caught,
+                    Stops(self) as caught,
                 ):
                     sb.ceiling()
-            self.assertEqual(
-                str(caught.exception), f"lint:subject-budget: {config}: {message}"
-            )
+            self.assertEqual(caught.said, f"lint:subject-budget: {config}: {message}")
 
     def test_the_canon_ceiling_is_what_the_org_ships(self) -> None:
         """The delivered file parses and carries a subject_length."""
@@ -1347,6 +1400,9 @@ class TestMainGuards(unittest.TestCase):
                 try:
                     with redirect_stdout(out), redirect_stderr(err):
                         status = sb.main()
+                except SystemExit as stop:
+                    # A refusal the task stops on: said as a finding, exit 1.
+                    status = stop.code if isinstance(stop.code, int) else 1
                 finally:
                     os.chdir(cwd)
             return status, out.getvalue(), err.getvalue()
@@ -1568,28 +1624,28 @@ class TestMainGuards(unittest.TestCase):
     def test_a_preset_with_no_advisory_suffix_stops_the_task(self) -> None:
         """The sixth field answers the same law as the other five."""
         thin = {k: v for k, v in PRESET.items() if k != "vulnerabilityAlerts"}
-        with self.assertRaises(SystemExit) as caught:
-            self._run(
-                {
-                    "renovate.json": "{}\n",
-                    "default.json": json.dumps(thin),
-                    "mise.toml": '[tools]\nruff = "0.16.2"\n',
-                },
-            )
-        self.assertIn("commitMessageSuffix", str(caught.exception))
+        status, _, err = self._run(
+            {
+                "renovate.json": "{}\n",
+                "default.json": json.dumps(thin),
+                "mise.toml": '[tools]\nruff = "0.16.2"\n',
+            },
+        )
+        self.assertEqual(1, status)
+        self.assertIn("commitMessageSuffix", err)
 
     def test_an_incomplete_template_stops_the_task(self) -> None:
         """A preset missing a field errors; it does not quietly assume."""
         thin = {k: v for k, v in PRESET.items() if k != "commitMessageAction"}
-        with self.assertRaises(SystemExit) as caught:
-            self._run(
-                {
-                    "renovate.json": "{}\n",
-                    "default.json": json.dumps(thin),
-                    "mise.toml": '[tools]\nruff = "0.16.2"\n',
-                },
-            )
-        self.assertIn("commitMessageAction", str(caught.exception))
+        status, _, err = self._run(
+            {
+                "renovate.json": "{}\n",
+                "default.json": json.dumps(thin),
+                "mise.toml": '[tools]\nruff = "0.16.2"\n',
+            },
+        )
+        self.assertEqual(1, status)
+        self.assertIn("commitMessageAction", err)
 
 
 CANON = Path(__file__).resolve().parent.parent

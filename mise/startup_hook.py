@@ -28,6 +28,7 @@ Stdlib only.
 import sys
 from pathlib import Path
 
+import findings
 import typed_std
 
 # The chain, appended to every hook after its work. `__file__` is the
@@ -87,7 +88,7 @@ def main(argv: list[str] | None = None) -> int:
     """
     args = sys.argv[1:] if argv is None else argv
     if len(args) != 1:
-        print("usage: startup_hook.py DIR < WORK", file=sys.stderr)
+        findings.finding("", "usage: startup_hook.py DIR < WORK")
         return 2
     write(Path(args[0]), typed_std.stdin_text())
     return 0

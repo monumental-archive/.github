@@ -123,6 +123,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 import decoded
+import findings as writer
 import typed_std
 
 EXIT_ERROR = 2
@@ -1387,7 +1388,7 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv, namespace=Args())
     repo = os.environ.get("GITHUB_REPOSITORY", "")
     if not repo:
-        print("red-check: GITHUB_REPOSITORY is not set", file=sys.stderr)
+        writer.finding("", "GITHUB_REPOSITORY is not set")
         return EXIT_ERROR
     server = os.environ.get("GITHUB_SERVER_URL") or "https://github.com"
     run_url = f"{server}/{repo}/actions/runs/{args.run_id}"
@@ -1399,7 +1400,7 @@ def main(argv: list[str]) -> int:
             return 0
         done = report(repo, args, run_url)
     except StandingIssueError as err:
-        print(f"red-check: {err}; nothing was filed", file=sys.stderr)
+        writer.finding("", f"{err}; nothing was filed")
         return EXIT_ERROR
     print(f"red-check: {done}")
     return 0

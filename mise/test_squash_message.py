@@ -24,24 +24,28 @@ import sys
 import tempfile
 import unittest
 from typing import override
+from unittest import mock
 
 import hermetic
 import squash_message
 
 HELPER = pathlib.Path(__file__).resolve().parent / "squash_message.py"
+# A workflow step runs the helper outside mise, so its findings carry the
+# script's own name (findings.task_name, #1934).
+STEP = "squash_message.py"
 STUB_MISE = """#!/usr/bin/env bash
 printf '%s\\n' "$*" > "${STUB_DIR}/mise-args"
 cp "${ORG_COMMIT_MSG_FILE}" "${STUB_DIR}/checked-message"
 exit "${STUB_EXIT}"
 """
 OWN_REF = (
-    "::error::the PR title already ends in this pull request's own reference"
+    f"::error::{STEP}: the PR title already ends in this pull request's own reference"
     " (#812), and the merge appends it again — the permanent subject would"
     " carry it twice — fix the TITLE: it carries the ISSUE reference only, the"
     " squash appends the PR's\n"
 )
 FAILS_CANON = (
-    "::error::the PR title and body become the permanent squash subject (plus"
+    f"::error::{STEP}: the PR title and body become the permanent squash subject (plus"
     " ' (#812)') and body, and they fail the commit canon — fix the TITLE or the"
     " BODY, not a commit\n"
 )
@@ -127,7 +131,7 @@ def refusal(number: int, line: str) -> str:
 
     """
     return (
-        f"::error::PR body line {number} follows a blank line inside the"
+        f"::error::{STEP}: PR body line {number} follows a blank line inside the"
         f" BREAKING CHANGE footer: {line!r} — everything from a"
         " `BREAKING CHANGE:` footer to the next footer is the break's"
         " description in the release notes — move that text above the footer,"
@@ -179,9 +183,11 @@ class StepHarness(unittest.TestCase):
             The status and both streams.
 
         """
-        return hermetic.call_main(
-            lambda: squash_message.main([]), env=self.step_env(title, body, verdict)
-        )
+        with mock.patch.object(sys, "argv", [STEP]):
+            return hermetic.call_main(
+                lambda: squash_message.main([]),
+                env=self.step_env(title, body, verdict),
+            )
 
     def checked(self) -> str:
         """Read the message `commits:check` was handed.
@@ -214,7 +220,7 @@ class SquashMessage(StepHarness):
         """#800: the merge would append the PR's number a second time."""
         done = self.squash("fix(ci): hold the title (#812)", "Body.")
         self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
-        self.assertEqual(done.stdout, OWN_REF)
+        self.assertEqual(done.stderr, OWN_REF)
         self.assertFalse((self.tmp / "mise-args").exists())
 
     def test_title_ending_in_the_issue_reference_is_the_convention(self) -> None:
@@ -263,8 +269,9 @@ class SquashMessage(StepHarness):
         done = self.squash("fix: x", body)
         self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
         self.assertEqual(
-            done.stdout,
-            "::error::PR body line 2 begins with 'committer': \"committer) and"
+            done.stderr,
+            f"::error::{STEP}: PR body line 2 begins with 'committer':"
+            ' "committer) and'
             " the row's own overrides.\" — GitHub splices the queue squash"
             " commit's signature after that line, the commit is unverifiable"
             " and the queue drops the pull request (#1529) — reword the BODY so"
@@ -276,7 +283,7 @@ class SquashMessage(StepHarness):
         """#1529: no delimiter is needed; `committerx y` was spliced too."""
         done = self.squash("fix: x", "Plain line.\ncommitterx y")
         self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
-        self.assertIn("PR body line 2 begins with 'committer'", done.stdout)
+        self.assertIn("PR body line 2 begins with 'committer'", done.stderr)
 
     def test_committer_inside_a_line_is_not_a_header(self) -> None:
         """The measured verified shapes: mid-line, indented, capitalised."""
@@ -289,7 +296,7 @@ class SquashMessage(StepHarness):
         """#411: the canon's refusal names what to fix, the title or the body."""
         done = self.squash("Fix: Capitalised", "Body.", verdict=1)
         self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
-        self.assertEqual(done.stdout, FAILS_CANON)
+        self.assertEqual(done.stderr, FAILS_CANON)
         self.assertEqual(self.checked(), "Fix: Capitalised (#812)\n\nBody.\n")
 
 
@@ -300,7 +307,7 @@ class BreakingFooter(StepHarness):
         """Assert a row is refused, naming its line, before the canon."""
         done = self.squash("feat: x", BREAKING_ROWS[row][0])
         self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
-        self.assertEqual(done.stdout, refusal(number, line))
+        self.assertEqual(done.stderr, refusal(number, line))
         self.assertFalse((self.tmp / "mise-args").exists())
 
     def assert_passes(self, row: str) -> None:

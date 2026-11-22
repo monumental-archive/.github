@@ -27,6 +27,12 @@ import decoded
 import hermetic
 import vex_one_per_merge
 
+
+def setUpModule() -> None:
+    """Run every row as the task does, recording no finding."""
+    unittest.enterModuleContext(hermetic.as_task(TASK))
+
+
 BELT = Path(__file__).resolve().parent
 CANON = BELT.parent
 BASH = hermetic.tool("bash")
@@ -59,7 +65,7 @@ class Tree:
         """Make the repository under `root`."""
         self.dir = root / "repo"
         self.dir.mkdir()
-        self.env = hermetic.env(root / "home")
+        self.env = hermetic.env(root / "home", MISE_TASK_NAME=TASK)
         self.git("init", "-q", "-b", "feature")
 
     def git(self, *args: str) -> str:

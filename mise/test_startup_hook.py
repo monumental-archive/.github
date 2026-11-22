@@ -25,6 +25,14 @@ from unittest import mock
 import hermetic
 import startup_hook
 
+# The task that runs the helper, whose name its findings carry (#1934).
+TASK = "audit:mutants"
+
+
+def setUpModule() -> None:
+    """Run every row as the task does, recording no finding."""
+    unittest.enterModuleContext(hermetic.as_task(TASK))
+
 
 def logs(name: str) -> str:
     """Write a hook's work: append its name to the row's log.
@@ -176,7 +184,7 @@ class Chain(unittest.TestCase):
         self.assert_ran(["main"], directory)
         with mock.patch("sys.stderr", io.StringIO()) as err:
             self.assertEqual(2, startup_hook.main([]))
-        self.assertEqual("usage: startup_hook.py DIR < WORK\n", err.getvalue())
+        self.assertEqual(f"{TASK}: usage: startup_hook.py DIR < WORK\n", err.getvalue())
 
 
 if __name__ == "__main__":

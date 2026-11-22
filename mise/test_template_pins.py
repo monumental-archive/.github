@@ -30,6 +30,15 @@ import decoded
 import hermetic
 import template_pins
 
+# The task that runs the helper, whose name its findings carry (#1934).
+TASK = "lint:template-pins"
+
+
+def setUpModule() -> None:
+    """Run every row as the task does, recording no finding."""
+    unittest.enterModuleContext(hermetic.as_task(TASK))
+
+
 BELT = Path(__file__).resolve().parent
 CANON_DIR = BELT.parent
 BASH = hermetic.tool("bash")
@@ -97,6 +106,7 @@ class Pins(unittest.TestCase):
         self.tree = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tree)
         self.env = hermetic.env(
+            MISE_TASK_NAME=TASK,
             ORG_BELT_DIR=str(BELT),
             ORG_CANON_DIR=str(CANON_DIR),
             ORG_PYTHON=sys.executable,

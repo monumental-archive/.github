@@ -15,7 +15,17 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import hermetic
 import project_licence as pl
+
+# The task that runs the helper, whose name its findings carry (#1934).
+TASK = "fix:test"
+
+
+def setUpModule() -> None:
+    """Run every row as the task does, recording no finding."""
+    unittest.enterModuleContext(hermetic.as_task(TASK))
+
 
 HERE = Path(__file__).resolve().parent
 
@@ -98,7 +108,7 @@ class Reader(unittest.TestCase):
     def test_usage(self) -> None:
         """No caller is a usage error, not a pass."""
         status, out, err = run({}, ["project_licence.py"])
-        usage = "usage: project_licence.py <caller>\n"
+        usage = f"{TASK}: usage: project_licence.py <caller>\n"
         self.assertEqual((2, "", usage), (status, out, err))
 
 

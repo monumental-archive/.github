@@ -49,6 +49,7 @@ from pathlib import Path
 from typing import Protocol
 
 import decoded
+import findings
 import typed_std
 
 GH = shutil.which("gh") or "gh"
@@ -504,18 +505,18 @@ def report(verdict: Verdict) -> int:
     for line in verdict.passed:
         print(f"{TAG}: {line}")
     for line in verdict.red + verdict.blind:
-        print(f"{TAG}: {line}", file=sys.stderr)
+        findings.finding("", line)
     if verdict.blind:
-        print(
-            f"{TAG}: a blind read is not a pass. Grant the audit App "
+        findings.finding(
+            "",
+            f"a blind read is not a pass. Grant the audit App "
             f"{ORG_GRANT} and {REPO_GRANT} (#1213).",
-            file=sys.stderr,
         )
     if verdict.red:
-        print(
-            f"{TAG}: reconcile security/*.json with the live settings, or put "
+        findings.finding(
+            "",
+            "reconcile security/*.json with the live settings, or put "
             "the live settings back (security/README.md)",
-            file=sys.stderr,
         )
     return 1 if verdict.red or verdict.blind else 0
 
@@ -550,7 +551,7 @@ def main(argv: list[str] | None = None, fetch: Fetch = gh_fetch) -> int:
         )
         verdict = Audit(args.owner, records, fetch).run()
     except (OSError, ValueError) as err:
-        print(f"{TAG}: cannot read an input: {err}", file=sys.stderr)
+        findings.finding("", f"cannot read an input: {err}")
         return 1
     return report(verdict)
 

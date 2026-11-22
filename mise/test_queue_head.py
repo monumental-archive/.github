@@ -28,6 +28,7 @@ import sys
 import tempfile
 import unittest
 from typing import override
+from unittest import mock
 
 import decoded
 import hermetic
@@ -36,6 +37,9 @@ import workflow_yaml
 
 HERE = pathlib.Path(__file__).resolve().parent
 HELPER = HERE / "queue_head.py"
+# A workflow step runs the helper outside mise, so its findings carry the
+# script's own name (findings.task_name, #1934).
+STEP = "queue_head.py"
 BUNDLE = HERE / "testdata" / "queue-head" / "edtf-265.bundle.gz"
 CI = HERE.parent / ".github" / "workflows" / "ci.yml"
 GIT = hermetic.tool("git")
@@ -188,9 +192,10 @@ def run_helper(cwd: pathlib.Path, ref: str, base: str, group: str) -> hermetic.C
         The status and both streams.
 
     """
-    return hermetic.call_main(
-        lambda: queue_head.main([]), env=step_env(ref, base, group), cwd=cwd
-    )
+    with mock.patch.object(sys, "argv", [STEP]):
+        return hermetic.call_main(
+            lambda: queue_head.main([]), env=step_env(ref, base, group), cwd=cwd
+        )
 
 
 def start_helper(
@@ -233,7 +238,7 @@ class QueueHead(unittest.TestCase):
     ) -> None:
         """Assert the step is red with exactly this message."""
         self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
-        self.assertEqual(done.stdout, f"::error::queue-head: {message}\n")
+        self.assertEqual(done.stderr, f"::error::{STEP}: {message}\n")
 
     def passed(
         self,
@@ -351,8 +356,8 @@ class QueueHead(unittest.TestCase):
         )
         self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
         self.assertEqual(
-            done.stdout,
-            f"::error::queue-head: the merge group {EDTF_GROUP} was not built from"
+            done.stderr,
+            f"::error::{STEP}: the merge group {EDTF_GROUP} was not built from"
             f" pull request #265's current head {EDTF_HEAD}: the pull request moved"
             f" after it was queued. The group's tree is {EDTF_MERGED_TREE};"
             f" {EDTF_HEAD} merged onto the base {EDTF_BASE} is {EDTF_HEAD_TREE}."
@@ -410,8 +415,8 @@ class QueueHead(unittest.TestCase):
         )
         self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
         self.assertRegex(
-            done.stdout,
-            rf"^::error::queue-head: fetching pull request #{NUMBER}'s head"
+            done.stderr,
+            rf"^::error::{STEP}: fetching pull request #{NUMBER}'s head"
             rf" \(refs/pull/{NUMBER}/head\) from origin failed, so the group is"
             r" unverified: .*couldn't find remote ref refs/pull/7/head\n$",
         )

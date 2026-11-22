@@ -21,6 +21,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import hermetic
 import pg_schema as ps
 from hypothesis import example
 from hypothesis import strategies as st
@@ -105,8 +106,8 @@ class Refusal(unittest.TestCase):
         with tempfile.TemporaryDirectory() as scratch:
             path = Path(scratch) / "raw.sql"
             path.write_bytes(data)
-            with contextlib.redirect_stderr(err):
-                got = ps.surface("lint:pg-schema", str(path))
+            with hermetic.as_task("lint:pg-schema"), contextlib.redirect_stderr(err):
+                got = ps.surface(str(path))
         if got is None:
             self.assertIn("lint:pg-schema:", err.getvalue())
         else:

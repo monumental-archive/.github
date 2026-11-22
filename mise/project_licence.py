@@ -23,6 +23,7 @@ the reason on stderr otherwise.
 import pathlib
 import sys
 
+import findings
 from decoded import UndecodableError, as_array, as_object, is_strings, load_toml
 
 EXPECTED_ARGC = 2
@@ -106,25 +107,29 @@ def main(argv: list[str]) -> int:
 
     """
     if len(argv) != EXPECTED_ARGC:
-        print("usage: project_licence.py <caller>", file=sys.stderr)
+        findings.finding("", "usage: project_licence.py <caller>")
         return 2
     caller = argv[1]
     try:
         config = load_toml(pathlib.Path("REUSE.toml").read_text(encoding="utf-8"))
     except UndecodableError as error:
-        print(f"{caller}: REUSE.toml does not parse: {error}", file=sys.stderr)
+        findings.finding("", f"REUSE.toml does not parse: {error}")
         return 1
     try:
         names = expressions(config)
     except UndecodableError as error:
-        print(f"{caller}: REUSE.toml: {error}", file=sys.stderr)
+        findings.finding("REUSE.toml", str(error))
         return 1
     states = pathlib.Path(".badge-states")
     text = states.read_text(encoding="utf-8") if states.is_file() else ""
     choice, errors = decide(caller, names, declared(text))
-    for line in errors:
-        print(line, file=sys.stderr)
     if errors:
+        head, *rest = errors
+        findings.finding(
+            "",
+            head.removeprefix(f"{caller}: "),
+            [line.removeprefix("  ") for line in rest],
+        )
         return 1
     if choice:
         print(choice)

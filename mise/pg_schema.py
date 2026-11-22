@@ -40,7 +40,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-LINT = "lint:pg-schema"
+import findings
+
 FIX = "fix:pg-schema"
 GIT = shutil.which("git") or "git"
 ARGUMENTS = 3  # mode, raw, snapshot
@@ -81,7 +82,7 @@ def tracked(path: str) -> bool:
     return result.returncode == 0
 
 
-def surface(label: str, raw: str) -> str | None:
+def surface(raw: str) -> str | None:
     """Read and normalise the generated schema, or say why it cannot be.
 
     Returns:
@@ -91,12 +92,15 @@ def surface(label: str, raw: str) -> str | None:
     try:
         text = Path(raw).read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as err:
-        print(f"{label}: cannot read the generated schema: {err}", file=sys.stderr)
+        findings.finding("", f"cannot read the generated schema: {err}")
         return None
     generated = normalise(text)
     if not generated:
-        print(f"{label}: the generated schema normalised to nothing", file=sys.stderr)
-        print("  an extension with no SQL surface cannot be right", file=sys.stderr)
+        findings.finding(
+            "",
+            "the generated schema normalised to nothing",
+            ["an extension with no SQL surface cannot be right"],
+        )
         return None
     return generated
 
@@ -110,19 +114,19 @@ def check(raw: str, snapshot: str) -> int:
 
     """
     if not tracked(snapshot):
-        print(f"{LINT}: no snapshot tracked at {snapshot}", file=sys.stderr)
-        print(
-            f"  run `mise run {FIX}` to write it, read it, and commit it",
-            file=sys.stderr,
+        findings.finding(
+            "",
+            f"no snapshot tracked at {snapshot}",
+            [f"run `mise run {FIX}` to write it, read it, and commit it"],
         )
         return 1
-    generated = surface(LINT, raw)
+    generated = surface(raw)
     if generated is None:
         return 1
     try:
         recorded = Path(snapshot).read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as err:
-        print(f"{LINT}: cannot read {snapshot}: {err}", file=sys.stderr)
+        findings.finding("", f"cannot read {snapshot}: {err}")
         return 1
     if recorded == generated:
         return 0
@@ -134,18 +138,14 @@ def check(raw: str, snapshot: str) -> int:
             tofile="generated",
         ),
     )
-    print(f"{LINT}: the SQL surface differs from {snapshot}", file=sys.stderr)
-    print(
-        "  read the diff above first: it is the surface change this commit makes",
-        file=sys.stderr,
-    )
-    print(
-        f"  if it is intended, run `mise run {FIX}` and commit the snapshot with",
-        file=sys.stderr,
-    )
-    print(
-        "  the upgrade script it implies (sql/<ext>--<previous>--<this>.sql)",
-        file=sys.stderr,
+    findings.finding(
+        "",
+        f"the SQL surface differs from {snapshot}",
+        [
+            "read the diff above first: it is the surface change this commit makes",
+            f"if it is intended, run `mise run {FIX}` and commit the snapshot with",
+            "the upgrade script it implies (sql/<ext>--<previous>--<this>.sql)",
+        ],
     )
     return 1
 
@@ -158,13 +158,13 @@ def write(raw: str, snapshot: str) -> int:
         cannot be written.
 
     """
-    generated = surface(FIX, raw)
+    generated = surface(raw)
     if generated is None:
         return 1
     try:
         Path(snapshot).write_text(generated, encoding="utf-8")
     except OSError as err:
-        print(f"{FIX}: cannot write {snapshot}: {err}", file=sys.stderr)
+        findings.finding("", f"cannot write {snapshot}: {err}")
         return 1
     print(f"{FIX}: wrote {snapshot}")
     return 0
@@ -179,10 +179,7 @@ def main(argv: list[str]) -> int:
     """
     modes = {"check": check, "write": write}
     if len(argv) != ARGUMENTS or argv[0] not in modes:
-        print(
-            "pg-schema: usage: pg_schema.py check|write <raw.sql> <snapshot>",
-            file=sys.stderr,
-        )
+        findings.finding("", "usage: pg_schema.py check|write <raw.sql> <snapshot>")
         return 1
     return modes[argv[0]](argv[1], argv[2])
 

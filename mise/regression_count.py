@@ -37,6 +37,7 @@ import subprocess
 import sys
 from typing import TYPE_CHECKING
 
+import findings
 import typed_std
 
 if TYPE_CHECKING:
@@ -547,10 +548,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     window = f"since {args.since}" if args.since else "all history"
     try:
         if git(args.repo, "rev-parse", "--is-shallow-repository").strip() == "true":
-            print(
-                "regression-count: the clone is shallow, so the window is cut"
+            findings.finding(
+                "",
+                "the clone is shallow, so the window is cut"
                 " short and the ratio would be a guess; fetch full history",
-                file=sys.stderr,
             )
             return 2
         commits = measure(args.repo, args.rev, args.since, args.until)
@@ -560,7 +561,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             else commits
         )
     except GitError as err:
-        print(f"regression-count: {err}", file=sys.stderr)
+        findings.finding("", str(err))
         return 2
     sys.stdout.write(text_report(commits, window))
     if args.summary:

@@ -46,6 +46,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import findings
+
 GIT = shutil.which("git") or "git"
 DECISIONS = "security/vex/*.openvex.json"
 BASE = "origin/main"
@@ -139,9 +141,7 @@ def count() -> int:
         return 0
     names = changed(f"{BASE}...{head}")
     if len(names) > 1:
-        print(f"{NAME}: {message()}:", file=sys.stderr)
-        for name in names:
-            print(f"  {name}", file=sys.stderr)
+        findings.finding("", f"{message()}:", names)
         return 1
     print(f"{NAME}: {len(names)} VEX decision(s) changed ahead of {BASE}")
     return 0

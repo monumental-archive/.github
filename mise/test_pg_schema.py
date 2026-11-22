@@ -241,7 +241,9 @@ def run_main(argv: list[str]) -> tuple[int, str, str]:
 
     """
     out, err = io.StringIO(), io.StringIO()
-    with redirect_stdout(out), redirect_stderr(err):
+    # check is lint:pg-schema's call, write fix:pg-schema's (#1934).
+    task = "fix:pg-schema" if argv[:1] == ["write"] else "lint:pg-schema"
+    with hermetic.as_task(task), redirect_stdout(out), redirect_stderr(err):
         status = pg_schema.main(argv)
     return status, out.getvalue(), err.getvalue()
 

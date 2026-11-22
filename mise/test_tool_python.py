@@ -79,7 +79,9 @@ class ToolPython(unittest.TestCase):
             Its status and streams.
 
         """
-        environ = hermetic.env(PATH=str(self.bins), **env)
+        # The caller's label is its task's own name, as the properties
+        # scripts pass it: the refusal reads `<label>: …` (#1934).
+        environ = hermetic.env(PATH=str(self.bins), MISE_TASK_NAME=LABEL, **env)
         return hermetic.call_main(
             lambda: tool_python.main([LABEL, "coverage", *argv]), env=environ
         )

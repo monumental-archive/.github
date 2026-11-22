@@ -40,6 +40,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import findings
 import typed_std
 
 GIT = shutil.which("git") or "git"
@@ -161,10 +162,7 @@ def main(argv: list[str]) -> int:
     # an empty owner or repository arrives here as "/x" or "x/".
     owner, _, repo = argv[0].partition("/") if argv else ("", "", "")
     if not owner or not repo:
-        print(
-            "lint:template-pins: usage: template_pins.py OWNER/REPO TEMPLATE...",
-            file=sys.stderr,
-        )
+        findings.finding("", "usage: template_pins.py OWNER/REPO TEMPLATE...")
         return EXIT_ERROR
     canon, files = argv[0], [Path(f) for f in argv[1:]]
     count = 0
@@ -174,7 +172,7 @@ def main(argv: list[str]) -> int:
         try:
             text = read(path)
         except ValueError as err:
-            print(f"lint:template-pins: {err}", file=sys.stderr)
+            findings.finding("", str(err))
             return EXIT_ERROR
         shas, found = template_pins(path, text, canon)
         bad += found
@@ -186,18 +184,16 @@ def main(argv: list[str]) -> int:
     names, unreleased = released(distinct)
     bad += unreleased
     if bad:
-        print(
-            f"lint:template-pins: template pin violations: {' '.join(bad)}",
-            file=sys.stderr,
-        )
-        print(
-            "  templates pin one merged, RELEASED canon SHA and move together",
-            file=sys.stderr,
-        )
-        print(
-            "  (#111, #233); scorecard.yml pins the canon action,"
-            " never a reusable (#1887).",
-            file=sys.stderr,
+        findings.finding(
+            "",
+            f"template pin violations: {' '.join(bad)}",
+            [
+                "templates pin one merged, RELEASED canon SHA and move together",
+                (
+                    "(#111, #233); scorecard.yml pins the canon action,"
+                    " never a reusable (#1887)."
+                ),
+            ],
         )
         return EXIT_RED
     print(

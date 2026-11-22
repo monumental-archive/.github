@@ -33,6 +33,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import findings
+
 VERSION = "import sys; print(sys.version)"
 
 # The site first, on one line, then the version: `sys.version` may span
@@ -65,6 +67,22 @@ def ask(python: str, code: str, *args: str) -> str:
     return done.stdout.strip() if done.returncode == 0 else ""
 
 
+def leg(label: str) -> str:
+    """Name what a caller's label adds to its task's name, as a subject.
+
+    `audit:mutants: python` under `audit:mutants` is the python leg. A
+    label that is the task's own name, or a helper's own name (`measured`),
+    adds nothing: the finding begins with the task's name (#1934).
+
+    Returns:
+        The rest of the label after the task's name, or "".
+
+    """
+    task = findings.task_name()
+    head, colon, rest = label.partition(": ")
+    return rest if colon and head == task else ""
+
+
 def check(label: str, command: str, site: str | None = None) -> str | None:
     """Check COMMAND's venv runs on the suite's `python3`.
 
@@ -76,10 +94,9 @@ def check(label: str, command: str, site: str | None = None) -> str | None:
     """
     found = shutil.which(command)
     if found is None:
-        print(
-            f"{label}: {command} missing — the belt pins pipx:{command};"
-            " run: mise install",
-            file=sys.stderr,
+        findings.finding(
+            leg(label),
+            f"{command} missing — the belt pins pipx:{command}; run: mise install",
         )
         return None
     python = str(Path(os.path.realpath(found)).parent / "python")
@@ -91,12 +108,12 @@ def check(label: str, command: str, site: str | None = None) -> str | None:
     suite = shutil.which("python3")
     want = "" if suite is None else ask(suite, VERSION)
     if not have or have != want:
-        print(
-            f"{label}: {command} runs on '{have or 'no interpreter'}'"
+        findings.finding(
+            leg(label),
+            f"{command} runs on '{have or 'no interpreter'}'"
             f" but the suite's python3 is '{want or 'missing'}' — the tool"
             " venv must be built on the belt's python pin"
             f" (reinstall: mise install -f pipx:{command})",
-            file=sys.stderr,
         )
         return None
     return python if site is None else where

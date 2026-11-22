@@ -23,6 +23,15 @@ from typing import override
 import hermetic
 import with_lock
 
+# The task that runs the helper, whose name its findings carry (#1934).
+TASK = "test:pgrx"
+
+
+def setUpModule() -> None:
+    """Run every row as the task does, recording no finding."""
+    unittest.enterModuleContext(hermetic.as_task(TASK))
+
+
 HELPER = Path(__file__).resolve().with_name("with_lock.py")
 
 
@@ -155,7 +164,7 @@ class TimeoutSaysSoAndRunsNothing(LockCase):
         self.wait_for(held)
         done = self.call("touch", str(ran), timeout="0.5")
         self.assertEqual(75, done.returncode)
-        self.assertEqual("waited too long for the row's lock\n", done.stderr)
+        self.assertEqual(f"{TASK}: waited too long for the row's lock\n", done.stderr)
         self.assertFalse(ran.exists())
         self.finish(holder)
 
@@ -185,7 +194,7 @@ class Usage(LockCase):
         """Without `--` there is no command to run."""
         done = hermetic.call_main(lambda: with_lock.main([str(self.lock), "true"]))
         self.assertEqual(
-            (2, "with-lock: usage: with_lock.py <lockfile> -- <command…>\n"),
+            (2, f"{TASK}: usage: with_lock.py <lockfile> -- <command…>\n"),
             (done.returncode, done.stderr),
         )
 
@@ -193,7 +202,7 @@ class Usage(LockCase):
         """`--` with nothing after it names what is missing."""
         done = hermetic.call_main(lambda: with_lock.main([str(self.lock), "--"]))
         self.assertEqual(
-            (2, "with-lock: no command after --\n"), (done.returncode, done.stderr)
+            (2, f"{TASK}: no command after --\n"), (done.returncode, done.stderr)
         )
 
     def test_the_default_message_names_the_wait_and_the_file(self) -> None:
@@ -206,7 +215,7 @@ class Usage(LockCase):
         )
         self.finish(holder)
         self.assertEqual(
-            (75, f"with-lock: waited 0.2s for {self.lock}\n"),
+            (75, f"{TASK}: waited 0.2s for {self.lock}\n"),
             (done.returncode, done.stderr),
         )
 

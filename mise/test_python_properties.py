@@ -367,7 +367,14 @@ class Script(unittest.TestCase):
         )
         self.assertEqual(
             (done.returncode, done.stdout, done.stderr),
-            (2, "", "usage: python_properties.py gate|audit FILE...\n"),
+            (
+                2,
+                "",
+                (
+                    "python_properties.py: usage: python_properties.py gate|audit"
+                    " FILE...\n"
+                ),
+            ),
         )
 
 

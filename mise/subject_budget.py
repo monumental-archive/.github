@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
 import decoded
+import findings as writer
 import typed_std
 
 if TYPE_CHECKING:
@@ -425,11 +426,15 @@ def read_config(path: Path, report: list[str]) -> Renovate:
     Returns:
         The decoded config.
 
+    Raises:
+        SystemExit: the config is of the wrong shape, said as a finding.
+
     """
     try:
         return decode_config(load_json(path, report))
     except decoded.UndecodableError as exc:
-        sys.exit(f"lint:subject-budget: {path}: {exc}")
+        writer.finding(str(path), str(exc))
+        raise SystemExit(1) from None
 
 
 # ---------------------------------------------------------------------
@@ -448,17 +453,22 @@ def preset_path(files: list[Path]) -> Path:
     Returns:
         The path to the default.json whose template applies here.
 
+    Raises:
+        SystemExit: ORG_CANON_DIR is unset, said as a finding.
+
     """
     if Path("default.json") in files:
         return Path("default.json")
     canon = os.environ.get("ORG_CANON_DIR", "")
     if not canon:
-        sys.exit(
-            "lint:subject-budget: ORG_CANON_DIR is unset, so the owned "
+        writer.finding(
+            "",
+            "ORG_CANON_DIR is unset, so the owned "
             "template cannot be read; the org belt did not arrive: "
             "CI sets MISE_GLOBAL_CONFIG_FILE, locally run "
             "lefthook run post-checkout",
         )
+        raise SystemExit(1)
     return Path(canon) / "default.json"
 
 
@@ -680,18 +690,26 @@ def effective(template: Template, dep: Dep) -> list[dict[str, str]]:
         first takes every unmodellable rule as not applying, so the list
         is one entry long wherever nothing forked.
 
+    Raises:
+        SystemExit: the template leaves a field unset, said as a finding.
+
     """
     preset, repo = template.preset, template.repo
     configs = apply_rules([{**preset.fields, **repo.fields}], preset.rules, dep)
     missing = unwritten(preset, dep)
     if missing:
-        sys.exit(
-            "lint:subject-budget: the owned template does not set "
-            + ", ".join(missing)
-            + ".\n  Every field the subject is composed from is set"
-            " explicitly in default.json (#576); this task will not"
-            " assume Renovate's default for one.",
+        writer.finding(
+            "",
+            f"the owned template does not set {', '.join(missing)}.",
+            [
+                (
+                    "Every field the subject is composed from is set"
+                    " explicitly in default.json (#576); this task will not"
+                    " assume Renovate's default for one."
+                )
+            ],
         )
+        raise SystemExit(1)
     return apply_rules(configs, repo.rules, dep)
 
 
@@ -718,17 +736,26 @@ def advisory_suffix(preset: Renovate, repo_config: Renovate) -> str:
     Returns:
         The suffix, exactly as the org wrote it.
 
+    Raises:
+        SystemExit: the template sets no advisory suffix, said as a finding.
+
     """
     for source in (repo_config, preset):
         if source.suffix is not None:
             return source.suffix
-    sys.exit(
-        "lint:subject-budget: the owned template does not set "
-        "vulnerabilityAlerts.commitMessageSuffix.\n  Renovate appends "
-        "one to every advisory subject whether or not the org writes it "
-        "(#686); this task will not assume its default for the field it "
-        "measures.",
+    writer.finding(
+        "",
+        "the owned template does not set vulnerabilityAlerts.commitMessageSuffix.",
+        [
+            (
+                "Renovate appends "
+                "one to every advisory subject whether or not the org writes it "
+                "(#686); this task will not assume its default for the field it "
+                "measures."
+            )
+        ],
     )
+    raise SystemExit(1)
 
 
 def render(config: dict[str, str], dep_name: str, width: int) -> tuple[str, str | None]:
@@ -1079,21 +1106,28 @@ def ceiling() -> int:
     Returns:
         The subject_length every commit in the org answers to.
 
+    Raises:
+        SystemExit: the delivered config is missing or unreadable, said as
+            a finding.
+
     """
     belt = os.environ.get("ORG_BELT_DIR", "")
     config = Path(belt) / "committed.toml" if belt else None
     if config is None or not config.is_file():
-        sys.exit(
-            "lint:subject-budget: ORG_BELT_DIR carries no committed.toml, so "
+        writer.finding(
+            "",
+            "ORG_BELT_DIR carries no committed.toml, so "
             "the ceiling has no definition; the org belt did not arrive: "
             "CI sets MISE_GLOBAL_CONFIG_FILE, locally run "
             "lefthook run post-checkout",
         )
+        raise SystemExit(1)
     try:
         doc = decoded.load_toml(config.read_text(encoding="utf-8"))
         return decoded.as_int(doc.get("subject_length"), "subject_length")
     except decoded.UndecodableError as exc:
-        sys.exit(f"lint:subject-budget: {config}: {exc}")
+        writer.finding(str(config), str(exc))
+        raise SystemExit(1) from None
 
 
 def collect(
@@ -1191,14 +1225,22 @@ def judge(
     return sorted(findings, reverse=True)
 
 
-def explain(findings: list[Finding], limit: int) -> None:
-    """Print the over-budget dependencies and the remedy for them."""
+def explain(findings: list[Finding], limit: int) -> list[str]:
+    """Name the over-budget dependencies and the remedy for them.
+
+    Returns:
+        The finding's detail lines.
+
+    """
+    lines = [""]
     for width, dep, subject in findings:
         over = width - limit
-        print(f"  {width:3d} cols (over by {over})  {dep.name}", file=sys.stderr)
-        print(f"        from {dep.manager} ({dep.origin})", file=sys.stderr)
-        print(f"        {subject}", file=sys.stderr)
-    print(
+        lines += [
+            f"{width:3d} cols (over by {over})  {dep.name}",
+            f"      from {dep.manager} ({dep.origin})",
+            f"      {subject}",
+        ]
+    remedy = (
         "\n  The subject template is the org's, so the fix is the org's: give the\n"
         "  dependency a shorter name in default.json rather than letting a bot\n"
         "  mint a subject nobody can shorten once it is a commit.\n\n"
@@ -1211,9 +1253,9 @@ def explain(findings: list[Finding], limit: int) -> None:
         "  suffix spends that allowance in place of.\n\n"
         f"  Widths above allow {VERSION_GROWTH} characters of version growth, and\n"
         f"  an ordinary subject a {PR_NUMBER_DIGITS}-digit pull request number;\n"
-        "  both are pinned and reasoned in mise/subject_budget.py.",
-        file=sys.stderr,
+        "  both are pinned and reasoned in mise/subject_budget.py."
     )
+    return lines + [line.removeprefix("  ") for line in remedy.splitlines()]
 
 
 def main() -> int:
@@ -1270,12 +1312,12 @@ def main() -> int:
         return 0
 
     noun = "dependency" if counted == 1 else "dependencies"
-    print(
-        f"lint:subject-budget: {len(findings)} of {counted} {noun} would "
-        f"mint a subject past {limit} columns\n",
-        file=sys.stderr,
+    writer.finding(
+        "",
+        f"{len(findings)} of {counted} {noun} would "
+        f"mint a subject past {limit} columns",
+        explain(findings, limit),
     )
-    explain(findings, limit)
     return 1
 
 

@@ -52,6 +52,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import decoded
+import findings
 import startup_hook
 import tool_python
 
@@ -97,9 +98,9 @@ def git(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def red(message: str) -> None:
-    """Print one refusal, labelled."""
-    print(f"{LABEL}: {message}", file=sys.stderr)
+def red(message: str, detail: list[str] | None = None) -> None:
+    """Report one refusal: a finding about the python leg."""
+    findings.finding("python", message, detail or [])
 
 
 @dataclass
@@ -229,13 +230,16 @@ def pragmas(pragma_file: Path) -> int:
     """
     found = read_pragmas(pragma_file.read_text(encoding="utf-8"))
     for refusal in found.refused:
-        red(refusal)
-    if found.refused:
-        print(
-            "  an exclusion records a mutant the suite cannot kill;"
-            " say why at the site",
-            file=sys.stderr,
+        red(
+            refusal,
+            [
+                (
+                    "an exclusion records a mutant the suite cannot kill;"
+                    " say why at the site"
+                )
+            ],
         )
+    if found.refused:
         return EXIT_RED
     return 0
 
@@ -589,12 +593,12 @@ def refused_dirty(module_paths: list[str]) -> bool:
     """
     changed = dirty(module_paths)
     if changed:
-        red("the tracked tree differs from git under module-path — refused:")
-        for path in changed:
-            print(f"  {path}", file=sys.stderr)
-        print(
-            "  the leg mutates these files in place and restores them from git",
-            file=sys.stderr,
+        red(
+            "the tracked tree differs from git under module-path — refused:",
+            [
+                *changed,
+                "the leg mutates these files in place and restores them from git",
+            ],
         )
     return bool(changed)
 
@@ -1082,10 +1086,9 @@ def report(judged: list[Judged], excluded: int, shard: str) -> int:
         )
     status = EXIT_RED if any(j.restored for j in judged) else 0
     if survivors:
-        red("red — kill each survivor with an assertion, or exclude it at its site")
-        print(
-            "  with '# pragma: no mutate -- <why the mutant is equivalent>'",
-            file=sys.stderr,
+        red(
+            "red — kill each survivor with an assertion, or exclude it at its site",
+            ["with '# pragma: no mutate -- <why the mutant is equivalent>'"],
         )
         return EXIT_RED
     return status

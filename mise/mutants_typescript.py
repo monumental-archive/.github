@@ -50,9 +50,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import decoded
+import findings as writer
 
 KILLED = frozenset({"Killed", "Timeout"})
 NO_REASON = "Ignored using a comment"
+# The leg's language: the subject of its findings, as --label names it.
+LANGUAGE = "typescript"
 MARK = "// Stryker disable next-line <Mutator>: <reason>"
 
 
@@ -165,7 +168,7 @@ def refusals(config: object) -> list[str]:
     return findings(read_config(config))
 
 
-def check_config(path: str, label: str) -> int:
+def check_config(path: str) -> int:
     """Refuse a config that excludes without a reason at the site.
 
     Returns:
@@ -175,23 +178,22 @@ def check_config(path: str, label: str) -> int:
     try:
         config = read_config(decoded.load_json(Path(path).read_bytes()))
     except (OSError, decoded.UndecodableError) as err:
-        print(f"{label}: {path} is not readable JSON: {err}", file=sys.stderr)
+        writer.finding(LANGUAGE, f"{path} is not readable JSON: {err}")
         return 1
     found = findings(config)
     for line in found:
-        print(f"{label}: {path} {line}", file=sys.stderr)
+        writer.finding(LANGUAGE, f"{path} {line}")
     if found:
-        print(
-            f"{label}: record each equivalent mutant at its site instead: {MARK}",
-            file=sys.stderr,
+        writer.finding(
+            LANGUAGE, f"record each equivalent mutant at its site instead: {MARK}"
         )
     incremental = config is not None and config.incremental
     if incremental:
-        print(
-            f"{label}: {path} sets `incremental` — a runner has no earlier"
+        writer.finding(
+            LANGUAGE,
+            f"{path} sets `incremental` — a runner has no earlier"
             " results, so it would read as on and do nothing; the leg runs every"
             " mutant every week (deferred, #1358)",
-            file=sys.stderr,
         )
     return 1 if found or incremental else 0
 
@@ -344,7 +346,7 @@ def judge(path: str, label: str, summary_dir: str) -> int:
     try:
         files = read_report(decoded.load_json(Path(path).read_bytes()))
     except (OSError, decoded.UndecodableError) as err:
-        print(f"{label}: no readable report at {path}: {err}", file=sys.stderr)
+        writer.finding(LANGUAGE, f"no readable report at {path}: {err}")
         return 1
     verdict = classify(files)
     for where in verdict.survived:
@@ -352,9 +354,9 @@ def judge(path: str, label: str, summary_dir: str) -> int:
     for where in verdict.not_covered:
         print(f"{label}: not covered: {where}")
     for line in verdict.unjudged:
-        print(f"{label}: not judged: {line}", file=sys.stderr)
+        writer.finding(LANGUAGE, f"not judged: {line}")
     for line in verdict.red:
-        print(f"{label}: {line}", file=sys.stderr)
+        writer.finding(LANGUAGE, line)
     print(
         f"{label}: {verdict.total} mutants, {verdict.killed} killed,"
         f" {len(verdict.survived)} survived, {len(verdict.not_covered)} not covered,"
@@ -368,11 +370,11 @@ def judge(path: str, label: str, summary_dir: str) -> int:
             encoding="utf-8",
         )
     if not verdict.green:
-        print(
-            f"{label}: red — kill each survivor with an assertion, add a test for"
-            f" each mutant no test reaches, or record an equivalent mutant at its"
+        writer.finding(
+            LANGUAGE,
+            "red — kill each survivor with an assertion, add a test for"
+            " each mutant no test reaches, or record an equivalent mutant at its"
             f" site: {MARK}",
-            file=sys.stderr,
         )
     return 0 if verdict.green else 1
 
@@ -403,7 +405,7 @@ def main(argv: list[str]) -> int:
     verdict.add_argument("--summary-dir", default="")
     args = parser.parse_args(argv, namespace=Args())
     if args.command == "config":
-        return check_config(args.path, args.label)
+        return check_config(args.path)
     return judge(args.path, args.label, args.summary_dir)
 
 

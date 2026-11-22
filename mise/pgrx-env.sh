@@ -357,7 +357,7 @@ org_pgrx_init() { # usage: org_pgrx_init < records from pgrx_postgres.py
   mkdir -p "$(dirname "${home}")"
   : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
   "${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/with_lock.py" --timeout 600 \
-    --message "pgrx-env: waited ten minutes for another task's Postgres init (${lock})" \
+    --message "waited ten minutes for another task's Postgres init (${lock})" \
     "${lock}" -- bash -euo pipefail -c \
     "$(declare -f org_pgrx_init_locked); org_pgrx_init_locked \"\$@\"" \
     org_pgrx_init_locked "${home}" "${args[@]}"

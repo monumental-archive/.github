@@ -64,7 +64,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import decoded
+import findings
 import typed_std
+
+# The leg's language: the subject of its findings, as the shell half's
+# label names it (`audit:mutants: go`).
+LANGUAGE = "go"
 
 MARK = "//mutants:equivalent"
 KILLED = frozenset({"KILLED", "TIMED_OUT"})
@@ -446,9 +451,9 @@ def report(args: Args, verdict: Verdict, excluded: int) -> None:
     for site in verdict.not_covered:
         print(f"{label}: not covered: {site}")
     for line in verdict.unjudged:
-        print(f"{label}: not judged: {line}", file=sys.stderr)
+        findings.finding(LANGUAGE, f"not judged: {line}")
     for line in verdict.red:
-        print(f"{label}: {line}", file=sys.stderr)
+        findings.finding(LANGUAGE, line)
     shard = args.where.removeprefix(", ")
     scope = f" {shard}:" if shard else ""
     print(
@@ -464,11 +469,11 @@ def report(args: Args, verdict: Verdict, excluded: int) -> None:
             encoding="utf-8",
         )
     if not verdict.green:
-        print(
-            f"{label}: red — kill each survivor with an assertion, add a test for"
+        findings.finding(
+            LANGUAGE,
+            "red — kill each survivor with an assertion, add a test for"
             " each line no test runs, or record an equivalent mutant at its site:"
             f" {MARK} <type> <reason>",
-            file=sys.stderr,
         )
 
 
@@ -513,13 +518,17 @@ def build_go(argv: list[str]) -> int:
     if not older(args.built, args.running):
         return 0
     spelled = args.built or "an unreadable Go"
-    print(
-        f"{args.label}: {args.gomu} was built with {spelled}, older than the"
-        f" {args.running} it runs under —\n"
-        "  it cannot read this toolchain's export data; rebuild it with the"
-        " repository's go:\n"
-        "    mise install go:github.com/sivchari/gomu/cmd/gomu",
-        file=sys.stderr,
+    findings.finding(
+        LANGUAGE,
+        f"{args.gomu} was built with {spelled}, older than the"
+        f" {args.running} it runs under —",
+        [
+            (
+                "it cannot read this toolchain's export data; rebuild it with the"
+                " repository's go:"
+            ),
+            "  mise install go:github.com/sivchari/gomu/cmd/gomu",
+        ],
     )
     return 1
 

@@ -24,6 +24,8 @@ import subprocess
 import sys
 import time
 
+import findings
+
 TIMED_OUT = 75  # EX_TEMPFAIL
 POLL = 0.1
 
@@ -65,9 +67,7 @@ def main(argv: list[str]) -> int:
 
     """
     if "--" not in argv:
-        print(
-            "with-lock: usage: with_lock.py <lockfile> -- <command…>", file=sys.stderr
-        )
+        findings.finding("", "usage: with_lock.py <lockfile> -- <command…>")
         return 2
     split = argv.index("--")
     parser = argparse.ArgumentParser(prog="with_lock.py")
@@ -77,14 +77,12 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv[:split], namespace=Args())
     command = argv[split + 1 :]
     if not command:
-        print("with-lock: no command after --", file=sys.stderr)
+        findings.finding("", "no command after --")
         return 2
     fd = acquire(args.lockfile, args.timeout)
     if fd is None:
-        message = args.message or (
-            f"with-lock: waited {args.timeout:g}s for {args.lockfile}"
-        )
-        print(message, file=sys.stderr)
+        message = args.message or f"waited {args.timeout:g}s for {args.lockfile}"
+        findings.finding("", message)
         return TIMED_OUT
     try:
         return subprocess.run(command, check=False).returncode

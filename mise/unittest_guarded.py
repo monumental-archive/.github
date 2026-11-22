@@ -53,6 +53,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal, TypedDict, override
 from warnings import catch_warnings, simplefilter
 
+import findings
 import workflow_command
 from decoded import UndecodableError, load_json
 
@@ -141,14 +142,16 @@ def workers() -> int:
     Returns:
         How many test files run at once; 1 runs serially.
 
+    Raises:
+        SystemExit: the count is not a number of workers, said as a finding.
+
     """
     raw = os.environ.get(WORKERS, "").strip()
     if not raw:
         return max(1, min(os.process_cpu_count() or 1, WORKER_CAP))
     if not raw.isdecimal() or int(raw) < 1:
-        sys.exit(
-            f"unittest-guarded: {WORKERS}={raw!r} is not a worker count (1 or more)"
-        )
+        findings.finding("", f"{WORKERS}={raw!r} is not a worker count (1 or more)")
+        raise SystemExit(1)
     return int(raw)
 
 
@@ -747,10 +750,16 @@ def read_spec(path: Path) -> Spec | None:
 
 
 def worker(spec_path: Path) -> None:
-    """Run the one module a spec names, as the parent's run would."""
+    """Run the one module a spec names, as the parent's run would.
+
+    Raises:
+        SystemExit: the spec is unreadable, said as a finding.
+
+    """
     spec = read_spec(spec_path)
     if spec is None:
-        sys.exit(f"unittest-guarded: worker spec {spec_path} is unreadable")
+        findings.finding("", f"worker spec {spec_path} is unreadable")
+        raise SystemExit(1)
     sys.path[:] = spec["path"]
     loader = unittest.TestLoader()
     loader.testNamePatterns = spec["patterns"]
