@@ -41,6 +41,7 @@ docker run --rm \
   --volume "${here}:/pgrx:ro" \
   --volume "${writers}/findings.sh:/opt/org/findings.sh:ro" \
   --volume "${writers}/workflow-command.sh:/opt/org/workflow-command.sh:ro" \
+  --volume "${writers}/tracked.sh:/opt/org/tracked.sh:ro" \
   --env ORG_FINDINGS_WRITER=/opt/org/findings.sh \
   "${SMOKE_IMAGE}" bash /pgrx/upgrade.sh
 org_notice "pg${PG}/${ARCH}: ${prev} -> ${UNTRUSTED_VERSION} upgrade executed"

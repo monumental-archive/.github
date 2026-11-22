@@ -51,6 +51,7 @@ honestly blocked on.
 | gomu (`go:` backend, built by the repository's own go, lazy, sumdb-verified) | Go mutation testing (`audit:mutants`' Go leg — Monday cron, never `ci`): no unexplained surviving mutant, adopted per repo by a pattern-free `.gomuignore` — chosen over gremlins and go-mutesting on a measured comparison (#1356) |
 | gobco (`go:` backend, built by the repository's own go, lazy, sumdb-verified) | Go condition coverage as a floor of its own (`go-branches`, #1546), held by the Monday audit (`audit:coverage-go-branches`), never the gate: each operand of `&&` and `\|\|` taken both ways, one package per call; chosen over gocoverageplus on a measured comparison |
 | yamllint (`pipx:` backend via aqua-backed uv) | YAML lint in the gate (`lint:yaml`), full rule inventory at error + `--strict` |
+| typos (`typos`, the belt pin) | Spelling of contents and file names in the gate (`lint:typos`), config delivered as `mise/typos.toml`; given the tracked list from `org_tracked` with `--force-exclude`, never its own directory walk, so untracked output (`mutants.out/`) is not read (#1986) |
 | editorconfig-checker (`aqua:`, binary `editorconfig-checker`) | Whole-file hygiene in the gate (`lint:editorconfig`) against `.editorconfig`, the org's one written indentation rule |
 | gitleaks (`aqua:gitleaks/gitleaks`) | Secret scanning at commit depth in the gate (`lint:gitleaks`, full history, `--redact`) |
 | hadolint (`aqua:hadolint/hadolint`) | Dockerfile lint in the gate (`lint:hadolint`), every severity fails (`--failure-threshold style`) |
@@ -294,7 +295,7 @@ that cannot go red is a claim.
 rule. rustfmt walks each target's module tree, so a `.rs` file no crate
 references is never visited — but such a file is not a build input
 either, and rustc cannot see it any more than rustfmt can. Feeding
-`git ls-files` would additionally mean choosing an edition in the belt,
+it the tracked list would additionally mean choosing an edition in the belt,
 when Cargo.toml states it per crate and `cargo fmt` reads it there.
 
 **The nightly question, open and deliberately not answered here.**

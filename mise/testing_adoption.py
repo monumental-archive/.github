@@ -29,7 +29,7 @@ Each row of `LANGUAGES` names the mutation leg whose guard it mirrors,
 and mise/test_testing_adoption.py reads that guard out of the leg, so the
 rule and the leg cannot name different files.
 
-Usage: `git ls-files | testing_adoption.py`, from the repository's root.
+Usage: `org_tracked | testing_adoption.py`, from the repository's root.
 Exits 0 when every shipped language is adopted (or none is shipped),
 1 with one line per missing file otherwise.
 """
@@ -40,7 +40,7 @@ from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
 import findings as writer
-import typed_std
+from tracked import stdin_paths
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -192,7 +192,7 @@ def main() -> int:
         0 when every shipped language is adopted, 1 when a file is missing.
 
     """
-    paths = [line for line in typed_std.stdin_text().split("\n") if line]
+    paths = stdin_paths()
     ships = shipped(paths)
     if not ships:
         print(f"{NAME}: ships none of Rust, Go, Python, TypeScript, skipped")

@@ -1587,7 +1587,7 @@ class ProofReadsBeforeItCompares(unittest.TestCase):
                 snapshot_sql(SCRIPT.read_text()), encoding="utf-8"
             )
             # The writers the real run copies into /work (#1660, #1934).
-            for writer in ("findings.sh", "workflow-command.sh"):
+            for writer in ("findings.sh", "workflow-command.sh", "tracked.sh"):
                 (root / "work" / writer).write_bytes(
                     (CANON / "mise" / writer).read_bytes()
                 )

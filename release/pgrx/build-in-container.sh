@@ -34,6 +34,7 @@ docker run --rm \
   --volume "${here}:/pgrx:ro" \
   --volume "${writers}/findings.sh:/opt/org/findings.sh:ro" \
   --volume "${writers}/workflow-command.sh:/opt/org/workflow-command.sh:ro" \
+  --volume "${writers}/tracked.sh:/opt/org/tracked.sh:ro" \
   --env ORG_FINDINGS_WRITER=/opt/org/findings.sh \
   --volume /tmp/out:/out \
   "${BUILD_IMAGE}" \

@@ -219,9 +219,9 @@ class TestMain(unittest.TestCase):
     """The entry the task starts, called in the test process (#1697)."""
 
     def test_each_lock_on_stdin_is_read_and_its_candidates_printed(self) -> None:
-        """A blank line and a missing file are passed over; exit is 0."""
+        """An empty entry and a missing file are passed over; exit is 0."""
         path = planted_lock(DEFECT)
-        listing = f"\n{path}\n{path.parent / 'absent.lock'}\n"
+        listing = f"\0{path}\0{path.parent / 'absent.lock'}\0"
         done = hermetic.call_main(lambda: lock_arch.main([]), stdin=listing)
         self.assertEqual(0, done.returncode)
         self.assertEqual(lock_arch.candidates(path), done.stdout.splitlines())
@@ -233,7 +233,7 @@ class TestMain(unittest.TestCase):
         done = subprocess.run(
             [sys.executable, str(pathlib.Path(lock_arch.__file__))],
             env=hermetic.env(),
-            input=f"{path}\n",
+            input=f"{path}\0",
             capture_output=True,
             text=True,
             check=False,

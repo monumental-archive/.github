@@ -203,7 +203,7 @@ class Main(unittest.TestCase):
             root = Path(tmp)
             (root / "Cargo.toml").write_text('[lints.rust]\nx = "allow"\n')
             (root / "lib.rs").write_text("\n#![allow(y)]\n")
-            done = self.run_helper(root, "Cargo.toml\n\nlib.rs\ngone.rs\n")
+            done = self.run_helper(root, "Cargo.toml\0\0lib.rs\0gone.rs\0")
         self.assertEqual(1, done.returncode)
         self.assertEqual("", done.stdout)
         self.assertEqual(
@@ -218,7 +218,7 @@ class Main(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "lib.rs").write_text('#![expect(y, reason = "z")]\n')
-            done = self.run_helper(root, "lib.rs\n")
+            done = self.run_helper(root, "lib.rs\0")
         self.assertEqual((0, "", ""), (done.returncode, done.stdout, done.stderr))
 
     def test_undecodable_files_are_refused_by_name(self) -> None:
@@ -226,7 +226,7 @@ class Main(unittest.TestCase):
         for name, raw in (("Cargo.toml", b"[lints\n"), ("lib.rs", b"\xff\n")):
             with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
                 (Path(tmp) / name).write_bytes(raw)
-                done = self.run_helper(Path(tmp), f"{name}\n")
+                done = self.run_helper(Path(tmp), f"{name}\0")
                 self.assertEqual(1, done.returncode)
                 self.assertTrue(done.stderr.startswith(f"lint:rust: {name}: "))
 
@@ -237,7 +237,7 @@ class Main(unittest.TestCase):
             path.write_text("#![allow(y)]\n")
             err = io.StringIO()
             stdin = sys.stdin
-            sys.stdin = io.StringIO(f"{path}\n")
+            sys.stdin = io.StringIO(f"{path}\0")
             try:
                 with contextlib.redirect_stderr(err):
                     status = rsup.main()

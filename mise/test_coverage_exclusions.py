@@ -80,7 +80,7 @@ def helper(root: Path, *paths: str) -> hermetic.Called:
 
     """
     return hermetic.call_main(
-        lambda: ce.main([]), cwd=root, stdin="\n".join(paths) + "\n"
+        lambda: ce.main([]), cwd=root, stdin="".join(f"{path}\0" for path in paths)
     )
 
 
@@ -138,7 +138,7 @@ class Markers(unittest.TestCase):
         name, body, rule = MARKERS[0]
         r = subprocess.run(
             [sys.executable, str(HELPER)],
-            input=f"{name}\n",
+            input=f"{name}\0",
             cwd=self.plant(name, body),
             capture_output=True,
             text=True,

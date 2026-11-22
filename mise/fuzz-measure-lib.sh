@@ -73,10 +73,15 @@ org__fuzz_measure_rust() {
   # and nothing outside the repository (registry, toolchain, generated
   # code) is named.
   root=$(pwd -P)
-  tracked=$(git ls-files -- '*.rs' ':!fuzz/fuzz_targets/**') || return 1
-  while IFS= read -r file; do
-    [[ -z ${file} ]] || sources+=("${root}/${file}")
-  done <<< "${tracked}"
+  tracked=$(mktemp) || return 1
+  org_tracked '*.rs' ':!fuzz/fuzz_targets/**' > "${tracked}" || {
+    rm -- "${tracked}"
+    return 1
+  }
+  while IFS= read -r -d '' file; do
+    sources+=("${root}/${file}")
+  done < "${tracked}"
+  rm -- "${tracked}"
   verbose=$(rustc -vV) || return 1
   host=$(sed -n 's/^host: //p' <<< "${verbose}")
   sysroot=$(rustc --print sysroot) || return 1

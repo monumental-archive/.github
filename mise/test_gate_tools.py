@@ -19,7 +19,8 @@ naming a tool is not a call; a Python helper calls what it hands
 imports does; any Python helper calls python3.
 
 A GUARD is what a task tests before its first "skipped" exit: the
-pathspecs it hands `git ls-files` (none at all is every file), `compgen
+pathspecs it hands `org_tracked` (mise/tracked.sh, #1986) or a `git
+ls-files --error-unmatch` presence check (none at all is every file), `compgen
 -G`, and `[[ -f | -d | -e ]]`. A tool called before that exit, or by a
 task with no such exit, must be unconditional. Reading a guard can only
 widen a condition, never narrow it: an unreadable guard is "always".
@@ -356,7 +357,7 @@ def guard_paths(lines: list[tuple[str, str]]) -> set[str]:
     """Read the pathspecs a body tests before it may skip.
 
     Returns:
-        The literal pathspecs; "*" where `git ls-files` lists every file.
+        The literal pathspecs; "*" where `org_tracked` lists every file.
 
     """
     paths: set[str] = set()
@@ -365,7 +366,10 @@ def guard_paths(lines: list[tuple[str, str]]) -> set[str]:
     # rest of it (#1410: biome disabled on stele, which tracks JSON only).
     joined = re.sub(r"\\\n", " ", "\n".join(text for _, text in lines))
     for text in joined.splitlines():
-        for seg in found(r"git ls-files([^|)>;&]*)", text):
+        # `org_tracked() {` is the producer's definition, not a call.
+        for seg in found(
+            r"(?:\bgit ls-files|\borg_tracked\b(?!\(\)))([^|)>;&]*)", text
+        ):
             words = [
                 typed_std.group(m, 1)
                 or typed_std.group(m, 2)
@@ -548,10 +552,11 @@ class Table(unittest.TestCase):
         self.assertIsNone(first_call(lines, ["hadolint"]))
 
     def test_a_continued_selection_is_read_whole(self) -> None:
-        """A backslash-continued `git ls-files` is one guard (#1410, lint:biome)."""
+        """A backslash-continued `org_tracked` is one guard (#1410, lint:biome)."""
         lines = expand(
-            'files=$(git ls-files ":!vendor/**" "*.js" \\\n  "*.json" "*.css")\n'
-            '[[ -n ${files} ]] || {\n  echo "x: skipped"\n  exit 0\n}\n',
+            "files=() && while IFS= read -r -d '' f; do files+=(\"${f}\"); done"
+            ' < <(org_tracked ":!vendor/**" "*.js" \\\n  "*.json" "*.css")\n'
+            '[[ -n ${files[0]+set} ]] || {\n  echo "x: skipped"\n  exit 0\n}\n',
             set(),
         )
         skip = first_skip(lines)

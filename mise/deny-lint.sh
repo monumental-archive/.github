@@ -20,8 +20,8 @@ org__here=${BASH_SOURCE[0]%/*}
 unset org__here
 # The task this script reports for, where mise named none (#1934).
 org_task "lint:deny"
-locks=$(git ls-files ':!vendor/**' "Cargo.lock" "*/Cargo.lock")
-[[ -n ${locks} ]] || {
+locks=() && while IFS= read -r -d '' f; do locks+=("${f}"); done < <(org_tracked ':!vendor/**' "Cargo.lock" "*/Cargo.lock")
+[[ -n ${locks[0]+set} ]] || {
   echo "lint:deny: no Cargo.lock tracked, skipped"
   exit 0
 }

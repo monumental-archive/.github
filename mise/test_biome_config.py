@@ -752,7 +752,7 @@ class RunTest(unittest.TestCase):
                 *("--nursery", str(NURSERY_FILE), "--out", str(out)),
                 *("--declaration", str(declared)),
             ]),
-            stdin="".join(f"{path}\n" for path in paths),
+            stdin="".join(f"{path}\0" for path in paths),
         )
         return done.returncode, done.stdout, done.stderr, out
 

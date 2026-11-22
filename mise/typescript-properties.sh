@@ -56,10 +56,10 @@ belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lef
 
 # The lockfile decides, as for the coverage leg (#1357): no fast-check
 # in it, nothing here can be a property.
-locks=$(git ls-files -- pnpm-lock.yaml package-lock.json yarn.lock bun.lock)
+locks=() && while IFS= read -r -d '' f; do locks+=("${f}"); done < <(org_tracked pnpm-lock.yaml package-lock.json yarn.lock bun.lock)
 pins=""
-if [[ -n ${locks} ]]; then
-  pins=$(tr '\n' '\0' <<< "${locks}" | xargs -0 python3 "${belt}/typescript_properties.py" locked)
+if [[ -n ${locks[0]+set} ]]; then
+  pins=$(printf '%s\0' "${locks[@]}" | xargs -0 python3 "${belt}/typescript_properties.py" locked)
 fi
 grep -qx fast-check <<< "${pins}" || {
   echo "${label}: no fast-check in a tracked lockfile, skipped"
@@ -67,25 +67,24 @@ grep -qx fast-check <<< "${pins}" || {
 }
 
 if [[ ${profile} == lint ]]; then
-  sources=$(git ls-files ':!vendor/**' '*.ts' '*.tsx' '*.mts' '*.cts' '*.js' '*.jsx' '*.mjs' '*.cjs')
-  [[ -n ${sources} ]] || {
+  sources=() && while IFS= read -r -d '' f; do sources+=("${f}"); done < <(org_tracked ':!vendor/**' '*.ts' '*.tsx' '*.mts' '*.cts' '*.js' '*.jsx' '*.mjs' '*.cjs')
+  [[ -n ${sources[0]+set} ]] || {
     echo "${label}: no TypeScript or JavaScript tracked, skipped"
     exit 0
   }
-  findings=$(tr '\n' '\0' <<< "${sources}" | xargs -0 python3 "${belt}/typescript_properties.py" lint) || {
+  findings=$(printf '%s\0' "${sources[@]}" | xargs -0 python3 "${belt}/typescript_properties.py" lint) || {
     detail=()
     while IFS= read -r finding; do detail+=("${finding}"); done <<< "${findings}"
     org_finding "" "properties live in *.prop.test.* files and take the belt's seed:" \
       "${detail[@]}"
     exit 1
   }
-  count=$(wc -l <<< "${sources}")
-  echo "${label}: $((count)) file(s) clean"
+  echo "${label}: ${#sources[@]} file(s) clean"
   exit 0
 fi
 
-files=$(git ls-files ':!vendor/**' '*.prop.test.ts' '*.prop.test.tsx' '*.prop.test.mts' '*.prop.test.cts')
-[[ -n ${files} ]] || {
+files=() && while IFS= read -r -d '' f; do files+=("${f}"); done < <(org_tracked ':!vendor/**' '*.prop.test.ts' '*.prop.test.tsx' '*.prop.test.mts' '*.prop.test.cts')
+[[ -n ${files[0]+set} ]] || {
   echo "${label}: no *.prop.test.{ts,tsx,mts,cts} tracked, skipped"
   exit 0
 }
@@ -115,12 +114,9 @@ done
 scratch=$(mktemp -d)
 rc=0
 trap 'rc=$?; rm -rf "${scratch}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
-python3 "${belt}/typescript_properties.py" stage "${scratch}" ${config:+"${config}"} <<< "${files}"
+printf '%s\0' "${files[@]}" | python3 "${belt}/typescript_properties.py" stage "${scratch}" ${config:+"${config}"}
 
-args=()
-while IFS= read -r f; do
-  args+=("${f}")
-done <<< "${files}"
+args=("${files[@]}")
 
 # The repository's OWN run must not collect a property file (#1549,
 # ruling of 2026-11-19): its `test` task would run the properties a

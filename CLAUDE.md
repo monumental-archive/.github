@@ -118,9 +118,10 @@ shared lives here and nowhere else. Five layers:
 
 - Every `uses:` pinned to a full commit SHA with a trailing version
   comment. Reusable-workflow callers pin this repo by SHA too.
-- Belt linters lint **tracked files only** (`git ls-files`), never a
-  tool's own directory walker — lefthook caches remote configs inside
-  `.git/`, and walkers find them.
+- Belt linters lint **tracked files only**, listed by `org_tracked`
+  (`mise/tracked.sh`; `tracked()` in `mise/tracked.py`) and read
+  NUL-safely, never by a tool's own directory walker — lefthook caches
+  remote configs inside `.git/`, and walkers find them (#1986).
 - Belt linters guard for applicability and skip clean: a linter that
   cannot skip cannot be universal.
 - Tasks are written in bash; `[task_config] shell` pins it (Ubuntu's `sh`

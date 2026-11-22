@@ -7,7 +7,7 @@ number bought, not earned. This is the rule's enforcement, for the
 languages the belt measures. There is no allow-list and no per-site
 escape, because the standard has none.
 
-Reads newline-separated paths on stdin and reports, per finding, the
+Reads NUL-separated paths on stdin (`org_tracked`, #1986) and reports, per finding, the
 file, the line and the rule. Exits 1 on any finding.
 
 Where a marker counts, by language:
@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import NamedTuple, override
 
 import findings
-import typed_std
+from tracked import stdin_paths
 
 PYTHON = frozenset({".py", ".pyi"})
 RUST = frozenset({".rs"})
@@ -172,15 +172,15 @@ def scan(path: str) -> list[Finding]:
 def main(argv: list[str]) -> int:
     """Scan the paths on stdin and report.
 
-    The paths come on stdin, one per line; `argv` carries nothing the
-    lint reads, as its task passes none.
+    The paths come on stdin, NUL-separated (`org_tracked`, #1986);
+    `argv` carries nothing the lint reads, as its task passes none.
 
     Returns:
         0 when no path holds an exclusion, 1 otherwise.
 
     """
     del argv
-    paths = [p for p in typed_std.stdin_text().splitlines() if p]
+    paths = stdin_paths()
     found = [f for p in paths for f in scan(p)]
     for each in found:
         findings.finding(f"{each.path}:{each.line}", each.rule)

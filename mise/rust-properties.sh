@@ -46,10 +46,10 @@ belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lef
 python="${ORG_PYTHON:?${ORG_PYTHON_UNSET:-unset — the belt Python}}"
 
 # The lock files decide: no proptest in one, nothing here is a property.
-locks=$(git ls-files ':!vendor/**' Cargo.lock '*/Cargo.lock')
+locks=() && while IFS= read -r -d '' f; do locks+=("${f}"); done < <(org_tracked ':!vendor/**' Cargo.lock '*/Cargo.lock')
 pins=""
-if [[ -n ${locks} ]]; then
-  pins=$(tr '\n' '\0' <<< "${locks}" | xargs -0 "${python}" "${belt}/rust_properties.py" locked) || {
+if [[ -n ${locks[0]+set} ]]; then
+  pins=$(printf '%s\0' "${locks[@]}" | xargs -0 "${python}" "${belt}/rust_properties.py" locked) || {
     org_finding "" "a tracked Cargo.lock could not be read (above)"
     exit 1
   }
@@ -60,7 +60,7 @@ fi
 }
 
 if [[ ${profile} == lint ]]; then
-  findings=$(tr '\n' '\0' <<< "${locks}" | xargs -0 "${python}" "${belt}/rust_properties.py" lint) || {
+  findings=$(printf '%s\0' "${locks[@]}" | xargs -0 "${python}" "${belt}/rust_properties.py" lint) || {
     detail=()
     while IFS= read -r finding; do detail+=("${finding}"); done <<< "${findings}"
     org_finding "" "proptest below 1.7.0 ignores PROPTEST_RNG_SEED, so the gate's seed never reaches it:" \

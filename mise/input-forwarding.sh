@@ -32,17 +32,15 @@ unset org__here
 # The task this script reports for, where mise named none (#1934).
 org_task "lint:input-forwarding"
 
-files=$(git ls-files ':!vendor/**' ".github/workflows/*.y*ml")
-[[ -n ${files} ]] || {
+files=() && while IFS= read -r -d '' f; do files+=("${f}"); done < <(org_tracked ':!vendor/**' ".github/workflows/*.y*ml")
+[[ -n ${files[0]+set} ]] || {
   echo "lint:input-forwarding: no workflows, skipped"
   exit 0
 }
-# shellcheck disable=SC2086  # the file list is newline-separated on purpose
-grep -l "uses: ./.github/workflows/" ${files} > /dev/null 2>&1 || {
+grep -l "uses: ./.github/workflows/" "${files[@]}" > /dev/null 2>&1 || {
   echo "lint:input-forwarding: no local reusable-workflow callers, skipped"
   exit 0
 }
-# shellcheck disable=SC2086  # the file list is newline-separated on purpose
 awk '
 FNR == 1 { split(FILENAME, P, "/"); base = P[length(P)]; in_wc = 0; sect = ""; curkey = ""; in_jobs = 0; job = ""; mode = "" }
 /^[^ ]/ { in_wc = 0; sect = ""; in_jobs = ($0 ~ /^jobs:/); job = ""; mode = "" }
@@ -95,4 +93,4 @@ END {
   if (fail) exit 1
   print "lint:input-forwarding: every universal input is forwarded at every local call site"
 }
-' ${files} | org_finding_lines
+' "${files[@]}" | org_finding_lines

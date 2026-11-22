@@ -171,6 +171,7 @@ class Containers(Script):
         self.assertIn(
             f"{WRITERS}/workflow-command.sh:/opt/org/workflow-command.sh:ro", argv
         )
+        self.assertIn(f"{WRITERS}/tracked.sh:/opt/org/tracked.sh:ro", argv)
         self.assertIn("ORG_FINDINGS_WRITER=/opt/org/findings.sh", argv)
 
     def test_the_build_mounts_the_canon_and_the_writer(self) -> None:

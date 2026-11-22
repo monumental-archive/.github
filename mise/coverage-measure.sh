@@ -220,19 +220,18 @@ fi
 # the #82 race. Guarded, not left to errexit: a mise that cannot answer
 # means no test task, and the leg says so rather than dying mute.
 python_test=""
-tracked_py=$(git ls-files -- '*.py' 2> /dev/null) || tracked_py=""
-if [[ -n ${tracked_py} ]]; then
+tracked_py=() && while IFS= read -r -d '' f; do tracked_py+=("${f}"); done < <(org_tracked '*.py' 2> /dev/null)
+if [[ -n ${tracked_py[0]+set} ]]; then
   python_test=$(mise tasks info test --json 2> /dev/null) || python_test=""
 fi
 
 # The JavaScript runner and its coverage provider, read from the root
 # package.json and its lockfile (#1357): `vitest <provider>`,
 # `unsupported <runner>`, or nothing.
-tracked_js=$(git ls-files -- package.json pnpm-lock.yaml package-lock.json yarn.lock bun.lock 2> /dev/null) || tracked_js=""
+tracked_js=() && while IFS= read -r -d '' f; do tracked_js+=("${f}"); done < <(org_tracked package.json pnpm-lock.yaml package-lock.json yarn.lock bun.lock 2> /dev/null)
 ts_runner=""
-if [[ -n ${tracked_js} ]]; then
-  # shellcheck disable=SC2086  # one argument per tracked path; none has a space
-  ts_runner=$("${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/coverage_js_runner.py" ${tracked_js}) || exit 1
+if [[ -n ${tracked_js[0]+set} ]]; then
+  ts_runner=$("${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/coverage_js_runner.py" "${tracked_js[@]}") || exit 1
 fi
 # The leg measures the repository's own `test` task (#1357 item 2), so a
 # vitest tree with no `test` task has no suite the gate runs: it skips
@@ -742,21 +741,25 @@ for b in tomllib.load(open(sys.argv[1], "rb")).get("bin", []):
   # Every tracked module's tests, each owned by the deepest go.mod above
   # it, as Go itself resolves a package's module; a test no module owns
   # is no target. Nothing under a vendor/ directory.
-  mods=$(git ls-files -- 'go.mod' '*/go.mod' ':!vendor/**' ':!*/vendor/*') || exit 1
-  [[ -n ${mods} ]] || return 0
-  files=$(git ls-files -- '*_test.go' ':!vendor/**' ':!*/vendor/*') || exit 1
-  while IFS= read -r file; do
-    [[ -n ${file} ]] || continue
+  local list f
+  list=$(mktemp) || exit 1
+  org_tracked 'go.mod' '*/go.mod' ':!vendor/**' ':!*/vendor/*' > "${list}" || exit 1
+  mods=() && while IFS= read -r -d '' f; do mods+=("${f}"); done < "${list}"
+  org_tracked '*_test.go' ':!vendor/**' ':!*/vendor/*' > "${list}" || exit 1
+  files=() && while IFS= read -r -d '' f; do files+=("${f}"); done < "${list}"
+  rm -- "${list}"
+  [[ -n ${mods[0]+set} ]] || return 0
+  for file in ${files[@]+"${files[@]}"}; do
     dir=$(dirname "${file}")
     module=""
-    while IFS= read -r mod; do
+    for mod in "${mods[@]}"; do
       m=$(dirname "${mod}")
       if [[ ${m} == . ]]; then
         [[ -n ${module} ]] || module=.
       elif [[ ${dir}/ == "${m}"/* && (${module} == . || ${#m} -gt ${#module}) ]]; then
         module=${m}
       fi
-    done <<< "${mods}"
+    done
     [[ -n ${module} ]] || continue
     names=$(sed -nE 's/^func (Fuzz[A-Z0-9_][A-Za-z0-9_]*|Fuzz)\([A-Za-z_][A-Za-z0-9_]* \*testing\.F\).*/\1/p' "${file}") || exit 1
     while IFS= read -r name; do
@@ -768,7 +771,7 @@ for b in tomllib.load(open(sys.argv[1], "rb")).get("bin", []):
       fi
       fuzz_found+="${n} go ${dir} ${name} ${module}"$'\n'
     done <<< "${names}"
-  done <<< "${files}"
+  done
 }
 
 # fuzz_origin <kind> <where> <name>: how a refusal names a target.

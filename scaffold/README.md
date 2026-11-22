@@ -22,8 +22,8 @@ org vocabulary the belt supplies.
 in this directory because no repo needs one by default. Measured on the
 belt's pin, sqlfluff 4.3.0, against the delivered `--config`: the file
 is honoured **even when the path is given explicitly**, which is the
-question worth asking, since `lint:sql` hands sqlfluff a `git ls-files`
-list rather than letting it walk. A named file drops out of the run with
+question worth asking, since `lint:sql` hands sqlfluff the tracked
+list (`org_tracked`) rather than letting it walk. A named file drops out of the run with
 a `WARNING` naming the ignore, exit 0. That is the escape for a
 GENERATED file only — a pgrx schema snapshot or any other transcript of
 what a tool emits, where conforming the file to a style rule is what

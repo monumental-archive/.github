@@ -17,7 +17,7 @@ It also refuses the scaffold's `<SPDX expression>` placeholder, the
 check `lint:licence` made before this helper existed (#214), and a
 REUSE.toml that does not parse.
 
-Reads the tracked paths NUL-separated on stdin (`git ls-files -z`), so
+Reads the tracked paths NUL-separated on stdin (`org_tracked`, #1986), so
 an untracked licence text never satisfies it, and reads each tracked
 `REUSE.toml` from the working directory. Stdlib and offline. Exits 1
 with every finding on stderr, 0 with nothing to say.
@@ -29,7 +29,8 @@ import sys
 
 import findings as writer
 from decoded import UndecodableError, as_array, as_object, is_strings, load_toml
-from typed_std import group, stdin_text
+from tracked import stdin_paths
+from typed_std import group
 
 PLACEHOLDER = "<SPDX expression>"
 
@@ -134,17 +135,17 @@ def findings(root: pathlib.Path, tracked: list[str]) -> list[str]:
 
 
 def main(argv: list[str]) -> int:
-    """Read `git ls-files -z` on stdin and report.
+    """Read the tracked-file list on stdin and report.
 
     Returns:
         A process exit status.
 
     """
     if len(argv) != 1:
-        writer.finding("", "usage: git ls-files -z | licence_texts.py")
+        writer.finding("", "usage: org_tracked | licence_texts.py")
         return 2
-    tracked = [path for path in stdin_text().split("\0") if path]
-    out = findings(pathlib.Path.cwd(), tracked)
+    listed = stdin_paths()
+    out = findings(pathlib.Path.cwd(), listed)
     for message in out:
         writer.finding("", message)
     return 1 if out else 0

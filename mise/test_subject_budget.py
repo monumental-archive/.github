@@ -1384,7 +1384,7 @@ class TestMainGuards(unittest.TestCase):
                 target = root / name
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(body, encoding="utf-8")
-            listing = "\n".join(tree)
+            listing = "\0".join(tree)
             out, err = io.StringIO(), io.StringIO()
             env = {"ORG_BELT_DIR": str(belt), "ORG_CANON_DIR": str(root)}
             with (

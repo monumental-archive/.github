@@ -108,8 +108,8 @@ class ShellCalls(unittest.TestCase):
         """The first line that runs a command, or None."""
         forms = {
             "run": "{c} --check x",
-            "pipe": "git ls-files | {c} -",
-            "xargs": "git ls-files | xargs -0 {c}",
+            "pipe": "org_tracked | {c} -",
+            "xargs": "org_tracked | xargs -0 {c}",
             "single": "echo '{c} is a tool'",
             "double": 'echo "{c} is a tool"',
             "comment": "# {c} runs here",
