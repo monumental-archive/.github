@@ -35,7 +35,8 @@ import typed_std
 
 REPO = "example-owner/example-repo"
 WORKFLOW = "slsa"
-TITLE = "slsa is red"
+TITLE = "red: caller permissions (slsa)"
+OLD = "slsa is red"
 RUN_ID = "200"
 RUN = f"https://github.com/{REPO}/actions/runs/{RUN_ID}"
 FIRST = f"https://github.com/{REPO}/actions/runs/100"
@@ -61,7 +62,7 @@ BEARER = "stub-bearer"
 
 LIST: list[str] = [
     "issue", "list", "--repo", REPO, "--state", "open",
-    "--limit", "1000", "--json", "number,title,body",
+    "--limit", "1000", "--json", "number,title,body,labels",
 ]  # fmt: skip
 JOBS: list[str] = ["api", "--paginate", "--jq", ".jobs[]", JOBS_API]
 LABELS: list[str] = [
@@ -76,15 +77,17 @@ LABELS: list[str] = [
 ]
 
 
-def issues(*found: tuple[int, str, str]) -> str:
-    """Write an `issue list` answer.
+def issues(*found: tuple[int, str, str], label: bool = True) -> str:
+    """Write an `issue list` answer, each issue labelled red-check.
 
     Returns:
         The JSON gh would print.
 
     """
+    names = [{"name": "red-check"}] if label else [{"name": "bug"}]
     listing: list[dict[str, object]] = [
-        {"number": n, "title": title, "body": body} for n, title, body in found
+        {"number": n, "title": title, "body": body, "labels": names}
+        for n, title, body in found
     ]
     return json.dumps(listing)
 
@@ -249,6 +252,7 @@ class Stubbed(unittest.TestCase):
         ref: str = "refs/heads/main",
         default: str = "main",
         findings: Path | None = None,
+        workflow: str = WORKFLOW,
     ) -> hermetic.Called:
         """Run the report as the job runs it.
 
@@ -258,7 +262,7 @@ class Stubbed(unittest.TestCase):
         """
         argv = [
             "--workflow",
-            WORKFLOW,
+            workflow,
             "--run-id",
             RUN_ID,
             "--ref",
@@ -303,7 +307,7 @@ class Rows(Stubbed):
     """The report's outcomes, by the calls gh received."""
 
     def test_red_creates_with_title_and_label(self) -> None:
-        """Red, none open: one issue, exact title, the label."""
+        """Red, none open: one issue, the job's title, the label."""
         proc = self.run_report()
         same(self, proc.returncode, 0, proc.stderr)
         calls = self.gh_calls()
@@ -313,10 +317,12 @@ class Rows(Stubbed):
         same(self, create[:6], ["issue", "create", "--repo", REPO, "--title", TITLE])
         same(self, create[-2:], ["--label", "red-check"])
         text = self.body_of(create)
+        self.assertIn("The job **caller permissions** of slsa on main", text)
         self.assertIn(f"- Latest red run: {RUN}\n", text)
         self.assertIn(f"- Red since: {RUN}\n", text)
         self.assertIn("- Red runs: 1\n", text)
-        self.assertIn("### caller permissions\n", text)
+        self.assertIn("## Red legs\n\n### caller permissions\n", text)
+        self.assertIn(f"- [caller permissions]({RUN}/job/2): failure\n", text)
         self.assertIn(
             "<summary>failing step: <code>mise run lint:caller</code></summary>", text
         )
@@ -350,12 +356,13 @@ class Rows(Stubbed):
         self.assertIn("- Red runs: 3\n", self.body_of(self.gh_calls()[2]))
 
     def test_green_closes_with_the_run(self) -> None:
-        """Every job green or skipped, one open: closed, naming the run."""
+        """A job green, its issue open: closed, naming the run."""
         self.jobs([job(1, "plan", "success"), job(2, "source-vsa", "skipped")])
-        self.env["STUB_LIST"] = issues((42, TITLE, previous(FIRST, 3)))
+        open_one = (42, "red: source-vsa (slsa)", previous(FIRST, 3))
+        self.env["STUB_LIST"] = issues(open_one)
         proc = self.run_report()
         same(self, proc.returncode, 0, proc.stderr)
-        comment = f"Green: {RUN} ran every job green or skipped."
+        comment = f"Green: {RUN} ran every leg of this job green or skipped."
         closed = ["issue", "close", "42", "--repo", REPO, "--comment", comment]
         same(self, self.gh_calls(), [JOBS, LIST, closed])
         self.assertIn("green: closed #42", proc.stdout)
@@ -366,24 +373,7 @@ class Rows(Stubbed):
         proc = self.run_report()
         same(self, proc.returncode, 0, proc.stderr)
         same(self, self.gh_calls(), [JOBS, LIST])
-        self.assertIn("green: no red-check issue open", proc.stdout)
-
-    def test_cancelled_job_is_neither(self) -> None:
-        """A cancelled job and no red one: nothing changes past the read.
-
-        A cancelled RUN never reaches here: the step that runs the
-        helper is `if: ${{ !cancelled() }}`, which test_report_job.py
-        holds for every reporting workflow.
-        """
-        self.jobs([job(1, "plan", "success"), job(2, "drafts", "cancelled")])
-        self.env["STUB_LIST"] = issues((42, TITLE, previous(FIRST, 3)))
-        proc = self.run_report()
-        same(self, proc.returncode, 0, proc.stderr)
-        same(self, self.gh_calls(), [JOBS])
-        self.assertIn(
-            "neither red nor green yet, nothing changed: drafts (cancelled)",
-            proc.stdout,
-        )
+        self.assertIn("red-check: nothing to change", proc.stdout)
 
     def test_other_branch_calls_nothing(self) -> None:
         """A run on another branch changes nothing, and asks nothing."""
@@ -406,7 +396,8 @@ class Rows(Stubbed):
         )
 
     def test_two_open_is_a_named_error(self) -> None:
-        """Two open issues with the title: a named error, never a third."""
+        """Two open issues with one job's title: a named error, nothing filed."""
+        self.jobs([job(1, "plan", "failure"), job(2, "caller permissions", "failure")])
         both = [(n, TITLE, previous(FIRST, 1)) for n in (41, 42)]
         self.env["STUB_LIST"] = issues(*both)
         proc = self.run_report()
@@ -439,16 +430,29 @@ class Rows(Stubbed):
         self.assertIn("created the red-check label; opened", proc.stdout)
 
     def test_unfinished_sibling_changes_nothing(self) -> None:
-        """Green so far with a caller's job still running: no close yet."""
+        """Green so far with a caller's job still running: nothing is read."""
         self.jobs([
             job(1, "records / links", "success"),
             job(3, "citations", None, "in_progress"),
         ])
-        self.env["STUB_LIST"] = issues((42, TITLE, previous(FIRST, 3)))
+        self.env["STUB_LIST"] = issues((42, "red: links (records)", previous(FIRST, 3)))
         proc = self.run_report()
         same(self, proc.returncode, 0, proc.stderr)
         same(self, self.gh_calls(), [JOBS])
         self.assertIn("neither red nor green yet", proc.stdout)
+
+    def test_unfinished_sibling_keeps_red_and_closes_nothing(self) -> None:
+        """A red job is kept with a sibling running; no green job is closed."""
+        self.jobs([
+            job(1, "plan", "success"),
+            job(2, "caller permissions", "failure"),
+            job(3, "citations", None, "in_progress"),
+        ])
+        self.env["STUB_LIST"] = issues((41, "red: plan (slsa)", previous(FIRST, 3)))
+        proc = self.run_report()
+        same(self, proc.returncode, 0, proc.stderr)
+        calls = self.gh_calls()
+        same(self, [c[:2] for c in calls[2:]], [["label", "list"], ["issue", "create"]])
 
     def test_timed_out_is_red(self) -> None:
         """A job that timed out is red."""
@@ -456,7 +460,212 @@ class Rows(Stubbed):
         self.log(4, logged("reading"))
         proc = self.run_report()
         same(self, proc.returncode, 0, proc.stderr)
-        self.assertIn("```text\nreading\n```", self.body_of(self.gh_calls()[-1]))
+        create = self.gh_calls()[-1]
+        same(self, create[5], "red: watch (slsa)")
+        self.assertIn("```text\nreading\n```", self.body_of(create))
+
+
+def failing(task: str, *output: str) -> str:
+    """Write a log whose failing step's first line is `task`'s command.
+
+    Returns:
+        The log text.
+
+    """
+    return logged(
+        f"##[group]Run {task}",
+        task,
+        "##[endgroup]",
+        *output,
+        "##[error]Process completed with exit code 1.",
+    )
+
+
+class PerJob(Stubbed):
+    """One issue per red job (#1966): its title, its legs, its closes."""
+
+    def made(self) -> dict[str, str]:
+        """Read every issue the report created.
+
+        Returns:
+            Each created issue's body, by its title.
+
+        """
+        return {
+            c[5]: self.body_of(c)
+            for c in self.gh_calls()
+            if c[:2] == ["issue", "create"]
+        }
+
+    def test_two_red_jobs_open_two_issues(self) -> None:
+        """Two red jobs in one run: two issues, each titled for its job."""
+        self.jobs([
+            job(1, "rust branch coverage holds its floor", "failure"),
+            job(2, "every source chain link verifies", "failure"),
+        ])
+        self.log(1, failing("mise run coverage", "below the floor"))
+        self.log(2, failing("mise run chain", "link 3 does not verify"))
+        proc = self.run_report()
+        same(self, proc.returncode, 0, proc.stderr)
+        calls = self.gh_calls()
+        same(self, calls[:3], [JOBS, LIST, LABELS])
+        same(
+            self,
+            [c[5] for c in calls[3:]],
+            [
+                "red: rust branch coverage holds its floor (slsa)",
+                "red: every source chain link verifies (slsa)",
+            ],
+        )
+        made = self.made()
+        first = made["red: rust branch coverage holds its floor (slsa)"]
+        second = made["red: every source chain link verifies (slsa)"]
+        self.assertIn("below the floor", first)
+        self.assertNotIn("link 3", first)
+        self.assertIn("link 3 does not verify", second)
+        self.assertNotIn("below the floor", second)
+
+    def test_a_reusable_workflow_leg_is_named_for_its_job(self) -> None:
+        """`deep-tests / x (3/8)` under deep-tests is a leg of the job `x`."""
+        same(self, standing.job_name("deep-tests / x (3/8)", "deep-tests"), "x")
+        self.jobs([
+            job(1, "deep-tests / x (3/8)", "failure"),
+            job(2, "deep-tests / x (4/8)", "success"),
+        ])
+        self.log(1, failing("mise run x", "boom"))
+        proc = self.run_report(workflow="deep-tests")
+        same(self, proc.returncode, 0, proc.stderr)
+        create = self.gh_calls()[-1]
+        same(self, create[5], "red: x (deep-tests)")
+        text = self.body_of(create)
+        self.assertIn("with 1 of its 2 legs red", text)
+        self.assertIn(f"- [deep-tests / x (3/8)]({RUN}/job/1): failure\n", text)
+        self.assertNotIn("x (4/8)", text)
+
+    def test_fourteen_legs_with_one_output_are_one_excerpt(self) -> None:
+        """Fourteen red legs, one output: one issue, one excerpt, 14 links."""
+        name = "fuzz targets survive a bounded run"
+        self.jobs([job(n, f"{name} (leg {n})", "failure") for n in range(1, 15)])
+        for n in range(1, 15):
+            self.log(n, failing("mise run fuzz", "llvm-tools is not installed"))
+        proc = self.run_report()
+        same(self, proc.returncode, 0, proc.stderr)
+        creates = [c for c in self.gh_calls() if c[:2] == ["issue", "create"]]
+        same(self, len(creates), 1)
+        same(self, creates[0][5], f"red: {name} (slsa)")
+        text = self.body_of(creates[0])
+        same(self, text.count("llvm-tools is not installed"), 1)
+        same(self, text.count("<details>"), 1)
+        same(self, text.count(f"- [{name} (leg "), 14)
+        self.assertIn(f"### {name} (leg 1) and 13 more legs\n", text)
+
+    def test_one_red_leg_of_fourteen_is_red(self) -> None:
+        """One leg red and thirteen green: the job is red."""
+        legs = [job(1, "shard (1)", "failure")]
+        legs += [job(n, f"shard ({n})", "success") for n in range(2, 15)]
+        self.jobs(legs)
+        self.log(1, failing("mise run shard", "one shard failed"))
+        proc = self.run_report()
+        same(self, proc.returncode, 0, proc.stderr)
+        create = self.gh_calls()[-1]
+        same(self, create[:2], ["issue", "create"])
+        same(self, create[5], "red: shard (slsa)")
+        self.assertIn("with 1 of its 14 legs red", self.body_of(create))
+
+    def test_every_leg_green_or_skipped_closes(self) -> None:
+        """Every leg green or skipped: the job's issue is closed."""
+        legs = [job(n, f"shard ({n})", "success") for n in range(1, 14)]
+        self.jobs([*legs, job(14, "shard (14)", "skipped")])
+        self.env["STUB_LIST"] = issues((42, "red: shard (slsa)", previous(FIRST, 2)))
+        proc = self.run_report()
+        same(self, proc.returncode, 0, proc.stderr)
+        comment = f"Green: {RUN} ran every leg of this job green or skipped."
+        closed = ["issue", "close", "42", "--repo", REPO, "--comment", comment]
+        same(self, self.gh_calls(), [JOBS, LIST, closed])
+
+    def test_a_cancelled_leg_with_no_red_leg_changes_nothing(self) -> None:
+        """A cancelled leg, the rest green: the job's issue is unchanged."""
+        self.jobs([job(1, "shard (1)", "success"), job(2, "shard (2)", "cancelled")])
+        self.env["STUB_LIST"] = issues((42, "red: shard (slsa)", previous(FIRST, 2)))
+        proc = self.run_report()
+        same(self, proc.returncode, 0, proc.stderr)
+        same(self, self.gh_calls(), [JOBS, LIST])
+        self.assertIn("neither red nor green, unchanged: shard", proc.stdout)
+
+    def test_green_job_closed_and_red_job_replaced(self) -> None:
+        """Job A green and job B red: A's issue closed, B's body replaced."""
+        self.jobs([job(1, "a", "success"), job(2, "b", "failure")])
+        self.log(2, failing("mise run b", "b broke"))
+        self.env["STUB_LIST"] = issues(
+            (41, "red: a (slsa)", previous(FIRST, 1)),
+            (42, "red: b (slsa)", previous(FIRST, 1)),
+        )
+        proc = self.run_report()
+        same(self, proc.returncode, 0, proc.stderr)
+        calls = self.gh_calls()
+        same(self, len(calls), 4)
+        same(self, calls[2][:5], ["issue", "edit", "42", "--repo", REPO])
+        self.assertIn("b broke", self.body_of(calls[2]))
+        comment = f"Green: {RUN} ran every leg of this job green or skipped."
+        closed = ["issue", "close", "41", "--repo", REPO, "--comment", comment]
+        same(self, calls[3], closed)
+
+    def test_a_job_not_in_the_run_is_closed_saying_so(self) -> None:
+        """`red: gone` labelled is closed; the same shape unlabelled is not."""
+        self.jobs([job(1, "plan", "success")])
+        labelled = issues((50, "red: gone (slsa)", previous(FIRST, 1)))
+        unlabelled = issues((51, "red: gone (slsa)", ""), label=False)
+        listing = [
+            *decoded.as_array(decoded.load_json(labelled), "labelled"),
+            *decoded.as_array(decoded.load_json(unlabelled), "unlabelled"),
+        ]
+        self.env["STUB_LIST"] = json.dumps(listing)
+        proc = self.run_report()
+        same(self, proc.returncode, 0, proc.stderr)
+        comment = (
+            f"Not in the run: {RUN} lists no job named `gone`;"
+            " it was renamed or removed."
+        )
+        closed = ["issue", "close", "50", "--repo", REPO, "--comment", comment]
+        same(self, self.gh_calls(), [JOBS, LIST, closed])
+
+    def test_the_old_issue_is_closed_red_or_green(self) -> None:
+        """An open `<workflow> is red` is closed on a red run and a green one."""
+        comment = (
+            f"{RUN} reported this workflow with one issue per red job"
+            " (monumental-archive/.github#1966), titled `red: <job> (slsa)`:"
+            " each red job now has its own issue."
+        )
+        closed = ["issue", "close", "30", "--repo", REPO, "--comment", comment]
+        for red in (True, False):
+            with self.subTest(red=red):
+                self.calls.unlink(missing_ok=True)
+                if not red:
+                    self.jobs([job(1, "plan", "success")])
+                old = (30, OLD, previous(FIRST, 5))
+                self.env["STUB_LIST"] = issues(old, label=False)
+                proc = self.run_report()
+                same(self, proc.returncode, 0, proc.stderr)
+                calls = self.gh_calls()
+                same(self, calls[-1], closed)
+                creates = [c for c in calls if c[:2] == ["issue", "create"]]
+                same(self, len(creates), 1 if red else 0)
+
+    def test_red_since_and_runs_carry_per_issue(self) -> None:
+        """Each job's issue carries its own Red since and run count."""
+        self.jobs([job(1, "a", "failure"), job(2, "b", "failure")])
+        self.log(1, failing("mise run a", "a broke"))
+        self.log(2, failing("mise run b", "b broke"))
+        self.env["STUB_LIST"] = issues((41, "red: a (slsa)", previous(FIRST, 3)))
+        proc = self.run_report()
+        same(self, proc.returncode, 0, proc.stderr)
+        calls = self.gh_calls()
+        edit = next(c for c in calls if c[:3] == ["issue", "edit", "41"])
+        self.assertIn(f"- Red since: {FIRST}\n", self.body_of(edit))
+        self.assertIn("- Red runs: 4\n", self.body_of(edit))
+        b = self.made()["red: b (slsa)"]
+        self.assertIn(f"- Red since: {RUN}\n", b)
+        self.assertIn("- Red runs: 1\n", b)
 
 
 class Logs(Stubbed):
@@ -508,6 +717,16 @@ class Logs(Stubbed):
         )
 
 
+def red_of(legs: int) -> standing.Red:
+    """Describe a red job with `legs` legs, for a body written without gh.
+
+    Returns:
+        What the body says beside the legs.
+
+    """
+    return standing.Red(WORKFLOW, "job", "main", RUN, FIRST, 2, legs)
+
+
 class Body(unittest.TestCase):
     """The body's entries, fence and size, without gh."""
 
@@ -519,7 +738,7 @@ class Body(unittest.TestCase):
             The body.
 
         """
-        return standing.body(standing.Red(WORKFLOW, "main", RUN, FIRST, 2), entries)
+        return standing.body(red_of(len(entries)), entries)
 
     @staticmethod
     def entry(number: int, tail: str) -> standing.Entry:
@@ -537,8 +756,8 @@ class Body(unittest.TestCase):
             None,
         )
 
-    def test_two_red_jobs_two_entries(self) -> None:
-        """Two red jobs give two entries, each with its tail."""
+    def test_two_outputs_give_two_excerpts(self) -> None:
+        """Two red legs with different output give two excerpts, in order."""
         text = self.red([self.entry(1, "first tail"), self.entry(2, "second tail")])
         same(self, text.count("<summary>failing step: <code>step</code></summary>"), 2)
         self.assertLess(text.index("### job 1"), text.index("first tail"))
@@ -560,7 +779,7 @@ class Body(unittest.TestCase):
         self.assertIn(
             "_Log tail dropped: the body would pass 60,000 characters._", text
         )
-        self.assertRegex(text, r"Log tails dropped for the last \d+ job\(s\)")
+        self.assertRegex(text, r"Log tails dropped for the last \d+ excerpt\(s\)")
 
     def test_recorded_log_shows_the_failing_step(self) -> None:
         """The endpoint's own answer: the step's 11 lines, no codes."""
@@ -685,6 +904,16 @@ def red_job(number: int, tail: standing.Excerpt | None) -> standing.Entry:
     return standing.Entry(job_of, tail, None if tail else "the log could not be read")
 
 
+def ran(*tasks: str) -> standing.Entry:
+    """Build a red leg whose failing step ran `tasks`.
+
+    Returns:
+        The entry.
+
+    """
+    return red_job(1, standing.Excerpt("out", "step", frozenset(tasks)))
+
+
 DENY = standing.Finding(
     "audit:deny",
     "chrono@0.4.45",
@@ -718,7 +947,7 @@ class FindingsBody(unittest.TestCase):
         """
         before = None if previous is None else standing.Issue(42, previous)
         return standing.body(
-            standing.Red(WORKFLOW, "main", RUN, FIRST, 2),
+            red_of(len(entries)),
             entries,
             standing.read_findings(self.dir),
             standing.seen_hashes(before),
@@ -728,12 +957,13 @@ class FindingsBody(unittest.TestCase):
         """Two tasks' records: one `###` per task, in name order, counted."""
         records(self.dir, "a.jsonl", SPELL, DENY)
         records(self.dir, "b.jsonl", LOOSE)
-        text = self.red([red_job(1, None)])
+        text = self.red([ran("audit:deny", "lint:typos")])
         self.assertIn("## Findings\n", text)
         self.assertIn("### audit:deny (2)\n", text)
         self.assertIn("### lint:typos (1)\n", text)
         self.assertLess(text.index("### audit:deny"), text.index("### lint:typos"))
-        self.assertLess(text.index("## Findings"), text.index("## Red jobs"))
+        self.assertLess(text.index("## Findings"), text.index("## Red legs"))
+        self.assertNotIn(standing.OUTSIDE, text)
         self.assertIn("- chrono@0.4.45: RUSTSEC-2026-0543 is undecided\n", text)
         self.assertIn("- a pin is loose\n", text)
         self.assertIn(
@@ -752,8 +982,8 @@ class FindingsBody(unittest.TestCase):
         third = standing.Finding("audit:deny", "time@0.3.0", "RUSTSEC-2026-0001")
         records(self.dir, "a.jsonl", DENY, LOOSE, third)
         before = f"...\n<!-- findings: 0123456789abcdef {LOOSE.digest} -->"
-        text = self.red([red_job(1, None)], before)
-        section = text[text.index("### audit:deny (3)") : text.index("## Red jobs")]
+        text = self.red([ran("audit:deny")], before)
+        section = text[text.index("### audit:deny (3)") : text.index("## Red legs")]
         new, still = section.split("#### Still red")
         self.assertIn("#### New in this run", new)
         same(self, new.count("\n- "), 2)
@@ -769,8 +999,8 @@ class FindingsBody(unittest.TestCase):
         self.assertIn("#### New in this run", text)
         self.assertNotIn("#### Still red", text)
 
-    def test_a_job_with_a_record_points_at_its_findings(self) -> None:
-        """A step with a record points above; one without shows its output."""
+    def test_a_leg_with_a_record_points_and_shows_its_output(self) -> None:
+        """A step with a record points above; both show their output."""
         records(self.dir, "a.jsonl", DENY)
         deny = standing.tail(
             logged(
@@ -794,7 +1024,8 @@ class FindingsBody(unittest.TestCase):
         first = text[text.index("### job 1") : text.index("### job 2")]
         second = text[text.index("### job 2") :]
         self.assertIn("Its findings are above, under <code>audit:deny</code>.", first)
-        self.assertNotIn("denied", first)
+        self.assertIn("```text\ndenied\n```", first)
+        self.assertNotIn("No finding was recorded", first)
         self.assertIn("_No finding was recorded._", second)
         self.assertIn("```text\ncaller grant missing\n```", second)
 
@@ -879,8 +1110,7 @@ class FindingsBody(unittest.TestCase):
         """No record and no unreadable line: the body is the one without findings."""
         self.dir.mkdir()
         entries = [red_job(1, standing.Excerpt("out", "mise run audit:deny"))]
-        red = standing.Red(WORKFLOW, "main", RUN, FIRST, 2)
-        same(self, self.red(entries), standing.body(red, entries))
+        same(self, self.red(entries), standing.body(red_of(1), entries))
         self.assertNotIn("## Findings", self.red(entries))
         self.assertNotIn("<!-- findings:", self.red(entries))
 
@@ -900,6 +1130,50 @@ class FindingsReport(Stubbed):
         self.assertIn("### lint:caller (1)\n", text)
         self.assertIn("- edtf: caller-grant\n", text)
         self.assertIn("Its findings are above, under <code>lint:caller</code>.", text)
+        self.assertIn(
+            "```text\nwalking\nassert: edtf/release.yml: caller-grant\n```", text
+        )
+
+    def test_each_record_reaches_the_job_whose_step_ran_it(self) -> None:
+        """A's record in A's issue only; verdict.py by its script; the rest in all."""
+        verdict = '"${ORG_PYTHON}" .github/rekor-monitor/verdict.py --report r.json'
+        self.jobs([
+            job(1, "a", "failure"),
+            job(2, "b", "failure"),
+            job(3, "watch (leg 1)", "failure"),
+        ])
+        self.log(1, failing("mise run lint:a", "a broke"))
+        self.log(2, failing("mise run lint:b", "b broke"))
+        self.log(3, failing(verdict, "a certificate did not reconcile"))
+        found = self.dir / "findings"
+        records(
+            found,
+            "run.jsonl",
+            standing.Finding("lint:a", "a.py", "finding of a"),
+            standing.Finding("lint:b", "b.py", "finding of b"),
+            standing.Finding("verdict.py", "leg 1", "finding of the watch"),
+            standing.Finding("audit:loose", "", "finding of no failing step"),
+        )
+        proc = self.run_report(findings=found)
+        same(self, proc.returncode, 0, proc.stderr)
+        made = {
+            c[5]: self.body_of(c)
+            for c in self.gh_calls()
+            if c[:2] == ["issue", "create"]
+        }
+        a, b = made["red: a (slsa)"], made["red: b (slsa)"]
+        watch = made["red: watch (slsa)"]
+        self.assertIn("- a.py: finding of a\n", a)
+        self.assertNotIn("finding of b", a)
+        self.assertIn("- b.py: finding of b\n", b)
+        self.assertNotIn("finding of a", b)
+        self.assertIn("### verdict.py (1)\n", watch)
+        self.assertIn("Its findings are above, under <code>verdict.py</code>.", watch)
+        self.assertNotIn("finding of the watch", a + b)
+        for text in (a, b, watch):
+            outside = text[text.index(standing.OUTSIDE) : text.index("## Red legs")]
+            self.assertIn("- finding of no failing step\n", outside)
+            same(self, outside.count("\n- "), 1)
 
     def test_without_the_flag_no_findings_are_read(self) -> None:
         """No `--findings`: the body has no findings section."""

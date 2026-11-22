@@ -4999,9 +4999,22 @@ dir = "{{cwd}}"
 # not be shown equal to any single one of them on this tree, so
 # re-encoding it would have changed what the audit means as a side
 # effect of tidying where it is written.
+#
+# lychee runs once, in its JSON mode, through lychee_findings.py: each
+# broken link is a finding record (#1955), subject the file and the
+# line in the detail, and the exit status is lychee's own. The names go
+# on one command line, not through xargs: a split list is two reports
+# and xargs' 123 in place of lychee's status. No skip exit: the
+# task runs everywhere (mise/audit-legs.toml).
 run = '''
 files=$(git ls-files ":!vendor/**" "*.md" "*.markdown")
-if [[ -n ${files} ]]; then xargs lychee --no-progress --include-fragments --config "${ORG_BELT_DIR}/lychee.toml" <<< "${files}"; else echo "audit:links: no markdown tracked, skipped"; fi
+if [[ -z ${files} ]]; then
+  echo "audit:links: no markdown tracked, skipped"
+else
+  names=()
+  while IFS= read -r name; do names+=("${name}"); done <<< "${files}"
+  "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/lychee_findings.py" --no-progress --include-fragments --config "${ORG_BELT_DIR}/lychee.toml" "${names[@]}"
+fi
 '''
 
 [tasks."audit:actions"]

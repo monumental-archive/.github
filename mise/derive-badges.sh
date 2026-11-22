@@ -212,8 +212,13 @@ add "[![license](https://img.shields.io/badge/license-${lic_esc}-blue)](LICENSES
 # cannot pass the secret for a repository, so it refuses the render.
 if [[ -f .coverage-floor ]]; then
   if ! grep -qsE "^[^#]*codecov-token:" .github/workflows/*.y*ml; then
+    # The block of the ci job's `secrets:` in workflow-templates/ci.yml,
+    # which test_derive_badges.py decodes and compares (#1923).
+    secret=CODECOV_TOKEN
     org_finding "" ".coverage-floor is tracked and no workflow passes codecov-token — the coverage shield has no producer" \
-      "add to the gate stub's job:  secrets: { codecov-token: \${{ secrets.CODECOV_TOKEN }} }"
+      "add under the gate stub's ci job:" \
+      "  secrets:" \
+      "    codecov-token: \${{ secrets.${secret} }}"
     exit 1
   fi
   add "[![coverage](https://codecov.io/gh/${org_path}/branch/main/graph/badge.svg)](https://codecov.io/gh/${org_path})"
