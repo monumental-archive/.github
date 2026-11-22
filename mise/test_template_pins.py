@@ -145,12 +145,13 @@ class Pins(unittest.TestCase):
         return self.git("rev-parse", "HEAD").strip()
 
     def plant(self, name: str, text: str | bytes) -> None:
-        """Write one template."""
+        """Write one template and track it: the task reads tracked files (#1986)."""
         path = self.tree / name
         if isinstance(text, bytes):
             path.write_bytes(text)
         else:
             path.write_text(text, encoding="utf-8")
+        self.git("add", "--", name)
 
     def helper(self, *files: str) -> hermetic.Called:
         """Call the helper's main in the planted tree.

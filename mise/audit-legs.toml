@@ -32,7 +32,13 @@ when = ["go.mod", "*/go.mod", "*/*/go.mod"]
 when = [".github/workflows/*.y*ml"]
 
 [repo-dependencies.action-pins]
-when = [".github/workflows/*.y*ml", "*action.y*ml"]
+when = [
+  ".github/workflows/*.y*ml",
+  "*/action.yaml",
+  "*/action.yml",
+  "action.yaml",
+  "action.yml",
+]
 
 [repo-dependencies.lock-arch]
 when = ["mise.lock", "*/mise.lock"]

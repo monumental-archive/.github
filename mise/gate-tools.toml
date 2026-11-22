@@ -49,7 +49,14 @@ tasks = ["lint:scaffold-assembly", "lint:trivy"]
 
 [tools.zizmor]
 tasks = ["lint:scaffold-assembly", "lint:zizmor"]
-when = ["*action.y*ml", ".github/workflows/*.y*ml", "scaffold/"]
+when = [
+  "*/action.yaml",
+  "*/action.yml",
+  ".github/workflows/*.y*ml",
+  "action.yaml",
+  "action.yml",
+  "scaffold/",
+]
 
 [tools.committed]
 # lint:commits and the squash-message step's commits:check.
@@ -135,19 +142,29 @@ tasks = [
   "lint:workflow-shell",
 ]
 when = [
-  "*action.y*ml",
+  "*/action.yaml",
+  "*/action.yml",
   "*mise.*.toml",
   "*mise.toml",
   "*mise/config.*.toml",
   "*mise/config.toml",
   ".github/workflows/*.y*ml",
+  "action.yaml",
+  "action.yml",
   "scaffold/",
   "workflow-templates/*.y*ml",
 ]
 
 [tools."aqua:suzuki-shunsuke/pinact"]
 tasks = ["lint:action-pins", "lint:scaffold-assembly"]
-when = ["*action.y*ml", ".github/workflows/*.y*ml", "scaffold/"]
+when = [
+  "*/action.yaml",
+  "*/action.yml",
+  ".github/workflows/*.y*ml",
+  "action.yaml",
+  "action.yml",
+  "scaffold/",
+]
 
 [tools.ruff]
 tasks = ["lint:python", "lint:scaffold-assembly"]
