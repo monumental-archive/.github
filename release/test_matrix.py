@@ -23,6 +23,7 @@ import io
 import os
 import sys
 import tempfile
+import tomllib
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -32,6 +33,7 @@ import matrix
 
 TESTDATA = Path(__file__).with_name("testdata") / "matrix"
 MAPPING = str(TESTDATA / "pgrx-base-images.toml")
+TRACKED = Path(__file__).parents[1] / "docker" / "pgrx-base-images.toml"
 
 NOTHING = "a release that builds nothing is not a release"
 NO_IMAGE = "has no digest-pinned base image in docker/pgrx-base-images.toml"
@@ -332,6 +334,32 @@ class PgrxExtension(Rows):
         mapping = self.mapping('[build]\n"16" = "b"\n[smoke]\n"16" = "s"\n')
         _, out, _ = run("pgrx-extension", mapping, "16")
         self.assertTrue(out.endswith("floor=null\n"))
+
+    def test_pg19_is_planned_from_the_real_mapping(self) -> None:
+        """The tracked mapping serves Postgres 19 (#1848).
+
+        The pins are read from the file itself, so a Renovate roll of
+        either digest moves nothing here; what is held is that 19 has
+        both images and plans a cell per architecture.
+        """
+        notices = (
+            "::notice::will build pg19 on ubuntu-24.04\n"
+            "::notice::will build pg19 on ubuntu-24.04-arm\n"
+        )
+        code, out, err = run("pgrx-extension", str(TRACKED), "19")
+        self.assertEqual((code, err), (0, notices))
+        pins = tomllib.loads(TRACKED.read_text("utf-8"))
+        images = (
+            f'"build":"{pins["build"]["19"]}","smoke":"{pins["smoke"]["19"]}"'
+        )
+        amd = f'{{"pg":"19","arch":"amd64","runner":"ubuntu-24.04",{images}}}'
+        arm = f'{{"pg":"19","arch":"arm64","runner":"ubuntu-24.04-arm",{images}}}'
+        self.assertEqual(
+            out,
+            f'matrix={{"include":[{amd},{arm}]}}\n'
+            'expected=["19-amd64","19-arm64"]\n'
+            f"floor={pins['floor']['glibc']}\n",
+        )
 
 
 class MappingShape(Rows):

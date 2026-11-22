@@ -10,10 +10,13 @@
 #
 # The keys ARE the canon's support matrix, and a consumer's pgNN features
 # are held to them by lint:gate-surface. A major enters by adding its key
-# and leaves by deleting it at its upstream final release
-# (postgresql.org/support/versioning) — both reviewed changes. An
-# end-of-life server is stale whatever its digest; 14 left this way at
-# 14.25, its final release (#1845).
+# at its upstream general release, once the official image is published
+# for both suites (bookworm for [build], trixie for [smoke]); a release
+# candidate is not supported upstream, so it does not enter. 19 entered
+# this way at 19.0 (#1848). A major leaves by deleting its key at its
+# upstream final release (postgresql.org/support/versioning). Both are
+# reviewed changes. An end-of-life server is stale whatever its digest;
+# 14 left this way at 14.25, its final release (#1845).
 
 [build]
 # renovate: pgrx-base-image
@@ -24,6 +27,8 @@
 "17" = "postgres:17-bookworm@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536"
 # renovate: pgrx-base-image
 "18" = "postgres:18-bookworm@sha256:ece55f7868da684e400f82f1030a050718adbdd65c23aa500c486f6e2950dc0f"
+# renovate: pgrx-base-image
+"19" = "postgres:19-bookworm@sha256:f4859caf96de494e38efa69ed703b08a5bbd9605e152e604f2daec8841c87c41"
 
 [smoke]
 # renovate: pgrx-base-image
@@ -34,6 +39,8 @@
 "17" = "postgres:17-trixie@sha256:846a7ddaa67a4b354ae1d21087b683901aa6113a4ed626d3787cfbf6c85e3e07"
 # renovate: pgrx-base-image
 "18" = "postgres:18-trixie@sha256:b9f6b8ff03b62f3cfd9d9ba3fe56226a9991c79d3fb46fd46536263bf02be553"
+# renovate: pgrx-base-image
+"19" = "postgres:19-trixie@sha256:bb6e70add742cd868fb62cb3b2f67d1dd2bdd2b65a521e778420748753687c60"
 
 # The glibc floor the [build] images guarantee, asserted per-build with
 # readelf: an extension whose symbols exceed this fails the release
