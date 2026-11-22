@@ -35,11 +35,13 @@ runs `zizmor --format=json <arguments>` once (#1955), its stderr passed
 through unchanged, and decodes the finding array it writes to stdout.
 Each finding that remains after the drop goes through
 mise/findings.py: the subject is its first location's file, the
-message `<ident>: <the first line of the first location's feature,
-trimmed>` (the owner's ruling on #1955: `desc` is one text per audit,
-so it is no identity), the detail its `desc`, its severity and each
-location as `<file>:<line>: <annotation>`. The line is never in the subject or
-the message, so an edit above a finding does not make it new. There is
+message `<ident>: <the first line of the feature of the first Primary
+location, trimmed>` (the owner's ruling on #1955: `desc` is one text
+per audit, so it is no identity; Hidden and Related locations are
+context, and a finding with no Primary location is refused), the
+detail its `desc`, its severity and each location as
+`<file>:<line>: <annotation>`. The line is never in the subject or the
+message, so an edit above a finding does not make it new. There is
 no second, human-mode run: the records print the findings.
 
 FAIL CLOSED ON BLINDNESS (#310 finding 3): without GH_TOKEN zizmor
@@ -252,8 +254,9 @@ def message(ident: str, feature: str) -> str:
     """Write a remaining finding's message (owner's ruling on #1955).
 
     zizmor's `desc` is one text per audit, so two findings of an audit
-    in one file would read the same; the first line of the first
-    location's feature, the source zizmor points at, tells them apart.
+    in one file would read the same; the first line of the feature of
+    its first Primary location, the source zizmor marks at fault, tells
+    them apart. Hidden and Related locations are context.
 
     Returns:
         `<ident>: <the feature's first line, trimmed>`.
@@ -263,12 +266,21 @@ def message(ident: str, feature: str) -> str:
     return f"{ident}: {first.strip()}"
 
 
-def place(item: object, where: str) -> tuple[str, str, str]:
-    """Read one location: its file, its line with its annotation, its feature.
+@dataclass(frozen=True)
+class Place:
+    """One location of a finding, as the record reads it."""
+
+    path: str  # the file
+    line: str  # `<file>:<line>: <annotation>`
+    kind: str  # Primary marks the location at fault; the rest are context
+    feature: str  # the source the location covers
+
+
+def place(item: object, where: str) -> Place:
+    """Read one location: its file, line and annotation, kind and source.
 
     Returns:
-        The file; `<file>:<line>: <annotation>`, zizmor's rows counting
-        from 0 and its lines from 1; and the source the location covers.
+        The location; zizmor's rows count from 0, its lines from 1.
 
     """
     location = decoded.as_object(item, where)
@@ -282,7 +294,8 @@ def place(item: object, where: str) -> tuple[str, str, str]:
     start = decoded.as_object(span.get("start_point"), f"{where}: start_point")
     row = decoded.as_int(start.get("row"), f"{where}: start_point.row")
     feature = decoded.as_str(concrete.get("feature"), f"{where}: feature")
-    return path, f"{path}:{row + 1}: {note}", feature
+    kind = decoded.as_str(symbolic.get("kind"), f"{where}: symbolic.kind")
+    return Place(path, f"{path}:{row + 1}: {note}", kind, feature)
 
 
 def record(finding: dict[str, object], where: str) -> Record:
@@ -307,8 +320,12 @@ def record(finding: dict[str, object], where: str) -> Record:
         msg = f"{where}: locations is empty"
         raise UndecodableError(msg)
     places = [place(p, f"{where}: locations[{at}]") for at, p in enumerate(listed)]
-    detail = (desc, f"severity: {severity}", *(line for _, line, _ in places))
-    return Record(ident, places[0][0], message(ident, places[0][2]), detail)
+    primary = next((p for p in places if p.kind == "Primary"), None)
+    if primary is None:
+        msg = f"{where}: no location is Primary"
+        raise UndecodableError(msg)
+    detail = (desc, f"severity: {severity}", *(p.line for p in places))
+    return Record(ident, places[0].path, message(ident, primary.feature), detail)
 
 
 @dataclass(frozen=True)

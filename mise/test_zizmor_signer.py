@@ -18,10 +18,10 @@ Those rows run `main` with `run_zizmor` answering the array (#1955).
 
 `Records` asserts what remains is recorded, read back from
 ORG_FINDINGS: subject the first location's file, message `<ident>:
-<the first line of the first location's feature>` (the owner's ruling
-on #1955), detail `desc`, the severity and each location with its
-line; the
-token and offline-degradation findings; zizmor's status as the exit.
+<the first line of the first Primary location's feature>` (the
+owner's ruling on #1955; Hidden and Related are context), detail
+`desc`, the severity and each location with its line; the token and
+offline-degradation findings; zizmor's status as the exit.
 `PinnedZizmor` runs the belt's zizmor `--offline` on a planted
 workflow, and two unpinned `uses:` in one file are two records with
 two messages. `Task` runs `audit:actions`' own body over a stub zizmor:
@@ -334,7 +334,10 @@ class Kept(unittest.TestCase):
         blind = copy.deepcopy(REAL[0])
         for location in locations(blind):
             symbolic(location)["kind"] = "Related"
-        self.assertEqual(14, run([blind])[0])
+        status, out, err = run([blind])
+        self.assertEqual(1, status)
+        self.assertIn("findings[0]: no location is Primary", err)
+        self.assertEqual("", out)
 
     def test_a_reference_without_a_ref_is_kept(self) -> None:
         """A Primary feature with no `@` is not a reference."""
@@ -403,6 +406,19 @@ class Refusals(unittest.TestCase):
                     err,
                 )
 
+    def test_a_finding_with_no_primary_location_is_refused(self) -> None:
+        """A remaining finding with no location at fault: refused by name."""
+        third = repointed(REAL[0], "actions/checkout@" + "d" * 40)
+        for location in locations(third):
+            symbolic(location)["kind"] = "Hidden"
+        status, _, err = run([third])
+        self.assertEqual(1, status)
+        self.assertIn(
+            f"{TASK}: zizmor exited 14: the output is not zizmor's report:"
+            " findings[0]: no location is Primary",
+            err,
+        )
+
     def test_input_that_is_not_the_finding_array_is_refused(self) -> None:
         """A SARIF document or an error object is not silently empty."""
         status, out, err = run({"runs": []})
@@ -456,7 +472,11 @@ class Records(unittest.TestCase):
         return [decoded.load_json(line) for line in lines]
 
     def test_a_remaining_finding_is_one_record(self) -> None:
-        """A third-party stale ref: one record, its lines, zizmor's 11."""
+        """A third-party stale ref: one record, its lines, zizmor's 11.
+
+        Its Hidden location (the job) comes first: the subject is that
+        location's file, the message the Primary location's source.
+        """
         third = repointed(REAL[0], "actions/checkout@" + "d" * 40)
         both: list[dict[str, object]] = [*REAL, third]
         doc = json.dumps(both).encode()
@@ -469,7 +489,7 @@ class Records(unittest.TestCase):
                 "v": 1,
                 "task": TASK,
                 "subject": path,
-                "message": "stale-action-refs: sign:",
+                "message": "stale-action-refs: actions/checkout@" + "d" * 40,
                 "detail": [
                     "commit hash does not point to a Git tag",
                     "severity: Low",
@@ -623,7 +643,7 @@ class PinnedZizmor(unittest.TestCase):
                 "v": 1,
                 "task": TASK,
                 "subject": path,
-                "message": "unpinned-uses: uses: actions/setup-go@v5",
+                "message": "unpinned-uses: actions/setup-go@v5",
                 "detail": [
                     "unpinned action reference",
                     "severity: High",
@@ -644,8 +664,8 @@ class PinnedZizmor(unittest.TestCase):
         self.assertEqual(14, status, err)
         messages = [decoded.as_object(r, "a record")["message"] for r in got]
         want: list[object] = [
-            "unpinned-uses: uses: actions/setup-go@v5",
-            "unpinned-uses: uses: actions/setup-node@v4",
+            "unpinned-uses: actions/setup-go@v5",
+            "unpinned-uses: actions/setup-node@v4",
         ]
         self.assertEqual(want, messages)
 
