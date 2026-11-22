@@ -165,10 +165,11 @@ jobs:
           stele derive vex-subjects "${args[@]}" \
             --policy slsa/assert-policy.json --org "${OWNER}" --out plan.json || rc=$?
           # 1 is refusals, which the job below reddens; 4 is an unreadable
-          # store; anything else is the tool failing.
-          . .org-canon/mise/workflow-command.sh
+          # store; anything else is the tool failing. The canon's finding
+          # writer (#1934), and its workflow commands (#1660).
+          . .org-canon/mise/findings.sh
           if ((rc == 4)); then
-            org_error "${UNREADABLE}"
+            org_finding_annotated "" "${UNREADABLE}"
             exit 4
           fi
           [[ ${rc} -le 1 ]] || exit "${rc}"

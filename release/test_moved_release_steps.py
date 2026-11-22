@@ -25,6 +25,7 @@ import json
 import os
 import subprocess
 import sys
+import tarfile
 import tempfile
 import unittest
 from pathlib import Path
@@ -357,6 +358,229 @@ class Inventory(Script):
         )
         called: list[str] = [argv[0] for argv in self.calls()]
         self.assertNotIn("stele", called)
+
+
+# The runner's own directories, without the belt: a row that needs stele
+# missing puts only these after its stub bin.
+SYSTEM_PATH = "/usr/bin:/bin"
+NO_STELE = "::error::{}: stele is not on the runner — it is a belt tool\n"
+
+
+class Helper(Script):
+    """A #1934 helper: its stele refusal, run with no stele on PATH."""
+
+    def run_bare(self, script: Path, **env: str) -> subprocess.CompletedProcess[str]:
+        """Run a script with no belt tool on PATH.
+
+        Returns:
+            The finished process.
+
+        """
+        full = hermetic.env(
+            self.root / "home",
+            PATH=f"{self.bin}:{SYSTEM_PATH}",
+            STUB_LOG=str(self.log),
+            **env,
+        )
+        return subprocess.run(
+            [BASH, str(script)],
+            cwd=self.work,
+            env=full,
+            stdin=subprocess.DEVNULL,
+            timeout=60,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+
+FACTS = """#!/usr/bin/env bash
+{ printf '%s\\n' "$(basename "$0")" "$@"; echo; } >> "${STUB_LOG}"
+printf 'facts=planted\\nepoch=1\\nlicence: MIT\\n'
+"""
+
+
+class DeriveFacts(Helper):
+    """release/derive-facts.sh: publish.yml's facts step (#1934)."""
+
+    SCRIPT = CANON / "release" / "derive-facts.sh"
+
+    def env(self) -> dict[str, str]:
+        """Name the step's inputs and its output file.
+
+        Returns:
+            The variables.
+
+        """
+        self.output = self.root / "output"
+        self.output.write_text("", "utf-8")
+        return {
+            "VERSION": "1.2.3",
+            "IMAGE_TITLE": "Repo",
+            "IMAGE_DESCRIPTION": "an image",
+            "GITHUB_REPOSITORY": "org/repo",
+            "GITHUB_SERVER_URL": "https://github.com",
+            "GITHUB_OUTPUT": str(self.output),
+        }
+
+    def test_the_facts_are_derived_and_split(self) -> None:
+        """Stele's facts and epoch are outputs; its other lines print."""
+        self.stub("stele", FACTS)
+        done = self.run_script(self.SCRIPT, **self.env())
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(self.output.read_text("utf-8"), "facts=planted\nepoch=1\n")
+        self.assertEqual(done.stdout, "licence: MIT\n")
+        expected: list[list[str]] = [
+            strings(
+                "stele",
+                "derive",
+                "facts",
+                "--archetype",
+                "versioned",
+                "--version",
+                "1.2.3",
+                "--repo",
+                "org/repo",
+                "--server-url",
+                "https://github.com",
+                "--git-dir",
+                ".",
+                "--title",
+                "Repo",
+                "--description",
+                "an image",
+            )
+        ]
+        self.assertEqual(self.calls(), expected)
+
+    def test_no_stele_is_refused_by_name(self) -> None:
+        """No stele on the runner: one finding, nothing written."""
+        done = self.run_bare(self.SCRIPT, **self.env())
+        self.assertEqual((done.returncode, done.stdout), (1, ""), done.stderr)
+        self.assertEqual(done.stderr, NO_STELE.format("derive-facts.sh"))
+        self.assertEqual(self.output.read_text("utf-8"), "")
+
+
+class UnpackGoLegs(Helper):
+    """release/unpack-go-legs.sh: publish.yml's go-binary unpack (#1934)."""
+
+    SCRIPT = CANON / "release" / "unpack-go-legs.sh"
+
+    def unpack(self) -> subprocess.CompletedProcess[str]:
+        """Run the unpack with a fresh GITHUB_ENV.
+
+        Returns:
+            The finished process.
+
+        """
+        self.github_env = self.root / "github-env"
+        self.github_env.write_text("", "utf-8")
+        (self.work / "shipped-archives").mkdir(exist_ok=True)
+        return self.run_script(self.SCRIPT, GITHUB_ENV=str(self.github_env))
+
+    def archive(self, leg: str) -> None:
+        """Pack one leg's archive holding a `tool` command."""
+        src = self.root / "src" / leg
+        src.mkdir(parents=True)
+        (src / "tool").write_text(leg, "utf-8")
+        (self.work / "shipped-archives").mkdir(exist_ok=True)
+        out = self.work / "shipped-archives" / f"{leg}.tar.gz"
+        with tarfile.open(out, "w:gz") as packed:
+            packed.add(src / "tool", arcname="tool")
+
+    def test_each_leg_gets_its_own_directory(self) -> None:
+        """Two legs shipping one basename both survive."""
+        for leg in ("tool_linux_amd64", "tool_linux_arm64"):
+            self.archive(leg)
+        done = self.unpack()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        for leg in ("tool_linux_amd64", "tool_linux_arm64"):
+            tool = self.work / "shipped" / leg / "tool"
+            self.assertEqual(tool.read_text("utf-8"), leg)
+        self.assertEqual(
+            self.github_env.read_text("utf-8"),
+            f"BINARIES_DIR={self.work.resolve()}/shipped\n",
+        )
+
+    def test_no_archive_is_refused_by_name(self) -> None:
+        """An artifact with no archive: one finding, no BINARIES_DIR."""
+        done = self.unpack()
+        self.assertEqual((done.returncode, done.stdout), (1, ""), done.stderr)
+        self.assertEqual(
+            done.stderr,
+            "::error::unpack-go-legs.sh: the go-binary build artifact holds no"
+            " archives\n",
+        )
+        self.assertEqual(self.github_env.read_text("utf-8"), "")
+
+
+class DeriveVex(Helper):
+    """release/derive-vex.sh: publish.yml's VEX gate (#1934)."""
+
+    SCRIPT = CANON / "release" / "derive-vex.sh"
+
+    @staticmethod
+    def env(basename: str) -> dict[str, str]:
+        """Name the step's inputs.
+
+        Returns:
+            The variables.
+
+        """
+        return {
+            "VERSION": "1.2.3",
+            "SBOM_BASENAME": basename,
+            "SBOM_CREATED": "2026-11-22T00:00:00Z",
+            "GITHUB_REPOSITORY": "org/.repo",
+        }
+
+    def test_the_policies_and_the_release_view_are_named(self) -> None:
+        """No basename: the repository's name, its leading dot dropped."""
+        self.stub("stele")
+        done = self.run_script(self.SCRIPT, **self.env(""))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        canon = str(CANON.resolve())
+        expected: list[list[str]] = [
+            strings(
+                "stele",
+                "derive",
+                "vex",
+                "--policy",
+                f"{canon}/slsa/assert-policy.json",
+                "--verify-policy",
+                f"{canon}/slsa/verify-policy.json",
+                "--inventories",
+                "dist",
+                "--release-view",
+                "dist/repo-1.2.3.spdx.json",
+                "--vex",
+                f"{canon}/security/vex",
+                "--repo",
+                "org/.repo",
+                "--version",
+                "1.2.3",
+                "--released",
+                "2026-11-22T00:00:00Z",
+                "--out",
+                "dist/repo-1.2.3.vex.openvex.json",
+            )
+        ]
+        self.assertEqual(self.calls(), expected)
+
+    def test_a_basename_names_the_documents(self) -> None:
+        """A declared basename is the documents' name."""
+        self.stub("stele")
+        done = self.run_script(self.SCRIPT, **self.env("edtf"))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        argv = self.calls()[0]
+        self.assertIn("dist/edtf-1.2.3.spdx.json", argv)
+        self.assertIn("dist/edtf-1.2.3.vex.openvex.json", argv)
+
+    def test_no_stele_is_refused_by_name(self) -> None:
+        """No stele on the runner: one finding."""
+        done = self.run_bare(self.SCRIPT, **self.env(""))
+        self.assertEqual((done.returncode, done.stdout), (1, ""), done.stderr)
+        self.assertEqual(done.stderr, NO_STELE.format("derive-vex.sh"))
 
 
 if __name__ == "__main__":

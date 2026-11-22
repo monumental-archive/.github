@@ -17,13 +17,15 @@ set -euo pipefail
 : "${RUNNER_TEMP:?}"
 : "${GITHUB_ENV:?}"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-# The canon's one writer of workflow commands (#1660), in this tree.
-# shellcheck source=mise/workflow-command.sh
-. "${root}/mise/workflow-command.sh"
+# The canon's finding writer (#1890, #1934), in this tree: it reports
+# through the one writer of workflow commands (#1660) beside it. No task
+# runs this script, so a finding names the script's own file name.
+# shellcheck source=mise/findings.sh
+. "${root}/mise/findings.sh"
 case "${SA_STAGE:-}" in
   claims | attest) ;;
   *)
-    org_error "source-attest stage must be 'claims' or 'attest', got '${SA_STAGE:-}' (#240)"
+    org_finding_annotated "" "source-attest stage must be 'claims' or 'attest', got '${SA_STAGE:-}' (#240)"
     exit 1
     ;;
 esac
@@ -35,14 +37,14 @@ case "${root}" in
     if [[ ${GITHUB_REPOSITORY} != "monumental-archive/.github" ]]; then
       emsg="source-attest resolved to '${root}' in ${GITHUB_REPOSITORY} — not an _actions path and not a canon"
       emsg+=" self-call"
-      org_error "${emsg}"
+      org_finding_annotated "" "${emsg}"
       exit 1
     fi
     canon_ref="${GITHUB_SHA}"
     ;;
 esac
 if [[ ! -f "${root}/slsa/verify-policy.json" ]]; then
-  org_error "resolved canon tree at '${root}' has no slsa/verify-policy.json"
+  org_finding_annotated "" "resolved canon tree at '${root}' has no slsa/verify-policy.json"
   exit 1
 fi
 work="${RUNNER_TEMP}/source-attest"

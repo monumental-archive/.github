@@ -263,8 +263,8 @@ jobs:
       - name: Assert the SBOM arrived
         run: |
           set -euo pipefail
-          # The canon's one writer of workflow commands (#1660).
-          . .org-canon/mise/workflow-command.sh
+          # The canon's finding writer (#1934), and its workflow commands (#1660).
+          . .org-canon/mise/findings.sh
           # Generation moved to the publish orchestrator's sbom job (and,
           # for images, the build's pull-back step) — class-shaped, derived
           # from what actually ships (docs/dependency-track.md). This job
@@ -278,12 +278,12 @@ jobs:
           # at generation now; this assertion is the backstop.
           n=$(find dist -maxdepth 1 -name "*.spdx.json" | wc -l | tr -d " ")
           if [[ ${n} -eq 0 ]]; then
-            org_error "no SBOM in dist — the sbom job should have delivered one"
+            org_finding_annotated "" "no SBOM in dist — the sbom job should have delivered one"
             exit 1
           fi
           hidden=$(find dist -maxdepth 1 -name ".*" -type f | wc -l | tr -d " ")
           if [[ ${hidden} -ne 0 ]]; then
-            org_error "dotfile in dist — dist/* globs and the checksum loop would silently skip it"
+            org_finding_annotated "" "dotfile in dist — dist/* globs and the checksum loop would silently skip it"
             exit 1
           fi
           org_notice "${n} SBOM(s) in the bundle"
@@ -344,13 +344,15 @@ jobs:
       - name: Checksum everything that ships
         run: |
           set -euo pipefail
+          # The canon's finding writer (#1934), and its workflow commands (#1660).
+          . .org-canon/mise/findings.sh
           cd dist
           # Never written into the directory it hashes (#1196): the
           # redirect belongs to sed, both halves start together, and a
           # checksums.txt created before the glob expands was listed at
           # the empty-file digest (release-lab v0.28.1).
           [[ ! -e checksums.txt ]] || {
-            echo "::error::dist/checksums.txt exists before it is written"
+            org_finding_annotated "" "dist/checksums.txt exists before it is written"
             exit 1
           }
           sha256sum ./* | sed 's| \./| |' > "${RUNNER_TEMP}/checksums.txt"

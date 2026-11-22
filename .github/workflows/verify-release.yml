@@ -306,8 +306,13 @@ jobs:
       # source mode refuses one, as verdict mode does.
       - name: Refuse a rehearsal
         if: inputs.mode == 'source' && inputs.dry-run
+        env:
+          CANON_PATH: ${{ steps.canon.outputs.path }}
         run: |
-          echo "::error::a rehearsal has no release to carry a source verdict — refusing a dry-run"
+          set -euo pipefail
+          # The canon's finding writer (#1934), and its workflow commands (#1660).
+          . "${CANON_PATH}/mise/findings.sh"
+          org_finding_annotated "" "a rehearsal has no release to carry a source verdict — refusing a dry-run"
           exit 1
 
       # The history a source verdict is proven and read against: every
@@ -347,9 +352,11 @@ jobs:
           MISE_LOCKED: "1"
         run: |
           set -euo pipefail
+          # The canon's finding writer (#1934), and its workflow commands (#1660).
+          . "${CANON_PATH}/mise/findings.sh"
           machinery=$(awk '/^version:/{print $2; exit}' "${CANON_PATH}/CITATION.cff")
           [[ -n ${machinery} ]] || {
-            echo "::error::the pinned canon tree's CITATION.cff names no version — the owed epochs cannot be judged"
+            org_finding_annotated "" "the pinned canon tree's CITATION.cff names no version — the owed epochs cannot be judged"
             exit 1
           }
           asset=$(jq -r '.evidence.sourceVerdictBundle // empty' "${CANON_PATH}/slsa/assert-policy.json")
@@ -377,7 +384,12 @@ jobs:
           MISE_LOCKED: "1"
         run: |
           set -euo pipefail
-          [[ -n ${ASSET} ]] || { echo "::error::the assert policy names no sourceVerdictBundle" && exit 1; }
+          # The canon's finding writer (#1934), and its workflow commands (#1660).
+          . "${CANON_PATH}/mise/findings.sh"
+          [[ -n ${ASSET} ]] || {
+            org_finding_annotated "" "the assert policy names no sourceVerdictBundle"
+            exit 1
+          }
           mkdir -p "${RUNNER_TEMP}/source-verdict"
           stele emit source-vsa --policy "${CANON_PATH}/slsa/verify-policy.json" \
             --assert-policy "${CANON_PATH}/slsa/assert-policy.json" --repo "${GITHUB_REPOSITORY}" \

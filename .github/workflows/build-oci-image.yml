@@ -389,10 +389,10 @@ jobs:
           UNTRUSTED_PREPARE: ${{ inputs.prepare }}
         run: |
           set -euo pipefail
-          # The canon's one writer of workflow commands (#1660).
-          . .org-canon/mise/workflow-command.sh
+          # The canon's finding writer (#1934), and its workflow commands (#1660).
+          . .org-canon/mise/findings.sh
           if [[ ! -x ${UNTRUSTED_PREPARE} ]]; then
-            org_error "prepare ${UNTRUSTED_PREPARE} is not executable"
+            org_finding_annotated "" "prepare ${UNTRUSTED_PREPARE} is not executable"
             exit 1
           fi
           "${UNTRUSTED_PREPARE}" "${ARCH}"
@@ -522,10 +522,10 @@ jobs:
           UNTRUSTED_SMOKE: ${{ inputs.smoke-test }}
         run: |
           set -euo pipefail
-          # The canon's one writer of workflow commands (#1660).
-          . .org-canon/mise/workflow-command.sh
+          # The canon's finding writer (#1934), and its workflow commands (#1660).
+          . .org-canon/mise/findings.sh
           if [[ ! -x ${UNTRUSTED_SMOKE} ]]; then
-            org_error "smoke-test ${UNTRUSTED_SMOKE} is not executable"
+            org_finding_annotated "" "smoke-test ${UNTRUSTED_SMOKE} is not executable"
             exit 1
           fi
           "${UNTRUSTED_SMOKE}" "oci-under-test:${ARCH}"

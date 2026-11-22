@@ -145,8 +145,8 @@ jobs:
       - name: Assert the caller pinned its build inputs
         run: |
           set -euo pipefail
-          # The canon's one writer of workflow commands (#1660).
-          . .org-canon/mise/workflow-command.sh
+          # The canon's finding writer (#1934), and its workflow commands (#1660).
+          . .org-canon/mise/findings.sh
           # Build inputs live in the caller's mise config, like its rust
           # toolchain. Nothing is installed ad hoc here: an unpinned tool in
           # a signing pipeline is the thing the whole toolbelt design
@@ -155,7 +155,7 @@ jobs:
             command -v "${tool}" > /dev/null || {
               emsg="${tool} not found — pin it in this repository's mise config; it is a build input of the"
               emsg+=" wasm-npm class"
-              org_error "${emsg}"
+              org_finding_annotated "" "${emsg}"
               exit 1
             }
           done
@@ -166,18 +166,18 @@ jobs:
           UNTRUSTED_CRATE_DIR: ${{ inputs.crate-dir }}
         run: |
           set -euo pipefail
-          # The canon's one writer of workflow commands (#1660).
-          . .org-canon/mise/workflow-command.sh
+          # The canon's finding writer (#1934), and its workflow commands (#1660).
+          . .org-canon/mise/findings.sh
           meta=$(cargo metadata --no-deps --format-version 1 \
             --manifest-path "${UNTRUSTED_CRATE_DIR}/Cargo.toml")
           manifest=$(jq -r '[.packages[].version] | unique | .[]' <<< "${meta}")
           versions=$(wc -l <<< "${manifest}")
           if [[ ${versions} -ne 1 ]]; then
-            org_error "workspace members disagree on version; canon is [workspace.package] inheritance"
+            org_finding_annotated "" "workspace members disagree on version; canon is [workspace.package] inheritance"
             exit 1
           fi
           if [[ ${manifest} != "${UNTRUSTED_VERSION}" ]]; then
-            org_error "tag says ${UNTRUSTED_VERSION}, manifest says ${manifest}"
+            org_finding_annotated "" "tag says ${UNTRUSTED_VERSION}, manifest says ${manifest}"
             exit 1
           fi
       - name: Test
