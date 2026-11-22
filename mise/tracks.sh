@@ -19,8 +19,17 @@
 # is written at fix:tracks, the task that names this script.
 set -euo pipefail
 
+# The writer beside this file, found with no command run (#1934).
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${org__here}/findings.sh"
+unset org__here
+# The task this script reports for, where mise named none (#1934).
+: "${MISE_TASK_NAME:=fix:tracks}"
+
 command -v taplo > /dev/null || {
-  echo "fix:tracks: taplo missing from the belt" >&2
+  org_finding "" "taplo missing from the belt"
   exit 1
 }
 render() { # doc, marker, header-row, jq-rows-program, json

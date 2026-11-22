@@ -16,6 +16,12 @@
 # collected from, so every line read as zero (#1652). The rust leg now
 # leaves the extension out, and `test:pgrx` measures it, each major's
 # run built instrumented where the repository holds a floor.
+# The writer beside this file, found with no command run (#1934).
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${org__here}/findings.sh"
+unset org__here
 
 org_pgrx_highest() { # usage: org_pgrx_highest < gate_surface.py's records
   # WHICH MAJOR EACH EXTENSION IS BUILT AT, derived once (#1795). The
@@ -48,7 +54,7 @@ org_pgrx_union() { # usage: org_pgrx_union < org_pgrx_highest's lines
   while IFS=$'\t' read -r spec major; do
     [[ -n ${spec} || -n ${major} ]] || continue
     if [[ ! ${major} =~ ^[1-9][0-9]*$ ]]; then
-      echo "pgrx-env: ${spec} names no Postgres major: '${major}'" >&2
+      org_finding "" "${spec} names no Postgres major: '${major}'"
       return 1
     fi
     registered[major]=1
@@ -84,7 +90,7 @@ org_pgrx_darwin_flags() { # correct the SDK the prebuilt pg_config names
   kernel=$(uname -s)
   [[ ${kernel} == "Darwin" ]] || return 0
   sdk=$(xcrun --show-sdk-path 2> /dev/null) || {
-    echo "pgrx-env: xcrun could not name an SDK — install the Command Line Tools" >&2
+    org_finding "" "xcrun could not name an SDK — install the Command Line Tools"
     return 1
   }
   export BINDGEN_EXTRA_CLANG_ARGS="-isysroot ${sdk} ${BINDGEN_EXTRA_CLANG_ARGS:-}"
@@ -141,7 +147,10 @@ org_pgrx_darwin_icu() { # usage: org_pgrx_darwin_icu <Postgres major>, in the su
   icu=$(org_pgrx_darwin_icu_of "$1") || return 1
   [[ -n ${icu} ]] || return 0
   where=$(org_pgrx_darwin_icu_headers "${icu}" "$1") || rc=$?
-  [[ ${rc} -ne 3 ]] || org_pgrx_darwin_icu_pin "${icu}" >&2
+  if [[ ${rc} -eq 3 ]]; then
+    # The finding, the pin to add as its last detail lines: one call.
+    org__pgrx_icu_findings "${where}" "${icu}" || return 1
+  fi
   [[ ${rc} -eq 0 ]] || return 1
   local include="-I${where}/source/common -I${where}/source/i18n"
   export BINDGEN_EXTRA_CLANG_ARGS="${include} ${BINDGEN_EXTRA_CLANG_ARGS:-}"
@@ -154,7 +163,7 @@ org_pgrx_darwin_icu_check() { # usage: org_pgrx_darwin_icu_check <Postgres major
   # rather than a red per major found one compile at a time. The per-call
   # org_pgrx_darwin_icu still refuses on its own, so this is a shortcut,
   # never the only guard.
-  local kernel major icu rc failed=0 seen="" missing=()
+  local kernel major icu rc out failed=0 seen="" missing=() found=()
   kernel=$(uname -s)
   [[ ${kernel} == "Darwin" ]] || return 0
   for major in ${1//,/ }; do
@@ -165,11 +174,16 @@ org_pgrx_darwin_icu_check() { # usage: org_pgrx_darwin_icu_check <Postgres major
     fi
     seen="${seen} ${icu}"
     rc=0
-    org_pgrx_darwin_icu_headers "${icu}" "${major}" > /dev/null || rc=$?
-    [[ ${rc} -ne 3 ]] || missing+=("${icu}")
+    out=$(org_pgrx_darwin_icu_headers "${icu}" "${major}") || rc=$?
+    if [[ ${rc} -eq 3 ]]; then
+      missing+=("${icu}")
+      found+=("${out}")
+    fi
     [[ ${rc} -eq 0 ]] || failed=1
   done
-  [[ ${#missing[@]} -eq 0 ]] || org_pgrx_darwin_icu_pin "${missing[@]}" >&2
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    org__pgrx_icu_findings "$(printf '%s\n' "${found[@]}")" "${missing[@]}" || return 1
+  fi
   return "${failed}"
 }
 
@@ -222,8 +236,10 @@ org_pgrx_darwin_icu_of() { # usage: org_pgrx_darwin_icu_of <Postgres major>; pri
 org_pgrx_darwin_icu_headers() { # usage: org_pgrx_darwin_icu_headers <ICU major> <Postgres major>
   # Prints the install path of the pinned ICU of that major, its headers
   # checked. Red otherwise with the reason, and status 3 when the remedy
-  # is a pin to add, which the caller prints for every missing major at
-  # once (org_pgrx_darwin_icu_pin).
+  # is a pin to add: then it prints the finding itself on stdout as one
+  # line for org_finding_lines (#1934), and the caller appends the pin
+  # for every missing major at once (org_pgrx_darwin_icu_pin) as its
+  # detail.
   local listing pinned version where
   listing=$(mise ls "github:unicode-org/icu" --json) || return 1
   pinned=$(jq -r '[.[] | select(.active and .installed) | .version] | join(" ")' <<< "${listing}") || return 1
@@ -233,20 +249,38 @@ org_pgrx_darwin_icu_headers() { # usage: org_pgrx_darwin_icu_headers <ICU major>
     | select(((.version // "") | split(".")[0]) == $major)] | last | .install_path // empty' <<< "${listing}") || return 1
   if [[ -z ${version} || -z ${where} ]]; then
     if [[ -z ${pinned} ]]; then
-      echo "pgrx-env: pg$2 was built against ICU $1, and mise.toml pins no ICU headers —" >&2
-      echo "  the prebuilt Postgres ships none, and pgrx binds every Postgres header from 0.19.3" >&2
+      printf '\037%s\037%s\n' "pg$2 was built against ICU $1, and mise.toml pins no ICU headers —" \
+        "the prebuilt Postgres ships none, and pgrx binds every Postgres header from 0.19.3"
     else
-      echo "pgrx-env: pg$2 was built against ICU $1; mise.toml pins ICU ${pinned} and no $1.x —" >&2
-      echo "  the headers must be the major the shipped dylibs are, one pin per ICU major" >&2
+      printf '\037%s\037%s\n' "pg$2 was built against ICU $1; mise.toml pins ICU ${pinned} and no $1.x —" \
+        "the headers must be the major the shipped dylibs are, one pin per ICU major"
     fi
     return 3
   fi
   if [[ ! -f ${where}/source/common/unicode/utypes.h || ! -f ${where}/source/i18n/unicode/ucol.h ]]; then
-    echo "pgrx-env: ICU ${version} at ${where} carries no headers under source/common and source/i18n" >&2
-    echo "  the pin must be ICU's SOURCE archive (asset_pattern = \"icu4c-*-sources.tgz\")" >&2
+    org_finding "" "ICU ${version} at ${where} carries no headers under source/common and source/i18n" \
+      "the pin must be ICU's SOURCE archive (asset_pattern = \"icu4c-*-sources.tgz\")"
     return 1
   fi
   echo "${where}"
+}
+
+org__pgrx_icu_findings() { # usage: org__pgrx_icu_findings <finding lines> <ICU majors to add…>
+  # The headers' findings, one per line, through the writer, the pin to
+  # add appended as the last one's detail (#1934): the remedy belongs to
+  # the finding, so it is that call's detail, not a line of its own.
+  local findings=$1 pin line last
+  shift
+  pin=$(org_pgrx_darwin_icu_pin "$@") || return 1
+  last=${findings##*$'\n'}
+  while IFS= read -r line; do
+    last+=$'\037'"${line#  }"
+  done <<< "${pin}"
+  if [[ ${findings} == *$'\n'* ]]; then
+    org_finding_lines <<< "${findings%$'\n'*}"$'\n'"${last}"
+  else
+    org_finding_lines <<< "${last}"
+  fi
 }
 
 org_pgrx_darwin_icu_pin() { # usage: org_pgrx_darwin_icu_pin <ICU majors to add…>
@@ -285,12 +319,12 @@ org_pgrx_init() { # usage: org_pgrx_init < records from pgrx_postgres.py
     args+=("--pg${major}" "${where}")
   done
   if [[ ${#args[@]} -eq 0 ]]; then
-    echo "pgrx-env: no Postgres to register — the plan was empty" >&2
+    org_finding "" "no Postgres to register — the plan was empty"
     return 1
   fi
   command -v cargo-pgrx > /dev/null || {
-    echo "pgrx-env: cargo-pgrx missing — a pgrx crate pins it as a build input:" >&2
-    echo '  "cargo:cargo-pgrx" = "0.19.2"   # must equal the pgrx dependency' >&2
+    org_finding "" "cargo-pgrx missing — a pgrx crate pins it as a build input:" \
+      '"cargo:cargo-pgrx" = "0.19.2"   # must equal the pgrx dependency'
     return 1
   }
   # ONE INIT AT A TIME. `ci` starts every task that needs a Postgres

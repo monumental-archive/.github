@@ -31,6 +31,13 @@
 #
 # One step per assignment, never a pipeline inside `$(...)`: a sourced
 # file cannot rely on its caller's pipefail.
+# The writer beside this file, found with no command run (#1934).
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${org__here}/findings.sh"
+unset org__here
+
 org_rust_coverage_env() {
   local label="$1" metadata target compiler envs
   # The belt Python names the compiler (#1877): refused first, as every
@@ -39,7 +46,7 @@ org_rust_coverage_env() {
   metadata=$(cargo metadata --no-deps --format-version 1 --locked) || return 1
   target=$(jq -r '.target_directory // empty' <<< "${metadata}") || return 1
   if [[ -z ${target} ]]; then
-    echo "${label}: cargo metadata named no target_directory — nowhere to measure Rust into" >&2
+    MISE_TASK_NAME="${label}" org_finding "" "cargo metadata named no target_directory — nowhere to measure Rust into"
     return 1
   fi
   compiler=$("${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/gate_cache_key.py" digest) || return 1

@@ -11,6 +11,15 @@
 # naming no leg is red, never a run of nothing.
 set -euo pipefail
 
+# The writer beside this file, found with no command run (#1934).
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${org__here}/findings.sh"
+unset org__here
+# The task this script reports for, where mise named none (#1934).
+: "${MISE_TASK_NAME:=audit:mutants}"
+
 belt="${ORG_BELT_DIR:?unset — no belt}"
 red=""
 ran=""
@@ -24,10 +33,10 @@ leg python
 leg rust
 leg typescript
 if [[ -n ${MUTANTS_LEG:-} && -z ${ran} ]]; then
-  echo "audit:mutants: MUTANTS_LEG='${MUTANTS_LEG}' names no leg (mise/mutants-<language>.sh)" >&2
+  org_finding "" "MUTANTS_LEG='${MUTANTS_LEG}' names no leg (mise/mutants-<language>.sh)"
   exit 1
 fi
 if [[ -n ${red} ]]; then
-  echo "audit:mutants: red leg(s):${red}" >&2
+  org_finding "" "red leg(s):${red}"
   exit 1
 fi

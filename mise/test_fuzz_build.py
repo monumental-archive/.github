@@ -178,8 +178,10 @@ NO_CORPUS_REMEDY = (
 CRASHED = (
     "lint:fuzz-build: fuzz target '{target}' fails on its committed corpus "
     "— libFuzzer says:\n"
-    "==1== ERROR: libFuzzer: deadly signal\n"
-    "SUMMARY: libFuzzer: deadly signal\n"
+)
+# libFuzzer's own report, passed through after the finding (#1934).
+LIBFUZZER_SAYS = (
+    "==1== ERROR: libFuzzer: deadly signal\nSUMMARY: libFuzzer: deadly signal\n"
 )
 CRASHED_REMEDY = (
     "  every tracked file under fuzz/corpus/<target>/ is replayed once; "
@@ -389,7 +391,9 @@ class FuzzBuild(unittest.TestCase):
         self.seed("round_trip", "b", "y")
         status, out, err, calls = self.run_lint()
         self.assertEqual((status, out), (1, ""))
-        self.assertEqual(err, CRASHED.format(target="parse") + CRASHED_REMEDY)
+        self.assertEqual(
+            err, CRASHED.format(target="parse") + CRASHED_REMEDY + LIBFUZZER_SAYS
+        )
         self.assertEqual(self.seeded(calls), BOTH_SEEDED)
 
     def test_the_replay_reads_a_directory_outside_the_tree(self) -> None:

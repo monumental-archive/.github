@@ -19,6 +19,15 @@
 # run goes on to the next, so one crash never hides another's finds.
 set -uo pipefail
 
+# The writer beside this file, found with no command run (#1934).
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${org__here}/findings.sh"
+unset org__here
+# The task this script reports for, where mise named none (#1934).
+: "${MISE_TASK_NAME:=audit:go-fuzz}"
+
 # The scratch directory and the seeds placed in the tree are removed
 # however the run ends (completion-guarded, #1233).
 work=""
@@ -39,9 +48,9 @@ budget=1800
 unknown() {
   local in=""
   [[ -z ${FUZZ_PACKAGE:-} ]] || in=" in '${FUZZ_PACKAGE}'"
-  echo "$1: FUZZ_TARGET '${FUZZ_TARGET}'${in} is no fuzz target $2" >&2
-  echo "  repo-deep-tests.yml's matrix lists the targets audit_legs.py reads from the tree;" >&2
-  echo "  a local run names one of the targets, or leaves FUZZ_TARGET unset to run every one" >&2
+  MISE_TASK_NAME=$1 org_finding "" "FUZZ_TARGET '${FUZZ_TARGET}'${in} is no fuzz target $2" \
+    "repo-deep-tests.yml's matrix lists the targets audit_legs.py reads from the tree;" \
+    "a local run names one of the targets, or leaves FUZZ_TARGET unset to run every one"
   exit 1
 }
 
@@ -71,7 +80,7 @@ list_dir() {
 }
 
 command -v go > /dev/null || {
-  echo "audit:go-fuzz: go.mod present but go missing — pin go in mise.toml" >&2
+  org_finding "" "go.mod present but go missing — pin go in mise.toml"
   exit 1
 }
 # The target's whole budget, half to each pass.
@@ -179,9 +188,9 @@ done <<< "${mods}"
 }
 [[ -n ${ORG_FUZZ_CANDIDATES:-} ]] || echo "audit:go-fuzz: staged under ${org_fuzz_stage}"
 if [[ -n ${failed} ]]; then
-  echo "audit:go-fuzz: failing target(s):${failed}" >&2
-  echo "  a failing input is staged as testdata/fuzz/<Target>/crash-<name> for repo-deep-tests.yml" >&2
-  echo "  to propose; its original name is in the output above" >&2
+  org_finding "" "failing target(s):${failed}" \
+    "a failing input is staged as testdata/fuzz/<Target>/crash-<name> for repo-deep-tests.yml" \
+    "to propose; its original name is in the output above"
   exit 1
 fi
 echo "audit:go-fuzz: ${ran} target(s) ran ${half}s plain and ${half}s raced, clean"

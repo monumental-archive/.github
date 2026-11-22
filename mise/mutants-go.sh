@@ -62,6 +62,15 @@
 # `go list` order and, given MUTANTS_SUMMARY_DIR, writes its counts to
 # go.tsv there (creating it) for the job that states the totals.
 set -euo pipefail
+
+# The writer beside this file, found with no command run (#1934).
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${org__here}/findings.sh"
+unset org__here
+# The task this script reports for, where mise named none (#1934).
+: "${MISE_TASK_NAME:=audit:mutants}"
 : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
 
 label="audit:mutants: go"
@@ -74,7 +83,7 @@ k=0
 n=1
 if [[ -n ${shard} ]]; then
   if [[ ! ${shard} =~ ^([0-9]+)/([1-9][0-9]*)$ ]] || ((BASH_REMATCH[1] >= BASH_REMATCH[2])); then
-    echo "${label}: MUTANTS_SHARD='${shard}' is not k/n with k < n" >&2
+    org_finding "go" "MUTANTS_SHARD='${shard}' is not k/n with k < n"
     exit 1
   fi
   k="${BASH_REMATCH[1]}"
@@ -99,23 +108,26 @@ while IFS= read -r f; do
   patterns+="${hits:+${hits}$'\n'}"
 done <<< "${ignores}"
 if [[ -n ${patterns} ]]; then
-  printf '%s' "${patterns}" | sed "s/^/${label}: pattern in /" >&2
-  echo "  a ${adoption} pattern drops whole files from the run and the count;" >&2
-  echo "  record an equivalent mutant at its site instead: //mutants:equivalent <type> <reason>" >&2
+  while IFS= read -r hit; do
+    [[ -n ${hit} ]] || continue
+    org_finding "go" "pattern in ${hit}" \
+      "a ${adoption} pattern drops whole files from the run and the count;" \
+      "record an equivalent mutant at its site instead: //mutants:equivalent <type> <reason>"
+  done <<< "${patterns}"
   exit 1
 fi
 
 if ! git ls-files --error-unmatch -- go.mod > /dev/null 2>&1; then
-  echo "${label}: ${adoption} is tracked but no go.mod beside it" >&2
+  org_finding "go" "${adoption} is tracked but no go.mod beside it"
   exit 1
 fi
 command -v go > /dev/null || {
-  echo "${label}: ${adoption} is tracked but go is missing — pin go in mise.toml" >&2
+  org_finding "go" "${adoption} is tracked but go is missing — pin go in mise.toml"
   exit 1
 }
 gomu_bin=$(command -v gomu) || {
-  echo "${label}: gomu missing — the belt pins it lazy; install it by name:" >&2
-  echo "    mise install go:github.com/sivchari/gomu/cmd/gomu" >&2
+  org_finding "go" "gomu missing — the belt pins it lazy; install it by name:" \
+    "  mise install go:github.com/sivchari/gomu/cmd/gomu"
   exit 1
 }
 # The binary itself, never mise's shim. A shim runs gomu under mise's own
@@ -127,7 +139,8 @@ gomu_bin=$(command -v gomu) || {
 target=$(readlink "${gomu_bin}" || true)
 if [[ ${target##*/} == mise ]]; then
   gomu_bin=$(mise which gomu) || {
-    echo "${label}: gomu resolves to a mise shim and \`mise which gomu\` names no binary" >&2
+    # shellcheck disable=SC2016  # the backticks quote a command in prose
+    org_finding "go" 'gomu resolves to a mise shim and `mise which gomu` names no binary'
     exit 1
   }
 fi
@@ -137,7 +150,7 @@ PATH="${goroot}/bin:${PATH}"
 export PATH
 resolved=$(command -v go)
 if [[ ${resolved} != "${goroot}/bin/go" ]]; then
-  echo "${label}: go resolves to ${resolved}, not ${goroot}/bin/go" >&2
+  org_finding "go" "go resolves to ${resolved}, not ${goroot}/bin/go"
   exit 1
 fi
 
@@ -194,7 +207,7 @@ if [[ ${#pkgs[@]} -gt 0 ]]; then
     > "${scratch}/baseline.log" 2>&1 || status=$?
   if [[ ${status} -ne 0 ]]; then
     cat "${scratch}/baseline.log" >&2
-    echo "${label}: the suite fails before any mutant (go test exited ${status})" >&2
+    org_finding "go" "the suite fails before any mutant (go test exited ${status})"
     exit 1
   fi
 fi

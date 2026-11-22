@@ -26,15 +26,15 @@
 # the call still returns 0: the finding was printed, and the report
 # falls back to the step's output. The task's status is the task's.
 #
-# `org_finding_lines` is for a program that cannot call a shell function,
-# an awk program above all (#1934): it prints one finding per line to
-# stdout, piped in. Its fields are the subject, the message, then each
-# detail line, separated by the unit separator (\037), never a tab: bash's
-# `read` collapses empty tab-separated fields, and an empty subject is a
-# field. Each line is one `org_finding` call. A line with no separator is
-# not a finding and goes to stdout through `org_say`, so the program's own
-# summary still prints and cannot open a workflow command. It returns 0; under pipefail the program's status
-# is the pipeline's.
+# `org_finding_lines` is for a program that cannot call a shell
+# function, an awk program above all (#1934): it prints one finding per
+# line to stdout, piped in. Its fields are the subject, the message, then
+# each detail line, separated by the unit separator (\037), never a tab:
+# bash's `read` collapses empty tab-separated fields, and an empty
+# subject is a field. Each line is one `org_finding` call. A line with no
+# separator is not a finding and goes to stdout through `org_say`, so the
+# program's own summary still prints and cannot open a workflow command.
+# It returns 0; under pipefail the program's status is the pipeline's.
 #
 # Loading this file runs no command (#1934): under BASH_ENV every bash
 # sources it, whatever its PATH holds, so the directory is found by

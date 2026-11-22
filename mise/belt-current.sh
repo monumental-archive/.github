@@ -8,6 +8,15 @@
 # nothing here for Renovate to bump.
 set -euo pipefail
 
+# The writer beside this file, found with no command run (#1934).
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${org__here}/findings.sh"
+unset org__here
+# The task this script reports for, where mise named none (#1934).
+: "${MISE_TASK_NAME:=lint:belt-current}"
+
 canon="${ORG_CANON_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
 status=0
 
@@ -22,28 +31,28 @@ older() {
 # 1. mise itself. It updates the tools and never updates itself.
 ci="${canon}/.github/workflows/ci.yml"
 if [[ ! -f ${ci} ]]; then
-  echo "belt-current: ${ci} is missing, so the mise version CI runs cannot" >&2
-  echo "  be read. The belt's canon tree is incomplete." >&2
+  org_finding "" "${ci} is missing, so the mise version CI runs cannot" \
+    "be read. The belt's canon tree is incomplete."
   exit 1
 fi
 want=$(awk '/uses: jdx\/mise-action@/ { seen = 1 }
   seen && /^[[:space:]]+version:/ { print $2; exit }' "${ci}")
 if [[ -z ${want} ]]; then
-  echo "belt-current: no mise-action version pin found in ${ci}" >&2
-  echo "  (lint:installer-pinned requires one), so there is nothing to compare." >&2
+  org_finding "" "no mise-action version pin found in ${ci}" \
+    "(lint:installer-pinned requires one), so there is nothing to compare."
   exit 1
 fi
 have=$(mise --version 2> /dev/null | sed -n '1p' | cut -d ' ' -f 1)
 if [[ -z ${have} ]]; then
-  echo "belt-current: could not read this machine's mise version" >&2
+  org_finding "" "could not read this machine's mise version"
   exit 1
 fi
 # shellcheck disable=SC2310  # older's status is the answer, not an error
 if older "${have}" "${want}"; then
-  echo "belt-current: this machine runs mise ${have}; CI runs ${want}." >&2
-  echo "  mise keeps the tools current and never updates itself, and an older" >&2
-  echo "  mise reads the lockfile and the registry differently. Run:" >&2
-  echo "    mise self-update ${want}" >&2
+  org_finding "" "this machine runs mise ${have}; CI runs ${want}." \
+    "mise keeps the tools current and never updates itself, and an older" \
+    "mise reads the lockfile and the registry differently. Run:" \
+    "  mise self-update ${want}"
   status=1
 elif [[ ${have} != "${want}" ]]; then
   echo "belt-current: note — mise ${have} here is newer than CI's ${want}"
@@ -76,22 +85,22 @@ elif [[ -n ${sha} ]]; then
   want="${XDG_CACHE_HOME:-${HOME}/.cache}/org-belt/${sha}"
   belt=$(cd -P "${want}" 2> /dev/null && pwd || echo "${want}")
   if [[ ${here} != "${belt}" ]]; then
-    echo "belt-current: the belt answering is ${canon}; this repository's gate" >&2
-    echo "  pins ${sha}${version:+ (v${version})}, whose belt is ${want}." >&2
+    detail=("pins ${sha}${version:+ (v${version})}, whose belt is ${want}.")
     if [[ ! -L .config/mise/conf.d/belt.toml ]]; then
-      echo "  This clone has no .config/mise/conf.d/belt.toml link. Run:" >&2
+      detail+=("This clone has no .config/mise/conf.d/belt.toml link. Run:")
     else
-      echo "  This clone's link names another tree. Run:" >&2
+      detail+=("This clone's link names another tree. Run:")
     fi
-    echo "    lefthook run post-checkout" >&2
+    org_finding "" "the belt answering is ${canon}; this repository's gate" \
+      "${detail[@]}" "  lefthook run post-checkout"
     status=1
   fi
 elif git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1; then
   belt=$(cd -P "${top}" && pwd)
   if [[ ${here} != "${belt}" ]]; then
-    echo "belt-current: this is the canon, and the belt answering is ${canon}," >&2
-    echo "  not this tree (${top}). The tree is its own belt: unset" >&2
-    echo "  MISE_GLOBAL_CONFIG_FILE, which is the one carrier ranked above it." >&2
+    org_finding "" "this is the canon, and the belt answering is ${canon}," \
+      "not this tree (${top}). The tree is its own belt: unset" \
+      "MISE_GLOBAL_CONFIG_FILE, which is the one carrier ranked above it."
     status=1
   fi
 fi

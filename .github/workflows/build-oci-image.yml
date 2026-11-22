@@ -247,8 +247,10 @@ jobs:
           # (#117: nothing unpinned on an attested path).
           version: 2026.11.8
           cache: false
-          # Only what this job's steps call (#1333).
-          install_args: github:monumental-archive/stele
+          # Only what this job's steps call (#1333): stele, and jq, which
+          # dockerfile-bases.sh's finding writer encodes a record with
+          # (#1934).
+          install_args: jq github:monumental-archive/stele
 
       - name: Verify every base before anything is built
         env:

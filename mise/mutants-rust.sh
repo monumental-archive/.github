@@ -41,6 +41,15 @@
 # alone and, given MUTANTS_SUMMARY_DIR, writes its counts to rust.tsv
 # there for the job that states the totals across shards.
 set -euo pipefail
+
+# The writer beside this file, found with no command run (#1934).
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${org__here}/findings.sh"
+unset org__here
+# The task this script reports for, where mise named none (#1934).
+: "${MISE_TASK_NAME:=audit:mutants}"
 : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
 
 label="audit:mutants: rust"
@@ -64,7 +73,7 @@ where=""
 sharding=()
 if [[ -n ${shard} ]]; then
   if [[ ! ${shard} =~ ^([0-9]+)/([1-9][0-9]*)$ ]] || ((BASH_REMATCH[1] >= BASH_REMATCH[2])); then
-    echo "${label}: MUTANTS_SHARD='${shard}' is not k/n with k < n" >&2
+    org_finding "rust" "MUTANTS_SHARD='${shard}' is not k/n with k < n"
     exit 1
   fi
   where=", shard ${shard}"
@@ -86,19 +95,19 @@ fi
 
 skips=$(git grep -n -e 'mutants::skip' -- ':!vendor/**' '*.rs' || true)
 if [[ -n ${skips} ]]; then
-  echo "${label}: #[mutants::skip] in the tree:" >&2
-  printf '  %s\n' "${skips}" >&2
-  echo "  record the site as an exclude_re entry in ${config}, under a # reason line" >&2
+  IFS=$'\n' read -r -d '' -a detail <<< "${skips}" || true
+  org_finding "rust" "#[mutants::skip] in the tree:" "${detail[@]}" \
+    "record the site as an exclude_re entry in ${config}, under a # reason line"
   exit 1
 fi
 
 command -v cargo > /dev/null || {
-  echo "${label}: ${config} present but cargo missing — pin rust in mise.toml" >&2
+  org_finding "rust" "${config} present but cargo missing — pin rust in mise.toml"
   exit 1
 }
 command -v cargo-mutants > /dev/null || {
-  echo "${label}: cargo-mutants missing — the belt pins it lazy; install it by name:" >&2
-  echo "    mise install cargo:cargo-mutants" >&2
+  org_finding "rust" "cargo-mutants missing — the belt pins it lazy; install it by name:" \
+    "  mise install cargo:cargo-mutants"
   exit 1
 }
 
@@ -195,7 +204,7 @@ for c in ${pgrx[@]+"${pgrx[@]}"}; do
 done
 
 if [[ ${#plain[@]} -eq 0 && ${#pgrx[@]} -eq 0 ]]; then
-  echo "${label}: ${config} tracked but no crate in the workspace" >&2
+  org_finding "rust" "${config} tracked but no crate in the workspace"
   exit 1
 fi
 

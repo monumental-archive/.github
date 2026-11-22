@@ -23,21 +23,30 @@
 # Invoked directly, never through a nested `mise run` (#82).
 set -euo pipefail
 
+# The writer beside this file, found with no command run (#1934).
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${org__here}/findings.sh"
+unset org__here
+
 # The caller's name, so a remedy printed here names the task the session
 # actually ran.
 label="${1:-coverage:go-branches}"
+# The task this script reports for, where mise named none (#1934).
+: "${MISE_TASK_NAME:=${label}}"
 
 if [[ ! -f go.mod ]]; then
-  echo "${label}: no go.mod — the go-branches leg measures a Go module" >&2
+  org_finding "" "no go.mod — the go-branches leg measures a Go module"
   exit 1
 fi
 if ! command -v go > /dev/null; then
-  echo "${label}: go.mod present but go missing — pin go in mise.toml" >&2
+  org_finding "" "go.mod present but go missing — pin go in mise.toml"
   exit 1
 fi
 gobco_bin=$(command -v gobco) || {
-  echo "${label}: gobco missing — the belt pins it lazy; install it by name:" >&2
-  echo "    mise install go:github.com/rillig/gobco" >&2
+  org_finding "" "gobco missing — the belt pins it lazy; install it by name:" \
+    "  mise install go:github.com/rillig/gobco"
   exit 1
 }
 # The binary itself, never mise's shim: a shim runs gobco under mise's
@@ -46,7 +55,8 @@ gobco_bin=$(command -v gobco) || {
 target=$(readlink "${gobco_bin}" || true)
 if [[ ${target##*/} == mise ]]; then
   gobco_bin=$(mise which gobco) || {
-    echo "${label}: gobco resolves to a mise shim and \`mise which gobco\` names no binary" >&2
+    # shellcheck disable=SC2016  # the backticks quote a command in prose
+    org_finding "" 'gobco resolves to a mise shim and `mise which gobco` names no binary'
     exit 1
   }
 fi
@@ -59,7 +69,7 @@ PATH="${goroot}/bin:${PATH}"
 export PATH
 resolved=$(command -v go)
 if [[ ${resolved} != "${goroot}/bin/go" ]]; then
-  echo "${label}: go resolves to ${resolved}, not ${goroot}/bin/go" >&2
+  org_finding "" "go resolves to ${resolved}, not ${goroot}/bin/go"
   exit 1
 fi
 # gobco parses the source with the go/parser it was built with, so one
@@ -86,9 +96,9 @@ if awk -v b="${built}" -v r="${running}" '
     for (i = 1; i <= 3; i++) if (have[i] + 0 != need[i] + 0) exit !(have[i] + 0 < need[i] + 0)
     exit 1
   }'; then
-  echo "${label}: ${gobco_bin} was built with ${built:-an unreadable Go}, older than the ${running} it runs under —" >&2
-  echo "  rebuild it with the repository's go:" >&2
-  echo "    mise install go:github.com/rillig/gobco" >&2
+  org_finding "" "${gobco_bin} was built with ${built:-an unreadable Go}, older than the ${running} it runs under —" \
+    "rebuild it with the repository's go:" \
+    "  mise install go:github.com/rillig/gobco"
   exit 1
 fi
 # One package per call: gobco v1.3.4 panics on more than one ("checking
@@ -105,15 +115,15 @@ while IFS= read -r dir; do
   [[ -n ${dir} ]] || continue
   if ! out=$(cd "${dir}" && "${gobco_bin}" 2>&1); then
     printf '%s\n' "${out}" >&2
-    echo "${label}: gobco failed in ${dir#"${PWD}/"} — a suite that does not pass" >&2
-    echo "  under measurement cannot measure a floor" >&2
+    org_finding "" "gobco failed in ${dir#"${PWD}/"} — a suite that does not pass" \
+      "under measurement cannot measure a floor"
     exit 1
   fi
   printf '%s\n' "${out}" >&2
   count=$(awk '$1 == "Condition" && $2 == "coverage:" { print $3 }' <<< "${out}")
   if [[ ! ${count} =~ ^[0-9]+/[0-9]+$ ]]; then
-    echo "${label}: gobco printed no condition count in ${dir#"${PWD}/"} — a" >&2
-    echo "  measurement that reads nothing must not become a floor" >&2
+    org_finding "" "gobco printed no condition count in ${dir#"${PWD}/"} — a" \
+      "measurement that reads nothing must not become a floor"
     exit 1
   fi
   covered=$((covered + ${count%/*}))
@@ -121,8 +131,8 @@ while IFS= read -r dir; do
 done <<< "${dirs}"
 # 0 of 0 is the shape of a run that measured no conditions, never 0%.
 if [[ ${total} == 0 ]]; then
-  echo "${label}: gobco counted no conditions in any package — a" >&2
-  echo "  measurement that reads nothing must not become a floor" >&2
+  org_finding "" "gobco counted no conditions in any package — a" \
+    "measurement that reads nothing must not become a floor"
   exit 1
 fi
 go_br=$(awk -v c="${covered}" -v t="${total}" 'BEGIN { printf "%.16g\n", c * 100 / t }')

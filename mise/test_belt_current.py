@@ -153,7 +153,7 @@ class TheBeltIsThePinned(unittest.TestCase):
         self.assertEqual(done.returncode, 1, done.stdout)
         self.assertEqual(
             done.stderr,
-            f"belt-current: the belt answering is {belt}; this repository's gate\n"
+            f"lint:belt-current: the belt answering is {belt}; this repository's gate\n"
             f"  pins {PIN} (v1.2.0), whose belt is {self.cache / 'org-belt' / PIN}.\n"
             f"  {why} Run:\n"
             "    lefthook run post-checkout\n",
@@ -220,7 +220,8 @@ class TheBeltIsThePinned(unittest.TestCase):
         self.assertEqual(done.returncode, 1, done.stdout)
         self.assertEqual(
             done.stderr,
-            f"belt-current: this is the canon, and the belt answering is {other},\n"
+            "lint:belt-current: this is the canon, and the belt answering is"
+            f" {other},\n"
             f"  not this tree ({self.repo}). The tree is its own belt: unset\n"
             "  MISE_GLOBAL_CONFIG_FILE, which is the one carrier ranked above it.\n",
         )
@@ -247,7 +248,8 @@ class TheBeltIsThePinned(unittest.TestCase):
         self.assertEqual(done.returncode, 1, done.stdout)
         self.assertEqual(
             done.stderr,
-            f"belt-current: the belt answering is {other}; this repository's gate\n"
+            f"lint:belt-current: the belt answering is {other};"
+            " this repository's gate\n"
             f"  pins {PIN} (v1.2.0), whose belt is {self.cache / 'org-belt' / PIN}.\n"
             "  This clone's link names another tree. Run:\n"
             "    lefthook run post-checkout\n",

@@ -49,11 +49,19 @@
 #     lacks, and a file the head no longer tracks. An added line is not.
 set -euo pipefail
 
+# The writer beside this file, found with no command run (#1934).
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${org__here}/findings.sh"
+unset org__here
+
 label="break:check"
+# The task this script reports for, where mise named none (#1934).
+: "${MISE_TASK_NAME:=${label}}"
 : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
 [[ -n ${PR_TITLE+set} ]] || {
-  printf '%s%s\n' "${label}: PR_TITLE is unset — the gate step sets it from the pull request," \
-    " and without it there is no declaration to hold" >&2
+  org_finding "" "PR_TITLE is unset — the gate step sets it from the pull request, and without it there is no declaration to hold"
   exit 1
 }
 belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
@@ -73,12 +81,13 @@ fi
 parents=$(git rev-list --parents -n 1 HEAD | wc -w)
 parents=$((parents - 1))
 if [[ ${parents} -ne 2 ]]; then
-  printf '%s%s\n' "${label}: HEAD has ${parents} parent(s), not 2 — the gate checks out the pull request's merge commit," \
-    " whose first parent is the base it is measured against" >&2
+  why="HEAD has ${parents} parent(s), not 2 — the gate checks out the pull request's merge commit,"
+  why+=" whose first parent is the base it is measured against"
+  org_finding "" "${why}"
   exit 1
 fi
 command -v cargo > /dev/null || {
-  echo "${label}: Cargo.toml present but cargo missing — pin rust in mise.toml" >&2
+  org_finding "" "Cargo.toml present but cargo missing — pin rust in mise.toml"
   exit 1
 }
 
@@ -188,15 +197,19 @@ while IFS= read -r snapshot; do
 done <<< "${snapshots}"
 
 [[ ${#verdicts[@]} -eq 0 ]] || printf '%s\n' "${verdicts[@]}"
-[[ ${#unmeasured[@]} -eq 0 ]] || printf '%s\n' "${unmeasured[@]}" >&2
-[[ ${#breaks[@]} -eq 0 ]] || printf '%s\n' "${breaks[@]}" >&2
+# Each entry is one finding, written `<label>: <crate or snapshot>: <message>`.
+for entry in ${unmeasured[@]+"${unmeasured[@]}"} ${breaks[@]+"${breaks[@]}"}; do
+  entry=${entry#"${label}: "}
+  org_finding "${entry%%: *}" "${entry#*: }"
+done
 if [[ ${#breaks[@]} -gt 0 ]]; then
-  printf '%s%s%s\n' "${label}: red — the change breaks what the base offered and the title does not say so:" \
-    " declare it in the TITLE (type(scope)!: …) or with a 'BREAKING CHANGE: ' footer in the BODY," \
-    " and the release notes then list it" >&2
+  why="red — the change breaks what the base offered and the title does not say so:"
+  why+=" declare it in the TITLE (type(scope)!: …) or with a 'BREAKING CHANGE: ' footer in the BODY,"
+  why+=" and the release notes then list it"
+  org_finding "" "${why}"
 fi
 if [[ ${#unmeasured[@]} -gt 0 ]]; then
-  echo "${label}: red — a crate above could not be measured, and an unmeasured crate is never a pass" >&2
+  org_finding "" "red — a crate above could not be measured, and an unmeasured crate is never a pass"
 fi
 [[ ${#breaks[@]} -eq 0 && ${#unmeasured[@]} -eq 0 ]] || exit 1
 [[ ${#verdicts[@]} -gt 0 ]] || echo "${label}: no crate or schema snapshot to hold"

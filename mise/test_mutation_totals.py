@@ -51,6 +51,7 @@ class Totals(unittest.TestCase):
         return subprocess.run(
             [BASH, str(SCRIPT), str(self.dir), lang],
             cwd=self.dir.parent,
+            env=hermetic.env(),
             capture_output=True,
             text=True,
             check=False,
@@ -161,6 +162,7 @@ class Totals(unittest.TestCase):
         done = subprocess.run(
             [BASH, str(SCRIPT), str(self.dir)],
             cwd=self.dir.parent,
+            env=hermetic.env(),
             capture_output=True,
             text=True,
             check=False,

@@ -31,13 +31,20 @@
 # refuses that file before either caller's question arises.)
 set -euo pipefail
 
+# The writer beside this file, found with no command run (#1934).
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${org__here}/findings.sh"
+unset org__here
+
 f="${1:-}"
 if [[ -z ${f} ]]; then
-  echo "dockerfile-bases: usage: dockerfile-bases.sh <dockerfile>" >&2
+  org_finding "" "usage: dockerfile-bases.sh <dockerfile>"
   exit 2
 fi
 if [[ ! -r ${f} ]]; then
-  echo "dockerfile-bases: ${f} is not readable — a missing Dockerfile is a refusal, never an empty base list" >&2
+  org_finding "" "${f} is not readable — a missing Dockerfile is a refusal, never an empty base list"
   exit 2
 fi
 
@@ -57,7 +64,7 @@ while IFS= read -r line; do
     ref="${3:-}"
   fi
   if [[ -z ${ref} ]]; then
-    echo "dockerfile-bases: ${f}: a FROM line names no image: ${line}" >&2
+    org_finding "" "${f}: a FROM line names no image: ${line}"
     exit 2
   fi
   case "$(printf '%s' "${ref}" | tr '[:upper:]' '[:lower:]')" in

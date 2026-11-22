@@ -43,9 +43,18 @@
 # next one. It ends with one line per verdict and exits 1 if any is red.
 # No crate, major or feature name is written here.
 set -euo pipefail
+
+# The writer beside this file, found with no command run (#1934).
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${org__here}/findings.sh"
+unset org__here
 : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
 
 label="audit:semver"
+# The task this script reports for, where mise named none (#1934).
+: "${MISE_TASK_NAME:=${label}}"
 belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
 
 manifests=$(git ls-files ':!vendor/**' "Cargo.toml" "*/Cargo.toml")
@@ -54,7 +63,7 @@ manifests=$(git ls-files ':!vendor/**' "Cargo.toml" "*/Cargo.toml")
   exit 0
 }
 command -v cargo > /dev/null || {
-  echo "${label}: Cargo.toml present but cargo missing — pin rust in mise.toml" >&2
+  org_finding "" "Cargo.toml present but cargo missing — pin rust in mise.toml"
   exit 1
 }
 
@@ -166,6 +175,6 @@ done <<< "${population}"
 }
 printf '%s\n' "${verdicts[@]}"
 if [[ ${red} -ne 0 ]]; then
-  echo "${label}: red — every crate above was judged; fix the API or bump the major" >&2
+  org_finding "" "red — every crate above was judged; fix the API or bump the major"
   exit 1
 fi

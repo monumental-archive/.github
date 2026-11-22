@@ -39,17 +39,24 @@
 # empty list, because an empty list is indistinguishable from "this
 # repo defines no audits" — which is a green result. A check that
 # cannot enumerate says so (#568).
+# The writer beside this file, found with no command run (#1934).
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${org__here}/findings.sh"
+unset org__here
+
 own_audit_tasks() { # usage: own_audit_tasks -> zero or more names on stdout
   command -v jq > /dev/null 2>&1 || {
-    echo "own-audits: jq is not on PATH — it is a belt pin, so the belt did not arrive" >&2
+    org_finding "" "jq is not on PATH — it is a belt pin, so the belt did not arrive"
     return 1
   }
   : "${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
   local belt_config="${ORG_BELT_DIR}/config.toml"
   [[ -f ${belt_config} ]] || {
-    echo "own-audits: ${belt_config} missing — the belt's own task list is what" >&2
-    echo "  every other audit task is measured against; without it nothing can be" >&2
-    echo "  called this repository's own" >&2
+    org_finding "" "${belt_config} missing — the belt's own task list is what" \
+      "every other audit task is measured against; without it nothing can be" \
+      "called this repository's own"
     return 1
   }
   local belt raw
@@ -70,19 +77,19 @@ own_audit_tasks() { # usage: own_audit_tasks -> zero or more names on stdout
   # the one this function thinks it is reading, and every answer below
   # would be "all of them are yours".
   [[ -n ${belt} ]] || {
-    echo "own-audits: no audit:* tasks found in ${belt_config} — the belt config is" >&2
-    echo "  unreadable or has changed shape; refusing to call every audit task this" >&2
-    echo "  repository's own" >&2
+    org_finding "" "no audit:* tasks found in ${belt_config} — the belt config is" \
+      "unreadable or has changed shape; refusing to call every audit task this" \
+      "repository's own"
     return 1
   }
   local json all
   json=$(mise tasks ls --json) || {
-    echo "own-audits: 'mise tasks ls --json' failed — refusing to report an empty" >&2
-    echo "  audit set, which would read as 'this repository defines none'" >&2
+    org_finding "" "'mise tasks ls --json' failed — refusing to report an empty" \
+      "audit set, which would read as 'this repository defines none'"
     return 1
   }
   all=$(jq -r '[.[] | select(.name | startswith("audit:")) | .name] | sort | .[]' <<< "${json}") || {
-    echo "own-audits: could not read the task list" >&2
+    org_finding "" "could not read the task list"
     return 1
   }
   local own

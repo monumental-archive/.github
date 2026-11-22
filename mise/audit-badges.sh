@@ -26,17 +26,26 @@
 # as state, not as expected-red noise (dependency-track.md:46).
 set -euo pipefail
 
+# The writer beside this file, found with no command run (#1934).
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${org__here}/findings.sh"
+unset org__here
+# The task this script reports for, where mise named none (#1934).
+: "${MISE_TASK_NAME:=audit:badges}"
+
 # The ratcheted floors are this leg's own data, and the task's guard no
 # longer stands in for them (#738): a Scorecard shield judged against a
 # floor file that is not there is a badge nobody is checking.
 floors="security/scorecard-floors.txt"
 [[ -f ${floors} ]] || {
-  echo "audit:badges: on the canon, and the input this leg reads is missing: ${floors}" >&2
-  echo "  a canon-only audit reds on a missing input, never skips (#738)." >&2
+  org_finding "" "on the canon, and the input this leg reads is missing: ${floors}" \
+    "a canon-only audit reds on a missing input, never skips (#738)."
   exit 1
 }
 command -v gh > /dev/null || {
-  echo "audit:badges: gh missing" >&2
+  org_finding "" "gh missing"
   exit 1
 }
 : "${GITHUB_REPOSITORY_OWNER:?audit:badges walks an org the environment names (#579) — Actions sets it; a local run exports it}"
@@ -575,8 +584,8 @@ while read -r repo; do
   done <<< "${urls}"
 done <<< "${repos}"
 if [[ -n ${failed} ]]; then
-  echo "audit:badges: shield defects:${failed}" >&2
-  echo "  every shield must agree with its source of truth; fix the fact, the floor, or the badge" >&2
+  org_finding "" "shield defects:${failed}" \
+    "every shield must agree with its source of truth; fix the fact, the floor, or the badge"
   exit 1
 fi
 # The same law the legs enforce, applied to the walk itself: a check
@@ -584,7 +593,7 @@ fi
 # three SLSA shields, so zero here is always a broken walk, never a
 # quiet org.
 if ((checked == 0)); then
-  echo "audit:badges: walked the org and checked zero shields — the walk is broken, not the org" >&2
+  org_finding "" "walked the org and checked zero shields — the walk is broken, not the org"
   exit 1
 fi
 echo "audit:badges: ${checked} shield(s) checked, all agree with their issuers"
