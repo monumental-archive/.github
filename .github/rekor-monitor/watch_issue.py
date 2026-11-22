@@ -44,15 +44,15 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-# The canon's one writer of workflow commands (#1660) and its one keeper
-# of a standing issue (#1887), in mise/.
+# The canon's finding writer (#1890) and its one keeper of a standing
+# issue (#1887), in mise/.
 # Appended, so this file's own directory and the standard library
 # come first.
 sys.path.append(str(Path(__file__).resolve().parents[2] / "mise"))
 
 import decoded
+import findings
 import standing_issue
-import workflow_command
 
 TITLE = "rekor-monitor: the signer-identity watch is behind"
 EXIT_RED = 1
@@ -314,7 +314,7 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv, namespace=Args())
     repo = os.environ.get("GITHUB_REPOSITORY", "")
     if not repo:
-        print("standing-issue: GITHUB_REPOSITORY is not set", file=sys.stderr)
+        findings.finding("", "GITHUB_REPOSITORY is not set")
         return EXIT_ERROR
     start = read_checkpoint(args.start)
     end = read_checkpoint(args.checkpoint)
@@ -325,11 +325,11 @@ def main(argv: list[str]) -> int:
     try:
         done = keep(repo, outcome.standing, end, run)
     except standing_issue.StandingIssueError as err:
-        print(f"standing-issue: {err}; nothing was filed", file=sys.stderr)
+        findings.finding(repo, f"{err}; nothing was filed")
         return EXIT_ERROR
     print(f"standing-issue: {done}")
     if outcome.red:
-        workflow_command.error(outcome.why)
+        findings.finding("", outcome.why, annotate=True)
         return EXIT_RED
     print(f"standing-issue: green: {outcome.why}")
     return 0

@@ -10,21 +10,29 @@
 # passed through `pg_ctl -o` the shell eats them (measured), so the
 # settings go into postgresql.conf.
 set -euo pipefail
-# The canon's one writer of workflow commands (#1660): the copy the
-# container run mounts and names, or this tree's own on the runner.
-# shellcheck source=mise/workflow-command.sh
-. "${ORG_WORKFLOW_COMMAND:-$(dirname "${BASH_SOURCE[0]}")/../mise/workflow-command.sh}"
+# The canon's finding writer (#1934): the copy the container run mounts
+# and names, beside the workflow-command writer it sources, or this
+# tree's own on the runner, found with no command run.
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${ORG_FINDINGS_WRITER:-${org__here}/../mise/findings.sh}"
+unset org__here
 # The first control file in glob order, as `ls | sed -n 1p` picked it.
 controls=(/extensions/ext/share/extension/*.control)
 if [[ ! -e ${controls[0]} ]]; then
-  org_error "no extension control file under /extensions/ext/share/extension"
+  org_finding_annotated "" "no extension control file under /extensions/ext/share/extension"
   exit 1
 fi
 ext=$(basename "${controls[0]}" .control)
 found=$(find /usr/lib/postgresql /usr/share/postgresql -name "${ext}*")
 if [[ -n ${found} ]]; then
-  org_error "${ext} files under the system directories; the path proof would not prove the path:"
-  org_say "${found}"
+  files=()
+  while IFS= read -r file; do
+    files+=("${file}")
+  done <<< "${found}"
+  org_finding_annotated "${ext}" \
+    "${ext} files under the system directories; the path proof would not prove the path:" "${files[@]}"
   exit 1
 fi
 org_say "no file named ${ext}* under the system directories"

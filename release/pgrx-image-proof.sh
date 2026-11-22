@@ -45,9 +45,11 @@ render() { # recipe -> <context>/<recipe>.Dockerfile
 }
 render copy
 docker buildx build --file "${context}/copy.Dockerfile" --load --tag "consumer-proof:pg${pg}" "${context}"
-# The canon's one writer of workflow commands (#1660), mounted and named.
-wc=(-v "${canon}/mise/workflow-command.sh:/opt/org/workflow-command.sh:ro"
-  -e ORG_WORKFLOW_COMMAND=/opt/org/workflow-command.sh)
+# The canon's finding writer (#1934), mounted and named, beside the
+# workflow-command writer (#1660) it sources from its own directory.
+wc=(-v "${canon}/mise/findings.sh:/opt/org/findings.sh:ro"
+  -v "${canon}/mise/workflow-command.sh:/opt/org/workflow-command.sh:ro"
+  -e ORG_FINDINGS_WRITER=/opt/org/findings.sh)
 docker run --rm -v "${docker_dir}:/proof:ro" "${wc[@]}" "consumer-proof:pg${pg}" \
   bash /proof/pgrx-copy-proof.sh "${ext}"
 if ((pg < 18)); then

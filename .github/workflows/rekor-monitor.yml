@@ -233,10 +233,14 @@ jobs:
       # its CT index, from the report's findings whatever its verdict: a
       # leg that stopped partway carries the findings of every chunk it
       # finished, and the next leg starts past them.
+      # The helpers run outside `mise run`, so each step names its own
+      # findings file (#1934): the belt's [env] names one only for a
+      # `mise run`.
       - name: File an issue for each certificate that did not reconcile
         id: findings
         env:
           GH_TOKEN: ${{ github.token }}
+          ORG_FINDINGS: ${{ runner.temp }}/findings/${{ github.job }}-${{ strategy.job-index }}.jsonl
         run: |
           "${ORG_PYTHON}" .github/rekor-monitor/certificate_issues.py \
             --report "${RUNNER_TEMP}/report.json" --run-url "${RUN_URL}"
@@ -268,9 +272,20 @@ jobs:
         env:
           CODE: ${{ steps.stele.outputs.code }}
           SAVED: ${{ steps.save.outcome == 'success' }}
+          ORG_FINDINGS: ${{ runner.temp }}/findings/${{ github.job }}-${{ strategy.job-index }}.jsonl
         run: |
           "${ORG_PYTHON}" .github/rekor-monitor/verdict.py --exit-code "${CODE}" \
             --report "${RUNNER_TEMP}/report.json" --saved "${SAVED}"
+
+      # This job's findings records, for the report job (#1933).
+      - name: Hand the findings to the report job
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: findings-${{ github.job }}-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/findings/
+          if-no-files-found: ignore
+          retention-days: 1
   # Once, after the last leg: did this run gain on the log? Read from
   # stele's own checkpoints, the one the run started from and the newest
   # saved. The standing issue (#1353) is for a watch that is not
@@ -316,15 +331,28 @@ jobs:
           key: ct-watch-${{ github.run_id }}-${{ github.run_attempt }}-end
           restore-keys: ct-watch-
 
+      # The helper runs outside `mise run`, so the step names its own
+      # findings file (#1934).
       - name: Judge the run and keep the standing issue
         env:
           GH_TOKEN: ${{ github.token }}
           KEPT: ${{ needs.start.outputs.kept }}
           LEGS: ${{ needs.watch.result }}
+          ORG_FINDINGS: ${{ runner.temp }}/findings/${{ github.job }}-${{ strategy.job-index }}.jsonl
         run: |
           "${ORG_PYTHON}" .github/rekor-monitor/watch_issue.py --start run-start.json \
             --start-kept "${KEPT}" --checkpoint checkpoint.json --legs "${LEGS}" \
             --run-url "${RUN_URL}"
+
+      # This job's findings records, for the report job (#1933).
+      - name: Hand the findings to the report job
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: findings-${{ github.job }}-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/findings/
+          if-no-files-found: ignore
+          retention-days: 1
 
   # Every scheduled workflow ends here (#1887), with one issue per red
   # job (#1966): for each red job of a run on the default branch, one

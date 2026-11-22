@@ -32,13 +32,13 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-# The canon's one writer of workflow commands, in mise/ (#1660).
-# Appended, so this file's own directory and the standard library
-# come first.
+# The canon's finding writer (#1890) and document loader (#1676), in
+# mise/. Appended, so this file's own directory and the standard
+# library come first.
 sys.path.append(str(Path(__file__).resolve().parents[2] / "mise"))
 
 import decoded
-import workflow_command
+import findings
 
 TARGET = "assert signer-certificates"
 EXIT_RED = 1
@@ -169,7 +169,7 @@ def main(argv: list[str]) -> int:
     report = read_report(args.report)
     red, why = judge(args.exit_code, report, saved=args.saved == "true")
     if red:
-        workflow_command.error(why)
+        findings.finding("", why, annotate=True)
         return EXIT_RED
     print(f"verdict: green: {why}")
     return 0

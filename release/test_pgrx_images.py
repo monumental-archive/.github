@@ -38,8 +38,9 @@ RELEASE = Path(__file__).resolve().parent
 CANON = RELEASE.parent
 # The writer of workflow commands each proof container is given (#1660).
 WRITER_MOUNT = (
-    f"-v {CANON}/mise/workflow-command.sh:/opt/org/workflow-command.sh:ro"
-    " -e ORG_WORKFLOW_COMMAND=/opt/org/workflow-command.sh"
+    f"-v {CANON}/mise/findings.sh:/opt/org/findings.sh:ro"
+    f" -v {CANON}/mise/workflow-command.sh:/opt/org/workflow-command.sh:ro"
+    " -e ORG_FINDINGS_WRITER=/opt/org/findings.sh"
 )
 STAGE = RELEASE / "pgrx_images.py"
 PROOF = RELEASE / "pgrx-image-proof.sh"
@@ -680,10 +681,10 @@ class CopyProof(unittest.TestCase):
         result = run([BASH, str(COPY_PROOF), "edtf_postgres"], self.root, self.env)
         self.assertEqual(1, result.returncode)
         self.assertEqual(
-            "::error::edtf_postgres.control is not under"
-            " /usr/share/postgresql/*/extension; the COPY did not place the"
-            " shipped extension\n",
-            result.stdout,
+            "::error::pgrx-copy-proof.sh: edtf_postgres: edtf_postgres.control"
+            " is not under /usr/share/postgresql/*/extension; the COPY did not"
+            " place the shipped extension\n",
+            result.stderr,
         )
         self.assertFalse(self.log.exists())
 
