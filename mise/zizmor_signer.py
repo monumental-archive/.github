@@ -240,9 +240,20 @@ def array(value: object) -> list[dict[str, object]] | None:
 class Record:
     """One remaining finding, as the writer records it."""
 
+    ident: str
     subject: str
     message: str
     detail: tuple[str, ...]
+
+
+def message(ident: str, desc: str) -> str:
+    """Write a remaining finding's message: its identity with the subject.
+
+    Returns:
+        `<ident>: <desc>`.
+
+    """
+    return f"{ident}: {desc}"
 
 
 def place(item: object, where: str) -> tuple[str, str]:
@@ -289,7 +300,7 @@ def record(finding: dict[str, object], where: str) -> Record:
         raise UndecodableError(msg)
     places = [place(p, f"{where}: locations[{at}]") for at, p in enumerate(listed)]
     detail = (f"severity: {severity}", *(line for _, line in places))
-    return Record(places[0][0], f"{ident}: {desc}", detail)
+    return Record(ident, places[0][0], message(ident, desc), detail)
 
 
 @dataclass(frozen=True)
@@ -370,7 +381,7 @@ def judge(task: str, ran: Ran, signer: str) -> int:
         writer.finding(each.subject, each.message, each.detail)
     if not records:
         return 0
-    idents = sorted({r.message.split(":", 1)[0] for r in records})
+    idents = sorted({r.ident for r in records})
     print(
         f"{task}: {len(records)} finding(s) remain: {', '.join(idents)}",
         file=sys.stderr,
