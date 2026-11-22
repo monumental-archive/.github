@@ -35,6 +35,7 @@ import pathlib
 import re
 import sys
 
+import findings
 from decoded import UndecodableError, as_object, is_array, is_object, load_toml
 from typed_std import stdin_text
 
@@ -353,20 +354,18 @@ def report(
     lock: pathlib.Path, platforms: dict[str, list[str]], missing: dict[str, list[str]]
 ) -> None:
     """Print the missing entries, their sources and the resolve commands."""
-    err = sys.stderr
-    print(f"{NAME}: {lock} lacks platforms the release builds on:", file=err)
+    detail: list[str] = []
     for key in sorted(missing):
-        print(f"  {key}: {' '.join(missing[key])}", file=err)
-        for source in platforms[key]:
-            print(f"    declared by {source}", file=err)
-    print(
-        "  each binary leg runs `mise install --locked` on its target's own runner\n"
-        "  and fails there, after the tag is minted (#810). Resolve them with:",
-        file=err,
-    )
+        detail.append(f"{key}: {' '.join(missing[key])}")
+        detail.extend(f"  declared by {source}" for source in platforms[key])
+    detail += [
+        "each binary leg runs `mise install --locked` on its target's own runner",
+        "and fails there, after the tag is minted (#810). Resolve them with:",
+    ]
     for key in sorted(missing):
         tools = sorted({t.rsplit("@", 1)[0] for t in missing[key]})
-        print(f"    mise lock --platform {key} {' '.join(tools)}", file=err)
+        detail.append(f"  mise lock --platform {key} {' '.join(tools)}")
+    findings.finding("", f"{lock} lacks platforms the release builds on:", detail)
 
 
 def read_documents(
@@ -385,10 +384,10 @@ def read_documents(
         path = lock
         return tools, lock_entries(lock)
     except UndecodableError as err:
-        print(
-            f"{NAME}: cannot read {path} — {err}\n"
-            "  a file this cannot read is not one it may pass",
-            file=sys.stderr,
+        findings.finding(
+            "",
+            f"cannot read {path} — {err}",
+            ["a file this cannot read is not one it may pass"],
         )
         return None
 
@@ -409,11 +408,13 @@ def main(argv: list[str]) -> int:
     try:
         platforms, stubs = declared(workflows, canon_defaults(args.defaults))
     except UnreadableError as err:
-        print(
-            f"{NAME}: cannot read the declared release targets — {err}\n"
-            "  declare them as one plain line, e.g. binary-targets: a,b — a target\n"
-            "  list this cannot read is not one it may pass",
-            file=sys.stderr,
+        findings.finding(
+            "",
+            f"cannot read the declared release targets — {err}",
+            [
+                "declare them as one plain line, e.g. binary-targets: a,b — a target",
+                "list this cannot read is not one it may pass",
+            ],
         )
         return 2
     if not stubs:

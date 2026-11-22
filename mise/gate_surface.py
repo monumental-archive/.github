@@ -59,10 +59,9 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parents[1] / "release"))
 
 import decoded
+import findings as writer
 import matrix
 import typed_std
-
-NAME = "gate-surface"
 
 # A Postgres major feature, and nothing else. `pg_test` is pgrx's own
 # harness switch and names no major; `pgrx` is the dependency, not a
@@ -327,16 +326,15 @@ def main(argv: list[str] | None = None) -> int:
     try:
         document = decoded.load_json(typed_std.stdin_text())
     except typed_std.NoStdinError as bad:
-        print(f"{NAME}: {bad}", file=sys.stderr)
+        writer.finding("", str(bad))
         return 1
     except decoded.UndecodableError as bad:
-        print(f"{NAME}: cargo metadata did not give JSON", file=sys.stderr)
-        print(f"  {bad}", file=sys.stderr)
+        writer.finding("", "cargo metadata did not give JSON", [str(bad)])
         return 1
     if not decoded.is_object(document):
         # cargo prints an object; any other document names no workspace,
         # and must not read as one with no crates (#1555: it raised).
-        print(f"{NAME}: cargo metadata is not a JSON object", file=sys.stderr)
+        writer.finding("", "cargo metadata is not a JSON object")
         return 1
 
     meta = metadata(document)
@@ -373,12 +371,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.publish is not None:
         findings = invariant(args.publish, surface, held)
         if findings:
-            print(
-                f"{NAME}: the publish path is not what the gate checks",
-                file=sys.stderr,
-            )
-            for line in findings:
-                print(f"  {line}", file=sys.stderr)
+            writer.finding("", "the publish path is not what the gate checks", findings)
             return 1
 
     print("\n".join(records))

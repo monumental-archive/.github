@@ -55,14 +55,22 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-# A missing sibling is named, never a bare traceback (#1522).
+# A missing sibling is named, never a bare traceback (#1522): the
+# writer's own absence on its own line, any other through the writer.
+try:
+    import findings as writer
+except ModuleNotFoundError as missing:
+    if missing.name not in {"findings", "workflow_command"}:
+        raise
+    msg = f"exit-trap: {missing.name}.py did not arrive beside this file"
+    raise SystemExit(msg) from None
 try:
     import belt_shell
 except ModuleNotFoundError as missing:
     if missing.name != "belt_shell":
         raise
-    msg = "exit-trap: belt_shell.py did not arrive beside this file"
-    raise SystemExit(msg) from None
+    writer.finding("", "belt_shell.py did not arrive beside this file")
+    raise SystemExit(1) from None
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -213,9 +221,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             checked += 1
             found.extend(findings(name, base, what, source, bash=bash))
     if found:
+        shape = [line.removeprefix("  ") for line in SHAPE.splitlines()]
         for line in found:
-            print(f"exit-trap: {line}", file=sys.stderr)
-        print(SHAPE, file=sys.stderr)
+            subject, _, message = line.partition(": ")
+            writer.finding(subject, message, shape)
         return 1
     print(f"exit-trap: {checked} script(s) and task body(ies), every EXIT trap guarded")
     return 0

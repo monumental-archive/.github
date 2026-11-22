@@ -23,19 +23,20 @@ stdlib `unittest`, the belt's one test idiom. Run through the gate as
 `mise run test`, which `ci` collects.
 """
 
-import io
 import json
 import sys
 import unittest
-from contextlib import redirect_stderr, redirect_stdout
 
 import adoption_population as ap
+import hermetic
 
 EVERY = ["build", "source", "dependency"]
 # The canon's own repository name, as main() is handed it from
 # security/identity.toml. Members here are named for their role, so
 # the canon's is `canon`.
 CANON = "canon"
+# The task that runs the helper, whose name its findings carry (#1934).
+TASK = "audit:adoption"
 # The five subject stubs every member but the canon owes (#1858).
 SUBJECTS = ["dependencies", "deep-tests", "records", "public-api", "own-audits"]
 STUBS = {f"{s}.yml" for s in SUBJECTS}
@@ -87,15 +88,12 @@ def run_main(doc: object, *argv: str) -> tuple[int, str, str]:
         The exit code, stdout and stderr.
 
     """
-    out, err = io.StringIO(), io.StringIO()
-    saved = sys.stdin
-    sys.stdin = io.StringIO(doc if isinstance(doc, str) else json.dumps(doc))
-    try:
-        with redirect_stdout(out), redirect_stderr(err):
-            code = ap.main(list(argv) or [CANON])
-    finally:
-        sys.stdin = saved
-    return code, out.getvalue(), err.getvalue()
+    done = hermetic.call_main(
+        lambda: ap.main(list(argv) or [CANON]),
+        env=hermetic.env(MISE_TASK_NAME=TASK),
+        stdin=doc if isinstance(doc, str) else json.dumps(doc),
+    )
+    return done.returncode, done.stdout, done.stderr
 
 
 class TestObligations(unittest.TestCase):
@@ -327,28 +325,27 @@ class TestMain(unittest.TestCase):
                 code, out, err = run_main(doc)
                 self.assertEqual(2, code)
                 self.assertEqual("", out)
-                self.assertTrue(err.startswith(f"adoption-population: {message}"), err)
+                self.assertTrue(err.startswith(f"{TASK}: {message}"), err)
 
     def test_arguments_other_than_the_canon_are_refused(self) -> None:
         """The roster is no input any more: a caller passing one is told."""
         code, out, err = run_main(document(member()), "--roster", "x.json")
         self.assertEqual((2, ""), (code, out))
         self.assertEqual(
-            "adoption-population: takes the canon's repository name and nothing"
+            f"{TASK}: takes the canon's repository name and nothing"
             " else, got ['--roster', 'x.json']\n",
             err,
         )
 
     def test_an_empty_canon_name_is_refused(self) -> None:
         """An identity read that failed leaves an empty name: refused."""
-        out, err = io.StringIO(), io.StringIO()
-        with redirect_stdout(out), redirect_stderr(err):
-            code = ap.main([""])
-        self.assertEqual((2, ""), (code, out.getvalue()))
+        done = hermetic.call_main(
+            lambda: ap.main([""]), env=hermetic.env(MISE_TASK_NAME=TASK)
+        )
+        self.assertEqual((2, ""), (done.returncode, done.stdout))
         self.assertEqual(
-            "adoption-population: takes the canon's repository name and nothing"
-            " else, got ['']\n",
-            err.getvalue(),
+            f"{TASK}: takes the canon's repository name and nothing else, got ['']\n",
+            done.stderr,
         )
 
 

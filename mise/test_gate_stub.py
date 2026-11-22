@@ -39,6 +39,15 @@ import decoded
 import gate_stub_fix
 import hermetic
 
+# The task that runs the helper, whose name its findings carry (#1934).
+TASK = "fix:gate-stub"
+
+
+def setUpModule() -> None:
+    """Run every row as the task does, recording no finding."""
+    unittest.enterModuleContext(hermetic.as_task(TASK))
+
+
 CANON = Path(__file__).resolve().parent.parent
 BELT = CANON / "mise"
 BASH = hermetic.tool("bash")

@@ -29,6 +29,15 @@ import biome_config
 import decoded
 import hermetic
 
+# The task that runs the helper, whose name its findings carry (#1934).
+TASK = "lint:biome"
+
+
+def setUpModule() -> None:
+    """Run every row as the task does, recording no finding."""
+    unittest.enterModuleContext(hermetic.as_task(TASK))
+
+
 BELT = Path(__file__).parent
 DOMAINS_FILE = BELT / "biome-domains.tsv"
 NURSERY_FILE = BELT / "biome-nursery-domains.tsv"
@@ -789,7 +798,7 @@ class RunTest(unittest.TestCase):
                     status = biome_config.run(args, [])
                 lines = err.getvalue().splitlines()
                 self.assertEqual(1, status)
-                self.assertEqual(f"biome-config: {args.org} cannot be read", lines[0])
+                self.assertEqual(f"{TASK}: {args.org} cannot be read", lines[0])
                 self.assertTrue(lines[1].startswith(f"  {said}"), lines[1])
                 self.assertEqual(
                     "  it is the belt's delivered config; restore it from the canon",

@@ -19,6 +19,16 @@ from pathlib import Path
 
 import decoded
 import deny_skips as ds
+import hermetic
+
+# The task that runs the helper, whose name its findings carry (#1934).
+TASK = "lint:deny"
+
+
+def setUpModule() -> None:
+    """Run every row as the task does, recording no finding."""
+    unittest.enterModuleContext(hermetic.as_task(TASK))
+
 
 HERE = Path(__file__).resolve().parent
 

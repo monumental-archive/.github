@@ -30,6 +30,15 @@ from typing import override
 import exit_trap as et
 import hermetic
 
+# The task that runs the helper, whose name its findings carry (#1934).
+TASK = "lint:bash-portability"
+
+
+def setUpModule() -> None:
+    """Run every row as the task does, recording no finding."""
+    unittest.enterModuleContext(hermetic.as_task(TASK))
+
+
 BASH = Path("/bin/bash")
 SH = Path("/bin/sh")
 DASH = hermetic.optional_tool("dash")
@@ -89,9 +98,9 @@ def lint(*named: tuple[str, str]) -> tuple[int, list[str], bool]:
         with redirect_stdout(io.StringIO()), redirect_stderr(err):
             status = et.main(paths)
         lines = [
-            line.removeprefix(f"exit-trap: {scratch}/")
+            line.removeprefix(f"{TASK}: {scratch}/")
             for line in err.getvalue().splitlines()
-            if line.startswith("exit-trap: ")
+            if line.startswith(f"{TASK}: ")
         ]
         return status, lines, SHAPE_LINE in err.getvalue()
 

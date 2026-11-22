@@ -39,6 +39,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
 import decoded
+import findings as writer
 import workflow_yaml
 from typed_std import group
 
@@ -700,7 +701,7 @@ def ceiling(files: list[str], debt: Path, *, write: bool) -> int:
     try:
         verdict = judge(files, debt)
     except ValueError as err:
-        print(f"{'fix:' if write else ''}workflow-shell: {err}", file=sys.stderr)
+        writer.finding("", str(err))
         return 1
     if write:
         if verdict.lowered or verdict.stale:
@@ -717,12 +718,12 @@ def ceiling(files: list[str], debt: Path, *, write: bool) -> int:
             f"{debt}:{n}: the block now holds {count} lines — {SETTLE} lowers the entry"
         )
     for line in verdict.findings:
-        print(line, file=sys.stderr)
+        writer.finding("", line)
     if verdict.findings:
-        print(
-            f"workflow-shell: {len(verdict.findings)} finding(s) — a run: block holds "
+        writer.finding(
+            "",
+            f"{len(verdict.findings)} finding(s) — a run: block holds "
             f"at most {CEILING} lines, and the debt file only shrinks",
-            file=sys.stderr,
         )
         return 1
     print(f"workflow-shell: every run: block fits {CEILING} lines or its debt entry")
@@ -863,7 +864,7 @@ def task_ceiling(files: list[str], debt: Path, *, write: bool) -> int:
     try:
         verdict, over = judge_tasks(files, debt)
     except decoded.UndecodableError as err:
-        print(f"{'fix:' if write else ''}task-shell: {err}", file=sys.stderr)
+        writer.finding("", str(err))
         return 1
     if write:
         if not debt.is_file():
@@ -892,12 +893,12 @@ def task_ceiling(files: list[str], debt: Path, *, write: bool) -> int:
             "lowers the entry"
         )
     for line in verdict.findings:
-        print(line, file=sys.stderr)
+        writer.finding("", line)
     if verdict.findings:
-        print(
-            f"task-shell: {len(verdict.findings)} finding(s) — a task body holds "
+        writer.finding(
+            "",
+            f"{len(verdict.findings)} finding(s) — a task body holds "
             f"at most {CEILING} lines, and the debt file only shrinks",
-            file=sys.stderr,
         )
         return 1
     print(
@@ -951,17 +952,14 @@ def main(argv: list[str]) -> int:
     # own defaults, exit 0 — so a belt that did not arrive would read as a
     # clean run. Checked before anything is linted.
     if not args.write and not args.no_lint and not ORG_RCFILE.is_file():
-        print(
-            f"embedded-shell: the org shellcheck config is missing at {ORG_RCFILE}",
-            file=sys.stderr,
-        )
+        writer.finding("", f"the org shellcheck config is missing at {ORG_RCFILE}")
         return 1
 
     try:
         return rewrite_all(args.files) if args.write else lint_all(args)
     except ValueError as err:
         # A file yq cannot parse is refused by name, never read as empty.
-        print(f"embedded-shell: {err}", file=sys.stderr)
+        writer.finding("", str(err))
         return 1
 
 
@@ -994,12 +992,12 @@ def lint_all(args: Args) -> int:
                 source_path=source_path,
             )
     for line in findings:
-        print(line, file=sys.stderr)
+        writer.finding("", line)
     if findings:
-        print(
-            f"embedded-shell: {len(findings)} finding(s) in `run:` values — "
+        writer.finding(
+            "",
+            f"{len(findings)} finding(s) in `run:` values — "
             "the same bar the belt applies to standalone scripts",
-            file=sys.stderr,
         )
         return 1
     print("embedded-shell: every run: value is shfmt-clean and shellcheck-clean")

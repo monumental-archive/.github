@@ -44,6 +44,11 @@ STUB_PATH = ".github/workflows/publish.yml"
 REMOTE = "monumental-archive/.github/.github/workflows/publish.yml@" + "a" * 40
 
 
+def setUpModule() -> None:
+    """Run every row as the task does, recording no finding (#1934)."""
+    unittest.enterModuleContext(hermetic.as_task(NAME))
+
+
 def stub(with_lines: str, uses: str = REMOTE) -> str:
     """Build a publish caller with the given `with:` body.
 
@@ -531,7 +536,7 @@ class Script(unittest.TestCase):
                     *("--lock", "mise.lock"),
                 ],
                 cwd=root,
-                env=hermetic.env(),
+                env=hermetic.env(MISE_TASK_NAME=NAME),
                 input=f"{STUB_PATH}\n",
                 capture_output=True,
                 text=True,

@@ -16,6 +16,7 @@ import io
 import os
 import platform
 import stat
+import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -23,6 +24,7 @@ from pathlib import Path
 from unittest import mock
 
 import gate_cache_key
+import hermetic
 
 LOGGED = (
     "mise-v2-linux-x64-ubuntu26-2026.11.6-p692-"
@@ -234,10 +236,14 @@ class Main(unittest.TestCase):
     def test_a_missing_tree_is_red(self) -> None:
         """A canon tree without its files is a red step, not a key."""
         err = io.StringIO()
-        with redirect_stderr(err):
+        with (
+            hermetic.as_task(""),
+            mock.patch.object(sys, "argv", ["gate_cache_key.py"]),
+            redirect_stderr(err),
+        ):
             code = gate_cache_key.main(["tool", "mise-v2", "/nonexistent"])
             self.assertEqual(1, code)
-        self.assertIn("gate-cache-key:", err.getvalue())
+        self.assertIn("gate_cache_key.py:", err.getvalue())
 
     def test_a_tree_without_a_belt_lockfile_is_red(self) -> None:
         """No lockfile, no key: a key that cannot name the belt is refused."""
@@ -484,7 +490,7 @@ def digest_main(path: str) -> tuple[int, str, str]:
 
     """
     out, err = io.StringIO(), io.StringIO()
-    env: dict[str, str] = {"PATH": path}
+    env: dict[str, str] = {"PATH": path, "MISE_TASK_NAME": "coverage:check"}
     with (
         mock.patch.dict(os.environ, env, clear=True),
         redirect_stdout(out),
@@ -530,7 +536,7 @@ class Directory(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             code, out, err = digest_main(tmp)
         self.assertEqual((1, ""), (code, out))
-        self.assertIn("gate-cache-key: no rustc on PATH", err)
+        self.assertIn("coverage:check: no rustc on PATH", err)
 
     def test_a_failing_rustc_is_red(self) -> None:
         """A rustup proxy with no toolchain: red by its message."""

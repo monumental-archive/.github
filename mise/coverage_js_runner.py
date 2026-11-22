@@ -26,7 +26,7 @@ The leg supports vitest. Any other runner is named, from the root
 package.json's dependencies or its `test` script, so a skip says what
 it skipped rather than reading as a tree with nothing to measure.
 
-`--vitest-command <label> <task>` is the second question: WHICH vitest run
+`--vitest-command <task>` is the second question: WHICH vitest run
 the leg measures. #1357 item 2 says the leg runs the repository's own
 test command, so the suite measured is the suite the gate runs (#707),
 never vitest's whole configured suite where the `test` task runs a
@@ -59,6 +59,7 @@ from typing import TYPE_CHECKING
 # The one walk of a task (#1608), a module beside this script.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import decoded
+import findings
 import task_walk
 import typed_std
 
@@ -338,7 +339,7 @@ def problems(
     return []
 
 
-def vitest_command(label: str, walked: Walk) -> int:
+def vitest_command(walked: Walk) -> int:
     """Print the walked steps' one vitest invocation, or refuse it by name.
 
     Returns:
@@ -348,10 +349,11 @@ def vitest_command(label: str, walked: Walk) -> int:
     found, refused = collect(walked.steps)
     lines = problems(found, refused, list(walked.tasks))
     if lines:
-        head = f"{label}: typescript: the leg measures the test task's own"
-        print(f"{head} vitest command{lines[0]}", file=sys.stderr)
-        for line in lines[1:]:
-            print(line, file=sys.stderr)
+        findings.finding(
+            "typescript",
+            f"the leg measures the test task's own vitest command{lines[0]}",
+            [line.removeprefix("  ") for line in lines[1:]],
+        )
         return 1
     directory, args = found[0]
     if not args or args[0] != "run":
@@ -361,7 +363,7 @@ def vitest_command(label: str, walked: Walk) -> int:
     return 0
 
 
-def walked_command(label: str, root: str) -> int:
+def walked_command(root: str) -> int:
     """Walk from the root task with mise and print its vitest command.
 
     Returns:
@@ -371,15 +373,15 @@ def walked_command(label: str, root: str) -> int:
     try:
         walked = task_walk.walk_mise(root)
     except task_walk.RefusedError as exc:
-        print(f"{label}: typescript: {exc}", file=sys.stderr)
+        findings.finding("typescript", str(exc))
         return 1
-    return vitest_command(label, walked)
+    return vitest_command(walked)
 
 
 def main(argv: list[str]) -> int:
     """Print the runner line for the tree, or answer `--vitest-command`.
 
-    `--vitest-command <label> <task>` walks the task (walked_command);
+    `--vitest-command <task>` walks the task (walked_command);
     any other arguments are the tracked files among package.json and
     the lockfiles.
 
@@ -389,14 +391,14 @@ def main(argv: list[str]) -> int:
 
     """
     if argv[:1] == ["--vitest-command"]:
-        return walked_command(argv[1], argv[2])
+        return walked_command(argv[1])
     tracked = argv
     if "package.json" not in tracked:
         return 0
     try:
         manifest = read_manifest(decoded.load_json(Path("package.json").read_bytes()))
     except (OSError, decoded.UndecodableError) as exc:
-        print(f"coverage-js-runner: package.json: {exc}", file=sys.stderr)
+        findings.finding("package.json", str(exc))
         return 1
     lockfile = next((name for name in LOCKFILES if name in tracked), None)
     lock = Path(lockfile).read_text(encoding="utf-8") if lockfile else ""

@@ -18,7 +18,17 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import hermetic
 import licence_texts as lt
+
+# The task that runs the helper, whose name its findings carry (#1934).
+TASK = "lint:licence"
+
+
+def setUpModule() -> None:
+    """Run every row as the task does, recording no finding."""
+    unittest.enterModuleContext(hermetic.as_task(TASK))
+
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
@@ -249,7 +259,9 @@ class LicenceTexts(unittest.TestCase):
         err = io.StringIO()
         with contextlib.redirect_stderr(err):
             self.assertEqual(2, lt.main(["licence_texts.py", "extra"]))
-        self.assertEqual("usage: git ls-files -z | licence_texts.py\n", err.getvalue())
+        self.assertEqual(
+            f"{TASK}: usage: git ls-files -z | licence_texts.py\n", err.getvalue()
+        )
 
 
 if __name__ == "__main__":

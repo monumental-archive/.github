@@ -31,6 +31,7 @@ from __future__ import annotations
 import os
 import sys
 
+import findings
 import squash_message
 
 
@@ -57,10 +58,10 @@ def main(argv: list[str]) -> int:
     del argv  # the step reads its environment, not arguments
     title = os.environ.get("PR_TITLE")
     if title is None:
-        print(
-            "break:check: PR_TITLE is unset — the gate step sets it from the pull"
+        findings.finding(
+            "",
+            "PR_TITLE is unset — the gate step sets it from the pull"
             " request, and without it there is no declaration to hold",
-            file=sys.stderr,
         )
         return 1
     body = os.environ.get("PR_BODY", "")

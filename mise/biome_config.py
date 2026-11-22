@@ -41,6 +41,7 @@ import sys
 from pathlib import Path
 from typing import NamedTuple
 
+import findings
 from decoded import UndecodableError, as_object, is_object, load_json
 from typed_std import stdin_text
 
@@ -281,10 +282,7 @@ def complain(headline: str, lines: list[str], remedy: str) -> int:
         A process exit status.
 
     """
-    print(f"{NAME}: {headline}", file=sys.stderr)
-    for line in lines:
-        print(f"  {line}", file=sys.stderr)
-    print(f"  {remedy}", file=sys.stderr)
+    findings.finding("", headline, [*lines, remedy])
     return 1
 
 

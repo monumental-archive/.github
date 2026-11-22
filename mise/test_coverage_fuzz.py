@@ -582,7 +582,7 @@ class FloorRows(FuzzCase):
         done = self.check()
         self.assertEqual(1, done.returncode)
         self.assertEqual(
-            f"coverage-floor: .coverage-floor {LOAD} floor 50 disagrees with its"
+            f"coverage:check: .coverage-floor {LOAD} floor 50 disagrees with its"
             " own record: measured 43.6 under band 2 and the cap 90 derives"
             " 41.6. Refused as drift and never repaired — restore the"
             " derivation, or delete both lines and re-derive with `mise run"

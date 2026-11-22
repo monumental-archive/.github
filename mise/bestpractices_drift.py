@@ -38,6 +38,7 @@ import sys
 from pathlib import Path
 
 import decoded
+import findings
 from typed_std import group
 
 # A live shield on the entry: the metal badge or the Baseline one.
@@ -191,22 +192,22 @@ def compare(path: str, repo: str, ident: str, entry_text: str) -> int:
         The process exit status.
 
     """
-    label = f"audit:bestpractices: {repo} (bestpractices.dev project {ident})"
+    entry_name = f"{repo} (bestpractices.dev project {ident})"
     try:
         wanted = answers(load(Path(path).read_bytes(), path), path)
         entry = load(entry_text, "the site's answer")
         have = published(entry, list(wanted))
     except (ValueError, TypeError) as err:
-        print(f"{label}: {err}", file=sys.stderr)
+        findings.finding(entry_name, str(err))
         return 1
     lines = drift(wanted, have)
     if not lines:
-        print(f"{label}: the published entry matches {path}")
+        print(f"audit:bestpractices: {entry_name}: the published entry matches {path}")
         return 0
-    print(f"{label}: the published entry differs from {path}:", file=sys.stderr)
-    for line in lines:
-        print(f"  {line}", file=sys.stderr)
-    print(STEP, file=sys.stderr)
+    step = [line.removeprefix("  ") for line in STEP.splitlines()]
+    findings.finding(
+        entry_name, f"the published entry differs from {path}:", [*lines, *step]
+    )
     return 1
 
 
@@ -260,11 +261,7 @@ def audit(path: str, repo: str, readme: str) -> int:
     text = Path(readme).read_text(encoding="utf-8") if readme else ""
     ident, problem = project(text)
     if problem is not None:
-        print(problem, file=sys.stderr)
-        print(
-            f"audit:bestpractices: {repo}: cannot tell which entry to compare",
-            file=sys.stderr,
-        )
+        findings.finding(repo, "cannot tell which entry to compare", [problem])
         return 1
     if ident is None:
         print(
@@ -276,13 +273,13 @@ def audit(path: str, repo: str, readme: str) -> int:
     try:
         code, entry = fetch(url, repo)
     except FileNotFoundError as err:
-        print(f"audit:bestpractices: {err}", file=sys.stderr)
+        findings.finding("", str(err))
         return 1
     if code != "200":
-        print(
-            f"audit:bestpractices: {repo}: {url} did not answer — HTTP"
+        findings.finding(
+            repo,
+            f"{url} did not answer — HTTP"
             f" {code or 'none'}, a question unanswered, not a drift",
-            file=sys.stderr,
         )
         return 1
     return compare(path, repo, ident, entry)

@@ -27,9 +27,14 @@ import sys
 import unittest
 
 import gate_surface as gs
+import hermetic
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
+
+# The task that runs the helper, whose name its findings carry (#1934).
+TASK = "lint:gate-surface"
+
 
 NAME = st.from_regex(r"[a-z][a-z0-9_-]{0,8}", fullmatch=True)
 FEATURE = st.one_of(
@@ -215,13 +220,17 @@ class Refusal(unittest.TestCase):
         old = sys.stdin
         sys.stdin = io.StringIO(json.dumps(doc))
         try:
-            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            with (
+                hermetic.as_task(TASK),
+                contextlib.redirect_stdout(out),
+                contextlib.redirect_stderr(err),
+            ):
                 status = gs.main([])
         finally:
             sys.stdin = old
         self.assertIn(status, (0, 1))
         if status:
-            self.assertIn("gate-surface: ", err.getvalue())
+            self.assertIn(f"{TASK}: ", err.getvalue())
 
 
 if __name__ == "__main__":

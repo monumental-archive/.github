@@ -131,7 +131,7 @@ def template(name: str, lines: list[str]) -> str:
 
 SIXTEEN = [f"echo {i}" for i in range(1, 17)]
 CEILING = (
-    "workflow-shell: 1 finding(s) — a run: block holds at most 15 lines,"
+    "lint:workflow-shell: 1 finding(s) — a run: block holds at most 15 lines,"
     " and the debt file only shrinks"
 )
 
@@ -392,7 +392,8 @@ class ShellEmbedded(Planted):
         done = self.run_task("lint:shell-embedded")
         self.assertEqual(done.returncode, 1)
         self.assertIn(
-            "actions/x/action.yml:9:note: Double quote to prevent globbing and"
+            "lint:shell-embedded: actions/x/action.yml:9:note: Double quote to"
+            " prevent globbing and"
             " word splitting. [SC2086]",
             done.stderr.splitlines(),
         )
@@ -491,8 +492,8 @@ class WorkflowShell(Planted):
         done = self.run_task("lint:workflow-shell")
         self.assertEqual(done.returncode, 1)
         finding = (
-            "actions/x/action.yml:9: step 'Big' holds a run: block of 16"
-            " lines, over the 15-line ceiling, and"
+            "lint:workflow-shell: actions/x/action.yml:9: step 'Big' holds a run:"
+            " block of 16 lines, over the 15-line ceiling, and"
             " security/workflow-shell-debt.txt does not list it — move the"
             " logic out (CONTRIBUTING.md)"
         )
@@ -506,7 +507,8 @@ class WorkflowShell(Planted):
         self.assertEqual(done.returncode, 1)
         self.assertEqual(
             done.stderr.splitlines()[0],
-            "workflow-templates/t.yml:8: step 'Big' holds a run: block of 16"
+            "lint:workflow-shell: workflow-templates/t.yml:8: step 'Big' holds"
+            " a run: block of 16"
             " lines, over the 15-line ceiling, and"
             " security/workflow-shell-debt.txt does not list it — move the"
             " logic out (CONTRIBUTING.md)",

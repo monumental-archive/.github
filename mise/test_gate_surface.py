@@ -26,6 +26,16 @@ from unittest import mock
 
 import decoded
 import gate_surface
+import hermetic
+
+# The task that runs the helper, whose name its findings carry (#1934).
+TASK = "lint:gate-surface"
+
+
+def setUpModule() -> None:
+    """Run every row as the task does, recording no finding."""
+    unittest.enterModuleContext(hermetic.as_task(TASK))
+
 
 ROOT = "/w"
 
@@ -580,7 +590,7 @@ class MainTest(unittest.TestCase):
         self.assertEqual(status, 1)
         self.assertEqual(
             err.getvalue(),
-            "gate-surface: no standard input: the process was started without one\n",
+            f"{TASK}: no standard input: the process was started without one\n",
         )
 
     def test_metadata_that_is_not_json_is_red(self) -> None:

@@ -31,6 +31,15 @@ import decoded
 import embedded_shell as es
 import hermetic
 
+# The task that runs the helper, whose name its findings carry (#1934).
+TASK = "lint:shell-embedded"
+
+
+def setUpModule() -> None:
+    """Run every row as the task does, recording no finding."""
+    unittest.enterModuleContext(hermetic.as_task(TASK))
+
+
 _HERE = Path(__file__).resolve().parent
 # An empty result, named so the expected list carries its type.
 NOTHING: list[object] = []
@@ -545,12 +554,13 @@ class Parser(unittest.TestCase):
             done = hermetic.call_main(lambda: es.main([str(path)]))
             debt = Path(tmp) / "debt.txt"
             ceiling = hermetic.call_main(
-                lambda: es.main(["--ceiling", str(debt), str(path)])
+                lambda: es.main(["--ceiling", str(debt), str(path)]),
+                env=hermetic.env(MISE_TASK_NAME="lint:workflow-shell"),
             )
         self.assertEqual(done.returncode, 1)
-        self.assertTrue(done.stderr.startswith(f"embedded-shell: {path}: "))
+        self.assertTrue(done.stderr.startswith(f"{TASK}: {path}: "))
         self.assertEqual(ceiling.returncode, 1)
-        self.assertTrue(ceiling.stderr.startswith(f"workflow-shell: {path}: "))
+        self.assertTrue(ceiling.stderr.startswith(f"lint:workflow-shell: {path}: "))
 
     def test_fix_mode_rewrites_a_literal_block_byte_for_byte(self) -> None:
         """A commented `|2+` header with trailing blanks: only the body moves.
@@ -1031,7 +1041,12 @@ class Tasks(unittest.TestCase):
         """
         self.cfg.write_text(text, encoding="utf-8")
         out, err = io.StringIO(), io.StringIO()
-        with redirect_stdout(out), redirect_stderr(err):
+        task = "fix:task-shell" if write else "lint:task-shell"
+        with (
+            hermetic.as_task(task),
+            redirect_stdout(out),
+            redirect_stderr(err),
+        ):
             rc = es.task_ceiling([str(self.cfg)], self.debt, write=write)
         return rc, out.getvalue(), err.getvalue()
 
@@ -1055,7 +1070,7 @@ class Tasks(unittest.TestCase):
         with self.assertRaises(decoded.UndecodableError) as refused:
             decoded.load_toml("lint")
         why = str(refused.exception)
-        for write, label in ((False, "task-shell"), (True, "fix:task-shell")):
+        for write, label in ((False, "lint:task-shell"), (True, "fix:task-shell")):
             rc, out, err = self.run_ceiling("lint", write=write)
             self.assertEqual((rc, out), (1, ""))
             self.assertEqual(err, f"{label}: {self.cfg}: not TOML: {why}\n")
@@ -1064,7 +1079,7 @@ class Tasks(unittest.TestCase):
         """`tasks = 1` has no bodies to weigh; it is named, not a crash."""
         rc, out, err = self.run_ceiling("tasks = 1\n")
         self.assertEqual((rc, out), (1, ""))
-        self.assertEqual(err, f"task-shell: {self.cfg}: tasks is not a table\n")
+        self.assertEqual(err, f"lint:task-shell: {self.cfg}: tasks is not a table\n")
 
     def test_no_debt_file_and_no_long_body_passes(self) -> None:
         """A repository with nothing over the ceiling carries no file."""
@@ -1082,7 +1097,7 @@ class Tasks(unittest.TestCase):
             f"ceiling, and {self.debt} does not list it — move the logic out",
             err,
         )
-        self.assertIn("task-shell: 1 finding(s)", err)
+        self.assertIn("lint:task-shell: 1 finding(s)", err)
 
     def test_list_run_is_one_body(self) -> None:
         """A `run` list of 8 + 8 commands is a 16-line body, not two."""

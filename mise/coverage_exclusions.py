@@ -28,6 +28,7 @@ import tokenize
 from pathlib import Path
 from typing import NamedTuple, override
 
+import findings
 import typed_std
 
 PYTHON = frozenset({".py", ".pyi"})
@@ -181,15 +182,17 @@ def main(argv: list[str]) -> int:
     del argv
     paths = [p for p in typed_std.stdin_text().splitlines() if p]
     found = [f for p in paths for f in scan(p)]
-    for finding in found:
-        print(finding, file=sys.stderr)
+    for each in found:
+        findings.finding(f"{each.path}:{each.line}", each.rule)
     if found:
-        print(
-            f"lint:coverage-exclusions: {len(found)} coverage exclusion(s).\n"
-            '  The testing standard forbids them (CONTRIBUTING.md, "No number\n'
-            '  can be bought"): an excluded line is a bought number. Test the\n'
-            "  code, or delete code no test can reach. There is no allow-list.",
-            file=sys.stderr,
+        findings.finding(
+            "",
+            f"{len(found)} coverage exclusion(s).",
+            [
+                'The testing standard forbids them (CONTRIBUTING.md, "No number',
+                'can be bought"): an excluded line is a bought number. Test the',
+                "code, or delete code no test can reach. There is no allow-list.",
+            ],
         )
         return 1
     print(f"lint:coverage-exclusions: {len(paths)} file(s), no coverage exclusions")

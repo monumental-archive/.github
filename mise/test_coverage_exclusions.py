@@ -22,6 +22,15 @@ import coverage_exclusions as ce
 import decoded
 import hermetic
 
+# The task that runs the helper, whose name its findings carry (#1934).
+TASK = "lint:coverage-exclusions"
+
+
+def setUpModule() -> None:
+    """Run every row as the task does, recording no finding."""
+    unittest.enterModuleContext(hermetic.as_task(TASK))
+
+
 _HERE = Path(__file__).resolve().parent
 HELPER = _HERE / "coverage_exclusions.py"
 GIT = hermetic.tool("git")
@@ -227,8 +236,13 @@ class MissingSibling(unittest.TestCase):
     run, so a missing sibling gave a raw FileNotFoundError traceback.
     """
 
-    def alone(self, source: Path, relative: str) -> subprocess.CompletedProcess[str]:
+    def alone(
+        self, source: Path, relative: str, *beside: str
+    ) -> subprocess.CompletedProcess[str]:
         """Run one helper copied into a tree that lacks its sibling.
+
+        `beside` names the files copied with it: the finding writer, for
+        a helper that reports the missing sibling through it.
 
         Returns:
             The finished process.
@@ -239,19 +253,28 @@ class MissingSibling(unittest.TestCase):
         target = Path(tmp.name) / relative
         target.parent.mkdir(parents=True)
         shutil.copy(source, target)
+        for name in beside:
+            shutil.copy(source.parent / name, target.parent / name)
         return subprocess.run(
             [sys.executable, str(target), "--help"],
             capture_output=True,
             text=True,
             check=False,
+            env=hermetic.env(MISE_TASK_NAME="lint:bash-portability"),
         )
 
     def test_exit_trap_without_belt_shell(self) -> None:
         """exit_trap.py names belt_shell.py and exits non-zero."""
-        r = self.alone(_HERE / "exit_trap.py", "mise/exit_trap.py")
+        r = self.alone(
+            _HERE / "exit_trap.py",
+            "mise/exit_trap.py",
+            "findings.py",
+            "workflow_command.py",
+        )
         self.assertNotEqual(r.returncode, 0)
         self.assertEqual(
-            r.stderr, "exit-trap: belt_shell.py did not arrive beside this file\n"
+            r.stderr,
+            "lint:bash-portability: belt_shell.py did not arrive beside this file\n",
         )
 
     def test_publish_crates_without_crates_index(self) -> None:

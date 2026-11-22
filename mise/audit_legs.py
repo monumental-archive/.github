@@ -62,9 +62,9 @@ from pathlib import Path
 
 import coverage_floor
 import decoded
+import findings
 import gate_tools
 import rust_properties
-import workflow_command
 
 HERE = Path(__file__).resolve().parent
 TABLE = HERE / "audit-legs.toml"
@@ -384,13 +384,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         table = load_table(args.table)
     except decoded.UndecodableError as err:
-        workflow_command.error(f"audit-legs: {err}", stream=sys.stderr)
+        findings.finding("", str(err), annotate=True)
         return 1
     rows = table.get(args.workflow)
     if rows is None:
-        workflow_command.error(
-            f"audit-legs: {args.table} has no table for {args.workflow}",
-            stream=sys.stderr,
+        findings.finding(
+            "", f"{args.table} has no table for {args.workflow}", annotate=True
         )
         return 1
     tracked = gate_tools.tracked_files(args.root)
@@ -400,7 +399,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         reasons = refine(args.workflow, reasons, args.root, tracked)
     except decoded.UndecodableError as err:
-        workflow_command.error(f"audit-legs: {err}", stream=sys.stderr)
+        findings.finding("", str(err), annotate=True)
         return 1
     for job, why in reasons.items():
         print(f"audit-legs: {job}: {why}", file=sys.stderr)

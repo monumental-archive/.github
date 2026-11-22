@@ -78,6 +78,7 @@ from dataclasses import dataclass
 from typing import Self, TextIO
 
 import decoded
+import findings
 
 # The population document's epoch this reader was written against
 # (stele docs/population.md). A different one is refused, never read
@@ -243,17 +244,16 @@ def main(argv: list[str] | None = None) -> int:
 
     """
     if argv is None or len(argv) != 1 or not argv[0]:
-        print(
-            "adoption-population: takes the canon's repository name and nothing"
-            f" else, got {argv}",
-            file=sys.stderr,
+        findings.finding(
+            "",
+            f"takes the canon's repository name and nothing else, got {argv}",
         )
         return 2
     canon = argv[0]
     try:
         members = load_members(sys.stdin)
     except RefusalError as exc:
-        print(f"adoption-population: {exc}", file=sys.stderr)
+        findings.finding("", str(exc))
         return 2
     for member in sorted(members, key=by_repo):
         for artifact, names in obligations(member, canon):
