@@ -90,12 +90,11 @@ provisioned=""
 default=""
 if [[ ${population} == *$'\t'pgrx$'\t'* ]]; then
   provisioned=ok
-  # shellcheck disable=SC2310  # deliberate: see above
   org_pgrx_provision default || provisioned=failed
 fi
 default_icu=ok
-# shellcheck disable=SC2310  # deliberate: a missing pin reds the
-# ordinary crates below and the extensions are still judged
+# A missing pin reds the ordinary crates below and the extensions are
+# still judged.
 if [[ -n ${default} ]] && ! org_pgrx_darwin_icu_check "${default}"; then
   default_icu=failed
 fi
@@ -143,8 +142,8 @@ while IFS=$'\t' read -r crate target library kind crate_majors; do
       continue
     fi
     echo "${label}: judging ${crate}"
-    # shellcheck disable=SC2310  # deliberate: the judgment's status is
-    # the verdict, and a red crate does not stop the next
+    # The judgment's status is the verdict, and a red crate does not stop
+    # the next.
     if org_pgrx_major "${default}" cargo-semver-checks check-release -p "${crate}"; then
       verdicts+=("${label}: ${crate}: judged clean")
     else
@@ -156,8 +155,8 @@ while IFS=$'\t' read -r crate target library kind crate_majors; do
 
   icu=ok
   if [[ ${provisioned} == ok ]]; then
-    # shellcheck disable=SC2310  # deliberate: a missing pin reds this
-    # crate's majors below and the crates after it are still judged
+    # A missing pin reds this crate's majors below and the crates after
+    # it are still judged.
     org_pgrx_darwin_icu_check "${crate_majors}" || icu=failed
   fi
   for major in $(tr ',' ' ' <<< "${crate_majors}"); do
@@ -174,8 +173,8 @@ while IFS=$'\t' read -r crate target library kind crate_majors; do
     echo "${label}: judging ${crate} at pg${major}"
     # In a subshell holding this major's ICU headers and Postgres (#1774,
     # #1940), so one major's never reaches the next.
-    # shellcheck disable=SC2310  # deliberate: the judgment's status is
-    # the verdict, and a red major does not stop the next
+    # The judgment's status is the verdict, and a red major does not stop
+    # the next.
     if org_pgrx_major "${major}" cargo-semver-checks check-release -p "${crate}" \
       --only-explicit-features --features "pg${major}"; then
       verdicts+=("${label}: ${crate} at pg${major}: judged clean")

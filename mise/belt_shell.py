@@ -42,8 +42,9 @@ and each of them changes the verdict:
     unparsable); those lines are commented out for the tools and
     restored on write.
 
-Nothing is excluded. The standalone corpus and the `run:` corpus are
-both clean at `--enable=all` with per-site `# shellcheck disable`
+Nothing is excluded beyond the delivered level, which holds one check
+off (SC2310, #1997). The standalone corpus and the `run:` corpus are
+both clean at that level with per-site `# shellcheck disable`
 directives where an idiom is deliberate, so the same code is not held
 to a lower bar for living in a TOML string.
 

@@ -172,7 +172,6 @@ dequeue_queued_pr() {
   mutation="mutation { dequeuePullRequest(input: {id: \"${id}\"})"
   mutation+=" { mergeQueueEntry { id } } }"
   forge_refusal=""
-  # shellcheck disable=SC2310  # forge's status is the answer, read below
   if ! forge "take #${number} out of the merge queue" graphql \
     -f query="${mutation}" > /dev/null; then
     if forge_refused '^HTTP/[0-9.]+ 403|"type": *"FORBIDDEN"|Resource not accessible by integration'; then
@@ -212,7 +211,6 @@ move_branch() {
 dequeued=""
 if gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${branch}" > /dev/null 2>&1; then
   forge_refusal=""
-  # shellcheck disable=SC2310  # forge's status is the answer, read below
   if ! move_branch; then
     if ! forge_refused '^HTTP/[0-9.]+ 422' \
       || ! forge_refused 'queued for merging cannot be updated'; then

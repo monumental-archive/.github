@@ -211,7 +211,6 @@ measure_one() { # usage: measure_one <dir> <crate> <major>
     export CARGO_TARGET_DIR="${root}/llvm-cov-${leg}-${compiler}"
     # Its major's ICU headers and Postgres, after the target directory
     # the Postgres clone is chosen by (#1940).
-    # shellcheck disable=SC2310  # it returns 1 on every failure, explicitly
     org_pgrx_major_env "${one}" || exit 1
     envs=$(cargo llvm-cov show-env --sh) || exit 1
     eval "${envs}"

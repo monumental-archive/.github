@@ -19,14 +19,6 @@ org_task "lint:belt-current"
 
 canon="${ORG_CANON_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
 
-# older <a> <b>: true when version a sorts strictly before version b.
-older() {
-  [[ $1 != "$2" ]] || return 1
-  local first
-  first=$(printf '%s\n%s\n' "$1" "$2" | sort -V | sed -n '1p')
-  [[ ${first} == "$1" ]]
-}
-
 # 1. mise itself. It updates the tools and never updates itself.
 ci="${canon}/.github/workflows/ci.yml"
 if [[ ! -f ${ci} ]]; then
@@ -46,8 +38,11 @@ if [[ -z ${have} ]]; then
   org_finding "" "could not read this machine's mise version"
   exit 1
 fi
-# shellcheck disable=SC2310  # older's status is the answer, not an error
-if older "${have}" "${want}"; then
+# The lower of the two versions, as a plain assignment so `set -e` and
+# pipefail hold over the sort (#1997): a failed sort stops the task
+# rather than reading as "not older".
+first=$(printf '%s\n%s\n' "${have}" "${want}" | sort -V | sed -n '1p')
+if [[ ${have} != "${want}" && ${first} == "${have}" ]]; then
   org_finding "" "this machine runs mise ${have}; CI runs ${want}." \
     "mise keeps the tools current and never updates itself, and an older" \
     "mise reads the lockfile and the registry differently. Run:" \
