@@ -555,78 +555,28 @@ def source(**lines: str) -> str:
 class SiteRecords(Planted):
     """An equivalent mutant is recorded at its site, and moves with it (#1987)."""
 
-    def leg_with(
-        self, text: str, *, config: str = ""
-    ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
-        """Plant src/lib.rs as given and run the leg, every mutant killed.
+    def test_the_leg_end_to_end_derives_counts_and_holds_its_records(self) -> None:
+        """One run, two records: the sound one excludes, the stale one reds.
 
-        Returns:
-            The finished process and the stub's call log.
-
+        The config excludes nothing and the unconfigured listing names
+        three mutants, so the one excluded is the record's (test_clean,
+        on the same planting, is 0). Every cut listing and the run carry
+        exactly the records' derived patterns; the stale record is named
+        by its file and line.
         """
-        self.plant(package("alpha", str(self.tree)), config=config)
-        self.track("src/lib.rs", text)
-        self.files["outcomes.json"].write_text(
-            json.dumps(outcomes(2, 2, 0)), encoding="utf-8"
+        self.plant(package("alpha", str(self.tree)), result=outcomes(2, 2, 0))
+        text = source(
+            l3=f"    {MARK} delete !: the flag is always set",
+            l19=f"    {MARK} {EQUAL}: a and b are one value",
         )
-        return self.run_leg()
-
-    def test_a_trailing_record_derives_its_lines_pattern(self) -> None:
-        """Code before the comment: the site is the comment's own line."""
-        text = source(l20=f"if a == b {{ {MARK} {EQUAL}: a and b are one value")
-        done, log = self.leg_with(text)
-        self.assertEqual(done.returncode, 0, done.stderr)
-        runs = [c for c in self.calls(log) if "--no-config" not in c][1:]
-        want = [
-            f"cargo mutants --list --exclude-re {DERIVED} --package alpha",
-            f"cargo mutants --output OUT --exclude-re {DERIVED} --package alpha",
-        ]
-        self.assertEqual(runs, want)
-
-    def test_a_record_on_the_line_above_derives_the_next_lines_pattern(self) -> None:
-        """A comment alone on its line: the site is the line below it."""
-        text = source(l19=f"    {MARK} {EQUAL}: a and b are one value")
-        done, log = self.leg_with(text)
-        self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertIn(
-            f"cargo mutants --list --exclude-re {DERIVED} --package alpha",
-            self.calls(log),
-        )
-
-    def test_the_end_to_end_run_carries_exactly_the_derived_exclusion(self) -> None:
-        """One record: its pattern on every cut listing and the run, one excluded."""
-        done, log = self.leg_with(source())
-        self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertIn(
-            f"{LABEL}: mutating workspace (3 mutants, 0 excluded)",
-            done.stdout.splitlines(),
-        )
-        self.log.write_text("", encoding="utf-8")
-        text = source(l19=f"    {MARK} {EQUAL}: a and b are one value")
         self.track("src/lib.rs", text)
         done, log = self.run_leg()
-        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.returncode, 1)
         want = [
             f"{LABEL}: mutating workspace (2 mutants, 1 excluded)",
             f"{LABEL}: 2 mutants, 2 killed, 0 survived, 1 excluded",
         ]
         self.assertEqual(done.stdout.splitlines(), want)
-        want = [
-            METADATA,
-            "cargo mutants --list --no-config --package alpha",
-            f"cargo mutants --list --exclude-re {DERIVED} --package alpha",
-            f"cargo mutants --output OUT --exclude-re {DERIVED} --package alpha",
-        ]
-        self.assertEqual(self.calls(log), want)
-
-    def test_a_stale_record_is_red_by_file_and_line(self) -> None:
-        """A record whose pattern matches nothing unconfigured: stale, named."""
-        text = source(
-            l3=f"    {MARK} delete !: the flag is always set",
-            l19=f"    {MARK} {EQUAL}: a and b are one value",
-        )
-        done, log = self.leg_with(text)
-        self.assertEqual(done.returncode, 1)
         want = [
             (
                 f"{LABEL}: src/lib.rs:3: {MARK} delete ! is stale:"
@@ -635,45 +585,94 @@ class SiteRecords(Planted):
             *RED,
         ]
         self.assertEqual(done.stderr.splitlines(), want)
-        self.assertIn(
-            f"{LABEL}: 2 mutants, 2 killed, 0 survived, 1 excluded",
-            done.stdout.splitlines(),
-        )
         stale = r"^src/lib\.rs:4:[0-9]+: delete !( in .*)?$"
-        self.assertIn(
-            (
-                f"cargo mutants --output OUT --exclude-re {stale}"
-                f" --exclude-re {DERIVED} --package alpha"
-            ),
-            self.calls(log),
-        )
+        derived = f"--exclude-re {stale} --exclude-re {DERIVED}"
+        want = [
+            METADATA,
+            "cargo mutants --list --no-config --package alpha",
+            f"cargo mutants --list {derived} --package alpha",
+            f"cargo mutants --output OUT {derived} --package alpha",
+        ]
+        self.assertEqual(self.calls(log), want)
+
+
+class SiteRules(unittest.TestCase):
+    """Each record and config rule, through mutants_rust.py's own steps."""
+
+    @staticmethod
+    def records_step(grep: str) -> tuple[int, str, str]:
+        """Run the `records` step on a planted `git grep -n`.
+
+        Returns:
+            Its exit status, stdout and stderr.
+
+        """
+        out, err = io.StringIO(), io.StringIO()
+        with (
+            mock.patch("sys.stdin", io.StringIO(grep)),
+            contextlib.redirect_stdout(out),
+            contextlib.redirect_stderr(err),
+        ):
+            status = helper.main(["records"])
+        return status, out.getvalue(), err.getvalue()
+
+    @staticmethod
+    def reasons_step(config: str) -> tuple[int, str]:
+        """Run the `reasons` step on a planted config, from its tree.
+
+        Returns:
+            Its exit status and stderr.
+
+        """
+        err = io.StringIO()
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / ".cargo").mkdir()
+            (Path(tmp) / CONFIG).write_text(config, encoding="utf-8")
+            with contextlib.chdir(tmp), contextlib.redirect_stderr(err):
+                status = helper.main(["reasons", CONFIG])
+        return status, err.getvalue()
+
+    def test_a_trailing_record_derives_its_lines_pattern(self) -> None:
+        """Code before the comment: the site is the comment's own line."""
+        grep = f"src/lib.rs:20:if a == b {{ {MARK} {EQUAL}: one value\n"
+        self.assertEqual(self.records_step(grep), (0, f"{DERIVED}\n", ""))
+
+    def test_a_record_on_the_line_above_derives_the_next_lines_pattern(self) -> None:
+        """A comment alone on its line: the site is the line below it."""
+        grep = f"src/lib.rs:19:    {MARK} {EQUAL}: one value\n"
+        self.assertEqual(self.records_step(grep), (0, f"{DERIVED}\n", ""))
+
+    def test_a_record_with_no_mutation_text_is_red_by_file_and_line(self) -> None:
+        """A reason with nothing before it: nothing to match, no pattern."""
+        grep = f"src/lib.rs:19:    {MARK} : one value\n"
+        want = f"{LABEL}: src/lib.rs:19: {MARK} names no mutation\n{FORM}\n"
+        self.assertEqual(self.records_step(grep), (1, "", want))
+
+    def test_a_record_with_no_reason_is_red_by_file_and_line(self) -> None:
+        """Mutation text and no reason: nothing says why it cannot be killed."""
+        grep = f"src/lib.rs:19:    {MARK} {EQUAL}:\n"
+        want = f"{LABEL}: src/lib.rs:19: {MARK} {EQUAL} gives no reason\n{FORM}\n"
+        self.assertEqual(self.records_step(grep), (1, "", want))
 
     def test_a_record_in_a_file_the_run_does_not_mutate_is_red(self) -> None:
         """No mutant of the listing is in its file: named, never matched."""
-        self.track("src/other.rs", source(l2=f"    {MARK} delete !: never read"))
-        done, _ = self.leg_with(source())
-        self.assertEqual(done.returncode, 1)
+        found = helper.read_records(f"src/other.rs:2:    {MARK} delete !: why\n")
+        want = [f"src/other.rs:2: {MARK} delete ! is in no mutated file"]
+        self.assertEqual(helper.unmatched(found, NAMES), want)
+
+    def test_a_stale_record_is_red_by_file_and_line(self) -> None:
+        """Its file is mutated, but no mutant of its text is at its site."""
+        found = helper.read_records(
+            f"src/lib.rs:3:    {MARK} delete !: why\n"
+            f"src/lib.rs:19:    {MARK} {EQUAL}: why\n"
+        )
         want = [
-            f"{LABEL}: src/other.rs:2: {MARK} delete ! is in no mutated file",
-            *RED,
+            (
+                f"src/lib.rs:3: {MARK} delete ! is stale:"
+                " no such mutant at line 4 — delete it"
+            )
         ]
-        self.assertEqual(done.stderr.splitlines(), want)
-
-    def test_a_record_with_no_mutation_text_is_red_before_any_build(self) -> None:
-        """A reason with nothing before it: nothing to match."""
-        done, log = self.leg_with(source(l19=f"    {MARK} : a and b are one value"))
-        self.assertEqual(done.returncode, 1)
-        want = [f"{LABEL}: src/lib.rs:19: {MARK} names no mutation", FORM]
-        self.assertEqual(done.stderr.splitlines(), want)
-        self.assertEqual(log, list[str]())
-
-    def test_a_record_with_no_reason_is_red_before_any_build(self) -> None:
-        """Mutation text and no reason: nothing says why it cannot be killed."""
-        done, log = self.leg_with(source(l19=f"    {MARK} {EQUAL}:"))
-        self.assertEqual(done.returncode, 1)
-        want = [f"{LABEL}: src/lib.rs:19: {MARK} {EQUAL} gives no reason", FORM]
-        self.assertEqual(done.stderr.splitlines(), want)
-        self.assertEqual(log, list[str]())
+        self.assertEqual(helper.unmatched(found, NAMES), want)
 
     def test_a_pinned_exclude_re_entry_is_red_by_name(self) -> None:
         """`:line:col:` in an entry: record it at its site instead."""
@@ -683,20 +682,13 @@ class SiteRecords(Planted):
             '  "src/lib\\\\.rs:20:9: replace == with !=",\n'
             "]\n"
         )
-        done, log = self.leg_with(source(), config=config)
-        self.assertEqual(done.returncode, 1)
-        want = [
-            (
-                f"{LABEL}: {CONFIG}:3: exclude_re entry"
-                ' "src/lib\\\\.rs:20:9: replace == with !=" pins a line and column'
-            ),
-            (
-                "  record the mutant at its site instead, on its line or"
-                f" the line above: {SPELLING}"
-            ),
-        ]
-        self.assertEqual(done.stderr.splitlines(), want)
-        self.assertEqual(log, list[str]())
+        want = (
+            f"{LABEL}: {CONFIG}:3: exclude_re entry"
+            ' "src/lib\\\\.rs:20:9: replace == with !=" pins a line and column\n'
+            "  record the mutant at its site instead, on its line or"
+            f" the line above: {SPELLING}\n"
+        )
+        self.assertEqual(self.reasons_step(config), (1, want))
 
     def test_an_unpinned_exclude_re_entry_with_its_reason_is_accepted(self) -> None:
         """A rule that is not a site stays in the config; [0-9]+ is no position."""
@@ -708,9 +700,7 @@ class SiteRecords(Planted):
             '  "src/lib\\\\.rs:[0-9]+:[0-9]+: replace banner",\n'
             "]\n"
         )
-        done, _ = self.leg_with(source(), config=config)
-        self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(done.stderr, "")
+        self.assertEqual(self.reasons_step(config), (0, ""))
 
 
 class Pgrx(Planted):
