@@ -396,5 +396,43 @@ class RefusedRead(ForgeCase):
         self.assertEqual("", done.stdout)
 
 
+class UnparsableBody(ForgeCase):
+    """A body the check cannot parse is not a clean org (#2001).
+
+    The loops read jq's rows through process substitution, so a jq
+    that failed read as no rows, and the check printed its clean line.
+    """
+
+    def assert_not_clean(self, done: subprocess.CompletedProcess[str]) -> None:
+        """The run stops nonzero and never says it found no drift."""
+        self.assertNotEqual(0, done.returncode, done.stdout + done.stderr)
+        self.assertNotIn("no drift", done.stdout)
+
+    def test_an_unparsable_packages_body_is_not_clean(self) -> None:
+        """The org's packages served as an object, not a list."""
+        self.forge.answer(PACKAGES, {"a": 1})
+        self.assert_not_clean(self.forge.check())
+
+    def test_an_unparsable_rulesets_body_is_not_clean(self) -> None:
+        """A repository's own rulesets served as an object, not a list.
+
+        The repository is private: a public one with no rows read still
+        drifts on its missing merge-queue ruleset, which would hide the
+        unparsable body behind a finding about something else.
+        """
+        repo = ROSTER[0]
+        settings = {k: v for k, v in BASELINE.items() if k != "labels"}
+        settings |= {
+            "web_commit_signoff_required": True,
+            "default_branch": "main",
+            "visibility": "private",
+        }
+        self.forge.answer(f"repos/{ORG}/{repo}", settings)
+        self.forge.answer(
+            f"repos/{ORG}/{repo}/rulesets?includes_parents=false", {"a": 1}
+        )
+        self.assert_not_clean(self.forge.check())
+
+
 if __name__ == "__main__":
     unittest.main()

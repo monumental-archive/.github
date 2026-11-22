@@ -150,9 +150,7 @@ esac
 # It stays here rather than moving into the plan because it is not a fact
 # about this repository's history: it compares a derived file against what
 # a DIFFERENT release published, which the plan has no reach into.
-# shellcheck disable=SC2312  # process substitution: capturing first would
-# turn an empty result into one blank line, which is a worse bug than the
-# masked status. The producing command is git/jq over local state.
+controls=$(git ls-files '*.control')
 while IFS= read -r control; do
   [[ -n ${control} ]] || continue
   name=$(basename "${control}" .control)
@@ -178,7 +176,7 @@ while IFS= read -r control; do
       "release commit."
     exit 1
   fi
-done < <(git ls-files '*.control')
+done <<< "${controls}"
 
 # Signed, not merely annotated (#349 S4): gitsign puts a keyless x509
 # signature in the tag object, under the same Sigstore root of trust as
