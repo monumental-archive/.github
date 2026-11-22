@@ -48,6 +48,15 @@
 #
 # THIS FILE IS THE SEQUENCE; mutants_python.py READS AND JUDGES (#1486).
 set -euo pipefail
+
+# The writer beside this file, found with no command run (#1934).
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${org__here}/findings.sh"
+unset org__here
+# The task this script reports for, where mise named none (#1934).
+: "${MISE_TASK_NAME:=audit:mutants}"
 : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
 
 label="audit:mutants: python"
@@ -105,8 +114,8 @@ fi
 "${helper[@]}" pragmas "${scratch}/pragmas.tsv"
 
 command -v cosmic-ray > /dev/null || {
-  echo "${label}: cosmic-ray missing — the belt pins it lazy; install it by name:" >&2
-  echo "    mise install pipx:cosmic-ray" >&2
+  org_finding "python" "cosmic-ray missing — the belt pins it lazy; install it by name:" \
+    "  mise install pipx:cosmic-ray"
   exit 1
 }
 
@@ -123,7 +132,7 @@ else
   # The plan job checked its own checkout; a shard checks its own.
   changed=$(git status --porcelain --untracked-files=no -- "${paths[@]}")
   if [[ -n ${changed} ]]; then
-    echo "${label}: the tracked tree differs from git under module-path — refused" >&2
+    org_finding "python" "the tracked tree differs from git under module-path — refused"
     exit 1
   fi
 fi

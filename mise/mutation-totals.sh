@@ -24,6 +24,15 @@
 # survivor exists. No language is written here.
 set -euo pipefail
 
+# The writer beside this file, found with no command run (#1934).
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${org__here}/findings.sh"
+unset org__here
+# The task this script reports for, where mise named none (#1934).
+: "${MISE_TASK_NAME:=audit:mutants}"
+
 usage="usage: mutation-totals.sh <directory of per-shard summaries> <language>"
 dir="${1:?${usage}}"
 lang="${2:?${usage}}"
@@ -38,28 +47,28 @@ if [[ -d ${dir} ]]; then
   rows=$(find "${dir}" -name "${lang}.tsv" -type f -exec cat {} + | sort -n)
 fi
 if [[ -z ${rows} ]]; then
-  echo "${label}: no shard reported a summary — every shard died before its last line" >&2
+  org_finding "${lang}" "no shard reported a summary — every shard died before its last line"
   exit 1
 fi
 
 status=0
-verdict=$(awk -F '\t' -v label="${label}" '
+verdict=$(awk -F '\t' -v label="${label}" -v lang="${lang}" '
   {
     split($1, kn, "/")
     if (n == "") n = kn[2]
-    if (kn[2] != n) { printf "%s: shards disagree about n (%s, %s)\n", label, n, kn[2]; bad = 1; next }
-    if (kn[1] in seen) { printf "%s: shard %s reported twice\n", label, $1; bad = 1; next }
+    if (kn[2] != n) { printf "%s\037shards disagree about n (%s, %s)\n", lang, n, kn[2]; bad = 1; next }
+    if (kn[1] in seen) { printf "%s\037shard %s reported twice\n", lang, $1; bad = 1; next }
     seen[kn[1]] = 1
     if ($2 == "skipped") { skipped++; next }
     judged++
     mutants += $2; killed += $3; survived += $4
     if (excluded == "") excluded = $5
-    else if ($5 != excluded) { printf "%s: shards disagree about excluded (%s, %s)\n", label, excluded, $5; bad = 1 }
+    else if ($5 != excluded) { printf "%s\037shards disagree about excluded (%s, %s)\n", lang, excluded, $5; bad = 1 }
   }
   END {
-    if (skipped > 0 && judged > 0) { printf "%s: some shards skipped and some judged\n", label; bad = 1 }
+    if (skipped > 0 && judged > 0) { printf "%s\037some shards skipped and some judged\n", lang; bad = 1 }
     for (k = 0; k < n; k++) if (!(k in seen)) {
-      printf "%s: shard %d/%s reported nothing — it died or judged nothing\n", label, k, n
+      printf "%s\037shard %d/%s reported nothing — it died or judged nothing\n", lang, k, n
       bad = 1
     }
     if (bad) exit 1
@@ -73,11 +82,12 @@ case ${status} in
   0) echo "${verdict}" ;;
   2)
     echo "${verdict}"
-    echo "${label}: red — the survivors are named in their shards' logs" >&2
+    org_finding "${lang}" "red — the survivors are named in their shards' logs"
     exit 1
     ;;
   *)
-    echo "${verdict}" >&2
+    # Each refusal is a finding line for the writer (#1934).
+    org_finding_lines <<< "${verdict}"
     exit 1
     ;;
 esac

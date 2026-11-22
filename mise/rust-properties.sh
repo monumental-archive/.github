@@ -24,15 +24,24 @@
 # The scheduled run never pushes.
 set -euo pipefail
 
+# The writer beside this file, found with no command run (#1934).
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${org__here}/findings.sh"
+unset org__here
+
 profile="${1:-}"
 case "${profile}" in
   lint) label="lint:rust-properties" ;;
   audit) label="audit:rust-properties" ;;
   *)
-    echo "rust-properties.sh: expected lint or audit, got '${profile}'" >&2
+    org_finding "" "expected lint or audit, got '${profile}'"
     exit 2
     ;;
 esac
+# The task this script reports for, where mise named none (#1934).
+: "${MISE_TASK_NAME:=${label}}"
 belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
 python="${ORG_PYTHON:?${ORG_PYTHON_UNSET:-unset — the belt Python}}"
 
@@ -41,7 +50,7 @@ locks=$(git ls-files ':!vendor/**' Cargo.lock '*/Cargo.lock')
 pins=""
 if [[ -n ${locks} ]]; then
   pins=$(tr '\n' '\0' <<< "${locks}" | xargs -0 "${python}" "${belt}/rust_properties.py" locked) || {
-    echo "${label}: a tracked Cargo.lock could not be read (above)" >&2
+    org_finding "" "a tracked Cargo.lock could not be read (above)"
     exit 1
   }
 fi
@@ -52,11 +61,11 @@ fi
 
 if [[ ${profile} == lint ]]; then
   findings=$(tr '\n' '\0' <<< "${locks}" | xargs -0 "${python}" "${belt}/rust_properties.py" lint) || {
-    echo "${label}: proptest below 1.7.0 ignores PROPTEST_RNG_SEED, so the gate's seed never reaches it:" >&2
-    while IFS= read -r finding; do
-      echo "  ${finding}" >&2
-    done <<< "${findings}"
-    echo "  update proptest to 1.7.0 or later (cargo update -p proptest)" >&2
+    detail=()
+    while IFS= read -r finding; do detail+=("${finding}"); done <<< "${findings}"
+    org_finding "" "proptest below 1.7.0 ignores PROPTEST_RNG_SEED, so the gate's seed never reaches it:" \
+      "${detail[@]}" \
+      "update proptest to 1.7.0 or later (cargo update -p proptest)"
     exit 1
   }
   while IFS= read -r pin; do
@@ -69,8 +78,8 @@ fi
 # none, nothing runs them, and a green audit would say nothing.
 if ! mise tasks info test > /dev/null 2>&1; then
   files=$(awk -F': proptest ' '{ print $1 }' <<< "${pins}" | sort -u | paste -sd ' ' -)
-  echo "${label}: ${files} locks proptest, but the repository defines no test task —" >&2
-  echo "  nothing runs its properties; the gate's and this run's seed reach proptest through mise run test" >&2
+  org_finding "" "${files} locks proptest, but the repository defines no test task —" \
+    "nothing runs its properties; the gate's and this run's seed reach proptest through mise run test"
   exit 1
 fi
 
@@ -79,8 +88,8 @@ echo "${label}: seed ${seed} (reproduce: ORG_PROPERTY_SEED=${seed})"
 status=0
 ORG_PROPERTY_SEED="${seed}" mise run test || status=$?
 if ((status != 0)); then
-  echo "${label}: seed ${seed} — ORG_PROPERTY_SEED=${seed} mise run test reproduces it and" >&2
-  echo "  writes proptest's line into the *.proptest-regressions file beside the test;" >&2
-  echo "  commit that line with the fix, and every run, the gate's included, replays it first" >&2
+  org_finding "" "seed ${seed} — ORG_PROPERTY_SEED=${seed} mise run test reproduces it and" \
+    "writes proptest's line into the *.proptest-regressions file beside the test;" \
+    "commit that line with the fix, and every run, the gate's included, replays it first"
 fi
 exit "${status}"

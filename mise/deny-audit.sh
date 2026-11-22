@@ -23,29 +23,38 @@
 # The subject is Cargo.lock: what the scan covers. The judgment, and
 # every rule of it, is stele's (stele's docs/vex-join.md).
 set -euo pipefail
+
+# The writer beside this file, found with no command run (#1934).
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${org__here}/findings.sh"
+unset org__here
+# The task this script reports for, where mise named none (#1934).
+: "${MISE_TASK_NAME:=audit:deny}"
 locks=$(git ls-files ':!vendor/**' "Cargo.lock" "*/Cargo.lock")
 [[ -n ${locks} ]] || {
   echo "audit:deny: no Cargo.lock tracked, skipped"
   exit 0
 }
 command -v cargo > /dev/null || {
-  echo "audit:deny: Cargo.lock present but cargo missing — pin rust in mise.toml" >&2
+  org_finding "" "Cargo.lock present but cargo missing — pin rust in mise.toml"
   exit 1
 }
 [[ -f deny.toml ]] || {
-  echo "audit:deny: Cargo.lock present but no deny.toml — copy scaffold/deny.toml from the canon" >&2
+  org_finding "" "Cargo.lock present but no deny.toml — copy scaffold/deny.toml from the canon"
   exit 1
 }
 command -v stele > /dev/null || {
-  echo "audit:deny: stele missing from the belt" >&2
+  org_finding "" "stele missing from the belt"
   exit 1
 }
 canon="${ORG_CANON_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
 belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
 vex="${canon}/security/vex"
 [[ -d ${vex} ]] || {
-  echo "audit:deny: ${vex} is not a directory, so the org's triage decisions cannot be read" >&2
-  echo "  the org belt did not arrive: CI sets MISE_GLOBAL_CONFIG_FILE, locally run: lefthook run post-checkout" >&2
+  org_finding "" "${vex} is not a directory, so the org's triage decisions cannot be read" \
+    "the org belt did not arrive: CI sets MISE_GLOBAL_CONFIG_FILE, locally run: lefthook run post-checkout"
   exit 1
 }
 scan=$(mktemp)

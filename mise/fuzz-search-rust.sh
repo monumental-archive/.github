@@ -17,6 +17,15 @@
 # run goes on to the next, so one crash never hides another's finds.
 set -uo pipefail
 
+# The writer beside this file, found with no command run (#1934).
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${org__here}/findings.sh"
+unset org__here
+# The task this script reports for, where mise named none (#1934).
+: "${MISE_TASK_NAME:=audit:fuzz}"
+
 # The scratch directory is removed however the run ends
 # (completion-guarded, #1233).
 work=""
@@ -31,9 +40,9 @@ budget=1800
 unknown() {
   local in=""
   [[ -z ${FUZZ_PACKAGE:-} ]] || in=" in '${FUZZ_PACKAGE}'"
-  echo "$1: FUZZ_TARGET '${FUZZ_TARGET}'${in} is no fuzz target $2" >&2
-  echo "  repo-deep-tests.yml's matrix lists the targets audit_legs.py reads from the tree;" >&2
-  echo "  a local run names one of the targets, or leaves FUZZ_TARGET unset to run every one" >&2
+  MISE_TASK_NAME=$1 org_finding "" "FUZZ_TARGET '${FUZZ_TARGET}'${in} is no fuzz target $2" \
+    "repo-deep-tests.yml's matrix lists the targets audit_legs.py reads from the tree;" \
+    "a local run names one of the targets, or leaves FUZZ_TARGET unset to run every one"
   exit 1
 }
 
@@ -64,24 +73,24 @@ list_dir() {
 }
 
 command -v cargo-fuzz > /dev/null || {
-  echo "audit:fuzz: cargo-fuzz missing (pin cargo:cargo-fuzz in mise.toml)" >&2
+  org_finding "" "cargo-fuzz missing (pin cargo:cargo-fuzz in mise.toml)"
   exit 1
 }
 if [[ -z ${FUZZ_TOOLCHAIN:-} ]]; then
-  echo "audit:fuzz: FUZZ_TOOLCHAIN is not declared — sanitized fuzzing needs a nightly toolchain" >&2
-  echo "  AddressSanitizer is cargo-fuzz's default and needs -Zsanitizer, so stable cannot run it" >&2
-  echo "  declare BOTH toolchains in this repo's mise.toml (mise holds and locks both):" >&2
-  echo "    [tools]" >&2
-  echo '    rust = ["1.xx.x", "nightly-YYYY-MM-DD"]' >&2
-  echo "    [env]" >&2
-  echo '    FUZZ_TOOLCHAIN = "nightly-YYYY-MM-DD"' >&2
-  echo "  a dated nightly, never bare 'nightly' — a moving channel is not a pinned input" >&2
+  org_finding "" "FUZZ_TOOLCHAIN is not declared — sanitized fuzzing needs a nightly toolchain" \
+    "AddressSanitizer is cargo-fuzz's default and needs -Zsanitizer, so stable cannot run it" \
+    "declare BOTH toolchains in this repo's mise.toml (mise holds and locks both):" \
+    "  [tools]" \
+    '  rust = ["1.xx.x", "nightly-YYYY-MM-DD"]' \
+    "  [env]" \
+    '  FUZZ_TOOLCHAIN = "nightly-YYYY-MM-DD"' \
+    "a dated nightly, never bare 'nightly' — a moving channel is not a pinned input"
   exit 1
 fi
 if ! toolchains=$(rustup toolchain list 2> /dev/null) \
   || ! grep -q "^${FUZZ_TOOLCHAIN}" <<< "${toolchains}"; then
-  echo "audit:fuzz: FUZZ_TOOLCHAIN='${FUZZ_TOOLCHAIN}' is declared but not installed" >&2
-  echo "  it rides the rust pin in mise.toml so it installs before tasks run, never mid-run" >&2
+  org_finding "" "FUZZ_TOOLCHAIN='${FUZZ_TOOLCHAIN}' is declared but not installed" \
+    "it rides the rust pin in mise.toml so it installs before tasks run, never mid-run"
   exit 1
 fi
 # --careful implies -Zbuild-std, which rebuilds the standard library from
@@ -89,14 +98,14 @@ fi
 # discovered halfway through a build, the llvm-tools/clippy pattern.
 if ! src=$(rustup component list --installed --toolchain "${FUZZ_TOOLCHAIN}" 2> /dev/null) \
   || ! grep -q "^rust-src" <<< "${src}"; then
-  echo "audit:fuzz: the nightly lacks rust-src, which --careful needs (it implies -Zbuild-std)" >&2
-  echo "  components ride the pin, so declare them there rather than adding them by hand:" >&2
-  echo "    rust = [\"1.xx.x\", { version = \"${FUZZ_TOOLCHAIN}\", components = \"rust-src\" }]" >&2
+  org_finding "" "the nightly lacks rust-src, which --careful needs (it implies -Zbuild-std)" \
+    "components ride the pin, so declare them there rather than adding them by hand:" \
+    "  rust = [\"1.xx.x\", { version = \"${FUZZ_TOOLCHAIN}\", components = \"rust-src\" }]"
   exit 1
 fi
 secs="${FUZZ_SECONDS:-${budget}}"
 targets=$(cargo fuzz list) || {
-  echo "audit:fuzz: cargo fuzz list failed (above)" >&2
+  org_finding "" "cargo fuzz list failed (above)"
   exit 1
 }
 if [[ -n ${FUZZ_TARGET:-} ]]; then
@@ -151,7 +160,7 @@ while IFS= read -r target; do
   fi
   if ! RUSTUP_TOOLCHAIN="${FUZZ_TOOLCHAIN}" cargo fuzz run -s address --careful "${target}" \
     "${base}" "${finds}" -- -merge=1 >&2; then
-    echo "audit:fuzz: ${target}: libFuzzer's merge of the finds failed (above)" >&2
+    org_finding "" "${target}: libFuzzer's merge of the finds failed (above)"
     failed="${failed} ${target}(merge)"
     continue
   fi
@@ -174,9 +183,9 @@ while IFS= read -r target; do
 done <<< "${targets}"
 [[ -n ${ORG_FUZZ_CANDIDATES:-} ]] || echo "audit:fuzz: staged under ${org_fuzz_stage}"
 if [[ -n ${failed} ]]; then
-  echo "audit:fuzz: failing target(s):${failed}" >&2
-  echo "  a crash's input is staged at fuzz/corpus/<target>/crash-<hash> for repo-deep-tests.yml" >&2
-  echo "  to propose; replay it with: cargo fuzz run <target> fuzz/artifacts/<target>/crash-<hash>" >&2
+  org_finding "" "failing target(s):${failed}" \
+    "a crash's input is staged at fuzz/corpus/<target>/crash-<hash> for repo-deep-tests.yml" \
+    "to propose; replay it with: cargo fuzz run <target> fuzz/artifacts/<target>/crash-<hash>"
   exit 1
 fi
 echo "audit:fuzz: all targets ran ${secs}s clean under ASan"

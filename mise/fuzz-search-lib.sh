@@ -15,6 +15,12 @@
 #
 # Every step is checked here rather than left to errexit, which a
 # caller's `$(...)`, `if` or `||` switches off.
+# The writer beside this file, found with no command run (#1934).
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${org__here}/findings.sh"
+unset org__here
 
 # The names the search reads from, and stages as, a corpus file: one
 # path segment, never `.` or `..`. The `propose` job holds every staged
@@ -38,7 +44,7 @@ org_fuzz_stage_dir() {
 org_fuzz_stage() {
   local to="${org_fuzz_stage:?org_fuzz_stage_dir first}/$2"
   if ! mkdir -p -- "${to%/*}" || ! cp -- "$1" "${to}"; then
-    echo "could not stage $1 at $2" >&2
+    org_finding "" "could not stage $1 at $2"
     return 1
   fi
 }
@@ -83,7 +89,7 @@ org_fuzz_last_new() {
         END { if (last != "") print last }' "$2"
       ;;
     *)
-      echo "org_fuzz_last_new: unknown kind '$1'" >&2
+      org_finding "" "unknown kind '$1'"
       return 1
       ;;
   esac
@@ -112,7 +118,7 @@ org_fuzz_summary() {
   echo "$1"
   [[ -n ${ORG_FUZZ_SUMMARY:-} ]] || return 0
   if ! mkdir -p -- "$(dirname -- "${ORG_FUZZ_SUMMARY}")" || ! echo "$1" >> "${ORG_FUZZ_SUMMARY}"; then
-    echo "could not write the summary to ${ORG_FUZZ_SUMMARY}" >&2
+    org_finding "" "could not write the summary to ${ORG_FUZZ_SUMMARY}"
     return 1
   fi
 }
@@ -128,7 +134,7 @@ org_fuzz_proposed() {
   local dir=$1 dest=$2 listing entry mode type oid path name
   git rev-parse -q --verify 'refs/remotes/origin/fuzz-corpus^{commit}' > /dev/null || return 0
   listing=$(git ls-tree --full-tree origin/fuzz-corpus -- "${dir}/") || {
-    echo "git ls-tree failed listing ${dir}/ on origin/fuzz-corpus" >&2
+    org_finding "" "git ls-tree failed listing ${dir}/ on origin/fuzz-corpus"
     return 1
   }
   while IFS=$'\t' read -r entry path; do
@@ -140,7 +146,7 @@ org_fuzz_proposed() {
     [[ ${name} != crash-* && ${name} != timeout-* && ${name} != oom-* ]] || continue
     [[ ! -e ${dest}/${name} ]] || continue
     if ! mkdir -p -- "${dest}" || ! git cat-file blob "${oid}" > "${dest}/${name}"; then
-      echo "could not read ${path} from origin/fuzz-corpus" >&2
+      org_finding "" "could not read ${path} from origin/fuzz-corpus"
       return 1
     fi
     echo "${name}"
@@ -187,7 +193,7 @@ org_fuzz_select() {
     [[ -n ${file} ]] || continue
     [[ ! -e ${dir}/${name} ]] || continue
     if ! cp -- "${file}" "${dir}/${name}"; then
-      echo "${label}: could not add ${file} to ${dir}" >&2
+      org_finding "" "could not add ${file} to ${dir}"
       status=1
       break
     fi

@@ -5,6 +5,12 @@
 # through the one function here, so the search keeps a find by exactly
 # the figure the floor holds. Kept out of fuzz-corpus-lib.sh, which
 # lint:fuzz-build's replay sources and which needs none of these tools.
+# The writer beside this file, found with no command run (#1934).
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${org__here}/findings.sh"
+unset org__here
 
 # org_fuzz_leg_name <name>: a fuzz target's leg (#1896), `fuzz-<name>`
 # lower-cased, every character but [a-z0-9] turned into `-`, so it fits
@@ -44,7 +50,7 @@ org_fuzz_measure() {
     rust) org__fuzz_measure_rust "${label}" "${leg}" "$4" "$5" ;;
     go) org__fuzz_measure_go "${label}" "${leg}" "$4" "$5" ;;
     *)
-      echo "${label}: ${leg}: unknown fuzz target kind '${kind}'" >&2
+      org_finding "" "${leg}: unknown fuzz target kind '${kind}'"
       return 1
       ;;
   esac
@@ -57,8 +63,8 @@ org__fuzz_measure_rust() {
   belt=$(dirname "${BASH_SOURCE[0]}")
   first=$(find "${corpus}" -type f -print -quit 2> /dev/null) || first=""
   if [[ -z ${first} ]]; then
-    echo "${label}: ${leg}: fuzz target '${target}' has no committed corpus — a" >&2
-    echo "  measurement that reads nothing must not become a floor (lint:fuzz-build names the remedy)" >&2
+    org_finding "" "${leg}: fuzz target '${target}' has no committed corpus — a" \
+      "measurement that reads nothing must not become a floor (lint:fuzz-build names the remedy)"
     return 1
   fi
   # The tracked sources, the figure's surface: everything the repository
@@ -76,8 +82,8 @@ org__fuzz_measure_rust() {
   sysroot=$(rustc --print sysroot) || return 1
   llvm_cov="${sysroot}/lib/rustlib/${host}/bin/llvm-cov"
   if [[ -z ${host} || ! -x ${llvm_cov} ]]; then
-    echo "${label}: no llvm-cov at ${llvm_cov} — the llvm-tools component is declared but" >&2
-    echo "  its binaries are not where the toolchain keeps them" >&2
+    org_finding "" "no llvm-cov at ${llvm_cov} — the llvm-tools component is declared but" \
+      "its binaries are not where the toolchain keeps them"
     return 1
   fi
   # A build directory of the compiler's own (#1877), beside the fuzz
@@ -86,7 +92,7 @@ org__fuzz_measure_rust() {
   metadata=$(cargo metadata --no-deps --format-version 1 --locked --manifest-path fuzz/Cargo.toml) || return 1
   dir=$(jq -r '.target_directory // empty' <<< "${metadata}") || return 1
   if [[ -z ${dir} ]]; then
-    echo "${label}: cargo metadata named no target_directory for fuzz/ — nowhere to build into" >&2
+    org_finding "" "cargo metadata named no target_directory for fuzz/ — nowhere to build into"
     return 1
   fi
   compiler=$("${ORG_PYTHON:?}" "${belt}/gate_cache_key.py" digest) || return 1
@@ -98,7 +104,7 @@ org__fuzz_measure_rust() {
   [[ -e fuzz/coverage ]] || made=${root}/fuzz/coverage
   rm -rf -- "fuzz/coverage/${target}/raw"
   if ! cargo fuzz coverage -s none --target-dir "${build}" "${target}" "${corpus}" >&2; then
-    echo "${label}: ${leg}: cargo fuzz coverage failed replaying the committed corpus (above)" >&2
+    org_finding "" "${leg}: cargo fuzz coverage failed replaying the committed corpus (above)"
     status=1
   fi
   if ((status == 0)); then
@@ -111,8 +117,8 @@ org__fuzz_measure_rust() {
   [[ -z ${made} ]] || rm -rf -- "${made}"
   ((status == 0)) || return 1
   if [[ ! ${count:-} =~ ^[0-9]+$ || ! ${covered:-} =~ ^[0-9]+$ || ${count} == 0 ]]; then
-    echo "${label}: ${leg}: llvm-cov counted no tracked line (count '${count:-absent}') — a" >&2
-    echo "  measurement that reads nothing must not become a floor" >&2
+    org_finding "" "${leg}: llvm-cov counted no tracked line (count '${count:-absent}') — a" \
+      "measurement that reads nothing must not become a floor"
     return 1
   fi
   awk -v n="${count}" -v c="${covered}" 'BEGIN { printf "%.16g\n", c * 100 / n }'
@@ -124,7 +130,7 @@ org__fuzz_measure_go() {
   module=${dir}
   while [[ ! -f ${module}/go.mod ]]; do
     if [[ ${module} == . ]]; then
-      echo "${label}: ${leg}: no go.mod above ${dir} — no module owns ${name}" >&2
+      org_finding "" "${leg}: no go.mod above ${dir} — no module owns ${name}"
       return 1
     fi
     module=$(dirname "${module}")
@@ -139,13 +145,13 @@ org__fuzz_measure_go() {
     [[ -z ${pkg} ]] || coverpkg+="${coverpkg:+,}${pkg}"
   done <<< "${pkgs}"
   if [[ -z ${coverpkg} ]]; then
-    echo "${label}: ${leg}: go list named no package of the module for ./${dir}" >&2
+    org_finding "" "${leg}: go list named no package of the module for ./${dir}"
     return 1
   fi
   work=$(mktemp -d) || return 1
   if ! (cd "${module}" && go test -count=1 -run "^${name}\$" -coverpkg="${coverpkg}" \
     -coverprofile="${work}/${leg}.out" "./${rel}") >&2; then
-    echo "${label}: ${leg}: ${name}'s seed corpus failed under measurement (above)" >&2
+    org_finding "" "${leg}: ${name}'s seed corpus failed under measurement (above)"
     status=1
   fi
   if ((status == 0)); then
@@ -155,8 +161,8 @@ org__fuzz_measure_go() {
   rm -rf -- "${work}"
   ((status == 0)) || return 1
   if [[ -z ${pct} ]]; then
-    echo "${label}: ${leg}: could not read a total from the Go profile — a" >&2
-    echo "  measurement that reads nothing must not become a floor" >&2
+    org_finding "" "${leg}: could not read a total from the Go profile — a" \
+      "measurement that reads nothing must not become a floor"
     return 1
   fi
   echo "${pct}"

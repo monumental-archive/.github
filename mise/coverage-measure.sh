@@ -96,11 +96,20 @@
 # own lockfile, which made `mise run ci` unrunnable locally (#82).
 set -euo pipefail
 
+# The writer beside this file, found with no command run (#1934).
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${org__here}/findings.sh"
+unset org__here
+
 : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
 
 # The caller's name, so a remedy printed here names the task the session
 # actually ran.
 label="${1:-coverage:measure}"
+# The task this script reports for, where mise named none (#1934).
+: "${MISE_TASK_NAME:=${label}}"
 belt_dir=$(dirname "${BASH_SOURCE[0]}")
 
 # Which language legs to run. Default `all`: every caller that reads
@@ -112,8 +121,9 @@ legs="${2:-all}"
 case "${legs}" in
   all | go | rust | rust-branches | pgrx | pgrx-majors | python | typescript | plpgsql | fuzz | probe | reports) ;;
   *)
-    echo "${label}: unknown leg selector '${legs}' — expected all, go, rust," \
-      "rust-branches, pgrx, pgrx-majors, python, typescript, plpgsql, fuzz, probe or reports" >&2
+    why="unknown leg selector '${legs}' — expected all, go, rust,"
+    why+=" rust-branches, pgrx, pgrx-majors, python, typescript, plpgsql, fuzz, probe or reports"
+    org_finding "" "${why}"
     exit 1
     ;;
 esac
@@ -169,7 +179,7 @@ if [[ ${legs} == reports ]]; then
     # which is the case a repository most needs named; the generic line
     # is for a floor with no record.
     "${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/coverage_floor.py" hold --label "${label}" --job gate < /dev/null || exit 1
-    echo "${label}: no leg was measured — a check that reads nothing must not pass" >&2
+    org_finding "" "no leg was measured — a check that reads nothing must not pass"
     exit 1
   fi
   # The leg lines themselves, beside the reports (#1622): the gate keeps
@@ -195,7 +205,7 @@ if [[ ${legs} == reports ]]; then
     exit 0
   fi
   if [[ -z ${files} ]]; then
-    echo "${label}: the legs measured wrote no report — nothing for the badge to upload" >&2
+    org_finding "" "the legs measured wrote no report — nothing for the badge to upload"
     exit 1
   fi
   printf '%s\n' "${measured}"
@@ -272,7 +282,7 @@ fi
 # "floor held" over a language nothing had measured (#392).
 if [[ -f go.mod && ${legs} =~ ^(all|go)$ ]]; then
   if ! command -v go > /dev/null; then
-    echo "${label}: go.mod present but go missing — pin go in mise.toml" >&2
+    org_finding "" "go.mod present but go missing — pin go in mise.toml"
     exit 1
   fi
   # The repository's own `test` run, measured where it ran (#1651, #1667):
@@ -291,10 +301,9 @@ if [[ -f go.mod && ${legs} =~ ^(all|go)$ ]]; then
   if [[ -n ${go_test} ]]; then
     counters=("${ORG_COVERAGE_RUN:-/nonexistent}"/go/covcounters.*)
     if [[ -z ${ORG_COVERAGE_RUN:-} || ! -e ${counters[0]} ]]; then
-      echo "${label}: the test task ran no measured Go — its test command runs" >&2
-      cat >&2 << 'REMEDY'
-  through "${ORG_BELT_DIR}/measured" (#1651), or no suite ran under mise
-REMEDY
+      # shellcheck disable=SC2016  # the remedy names the variable, unexpanded
+      org_finding "" "the test task ran no measured Go — its test command runs" \
+        'through "${ORG_BELT_DIR}/measured" (#1651), or no suite ran under mise'
       exit 1
     fi
     go tool covdata textfmt -i="${ORG_COVERAGE_RUN}/go" -o="${out}/coverage.txt" >&2
@@ -306,8 +315,8 @@ REMEDY
   fi
   go_pct=$(go tool cover -func="${out}/coverage.txt" | awk '/^total:/ { sub(/%/, "", $3); print $3 }')
   if [[ -z ${go_pct} ]]; then
-    echo "${label}: could not read a total from the Go profile — a" >&2
-    echo "  measurement that reads nothing must not become a floor" >&2
+    org_finding "" "could not read a total from the Go profile — a" \
+      "measurement that reads nothing must not become a floor"
     exit 1
   fi
   echo "go ${go_pct}"
@@ -378,11 +387,11 @@ rust_surface() {
   # is a second statement of the same surface, which drifts. Refused by
   # name in both legs, whatever it names.
   if [[ -n ${COVERAGE_EXCLUDE:-} ]]; then
-    echo "${label}: COVERAGE_EXCLUDE is set (${COVERAGE_EXCLUDE}) — it is removed (#1653):" >&2
-    echo "  the rust leg measures what the test task's own command builds, so the command" >&2
-    echo "  says what it leaves out (cargo test --workspace --exclude <member>); delete" >&2
-    echo "  the variable from mise.toml's [env] (a pgrx extension needs no line: test:pgrx" >&2
-    echo "  measures it)" >&2
+    org_finding "" "COVERAGE_EXCLUDE is set (${COVERAGE_EXCLUDE}) — it is removed (#1653):" \
+      "the rust leg measures what the test task's own command builds, so the command" \
+      "says what it leaves out (cargo test --workspace --exclude <member>); delete" \
+      "the variable from mise.toml's [env] (a pgrx extension needs no line: test:pgrx" \
+      "measures it)"
     exit 1
   fi
   llvm_tools "${toolchain}"
@@ -407,15 +416,17 @@ llvm_tools() {
   local toolchain="$1" installed
   installed=$(rustup component list --installed ${toolchain:+--toolchain "${toolchain}"} 2> /dev/null) || installed=""
   if ! grep -q "^llvm-tools" <<< "${installed}"; then
+    local when="(installed with the toolchain, before tasks run — never mid-run)"
     if [[ -z ${toolchain} ]]; then
-      echo "${label}: llvm-tools component missing — declare it with the" >&2
-      echo '  rust pin in mise.toml: rust = { version = "1.xx.x", components = "llvm-tools" }' >&2
+      org_finding "" "llvm-tools component missing — declare it with the" \
+        'rust pin in mise.toml: rust = { version = "1.xx.x", components = "llvm-tools" }' \
+        "${when}"
     else
-      echo "${label}: llvm-tools component missing on ${toolchain} — declare it with" >&2
-      echo "  the nightly's pin in mise.toml:" >&2
-      echo "    { version = \"${toolchain}\", components = \"rust-src,llvm-tools\" }" >&2
+      org_finding "" "llvm-tools component missing on ${toolchain} — declare it with" \
+        "the nightly's pin in mise.toml:" \
+        "  { version = \"${toolchain}\", components = \"rust-src,llvm-tools\" }" \
+        "${when}"
     fi
-    echo "  (installed with the toolchain, before tasks run — never mid-run)" >&2
     exit 1
   fi
 }
@@ -440,10 +451,9 @@ if [[ -f Cargo.toml && ${legs} =~ ^(all|rust)$ ]]; then
   # would otherwise read as this one's.
   if [[ -z ${ORG_COVERAGE_RUN:-} || ! -d ${ORG_COVERAGE_RUN}/rust ]] \
     || ! compgen -G "$(dirname "${LLVM_PROFILE_FILE:-/nonexistent/x}")/*.profraw" > /dev/null; then
-    echo "${label}: the test task ran no measured Rust — its test command runs" >&2
-    cat >&2 << 'REMEDY'
-  through "${ORG_BELT_DIR}/measured" (#1653), or no suite ran under mise
-REMEDY
+    # shellcheck disable=SC2016  # the remedy names the variable, unexpanded
+    org_finding "" "the test task ran no measured Rust — its test command runs" \
+      'through "${ORG_BELT_DIR}/measured" (#1653), or no suite ran under mise'
     exit 1
   fi
   # The extension's files leave the report by path (#1656): `report`
@@ -475,8 +485,8 @@ REMEDY
     END { if (found > 0) printf "%.16g\n", hit * 100 / found }
   ' "${out}/lcov.info" 2> /dev/null) || rust_pct=""
   if [[ -z ${rust_pct} ]]; then
-    echo "${label}: could not read a total from the Rust report — a" >&2
-    echo "  measurement that reads nothing must not become a floor" >&2
+    org_finding "" "could not read a total from the Rust report — a" \
+      "measurement that reads nothing must not become a floor"
     exit 1
   fi
   echo "rust ${rust_pct}"
@@ -500,17 +510,17 @@ if [[ -f Cargo.toml && ${legs} == rust-branches ]]; then
   # keep in step. A leg that used whatever nightly a machine happened to
   # have would vary its figure by machine.
   if [[ -z ${FUZZ_TOOLCHAIN:-} ]]; then
-    echo "${label}: FUZZ_TOOLCHAIN is not declared — Rust branch coverage needs a nightly" >&2
-    echo "  (cargo llvm-cov --branch passes -Z flags stable refuses). Declare the dated" >&2
-    echo "  nightly in this repo's mise.toml, both toolchains under one rust pin:" >&2
-    echo '    rust = ["1.xx.x", { version = "nightly-YYYY-MM-DD", components = "rust-src,llvm-tools" }]' >&2
-    echo '    [env] FUZZ_TOOLCHAIN = "nightly-YYYY-MM-DD"' >&2
+    org_finding "" "FUZZ_TOOLCHAIN is not declared — Rust branch coverage needs a nightly" \
+      "(cargo llvm-cov --branch passes -Z flags stable refuses). Declare the dated" \
+      "nightly in this repo's mise.toml, both toolchains under one rust pin:" \
+      '  rust = ["1.xx.x", { version = "nightly-YYYY-MM-DD", components = "rust-src,llvm-tools" }]' \
+      '  [env] FUZZ_TOOLCHAIN = "nightly-YYYY-MM-DD"'
     exit 1
   fi
   toolchains=$(rustup toolchain list 2> /dev/null) || toolchains=""
   if ! grep -q "^${FUZZ_TOOLCHAIN}" <<< "${toolchains}"; then
-    echo "${label}: FUZZ_TOOLCHAIN='${FUZZ_TOOLCHAIN}' is declared but not installed" >&2
-    echo "  it rides the rust pin in mise.toml so it installs before tasks run, never mid-run" >&2
+    org_finding "" "FUZZ_TOOLCHAIN='${FUZZ_TOOLCHAIN}' is declared but not installed" \
+      "it rides the rust pin in mise.toml so it installs before tasks run, never mid-run"
     exit 1
   fi
   rust_surface "${FUZZ_TOOLCHAIN}"
@@ -524,7 +534,7 @@ if [[ -f Cargo.toml && ${legs} == rust-branches ]]; then
   # leg's is for its own (rust-coverage-env.sh), so the two never meet.
   compiler=$(RUSTUP_TOOLCHAIN="${FUZZ_TOOLCHAIN}" "${ORG_PYTHON}" "${belt_dir}/gate_cache_key.py" digest) || exit 1
   if [[ -z ${target_directory} ]]; then
-    echo "${label}: cargo metadata named no target_directory — nowhere to measure Rust into" >&2
+    org_finding "" "cargo metadata named no target_directory — nowhere to measure Rust into"
     exit 1
   fi
   # shellcheck disable=SC2086  # ${excludes} is a built '--exclude <member>' list,
@@ -539,8 +549,8 @@ if [[ -f Cargo.toml && ${legs} == rust-branches ]]; then
   br_count=$(jq -r '.data[0].totals.branches.count // empty' <<< "${report}")
   br_pct=$(jq -r '.data[0].totals.branches.percent // empty' <<< "${report}")
   if [[ -z ${br_count} || -z ${br_pct} || ${br_count} == 0 ]]; then
-    echo "${label}: the Rust report counted no branches (count '${br_count:-absent}') — a" >&2
-    echo "  measurement that reads nothing must not become a floor" >&2
+    org_finding "" "the Rust report counted no branches (count '${br_count:-absent}') — a" \
+      "measurement that reads nothing must not become a floor"
     exit 1
   fi
   echo "rust-branches ${br_pct}"
@@ -565,10 +575,10 @@ py_report() {
     printf '%s\n' "${out}" >&2
     exit 1
   fi
-  echo "${label}: coverage recorded '${missing}', which no file in the tree matches —" >&2
-  echo "  a test ran a Python child under measurement from a directory other than the" >&2
-  echo "  repository root, and its files were recorded relative to that directory;" >&2
-  echo "  start the child from the repository root" >&2
+  org_finding "" "coverage recorded '${missing}', which no file in the tree matches —" \
+    "a test ran a Python child under measurement from a directory other than the" \
+    "repository root, and its files were recorded relative to that directory;" \
+    "start the child from the repository root"
   exit 1
 }
 
@@ -581,8 +591,8 @@ if [[ -n ${python_test} && ${legs} =~ ^(all|python)$ ]]; then
   # belt's start-up hook and wrote here. The discovery roots stay where
   # the repository wrote them; the belt never restates them.
   if ! command -v coverage > /dev/null; then
-    echo "${label}: tracked Python and a test task, but coverage is missing —" >&2
-    echo "  the belt pins pipx:coverage; run: mise install" >&2
+    org_finding "" "tracked Python and a test task, but coverage is missing —" \
+      "the belt pins pipx:coverage; run: mise install"
     exit 1
   fi
   data=("${run:-/nonexistent}"/python/.coverage*)
@@ -600,8 +610,8 @@ REMEDY
     rc_file="${run}/coverage.rc"
     # --keep: the run's data stays for any other reader in the same run.
     if ! coverage combine --keep --rcfile="${rc_file}" --quiet >&2; then
-      echo "${label}: the test task ran no measured Python — a measurement" >&2
-      echo "  that reads nothing must not become a floor" >&2
+      org_finding "" "the test task ran no measured Python — a measurement" \
+        "that reads nothing must not become a floor"
       exit 1
     fi
     py_report json --rcfile="${rc_file}" --quiet -o "${out}/coverage.json"
@@ -609,8 +619,8 @@ REMEDY
     br_pct=$(jq -r '.totals.percent_branches_covered // empty' "${out}/coverage.json")
     rm -f -- "${out}/coverage.json"
     if [[ -z ${py_pct} || -z ${br_pct} ]]; then
-      echo "${label}: could not read a total from the Python report — a" >&2
-      echo "  measurement that reads nothing must not become a floor" >&2
+      org_finding "" "could not read a total from the Python report — a" \
+        "measurement that reads nothing must not become a floor"
       exit 1
     fi
     # The report Codecov receives is rendered from this measurement's own
@@ -629,22 +639,22 @@ if [[ -n ${ts_test} && ${legs} =~ ^(all|typescript)$ ]]; then
   provider=${ts_runner#vitest }
   case "${provider}" in
     none)
-      echo "${label}: vitest runs the suite but the lockfile pins no coverage provider —" >&2
-      echo "  add @vitest/coverage-v8 to devDependencies at vitest's own version" >&2
-      echo "  (the belt pins no provider: the repository's lockfile owns it, #1357)" >&2
+      org_finding "" "vitest runs the suite but the lockfile pins no coverage provider —" \
+        "add @vitest/coverage-v8 to devDependencies at vitest's own version" \
+        "(the belt pins no provider: the repository's lockfile owns it, #1357)"
       exit 1
       ;;
     both)
-      echo "${label}: the lockfile pins both @vitest/coverage-v8 and @vitest/coverage-istanbul —" >&2
-      echo "  the leg does not choose between them; keep the one the suite uses" >&2
+      org_finding "" "the lockfile pins both @vitest/coverage-v8 and @vitest/coverage-istanbul —" \
+        "the leg does not choose between them; keep the one the suite uses"
       exit 1
       ;;
     *) ;;
   esac
   vitest="${PWD}/node_modules/.bin/vitest"
   if [[ ! -x ${vitest} ]]; then
-    echo "${label}: vitest is in the lockfile but not installed — install from the" >&2
-    echo "  tracked lockfile before measuring" >&2
+    org_finding "" "vitest is in the lockfile but not installed — install from the" \
+      "tracked lockfile before measuring"
     exit 1
   fi
   # The vitest run the gate's `test` task makes, read from the steps
@@ -672,16 +682,16 @@ if [[ -n ${ts_test} && ${legs} =~ ^(all|typescript)$ ]]; then
     --coverage.reporter=json-summary \
     --coverage.reporter=lcov \
     --coverage.reportsDirectory="${ts_work}") >&2; then
-    echo "${label}: the vitest suite failed under measurement — a suite that" >&2
-    echo "  does not pass cannot measure a floor" >&2
+    org_finding "" "the vitest suite failed under measurement — a suite that" \
+      "does not pass cannot measure a floor"
     exit 1
   fi
   ts_pct=$(jq -r '.total.lines.pct // empty' "${ts_work}/coverage-summary.json" 2> /dev/null) || ts_pct=""
   ts_br=$(jq -r '.total.branches.pct // empty' "${ts_work}/coverage-summary.json" 2> /dev/null) || ts_br=""
   # A total over nothing reads "Unknown", not a number.
   if [[ ! ${ts_pct} =~ ^[0-9.]+$ || ! ${ts_br} =~ ^[0-9.]+$ ]]; then
-    echo "${label}: could not read a total from the vitest report — a" >&2
-    echo "  measurement that reads nothing must not become a floor" >&2
+    org_finding "" "could not read a total from the vitest report — a" \
+      "measurement that reads nothing must not become a floor"
     exit 1
   fi
   # The upload is this run's own lcov (#707's law). A name of its own:
@@ -717,7 +727,7 @@ fuzz_targets() {
     manifest=$("${ORG_PYTHON}" -c 'import sys, tomllib
 for b in tomllib.load(open(sys.argv[1], "rb")).get("bin", []):
     print(b["name"])' fuzz/Cargo.toml) || {
-      echo "${label}: could not read the [[bin]] targets of fuzz/Cargo.toml" >&2
+      org_finding "" "could not read the [[bin]] targets of fuzz/Cargo.toml"
       exit 1
     }
     while IFS= read -r target; do
@@ -782,8 +792,7 @@ if [[ ${legs} =~ ^(all|fuzz)$ ]]; then
       clash+=" ${leg}"
       one=$(fuzz_origin "${kind}" "${where}" "${name}")
       two=$(fuzz_origin "${okind}" "${owhere}" "${oname}")
-      echo "${label}: ${one} and ${two} both derive the leg ${leg} — rename" \
-        "one, so each target holds a floor of its own" >&2
+      org_finding "" "${one} and ${two} both derive the leg ${leg} — rename one, so each target holds a floor of its own"
     done <<< "${fuzz_found}"
   done <<< "${fuzz_found}"
   [[ -z ${clash} ]] || exit 1
@@ -795,8 +804,8 @@ fi
 if [[ ${legs} =~ ^(all|fuzz)$ && ${fuzz_found} == *" rust "* ]]; then
   llvm_tools ""
   if ! command -v cargo-fuzz > /dev/null; then
-    echo "${label}: fuzz/ exists but cargo-fuzz is missing — pin it as a build input:" >&2
-    echo '  mise.toml: "cargo:cargo-fuzz" = "<version>" (installed before tasks, never mid-run)' >&2
+    org_finding "" "fuzz/ exists but cargo-fuzz is missing — pin it as a build input:" \
+      'mise.toml: "cargo:cargo-fuzz" = "<version>" (installed before tasks, never mid-run)'
     exit 1
   fi
   fuzz_work=$(mktemp -d)
@@ -811,7 +820,7 @@ fi
 
 if [[ ${legs} =~ ^(all|fuzz)$ && ${fuzz_found} == *" go "* ]]; then
   if ! command -v go > /dev/null; then
-    echo "${label}: go.mod present but go missing — pin go in mise.toml" >&2
+    org_finding "" "go.mod present but go missing — pin go in mise.toml"
     exit 1
   fi
   while read -r leg kind dir name _; do

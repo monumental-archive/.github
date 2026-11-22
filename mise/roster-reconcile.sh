@@ -25,21 +25,30 @@
 # a fallback to trusting the listing.
 set -euo pipefail
 
+# The writer beside this file, found with no command run (#1934).
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${org__here}/findings.sh"
+unset org__here
+
 caller="${1:?usage: roster-reconcile.sh <caller> <roster.json> < listing}"
 roster="${2:?usage: roster-reconcile.sh <caller> <roster.json> < listing}"
+# The task this script reports for, where mise named none (#1934).
+: "${MISE_TASK_NAME:=${caller}}"
 
 [[ -f ${roster} ]] || {
-  echo "${caller}: no roster at ${roster} — the population is named there, and" >&2
-  echo "  without it an unseen repository cannot be told from a clean one." >&2
+  org_finding "" "no roster at ${roster} — the population is named there, and" \
+    "without it an unseen repository cannot be told from a clean one."
   exit 2
 }
 named="$(jq -r '.population.repositories[].repo' "${roster}")" || {
-  echo "${caller}: ${roster} has no readable .population.repositories[].repo" >&2
+  org_finding "" "${roster} has no readable .population.repositories[].repo"
   exit 2
 }
 [[ -n ${named} ]] || {
-  echo "${caller}: ${roster} names no repositories — an empty roster" >&2
-  echo "  reconciles against nothing." >&2
+  org_finding "" "${roster} names no repositories — an empty roster" \
+    "reconciles against nothing."
   exit 2
 }
 
@@ -54,12 +63,12 @@ unseen="$(comm -13 <(printf '%s\n' "${listing_sorted}") <(printf '%s\n' "${roste
 status=0
 while IFS= read -r repo; do
   [[ -n ${repo} ]] || continue
-  echo "${caller}: ${repo}: in the org, not in the roster — add it to the roster or remove the repository" >&2
+  org_finding "${repo}" "in the org, not in the roster — add it to the roster or remove the repository"
   status=1
 done <<< "${unlisted}"
 while IFS= read -r repo; do
   [[ -n ${repo} ]] || continue
-  echo "${caller}: ${repo}: in the roster, not visible to this token — an unseen repository is unchecked, not clean" >&2
+  org_finding "${repo}" "in the roster, not visible to this token — an unseen repository is unchecked, not clean"
   status=1
 done <<< "${unseen}"
 exit "${status}"

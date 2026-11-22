@@ -38,14 +38,23 @@
 # derivation call: instrumented with or without a floor, every declared
 # major, and no floor held, because those callers derive the floor.
 set -euo pipefail
+
+# The writer beside this file, found with no command run (#1934).
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${org__here}/findings.sh"
+unset org__here
 : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
 
 label="test:pgrx"
+# The task this script reports for, where mise named none (#1934).
+: "${MISE_TASK_NAME:=${label}}"
 mode="${1:-test}"
 case "${mode}" in
   test | measure) ;;
   *)
-    echo "${label}: unknown mode '${mode}' — expected test or measure" >&2
+    org_finding "" "unknown mode '${mode}' — expected test or measure"
     exit 1
     ;;
 esac
@@ -57,7 +66,7 @@ manifests=$(git ls-files ':!vendor/**' "Cargo.toml" "*/Cargo.toml")
   exit 0
 }
 command -v cargo > /dev/null || {
-  echo "${label}: Cargo.toml present but cargo missing — pin rust in mise.toml" >&2
+  org_finding "" "Cargo.toml present but cargo missing — pin rust in mise.toml"
   exit 1
 }
 
@@ -71,7 +80,7 @@ declared=""
 while IFS=$'\t' read -r record spec kind crate_majors dir; do
   [[ ${record} == crate && ${kind} == pgrx ]] || continue
   [[ ${dir} != "-" ]] || {
-    echo "${label}: ${spec} is a pgrx extension cargo reports no directory for" >&2
+    org_finding "" "${spec} is a pgrx extension cargo reports no directory for"
     exit 1
   }
   # dir:name:majors — the name is what the report is restricted to.
@@ -96,14 +105,14 @@ if [[ ${mode} == test && -n ${ORG_PGRX_FANNED+set} ]]; then
       type == "string" and test("\\A[1-9][0-9]*\\z")))
     then .[0] | join(",") else error("refused") end' \
     <<< "${ORG_PGRX_FANNED}" 2> /dev/null) || {
-    echo "${label}: ORG_PGRX_FANNED '${ORG_PGRX_FANNED}' is not a JSON array of canonical major strings" >&2
+    org_finding "" "ORG_PGRX_FANNED '${ORG_PGRX_FANNED}' is not a JSON array of canonical major strings"
     exit 1
   }
   planned=$(normalise "${planned}")
   if [[ ${planned} != "${declared}" ]]; then
-    echo "${label}: the gate planned legs for majors [${planned}]; the crate declares [${declared}]" >&2
-    echo "  the legs are planned before the toolchain exists and checked here, where it" >&2
-    echo "  does — a major with no leg is a major nothing tested (#1148)" >&2
+    org_finding "" "the gate planned legs for majors [${planned}]; the crate declares [${declared}]" \
+      "the legs are planned before the toolchain exists and checked here, where it" \
+      "does — a major with no leg is a major nothing tested (#1148)"
     exit 1
   fi
   if [[ -n ${declared} ]]; then
@@ -129,14 +138,14 @@ measured=""
 components=""
 [[ -z ${measured} ]] || components=$(rustup component list --installed 2> /dev/null) || components=""
 if [[ -n ${measured} ]] && ! grep -q "^llvm-tools" <<< "${components}"; then
-  echo "${label}: the extension is measured here and llvm-tools is missing — declare it with the" >&2
-  echo '  rust pin in mise.toml: rust = { version = "1.xx.x", components = "llvm-tools" }' >&2
+  org_finding "" "the extension is measured here and llvm-tools is missing — declare it with the" \
+    'rust pin in mise.toml: rust = { version = "1.xx.x", components = "llvm-tools" }'
   exit 1
 fi
 
 only="${ORG_PGRX_MAJOR:-}"
 if [[ -n ${only} && ",${declared}," != *",${only},"* ]]; then
-  echo "${label}: asked for pg${only}; the crate declares [${declared}]" >&2
+  org_finding "" "asked for pg${only}; the crate declares [${declared}]"
   exit 1
 fi
 
@@ -206,18 +215,18 @@ measure_one() { # usage: measure_one <dir> <crate> <major>
     # backend's working directory: a relative profile path is written
     # there and goes with it.
     if [[ ${LLVM_PROFILE_FILE:-} != /* ]]; then
-      echo "${label}: pg${one}: the profile path '${LLVM_PROFILE_FILE:-}' is not absolute —" >&2
-      echo "  the backends write it inside the data directory pgrx deletes on shutdown" >&2
+      org_finding "" "pg${one}: the profile path '${LLVM_PROFILE_FILE:-}' is not absolute —" \
+        "the backends write it inside the data directory pgrx deletes on shutdown"
       exit 1
     fi
     cargo llvm-cov clean --profraw-only >&2 || exit 1
     if ! (cd "${dir}" && cargo pgrx test "pg${one}") >&2; then
-      echo "${label}: ${dir} at pg${one} failed — a suite that does not pass measures nothing" >&2
+      org_finding "" "${dir} at pg${one} failed — a suite that does not pass measures nothing"
       exit 1
     fi
     if ! compgen -G "$(dirname "${LLVM_PROFILE_FILE}")/*.profraw" > /dev/null; then
-      echo "${label}: ${leg}: the suite passed and wrote no coverage profile — an extension" >&2
-      echo "  that measured nothing must not read as held (#1656)" >&2
+      org_finding "" "${leg}: the suite passed and wrote no coverage profile — an extension" \
+        "that measured nothing must not read as held (#1656)"
       exit 1
     fi
     cargo llvm-cov report -p "${crate}" --lcov --output-path "${reports}/lcov-${leg}.info" >&2 || exit 1
@@ -227,8 +236,8 @@ measure_one() { # usage: measure_one <dir> <crate> <major>
       END { if (found > 0) printf "%.16g\n", hit * 100 / found }
     ' "${reports}/lcov-${leg}.info" 2> /dev/null) || pct=""
     if [[ -z ${pct} ]]; then
-      echo "${label}: ${leg}: could not read a total from the report — a" >&2
-      echo "  measurement that reads nothing must not become a floor" >&2
+      org_finding "" "${leg}: could not read a total from the report — a" \
+        "measurement that reads nothing must not become a floor"
       exit 1
     fi
     echo "${leg} ${pct}"
@@ -318,7 +327,7 @@ for name in ${failed}; do
   cat "${logs}/${name}.log" >&2
 done
 if [[ -n ${failed} ]]; then
-  echo "${label}: failed at:${failed}" >&2
+  org_finding "" "failed at:${failed}"
   exit 1
 fi
 if [[ -n ${measured} ]]; then

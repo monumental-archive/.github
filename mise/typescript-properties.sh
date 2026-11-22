@@ -17,6 +17,13 @@
 # the belt's seed is red before it runs.
 set -euo pipefail
 
+# The writer beside this file, found with no command run (#1934).
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${org__here}/findings.sh"
+unset org__here
+
 profile="${1:-}"
 case "${profile}" in
   gate)
@@ -31,7 +38,7 @@ case "${profile}" in
     seed="${ORG_PROPERTY_SEED:-$(($(od -An -N4 -tu4 /dev/urandom) & 0x7fffffff))}"
     runs=10000
     [[ ${seed} =~ ^[0-9]+$ ]] || {
-      echo "${label}: ORG_PROPERTY_SEED must be a non-negative integer, got '${seed}'" >&2
+      org_finding "" "ORG_PROPERTY_SEED must be a non-negative integer, got '${seed}'"
       exit 2
     }
     ;;
@@ -39,10 +46,12 @@ case "${profile}" in
     label="lint:typescript-properties"
     ;;
   *)
-    echo "typescript-properties.sh: expected gate, audit or lint, got '${profile}'" >&2
+    org_finding "" "expected gate, audit or lint, got '${profile}'"
     exit 2
     ;;
 esac
+# The task this script reports for, where mise named none (#1934).
+: "${MISE_TASK_NAME:=${label}}"
 belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
 
 # The lockfile decides, as for the coverage leg (#1357): no fast-check
@@ -64,10 +73,10 @@ if [[ ${profile} == lint ]]; then
     exit 0
   }
   findings=$(tr '\n' '\0' <<< "${sources}" | xargs -0 python3 "${belt}/typescript_properties.py" lint) || {
-    echo "${label}: properties live in *.prop.test.* files and take the belt's seed:" >&2
-    while IFS= read -r finding; do
-      echo "  ${finding}" >&2
-    done <<< "${findings}"
+    detail=()
+    while IFS= read -r finding; do detail+=("${finding}"); done <<< "${findings}"
+    org_finding "" "properties live in *.prop.test.* files and take the belt's seed:" \
+      "${detail[@]}"
     exit 1
   }
   count=$(wc -l <<< "${sources}")
@@ -82,14 +91,14 @@ files=$(git ls-files ':!vendor/**' '*.prop.test.ts' '*.prop.test.tsx' '*.prop.te
 }
 
 grep -qx vitest <<< "${pins}" || {
-  echo "${label}: *.prop.test.* tracked but the lockfile pins no vitest —" >&2
-  echo "  the leg runs properties with the repository's own vitest (#1549)" >&2
+  org_finding "" "*.prop.test.* tracked but the lockfile pins no vitest —" \
+    "the leg runs properties with the repository's own vitest (#1549)"
   exit 1
 }
 vitest="${PWD}/node_modules/.bin/vitest"
 [[ -x ${vitest} ]] || {
-  echo "${label}: vitest is in the lockfile but not installed — install from the" >&2
-  echo "  lockfile first (pnpm install --frozen-lockfile, or npm ci)" >&2
+  org_finding "" "vitest is in the lockfile but not installed — install from the" \
+    "lockfile first (pnpm install --frozen-lockfile, or npm ci)"
   exit 1
 }
 
@@ -123,19 +132,19 @@ done <<< "${files}"
 if [[ ${profile} == gate ]]; then
   "${vitest}" list --filesOnly --json="${scratch}/collected.json" --root "${PWD}" \
     > "${scratch}/list.log" 2>&1 || {
-    echo "${label}: vitest could not list the files the repository's own config collects:" >&2
+    org_finding "" "vitest could not list the files the repository's own config collects:"
     sed 's/^/  /' "${scratch}/list.log" >&2
     exit 1
   }
   leaked=$(python3 "${belt}/typescript_properties.py" collected "${scratch}/collected.json" "${args[@]}") || {
-    echo "${label}: the repository's own vitest run collects these property files," >&2
-    echo "  so its test task runs them a second time with no seed:" >&2
-    while IFS= read -r line; do
-      echo "    ${line}" >&2
-    done <<< "${leaked}"
-    echo "  add the property pattern to test.exclude in ${config:-a vitest.config.ts}, beside vitest's" >&2
-    echo "  defaults (configDefaults from vitest/config):" >&2
-    echo '    exclude: [...configDefaults.exclude, "**/*.prop.test.*"],' >&2
+    detail=()
+    while IFS= read -r line; do detail+=("  ${line}"); done <<< "${leaked}"
+    org_finding "" "the repository's own vitest run collects these property files," \
+      "so its test task runs them a second time with no seed:" \
+      "${detail[@]}" \
+      "add the property pattern to test.exclude in ${config:-a vitest.config.ts}, beside vitest's" \
+      "defaults (configDefaults from vitest/config):" \
+      '  exclude: [...configDefaults.exclude, "**/*.prop.test.*"],'
     exit 1
   }
 fi
@@ -150,18 +159,18 @@ ORG_PROPERTY_SEED="${seed}" ORG_PROPERTY_RUNS="${runs}" \
   "${vitest}" run --root "${PWD}" -c "${scratch}/org-property.config.mts" "${args[@]}" || status=$?
 if ((status != 0)); then
   if [[ ${profile} == audit ]]; then
-    echo "${label}: seed ${seed} — commit each counterexample above as a fixed" >&2
-    echo "  example of its property, with its fix, and the gate replays it" >&2
+    org_finding "" "seed ${seed} — commit each counterexample above as a fixed" \
+      "example of its property, with its fix, and the gate replays it"
   fi
   exit "${status}"
 fi
 # vitest exits 0 for a filter that matched nothing it could run under a
 # config that passes with no tests; the report is the proof each ran.
 missing=$(python3 "${belt}/typescript_properties.py" verify "${scratch}/report.json" "${args[@]}") || {
-  echo "${label}: not every property file ran:" >&2
-  while IFS= read -r line; do
-    echo "  ${line}" >&2
-  done <<< "${missing}"
+  detail=()
+  while IFS= read -r line; do detail+=("${line}"); done <<< "${missing}"
+  org_finding "" "not every property file ran:" \
+    "${detail[@]}"
   exit 1
 }
 echo "${label}: every property file held"

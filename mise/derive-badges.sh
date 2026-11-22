@@ -14,6 +14,15 @@
 # Output: BADGES_OUT names a file to write the block to (what lint:badges
 # wants); unset, the block is spliced into README.md between the markers.
 set -euo pipefail
+
+# The writer beside this file, found with no command run (#1934).
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${org__here}/findings.sh"
+unset org__here
+# The task this script reports for, where mise named none (#1934).
+: "${MISE_TASK_NAME:=fix:badges}"
 # Refused before any early exit, so a missing interpreter is never a
 # clean skip (#1565): project_licence.py runs under it below.
 : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
@@ -39,7 +48,7 @@ set -euo pipefail
 # unreachable code. Measured 2026-08-24.
 repo_url=$(grep "^SPDX-PackageDownloadLocation" REUSE.toml | sed -n 1p | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/' || true)
 [[ -n ${repo_url} ]] || {
-  echo "fix:badges: REUSE.toml carries no SPDX-PackageDownloadLocation" >&2
+  org_finding "" "REUSE.toml carries no SPDX-PackageDownloadLocation"
   exit 1
 }
 repo="${repo_url##*/}"
@@ -190,7 +199,7 @@ fi
 # citation cannot state two licences (#1589).
 lic=$("${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/project_licence.py" fix:badges)
 if [[ -z ${lic} ]]; then
-  echo "fix:badges: REUSE.toml carries no SPDX-License-Identifier — the licence shield has nothing to state" >&2
+  org_finding "" "REUSE.toml carries no SPDX-License-Identifier — the licence shield has nothing to state"
   exit 1
 fi
 lic_esc=$(shield_esc "${lic}")
@@ -203,8 +212,8 @@ add "[![license](https://img.shields.io/badge/license-${lic_esc}-blue)](LICENSES
 # cannot pass the secret for a repository, so it refuses the render.
 if [[ -f .coverage-floor ]]; then
   if ! grep -qsE "^[^#]*codecov-token:" .github/workflows/*.y*ml; then
-    echo "fix:badges: .coverage-floor is tracked and no workflow passes codecov-token — the coverage shield has no producer" >&2
-    echo "  add to the gate stub's job:  secrets: { codecov-token: \${{ secrets.CODECOV_TOKEN }} }" >&2
+    org_finding "" ".coverage-floor is tracked and no workflow passes codecov-token — the coverage shield has no producer" \
+      "add to the gate stub's job:  secrets: { codecov-token: \${{ secrets.CODECOV_TOKEN }} }"
     exit 1
   fi
   add "[![coverage](https://codecov.io/gh/${org_path}/branch/main/graph/badge.svg)](https://codecov.io/gh/${org_path})"
@@ -262,7 +271,7 @@ policy="${ORG_CANON_DIR}/slsa/assert-policy.json"
 cont_path=$(jq -r '.evidence.continuous.stubPath // empty' "${policy}")
 cont_uses=$(jq -r '.evidence.continuous.stubUses // empty' "${policy}")
 if [[ -z ${cont_path} || -z ${cont_uses} ]]; then
-  echo "fix:badges: ${policy} declares no evidence.continuous stubPath and stubUses" >&2
+  org_finding "" "${policy} declares no evidence.continuous stubPath and stubUses"
   exit 1
 fi
 cont_img=""
@@ -278,7 +287,7 @@ reg_live=""
 if [[ ${classes} == *rust-crate* ]]; then
   crate=$(state crates)
   if [[ -z ${crate} ]]; then
-    echo "fix:badges: classes include rust-crate but .badge-states names no crate ('crates <name>')" >&2
+    org_finding "" "classes include rust-crate but .badge-states names no crate ('crates <name>')"
     exit 1
   fi
   reg_live=1
@@ -288,7 +297,7 @@ fi
 if [[ ${classes} == *wasm-npm* ]]; then
   pkg=$(state npm)
   if [[ -z ${pkg} ]]; then
-    echo "fix:badges: classes include wasm-npm but .badge-states names no package ('npm <name>')" >&2
+    org_finding "" "classes include wasm-npm but .badge-states names no package ('npm <name>')"
     exit 1
   fi
   reg_live=1
@@ -322,7 +331,7 @@ if [[ ${classes} == *oci-image* || ${classes} == *pgrx-extension* || -n ${cont_i
       [[ -n ${ext} ]] && imgs="${imgs} $(basename "${ext}" | tr "[:upper:]" "[:lower:]")"
     done
     [[ ${classes} == *oci-image* || -n ${imgs} ]] || {
-      echo "fix:badges: classes include pgrx-extension but the publish stub names no extension-crate-dir" >&2
+      org_finding "" "classes include pgrx-extension but the publish stub names no extension-crate-dir"
       exit 1
     }
   fi
@@ -357,11 +366,11 @@ if [[ -f .badge-states ]]; then
   while read -r skey spath srest; do
     [[ ${skey} == "static" ]] || continue
     if [[ -z ${spath} || ${srest} != *=* || -z ${srest%%=*} || -z ${srest#*=} ]]; then
-      echo "fix:badges: malformed static line — want 'static <path> <label>=<message>': ${skey} ${spath} ${srest}" >&2
+      org_finding "" "malformed static line — want 'static <path> <label>=<message>': ${skey} ${spath} ${srest}"
       exit 1
     fi
     if ! git ls-files --error-unmatch -- "${spath}" > /dev/null 2>&1; then
-      echo "fix:badges: static shield '${srest}' names ${spath}, which is not a tracked file — a claim needs its enforcer" >&2
+      org_finding "" "static shield '${srest}' names ${spath}, which is not a tracked file — a claim needs its enforcer"
       exit 1
     fi
     slabel="${srest%%=*}"
@@ -393,11 +402,11 @@ if [[ -n ${BADGES_OUT:-} ]]; then
   exit 0
 fi
 [[ -f README.md ]] || {
-  echo "fix:badges: no README.md" >&2
+  org_finding "" "no README.md"
   exit 1
 }
 if ! grep -q "<!-- badges:begin -->" README.md || ! grep -q "<!-- badges:end -->" README.md; then
-  echo "fix:badges: README.md carries no badges:begin/badges:end markers — add the pair where the block belongs" >&2
+  org_finding "" "README.md carries no badges:begin/badges:end markers — add the pair where the block belongs"
   exit 1
 fi
 # Block delivered via a file: awk -v cannot carry newlines portably

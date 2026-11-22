@@ -59,13 +59,22 @@
 # there for the job that states the totals.
 set -euo pipefail
 
+# The writer beside this file, found with no command run (#1934).
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${org__here}/findings.sh"
+unset org__here
+# The task this script reports for, where mise named none (#1934).
+: "${MISE_TASK_NAME:=audit:mutants}"
+
 label="audit:mutants: typescript"
 adoption="stryker.config.json"
 report="reports/mutation/mutation.json"
 
 shard="${MUTANTS_SHARD:-0/1}"
 if [[ ${shard} != 0/1 ]]; then
-  echo "${label}: MUTANTS_SHARD='${shard}' — StrykerJS cannot shard; the typescript job runs one shard, 0/1" >&2
+  org_finding "typescript" "MUTANTS_SHARD='${shard}' — StrykerJS cannot shard; the typescript job runs one shard, 0/1"
   exit 1
 fi
 
@@ -78,8 +87,11 @@ summary() { # summary <row>: the counts the totals job reads
 others=$(git ls-files -- 'stryker.conf.*' 'stryker.config.*' '.stryker.conf.*' \
   | grep -v -x -F "${adoption}" || true)
 if [[ -n ${others} ]]; then
-  printf '%s\n' "${others}" | sed "s/^/${label}: a StrykerJS config the leg cannot read: /" >&2
-  echo "  the leg reads ${adoption} only; move the config there" >&2
+  while IFS= read -r item; do
+    [[ -n ${item} ]] || continue
+    org_finding "typescript" "a StrykerJS config the leg cannot read: ${item}" \
+      "the leg reads ${adoption} only; move the config there"
+  done <<< "${others}"
   exit 1
 fi
 if ! git ls-files --error-unmatch -- "${adoption}" > /dev/null 2>&1; then
@@ -89,8 +101,8 @@ if ! git ls-files --error-unmatch -- "${adoption}" > /dev/null 2>&1; then
 fi
 
 if [[ -z ${CI:-} ]]; then
-  echo "${label}: CI is unset — mutants run in place with the tree's own environment," >&2
-  echo "  so this leg runs on a runner only (repo-mutants.yml), never a workstation" >&2
+  org_finding "typescript" "CI is unset — mutants run in place with the tree's own environment," \
+    "so this leg runs on a runner only (repo-mutants.yml), never a workstation"
   exit 1
 fi
 
@@ -99,19 +111,21 @@ python3 "${belt}/mutants_typescript.py" --label "${label}" config "${adoption}"
 
 stryker=node_modules/.bin/stryker
 [[ -x ${stryker} ]] || {
-  echo "${label}: ${adoption} is tracked but ${stryker} is missing — add" >&2
-  echo "  @stryker-mutator/core and its runner plugin to devDependencies, and install" >&2
+  org_finding "typescript" "${adoption} is tracked but ${stryker} is missing — add" \
+    "@stryker-mutator/core and its runner plugin to devDependencies, and install"
   exit 1
 }
 if git ls-files --error-unmatch -- "${report}" > /dev/null 2>&1; then
-  echo "${label}: ${report} is tracked; it is StrykerJS's output, and the leg replaces it" >&2
+  org_finding "typescript" "${report} is tracked; it is StrykerJS's output, and the leg replaces it"
   exit 1
 fi
 
 dirty=$(git status --porcelain --untracked-files=no)
 if [[ -n ${dirty} ]]; then
-  printf '%s\n' "${dirty}" | sed "s/^/${label}: uncommitted: /" >&2
-  echo "  the leg mutates tracked files in place; it runs on a clean tree only" >&2
+  while IFS= read -r item; do
+    [[ -n ${item} ]] || continue
+    org_finding "typescript" "uncommitted: ${item}" "the leg mutates tracked files in place; it runs on a clean tree only"
+  done <<< "${dirty}"
   exit 1
 fi
 
@@ -125,17 +139,20 @@ status=0
 
 left=$(git status --porcelain --untracked-files=no)
 if [[ -n ${left} ]]; then
-  printf '%s\n' "${left}" | sed "s/^/${label}: left changed after the run: /" >&2
-  echo "  StrykerJS did not restore the tree it mutated in place; restore it with git" >&2
+  while IFS= read -r item; do
+    [[ -n ${item} ]] || continue
+    org_finding "typescript" "left changed after the run: ${item}" \
+      "StrykerJS did not restore the tree it mutated in place; restore it with git"
+  done <<< "${left}"
   exit 1
 fi
 if [[ ${status} -ne 0 ]]; then
-  echo "${label}: StrykerJS exited ${status} — nothing judged; its output:" >&2
+  org_finding "typescript" "StrykerJS exited ${status} — nothing judged; its output:"
   tail -n 40 "${scratch}/stryker.log" | sed 's/^/    /' >&2
   exit 1
 fi
 if [[ ! -s ${report} ]]; then
-  echo "${label}: StrykerJS wrote no ${report}" >&2
+  org_finding "typescript" "StrykerJS wrote no ${report}"
   exit 1
 fi
 mv "${report}" "${scratch}/mutation.json"

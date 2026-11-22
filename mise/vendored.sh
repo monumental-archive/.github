@@ -44,7 +44,16 @@
 # the working tree.
 set -euo pipefail
 
+# The writer beside this file, found with no command run (#1934).
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${org__here}/findings.sh"
+unset org__here
+
 name=lint:vendored
+# The task this script reports for, where mise named none (#1934).
+: "${MISE_TASK_NAME:=${name}}"
 
 if command -v sha256sum > /dev/null 2>&1; then
   sha256=(sha256sum)
@@ -80,7 +89,7 @@ vendor_root() {
 
 problems=0
 red() {
-  echo "${name}: $*" >&2
+  org_finding "" "$*"
   problems=$((problems + 1))
 }
 
@@ -204,10 +213,8 @@ while IFS= read -r m; do
 done <<< "${manifest_set#$'\n'}"
 
 if [[ ${problems} -ne 0 ]]; then
-  echo "${name}: ${verified} files verified against ${manifests} manifests," \
-    "${problems} problems above" >&2
-  echo "  vendored text is verified, never linted: re-fetch at a full" \
-    "commit and update PINNED.toml in the same change" >&2
+  org_finding "" "${verified} files verified against ${manifests} manifests, ${problems} problems above" \
+    "vendored text is verified, never linted: re-fetch at a full commit and update PINNED.toml in the same change"
   exit 1
 fi
 echo "${name}: ${verified} files verified against ${manifests} manifests"

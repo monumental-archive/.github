@@ -22,6 +22,15 @@
 # Output: CITATION_OUT names a file to write the render to (what
 # lint:citation wants); unset, it renders CITATION.cff in place.
 set -euo pipefail
+
+# The writer beside this file, found with no command run (#1934).
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${org__here}/findings.sh"
+unset org__here
+# The task this script reports for, where mise named none (#1934).
+: "${MISE_TASK_NAME:=fix:citation}"
 # Refused before any early exit, so a missing interpreter is never a
 # clean skip (#1565): project_licence.py runs under it below.
 : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
@@ -48,20 +57,20 @@ out="${CITATION_OUT:-CITATION.cff}"
 # where it names several, the `licence` line of .badge-states.
 lic=$("${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/project_licence.py" fix:citation)
 if [[ -z ${lic} || ${lic} == "<SPDX expression>" ]]; then
-  echo "fix:citation: REUSE.toml declares no licence expression — fill it first (lint:licence)" >&2
+  org_finding "" "REUSE.toml declares no licence expression — fill it first (lint:licence)"
   exit 1
 fi
 supplier=$(grep "^SPDX-PackageSupplier" REUSE.toml | sed -n 1p | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/' || true)
 person="${supplier%% <*}"
 if [[ -z ${person} ]]; then
-  echo "fix:citation: REUSE.toml carries no SPDX-PackageSupplier — the citation needs an author" >&2
+  org_finding "" "REUSE.toml carries no SPDX-PackageSupplier — the citation needs an author"
   exit 1
 fi
 family="${person##* }"
 given="${person% "${family}"}"
 repo_url=$(grep "^SPDX-PackageDownloadLocation" REUSE.toml | sed -n 1p | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/' || true)
 [[ -n ${repo_url} ]] || {
-  echo "fix:citation: REUSE.toml carries no SPDX-PackageDownloadLocation" >&2
+  org_finding "" "REUSE.toml carries no SPDX-PackageDownloadLocation"
   exit 1
 }
 title="${repo_url##*/}"

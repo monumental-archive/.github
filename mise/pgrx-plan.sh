@@ -16,6 +16,13 @@
 # The derivation itself is gate_surface.py's, the one every other
 # consumer uses. No major is written here.
 set -euo pipefail
+
+# The writer beside this file, found with no command run (#1934).
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${org__here}/findings.sh"
+unset org__here
 : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
 
 canon="${1:?usage: pgrx-plan.sh <canon tree>}"
@@ -26,7 +33,7 @@ if [[ ! -f Cargo.toml ]]; then
 fi
 for tool in cargo jq; do
   command -v "${tool}" > /dev/null || {
-    echo "pgrx-plan: ${tool} is not on this runner, so the fan-out cannot be planned" >&2
+    org_finding "" "${tool} is not on this runner, so the fan-out cannot be planned"
     exit 1
   }
 done

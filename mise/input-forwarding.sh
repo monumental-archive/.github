@@ -23,6 +23,15 @@
 # the task that names this script.
 set -euo pipefail
 
+# The writer beside this file, found with no command run (#1934).
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${org__here}/findings.sh"
+unset org__here
+# The task this script reports for, where mise named none (#1934).
+: "${MISE_TASK_NAME:=lint:input-forwarding}"
+
 files=$(git ls-files ':!vendor/**' ".github/workflows/*.y*ml")
 [[ -n ${files} ]] || {
   echo "lint:input-forwarding: no workflows, skipped"
@@ -67,7 +76,7 @@ END {
   fail = 0
   for (i = 1; i <= ndecl; i++)
     if (dclass[i] == "" && called[dbase[i]] && !fdef[dbase[i]]) {
-      printf "lint:input-forwarding: %s %s in %s carries no forwarding marker\n", dkind[i], dname[i], dbase[i] > "/dev/stderr"
+      printf "\037%s %s in %s carries no forwarding marker\n", dkind[i], dname[i], dbase[i]
       fail = 1
     }
   for (j = 1; j <= ncall; j++)
@@ -75,15 +84,15 @@ END {
       if (dbase[i] != cbase[j] || dclass[i] != "universal") continue
       if (dkind[i] == "secret" && inherited[cfile[j] SUBSEP cjob[j]]) continue
       if (!fwd[cfile[j] SUBSEP cjob[j] SUBSEP dkind[i] SUBSEP dname[i]]) {
-        printf "lint:input-forwarding: %s:%s does not forward universal %s %s of %s\n",
-          cfile[j], cjob[j], dkind[i], dname[i], dbase[i] > "/dev/stderr"
+        printf "%s:%s\037does not forward universal %s %s of %s\n",
+          cfile[j], cjob[j], dkind[i], dname[i], dbase[i]
         fail = 1
         unforwarded = 1
       }
     }
   if (unforwarded)
-    print "lint:input-forwarding: run fix:input-forwarding to insert the missing forwards" > "/dev/stderr"
+    print "\037run fix:input-forwarding to insert the missing forwards"
   if (fail) exit 1
   print "lint:input-forwarding: every universal input is forwarded at every local call site"
 }
-' ${files}
+' ${files} | org_finding_lines

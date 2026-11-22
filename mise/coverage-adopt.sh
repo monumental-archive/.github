@@ -23,17 +23,25 @@
 # repository declares its nightly (#1359) and the go-branches line where
 # go.mod is (#1546), then coverage_floor.py writes it.
 set -euo pipefail
+
+# The writer beside this file, found with no command run (#1934).
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${org__here}/findings.sh"
+unset org__here
 : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
 label=coverage:adopt
+# The task this script reports for, where mise named none (#1934).
+: "${MISE_TASK_NAME:=${label}}"
 belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
 
 case "${1:-}" in
   start)
     if ! mise tasks info test --json > /dev/null 2>&1; then
-      cat >&2 << 'REFUSAL'
-coverage:adopt: no test task — adoption measures the repository's own test run;
-  define one whose test command runs through "${ORG_BELT_DIR}/measured"
-REFUSAL
+      # shellcheck disable=SC2016  # the remedy names the variable, unexpanded
+      org_finding "" "no test task — adoption measures the repository's own test run;" \
+        'define one whose test command runs through "${ORG_BELT_DIR}/measured"'
       exit 1
     fi
     [[ -f .coverage-floor ]] || : > .coverage-floor
@@ -59,7 +67,7 @@ REFUSAL
       --provenance "${label}" --adopt <<< "${legs}"
     ;;
   *)
-    echo "usage: coverage-adopt.sh start|write" >&2
+    org_finding "" "usage: coverage-adopt.sh start|write"
     exit 2
     ;;
 esac

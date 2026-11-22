@@ -40,6 +40,9 @@ import hermetic
 
 ENV_SH = Path(__file__).resolve().with_name("pgrx-env.sh")
 BASH = hermetic.tool("bash")
+# The task a sourced pgrx-env.sh reports for: its findings name the
+# task that sourced it (#1934), here test:pgrx.
+TASK = "test:pgrx"
 
 # `cargo pgrx init` as far as these rows need it: it logs its start and
 # end around $STUB_HOLD seconds of work (two by default), so two inits
@@ -78,7 +81,7 @@ class InitCase(unittest.TestCase):
             (bindir / name).write_text(body, encoding="utf-8")
             (bindir / name).chmod(0o755)
         self.home = root / "pgrx"
-        env = hermetic.env()
+        env = hermetic.env(MISE_TASK_NAME=TASK)
         self.env = env | {
             "PATH": f"{bindir}{os.pathsep}{os.environ['PATH']}",
             "PGRX_HOME": str(self.home),
@@ -239,7 +242,7 @@ class Majors(unittest.TestCase):
         return subprocess.run(
             [BASH, "-euo", "pipefail", "-c", script],
             input=surface,
-            env=hermetic.env(),
+            env=hermetic.env(MISE_TASK_NAME=TASK),
             capture_output=True,
             text=True,
             check=False,
@@ -282,14 +285,14 @@ class Majors(unittest.TestCase):
         done = subprocess.run(
             [BASH, "-euo", "pipefail", "-c", script],
             input="first@0.1.0\t17\nsecond@0.1.0\tpg16\n",
-            env=hermetic.env(),
+            env=hermetic.env(MISE_TASK_NAME=TASK),
             capture_output=True,
             text=True,
             check=False,
         )
         self.assertEqual(1, done.returncode)
         self.assertEqual("", done.stdout)
-        want = ["pgrx-env: second@0.1.0 names no Postgres major: 'pg16'"]
+        want = [f"{TASK}: second@0.1.0 names no Postgres major: 'pg16'"]
         self.assertEqual(want, done.stderr.splitlines())
 
 
@@ -347,7 +350,7 @@ def none_pinned(pg: int, icu: int) -> str:
 
     """
     return (
-        f"pgrx-env: pg{pg} was built against ICU {icu},"
+        f"{TASK}: pg{pg} was built against ICU {icu},"
         " and mise.toml pins no ICU headers —"
     )
 
@@ -360,7 +363,7 @@ def other_pinned(pg: int, icu: int, pinned: str) -> str:
 
     """
     return (
-        f"pgrx-env: pg{pg} was built against ICU {icu};"
+        f"{TASK}: pg{pg} was built against ICU {icu};"
         f" mise.toml pins ICU {pinned} and no {icu}.x —"
     )
 
@@ -398,7 +401,7 @@ class IcuCase(unittest.TestCase):
         ):
             (bindir / name).write_text(body, encoding="utf-8")
             (bindir / name).chmod(0o755)
-        self.env = hermetic.env() | {
+        self.env = hermetic.env(MISE_TASK_NAME=TASK) | {
             "PATH": f"{bindir}{os.pathsep}{os.environ['PATH']}",
             "PLANT_ROOT": str(self.root),
         }
@@ -652,7 +655,7 @@ class OneIcuMajor(IcuCase):
         where = self.root / "icu" / "78.3"
         reason = [
             (
-                f"pgrx-env: ICU 78.3 at {where} carries no headers"
+                f"{TASK}: ICU 78.3 at {where} carries no headers"
                 " under source/common and source/i18n"
             ),
             (

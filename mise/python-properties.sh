@@ -20,6 +20,13 @@
 # of its own (the hidden-Python trap the belt's UV_* env exists for)
 # would test them on a different Python, silently.
 set -euo pipefail
+
+# The writer beside this file, found with no command run (#1934).
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${org__here}/findings.sh"
+unset org__here
 : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
 
 profile="${1:-}"
@@ -27,10 +34,12 @@ case "${profile}" in
   gate) label="test:python-properties" ;;
   audit) label="audit:python-properties" ;;
   *)
-    echo "python-properties.sh: expected gate or audit, got '${profile}'" >&2
+    org_finding "" "expected gate or audit, got '${profile}'"
     exit 2
     ;;
 esac
+# The task this script reports for, where mise named none (#1934).
+: "${MISE_TASK_NAME:=${label}}"
 belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
 
 # git's default pathspec lets `*` cross a slash, so this lists every
@@ -54,11 +63,11 @@ if [[ ${profile} == gate ]]; then
     leaks=$(tr '\n' '\0' <<< "${others}" | xargs -0 "${ORG_PYTHON}" "${belt}/hypothesis_imports.py")
   fi
   if [[ -n ${leaks} ]]; then
-    echo "${label}: these import Hypothesis (or cannot be read) but are not prop_*.py files:" >&2
-    while IFS= read -r leak; do
-      echo "  ${leak}" >&2
-    done <<< "${leaks}"
-    echo "  property tests live in prop_*.py, so the ordinary suites run with nothing installed" >&2
+    detail=()
+    while IFS= read -r leak; do detail+=("${leak}"); done <<< "${leaks}"
+    org_finding "" "these import Hypothesis (or cannot be read) but are not prop_*.py files:" \
+      "${detail[@]}" \
+      "property tests live in prop_*.py, so the ordinary suites run with nothing installed"
     exit 1
   fi
   # A property takes the belt's typed `given` (#1604): Hypothesis's own
@@ -67,11 +76,11 @@ if [[ ${profile} == gate ]]; then
   # match its parameter.
   untyped=$(tr '\n' '\0' <<< "${files}" | xargs -0 "${ORG_PYTHON}" "${belt}/hypothesis_imports.py" --given)
   if [[ -n ${untyped} ]]; then
-    echo "${label}: these take given from hypothesis, not the belt's typed one:" >&2
-    while IFS= read -r file; do
-      echo "  ${file}" >&2
-    done <<< "${untyped}"
-    echo "  write: from typed_hypothesis import given" >&2
+    detail=()
+    while IFS= read -r file; do detail+=("${file}"); done <<< "${untyped}"
+    org_finding "" "these take given from hypothesis, not the belt's typed one:" \
+      "${detail[@]}" \
+      "write: from typed_hypothesis import given"
     exit 1
   fi
 fi

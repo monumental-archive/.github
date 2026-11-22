@@ -81,21 +81,45 @@ tasks = []
 when = []
 
 [tools.jq]
-# lint:audit-scheduled calls it with no guard.
+# lint:audit-scheduled calls it with no guard. The finding writer
+# (findings.sh) encodes each record with it, so every task whose belt
+# script reports a finding calls it too (#1934).
 tasks = [
   "break:check",
+  "commits:check",
   "coverage:check",
+  "lint:actions-allowed",
   "lint:audit-scheduled",
   "lint:badges",
+  "lint:belt-current",
+  "lint:bestpractices",
   "lint:biome",
   "lint:biome-domains",
+  "lint:canon-pins",
+  "lint:citation",
+  "lint:commits",
+  "lint:deny",
+  "lint:from-digests",
+  "lint:fuzz-build",
+  "lint:gate-stub",
+  "lint:input-forwarding",
   "lint:msrv",
   "lint:pg-clippy",
   "lint:pg-schema",
+  "lint:python-types",
+  "lint:release-stub",
+  "lint:rust-properties",
   "lint:scaffold-assembly",
+  "lint:signer-pin",
   "lint:source-attest",
+  "lint:sql",
+  "lint:template-pins",
   "lint:tracks",
+  "lint:typescript-properties",
+  "lint:vendored",
   "test:pgrx",
+  "test:python-properties",
+  "test:typescript-properties",
 ]
 
 [tools.yq]

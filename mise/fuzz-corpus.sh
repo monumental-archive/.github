@@ -29,6 +29,15 @@
 # the closing line.
 set -euo pipefail
 
+# The writer beside this file, found with no command run (#1934).
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${org__here}/findings.sh"
+unset org__here
+# The task this script reports for, where mise named none (#1934).
+: "${MISE_TASK_NAME:=lint:fuzz-build}"
+
 # shellcheck source=mise/fuzz-corpus-lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/fuzz-corpus-lib.sh"
 
@@ -36,7 +45,7 @@ count="${1:?usage: fuzz-corpus.sh <target count>}"
 if ! targets=$(python3 -c 'import sys, tomllib
 for b in tomllib.load(open(sys.argv[1], "rb")).get("bin", []):
     print(b["name"])' fuzz/Cargo.toml); then
-  echo "lint:fuzz-build: could not read the [[bin]] targets of fuzz/Cargo.toml" >&2
+  org_finding "" "could not read the [[bin]] targets of fuzz/Cargo.toml"
   exit 1
 fi
 
@@ -61,25 +70,23 @@ done <<< "${targets}"
 
 if ((${#missing[@]} > 0)); then
   for target in "${missing[@]}"; do
-    echo "lint:fuzz-build: fuzz target '${target}' has no committed corpus (no tracked file under fuzz/corpus/${target}/)" >&2
+    org_finding "" "fuzz target '${target}' has no committed corpus (no tracked file under fuzz/corpus/${target}/)" \
+      "commit seed inputs under fuzz/corpus/<target>/ — the gate replays them on every pull request" \
+      "and make sure fuzz/.gitignore does not ignore corpus/"
   done
-  echo "  commit seed inputs under fuzz/corpus/<target>/ — the gate replays them on every pull request" >&2
-  echo "  and make sure fuzz/.gitignore does not ignore corpus/" >&2
   exit 1
 fi
 
 failed=0
 for target in "${replay[@]}"; do
   if ! report=$(cargo fuzz run -s none "${target}" "${scratch}/${target}" -- -runs=0 -artifact_prefix="${scratch}/" 2>&1); then
-    echo "lint:fuzz-build: fuzz target '${target}' fails on its committed corpus — libFuzzer says:" >&2
+    org_finding "" "fuzz target '${target}' fails on its committed corpus — libFuzzer says:" \
+      "every tracked file under fuzz/corpus/<target>/ is replayed once; fix the target or the seed"
     printf '%s\n' "${report}" >&2
     failed=1
   fi
 done
-if ((failed)); then
-  echo "  every tracked file under fuzz/corpus/<target>/ is replayed once; fix the target or the seed" >&2
-  exit 1
-fi
+((failed == 0)) || exit 1
 
 echo "lint:fuzz-build: ${count} target(s) build, lockfile current, ${seeds} committed seed(s) replay clean"
 org_done=1

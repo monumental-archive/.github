@@ -58,6 +58,7 @@ def run(roster: list[str] | None, listing: str) -> tuple[int, str]:
         done = subprocess.run(
             [BASH, str(SCRIPT), CALLER, str(path)],
             input=listing,
+            env=hermetic.env(),
             capture_output=True,
             text=True,
             check=False,

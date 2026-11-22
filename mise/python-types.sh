@@ -22,9 +22,18 @@
 # files import it), else the repository's `python3`; either way it is
 # asserted to be the same Python as `python3`, the belt's pin.
 set -euo pipefail
+
+# The writer beside this file, found with no command run (#1934).
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${org__here}/findings.sh"
+unset org__here
 : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
 belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
 label="${1:?expected the task name}"
+# The task this script reports for, where mise named none (#1934).
+: "${MISE_TASK_NAME:=${label}}"
 
 files=$(git ls-files ':!vendor/**' '*.py' '*.pyi')
 [[ -n ${files} ]] || {
@@ -34,18 +43,18 @@ files=$(git ls-files ':!vendor/**' '*.py' '*.pyi')
 
 cfg="${belt}/mypy.ini"
 [[ -r ${cfg} ]] || {
-  echo "${label}: ${cfg} is missing — the belt did not arrive" >&2
+  org_finding "" "${cfg} is missing — the belt did not arrive"
   exit 1
 }
 command -v mypy > /dev/null || {
-  echo "${label}: Python tracked but mypy is missing — the belt pins pipx:mypy; run: mise install" >&2
+  org_finding "" "Python tracked but mypy is missing — the belt pins pipx:mypy; run: mise install"
   exit 1
 }
 pinned=$(awk -F'"' '/^"pipx:mypy" = "/ { print $4 }' "${belt}/config.toml")
 running=$(mypy --version | awk '{ print $2 }')
 [[ -n ${pinned} && ${running} == "${pinned}" ]] || {
-  echo "${label}: mypy ${running:-unknown} is running but the belt pins '${pinned:-nothing}'" >&2
-  echo "  reinstall: mise install -f pipx:mypy" >&2
+  org_finding "" "mypy ${running:-unknown} is running but the belt pins '${pinned:-nothing}'" \
+    "reinstall: mise install -f pipx:mypy"
   exit 1
 }
 
@@ -64,10 +73,10 @@ done <<< "${files}"
 red=0
 seams=$("${ORG_PYTHON}" "${belt}/python_types_seams.py" "${args[@]}") || red=1
 if [[ -n ${seams} ]]; then
-  echo "${label}: these lower the org's level for their own file:" >&2
-  while IFS= read -r line; do
-    echo "  ${line}" >&2
-  done <<< "${seams}"
+  detail=()
+  while IFS= read -r line; do detail+=("${line}"); done <<< "${seams}"
+  org_finding "" "these lower the org's level for their own file:" \
+    "${detail[@]}"
 fi
 
 # The import roots, derived from the tracked files (python_roots.py,
@@ -77,7 +86,7 @@ fi
 # import given` resolves as the properties runner resolves it (#1604).
 # Two files that would be one module are red by name, before mypy stops.
 roots=$("${ORG_PYTHON}" "${belt}/python_roots.py" "${belt}" "${args[@]}") || {
-  echo "${label}: rename one of each pair above so every module name is one file's" >&2
+  org_finding "" "rename one of each pair above so every module name is one file's"
   exit 1
 }
 
@@ -85,11 +94,11 @@ status=0
 out=$(MYPYPATH="${roots}" mypy --config-file "${cfg}" --python-executable "${exe}" "${args[@]}" 2>&1) || status=$?
 [[ -z ${out} ]] || printf '%s\n' "${out}"
 if grep -qF "${cfg}:" <<< "${out}"; then
-  echo "${label}: mypy did not load ${cfg} cleanly (above) — its defaults would be in force" >&2
+  org_finding "" "mypy did not load ${cfg} cleanly (above) — its defaults would be in force"
   red=1
 fi
 if ((status != 0)); then
-  echo "${label}: mypy exited ${status}; findings above, fixed in the code, never by lowering a level" >&2
+  org_finding "" "mypy exited ${status}; findings above, fixed in the code, never by lowering a level"
   red=1
 fi
 ((red == 0)) || exit 1

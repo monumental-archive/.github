@@ -20,10 +20,17 @@
 # Arguments are passed through to committed verbatim.
 set -euo pipefail
 
+# The writer beside this file, found with no command run (#1934).
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${org__here}/findings.sh"
+unset org__here
+
 if [[ -z ${ORG_BELT_DIR:-} || ! -f "${ORG_BELT_DIR}/committed.toml" ]]; then
-  echo "committed.sh: ORG_BELT_DIR is unset or carries no committed.toml" >&2
-  echo "  the org belt did not arrive; CI sets MISE_GLOBAL_CONFIG_FILE," >&2
-  echo "  locally run: lefthook run post-checkout" >&2
+  org_finding "" "ORG_BELT_DIR is unset or carries no committed.toml" \
+    "the org belt did not arrive; CI sets MISE_GLOBAL_CONFIG_FILE," \
+    "locally run: lefthook run post-checkout"
   exit 1
 fi
 
@@ -49,8 +56,8 @@ if [[ -n ${ORG_COMMIT_SCOPES:-} ]]; then
     # quote or bracket would corrupt the TOML, and committed reports a
     # parse error rather than the scope the repo meant to enforce.
     if [[ ! ${scope} =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
-      echo "committed.sh: ORG_COMMIT_SCOPES holds \"${scope}\", which is not a scope" >&2
-      echo '  expected a comma-separated list of lowercase names, e.g. "derive,emit"' >&2
+      org_finding "" "ORG_COMMIT_SCOPES holds \"${scope}\", which is not a scope" \
+        'expected a comma-separated list of lowercase names, e.g. "derive,emit"'
       exit 1
     fi
     echo "  \"${scope}\"," >> "${cfg}"

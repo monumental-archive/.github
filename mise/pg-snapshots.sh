@@ -18,6 +18,13 @@
 # Nothing at all when no Cargo.toml is tracked or no member is an
 # extension; the caller says which of those it was.
 set -euo pipefail
+
+# The writer beside this file, found with no command run (#1934).
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${org__here}/findings.sh"
+unset org__here
 : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
 
 belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
@@ -25,7 +32,7 @@ belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lef
 manifests=$(git ls-files ':!vendor/**' "Cargo.toml" "*/Cargo.toml")
 [[ -n ${manifests} ]] || exit 0
 command -v cargo > /dev/null || {
-  echo "pg-snapshots: Cargo.toml present but cargo missing — pin rust in mise.toml" >&2
+  org_finding "" "Cargo.toml present but cargo missing — pin rust in mise.toml"
   exit 1
 }
 
@@ -38,7 +45,7 @@ surface=$("${ORG_PYTHON}" "${belt}/gate_surface.py" <<< "${metadata}")
 while IFS=$'\t' read -r record spec kind majors dir; do
   [[ ${record} == crate && ${kind} == pgrx ]] || continue
   [[ ${dir} != "-" ]] || {
-    echo "pg-snapshots: ${spec} is a pgrx extension cargo reports no directory for" >&2
+    org_finding "" "${spec} is a pgrx extension cargo reports no directory for"
     exit 1
   }
   # A crate at the workspace root is `.`; the path is spelled the way
