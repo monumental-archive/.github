@@ -22,8 +22,10 @@ executable form:
 1. Copy nothing, configure nothing: once per clone, run
    `lefthook install && lefthook run post-checkout`, which links the clone
    to the toolbelt its gate pins, then `mise trust && mise install`, and
-   the full toolchain arrives pinned. The hooks keep the link current on
-   every checkout, merge and rebase after that.
+   the full toolchain arrives pinned. Every hook relinks before it runs
+   anything else (commit, push, checkout, merge and rebase), and every
+   belt task refuses, naming both shas, when the belt answering is not
+   the one the clone pins.
 
    A clone that was never linked has no belt (`mise run ci` reports no
    such task): there is no machine-wide belt to fall back on, and
@@ -161,6 +163,7 @@ red on any identifier a `REUSE.toml` names without its
 
 [#1589]: https://github.com/monumental-archive/.github/issues/1589
 [#1981]: https://github.com/monumental-archive/.github/issues/1981
+[#1987]: https://github.com/monumental-archive/.github/issues/1987
 
 ### No number can be bought
 
@@ -171,10 +174,11 @@ red on any identifier a `REUSE.toml` names without its
      original. The deletion is the fix, and nothing is recorded.
   2. **A test can tell: write the assertion.**
   3. **The code must stay and no input can tell: record it** as
-     equivalent, with a reason, at one site in the repository: in the
-     tool's own per-site exclusion where it has one (Rust: an
-     `exclude_re` entry in `.cargo/mutants.toml`), otherwise in a
-     comment at the site (Go: `//mutants:equivalent <type> <reason>`).
+     equivalent, with a reason, at its site in the repository: a
+     comment that moves with the code (Rust:
+     `// mutants:equivalent <mutation>: <reason>`, [#1987]; Go:
+     `//mutants:equivalent <type> <reason>`), never a line and column
+     in a separate file.
      This is the last resort, and its reason says why the code cannot
      be deleted. There are no org-level exclusions.
 - Never change shipped code only to make a mutant disappear. Rewriting

@@ -9,19 +9,34 @@
 # survivor in the code that matters hide in the average. So this is red
 # while any survivor stands. Its three outcomes, in order (#1981):
 # delete code it proves redundant, kill it with an assertion, or — the
-# code must stay and no input can tell — record it, with a reason, as an
-# exclusion in the repository's own config.
+# code must stay and no input can tell — record it, at its site, as
+# equivalent, with a reason.
 #
 # ADOPTION IS THE TOOL'S OWN CONFIG FILE. A repository adopts by tracking
 # `.cargo/mutants.toml`; without one this skips clean, by name. No list of
 # adopters lives in the belt, and no exclusion does either: an equivalent
 # mutant is a fact about one site in one repository.
 #
-# EVERY EXCLUSION CARRIES ITS REASON. Each `exclude_re` (and
-# `exclude_globs`) entry sits on its own line under a `#` line that says
-# why; one without is red by name. `#[mutants::skip]` is refused: it puts
-# a dependency in shipped code, and it is an exclusion with nowhere to
-# write the reason.
+# THE RECORD OF AN EQUIVALENT MUTANT IS A COMMENT AT ITS SITE (#1987):
+#
+#   // mutants:equivalent <mutation>: <reason>
+#
+# trailing the mutant's line, or alone on the line directly above it.
+# <mutation> is cargo-mutants' own text for the mutant without its
+# ` in <function>` (`replace > with >=`, `delete -`). It moves with the
+# code: the leg derives the exclusion from where the comment stands,
+# `^<path>:<line>:[0-9]+: <mutation>( in .*)?$`, and passes it as
+# `--exclude-re` to the configured listings and the run, beside the
+# config's own. mutants_rust.py holds each record to a mutant at its
+# site in the `--no-config` listing; its header has the rules.
+#
+# EVERY CONFIG EXCLUSION CARRIES ITS REASON, AND NONE IS A SITE.
+# `exclude_re` is for rules that are not a site (the pgrx `tests::`
+# pattern). Each `exclude_re` (and `exclude_globs`) entry sits on its
+# own line under a `#` line that says why; one without is red by name,
+# and so is an `exclude_re` entry that pins a line and column — it goes
+# stale as soon as the code above it moves. `#[mutants::skip]` is
+# refused: it puts a dependency in shipped code. A comment is not one.
 #
 # THE POPULATION IS EVERY WORKSPACE MEMBER, named one by one. Measured on
 # release-lab: a bare `cargo mutants` follows `default-members`, which
@@ -99,9 +114,18 @@ skips=$(git grep -n -e 'mutants::skip' -- ':!vendor/**' '*.rs' || true)
 if [[ -n ${skips} ]]; then
   IFS=$'\n' read -r -d '' -a detail <<< "${skips}" || true
   org_finding "rust" "#[mutants::skip] in the tree:" "${detail[@]}" \
-    "record the site as an exclude_re entry in ${config}, under a # reason line"
+    "record an equivalent mutant at its site instead: // mutants:equivalent <mutation>: <reason>"
   exit 1
 fi
+
+# The site records, and the exclusion each one stands for: a malformed
+# record is red here, before anything is built, as a reason is.
+records=$(git grep -n -F -e '// mutants:equivalent' -- ':!vendor/**' '*.rs' || true)
+derived=$("${ORG_PYTHON}" "${belt}/mutants_rust.py" records <<< "${records}")
+excludes=()
+while IFS= read -r pattern; do
+  if [[ -n ${pattern} ]]; then excludes+=(--exclude-re "${pattern}"); fi
+done <<< "${derived}"
 
 command -v cargo > /dev/null || {
   org_finding "rust" "${config} present but cargo missing — pin rust in mise.toml"
@@ -144,27 +168,31 @@ trap 'rc=$?; rm -rf "${scratch}"; [ -n "${org_done:-}" ] || [ "${rc}" -ne 0 ] ||
 # The run log the verdict replays, one line per event, in order.
 runs="${scratch}/runs.tsv"
 : > "${runs}"
+# The records, which the verdict holds to the --no-config listings.
+printf '%s\n' "${records}" > "${scratch}/records.txt"
 
 # One cargo-mutants run: $1 names it, the rest are its selection flags.
 # The listings go to the helper, which says what the run mutates and
 # whether the shard holds anything; the run's exit status is recorded
-# for the verdict, which decides what it means.
+# for the verdict, which decides what it means. The records' exclusions
+# cut every listing but the --no-config one, which is the population
+# they are counted and held against.
 mutate() {
   local name="$1" out="${scratch}/$1" status=0
   shift
   mkdir -p "${out}"
   cargo mutants --list --no-config "$@" > "${out}/all.txt"
-  cargo mutants --list "$@" > "${out}/listed.txt"
+  cargo mutants --list ${excludes[@]+"${excludes[@]}"} "$@" > "${out}/listed.txt"
   local here=""
   if [[ -n ${shard} ]]; then
-    cargo mutants --list "${sharding[@]}" "$@" > "${out}/here.txt"
+    cargo mutants --list "${sharding[@]}" ${excludes[@]+"${excludes[@]}"} "$@" > "${out}/here.txt"
     here="${out}/here.txt"
   fi
   "${ORG_PYTHON}" "${belt}/mutants_rust.py" plan --name "${name}" --where "${where}" --dir "${out}" \
     --all "${out}/all.txt" --listed "${out}/listed.txt" --here "${here}"
   printf 'run\t%s\t%s\n' "${name}" "${out}" >> "${runs}"
   [[ ! -e ${out}/empty ]] || return 0
-  cargo mutants --output "${out}" ${sharding[@]+"${sharding[@]}"} "$@" || status=$?
+  cargo mutants --output "${out}" ${sharding[@]+"${sharding[@]}"} ${excludes[@]+"${excludes[@]}"} "$@" || status=$?
   echo "${status}" > "${out}/status"
 }
 
