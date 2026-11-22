@@ -5,7 +5,8 @@ The checkpoint passes between legs and between runs through one
 mechanism, the Actions cache. That only works if every leg restores the
 newest save by one prefix and saves under a key no other leg uses, the
 legs run one at a time, the run's starting checkpoint is kept aside
-before the first leg, and the alert runs once after the last. None of it
+before the first leg, and the gaining job runs once after the last,
+reading every leg's report and counting all the legs. None of it
 can run here, so this reads the workflow and names each part that is not
 as built; a planted copy per rule proves the message.
 
@@ -36,6 +37,8 @@ RUN = "${{ github.run_id }}-${{ github.run_attempt }}"
 LEG_KEY = f"ct-watch-{RUN}-${{{{ matrix.leg }}}}"
 START_KEY = f"ct-start-{RUN}"
 NEWEST = "ct-watch-"
+REPORT = "watch-report-${{ matrix.leg }}"
+REPORTS = "watch-report-*"
 LEGS = 14
 # A leg's bound, longer than its 40-minute read and inside its token's hour.
 TIMEOUT = 50
@@ -157,8 +160,8 @@ def leg_wide(watch: Mapping) -> list[str]:
     return found
 
 
-def ends(start: Mapping, alert: Mapping) -> list[str]:
-    """Name what is wrong with the start job and the alert job.
+def ends(start: Mapping, gaining: Mapping, watch: Mapping) -> list[str]:
+    """Name what is wrong with the start job and the gaining job.
 
     Returns:
         One line per problem.
@@ -171,16 +174,25 @@ def ends(start: Mapping, alert: Mapping) -> list[str]:
     ]
     if not (START_KEY in kept and NEWEST in newest):
         found.append("the run's starting checkpoint is not kept aside")
-    if alert.get("needs") != ["start", "watch"] or alert.get("if") != "${{ always() }}":
-        found.append("the alert does not run once after the last leg")
-    restores = [inputs(s) for s in using(alert, "actions/cache/restore")]
+    after_legs = gaining.get("needs") == ["start", "watch"]
+    if not after_legs or gaining.get("if") != "${{ always() }}":
+        found.append("the gaining job does not run once after the last leg")
+    restores = [inputs(s) for s in using(gaining, "actions/cache/restore")]
     aside = [
         r for r in restores if r.get("key") == START_KEY and "restore-keys" not in r
     ]
     if not aside or not any(r.get("restore-keys") == NEWEST for r in restores):
-        found.append("the alert does not read both checkpoints")
-    if using(alert, "actions/cache/save"):
-        found.append("the alert saves a checkpoint")
+        found.append("the gaining job does not read both checkpoints")
+    if using(gaining, "actions/cache/save"):
+        found.append("the gaining job saves a checkpoint")
+    handed = [inputs(s).get("name") for s in using(watch, "actions/upload-artifact")]
+    taken = [
+        inputs(s).get("pattern") for s in using(gaining, "actions/download-artifact")
+    ]
+    if REPORT not in handed or REPORTS not in taken:
+        found.append("the legs' reports do not reach the gaining job")
+    if f"--legs {LEGS}" not in runs(gaining):
+        found.append(f"the gaining job does not count {LEGS} legs")
     return found
 
 
@@ -199,15 +211,15 @@ def problems(text: str) -> list[str]:
     by_id = workflow_yaml.jobs(document)
     # `report` is every scheduled workflow's last job (#1887), held by
     # mise/test_report_job.py; this file holds the legs' shape.
-    if sorted(by_id) != ["alert", "report", "start", "watch"]:
-        expected = "start, watch, alert and report"
+    if sorted(by_id) != ["gaining", "report", "start", "watch"]:
+        expected = "start, watch, gaining and report"
         return [*found, f"the jobs are {sorted(by_id)}, not {expected}"]
     found += leg_wide(by_id["watch"])
-    return found + ends(by_id["start"], by_id["alert"])
+    return found + ends(by_id["start"], by_id["gaining"], by_id["watch"])
 
 
-# The alert's `needs:` and the line after it; the report job's (#1887)
-# lists more jobs, so this reaches the alert's alone.
+# The gaining job's `needs:` and the line after it; the report job's
+# (#1887) lists more jobs, so this reaches the gaining job's alone.
 AFTER_LEGS = "    if: ${{ always() }}\n    runs-on"
 
 # Each row: what is planted (old, new) and the one message it must earn.
@@ -260,8 +272,8 @@ ROWS = [
         "a leg does not restore the newest save by its prefix",
     ),
     (
-        f"key: {LEG_KEY}\n\n      # The leg's colour",
-        f"key: ct-watch-{RUN}\n\n      # The leg's colour",
+        f"key: {LEG_KEY}\n\n      # The leg's report",
+        f"key: ct-watch-{RUN}\n\n      # The leg's report",
         "a leg does not save under its own key",
     ),
     (
@@ -277,24 +289,39 @@ ROWS = [
     (
         f"    needs:\n      - start\n      - watch\n{AFTER_LEGS}",
         f"    needs:\n      - watch\n{AFTER_LEGS}",
-        "the alert does not run once after the last leg",
+        "the gaining job does not run once after the last leg",
     ),
     (
         f"key: {START_KEY}\n\n      # unattested-path: the newest checkpoint, the last",
         "key: x\n\n      # unattested-path: the newest checkpoint, the last",
-        "the alert does not read both checkpoints",
+        "the gaining job does not read both checkpoints",
     ),
     (
-        '            --run-url "${RUN_URL}"\n',
-        '            --run-url "${RUN_URL}"\n      - uses: actions/cache/save@x\n',
-        "the alert saves a checkpoint",
+        f"--legs {LEGS}\n",
+        f"--legs {LEGS}\n      - uses: actions/cache/save@x\n",
+        "the gaining job saves a checkpoint",
     ),
     (
-        "\n  alert:\n",
-        "\n  alerts:\n",
+        f"--legs {LEGS}\n",
+        f"--legs {LEGS - 1}\n",
+        f"the gaining job does not count {LEGS} legs",
+    ),
+    (
+        f"name: {REPORT}\n",
+        "name: watch-report\n",
+        "the legs' reports do not reach the gaining job",
+    ),
+    (
+        f"pattern: {REPORTS}\n",
+        "pattern: findings-*\n",
+        "the legs' reports do not reach the gaining job",
+    ),
+    (
+        "\n  gaining:\n",
+        "\n  gains:\n",
         (
-            "the jobs are ['alerts', 'report', 'start', 'watch'],"
-            " not start, watch, alert and report"
+            "the jobs are ['gains', 'report', 'start', 'watch'],"
+            " not start, watch, gaining and report"
         ),
     ),
 ]
@@ -311,7 +338,7 @@ class Shape(unittest.TestCase):
     def test_the_workflow_holds(self) -> None:
         """The workflow as built names no problem.
 
-        The alert's `always()` is #1149's: a leg ended by its timeout is
+        The gaining job's `always()` is #1149's: a leg ended by its timeout is
         cancelled, which `failure()` does not match, and nothing was filed.
         """
         self.assertEqual(problems(self.text), list[str]())

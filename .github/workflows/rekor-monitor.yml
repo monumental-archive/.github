@@ -30,7 +30,7 @@
 #   ct-watch-<run>-<attempt>-<leg>  each leg's save; every leg restores
 #                                   the newest by the `ct-watch-` prefix
 #   ct-start-<run>-<attempt>        the checkpoint the run started from,
-#                                   kept aside for the alert job
+#                                   kept aside for the gaining job
 ---
 name: signer-identity-watch
 
@@ -63,7 +63,7 @@ concurrency:
 
 jobs:
   # The checkpoint the run starts from, restored and kept aside under its
-  # own key so the alert job can say whether this run gained on the log.
+  # own key so the gaining job can say whether this run gained on the log.
   start:
     name: Keep the checkpoint the run starts from
     runs-on: ubuntu-26.04
@@ -262,11 +262,24 @@ jobs:
           path: checkpoint.json
           key: ct-watch-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.leg }}
 
+      # The leg's report, for the gaining job: why each leg stopped is
+      # part of the one finding a run that did not gain records (#1967).
+      # A leg with no report is counted there as "no report".
+      - name: Hand the report to the gaining job
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: watch-report-${{ matrix.leg }}
+          path: ${{ runner.temp }}/report.json
+          if-no-files-found: ignore
+          retention-days: 1
+
       # The leg's colour, from stele's exit status and its report. A
       # finding is red whatever the exit code, 4 included: a certificate
       # that does not reconcile is the one thing this watch exists to
-      # raise. `always()`: a leg ended by its own timeout is CANCELLED.
-      # verdict.py's header has the outcomes.
+      # raise. A leg is red only for its own failure: whether the run
+      # gained is the gaining job's (#1967). `always()`: a leg ended by
+      # its own timeout is CANCELLED. verdict.py's header has the outcomes.
       - name: Judge the leg
         if: ${{ always() }}
         env:
@@ -288,21 +301,20 @@ jobs:
           retention-days: 1
   # Once, after the last leg: did this run gain on the log? Read from
   # stele's own checkpoints, the one the run started from and the newest
-  # saved. The standing issue (#1353) is for a watch that is not
-  # gaining; a backlog being worked off is normal.
-  alert:
-    name: Keep the standing issue
+  # saved. A run that did not gain is this job red, with one finding the
+  # report job's red-check issue carries (#1967): a backlog being worked
+  # off is normal, one that is not shrinking is not. The watch keeps no
+  # issue of its own; a fact is reported once (docs/findings.md).
+  gaining:
+    name: the signer-identity watch is gaining on the log
     needs:
       - start
       - watch
     if: ${{ always() }}
     runs-on: ubuntu-26.04
     timeout-minutes: 10
-    env:
-      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     permissions:
-      contents: read # the helper
-      issues: write # the standing issue
+      contents: read # the helper and the legs' reports
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -331,18 +343,25 @@ jobs:
           key: ct-watch-${{ github.run_id }}-${{ github.run_attempt }}-end
           restore-keys: ct-watch-
 
+      # Every leg's report, one directory per leg: why each stopped.
+      - name: Collect the legs' reports
+        if: ${{ !cancelled() }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: watch-report-*
+          path: ${{ runner.temp }}/reports
+
       # The helper runs outside `mise run`, so the step names its own
-      # findings file (#1934).
-      - name: Judge the run and keep the standing issue
+      # findings file (#1934). --legs is the watch job's matrix length:
+      # a leg that handed no report on is counted as "no report".
+      - name: Judge whether the run gained on the log
         env:
-          GH_TOKEN: ${{ github.token }}
           KEPT: ${{ needs.start.outputs.kept }}
-          LEGS: ${{ needs.watch.result }}
           ORG_FINDINGS: ${{ runner.temp }}/findings/${{ github.job }}-${{ strategy.job-index }}.jsonl
         run: |
-          "${ORG_PYTHON}" .github/rekor-monitor/watch_issue.py --start run-start.json \
-            --start-kept "${KEPT}" --checkpoint checkpoint.json --legs "${LEGS}" \
-            --run-url "${RUN_URL}"
+          "${ORG_PYTHON}" .github/rekor-monitor/gain.py --start run-start.json \
+            --start-kept "${KEPT}" --checkpoint checkpoint.json \
+            --reports "${RUNNER_TEMP}/reports" --legs 14
 
       # This job's findings records, for the report job (#1933).
       - name: Hand the findings to the report job
@@ -365,7 +384,7 @@ jobs:
     needs:
       - start
       - watch
-      - alert
+      - gaining
     if: ${{ always() }}
     runs-on: ubuntu-26.04
     timeout-minutes: 10

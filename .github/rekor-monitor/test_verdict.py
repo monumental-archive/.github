@@ -164,14 +164,17 @@ class Verdict(unittest.TestCase):
             " each has its issue",
         )
 
-    def test_not_advanced_is_red(self) -> None:
-        """Exit 4, nothing judged: red, stele's reason quoted."""
+    def test_judged_nothing_is_green(self) -> None:
+        """Exit 4, saved, no finding, nothing judged: green, stele's reason printed.
+
+        A leg is red only for its own failure (#1967): whether the run
+        gained is judged once, after the last leg (gain.py).
+        """
         proc = self.run_helper("4", load("report-budget.json"))
-        self.assertEqual(proc.returncode, 1)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stderr, "")
         self.assertEqual(
-            proc.stderr.strip(),
-            "::error::verdict.py: the checkpoint did not advance: stele judged nothing"
-            f" ({STOPPED})",
+            proc.stdout.strip(), f"verdict: green: stele judged nothing ({STOPPED})"
         )
 
     def test_killed_is_red(self) -> None:

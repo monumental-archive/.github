@@ -41,7 +41,7 @@ dir = "{{cwd}}"
 # all (#772), and the first one written reproduces a burned release from
 # a real captured listing. .github/rekor-monitor/ joined with #1250; its
 # reconciler moved to stele with #1339, and what stays is the workflow's
-# helpers (the issue filer, the leg's verdict, the standing issue) and
+# helpers (the issue filer, the leg's verdict, the run's gain) and
 # its shape, tested on stele's own captured reports and checkpoints.
 # settings/ joined with #1360: repo-baseline.sh's drift check, run
 # against a stubbed forge that makes no live settings read or write.

@@ -29,6 +29,13 @@ Nothing reads a finding back out of a log.
    a tool's own report beside its finding, or a stranger's own audit
    task that reported nothing through a writer, is otherwise in no
    issue. Legs with the same output share one excerpt.
+4. **A fact is reported once** (#1967). Either its job is red and the
+   red-check issue carries it as findings, or a filer carries it in
+   its own issue and its job is green. Never both. The signer-identity
+   watch takes the first form: its `gaining` job is red when a run did
+   not gain on the log, with one finding, and keeps no issue of its
+   own. A security release takes the second: it files its own issue
+   and its job is green.
 
 ## How the writer reaches a task
 
