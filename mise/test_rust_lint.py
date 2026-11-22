@@ -19,6 +19,7 @@ stdlib `unittest`, matching the other mise/test_*.py; run through the
 gate as `mise run test`.
 """
 
+import itertools
 import os
 import subprocess
 import tempfile
@@ -328,7 +329,12 @@ class TheLadderNamesItsContradictions(unittest.TestCase):
     """
 
     def ladder(self, call: str) -> str:
-        """Source the belt's ladder and print one function's output."""
+        """Source the belt's ladder and run one of its functions.
+
+        Returns:
+            What the function printed.
+
+        """
         done = subprocess.run(
             [BASH, "-c", f'. "$1" && {call}', "ladder", str(BELT / "clippy-ladder.sh")],
             capture_output=True,
@@ -342,7 +348,7 @@ class TheLadderNamesItsContradictions(unittest.TestCase):
     def test_the_ladder_allows_both_lints(self) -> None:
         """org_clippy_ladder prints an `-A` for each of the two."""
         words = self.ladder("org_clippy_ladder").split()
-        allowed = [b for a, b in zip(words, words[1:], strict=False) if a == "-A"]
+        allowed = [b for a, b in itertools.pairwise(words) if a == "-A"]
         self.assertIn("clippy::single_call_fn", allowed)
         self.assertIn("clippy::tests_outside_test_module", allowed)
 
