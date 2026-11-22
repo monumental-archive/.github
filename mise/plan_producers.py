@@ -54,6 +54,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import decoded
+import findings as writer
 import typed_std
 
 NAME = "plan-producers"
@@ -408,13 +409,12 @@ def main() -> int:
     try:
         document = decoded.load_json(args.policy.read_bytes())
     except (OSError, decoded.UndecodableError) as bad:
-        print(f"{NAME}: {args.policy} does not read as JSON", file=sys.stderr)
-        print(f"  {bad}", file=sys.stderr)
+        writer.finding("", f"{args.policy} does not read as JSON", [str(bad)])
         return 1
     try:
         policy = read_policy(document)
     except decoded.UndecodableError as bad:
-        print(f"{NAME}: {args.policy}: {bad}", file=sys.stderr)
+        writer.finding(str(args.policy), str(bad))
         return 1
 
     files: dict[str, str] = {}
@@ -422,8 +422,7 @@ def main() -> int:
         try:
             files[str(path)] = path.read_text(encoding="utf-8")
         except OSError as bad:
-            print(f"{NAME}: {path} does not read", file=sys.stderr)
-            print(f"  {bad}", file=sys.stderr)
+            writer.finding("", f"{path} does not read", [str(bad)])
             return 1
 
     declared = obligations(policy)
@@ -433,21 +432,20 @@ def main() -> int:
 
     findings = judge(policy, files)
     if findings:
-        print(
-            f"{NAME}: the planned obligations and their producers disagree",
-            file=sys.stderr,
-        )
-        for line in findings:
-            print(f"  {line}", file=sys.stderr)
-        print(
-            "  a planned obligation is a document some build leg must emit an "
-            "inventory plan for;",
-            file=sys.stderr,
-        )
-        print(
-            "  declare the producer with `# plan-producer: <class> <prefix>` "
-            "beside the class name.",
-            file=sys.stderr,
+        writer.finding(
+            "",
+            "the planned obligations and their producers disagree",
+            [
+                *findings,
+                (
+                    "a planned obligation is a document some build leg must emit an "
+                    "inventory plan for;"
+                ),
+                (
+                    "declare the producer with `# plan-producer: <class> <prefix>` "
+                    "beside the class name."
+                ),
+            ],
         )
         return 1
 

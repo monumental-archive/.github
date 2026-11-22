@@ -33,10 +33,24 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import TYPE_CHECKING, Self
 from unittest import mock
 
 import decoded
+import hermetic
 import workspace_inherit as wi
+
+if TYPE_CHECKING:
+    from types import TracebackType
+
+# The task that runs the helper, whose name its findings carry (#1934).
+TASK = "lint:workspace-inherit"
+
+
+def setUpModule() -> None:
+    """Run every row as the task does, recording no finding."""
+    unittest.enterModuleContext(hermetic.as_task(TASK))
+
 
 ROOT = Path("/ws")
 # What a row expects when no key is inert.
@@ -46,6 +60,50 @@ NO_FINDINGS: list[wi.Finding] = []
 # declared VALUE the check resolves, never a flag on the call.
 DISCOVER = True
 NO_README = False
+
+
+class Stops:
+    """Expect the task to stop: exit 1, its finding said on stderr (#1934).
+
+    The refusal is a finding, written through the writer; `said` is what
+    it printed, without the final newline.
+    """
+
+    def __init__(self, case: unittest.TestCase) -> None:
+        """Hold the row that expects the stop."""
+        self.case = case
+        self.said = ""
+        self._err = io.StringIO()
+        self._redirect = redirect_stderr(self._err)
+
+    def __enter__(self) -> Self:
+        """Start capturing stderr.
+
+        Returns:
+            This expectation, to read `said` from afterwards.
+
+        """
+        self._redirect.__enter__()
+        return self
+
+    def __exit__(
+        self,
+        kind: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> bool:
+        """Stop capturing, and hold the block to a stop with status 1.
+
+        Returns:
+            True: the expected stop is swallowed.
+
+        """
+        self._redirect.__exit__(kind, exc, tb)
+        self.said = self._err.getvalue().rstrip("\n")
+        if not isinstance(exc, SystemExit):
+            self.case.fail(f"the task did not stop: {exc!r}")
+        self.case.assertEqual(1, exc.code, self.said)
+        return True
 
 
 def member(name: str, **fields: object) -> wi.Member:
@@ -246,7 +304,7 @@ class TestWorkspacePackage(unittest.TestCase):
 
     def test_an_unreadable_manifest_stops_the_task(self) -> None:
         """A manifest missing where cargo named the root is broken."""
-        with TemporaryDirectory() as tmp, self.assertRaises(SystemExit):
+        with TemporaryDirectory() as tmp, Stops(self):
             wi.workspace_package(Path(tmp))
 
 
@@ -322,7 +380,7 @@ class TestMain(unittest.TestCase):
 
     def test_metadata_of_the_wrong_shape_stops_the_task_by_where(self) -> None:
         """A wrong-shaped account is refused naming where, never a crash."""
-        said = "lint:workspace-inherit: cargo metadata is unreadable"
+        said = f"{TASK}: cargo metadata is unreadable"
         shapes: tuple[tuple[object, str], ...] = (
             ([], "the document is not an object"),
             ({"workspace_root": 1}, "workspace_root is not a string"),
@@ -346,34 +404,34 @@ class TestMain(unittest.TestCase):
         )
         for document, where in shapes:
             stdin = io.StringIO(json.dumps(document))
+            err = io.StringIO()
             with (
                 self.subTest(where=where),
                 mock.patch.object(sys, "stdin", stdin),
-                self.assertRaises(SystemExit) as stopped,
+                redirect_stderr(err),
             ):
-                wi.main()
-            self.assertEqual(f"{said} ({where})", stopped.exception.code)
+                self.assertEqual(1, wi.main())
+            self.assertEqual(f"{said} ({where})\n", err.getvalue())
 
     def test_a_manifest_of_the_wrong_shape_stops_the_task(self) -> None:
         """`[workspace]` that is not a table is named, never a crash."""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "Cargo.toml").write_text("workspace = 1\n", encoding="utf-8")
-            with self.assertRaises(SystemExit) as stopped:
+            with Stops(self) as stopped:
                 wi.workspace_package(root)
         self.assertEqual(
-            f"lint:workspace-inherit: {root}/Cargo.toml is unreadable"
-            " (workspace is not an object)",
-            stopped.exception.code,
+            f"{TASK}: {root}/Cargo.toml is unreadable (workspace is not an object)",
+            stopped.said,
         )
 
     def test_unreadable_metadata_stops_the_task(self) -> None:
         """A broken account is refused, never read as an empty one."""
         with (
             mock.patch.object(sys, "stdin", io.StringIO("not json")),
-            self.assertRaises(SystemExit),
+            redirect_stderr(io.StringIO()),
         ):
-            wi.main()
+            self.assertEqual(1, wi.main())
 
 
 if __name__ == "__main__":

@@ -80,6 +80,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import findings
 from hypothesis import HealthCheck, seed, settings
 from unittest_guarded import workers
 
@@ -362,11 +363,11 @@ def fan_out(profile_name: str, files: list[Path], count: int) -> int:
         tests += tested(result.stdout, files)
         if result.returncode:
             red.append(f"{k}/{count}")
-    total = f"{label}: {tests} test(s) in {len(files)} file(s)"
+    total = f"{tests} test(s) in {len(files)} file(s)"
     if red:
-        print(f"{total}; shard(s) {', '.join(red)} red", file=sys.stderr)
+        findings.finding("", f"{total}; shard(s) {', '.join(red)} red")
         return 1
-    print(f"{total} held")
+    print(f"{label}: {total} held")
     return 0
 
 
@@ -399,12 +400,13 @@ def run(profile_name: str, files: list[Path]) -> int:
     for text in report.failures:
         print(f"\n{text}", file=sys.stderr)
     for text in report.refused:
-        print(f"{label}: {text}", file=sys.stderr)
+        head, *rest = text.splitlines()
+        findings.finding("", head, rest)
     if report.failures and chosen is not None:
-        print(
-            f"{label}: seed {chosen} — commit each falsifying example above"
+        findings.finding(
+            "",
+            f"seed {chosen} — commit each falsifying example above"
             " as an @example row with its fix",
-            file=sys.stderr,
         )
     if report.failures or report.refused:
         return 1
@@ -421,14 +423,14 @@ def main(argv: list[str]) -> int:
     """
     args = argv
     if len(args) < MIN_ARGS or args[0] not in LABELS:
-        print("usage: python_properties.py gate|audit FILE...", file=sys.stderr)
+        findings.finding("", "usage: python_properties.py gate|audit FILE...")
         return EXIT_USAGE
     label, spec = LABELS[args[0]], os.environ.get("ORG_PROPERTY_SHARD", "")
     files = [Path(a) for a in args[1:]]
     try:
         chosen = shard_of(files, spec)
     except ShardError as bad:
-        print(f"{label}: {bad}", file=sys.stderr)
+        findings.finding("", str(bad))
         return EXIT_USAGE
     if not chosen:
         print(f"{label}: shard {spec} holds none of the {len(files)} file(s), skipped")

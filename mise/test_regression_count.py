@@ -25,6 +25,15 @@ import regression_count as rc
 # Every inherited GIT_* goes too (#857): under the pre-push hook git
 # exports GIT_DIR and friends, and a row would then read the real
 # repository instead of the one it built.
+# The task that runs the helper, whose name its findings carry (#1934).
+TASK = "audit:regression-tests"
+
+
+def setUpModule() -> None:
+    """Run every row as the task does, recording no finding."""
+    unittest.enterModuleContext(hermetic.as_task(TASK))
+
+
 _GIT_ENV = {
     "GIT_CONFIG_GLOBAL": os.devnull,
     "GIT_CONFIG_NOSYSTEM": "1",
@@ -113,7 +122,7 @@ class RepoCase(unittest.TestCase):
     @override
     def setUp(self) -> None:
         """Isolate git's config, then build the repository."""
-        clean = hermetic.env()
+        clean = hermetic.env(MISE_TASK_NAME=TASK)
         isolated: dict[str, str] = {**clean, **_GIT_ENV}
         self.enterContext(mock.patch.dict(os.environ, isolated, clear=True))
         tmp = tempfile.TemporaryDirectory()
@@ -456,7 +465,7 @@ class TestReport(RepoCase):
             with contextlib.redirect_stderr(err):
                 status = rc.main(["--repo", tmp])
         self.assertEqual(status, 2)
-        self.assertIn("regression-count: git", err.getvalue())
+        self.assertIn(f"{TASK}: git", err.getvalue())
 
 
 if __name__ == "__main__":

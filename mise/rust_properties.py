@@ -43,6 +43,7 @@ import sys
 from pathlib import Path
 
 import decoded
+import findings
 
 EXIT_USAGE = 2
 NAME = "proptest"
@@ -174,17 +175,16 @@ def main(argv: list[str]) -> int:
 
     """
     if not argv or argv[0] not in {"locked", "lint", "seed"}:
-        print("rust_properties.py: expected locked, lint or seed", file=sys.stderr)
+        findings.finding("", "expected locked, lint or seed")
         return EXIT_USAGE
     command, files = argv[0], argv[1:]
     if command == "seed":
         given = os.environ.get("ORG_PROPERTY_SEED", "")
         chosen = seed(given)
         if chosen is None or files:
-            print(
-                "rust_properties.py: ORG_PROPERTY_SEED must be an integer"
-                f" from 0 to 2^64-1, got '{given}'",
-                file=sys.stderr,
+            findings.finding(
+                "",
+                f"ORG_PROPERTY_SEED must be an integer from 0 to 2^64-1, got '{given}'",
             )
             return EXIT_USAGE
         print(chosen)
@@ -192,7 +192,7 @@ def main(argv: list[str]) -> int:
     try:
         pins = locked(Path.cwd(), files)
     except (decoded.UndecodableError, OSError) as err:
-        print(err, file=sys.stderr)
+        findings.finding("", str(err))
         return 1
     if command == "locked":
         for name, version in pins:

@@ -29,6 +29,15 @@ import hermetic
 import python_roots
 import python_types_seams
 
+# The task that runs the helper, whose name its findings carry (#1934).
+TASK = "lint:python-types"
+
+
+def setUpModule() -> None:
+    """Run every row as the task does, recording no finding."""
+    unittest.enterModuleContext(hermetic.as_task(TASK))
+
+
 BELT = Path(__file__).resolve().parent
 BASH = hermetic.tool("bash")
 GIT = hermetic.tool("git")
@@ -379,7 +388,7 @@ class TheHelpers(unittest.TestCase):
         done = roots("a/helper.py", "b/helper.py")
         self.assertEqual(1, done.returncode)
         self.assertEqual(
-            "python_roots: these tracked files would be one module, so an import"
+            f"{TASK}: these tracked files would be one module, so an import"
             " of that name reaches only one of them:\n  helper: a/helper, b/helper\n",
             done.stderr,
         )
@@ -388,7 +397,7 @@ class TheHelpers(unittest.TestCase):
         """No belt or no file: exit 2 with the usage."""
         done = hermetic.call_main(lambda: python_roots.main([str(BELT)]))
         self.assertEqual(
-            (2, "usage: python_roots.py <belt-dir> <file>...\n"),
+            (2, f"{TASK}: usage: python_roots.py <belt-dir> <file>...\n"),
             (done.returncode, done.stderr),
         )
 
@@ -416,7 +425,7 @@ class TheHelpers(unittest.TestCase):
             check=False,
         )
         self.assertEqual(
-            (2, "usage: python_roots.py <belt-dir> <file>...\n"),
+            (2, "python_roots.py: usage: python_roots.py <belt-dir> <file>...\n"),
             (done.returncode, done.stderr),
         )
 

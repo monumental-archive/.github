@@ -52,7 +52,7 @@ import shutil
 import subprocess
 import sys
 
-import workflow_command
+import findings
 
 GIT = shutil.which("git") or "git"
 
@@ -214,7 +214,7 @@ def main(argv: list[str]) -> int:
         head = fetch_head(number, env.get("ORG_QUEUE_TOKEN", ""))
         tree = check(base, group, number, head)
     except StepError as err:
-        workflow_command.error(f"queue-head: {err}")
+        findings.finding("", str(err), annotate=True)
         return 1
     print(
         f"queue-head: merge group {group} is pull request #{number}'s current"

@@ -24,12 +24,22 @@ from pathlib import Path
 from unittest import mock
 
 import decoded
+import hermetic
 import msrv_plan
 
 # What the planner returns, named so an expected value states its type.
 Version = tuple[int, int, int]
 Groups = dict[Version, list[str]]
 Pinned = dict[Version, str]
+
+
+# The task that runs the helper, whose name its findings carry (#1934).
+TASK = "lint:msrv"
+
+
+def setUpModule() -> None:
+    """Run every row as the task does, recording no finding."""
+    unittest.enterModuleContext(hermetic.as_task(TASK))
 
 
 def member(
@@ -588,7 +598,7 @@ class MainTest(unittest.TestCase):
         for doc, listing, said in cases:
             with self.subTest(said=said):
                 status, out, err = self.invoke(doc, listing)
-                self.assertEqual((1, "", f"msrv-plan: {said}\n"), (status, out, err))
+                self.assertEqual((1, "", f"{TASK}: {said}\n"), (status, out, err))
 
     def test_metadata_that_is_not_json_is_red(self) -> None:
         """A broken cargo must not read as a workspace with no promises."""

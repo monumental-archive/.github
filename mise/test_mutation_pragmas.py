@@ -16,7 +16,17 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import hermetic
 import mutation_pragmas as mp
+
+# The task that runs the helper, whose name its findings carry (#1934).
+TASK = "audit:mutants"
+
+
+def setUpModule() -> None:
+    """Run every row as the task does, recording no finding."""
+    unittest.enterModuleContext(hermetic.as_task(TASK))
+
 
 HERE = Path(__file__).resolve().parent
 
@@ -35,7 +45,7 @@ class Unreadable(unittest.TestCase):
             with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
                 status = mp.main([str(bad), str(good)])
         self.assertEqual(status, 1)
-        self.assertIn(f"mutation-pragmas: {bad}: could not tokenize:", err.getvalue())
+        self.assertIn(f"{TASK}: {bad}: could not tokenize:", err.getvalue())
         self.assertEqual(out.getvalue(), f"{good}\t1\t# pragma: no mutate\n")
 
 

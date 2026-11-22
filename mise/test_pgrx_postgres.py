@@ -20,7 +20,16 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
+import hermetic
 import pgrx_postgres
+
+# The task that runs the helper, whose name its findings carry (#1934).
+TASK = "lint:pg-clippy"
+
+
+def setUpModule() -> None:
+    """Run every row as the task does, recording no finding."""
+    unittest.enterModuleContext(hermetic.as_task(TASK))
 
 
 def install(version: str, *, nested: bool = True, empty: bool = False) -> str:
@@ -250,7 +259,7 @@ class MainTest(unittest.TestCase):
 
     def test_a_listing_of_the_wrong_shape_is_red_by_where(self) -> None:
         """Not a list, or an entry not an object: named, never a crash."""
-        cmd = "pgrx-postgres: `mise ls aqua:theseus-rs/postgresql-binaries`"
+        cmd = f"{TASK}: `mise ls aqua:theseus-rs/postgresql-binaries`"
         cases: tuple[tuple[object, str], ...] = (
             ({"version": "18.6.0"}, "the listing is not a list"),
             (["18.6.0"], "listing[0] is not an object"),

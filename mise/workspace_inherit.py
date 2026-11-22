@@ -34,6 +34,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
 
+import findings as writer
 from decoded import (
     UndecodableError,
     as_array,
@@ -160,6 +161,9 @@ def workspace_package(root: Path) -> dict[str, object]:
     Returns:
         The declared table, empty when the manifest declares none.
 
+    Raises:
+        SystemExit: the manifest is unreadable, said as a finding.
+
     """
     manifest = root / "Cargo.toml"
     try:
@@ -167,7 +171,8 @@ def workspace_package(root: Path) -> dict[str, object]:
         workspace = as_object(doc.get("workspace", {}), "workspace")
         return as_object(workspace.get("package", {}), "workspace.package")
     except (OSError, UndecodableError) as exc:
-        sys.exit(f"lint:workspace-inherit: {manifest} is unreadable ({exc})")
+        writer.finding("", f"{manifest} is unreadable ({exc})")
+        raise SystemExit(1) from None
 
 
 def same_file(declared: str, reported: str, root: Path, manifest: Path) -> bool:
@@ -238,24 +243,29 @@ def judge(
     return findings
 
 
-def explain(findings: list[Finding], root: Path) -> None:
-    """Print the inert keys and the one line that fixes each."""
+def explain(findings: list[Finding], root: Path) -> list[str]:
+    """Name the inert keys and the one line that fixes each.
+
+    Returns:
+        The finding's detail lines.
+
+    """
+    lines = [""]
     for key, declared, takers in findings:
-        print(
-            f"  {key} = {declared!r} is declared and inherited by no member",
-            file=sys.stderr,
-        )
-        print(f"        could take it: {', '.join(takers)}", file=sys.stderr)
-        print(f"        add `{key}.workspace = true`", file=sys.stderr)
-    print(
+        lines += [
+            f"{key} = {declared!r} is declared and inherited by no member",
+            f"      could take it: {', '.join(takers)}",
+            f"      add `{key}.workspace = true`",
+        ]
+    remedy = (
         f"\n  Declared in {root}/Cargo.toml under [workspace.package].\n"
         "  Inheritance is opt-in per member AND per key, so a key nobody takes\n"
         "  reaches no consumer and no tool — release-lab's `rust-version` left\n"
         "  clippy's incompatible_msrv with nothing to check against (#863).\n"
         "  A key only SOME members want is fine and is not reported here; this\n"
-        "  is the one nobody wants.",
-        file=sys.stderr,
+        "  is the one nobody wants."
     )
+    return lines + [line.removeprefix("  ") for line in remedy.splitlines()]
 
 
 def metadata(document: object) -> tuple[Path, list[Member]]:
@@ -295,7 +305,8 @@ def main() -> int:
     try:
         root, members = metadata(load_json(stdin_text()))
     except UndecodableError as exc:
-        sys.exit(f"lint:workspace-inherit: cargo metadata is unreadable ({exc})")
+        writer.finding("", f"cargo metadata is unreadable ({exc})")
+        return 1
 
     table = workspace_package(root)
     if not table:
@@ -303,10 +314,10 @@ def main() -> int:
         return 0
 
     if not members:
-        print(
-            "lint:workspace-inherit: [workspace.package] is declared and cargo "
+        writer.finding(
+            "",
+            "[workspace.package] is declared and cargo "
             "metadata names no workspace member to inherit it",
-            file=sys.stderr,
         )
         return 1
 
@@ -324,12 +335,11 @@ def main() -> int:
         )
         return 0
 
-    print(
-        f"lint:workspace-inherit: {len(findings)} of {counted} "
-        f"[workspace.package] {noun} reach no member\n",
-        file=sys.stderr,
+    writer.finding(
+        "",
+        f"{len(findings)} of {counted} [workspace.package] {noun} reach no member",
+        explain(findings, root),
     )
-    explain(findings, root)
     return 1
 
 

@@ -29,6 +29,8 @@ import os
 import sys
 from pathlib import PurePosixPath
 
+import findings
+
 USAGE = "usage: python_roots.py <belt-dir> <file>..."
 # The belt and at least one file.
 MIN_ARGS = 2
@@ -97,16 +99,16 @@ def main(argv: list[str]) -> int:
 
     """
     if len(argv) < MIN_ARGS:
-        sys.stderr.write(USAGE + "\n")
+        findings.finding("", USAGE)
         return 2
     found, clashes = roots(argv[1:], argv[0])
     if clashes:
-        sys.stderr.write(
-            "python_roots: these tracked files would be one module,"
-            " so an import of that name reaches only one of them:\n"
+        findings.finding(
+            "",
+            "these tracked files would be one module,"
+            " so an import of that name reaches only one of them:",
+            clashes,
         )
-        for line in clashes:
-            sys.stderr.write(f"  {line}\n")
         return 1
     sys.stdout.write(":".join(found) + "\n")
     return 0

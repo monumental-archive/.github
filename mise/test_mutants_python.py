@@ -38,6 +38,10 @@ import hermetic
 import mutants_python as helper
 import tool_python
 
+# The task that runs the helper, whose name its findings carry (#1934).
+TASK = "audit:mutants"
+
+
 BELT = Path(__file__).resolve().parent
 SCRIPT = BELT / "mutants-python.sh"
 BASH = hermetic.tool("bash")
@@ -277,7 +281,7 @@ def stand_in_env(root: Path) -> dict[str, str]:
     for name in ("log", "ran", "dump"):
         (root / name).touch()
     (root / "mutants.json").write_text("{}", encoding="utf-8")
-    env = hermetic.env() | {
+    env = hermetic.env(MISE_TASK_NAME=TASK) | {
         "PATH": f"{bins}{os.pathsep}{os.environ['PATH']}",
         "PLANT_LOG": str(root / "log"),
         "PLANT_RAN": str(root / "ran"),
@@ -446,6 +450,7 @@ def setUpModule() -> None:
         RuntimeError: the shared plan failed; every judging row needs it.
 
     """
+    unittest.enterModuleContext(hermetic.as_task(TASK))
     root = Path(tempfile.mkdtemp())
     unittest.addModuleCleanup(shutil.rmtree, root)
     env = stand_in_env(root)

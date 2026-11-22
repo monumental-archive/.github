@@ -305,11 +305,17 @@ class CoverageOnAnotherPython(unittest.TestCase):
             entry.write_text("#!/bin/sh\n")
             entry.chmod(0o755)
             path = f"{bin_dir}{os.pathsep}{os.environ['PATH']}"
-            done = run(tree, DUMP, ORG_COVERAGE_RUN=str(Path(tmp) / "run"), PATH=path)
+            done = run(
+                tree,
+                DUMP,
+                ORG_COVERAGE_RUN=str(Path(tmp) / "run"),
+                PATH=path,
+                MISE_TASK_NAME="test",
+            )
             self.assertEqual(1, done.returncode)
             self.assertRegex(
                 done.stderr,
-                r"\Ameasured: coverage runs on 'no interpreter' but the suite's"
+                r"\Atest: coverage runs on 'no interpreter' but the suite's"
                 r" python3 is '3\.[^']+' — the tool venv must be built on the"
                 r" belt's python pin \(reinstall: mise install -f pipx:coverage\)\n\Z",
             )

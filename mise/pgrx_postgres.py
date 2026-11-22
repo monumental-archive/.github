@@ -40,10 +40,9 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+import findings as writer
 from decoded import UndecodableError, as_array, as_object, load_json
 from typed_std import stdin_text
-
-NAME = "pgrx-postgres"
 
 # The package the belt provisions from. Named here rather than in each
 # task, so a repository's remedy line and the check that produced it can
@@ -217,28 +216,24 @@ def main(argv: list[str] | None = None) -> int:
     try:
         document = load_json(stdin_text())
     except UndecodableError as bad:
-        print(f"{NAME}: `mise ls {PACKAGE}` did not give JSON", file=sys.stderr)
-        print(f"  {bad}", file=sys.stderr)
+        writer.finding("", f"`mise ls {PACKAGE}` did not give JSON", [str(bad)])
         return 1
     try:
         listing = entries(document)
     except UndecodableError as bad:
-        print(f"{NAME}: `mise ls {PACKAGE}`: {bad}", file=sys.stderr)
+        writer.finding(f"`mise ls {PACKAGE}`", str(bad))
         return 1
 
     majors = [int(m) for m in args.majors.split(",") if digits(m.strip())]
     if not majors:
-        print(f"{NAME}: --majors named no Postgres major", file=sys.stderr)
+        writer.finding("", "--majors named no Postgres major")
         return 1
 
     records, findings = plan(majors, listing)
     if findings:
-        print(
-            f"{NAME}: the crate declares a major this repository does not pin",
-            file=sys.stderr,
+        writer.finding(
+            "", "the crate declares a major this repository does not pin", findings
         )
-        for line in findings:
-            print(f"  {line}", file=sys.stderr)
         return 1
 
     print("\n".join(records))

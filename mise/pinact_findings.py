@@ -22,11 +22,11 @@ message, so an edit above a finding does not make it a new one. Then
 `<task>: pinact: <n> finding(s)` goes to stdout.
 
 The exit status is pinact's own, always. The refusals exit 1, each by
-name and recording nothing: no pinact on PATH, output that is not a
-SARIF VERSION log of the shape read here, and a result whose line
-cannot be read (no such file, or fewer lines), the message carrying
-pinact's status. A pinact pin whose report moves turns `audit:action-pins` red
-until this moves with it.
+name, recorded as its own finding and none of the report's (#1934): no
+pinact on PATH, output that is not a SARIF VERSION log of the shape read
+here, and a result whose line cannot be read (no such file, or fewer
+lines), the message carrying pinact's status. A pinact pin whose report
+moves turns `audit:action-pins` red until this moves with it.
 """
 
 import shutil
@@ -187,12 +187,12 @@ def main(argv: list[str]) -> int:
             check=False,
         )
     except FileNotFoundError:
-        print(f"{task}: pinact is not on PATH", file=sys.stderr)
+        findings.finding("", "pinact is not on PATH")
         return EXIT_REFUSED
     try:
         report = read_report(ran.stdout)
     except NotAReportError as err:
-        print(f"{task}: pinact exited {ran.returncode}: {err}", file=sys.stderr)
+        findings.finding("", f"pinact exited {ran.returncode}: {err}")
         return EXIT_REFUSED
     for each in report:
         findings.finding(each.subject, each.message, each.detail)

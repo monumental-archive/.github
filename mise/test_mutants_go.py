@@ -44,6 +44,15 @@ import decoded
 import hermetic
 import mutants_go
 
+# The task that runs the helper, whose name its findings carry (#1934).
+TASK = "audit:mutants"
+
+
+def setUpModule() -> None:
+    """Run every row as the task does, recording no finding."""
+    unittest.enterModuleContext(hermetic.as_task(TASK))
+
+
 BELT = Path(__file__).resolve().parent
 SCRIPT = BELT / "mutants-go.sh"
 BASH = hermetic.tool("bash")
@@ -150,7 +159,7 @@ def clean_env() -> dict[str, str]:
         os.environ minus every GIT_* key.
 
     """
-    return hermetic.env()
+    return hermetic.env(MISE_TASK_NAME=TASK)
 
 
 def summary_line(counts: tuple[int, int, int, int, int, int]) -> str:

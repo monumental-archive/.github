@@ -101,8 +101,10 @@ def call(
         for name, text in files.items():
             Path(scratch, name).write_text(text, encoding="utf-8")
         try:
+            # The profile's label is the task that runs it (#1934).
+            task = {"MISE_TASK_NAME": pp.LABELS.get(argv[0], "")} if argv else {}
             return hermetic.call_main(
-                lambda: pp.main(argv), env=hermetic.env(**env), cwd=scratch
+                lambda: pp.main(argv), env=hermetic.env(**(task | env)), cwd=scratch
             )
         finally:
             settings.load_profile(before)
@@ -190,7 +192,9 @@ class Audit(unittest.TestCase):
         )
 
 
-USAGE = "usage: python_properties.py gate|audit FILE...\n"
+# A usage error under the gate's task, as python-properties.sh runs it.
+GATE = "test:python-properties"
+USAGE = f"{GATE}: usage: python_properties.py gate|audit FILE...\n"
 
 
 def unlabelled(word: str) -> bool:
@@ -218,7 +222,8 @@ class Usage(unittest.TestCase):
     )
     def test_a_usage_error_is_two(self, argv: list[str]) -> None:
         """R: exit 2 with the usage line, and nothing run."""
-        done = hermetic.call_main(lambda: pp.main(argv))
+        with hermetic.as_task(GATE):
+            done = hermetic.call_main(lambda: pp.main(argv))
         self.assertEqual(done, hermetic.Called(2, "", USAGE))
 
 

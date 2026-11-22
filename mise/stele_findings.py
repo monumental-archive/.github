@@ -20,13 +20,13 @@ finding, the document's subject and the verdict. Then
 `<task>: stele: <verdict>` goes to stdout.
 
 The exit status is stele's own, always. The refusals exit 1, each by
-name and recording nothing: no stele on PATH; a schema other than
-SCHEMA (a consumer reading a schema it does not implement refuses, as
-the report schema requires; a stele pin whose report moves turns these
-tasks red until this moves with it); and output that is not one JSON
-document, the message carrying stele's status. `excused`,
-`staleExceptions` and `facts` do not move the verdict, so they are not
-recorded.
+name, recorded as its own finding and none of the report's (#1934): no
+stele on PATH; a schema other than SCHEMA (a consumer reading a schema
+it does not implement refuses, as the report schema requires; a stele
+pin whose report moves turns these tasks red until this moves with it);
+and output that is not one JSON document, the message carrying stele's
+status. `excused`, `staleExceptions` and `facts` do not move the
+verdict, so they are not recorded.
 """
 
 import shutil
@@ -154,7 +154,7 @@ def main(argv: list[str]) -> int:
     """
     task = findings.task_name()
     if len(argv) < NAMED or argv[0] != "assert":
-        print(f"{task}: {USAGE}", file=sys.stderr)
+        findings.finding("", USAGE)
         return EXIT_REFUSED
     target, rest = argv[1], argv[NAMED:]
     named = f"stele assert {target}"
@@ -165,12 +165,12 @@ def main(argv: list[str]) -> int:
             check=False,
         )
     except FileNotFoundError:
-        print(f"{task}: {named}: stele is not on PATH", file=sys.stderr)
+        findings.finding(named, "stele is not on PATH")
         return EXIT_REFUSED
     try:
         report = read_report(ran.stdout)
     except NotAReportError as err:
-        print(f"{task}: {named} exited {ran.returncode}: {err}", file=sys.stderr)
+        findings.finding("", f"{named} exited {ran.returncode}: {err}")
         return EXIT_REFUSED
     for each in report.findings:
         findings.finding(each.subject, each.message, each.detail)

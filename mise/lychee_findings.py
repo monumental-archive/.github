@@ -19,12 +19,12 @@ does not make it a new one. Then `<task>: lychee: <n> broken link(s)`
 goes to stdout.
 
 The exit status is lychee's own, always. The refusals exit 1, each by
-name and recording nothing: no lychee on PATH, and output that is not a
-report of the shape read here (the message carrying lychee's status). A
-lychee pin whose report moves turns `audit:links` red until this moves
-with it. The other maps (excluded, redirected, timed out) are not
-failures lychee's status counts as broken links, so they are not
-recorded.
+name, recorded as its own finding and none of the report's (#1934): no
+lychee on PATH, and output that is not a report of the shape read here
+(the message carrying lychee's status). A lychee pin whose report moves
+turns `audit:links` red until this moves with it. The other maps
+(excluded, redirected, timed out) are not failures lychee's status
+counts as broken links, so they are not recorded.
 """
 
 import shutil
@@ -123,12 +123,12 @@ def main(argv: list[str]) -> int:
             check=False,
         )
     except FileNotFoundError:
-        print(f"{task}: lychee is not on PATH", file=sys.stderr)
+        findings.finding("", "lychee is not on PATH")
         return EXIT_REFUSED
     try:
         report = read_report(ran.stdout)
     except NotAReportError as err:
-        print(f"{task}: lychee exited {ran.returncode}: {err}", file=sys.stderr)
+        findings.finding("", f"lychee exited {ran.returncode}: {err}")
         return EXIT_REFUSED
     for each in report:
         findings.finding(each.subject, each.message, each.detail)

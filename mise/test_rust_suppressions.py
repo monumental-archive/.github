@@ -23,6 +23,15 @@ import decoded
 import hermetic
 import rust_suppressions as rsup
 
+# The task that runs the helper, whose name its findings carry (#1934).
+TASK = "lint:rust"
+
+
+def setUpModule() -> None:
+    """Run every row as the task does, recording no finding."""
+    unittest.enterModuleContext(hermetic.as_task(TASK))
+
+
 HELPER = Path(__file__).resolve().parent / "rust_suppressions.py"
 
 
@@ -182,7 +191,7 @@ class Main(unittest.TestCase):
             [sys.executable, str(HELPER)],
             cwd=root,
             input=names,
-            env=hermetic.env(),
+            env=hermetic.env(MISE_TASK_NAME=TASK),
             capture_output=True,
             text=True,
             check=False,

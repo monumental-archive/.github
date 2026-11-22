@@ -103,6 +103,14 @@ def records(file: Path) -> list[dict[str, object]]:
     ]
 
 
+def refused(case: unittest.TestCase, file: Path, stderr: str) -> None:
+    """Hold a refusal to one record: its own, none of the report's (#1934)."""
+    got = records(file)
+    same(case, len(got), 1)
+    same(case, got[0]["subject"], "")
+    case.assertIn(f"{TASK}: {got[0]['message']}\n", stderr)
+
+
 class Adapter(unittest.TestCase):
     """The adapter over a stub lychee."""
 
@@ -203,7 +211,7 @@ class Adapter(unittest.TestCase):
         same(self, got, want)
 
     def test_an_unknown_shape_is_refused_by_name(self) -> None:
-        """A report with no `error_map`: refused by name, exit 1, no record."""
+        """A report with no `error_map`: refused by name, exit 1, its one record."""
         done = self.run_adapter('{"fail_map": {}}', 2)
         same(self, done.returncode, 1, done.stderr)
         self.assertIn(
@@ -211,7 +219,7 @@ class Adapter(unittest.TestCase):
             " error_map is not an object",
             done.stderr,
         )
-        same(self, records(self.file), [])
+        refused(self, self.file, done.stderr)
         same(self, done.stdout, "")
 
     def test_output_that_is_not_json_is_refused_by_name(self) -> None:
@@ -222,17 +230,17 @@ class Adapter(unittest.TestCase):
             f"{TASK}: lychee exited 2: the output is not lychee's report",
             done.stderr,
         )
-        same(self, records(self.file), [])
+        refused(self, self.file, done.stderr)
 
     def test_a_malformed_entry_records_none(self) -> None:
-        """One entry without a line: refused before any is recorded."""
+        """One entry without a line: refused, none of the report's recorded."""
         bad = entry("file:///t/x.md", NOT_FOUND, 4)
         del bad["span"]
         doc = report({"a.md": [entry("file:///t/y.md", NOT_FOUND, 1), bad]})
         done = self.run_adapter(doc, 2)
         same(self, done.returncode, 1, done.stderr)
         self.assertIn("error_map[a.md][1]: span is not an object", done.stderr)
-        same(self, records(self.file), [])
+        refused(self, self.file, done.stderr)
 
     def test_lychee_s_status_is_the_exit(self) -> None:
         """A 3 from lychee with an empty report exits 3."""
@@ -252,11 +260,11 @@ class Adapter(unittest.TestCase):
         )
 
     def test_no_lychee_is_refused_by_name(self) -> None:
-        """No lychee on PATH: refused by name, exit 1, no record."""
+        """No lychee on PATH: refused by name, exit 1, its one record."""
         done = self.run_adapter(report({}), 0, path=str(self.dir / "empty"))
         same(self, done.returncode, 1, done.stderr)
         self.assertIn(f"{TASK}: lychee is not on PATH", done.stderr)
-        same(self, records(self.file), [])
+        refused(self, self.file, done.stderr)
 
 
 class Task(unittest.TestCase):

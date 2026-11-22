@@ -48,7 +48,8 @@ def run(
         (root / "REUSE.toml").write_text("version = 1\n" + reuse, encoding="utf-8")
         if states is not None:
             (root / ".badge-states").write_text(states, encoding="utf-8")
-        env = hermetic.env()
+        # The task's name, as mise gives it to the script's helpers (#1979).
+        env = hermetic.env(MISE_TASK_NAME="fix:citation")
         env["CITATION_OUT"] = str(root / "out.cff")
         done = subprocess.run(
             [BASH, str(SCRIPT)],

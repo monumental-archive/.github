@@ -97,10 +97,13 @@ from dataclasses import dataclass
 from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from pathlib import Path
 
+import findings
 from decoded import UndecodableError, as_array, as_object, load_json
 from typed_std import group
 
 NAME = "plpgsql-coverage"
+# The leg a report measures: the subject of its findings.
+LEG = "plpgsql"
 ENV = "ORG_PLPGSQL_COVERAGE"
 
 # Settings, read in the teardown's own session.
@@ -488,9 +491,8 @@ def collect(conninfo: str) -> int:
     """
     target = os.environ.get(ENV, "")
     if not target:
-        print(
-            f"{NAME}: {ENV} is not set — the leg sets it; call collect only then",
-            file=sys.stderr,
+        findings.finding(
+            "", f"{ENV} is not set — the leg sets it; call collect only then"
         )
         return 1
     Path(target).write_text(encode(gather(conninfo)), encoding="utf-8")
@@ -700,37 +702,35 @@ def branch_total(readings: list[Reading]) -> Decimal | None:
     return covered / weight
 
 
-def refusals(label: str, report: Report | Failed) -> list[str]:
+def refusals(report: Report | Failed) -> list[str]:
     """Name every reason the report cannot become a measurement.
 
     Returns:
-        The refusal lines, empty when the report is a measurement.
+        The refusal lines, empty when the report is a measurement: each a
+        finding about the plpgsql leg.
 
     """
-    head = f"{label}: plpgsql:"
     if isinstance(report, Failed):
-        return [f"{head} the teardown's collection failed: {report.error}"]
+        return [f"the teardown's collection failed: {report.error}"]
     lines = []
     if report.profiler != "on":
         lines.append(
-            f"{head} plpgsql_check.profiler is '{report.profiler}' —"
+            f"plpgsql_check.profiler is '{report.profiler}' —"
             " with the profiler off every function reads 0%, which is not a"
             " measurement; start the test database with"
             " -c plpgsql_check.profiler=on"
         )
     if "plpgsql_check" not in [p.strip() for p in report.preload.split(",")]:
         lines.append(
-            f"{head} plpgsql_check is not in shared_preload_libraries"
+            f"plpgsql_check is not in shared_preload_libraries"
             f" ('{report.preload}') — the profile is per session and"
             " the teardown sees none of the suite's; preload plpgsql,plpgsql_check"
         )
     unread = [f for f in report.functions if isinstance(f, Unreadable)]
-    lines.extend(
-        f"{head} plpgsql_check cannot read {f.function}: {f.error}" for f in unread
-    )
+    lines.extend(f"plpgsql_check cannot read {f.function}: {f.error}" for f in unread)
     if unread:
         lines.append(
-            f"{head} {len(unread)} function(s) unreadable — a function the"
+            f"{len(unread)} function(s) unreadable — a function the"
             " extension cannot read is never dropped from the total"
         )
     # The static check (#1605), judged before the floor: every optional
@@ -743,19 +743,18 @@ def refusals(label: str, report: Report | Failed) -> list[str]:
         for g in f.findings
     ]
     lines.extend(
-        f"{head} {function}: line {'-' if g.line is None else g.line}:"
-        f" {g.level}: {g.message}"
+        f"{function}: line {'-' if g.line is None else g.line}: {g.level}: {g.message}"
         for function, g in found
     )
     if found:
         lines.append(
-            f"{head} {len(found)} static-check finding(s) — plpgsql_check"
+            f"{len(found)} static-check finding(s) — plpgsql_check"
             " reads each as a body that cannot do what it says"
         )
     # A suppression is allowed only with its reason (#1605): the comment
     # line directly above it.
     lines.extend(
-        f"{head} {f.function}: line {u.line}: suppression `{u.options}` has no"
+        f"{f.function}: line {u.line}: suppression `{u.options}` has no"
         " reason — the comment line directly above it says why"
         for f in report.functions
         if isinstance(f, Reading)
@@ -793,24 +792,22 @@ def totals(label: str, report_path: str) -> int:
     try:
         report = decode(Path(report_path).read_text(encoding="utf-8"))
     except FileNotFoundError:
-        print(
-            f"{label}: plpgsql: the test task wrote no report — its teardown"
+        findings.finding(
+            LEG,
+            "the test task wrote no report — its teardown"
             f" must call plpgsql_coverage.py collect while {ENV} is set",
-            file=sys.stderr,
         )
         return 1
     except NotAReportError as exc:
-        print(
-            f"{label}: plpgsql: the report is not a coverage report: {exc}",
-            file=sys.stderr,
-        )
+        findings.finding(LEG, f"the report is not a coverage report: {exc}")
         return 1
     if isinstance(report, Report):
         for line in suppressed_lines(label, report):
             print(line, file=sys.stderr)
-    lines = refusals(label, report)
+    lines = refusals(report)
     if lines or isinstance(report, Failed):
-        print("\n".join(lines), file=sys.stderr)
+        for line in lines:
+            findings.finding(LEG, line)
         return 1
     readings = [f for f in report.functions if isinstance(f, Reading)]
     for f in readings:
@@ -867,9 +864,8 @@ def main(argv: list[str]) -> int:
         case ["totals", label, report]:
             return totals(label, report)
         case _:
-            print(
-                f"usage: {NAME} collect <conninfo> | totals <label> <report>",
-                file=sys.stderr,
+            findings.finding(
+                "", f"usage: {NAME} collect <conninfo> | totals <label> <report>"
             )
             return 2
 

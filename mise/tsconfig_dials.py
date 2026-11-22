@@ -45,6 +45,7 @@ import json
 import sys
 from pathlib import Path
 
+import findings as writer
 from decoded import UndecodableError, is_object, load_json
 from typed_std import stdin_text
 
@@ -132,22 +133,18 @@ def main(argv: list[str] | None = None) -> int:
 
     required, unreadable = dials(args.flags)
     if unreadable:
-        print(
-            f"{NAME}: {args.flags} has a flag this check cannot read",
-            file=sys.stderr,
+        writer.finding(
+            "", f"{args.flags} has a flag this check cannot read", unreadable
         )
-        for line in unreadable:
-            print(f"  {line}", file=sys.stderr)
         return 1
     if not required:
-        print(f"{NAME}: {args.flags} names no dial at all", file=sys.stderr)
+        writer.finding("", f"{args.flags} names no dial at all")
         return 1
 
     try:
         resolved = load_json(stdin_text())
     except UndecodableError as bad:
-        print(f"{NAME}: {args.name}: tsc did not resolve to JSON", file=sys.stderr)
-        print(f"  {bad}", file=sys.stderr)
+        writer.finding(args.name, "tsc did not resolve to JSON", [str(bad)])
         return 1
 
     # tsc --showConfig prints an object; anything else is not a config
@@ -156,22 +153,22 @@ def main(argv: list[str] | None = None) -> int:
     stated = resolved.get("compilerOptions", {}) if is_object(resolved) else None
     if not is_object(stated):
         what = "compilerOptions is not" if whole else "tsc did not resolve to"
-        print(f"{NAME}: {args.name}: {what} an object", file=sys.stderr)
+        writer.finding(args.name, f"{what} an object")
         return 1
 
     findings = judge(stated, required)
     if findings:
-        print(f"{NAME}: {args.name} does not state the org's level", file=sys.stderr)
-        for line in findings:
-            print(f"  {line}", file=sys.stderr)
-        print(
-            "  copy the dials from scaffold/tsconfig.json, or extend a config "
-            "that has them —",
-            file=sys.stderr,
-        )
-        print(
-            "  stricter than the org is always allowed and is never inspected",
-            file=sys.stderr,
+        writer.finding(
+            "",
+            f"{args.name} does not state the org's level",
+            [
+                *findings,
+                (
+                    "copy the dials from scaffold/tsconfig.json, or extend a config "
+                    "that has them —"
+                ),
+                "stricter than the org is always allowed and is never inspected",
+            ],
         )
         return 1
     print(f"{NAME}: {args.name}: {len(required)} dial(s) at the org's level")

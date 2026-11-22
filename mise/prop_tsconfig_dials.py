@@ -26,6 +26,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import hermetic
 import tsconfig_dials as td
 from hypothesis import example
 from hypothesis import strategies as st
@@ -143,13 +144,17 @@ class Refusal(unittest.TestCase):
             old = sys.stdin
             sys.stdin = io.StringIO(json.dumps(resolved))
             try:
-                with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                with (
+                    hermetic.as_task("lint:tsconfig-dials"),
+                    contextlib.redirect_stdout(out),
+                    contextlib.redirect_stderr(err),
+                ):
                     status = td.main(["--flags", str(flags), "--name", "t"])
             finally:
                 sys.stdin = old
         self.assertIn(status, (0, 1))
         if status:
-            self.assertIn("tsconfig-dials: ", err.getvalue())
+            self.assertIn("lint:tsconfig-dials: ", err.getvalue())
 
 
 if __name__ == "__main__":

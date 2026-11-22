@@ -60,6 +60,7 @@ from pathlib import Path
 
 import coverage_js_runner
 import decoded
+import findings
 import typed_std
 
 EXIT_USAGE = 2
@@ -361,7 +362,8 @@ def main(argv: list[str]) -> int:
         return verify(args[0], args[1:])
     if command == "collected" and len(args) >= VERIFY_MIN_ARGS:
         return collected(args[0], args[1:])
-    print(__doc__.split("Subcommands", 1)[0].strip(), file=sys.stderr)
+    head, *rest = __doc__.split("Subcommands", 1)[0].strip().splitlines()
+    findings.finding("", head, rest)
     return EXIT_USAGE
 
 

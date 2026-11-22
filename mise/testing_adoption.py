@@ -39,6 +39,7 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
+import findings as writer
 import typed_std
 
 if TYPE_CHECKING:
@@ -199,7 +200,7 @@ def main() -> int:
     missing = findings(paths)
     if missing:
         for line in missing:
-            print(line, file=sys.stderr)
+            writer.finding("", line.removeprefix(f"{NAME}: "))
         return 1
     names = ", ".join(language.name for language, _ in ships)
     print(f"{NAME}: ok ({names} adopted)")

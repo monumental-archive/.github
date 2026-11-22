@@ -37,6 +37,7 @@ import re
 import sys
 from pathlib import Path
 
+import findings as writer
 from decoded import UndecodableError, is_object, load_toml
 from typed_std import stdin_text
 
@@ -310,31 +311,29 @@ def main() -> int:
     names = [name for name in stdin_text().splitlines() if name]
     blanket = [name for name in names if group_suppressed(Path(name))]
     if blanket:
-        print(
-            "lint:rust: crate-level suppression of a whole clippy group:"
+        writer.finding(
+            "",
+            "crate-level suppression of a whole clippy group:"
             + "".join(f" {name}" for name in blanket),
-            file=sys.stderr,
+            [line.removeprefix("  ") for line in GROUP_MESSAGE],
         )
-        for line in GROUP_MESSAGE:
-            print(line, file=sys.stderr)
         return 1
     found: list[str] = []
     for name in names:
         try:
             found.extend(findings(Path(name)))
         except UndecodableError as error:
-            print(f"lint:rust: {name}: {error}", file=sys.stderr)
+            writer.finding(name, str(error))
             return 1
     if not found:
         return 0
-    print(
-        "lint:rust: suppression clippy's allow_attributes cannot see:",
-        file=sys.stderr,
+    writer.finding("", "suppression clippy's allow_attributes cannot see:", found)
+    head, *rest = REMEDY
+    writer.finding(
+        "",
+        head.removeprefix("lint:rust: "),
+        [line.removeprefix("  ") for line in rest],
     )
-    for line in found:
-        print(f"  {line}", file=sys.stderr)
-    for line in REMEDY:
-        print(line, file=sys.stderr)
     return 1
 
 

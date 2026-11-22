@@ -19,7 +19,7 @@ import sys
 import tokenize
 from pathlib import Path
 
-NAME = "mutation-pragmas"
+import findings
 
 
 def pragmas(path: Path) -> list[tuple[int, str]]:
@@ -55,7 +55,7 @@ def main(argv: list[str] | None = None) -> int:
             for line, text in pragmas(Path(name)):
                 print(f"{name}\t{line}\t{text}")
         except (OSError, SyntaxError, UnicodeDecodeError, tokenize.TokenError) as bad:
-            print(f"{NAME}: {name}: could not tokenize: {bad}", file=sys.stderr)
+            findings.finding(name, f"could not tokenize: {bad}")
             status = 1
     return status
 

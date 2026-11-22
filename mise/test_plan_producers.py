@@ -29,7 +29,17 @@ from typing import override
 from unittest import mock
 
 import decoded
+import hermetic
 import plan_producers as pp
+
+# The task that runs the helper, whose name its findings carry (#1934).
+TASK = "lint:plan-producers"
+
+
+def setUpModule() -> None:
+    """Run every row as the task does, recording no finding."""
+    unittest.enterModuleContext(hermetic.as_task(TASK))
+
 
 REPO = Path(__file__).resolve().parent.parent
 POLICY = REPO / "slsa" / "assert-policy.json"
@@ -440,7 +450,7 @@ class PolicyShapeTest(unittest.TestCase):
                 self.assertEqual(pp.main(), 1)
         self.assertEqual(
             err.getvalue(),
-            f"plan-producers: {bad}: evidence.classes is not an object\n",
+            f"{TASK}: {bad}: evidence.classes is not an object\n",
         )
 
     def test_main_refuses_a_duplicate_key_as_json(self) -> None:
@@ -456,8 +466,7 @@ class PolicyShapeTest(unittest.TestCase):
                 self.assertEqual(pp.main(), 1)
         self.assertEqual(
             err.getvalue(),
-            f"plan-producers: {bad} does not read as JSON\n"
-            '  duplicate key "evidence"\n',
+            f'{TASK}: {bad} does not read as JSON\n  duplicate key "evidence"\n',
         )
 
 

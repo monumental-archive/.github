@@ -40,10 +40,20 @@ from typing import TYPE_CHECKING
 from unittest import mock
 
 import decoded
+import hermetic
 import security_config as sc
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+# The task that runs the helper, whose name its findings carry (#1934).
+TASK = "audit:security-config"
+
+
+def setUpModule() -> None:
+    """Run every row as the task does, recording no finding."""
+    unittest.enterModuleContext(hermetic.as_task(TASK))
+
 
 HERE = Path(__file__).parent
 DATA = HERE / "testdata" / "security-config"
