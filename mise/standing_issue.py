@@ -10,26 +10,41 @@ and the caller files nothing. .github/rekor-monitor/watch_issue.py
 keeps its own judgment and imports these.
 
 The second is the `report` job every scheduled workflow ends with. It
-reads the run's own job list and keeps one issue titled exactly
-`<workflow> is red`, labelled `red-check`:
+reads the run's own job list and keeps one issue per red job (#1966),
+titled exactly `red: <job> (<workflow>)` and labelled `red-check`. A
+job's name is its name in the list, a leading `<workflow> / ` dropped
+(a reusable workflow's jobs are listed under their caller's job) and
+one final ` (…)` dropped: jobs with the same name are one job's legs,
+the form GitHub gives a matrix job by default. No job is named here;
+the run's list is the only source.
 
   cancelled run                   nothing changes: the job's step that
                                   runs this is `if: !cancelled()`.
   run not on the default branch   nothing changes; gh is never called.
-  a job failed or timed out       no open issue: create it; one open:
-                                  replace its body, keeping "Red since".
-  every job green or skipped      close the open issue, naming the run.
-  otherwise (a job cancelled, or  nothing changes: the run says neither.
-  one not finished)
+  a leg failed or timed out       a red job. No open issue with its
+                                  title: create it; one open: replace
+                                  its body, keeping "Red since".
+  every leg green or skipped      the job is green: its open issue
+                                  labelled red-check is closed, naming
+                                  the run.
+  otherwise (a leg cancelled, or  the job is neither; its issue is
+  one not finished)               unchanged.
+  an open issue labelled          its job is not in the run (renamed
+  red-check, `red: <x> (<wf>)`,   or removed): closed, saying so.
+  and no job <x> in the list
+  an open `<workflow> is red`     the one issue a workflow kept before
+                                  #1966: closed by the first report,
+                                  naming the run.
 
 The job list is the run's latest attempt. The report job is itself
 unfinished while it reads it, so one unfinished job is expected; more
 than one means a job outside this workflow's `needs:` is still running
 (a reusable workflow's report, with a sibling job in its caller), and a
-later report in the same run has the last word. A run is counted once,
-by its URL, however many reports in it write the body.
+later report in the same run has the last word: red jobs are still
+kept, and nothing is closed. A run is counted once per issue, by its
+URL, however many reports in it write the body.
 
-Each red job's entry carries its failing step's output, whole (#1925),
+Each red leg's entry carries its failing step's output, whole (#1925),
 found from the runner's own markers: the step is the last `##[group]Run `
 before the first `##[error]` line, its output runs from after that
 group's first `##[endgroup]` (the command and its environment) to the
@@ -45,29 +60,37 @@ over HTTPS with GH_TOKEN and its redirect followed, the token on an
 unredirected header so it never reaches the blob host; no gh is in the
 log path (`gh run view --log` refuses while the run, this job's own,
 is in progress, and `gh api` refuses a text body carrying escapes). A
-log that cannot be read is named in its entry. The excerpt is fenced
-so no line in it can close the fence. The body stays
-under 60,000 characters: excerpts are dropped from the last job
-upwards, and the body says so. The label is created from settings/repo-baseline.json's
+log that cannot be read is named in its entry. Legs with the same
+output are listed together over one excerpt. The excerpt is fenced so
+no line in it can close the fence. The body stays under 60,000
+characters: excerpts are dropped from the last one upwards, and the
+body says so. The label is created from settings/repo-baseline.json's
 definition when the repository does not have it.
 
 With `--findings DIR` the body is also written from the run's findings
 (#1890, docs/findings.md): every `*.jsonl` in DIR, one record per line
 as mise/findings.sh and mise/findings.py append them. A line that is
-not a record is counted, and the body says how many. `## Findings`
+not a record is counted, and the body says how many. A failing step
+ran a task when the task is named after `mise run ` in the step's name,
+in a `[<task>] ` prefix of its output, or is the file name of a `.py`
+or `.sh` script the step's name runs (a record written outside mise
+carries its script's file name). `## Findings` lists the findings
+whose task one of this job's failing steps ran; a finding whose task
+no red job's failing step ran is listed in every red job's issue,
+under `## Recorded outside this job's failing step`. Each section
 lists each task's findings, its name in order, those new in this run
 apart from those still red: a finding is its task, subject and
 message, and the body ends with a comment line carrying the first 16
 hex characters of the SHA-256 of each finding the body shows, which the
 next run reads back. New means not listed in this issue's previous
-body: a finding the limit cut is new when a later run first shows it. A
-red job whose failing step ran a task with a record (named after
-`mise run ` in the step's name, or in a `[<task>] ` prefix of its
-output) points at its findings; any other shows its failing step's
-output under "no finding was recorded". Over the limit, step outputs
-go first, then detail blocks, then findings from the end of the list,
-each said with how many. Without the flag, or with no record and no
-unreadable line in DIR, the body is as above.
+body: a finding the limit cut is new when a later run first shows it.
+A red leg whose failing step ran a task with a record points at its
+findings; any other says "no finding was recorded". Its output is shown
+either way: a tool's own report beside a finding is otherwise in no
+issue. Over the limit, step outputs go first, then detail blocks, then
+findings from the end of the list, each said with how many. Without
+the flag, or with no record and no unreadable line in DIR, the body is
+as above.
 
 Usage:
   standing_issue.py --workflow NAME --run-id ID --ref REF
@@ -75,7 +98,7 @@ Usage:
 
 The repository is GITHUB_REPOSITORY, the server GITHUB_SERVER_URL, the
 API GITHUB_API_URL (https://api.github.com when unset).
-Exit 0 when the issue was kept (or nothing was to change), 2 when a
+Exit 0 when the issues were kept (or nothing was to change), 2 when a
 read or write failed. Stdlib only, and `gh` on PATH for every read but
 the logs.
 """
@@ -130,6 +153,12 @@ BACKTICKS = re.compile(r"`+")
 # `[<task>] ` prefix mise writes before a task's own lines.
 RUN_TASK = re.compile(r"(?:^|\s)mise run ([^\s;&|]+)")
 TASK_PREFIX = re.compile(r"^\[([^\]\s]+)\] ")
+# A script a failing step's name runs: a record written outside mise
+# carries its file name as its task (#1890 item 1).
+SCRIPT = re.compile(r"([^\s/\"';&|()]+\.(?:py|sh))(?=$|[\s\"';&|)])")
+# One final ` (…)` of a listed job name: a matrix leg's values (#1966).
+LEG = re.compile(r" \([^()]*\)$")
+OLD_TITLE = "{workflow} is red"
 # The last line of a body written from findings: each one's hash.
 HASHES = re.compile(r"^<!-- findings: ([0-9a-f ]*) -->$", re.MULTILINE)
 HASH_LENGTH = 16
@@ -147,6 +176,8 @@ class Issue:
 
     number: int
     body: str
+    title: str = ""
+    labels: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -162,7 +193,7 @@ class Job:
 
 @dataclass(frozen=True)
 class Excerpt:
-    """What a red job's entry shows of its log.
+    """What a red leg's entry shows of its log.
 
     `step` names the failing step; None when the log marks none, and
     the text is then the log's last lines. `tasks` are the tasks the
@@ -176,7 +207,7 @@ class Excerpt:
 
 @dataclass(frozen=True)
 class Entry:
-    """A red job as the issue shows it: name, link, and its excerpt."""
+    """A red leg as the issue shows it: name, link, and its excerpt."""
 
     job: Job
     tail: Excerpt | None
@@ -295,6 +326,55 @@ def titled(answer: object, title: str) -> list[Issue]:
         text = "" if text is None else decoded.as_str(text, f"issue {at}: body")
         found.append(Issue(number, text))
     return found
+
+
+def every_open(repo: str) -> list[Issue]:
+    """List every open issue, with its title and labels.
+
+    Returns:
+        Each open issue the forge lists.
+
+    Raises:
+        StandingIssueError: the listing could not be read, or is not a
+            list of issues.
+
+    """
+    out = gh(
+        "issue", "list", "--repo", repo, "--state", "open",
+        "--limit", "1000", "--json", "number,title,body,labels",
+    )  # fmt: skip
+    try:
+        return [
+            labelled(item, at)
+            for at, item in enumerate(
+                decoded.as_array(decoded.load_json(out), "the answer")
+            )
+        ]
+    except decoded.UndecodableError as err:
+        msg = f"gh issue list answered something that is not a list of issues: {err}"
+        raise StandingIssueError(msg) from err
+
+
+def labelled(item: object, at: int) -> Issue:
+    """Decode one listed issue with its title and labels.
+
+    Returns:
+        The issue; a body the forge left empty is "".
+
+    """
+    issue = decoded.as_object(item, f"issue {at}")
+    number = decoded.as_int(issue.get("number"), f"issue {at}: number")
+    title = decoded.as_str(issue.get("title"), f"issue {at}: title")
+    text = issue.get("body")
+    text = "" if text is None else decoded.as_str(text, f"issue {at}: body")
+    names = frozenset(
+        decoded.as_str(
+            decoded.as_object(label, f"issue {at}: label").get("name"),
+            f"issue {at}: label name",
+        )
+        for label in decoded.as_array(issue.get("labels", []), f"issue {at}: labels")
+    )
+    return Issue(number, text, title, names)
 
 
 def create(repo: str, title: str, body: str, labels: tuple[str, ...] = ()) -> None:
@@ -544,7 +624,8 @@ def step_tasks(step: str, output: list[str]) -> frozenset[str]:
     """Name the tasks a failing step ran.
 
     Returns:
-        Each task named after `mise run ` in the step's name, and each
+        Each task named after `mise run ` in the step's name, the file
+        name of each `.py` or `.sh` script its name runs, and each task
         named in a `[<task>] ` prefix of its output.
 
     """
@@ -553,6 +634,10 @@ def step_tasks(step: str, output: list[str]) -> frozenset[str]:
         task = typed_std.group(match, 1)
         if task:
             named.add(task)
+    for match in SCRIPT.finditer(step):
+        script = typed_std.group(match, 1)
+        if script:
+            named.add(script)
     for line in output:
         prefixed = TASK_PREFIX.match(line)
         task = typed_std.group(prefixed, 1) if prefixed else None
@@ -607,7 +692,7 @@ def job_log(repo: str, job_id: int) -> str:
 
 
 def read_tail(repo: str, job: Job) -> Entry:
-    """Fetch a red job's log and cut its excerpt.
+    """Fetch a red leg's log and cut its excerpt.
 
     Returns:
         The entry; a log that cannot be read is named, never fatal.
@@ -692,26 +777,40 @@ def seen_hashes(previous: Issue | None) -> frozenset[str] | None:
 
 @dataclass(frozen=True)
 class Listed:
-    """A finding as the body lists it: new in this run, or still red."""
+    """A finding as the body lists it: new in this run, or still red.
+
+    `outside` is a finding whose task no red job's failing step ran.
+    """
 
     finding: Finding
     new: bool
+    outside: bool = False
 
 
 @dataclass(frozen=True)
 class Listing:
-    """The run's findings in the order the body lists them."""
+    """A red job's findings in the order its body lists them.
+
+    `tasks` is every task with a record in the run.
+    """
 
     items: tuple[Listed, ...]
     tasks: frozenset[str]
     unreadable: int
 
 
-def listing(findings: Findings | None, seen: frozenset[str] | None) -> Listing | None:
-    """Order the findings: by task name, the new before those still red.
+def listing(
+    findings: Findings | None,
+    seen: frozenset[str] | None,
+    mine: frozenset[str],
+    ran: frozenset[str],
+) -> Listing | None:
+    """Order a red job's findings: its own, then those no failing step ran.
 
-    A finding recorded twice (the same task, subject and message) is
-    listed once.
+    `mine` is every task this job's failing steps ran, `ran` every task
+    a red job's failing step ran in the run. Within each section, by
+    task name, the new before those still red. A finding recorded twice
+    (the same task, subject and message) is listed once.
 
     Returns:
         The listing, or None without findings files or with nothing in
@@ -724,8 +823,14 @@ def listing(findings: Findings | None, seen: frozenset[str] | None) -> Listing |
     for found in findings.records:
         unique.setdefault(found.digest, found)
     known = seen or frozenset()
-    items = [Listed(f, f.digest not in known) for f in unique.values()]
-    items.sort(key=lambda i: (i.finding.task, not i.new))
+    items: list[Listed] = []
+    for found in unique.values():
+        new = found.digest not in known
+        if found.task in mine:
+            items.append(Listed(found, new))
+        elif found.task not in ran:
+            items.append(Listed(found, new, outside=True))
+    items.sort(key=lambda i: (i.outside, i.finding.task, not i.new))
     tasks = frozenset(f.task for f in unique.values())
     return Listing(tuple(items), tasks, findings.unreadable)
 
@@ -757,17 +862,24 @@ def listed_finding(item: Finding, *, detail: bool) -> str:
     return f"{line}\n\n{indented}\n\n  </details>\n"
 
 
+OUTSIDE = "## Recorded outside this job's failing step"
+
+
 def findings_section(found: Listing, shown: int, details: int) -> str:
     """Write `## Findings`: each task's findings, new apart from still red.
 
+    The job's own findings come first; those no red job's failing step
+    ran follow under OUTSIDE.
+
     Returns:
-        The section, listing the first `shown` findings, the first
+        The sections, listing the first `shown` findings, the first
         `details` of them with their detail.
 
     """
-    counts: dict[str, int] = {}
+    counts: dict[tuple[bool, str], int] = {}
     for item in found.items:
-        counts[item.finding.task] = counts.get(item.finding.task, 0) + 1
+        key = (item.outside, item.finding.task)
+        counts[key] = counts.get(key, 0) + 1
     parts = ["## Findings", ""]
     if found.unreadable:
         parts += [
@@ -777,12 +889,19 @@ def findings_section(found: Listing, shown: int, details: int) -> str:
             ),
             "",
         ]
+    if all(item.outside for item in found.items):
+        parts += ["_This job's failing steps recorded no finding._", ""]
     task: str | None = None
     group: bool | None = None
+    outside = False
     for at, item in enumerate(found.items[:shown]):
+        if item.outside and not outside:
+            outside, task = True, None
+            parts += [OUTSIDE, ""]
         if item.finding.task != task:
             task, group = item.finding.task, None
-            parts += [f"### {one_line(task)} ({counts[task]})", ""]
+            count = counts[item.outside, task]
+            parts += [f"### {one_line(task)} ({count})", ""]
         if item.new != group:
             group = item.new
             parts += ["#### New in this run" if item.new else "#### Still red", ""]
@@ -790,45 +909,86 @@ def findings_section(found: Listing, shown: int, details: int) -> str:
     return "\n".join(parts)
 
 
-def entry(item: Entry, *, drop: bool, recorded: frozenset[str] | None = None) -> str:
-    """Write one red job's entry.
+@dataclass(frozen=True)
+class Legs:
+    """A red job's legs with one output, listed together over one excerpt."""
 
-    `recorded` is every task with a finding, when the body is written
-    from findings: a job whose failing step ran one points at them.
+    legs: tuple[Job, ...]
+    tail: Excerpt | None
+    missing: str | None
+
+
+def grouped(entries: list[Entry]) -> list[Legs]:
+    """Gather red legs whose failing step wrote the same output.
 
     Returns:
-        The job's name, its link and its collapsed log tail.
+        One group per output, in the order a leg first shows it.
 
     """
-    head = f"### {item.job.name}\n\n[{item.job.conclusion}]({item.job.url})\n"
-    ran = (item.tail.tasks if item.tail else frozenset()) & (recorded or frozenset())
+    groups: dict[tuple[Excerpt | None, str | None], list[Job]] = {}
+    for item in entries:
+        groups.setdefault((item.tail, item.missing), []).append(item.job)
+    return [
+        Legs(tuple(legs), tail, missing) for (tail, missing), legs in groups.items()
+    ]
+
+
+def legs_entry(
+    group: Legs, *, drop: bool, recorded: frozenset[str] | None = None
+) -> str:
+    """Write one group of red legs: each leg's link, then their excerpt.
+
+    `recorded` is every task with a finding, when the body is written
+    from findings: legs whose failing step ran one point at them, and
+    their output is shown either way.
+
+    Returns:
+        The group's heading, links, pointer and collapsed output.
+
+    """
+    first = group.legs[0].name
+    more = len(group.legs) - 1
+    heading = f"### {first}"
+    if more:
+        heading += f" and {more} more leg{'s' if more != 1 else ''}"
+    links = "\n".join(
+        f"- [{leg.name}]({leg.url}): {leg.conclusion}" for leg in group.legs
+    )
+    head = f"{heading}\n\n{links}\n"
+    ran = (group.tail.tasks if group.tail else frozenset()) & (recorded or frozenset())
     if ran:
         named = ", ".join(f"<code>{html.escape(t)}</code>" for t in sorted(ran))
-        return f"{head}\nIts findings are above, under {named}.\n"
-    if recorded is not None:
+        whose = "Its" if not more else "Their"
+        head += f"\n{whose} findings are above, under {named}.\n"
+    elif recorded is not None:
         head += "\n_No finding was recorded._\n"
     summary = "log tail"
     if drop:
         shown = f"_Log tail dropped: the body would pass {BODY_LIMIT:,} characters._"
-    elif item.tail is None:
-        shown = f"_Log tail unknown: {item.missing}_"
-    elif item.tail.step is None:
-        shown = fenced(item.tail.text or "(the log is empty)")
+    elif group.tail is None:
+        shown = f"_Log tail unknown: {group.missing}_"
+    elif group.tail.step is None:
+        shown = fenced(group.tail.text or "(the log is empty)")
     else:
-        summary = f"failing step: <code>{html.escape(item.tail.step)}</code>"
-        shown = fenced(item.tail.text or "(the step printed nothing)")
+        summary = f"failing step: <code>{html.escape(group.tail.step)}</code>"
+        shown = fenced(group.tail.text or "(the step printed nothing)")
     return f"{head}\n<details><summary>{summary}</summary>\n\n{shown}\n\n</details>\n"
 
 
 @dataclass(frozen=True)
 class Red:
-    """What the body says about this run beside its jobs."""
+    """What a red job's body says beside its legs.
+
+    `legs` counts the job's legs in the run, red or not.
+    """
 
     workflow: str
+    job: str
     branch: str
     run_url: str
     since: str
     runs: int
+    legs: int
 
 
 @dataclass(frozen=True)
@@ -847,16 +1007,18 @@ def compose(red: Red, entries: list[Entry], found: Listing | None, cut: Cut) -> 
         The body.
 
     """
-    keep = len(entries) - cut.tails
+    groups = grouped(entries)
+    keep = len(groups) - cut.tails
     recorded = found.tasks if found else None
     parts = [
-        entry(e, drop=at >= keep, recorded=recorded) for at, e in enumerate(entries)
+        legs_entry(g, drop=at >= keep, recorded=recorded) for at, g in enumerate(groups)
     ]
-    plural = "s" if len(entries) != 1 else ""
+    plural = "s" if red.legs != 1 else ""
     lines = [
-        f"The latest run of {red.workflow} on {red.branch} ended with",
-        f"{len(entries)} red job{plural}. Every red run replaces this body;",
-        "the next run with every job green or skipped closes this issue.",
+        f"The job **{html.escape(red.job)}** of {red.workflow} on {red.branch} ended",
+        f"its latest run with {len(entries)} of its {red.legs} leg{plural} red. Every",
+        "red run replaces this body; the next run with every leg of this",
+        "job green or skipped closes this issue.",
         "",
         f"- Latest red run: {red.run_url}",
         f"- Red since: {red.since}",
@@ -865,20 +1027,20 @@ def compose(red: Red, entries: list[Entry], found: Listing | None, cut: Cut) -> 
     ]
     limit = f"the body would pass {BODY_LIMIT:,} characters."
     if cut.tails:
-        lines += [f"Log tails dropped for the last {cut.tails} job(s): {limit}", ""]
+        lines += [f"Log tails dropped for the last {cut.tails} excerpt(s): {limit}", ""]
     if cut.details:
         lines += [f"Detail dropped for the last {cut.details} finding(s): {limit}", ""]
     if cut.findings:
         lines += [f"The last {cut.findings} finding(s) are not shown: {limit}", ""]
     if found is None:
-        return "\n".join([*lines, "## Red jobs", "", *parts])
+        return "\n".join([*lines, "## Red legs", "", *parts])
     shown = len(found.items) - cut.findings
     details = len(found.items) - cut.details
     hashes = " ".join(i.finding.digest for i in found.items[:shown])
     return "\n".join([
         *lines,
         findings_section(found, shown, details),
-        "## Red jobs",
+        "## Red legs",
         "",
         *parts,
         f"<!-- findings: {hashes} -->",
@@ -909,16 +1071,21 @@ def body(
     entries: list[Entry],
     findings: Findings | None = None,
     seen: frozenset[str] | None = None,
+    ran: frozenset[str] | None = None,
 ) -> str:
-    """Write the red-check issue's body, under BODY_LIMIT characters.
+    """Write a red job's issue body, under BODY_LIMIT characters.
+
+    `entries` are the job's red legs; `ran` is every task a red job's
+    failing step ran in the run, this job's own when None.
 
     Returns:
-        The body; step outputs dropped from the last job upwards, then
-        detail blocks, then findings, from the end of the list.
+        The body; step outputs dropped from the last excerpt upwards,
+        then detail blocks, then findings, from the end of the list.
 
     """
-    found = listing(findings, seen)
-    jobs_cut = len(entries)
+    mine = frozenset(t for e in entries if e.tail for t in e.tail.tasks)
+    found = listing(findings, seen, mine, mine if ran is None else ran)
+    tails_cut = len(grouped(entries))
     count = len(found.items) if found else 0
 
     def text(cut: Cut) -> str:
@@ -927,14 +1094,14 @@ def body(
     def fits(cut: Cut) -> bool:
         return len(text(cut)) < BODY_LIMIT
 
-    for tails in range(jobs_cut + 1):
+    for tails in range(tails_cut + 1):
         if fits(Cut(tails)):
             return text(Cut(tails))
-    details = least(lambda n: fits(Cut(jobs_cut, n)), count)
+    details = least(lambda n: fits(Cut(tails_cut, n)), count)
     if details is not None:
-        return text(Cut(jobs_cut, details))
-    dropped = least(lambda n: fits(Cut(jobs_cut, count, n)), count)
-    return text(Cut(jobs_cut, count, count if dropped is None else dropped))
+        return text(Cut(tails_cut, details))
+    dropped = least(lambda n: fits(Cut(tails_cut, count, n)), count)
+    return text(Cut(tails_cut, count, count if dropped is None else dropped))
 
 
 def field(line: re.Pattern[str], body: str) -> str | None:
@@ -965,70 +1132,230 @@ def carried(previous: Issue | None, run_url: str) -> tuple[str, int]:
     return since, max(runs, 1)
 
 
+def job_name(listed: str, workflow: str) -> str:
+    """Name the job a listed job is a leg of.
+
+    Returns:
+        The listed name without a leading `<workflow> / ` and without
+        one final ` (…)`.
+
+    """
+    return LEG.sub("", listed.removeprefix(f"{workflow} / "), count=1)
+
+
+def by_name(every: list[Job], workflow: str) -> dict[str, list[Job]]:
+    """Gather the run's jobs into jobs and their legs.
+
+    Returns:
+        Each job's name and its legs, in the order the list gives them.
+
+    """
+    named: dict[str, list[Job]] = {}
+    for item in every:
+        named.setdefault(job_name(item.name, workflow), []).append(item)
+    return named
+
+
+def is_red_leg(leg: Job) -> bool:
+    """Say whether a leg failed or timed out.
+
+    Returns:
+        True when it did.
+
+    """
+    return leg.status == "completed" and leg.conclusion in RED
+
+
+def is_green(legs: list[Job]) -> bool:
+    """Say whether every leg of a job is success or skipped.
+
+    Returns:
+        True when every one is.
+
+    """
+    return all(j.status == "completed" and j.conclusion in GREEN for j in legs)
+
+
+def red_title(job: str, workflow: str) -> str:
+    """Write a red job's issue title.
+
+    Returns:
+        `red: <job> (<workflow>)`.
+
+    """
+    return f"red: {job} ({workflow})"
+
+
+def titled_job(title: str, workflow: str) -> str | None:
+    """Read the job a `red: <job> (<workflow>)` title names.
+
+    Returns:
+        The job, or None when the title has another shape or workflow.
+
+    """
+    prefix, suffix = "red: ", f" ({workflow})"
+    if len(title) <= len(prefix) + len(suffix):
+        return None
+    if not (title.startswith(prefix) and title.endswith(suffix)):
+        return None
+    return title[len(prefix) : -len(suffix)]
+
+
+@dataclass(frozen=True)
+class Run:
+    """What every issue one report keeps shares."""
+
+    repo: str
+    workflow: str
+    branch: str
+    url: str
+
+
+@dataclass(frozen=True)
+class Write:
+    """One red job's issue, decided before anything is written."""
+
+    title: str
+    found: Issue | None
+    text: str
+    runs: int
+
+
 def keep_red(
-    repo: str, red_jobs: list[Job], red: Red, findings: Findings | None = None
-) -> str:
-    """Create the red-check issue, or replace its body in place.
+    run: Run,
+    named: dict[str, list[Job]],
+    listed: list[Issue],
+    findings: Findings | None = None,
+) -> list[str]:
+    """Create each red job's issue, or replace its body in place.
+
+    Every body is written before any issue is: two open issues with one
+    title raise before anything is filed.
 
     Returns:
         What was done, for the run's log.
 
     """
-    title = f"{red.workflow} is red"
-    found = one(open_issues(repo, title), title)
-    since, runs = carried(found, red.run_url)
-    entries = [read_tail(repo, job) for job in red_jobs]
-    text = body(
-        Red(red.workflow, red.branch, red.run_url, since, runs),
-        entries,
-        findings,
-        seen_hashes(found),
+    entries = {
+        name: [read_tail(run.repo, leg) for leg in legs if is_red_leg(leg)]
+        for name, legs in named.items()
+        if any(is_red_leg(leg) for leg in legs)
+    }
+    ran = frozenset(
+        t for legs in entries.values() for e in legs if e.tail for t in e.tail.tasks
     )
-    if found is None:
-        made = ensure_label(repo)
-        create(repo, title, text, (LABEL,))
-        return f"{made}opened {title!r}"
-    replace(repo, found.number, text)
-    return f"updated #{found.number} ({runs} red runs)"
+    writes: list[Write] = []
+    for name, legs in entries.items():
+        title = red_title(name, run.workflow)
+        found = one([i for i in listed if i.title == title], title)
+        since, runs = carried(found, run.url)
+        red = Red(
+            run.workflow, name, run.branch, run.url, since, runs, len(named[name])
+        )
+        text = body(red, legs, findings, seen_hashes(found), ran)
+        writes.append(Write(title, found, text, runs))
+    done: list[str] = []
+    label_kept = False
+    for write in writes:
+        if write.found is None:
+            if not label_kept:
+                made = ensure_label(run.repo)
+                label_kept = True
+                if made:
+                    done.append(made.removesuffix("; "))
+            create(run.repo, write.title, write.text, (LABEL,))
+            done.append(f"opened {write.title!r}")
+        else:
+            replace(run.repo, write.found.number, write.text)
+            done.append(f"updated #{write.found.number} ({write.runs} red runs)")
+    return done
 
 
-def keep_green(repo: str, workflow: str, run_url: str) -> str:
-    """Close the red-check issue, if one is open.
+def keep_green(run: Run, named: dict[str, list[Job]], listed: list[Issue]) -> list[str]:
+    """Close each red-check issue whose job is green, or not in the run.
+
+    Only an open issue labelled red-check with a `red: <job>
+    (<workflow>)` title is read; any other is a person's.
 
     Returns:
         What was done, for the run's log.
 
     """
-    title = f"{workflow} is red"
-    found = one(open_issues(repo, title), title)
-    if found is None:
-        return "green: no red-check issue open"
-    close(repo, found.number, f"Green: {run_url} ran every job green or skipped.")
-    return f"green: closed #{found.number}"
+    done: list[str] = []
+    for issue in listed:
+        name = titled_job(issue.title, run.workflow)
+        if LABEL not in issue.labels or name is None:
+            continue
+        legs = named.get(name)
+        if legs is None:
+            said = (
+                f"Not in the run: {run.url} lists no job named `{name}`;"
+                " it was renamed or removed."
+            )
+            close(run.repo, issue.number, said)
+            done.append(f"not in the run: closed #{issue.number}")
+        elif is_green(legs):
+            said = f"Green: {run.url} ran every leg of this job green or skipped."
+            close(run.repo, issue.number, said)
+            done.append(f"green: closed #{issue.number}")
+    return done
+
+
+def close_old(run: Run, listed: list[Issue]) -> list[str]:
+    """Close the one issue a workflow kept before each red job had its own.
+
+    Returns:
+        What was done, for the run's log.
+
+    """
+    title = OLD_TITLE.format(workflow=run.workflow)
+    said = (
+        f"{run.url} reported this workflow with one issue per red job"
+        f" (monumental-archive/.github#1966), titled `red: <job> ({run.workflow})`:"
+        " each red job now has its own issue."
+    )
+    done: list[str] = []
+    for issue in listed:
+        if issue.title == title:
+            close(run.repo, issue.number, said)
+            done.append(f"closed #{issue.number}, the workflow's one issue")
+    return done
 
 
 def report(repo: str, args: Args, run_url: str) -> str:
-    """Read the run's jobs and keep the red-check issue.
+    """Read the run's jobs and keep each red job's issue.
 
     Returns:
         What was done, for the run's log.
 
     """
     every = jobs(repo, args.run_id)
-    red_jobs = [j for j in every if j.status == "completed" and j.conclusion in RED]
-    branch = args.ref.removeprefix("refs/heads/")
-    if red_jobs:
-        findings = read_findings(Path(args.findings)) if args.findings else None
-        red = Red(args.workflow, branch, run_url, run_url, 1)
-        return keep_red(repo, red_jobs, red, findings)
+    named = by_name(every, args.workflow)
+    red = any(is_red_leg(j) for j in every)
     unfinished = [j for j in every if j.status != "completed"]
-    others = [j for j in every if j.status == "completed" and j.conclusion not in GREEN]
-    if len(unfinished) > 1 or others:
-        names = ", ".join(
-            f"{j.name} ({j.conclusion or j.status})" for j in [*others, *unfinished[1:]]
-        )
+    settled = len(unfinished) <= 1
+    if not (red or settled):
+        names = ", ".join(f"{j.name} ({j.status})" for j in unfinished[1:])
         return f"neither red nor green yet, nothing changed: {names}"
-    return keep_green(repo, args.workflow, run_url)
+    listed = every_open(repo)
+    run = Run(repo, args.workflow, args.ref.removeprefix("refs/heads/"), run_url)
+    done: list[str] = []
+    if red:
+        findings = read_findings(Path(args.findings)) if args.findings else None
+        done += keep_red(run, named, listed, findings)
+    if settled:
+        done += keep_green(run, named, listed)
+    done += close_old(run, listed)
+    neither = [
+        name
+        for name, legs in named.items()
+        if all(j.status == "completed" for j in legs)
+        and not is_green(legs)
+        and not any(is_red_leg(j) for j in legs)
+    ]
+    if neither:
+        done.append(f"neither red nor green, unchanged: {', '.join(neither)}")
+    return "; ".join(done) or "nothing to change"
 
 
 def default_branch(repo: str, given: str) -> str:
@@ -1044,7 +1371,7 @@ def default_branch(repo: str, given: str) -> str:
 
 
 def main(argv: list[str]) -> int:
-    """Report one scheduled run in its workflow's red-check issue.
+    """Report one scheduled run in an issue per red job.
 
     Returns:
         0 when kept or nothing was to change, EXIT_ERROR when a read or

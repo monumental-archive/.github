@@ -1,8 +1,9 @@
 # Findings
 
 A belt check that finds something wrong reports it as a **finding**: a
-record written where the finding is known, by one of two writers. The
-red-check issue a scheduled run keeps is written from those records.
+record written where the finding is known, by one of two writers. A
+scheduled run keeps one red-check issue per red job (#1966), titled
+`red: <job> (<workflow>)`, and writes each from those records.
 Nothing reads a finding back out of a log.
 
 ## The rule
@@ -12,13 +13,22 @@ Nothing reads a finding back out of a log.
    `org_finding <subject> <message> [<detail>…]`; Python imports
    `mise/findings.py` and calls `finding(subject, message, detail)`.
    Nothing else writes a record.
-2. **The red-check issue is written from records.** The report
+2. **Each red job's issue is written from records.** The report
    (`mise/standing_issue.py --findings <dir>`) reads every `*.jsonl`
-   in the directory and lists each task's findings, new ones apart
-   from those still red since the last run.
-3. **A red job with no record shows its failing step.** A check that
-   reported nothing through a writer, or a stranger's own audit task,
-   is shown as the output of the step that failed.
+   in the directory. A red job's issue lists the findings whose task
+   one of its failing steps ran: named after `mise run` in the step's
+   name, in a `[<task>]` prefix of its output, or the file name of a
+   `.py` or `.sh` script the step's name runs. A finding whose task no
+   red job's failing step ran is listed in every red job's issue,
+   under `## Recorded outside this job's failing step`. Each task's
+   findings are listed new apart from those still red since the
+   issue's last body.
+3. **A red leg always shows its failing step.** A leg whose step ran a
+   task with a record points at its findings above the output; any
+   other says no finding was recorded. The output is shown either way:
+   a tool's own report beside its finding, or a stranger's own audit
+   task that reported nothing through a writer, is otherwise in no
+   issue. Legs with the same output share one excerpt.
 
 ## How the writer reaches a task
 
@@ -67,10 +77,10 @@ One JSON object on one line:
 | `detail` | A list of lines. May be empty. |
 
 A finding's identity is its task, subject and message. The report keeps
-a short hash of the identity of each finding the issue shows in its
-body. A finding listed in the issue's previous body reads as still red;
-any other is new. So a finding the body's size limit cut is new when a
-later run first shows it.
+a short hash of the identity of each finding an issue shows in its
+body, per issue. A finding listed in that issue's previous body reads
+as still red; any other is new. So a finding the body's size limit
+cut is new when a later run first shows it.
 
 ## Where records go
 
@@ -87,7 +97,7 @@ one line per finding.
 
 A record that cannot be appended is said in one more line on stderr
 and does not change the check's status: the finding was printed, and
-the report falls back to the step's output.
+the issue shows it in the step's output.
 
 ## What a writer prints
 
