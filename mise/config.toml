@@ -3732,10 +3732,10 @@ if ! installed=$(rustup component list --installed 2> /dev/null) || ! grep -q "^
 fi
 export CLIPPY_CONF_DIR="${ORG_BELT_DIR}"
 . "${ORG_BELT_DIR}/clippy-ladder.sh"
-# The pgrx ladder: the org's, plus the one contradiction a pgrx crate
-# cannot escape (the reason is written at the list, in clippy-ladder.sh).
-ladder=$(org_clippy_pgrx_ladder)
-contradiction_count=$(org_clippy_pgrx_contradiction_count)
+# The org's one ladder: a pgrx crate is linted at exactly what every
+# crate is (#1995).
+ladder=$(org_clippy_ladder)
+contradiction_count=$(org_clippy_contradiction_count)
 # The SDK, and every major's ICU headers and Postgres pin checked
 # (#1774, #1940).
 org_pgrx_darwin_prepare "${majors}"

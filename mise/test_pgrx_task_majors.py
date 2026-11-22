@@ -74,8 +74,7 @@ esac
 """
 LADDER_STUB = """
 org_clippy_ladder() { echo "-D warnings"; }
-org_clippy_pgrx_ladder() { echo "-D warnings"; }
-org_clippy_pgrx_contradiction_count() { echo 0; }
+org_clippy_contradiction_count() { echo 0; }
 """
 PGRX_ENV_STUB = f"""
 . "{BELT / "pgrx-env.sh"}"

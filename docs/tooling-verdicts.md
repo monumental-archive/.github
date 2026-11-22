@@ -63,7 +63,7 @@ honestly blocked on.
 | cargo-auditable (`github:rust-secure-code/cargo-auditable`, repo-side pin, upstream sha256s) | Release build input of every class that ships a Rust binary (#1334), prebuilt where the `cargo:` backend compiled it per job (187–252 s on edtf v1.3.5). Not `aqua:`: mise's baked registry has no entry (mise 2026.11.6: `no aqua-registry found for rust-secure-code/cargo-auditable`). `mise lock` at 0.7.7 records, for all four platforms, checksums equal to upstream's `.tar.xz.sha256` files (measured 2026-11-17); on Linux mise selects the `unknown-linux-gnu` asset, not musl. A locked install took 2.9 s. Reopen when a mise release's baked aqua registry carries the package |
 | sqlfluff (`pipx:` backend via aqua-backed uv) | SQL lint in the gate (`lint:sql`, all core rules, dialect postgres) + `fix:sql` — proven first in monumental-archive-db |
 | shellcheck + shfmt over mise task bodies (`mise/belt_shell.py`) | The third shell surface in the gate (`lint:belt-shell`) at the delivered level (`enable=all`, SC2310 held off, #1997), this file's own tasks included — plus `fix:belt-shell` |
-| clippy (rustup component of the repo's own pin) | Rust lint in the gate (`lint:rust`): every group at deny, restriction minus eleven named contradictions, `-D warnings`, org knobs in the canon's `mise/clippy.toml`, every workspace member linted as its own package — plus `fix:rust` |
+| clippy (rustup component of the repo's own pin) | Rust lint in the gate (`lint:rust`): every group at deny, restriction minus thirteen named contradictions, `-D warnings`, org knobs in the canon's `mise/clippy.toml`, every workspace member linted as its own package — plus `fix:rust` |
 | rustfmt (rustup component of the repo's own pin) | Rust format check in the gate (`lint:rust`, same task): the canon's `mise/rustfmt.toml` at rustfmt's **stable** maximum, `style_edition` pinned — plus `fix:rust` |
 | a second pinned `rust` toolchain (`core:rust`, repo-side) | The declared minimum compiled in the gate (`lint:msrv`): every crate declaring `rust-version` is built at a pin of exactly that version, and `mise/msrv_plan.py` holds `Cargo.toml` and `mise.toml` in agreement about which version that is |
 | `aqua:theseus-rs/postgresql-binaries` (repo-side, one pin per major) | A real Postgres for the gate: the pgrx extension compiles (`lint:pg-clippy`) and its suite runs at every declared major (`test:pgrx`), with `mise/pgrx_postgres.py` holding the crate's `pgNN` features and the repository's pins in agreement |
@@ -86,7 +86,7 @@ anything, so the contradiction it was hiding fires and the gate reddens
 where someone reads it. The same reasoning should govern any future belt
 list.
 
-*The eleven exclusions are mechanical, not taste.* clippy's own book says
+*The thirteen exclusions are mechanical, not taste.* clippy's own book says
 the restriction group must not be enabled wholesale, because its lints
 contradict each other — enabling it as a group even makes clippy lint
 you for doing so (`blanket_clippy_restriction_lints`, allowed here with
@@ -133,6 +133,46 @@ would have been the inconsistent ruling. So the old lint is excluded and
 the new one stands. On a toolchain older than 1.99 the exclusion costs
 only the old lint, since the new one does not exist there.
 
+The twelfth, `single_call_fn`, was excluded on two measurements
+(2026-11-23, #1995), at this ladder on a scratch two-crate workspace,
+cargo 1.97.1, clippy 0.1.97. It reports any function with one caller,
+and its remedy is to inline it. First, it contradicts pedantic's
+`too_many_lines`: one function of 107 lines is `this function has too
+many lines (107/100)`, and the same body split into two named steps is
+`this function is only used once` on each step, so a body over the
+threshold can satisfy neither. That contradiction is conditional: it
+bites only when a function passes 100 lines, where `implicit_return`'s
+bites at every site. Second, its premise is false wherever a caller is
+outside the crate. A `pub fn` with one caller at home and a second in
+another workspace member is still `only used once`, because clippy
+lints one crate and the org holds `avoid-breaking-exported-api = false`
+on purpose; the same holds for a caller in JS across the wasm boundary
+and for a caller a macro generates (pgrx's `#[pg_extern]` wrappers, its
+`#[pg_test]` runners, and the `pg_test::setup` /
+`postgresql_conf_options` hooks its runner calls once per test, which
+reddened edtf when a change left one `#[pg_test]`). Which of the pair
+goes was decided on their stated reasons: `too_many_lines` stays,
+because its reason is a bound on what a reader holds at once, and
+`single_call_fn` goes, because its own documentation concedes that
+splitting a large function "often improves readability by giving names
+to its parts" — the split it forbids. Every site in the org suppressed
+it: 46 of 46 across edtf, iiif-server and release-lab, none recording
+an inlining.
+
+The thirteenth, `tests_outside_test_module`, is not a pair outside
+pgrx. It reports a `#[test]` outside a `#[cfg(test)]` module, and it
+fires in the one place that module gates nothing: measured the same
+day, a top-level `#[test]` in `tests/top.rs` — the layout the Cargo
+Book gives for integration tests — is a finding, and the same test
+wrapped in `#[cfg(test)] mod` in `tests/wrapped.rs` is clean. A
+`tests/` file is compiled only as a test target, where `cfg(test)` is
+always true, so the remedy changes nothing a compiler or a reader
+gains. It is excluded because its remedy gates nothing where it fires,
+and because every site suppressed it — 29 files across edtf and
+iiif-server, every one a test target, none under `src/` — which is the
+waiver #694 refused under another name. In a pgrx crate it is a strict
+contradiction, below.
+
 *The ladder was recalibrated against a real codebase (#687).* The 97
 findings above are release-lab's — a fixture of small crates — and the
 canon tracks no Rust at all, so until 2026-08-21 nothing had run this
@@ -148,8 +188,10 @@ decision being that the ladder is right and the codebase answers to it,
 not the reverse. Read the 97 as what a fixture measures, never as what
 this ladder costs a real repository.
 
-*One further contradiction, and it applies to pgrx crates only (#813).*
-`tests_outside_test_module` demands `#[cfg(test)]`. pgrx demands
+*In a pgrx crate the thirteenth is a strict contradiction (#813).* It
+was first excluded for pgrx crates only, on this measurement, and has
+been excluded for every crate since #1995. `tests_outside_test_module`
+demands `#[cfg(test)]`. pgrx demands
 `#[cfg(any(test, feature = "pg_test"))]`, because `cargo pgrx test`
 compiles the tests INTO the extension under that feature and runs them
 inside a live Postgres; under a bare `#[cfg(test)]` they are not built
@@ -160,8 +202,8 @@ extension crate the first time it was ever linted at this level: **7 of
 73 findings** were this lint, one per `#[pg_test]`, on a module carrying
 exactly the cfg pgrx documents. It is named in `mise/clippy-ladder.sh`
 rather than left to seven `#[expect]` attributes in every pgrx crate in
-the org forever, and it is scoped by derivation — a crate that does not
-depend on pgrx never sees it.
+the org forever. Since #1995 there is one ladder for every crate, and
+`lint:pg-clippy` lints an extension at exactly what `lint:rust` uses.
 
 *What that first linting cost, recorded so the next one is not a
 surprise.* The remaining **66** findings on `edtf-postgres` are ordinary
@@ -171,9 +213,11 @@ import debt of the #687 kind, not structural: 26 `missing_assert_message`,
 `too_long_first_doc_paragraph`, and singletons including `wildcard_imports`
 on `pgrx::prelude::*` and `inline_modules` on the `pub mod pg_test`
 harness. release-lab's `lab-pg` reads 20 of the same classes. Each was
-checked against pgrx's requirements and none of them is a contradiction —
-which is exactly why they are debt to work through rather than exclusions
-to add. The crate carried it for forty releases because `CLIPPY_EXCLUDE`
+checked against pgrx's requirements and ruled no contradiction — which
+is why they were debt to work through rather than exclusions to add.
+That ruling was wrong for the 13 `single_call_fn`: they were the
+contradiction measured later (#1995), and the lint is excluded now.
+The crate carried the debt for forty releases because `CLIPPY_EXCLUDE`
 hid it.
 
 *An `#[expect]` is written against a clippy configuration, not a lint
@@ -190,11 +234,14 @@ task beside the belt's is not a second opinion but a contradiction, and
 why the remedy was to delete `pg:lint` rather than teach it the org
 ladder. Two corollaries from the same work. An expectation on an
 allow-by-default lint is silent wherever that lint is off, so it proves
-nothing there. And an expectation on `single_call_fn` cannot be
+nothing there. And an expectation on a lint that counts callers cannot be
 unconditional if the test module also calls the function: with tests
 compiled the lint has two callers and goes quiet, so the shape that
 survives both targets is
-`#[cfg_attr(not(any(test, feature = "pg_test")), expect(...))]`.
+`#[cfg_attr(not(any(test, feature = "pg_test")), expect(...))]`. The
+lint this was measured on, `single_call_fn`, is excluded since #1995;
+the point holds for any expectation whose finding depends on which
+targets are compiled.
 
 *The whole workspace is linted every run, one crate at a time (#726).*
 Under `-D warnings` a clippy finding IS a compile error, so a red crate
@@ -3162,12 +3209,14 @@ function replaced (`replace tests::answers with ()`) and a mutant
 inside one (`replace == with != in tests::answers`). A file other than
 `lib.rs` that holds a `#[pg_test]` module gets its own entry.
 
-A second pgrx fact for the triage: an assertion added to a pgrx
-crate rides an existing `#[pg_test]` where the crate's `pg_test`
-module carries `single_call_fn` expectations. pgrx's generated runner
-calls `pg_test::setup` once per test, so a second test leaves those
-expectations unfulfilled (measured with `lint:pg-clippy` on
-release-lab).
+A second pgrx fact for the triage: pgrx's generated runner calls
+`pg_test::setup` once per test, so adding or removing a `#[pg_test]`
+changes how many callers that hook has, and an `#[expect]` whose
+finding counts callers goes unfulfilled under `-D warnings` (measured
+with `lint:pg-clippy` on release-lab, on `single_call_fn`
+expectations). That lint is excluded since #1995, so an assertion no
+longer has to ride an existing `#[pg_test]` for its sake; the point
+holds for any expectation that depends on the number of tests.
 
 **sqlfluff, the third `pipx:` exception, provable only in
 monumental-archive-db** (#403). PyPI-only — no aqua package — so it

@@ -40,6 +40,8 @@ ORG_CLIPPY_CONTRADICTIONS=(
   arbitrary_source_item_ordering
   inline_asm_x86_intel_syntax
   unneeded_field_pattern
+  single_call_fn
+  tests_outside_test_module
 )
 
 org_clippy_ladder() { # -> the flags that ride clippy's `--`, on one line
@@ -66,42 +68,6 @@ org_clippy_ladder() { # -> the flags that ride clippy's `--`, on one line
     printf ' -A clippy::%s' "${lint}"
   done
   printf '\n'
-}
-
-# THE ONE FURTHER CONTRADICTION A PGRX EXTENSION CANNOT ESCAPE (#813).
-# Same test as the list above — obeying the lint means disobeying
-# something else — and here the something else is pgrx itself.
-#
-# `tests_outside_test_module` demands `#[cfg(test)]`. pgrx demands
-# `#[cfg(any(test, feature = "pg_test"))]`, because `cargo pgrx test`
-# compiles the tests INTO the extension under that feature and runs them
-# inside a live Postgres; under a bare `#[cfg(test)]` they are not built
-# into the extension at all and the suite finds nothing. So the lint and
-# the framework want incompatible attributes on the same module, and the
-# repository cannot satisfy both.
-#
-# Measured on edtf's real extension crate before this was added: 7 of the
-# 73 findings were this lint, one per `#[pg_test]`, on a module carrying
-# exactly the cfg pgrx documents. It is named here rather than left to
-# seven `#[expect]` attributes in every pgrx crate in the org forever,
-# for the reason the list above is named here: it is a property of the
-# tools, not a judgement about this code.
-ORG_CLIPPY_PGRX_CONTRADICTIONS=(
-  tests_outside_test_module
-)
-
-org_clippy_pgrx_ladder() { # -> the ladder a pgrx extension is linted at
-  local base lint
-  base=$(org_clippy_ladder)
-  printf '%s' "${base}"
-  for lint in "${ORG_CLIPPY_PGRX_CONTRADICTIONS[@]}"; do
-    printf ' -A clippy::%s' "${lint}"
-  done
-  printf '\n'
-}
-
-org_clippy_pgrx_contradiction_count() { # -> the pgrx ladder's count
-  printf '%s\n' "$((${#ORG_CLIPPY_CONTRADICTIONS[@]} + ${#ORG_CLIPPY_PGRX_CONTRADICTIONS[@]}))"
 }
 
 org_clippy_contradiction_count() { # -> how many named contradictions apply
