@@ -14,9 +14,9 @@ that `json.loads` reads back to the same values; with `ORG_FINDINGS`
 unset nothing is written; with it naming a path under a file the
 finding is still printed, one more line names the failure, and the
 status is 0; the annotated entry prints `::error::` with the runner's
-escaping; `task` is `MISE_TASK_NAME` when set; for the shell writer, the job
-when the script is a workflow step's own (directly under
-`RUNNER_TEMP`); the script's file name otherwise.
+escaping; `task` is `MISE_TASK_NAME` when set; the job when the script is a
+workflow step's own (directly under `RUNNER_TEMP`); the script's file
+name otherwise.
 
 stdlib `unittest`, matching the rest of mise/.
 """
@@ -349,8 +349,6 @@ class FindingRows(unittest.TestCase):
     def test_a_step_script_s_finding_names_the_job(self) -> None:
         """The runner's step script, directly under RUNNER_TEMP: GITHUB_JOB."""
         for writer in writers():
-            if writer.suffix != ".sh":
-                continue
             with self.subTest(writer=writer.name):
                 self.file.unlink(missing_ok=True)
                 done = writer.run(
@@ -373,8 +371,7 @@ class FindingRows(unittest.TestCase):
             "no job": {"RUNNER_TEMP": "", "GITHUB_JOB": ""},
         }
         for writer in writers():
-            if writer.suffix != ".sh":
-                continue
+            name = f"reporter{writer.suffix}"
             for case, env in cases.items():
                 with self.subTest(writer=writer.name, case=case):
                     self.file.unlink(missing_ok=True)
@@ -389,8 +386,8 @@ class FindingRows(unittest.TestCase):
                         ORG_FINDINGS=str(self.file),
                         **planted,
                     )
-                    self.assertEqual(done.stderr, "reporter.sh: s: m\n")
-                    self.assertEqual(self.records()[0]["task"], "reporter.sh")
+                    self.assertEqual(done.stderr, f"{name}: s: m\n")
+                    self.assertEqual(self.records()[0]["task"], name)
 
     def test_findings_append(self) -> None:
         """A second finding is a second line of the same file."""

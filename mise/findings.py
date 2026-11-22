@@ -18,7 +18,9 @@ an error annotation instead, through mise/workflow_command.py. The
 record is the same.
 
 `task` is `MISE_TASK_NAME`, which a Python child of a mise task
-inherits, or the running script's file name where mise named none.
+inherits. Where mise named none, it is `GITHUB_JOB` when the running
+script is a workflow step's own (a file directly under `RUNNER_TEMP`),
+else the running script's file name.
 
 A record that cannot be appended is said in one more stderr line and
 raises nothing: the finding was printed, and the report falls back to
@@ -47,10 +49,21 @@ def task_name() -> str:
     """Name the task a finding belongs to.
 
     Returns:
-        `MISE_TASK_NAME`, or the running script's file name.
+        `MISE_TASK_NAME`; where mise named none, `GITHUB_JOB` when the
+        running script is a workflow step's own (a file directly under
+        `RUNNER_TEMP`, named by a guid, #1934); else the running
+        script's file name.
 
     """
-    return os.environ.get("MISE_TASK_NAME") or Path(sys.argv[0]).name
+    named = os.environ.get("MISE_TASK_NAME")
+    if named:
+        return named
+    script = Path(sys.argv[0])
+    job = os.environ.get("GITHUB_JOB")
+    temp = os.environ.get("RUNNER_TEMP")
+    if job and temp and script.parent == Path(temp):
+        return job
+    return script.name
 
 
 def record(task: str, subject: str, message: str, detail: Iterable[str]) -> str:
