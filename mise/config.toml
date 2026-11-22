@@ -5004,16 +5004,17 @@ dir = "{{cwd}}"
 # broken link is a finding record (#1955), subject the file and the
 # line in the detail, and the exit status is lychee's own. The names go
 # on one command line, not through xargs: a split list is two reports
-# and xargs' 123 in place of lychee's status.
+# and xargs' 123 in place of lychee's status. No skip exit: the
+# task runs everywhere (mise/audit-legs.toml).
 run = '''
 files=$(git ls-files ":!vendor/**" "*.md" "*.markdown")
-[[ -n ${files} ]] || {
+if [[ -z ${files} ]]; then
   echo "audit:links: no markdown tracked, skipped"
-  exit 0
-}
-names=()
-while IFS= read -r name; do names+=("${name}"); done <<< "${files}"
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/lychee_findings.py" --no-progress --include-fragments --config "${ORG_BELT_DIR}/lychee.toml" "${names[@]}"
+else
+  names=()
+  while IFS= read -r name; do names+=("${name}"); done <<< "${files}"
+  "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/lychee_findings.py" --no-progress --include-fragments --config "${ORG_BELT_DIR}/lychee.toml" "${names[@]}"
+fi
 '''
 
 [tasks."audit:actions"]
