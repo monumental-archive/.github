@@ -440,7 +440,7 @@ class AdoptRows(BranchCase):
         done, tree, _ = self.run_task("coverage:adopt", branches="69.9")
         self.assertEqual(1, done.returncode)
         self.assertIn(
-            "coverage-floor: rust-branches measured 69.9% is below its floor 70.0%.",
+            "coverage:adopt: rust-branches measured 69.9% is below its floor 70.0%.",
             done.stderr,
         )
         self.assertEqual(

@@ -13,14 +13,13 @@ gate as `mise run test`.
 
 import contextlib
 import io
-import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest import mock
 
 import decoded
 import deny_skips as ds
+import hermetic
 
 # The task that runs the helper, whose name its findings carry (#1934).
 TASK = "lint:deny"
@@ -28,9 +27,7 @@ TASK = "lint:deny"
 
 def setUpModule() -> None:
     """Run every row as the task does, recording no finding."""
-    patch = mock.patch.dict(os.environ, {"MISE_TASK_NAME": TASK, "ORG_FINDINGS": ""})
-    patch.start()
-    unittest.addModuleCleanup(patch.stop)
+    unittest.enterModuleContext(hermetic.as_task(TASK))
 
 
 HERE = Path(__file__).resolve().parent

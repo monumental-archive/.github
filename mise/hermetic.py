@@ -55,6 +55,17 @@ handed the child are this process's for the call, then restored, so
 mutation, coverage and the type checker see the helper run. `done`
 carries the status and both streams, as a finished process does.
 
+A row that calls a helper in this process names the task the helper
+runs under, and records nothing (#1934):
+
+    with hermetic.as_task("lint:belt-shell"):      # or setUpModule's
+        helper.main([...])                         # enterModuleContext
+
+The finding writer reads MISE_TASK_NAME and ORG_FINDINGS from the
+process. Unnamed, a row under `mise run test` would print `test:` and
+append its planted findings to the gate's own record file. An empty
+name is a workflow step's: the writer falls back to the script's name.
+
 A test that needs a belt or a canon tree of its own gets the whole one
 (#1714), every tracked file a link, with only what it stubs replaced:
 
@@ -92,7 +103,7 @@ from unittest import mock
 import decoded
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Mapping
+    from collections.abc import Callable, Generator, Iterable, Mapping
 
 # The canon this module is part of: its checkout.
 CANON = Path(__file__).resolve().parent.parent
@@ -338,6 +349,19 @@ def call_main(
             if isinstance(code, str):
                 print(code, file=sys.stderr)
     return Called(status, out.getvalue(), err.getvalue())
+
+
+@contextlib.contextmanager
+def as_task(name: str) -> Generator[None]:
+    """Run the block as the task `name` runs a helper, recording nothing.
+
+    Yields:
+        Nothing; MISE_TASK_NAME is `name` and ORG_FINDINGS empty inside.
+
+    """
+    named: dict[str, str] = {"MISE_TASK_NAME": name, "ORG_FINDINGS": ""}
+    with mock.patch.dict(os.environ, named):
+        yield
 
 
 def rustc_verbose(toolchain: str = "stable") -> str:

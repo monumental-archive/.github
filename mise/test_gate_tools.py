@@ -38,7 +38,6 @@ stdlib `unittest`, matching the other mise/test_*.py.
 import contextlib
 import dataclasses
 import io
-import os
 import re
 import shlex
 import subprocess
@@ -841,6 +840,7 @@ class Helper(unittest.TestCase):
                 text=True,
                 check=False,
                 cwd=CANON,
+                env=hermetic.env(),
             )
         self.assertEqual(1, result.returncode)
         self.assertIn(
@@ -865,7 +865,7 @@ class Refusals(unittest.TestCase):
         (Path(tmp.name) / "config.toml").write_text(config_text, encoding="utf-8")
         err = io.StringIO()
         with (
-            mock.patch.dict(os.environ, {"MISE_TASK_NAME": "", "ORG_FINDINGS": ""}),
+            hermetic.as_task(""),
             mock.patch.object(sys, "argv", [STEP]),
             contextlib.redirect_stderr(err),
             contextlib.redirect_stdout(io.StringIO()),

@@ -163,7 +163,7 @@ jobs:
           # majors go as the plan wrote them, JSON for the helper's one
           # decoder to read: no shell takes them apart (#1880).
           "${ORG_PYTHON}" .org-canon/mise/coverage_floor.py planned \
-            --label plan --majors-json "${majors}"
+            --majors-json "${majors}"
   # Everything the gate runs except the extension's own suite, which the
   # `pgrx` legs below run one major each. This was the job named `ci`;
   # that name now belongs to the final job, because `ci / ci` is the one

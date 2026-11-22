@@ -22,13 +22,11 @@ gate as `mise run test`, which `ci` collects.
 
 import contextlib
 import io
-import os
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest import mock
 
 import decoded
 import hermetic
@@ -48,9 +46,7 @@ REMOTE = "monumental-archive/.github/.github/workflows/publish.yml@" + "a" * 40
 
 def setUpModule() -> None:
     """Run every row as the task does, recording no finding (#1934)."""
-    patch = mock.patch.dict(os.environ, {"MISE_TASK_NAME": NAME, "ORG_FINDINGS": ""})
-    patch.start()
-    unittest.addModuleCleanup(patch.stop)
+    unittest.enterModuleContext(hermetic.as_task(NAME))
 
 
 def stub(with_lines: str, uses: str = REMOTE) -> str:

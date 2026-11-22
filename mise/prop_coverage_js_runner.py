@@ -26,12 +26,11 @@ the ordinary suite (`mise run test`) never imports this file.
 
 import contextlib
 import io
-import os
 import unittest
-from unittest import mock
 
 import coverage_js_runner as cj
 import decoded
+import hermetic
 import task_walk as tw
 from hypothesis import example
 from hypothesis import strategies as st
@@ -39,13 +38,6 @@ from typed_hypothesis import given
 
 # The task that runs the helper, whose name its findings carry (#1934).
 RUN_AS = "coverage:check"
-
-
-def setUpModule() -> None:
-    """Run every row as the task does, recording no finding."""
-    patch = mock.patch.dict(os.environ, {"MISE_TASK_NAME": RUN_AS, "ORG_FINDINGS": ""})
-    patch.start()
-    unittest.addModuleCleanup(patch.stop)
 
 
 VERSION = st.from_regex(r"[0-9]{1,2}\.[0-9]{1,2}\.[0-9]{1,2}", fullmatch=True)
@@ -202,7 +194,11 @@ class VitestCommand(unittest.TestCase):
             self.assertIn("task '", str(exc))
             return
         out, err = io.StringIO(), io.StringIO()
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        with (
+            hermetic.as_task(RUN_AS),
+            contextlib.redirect_stdout(out),
+            contextlib.redirect_stderr(err),
+        ):
             status = cj.vitest_command(walked)
         self.assertIn(status, (0, 1))
         if status == 0:

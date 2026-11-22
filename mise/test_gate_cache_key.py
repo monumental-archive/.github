@@ -24,6 +24,7 @@ from pathlib import Path
 from unittest import mock
 
 import gate_cache_key
+import hermetic
 
 LOGGED = (
     "mise-v2-linux-x64-ubuntu26-2026.11.6-p692-"
@@ -236,7 +237,7 @@ class Main(unittest.TestCase):
         """A canon tree without its files is a red step, not a key."""
         err = io.StringIO()
         with (
-            mock.patch.dict(os.environ, {"MISE_TASK_NAME": "", "ORG_FINDINGS": ""}),
+            hermetic.as_task(""),
             mock.patch.object(sys, "argv", ["gate_cache_key.py"]),
             redirect_stderr(err),
         ):

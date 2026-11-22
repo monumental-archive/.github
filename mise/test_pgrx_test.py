@@ -275,7 +275,10 @@ class Planted(unittest.TestCase):
 
         """
         return self.run_bash(
-            [str(self.belt / "pgrx-test.sh"), *args], **({"ORG_PGRX_MAJOR": "18"} | env)
+            [str(self.belt / "pgrx-test.sh"), *args],
+            # MISE_TASK_NAME: what mise gives the task's body, and so the
+            # helpers it starts.
+            **({"ORG_PGRX_MAJOR": "18", "MISE_TASK_NAME": "test:pgrx"} | env),
         )
 
     @staticmethod
@@ -410,7 +413,7 @@ class MeasuredRun(Planted):
         )
         done, _ = self.run_pgrx(PLANT_LH="18")
         self.assertEqual(1, done.returncode)
-        self.assertIn("coverage-floor:", done.stderr)
+        self.assertIn("test:pgrx: .coverage-floor", done.stderr)
 
     def test_every_declared_major_side_by_side_holds_its_own(self) -> None:
         """The local form: each major its own target dir and its own line."""

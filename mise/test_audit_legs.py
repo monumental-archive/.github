@@ -37,7 +37,6 @@ stdlib `unittest`, matching the other mise/test_*.py.
 import contextlib
 import copy
 import io
-import os
 import re
 import subprocess
 import sys
@@ -599,9 +598,7 @@ def as_step() -> contextlib.ExitStack:
 
     """
     stack = contextlib.ExitStack()
-    stack.enter_context(
-        mock.patch.dict(os.environ, {"MISE_TASK_NAME": "", "ORG_FINDINGS": ""})
-    )
+    stack.enter_context(hermetic.as_task(""))
     stack.enter_context(mock.patch.object(sys, "argv", [STEP]))
     return stack
 

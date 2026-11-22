@@ -509,7 +509,7 @@ class AdoptRows(GoBranchCase):
         done, tmp, _ = self.run_task("coverage:adopt", counts="a=5/8 b=34/42")
         self.assertEqual(1, done.returncode)
         self.assertIn(
-            "coverage-floor: go-branches measured 78.0% is below its floor 80.0%.",
+            "coverage:adopt: go-branches measured 78.0% is below its floor 80.0%.",
             done.stderr,
         )
         self.assertEqual(

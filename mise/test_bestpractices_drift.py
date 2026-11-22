@@ -23,12 +23,12 @@ gate as `mise run test`, which `ci` collects.
 import contextlib
 import io
 import json
-import os
 import shutil
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from typing import override
 from unittest import mock
 
 import bestpractices_drift as drift
@@ -405,14 +405,10 @@ class Red(unittest.TestCase):
 class Helper(unittest.TestCase):
     """The helper's pieces, in process."""
 
+    @override
     def setUp(self) -> None:
         """Run as the task does, recording no finding (#1934)."""
-        self.enterContext(
-            mock.patch.dict(
-                os.environ,
-                {"MISE_TASK_NAME": "audit:bestpractices", "ORG_FINDINGS": ""},
-            )
-        )
+        self.enterContext(hermetic.as_task("audit:bestpractices"))
 
     def test_site_key_maps_baseline_and_keeps_the_rest(self) -> None:
         """Only Baseline input names are renamed."""

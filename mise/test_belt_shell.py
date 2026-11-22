@@ -24,15 +24,14 @@ stdlib `unittest`, the belt's one test idiom. Run through the gate as
 """
 
 import io
-import os
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest import mock
 
 import belt_shell as bs
 import decoded
+import hermetic
 
 # The tasks that run the helper, whose names its findings carry (#1934).
 LINT = "lint:belt-shell"
@@ -41,9 +40,7 @@ FIX = "fix:belt-shell"
 
 def setUpModule() -> None:
     """Run every row as the lint task does, recording no finding."""
-    patch = mock.patch.dict(os.environ, {"MISE_TASK_NAME": LINT, "ORG_FINDINGS": ""})
-    patch.start()
-    unittest.addModuleCleanup(patch.stop)
+    unittest.enterModuleContext(hermetic.as_task(LINT))
 
 
 # A body mise would run verbatim, already in the org's format.
@@ -441,7 +438,7 @@ class Main(unittest.TestCase):
             for task, extra in ((LINT, []), (FIX, ["--write"])):
                 err = io.StringIO()
                 with (
-                    mock.patch.dict(os.environ, {"MISE_TASK_NAME": task}),
+                    hermetic.as_task(task),
                     redirect_stdout(io.StringIO()),
                     redirect_stderr(err),
                 ):

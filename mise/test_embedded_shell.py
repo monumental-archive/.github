@@ -26,7 +26,6 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import override
-from unittest import mock
 
 import decoded
 import embedded_shell as es
@@ -38,9 +37,7 @@ TASK = "lint:shell-embedded"
 
 def setUpModule() -> None:
     """Run every row as the task does, recording no finding."""
-    patch = mock.patch.dict(os.environ, {"MISE_TASK_NAME": TASK, "ORG_FINDINGS": ""})
-    patch.start()
-    unittest.addModuleCleanup(patch.stop)
+    unittest.enterModuleContext(hermetic.as_task(TASK))
 
 
 _HERE = Path(__file__).resolve().parent
@@ -1046,7 +1043,7 @@ class Tasks(unittest.TestCase):
         out, err = io.StringIO(), io.StringIO()
         task = "fix:task-shell" if write else "lint:task-shell"
         with (
-            mock.patch.dict(os.environ, {"MISE_TASK_NAME": task}),
+            hermetic.as_task(task),
             redirect_stdout(out),
             redirect_stderr(err),
         ):

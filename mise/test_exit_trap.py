@@ -19,7 +19,6 @@ stdlib `unittest`, the belt's one test idiom. Run through the gate as
 """
 
 import io
-import os
 import re
 import subprocess
 import unittest
@@ -27,7 +26,6 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import override
-from unittest import mock
 
 import exit_trap as et
 import hermetic
@@ -38,9 +36,7 @@ TASK = "lint:bash-portability"
 
 def setUpModule() -> None:
     """Run every row as the task does, recording no finding."""
-    patch = mock.patch.dict(os.environ, {"MISE_TASK_NAME": TASK, "ORG_FINDINGS": ""})
-    patch.start()
-    unittest.addModuleCleanup(patch.stop)
+    unittest.enterModuleContext(hermetic.as_task(TASK))
 
 
 BASH = Path("/bin/bash")

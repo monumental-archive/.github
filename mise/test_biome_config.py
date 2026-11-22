@@ -17,7 +17,6 @@ refuse looks precisely like success.
 
 import io
 import json
-import os
 import subprocess
 import sys
 import tempfile
@@ -25,7 +24,6 @@ import unittest
 from contextlib import redirect_stderr
 from pathlib import Path
 from typing import ClassVar, override
-from unittest import mock
 
 import biome_config
 import decoded
@@ -37,9 +35,7 @@ TASK = "lint:biome"
 
 def setUpModule() -> None:
     """Run every row as the task does, recording no finding."""
-    patch = mock.patch.dict(os.environ, {"MISE_TASK_NAME": TASK, "ORG_FINDINGS": ""})
-    patch.start()
-    unittest.addModuleCleanup(patch.stop)
+    unittest.enterModuleContext(hermetic.as_task(TASK))
 
 
 BELT = Path(__file__).parent

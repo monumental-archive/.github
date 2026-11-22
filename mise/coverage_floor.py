@@ -1221,7 +1221,6 @@ def main(argv: list[str] | None = None) -> int:
         "planned",
         help="hold the floor's recorded legs to the jobs this run plans",
     )
-    plan.add_argument("--label", required=True)
     plan.add_argument(
         "--majors-json",
         required=True,

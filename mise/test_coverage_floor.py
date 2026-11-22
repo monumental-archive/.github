@@ -33,7 +33,6 @@ from decimal import Decimal
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Self, override
-from unittest import mock
 
 import coverage_floor as cf
 import hermetic
@@ -126,9 +125,7 @@ TASK = "coverage:check"
 
 def setUpModule() -> None:
     """Run every row as the task does, recording no finding."""
-    patch = mock.patch.dict(os.environ, {"MISE_TASK_NAME": TASK, "ORG_FINDINGS": ""})
-    patch.start()
-    unittest.addModuleCleanup(patch.stop)
+    unittest.enterModuleContext(hermetic.as_task(TASK))
 
 
 NO_PROBLEMS: list[str] = []
@@ -1359,8 +1356,6 @@ class TestOwners(unittest.TestCase):
                     "--path",
                     str(tree.path),
                     "planned",
-                    "--label",
-                    "plan",
                     "--majors-json",
                     '["16"]',
                 ],
@@ -1511,8 +1506,6 @@ class TestThePlanFeedsTheHelper(unittest.TestCase):
                     sys.executable,
                     str(self.canon / "mise" / "coverage_floor.py"),
                     "planned",
-                    "--label",
-                    "plan",
                     "--majors-json",
                     plan.stdout,
                 ])
@@ -1535,7 +1528,7 @@ class TestThePlanFeedsTheHelper(unittest.TestCase):
         expansions = [m.group(0) for m in re.finditer(r"\$\{[^}]*majors[^}]*\}", body)]
         verbatim: list[str] = ["${majors}"] * len(expansions)
         self.assertEqual(verbatim, expansions)
-        self.assertIn('planned \\\n  --label plan --majors-json "${majors}"\n', body)
+        self.assertIn('planned \\\n  --majors-json "${majors}"\n', body)
 
 
 def fuzz_line(leg: str, floor: str, measured: str) -> str:
