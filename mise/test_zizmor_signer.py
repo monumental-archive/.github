@@ -235,19 +235,19 @@ class RefVersionMismatch(unittest.TestCase):
             "monumental-archive/signer/",
             "someone-else/signer/",
         )
-        status, out, err = run([other])
+        status, out, _ = run([other])
         self.assertEqual(14, status)
         self.assertIn("0 ref-version-mismatch finding(s) on the signer dropped", out)
-        self.assertIn("1 finding(s) remain: ref-version-mismatch", err)
+        self.assertIn("1 finding(s) remain: ref-version-mismatch", out)
 
     def test_a_mismatch_with_no_readable_reference_is_kept(self) -> None:
         """A Hidden location with no `uses:` line names nothing; it is kept."""
         blind = rewritten(MISMATCH[0], "Hidden", "uses:", "calls:")
         none: list[str] = []
         self.assertEqual(none, signer.references(blind))
-        status, _, err = run([blind])
+        status, out, _ = run([blind])
         self.assertEqual(14, status)
-        self.assertIn("1 finding(s) remain: ref-version-mismatch", err)
+        self.assertIn("1 finding(s) remain: ref-version-mismatch", out)
 
     def test_the_comment_alone_is_not_read_as_a_reference(self) -> None:
         """Primary carries only `main`; dropping the Hidden location blinds it."""
@@ -255,9 +255,9 @@ class RefVersionMismatch(unittest.TestCase):
         blind["locations"] = [
             loc for loc in locations(blind) if symbolic(loc)["kind"] == "Primary"
         ]
-        status, _, err = run([blind])
+        status, out, _ = run([blind])
         self.assertEqual(14, status)
-        self.assertIn("1 finding(s) remain: ref-version-mismatch", err)
+        self.assertIn("1 finding(s) remain: ref-version-mismatch", out)
 
     def test_a_uses_in_prose_is_not_a_reference(self) -> None:
         """A commented `uses:` beside the signer's is not read as a second ref."""
@@ -279,17 +279,17 @@ class RefVersionMismatch(unittest.TestCase):
             "    with:\n",
             "    with:\n      - uses: actions/checkout@v4\n",
         )
-        status, _, err = run([two])
+        status, out, _ = run([two])
         self.assertEqual(14, status)
-        self.assertIn("1 finding(s) remain: ref-version-mismatch", err)
+        self.assertIn("1 finding(s) remain: ref-version-mismatch", out)
 
     def test_another_audit_on_the_signer_is_kept(self) -> None:
         """An unrelated audit carrying the same locations still reds."""
         other_rule = copy.deepcopy(MISMATCH[0])
         other_rule["ident"] = "unpinned-uses"
-        status, _, err = run([other_rule])
+        status, out, _ = run([other_rule])
         self.assertEqual(14, status)
-        self.assertIn("1 finding(s) remain: unpinned-uses", err)
+        self.assertIn("1 finding(s) remain: unpinned-uses", out)
 
 
 class Kept(unittest.TestCase):
@@ -301,17 +301,17 @@ class Kept(unittest.TestCase):
             REAL[0],
             "monumental-archive/other/.github/workflows/sign.yml@" + "a" * 40,
         )
-        status, out, err = run([other])
+        status, out, _ = run([other])
         self.assertEqual(14, status)
         self.assertIn("0 stale-action-refs finding(s) on the signer dropped", out)
-        self.assertIn("1 finding(s) remain: stale-action-refs", err)
+        self.assertIn("1 finding(s) remain: stale-action-refs", out)
 
     def test_a_third_party_action_is_kept(self) -> None:
         """A stale third-party action pin is exactly what the audit is for."""
         third = repointed(REAL[0], "actions/checkout@" + "b" * 40)
-        status, _, err = run([*REAL, third])
+        status, out, _ = run([*REAL, third])
         self.assertEqual(14, status)
-        self.assertIn("1 finding(s) remain", err)
+        self.assertIn("1 finding(s) remain", out)
 
     def test_a_repository_that_only_shares_the_prefix_is_kept(self) -> None:
         """`signer-fork` is not `signer`: repositories match whole."""
@@ -325,9 +325,9 @@ class Kept(unittest.TestCase):
         """The exemption is one rule wide, not the signer wide."""
         other_rule = copy.deepcopy(REAL[0])
         other_rule["ident"] = "impostor-commit"
-        status, _, err = run([other_rule])
+        status, out, _ = run([other_rule])
         self.assertEqual(14, status)
-        self.assertIn("remain: impostor-commit", err)
+        self.assertIn("remain: impostor-commit", out)
 
     def test_a_finding_with_no_readable_reference_is_kept(self) -> None:
         """When zizmor's shape gives no reference, nothing is assumed."""
@@ -366,7 +366,7 @@ class Matching(unittest.TestCase):
 
 
 class Refusals(unittest.TestCase):
-    """Reports the filter will not guess about: exit 1, by name, no record."""
+    """Reports the filter will not guess about: exit 1, by name."""
 
     def test_a_signer_declaration_with_no_repository_is_refused(self) -> None:
         """A declaration that names no owner/repo cannot exempt anything."""
@@ -500,7 +500,7 @@ class Records(unittest.TestCase):
         ]
         self.assertEqual(want, self.records())
         self.assertTrue(err.startswith(" INFO zizmor\n"), err)
-        self.assertIn(f"{TASK}: 1 finding(s) remain: stale-action-refs", err)
+        self.assertIn(f"{TASK}: 1 finding(s) remain: stale-action-refs", out)
         self.assertIn("10 stale-action-refs finding(s) on the signer dropped", out)
 
     def test_all_dropped_is_no_record_and_green(self) -> None:
@@ -561,7 +561,7 @@ class Records(unittest.TestCase):
         self.assertEqual(want, self.records())
 
     def test_no_zizmor_is_refused_by_name(self) -> None:
-        """No zizmor on PATH: refused by name, 1, no record."""
+        """No zizmor on PATH: refused by name, 1, its one record (#1934)."""
         with mock.patch.object(signer, "ZIZMOR", "/nonexistent/zizmor"):
             out, err = io.StringIO(), io.StringIO()
             with (
@@ -572,7 +572,16 @@ class Records(unittest.TestCase):
                 status = signer.main(["--signer-workflow", SIGNER_WORKFLOW])
         self.assertEqual(1, status)
         self.assertIn(f"{TASK}: zizmor is not on PATH", err.getvalue())
-        self.assertFalse(self.records())
+        want: list[object] = [
+            {
+                "v": 1,
+                "task": TASK,
+                "subject": "",
+                "message": "zizmor is not on PATH",
+                "detail": [],
+            }
+        ]
+        self.assertEqual(want, self.records())
 
 
 WORKFLOW = """\

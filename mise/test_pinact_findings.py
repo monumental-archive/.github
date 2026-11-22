@@ -203,6 +203,14 @@ def records(file: Path) -> list[dict[str, object]]:
     ]
 
 
+def refused(case: unittest.TestCase, file: Path, stderr: str) -> None:
+    """Hold a refusal to one record: its own, none of the report's (#1934)."""
+    got = records(file)
+    same(case, len(got), 1)
+    same(case, got[0]["subject"], "")
+    case.assertIn(f"{TASK}: {got[0]['message']}\n", stderr)
+
+
 class Stubbed(unittest.TestCase):
     """A stub pinact on PATH, its log, the findings file."""
 
@@ -291,18 +299,18 @@ class Adapter(Stubbed):
         same(self, done.stdout, f"{TASK}: pinact: 0 finding(s)\n")
 
     def test_another_sarif_version_is_refused_by_name(self) -> None:
-        """SARIF 2.2: refused, both versions named, exit 1, no record."""
+        """SARIF 2.2: refused, both versions named, exit 1, its one record."""
         done = self.run_adapter(sarif(version="2.2.0"), 0)
         same(self, done.returncode, 1, done.stderr)
         self.assertIn(
             "the report is SARIF 2.2.0; this adapter reads SARIF 2.1.0",
             done.stderr,
         )
-        same(self, records(self.file), [])
+        refused(self, self.file, done.stderr)
         same(self, done.stdout, "")
 
     def test_an_unknown_shape_is_refused_by_name(self) -> None:
-        """A log with no `runs`: refused by name, exit 1, no record."""
+        """A log with no `runs`: refused by name, exit 1, its one record."""
         done = self.run_adapter('{"version": "2.1.0"}', 3)
         same(self, done.returncode, 1, done.stderr)
         self.assertIn(
@@ -310,7 +318,7 @@ class Adapter(Stubbed):
             " runs is not a list",
             done.stderr,
         )
-        same(self, records(self.file), [])
+        refused(self, self.file, done.stderr)
         same(self, done.stdout, "")
 
     def test_output_that_is_not_json_is_refused_by_name(self) -> None:
@@ -321,15 +329,15 @@ class Adapter(Stubbed):
             f"{TASK}: pinact exited 3: the output is not pinact's report",
             done.stderr,
         )
-        same(self, records(self.file), [])
+        refused(self, self.file, done.stderr)
 
     def test_a_malformed_result_records_none(self) -> None:
-        """One result with no location: refused before any is recorded."""
+        """One result with no location: refused, none of the report's recorded."""
         bad = result("parse-error", MISMATCH, 6) | {"locations": []}
         done = self.run_adapter(sarif(result("parse-error", "x", 1), bad), 3)
         same(self, done.returncode, 1, done.stderr)
         self.assertIn("runs[0].results[1]: locations is empty", done.stderr)
-        same(self, records(self.file), [])
+        refused(self, self.file, done.stderr)
 
     def test_another_resolved_sha_leaves_the_message(self) -> None:
         """A release moves the SHA in the text: the message is unchanged."""
@@ -341,7 +349,7 @@ class Adapter(Stubbed):
         same(self, got, want)
 
     def test_a_missing_file_is_refused_by_name(self) -> None:
-        """A result naming a file that is not there: refused, 1, no record."""
+        """A result naming a file that is not there: refused, 1, its one record."""
         (self.dir / WORKFLOW).unlink()
         done = self.run_adapter(QUOTED, 3)
         same(self, done.returncode, 1, done.stderr)
@@ -350,17 +358,17 @@ class Adapter(Stubbed):
             f" runs[0].results[0]: locations[0]: {WORKFLOW} cannot be read",
             done.stderr,
         )
-        same(self, records(self.file), [])
+        refused(self, self.file, done.stderr)
 
     def test_a_line_past_the_end_is_refused_by_name(self) -> None:
-        """A result past the file's last line: refused, 1, no record."""
+        """A result past the file's last line: refused, 1, its one record."""
         done = self.run_adapter(sarif(result("parse-error", MISMATCH, 8)), 3)
         same(self, done.returncode, 1, done.stderr)
         self.assertIn(
             f"runs[0].results[0]: locations[0]: {WORKFLOW} has no line 8",
             done.stderr,
         )
-        same(self, records(self.file), [])
+        refused(self, self.file, done.stderr)
 
     def test_pinact_s_status_is_the_exit(self) -> None:
         """A 2 from pinact with a clean log exits 2."""
@@ -380,11 +388,11 @@ class Adapter(Stubbed):
         )
 
     def test_no_pinact_is_refused_by_name(self) -> None:
-        """No pinact on PATH: refused by name, exit 1, no record."""
+        """No pinact on PATH: refused by name, exit 1, its one record."""
         done = self.run_adapter(sarif(), 0, path=str(self.dir / "empty"))
         same(self, done.returncode, 1, done.stderr)
         self.assertIn(f"{TASK}: pinact is not on PATH", done.stderr)
-        same(self, records(self.file), [])
+        refused(self, self.file, done.stderr)
 
     def test_the_pinned_pinact_offline_gives_two_messages(self) -> None:
         """Two unpinned actions in one file, judged by pinact with `--no-api`.

@@ -54,11 +54,11 @@ same way, and only zizmor knows.
 The exit status is zizmor's own: 0 when nothing remains (a run whose
 findings were all the signer's is clean), its 10-14 by severity when
 findings remain, and any other status, zizmor failing, with no report
-read. The refusals exit 1, each by name and recording nothing: no
-zizmor on PATH, a signer declaration naming no repository, output that
-is not zizmor's finding array, and a remaining finding not of the
-shape read here. A zizmor pin whose report moves turns the task red
-until this moves with it.
+read. The refusals exit 1, each by name and a finding of its own, none
+of the report's (#1934): no zizmor on PATH, a signer declaration naming
+no repository, output that is not zizmor's finding array, and a
+remaining finding not of the shape read here. A zizmor pin whose report
+moves turns the task red until this moves with it.
 """
 
 from __future__ import annotations
@@ -389,10 +389,9 @@ def judge(task: str, ran: Ran, signer: str) -> int:
     try:
         dropped, records = read(ran, signer)
     except UndecodableError as err:
-        print(
-            f"{task}: zizmor exited {ran.status}:"
-            f" the output is not zizmor's report: {err}",
-            file=sys.stderr,
+        writer.finding(
+            "",
+            f"zizmor exited {ran.status}: the output is not zizmor's report: {err}",
         )
         return EXIT_REFUSED
     for audit, (_, why) in AUDITS.items():
@@ -407,9 +406,11 @@ def judge(task: str, ran: Ran, signer: str) -> int:
     if not records:
         return 0
     idents = sorted({r.ident for r in records})
+    # The count, beside the records that say each one: not a finding of
+    # its own, so on stdout with the dropped counts (#1934 rule 4).
     print(
         f"{task}: {len(records)} finding(s) remain: {', '.join(idents)}",
-        file=sys.stderr,
+        flush=True,
     )
     return ran.status if ran.status in FINDINGS else EXIT_REFUSED
 
@@ -434,7 +435,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         signer = signer_repository(args.signer_workflow)
     except ValueError as err:
-        print(f"{task}: {err}", file=sys.stderr)
+        writer.finding("", str(err))
         return EXIT_REFUSED
     if not os.environ.get("GH_TOKEN"):
         writer.finding(
@@ -446,7 +447,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         ran = run_zizmor(rest)
     except FileNotFoundError:
-        print(f"{task}: zizmor is not on PATH", file=sys.stderr)
+        writer.finding("", "zizmor is not on PATH")
         return EXIT_REFUSED
     sys.stderr.write(ran.stderr.decode("utf-8", "replace"))
     sys.stderr.flush()

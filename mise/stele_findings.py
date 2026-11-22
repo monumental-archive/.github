@@ -20,13 +20,13 @@ finding, the document's subject and the verdict. Then
 `<task>: stele: <verdict>` goes to stdout.
 
 The exit status is stele's own, always. The refusals exit 1, each by
-name and recording nothing: no stele on PATH; a schema other than
-SCHEMA (a consumer reading a schema it does not implement refuses, as
-the report schema requires; a stele pin whose report moves turns these
-tasks red until this moves with it); and output that is not one JSON
-document, the message carrying stele's status. `excused`,
-`staleExceptions` and `facts` do not move the verdict, so they are not
-recorded.
+name, recorded as its own finding and none of the report's (#1934): no
+stele on PATH; a schema other than SCHEMA (a consumer reading a schema
+it does not implement refuses, as the report schema requires; a stele
+pin whose report moves turns these tasks red until this moves with it);
+and output that is not one JSON document, the message carrying stele's
+status. `excused`, `staleExceptions` and `facts` do not move the
+verdict, so they are not recorded.
 """
 
 import shutil
