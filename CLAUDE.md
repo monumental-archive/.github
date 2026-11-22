@@ -45,10 +45,12 @@ shared lives here and nowhere else. Five layers:
    layer every repo and every machine consumes — exact pins, per-platform
    checksums, GitHub attestations. Consumed locally through each clone's
    own link — `.config/mise/conf.d/belt.toml` and `.config/mise/mise.lock`
-   into the machine's cache tree of the sha the gate stub pins, made by
-   the org hooks (#1686) — and in CI via `MISE_GLOBAL_CONFIG_FILE`.
-   There is no machine-wide belt: a clone with no link has none, and
-   `lefthook run post-checkout` makes the link (#1739).
+   into the machine's cache tree of the sha the gate stub pins, derived
+   by the org hooks at every hook and checked by every belt task, which
+   refuses a belt that is not its tree's pin (#1686, #1988) — and in CI
+   via `MISE_GLOBAL_CONFIG_FILE`. There is no machine-wide belt: a
+   clone with no link has none, and `lefthook run post-checkout` makes
+   the link (#1739).
    The filename is load-bearing: both mise and Renovate's mise manager
    recognise `mise/config.toml` natively — do not rename.
 3. **The task contract**: the global `ci` task is the sum of three

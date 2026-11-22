@@ -56,7 +56,7 @@ honestly blocked on.
 | hadolint (`aqua:hadolint/hadolint`) | Dockerfile lint in the gate (`lint:hadolint`), every severity fails (`--failure-threshold style`) |
 | cargo-machete (`github:` backend, upstream sha256s) | Unused Rust dependencies in the gate (`lint:machete`, static) — proven first in a consumer |
 | cargo-semver-checks (`github:` backend, TOFU checksum) | Public API vs published baseline (`audit:semver` — network, Monday cron, per repo), and vs a pull request's base (`break:check`, the gate's test leg, #1906) — proven first in a consumer |
-| cargo-mutants (`cargo:` backend, compiled `--locked`, pinned `lazy`) | Rust mutation testing (`audit:mutants`' Rust leg — its own weekly workflow, `repo-mutants.yml`, never the gate or the audit): no unexplained surviving mutant, never a score; adoption is a tracked `.cargo/mutants.toml`, each exclusion an `exclude_re` entry under a `#` reason (#1355) — proven first on release-lab |
+| cargo-mutants (`cargo:` backend, compiled `--locked`, pinned `lazy`) | Rust mutation testing (`audit:mutants`' Rust leg — its own weekly workflow, `repo-mutants.yml`, never the gate or the audit): no unexplained surviving mutant, never a score; adoption is a tracked `.cargo/mutants.toml`; an equivalent mutant is recorded at its site, `// mutants:equivalent <mutation>: <reason>`, from which the leg derives the exclusion (#1355, #1987) — proven first on release-lab |
 | cosmic-ray (`pipx:` backend, belt Python, pinned `lazy`) | Python mutation testing (`audit:mutants`' Python leg — its own jobs in `repo-mutants.yml`, never the gate or the audit): no unexplained surviving mutant; adoption is a tracked root `cosmic-ray.toml`, each exclusion a `# pragma: no mutate -- <reason>` on the mutant's line; mutates the tracked file in place, one mutant at a time, against the test files coverage shows reaching it (#1771; mutmut refused, #1354) |
 | StrykerJS (the repository's own, from its lockfile; the belt pins nothing) | TypeScript mutation testing (`audit:mutants`' TypeScript leg — its own jobs in `repo-mutants.yml`, never the gate or the audit): no unexplained surviving mutant; adoption is a tracked root `stryker.config.json`, each exclusion a `// Stryker disable next-line <Mutator>: <reason>` at its site; run `--inPlace` (#1358) — proven first on monumental-archive |
 | `lint:test-adoption` (the belt's own rule, `mise/testing_adoption.py`; no tool) | Adoption is required, not opt-in (#1910): the four mutation legs and `coverage:check` skip clean where their file is absent, so the gate requires the file — a repository that ships Rust (a `Cargo.toml` outside `vendor/` and `fuzz/`), Go (a root `go.mod`), Python (a `*.py` that is not `test_*.py`, `prop_*.py` or `conftest.py`) or TypeScript (a source that is not a declaration, test or spec) tracks that language's mutation file above and a `.coverage-floor`, red by name otherwise; file names only, nothing opened; what each file holds stays its leg's business |
@@ -3018,15 +3018,29 @@ survivor has three outcomes, in this order (#1981): code it proves
 redundant (another path already decides the result) is deleted, and
 nothing is recorded; a survivor a test can tell apart is killed by an
 assertion; and only code that must stay, where no input can tell, is
-recorded in the repository's own `.cargo/mutants.toml` as an
-`exclude_re` entry under a `#` line that says why it cannot be
-deleted. Shipped code is never changed only to make a mutant
-disappear: rewriting an operator into a form the tool does not mutate
-hides the question, while deleting redundant code answers it. An
-entry with no reason, an entry on the `exclude_re = [` line itself,
-and `#[mutants::skip]` (a dependency in shipped code) are each red by
-name. `exclude_globs` is held to the same reason rule — a
-whole-file exclusion is an exclusion. Adoption is that file, tracked;
+recorded at its site (#1987): `// mutants:equivalent <mutation>:
+<reason>`, trailing the mutant's line or alone on the line above it,
+`<mutation>` being cargo-mutants' own text without its
+`in <function>` suffix. The leg derives
+`^<path>:<line>:[0-9]+: <mutation>( in .*)?$` from where the comment
+stands and passes it as `--exclude-re`, beside the config's own
+(measured on cargo-mutants 27.1.0: command-line exclusions add to the
+config's), so the record moves with the code. A record with no
+mutation text or no reason, one in a file the run does not mutate,
+and one whose pattern matches nothing in the `--no-config` listing
+(stale) are each red by name. The tool's own exclusion file was the
+record before, and its only handle on a site is a position: measured
+on edtf, 19 of 20 entries pinned `:line:col:` and went stale silently
+on any edit above them. Shipped code is never changed only to make a
+mutant disappear: rewriting an operator into a form the tool does not
+mutate hides the question, while deleting redundant code answers it.
+`exclude_re` in `.cargo/mutants.toml` is for rules that are not a
+site (the pgrx `tests::` pattern): an entry that pins a line and
+column, an entry with no `#` reason line, an entry on the
+`exclude_re = [` line itself, and `#[mutants::skip]` (a dependency in
+shipped code; a comment is not one) are each red by name.
+`exclude_globs` is held to the same reason rule — a whole-file
+exclusion is an exclusion. Adoption is that file, tracked;
 the belt keeps no list of adopters and delivers no exclusions. Every
 workspace member is mutated, named one by one: measured on
 release-lab, a bare `cargo mutants` follows `default-members` and left

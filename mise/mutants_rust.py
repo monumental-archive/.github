@@ -8,9 +8,15 @@ comes under the canon's coverage figure and its own mutation run
 (CONTRIBUTING.md, "A helper's language", #1352):
 
 - `reasons CONFIG`: every `exclude_re` / `exclude_globs` entry of
-  `.cargo/mutants.toml` sits on its own line under a `#` reason line.
-  Read as TEXT, line by line, never with tomllib: the rule is about the
-  comment above an entry, and a TOML parser drops comments.
+  `.cargo/mutants.toml` sits on its own line under a `#` reason line,
+  and no `exclude_re` entry pins a position (`:<digits>:<digits>:`):
+  a site's mutant is recorded at its site (#1987). Read as TEXT, line
+  by line, never with tomllib: the rule is about the comment above an
+  entry, and a TOML parser drops comments.
+- `records`: the site records, `git grep -n` of every
+  `// mutants:equivalent` comment on stdin. One with no mutation text
+  or no reason is red by name; otherwise prints each one's derived
+  `--exclude-re` pattern, one per line.
 - `default-major NAME`: the one `pgNN` a crate's `default` feature
   names, from `cargo metadata` on stdin; empty when there is not
   exactly one.
@@ -21,19 +27,34 @@ comes under the canon's coverage figure and its own mutation run
   the scratch directory: which exit statuses of `cargo mutants` mean
   "judged" (0, 2 survivors, 3 timeouts), the tally from each
   `outcomes.json` (a count it does not state is red by name, never
-  read as zero), the survivors from `missed.txt`. Prints them and the
-  summary line, writes `rust.tsv` for the totals, and returns the leg's
-  exit status.
+  read as zero), the survivors from `missed.txt`, and each site record
+  held to the `--no-config` listings. Prints them and the summary line,
+  writes `rust.tsv` for the totals, and returns the leg's exit status.
+
+A RECORD is `// mutants:equivalent <mutation>: <reason>`, either
+trailing the mutant's line (code before the comment: its site is that
+line) or alone on the line directly above it (its site is the next
+line). `<mutation>` is cargo-mutants' own text for the mutant without
+its ` in <function>` suffix, and the record explains every mutant with
+that text at its site: the leg passes
+`^<path>:<site>:[0-9]+: <mutation>( in .*)?$` as `--exclude-re` to the
+configured listings and the run, beside whatever the config holds. It
+is red, by name, when it gives no mutation text or no reason, when it
+is in no mutated file, and when its pattern matches nothing in the
+`--no-config` listing (stale: the mutant is gone, or the line has no
+such mutant).
 
 The scratch directory's `runs.tsv` is the shell's log, one line per
 event in order: `run <TAB> name <TAB> dir` for a cargo-mutants run, or
 `red <TAB> message` for a crate the shell could not run. A run's
-directory holds `counts` (written by `plan`), `status` (cargo mutants'
-exit status, absent when there was nothing to run) and cargo-mutants'
-own `mutants.out/`.
+directory holds `all.txt` (the `--no-config` listing), `counts`
+(written by `plan`), `status` (cargo mutants' exit status, absent when
+there was nothing to run) and cargo-mutants' own `mutants.out/`.
+`records.txt` beside it is the `git grep -n` the records came from.
 
 Stdlib only. Every message is the one the shell printed before #1486,
-byte for byte: test_mutants_rust.py's stub rows hold them.
+byte for byte, but where #1987 moved the record to the site:
+test_mutants_rust.py's stub rows hold them.
 """
 
 import argparse
@@ -54,7 +75,6 @@ if TYPE_CHECKING:
 LABEL = "audit:mutants: rust"
 # The leg's language: the subject of its findings, as LABEL names it.
 LANGUAGE = "rust"
-CONFIG = ".cargo/mutants.toml"
 # The statuses that mean cargo-mutants judged every mutant it was given:
 # 0 (all caught), 2 (survivors), 3 (timeouts). Anything else judged
 # nothing; a red baseline is 4.
@@ -72,6 +92,18 @@ COMMENT = re.compile(rf"^[{SPACE}]*#")
 BLANK = re.compile(rf"^[{SPACE}]*$")
 TRAILING_COMMA = re.compile(rf",[{SPACE}]*$")
 MAJOR = re.compile(r"^pg[0-9]+$")
+# A position as cargo-mutants names a mutant by it: `:line:col:`.
+POSITION = re.compile(r":[0-9]+:[0-9]+:")
+
+# The record of an equivalent mutant, at its site (#1987).
+MARK = "// mutants:equivalent"
+SPELLING = f"{MARK} <mutation>: <reason>"
+# What follows the mark: the mutation text, then `: ` and the reason.
+RECORD = re.compile(r"^(?P<mutation>.*?)(?::[ \t]+(?P<reason>.*)|:?)$")
+# A mutant's name in a listing: `path:line:col: mutation`.
+NAME = re.compile(r"^(?P<path>.+?):[0-9]+:[0-9]+: ")
+# What Rust's `regex::escape` escapes: the pattern is cargo-mutants'.
+META = frozenset("\\.+*?()|[]{}^$#&-~")
 
 
 def lines_of(text: str) -> list[str]:
@@ -97,18 +129,31 @@ def entry_text(line: str) -> str:
     return TRAILING_COMMA.sub("", line.lstrip(SPACE))
 
 
-def unexplained(text: str) -> list[tuple[int, str, str]]:
-    """Find every exclusion entry with no `#` reason line above it.
+@dataclass(frozen=True)
+class Entry:
+    """One entry of an exclusion list, as the config's text spells it."""
+
+    number: int
+    key: str
+    # The entry as the message names it; an entry on the opening line is
+    # named as such.
+    text: str
+    # Whether a `#` reason line stands above it.
+    explained: bool
+
+
+def entries(text: str) -> list[Entry]:
+    """Find every exclusion entry, and whether a reason line is above it.
 
     An entry on the `key = [` line itself has nowhere to put one and is
     named as such. Blank lines between the reason and its entry are
     allowed; any other line ends the reason's reach.
 
     Returns:
-        (line number, key, entry text) for each unexplained entry.
+        Each entry, in the file's order.
 
     """
-    found: list[tuple[int, str, str]] = []
+    found: list[Entry] = []
     inside = False
     key = ""
     prev = ""
@@ -118,7 +163,8 @@ def unexplained(text: str) -> list[tuple[int, str, str]]:
             key = typed_std.group(match, 1) or ""
             rest = OPENING.sub("", line, count=1)
             if QUOTED.match(rest):
-                found.append((number, key, "an entry on the opening line"))
+                opening = "an entry on the opening line"
+                found.append(Entry(number, key, opening, explained=False))
             inside = "]" not in line
             prev = ""
             continue
@@ -128,8 +174,8 @@ def unexplained(text: str) -> list[tuple[int, str, str]]:
             inside = False
             continue
         if QUOTED.match(line):
-            if not COMMENT.match(prev):
-                found.append((number, key, entry_text(line)))
+            explained = COMMENT.match(prev) is not None
+            found.append(Entry(number, key, entry_text(line), explained=explained))
             if CLOSED_AT_END.search(line):
                 inside = False
         if not BLANK.match(line):
@@ -137,11 +183,40 @@ def unexplained(text: str) -> list[tuple[int, str, str]]:
     return found
 
 
-def reasons(config: Path) -> int:
-    """Hold every exclusion to its reason line; print each one without.
+def unexplained(text: str) -> list[tuple[int, str, str]]:
+    """Find every exclusion entry with no `#` reason line above it.
 
     Returns:
-        0 when every entry has its reason, 1 otherwise.
+        (line number, key, entry text) for each unexplained entry.
+
+    """
+    return [(e.number, e.key, e.text) for e in entries(text) if not e.explained]
+
+
+def pinned(text: str) -> list[tuple[int, str]]:
+    """Find every `exclude_re` entry that pins a line and column (#1987).
+
+    A position moves as soon as the code above it does, and the entry
+    then points at nothing, or at another mutant: a site's mutant is
+    recorded at its site. A rule that is not a site (`tests::`) stays.
+
+    Returns:
+        (line number, entry text) for each entry holding `:<n>:<n>:`.
+
+    """
+    return [
+        (e.number, e.text)
+        for e in entries(text)
+        if e.key == "exclude_re" and POSITION.search(e.text)
+    ]
+
+
+def reasons(config: Path) -> int:
+    """Hold every exclusion to its reason line, and to naming no position.
+
+    Returns:
+        0 when every entry has its reason and none pins a position, 1
+        otherwise.
 
     """
     text = config.read_text(encoding="utf-8", errors="replace")
@@ -157,9 +232,153 @@ def reasons(config: Path) -> int:
                 )
             ],
         )
-    if found:
+    positions = pinned(text)
+    for number, entry in positions:
+        findings.finding(
+            LANGUAGE,
+            f"{config}:{number}: exclude_re entry {entry} pins a line and column",
+            [
+                (
+                    "record the mutant at its site instead, on its line or"
+                    f" the line above: {SPELLING}"
+                )
+            ],
+        )
+    if found or positions:
         return EXIT_RED
     return 0
+
+
+def escape(text: str) -> str:
+    """Escape text as Rust's `regex::escape` does.
+
+    Returns:
+        The text with each regex meta character behind a backslash.
+
+    """
+    return "".join(f"\\{c}" if c in META else c for c in text)
+
+
+@dataclass(frozen=True)
+class Record:
+    """One `// mutants:equivalent` comment."""
+
+    path: str
+    line: int
+    site: int
+    mutation: str
+    reason: str
+
+    @property
+    def spelled(self) -> str:
+        """Its location and mark, as every message about it begins."""
+        return f"{self.path}:{self.line}: {MARK}"
+
+    @property
+    def pattern(self) -> str:
+        """The `--exclude-re` it stands for: its mutation, at its site."""
+        return (
+            f"^{escape(self.path)}:{self.site}:[0-9]+:"
+            f" {escape(self.mutation)}( in .*)?$"
+        )
+
+
+def read_records(text: str) -> list[Record]:
+    """Parse every `// mutants:equivalent` comment `git grep -n` found.
+
+    Returns:
+        One record per comment, malformed ones included.
+
+    """
+    found = []
+    for hit in lines_of(text):
+        if not hit:
+            continue
+        path, number, content = hit.split(":", 2)
+        before, _, after = content.partition(MARK)
+        match = RECORD.match(after.strip())
+        mutation = typed_std.group(match, "mutation") if match else None
+        reason = typed_std.group(match, "reason") if match else None
+        line = int(number)
+        found.append(
+            Record(
+                path=path,
+                line=line,
+                site=line if before.strip() else line + 1,
+                mutation=(mutation or "").strip(),
+                reason=(reason or "").strip(),
+            )
+        )
+    return found
+
+
+def malformed(records: Sequence[Record]) -> list[str]:
+    """Hold every record to its form.
+
+    Returns:
+        One message per record that cannot explain anything.
+
+    """
+    found = []
+    for r in records:
+        if not r.mutation:
+            found.append(f"{r.spelled} names no mutation")
+        elif not r.reason:
+            found.append(f"{r.spelled} {r.mutation} gives no reason")
+    return found
+
+
+def records(text: str) -> int:
+    """Hold the site records to their form; print each one's pattern.
+
+    Returns:
+        0 when every record is well formed, 1 otherwise.
+
+    """
+    found = read_records(text)
+    wrong = malformed(found)
+    for message in wrong:
+        findings.finding(
+            LANGUAGE,
+            message,
+            [
+                (
+                    f"{SPELLING} — the mutation is cargo-mutants' own text"
+                    " for the mutant, without its ' in <function>'"
+                )
+            ],
+        )
+    if wrong:
+        return EXIT_RED
+    for r in found:
+        print(r.pattern)
+    return 0
+
+
+def unmatched(found: Sequence[Record], names: Sequence[str]) -> list[str]:
+    """Hold each record to a mutant the `--no-config` listings name.
+
+    Returns:
+        One message per record in no mutated file, or matching nothing.
+
+    """
+    population = set()
+    for name in names:
+        match = NAME.match(name)
+        if match:
+            population.add(typed_std.group(match, "path"))
+    reds = []
+    for r in found:
+        if r.path not in population:
+            reds.append(f"{r.spelled} {r.mutation} is in no mutated file")
+            continue
+        pattern = re.compile(r.pattern)
+        if not any(pattern.search(name) for name in names):
+            reds.append(
+                f"{r.spelled} {r.mutation} is stale: no such mutant"
+                f" at line {r.site} — delete it"
+            )
+    return reds
 
 
 @dataclass(frozen=True)
@@ -311,6 +530,10 @@ class Verdict:
     excluded: int = 0
     survivors: list[str] = field(default_factory=list)
     runs: list[str] = field(default_factory=list)
+    # Every mutant the `--no-config` listings name, in every run.
+    names: list[str] = field(default_factory=list)
+    # The site records that explain nothing.
+    records: list[str] = field(default_factory=list)
 
 
 COUNTS = ("total_mutants", "caught", "timeout", "missed")
@@ -370,6 +593,8 @@ def judge_run(verdict: Verdict, name: str, run: Path) -> None:
     """Add one cargo-mutants run to the verdict."""
     every, listed, _ = (int(n) for n in (run / "counts").read_text().split("\t"))
     verdict.excluded += every - listed
+    listing = (run / "all.txt").read_text(encoding="utf-8")
+    verdict.names.extend(line for line in lines_of(listing) if line.strip(" \t"))
     if (run / "empty").exists():
         return
     status = int((run / "status").read_text().strip())
@@ -402,7 +627,7 @@ def judge_run(verdict: Verdict, name: str, run: Path) -> None:
 
 
 def read_runs(scratch: Path) -> Verdict:
-    """Replay the shell's log of runs, in order.
+    """Replay the shell's log of runs, in order; then hold the records.
 
     Returns:
         The summed verdict.
@@ -418,6 +643,10 @@ def read_runs(scratch: Path) -> Verdict:
         elif kind == "run":
             name, _, directory = rest.partition("\t")
             judge_run(verdict, name, Path(directory))
+    grepped = scratch / "records.txt"
+    if grepped.is_file():
+        found = read_records(grepped.read_text(encoding="utf-8"))
+        verdict.records = unmatched(found, verdict.names)
     return verdict
 
 
@@ -425,18 +654,19 @@ def red(verdict: Verdict) -> bool:
     """Say whether the leg is red.
 
     Returns:
-        True for any survivor, or any run that judged nothing.
+        True for any survivor, any run that judged nothing, or any
+        record that explains nothing.
 
     """
-    return bool(verdict.survived or verdict.runs)
+    return bool(verdict.survived or verdict.runs or verdict.records)
 
 
 def report(args: Args) -> int:
     """Print the survivors, the runs that judged nothing and the summary.
 
     Only a shard that judged everything it was given writes `rust.tsv`:
-    a red run (as opposed to red survivors) writes nothing, and the
-    totals step names the shard that is missing.
+    a red run (as opposed to red survivors or records) writes nothing,
+    and the totals step names the shard that is missing.
 
     Returns:
         0 when green, 1 when red.
@@ -447,6 +677,8 @@ def report(args: Args) -> int:
         print(f"{LABEL}: survived: {survivor}")
     for run in verdict.runs:
         findings.finding(LANGUAGE, str(run))
+    for record in verdict.records:
+        findings.finding(LANGUAGE, record)
     scope = args.where.removeprefix(",")
     scope = f"{scope}:" if scope else ""
     print(
@@ -465,13 +697,8 @@ def report(args: Args) -> int:
         findings.finding(
             LANGUAGE,
             "red — delete code a survivor proves redundant, kill each survivor"
-            f" with an assertion, or record it in {CONFIG}",
-            [
-                (
-                    "as an exclude_re entry under a # line"
-                    " saying why the mutant is equivalent"
-                )
-            ],
+            " with an assertion, or record an equivalent mutant at its site",
+            [f"on its line or the line above: {SPELLING}"],
         )
         return EXIT_RED
     return 0
@@ -487,6 +714,7 @@ def parse_args(argv: list[str] | None) -> Args:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("reasons").add_argument("config", type=Path)
+    sub.add_parser("records")
     sub.add_parser("default-major").add_argument("name")
     planned = sub.add_parser("plan")
     for name in ("name", "where", "dir", "all", "listed"):
@@ -509,6 +737,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     if args.command == "reasons":
         return reasons(args.config)
+    if args.command == "records":
+        return records(typed_std.stdin_text())
     if args.command == "default-major":
         try:
             packages = read_metadata(decoded.load_json(typed_std.stdin_text()))

@@ -26,9 +26,10 @@ with no change of its own.
 - **Org hooks** (`lefthook/org-hooks.yml`): the hook set and what it
   enforces. Removing a hook is a minor (loosening); a new blocking hook
   is a minor (tightening is the product); renaming in ways that break
-  `extends` consumers is breaking. The post-checkout, post-merge and
-  post-rewrite jobs make the belt link above; a clone runs them once by
-  hand after `lefthook install` (`lefthook run post-checkout`).
+  `extends` consumers is breaking. Every hook's first job makes the belt
+  link above, so the link is derived at every hook (#1988) and checked
+  at every task (`ORG_BELT_REFUSED`); a clone runs the job once by hand
+  after `lefthook install` (`lefthook run post-checkout`).
 - **The Renovate preset** (`default.json`): its observable behaviour —
   automerge classes, age gates, custom managers. Narrowing automerge or
   removing a manager consumers rely on is breaking.

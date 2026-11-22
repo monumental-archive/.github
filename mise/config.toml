@@ -3,7 +3,9 @@
 # Local: each clone links the belt of its own pin (#1686, #1739) — the
 #   org hooks point `.config/mise/conf.d/belt.toml` at the machine's cache
 #   tree of the gate stub's sha; `lefthook run post-checkout` makes the
-#   link. There is no machine-wide belt. In the canon, the tree is the belt.
+#   link, every hook re-derives it, and every task refuses a belt that is
+#   not the tree's pin (#1988). There is no machine-wide belt. In the
+#   canon, the tree is the belt.
 # CI: the shared workflow checks out this repo (SHA-pinned) and sets
 #   MISE_GLOBAL_CONFIG_FILE to this file, at the same resolution.
 #
@@ -147,6 +149,29 @@ aqua.registries = [
 # failure errexit promotes to a crash, and `git` and `readlink`, which may
 # be absent or find nothing, end in `|| true`.
 ORG_BELT_DIR = '''{{ exec(command=`d="${MISE_GLOBAL_CONFIG_FILE:-}"; if [ -z "$d" ]; then t=$(unset $(git rev-parse --local-env-vars 2>/dev/null || true); git rev-parse --show-toplevel 2>/dev/null || true); if [ -n "$t" ] && [ -f "$t/mise/config.toml" ] && [ -f "$t/mise/clippy.toml" ]; then d="$t/mise/config.toml"; elif [ -n "$t" ] && [ -L "$t/.config/mise/conf.d/belt.toml" ]; then l=$(readlink "$t/.config/mise/conf.d/belt.toml" || true); case "$l" in /*) ;; *) l="$t/.config/mise/conf.d/$l" ;; esac; if [ -f "$(dirname "$l")/clippy.toml" ]; then d="$l"; fi; fi; fi; if [ -n "$d" ] && [ -d "$(dirname "$d")" ]; then cd "$(dirname "$d")" && pwd; fi`) }}'''
+# A BELT REFUSES TO ANSWER FOR ANOTHER PIN (#1988). The link above is
+# derived from the gate stub, and the hooks re-derive it at every hook
+# (lefthook/org-hooks.yml); between hooks a tree's pin can move with no
+# hook at all (`git reset`, a commit to the stub, a worktree a tool
+# made), and a tree with no link of its own is answered by a parent
+# checkout's link when mise walks up to it. This holds one line when the
+# belt arrived by the link (carrier 3) and is not the tree the invoking
+# tree's own gate stub pins; mise/findings.sh, which BASH_ENV sources
+# before every task body, prints it and exits 1, so every belt task, ci
+# included, refuses by name. Otherwise it is empty: carrier 1 (named on
+# purpose), carrier 2 (the canon is its own belt), no belt, no pin.
+# The invoking tree is `{{ cwd }}`, mise's directory of invocation:
+# the exec itself runs in the config's directory (measured 2026-11-22 on
+# mise 2026.11.8: `{{ cwd }}` gave the shell's directory, `pwd` in the
+# exec gave the config's), which for a parent's link is the parent. It
+# is spliced in single-quoted, each `'` closed and reopened. The pin is
+# read by the expression the hooks' `belt` job uses, spelt without a
+# backslash, which Tera refuses; the belt's sha is the name of the cache
+# tree ORG_BELT_DIR sits in (`org-belt/<sha>/mise`), and any other tree
+# is named by its path. Exit 0 with no output on every failure, like
+# every exec here (#569): `mise env`, `mise install` and Renovate's
+# `mise lock` never run a task, so they never refuse.
+ORG_BELT_REFUSED = '''{{ exec(command=`c='` ~ cwd | replace(from=`'`, to=`'"'"'`) ~ `'; b="${ORG_BELT_DIR:-}"; if [ -z "${MISE_GLOBAL_CONFIG_FILE:-}" ] && [ -n "$b" ] && cd "$c" 2>/dev/null; then t=$(unset $(git rev-parse --local-env-vars 2>/dev/null || true); git rev-parse --show-toplevel 2>/dev/null || true); if [ -n "$t" ] && { [ ! -f "$t/mise/config.toml" ] || [ ! -f "$t/mise/clippy.toml" ]; }; then p=$(cat "$t"/.github/workflows/*.y*ml 2>/dev/null | grep -oE 'uses:[[:space:]]*[^[:space:]/]+/[^[:space:]/]+/[.]github/workflows/ci[.]ya?ml@[0-9a-f]+' | sed -n 1p || true); p="${p##*@}"; a=$(dirname "$b"); n=$(basename "$a"); case "$n" in ""|*[!0-9a-f]*) n="$a" ;; esac; if [ -n "$p" ] && [ "$n" != "$p" ]; then echo "the belt answering is $n; this tree pins $p. Run: lefthook run post-checkout"; fi; fi; fi`) }}'''
 # WHERE THE CANON TREE IS, derived from the belt and never resolved a
 # second time. The belt is one directory inside the canon; the tasks
 # that need the canon proper need what sits BESIDE it — slsa/ policies,
@@ -2388,7 +2413,7 @@ files=$(git ls-files ':!vendor/**' "*mise.toml" "*mise.*.toml" \
 '''
 
 [tasks."lint:belt-current"]
-description = "This machine's mise is as current as CI's, and its belt is the one the gate stub pins (#1686)"
+description = "This machine's mise is as current as CI's (#1686)"
 dir = "{{cwd}}"
 # The belt keeps every TOOL at the pinned version on every machine, and
 # says nothing about two things that sit underneath it. Both were found
@@ -2403,24 +2428,17 @@ dir = "{{cwd}}"
 # The belt: every repository on a machine read ONE canon checkout
 # through a machine-wide symlink. That checkout was 215 commits behind, so
 # every repository was being linted locally with August's tools while
-# its gate ran November's; and one checkout sits on one commit while the
-# org's repositories pin several. Now each clone loads the belt of its
-# own pin (#1686): the org hooks link `.config/mise/conf.d/belt.toml` to
-# the machine's cache tree of exactly the gate stub's sha. So the check
-# is exact: the belt answering (ORG_CANON_DIR) is that tree, or it is
-# red, naming both and `lefthook run post-checkout`; older and newer are
-# one red. In the canon, which has no pin, the belt is the tree.
+# its gate ran November's. Now each clone loads the belt of its own pin
+# (#1686), the hooks re-derive that link at every hook, and every belt
+# task refuses a belt that is not the invoking tree's pin
+# (ORG_BELT_REFUSED in [env], #1988). This task once said that in its
+# own second check, which ran only in `ci` and only after the wrong belt
+# had loaded; it now checks mise alone.
 #
-# Both comparisons are derived — the mise version from the canon's own
-# ci.yml, the pinned sha from the gate stub's `uses:` line — so no
-# second literal exists to drift and Renovate has nothing extra to bump.
+# The version is derived from the canon's own ci.yml, so no second
+# literal exists to drift and Renovate has nothing extra to bump.
 # An older mise is red; a NEWER local mise is a note, since refusing to
 # push from a machine that is ahead helps nobody.
-#
-# A belt that arrived by MISE_GLOBAL_CONFIG_FILE (CI's canon action,
-# which delivers the tree at the pin's own resolution, or a person who
-# named one on purpose) is said in one line and passes: the carrier
-# decides, never a variable such as GITHUB_ACTIONS that anyone can set.
 run = '''
 "${ORG_BELT_DIR}/belt-current.sh"
 '''

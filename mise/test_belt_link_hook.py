@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """Table tests for the hook that links a clone to its pin's belt (#1686).
 
-`lefthook/org-hooks.yml`'s post-checkout, post-merge and post-rewrite
-jobs share one inline command: read the tracked gate stub's pin, make
-the canon tree of exactly that sha in the machine's cache once, and
-link `.config/mise/conf.d/belt.toml` and `.config/mise/mise.lock` into
-it.
+`lefthook/org-hooks.yml`'s `belt` job is one inline command, the first
+job of every hook (#1988): read the tracked gate stub's pin, make the
+canon tree of exactly that sha in the machine's cache once, and link
+`.config/mise/conf.d/belt.toml` and `.config/mise/mise.lock` into it.
 
 The command under test is the job's own `run:`, read out of the canon's
 REAL hook file and run by `sh` in a planted consumer, not a copy of it.
@@ -13,8 +12,10 @@ A local bare repository stands in for the canon: the consumer's HOME
 carries a git `insteadOf` that sends the stub's GitHub URL to it, and
 the cache is a directory of the row's own (XDG_CACHE_HOME).
 
-One row runs the real lefthook, where it is installed, so the command
-is proven to survive lefthook's own templating, as the hook runs it.
+Rows run the real lefthook, where it is installed: the command
+survives lefthook's own templating, and pre-commit, commit-msg and
+pre-push each relink a nested worktree to its own pin before mise runs,
+and stop when the link fails (#1988).
 
 stdlib `unittest`, matching the other mise/test_*.py. Run through the
 gate as `mise run test`, which `ci` collects.
@@ -55,7 +56,7 @@ exec "{git}" "$@"
 
 
 def hook_command() -> str:
-    """Read the post-checkout job's folded `run:` as YAML folds it.
+    """Read the `belt` job's folded `run:` (the `&belt` anchor) as YAML folds it.
 
     Returns:
         The command: the scalar's lines joined by single spaces.
@@ -72,7 +73,7 @@ def hook_command() -> str:
             break
         body.append(line.strip())
     if not body:
-        msg = "post-checkout's belt job has no run: body"
+        msg = "the belt job has no run: body"
         raise AssertionError(msg)
     return " ".join(body)
 
@@ -100,6 +101,10 @@ def run(
 class HookFixture(unittest.TestCase):
     """A bare canon with two commits, a consumer pinning the first, a cache."""
 
+    # What each belt commit carries after its `# belt <n>` line; `{n}`
+    # is the commit's number. Empty: the rows read the file's text.
+    belt_tasks = ""
+
     @override
     def setUp(self) -> None:
         """Plant the canon with two commits, a consumer, HOME and cache."""
@@ -119,9 +124,11 @@ class HookFixture(unittest.TestCase):
         work = self.tmp / "canon"
         self.git(self.tmp, "init", "-q", "-b", "main", str(work))
         (work / "mise").mkdir()
-        self.shas = []
+        self.shas: list[str] = []
         for n in ("1", "2"):
-            (work / "mise" / "config.toml").write_text(f"# belt {n}\n", "utf-8")
+            (work / "mise" / "config.toml").write_text(
+                f"# belt {n}\n" + self.belt_tasks.replace("{n}", n), "utf-8"
+            )
             (work / "mise" / "mise.lock").write_text(f"# lock {n}\n", "utf-8")
             self.git(work, "add", "-A")
             self.git(work, "commit", "-q", "-m", f"belt {n}")
@@ -138,7 +145,18 @@ class HookFixture(unittest.TestCase):
             The environment.
 
         """
-        return hermetic.env(self.home, XDG_CACHE_HOME=str(self.cache), **extra)
+        return hermetic.env(
+            self.home,
+            XDG_CACHE_HOME=str(self.cache),
+            MISE_CONFIG_DIR=str(self.tmp / "mise-config"),
+            MISE_DATA_DIR=str(self.tmp / "mise-data"),
+            MISE_CACHE_DIR=str(self.tmp / "mise-cache"),
+            MISE_STATE_DIR=str(self.tmp / "mise-state"),
+            MISE_TRUSTED_CONFIG_PATHS=str(self.tmp),
+            MISE_OFFLINE="1",
+            MISE_YES="1",
+            **extra,
+        )
 
     def git(self, cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
         """Run git in `cwd`, checked.
@@ -149,9 +167,9 @@ class HookFixture(unittest.TestCase):
         """
         return run([hermetic.tool("git"), *args], cwd, self.env(), check=True)
 
-    def pin(self, sha: str) -> None:
-        """Write the consumer's gate stub, pinning the canon at `sha`."""
-        wf = self.consumer / ".github" / "workflows"
+    def pin(self, sha: str, tree: Path | None = None) -> None:
+        """Write a gate stub (the consumer's by default) pinning `sha`."""
+        wf = (tree or self.consumer) / ".github" / "workflows"
         wf.mkdir(parents=True, exist_ok=True)
         (wf / "gate.yml").write_text(
             "jobs:\n  ci:\n"
@@ -172,8 +190,8 @@ class HookFixture(unittest.TestCase):
             self.env(**extra),
         )
 
-    def links(self) -> dict[str, str | None]:
-        """Read both links in the consumer.
+    def links(self, tree: Path | None = None) -> dict[str, str | None]:
+        """Read both links in a tree, the consumer by default.
 
         Returns:
             Link path (relative) to its target, None when absent.
@@ -181,7 +199,7 @@ class HookFixture(unittest.TestCase):
         """
         out: dict[str, str | None] = {}
         for rel in (".config/mise/conf.d/belt.toml", ".config/mise/mise.lock"):
-            path = self.consumer / rel
+            path = (tree or self.consumer) / rel
             out[rel] = str(path.readlink()) if path.is_symlink() else None
         return out
 
@@ -453,6 +471,147 @@ class TheCloneStaysItsOwn(HookFixture):
             done.stdout,
         )
         self.assertEqual(self.links(), self.linked(self.shas[0]))
+
+
+# Each belt commit's tasks: the ones the org hooks run, each recording
+# which belt ran it, so a row can tell the pin's belt from another.
+HOOK_TASKS = "".join(
+    f'[tasks."{name}"]\nrun = \'echo {{n}}:{name} >> "$ORG_MARK"\'\n'
+    for name in ("lint:typos", "lint:actions", "commits:check", "ci")
+)
+
+
+class EveryHookLinksFirst(HookFixture):
+    """Each row: a hook of the real hook file, run by lefthook in a worktree (#1988).
+
+    The consumer pins the first commit, A, and is linked to it; a
+    worktree nested inside it, where the desktop app makes them, pins
+    the second, B. The cache holds both trees. Every hook that runs mise
+    must relink to B before mise runs, so its tasks are B's.
+    """
+
+    belt_tasks = HOOK_TASKS
+
+    @override
+    def setUp(self) -> None:
+        """Plant the cache of A and B, the consumer on A, and the worktree."""
+        super().setUp()
+        if LEFTHOOK is None:
+            self.skipTest("lefthook is not installed")
+        self.commit_all()
+        self.pin(self.shas[1])
+        self.assertEqual(self.hook().returncode, 0)
+        self.pin(self.shas[0])
+        self.assertEqual(self.hook().returncode, 0)
+        both = sorted(self.shas)
+        self.assertEqual(self.cached(), both)
+        self.tree = self.consumer / ".claude" / "worktrees" / "lane"
+        self.git(self.consumer, "worktree", "add", "-q", "-b", "lane", str(self.tree))
+        self.pin(self.shas[1], self.tree)
+        # Staged, as a commit has it: lefthook skips a pre-commit with
+        # nothing staged.
+        self.git(self.tree, "add", ".github")
+        (self.tree / "lefthook.yml").write_text(
+            HOOKS.read_text(encoding="utf-8"), encoding="utf-8"
+        )
+        self.mark = self.tmp / "mark"
+
+    def link_to_a(self) -> None:
+        """Give the worktree a link naming A's tree, as a stale one does."""
+        conf = self.tree / ".config" / "mise"
+        (conf / "conf.d").mkdir(parents=True)
+        linked = self.linked(self.shas[0])
+        for rel, target in linked.items():
+            if target is None:
+                self.fail(f"no target for {rel}")
+            (self.tree / rel).symlink_to(target)
+
+    def lefthook(self, *args: str) -> subprocess.CompletedProcess[str]:
+        """Run one hook through lefthook, in the worktree.
+
+        Returns:
+            The run.
+
+        """
+        argv = [hermetic.tool("lefthook"), "run", "--no-auto-install", *args]
+        return run(argv, self.tree, self.env(ORG_MARK=str(self.mark)))
+
+    def marks(self) -> list[str]:
+        """Read which belt ran which task.
+
+        Returns:
+            The `<n>:<task>` lines, sorted; empty when none ran.
+
+        """
+        if not self.mark.exists():
+            return []
+        return sorted(self.mark.read_text("utf-8").splitlines())
+
+    def tasks(self) -> list[str]:
+        """List the tasks mise finds in the worktree, inside the ceiling.
+
+        Returns:
+            The task names.
+
+        """
+        argv = [hermetic.tool("mise"), "tasks", "ls", "--name-only"]
+        ceiling = str(self.tree.parent)
+        done = run(argv, self.tree, self.env(MISE_CEILING_PATHS=ceiling))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        return sorted(done.stdout.split())
+
+    def assert_ran_from_b(
+        self, done: subprocess.CompletedProcess[str], *names: str
+    ) -> None:
+        """Assert the hook passed, linked B, and ran `names` from B."""
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertEqual(self.links(self.tree), self.linked(self.shas[1]))
+        ran = sorted(f"2:{n}" for n in names)
+        self.assertEqual(self.marks(), ran)
+        want = sorted(["ci", "commits:check", "lint:actions", "lint:typos"])
+        self.assertEqual(self.tasks(), want)
+
+    def test_pre_commit_links_a_worktree_with_none(self) -> None:
+        """No .config/mise at all: pre-commit links B, then runs B's lints."""
+        self.assertFalse((self.tree / ".config").exists())
+        done = self.lefthook("pre-commit")
+        self.assert_ran_from_b(done, "lint:typos", "lint:actions")
+
+    def test_pre_commit_relinks_a_link_to_another_pin(self) -> None:
+        """A link to A: pre-commit relinks B before its lints run."""
+        self.link_to_a()
+        done = self.lefthook("pre-commit")
+        self.assert_ran_from_b(done, "lint:typos", "lint:actions")
+
+    def test_commit_msg_relinks_first(self) -> None:
+        """commit-msg: B's commits:check, then the sign-off check."""
+        self.link_to_a()
+        msg = self.tmp / "COMMIT_EDITMSG"
+        msg.write_text(
+            "fix: a subject\n\nSigned-off-by: A Person <a@example.invalid>\n",
+            encoding="utf-8",
+        )
+        done = self.lefthook("commit-msg", str(msg))
+        self.assert_ran_from_b(done, "commits:check")
+
+    def test_pre_push_relinks_first(self) -> None:
+        """pre-push: B's ci."""
+        self.link_to_a()
+        done = self.lefthook("pre-push")
+        self.assert_ran_from_b(done, "ci")
+
+    def test_a_failed_link_stops_the_hook(self) -> None:
+        """The belt job fails: no later job runs, and the hook is red."""
+        self.link_to_a()
+        self.pin("abc123", self.tree)
+        self.git(self.tree, "add", ".github")
+        done = self.lefthook("pre-commit")
+        self.assertNotEqual(done.returncode, 0, done.stdout)
+        self.assertIn(
+            "org-belt: the gate stub pins abc123, not a 40-hex sha; nothing linked",
+            done.stdout + done.stderr,
+        )
+        self.assertEqual(self.marks(), list[str]())
 
 
 if __name__ == "__main__":
