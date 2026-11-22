@@ -856,5 +856,77 @@ class RunTest(unittest.TestCase):
         self.assertIn("not valid JSON", stderr.getvalue())
 
 
+BIOME_STUB = """#!/bin/sh
+# lint:biome-domains asks only for the version once the table is empty.
+[ "$1" = --version ] && echo "Version: 9.9.9" && exit 0
+exit 1
+"""
+
+
+# The org config's one nursery rule, as biome-org.json writes it.
+ORG_NAMES_NO_Z = '{"linter": {"rules": {"nursery": {"noZ": "error"}}}}\n'
+
+
+class BiomeDomainsDriftTest(unittest.TestCase):
+    """lint:biome-domains, the nursery table against the org config."""
+
+    def test_both_directions_of_drift_are_named_grouped(self) -> None:
+        """Each side's rule is named, every enforced one before every mapped one.
+
+        `noA` sorts before `noZ`, so `comm -3` lists the table's rule
+        first: the finding still groups the config's rule ahead of it.
+        """
+        tasks = decoded.as_object(
+            decoded.load_toml((BELT / "config.toml").read_bytes())["tasks"], "tasks"
+        )
+        task = decoded.as_object(tasks["lint:biome-domains"], "lint:biome-domains")
+        body = decoded.as_str(task["run"], "lint:biome-domains.run")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            stubs = root / "stubs"
+            stubs.mkdir()
+            (stubs / "biome").write_text(BIOME_STUB, encoding="utf-8")
+            (stubs / "biome").chmod(0o755)
+            tree = root / "tree"
+            (tree / "mise").mkdir(parents=True)
+            planted = {
+                "mise/biome-domains.tsv": "# no domain rows\n",
+                "mise/biome-nursery-domains.tsv": "noA\tnext\n",
+                "mise/biome-org.json": ORG_NAMES_NO_Z,
+            }
+            for name, text in planted.items():
+                (tree / name).write_text(text, encoding="utf-8")
+            jq = Path(hermetic.tool("jq")).parent
+            env = hermetic.env(
+                PATH=f"{stubs}:{jq}:{hermetic.env().get('PATH', '')}",
+                # As mise runs a body: the task's name, which the finding
+                # writer reads (#1890), and the belt's BASH_ENV, which
+                # gives the body the writer (#1934).
+                MISE_TASK_NAME="lint:biome-domains",
+                BASH_ENV=str(BELT / "findings.sh"),
+            )
+            git = hermetic.tool("git")
+            subprocess.run([git, "init", "-q"], cwd=tree, env=env, check=True)
+            subprocess.run([git, "add", "."], cwd=tree, env=env, check=True)
+            done = subprocess.run(
+                [hermetic.tool("bash"), "-euo", "pipefail", "-c", body],
+                cwd=tree,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertEqual(done.returncode, 1, done.stderr)
+        self.assertEqual(
+            done.stderr,
+            "lint:biome-domains: the nursery table and the org config name"
+            " different rules\n"
+            "  enforced but unmapped: noZ\n"
+            "  mapped but not enforced: noA\n"
+            "  an unmapped rule escapes its domain and runs in every repo"
+            " whatever the repo is\n",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -91,7 +91,9 @@ BODY = body()
 FIX_BODY = body("fix:gate-stub")
 
 
-def run(script: str, tree: Path) -> subprocess.CompletedProcess[str]:
+def run(
+    script: str, tree: Path, task: str = "lint:gate-stub"
+) -> subprocess.CompletedProcess[str]:
     """Run one task body in a planted tree.
 
     Returns:
@@ -104,6 +106,11 @@ def run(script: str, tree: Path) -> subprocess.CompletedProcess[str]:
         "ORG_CANON_DIR": str(CANON),
         "ORG_PYTHON": sys.executable,
         "ORG_PYTHON_UNSET": "unset",
+        # As mise runs a body: the task's name, which the finding writer
+        # reads (#1890), and the belt's BASH_ENV, which gives the body the
+        # writer (#1934).
+        "MISE_TASK_NAME": task,
+        "BASH_ENV": str(BELT / "findings.sh"),
     }
     return subprocess.run(
         [BASH, "-euo", "pipefail", "-c", script],
@@ -342,7 +349,7 @@ class Fix(unittest.TestCase):
             flows.mkdir(parents=True)
             caller = flows / "gate.yml"
             caller.write_text(planted(GROUP, PRE_1617_GROUP), encoding="utf-8")
-            done = run(FIX_BODY, Path(tmp))
+            done = run(FIX_BODY, Path(tmp), "fix:gate-stub")
             after = caller.read_text(encoding="utf-8")
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(after, STUB)
