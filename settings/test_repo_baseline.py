@@ -369,11 +369,9 @@ class PublishEnvironment(ForgeCase):
             done.stderr,
         )
         self.assertNotIn("has publish.yml but no publish environment", done.stderr)
-        args = [a for _, a in self.forge.calls()]
-        self.assertFalse(
-            any("environments/publish" in a for a in args),
-            [a for a in args if "environments/publish" in a],
-        )
+        touched = [a for _, a in self.forge.calls() if "environments/publish" in a]
+        want: list[str] = []
+        self.assertEqual(want, touched)
         self.assertEqual(1, done.returncode)
 
 
