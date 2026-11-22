@@ -161,6 +161,7 @@ red on any identifier a `REUSE.toml` names without its
 
 [#1589]: https://github.com/monumental-archive/.github/issues/1589
 [#1981]: https://github.com/monumental-archive/.github/issues/1981
+[#1987]: https://github.com/monumental-archive/.github/issues/1987
 
 ### No number can be bought
 
@@ -171,10 +172,11 @@ red on any identifier a `REUSE.toml` names without its
      original. The deletion is the fix, and nothing is recorded.
   2. **A test can tell: write the assertion.**
   3. **The code must stay and no input can tell: record it** as
-     equivalent, with a reason, at one site in the repository: in the
-     tool's own per-site exclusion where it has one (Rust: an
-     `exclude_re` entry in `.cargo/mutants.toml`), otherwise in a
-     comment at the site (Go: `//mutants:equivalent <type> <reason>`).
+     equivalent, with a reason, at its site in the repository: a
+     comment that moves with the code (Rust:
+     `// mutants:equivalent <mutation>: <reason>`, [#1987]; Go:
+     `//mutants:equivalent <type> <reason>`), never a line and column
+     in a separate file.
      This is the last resort, and its reason says why the code cannot
      be deleted. There are no org-level exclusions.
 - Never change shipped code only to make a mutant disappear. Rewriting
