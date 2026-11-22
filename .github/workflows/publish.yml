@@ -420,24 +420,7 @@ jobs:
           VERSION: ${{ needs.guard.outputs.version }}
           IMAGE_TITLE: ${{ inputs.image-title }}
           IMAGE_DESCRIPTION: ${{ inputs.image-description }}
-        run: |
-          set -euo pipefail
-          # The canon's finding writer (#1934), and its workflow commands (#1660).
-          . .org-canon/mise/findings.sh
-          command -v stele > /dev/null || {
-            org_finding_annotated "" "stele is not on the runner — it is a belt tool"
-            exit 1
-          }
-          out=$(stele derive facts \
-            --archetype versioned \
-            --version "${VERSION}" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --server-url "${GITHUB_SERVER_URL}" \
-            --git-dir . \
-            --title "${IMAGE_TITLE}" \
-            --description "${IMAGE_DESCRIPTION}")
-          grep -E '^(facts|epoch)=' <<< "${out}" >> "${GITHUB_OUTPUT}"
-          grep -Ev '^(facts|epoch)=' <<< "${out}" || true
+        run: .org-canon/release/derive-facts.sh
   # The release SBOM, class-shaped: binary-derived for go-binary (read
   # out of the shipped bytes by stele, docs in stele's binary-sbom.md),
   # lock-derived where a Cargo.lock or go.mod is tracked, GitHub's
@@ -538,24 +521,7 @@ jobs:
         # One directory per archive: two legs both ship the same command
         # basename, and a flat extraction would silently overwrite one
         # leg with another.
-        run: |
-          set -euo pipefail
-          # The canon's finding writer (#1934), and its workflow commands (#1660).
-          . .org-canon/mise/findings.sh
-          found=0
-          for a in shipped-archives/*.tar.gz; do
-            [[ -e ${a} ]] || break
-            leg="${a##*/}"
-            leg="${leg%.tar.gz}"
-            mkdir -p "shipped/${leg}"
-            tar -xzf "${a}" -C "shipped/${leg}"
-            found=1
-          done
-          if [[ ${found} -ne 1 ]]; then
-            org_finding_annotated "" "the go-binary build artifact holds no archives"
-            exit 1
-          fi
-          echo "BINARIES_DIR=${PWD}/shipped" >> "${GITHUB_ENV}"
+        run: .org-canon/release/unpack-go-legs.sh
       - name: Fetch the inventory plans the build legs emitted
         if: >-
           ${{ contains(inputs.classes, 'rust-crate') ||
@@ -642,29 +608,9 @@ jobs:
         env:
           VERSION: ${{ needs.guard.outputs.version }}
           SBOM_BASENAME: ${{ inputs.sbom-basename }}
-        run: |
-          set -euo pipefail
-          # The canon's finding writer (#1934), and its workflow commands (#1660).
-          . .org-canon/mise/findings.sh
-          command -v stele > /dev/null || {
-            org_finding_annotated "" "stele is not on the runner — it is a belt tool"
-            exit 1
-          }
-          base="${SBOM_BASENAME:-${GITHUB_REPOSITORY##*/}}"
-          base="${base#.}"
-          # The ecosystems and the author are the assert policy's
-          # (blastRadius), the document id its vexId template, and the
-          # release view's product the verify policy's resourceUri
-          # (stele#397, #1372). Every other inventory in dist/ is
-          # covered under its own document name.
-          stele derive vex \
-            --policy .org-canon/slsa/assert-policy.json \
-            --verify-policy .org-canon/slsa/verify-policy.json \
-            --inventories dist --release-view "dist/${base}-${VERSION}.spdx.json" \
-            --vex .org-canon/security/vex \
-            --repo "${GITHUB_REPOSITORY}" --version "${VERSION}" \
-            --released "${SBOM_CREATED}" \
-            --out "dist/${base}-${VERSION}.vex.openvex.json"
+        # The ecosystems, the document id and the release view's product
+        # are the policies' (stele#397, #1372); the helper has the rest.
+        run: .org-canon/release/derive-vex.sh
       - name: Triage the tagged lock against the advisory feed
         # Dependency L2's own wording — triage all known vulnerabilities
         # BEFORE release — enforced against the release rather than the

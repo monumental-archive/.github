@@ -18,4 +18,3 @@
 #
 # Generated from the tree by the lint's own counter
 # (mise/embedded_shell.py), never typed.
-.github/actions/source-attest/action.yml	Emit the chain links and push the ledger	19	# leaving (the source-attest action is deleted): #1362

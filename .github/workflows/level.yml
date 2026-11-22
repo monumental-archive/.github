@@ -150,26 +150,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           # Outside `mise run`, so the step names its findings file (#1934).
           ORG_FINDINGS: ${{ runner.temp }}/findings/${{ github.job }}-${{ strategy.job-index }}.jsonl
-        run: |
-          set -euo pipefail
-          # The canon's finding writer (#1934), and its workflow commands (#1660).
-          . .org-canon/mise/findings.sh
-          cd levels
-          git init -q -b levels
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -q -m "chore: publish measured levels" \
-            -m "Rendered by stele level in ${GITHUB_REPOSITORY}; this repository judges itself."
-          git push -q --force \
-            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
-            levels:levels
-          if [[ ${investigate} -ne 0 ]]; then
-            emsg="a cell that was judged before cannot be judged now — investigate; good reports were not"
-            emsg+=" overwritten"
-            org_finding_annotated "" "${emsg}"
-            exit 1
-          fi
+        run: .org-canon/mise/levels-publish.sh
       # This job's findings records, for the report job (#1933).
       - name: Hand the findings to the report job
         if: ${{ !cancelled() }}

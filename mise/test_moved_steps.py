@@ -283,5 +283,177 @@ class SourceAttestResolve(unittest.TestCase):
         )
 
 
+# A stub that appends its argv, one argument per line and a blank line
+# after, to $STUB_LOG, and exits 0.
+RECORDER = """#!/usr/bin/env bash
+{ printf '%s\\n' "$(basename "$0")" "$@"; echo; } >> "${STUB_LOG}"
+"""
+NO_STELE = "::error::{}: stele is not on the runner — it is a belt tool\n"
+
+
+class Stubbed(unittest.TestCase):
+    """A scratch work directory, a stub bin, and a script run in it."""
+
+    @override
+    def setUp(self) -> None:
+        """Make the work directory, the stub bin and the log."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tmp = Path(os.path.realpath(tmp.name))
+        self.work = self.tmp / "work"
+        self.work.mkdir()
+        self.bin = self.tmp / "bin"
+        self.bin.mkdir()
+        self.log = self.tmp / "stub.log"
+        self.log.write_text("", "utf-8")
+
+    def stub(self, name: str) -> None:
+        """Put a recording stub first on PATH."""
+        (self.bin / name).write_text(RECORDER, "utf-8")
+        (self.bin / name).chmod(0o755)
+
+    def run_in(
+        self, script: Path, path: str, **env: str
+    ) -> subprocess.CompletedProcess[str]:
+        """Run a script in the work directory, the stub bin first on PATH.
+
+        Returns:
+            The finished process.
+
+        """
+        return subprocess.run(
+            [BASH, str(script)],
+            cwd=self.work,
+            env=hermetic.env(
+                self.tmp / "home",
+                PATH=f"{self.bin}:{path}",
+                STUB_LOG=str(self.log),
+                **env,
+            ),
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=60,
+        )
+
+    def calls(self) -> list[list[str]]:
+        """Read the stubs' recorded calls.
+
+        Returns:
+            One argv per call, the tool's name first.
+
+        """
+        text = self.log.read_text("utf-8")
+        return [block.split("\n") for block in text.split("\n\n") if block.strip()]
+
+
+class LevelsPublish(Stubbed):
+    """mise/levels-publish.sh: level.yml's publish step (#1934)."""
+
+    SCRIPT = HERE / "levels-publish.sh"
+
+    def publish(self, investigate: str) -> subprocess.CompletedProcess[str]:
+        """Publish the planted cells with a stub git.
+
+        Returns:
+            The finished process.
+
+        """
+        self.stub("git")
+        (self.work / "levels").mkdir()
+        return self.run_in(
+            self.SCRIPT,
+            os.environ["PATH"],
+            GH_TOKEN="planted",  # ruff: ignore[hardcoded-password-func-arg]
+            GITHUB_REPOSITORY="org/repo",
+            investigate=investigate,
+        )
+
+    def pushed(self) -> list[str]:
+        """Name the git subcommands run, in order.
+
+        Returns:
+            Each call's first argument.
+
+        """
+        return [argv[1] for argv in self.calls()]
+
+    def test_the_cells_are_pushed_to_the_levels_branch(self) -> None:
+        """Nothing to investigate: committed, force-pushed, green."""
+        done = self.publish("0")
+        self.assertEqual((done.returncode, done.stderr), (0, ""), done.stdout)
+        expected: list[str] = ["init", "config", "config", "add", "commit", "push"]
+        self.assertEqual(self.pushed(), expected)
+        push = self.calls()[-1]
+        self.assertIn("https://x-access-token:planted@github.com/org/repo.git", push)
+        self.assertEqual(push[-1], "levels:levels")
+
+    def test_a_regression_is_refused_after_the_push(self) -> None:
+        """Exit 4 before: the good cells still publish, then one finding."""
+        done = self.publish("4")
+        self.assertEqual((done.returncode, done.stdout), (1, ""), done.stderr)
+        self.assertEqual(self.pushed()[-1], "push")
+        self.assertEqual(
+            done.stderr,
+            "::error::levels-publish.sh: a cell that was judged before cannot be"
+            " judged now — investigate; good reports were not overwritten\n",
+        )
+
+
+class SourceAttestChain(Stubbed):
+    """.github/actions/source-attest/chain.sh: the attest step (#1934)."""
+
+    def chain(self, genesis: str, path: str) -> subprocess.CompletedProcess[str]:
+        """Emit the chain from a planted canon tree.
+
+        Returns:
+            The finished process.
+
+        """
+        root = self.tmp / "canon"
+        hermetic.canon(root, ".github/actions/source-attest")
+        return self.run_in(
+            root / ".github" / "actions" / "source-attest" / "chain.sh",
+            path,
+            SA_ACTOR="someone",
+            SA_ACTOR_ID="42",
+            SA_GENESIS=genesis,
+            SA_CANON_ROOT=str(root),
+            SA_CANON_REF="v1.2.3",
+            SA_WORK=str(self.tmp / "sa"),
+            SA_REMOTE_URL="file:///remote",
+            GITHUB_REPOSITORY="someone/consumer",
+            GITHUB_SHA="c" * 40,
+        )
+
+    def test_the_chain_is_emitted_against_the_canon_policy(self) -> None:
+        """Stele emit chain, with the tree's policy and the seam's remote."""
+        self.stub("stele")
+        done = self.chain("false", "/usr/bin:/bin")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        argv = self.calls()[0]
+        expected: list[str] = ["stele", "emit", "chain"]
+        self.assertEqual(argv[:3], expected)
+        self.assertIn(f"{self.tmp}/canon/slsa/verify-policy.json", argv)
+        self.assertIn("file:///remote", argv)
+        self.assertIn(f"{self.tmp}/sa/claims.json", argv)
+        self.assertNotIn("--genesis", argv)
+
+    def test_genesis_founds_a_chain(self) -> None:
+        """SA_GENESIS=true is the one flag that founds one."""
+        self.stub("stele")
+        done = self.chain("true", "/usr/bin:/bin")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(self.calls()[0][-1], "--genesis")
+
+    def test_no_stele_is_refused_by_name(self) -> None:
+        """No stele on the runner: one finding, nothing emitted."""
+        done = self.chain("false", "/usr/bin:/bin")
+        self.assertEqual((done.returncode, done.stdout), (1, ""), done.stderr)
+        self.assertEqual(done.stderr, NO_STELE.format("chain.sh"))
+        self.assertFalse(self.calls())
+
+
 if __name__ == "__main__":
     unittest.main()
