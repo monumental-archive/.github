@@ -282,8 +282,8 @@ ROWS = [
         "a leg saves before its findings are filed",
     ),
     (
-        f"key: {START_KEY}\n\n  watch:",
-        "key: x\n\n  watch:",
+        f"path: run-start.json\n          key: {START_KEY}\n\n      # This job's",
+        "path: run-start.json\n          key: x\n\n      # This job's",
         "the run's starting checkpoint is not kept aside",
     ),
     (
