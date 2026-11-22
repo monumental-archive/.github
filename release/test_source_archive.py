@@ -17,6 +17,7 @@ stdlib `unittest`, matching the rest of release/. Run through the gate
 as `mise run test`, which `ci` collects.
 """
 
+import contextlib
 import gzip
 import hashlib
 import io
@@ -28,6 +29,7 @@ import unittest
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 # Appended, so this file's own directory and the standard library
 # come first.
@@ -63,6 +65,21 @@ case $1 in
   *) echo "git stub: refusing $*" >&2; exit 2 ;;
 esac
 """
+
+
+_NAMED = contextlib.ExitStack()
+
+
+def setUpModule() -> None:
+    """Name the helper by its file, as a run outside mise does (#1934).
+
+    An in-process call reads argv, whatever task runs this suite.
+    """
+    _NAMED.enter_context(mock.patch.object(sys, "argv", ["source_archive.py"]))
+    for key in ("MISE_TASK_NAME", "ORG_FINDINGS"):
+        if key in os.environ:
+            _NAMED.callback(os.environ.__setitem__, key, os.environ.pop(key))
+    unittest.addModuleCleanup(_NAMED.close)
 
 
 def tarball(entries: int, salt: str = "") -> bytes:
@@ -231,8 +248,9 @@ class Refuses(unittest.TestCase):
         run = run_helper((a, b), tracked=5)
         self.assertEqual(1, run.returncode)
         self.assertEqual(
-            f"::error::source archive is not deterministic ({sha(a)} vs {sha(b)})\n",
-            run.stdout,
+            f"::error::source_archive.py: source archive is not deterministic"
+            f" ({sha(a)} vs {sha(b)})\n",
+            run.stderr,
         )
         self.assertNotIn("ls-files", run.git)
 
@@ -242,7 +260,8 @@ class Refuses(unittest.TestCase):
         run = run_helper((data, data), tracked=7)
         self.assertEqual(1, run.returncode)
         self.assertEqual(
-            "::error::archive lists 3 entries for 7 tracked files\n", run.stdout
+            "::error::source_archive.py: archive lists 3 entries for 7 tracked files\n",
+            run.stderr,
         )
 
     def test_an_empty_archive_is_refused(self) -> None:
@@ -251,7 +270,8 @@ class Refuses(unittest.TestCase):
         run = run_helper((data, data), tracked=4)
         self.assertEqual(1, run.returncode)
         self.assertEqual(
-            "::error::archive lists 0 entries for 4 tracked files\n", run.stdout
+            "::error::source_archive.py: archive lists 0 entries for 4 tracked files\n",
+            run.stderr,
         )
 
     def test_a_failing_git_fails_the_step_with_its_status(self) -> None:

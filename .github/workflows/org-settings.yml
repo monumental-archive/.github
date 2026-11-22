@@ -166,7 +166,20 @@ jobs:
           persist-credentials: false
 
       - name: Check every repo against the baseline
+        # A script outside `mise run` names its findings file (#1934).
+        env:
+          ORG_FINDINGS: ${{ runner.temp }}/findings/${{ github.job }}-${{ strategy.job-index }}.jsonl
         run: ./settings/repo-baseline.sh check
+
+      # This job's findings records, for the report job (#1933).
+      - name: Hand the findings to the report job
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: findings-${{ github.job }}-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/findings/
+          if-no-files-found: ignore
+          retention-days: 1
   adoption:
     name: every repository carries its required workflows
     runs-on: ubuntu-26.04

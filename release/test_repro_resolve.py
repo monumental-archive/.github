@@ -13,6 +13,7 @@ stdlib `unittest`, matching the other tests here.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import pathlib
@@ -23,6 +24,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import override
+from unittest import mock
 
 # Appended, so this file's own directory and the standard library
 # come first.
@@ -30,6 +32,20 @@ sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
 import hermetic
 import repro_resolve
+
+_NAMED = contextlib.ExitStack()
+
+
+def setUpModule() -> None:
+    """Name the helper by its file, as a run outside mise does (#1934).
+
+    An in-process call reads argv, whatever task runs this suite.
+    """
+    _NAMED.enter_context(mock.patch.object(sys, "argv", ["repro_resolve.py"]))
+    for key in ("MISE_TASK_NAME", "ORG_FINDINGS"):
+        if key in os.environ:
+            _NAMED.callback(os.environ.__setitem__, key, os.environ.pop(key))
+    unittest.addModuleCleanup(_NAMED.close)
 
 
 def dumps(value: object) -> str:
@@ -185,7 +201,9 @@ class ReadTheLatestRelease(unittest.TestCase):
         done, out = self.resolve("nightly")
         self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
         self.assertEqual(
-            done.stdout, "::error::latest release tag nightly is not a v* release\n"
+            done.stderr,
+            "::error::repro_resolve.py: latest release tag nightly is not a v*"
+            " release\n",
         )
         self.assertEqual(out, "")
 
@@ -194,8 +212,9 @@ class ReadTheLatestRelease(unittest.TestCase):
         done, out = self.resolve(checksums="")
         self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
         self.assertEqual(
-            done.stdout,
-            "::error::release v1.2.3 has no checksums.txt — nothing to prove against\n",
+            done.stderr,
+            "::error::repro_resolve.py: release v1.2.3 has no checksums.txt — nothing"
+            " to prove against\n",
         )
         self.assertEqual(out, "")
 
@@ -214,8 +233,10 @@ class ReadTheLatestRelease(unittest.TestCase):
         done, out = self.resolve(manifest="{")
         self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
         self.assertTrue(
-            done.stdout.startswith("::error::evidence-manifest.json is not JSON:"),
-            done.stdout,
+            done.stderr.startswith(
+                "::error::repro_resolve.py: evidence-manifest.json is not JSON:"
+            ),
+            done.stderr,
         )
         self.assertEqual(out, "")
 
@@ -229,8 +250,9 @@ class ReadTheLatestRelease(unittest.TestCase):
                 done, out = self.resolve(manifest=dumps({"entries": entries}))
                 self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
                 self.assertEqual(
-                    done.stdout,
-                    "::error::evidence-manifest.json is not an evidence manifest:"
+                    done.stderr,
+                    "::error::repro_resolve.py: evidence-manifest.json is not an"
+                    " evidence manifest:"
                     " its entries are not a list\n",
                 )
                 self.assertEqual(out, "")

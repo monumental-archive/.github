@@ -37,6 +37,13 @@
 # token), APP_SLUG, GITHUB_REPOSITORY, DEFAULT_BRANCH and SUMMARIES.
 set -euo pipefail
 
+# The writer of findings in this tree, found with no command run (#1934).
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${org__here}/../mise/findings.sh"
+unset org__here
+
 branch=fuzz-corpus
 title="test(fuzz): add inputs that reach new code"
 segment='[A-Za-z0-9._-]+'
@@ -70,7 +77,7 @@ check() {
   local entry path why list refused=0
   files=()
   if [[ ! -d ${CANDIDATES} || -L ${CANDIDATES} ]]; then
-    echo "FAIL: ${CANDIDATES} is not the downloaded artifact directory" >&2
+    org_finding "" "${CANDIDATES} is not the downloaded artifact directory"
     exit 1
   fi
   list=$(mktemp)
@@ -79,7 +86,7 @@ check() {
   if ! find "${CANDIDATES}" -mindepth 1 -print0 > "${list}" \
     || ! LC_ALL=C sort -z -o "${list}" "${list}"; then
     rm -f -- "${list}"
-    echo "FAIL: could not list ${CANDIDATES}" >&2
+    org_finding "" "could not list ${CANDIDATES}"
     exit 1
   fi
   while IFS= read -r -d '' entry; do
@@ -94,7 +101,7 @@ check() {
       why=$(corpus_path_refusal "${path}")
     fi
     if [[ -n ${why} ]]; then
-      echo "FAIL: refused ${path}: ${why}" >&2
+      org_finding "" "refused ${path}: ${why}"
       refused=1
       continue
     fi
@@ -102,11 +109,11 @@ check() {
   done < "${list}"
   rm -f -- "${list}"
   if ((refused)); then
-    echo "FAIL: the artifact is refused whole; nothing is committed" >&2
+    org_finding "" "the artifact is refused whole; nothing is committed"
     exit 1
   fi
   if [[ -z ${files[*]-} ]]; then
-    echo "FAIL: the artifact holds no file; nothing to propose" >&2
+    org_finding "" "the artifact holds no file; nothing to propose"
     exit 1
   fi
 }
@@ -236,7 +243,7 @@ case "${1:-}" in
     propose
     ;;
   *)
-    echo "usage: propose-fuzz-corpus.sh handover|staged|check|propose" >&2
+    org_finding "" "usage: propose-fuzz-corpus.sh handover|staged|check|propose"
     exit 1
     ;;
 esac

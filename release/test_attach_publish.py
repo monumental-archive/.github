@@ -153,6 +153,8 @@ class AttachAndPublish(unittest.TestCase):
             GITHUB_REPOSITORY=REPO,
             GITHUB_SERVER_URL="https://github.com",
             GITHUB_RUN_ID="42",
+            # The name a run outside mise gives the writer (#1934).
+            MISE_TASK_NAME=HELPER.name,
         )
         done: subprocess.CompletedProcess[str] | hermetic.Called
         if script:
@@ -205,11 +207,12 @@ class AttachAndPublish(unittest.TestCase):
         self.assertIn("-dddd  attestations.intoto.jsonl", done.stdout)
         self.assertIn("+cccc  attestations.intoto.jsonl", done.stdout)
         self.assertTrue(
-            done.stdout.endswith(
-                f"::error::{TAG} is published and immutable but the rebuilt assets"
+            done.stderr.endswith(
+                f"::error::attach_publish.py: {TAG} is published and immutable but"
+                f" the rebuilt assets"
                 " differ from the published set — this is not a resume\n"
             ),
-            done.stdout,
+            done.stderr,
         )
         self.assertNotIn("release upload", subcommands(calls))
 
@@ -219,8 +222,9 @@ class AttachAndPublish(unittest.TestCase):
         done, _ = self.publish("false", published=rebuilt_other, manifest=TYPED)
         self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
         self.assertEqual(
-            done.stdout,
-            f"::error::{TAG} is published and immutable but these build subjects"
+            done.stderr,
+            f"::error::attach_publish.py: {TAG} is published and immutable but these"
+            f" build subjects"
             " differ from the published bytes: tool-1.2.3-linux.tar.gz — this is"
             " not a resume\n",
         )
@@ -230,7 +234,7 @@ class AttachAndPublish(unittest.TestCase):
         partial = "bbbb  sbom.spdx.json\ncccc  attestations.intoto.jsonl\n"
         done, _ = self.publish("false", published=partial, manifest=TYPED)
         self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
-        self.assertIn("differ from the published bytes: tool-1.2.3", done.stdout)
+        self.assertIn("differ from the published bytes: tool-1.2.3", done.stderr)
 
     def test_manifest_that_is_not_json(self) -> None:
         """A manifest that cannot be read refuses rather than guessing."""
@@ -238,8 +242,10 @@ class AttachAndPublish(unittest.TestCase):
         done, _ = self.publish("false")
         self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
         self.assertTrue(
-            done.stdout.startswith("::error::published-manifest.json is not JSON:"),
-            done.stdout,
+            done.stderr.startswith(
+                "::error::attach_publish.py: published-manifest.json is not JSON:"
+            ),
+            done.stderr,
         )
 
     def test_manifest_whose_entries_are_not_a_list(self) -> None:
@@ -254,8 +260,9 @@ class AttachAndPublish(unittest.TestCase):
         done, _ = self.publish("false")
         self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
         self.assertEqual(
-            done.stdout,
-            "::error::published-manifest.json is not an evidence manifest:"
+            done.stderr,
+            "::error::attach_publish.py: published-manifest.json is not an evidence"
+            " manifest:"
             " its entries are not a list\n",
         )
 

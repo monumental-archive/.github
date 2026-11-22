@@ -21,11 +21,14 @@ import contextlib
 import io
 import json
 import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import decoded
+import hermetic
 import inventory_plan as inventory
 from hypothesis import example
 from hypothesis import strategies as st
@@ -38,6 +41,21 @@ PREFIX = st.text(max_size=12)
 SCALAR: st.SearchStrategy[object] = st.one_of(
     st.booleans(), st.integers(), st.text(max_size=8)
 )
+
+
+def as_helper() -> contextlib.ExitStack:
+    """Run the helper as a run outside mise does, recording nothing (#1934).
+
+    The writer names it by its file, whatever task runs this suite.
+
+    Returns:
+        The patches, entered by the caller's `with`.
+
+    """
+    stack = contextlib.ExitStack()
+    stack.enter_context(hermetic.as_task(""))
+    stack.enter_context(mock.patch.object(sys, "argv", ["inventory_plan.py"]))
+    return stack
 
 
 def nested(inner: st.SearchStrategy[object]) -> st.SearchStrategy[object]:
@@ -87,7 +105,9 @@ def run_step(manifest: str, major: str, prefix: str) -> tuple[int, str, object]:
     """Run the step on a crate whose Cargo.toml is `manifest`.
 
     Returns:
-        The exit status, stdout, and the plan written (None when none).
+        The exit status, what it printed (both streams, as the job log
+        shows them: a refusal is a finding, on stderr, #1934), and the plan
+        written (None when none).
 
     """
     here = Path.cwd()
@@ -99,7 +119,11 @@ def run_step(manifest: str, major: str, prefix: str) -> tuple[int, str, object]:
         os.chdir(tmp)
         out = io.StringIO()
         try:
-            with contextlib.redirect_stdout(out):
+            with (
+                as_helper(),
+                contextlib.redirect_stdout(out),
+                contextlib.redirect_stderr(out),
+            ):
                 code = inventory.main(["crate", major])
         finally:
             os.chdir(here)
@@ -156,7 +180,7 @@ class AnyManifest(unittest.TestCase):
         else:
             self.assertEqual(code, 1)
             self.assertIsNone(plan)
-            self.assertTrue(out.startswith("::error::"), out)
+            self.assertTrue(out.startswith("::error::inventory_plan.py: "), out)
             self.assertEqual(out.count("\n"), 1, out)
 
 

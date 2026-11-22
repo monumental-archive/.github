@@ -29,8 +29,8 @@ from pathlib import Path
 # come first.
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
+import findings
 import typed_std
-import workflow_command
 
 # A VCS setting's own line, `\tbuild\tvcs.revision=<sha>`, and nothing
 # else: anchored at the line's `build` field, because another setting's
@@ -171,7 +171,7 @@ def main() -> int:
     try:
         check_staged()
     except RefusedError as e:
-        workflow_command.error(str(e))
+        findings.finding("", str(e), annotate=True)
         return 1
     except ToolFailedError as e:
         return e.status

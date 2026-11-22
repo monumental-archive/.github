@@ -20,11 +20,15 @@ Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
 """
 
+import contextlib
 import io
+import sys
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
+from unittest import mock
 
 import decoded
+import hermetic
 import matrix
 from hypothesis import example
 from hypothesis import strategies as st
@@ -36,6 +40,21 @@ MAJOR = st.integers(10, 99).map(str)
 # A field nobody tabled: no comma, newline or space (those are the
 # splitter's), and not a known target.
 KNOWN = {t for runners, _ in matrix.TARGETS.values() for t in runners}
+
+
+def as_helper() -> contextlib.ExitStack:
+    """Run the helper as a run outside mise does, recording nothing (#1934).
+
+    The writer names it by its file, whatever task runs this suite.
+
+    Returns:
+        The patches, entered by the caller's `with`.
+
+    """
+    stack = contextlib.ExitStack()
+    stack.enter_context(hermetic.as_task(""))
+    stack.enter_context(mock.patch.object(sys, "argv", ["matrix.py"]))
+    return stack
 
 
 def untabled(field: str) -> bool:
@@ -93,7 +112,7 @@ def run(argv: list[str]) -> tuple[int, str, str]:
 
     """
     out, err = io.StringIO(), io.StringIO()
-    with redirect_stdout(out), redirect_stderr(err):
+    with as_helper(), redirect_stdout(out), redirect_stderr(err):
         code = matrix.main(argv)
     return code, out.getvalue(), err.getvalue()
 
@@ -151,7 +170,11 @@ class StrangerRefusedByName(unittest.TestCase):
         self.assertEqual(
             (code, out, err),
             # The field is the caller's text: written escaped (#1660).
-            (1, "", f"::error::unknown target {escaped(stranger)}; {hint}\n"),
+            (
+                1,
+                "",
+                f"::error::matrix.py: unknown target {escaped(stranger)}; {hint}\n",
+            ),
         )
 
     @given(STRANGER.filter(not_digits), st.data())
@@ -164,7 +187,7 @@ class StrangerRefusedByName(unittest.TestCase):
         code, out, err = run(["pgrx-images", request])
         self.assertEqual(
             (code, out, err),
-            (1, "", f"::error::{escaped(stranger)} is not a PG major\n"),
+            (1, "", f"::error::matrix.py: {escaped(stranger)} is not a PG major\n"),
         )
 
 
@@ -180,7 +203,7 @@ class AnyRequest(unittest.TestCase):
             self.assertTrue(out.startswith("matrix="), out)
         else:
             self.assertEqual((code, out), (1, ""))
-            self.assertTrue(err.startswith("::error::"), err)
+            self.assertTrue(err.startswith("::error::matrix.py: "), err)
             self.assertEqual(err.count("\n"), 1, err)
 
 

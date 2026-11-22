@@ -16,12 +16,15 @@ stdlib `unittest`, matching the rest of release/. Run through the gate
 as `mise run test`, which `ci` collects.
 """
 
+import contextlib
+import os
 import subprocess
 import sys
 import unittest
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 # Appended, so this file's own directory and the standard library
 # come first.
@@ -53,9 +56,24 @@ GOLDEN = """[
 ]
 """
 
-MANIFEST_REFUSAL = "::error::crate/Cargo.toml: "
+MANIFEST_REFUSAL = "::error::inventory_plan.py: crate/Cargo.toml: "
 
 CRATE = '[package]\nname = "pg_edtf"\nversion = "0.4.2"\n\n[features]\npg16 = []\n'
+
+
+_NAMED = contextlib.ExitStack()
+
+
+def setUpModule() -> None:
+    """Name the helper by its file, as a run outside mise does (#1934).
+
+    An in-process call reads argv, whatever task runs this suite.
+    """
+    _NAMED.enter_context(mock.patch.object(sys, "argv", ["inventory_plan.py"]))
+    for key in ("MISE_TASK_NAME", "ORG_FINDINGS"):
+        if key in os.environ:
+            _NAMED.callback(os.environ.__setitem__, key, os.environ.pop(key))
+    unittest.addModuleCleanup(_NAMED.close)
 
 
 @dataclass
@@ -166,7 +184,7 @@ class Refuses(unittest.TestCase):
     def assert_refused(self, run: Run, want: str) -> None:
         """Hold one refusal to its status, its line, and no plan."""
         self.assertEqual(1, run.returncode, run.stderr)
-        self.assertEqual(f"::error::{want}\n", run.stdout)
+        self.assertEqual(f"::error::inventory_plan.py: {want}\n", run.stderr)
         self.assertIsNone(run.plan)
 
     def test_no_prefix_is_refused(self) -> None:
@@ -186,14 +204,14 @@ class Refuses(unittest.TestCase):
         """The crate directory holds no Cargo.toml."""
         run = run_helper(manifest=None)
         self.assertEqual(1, run.returncode)
-        self.assertTrue(run.stdout.startswith(MANIFEST_REFUSAL), run.stdout)
+        self.assertTrue(run.stderr.startswith(MANIFEST_REFUSAL), run.stderr)
         self.assertIsNone(run.plan)
 
     def test_a_manifest_that_is_not_toml_is_refused(self) -> None:
         """A manifest the reader cannot parse."""
         run = run_helper(manifest="[package\n")
         self.assertEqual(1, run.returncode)
-        self.assertTrue(run.stdout.startswith(MANIFEST_REFUSAL), run.stdout)
+        self.assertTrue(run.stderr.startswith(MANIFEST_REFUSAL), run.stderr)
         self.assertIsNone(run.plan)
 
     def test_a_workspace_manifest_is_refused(self) -> None:
@@ -221,7 +239,9 @@ class Refuses(unittest.TestCase):
         """Two positional arguments, never fewer."""
         run = run_helper(args=("crate",))
         self.assertEqual(2, run.returncode)
-        self.assertEqual("usage: inventory_plan.py CRATE_DIR MAJOR\n", run.stderr)
+        self.assertEqual(
+            "inventory_plan.py: usage: inventory_plan.py CRATE_DIR MAJOR\n", run.stderr
+        )
 
 
 if __name__ == "__main__":

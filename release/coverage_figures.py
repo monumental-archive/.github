@@ -37,17 +37,20 @@ from dataclasses import dataclass
 from pathlib import Path
 
 # The canon's one JSON loader and its readers, beside this tree in
-# mise/ (#1676). A missing sibling is named, never a bare traceback.
+# mise/ (#1676). A missing sibling is named, never a bare traceback:
+# the writer of findings (#1934) is imported first, and names it.
 # Appended, so this file's own directory and the standard library come
 # first.
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
+import findings
+
 try:
     import decoded
 except ModuleNotFoundError as missing:
     if missing.name != "decoded":
         raise
-    msg = "coverage_figures: mise/decoded.py did not arrive in the canon tree"
-    raise SystemExit(msg) from None
+    findings.finding("", "mise/decoded.py did not arrive in the canon tree")
+    raise SystemExit(1) from None
 
 LABEL = "release:coverage-floor"
 FILE = "coverage-figures.txt"
@@ -275,10 +278,10 @@ def main(argv: list[str]) -> int:
         or not re.fullmatch(r"[0-9a-f]{40}", argv[1])
         or (len(argv) == max(ARGS) and not ONE_LEG.fullmatch(argv[-1]))
     ):
-        print(
+        findings.finding(
+            "",
             f"usage: coverage_figures.py {{{','.join(commands)}}} <40-hex sha>"
             " [pgrx-pg<major>]",
-            file=sys.stderr,
         )
         return 2
     leg = argv[2] if len(argv) == max(ARGS) else ""

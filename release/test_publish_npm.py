@@ -16,10 +16,12 @@ stdlib `unittest`, matching the rest of release/. Run through the gate
 as `mise run test`, which `ci` collects.
 """
 
+import contextlib
 import io
 import os
+import sys
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -62,6 +64,21 @@ DEBUG_LOG = f"""0 verbose cli /usr/bin/node /usr/bin/npm
 """
 
 
+_NAMED = contextlib.ExitStack()
+
+
+def setUpModule() -> None:
+    """Name the helper by its file, as a run outside mise does (#1934).
+
+    An in-process call reads argv, whatever task runs this suite.
+    """
+    _NAMED.enter_context(mock.patch.object(sys, "argv", ["publish_npm.py"]))
+    for key in ("MISE_TASK_NAME", "ORG_FINDINGS"):
+        if key in os.environ:
+            _NAMED.callback(os.environ.__setitem__, key, os.environ.pop(key))
+    unittest.addModuleCleanup(_NAMED.close)
+
+
 @dataclass
 class Run:
     """What one run of the publisher did."""
@@ -69,6 +86,8 @@ class Run:
     returncode: int
     stdout: str
     npm: list[str]
+    # The refusals: the finding writer prints to stderr (#1934).
+    stderr: str = ""
 
 
 # ruff: ignore[too-many-arguments] - one keyword per stub answer
@@ -129,12 +148,15 @@ def run_publish(
             env["STUB_WRITE_LOG"] = str(configured)
         elif logs == "home":
             env["STUB_WRITE_LOG"] = str(home / ".npm" / "_logs")
-        out = io.StringIO()
-        with redirect_stdout(out):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
             code = publish_npm.run(PACKAGE, env, work)
         log = tmp / "npm.log"
         return Run(
-            code, out.getvalue(), log.read_text().splitlines() if log.exists() else []
+            code,
+            out.getvalue(),
+            log.read_text().splitlines() if log.exists() else [],
+            err.getvalue(),
         )
 
 
@@ -146,9 +168,10 @@ class Refusals(unittest.TestCase):
         run = run_publish(version="11.5.0")
         self.assertEqual(1, run.returncode)
         self.assertEqual(
-            "::error::npm 11.5.0 < 11.5.1; trusted publishing needs 11.5.1+"
+            "::error::publish_npm.py: npm 11.5.0 < 11.5.1; trusted publishing needs"
+            " 11.5.1+"
             " — bump the pin in this repository's mise config\n",
-            run.stdout,
+            run.stderr,
         )
         want: list[str] = ["--version"]
         self.assertEqual(want, run.npm)
@@ -163,11 +186,12 @@ class Refusals(unittest.TestCase):
         run = run_publish(oidc=False)
         self.assertEqual(1, run.returncode)
         self.assertEqual(
-            "::error::the OIDC token endpoint is absent from this job's environment,"
+            "::error::publish_npm.py: the OIDC token endpoint is absent from this"
+            " job's environment,"
             " so npm cannot use trusted publishing — every job in the call chain"
             " must grant id-token: write, including the caller's own job in its"
             " repository\n",
-            run.stdout,
+            run.stderr,
         )
         self.assertNotIn("publish", " ".join(run.npm))
 
@@ -178,10 +202,11 @@ class Refusals(unittest.TestCase):
                 run = run_publish(tarballs=tarballs)
                 self.assertEqual(1, run.returncode)
                 self.assertTrue(
-                    run.stdout.endswith(
-                        f"::error::expected exactly one tarball, found {count}\n"
+                    run.stderr.endswith(
+                        f"::error::publish_npm.py: expected exactly one tarball,"
+                        f" found {count}\n"
                     ),
-                    run.stdout,
+                    run.stderr,
                 )
                 published: list[str] = [c for c in run.npm if c.startswith("publish")]
                 self.assertFalse(published)

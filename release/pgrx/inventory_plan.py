@@ -34,6 +34,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parents[2] / "mise"))
 
 import decoded
+import findings
 import workflow_command
 
 MAJOR = re.compile(r"^[0-9]+$")
@@ -133,12 +134,12 @@ def main(argv: list[str]) -> int:
 
     """
     if len(argv) != 2:  # ruff: ignore[magic-value-comparison] - the two positional arguments
-        print("usage: inventory_plan.py CRATE_DIR MAJOR", file=sys.stderr)
+        findings.finding("", "usage: inventory_plan.py CRATE_DIR MAJOR")
         return 2
     try:
         one = cell(Path(argv[0]), argv[1], os.environ.get("PLAN_DOC_PREFIX", ""))
     except RefusedError as e:
-        workflow_command.error(str(e))
+        findings.finding("", str(e), annotate=True)
         return 1
     out = Path("plan")
     out.mkdir(exist_ok=True)

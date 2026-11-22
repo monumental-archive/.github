@@ -49,6 +49,7 @@ import sys
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[1] / "mise"))
 
 import decoded
+import findings
 import workflow_command
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -249,7 +250,7 @@ def main() -> int:
         else:
             publish(tag, repo, dry_run=os.environ.get("DRY_RUN") == "true")
     except StepError as err:
-        workflow_command.error(str(err))
+        findings.finding("", str(err), annotate=True)
         return 1
     return 0
 

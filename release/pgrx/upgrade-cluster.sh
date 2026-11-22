@@ -5,10 +5,15 @@
 #
 #   upgrade-cluster.sh create|update
 set -euo pipefail
-# The canon's one writer of workflow commands (#1660): the copy the
-# container run mounts and names, or this tree's own on the runner.
-# shellcheck source=mise/workflow-command.sh
-. "${ORG_WORKFLOW_COMMAND:-$(dirname "${BASH_SOURCE[0]}")/../../mise/workflow-command.sh}"
+# The canon's writer of findings (#1934), which brings its one writer of
+# workflow commands (#1660): the copy the container run mounts and
+# names, beside its writer of workflow commands, or this tree's own on
+# the runner, found with no command run.
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${ORG_FINDINGS_WRITER:-${org__here}/../../mise/findings.sh}"
+unset org__here
 : "${PG:?}"
 : "${NAME:?}"
 : "${PREV:?}"
@@ -23,13 +28,13 @@ case $1 in
     psql -c "ALTER EXTENSION ${NAME} UPDATE TO '${NEW}';"
     got=$(psql -tA -c "SELECT extversion FROM pg_extension WHERE extname = '${NAME}';")
     if [[ ${got} != "${NEW}" ]]; then
-      org_error "upgrade left extversion ${got}, wanted ${NEW}"
+      org_finding_annotated "" "upgrade left extversion ${got}, wanted ${NEW}"
       exit 1
     fi
     echo "upgraded ${PREV} -> ${got}"
     ;;
   *)
-    org_error "upgrade-cluster.sh: unknown phase '$1' (create or update)"
+    org_finding_annotated "" "unknown phase '$1' (create or update)"
     exit 2
     ;;
 esac

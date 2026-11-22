@@ -39,7 +39,7 @@ require_planned_head() {
   head=$(gh api graphql -f query="${query}" \
     --jq '.data.repository.defaultBranchRef.target.oid') || head=""
   if [[ ! ${head} =~ ^[0-9a-f]{40}$ ]]; then
-    echo "FAIL: could not read the default branch head of ${GITHUB_REPOSITORY}" >&2
+    org_finding "" "could not read the default branch head of ${GITHUB_REPOSITORY}"
     exit 1
   fi
   if [[ ${head} != "${planned}" ]]; then

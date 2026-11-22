@@ -39,7 +39,7 @@ import hermetic
 HERE = Path(__file__).resolve().parent
 CANON = HERE.parent
 PGRX = (CANON / "release" / "pgrx").resolve()
-WRITER = (CANON / "mise" / "workflow-command.sh").resolve()
+WRITERS = (CANON / "mise").resolve()
 BASH = hermetic.tool("bash")
 GIT = hermetic.tool("git")
 
@@ -145,8 +145,8 @@ class TagVersion(Script):
             self.SCRIPT, UNTRUSTED_VERSION="1.2.4", UNTRUSTED_CRATE_DIR="ext"
         )
         self.assertEqual(
-            (done.returncode, done.stdout),
-            (1, "::error::tag says 1.2.4, manifest says 1.2.3\n"),
+            (done.returncode, done.stderr),
+            (1, "::error::tag-version.sh: tag says 1.2.4, manifest says 1.2.3\n"),
         )
 
     def test_a_workspace_version_is_read_from_the_workspace(self) -> None:
@@ -165,10 +165,13 @@ class Containers(Script):
     """release/pgrx/build-in-container.sh and upgrade-previous.sh."""
 
     def mounts(self, argv: list[str]) -> None:
-        """Hold one docker run to the canon's two mounts and the name."""
+        """Hold one docker run to the canon's mounts and the writer's name."""
         self.assertIn(f"{PGRX}:/pgrx:ro", argv)
-        self.assertIn(f"{WRITER}:/opt/org/workflow-command.sh:ro", argv)
-        self.assertIn("ORG_WORKFLOW_COMMAND=/opt/org/workflow-command.sh", argv)
+        self.assertIn(f"{WRITERS}/findings.sh:/opt/org/findings.sh:ro", argv)
+        self.assertIn(
+            f"{WRITERS}/workflow-command.sh:/opt/org/workflow-command.sh:ro", argv
+        )
+        self.assertIn("ORG_FINDINGS_WRITER=/opt/org/findings.sh", argv)
 
     def test_the_build_mounts_the_canon_and_the_writer(self) -> None:
         """One docker run, build-root.sh in the build image."""
@@ -352,8 +355,9 @@ class Inventory(Script):
         done = self.run_inventory({"amd64": SHA})
         self.assertEqual(done.returncode, 1)
         self.assertEqual(
-            done.stdout,
-            "::error::no arm64 digest to inventory; refusing to decide about a"
+            done.stderr,
+            "::error::inventory-digests.sh: no arm64 digest to inventory; refusing"
+            " to decide about a"
             " partial image\n",
         )
         called: list[str] = [argv[0] for argv in self.calls()]

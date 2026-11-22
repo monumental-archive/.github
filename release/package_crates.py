@@ -41,7 +41,7 @@ from pathlib import Path
 # come first.
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
-import workflow_command
+import findings
 
 HERE = Path(__file__).resolve().parent
 PACKAGE = Path("target") / "package"
@@ -180,7 +180,7 @@ def main() -> int:
     except CargoFailedError as e:
         return e.status
     for line in refused:
-        workflow_command.error(line)
+        findings.finding("", line, annotate=True)
     return 1 if refused else 0
 
 

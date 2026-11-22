@@ -73,7 +73,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
 import decoded
-import workflow_command
+import findings
 
 CANDIDATES = ("mise.toml", ".mise.toml", "mise/config.toml")
 
@@ -374,7 +374,7 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
         pins = read_pins(root, needed, optional, args.input_of, majors)
     except RefusalError as refusal:
         for line in str(refusal).splitlines():
-            workflow_command.error(line, stream=sys.stderr)
+            findings.finding("", line, annotate=True)
         return 1
     if args.mode == "env":
         for var, _, name in pairs:

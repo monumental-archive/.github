@@ -7,8 +7,9 @@
 # The canon's release/pgrx is mounted read-only at /pgrx and runs as
 # plain scripts (#1380): build-root.sh installs the headers at the
 # image's own server and sets the PostgreSQL floor (#1157, #1274), then
-# becomes postgres for build.sh. The writer is mounted beside them and
-# named in ORG_WORKFLOW_COMMAND. Source mounted read-only and copied
+# becomes postgres for build.sh. The writer of findings is mounted
+# beside them and named in ORG_FINDINGS_WRITER, the writer of workflow
+# commands it sources beside it (#1934). Source mounted read-only and copied
 # inside: the container must not write into the checkout, and target/
 # never enters it.
 #
@@ -20,7 +21,7 @@ set -euo pipefail
 : "${UNTRUSTED_VERSION:?}"
 : "${UNTRUSTED_CRATE_DIR:?}"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-writer="$(cd "${here}/../../mise" && pwd -P)/workflow-command.sh"
+writers="$(cd "${here}/../../mise" && pwd -P)"
 epoch=$(git log -1 --pretty=%ct)
 mkdir -p /tmp/out
 docker run --rm \
@@ -31,8 +32,9 @@ docker run --rm \
   --env SOURCE_DATE_EPOCH="${epoch}" \
   --volume "${PWD}:/src:ro" \
   --volume "${here}:/pgrx:ro" \
-  --volume "${writer}:/opt/org/workflow-command.sh:ro" \
-  --env ORG_WORKFLOW_COMMAND=/opt/org/workflow-command.sh \
+  --volume "${writers}/findings.sh:/opt/org/findings.sh:ro" \
+  --volume "${writers}/workflow-command.sh:/opt/org/workflow-command.sh:ro" \
+  --env ORG_FINDINGS_WRITER=/opt/org/findings.sh \
   --volume /tmp/out:/out \
   "${BUILD_IMAGE}" \
   bash /pgrx/build-root.sh

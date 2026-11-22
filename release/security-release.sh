@@ -58,6 +58,14 @@
 #   reason  one sentence: why, or why not
 set -euo pipefail
 
+# The writer of findings in this tree, found with no command run (#1934).
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${org__here}/../mise/findings.sh"
+unset org__here
+: "${MISE_TASK_NAME:=security-release}"
+
 emit() {
   if [[ -n ${GITHUB_OUTPUT:-} ]]; then
     echo "$1" >> "${GITHUB_OUTPUT}"
@@ -85,7 +93,7 @@ needs_human() {
     # duplicate on every run for as long as the forge is degraded.
     if ! open=$(gh issue list --repo "${repo}" --state open \
       --search "in:title \"${title}\"" --json number --jq 'length'); then
-      echo "security-release: could not read this repository's issues" >&2
+      org_finding "" "could not read this repository's issues"
       exit 1
     fi
     if [[ ${open} == 0 ]]; then
@@ -132,7 +140,7 @@ canon="${ORG_CANON_DIR:-.org-canon}"
 
 for tool in jq gh stele; do
   command -v "${tool}" > /dev/null || {
-    echo "security-release: ${tool} missing from the belt" >&2
+    org_finding "" "${tool} missing from the belt"
     exit 1
   }
 done
@@ -152,7 +160,7 @@ fi
 # 2. The plan's own Release PR, unheld and mergeable.
 if ! pr=$(gh pr list --repo "${repo}" --head "${branch}" --state open \
   --json number,title,labels,mergeStateStatus --jq '.[0] // empty'); then
-  echo "security-release: could not read this repository's pull requests" >&2
+  org_finding "" "could not read this repository's pull requests"
   exit 1
 fi
 [[ -n ${pr} ]] || no "no open Release PR on ${branch}"
@@ -188,7 +196,7 @@ case "${status}" in
   0 | 1) ;;
   4) no "the published SBOMs could not be judged (stele: CANNOT_JUDGE)" ;;
   *)
-    echo "security-release: stele assert blast-radius exited ${status}" >&2
+    org_finding "" "stele assert blast-radius exited ${status}"
     exit 1
     ;;
 esac
@@ -223,7 +231,7 @@ if [[ -f go.mod ]]; then
   # the answer below would be "main remedies nothing" about a tree
   # nobody looked at (found by running this against stele's main).
   command -v go > /dev/null || {
-    echo "security-release: go.mod present but go missing — pin go in mise.toml" >&2
+    org_finding "" "go.mod present but go missing — pin go in mise.toml"
     exit 1
   }
   # Module paths lowercased: the finding's package is in purl-canonical

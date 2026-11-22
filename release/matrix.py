@@ -39,6 +39,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
 import decoded
+import findings
 import workflow_command
 
 # The canon's target-to-runner tables, one per class that builds per
@@ -360,13 +361,14 @@ def main(argv: list[str] | None = None) -> int:
     try:
         planned = plan(sys.argv[1:] if argv is None else argv)
     except BareRefusalError as refusal:
-        print(refusal, file=sys.stderr)
+        findings.finding("", str(refusal))
         return 1
     except RefusalError as refusal:
-        workflow_command.error(str(refusal), stream=sys.stderr)
+        findings.finding("", str(refusal), annotate=True)
         return 1
     if planned is None:
-        print(USAGE, file=sys.stderr)
+        first, *rest = USAGE.splitlines()
+        findings.finding("", first, [line.strip() for line in rest])
         return 2
     outputs, notices = planned
     for line in notices:

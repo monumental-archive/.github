@@ -73,7 +73,11 @@ from typing import TYPE_CHECKING, Protocol
 # missing sibling is named, never a bare traceback (#1522).
 # Appended, so this file's own directory and the standard library
 # come first.
+# The writer of findings (#1934) is imported first, so a missing
+# sibling is named through it.
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
+import findings
+
 try:
     import crates_index
     import decoded
@@ -82,8 +86,8 @@ try:
 except ModuleNotFoundError as missing:
     if missing.name != "crates_index":
         raise
-    msg = "publish-crates: mise/crates_index.py did not arrive in the canon tree"
-    raise SystemExit(msg) from None
+    findings.finding("", "mise/crates_index.py did not arrive in the canon tree")
+    raise SystemExit(1) from None
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -388,9 +392,11 @@ def run(env: Mapping[str, str], cwd: Path, fetch: Fetch = http) -> int:
             crate = target_dir / "package" / f"{name}-{version}.crate"
             local = hashlib.sha256(crate.read_bytes()).hexdigest()
             if local != cksum:
-                workflow_command.error(
+                findings.finding(
+                    "",
                     f"{name} {version} is on crates.io with checksum"
-                    f" {cksum}, but this tree packages {local}"
+                    f" {cksum}, but this tree packages {local}",
+                    annotate=True,
                 )
                 mismatched = True
                 continue
@@ -424,10 +430,10 @@ def main() -> int:
     try:
         return run(os.environ, Path.cwd())
     except RefusalError as e:
-        workflow_command.error(str(e))
+        findings.finding("", str(e), annotate=True)
         return 1
     except CommandError as e:
-        workflow_command.error(f"{' '.join(e.argv)} exited {e.returncode}")
+        findings.finding("", f"{' '.join(e.argv)} exited {e.returncode}", annotate=True)
         return e.returncode
 
 

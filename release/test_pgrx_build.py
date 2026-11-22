@@ -19,6 +19,7 @@ that reads like a pass (#364).
 stdlib `unittest`, matching the other tests here.
 """
 
+import contextlib
 import json
 import os
 import re
@@ -47,6 +48,21 @@ BASH = hermetic.tool("bash")
 ON_RUNNER = os.environ.get("GITHUB_ACTIONS") == "true"
 # What a helper's run answered: a child's, or an in-process call's.
 type Done = subprocess.CompletedProcess[str] | hermetic.Called
+
+
+_NAMED = contextlib.ExitStack()
+
+
+def setUpModule() -> None:
+    """Name the helper by its file, as a run outside mise does (#1934).
+
+    An in-process call reads argv, whatever task runs this suite.
+    """
+    _NAMED.enter_context(mock.patch.object(sys, "argv", ["previous_release.py"]))
+    for key in ("MISE_TASK_NAME", "ORG_FINDINGS"):
+        if key in os.environ:
+            _NAMED.callback(os.environ.__setitem__, key, os.environ.pop(key))
+    unittest.addModuleCleanup(_NAMED.close)
 
 
 def strings(*items: str) -> list[str]:
@@ -186,8 +202,8 @@ class FloorBlock(unittest.TestCase):
                 result = self.floor()
                 self.assertEqual(1, result.returncode)
                 self.assertEqual(
-                    f"::error::{script} already uses the pgrx_floor tag\n",
-                    result.stdout,
+                    f"::error::floor.sh: {script} already uses the pgrx_floor tag\n",
+                    result.stderr,
                 )
                 self.assertEqual(planted, (self.extdir / script).read_text())
 
@@ -426,10 +442,11 @@ class ControlFileRefusal(PreviousRelease):
         result = self.previous("guard")
         self.assertEqual(1, result.returncode)
         self.assertEqual(
-            "::error::no upgrade path crates/demo-ext/sql/demo_ext--1.1.0--1.2.0.sql"
+            "::error::previous_release.py: no upgrade path"
+            " crates/demo-ext/sql/demo_ext--1.1.0--1.2.0.sql"
             " from published 1.1.0 (v1.1.0) — existing installations would be"
             " stranded\n",
-            result.stdout,
+            result.stderr,
         )
 
     def test_a_present_upgrade_path_passes(self) -> None:
@@ -616,11 +633,11 @@ class OnePredecessor(PreviousRelease):
         result = self.previous("guard", version="1.3.0")
         self.assertEqual(1, result.returncode, result.stderr)
         self.assertEqual(
-            "::error::no upgrade path"
+            "::error::previous_release.py: no upgrade path"
             " crates/edtf-postgres/sql/edtf_postgres--1.2.3--1.3.0.sql from"
             " published 1.2.3 (edtf-postgres-v1.2.3) — existing installations"
             " would be stranded\n",
-            result.stdout,
+            result.stderr,
         )
 
     def test_the_guard_checks_past_a_burned_head(self) -> None:
@@ -863,10 +880,11 @@ class ContainerScripts(unittest.TestCase):
         result = self.script("smoke.sh", UNTRUSTED_SMOKE="ci/no-such-smoke.sh")
         self.assertEqual(1, result.returncode)
         self.assertEqual(
-            "::error::smoke-test ci/no-such-smoke.sh is not executable\n", result.stdout
+            "::error::smoke.sh: smoke-test ci/no-such-smoke.sh is not executable\n",
+            result.stderr,
         )
         # Stopped at the refusal, never tried: nothing else was said.
-        self.assertEqual("", result.stderr)
+        self.assertEqual("", result.stdout)
 
     def test_smoke_cluster_names_the_extension_from_its_control(self) -> None:
         """The cluster half reads EXT, which smoke.sh exports from the control."""
@@ -913,7 +931,9 @@ class ContainerScripts(unittest.TestCase):
         result = self.script("upgrade-cluster.sh", "update", STUB_GOT="1.1.0")
         self.assertEqual(1, result.returncode)
         self.assertEqual(
-            "::error::upgrade left extversion 1.1.0, wanted 1.2.0\n", result.stdout
+            "::error::upgrade-cluster.sh: upgrade left extversion 1.1.0, wanted"
+            " 1.2.0\n",
+            result.stderr,
         )
 
     def test_an_unknown_phase_is_refused(self) -> None:
@@ -922,7 +942,7 @@ class ContainerScripts(unittest.TestCase):
         self.assertEqual(2, result.returncode)
         self.assertEqual(
             "::error::upgrade-cluster.sh: unknown phase 'drop' (create or update)\n",
-            result.stdout,
+            result.stderr,
         )
         self.assertFalse(self.calls.exists())
 
@@ -1111,7 +1131,8 @@ class DebugSplit(unittest.TestCase):
         result = self.split()
         self.assertEqual(1, result.returncode)
         self.assertEqual(
-            f"::error::{self.REL} after the split: no .dep-v0\n", result.stdout
+            f"::error::debug-split.sh: {self.REL} after the split: no .dep-v0\n",
+            result.stderr,
         )
 
     def test_each_wrong_step_is_refused_by_name(self) -> None:
@@ -1124,13 +1145,15 @@ class DebugSplit(unittest.TestCase):
                 self.assertEqual(1, result.returncode, result.stdout)
                 if name == "dynamic functions":
                     self.assertRegex(
-                        result.stdout,
-                        rf"^::error::{self.REL} after the split:"
+                        result.stderr,
+                        rf"^::error::debug-split.sh: {self.REL} after the split:"
                         r" \d+ dynamic functions, \d+ before the split\n$",
                     )
                 else:
                     self.assertEqual(
-                        f"::error::{self.REL} after the split: {name}\n", result.stdout
+                        f"::error::debug-split.sh: {self.REL} after the split:"
+                        f" {name}\n",
+                        result.stderr,
                     )
 
     def test_no_library_is_refused(self) -> None:
@@ -1139,7 +1162,9 @@ class DebugSplit(unittest.TestCase):
         result = self.split()
         self.assertEqual(1, result.returncode)
         self.assertEqual(
-            f"::error::no shared library under {self.pkgroot} to split\n", result.stdout
+            f"::error::debug-split.sh: no shared library under {self.pkgroot} to"
+            f" split\n",
+            result.stderr,
         )
 
 
@@ -1186,8 +1211,9 @@ class GlibcFloor(unittest.TestCase):
         result = self.floor("1.0")
         self.assertEqual(1, result.returncode)
         self.assertRegex(
-            result.stdout,
-            r"^::error::demo_ext\.so needs GLIBC_\d+\.\d+, above the 1\.0 floor"
+            result.stderr,
+            r"^::error::glibc-floor.sh: demo_ext\.so needs GLIBC_\d+\.\d+, above the"
+            r" 1\.0 floor"
             r" the class guarantees\n$",
         )
 
@@ -1210,7 +1236,9 @@ class GlibcFloorNoLibrary(unittest.TestCase):
         with TemporaryDirectory() as d:
             result = run([BASH, str(PGRX / "glibc-floor.sh"), d, "2.36"], {})
         self.assertEqual(1, result.returncode)
-        self.assertEqual("::error::no shared library packaged\n", result.stdout)
+        self.assertEqual(
+            "::error::glibc-floor.sh: no shared library packaged\n", result.stderr
+        )
 
 
 if __name__ == "__main__":

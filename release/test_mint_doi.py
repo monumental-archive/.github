@@ -170,6 +170,21 @@ esac
 """
 
 
+_NAMED = contextlib.ExitStack()
+
+
+def setUpModule() -> None:
+    """Name the helper by its file, as a run outside mise does (#1934).
+
+    An in-process call reads argv, whatever task runs this suite.
+    """
+    _NAMED.enter_context(mock.patch.object(sys, "argv", ["mint_doi.py"]))
+    for key in ("MISE_TASK_NAME", "ORG_FINDINGS"):
+        if key in os.environ:
+            _NAMED.callback(os.environ.__setitem__, key, os.environ.pop(key))
+    unittest.addModuleCleanup(_NAMED.close)
+
+
 def strings(*items: str) -> list[str]:
     """List the given strings, typed as strings for the assertions.
 
@@ -838,7 +853,7 @@ class TwoIds(unittest.TestCase):
 
 TWO = '["mit","apache-2.0"]'
 SHORT = (
-    "::error::the published record's licences read back as"
+    "::error::mint_doi.py: the published record's licences read back as"
     f' ["mit"], not {TWO} — the DOI 10.5281/zenodo.101 states less than'
     " CITATION.cff"
 )
@@ -862,7 +877,8 @@ class ThePublishedRecord(unittest.TestCase):
         run = run_helper("MIT OR Apache-2.0", published="fail")
         self.assertEqual(run.returncode, 1, run.stdout)
         self.assertIn(
-            "::error::the published record 101 could not be read back — the"
+            "::error::mint_doi.py: the published record 101 could not be read back —"
+            " the"
             " licences of DOI 10.5281/zenodo.101 are unverified",
             run.stdout,
         )
@@ -907,7 +923,8 @@ class Refusals(unittest.TestCase):
         """WITH refuses, naming the operator."""
         self.assert_refused(
             run_helper("GPL-2.0-only WITH Classpath-exception-2.0"),
-            "::error::CITATION.cff license 'GPL-2.0-only WITH Classpath-exception-2.0'"
+            "::error::mint_doi.py: CITATION.cff license 'GPL-2.0-only WITH"
+            " Classpath-exception-2.0'"
             " joins ids with 'WITH'",
         )
 
@@ -929,7 +946,7 @@ class Refusals(unittest.TestCase):
         run = run_helper("MIT OR Not-A-Licence")
         self.assert_refused(
             run,
-            "::error::licence id 'not-a-licence' (from CITATION.cff"
+            "::error::mint_doi.py: licence id 'not-a-licence' (from CITATION.cff"
             " 'MIT OR Not-A-Licence') is not in Zenodo's licence vocabulary",
         )
         self.assertEqual(len(run.made("GET", "/api/vocabularies/licenses/")), 2)
@@ -1390,7 +1407,8 @@ class LostPublishResponse(unittest.TestCase):
         run = canon_run(canon_zenodo(publish="fail"))
         self.assertEqual(run.returncode, 1, run.stdout)
         self.assertIn(
-            "::error::publish failed and the concept's latest published version"
+            "::error::mint_doi.py: publish failed and the concept's latest published"
+            " version"
             " is not 1.68.5",
             run.stdout,
         )
@@ -1468,7 +1486,7 @@ class FirstMintGuards(unittest.TestCase):
         run = run_helper("0BSD", zenodo=z, version="1.68.5", repo=CANON_REPO)
         self.assertEqual(run.returncode, 1, run.stdout)
         self.assertIn(
-            "::error::a submitted deposition already bears this title but"
+            "::error::mint_doi.py: a submitted deposition already bears this title but"
             " CITATION.cff records no concept DOI — record it under identifiers:"
             " before minting again",
             run.stdout,
@@ -1489,7 +1507,8 @@ class FirstMintGuards(unittest.TestCase):
         )
         self.assertEqual(run.returncode, 1, run.stdout)
         self.assertIn(
-            "::error::a submitted deposition already bears this title", run.stdout
+            "::error::mint_doi.py: a submitted deposition already bears this title",
+            run.stdout,
         )
         self.assertEqual(run.writes(), NOTHING)
 
@@ -1516,7 +1535,8 @@ class FirstMintGuards(unittest.TestCase):
         run = run_helper("0BSD", zenodo=z, version="1.68.5", repo=CANON_REPO)
         self.assertEqual(run.returncode, 1, run.stdout)
         self.assertIn(
-            "::error::a submitted deposition already bears this title", run.stdout
+            "::error::mint_doi.py: a submitted deposition already bears this title",
+            run.stdout,
         )
         self.assertEqual(len(run.made("GET", f"{DEP}?q=title")), 2)
         self.assertEqual(run.writes(), NOTHING)
@@ -1530,7 +1550,7 @@ class FirstMintGuards(unittest.TestCase):
         self.assertEqual(run.returncode, 1, run.stdout)
         self.assertIn(
             # The query's own `%` is escaped as the runner reads it (#1660).
-            "::error::the deposition listing"
+            "::error::mint_doi.py: the deposition listing"
             " (q=title:%2522monumental-archive%252F.github%2522) could not be"
             f" read to its end ({mint_doi.LISTING_PAGE} entries read) — a first mint"
             " is never checked against part of it",
@@ -1560,7 +1580,8 @@ class FirstMintGuards(unittest.TestCase):
         run = run_helper("0BSD", zenodo=z)
         self.assertEqual(run.returncode, 1, run.stdout)
         self.assertIn(
-            "::error::Zenodo's licence vocabulary answered HTTP 500 for '0bsd'"
+            "::error::mint_doi.py: Zenodo's licence vocabulary answered HTTP 500 for"
+            " '0bsd'"
             " — not minting on an unchecked licence",
             run.stdout,
         )
@@ -1577,7 +1598,8 @@ class FirstMintGuards(unittest.TestCase):
         run = run_helper("0BSD", cff=cff)
         self.assertEqual(run.returncode, 1, run.stdout)
         self.assertIn(
-            "::error::CITATION.cff carries no authors — the record credits people,"
+            "::error::mint_doi.py: CITATION.cff carries no authors — the record"
+            " credits people,"
             " never an account name",
             run.stdout,
         )
@@ -1588,7 +1610,8 @@ class FirstMintGuards(unittest.TestCase):
         run = run_helper("0BSD", cff="")
         self.assertEqual(run.returncode, 1, run.stdout)
         self.assertIn(
-            "::error::no CITATION.cff at v1.3.5 — a DOI-minting repo derives one"
+            "::error::mint_doi.py: no CITATION.cff at v1.3.5 — a DOI-minting repo"
+            " derives one"
             " from REUSE.toml (fix:citation; lint:citation gates this upstream)",
             run.stdout,
         )
@@ -1604,7 +1627,8 @@ class FirstMintGuards(unittest.TestCase):
         run = run_helper("0BSD", cff_status=1)
         self.assertEqual(run.returncode, 1, run.stdout)
         self.assertIn(
-            "::error::no CITATION.cff at v1.3.5 — a DOI-minting repo derives one"
+            "::error::mint_doi.py: no CITATION.cff at v1.3.5 — a DOI-minting repo"
+            " derives one"
             " from REUSE.toml (fix:citation; lint:citation gates this upstream)",
             run.stdout,
         )
@@ -1615,7 +1639,8 @@ class FirstMintGuards(unittest.TestCase):
         run = run_helper("0BSD", concept="10.5281/zenodo.abc")
         self.assertEqual(run.returncode, 1, run.stdout)
         self.assertIn(
-            "::error::CITATION.cff concept DOI '10.5281/zenodo.abc' does not end"
+            "::error::mint_doi.py: CITATION.cff concept DOI '10.5281/zenodo.abc' does"
+            " not end"
             " in a Zenodo record id",
             run.stdout,
         )
@@ -1626,7 +1651,7 @@ class FirstMintGuards(unittest.TestCase):
         run = run_helper("0BSD", concept="10.5281/zenodo.555")
         self.assertEqual(run.returncode, 1, run.stdout)
         self.assertIn(
-            "::error::the concept record 555 did not resolve to a latest"
+            "::error::mint_doi.py: the concept record 555 did not resolve to a latest"
             " published version",
             run.stdout,
         )
@@ -1817,7 +1842,8 @@ class AnswerShapes(unittest.TestCase):
         run = canon_run(canon_zenodo(newversion_body={"links": {}}))
         self.assertEqual(run.returncode, 1, run.stdout)
         self.assertIn(
-            "::error::the newversion answer's links.latest_draft is not a string",
+            "::error::mint_doi.py: the newversion answer's links.latest_draft is not"
+            " a string",
             run.stdout,
         )
 
@@ -1826,7 +1852,8 @@ class AnswerShapes(unittest.TestCase):
         run = canon_run(canon_zenodo(drafts=[1]))
         self.assertEqual(run.returncode, 1, run.stdout)
         self.assertIn(
-            "::error::an entry of the draft listing is not an object", run.stdout
+            "::error::mint_doi.py: an entry of the draft listing is not an object",
+            run.stdout,
         )
 
     def test_a_title_listing_entry_that_is_not_an_object_is_refused(self) -> None:
@@ -1836,7 +1863,8 @@ class AnswerShapes(unittest.TestCase):
         )
         self.assertEqual(run.returncode, 1, run.stdout)
         self.assertIn(
-            "::error::an entry of the deposition listing (q=title:", run.stdout
+            "::error::mint_doi.py: an entry of the deposition listing (q=title:",
+            run.stdout,
         )
         self.assertIn(") is not an object", run.stdout)
         self.assertEqual(run.writes(), NOTHING)

@@ -20,9 +20,10 @@
 set -euo pipefail
 
 canon="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# The canon's one writer of workflow commands (#1660).
-# shellcheck source=mise/workflow-command.sh
-. "${canon}/mise/workflow-command.sh"
+# The canon's writer of findings (#1934), which brings its writer of
+# workflow commands (#1660).
+# shellcheck source=mise/findings.sh
+. "${canon}/mise/findings.sh"
 repo_slug="${GITHUB_REPOSITORY:-$(git remote get-url origin | sed -E 's#(git@github.com:|https://github.com/)##; s#\.git$##')}"
 repo_url="https://github.com/${repo_slug}"
 groups="feat=Added,fix=Fixed,perf=Performance,refactor=Changed"
@@ -77,14 +78,14 @@ if ! stele derive release-plan \
   --release-url "${repo_url}/releases/tag/" \
   --pull-url "${repo_url}/pull/" \
   --out "${plan}"; then
-  echo "FAIL: the release plan was refused — see the refusal above" >&2
-  echo "  Nothing was minted and no version was spent. A 'tag-taken'" >&2
-  echo "  refusal means the namespace already carries this version:" >&2
-  echo "  the release is done, or the tag was minted outside this job." >&2
+  org_finding "" "the release plan was refused — see the refusal above" \
+    "Nothing was minted and no version was spent. A 'tag-taken'" \
+    "refusal means the namespace already carries this version:" \
+    "the release is done, or the tag was minted outside this job."
   exit 1
 fi
 
-# Each refusal the plan names, one error command each: a detail is the
+# Each refusal the plan names, one annotated finding each: a detail is the
 # planner's text, and read raw a newline in it began a log line of its
 # own (#1660). NUL-delimited, so the newline stays inside its refusal.
 refused() {
@@ -92,7 +93,7 @@ refused() {
   listed=$(mktemp)
   jq -j '(.refusals // [])[] | .cause + ": " + .detail + "\u0000"' "${plan}" > "${listed}"
   while IFS= read -r -d '' refusal; do
-    org_error "${refusal}"
+    org_finding_annotated "" "${refusal}"
   done < "${listed}"
   rm -f "${listed}"
 }
@@ -101,15 +102,15 @@ version=$(jq -r '.version // ""' "${plan}")
 tag=$(jq -r '.tag // ""' "${plan}")
 subject=$(jq -r '.commit.subject // ""' "${plan}")
 if [[ -z ${tag} || -z ${version} ]]; then
-  echo "FAIL: the plan names no tag to mint" >&2
-  refused >&2
+  org_finding "" "the plan names no tag to mint"
+  refused
   exit 1
 fi
 
 refusal_count=$(jq '(.refusals // []) | length' "${plan}")
 if [[ ${refusal_count} -gt 0 ]]; then
-  echo "FAIL: the release plan refuses:" >&2
-  refused >&2
+  org_finding "" "the release plan refuses:"
+  refused
   exit 1
 fi
 
@@ -122,9 +123,9 @@ head_subject=$(git log -1 --pretty=%s)
 case "${head_subject}" in
   "${subject}"*) ;;
   *)
-    org_say "FAIL: HEAD is not the release commit for ${tag}" >&2
-    org_say "  expected: ${subject}" >&2
-    org_say "  subject:  ${head_subject}" >&2
+    org_finding "" "HEAD is not the release commit for ${tag}" \
+      "expected: ${subject}" \
+      "subject:  ${head_subject}"
     exit 1
     ;;
 esac
@@ -159,8 +160,8 @@ while IFS= read -r control; do
   answer=$("${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}" \
     "${canon}/release/pgrx/previous_release.py" predecessor \
     --repo "${repo_slug}" --version "${version}" --control "${control}") || {
-    org_say "FAIL: refusing to mint ${tag} — the release listing could not be read" >&2
-    org_say "  to find ${name}'s predecessor; nothing was minted, re-run this job." >&2
+    org_finding "" "refusing to mint ${tag} — the release listing could not be read" \
+      "to find ${name}'s predecessor; nothing was minted, re-run this job."
     exit 1
   }
   [[ -n ${answer} ]] || continue
@@ -168,13 +169,13 @@ while IFS= read -r control; do
   prev_tag="${answer#*$'\t'}"
   upgrade="${crate_dir}/sql/${name}--${prev}--${version}.sql"
   if [[ ! -f ${upgrade} ]]; then
-    org_say "FAIL: refusing to mint ${tag} — no upgrade path ${upgrade} from published ${prev} (${prev_tag})" >&2
-    org_say "  The Release PR derived its path before ${prev_tag} finished publishing" >&2
-    org_say "  (#358 seam 5). No tag was minted, so ${version} is NOT burned:" >&2
-    echo "  once the in-flight publish is complete, refresh the derivation via" >&2
-    echo "  the Release-PR leg (a push to the default branch, or the" >&2
-    echo "  release-published trigger) and re-run this job on the refreshed" >&2
-    echo "  release commit." >&2
+    org_finding "" "refusing to mint ${tag} — no upgrade path ${upgrade} from published ${prev} (${prev_tag})" \
+      "The Release PR derived its path before ${prev_tag} finished publishing" \
+      "(#358 seam 5). No tag was minted, so ${version} is NOT burned:" \
+      "once the in-flight publish is complete, refresh the derivation via" \
+      "the Release-PR leg (a push to the default branch, or the" \
+      "release-published trigger) and re-run this job on the refreshed" \
+      "release commit."
     exit 1
   fi
 done < <(git ls-files '*.control')
@@ -247,12 +248,13 @@ git push origin "${tag}" 2> "${push_log}" || push_rc=$?
 if [[ ${push_rc} -ne 0 ]] \
   && grep -qF "refusing to allow a GitHub App to create or update workflow" "${push_log}"; then
   git tag -d "${tag}" > /dev/null
-  org_error "the push of ${tag} was refused: a workflow-changing commit reached the default" \
-    "branch after the release commit, so its workflow files differ from the release commit's, and" \
-    "GitHub will not let the tag-mint App create a ref that would change them. ${tag} has not been" \
-    "minted and ${version} is not spent. Land one change on the default branch that makes its" \
-    "workflow files equal to the release commit's again (the commit that moved them, reverted)," \
-    "then re-run this job (docs/runbook.md)."
+  msg="the push of ${tag} was refused: a workflow-changing commit reached the default"
+  msg+=" branch after the release commit, so its workflow files differ from the release commit's, and"
+  msg+=" GitHub will not let the tag-mint App create a ref that would change them. ${tag} has not been"
+  msg+=" minted and ${version} is not spent. Land one change on the default branch that makes its"
+  msg+=" workflow files equal to the release commit's again (the commit that moved them, reverted),"
+  msg+=" then re-run this job (docs/runbook.md)."
+  org_finding_annotated "" "${msg}"
   exit 1
 fi
 cat "${push_log}" >&2

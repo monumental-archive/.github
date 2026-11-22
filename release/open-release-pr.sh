@@ -21,6 +21,13 @@
 # away its review thread.
 set -euo pipefail
 
+# The writer of findings in this tree, found with no command run (#1934).
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${org__here}/../mise/findings.sh"
+unset org__here
+
 : "${PLAN:?PLAN must be set (the plan document prepare-release.sh emitted)}"
 : "${GH_TOKEN:?GH_TOKEN must be set (the tag-mint App token, not GITHUB_TOKEN)}"
 : "${GITHUB_REPOSITORY:?}"
@@ -45,7 +52,7 @@ staging=$(jq -r '.branch.staging' "${PLAN}")
 
 for v in version title branch staging; do
   [[ -n ${!v} && ${!v} != null ]] || {
-    echo "FAIL: the plan states no ${v}" >&2
+    org_finding "" "the plan states no ${v}"
     exit 1
   }
 done
@@ -143,7 +150,7 @@ oid=$(org_signed_commit "release commit" "${staging}" "${GITHUB_SHA}" \
 dequeue_queued_pr() {
   local pr number id planned landed mutation
   pr=$(gh pr view "${branch}" --json number,id,body) || {
-    echo "FAIL: could not read the queued pull request for ${branch}" >&2
+    org_finding "" "could not read the queued pull request for ${branch}"
     exit 1
   }
   number=$(jq -r '.number' <<< "${pr}")

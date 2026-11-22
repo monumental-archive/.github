@@ -5,10 +5,15 @@
 # (/pgrx/smoke-cluster.sh), then the caller's smoke-test script, if it
 # names one, runs against the extracted package root.
 set -euo pipefail
-# The canon's one writer of workflow commands (#1660): the copy the
-# container run mounts and names, or this tree's own on the runner.
-# shellcheck source=mise/workflow-command.sh
-. "${ORG_WORKFLOW_COMMAND:-$(dirname "${BASH_SOURCE[0]}")/../../mise/workflow-command.sh}"
+# The canon's writer of findings (#1934), which brings its one writer of
+# workflow commands (#1660): the copy the container run mounts and
+# names, beside its writer of workflow commands, or this tree's own on
+# the runner, found with no command run.
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${ORG_FINDINGS_WRITER:-${org__here}/../../mise/findings.sh}"
+unset org__here
 : "${PG:?}"
 : "${UNTRUSTED_SMOKE?}"
 cp -a "/pkgroot/usr/lib/postgresql/${PG}/lib/." \
@@ -21,7 +26,7 @@ export EXT
 su postgres -s /bin/bash /pgrx/smoke-cluster.sh
 if [[ -n ${UNTRUSTED_SMOKE} ]]; then
   if [[ ! -x "/src/${UNTRUSTED_SMOKE}" ]]; then
-    org_error "smoke-test ${UNTRUSTED_SMOKE} is not executable"
+    org_finding_annotated "" "smoke-test ${UNTRUSTED_SMOKE} is not executable"
     exit 1
   fi
   "/src/${UNTRUSTED_SMOKE}" /pkgroot "${PG}"

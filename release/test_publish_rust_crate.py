@@ -53,6 +53,7 @@ stdlib `unittest`, matching the rest of release/. Run through the gate
 as `mise run test`, which `ci` collects.
 """
 
+import contextlib
 import hashlib
 import io
 import json
@@ -61,7 +62,7 @@ import shutil
 import sys
 import unittest
 import urllib.request
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass, field
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -75,8 +76,8 @@ import publish_crates
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
 import decoded
+import findings
 import hermetic
-import workflow_command
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -122,6 +123,21 @@ case $1 in
   *) echo "cargo stub: refusing $*" >&2; exit 101 ;;
 esac
 """
+
+
+_NAMED = contextlib.ExitStack()
+
+
+def setUpModule() -> None:
+    """Name the helper by its file, as a run outside mise does (#1934).
+
+    An in-process call reads argv, whatever task runs this suite.
+    """
+    _NAMED.enter_context(mock.patch.object(sys, "argv", ["publish_crates.py"]))
+    for key in ("MISE_TASK_NAME", "ORG_FINDINGS"):
+        if key in os.environ:
+            _NAMED.callback(os.environ.__setitem__, key, os.environ.pop(key))
+    unittest.addModuleCleanup(_NAMED.close)
 
 
 @dataclass
@@ -250,12 +266,12 @@ def run_publish(
         fetch = Fetch(
             served, oidc=answers.get("oidc", 200), exchange=answers.get("exchange", 200)
         )
-        out = io.StringIO()
-        with redirect_stdout(out):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
             try:
                 code = publish_crates.run(env, tmp, fetch)
             except publish_crates.RefusalError as e:
-                workflow_command.error(str(e))
+                findings.finding("", str(e), annotate=True)
                 code = 1
 
         def read(name: str) -> list[str]:
@@ -263,7 +279,12 @@ def run_publish(
             return path.read_text().splitlines() if path.exists() else []
 
         return Run(
-            code, out.getvalue(), "", read("cargo"), fetch.requests, read("cargo-env")
+            code,
+            out.getvalue(),
+            err.getvalue(),
+            read("cargo"),
+            fetch.requests,
+            read("cargo-env"),
         )
 
 
@@ -349,9 +370,10 @@ class PublishResumes(unittest.TestCase):
         run = run_publish(CORE | WASM, crate=planted)
         self.assertNotEqual(0, run.returncode)
         self.assertEqual(
-            f"::error::edtf-core 1.3.3 is on crates.io with checksum {CORE_CKSUM},"
+            f"::error::publish_crates.py: edtf-core 1.3.3 is on crates.io with"
+            f" checksum {CORE_CKSUM},"
             f" but this tree packages {hashlib.sha256(planted).hexdigest()}\n",
-            run.stdout,
+            run.stderr,
         )
         self.assertEqual(list[str](), run.publishes())
 
@@ -360,10 +382,10 @@ class PublishResumes(unittest.TestCase):
         run = run_publish({"ed/tf/edtf-core": "503"} | WASM)
         self.assertNotEqual(0, run.returncode)
         self.assertEqual(
-            "::error::the crates.io index answered 503 for edtf-core"
+            "::error::publish_crates.py: the crates.io index answered 503 for edtf-core"
             " (https://index.crates.io/ed/tf/edtf-core); an unread index"
             ' is not "not published"\n',
-            run.stdout,
+            run.stderr,
         )
         self.assertEqual(list[str](), run.publishes())
 
@@ -461,9 +483,10 @@ class PublishMintsItsOwnToken(unittest.TestCase):
         run = run_publish(WASM, exchange=403)
         self.assertEqual(1, run.returncode)
         self.assertEqual(
-            "::error::the crates.io token exchange answered 403 — if 403, check"
+            "::error::publish_crates.py: the crates.io token exchange answered 403 —"
+            " if 403, check"
             " the User-Agent before the publisher config (#907)\n",
-            run.stdout,
+            run.stderr,
         )
         self.assertEqual(list[str](), run.publishes())
 
@@ -472,7 +495,9 @@ class PublishMintsItsOwnToken(unittest.TestCase):
         run = run_publish(WASM, oidc=500)
         self.assertEqual(1, run.returncode)
         self.assertEqual(
-            "::error::the runner's OIDC token endpoint answered 500\n", run.stdout
+            "::error::publish_crates.py: the runner's OIDC token endpoint answered"
+            " 500\n",
+            run.stderr,
         )
         urls = [u for u, _ in run.curl]
         self.assertNotIn(publish_crates.EXCHANGE, urls)
@@ -545,7 +570,9 @@ class PublishMintsItsOwnToken(unittest.TestCase):
         run = run_publish({"ed/tf/edtf-core": "000"} | WASM)
         self.assertEqual(1, run.returncode)
         self.assertIn(
-            "::error::the crates.io index answered nothing for edtf-core", run.stdout
+            "::error::publish_crates.py: the crates.io index answered nothing for"
+            " edtf-core",
+            run.stderr,
         )
 
     def test_cargo_publish_s_own_exit_is_the_run_s(self) -> None:
@@ -562,13 +589,13 @@ class Main(unittest.TestCase):
         """Run main with `run` raising failure.
 
         Returns:
-            The exit code and stdout.
+            The exit code and stderr, where the finding writer prints.
 
         """
         out = io.StringIO()
         with (
             mock.patch.object(publish_crates, "run", side_effect=failure),
-            mock.patch.object(sys, "stdout", out),
+            mock.patch.object(sys, "stderr", out),
         ):
             code = publish_crates.main()
         return code, out.getvalue()
@@ -576,7 +603,7 @@ class Main(unittest.TestCase):
     def test_a_refusal_is_printed_and_exits_1(self) -> None:
         """The refusal's own line, exit 1."""
         self.assertEqual(
-            (1, "::error::stop\n"),
+            (1, "::error::publish_crates.py: stop\n"),
             self.main(publish_crates.RefusalError("stop")),
         )
 
@@ -584,7 +611,8 @@ class Main(unittest.TestCase):
         """A failed cargo or member helper is named, with its exit."""
         failed = publish_crates.CommandError(["cargo", "package", "-p", "x"], 101)
         self.assertEqual(
-            (101, "::error::cargo package -p x exited 101\n"), self.main(failed)
+            (101, "::error::publish_crates.py: cargo package -p x exited 101\n"),
+            self.main(failed),
         )
 
     def test_success_is_run_s_exit(self) -> None:

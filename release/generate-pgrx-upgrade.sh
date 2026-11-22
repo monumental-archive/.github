@@ -47,10 +47,12 @@ set -euo pipefail
 : "${GITHUB_REPOSITORY:?}"
 
 canon="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# The canon's one writer of workflow commands (#1660); the containers
-# below read the copy each build places in its /work.
-# shellcheck source=mise/workflow-command.sh
-. "${canon}/mise/workflow-command.sh"
+# The canon's writer of findings (#1934), which brings its one writer of
+# workflow commands (#1660); the containers below read the copies each
+# build places in its /work, and name this script as their task.
+# shellcheck source=mise/findings.sh
+. "${canon}/mise/findings.sh"
+: "${MISE_TASK_NAME:=generate-pgrx-upgrade.sh}"
 
 emit() {
   if [[ -n ${GITHUB_OUTPUT:-} ]]; then
@@ -156,7 +158,7 @@ fi
 # the first entry, the one mise puts on PATH and this build must use.
 pins=$("${ORG_PYTHON}" "${canon}/release/caller_pins.py" env --input-of "the pgrx-extension class" \
   RUST_VERSION=rust PGRX_VERSION=cargo-pgrx) || {
-  echo "FAIL: rust and cargo:cargo-pgrx must be pinned in this repository's mise config" >&2
+  org_finding "" "rust and cargo:cargo-pgrx must be pinned in this repository's mise config"
   exit 1
 }
 RUST_VERSION=$(sed -n 's/^RUST_VERSION=//p' <<< "${pins}")
@@ -231,7 +233,7 @@ for control in "${controls[@]}"; do
     fi
   done
   if [[ -z ${pg} ]]; then
-    org_say "FAIL: ${prev_tag} shipped ${name} tarballs, but none for a PG major the base-image mapping carries" >&2
+    org_finding "" "${prev_tag} shipped ${name} tarballs, but none for a PG major the base-image mapping carries"
     exit 1
   fi
   build_image=$(jq -r --arg pg "${pg}" '.build[$pg]' <<< "${mapping}")
@@ -246,8 +248,9 @@ for control in "${controls[@]}"; do
   # read-only, so the traversal bit is set here, once, on the host.
   chmod 755 "${work}"
   mkdir -p "${work}/prevroot" "${work}/out"
-  # The writer of workflow commands, where both containers read /work.
-  cp "${canon}/mise/workflow-command.sh" "${work}/"
+  # The writers of findings and workflow commands, where both containers
+  # read /work.
+  cp "${canon}/mise/findings.sh" "${canon}/mise/workflow-command.sh" "${work}/"
 
   echo "deriving ${name}: ${prev} -> ${VERSION} (pg${pg})"
   gh release download "${prev_tag}" --repo "${GITHUB_REPOSITORY}" \
@@ -271,10 +274,10 @@ for control in "${controls[@]}"; do
   prev_root="${work}/prevroot/pkgroot"
   [[ -d ${prev_root} ]] || prev_root="${work}/prevroot"
   if [[ ! -d ${prev_root}/usr/lib/postgresql/${pg}/lib ]]; then
-    org_say "FAIL: ${prev_tag} tarball has no usr/lib/postgresql/${pg}/lib under its package root" >&2
-    org_say "  looked in ${prev_root#"${work}/"} (of $(basename "${work}/prev.tar.gz"))" >&2
-    echo "  the archive is neither pkgroot/usr/... nor ./usr/..., which is the shape a" >&2
-    echo "  pgrx package tarball has; nothing downstream can read it" >&2
+    org_finding "" "${prev_tag} tarball has no usr/lib/postgresql/${pg}/lib under its package root" \
+      "looked in ${prev_root#"${work}/"} (of $(basename "${work}/prev.tar.gz"))" \
+      "the archive is neither pkgroot/usr/... nor ./usr/..., which is the shape a" \
+      "pgrx package tarball has; nothing downstream can read it"
     exit 1
   fi
 
@@ -283,7 +286,7 @@ for control in "${controls[@]}"; do
   # and no walk to finish (#682).
   prev_schema=$(find "${prev_root}" -type f -name "${name}--${prev}.sql" -print -quit)
   if [[ -z ${prev_schema} ]]; then
-    org_say "FAIL: ${prev_tag} tarball carries no generated schema ${name}--${prev}.sql" >&2
+    org_finding "" "${prev_tag} tarball carries no generated schema ${name}--${prev}.sql"
     exit 1
   fi
 
@@ -293,7 +296,8 @@ for control in "${controls[@]}"; do
   # leg needs only the generated schema and the loadable library).
   cat > "${work}/build.sh" << 'EOSH'
 set -euo pipefail
-. /work/workflow-command.sh
+. /work/findings.sh
+: "${MISE_TASK_NAME:=generate-pgrx-upgrade.sh}"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 # Headers at exactly the server the pinned image already carries
@@ -307,7 +311,7 @@ if ! apt-cache show "postgresql-server-dev-${PG}=${server}" > /dev/null 2>&1; th
   msg="image ${BUILD_IMAGE} carries server ${server}; the apt repository"
   msg+=" no longer serves its headers — move the image pin in"
   msg+=" docker/pgrx-base-images.toml"
-  org_error "${msg}"
+  org_finding_annotated "" "${msg}"
   exit 1
 fi
 apt-get install -y -qq --no-install-recommends \
@@ -315,7 +319,7 @@ apt-get install -y -qq --no-install-recommends \
   ca-certificates curl pkg-config clang llvm libclang-dev git
 after=$(dpkg-query -W -f="\${Version}" "postgresql-${PG}")
 [[ ${after} == "${server}" ]] || {
-  org_error "the build moved the server from ${server} to ${after}"
+  org_finding_annotated "" "the build moved the server from ${server} to ${after}"
   exit 1
 }
 mkdir -p /build
@@ -357,7 +361,7 @@ EOSH
   # there is no pipe to break and no walk to finish (#682).
   new_schema=$(find "${work}/out/pkgroot" -type f -name "${name}--${VERSION}.sql" -print -quit)
   if [[ -z ${new_schema} ]]; then
-    org_say "FAIL: candidate build produced no generated schema ${name}--${VERSION}.sql" >&2
+    org_finding "" "candidate build produced no generated schema ${name}--${VERSION}.sql"
     exit 1
   fi
 
@@ -371,15 +375,24 @@ EOSH
   # soundly migrate, naming the statement. The round-trip proof below is
   # the authority either way.
   EXT_NAME="${name}" PREV_V="${prev}" NEW_V="${VERSION}" ORG_MISE_DIR="${canon}/mise" \
+    MISE_TASK_NAME="${MISE_TASK_NAME}" \
     python3 - "${prev_schema}" "${new_schema}" "${work}/upgrade.sql" \
     ${data_fragment:+"${data_fragment}"} << 'EOPY'
 import os
 import re
 import sys
 
-# The canon's one writer of workflow commands (#1660).
+# The canon's writers of findings (#1934) and workflow commands (#1660).
 sys.path.insert(0, os.environ["ORG_MISE_DIR"])
+import findings
 import workflow_command
+
+
+def refuse(message):
+    """Say why the derivation stops, as one finding, then exit 1 (#1934)."""
+    findings.finding("", message)
+    sys.exit(1)
+
 
 prev_path, new_path, out_path = sys.argv[1:4]
 data_path = sys.argv[4] if len(sys.argv) > 4 else ""
@@ -405,7 +418,7 @@ def strip_leading_comments(stmt):
         if stmt.startswith("/*"):
             end = stmt.find("*/")
             if end < 0:
-                sys.exit(f"FAIL: unterminated block comment: {stmt[:200]!r}")
+                refuse(f"unterminated block comment: {stmt[:200]!r}")
             stmt = stmt[end + 2:].lstrip()
         elif stmt.startswith("--"):
             nl = stmt.find("\n")
@@ -432,7 +445,7 @@ def split_statements(text):
             if stmt:
                 stmts.append(stmt)
     if strip_leading_comments("\n".join(buf)):
-        sys.exit(f"FAIL: unterminated statement in generated schema: {buf[0][:200]!r}")
+        refuse(f"unterminated statement in generated schema: {buf[0][:200]!r}")
     return stmts
 
 
@@ -453,7 +466,7 @@ def paren_span(text, start):
             depth -= 1
             if depth == 0:
                 return i
-    sys.exit(f"FAIL: unbalanced parentheses in: {text[:200]!r}")
+    refuse(f"unbalanced parentheses in: {text[:200]!r}")
 
 
 # pgrx emits "CREATE  FUNCTION" (double space): match on \s+, always.
@@ -529,7 +542,7 @@ def classify(stmt):
             rest = n[len(prefix):]
             m = re.match(r"[^\s(;]+", rest)
             if not m:
-                sys.exit(f"FAIL: cannot name {kind} in: {n[:200]!r}")
+                refuse(f"cannot name {kind} in: {n[:200]!r}")
             return ("named", (kind, m.group(0)), n)
     for prefix in REPLAY:
         if u.startswith(prefix):
@@ -574,14 +587,14 @@ floor = FLOOR_BLOCK.match(prev_text)
 if floor:
     prev_text = prev_text[floor.end():]
 if FLOOR_TAG in prev_text:
-    sys.exit(
-        f"FAIL: previous schema {ext}--{prev_v}.sql uses the reserved"
+    refuse(
+        f"previous schema {ext}--{prev_v}.sql uses the reserved"
         f" ${FLOOR_TAG}$ tag other than as its one leading floor block"
     )
 new_text = read(new_path)
 if FLOOR_TAG in new_text:
-    sys.exit(
-        f"FAIL: candidate schema {ext}--{new_v}.sql carries the reserved"
+    refuse(
+        f"candidate schema {ext}--{new_v}.sql carries the reserved"
         f" ${FLOOR_TAG}$ tag; the floor block is packaging, never schema"
     )
 prev_stmts = split_statements(prev_text)
@@ -655,7 +668,7 @@ for cls, key, n, s in n_order:
 if failures:
     if not data_path:
         for f in failures:
-            workflow_command.error(f"{ext}: {f}", stream=sys.stderr)
+            findings.finding(ext, f, annotate=True)
         sys.exit(1)
     for f in failures:
         workflow_command.warning(
@@ -705,8 +718,8 @@ if data_path:
 # instead of emitting a file that either the linter or the server rejects.
 guard_fixed = len("\\echo Use ALTER EXTENSION  UPDATE to load this file. \\quit")
 if guard_fixed + len(ext) > 80:
-    sys.exit(
-        f"generate-pgrx-upgrade: the psql guard would exceed 80 columns: "
+    refuse(
+        f"the psql guard would exceed 80 columns: "
         f"{guard_fixed} + len('{ext}') = {guard_fixed + len(ext)} > 80. "
         f"The guard must stay one line (only \\echo lines are ignored by the "
         f"extension loader), so shorten the extension name or re-shape the "
@@ -786,12 +799,13 @@ cp -a "/new${ext}/." "${ext}/"
 cp /work/upgrade.sql "${ext}/${NAME}--${PREV}--${NEW}.sql"
 su -w PG,NAME,PREV,NEW postgres -s /bin/bash -c '
   set -euo pipefail
-  . /work/workflow-command.sh
+  . /work/findings.sh
+  : "${MISE_TASK_NAME:=generate-pgrx-upgrade.sh}"
   psql -v ON_ERROR_STOP=1 -d upgraded -c "ALTER EXTENSION ${NAME} UPDATE TO '\''${NEW}'\'';" > /dev/null
   got=$(psql -v ON_ERROR_STOP=1 -d upgraded -tA -c \
     "SELECT extversion FROM pg_extension WHERE extname = '\''${NAME}'\'';")
   if [[ ${got} != "${NEW}" ]]; then
-    org_error "upgrade left extversion ${got}, wanted ${NEW}"
+    org_finding_annotated "" "upgrade left extversion ${got}, wanted ${NEW}"
     exit 1
   fi
   createdb fresh
@@ -802,14 +816,14 @@ su -w PG,NAME,PREV,NEW postgres -s /bin/bash -c '
   for db in upgraded fresh; do
     psql -v ON_ERROR_STOP=1 -d "${db}" -tA -v ext="${NAME}" -f /work/snapshot.sql > "/tmp/${db}.snap"
     if [[ ! -s /tmp/${db}.snap ]]; then
-      org_error "${db} catalog snapshot of ${NAME} is empty — the proof read nothing"
+      org_finding_annotated "" "${db} catalog snapshot of ${NAME} is empty — the proof read nothing"
       exit 1
     fi
   done
   if ! diff -u /tmp/upgraded.snap /tmp/fresh.snap; then
     emsg="upgraded ${NAME} catalog differs from a fresh ${NEW} install — the derived script is"
     emsg+=" unsound; see the diff above"
-    org_error "${emsg}"
+    org_finding_annotated "" "${emsg}"
     exit 1
   fi
   # Rows, not lines: a function definition spans several lines.

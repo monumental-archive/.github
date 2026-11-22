@@ -297,8 +297,11 @@ jobs:
 
       - name: Read the caller's pinned build inputs
         # The caller's config decides the versions; the canon decides
-        # which tools (#1333). One reader, release/caller_pins.py.
+        # which tools (#1333). One reader, release/caller_pins.py. A
+        # helper outside `mise run` names its findings file (#1934).
         id: pins
+        env:
+          ORG_FINDINGS: ${{ runner.temp }}/findings/${{ github.job }}-${{ strategy.job-index }}.jsonl
         run: |
           "${ORG_PYTHON}" .org-canon/release/caller_pins.py install \
             --input-of "the release's advisory triage" \
@@ -326,6 +329,8 @@ jobs:
         id: inventory
         env:
           GH_TOKEN: ${{ github.token }}
+          # A script outside `mise run` names its findings file (#1934).
+          ORG_FINDINGS: ${{ runner.temp }}/findings/${{ github.job }}-${{ strategy.job-index }}.jsonl
         # trivy exports each per-arch inventory; stele judges both by the
         # one admissibility rule (stele#396, #1371): no PURL, or a
         # versionless one, is a package every scanner is blind to (the

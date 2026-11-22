@@ -11,10 +11,15 @@
 #
 #   floor.sh EXTDIR VERSION FLOOR_XY FLOOR_NUM
 set -euo pipefail
-# The canon's one writer of workflow commands (#1660): the copy the
-# container run mounts and names, or this tree's own on the runner.
-# shellcheck source=mise/workflow-command.sh
-. "${ORG_WORKFLOW_COMMAND:-$(dirname "${BASH_SOURCE[0]}")/../../mise/workflow-command.sh}"
+# The canon's writer of findings (#1934), which brings its one writer of
+# workflow commands (#1660): the copy the container run mounts and
+# names, beside its writer of workflow commands, or this tree's own on
+# the runner, found with no command run.
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${ORG_FINDINGS_WRITER:-${org__here}/../../mise/findings.sh}"
+unset org__here
 extdir=$1
 version=$2
 xy=$3
@@ -32,7 +37,7 @@ for control in "${extdir}"/*.control; do
   for script in "${scripts[@]}"; do
     [[ -f ${script} ]] || continue
     if grep -qF "pgrx_floor" "${script}"; then
-      org_error "${script##*/} already uses the pgrx_floor tag"
+      org_finding_annotated "" "${script##*/} already uses the pgrx_floor tag"
       exit 1
     fi
     {

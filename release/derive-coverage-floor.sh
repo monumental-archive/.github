@@ -27,6 +27,14 @@
 # Leaves the working tree modified; open-release-pr.sh commits it via the
 # API, as EXTRA_FILES.
 set -euo pipefail
+
+# The writer of findings in this tree, found with no command run (#1934).
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${org__here}/../mise/findings.sh"
+unset org__here
+: "${MISE_TASK_NAME:=release:coverage-floor}"
 : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
 
 : "${VERSION:?VERSION must be set (the version being released)}"
@@ -116,7 +124,7 @@ if [[ -z ${legs} ]]; then
   echo "release:coverage-floor: measuring ${sha}" >&2
   reports=$(mktemp -d)
   if ! ORG_COVERAGE_REPORTS="${reports}" mise run coverage:check >&2; then
-    echo "release:coverage-floor: coverage:check failed measuring ${sha} (above)" >&2
+    org_finding "" "coverage:check failed measuring ${sha} (above)"
     exit 1
   fi
   legs=$(< "${reports}/coverage-figures.txt")

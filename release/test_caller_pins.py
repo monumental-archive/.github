@@ -7,15 +7,34 @@ whose message is asserted whole — a refusal that exits 1 with the wrong
 words sends a repository to the wrong remedy.
 """
 
+import contextlib
 import io
+import os
+import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest import mock
 
 import caller_pins
 
 INPUT_OF = "every class that ships a Rust binary"
+
+
+_NAMED = contextlib.ExitStack()
+
+
+def setUpModule() -> None:
+    """Name the helper by its file, as a run outside mise does (#1934).
+
+    An in-process call reads argv, whatever task runs this suite.
+    """
+    _NAMED.enter_context(mock.patch.object(sys, "argv", ["caller_pins.py"]))
+    for key in ("MISE_TASK_NAME", "ORG_FINDINGS"):
+        if key in os.environ:
+            _NAMED.callback(os.environ.__setitem__, key, os.environ.pop(key))
+    unittest.addModuleCleanup(_NAMED.close)
 
 
 def run(
@@ -135,7 +154,8 @@ class Keys(unittest.TestCase):
                 1,
                 "",
                 (
-                    "::error::cargo-pgrx is pinned under 2 keys in mise.toml"
+                    "::error::caller_pins.py: cargo-pgrx is pinned under 2 keys in"
+                    " mise.toml"
                     " (cargo:cargo-pgrx, github:pgcentralfoundation/cargo-pgrx);"
                     " mise would install each and put one on PATH, so pin it under"
                     " one key\n"
@@ -155,7 +175,8 @@ class Refusals(unittest.TestCase):
                 1,
                 "",
                 (
-                    "::error::cargo-auditable missing — pin cargo-auditable in this"
+                    "::error::caller_pins.py: cargo-auditable missing — pin"
+                    " cargo-auditable in this"
                     " repository's mise config; it is a build input of every class"
                     " that ships a Rust binary\n"
                 ),
@@ -169,12 +190,14 @@ class Refusals(unittest.TestCase):
         self.assertEqual((1, ""), (code, out))
         want: list[str] = [
             (
-                "::error::rust missing — pin rust in this repository's mise"
+                "::error::caller_pins.py: rust missing — pin rust in this"
+                " repository's mise"
                 " config; it is a build input of every class that ships a Rust"
                 " binary"
             ),
             (
-                "::error::cargo-auditable missing — pin cargo-auditable in this"
+                "::error::caller_pins.py: cargo-auditable missing — pin"
+                " cargo-auditable in this"
                 " repository's mise config; it is a build input of every class"
                 " that ships a Rust binary"
             ),
@@ -185,7 +208,7 @@ class Refusals(unittest.TestCase):
         """An empty list or table pins nothing."""
         code, _, err = install("[tools]\nrust = []\n", "rust")
         self.assertEqual(1, code)
-        self.assertIn("::error::rust missing — pin rust", err)
+        self.assertIn("::error::caller_pins.py: rust missing — pin rust", err)
 
     def test_no_config(self) -> None:
         """No config at all: refused, naming what it could not read."""
@@ -194,7 +217,8 @@ class Refusals(unittest.TestCase):
                 1,
                 "",
                 (
-                    "::error::no mise config in this repository (mise.toml,"
+                    "::error::caller_pins.py: no mise config in this repository"
+                    " (mise.toml,"
                     " .mise.toml, mise/config.toml), so rust, cargo-auditable cannot"
                     " be read; pin them in this repository's mise config: they are"
                     " build inputs of every class that ships a Rust binary\n"
@@ -217,7 +241,8 @@ class Refusals(unittest.TestCase):
                         1,
                         "",
                         (
-                            "::error::tools in mise.toml is not a table, so no tool"
+                            "::error::caller_pins.py: tools in mise.toml is not a"
+                            " table, so no tool"
                             " is pinned there; pin the build inputs of every class"
                             " that ships a Rust binary under [tools]\n"
                         ),
@@ -271,7 +296,8 @@ class IfPinned(unittest.TestCase):
                 1,
                 "",
                 (
-                    "::error::go missing — pin go in this repository's mise"
+                    "::error::caller_pins.py: go missing — pin go in this"
+                    " repository's mise"
                     " config; it is a build input of every class that ships a"
                     " Rust binary\n"
                 ),
@@ -297,7 +323,8 @@ class IfPinned(unittest.TestCase):
                 1,
                 "",
                 (
-                    "::error::cargo-pgrx is pinned under 2 keys in mise.toml"
+                    "::error::caller_pins.py: cargo-pgrx is pinned under 2 keys in"
+                    " mise.toml"
                     " (cargo:cargo-pgrx, github:pgcentralfoundation/cargo-pgrx);"
                     " mise would install each and put one on PATH, so pin it under"
                     " one key\n"
@@ -344,7 +371,8 @@ class Env(unittest.TestCase):
                 1,
                 "",
                 (
-                    "::error::cargo-pgrx missing — pin cargo-pgrx in this"
+                    "::error::caller_pins.py: cargo-pgrx missing — pin cargo-pgrx in"
+                    " this"
                     " repository's mise config; it is a build input of the"
                     " pgrx-extension class\n"
                 ),
@@ -457,7 +485,8 @@ class Majors(unittest.TestCase):
                 1,
                 "",
                 (
-                    "::error::postgresql-binaries pins no 13.x in mise.toml (pinned:"
+                    "::error::caller_pins.py: postgresql-binaries pins no 13.x in"
+                    " mise.toml (pinned:"
                     " 18.6.1, 17.11.1, 16.15.1, 15.19.1, 14.24.1); this job runs"
                     " major 13 — pin it beside the others; it is a build input of"
                     " the gate's pgrx legs\n"
@@ -482,7 +511,8 @@ class Majors(unittest.TestCase):
                 1,
                 "",
                 (
-                    "::error::postgresql-binaries pins no 18.x in mise.toml (pinned:"
+                    "::error::caller_pins.py: postgresql-binaries pins no 18.x in"
+                    " mise.toml (pinned:"
                     " 17.11.1); this job runs major 18 — pin it beside the others;"
                     " it is a build input of the gate's pgrx legs\n"
                 ),
@@ -498,7 +528,8 @@ class Majors(unittest.TestCase):
                 1,
                 "",
                 (
-                    "::error::postgresql-binaries pins major 18 2 times in mise.toml"
+                    "::error::caller_pins.py: postgresql-binaries pins major 18 2"
+                    " times in mise.toml"
                     " (18.6.1, 18.5.0); mise would install each and the job could"
                     " take either, so pin one\n"
                 ),
@@ -513,7 +544,8 @@ class Majors(unittest.TestCase):
                 1,
                 "",
                 (
-                    "::error::postgresql-binaries missing — pin postgresql-binaries"
+                    "::error::caller_pins.py: postgresql-binaries missing — pin"
+                    " postgresql-binaries"
                     " in this repository's mise config; it is a build input of the"
                     " gate's pgrx legs\n"
                 ),

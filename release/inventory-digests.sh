@@ -16,9 +16,10 @@ set -euo pipefail
 : "${GITHUB_ACTOR:?}"
 : "${GH_TOKEN:?}"
 : "${GITHUB_OUTPUT:?}"
-# The canon's one writer of workflow commands (#1660), in this tree.
-# shellcheck source=mise/workflow-command.sh
-. "$(dirname "${BASH_SOURCE[0]}")/../mise/workflow-command.sh"
+# The canon's writer of findings (#1934), which brings its one writer
+# of workflow commands (#1660), in this tree.
+# shellcheck source=mise/findings.sh
+. "$(dirname "${BASH_SOURCE[0]}")/../mise/findings.sh"
 image="ghcr.io/$(printf '%s' "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
 printf '%s' "${GH_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
 mkdir -p dist
@@ -26,7 +27,7 @@ subjects=""
 for arch in amd64 arm64; do
   digest=$(cat "digests/${arch}" 2> /dev/null || echo "")
   if [[ ! ${digest} =~ ^sha256:[0-9a-f]{64}$ ]]; then
-    org_error "no ${arch} digest to inventory; refusing to decide about a partial image"
+    org_finding_annotated "" "no ${arch} digest to inventory; refusing to decide about a partial image"
     exit 1
   fi
   trivy image --config /dev/null --format spdx-json --output "dist/${arch}.spdx.json" "${image}@${digest}"

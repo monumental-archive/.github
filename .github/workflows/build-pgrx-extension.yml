@@ -239,14 +239,16 @@ jobs:
         run: .org-canon/release/pgrx/glibc-floor.sh /tmp/out/pkgroot "${GLIBC_FLOOR}"
       - name: Smoke the package on both distros
         # CREATE EXTENSION on a fresh cluster, then the caller's smoke
-        # script (release/pgrx/smoke.sh), on bookworm and trixie.
+        # script (release/pgrx/smoke.sh), on bookworm and trixie. The
+        # canon's mise/ is mounted whole at /opt/org, so the writer of
+        # findings sits beside the writer of workflow commands (#1934).
         if: ${{ !inputs.repro }}
         env:
           UNTRUSTED_SMOKE: ${{ inputs.smoke-test }}
         run: |
           set -euo pipefail
           pgrx=$(realpath .org-canon/release/pgrx)
-          wc=$(realpath .org-canon/mise/workflow-command.sh)
+          writers=$(realpath .org-canon/mise)
           for image in "${BUILD_IMAGE}" "${SMOKE_IMAGE}"; do
             docker run --rm \
               --env PG \
@@ -254,8 +256,8 @@ jobs:
               --volume /tmp/out/pkgroot:/pkgroot:ro \
               --volume "${PWD}:/src:ro" \
               --volume "${pgrx}:/pgrx:ro" \
-              --volume "${wc}:/opt/org/workflow-command.sh:ro" \
-              --env ORG_WORKFLOW_COMMAND=/opt/org/workflow-command.sh \
+              --volume "${writers}:/opt/org:ro" \
+              --env ORG_FINDINGS_WRITER=/opt/org/findings.sh \
               "${image}" \
               bash /pgrx/smoke.sh
           done

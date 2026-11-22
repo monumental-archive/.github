@@ -279,13 +279,27 @@ class MissingSibling(unittest.TestCase):
 
     def test_publish_crates_without_crates_index(self) -> None:
         """publish_crates.py names mise/crates_index.py and exits non-zero."""
-        r = self.alone(
-            _HERE.parent / "release" / "publish_crates.py", "release/publish_crates.py"
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        helper = "release/publish_crates.py"
+        # A stub of its own text, so the helper resolves its siblings in
+        # this tree; the writer beside it, the missing sibling removed.
+        root = hermetic.canon(
+            tmp.name, stubs={helper: (_HERE.parent / helper).read_text()}
+        )
+        (root / "mise" / "crates_index.py").unlink()
+        r = subprocess.run(
+            [sys.executable, str(root / helper), "--help"],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=hermetic.env(MISE_TASK_NAME="lint:bash-portability"),
         )
         self.assertNotEqual(r.returncode, 0)
         self.assertEqual(
             r.stderr,
-            "publish-crates: mise/crates_index.py did not arrive in the canon tree\n",
+            "lint:bash-portability: mise/crates_index.py did not arrive in the"
+            " canon tree\n",
         )
 
 

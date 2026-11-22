@@ -36,6 +36,7 @@ if TYPE_CHECKING:
 # come first.
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
+import findings
 import workflow_command
 
 
@@ -129,7 +130,7 @@ def main(env: Mapping[str, str] | None = None) -> int:
     try:
         workflow_command.notice(build(env))
     except RefusedError as e:
-        workflow_command.error(str(e))
+        findings.finding("", str(e), annotate=True)
         return 1
     except GitFailedError as e:
         return e.status

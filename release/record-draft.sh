@@ -56,18 +56,26 @@ run_url="${RUN_URL:-}"
 fixed_forward="${FIXED_FORWARD:-}"
 registries="${REGISTRIES:-}"
 
+# The writer of findings in this tree, found with no command run (#1934).
+org__here=${BASH_SOURCE[0]%/*}
+[[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
+# shellcheck source=mise/findings.sh
+. "${org__here}/../mise/findings.sh"
+unset org__here
+: "${MISE_TASK_NAME:=record-draft}"
+
 [[ -n ${repo} ]] || {
-  echo "record-draft: REPO is unset" >&2
+  org_finding "" "REPO is unset"
   exit 1
 }
 [[ -n ${tag} ]] || {
-  echo "record-draft: TAG is unset" >&2
+  org_finding "" "TAG is unset"
   exit 1
 }
 case "${kind}" in
   burn | rehearsal) ;;
   *)
-    echo "record-draft: KIND must be burn or rehearsal, got '${kind}'" >&2
+    org_finding "" "KIND must be burn or rehearsal, got '${kind}'"
     exit 1
     ;;
 esac
@@ -82,13 +90,13 @@ public=""
 partial=""
 if [[ -n ${registries} ]]; then
   if [[ ${kind} != "burn" || -z ${run_url} ]]; then
-    echo "record-draft: REGISTRIES is evidence of a publish run: it needs KIND=burn and RUN_URL" >&2
+    org_finding "" "REGISTRIES is evidence of a publish run: it needs KIND=burn and RUN_URL"
     exit 1
   fi
   while IFS= read -r line; do
     [[ -n ${line} ]] || continue
     if [[ ${line} != *=* || -z ${line%=*} ]]; then
-      echo "record-draft: REGISTRIES line '${line}' is not <registry>=<job result>" >&2
+      org_finding "" "REGISTRIES line '${line}' is not <registry>=<job result>"
       exit 1
     fi
     name="${line%=*}"
@@ -98,8 +106,8 @@ if [[ -n ${registries} ]]; then
       failure | cancelled) partial+="- ${name}: may be partly published"$'\n' ;;
       skipped | "") ;;
       *)
-        echo "record-draft: REGISTRIES: ${name} has job result '${result}'," \
-          "not success, failure, cancelled, skipped or empty" >&2
+        org_finding "REGISTRIES" "${name} has job result '${result}',\
+ not success, failure, cancelled, skipped or empty"
         exit 1
         ;;
     esac
@@ -111,7 +119,7 @@ fi
 # already published. Same degraded-forge discipline as the audits.
 if ! is_draft=$(gh release view "${tag}" --repo "${repo}" \
   --json isDraft --jq '.isDraft' 2> /dev/null); then
-  echo "record-draft: no release at ${repo}@${tag}, or it could not be read" >&2
+  org_finding "" "no release at ${repo}@${tag}, or it could not be read"
   exit 1
 fi
 if [[ ${is_draft} != "true" ]]; then
