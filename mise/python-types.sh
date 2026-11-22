@@ -33,7 +33,7 @@ unset org__here
 belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
 label="${1:?expected the task name}"
 # The task this script reports for, where mise named none (#1934).
-: "${MISE_TASK_NAME:=${label}}"
+org_task "${label}"
 
 files=$(git ls-files ':!vendor/**' '*.py' '*.pyi')
 [[ -n ${files} ]] || {

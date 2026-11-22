@@ -19,7 +19,7 @@ org__here=${BASH_SOURCE[0]%/*}
 . "${org__here}/findings.sh"
 unset org__here
 # The task this script reports for, where mise named none (#1934).
-: "${MISE_TASK_NAME:=lint:deny}"
+org_task "lint:deny"
 locks=$(git ls-files ':!vendor/**' "Cargo.lock" "*/Cargo.lock")
 [[ -n ${locks} ]] || {
   echo "lint:deny: no Cargo.lock tracked, skipped"

@@ -109,7 +109,7 @@ unset org__here
 # actually ran.
 label="${1:-coverage:measure}"
 # The task this script reports for, where mise named none (#1934).
-: "${MISE_TASK_NAME:=${label}}"
+org_task "${label}"
 belt_dir=$(dirname "${BASH_SOURCE[0]}")
 
 # Which language legs to run. Default `all`: every caller that reads

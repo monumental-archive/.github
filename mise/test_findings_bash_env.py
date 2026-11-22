@@ -19,11 +19,16 @@ SSH_CLIENT set, at a shell level under 2: its rsh/sshd branch reads
 (#1934), so under it the body keeps the writer where a plain `bash -c`
 loses it.
 
+A script run outside `mise run` states its task with `org_task`
+(#1979), and a Python child it starts records under that name, not
+its own file's: the export is the function's, so no site can forget it.
+
 stdlib `unittest`, matching the rest of mise/.
 """
 
 import socket
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -63,6 +68,17 @@ EXPECTED: list[dict[str, object]] = [
 
 
 PROBE = "type -t org_finding || echo none"
+
+PLANTED = """. "$1"
+org_task test:planted
+"$2" "$3"
+"""
+
+CHILD = f"""import sys
+sys.path.insert(0, {str(MISE)!r})
+import findings
+findings.finding("", "m")
+"""
 
 
 def config() -> dict[str, object]:
@@ -196,6 +212,52 @@ class BashEnvRows(unittest.TestCase):
             "{% if env.ORG_BELT_DIR %}{{ env.ORG_BELT_DIR }}/findings.sh{% endif %}",
         )
         self.assertTrue(WRITER.is_file())
+
+
+class OrgTaskRows(unittest.TestCase):
+    """`org_task` names a bare script's task for every child (#1979)."""
+
+    def run_planted(self, **env: str) -> subprocess.CompletedProcess[str]:
+        """Run a script that sources the writer, then starts a Python child.
+
+        Returns:
+            The finished process.
+
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "planted.sh").write_text(PLANTED, encoding="utf-8")
+            (root / "child.py").write_text(CHILD, encoding="utf-8")
+            given = hermetic.env(PYTHONUTF8="1", ORG_FINDINGS="", **env)
+            if "MISE_TASK_NAME" not in env:
+                self.assertNotIn("MISE_TASK_NAME", given)
+            return subprocess.run(
+                [
+                    str(hermetic.tool("bash")),
+                    str(root / "planted.sh"),
+                    str(WRITER),
+                    sys.executable,
+                    str(root / "child.py"),
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                env=given,
+                check=False,
+                cwd=root,
+            )
+
+    def test_a_bare_script_names_its_task_to_a_python_child(self) -> None:
+        """With no MISE_TASK_NAME, the child prints the task, not child.py."""
+        done = self.run_planted()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stderr, "test:planted: m\n")
+
+    def test_a_name_mise_gave_wins(self) -> None:
+        """Under mise run, mise's own name reaches the child unchanged."""
+        done = self.run_planted(MISE_TASK_NAME="lint:demo")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stderr, "lint:demo: m\n")
 
 
 if __name__ == "__main__":
