@@ -57,15 +57,11 @@ unknown() {
 rc=0
 trap 'rc=$?; cleanup; [ -n "${org_done:-}" ] || [ "${rc}" -ne 0 ] || rc=1; exit "${rc}"' EXIT
 
-# Read through a file, so a listing that fails is red, never a shorter
-# list.
-list=$(mktemp) || exit 1
-org_tracked ':!vendor/**' ':!*/vendor/*' "go.mod" "*/go.mod" > "${list}" || {
-  rm -- "${list}"
-  exit 1
-}
-mods=() && while IFS= read -r -d '' m; do mods+=("${m}"); done < "${list}"
-rm -- "${list}"
+# A listing that fails is red, never a shorter list: this script runs
+# without errexit, so the failure is carried by `|| exit 1`, and
+# org_tracked_read returns 1 on every failure path itself.
+mods=()
+org_tracked_read mods ':!vendor/**' ':!*/vendor/*' "go.mod" "*/go.mod" || exit 1
 [[ -n ${mods[0]+set} ]] || {
   [[ -z ${FUZZ_TARGET:-} ]] || unknown audit:go-fuzz "of this tree (no go.mod tracked)"
   echo "audit:go-fuzz: no go.mod tracked, skipped"

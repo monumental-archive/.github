@@ -73,15 +73,14 @@ org__fuzz_measure_rust() {
   # and nothing outside the repository (registry, toolchain, generated
   # code) is named.
   root=$(pwd -P)
-  tracked=$(mktemp) || return 1
-  org_tracked '*.rs' ':!fuzz/fuzz_targets/**' > "${tracked}" || {
-    rm -- "${tracked}"
-    return 1
-  }
-  while IFS= read -r -d '' file; do
+  # Its callers run with and without errexit, so the failure is
+  # returned by name; org_tracked_read returns 1 on every failure path
+  # itself, so the `||` hides none.
+  tracked=()
+  org_tracked_read tracked '*.rs' ':!fuzz/fuzz_targets/**' || return 1
+  for file in ${tracked[@]+"${tracked[@]}"}; do
     sources+=("${root}/${file}")
-  done < "${tracked}"
-  rm -- "${tracked}"
+  done
   verbose=$(rustc -vV) || return 1
   host=$(sed -n 's/^host: //p' <<< "${verbose}")
   sysroot=$(rustc --print sysroot) || return 1

@@ -33,6 +33,11 @@ import tracked
 
 BELT = Path(__file__).resolve().parent
 BASH = hermetic.tool("bash")
+# The machine's own bash as well (#1986): on a Mac it is 3.2, which has
+# no `declare -n` and no `printf -v` into an array element, and the
+# helper fills its array by name.
+SYSTEM_BASH = hermetic.optional_tool("bash", path="/bin")
+SHELLS = (BASH,) if SYSTEM_BASH in {None, BASH} else (BASH, str(SYSTEM_BASH))
 GIT = hermetic.tool("git")
 
 # The three tracked names, and the untracked tool output beside them.
@@ -40,6 +45,7 @@ SPACED = "a b.md"
 ACCENTED = "é.md"
 PLAIN = "plain.md"
 NAMES = (SPACED, ACCENTED, PLAIN)
+WANT: list[str] = sorted(NAMES)
 UNTRACKED = "mutants.out/log.txt"
 
 # A misspelling typos knows, and what it asks for.
@@ -47,6 +53,35 @@ TYPO = "t" + "eh"
 TYPO_MESSAGE = f"`{TYPO}` should be `the`"
 
 CLEAN_MARKDOWN = "# Title\n\nSome text.\n"
+
+# A git that fails every call, as git does outside a repository.
+FAILING_GIT = "#!/bin/sh\necho 'git: planted failure' >&2\nexit 128\n"
+
+
+def read_into(
+    shell: str, cwd: Path, pathspecs: str, tmpdir: Path
+) -> subprocess.CompletedProcess[bytes]:
+    """Run `org_tracked_read` in `cwd` and print what it filled, NUL-separated.
+
+    `shell` is the bash it runs under; `tmpdir` is the run's TMPDIR, so
+    a row can see the file it leaves.
+
+    Returns:
+        The finished run.
+
+    """
+    script = (
+        f"listed=() && org_tracked_read listed {pathspecs}\n"
+        '[[ -z ${listed[0]+set} ]] || printf "%s\\0" "${listed[@]}"\n'
+    )
+    return subprocess.run(
+        [shell, "--norc", "-euo", "pipefail", "-c", script],
+        cwd=cwd,
+        env=hermetic.env(cwd.parent / "home", TMPDIR=str(tmpdir))
+        | {"BASH_ENV": str(BELT / "findings.sh")},
+        capture_output=True,
+        check=False,
+    )
 
 
 def body(task: str) -> str:
@@ -74,9 +109,18 @@ def plant(tree: Path, files: dict[str, str], untracked: dict[str, str]) -> None:
 
 
 def run_task(
-    task: str, files: dict[str, str], untracked: dict[str, str] | None = None
+    task: str,
+    files: dict[str, str],
+    untracked: dict[str, str] | None = None,
+    *,
+    failing_git: bool = False,
+    shell: str = BASH,
 ) -> subprocess.CompletedProcess[str]:
     """Plant a repository and run one task's body in it.
+
+    With `failing_git`, the body meets a `git` first on PATH that says
+    so on stderr and exits 128, as git does outside a repository.
+    `shell` replaces the belt's bash, with mise's flags kept.
 
     Returns:
         The finished run, both streams captured.
@@ -86,11 +130,18 @@ def run_task(
         tree = Path(tmp) / "repo"
         tree.mkdir()
         plant(tree, files, untracked or {})
+        env = hermetic.env(Path(tmp) / "home", ORG_BELT_DIR=str(BELT))
+        if failing_git:
+            stubs = Path(tmp) / "stubs"
+            stubs.mkdir()
+            (stubs / "git").write_text(FAILING_GIT, encoding="utf-8")
+            (stubs / "git").chmod(0o755)
+            env["PATH"] = f"{stubs}:{env.get('PATH', '')}"
         as_mise = hermetic.task_run(task, body(task))
         return subprocess.run(
-            as_mise.argv,
+            [shell, *as_mise.argv[1:]],
             cwd=tree,
-            env=hermetic.env(Path(tmp) / "home", ORG_BELT_DIR=str(BELT)) | as_mise.env,
+            env=env | as_mise.env,
             capture_output=True,
             text=True,
             check=False,
@@ -127,20 +178,59 @@ class Producers(unittest.TestCase):
         )
         self.assertEqual((0, b""), (done.returncode, done.stderr))
         listed = [n.decode() for n in done.stdout.split(b"\0") if n]
-        self.assertEqual(sorted(NAMES), sorted(listed))
+        got: list[str] = sorted(listed)
+        self.assertEqual(WANT, got)
         self.assertNotIn(UNTRACKED, listed)
+
+    def test_org_tracked_read_fills_the_array_with_the_three_names(self) -> None:
+        """One element per name, unquoted; no empty last element; no file left."""
+        tree = self.planted()
+        for shell in SHELLS:
+            with self.subTest(shell=shell), tempfile.TemporaryDirectory() as tmp:
+                done = read_into(shell, tree, "", Path(tmp))
+                left: list[Path] = list(Path(tmp).iterdir())
+            self.assertEqual((0, b""), (done.returncode, done.stderr))
+            got: list[str] = sorted(n.decode() for n in done.stdout.split(b"\0")[:-1])
+            self.assertEqual(WANT, got)
+            self.assertEqual(list[Path](), left)
+
+    def test_org_tracked_read_of_nothing_is_an_empty_array(self) -> None:
+        """A pathspec matching nothing: exit 0 and no element at all."""
+        tree = self.planted()
+        for shell in SHELLS:
+            with self.subTest(shell=shell), tempfile.TemporaryDirectory() as tmp:
+                done = read_into(shell, tree, "'*.zz'", Path(tmp))
+            self.assertEqual((0, b"", b""), (done.returncode, done.stdout, done.stderr))
+
+    def test_org_tracked_read_fails_when_git_fails_and_leaves_no_file(self) -> None:
+        """Outside a repository: git's error, exit 1 under errexit, no file."""
+        for shell in SHELLS:
+            with self.subTest(shell=shell), tempfile.TemporaryDirectory() as tmp:
+                outside = Path(tmp) / "plain"
+                outside.mkdir()
+                scratch = Path(tmp) / "tmp"
+                scratch.mkdir()
+                done = read_into(shell, outside, "", scratch)
+                left: list[Path] = list(scratch.iterdir())
+            self.assertEqual(1, done.returncode)
+            self.assertEqual(b"", done.stdout)
+            self.assertIn(b"fatal: not a git repository", done.stderr)
+            self.assertEqual(list[Path](), left)
 
     def test_tracked_lists_the_three_names_from_a_root(self) -> None:
         """The Python producer, the same list, the untracked log absent."""
         tree = self.planted()
-        self.assertEqual(sorted(NAMES), sorted(tracked.tracked(root=tree)))
+        got: list[str] = sorted(tracked.tracked(root=tree))
+        self.assertEqual(WANT, got)
 
     def test_tracked_lists_the_working_directory_by_pathspec(self) -> None:
         """No root: the working directory's tree; a pathspec narrows it."""
         tree = self.planted()
         with contextlib.chdir(tree):
-            self.assertEqual([ACCENTED], tracked.tracked("é*"))
-            self.assertEqual(sorted(NAMES), sorted(tracked.tracked()))
+            narrowed: list[str] = tracked.tracked("é*")
+            every: list[str] = sorted(tracked.tracked())
+        self.assertEqual(list[str]([ACCENTED]), narrowed)
+        self.assertEqual(WANT, every)
 
     def test_stdin_paths_reads_a_nul_separated_list(self) -> None:
         """A name with a space or a newline is one path; empties dropped."""
@@ -152,8 +242,9 @@ class Producers(unittest.TestCase):
 
     def test_split_decodes_each_entry_as_a_file_name(self) -> None:
         """Bytes that are not UTF-8 survive as the name os.fsdecode makes."""
+        want: list[str] = [SPACED, ACCENTED, "\udcff"]
         self.assertEqual(
-            [SPACED, ACCENTED, "\udcff"],
+            want,
             tracked.split(SPACED.encode() + b"\0" + ACCENTED.encode() + b"\0\xff\0"),
         )
 
@@ -195,10 +286,14 @@ class Markdown(unittest.TestCase):
     """lint:markdown hands rumdl one argument per tracked name."""
 
     def test_spaced_and_accented_names_pass_clean(self) -> None:
-        """Red at 1c4fbe22 with `File not found: a`; green now."""
-        done = run_task("lint:markdown", dict.fromkeys(NAMES, CLEAN_MARKDOWN))
-        self.assertEqual(0, done.returncode, done.stdout + done.stderr)
-        self.assertNotIn("File not found", done.stdout + done.stderr)
+        """Red at 1c4fbe22 with `File not found: a`; green now, both shells."""
+        for shell in SHELLS:
+            with self.subTest(shell=shell):
+                done = run_task(
+                    "lint:markdown", dict.fromkeys(NAMES, CLEAN_MARKDOWN), shell=shell
+                )
+                self.assertEqual(0, done.returncode, done.stdout + done.stderr)
+                self.assertIn("Success: No issues found in 3 files", done.stdout)
 
     def test_a_violation_in_the_accented_name_is_red_by_name(self) -> None:
         """The finding names `é.md` as written, never git's octal escapes."""
@@ -212,6 +307,24 @@ class Markdown(unittest.TestCase):
             " ones; the rest by hand",
             done.stderr,
         )
+
+
+class FailingGit(unittest.TestCase):
+    """A listing that fails is red, never "no files, skipped"."""
+
+    def test_a_listing_task_fails_when_git_fails(self) -> None:
+        """lint:markdown, with git exiting 128: nonzero, git's words, no skip."""
+        for shell in SHELLS:
+            with self.subTest(shell=shell):
+                done = run_task(
+                    "lint:markdown",
+                    dict.fromkeys(NAMES, CLEAN_MARKDOWN),
+                    failing_git=True,
+                    shell=shell,
+                )
+                self.assertNotEqual(0, done.returncode)
+                self.assertIn("git: planted failure", done.stderr)
+                self.assertNotIn("skipped", done.stdout + done.stderr)
 
 
 class Shell(unittest.TestCase):

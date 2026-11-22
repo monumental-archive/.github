@@ -22,17 +22,17 @@ org vocabulary the belt supplies.
 in this directory because no repo needs one by default. Measured on the
 belt's pin, sqlfluff 4.3.0, against the delivered `--config`: the file
 is honoured **even when the path is given explicitly**, which is the
-question worth asking, since `lint:sql` hands sqlfluff the tracked
-list (`org_tracked`) rather than letting it walk. A named file drops out of the run with
-a `WARNING` naming the ignore, exit 0. That is the escape for a
-GENERATED file only — a pgrx schema snapshot or any other transcript of
-what a tool emits, where conforming the file to a style rule is what
-breaks it, on the standing rule that a file reformatted away from what
-its writer emits stops being evidence. It is repo content with a written
-reason per entry, never a silent lowering, and never a home for findings
-the repo simply has not fixed. It is not a seam: nothing in the belt
-reads it, nothing in a repo declares anything to the belt, and the org
-ships no escape mechanism of its own (#694).
+question worth asking, since `lint:sql` hands sqlfluff the tracked list
+(`org_tracked`) rather than letting it walk. A named file drops out of
+the run with a `WARNING` naming the ignore, exit 0. That is the escape
+for a GENERATED file only — a pgrx schema snapshot or any other
+transcript of what a tool emits, where conforming the file to a style
+rule is what breaks it, on the standing rule that a file reformatted
+away from what its writer emits stops being evidence. It is repo content
+with a written reason per entry, never a silent lowering, and never a
+home for findings the repo simply has not fixed. It is not a seam:
+nothing in the belt reads it, nothing in a repo declares anything to the
+belt, and the org ships no escape mechanism of its own (#694).
 
 Suppressing one finding rather than one file is sqlfluff's per-line
 `-- noqa: CODE`, and it carries **one trap, measured in the same probe**:

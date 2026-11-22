@@ -46,7 +46,7 @@ belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lef
 python="${ORG_PYTHON:?${ORG_PYTHON_UNSET:-unset — the belt Python}}"
 
 # The lock files decide: no proptest in one, nothing here is a property.
-locks=() && while IFS= read -r -d '' f; do locks+=("${f}"); done < <(org_tracked ':!vendor/**' Cargo.lock '*/Cargo.lock')
+locks=() && org_tracked_read locks ':!vendor/**' Cargo.lock '*/Cargo.lock'
 pins=""
 if [[ -n ${locks[0]+set} ]]; then
   pins=$(printf '%s\0' "${locks[@]}" | xargs -0 "${python}" "${belt}/rust_properties.py" locked) || {

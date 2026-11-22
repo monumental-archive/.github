@@ -18,7 +18,7 @@
 # Versioning: Zenodo's concept DOI covers the software; each release gets
 # a version DOI. The concept is found by the concept-DOI identifier
 # CITATION.cff records — a direct fetch, not a search, so the title
-# listing's 100-deposition page cap can never mis-resolve it (#316
+# listing's 100-deposition page cap can never resolve it wrongly (#316
 # addendum A: past the cap a title search either errors on newversion
 # or silently splits the citation record). With no identifier recorded
 # this is the FIRST mint: guarded by asserting no submitted deposition

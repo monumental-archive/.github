@@ -35,8 +35,8 @@ label="${1:?expected the task name}"
 # The task this script reports for, where mise named none (#1934).
 org_task "${label}"
 
-files=$(git ls-files ':!vendor/**' '*.py' '*.pyi')
-[[ -n ${files} ]] || {
+args=() && org_tracked_read args ':!vendor/**' '*.py' '*.pyi'
+[[ -n ${args[0]+set} ]] || {
   echo "${label}: no Python tracked, skipped"
   exit 0
 }
@@ -64,11 +64,6 @@ exe=$(command -v python3)
 if command -v hypothesis > /dev/null; then
   exe=$("${ORG_PYTHON}" "${belt}/tool_python.py" "${label}" hypothesis) || exit 1
 fi
-
-args=()
-while IFS= read -r f; do
-  args+=("${f}")
-done <<< "${files}"
 
 red=0
 seams=$("${ORG_PYTHON}" "${belt}/python_types_seams.py" "${args[@]}") || red=1

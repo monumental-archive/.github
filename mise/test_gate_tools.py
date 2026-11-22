@@ -366,9 +366,12 @@ def guard_paths(lines: list[tuple[str, str]]) -> set[str]:
     # rest of it (#1410: biome disabled on stele, which tracks JSON only).
     joined = re.sub(r"\\\n", " ", "\n".join(text for _, text in lines))
     for text in joined.splitlines():
-        # `org_tracked() {` is the producer's definition, not a call.
+        # `org_tracked() {` is the producer's definition, not a call, and
+        # `org_tracked_read`'s first word is the array it fills.
         for seg in found(
-            r"(?:\bgit ls-files|\borg_tracked\b(?!\(\)))([^|)>;&]*)", text
+            r"(?:\bgit ls-files|\borg_tracked_read\s+\S+|\borg_tracked\b(?!\(\)))"
+            r"([^|)>;&]*)",
+            text,
         ):
             words = [
                 typed_std.group(m, 1)

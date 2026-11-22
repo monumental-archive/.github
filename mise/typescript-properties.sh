@@ -56,7 +56,7 @@ belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lef
 
 # The lockfile decides, as for the coverage leg (#1357): no fast-check
 # in it, nothing here can be a property.
-locks=() && while IFS= read -r -d '' f; do locks+=("${f}"); done < <(org_tracked pnpm-lock.yaml package-lock.json yarn.lock bun.lock)
+locks=() && org_tracked_read locks pnpm-lock.yaml package-lock.json yarn.lock bun.lock
 pins=""
 if [[ -n ${locks[0]+set} ]]; then
   pins=$(printf '%s\0' "${locks[@]}" | xargs -0 python3 "${belt}/typescript_properties.py" locked)
@@ -67,7 +67,7 @@ grep -qx fast-check <<< "${pins}" || {
 }
 
 if [[ ${profile} == lint ]]; then
-  sources=() && while IFS= read -r -d '' f; do sources+=("${f}"); done < <(org_tracked ':!vendor/**' '*.ts' '*.tsx' '*.mts' '*.cts' '*.js' '*.jsx' '*.mjs' '*.cjs')
+  sources=() && org_tracked_read sources ':!vendor/**' '*.ts' '*.tsx' '*.mts' '*.cts' '*.js' '*.jsx' '*.mjs' '*.cjs'
   [[ -n ${sources[0]+set} ]] || {
     echo "${label}: no TypeScript or JavaScript tracked, skipped"
     exit 0
@@ -83,7 +83,7 @@ if [[ ${profile} == lint ]]; then
   exit 0
 fi
 
-files=() && while IFS= read -r -d '' f; do files+=("${f}"); done < <(org_tracked ':!vendor/**' '*.prop.test.ts' '*.prop.test.tsx' '*.prop.test.mts' '*.prop.test.cts')
+files=() && org_tracked_read files ':!vendor/**' '*.prop.test.ts' '*.prop.test.tsx' '*.prop.test.mts' '*.prop.test.cts'
 [[ -n ${files[0]+set} ]] || {
   echo "${label}: no *.prop.test.{ts,tsx,mts,cts} tracked, skipped"
   exit 0

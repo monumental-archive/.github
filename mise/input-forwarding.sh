@@ -32,7 +32,7 @@ unset org__here
 # The task this script reports for, where mise named none (#1934).
 org_task "lint:input-forwarding"
 
-files=() && while IFS= read -r -d '' f; do files+=("${f}"); done < <(org_tracked ':!vendor/**' ".github/workflows/*.y*ml")
+files=() && org_tracked_read files ':!vendor/**' ".github/workflows/*.y*ml"
 [[ -n ${files[0]+set} ]] || {
   echo "lint:input-forwarding: no workflows, skipped"
   exit 0

@@ -850,7 +850,7 @@ dir = "{{cwd}}"
 # extend-exclude applying to the paths named. typos still checks each
 # named file's NAME.
 run = '''
-files=() && while IFS= read -r -d '' f; do files+=("${f}"); done < <(org_tracked)
+files=() && org_tracked_read files
 [[ -n ${files[0]+set} ]] || {
   echo "lint:typos: empty tree, skipped"
   exit 0
@@ -891,14 +891,14 @@ dir = "{{cwd}}"
 #   file is checked here before either half runs.
 run = '''
 set -euo pipefail
-files=() && while IFS= read -r -d '' f; do files+=("${f}"); done < <(org_tracked ":!vendor/**" "*.toml")
+files=() && org_tracked_read files ":!vendor/**" "*.toml"
 [[ -n ${files[0]+set} ]] || {
   echo "lint:toml: no TOML tracked, skipped"
   exit 0
 }
-detail=() && while IFS= read -r -d '' f; do detail+=("tracked: ${f}"); done < <(org_tracked "taplo.toml" "*/taplo.toml" ".taplo.toml" "*/.taplo.toml")
+detail=() && org_tracked_read detail "taplo.toml" "*/taplo.toml" ".taplo.toml" "*/.taplo.toml"
 if [[ -n ${detail[0]+set} ]]; then
-  org_finding "" "the belt delivers the org TOML format; a repo must not track its own" "${detail[@]}" \
+  org_finding "" "the belt delivers the org TOML format; a repo must not track its own" "${detail[@]/#/tracked: }" \
     "git rm --cached it: --config replaces it, so it changes nothing and reads as if it did" \
     "its exclude globs steer taplo's walker, which the belt never uses — the file list is git's"
   exit 1
@@ -927,7 +927,7 @@ dir = "{{cwd}}"
 # produces edits the gate then rejects.
 run = '''
 set -euo pipefail
-files=() && while IFS= read -r -d '' f; do files+=("${f}"); done < <(org_tracked ":!vendor/**" "*.toml")
+files=() && org_tracked_read files ":!vendor/**" "*.toml"
 [[ -n ${files[0]+set} ]] || {
   echo "fix:toml: no TOML tracked, nothing to fix"
   exit 0
@@ -944,7 +944,7 @@ printf '%s\0' "${files[@]}" | xargs -0 taplo fmt --config "${config}"
 description = "Markdown lint (rumdl, full rule set)"
 dir = "{{cwd}}"
 run = '''
-files=() && while IFS= read -r -d '' f; do files+=("${f}"); done < <(org_tracked ":!vendor/**" "*.md" "*.markdown")
+files=() && org_tracked_read files ":!vendor/**" "*.md" "*.markdown"
 if [[ -n ${files[0]+set} ]]; then
   printf '%s\0' "${files[@]}" | xargs -0 rumdl check --config "${ORG_BELT_DIR}/rumdl.toml" || {
     org_finding "" "findings above — run fix:markdown for the fixable ones; the rest by hand"
@@ -999,7 +999,7 @@ dir = "{{cwd}}"
 # linted. A repository's own .sqlfluffignore keeps working beside it.
 run = '''
 set -euo pipefail
-tracked=() && while IFS= read -r -d '' f; do tracked+=("${f}"); done < <(org_tracked ':!vendor/**' "*.sql")
+tracked=() && org_tracked_read tracked ':!vendor/**' "*.sql"
 [[ -n ${tracked[0]+set} ]] || {
   echo "lint:sql: no SQL tracked, skipped"
   exit 0
@@ -1038,7 +1038,7 @@ dir = "{{cwd}}"
 # same helper (#1240): rewriting one is what turns `lint:pg-schema` red.
 run = '''
 set -euo pipefail
-tracked=() && while IFS= read -r -d '' f; do tracked+=("${f}"); done < <(org_tracked ':!vendor/**' "*.sql")
+tracked=() && org_tracked_read tracked ':!vendor/**' "*.sql"
 [[ -n ${tracked[0]+set} ]] || {
   echo "fix:sql: no SQL tracked, skipped"
   exit 0
@@ -1104,7 +1104,7 @@ dir = "{{cwd}}"
 # processing error and fails like everything else.
 run = '''
 set -euo pipefail
-manifests=() && while IFS= read -r -d '' f; do manifests+=("${f}"); done < <(org_tracked ':!vendor/**' "Cargo.toml" "*/Cargo.toml")
+manifests=() && org_tracked_read manifests ':!vendor/**' "Cargo.toml" "*/Cargo.toml"
 [[ -n ${manifests[0]+set} ]] || {
   echo "lint:machete: no Cargo.toml tracked, skipped"
   exit 0
@@ -1127,7 +1127,7 @@ dir = "{{cwd}}"
 # finding. Tracked files only; same glob family as lint:from-digests.
 run = '''
 set -euo pipefail
-files=() && while IFS= read -r -d '' f; do files+=("${f}"); done < <(org_tracked ':!vendor/**' "Dockerfile" "*/Dockerfile" "*.Dockerfile" "Dockerfile.*" "*/Dockerfile.*")
+files=() && org_tracked_read files ':!vendor/**' "Dockerfile" "*/Dockerfile" "*.Dockerfile" "Dockerfile.*" "*/Dockerfile.*"
 [[ -n ${files[0]+set} ]] || {
   echo "lint:hadolint: no Dockerfile tracked, skipped"
   exit 0
@@ -1186,7 +1186,7 @@ dir = "{{cwd}}"
 # `ec`, the name through 3.x, is gone.
 run = '''
 set -euo pipefail
-files=() && while IFS= read -r -d '' f; do files+=("${f}"); done < <(org_tracked ':!vendor/**')
+files=() && org_tracked_read files ':!vendor/**'
 [[ -n ${files[0]+set} ]] || {
   echo "lint:editorconfig: empty tree, skipped"
   exit 0
@@ -1249,14 +1249,14 @@ for lock in "${locks[@]}"; do
   subject+=(":!${lock}" ":!*/${lock}")
   machine+=("${lock}" "*/${lock}")
 done
-skipped=() && while IFS= read -r -d '' f; do skipped+=("${f}"); done < <(org_tracked "${machine[@]}")
+skipped=() && org_tracked_read skipped "${machine[@]}"
 if [[ -n ${skipped[0]+set} ]]; then
   # Named out loud: a gate that silently drops files reads like one that
   # read them.
   echo "lint:yaml: machine-written, outside this check's subject (#718):"
   for f in "${skipped[@]}"; do org_say "  ${f}"; done
 fi
-files=() && while IFS= read -r -d '' f; do files+=("${f}"); done < <(org_tracked "${subject[@]}" "*.yml" "*.yaml")
+files=() && org_tracked_read files "${subject[@]}" "*.yml" "*.yaml"
 [[ -n ${files[0]+set} ]] || {
   echo "lint:yaml: no hand-written YAML tracked, skipped"
   exit 0
@@ -1280,7 +1280,7 @@ dir = "{{cwd}}"
 # silently and in write mode, which is worse than the red its fix:shell
 # sibling produced from the same shape.
 run = '''
-files=() && while IFS= read -r -d '' f; do files+=("${f}"); done < <(org_tracked ":!vendor/**" "*.md" "*.markdown")
+files=() && org_tracked_read files ":!vendor/**" "*.md" "*.markdown"
 [[ -n ${files[0]+set} ]] || {
   echo "fix:markdown: no markdown tracked, skipped"
   exit 0
@@ -1757,15 +1757,15 @@ dir = "{{cwd}}"
 # and the second run only ever happens on the red path.
 run = '''
 set -euo pipefail
-files=() && while IFS= read -r -d '' f; do files+=("${f}"); done < <(org_tracked ':!vendor/**' "*.js" "*.jsx" "*.mjs" "*.cjs" "*.ts" "*.tsx" "*.mts" "*.cts" \
-  "*.json" "*.jsonc" "*.css" "*.graphql" "*.gql")
+files=() && org_tracked_read files ':!vendor/**' "*.js" "*.jsx" "*.mjs" "*.cjs" "*.ts" "*.tsx" "*.mts" "*.cts" \
+  "*.json" "*.jsonc" "*.css" "*.graphql" "*.gql"
 [[ -n ${files[0]+set} ]] || {
   echo "lint:biome: nothing biome parses is tracked, skipped"
   exit 0
 }
-detail=() && while IFS= read -r -d '' f; do detail+=("tracked: ${f}"); done < <(org_tracked "biome.jsonc" "*/biome.json" "*/biome.jsonc")
+detail=() && org_tracked_read detail "biome.jsonc" "*/biome.json" "*/biome.jsonc"
 if [[ -n ${detail[0]+set} ]]; then
-  org_finding "" "a repo declares its biome domains in a root biome.json and nowhere else" "${detail[@]}" \
+  org_finding "" "a repo declares its biome domains in a root biome.json and nowhere else" "${detail[@]/#/tracked: }" \
     "a nested config takes root:false + extends and may then switch a rule off in one" \
     "subtree — biome's own monorepo guide demonstrates exactly that; the org has no" \
     "such surface. A .jsonc root is refused for the plainer reason: one shape, one name."
@@ -1833,15 +1833,15 @@ dir = "{{cwd}}"
 # see one project and one identity.
 run = '''
 set -euo pipefail
-files=() && while IFS= read -r -d '' f; do files+=("${f}"); done < <(org_tracked ':!vendor/**' "*.js" "*.jsx" "*.mjs" "*.cjs" "*.ts" "*.tsx" "*.mts" "*.cts" \
-  "*.json" "*.jsonc" "*.css" "*.graphql" "*.gql")
+files=() && org_tracked_read files ':!vendor/**' "*.js" "*.jsx" "*.mjs" "*.cjs" "*.ts" "*.tsx" "*.mts" "*.cts" \
+  "*.json" "*.jsonc" "*.css" "*.graphql" "*.gql"
 [[ -n ${files[0]+set} ]] || {
   echo "fix:biome: nothing biome parses is tracked, skipped"
   exit 0
 }
-detail=() && while IFS= read -r -d '' f; do detail+=("tracked: ${f}"); done < <(org_tracked "biome.jsonc" "*/biome.json" "*/biome.jsonc")
+detail=() && org_tracked_read detail "biome.jsonc" "*/biome.json" "*/biome.jsonc"
 if [[ -n ${detail[0]+set} ]]; then
-  org_finding "" "a repo declares its biome domains in a root biome.json and nowhere else" "${detail[@]}" \
+  org_finding "" "a repo declares its biome domains in a root biome.json and nowhere else" "${detail[@]/#/tracked: }" \
     "a nested config takes root:false + extends and may then switch a rule off in one" \
     "subtree — biome's own monorepo guide demonstrates exactly that; the org has no" \
     "such surface. A .jsonc root is refused for the plainer reason: one shape, one name."
@@ -1995,7 +1995,7 @@ dir = "{{cwd}}"
 # almost nothing.
 run = '''
 set -euo pipefail
-files=() && while IFS= read -r -d '' f; do files+=("${f}"); done < <(org_tracked ':!vendor/**' "*.py" "*.pyi")
+files=() && org_tracked_read files ':!vendor/**' "*.py" "*.pyi"
 [[ -n ${files[0]+set} ]] || {
   echo "lint:python: no Python tracked, skipped"
   exit 0
@@ -2023,7 +2023,7 @@ dir = "{{cwd}}"
 # publishing a library deliberately supports interpreters older than the
 # one it develops on. Only "claims newer than it can run" is a defect.
 run = '''
-files=() && while IFS= read -r -d '' f; do files+=("${f}"); done < <(org_tracked ':!vendor/**' "*.py" "*.pyi")
+files=() && org_tracked_read files ':!vendor/**' "*.py" "*.pyi"
 [[ -n ${files[0]+set} ]] || {
   echo "lint:python-target: no Python tracked, skipped"
   exit 0
@@ -2074,7 +2074,7 @@ dir = "{{cwd}}"
 # is red by name here, before mypy stops on it. Its printed roots go
 # nowhere here.
 run = '''
-files=() && while IFS= read -r -d '' f; do files+=("${f}"); done < <(org_tracked ':!vendor/**' "*.py" "*.pyi")
+files=() && org_tracked_read files ':!vendor/**' "*.py" "*.pyi"
 [[ -n ${files[0]+set} ]] || { echo "lint:python-module-names: no Python tracked, skipped" && exit 0; }
 detail=() && for f in "${files[@]}"; do [[ ${f##*/} != *-* ]] || detail+=("${f}"); done
 if [[ -n ${detail[0]+set} ]]; then
@@ -2122,7 +2122,7 @@ dir = "{{cwd}}"
 run = '''
 set -euo pipefail
 . "${ORG_BELT_DIR}/action-files.sh"
-files=() && while IFS= read -r -d '' f; do files+=("${f}"); done < <(action_files)
+files=() && action_files files
 [[ -n ${files[0]+set} ]] || {
   echo "lint:action-pins: no workflows or actions, skipped"
   exit 0
@@ -2142,7 +2142,7 @@ dir = "{{cwd}}"
 run = '''
 set -euo pipefail
 . "${ORG_BELT_DIR}/action-files.sh"
-files=() && while IFS= read -r -d '' f; do files+=("${f}"); done < <(action_files)
+files=() && action_files files
 [[ -n ${files[0]+set} ]] || {
   echo "fix:actions: no workflows or actions, skipped"
   exit 0
@@ -2158,7 +2158,7 @@ dir = "{{cwd}}"
 # diff first.
 run = '''
 set -euo pipefail
-files=() && while IFS= read -r -d '' f; do files+=("${f}"); done < <(org_tracked ':!vendor/**' "*.py" "*.pyi")
+files=() && org_tracked_read files ':!vendor/**' "*.py" "*.pyi"
 [[ -n ${files[0]+set} ]] || {
   echo "fix:python: no Python tracked, skipped"
   exit 0
@@ -2209,17 +2209,17 @@ dir = "{{cwd}}"
 #   missing path; this one has to be checked here.
 run = '''
 set -euo pipefail
-tracked=() && while IFS= read -r -d '' f; do tracked+=("${f}"); done < <(org_tracked ':!vendor/**')
+tracked=() && org_tracked_read tracked ':!vendor/**'
 # shfmt --find keeps the list's shell files, one name per line; it runs
 # only on a list, because given none it walks the directory.
-files=() && while IFS= read -r f; do files+=("${f}"); done < <([[ -z ${tracked[0]+set} ]] || printf '%s\0' "${tracked[@]}" | xargs -0 shfmt --find)
-[[ -n ${files[0]+set} ]] || {
+found=$([[ -z ${tracked[0]+set} ]] || printf '%s\0' "${tracked[@]}" | xargs -0 shfmt --find)
+[[ -n ${found} ]] || {
   echo "lint:shell: no shell tracked, skipped"
   exit 0
 }
-detail=() && while IFS= read -r -d '' f; do detail+=("tracked: ${f}"); done < <(org_tracked ".shellcheckrc" "*/.shellcheckrc")
+detail=() && org_tracked_read detail ".shellcheckrc" "*/.shellcheckrc"
 if [[ -n ${detail[0]+set} ]]; then
-  org_finding "" "the belt delivers the org's shellcheck settings; a repo must not track its own" "${detail[@]}" \
+  org_finding "" "the belt delivers the org's shellcheck settings; a repo must not track its own" "${detail[@]/#/tracked: }" \
     "git rm --cached it: --rcfile beats discovery, so it changes nothing and reads as if it did" \
     "a check genuinely wrong for one site takes a # shellcheck disable=SCxxxx there, with a reason"
   exit 1
@@ -2231,12 +2231,12 @@ rc="${ORG_BELT_DIR}/shellcheckrc"
     "belt that did not arrive would produce a clean run instead of a red one. Checked here."
   exit 1
 }
-printf '%s\0' "${files[@]}" | xargs -0 shfmt -i 2 -bn -ci -sr -s -d || {
+tr '\n' '\0' <<< "${found}" | xargs -0 shfmt -i 2 -bn -ci -sr -s -d || {
   org_finding "" "formatting differs from the org's — run fix:shell"
   exit 1
 }
-printf '%s\0' "${files[@]}" | xargs -0 shellcheck --rcfile="${rc}"
-count=$(printf '%s\0' "${files[@]}" | tr -cd '\0' | wc -c | tr -d " ")
+tr '\n' '\0' <<< "${found}" | xargs -0 shellcheck --rcfile="${rc}"
+count=$(grep -c . <<< "${found}")
 echo "lint:shell: ${count} script(s) formatted and linted"
 '''
 
@@ -2273,7 +2273,7 @@ set -euo pipefail
 # The action lints' one selection (#1448): an action's run: blocks are
 # read wherever its action.yml lives, not only under .github/actions/.
 . "${ORG_BELT_DIR}/action-files.sh"
-files=() && while IFS= read -r -d '' f; do files+=("${f}"); done < <(action_files)
+files=() && action_files files
 [[ -n ${files[0]+set} ]] || {
   echo "lint:shell-embedded: no workflows or actions, skipped"
   exit 0
@@ -2316,8 +2316,9 @@ dir = "{{cwd}}"
 run = '''
 # The action lints' one selection (#1448), and the workflow templates.
 . "${ORG_BELT_DIR}/action-files.sh"
-files=() && while IFS= read -r -d '' f; do files+=("${f}"); done < <(action_files)
-while IFS= read -r -d '' f; do files+=("${f}"); done < <(org_tracked ':!vendor/**' "workflow-templates/*.y*ml")
+templates=() && org_tracked_read templates ':!vendor/**' "workflow-templates/*.y*ml"
+files=() && action_files files
+files+=(${templates[@]+"${templates[@]}"})
 [[ -n ${files[0]+set} ]] || {
   echo "lint:workflow-shell: no workflows, actions or templates, skipped"
   exit 0
@@ -2337,8 +2338,9 @@ dir = "{{cwd}}"
 run = '''
 # The action lints' one selection (#1448), and the workflow templates.
 . "${ORG_BELT_DIR}/action-files.sh"
-files=() && while IFS= read -r -d '' f; do files+=("${f}"); done < <(action_files)
-while IFS= read -r -d '' f; do files+=("${f}"); done < <(org_tracked ':!vendor/**' "workflow-templates/*.y*ml")
+templates=() && org_tracked_read templates ':!vendor/**' "workflow-templates/*.y*ml"
+files=() && action_files files
+files+=(${templates[@]+"${templates[@]}"})
 [[ -n ${files[0]+set} ]] || {
   echo "fix:workflow-shell: no workflows, actions or templates, nothing to fix"
   exit 0
@@ -2366,8 +2368,8 @@ dir = "{{cwd}}"
 # tracked only. Universal: a repository with a body over the ceiling
 # carries its own debt file, and one with no mise config skips clean.
 run = '''
-files=() && while IFS= read -r -d '' f; do files+=("${f}"); done < <(org_tracked ':!vendor/**' "*mise.toml" "*mise.*.toml" \
-  "*mise/config.toml" "*mise/config.*.toml")
+files=() && org_tracked_read files ':!vendor/**' "*mise.toml" "*mise.*.toml" \
+  "*mise/config.toml" "*mise/config.*.toml"
 [[ -n ${files[0]+set} ]] || {
   echo "lint:task-shell: no mise config tracked, skipped"
   exit 0
@@ -2386,8 +2388,8 @@ dir = "{{cwd}}"
 # listed body that shrank gets its new number, an entry whose body is gone
 # or now fits is removed, and nothing is added.
 run = '''
-files=() && while IFS= read -r -d '' f; do files+=("${f}"); done < <(org_tracked ':!vendor/**' "*mise.toml" "*mise.*.toml" \
-  "*mise/config.toml" "*mise/config.*.toml")
+files=() && org_tracked_read files ':!vendor/**' "*mise.toml" "*mise.*.toml" \
+  "*mise/config.toml" "*mise/config.*.toml"
 [[ -n ${files[0]+set} ]] || {
   echo "fix:task-shell: no mise config tracked, nothing to fix"
   exit 0
@@ -2592,8 +2594,8 @@ dir = "{{cwd}}"
 # checked at its next pin bump, and a tree carrying no mise config skips
 # clean by name.
 run = '''
-files=() && while IFS= read -r -d '' f; do files+=("${f}"); done < <(org_tracked ':!vendor/**' "*mise.toml" "*mise.*.toml" \
-  "*mise/config.toml" "*mise/config.*.toml")
+files=() && org_tracked_read files ':!vendor/**' "*mise.toml" "*mise.*.toml" \
+  "*mise/config.toml" "*mise/config.*.toml"
 [[ -n ${files[0]+set} ]] || {
   echo "lint:belt-shell: no mise config tracked, skipped"
   exit 0
@@ -2620,15 +2622,15 @@ dir = "{{cwd}}"
 # 32680564529) and reproduced locally by invoking shfmt the way GNU
 # xargs would.
 run = '''
-tracked=() && while IFS= read -r -d '' f; do tracked+=("${f}"); done < <(org_tracked ':!vendor/**')
+tracked=() && org_tracked_read tracked ':!vendor/**'
 # shfmt --find keeps the list's shell files, one name per line; it runs
 # only on a list, because given none it walks the directory.
-files=() && while IFS= read -r f; do files+=("${f}"); done < <([[ -z ${tracked[0]+set} ]] || printf '%s\0' "${tracked[@]}" | xargs -0 shfmt --find)
-[[ -n ${files[0]+set} ]] || {
+found=$([[ -z ${tracked[0]+set} ]] || printf '%s\0' "${tracked[@]}" | xargs -0 shfmt --find)
+[[ -n ${found} ]] || {
   echo "fix:shell: no shell tracked, skipped"
   exit 0
 }
-printf '%s\0' "${files[@]}" | xargs -0 shfmt -i 2 -bn -ci -sr -s -w
+tr '\n' '\0' <<< "${found}" | xargs -0 shfmt -i 2 -bn -ci -sr -s -w
 '''
 
 [tasks."fix:belt-shell"]
@@ -2645,8 +2647,8 @@ dir = "{{cwd}}"
 # are shell comments while the tools hold them and go back afterwards,
 # and a mismatched count refuses the rewrite rather than guessing.
 run = '''
-files=() && while IFS= read -r -d '' f; do files+=("${f}"); done < <(org_tracked ':!vendor/**' "*mise.toml" "*mise.*.toml" \
-  "*mise/config.toml" "*mise/config.*.toml")
+files=() && org_tracked_read files ':!vendor/**' "*mise.toml" "*mise.*.toml" \
+  "*mise/config.toml" "*mise/config.*.toml"
 [[ -n ${files[0]+set} ]] || {
   echo "fix:belt-shell: no mise config tracked, nothing to fix"
   exit 0
@@ -2797,7 +2799,7 @@ run = '''
 # The files the other action lints read, from the one selection (#1448):
 # every action definition wherever it lives, not only .github/actions/.
 . "${ORG_BELT_DIR}/action-files.sh"
-files=() && while IFS= read -r -d '' f; do files+=("${f}"); done < <(action_files)
+files=() && action_files files
 [[ -n ${files[0]+set} ]] || {
   echo "lint:zizmor: no workflows or actions, skipped"
   exit 0
@@ -2865,7 +2867,7 @@ dir = "{{cwd}}"
 # release died at run time with exit 126 — after the tag, which is
 # immutable, so the version was burned. Nothing else checks a mode.
 run = '''
-files=() && while IFS= read -r -d '' f; do files+=("${f}"); done < <(org_tracked ':!vendor/**' "*.sh")
+files=() && org_tracked_read files ':!vendor/**' "*.sh"
 [[ -n ${files[0]+set} ]] || {
   echo "lint:exec-bits: no shell scripts tracked, skipped"
   exit 0
@@ -2902,7 +2904,7 @@ dir = "{{cwd}}"
 # or directly under dev/ or .github/.
 run = '''
 # Brace expansion names all twelve; org_tracked prints the tracked ones.
-detail=() && while IFS= read -r -d '' f; do detail+=("${f}"); done < <(org_tracked {,dev/,.github/}{codecov,.codecov}.{yml,yaml})
+detail=() && org_tracked_read detail {,dev/,.github/}{codecov,.codecov}.{yml,yaml}
 if [[ -n ${detail[0]+set} ]]; then
   org_finding "" "tracked Codecov config overrides the org's Global YAML:" "${detail[@]}" \
     "the org turns Codecov's statuses off once, org-wide (#1532);" \
@@ -3023,7 +3025,7 @@ dir = "{{cwd}}"
 # toolchain.
 run = '''
 set -euo pipefail
-manifests=() && while IFS= read -r -d '' f; do manifests+=("${f}"); done < <(org_tracked ':!vendor/**' "Cargo.toml" "*/Cargo.toml")
+manifests=() && org_tracked_read manifests ':!vendor/**' "Cargo.toml" "*/Cargo.toml"
 [[ -n ${manifests[0]+set} ]] || {
   echo "lint:rust: no Cargo.toml tracked, skipped"
   exit 0
@@ -3082,7 +3084,7 @@ conf_spec=("clippy.toml" ".clippy.toml" "*/clippy.toml" "*/.clippy.toml"
 if git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1; then
   conf_spec+=(":!mise/clippy.toml" ":!mise/rustfmt.toml")
 fi
-local_conf=() && while IFS= read -r -d '' f; do local_conf+=("${f}"); done < <(org_tracked "${conf_spec[@]}")
+local_conf=() && org_tracked_read local_conf "${conf_spec[@]}"
 if [[ -n ${local_conf[0]+set} ]]; then
   org_finding "" "repo-local Rust tool configuration is not the org's:" "${local_conf[@]}" \
     "the knobs live in the canon's mise/clippy.toml and mise/rustfmt.toml," \
@@ -3113,7 +3115,7 @@ fi
 # analogue, so it can never retire itself. A whole-file `#![rustfmt::skip]`
 # is refused outright, and a narrow one states why in the marker-comment
 # idiom `lint:capability-boundary` already uses.
-rs=() && while IFS= read -r -d '' f; do rs+=("${f}"); done < <(org_tracked ':!vendor/**' "*.rs")
+rs=() && org_tracked_read rs ':!vendor/**' "*.rs"
 skips=""
 for f in ${rs[@]+"${rs[@]}"}; do
   if grep -qE '^[[:space:]]*#!\[rustfmt::skip' "${f}"; then
@@ -3362,7 +3364,7 @@ dir = "{{cwd}}"
 # the case that would otherwise still red).
 run = '''
 set -euo pipefail
-manifests=() && while IFS= read -r -d '' f; do manifests+=("${f}"); done < <(org_tracked ':!vendor/**' "Cargo.toml" "*/Cargo.toml")
+manifests=() && org_tracked_read manifests ':!vendor/**' "Cargo.toml" "*/Cargo.toml"
 [[ -n ${manifests[0]+set} ]] || {
   echo "fix:rust: no Cargo.toml tracked, skipped"
   exit 0
@@ -3545,7 +3547,7 @@ dir = "{{cwd}}"
 # toolchains. `cargo fetch --locked` first, same precedent.
 run = '''
 set -euo pipefail
-manifests=() && while IFS= read -r -d '' f; do manifests+=("${f}"); done < <(org_tracked ':!vendor/**' "Cargo.toml" "*/Cargo.toml")
+manifests=() && org_tracked_read manifests ':!vendor/**' "Cargo.toml" "*/Cargo.toml"
 [[ -n ${manifests[0]+set} ]] || {
   echo "lint:msrv: no Cargo.toml tracked, skipped"
   exit 0
@@ -3699,7 +3701,7 @@ dir = "{{cwd}}"
 # `-D warnings` turns each one into an error.
 run = '''
 set -euo pipefail
-manifests=() && while IFS= read -r -d '' f; do manifests+=("${f}"); done < <(org_tracked ':!vendor/**' "Cargo.toml" "*/Cargo.toml")
+manifests=() && org_tracked_read manifests ':!vendor/**' "Cargo.toml" "*/Cargo.toml"
 [[ -n ${manifests[0]+set} ]] || {
   echo "lint:pg-clippy: no Cargo.toml tracked, skipped"
   exit 0
@@ -3935,7 +3937,7 @@ set -euo pipefail
   echo "lint:gate-surface: no publish.yml, nothing is published from here, skipped"
   exit 0
 }
-manifests=() && while IFS= read -r -d '' f; do manifests+=("${f}"); done < <(org_tracked ':!vendor/**' "Cargo.toml" "*/Cargo.toml")
+manifests=() && org_tracked_read manifests ':!vendor/**' "Cargo.toml" "*/Cargo.toml"
 [[ -n ${manifests[0]+set} ]] || {
   echo "lint:gate-surface: no Cargo.toml tracked, skipped"
   exit 0
@@ -3994,7 +3996,7 @@ dir = "{{cwd}}"
 # analysis state produced from a different checkout.
 run = '''
 set -euo pipefail
-mods=() && while IFS= read -r -d '' f; do mods+=("${f}"); done < <(org_tracked ':!vendor/**' "go.mod" "*/go.mod" "*/*/go.mod")
+mods=() && org_tracked_read mods ':!vendor/**' "go.mod" "*/go.mod" "*/*/go.mod"
 [[ -n ${mods[0]+set} ]] || {
   echo "lint:go: no go.mod tracked, skipped"
   exit 0
@@ -4117,13 +4119,13 @@ dir = "{{cwd}}"
 # project's program. A repo cannot `exclude` its way to a green gate.
 run = '''
 set -euo pipefail
-ts=() && while IFS= read -r -d '' f; do ts+=("${f}"); done < <(org_tracked ':!vendor/**' "*.ts" "*.tsx" "*.mts" "*.cts")
+ts=() && org_tracked_read ts ':!vendor/**' "*.ts" "*.tsx" "*.mts" "*.cts"
 [[ -n ${ts[0]+set} ]] || {
   echo "lint:types: no TypeScript tracked, skipped"
   exit 0
 }
-cfgs=() && while IFS= read -r -d '' f; do cfgs+=("${f}"); done < <(org_tracked ':!vendor/**' "tsconfig.json" "*/tsconfig.json" "*/*/tsconfig.json" \
-  "*/*/*/tsconfig.json")
+cfgs=() && org_tracked_read cfgs ':!vendor/**' "tsconfig.json" "*/tsconfig.json" "*/*/tsconfig.json" \
+  "*/*/*/tsconfig.json"
 if [[ -z ${cfgs[0]+set} ]]; then
   org_finding "" "TypeScript is tracked but no tsconfig.json is — copy scaffold/tsconfig.json" \
     "tsc refuses a file list when a project exists, so a project is how the org checks"
@@ -4164,7 +4166,7 @@ if [[ -n ${refs} ]]; then
     "mean checking at whatever level the repo chose. Give each project its own config."
   exit 1
 fi
-pkgs=() && while IFS= read -r -d '' f; do pkgs+=("${f}"); done < <(org_tracked "package.json" "*/package.json")
+pkgs=() && org_tracked_read pkgs "package.json" "*/package.json"
 if [[ -n ${pkgs[0]+set} && ! -d node_modules ]]; then
   org_finding "" "dependencies are not installed, so their types cannot be read" \
     "install from the tracked lockfile before checking (a check against absent types" \
@@ -4256,8 +4258,8 @@ description = "Every tracked tsconfig.json states the org's dials, none weaker (
 dir = "{{cwd}}"
 run = '''
 set -euo pipefail
-cfgs=() && while IFS= read -r -d '' f; do cfgs+=("${f}"); done < <(org_tracked ':!vendor/**' "tsconfig.json" "*/tsconfig.json" "*/*/tsconfig.json" \
-  "*/*/*/tsconfig.json")
+cfgs=() && org_tracked_read cfgs ':!vendor/**' "tsconfig.json" "*/tsconfig.json" "*/*/tsconfig.json" \
+  "*/*/*/tsconfig.json"
 [[ -n ${cfgs[0]+set} ]] || {
   echo "lint:tsconfig-dials: no tsconfig.json tracked, skipped"
   exit 0
@@ -4322,7 +4324,7 @@ dir = "{{cwd}}"
 # check found unguarded were the defect, not the assembly, and #860
 # guarded them.
 run = '''
-tracked=() && while IFS= read -r -d '' f; do tracked+=("${f}"); done < <(org_tracked "scaffold/")
+tracked=() && org_tracked_read tracked "scaffold/"
 [[ -n ${tracked[0]+set} ]] || {
   echo "lint:scaffold-assembly: no tracked scaffold/, not the canon, skipped"
   exit 0
@@ -4546,7 +4548,7 @@ dir = "{{cwd}}"
 # that state is already failing, so the gate stays stable where it counts.
 run = '''
 set -euo pipefail
-mods=() && while IFS= read -r -d '' f; do mods+=("${f}"); done < <(org_tracked ':!vendor/**' "go.mod" "*/go.mod" "*/*/go.mod")
+mods=() && org_tracked_read mods ':!vendor/**' "go.mod" "*/go.mod" "*/*/go.mod"
 [[ -n ${mods[0]+set} ]] || {
   echo "lint:go-tidy: no go.mod tracked, skipped"
   exit 0
@@ -4575,7 +4577,7 @@ dir = "{{cwd}}"
 # not, so it is derivable from the tree rather than a judgement call.
 run = '''
 set -euo pipefail
-mods=() && while IFS= read -r -d '' f; do mods+=("${f}"); done < <(org_tracked ':!vendor/**' "go.mod" "*/go.mod" "*/*/go.mod")
+mods=() && org_tracked_read mods ':!vendor/**' "go.mod" "*/go.mod" "*/*/go.mod"
 [[ -n ${mods[0]+set} ]] || {
   echo "fix:go-tidy: no go.mod tracked, skipped"
   exit 0
@@ -4626,7 +4628,7 @@ env = { CGO_ENABLED = "1" }
 # compile would otherwise drop out of the run instead of failing it.
 run = '''
 set -euo pipefail
-mods=() && while IFS= read -r -d '' f; do mods+=("${f}"); done < <(org_tracked ':!vendor/**' "go.mod" "*/go.mod" "*/*/go.mod")
+mods=() && org_tracked_read mods ':!vendor/**' "go.mod" "*/go.mod" "*/*/go.mod"
 [[ -n ${mods[0]+set} ]] || {
   echo "lint:go-fuzz-seeds: no go.mod tracked, skipped"
   exit 0
@@ -4680,7 +4682,7 @@ dir = "{{cwd}}"
 # mistake into this one's source.
 run = '''
 set -euo pipefail
-mods=() && while IFS= read -r -d '' f; do mods+=("${f}"); done < <(org_tracked ':!vendor/**' "go.mod" "*/go.mod" "*/*/go.mod")
+mods=() && org_tracked_read mods ':!vendor/**' "go.mod" "*/go.mod" "*/*/go.mod"
 [[ -n ${mods[0]+set} ]] || {
   echo "fix:go: no go.mod tracked, skipped"
   exit 0
@@ -4739,7 +4741,7 @@ dir = "{{cwd}}"
 # checkout's layout, not about the module.
 run = '''
 set -euo pipefail
-mods=() && while IFS= read -r -d '' f; do mods+=("${f}"); done < <(org_tracked ':!vendor/**' "go.mod" "*/go.mod" "*/*/go.mod")
+mods=() && org_tracked_read mods ':!vendor/**' "go.mod" "*/go.mod" "*/*/go.mod"
 [[ -n ${mods[0]+set} ]] || {
   echo "audit:go-vulns: no go.mod tracked, skipped"
   exit 0
@@ -4964,7 +4966,7 @@ git ls-files --error-unmatch .bestpractices.json > /dev/null 2>&1 || {
   exit 0
 }
 top=$(git rev-parse --show-toplevel)
-readme=() && while IFS= read -r -d '' f; do readme+=("${f}"); done < <(org_tracked ':(icase)readme' ':(icase)readme.md' ':(icase)readme.markdown')
+readme=() && org_tracked_read readme ':(icase)readme' ':(icase)readme.md' ':(icase)readme.markdown'
 "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/bestpractices_drift.py" .bestpractices.json "${GITHUB_REPOSITORY:-${top##*/}}" "${readme[0]:-}"
 '''
 
@@ -5005,7 +5007,7 @@ dir = "{{cwd}}"
 # and xargs' 123 in place of lychee's status. No skip exit: the
 # task runs everywhere (mise/audit-legs.toml).
 run = '''
-names=() && while IFS= read -r -d '' f; do names+=("${f}"); done < <(org_tracked ":!vendor/**" "*.md" "*.markdown")
+names=() && org_tracked_read names ":!vendor/**" "*.md" "*.markdown"
 if [[ -z ${names[0]+set} ]]; then
   echo "audit:links: no markdown tracked, skipped"
 else
@@ -5830,7 +5832,7 @@ dir = "{{cwd}}"
 # a tracked file there is red by name. Every org repository keeps its own
 # config as `mise.toml` at its root.
 run = '''
-detail=() && while IFS= read -r -d '' f; do detail+=("${f}"); done < <(org_tracked .config/mise/)
+detail=() && org_tracked_read detail .config/mise/
 if [[ -n ${detail[0]+set} ]]; then
   org_finding "" "the belt's link and lock live in .config/mise/; a repository's" \
     "own config is mise.toml at its root. Tracked there:" "${detail[@]}"
@@ -6111,7 +6113,7 @@ dir = "{{cwd}}"
 # while its uses: line was bumped twice — every dispatch a guaranteed
 # identity mismatch, silently.
 run = '''
-files=() && while IFS= read -r -d '' f; do files+=("${f}"); done < <(org_tracked ':!vendor/**' ".github/workflows/*.y*ml")
+files=() && org_tracked_read files ':!vendor/**' ".github/workflows/*.y*ml"
 [[ -n ${files[0]+set} ]] || {
   echo "lint:signer-pin: no workflows, skipped"
   exit 0
@@ -6367,7 +6369,7 @@ dir = "{{cwd}}"
 # that let the bad `uses:` through.
 run = '''
 . "${ORG_BELT_DIR}/action-files.sh"
-files=() && while IFS= read -r -d '' f; do files+=("${f}"); done < <(action_files)
+files=() && action_files files
 [[ -n ${files[0]+set} ]] || {
   echo "lint:actions-allowed: no workflows or actions, skipped"
   exit 0
@@ -6551,7 +6553,7 @@ dir = "{{cwd}}"
 # that refusal out of the command substitution below: a parse that
 # failed must never read here as a Dockerfile with no bases.
 run = '''
-files=() && while IFS= read -r -d '' f; do files+=("${f}"); done < <(org_tracked ':!vendor/**' "Dockerfile" "*/Dockerfile" "*.Dockerfile" "Dockerfile.*")
+files=() && org_tracked_read files ':!vendor/**' "Dockerfile" "*/Dockerfile" "*.Dockerfile" "Dockerfile.*"
 [[ -n ${files[0]+set} ]] || {
   echo "lint:from-digests: no Dockerfiles tracked, skipped"
   exit 0
@@ -6584,18 +6586,17 @@ dir = "{{cwd}}"
 # Grep-shaped like every belt lint: count steps, count pins, any
 # shortfall is red with the file named.
 run = '''
-compgen -G ".github/workflows/*.y*ml" > /dev/null || {
+files=() && org_tracked_read files ':!vendor/**' ".github/workflows/*.y*ml"
+[[ -n ${files[0]+set} ]] || {
   echo "lint:installer-pinned: no workflows, skipped"
   exit 0
 }
 bad=""
-for f in .github/workflows/*.y*ml; do
+for f in "${files[@]}"; do
   steps=$(grep -cE "^[^#]*uses:[[:space:]]*jdx/mise-action@" "${f}") || true
   ((steps > 0)) || continue
   pins=$(grep -cE "^[^#]*version:[[:space:]]*[0-9]{4}\.[0-9]+\.[0-9]+" "${f}") || true
-  if ((steps > pins)); then
-    bad="${bad} ${f}(${steps} steps, ${pins} version pins)"
-  fi
+  ((steps <= pins)) || bad="${bad} ${f}(${steps} steps, ${pins} version pins)"
 done
 if [[ -n ${bad} ]]; then
   org_finding "" "mise-action without a mise version pin:${bad}" \
@@ -6799,8 +6800,8 @@ dir = "{{cwd}}"
 # every belt lint; a repository tracking none of these languages skips
 # clean.
 run = '''
-files=() && while IFS= read -r -d '' f; do files+=("${f}"); done < <(org_tracked ':!vendor/**' '*.py' '*.pyi' '*.rs' '*.go' \
-  '*.ts' '*.tsx' '*.mts' '*.cts' '*.js' '*.jsx' '*.mjs' '*.cjs')
+files=() && org_tracked_read files ':!vendor/**' '*.py' '*.pyi' '*.rs' '*.go' \
+  '*.ts' '*.tsx' '*.mts' '*.cts' '*.js' '*.jsx' '*.mjs' '*.cjs'
 [[ -n ${files[0]+set} ]] || {
   echo "lint:coverage-exclusions: no Python, Rust, Go, TypeScript or JavaScript tracked, skipped"
   exit 0
@@ -7099,7 +7100,7 @@ dir = "{{cwd}}"
 run = '''
 set -euo pipefail
 . "${ORG_BELT_DIR}/action-files.sh"
-files=() && while IFS= read -r -d '' f; do files+=("${f}"); done < <(action_files)
+files=() && action_files files
 [[ -n ${files[0]+set} ]] || {
   echo "audit:action-pins: no workflows or actions, skipped"
   exit 0
@@ -7663,7 +7664,7 @@ git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
     "a canon-only audit reds on a missing input, never skips (#738)."
   exit 1
 }
-docs=() && while IFS= read -r -d '' f; do docs+=("${f}"); done < <(org_tracked ':!vendor/**' "docs/*.md")
+docs=() && org_tracked_read docs ':!vendor/**' "docs/*.md"
 [[ -n ${docs[0]+set} ]] || {
   org_finding "" "on the canon, and docs/ holds no tracked markdown —" \
     "there is nothing to resolve, so there is nothing to report clean (#738)."
@@ -8267,12 +8268,12 @@ dir = "{{cwd}}"
 # a repo with content and no licence is exactly the defect, never an
 # exemption.
 run = '''
-tracked=() && while IFS= read -r -d '' f; do tracked+=("${f}"); done < <(org_tracked)
+tracked=() && org_tracked_read tracked
 [[ -n ${tracked[0]+set} ]] || {
   echo "lint:licence: no tracked files, skipped"
   exit 0
 }
-lic=() && while IFS= read -r -d '' f; do lic+=("${f}"); done < <(org_tracked ':!vendor/**' "LICENSE" "LICENSE.*" "LICENSES/*")
+lic=() && org_tracked_read lic ':!vendor/**' "LICENSE" "LICENSE.*" "LICENSES/*"
 if [[ -z ${lic[0]+set} ]]; then
   org_finding "" "no tracked LICENSE or LICENSES/ — every repo carries its own licence (#214)" \
     "with no licence the default is all rights reserved, the opposite of the intent"
@@ -8463,7 +8464,7 @@ dir = "{{cwd}}"
 # `_justification` line is found by key. A file not laid out that way
 # is red by name, rather than read wrongly.
 run = '''
-files=() && while IFS= read -r -d '' f; do files+=("${f}"); done < <(org_tracked ':!vendor/**' ".bestpractices.json" "*/.bestpractices.json" ".project.d/bestpractices.json")
+files=() && org_tracked_read files ':!vendor/**' ".bestpractices.json" "*/.bestpractices.json" ".project.d/bestpractices.json"
 [[ -n ${files[0]+set} ]] || {
   echo "lint:bestpractices: no .bestpractices.json, skipped"
   exit 0
@@ -8757,7 +8758,7 @@ dir = "{{cwd}}"
 # a release listing, so this reads one — network-bound by nature, and
 # structurally outside the gate.
 run = '''
-locks=() && while IFS= read -r -d '' f; do locks+=("${f}"); done < <(org_tracked ':!vendor/**' "mise.lock" "*/mise.lock")
+locks=() && org_tracked_read locks ':!vendor/**' "mise.lock" "*/mise.lock"
 [[ -n ${locks[0]+set} ]] || {
   echo "audit:lock-arch: no mise.lock tracked, skipped"
   exit 0
@@ -8889,7 +8890,7 @@ dir = "{{cwd}}"
 # #899: every binary executed inside ubuntu:24.04 on both
 # architectures). The org took on that obligation knowingly.
 run = '''
-locks=() && while IFS= read -r -d '' f; do locks+=("${f}"); done < <(org_tracked ':!vendor/**' "mise.lock" "*/mise.lock")
+locks=() && org_tracked_read locks ':!vendor/**' "mise.lock" "*/mise.lock"
 [[ -n ${locks[0]+set} ]] || {
   echo "audit:lock-idempotent: no mise.lock tracked, skipped"
   exit 0
@@ -9368,7 +9369,7 @@ git ls-files --error-unmatch "${policy}" > /dev/null 2>&1 || {
   echo "lint:plan-producers: no committed assert policy, skipped"
   exit 0
 }
-flows=() && while IFS= read -r -d '' f; do flows+=("${f}"); done < <(org_tracked '.github/workflows/build-*.yml' '.github/workflows/publish.yml')
+flows=() && org_tracked_read flows '.github/workflows/build-*.yml' '.github/workflows/publish.yml'
 "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/plan_producers.py" --policy "${policy}" ${flows[@]+"${flows[@]}"}
 '''
 
@@ -9410,7 +9411,7 @@ dir = "{{cwd}}"
 # audit:action-pins does.
 run = '''
 set -euo pipefail
-files=() && while IFS= read -r -d '' f; do files+=("${f}"); done < <(org_tracked ':!vendor/**' ".github/workflows/*.y*ml")
+files=() && org_tracked_read files ':!vendor/**' ".github/workflows/*.y*ml"
 [[ -n ${files[0]+set} ]] || {
   echo "lint:caller-permissions: no workflows, skipped"
   exit 0
@@ -9437,7 +9438,8 @@ dir = "{{cwd}}"
 # alone, never a reusable workflow. mise/template_pins.py has the rules
 # and their history (#28, #233, #1887); the canon is the identity's.
 run = '''
-compgen -G "workflow-templates/*.y*ml" > /dev/null || {
+files=() && org_tracked_read files ':!vendor/**' "workflow-templates/*.y*ml"
+[[ -n ${files[0]+set} ]] || {
   echo "lint:template-pins: no workflow-templates/, skipped"
   exit 0
 }
@@ -9445,7 +9447,7 @@ compgen -G "workflow-templates/*.y*ml" > /dev/null || {
 owner=$(org_identity owner)
 repo=$(org_identity repo)
 "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/template_pins.py" "${owner}/${repo}" \
-  workflow-templates/*.y*ml
+  "${files[@]}"
 '''
 
 [tasks."lint:runner-pin"]
@@ -9466,8 +9468,8 @@ dir = "{{cwd}}"
 # matrix laundering hole: a floating value reaching runs-on through a
 # matrix include or a bash case arm is the same float with indirection.
 run = '''
-files=() && while IFS= read -r -d '' f; do files+=("${f}"); done < <(org_tracked ':!vendor/**' ".github/workflows/*.yml" ".github/workflows/*.yaml" \
-  "workflow-templates/*.yml" "workflow-templates/*.yaml")
+files=() && org_tracked_read files ':!vendor/**' ".github/workflows/*.yml" ".github/workflows/*.yaml" \
+  "workflow-templates/*.yml" "workflow-templates/*.yaml"
 [[ -n ${files[0]+set} ]] || {
   echo "lint:runner-pin: no workflows, skipped"
   exit 0
@@ -9516,26 +9518,29 @@ canon="${canon_owner}/${canon_repo}"
 canon_re="${canon//./\\.}"
 bad=""
 found=0
-while IFS= read -r -d '' f; do
+yml=() && org_tracked_read yml ':!vendor/**' "*.yml" "*.yaml"
+for f in ${yml[@]+"${yml[@]}"}; do
   while IFS= read -r line; do
     [[ -n ${line} ]] || continue
     found=$((found + 1))
     grep -qE "@[0-9a-f]{40} # v[0-9]+\.[0-9]+\.[0-9]+" <<< "${line}" \
       || bad="${bad} ${f}(canon pin without '@<full-sha> # vX.Y.Z')"
   done < <(grep -hE "^[^#]*uses:[[:space:]]*${canon_re}/" "${f}" || true)
-done < <(org_tracked ':!vendor/**' "*.yml" "*.yaml")
-while IFS= read -r -d '' f; do
+done
+hooks=() && org_tracked_read hooks ':!vendor/**' "lefthook.yml" "*/lefthook.yml"
+for f in ${hooks[@]+"${hooks[@]}"}; do
   grep -qF "github.com/${canon}" "${f}" || continue
   found=$((found + 1))
   grep -qE "^[[:space:]]*ref:[[:space:]]*v[0-9]" "${f}" \
     || bad="${bad} ${f}(lefthook canon remote must ref a v* tag, not a branch)"
-done < <(org_tracked ':!vendor/**' "lefthook.yml" "*/lefthook.yml")
-while IFS= read -r -d '' f; do
+done
+presets=() && org_tracked_read presets ':!vendor/**' "renovate.json" "*/renovate.json" ".github/renovate.json"
+for f in ${presets[@]+"${presets[@]}"}; do
   grep -qF "github>${canon}" "${f}" || continue
   found=$((found + 1))
   grep -qE "github>${canon_re}#v[0-9]" "${f}" \
     || bad="${bad} ${f}(preset reference must carry #vX.Y.Z)"
-done < <(org_tracked ':!vendor/**' "renovate.json" "*/renovate.json" ".github/renovate.json")
+done
 # The fourth surface is a prohibition: no workflow step may clone the
 # canon with actions/checkout, at any ref. Canon content reaches a job
 # only through `uses: $/.github/actions/canon` — GitHub's
@@ -9545,12 +9550,13 @@ done < <(org_tracked ':!vendor/**' "renovate.json" "*/renovate.json" ".github/re
 # github.job_workflow_sha conditional evaluated empty and floated to
 # main (#158); the release-time stamp needed workflow writes the
 # tag-mint App must never hold (#164).
-while IFS= read -r -d '' f; do
+workflows=() && org_tracked_read workflows ':!vendor/**' ".github/workflows/*.yml" ".github/workflows/*.yaml"
+for f in ${workflows[@]+"${workflows[@]}"}; do
   checkouts=$(grep -cE "^[^#]*repository:[[:space:]]*${canon_re}[[:space:]]*$" "${f}") || continue
   found=$((found + checkouts))
   [[ ${checkouts} -eq 0 ]] \
     || bad="${bad} ${f}(${checkouts} canon checkout(s) — use \$/.github/actions/canon)"
-done < <(org_tracked ':!vendor/**' ".github/workflows/*.yml" ".github/workflows/*.yaml")
+done
 [[ ${found} -gt 0 ]] || {
   echo "lint:canon-pins: no canon references, skipped"
   exit 0
@@ -9684,13 +9690,15 @@ dir = "{{cwd}}"
 # mark the guard reads. exit_trap.py holds both and prints the shape.
 # Workflow `run:` steps are not held to it: they only ever meet bash 5.
 run = '''
-tracked=() && while IFS= read -r -d '' f; do tracked+=("${f}"); done < <(org_tracked ':!vendor/**')
+tracked=() && org_tracked_read tracked ':!vendor/**'
 # shfmt --find prints the list's shell files one per line; given no list
 # it walks the directory, so it runs only on one.
-scripts=() && while IFS= read -r f; do scripts+=("${f}"); done < <([[ -z ${tracked[0]+set} ]] || printf '%s\0' "${tracked[@]}" | xargs -0 shfmt --find 2> /dev/null)
-configs=() && while IFS= read -r -d '' f; do configs+=("${f}"); done < <(org_tracked ':!vendor/**' "*mise.toml" "*mise.*.toml" \
-  "*mise/config.toml" "*mise/config.*.toml")
-files=(${scripts[@]+"${scripts[@]}"}) && while IFS= read -r -d '' f; do files+=("${f}"); done < <(org_tracked ':!vendor/**' ".github/workflows/*.y*ml")
+listed=$([[ -z ${tracked[0]+set} ]] || printf '%s\0' "${tracked[@]}" | xargs -0 shfmt --find 2> /dev/null)
+scripts=() && while IFS= read -r f; do [[ -z ${f} ]] || scripts+=("${f}"); done <<< "${listed}"
+configs=() && org_tracked_read configs ':!vendor/**' "*mise.toml" "*mise.*.toml" \
+  "*mise/config.toml" "*mise/config.*.toml"
+files=() && org_tracked_read files ':!vendor/**' ".github/workflows/*.y*ml"
+files+=(${scripts[@]+"${scripts[@]}"})
 [[ -n ${files[0]+set} || -n ${configs[0]+set} ]] || {
   echo "lint:bash-portability: nothing to check, skipped"
   exit 0
@@ -9700,15 +9708,13 @@ files=(${scripts[@]+"${scripts[@]}"}) && while IFS= read -r -d '' f; do files+=(
 # mapfile / readarray     — bash 4.0
 # &>>                     — append-both redirection, bash 4.0
 bad4='\$\{[A-Za-z_][A-Za-z0-9_]*(\[[^]]*\])?(,,|\^\^|,|\^)\}|(declare|typeset)[[:space:]]+-[A-Za-z]*A|(^|[^A-Za-z_])(mapfile|readarray)[[:space:]]|&>>'
-found=""
-count=0
+found="" count=0 traps=0
 for f in ${files[@]+"${files[@]}"}; do
   count=$((count + 1))
   [[ -f ${f} ]] || continue
   hit=$(grep -vE "^[[:space:]]*#" "${f}" | grep -nE "${bad4}" || true)
   [[ -n ${hit} ]] && found="${found}\n  ${f}: ${hit}"
 done
-traps=0
 "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/exit_trap.py" ${scripts[@]+"${scripts[@]}"} ${configs[@]+"${configs[@]}"} || traps=$?
 if [[ -n ${found} ]]; then
   IFS=$'\n' read -r -d '' -a detail < <(printf "%b\n" "${found}") || true

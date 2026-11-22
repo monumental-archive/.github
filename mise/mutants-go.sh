@@ -103,10 +103,11 @@ if ! git ls-files --error-unmatch -- "${adoption}" > /dev/null 2>&1; then
 fi
 
 patterns=""
-while IFS= read -r -d '' f; do
+ignores=() && org_tracked_read ignores "${adoption}" "*/${adoption}"
+for f in ${ignores[@]+"${ignores[@]}"}; do
   hits=$(awk -v f="${f}" '!/^[[:space:]]*(#|$)/ { printf "%s:%d: %s\n", f, NR, $0 }' "${f}")
   patterns+="${hits:+${hits}$'\n'}"
-done < <(org_tracked "${adoption}" "*/${adoption}")
+done
 if [[ -n ${patterns} ]]; then
   while IFS= read -r hit; do
     [[ -n ${hit} ]] || continue

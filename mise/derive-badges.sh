@@ -227,7 +227,9 @@ cit=""
 [[ -f CITATION.cff ]] && cit=1
 concept=""
 [[ -n ${cit} ]] && concept=$(awk '/^identifiers:/{f=1} f && /value:/{print $NF; exit}' CITATION.cff)
-minting=$(org_tracked ".github/workflows/*.y*ml" | xargs -0 grep -lE "^[^#]*mint-doi:[[:space:]]*true" 2> /dev/null || true)
+workflows=() && org_tracked_read workflows ".github/workflows/*.y*ml"
+minting=""
+[[ -z ${workflows[0]+set} ]] || minting=$(grep -lE "^[^#]*mint-doi:[[:space:]]*true" "${workflows[@]}" 2> /dev/null || true)
 if [[ -n ${concept} ]]; then
   add "[![DOI](https://zenodo.org/badge/DOI/${concept}.svg)](https://doi.org/${concept})"
 elif [[ -n ${minting} ]]; then

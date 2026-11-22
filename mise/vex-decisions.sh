@@ -27,17 +27,20 @@ here="$(dirname "${BASH_SOURCE[0]}")"
 # The canon's one writer of workflow commands (#1660), beside this file.
 # shellcheck source=mise/workflow-command.sh
 . "${here}/workflow-command.sh"
+# The tracked-file producer (#1986), beside it.
+# shellcheck source=mise/tracked.sh
+. "${here}/tracked.sh"
+files=()
 if [[ -n ${BEFORE:-} ]] && git cat-file -e "${BEFORE}^{commit}" 2> /dev/null; then
   mode=() none="no changed statements"
   list=$("${ORG_PYTHON}" "${here}/vex_one_per_merge.py" --list "${BEFORE}..")
+  while IFS= read -r file; do
+    [[ -n ${file} ]] && files+=("${file}")
+  done <<< "${list}"
 else
   mode=(--unsigned-only --store "${REPO}") none="security/vex/ holds no decisions"
-  list=$(git ls-files "${DECISIONS}")
+  org_tracked_read files "${DECISIONS}"
 fi
-files=()
-while IFS= read -r file; do
-  [[ -n ${file} ]] && files+=("${file}")
-done <<< "${list}"
 # Nothing to sign ends here, with nothing printed: no output is `any`
 # unset, which every consumer reads as false.
 if ((${#files[@]} == 0)); then

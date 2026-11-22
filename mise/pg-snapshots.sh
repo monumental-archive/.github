@@ -29,7 +29,7 @@ unset org__here
 
 belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
 
-manifests=() && while IFS= read -r -d '' f; do manifests+=("${f}"); done < <(org_tracked ':!vendor/**' "Cargo.toml" "*/Cargo.toml")
+manifests=() && org_tracked_read manifests ':!vendor/**' "Cargo.toml" "*/Cargo.toml"
 [[ -n ${manifests[0]+set} ]] || exit 0
 command -v cargo > /dev/null || {
   org_finding "" "Cargo.toml present but cargo missing — pin rust in mise.toml"

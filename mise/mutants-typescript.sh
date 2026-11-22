@@ -86,9 +86,11 @@ summary() { # summary <row>: the counts the totals job reads
   printf '%s\n' "$1" > "${MUTANTS_SUMMARY_DIR}/typescript.tsv"
 }
 
-others=() && while IFS= read -r -d '' f; do
+configs=() && org_tracked_read configs 'stryker.conf.*' 'stryker.config.*' '.stryker.conf.*'
+others=()
+for f in ${configs[@]+"${configs[@]}"}; do
   [[ ${f} == "${adoption}" ]] || others+=("${f}")
-done < <(org_tracked 'stryker.conf.*' 'stryker.config.*' '.stryker.conf.*')
+done
 if [[ -n ${others[0]+set} ]]; then
   for item in "${others[@]}"; do
     org_finding "typescript" "a StrykerJS config the leg cannot read: ${item}" \

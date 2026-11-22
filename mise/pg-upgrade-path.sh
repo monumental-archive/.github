@@ -62,14 +62,11 @@ set -euo pipefail
 # The canon's one writer of workflow commands (#1660), beside this file.
 # shellcheck source=mise/workflow-command.sh
 . "$(dirname "${BASH_SOURCE[0]}")/workflow-command.sh"
+# The tracked-file producer (#1986), beside it.
+# shellcheck source=mise/tracked.sh
+. "$(dirname "${BASH_SOURCE[0]}")/tracked.sh"
 
-controls=()
-# shellcheck disable=SC2312  # process substitution over tracked files: the
-# empty case is handled explicitly below, which is stronger than a masked
-# pipeline status.
-while IFS= read -r tracked_control; do
-  [[ -n ${tracked_control} ]] && controls+=("${tracked_control}")
-done < <(git ls-files '*.control')
+controls=() && org_tracked_read controls '*.control'
 
 if ((${#controls[@]} == 0)); then
   echo "lint:pg-upgrade-path: no extension control files tracked"
@@ -90,12 +87,7 @@ for control in "${controls[@]}"; do
   name=$(basename "${control}" .control)
   sql_dir="${crate_dir}/sql"
 
-  scripts=()
-  # shellcheck disable=SC2312  # same as above: emptiness is the signal and
-  # it is tested directly.
-  while IFS= read -r tracked_sql; do
-    [[ -n ${tracked_sql} ]] && scripts+=("${tracked_sql}")
-  done < <(git ls-files "${sql_dir}/${name}--*--*.sql")
+  scripts=() && org_tracked_read scripts "${sql_dir}/${name}--*--*.sql"
 
   if ((${#scripts[@]} == 0)); then
     org_say "lint:pg-upgrade-path: ${name} has no upgrade scripts; first publish has no predecessor to strand"

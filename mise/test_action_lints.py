@@ -190,7 +190,9 @@ class Planted(unittest.TestCase):
 
         """
         as_mise = hermetic.task_run(
-            "lint:zizmor", '. "${ORG_BELT_DIR}/action-files.sh"; action_files'
+            "lint:zizmor",
+            '. "${ORG_BELT_DIR}/action-files.sh"; files=() && action_files files;'
+            ' printf "%s\\0" "${files[@]}"',
         )
         done = subprocess.run(
             as_mise.argv,

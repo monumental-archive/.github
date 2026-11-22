@@ -44,11 +44,12 @@ names it in `BASH_ENV`, beside the belt (`${ORG_BELT_DIR}/findings.sh`),
 and bash sources that file before it runs any non-interactive script.
 So every task body under the belt's shell (`bash --norc -euo pipefail -c`),
 and every bash a body starts, can call `org_finding` and
-`org_finding_annotated`, and `org_tracked`, the one producer of the
-tracked-file list (`mise/tracked.sh`, #1986). It holds locally through the clone's belt
-link and in CI through `MISE_GLOBAL_CONFIG_FILE`, as `ORG_BELT_DIR`
-does. With no belt, `BASH_ENV` is empty and nothing is sourced. A
-`sh` script never reads it.
+`org_finding_annotated`, and `org_tracked` and `org_tracked_read`,
+the one producer of the tracked-file list (`mise/tracked.sh`, #1986).
+It holds locally through the clone's belt link and in CI through
+`MISE_GLOBAL_CONFIG_FILE`, as `ORG_BELT_DIR` does. With no belt,
+`BASH_ENV` is empty and nothing is sourced. A `sh` script never reads
+it.
 
 A test that runs a body by hand gets the shell and the variables
 mise gives it from `hermetic.task_run`. Loading the writer runs no
