@@ -111,7 +111,10 @@ REASON = (
     " say why, one # line above each entry"
 )
 RED = [
-    f"{LABEL}: red — kill each survivor with an assertion, or record it in {CONFIG}",
+    (
+        f"{LABEL}: red — delete code a survivor proves redundant,"
+        f" kill each survivor with an assertion, or record it in {CONFIG}"
+    ),
     "  as an exclude_re entry under a # line saying why the mutant is equivalent",
 ]
 

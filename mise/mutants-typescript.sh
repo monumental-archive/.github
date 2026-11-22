@@ -5,8 +5,10 @@
 # is a SURVIVOR, and a survivor is a named line to fix.
 #
 # THE MEASURE IS "NO UNEXPLAINED SURVIVOR", NEVER A SCORE (#1336). Red
-# while any mutant is neither killed by an assertion nor excluded, with
-# a reason, at its site:
+# while any survivor stands. Its three outcomes, in order (#1981):
+# delete code it proves redundant, kill it with an assertion, or — the
+# code must stay and no input can tell — exclude it, with a reason, at
+# its site:
 #
 #   // Stryker disable next-line <Mutator>: <reason>
 #

@@ -464,7 +464,8 @@ def report(args: Args) -> int:
     if red(verdict):
         findings.finding(
             LANGUAGE,
-            f"red — kill each survivor with an assertion, or record it in {CONFIG}",
+            "red — delete code a survivor proves redundant, kill each survivor"
+            f" with an assertion, or record it in {CONFIG}",
             [
                 (
                     "as an exclude_re entry under a # line"

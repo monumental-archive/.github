@@ -160,16 +160,26 @@ red on any identifier a `REUSE.toml` names without its
 `LICENSES/<id>.txt` ([#1589]).
 
 [#1589]: https://github.com/monumental-archive/.github/issues/1589
+[#1981]: https://github.com/monumental-archive/.github/issues/1981
 
 ### No number can be bought
 
 - The mutation measure is "no unexplained surviving mutant", never a
-  score. Each survivor is killed by an assertion, or recorded as
-  equivalent, with a reason, at one site in the repository: in the
-  tool's own per-site exclusion where it has one (Rust: an `exclude_re`
-  entry in `.cargo/mutants.toml`), otherwise in a comment at the site
-  (Go: `//mutants:equivalent <type> <reason>`). There are no
-  org-level exclusions.
+  score. A survivor has three outcomes, taken in this order ([#1981]):
+  1. **The code is redundant: delete it.** Another path already
+     decides the result, so no input can tell the mutant from the
+     original. The deletion is the fix, and nothing is recorded.
+  2. **A test can tell: write the assertion.**
+  3. **The code must stay and no input can tell: record it** as
+     equivalent, with a reason, at one site in the repository: in the
+     tool's own per-site exclusion where it has one (Rust: an
+     `exclude_re` entry in `.cargo/mutants.toml`), otherwise in a
+     comment at the site (Go: `//mutants:equivalent <type> <reason>`).
+     This is the last resort, and its reason says why the code cannot
+     be deleted. There are no org-level exclusions.
+- Never change shipped code only to make a mutant disappear. Rewriting
+  an operator into a form the tool does not mutate hides the question;
+  deleting code the mutant proved redundant answers it.
 - No `#[coverage(off)]`, `# pragma: no cover` or equivalent.
 - No deleting fail-closed guards to shrink the denominator.
 - No test that calls code without asserting on its result.

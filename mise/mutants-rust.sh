@@ -7,8 +7,10 @@
 # THE MEASURE IS "NO UNEXPLAINED SURVIVOR", NEVER A SCORE (#1336). A
 # percentage can be bought by deleting hard code, and it lets the one
 # survivor in the code that matters hide in the average. So this is red
-# while any survivor is neither killed by an assertion nor recorded, with
-# a reason, as an exclusion in the repository's own config.
+# while any survivor stands. Its three outcomes, in order (#1981):
+# delete code it proves redundant, kill it with an assertion, or — the
+# code must stay and no input can tell — record it, with a reason, as an
+# exclusion in the repository's own config.
 #
 # ADOPTION IS THE TOOL'S OWN CONFIG FILE. A repository adopts by tracking
 # `.cargo/mutants.toml`; without one this skips clean, by name. No list of
