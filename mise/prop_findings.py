@@ -7,7 +7,8 @@ of a file name that is not UTF-8):
 
 - R: with `ORG_FINDINGS` naming a file, `finding()` returns, the file
   gains exactly one line, and `json.loads` of it gives each field equal
-  to `_text` of what was given: the text the log line shows.
+  to `_text` of what was given, modelled apart in the test: the text
+  the log line shows.
 
 `ORG_FINDINGS` is set by the test to a temporary file, so the case runs
 on every machine.
@@ -30,8 +31,16 @@ from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
 
-# The Done-when's oracle is the writer's own `_text` (#1984).
-TEXT = findings._text  # ruff: ignore[private-member-access] - the oracle is _text
+
+def printed(s: str) -> str:
+    """Model the writer's `_text`, apart from it (#1984).
+
+    Returns:
+        The text, each character UTF-8 cannot carry as its backslash
+        escape.
+
+    """
+    return s.encode("utf-8", "backslashreplace").decode("utf-8")
 
 
 class OneRecordReadsBack(unittest.TestCase):
@@ -61,9 +70,9 @@ class OneRecordReadsBack(unittest.TestCase):
             {
                 "v": findings.VERSION,
                 "task": "lint:demo",
-                "subject": TEXT(subject),
-                "message": TEXT(message),
-                "detail": [TEXT(line) for line in detail],
+                "subject": printed(subject),
+                "message": printed(message),
+                "detail": [printed(line) for line in detail],
             },
         )
 
