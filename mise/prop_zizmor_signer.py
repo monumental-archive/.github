@@ -9,9 +9,11 @@ generated zizmor findings:
   audit uses, is in the signer's repository, however the owner and
   repository are cased; the order of the findings never changes how
   many are dropped or kept.
-- Refusal (R): whatever JSON arrives on stdin, `main` answers 0, 1 or
-  its own refusal 2, and never raises (#1555: a finding whose ident,
-  locations or location fields were the wrong type raised).
+- Refusal (R): whatever zizmor writes to stdout, `main` answers 0,
+  zizmor's status, or its own refusal 1, and never raises (#1555: a
+  finding whose ident, locations or location fields were the wrong
+  type raised). A kept finding drawn here carries no record's fields,
+  so it is refused: 1.
 
 Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
@@ -20,8 +22,9 @@ the ordinary suite (`mise run test`) never imports this file.
 import contextlib
 import io
 import json
-import sys
+import os
 import unittest
+from unittest import mock
 
 import zizmor_signer as zs
 from hypothesis import example
@@ -96,21 +99,23 @@ class Exemption(unittest.TestCase):
         self.assertEqual(status, 0 if all(on for _, on in drawn) else 1)
 
 
-def run(stdin: str) -> tuple[int, str]:
-    """Run main on a stdin.
+def run(stdout: str) -> tuple[int, str]:
+    """Run main with zizmor answering `stdout` and its findings status, 14.
 
     Returns:
         The status and stdout.
 
     """
     out = io.StringIO()
-    old = sys.stdin
-    sys.stdin = io.StringIO(stdin)
-    try:
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
-            status = zs.main(["--signer-workflow", WORKFLOW])
-    finally:
-        sys.stdin = old
+    ran = zs.Ran(14, stdout.encode(), b"")
+    env = {"GH_TOKEN": "a token", "MISE_TASK_NAME": "audit:actions", "ORG_FINDINGS": ""}
+    with (
+        mock.patch.object(zs, "run_zizmor", return_value=ran),
+        mock.patch.dict(os.environ, env),
+        contextlib.redirect_stdout(out),
+        contextlib.redirect_stderr(io.StringIO()),
+    ):
+        status = zs.main(["--signer-workflow", WORKFLOW])
     return status, out.getvalue()
 
 
@@ -164,15 +169,15 @@ SHAPED: st.SearchStrategy[list[dict[str, object]]] = st.lists(
 
 
 class Refusal(unittest.TestCase):
-    """Any stdin is answered, never a traceback."""
+    """Any output of zizmor is answered, never a traceback."""
 
     @given(st.one_of(JSON.map(dumped), SHAPED.map(dumped), st.text(max_size=40)))
     @example('[{"ident": "stale-action-refs", "locations": [{"symbolic": "x"}]}]')
     @example('[{"ident": []}]')
-    def test_main_answers_any_stdin(self, stdin: str) -> None:
-        """0, 1 or 2."""
-        status, _ = run(stdin)
-        self.assertIn(status, (0, 1, 2))
+    def test_main_answers_any_output(self, stdout: str) -> None:
+        """0, 1 or 14."""
+        status, _ = run(stdout)
+        self.assertIn(status, (0, 1, 14))
 
 
 if __name__ == "__main__":
