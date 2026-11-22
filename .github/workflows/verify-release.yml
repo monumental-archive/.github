@@ -386,7 +386,10 @@ jobs:
           set -euo pipefail
           # The canon's finding writer (#1934), and its workflow commands (#1660).
           . "${CANON_PATH}/mise/findings.sh"
-          [[ -n ${ASSET} ]] || { org_finding_annotated "" "the assert policy names no sourceVerdictBundle"; exit 1; }
+          [[ -n ${ASSET} ]] || {
+            org_finding_annotated "" "the assert policy names no sourceVerdictBundle"
+            exit 1
+          }
           mkdir -p "${RUNNER_TEMP}/source-verdict"
           stele emit source-vsa --policy "${CANON_PATH}/slsa/verify-policy.json" \
             --assert-policy "${CANON_PATH}/slsa/assert-policy.json" --repo "${GITHUB_REPOSITORY}" \
