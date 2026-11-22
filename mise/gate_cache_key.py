@@ -113,6 +113,7 @@ import time
 from pathlib import Path
 from typing import NamedTuple
 
+import findings
 import typed_std
 
 NAME = "gate-cache-key"
@@ -351,7 +352,7 @@ def cargo(env: dict[str, str]) -> int:
         verbose = rustc_verbose()
         digest = rustc_digest(verbose)
     except (OSError, ValueError) as err:
-        print(f"{NAME}: {err}", file=sys.stderr)
+        findings.finding("", str(err))
         return 1
     write_outputs(env, {"digest": digest})
     print(f"{NAME}: {digest} for {verbose.splitlines()[0]}")
@@ -368,7 +369,7 @@ def digest() -> int:
     try:
         short = directory_digest(rustc_verbose())
     except (OSError, ValueError) as err:
-        print(f"{NAME}: {err}", file=sys.stderr)
+        findings.finding("", str(err))
         return 1
     print(short)
     return 0
@@ -393,7 +394,7 @@ def main(argv: list[str] | None = None, now: float | None = None) -> int:
         belt = belt_hash((args.canon / "mise" / "mise.lock").read_bytes())
         plat = target(platform.system(), platform.machine())
     except (OSError, ValueError) as err:
-        print(f"{NAME}: {err}", file=sys.stderr)
+        findings.finding("", str(err))
         return 1
     clock = time.time() if now is None else now
     out = names(args.name, env, Facts(version, plat, clock, belt), args.install)

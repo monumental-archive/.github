@@ -19,6 +19,7 @@ stdlib `unittest`, the belt's one test idiom. Run through the gate as
 """
 
 import io
+import os
 import re
 import subprocess
 import unittest
@@ -26,9 +27,21 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import override
+from unittest import mock
 
 import exit_trap as et
 import hermetic
+
+# The task that runs the helper, whose name its findings carry (#1934).
+TASK = "lint:bash-portability"
+
+
+def setUpModule() -> None:
+    """Run every row as the task does, recording no finding."""
+    patch = mock.patch.dict(os.environ, {"MISE_TASK_NAME": TASK, "ORG_FINDINGS": ""})
+    patch.start()
+    unittest.addModuleCleanup(patch.stop)
+
 
 BASH = Path("/bin/bash")
 SH = Path("/bin/sh")
@@ -89,9 +102,9 @@ def lint(*named: tuple[str, str]) -> tuple[int, list[str], bool]:
         with redirect_stdout(io.StringIO()), redirect_stderr(err):
             status = et.main(paths)
         lines = [
-            line.removeprefix(f"exit-trap: {scratch}/")
+            line.removeprefix(f"{TASK}: {scratch}/")
             for line in err.getvalue().splitlines()
-            if line.startswith("exit-trap: ")
+            if line.startswith(f"{TASK}: ")
         ]
         return status, lines, SHAPE_LINE in err.getvalue()
 

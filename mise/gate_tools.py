@@ -67,8 +67,8 @@ sys.path.append(str(Path(__file__).resolve().parents[1] / "release"))
 
 import caller_pins
 import decoded
+import findings
 import typed_std
-import workflow_command
 
 HERE = Path(__file__).resolve().parent
 TABLE = HERE / "gate-tools.toml"
@@ -385,15 +385,16 @@ def main(argv: list[str] | None = None) -> int:
             decoded.load_toml(config.read_bytes()).get("tools"), f"{config}: [tools]"
         )
     except decoded.UndecodableError as err:
-        workflow_command.error(f"gate-tools: {err}", stream=sys.stderr)
+        findings.finding("", str(err), annotate=True)
         return 1
     unknown = sorted(set(belt) ^ set(table))
     if unknown:
         for key in unknown:
-            workflow_command.error(
-                f"gate-tools: {key} is in one of mise/config.toml's"
+            findings.finding(
+                "",
+                f"{key} is in one of mise/config.toml's"
                 " [tools] and mise/gate-tools.toml but not the other",
-                stream=sys.stderr,
+                annotate=True,
             )
         return 1
     tracked = tracked_files(args.root)

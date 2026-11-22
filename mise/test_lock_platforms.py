@@ -22,11 +22,13 @@ gate as `mise run test`, which `ci` collects.
 
 import contextlib
 import io
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import decoded
 import hermetic
@@ -42,6 +44,13 @@ DEFAULTS = CANON / ".github" / "workflows" / "publish.yml"
 NAME = "lint:lock-platforms"
 STUB_PATH = ".github/workflows/publish.yml"
 REMOTE = "monumental-archive/.github/.github/workflows/publish.yml@" + "a" * 40
+
+
+def setUpModule() -> None:
+    """Run every row as the task does, recording no finding (#1934)."""
+    patch = mock.patch.dict(os.environ, {"MISE_TASK_NAME": NAME, "ORG_FINDINGS": ""})
+    patch.start()
+    unittest.addModuleCleanup(patch.stop)
 
 
 def stub(with_lines: str, uses: str = REMOTE) -> str:
@@ -531,7 +540,7 @@ class Script(unittest.TestCase):
                     *("--lock", "mise.lock"),
                 ],
                 cwd=root,
-                env=hermetic.env(),
+                env=hermetic.env(MISE_TASK_NAME=NAME),
                 input=f"{STUB_PATH}\n",
                 capture_output=True,
                 text=True,

@@ -7,10 +7,22 @@ serves: `ed/tf/edtf-core` is release/testdata's captured record, and
 """
 
 import io
+import os
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
+from unittest import mock
 
 import crates_index
+
+# The task that runs the helper, whose name its findings carry (#1934).
+TASK = "audit:semver"
+
+
+def setUpModule() -> None:
+    """Run every row as the task does, recording no finding."""
+    patch = mock.patch.dict(os.environ, {"MISE_TASK_NAME": TASK, "ORG_FINDINGS": ""})
+    patch.start()
+    unittest.addModuleCleanup(patch.stop)
 
 
 class IndexPath(unittest.TestCase):
@@ -77,14 +89,14 @@ class Command(unittest.TestCase):
         for argv in ((), ("url",), ("path", "alpha"), ("url", "a", "b")):
             with self.subTest(argv=argv):
                 self.assertEqual(
-                    (2, "", "usage: crates_index.py url <crate>\n"),
+                    (2, "", f"{TASK}: usage: crates_index.py url <crate>\n"),
                     self.run_main(*argv),
                 )
 
     def test_an_empty_name(self) -> None:
         """The refusal reaches the caller's stderr by name."""
         self.assertEqual(
-            (2, "", "crates_index.py: a crate with no name has no index record\n"),
+            (2, "", f"{TASK}: a crate with no name has no index record\n"),
             self.run_main("url", ""),
         )
 

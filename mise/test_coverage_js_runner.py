@@ -16,6 +16,7 @@ gate as `mise run test`.
 import contextlib
 import io
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -27,6 +28,17 @@ import coverage_js_runner as cj
 import decoded
 import hermetic
 import task_walk as tw
+
+# The task that runs the helper, whose name its findings carry (#1934).
+TASK = "coverage:check"
+
+
+def setUpModule() -> None:
+    """Run every row as the task does, recording no finding."""
+    patch = mock.patch.dict(os.environ, {"MISE_TASK_NAME": TASK, "ORG_FINDINGS": ""})
+    patch.start()
+    unittest.addModuleCleanup(patch.stop)
+
 
 HERE = Path(__file__).resolve().parent
 
@@ -47,7 +59,7 @@ class TaskReferences(unittest.TestCase):
         walked = tw.walk("test", answers.get, list)
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            status = cj.vitest_command("coverage:check", walked)
+            status = cj.vitest_command(walked)
         self.assertEqual(status, 0, err.getvalue())
         want: dict[str, object] = {"dir": ".", "args": ["run"]}
         self.assertEqual(decoded.load_json(out.getvalue()), want)
@@ -57,7 +69,7 @@ class TaskReferences(unittest.TestCase):
         walked = tw.Walk(("test", "lint"), (tw.Step("lint", "", "echo lint"),))
         err = io.StringIO()
         with contextlib.redirect_stderr(err):
-            status = cj.vitest_command("coverage:check", walked)
+            status = cj.vitest_command(walked)
         self.assertEqual(status, 1)
         self.assertIn("  tasks walked: test, lint\n", err.getvalue())
 
@@ -97,7 +109,7 @@ class Readers(unittest.TestCase):
         walked = tw.Walk(("test",), (tw.Step("test", "", "vitest --silent"),))
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            status = cj.vitest_command("coverage:check", walked)
+            status = cj.vitest_command(walked)
         self.assertEqual(0, status)
         want: dict[str, object] = {"dir": ".", "args": ["run", "--silent"]}
         self.assertEqual(want, decoded.load_json(out.getvalue()))
@@ -134,7 +146,7 @@ class Main(unittest.TestCase):
         """Broken JSON is exit 1, named, never read as no runner."""
         status, out, err = self.main(["package.json"], {"package.json": "{"})
         self.assertEqual((1, ""), (status, out))
-        self.assertTrue(err.startswith("coverage-js-runner: package.json: "), err)
+        self.assertTrue(err.startswith(f"{TASK}: package.json: "), err)
 
     def test_a_package_json_that_is_not_an_object_names_no_runner(self) -> None:
         """A JSON array declares nothing."""
@@ -162,7 +174,7 @@ class Main(unittest.TestCase):
 
 
 class VitestCommand(unittest.TestCase):
-    """`--vitest-command <label> <task>`, through main in this process (#1696)."""
+    """`--vitest-command <task>`, through main in this process (#1696)."""
 
     def call(self, walked: tw.Walk | tw.RefusedError) -> tuple[int, str, str]:
         """Call main with the walk mise would answer replaced by `walked`.
@@ -179,9 +191,7 @@ class VitestCommand(unittest.TestCase):
             return walked
 
         with mock.patch.object(tw, "walk_mise", walk_mise):
-            done = hermetic.call_main(
-                lambda: cj.main(["--vitest-command", "coverage:check", "test"])
-            )
+            done = hermetic.call_main(lambda: cj.main(["--vitest-command", "test"]))
         return done.returncode, done.stdout, done.stderr
 
     def test_the_walked_vitest_command_is_printed(self) -> None:

@@ -29,15 +29,28 @@ stdlib `unittest`, matching the other mise/test_*.py. Run through the
 gate as `mise run test`, which `ci` collects.
 """
 
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import decoded
 import gate_stub_fix
 import hermetic
+
+# The task that runs the helper, whose name its findings carry (#1934).
+TASK = "fix:gate-stub"
+
+
+def setUpModule() -> None:
+    """Run every row as the task does, recording no finding."""
+    patch = mock.patch.dict(os.environ, {"MISE_TASK_NAME": TASK, "ORG_FINDINGS": ""})
+    patch.start()
+    unittest.addModuleCleanup(patch.stop)
+
 
 CANON = Path(__file__).resolve().parent.parent
 BELT = CANON / "mise"

@@ -33,6 +33,7 @@ from decimal import Decimal
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Self, override
+from unittest import mock
 
 import coverage_floor as cf
 import hermetic
@@ -119,6 +120,17 @@ class Tree:
 
 
 # What a row expects of a clean parse or reading, named with its type.
+# The task that runs the helper, whose name its findings carry (#1934).
+TASK = "coverage:check"
+
+
+def setUpModule() -> None:
+    """Run every row as the task does, recording no finding."""
+    patch = mock.patch.dict(os.environ, {"MISE_TASK_NAME": TASK, "ORG_FINDINGS": ""})
+    patch.start()
+    unittest.addModuleCleanup(patch.stop)
+
+
 NO_PROBLEMS: list[str] = []
 NO_LEGS: list[tuple[str, Decimal]] = []
 
@@ -1044,7 +1056,7 @@ class TestLegsRecord(unittest.TestCase):
         self.assertEqual(1, status)
         self.assertEqual(text, after)
         self.assertEqual(
-            "coverage-floor: the floor records plpgsql and this derivation"
+            f"{TASK}: the floor records plpgsql and this derivation"
             " measured none. A leg leaves the record only on purpose: restore"
             " what it measures, or add `# dropped: plpgsql <reason>` to"
             f" {tree.path}\n",
@@ -1129,7 +1141,7 @@ class TestOwners(unittest.TestCase):
                 (
                     1,
                     "lbl: rust leg holds the floor 90 (99%)\n",
-                    "lbl: the floor was derived with python and this run"
+                    f"{TASK}: the floor was derived with python and this run"
                     " measured none\n"
                     + REMEDY.format(needs=cf.NEEDS["python"], leg="python"),
                 ),
@@ -1142,7 +1154,7 @@ class TestOwners(unittest.TestCase):
                 (
                     1,
                     "",
-                    "lbl: the floor was derived with pgrx-pg15 and this run"
+                    f"{TASK}: the floor was derived with pgrx-pg15 and this run"
                     " measured none\n" + NO_OWNER.format(leg="pgrx-pg15"),
                 ),
             ),
@@ -1158,7 +1170,7 @@ class TestOwners(unittest.TestCase):
                 "rust pgrx-pg15",
                 "pgrx-pg15 80\n",
                 PGRX15,
-                (1, "", "lbl: pgrx-pg15: 80% is below the derived floor 90%\n"),
+                (1, "", f"{TASK}: pgrx-pg15: 80% is below the derived floor 90%\n"),
             ),
             (
                 "pgrx scope: another major, and the gate's legs, are not its own",
@@ -1181,7 +1193,7 @@ class TestOwners(unittest.TestCase):
                 (
                     1,
                     "",
-                    "plan: the floor records pgrx-pg14, measured by the pgrx:14"
+                    f"{TASK}: the floor records pgrx-pg14, measured by the pgrx:14"
                     " job, and this run plans none (planned majors:"
                     " 15,16,17,18)\n" + NO_OWNER.format(leg="pgrx-pg14"),
                 ),
@@ -1193,7 +1205,7 @@ class TestOwners(unittest.TestCase):
                 (
                     1,
                     "",
-                    "plan: the floor records pgrx-pg15, measured by the pgrx:15"
+                    f"{TASK}: the floor records pgrx-pg15, measured by the pgrx:15"
                     " job, and this run plans none (planned majors: none)\n"
                     + NO_OWNER.format(leg="pgrx-pg15"),
                 ),
@@ -1206,7 +1218,7 @@ class TestOwners(unittest.TestCase):
             ),
         ):
             with self.subTest(name), Tree(owned_record(legs)) as tree:
-                self.assertEqual(want, run(cf.planned, tree.path, "plan", majors))
+                self.assertEqual(want, run(cf.planned, tree.path, majors))
 
     def test_the_plan_accepts_a_dropped_leg_and_no_floor(self) -> None:
         """A dropped leg needs no owner; no floor, or no record, needs none."""
@@ -1219,16 +1231,14 @@ class TestOwners(unittest.TestCase):
             ("no floor", None),
         ):
             with self.subTest(name), Tree(text) as tree:
-                self.assertEqual(
-                    (0, "", ""), run(cf.planned, tree.path, "plan", '["15"]')
-                )
+                self.assertEqual((0, "", ""), run(cf.planned, tree.path, '["15"]'))
 
     def test_the_plan_refuses_a_floor_off_its_record(self) -> None:
         """Drift is the same refusal in the plan as everywhere else."""
         with Tree(record("88.0")) as tree:
-            status, _, err = run(cf.planned, tree.path, "plan", '["15"]')
+            status, _, err = run(cf.planned, tree.path, '["15"]')
         self.assertEqual(1, status)
-        self.assertIn("coverage-floor:", err)
+        self.assertIn(f"{TASK}:", err)
 
     def test_the_plan_decodes_its_majors_as_json(self) -> None:
         """`--majors-json` is the plan's array of major strings, or red (#1880).
@@ -1237,7 +1247,7 @@ class TestOwners(unittest.TestCase):
         floor: a value the helper cannot read plans nothing.
         """
         refused = (
-            "plan: the planned majors '{value}' are not a JSON array of"
+            TASK + ": the planned majors '{value}' are not a JSON array of"
             " canonical major strings: {why}\n"
         )
         for name, legs, majors, want in (
@@ -1287,7 +1297,7 @@ class TestOwners(unittest.TestCase):
             ),
         ):
             with self.subTest(name), Tree(owned_record(legs)) as tree:
-                self.assertEqual(want, run(cf.planned, tree.path, "plan", majors))
+                self.assertEqual(want, run(cf.planned, tree.path, majors))
 
     def test_one_owner_per_leg_family(self) -> None:
         """`pgrx-pgNN` strictly is the pgrx job; every other leg the gate's.
@@ -1385,7 +1395,7 @@ PLAN_ROWS: tuple[tuple[str, str, int, str], ...] = (
         "a recorded major the plan does not make",
         "rust pgrx-pg14 pgrx-pg15",
         1,
-        "plan: the floor records pgrx-pg14, measured by the pgrx:14 job,"
+        "coverage_floor.py: the floor records pgrx-pg14, measured by the pgrx:14 job,"
         " and this run plans none (planned majors: 15,16,17,18)\n"
         + NO_OWNER.format(leg="pgrx-pg14"),
     ),
@@ -1607,7 +1617,7 @@ class TestFuzzLegs(unittest.TestCase):
         self.assertEqual(1, status)
         self.assertEqual("lbl: rust leg holds the floor 83.4 (86.0%)\n", out)
         self.assertEqual(
-            f"lbl: {MARKER}: the fuzz target has no line in {tree.path} —"
+            f"{TASK}: {MARKER}: the fuzz target has no line in {tree.path} —"
             " every fuzz target is a leg of the floor (#1896): run `mise run"
             f" coverage:adopt` and commit {tree.path}\n",
             err,
@@ -1636,7 +1646,7 @@ class TestFuzzLegs(unittest.TestCase):
         self.assertEqual(1, status)
         self.assertEqual("lbl: rust leg holds the floor 83.4 (86.0%)\n", out)
         self.assertEqual(
-            f"lbl: {bare}: the fuzz target has no line in {tree.path} —"
+            f"{TASK}: {bare}: the fuzz target has no line in {tree.path} —"
             " every fuzz target is a leg of the floor (#1896): run `mise run"
             f" coverage:adopt` and commit {tree.path}\n",
             err,
@@ -1654,7 +1664,7 @@ class TestFuzzLegs(unittest.TestCase):
             (
                 "below",
                 "87.9",
-                (1, "", f"lbl: {MARKER}: 87.9% is below its derived floor 88%\n"),
+                (1, "", f"{TASK}: {MARKER}: 87.9% is below its derived floor 88%\n"),
             ),
         ):
             with self.subTest(name), Tree(text) as tree:
@@ -1672,7 +1682,7 @@ class TestFuzzLegs(unittest.TestCase):
             (
                 1,
                 "",
-                f"lbl: the floor was derived with {MARKER} and this run measured"
+                f"{TASK}: the floor was derived with {MARKER} and this run measured"
                 " none\n" + FUZZ_NEEDS,
             ),
             gate,
@@ -1686,7 +1696,7 @@ class TestFuzzLegs(unittest.TestCase):
             status, _, err = run(cf.derive, tree.path, "rust 86.0\n", "v1", adopt=False)
         self.assertEqual(1, status)
         self.assertEqual(
-            f"coverage-floor: the floor records {MARKER} and this derivation"
+            f"{TASK}: the floor records {MARKER} and this derivation"
             " measured none. A leg leaves the record only on purpose: restore"
             f" what it measures, or add `# dropped: {MARKER} <reason>` to"
             f" {tree.path}\n",

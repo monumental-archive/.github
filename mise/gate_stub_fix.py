@@ -25,6 +25,8 @@ import re
 import sys
 from pathlib import Path
 
+import findings
+
 NAME = "fix:gate-stub"
 
 KEY = "github.event.pull_request.number || format('{0}-{1}', github.ref, github.sha)"
@@ -134,14 +136,16 @@ def main(argv: list[str]) -> int:
             path.write_text(new, encoding="utf-8")
             print(f"{NAME}: rewrote the concurrency lines in {path}")
     if refused:
-        print(
-            f"{NAME}: no top-level concurrency block to rewrite, so none was"
-            " written; add one by hand under the triggers:\n"
-            "  concurrency:\n"
-            f"    group: {GROUP}\n"
-            f"    cancel-in-progress: {CANCEL}\n"
-            f"  in: {' '.join(refused)}",
-            file=sys.stderr,
+        findings.finding(
+            "",
+            "no top-level concurrency block to rewrite, so none was"
+            " written; add one by hand under the triggers:",
+            [
+                "concurrency:",
+                f"  group: {GROUP}",
+                f"  cancel-in-progress: {CANCEL}",
+                f"in: {' '.join(refused)}",
+            ],
         )
         return 1
     print(f"{NAME}: ok")

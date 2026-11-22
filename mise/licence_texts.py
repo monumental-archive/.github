@@ -27,6 +27,7 @@ import pathlib
 import re
 import sys
 
+import findings as writer
 from decoded import UndecodableError, as_array, as_object, is_strings, load_toml
 from typed_std import group, stdin_text
 
@@ -140,12 +141,12 @@ def main(argv: list[str]) -> int:
 
     """
     if len(argv) != 1:
-        print("usage: git ls-files -z | licence_texts.py", file=sys.stderr)
+        writer.finding("", "usage: git ls-files -z | licence_texts.py")
         return 2
     tracked = [path for path in stdin_text().split("\0") if path]
     out = findings(pathlib.Path.cwd(), tracked)
     for message in out:
-        print(f"lint:licence: {message}", file=sys.stderr)
+        writer.finding("", message)
     return 1 if out else 0
 
 

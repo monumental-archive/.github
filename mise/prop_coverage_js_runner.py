@@ -26,7 +26,9 @@ the ordinary suite (`mise run test`) never imports this file.
 
 import contextlib
 import io
+import os
 import unittest
+from unittest import mock
 
 import coverage_js_runner as cj
 import decoded
@@ -34,6 +36,17 @@ import task_walk as tw
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
+
+# The task that runs the helper, whose name its findings carry (#1934).
+RUN_AS = "coverage:check"
+
+
+def setUpModule() -> None:
+    """Run every row as the task does, recording no finding."""
+    patch = mock.patch.dict(os.environ, {"MISE_TASK_NAME": RUN_AS, "ORG_FINDINGS": ""})
+    patch.start()
+    unittest.addModuleCleanup(patch.stop)
+
 
 VERSION = st.from_regex(r"[0-9]{1,2}\.[0-9]{1,2}\.[0-9]{1,2}", fullmatch=True)
 # One entry per lockfile dialect, for a package at a version.
@@ -190,7 +203,7 @@ class VitestCommand(unittest.TestCase):
             return
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            status = cj.vitest_command("coverage:check", walked)
+            status = cj.vitest_command(walked)
         self.assertIn(status, (0, 1))
         if status == 0:
             printed = decoded.as_object(decoded.load_json(out.getvalue()), "stdout")

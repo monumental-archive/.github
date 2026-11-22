@@ -37,6 +37,7 @@ stdlib `unittest`, matching the other mise/test_*.py.
 import contextlib
 import copy
 import io
+import os
 import re
 import subprocess
 import sys
@@ -45,6 +46,7 @@ import unittest
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
+from unittest import mock
 
 import audit_legs
 import coverage_floor
@@ -584,6 +586,26 @@ class GateSecrets(unittest.TestCase):
         self.assertEqual(want, secret_drift(read_ci(), documents))
 
 
+# A workflow step runs the helper outside mise, so its findings carry the
+# script's own name (findings.task_name, #1934).
+STEP = "audit_legs.py"
+
+
+def as_step() -> contextlib.ExitStack:
+    """Run as a workflow step does: no task name, no findings file.
+
+    Returns:
+        The patches, entered by the caller's `with`.
+
+    """
+    stack = contextlib.ExitStack()
+    stack.enter_context(
+        mock.patch.dict(os.environ, {"MISE_TASK_NAME": "", "ORG_FINDINGS": ""})
+    )
+    stack.enter_context(mock.patch.object(sys, "argv", [STEP]))
+    return stack
+
+
 def git_tree(files: dict[str, str]) -> Path:
     """Plant a git tree with the files tracked.
 
@@ -955,6 +977,7 @@ class FuzzTargets(unittest.TestCase):
             root = git_tree({"fuzz/Cargo.toml": text})
             err = io.StringIO()
             with (
+                as_step(),
                 contextlib.redirect_stderr(err),
                 contextlib.redirect_stdout(io.StringIO()),
             ):
@@ -962,7 +985,7 @@ class FuzzTargets(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(1, status)
                 self.assertTrue(
-                    err.getvalue().startswith(f"::error::audit-legs: {message}"),
+                    err.getvalue().startswith(f"::error::{STEP}: {message}"),
                     err.getvalue(),
                 )
 
@@ -1066,7 +1089,11 @@ class Refusals(unittest.TestCase):
         table = Path(tmp.name) / "audit-legs.toml"
         table.write_text(table_text, encoding="utf-8")
         err = io.StringIO()
-        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+        with (
+            as_step(),
+            contextlib.redirect_stderr(err),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
             status = audit_legs.main([
                 "--root",
                 str(CANON),
@@ -1091,16 +1118,14 @@ class Refusals(unittest.TestCase):
             with self.subTest(text=text):
                 status, err, table = self.run_main(text)
                 self.assertEqual(1, status)
-                self.assertTrue(
-                    err.startswith(f"::error::audit-legs: {table}: "), msg=err
-                )
+                self.assertTrue(err.startswith(f"::error::{STEP}: {table}: "), msg=err)
                 self.assertIn(message, err)
 
     def test_an_unknown_workflow(self) -> None:
         """A workflow the table has no section for is refused, not run."""
         status, err, table = self.run_main("[w.x]\n", "v")
         self.assertEqual(1, status)
-        self.assertEqual(f"::error::audit-legs: {table} has no table for v\n", err)
+        self.assertEqual(f"::error::{STEP}: {table} has no table for v\n", err)
 
     def test_a_well_formed_table_decodes(self) -> None:
         """Absent fields take their defaults."""

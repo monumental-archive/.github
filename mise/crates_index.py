@@ -19,6 +19,8 @@ a shell caller that keeps its own request.
 
 import sys
 
+import findings
+
 INDEX = "https://index.crates.io"
 
 
@@ -64,12 +66,12 @@ def main(argv: list[str]) -> int:
 
     """
     if len(argv) != 2 or argv[0] != "url":  # ruff: ignore[magic-value-comparison] - `url <crate>`
-        print("usage: crates_index.py url <crate>", file=sys.stderr)
+        findings.finding("", "usage: crates_index.py url <crate>")
         return 2
     try:
         print(index_url(argv[1]))
     except ValueError as e:
-        print(f"crates_index.py: {e}", file=sys.stderr)
+        findings.finding("", str(e))
         return 2
     return 0
 

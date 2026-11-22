@@ -23,6 +23,7 @@ gate as `mise run test`, which `ci` collects.
 import contextlib
 import io
 import json
+import os
 import shutil
 import subprocess
 import tempfile
@@ -395,14 +396,23 @@ class Red(unittest.TestCase):
         """Which entry the file answers for cannot be guessed."""
         other = README.replace(ID, "16735")
         self.assert_red(
-            f"README shields name more than one entry: {ID}, 16735\n"
-            f"audit:bestpractices: {REPO}: cannot tell which entry to compare\n",
+            f"audit:bestpractices: {REPO}: cannot tell which entry to compare\n"
+            f"  README shields name more than one entry: {ID}, 16735\n",
             readme=README + other,
         )
 
 
 class Helper(unittest.TestCase):
     """The helper's pieces, in process."""
+
+    def setUp(self) -> None:
+        """Run as the task does, recording no finding (#1934)."""
+        self.enterContext(
+            mock.patch.dict(
+                os.environ,
+                {"MISE_TASK_NAME": "audit:bestpractices", "ORG_FINDINGS": ""},
+            )
+        )
 
     def test_site_key_maps_baseline_and_keeps_the_rest(self) -> None:
         """Only Baseline input names are renamed."""

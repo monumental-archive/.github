@@ -38,6 +38,7 @@ stdlib `unittest`, matching the other mise/test_*.py.
 import contextlib
 import dataclasses
 import io
+import os
 import re
 import shlex
 import subprocess
@@ -45,6 +46,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import decoded
 import gate_tools
@@ -52,6 +54,9 @@ import hermetic
 import typed_std
 
 CANON = Path(__file__).resolve().parent.parent
+# A workflow step runs the helper outside mise, so its findings carry the
+# script's own name (findings.task_name, #1934).
+STEP = "gate_tools.py"
 BELT = CANON / "mise"
 GIT = hermetic.tool("git")
 
@@ -839,7 +844,7 @@ class Helper(unittest.TestCase):
             )
         self.assertEqual(1, result.returncode)
         self.assertIn(
-            "::error::gate-tools: aqua:hadolint/hadolint is in one of", result.stderr
+            f"::error::{STEP}: aqua:hadolint/hadolint is in one of", result.stderr
         )
 
 
@@ -859,7 +864,12 @@ class Refusals(unittest.TestCase):
         table.write_text(table_text, encoding="utf-8")
         (Path(tmp.name) / "config.toml").write_text(config_text, encoding="utf-8")
         err = io.StringIO()
-        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+        with (
+            mock.patch.dict(os.environ, {"MISE_TASK_NAME": "", "ORG_FINDINGS": ""}),
+            mock.patch.object(sys, "argv", [STEP]),
+            contextlib.redirect_stderr(err),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
             status = gate_tools.main(["--table", str(table), "list"])
         return status, err.getvalue(), table
 
@@ -878,9 +888,7 @@ class Refusals(unittest.TestCase):
             with self.subTest(text=text):
                 status, err, table = self.run_main(text, "[tools]\n")
                 self.assertEqual(1, status)
-                self.assertTrue(
-                    err.startswith(f"::error::gate-tools: {table}: "), msg=err
-                )
+                self.assertTrue(err.startswith(f"::error::{STEP}: {table}: "), msg=err)
                 self.assertIn(message, err)
 
     def test_belt_tools_not_a_table(self) -> None:
@@ -888,7 +896,7 @@ class Refusals(unittest.TestCase):
         status, err, table = self.run_main("[tools]\n", "tools = []\n")
         self.assertEqual(1, status)
         self.assertEqual(
-            f"::error::gate-tools: {table.parent / 'config.toml'}: [tools] "
+            f"::error::{STEP}: {table.parent / 'config.toml'}: [tools] "
             "is not an object\n",
             err,
         )

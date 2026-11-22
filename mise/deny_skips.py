@@ -28,6 +28,7 @@ import re
 import sys
 import tempfile
 
+import findings
 from decoded import UndecodableError, as_array, as_object, load_toml
 from typed_std import group
 
@@ -106,13 +107,13 @@ def main(argv: list[str]) -> int:
 
     """
     if len(argv) != EXPECTED_ARGC:
-        print("usage: deny_skips.py <deny.toml>", file=sys.stderr)
+        findings.finding("", "usage: deny_skips.py <deny.toml>")
         return 2
     source = pathlib.Path(argv[1])
     try:
         skips = entries(load_toml(source.read_text(encoding="utf-8")))
     except UndecodableError as error:
-        print(f"lint:deny: {source}: {error}", file=sys.stderr)
+        findings.finding(str(source), str(error))
         return 1
     if not skips:
         return 0
@@ -127,7 +128,7 @@ def main(argv: list[str]) -> int:
             # Declared but unmatchable by the line rule: report rather
             # than skip, because a skip this cannot test is a skip
             # nothing is checking.
-            print(f"lint:deny: cannot isolate {key} '{spec}'", file=sys.stderr)
+            findings.finding("", f"cannot isolate {key} '{spec}'")
             return 1
         path = out / f"without-{index}-{spec.replace('/', '_')}.toml"
         path.write_text("".join(kept), encoding="utf-8")

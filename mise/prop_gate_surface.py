@@ -23,13 +23,26 @@ the ordinary suite (`mise run test`) never imports this file.
 import contextlib
 import io
 import json
+import os
 import sys
 import unittest
+from unittest import mock
 
 import gate_surface as gs
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
+
+# The task that runs the helper, whose name its findings carry (#1934).
+TASK = "lint:gate-surface"
+
+
+def setUpModule() -> None:
+    """Run every row as the task does, recording no finding."""
+    patch = mock.patch.dict(os.environ, {"MISE_TASK_NAME": TASK, "ORG_FINDINGS": ""})
+    patch.start()
+    unittest.addModuleCleanup(patch.stop)
+
 
 NAME = st.from_regex(r"[a-z][a-z0-9_-]{0,8}", fullmatch=True)
 FEATURE = st.one_of(
@@ -221,7 +234,7 @@ class Refusal(unittest.TestCase):
             sys.stdin = old
         self.assertIn(status, (0, 1))
         if status:
-            self.assertIn("gate-surface: ", err.getvalue())
+            self.assertIn(f"{TASK}: ", err.getvalue())
 
 
 if __name__ == "__main__":

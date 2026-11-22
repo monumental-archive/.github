@@ -75,6 +75,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
 import decoded
+import findings as writer
 from typed_std import group
 
 if TYPE_CHECKING:
@@ -749,9 +750,15 @@ def write_mode(configs: dict[Path, Config]) -> int:
         total += written
         refused += problems
     for line in refused:
-        print(line, file=sys.stderr)
+        report(line)
     print(f"belt-shell: reformatted {total} `run` body(ies)")
     return 1 if refused else 0
+
+
+def report(line: str) -> None:
+    """Write one `<file>:<line>: <message>` line as a finding about that place."""
+    subject, _, message = line.partition(": ")
+    writer.finding(subject, message)
 
 
 def check_mode(
@@ -782,26 +789,26 @@ def check_mode(
             bodies += 1
             found += findings(body, path, head, source_paths)
     for line in found:
-        print(line, file=sys.stderr)
+        report(line)
     if found:
-        print(
-            f"belt-shell: {len(found)} finding(s) in mise task bodies — the same "
+        writer.finding(
+            "",
+            f"{len(found)} finding(s) in mise task bodies — the same "
             "bar the belt applies to standalone scripts",
-            file=sys.stderr,
         )
     if asserted.pins:
-        print(
-            f"belt-shell: {len(asserted.pins)} config(s) define tasks without "
+        writer.finding(
+            "",
+            f"{len(asserted.pins)} config(s) define tasks without "
             "pinning the task shell — the belt supplies the strict shell as a "
             "default, and the pin is what makes the file true without it (#700)",
-            file=sys.stderr,
         )
     if asserted.nests:
-        print(
-            f"belt-shell: {len(asserted.nests)} task body(ies) execute `mise run` "
+        writer.finding(
+            "",
+            f"{len(asserted.nests)} task body(ies) execute `mise run` "
             "— the race #82 measured, and the reason every shared derivation in "
             "the belt is a script both halves invoke (#764)",
-            file=sys.stderr,
         )
     if found or asserted.pins or asserted.nests:
         return 1
@@ -851,15 +858,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     # own defaults, exit 0 — so a belt that did not arrive would read as a
     # clean run. Checked before any body is linted.
     if not args.write and not ORG_RCFILE.is_file():
-        print(
-            f"belt-shell: the org shellcheck config is missing at {ORG_RCFILE}",
-            file=sys.stderr,
-        )
+        writer.finding("", f"the org shellcheck config is missing at {ORG_RCFILE}")
         return 1
     try:
         configs, shell, env = collect(paths, [Path(f) for f in args.env_from])
     except decoded.UndecodableError as err:
-        print(f"belt-shell: {err}", file=sys.stderr)
+        writer.finding("", str(err))
         return 1
 
     # Asserted before the interpreter skip below and before any body is
@@ -874,7 +878,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         [] if args.write else nested(configs),
     )
     for line in [*asserted.pins, *asserted.nests]:
-        print(line, file=sys.stderr)
+        report(line)
 
     if Path(shlex.split(shell)[0]).name not in {"bash", "sh"}:
         print(f"belt-shell: task shell is {shell!r}, not shell — skipped")

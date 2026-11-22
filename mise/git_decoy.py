@@ -34,6 +34,8 @@ import subprocess
 import sys
 from typing import NamedTuple
 
+import findings
+
 GIT = shutil.which("git") or "git"
 
 # A git with no user or system config and an identity of its own, so
@@ -172,12 +174,10 @@ def run(decoy: pathlib.Path, command: list[str]) -> int:
     status = subprocess.run(command, env=env, check=False).returncode
     found = changes(decoy, before, state(decoy))
     if found:
-        print(f"git-decoy: {MESSAGE}, running: {' '.join(command)}", file=sys.stderr)
-        for line in found:
-            print(f"  {line}", file=sys.stderr)
-        print(
-            "  every git call in a test passes a scrubbed env= (#857)",
-            file=sys.stderr,
+        findings.finding(
+            "",
+            f"{MESSAGE}, running: {' '.join(command)}",
+            [*found, "every git call in a test passes a scrubbed env= (#857)"],
         )
         return 1
     return status

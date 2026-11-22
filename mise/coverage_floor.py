@@ -70,6 +70,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 import decoded
+import findings
 import typed_std
 
 NAME = "coverage-floor"
@@ -694,7 +695,7 @@ def render(
 def complain(problems: list[str], path: Path) -> None:
     """Print every reason the file was refused, never only the first."""
     for problem in problems:
-        print(f"{NAME}: {path} {problem}", file=sys.stderr)
+        findings.finding("", f"{path} {problem}")
 
 
 def read(path: Path, leg: str | None = None) -> int:
@@ -736,11 +737,11 @@ def ratchet_separate(record: Record, separate: dict[str, Decimal]) -> bool:
             continue
         floor = holds[leg][0]
         if quantise(measured) < floor:
-            print(
-                f"{NAME}: {leg} measured {quantise(measured)}% is below its "
+            findings.finding(
+                "",
+                f"{leg} measured {quantise(measured)}% is below its "
                 f"floor {floor}%. The floor never falls, so nothing is "
                 f"written: write the tests that put {leg} back to {floor}%",
-                file=sys.stderr,
             )
             held = False
     return held
@@ -815,10 +816,10 @@ def write(  # ruff: ignore[too-many-arguments] -- one keyword per part of a meas
     if record is None:
         if not adopt:
             complain(problems, path)
-            print(
-                f"{NAME}: a release does not repair a floor it did not "
+            findings.finding(
+                "",
+                "a release does not repair a floor it did not "
                 "write — fix the file, then release",
-                file=sys.stderr,
             )
             return 1
         # `fix:*` is the write-mode channel and a human running it IS the
@@ -833,14 +834,14 @@ def write(  # ruff: ignore[too-many-arguments] -- one keyword per part of a meas
     # every merged pull request already held, so it cannot red main.
     main_held = quantised >= record.floor
     if not main_held:
-        print(
-            f"{NAME}: measured {quantised}% is below the floor "
+        findings.finding(
+            "",
+            f"measured {quantised}% is below the floor "
             f"{record.floor}%. The floor never falls, so this release "
             "FAILS rather than lowering it: write the tests that put it "
             f"back to {record.floor}%, or consciously reset the floor by "
             "replacing the `measured` and `derived` lines of "
             f"{path} with `reset: <why>`",
-            file=sys.stderr,
         )
     # Every leg is judged before anything returns, so one run names every
     # refusal rather than the first.
@@ -894,11 +895,11 @@ def record_holds(record: Record, legs: list[str], path: Path) -> bool:
         leg for leg in recorded(record) if leg not in legs and leg not in dropped
     ]
     for leg in missing:
-        print(
-            f"{NAME}: the floor records {leg} and this derivation measured "
+        findings.finding(
+            "",
+            f"the floor records {leg} and this derivation measured "
             "none. A leg leaves the record only on purpose: restore what it "
             f"measures, or add `# dropped: {leg} <reason>` to {path}",
-            file=sys.stderr,
         )
     return not missing
 
@@ -917,10 +918,10 @@ def derive(path: Path, source: str, provenance: str, *, adopt: bool) -> int:
     measured = [(leg, pct) for leg, pct in every if not apart(leg)]
     separate = {leg: pct for leg, pct in every if apart(leg)}
     if not measured:
-        print(
-            f"{NAME}: no leg was measured — a derivation that reads "
+        findings.finding(
+            "",
+            "no leg was measured — a derivation that reads "
             "nothing must not write a floor",
-            file=sys.stderr,
         )
         return 1
     # The weakest leg, because the floor is a minimum every leg must hold:
@@ -984,7 +985,7 @@ def job_of(text: str) -> str:
     raise argparse.ArgumentTypeError(msg)
 
 
-def unaccounted(record: Record, label: str, legs: list[str]) -> list[str]:
+def unaccounted(record: Record, legs: list[str]) -> list[str]:
     """Name each recorded leg in `legs` that is not dropped, with its remedy.
 
     Returns:
@@ -994,11 +995,11 @@ def unaccounted(record: Record, label: str, legs: list[str]) -> list[str]:
     dropped = record.dropped or {}
     missing = [leg for leg in legs if leg not in dropped]
     for leg in missing:
-        print(
-            f"{label}: the floor was derived with {leg} and this run measured none",
-            file=sys.stderr,
+        findings.finding(
+            "",
+            f"the floor was derived with {leg} and this run measured none",
+            [needs(leg).removeprefix("  ")],
         )
-        print(needs(leg), file=sys.stderr)
     return missing
 
 
@@ -1050,10 +1051,7 @@ def hold(path: Path, label: str, source: str, jobs: frozenset[str]) -> int:
                 status = 1
             continue
         if pct < record.floor:
-            print(
-                f"{label}: {leg}: {pct}% is below the derived floor {record.floor}%",
-                file=sys.stderr,
-            )
+            findings.finding(leg, f"{pct}% is below the derived floor {record.floor}%")
             status = 1
             continue
         print(f"{label}: {leg} leg holds the floor {record.floor} ({pct}%)")
@@ -1063,7 +1061,7 @@ def hold(path: Path, label: str, source: str, jobs: frozenset[str]) -> int:
                 "the next derivation",
             )
     owned = [leg for leg in recorded(record) if owner(leg) in jobs and leg not in names]
-    if unaccounted(record, label, owned):
+    if unaccounted(record, owned):
         status = 1
     return status
 
@@ -1083,18 +1081,15 @@ def hold_fuzz(
     leg, pct = measured
     held = (record.separate or {}).get(leg)
     if held is None:
-        print(
-            f"{label}: {leg}: the fuzz target has no line in {path} — every "
+        findings.finding(
+            leg,
+            f"the fuzz target has no line in {path} — every "
             "fuzz target is a leg of the floor (#1896): run `mise run "
             f"coverage:adopt` and commit {path}",
-            file=sys.stderr,
         )
         return False
     if pct < held[0]:
-        print(
-            f"{label}: {leg}: {pct}% is below its derived floor {held[0]}%",
-            file=sys.stderr,
-        )
+        findings.finding(leg, f"{pct}% is below its derived floor {held[0]}%")
         return False
     print(f"{label}: {leg} leg holds its floor {held[0]} ({pct}%)")
     return True
@@ -1127,7 +1122,7 @@ def planned_majors(text: str) -> list[str]:
     return majors
 
 
-def planned(path: Path, label: str, majors_json: str) -> int:
+def planned(path: Path, majors_json: str) -> int:
     """Hold the floor's record to this run's plan (#1875).
 
     Every recorded leg must have its owning job planned: the gate job
@@ -1144,10 +1139,10 @@ def planned(path: Path, label: str, majors_json: str) -> int:
     try:
         majors = planned_majors(majors_json)
     except decoded.UndecodableError as exc:
-        print(
-            f"{label}: the planned majors '{majors_json}' are not a JSON array "
+        findings.finding(
+            "",
+            f"the planned majors '{majors_json}' are not a JSON array "
             f"of canonical major strings: {exc}",
-            file=sys.stderr,
         )
         return 1
     if not path.exists():
@@ -1165,12 +1160,12 @@ def planned(path: Path, label: str, majors_json: str) -> int:
         if owner(leg) not in jobs and leg not in dropped
     ]
     for leg in orphaned:
-        print(
-            f"{label}: the floor records {leg}, measured by the {owner(leg)} "
+        findings.finding(
+            "",
+            f"the floor records {leg}, measured by the {owner(leg)} "
             f"job, and this run plans none (planned majors: {listed})",
-            file=sys.stderr,
+            [needs(leg).removeprefix("  ")],
         )
-        print(needs(leg), file=sys.stderr)
     return 1 if orphaned else 0
 
 
@@ -1245,7 +1240,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "hold":
         return hold(args.path, args.label, typed_std.stdin_text(), frozenset(args.job))
     if args.command == "planned":
-        return planned(args.path, args.label, args.majors_json)
+        return planned(args.path, args.majors_json)
     return derive(args.path, typed_std.stdin_text(), args.provenance, adopt=args.adopt)
 
 

@@ -64,13 +64,13 @@ def main(argv: list[str]) -> int:
 
     """
     if len(argv) != EXPECTED_ARGC:
-        print("usage: deny_advisories.py <deny.toml>", file=sys.stderr)
+        findings.finding("", "usage: deny_advisories.py <deny.toml>")
         return 2
     source = Path(argv[1])
     try:
         named = advisories(load_toml(source.read_text(encoding="utf-8")))
     except UndecodableError as error:
-        print(f"{findings.task_name()}: {source}: {error}", file=sys.stderr)
+        findings.finding(str(source), str(error))
         return 1
     for advisory in named:
         findings.finding(advisory, MESSAGE, REMEDY)

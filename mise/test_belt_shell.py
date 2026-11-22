@@ -24,13 +24,27 @@ stdlib `unittest`, the belt's one test idiom. Run through the gate as
 """
 
 import io
+import os
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 import belt_shell as bs
 import decoded
+
+# The tasks that run the helper, whose names its findings carry (#1934).
+LINT = "lint:belt-shell"
+FIX = "fix:belt-shell"
+
+
+def setUpModule() -> None:
+    """Run every row as the lint task does, recording no finding."""
+    patch = mock.patch.dict(os.environ, {"MISE_TASK_NAME": LINT, "ORG_FINDINGS": ""})
+    patch.start()
+    unittest.addModuleCleanup(patch.stop)
+
 
 # A body mise would run verbatim, already in the org's format.
 CLEAN = 'echo "hello"\n'
@@ -424,13 +438,15 @@ class Main(unittest.TestCase):
         why = str(caught.exception)
         with TemporaryDirectory() as tmp:
             path = write(tmp, "[tasks.t\n")
-            for extra in ([], ["--write"]):
+            for task, extra in ((LINT, []), (FIX, ["--write"])):
                 err = io.StringIO()
-                with redirect_stdout(io.StringIO()), redirect_stderr(err):
+                with (
+                    mock.patch.dict(os.environ, {"MISE_TASK_NAME": task}),
+                    redirect_stdout(io.StringIO()),
+                    redirect_stderr(err),
+                ):
                     self.assertEqual(bs.main([str(path), *extra]), 1)
-                self.assertEqual(
-                    err.getvalue(), f"belt-shell: {path}: not TOML: {why}\n"
-                )
+                self.assertEqual(err.getvalue(), f"{task}: {path}: not TOML: {why}\n")
 
     def test_a_finding_exits_one(self) -> None:
         """The gate's whole point."""

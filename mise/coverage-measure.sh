@@ -662,7 +662,7 @@ if [[ -n ${ts_test} && ${legs} =~ ^(all|typescript)$ ]]; then
   # arguments and its task's dir, or a refusal by name. The reading of
   # the scripts is coverage_js_runner.py's.
   command_json=$("${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/coverage_js_runner.py" \
-    --vitest-command "${label}" test) || exit 1
+    --vitest-command test) || exit 1
   test_dir=$(jq -r '.dir' <<< "${command_json}")
   args_lines=$(jq -r '.args[]' <<< "${command_json}")
   test_args=()

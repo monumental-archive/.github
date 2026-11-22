@@ -64,6 +64,8 @@ except ModuleNotFoundError as missing:
     msg = "exit-trap: belt_shell.py did not arrive beside this file"
     raise SystemExit(msg) from None
 
+import findings as writer
+
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
 
@@ -213,9 +215,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             checked += 1
             found.extend(findings(name, base, what, source, bash=bash))
     if found:
+        shape = [line.removeprefix("  ") for line in SHAPE.splitlines()]
         for line in found:
-            print(f"exit-trap: {line}", file=sys.stderr)
-        print(SHAPE, file=sys.stderr)
+            subject, _, message = line.partition(": ")
+            writer.finding(subject, message, shape)
         return 1
     print(f"exit-trap: {checked} script(s) and task body(ies), every EXIT trap guarded")
     return 0
