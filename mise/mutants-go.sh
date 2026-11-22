@@ -5,8 +5,10 @@
 # pass is a SURVIVOR, and a survivor is a named line to fix.
 #
 # THE MEASURE IS "NO UNEXPLAINED SURVIVOR", NEVER A SCORE (#1336). Red
-# while any mutant survives that is neither killed by an assertion nor
-# recorded, at its site, as equivalent — with a reason.
+# while any survivor stands. Its three outcomes, in order (#1981):
+# delete code it proves redundant, kill it with an assertion, or — the
+# code must stay and no input can tell — record it, at its site, as
+# equivalent, with a reason.
 #
 # ADOPTION IS THE TOOL'S OWN FILE. gomu has no config file; the one file
 # it reads is `.gomuignore`. A repository adopts by tracking one at its

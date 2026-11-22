@@ -192,7 +192,10 @@ runpy.run_path(sys.argv[1])["ceiling"](int(sys.argv[2]))()
 os.execv(sys.argv[3], sys.argv[3:])
 """
 RED = [
-    f"{LABEL}: red — kill each survivor with an assertion, or exclude it at its site",
+    (
+        f"{LABEL}: red — delete code a survivor proves redundant,"
+        " kill each survivor with an assertion, or exclude it at its site"
+    ),
     "  with '# pragma: no mutate -- <why the mutant is equivalent>'",
 ]
 REASON = "  an exclusion records a mutant the suite cannot kill; say why at the site"

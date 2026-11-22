@@ -3014,11 +3014,18 @@ says a test ran a line; a mutation run changes the line and asks
 whether any test noticed. The measure is **no unexplained surviving
 mutant**, never a score: a percentage can be bought by deleting hard
 code and lets the survivor that matters hide in the average. A
-survivor is killed by an assertion or recorded in the repository's own
-`.cargo/mutants.toml` as an `exclude_re` entry under a `#` line that
-says why; an entry with no reason, an entry on the `exclude_re = [`
-line itself, and `#[mutants::skip]` (a dependency in shipped code) are
-each red by name. `exclude_globs` is held to the same reason rule — a
+survivor has three outcomes, in this order (#1981): code it proves
+redundant (another path already decides the result) is deleted, and
+nothing is recorded; a survivor a test can tell apart is killed by an
+assertion; and only code that must stay, where no input can tell, is
+recorded in the repository's own `.cargo/mutants.toml` as an
+`exclude_re` entry under a `#` line that says why it cannot be
+deleted. Shipped code is never changed only to make a mutant
+disappear: rewriting an operator into a form the tool does not mutate
+hides the question, while deleting redundant code answers it. An
+entry with no reason, an entry on the `exclude_re = [` line itself,
+and `#[mutants::skip]` (a dependency in shipped code) are each red by
+name. `exclude_globs` is held to the same reason rule — a
 whole-file exclusion is an exclusion. Adoption is that file, tracked;
 the belt keeps no list of adopters and delivers no exclusions. Every
 workspace member is mutated, named one by one: measured on

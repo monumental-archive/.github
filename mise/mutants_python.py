@@ -1087,7 +1087,8 @@ def report(judged: list[Judged], excluded: int, shard: str) -> int:
     status = EXIT_RED if any(j.restored for j in judged) else 0
     if survivors:
         red(
-            "red — kill each survivor with an assertion, or exclude it at its site",
+            "red — delete code a survivor proves redundant, kill each survivor"
+            " with an assertion, or exclude it at its site",
             ["with '# pragma: no mutate -- <why the mutant is equivalent>'"],
         )
         return EXIT_RED

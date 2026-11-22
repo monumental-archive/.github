@@ -372,8 +372,9 @@ def judge(path: str, label: str, summary_dir: str) -> int:
     if not verdict.green:
         writer.finding(
             LANGUAGE,
-            "red — kill each survivor with an assertion, add a test for"
-            " each mutant no test reaches, or record an equivalent mutant at its"
+            "red — delete code a survivor proves redundant, kill each survivor"
+            " with an assertion, add a test for each mutant no test reaches, or"
+            " record an equivalent mutant at its"
             f" site: {MARK}",
         )
     return 0 if verdict.green else 1

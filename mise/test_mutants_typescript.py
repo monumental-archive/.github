@@ -50,8 +50,9 @@ GIT = hermetic.tool("git")
 LABEL = "audit:mutants: typescript"
 MARK = "// Stryker disable next-line <Mutator>: <reason>"
 RED_TAIL = (
-    f"{LABEL}: red — kill each survivor with an assertion, add a test for"
-    f" each mutant no test reaches, or record an equivalent mutant at its"
+    f"{LABEL}: red — delete code a survivor proves redundant, kill each"
+    " survivor with an assertion, add a test for each mutant no test"
+    " reaches, or record an equivalent mutant at its"
     f" site: {MARK}"
 )
 

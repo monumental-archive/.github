@@ -61,8 +61,9 @@ GIT = hermetic.tool("git")
 LABEL = "audit:mutants: go"
 MODULE = "example.com/p"
 RED_TAIL = (
-    f"{LABEL}: red — kill each survivor with an assertion, add a test for"
-    " each line no test runs, or record an equivalent mutant at its site:"
+    f"{LABEL}: red — delete code a survivor proves redundant, kill each"
+    " survivor with an assertion, add a test for each line no test"
+    " runs, or record an equivalent mutant at its site:"
     " //mutants:equivalent <type> <reason>\n"
 )
 
