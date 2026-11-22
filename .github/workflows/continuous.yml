@@ -139,6 +139,16 @@ jobs:
           fi
           echo "::notice::continuous publish"
           printf '  ref: %q\n' "${GITHUB_REF}"
+
+      # This job's findings records, for the report job (#1933).
+      - name: Hand the findings to the report job
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: findings-${{ github.job }}-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/findings/
+          if-no-files-found: ignore
+          retention-days: 1
   # Same resolver, same rules as the versioned facts job in publish.yml —
   # the archetype difference is one flag: the continuous map simply never
   # contains `version`, because this stream has none. It runs no caller
@@ -186,8 +196,6 @@ jobs:
       - name: Resolve and validate the facts
         id: resolve
         env:
-          # Outside `mise run`, so the step names its findings file (#1934).
-          ORG_FINDINGS: ${{ runner.temp }}/findings/${{ github.job }}-${{ strategy.job-index }}.jsonl
           GH_TOKEN: ${{ github.token }}
           IMAGE_TITLE: ${{ inputs.image-title }}
           IMAGE_DESCRIPTION: ${{ inputs.image-description }}
@@ -297,11 +305,8 @@ jobs:
 
       - name: Read the caller's pinned build inputs
         # The caller's config decides the versions; the canon decides
-        # which tools (#1333). One reader, release/caller_pins.py. A
-        # helper outside `mise run` names its findings file (#1934).
+        # which tools (#1333). One reader, release/caller_pins.py.
         id: pins
-        env:
-          ORG_FINDINGS: ${{ runner.temp }}/findings/${{ github.job }}-${{ strategy.job-index }}.jsonl
         run: |
           "${ORG_PYTHON}" .org-canon/release/caller_pins.py install \
             --input-of "the release's advisory triage" \
@@ -329,8 +334,6 @@ jobs:
         id: inventory
         env:
           GH_TOKEN: ${{ github.token }}
-          # A script outside `mise run` names its findings file (#1934).
-          ORG_FINDINGS: ${{ runner.temp }}/findings/${{ github.job }}-${{ strategy.job-index }}.jsonl
         # trivy exports each per-arch inventory; stele judges both by the
         # one admissibility rule (stele#396, #1371): no PURL, or a
         # versionless one, is a package every scanner is blind to (the
@@ -356,8 +359,6 @@ jobs:
         # (#1279) — the run artifact itself expires and is evidence of
         # nothing.
         env:
-          # Outside `mise run`, so the step names its findings file (#1934).
-          ORG_FINDINGS: ${{ runner.temp }}/findings/${{ github.job }}-${{ strategy.job-index }}.jsonl
           # The instant this publish describes, resolved once in the
           # facts job from the published commit's own committer time —
           # the same value SOURCE_DATE_EPOCH carries into the image. A
@@ -428,6 +429,13 @@ jobs:
       - name: Triage the tree's Go module graph against the advisory feed
         run: mise run audit:go-vulns
 
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: continuous-inventory
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
       # This job's findings records, for the report job (#1933).
       - name: Hand the findings to the report job
         if: ${{ !cancelled() }}
@@ -437,13 +445,6 @@ jobs:
           path: ${{ runner.temp }}/findings/
           if-no-files-found: ignore
           retention-days: 1
-
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: continuous-inventory
-          path: dist/
-          if-no-files-found: error
-          retention-days: 7
 
   # The barrier. It runs and FAILS rather than skipping, so a refused
   # publish shows one red job naming the refusal instead of a cloud of
@@ -536,9 +537,6 @@ jobs:
 
       - name: Resolve the digests a consumer pulls
         id: pulled
-        env:
-          # Outside `mise run`, so the step names its findings file (#1934).
-          ORG_FINDINGS: ${{ runner.temp }}/findings/${{ github.job }}-${{ strategy.job-index }}.jsonl
         run: |
           set -euo pipefail
           # The canon's finding writer (#1934), and its workflow commands (#1660).

@@ -213,24 +213,6 @@ ORG_PYTHON_UNSET = '''unset — the belt Python is not installed here; run: mise
 # measured here; coverage:check and coverage:adopt read it after `test`.
 # A run's directory can outlive it; coverage-run.sh says who sweeps it.
 ORG_COVERAGE_RUN = "{{ get_env(name='TMPDIR', default='') | default(value='/tmp', boolean=true) | trim_end(pat='/') }}/org-coverage-{{ mise_pid }}"
-# THE JOB'S FINDINGS FILE (#1933, docs/findings.md): the file a belt
-# check's findings writer appends its records to. Jobs of one run share
-# nothing unless the workflow hands it on, so every job that runs a
-# belt task uploads `${RUNNER_TEMP}/findings/` and the report job reads
-# every job's from one directory. It is named here, not by a step: a
-# task job may or may not run the canon action, and every `mise run`
-# loads this [env] (the place ORG_BELT_DIR is resolved once, above).
-# Three answers, first found wins:
-#   1. a value the caller set, kept, so a nested `mise run` and a hand
-#      run that names its own file write where they were told;
-#   2. on a runner (RUNNER_TEMP set), `<GITHUB_JOB>-<16 random hex>`:
-#      two legs of one matrix share GITHUB_JOB, and the report's merged
-#      download puts every file in one directory, so no two jobs may
-#      share a name;
-#   3. empty off a runner, so a writer prints and records nothing.
-# The exec runs only on a runner: Tera renders the branch it takes.
-# The file is not made here; a writer makes it with its first record.
-ORG_FINDINGS = "{% if env.ORG_FINDINGS %}{{ env.ORG_FINDINGS }}{% elif env.RUNNER_TEMP %}{{ env.RUNNER_TEMP }}/findings/{{ env.GITHUB_JOB }}-{{ exec(command='od -An -N8 -tx1 /dev/urandom | tr -d \" \\n\"') }}.jsonl{% endif %}"
 # THE FINDINGS WRITER, IN EVERY TASK (#1934, owner's ruling): bash
 # sources the file BASH_ENV names before it runs a non-interactive
 # script, so every task body (`bash --norc -euo pipefail -c`, [task_config]

@@ -92,10 +92,7 @@ jobs:
 
       - name: Enumerate every pinned digest
         id: plan
-        # One derivation and its tests: release/matrix.py (#1385). A
-        # helper outside `mise run` names its findings file (#1934).
-        env:
-          ORG_FINDINGS: ${{ runner.temp }}/findings/${{ github.job }}-${{ strategy.job-index }}.jsonl
+        # One derivation and its tests: release/matrix.py (#1385).
         run: |
           "${ORG_PYTHON}" release/matrix.py base-images docker/pgrx-base-images.toml \
             >> "${GITHUB_OUTPUT}"
@@ -207,6 +204,16 @@ jobs:
           subject-digest: ${{ matrix.digest }}
           predicate-type: https://monumental-archive.github.io/attestations/base-image-approval/v1
           predicate-path: predicate.json
+
+      # This job's findings records, for the report job (#1933).
+      - name: Hand the findings to the report job
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: findings-${{ github.job }}-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/findings/
+          if-no-files-found: ignore
+          retention-days: 1
 
   # Every scheduled workflow ends here (#1887), with one issue per red
   # job (#1966): for each red job of a run on the default branch, one

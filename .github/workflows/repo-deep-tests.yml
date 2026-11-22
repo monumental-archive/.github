@@ -92,6 +92,16 @@ jobs:
         id: applies
         run: '"${ORG_PYTHON}" .org-canon/mise/audit_legs.py repo-deep-tests >> "${GITHUB_OUTPUT}"'
 
+      # This job's findings records, for the report job (#1933).
+      - name: Hand the findings to the report job
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: findings-${{ github.job }}-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/findings/
+          if-no-files-found: ignore
+          retention-days: 1
+
   # One runner per fuzz target (#1899), each searched for FUZZ_SECONDS
   # (the belt's 1800 default; Go halves it between its plain and race
   # passes), so the wall time no longer grows with the number of
@@ -174,19 +184,7 @@ jobs:
         env:
           CANDIDATES: ${{ runner.temp }}/fuzz-corpus-candidates
           SUMMARY: ${{ runner.temp }}/fuzz-corpus-summary/${{ matrix.leg }}.md
-          # A script outside `mise run` names its findings file (#1934).
-          ORG_FINDINGS: ${{ runner.temp }}/findings/${{ github.job }}-${{ strategy.job-index }}.jsonl
         run: .org-canon/release/propose-fuzz-corpus.sh handover
-
-      # This job's findings records, for the report job (#1933).
-      - name: Hand the findings to the report job
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: findings-${{ github.job }}-${{ strategy.job-index }}
-          path: ${{ runner.temp }}/findings/
-          if-no-files-found: ignore
-          retention-days: 1
 
       # One artifact per target (#1897, #1899), replacing the two 30-day
       # reproducer uploads: every staged file at its repository path.
@@ -212,6 +210,16 @@ jobs:
           path: ${{ runner.temp }}/fuzz-corpus-summary/
           if-no-files-found: error
           retention-days: 30
+
+      # This job's findings records, for the report job (#1933).
+      - name: Hand the findings to the report job
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: findings-${{ github.job }}-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/findings/
+          if-no-files-found: ignore
+          retention-days: 1
 
   # What the search kept becomes a reviewed pull request (#1897), opened
   # by a job that runs NO repository code: no checkout, no mise, cargo
@@ -260,15 +268,12 @@ jobs:
         id: staged
         env:
           CANDIDATES: ${{ runner.temp }}/fuzz-corpus-candidates
-          # A script outside `mise run` names its findings file (#1934).
-          ORG_FINDINGS: ${{ runner.temp }}/findings/${{ github.job }}-${{ strategy.job-index }}.jsonl
         run: .org-canon/release/propose-fuzz-corpus.sh staged
 
       - name: Refuse any path outside the two corpus shapes
         if: ${{ steps.staged.outputs.staged == 'true' }}
         env:
           CANDIDATES: ${{ runner.temp }}/fuzz-corpus-candidates
-          ORG_FINDINGS: ${{ runner.temp }}/findings/${{ github.job }}-${{ strategy.job-index }}.jsonl
         run: .org-canon/release/propose-fuzz-corpus.sh check
 
       # The release App (TAG_MINT_APP_CLIENT_ID): it already holds these
@@ -292,7 +297,6 @@ jobs:
           CANDIDATES: ${{ runner.temp }}/fuzz-corpus-candidates
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           SUMMARIES: ${{ runner.temp }}/fuzz-corpus-summaries
-          ORG_FINDINGS: ${{ runner.temp }}/findings/${{ github.job }}-${{ strategy.job-index }}.jsonl
         run: .org-canon/release/propose-fuzz-corpus.sh propose
 
       # This job's findings records, for the report job (#1933).
@@ -420,6 +424,16 @@ jobs:
           set -euo pipefail
           seed=$(od -An -N8 -tu8 /dev/urandom)
           echo "seed=${seed// /}" >> "${GITHUB_OUTPUT}"
+
+      # This job's findings records, for the report job (#1933).
+      - name: Hand the findings to the report job
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: findings-${{ github.job }}-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/findings/
+          if-no-files-found: ignore
+          retention-days: 1
 
   python-properties:
     name: python properties hold at a random seed (${{ matrix.shard }}/8)

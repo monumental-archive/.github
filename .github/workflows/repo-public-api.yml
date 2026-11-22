@@ -50,6 +50,16 @@ jobs:
         id: applies
         run: '"${ORG_PYTHON}" .org-canon/mise/audit_legs.py repo-public-api >> "${GITHUB_OUTPUT}"'
 
+      # This job's findings records, for the report job (#1933).
+      - name: Hand the findings to the report job
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: findings-${{ github.job }}-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/findings/
+          if-no-files-found: ignore
+          retention-days: 1
+
   semver:
     name: the public API is compatible with the published release
     needs: applies

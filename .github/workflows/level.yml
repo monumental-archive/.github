@@ -129,8 +129,6 @@ jobs:
         # canon's cron took for the same reason.
         env:
           GH_TOKEN: ${{ github.token }}
-          # Outside `mise run`, so the step names its findings file (#1934).
-          ORG_FINDINGS: ${{ runner.temp }}/findings/${{ github.job }}-${{ strategy.job-index }}.jsonl
         run: |
           set -euo pipefail
           # The canon's finding writer (#1934), and its workflow commands (#1660).
@@ -148,8 +146,6 @@ jobs:
       - name: Publish to this repository's levels branch
         env:
           GH_TOKEN: ${{ github.token }}
-          # Outside `mise run`, so the step names its findings file (#1934).
-          ORG_FINDINGS: ${{ runner.temp }}/findings/${{ github.job }}-${{ strategy.job-index }}.jsonl
         run: .org-canon/mise/levels-publish.sh
       # This job's findings records, for the report job (#1933).
       - name: Hand the findings to the report job

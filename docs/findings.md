@@ -104,16 +104,26 @@ cut is new when a later run first shows it.
 
 ## Where records go
 
-`ORG_FINDINGS` names the file. Unset or empty, a writer prints the
-finding and records nothing, so a check run by hand behaves as it
-always has.
+The writer names the file (#1976), whatever ran it: `mise run`, a
+workflow step, a script run bare. `ORG_FINDINGS`, when it is set and
+not empty, is the file. Unset on a runner (`RUNNER_TEMP` and
+`GITHUB_JOB` both set), it is
+`${RUNNER_TEMP}/findings/<job>-<16 random hex>.jsonl`, the hex drawn
+once per process on its first record, so two legs of one matrix, or
+two processes of one job, never share a file. Off a runner, or with
+`ORG_FINDINGS` empty, a writer prints the finding and records
+nothing, so a check run by hand behaves as it always has. No step and
+no `[env]` names the file. The writer creates the file's directory and
+appends one line per finding.
 
-On a runner the belt's `[env]` names it for every `mise run`:
-`${RUNNER_TEMP}/findings/<job>-<16 random hex>.jsonl`, unless the
-caller set one. Each job that runs a belt task uploads that directory,
-and the report job downloads every job's into one (#1933). Off a
-runner it is empty. Set, the writer creates the file's directory and appends
-one line per finding.
+Every job of a reporting workflow (one whose `report` job runs
+`mise/standing_issue.py`) that has steps ends by uploading
+`${RUNNER_TEMP}/findings/` as `findings-<job>-<index>`, unless the run
+was cancelled, and the report job downloads every job's into one
+directory (#1933). Every job, not only those that run a belt task, so
+no way of writing a record falls outside the set;
+`mise/test_findings_handoff.py` holds each job to it. A job that calls
+a reusable workflow has no steps of its own and uploads nothing.
 
 A record that cannot be appended is said in one more line on stderr
 and does not change the check's status: the finding was printed, and
