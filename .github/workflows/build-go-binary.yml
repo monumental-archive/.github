@@ -207,7 +207,9 @@ jobs:
           # never installed here; an unpinned install on a release leg is
           # a runner mutation.
           command -v go > /dev/null || {
-            org_finding_annotated "" "go missing — pin go in this repository's mise config; it is the build input of the go-binary class"
+            emsg="go missing — pin go in this repository's mise config; it is the build input of the"
+            emsg+=" go-binary class"
+            org_finding_annotated "" "${emsg}"
             exit 1
           }
           # Native builds only: the leg's host must BE the target, or the

@@ -165,7 +165,9 @@ jobs:
             "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
             levels:levels
           if [[ ${investigate} -ne 0 ]]; then
-            org_finding_annotated "" "a cell that was judged before cannot be judged now — investigate; good reports were not overwritten"
+            emsg="a cell that was judged before cannot be judged now — investigate; good reports were not"
+            emsg+=" overwritten"
+            org_finding_annotated "" "${emsg}"
             exit 1
           fi
       # This job's findings records, for the report job (#1933).
