@@ -14,15 +14,18 @@ Usage:
 runs `pinact run --format sarif <arguments>` once, pinact's stderr (its
 diff) passed through, and decodes the one log pinact writes to stdout.
 Each result of each run goes through mise/findings.py: the subject is
-the result's artifact URI, the message its `message.text`, the detail
+the result's artifact URI, the message `<ruleId>: <the file's line at
+region.startLine, trimmed>` (the owner's ruling on #1955), read here
+from that file, the detail its `message.text` and
 `line <region.startLine>`. The line is never in the subject or the
 message, so an edit above a finding does not make it a new one. Then
 `<task>: pinact: <n> finding(s)` goes to stdout.
 
 The exit status is pinact's own, always. The refusals exit 1, each by
-name and recording nothing: no pinact on PATH, and output that is not a
-SARIF VERSION log of the shape read here (the message carrying pinact's
-status). A pinact pin whose report moves turns `audit:action-pins` red
+name and recording nothing: no pinact on PATH, output that is not a
+SARIF VERSION log of the shape read here, and a result whose line
+cannot be read (no such file, or fewer lines), the message carrying
+pinact's status. A pinact pin whose report moves turns `audit:action-pins` red
 until this moves with it.
 """
 
@@ -30,6 +33,7 @@ import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 
 import decoded
 import findings
@@ -55,20 +59,56 @@ class Found:
     detail: tuple[str, ...]
 
 
+def message(rule: str, line: str) -> str:
+    """Write a result's message (the owner's ruling on #1955).
+
+    pinact's text is one text per rule for `parse-error`, and carries
+    the resolved SHA for `unpinned-action`, so it is no identity: two
+    results of a rule in one file would read the same, and a release
+    would make an old one new. The source line it points at is.
+
+    Returns:
+        `<ruleId>: <the line, trimmed>`.
+
+    """
+    return f"{rule}: {line.strip()}"
+
+
+def source(uri: str, line: int, where: str) -> str:
+    """Read the line a result points at, from the file its URI names.
+
+    Returns:
+        The line, as the file holds it.
+
+    Raises:
+        UndecodableError: no such file, or no such line in it.
+
+    """
+    try:
+        lines = Path(uri).read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError) as err:
+        msg = f"{where}: {uri} cannot be read: {err}"
+        raise UndecodableError(msg) from err
+    if not 1 <= line <= len(lines):
+        msg = f"{where}: {uri} has no line {line}"
+        raise UndecodableError(msg)
+    return lines[line - 1]
+
+
 def found(item: object, where: str) -> Found:
     """Read one SARIF result.
 
     Returns:
-        Its first location's artifact URI; its `message.text`; and
-        `line <region.startLine>`.
+        Its first location's artifact URI; `<ruleId>: <the line it
+        points at>`; and its `message.text` and `line <startLine>`.
 
     Raises:
         UndecodableError: the result is not of the shape read here.
 
     """
     result = decoded.as_object(item, where)
-    message = decoded.as_object(result.get("message"), f"{where}: message")
-    text = decoded.as_str(message.get("text"), f"{where}: message.text")
+    said = decoded.as_object(result.get("message"), f"{where}: message")
+    text = decoded.as_str(said.get("text"), f"{where}: message.text")
     locations = decoded.as_array(result.get("locations"), f"{where}: locations")
     if not locations:
         msg = f"{where}: locations is empty"
@@ -84,7 +124,8 @@ def found(item: object, where: str) -> Found:
     uri = decoded.as_str(artifact.get("uri"), f"{at}: artifactLocation.uri")
     region = decoded.as_object(physical.get("region"), f"{at}: region")
     line = decoded.as_int(region.get("startLine"), f"{at}: region.startLine")
-    return Found(uri, text, (f"line {line}",))
+    rule = decoded.as_str(result.get("ruleId"), f"{where}: ruleId")
+    return Found(uri, message(rule, source(uri, line, at)), (text, f"line {line}"))
 
 
 def decode(output: bytes) -> tuple[Found, ...]:

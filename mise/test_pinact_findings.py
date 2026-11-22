@@ -15,8 +15,13 @@ real run by the lane, quoted in QUOTED with its command:
 
 over a workflow whose line 6 pins actions/checkout v4.1.0's commit with
 the comment `# v4.2.0`, and whose line 7 is `actions/checkout@v4`; it
-exited 3. One row runs the belt's pinned pinact itself with `--no-api`,
-which needs no network, on that unpinned line.
+exited 3; SOURCE is that workflow, planted wherever a row runs, since
+the message is `<ruleId>: <the file's line, trimmed>` (the owner's
+ruling on #1955). One row runs the belt's pinned pinact itself with
+`--no-api`, which needs no network, on two unpinned lines in one file:
+one rule, one text, two records with two messages. Another moves the
+resolved SHA in the text and the message stays; a missing file and a
+line past the end are refused by name.
 
 The `Task` rows run `audit:action-pins`' own body, read from the belt's
 config, over the stub in a planted, tracked tree: the quoted report is
@@ -142,20 +147,28 @@ QUOTED = sarif(
     result("parse-error", MISMATCH, 6),
     result("unpinned-action", UNPINNED, 7) | {"fixes": [FIX]},
 )
+# The workflow the real run read, as the lane planted it.
+SOURCE = (
+    "on: push\njobs:\n  a:\n    runs-on: ubuntu-24.04\n    steps:\n"
+    f"      - uses: actions/checkout@{LIED} # v4.2.0\n"
+    "      - uses: actions/checkout@v4\n"
+)
+LIED_LINE = f"parse-error: - uses: actions/checkout@{LIED} # v4.2.0"
+UNPINNED_LINE = "unpinned-action: - uses: actions/checkout@v4"
 QUOTED_RECORDS: list[dict[str, object]] = [
     {
         "v": 1,
         "task": TASK,
         "subject": WORKFLOW,
-        "message": MISMATCH,
-        "detail": ["line 6"],
+        "message": LIED_LINE,
+        "detail": [MISMATCH, "line 6"],
     },
     {
         "v": 1,
         "task": TASK,
         "subject": WORKFLOW,
-        "message": UNPINNED,
-        "detail": ["line 7"],
+        "message": UNPINNED_LINE,
+        "detail": [UNPINNED, "line 7"],
     },
 ]
 
@@ -206,6 +219,8 @@ class Stubbed(unittest.TestCase):
         self.log = self.dir / "pinact.log"
         self.doc = self.dir / "doc.json"
         self.file = self.dir / "findings" / "job.jsonl"
+        (self.dir / ".github" / "workflows").mkdir(parents=True)
+        (self.dir / WORKFLOW).write_text(SOURCE, encoding="utf-8")
 
     def stub_env(self, document: str, status: int, path: str | None) -> dict[str, str]:
         """Give a run the stub's answer and the findings file.
@@ -258,9 +273,11 @@ class Adapter(Stubbed):
             done.stderr.splitlines(),
             [
                 "-       - uses: actions/checkout@v4",
-                f"{TASK}: {WORKFLOW}: {MISMATCH}",
+                f"{TASK}: {WORKFLOW}: {LIED_LINE}",
+                f"  {MISMATCH}",
                 "  line 6",
-                f"{TASK}: {WORKFLOW}: {UNPINNED}",
+                f"{TASK}: {WORKFLOW}: {UNPINNED_LINE}",
+                f"  {UNPINNED}",
                 "  line 7",
             ],
         )
@@ -314,6 +331,37 @@ class Adapter(Stubbed):
         self.assertIn("runs[0].results[1]: locations is empty", done.stderr)
         same(self, records(self.file), [])
 
+    def test_another_resolved_sha_leaves_the_message(self) -> None:
+        """A release moves the SHA in the text: the message is unchanged."""
+        later = UNPINNED.replace(FIXED, "f" * 40)
+        done = self.run_adapter(sarif(result("unpinned-action", later, 7)), 3)
+        same(self, done.returncode, 3, done.stderr)
+        got = [(r["message"], r["detail"]) for r in records(self.file)]
+        want: list[tuple[object, object]] = [(UNPINNED_LINE, [later, "line 7"])]
+        same(self, got, want)
+
+    def test_a_missing_file_is_refused_by_name(self) -> None:
+        """A result naming a file that is not there: refused, 1, no record."""
+        (self.dir / WORKFLOW).unlink()
+        done = self.run_adapter(QUOTED, 3)
+        same(self, done.returncode, 1, done.stderr)
+        self.assertIn(
+            f"{TASK}: pinact exited 3: the output is not pinact's report:"
+            f" runs[0].results[0]: locations[0]: {WORKFLOW} cannot be read",
+            done.stderr,
+        )
+        same(self, records(self.file), [])
+
+    def test_a_line_past_the_end_is_refused_by_name(self) -> None:
+        """A result past the file's last line: refused, 1, no record."""
+        done = self.run_adapter(sarif(result("parse-error", MISMATCH, 8)), 3)
+        same(self, done.returncode, 1, done.stderr)
+        self.assertIn(
+            f"runs[0].results[0]: locations[0]: {WORKFLOW} has no line 8",
+            done.stderr,
+        )
+        same(self, records(self.file), [])
+
     def test_pinact_s_status_is_the_exit(self) -> None:
         """A 2 from pinact with a clean log exits 2."""
         done = self.run_adapter(sarif(), 2)
@@ -338,14 +386,17 @@ class Adapter(Stubbed):
         self.assertIn(f"{TASK}: pinact is not on PATH", done.stderr)
         same(self, records(self.file), [])
 
-    def test_the_pinned_pinact_offline_gives_the_record(self) -> None:
-        """An unpinned action, judged by pinact itself with `--no-api`."""
+    def test_the_pinned_pinact_offline_gives_two_messages(self) -> None:
+        """Two unpinned actions in one file, judged by pinact with `--no-api`.
+
+        One rule, one text, one file: two records with two messages.
+        """
         if hermetic.optional_tool("pinact") is None:
             self.skipTest("the belt's pinact is not on PATH")
-        (self.dir / ".github" / "workflows").mkdir(parents=True)
         (self.dir / WORKFLOW).write_text(
             "on: push\njobs:\n  a:\n    runs-on: ubuntu-24.04\n    steps:\n"
-            "      - uses: actions/checkout@v4\n",
+            "      - uses: actions/checkout@v4\n"
+            "      - uses: actions/setup-go@v5\n",
             encoding="utf-8",
         )
         done = subprocess.run(
@@ -360,14 +411,22 @@ class Adapter(Stubbed):
             check=False,
         )
         self.assertNotEqual(done.returncode, 0, done.stderr)
+        cannot = "failed to handle a line: action can't be pinned"
         want: list[dict[str, object]] = [
             {
                 "v": 1,
                 "task": TASK,
                 "subject": WORKFLOW,
-                "message": "failed to handle a line: action can't be pinned",
-                "detail": ["line 6"],
-            }
+                "message": "parse-error: - uses: actions/checkout@v4",
+                "detail": [cannot, "line 6"],
+            },
+            {
+                "v": 1,
+                "task": TASK,
+                "subject": WORKFLOW,
+                "message": "parse-error: - uses: actions/setup-go@v5",
+                "detail": [cannot, "line 7"],
+            },
         ]
         same(self, records(self.file), want)
 
@@ -384,7 +443,7 @@ class Task(Stubbed):
         """
         root = self.dir / "tree"
         (root / ".github" / "workflows").mkdir(parents=True)
-        (root / WORKFLOW).write_text("on: push\n", encoding="utf-8")
+        (root / WORKFLOW).write_text(SOURCE, encoding="utf-8")
         git = [GIT, "-C", str(root)]
         subprocess.run([*git, "init", "-q"], env=hermetic.env(), check=True)
         subprocess.run([*git, "add", "-A"], env=hermetic.env(), check=True)
