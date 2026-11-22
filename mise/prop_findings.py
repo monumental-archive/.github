@@ -6,7 +6,7 @@ The property, over any subject, message and detail lines Hypothesis's
 of a file name that is not UTF-8):
 
 - R: with `ORG_FINDINGS` naming a file, `finding()` returns, the file
-  gains exactly one line, and `json.loads` of it gives each field equal
+  gains exactly one line, and reading it back gives each field equal
   to `_text` of what was given, modelled apart in the test: the text
   the log line shows.
 
@@ -18,7 +18,6 @@ the ordinary suite (`mise run test`) never imports this file.
 """
 
 import io
-import json
 import os
 import tempfile
 import unittest
@@ -26,6 +25,7 @@ from contextlib import redirect_stderr
 from pathlib import Path
 from unittest import mock
 
+import decoded
 import findings
 from hypothesis import example
 from hypothesis import strategies as st
@@ -43,12 +43,17 @@ def printed(s: str) -> str:
     return s.encode("utf-8", "backslashreplace").decode("utf-8")
 
 
+# The examples' detail lists, typed for the examples' decorator.
+LONE: list[str] = ["\udfff"]
+NONE: list[str] = []
+
+
 class OneRecordReadsBack(unittest.TestCase):
     """R: one line, read back as the text the log line shows."""
 
     @given(st.text(), st.text(), st.lists(st.text(), max_size=4))
-    @example("bad\udcffname", "x\ud800y", ["\udfff"])
-    @example("", "", [])
+    @example("bad\udcffname", "x\ud800y", LONE)
+    @example("", "", NONE)
     def test_one_record_reads_back(
         self, subject: str, message: str, detail: list[str]
     ) -> None:
@@ -64,17 +69,16 @@ class OneRecordReadsBack(unittest.TestCase):
             text = file.read_text(encoding="utf-8")
         self.assertTrue(text.endswith("\n"), text)
         self.assertEqual(text.count("\n"), 1, text)
-        record = json.loads(text)
-        self.assertEqual(
-            record,
-            {
-                "v": findings.VERSION,
-                "task": "lint:demo",
-                "subject": printed(subject),
-                "message": printed(message),
-                "detail": [printed(line) for line in detail],
-            },
-        )
+        record = decoded.as_object(decoded.load_json(text), "the record")
+        lines: list[object] = [printed(line) for line in detail]
+        expected: dict[str, object] = {
+            "v": findings.VERSION,
+            "task": "lint:demo",
+            "subject": printed(subject),
+            "message": printed(message),
+            "detail": lines,
+        }
+        self.assertEqual(record, expected)
 
 
 if __name__ == "__main__":
