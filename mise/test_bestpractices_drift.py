@@ -167,10 +167,11 @@ def run(
                 text=True,
                 check=True,
             )
+        as_mise = hermetic.task_run("audit:bestpractices", BODY)
         done = subprocess.run(
-            [BASH, "-euo", "pipefail", "-c", BODY],
+            as_mise.argv,
             cwd=tree,
-            env=env,
+            env=env | as_mise.env,
             capture_output=True,
             text=True,
             check=False,

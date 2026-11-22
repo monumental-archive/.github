@@ -98,8 +98,8 @@ class TheBeltClaimsItsDirectory(unittest.TestCase):
             The run.
 
         """
-        argv = [hermetic.tool("bash"), "-euo", "pipefail", "-c", body()]
-        return run(argv, self.repo, self.env)
+        as_mise = hermetic.task_run("lint:belt-link", body())
+        return run(as_mise.argv, self.repo, self.env | as_mise.env)
 
     def test_a_tracked_config_toml_is_red(self) -> None:
         """A repository's own `.config/mise/config.toml`: red by name."""

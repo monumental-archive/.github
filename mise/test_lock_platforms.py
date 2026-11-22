@@ -143,10 +143,11 @@ def lint(
         subprocess.run([GIT, "init", "-q"], cwd=root, env=env, check=True)
         if files:
             subprocess.run([GIT, "add", "--", *files], cwd=root, env=env, check=True)
+        as_mise = hermetic.task_run("lint:lock-platforms", BODY)
         return subprocess.run(
-            [BASH, "-euo", "pipefail", "-c", BODY],
+            as_mise.argv,
             cwd=root,
-            env=env,
+            env=env | as_mise.env,
             capture_output=True,
             text=True,
             check=False,

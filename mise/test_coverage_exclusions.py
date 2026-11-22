@@ -182,10 +182,11 @@ class Task(unittest.TestCase):
             The finished process.
 
         """
+        as_mise = hermetic.task_run("lint:coverage-exclusions", task_body())
         return subprocess.run(
-            [BASH, "-euo", "pipefail", "-c", task_body()],
+            as_mise.argv,
             cwd=root,
-            env=hermetic.env(ORG_BELT_DIR=str(_HERE), **GIT_CONFIG),
+            env=hermetic.env(ORG_BELT_DIR=str(_HERE), **GIT_CONFIG) | as_mise.env,
             capture_output=True,
             text=True,
             check=False,

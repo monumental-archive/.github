@@ -110,10 +110,11 @@ class History:
             The finished process, stdout and stderr captured as text.
 
         """
+        as_mise = hermetic.task_run("lint:release-planned", BODY)
         return subprocess.run(
-            [hermetic.tool("bash"), "-euo", "pipefail", "-c", BODY],
+            as_mise.argv,
             cwd=self.root,
-            env=self.env,
+            env=self.env | as_mise.env,
             capture_output=True,
             text=True,
             check=False,
@@ -194,7 +195,7 @@ class ReleasePlanned(unittest.TestCase):
         self.repo.commit(f"{RELEASE}\nPlanned-At: {self.planned[:12]}\n")
         self.assert_red(
             f"{NAME}: HEAD's Planned-At trailer is not one full commit sha:\n"
-            f"Planned-At: {self.planned[:12]}\n"
+            f"  Planned-At: {self.planned[:12]}\n"
         )
 
     def test_a_plan_missing_from_the_checkout_is_red_by_name(self) -> None:

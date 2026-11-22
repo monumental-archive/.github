@@ -55,6 +55,8 @@ def task_run(name: str) -> str:
 
 GATE = task_run("test:python-properties")
 AUDIT = task_run("audit:python-properties")
+# Each body's task name, for the run that hands it to hermetic.task_run.
+NAMES = {GATE: "test:python-properties", AUDIT: "audit:python-properties"}
 
 HOLDS = """\
 import unittest
@@ -171,10 +173,11 @@ def run(
             ORG_PYTHON=str(PYTHON),
             **env or {},
         )
+        as_mise = hermetic.task_run(NAMES[body], body)
         return subprocess.run(
-            [BASH, "-euo", "pipefail", "-c", body],
+            as_mise.argv,
             cwd=root,
-            env=environ,
+            env=environ | as_mise.env,
             capture_output=True,
             text=True,
             check=False,

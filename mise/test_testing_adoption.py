@@ -64,10 +64,11 @@ def run(tree: Path, home: Path) -> subprocess.CompletedProcess[str]:
         The finished run.
 
     """
+    as_mise = hermetic.task_run("lint:test-adoption", body())
     return subprocess.run(
-        [BASH, "-euo", "pipefail", "-c", body()],
+        as_mise.argv,
         cwd=tree,
-        env=hermetic.env(home, ORG_BELT_DIR=str(BELT)),
+        env=hermetic.env(home, ORG_BELT_DIR=str(BELT)) | as_mise.env,
         capture_output=True,
         text=True,
         check=False,

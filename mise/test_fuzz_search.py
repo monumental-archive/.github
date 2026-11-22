@@ -346,10 +346,11 @@ class SearchCase(unittest.TestCase):
             The finished process.
 
         """
+        as_mise = hermetic.task_run(name, task_body(name))
         return subprocess.run(
-            [BASH, "-euo", "pipefail", "-c", task_body(name)],
+            as_mise.argv,
             cwd=self.tree,
-            env=self.env,
+            env=self.env | as_mise.env,
             capture_output=True,
             text=True,
             check=False,

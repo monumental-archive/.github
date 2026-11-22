@@ -54,6 +54,8 @@ def run_body(name: str) -> str:
 
 LINT = run_body("lint:rust-properties")
 AUDIT = run_body("audit:rust-properties")
+# Each body's task name, for the run that hands it to hermetic.task_run.
+NAMES = {LINT: "lint:rust-properties", AUDIT: "audit:rust-properties"}
 SKIP_LINT = "lint:rust-properties: no tracked Cargo.lock locks proptest, skipped\n"
 # The stub's calls where it must never have been called.
 NONE: list[str] = []
@@ -150,10 +152,11 @@ def run(body: str, files: dict[str, str], env: dict[str, str] | None = None) -> 
         if "ORG_PROPERTY_SEED" not in (env or {}):
             environ.pop("ORG_PROPERTY_SEED", None)
         environ.pop("PROPTEST_CASES", None)
+        as_mise = hermetic.task_run(NAMES[body], body)
         done = subprocess.run(
-            [BASH, "-euo", "pipefail", "-c", body],
+            as_mise.argv,
             cwd=root,
-            env=environ,
+            env=environ | as_mise.env,
             capture_output=True,
             text=True,
             check=False,

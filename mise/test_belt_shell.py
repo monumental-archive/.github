@@ -191,6 +191,13 @@ class Prelude(unittest.TestCase):
             '#!/usr/bin/env bash\nset -euo pipefail\nexport A=""\nexport B=""\n',
         )
 
+    def test_a_long_option_is_the_invocation_not_a_set_flag(self) -> None:
+        """The belt's `--norc` (#1934) never reaches the set line."""
+        self.assertEqual(
+            bs.prelude("bash --norc -euo pipefail -c", []),
+            "#!/usr/bin/env bash\nset -euo pipefail\n",
+        )
+
     def test_no_flags_emits_no_set_line(self) -> None:
         """Mise's own bare default has nothing to declare."""
         self.assertEqual(bs.prelude("sh -c", []), "#!/usr/bin/env sh\n")

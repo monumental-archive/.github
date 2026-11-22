@@ -437,10 +437,11 @@ class Selection(unittest.TestCase):
             The finished process.
 
         """
+        as_mise = hermetic.task_run("audit:mutants", run_of("audit:mutants"))
         return subprocess.run(
-            [BASH, "-euo", "pipefail", "-c", run_of("audit:mutants")],
+            as_mise.argv,
             cwd=self.belt,
-            env=hermetic.env(ORG_BELT_DIR=str(self.belt), **env),
+            env=hermetic.env(ORG_BELT_DIR=str(self.belt), **env) | as_mise.env,
             capture_output=True,
             text=True,
             check=False,

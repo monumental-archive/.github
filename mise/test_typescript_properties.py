@@ -59,6 +59,12 @@ def run_body(name: str) -> str:
 GATE = run_body("test:typescript-properties")
 AUDIT = run_body("audit:typescript-properties")
 LINT = run_body("lint:typescript-properties")
+# Each body's task name, for the run that hands it to hermetic.task_run.
+NAMES = {
+    GATE: "test:typescript-properties",
+    AUDIT: "audit:typescript-properties",
+    LINT: "lint:typescript-properties",
+}
 
 # pnpm's shape, the proving repository's lockfile format.
 LOCK_BOTH = "packages:\n\n  fast-check@4.9.0:\n    x\n\n  vitest@4.1.12:\n    x\n"
@@ -218,10 +224,11 @@ def run(
             STUB_OUT=str(out),
             **env or {},
         )
+        as_mise = hermetic.task_run(NAMES[body], body)
         done = subprocess.run(
-            [BASH, "-euo", "pipefail", "-c", body],
+            as_mise.argv,
             cwd=root,
-            env=environ,
+            env=environ | as_mise.env,
             capture_output=True,
             text=True,
             check=False,

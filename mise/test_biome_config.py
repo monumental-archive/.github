@@ -897,21 +897,15 @@ class BiomeDomainsDriftTest(unittest.TestCase):
             for name, text in planted.items():
                 (tree / name).write_text(text, encoding="utf-8")
             jq = Path(hermetic.tool("jq")).parent
-            env = hermetic.env(
-                PATH=f"{stubs}:{jq}:{hermetic.env().get('PATH', '')}",
-                # As mise runs a body: the task's name, which the finding
-                # writer reads (#1890), and the belt's BASH_ENV, which
-                # gives the body the writer (#1934).
-                MISE_TASK_NAME="lint:biome-domains",
-                BASH_ENV=str(BELT / "findings.sh"),
-            )
+            env = hermetic.env(PATH=f"{stubs}:{jq}:{hermetic.env().get('PATH', '')}")
             git = hermetic.tool("git")
             subprocess.run([git, "init", "-q"], cwd=tree, env=env, check=True)
             subprocess.run([git, "add", "."], cwd=tree, env=env, check=True)
+            as_mise = hermetic.task_run("lint:biome-domains", body)
             done = subprocess.run(
-                [hermetic.tool("bash"), "-euo", "pipefail", "-c", body],
+                as_mise.argv,
                 cwd=tree,
-                env=env,
+                env=env | as_mise.env,
                 capture_output=True,
                 text=True,
                 check=False,

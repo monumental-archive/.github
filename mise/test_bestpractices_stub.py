@@ -88,10 +88,11 @@ def lint(text: str, path: str = STUB_PATH) -> subprocess.CompletedProcess[str]:
         env |= {"ORG_BELT_DIR": str(BELT), "ORG_CANON_DIR": str(CANON)}
         subprocess.run([GIT, "init", "-q"], cwd=tmp, env=env, check=True)
         subprocess.run([GIT, "add", path], cwd=tmp, env=env, check=True)
+        as_mise = hermetic.task_run("lint:bestpractices", BODY)
         done = subprocess.run(
-            [BASH, "-euo", "pipefail", "-c", BODY],
+            as_mise.argv,
             cwd=tmp,
-            env=env,
+            env=env | as_mise.env,
             capture_output=True,
             text=True,
             check=False,

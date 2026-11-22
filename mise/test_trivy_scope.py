@@ -75,10 +75,11 @@ class TrivyScansTrackedFilesOnly(unittest.TestCase):
             log = root / "trivy.log"
             env["PATH"] = f"{bindir}{os.pathsep}{env['PATH']}"
             env["TRIVY_LOG"] = str(log)
+            as_mise = hermetic.task_run("lint:trivy", body())
             done = subprocess.run(
-                [BASH, "-euo", "pipefail", "-c", body()],
+                as_mise.argv,
                 cwd=tree,
-                env=env,
+                env=env | as_mise.env,
                 capture_output=True,
                 text=True,
                 check=False,
