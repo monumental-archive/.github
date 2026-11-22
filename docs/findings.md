@@ -83,6 +83,11 @@ One JSON object on one line:
 | `message` | One line. |
 | `detail` | A list of lines. May be empty. |
 
+A character that UTF-8 cannot carry (a lone surrogate, as Python's
+`os.fsdecode` makes of a file name that is not UTF-8) is recorded as
+its backslash escape, `\udcff`, as it is printed, so the log line and
+the record are the same text (#1984).
+
 A finding's identity is its task, subject and message. The report keeps
 a short hash of the identity of each finding an issue shows in its
 body, per issue. A finding listed in that issue's previous body reads
