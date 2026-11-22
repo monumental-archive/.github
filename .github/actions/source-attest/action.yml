@@ -105,8 +105,9 @@ runs:
         MISE_LOCKED: "1"
       run: | # zizmor: ignore[github-env]
         set -euo pipefail
-        # The canon's one writer of workflow commands (#1660), in this tree.
-        . "${GITHUB_ACTION_PATH}/../../../mise/workflow-command.sh"
+        # The canon's finding writer (#1934), and its workflow commands
+        # (#1660), in this tree.
+        . "${GITHUB_ACTION_PATH}/../../../mise/findings.sh"
         # Retried with backoff: the GitHub release download behind this
         # died twice on 2026-08-12 alone (#265). The retry shortens the
         # window; the auto-heal in chain.sh is what makes losing it
@@ -114,7 +115,7 @@ runs:
         for attempt in 1 2 3 4 5; do
           mise install "aqua:sigstore/cosign" "github:monumental-archive/stele" && break
           if [[ ${attempt} == 5 ]]; then
-            org_error "could not install cosign after ${attempt} attempts"
+            org_finding_annotated "" "could not install cosign after ${attempt} attempts"
             exit 1
           fi
           org_warning "cosign install failed (attempt ${attempt}), retrying"
@@ -150,8 +151,11 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
+        # The canon's finding writer (#1934), and its workflow commands
+        # (#1660), in this tree.
+        . "${GITHUB_ACTION_PATH}/../../../mise/findings.sh"
         command -v stele > /dev/null || {
-          echo "::error::stele is not on the runner — it is a belt tool"
+          org_finding_annotated "" "stele is not on the runner — it is a belt tool"
           exit 1
         }
         stele derive claims \
@@ -175,12 +179,13 @@ runs:
         SA_CLAIMS_B64: ${{ inputs.claims }}
       run: |
         set -euo pipefail
-        # The canon's one writer of workflow commands (#1660), in this tree.
-        . "${GITHUB_ACTION_PATH}/../../../mise/workflow-command.sh"
+        # The canon's finding writer (#1934), and its workflow commands
+        # (#1660), in this tree.
+        . "${GITHUB_ACTION_PATH}/../../../mise/findings.sh"
         [[ -n ${SA_CLAIMS_B64} ]] || {
           emsg="stage 'attest' requires the claims payload from the claims job — wire this input to"
           emsg+=" needs.claims.outputs.claims (#240)"
-          org_error "${emsg}"
+          org_finding_annotated "" "${emsg}"
           exit 1
         }
         base64 -d <<< "${SA_CLAIMS_B64}" > "${SA_WORK}/claims.json"
@@ -220,8 +225,11 @@ runs:
         # The released, attested binary — no Go toolchain on the runner;
         # the belt holds its per-platform checksums and attestation in
         # mise/mise.lock (stele#7).
+        # The canon's finding writer (#1934), and its workflow commands
+        # (#1660), in this tree.
+        . "${GITHUB_ACTION_PATH}/../../../mise/findings.sh"
         command -v stele > /dev/null || {
-          echo "::error::stele is not on the runner — it is a belt tool"
+          org_finding_annotated "" "stele is not on the runner — it is a belt tool"
           exit 1
         }
         genesis=()

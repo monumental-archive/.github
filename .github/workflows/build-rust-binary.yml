@@ -215,17 +215,17 @@ jobs:
           UNTRUSTED_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          # The canon's one writer of workflow commands (#1660).
-          . .org-canon/mise/workflow-command.sh
+          # The canon's finding writer (#1934), and its workflow commands (#1660).
+          . .org-canon/mise/findings.sh
           meta=$(cargo metadata --no-deps --format-version 1)
           manifest=$(jq -r '[.packages[].version] | unique | .[]' <<< "${meta}")
           versions=$(wc -l <<< "${manifest}")
           if [[ ${versions} -ne 1 ]]; then
-            org_error "workspace members disagree on version; canon is [workspace.package] inheritance"
+            org_finding_annotated "" "workspace members disagree on version; canon is [workspace.package] inheritance"
             exit 1
           fi
           if [[ ${manifest} != "${UNTRUSTED_VERSION}" ]]; then
-            org_error "tag says ${UNTRUSTED_VERSION}, manifest says ${manifest}"
+            org_finding_annotated "" "tag says ${UNTRUSTED_VERSION}, manifest says ${manifest}"
             exit 1
           fi
       # The class's whole compile, from the one definition the oci-image
@@ -274,10 +274,10 @@ jobs:
           UNTRUSTED_SMOKE: ${{ inputs.smoke-test }}
         run: |
           set -euo pipefail
-          # The canon's one writer of workflow commands (#1660).
-          . .org-canon/mise/workflow-command.sh
+          # The canon's finding writer (#1934), and its workflow commands (#1660).
+          . .org-canon/mise/findings.sh
           if [[ ! -x ${UNTRUSTED_SMOKE} ]]; then
-            org_error "smoke-test ${UNTRUSTED_SMOKE} is not executable"
+            org_finding_annotated "" "smoke-test ${UNTRUSTED_SMOKE} is not executable"
             exit 1
           fi
           "${UNTRUSTED_SMOKE}" "${PWD}/staged" "${TARGET}"

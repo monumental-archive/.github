@@ -61,7 +61,7 @@ One JSON object on one line:
 | Key | What it holds |
 | --- | --- |
 | `v` | The record's version, `1`. |
-| `task` | `MISE_TASK_NAME`, which a child of a mise task inherits; the running script's file name where mise named none. |
+| `task` | `MISE_TASK_NAME`, which a child of a mise task inherits. Where mise named none: `GITHUB_JOB` when the running script is a workflow step's own (a file directly under `RUNNER_TEMP`, named by a guid), else the running script's file name. |
 | `subject` | What the finding is about: a file, a repository, a crate, an advisory. May be empty. |
 | `message` | One line. |
 | `detail` | A list of lines. May be empty. |

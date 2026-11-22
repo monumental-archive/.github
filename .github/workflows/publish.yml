@@ -316,7 +316,7 @@ jobs:
           version: 2026.11.8
           cache: false
           # Only what this job's steps call (#1333).
-          install_args: github:monumental-archive/stele
+          install_args: jq github:monumental-archive/stele
 
       # The ref check and the version are facts about the event and stay
       # here. Which classes the evidence declares is `stele derive
@@ -341,11 +341,11 @@ jobs:
           UNTRUSTED_BINARY_CRATE: ${{ inputs.binary-crate }}
         run: |
           set -euo pipefail
-          # The canon's one writer of workflow commands (#1660).
-          . .org-canon/mise/workflow-command.sh
+          # The canon's finding writer (#1934), and its workflow commands (#1660).
+          . .org-canon/mise/findings.sh
           if [[ ${GITHUB_REF} != refs/tags/v* ]]; then
-            org_error "publish runs on v* tags only, got ${GITHUB_REF}"
-            org_error "dispatching from a branch would attest a moving pointer"
+            org_finding_annotated "" "publish runs on v* tags only, got ${GITHUB_REF}" \
+              "dispatching from a branch would attest a moving pointer"
             exit 1
           fi
           out=$(stele derive classes --policy .org-canon/slsa/assert-policy.json \
@@ -404,7 +404,7 @@ jobs:
           # Only what this job's steps call (#1333): the release path is
           # uncached, so every tool in scope is paid for on every run.
           # release/test_job_installs.py holds the list to the calls.
-          install_args: github:monumental-archive/stele
+          install_args: jq github:monumental-archive/stele
 
       # `stele derive facts` (stele#40): the whole fact set from a NAMED
       # checkout — the instant comes from the released commit, the
@@ -422,8 +422,10 @@ jobs:
           IMAGE_DESCRIPTION: ${{ inputs.image-description }}
         run: |
           set -euo pipefail
+          # The canon's finding writer (#1934), and its workflow commands (#1660).
+          . .org-canon/mise/findings.sh
           command -v stele > /dev/null || {
-            echo "::error::stele is not on the runner — it is a belt tool"
+            org_finding_annotated "" "stele is not on the runner — it is a belt tool"
             exit 1
           }
           out=$(stele derive facts \
@@ -538,6 +540,8 @@ jobs:
         # leg with another.
         run: |
           set -euo pipefail
+          # The canon's finding writer (#1934), and its workflow commands (#1660).
+          . .org-canon/mise/findings.sh
           found=0
           for a in shipped-archives/*.tar.gz; do
             [[ -e ${a} ]] || break
@@ -548,7 +552,7 @@ jobs:
             found=1
           done
           if [[ ${found} -ne 1 ]]; then
-            echo "::error::the go-binary build artifact holds no archives"
+            org_finding_annotated "" "the go-binary build artifact holds no archives"
             exit 1
           fi
           echo "BINARIES_DIR=${PWD}/shipped" >> "${GITHUB_ENV}"
@@ -640,8 +644,10 @@ jobs:
           SBOM_BASENAME: ${{ inputs.sbom-basename }}
         run: |
           set -euo pipefail
+          # The canon's finding writer (#1934), and its workflow commands (#1660).
+          . .org-canon/mise/findings.sh
           command -v stele > /dev/null || {
-            echo "::error::stele is not on the runner — it is a belt tool"
+            org_finding_annotated "" "stele is not on the runner — it is a belt tool"
             exit 1
           }
           base="${SBOM_BASENAME:-${GITHUB_REPOSITORY##*/}}"

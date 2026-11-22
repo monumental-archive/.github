@@ -70,9 +70,18 @@ org__finding_record() {
 org__finding() {
   local annotate=$1 subject=$2 message=$3
   shift 3
-  # The task a finding belongs to: mise's name for it, or the running
-  # script's file name where mise named none.
-  local task=${MISE_TASK_NAME:-${0##*/}} head
+  # The task a finding belongs to: mise's name for it; where mise named
+  # none, the job's when the running script is the runner's step script
+  # (a file directly under RUNNER_TEMP, named by a random guid, #1934);
+  # else the running script's file name.
+  local task=${MISE_TASK_NAME:-} head
+  if [[ -z ${task} ]]; then
+    if [[ -n ${GITHUB_JOB:-} && -n ${RUNNER_TEMP:-} && ${0%/*} == "${RUNNER_TEMP%/}" ]]; then
+      task=${GITHUB_JOB}
+    else
+      task=${0##*/}
+    fi
+  fi
   if [[ -n ${subject} ]]; then
     head="${task}: ${subject}: ${message}"
   else
