@@ -454,9 +454,8 @@ for repo in ${repos}; do
       else
         own_rulesets="${api_body}"
         queue_seen=0
-        # shellcheck disable=SC2312  # process substitution, the packages
-        # block's shape: capturing first turns an empty result into one
-        # blank line, and the producer is jq over a body already read.
+        rs_rows=$(jq -r '.[] | [.id, .name, .target, .enforcement, .source_type]
+          | @tsv' <<< "${own_rulesets}")
         while IFS=$'\t' read -r rs_id rs_name rs_target rs_state rs_source; do
           [[ -n ${rs_name} ]] || continue
           if [[ ${rs_name} == "${queue_name}" && ${visibility} == "public" ]]; then
@@ -487,8 +486,7 @@ for repo in ${repos}; do
             "enforcement (docs/rulesets.md); a repo's own is either" \
             "redundant with them or contradicts them (#876)."
           drift=1
-        done < <(jq -r '.[] | [.id, .name, .target, .enforcement, .source_type]
-          | @tsv' <<< "${own_rulesets}")
+        done <<< "${rs_rows}"
         if [[ ${visibility} == "public" && ${queue_seen} -eq 0 ]]; then
           org_finding "" "${repo} has no ${queue_name} ruleset, so its pull requests" \
             "still need a rebase to merge — run: settings/repo-baseline.sh apply"
@@ -596,9 +594,9 @@ if [[ ${mode} == check ]]; then
     drift=1
     packages='[]'
   fi
-  # shellcheck disable=SC2312  # process substitution: capturing first would
-  # turn an empty result into one blank line, which is a worse bug than the
-  # masked status. The producing command is git/jq over local state.
+  package_rows=$(jq -r '.[] | [.name, .visibility,
+      (if .repository.private == null then "true" else (.repository.private | tostring) end)]
+      | @tsv' <<< "${packages}")
   while IFS=$'\t' read -r name visibility repo_private; do
     [[ -n ${name} ]] || continue
     if [[ ${repo_private} == "false" && ${visibility} != "public" ]]; then
@@ -610,9 +608,7 @@ if [[ ${mode} == check ]]; then
     # as well as null, so `false // true` is true — which would mark every
     # PUBLIC repository private and make this check incapable of firing.
     # Found by running it against real data rather than trusting it.
-  done < <(jq -r '.[] | [.name, .visibility,
-      (if .repository.private == null then "true" else (.repository.private | tostring) end)]
-      | @tsv' <<< "${packages}")
+  done <<< "${package_rows}"
 fi
 
 # State what was covered on success (#310 finding 2, the audit:source-vsa

@@ -469,6 +469,36 @@ class ReadsThePinsThroughTheOneReader(unittest.TestCase):
         )
 
 
+# Stub `git` that fails `ls-files` as git does outside a repository and
+# hands every other call to the real binary.
+GIT_LS_FILES_FAILS = f"""#!/usr/bin/env bash
+if [[ ${{1:-}} == ls-files ]]; then
+  echo "fatal: not a git repository (or any of the parent directories): .git" >&2
+  exit 128
+fi
+exec {GIT} "$@"
+"""
+
+
+class AFailedControlListingIsNotAbsence(unittest.TestCase):
+    """A `git ls-files` that failed is not "no control files" (#2001)."""
+
+    def test_a_failed_listing_is_not_read_as_not_applicable(self) -> None:
+        """The listing was read through process substitution.
+
+        A failed git read as no rows: "not applicable", `files=`, exit 0.
+        """
+        with TemporaryDirectory() as d:
+            repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.1", EDTF_EDGES)
+            bindir = repo.root / "stubbin"
+            bindir.mkdir()
+            (bindir / "git").write_text(GIT_LS_FILES_FAILS)
+            (bindir / "git").chmod(0o755)
+            result = repo.derive("1.3.1", "1.3.0", "edtf-releases.json")
+        self.assertNotEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertNotIn("not applicable", result.stdout + result.stderr)
+
+
 # Set on the suite this row spawns, so the child declines to spawn one of
 # its own. A marker rather than running one class by name: the row is
 # about what a WHOLE suite run does to an index, and naming a class would
