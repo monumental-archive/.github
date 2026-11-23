@@ -2663,15 +2663,24 @@ def matrix_findings(strategy: dict[str, object]) -> list[str]:
 
     """
     matrix = decoded.as_object(strategy.get("matrix") or {}, "matrix")
-    rows = [decoded.as_object(r, "include") for r in matrix.get("include") or []]
-    legs = list(dict.fromkeys(str(r.get("leg")) for r in rows))
+    rows = [
+        decoded.as_object(r, "include")
+        for r in decoded.as_array(matrix.get("include", []), "include")
+    ]
+    legs: list[str] = []
+    for leg in (str(r.get("leg")) for r in rows):
+        if leg not in legs:
+            legs.append(leg)
     out = []
     if legs != list(GATE_LEGS):
         out.append(f"gate: not a matrix of the legs {list(GATE_LEGS)}")
     for leg in legs:
         shards = [r for r in rows if r.get("leg") == leg]
         n = len(shards)
-        if shards != [{"leg": leg, "shard": i, "of": n} for i in range(1, n + 1)]:
+        want: list[dict[str, object]] = [
+            {"leg": leg, "shard": i, "of": n} for i in range(1, n + 1)
+        ]
+        if shards != want:
             out.append(f"gate: the {leg} leg's shards are not 1 to {n} of {n}")
     return out
 

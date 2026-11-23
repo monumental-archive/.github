@@ -17,6 +17,7 @@ from pathlib import Path
 
 import decoded
 import gate_shard
+import typed_std
 
 HERE = Path(__file__).resolve().parent
 CI = HERE.parent / ".github" / "workflows" / "ci.yml"
@@ -30,15 +31,22 @@ class Table(unittest.TestCase):
         config = decoded.load_toml((HERE / "config.toml").read_bytes())
         defined = set(decoded.as_object(config["tasks"], "tasks"))
         stale = sorted(set(gate_shard.load().rows) - defined)
-        self.assertEqual([], stale)
+        none: list[str] = []
+        self.assertEqual(none, stale)
 
     def test_the_matrix_runs_the_table_count(self) -> None:
         """ci.yml's lint shards are 1 to `shards` of `shards`."""
         n = gate_shard.load().shards
-        rows = re.findall(
-            r"- leg: lint\n +shard: (\d+)\n +of: (\d+)\n", CI.read_text("utf-8")
-        )
-        self.assertEqual([(str(i), str(n)) for i in range(1, n + 1)], rows)
+        rows = [
+            (typed_std.group(m, 1), typed_std.group(m, 2))
+            for m in re.finditer(
+                r"- leg: lint\n +shard: (\d+)\n +of: (\d+)\n", CI.read_text("utf-8")
+            )
+        ]
+        want: list[tuple[str | None, str | None]] = [
+            (str(i), str(n)) for i in range(1, n + 1)
+        ]
+        self.assertEqual(want, rows)
 
 
 COSTS = gate_shard.Costs(
@@ -59,8 +67,10 @@ class Deal(unittest.TestCase):
         """The union is the list, with no lint twice."""
         names = [f"lint:t{i}" for i in range(23)]
         hands = gate_shard.deal(names, 4, dict.fromkeys(names, 2))
-        dealt = [n for h in hands for n in h]
-        self.assertEqual(sorted(names), sorted(dealt))
+        dealt: list[str] = [n for h in hands for n in h]
+        want: list[str] = sorted(names)
+        got: list[str] = sorted(dealt)
+        self.assertEqual(want, got)
         self.assertEqual(len(dealt), len(set(dealt)))
 
     def test_the_heaviest_are_apart(self) -> None:
@@ -68,15 +78,18 @@ class Deal(unittest.TestCase):
         names = ["lint:rust", "lint:msrv", "lint:shell", "lint:a", "lint:b"]
         weigh = {n: gate_shard.cost(n, COSTS, ["Cargo.toml"]) for n in names}
         hands = gate_shard.deal(names, 4, weigh)
-        self.assertEqual(
-            [["lint:rust"], ["lint:msrv"], ["lint:shell"], ["lint:a", "lint:b"]], hands
-        )
+        want: list[list[str]] = [
+            ["lint:rust"],
+            ["lint:msrv"],
+            ["lint:shell"],
+            ["lint:a", "lint:b"],
+        ]
+        self.assertEqual(want, hands)
 
     def test_more_shards_than_lints(self) -> None:
         """A shard with nothing dealt is empty, never an error."""
-        self.assertEqual(
-            [["lint:a"], []], gate_shard.deal(["lint:a"], 2, {"lint:a": 2})
-        )
+        want: list[list[str]] = [["lint:a"], []]
+        self.assertEqual(want, gate_shard.deal(["lint:a"], 2, {"lint:a": 2}))
 
 
 class Cost(unittest.TestCase):

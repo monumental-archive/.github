@@ -107,8 +107,9 @@ def deal(names: list[str], of: int, weigh: dict[str, int]) -> list[list[str]]:
     """
     loads = [0] * of
     hands: list[list[str]] = [[] for _ in range(of)]
-    for name in sorted(names, key=lambda n: (-weigh[n], n)):
-        at = min(range(of), key=lambda i: (loads[i], i))
+    # Costliest first; a stable sort keeps equal costs in name order.
+    for name in sorted(sorted(names), key=weigh.__getitem__, reverse=True):
+        at = loads.index(min(loads))
         loads[at] += weigh[name]
         hands[at].append(name)
     return [sorted(h) for h in hands]
