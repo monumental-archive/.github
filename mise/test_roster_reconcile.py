@@ -25,6 +25,7 @@ import hermetic
 CANON = Path(__file__).resolve().parent.parent
 SCRIPT = CANON / "mise" / "roster-reconcile.sh"
 BASH = hermetic.tool("bash")
+GIT = hermetic.tool("git")
 
 ROSTER = ["alpha", "beta", "gamma"]
 CALLER = "probe"
@@ -51,14 +52,21 @@ def run(roster: list[str] | None, listing: str) -> tuple[int, str]:
 
     """
     with TemporaryDirectory() as tmp:
-        path = Path(tmp) / "assert-policy.json"
+        # A tracked roster, named from the tree's top as the caller names
+        # slsa/assert-policy.json (#2013).
+        tree = Path(tmp)
+        env = hermetic.env(tree / ".home")
+        subprocess.run([GIT, "init", "-q"], cwd=tree, env=env, check=True)
+        path = "assert-policy.json"
         if roster is not None:
             body = {"population": {"repositories": [{"repo": r} for r in roster]}}
-            path.write_text(json.dumps(body), encoding="utf-8")
+            (tree / path).write_text(json.dumps(body), encoding="utf-8")
+            subprocess.run([GIT, "add", path], cwd=tree, env=env, check=True)
         done = subprocess.run(
-            [BASH, str(SCRIPT), CALLER, str(path)],
+            [BASH, str(SCRIPT), CALLER, path],
+            cwd=tree,
             input=listing,
-            env=hermetic.env(),
+            env=env,
             capture_output=True,
             text=True,
             check=False,

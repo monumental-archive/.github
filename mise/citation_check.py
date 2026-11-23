@@ -32,6 +32,7 @@ import tempfile
 from pathlib import Path
 
 import findings
+import tracked
 
 EXIT_RED = 1
 EXIT_ERROR = 2
@@ -145,9 +146,12 @@ def main(argv: list[str]) -> int:
         EXIT_ERROR on a read error, or a failed render's status.
 
     """
-    if not Path("CITATION.cff").is_file():
+    # Asked of git, never the directory: an untracked file is not the
+    # tree's (#2013).
+    here = Path.cwd()
+    if not tracked.has("CITATION.cff", root=here):
         return uncited(argv)
-    if not Path("REUSE.toml").is_file():
+    if not tracked.has("REUSE.toml", root=here):
         findings.finding(
             "", "CITATION.cff exists but REUSE.toml (its source of truth) does not"
         )

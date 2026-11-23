@@ -97,7 +97,7 @@ if [[ -n ${shard} ]]; then
   sharding=(--shard "${shard}" --sharding round-robin)
 fi
 
-if ! git ls-files --error-unmatch "${config}" > /dev/null 2>&1; then
+if ! org_tracked_has "${config}"; then
   echo "${label}: no ${config} tracked, skipped"
   if [[ -n ${MUTANTS_SUMMARY_DIR:-} ]]; then
     mkdir -p "${MUTANTS_SUMMARY_DIR}"

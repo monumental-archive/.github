@@ -49,7 +49,7 @@ unknown() {
 rc=0
 trap 'rc=$?; cleanup; [ -n "${org_done:-}" ] || [ "${rc}" -ne 0 ] || rc=1; exit "${rc}"' EXIT
 
-[[ -d fuzz && -f fuzz/Cargo.toml ]] || {
+org_tracked_has fuzz/Cargo.toml || {
   [[ -z ${FUZZ_TARGET:-} ]] || unknown audit:fuzz "of this tree (no fuzz/)"
   echo "audit:fuzz: no fuzz/, skipped"
   org_done=1

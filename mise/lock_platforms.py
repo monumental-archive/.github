@@ -41,7 +41,7 @@ import sys
 
 import findings
 from decoded import UndecodableError, as_object, is_array, is_object, load_toml
-from tracked import stdin_paths
+from tracked import has, stdin_paths
 
 NAME = "lint:lock-platforms"
 
@@ -408,12 +408,15 @@ def located() -> tuple[pathlib.Path, pathlib.Path] | None:
         absent: a skip.
 
     """
-    config = next((c for c in CONFIGS if pathlib.Path(c).is_file()), None)
+    # Asked of git, never the directory: an untracked config or lock is
+    # not the tree's (#2013).
+    here = pathlib.Path.cwd()
+    config = next((c for c in CONFIGS if has(c, root=here)), None)
     if config is None:
         print(f"{NAME}: no mise config, skipped")
         return None
     lock = pathlib.Path(config).parent / "mise.lock"
-    if not lock.is_file():
+    if not has(str(lock), root=here):
         print(f"{NAME}: no {lock}, skipped")
         return None
     return pathlib.Path(config), lock

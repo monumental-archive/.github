@@ -30,6 +30,7 @@ import sys
 from pathlib import Path
 
 import findings
+import tracked
 
 EXIT_RED = 1
 EXIT_ERROR = 2
@@ -141,7 +142,9 @@ def judge(canon: str, signer: str, texts: dict[str, list[str]]) -> int:
             ],
         )
         return EXIT_RED
-    if Path(PIN_FILE).is_file():
+    # Asked of git, never the directory: an untracked copy is no
+    # second statement (#2013).
+    if tracked.has(PIN_FILE, root=Path.cwd()):
         findings.finding(
             "",
             f"{PIN_FILE} exists — the second copy of the signer identity was"

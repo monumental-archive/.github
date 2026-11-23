@@ -36,7 +36,7 @@ org_task "fix:citation"
 : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
 
 out="${CITATION_OUT:-CITATION.cff}"
-[[ -f REUSE.toml ]] || {
+org_tracked_has REUSE.toml || {
   echo "fix:citation: no REUSE.toml, nothing to derive from"
   exit 0
 }
@@ -77,7 +77,7 @@ title="${repo_url##*/}"
 version="0.0.0"
 released=$(git log -1 --format=%cs 2> /dev/null || date -u +%F)
 concept=""
-if [[ -f CITATION.cff ]]; then
+if org_tracked_has CITATION.cff; then
   t=$(sed -n "s/^title: //p" CITATION.cff | sed -n 1p)
   [[ -n ${t} ]] && title="${t}"
   v=$(sed -n "s/^version: //p" CITATION.cff | sed -n 1p)

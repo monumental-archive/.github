@@ -35,6 +35,7 @@ import hermetic
 
 BELT = Path(__file__).resolve().parent
 BASH = hermetic.tool("bash")
+GIT = hermetic.tool("git")
 OWN_AUDITS_STUB = "own_audit_tasks() { :; }\n"
 OWN_AUDIT_STUB = "own_audit_tasks() { echo audit:custom; }\n"
 CANON = "monumental-archive/.github/.github/workflows"
@@ -84,14 +85,19 @@ class Scheduled(unittest.TestCase):
             encoding="utf-8",
         )
 
-    def run_lint(self) -> subprocess.CompletedProcess[str]:
-        """Run the task body in the planted tree.
+    def run_lint(
+        self, untracked: tuple[str, ...] = ()
+    ) -> subprocess.CompletedProcess[str]:
+        """Run the task body in the planted tree, tracking all but `untracked`.
 
         Returns:
             The finished process.
 
         """
         hermetic.track(self.tree)
+        if untracked:
+            rm = [GIT, "rm", "-q", "--cached", "--", *untracked]
+            subprocess.run(rm, cwd=self.tree, env=self.env, check=True)
         as_mise = hermetic.task_run("lint:audit-scheduled", body())
         return subprocess.run(
             as_mise.argv,
@@ -110,6 +116,16 @@ class Scheduled(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         expected = [
             "lint:audit-scheduled: 2 belt audit task(s), every one scheduled",
+            "lint:audit-scheduled: this repository defines no audit:* of its own",
+        ]
+        self.assertEqual(done.stdout.splitlines(), expected)
+
+    def test_an_untracked_belt_config_holds_nothing_to_schedule(self) -> None:
+        """mise/config.toml on disk, not in git: no belt half (#2013)."""
+        self.workflow("repo-dependencies.yml", "fuzz")
+        done = self.run_lint(untracked=("mise/config.toml",))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        expected = [
             "lint:audit-scheduled: this repository defines no audit:* of its own",
         ]
         self.assertEqual(done.stdout.splitlines(), expected)
@@ -154,6 +170,7 @@ class OwnTasks(unittest.TestCase):
             "ORG_CANON_DIR": str(canon),
             "ORG_PYTHON": sys.executable,
         }
+        subprocess.run([GIT, "init", "-q"], cwd=self.tree, env=self.env, check=True)
 
     def caller(self, name: str, callee: str) -> None:
         """Plant a stub whose one job calls a canon workflow by pin."""

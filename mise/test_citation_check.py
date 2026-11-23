@@ -79,7 +79,7 @@ class Citation(unittest.TestCase):
 
     @override
     def setUp(self) -> None:
-        """Plant an empty tree."""
+        """Plant an empty repository: the helper asks git (#2013)."""
         self.tree = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tree)
         self.env = hermetic.env(
@@ -87,6 +87,11 @@ class Citation(unittest.TestCase):
             ORG_BELT_DIR=str(BELT),
             ORG_PYTHON=sys.executable,
         )
+        self.git("init", "-q")
+
+    def git(self, *args: str) -> None:
+        """Run git in the planted tree."""
+        subprocess.run([GIT, *args], cwd=self.tree, env=self.env, check=True)
 
     def plant(self, name: str, text: str | bytes) -> str:
         """Write one file into the tree.
@@ -109,13 +114,18 @@ class Citation(unittest.TestCase):
         self.plant(".badge-states", source(".badge-states"))
         self.plant("CITATION.cff", citation)
 
-    def helper(self, *files: str) -> hermetic.Called:
-        """Call the helper's main in the planted tree.
+    def helper(self, *files: str, untracked: tuple[str, ...] = ()) -> hermetic.Called:
+        """Call the helper's main in the planted tree, tracking what is in it.
+
+        `untracked` are planted files git is not to track.
 
         Returns:
             The status and what it printed.
 
         """
+        self.git("add", "-A")
+        if untracked:
+            self.git("rm", "-q", "--cached", "--", *untracked)
         argv = list(files)
         return hermetic.call_main(
             lambda: citation_check.main(argv), env=self.env, cwd=self.tree
@@ -153,7 +163,7 @@ class Citation(unittest.TestCase):
         """A derived field edited by hand: the diff, then the finding."""
         drifted = source("CITATION.cff").replace("license: 0BSD", "license: MIT")
         self.sources(drifted)
-        done = self.task()
+        done = self.task("REUSE.toml", ".badge-states", "CITATION.cff")
         same(self, done.returncode, citation_check.EXIT_RED)
         diff = done.stdout.splitlines()
         same(self, diff[0].split("\t")[0], "--- CITATION.cff")
@@ -171,7 +181,7 @@ class Citation(unittest.TestCase):
         """The render refuses: its message, its status, no verdict."""
         self.plant("REUSE.toml", "x = 1\n")
         self.plant("CITATION.cff", source("CITATION.cff"))
-        done = self.task()
+        done = self.task("REUSE.toml", "CITATION.cff")
         same(self, done.returncode, 1)
         want = [
             (
@@ -194,6 +204,27 @@ class Citation(unittest.TestCase):
         """A citation with no source: red, by name."""
         self.plant("CITATION.cff", source("CITATION.cff"))
         done = self.helper()
+        same(self, done.returncode, citation_check.EXIT_RED)
+        want = [
+            (
+                "lint:citation: CITATION.cff exists but REUSE.toml (its source of"
+                " truth) does not"
+            )
+        ]
+        same(self, done.stderr.splitlines(), want)
+
+    def test_an_untracked_citation_is_no_citation(self) -> None:
+        """CITATION.cff on disk and not in git: the tree has none (#2013)."""
+        self.sources(source("CITATION.cff"))
+        rel = self.plant(".github/workflows/wf.yml", "on: push\n")
+        done = self.helper(rel, untracked=("CITATION.cff",))
+        same(self, done.returncode, 0, done.stderr)
+        same(self, done.stdout.splitlines(), SKIPPED)
+
+    def test_an_untracked_reuse_is_no_source(self) -> None:
+        """REUSE.toml on disk and not in git: the citation has no source."""
+        self.sources(source("CITATION.cff"))
+        done = self.helper(untracked=("REUSE.toml",))
         same(self, done.returncode, citation_check.EXIT_RED)
         want = [
             (

@@ -48,8 +48,8 @@
 # than its own file's. A name mise gave wins.
 #
 # It also loads `org_tracked` (mise/tracked.sh, #1986), the one producer
-# of the tracked-file list, so every task body and every bash a body
-# starts has it.
+# of the tracked-file list, and `org_tracked_has` (#2013), so every
+# task body and every bash a body starts has them.
 #
 # Loading this file runs no command (#1934): under BASH_ENV every bash
 # sources it, whatever its PATH holds, so the directory is found by

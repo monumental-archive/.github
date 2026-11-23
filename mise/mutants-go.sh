@@ -93,7 +93,7 @@ if [[ -n ${shard} ]]; then
   where=", shard ${shard}"
 fi
 
-if ! git ls-files --error-unmatch -- "${adoption}" > /dev/null 2>&1; then
+if ! org_tracked_has "${adoption}"; then
   echo "${label}: no ${adoption} tracked, skipped"
   if [[ -n ${MUTANTS_SUMMARY_DIR:-} ]]; then
     mkdir -p "${MUTANTS_SUMMARY_DIR}"
@@ -118,7 +118,7 @@ if [[ -n ${patterns} ]]; then
   exit 1
 fi
 
-if ! git ls-files --error-unmatch -- go.mod > /dev/null 2>&1; then
+if ! org_tracked_has go.mod; then
   org_finding "go" "${adoption} is tracked but no go.mod beside it"
   exit 1
 fi

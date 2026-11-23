@@ -122,6 +122,10 @@ shared lives here and nowhere else. Five layers:
   (`mise/tracked.sh`; `tracked()` in `mise/tracked.py`) and read
   NUL-safely, never by a tool's own directory walker — lefthook caches
   remote configs inside `.git/`, and walkers find them (#1986).
+  Whether a repository has a file is asked the same way:
+  `org_tracked_has` (`has()` in `mise/tracked.py`), never `[[ -f ]]`,
+  and a git that cannot answer ends the task rather than reading as
+  absent (#2013).
 - Belt linters guard for applicability and skip clean: a linter that
   cannot skip cannot be universal.
 - Tasks are written in bash; `[task_config] shell` pins it (Ubuntu's `sh`

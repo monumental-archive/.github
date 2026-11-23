@@ -38,6 +38,7 @@ import sys
 from pathlib import Path
 
 import findings
+import tracked
 
 EXIT_RED = 1
 EXIT_ERROR = 2
@@ -187,7 +188,9 @@ def main(argv: list[str]) -> int:
         return EXIT_ERROR
     try:
         lines = [line for name in args.workflows for line in read(Path(name))]
-        status = belt_half(lines) if CONFIG.is_file() else 0
+        # The belt half applies where git tracks a belt config (#2013).
+        belt = tracked.has(str(CONFIG), root=Path.cwd())
+        status = belt_half(lines) if belt else 0
     except ValueError as err:
         findings.finding("", str(err))
         return EXIT_ERROR

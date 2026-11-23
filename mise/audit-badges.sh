@@ -39,7 +39,7 @@ org_task "audit:badges"
 # longer stands in for them (#738): a Scorecard shield judged against a
 # floor file that is not there is a badge nobody is checking.
 floors="security/scorecard-floors.txt"
-[[ -f ${floors} ]] || {
+org_tracked_has "${floors}" || {
   org_finding "" "on the canon, and the input this leg reads is missing: ${floors}" \
     "a canon-only audit reds on a missing input, never skips (#738)."
   exit 1

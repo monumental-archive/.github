@@ -90,17 +90,27 @@ class Helper(unittest.TestCase):
 
     @override
     def setUp(self) -> None:
-        """Plant an empty tree with a workflows directory."""
+        """Plant an empty repository with a workflows directory.
+
+        The helper asks git whether the belt config is tracked (#2013).
+        """
         self.tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp)
         self.tree = self.tmp / "tree"
         (self.tree / ".github" / "workflows").mkdir(parents=True)
         self.env = hermetic.env(MISE_TASK_NAME=TASK, ORG_FINDINGS="")
+        self.git("init", "-q")
+
+    def git(self, *args: str) -> None:
+        """Run git in the planted tree."""
+        git = hermetic.tool("git")
+        subprocess.run([git, *args], cwd=self.tree, env=self.env, check=True)
 
     def config(self, text: str) -> None:
         """Plant a belt config in the tree, as the canon carries one."""
         (self.tree / "mise").mkdir(exist_ok=True)
         (self.tree / "mise" / "config.toml").write_text(text, encoding="utf-8")
+        self.git("add", "--", "mise/config.toml")
 
     def plant(self, name: str, text: str | bytes) -> str:
         """Write one workflow.

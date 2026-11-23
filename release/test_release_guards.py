@@ -600,6 +600,13 @@ class CoverageFloorApplicability(unittest.TestCase):
         """
         with TemporaryDirectory() as d:
             (Path(d) / ".coverage-floor").write_text("floor = 80.0\n")
+            # The probe asks git which manifests are tracked (#2013).
+            subprocess.run(
+                [hermetic.tool("git"), "init", "-q"],
+                cwd=d,
+                env=hermetic.env(Path(d) / ".home"),
+                check=True,
+            )
             out = Path(d) / "outputs"
             result = run_script(
                 "derive-coverage-floor.sh",

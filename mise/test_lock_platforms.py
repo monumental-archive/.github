@@ -281,6 +281,20 @@ class Guards(Case):
         """No lock: --locked is not in play."""
         self.assert_body_out(tree(lock=None), "no mise.lock, skipped")
 
+    def test_an_untracked_config_is_no_config(self) -> None:
+        """A mise.toml on disk and not in git is not the tree's (#2013)."""
+        done = lint(tree(config=None), untracked={"mise.toml": CONFIG})
+        self.assertEqual(
+            (0, f"{NAME}: no mise config, skipped\n"), (done.returncode, done.stdout)
+        )
+
+    def test_an_untracked_lock_is_no_lock(self) -> None:
+        """A mise.lock on disk and not in git is not the tree's (#2013)."""
+        done = lint(tree(lock=None), untracked={"mise.lock": LOCK})
+        self.assertEqual(
+            (0, f"{NAME}: no mise.lock, skipped\n"), (done.returncode, done.stdout)
+        )
+
     def test_no_tracked_workflow_skips(self) -> None:
         """No workflows at all: no publish stub."""
         self.assert_out(tree(stub=None), "no publish stub, skipped")

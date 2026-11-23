@@ -168,7 +168,8 @@ class Planted(unittest.TestCase):
             # The bestpractices legs start the belt's owner helper.
             ORG_PYTHON=os.environ.get("ORG_PYTHON") or sys.executable,
         )
-        for argv in (["init", "-q"], ["add", "security/identity.toml"]):
+        tracked = ["security/identity.toml", "security/scorecard-floors.txt"]
+        for argv in (["init", "-q"], ["add", *tracked]):
             subprocess.run([GIT, *argv], cwd=self.tree, env=self.env, check=True)
         self.stubs = tmp / "stubs"
         bindir = tmp / "bin"

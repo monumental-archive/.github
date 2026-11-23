@@ -56,13 +56,13 @@ case "${1:-}" in
     legs=$(ORG_COVERAGE_DISCOVER=1 "${belt}/coverage-measure.sh" "${label}")
     pgrx=$("${belt}/coverage-measure.sh" "${label}" pgrx)
     [[ -z ${pgrx} ]] || legs+=$'\n'${pgrx}
-    if [[ -f Cargo.toml && -n ${FUZZ_TOOLCHAIN:-} ]]; then
+    if org_tracked_has Cargo.toml && [[ -n ${FUZZ_TOOLCHAIN:-} ]]; then
       legs+=$'\n'$("${belt}/coverage-measure.sh" "${label}" rust-branches)
-    elif [[ -f Cargo.toml ]]; then
+    elif org_tracked_has Cargo.toml; then
       echo "${label}: no FUZZ_TOOLCHAIN declared, so no rust-branches line" \
         "(branch coverage needs the dated nightly)"
     fi
-    [[ ! -f go.mod ]] || legs+=$'\n'$("${belt}/coverage-go-branches.sh" "${label}")
+    ! org_tracked_has go.mod || legs+=$'\n'$("${belt}/coverage-go-branches.sh" "${label}")
     "${ORG_PYTHON}" "${belt}/coverage_floor.py" write \
       --provenance "${label}" --adopt <<< "${legs}"
     ;;

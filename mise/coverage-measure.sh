@@ -263,8 +263,8 @@ if [[ -z ${test_task} && -n ${ORG_COVERAGE_DISCOVER:-} ]]; then
 fi
 
 if [[ ${legs} == probe ]]; then
-  [[ -f go.mod ]] && echo go
-  [[ -f Cargo.toml ]] && echo rust
+  ! org_tracked_has go.mod || echo go
+  ! org_tracked_has Cargo.toml || echo rust
   [[ -n ${python_test} ]] && echo python
   case "${ts_runner}" in
     vitest\ *) [[ -z ${ts_test} ]] || echo typescript ;;
@@ -289,7 +289,7 @@ fi
 # minimum and applying it per language is the only reading that means
 # anything: a mixed repository that measured Rust alone once reported
 # "floor held" over a language nothing had measured (#392).
-if [[ -f go.mod && ${legs} =~ ^(all|go)$ ]]; then
+if org_tracked_has go.mod && [[ ${legs} =~ ^(all|go)$ ]]; then
   if ! command -v go > /dev/null; then
     org_finding "" "go.mod present but go missing — pin go in mise.toml"
     exit 1
@@ -361,7 +361,7 @@ pgrx_surface() {
 # needs the list to know it read them all. Nothing in a tree with no
 # extension.
 if [[ ${legs} == pgrx-majors ]]; then
-  if [[ -f Cargo.toml ]]; then
+  if org_tracked_has Cargo.toml; then
     pgrx_surface
     [[ -z ${pgrx_majors} ]] || printf '%s\n' "${pgrx_majors}"
   fi
@@ -440,7 +440,7 @@ llvm_tools() {
   fi
 }
 
-if [[ -f Cargo.toml && ${legs} =~ ^(all|rust)$ ]]; then
+if org_tracked_has Cargo.toml && [[ ${legs} =~ ^(all|rust)$ ]]; then
   rust_surface ""
   # The repository's own `test` run, measured where it ran (#1653): its
   # test command ran through `measured`, which instrumented every cargo it
@@ -506,14 +506,14 @@ if [[ -f Cargo.toml && ${legs} =~ ^(all|rust)$ ]]; then
   done
 fi
 
-if [[ -f Cargo.toml && ${legs} == pgrx ]]; then
+if org_tracked_has Cargo.toml && [[ ${legs} == pgrx ]]; then
   # pgrx-test.sh's own run, every declared major, its leg lines kept on
   # stdout and everything else sent to stderr.
   ORG_PGRX_MAJOR="" "${belt_dir}/pgrx-test.sh" measure \
     | awk '/^pgrx-pg[0-9]+ [0-9.]+$/ { print; next } { print > "/dev/stderr" }'
 fi
 
-if [[ -f Cargo.toml && ${legs} == rust-branches ]]; then
+if org_tracked_has Cargo.toml && [[ ${legs} == rust-branches ]]; then
   # The nightly is DECLARED by the repository, never discovered — the
   # audit:fuzz rule, and the same pin: no second nightly for the belt to
   # keep in step. A leg that used whatever nightly a machine happened to
@@ -732,7 +732,7 @@ fi
 fuzz_targets() {
   local manifest target files mods file dir names name mod m module n
   fuzz_found=""
-  if [[ -f fuzz/Cargo.toml ]]; then
+  if org_tracked_has fuzz/Cargo.toml; then
     manifest=$("${ORG_PYTHON}" -c 'import sys, tomllib
 for b in tomllib.load(open(sys.argv[1], "rb")).get("bin", []):
     print(b["name"])' fuzz/Cargo.toml) || {

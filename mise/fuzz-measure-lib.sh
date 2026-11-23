@@ -132,7 +132,7 @@ org__fuzz_measure_go() {
   local label=$1 leg=$2 dir=$3 name=$4 module rel pkgs pkg coverpkg="" work cover pct="" status=0
   # The package's module, as Go resolves it: the nearest go.mod above.
   module=${dir}
-  while [[ ! -f ${module}/go.mod ]]; do
+  while ! org_tracked_has "${module}/go.mod"; do
     if [[ ${module} == . ]]; then
       org_finding "" "${leg}: no go.mod above ${dir} — no module owns ${name}"
       return 1

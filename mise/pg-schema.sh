@@ -75,7 +75,7 @@ if [[ ${mode} == check ]]; then
   missing=0
   for target in "${targets[@]}"; do
     snapshot="${target#*:*:*:}"
-    git ls-files --error-unmatch -- "${snapshot}" > /dev/null 2>&1 || {
+    org_tracked_has "${snapshot}" || {
       "${ORG_PYTHON}" "${belt}/pg_schema.py" check /dev/null "${snapshot}" || missing=1
     }
   done
