@@ -70,7 +70,10 @@
 # hooks, the belt's own ORG_BELT_REFUSED (mise/config.toml) refuses
 # every belt task in a tree whose link names another pin's belt, or
 # whose missing link lets a parent checkout's belt answer, with one
-# line naming both shas and the remedy. Once per clone, after
+# line naming both shas and the remedy. Both read the pin from the
+# TRACKED workflows (`git grep`), never a glob over the directory, so
+# an untracked stray in .github/workflows/ cannot choose the belt
+# (#2018). Once per clone, after
 # `lefthook install`:
 #   lefthook run post-checkout
 pre-commit:
@@ -84,7 +87,7 @@ pre-commit:
       run: &belt >-
         top="$(git rev-parse --show-toplevel)" || exit 1;
         common="$(git rev-parse --git-common-dir)" || exit 1; common="$(cd "${common}" && pwd)" || exit 1;
-        pin="$(cat "${top}"/.github/workflows/*.y*ml 2>/dev/null
+        pin="$(git -C "${top}" grep -h -I -e '' -- '.github/workflows/*.y*ml' 2>/dev/null
         | sed -nE 's|.*uses:[[:space:]]*([^[:space:]/]+/[^[:space:]/]+)/\.github/workflows/ci\.ya?ml@([0-9a-f]+).*|\1 \2|p'
         | sed -n '1p')";
         [ -n "${pin}" ] || exit 0;
