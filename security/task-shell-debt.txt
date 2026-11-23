@@ -54,7 +54,6 @@ mise/config.toml	lint:actions-allowed	41	# #1544 unassigned
 mise/config.toml	audit:actions-allowlist	43	# #1544 unassigned
 mise/config.toml	audit:security-config	25	# #1544 unassigned
 mise/config.toml	lint:from-digests	20	# #1544 unassigned
-mise/config.toml	lint:installer-pinned	19	# #1544 unassigned
 mise/config.toml	lint:cold-attested	100	# #1544 unassigned
 mise/config.toml	coverage:check	19	# #1544 unassigned
 mise/config.toml	lint:fuzz-build	40	# #1544 unassigned
@@ -79,7 +78,6 @@ mise/config.toml	lint:audit-scheduled	68	# #1544 unassigned
 mise/config.toml	lint:canon-policy	19	# #1544 unassigned
 mise/config.toml	lint:policy-load	45	# #1544 unassigned
 mise/config.toml	lint:caller-permissions	18	# #1544 unassigned
-mise/config.toml	lint:runner-pin	28	# #1544 unassigned
 mise/config.toml	lint:canon-pins	50	# #1544 unassigned
 mise/config.toml	lint:hook-jobs	18	# #1544 unassigned
 mise/config.toml	lint:release-planned	35	# #1544 unassigned

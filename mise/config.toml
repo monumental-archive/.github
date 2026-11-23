@@ -6106,26 +6106,14 @@ dir = "{{cwd}}"
 # asserts each jdx/mise-action step carries an explicit `version:`.
 # Grep-shaped like every belt lint: count steps, count pins, any
 # shortfall is red with the file named.
+# The counting is mise/installer_pinned.py (#1911).
 run = '''
 files=() && org_tracked_read files ':!vendor/**' ".github/workflows/*.y*ml"
 [[ -n ${files[0]+set} ]] || {
   echo "lint:installer-pinned: no workflows, skipped"
   exit 0
 }
-bad=""
-for f in "${files[@]}"; do
-  steps=$(grep -cE "^[^#]*uses:[[:space:]]*jdx/mise-action@" "${f}") || true
-  ((steps > 0)) || continue
-  pins=$(grep -cE "^[^#]*version:[[:space:]]*[0-9]{4}\.[0-9]+\.[0-9]+" "${f}") || true
-  ((steps <= pins)) || bad="${bad} ${f}(${steps} steps, ${pins} version pins)"
-done
-if [[ -n ${bad} ]]; then
-  org_finding "" "mise-action without a mise version pin:${bad}" \
-    "the installer is a build input — an unpinned mise delivers" \
-    "same-day releases straight into attested builds (v0.18.2 darwin leg)"
-  exit 1
-fi
-echo "lint:installer-pinned: ok"
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/installer_pinned.py" "${files[@]}"
 '''
 
 [tasks."lint:cold-attested"]
@@ -8962,34 +8950,15 @@ dir = "{{cwd}}"
 # matrix laundering hole: a floating value reaching runs-on through a
 # matrix include or a bash case arm is the same float with indirection.
 run = '''
-files=() && org_tracked_read files ':!vendor/**' ".github/workflows/*.yml" ".github/workflows/*.yaml" \
-  "workflow-templates/*.yml" "workflow-templates/*.yaml"
-[[ -n ${files[0]+set} ]] || {
+workflows=() && org_tracked_read workflows ':!vendor/**' ".github/workflows/*.yml" ".github/workflows/*.yaml"
+templates=() && org_tracked_read templates ':!vendor/**' "workflow-templates/*.yml" "workflow-templates/*.yaml"
+[[ -n ${workflows[0]+set} || -n ${templates[0]+set} ]] || {
   echo "lint:runner-pin: no workflows, skipped"
   exit 0
 }
-bad=""
-for f in "${files[@]}"; do
-  while IFS= read -r line; do
-    [[ -n ${line} ]] || continue
-    v=$(sed -E "s/^[[:space:]]*runs-on:[[:space:]]*//; s/[[:space:]]*#.*$//" <<< "${line}" | tr -d "\"'")
-    case "${v}" in
-      \$\{\{*matrix.*\}\}) ;; # indirection; the value check below covers it
-      *) [[ ${v} =~ ^[a-z]+-[0-9][a-z0-9.-]*$ ]] \
-        || bad="${bad} ${f}(runs-on: ${v})" ;;
-    esac
-  done <<< "$(grep -hE "^[[:space:]]*runs-on:" "${f}" || true)"
-  float=$(grep -nE "(ubuntu|macos|windows)-latest" "${f}" | grep -vE "^[0-9]+:[[:space:]]*#" || true)
-  [[ -z ${float} ]] || bad="${bad} ${f}(floating label: $(head -1 <<< "${float}"))"
-done
-if [[ -n ${bad} ]]; then
-  org_finding "" "floating or unpinned runner labels:${bad}" \
-    "pin every runs-on to a named image version (ubuntu-24.04, not" \
-    "ubuntu-latest) — Renovate rolls named pins as visible diffs;" \
-    "a floating label migrates with no diff at all (#290)."
-  exit 1
-fi
-echo "lint:runner-pin: every runs-on pinned or matrix-indirected, no floating labels"
+# The two checks and their message: mise/runner_pin.py (#1911).
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/runner_pin.py" \
+  ${workflows[@]+"${workflows[@]}"} -- ${templates[@]+"${templates[@]}"}
 '''
 
 [tasks."lint:canon-pins"]
