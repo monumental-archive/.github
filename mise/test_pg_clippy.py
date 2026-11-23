@@ -5,11 +5,11 @@ The task's body after its guard is mise/pg_clippy.py. Each row calls
 its `main` in this process, in a planted git tree, against a planted
 belt whose clippy ladder and pgrx provisioning are the stubs
 test_rust_lint.py plants for rust_lint.py, whose plumbing this helper
-shares. cargo, rustup and mise are stubs on PATH that log what they
-were asked; the workspace's cargo metadata is read by the belt's real
-gate_surface.py, and its extension's major derived by the real
-pgrx-env.sh. Every row asserts the whole log, so a row cannot pass by
-stopping early.
+shares through mise/rust_task.py. cargo, rustup and mise are stubs on
+PATH that log what they were asked; the workspace's cargo metadata is
+read by the belt's real gate_surface.py, and its extension's major
+derived by the real pgrx-env.sh. Every row asserts the whole log, so a
+row cannot pass by stopping early.
 
 stdlib `unittest`, matching the other mise/test_*.py; run through the
 gate as `mise run test`.
@@ -23,11 +23,9 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import override
-from unittest import mock
 
 import hermetic
 import pg_clippy
-import rust_lint
 import test_rust_lint as planted
 
 BELT = Path(__file__).resolve().parent
@@ -133,12 +131,11 @@ class Planted(unittest.TestCase):
             Its status and what it wrote.
 
         """
-        with mock.patch.object(rust_lint, "BELT", self.belt):
-            return hermetic.call_main(
-                lambda: pg_clippy.main(list(argv)),
-                env=self.env | stub,
-                cwd=self.tree,
-            )
+        return hermetic.call_main(
+            lambda: pg_clippy.main(list(argv)),
+            env=self.env | {"ORG_BELT_DIR": str(self.belt)} | stub,
+            cwd=self.tree,
+        )
 
     def call_child(self, **stub: str) -> tuple[hermetic.Called, str]:
         """Call main, reading what a child wrote to descriptor 2.
@@ -312,12 +309,11 @@ class Workspace(Planted):
     def test_the_manifest_path_reaches_every_cargo_command(self) -> None:
         """Fetch, metadata and clippy each name the workspace they read."""
         where = ["--manifest-path", "crates/Cargo.toml"]
-        with mock.patch.object(rust_lint, "BELT", self.belt):
-            done = hermetic.call_main(
-                lambda: pg_clippy.workspace(str(self.bins / "cargo"), where),
-                env=self.env,
-                cwd=self.tree,
-            )
+        done = hermetic.call_main(
+            lambda: pg_clippy.workspace(str(self.bins / "cargo"), where),
+            env=self.env | {"ORG_BELT_DIR": str(self.belt)},
+            cwd=self.tree,
+        )
         self.assertEqual(0, done.returncode, done.stderr)
         tail = "--manifest-path crates/Cargo.toml"
         self.assert_logged(
