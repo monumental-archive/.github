@@ -35,7 +35,7 @@ jobs:
   release:
     # No `with:` at all: the caller passes no App identity, only the
     # private key below.
-    uses: monumental-archive/.github/.github/workflows/release.yml@bee992674313be6f6b25d6ba7e081733b11c0371 # v1.78.1
+    uses: monumental-archive/.github/.github/workflows/release.yml@aa5875fc4e86e582942101e1613d9585f3d79623 # v1.78.2
     permissions:
       # Required, and easy to omit. A `uses:` job with no `permissions:`
       # block inherits the WORKFLOW-level default — `permissions: {}` above
