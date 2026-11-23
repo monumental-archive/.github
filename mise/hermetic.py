@@ -24,6 +24,7 @@ The files a tree tracks are read here too, through the same
 environment (#1618):
 
     names = hermetic.tracked(CANON, "*.py")        # relative to CANON
+    hermetic.track(tree)                           # plant, then track it all
 
 A test that lists the canon's own tree calls `tracked`, never `git
 ls-files` itself, so every listing runs under the same environment and
@@ -301,6 +302,27 @@ def tracked(root: Path | str, *pathspecs: str, **overrides: str) -> list[str]:
         )
         raise RuntimeError(msg)
     return names
+
+
+def track(tree: Path | str) -> None:
+    """Make `tree` a git repository tracking every file in it (#2007).
+
+    A belt task reads the files git tracks, never a directory's walk, so
+    a row that plants files for a task body to read tracks them, under
+    `env`. Idempotent: a tree already a repository is added to.
+
+    Raises:
+        RuntimeError: git is not on PATH.
+
+    """
+    git = shutil.which("git")
+    if git is None:
+        msg = "hermetic.track: git is not on PATH"
+        raise RuntimeError(msg)
+    for args in (("init", "-q"), ("add", "-A")):
+        subprocess.run(
+            [git, "-C", str(tree), *args], env=env(), capture_output=True, check=True
+        )
 
 
 @dataclass(frozen=True)

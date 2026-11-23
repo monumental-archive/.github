@@ -249,6 +249,7 @@ when = []
 tasks = [
   "break:check",
   "coverage:check",
+  "lint:actions",
   "lint:audit-scheduled",
   "lint:badges",
   "lint:bash-portability",

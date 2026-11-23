@@ -162,7 +162,7 @@ NO_WORKSPACE = (
     "resolution depends on where the checkout sits\n"
     "  a workspace above the checkout (a nested worktree) claims the crate; "
     "make it its own root\n"
-    "  with the empty table cargo itself recommends, in fuzz/Cargo.toml:\n"
+    "  the belt requires an empty [workspace] table in fuzz/Cargo.toml:\n"
     "    [workspace]\n"
 )
 UNRESOLVED_HEAD = "lint:fuzz-build: the fuzz manifest does not resolve — cargo says:\n"

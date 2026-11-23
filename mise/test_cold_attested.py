@@ -262,6 +262,7 @@ class ColdAttested(unittest.TestCase):
             The finished process.
 
         """
+        hermetic.track(self.tree)
         as_mise = hermetic.task_run(TASK, body())
         return subprocess.run(
             as_mise.argv,

@@ -94,6 +94,7 @@ class Scheduled(unittest.TestCase):
             The finished process.
 
         """
+        hermetic.track(self.tree)
         as_mise = hermetic.task_run("lint:audit-scheduled", body())
         return subprocess.run(
             as_mise.argv,
@@ -188,6 +189,7 @@ class OwnTasks(unittest.TestCase):
             The finished process.
 
         """
+        hermetic.track(self.tree)
         as_mise = hermetic.task_run("lint:audit-scheduled", body())
         return subprocess.run(
             as_mise.argv,

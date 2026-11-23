@@ -2319,7 +2319,7 @@ dir = "{{cwd}}"
 run = '''
 # The action lints' one selection (#1448), and the workflow templates.
 . "${ORG_BELT_DIR}/action-files.sh"
-templates=() && org_tracked_read templates ':!vendor/**' "workflow-templates/*.y*ml"
+templates=() && workflow_template_files templates
 files=() && action_files files
 files+=(${templates[@]+"${templates[@]}"})
 [[ -n ${files[0]+set} ]] || {
@@ -2341,7 +2341,7 @@ dir = "{{cwd}}"
 run = '''
 # The action lints' one selection (#1448), and the workflow templates.
 . "${ORG_BELT_DIR}/action-files.sh"
-templates=() && org_tracked_read templates ':!vendor/**' "workflow-templates/*.y*ml"
+templates=() && workflow_template_files templates
 files=() && action_files files
 files+=(${templates[@]+"${templates[@]}"})
 [[ -n ${files[0]+set} ]] || {
@@ -4501,13 +4501,15 @@ dir = "{{cwd}}"
 # its lines in the detail. The exit status is zizmor's own. There is no
 # second, human-mode run: the records print the findings.
 run = '''
-compgen -G ".github/workflows/*.y*ml" > /dev/null || {
+. "${ORG_BELT_DIR}/action-files.sh"
+files=() && workflow_files files
+[[ -n ${files[0]+set} ]] || {
   echo "audit:actions: no workflows, skipped"
   exit 0
 }
 . "${ORG_BELT_DIR}/identity.sh"
 signer_wf=$(org_identity signer-workflow)
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/zizmor_signer.py" --signer-workflow "${signer_wf}" --persona=auditor .github/workflows/
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/zizmor_signer.py" --signer-workflow "${signer_wf}" --persona=auditor "${files[@]}"
 '''
 
 [tasks."audit:template-pins"]
@@ -4523,7 +4525,9 @@ dir = "{{cwd}}"
 # bump. audit:*, not lint:*: pin-vs-HEAD drift is a property of time
 # passing on main, not of the diff under review.
 run = '''
-compgen -G "workflow-templates/*.y*ml" > /dev/null || {
+. "${ORG_BELT_DIR}/action-files.sh"
+files=() && workflow_template_files files
+[[ -n ${files[0]+set} ]] || {
   echo "audit:template-pins: no workflow-templates/, skipped"
   exit 0
 }
@@ -4533,7 +4537,7 @@ canon_repo=$(org_identity repo)
 # The pin, the drift since it, and the post-release window (#290,
 # #310): mise/template_drift.py (#1911).
 "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/template_drift.py" \
-  "${canon_owner}/${canon_repo}" workflow-templates/*.y*ml
+  "${canon_owner}/${canon_repo}" "${files[@]}"
 '''
 
 [tasks."audit:canon-pins"]
@@ -4983,21 +4987,20 @@ env = { SHELLCHECK_OPTS = "--enable=all --exclude=SC2310 --external-sources --ex
 # laptop, which then said nothing about what the runner reds. A
 # directory of this run's own holds `.org-canon` as a link to the belt's
 # canon tree and goes on exit; nothing is written in the working tree.
+#
+# actionlint is given the tracked workflows (#2007), never the directory
+# it would walk, untracked files and all; the call, its flags and the
+# link are mise/actions_lint.py, moved out when the selection took the
+# body past the 15-line ceiling.
 run = '''
-if ! compgen -G ".github/workflows/*.y*ml" > /dev/null; then
+. "${ORG_BELT_DIR}/action-files.sh"
+files=() && workflow_files files
+[[ -n ${files[0]+set} ]] || {
   echo "lint:actions: no workflows, skipped"
   exit 0
-fi
-rc=0
-src=$(mktemp -d)
-trap 'rc=$?; rm -rf "${src}"; [ -n "${org_done:-}" ] || [ "${rc}" -ne 0 ] || rc=1; exit "${rc}"' EXIT
-ln -s "${ORG_CANON_DIR}" "${src}/.org-canon"
-SHELLCHECK_OPTS="${SHELLCHECK_OPTS:-} --source-path=${src}" \
-  actionlint -color -ignore "specifying action \"\\$/" -ignore 'label "ubuntu-26\.04(-arm)?" is unknown' || {
-  org_finding "" "actionlint findings above — fixed by hand; fix:actions only re-pins uses: (pinact)"
-  exit 1
 }
-org_done=1
+# The two -ignore flags and the `.org-canon` link: mise/actions_lint.py.
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/actions_lint.py" "${files[@]}"
 '''
 
 [tasks."release:preview"]
@@ -5142,7 +5145,9 @@ dir = "{{cwd}}"
 # commit as well gives every commit its own verdict. Both lines are
 # required verbatim, and both are printed in the message.
 run = '''
-compgen -G ".github/workflows/*.y*ml" > /dev/null || {
+. "${ORG_BELT_DIR}/action-files.sh"
+files=() && workflow_files files
+[[ -n ${files[0]+set} ]] || {
   echo "lint:gate-stub: no workflows, skipped"
   exit 0
 }
@@ -5151,7 +5156,7 @@ canon_owner=$(org_identity owner)
 canon_repo=$(org_identity repo)
 # The three requirements and their messages: mise/gate_stub.py (#1911).
 "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/gate_stub.py" \
-  "${canon_owner}/${canon_repo}" .github/workflows/*.y*ml
+  "${canon_owner}/${canon_repo}" "${files[@]}"
 '''
 
 [tasks."fix:gate-stub"]
@@ -5165,7 +5170,9 @@ dir = "{{cwd}}"
 # in the callers the lint judges, leaves a conforming stub byte for byte,
 # and refuses by name a caller with no block rather than invent one.
 run = '''
-compgen -G ".github/workflows/*.y*ml" > /dev/null || {
+. "${ORG_BELT_DIR}/action-files.sh"
+files=() && workflow_files files
+[[ -n ${files[0]+set} ]] || {
   echo "fix:gate-stub: no workflows, skipped"
   exit 0
 }
@@ -5173,7 +5180,7 @@ compgen -G ".github/workflows/*.y*ml" > /dev/null || {
 canon_owner=$(org_identity owner)
 canon_repo=$(org_identity repo)
 canon="${canon_owner}/${canon_repo}"
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/gate_stub_fix.py" "${canon}" .github/workflows/*.y*ml
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/gate_stub_fix.py" "${canon}" "${files[@]}"
 '''
 
 [tasks."lint:belt-link"]
@@ -5227,14 +5234,16 @@ dir = "{{cwd}}"
 # whole file — a new job in it inherits the same standing. A cache is a
 # per-declaration build input, so its marker anchors per declaration.
 run = '''
-compgen -G ".github/workflows/*.y*ml" > /dev/null || {
+. "${ORG_BELT_DIR}/action-files.sh"
+files=() && workflow_files files
+[[ -n ${files[0]+set} ]] || {
   echo "lint:capability-boundary: no workflows, skipped"
   exit 0
 }
 # Only a real grant counts: a workflow that says "no id-token, ever" in
 # a comment is documenting the boundary, not breaching it. The logic is
 # mise/capability_boundary.py (#1911).
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/capability_boundary.py" .github/workflows/*.y*ml
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/capability_boundary.py" "${files[@]}"
 '''
 
 [tasks."lint:release-phases"]
@@ -5460,7 +5469,8 @@ dir = "{{cwd}}"
 # identity.sh fails closed on a missing field, so the helper is never
 # handed an empty signer. The logic is mise/signer_pin.py (#1911).
 run = '''
-files=() && org_tracked_read files ':!vendor/**' ".github/workflows/*.y*ml"
+. "${ORG_BELT_DIR}/action-files.sh"
+files=() && workflow_files files
 [[ -n ${files[0]+set} ]] || {
   echo "lint:signer-pin: no workflows, skipped"
   exit 0
@@ -5901,7 +5911,8 @@ dir = "{{cwd}}"
 # shortfall is red with the file named.
 # The counting is mise/installer_pinned.py (#1911).
 run = '''
-files=() && org_tracked_read files ':!vendor/**' ".github/workflows/*.y*ml"
+. "${ORG_BELT_DIR}/action-files.sh"
+files=() && workflow_files files
 [[ -n ${files[0]+set} ]] || {
   echo "lint:installer-pinned: no workflows, skipped"
   exit 0
@@ -5981,12 +5992,14 @@ dir = "{{cwd}}"
 # FILE, so one marker there legitimately covers every grant in it. A
 # cache is a per-declaration input, and a file grows more of them.
 run = '''
-compgen -G ".github/workflows/*.y*ml" > /dev/null || {
+. "${ORG_BELT_DIR}/action-files.sh"
+files=() && workflow_files files
+[[ -n ${files[0]+set} ]] || {
   echo "lint:cold-attested: no workflows, skipped"
   exit 0
 }
 # The marker rules above are mise/cold_attested.py's logic (#1911).
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/cold_attested.py" .github/workflows/*.y*ml
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/cold_attested.py" "${files[@]}"
 '''
 
 [tasks."lint:coverage-exclusions"]
@@ -6226,7 +6239,8 @@ if ! org_tracked_has fuzz/Cargo.lock; then
   org_finding "" "fuzz/Cargo.lock is not committed — an unlocked fuzz build is not deterministic"
   exit 1
 fi
-# The fuzz crate is its own workspace root BY DECLARATION (#1290). A root
+# The fuzz crate is its own workspace root BY DECLARATION, the belt's rule
+# (#1290; cargo-fuzz 0.13.2's init writes no such table, #2004). A root
 # manifest's `exclude = ["fuzz"]` shields it only while no other workspace
 # sits above the checkout; in a worktree nested inside the main checkout,
 # cargo's upward walk finds the main checkout's manifest, which does not
@@ -6242,7 +6256,7 @@ except tomllib.TOMLDecodeError:
 if [[ ${ws} == absent ]]; then
   org_finding "" "fuzz/Cargo.toml declares no [workspace] table — its resolution depends on where the checkout sits" \
     "a workspace above the checkout (a nested worktree) claims the crate; make it its own root" \
-    "with the empty table cargo itself recommends, in fuzz/Cargo.toml:" \
+    "the belt requires an empty [workspace] table in fuzz/Cargo.toml:" \
     "  [workspace]"
   exit 1
 fi
@@ -7487,7 +7501,8 @@ dir = "{{cwd}}"
 # The logic is mise/citation_check.py (#1911); the render it compares
 # against is mise/citation.sh, fix:citation's.
 run = '''
-files=() && org_tracked_read files ':!vendor/**' ".github/workflows/*.y*ml"
+. "${ORG_BELT_DIR}/action-files.sh"
+files=() && workflow_files files
 "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/citation_check.py" ${files[@]+"${files[@]}"}
 '''
 
@@ -7809,7 +7824,9 @@ dir = "{{cwd}}"
 # and writes the lock, which makes it a fixer's job, not a lint's. The
 # helper finds the config and its lock, or skips (#1911).
 run = '''
-org_tracked ':!vendor/**' ".github/workflows/*.yml" ".github/workflows/*.yaml" \
+. "${ORG_BELT_DIR}/action-files.sh"
+workflows=() && workflow_files workflows
+printf '%s\0' ${workflows[@]+"${workflows[@]}"} \
   | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/lock_platforms.py" \
     --defaults "${ORG_CANON_DIR}/.github/workflows/publish.yml"
 '''
@@ -8126,14 +8143,16 @@ dir = "{{cwd}}"
 # Scoped to workflow_call files: in an ordinary workflow the caller IS the
 # top level, so omitting permissions there is merely the usual default.
 run = '''
-compgen -G ".github/workflows/*.y*ml" > /dev/null || {
+. "${ORG_BELT_DIR}/action-files.sh"
+files=() && workflow_files files
+[[ -n ${files[0]+set} ]] || {
   echo "lint:nested-permissions: no workflows, skipped"
   exit 0
 }
 # Any file with a `uses:` job — reusable workflows AND caller stubs —
 # since the trap is the same in both; the logic is
 # mise/nested_permissions.py (#1911).
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/nested_permissions.py" .github/workflows/*.y*ml
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/nested_permissions.py" "${files[@]}"
 '''
 
 [tasks."lint:audit-scheduled"]
@@ -8183,10 +8202,8 @@ dir = "{{cwd}}"
 run = '''
 . "${ORG_BELT_DIR}/own-audits.sh"
 own=$(own_audit_tasks)
-flows=()
-if compgen -G ".github/workflows/*.y*ml" > /dev/null; then
-  flows=(.github/workflows/*.y*ml)
-fi
+. "${ORG_BELT_DIR}/action-files.sh"
+flows=() && workflow_files flows
 canon=""
 if [[ -n ${own} && -n ${flows[0]+set} ]]; then
   . "${ORG_BELT_DIR}/identity.sh"
@@ -8406,7 +8423,8 @@ dir = "{{cwd}}"
 # audit:action-pins does.
 run = '''
 set -euo pipefail
-files=() && org_tracked_read files ':!vendor/**' ".github/workflows/*.y*ml"
+. "${ORG_BELT_DIR}/action-files.sh"
+files=() && workflow_files files
 [[ -n ${files[0]+set} ]] || {
   echo "lint:caller-permissions: no workflows, skipped"
   exit 0
@@ -8424,7 +8442,8 @@ dir = "{{cwd}}"
 # alone, never a reusable workflow. mise/template_pins.py has the rules
 # and their history (#28, #233, #1887); the canon is the identity's.
 run = '''
-files=() && org_tracked_read files ':!vendor/**' "workflow-templates/*.y*ml"
+. "${ORG_BELT_DIR}/action-files.sh"
+files=() && workflow_template_files files
 [[ -n ${files[0]+set} ]] || {
   echo "lint:template-pins: no workflow-templates/, skipped"
   exit 0
@@ -8454,8 +8473,9 @@ dir = "{{cwd}}"
 # matrix laundering hole: a floating value reaching runs-on through a
 # matrix include or a bash case arm is the same float with indirection.
 run = '''
-workflows=() && org_tracked_read workflows ':!vendor/**' ".github/workflows/*.yml" ".github/workflows/*.yaml"
-templates=() && org_tracked_read templates ':!vendor/**' "workflow-templates/*.yml" "workflow-templates/*.yaml"
+. "${ORG_BELT_DIR}/action-files.sh"
+workflows=() && workflow_files workflows
+templates=() && workflow_template_files templates
 [[ -n ${workflows[0]+set} || -n ${templates[0]+set} ]] || {
   echo "lint:runner-pin: no workflows, skipped"
   exit 0
@@ -8494,7 +8514,8 @@ canon_repo=$(org_identity repo)
 yml=() && org_tracked_read yml ':!vendor/**' "*.yml" "*.yaml"
 hooks=() && org_tracked_read hooks ':!vendor/**' "lefthook.yml" "*/lefthook.yml"
 presets=() && org_tracked_read presets ':!vendor/**' "renovate.json" "*/renovate.json" ".github/renovate.json"
-workflows=() && org_tracked_read workflows ':!vendor/**' ".github/workflows/*.yml" ".github/workflows/*.yaml"
+. "${ORG_BELT_DIR}/action-files.sh"
+workflows=() && workflow_files workflows
 # The four surfaces, the skip and the message: mise/canon_pins.py (#1911).
 "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/canon_pins.py" "${canon_owner}/${canon_repo}" \
   ${yml[@]+"${yml[@]}"} -- ${hooks[@]+"${hooks[@]}"} -- ${presets[@]+"${presets[@]}"} -- \
@@ -8625,7 +8646,8 @@ listed=$([[ -z ${tracked[0]+set} ]] || printf '%s\0' "${tracked[@]}" | xargs -0 
 scripts=() && while IFS= read -r f; do [[ -z ${f} ]] || scripts+=("${f}"); done <<< "${listed}"
 configs=() && org_tracked_read configs ':!vendor/**' "*mise.toml" "*mise.*.toml" \
   "*mise/config.toml" "*mise/config.*.toml"
-flows=() && org_tracked_read flows ':!vendor/**' ".github/workflows/*.y*ml"
+. "${ORG_BELT_DIR}/action-files.sh"
+flows=() && workflow_files flows
 [[ -n ${flows[0]+set} || -n ${scripts[0]+set} || -n ${configs[0]+set} ]] || {
   echo "lint:bash-portability: nothing to check, skipped"
   exit 0

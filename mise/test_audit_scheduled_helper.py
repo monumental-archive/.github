@@ -7,7 +7,7 @@ helper, a row per branch, each asserting its message: zero belt audit
 tasks, a name that is a prefix of another's, no config and no own task,
 own tasks with no workflow (alone and beside a red belt half), own tasks
 each run by a workflow, collected by the canon itself (`./`), a
-scheduler outside the files named (through the body), own tasks with no
+scheduler in a file the selection does not name (through the body), own tasks with no
 canon, a file that is not UTF-8, and no `--own`.
 
 stdlib `unittest`, run through the gate as `mise run test`.
@@ -227,12 +227,13 @@ class Helper(unittest.TestCase):
         same(self, done.stdout.splitlines(), [collected])
 
     def test_a_file_outside_the_workflows_schedules_nothing(self) -> None:
-        """Through the body: a subdirectory's file is not a workflow GitHub runs."""
+        """Through the body: a file the selection does not name schedules nothing."""
         self.config('[tasks."audit:fuzz"]\nrun = "x"\n')
         self.plant("top.yml", "run: true\n")
-        self.plant("sub/x.yml", "run: mise run audit:fuzz\n")
+        self.plant("notes.md", "run: mise run audit:fuzz\n")
         stubs = {"own-audits.sh": OWN_AUDITS_STUB}
         belt = hermetic.belt(self.tmp / "belt", stubs=stubs)
+        hermetic.track(self.tree)
         as_mise = hermetic.task_run(TASK, body())
         env = self.env | {"ORG_BELT_DIR": str(belt), "ORG_PYTHON": sys.executable}
         done = subprocess.run(
