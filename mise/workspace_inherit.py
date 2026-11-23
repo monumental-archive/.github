@@ -23,12 +23,20 @@ The rule is minimal and fail-closed: a key NO member takes is red. Not
 only some members want, and release-lab keeps `description` per crate on
 purpose. A key nobody takes is dead in a way a partly-taken key is not.
 
-Reads `cargo metadata --no-deps --locked` on stdin, the belt convention:
-the task runs the tool and the helper consumes, so this script starts no
-processes.
+Runs once per workspace in the tree (#2004): the task reads the roots
+from `org_rust_workspace_roots` (mise/rust-workspaces.sh) and passes
+them here, and for each root `R` this runs `cargo fetch --locked
+--manifest-path R` and `cargo metadata --no-deps --format-version 1
+--locked --manifest-path R`, then reads the declared keys from the root
+manifest cargo names for `R`. Every root is judged even when an earlier
+one is red, and each line names its root. A cargo-fuzz crate is its own
+workspace, so a root workspace alone left its `[workspace.package]`
+unread.
 """
 
 import os
+import shutil
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -44,7 +52,8 @@ from decoded import (
     load_json,
     load_toml,
 )
-from typed_std import stdin_text
+
+CARGO = shutil.which("cargo") or "cargo"
 
 # The [workspace.package] keys cargo reports per package, and the field
 # each is reported under.
@@ -295,27 +304,30 @@ def metadata(document: object) -> tuple[Path, list[Member]]:
     return root, members
 
 
-def main() -> int:
-    """Run the check over one cargo metadata document on stdin.
+def check(text: str, where: str) -> int:
+    """Run the check over one workspace's cargo metadata document.
+
+    `where` is the root manifest the document is cargo's account of,
+    as the task named it; every line this prints names it.
 
     Returns:
         0 when every declared key reaches a member, 1 when one does not.
 
     """
     try:
-        root, members = metadata(load_json(stdin_text()))
+        root, members = metadata(load_json(text))
     except UndecodableError as exc:
-        writer.finding("", f"cargo metadata is unreadable ({exc})")
+        writer.finding(where, f"cargo metadata is unreadable ({exc})")
         return 1
 
     table = workspace_package(root)
     if not table:
-        print("lint:workspace-inherit: no [workspace.package] table, skipped")
+        print(f"lint:workspace-inherit: {where}: no [workspace.package] table, skipped")
         return 0
 
     if not members:
         writer.finding(
-            "",
+            where,
             "[workspace.package] is declared and cargo "
             "metadata names no workspace member to inherit it",
         )
@@ -324,24 +336,67 @@ def main() -> int:
     report: list[str] = []
     findings = judge(table, members, root, report)
     for line in report:
-        print(f"lint:workspace-inherit: unjudged — {line}", file=sys.stderr)
+        print(f"lint:workspace-inherit: {where}: unjudged — {line}", file=sys.stderr)
 
     counted = len(table)
     noun = "key" if counted == 1 else "keys"
     if not findings:
         print(
-            f"lint:workspace-inherit: {counted} [workspace.package] {noun}, "
+            f"lint:workspace-inherit: {where}: {counted} [workspace.package] {noun}, "
             f"every one inherited by a member of {len(members)}",
         )
         return 0
 
     writer.finding(
-        "",
+        where,
         f"{len(findings)} of {counted} [workspace.package] {noun} reach no member",
         explain(findings, root),
     )
     return 1
 
 
+def account(manifest: str) -> str | None:
+    """Fetch one workspace's dependencies and read cargo's account of it.
+
+    Returns:
+        The `cargo metadata` document; None when cargo refused, after
+        the finding that carries cargo's text.
+
+    """
+    path = ["--manifest-path", manifest]
+    out = ""
+    for command in (
+        ["fetch", "--locked"],
+        ["metadata", "--no-deps", "--format-version", "1", "--locked"],
+    ):
+        done = subprocess.run(
+            [CARGO, *command, *path], capture_output=True, check=False, text=True
+        )
+        if done.returncode != 0:
+            said = done.stderr.strip().splitlines()
+            writer.finding(manifest, f"cargo {command[0]} failed", said)
+            return None
+        out = done.stdout
+    return out
+
+
+def main(roots: list[str]) -> int:
+    """Run the check once per workspace root, past a red one.
+
+    Returns:
+        0 when every root is green, 1 when any is red.
+
+    """
+    if not roots:
+        print("usage: workspace_inherit.py <root Cargo.toml>...", file=sys.stderr)
+        return 2
+    status = 0
+    for manifest in roots:
+        text = account(manifest)
+        verdict = 1 if text is None else check(text, manifest)
+        status = max(status, verdict)
+    return status
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

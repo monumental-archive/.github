@@ -16,8 +16,9 @@ holds every gate caller to both lines.
 The body under test is the task's own `run` string, read out of
 mise/config.toml with decoded.load_toml and run by bash in a planted
 tree — not a copy of it — so a change to the lint has to face these
-rows. The Tera raw markers are dropped the way mise's render drops
-them.
+rows. The lint's logic is mise/gate_stub.py (#1911), whose other
+branches mise/test_gate_stub_lint.py holds. A Tera raw marker, should
+a body carry one, is dropped the way mise's render drops it.
 
 Each red row is red-when-planted and asserts the message, not just the
 exit status: a planted row scored on exit alone can pass for the wrong

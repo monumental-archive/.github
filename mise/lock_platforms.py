@@ -12,8 +12,12 @@ the first thing ever to ask for `macos-x64`, after the tag was minted
 
 Usage:
 
-    lock_platforms.py --defaults <canon publish.yml> --config <mise config>
-                      --lock <mise.lock> < workflow-paths
+    lock_platforms.py --defaults <canon publish.yml> [--config <mise config>
+                      --lock <mise.lock>] < workflow-paths
+
+With no `--config`, the config is the first of mise/config.toml,
+mise.toml and .mise.toml present in the working directory, and the lock
+the mise.lock beside it; neither present is a skip, said so (#1911).
 
 The workflows, NUL-separated on stdin (`org_tracked`, #1986), are the
 repository's tracked ones; the jobs among them that call the canon's publish.yml are the
@@ -82,8 +86,12 @@ class Args(argparse.Namespace):
     """The parsed command line, typed."""
 
     defaults: pathlib.Path
-    config: pathlib.Path
-    lock: pathlib.Path
+    config: pathlib.Path | None
+    lock: pathlib.Path | None
+
+
+# Where a mise config may sit, in the order mise's own task looked.
+CONFIGS = ("mise/config.toml", "mise.toml", ".mise.toml")
 
 
 class UnreadableError(ValueError):
@@ -392,6 +400,59 @@ def read_documents(
         return None
 
 
+def located() -> tuple[pathlib.Path, pathlib.Path] | None:
+    """Find the tree's mise config and the lock beside it.
+
+    Returns:
+        The config and its lock, or None having said on stdout which is
+        absent: a skip.
+
+    """
+    config = next((c for c in CONFIGS if pathlib.Path(c).is_file()), None)
+    if config is None:
+        print(f"{NAME}: no mise config, skipped")
+        return None
+    lock = pathlib.Path(config).parent / "mise.lock"
+    if not lock.is_file():
+        print(f"{NAME}: no {lock}, skipped")
+        return None
+    return pathlib.Path(config), lock
+
+
+def covered(
+    config: pathlib.Path, lock: pathlib.Path, platforms: dict[str, list[str]]
+) -> int:
+    """Hold the lock's configured entries to the declared platforms.
+
+    Returns:
+        0 when every entry covers them, 1 when one does not, 2 when the
+        config or the lock cannot be read.
+
+    """
+    # Only what the leg installs: a lock entry for a tool the config no
+    # longer names is stale and never installed — edtf v1.3.0's lock
+    # carried nine such entries without macos-x64, and the leg named only
+    # the two configured ones.
+    documents = read_documents(config, lock)
+    if documents is None:
+        return 2
+    tools, locked = documents
+    entries = [e for e in locked if e[0] in tools]
+    missing: dict[str, list[str]] = {}
+    for tool, version, keys in entries:
+        for key in sorted(platforms):
+            if key not in keys and installs_on(tools[tool], version, key):
+                missing.setdefault(key, []).append(f"{tool}@{version}")
+    if missing:
+        report(lock, platforms, missing)
+        return 1
+    print(
+        f"{NAME}: {len(entries)} configured entries with platform tables"
+        f" in {lock} cover {','.join(sorted(platforms))}"
+    )
+    return 0
+
+
 def main(argv: list[str]) -> int:
     """Run the check; see the module docstring for the exit contract.
 
@@ -401,10 +462,18 @@ def main(argv: list[str]) -> int:
     """
     parser = argparse.ArgumentParser()
     parser.add_argument("--defaults", required=True, type=pathlib.Path)
-    parser.add_argument("--config", required=True, type=pathlib.Path)
-    parser.add_argument("--lock", required=True, type=pathlib.Path)
+    parser.add_argument("--config", type=pathlib.Path)
+    parser.add_argument("--lock", type=pathlib.Path)
     args = parser.parse_args(argv, namespace=Args())
+    # The listing is read whole first, so the writer is never cut off by
+    # a skip below.
     workflows = [pathlib.Path(path) for path in stdin_paths()]
+    found = located() if args.config is None or args.lock is None else None
+    if found is not None:
+        args.config, args.lock = found
+    if args.config is None or args.lock is None:
+        return 0
+    config, lock = args.config, args.lock
     try:
         platforms, stubs = declared(workflows, canon_defaults(args.defaults))
     except UnreadableError as err:
@@ -424,28 +493,7 @@ def main(argv: list[str]) -> int:
         read = ", ".join(sorted(set(stubs)))
         print(f"{NAME}: {read} declares no binary class, skipped")
         return 0
-    # Only what the leg installs: a lock entry for a tool the config no
-    # longer names is stale and never installed — edtf v1.3.0's lock
-    # carried nine such entries without macos-x64, and the leg named only
-    # the two configured ones.
-    documents = read_documents(args.config, args.lock)
-    if documents is None:
-        return 2
-    tools, locked = documents
-    entries = [e for e in locked if e[0] in tools]
-    missing: dict[str, list[str]] = {}
-    for tool, version, keys in entries:
-        for key in sorted(platforms):
-            if key not in keys and installs_on(tools[tool], version, key):
-                missing.setdefault(key, []).append(f"{tool}@{version}")
-    if missing:
-        report(args.lock, platforms, missing)
-        return 1
-    print(
-        f"{NAME}: {len(entries)} configured entries with platform tables"
-        f" in {args.lock} cover {','.join(sorted(platforms))}"
-    )
-    return 0
+    return covered(config, lock, platforms)
 
 
 if __name__ == "__main__":

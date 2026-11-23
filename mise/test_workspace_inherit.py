@@ -26,8 +26,10 @@ two `publish` rows are why publish gets no verdict at all.
 Run through the gate as `mise run test`, which `ci` collects.
 """
 
+import functools
 import io
 import json
+import subprocess
 import sys
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -42,6 +44,8 @@ import workspace_inherit as wi
 
 if TYPE_CHECKING:
     from types import TracebackType
+
+BELT = Path(__file__).resolve().parent
 
 # The task that runs the helper, whose name its findings carry (#1934).
 TASK = "lint:workspace-inherit"
@@ -331,12 +335,8 @@ class TestMain(unittest.TestCase):
                 "packages": packages,
             }
             out, err = io.StringIO(), io.StringIO()
-            with (
-                mock.patch.object(sys, "stdin", io.StringIO(json.dumps(document))),
-                redirect_stdout(out),
-                redirect_stderr(err),
-            ):
-                status = wi.main()
+            with redirect_stdout(out), redirect_stderr(err):
+                status = wi.check(json.dumps(document), "Cargo.toml")
             return status, out.getvalue(), err.getvalue()
 
     def test_no_workspace_package_table_skips_clean(self) -> None:
@@ -346,7 +346,9 @@ class TestMain(unittest.TestCase):
             [raw_member("a")],
         )
         self.assertEqual(status, 0)
-        self.assertIn("no [workspace.package] table, skipped", out)
+        self.assertIn(
+            f"{TASK}: Cargo.toml: no [workspace.package] table, skipped\n", out
+        )
 
     def test_an_inherited_key_passes_and_says_what_it_measured(self) -> None:
         """The green path counts the keys and the members."""
@@ -355,7 +357,7 @@ class TestMain(unittest.TestCase):
             [raw_member("a", rust_version="1.82")],
         )
         self.assertEqual(status, 0)
-        self.assertIn("1 [workspace.package] key", out)
+        self.assertIn(f"{TASK}: Cargo.toml: 1 [workspace.package] key, every", out)
 
     def test_an_inert_key_fails_with_the_one_line_remedy(self) -> None:
         """The red path names the key, the members and the fix."""
@@ -380,7 +382,7 @@ class TestMain(unittest.TestCase):
 
     def test_metadata_of_the_wrong_shape_stops_the_task_by_where(self) -> None:
         """A wrong-shaped account is refused naming where, never a crash."""
-        said = f"{TASK}: cargo metadata is unreadable"
+        said = f"{TASK}: Cargo.toml: cargo metadata is unreadable"
         shapes: tuple[tuple[object, str], ...] = (
             ([], "the document is not an object"),
             ({"workspace_root": 1}, "workspace_root is not a string"),
@@ -403,14 +405,9 @@ class TestMain(unittest.TestCase):
             ),
         )
         for document, where in shapes:
-            stdin = io.StringIO(json.dumps(document))
             err = io.StringIO()
-            with (
-                self.subTest(where=where),
-                mock.patch.object(sys, "stdin", stdin),
-                redirect_stderr(err),
-            ):
-                self.assertEqual(1, wi.main())
+            with self.subTest(where=where), redirect_stderr(err):
+                self.assertEqual(1, wi.check(json.dumps(document), "Cargo.toml"))
             self.assertEqual(f"{said} ({where})\n", err.getvalue())
 
     def test_a_manifest_of_the_wrong_shape_stops_the_task(self) -> None:
@@ -427,11 +424,211 @@ class TestMain(unittest.TestCase):
 
     def test_unreadable_metadata_stops_the_task(self) -> None:
         """A broken account is refused, never read as an empty one."""
-        with (
-            mock.patch.object(sys, "stdin", io.StringIO("not json")),
-            redirect_stderr(io.StringIO()),
-        ):
-            self.assertEqual(1, wi.main())
+        with redirect_stderr(io.StringIO()):
+            self.assertEqual(1, wi.check("not json", "Cargo.toml"))
+
+
+# cargo for the two-root rows (#2004): locate-project names the fuzz
+# crate its own root and every other manifest the top's, unless
+# STUB_LOCATE_FAILS names the manifest; fetch passes
+# unless STUB_FETCH_FAILS names the manifest; metadata prints the
+# planted account of the root it is asked about.
+CARGO = """\
+#!/usr/bin/env bash
+case "$1" in
+  locate-project)
+    if [[ $4 == "${STUB_LOCATE_FAILS:-}" ]]; then
+      echo "error: planted: failed to locate $4" >&2
+      exit 101
+    fi
+    case "$4" in
+      fuzz/*) echo "${PWD}/fuzz/Cargo.toml" ;;
+      *) echo "${PWD}/Cargo.toml" ;;
+    esac
+    ;;
+  fetch)
+    if [[ $4 == "${STUB_FETCH_FAILS:-}" ]]; then
+      echo "error: planted: failed to fetch for $4" >&2
+      exit 101
+    fi
+    ;;
+  metadata) cat "${STUB_ACCOUNTS}/${7//\\//_}.json" ;;
+  *) exit 1 ;;
+esac
+"""
+
+# Two workspaces: the top one's key is taken; the fuzz crate's own
+# workspace declares `edition`, and its one member takes none.
+TWO_ROOTS = {
+    "Cargo.toml": '[workspace]\nmembers = ["crates/a"]\n\n'
+    '[workspace.package]\nrust-version = "1.82"\n',
+    "crates/a/Cargo.toml": "[package]\nname = 'a'\n",
+    "fuzz/Cargo.toml": "[package]\nname = 'a-fuzz'\n\n"
+    '[workspace]\n\n[workspace.package]\nedition = "2024"\n',
+}
+INERT_IN_FUZZ = (
+    f"{TASK}: fuzz/Cargo.toml: 1 of 1 [workspace.package] key reach no member\n"
+    "  \n"
+    "  edition = '2024' is declared and inherited by no member\n"
+    "        could take it: a-fuzz\n"
+    "        add `edition.workspace = true`\n"
+)
+TOP_GREEN = (
+    f"{TASK}: Cargo.toml: 1 [workspace.package] key, every one inherited"
+    " by a member of 1\n"
+)
+
+
+def account_of(root: Path, crate: str, **fields: object) -> dict[str, object]:
+    """Build cargo's account of a one-member workspace at `root`.
+
+    Returns:
+        The metadata document.
+
+    """
+    package_id = f"path+file://{root}#{crate}@0.1.0"
+    return {
+        "workspace_root": str(root),
+        "workspace_members": [package_id],
+        "packages": [
+            {
+                "name": crate,
+                "id": package_id,
+                "manifest_path": str(root / "Cargo.toml"),
+                **fields,
+            },
+        ],
+    }
+
+
+class TwoRoots:
+    """A planted tree with two workspaces, cargo stubbed."""
+
+    def __init__(
+        self, case: unittest.TestCase, fetch_fails: str = "", locate_fails: str = ""
+    ) -> None:
+        """Plant the tree, the stub and each root's account."""
+        scratch = TemporaryDirectory()
+        case.addCleanup(scratch.cleanup)
+        base = Path(scratch.name).resolve()
+        self.tree = base / "repo"
+        accounts = base / "accounts"
+        accounts.mkdir()
+        bindir = base / "bin"
+        bindir.mkdir()
+        self.cargo = bindir / "cargo"
+        self.cargo.write_text(CARGO, encoding="utf-8")
+        self.cargo.chmod(0o755)
+        for name, text in TWO_ROOTS.items():
+            (self.tree / name).parent.mkdir(parents=True, exist_ok=True)
+            (self.tree / name).write_text(text, encoding="utf-8")
+        planted = {
+            "Cargo.toml": account_of(self.tree, "a", rust_version="1.82"),
+            "fuzz_Cargo.toml": account_of(self.tree / "fuzz", "a-fuzz", edition="2021"),
+        }
+        for name, document in planted.items():
+            (accounts / f"{name}.json").write_text(json.dumps(document), "utf-8")
+        self.env = hermetic.env(
+            base / "home",
+            MISE_TASK_NAME=TASK,
+            ORG_FINDINGS="",
+            STUB_ACCOUNTS=str(accounts),
+            STUB_FETCH_FAILS=fetch_fails,
+            STUB_LOCATE_FAILS=locate_fails,
+        )
+        self.env["PATH"] = f"{bindir}:{self.env.get('PATH', '')}"
+
+    def main(self) -> hermetic.Called:
+        """Run the helper over both roots, in this process.
+
+        Returns:
+            The status and both streams.
+
+        """
+        roots = ["Cargo.toml", "fuzz/Cargo.toml"]
+        with mock.patch.object(wi, "CARGO", str(self.cargo)):
+            return hermetic.call_main(
+                functools.partial(wi.main, roots), env=self.env, cwd=self.tree
+            )
+
+    def task(self) -> subprocess.CompletedProcess[str]:
+        """Run the task's own body in the tree, as mise does.
+
+        Returns:
+            The finished run, both streams captured.
+
+        """
+        git = hermetic.tool("git")
+        subprocess.run([git, "init", "-q"], cwd=self.tree, env=self.env, check=True)
+        subprocess.run(
+            [git, "add", "--", *TWO_ROOTS], cwd=self.tree, env=self.env, check=True
+        )
+        config = decoded.load_toml((BELT / "config.toml").read_bytes())
+        tasks = decoded.as_object(config["tasks"], "the belt's [tasks]")
+        entry = decoded.as_object(tasks[TASK], TASK)
+        as_mise = hermetic.task_run(TASK, decoded.as_str(entry["run"], "run"))
+        return subprocess.run(
+            as_mise.argv,
+            cwd=self.tree,
+            env=self.env
+            | as_mise.env
+            | {"ORG_BELT_DIR": str(BELT), "ORG_PYTHON": sys.executable},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+
+class TestEveryRoot(unittest.TestCase):
+    """Each workspace in the tree is judged, past a red one (#2004)."""
+
+    def test_a_key_no_member_of_the_second_root_takes_is_red(self) -> None:
+        """fuzz/Cargo.toml's `edition`: nonzero, naming the key and the root."""
+        planted = TwoRoots(self)
+        done = planted.main()
+        self.assertEqual((1, TOP_GREEN), (done.returncode, done.stdout))
+        self.assertTrue(done.stderr.startswith(INERT_IN_FUZZ), done.stderr)
+        declared = f"  Declared in {planted.tree}/fuzz/Cargo.toml under"
+        self.assertIn(declared, done.stderr)
+
+    def test_a_failing_cargo_is_red_with_its_text_and_the_rest_judged(self) -> None:
+        """Fetch refused for the top root: cargo's words; fuzz still judged."""
+        done = TwoRoots(self, fetch_fails="Cargo.toml").main()
+        self.assertEqual((1, ""), (done.returncode, done.stdout))
+        self.assertIn(
+            f"{TASK}: Cargo.toml: cargo fetch failed\n"
+            "  error: planted: failed to fetch for Cargo.toml\n",
+            done.stderr,
+        )
+        self.assertIn(INERT_IN_FUZZ, done.stderr)
+
+    def test_no_root_is_a_usage_error(self) -> None:
+        """The task always passes one; none at all is refused, exit 2."""
+        none: list[str] = []
+        done = hermetic.call_main(functools.partial(wi.main, none))
+        self.assertEqual(
+            (2, "", "usage: workspace_inherit.py <root Cargo.toml>...\n"),
+            (done.returncode, done.stdout, done.stderr),
+        )
+
+    def test_the_task_reads_the_roots_and_judges_both(self) -> None:
+        """The body, end to end: the derivation's roots, the fuzz one red."""
+        done = TwoRoots(self).task()
+        self.assertEqual(1, done.returncode, done.stdout + done.stderr)
+        self.assertEqual(TOP_GREEN, done.stdout)
+        self.assertIn(INERT_IN_FUZZ, done.stderr)
+
+    def test_the_task_stops_when_the_derivation_fails(self) -> None:
+        """locate-project refused: its finding, exit 1, the helper never run."""
+        done = TwoRoots(self, locate_fails="fuzz/Cargo.toml").task()
+        self.assertEqual((1, ""), (done.returncode, done.stdout))
+        self.assertIn(
+            f"{TASK}: cargo locate-project failed for fuzz/Cargo.toml\n"
+            "  error: planted: failed to locate fuzz/Cargo.toml\n",
+            done.stderr,
+        )
+        self.assertNotIn("usage:", done.stderr)
+        self.assertNotIn("[workspace.package]", done.stderr)
 
 
 if __name__ == "__main__":
