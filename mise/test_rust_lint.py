@@ -39,6 +39,7 @@ from unittest import mock
 import decoded
 import hermetic
 import rust_lint
+import rust_workspaces
 
 BELT = Path(__file__).resolve().parent
 METADATA = BELT.parent / "release" / "testdata" / "edtf-cargo-metadata.json"
@@ -632,7 +633,12 @@ class Planted(unittest.TestCase):
             Its status and what it wrote.
 
         """
-        with mock.patch.object(rust_lint, "BELT", self.belt):
+        # The derivation resolves cargo when it is imported; here, the
+        # stub on the row's PATH is the cargo it asks.
+        with (
+            mock.patch.object(rust_lint, "BELT", self.belt),
+            mock.patch.object(rust_workspaces, "CARGO", str(self.bins / "cargo")),
+        ):
             return hermetic.call_main(
                 lambda: rust_lint.main(list(argv)),
                 env=self.env | stub,

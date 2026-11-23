@@ -709,7 +709,7 @@ def workspace_roots() -> list[str] | None:
     """
     try:
         return rust_workspaces.roots()
-    except rust_workspaces.WorkspaceError:
+    except rust_workspaces.UnresolvedError:
         return None
 
 
