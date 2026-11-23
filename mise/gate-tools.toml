@@ -248,6 +248,7 @@ when = []
 tasks = [
   "break:check",
   "coverage:check",
+  "lint:audit-scheduled",
   "lint:badges",
   "lint:bash-portability",
   "lint:belt-shell",
@@ -272,6 +273,7 @@ tasks = [
   "lint:python-module-names",
   "lint:python-target",
   "lint:python-types",
+  "lint:runner-pin",
   "lint:rust",
   "lint:rust-properties",
   "lint:scaffold-assembly",

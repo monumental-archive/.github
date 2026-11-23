@@ -71,14 +71,11 @@ mise/config.toml	lint:bestpractices	54	# #1544 unassigned
 mise/config.toml	lint:badges	28	# #1544 unassigned
 mise/config.toml	lint:release-stub	33	# #1544 unassigned
 mise/config.toml	lint:toolbelt-lock	35	# #1544 unassigned
-mise/config.toml	lint:lock-platforms	21	# #1544 unassigned
 mise/config.toml	audit:lock-arch	63	# #1544 unassigned
 mise/config.toml	audit:lock-idempotent	100	# #1544 unassigned
-mise/config.toml	lint:audit-scheduled	68	# #1544 unassigned
 mise/config.toml	lint:canon-policy	19	# #1544 unassigned
 mise/config.toml	lint:policy-load	45	# #1544 unassigned
 mise/config.toml	lint:caller-permissions	18	# #1544 unassigned
-mise/config.toml	lint:runner-pin	28	# #1544 unassigned
 mise/config.toml	lint:canon-pins	50	# #1544 unassigned
 mise/config.toml	lint:hook-jobs	18	# #1544 unassigned
 mise/config.toml	lint:release-planned	35	# #1544 unassigned

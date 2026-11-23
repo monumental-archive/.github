@@ -8222,29 +8222,12 @@ dir = "{{cwd}}"
 # lets them install; a tool with no platform tables at all (cargo:,
 # rust) is outside by construction. Offline and deterministic, so in ci.
 # The remedy is printed, never run: resolving a platform is network-bound
-# and writes the lock, which makes it a fixer's job, not a lint's.
+# and writes the lock, which makes it a fixer's job, not a lint's. The
+# helper finds the config and its lock, or skips (#1911).
 run = '''
-cfg=""
-for c in mise/config.toml mise.toml .mise.toml; do
-  org_tracked_has "${c}" && {
-    cfg="${c}"
-    break
-  }
-done
-[[ -n ${cfg} ]] || {
-  echo "lint:lock-platforms: no mise config, skipped"
-  exit 0
-}
-lock="mise.lock"
-[[ ${cfg} == */* ]] && lock="${cfg%/*}/mise.lock"
-org_tracked_has "${lock}" || {
-  echo "lint:lock-platforms: no ${lock}, skipped"
-  exit 0
-}
 org_tracked ':!vendor/**' ".github/workflows/*.yml" ".github/workflows/*.yaml" \
   | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/lock_platforms.py" \
-    --defaults "${ORG_CANON_DIR}/.github/workflows/publish.yml" \
-    --config "${cfg}" --lock "${lock}"
+    --defaults "${ORG_CANON_DIR}/.github/workflows/publish.yml"
 '''
 
 [tasks."audit:lock-arch"]
@@ -8578,8 +8561,9 @@ dir = "{{cwd}}"
 # Both `audit:release-tags` and `audit:spec-drift` shipped as tasks,
 # were cited in prose as enforcing, and NO workflow ran either (#354,
 # fixed #356). This is the join: red on any audit:* task with no
-# `mise run audit:<name>` occurrence anywhere in .github/workflows/.
-# Anywhere, so the schedulers are whichever files run one: the canon's
+# `mise run audit:<name>` occurrence in any workflow file
+# (.github/workflows/*.y*ml, the only files GitHub runs).
+# Any, so the schedulers are whichever files run one: the canon's
 # org-side subject workflows (slsa.yml, org-settings.yml,
 # pins-and-belt.yml, badges.yml; #1884), publish.yml, the repo-*.yml subject workflows (#1858), and
 # repo-mutants.yml for audit:mutants, which runs apart so a survivor
@@ -8613,76 +8597,22 @@ dir = "{{cwd}}"
 # ONLY collecting workflow (#1858): a caller of any other subject
 # workflow runs the belt's legs and none of the repository's own.
 run = '''
-status=0
 . "${ORG_BELT_DIR}/own-audits.sh"
-if org_tracked_has mise/config.toml; then
-  bad=""
-  count=0
-  audits=$(grep -oE '^\[tasks\."audit:[a-z-]+"\]' mise/config.toml \
-    | sed 's/^\[tasks\."audit:\(.*\)"\]$/\1/')
-  while IFS= read -r t; do
-    [[ -n ${t} ]] || continue
-    count=$((count + 1))
-    grep -rEq "mise run audit:${t}([^a-z-]|$)" .github/workflows/ \
-      || bad="${bad} audit:${t}"
-  done <<< "${audits}"
-  if [[ ${count} -eq 0 ]]; then
-    org_finding "" "zero belt audit tasks enumerated — the grep is broken"
-    status=1
-  elif [[ -n ${bad} ]]; then
-    org_finding "" "belt audit task(s) no workflow ever runs:${bad}" \
-      "schedule each in .github/workflows/ (slsa.yml or a sibling, publish.yml, a" \
-      "repo-*.yml subject workflow or repo-mutants.yml) or delete the task — a check" \
-      "nobody runs is a claim, not a check (#358 seam 1)."
-    status=1
-  else
-    echo "lint:audit-scheduled: ${count} belt audit task(s), every one scheduled"
-  fi
-fi
-
 own=$(own_audit_tasks)
-if [[ -z ${own} ]]; then
-  echo "lint:audit-scheduled: this repository defines no audit:* of its own"
-  exit "${status}"
+flows=()
+if compgen -G ".github/workflows/*.y*ml" > /dev/null; then
+  flows=(.github/workflows/*.y*ml)
 fi
-if ! compgen -G ".github/workflows/*.y*ml" > /dev/null; then
-  # shellcheck disable=SC2001  # an anchored per-line prefix; ${x//from/to} has no line anchor
-  IFS=$'\n' read -r -d '' -a detail < <(sed 's/^/  /' <<< "${own}") || true
-  org_finding "" "repo-defined audit task(s) and NO workflows at all:" ${detail[@]+"${detail[@]}"} \
-    "wire the own-audits stub (workflow-templates/own-audits.yml) —" \
-    "it calls repo-own-audits.yml, whose one leg runs every audit:*" \
-    "this repository defines (#704, #1858)."
-  exit 1
+canon=""
+if [[ -n ${own} && -n ${flows[0]+set} ]]; then
+  . "${ORG_BELT_DIR}/identity.sh"
+  owner=$(org_identity owner)
+  repo=$(org_identity repo)
+  canon="${owner}/${repo}"
 fi
-. "${ORG_BELT_DIR}/identity.sh"
-canon_owner=$(org_identity owner)
-canon_repo=$(org_identity repo)
-canon="${canon_owner}/${canon_repo}"
-canon_re="${canon//./\\.}"
-collected=0
-grep -rEq "uses:[[:space:]]*(${canon_re}/|\./)\.github/workflows/repo-own-audits\.ya?ml" \
-  .github/workflows/ && collected=1
-missing=""
-own_count=0
-while IFS= read -r t; do
-  [[ -n ${t} ]] || continue
-  own_count=$((own_count + 1))
-  [[ ${collected} -eq 1 ]] && continue
-  grep -rEq "mise run ${t}([^a-z-]|$)" .github/workflows/ || missing="${missing} ${t}"
-done <<< "${own}"
-if [[ -n ${missing} ]]; then
-  org_finding "" "repo-defined audit task(s) no workflow runs:${missing}" \
-    "wire the own-audits stub (workflow-templates/own-audits.yml), which" \
-    "calls repo-own-audits.yml and runs every audit:* this repository defines," \
-    "or run each from a workflow here — or delete the task. A check" \
-    "nobody runs is a claim, not a check (#358 seam 1, #704)."
-  status=1
-elif [[ ${collected} -eq 1 ]]; then
-  echo "lint:audit-scheduled: ${own_count} repo-defined audit task(s), collected by repo-own-audits.yml"
-else
-  echo "lint:audit-scheduled: ${own_count} repo-defined audit task(s), each run by a workflow here"
-fi
-exit "${status}"
+# Both halves and their messages: mise/audit_scheduled.py (#1911).
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/audit_scheduled.py" \
+  --own "${own}" --canon "${canon}" ${flows[@]+"${flows[@]}"}
 '''
 
 [tasks."lint:canon-policy"]
@@ -8949,34 +8879,15 @@ dir = "{{cwd}}"
 # matrix laundering hole: a floating value reaching runs-on through a
 # matrix include or a bash case arm is the same float with indirection.
 run = '''
-files=() && org_tracked_read files ':!vendor/**' ".github/workflows/*.yml" ".github/workflows/*.yaml" \
-  "workflow-templates/*.yml" "workflow-templates/*.yaml"
-[[ -n ${files[0]+set} ]] || {
+workflows=() && org_tracked_read workflows ':!vendor/**' ".github/workflows/*.yml" ".github/workflows/*.yaml"
+templates=() && org_tracked_read templates ':!vendor/**' "workflow-templates/*.yml" "workflow-templates/*.yaml"
+[[ -n ${workflows[0]+set} || -n ${templates[0]+set} ]] || {
   echo "lint:runner-pin: no workflows, skipped"
   exit 0
 }
-bad=""
-for f in "${files[@]}"; do
-  while IFS= read -r line; do
-    [[ -n ${line} ]] || continue
-    v=$(sed -E "s/^[[:space:]]*runs-on:[[:space:]]*//; s/[[:space:]]*#.*$//" <<< "${line}" | tr -d "\"'")
-    case "${v}" in
-      \$\{\{*matrix.*\}\}) ;; # indirection; the value check below covers it
-      *) [[ ${v} =~ ^[a-z]+-[0-9][a-z0-9.-]*$ ]] \
-        || bad="${bad} ${f}(runs-on: ${v})" ;;
-    esac
-  done <<< "$(grep -hE "^[[:space:]]*runs-on:" "${f}" || true)"
-  float=$(grep -nE "(ubuntu|macos|windows)-latest" "${f}" | grep -vE "^[0-9]+:[[:space:]]*#" || true)
-  [[ -z ${float} ]] || bad="${bad} ${f}(floating label: $(head -1 <<< "${float}"))"
-done
-if [[ -n ${bad} ]]; then
-  org_finding "" "floating or unpinned runner labels:${bad}" \
-    "pin every runs-on to a named image version (ubuntu-24.04, not" \
-    "ubuntu-latest) — Renovate rolls named pins as visible diffs;" \
-    "a floating label migrates with no diff at all (#290)."
-  exit 1
-fi
-echo "lint:runner-pin: every runs-on pinned or matrix-indirected, no floating labels"
+# The two checks and their message: mise/runner_pin.py (#1911).
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/runner_pin.py" \
+  ${workflows[@]+"${workflows[@]}"} -- ${templates[@]+"${templates[@]}"}
 '''
 
 [tasks."lint:canon-pins"]
