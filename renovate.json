@@ -1,6 +1,6 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["github>monumental-archive/.github#v1.76.0"],
+  "extends": ["github>monumental-archive/.github#v1.77.0"],
   "packageRules": [
     {
       "description": "The pg majors in pgrx-base-images.toml are the support matrix, not staleness: each key deliberately maps to its own major (building 15 against 18 is not an update, it is a different matrix). Only digest and suffix refreshes within each major flow; a major enters by adding its key at its upstream general release, once the official image is published for both suites (bookworm for [build], trixie for [smoke]), and leaves by deleting its key at its upstream final release (postgresql.org/support/versioning) — both reviewed changes.",
