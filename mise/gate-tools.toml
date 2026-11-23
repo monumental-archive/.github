@@ -253,6 +253,7 @@ tasks = [
   "lint:belt-shell",
   "lint:belt-tree",
   "lint:biome",
+  "lint:canon-pins",
   "lint:caller-permissions",
   "lint:capability-boundary",
   "lint:citation",

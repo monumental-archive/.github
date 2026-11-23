@@ -8615,37 +8615,7 @@ dir = "{{cwd}}"
 # Shape is the gate's business; freshness is audit:canon-pins (network).
 # Comment lines are excluded: workflow headers quote the pin shape as
 # documentation.
-run = '''
-. "${ORG_BELT_DIR}/identity.sh"
-canon_owner=$(org_identity owner)
-canon_repo=$(org_identity repo)
-canon="${canon_owner}/${canon_repo}"
-canon_re="${canon//./\\.}"
-bad=""
-found=0
-yml=() && org_tracked_read yml ':!vendor/**' "*.yml" "*.yaml"
-for f in ${yml[@]+"${yml[@]}"}; do
-  while IFS= read -r line; do
-    [[ -n ${line} ]] || continue
-    found=$((found + 1))
-    grep -qE "@[0-9a-f]{40} # v[0-9]+\.[0-9]+\.[0-9]+" <<< "${line}" \
-      || bad="${bad} ${f}(canon pin without '@<full-sha> # vX.Y.Z')"
-  done < <(grep -hE "^[^#]*uses:[[:space:]]*${canon_re}/" "${f}" || true)
-done
-hooks=() && org_tracked_read hooks ':!vendor/**' "lefthook.yml" "*/lefthook.yml"
-for f in ${hooks[@]+"${hooks[@]}"}; do
-  grep -qF "github.com/${canon}" "${f}" || continue
-  found=$((found + 1))
-  grep -qE "^[[:space:]]*ref:[[:space:]]*v[0-9]" "${f}" \
-    || bad="${bad} ${f}(lefthook canon remote must ref a v* tag, not a branch)"
-done
-presets=() && org_tracked_read presets ':!vendor/**' "renovate.json" "*/renovate.json" ".github/renovate.json"
-for f in ${presets[@]+"${presets[@]}"}; do
-  grep -qF "github>${canon}" "${f}" || continue
-  found=$((found + 1))
-  grep -qE "github>${canon_re}#v[0-9]" "${f}" \
-    || bad="${bad} ${f}(preset reference must carry #vX.Y.Z)"
-done
+#
 # The fourth surface is a prohibition: no workflow step may clone the
 # canon with actions/checkout, at any ref. Canon content reaches a job
 # only through `uses: $/.github/actions/canon` — GitHub's
@@ -8655,26 +8625,18 @@ done
 # github.job_workflow_sha conditional evaluated empty and floated to
 # main (#158); the release-time stamp needed workflow writes the
 # tag-mint App must never hold (#164).
+run = '''
+. "${ORG_BELT_DIR}/identity.sh"
+canon_owner=$(org_identity owner)
+canon_repo=$(org_identity repo)
+yml=() && org_tracked_read yml ':!vendor/**' "*.yml" "*.yaml"
+hooks=() && org_tracked_read hooks ':!vendor/**' "lefthook.yml" "*/lefthook.yml"
+presets=() && org_tracked_read presets ':!vendor/**' "renovate.json" "*/renovate.json" ".github/renovate.json"
 workflows=() && org_tracked_read workflows ':!vendor/**' ".github/workflows/*.yml" ".github/workflows/*.yaml"
-for f in ${workflows[@]+"${workflows[@]}"}; do
-  checkouts=$(grep -cE "^[^#]*repository:[[:space:]]*${canon_re}[[:space:]]*$" "${f}") || continue
-  found=$((found + checkouts))
-  [[ ${checkouts} -eq 0 ]] \
-    || bad="${bad} ${f}(${checkouts} canon checkout(s) — use \$/.github/actions/canon)"
-done
-[[ ${found} -gt 0 ]] || {
-  echo "lint:canon-pins: no canon references, skipped"
-  exit 0
-}
-if [[ -n ${bad} ]]; then
-  org_finding "" "unversioned canon references:${bad}" \
-    "every canon reference pins a tag Renovate can bump (#133);" \
-    "workflow pins: '@<sha> # vX.Y.Z', lefthook: 'ref: vX.Y.Z'," \
-    "preset: 'github>${canon}#vX.Y.Z'; canon" \
-    'content in a job comes only via $/.github/actions/canon (#165).'
-  exit 1
-fi
-echo "lint:canon-pins: ${found} canon references, all versioned"
+# The four surfaces, the skip and the message: mise/canon_pins.py (#1911).
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/canon_pins.py" "${canon_owner}/${canon_repo}" \
+  ${yml[@]+"${yml[@]}"} -- ${hooks[@]+"${hooks[@]}"} -- ${presets[@]+"${presets[@]}"} -- \
+  ${workflows[@]+"${workflows[@]}"}
 '''
 
 [tasks."lint:hook-jobs"]
