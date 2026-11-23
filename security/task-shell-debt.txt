@@ -75,7 +75,6 @@ mise/config.toml	lint:toolbelt-lock	35	# #1544 unassigned
 mise/config.toml	lint:lock-platforms	21	# #1544 unassigned
 mise/config.toml	audit:lock-arch	63	# #1544 unassigned
 mise/config.toml	audit:lock-idempotent	100	# #1544 unassigned
-mise/config.toml	lint:nested-permissions	30	# #1544 unassigned
 mise/config.toml	lint:audit-scheduled	68	# #1544 unassigned
 mise/config.toml	lint:canon-policy	19	# #1544 unassigned
 mise/config.toml	lint:policy-load	45	# #1544 unassigned
