@@ -218,6 +218,8 @@ DYNAMIC = {
     "release/publish_crates.py": "runs crates-io-members.sh by its path, and"
     " builds its cargo metadata, package and publish argvs in variables",
     "mise/belt_shell.py": "splats its shfmt and shellcheck argvs from lists",
+    "mise/citations.py": "runs gh and git from the paths its network reads"
+    " hold, so a row can stand them in (#1911)",
     "mise/embedded_shell.py": "splats its shfmt argv from a list",
     "mise/git_decoy.py": "runs its caller's command against a decoy repository",
     "mise/hermetic.py": "splats its caller's pathspecs into the git ls-files argv",
