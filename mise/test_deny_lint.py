@@ -32,6 +32,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import override
 
 import decoded
 import hermetic
@@ -89,13 +90,15 @@ STELE_STUB = """#!{bash}
 printf 'stele %s\\n' "$*" >> "${PLANT_LOG}"
 printf '%s' "${PLANT_REPORT}"
 """
-REPORT = json.dumps({
+REPORT_DOC: dict[str, object] = {
     "schema": 9,
     "target": "assert advisories",
     "subject": "Cargo.lock",
     "verdict": "PASS",
-    "findings": [],
-})
+    "findings": list[object](),
+}
+REPORT = json.dumps(REPORT_DOC)
+
 
 NO_POLICY = (
     "lint:deny: fuzz: Cargo.lock present but no deny.toml"
@@ -143,9 +146,30 @@ def lint_call(root: str) -> str:
     )
 
 
+def both() -> list[str]:
+    """Spell the policy checks of both roots, top first.
+
+    Returns:
+        The logged cargo calls.
+
+    """
+    return [lint_call(r) for r in ROOTS]
+
+
+def top_only() -> list[str]:
+    """Spell the policy check of the top root alone.
+
+    Returns:
+        The logged cargo call.
+
+    """
+    return [lint_call("Cargo.toml")]
+
+
 class Planted(unittest.TestCase):
     """A two-root tree, the stubs and the tools, per row."""
 
+    @override
     def setUp(self) -> None:
         """Plant the stubs and the tools; the tree is planted per row."""
         self.tmp = Path(tempfile.mkdtemp()).resolve()
@@ -220,7 +244,7 @@ class LintDeny(Planted):
         """One policy check per root, each with its manifest and config."""
         done, calls = self.run_task("lint:deny", TREE)
         self.assertEqual(0, done.returncode, done.stdout + done.stderr)
-        self.assertEqual([lint_call(r) for r in ROOTS], checks(calls))
+        self.assertEqual(both(), checks(calls))
         fetches = [c for c in calls if c.startswith("cargo fetch")]
         want = [f"cargo fetch --locked --manifest-path {r}" for r in ROOTS]
         self.assertEqual(want, fetches)
@@ -231,20 +255,20 @@ class LintDeny(Planted):
         done, calls = self.run_task("lint:deny", files)
         self.assertEqual(1, done.returncode, done.stdout + done.stderr)
         self.assertEqual(NO_POLICY, done.stderr)
-        self.assertEqual([lint_call("Cargo.toml")], checks(calls))
+        self.assertEqual(top_only(), checks(calls))
 
     def test_a_red_second_root_does_not_hide_the_first(self) -> None:
         """The stub refuses fuzz only: red, and the top was still checked."""
         done, calls = self.run_task("lint:deny", TREE, deny_fails="fuzz/Cargo.toml")
         self.assertEqual(1, done.returncode, done.stdout + done.stderr)
-        self.assertEqual([lint_call(r) for r in ROOTS], checks(calls))
+        self.assertEqual(both(), checks(calls))
         self.assertIn("rejected licence in fuzz/Cargo.toml", done.stdout)
 
     def test_a_red_first_root_does_not_hide_the_second(self) -> None:
         """The stub refuses the top: red, and fuzz is still checked."""
         done, calls = self.run_task("lint:deny", TREE, deny_fails="Cargo.toml")
         self.assertEqual(1, done.returncode, done.stdout + done.stderr)
-        self.assertEqual([lint_call(r) for r in ROOTS], checks(calls))
+        self.assertEqual(both(), checks(calls))
 
     def test_an_advisory_ignore_in_the_fuzz_policy_is_refused_by_file(self) -> None:
         """deny_advisories.py names fuzz/deny.toml, and fuzz is not checked."""
@@ -258,7 +282,7 @@ class LintDeny(Planted):
             "  for that advisory and package version, which audit:deny reads\n",
             done.stderr,
         )
-        self.assertEqual([lint_call("Cargo.toml")], checks(calls))
+        self.assertEqual(top_only(), checks(calls))
 
     def test_a_stale_skip_in_the_fuzz_policy_is_named_with_its_root(self) -> None:
         """A skip the fuzz graph no longer needs: the variant runs there."""
@@ -315,7 +339,8 @@ class AuditDeny(Planted):
         self.assertEqual(want, scans)
         stele = [c.split(" ") for c in calls if c.startswith("stele ")]
         subjects = [args[args.index("--subject") + 1] for args in stele]
-        self.assertEqual(["Cargo.lock", "fuzz/Cargo.lock"], subjects)
+        locks: list[str] = ["Cargo.lock", "fuzz/Cargo.lock"]
+        self.assertEqual(locks, subjects)
         self.assertEqual("audit:deny: stele: PASS\n" * 2, done.stdout)
 
     def test_a_missing_fuzz_policy_is_red_and_the_top_still_scanned(self) -> None:
