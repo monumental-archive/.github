@@ -191,19 +191,17 @@ class Planted(unittest.TestCase):
         )
 
 
-CALL = "\t".join(
-    [
-        "assert",
-        "permissions",
-        "--json",
-        "--policy",
-        f"{CANON}/slsa/assert-policy.json",
-        "--tree",
-        CANON,
-        "--callers",
-        ".",
-    ]
-)
+CALL = "\t".join([
+    "assert",
+    "permissions",
+    "--json",
+    "--policy",
+    f"{CANON}/slsa/assert-policy.json",
+    "--tree",
+    CANON,
+    "--callers",
+    ".",
+])
 SKIPPED = ["lint:caller-permissions: no workflows, skipped"]
 
 
