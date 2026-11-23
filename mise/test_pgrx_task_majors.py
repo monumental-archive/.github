@@ -14,8 +14,9 @@ registered.
 they were asked, and `ORG_PYTHON` is a stub that answers each belt
 helper by name: `gate_surface.py` with the planted surface,
 `pgrx_postgres.py` with a plan, `msrv_plan.py` with the planted plan.
-`msrv_lint.py`, lint:msrv's body after its guard (#1911), runs on this
-interpreter, from the planted belt, so it meets the same stubs.
+`rust_lint.py` and `msrv_lint.py`, fix:rust's and lint:msrv's bodies
+after their guards (#1911), run on this interpreter, from the planted
+belt, so they meet the same stubs.
 pgrx-env.sh is the real one, sourced, with only what needs a Mac or a
 Postgres replaced: the prepare and the init log, and a major's ICU
 headers are a mark the stub cargo prints. Every row asserts the whole
@@ -67,7 +68,7 @@ echo '[]'
 # in the order the pipeline runs them.
 PYTHON_STUB = r"""#!/usr/bin/env bash
 script=$(basename "$1")
-[[ ${script} != msrv_lint.py ]] || exec "${PLANT_PYTHON}" "$@"
+case ${script} in rust_lint.py | msrv_lint.py) exec "${PLANT_PYTHON}" "$@" ;; esac
 shift
 [[ $1 == --failed ]] || cat > /dev/null
 printf '%s %s\n' "${script}" "$*" >> "${PLANT_LOG}"
