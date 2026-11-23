@@ -218,6 +218,8 @@ DYNAMIC = {
     "release/publish_crates.py": "runs crates-io-members.sh by its path, and"
     " builds its cargo metadata, package and publish argvs in variables",
     "mise/belt_shell.py": "splats its shfmt and shellcheck argvs from lists",
+    "mise/caller_permissions.py": "runs stele_findings.py by its path under"
+    " the interpreter it runs on, its stele argv built in a list",
     "mise/citations.py": "runs gh and git from the paths its network reads"
     " hold, so a row can stand them in (#1911)",
     "mise/embedded_shell.py": "splats its shfmt argv from a list",
@@ -231,6 +233,8 @@ DYNAMIC = {
     " interpreter it runs on (#1741)",
     "mise/rust_lint.py": "builds its cargo argvs in lists from the tracked"
     " workspace, and calls the belt's shell functions through bash (#1911)",
+    "mise/rust_task.py": "runs the Rust task helpers' cargo, bash and"
+    " belt-helper argvs, built by its callers (#1911)",
     "mise/security_config.py": "builds its gh argv in a variable",
     "mise/tool_python.py": "asks a tool venv's interpreter and python3"
     " found on PATH (#1788)",

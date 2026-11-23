@@ -12,7 +12,7 @@ Behaviour, messages and exit statuses are the body's own, unchanged.
 The crate this lints is the one the gate never compiled (#813): the
 task's comment carries that history. The plumbing it shares with
 lint:rust and fix:rust — the compile surface, the clippy ladder, the
-pgrx provisioning and the per-major subshell — is mise/rust_lint.py's,
+pgrx provisioning and the per-major subshell — is mise/rust_task.py's,
 which calls mise/clippy-ladder.sh and mise/pgrx-env.sh rather than
 restating them, so all three tasks build an extension the same way.
 
@@ -28,7 +28,7 @@ import sys
 from typing import TYPE_CHECKING
 
 import findings
-import rust_lint
+import rust_task
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -48,13 +48,13 @@ def derive(cargo: str, where: Sequence[str]) -> tuple[int, list[list[str]], str]
         The status, `[spec, major]` per extension, and the majors.
 
     """
-    status = rust_lint.run([cargo, "fetch", "--locked", *where])
+    status = rust_task.run([cargo, "fetch", "--locked", *where])
     if status != 0:
         return status, [], ""
-    status, found = rust_lint.surface(cargo, where)
+    status, found = rust_task.surface(cargo, where)
     if status != 0:
         return status, [], ""
-    return rust_lint.pgrx_pairs(found)
+    return rust_task.pgrx_pairs(found)
 
 
 def workspace(cargo: str, where: Sequence[str] = ()) -> int:
@@ -77,22 +77,22 @@ def workspace(cargo: str, where: Sequence[str] = ()) -> int:
     # clippy is a rustup COMPONENT of the repo's own pin, asserted with a
     # remedy and never installed mid-run — the lint:rust reasoning
     # verbatim.
-    if not rust_lint.has(rust_lint.installed_components(), "clippy"):
+    if not rust_task.has(rust_task.installed_components(), "clippy"):
         findings.finding(
             "",
             "clippy component missing — declare it with the rust pin in mise.toml:",
-            [rust_lint.PIN],
+            [rust_task.PIN],
         )
         return 1
-    os.environ["CLIPPY_CONF_DIR"] = str(rust_lint.BELT)
+    os.environ["CLIPPY_CONF_DIR"] = str(rust_task.belt())
     # The org's one ladder: a pgrx crate is linted at exactly what every
     # crate is (#1995).
-    status, flags, count = rust_lint.ladder()
+    status, flags, count = rust_task.ladder()
     if status != 0:
         return status
     # The SDK, and every major's ICU headers and Postgres pin checked
     # (#1774, #1940).
-    status, prepared = rust_lint.register(majors)
+    status, prepared = rust_task.register(majors)
     if status != 0:
         return status
     return lint_each(cargo, where, pairs, (flags, count), prepared)
@@ -117,12 +117,12 @@ def lint_each(
     flags, count = ladder
     linted = ""
     for spec, major in pairs:
-        linted += f" {rust_lint.name_of(spec)}(pg{major})"
+        linted += f" {rust_task.name_of(spec)}(pg{major})"
         # `--no-deps` is load-bearing: without it clippy also lints the
         # workspace's other crates under --no-default-features, where
         # their lint expectations do not fire. In a subshell holding its
         # own major's ICU headers and Postgres, so none reaches the next.
-        status = rust_lint.at_major(
+        status = rust_task.at_major(
             major,
             [
                 cargo,
@@ -164,7 +164,7 @@ def main(argv: list[str]) -> int:
         return 2
     cargo = shutil.which("cargo")
     if cargo is None:
-        findings.finding("", rust_lint.NO_CARGO)
+        findings.finding("", rust_task.NO_CARGO)
         return 1
     return workspace(cargo)
 

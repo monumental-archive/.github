@@ -3153,6 +3153,9 @@ dir = "{{cwd}}"
 # Deterministic in the same sense lint:rust is: the outcome is a function
 # of the tree, the lock, the canon's floor file and two pinned
 # toolchains. `cargo fetch --locked` first, same precedent.
+#
+# The body after its guard is mise/msrv_lint.py, which says why each
+# step is there (#1911).
 run = '''
 set -euo pipefail
 manifests=() && org_tracked_read manifests ':!vendor/**' "Cargo.toml" "*/Cargo.toml"
@@ -3160,119 +3163,7 @@ manifests=() && org_tracked_read manifests ':!vendor/**' "Cargo.toml" "*/Cargo.t
   echo "lint:msrv: no Cargo.toml tracked, skipped"
   exit 0
 }
-# A repo with a Cargo.toml has rust pinned as a build input; cargo absent
-# is a broken toolchain, and skipping would be the vacuous-success
-# failure.
-command -v cargo > /dev/null || {
-  org_finding "" "Cargo.toml present but cargo missing — pin rust in mise.toml"
-  exit 1
-}
-# The pins this reads are mise's own account of them, so mise itself is
-# an input. It is always present inside a mise task; asserted anyway,
-# because the alternative to a red here is a check that silently sees no
-# pins and calls a repo unpinned.
-command -v mise > /dev/null || {
-  org_finding "" "mise missing — the toolchain pins this reads are mise's"
-  exit 1
-}
-tmp=$(mktemp -d)
-rc=0
-# A red compile is at the DERIVED number, which the plan has already
-# held each promise to, so msrv_plan.py says what that means (#1850) and
-# the remedy never reads as "raise the promise". Said from the trap so
-# the compile below runs as a plain command, `set -e` intact.
-trap 'rc=$?; rm -rf "${tmp}"; [[ -z ${compiling:-} ]] || "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/msrv_plan.py" --failed "${first}" "${rest}" || :; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
-cargo fetch --locked
-mise ls rust --json > "${tmp}/toolchains.json"
-features="${CLIPPY_FEATURES:---all-features}"
-# The whole locked graph, not --no-deps: msrv_plan.py derives each
-# promise from what the dependencies declare (#1850). Resolved with the
-# gate's features, so an optional dependency the gate compiles is read
-# and one it never enables is not. Nothing left to download after the
-# fetch above.
-# shellcheck disable=SC2086  # ${features} holds whole flag words
-cargo metadata --format-version 1 --locked ${features} > "${tmp}/metadata.json"
-# The belt's one derivation says which members are pgrx extensions and at
-# which majors (#813), and pgrx-env.sh says, once, which major each is
-# built at (#1795): its highest, the same major lint:pg-clippy and
-# fix:rust build it at. A pgrx crate cannot be compiled with
-# --all-features, so its own flags ride the plan rather than this task
-# guessing.
-#
-# Each derivation is assigned before anything reads it, never spliced in
-# as `<<< "$(...)"`: a command substitution's failure is discarded, so a
-# red derivation would arrive as an EMPTY here-string and this task would
-# report having verified a workspace it never saw (SC2312, and the
-# fail-open shape the gate exists to refuse).
-surface=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/gate_surface.py" \
-  --exclude "${CLIPPY_EXCLUDE:-}" < "${tmp}/metadata.json")
-. "${ORG_BELT_DIR}/pgrx-env.sh"
-pairs=$(org_pgrx_highest <<< "${surface}")
-majors=$(org_pgrx_union <<< "${pairs}")
-pgrx=""
-while IFS=$'\t' read -r spec major; do
-  [[ -z ${spec} ]] || pgrx="${pgrx}${pgrx:+,}${spec%@*}:${major}"
-done <<< "${pairs}"
-plan=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/msrv_plan.py" \
-  --toolchains "${tmp}/toolchains.json" --exclude "${CLIPPY_EXCLUDE:-}" \
-  --pgrx "${pgrx}" --floor "${ORG_BELT_DIR}/rust-floor.toml" < "${tmp}/metadata.json")
-# A pgrx crate needs a Postgres before it can be compiled at all, at the
-# MSRV exactly as at the stable pin: each compile takes its own through
-# org_pgrx_major (#1940), and every major's pin is checked here first,
-# only when one is in the plan, so a repo without an extension pays
-# nothing.
-if [[ -n ${pairs} && ${plan} == *"--features pg"* ]]; then
-  # The SDK, and every extension's ICU headers checked (#1774).
-  org_pgrx_darwin_prepare "${majors}"
-  mise ls "aqua:theseus-rs/postgresql-binaries" --json \
-    | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/pgrx_postgres.py" --majors "${majors}" \
-      > /dev/null
-fi
-checked=0
-while IFS=$'\t' read -r kind first own rest; do
-  [[ -n ${kind} ]] || continue
-  case ${kind} in
-    note)
-      echo "lint:msrv: ${first}"
-      ;;
-    check)
-      checked=$((checked + 1))
-      # One `-p` per spec: msrv_plan.py joins them with single spaces.
-      flags="-p ${rest// / -p }"
-      # A crate with feature flags of its own gets them INSTEAD of the
-      # workspace default, never as well: they contradict each other.
-      # `default` rather than an empty field, because bash collapses a
-      # run of tabs and an empty field would shift the specs into it.
-      use="${features}"
-      [[ ${own} == "default" ]] || use="${own}"
-      echo "lint:msrv: compiling at ${first}: ${rest}"
-      # Read by the EXIT trap: a red from here on is the compile's.
-      compiling=1
-      # shellcheck disable=SC2086  # ${use} and ${flags} hold whole flag
-      # WORDS, which cargo must receive as separate arguments. A pgrx
-      # group's own flags are `--no-default-features --features pgNN`, so
-      # their digits are its one major, compiled in a subshell holding
-      # that major's ICU headers and Postgres (#1774, #1940); `default`
-      # has none and adds none.
-      RUSTUP_TOOLCHAIN="${first}" org_pgrx_major "${own//[!0-9]/}" cargo check --locked ${use} ${flags}
-      compiling=""
-      ;;
-    *)
-      org_finding "" "unreadable plan record from msrv_plan.py: ${kind}"
-      exit 1
-      ;;
-  esac
-done <<< "${plan}"
-# Both directions printed, the lint:rust precedent: a run that verified
-# nothing must not read like a run that verified everything.
-if [[ ${checked} -eq 0 ]]; then
-  echo "lint:msrv: every declared minimum sits outside the gate's compile surface"
-  echo "lint:msrv: nothing verified — the exclusions above are what to remove"
-  org_done=1
-  exit 0
-fi
-echo "lint:msrv: ${checked} declared minimum(s) compiled at the toolchain they name"
-org_done=1
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/msrv_lint.py"
 '''
 
 [tasks."lint:pg-clippy"]
@@ -7605,32 +7496,11 @@ dir = "{{cwd}}"
 # renders from its sources. Deterministic, tracked files only, skips
 # clean where neither condition applies — a linter that cannot skip
 # cannot be universal.
+# The logic is mise/citation_check.py (#1911); the render it compares
+# against is mise/citation.sh, fix:citation's.
 run = '''
-minting=$(org_tracked ':!vendor/**' ".github/workflows/*.y*ml" | xargs -0 grep -lE "^[^#]*mint-doi:[[:space:]]*true" 2> /dev/null || true)
-if [[ ! -f CITATION.cff ]]; then
-  if [[ -n ${minting} ]]; then
-    IFS=$'\n' read -r -d '' -a detail <<< "${minting}" || true
-    org_finding "" "mint-doi: true with no CITATION.cff — a citable repo carries its citation (#316 finding 6):" "${detail[@]}" \
-      "run fix:citation (REUSE.toml is the source), commit the render"
-    exit 1
-  fi
-  echo "lint:citation: no CITATION.cff and no mint-doi request, skipped"
-  exit 0
-fi
-if [[ ! -f REUSE.toml ]]; then
-  org_finding "" "CITATION.cff exists but REUSE.toml (its source of truth) does not"
-  exit 1
-fi
-tmp=$(mktemp)
-rc=0
-trap 'rc=$?; rm -f "${tmp}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
-CITATION_OUT="${tmp}" bash "${ORG_BELT_DIR}/citation.sh" > /dev/null
-if ! diff -u CITATION.cff "${tmp}"; then
-  org_finding "" "CITATION.cff drifted from its sources — edit REUSE.toml (or the human fields) and run fix:citation"
-  exit 1
-fi
-echo "lint:citation: CITATION.cff agrees with REUSE.toml"
-org_done=1
+files=() && org_tracked_read files ':!vendor/**' ".github/workflows/*.y*ml"
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/citation_check.py" ${files[@]+"${files[@]}"}
 '''
 
 [tasks."fix:badges"]
@@ -8555,18 +8425,9 @@ files=() && org_tracked_read files ':!vendor/**' ".github/workflows/*.y*ml"
   echo "lint:caller-permissions: no workflows, skipped"
   exit 0
 }
-command -v stele > /dev/null || {
-  org_finding "" "stele missing from the belt"
-  exit 1
-}
-if ! "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/stele_findings.py" assert permissions \
-  --policy "${ORG_CANON_DIR}/slsa/assert-policy.json" \
-  --tree "${ORG_CANON_DIR}" \
-  --callers .; then
-  org_finding "" "see above — grant what the pinned canon's" \
-    "callee jobs ask for, at the caller's uses: job (#358 seam 2)."
-  exit 1
-fi
+# stele's join and its messages: mise/caller_permissions.py (#1911).
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/caller_permissions.py" \
+  "${ORG_CANON_DIR}" "${files[@]}"
 '''
 
 [tasks."lint:template-pins"]
