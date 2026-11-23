@@ -116,6 +116,22 @@ class Scheduled(unittest.TestCase):
         ]
         self.assertEqual(done.stdout.splitlines(), expected)
 
+    def test_an_untracked_belt_config_holds_nothing_to_schedule(self) -> None:
+        """mise/config.toml on disk, not in git: no belt half (#2013)."""
+        subprocess.run(
+            [GIT, "rm", "-q", "--cached", "mise/config.toml"],
+            cwd=self.tree,
+            env=self.env,
+            check=True,
+        )
+        self.workflow("repo-dependencies.yml", "fuzz")
+        done = self.run_lint()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        expected = [
+            "lint:audit-scheduled: this repository defines no audit:* of its own",
+        ]
+        self.assertEqual(done.stdout.splitlines(), expected)
+
     def test_unscheduled_task_is_red_and_names_the_schedulers(self) -> None:
         """No workflow runs audit:mutants: red, and repo-mutants.yml named."""
         self.workflow("repo-dependencies.yml", "fuzz")
