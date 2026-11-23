@@ -111,7 +111,6 @@ tasks = [
   "lint:gate-stub",
   "lint:input-forwarding",
   "lint:msrv",
-  "lint:pg-clippy",
   "lint:pg-schema",
   "lint:python-types",
   "lint:release-stub",

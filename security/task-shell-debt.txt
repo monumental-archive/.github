@@ -30,7 +30,6 @@ mise/config.toml	lint:commits	24	# #1544 unassigned
 mise/config.toml	lint:dco	24	# #1544 unassigned
 mise/config.toml	lint:exec-bits	18	# #1544 unassigned
 mise/config.toml	lint:msrv	70	# #1544 unassigned
-mise/config.toml	lint:pg-clippy	43	# #1544 unassigned
 mise/config.toml	lint:gate-surface	23	# #1544 unassigned
 mise/config.toml	lint:go	30	# #1544 unassigned
 mise/config.toml	lint:tsc-flags	25	# #1544 unassigned

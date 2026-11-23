@@ -3307,67 +3307,16 @@ dir = "{{cwd}}"
 # it clippy also lints the workspace's other crates under
 # --no-default-features, where their lint expectations do not fire and
 # `-D warnings` turns each one into an error.
+#
+# The body after its guard is mise/pg_clippy.py (#1911), on the plumbing
+# lint:rust and fix:rust share in mise/rust_lint.py.
 run = '''
-set -euo pipefail
 manifests=() && org_tracked_read manifests ':!vendor/**' "Cargo.toml" "*/Cargo.toml"
 [[ -n ${manifests[0]+set} ]] || {
   echo "lint:pg-clippy: no Cargo.toml tracked, skipped"
   exit 0
 }
-command -v cargo > /dev/null || {
-  org_finding "" "Cargo.toml present but cargo missing — pin rust in mise.toml"
-  exit 1
-}
-cargo fetch --locked
-# Assigned first, one step per assignment: a `<<< "$(...)"` discards the
-# derivation's exit status, so a red derivation would read as a
-# workspace with no extension and this task would skip clean having
-# checked nothing. Each extension's major, and the majors to register,
-# come from pgrx-env.sh, written once for every task that builds one
-# (#1795).
-surface=$(cargo metadata --no-deps --format-version 1 --locked \
-  | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/gate_surface.py" --exclude "${CLIPPY_EXCLUDE:-}")
-. "${ORG_BELT_DIR}/pgrx-env.sh"
-pairs=$(org_pgrx_highest <<< "${surface}")
-majors=$(org_pgrx_union <<< "${pairs}")
-[[ -n ${pairs} ]] || {
-  echo "lint:pg-clippy: no pgrx extension tracked, skipped"
-  exit 0
-}
-# clippy is a rustup COMPONENT of the repo's own pin, asserted with a
-# remedy and never installed mid-run — the lint:rust reasoning verbatim.
-if ! installed=$(rustup component list --installed 2> /dev/null) || ! grep -q "^clippy" <<< "${installed}"; then
-  org_finding "" "clippy component missing — declare it with the rust pin in mise.toml:" \
-    'rust = { version = "1.xx.x", components = "clippy,rustfmt,llvm-tools" }'
-  exit 1
-fi
-export CLIPPY_CONF_DIR="${ORG_BELT_DIR}"
-. "${ORG_BELT_DIR}/clippy-ladder.sh"
-# The org's one ladder: a pgrx crate is linted at exactly what every
-# crate is (#1995).
-ladder=$(org_clippy_ladder)
-contradiction_count=$(org_clippy_contradiction_count)
-# The SDK, and every major's ICU headers and Postgres pin checked
-# (#1774, #1940).
-org_pgrx_darwin_prepare "${majors}"
-mise ls "aqua:theseus-rs/postgresql-binaries" --json \
-  | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/pgrx_postgres.py" --majors "${majors}" \
-    > /dev/null
-count=0
-linted=""
-# Read on descriptor 3, so cargo's standard input is not the list.
-while IFS=$'\t' read -r -u 3 spec major; do
-  count=$((count + 1))
-  linted="${linted} ${spec%@*}(pg${major})"
-  # shellcheck disable=SC2086  # ${ladder} holds whole flag WORDS, which
-  # clippy must receive as separate arguments. In a subshell holding its
-  # own major's ICU headers and Postgres (#1774, #1940), so none reaches
-  # the next major.
-  org_pgrx_major "${major}" cargo clippy -p "${spec}" --no-deps --all-targets --locked --keep-going \
-    --no-default-features --features "pg${major}" -- ${ladder}
-done 3<<< "${pairs}"
-echo "lint:pg-clippy: ${count} extension(s) linted:${linted}"
-echo "lint:pg-clippy: clean at every group (restriction minus ${contradiction_count} named contradictions)"
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/pg_clippy.py"
 '''
 
 [tasks."lint:pg-schema"]
