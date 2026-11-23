@@ -11,9 +11,9 @@ coverage and mutation legs (CONTRIBUTING, "A helper's language").
 Behaviour, messages and exit statuses are the bodies' own, unchanged.
 
 The task's reasoning for each step rides beside the step below. The
-clippy ladder stays in mise/clippy-ladder.sh and the pgrx provisioning
-in mise/pgrx-env.sh, each written once for every task that needs it;
-this file calls their functions through bash rather than restating them.
+steps every Rust task's helper shares (the belt and its Python, the
+compile surface, the clippy ladder, the pgrx derivation and
+provisioning) are mise/rust_task.py's.
 
 Run in the repository's root, with cargo, rustup and the belt on PATH;
 stdlib only.
@@ -26,36 +26,31 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import findings
 import rust_suppressions
 import tracked
+from rust_task import (
+    NO_CARGO,
+    PIN,
+    at_major,
+    belt,
+    features,
+    has,
+    installed_components,
+    ladder,
+    name_of,
+    pgrx_pairs,
+    register,
+    run,
+    surface,
+)
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Sequence
 
-BELT = Path(__file__).parent
-BASH = shutil.which("bash") or "bash"
-# The task shell's flags ([task_config] shell), for the belt functions
-# this file calls: they ran under them in the bodies.
-SHELL = [BASH, "--norc", "-euo", "pipefail", "-c"]
-# Source a belt script, then call one of its functions with the rest.
-CALL = '. "$1" && shift && "$@"'
-# The same, then write every exported variable NUL-separated to a file:
-# what a function exported for the calls after it (org_pgrx_darwin_prepare).
-EXPORTS = (
-    '. "$1" && out=$2 && shift 2 && "$@" && '
-    '{ for name in $(compgen -e); do printf "%s=%s\\0" "${name}" "${!name}"; done; }'
-    ' > "${out}"'
-)
-# What bash itself exports or rewrites in every shell, which no function
-# exported for its callers.
-BASH_OWN = frozenset({"SHLVL", "_", "PWD", "OLDPWD"})
-PIN = 'rust = { version = "1.xx.x", components = "clippy,rustfmt,llvm-tools" }'
-NO_CARGO = "Cargo.toml present but cargo missing — pin rust in mise.toml"
 WHOLE_FILE = re.compile(rb"^[ \t\v\f\r]*#!\[rustfmt::skip", re.MULTILINE)
 NARROW = re.compile(rb"^[ \t\v\f\r]*#\[rustfmt::skip", re.MULTILINE)
 WARNING = re.compile(r"^Warning", re.MULTILINE)
@@ -74,179 +69,6 @@ CONF = (
 USAGE = "usage: rust_lint.py lint|fix"
 # A record's fields: excluded or crate, the spec, plain or pgrx.
 RECORD, SPEC, KIND = 0, 1, 2
-
-
-def python() -> str:
-    """Name the belt's Python, which runs the belt's other helpers.
-
-    Returns:
-        ORG_PYTHON, as the bodies read it; this interpreter where it is
-        unset.
-
-    """
-    return os.environ.get("ORG_PYTHON") or sys.executable
-
-
-def name_of(spec: str) -> str:
-    """Take a package spec's name, as bash's `${spec%@*}` does.
-
-    Returns:
-        The text before the last `@`; the whole spec when it has none.
-
-    """
-    head, at, _ = spec.rpartition("@")
-    return head if at else spec
-
-
-def run(argv: Sequence[str], env: Mapping[str, str] | None = None) -> int:
-    """Run a command with this process's streams.
-
-    Returns:
-        Its exit status.
-
-    """
-    return subprocess.run(argv, env=env, check=False).returncode
-
-
-def output(argv: Sequence[str], stdin: str = "") -> tuple[int, str]:
-    """Run a command, reading what it prints; its stderr is this process's.
-
-    Returns:
-        Its exit status and its standard output.
-
-    """
-    done = subprocess.run(
-        argv, input=stdin, stdout=subprocess.PIPE, text=True, check=False
-    )
-    return done.returncode, done.stdout
-
-
-def belt_call(script: str, *call: str, stdin: str = "") -> tuple[int, str]:
-    """Call a function of a belt shell script.
-
-    Returns:
-        Its exit status and its standard output.
-
-    """
-    return output([*SHELL, CALL, "belt", str(BELT / script), *call], stdin)
-
-
-def belt_exports(script: str, *call: str) -> tuple[int, dict[str, str]]:
-    """Call a belt function that exports, and take what it exported.
-
-    Returns:
-        Its exit status, and every variable it set or changed in the
-        environment, for the commands that run after it.
-
-    """
-    with tempfile.TemporaryDirectory() as tmp:
-        dump = Path(tmp) / "exports"
-        status = run([*SHELL, EXPORTS, "belt", str(BELT / script), str(dump), *call])
-        if status != 0:
-            return status, {}
-        listing = dump.read_bytes()
-    exported: dict[str, str] = {}
-    for entry in tracked.split(listing):
-        key, _, value = entry.partition("=")
-        if key not in BASH_OWN and os.environ.get(key) != value:
-            exported[key] = value
-    return 0, exported
-
-
-def installed_components() -> list[str]:
-    """List the rustup components the repository's own pin installed.
-
-    Returns:
-        One line per component; none when rustup is absent or fails.
-
-    """
-    rustup = shutil.which("rustup")
-    if rustup is None:
-        return []
-    done = subprocess.run(
-        [rustup, "component", "list", "--installed"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        text=True,
-        check=False,
-    )
-    return done.stdout.splitlines() if done.returncode == 0 else []
-
-
-def has(components: list[str], name: str) -> bool:
-    """Say whether a component is installed, as `grep -q "^<name>"` does.
-
-    Returns:
-        True when a line starts with the name.
-
-    """
-    return any(line.startswith(name) for line in components)
-
-
-def ladder() -> tuple[int, list[str], str]:
-    """Read the org's one clippy ladder, from mise/clippy-ladder.sh.
-
-    THE LADDER LIVES IN THE BELT'S clippy-ladder.sh (#813). It moved the
-    day a SECOND task acquired the same obligation: `lint:pg-clippy`
-    sets this exact level on the pgrx crate the gate never compiled, and
-    a second copy of a ten-name list is the drift #752 recorded — the
-    list said ten and the prose above it said nine.
-
-    Returns:
-        The status, the flags that ride clippy's `--`, and the count of
-        named contradictions.
-
-    """
-    status, flags = belt_call("clippy-ladder.sh", "org_clippy_ladder")
-    if status != 0:
-        return status, [], ""
-    status, count = belt_call("clippy-ladder.sh", "org_clippy_contradiction_count")
-    return status, flags.split(), count.strip()
-
-
-def features() -> list[str]:
-    """Take the features every crate is linted with.
-
-    CLIPPY_FEATURES lets a repo whose features are mutually exclusive
-    say so; everything else gets --all-features, because an unlinted
-    feature is unlinted code.
-
-    Returns:
-        The flag words, split as bash splits an unquoted value.
-
-    """
-    return (os.environ.get("CLIPPY_FEATURES") or "--all-features").split()
-
-
-def surface(cargo: str, where: Sequence[str] = ()) -> tuple[int, str]:
-    """Derive the workspace's compile surface, the belt's one derivation (#813).
-
-    gate_surface.py reads cargo's own account — `workspace_members`, not
-    `workspace_default_members` — and classifies each member, so
-    lint:rust, fix:rust, lint:pg-clippy, test:pgrx and lint:msrv cannot
-    disagree about which crates exist or what kind each one is. `where`
-    is cargo's `--manifest-path` naming the workspace; empty, cargo
-    finds the one at the working directory.
-
-    Returns:
-        The status (the helper's when it failed, else cargo's, as
-        pipefail reads the pipe) and the records.
-
-    """
-    meta_status, meta = output([
-        cargo,
-        "metadata",
-        "--no-deps",
-        "--format-version",
-        "1",
-        "--locked",
-        *where,
-    ])
-    exclude = os.environ.get("CLIPPY_EXCLUDE", "")
-    status, records = output(
-        [python(), str(BELT / "gate_surface.py"), "--exclude", exclude], meta
-    )
-    return status or meta_status, records
 
 
 def records(text: str) -> list[list[str]]:
@@ -365,7 +187,7 @@ def format_check(cargo: str) -> int:
             "--check",
             "--",
             "--config-path",
-            str(BELT / "rustfmt.toml"),
+            str(belt() / "rustfmt.toml"),
         ],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -671,7 +493,7 @@ def clippy_leg(cargo: str) -> int:
     """
     # The canon's clippy.toml, delivered by directory: an unresolvable
     # belt would leave clippy at its own defaults, silently.
-    os.environ["CLIPPY_CONF_DIR"] = str(BELT)
+    os.environ["CLIPPY_CONF_DIR"] = str(belt())
     status, flags, count = ladder()
     if status != 0:
         return status
@@ -691,46 +513,6 @@ def clippy_leg(cargo: str) -> int:
         )
         return 1
     return verdict(lint_members(cargo, records(listed), flags), count)
-
-
-def register(majors: str) -> tuple[int, dict[str, str]]:
-    """Ready this machine to build the extensions, before anything compiles.
-
-    The SDK, and the ICU headers and Postgres pin of every major the
-    pass builds, checked first (#1774, #1940).
-
-    Returns:
-        The status, and what org_pgrx_darwin_prepare exported for the
-        compiles after it.
-
-    """
-    status, prepared = belt_exports("pgrx-env.sh", "org_pgrx_darwin_prepare", majors)
-    if status != 0:
-        return status, {}
-    listed, installed = output([
-        shutil.which("mise") or "mise",
-        "ls",
-        "aqua:theseus-rs/postgresql-binaries",
-        "--json",
-    ])
-    checked, _ = output(
-        [python(), str(BELT / "pgrx_postgres.py"), "--majors", majors], installed
-    )
-    return checked or listed, prepared
-
-
-def at_major(major: str, argv: Sequence[str], prepared: Mapping[str, str]) -> int:
-    """Run one compile in a shell holding its own major's headers and Postgres.
-
-    org_pgrx_major's subshell ends with the command, so the next major
-    starts from the caller's environment (#1774, #1940).
-
-    Returns:
-        The command's status.
-
-    """
-    shell = [*SHELL, CALL, "belt", str(BELT / "pgrx-env.sh"), "org_pgrx_major", major]
-    return run([*shell, *argv], {**os.environ, **prepared})
 
 
 def fix_extensions(
@@ -781,25 +563,6 @@ def fix_extensions(
     return 0
 
 
-def pgrx_pairs(found: str) -> tuple[int, list[list[str]], str]:
-    """Take each extension's major, and the majors to register (#1795).
-
-    From the belt's one derivation, mise/pgrx-env.sh: the gate's lint
-    and the fix pass build each extension at the same major. One step
-    per assignment, so a failed derivation is never an empty list.
-
-    Returns:
-        The status, `[spec, major]` per extension, and the majors.
-
-    """
-    status, highest = belt_call("pgrx-env.sh", "org_pgrx_highest", stdin=found)
-    if status != 0:
-        return status, [], ""
-    status, majors = belt_call("pgrx-env.sh", "org_pgrx_union", stdin=highest)
-    pairs = [line.split("\t") for line in highest.splitlines()]
-    return status, [pair for pair in pairs if len(pair) > 1 and pair[0]], majors.strip()
-
-
 def fix() -> int:
     """Run fix:rust after its guard.
 
@@ -830,7 +593,7 @@ def fix_leg(cargo: str) -> int:
         The task's status.
 
     """
-    os.environ["CLIPPY_CONF_DIR"] = str(BELT)
+    os.environ["CLIPPY_CONF_DIR"] = str(belt())
     # Format first: clippy --fix rewrites source, and handing it
     # canonically formatted input keeps its edits from arriving
     # pre-mangled.
@@ -840,7 +603,7 @@ def fix_leg(cargo: str) -> int:
         "--all",
         "--",
         "--config-path",
-        str(BELT / "rustfmt.toml"),
+        str(belt() / "rustfmt.toml"),
     ])
     if status != 0:
         return status

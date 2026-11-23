@@ -30,7 +30,9 @@ from decoded import UndecodableError, as_array, as_object, load_toml
 
 # argv[0] plus the config path.
 EXPECTED_ARGC = 2
-MESSAGE = "an advisory ignore in deny.toml"
+# The file is named as the task passed it: `deny.toml` for the top
+# workspace, `<dir>/deny.toml` for another (#2009).
+MESSAGE = "an advisory ignore in {config}"
 REMEDY = (
     "delete the entry: the decision is the canon's security/vex/ file",
     "for that advisory and package version, which audit:deny reads",
@@ -73,7 +75,7 @@ def main(argv: list[str]) -> int:
         findings.finding(str(source), str(error))
         return 1
     for advisory in named:
-        findings.finding(advisory, MESSAGE, REMEDY)
+        findings.finding(advisory, MESSAGE.format(config=source), REMEDY)
     return 1 if named else 0
 
 
