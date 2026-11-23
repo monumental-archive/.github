@@ -9056,38 +9056,10 @@ compgen -G ".github/workflows/*.y*ml" > /dev/null || {
   echo "lint:nested-permissions: no workflows, skipped"
   exit 0
 }
-bad=""
-checked=0
-for f in .github/workflows/*.y*ml; do
-  # Any file with a `uses:` job — reusable workflows AND caller stubs.
-  # The trap is identical in both: a `uses:` job with no `permissions:`
-  # block takes the WORKFLOW-level default, never the caller's grant.
-  # Scoping this to workflow_call files missed every caller stub, which
-  # is exactly where the grant has to be written — and a shared workflow
-  # that gains a permission breaks all of its callers at once, silently.
-  grep -qE "^    uses:" "${f}" || continue
-  checked=$((checked + 1))
-  offenders=$(awk '
-    /^jobs:[[:space:]]*$/ { injobs = 1; next }
-    injobs && /^  [A-Za-z0-9_-]+:[[:space:]]*$/ {
-      if (job != "" && uses && !perms) print job
-      job = $1; sub(/:$/, "", job); uses = 0; perms = 0; next
-    }
-    injobs && /^    uses:/ { uses = 1 }
-    injobs && /^    permissions:/ { perms = 1 }
-    END { if (job != "" && uses && !perms) print job }
-  ' "${f}")
-  for j in ${offenders}; do bad="${bad} ${f}:${j}"; done
-done
-if [[ -n ${bad} ]]; then
-  read -r -a detail <<< "${bad}"
-  org_finding "" "nested uses: job with no permissions block:" "${detail[@]}" \
-    "it inherits the workflow-level default, not the caller grant —" \
-    "state exactly what the called workflow needs, or the run dies as" \
-    "startup_failure with no jobs and no log."
-  exit 1
-fi
-echo "lint:nested-permissions: ${checked} workflow(s) with uses: jobs clean"
+# Any file with a `uses:` job — reusable workflows AND caller stubs —
+# since the trap is the same in both; the logic is
+# mise/nested_permissions.py (#1911).
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/nested_permissions.py" .github/workflows/*.y*ml
 '''
 
 [tasks."lint:audit-scheduled"]
