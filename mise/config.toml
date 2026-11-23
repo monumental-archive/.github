@@ -3307,67 +3307,16 @@ dir = "{{cwd}}"
 # it clippy also lints the workspace's other crates under
 # --no-default-features, where their lint expectations do not fire and
 # `-D warnings` turns each one into an error.
+#
+# The body after its guard is mise/pg_clippy.py (#1911), on the plumbing
+# lint:rust and fix:rust share in mise/rust_lint.py.
 run = '''
-set -euo pipefail
 manifests=() && org_tracked_read manifests ':!vendor/**' "Cargo.toml" "*/Cargo.toml"
 [[ -n ${manifests[0]+set} ]] || {
   echo "lint:pg-clippy: no Cargo.toml tracked, skipped"
   exit 0
 }
-command -v cargo > /dev/null || {
-  org_finding "" "Cargo.toml present but cargo missing — pin rust in mise.toml"
-  exit 1
-}
-cargo fetch --locked
-# Assigned first, one step per assignment: a `<<< "$(...)"` discards the
-# derivation's exit status, so a red derivation would read as a
-# workspace with no extension and this task would skip clean having
-# checked nothing. Each extension's major, and the majors to register,
-# come from pgrx-env.sh, written once for every task that builds one
-# (#1795).
-surface=$(cargo metadata --no-deps --format-version 1 --locked \
-  | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/gate_surface.py" --exclude "${CLIPPY_EXCLUDE:-}")
-. "${ORG_BELT_DIR}/pgrx-env.sh"
-pairs=$(org_pgrx_highest <<< "${surface}")
-majors=$(org_pgrx_union <<< "${pairs}")
-[[ -n ${pairs} ]] || {
-  echo "lint:pg-clippy: no pgrx extension tracked, skipped"
-  exit 0
-}
-# clippy is a rustup COMPONENT of the repo's own pin, asserted with a
-# remedy and never installed mid-run — the lint:rust reasoning verbatim.
-if ! installed=$(rustup component list --installed 2> /dev/null) || ! grep -q "^clippy" <<< "${installed}"; then
-  org_finding "" "clippy component missing — declare it with the rust pin in mise.toml:" \
-    'rust = { version = "1.xx.x", components = "clippy,rustfmt,llvm-tools" }'
-  exit 1
-fi
-export CLIPPY_CONF_DIR="${ORG_BELT_DIR}"
-. "${ORG_BELT_DIR}/clippy-ladder.sh"
-# The org's one ladder: a pgrx crate is linted at exactly what every
-# crate is (#1995).
-ladder=$(org_clippy_ladder)
-contradiction_count=$(org_clippy_contradiction_count)
-# The SDK, and every major's ICU headers and Postgres pin checked
-# (#1774, #1940).
-org_pgrx_darwin_prepare "${majors}"
-mise ls "aqua:theseus-rs/postgresql-binaries" --json \
-  | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/pgrx_postgres.py" --majors "${majors}" \
-    > /dev/null
-count=0
-linted=""
-# Read on descriptor 3, so cargo's standard input is not the list.
-while IFS=$'\t' read -r -u 3 spec major; do
-  count=$((count + 1))
-  linted="${linted} ${spec%@*}(pg${major})"
-  # shellcheck disable=SC2086  # ${ladder} holds whole flag WORDS, which
-  # clippy must receive as separate arguments. In a subshell holding its
-  # own major's ICU headers and Postgres (#1774, #1940), so none reaches
-  # the next major.
-  org_pgrx_major "${major}" cargo clippy -p "${spec}" --no-deps --all-targets --locked --keep-going \
-    --no-default-features --features "pg${major}" -- ${ladder}
-done 3<<< "${pairs}"
-echo "lint:pg-clippy: ${count} extension(s) linted:${linted}"
-echo "lint:pg-clippy: clean at every group (restriction minus ${contradiction_count} named contradictions)"
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/pg_clippy.py"
 '''
 
 [tasks."lint:pg-schema"]
@@ -5240,24 +5189,31 @@ dir = "{{cwd}}"
 # Filtering by the compile surface would hide a live reader and red a
 # key that has one.
 #
+# Once per workspace in the tree (#2004): a cargo-fuzz crate is its own
+# workspace, and its [workspace.package] went unread while only the root
+# workspace was. The helper runs the cargo legs for each root the
+# derivation names and judges every root past a red one.
+#
 # Deterministic: the outcome is a function of the tree and the lock.
 # `cargo fetch --locked` first, the lint:rust precedent.
-run = '''
-set -euo pipefail
-org_tracked_has Cargo.toml || {
-  echo "lint:workspace-inherit: no root Cargo.toml tracked, skipped"
-  exit 0
-}
+#
 # A repo with a Cargo.toml has rust pinned as a build input; cargo absent
 # is a broken toolchain, and skipping would be the vacuous-success
 # failure this task exists to refuse.
+run = '''
+set -euo pipefail
+manifests=() && org_tracked_read manifests ':!vendor/**' "Cargo.toml" "*/Cargo.toml"
+[[ -n ${manifests[0]+set} ]] || {
+  echo "lint:workspace-inherit: no Cargo.toml tracked, skipped"
+  exit 0
+}
 command -v cargo > /dev/null || {
   org_finding "" "Cargo.toml tracked but cargo missing — pin rust in mise.toml"
   exit 1
 }
-cargo fetch --locked
-cargo metadata --no-deps --format-version 1 --locked \
-  | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/workspace_inherit.py"
+. "${ORG_BELT_DIR}/rust-workspaces.sh"
+roots=() && org_rust_workspace_roots roots || exit 1
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/workspace_inherit.py" "${roots[@]}"
 '''
 
 [tasks."lint:gate-stub"]
@@ -5293,10 +5249,8 @@ dir = "{{cwd}}"
 # newer push replaces the waiting one, reported `cancelled`, so a burst
 # of merges judged only its first and last commit (#1617). Naming the
 # commit as well gives every commit its own verdict. Both lines are
-# required verbatim, and both are printed in the message. The body is
-# raw: `${{` would otherwise open a Tera expression at render.
+# required verbatim, and both are printed in the message.
 run = '''
-{% raw %}
 compgen -G ".github/workflows/*.y*ml" > /dev/null || {
   echo "lint:gate-stub: no workflows, skipped"
   exit 0
@@ -5304,62 +5258,9 @@ compgen -G ".github/workflows/*.y*ml" > /dev/null || {
 . "${ORG_BELT_DIR}/identity.sh"
 canon_owner=$(org_identity owner)
 canon_repo=$(org_identity repo)
-canon="${canon_owner}/${canon_repo}"
-canon_re="${canon//./\\.}"
-bad=""
-unqueued=""
-ungrouped=""
-# shellcheck disable=SC2016  # ${{ }} is GitHub's expression syntax, matched
-# literally — expanding it here is the defect
-want_group="github.event.pull_request.number || format('{0}-{1}', github.ref, github.sha)"
-# shellcheck disable=SC2016
-want_cancel='${{ github.event_name == '"'"'pull_request'"'"' }}'
-for f in .github/workflows/*.y*ml; do
-  grep -qE "uses:[[:space:]]*(${canon_re}/|\./)\.github/workflows/ci\.ya?ml" "${f}" || continue
-  grep -qE "^[[:space:]]*pull_request" "${f}" || continue
-  grep -qE "^[[:space:]]*-[[:space:]]*edited|types:[^#]*\bedited\b" "${f}" || bad="${bad} ${f}"
-  grep -qE "^[[:space:]]+merge_group:" "${f}" || unqueued="${unqueued} ${f}"
-  groups=$(grep -E "^[[:space:]]*group:" "${f}" || true)
-  # Each cancel-in-progress line, indent and trailing comment dropped,
-  # must be exactly the wanted line; every group line must carry the key.
-  # An absent line reds too: `<<<` feeds an empty capture as one empty
-  # line, and grep -v finds it.
-  cancels=$(grep -E "^[[:space:]]*cancel-in-progress:" "${f}" \
-    | sed -E 's/^[[:space:]]+//; s/[[:space:]]+#.*$//; s/[[:space:]]+$//' || true)
-  if grep -vqF "${want_group}" <<< "${groups}" \
-    || grep -vqxF "cancel-in-progress: ${want_cancel}" <<< "${cancels}"; then
-    ungrouped="${ungrouped} ${f}"
-  fi
-done
-status=0
-if [[ -n ${bad} ]]; then
-  org_finding "" "gate caller's pull_request trigger lacks the edited type," \
-    "so title/base edits keep a stale verdict (#427). Set" \
-    "types: [opened, synchronize, reopened, edited] in:${bad}"
-  status=1
-fi
-if [[ -n ${unqueued} ]]; then
-  org_finding "" "gate caller has no merge_group trigger, so the merge" \
-    "queue's own run never starts and a queued pull request waits for a" \
-    'check that cannot report (#1117). Under "on": add' \
-    "  merge_group:" \
-    "    types:" \
-    "      - checks_requested" \
-    "in:${unqueued}"
-  status=1
-fi
-if [[ -n ${ungrouped} ]]; then
-  org_finding "" "gate caller's concurrency group is shared: a merged pull" \
-    "request's event cancels the push gate (#1195), a push replaces the one" \
-    "pending (#1617). Run mise run fix:gate-stub, or set under concurrency:" \
-    "  group: \${{ github.workflow }}-\${{ ${want_group} }}" \
-    "  cancel-in-progress: ${want_cancel}" \
-    "in:${ungrouped}"
-  status=1
-fi
-[[ ${status} -eq 0 ]] || exit 1
-echo "lint:gate-stub: ok"
-{% endraw %}
+# The three requirements and their messages: mise/gate_stub.py (#1911).
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/gate_stub.py" \
+  "${canon_owner}/${canon_repo}" .github/workflows/*.y*ml
 '''
 
 [tasks."fix:gate-stub"]
@@ -6193,102 +6094,8 @@ compgen -G ".github/workflows/*.y*ml" > /dev/null || {
   echo "lint:cold-attested: no workflows, skipped"
   exit 0
 }
-awk '
-function endstep() {
-  declares = has_cache || (has_dflt && !has_false)
-  if (instep && auth && !declares) {
-    printf "%s:%d\037unattested-path marker on a step that declares no cache\n", stepfile, stepline
-    fail = 1
-  }
-  if (instep && has_dflt && !has_false && !auth) {
-    printf "%s:%d\037%s step does not say `cache: false` and carries no unattested-path marker\n", stepfile, stepline, dfltkind
-    fail = 1
-  }
-  instep = 0
-  has_dflt = 0
-  dfltkind = ""
-  has_false = 0
-  has_cache = 0
-  auth = 0
-}
-BEGIN { fail = 0 }
-{
-  ind = match($0, /[^ ]/) - 1
-  isblank = ($0 ~ /^[[:space:]]*$/)
-  iscmt = (!isblank && $0 ~ /^[[:space:]]*#/)
-}
-FNR == 1 {
-  endstep()
-  blkstart = 0
-  blkmark = 0
-  blkind = -1
-  stepind = -1
-  has_cache = 0
-}
-isblank {
-  if (blkmark) {
-    printf "%s:%d\037unattested-path marker introduces no step\n", FILENAME, blkstart
-    fail = 1
-  }
-  blkstart = 0
-  blkmark = 0
-  next
-}
-iscmt {
-  if (!blkstart) {
-    blkstart = FNR
-    blkind = ind
-    blkmark = ($0 ~ /^[[:space:]]*#[[:space:]]*unattested-path:/)
-  }
-  next
-}
-{
-  isstep = ($0 ~ /^[[:space:]]*-[[:space:]]+[A-Za-z_][A-Za-z0-9_-]*:/) && (!instep || ind <= stepind)
-  newauth = 0
-  if (blkstart) {
-    if (blkmark) {
-      if (isstep && ind == blkind)
-        newauth = 1
-      else {
-        printf "%s:%d\037unattested-path marker introduces no step\n", FILENAME, blkstart
-        fail = 1
-      }
-    }
-    blkstart = 0
-    blkmark = 0
-  }
-  if (isstep) {
-    endstep()
-    instep = 1
-    stepind = ind
-    stepline = FNR
-    stepfile = FILENAME
-    auth = newauth
-  } else if (instep && ind <= stepind)
-    endstep()
-  if ($0 ~ /^[^#]*uses:[[:space:]]*actions\/cache/) {
-    has_cache = 1
-    if (!auth) {
-      printf "%s:%d\037actions/cache step carries no unattested-path marker\n", FILENAME, FNR
-      fail = 1
-    }
-  }
-  if ($0 ~ /^[^#]*uses:[[:space:]]*jdx\/mise-action@/) {
-    has_dflt = 1
-    dfltkind = "mise-action"
-  }
-  if ($0 ~ /^[^#]*uses:[[:space:]]*actions\/setup-/) {
-    has_dflt = 1
-    dfltkind = "actions/setup-*"
-  }
-  if ($0 ~ /^[^#]*cache:[[:space:]]*false/) has_false = 1
-}
-END {
-  endstep()
-  if (fail) exit 1
-  print "lint:cold-attested: every cache declaration carries its own unattested-path marker"
-}
-' .github/workflows/*.y*ml | org_finding_lines
+# The marker rules above are mise/cold_attested.py's logic (#1911).
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/cold_attested.py" .github/workflows/*.y*ml
 '''
 
 [tasks."lint:coverage-exclusions"]
@@ -7160,107 +6967,14 @@ dir = "{{cwd}}"
 # written here, in `CONTRIBUTING.md` where docs authors meet it, and why
 # `docs/` was swept into it in one pass — measured, the same org
 # citations resolving before and after.
+#
+# The walk is mise/citations.py (#1911), which reads docs/ from git.
 run = '''
 org_tracked_has security/identity.toml || {
   echo "audit:citations: no tracked security/identity.toml, not the canon, skipped"
   exit 0
 }
-# docs/ is what this leg walks, and the walk is collected once here: a
-# canon that has lost it reds by name (#738), and a docs/ holding no
-# tracked markdown reds too — resolving zero citations out of zero
-# documents is the "read nothing, report clean" shape, not a clean org.
-[[ -d docs ]] || {
-  org_finding "" "on the canon, and the input this leg walks is missing: docs/" \
-    "a canon-only audit reds on a missing input, never skips (#738)."
-  exit 1
-}
-docs=() && org_tracked_read docs ':!vendor/**' "docs/*.md"
-[[ -n ${docs[0]+set} ]] || {
-  org_finding "" "on the canon, and docs/ holds no tracked markdown —" \
-    "there is nothing to resolve, so there is nothing to report clean (#738)."
-  exit 1
-}
-command -v gh > /dev/null || {
-  org_finding "" "gh missing"
-  exit 1
-}
-: "${GITHUB_REPOSITORY_OWNER:?audit:citations walks an org the environment names (#579) — Actions sets it; a local run exports it}"
-if ! repos=$(gh api "orgs/${GITHUB_REPOSITORY_OWNER}/repos" --paginate --jq '.[].name' 2> /dev/null); then
-  org_finding "" "could not enumerate org repos — nothing was resolved"
-  exit 1
-fi
-[[ -n ${repos} ]] || {
-  org_finding "" "the org listing named zero repositories — the walk is" \
-    "broken, not the docs, and nothing was resolved"
-  exit 1
-}
-# One alternation of live repository names — no literal list of repos in
-# the belt, so an imported repo is walked the Monday it exists. Longest
-# first, so a name that prefixes another cannot win the shorter match.
-# Only `.` needs escaping: GitHub repository names are limited to
-# `A-Za-z0-9._-`, and of those only the dot is an ERE metacharacter —
-# unescaped, `.github` would match any character followed by "github".
-by_length=$(awk '{ print length, $0 }' <<< "${repos}" | sort -rn | cut -d' ' -f2-)
-names=""
-while IFS= read -r r; do
-  [[ -n ${r} ]] || continue
-  names="${names}|${r//./\\.}"
-done <<< "${by_length}"
-names="${names#|}"
-tags=""
-for repo in ${repos}; do
-  t=$(git ls-remote --tags "https://github.com/${GITHUB_REPOSITORY_OWNER}/${repo}" "v[0-9]*" 2> /dev/null \
-    | sed -n "s|.*refs/tags/\(v[0-9][0-9.]*\)$|${repo} \1|p") || true
-  tags="${tags}
-${t}"
-done
-fail=""
-# `|| true` on both collectors, and it is not a shrug: grep exits 1 for
-# "matched nothing", which is a legitimate answer here — docs citing no
-# org releases, or no Actions runs, is a state this audit must survive
-# rather than crash on. Under the belt's `-o pipefail` shell that 1 would
-# kill the task. Load-bearing for the run-URL collector especially: it
-# matches nothing on this tree today, which is exactly how the strict
-# shell surfaced it (#82 finding 2).
-cited=$(printf '%s\0' "${docs[@]}" | xargs -0 grep -hoE \
-  "(${GITHUB_REPOSITORY_OWNER}/)?(${names})[@ ]v[0-9]+\.[0-9]+\.[0-9]+" | sort -u) || true
-linked=$(printf '%s\0' "${docs[@]}" | xargs -0 grep -hoE \
-  "github\.com/${GITHUB_REPOSITORY_OWNER}/(${names})/releases/tag/v[0-9]+\.[0-9]+\.[0-9]+" | sort -u) || true
-# Both forms normalise to "repo version" before anything is resolved, so
-# the resolver has one shape to answer about. `sed '/^$/d'` and not
-# `grep -v`: an empty collection is legitimate, and grep's exit 1 for
-# "matched nothing" would kill the pipeline under pipefail.
-pairs=$({
-  sed -E "s|^(${GITHUB_REPOSITORY_OWNER}/)?(.+)[@ ](v[0-9]+\.[0-9]+\.[0-9]+)$|\\2 \\3|" <<< "${cited}"
-  sed -E "s|^github\.com/${GITHUB_REPOSITORY_OWNER}/(.+)/releases/tag/(v[0-9]+\.[0-9]+\.[0-9]+)$|\\1 \\2|" <<< "${linked}"
-} | sed '/^$/d' | sort -u)
-vn=0
-while IFS=' ' read -r repo ver; do
-  [[ -n ${repo} && -n ${ver} ]] || continue
-  vn=$((vn + 1))
-  grep -qxF "${repo} ${ver}" <<< "${tags}" || fail="${fail}
-  cited in docs/ as an org release, but no such tag in ${repo}: ${ver}"
-done <<< "${pairs}"
-runs=$(printf '%s\0' "${docs[@]}" | xargs -0 grep -hoE "github\.com/${GITHUB_REPOSITORY_OWNER}/[A-Za-z0-9._-]+/actions/runs/[0-9]+" \
-  | sort -u) || true
-rn=0
-while IFS= read -r r; do
-  [[ -n ${r} ]] || continue
-  rn=$((rn + 1))
-  repo=$(cut -d/ -f3 <<< "${r}")
-  id=$(cut -d/ -f6 <<< "${r}")
-  gh api "repos/${GITHUB_REPOSITORY_OWNER}/${repo}/actions/runs/${id}" --jq .id > /dev/null 2>&1 \
-    || fail="${fail}
-  run URL cited in docs/ does not resolve: https://${r}"
-done <<< "${runs}"
-if [[ -n ${fail} ]]; then
-  org_finding "" "citations that resolve to nothing:${fail}" \
-    "a citation is a claim about the record — correct the document" \
-    "or the record, never leave them disagreeing (#349 finding 2)"
-  exit 1
-fi
-dn=$(printf '%s\0' "${docs[@]}" | tr -cd '\0' | wc -c | tr -d ' ')
-echo "audit:citations: ${dn} doc(s) walked, ${vn} org release citation(s) and ${rn} run URL(s) all resolve"
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/citations.py"
 '''
 
 [tasks."audit:adoption"]
@@ -8902,37 +8616,7 @@ dir = "{{cwd}}"
 # Shape is the gate's business; freshness is audit:canon-pins (network).
 # Comment lines are excluded: workflow headers quote the pin shape as
 # documentation.
-run = '''
-. "${ORG_BELT_DIR}/identity.sh"
-canon_owner=$(org_identity owner)
-canon_repo=$(org_identity repo)
-canon="${canon_owner}/${canon_repo}"
-canon_re="${canon//./\\.}"
-bad=""
-found=0
-yml=() && org_tracked_read yml ':!vendor/**' "*.yml" "*.yaml"
-for f in ${yml[@]+"${yml[@]}"}; do
-  while IFS= read -r line; do
-    [[ -n ${line} ]] || continue
-    found=$((found + 1))
-    grep -qE "@[0-9a-f]{40} # v[0-9]+\.[0-9]+\.[0-9]+" <<< "${line}" \
-      || bad="${bad} ${f}(canon pin without '@<full-sha> # vX.Y.Z')"
-  done < <(grep -hE "^[^#]*uses:[[:space:]]*${canon_re}/" "${f}" || true)
-done
-hooks=() && org_tracked_read hooks ':!vendor/**' "lefthook.yml" "*/lefthook.yml"
-for f in ${hooks[@]+"${hooks[@]}"}; do
-  grep -qF "github.com/${canon}" "${f}" || continue
-  found=$((found + 1))
-  grep -qE "^[[:space:]]*ref:[[:space:]]*v[0-9]" "${f}" \
-    || bad="${bad} ${f}(lefthook canon remote must ref a v* tag, not a branch)"
-done
-presets=() && org_tracked_read presets ':!vendor/**' "renovate.json" "*/renovate.json" ".github/renovate.json"
-for f in ${presets[@]+"${presets[@]}"}; do
-  grep -qF "github>${canon}" "${f}" || continue
-  found=$((found + 1))
-  grep -qE "github>${canon_re}#v[0-9]" "${f}" \
-    || bad="${bad} ${f}(preset reference must carry #vX.Y.Z)"
-done
+#
 # The fourth surface is a prohibition: no workflow step may clone the
 # canon with actions/checkout, at any ref. Canon content reaches a job
 # only through `uses: $/.github/actions/canon` — GitHub's
@@ -8942,26 +8626,18 @@ done
 # github.job_workflow_sha conditional evaluated empty and floated to
 # main (#158); the release-time stamp needed workflow writes the
 # tag-mint App must never hold (#164).
+run = '''
+. "${ORG_BELT_DIR}/identity.sh"
+canon_owner=$(org_identity owner)
+canon_repo=$(org_identity repo)
+yml=() && org_tracked_read yml ':!vendor/**' "*.yml" "*.yaml"
+hooks=() && org_tracked_read hooks ':!vendor/**' "lefthook.yml" "*/lefthook.yml"
+presets=() && org_tracked_read presets ':!vendor/**' "renovate.json" "*/renovate.json" ".github/renovate.json"
 workflows=() && org_tracked_read workflows ':!vendor/**' ".github/workflows/*.yml" ".github/workflows/*.yaml"
-for f in ${workflows[@]+"${workflows[@]}"}; do
-  checkouts=$(grep -cE "^[^#]*repository:[[:space:]]*${canon_re}[[:space:]]*$" "${f}") || continue
-  found=$((found + checkouts))
-  [[ ${checkouts} -eq 0 ]] \
-    || bad="${bad} ${f}(${checkouts} canon checkout(s) — use \$/.github/actions/canon)"
-done
-[[ ${found} -gt 0 ]] || {
-  echo "lint:canon-pins: no canon references, skipped"
-  exit 0
-}
-if [[ -n ${bad} ]]; then
-  org_finding "" "unversioned canon references:${bad}" \
-    "every canon reference pins a tag Renovate can bump (#133);" \
-    "workflow pins: '@<sha> # vX.Y.Z', lefthook: 'ref: vX.Y.Z'," \
-    "preset: 'github>${canon}#vX.Y.Z'; canon" \
-    'content in a job comes only via $/.github/actions/canon (#165).'
-  exit 1
-fi
-echo "lint:canon-pins: ${found} canon references, all versioned"
+# The four surfaces, the skip and the message: mise/canon_pins.py (#1911).
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/canon_pins.py" "${canon_owner}/${canon_repo}" \
+  ${yml[@]+"${yml[@]}"} -- ${hooks[@]+"${hooks[@]}"} -- ${presets[@]+"${presets[@]}"} -- \
+  ${workflows[@]+"${workflows[@]}"}
 '''
 
 [tasks."lint:hook-jobs"]
@@ -9083,38 +8759,16 @@ dir = "{{cwd}}"
 # Workflow `run:` steps are not held to it: they only ever meet bash 5.
 run = '''
 tracked=() && org_tracked_read tracked ':!vendor/**'
-# shfmt --find prints the list's shell files one per line; given no list
-# it walks the directory, so it runs only on one.
+# shfmt --find prints the list's shell files; given no list it walks the directory.
 listed=$([[ -z ${tracked[0]+set} ]] || printf '%s\0' "${tracked[@]}" | xargs -0 shfmt --find 2> /dev/null)
 scripts=() && while IFS= read -r f; do [[ -z ${f} ]] || scripts+=("${f}"); done <<< "${listed}"
 configs=() && org_tracked_read configs ':!vendor/**' "*mise.toml" "*mise.*.toml" \
   "*mise/config.toml" "*mise/config.*.toml"
-files=() && org_tracked_read files ':!vendor/**' ".github/workflows/*.y*ml"
-files+=(${scripts[@]+"${scripts[@]}"})
-[[ -n ${files[0]+set} || -n ${configs[0]+set} ]] || {
+flows=() && org_tracked_read flows ':!vendor/**' ".github/workflows/*.y*ml"
+[[ -n ${flows[0]+set} || -n ${scripts[0]+set} || -n ${configs[0]+set} ]] || {
   echo "lint:bash-portability: nothing to check, skipped"
   exit 0
 }
-# ${v,,} ${v^^} ${v,} ${v^} — case modification, bash 4.0
-# declare -A / typeset -A — associative arrays, bash 4.0
-# mapfile / readarray     — bash 4.0
-# &>>                     — append-both redirection, bash 4.0
-bad4='\$\{[A-Za-z_][A-Za-z0-9_]*(\[[^]]*\])?(,,|\^\^|,|\^)\}|(declare|typeset)[[:space:]]+-[A-Za-z]*A|(^|[^A-Za-z_])(mapfile|readarray)[[:space:]]|&>>'
-found="" count=0 traps=0
-for f in ${files[@]+"${files[@]}"}; do
-  count=$((count + 1))
-  [[ -f ${f} ]] || continue
-  hit=$(grep -vE "^[[:space:]]*#" "${f}" | grep -nE "${bad4}" || true)
-  [[ -n ${hit} ]] && found="${found}\n  ${f}: ${hit}"
-done
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/exit_trap.py" ${scripts[@]+"${scripts[@]}"} ${configs[@]+"${configs[@]}"} || traps=$?
-if [[ -n ${found} ]]; then
-  IFS=$'\n' read -r -d '' -a detail < <(printf "%b\n" "${found}") || true
-  org_finding "" "bash 4+ syntax found (macOS ships 3.2):" ${detail[@]+"${detail[@]}"} \
-    "these pass in CI and fail locally, which is how a script reaches" \
-    "a release untested. Use tr, case, or an explicit loop instead."
-  exit 1
-fi
-[[ ${traps} -eq 0 ]] || exit 1
-echo "lint:bash-portability: ${count} files clean"
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/bash_portability.py" ${flows[@]+"${flows[@]}"} -- \
+  ${scripts[@]+"${scripts[@]}"} -- ${configs[@]+"${configs[@]}"}
 '''

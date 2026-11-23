@@ -946,8 +946,9 @@ class WithIcu(IcuCase):
 # one of them in a subshell of its own (measure_one), and each
 # workspace-wide audit runs its workspace command at the default major
 # org_pgrx_provision names beside its per-extension one (#1940).
-# fix:rust's compiles left its body for mise/rust_lint.py (#1911), whose
-# one call is `at_major`: test_pgrx_task_majors.py proves each of them
+# fix:rust's and lint:pg-clippy's compiles left their bodies for
+# mise/rust_lint.py and mise/pg_clippy.py (#1911), whose one call is
+# rust_lint's `at_major`: test_pgrx_task_majors.py proves each of them
 # carries its own major's headers and not the last one's.
 SITES = {
     "mise/pgrx-test.sh": 3,
@@ -955,7 +956,6 @@ SITES = {
     "mise/mutants-rust.sh": 2,
     "mise/semver-audit.sh": 2,
     "lint:msrv": 1,
-    "lint:pg-clippy": 1,
 }
 CANON = ENV_SH.parent.parent
 COMPILE = re.compile(r"\bcargo(-semver-checks)? |\bmutate ")
@@ -1088,7 +1088,7 @@ class NoLeak(unittest.TestCase):
             if CALL.search(site_text(task))
         )
         config = (CANON / "mise" / "config.toml").read_text(encoding="utf-8")
-        self.assertEqual(2, len(list(CALL.finditer(config))))
+        self.assertEqual(1, len(list(CALL.finditer(config))))
         sites = set(SITES)
         self.assertEqual(sites, found)
 
