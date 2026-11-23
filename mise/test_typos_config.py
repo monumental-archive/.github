@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Table tests for the delivered typos config's commit-SHA skip (#1249).
+"""Table tests for the delivered typos config (#1249, #2079).
+
+Two rulings live in `mise/typos.toml` and are driven here: the
+commit-SHA skip (#1249) and the fuzz-corpus exclusion (#2079).
 
 The v1.67.1 release PR went red on its own generated changelog: typos
 read the letters inside the abbreviated SHA `3ede177` as a word.
@@ -56,6 +59,44 @@ BY_POSITION = [
     f"ccc{RUN}1{RUN}",
     f"cccc{RUN}1{RUN}",
 ]
+
+
+# The kept input that reddened edtf's corpus PR (#2079), byte for byte,
+# with the misspelling typos found in it.
+CORPUS_RUN = "i" + "z"
+CORPUS_INPUT = f"Y6776E----{CORPUS_RUN}-x-&---z"
+CORPUS_MESSAGE = f"`{CORPUS_RUN}` should be `is`"
+CORPUS_FILE = "fuzz/corpus/normalize/07eca93f432491730957db8dd770ce35073a27ad"
+
+
+def typos_at(
+    path: str, text: str, *, belt: bool = True
+) -> subprocess.CompletedProcess[str]:
+    """Run the pinned typos as `lint:typos` does, over one planted path.
+
+    The task hands typos each tracked path, relative to the tree's root,
+    with `--force-exclude` so the config's `extend-exclude` still holds
+    for a path named explicitly. This plants `text` at `path` in a fresh
+    tree and names it the same way.
+
+    Returns:
+        The completed process, stdout and stderr captured.
+
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / path
+        target.parent.mkdir(parents=True)
+        target.write_text(text + "\n", encoding="utf-8")
+        args = [TYPOS, "--isolated", "--force-exclude"]
+        if belt:
+            args += ["-c", str(CONFIG)]
+        return subprocess.run(
+            [*args, path],
+            capture_output=True,
+            text=True,
+            check=False,
+            cwd=tmp,
+        )
 
 
 def typos(text: str, *, belt: bool = True) -> subprocess.CompletedProcess[str]:
@@ -128,6 +169,33 @@ class TyposShaTest(unittest.TestCase):
     def test_a_short_hex_token_is_still_checked(self) -> None:
         """Below seven characters the token is not taken for a SHA."""
         self.assert_red(f"{RUN}12", RUN_MESSAGE)
+
+
+class TyposFuzzCorpusTest(unittest.TestCase):
+    """The root `fuzz/corpus/` is data; the same bytes elsewhere are not."""
+
+    def assert_red_at(self, path: str) -> None:
+        """Red under the belt config at `path`, with the exact message."""
+        result = typos_at(path, CORPUS_INPUT)
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn(CORPUS_MESSAGE, result.stdout)
+        self.assertIn(path, result.stdout)
+
+    def test_a_corpus_input_passes(self) -> None:
+        """The edtf input, at its own path: green, and red without the belt."""
+        control = typos_at(CORPUS_FILE, CORPUS_INPUT, belt=False)
+        self.assertEqual(control.returncode, 2, control.stdout)
+        self.assertIn(CORPUS_MESSAGE, control.stdout)
+        result = typos_at(CORPUS_FILE, CORPUS_INPUT)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_the_same_bytes_outside_the_corpus_still_red(self) -> None:
+        """The exclusion is the path, not the content."""
+        self.assert_red_at("fuzz/normalize.txt")
+
+    def test_a_nested_corpus_is_still_checked(self) -> None:
+        """Anchored at the root: cargo-fuzz writes nowhere deeper."""
+        self.assert_red_at("vendor/fuzz/corpus/normalize/input")
 
 
 if __name__ == "__main__":

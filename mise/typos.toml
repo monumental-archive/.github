@@ -14,7 +14,16 @@
 # Vendored SPDX identifiers, verbatim from spdx/license-list-data — ids
 # like CC-BY-ND and Unicode-TOU read as misspellings to the dictionary.
 # Data, not prose; regenerated, never edited.
-extend-exclude = ["release/spdx-license-data.json"]
+#
+# A cargo-fuzz corpus is machine-generated input (#2079): each file is
+# the exact byte string that reached new code, so none can be edited,
+# and the next run writes different bytes, so no vocabulary entry can
+# keep up. The canon `.editorconfig` already unsets its checks for
+# `[fuzz/corpus/**]` for the same reason. edtf's scheduled corpus PR
+# went red on `iz` inside one kept input. The pattern is anchored at
+# the tree's root, the one place cargo-fuzz writes it: a `fuzz/corpus/`
+# anywhere deeper is still checked.
+extend-exclude = ["release/spdx-license-data.json", "fuzz/corpus/"]
 
 [default]
 # Abbreviated commit SHAs are not words (#1249). typos reads the letters
