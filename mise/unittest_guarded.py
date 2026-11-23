@@ -869,6 +869,46 @@ def worker(spec_path: Path) -> None:
     ).run(suite)
 
 
+def roots(dirs: list[str]) -> int:
+    """Discover and run several roots side by side (#2056).
+
+    Each root is this runner's own `discover --start-directory <root>
+    --pattern "test_*.py"`, in a process and a worker pool of its own.
+    One after another, each root waited on its slowest file while the
+    other workers idled (a 29-second file ran alone on four cores); side
+    by side, one root's tail overlaps the others' work. Each root's
+    output is held until every root has finished, then printed in the
+    order given, so the log reads as it did.
+
+    Returns:
+        The first nonzero status in the order given, else 0; 2 with no
+        root.
+
+    """
+    if not dirs:
+        print("usage: unittest_guarded.py roots <dir> [<dir>…]", file=sys.stderr)
+        return 2
+    with tempfile.TemporaryDirectory() as held:
+        logs = [Path(held) / f"{at}.log" for at in range(len(dirs))]
+        runs: list[subprocess.Popen[bytes]] = []
+        for root, log in zip(dirs, logs, strict=True):
+            argv = ["discover", "--start-directory", root, "--pattern", "test_*.py"]
+            with log.open("w", encoding="utf-8") as out:
+                runs.append(
+                    subprocess.Popen(
+                        [sys.executable, SELF, *argv],
+                        stdout=out,
+                        stderr=subprocess.STDOUT,
+                    )
+                )
+        codes: list[int] = []
+        for run, log in zip(runs, logs, strict=True):
+            codes.append(run.wait())
+            sys.stdout.write(log.read_text(encoding="utf-8"))
+        sys.stdout.flush()
+    return next((c for c in codes if c), 0)
+
+
 def main(argv: list[str]) -> int:
     """Hand the command line to unittest, with the guarded result.
 
@@ -881,6 +921,8 @@ def main(argv: list[str]) -> int:
     if argv[:1] == ["--worker"]:
         worker(Path(argv[1]))
         return 0
+    if argv[:1] == ["roots"]:
+        return roots(argv[1:])
     # `python3 -m unittest` puts the working directory first on the
     # import path; a script puts its own directory there. Match -m.
     sys.path[0] = START
