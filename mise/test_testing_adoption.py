@@ -11,9 +11,9 @@ task does not exist and every row fails on the lookup.
 Each red row asserts its message, not just the exit status: a planted
 row scored on exit alone can pass for the wrong reason.
 
-The table is held to the legs: each mutation leg's guard (`git ls-files
---error-unmatch "${var}"` and the `var=` it reads) names the file that
-adopts it, and the table must name the same one. A planted copy of the
+The table is held to the legs: each mutation leg's guard
+(`org_tracked_has "${var}"`, #2013, and the `var=` it reads) names the
+file that adopts it, and the table must name the same one. A planted copy of the
 legs' texts, in memory, with one name changed is red by name.
 
 stdlib `unittest`, matching the other mise/test_*.py; run through the
@@ -39,9 +39,7 @@ FLOOR = ".coverage-floor"
 MUTATION = "tracking it adopts the leg; docs/tooling-verdicts.md says what it holds"
 ADOPT = "mise run coverage:adopt writes it"
 SKIPPED = f"{TASK}: ships none of Rust, Go, Python, TypeScript, skipped\n"
-GUARD = re.compile(
-    r'^if ! git ls-files --error-unmatch (?:-- )?"\$\{(\w+)\}"', re.MULTILINE
-)
+GUARD = re.compile(r'^if ! org_tracked_has "\$\{(\w+)\}"', re.MULTILINE)
 
 
 def body() -> str:
@@ -101,8 +99,8 @@ def guarded(text: str) -> str | None:
     """Read the file a mutation leg's guard skips without.
 
     Returns:
-        The value of the variable the leg's first `git ls-files
-        --error-unmatch` guard reads, or None when the leg has no guard.
+        The value of the variable the leg's first `org_tracked_has`
+        guard reads, or None when the leg has no guard.
 
     """
     found = GUARD.search(text)
@@ -277,7 +275,7 @@ class TableAgainstLegs(unittest.TestCase):
         """A leg that lost its guard reads as no file, not as agreement."""
         texts = legs()
         text = texts["mutants-python.sh"]
-        unguarded = text.replace("--error-unmatch", "--others")
+        unguarded = text.replace("org_tracked_has", "org_tracked")
         self.assertNotEqual(text, unguarded)
         texts["mutants-python.sh"] = unguarded
         line = (

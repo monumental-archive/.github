@@ -36,6 +36,7 @@ import decoded
 import hermetic
 import msrv_lint
 import rust_task
+import rust_workspaces
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -92,8 +93,9 @@ CHECK = "check\t1.85.0\tdefault\tplain@0.1.0 other@0.1.0\n"
 PG_CHECK = "check\t1.85.0\t--no-default-features --features pg17\text@0.2.0\n"
 NOTE = "note\tunverified: gone@0.1.0 (CLIPPY_EXCLUDE)\n"
 META = '<{"planted": true}>'
-FETCH = "cargo fetch --locked"
-METADATA = "cargo metadata --format-version 1 --locked --all-features"
+ROOT = "--manifest-path Cargo.toml"
+FETCH = f"cargo fetch --locked {ROOT}"
+METADATA = f"cargo metadata --format-version 1 --locked {ROOT} --all-features"
 PINS = "mise ls rust --json"
 # Nothing printed, or nothing called, typed for the comparison.
 NONE: list[str] = []
@@ -147,8 +149,8 @@ def body() -> str:
     return decoded.as_str(entry["run"], f"{TASK}.run")
 
 
-class Body(unittest.TestCase):
-    """Each branch of the body: its commands, its lines, its status."""
+class Planted(unittest.TestCase):
+    """The planted belt, stubs and log every in-process row runs in."""
 
     @override
     def setUp(self) -> None:
@@ -191,11 +193,18 @@ class Body(unittest.TestCase):
         self.surface.write_text(surface, encoding="utf-8")
         self.plan.write_text(plan, encoding="utf-8")
 
-    def call(self, manifest: Path | None = None) -> tuple[int, list[str], list[str]]:
+    def call(
+        self,
+        manifest: str | None = None,
+        roots: tuple[str, ...] | None = ("Cargo.toml",),
+    ) -> tuple[int, list[str], list[str]]:
         """Run the helper in this process, as the task does.
 
         `manifest` set runs `workspace` alone, at that manifest, with
-        the count line main would print.
+        the count line main would print. `roots` is what
+        rust_workspaces.resolved answers, None for a tree it refused: the
+        root manifest alone unless a row says otherwise
+        (mise/test_msrv_roots.py runs the real one).
 
         Returns:
             The status, and the stdout and stderr lines.
@@ -204,6 +213,11 @@ class Body(unittest.TestCase):
         out, err = self.tmp / "out", self.tmp / "err"
         with (
             mock.patch.dict(os.environ, self.env, clear=True),
+            mock.patch.object(
+                rust_workspaces,
+                "resolved",
+                return_value=None if roots is None else list(roots),
+            ),
             captured(out, err),
         ):
             if manifest is None:
@@ -235,15 +249,21 @@ class Body(unittest.TestCase):
         """
         plan = (
             "msrv_plan.py --toolchains <tmp>/toolchains.json --exclude "
-            f" --pgrx {pgrx} --floor <belt>/rust-floor.toml {META}"
+            f" --pgrx {pgrx} --floor <belt>/rust-floor.toml --root Cargo.toml {META}"
         )
         return [PINS, FETCH, METADATA, f"gate_surface.py --exclude  {META}", plan]
+
+
+class Body(Planted):
+    """Each branch of the body: its commands, its lines, its status."""
 
     def test_one_group_compiles_at_its_toolchain_and_is_counted(self) -> None:
         """A plain group: one `-p` per spec, the gate's features, the count."""
         status, said, err = self.call()
         self.assertEqual((0, NONE), (status, err))
-        check = "cargo check --locked --all-features -p plain@0.1.0 -p other@0.1.0"
+        check = (
+            f"cargo check --locked {ROOT} --all-features -p plain@0.1.0 -p other@0.1.0"
+        )
         self.assertEqual(lines(*self.planned(), f"{check} {{1.85.0}}"), self.logged())
         want = [
             "lint:msrv: compiling at 1.85.0: plain@0.1.0 other@0.1.0",
@@ -258,11 +278,13 @@ class Body(unittest.TestCase):
         self.assertEqual(0, status)
         logged = self.logged()
         self.assertEqual(
-            "cargo metadata --format-version 1 --locked --features a", logged[2]
+            f"cargo metadata --format-version 1 --locked {ROOT} --features a", logged[2]
         )
         self.assertEqual(f"gate_surface.py --exclude gone {META}", logged[3])
         self.assertIn("--exclude gone --pgrx ", logged[4])
-        check = "cargo check --locked --features a -p plain@0.1.0 -p other@0.1.0"
+        check = (
+            f"cargo check --locked {ROOT} --features a -p plain@0.1.0 -p other@0.1.0"
+        )
         self.assertEqual(f"{check} {{1.85.0}}", logged[5])
 
     def test_a_note_is_said_and_nothing_verified_says_so(self) -> None:
@@ -283,15 +305,18 @@ class Body(unittest.TestCase):
         self.plant(PLAIN + EXTENSION, CHECK + PG_CHECK)
         status, said, err = self.call()
         self.assertEqual((0, NONE), (status, err))
-        own = "cargo check --locked --no-default-features --features pg17 -p ext@0.2.0"
+        own = (
+            f"cargo check --locked {ROOT} --no-default-features --features pg17"
+            " -p ext@0.2.0"
+        )
         want = [
             *self.planned("ext:17"),
             "prepare 17",
             "mise ls aqua:theseus-rs/postgresql-binaries --json",
             "pgrx_postgres.py --majors 17 <[]>",
             (
-                "cargo check --locked --all-features -p plain@0.1.0 -p other@0.1.0"
-                " {1.85.0}"
+                f"cargo check --locked {ROOT} --all-features"
+                " -p plain@0.1.0 -p other@0.1.0 {1.85.0}"
             ),
             f"{own} [-Iicu-pg17-sdk] {{1.85.0}}",
         ]
@@ -317,7 +342,9 @@ class Body(unittest.TestCase):
         self.env["PLANT_FAIL"] = "cargo-check"
         status, said, err = self.call()
         self.assertEqual(101, status)
-        failed = "msrv_plan.py --failed 1.85.0 plain@0.1.0 other@0.1.0 <>"
+        failed = (
+            "msrv_plan.py --failed 1.85.0 plain@0.1.0 other@0.1.0 --root Cargo.toml <>"
+        )
         self.assertEqual(failed, self.logged()[-1])
         self.assertEqual(7, len(self.logged()))
         compiling = lines("lint:msrv: compiling at 1.85.0: plain@0.1.0 other@0.1.0")
@@ -329,7 +356,9 @@ class Body(unittest.TestCase):
         self.plant(PLAIN, "verdict\tx\n" + CHECK)
         status, said, err = self.call()
         self.assertEqual((1, NONE), (status, said))
-        unreadable = "lint:msrv: unreadable plan record from msrv_plan.py: verdict"
+        unreadable = (
+            "lint:msrv: Cargo.toml: unreadable plan record from msrv_plan.py: verdict"
+        )
         self.assertEqual(lines(unreadable), err)
         self.assertEqual(self.planned(), self.logged())
 
@@ -407,14 +436,18 @@ class Body(unittest.TestCase):
         self.assertEqual(lines(refused), err)
         self.assertEqual(self.planned()[:4], self.logged())
 
+
+class Roots(Planted):
+    """The workspace roots: each one run, every red one past, one count."""
+
     def test_a_workspace_manifest_reaches_every_cargo_call(self) -> None:
         """`workspace` at a manifest: the fetch, the graph and each compile name it."""
         self.plant(PLAIN, CHECK)
-        status, said, _ = self.call(Path("fuzz/Cargo.toml"))
+        status, said, _ = self.call("fuzz/Cargo.toml")
         self.assertEqual(0, status)
         at = "--manifest-path fuzz/Cargo.toml"
         logged = self.logged()
-        self.assertEqual(f"{FETCH} {at}", logged[0])
+        self.assertEqual(f"cargo fetch --locked {at}", logged[0])
         self.assertEqual(
             f"cargo metadata --format-version 1 --locked {at} --all-features", logged[1]
         )
@@ -423,6 +456,30 @@ class Body(unittest.TestCase):
         )
         self.assertEqual(f"{check} {{1.85.0}}", logged[-1])
         self.assertEqual("lint:msrv: 1 checked", said[-1])
+
+    def test_every_root_runs_past_a_red_one(self) -> None:
+        """Two roots, every compile refused: both roots run, the first red kept."""
+        self.env["PLANT_FAIL"] = "cargo-check"
+        status, said, _ = self.call(roots=("Cargo.toml", "fuzz/Cargo.toml"))
+        self.assertEqual(101, status)
+        fetched = [line for line in self.logged() if line.startswith("cargo fetch")]
+        want = [FETCH, "cargo fetch --locked --manifest-path fuzz/Cargo.toml"]
+        self.assertEqual(want, fetched)
+        self.assertEqual(2, len(said))
+
+    def test_the_count_covers_every_root(self) -> None:
+        """Two roots of one group each: one count line, of both."""
+        status, said, _ = self.call(roots=("Cargo.toml", "fuzz/Cargo.toml"))
+        self.assertEqual(0, status)
+        count = "lint:msrv: 2 declared minimum(s) compiled at the toolchain they name"
+        self.assertEqual(count, said[-1])
+        self.assertEqual(3, len(said))
+
+    def test_a_tree_whose_roots_cannot_be_named_is_red(self) -> None:
+        """rust_workspaces.resolved said why: status 1, and nothing run."""
+        status, said, _ = self.call(roots=None)
+        self.assertEqual((1, NONE), (status, said))
+        self.assertEqual(NONE, self.logged())
 
 
 class Helpers(unittest.TestCase):

@@ -157,9 +157,10 @@ repos="${api_body}"
 # NAME against the roster in slsa/assert-policy.json (#680), so a
 # narrowed AUDIT_TOKEN repo selection is red with the unseen names, and
 # an import edits the roster and nothing here.
+# Asked from the canon's top, by the path git tracks it under (#2013).
 canon_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-"${canon_root}/mise/roster-reconcile.sh" repo-baseline \
-  "${canon_root}/slsa/assert-policy.json" <<< "${repos}"
+(cd "${canon_root}" && mise/roster-reconcile.sh repo-baseline \
+  slsa/assert-policy.json <<< "${repos}")
 # Reconciled, so the listing IS the population; counted only to say
 # what was covered on success below, never compared to anything.
 seen_repos="$(wc -w <<< "${repos}" | tr -d ' ')"

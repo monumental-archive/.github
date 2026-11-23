@@ -37,6 +37,7 @@ import hermetic
 CANON = Path(__file__).resolve().parent.parent
 BELT = CANON / "mise"
 BASH = hermetic.tool("bash")
+GIT = hermetic.tool("git")
 
 FLOWS = CANON / ".github" / "workflows"
 PUBLISH = (FLOWS / "publish.yml").read_text(encoding="utf-8")
@@ -176,6 +177,9 @@ def lint(workflow: str, name: str = "publish.yml") -> subprocess.CompletedProces
         (flows / name).write_text(workflow, encoding="utf-8")
         env = hermetic.env()
         env |= {"ORG_BELT_DIR": str(BELT), "ORG_CANON_DIR": str(CANON)}
+        # The lint reads a tracked orchestrator only (#2013).
+        for step in (["init", "-q"], ["add", "-A"]):
+            subprocess.run([GIT, *step], cwd=tmp, env=env, check=True)
         as_mise = hermetic.task_run("lint:release-phases", BODY)
         return subprocess.run(
             as_mise.argv,

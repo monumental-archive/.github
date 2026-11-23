@@ -35,15 +35,13 @@ Usage:
 
 import difflib
 import re
-import shutil
-import subprocess
 import sys
 from pathlib import Path
 
 import findings
+import tracked
 
 FIX = "fix:pg-schema"
-GIT = shutil.which("git") or "git"
 ARGUMENTS = 3  # mode, raw, snapshot
 
 
@@ -65,21 +63,6 @@ def normalise(text: str) -> str:
     if not statements:
         return ""
     return "\n".join(sorted(statements)) + "\n"
-
-
-def tracked(path: str) -> bool:
-    """Ask git whether the snapshot is tracked in the current repository.
-
-    Returns:
-        True when `git ls-files --error-unmatch` finds it.
-
-    """
-    result = subprocess.run(
-        [GIT, "ls-files", "--error-unmatch", "--", path],
-        capture_output=True,
-        check=False,
-    )
-    return result.returncode == 0
 
 
 def surface(raw: str) -> str | None:
@@ -113,7 +96,7 @@ def check(raw: str, snapshot: str) -> int:
         or different, or the generation is unusable.
 
     """
-    if not tracked(snapshot):
+    if not tracked.has(snapshot):
         findings.finding(
             "",
             f"no snapshot tracked at {snapshot}",

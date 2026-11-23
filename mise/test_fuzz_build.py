@@ -240,6 +240,7 @@ class FuzzBuild(unittest.TestCase):
         self.log = self.stubs / "calls.log"
         self.refusal = self.stubs / "refusal.txt"
         self.git("init", "-q")
+        self.git("add", "--", "fuzz/Cargo.lock")
 
     def git(self, *args: str) -> None:
         """Run git in the planted tree, under the fixture environment."""
@@ -260,8 +261,9 @@ class FuzzBuild(unittest.TestCase):
             self.git("add", "--", str(path.relative_to(self.root)))
 
     def manifest(self, text: str) -> None:
-        """Write fuzz/Cargo.toml."""
+        """Write fuzz/Cargo.toml and track it: the lint asks git (#2013)."""
         (self.root / "fuzz" / "Cargo.toml").write_text(text, encoding="utf-8")
+        self.git("add", "--", "fuzz/Cargo.toml")
 
     def refuse(self, text: str) -> None:
         """Make the probe fail with cargo's `text` on stderr."""

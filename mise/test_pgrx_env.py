@@ -8,6 +8,12 @@ directory, so no pgrx task writes or reads state another task can see
 and the belt never runs `cargo pgrx init` (#1940). A stand-in `cargo`
 that logs what it was given, over a planted install, holds that.
 
+Every such call also names pgrx's clang driver by its real path
+(#2022): given none, pgrx searches `PATH` for one and watches every
+directory it passed, so a runner's newer mise directory rebuilt
+`pgrx-pg-sys` on every warm cache. A stand-in clang behind a link
+holds that.
+
 And `org_pgrx_darwin_icu`, against stand-in `pg_config`s and a
 stand-in `mise ls` (#1774): on a Mac each Postgres major gets the ICU
 headers its own build names, in a subshell with its one cargo call, so
@@ -38,11 +44,14 @@ BASH = hermetic.tool("bash")
 TASK = "test:pgrx"
 
 # A stand-in cargo that logs, per call, its arguments and the two
-# variables pgrx reads its Postgres from, and answers `cargo metadata`
+# variables pgrx reads its Postgres from, and in a log of their own the
+# two it reads its clang from (#2022), and answers `cargo metadata`
 # with the target directory a row planted.
 CARGO_STUB = r"""#!/usr/bin/env bash
 printf '%s|%s|%s\n' "$*" "${PGRX_PG_CONFIG_PATH:-}" "${PGRX_HOME:-}" \
   >> "${PLANT_ROOT}/cargo.log"
+printf '%s|%s\n' "${CLANG_PATH-unset}" "${LIBCLANG_PATH-unset}" \
+  >> "${PLANT_ROOT}/clang.log"
 if [[ $1 == metadata ]]; then
   if [[ -n ${PLANT_METADATA:-} ]]; then
     cat "${PLANT_METADATA}"
@@ -56,6 +65,19 @@ PG_MISE_STUB = r"""#!/usr/bin/env bash
 [[ $1 == ls && $2 == aqua:theseus-rs/postgresql-binaries && $3 == --json ]] || exit 1
 cat "${PLANT_ROOT}/pg.json"
 """
+# `xcrun --find clang`, the Mac's lookup: the planted driver's link,
+# as Xcode's is a path that is not the real one. Anything else is the
+# Mac's own xcrun (the SDK correction asks it), never reached on Linux.
+CLANG_XCRUN_STUB = r"""#!/usr/bin/env bash
+[[ $1 == --find && $2 == clang ]] || exec /usr/bin/xcrun "$@"
+echo "${PLANT_ROOT}/bin/clang"
+"""
+# The xcrun of a Mac with no clang: every lookup fails.
+NO_XCRUN_STUB = "#!/usr/bin/env bash\nexit 1\n"
+NO_CLANG = (
+    "no clang on PATH: pgrx needs clang and its libclang;"
+    " install them, or set CLANG_PATH and LIBCLANG_PATH"
+)
 INSTALL = "postgresql-16.16.0-x86_64-unknown-linux-gnu"
 OLD = 946684800  # 2000-01-01 00:00 UTC
 # The race row: this many tasks clone one new Postgres at once.
@@ -77,9 +99,23 @@ class PostgresCase(unittest.TestCase):
         self.root = Path(tmp.name).resolve()
         bindir = self.root / "bin"
         bindir.mkdir()
-        for name, body in (("cargo", CARGO_STUB), ("mise", PG_MISE_STUB)):
+        for name, body in (
+            ("cargo", CARGO_STUB),
+            ("mise", PG_MISE_STUB),
+            ("xcrun", CLANG_XCRUN_STUB),
+        ):
             (bindir / name).write_text(body, encoding="utf-8")
             (bindir / name).chmod(0o755)
+        # One LLVM install, its driver reached through a link on PATH
+        # (Linux's /usr/bin/clang is one), its libclang beside it.
+        self.llvm = self.root / "llvm"
+        (self.llvm / "bin").mkdir(parents=True)
+        (self.llvm / "lib").mkdir()
+        driver = self.llvm / "bin" / "clang-19"
+        driver.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+        driver.chmod(0o755)
+        (self.llvm / "lib" / "libclang.so.19.1").touch()
+        (bindir / "clang").symlink_to(driver)
         self.install(self.root / "pg" / "16.16.0", INSTALL)
         self.cache = self.root / "cache"
         self.target = self.root / "work" / "target"
@@ -157,6 +193,16 @@ class PostgresCase(unittest.TestCase):
         code, _, err = self.bash("org_pgrx_major 16 cargo build", **env)
         self.assertEqual(0, code, err)
         return self.seen()[-1]
+
+    def clang(self) -> list[str]:
+        """Read what the last cargo call saw of its clang.
+
+        Returns:
+            [CLANG_PATH, LIBCLANG_PATH], "unset" for one not set.
+
+        """
+        log = self.root / "clang.log"
+        return log.read_text(encoding="utf-8").splitlines()[-1].split("|")
 
 
 class OwnPostgres(PostgresCase):
@@ -267,6 +313,51 @@ class OwnPostgres(PostgresCase):
         code, _, err = self.bash("org_pgrx_major 17 cargo build")
         self.assertEqual(1, code)
         self.assertIn("no Postgres 17.x is pinned", err)
+        none: list[list[str]] = []
+        self.assertEqual(none, self.seen())
+
+
+class Clang(PostgresCase):
+    """Every pgrx compile is given its clang; pgrx searches nothing (#2022)."""
+
+    def test_the_build_sees_the_real_driver_and_its_libclang(self) -> None:
+        """CLANG_PATH is the driver's real path, LIBCLANG_PATH its lib.
+
+        Red at d917a760: neither was set, so pgrx searched PATH for
+        clang and watched every directory it passed.
+        """
+        self.built()
+        driver = self.llvm / "bin" / "clang-19"
+        want = [str(driver), str(self.llvm / "lib")]
+        self.assertEqual(want, self.clang())
+        self.assertTrue(Path(self.clang()[0]).is_absolute())
+
+    def test_a_callers_clang_path_is_passed_through_alone(self) -> None:
+        """A caller's CLANG_PATH reaches cargo as it is, no libclang added.
+
+        A caller's LIBCLANG_PATH alone is kept too, and the driver is
+        still named: the half the caller did not set is the belt's.
+        Red at d917a760 on that second half, which named no driver.
+        """
+        self.built(CLANG_PATH="/opt/llvm/bin/clang")
+        want = ["/opt/llvm/bin/clang", "unset"]
+        self.assertEqual(want, self.clang())
+        self.built(LIBCLANG_PATH="/opt/llvm/lib")
+        driver = self.llvm / "bin" / "clang-19"
+        want = [str(driver), "/opt/llvm/lib"]
+        self.assertEqual(want, self.clang())
+
+    def test_no_clang_on_path_is_red_and_runs_nothing(self) -> None:
+        """No driver to name: red with the remedy, before any command."""
+        bare = self.root / "bare"
+        bare.mkdir()
+        for name, body in (("cargo", CARGO_STUB), ("xcrun", NO_XCRUN_STUB)):
+            (bare / name).write_text(body, encoding="utf-8")
+            (bare / name).chmod(0o755)
+        (bare / "uname").symlink_to(hermetic.tool("uname"))
+        code, _, err = self.bash("org_pgrx_major 16 cargo build", PATH=str(bare))
+        self.assertEqual(1, code, err)
+        self.assertEqual(f"{TASK}: {NO_CLANG}", err.splitlines()[0])
         none: list[list[str]] = []
         self.assertEqual(none, self.seen())
 

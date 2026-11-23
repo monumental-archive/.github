@@ -5,11 +5,12 @@
 #
 # The tasks that compile a pgrx extension — `lint:pg-clippy`,
 # `test:pgrx`, `fix:rust`'s extension pass, and the workspace-wide
-# mutation and semver audits — each need the same two things first: a
-# Postgres of each major they build, theirs alone (#1940), and, on
-# macOS, a correction to flags the prebuilt Postgres recorded on
-# somebody else's machine. Written in each they would drift; written
-# here they cannot.
+# mutation and semver audits — each need the same three things first:
+# a Postgres of each major they build, theirs alone (#1940), a clang
+# driver named by its real path, so pgrx watches no PATH directory
+# (#2022), and, on macOS, a correction to flags the prebuilt Postgres
+# recorded on somebody else's machine. Written in each they would
+# drift; written here they cannot.
 #
 # The coverage measurement is no longer among them (#1656). It compiled
 # the extension under `cargo llvm-cov --workspace` (#917), but the
@@ -199,10 +200,10 @@ org_pgrx_darwin_prepare() { # usage: org_pgrx_darwin_prepare <Postgres majors, c
 
 org_pgrx_major() { # usage: org_pgrx_major <Postgres major, or empty> <command…>
   # One command that compiles the extension at one Postgres major, run in
-  # a subshell holding that major's ICU headers (#1774) and its Postgres
-  # (#1940): both end with the command, so the next major starts from the
-  # caller's environment. Empty: a command that compiles no Postgres, run
-  # as it is.
+  # a subshell holding the clang driver (#2022), that major's ICU headers
+  # (#1774) and its Postgres (#1940): all end with the command, so the
+  # next major starts from the caller's environment. Empty: a command
+  # that compiles no Postgres, run as it is.
   local major="$1"
   shift
   (
@@ -213,10 +214,57 @@ org_pgrx_major() { # usage: org_pgrx_major <Postgres major, or empty> <command�
 
 org_pgrx_major_env() { # usage: org_pgrx_major_env <Postgres major>, in the subshell that builds it
   # What org_pgrx_major exports, for a subshell that runs more than one
-  # command at the major (test:pgrx's measured run): the ICU headers,
-  # then the Postgres.
+  # command at the major (test:pgrx's measured run): the clang driver,
+  # the ICU headers, then the Postgres.
+  org_pgrx_clang || return 1
   org_pgrx_darwin_icu "$1" || return 1
   org_pgrx_postgres "$1"
+}
+
+org_pgrx_clang() { # usage: org_pgrx_clang, in the subshell that builds it
+  # THE BELT NAMES THE CLANG DRIVER; PGRX SEARCHES NOTHING (#2022). Given
+  # no absolute driver, pgrx 0.20's build script searches PATH for
+  # `clang-<major>`, and every PATH directory it passes before the hit
+  # is handed to cargo as `rerun-if-changed`. Cargo judges a directory
+  # by the newest mtime under it, and on a runner
+  # ~/.local/share/mise/bin is ahead of /usr/bin and rewritten in every
+  # job, so a build restored from the cache was always stale: measured
+  # on edtf, `pgrx-pg-sys` compiled twice per pgrx leg on an exact cache
+  # hit, about 4m30s. An absolute CLANG_PATH returns before any PATH
+  # lookup, so no PATH directory is watched.
+  #
+  # The driver is the platform's own (`xcrun --find clang` on Darwin,
+  # the first `clang` on PATH elsewhere), named by its real path. Its
+  # libclang, when `<driver's directory>/../lib` holds one, is
+  # LIBCLANG_PATH: the library pgrx loads and the driver it runs are
+  # then one LLVM install, so their majors cannot differ. Both values
+  # are the same on every run of one machine, so after the first build
+  # they never change a fingerprint. A caller's CLANG_PATH is left as
+  # it is with nothing else exported, and a caller's LIBCLANG_PATH is
+  # kept.
+  [[ -z ${CLANG_PATH:-} ]] || return 0
+  local kernel driver="" lib found
+  kernel=$(uname -s)
+  if [[ ${kernel} == Darwin ]]; then
+    driver=$(xcrun --find clang 2> /dev/null) || driver=""
+  else
+    driver=$(command -v clang) || driver=""
+  fi
+  if [[ -z ${driver} ]]; then
+    org_finding "" "no clang on PATH: pgrx needs clang and its libclang; install them, or set CLANG_PATH and LIBCLANG_PATH"
+    return 1
+  fi
+  : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
+  driver=$("${ORG_PYTHON}" -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "${driver}") || return 1
+  export CLANG_PATH="${driver}"
+  [[ -z ${LIBCLANG_PATH:-} ]] || return 0
+  lib="${driver%/*/*}/lib"
+  for found in "${lib}"/libclang.so* "${lib}"/libclang-*.so* "${lib}"/libclang.dylib; do
+    [[ -e ${found} ]] || continue
+    export LIBCLANG_PATH="${lib}"
+    return 0
+  done
+  return 0
 }
 
 org_pgrx_postgres() { # usage: org_pgrx_postgres <Postgres major>, in the subshell that builds it

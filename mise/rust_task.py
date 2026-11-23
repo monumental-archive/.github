@@ -6,9 +6,9 @@ lint:msrv's body (mise/msrv_lint.py) and lint:rust's and fix:rust's
 its Python for its other helpers, a command with this process's streams
 or read, a function of a belt shell script called through bash, the
 gate's features and compile surface, the installed components, the
-clippy ladder, the pgrx derivation and provisioning, and the tree's
-workspaces from mise/rust_workspaces.py (#2004). Written once
-here, so the helpers cannot drift apart on any of them.
+clippy ladder, and the pgrx derivation and provisioning. Written once
+here, so the helpers cannot drift apart on any of them. The tree's
+workspaces are mise/rust_workspaces.py's `resolved()` (#2004, #2011).
 
 The ladder stays in mise/clippy-ladder.sh and the pgrx steps in
 mise/pgrx-env.sh, each written once for every task that needs it, shell
@@ -28,8 +28,6 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import findings
-import rust_workspaces
 import tracked
 
 if TYPE_CHECKING:
@@ -304,22 +302,3 @@ def surface(cargo: str, where: Sequence[str] = ()) -> tuple[int, str]:
         [python(), str(belt() / "gate_surface.py"), "--exclude", exclude], meta
     )
     return status or meta_status, records
-
-
-def workspace_roots() -> list[str] | None:
-    """Name the tree's workspaces, from the belt's one derivation (#2004).
-
-    Returns:
-        Each root manifest, the top one first; None after a finding.
-
-    """
-    try:
-        return rust_workspaces.roots()
-    except rust_workspaces.UnresolvedError:
-        return None
-    except subprocess.CalledProcessError as exc:
-        # git could not name the tree's top: the derivation's own words.
-        said: object = exc.stderr
-        text = os.fsdecode(said) if isinstance(said, bytes) else str(said)
-        findings.finding("", "git could not name the tree", text.strip().splitlines())
-        return None

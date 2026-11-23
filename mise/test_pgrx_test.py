@@ -237,6 +237,18 @@ class Planted(unittest.TestCase):
         self.git("init", "-q")
         self.git("add", "Cargo.toml")
 
+    def as_mise(self, task: str) -> dict[str, str]:
+        """Give a body what mise gives it: its name and the planted belt's writer.
+
+        Without BASH_ENV a body has no `org_tracked_has`, and a negated
+        call that is not found reads as "absent" (#2013).
+
+        Returns:
+            MISE_TASK_NAME and BASH_ENV.
+
+        """
+        return {"MISE_TASK_NAME": task, "BASH_ENV": str(self.belt / "findings.sh")}
+
     def git(self, *args: str) -> None:
         """Run git in the planted tree, scrubbed of the caller's git state."""
         subprocess.run([GIT, *args], cwd=self.tree, env=hermetic.env(), check=True)
@@ -556,7 +568,11 @@ class CoverageTasks(Planted):
         self.floor()
         body = task_body("coverage:check")
         done, log = self.run_bash(
-            ["-c", body], PLANT_LF="10", PLANT_LH="9", **self.measured_run()
+            ["-c", body],
+            PLANT_LF="10",
+            PLANT_LH="9",
+            **self.as_mise("coverage:check"),
+            **self.measured_run(),
         )
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertEqual(NOTHING, self.suites(log))
@@ -586,7 +602,9 @@ class CoverageTasks(Planted):
         """The removed variable is refused whatever it names (#1653)."""
         self.floor()
         body = task_body("coverage:check")
-        done, _ = self.run_bash(["-c", body], COVERAGE_EXCLUDE="lab-pg")
+        done, _ = self.run_bash(
+            ["-c", body], COVERAGE_EXCLUDE="lab-pg", **self.as_mise("coverage:check")
+        )
         self.assertEqual(1, done.returncode)
         self.assertIn(
             "coverage:check: COVERAGE_EXCLUDE is set (lab-pg) — it is removed"

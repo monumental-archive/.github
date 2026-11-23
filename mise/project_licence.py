@@ -24,6 +24,7 @@ import pathlib
 import sys
 
 import findings
+import tracked
 from decoded import UndecodableError, as_array, as_object, is_strings, load_toml
 
 EXPECTED_ARGC = 2
@@ -120,8 +121,11 @@ def main(argv: list[str]) -> int:
     except UndecodableError as error:
         findings.finding("REUSE.toml", str(error))
         return 1
+    # A declaration counts when the repository tracks it (#2013); the
+    # tree is the working directory's, whatever GIT_DIR a hook carries.
     states = pathlib.Path(".badge-states")
-    text = states.read_text(encoding="utf-8") if states.is_file() else ""
+    tracked_states = tracked.has(str(states), root=pathlib.Path.cwd())
+    text = states.read_text(encoding="utf-8") if tracked_states else ""
     choice, errors = decide(caller, names, declared(text))
     if errors:
         head, *rest = errors

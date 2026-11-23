@@ -12,6 +12,10 @@ different files.
   disk (`os.fsdecode`). With `root`, the listing is that tree's, and no
   `GIT_*` variable reaches git: git exports GIT_DIR to hooks in a
   linked worktree, and `-C` does not outrank it (#857).
+- `has(path, root=None)`: whether git tracks `path` (#2013), on disk
+  or not: an untracked file is absent, a tracked file deleted from the
+  working tree present. Raises `GitUnanswerableError` on any git status
+  but 0 and 1, so a failed git is never read as absent.
 - `stdin_paths()`: the list a task body piped in from `org_tracked`,
   NUL-separated on standard input, decoded the same way. A stream that
   carries text only (a test's `io.StringIO`) is split on NUL as it is.
@@ -55,11 +59,7 @@ def tracked(*pathspecs: str, root: Path | None = None) -> list[str]:
         The paths, relative to the tree's top, in git's order.
 
     """
-    where: list[str] = []
-    env: dict[str, str] | None = None
-    if root is not None:
-        where = ["-C", str(root)]
-        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    where, env = _where(root)
     out = subprocess.run(
         [GIT, *where, "-c", "core.quotePath=false", "ls-files", "-z", "--", *pathspecs],
         capture_output=True,
@@ -67,6 +67,46 @@ def tracked(*pathspecs: str, root: Path | None = None) -> list[str]:
         env=env,
     ).stdout
     return split(out)
+
+
+class GitUnanswerableError(RuntimeError):
+    """Git could not say whether a path is tracked."""
+
+
+def _where(root: Path | None) -> tuple[list[str], dict[str, str] | None]:
+    """Point git at `root`, with no `GIT_*` variable outranking `-C`.
+
+    Returns:
+        The `-C` arguments and the environment, both empty for no root.
+
+    """
+    if root is None:
+        return [], None
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    return ["-C", str(root)], env
+
+
+def has(path: str, root: Path | None = None) -> bool:
+    """Say whether git tracks `path`.
+
+    Returns:
+        True when git exits 0, False when it exits 1.
+
+    Raises:
+        GitUnanswerableError: git exited with any other status.
+
+    """
+    where, env = _where(root)
+    done = subprocess.run(
+        [GIT, *where, "ls-files", "--error-unmatch", "--", path],
+        capture_output=True,
+        check=False,
+        env=env,
+    )
+    if done.returncode in {0, 1}:
+        return done.returncode == 0
+    msg = f"git could not say whether {path} is tracked (exit {done.returncode})"
+    raise GitUnanswerableError(msg)
 
 
 def stdin_paths() -> list[str]:

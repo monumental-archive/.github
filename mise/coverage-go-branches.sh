@@ -36,7 +36,7 @@ label="${1:-coverage:go-branches}"
 # The task this script reports for, where mise named none (#1934).
 org_task "${label}"
 
-if [[ ! -f go.mod ]]; then
+if ! org_tracked_has go.mod; then
   org_finding "" "no go.mod — the go-branches leg measures a Go module"
   exit 1
 fi

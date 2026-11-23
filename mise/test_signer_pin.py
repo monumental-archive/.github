@@ -181,13 +181,18 @@ class Branches(unittest.TestCase):
 
     @override
     def setUp(self) -> None:
-        """Plant an empty tree."""
+        """Plant an empty repository: the pin is asked of git (#2013)."""
         self.tree = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tree)
         self.env = hermetic.env(MISE_TASK_NAME=TASK)
+        self.git("init", "-q")
 
-    def plant(self, name: str, text: str | bytes) -> str:
-        """Write one file into the tree.
+    def git(self, *args: str) -> None:
+        """Run git in the planted tree."""
+        subprocess.run([GIT, *args], cwd=self.tree, env=self.env, check=True)
+
+    def plant(self, name: str, text: str | bytes, *, track: bool = True) -> str:
+        """Write one file into the tree, and track it unless told not to.
 
         Returns:
             Its path from the tree's top.
@@ -199,6 +204,8 @@ class Branches(unittest.TestCase):
             path.write_bytes(text)
         else:
             path.write_text(text, encoding="utf-8")
+        if track:
+            self.git("add", "--", name)
         return name
 
     def helper(self, *argv: str) -> hermetic.Called:
@@ -304,6 +311,15 @@ class Branches(unittest.TestCase):
             ),
         ]
         self.assertEqual(want, done.stderr.splitlines())
+
+    def test_an_untracked_pin_file_is_no_second_copy(self) -> None:
+        """On disk and untracked, the pin states nothing: green (#2013)."""
+        rel = self.plant("a.yml", workflow())
+        self.plant(signer_pin.PIN_FILE, f"{SHA}\n", track=False)
+        done = self.check(rel)
+        self.assertEqual(0, done.returncode, done.stderr)
+        want = [f"lint:signer-pin: all signer references agree on {SHA}"]
+        self.assertEqual(want, done.stdout.splitlines())
 
     def test_readers_are_red_and_named(self) -> None:
         """Readers on non-comment lines named; a comment is not a reader."""

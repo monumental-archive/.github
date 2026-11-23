@@ -72,7 +72,7 @@ lint_root() {
   local manifest=$1 dir="" config variants name variant stale=""
   [[ ${manifest} != */* ]] || dir="${manifest%/*}/"
   config="${dir}deny.toml"
-  [[ -f ${config} ]] || {
+  org_tracked_has "${config}" || {
     org_finding "${dir%/}" "Cargo.lock present but no deny.toml — copy scaffold/deny.toml from the canon"
     return 1
   }

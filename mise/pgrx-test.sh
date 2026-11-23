@@ -209,8 +209,8 @@ measure_one() { # usage: measure_one <dir> <crate> <major>
     # And of its own compiler (#1877, rust-coverage-env.sh says why).
     compiler=$("${ORG_PYTHON}" "${belt}/gate_cache_key.py" digest) || exit 1
     export CARGO_TARGET_DIR="${root}/llvm-cov-${leg}-${compiler}"
-    # Its major's ICU headers and Postgres, after the target directory
-    # the Postgres clone is chosen by (#1940).
+    # Its clang driver (#2022), its major's ICU headers and Postgres,
+    # after the target directory the Postgres clone is chosen by (#1940).
     org_pgrx_major_env "${one}" || exit 1
     envs=$(cargo llvm-cov show-env --sh) || exit 1
     eval "${envs}"

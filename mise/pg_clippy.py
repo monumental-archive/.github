@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING, NamedTuple
 
 import findings
 import rust_task
+import rust_workspaces
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -175,7 +176,7 @@ def main(argv: list[str]) -> int:
     if cargo is None:
         findings.finding("", rust_task.NO_CARGO)
         return 1
-    trees = rust_task.workspace_roots()
+    trees = rust_workspaces.resolved()
     if trees is None:
         return 1
     # EVERY WORKSPACE IN THE TREE (#2004), each run even when an earlier
