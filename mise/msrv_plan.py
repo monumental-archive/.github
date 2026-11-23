@@ -141,6 +141,7 @@ class Args(argparse.Namespace):
     floor: Path | None
     exclude: str
     pgrx: str
+    root: str
     failed: list[str] | None
 
 
@@ -677,12 +678,15 @@ def rule(
     metadata: object,
     workspace: list[Package],
     floor_file: Path,
+    root: str = "",
 ) -> bool:
     """Hold every workspace member to the derived number.
 
     A member CLIPPY_EXCLUDE keeps off the compile surface is held like
     any other: the exclusion says what the gate cannot compile, not
     which number the crate may promise (#1909).
+
+    `root` is the workspace's manifest, the finding's subject (#2011).
 
     Returns:
         True when every member declares exactly it; False having said on
@@ -701,7 +705,7 @@ def rule(
         return False
     if found:
         writer.finding(
-            "",
+            root,
             "a minimum is undeclared or differs from the one the rule derives",
             [*found, *(line.removeprefix("  ") for line in rule_remedy())],
         )
@@ -720,12 +724,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--floor", type=Path)
     parser.add_argument("--exclude", default="")
     parser.add_argument("--pgrx", default="")
+    # The workspace's manifest, named as the subject of each finding about
+    # its members, so a tree of several workspaces says which (#2011).
+    parser.add_argument("--root", default="")
     parser.add_argument("--failed", nargs=2, metavar=("TOOLCHAIN", "SPECS"))
     args = parser.parse_args(argv, namespace=Args())
 
     if args.failed:
         head, *rest = compile_failure(*args.failed)
-        writer.finding("", head, [line.removeprefix("  ") for line in rest])
+        writer.finding(args.root, head, [line.removeprefix("  ") for line in rest])
         return 1
     if args.toolchains is None or args.floor is None:
         parser.error("--toolchains and --floor are required to plan")
@@ -738,11 +745,13 @@ def main(argv: list[str] | None = None) -> int:
     exclude = set(args.exclude.split())
     groups, unreachable, unreadable = promises(workspace, exclude)
     if unreadable:
-        writer.finding("", "a declared minimum this check cannot compare", unreadable)
+        writer.finding(
+            args.root, "a declared minimum this check cannot compare", unreadable
+        )
         return 1
-    if not rule(metadata, workspace, args.floor):
+    if not rule(metadata, workspace, args.floor, args.root):
         return 1
-    return plan(groups, unreachable, pinned_toolchains, features(args.pgrx))
+    return plan(groups, unreachable, pinned_toolchains, features(args.pgrx), args.root)
 
 
 def plan(
@@ -750,6 +759,7 @@ def plan(
     unreachable: list[str],
     pinned_toolchains: list[Toolchain],
     extensions: dict[str, str],
+    root: str = "",
 ) -> int:
     """Emit one check per declared minimum, or the pins that disagree.
 
@@ -782,7 +792,7 @@ def plan(
         if absent:
             findings.append(f"({', '.join(absent)} is pinned but not installed)")
         writer.finding(
-            "", "the declared minimum and the pinned toolchain disagree", findings
+            root, "the declared minimum and the pinned toolchain disagree", findings
         )
         return 1
 

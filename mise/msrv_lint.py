@@ -16,9 +16,12 @@ them) are mise/rust_task.py's. The task's reasoning for the rule
 rides beside the task in mise/config.toml; the reasoning for each step
 rides beside the step below.
 
-`workspace` takes the workspace's manifest as a parameter: None is
-cargo's own discovery from the working directory, the root, which is
-the only workspace this checks today.
+Every workspace in the tree is held, not only the root's (#2011): the
+roots are mise/rust_workspaces.py's, `mise ls rust` is read once, and
+`workspace` runs each root's steps with `--manifest-path` naming it.
+Every root runs even when an earlier one is red; each finding about a
+member names its root as the subject, and the closing count covers
+every root.
 
 Run in the repository's root, with cargo, mise and the belt on PATH;
 stdlib only.
@@ -35,6 +38,7 @@ from typing import TYPE_CHECKING
 
 import findings
 import rust_task
+import rust_workspaces
 from rust_task import NO_CARGO, belt, features, output, python, run
 
 if TYPE_CHECKING:
@@ -69,7 +73,7 @@ def check(
     toolchain: str,
     own: str,
     specs: str,
-    manifest: Sequence[str],
+    root: str,
     prepared: Mapping[str, str],
 ) -> int:
     """Compile one group at the toolchain it names, at its pgrx major.
@@ -93,16 +97,18 @@ def check(
     flags = f"-p {specs.replace(' ', ' -p ')}".split()
     major = "".join(c for c in own if c.isdigit())
     say(f"compiling at {toolchain}: {specs}")
-    argv = ["cargo", "check", "--locked", *manifest, *use, *flags]
+    at = ["--manifest-path", root]
+    argv = ["cargo", "check", "--locked", *at, *use, *flags]
     status = rust_task.at_major(
         major, argv, {**prepared, "RUSTUP_TOOLCHAIN": toolchain}
     )
     if status != 0:
-        run([python(), str(belt() / "msrv_plan.py"), "--failed", toolchain, specs])
+        failed = ["--failed", toolchain, specs, "--root", root]
+        run([python(), str(belt() / "msrv_plan.py"), *failed])
     return status
 
 
-def planned(at: Sequence[str], toolchains: Path) -> tuple[int, str, str, str]:
+def planned(root: str, toolchains: Path) -> tuple[int, str, str, str]:
     """Read one workspace and plan its checks.
 
     `cargo fetch --locked` first, the lint:rust precedent, so nothing
@@ -117,6 +123,7 @@ def planned(at: Sequence[str], toolchains: Path) -> tuple[int, str, str, str]:
         extensions and majors pgrx-env.sh derived.
 
     """
+    at = ["--manifest-path", root]
     cargo = shutil.which("cargo") or "cargo"
     status = run([cargo, "fetch", "--locked", *at])
     if status != 0:
@@ -152,15 +159,15 @@ def planned(at: Sequence[str], toolchains: Path) -> tuple[int, str, str, str]:
             pgrx,
             "--floor",
             str(belt() / "rust-floor.toml"),
+            "--root",
+            root,
         ],
         metadata,
     )
     return status, plan, pgrx, majors
 
 
-def compile_plan(
-    plan: str, at: Sequence[str], prepared: Mapping[str, str]
-) -> tuple[int, int]:
+def compile_plan(plan: str, root: str, prepared: Mapping[str, str]) -> tuple[int, int]:
     """Say each note and compile each check, in the plan's order.
 
     Returns:
@@ -175,25 +182,26 @@ def compile_plan(
                 say(first)
             case "check":
                 checked += 1
-                status = check(first, own, rest, at, prepared)
+                status = check(first, own, rest, root, prepared)
                 if status != 0:
                     return status, checked
             case _:
-                findings.finding("", f"{UNREADABLE}: {kind}")
+                findings.finding(root, f"{UNREADABLE}: {kind}")
                 return 1, checked
     return 0, checked
 
 
-def workspace(manifest: Path | None, toolchains: Path) -> tuple[int, int]:
+def workspace(root: str, toolchains: Path) -> tuple[int, int]:
     """Plan one workspace's declared minimums and compile each.
+
+    `root` is the workspace's manifest, as rust_workspaces.py names it.
 
     Returns:
         The status: the first failure's, else 0; and how many groups
         were compiled.
 
     """
-    at = [] if manifest is None else ["--manifest-path", str(manifest)]
-    status, plan, pgrx, majors = planned(at, toolchains)
+    status, plan, pgrx, majors = planned(root, toolchains)
     if status != 0:
         return status, 0
     # Only when an extension is in the plan, so a repo without one pays
@@ -203,7 +211,47 @@ def workspace(manifest: Path | None, toolchains: Path) -> tuple[int, int]:
         status, prepared = rust_task.register(majors)
         if status != 0:
             return status, 0
-    return compile_plan(plan, at, prepared)
+    return compile_plan(plan, root, prepared)
+
+
+def every_root(roots: Sequence[str], toolchains: Path) -> tuple[int, int]:
+    """Run every workspace, an earlier red stopping none after it.
+
+    Returns:
+        The status: the first red root's, else 0; and how many groups
+        were compiled across every root.
+
+    """
+    status = 0
+    checked = 0
+    for root in roots:
+        red, compiled = workspace(root, toolchains)
+        status = status or red
+        checked += compiled
+    return status, checked
+
+
+def verified(mise: str) -> tuple[int, int]:
+    """Read the tree's workspaces and the pins once, then run every root.
+
+    Returns:
+        The status: 1 when the roots could not be named (said by
+        rust_workspaces.py), mise's when the pins could not be read,
+        else every_root's; and how many groups were compiled.
+
+    """
+    roots = rust_workspaces.resolved()
+    if roots is None:
+        return 1, 0
+    with tempfile.TemporaryDirectory() as tmp:
+        toolchains = Path(tmp) / "toolchains.json"
+        # Read once, before any workspace: the pins are the machine's,
+        # not a workspace's.
+        status, listed = output([mise, "ls", "rust", "--json"])
+        if status != 0:
+            return status, 0
+        toolchains.write_text(listed, encoding="utf-8")
+        return every_root(roots, toolchains)
 
 
 def main() -> int:
@@ -227,15 +275,7 @@ def main() -> int:
     if mise is None:
         findings.finding("", NO_MISE)
         return 1
-    with tempfile.TemporaryDirectory() as tmp:
-        toolchains = Path(tmp) / "toolchains.json"
-        # Read once, before any workspace: the pins are the machine's,
-        # not a workspace's.
-        status, listed = output([mise, "ls", "rust", "--json"])
-        if status != 0:
-            return status
-        toolchains.write_text(listed, encoding="utf-8")
-        status, checked = workspace(None, toolchains)
+    status, checked = verified(mise)
     if status != 0:
         return status
     # Both directions printed, the lint:rust precedent: a run that

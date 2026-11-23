@@ -46,6 +46,7 @@ line="cargo $*"
 [[ -z ${BINDGEN_EXTRA_CLANG_ARGS:-} ]] || line="${line} [${BINDGEN_EXTRA_CLANG_ARGS}]"
 [[ -z ${RUSTUP_TOOLCHAIN:-} ]] || line="${line} {${RUSTUP_TOOLCHAIN}}"
 printf '%s\n' "${line}" >> "${PLANT_LOG}"
+[[ $1 != locate-project ]] || { echo "$(pwd -P)/Cargo.toml"; exit 0; }
 [[ $1 != metadata ]] || echo '{}'
 [[ $1 != check || -z ${PLANT_CHECK_FAILS:-} ]] || exit 101
 exit 0
@@ -53,6 +54,7 @@ exit 0
 # Answers the belt's one producer of the tracked list (#1986) and
 # nothing else: `git -c core.quotePath=false ls-files -z -- …`.
 GIT_STUB = """#!/usr/bin/env bash
+[[ "$1 $2" != "rev-parse --show-toplevel" ]] || { pwd -P; exit 0; }
 [[ "$1 $2 $3 $4" == "-c core.quotePath=false ls-files -z" ]] || exit 99
 printf 'Cargo.toml\\0'
 """
@@ -100,6 +102,9 @@ SURFACE = (
 PLAN = (
     "check\t1.82.0\t--no-default-features --features pg17\tfirst@0.1.0\n"
     "check\t1.82.0\t--no-default-features --features pg16\tsecond@0.1.0\n"
+)
+LOCATE = (
+    "cargo locate-project --workspace --manifest-path Cargo.toml --message-format plain"
 )
 METADATA = "cargo metadata --no-deps --format-version 1 --locked"
 REGISTER = [
@@ -275,17 +280,20 @@ class TwoExtensions(unittest.TestCase):
         """
         done = self.run_task("lint:msrv")
         self.assertEqual(0, done.returncode, done.stderr)
-        check = "cargo check --locked --no-default-features"
+        at = "--manifest-path Cargo.toml"
+        check = f"cargo check --locked {at} --no-default-features"
         want = [
-            # The pins once, then the workspace (#1911).
+            # The tree's workspaces (#2011), the pins once, then each.
+            LOCATE,
             "mise ls rust --json",
-            "cargo fetch --locked",
+            f"cargo fetch --locked {at}",
             # The whole graph, resolved with the gate's features (#1850).
-            "cargo metadata --format-version 1 --locked --all-features",
+            f"cargo metadata --format-version 1 --locked {at} --all-features",
             "gate_surface.py --exclude ",
             (
                 "msrv_plan.py --toolchains <tmp>/toolchains.json --exclude "
                 f" --pgrx first:17,second:16 --floor {self.belt}/rust-floor.toml"
+                " --root Cargo.toml"
             ),
             *REGISTER,
             f"{check} --features pg17 -p first@0.1.0 [-Iicu-pg17] {{1.82.0}}",
@@ -310,7 +318,7 @@ class TwoExtensions(unittest.TestCase):
         done = self.run_task("lint:msrv")
         self.assertEqual(101, done.returncode, done.stderr)
         failed = [line for line in self.logged() if "--failed" in line]
-        want: list[str] = ["msrv_plan.py --failed 1.82.0 first@0.1.0"]
+        want: list[str] = ["msrv_plan.py --failed 1.82.0 first@0.1.0 --root Cargo.toml"]
         self.assertEqual(want, failed)
         said = ["lint:msrv: compiling at 1.82.0: first@0.1.0"]
         self.assertEqual(said, done.stdout.splitlines())

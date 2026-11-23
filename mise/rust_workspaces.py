@@ -13,6 +13,8 @@ this tree", and every task that runs cargo loops over it.
   Both sides are resolved physically, so `/tmp` and `/private/tmp`
   agree. The root `Cargo.toml` comes first when there is one, the rest
   sorted.
+- `resolved()`: the same list, or None having said why, for a Python
+  helper that loops over the roots (lint:msrv, #2011).
 - `rust_workspaces.py roots`: the same list, NUL-separated on stdout,
   for `org_rust_workspace_roots` in mise/rust-workspaces.sh.
 
@@ -146,6 +148,26 @@ def roots() -> list[str]:
     return ordered(found)
 
 
+def resolved() -> list[str] | None:
+    """Derive the roots, or say why not, for a caller that loops over them.
+
+    Returns:
+        The roots, as `roots` gives them; None when a manifest's
+        workspace is not in the tree (its findings already said) or git
+        could not name the tree (said here, with git's text).
+
+    """
+    try:
+        return roots()
+    except UnresolvedError:
+        return None
+    except subprocess.CalledProcessError as exc:
+        said: object = exc.stderr
+        text = os.fsdecode(said) if isinstance(said, bytes) else str(said)
+        writer.finding("", "git could not name the tree", text.strip().splitlines())
+        return None
+
+
 def main(argv: list[str]) -> int:
     """Print the roots NUL-separated, for the shell reader.
 
@@ -156,14 +178,8 @@ def main(argv: list[str]) -> int:
     if argv != ["roots"]:
         print("usage: rust_workspaces.py roots", file=sys.stderr)
         return 2
-    try:
-        listed = roots()
-    except UnresolvedError:
-        return 1
-    except subprocess.CalledProcessError as exc:
-        said: object = exc.stderr
-        text = os.fsdecode(said) if isinstance(said, bytes) else str(said)
-        writer.finding("", "git could not name the tree", text.strip().splitlines())
+    listed = resolved()
+    if listed is None:
         return 1
     stream: object = sys.stdout
     if isinstance(stream, io.TextIOWrapper):
