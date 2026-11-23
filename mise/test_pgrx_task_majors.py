@@ -14,6 +14,8 @@ registered.
 they were asked, and `ORG_PYTHON` is a stub that answers each belt
 helper by name: `gate_surface.py` with the planted surface,
 `pgrx_postgres.py` with a plan, `msrv_plan.py` with the planted plan.
+`msrv_lint.py`, lint:msrv's body after its guard (#1911), runs on this
+interpreter, from the planted belt, so it meets the same stubs.
 pgrx-env.sh is the real one, sourced, with only what needs a Mac or a
 Postgres replaced: the prepare and the init log, and a major's ICU
 headers are a mark the stub cargo prints. Every row asserts the whole
@@ -26,6 +28,7 @@ GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. stdlib
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -64,6 +67,7 @@ echo '[]'
 # in the order the pipeline runs them.
 PYTHON_STUB = r"""#!/usr/bin/env bash
 script=$(basename "$1")
+[[ ${script} != msrv_lint.py ]] || exec "${PLANT_PYTHON}" "$@"
 shift
 [[ $1 == --failed ]] || cat > /dev/null
 printf '%s %s\n' "${script}" "$*" >> "${PLANT_LOG}"
@@ -155,6 +159,7 @@ class TwoExtensions(unittest.TestCase):
             "PLANT_LOG": str(self.log),
             "PLANT_SURFACE": str(surface),
             "PLANT_PLAN": str(plan),
+            "PLANT_PYTHON": sys.executable,
         }
 
     def run_task(self, task: str) -> subprocess.CompletedProcess[str]:
@@ -232,8 +237,9 @@ class TwoExtensions(unittest.TestCase):
         self.assertEqual(0, done.returncode, done.stderr)
         check = "cargo check --locked --no-default-features"
         want = [
-            "cargo fetch --locked",
+            # The pins once, then the workspace (#1911).
             "mise ls rust --json",
+            "cargo fetch --locked",
             # The whole graph, resolved with the gate's features (#1850).
             "cargo metadata --format-version 1 --locked --all-features",
             "gate_surface.py --exclude ",
@@ -256,7 +262,8 @@ class TwoExtensions(unittest.TestCase):
     def test_lint_msrv_red_compile_says_the_rule_and_keeps_its_status(self) -> None:
         """A red compile at the derived number runs item 4's remedy (#1850).
 
-        From the EXIT trap, for the group that failed and no other, and
+        From msrv_lint.py's `check` (#1911; the body's EXIT trap before
+        it), for the group that failed and no other, and
         the task exits with cargo's own status rather than the remedy's.
         """
         self.env["PLANT_CHECK_FAILS"] = "1"

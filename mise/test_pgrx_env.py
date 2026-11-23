@@ -946,13 +946,15 @@ class WithIcu(IcuCase):
 # one of them in a subshell of its own (measure_one), and each
 # workspace-wide audit runs its workspace command at the default major
 # org_pgrx_provision names beside its per-extension one (#1940).
+# lint:msrv's compiles left its body for mise/msrv_lint.py (#1911), whose
+# one call is `check`: test_pgrx_task_majors.py proves each of them
+# carries its own major's headers and not the last one's.
 SITES = {
     "mise/pgrx-test.sh": 3,
     "mise/pg-schema.sh": 1,
     "mise/mutants-rust.sh": 2,
     "mise/semver-audit.sh": 2,
     "fix:rust": 1,
-    "lint:msrv": 1,
     "lint:pg-clippy": 1,
 }
 CANON = ENV_SH.parent.parent
@@ -1073,7 +1075,7 @@ class NoLeak(unittest.TestCase):
                         f"line {at + 1}'s subshell compiles nothing after it",
                     )
 
-    def test_no_site_beyond_the_seven(self) -> None:
+    def test_no_site_beyond_the_table(self) -> None:
         """A new compile site cannot add headers without joining the table."""
         found = set()
         for path in sorted((CANON / "mise").glob("*.sh")):
@@ -1082,11 +1084,11 @@ class NoLeak(unittest.TestCase):
                 found.add(f"mise/{path.name}")
         found.update(
             task
-            for task in ("fix:rust", "lint:msrv", "lint:pg-clippy")
+            for task in ("fix:rust", "lint:pg-clippy")
             if CALL.search(site_text(task))
         )
         config = (CANON / "mise" / "config.toml").read_text(encoding="utf-8")
-        self.assertEqual(3, len(list(CALL.finditer(config))))
+        self.assertEqual(2, len(list(CALL.finditer(config))))
         sites = set(SITES)
         self.assertEqual(sites, found)
 
