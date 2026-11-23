@@ -7499,7 +7499,8 @@ dir = "{{cwd}}"
 # The logic is mise/citation_check.py (#1911); the render it compares
 # against is mise/citation.sh, fix:citation's.
 run = '''
-files=() && org_tracked_read files ':!vendor/**' ".github/workflows/*.y*ml"
+. "${ORG_BELT_DIR}/action-files.sh"
+files=() && workflow_files files
 "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/citation_check.py" ${files[@]+"${files[@]}"}
 '''
 
@@ -8420,7 +8421,8 @@ dir = "{{cwd}}"
 # audit:action-pins does.
 run = '''
 set -euo pipefail
-files=() && org_tracked_read files ':!vendor/**' ".github/workflows/*.y*ml"
+. "${ORG_BELT_DIR}/action-files.sh"
+files=() && workflow_files files
 [[ -n ${files[0]+set} ]] || {
   echo "lint:caller-permissions: no workflows, skipped"
   exit 0
