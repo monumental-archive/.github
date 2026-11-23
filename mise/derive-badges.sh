@@ -20,6 +20,9 @@ org__here=${BASH_SOURCE[0]%/*}
 [[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
 # shellcheck source=mise/findings.sh
 . "${org__here}/findings.sh"
+# The one selection of the workflows (#2007).
+# shellcheck source=mise/action-files.sh
+. "${org__here}/action-files.sh"
 unset org__here
 # The task this script reports for, where mise named none (#1934).
 org_task "fix:badges"
@@ -140,10 +143,14 @@ repo_name="${org_path#*/}"
 # No stub is the ordinary answer for a repo that publishes no level
 # cells, and the `if` below already renders the block without SLSA
 # shields for it — the same shape as the coverage shield, which renders
-# iff .coverage-floor exists (#347). `|| true` per the note at the top:
-# an unglobbed `.github/workflows/*.y*ml` makes grep exit 2, a matchless
-# search makes it exit 1, and both used to be fatal and silent (#905).
-stub=$(grep -lsE "^[[:space:]]*uses:.*workflows/level\.yml" .github/workflows/*.y*ml 2> /dev/null | sed -n 1p || true)
+# iff .coverage-floor exists (#347). The workflows are the tracked ones
+# (#2007): a stub git does not track publishes nothing. `|| true` per the
+# note at the top: a matchless search makes grep exit 1, which used to be
+# fatal and silent (#905); an empty list is no search at all.
+workflows=() && workflow_files workflows
+stub=""
+[[ -z ${workflows[0]+set} ]] \
+  || stub=$(grep -lsE "^[[:space:]]*uses:.*workflows/level\.yml" "${workflows[@]}" 2> /dev/null | sed -n 1p || true)
 tracks=""
 if [[ -n ${stub} ]]; then
   tracks=$(sed -n 's/^[[:space:]]*tracks:[[:space:]]*//p' "${stub}" | sed -n 1p)
@@ -211,7 +218,7 @@ add "[![license](https://img.shields.io/badge/license-${lic_esc}-blue)](LICENSES
 # reads "unknown" for ever (edtf and iiif-server, #1161). The belt
 # cannot pass the secret for a repository, so it refuses the render.
 if [[ -f .coverage-floor ]]; then
-  if ! grep -qsE "^[^#]*codecov-token:" .github/workflows/*.y*ml; then
+  if [[ -z ${workflows[0]+set} ]] || ! grep -qsE "^[^#]*codecov-token:" "${workflows[@]}"; then
     # The block of the ci job's `secrets:` in workflow-templates/ci.yml,
     # which test_derive_badges.py decodes and compares (#1923).
     secret=CODECOV_TOKEN
@@ -227,7 +234,6 @@ cit=""
 [[ -f CITATION.cff ]] && cit=1
 concept=""
 [[ -n ${cit} ]] && concept=$(awk '/^identifiers:/{f=1} f && /value:/{print $NF; exit}' CITATION.cff)
-workflows=() && org_tracked_read workflows ".github/workflows/*.y*ml"
 minting=""
 [[ -z ${workflows[0]+set} ]] || minting=$(grep -lE "^[^#]*mint-doi:[[:space:]]*true" "${workflows[@]}" 2> /dev/null || true)
 if [[ -n ${concept} ]]; then

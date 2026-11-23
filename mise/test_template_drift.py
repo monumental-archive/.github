@@ -166,6 +166,7 @@ class Planted(unittest.TestCase):
             path.write_bytes(text)
         else:
             path.write_text(text, encoding="utf-8")
+        self.git("add", "--", STUB)
         return STUB
 
     def helper(self, *argv: str, now: int = T0) -> hermetic.Called:
