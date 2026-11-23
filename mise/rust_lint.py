@@ -711,6 +711,12 @@ def workspace_roots() -> list[str] | None:
         return rust_workspaces.roots()
     except rust_workspaces.UnresolvedError:
         return None
+    except subprocess.CalledProcessError as exc:
+        # git could not name the tree's top: the derivation's own words.
+        said: object = exc.stderr
+        text = os.fsdecode(said) if isinstance(said, bytes) else str(said)
+        findings.finding("", "git could not name the tree", text.strip().splitlines())
+        return None
 
 
 def lint_root(cargo: str, root: str, flags: list[str]) -> tuple[int, list[str]]:

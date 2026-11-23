@@ -1204,6 +1204,19 @@ class EveryWorkspace(Planted):
         self.assertIn("error: planted: Cargo.toml could not be read", done.stderr)
         self.assertEqual(NOT_ASKED, self.asked("clippy"))
 
+    def test_git_failing_to_name_the_tree_is_red(self) -> None:
+        """The derivation's git cannot name the top: red, git's words kept."""
+        git = self.bins / "failing-git"
+        git.write_text(
+            "#!/usr/bin/env bash\necho 'fatal: planted' >&2\nexit 128\n",
+            encoding="utf-8",
+        )
+        git.chmod(0o755)
+        with mock.patch.object(rust_workspaces, "GIT", str(git)):
+            done = self.call("lint")
+        self.assert_finding(done, 1, "git could not name the tree", "fatal: planted")
+        self.assertEqual(NOT_ASKED, self.asked("clippy"))
+
     def test_fix_rust_formats_and_fixes_each_root(self) -> None:
         """fix:rust: cargo fmt and clippy --fix for both roots."""
         (self.bins / "cargo").write_text(FIX_CARGO, encoding="utf-8")
