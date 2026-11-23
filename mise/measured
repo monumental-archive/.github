@@ -253,8 +253,10 @@ if [[ -f ${root}/Cargo.toml ]]; then
   # stay built. once.py runs the clean under a lock on the run's marker, so
   # a second call in the same run keeps the first one's work, and a call
   # starting beside the first waits for its clean to finish rather than
-  # building into a directory the clean is emptying.
-  "${ORG_PYTHON}" "${belt}/once.py" "${run}/rust" -- cargo llvm-cov clean --workspace >&2 || exit 1
+  # building into a directory the clean is emptying. A clean cargo refused
+  # is red by name: cargo-llvm-cov reports it as a warning (#2070).
+  "${ORG_PYTHON}" "${belt}/once.py" "${run}/rust" -- \
+    "${ORG_PYTHON}" "${belt}/coverage_owner.py" clean >&2 || exit 1
 fi
 
 # plpgsql: one report per run; a value already set is kept.

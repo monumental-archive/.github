@@ -434,6 +434,12 @@ case "$1 ${2:-}" in
     echo "export CARGO_LLVM_COV_TARGET_DIR=${dir}"
     ;;
   "llvm-cov clean")
+    # cargo refuses an untagged directory; cargo-llvm-cov says so as a
+    # warning and exits 0 (#2070).
+    if [[ -n ${STUB_REFUSE_UNTAGGED:-} && ! -f ${CARGO_TARGET_DIR}/CACHEDIR.TAG ]]; then
+      echo "warning: process didn't exit successfully:" \\
+        "\\`cargo clean\\` (exit status: 101)" >&2
+    fi
     if [[ -n ${STUB_CLEAN_SECONDS:-} ]]; then
       sleep "${STUB_CLEAN_SECONDS}"
       echo "clean ended" >> "${STUB_LOG}"
@@ -547,6 +553,47 @@ class RustInstrumented(unittest.TestCase):
             started = [c for c in calls if c.startswith(("llvm-cov clean", "test"))]
             self.assertEqual(NO_CALLS, started)
             self.assertEqual(f"{other}\n", (target / ".org-coverage-owner").read_text())
+
+    def test_the_build_directory_is_tagged_before_its_clean(self) -> None:
+        """The planted row (#2070): cargo cleans only a tagged directory.
+
+        On main the claim made the directory untagged, cargo refused the
+        clean, cargo-llvm-cov warned and exited 0, and the run went on
+        measuring beside the previous build's executables.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tree, out, calls = self.rust_run(
+                tmp, ["cargo", "test"], STUB_REFUSE_UNTAGGED="1"
+            )
+            self.assertEqual(0, out.returncode, out.stderr)
+            self.assertNotIn("didn't exit successfully", out.stderr)
+            target = tree / "target" / f"llvm-cov-target-{STABLE}"
+            self.assertTrue((target / "CACHEDIR.TAG").is_file())
+            self.assertIn(f"test | CARGO_TARGET_DIR={target}", calls)
+
+    def test_a_refused_clean_ends_the_call(self) -> None:
+        """A clean cargo refused is red by name, and nothing is built."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tree, out, calls = self.rust_run(
+                tmp, ["cargo", "test"], STUB_REFUSE_UNTAGGED="1", run_name="plant"
+            )
+            target = tree / "target" / f"llvm-cov-target-{STABLE}"
+            (target / "CACHEDIR.TAG").unlink()
+            # The claim tags it again: plant the refusal after the claim.
+            (target / ".org-coverage-owner").unlink()
+            stub = Path(tmp) / "stubs" / "cargo"
+            stub.write_text(
+                stub.read_text().replace("! -f ${CARGO_TARGET_DIR}", "-n x || ! -f x"),
+                encoding="utf-8",
+            )
+            (Path(tmp) / "cargo.log").unlink()
+            _, out, calls = self.rust_run(
+                tmp, ["cargo", "test"], STUB_REFUSE_UNTAGGED="1", run_name="next"
+            )
+            self.assertEqual(1, out.returncode, out.stderr)
+            self.assertIn(f"the workspace clean of {target} did not happen", out.stderr)
+            built: list[str] = [c for c in calls if c.startswith("test")]
+            self.assertEqual(NO_CALLS, built)
 
     def test_a_call_beside_the_first_waits_for_its_clean(self) -> None:
         """Two calls in one run, side by side: both build after the clean (#2061).
