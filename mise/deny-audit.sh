@@ -95,5 +95,6 @@ status=0
 for root in "${roots[@]}"; do
   audit_root "${root}" || status=1
 done
+# A red root exits here; the trap keeps that status.
+[[ ${status} -eq 0 ]] || exit 1
 org_done=1
-exit "${status}"
