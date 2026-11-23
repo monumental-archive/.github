@@ -5292,10 +5292,8 @@ dir = "{{cwd}}"
 # newer push replaces the waiting one, reported `cancelled`, so a burst
 # of merges judged only its first and last commit (#1617). Naming the
 # commit as well gives every commit its own verdict. Both lines are
-# required verbatim, and both are printed in the message. The body is
-# raw: `${{` would otherwise open a Tera expression at render.
+# required verbatim, and both are printed in the message.
 run = '''
-{% raw %}
 compgen -G ".github/workflows/*.y*ml" > /dev/null || {
   echo "lint:gate-stub: no workflows, skipped"
   exit 0
@@ -5303,62 +5301,9 @@ compgen -G ".github/workflows/*.y*ml" > /dev/null || {
 . "${ORG_BELT_DIR}/identity.sh"
 canon_owner=$(org_identity owner)
 canon_repo=$(org_identity repo)
-canon="${canon_owner}/${canon_repo}"
-canon_re="${canon//./\\.}"
-bad=""
-unqueued=""
-ungrouped=""
-# shellcheck disable=SC2016  # ${{ }} is GitHub's expression syntax, matched
-# literally — expanding it here is the defect
-want_group="github.event.pull_request.number || format('{0}-{1}', github.ref, github.sha)"
-# shellcheck disable=SC2016
-want_cancel='${{ github.event_name == '"'"'pull_request'"'"' }}'
-for f in .github/workflows/*.y*ml; do
-  grep -qE "uses:[[:space:]]*(${canon_re}/|\./)\.github/workflows/ci\.ya?ml" "${f}" || continue
-  grep -qE "^[[:space:]]*pull_request" "${f}" || continue
-  grep -qE "^[[:space:]]*-[[:space:]]*edited|types:[^#]*\bedited\b" "${f}" || bad="${bad} ${f}"
-  grep -qE "^[[:space:]]+merge_group:" "${f}" || unqueued="${unqueued} ${f}"
-  groups=$(grep -E "^[[:space:]]*group:" "${f}" || true)
-  # Each cancel-in-progress line, indent and trailing comment dropped,
-  # must be exactly the wanted line; every group line must carry the key.
-  # An absent line reds too: `<<<` feeds an empty capture as one empty
-  # line, and grep -v finds it.
-  cancels=$(grep -E "^[[:space:]]*cancel-in-progress:" "${f}" \
-    | sed -E 's/^[[:space:]]+//; s/[[:space:]]+#.*$//; s/[[:space:]]+$//' || true)
-  if grep -vqF "${want_group}" <<< "${groups}" \
-    || grep -vqxF "cancel-in-progress: ${want_cancel}" <<< "${cancels}"; then
-    ungrouped="${ungrouped} ${f}"
-  fi
-done
-status=0
-if [[ -n ${bad} ]]; then
-  org_finding "" "gate caller's pull_request trigger lacks the edited type," \
-    "so title/base edits keep a stale verdict (#427). Set" \
-    "types: [opened, synchronize, reopened, edited] in:${bad}"
-  status=1
-fi
-if [[ -n ${unqueued} ]]; then
-  org_finding "" "gate caller has no merge_group trigger, so the merge" \
-    "queue's own run never starts and a queued pull request waits for a" \
-    'check that cannot report (#1117). Under "on": add' \
-    "  merge_group:" \
-    "    types:" \
-    "      - checks_requested" \
-    "in:${unqueued}"
-  status=1
-fi
-if [[ -n ${ungrouped} ]]; then
-  org_finding "" "gate caller's concurrency group is shared: a merged pull" \
-    "request's event cancels the push gate (#1195), a push replaces the one" \
-    "pending (#1617). Run mise run fix:gate-stub, or set under concurrency:" \
-    "  group: \${{ github.workflow }}-\${{ ${want_group} }}" \
-    "  cancel-in-progress: ${want_cancel}" \
-    "in:${ungrouped}"
-  status=1
-fi
-[[ ${status} -eq 0 ]] || exit 1
-echo "lint:gate-stub: ok"
-{% endraw %}
+# The three requirements and their messages: mise/gate_stub.py (#1911).
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/gate_stub.py" \
+  "${canon_owner}/${canon_repo}" .github/workflows/*.y*ml
 '''
 
 [tasks."fix:gate-stub"]

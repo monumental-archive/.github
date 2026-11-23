@@ -261,6 +261,7 @@ tasks = [
   "lint:deny",
   "lint:fuzz-build",
   "lint:licence",
+  "lint:gate-stub",
   "lint:gate-surface",
   "lint:installer-pinned",
   "lint:lock-platforms",
