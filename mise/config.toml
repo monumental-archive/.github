@@ -8796,38 +8796,16 @@ dir = "{{cwd}}"
 # Workflow `run:` steps are not held to it: they only ever meet bash 5.
 run = '''
 tracked=() && org_tracked_read tracked ':!vendor/**'
-# shfmt --find prints the list's shell files one per line; given no list
-# it walks the directory, so it runs only on one.
+# shfmt --find prints the list's shell files; given no list it walks the directory.
 listed=$([[ -z ${tracked[0]+set} ]] || printf '%s\0' "${tracked[@]}" | xargs -0 shfmt --find 2> /dev/null)
 scripts=() && while IFS= read -r f; do [[ -z ${f} ]] || scripts+=("${f}"); done <<< "${listed}"
 configs=() && org_tracked_read configs ':!vendor/**' "*mise.toml" "*mise.*.toml" \
   "*mise/config.toml" "*mise/config.*.toml"
-files=() && org_tracked_read files ':!vendor/**' ".github/workflows/*.y*ml"
-files+=(${scripts[@]+"${scripts[@]}"})
-[[ -n ${files[0]+set} || -n ${configs[0]+set} ]] || {
+flows=() && org_tracked_read flows ':!vendor/**' ".github/workflows/*.y*ml"
+[[ -n ${flows[0]+set} || -n ${scripts[0]+set} || -n ${configs[0]+set} ]] || {
   echo "lint:bash-portability: nothing to check, skipped"
   exit 0
 }
-# ${v,,} ${v^^} ${v,} ${v^} — case modification, bash 4.0
-# declare -A / typeset -A — associative arrays, bash 4.0
-# mapfile / readarray     — bash 4.0
-# &>>                     — append-both redirection, bash 4.0
-bad4='\$\{[A-Za-z_][A-Za-z0-9_]*(\[[^]]*\])?(,,|\^\^|,|\^)\}|(declare|typeset)[[:space:]]+-[A-Za-z]*A|(^|[^A-Za-z_])(mapfile|readarray)[[:space:]]|&>>'
-found="" count=0 traps=0
-for f in ${files[@]+"${files[@]}"}; do
-  count=$((count + 1))
-  [[ -f ${f} ]] || continue
-  hit=$(grep -vE "^[[:space:]]*#" "${f}" | grep -nE "${bad4}" || true)
-  [[ -n ${hit} ]] && found="${found}\n  ${f}: ${hit}"
-done
-"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/exit_trap.py" ${scripts[@]+"${scripts[@]}"} ${configs[@]+"${configs[@]}"} || traps=$?
-if [[ -n ${found} ]]; then
-  IFS=$'\n' read -r -d '' -a detail < <(printf "%b\n" "${found}") || true
-  org_finding "" "bash 4+ syntax found (macOS ships 3.2):" ${detail[@]+"${detail[@]}"} \
-    "these pass in CI and fail locally, which is how a script reaches" \
-    "a release untested. Use tr, case, or an explicit loop instead."
-  exit 1
-fi
-[[ ${traps} -eq 0 ]] || exit 1
-echo "lint:bash-portability: ${count} files clean"
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/bash_portability.py" ${flows[@]+"${flows[@]}"} -- \
+  ${scripts[@]+"${scripts[@]}"} -- ${configs[@]+"${configs[@]}"}
 '''
