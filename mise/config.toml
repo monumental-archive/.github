@@ -8659,29 +8659,12 @@ dir = "{{cwd}}"
 # lets them install; a tool with no platform tables at all (cargo:,
 # rust) is outside by construction. Offline and deterministic, so in ci.
 # The remedy is printed, never run: resolving a platform is network-bound
-# and writes the lock, which makes it a fixer's job, not a lint's.
+# and writes the lock, which makes it a fixer's job, not a lint's. The
+# helper finds the config and its lock, or skips (#1911).
 run = '''
-cfg=""
-for c in mise/config.toml mise.toml .mise.toml; do
-  [[ -f ${c} ]] && {
-    cfg="${c}"
-    break
-  }
-done
-[[ -n ${cfg} ]] || {
-  echo "lint:lock-platforms: no mise config, skipped"
-  exit 0
-}
-lock="mise.lock"
-[[ ${cfg} == */* ]] && lock="${cfg%/*}/mise.lock"
-[[ -f ${lock} ]] || {
-  echo "lint:lock-platforms: no ${lock}, skipped"
-  exit 0
-}
 org_tracked ':!vendor/**' ".github/workflows/*.yml" ".github/workflows/*.yaml" \
   | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/lock_platforms.py" \
-    --defaults "${ORG_CANON_DIR}/.github/workflows/publish.yml" \
-    --config "${cfg}" --lock "${lock}"
+    --defaults "${ORG_CANON_DIR}/.github/workflows/publish.yml"
 '''
 
 [tasks."audit:lock-arch"]
