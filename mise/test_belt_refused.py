@@ -113,11 +113,11 @@ def refusal(answering: str, pinned: str) -> str:
     return f"the belt answering is {answering}; this tree pins {pinned}. {REMEDY}\n"
 
 
-def pin(tree: Path, sha: str) -> None:
-    """Write `tree`'s gate stub, pinning the canon at `sha`."""
+def stub(tree: Path, sha: str, name: str = "gate.yml") -> None:
+    """Write a workflow in `tree` pinning the canon at `sha`, untracked."""
     wf = tree / ".github" / "workflows"
     wf.mkdir(parents=True, exist_ok=True)
-    (wf / "gate.yml").write_text(
+    (wf / name).write_text(
         "jobs:\n  ci:\n"
         f"    uses: {OWNER_REPO}/.github/workflows/ci.yml@{sha} # v1.0.0\n",
         encoding="utf-8",
@@ -168,6 +168,15 @@ class Planted(unittest.TestCase):
     def git(self, cwd: Path, *args: str) -> None:
         """Run git in `cwd`, checked."""
         run([hermetic.tool("git"), *args], cwd, self.env(), check=True)
+
+    def pin(self, tree: Path, sha: str) -> None:
+        """Write `tree`'s gate stub pinning `sha`, and track it.
+
+        The pin is read from tracked workflows only (#2018), so a stub
+        is staged as a commit would have it.
+        """
+        stub(tree, sha)
+        self.git(tree, "add", ".github/workflows/gate.yml")
 
     def link(self, tree: Path, sha: str) -> None:
         """Point `tree`'s belt link into the cache tree of `sha`."""
@@ -232,19 +241,19 @@ class TheBeltAnswersOnlyForItsPin(Planted):
 
     def test_a_link_to_another_pin_refuses(self) -> None:
         """Pin B, link A: exit 1, one line naming A, B and the remedy."""
-        pin(self.repo, B)
+        self.pin(self.repo, B)
         self.link(self.repo, A)
         self.assert_refused(self.repo, A, B)
 
     def test_a_link_to_the_pin_runs(self) -> None:
         """Pin B, link B: the task runs."""
-        pin(self.repo, B)
+        self.pin(self.repo, B)
         self.link(self.repo, B)
         self.assert_runs(self.repo)
 
     def test_the_refusal_holds_from_a_subdirectory(self) -> None:
         """Invoked below the top: the tree is still the one judged."""
-        pin(self.repo, B)
+        self.pin(self.repo, B)
         self.link(self.repo, A)
         below = self.repo / "src" / "it's here"
         below.mkdir(parents=True)
@@ -252,7 +261,7 @@ class TheBeltAnswersOnlyForItsPin(Planted):
 
     def test_mise_run_itself_refuses(self) -> None:
         """Through `mise run`: the task's body never runs."""
-        pin(self.repo, B)
+        self.pin(self.repo, B)
         self.link(self.repo, A)
         done = self.mise(self.repo, "run", TASK)
         self.assertEqual(done.returncode, 1, done.stdout)
@@ -261,19 +270,19 @@ class TheBeltAnswersOnlyForItsPin(Planted):
 
     def test_a_nested_worktree_with_no_link_refuses(self) -> None:
         """Parent pinned and linked to A; a worktree inside it pins B, unlinked."""
-        pin(self.repo, A)
+        self.pin(self.repo, A)
         self.git(self.repo, "add", "-A")
         self.git(self.repo, "commit", "-q", "-m", "pin A")
         self.link(self.repo, A)
         nested = self.repo / ".claude" / "worktrees" / "lane"
         self.git(self.repo, "worktree", "add", "-q", "-b", "lane", str(nested))
-        pin(nested, B)
+        self.pin(nested, B)
         self.assertFalse((nested / ".config").exists())
         self.assert_refused(nested, A, B)
 
     def test_a_nested_worktree_on_its_parents_pin_runs(self) -> None:
         """The same nesting, the same pin: the belt answering is the pinned."""
-        pin(self.repo, A)
+        self.pin(self.repo, A)
         self.git(self.repo, "add", "-A")
         self.git(self.repo, "commit", "-q", "-m", "pin A")
         self.link(self.repo, A)
@@ -283,16 +292,34 @@ class TheBeltAnswersOnlyForItsPin(Planted):
 
     def test_a_belt_named_by_the_global_carrier_runs(self) -> None:
         """Carrier 1, MISE_GLOBAL_CONFIG_FILE, named on purpose: runs."""
-        pin(self.repo, B)
+        self.pin(self.repo, B)
         named = str(self.trees[A] / "mise" / "config.toml")
         self.assert_runs(self.repo, MISE_GLOBAL_CONFIG_FILE=named)
 
     def test_the_canons_own_tree_runs(self) -> None:
         """Carrier 2: the tree is its own belt, whatever stub or link it holds."""
         hermetic.belt(self.repo / "mise", stubs={"config.toml": belt_lines()})
-        pin(self.repo, B)
+        self.pin(self.repo, B)
         self.link(self.repo, A)
         self.assert_runs(self.repo)
+
+    def test_an_untracked_stray_does_not_choose_the_pin(self) -> None:
+        """Tracked stub pins B, linked B; an untracked stray pinning A sorts first.
+
+        Fails before #2018: the glob read the stray, so the right belt
+        was refused.
+        """
+        self.pin(self.repo, B)
+        stub(self.repo, A, "a-stray.yml")
+        self.link(self.repo, B)
+        self.assert_runs(self.repo)
+
+    def test_an_untracked_stray_does_not_excuse_a_wrong_link(self) -> None:
+        """Tracked stub pins B, linked A; a stray pinning A: still refused."""
+        self.pin(self.repo, B)
+        stub(self.repo, A, "a-stray.yml")
+        self.link(self.repo, A)
+        self.assert_refused(self.repo, A, B)
 
     def test_a_tree_with_no_pin_runs(self) -> None:
         """No gate stub: nothing to compare, nothing refused."""
@@ -307,7 +334,7 @@ class OnlyTasksRefuse(Planted):
     def setUp(self) -> None:
         """Plant the refused tree: pin B, link A."""
         super().setUp()
-        pin(self.repo, B)
+        self.pin(self.repo, B)
         self.link(self.repo, A)
 
     def test_mise_env_exits_0(self) -> None:

@@ -167,15 +167,24 @@ class HookFixture(unittest.TestCase):
         """
         return run([hermetic.tool("git"), *args], cwd, self.env(), check=True)
 
-    def pin(self, sha: str, tree: Path | None = None) -> None:
-        """Write a gate stub (the consumer's by default) pinning `sha`."""
-        wf = (tree or self.consumer) / ".github" / "workflows"
+    def pin(
+        self, sha: str, tree: Path | None = None, *, name: str = "gate.yml"
+    ) -> None:
+        """Write a gate stub (the consumer's by default) pinning `sha`.
+
+        The stub is staged: the hook reads tracked workflows only
+        (#2018). Any other `name` is a stray, left untracked.
+        """
+        where = tree or self.consumer
+        wf = where / ".github" / "workflows"
         wf.mkdir(parents=True, exist_ok=True)
-        (wf / "gate.yml").write_text(
+        (wf / name).write_text(
             "jobs:\n  ci:\n"
             f"    uses: {OWNER_REPO}/.github/workflows/ci.yml@{sha} # v1.0.0\n",
             encoding="utf-8",
         )
+        if name == "gate.yml":
+            self.git(where, "add", ".github/workflows/gate.yml")
 
     def hook(self, **extra: str) -> subprocess.CompletedProcess[str]:
         """Run the job's command in the consumer, as lefthook does.
@@ -386,6 +395,18 @@ class TheCacheAndTheLinks(HookFixture):
         left = sorted(p.name for p in [*conf.iterdir(), *(conf / "conf.d").iterdir()])
         want = sorted(["belt.toml", "conf.d", "mise.lock", *planted])
         self.assertEqual(left, want)
+
+    def test_an_untracked_stray_does_not_choose_the_belt(self) -> None:
+        """A stray pinning the second commit sorts first: the tracked pin wins.
+
+        Fails before #2018: the glob read the untracked stray.
+        """
+        self.pin(self.shas[1], name="a-stray.yml")
+        done = self.hook()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        first = [self.shas[0]]
+        self.assertEqual(self.cached(), first)
+        self.assertEqual(self.links(), self.linked(self.shas[0]))
 
     def test_a_fetch_that_is_not_the_pin_is_refused(self) -> None:
         """The remote answers with another commit: red, nothing linked."""

@@ -166,12 +166,14 @@ ORG_BELT_DIR = '''{{ exec(command=`d="${MISE_GLOBAL_CONFIG_FILE:-}"; if [ -z "$d
 # exec gave the config's), which for a parent's link is the parent. It
 # is spliced in single-quoted, each `'` closed and reopened. The pin is
 # read by the expression the hooks' `belt` job uses, spelt without a
-# backslash, which Tera refuses; the belt's sha is the name of the cache
+# backslash, which Tera refuses, from the TRACKED workflows only
+# (`git grep`, never a glob over the directory, which reads an
+# untracked stray as readily; #2018); the belt's sha is the name of the cache
 # tree ORG_BELT_DIR sits in (`org-belt/<sha>/mise`), and any other tree
 # is named by its path. Exit 0 with no output on every failure, like
 # every exec here (#569): `mise env`, `mise install` and Renovate's
 # `mise lock` never run a task, so they never refuse.
-ORG_BELT_REFUSED = '''{{ exec(command=`c='` ~ cwd | replace(from=`'`, to=`'"'"'`) ~ `'; b="${ORG_BELT_DIR:-}"; if [ -z "${MISE_GLOBAL_CONFIG_FILE:-}" ] && [ -n "$b" ] && cd "$c" 2>/dev/null; then t=$(unset $(git rev-parse --local-env-vars 2>/dev/null || true); git rev-parse --show-toplevel 2>/dev/null || true); if [ -n "$t" ] && { [ ! -f "$t/mise/config.toml" ] || [ ! -f "$t/mise/clippy.toml" ]; }; then p=$(cat "$t"/.github/workflows/*.y*ml 2>/dev/null | grep -oE 'uses:[[:space:]]*[^[:space:]/]+/[^[:space:]/]+/[.]github/workflows/ci[.]ya?ml@[0-9a-f]+' | sed -n 1p || true); p="${p##*@}"; a=$(dirname "$b"); n=$(basename "$a"); case "$n" in ""|*[!0-9a-f]*) n="$a" ;; esac; if [ -n "$p" ] && [ "$n" != "$p" ]; then echo "the belt answering is $n; this tree pins $p. Run: lefthook run post-checkout"; fi; fi; fi`) }}'''
+ORG_BELT_REFUSED = '''{{ exec(command=`c='` ~ cwd | replace(from=`'`, to=`'"'"'`) ~ `'; b="${ORG_BELT_DIR:-}"; if [ -z "${MISE_GLOBAL_CONFIG_FILE:-}" ] && [ -n "$b" ] && cd "$c" 2>/dev/null; then t=$(unset $(git rev-parse --local-env-vars 2>/dev/null || true); git rev-parse --show-toplevel 2>/dev/null || true); if [ -n "$t" ] && { [ ! -f "$t/mise/config.toml" ] || [ ! -f "$t/mise/clippy.toml" ]; }; then p=$(unset $(git rev-parse --local-env-vars 2>/dev/null || true); git -C "$t" grep -h -I -e '' -- '.github/workflows/*.y*ml' 2>/dev/null | grep -oE 'uses:[[:space:]]*[^[:space:]/]+/[^[:space:]/]+/[.]github/workflows/ci[.]ya?ml@[0-9a-f]+' | sed -n 1p || true); p="${p##*@}"; a=$(dirname "$b"); n=$(basename "$a"); case "$n" in ""|*[!0-9a-f]*) n="$a" ;; esac; if [ -n "$p" ] && [ "$n" != "$p" ]; then echo "the belt answering is $n; this tree pins $p. Run: lefthook run post-checkout"; fi; fi; fi`) }}'''
 # WHERE THE CANON TREE IS, derived from the belt and never resolved a
 # second time. The belt is one directory inside the canon; the tasks
 # that need the canon proper need what sits BESIDE it — slsa/ policies,
