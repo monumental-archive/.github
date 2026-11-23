@@ -52,7 +52,6 @@ mise/config.toml	lint:actions-allowed	41	# #1544 unassigned
 mise/config.toml	audit:actions-allowlist	43	# #1544 unassigned
 mise/config.toml	audit:security-config	25	# #1544 unassigned
 mise/config.toml	lint:from-digests	20	# #1544 unassigned
-mise/config.toml	lint:cold-attested	100	# #1544 unassigned
 mise/config.toml	coverage:check	19	# #1544 unassigned
 mise/config.toml	lint:fuzz-build	40	# #1544 unassigned
 mise/config.toml	audit:caller-permissions	23	# #1544 unassigned
@@ -60,7 +59,6 @@ mise/config.toml	audit:spec-drift	65	# #1544 unassigned
 mise/config.toml	lint:tracks	31	# #1544 unassigned
 mise/config.toml	audit:release-tags	22	# #1544 unassigned
 mise/config.toml	audit:drafts	130	# #1544 unassigned
-mise/config.toml	audit:citations	79	# #1544 unassigned
 mise/config.toml	audit:adoption	110	# #1544 unassigned
 mise/config.toml	audit:signer-surface	65	# #1544 unassigned
 mise/config.toml	audit:coverage-branches	20	# #1544 unassigned
@@ -73,7 +71,5 @@ mise/config.toml	audit:lock-arch	63	# #1544 unassigned
 mise/config.toml	audit:lock-idempotent	100	# #1544 unassigned
 mise/config.toml	lint:canon-policy	19	# #1544 unassigned
 mise/config.toml	lint:policy-load	45	# #1544 unassigned
-mise/config.toml	lint:canon-pins	50	# #1544 unassigned
 mise/config.toml	lint:hook-jobs	18	# #1544 unassigned
 mise/config.toml	lint:release-planned	35	# #1544 unassigned
-mise/config.toml	lint:bash-portability	29	# #1544 unassigned

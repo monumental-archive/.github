@@ -220,6 +220,8 @@ DYNAMIC = {
     "mise/belt_shell.py": "splats its shfmt and shellcheck argvs from lists",
     "mise/caller_permissions.py": "runs stele_findings.py by its path under"
     " the interpreter it runs on, its stele argv built in a list",
+    "mise/citations.py": "runs gh and git from the paths its network reads"
+    " hold, so a row can stand them in (#1911)",
     "mise/embedded_shell.py": "splats its shfmt argv from a list",
     "mise/git_decoy.py": "runs its caller's command against a decoy repository",
     "mise/hermetic.py": "splats its caller's pathspecs into the git ls-files argv",
