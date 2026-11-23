@@ -16,6 +16,10 @@ pgrx provisioning and the per-major subshell — is mise/rust_task.py's,
 which calls mise/clippy-ladder.sh and mise/pgrx-env.sh rather than
 restating them, so all three tasks build an extension the same way.
 
+It runs once per workspace the tree tracks (#2004), the roots named by
+mise/rust_workspaces.py, so an extension outside the root workspace is
+linted like one inside it.
+
 Run in the repository's root, with cargo, rustup and the belt on PATH;
 stdlib only.
 """
@@ -25,10 +29,11 @@ from __future__ import annotations
 import os
 import shutil
 import sys
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 import findings
 import rust_task
+import rust_workspaces
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -57,23 +62,31 @@ def derive(cargo: str, where: Sequence[str]) -> tuple[int, list[list[str]], str]
     return rust_task.pgrx_pairs(found)
 
 
-def workspace(cargo: str, where: Sequence[str] = ()) -> int:
+class Linted(NamedTuple):
+    """What one workspace's pass did."""
+
+    status: int
+    extensions: int
+    # The count of named contradictions the ladder left out, once read.
+    contradictions: str
+
+
+def workspace(cargo: str, root: str) -> Linted:
     """Lint each pgrx extension of one workspace at its highest major.
 
-    `where` is cargo's `--manifest-path` naming the workspace, handed to
-    every cargo command that reads it; empty, cargo finds the one at the
-    working directory, which is the only workspace this task lints.
+    `root` is the workspace's root manifest, handed to every cargo
+    command that reads it as `--manifest-path`.
 
     Returns:
-        The task's status.
+        The workspace's status, and how many extensions it linted.
 
     """
+    where = ("--manifest-path", root)
     status, pairs, majors = derive(cargo, where)
     if status != 0:
-        return status
+        return Linted(status, 0, "")
     if not pairs:
-        print("lint:pg-clippy: no pgrx extension tracked, skipped")
-        return 0
+        return Linted(0, 0, "")
     # clippy is a rustup COMPONENT of the repo's own pin, asserted with a
     # remedy and never installed mid-run — the lint:rust reasoning
     # verbatim.
@@ -83,38 +96,39 @@ def workspace(cargo: str, where: Sequence[str] = ()) -> int:
             "clippy component missing — declare it with the rust pin in mise.toml:",
             [rust_task.PIN],
         )
-        return 1
+        return Linted(1, 0, "")
     os.environ["CLIPPY_CONF_DIR"] = str(rust_task.belt())
     # The org's one ladder: a pgrx crate is linted at exactly what every
     # crate is (#1995).
     status, flags, count = rust_task.ladder()
     if status != 0:
-        return status
+        return Linted(status, 0, "")
     # The SDK, and every major's ICU headers and Postgres pin checked
     # (#1774, #1940).
     status, prepared = rust_task.register(majors)
     if status != 0:
-        return status
-    return lint_each(cargo, where, pairs, (flags, count), prepared)
+        return Linted(status, 0, "")
+    return lint_each(cargo, root, pairs, (flags, count), prepared)
 
 
 def lint_each(
     cargo: str,
-    where: Sequence[str],
+    root: str,
     pairs: list[list[str]],
     ladder: tuple[list[str], str],
     prepared: Mapping[str, str],
-) -> int:
+) -> Linted:
     """Run clippy on each extension at its own major, then say so.
 
     `ladder` is the flags that ride clippy's `--` and the count of
     named contradictions they leave out.
 
     Returns:
-        The first red clippy's status, else 0.
+        The first red clippy's status, else 0, and how many it linted.
 
     """
     flags, count = ladder
+    where = ("--manifest-path", root)
     linted = ""
     for spec, major in pairs:
         linted += f" {rust_task.name_of(spec)}(pg{major})"
@@ -143,13 +157,9 @@ def lint_each(
             prepared,
         )
         if status != 0:
-            return status
-    print(f"lint:pg-clippy: {len(pairs)} extension(s) linted:{linted}")
-    print(
-        "lint:pg-clippy: clean at every group"
-        f" (restriction minus {count} named contradictions)"
-    )
-    return 0
+            return Linted(status, 0, "")
+    print(f"lint:pg-clippy: {root}: {len(pairs)} extension(s) linted:{linted}")
+    return Linted(0, len(pairs), count)
 
 
 def main(argv: list[str]) -> int:
@@ -166,7 +176,29 @@ def main(argv: list[str]) -> int:
     if cargo is None:
         findings.finding("", rust_task.NO_CARGO)
         return 1
-    return workspace(cargo)
+    trees = rust_workspaces.resolved()
+    if trees is None:
+        return 1
+    # EVERY WORKSPACE IN THE TREE (#2004), each run even when an earlier
+    # one is red; the task exits with the last red status.
+    status = 0
+    linted = 0
+    count = ""
+    for root in trees:
+        done = workspace(cargo, root)
+        status = done.status or status
+        linted += done.extensions
+        count = done.contradictions or count
+    if status != 0:
+        return status
+    if not linted:
+        print("lint:pg-clippy: no pgrx extension tracked, skipped")
+        return 0
+    print(
+        "lint:pg-clippy: clean at every group"
+        f" (restriction minus {count} named contradictions)"
+    )
+    return 0
 
 
 if __name__ == "__main__":

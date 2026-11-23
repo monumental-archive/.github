@@ -6,7 +6,8 @@ lint:msrv's body (mise/msrv_lint.py) and lint:rust's and fix:rust's
 its Python for its other helpers, a command with this process's streams
 or read, a function of a belt shell script called through bash, the
 gate's features and compile surface, the installed components, the
-clippy ladder, and the pgrx derivation and provisioning. Written once
+clippy ladder, the pgrx derivation and provisioning, and the tree's
+workspaces from mise/rust_workspaces.py (#2004). Written once
 here, so the helpers cannot drift apart on any of them.
 
 The ladder stays in mise/clippy-ladder.sh and the pgrx steps in

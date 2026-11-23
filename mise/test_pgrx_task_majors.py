@@ -41,20 +41,23 @@ import hermetic
 BELT = Path(__file__).resolve().parent
 BASH = hermetic.tool("bash")
 
+# The workspace derivation's question (#2004) is answered and not
+# logged: every manifest's root is the tree's Cargo.toml.
 CARGO_STUB = r"""#!/usr/bin/env bash
+[[ $1 != locate-project ]] || { echo "${PWD}/Cargo.toml"; exit 0; }
 line="cargo $*"
 [[ -z ${BINDGEN_EXTRA_CLANG_ARGS:-} ]] || line="${line} [${BINDGEN_EXTRA_CLANG_ARGS}]"
 [[ -z ${RUSTUP_TOOLCHAIN:-} ]] || line="${line} {${RUSTUP_TOOLCHAIN}}"
 printf '%s\n' "${line}" >> "${PLANT_LOG}"
-[[ $1 != locate-project ]] || { echo "$(pwd -P)/Cargo.toml"; exit 0; }
 [[ $1 != metadata ]] || echo '{}'
 [[ $1 != check || -z ${PLANT_CHECK_FAILS:-} ]] || exit 101
 exit 0
 """
-# Answers the belt's one producer of the tracked list (#1986) and
+# Answers the belt's one producer of the tracked list (#1986), and the
+# workspace derivation's `rev-parse --show-toplevel` (#2004), and
 # nothing else: `git -c core.quotePath=false ls-files -z -- …`.
 GIT_STUB = """#!/usr/bin/env bash
-[[ "$1 $2" != "rev-parse --show-toplevel" ]] || { pwd -P; exit 0; }
+[[ " $* " != *" rev-parse --show-toplevel "* ]] || { pwd; exit 0; }
 [[ "$1 $2 $3 $4" == "-c core.quotePath=false ls-files -z" ]] || exit 99
 printf 'Cargo.toml\\0'
 """
@@ -102,9 +105,6 @@ SURFACE = (
 PLAN = (
     "check\t1.82.0\t--no-default-features --features pg17\tfirst@0.1.0\n"
     "check\t1.82.0\t--no-default-features --features pg16\tsecond@0.1.0\n"
-)
-LOCATE = (
-    "cargo locate-project --workspace --manifest-path Cargo.toml --message-format plain"
 )
 METADATA = "cargo metadata --no-deps --format-version 1 --locked"
 REGISTER = [
@@ -220,24 +220,25 @@ class TwoExtensions(unittest.TestCase):
         self.assertEqual(0, done.returncode, done.stderr)
         fix = "cargo clippy --fix --allow-dirty"
         own = "--no-deps --all-targets --locked --no-default-features"
+        at = "--manifest-path Cargo.toml"
         want = [
-            f"cargo fmt --all -- --config-path {self.belt}/rustfmt.toml",
-            "cargo fetch --locked",
-            METADATA,
+            f"cargo fmt --all {at} -- --config-path {self.belt}/rustfmt.toml",
+            f"cargo fetch --locked {at}",
+            f"{METADATA} {at}",
             "gate_surface.py --exclude ",
             (
                 f"{fix} --workspace --exclude first --exclude second"
-                " --all-features --locked -- -D warnings"
+                f" --all-features --locked {at} -- -D warnings"
             ),
             *REGISTER,
-            f"{fix} -p first {own} --features pg17 -- -D warnings [-Iicu-pg17]",
-            f"{fix} -p second {own} --features pg16 -- -D warnings [-Iicu-pg16]",
+            f"{fix} -p first {own} --features pg17 {at} -- -D warnings [-Iicu-pg17]",
+            f"{fix} -p second {own} --features pg16 {at} -- -D warnings [-Iicu-pg16]",
         ]
         self.assertEqual(want, self.logged())
         said = [
-            "fix:rust: formatted",
-            "fix:rust: plain rewritten where clippy could",
-            "fix:rust: pgrx extension(s) fixed: first(pg17) second(pg16)",
+            "fix:rust: Cargo.toml: formatted",
+            "fix:rust: Cargo.toml: plain rewritten where clippy could",
+            "fix:rust: Cargo.toml: pgrx extension(s) fixed: first(pg17) second(pg16)",
             "fix:rust: applied what is machine-applicable — the rest is judgement",
         ]
         self.assertEqual(said, done.stdout.splitlines())
@@ -247,23 +248,27 @@ class TwoExtensions(unittest.TestCase):
         done = self.run_task("lint:pg-clippy")
         self.assertEqual(0, done.returncode, done.stderr)
         own = "--no-deps --all-targets --locked --keep-going --no-default-features"
+        at = "--manifest-path Cargo.toml"
         want = [
-            "cargo fetch --locked",
-            METADATA,
+            f"cargo fetch --locked {at}",
+            f"{METADATA} {at}",
             "gate_surface.py --exclude ",
             *REGISTER,
             (
-                f"cargo clippy -p first@0.1.0 {own} --features pg17 -- -D warnings"
-                " [-Iicu-pg17]"
+                f"cargo clippy -p first@0.1.0 {at} {own} --features pg17"
+                " -- -D warnings [-Iicu-pg17]"
             ),
             (
-                f"cargo clippy -p second@0.1.0 {own} --features pg16 -- -D warnings"
-                " [-Iicu-pg16]"
+                f"cargo clippy -p second@0.1.0 {at} {own} --features pg16"
+                " -- -D warnings [-Iicu-pg16]"
             ),
         ]
         self.assertEqual(want, self.logged())
         said = [
-            "lint:pg-clippy: 2 extension(s) linted: first(pg17) second(pg16)",
+            (
+                "lint:pg-clippy: Cargo.toml: 2 extension(s) linted:"
+                " first(pg17) second(pg16)"
+            ),
             (
                 "lint:pg-clippy: clean at every group"
                 " (restriction minus 0 named contradictions)"
@@ -283,8 +288,7 @@ class TwoExtensions(unittest.TestCase):
         at = "--manifest-path Cargo.toml"
         check = f"cargo check --locked {at} --no-default-features"
         want = [
-            # The tree's workspaces (#2011), the pins once, then each.
-            LOCATE,
+            # The pins once, then each of the tree's workspaces (#2011).
             "mise ls rust --json",
             f"cargo fetch --locked {at}",
             # The whole graph, resolved with the gate's features (#1850).

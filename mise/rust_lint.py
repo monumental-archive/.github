@@ -10,6 +10,11 @@ message; everything after the guard is here, so it comes under the
 coverage and mutation legs (CONTRIBUTING, "A helper's language").
 Behaviour, messages and exit statuses are the bodies' own, unchanged.
 
+Both run their cargo legs once per workspace the tree tracks (#2004),
+the roots named by mise/rust_workspaces.py, so a crate outside the root
+workspace (a cargo-fuzz crate is its own) is formatted, linted and
+fixed like any other.
+
 The task's reasoning for each step rides beside the step below. The
 steps every Rust task's helper shares (the belt and its Python, the
 compile surface, the clippy ladder, the pgrx derivation and
@@ -31,6 +36,7 @@ from typing import TYPE_CHECKING
 
 import findings
 import rust_suppressions
+import rust_workspaces
 import tracked
 from rust_task import (
     NO_CARGO,
@@ -164,8 +170,8 @@ def rustfmt_skips(sources: list[str]) -> str:
     return skips
 
 
-def format_check(cargo: str) -> int:
-    """Check the tree is formatted as the org formats it.
+def format_check(cargo: str, root: str) -> int:
+    """Check one workspace is formatted as the org formats it.
 
     `cargo fmt` rather than a tracked-file list — the lint:go deviation
     with the argument running the other way. rustfmt walks each target's
@@ -185,6 +191,8 @@ def format_check(cargo: str) -> int:
             "fmt",
             "--all",
             "--check",
+            "--manifest-path",
+            root,
             "--",
             "--config-path",
             str(belt() / "rustfmt.toml"),
@@ -202,16 +210,16 @@ def format_check(cargo: str) -> int:
     if WARNING.search(done.stdout):
         sys.stderr.write(done.stdout)
         findings.finding(
-            "", "rustfmt warned — an ignored option means a weaker format, silently"
+            root, "rustfmt warned — an ignored option means a weaker format, silently"
         )
         return 1
     if done.returncode != 0:
         sys.stderr.write(done.stdout)
         findings.finding(
-            "", "formatting differs from the org's — run 'mise run fix:rust'"
+            root, "formatting differs from the org's — run 'mise run fix:rust'"
         )
         return 1
-    print("lint:rust: formatting clean")
+    print(f"lint:rust: {root}: formatting clean")
     return 0
 
 
@@ -246,8 +254,8 @@ def preflight(cargo: str | None) -> tuple[str, list[str]] | None:
     return cargo, installed
 
 
-def checks_before_clippy(cargo: str, installed: list[str], manifests: list[str]) -> int:
-    """Run lint:rust's checks that need no compile, in the body's order.
+def checks_before_clippy(installed: list[str], manifests: list[str]) -> int:
+    """Run lint:rust's checks that read the tracked files, before any cargo.
 
     Returns:
         0 when every one passes, else the task's status.
@@ -301,9 +309,6 @@ def checks_before_clippy(cargo: str, installed: list[str], manifests: list[str])
             ],
         )
         return 1
-    status = format_check(cargo)
-    if status != 0:
-        return status
     # EVERY SUPPRESSION IS AN `expect`, and two checks make that true
     # together (#1857): restriction's allow_attributes refuses an outer
     # `#[allow]`, and rust_suppressions.py refuses the inner and manifest
@@ -325,7 +330,9 @@ class Population:
         self.output = ""
 
 
-def lint_members(cargo: str, rows: list[list[str]], flags: list[str]) -> Population:
+def lint_members(
+    cargo: str, root: str, rows: list[list[str]], flags: list[str]
+) -> Population:
     """Lint every member as its own package, past a red one (#726).
 
     Under `-D warnings` a finding IS a compile error, so a red crate
@@ -379,6 +386,8 @@ def lint_members(cargo: str, rows: list[list[str]], flags: list[str]) -> Populat
             *words,
             "--locked",
             "--keep-going",
+            "--manifest-path",
+            root,
             "--",
             *flags,
         ])
@@ -399,11 +408,12 @@ def joined(names: list[str]) -> str:
     return "".join(f" {name}" for name in names)
 
 
-def verdict(seen: Population, count: str) -> int:
-    """Say what the clippy passes found, the population first (#726).
+def verdict(seen: Population, root: str) -> int:
+    """Say what one workspace's clippy passes found, the population first (#726).
 
     Returns:
-        The task's status.
+        The workspace's status; its red crates stay in `seen` for the
+        task's one `red:` finding.
 
     """
     # A bare `--features NAME` means different things to the two shapes:
@@ -412,7 +422,7 @@ def verdict(seen: Population, count: str) -> int:
     # crate gets its own pass (measured, both).
     if "does not contain this feature" in seen.output:
         findings.finding(
-            "",
+            root,
             "CLIPPY_FEATURES names a feature some crate in this workspace lacks",
             [
                 (
@@ -435,7 +445,7 @@ def verdict(seen: Population, count: str) -> int:
     # looks like a false positive.
     if UNKNOWN_LINT.search(seen.output):
         findings.finding(
-            "",
+            root,
             (
                 "a lint name above is unknown to this toolchain"
                 " (see E0602/renamed above)"
@@ -450,23 +460,15 @@ def verdict(seen: Population, count: str) -> int:
         return 1
     # The population, printed before the verdict and in BOTH directions,
     # so that no run of this task can read as a whole workspace when it
-    # was not one (#726).
-    print(f"lint:rust: {len(seen.linted)} crate(s) linted:{joined(seen.linted)}")
+    # was not one (#726). Each line names its workspace (#2004).
+    said = f"lint:rust: {root}:"
+    print(f"{said} {len(seen.linted)} crate(s) linted:{joined(seen.linted)}")
     if seen.extensions:
-        print(
-            "lint:rust: pgrx extension(s), linted by lint:pg-clippy:"
-            + joined(seen.extensions)
-        )
+        named = joined(seen.extensions)
+        print(f"{said} pgrx extension(s), linted by lint:pg-clippy:{named}")
     if seen.excluded:
-        print(f"lint:rust: excluded by CLIPPY_EXCLUDE:{joined(seen.excluded)}")
-    if seen.red:
-        findings.finding("", f"red:{joined(seen.red)}")
-        return seen.status
-    print(
-        f"lint:rust: clean at every group (restriction minus {count}"
-        " named contradictions)"
-    )
-    return 0
+        print(f"{said} excluded by CLIPPY_EXCLUDE:{joined(seen.excluded)}")
+    return seen.status
 
 
 def lint() -> int:
@@ -480,7 +482,7 @@ def lint() -> int:
     if found is None:
         return 1
     cargo, installed = found
-    status = checks_before_clippy(cargo, installed, tracked.tracked(*MANIFESTS))
+    status = checks_before_clippy(installed, tracked.tracked(*MANIFESTS))
     return status or clippy_leg(cargo)
 
 
@@ -497,26 +499,61 @@ def clippy_leg(cargo: str) -> int:
     status, flags, count = ladder()
     if status != 0:
         return status
+    trees = rust_workspaces.resolved()
+    if trees is None:
+        return 1
+    # EVERY WORKSPACE IN THE TREE, not the root's alone (#2004). A
+    # tracked crate outside the root workspace — a cargo-fuzz crate is
+    # its own root — was never formatted or linted, and the population
+    # read as the whole tree. Each root is run even when an earlier one
+    # is red, and the task exits with the last red status.
+    red: list[str] = []
+    for root in trees:
+        rooted, reds = lint_root(cargo, root, flags)
+        red += [f"{name} ({root})" for name in reds]
+        status = rooted or status
+    if red:
+        findings.finding("", f"red:{joined(red)}")
+    if status != 0:
+        return status
+    print(
+        f"lint:rust: clean at every group (restriction minus {count}"
+        " named contradictions)"
+    )
+    return 0
+
+
+def lint_root(cargo: str, root: str, flags: list[str]) -> tuple[int, list[str]]:
+    """Format-check and lint one workspace.
+
+    Returns:
+        The workspace's status, and the crates that went red.
+
+    """
     # Deterministic: the outcome is a function of the tree, the lock and
     # the pinned toolchain. `cargo fetch --locked` first, the lint:deny
     # precedent — fetching pinned inputs is the same category as fetching
     # the toolchain.
-    status = run([cargo, "fetch", "--locked"])
+    status = run([cargo, "fetch", "--locked", "--manifest-path", root])
     if status != 0:
-        return status
-    status, listed = surface(cargo)
+        return status, []
+    status = format_check(cargo, root)
     if status != 0:
-        return status
+        return status, []
+    status, listed = surface(cargo, ("--manifest-path", root))
+    if status != 0:
+        return status, []
     if not listed.strip():
         findings.finding(
-            "", "a Cargo.toml is tracked but cargo metadata names no workspace member"
+            root, "a Cargo.toml is tracked but cargo metadata names no workspace member"
         )
-        return 1
-    return verdict(lint_members(cargo, records(listed), flags), count)
+        return 1, []
+    seen = lint_members(cargo, root, records(listed), flags)
+    return verdict(seen, root), seen.red
 
 
 def fix_extensions(
-    cargo: str, pairs: list[list[str]], majors: str, flags: list[str]
+    cargo: str, root: str, pairs: list[list[str]], majors: str, flags: list[str]
 ) -> int:
     """Fix each pgrx extension at its own highest major.
 
@@ -552,6 +589,8 @@ def fix_extensions(
                 "--no-default-features",
                 "--features",
                 f"pg{major}",
+                "--manifest-path",
+                root,
                 "--",
                 *flags,
             ],
@@ -559,7 +598,7 @@ def fix_extensions(
         )
         if status != 0:
             return status
-    print(f"fix:rust: pgrx extension(s) fixed:{fixed}")
+    print(f"fix:rust: {root}: pgrx extension(s) fixed:{fixed}")
     return 0
 
 
@@ -594,6 +633,29 @@ def fix_leg(cargo: str) -> int:
 
     """
     os.environ["CLIPPY_CONF_DIR"] = str(belt())
+    status, flags, _ = ladder()
+    if status != 0:
+        return status
+    trees = rust_workspaces.resolved()
+    if trees is None:
+        return 1
+    # Every workspace in the tree, as the gate leg (#2004); each root is
+    # fixed even when an earlier one failed.
+    for root in trees:
+        status = fix_root(cargo, root, flags) or status
+    if status != 0:
+        return status
+    print("fix:rust: applied what is machine-applicable — the rest is judgement")
+    return 0
+
+
+def fix_root(cargo: str, root: str, flags: list[str]) -> int:
+    """Format and fix one workspace.
+
+    Returns:
+        The workspace's status.
+
+    """
     # Format first: clippy --fix rewrites source, and handing it
     # canonically formatted input keeps its edits from arriving
     # pre-mangled.
@@ -601,33 +663,33 @@ def fix_leg(cargo: str) -> int:
         cargo,
         "fmt",
         "--all",
+        "--manifest-path",
+        root,
         "--",
         "--config-path",
         str(belt() / "rustfmt.toml"),
     ])
     if status != 0:
         return status
-    print("fix:rust: formatted")
-    status, flags, _ = ladder()
-    if status != 0:
-        return status
-    status = run([cargo, "fetch", "--locked"])
+    print(f"fix:rust: {root}: formatted")
+    status = run([cargo, "fetch", "--locked", "--manifest-path", root])
     if status != 0:
         return status
     # Same derivation as the gate leg, for the same reason: this leg's
     # mirror of #726 is the POPULATION, and a population computed twice
     # is two populations (#813).
-    status, found = surface(cargo)
+    status, found = surface(cargo, ("--manifest-path", root))
     if status != 0:
         return status
     status, pairs, majors = pgrx_pairs(found)
     if status != 0:
         return status
-    return fix_workspace(cargo, records(found), pairs, (majors, flags))
+    return fix_workspace(cargo, root, records(found), pairs, (majors, flags))
 
 
 def fix_workspace(
     cargo: str,
+    root: str,
     rows: list[list[str]],
     pairs: list[list[str]],
     build: tuple[str, list[str]],
@@ -679,19 +741,20 @@ def fix_workspace(
         *excludes,
         *features(),
         "--locked",
+        "--manifest-path",
+        root,
         "--",
         *flags,
     ])
     if status != 0:
         return status
-    print(f"fix:rust:{joined(fixing) or ' none'} rewritten where clippy could")
+    print(f"fix:rust: {root}:{joined(fixing) or ' none'} rewritten where clippy could")
     if pairs:
-        status = fix_extensions(cargo, pairs, majors, flags)
+        status = fix_extensions(cargo, root, pairs, majors, flags)
         if status != 0:
             return status
     if excluded:
-        print(f"fix:rust: excluded by CLIPPY_EXCLUDE:{joined(excluded)}")
-    print("fix:rust: applied what is machine-applicable — the rest is judgement")
+        print(f"fix:rust: {root}: excluded by CLIPPY_EXCLUDE:{joined(excluded)}")
     return 0
 
 

@@ -64,8 +64,8 @@ honestly blocked on.
 | cargo-auditable (`github:rust-secure-code/cargo-auditable`, repo-side pin, upstream sha256s) | Release build input of every class that ships a Rust binary (#1334), prebuilt where the `cargo:` backend compiled it per job (187–252 s on edtf v1.3.5). Not `aqua:`: mise's baked registry has no entry (mise 2026.11.6: `no aqua-registry found for rust-secure-code/cargo-auditable`). `mise lock` at 0.7.7 records, for all four platforms, checksums equal to upstream's `.tar.xz.sha256` files (measured 2026-11-17); on Linux mise selects the `unknown-linux-gnu` asset, not musl. A locked install took 2.9 s. Reopen when a mise release's baked aqua registry carries the package |
 | sqlfluff (`pipx:` backend via aqua-backed uv) | SQL lint in the gate (`lint:sql`, all core rules, dialect postgres) + `fix:sql` — proven first in monumental-archive-db |
 | shellcheck + shfmt over mise task bodies (`mise/belt_shell.py`) | The third shell surface in the gate (`lint:belt-shell`) at the delivered level (`enable=all`, SC2310 held off, #1997), this file's own tasks included — plus `fix:belt-shell` |
-| clippy (rustup component of the repo's own pin) | Rust lint in the gate (`lint:rust`): every group at deny, restriction minus thirteen named contradictions, `-D warnings`, org knobs in the canon's `mise/clippy.toml`, every workspace member linted as its own package — plus `fix:rust` |
-| rustfmt (rustup component of the repo's own pin) | Rust format check in the gate (`lint:rust`, same task): the canon's `mise/rustfmt.toml` at rustfmt's **stable** maximum, `style_edition` pinned — plus `fix:rust` |
+| clippy (rustup component of the repo's own pin) | Rust lint in the gate (`lint:rust`): every group at deny, restriction minus thirteen named contradictions, `-D warnings`, org knobs in the canon's `mise/clippy.toml`, every member of every workspace the tree tracks (a cargo-fuzz crate is its own) linted as its own package, workspace by workspace (#2004) — plus `fix:rust` |
+| rustfmt (rustup component of the repo's own pin) | Rust format check in the gate (`lint:rust`, same task): the canon's `mise/rustfmt.toml` at rustfmt's **stable** maximum, `style_edition` pinned, over every workspace the tree tracks (#2004) — plus `fix:rust` |
 | a second pinned `rust` toolchain (`core:rust`, repo-side) | The declared minimum compiled in the gate (`lint:msrv`): every crate declaring `rust-version` is built at a pin of exactly that version, and `mise/msrv_plan.py` holds `Cargo.toml` and `mise.toml` in agreement about which version that is |
 | `aqua:theseus-rs/postgresql-binaries` (repo-side, one pin per major) | A real Postgres for the gate: the pgrx extension compiles (`lint:pg-clippy`) and its suite runs at every declared major (`test:pgrx`), with `mise/pgrx_postgres.py` holding the crate's `pgNN` features and the repository's pins in agreement |
 | `github:unicode-org/icu` (repo-side, macOS only, TOFU checksum) | ICU's headers for building a pgrx extension on a Mac: the prebuilt Postgres is configured `--with-icu` and ships the dylibs without the headers, and pgrx binds every Postgres header from 0.19.3. `mise/pgrx-env.sh` adds them per Postgres major, and holds one release per ICU major the pinned Postgres builds name: the single-table form for one, the array form for more (#1774) |
@@ -273,6 +273,21 @@ is unchanged and the green line now names all five crates it covers.
 workspace's default members, and `CLIPPY_EXCLUDE` honoured — but not the
 mechanism: `cargo fix` caps lint denials to warnings and says so in its
 own note, so one pass already reaches every crate (measured, both).
+
+*Every workspace the tree tracks, not the root's alone* (#2004). The
+task decided a repository had Rust from its tracked `Cargo.toml` files
+and took the crates from the root workspace, so a tracked crate outside
+it was never formatted, linted or fixed — in all three Rust
+repositories that was `fuzz/Cargo.toml`, a cargo-fuzz crate that is its
+own root, and three unformatted fuzz targets passed a green gate in
+edtf. Each tracked manifest is now resolved to its workspace root by
+`cargo locate-project --workspace`, and `lint:rust`, `fix:rust` and
+`lint:pg-clippy` run their cargo legs once per root, with
+`--manifest-path`, the same ladder and the same features; the
+population line names its root, and a root outside the checkout is
+red. Measured 2026-11-23 on the three
+repositories' fuzz crates at this ladder: 6, 13 and 27 findings, 6 to
+14 s cold each.
 
 *The exception mechanism is `#[expect(..., reason = "...")]` and nothing
 else.* No clippy flag can beat a source attribute: a crate-level
