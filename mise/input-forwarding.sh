@@ -28,11 +28,14 @@ org__here=${BASH_SOURCE[0]%/*}
 [[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
 # shellcheck source=mise/findings.sh
 . "${org__here}/findings.sh"
+# The one selection of the workflows (#2007).
+# shellcheck source=mise/action-files.sh
+. "${org__here}/action-files.sh"
 unset org__here
 # The task this script reports for, where mise named none (#1934).
 org_task "lint:input-forwarding"
 
-files=() && org_tracked_read files ':!vendor/**' ".github/workflows/*.y*ml"
+files=() && workflow_files files
 [[ -n ${files[0]+set} ]] || {
   echo "lint:input-forwarding: no workflows, skipped"
   exit 0

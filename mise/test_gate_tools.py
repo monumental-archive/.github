@@ -403,6 +403,64 @@ def first_skip(lines: list[tuple[str, str]]) -> int | None:
     return None
 
 
+FUNCTION = re.compile(r"^(\w+)\(\)\s*\{")
+
+
+def called_only(text: str) -> str:
+    """Drop the shell functions a body defines but never calls.
+
+    A sourced selector file (mise/action-files.sh, #2007) defines one
+    function per selection; a task calls the one it means. Read whole,
+    every function's pathspecs would join every caller's guard, so the
+    workflow templates would become a condition of lint:zizmor. A
+    function counts when it is named outside every definition, or inside
+    one that counts.
+
+    Returns:
+        The text with each uncalled function's definition removed.
+
+    """
+    lines = text.split("\n")
+    spans: dict[str, tuple[int, int]] = {}
+    for start, line in enumerate(lines):
+        match = FUNCTION.match(line)
+        if match is None:
+            continue
+        stop = start
+        if not line.rstrip().endswith("}"):
+            ends = [n for n in range(start + 1, len(lines)) if lines[n].rstrip() == "}"]
+            stop = ends[0] if ends else len(lines) - 1
+        spans[typed_std.group(match, 1) or ""] = (start, stop)
+    inside = {n for start, stop in spans.values() for n in range(start, stop + 1)}
+    called = {
+        name
+        for name in spans
+        for n, line in enumerate(lines)
+        if n not in inside and re.search(rf"\b{name}\b", line)
+    }
+    grew = True
+    while grew:
+        bodies = [
+            line
+            for name in called
+            for line in lines[spans[name][0] + 1 : spans[name][1] + 1]
+        ]
+        more = {
+            name
+            for name in spans
+            if name not in called and any(re.search(rf"\b{name}\b", b) for b in bodies)
+        }
+        called |= more
+        grew = bool(more)
+    dropped = {
+        n
+        for name, (start, stop) in spans.items()
+        if name not in called
+        for n in range(start, stop + 1)
+    }
+    return "\n".join(line for n, line in enumerate(lines) if n not in dropped)
+
+
 def guard_paths(lines: list[tuple[str, str]]) -> set[str]:
     """Read the pathspecs a body tests before it may skip.
 
@@ -415,6 +473,7 @@ def guard_paths(lines: list[tuple[str, str]]) -> set[str]:
     # onto a second line, and reading line by line lost `*.json` and the
     # rest of it (#1410: biome disabled on stele, which tracks JSON only).
     joined = re.sub(r"\\\n", " ", "\n".join(text for _, text in lines))
+    joined = called_only(joined)
     for text in joined.splitlines():
         # `org_tracked() {` is the producer's definition, not a call, and
         # `org_tracked_read`'s first word is the array it fills.
@@ -617,6 +676,50 @@ class Table(unittest.TestCase):
             self.fail("the planted body never skips")
         selected: set[str] = {"*.js", "*.json", "*.css"}
         self.assertEqual(selected, guard_paths(lines[: skip + 1]))
+
+    def test_a_sourced_selector_guards_with_its_own_pathspec(self) -> None:
+        """Only the function a body calls joins its guard (#2007).
+
+        mise/action-files.sh defines three selectors; a task calling
+        workflow_files is guarded on the workflows alone, and one calling
+        workflow_template_files on the templates alone. Read whole, every
+        selector's pathspecs would join every caller's guard.
+        """
+        skip = '[[ -n ${f[0]+set} ]] || {\n  echo "x: skipped"\n  exit 0\n}\n'
+        source = '. "${ORG_BELT_DIR}/action-files.sh"\n'
+        for call, want in (
+            ("workflow_files", {".github/workflows/*.y*ml"}),
+            ("workflow_template_files", {"workflow-templates/*.y*ml"}),
+            (
+                "action_files",
+                {
+                    ".github/workflows/*.y*ml",
+                    "action.yml",
+                    "action.yaml",
+                    "*/action.yml",
+                    "*/action.yaml",
+                },
+            ),
+        ):
+            with self.subTest(call=call):
+                lines = expand(f"{source}f=() && {call} f\n{skip}", set())
+                at = first_skip(lines)
+                if at is None:
+                    self.fail("the planted body never skips")
+                self.assertEqual(want, guard_paths(lines[: at + 1]))
+
+    def test_an_uncalled_function_is_dropped_and_a_nested_one_kept(self) -> None:
+        """A function counts when called, or called by one that is."""
+        text = (
+            'a() { org_tracked_read "$1" one; }\n'
+            'b() {\n  a "$1"\n}\n'
+            'c() { org_tracked_read "$1" three; }\n'
+            "f=() && b f\n"
+        )
+        self.assertEqual(
+            called_only(text),
+            'a() { org_tracked_read "$1" one; }\nb() {\n  a "$1"\n}\nf=() && b f\n',
+        )
 
     def test_xargs_and_cargo_subcommands_are_calls(self) -> None:
         """`xargs -0 tool` and `cargo deny` are calls."""

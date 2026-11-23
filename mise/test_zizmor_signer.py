@@ -102,7 +102,7 @@ SIGNER_WORKFLOW = "monumental-archive/signer/.github/workflows/sign.yml"
 SIGNER_REF = SIGNER_WORKFLOW + "@cffec9441210d46f237099d8785098aacf5b8273"
 MISMATCH_REF = SIGNER_WORKFLOW + "@0d6c6e297684c8ba401fb9c212532628fe552148"
 TASK = "audit:actions"
-ARGS = ["--persona=auditor", ".github/workflows/"]
+ARGS = ["--persona=auditor", ".github/workflows/a.yml"]
 # A GH_TOKEN value: the rows never reach the API.
 STANDIN = "a token"
 
@@ -722,6 +722,7 @@ class Task(unittest.TestCase):
         config = decoded.load_toml((HERE / "config.toml").read_bytes())
         tasks = decoded.as_object(config["tasks"], "tasks")
         body = decoded.as_str(decoded.as_object(tasks[TASK], TASK)["run"], "run")
+        hermetic.track(root)
         run = hermetic.task_run(TASK, body)
         return subprocess.run(
             run.argv,
@@ -751,7 +752,7 @@ class Task(unittest.TestCase):
         done = self.run_task([third], 11)
         self.assertEqual(11, done.returncode, done.stderr)
         logged: list[str] = self.log.read_text(encoding="utf-8").splitlines()
-        once: list[str] = ["--format=json\t--persona=auditor\t.github/workflows/"]
+        once: list[str] = ["--format=json\t--persona=auditor\t.github/workflows/a.yml"]
         self.assertEqual(logged, once)
         lines = self.file.read_text(encoding="utf-8").splitlines()
         self.assertEqual(1, len(lines))

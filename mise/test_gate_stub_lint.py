@@ -164,6 +164,7 @@ class Lint(unittest.TestCase):
 
     def test_no_workflows_is_skipped_by_name(self) -> None:
         """No workflow file: the task says it skipped."""
+        hermetic.track(self.tree)
         as_mise = hermetic.task_run(TASK, body())
         done = subprocess.run(
             as_mise.argv,
