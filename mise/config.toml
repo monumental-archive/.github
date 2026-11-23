@@ -9055,8 +9055,9 @@ dir = "{{cwd}}"
 # Both `audit:release-tags` and `audit:spec-drift` shipped as tasks,
 # were cited in prose as enforcing, and NO workflow ran either (#354,
 # fixed #356). This is the join: red on any audit:* task with no
-# `mise run audit:<name>` occurrence anywhere in .github/workflows/.
-# Anywhere, so the schedulers are whichever files run one: the canon's
+# `mise run audit:<name>` occurrence in any workflow file
+# (.github/workflows/*.y*ml, the only files GitHub runs).
+# Any, so the schedulers are whichever files run one: the canon's
 # org-side subject workflows (slsa.yml, org-settings.yml,
 # pins-and-belt.yml, badges.yml; #1884), publish.yml, the repo-*.yml subject workflows (#1858), and
 # repo-mutants.yml for audit:mutants, which runs apart so a survivor
@@ -9090,77 +9091,22 @@ dir = "{{cwd}}"
 # ONLY collecting workflow (#1858): a caller of any other subject
 # workflow runs the belt's legs and none of the repository's own.
 run = '''
-status=0
-
-if [[ -f mise/config.toml ]]; then
-  bad=""
-  count=0
-  audits=$(grep -oE '^\[tasks\."audit:[a-z-]+"\]' mise/config.toml \
-    | sed 's/^\[tasks\."audit:\(.*\)"\]$/\1/')
-  while IFS= read -r t; do
-    [[ -n ${t} ]] || continue
-    count=$((count + 1))
-    grep -rEq "mise run audit:${t}([^a-z-]|$)" .github/workflows/ \
-      || bad="${bad} audit:${t}"
-  done <<< "${audits}"
-  if [[ ${count} -eq 0 ]]; then
-    org_finding "" "zero belt audit tasks enumerated — the grep is broken"
-    status=1
-  elif [[ -n ${bad} ]]; then
-    org_finding "" "belt audit task(s) no workflow ever runs:${bad}" \
-      "schedule each in .github/workflows/ (slsa.yml or a sibling, publish.yml, a" \
-      "repo-*.yml subject workflow or repo-mutants.yml) or delete the task — a check" \
-      "nobody runs is a claim, not a check (#358 seam 1)."
-    status=1
-  else
-    echo "lint:audit-scheduled: ${count} belt audit task(s), every one scheduled"
-  fi
-fi
-
 . "${ORG_BELT_DIR}/own-audits.sh"
 own=$(own_audit_tasks)
-if [[ -z ${own} ]]; then
-  echo "lint:audit-scheduled: this repository defines no audit:* of its own"
-  exit "${status}"
+flows=()
+if compgen -G ".github/workflows/*.y*ml" > /dev/null; then
+  flows=(.github/workflows/*.y*ml)
 fi
-if ! compgen -G ".github/workflows/*.y*ml" > /dev/null; then
-  # shellcheck disable=SC2001  # an anchored per-line prefix; ${x//from/to} has no line anchor
-  IFS=$'\n' read -r -d '' -a detail < <(sed 's/^/  /' <<< "${own}") || true
-  org_finding "" "repo-defined audit task(s) and NO workflows at all:" ${detail[@]+"${detail[@]}"} \
-    "wire the own-audits stub (workflow-templates/own-audits.yml) —" \
-    "it calls repo-own-audits.yml, whose one leg runs every audit:*" \
-    "this repository defines (#704, #1858)."
-  exit 1
+canon=""
+if [[ -n ${own} && -n ${flows[0]+set} ]]; then
+  . "${ORG_BELT_DIR}/identity.sh"
+  owner=$(org_identity owner)
+  repo=$(org_identity repo)
+  canon="${owner}/${repo}"
 fi
-. "${ORG_BELT_DIR}/identity.sh"
-canon_owner=$(org_identity owner)
-canon_repo=$(org_identity repo)
-canon="${canon_owner}/${canon_repo}"
-canon_re="${canon//./\\.}"
-collected=0
-grep -rEq "uses:[[:space:]]*(${canon_re}/|\./)\.github/workflows/repo-own-audits\.ya?ml" \
-  .github/workflows/ && collected=1
-missing=""
-own_count=0
-while IFS= read -r t; do
-  [[ -n ${t} ]] || continue
-  own_count=$((own_count + 1))
-  [[ ${collected} -eq 1 ]] && continue
-  grep -rEq "mise run ${t}([^a-z-]|$)" .github/workflows/ || missing="${missing} ${t}"
-done <<< "${own}"
-if [[ -n ${missing} ]]; then
-  org_finding "" "repo-defined audit task(s) no workflow runs:${missing}" \
-    "wire the own-audits stub (workflow-templates/own-audits.yml), which" \
-    "calls repo-own-audits.yml and runs every audit:* this repository defines," \
-    "or run each from a workflow here — or delete the task. A check" \
-    "nobody runs is a claim, not a check (#358 seam 1, #704)."
-  status=1
-elif [[ ${collected} -eq 1 ]]; then
-  echo "lint:audit-scheduled: ${own_count} repo-defined audit task(s), collected by repo-own-audits.yml"
-else
-  echo "lint:audit-scheduled: ${own_count} repo-defined audit task(s), each run by a workflow here"
-fi
-exit "${status}"
+# Both halves and their messages: mise/audit_scheduled.py (#1911).
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/audit_scheduled.py" \
+  --own "${own}" --canon "${canon}" ${flows[@]+"${flows[@]}"}
 '''
 
 [tasks."lint:canon-policy"]
