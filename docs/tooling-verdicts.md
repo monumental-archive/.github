@@ -2790,8 +2790,10 @@ lock-checksummed across all seven platforms — the closest-to-policy
 path without aqua, and the belt's first use of it. Like biome and
 golangci-lint this tool is **unprovable in the canon** (no Rust
 tracked; `lint:machete` skips clean here) and is exercised first in a
-consumer. *Reopen:* an aqua-registry package appearing (move the pin),
-or machete growing a no-write metadata mode (reconsider precision).
+consumer; only the task's file list is held here, by planted rows that
+run the real tool (`mise/test_machete.py`, #2008). *Reopen:* an
+aqua-registry package appearing (move the pin), or machete growing a
+no-write metadata mode (reconsider precision).
 
 **cargo-semver-checks as `audit:semver`, and the recorded deviation
 from #403's wording** (#403). The issue's close condition says every
