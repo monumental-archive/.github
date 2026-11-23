@@ -48,7 +48,8 @@ IDENTITY = {
 COMMIT = (
     "git -c user.name=t -c user.email=t@example.invalid -c commit.gpgsign=false commit"
 )
-ROOT_RE = re.compile(r"--start-directory\s+(\S+)")
+# The roots the body names: `unittest_guarded.py roots <dir>…` (#2056).
+ROOTS_RE = re.compile(r"unittest_guarded\.py roots((?: [^\s\\]+)+)")
 
 PASSING = """\
 import unittest
@@ -101,14 +102,19 @@ def roots() -> list[str]:
     """Read the discovery roots the `test` task names.
 
     Returns:
-        Each `--start-directory` argument, in order.
+        Each root the `unittest_guarded.py roots` call names, in order.
+
+    Raises:
+        AssertionError: the body names none, so a row would plant no
+            root and prove nothing.
 
     """
     found: list[str] = []
-    for match in ROOT_RE.finditer(body()):
-        root = typed_std.group(match, 1)
-        if root is not None:
-            found.append(root)
+    for match in ROOTS_RE.finditer(body()):
+        found += (typed_std.group(match, 1) or "").split()
+    if not found:
+        msg = "the test task names no `unittest_guarded.py roots` call"
+        raise AssertionError(msg)
     return found
 
 
