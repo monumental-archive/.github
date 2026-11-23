@@ -256,6 +256,7 @@ tasks = [
   "lint:caller-permissions",
   "lint:capability-boundary",
   "lint:citation",
+  "lint:cold-attested",
   "lint:coverage-exclusions",
   "lint:deny",
   "lint:fuzz-build",
