@@ -36,7 +36,7 @@ class Table(unittest.TestCase):
         """ci.yml's lint shards are 1 to `shards` of `shards`."""
         n = gate_shard.load().shards
         rows = re.findall(
-            r"- \{leg: lint, shard: (\d+), of: (\d+)\}", CI.read_text("utf-8")
+            r"- leg: lint\n +shard: (\d+)\n +of: (\d+)\n", CI.read_text("utf-8")
         )
         self.assertEqual([(str(i), str(n)) for i in range(1, n + 1)], rows)
 

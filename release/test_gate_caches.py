@@ -229,8 +229,9 @@ TOOL_SAVE_IF = (
     "          && steps.tool-cache.outputs.cache-hit != 'true' }}\n"
 )
 GO_KEYS = (
-    "restore-keys: ${{ env.ORG_GATE_CACHE_FALLBACK == 'true'"
-    " && format('gate-go-v2-{0}-{1}-', env.ORG_GATE_SLOT, runner.os) || '' }}"
+    "restore-keys: >-\n"
+    "            ${{ env.ORG_GATE_CACHE_FALLBACK == 'true'\n"
+    "            && format('gate-go-v2-{0}-{1}-', env.ORG_SLOT, runner.os) || '' }}"
 )
 TOOL_KEYS = (
     "          restore-keys: ${{ env.ORG_GATE_CACHE_FALLBACK == 'true'"
@@ -310,7 +311,7 @@ class Planted(unittest.TestCase):
         self.assert_named(
             plant(
                 GO_KEYS,
-                "restore-keys: gate-go-v2-${{ env.ORG_GATE_SLOT }}-${{ runner.os }}-",
+                "restore-keys: gate-go-v2-${{ env.ORG_SLOT }}-${{ runner.os }}-",
             ),
             f"gate: {GO_RESTORE} carries a fallback on the default branch",
         )
@@ -347,7 +348,7 @@ class Planted(unittest.TestCase):
         """A restore with no save starves the default branch's copy."""
         text = plant(
             GO_SAVE_KEY,
-            "          key: gate-go-v2-${{ env.ORG_GATE_SLOT }}-${{ runner.os }}-\n",
+            "          key: gate-go-v2-${{ env.ORG_SLOT }}-${{ runner.os }}-\n",
         )
         self.assert_named(text, f"gate: {GO_RESTORE} is restored and never saved")
         self.assert_named(
@@ -395,13 +396,13 @@ LEG_CACHES = {
     "Save the tool cache (default branch only)": "matrix.leg == 'test'",
 }
 LEG_KEYS = {
-    "go-cache": "gate-go-v2-${{ env.ORG_GATE_SLOT }}-",
-    "cargo-cache": "gate-cargo-${{ env.ORG_GATE_SLOT }}-",
+    "go-cache": "gate-go-v2-${{ env.ORG_SLOT }}-",
+    "cargo-cache": "gate-cargo-${{ env.ORG_SLOT }}-",
 }
 LEG_PREFIXES = {
-    "go-cache": "format('gate-go-v2-{0}-{1}-', env.ORG_GATE_SLOT, runner.os)",
+    "go-cache": "format('gate-go-v2-{0}-{1}-', env.ORG_SLOT, runner.os)",
     "cargo-cache": (
-        "format('gate-cargo-{0}-{1}-{2}-', env.ORG_GATE_SLOT, runner.os,"
+        "format('gate-cargo-{0}-{1}-{2}-', env.ORG_SLOT, runner.os,"
         " steps.rustc.outputs.digest)"
     ),
 }
@@ -447,20 +448,20 @@ class LegCaches(unittest.TestCase):
             (
                 "a shared cargo key",
                 (
-                    "key: gate-cargo-${{ env.ORG_GATE_SLOT }}-${{ runner.os }}",
+                    "key: gate-cargo-${{ env.ORG_SLOT }}-${{ runner.os }}",
                     "key: gate-cargo-${{ runner.os }}",
                 ),
                 (
                     "gate: the cargo-cache key does not start"
-                    " gate-cargo-${{ env.ORG_GATE_SLOT }}-"
+                    " gate-cargo-${{ env.ORG_SLOT }}-"
                 ),
             ),
             (
                 "a shared Go fallback",
-                (GO_KEYS, GO_KEYS.replace("{0}-{1}-', env.ORG_GATE_SLOT, ", "{0}-', ")),
+                (GO_KEYS, GO_KEYS.replace("{0}-{1}-', env.ORG_SLOT, ", "{0}-', ")),
                 (
                     "gate: the go-cache fallback is not"
-                    " format('gate-go-v2-{0}-{1}-', env.ORG_GATE_SLOT, runner.os)"
+                    " format('gate-go-v2-{0}-{1}-', env.ORG_SLOT, runner.os)"
                 ),
             ),
             (

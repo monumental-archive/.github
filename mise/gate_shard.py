@@ -26,8 +26,6 @@ stdlib only.
 """
 
 import fnmatch
-import json
-import os
 import shutil
 import subprocess
 import sys
@@ -122,9 +120,6 @@ def lint_tasks(mise: str) -> list[str]:
     Returns:
         The task names, sorted.
 
-    Raises:
-        ValueError: mise's listing is not a list of named tasks.
-
     """
     out = subprocess.run(
         [mise, "tasks", "ls", "--hidden", "--json"],
@@ -152,18 +147,8 @@ def hands(of: int, mise: str, costs: Costs) -> list[list[str]]:
     return deal(names, of, {n: cost(n, costs, files) for n in names})
 
 
-def usage() -> int:
-    """Print the usage.
-
-    Returns:
-        2, the usage exit.
-
-    """
-    print(
-        "usage: gate_shard.py run <leg> <shard> <of> | gate_shard.py deal <of>",
-        file=sys.stderr,
-    )
-    return 2
+USAGE = "usage: gate_shard.py run <leg> <shard> <of> | gate_shard.py deal <of>"
+USAGE_EXIT = 2
 
 
 def whole(text: str) -> int | None:
@@ -176,36 +161,21 @@ def whole(text: str) -> int | None:
     return int(text) if text.isdigit() and int(text) > 0 else None
 
 
-def main(argv: list[str]) -> int:
-    """Run or print the deal.
+def run(leg: str, shard: int, of: int, mise: str) -> int:
+    """Run one shard of a leg: `ci:<leg>` alone, or this shard's lints.
 
     Returns:
-        The exit status; `run` replaces this process with mise's.
+        mise's exit status.
 
     """
-    mise = shutil.which("mise")
-    if mise is None:
-        print("gate_shard: mise is not on PATH", file=sys.stderr)
-        return 1
-    costs = load()
-    if len(argv) == 2 and argv[0] == "deal" and (of := whole(argv[1])):
-        for at, hand in enumerate(hands(of, mise, costs), 1):
-            print(f"lint {at}/{of}: {' '.join(hand)}")
-        return 0
-    if len(argv) != 4 or argv[0] != "run" or argv[1] not in LEGS:
-        return usage()
-    leg = argv[1]
-    shard, of = whole(argv[2]), whole(argv[3])
-    if shard is None or of is None or shard > of:
-        return usage()
     if of == 1:
-        os.execv(mise, [mise, "run", f"ci:{leg}"])
+        return subprocess.run([mise, "run", f"ci:{leg}"], check=False).returncode
     if leg != "lint":
         print(
             f"gate_shard: the {leg} leg runs on one runner, not {of}", file=sys.stderr
         )
         return 1
-    hand = hands(of, mise, costs)[shard - 1]
+    hand = hands(of, mise, load())[shard - 1]
     print(f"gate_shard: lint {shard}/{of}: {len(hand)} lints: {' '.join(hand)}")
     if not hand:
         return 0
@@ -213,8 +183,48 @@ def main(argv: list[str]) -> int:
     for at, name in enumerate(hand):
         args += [*([":::"] if at else []), name]
     sys.stdout.flush()
-    os.execv(mise, args)
-    return 0  # pragma: no cover -- execv does not return
+    return subprocess.run(args, check=False).returncode
+
+
+def parse(argv: list[str]) -> tuple[str, str, int, int] | None:
+    """Read the command line.
+
+    Returns:
+        The command, the leg, the shard and the count (`deal` has leg
+        "lint" and shard 1), or None when it is malformed.
+
+    """
+    match argv:
+        case ["deal", count] if of := whole(count):
+            return "deal", "lint", 1, of
+        case ["run", leg, at, count] if leg in LEGS:
+            shard, of = whole(at), whole(count)
+            if shard is not None and of is not None and shard <= of:
+                return "run", leg, shard, of
+    return None
+
+
+def main(argv: list[str]) -> int:
+    """Run or print the deal.
+
+    Returns:
+        The exit status: mise's for `run`, 2 for a malformed command line.
+
+    """
+    parsed = parse(argv)
+    if parsed is None:
+        print(USAGE, file=sys.stderr)
+        return USAGE_EXIT
+    command, leg, shard, of = parsed
+    mise = shutil.which("mise")
+    if mise is None:
+        print("gate_shard: mise is not on PATH", file=sys.stderr)
+        return 1
+    if command == "run":
+        return run(leg, shard, of, mise)
+    for at, hand in enumerate(hands(of, mise, load()), 1):
+        print(f"lint {at}/{of}: {' '.join(hand)}")
+    return 0
 
 
 if __name__ == "__main__":

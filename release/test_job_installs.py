@@ -2761,7 +2761,14 @@ class GateLegs(unittest.TestCase):
         rows = [
             (
                 "a leg dropped",
-                ("          - {leg: properties, shard: 1, of: 1}\n", ""),
+                (
+                    (
+                        "          - leg: properties\n"
+                        "            shard: 1\n"
+                        "            of: 1\n"
+                    ),
+                    "",
+                ),
                 "gate: not a matrix of the legs ['lint', 'test', 'properties']",
             ),
             (
