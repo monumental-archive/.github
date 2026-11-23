@@ -2,15 +2,17 @@
 """What the helpers of the belt's Rust tasks share (#1911).
 
 lint:msrv's body (mise/msrv_lint.py) and lint:rust's and fix:rust's
-(mise/rust_lint.py) run the same steps around their own: the belt's
-Python for its other helpers, a command with this process's streams or
-read, a function of a belt shell script called through bash, the gate's
-features, and the pgrx derivation and provisioning. Written once here,
-so the helpers cannot drift apart on any of them.
+(mise/rust_lint.py) run the same steps around their own: the belt and
+its Python for its other helpers, a command with this process's streams
+or read, a function of a belt shell script called through bash, the
+gate's features and compile surface, the installed components, the
+clippy ladder, and the pgrx derivation and provisioning. Written once
+here, so the helpers cannot drift apart on any of them.
 
-The pgrx steps stay in mise/pgrx-env.sh, written once for every task
-that needs them, shell and Python alike; this module calls its
-functions through bash rather than restating them.
+The ladder stays in mise/clippy-ladder.sh and the pgrx steps in
+mise/pgrx-env.sh, each written once for every task that needs it, shell
+and Python alike; this module calls their functions through bash rather
+than restating them.
 
 Imported, never run; stdlib only.
 """
@@ -47,6 +49,8 @@ EXPORTS = (
 # exported for its callers.
 BASH_OWN = frozenset({"SHLVL", "_", "PWD", "OLDPWD"})
 POSTGRES = "aqua:theseus-rs/postgresql-binaries"
+PIN = 'rust = { version = "1.xx.x", components = "clippy,rustfmt,llvm-tools" }'
+NO_CARGO = "Cargo.toml present but cargo missing — pin rust in mise.toml"
 
 
 def belt() -> Path:
@@ -215,3 +219,82 @@ def at_major(major: str, argv: Sequence[str], prepared: Mapping[str, str]) -> in
     pgrx_env = str(belt() / "pgrx-env.sh")
     shell = [*SHELL, CALL, "belt", pgrx_env, "org_pgrx_major", major]
     return run([*shell, *argv], {**os.environ, **prepared})
+
+
+def installed_components() -> list[str]:
+    """List the rustup components the repository's own pin installed.
+
+    Returns:
+        One line per component; none when rustup is absent or fails.
+
+    """
+    rustup = shutil.which("rustup")
+    if rustup is None:
+        return []
+    done = subprocess.run(
+        [rustup, "component", "list", "--installed"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        check=False,
+    )
+    return done.stdout.splitlines() if done.returncode == 0 else []
+
+
+def has(components: list[str], name: str) -> bool:
+    """Say whether a component is installed, as `grep -q "^<name>"` does.
+
+    Returns:
+        True when a line starts with the name.
+
+    """
+    return any(line.startswith(name) for line in components)
+
+
+def ladder() -> tuple[int, list[str], str]:
+    """Read the org's one clippy ladder, from mise/clippy-ladder.sh.
+
+    THE LADDER LIVES IN THE BELT'S clippy-ladder.sh (#813). It moved the
+    day a SECOND task acquired the same obligation: `lint:pg-clippy`
+    sets this exact level on the pgrx crate the gate never compiled, and
+    a second copy of a ten-name list is the drift #752 recorded — the
+    list said ten and the prose above it said nine.
+
+    Returns:
+        The status, the flags that ride clippy's `--`, and the count of
+        named contradictions.
+
+    """
+    status, flags = belt_call("clippy-ladder.sh", "org_clippy_ladder")
+    if status != 0:
+        return status, [], ""
+    status, count = belt_call("clippy-ladder.sh", "org_clippy_contradiction_count")
+    return status, flags.split(), count.strip()
+
+
+def surface(cargo: str) -> tuple[int, str]:
+    """Derive the workspace's compile surface, the belt's one derivation (#813).
+
+    gate_surface.py reads cargo's own account — `workspace_members`, not
+    `workspace_default_members` — and classifies each member, so
+    lint:rust, fix:rust, lint:pg-clippy, test:pgrx and lint:msrv cannot
+    disagree about which crates exist or what kind each one is.
+
+    Returns:
+        The status (the helper's when it failed, else cargo's, as
+        pipefail reads the pipe) and the records.
+
+    """
+    meta_status, meta = output([
+        cargo,
+        "metadata",
+        "--no-deps",
+        "--format-version",
+        "1",
+        "--locked",
+    ])
+    exclude = os.environ.get("CLIPPY_EXCLUDE", "")
+    status, records = output(
+        [python(), str(belt() / "gate_surface.py"), "--exclude", exclude], meta
+    )
+    return status or meta_status, records

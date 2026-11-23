@@ -35,13 +35,12 @@ from typing import TYPE_CHECKING
 
 import findings
 import rust_task
-from rust_task import belt, features, output, python, run
+from rust_task import NO_CARGO, belt, features, output, python, run
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
 TASK = "lint:msrv"
-NO_CARGO = "Cargo.toml present but cargo missing — pin rust in mise.toml"
 NO_MISE = "mise missing — the toolchain pins this reads are mise's"
 UNREADABLE = "unreadable plan record from msrv_plan.py"
 # Fields of an msrv_plan.py record: kind, toolchain or note, own flags,

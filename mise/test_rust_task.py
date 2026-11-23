@@ -28,6 +28,7 @@ import rust_task
 
 ALL: list[str] = ["--all-features"]
 PREPARED: list[str] = ["prepare 17"]
+NOTHING: list[str] = []
 
 PGRX_ENV = r"""
 org_pgrx_highest() {
@@ -61,12 +62,29 @@ PYTHON_STUB = r"""#!/usr/bin/env bash
 printf '%s %s <%s>\n' "$(basename "$1")" "${*:2}" "$(cat)" >> "${PLANT_DIR}/log"
 exit "${PLANT_PYTHON_STATUS:-0}"
 """
+LADDER = r"""
+org_clippy_ladder() { echo "-D warnings  -W x"; return "${PLANT_LADDER_STATUS:-0}"; }
+org_clippy_contradiction_count() {
+  echo " 2 "
+  return "${PLANT_COUNT_STATUS:-0}"
+}
+"""
+RUSTUP_STUB = r"""#!/usr/bin/env bash
+[[ $* == "component list --installed" ]] || exit 99
+printf 'clippy-host\nrustfmt-host\n'
+exit "${PLANT_RUSTUP_STATUS:-0}"
+"""
+CARGO_STUB = r"""#!/usr/bin/env bash
+printf 'cargo %s\n' "$*" >> "${PLANT_DIR}/log"
+echo '{"meta": 1}'
+exit "${PLANT_CARGO_STATUS:-0}"
+"""
 # Prints what a compile under at_major would see.
 SHOW = 'echo "major=${PLANT_MAJOR-unset} sdk=${PLANT_SDK-unset}"; exit "${1:-0}"'
 
 
-class Steps(unittest.TestCase):
-    """Each shared step, each way it can go."""
+class Planted(unittest.TestCase):
+    """A planted belt, the stubs, and the row's environment."""
 
     @override
     def setUp(self) -> None:
@@ -76,9 +94,16 @@ class Steps(unittest.TestCase):
         self.belt = self.tmp / "belt"
         self.belt.mkdir()
         (self.belt / "pgrx-env.sh").write_text(PGRX_ENV, encoding="utf-8")
+        (self.belt / "clippy-ladder.sh").write_text(LADDER, encoding="utf-8")
         bins = self.tmp / "bin"
         bins.mkdir()
-        for name, text in {"mise": MISE_STUB, "python": PYTHON_STUB}.items():
+        stubs = {
+            "mise": MISE_STUB,
+            "python": PYTHON_STUB,
+            "rustup": RUSTUP_STUB,
+            "cargo": CARGO_STUB,
+        }
+        for name, text in stubs.items():
             stub = bins / name
             stub.write_text(text, encoding="utf-8")
             stub.chmod(0o755)
@@ -107,6 +132,10 @@ class Steps(unittest.TestCase):
         """
         text = (self.tmp / "log").read_text(encoding="utf-8")
         return text.replace(str(self.belt), "<belt>").splitlines()
+
+
+class Basics(Planted):
+    """The belt, its Python, names, features, commands and components."""
 
     def test_the_belt_is_org_belt_dir_else_this_modules_directory(self) -> None:
         """ORG_BELT_DIR when set; this module's own directory unset or empty."""
@@ -156,6 +185,27 @@ class Steps(unittest.TestCase):
             rust_task.output([bash, "-c", 'echo "got:$(cat)"; exit 4'], "in"),
         )
 
+    def test_installed_components_are_rustups_listing(self) -> None:
+        """One per line; none when rustup fails or is absent."""
+        want: list[str] = ["clippy-host", "rustfmt-host"]
+        self.assertEqual(want, rust_task.installed_components())
+        os.environ["PLANT_RUSTUP_STATUS"] = "1"
+        self.assertEqual(NOTHING, rust_task.installed_components())
+        (self.tmp / "bin" / "rustup").unlink()
+        os.environ["PATH"] = str(self.tmp / "bin")
+        self.assertEqual(NOTHING, rust_task.installed_components())
+
+    def test_a_component_is_had_when_a_line_starts_with_its_name(self) -> None:
+        """`grep -q "^<name>"`: a prefix of a line, never a middle."""
+        listing = ["clippy-host", "rustfmt-host"]
+        self.assertTrue(rust_task.has(listing, "rustfmt"))
+        self.assertFalse(rust_task.has(listing, "host"))
+        self.assertFalse(rust_task.has([], "clippy"))
+
+
+class BeltCalls(Planted):
+    """Belt shell functions called through bash: the ladder, the surface."""
+
     def test_a_belt_call_sources_the_script_and_calls_the_function(self) -> None:
         """The function's status and output; stdin reaches it."""
         os.environ |= {"PLANT_UNION": "16,17", "PLANT_UNION_STATUS": "2"}
@@ -174,6 +224,46 @@ class Steps(unittest.TestCase):
         os.environ["PLANT_PREPARE_STATUS"] = "6"
         got = rust_task.belt_exports("pgrx-env.sh", "org_pgrx_darwin_prepare", "17")
         self.assertEqual((6, {}), got)
+
+    def test_the_ladder_is_its_flags_and_its_count(self) -> None:
+        """The flags split into words, the count stripped."""
+        flags: list[str] = ["-D", "warnings", "-W", "x"]
+        self.assertEqual((0, flags, "2"), rust_task.ladder())
+
+    def test_a_failed_ladder_stops_before_the_count(self) -> None:
+        """The ladder's status, no flags; a failed count is its status."""
+        os.environ["PLANT_LADDER_STATUS"] = "3"
+        self.assertEqual((3, NOTHING, ""), rust_task.ladder())
+        os.environ |= {"PLANT_LADDER_STATUS": "0", "PLANT_COUNT_STATUS": "4"}
+        status, _, _ = rust_task.ladder()
+        self.assertEqual(4, status)
+
+    def test_the_surface_is_gate_surfaces_reading_of_cargos_metadata(self) -> None:
+        """No-deps metadata on the helper's stdin, CLIPPY_EXCLUDE passed."""
+        os.environ["CLIPPY_EXCLUDE"] = "held"
+        self.assertEqual((0, ""), rust_task.surface(str(self.tmp / "bin" / "cargo")))
+        want = [
+            "cargo metadata --no-deps --format-version 1 --locked",
+            'gate_surface.py --exclude held <{"meta": 1}>',
+        ]
+        self.assertEqual(want, self.logged())
+
+    def test_the_surfaces_status_is_the_helpers_else_cargos(self) -> None:
+        """gate_surface.py's status first, as pipefail reads the pipe."""
+        cargo = str(self.tmp / "bin" / "cargo")
+        rows = {("0", "5"): 5, ("3", "0"): 3, ("3", "5"): 5}
+        for (meta, helper), want in rows.items():
+            with self.subTest(meta=meta, helper=helper):
+                os.environ |= {
+                    "PLANT_CARGO_STATUS": meta,
+                    "PLANT_PYTHON_STATUS": helper,
+                }
+                status, _ = rust_task.surface(cargo)
+                self.assertEqual(want, status)
+
+
+class Pgrx(Planted):
+    """The pgrx derivation, the registration and the compile at a major."""
 
     def test_pairs_are_each_extension_and_its_major(self) -> None:
         """Each `spec<TAB>major` line, a blank or one-field line dropped."""

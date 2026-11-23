@@ -1083,9 +1083,7 @@ class NoLeak(unittest.TestCase):
             if path.name != "pgrx-env.sh" and CALL.search(text):
                 found.add(f"mise/{path.name}")
         found.update(
-            task
-            for task in ("lint:pg-clippy",)
-            if CALL.search(site_text(task))
+            task for task in ("lint:pg-clippy",) if CALL.search(site_text(task))
         )
         config = (CANON / "mise" / "config.toml").read_text(encoding="utf-8")
         self.assertEqual(1, len(list(CALL.finditer(config))))

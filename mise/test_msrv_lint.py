@@ -35,6 +35,7 @@ from unittest import mock
 import decoded
 import hermetic
 import msrv_lint
+import rust_task
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -491,7 +492,7 @@ class Task(unittest.TestCase):
                 "ORG_FINDINGS": "",
             }
             done = Task.run_body(tree, env)
-        want = f"lint:msrv: {msrv_lint.NO_CARGO}\n"
+        want = f"lint:msrv: {rust_task.NO_CARGO}\n"
         self.assertEqual((1, "", want), (done.returncode, done.stdout, done.stderr))
 
 
