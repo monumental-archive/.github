@@ -7592,32 +7592,11 @@ dir = "{{cwd}}"
 # renders from its sources. Deterministic, tracked files only, skips
 # clean where neither condition applies — a linter that cannot skip
 # cannot be universal.
+# The logic is mise/citation_check.py (#1911); the render it compares
+# against is mise/citation.sh, fix:citation's.
 run = '''
-minting=$(org_tracked ':!vendor/**' ".github/workflows/*.y*ml" | xargs -0 grep -lE "^[^#]*mint-doi:[[:space:]]*true" 2> /dev/null || true)
-if [[ ! -f CITATION.cff ]]; then
-  if [[ -n ${minting} ]]; then
-    IFS=$'\n' read -r -d '' -a detail <<< "${minting}" || true
-    org_finding "" "mint-doi: true with no CITATION.cff — a citable repo carries its citation (#316 finding 6):" "${detail[@]}" \
-      "run fix:citation (REUSE.toml is the source), commit the render"
-    exit 1
-  fi
-  echo "lint:citation: no CITATION.cff and no mint-doi request, skipped"
-  exit 0
-fi
-if [[ ! -f REUSE.toml ]]; then
-  org_finding "" "CITATION.cff exists but REUSE.toml (its source of truth) does not"
-  exit 1
-fi
-tmp=$(mktemp)
-rc=0
-trap 'rc=$?; rm -f "${tmp}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
-CITATION_OUT="${tmp}" bash "${ORG_BELT_DIR}/citation.sh" > /dev/null
-if ! diff -u CITATION.cff "${tmp}"; then
-  org_finding "" "CITATION.cff drifted from its sources — edit REUSE.toml (or the human fields) and run fix:citation"
-  exit 1
-fi
-echo "lint:citation: CITATION.cff agrees with REUSE.toml"
-org_done=1
+files=() && org_tracked_read files ':!vendor/**' ".github/workflows/*.y*ml"
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/citation_check.py" ${files[@]+"${files[@]}"}
 '''
 
 [tasks."fix:badges"]
