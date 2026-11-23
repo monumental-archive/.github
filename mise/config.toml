@@ -583,8 +583,7 @@ python = "3.15.2"
 # upstream binary with its published sha256 into the lock — the
 # closest-to-policy path without aqua. Like biome and golangci-lint,
 # unprovable here: the canon tracks no Rust, so it is exercised first
-# in a consumer (docs/tooling-verdicts.md); the task's file list is held
-# by planted rows (mise/test_machete.py, #2008).
+# in a consumer (docs/tooling-verdicts.md).
 "github:bnjbvr/cargo-machete" = "v0.10.1"
 # Dockerfile lint (#403): every hadolint rule at maximum reach —
 # --failure-threshold style fails on ALL severities including style,
@@ -1102,9 +1101,7 @@ dir = "{{cwd}}"
 # is the belt's. A false positive (renamed crate, macro-only use) gets
 # a written [package.metadata.cargo-machete] ignored entry beside the
 # dependency it excuses, never a task-level skip. Exit 2 is a
-# processing error and fails like everything else. The tracked
-# manifests are its arguments: with none it walks the directory and
-# reads every Cargo.toml git does not ignore, tracked or not (#2008).
+# processing error and fails like everything else.
 run = '''
 set -euo pipefail
 manifests=() && org_tracked_read manifests ':!vendor/**' "Cargo.toml" "*/Cargo.toml"
@@ -1112,7 +1109,7 @@ manifests=() && org_tracked_read manifests ':!vendor/**' "Cargo.toml" "*/Cargo.t
   echo "lint:machete: no Cargo.toml tracked, skipped"
   exit 0
 }
-printf '%s\0' "${manifests[@]}" | xargs -0 cargo-machete
+cargo-machete
 echo "lint:machete: no unused dependencies"
 '''
 
@@ -5877,22 +5874,10 @@ compgen -G ".github/workflows/*.y*ml" > /dev/null || {
   echo "lint:capability-boundary: no workflows, skipped"
   exit 0
 }
-bad=""
-for f in .github/workflows/*.y*ml; do
-  grep -qE "^[[:space:]]*workflow_call:" "${f}" || continue
-  # Only a real grant counts. A workflow that says "no id-token, ever" in
-  # a comment is documenting the boundary, not breaching it — matching
-  # comment text flagged exactly the files that get this right.
-  grep -qE "^[^#]*id-token:[[:space:]]*write" "${f}" || continue
-  grep -qE "^[[:space:]]*#[[:space:]]*capability-boundary:" "${f}" && continue
-  bad="${bad} ${f}"
-done
-if [[ -n ${bad} ]]; then
-  org_finding "" "workflow_call workflow holds id-token" \
-    "without a capability-boundary marker:${bad}"
-  exit 1
-fi
-echo "lint:capability-boundary: ok"
+# Only a real grant counts: a workflow that says "no id-token, ever" in
+# a comment is documenting the boundary, not breaching it. The logic is
+# mise/capability_boundary.py (#1911).
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/capability_boundary.py" .github/workflows/*.y*ml
 '''
 
 [tasks."lint:release-phases"]
