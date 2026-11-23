@@ -10,6 +10,50 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.77.0](https://github.com/monumental-archive/.github/compare/v1.76.0...v1.77.0) - 2026-11-23
+
+### Added
+
+- run the gate's lint leg as four shards ([#2050](https://github.com/monumental-archive/.github/pull/2050))
+- shard the canon's test leg and judge coverage once over all ([#2055](https://github.com/monumental-archive/.github/pull/2055))
+
+### Changed
+
+- extract audit:template-pins into a helper ([#2021](https://github.com/monumental-archive/.github/pull/2021))
+- extract lint:capability-boundary into a helper ([#2019](https://github.com/monumental-archive/.github/pull/2019))
+- move lint:rust and fix:rust into mise/rust_lint.py ([#2023](https://github.com/monumental-archive/.github/pull/2023))
+- extract lint:signer-pin into a helper ([#2027](https://github.com/monumental-archive/.github/pull/2027))
+- extract lint:nested-permissions into a helper ([#2020](https://github.com/monumental-archive/.github/pull/2020))
+- extract lint:installer-pinned into a helper ([#2028](https://github.com/monumental-archive/.github/pull/2028))
+- extract lint:runner-pin into a helper ([#2033](https://github.com/monumental-archive/.github/pull/2033))
+- extract lint:lock-platforms into a helper ([#2038](https://github.com/monumental-archive/.github/pull/2038))
+- extract lint:audit-scheduled into a helper ([#2036](https://github.com/monumental-archive/.github/pull/2036))
+- extract lint:gate-stub into a helper ([#2024](https://github.com/monumental-archive/.github/pull/2024))
+- move lint:pg-clippy into mise/pg_clippy.py ([#2032](https://github.com/monumental-archive/.github/pull/2032))
+- extract lint:cold-attested into a helper ([#2030](https://github.com/monumental-archive/.github/pull/2030))
+- extract audit:citations into a helper ([#2034](https://github.com/monumental-archive/.github/pull/2034))
+- extract lint:bash-portability into a helper ([#2043](https://github.com/monumental-archive/.github/pull/2043))
+- extract lint:canon-pins into a helper ([#2039](https://github.com/monumental-archive/.github/pull/2039))
+- extract lint:caller-permissions into a helper ([#2025](https://github.com/monumental-archive/.github/pull/2025))
+- extract lint:citation into a helper ([#2042](https://github.com/monumental-archive/.github/pull/2042))
+- move lint:msrv's body into mise/msrv_lint.py ([#2031](https://github.com/monumental-archive/.github/pull/2031))
+
+### Fixed
+
+- pass lint:machete the tracked manifests ([#2015](https://github.com/monumental-archive/.github/pull/2015))
+- update monumental-archive/signer to d86057d ([#2026](https://github.com/monumental-archive/.github/pull/2026))
+- derive the tree's rust workspace roots in one helper ([#2035](https://github.com/monumental-archive/.github/pull/2035))
+- judge workspace inheritance once per workspace root ([#2040](https://github.com/monumental-archive/.github/pull/2040))
+- follow a belt script a python helper runs in gate-tools ([#2041](https://github.com/monumental-archive/.github/pull/2041))
+- run lint:deny and audit:deny once per workspace ([#2044](https://github.com/monumental-archive/.github/pull/2044))
+- run the Rust lints once per tracked workspace ([#2047](https://github.com/monumental-archive/.github/pull/2047))
+- select the workflows and templates through one selector ([#2046](https://github.com/monumental-archive/.github/pull/2046))
+- key the cargo caches on every input of their builds ([#2051](https://github.com/monumental-archive/.github/pull/2051))
+- name pgrx's clang driver so it watches no PATH directory ([#2052](https://github.com/monumental-archive/.github/pull/2052))
+- hold every tracked workspace to its declared msrv ([#2048](https://github.com/monumental-archive/.github/pull/2048))
+- ask git whether a file is tracked, never the filesystem ([#2029](https://github.com/monumental-archive/.github/pull/2029))
+- read the belt pin from tracked workflows only ([#2053](https://github.com/monumental-archive/.github/pull/2053))
+
 ## [1.76.0](https://github.com/monumental-archive/.github/compare/v1.75.0...v1.76.0) - 2026-11-22
 
 ### Added
