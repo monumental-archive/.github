@@ -617,10 +617,11 @@ class CargoInputs(unittest.TestCase):
             self.run_in(TREE), self.run_in(TREE, canon_ref="v1.77.0")
         )
 
-    def test_an_image_change_moves_inputs(self) -> None:
-        """A newer runner image has newer system headers pgrx watches."""
-        self.assert_moves_inputs_only(
-            self.run_in(TREE), self.run_in(TREE, ImageVersion="20261123.2.0")
+    def test_an_image_build_number_holds_inputs(self) -> None:
+        """Two fleets, one toolchain: the build number names nothing (#2066)."""
+        self.assertEqual(
+            self.run_in(TREE, ImageVersion="20261116.88.1"),
+            self.run_in(TREE, ImageVersion="20261116.202.1"),
         )
 
     def test_identical_trees_give_the_same_inputs(self) -> None:
@@ -658,6 +659,140 @@ class CargoInputs(unittest.TestCase):
         """The rows read the gate's own list, which names mise.toml."""
         self.assertIn("mise.toml", GLOBS.splitlines())
         self.assertIn(".tool-versions", GLOBS.splitlines())
+
+
+# `--version` as the gate's runner prints it, first line (#2066).
+CC = "x86_64-linux-gnu-gcc-15 (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+CLANG = "Ubuntu clang version 21.1.8 (6ubuntu1)"
+LDD = "ldd (Ubuntu GLIBC 2.43-2ubuntu2.7) 2.43"
+
+
+class Toolchain(unittest.TestCase):
+    """The cargo key names the toolchain the build takes from the image."""
+
+    @override
+    def setUp(self) -> None:
+        """Put `rustc`, the toolchain and an `xcrun` on PATH for every row.
+
+        The `xcrun` finds the row's `clang` on PATH, so the rows read the
+        same stub on Darwin as `clang` on PATH does elsewhere.
+        """
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = rustc_on_path(Path(self.tmp.name), f"printf '%s' '{RUSTC}'")
+        self.trees = 0
+        self.stub("xcrun", "command -v clang || exit 1")
+        for name, text in (("cc", CC), ("c++", CC), ("clang", CLANG), ("ldd", LDD)):
+            self.stub(name, f"echo '{text}'")
+
+    def stub(self, name: str, script: str) -> Path:
+        """Write a command `name` on the rows' PATH that runs `script`.
+
+        Returns:
+            Its path.
+
+        """
+        tool = Path(self.path) / name
+        tool.write_text(f"#!/bin/sh\n{script}\n", "utf-8")
+        tool.chmod(tool.stat().st_mode | stat.S_IXUSR)
+        return tool
+
+    def run_with(self, **kw: str) -> tuple[int, str, str]:
+        """Run `cargo` over TREE with the toolchain the stubs now hold.
+
+        Returns:
+            The exit code, what it wrote to GITHUB_OUTPUT and its stderr.
+
+        """
+        self.trees += 1
+        tree = git_tree(Path(self.tmp.name) / f"tree{self.trees}", TREE)
+        return cargo_main(self.path, tree, **kw)
+
+    def run_in(self, **kw: str) -> dict[str, str]:
+        """Run `cargo` as `run_with` does, and require it to pass.
+
+        Returns:
+            The step's outputs.
+
+        """
+        code, written, err = self.run_with(**kw)
+        self.assertEqual(0, code, err)
+        return outputs(written)
+
+    def assert_moves(self, name: str, **kw: str) -> None:
+        """Move `inputs` and hold `digest` on a new `--version` from `name`."""
+        before = self.run_in(**kw)
+        self.stub(name, "echo 'a newer build'")
+        after = self.run_in(**kw)
+        self.assertEqual(before["digest"], after["digest"])
+        self.assertNotEqual(before["inputs"], after["inputs"])
+
+    def assert_holds(self, name: str, **kw: str) -> None:
+        """Hold `inputs` on a new `--version` from `name`."""
+        before = self.run_in(**kw)
+        self.stub(name, "echo 'a newer build'")
+        self.assertEqual(before, self.run_in(**kw))
+
+    def test_a_cc_change_moves_inputs(self) -> None:
+        """`cc` on PATH is the C compiler cargo's build scripts run."""
+        self.assert_moves("cc")
+
+    def test_a_cxx_change_moves_inputs(self) -> None:
+        """`c++` on PATH is the C++ compiler they run."""
+        self.assert_moves("c++")
+
+    def test_a_clang_change_moves_inputs(self) -> None:
+        """The clang driver pgrx runs, and so its libclang, is an input."""
+        self.assert_moves("clang")
+
+    def test_inputs_follow_cc(self) -> None:
+        """`$CC` names the compiler, so `cc` on PATH is not read."""
+        self.stub("gcc-15", f"echo '{CC}'")
+        self.assert_moves("gcc-15", CC="gcc-15")
+        self.assert_holds("cc", CC="gcc-15")
+
+    def test_inputs_follow_cxx(self) -> None:
+        """`$CXX` names the compiler, so `c++` on PATH is not read."""
+        self.stub("g++-15", f"echo '{CC}'")
+        self.assert_moves("g++-15", CXX="g++-15")
+        self.assert_holds("c++", CXX="g++-15")
+
+    def test_inputs_follow_clang_path(self) -> None:
+        """`$CLANG_PATH` is the driver pgrx runs, as pgrx-env.sh leaves it."""
+        driver = str(self.stub("clang-21", f"echo '{CLANG}'"))
+        self.assert_moves("clang-21", CLANG_PATH=driver)
+        self.assert_holds("clang", CLANG_PATH=driver)
+
+    def test_a_libc_change_moves_inputs(self) -> None:
+        """The first line of `ldd --version` carries the package revision."""
+        before = self.run_in()
+        self.stub("ldd", "echo 'ldd (Ubuntu GLIBC 2.43-2ubuntu2.8) 2.43'")
+        after = self.run_in()
+        self.assertEqual(before["digest"], after["digest"])
+        self.assertNotEqual(before["inputs"], after["inputs"])
+
+    def test_no_toolchain_is_absent_not_red(self) -> None:
+        """A runner without them builds nothing that needs them."""
+        present = self.run_in()
+        for name in ("cc", "c++", "clang", "ldd", "xcrun"):
+            (Path(self.path) / name).unlink()
+        absent = self.run_in()
+        self.assertNotEqual(present["inputs"], absent["inputs"])
+
+    def test_a_failing_ldd_is_absent(self) -> None:
+        """An `ldd` that cannot report a glibc (musl) is not a finding."""
+        self.stub("ldd", "exit 1")
+        failing = self.run_in()
+        (Path(self.path) / "ldd").unlink()
+        self.assertEqual(failing, self.run_in())
+
+    def test_a_clang_that_cannot_report_is_red(self) -> None:
+        """The key never names a compiler it could not identify."""
+        self.stub("clang", "echo broken >&2; exit 3")
+        code, written, err = self.run_with()
+        self.assertEqual(1, code)
+        self.assertEqual("", written)
+        self.assertIn("clang --version exited 3", err)
 
 
 def digest_main(path: str) -> tuple[int, str, str]:

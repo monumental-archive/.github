@@ -109,7 +109,7 @@ lint leg compiled pgrx-pg-sys cold on every run under an exact hit,
 because Cargo.lock and the compiler had not moved. #1414 and #1864 each
 added one input by hand; this names them all. So `cargo` writes
 `inputs` beside `digest`: the sha256 over, in order, the runner image
-(`ImageOS` and `ImageVersion`, `self-hosted` when unset), the canon ref
+and the toolchain the build takes from it (below), the canon ref
 the run resolved (`--canon-ref`, the canon action's `ref` output: the
 belt's flags and variables reach cargo, and `.org-canon` has no git
 directory to ask), and the content of every tracked file the cargo
@@ -120,6 +120,25 @@ Cargo.toml builds nothing in CI. The workflow puts `inputs` after
 `digest` in the key and leaves the fallback prefix at `digest`, so a
 pull request still falls back to any entry the same compiler filled.
 No canon ref and no globs are red, never an empty input.
+
+THE KEY NAMES THE TOOLCHAIN, NOT THE IMAGE'S BUILD NUMBER (#2066). The
+image is in the key because a build reads from it: cargo does not
+fingerprint `cc`, and pgrx watches the `clang` binary and the system
+headers by modification time only. But GitHub serves `ubuntu-26.04` from
+two fleets whose `ImageVersion` differs while that toolchain is the same,
+so naming the build number stored every entry twice and built it cold
+once per fleet. So the first line is `ImageOS` (`self-hosted` when unset)
+and the toolchain the build takes from the image (`cc`, `c++`, `clang`,
+the C library), each `<name>\0<identity>\n`: a compiler's real path and
+the whole of its `--version` (`$CC`, `$CXX` and `$CLANG_PATH` when set;
+`clang` by `mise/pgrx-env.sh`'s rule, `xcrun --find clang` on Darwin, so
+the key names the driver pgrx runs, whose own LLVM install holds the
+`libclang` it loads), and the first line of `ldd --version`, which
+carries the distribution's package revision. A compiler or `ldd` not
+found, or an `ldd` that fails (Darwin, musl), is `absent`: a runner
+without it builds nothing that needs it. A compiler found that cannot
+report its version is red, as `rustc` is (#1864). `ImageVersion` is read
+nowhere.
 """
 
 import argparse
@@ -352,23 +371,113 @@ def mise_globs(env: dict[str, str]) -> list[str]:
     return globs
 
 
+# What a toolchain entry is when the runner has none (#2066).
+ABSENT = "absent"
+
+
+def compiler_identity(command: str) -> str:
+    r"""Name a compiler by its real path and its whole `--version` (#2066).
+
+    Returns:
+        `<real path>\n<--version stdout>`, or ABSENT when `command` is
+        not found.
+
+    Raises:
+        ValueError: the compiler is found but cannot report its version:
+            the key never names a compiler it could not identify.
+
+    """
+    found = shutil.which(command)
+    if found is None:
+        return ABSENT
+    real = os.path.realpath(found)
+    done = subprocess.run(
+        [real, "--version"], capture_output=True, text=True, check=False
+    )
+    if done.returncode != 0:
+        msg = f"{command} --version exited {done.returncode}: {done.stderr.strip()}"
+        raise ValueError(msg)
+    return f"{real}\n{done.stdout}"
+
+
+def clang_driver(env: dict[str, str]) -> str | None:
+    """Find the clang driver pgrx runs, by `mise/pgrx-env.sh`'s rule.
+
+    Returns:
+        `$CLANG_PATH` when set; else `xcrun --find clang` on Darwin and
+        `clang` on PATH elsewhere; None when there is none.
+
+    """
+    if env.get("CLANG_PATH"):
+        return env["CLANG_PATH"]
+    if platform.system() != "Darwin":
+        return shutil.which("clang")
+    xcrun = shutil.which("xcrun")
+    if xcrun is None:
+        return None
+    done = subprocess.run(
+        [xcrun, "--find", "clang"], capture_output=True, text=True, check=False
+    )
+    if done.returncode != 0:
+        return None
+    return done.stdout.strip() or None
+
+
+def libc_identity() -> str:
+    """Name the C library by the first line of `ldd --version` (#2066).
+
+    Returns:
+        That line, or ABSENT when there is no `ldd` or it fails (Darwin,
+        musl).
+
+    """
+    ldd = shutil.which("ldd")
+    if ldd is None:
+        return ABSENT
+    done = subprocess.run(
+        [ldd, "--version"], capture_output=True, text=True, check=False
+    )
+    if done.returncode != 0 or not done.stdout.strip():
+        return ABSENT
+    return done.stdout.splitlines()[0]
+
+
+def toolchain(env: dict[str, str]) -> str:
+    r"""Name the toolchain a build takes from the image (#2066).
+
+    Returns:
+        `cc`, `c++`, `clang` and `libc`, each `<name>\0<identity>\n`.
+
+    """
+    clang = clang_driver(env)
+    entries = (
+        ("cc", compiler_identity(env.get("CC") or "cc")),
+        ("c++", compiler_identity(env.get("CXX") or "c++")),
+        ("clang", compiler_identity(clang) if clang else ABSENT),
+        ("libc", libc_identity()),
+    )
+    return "".join(f"{name}\0{identity}\n" for name, identity in entries)
+
+
 def cargo_inputs(root: Path, env: dict[str, str], canon_ref: str) -> str:
     r"""Digest what decides a cargo cache's contents, besides the compiler.
 
     Returns:
-        The sha256, in hex, over the runner image, the canon ref and each
-        tracked input file as `<path>\0<sha256>\n`, paths sorted.
+        The sha256, in hex, over the runner image and its toolchain, the
+        canon ref and each tracked input file as `<path>\0<sha256>\n`,
+        paths sorted.
 
     Raises:
-        ValueError: no canon ref, or no mise config globs.
+        ValueError: no canon ref, no mise config globs, or a compiler
+            that cannot report its version.
 
     """
     if not canon_ref:
         msg = "no --canon-ref: the cargo key would omit the belt that drives cargo"
         raise ValueError(msg)
     image = env.get("ImageOS") or "self-hosted"
-    version = env.get("ImageVersion") or "self-hosted"
-    h = hashlib.sha256(f"{image}\0{version}\n{canon_ref}\n".encode())
+    tools = toolchain(env)
+    h = hashlib.sha256(f"{image}\0{tools}{canon_ref}\n".encode())
     for path in sorted(set(tracked.tracked(*CARGO_FILES, *mise_globs(env), root=root))):
         content = hashlib.sha256((root / path).read_bytes()).hexdigest()
         h.update(os.fsencode(path) + b"\0" + content.encode() + b"\n")
