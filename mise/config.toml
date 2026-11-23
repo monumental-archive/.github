@@ -6225,7 +6225,8 @@ if [[ ! -f fuzz/Cargo.lock ]]; then
   org_finding "" "fuzz/Cargo.lock is not committed — an unlocked fuzz build is not deterministic"
   exit 1
 fi
-# The fuzz crate is its own workspace root BY DECLARATION (#1290). A root
+# The fuzz crate is its own workspace root BY DECLARATION, the belt's rule
+# (#1290; cargo-fuzz 0.13.2's init writes no such table, #2004). A root
 # manifest's `exclude = ["fuzz"]` shields it only while no other workspace
 # sits above the checkout; in a worktree nested inside the main checkout,
 # cargo's upward walk finds the main checkout's manifest, which does not
@@ -6241,7 +6242,7 @@ except tomllib.TOMLDecodeError:
 if [[ ${ws} == absent ]]; then
   org_finding "" "fuzz/Cargo.toml declares no [workspace] table — its resolution depends on where the checkout sits" \
     "a workspace above the checkout (a nested worktree) claims the crate; make it its own root" \
-    "with the empty table cargo itself recommends, in fuzz/Cargo.toml:" \
+    "the belt requires an empty [workspace] table in fuzz/Cargo.toml:" \
     "  [workspace]"
   exit 1
 fi
