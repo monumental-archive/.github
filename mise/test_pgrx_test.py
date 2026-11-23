@@ -213,6 +213,9 @@ class Planted(unittest.TestCase):
         )
         self.log = self.tmp / "log"
         self.log.touch()
+        # The run the belt's `[env]` names, present, so live (#2062).
+        self.run_dir = self.tmp / "coverage-run"
+        self.run_dir.mkdir()
         metadata = self.tmp / "metadata.json"
         packages = [
             package("lab-pg", self.tree, pgrx=True, majors=self.declares),
@@ -232,6 +235,7 @@ class Planted(unittest.TestCase):
             "RUSTUP_TOOLCHAIN": "stable",
             "PLANT_LOG": str(self.log),
             "PLANT_METADATA": str(metadata),
+            "ORG_COVERAGE_RUN": str(self.run_dir),
         }
         (self.tree / "Cargo.toml").write_text("[workspace]\n", encoding="utf-8")
         self.git("init", "-q")
@@ -568,6 +572,57 @@ class PlainOrRefused(Planted):
         self.assertEqual(1, done.returncode)
         self.assertIn(
             "test:pgrx: pg18: the profile path 'lab-%p-%m.profraw' is not absolute",
+            done.stderr,
+        )
+        self.assertEqual(NOTHING, self.suites(log))
+
+
+class OwnedBuildDirectory(Planted):
+    """A major's build directory is claimed for this run first (#2062)."""
+
+    def test_a_directory_another_live_run_holds_is_refused(self) -> None:
+        """The planted row: nothing is cleaned or built, and the run is named.
+
+        On main the run cleaned the other run's profiles and built into
+        its directory.
+        """
+        self.floor()
+        target = self.tree / "target" / f"llvm-cov-pgrx-pg18-{STABLE}"
+        target.mkdir(parents=True)
+        other = self.tmp / f"org-coverage-{os.getpid()}"
+        other.mkdir()
+        (target / ".org-coverage-owner").write_text(f"{other}\n", encoding="utf-8")
+        done, log = self.run_pgrx()
+        self.assertEqual(1, done.returncode)
+        self.assertIn(
+            f"{target} is being measured by another run ({other});"
+            " wait for it to finish",
+            done.stderr,
+        )
+        self.assertNotIn("pgrx-pg18", done.stdout)
+        cleaned = [ln for ln in log if ln.startswith("cargo llvm-cov clean")]
+        self.assertEqual(NOTHING, cleaned)
+        self.assertEqual(NOTHING, self.suites(log))
+
+    def test_the_run_is_claimed_before_the_clean(self) -> None:
+        """A measured major records this run as its directory's owner."""
+        self.floor()
+        done, _ = self.run_pgrx(PLANT_LH="17")
+        self.assertEqual(0, done.returncode, done.stderr)
+        target = self.tree / "target" / f"llvm-cov-pgrx-pg18-{STABLE}"
+        self.assertEqual(
+            f"{self.run_dir}\n",
+            (target / ".org-coverage-owner").read_text(encoding="utf-8"),
+        )
+
+    def test_an_empty_run_is_red_by_name(self) -> None:
+        """Outside the belt there is no run to claim for: red, naming it."""
+        self.floor()
+        done, log = self.run_pgrx(ORG_COVERAGE_RUN="")
+        self.assertEqual(1, done.returncode)
+        self.assertIn(
+            "test:pgrx: ORG_COVERAGE_RUN is empty — the run a measured build"
+            " directory is",
             done.stderr,
         )
         self.assertEqual(NOTHING, self.suites(log))

@@ -142,6 +142,13 @@ if [[ -n ${measured} ]] && ! grep -q "^llvm-tools" <<< "${components}"; then
     'rust pin in mise.toml: rust = { version = "1.xx.x", components = "llvm-tools" }'
   exit 1
 fi
+# The run each major's build directory is claimed for (#2062). The
+# belt's `[env]` always names it, so empty means outside the belt.
+if [[ -n ${measured} && -z ${ORG_COVERAGE_RUN:-} ]]; then
+  org_finding "" "ORG_COVERAGE_RUN is empty — the run a measured build directory is" \
+    "claimed for; the belt's [env] names it, so run this through mise"
+  exit 1
+fi
 
 only="${ORG_PGRX_MAJOR:-}"
 if [[ -n ${only} && ",${declared}," != *",${only},"* ]]; then
@@ -222,6 +229,10 @@ measure_one() { # usage: measure_one <dir> <crate> <major>
         "the backends write it inside the data directory pgrx deletes on shutdown"
       exit 1
     fi
+    # Claimed for this run before it is cleaned (#2062): a second run
+    # measuring in this checkout is refused by name, never mixed in.
+    "${ORG_PYTHON}" "${belt}/coverage_owner.py" claim "${CARGO_TARGET_DIR}" \
+      "${ORG_COVERAGE_RUN}" || exit 1
     # The workspace's own artifacts and old profiles go (#2061): `report`
     # reads every workspace executable in the directory, and one an earlier
     # build left (a version bump renames them all) joins the figure with

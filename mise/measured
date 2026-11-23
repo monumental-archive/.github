@@ -240,6 +240,11 @@ if [[ -f ${root}/Cargo.toml ]]; then
   # shellcheck source=mise/rust-coverage-env.sh
   . "${belt}/rust-coverage-env.sh"
   org_rust_coverage_env measured
+  # The build directory is the checkout's, the run is this process's: two
+  # runs measuring at once in one checkout would clean and read each
+  # other's directory (#2062). Every call claims it before anything is
+  # cleaned or built, and a live other run's claim ends this one, by name.
+  "${ORG_PYTHON}" "${belt}/coverage_owner.py" claim "${CARGO_TARGET_DIR}" "${run}" || exit 1
   # The workspace's own artifacts and old profiles go once per run, by its
   # first call (#2061): `report` reads every workspace executable in the
   # directory, so one an earlier build left and this run did not overwrite
