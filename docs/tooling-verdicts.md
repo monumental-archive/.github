@@ -2471,7 +2471,14 @@ clean, every call (and each pgrx major's run) claims the build
 directory for its run with `coverage_owner.py`: the directory is the
 checkout's and the run a process's, so a second run measuring in the
 same checkout while the first is live is refused by name instead of
-cleaning and reading the first one's directory (#2062). A pgrx
+cleaning and reading the first one's directory (#2062). The claim
+makes the directory before cargo first builds there, and cargo writes
+`CACHEDIR.TAG` only into a directory it creates and refuses to clean
+one without it, so the claim writes cargo's tag (#2070). The clean
+runs through `coverage_owner.py clean`, red by name when cargo did
+not clean: cargo-llvm-cov reports a failed `cargo clean` as a
+warning and exits 0, and the skipped clean put edtf's 2.0.0 release at
+72% against its 90% floor. A pgrx
 extension the command builds leaves the report by path
 (`--ignore-filename-regex` over the extension's directory): its
 functions run in the Postgres backend and `test:pgrx` measures them.

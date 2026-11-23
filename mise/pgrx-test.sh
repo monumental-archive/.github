@@ -237,8 +237,9 @@ measure_one() { # usage: measure_one <dir> <crate> <major>
     # reads every workspace executable in the directory, and one an earlier
     # build left (a version bump renames them all) joins the figure with
     # zero hits. Dependencies stay built. One caller per directory per run,
-    # so no lock: the majors never share one.
-    cargo llvm-cov clean --workspace >&2 || exit 1
+    # so no lock: the majors never share one. A clean cargo refused is red
+    # by name: cargo-llvm-cov reports it as a warning (#2070).
+    "${ORG_PYTHON}" "${belt}/coverage_owner.py" clean >&2 || exit 1
     if ! (cd "${dir}" && cargo pgrx test "pg${one}") >&2; then
       org_finding "" "${dir} at pg${one} failed — a suite that does not pass measures nothing"
       exit 1

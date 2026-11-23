@@ -30,12 +30,29 @@ liveness is read at the next claim; nothing has to run "finally",
 which mise cannot do. Nor does any process hold the lock for the run:
 a run spans processes (`test`, then `coverage:check`), and the lock
 covers only the read and the write of one claim.
+
+A claim also leaves cargo's `CACHEDIR.TAG` in the directory (#2070).
+Cargo writes the tag only into a build directory it creates itself,
+and `cargo clean` refuses one without it; the claim makes the
+directory before cargo first builds there, so without the tag every
+later clean of it was refused. A restored cache that holds such an
+untagged directory is tagged at its next claim.
+
+    coverage_owner.py clean
+
+runs `cargo llvm-cov clean --workspace` in the claimed directory
+(`CARGO_TARGET_DIR`) and is red when the clean did not happen.
+cargo-llvm-cov reports a `cargo clean` that failed only as a warning
+and exits 0, so the stale workspace executables the clean exists to
+remove (#2061) stayed and joined the figure with zero hits: edtf's
+release measured 72% on a suite that holds its 90% floor.
 """
 
 import argparse
 import fcntl
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -45,6 +62,19 @@ OWNER = ".org-coverage-owner"
 LOCK = ".org-coverage-owner.lock"
 # The name coverage-run.sh gives a run of its own `mise run`.
 PID_NAMED = re.compile(r"org-coverage-([0-9]+)")
+# The tag cargo writes into a build directory it creates, byte for byte
+# (cargo 1.97); `cargo clean` reads the signature line.
+TAG = "CACHEDIR.TAG"
+SIGNATURE = "Signature: 8a477f597d28d172789f06886806bc55"
+TAG_TEXT = (
+    f"{SIGNATURE}\n"
+    "# This file is a cache directory tag created by cargo.\n"
+    "# For information about cache directory tags see https://bford.info/cachedir/\n"
+)
+# How cargo-llvm-cov 0.9.1 reports a cargo it ran that failed: a warning,
+# and its own exit status 0.
+FAILED = "warning: process didn't exit successfully:"
+CLEAN = ("cargo", "llvm-cov", "clean", "--workspace")
 
 
 def live(run: str) -> bool:
@@ -71,6 +101,16 @@ def live(run: str) -> bool:
     return True
 
 
+def tag(target: Path) -> None:
+    """Leave cargo's cache directory tag in `target`, unless it holds one."""
+    path = target / TAG
+    if path.is_file():
+        first = path.read_text(encoding="utf-8", errors="replace").partition("\n")[0]
+        if first == SIGNATURE:
+            return
+    path.write_text(TAG_TEXT, encoding="utf-8")
+
+
 def claim(target: Path, run: str) -> str | None:
     """Claim `target` for `run`, unless another live run holds it.
 
@@ -85,8 +125,34 @@ def claim(target: Path, run: str) -> str | None:
         held = owner.read_text(encoding="utf-8").strip() if owner.exists() else ""
         if held and held != run and live(held):
             return held
+        tag(target)
         owner.write_text(f"{run}\n", encoding="utf-8")
     return None
+
+
+def clean() -> int:
+    """Run the workspace clean, red when cargo refused or failed it.
+
+    Returns:
+        0 when the clean ran; else 1, or cargo-llvm-cov's own status.
+
+    """
+    done = subprocess.run(CLEAN, stderr=subprocess.PIPE, text=True, check=False)
+    sys.stderr.write(done.stderr)
+    if done.returncode != 0:
+        return done.returncode
+    refused = [ln for ln in done.stderr.splitlines() if ln.startswith(FAILED)]
+    if refused:
+        target = os.environ.get("CARGO_TARGET_DIR", "")
+        findings.finding(
+            "",
+            f"the workspace clean of {target or 'the build directory'} did not"
+            " happen — its old executables would join the figure with zero"
+            " hits (#2061): cargo-llvm-cov reported the failure above as a"
+            " warning",
+        )
+        return 1
+    return 0
 
 
 class Args(argparse.Namespace):
@@ -109,17 +175,21 @@ def parse(argv: list[str] | None) -> Args:
     one = sub.add_parser("claim", help="claim a build directory for a run")
     one.add_argument("target", type=Path, help="the build directory measured into")
     one.add_argument("run", help="this run's directory (ORG_COVERAGE_RUN)")
+    sub.add_parser("clean", help="clean the workspace out of CARGO_TARGET_DIR")
     return parser.parse_args(argv, namespace=Args())
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Claim, or refuse naming the run that holds the directory.
+    """Claim, or refuse naming the run that holds the directory; or clean.
 
     Returns:
-        0 when the directory is this run's, 1 when another live run's.
+        0 when the directory is this run's, 1 when another live run's;
+        for `clean`, its status.
 
     """
     args = parse(argv)
+    if args.command == "clean":
+        return clean()
     try:
         held = claim(args.target, args.run)
     except OSError as err:
