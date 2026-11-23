@@ -77,8 +77,6 @@ class Scheduled(unittest.TestCase):
             "ORG_BELT_DIR": str(belt),
             "ORG_PYTHON": sys.executable,
         }
-        for argv in (["init", "-q"], ["add", "mise/config.toml"]):
-            subprocess.run([GIT, *argv], cwd=self.tree, env=self.env, check=True)
 
     def workflow(self, name: str, task: str) -> None:
         """Plant a workflow whose one step runs one audit task."""
@@ -87,14 +85,19 @@ class Scheduled(unittest.TestCase):
             encoding="utf-8",
         )
 
-    def run_lint(self) -> subprocess.CompletedProcess[str]:
-        """Run the task body in the planted tree.
+    def run_lint(
+        self, untracked: tuple[str, ...] = ()
+    ) -> subprocess.CompletedProcess[str]:
+        """Run the task body in the planted tree, tracking all but `untracked`.
 
         Returns:
             The finished process.
 
         """
         hermetic.track(self.tree)
+        if untracked:
+            rm = [GIT, "rm", "-q", "--cached", "--", *untracked]
+            subprocess.run(rm, cwd=self.tree, env=self.env, check=True)
         as_mise = hermetic.task_run("lint:audit-scheduled", body())
         return subprocess.run(
             as_mise.argv,
@@ -119,14 +122,8 @@ class Scheduled(unittest.TestCase):
 
     def test_an_untracked_belt_config_holds_nothing_to_schedule(self) -> None:
         """mise/config.toml on disk, not in git: no belt half (#2013)."""
-        subprocess.run(
-            [GIT, "rm", "-q", "--cached", "mise/config.toml"],
-            cwd=self.tree,
-            env=self.env,
-            check=True,
-        )
         self.workflow("repo-dependencies.yml", "fuzz")
-        done = self.run_lint()
+        done = self.run_lint(untracked=("mise/config.toml",))
         self.assertEqual(done.returncode, 0, done.stderr)
         expected = [
             "lint:audit-scheduled: this repository defines no audit:* of its own",
