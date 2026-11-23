@@ -23,27 +23,40 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import override
+from unittest import mock
 
 import hermetic
 import pg_clippy
+import rust_workspaces
 import test_rust_lint as planted
 
 BELT = Path(__file__).resolve().parent
 GIT = hermetic.tool("git")
 TASK = "lint:pg-clippy"
-# The stub cargo logs each call with the marks the prepare and the
-# major's subshell exported, and the clippy config directory it saw.
-CARGO = """\
-#!/usr/bin/env bash
+# The stub cargo answers the workspace derivation as test_rust_lint.py's
+# stubs do (#2004), then logs each call with the marks the prepare and
+# the major's subshell exported, and the clippy config directory it saw.
+# A manifest under fuzz/ reads STUB_FUZZ_METADATA.
+CARGO = (
+    planted.LOCATE
+    + """\
 marks="${STUB_PREPARED:-} ${STUB_MAJOR:-} ${CLIPPY_CONF_DIR:-}"
 printf 'cargo %s [%s]\\n' "$*" "${marks}" >> "${STUB_LOG}"
 case "$1" in
   fetch) exit "${STUB_FETCH_STATUS:-0}" ;;
-  metadata) cat "${STUB_METADATA}"; exit "${STUB_METADATA_STATUS:-0}" ;;
+  metadata)
+    if [[ ${manifest} == fuzz/* ]]; then
+      cat "${STUB_FUZZ_METADATA}"
+    else
+      cat "${STUB_METADATA}"
+    fi
+    exit "${STUB_METADATA_STATUS:-0}"
+    ;;
   clippy) [[ $3 != "${STUB_RED:-none}@"* ]] || exit 101 ;;
   *) exit 99 ;;
 esac
 """
+)
 # test_rust_lint.py's provisioning stub, and a derivation that names a
 # major no build could take, which gate_surface.py never writes.
 PGRX_ENV = (
@@ -59,8 +72,9 @@ TWO = planted.workspace(
     planted.member("ext", pgrx=True),
     planted.member("other", pgrx=True),
 )
-FETCH = "cargo fetch --locked [  ]"
-METADATA = "cargo metadata --no-deps --format-version 1 --locked [  ]"
+AT = "--manifest-path Cargo.toml"
+FETCH = f"cargo fetch --locked {AT} [  ]"
+METADATA = f"cargo metadata --no-deps --format-version 1 --locked {AT} [  ]"
 REGISTER = ["prepare 17", "mise ls aqua:theseus-rs/postgresql-binaries --json"]
 LADDER = "-- -D warnings"
 OWN = (
@@ -69,14 +83,15 @@ OWN = (
 )
 
 
-def clippy(spec: str, belt: Path) -> str:
+def clippy(spec: str, belt: Path, root: str = "Cargo.toml") -> str:
     """Write the log line of one extension's clippy at pg17.
 
     Returns:
         What the stub cargo logs.
 
     """
-    return f"cargo clippy -p {spec} {OWN} {LADDER} [yes pg17 {belt}]"
+    at = f"--manifest-path {root}"
+    return f"cargo clippy -p {spec} {at} {OWN} {LADDER} [yes pg17 {belt}]"
 
 
 class Planted(unittest.TestCase):
@@ -109,6 +124,8 @@ class Planted(unittest.TestCase):
         self.log = tmp / "log"
         self.metadata = tmp / "metadata.json"
         self.metadata.write_text(TWO, encoding="utf-8")
+        self.fuzz_metadata = tmp / "fuzz-metadata.json"
+        self.fuzz_metadata.write_text(planted.FUZZ, encoding="utf-8")
         self.env = hermetic.env(
             tmp / "home",
             PATH=os.pathsep.join((str(self.bins), "/usr/bin", "/bin")),
@@ -118,11 +135,17 @@ class Planted(unittest.TestCase):
             CLIPPY_EXCLUDE="other",
             STUB_LOG=str(self.log),
             STUB_METADATA=str(self.metadata),
+            STUB_FUZZ_METADATA=str(self.fuzz_metadata),
             STUB_REAL_BELT=str(BELT),
         )
         (self.tree / "src").mkdir(parents=True)
         (self.tree / "Cargo.toml").write_text("[workspace]\n", encoding="utf-8")
         subprocess.run([GIT, "init", "-q"], cwd=self.tree, env=self.env, check=True)
+        self.track()
+
+    def track(self) -> None:
+        """Track every file the tree holds, as the derivation reads them."""
+        subprocess.run([GIT, "add", "."], cwd=self.tree, env=self.env, check=True)
 
     def call(self, *argv: str, **stub: str) -> hermetic.Called:
         """Call pg_clippy.py's main in the tree, from the planted belt.
@@ -131,11 +154,14 @@ class Planted(unittest.TestCase):
             Its status and what it wrote.
 
         """
-        return hermetic.call_main(
-            lambda: pg_clippy.main(list(argv)),
-            env=self.env | {"ORG_BELT_DIR": str(self.belt)} | stub,
-            cwd=self.tree,
-        )
+        # The derivation resolves cargo when it is imported; here, the
+        # stub on the row's PATH is the cargo it asks.
+        with mock.patch.object(rust_workspaces, "CARGO", str(self.bins / "cargo")):
+            return hermetic.call_main(
+                lambda: pg_clippy.main(list(argv)),
+                env=self.env | {"ORG_BELT_DIR": str(self.belt)} | stub,
+                cwd=self.tree,
+            )
 
     def call_child(self, **stub: str) -> tuple[hermetic.Called, str]:
         """Call main, reading what a child wrote to descriptor 2.
@@ -294,7 +320,7 @@ class Branches(Planted):
         self.assertEqual(0, done.returncode, done.stderr)
         self.assert_logged(FETCH, METADATA, *REGISTER, clippy("ext@0.1.0", self.belt))
         said = [
-            "lint:pg-clippy: 1 extension(s) linted: ext(pg17)",
+            "lint:pg-clippy: Cargo.toml: 1 extension(s) linted: ext(pg17)",
             (
                 "lint:pg-clippy: clean at every group"
                 " (restriction minus 0 named contradictions)"
@@ -304,13 +330,16 @@ class Branches(Planted):
 
 
 class Workspace(Planted):
-    """The workspace is a parameter, for #2004's per-root lint."""
+    """Every workspace the tree tracks is linted (#2004)."""
 
     def test_the_manifest_path_reaches_every_cargo_command(self) -> None:
         """Fetch, metadata and clippy each name the workspace they read."""
-        where = ["--manifest-path", "crates/Cargo.toml"]
         done = hermetic.call_main(
-            lambda: pg_clippy.workspace(str(self.bins / "cargo"), where),
+            lambda: (
+                pg_clippy.workspace(
+                    str(self.bins / "cargo"), "crates/Cargo.toml"
+                ).status
+            ),
             env=self.env | {"ORG_BELT_DIR": str(self.belt)},
             cwd=self.tree,
         )
@@ -322,6 +351,43 @@ class Workspace(Planted):
             *REGISTER,
             f"cargo clippy -p ext@0.1.0 {tail} {OWN} {LADDER} [yes pg17 {self.belt}]",
         )
+
+    def test_an_extension_in_a_second_root_is_linted_there(self) -> None:
+        """A pgrx extension in fuzz/Cargo.toml, its own root: linted at it.
+
+        The root workspace holds a plain crate only; before #2004 the
+        task read the root workspace alone and skipped clean.
+        """
+        self.metadata.write_text(
+            planted.workspace(planted.member("a")), encoding="utf-8"
+        )
+        self.fuzz_metadata.write_text(
+            planted.workspace(planted.member("ext", pgrx=True)), encoding="utf-8"
+        )
+        (self.tree / "fuzz").mkdir()
+        (self.tree / "fuzz" / "Cargo.toml").write_text(
+            "[workspace]\n", encoding="utf-8"
+        )
+        self.track()
+        done = self.call()
+        self.assertEqual(0, done.returncode, done.stderr)
+        fuzz = "--manifest-path fuzz/Cargo.toml"
+        self.assert_logged(
+            FETCH,
+            METADATA,
+            f"cargo fetch --locked {fuzz} [  ]",
+            f"cargo metadata --no-deps --format-version 1 --locked {fuzz} [  ]",
+            *REGISTER,
+            clippy("ext@0.1.0", self.belt, "fuzz/Cargo.toml"),
+        )
+        said = [
+            "lint:pg-clippy: fuzz/Cargo.toml: 1 extension(s) linted: ext(pg17)",
+            (
+                "lint:pg-clippy: clean at every group"
+                " (restriction minus 0 named contradictions)"
+            ),
+        ]
+        self.assertEqual(said, done.stdout.splitlines())
 
 
 if __name__ == "__main__":

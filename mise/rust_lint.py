@@ -36,7 +36,6 @@ from typing import TYPE_CHECKING
 
 import findings
 import rust_suppressions
-import rust_workspaces
 import tracked
 from rust_task import (
     NO_CARGO,
@@ -52,6 +51,7 @@ from rust_task import (
     register,
     run,
     surface,
+    workspace_roots,
 )
 
 if TYPE_CHECKING:
@@ -521,25 +521,6 @@ def clippy_leg(cargo: str) -> int:
         " named contradictions)"
     )
     return 0
-
-
-def workspace_roots() -> list[str] | None:
-    """Name the tree's workspaces, from the belt's one derivation (#2004).
-
-    Returns:
-        Each root manifest, the top one first; None after a finding.
-
-    """
-    try:
-        return rust_workspaces.roots()
-    except rust_workspaces.UnresolvedError:
-        return None
-    except subprocess.CalledProcessError as exc:
-        # git could not name the tree's top: the derivation's own words.
-        said: object = exc.stderr
-        text = os.fsdecode(said) if isinstance(said, bytes) else str(said)
-        findings.finding("", "git could not name the tree", text.strip().splitlines())
-        return None
 
 
 def lint_root(cargo: str, root: str, flags: list[str]) -> tuple[int, list[str]]:

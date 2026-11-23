@@ -281,10 +281,11 @@ it was never formatted, linted or fixed — in all three Rust
 repositories that was `fuzz/Cargo.toml`, a cargo-fuzz crate that is its
 own root, and three unformatted fuzz targets passed a green gate in
 edtf. Each tracked manifest is now resolved to its workspace root by
-`cargo locate-project --workspace`, and `lint:rust` and `fix:rust` run
-their cargo legs once per root, with `--manifest-path`, the same ladder
-and the same features; the population line names its root, and a root
-outside the checkout is red. Measured 2026-11-23 on the three
+`cargo locate-project --workspace`, and `lint:rust`, `fix:rust` and
+`lint:pg-clippy` run their cargo legs once per root, with
+`--manifest-path`, the same ladder and the same features; the
+population line names its root, and a root outside the checkout is
+red. Measured 2026-11-23 on the three
 repositories' fuzz crates at this ladder: 6, 13 and 27 findings, 6 to
 14 s cold each.
 

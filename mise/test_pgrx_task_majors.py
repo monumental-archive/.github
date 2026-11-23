@@ -248,23 +248,27 @@ class TwoExtensions(unittest.TestCase):
         done = self.run_task("lint:pg-clippy")
         self.assertEqual(0, done.returncode, done.stderr)
         own = "--no-deps --all-targets --locked --keep-going --no-default-features"
+        at = "--manifest-path Cargo.toml"
         want = [
-            "cargo fetch --locked",
-            METADATA,
+            f"cargo fetch --locked {at}",
+            f"{METADATA} {at}",
             "gate_surface.py --exclude ",
             *REGISTER,
             (
-                f"cargo clippy -p first@0.1.0 {own} --features pg17 -- -D warnings"
-                " [-Iicu-pg17]"
+                f"cargo clippy -p first@0.1.0 {at} {own} --features pg17"
+                " -- -D warnings [-Iicu-pg17]"
             ),
             (
-                f"cargo clippy -p second@0.1.0 {own} --features pg16 -- -D warnings"
-                " [-Iicu-pg16]"
+                f"cargo clippy -p second@0.1.0 {at} {own} --features pg16"
+                " -- -D warnings [-Iicu-pg16]"
             ),
         ]
         self.assertEqual(want, self.logged())
         said = [
-            "lint:pg-clippy: 2 extension(s) linted: first(pg17) second(pg16)",
+            (
+                "lint:pg-clippy: Cargo.toml: 2 extension(s) linted:"
+                " first(pg17) second(pg16)"
+            ),
             (
                 "lint:pg-clippy: clean at every group"
                 " (restriction minus 0 named contradictions)"
