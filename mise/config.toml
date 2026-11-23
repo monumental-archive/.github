@@ -5084,54 +5084,10 @@ compgen -G "workflow-templates/*.y*ml" > /dev/null || {
 . "${ORG_BELT_DIR}/identity.sh"
 canon_owner=$(org_identity owner)
 canon_repo=$(org_identity repo)
-canon="${canon_owner}/${canon_repo}"
-canon_re="${canon//./\\.}"
-sha=$(grep -hoE "uses:[[:space:]]*${canon_re}/[^@]+@[0-9a-f]{40}" \
-  workflow-templates/*.y*ml | grep -oE "[0-9a-f]{40}" | sort -u)
-[[ -n ${sha} ]] || {
-  echo "audit:template-pins: no org pins in templates, skipped"
-  exit 0
-}
-pins=$(wc -l <<< "${sha}" | tr -d " ")
-if [[ ${pins} -gt 1 ]]; then
-  org_finding "" "templates pin more than one SHA (lint:template-pins should have failed)"
-  exit 1
-fi
-if ! git cat-file -e "${sha}^{commit}" 2> /dev/null; then
-  org_finding "" "pinned SHA ${sha:0:8} not in local history (shallow clone?)"
-  exit 1
-fi
-drift=$(git diff --name-only "${sha}..HEAD" -- .github/workflows/ mise/)
-if [[ -n ${drift} ]]; then
-  # The post-release window (#290 finding 4, same shape as
-  # audit:canon-pins): a release commit cannot pin itself (#227), so
-  # right after a release the templates lawfully sit behind until
-  # Renovate's chore(canon) bump lands. The grace is measured as
-  # STALENESS DURATION, not releases-behind (#310 finding 1): the alarm
-  # is "this pin has been catchable for over a day and nothing caught
-  # it", so the clock starts at the EARLIEST tag newer than the pin — a
-  # burst of releases inside one bot cycle is one short staleness, not
-  # a multi-release alarm, while a week-old lag stays red no matter how
-  # recent the newest tag is. All local: tags and dates are in the clone.
-  pin_tag=$(git tag --points-at "${sha}" --list "v[0-9]*" | sed -n 1p)
-  succ_tag=$(git tag --list "v[0-9]*" | sort -V \
-    | awk -v p="${pin_tag}" '$0 == p { getline; print; exit }')
-  if [[ -n ${pin_tag} && -n ${succ_tag} ]]; then
-    age=$(($(date -u +%s) - $(git log -1 --format=%ct "${succ_tag}")))
-    if [[ ${age} -lt 86400 ]]; then
-      echo "audit:template-pins: post-release window — pin at ${pin_tag}, stale for $((age / 3600))h (since ${succ_tag})"
-      echo "  the lag is structural (#227); Renovate's chore(canon) bump"
-      echo "  closes it. Red only past the 24h grace (#290, #310)."
-      exit 0
-    fi
-  fi
-  IFS=$'\n' read -r -d '' -a detail < <(git log --no-decorate --oneline "${sha}..HEAD" -- .github/workflows/ mise/) || true
-  org_finding "" "pin ${sha:0:8} misses shipped canon changes:" ${detail[@]+"${detail[@]}"} \
-    "a repo standing up from the templates would not get these —" \
-    "bump the template pins to current canon (see #110, #111)."
-  exit 1
-fi
-echo "audit:template-pins: pin ${sha:0:8} carries all shipped workflow and belt changes"
+# The pin, the drift since it, and the post-release window (#290,
+# #310): mise/template_drift.py (#1911).
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/template_drift.py" \
+  "${canon_owner}/${canon_repo}" workflow-templates/*.y*ml
 '''
 
 [tasks."audit:canon-pins"]
