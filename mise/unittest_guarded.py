@@ -35,8 +35,9 @@ the same block is appended there, each line escaped as
 workflow_command escapes outside text, so a name cannot add a line.
 
 Third, a shard (#2049): with ORG_TEST_SHARD set to `<n>/<of>`, the run
-keeps only its share of the discovered test files, dealt largest file
-first to the shard with the least source dealt, so `of` runs of the
+keeps only its share of the discovered test files, dealt costliest file
+first (mise/gate-shards.toml's measured seconds) to the shard with the
+least dealt, so `of` runs of the
 same tree, each on its own runner, run every file exactly once between
 them. A file that could not be imported goes to shard 1, which reports
 it. A shard dealt no file of a root passes: its files ran elsewhere.
@@ -60,9 +61,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal, TypedDict, override
 from warnings import catch_warnings, simplefilter
 
+import decoded
 import findings
 import workflow_command
-from decoded import UndecodableError, load_json
+from decoded import UndecodableError, load_json, load_toml
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -86,6 +88,8 @@ ACTIONS: dict[str, Action] = {
 WORKER_CAP = 8
 WORKERS = "ORG_TEST_WORKERS"
 SHARD = "ORG_TEST_SHARD"
+# What each test file costs, beside this runner in the belt (#2054).
+COSTS = Path(__file__).resolve().parent / "gate-shards.toml"
 # How many of a root's slowest files its cost block names.
 SLOWEST = 10
 SUMMARY = "GITHUB_STEP_SUMMARY"
@@ -184,32 +188,53 @@ def shard() -> tuple[int, int] | None:
     raise SystemExit(1)
 
 
-def size(unit: Unit) -> int:
-    """Weigh a unit by its test file's source.
+def file_costs(table: Path = COSTS) -> tuple[int, dict[str, int]]:
+    """Read what each test file costs, from mise/gate-shards.toml (#2054).
 
     Returns:
-        The file's size in bytes; 0 for a unit with no module file.
+        The default cost and the seconds per file path from the root.
+
+    """
+    doc = decoded.as_object(load_toml(table.read_bytes()).get("test"), "test")
+    default = decoded.as_int(doc.get("default"), "test.default")
+    rows = decoded.as_object(doc.get("cost", {}), "test.cost")
+    return default, {k: decoded.as_int(v, f"test.cost.{k}") for k, v in rows.items()}
+
+
+def file_cost(unit: Unit, default: int, rows: dict[str, int]) -> int:
+    """Weigh a unit by its test file's measured seconds.
+
+    Returns:
+        The file's row, by its path from the directory the run started
+        in; the default for a file with no row or a unit with no module.
 
     """
     module: ModuleType | None = sys.modules.get(unit[0] or "")
     spec = None if module is None else module.__spec__
     origin = None if spec is None else spec.origin
-    return Path(origin).stat().st_size if origin and Path(origin).is_file() else 0
+    if not origin:
+        return default
+    try:
+        path = Path(origin).resolve().relative_to(Path(START).resolve()).as_posix()
+    except ValueError:
+        return default
+    return rows.get(path, default)
 
 
 def share(units: list[Unit], at: int, of: int) -> list[Unit]:
     """Keep shard `at` of `of`'s units, in discovery order.
 
     Returns:
-        The units dealt to this shard: largest first to the shard with
+        The units dealt to this shard: costliest first to the shard with
         the least dealt, ties by name, a unit with no module to shard 1.
 
     """
-    weights = [size(u) for u in units]
+    default, rows = file_costs()
+    weights = [file_cost(u, default, rows) for u in units]
     by_name = sorted(range(len(units)), key=[u[0] or "" for u in units].__getitem__)
     loads = [0] * of
     dealt: list[int] = []
-    # Largest first; a stable sort keeps equal sizes in name order.
+    # Costliest first; a stable sort keeps equal costs in name order.
     for i in sorted(by_name, key=weights.__getitem__, reverse=True):
         to = 0 if units[i][0] is None else loads.index(min(loads))
         loads[to] += weights[i]
