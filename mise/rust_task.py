@@ -272,13 +272,15 @@ def ladder() -> tuple[int, list[str], str]:
     return status, flags.split(), count.strip()
 
 
-def surface(cargo: str) -> tuple[int, str]:
+def surface(cargo: str, where: Sequence[str] = ()) -> tuple[int, str]:
     """Derive the workspace's compile surface, the belt's one derivation (#813).
 
     gate_surface.py reads cargo's own account — `workspace_members`, not
     `workspace_default_members` — and classifies each member, so
     lint:rust, fix:rust, lint:pg-clippy, test:pgrx and lint:msrv cannot
-    disagree about which crates exist or what kind each one is.
+    disagree about which crates exist or what kind each one is. `where`
+    is cargo's `--manifest-path` naming the workspace; empty, cargo
+    finds the one at the working directory.
 
     Returns:
         The status (the helper's when it failed, else cargo's, as
@@ -292,6 +294,7 @@ def surface(cargo: str) -> tuple[int, str]:
         "--format-version",
         "1",
         "--locked",
+        *where,
     ])
     exclude = os.environ.get("CLIPPY_EXCLUDE", "")
     status, records = output(

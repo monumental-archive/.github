@@ -3198,67 +3198,16 @@ dir = "{{cwd}}"
 # it clippy also lints the workspace's other crates under
 # --no-default-features, where their lint expectations do not fire and
 # `-D warnings` turns each one into an error.
+#
+# The body after its guard is mise/pg_clippy.py (#1911), on the plumbing
+# lint:rust and fix:rust share in mise/rust_lint.py.
 run = '''
-set -euo pipefail
 manifests=() && org_tracked_read manifests ':!vendor/**' "Cargo.toml" "*/Cargo.toml"
 [[ -n ${manifests[0]+set} ]] || {
   echo "lint:pg-clippy: no Cargo.toml tracked, skipped"
   exit 0
 }
-command -v cargo > /dev/null || {
-  org_finding "" "Cargo.toml present but cargo missing — pin rust in mise.toml"
-  exit 1
-}
-cargo fetch --locked
-# Assigned first, one step per assignment: a `<<< "$(...)"` discards the
-# derivation's exit status, so a red derivation would read as a
-# workspace with no extension and this task would skip clean having
-# checked nothing. Each extension's major, and the majors to register,
-# come from pgrx-env.sh, written once for every task that builds one
-# (#1795).
-surface=$(cargo metadata --no-deps --format-version 1 --locked \
-  | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/gate_surface.py" --exclude "${CLIPPY_EXCLUDE:-}")
-. "${ORG_BELT_DIR}/pgrx-env.sh"
-pairs=$(org_pgrx_highest <<< "${surface}")
-majors=$(org_pgrx_union <<< "${pairs}")
-[[ -n ${pairs} ]] || {
-  echo "lint:pg-clippy: no pgrx extension tracked, skipped"
-  exit 0
-}
-# clippy is a rustup COMPONENT of the repo's own pin, asserted with a
-# remedy and never installed mid-run — the lint:rust reasoning verbatim.
-if ! installed=$(rustup component list --installed 2> /dev/null) || ! grep -q "^clippy" <<< "${installed}"; then
-  org_finding "" "clippy component missing — declare it with the rust pin in mise.toml:" \
-    'rust = { version = "1.xx.x", components = "clippy,rustfmt,llvm-tools" }'
-  exit 1
-fi
-export CLIPPY_CONF_DIR="${ORG_BELT_DIR}"
-. "${ORG_BELT_DIR}/clippy-ladder.sh"
-# The org's one ladder: a pgrx crate is linted at exactly what every
-# crate is (#1995).
-ladder=$(org_clippy_ladder)
-contradiction_count=$(org_clippy_contradiction_count)
-# The SDK, and every major's ICU headers and Postgres pin checked
-# (#1774, #1940).
-org_pgrx_darwin_prepare "${majors}"
-mise ls "aqua:theseus-rs/postgresql-binaries" --json \
-  | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/pgrx_postgres.py" --majors "${majors}" \
-    > /dev/null
-count=0
-linted=""
-# Read on descriptor 3, so cargo's standard input is not the list.
-while IFS=$'\t' read -r -u 3 spec major; do
-  count=$((count + 1))
-  linted="${linted} ${spec%@*}(pg${major})"
-  # shellcheck disable=SC2086  # ${ladder} holds whole flag WORDS, which
-  # clippy must receive as separate arguments. In a subshell holding its
-  # own major's ICU headers and Postgres (#1774, #1940), so none reaches
-  # the next major.
-  org_pgrx_major "${major}" cargo clippy -p "${spec}" --no-deps --all-targets --locked --keep-going \
-    --no-default-features --features "pg${major}" -- ${ladder}
-done 3<<< "${pairs}"
-echo "lint:pg-clippy: ${count} extension(s) linted:${linted}"
-echo "lint:pg-clippy: clean at every group (restriction minus ${contradiction_count} named contradictions)"
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/pg_clippy.py"
 '''
 
 [tasks."lint:pg-schema"]
@@ -5183,10 +5132,8 @@ dir = "{{cwd}}"
 # newer push replaces the waiting one, reported `cancelled`, so a burst
 # of merges judged only its first and last commit (#1617). Naming the
 # commit as well gives every commit its own verdict. Both lines are
-# required verbatim, and both are printed in the message. The body is
-# raw: `${{` would otherwise open a Tera expression at render.
+# required verbatim, and both are printed in the message.
 run = '''
-{% raw %}
 compgen -G ".github/workflows/*.y*ml" > /dev/null || {
   echo "lint:gate-stub: no workflows, skipped"
   exit 0
@@ -5194,62 +5141,9 @@ compgen -G ".github/workflows/*.y*ml" > /dev/null || {
 . "${ORG_BELT_DIR}/identity.sh"
 canon_owner=$(org_identity owner)
 canon_repo=$(org_identity repo)
-canon="${canon_owner}/${canon_repo}"
-canon_re="${canon//./\\.}"
-bad=""
-unqueued=""
-ungrouped=""
-# shellcheck disable=SC2016  # ${{ }} is GitHub's expression syntax, matched
-# literally — expanding it here is the defect
-want_group="github.event.pull_request.number || format('{0}-{1}', github.ref, github.sha)"
-# shellcheck disable=SC2016
-want_cancel='${{ github.event_name == '"'"'pull_request'"'"' }}'
-for f in .github/workflows/*.y*ml; do
-  grep -qE "uses:[[:space:]]*(${canon_re}/|\./)\.github/workflows/ci\.ya?ml" "${f}" || continue
-  grep -qE "^[[:space:]]*pull_request" "${f}" || continue
-  grep -qE "^[[:space:]]*-[[:space:]]*edited|types:[^#]*\bedited\b" "${f}" || bad="${bad} ${f}"
-  grep -qE "^[[:space:]]+merge_group:" "${f}" || unqueued="${unqueued} ${f}"
-  groups=$(grep -E "^[[:space:]]*group:" "${f}" || true)
-  # Each cancel-in-progress line, indent and trailing comment dropped,
-  # must be exactly the wanted line; every group line must carry the key.
-  # An absent line reds too: `<<<` feeds an empty capture as one empty
-  # line, and grep -v finds it.
-  cancels=$(grep -E "^[[:space:]]*cancel-in-progress:" "${f}" \
-    | sed -E 's/^[[:space:]]+//; s/[[:space:]]+#.*$//; s/[[:space:]]+$//' || true)
-  if grep -vqF "${want_group}" <<< "${groups}" \
-    || grep -vqxF "cancel-in-progress: ${want_cancel}" <<< "${cancels}"; then
-    ungrouped="${ungrouped} ${f}"
-  fi
-done
-status=0
-if [[ -n ${bad} ]]; then
-  org_finding "" "gate caller's pull_request trigger lacks the edited type," \
-    "so title/base edits keep a stale verdict (#427). Set" \
-    "types: [opened, synchronize, reopened, edited] in:${bad}"
-  status=1
-fi
-if [[ -n ${unqueued} ]]; then
-  org_finding "" "gate caller has no merge_group trigger, so the merge" \
-    "queue's own run never starts and a queued pull request waits for a" \
-    'check that cannot report (#1117). Under "on": add' \
-    "  merge_group:" \
-    "    types:" \
-    "      - checks_requested" \
-    "in:${unqueued}"
-  status=1
-fi
-if [[ -n ${ungrouped} ]]; then
-  org_finding "" "gate caller's concurrency group is shared: a merged pull" \
-    "request's event cancels the push gate (#1195), a push replaces the one" \
-    "pending (#1617). Run mise run fix:gate-stub, or set under concurrency:" \
-    "  group: \${{ github.workflow }}-\${{ ${want_group} }}" \
-    "  cancel-in-progress: ${want_cancel}" \
-    "in:${ungrouped}"
-  status=1
-fi
-[[ ${status} -eq 0 ]] || exit 1
-echo "lint:gate-stub: ok"
-{% endraw %}
+# The three requirements and their messages: mise/gate_stub.py (#1911).
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/gate_stub.py" \
+  "${canon_owner}/${canon_repo}" .github/workflows/*.y*ml
 '''
 
 [tasks."fix:gate-stub"]
@@ -8112,29 +8006,12 @@ dir = "{{cwd}}"
 # lets them install; a tool with no platform tables at all (cargo:,
 # rust) is outside by construction. Offline and deterministic, so in ci.
 # The remedy is printed, never run: resolving a platform is network-bound
-# and writes the lock, which makes it a fixer's job, not a lint's.
+# and writes the lock, which makes it a fixer's job, not a lint's. The
+# helper finds the config and its lock, or skips (#1911).
 run = '''
-cfg=""
-for c in mise/config.toml mise.toml .mise.toml; do
-  [[ -f ${c} ]] && {
-    cfg="${c}"
-    break
-  }
-done
-[[ -n ${cfg} ]] || {
-  echo "lint:lock-platforms: no mise config, skipped"
-  exit 0
-}
-lock="mise.lock"
-[[ ${cfg} == */* ]] && lock="${cfg%/*}/mise.lock"
-[[ -f ${lock} ]] || {
-  echo "lint:lock-platforms: no ${lock}, skipped"
-  exit 0
-}
 org_tracked ':!vendor/**' ".github/workflows/*.yml" ".github/workflows/*.yaml" \
   | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/lock_platforms.py" \
-    --defaults "${ORG_CANON_DIR}/.github/workflows/publish.yml" \
-    --config "${cfg}" --lock "${lock}"
+    --defaults "${ORG_CANON_DIR}/.github/workflows/publish.yml"
 '''
 
 [tasks."audit:lock-arch"]
@@ -8468,8 +8345,9 @@ dir = "{{cwd}}"
 # Both `audit:release-tags` and `audit:spec-drift` shipped as tasks,
 # were cited in prose as enforcing, and NO workflow ran either (#354,
 # fixed #356). This is the join: red on any audit:* task with no
-# `mise run audit:<name>` occurrence anywhere in .github/workflows/.
-# Anywhere, so the schedulers are whichever files run one: the canon's
+# `mise run audit:<name>` occurrence in any workflow file
+# (.github/workflows/*.y*ml, the only files GitHub runs).
+# Any, so the schedulers are whichever files run one: the canon's
 # org-side subject workflows (slsa.yml, org-settings.yml,
 # pins-and-belt.yml, badges.yml; #1884), publish.yml, the repo-*.yml subject workflows (#1858), and
 # repo-mutants.yml for audit:mutants, which runs apart so a survivor
@@ -8503,77 +8381,22 @@ dir = "{{cwd}}"
 # ONLY collecting workflow (#1858): a caller of any other subject
 # workflow runs the belt's legs and none of the repository's own.
 run = '''
-status=0
-
-if [[ -f mise/config.toml ]]; then
-  bad=""
-  count=0
-  audits=$(grep -oE '^\[tasks\."audit:[a-z-]+"\]' mise/config.toml \
-    | sed 's/^\[tasks\."audit:\(.*\)"\]$/\1/')
-  while IFS= read -r t; do
-    [[ -n ${t} ]] || continue
-    count=$((count + 1))
-    grep -rEq "mise run audit:${t}([^a-z-]|$)" .github/workflows/ \
-      || bad="${bad} audit:${t}"
-  done <<< "${audits}"
-  if [[ ${count} -eq 0 ]]; then
-    org_finding "" "zero belt audit tasks enumerated — the grep is broken"
-    status=1
-  elif [[ -n ${bad} ]]; then
-    org_finding "" "belt audit task(s) no workflow ever runs:${bad}" \
-      "schedule each in .github/workflows/ (slsa.yml or a sibling, publish.yml, a" \
-      "repo-*.yml subject workflow or repo-mutants.yml) or delete the task — a check" \
-      "nobody runs is a claim, not a check (#358 seam 1)."
-    status=1
-  else
-    echo "lint:audit-scheduled: ${count} belt audit task(s), every one scheduled"
-  fi
-fi
-
 . "${ORG_BELT_DIR}/own-audits.sh"
 own=$(own_audit_tasks)
-if [[ -z ${own} ]]; then
-  echo "lint:audit-scheduled: this repository defines no audit:* of its own"
-  exit "${status}"
+flows=()
+if compgen -G ".github/workflows/*.y*ml" > /dev/null; then
+  flows=(.github/workflows/*.y*ml)
 fi
-if ! compgen -G ".github/workflows/*.y*ml" > /dev/null; then
-  # shellcheck disable=SC2001  # an anchored per-line prefix; ${x//from/to} has no line anchor
-  IFS=$'\n' read -r -d '' -a detail < <(sed 's/^/  /' <<< "${own}") || true
-  org_finding "" "repo-defined audit task(s) and NO workflows at all:" ${detail[@]+"${detail[@]}"} \
-    "wire the own-audits stub (workflow-templates/own-audits.yml) —" \
-    "it calls repo-own-audits.yml, whose one leg runs every audit:*" \
-    "this repository defines (#704, #1858)."
-  exit 1
+canon=""
+if [[ -n ${own} && -n ${flows[0]+set} ]]; then
+  . "${ORG_BELT_DIR}/identity.sh"
+  owner=$(org_identity owner)
+  repo=$(org_identity repo)
+  canon="${owner}/${repo}"
 fi
-. "${ORG_BELT_DIR}/identity.sh"
-canon_owner=$(org_identity owner)
-canon_repo=$(org_identity repo)
-canon="${canon_owner}/${canon_repo}"
-canon_re="${canon//./\\.}"
-collected=0
-grep -rEq "uses:[[:space:]]*(${canon_re}/|\./)\.github/workflows/repo-own-audits\.ya?ml" \
-  .github/workflows/ && collected=1
-missing=""
-own_count=0
-while IFS= read -r t; do
-  [[ -n ${t} ]] || continue
-  own_count=$((own_count + 1))
-  [[ ${collected} -eq 1 ]] && continue
-  grep -rEq "mise run ${t}([^a-z-]|$)" .github/workflows/ || missing="${missing} ${t}"
-done <<< "${own}"
-if [[ -n ${missing} ]]; then
-  org_finding "" "repo-defined audit task(s) no workflow runs:${missing}" \
-    "wire the own-audits stub (workflow-templates/own-audits.yml), which" \
-    "calls repo-own-audits.yml and runs every audit:* this repository defines," \
-    "or run each from a workflow here — or delete the task. A check" \
-    "nobody runs is a claim, not a check (#358 seam 1, #704)."
-  status=1
-elif [[ ${collected} -eq 1 ]]; then
-  echo "lint:audit-scheduled: ${own_count} repo-defined audit task(s), collected by repo-own-audits.yml"
-else
-  echo "lint:audit-scheduled: ${own_count} repo-defined audit task(s), each run by a workflow here"
-fi
-exit "${status}"
+# Both halves and their messages: mise/audit_scheduled.py (#1911).
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/audit_scheduled.py" \
+  --own "${own}" --canon "${canon}" ${flows[@]+"${flows[@]}"}
 '''
 
 [tasks."lint:canon-policy"]
@@ -8840,34 +8663,15 @@ dir = "{{cwd}}"
 # matrix laundering hole: a floating value reaching runs-on through a
 # matrix include or a bash case arm is the same float with indirection.
 run = '''
-files=() && org_tracked_read files ':!vendor/**' ".github/workflows/*.yml" ".github/workflows/*.yaml" \
-  "workflow-templates/*.yml" "workflow-templates/*.yaml"
-[[ -n ${files[0]+set} ]] || {
+workflows=() && org_tracked_read workflows ':!vendor/**' ".github/workflows/*.yml" ".github/workflows/*.yaml"
+templates=() && org_tracked_read templates ':!vendor/**' "workflow-templates/*.yml" "workflow-templates/*.yaml"
+[[ -n ${workflows[0]+set} || -n ${templates[0]+set} ]] || {
   echo "lint:runner-pin: no workflows, skipped"
   exit 0
 }
-bad=""
-for f in "${files[@]}"; do
-  while IFS= read -r line; do
-    [[ -n ${line} ]] || continue
-    v=$(sed -E "s/^[[:space:]]*runs-on:[[:space:]]*//; s/[[:space:]]*#.*$//" <<< "${line}" | tr -d "\"'")
-    case "${v}" in
-      \$\{\{*matrix.*\}\}) ;; # indirection; the value check below covers it
-      *) [[ ${v} =~ ^[a-z]+-[0-9][a-z0-9.-]*$ ]] \
-        || bad="${bad} ${f}(runs-on: ${v})" ;;
-    esac
-  done <<< "$(grep -hE "^[[:space:]]*runs-on:" "${f}" || true)"
-  float=$(grep -nE "(ubuntu|macos|windows)-latest" "${f}" | grep -vE "^[0-9]+:[[:space:]]*#" || true)
-  [[ -z ${float} ]] || bad="${bad} ${f}(floating label: $(head -1 <<< "${float}"))"
-done
-if [[ -n ${bad} ]]; then
-  org_finding "" "floating or unpinned runner labels:${bad}" \
-    "pin every runs-on to a named image version (ubuntu-24.04, not" \
-    "ubuntu-latest) — Renovate rolls named pins as visible diffs;" \
-    "a floating label migrates with no diff at all (#290)."
-  exit 1
-fi
-echo "lint:runner-pin: every runs-on pinned or matrix-indirected, no floating labels"
+# The two checks and their message: mise/runner_pin.py (#1911).
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/runner_pin.py" \
+  ${workflows[@]+"${workflows[@]}"} -- ${templates[@]+"${templates[@]}"}
 '''
 
 [tasks."lint:canon-pins"]

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Table tests for the majors fix:rust and lint:msrv build pgrx at (#1795).
+"""Table tests for the majors pgrx is built at by three tasks (#1795).
 
 Each task's own body, read from mise/config.toml, runs against a stub
 surface of two extensions, `first` (majors 15,16,17) and `second`
@@ -14,9 +14,9 @@ registered.
 they were asked, and `ORG_PYTHON` is a stub that answers each belt
 helper by name: `gate_surface.py` with the planted surface,
 `pgrx_postgres.py` with a plan, `msrv_plan.py` with the planted plan.
-`rust_lint.py` and `msrv_lint.py`, fix:rust's and lint:msrv's bodies
-after their guards (#1911), run on this interpreter, from the planted
-belt, so they meet the same stubs.
+`rust_lint.py`, `msrv_lint.py` and `pg_clippy.py`, the bodies of
+fix:rust, lint:msrv and lint:pg-clippy after their guards (#1911), run
+on this interpreter, from the planted belt, so they meet the same stubs.
 pgrx-env.sh is the real one, sourced, with only what needs a Mac or a
 Postgres replaced: the prepare and the init log, and a major's ICU
 headers are a mark the stub cargo prints. Every row asserts the whole
@@ -68,7 +68,7 @@ echo '[]'
 # in the order the pipeline runs them.
 PYTHON_STUB = r"""#!/usr/bin/env bash
 script=$(basename "$1")
-case ${script} in rust_lint.py | msrv_lint.py) exec "${PLANT_PYTHON}" "$@" ;; esac
+case ${script} in rust_lint.py | msrv_lint.py | pg_clippy.py) exec "${PLANT_PYTHON}" "$@" ;; esac
 shift
 [[ $1 == --failed ]] || cat > /dev/null
 printf '%s %s\n' "${script}" "$*" >> "${PLANT_LOG}"
@@ -144,7 +144,15 @@ class TwoExtensions(unittest.TestCase):
             stub.chmod(0o755)
         self.belt = hermetic.belt(
             self.tmp / "belt",
-            stubs={"pgrx-env.sh": PGRX_ENV_STUB, "clippy-ladder.sh": LADDER_STUB},
+            stubs={
+                "pgrx-env.sh": PGRX_ENV_STUB,
+                "clippy-ladder.sh": LADDER_STUB,
+                # A copy, not the link the belt plants: Python puts a
+                # script's RESOLVED directory on sys.path, so a linked
+                # pg_clippy.py would import the canon's own rust_lint,
+                # whose BELT is the canon's, past these stubs.
+                "pg_clippy.py": (BELT / "pg_clippy.py").read_text(encoding="utf-8"),
+            },
         )
         self.log = self.tmp / "log"
         self.log.touch()
@@ -224,6 +232,35 @@ class TwoExtensions(unittest.TestCase):
             "fix:rust: plain rewritten where clippy could",
             "fix:rust: pgrx extension(s) fixed: first(pg17) second(pg16)",
             "fix:rust: applied what is machine-applicable — the rest is judgement",
+        ]
+        self.assertEqual(said, done.stdout.splitlines())
+
+    def test_lint_pg_clippy_lints_each_extension_at_its_own_major(self) -> None:
+        """lint:pg-clippy registers 16,17 and lints first at pg17, second at pg16."""
+        done = self.run_task("lint:pg-clippy")
+        self.assertEqual(0, done.returncode, done.stderr)
+        own = "--no-deps --all-targets --locked --keep-going --no-default-features"
+        want = [
+            "cargo fetch --locked",
+            METADATA,
+            "gate_surface.py --exclude ",
+            *REGISTER,
+            (
+                f"cargo clippy -p first@0.1.0 {own} --features pg17 -- -D warnings"
+                " [-Iicu-pg17]"
+            ),
+            (
+                f"cargo clippy -p second@0.1.0 {own} --features pg16 -- -D warnings"
+                " [-Iicu-pg16]"
+            ),
+        ]
+        self.assertEqual(want, self.logged())
+        said = [
+            "lint:pg-clippy: 2 extension(s) linted: first(pg17) second(pg16)",
+            (
+                "lint:pg-clippy: clean at every group"
+                " (restriction minus 0 named contradictions)"
+            ),
         ]
         self.assertEqual(said, done.stdout.splitlines())
 

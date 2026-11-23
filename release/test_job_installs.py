@@ -229,6 +229,8 @@ DYNAMIC = {
     " interpreter it runs on (#1741)",
     "mise/rust_lint.py": "builds its cargo argvs in lists from the tracked"
     " workspace, and calls the belt's shell functions through bash (#1911)",
+    "mise/rust_task.py": "runs the Rust task helpers' cargo, bash and"
+    " belt-helper argvs, built by its callers (#1911)",
     "mise/security_config.py": "builds its gh argv in a variable",
     "mise/tool_python.py": "asks a tool venv's interpreter and python3"
     " found on PATH (#1788)",
