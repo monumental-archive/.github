@@ -5833,22 +5833,10 @@ compgen -G ".github/workflows/*.y*ml" > /dev/null || {
   echo "lint:capability-boundary: no workflows, skipped"
   exit 0
 }
-bad=""
-for f in .github/workflows/*.y*ml; do
-  grep -qE "^[[:space:]]*workflow_call:" "${f}" || continue
-  # Only a real grant counts. A workflow that says "no id-token, ever" in
-  # a comment is documenting the boundary, not breaching it — matching
-  # comment text flagged exactly the files that get this right.
-  grep -qE "^[^#]*id-token:[[:space:]]*write" "${f}" || continue
-  grep -qE "^[[:space:]]*#[[:space:]]*capability-boundary:" "${f}" && continue
-  bad="${bad} ${f}"
-done
-if [[ -n ${bad} ]]; then
-  org_finding "" "workflow_call workflow holds id-token" \
-    "without a capability-boundary marker:${bad}"
-  exit 1
-fi
-echo "lint:capability-boundary: ok"
+# Only a real grant counts: a workflow that says "no id-token, ever" in
+# a comment is documenting the boundary, not breaching it. The logic is
+# mise/capability_boundary.py (#1911).
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/capability_boundary.py" .github/workflows/*.y*ml
 '''
 
 [tasks."lint:release-phases"]
