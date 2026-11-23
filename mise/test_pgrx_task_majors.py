@@ -285,17 +285,19 @@ class TwoExtensions(unittest.TestCase):
         """
         done = self.run_task("lint:msrv")
         self.assertEqual(0, done.returncode, done.stderr)
-        check = "cargo check --locked --no-default-features"
+        at = "--manifest-path Cargo.toml"
+        check = f"cargo check --locked {at} --no-default-features"
         want = [
-            # The pins once, then the workspace (#1911).
+            # The pins once, then each of the tree's workspaces (#2011).
             "mise ls rust --json",
-            "cargo fetch --locked",
+            f"cargo fetch --locked {at}",
             # The whole graph, resolved with the gate's features (#1850).
-            "cargo metadata --format-version 1 --locked --all-features",
+            f"cargo metadata --format-version 1 --locked {at} --all-features",
             "gate_surface.py --exclude ",
             (
                 "msrv_plan.py --toolchains <tmp>/toolchains.json --exclude "
                 f" --pgrx first:17,second:16 --floor {self.belt}/rust-floor.toml"
+                " --root Cargo.toml"
             ),
             *REGISTER,
             f"{check} --features pg17 -p first@0.1.0 [-Iicu-pg17] {{1.82.0}}",
@@ -320,7 +322,7 @@ class TwoExtensions(unittest.TestCase):
         done = self.run_task("lint:msrv")
         self.assertEqual(101, done.returncode, done.stderr)
         failed = [line for line in self.logged() if "--failed" in line]
-        want: list[str] = ["msrv_plan.py --failed 1.82.0 first@0.1.0"]
+        want: list[str] = ["msrv_plan.py --failed 1.82.0 first@0.1.0 --root Cargo.toml"]
         self.assertEqual(want, failed)
         said = ["lint:msrv: compiling at 1.82.0: first@0.1.0"]
         self.assertEqual(said, done.stdout.splitlines())

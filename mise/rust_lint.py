@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING
 
 import findings
 import rust_suppressions
+import rust_workspaces
 import tracked
 from rust_task import (
     NO_CARGO,
@@ -51,7 +52,6 @@ from rust_task import (
     register,
     run,
     surface,
-    workspace_roots,
 )
 
 if TYPE_CHECKING:
@@ -499,7 +499,7 @@ def clippy_leg(cargo: str) -> int:
     status, flags, count = ladder()
     if status != 0:
         return status
-    trees = workspace_roots()
+    trees = rust_workspaces.resolved()
     if trees is None:
         return 1
     # EVERY WORKSPACE IN THE TREE, not the root's alone (#2004). A
@@ -636,7 +636,7 @@ def fix_leg(cargo: str) -> int:
     status, flags, _ = ladder()
     if status != 0:
         return status
-    trees = workspace_roots()
+    trees = rust_workspaces.resolved()
     if trees is None:
         return 1
     # Every workspace in the tree, as the gate leg (#2004); each root is

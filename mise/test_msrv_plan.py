@@ -572,6 +572,49 @@ class MainTest(unittest.TestCase):
         self.assertEqual(status, 1)
         self.assertIn("cannot compare", err)
 
+    def test_a_root_is_the_subject_of_each_finding_about_its_members(self) -> None:
+        """#2011: the rule, the pins, the unreadable and the failed name it."""
+        fuzz = "fuzz/Cargo.toml"
+        rows = {
+            "a minimum is undeclared": (
+                metadata(member("a")),
+                [pin("1.82.0")],
+            ),
+            "the declared minimum and the pinned toolchain disagree": (
+                metadata(member("a", "1.82")),
+                [pin("1.97.1")],
+            ),
+            "a declared minimum this check cannot compare": (
+                metadata(member("a", "stable")),
+                [pin("1.97.1")],
+            ),
+        }
+        floor = str(floor_file(PIN_ROWS_FLOOR))
+        for said, (doc, listing) in rows.items():
+            with self.subTest(said=said):
+                path = Path(tempfile.mkdtemp()) / "toolchains.json"
+                path.write_text(json.dumps(listing), encoding="utf-8")
+                argv = ["--toolchains", str(path), "--floor", floor, "--root", fuzz]
+                err = io.StringIO()
+                with (
+                    mock.patch("sys.stdin", io.StringIO(json.dumps(doc))),
+                    redirect_stdout(io.StringIO()),
+                    redirect_stderr(err),
+                ):
+                    status = msrv_plan.main(argv)
+                self.assertEqual(1, status)
+                said_err = err.getvalue()
+                self.assertTrue(
+                    said_err.startswith(f"{TASK}: {fuzz}: {said}"), said_err
+                )
+        err_io = io.StringIO()
+        with redirect_stderr(err_io):
+            status = msrv_plan.main(["--failed", "1.85.0", "a@1", "--root", fuzz])
+        self.assertEqual(1, status)
+        self.assertTrue(
+            err_io.getvalue().startswith(f"{TASK}: {fuzz}: a@1 failed to compile")
+        )
+
     def test_a_document_of_the_wrong_shape_is_red_by_where(self) -> None:
         """A wrong-shaped account or listing is named, never a crash."""
         good = metadata(member("a", "1.82"))

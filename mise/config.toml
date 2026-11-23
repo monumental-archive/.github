@@ -3139,9 +3139,11 @@ dir = "{{cwd}}"
 # code never raises it. msrv_plan.py reds a declared number that
 # differs, naming the one it should be and why, before anything
 # compiles; the pin check then holds the MSRV toolchain to it unchanged.
-# Every workspace member is held to it (#1909): one that declares no
-# rust-version is a finding naming the number to declare, so a workspace
-# declaring nothing is red rather than skipped, and a member
+# Every member of every workspace the tree tracks is held to it (#1909,
+# #2011: a cargo-fuzz crate is its own workspace, and reading the root's
+# alone held it to nothing): one that declares no rust-version is a
+# finding naming the number to declare and its workspace's manifest, so
+# a workspace declaring nothing is red rather than skipped, and a member
 # CLIPPY_EXCLUDE keeps out of the compile is still held to its number,
 # only unverified at it. A dependency that needs more than it
 # declares fails the compile at the derived number, and the remedy says

@@ -211,6 +211,36 @@ class Roots(unittest.TestCase):
         self.assertIn("lint:rust: git could not name the tree\n", done.stderr)
         self.assertIn("not a git repository", done.stderr)
 
+    def test_resolved_is_the_roots_or_none_having_said_why(self) -> None:
+        """The roots; None on an unresolved manifest; None on git, said."""
+        planted = Planted(self)
+        roots: list[str] = ["Cargo.toml", "fuzz/Cargo.toml"]
+        with mock.patch.object(rust_workspaces, "CARGO", str(planted.cargo)):
+            done = hermetic.call_main(
+                lambda: 0 if rust_workspaces.resolved() == roots else 3,
+                env=planted.env,
+                cwd=planted.tree,
+            )
+        self.assertEqual((0, ""), (done.returncode, done.stderr))
+        refused = Planted(self, "outside")
+        with mock.patch.object(rust_workspaces, "CARGO", str(refused.cargo)):
+            done = hermetic.call_main(
+                lambda: 0 if rust_workspaces.resolved() is None else 3,
+                env=refused.env,
+                cwd=refused.tree,
+            )
+        self.assertEqual(0, done.returncode)
+        self.assertIn("belongs to a workspace outside this tree", done.stderr)
+        outside = planted.base / "plain"
+        outside.mkdir()
+        done = hermetic.call_main(
+            lambda: 0 if rust_workspaces.resolved() is None else 3,
+            env=planted.env,
+            cwd=outside,
+        )
+        self.assertEqual(0, done.returncode)
+        self.assertIn("lint:rust: git could not name the tree\n", done.stderr)
+
     def test_anything_but_roots_is_a_usage_error(self) -> None:
         """No subcommand, or another: exit 2 and the usage line."""
         argvs: list[list[str]] = [[], ["root"], ["roots", "x"]]
