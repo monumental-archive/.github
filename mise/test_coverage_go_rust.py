@@ -26,6 +26,7 @@ from test_coverage_tasks import (
     FLOOR,
     GIT,
     GO,
+    init_tree,
 )
 
 # The Rust leg's tools: rustup asserting llvm-tools, and cargo answering
@@ -172,6 +173,7 @@ class MeasureSelectors(unittest.TestCase):
                 "STUB_DIR": tmp,
                 "STUB_FILES": "a.rs:13:8 b.rs:0:0",
             }
+            init_tree(tree, env, ["Cargo.toml"], commit=False)
             env["ORG_COVERAGE_REPORTS"] = str(Path(tmp) / "reports")
             done = subprocess.run(
                 [BASH, str(BELT / "coverage-measure.sh"), "coverage:test", "rust"],
@@ -215,6 +217,7 @@ class MeasureSelectors(unittest.TestCase):
                 "STUB_FILES": "a.rs:200:123",
                 "STUB_GO": "93.0",
             }
+            init_tree(tree, env, ["Cargo.toml", "go.mod"], commit=False)
             done = subprocess.run(
                 [BASH, str(BELT / "coverage-measure.sh"), "coverage:test", "all"],
                 cwd=tree,
@@ -273,6 +276,7 @@ class RustLegGuards(unittest.TestCase):
             "STUB_DIR": tmp,
             "STUB_FILES": "src/lib.rs:10:0 crates/core/src/lib.rs:10:9",
         }
+        init_tree(tree, env, ["Cargo.toml"], commit=False)
         if metadata is not None:
             (base / "metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
             env["STUB_METADATA"] = str(base / "metadata.json")
