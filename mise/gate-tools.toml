@@ -273,6 +273,7 @@ tasks = [
   "lint:rust-properties",
   "lint:scaffold-assembly",
   "lint:shell-embedded",
+  "lint:signer-pin",
   "lint:sql",
   "lint:subject-budget",
   "lint:task-shell",
