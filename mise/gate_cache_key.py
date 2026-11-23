@@ -89,16 +89,17 @@ fallback prefix alike: a toolchain change misses, and a fallback only
 ever restores an entry the same compiler filled. No `rustc` is red,
 never an empty digest: the step runs only where a cargo cache does.
 
-EVERY COVERAGE DIRECTORY NAMES ITS COMPILER (#1877). The cache key keeps
-a restore from mixing compilers, but not a directory that persists: a
-developer's `target/`, a reused worktree. Rust 1.100 moved test
-executables from `deps/` to `build/*/out/`, so a bump left 1.97.1's
-beside 1.100.0's and `cargo llvm-cov report` read both (99.37% fresh,
-95.77% over the mixed directory, on edtf). So `digest` prints the first
-16 hex characters of the same digest, for the `rustc` on PATH (under
-RUSTUP_TOOLCHAIN when the caller sets it), and every coverage
-CARGO_TARGET_DIR ends in it: a compiler change is a new, empty
-directory. Same red branches as `cargo`.
+EVERY COVERAGE DIRECTORY NAMES ITS COMPILER (#1877). `digest` prints
+the first 16 hex characters of the same digest, for the `rustc` on PATH
+(under RUSTUP_TOOLCHAIN when the caller sets it), and every coverage
+CARGO_TARGET_DIR ends in it. It is no longer the correctness guard:
+`cargo llvm-cov report` reads every workspace executable in the
+directory, and each measurement cleans the workspace's own first
+(`cargo llvm-cov clean --workspace`, #2061), whatever left them, a
+compiler or a version bump. The digest keeps the nightly
+`rust-branches` leg, whose one-shot command cleans its own directory,
+away from the stable leg's executables, and keeps each compiler's
+dependencies warm. Same red branches as `cargo`.
 
 THE CARGO KEY NAMES EVERY DECLARED INPUT, ONCE (#2045). An entry is
 saved only by a default-branch run that missed, and never written back,

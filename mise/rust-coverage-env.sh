@@ -22,12 +22,15 @@
 #
 # And a directory of its own compiler (#1877): `<digest>` is
 # `gate_cache_key.py digest`, 16 hex of the `rustc -vV` cargo builds
-# with. `cargo llvm-cov report` reads every test executable in the
-# directory, and a toolchain bump that moves where they go (Rust 1.100:
-# `deps/` to `build/*/out/`) leaves the old compiler's beside the new
-# one's: edtf measured 95.77% over the mixed directory, 99.37% fresh. A
-# compiler change is a new, empty directory instead. Nothing prunes the
-# old one: the nightly leg may be measuring into its own beside this.
+# with. It is not what keeps the figure exact: `cargo llvm-cov report`
+# reads every workspace executable in the directory, and the first
+# measured call in a run cleans the workspace's own (`cargo llvm-cov
+# clean --workspace`, #2061), whatever renamed them, a compiler or a
+# version bump. The digest keeps the nightly `rust-branches` leg, whose
+# one-shot command cleans its own directory, away from the stable leg's
+# executables when both run side by side, and keeps each compiler's
+# dependencies warm. Nothing prunes an old one: the nightly leg may be
+# measuring into its own beside this.
 #
 # One step per assignment, never a pipeline inside `$(...)`: a sourced
 # file cannot rely on its caller's pipefail.
