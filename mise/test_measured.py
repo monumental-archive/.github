@@ -5,6 +5,7 @@ Draft, unpushed: the rows #1667's Done-when names for `measured` itself.
 """
 
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -497,10 +498,16 @@ class RustInstrumented(unittest.TestCase):
             self.assertIn(f"llvm-cov show-env --sh | CARGO_TARGET_DIR={target}", calls)
 
     def test_old_profiles_are_cleaned_once_per_run(self) -> None:
-        """Two calls in one run clean once; the next run cleans again."""
+        """Two calls in one run clean once; the next run cleans again.
+
+        The first run has ended before the next starts: its directory is
+        gone, so its claim on the build directory has lapsed (#2062).
+        """
         with tempfile.TemporaryDirectory() as tmp:
             calls: list[str] = []
             for run_name in ("run", "run", "next"):
+                if run_name == "next":
+                    shutil.rmtree(Path(tmp) / "run")
                 _, out, calls = self.rust_run(tmp, DUMP, run_name=run_name)
                 self.assertEqual(0, out.returncode, out.stderr)
             target = f"{Path(tmp).resolve()}/tree/target/llvm-cov-target-{STABLE}"
@@ -509,6 +516,31 @@ class RustInstrumented(unittest.TestCase):
                 f"llvm-cov clean --profraw-only | CARGO_TARGET_DIR={target}"
             ] * 2
             self.assertEqual(twice, cleaned)
+
+    def test_a_directory_another_live_run_holds_is_refused(self) -> None:
+        """The planted row (#2062): another live run's claim ends the call.
+
+        On main the second run cleaned the first one's profiles and ran
+        its suite into the same directory.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tree, out, _ = self.rust_run(tmp, DUMP)
+            self.assertEqual(0, out.returncode, out.stderr)
+            target = tree / "target" / f"llvm-cov-target-{STABLE}"
+            other = Path(tmp).resolve() / f"org-coverage-{os.getpid()}"
+            other.mkdir()
+            (target / ".org-coverage-owner").write_text(f"{other}\n")
+            (Path(tmp) / "cargo.log").unlink()
+            _, out, calls = self.rust_run(tmp, ["cargo", "test"], run_name="next")
+            self.assertEqual(1, out.returncode, out.stderr)
+            self.assertIn(
+                f"{target} is being measured by another run ({other});"
+                " wait for it to finish\n",
+                out.stderr,
+            )
+            started = [c for c in calls if c.startswith(("llvm-cov clean", "test"))]
+            self.assertEqual(NO_CALLS, started)
+            self.assertEqual(f"{other}\n", (target / ".org-coverage-owner").read_text())
 
     def test_two_compilers_measure_into_two_directories(self) -> None:
         """Two `rustc` differing only in `release:`: two directories (#1877).

@@ -2458,7 +2458,12 @@ clean --profraw-only`), its marker a directory in the run's directory,
 so a restored cache or an earlier run cannot add to the figure and a
 second call in the same run keeps the first one's profiles. The leg
 reads profiles only beside that marker: no profile, or none from this
-run, is red by name, naming the `measured` prefix (#1666). A pgrx
+run, is red by name, naming the `measured` prefix (#1666). Before any
+clean, every call (and each pgrx major's run) claims the build
+directory for its run with `coverage_owner.py`: the directory is the
+checkout's and the run a process's, so a second run measuring in the
+same checkout while the first is live is refused by name instead of
+cleaning and reading the first one's directory (#2062). A pgrx
 extension the command builds leaves the report by path
 (`--ignore-filename-regex` over the extension's directory): its
 functions run in the Postgres backend and `test:pgrx` measures them.
