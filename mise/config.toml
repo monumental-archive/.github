@@ -5678,24 +5678,31 @@ dir = "{{cwd}}"
 # Filtering by the compile surface would hide a live reader and red a
 # key that has one.
 #
+# Once per workspace in the tree (#2004): a cargo-fuzz crate is its own
+# workspace, and its [workspace.package] went unread while only the root
+# workspace was. The helper runs the cargo legs for each root the
+# derivation names and judges every root past a red one.
+#
 # Deterministic: the outcome is a function of the tree and the lock.
 # `cargo fetch --locked` first, the lint:rust precedent.
-run = '''
-set -euo pipefail
-git ls-files --error-unmatch -- Cargo.toml > /dev/null 2>&1 || {
-  echo "lint:workspace-inherit: no root Cargo.toml tracked, skipped"
-  exit 0
-}
+#
 # A repo with a Cargo.toml has rust pinned as a build input; cargo absent
 # is a broken toolchain, and skipping would be the vacuous-success
 # failure this task exists to refuse.
+run = '''
+set -euo pipefail
+manifests=() && org_tracked_read manifests ':!vendor/**' "Cargo.toml" "*/Cargo.toml"
+[[ -n ${manifests[0]+set} ]] || {
+  echo "lint:workspace-inherit: no Cargo.toml tracked, skipped"
+  exit 0
+}
 command -v cargo > /dev/null || {
   org_finding "" "Cargo.toml tracked but cargo missing — pin rust in mise.toml"
   exit 1
 }
-cargo fetch --locked
-cargo metadata --no-deps --format-version 1 --locked \
-  | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/workspace_inherit.py"
+. "${ORG_BELT_DIR}/rust-workspaces.sh"
+roots=() && org_rust_workspace_roots roots
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/workspace_inherit.py" "${roots[@]}"
 '''
 
 [tasks."lint:gate-stub"]
