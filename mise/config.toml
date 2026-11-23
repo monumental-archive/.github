@@ -8540,18 +8540,9 @@ files=() && org_tracked_read files ':!vendor/**' ".github/workflows/*.y*ml"
   echo "lint:caller-permissions: no workflows, skipped"
   exit 0
 }
-command -v stele > /dev/null || {
-  org_finding "" "stele missing from the belt"
-  exit 1
-}
-if ! "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/stele_findings.py" assert permissions \
-  --policy "${ORG_CANON_DIR}/slsa/assert-policy.json" \
-  --tree "${ORG_CANON_DIR}" \
-  --callers .; then
-  org_finding "" "see above — grant what the pinned canon's" \
-    "callee jobs ask for, at the caller's uses: job (#358 seam 2)."
-  exit 1
-fi
+# stele's join and its messages: mise/caller_permissions.py (#1911).
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/caller_permissions.py" \
+  "${ORG_CANON_DIR}" "${files[@]}"
 '''
 
 [tasks."lint:template-pins"]
