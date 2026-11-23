@@ -223,6 +223,8 @@ DYNAMIC = {
     "mise/citations.py": "runs gh and git from the paths its network reads"
     " hold, so a row can stand them in (#1911)",
     "mise/embedded_shell.py": "splats its shfmt argv from a list",
+    "mise/gate_shard.py": "runs mise on its shard's lints, a list dealt"
+    " from mise's own task list (#2049)",
     "mise/git_decoy.py": "runs its caller's command against a decoy repository",
     "mise/hermetic.py": "splats its caller's pathspecs into the git ls-files argv",
     "mise/mutants_python.py": "runs the repository's own test-command,"
@@ -2619,10 +2621,18 @@ class GateCoverageReports(unittest.TestCase):
 # THE GATE'S THREE LEGS (#1740). One job, a matrix over the legs, its
 # setup written once; each leg runs its own belt task, and a step that
 # belongs to one leg says so in its `if:`. The cache steps' legs are held
-# in test_gate_caches.py beside the caches.
+# in test_gate_caches.py beside the caches. The lint leg is several
+# shards (#2049), each run by gate_shard.py; a once-per-gate lint step
+# runs on the first.
 GATE_LEGS = ("lint", "test", "properties")
-RUN_LEG = 'mise run "ci:${LEG}"'
-LINT_ONLY = "matrix.leg == 'lint'"
+RUN_LEG = (
+    '"${ORG_PYTHON}" .org-canon/mise/gate_shard.py run "${LEG}" "${SHARD}" "${OF}"'
+)
+GATE_NAME = (
+    "gate (${{ matrix.leg }}${{ matrix.of > 1"
+    " && format(' {0}/{1}', matrix.shard, matrix.of) || '' }})"
+)
+LINT_ONLY = "matrix.leg == 'lint' && matrix.shard == 1"
 TEST_ONLY = "matrix.leg == 'test'"
 LEG_BOUND = {
     "A merge group is the pull request's current head": LINT_ONLY,
@@ -2644,6 +2654,37 @@ def flat(value: str) -> str:
     return " ".join(value.split())
 
 
+def matrix_findings(strategy: dict[str, object]) -> list[str]:
+    """Hold the gate's matrix to the three legs, each shard numbered (#2049).
+
+    Returns:
+        One line when the legs are not the three in order, and one per
+        leg whose rows are not shard 1 to n of n.
+
+    """
+    matrix = decoded.as_object(strategy.get("matrix") or {}, "matrix")
+    rows = [
+        decoded.as_object(r, "include")
+        for r in decoded.as_array(matrix.get("include", []), "include")
+    ]
+    legs: list[str] = []
+    for leg in (str(r.get("leg")) for r in rows):
+        if leg not in legs:
+            legs.append(leg)
+    out = []
+    if legs != list(GATE_LEGS):
+        out.append(f"gate: not a matrix of the legs {list(GATE_LEGS)}")
+    for leg in legs:
+        shards = [r for r in rows if r.get("leg") == leg]
+        n = len(shards)
+        want: list[dict[str, object]] = [
+            {"leg": leg, "shard": i, "of": n} for i in range(1, n + 1)
+        ]
+        if shards != want:
+            out.append(f"gate: the {leg} leg's shards are not 1 to {n} of {n}")
+    return out
+
+
 def leg_findings(text: str) -> list[str]:
     """Hold ci.yml's gate to its three legs, and its readers to the matrix.
 
@@ -2657,19 +2698,20 @@ def leg_findings(text: str) -> list[str]:
     found = workflow_yaml.jobs(parsed(text))
     gate = found["gate"]
     strategy = decoded.as_object(gate.get("strategy") or {}, "strategy")
-    matrix = decoded.as_object(strategy.get("matrix") or {}, "matrix")
-    out = []
-    if matrix.get("leg") != list(GATE_LEGS):
-        out.append(f"gate: not a matrix of the legs {list(GATE_LEGS)}")
+    out = matrix_findings(strategy)
     if strategy.get("fail-fast") is not False:
         out.append("gate: fail-fast is not false, so one red leg cancels the others")
-    if field(gate, "name") != "gate (${{ matrix.leg }})":
+    if field(gate, "name") != GATE_NAME:
         out.append("gate: its name does not carry the leg")
     if "outputs" in gate:
         out.append("gate: declares a job output, which one leg's result overwrites")
     gate_steps = workflow_yaml.steps(gate)
     runs = [s for s in gate_steps if field(s, "run").strip() == RUN_LEG]
-    if len(runs) != 1 or table(runs[0], "env").get("LEG") != "${{ matrix.leg }}":
+    run_env = table(runs[0], "env") if len(runs) == 1 else {}
+    if any(
+        run_env.get(k) != f"${{{{ matrix.{k.lower()} }}}}"
+        for k in ("LEG", "SHARD", "OF")
+    ):
         out.append(f"gate: no step runs `{RUN_LEG}` with LEG from the matrix")
     by_name = {field(s, "name"): s for s in gate_steps}
     for name, leg in LEG_BOUND.items():
@@ -2728,20 +2770,27 @@ class GateLegs(unittest.TestCase):
         rows = [
             (
                 "a leg dropped",
-                ("          - test\n          - properties\n", "          - test\n"),
+                (
+                    (
+                        "          - leg: properties\n"
+                        "            shard: 1\n"
+                        "            of: 1\n"
+                    ),
+                    "",
+                ),
                 "gate: not a matrix of the legs ['lint', 'test', 'properties']",
             ),
             (
                 "fail-fast on",
                 (
-                    "      fail-fast: false\n      matrix:\n        leg:",
-                    "      fail-fast: true\n      matrix:\n        leg:",
+                    "      fail-fast: false\n      matrix:\n        include:",
+                    "      fail-fast: true\n      matrix:\n        include:",
                 ),
                 "gate: fail-fast is not false, so one red leg cancels the others",
             ),
             (
                 "the plain name",
-                ("    name: gate (${{ matrix.leg }})", "    name: gate"),
+                (f"    name: {GATE_NAME}", "    name: gate"),
                 "gate: its name does not carry the leg",
             ),
             (
@@ -2752,24 +2801,31 @@ class GateLegs(unittest.TestCase):
             (
                 "the squash check on every leg",
                 (
+                    (
+                        "${{ matrix.leg == 'lint' && matrix.shard == 1"
+                        " && github.event_name == 'pull_request'"
+                    ),
                     "${{ matrix.leg == 'lint' && github.event_name == 'pull_request'",
-                    "${{ github.event_name == 'pull_request'",
                 ),
                 (
                     "gate: 'The squash message is the PR title and body — hold it to"
                     " the commit canon' runs on every leg, not only where"
-                    " matrix.leg == 'lint'"
+                    " matrix.leg == 'lint' && matrix.shard == 1"
                 ),
             ),
             (
                 "the merge-group check on every leg",
                 (
+                    (
+                        "${{ matrix.leg == 'lint' && matrix.shard == 1"
+                        " && github.event_name == 'merge_group' }}"
+                    ),
                     "${{ matrix.leg == 'lint' && github.event_name == 'merge_group' }}",
-                    "${{ github.event_name == 'merge_group' }}",
                 ),
                 (
                     "gate: 'A merge group is the pull request's current head' runs on"
-                    " every leg, not only where matrix.leg == 'lint'"
+                    " every leg, not only where"
+                    " matrix.leg == 'lint' && matrix.shard == 1"
                 ),
             ),
             (

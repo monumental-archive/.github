@@ -179,17 +179,40 @@ jobs:
   # information, and a leg cancelled by its neighbour reports nothing.
   # `ci / ci` reads the job's one result, success only when every leg's
   # is.
+  #
+  # THE LINT LEG IS FOUR SHARDS (#2049). In a Rust tree three or four
+  # lints that each compile the workspace shared one runner's four cores:
+  # the leg took 9m12s on release-lab and 6m00s on edtf. Each shard deals
+  # the same `lint:*` tasks longest first over mise/gate-shards.toml and
+  # runs its own share (mise/gate_shard.py); the count here is the
+  # table's `shards`, which mise/test_gate_shard.py holds them to. A leg
+  # of one shard runs `ci:<leg>` as a laptop does.
   gate:
-    name: gate (${{ matrix.leg }})
+    name: gate (${{ matrix.leg }}${{ matrix.of > 1 && format(' {0}/{1}', matrix.shard, matrix.of) || '' }})
     needs: plan
     runs-on: ubuntu-26.04
     strategy:
       fail-fast: false
       matrix:
-        leg:
-          - lint
-          - test
-          - properties
+        include:
+          - leg: lint
+            shard: 1
+            of: 4
+          - leg: lint
+            shard: 2
+            of: 4
+          - leg: lint
+            shard: 3
+            of: 4
+          - leg: lint
+            shard: 4
+            of: 4
+          - leg: test
+            shard: 1
+            of: 1
+          - leg: properties
+            shard: 1
+            of: 1
     # A hung gate must fail in minutes, not at GitHub's six-hour default:
     # on #969 mise never exited after a task failed and the job held a
     # runner for 6h00m. Sized from the org's own history (2026-11-13, nine
@@ -202,6 +225,10 @@ jobs:
       # The lock is law: no network resolution at run time.
       MISE_LOCKED: "1"
       MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
+      # What this runner's build caches are named for (#2049): the leg,
+      # and its shard where the leg has several, since each shard builds
+      # what its own lints compile. A leg of one keeps its old name.
+      ORG_SLOT: ${{ matrix.of > 1 && format('{0}-{1}', matrix.leg, matrix.shard) || matrix.leg }}
     steps:
       - name: Check out caller repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -227,9 +254,9 @@ jobs:
       # else, or anything unverifiable, is red by name. The token is the
       # job's own `contents: read`, for one git fetch of
       # refs/pull/<n>/head: the checkout keeps no credentials. Once per
-      # run: the lint leg's (#1740).
+      # run: the lint leg's (#1740), its first shard's (#2049).
       - name: A merge group is the pull request's current head
-        if: ${{ matrix.leg == 'lint' && github.event_name == 'merge_group' }}
+        if: ${{ matrix.leg == 'lint' && matrix.shard == 1 && github.event_name == 'merge_group' }}
         env:
           ORG_QUEUE_BASE: ${{ github.event.merge_group.base_sha }}
           ORG_QUEUE_GROUP: ${{ github.event.merge_group.head_sha }}
@@ -394,7 +421,8 @@ jobs:
       #
       # The lint and test legs only, each under a name of its own
       # (#1740): the linters' build cache and the test build's are
-      # different contents, and the properties leg builds no Go.
+      # different contents, and the properties leg builds no Go. Each
+      # lint shard keeps its own (#2049): ORG_SLOT.
       - name: Restore the Go caches (unsigned gate only)
         id: go-cache
         if: ${{ matrix.leg != 'properties' && hashFiles('go.sum') != '' }}
@@ -403,8 +431,10 @@ jobs:
           path: |
             ~/go/pkg/mod
             ~/.cache/go-build
-          key: gate-go-v2-${{ matrix.leg }}-${{ runner.os }}-${{ hashFiles('go.sum') }}
-          restore-keys: ${{ env.ORG_GATE_CACHE_FALLBACK == 'true' && format('gate-go-v2-{0}-{1}-', matrix.leg, runner.os) || '' }}
+          key: gate-go-v2-${{ env.ORG_SLOT }}-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: >-
+            ${{ env.ORG_GATE_CACHE_FALLBACK == 'true'
+            && format('gate-go-v2-{0}-{1}-', env.ORG_SLOT, runner.os) || '' }}
 
       # THE CARGO CACHES NAME THEIR COMPILER (#1864). `target` is what
       # the compiler that built it made, and a key on Cargo.lock alone
@@ -444,9 +474,9 @@ jobs:
       #
       # The lint and test legs only, each under a name of its own
       # (#1740): clippy's `target` and the test build's are different
-      # contents, so one shared entry would hold whichever leg saved it.
-      # The key and its fallback carry the compiler's digest (#1864),
-      # named in the step above.
+      # contents, so one shared entry would hold whichever leg saved it;
+      # each lint shard keeps its own (#2049). The key and its fallback
+      # carry the compiler's digest (#1864), named in the step above.
       #
       # THE KEY NAMES WHAT DECIDES THE CONTENTS; AN ENTRY IS NEVER
       # WRITTEN BACK (#2045). Only a default-branch run that missed
@@ -467,10 +497,10 @@ jobs:
           path: |
             ~/.cargo/registry
             target
-          key: gate-cargo-${{ matrix.leg }}-${{ runner.os }}-${{ steps.rustc.outputs.digest }}-${{ steps.rustc.outputs.inputs }}
+          key: gate-cargo-${{ env.ORG_SLOT }}-${{ runner.os }}-${{ steps.rustc.outputs.digest }}-${{ steps.rustc.outputs.inputs }}
           restore-keys: >-
             ${{ env.ORG_GATE_CACHE_FALLBACK == 'true'
-            && format('gate-cargo-{0}-{1}-{2}-', matrix.leg, runner.os, steps.rustc.outputs.digest)
+            && format('gate-cargo-{0}-{1}-{2}-', env.ORG_SLOT, runner.os, steps.rustc.outputs.digest)
             || '' }}
 
       # A PULL REQUEST'S TITLE IS HELD TO WHAT IT BREAKS (#1906). A
@@ -525,10 +555,11 @@ jobs:
       # lint:subject-budget proves, on the pull request that introduces
       # a dependency, that every title the owned template could mint
       # for it fits. By the time the bot runs, there is nothing to
-      # catch. Once per run: the lint leg's (#1740).
+      # catch. Once per run: the lint leg's (#1740), its first shard's
+      # (#2049).
       - name: The squash message is the PR title and body — hold it to the commit canon
         if: >-
-          ${{ matrix.leg == 'lint' && github.event_name == 'pull_request'
+          ${{ matrix.leg == 'lint' && matrix.shard == 1 && github.event_name == 'pull_request'
           && github.event.pull_request.user.type != 'Bot' }}
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
@@ -540,10 +571,13 @@ jobs:
       # (no blank line above: lint:shell-embedded captures trailing
       # blanks into the run: block and shfmt refuses them)
       # This leg's belt task, `ci:lint`, `ci:test` or `ci:properties`
-      # (#1740); `ci` is the three of them.
+      # (#1740); `ci` is the three of them. A lint shard runs its share
+      # of `ci:lint`'s tasks instead (#2049).
       - name: Run the gate
         env:
           LEG: ${{ matrix.leg }}
+          SHARD: ${{ matrix.shard }}
+          OF: ${{ matrix.of }}
           ATLAS_TOKEN: ${{ secrets.atlas-token }}
           # The planned legs. With this set, test:pgrx runs no suite here
           # — the legs do — and instead holds the plan to the list it
@@ -553,7 +587,7 @@ jobs:
           # checkout, so nothing the gate measures lands in the tree
           # (#1628). The step below keeps this directory.
           ORG_COVERAGE_REPORTS: ${{ runner.temp }}/coverage-reports
-        run: mise run "ci:${LEG}"
+        run: '"${ORG_PYTHON}" .org-canon/mise/gate_shard.py run "${LEG}" "${SHARD}" "${OF}"'
 
       # COVERAGE IS MEASURED ONCE, HERE (#1528). coverage:check, which
       # the test leg runs (#1740), writes the report each leg's number

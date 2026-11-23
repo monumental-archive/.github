@@ -509,9 +509,10 @@ class Workflow(unittest.TestCase):
         ]
         self.assertEqual(len(found), 1, found)
         ((at, step),) = found
-        # Once per run: the gate's lint leg (#1740).
+        # Once per run: the gate's lint leg (#1740), its first shard (#2049).
         self.assertEqual(
-            "${{ matrix.leg == 'lint' && github.event_name == 'merge_group' }}",
+            "${{ matrix.leg == 'lint' && matrix.shard == 1"
+            " && github.event_name == 'merge_group' }}",
             step.get("if"),
         )
         # Under the belt's Python (#1543), written on one line.
