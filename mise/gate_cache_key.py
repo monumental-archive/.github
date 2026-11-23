@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Name the gate's caches: the tool cache, and the compiler in the cargo caches.
+r"""Name the gate's caches: the tool cache, and the cargo caches' inputs.
 
 The gate's tool cache used to be restored and saved by mise-action itself
 (`cache: true`). That action restores by EXACT key only — its
@@ -84,7 +84,7 @@ beside them, and llvm-cov read both: edtf's Rust 1.100 bump measured
 the job's PATH resolves after its install step (mise-action exports the
 mise environment, so that is the toolchain the tasks build with). The
 release, commit hash, LLVM version and host are all in it. The workflow
-places the digest before the Cargo.lock hash, in the key and in the
+places the digest in the key (before `inputs`, below) and in the
 fallback prefix alike: a toolchain change misses, and a fallback only
 ever restores an entry the same compiler filled. No `rustc` is red,
 never an empty digest: the step runs only where a cargo cache does.
@@ -99,6 +99,26 @@ beside 1.100.0's and `cargo llvm-cov report` read both (99.37% fresh,
 RUSTUP_TOOLCHAIN when the caller sets it), and every coverage
 CARGO_TARGET_DIR ends in it: a compiler change is a new, empty
 directory. Same red branches as `cargo`.
+
+THE CARGO KEY NAMES EVERY DECLARED INPUT, ONCE (#2045). An entry is
+saved only by a default-branch run that missed, and never written back,
+so an input the key does not name leaves a stale entry hitting for
+ever: edtf added pg19, its lint tasks built `--features pg19`, and the
+lint leg compiled pgrx-pg-sys cold on every run under an exact hit,
+because Cargo.lock and the compiler had not moved. #1414 and #1864 each
+added one input by hand; this names them all. So `cargo` writes
+`inputs` beside `digest`: the sha256 over, in order, the runner image
+(`ImageOS` and `ImageVersion`, `self-hosted` when unset), the canon ref
+the run resolved (`--canon-ref`, the canon action's `ref` output: the
+belt's flags and variables reach cargo, and `.org-canon` has no git
+directory to ask), and the content of every tracked file the cargo
+manifests, lockfiles, toolchain files and the tool key's mise config
+globs (ORG_MISE_CONFIG_GLOBS) match, each as `<path>\0<sha256>\n`,
+paths sorted. Tracked only (`tracked()`, #1986): an untracked
+Cargo.toml builds nothing in CI. The workflow puts `inputs` after
+`digest` in the key and leaves the fallback prefix at `digest`, so a
+pull request still falls back to any entry the same compiler filled.
+No canon ref and no globs are red, never an empty input.
 """
 
 import argparse
@@ -114,6 +134,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 import findings
+import tracked
 import typed_std
 
 NAME = "gate-cache-key"
@@ -297,6 +318,62 @@ def rustc_verbose() -> str:
     return done.stdout
 
 
+# The cargo inputs a tracked file can carry (#2045): the manifests and
+# lockfiles at the root and below it, cargo's own config, the toolchain
+# files. git's pathspec `*` crosses `/`, so a nested member is named.
+CARGO_FILES = (
+    "Cargo.lock",
+    "*/Cargo.lock",
+    "Cargo.toml",
+    "*/Cargo.toml",
+    ".cargo/config.toml",
+    "rust-toolchain",
+    "rust-toolchain.toml",
+)
+
+
+def mise_globs(env: dict[str, str]) -> list[str]:
+    """Read the mise config globs the tool key hashes (#2045).
+
+    Returns:
+        ORG_MISE_CONFIG_GLOBS, one glob a line.
+
+    Raises:
+        ValueError: the workflow set none, so the key would leave the
+            repository's tool pins out.
+
+    """
+    globs = [g.strip() for g in env.get("ORG_MISE_CONFIG_GLOBS", "").splitlines()]
+    globs = [g for g in globs if g]
+    if not globs:
+        msg = "ORG_MISE_CONFIG_GLOBS is unset: the cargo key would omit the tool pins"
+        raise ValueError(msg)
+    return globs
+
+
+def cargo_inputs(root: Path, env: dict[str, str], canon_ref: str) -> str:
+    r"""Digest what decides a cargo cache's contents, besides the compiler.
+
+    Returns:
+        The sha256, in hex, over the runner image, the canon ref and each
+        tracked input file as `<path>\0<sha256>\n`, paths sorted.
+
+    Raises:
+        ValueError: no canon ref, or no mise config globs.
+
+    """
+    if not canon_ref:
+        msg = "no --canon-ref: the cargo key would omit the belt that drives cargo"
+        raise ValueError(msg)
+    image = env.get("ImageOS") or "self-hosted"
+    version = env.get("ImageVersion") or "self-hosted"
+    h = hashlib.sha256(f"{image}\0{version}\n{canon_ref}\n".encode())
+    for path in sorted(set(tracked.tracked(*CARGO_FILES, *mise_globs(env), root=root))):
+        content = hashlib.sha256((root / path).read_bytes()).hexdigest()
+        h.update(os.fsencode(path) + b"\0" + content.encode() + b"\n")
+    return h.hexdigest()
+
+
 class Args(argparse.Namespace):
     """The command line, typed where argparse writes it."""
 
@@ -304,6 +381,7 @@ class Args(argparse.Namespace):
     name: str
     canon: Path
     install: str
+    canon_ref: str
 
 
 def parse(argv: list[str] | None) -> Args:
@@ -327,7 +405,14 @@ def parse(argv: list[str] | None) -> Args:
         default="",
         help="the job's install_args, for a job that installs a list (#1408)",
     )
-    caches.add_parser("cargo", help="digest the compiler the cargo caches hold")
+    cargo_cmd = caches.add_parser(
+        "cargo", help="digest the compiler and the inputs the cargo caches hold"
+    )
+    cargo_cmd.add_argument(
+        "--canon-ref",
+        default="",
+        help="the canon ref the run resolved, the canon action's `ref` (#2045)",
+    )
     caches.add_parser(
         "digest", help="print the compiler's short digest, for a directory (#1877)"
     )
@@ -341,8 +426,8 @@ def write_outputs(env: dict[str, str], out: dict[str, str]) -> None:
         fh.write(lines)
 
 
-def cargo(env: dict[str, str]) -> int:
-    """Write the compiler's digest, for the cargo caches' keys (#1864).
+def cargo(env: dict[str, str], canon_ref: str) -> int:
+    """Write the cargo caches' compiler digest and inputs (#1864, #2045).
 
     Returns:
         0, or 1 with the reason on stderr.
@@ -351,11 +436,12 @@ def cargo(env: dict[str, str]) -> int:
     try:
         verbose = rustc_verbose()
         digest = rustc_digest(verbose)
-    except (OSError, ValueError) as err:
+        inputs = cargo_inputs(Path.cwd(), env, canon_ref)
+    except (OSError, ValueError, subprocess.CalledProcessError) as err:
         findings.finding("", str(err))
         return 1
-    write_outputs(env, {"digest": digest})
-    print(f"{NAME}: {digest} for {verbose.splitlines()[0]}")
+    write_outputs(env, {"digest": digest, "inputs": inputs})
+    print(f"{NAME}: {digest} for {verbose.splitlines()[0]}, inputs {inputs}")
     return 0
 
 
@@ -385,7 +471,7 @@ def main(argv: list[str] | None = None, now: float | None = None) -> int:
     args = parse(argv)
     env = dict(os.environ)
     if args.cache == "cargo":
-        return cargo(env)
+        return cargo(env, args.canon_ref)
     if args.cache == "digest":
         return digest()
     try:
