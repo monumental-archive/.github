@@ -59,8 +59,7 @@ NO_STEP = "unattested-path marker introduces no step"
 NO_MARKER = "actions/cache step carries no unattested-path marker"
 DEFAULT = "{} step does not say `cache: false` and carries no unattested-path marker"
 CLEAN = (
-    "lint:cold-attested: every cache declaration carries its own"
-    " unattested-path marker"
+    "lint:cold-attested: every cache declaration carries its own unattested-path marker"
 )
 
 
@@ -192,7 +191,7 @@ def lines(path: Path) -> list[str]:
         msg = f"{path}: cannot be read as UTF-8: {err}"
         raise ValueError(msg) from err
     records = text.split("\n")
-    if records[-1] == "":
+    if not records[-1]:
         records.pop()
     return records
 
