@@ -450,6 +450,33 @@ class MeasuredRun(Planted):
         ]
         self.assertEqual(want, targets)
 
+    def test_each_major_cleans_its_workspace_before_its_suite(self) -> None:
+        """`llvm-cov clean --workspace` in the major's own directory, first (#2061).
+
+        On main the run cleaned `--profraw-only`, so a workspace
+        executable an earlier build left (a version bump renames them
+        all) stayed and `report` counted it with zero hits.
+        """
+        self.floor()
+        done, log = self.run_pgrx(ORG_PGRX_MAJOR="", PLANT_LH="18")
+        self.assertEqual(0, done.returncode, done.stderr)
+        for major in MAJORS:
+            with self.subTest(major=major):
+                target = self.tree / "target" / f"llvm-cov-pgrx-pg{major}-{STABLE}"
+                mine = [ln for ln in log if f"|target={target}|" in ln]
+                cleans = [
+                    i
+                    for i, ln in enumerate(mine)
+                    if ln.startswith("cargo llvm-cov clean ")
+                ]
+                once: list[str] = ["cargo llvm-cov clean --workspace|"]
+                seen: list[str] = [mine[i].split("cwd=")[0] for i in cleans]
+                self.assertEqual(once, seen)
+                suite = next(
+                    i for i, ln in enumerate(mine) if ln.startswith("cargo pgrx test")
+                )
+                self.assertLess(cleans[0], suite)
+
 
 class IcuPerMajor(Planted):
     """Every suite run compiles with its own major's ICU headers (#1774)."""

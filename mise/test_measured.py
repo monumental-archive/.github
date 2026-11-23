@@ -415,7 +415,8 @@ class GoMerged(unittest.TestCase):
 # show-env` as cargo-llvm-cov 0.9.1 does: the profile path is under the
 # CARGO_TARGET_DIR it is given, or under `target/` without one (probed on
 # release-lab). STUB_NO_TARGET answers a metadata with no target
-# directory.
+# directory; STUB_CLEAN_SECONDS makes `llvm-cov clean` take that long and
+# log its end.
 CARGO = """#!/usr/bin/env bash
 echo "$* | CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-}" >> "${STUB_LOG}"
 case "$1 ${2:-}" in
@@ -432,7 +433,12 @@ case "$1 ${2:-}" in
     echo "export RUSTC_WRAPPER=/stub/cargo-llvm-cov"
     echo "export CARGO_LLVM_COV_TARGET_DIR=${dir}"
     ;;
-  "llvm-cov clean") ;;
+  "llvm-cov clean")
+    if [[ -n ${STUB_CLEAN_SECONDS:-} ]]; then
+      sleep "${STUB_CLEAN_SECONDS}"
+      echo "clean ended" >> "${STUB_LOG}"
+    fi
+    ;;
   *) ;;
 esac
 """
@@ -513,7 +519,7 @@ class RustInstrumented(unittest.TestCase):
             target = f"{Path(tmp).resolve()}/tree/target/llvm-cov-target-{STABLE}"
             cleaned = [c for c in calls if c.startswith("llvm-cov clean")]
             twice: list[str] = [
-                f"llvm-cov clean --profraw-only | CARGO_TARGET_DIR={target}"
+                f"llvm-cov clean --workspace | CARGO_TARGET_DIR={target}"
             ] * 2
             self.assertEqual(twice, cleaned)
 
@@ -541,6 +547,49 @@ class RustInstrumented(unittest.TestCase):
             started = [c for c in calls if c.startswith(("llvm-cov clean", "test"))]
             self.assertEqual(NO_CALLS, started)
             self.assertEqual(f"{other}\n", (target / ".org-coverage-owner").read_text())
+
+    def test_a_call_beside_the_first_waits_for_its_clean(self) -> None:
+        """Two calls in one run, side by side: both build after the clean (#2061).
+
+        On main the second call found the marker the first had just made
+        and went on without waiting, so it built while the clean ran; with
+        a workspace clean, the clean would delete what it built.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            # Plant the tree and its stubs; this call measures nothing.
+            self.rust_run(tmp, [SH, "-c", "true"], run_name="plant")
+            base = Path(tmp)
+            # The planting run has ended: its claim lapses (#2062).
+            shutil.rmtree(base / "plant")
+            log = base / "cargo.log"
+            log.unlink()
+            env = hermetic.env(
+                ORG_COVERAGE_RUN=str(base / "run"),
+                PATH=f"{base / 'stubs'}{os.pathsep}{os.environ['PATH']}",
+                STUB_LOG=str(log),
+                STUB_CLEAN_SECONDS="1",
+                RUSTUP_TOOLCHAIN="stable",
+            )
+            calls = [
+                subprocess.Popen(
+                    [str(MEASURED), SH, "-c", f"cargo test --{name}"],
+                    cwd=base / "tree",
+                    env=env,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                for name in ("first", "second")
+            ]
+            for call in calls:
+                _, err = call.communicate(timeout=60)
+                self.assertEqual(0, call.returncode, err)
+            lines = [ln.split(" | ")[0] for ln in log.read_text().splitlines()]
+            cleans = [ln for ln in lines if ln.startswith("llvm-cov clean")]
+            self.assertEqual(1, len(cleans), lines)
+            ended = lines.index("clean ended")
+            for name in ("first", "second"):
+                self.assertGreater(lines.index(f"test --{name}"), ended, lines)
 
     def test_two_compilers_measure_into_two_directories(self) -> None:
         """Two `rustc` differing only in `release:`: two directories (#1877).

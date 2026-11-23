@@ -2442,21 +2442,29 @@ release-lab:
 - `report` exits 0 after a failed suite. The suite's exit status gates
   the figure: `coverage:check` depends on `test`, so mise never runs
   it after a red one.
-- A directory of its own compiler (#1877). `report` reads every test
-  executable in the directory, and Rust 1.100 moved them from `deps/`
-  to `build/*/out/`, so a bump left 1.97.1's beside 1.100.0's: edtf
-  measured 99.37% fresh and 95.77% over the mixed directory, and a
-  longer-lived worktree 70.12%, the figure CI took over a stale cache
-  in #1864. Every coverage directory (this one, each pgrx major's, the
-  nightly `rust-branches` leg's) ends in its compiler's digest, so a
-  compiler change is a new, empty directory. Nothing prunes the old
+- `report` reads every workspace executable in the directory,
+  whatever built it (#2061). A version bump renames every workspace
+  artifact, so the old ones are never overwritten: edtf's v2.0.0
+  release measured 33.85% over a directory v1.3.5 had filled, 67.54%
+  after `cargo llvm-cov clean --workspace`, which removes the
+  workspace's own artifacts and every profile and keeps the
+  dependencies. Rust 1.100 met the same through a compiler change
+  (#1877: 99.37% fresh, 95.77% mixed).
+- A directory of its own compiler (#1877). Every coverage directory
+  (this one, each pgrx major's, the nightly `rust-branches` leg's)
+  ends in its compiler's digest. The clean above is the correctness
+  guard; the digest keeps the nightly leg, whose one-shot command
+  cleans its own directory, away from the stable leg's executables,
+  and keeps each compiler's dependencies warm. Nothing prunes an old
   one: the stable and nightly legs run side by side in one tree, and
   `cargo clean` removes it.
 
-The first `measured` call in a run removes old profiles (`cargo llvm-cov
-clean --profraw-only`), its marker a directory in the run's directory,
-so a restored cache or an earlier run cannot add to the figure and a
-second call in the same run keeps the first one's profiles. The leg
+The first `measured` call in a run cleans the workspace (`cargo
+llvm-cov clean --workspace`, #2061) through `mise/once.py`, under an
+exclusive lock on its marker, a directory in the run's directory: a
+second call in the same run keeps the first one's work, and a call
+starting beside the first waits for the clean to finish. Each pgrx
+major runs the same clean in its own directory before `pgrx test`. The leg
 reads profiles only beside that marker: no profile, or none from this
 run, is red by name, naming the `measured` prefix (#1666). Before any
 clean, every call (and each pgrx major's run) claims the build

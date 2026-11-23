@@ -233,7 +233,12 @@ measure_one() { # usage: measure_one <dir> <crate> <major>
     # measuring in this checkout is refused by name, never mixed in.
     "${ORG_PYTHON}" "${belt}/coverage_owner.py" claim "${CARGO_TARGET_DIR}" \
       "${ORG_COVERAGE_RUN}" || exit 1
-    cargo llvm-cov clean --profraw-only >&2 || exit 1
+    # The workspace's own artifacts and old profiles go (#2061): `report`
+    # reads every workspace executable in the directory, and one an earlier
+    # build left (a version bump renames them all) joins the figure with
+    # zero hits. Dependencies stay built. One caller per directory per run,
+    # so no lock: the majors never share one.
+    cargo llvm-cov clean --workspace >&2 || exit 1
     if ! (cd "${dir}" && cargo pgrx test "pg${one}") >&2; then
       org_finding "" "${dir} at pg${one} failed — a suite that does not pass measures nothing"
       exit 1
