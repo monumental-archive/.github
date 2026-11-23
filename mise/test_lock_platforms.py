@@ -521,6 +521,85 @@ class ReadDocuments(unittest.TestCase):
                 )
 
 
+def located(files: dict[str, str]) -> hermetic.Called:
+    """Call the helper as the task body does: no --config, it finds them.
+
+    Returns:
+        The status and both streams.
+
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        plant(root, files, {})
+        return hermetic.call_main(
+            lambda: lock_platforms.main(["--defaults", str(DEFAULTS)]),
+            cwd=root,
+            stdin=f"{STUB_PATH}\0",
+        )
+
+
+OK_LOCK = entry("node", "26.5.1", FOUR)
+
+
+class Located(unittest.TestCase):
+    """The helper finds the tree's config and the lock beside it (#1911)."""
+
+    def assert_skip(self, files: dict[str, str], line: str) -> None:
+        """Assert a skip, said on stdout, with nothing on stderr."""
+        done = located(files)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout, f"{NAME}: {line}\n")
+        self.assertEqual(done.stderr, "")
+
+    def test_no_config_skips(self) -> None:
+        """None of the three configs: a skip, the stub never read."""
+        self.assert_skip({STUB_PATH: RUST_BINARY}, "no mise config, skipped")
+
+    def test_no_lock_beside_the_config_skips(self) -> None:
+        """A lock beside another config is not this config's lock."""
+        files = {STUB_PATH: RUST_BINARY, "mise/config.toml": CONFIG, "mise.lock": LOCK}
+        self.assert_skip(files, "no mise/mise.lock, skipped")
+
+    def test_each_config_is_found_in_order(self) -> None:
+        """mise/config.toml, then mise.toml, then .mise.toml; its lock beside."""
+        ok = (
+            "1 configured entries with platform tables in {} cover"
+            " linux-arm64,linux-x64,macos-arm64,macos-x64"
+        )
+        rows = {
+            "nested first": (
+                {"mise/config.toml": CONFIG, "mise/mise.lock": OK_LOCK},
+                {"mise.toml": CONFIG, "mise.lock": LOCK},
+                ok.format("mise/mise.lock"),
+            ),
+            "mise.toml second": (
+                {"mise.toml": CONFIG, "mise.lock": OK_LOCK},
+                {".mise.toml": "[tools]\n"},
+                ok.format("mise.lock"),
+            ),
+            "dotted last": (
+                {".mise.toml": CONFIG, "mise.lock": OK_LOCK},
+                {},
+                ok.format("mise.lock"),
+            ),
+        }
+        for row, (found, beside, line) in rows.items():
+            with self.subTest(row=row):
+                self.assert_skip({STUB_PATH: RUST_BINARY} | found | beside, line)
+
+    def test_a_found_lock_is_named_in_the_red(self) -> None:
+        """The nested lock short of a platform: red, the lock named."""
+        files = {
+            STUB_PATH: RUST_BINARY,
+            "mise/config.toml": CONFIG,
+            "mise/mise.lock": LOCK,
+        }
+        done = located(files)
+        self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
+        self.assertEqual(done.stderr, RED.replace("mise.lock", "mise/mise.lock", 1))
+        self.assertEqual(done.stdout, "")
+
+
 class Script(unittest.TestCase):
     """The one row that starts the helper as a process (#1697)."""
 
