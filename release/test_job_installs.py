@@ -149,6 +149,10 @@ WHOLE_CONFIG = {
 # ci.yml is one or the other.
 GATE_LISTS = [("ci.yml", "pgrx")]
 GATE_WHOLE = {
+    ("ci.yml", "coverage"): (
+        "it runs coverage:check over a sharded test leg's data with the"
+        " gate's tools, under the gate's tool cache (#2049)"
+    ),
     ("ci.yml", "gate"): (
         "it runs every lint, so it needs the whole belt and every tool the"
         " caller's config pins"
@@ -2632,8 +2636,9 @@ GATE_NAME = (
     "gate (${{ matrix.leg }}${{ matrix.of > 1"
     " && format(' {0}/{1}', matrix.shard, matrix.of) || '' }})"
 )
+MATRIX = "${{ fromJSON(needs.plan.outputs.legs) }}"
 LINT_ONLY = "matrix.leg == 'lint' && matrix.shard == 1"
-TEST_ONLY = "matrix.leg == 'test'"
+TEST_ONLY = "matrix.leg == 'test' && matrix.of == 1"
 LEG_BOUND = {
     "A merge group is the pull request's current head": LINT_ONLY,
     "The squash message is the PR title and body — hold it to the commit canon": (
@@ -2655,34 +2660,19 @@ def flat(value: str) -> str:
 
 
 def matrix_findings(strategy: dict[str, object]) -> list[str]:
-    """Hold the gate's matrix to the three legs, each shard numbered (#2049).
+    """Hold the gate's matrix to the plan's (#2049).
+
+    The rows are the plan job's, laid out by mise/gate_shard.py plan and
+    held there by mise/test_gate_shard.py: lint shards, test shards,
+    properties.
 
     Returns:
-        One line when the legs are not the three in order, and one per
-        leg whose rows are not shard 1 to n of n.
+        One line when the matrix is anything but the plan's output.
 
     """
-    matrix = decoded.as_object(strategy.get("matrix") or {}, "matrix")
-    rows = [
-        decoded.as_object(r, "include")
-        for r in decoded.as_array(matrix.get("include", []), "include")
-    ]
-    legs: list[str] = []
-    for leg in (str(r.get("leg")) for r in rows):
-        if leg not in legs:
-            legs.append(leg)
-    out = []
-    if legs != list(GATE_LEGS):
-        out.append(f"gate: not a matrix of the legs {list(GATE_LEGS)}")
-    for leg in legs:
-        shards = [r for r in rows if r.get("leg") == leg]
-        n = len(shards)
-        want: list[dict[str, object]] = [
-            {"leg": leg, "shard": i, "of": n} for i in range(1, n + 1)
-        ]
-        if shards != want:
-            out.append(f"gate: the {leg} leg's shards are not 1 to {n} of {n}")
-    return out
+    if strategy.get("matrix") != MATRIX:
+        return [f"gate: the matrix is not the plan's, {MATRIX}"]
+    return []
 
 
 def leg_findings(text: str) -> list[str]:
@@ -2769,22 +2759,15 @@ class GateLegs(unittest.TestCase):
         """Each property broken once on the real file, by its message."""
         rows = [
             (
-                "a leg dropped",
-                (
-                    (
-                        "          - leg: properties\n"
-                        "            shard: 1\n"
-                        "            of: 1\n"
-                    ),
-                    "",
-                ),
-                "gate: not a matrix of the legs ['lint', 'test', 'properties']",
+                "a static matrix",
+                (f"      matrix: {MATRIX}\n", "      matrix:\n        leg: [lint]\n"),
+                f"gate: the matrix is not the plan's, {MATRIX}",
             ),
             (
                 "fail-fast on",
                 (
-                    "      fail-fast: false\n      matrix:\n        include:",
-                    "      fail-fast: true\n      matrix:\n        include:",
+                    "      fail-fast: false\n      matrix:",
+                    "      fail-fast: true\n      matrix:",
                 ),
                 "gate: fail-fast is not false, so one red leg cancels the others",
             ),
@@ -2831,23 +2814,30 @@ class GateLegs(unittest.TestCase):
             (
                 "the badge reports from every leg",
                 (
+                    (
+                        "${{ matrix.leg == 'test' && matrix.of == 1"
+                        " && github.event_name == 'push'"
+                    ),
                     "${{ matrix.leg == 'test' && github.event_name == 'push'",
-                    "${{ github.event_name == 'push'",
                 ),
                 (
                     "gate: 'Keep the coverage reports for the badge (default branch"
-                    " only)' runs on every leg, not only where matrix.leg == 'test'"
+                    " only)' runs on every leg, not only where"
+                    " matrix.leg == 'test' && matrix.of == 1"
                 ),
             ),
             (
                 "the release figures from every leg",
                 (
+                    (
+                        "${{ matrix.leg == 'test' && matrix.of == 1"
+                        " && (github.event_name == 'merge_group'"
+                    ),
                     "${{ matrix.leg == 'test' && (github.event_name == 'merge_group'",
-                    "${{ (github.event_name == 'merge_group'",
                 ),
                 (
                     "gate: 'Keep the coverage figures for the release' runs on every"
-                    " leg, not only where matrix.leg == 'test'"
+                    " leg, not only where matrix.leg == 'test' && matrix.of == 1"
                 ),
             ),
             (

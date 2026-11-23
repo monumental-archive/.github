@@ -65,8 +65,14 @@ class EveryPartPassed(unittest.TestCase):
     """Each row: the jobs' results, and the verdict printed."""
 
     @staticmethod
-    def verdict(
-        plan: str, gate: str, pgrx: str, majors: str = "[16, 17]"
+    def verdict(  # ruff: ignore[too-many-arguments] -- one keyword per job result
+        plan: str,
+        gate: str,
+        pgrx: str,
+        *,
+        majors: str = "[16, 17]",
+        coverage: str = "skipped",
+        shards: str = "1",
     ) -> subprocess.CompletedProcess[str]:
         """Run the lifted step on one set of job results.
 
@@ -78,7 +84,13 @@ class EveryPartPassed(unittest.TestCase):
         return subprocess.run(
             [bash, "-c", step_script()],
             env=hermetic.env(
-                PATH=os.environ["PATH"], PLAN=plan, GATE=gate, PGRX=pgrx, MAJORS=majors
+                PATH=os.environ["PATH"],
+                PLAN=plan,
+                GATE=gate,
+                PGRX=pgrx,
+                MAJORS=majors,
+                COVERAGE=coverage,
+                SHARDS=shards,
             ),
             capture_output=True,
             text=True,
@@ -96,7 +108,7 @@ class EveryPartPassed(unittest.TestCase):
 
     def test_no_legs_planned_and_none_ran(self) -> None:
         """A tree with no extension skips the legs, and that is green."""
-        done = self.verdict("success", "success", "skipped", "[]")
+        done = self.verdict("success", "success", "skipped", majors="[]")
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(
             done.stdout, "ci: plan, gate and every pgrx leg (\\[\\]) passed\n"
@@ -114,7 +126,7 @@ class EveryPartPassed(unittest.TestCase):
 
     def test_a_failed_plan(self) -> None:
         """The plan's result is named."""
-        done = self.verdict("failure", "skipped", "skipped", "")
+        done = self.verdict("failure", "skipped", "skipped", majors="")
         self.assertEqual(done.returncode, 1, done.stderr)
         self.assertEqual(
             done.stdout,
@@ -141,6 +153,33 @@ class EveryPartPassed(unittest.TestCase):
             done.stdout,
             "::error::a job the gate needs did not succeed\n"
             "  job pgrx\\ legs: failure\n",
+        )
+
+    def test_sharded_tests_judged(self) -> None:
+        """A sharded test leg's coverage job passed: green (#2049)."""
+        done = self.verdict(
+            "success", "success", "success", coverage="success", shards="4"
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+
+    def test_sharded_tests_never_judged(self) -> None:
+        """A sharded test leg whose coverage job was skipped is red, by name."""
+        done = self.verdict("success", "success", "success", shards="4")
+        self.assertEqual(done.returncode, 1, done.stderr)
+        self.assertEqual(
+            done.stdout,
+            "::error::a job the gate needs did not succeed\n  job coverage: skipped\n",
+        )
+
+    def test_a_failed_coverage_job(self) -> None:
+        """The coverage job's failure is named."""
+        done = self.verdict(
+            "success", "success", "success", coverage="failure", shards="4"
+        )
+        self.assertEqual(done.returncode, 1, done.stderr)
+        self.assertEqual(
+            done.stdout,
+            "::error::a job the gate needs did not succeed\n  job coverage: failure\n",
         )
 
 

@@ -534,7 +534,8 @@ class TheStep(unittest.TestCase):
         self.assertLess(restore, at)
         self.assertEqual(
             step.get("if"),
-            "${{ matrix.leg == 'test' && github.event_name == 'pull_request' }}",
+            "${{ matrix.leg == 'test' && matrix.shard == 1"
+            " && github.event_name == 'pull_request' }}",
         )
         self.assertEqual(step.get("run"), "mise run break:check")
         env: dict[str, object] = {

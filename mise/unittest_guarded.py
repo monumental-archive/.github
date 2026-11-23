@@ -34,6 +34,13 @@ count and the root's wall time. When GITHUB_STEP_SUMMARY names a file,
 the same block is appended there, each line escaped as
 workflow_command escapes outside text, so a name cannot add a line.
 
+Third, a shard (#2049): with ORG_TEST_SHARD set to `<n>/<of>`, the run
+keeps only its share of the discovered test files, dealt largest file
+first to the shard with the least source dealt, so `of` runs of the
+same tree, each on its own runner, run every file exactly once between
+them. A file that could not be imported goes to shard 1, which reports
+it. A shard dealt no file of a root passes: its files ran elsewhere.
+
 Coverage needs nothing from here: a worker is `python3`, started with
 this process's environment, so the measurement's start-up hook reaches
 it as it reaches any child, and its data file is its own (`parallel =
@@ -78,6 +85,7 @@ ACTIONS: dict[str, Action] = {
 # workstation running several gates at once should keep cores to spare.
 WORKER_CAP = 8
 WORKERS = "ORG_TEST_WORKERS"
+SHARD = "ORG_TEST_SHARD"
 # How many of a root's slowest files its cost block names.
 SLOWEST = 10
 SUMMARY = "GITHUB_STEP_SUMMARY"
@@ -153,6 +161,61 @@ def workers() -> int:
         findings.finding("", f"{WORKERS}={raw!r} is not a worker count (1 or more)")
         raise SystemExit(1)
     return int(raw)
+
+
+def shard() -> tuple[int, int] | None:
+    """Read this run's shard: ORG_TEST_SHARD, `<n>/<of>`.
+
+    Returns:
+        The shard and the count, or None when the run is not sharded.
+
+    Raises:
+        SystemExit: the variable is set and is not `<n>/<of>` with
+            1 <= n <= of.
+
+    """
+    raw = os.environ.get(SHARD, "").strip()
+    if not raw:
+        return None
+    at, _, of = raw.partition("/")
+    if at.isdecimal() and of.isdecimal() and 1 <= int(at) <= int(of):
+        return int(at), int(of)
+    findings.finding("", f"{SHARD}={raw!r} is not a shard (<n>/<of>, 1 <= n <= of)")
+    raise SystemExit(1)
+
+
+def size(unit: Unit) -> int:
+    """Weigh a unit by its test file's source.
+
+    Returns:
+        The file's size in bytes; 0 for a unit with no module file.
+
+    """
+    module: ModuleType | None = sys.modules.get(unit[0] or "")
+    spec = None if module is None else module.__spec__
+    origin = None if spec is None else spec.origin
+    return Path(origin).stat().st_size if origin and Path(origin).is_file() else 0
+
+
+def share(units: list[Unit], at: int, of: int) -> list[Unit]:
+    """Keep shard `at` of `of`'s units, in discovery order.
+
+    Returns:
+        The units dealt to this shard: largest first to the shard with
+        the least dealt, ties by name, a unit with no module to shard 1.
+
+    """
+    weights = [size(u) for u in units]
+    by_name = sorted(range(len(units)), key=[u[0] or "" for u in units].__getitem__)
+    loads = [0] * of
+    dealt: list[int] = []
+    # Largest first; a stable sort keeps equal sizes in name order.
+    for i in sorted(by_name, key=weights.__getitem__, reverse=True):
+        to = 0 if units[i][0] is None else loads.index(min(loads))
+        loads[to] += weights[i]
+        if to == at - 1:
+            dealt.append(i)
+    return [units[i] for i in sorted(dealt)]
 
 
 def _left(message: str) -> None:
@@ -392,6 +455,14 @@ class GuardedRunner(unittest.TextTestRunner):
         """
         count = workers()
         began = time.perf_counter()
+        where = shard()
+        if where is not None and isinstance(test, unittest.TestSuite):
+            units = plan(test)
+            mine = share(units, *where)
+            self.stream.writeln(
+                f"{SHARD}={where[0]}/{where[1]}: {len(mine)} of {len(units)} test files"
+            )
+            test = unittest.TestSuite(item for _, item in mine)
         if count == 1 or self.failfast or not isinstance(test, unittest.TestSuite):
             return costed(super().run(test), 1, began)
         spec: Spec = {
@@ -801,7 +872,7 @@ def main(argv: list[str]) -> int:
         report(result, start if isinstance(start, str) else "the run")
     if not result.wasSuccessful():
         return 1
-    if result.testsRun == 0 and not result.skipped:
+    if result.testsRun == 0 and not result.skipped and shard() is None:
         return NO_TESTS
     return 0
 

@@ -1,11 +1,11 @@
-# The gate's lint shards and what each heavy lint costs (#2049).
+# The gate's shards and what each heavy lint costs (#2049).
 #
 # ci.yml runs the lint leg on `shards` runners side by side, and
 # mise/gate_shard.py deals the `lint:*` tasks among them, longest first,
 # so the heaviest lints land on different runners. A lint's cost is its
 # row's `seconds` in a tree where one of its `when` pathspecs (git's
 # default meaning; absent = every tree) names a tracked file, and
-# `default` everywhere else: a lint that skips in a tree weighs what a
+# `lint.default` everywhere else: a lint that skips in a tree weighs what a
 # skip weighs, and the next heavy lint takes that runner.
 #
 # The seconds are the slowest the lint took in any repository's gate
@@ -13,63 +13,71 @@
 # runner), rounded. They decide only which lints share a runner, never
 # whether one runs: a stale figure costs balance, not coverage.
 # mise/test_gate_shard.py holds every row to a lint the belt defines. A
-# repository's own lint is unlisted and weighs `default`.
+# repository's own lint is unlisted and weighs `lint.default`.
 
-shards = 4
+# The shard counts: the lint leg always; the test leg where the tree's
+# `test` task runs the belt's test runner, mise/unittest_guarded.py,
+# which keeps one shard's files (ORG_TEST_SHARD), and one runner where it
+# does not: a `cargo test` or `go test` has no way to take a share.
+[shards]
+lint = 4
+test = 4
+
+[lint]
 default = 2
 
-[lint."lint:msrv"]
+[lint.cost."lint:msrv"]
 seconds = 323
 when = ["Cargo.toml"]
 
-[lint."lint:rust"]
+[lint.cost."lint:rust"]
 seconds = 322
 when = ["Cargo.toml"]
 
-[lint."lint:pg-clippy"]
+[lint.cost."lint:pg-clippy"]
 seconds = 222
 when = ["Cargo.toml"]
 
-[lint."lint:pg-schema"]
+[lint.cost."lint:pg-schema"]
 seconds = 187
 when = ["Cargo.toml"]
 
-[lint."lint:fuzz-build"]
+[lint.cost."lint:fuzz-build"]
 seconds = 170
 when = ["fuzz/Cargo.toml"]
 
-[lint."lint:go"]
+[lint.cost."lint:go"]
 seconds = 49
 when = ["go.mod"]
 
-[lint."lint:scaffold-assembly"]
+[lint.cost."lint:scaffold-assembly"]
 seconds = 46
 when = ["scaffold/"]
 
-[lint."lint:shell"]
+[lint.cost."lint:shell"]
 seconds = 44
 
-[lint."lint:belt-shell"]
+[lint.cost."lint:belt-shell"]
 seconds = 38
 
-[lint."lint:go-fuzz-seeds"]
+[lint.cost."lint:go-fuzz-seeds"]
 seconds = 36
 when = ["go.mod"]
 
-[lint."lint:python-types"]
+[lint.cost."lint:python-types"]
 seconds = 30
 when = ["*.py"]
 
-[lint."lint:types"]
+[lint.cost."lint:types"]
 seconds = 27
 when = ["*.ts", "*.tsx", "*.mts", "*.cts"]
 
-[lint."lint:shell-embedded"]
+[lint.cost."lint:shell-embedded"]
 seconds = 26
 
-[lint."lint:sql"]
+[lint.cost."lint:sql"]
 seconds = 24
 when = ["*.sql"]
 
-[lint."lint:biome"]
+[lint.cost."lint:biome"]
 seconds = 23
