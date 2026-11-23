@@ -16,10 +16,12 @@ command:
   allow loses to the belt's later `-D` flags today and would win the
   day the flag order changed. One rule for every tool's table.
 
-Reads tracked paths, NUL-separated on stdin (`org_tracked`, #1986): each `Cargo.toml` is
-decoded with `tomllib` (through `decoded`, never grepped), every other
-path is read as Rust source. Prints one finding per line to stderr,
-then the remedy, and exits 1; prints nothing and exits 0 when clean.
+Reads tracked paths, NUL-separated on stdin (`org_tracked`, #1986), or
+as a list from `check`, which mise/rust_lint.py calls (#1911): each
+`Cargo.toml` is decoded with `tomllib` (through `decoded`, never
+grepped), every other path is read as Rust source. Prints one finding
+per line to stderr, then the remedy, and exits 1; prints nothing and
+exits 0 when clean.
 A tracked path missing from the working tree is not a build input and
 is passed over, as the task's other per-file checks pass it over.
 
@@ -308,7 +310,16 @@ def main() -> int:
         A process exit status: 0 clean, 1 on any finding or refusal.
 
     """
-    names = stdin_paths()
+    return check(stdin_paths())
+
+
+def check(names: list[str]) -> int:
+    """Check the named paths and report what clippy cannot see.
+
+    Returns:
+        A process exit status: 0 clean, 1 on any finding or refusal.
+
+    """
     blanket = [name for name in names if group_suppressed(Path(name))]
     if blanket:
         writer.finding(

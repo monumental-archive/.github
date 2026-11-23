@@ -24,6 +24,7 @@ run through the gate as `mise run test`, which `ci` collects.
 
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -69,10 +70,12 @@ class Scheduled(unittest.TestCase):
         (self.tree / "mise").mkdir(parents=True)
         (self.tree / "mise" / "config.toml").write_text(CONFIG, encoding="utf-8")
         (self.tree / ".github" / "workflows").mkdir(parents=True)
-        belt = self.tmp / "belt"
-        belt.mkdir()
-        (belt / "own-audits.sh").write_text(OWN_AUDITS_STUB, encoding="utf-8")
-        self.env = hermetic.env() | {"ORG_BELT_DIR": str(belt)}
+        stubs = {"own-audits.sh": OWN_AUDITS_STUB}
+        belt = hermetic.belt(self.tmp / "belt", stubs=stubs)
+        self.env = hermetic.env() | {
+            "ORG_BELT_DIR": str(belt),
+            "ORG_PYTHON": sys.executable,
+        }
 
     def workflow(self, name: str, task: str) -> None:
         """Plant a workflow whose one step runs one audit task."""
@@ -148,6 +151,7 @@ class OwnTasks(unittest.TestCase):
         self.env = hermetic.env() | {
             "ORG_BELT_DIR": str(belt),
             "ORG_CANON_DIR": str(canon),
+            "ORG_PYTHON": sys.executable,
         }
 
     def caller(self, name: str, callee: str) -> None:
