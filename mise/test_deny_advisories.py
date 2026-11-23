@@ -77,7 +77,7 @@ def lint(text: str | None) -> hermetic.Called:
         path.write_text(text or "", encoding="utf-8")
         env = hermetic.env(MISE_TASK_NAME="lint:deny", ORG_FINDINGS="")
         return hermetic.call_main(
-            lambda: da.main(["deny_advisories.py", str(path)]), env=env
+            lambda: da.main(["deny_advisories.py", "deny.toml"]), env=env, cwd=tmp
         )
 
 
@@ -155,7 +155,7 @@ class DenyAdvisories(unittest.TestCase):
             records = Path(tmp) / "findings.jsonl"
             env = hermetic.env(MISE_TASK_NAME="lint:deny", ORG_FINDINGS=str(records))
             done = hermetic.call_main(
-                lambda: da.main(["deny_advisories.py", str(path)]), env=env
+                lambda: da.main(["deny_advisories.py", "deny.toml"]), env=env, cwd=tmp
             )
             lines = records.read_text(encoding="utf-8").splitlines()
         self.assertEqual(done.returncode, 1)
@@ -190,7 +190,14 @@ def task_body(name: str) -> str:
     )
 
 
+# locate-project answers that the one manifest is its own root, unlogged:
+# the rows are about the scan, and #2009's rows (test_deny_lint.py) about
+# the roots.
 CARGO_STUB = """#!{bash}
+[[ $1 != locate-project ]] || {
+  echo "${PWD}/Cargo.toml"
+  exit 0
+}
 printf 'cargo %s\\n' "$*" >> "${PLANT_LOG}"
 case "$1" in
   fetch) ;;
@@ -275,10 +282,10 @@ class AuditDeny(unittest.TestCase):
         subprocess.run([GIT, *args], cwd=self.root, env=hermetic.env(), check=True)
 
     def plant(self) -> None:
-        """Track a Cargo.lock and a deny.toml."""
-        for name in ("Cargo.lock", "deny.toml"):
+        """Track a Cargo.toml, a Cargo.lock and a deny.toml."""
+        for name in ("Cargo.toml", "Cargo.lock", "deny.toml"):
             (self.root / name).write_text("# planted\n", encoding="utf-8")
-        self.git("add", "Cargo.lock", "deny.toml")
+        self.git("add", "Cargo.toml", "Cargo.lock", "deny.toml")
 
     def audit(
         self,
@@ -338,10 +345,12 @@ class AuditDeny(unittest.TestCase):
         done, calls = self.audit()
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(done.stdout, f"{TASK}: stele: PASS\n")
+        scan = "--format json check advisories"
+        where = "--manifest-path Cargo.toml --config deny.toml"
         want = [
-            "cargo fetch --locked --quiet",
-            "cargo deny --format json check advisories",
-            "cargo-deny deny --format json check advisories",
+            "cargo fetch --locked --quiet --manifest-path Cargo.toml",
+            f"cargo deny {where} {scan}",
+            f"cargo-deny deny {where} {scan}",
         ]
         self.assertEqual(calls[:3], want)
 

@@ -11,7 +11,10 @@ to the tool by the task that runs it (`ORG_BELT_DIR`, #445), so a repo
 carries nothing to drift and gets the current rules at the canon SHA it
 pins. Everything below is here because something OUTSIDE the belt reads
 it — an editor, GitHub, a git hook, the release script — or because its
-CONTENT is genuinely per-repo. `deny.toml`'s skips describe one tree;
+CONTENT is genuinely per-repo. `deny.toml`'s skips describe one tree
+(and a second Cargo workspace, such as a cargo-fuzz crate, copies
+`deny.toml` beside its own manifest: `lint:deny` and `audit:deny` check
+each workspace against the file beside it, #2009);
 `.golangci.yml` names the module path (gci's import prefix) and, in
 stele, wrapcheck globs for that module's own packages. The belt can
 deliver a config; it cannot invent a repo's identity. A repo may still

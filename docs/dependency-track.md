@@ -31,10 +31,26 @@ problems at the moment a dependency enters. Already org-wide.
 
 ### The gate: `lint:deny` (cargo-deny — bans, licenses, sources)
 
-Deterministic over `Cargo.lock` + the committed `deny.toml`
-(scaffold-copied, like every stub). Rust-only by nature, universal by
-guard: no tracked `Cargo.lock` → skip clean. `Cargo.lock` present but
-cargo absent → loud failure, never a vacuous green.
+Deterministic over each workspace's `Cargo.lock` + the `deny.toml`
+committed beside its manifest (scaffold-copied, like every stub).
+Rust-only by nature, universal by guard: no tracked `Cargo.lock` → skip
+clean. `Cargo.lock` present but cargo absent → loud failure, never a
+vacuous green.
+
+**One run per workspace, one policy file per dependency graph
+(#2009).** The tree's workspace roots come from
+`org_rust_workspace_roots` (#2004), and each root is checked with
+`--manifest-path` and `--config` naming the `deny.toml` beside it; every
+root runs past a red one. A cargo-fuzz crate is its own workspace with
+its own lock, and checking only the root left its graph (the
+`libfuzzer-sys` build script, its licence) outside the policy. The
+root's file cannot serve the second graph: its allowances are sized to
+the graph it was written for, and cargo-deny reds an allowance a graph
+never encounters. So an allowance only the fuzz harness needs is written
+in `fuzz/deny.toml` and never widens what the shipped graph may contain.
+The path is passed rather than found by cargo-deny's upward search, so a
+workspace that forgot its file is red by name instead of silently taking
+the parent's.
 
 The policy, maximally defensible:
 
@@ -44,7 +60,12 @@ The policy, maximally defensible:
 - **sources**: crates.io only. `unknown-registry = "deny"`,
   `unknown-git = "deny"` — where dependencies come from is a gated
   invariant, and a git dependency is a decision, not a default.
-- **bans**: `wildcards = "deny"`; `multiple-versions = "deny"`. This read
+- **bans**: `wildcards = "deny"`, with `allow-wildcard-paths = true`
+  (#2009): a `publish = false` crate's bare path dependency, such as a
+  fuzz crate's on the crate it exercises, is not a wildcard, because a
+  `version` beside it is a copy the release never bumps and the next
+  minor release fails on it; a published crate's path dependency is
+  still `error[wildcard]`. `multiple-versions = "deny"`. This read
   `"warn"` until 2026-08-16 — the org's one deliberately non-maximal
   setting, on the reasoning that transitive duplicates are endemic and
   outside any repo's control, and that an expected-red gate teaches
@@ -65,7 +86,7 @@ The policy, maximally defensible:
   `clippy::multiple_crate_versions` (cargo group) asserts the same rule
   and is therefore allowed in the canon's `clippy.toml`, with the reason
   recorded there. It is not a weakening: the two tools differ in *where
-  their exception lists live*. `deny.toml` is per-repo, so a skip
+  their exception lists live*. `deny.toml` is per workspace, so a skip
   describes the one tree it belongs to; the canon's `clippy.toml` is a
   single file shared org-wide, so recording a duplicate there would
   silently exempt every other repo from a rule they never broke. One
@@ -77,9 +98,12 @@ by the lock, so gate eligibility holds.
 
 ### The cron: `audit:deny` (advisories)
 
-`cargo deny check advisories` — RustSec feed, network-bound, structurally
-outside the gate. It runs on the Monday cadence but NOT in the canon's
-`org-settings.yml` beside settings drift: it is a per-repo
+`cargo deny check advisories`, once per workspace against the
+`deny.toml` beside it, the `lint:deny` loop — RustSec feed,
+network-bound, structurally outside the gate. stele's `--subject` is
+that workspace's lock (`Cargo.lock`, `fuzz/Cargo.lock`): a label, since
+the join is on the package version. It runs on the Monday cadence but
+NOT in the canon's `org-settings.yml` beside settings drift: it is a per-repo
 obligation, so it runs from `repo-dependencies.yml` via each repo's
 own `dependencies.yml` stub — which means adoption is per repo and enumerated
 nowhere the way `audit:source-vsa` enumerates chains (#349 finding 8
