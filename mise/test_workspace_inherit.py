@@ -429,13 +429,18 @@ class TestMain(unittest.TestCase):
 
 
 # cargo for the two-root rows (#2004): locate-project names the fuzz
-# crate its own root and every other manifest the top's; fetch passes
+# crate its own root and every other manifest the top's, unless
+# STUB_LOCATE_FAILS names the manifest; fetch passes
 # unless STUB_FETCH_FAILS names the manifest; metadata prints the
 # planted account of the root it is asked about.
 CARGO = """\
 #!/usr/bin/env bash
 case "$1" in
   locate-project)
+    if [[ $4 == "${STUB_LOCATE_FAILS:-}" ]]; then
+      echo "error: planted: failed to locate $4" >&2
+      exit 101
+    fi
     case "$4" in
       fuzz/*) echo "${PWD}/fuzz/Cargo.toml" ;;
       *) echo "${PWD}/Cargo.toml" ;;
@@ -499,7 +504,9 @@ def account_of(root: Path, crate: str, **fields: object) -> dict[str, object]:
 class TwoRoots:
     """A planted tree with two workspaces, cargo stubbed."""
 
-    def __init__(self, case: unittest.TestCase, fetch_fails: str = "") -> None:
+    def __init__(
+        self, case: unittest.TestCase, fetch_fails: str = "", locate_fails: str = ""
+    ) -> None:
         """Plant the tree, the stub and each root's account."""
         scratch = TemporaryDirectory()
         case.addCleanup(scratch.cleanup)
@@ -527,6 +534,7 @@ class TwoRoots:
             ORG_FINDINGS="",
             STUB_ACCOUNTS=str(accounts),
             STUB_FETCH_FAILS=fetch_fails,
+            STUB_LOCATE_FAILS=locate_fails,
         )
         self.env["PATH"] = f"{bindir}:{self.env.get('PATH', '')}"
 
@@ -609,6 +617,18 @@ class TestEveryRoot(unittest.TestCase):
         self.assertEqual(1, done.returncode, done.stdout + done.stderr)
         self.assertEqual(TOP_GREEN, done.stdout)
         self.assertIn(INERT_IN_FUZZ, done.stderr)
+
+    def test_the_task_stops_when_the_derivation_fails(self) -> None:
+        """locate-project refused: its finding, exit 1, the helper never run."""
+        done = TwoRoots(self, locate_fails="fuzz/Cargo.toml").task()
+        self.assertEqual((1, ""), (done.returncode, done.stdout))
+        self.assertIn(
+            f"{TASK}: cargo locate-project failed for fuzz/Cargo.toml\n"
+            "  error: planted: failed to locate fuzz/Cargo.toml\n",
+            done.stderr,
+        )
+        self.assertNotIn("usage:", done.stderr)
+        self.assertNotIn("[workspace.package]", done.stderr)
 
 
 if __name__ == "__main__":

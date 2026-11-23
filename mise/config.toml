@@ -5701,7 +5701,7 @@ command -v cargo > /dev/null || {
   exit 1
 }
 . "${ORG_BELT_DIR}/rust-workspaces.sh"
-roots=() && org_rust_workspace_roots roots
+roots=() && org_rust_workspace_roots roots || exit 1
 "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/workspace_inherit.py" "${roots[@]}"
 '''
 
