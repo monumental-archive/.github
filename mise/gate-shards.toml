@@ -81,3 +81,70 @@ when = ["*.sql"]
 
 [lint.cost."lint:biome"]
 seconds = 23
+
+# What each test file costs, for the test shards (#2054): the seconds a
+# file took on the gate's runner (main's gate run 45101495123, four test
+# shards of four workers each), by its path from the repository root.
+# mise/unittest_guarded.py deals a root's files longest first over these,
+# so the slowest files land on different shards; a file not listed weighs
+# `test.default`. Like the lint costs they decide balance only, never
+# whether a file runs, and mise/test_gate_shard.py holds every row to a
+# tracked test file.
+[test]
+default = 2
+
+[test.cost]
+"mise/test_gate_tools.py" = 46
+"mise/test_mutants_python.py" = 46
+"mise/test_python_types.py" = 34
+"mise/test_coverage_typescript.py" = 31
+"mise/test_python_properties.py" = 31
+"mise/test_coverage_tasks.py" = 29
+"mise/test_pgrx_test.py" = 29
+"release/test_generate_pgrx_upgrade.py" = 29
+"mise/test_coverage_references.py" = 27
+"mise/test_measured.py" = 27
+"mise/test_mutants_go.py" = 25
+"mise/test_mutants_rust.py" = 23
+"mise/test_coverage_go_rust.py" = 22
+"mise/test_standing_issue.py" = 21
+"mise/test_rust_lint.py" = 17
+"mise/test_audit_badges.py" = 16
+"mise/test_coverage_branches.py" = 15
+"mise/test_typescript_properties.py" = 14
+"mise/test_pgrx_env.py" = 13
+"mise/test_unittest_guarded.py" = 13
+"mise/test_hermetic.py" = 12
+"mise/test_task_contract.py" = 12
+"release/test_job_installs.py" = 11
+"mise/test_coverage_fuzz.py" = 10
+"mise/test_break_check.py" = 9
+"mise/test_coverage_go_branches.py" = 9
+"mise/test_plpgsql_coverage.py" = 8
+"mise/test_prepush_hook.py" = 8
+"release/test_coverage_figures.py" = 8
+"mise/test_bestpractices_stub.py" = 7
+"mise/test_pg_schema.py" = 7
+"mise/test_semver_audit.py" = 7
+"mise/test_mutants_typescript.py" = 6
+"settings/test_repo_baseline.py" = 6
+"mise/test_belt_link_hook.py" = 5
+"mise/test_deny_lint.py" = 5
+"mise/test_derive_badges.py" = 5
+"release/test_pgrx_images.py" = 5
+"release/test_registry.py" = 5
+"release/test_release_guards.py" = 5
+"mise/test_fuzz_search.py" = 4
+"release/test_pack_wasm.py" = 4
+"release/test_upgrade_script.py" = 4
+"mise/test_findings.py" = 3
+"mise/test_git_decoy.py" = 3
+"mise/test_pg_clippy.py" = 3
+"mise/test_pg_upgrade_path.py" = 3
+"mise/test_pinact_findings.py" = 3
+"release/test_security_release.py" = 3
+"mise/test_audit_legs.py" = 2
+"release/test_mint_doi.py" = 2
+"release/test_pgrx_build.py" = 2
+"release/test_pgrx_inventory_plan.py" = 2
+"release/test_prepare_release.py" = 2

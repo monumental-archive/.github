@@ -18,6 +18,8 @@ from typing import override
 
 import decoded
 import gate_shard
+import unittest_guarded
+from tracked import tracked
 
 HERE = Path(__file__).resolve().parent
 CI = HERE.parent / ".github" / "workflows" / "ci.yml"
@@ -31,6 +33,14 @@ class Table(unittest.TestCase):
         config = decoded.load_toml((HERE / "config.toml").read_bytes())
         defined = set(decoded.as_object(config["tasks"], "tasks"))
         stale = sorted(set(gate_shard.load().rows) - defined)
+        none: list[str] = []
+        self.assertEqual(none, stale)
+
+    def test_every_test_cost_is_a_tracked_test_file(self) -> None:
+        """A test cost naming no tracked test file is stale, red by name (#2054)."""
+        _, rows = unittest_guarded.file_costs()
+        files = set(tracked("*test_*.py", root=HERE.parent))
+        stale = sorted(set(rows) - files)
         none: list[str] = []
         self.assertEqual(none, stale)
 
