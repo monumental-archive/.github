@@ -1,19 +1,31 @@
 #!/usr/bin/env python3
-"""Run one shard of a gate leg (#2049).
+"""Plan the gate's shards, and run one shard of a leg (#2049).
 
-ci.yml's gate job is a matrix of legs, and the lint leg runs on several
+ci.yml's gate job is a matrix of legs, and a leg can run on several
 runners side by side: in a Rust tree three or four lints that each
-compile the workspace shared one runner's four cores, and the leg was
-the slowest of the gate (release-lab 9m12s, edtf 6m00s). Every shard
-deals the same `lint:*` tasks the same way and runs its own share.
+compile the workspace shared one runner's four cores (release-lab's lint
+leg took 9m12s), and the canon's test suite is 611 CPU-seconds on four.
 
+    gate_shard.py plan                     the matrix, for GITHUB_OUTPUT
     gate_shard.py run <leg> <shard> <of>   run this shard of the leg
     gate_shard.py deal <of>                print every shard's lints
 
+THE PLAN runs before any tool is installed, on the runner's own Python,
+and reads only the tree: the lint leg gets mise/gate-shards.toml's
+`shards.lint`; the test leg gets `shards.test` where a root mise config
+gives `test` a run line naming the belt's test runner
+(unittest_guarded.py, which keeps one shard's files), and one runner
+otherwise; properties one. The shard that runs re-reads `test` from mise
+and reds when it does not name the runner: the plan can fail a gate,
+never pass one.
+
 A leg of one shard is `mise run ci:<leg>`, exactly as a laptop runs it.
-The lint leg of more is `mise run a ::: b ::: …` over this shard's
-share of the tasks `ci:lint`'s `lint:*` collects, from mise's own task
-list; the union of the shards is that list, each task once.
+A lint shard runs `mise run a ::: b ::: …` over its share of the tasks
+`ci:lint`'s `lint:*` collects, from mise's own task list; the union of
+the shards is that list, each task once. A test shard runs `test` with
+ORG_TEST_SHARD naming it, and the first also `build` (where the tree has
+one) and `test:pgrx`; coverage:check runs once, after every shard, in
+the gate's coverage job, over the data the shards kept.
 
 THE DEAL is longest first: the costliest lint goes to the shard with the
 least dealt, then the next. A lint's cost is its row in
@@ -26,6 +38,8 @@ stdlib only.
 """
 
 import fnmatch
+import json
+import os
 import shutil
 import subprocess
 import sys
@@ -39,13 +53,18 @@ from tracked import tracked
 TABLE = Path(__file__).resolve().parent / "gate-shards.toml"
 LINTS = "lint:*"
 LEGS = ("lint", "test", "properties")
+# The belt's test runner, which takes a share of a root's test files.
+RUNNER = "unittest_guarded.py"
+# The root mise configs a repository's `test` task is defined in.
+CONFIGS = ("mise.toml", ".mise.toml", ".config/mise.toml", ".config/mise/config.toml")
 
 
 @dataclass(frozen=True)
 class Costs:
-    """The table as decoded: shard count, default, and each heavy lint."""
+    """The table as decoded: shard counts, default, and each heavy lint."""
 
-    shards: int
+    lint_shards: int
+    test_shards: int
     default: int
     rows: dict[str, tuple[int, tuple[str, ...] | None]]
 
@@ -54,31 +73,36 @@ def load(path: Path = TABLE) -> Costs:
     """Read the cost table.
 
     Returns:
-        Its shard count, default cost and rows.
+        Its shard counts, default cost and rows.
 
     Raises:
         ValueError: a field is missing, or not the type it must be.
 
     """
     doc = decoded.load_toml(path.read_bytes())
-    shards = decoded.as_int(doc.get("shards"), "shards")
-    default = decoded.as_int(doc.get("default"), "default")
+    shards = decoded.as_object(doc.get("shards"), "shards")
+    counts = [
+        decoded.as_int(shards.get("lint"), "shards.lint"),
+        decoded.as_int(shards.get("test"), "shards.test"),
+    ]
+    lint = decoded.as_object(doc.get("lint"), "lint")
+    default = decoded.as_int(lint.get("default"), "lint.default")
     rows: dict[str, tuple[int, tuple[str, ...] | None]] = {}
-    for name, value in decoded.as_object(doc.get("lint", {}), "lint").items():
-        row = decoded.as_object(value, f"lint.{name}")
-        seconds = decoded.as_int(row.get("seconds"), f"lint.{name}.seconds")
+    for name, value in decoded.as_object(lint.get("cost", {}), "lint.cost").items():
+        row = decoded.as_object(value, f"lint.cost.{name}")
+        seconds = decoded.as_int(row.get("seconds"), f"lint.cost.{name}.seconds")
         when: tuple[str, ...] | None = None
         if "when" in row:
             raw = row["when"]
             if not decoded.is_strings(raw) or not raw:
-                msg = f"lint.{name}.when: a non-empty list of pathspecs"
+                msg = f"lint.cost.{name}.when: a non-empty list of pathspecs"
                 raise ValueError(msg)
             when = tuple(raw)
         rows[name] = (seconds, when)
-    if shards < 1:
-        msg = "shards: at least 1"
+    if min(counts) < 1:
+        msg = "shards: at least 1 for each leg"
         raise ValueError(msg)
-    return Costs(shards, default, rows)
+    return Costs(counts[0], counts[1], default, rows)
 
 
 def cost(name: str, costs: Costs, files: list[str]) -> int:
@@ -148,7 +172,114 @@ def hands(of: int, mise: str, costs: Costs) -> list[list[str]]:
     return deal(names, of, {n: cost(n, costs, files) for n in names})
 
 
-USAGE = "usage: gate_shard.py run <leg> <shard> <of> | gate_shard.py deal <of>"
+def names_runner(run: object) -> bool:
+    """Say whether a task's `run` names the belt's test runner.
+
+    Returns:
+        True when the run line, or any line of a run list, names it.
+
+    """
+    lines = [run] if isinstance(run, str) else run if decoded.is_strings(run) else []
+    return any(RUNNER in line for line in lines)
+
+
+def slices(files: list[str], root: Path) -> bool:
+    """Say whether this tree's `test` task runs the belt's test runner.
+
+    Returns:
+        True when a tracked root mise config defines `test` with a run
+        line naming unittest_guarded.py.
+
+    """
+    for name in CONFIGS:
+        if name not in files:
+            continue
+        doc = decoded.load_toml((root / name).read_bytes())
+        tasks = doc.get("tasks")
+        test = tasks.get("test") if decoded.is_object(tasks) else None
+        if decoded.is_object(test) and names_runner(test.get("run")):
+            return True
+    return False
+
+
+def plan(costs: Costs, files: list[str], root: Path) -> list[dict[str, object]]:
+    """Lay out the gate's matrix: one row per runner.
+
+    Returns:
+        The rows, lint shards first, then test, then properties.
+
+    """
+    counts = {
+        "lint": costs.lint_shards,
+        "test": costs.test_shards if slices(files, root) else 1,
+        "properties": 1,
+    }
+    return [
+        {"leg": leg, "shard": at, "of": of}
+        for leg, of in counts.items()
+        for at in range(1, of + 1)
+    ]
+
+
+def task_info(mise: str, name: str) -> dict[str, object] | None:
+    """Ask mise for one task.
+
+    Returns:
+        The task's JSON, or None when the tree defines no such task.
+
+    """
+    done = subprocess.run(
+        [mise, "tasks", "info", name, "--json"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if done.returncode != 0:
+        return None
+    return decoded.as_object(decoded.load_json(done.stdout), name)
+
+
+def test_shard(shard: int, of: int, mise: str) -> int:
+    """Run this shard of the test leg.
+
+    Returns:
+        mise's exit status, or 1 when `test` does not run the belt's
+        test runner, so the shard could not take a share.
+
+    """
+    test = task_info(mise, "test")
+    if test is None or not names_runner(test.get("run")):
+        print(
+            f"gate_shard: the plan gave the test leg {of} shards, but `test`"
+            f" does not run {RUNNER}, so a shard would run the whole suite",
+            file=sys.stderr,
+        )
+        return 1
+    tasks = ["test"]
+    if shard == 1:
+        tasks += [t for t in ("build",) if task_info(mise, t) is not None]
+        tasks.append("test:pgrx")
+    return run_tasks(mise, tasks, {"ORG_TEST_SHARD": f"{shard}/{of}"})
+
+
+def run_tasks(mise: str, tasks: list[str], env: dict[str, str]) -> int:
+    """Run tasks side by side, as one `mise run`.
+
+    Returns:
+        mise's exit status.
+
+    """
+    args = [mise, "run"]
+    for at, name in enumerate(tasks):
+        args += [*([":::"] if at else []), name]
+    sys.stdout.flush()
+    return subprocess.run(args, check=False, env=os.environ | env).returncode
+
+
+USAGE = (
+    "usage: gate_shard.py plan | gate_shard.py run <leg> <shard> <of>"
+    " | gate_shard.py deal <of>"
+)
 USAGE_EXIT = 2
 
 
@@ -163,14 +294,16 @@ def whole(text: str) -> int | None:
 
 
 def run(leg: str, shard: int, of: int, mise: str) -> int:
-    """Run one shard of a leg: `ci:<leg>` alone, or this shard's lints.
+    """Run one shard of a leg: `ci:<leg>` alone, or this shard's share.
 
     Returns:
         mise's exit status.
 
     """
     if of == 1:
-        return subprocess.run([mise, "run", f"ci:{leg}"], check=False).returncode
+        return run_tasks(mise, [f"ci:{leg}"], {})
+    if leg == "test":
+        return test_shard(shard, of, mise)
     if leg != "lint":
         print(
             f"gate_shard: the {leg} leg runs on one runner, not {of}", file=sys.stderr
@@ -178,13 +311,7 @@ def run(leg: str, shard: int, of: int, mise: str) -> int:
         return 1
     hand = hands(of, mise, load())[shard - 1]
     print(f"gate_shard: lint {shard}/{of}: {len(hand)} lints: {' '.join(hand)}")
-    if not hand:
-        return 0
-    args = [mise, "run"]
-    for at, name in enumerate(hand):
-        args += [*([":::"] if at else []), name]
-    sys.stdout.flush()
-    return subprocess.run(args, check=False).returncode
+    return run_tasks(mise, hand, {}) if hand else 0
 
 
 def parse(argv: list[str]) -> tuple[str, str, int, int] | None:
@@ -196,6 +323,8 @@ def parse(argv: list[str]) -> tuple[str, str, int, int] | None:
 
     """
     match argv:
+        case ["plan"]:
+            return "plan", "", 0, 0
         case ["deal", count] if of := whole(count):
             return "deal", "lint", 1, of
         case ["run", leg, at, count] if leg in LEGS:
@@ -217,6 +346,13 @@ def main(argv: list[str]) -> int:
         print(USAGE, file=sys.stderr)
         return USAGE_EXIT
     command, leg, shard, of = parsed
+    if command == "plan":
+        rows = plan(load(), tracked(), Path.cwd())
+        tests = sum(r["leg"] == "test" for r in rows)
+        matrix: dict[str, object] = {"include": rows}
+        print(f"legs={json.dumps(matrix, separators=(',', ':'))}")
+        print(f"test-shards={tests}")
+        return 0
     mise = shutil.which("mise")
     if mise is None:
         print("gate_shard: mise is not on PATH", file=sys.stderr)

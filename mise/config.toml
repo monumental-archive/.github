@@ -212,7 +212,12 @@ ORG_PYTHON_UNSET = '''unset — the belt Python is not installed here; run: mise
 # script (measured on mise 2026.11.7). `measured` writes what the suite
 # measured here; coverage:check and coverage:adopt read it after `test`.
 # A run's directory can outlive it; coverage-run.sh says who sweeps it.
-ORG_COVERAGE_RUN = "{{ get_env(name='TMPDIR', default='') | default(value='/tmp', boolean=true) | trim_end(pat='/') }}/org-coverage-{{ mise_pid }}"
+#
+# A sharded test leg names the directory instead (#2049): every shard
+# measures into ORG_GATE_COVERAGE_RUN and keeps it, and the gate's
+# coverage job gathers the shards' data there and runs coverage:check
+# over it, so the floor judges the whole suite. Nothing else sets it.
+ORG_COVERAGE_RUN = "{% set gate = get_env(name='ORG_GATE_COVERAGE_RUN', default='') %}{% if gate %}{{ gate }}{% else %}{{ get_env(name='TMPDIR', default='') | default(value='/tmp', boolean=true) | trim_end(pat='/') }}/org-coverage-{{ mise_pid }}{% endif %}"
 # THE FINDINGS WRITER, IN EVERY TASK (#1934, owner's ruling): bash
 # sources the file BASH_ENV names before it runs a non-interactive
 # script, so every task body (`bash --norc -euo pipefail -c`, [task_config]

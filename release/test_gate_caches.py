@@ -52,8 +52,9 @@ CI = CANON / ".github" / "workflows" / "ci.yml"
 # The jobs #1406 names, less the coverage upload, which installs and
 # builds nothing since #1528. A cache anywhere else is a new cache, and
 # the design conditions say no release, publish or continuous job gains
-# one.
-CACHE_JOBS = {"gate", "pgrx"}
+# one. The coverage job (#2049) restores and saves the gate's tool cache
+# under the gate's key, to judge a sharded test leg's floor.
+CACHE_JOBS = {"coverage", "gate", "pgrx"}
 # A workflow with nothing to report.
 NONE: list[str] = []
 
@@ -228,7 +229,8 @@ def plant(old: str, new: str) -> str:
 TOOL_SAVE_IF = (
     "        if: >-\n"
     "          ${{ env.ORG_GATE_CACHE_SAVE == 'true' && matrix.leg == 'test'\n"
-    "          && steps.tool-cache.outputs.cache-hit != 'true' }}\n"
+    "          && matrix.shard == 1"
+    " && steps.tool-cache.outputs.cache-hit != 'true' }}\n"
 )
 GO_KEYS = (
     "restore-keys: >-\n"
@@ -305,7 +307,7 @@ class Planted(unittest.TestCase):
         self.assert_named(
             plant(gate, save + gate),
             "plan: 'Save the plan cache (default branch only)' is a cache outside"
-            " ['gate', 'pgrx']",
+            " ['coverage', 'gate', 'pgrx']",
         )
 
     def test_a_fallback_on_the_default_branch(self) -> None:
