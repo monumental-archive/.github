@@ -4,6 +4,10 @@
 #
 # The gate half is deterministic: outcome is a function of Cargo.lock plus
 # this file. The advisory half is a moving feed and lives outside the gate.
+#
+# One per workspace (#2009): a second workspace in the tree (a cargo-fuzz
+# crate is its own) copies this file beside its own manifest, and both
+# tasks check each workspace against the deny.toml beside it.
 
 [graph]
 # All targets: the lock is one artifact; policy must not vary by the
@@ -40,6 +44,16 @@ allow = [
 # duplicate would silently exempt every other repo. One policy, one home,
 # at the layer that can describe a single tree.
 wildcards = "deny"
+# A bare path dependency (no `version`) between a crate this repository
+# does not publish and the crate it exercises — a second workspace such
+# as a cargo-fuzz crate — is not a wildcard. A `version` written beside
+# that path would be a copy of the release version that the release's
+# version bump never touches, and the next minor release fails
+# `cargo update --manifest-path fuzz/Cargo.toml` on it (measured on
+# release-lab, #2009). This loosens nothing publishable: cargo-deny
+# applies it to `publish = false` crates only, and a published crate's
+# path dependency is still `error[wildcard]`.
+allow-wildcard-paths = true
 multiple-versions = "deny"
 
 [sources]

@@ -15,8 +15,9 @@ tools their steps call.
 A call is a tool's command at command position (line start, after a
 separator, behind `xargs`), with quoted literals blanked so a message
 naming a tool is not a call; a Python helper calls what it hands
-`subprocess` as a quoted list element, and what any belt module it
-imports does; any Python helper calls python3.
+`subprocess` as a quoted list element, what any belt module it
+imports does, and what a belt script it runs calls (#1911); any Python
+helper calls python3.
 
 A GUARD is what a task tests before its first "skipped" exit: the
 pathspecs it hands `org_tracked` (mise/tracked.sh, #1986) or a `git
@@ -36,6 +37,7 @@ from pre-push. Every git here runs without any `GIT_*` variable.
 stdlib `unittest`, matching the other mise/test_*.py.
 """
 
+import ast
 import contextlib
 import dataclasses
 import io
@@ -224,6 +226,10 @@ def expand(text: str, seen: set[str]) -> list[tuple[str, str]]:
             seen.add(name)
             if name.endswith(".py"):
                 out.append((f"py:{name}", "python3"))
+                for script in spawned(name):
+                    if script not in seen:
+                        seen.add(script)
+                        out += expand(_source(script), seen)
             else:
                 out += expand(path.read_text("utf-8"), seen)
     return out
@@ -259,6 +265,50 @@ def belt_imports(name: str) -> list[str]:
             if imported not in out and (BELT / imported).is_file():
                 out.append(imported)
                 todo.append(imported)
+    return out
+
+
+SPAWNS = re.compile(r"^(?:import|from) subprocess", re.MULTILINE)
+BELT_SCRIPT = re.compile(r"(?<![\w.-])([\w-]+\.sh)\b")
+
+
+def spawned(name: str) -> list[str]:
+    """Name the belt shell scripts a Python helper runs (#1911).
+
+    A helper, or a belt module it imports, that imports subprocess and
+    names a belt `.sh` in a string of its code runs that script:
+    citation_check.py runs citation.sh, whose findings call jq. Its
+    docstrings are prose, never a run. A module that spawns nothing only
+    names a script (testing_adoption.py's table).
+
+    Returns:
+        Script names in the belt, each once, in the order found.
+
+    """
+    out: list[str] = []
+    for module in belt_imports(name):
+        text = _source(module)
+        if not SPAWNS.search(text):
+            continue
+        tree = ast.parse(text)
+        docs = {
+            id(node.body[0].value)
+            for node in ast.walk(tree)
+            if isinstance(
+                node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+            )
+            and node.body
+            and isinstance(node.body[0], ast.Expr)
+            and isinstance(node.body[0].value, ast.Constant)
+        }
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Constant) and isinstance(node.value, str)):
+                continue
+            if id(node) in docs:
+                continue
+            for script in found(BELT_SCRIPT, node.value):
+                if script not in out and (BELT / script).is_file():
+                    out.append(script)
     return out
 
 
@@ -588,6 +638,48 @@ class Table(unittest.TestCase):
         text = '"${ORG_PYTHON}" "${ORG_BELT_DIR}/embedded_shell.py" ${files}'
         self.assertIn("workflow_yaml.py", belt_imports("embedded_shell.py"))
         self.assertEqual(1, first_call(expand(text, set()), ["yq"]))
+
+    def test_a_helper_calls_what_a_belt_script_it_runs_calls(self) -> None:
+        """Planted: a helper runs a belt script; the script's tool is called.
+
+        Read alone, the helper spawns no tool, and the table's row for
+        the script's tool would be stale (#1911: citation_check.py runs
+        citation.sh, whose findings call jq). A script only named in a
+        docstring, or by a module that spawns nothing, is not run.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            belt_dir = Path(tmp)
+            (belt_dir / "planted.sh").write_text("hadolint Dockerfile\n", "utf-8")
+            (belt_dir / "named.sh").write_text("shfmt -d x\n", "utf-8")
+            (belt_dir / "runs.py").write_text(
+                '"""Runs planted.sh, never named.sh."""\n'
+                "import subprocess\n"
+                'subprocess.run(["bash", "planted.sh"], check=True)\n',
+                "utf-8",
+            )
+            (belt_dir / "names.py").write_text('SCRIPT = "named.sh"\n', "utf-8")
+            here = sys.modules[__name__]
+            with (
+                mock.patch.object(here, "BELT", belt_dir),
+                mock.patch.dict(_SOURCES, clear=True),
+            ):
+                self.assertEqual("planted.sh", " ".join(spawned("runs.py")))
+                self.assertEqual("", " ".join(spawned("names.py")))
+                runs = expand('"${ORG_PYTHON}" "${ORG_BELT_DIR}/runs.py"', set())
+                self.assertEqual(2, first_call(runs, ["hadolint"]))
+                self.assertIsNone(first_call(runs, ["shfmt"]))
+                names = expand('"${ORG_PYTHON}" "${ORG_BELT_DIR}/names.py"', set())
+                self.assertIsNone(first_call(names, ["shfmt"]))
+
+    def test_the_belt_helpers_that_run_belt_scripts(self) -> None:
+        """The belt's real helpers: run, and only named.
+
+        rust_lint.py runs the clippy ladder and the pgrx provisioning;
+        testing_adoption.py names the mutation scripts and runs none.
+        """
+        ran = " ".join(sorted(spawned("rust_lint.py")))
+        self.assertEqual("clippy-ladder.sh pgrx-env.sh", ran)
+        self.assertEqual("", " ".join(spawned("testing_adoption.py")))
 
     def test_the_venv_check_uses_its_command(self) -> None:
         """`tool_python.py LABEL COMMAND` uses COMMAND's tool (#1788)."""

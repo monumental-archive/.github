@@ -635,13 +635,10 @@ class Planted(unittest.TestCase):
         """
         # The derivation resolves cargo when it is imported; here, the
         # stub on the row's PATH is the cargo it asks.
-        with (
-            mock.patch.object(rust_lint, "BELT", self.belt),
-            mock.patch.object(rust_workspaces, "CARGO", str(self.bins / "cargo")),
-        ):
+        with mock.patch.object(rust_workspaces, "CARGO", str(self.bins / "cargo")):
             return hermetic.call_main(
                 lambda: rust_lint.main(list(argv)),
-                env=self.env | stub,
+                env=self.env | {"ORG_BELT_DIR": str(self.belt)} | stub,
                 cwd=self.tree,
             )
 

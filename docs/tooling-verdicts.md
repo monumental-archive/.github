@@ -916,7 +916,9 @@ than by reading them.
 now end `|| true` with the reason beside them. Isolated rather than
 guessed: the version collector matches 17 and exits 0, the run-URL
 collector matches nothing and exits 1, because the docs cite no Actions
-runs today.
+runs today. Since #1911 the walk is `mise/citations.py`, whose
+collectors are regular expressions with no exit status to mistake, so
+the `|| true` went with the shell.
 
 The direction matters and is the general rule, not a detail of this
 change. Strict-by-default with a named exception at each genuine site
