@@ -42,14 +42,11 @@ mise/config.toml	audit:go-vulns	44	# #1544 unassigned
 mise/config.toml	audit:blast-radius	26	# #1544 unassigned
 mise/config.toml	audit:attestations	27	# #1544 unassigned
 mise/config.toml	audit:source-vsa	22	# #1544 unassigned
-mise/config.toml	audit:template-pins	45	# #1544 unassigned
 mise/config.toml	audit:canon-pins	83	# #1544 unassigned
 mise/config.toml	audit:org-pins	127	# #1544 unassigned
 mise/config.toml	audit:biome-rules	40	# #1544 unassigned
 mise/config.toml	lint:gate-stub	57	# #1544 unassigned
-mise/config.toml	lint:capability-boundary	17	# #1544 unassigned
 mise/config.toml	lint:release-phases	112	# #1544 unassigned
-mise/config.toml	lint:signer-pin	44	# #1544 unassigned
 mise/config.toml	fix:input-forwarding	30	# #1544 unassigned
 mise/config.toml	lint:source-attest	75	# #1544 unassigned
 mise/config.toml	lint:actions-allowed	41	# #1544 unassigned
@@ -77,7 +74,6 @@ mise/config.toml	lint:toolbelt-lock	35	# #1544 unassigned
 mise/config.toml	lint:lock-platforms	21	# #1544 unassigned
 mise/config.toml	audit:lock-arch	63	# #1544 unassigned
 mise/config.toml	audit:lock-idempotent	100	# #1544 unassigned
-mise/config.toml	lint:nested-permissions	30	# #1544 unassigned
 mise/config.toml	lint:audit-scheduled	68	# #1544 unassigned
 mise/config.toml	lint:canon-policy	19	# #1544 unassigned
 mise/config.toml	lint:policy-load	45	# #1544 unassigned

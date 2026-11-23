@@ -4638,54 +4638,10 @@ compgen -G "workflow-templates/*.y*ml" > /dev/null || {
 . "${ORG_BELT_DIR}/identity.sh"
 canon_owner=$(org_identity owner)
 canon_repo=$(org_identity repo)
-canon="${canon_owner}/${canon_repo}"
-canon_re="${canon//./\\.}"
-sha=$(grep -hoE "uses:[[:space:]]*${canon_re}/[^@]+@[0-9a-f]{40}" \
-  workflow-templates/*.y*ml | grep -oE "[0-9a-f]{40}" | sort -u)
-[[ -n ${sha} ]] || {
-  echo "audit:template-pins: no org pins in templates, skipped"
-  exit 0
-}
-pins=$(wc -l <<< "${sha}" | tr -d " ")
-if [[ ${pins} -gt 1 ]]; then
-  org_finding "" "templates pin more than one SHA (lint:template-pins should have failed)"
-  exit 1
-fi
-if ! git cat-file -e "${sha}^{commit}" 2> /dev/null; then
-  org_finding "" "pinned SHA ${sha:0:8} not in local history (shallow clone?)"
-  exit 1
-fi
-drift=$(git diff --name-only "${sha}..HEAD" -- .github/workflows/ mise/)
-if [[ -n ${drift} ]]; then
-  # The post-release window (#290 finding 4, same shape as
-  # audit:canon-pins): a release commit cannot pin itself (#227), so
-  # right after a release the templates lawfully sit behind until
-  # Renovate's chore(canon) bump lands. The grace is measured as
-  # STALENESS DURATION, not releases-behind (#310 finding 1): the alarm
-  # is "this pin has been catchable for over a day and nothing caught
-  # it", so the clock starts at the EARLIEST tag newer than the pin — a
-  # burst of releases inside one bot cycle is one short staleness, not
-  # a multi-release alarm, while a week-old lag stays red no matter how
-  # recent the newest tag is. All local: tags and dates are in the clone.
-  pin_tag=$(git tag --points-at "${sha}" --list "v[0-9]*" | sed -n 1p)
-  succ_tag=$(git tag --list "v[0-9]*" | sort -V \
-    | awk -v p="${pin_tag}" '$0 == p { getline; print; exit }')
-  if [[ -n ${pin_tag} && -n ${succ_tag} ]]; then
-    age=$(($(date -u +%s) - $(git log -1 --format=%ct "${succ_tag}")))
-    if [[ ${age} -lt 86400 ]]; then
-      echo "audit:template-pins: post-release window — pin at ${pin_tag}, stale for $((age / 3600))h (since ${succ_tag})"
-      echo "  the lag is structural (#227); Renovate's chore(canon) bump"
-      echo "  closes it. Red only past the 24h grace (#290, #310)."
-      exit 0
-    fi
-  fi
-  IFS=$'\n' read -r -d '' -a detail < <(git log --no-decorate --oneline "${sha}..HEAD" -- .github/workflows/ mise/) || true
-  org_finding "" "pin ${sha:0:8} misses shipped canon changes:" ${detail[@]+"${detail[@]}"} \
-    "a repo standing up from the templates would not get these —" \
-    "bump the template pins to current canon (see #110, #111)."
-  exit 1
-fi
-echo "audit:template-pins: pin ${sha:0:8} carries all shipped workflow and belt changes"
+# The pin, the drift since it, and the post-release window (#290,
+# #310): mise/template_drift.py (#1911).
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/template_drift.py" \
+  "${canon_owner}/${canon_repo}" workflow-templates/*.y*ml
 '''
 
 [tasks."audit:canon-pins"]
@@ -5431,22 +5387,10 @@ compgen -G ".github/workflows/*.y*ml" > /dev/null || {
   echo "lint:capability-boundary: no workflows, skipped"
   exit 0
 }
-bad=""
-for f in .github/workflows/*.y*ml; do
-  grep -qE "^[[:space:]]*workflow_call:" "${f}" || continue
-  # Only a real grant counts. A workflow that says "no id-token, ever" in
-  # a comment is documenting the boundary, not breaching it — matching
-  # comment text flagged exactly the files that get this right.
-  grep -qE "^[^#]*id-token:[[:space:]]*write" "${f}" || continue
-  grep -qE "^[[:space:]]*#[[:space:]]*capability-boundary:" "${f}" && continue
-  bad="${bad} ${f}"
-done
-if [[ -n ${bad} ]]; then
-  org_finding "" "workflow_call workflow holds id-token" \
-    "without a capability-boundary marker:${bad}"
-  exit 1
-fi
-echo "lint:capability-boundary: ok"
+# Only a real grant counts: a workflow that says "no id-token, ever" in
+# a comment is documenting the boundary, not breaching it. The logic is
+# mise/capability_boundary.py (#1911).
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/capability_boundary.py" .github/workflows/*.y*ml
 '''
 
 [tasks."lint:release-phases"]
@@ -5669,6 +5613,8 @@ dir = "{{cwd}}"
 # command, and the lab's literal sat frozen at the signer's FIRST commit
 # while its uses: line was bumped twice — every dispatch a guaranteed
 # identity mismatch, silently.
+# identity.sh fails closed on a missing field, so the helper is never
+# handed an empty signer. The logic is mise/signer_pin.py (#1911).
 run = '''
 files=() && org_tracked_read files ':!vendor/**' ".github/workflows/*.y*ml"
 [[ -n ${files[0]+set} ]] || {
@@ -5676,44 +5622,11 @@ files=() && org_tracked_read files ':!vendor/**' ".github/workflows/*.y*ml"
   exit 0
 }
 . "${ORG_BELT_DIR}/identity.sh"
-canon_owner=$(org_identity owner)
-canon_repo=$(org_identity repo)
-canon="${canon_owner}/${canon_repo}"
-signer_wf=$(org_identity signer-workflow)
-signer_re="${signer_wf//./\\.}"
-literals=$(printf '%s\0' "${files[@]}" | xargs -0 grep -nE -- "--signer-digest[[:space:]]+[0-9a-f]{40}" || true)
-if [[ -n ${literals} ]]; then
-  IFS=$'\n' read -r -d '' -a detail <<< "${literals}" || true
-  org_finding "" "hand-written --signer-digest literal — nothing bumps it, so it drifts from the uses: pin the certificate will carry (#314):" "${detail[@]}" \
-    "derive it instead: uses: ${canon}/.github/actions/verify-signed" \
-    '($/.github/actions/verify-signed from a canon-owned workflow)'
-  exit 1
-fi
-if [[ -f security/signer.pin ]]; then
-  org_finding "" "security/signer.pin exists — the second copy of the signer identity was deleted (#316 finding 2)" \
-    "the uses: lines are the single statement of the trusted signer; verifiers derive from them" \
-    "(a standalone pin file has no Renovate manager the first-party group can match, so it" \
-    "bumps on a separate branch that can never pass this lint — the two-branch split)"
-  exit 1
-fi
-readers=$(printf '%s\0' "${files[@]}" | xargs -0 grep -lE "^[^#]*security/signer\.pin" || true)
-if [[ -n ${readers} ]]; then
-  org_finding "" "workflows read security/signer.pin (on a non-comment line) but the file is deleted (#316 finding 2) — derive from the sign.yml uses: pin instead:${readers}"
-  exit 1
-fi
-refs=$(printf '%s\0' "${files[@]}" | xargs -0 grep -hoE "${signer_re}@[0-9a-f]{40}" | sort -u || true)
-[[ -n ${refs} ]] || {
-  echo "lint:signer-pin: no signer references, skipped"
-  exit 0
-}
-count=$(wc -l <<< "${refs}" | tr -d " ")
-if [[ ${count} != "1" ]]; then
-  IFS=$'\n' read -r -d '' -a detail <<< "${refs}" || true
-  org_finding "" "sign.yml pinned at more than one digest — a tree states the trusted signer once:" "${detail[@]}" \
-    "a partial bump left the tree disagreeing with itself; move every uses: line together"
-  exit 1
-fi
-echo "lint:signer-pin: all signer references agree on ${refs##*@}"
+owner=$(org_identity owner)
+repo=$(org_identity repo)
+signer=$(org_identity signer-workflow)
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/signer_pin.py" "${owner}/${repo}" \
+  "${signer}" "${files[@]}"
 '''
 
 [tasks."lint:input-forwarding"]
@@ -8610,38 +8523,10 @@ compgen -G ".github/workflows/*.y*ml" > /dev/null || {
   echo "lint:nested-permissions: no workflows, skipped"
   exit 0
 }
-bad=""
-checked=0
-for f in .github/workflows/*.y*ml; do
-  # Any file with a `uses:` job — reusable workflows AND caller stubs.
-  # The trap is identical in both: a `uses:` job with no `permissions:`
-  # block takes the WORKFLOW-level default, never the caller's grant.
-  # Scoping this to workflow_call files missed every caller stub, which
-  # is exactly where the grant has to be written — and a shared workflow
-  # that gains a permission breaks all of its callers at once, silently.
-  grep -qE "^    uses:" "${f}" || continue
-  checked=$((checked + 1))
-  offenders=$(awk '
-    /^jobs:[[:space:]]*$/ { injobs = 1; next }
-    injobs && /^  [A-Za-z0-9_-]+:[[:space:]]*$/ {
-      if (job != "" && uses && !perms) print job
-      job = $1; sub(/:$/, "", job); uses = 0; perms = 0; next
-    }
-    injobs && /^    uses:/ { uses = 1 }
-    injobs && /^    permissions:/ { perms = 1 }
-    END { if (job != "" && uses && !perms) print job }
-  ' "${f}")
-  for j in ${offenders}; do bad="${bad} ${f}:${j}"; done
-done
-if [[ -n ${bad} ]]; then
-  read -r -a detail <<< "${bad}"
-  org_finding "" "nested uses: job with no permissions block:" "${detail[@]}" \
-    "it inherits the workflow-level default, not the caller grant —" \
-    "state exactly what the called workflow needs, or the run dies as" \
-    "startup_failure with no jobs and no log."
-  exit 1
-fi
-echo "lint:nested-permissions: ${checked} workflow(s) with uses: jobs clean"
+# Any file with a `uses:` job — reusable workflows AND caller stubs —
+# since the trap is the same in both; the logic is
+# mise/nested_permissions.py (#1911).
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/nested_permissions.py" .github/workflows/*.y*ml
 '''
 
 [tasks."lint:audit-scheduled"]
