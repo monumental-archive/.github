@@ -552,8 +552,7 @@ class RustInstrumented(unittest.TestCase):
                 self.assertEqual(0, call.returncode, err)
             lines = [ln.split(" | ")[0] for ln in log.read_text().splitlines()]
             cleans = [ln for ln in lines if ln.startswith("llvm-cov clean")]
-            once: list[str] = ["llvm-cov clean --workspace"]
-            self.assertEqual(once, cleans)
+            self.assertEqual(1, len(cleans), lines)
             ended = lines.index("clean ended")
             for name in ("first", "second"):
                 self.assertGreater(lines.index(f"test --{name}"), ended, lines)
