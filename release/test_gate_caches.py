@@ -22,8 +22,10 @@ use. These rows hold each cache step in ci.yml to the shape that fixes it:
   own cargo and Go caches, keyed by leg, and the test leg alone saves
   the tool cache every leg restores;
 - every cargo cache in every workflow names the compiler that fills it
-  (#1864): its key and fallback prefix carry the `rustc -vV` digest
-  before Cargo.lock's hash, from a step after the job's install.
+  (#1864): its key and fallback prefix carry the `rustc -vV` digest,
+  from a step after the job's install; and its key ends in the digest
+  of every other input that decides its contents (#2045), which the
+  fallback prefix never carries.
 
 The planted rows each break one property on the real file and assert the
 message that names it.
@@ -503,13 +505,21 @@ class LegCaches(unittest.TestCase):
 # compiler that built it made, so a key on Cargo.lock alone restored the
 # previous toolchain's objects after a bump and coverage read both. Every
 # cache holding a cargo path, in any workflow, keys on the digest
-# `gate_cache_key.py cargo` writes, before Cargo.lock's hash, and its
-# fallback prefix carries the digest too. The step runs after the job's
-# install, so the `rustc` it reads is the one the tasks build with, and
-# under the restore's own condition, so it runs wherever the restore does.
+# `gate_cache_key.py cargo` writes, and its fallback prefix carries the
+# digest too. The step runs after the job's install, so the `rustc` it
+# reads is the one the tasks build with, and under the restore's own
+# condition, so it runs wherever the restore does.
+#
+# AND EVERY OTHER INPUT (#2045). An entry is never written back, so the
+# key ends in `inputs`, the same step's digest of the runner image, the
+# canon ref and the tracked manifests, toolchain files and mise configs;
+# the step is handed the canon ref the run resolved. The fallback
+# prefix stops at the compiler's digest and never carries `inputs`.
 CARGO_PATHS = ("target", "~/.cargo/registry")
 DIGEST = "steps.rustc.outputs.digest"
-COMPILER_KEY = f"${{{{ {DIGEST} }}}}-${{{{ hashFiles('Cargo.lock') }}}}"
+INPUTS = "steps.rustc.outputs.inputs"
+COMPILER_KEY = f"${{{{ {DIGEST} }}}}-${{{{ {INPUTS} }}}}"
+CANON_REF = "${{ steps.canon.outputs.ref }}"
 WORKFLOWS = CANON / ".github" / "workflows"
 
 
@@ -524,6 +534,37 @@ def holds_cargo(step: Step) -> bool:
         return False
     paths = inputs(step).get("path", "").split()
     return any(p in CARGO_PATHS for p in paths)
+
+
+def handed_the_canon_ref(step: Step) -> bool:
+    """Say whether the cargo step is given the ref the run resolved (#2045).
+
+    Returns:
+        True when ORG_CANON_REF is the canon action's `ref` and the run
+        passes it as `--canon-ref`.
+
+    """
+    ref = table(step, "env").get("ORG_CANON_REF", "")
+    return ref == CANON_REF and "--canon-ref" in field(step, "run")
+
+
+def restore_findings(label: str, restore: Step) -> list[str]:
+    """Hold one cargo restore's key and fallback (#1864, #2045).
+
+    Returns:
+        One line per breach: a key not ending in the digest and the
+        inputs, a fallback without the digest or with the inputs.
+
+    """
+    out = []
+    if not flat(inputs(restore).get("key", "")).endswith(COMPILER_KEY):
+        out.append(f"{label} key does not end {COMPILER_KEY}")
+    fallback = flat(inputs(restore).get("restore-keys", ""))
+    if DIGEST not in fallback:
+        out.append(f"{label} fallback does not carry {DIGEST}")
+    if INPUTS in fallback:
+        out.append(f"{label} fallback carries {INPUTS}")
+    return out
 
 
 def compiler_findings(text: str, where: str = "ci.yml") -> list[str]:
@@ -554,17 +595,43 @@ def compiler_findings(text: str, where: str = "ci.yml") -> list[str]:
         at, digest_step = named[0]
         if not installs or at < installs[0]:
             out.append(f"{name}: the rustc digest is read before the install")
+        if not handed_the_canon_ref(digest_step):
+            out.append(f"{name}: the cargo step is not handed {CANON_REF}")
         for i, restore in restores:
             label = f"{name}: '{field(restore, 'name')}'"
-            if COMPILER_KEY not in inputs(restore).get("key", ""):
-                out.append(f"{label} key does not end {COMPILER_KEY}")
-            if DIGEST not in flat(inputs(restore).get("restore-keys", "")):
-                out.append(f"{label} fallback does not carry {DIGEST}")
+            out += restore_findings(label, restore)
             if at > i:
                 out.append(f"{label} restores before the rustc digest is read")
             if flat(field(digest_step, "if")) != flat(field(restore, "if")):
                 out.append(f"{label} runs under another condition than its digest")
     return out
+
+
+# The planted rows' anchors in the real ci.yml (#2045).
+KEYED = f"${{{{ {DIGEST} }}}}-${{{{ {INPUTS} }}}}"
+UNKEYED = f"${{{{ {DIGEST} }}}}"
+LOCKED = f"{UNKEYED}-${{{{ hashFiles('Cargo.lock') }}}}"
+RESTORE = (
+    "\n          restore-keys: >-\n"
+    "            ${{ env.ORG_GATE_CACHE_FALLBACK == 'true'\n"
+    "            && format('"
+)
+FALLBACK_END = (
+    "runner.os, steps.rustc.outputs.digest)\n            || '' }}"
+    "\n\n      # A PULL REQUEST"
+)
+FALLBACK_INPUTS = FALLBACK_END.replace(
+    "steps.rustc.outputs.digest)",
+    "format('{0}-{1}', steps.rustc.outputs.digest, steps.rustc.outputs.inputs))",
+)
+CARGO_RUN = (
+    '\'"${ORG_PYTHON}" .org-canon/mise/gate_cache_key.py cargo'
+    ' --canon-ref "${ORG_CANON_REF}"\''
+)
+HANDED = (
+    f"          ORG_CANON_REF: {CANON_REF}\n"
+    f"        run: {CARGO_RUN}\n\n      # unattested"
+)
 
 
 class Compiler(unittest.TestCase):
@@ -606,6 +673,26 @@ class Compiler(unittest.TestCase):
                 f"{gate} key does not end {COMPILER_KEY}",
             ),
             (
+                "the gate's key omits inputs",
+                (f"{KEYED}{RESTORE}gate-cargo-", f"{LOCKED}{RESTORE}gate-cargo-"),
+                f"{gate} key does not end {COMPILER_KEY}",
+            ),
+            (
+                "the pgrx key omits inputs",
+                (f"{KEYED}{RESTORE}gate-pgrx-", f"{UNKEYED}{RESTORE}gate-pgrx-"),
+                f"{pgrx} key does not end {COMPILER_KEY}",
+            ),
+            (
+                "a fallback carrying inputs",
+                (FALLBACK_END, FALLBACK_INPUTS),
+                f"{gate} fallback carries {INPUTS}",
+            ),
+            (
+                "the cargo step not handed the canon ref",
+                (HANDED, HANDED.replace(CANON_REF, "${{ github.sha }}")),
+                f"ci.yml: gate: the cargo step is not handed {CANON_REF}",
+            ),
+            (
                 "a fallback across compilers",
                 (
                     (
@@ -630,10 +717,7 @@ class Compiler(unittest.TestCase):
             ),
             (
                 "no digest step",
-                (
-                    "'\"${ORG_PYTHON}\" .org-canon/mise/gate_cache_key.py cargo'",
-                    "'true'",
-                ),
+                (f"{CARGO_RUN}\n\n      # unattested", "'true'\n\n      # unattested"),
                 "ci.yml: gate: no `gate_cache_key.py cargo` step with id rustc",
             ),
         ]
@@ -647,7 +731,9 @@ class Compiler(unittest.TestCase):
         step = (
             "      - name: Name the compiler the cargo caches hold\n"
             "        id: rustc\n"
-            "        run: '\"${ORG_PYTHON}\" .org-canon/mise/gate_cache_key.py cargo'\n"
+            "        env:\n"
+            f"          ORG_CANON_REF: {CANON_REF}\n"
+            f"        run: {CARGO_RUN}\n"
             "\n"
         )
         install = "      - name: Install mise and the leg's tools\n"
