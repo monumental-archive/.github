@@ -767,10 +767,11 @@ def plan(
             continue
         plain = [spec for spec in specs if spec.split("@")[0] not in extensions]
         if plain:
-            # `default`, never an empty field: the consumer is a bash
-            # `read` loop with IFS=tab, and bash collapses a run of
-            # whitespace separators, so an empty field shifts every field
-            # after it left by one.
+            # `default`, never an empty field: a plan is a tab-separated
+            # record, and a bash `read` with IFS=tab collapses a run of
+            # whitespace separators, so an empty field would shift every
+            # field after it left by one. Its consumer, msrv_lint.py
+            # (#1911), reads `default` as the gate's own features.
             records.append(f"check\t{toolchain}\tdefault\t{' '.join(plain)}")
         records.extend(
             f"check\t{toolchain}\t{extensions[spec.split('@')[0]]}\t{spec}"

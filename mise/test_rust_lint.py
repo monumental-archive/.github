@@ -34,7 +34,6 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import override
-from unittest import mock
 
 import decoded
 import hermetic
@@ -565,12 +564,11 @@ class Planted(unittest.TestCase):
             Its status and what it wrote.
 
         """
-        with mock.patch.object(rust_lint, "BELT", self.belt):
-            return hermetic.call_main(
-                lambda: rust_lint.main(list(argv)),
-                env=self.env | stub,
-                cwd=self.tree,
-            )
+        return hermetic.call_main(
+            lambda: rust_lint.main(list(argv)),
+            env=self.env | {"ORG_BELT_DIR": str(self.belt)} | stub,
+            cwd=self.tree,
+        )
 
     def logged(self) -> list[str]:
         """Read what the stubs were asked.

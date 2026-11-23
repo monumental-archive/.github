@@ -946,16 +946,16 @@ class WithIcu(IcuCase):
 # one of them in a subshell of its own (measure_one), and each
 # workspace-wide audit runs its workspace command at the default major
 # org_pgrx_provision names beside its per-extension one (#1940).
-# fix:rust's and lint:pg-clippy's compiles left their bodies for
-# mise/rust_lint.py and mise/pg_clippy.py (#1911), whose one call is
-# rust_lint's `at_major`: test_pgrx_task_majors.py proves each of them
-# carries its own major's headers and not the last one's.
+# fix:rust's, lint:msrv's and lint:pg-clippy's compiles left their
+# bodies for mise/rust_lint.py, mise/msrv_lint.py and mise/pg_clippy.py
+# (#1911), whose one call is mise/rust_task.py's `at_major`:
+# test_pgrx_task_majors.py proves each of them carries its own major's
+# headers and not the last one's.
 SITES = {
     "mise/pgrx-test.sh": 3,
     "mise/pg-schema.sh": 1,
     "mise/mutants-rust.sh": 2,
     "mise/semver-audit.sh": 2,
-    "lint:msrv": 1,
 }
 CANON = ENV_SH.parent.parent
 COMPILE = re.compile(r"\bcargo(-semver-checks)? |\bmutate ")
@@ -1082,13 +1082,8 @@ class NoLeak(unittest.TestCase):
             text = path.read_text(encoding="utf-8")
             if path.name != "pgrx-env.sh" and CALL.search(text):
                 found.add(f"mise/{path.name}")
-        found.update(
-            task
-            for task in ("lint:msrv", "lint:pg-clippy")
-            if CALL.search(site_text(task))
-        )
         config = (CANON / "mise" / "config.toml").read_text(encoding="utf-8")
-        self.assertEqual(1, len(list(CALL.finditer(config))))
+        self.assertEqual(0, len(list(CALL.finditer(config))))
         sites = set(SITES)
         self.assertEqual(sites, found)
 
