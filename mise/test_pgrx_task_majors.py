@@ -68,7 +68,9 @@ echo '[]'
 # in the order the pipeline runs them.
 PYTHON_STUB = r"""#!/usr/bin/env bash
 script=$(basename "$1")
-case ${script} in rust_lint.py | msrv_lint.py | pg_clippy.py) exec "${PLANT_PYTHON}" "$@" ;; esac
+case ${script} in
+  rust_lint.py | msrv_lint.py | pg_clippy.py) exec "${PLANT_PYTHON}" "$@" ;;
+esac
 shift
 [[ $1 == --failed ]] || cat > /dev/null
 printf '%s %s\n' "${script}" "$*" >> "${PLANT_LOG}"

@@ -8,8 +8,8 @@ test_rust_lint.py plants for rust_lint.py, whose plumbing this helper
 shares through mise/rust_task.py. cargo, rustup and mise are stubs on
 PATH that log what they were asked; the workspace's cargo metadata is
 read by the belt's real gate_surface.py, and its extension's major
-derived by the real pgrx-env.sh. Every row asserts the whole log, so a row cannot pass by
-stopping early.
+derived by the real pgrx-env.sh. Every row asserts the whole log, so a
+row cannot pass by stopping early.
 
 stdlib `unittest`, matching the other mise/test_*.py; run through the
 gate as `mise run test`.
