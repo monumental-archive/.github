@@ -202,8 +202,8 @@ org_pgrx_major() { # usage: org_pgrx_major <Postgres major, or empty> <commandâ€
   # One command that compiles the extension at one Postgres major, run in
   # a subshell holding the clang driver (#2022), that major's ICU headers
   # (#1774) and its Postgres (#1940): all end with the command, so the
-  # next major starts from the caller's environment. Empty: a command that compiles no Postgres, run
-  # as it is.
+  # next major starts from the caller's environment. Empty: a command
+  # that compiles no Postgres, run as it is.
   local major="$1"
   shift
   (
