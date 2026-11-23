@@ -60,6 +60,10 @@ CLEAN_MARKDOWN = "# Title\n\nSome text.\n"
 # A git that fails every call, as git does outside a repository.
 FAILING_GIT = "#!/bin/sh\necho 'git: planted failure' >&2\nexit 128\n"
 FAILING_STUBS = {"git": FAILING_GIT}
+# A cargo that answers locate-project with the tree's root manifest.
+LOCATING_CARGO = (
+    '#!/bin/sh\n[ "$1" = locate-project ] && echo "${PWD}/Cargo.toml"\nexit 0\n'
+)
 
 
 def read_into(
@@ -515,9 +519,10 @@ class UntrackedIsAbsent(unittest.TestCase):
         """Cargo.lock tracked, deny.toml beside it untracked: refused."""
         done = run_task(
             "lint:deny",
-            {"Cargo.lock": "version = 4\n"},
+            {"Cargo.toml": "[workspace]\n", "Cargo.lock": "version = 4\n"},
             {"deny.toml": "[graph]\n"},
-            stubs={"cargo": "#!/bin/sh\nexit 0\n"},
+            # cargo names the root workspace, and does nothing else.
+            stubs={"cargo": LOCATING_CARGO},
         )
         self.assertEqual(1, done.returncode, done.stdout + done.stderr)
         self.assertIn("lint:deny: Cargo.lock present but no deny.toml", done.stderr)
