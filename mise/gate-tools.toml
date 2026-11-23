@@ -115,6 +115,7 @@ tasks = [
   "lint:pg-schema",
   "lint:python-types",
   "lint:release-stub",
+  "lint:rust",
   "lint:rust-properties",
   "lint:scaffold-assembly",
   "lint:signer-pin",
