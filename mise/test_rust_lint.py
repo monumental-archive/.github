@@ -15,19 +15,30 @@ refuses the first member and passes the rest, and the stub records each
 crate it was asked to lint. clippy's verdict on a crate is clippy's to
 prove; the row is about which crates are asked.
 
+The task's body after its guard is mise/rust_lint.py (#1911). The
+rows from `Planted` on call its `main` in this process, one row per
+branch of lint:rust and of fix:rust with its message asserted, against
+a planted belt whose ladder and pgrx provisioning are stubs.
+
 stdlib `unittest`, matching the other mise/test_*.py; run through the
 gate as `mise run test`.
 """
 
 import itertools
+import json
 import os
+import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import override
+from unittest import mock
 
 import decoded
 import hermetic
+import rust_lint
 
 BELT = Path(__file__).resolve().parent
 METADATA = BELT.parent / "release" / "testdata" / "edtf-cargo-metadata.json"
@@ -378,6 +389,650 @@ class TheStubOutlivesItsReader(unittest.TestCase):
             finally:
                 os.close(write)
         self.assertEqual(0, done.returncode)
+
+
+# The rows below call mise/rust_lint.py's `main` in this process (#1911),
+# in a planted tree, against a planted belt whose ladder, pgrx
+# provisioning and Postgres pin check are stubs. cargo, rustup and mise
+# are stubs on a PATH that holds nothing else, and each logs what it was
+# asked. The workspace: two plain members, `a` and `b`; `ext`, a pgrx
+# extension at majors 16 and 17; and `held`, named in CLIPPY_EXCLUDE.
+STUB_CARGO = """\
+#!/usr/bin/env bash
+printf 'cargo %s\\n' "$*" >> "${STUB_LOG}"
+if [[ $1 == clippy ]]; then
+  printf '%s' "${STUB_CLIPPY_OUT:-}"
+  [[ $2 != --fix ]] || exit "${STUB_FIX_STATUS:-0}"
+  [[ $3 != "${STUB_RED:-none}@"* ]] || exit 101
+  exit 0
+fi
+case "$1" in
+  fmt) printf '%s' "${STUB_FMT_OUT:-}"; exit "${STUB_FMT_STATUS:-0}" ;;
+  fetch) exit "${STUB_FETCH_STATUS:-0}" ;;
+  metadata) cat "${STUB_METADATA}" ;;
+  *) exit 99 ;;
+esac
+"""
+STUB_RUSTUP = """\
+#!/usr/bin/env bash
+printf '%b' "${STUB_COMPONENTS-clippy-host\\nrustfmt-host\\n}"
+"""
+STUB_MISE = """\
+#!/usr/bin/env bash
+printf 'mise %s\\n' "$*" >> "${STUB_LOG}"
+echo '[]'
+"""
+# What the belt's three provisioning files are replaced with: a ladder
+# of one flag and no contradiction, a prepare that exports a mark the
+# stub cargo logs (or fails), a major's headers as a second mark, and a
+# pin check that reads its input and exits as the row says.
+STUB_LADDER = """
+org_clippy_ladder() { [[ -z ${STUB_LADDER_FAILS:-} ]] || return 3; echo "-D warnings"; }
+org_clippy_contradiction_count() { echo 0; }
+"""
+STUB_PGRX_ENV = """
+. "${STUB_REAL_BELT}/pgrx-env.sh"
+org_pgrx_darwin_prepare() {
+  printf 'prepare %s\\n' "$*" >> "${STUB_LOG}"
+  [[ -z ${STUB_PREPARE_FAILS:-} ]] || return 5
+  export STUB_PREPARED=yes
+}
+org_pgrx_major_env() { export STUB_MAJOR="pg$1"; }
+"""
+STUB_PIN = """
+import os
+import sys
+
+sys.stdin.read()
+sys.exit(int(os.environ.get("STUB_PIN_STATUS", "0")))
+"""
+FIX_CARGO = """\
+#!/usr/bin/env bash
+marks="${STUB_PREPARED:-} ${STUB_MAJOR:-}"
+printf 'cargo %s [%s]\\n' "$*" "${marks}" >> "${STUB_LOG}"
+[[ $1 != metadata ]] || cat "${STUB_METADATA}"
+[[ $1 != clippy || $5 != ext ]] || exit "${STUB_EXT_STATUS:-0}"
+exit 0
+"""
+
+
+def member(name: str, *, pgrx: bool = False) -> dict[str, object]:
+    """Write one package of cargo metadata.
+
+    Returns:
+        The package, a pgrx extension at pg16 and pg17 when asked.
+
+    """
+    return {
+        "id": f"{name} 0.1.0",
+        "name": name,
+        "version": "0.1.0",
+        "features": {"pg16": [], "pg17": []} if pgrx else {},
+        "dependencies": [{"name": "pgrx"}] if pgrx else [],
+        "manifest_path": f"/ws/{name}/Cargo.toml",
+    }
+
+
+def workspace(*packages: dict[str, object]) -> str:
+    """Write cargo metadata for a workspace of the given members.
+
+    Returns:
+        The JSON cargo prints.
+
+    """
+    members: list[object] = [pkg["id"] for pkg in packages]
+    document: dict[str, object] = {
+        "workspace_root": "/ws",
+        "workspace_members": members,
+        "packages": list(packages),
+    }
+    return json.dumps(document)
+
+
+FOUR = workspace(member("a"), member("b"), member("ext", pgrx=True), member("held"))
+PLAIN = workspace(member("a"), member("b"), member("held"))
+SKIP_MESSAGE = [
+    "#![rustfmt::skip] exempts an entire file — never allowed",
+    "#[rustfmt::skip] must carry a '// rustfmt-skip: <why>' marker above it",
+    (
+        "rustfmt has no #[expect] analogue, so the comment is the only"
+        " thing a reviewer sees"
+    ),
+]
+
+
+class Planted(unittest.TestCase):
+    """A planted tree, a planted belt and the stubs, for rust_lint.py's rows."""
+
+    task = "lint:rust"
+    cargo = STUB_CARGO
+
+    @override
+    def setUp(self) -> None:
+        """Plant the tree, the belt and the stubs."""
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp)
+        self.tree = tmp / "repo"
+        self.bins = tmp / "bin"
+        self.bins.mkdir()
+        for name, text in (
+            ("cargo", self.cargo),
+            ("rustup", STUB_RUSTUP),
+            ("mise", STUB_MISE),
+        ):
+            (self.bins / name).write_text(text, encoding="utf-8")
+            (self.bins / name).chmod(0o755)
+        # The stubs' own interpreter; the rest of PATH is the system's,
+        # which holds no cargo, rustup or mise.
+        (self.bins / "bash").symlink_to(BASH)
+        self.belt = hermetic.belt(
+            tmp / "belt",
+            stubs={
+                "clippy-ladder.sh": STUB_LADDER,
+                "pgrx-env.sh": STUB_PGRX_ENV,
+                "pgrx_postgres.py": STUB_PIN,
+            },
+        )
+        self.log = tmp / "log"
+        self.metadata = tmp / "metadata.json"
+        self.metadata.write_text(FOUR, encoding="utf-8")
+        self.env = hermetic.env(
+            tmp / "home",
+            PATH=os.pathsep.join((str(self.bins), "/usr/bin", "/bin")),
+            MISE_TASK_NAME=self.task,
+            ORG_FINDINGS="",
+            ORG_PYTHON=sys.executable,
+            CLIPPY_EXCLUDE="held",
+            STUB_LOG=str(self.log),
+            STUB_METADATA=str(self.metadata),
+            STUB_REAL_BELT=str(BELT),
+        )
+        self.plant({"Cargo.toml": "[workspace]\n", "src/lib.rs": "\n"})
+
+    def plant(self, files: dict[str, str]) -> None:
+        """Write files into the tree and track them."""
+        for name, text in files.items():
+            (self.tree / name).parent.mkdir(parents=True, exist_ok=True)
+            (self.tree / name).write_text(text, encoding="utf-8")
+        if not (self.tree / ".git").exists():
+            subprocess.run([GIT, "init", "-q"], cwd=self.tree, env=self.env, check=True)
+        subprocess.run([GIT, "add", "."], cwd=self.tree, env=self.env, check=True)
+
+    def call(self, *argv: str, **stub: str) -> hermetic.Called:
+        """Call rust_lint.py's main in the tree, from the planted belt.
+
+        Returns:
+            Its status and what it wrote.
+
+        """
+        with mock.patch.object(rust_lint, "BELT", self.belt):
+            return hermetic.call_main(
+                lambda: rust_lint.main(list(argv)),
+                env=self.env | stub,
+                cwd=self.tree,
+            )
+
+    def logged(self) -> list[str]:
+        """Read what the stubs were asked.
+
+        Returns:
+            One line per call.
+
+        """
+        if not self.log.exists():
+            return []
+        return self.log.read_text(encoding="utf-8").splitlines()
+
+    def assert_finding(self, done: hermetic.Called, status: int, *lines: str) -> None:
+        """Assert the status, and the finding's lines in order on stderr."""
+        self.assertEqual(status, done.returncode, done.stdout + done.stderr)
+        head, *detail = lines
+        want = f"{self.task}: {head}\n" + "".join(f"  {line}\n" for line in detail)
+        self.assertIn(want, done.stderr)
+
+
+class LintBeforeClippy(Planted):
+    """Each of lint:rust's branches before clippy, its message asserted (#1911)."""
+
+    def test_cargo_missing_is_red(self) -> None:
+        """No cargo on PATH: the toolchain is broken, never a skip."""
+        (self.bins / "cargo").unlink()
+        done = self.call("lint")
+        self.assert_finding(
+            done, 1, "Cargo.toml present but cargo missing — pin rust in mise.toml"
+        )
+        self.assertEqual(NOT_ASKED, self.logged())
+
+    def test_clippy_missing_is_red(self) -> None:
+        """A rustup that lists no clippy: the remedy names the pin."""
+        done = self.call("lint", STUB_COMPONENTS="rustfmt-host\\n")
+        self.assert_finding(
+            done,
+            1,
+            "clippy component missing — declare it with the rust pin in mise.toml:",
+            'rust = { version = "1.xx.x", components = "clippy,rustfmt,llvm-tools" }',
+            "(installed with the toolchain, before tasks run — never mid-run)",
+        )
+
+    def test_no_rustup_reads_as_no_clippy(self) -> None:
+        """No rustup: no component is installed."""
+        (self.bins / "rustup").unlink()
+        done = self.call("lint")
+        self.assertEqual(1, done.returncode)
+        self.assertIn("lint:rust: clippy component missing", done.stderr)
+
+    def test_a_failing_rustup_reads_as_no_clippy(self) -> None:
+        """A rustup that exits nonzero: what it printed is not believed."""
+        (self.bins / "rustup").write_text(
+            "#!/usr/bin/env bash\necho clippy-host\nexit 1\n", encoding="utf-8"
+        )
+        done = self.call("lint")
+        self.assertEqual(1, done.returncode)
+        self.assertIn("lint:rust: clippy component missing", done.stderr)
+
+    def test_a_local_clippy_toml_is_red(self) -> None:
+        """A tracked clippy.toml lowers the org's knobs: red, by name."""
+        self.plant({"clippy.toml": "\n", "crates/a/rustfmt.toml": "\n"})
+        done = self.call("lint")
+        self.assert_finding(
+            done,
+            1,
+            "repo-local Rust tool configuration is not the org's:",
+            "clippy.toml",
+            "crates/a/rustfmt.toml",
+            "the knobs live in the canon's mise/clippy.toml and mise/rustfmt.toml,",
+            "delivered through CLIPPY_CONF_DIR and rustfmt's --config-path",
+            (
+                "a setting this repo genuinely needs is argued into the canon,"
+                " not kept locally"
+            ),
+        )
+
+    def test_the_canon_holds_its_delivered_configs(self) -> None:
+        """With the identity tracked, mise/clippy.toml is the belt's own (#746)."""
+        self.plant({
+            "security/identity.toml": "\n",
+            "mise/clippy.toml": "\n",
+            "mise/rustfmt.toml": "\n",
+        })
+        done = self.call("lint")
+        self.assertEqual(0, done.returncode, done.stderr)
+
+    def test_a_consumer_mise_clippy_toml_is_red(self) -> None:
+        """Without the identity, mise/clippy.toml is a shadow config."""
+        self.plant({"mise/clippy.toml": "\n"})
+        done = self.call("lint")
+        self.assertEqual(1, done.returncode)
+        self.assertIn("lint:rust: repo-local Rust tool configuration", done.stderr)
+        self.assertIn("  mise/clippy.toml\n", done.stderr)
+
+    def test_rustfmt_missing_is_red(self) -> None:
+        """A rustup that lists no rustfmt: the remedy names the pin."""
+        done = self.call("lint", STUB_COMPONENTS="clippy-host\\n")
+        self.assert_finding(
+            done,
+            1,
+            "rustfmt component missing — declare it with the rust pin in mise.toml:",
+            'rust = { version = "1.xx.x", components = "clippy,rustfmt,llvm-tools" }',
+        )
+
+    def test_a_whole_file_skip_is_red(self) -> None:
+        """`#![rustfmt::skip]`, indented: never allowed."""
+        self.plant({"src/lib.rs": "  #![rustfmt::skip]\n"})
+        done = self.call("lint")
+        self.assert_finding(
+            done,
+            1,
+            "formatting suppressed without a written decision: src/lib.rs(whole-file)",
+            *SKIP_MESSAGE,
+        )
+        self.assertEqual(NOT_ASKED, self.logged())
+
+    def test_a_narrow_skip_without_a_marker_is_red(self) -> None:
+        """`#[rustfmt::skip]` with no `rustfmt-skip:` comment: red."""
+        self.plant({"src/a.rs": "#[rustfmt::skip]\nfn f() {}\n", "src/b.rs": "\n"})
+        done = self.call("lint")
+        self.assert_finding(
+            done,
+            1,
+            "formatting suppressed without a written decision: src/a.rs(no marker)",
+            *SKIP_MESSAGE,
+        )
+
+    def test_a_narrow_skip_with_a_marker_passes(self) -> None:
+        """`// rustfmt-skip: <why>` above it: green."""
+        text = "// rustfmt-skip: a table\n#[rustfmt::skip]\nfn f() {}\n"
+        self.plant({"src/a.rs": text})
+        done = self.call("lint")
+        self.assertEqual(0, done.returncode, done.stderr)
+
+    def test_a_vendored_skip_is_not_read(self) -> None:
+        """vendor/ is not the repository's code; a deleted file is passed over."""
+        self.plant({"vendor/x/lib.rs": "#![rustfmt::skip]\n", "src/gone.rs": "\n"})
+        (self.tree / "src" / "gone.rs").unlink()
+        done = self.call("lint")
+        self.assertEqual(0, done.returncode, done.stderr)
+
+    def test_a_rustfmt_warning_is_red(self) -> None:
+        """A rustfmt warning with exit 0: an ignored option is a weaker format."""
+        out = "Warning: Unknown configuration option `x`\n"
+        done = self.call("lint", STUB_FMT_OUT=out)
+        self.assert_finding(
+            done,
+            1,
+            "rustfmt warned — an ignored option means a weaker format, silently",
+        )
+        self.assertIn(out, done.stderr)
+
+    def test_unformatted_code_is_red(self) -> None:
+        """A failing format check: the diff is shown and fix:rust named."""
+        out = "Diff in src/lib.rs at line 1:\n"
+        done = self.call("lint", STUB_FMT_OUT=out, STUB_FMT_STATUS="1")
+        self.assert_finding(
+            done, 1, "formatting differs from the org's — run 'mise run fix:rust'"
+        )
+        self.assertIn(out, done.stderr)
+        self.assertNotIn("formatting clean", done.stdout)
+
+    def test_a_suppression_clippy_cannot_see_is_red(self) -> None:
+        """rust_suppressions.py reads every tracked manifest and source."""
+        self.plant({"src/lib.rs": "#![allow(dead_code)]\n"})
+        done = self.call("lint")
+        self.assertEqual(1, done.returncode)
+        self.assertIn(UNSEEN, done.stderr)
+        self.assertNotIn("cargo fetch --locked", self.logged())
+
+
+class LintClippy(Planted):
+    """Each of lint:rust's branches from the ladder on, its message asserted."""
+
+    def test_a_failing_ladder_keeps_its_status(self) -> None:
+        """The ladder cannot be read: nothing is linted."""
+        done = self.call("lint", STUB_LADDER_FAILS="1")
+        self.assertEqual(3, done.returncode)
+        self.assertNotIn("cargo fetch --locked", self.logged())
+
+    def test_a_failing_fetch_keeps_its_status(self) -> None:
+        """A failing `cargo fetch`: its status, and no metadata read."""
+        done = self.call("lint", STUB_FETCH_STATUS="7")
+        self.assertEqual(7, done.returncode)
+        self.assertEqual("cargo fetch --locked", self.logged()[-1])
+
+    def test_unreadable_metadata_is_red(self) -> None:
+        """Metadata that is not JSON: gate_surface.py's status, nothing linted.
+
+        The finding is gate_surface.py's, on its own stderr, which this
+        process does not capture; test_gate_surface.py asserts it.
+        """
+        self.metadata.write_text("not json", encoding="utf-8")
+        done = self.call("lint")
+        self.assertEqual(1, done.returncode)
+        self.assertNotIn("clippy", "\n".join(self.logged()))
+
+    def test_a_workspace_of_no_member_is_red(self) -> None:
+        """Metadata naming no member: never a pass over nothing."""
+        self.metadata.write_text(workspace(), encoding="utf-8")
+        done = self.call("lint")
+        self.assert_finding(
+            done,
+            1,
+            "a Cargo.toml is tracked but cargo metadata names no workspace member",
+        )
+
+    def test_a_clean_workspace_prints_its_population(self) -> None:
+        """Each plain member is linted; the extension and the excluded are named."""
+        done = self.call("lint")
+        self.assertEqual(0, done.returncode, done.stderr)
+        said = [
+            "lint:rust: formatting clean",
+            "lint:rust: 2 crate(s) linted: a b",
+            "lint:rust: pgrx extension(s), linted by lint:pg-clippy: ext",
+            "lint:rust: excluded by CLIPPY_EXCLUDE: held",
+            (
+                "lint:rust: clean at every group"
+                " (restriction minus 0 named contradictions)"
+            ),
+        ]
+        self.assertEqual(said, done.stdout.splitlines())
+        clippy = "--no-deps --all-targets --all-features --locked --keep-going"
+        want = [
+            f"cargo fmt --all --check -- --config-path {self.belt}/rustfmt.toml",
+            "cargo fetch --locked",
+            "cargo metadata --no-deps --format-version 1 --locked",
+            f"cargo clippy -p a@0.1.0 {clippy} -- -D warnings",
+            f"cargo clippy -p b@0.1.0 {clippy} -- -D warnings",
+        ]
+        self.assertEqual(want, self.logged())
+
+    def test_clippy_features_replace_all_features(self) -> None:
+        """CLIPPY_FEATURES is split into words, in place of --all-features."""
+        done = self.call("lint", CLIPPY_FEATURES="--no-default-features  --features x")
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertIn(
+            "cargo clippy -p a@0.1.0 --no-deps --all-targets --no-default-features"
+            " --features x --locked --keep-going -- -D warnings",
+            self.logged(),
+        )
+
+    def test_a_red_member_is_named_with_clippys_status(self) -> None:
+        """A red `a`: every member is still asked, and cargo's 101 is kept."""
+        done = self.call("lint", STUB_RED="a")
+        self.assert_finding(done, 101, "red: a")
+        self.assertIn("lint:rust: 2 crate(s) linted: a b\n", done.stdout)
+        self.assertEqual(2, sum("cargo clippy" in line for line in self.logged()))
+
+    def test_clippy_output_is_shown(self) -> None:
+        """What clippy prints reaches stdout as it comes."""
+        done = self.call("lint", STUB_CLIPPY_OUT="warning: a note\n")
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertEqual(2, done.stdout.count("warning: a note\n"))
+
+    def test_a_feature_some_crate_lacks_is_red(self) -> None:
+        """Cargo's `does not contain this feature`: the CLIPPY_FEATURES finding."""
+        out = "error: package `a` does not contain this feature: x\n"
+        done = self.call("lint", STUB_CLIPPY_OUT=out)
+        self.assert_finding(
+            done,
+            1,
+            "CLIPPY_FEATURES names a feature some crate in this workspace lacks",
+            (
+                "every crate is linted as its own package (#726),"
+                " so the value has to be one"
+            ),
+            (
+                "each member accepts — --all-features, or --no-default-features"
+                " — and a crate"
+            ),
+            "that genuinely cannot take it is named in CLIPPY_EXCLUDE instead",
+        )
+
+    def test_an_unknown_lint_name_is_red(self) -> None:
+        """E0602: the exclusion list names a lint this toolchain lacks."""
+        done = self.call("lint", STUB_CLIPPY_OUT="warning[E0602]: unknown lint\n")
+        self.assert_finding(
+            done,
+            1,
+            "a lint name above is unknown to this toolchain (see E0602/renamed above)",
+            (
+                "clippy renamed or removed it — update the exclusion list"
+                " in mise/config.toml"
+            ),
+        )
+
+    def test_a_renamed_lint_name_is_red(self) -> None:
+        """`has been renamed to`: the same finding."""
+        out = "warning: lint `x` has been renamed to `y`\n"
+        done = self.call("lint", STUB_CLIPPY_OUT=out)
+        self.assertEqual(1, done.returncode)
+        self.assertIn("lint:rust: a lint name above is unknown", done.stderr)
+
+    def test_no_extension_and_no_exclusion_print_neither_line(self) -> None:
+        """Only the lines that name something are printed."""
+        self.metadata.write_text(workspace(member("a")), encoding="utf-8")
+        done = self.call("lint")
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertNotIn("pgrx extension", done.stdout)
+        self.assertNotIn("excluded", done.stdout)
+
+    def test_no_subcommand_is_a_usage_error(self) -> None:
+        """No task named: status 2, the usage."""
+        done = self.call()
+        self.assert_finding(done, 2, "usage: rust_lint.py lint|fix")
+
+
+class FixBranches(Planted):
+    """Each of fix:rust's branches, its message asserted (#1911)."""
+
+    task = "fix:rust"
+    cargo = FIX_CARGO
+
+    def test_cargo_missing_is_red(self) -> None:
+        """No cargo on PATH: red, as the gate leg."""
+        (self.bins / "cargo").unlink()
+        done = self.call("fix")
+        self.assert_finding(
+            done, 1, "Cargo.toml present but cargo missing — pin rust in mise.toml"
+        )
+
+    def test_each_missing_component_is_red(self) -> None:
+        """clippy, then rustfmt, each named."""
+        for listed, missing in (
+            ("rustfmt-host\\n", "clippy"),
+            ("clippy-host\\n", "rustfmt"),
+        ):
+            with self.subTest(missing=missing):
+                done = self.call("fix", STUB_COMPONENTS=listed)
+                self.assert_finding(
+                    done,
+                    1,
+                    f"{missing} component missing"
+                    " — declare it with the rust pin in mise.toml",
+                )
+
+    def test_a_failing_format_keeps_its_status(self) -> None:
+        """A failing `cargo fmt`: its status, and nothing fixed."""
+        (self.bins / "cargo").write_text(
+            "#!/usr/bin/env bash\nexit 4\n", encoding="utf-8"
+        )
+        done = self.call("fix")
+        self.assertEqual(4, done.returncode)
+        self.assertNotIn("formatted", done.stdout)
+
+    def test_a_failing_ladder_keeps_its_status(self) -> None:
+        """The ladder cannot be read: formatted, nothing fixed."""
+        done = self.call("fix", STUB_LADDER_FAILS="1")
+        self.assertEqual(3, done.returncode)
+        formatted: list[str] = ["fix:rust: formatted"]
+        self.assertEqual(formatted, done.stdout.splitlines())
+
+    def test_a_workspace_without_extensions(self) -> None:
+        """One --workspace pass, the excluded held out and named."""
+        self.metadata.write_text(PLAIN, encoding="utf-8")
+        done = self.call("fix")
+        self.assertEqual(0, done.returncode, done.stderr)
+        want = [
+            f"cargo fmt --all -- --config-path {self.belt}/rustfmt.toml [ ]",
+            "cargo fetch --locked [ ]",
+            "cargo metadata --no-deps --format-version 1 --locked [ ]",
+            (
+                "cargo clippy --fix --allow-dirty --workspace --exclude held"
+                " --all-features --locked -- -D warnings [ ]"
+            ),
+        ]
+        self.assertEqual(want, self.logged())
+        said = [
+            "fix:rust: formatted",
+            "fix:rust: a b rewritten where clippy could",
+            "fix:rust: excluded by CLIPPY_EXCLUDE: held",
+            "fix:rust: applied what is machine-applicable — the rest is judgement",
+        ]
+        self.assertEqual(said, done.stdout.splitlines())
+
+    def test_nothing_left_to_fix_says_none(self) -> None:
+        """Every member excluded: ` none`, and no exclusion of an extension."""
+        self.metadata.write_text(workspace(member("held")), encoding="utf-8")
+        done = self.call("fix")
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertIn("fix:rust: none rewritten where clippy could\n", done.stdout)
+
+    def test_a_failing_fix_pass_keeps_its_status(self) -> None:
+        """The workspace pass fails: its status, no extension pass."""
+        self.plant({})
+        (self.bins / "cargo").write_text(
+            "#!/usr/bin/env bash\n[[ $1 != clippy ]] || exit 6\n"
+            '[[ $1 != metadata ]] || cat "${STUB_METADATA}"\n',
+            encoding="utf-8",
+        )
+        done = self.call("fix")
+        self.assertEqual(6, done.returncode)
+        self.assertNotIn("prepare 16,17", self.logged())
+
+    def test_the_extension_is_fixed_at_its_highest_major(self) -> None:
+        """The extension is held out of the workspace pass and fixed at pg17.
+
+        What the prepare exported reaches the compile, and so does the
+        major's own environment.
+        """
+        done = self.call("fix")
+        self.assertEqual(0, done.returncode, done.stderr)
+        own = "--no-deps --all-targets --locked --no-default-features"
+        want = [
+            (
+                "cargo clippy --fix --allow-dirty --workspace --exclude held"
+                " --exclude ext --all-features --locked -- -D warnings [ ]"
+            ),
+            "prepare 17",
+            "mise ls aqua:theseus-rs/postgresql-binaries --json",
+            (
+                "cargo clippy --fix --allow-dirty -p ext"
+                f" {own} --features pg17 -- -D warnings [yes pg17]"
+            ),
+        ]
+        self.assertEqual(want, self.logged()[3:])
+        said = [
+            "fix:rust: formatted",
+            "fix:rust: a b rewritten where clippy could",
+            "fix:rust: pgrx extension(s) fixed: ext(pg17)",
+            "fix:rust: excluded by CLIPPY_EXCLUDE: held",
+            "fix:rust: applied what is machine-applicable — the rest is judgement",
+        ]
+        self.assertEqual(said, done.stdout.splitlines())
+
+    def test_a_failing_prepare_keeps_its_status(self) -> None:
+        """The prepare fails: its status, and the extension never compiled."""
+        done = self.call("fix", STUB_PREPARE_FAILS="1")
+        self.assertEqual(5, done.returncode)
+        self.assertEqual("prepare 17", self.logged()[-1])
+
+    def test_a_failing_pin_check_keeps_its_status(self) -> None:
+        """A major with no Postgres pinned: the check's status."""
+        done = self.call("fix", STUB_PIN_STATUS="8")
+        self.assertEqual(8, done.returncode)
+        self.assertNotIn("ext(pg17)", done.stdout)
+
+    def test_a_failing_extension_fix_keeps_its_status(self) -> None:
+        """The extension's own pass fails: its status."""
+        done = self.call("fix", STUB_EXT_STATUS="9")
+        self.assertEqual(9, done.returncode)
+        self.assertNotIn("ext(pg17)", done.stdout)
+
+    def test_a_failing_union_keeps_its_status(self) -> None:
+        """The majors cannot be derived: no pass runs."""
+        self.belt.joinpath("pgrx-env.sh").write_text(
+            STUB_PGRX_ENV + "org_pgrx_union() { return 4; }\n", encoding="utf-8"
+        )
+        done = self.call("fix")
+        self.assertEqual(4, done.returncode)
+        self.assertNotIn("--fix", "\n".join(self.logged()))
+
+    def test_a_failing_highest_keeps_its_status(self) -> None:
+        """Each extension's major cannot be derived: no pass runs."""
+        self.belt.joinpath("pgrx-env.sh").write_text(
+            STUB_PGRX_ENV + "org_pgrx_highest() { return 2; }\n", encoding="utf-8"
+        )
+        done = self.call("fix")
+        self.assertEqual(2, done.returncode)
+        self.assertNotIn("--fix", "\n".join(self.logged()))
 
 
 if __name__ == "__main__":
