@@ -255,6 +255,7 @@ tasks = [
   "lint:belt-tree",
   "lint:biome",
   "lint:caller-permissions",
+  "lint:capability-boundary",
   "lint:citation",
   "lint:coverage-exclusions",
   "lint:deny",
