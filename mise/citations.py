@@ -75,6 +75,7 @@ class Network:
     """The live reads, one method each, so a row can stand them in."""
 
     gh: str
+    git: str = GIT
 
     def org_repos(self, owner: str) -> list[str] | None:
         """List the org's repositories through gh.
@@ -102,7 +103,7 @@ class Network:
         """
         url = f"https://github.com/{owner}/{repo}"
         done = subprocess.run(
-            [GIT, "ls-remote", "--tags", url, "v[0-9]*"],
+            [self.git, "ls-remote", "--tags", url, "v[0-9]*"],
             capture_output=True,
             text=True,
             check=False,
@@ -194,8 +195,10 @@ def documents(top: Path) -> list[str] | None:
             "",
             "on the canon, and docs/ holds no tracked markdown —",
             [
-                "there is nothing to resolve, so there is nothing to report"
-                " clean (#738)."
+                (
+                    "there is nothing to resolve, so there is nothing to report"
+                    " clean (#738)."
+                ),
             ],
         )
         return None
@@ -227,6 +230,26 @@ def unresolved(
     return fail, len(pairs), len(runs)
 
 
+def connect(net: Reads | None) -> tuple[Reads, str] | None:
+    """Reach the org the environment names.
+
+    Returns:
+        The reads and the owner, or None after the finding.
+
+    """
+    if net is None:
+        gh = shutil.which("gh")
+        if gh is None:
+            findings.finding("", "gh missing")
+            return None
+        net = Network(gh)
+    owner = os.environ.get("GITHUB_REPOSITORY_OWNER", "")
+    if not owner:
+        findings.finding("", OWNER_UNSET)
+        return None
+    return net, owner
+
+
 def main(net: Reads | None = None, top: Path | None = None) -> int:
     """Resolve docs/'s citations.
 
@@ -236,18 +259,10 @@ def main(net: Reads | None = None, top: Path | None = None) -> int:
     """
     top = top or Path.cwd()
     docs = documents(top)
-    if docs is None:
+    reached = connect(net) if docs is not None else None
+    if docs is None or reached is None:
         return EXIT_RED
-    if net is None:
-        gh = shutil.which("gh")
-        if gh is None:
-            findings.finding("", "gh missing")
-            return EXIT_RED
-        net = Network(gh)
-    owner = os.environ.get("GITHUB_REPOSITORY_OWNER", "")
-    if not owner:
-        findings.finding("", OWNER_UNSET)
-        return EXIT_RED
+    net, owner = reached
     repos = net.org_repos(owner)
     if repos is None:
         findings.finding("", "could not enumerate org repos — nothing was resolved")

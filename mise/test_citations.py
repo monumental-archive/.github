@@ -106,8 +106,9 @@ def audit(
         tree.mkdir()
         plant(tree, files)
         out, err = io.StringIO(), io.StringIO()
+        named: dict[str, str] = {"GITHUB_REPOSITORY_OWNER": owner}
         with (
-            mock.patch.dict(os.environ, {"GITHUB_REPOSITORY_OWNER": owner}),
+            mock.patch.dict(os.environ, named),
             contextlib.redirect_stdout(out),
             contextlib.redirect_stderr(err),
         ):
@@ -152,7 +153,7 @@ class Inputs(unittest.TestCase):
 
     def test_no_gh_is_red(self) -> None:
         """With no network stand-in and no gh on PATH: `gh missing`."""
-        with mock.patch.object(citations.shutil, "which", return_value=None):
+        with mock.patch("shutil.which", return_value=None):
             status, _, err = audit(DOC, None)
         self.assertEqual((1, f"{TASK}: gh missing\n"), (status, err))
 
@@ -166,7 +167,7 @@ class Listing(unittest.TestCase):
     """The org listing is the population; a broken one resolves nothing."""
 
     def test_a_failed_listing_is_red(self) -> None:
-        """gh could not list: nothing was resolved."""
+        """Gh could not list: nothing was resolved."""
         status, _, err = audit(DOC, Org(repos=None))
         self.assertEqual(
             (1, f"{TASK}: could not enumerate org repos — nothing was resolved\n"),
@@ -179,8 +180,10 @@ class Listing(unittest.TestCase):
         self.assertEqual(
             (
                 1,
-                f"{TASK}: the org listing named zero repositories — the walk is\n"
-                "  broken, not the docs, and nothing was resolved\n",
+                (
+                    f"{TASK}: the org listing named zero repositories — the walk"
+                    " is\n  broken, not the docs, and nothing was resolved\n"
+                ),
             ),
             (status, err),
         )
@@ -248,37 +251,38 @@ class Resolution(unittest.TestCase):
         self.assertIn("0 org release citation(s)", out)
 
 
+def run_body(files: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    """Run the task's body in a tree tracking `files`.
+
+    Returns:
+        The finished run.
+
+    """
+    config = decoded.load_toml((BELT / "config.toml").read_bytes())
+    tasks = decoded.as_object(config["tasks"], "the belt's [tasks]")
+    body = decoded.as_str(decoded.as_object(tasks[TASK], TASK)["run"], TASK)
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = Path(tmp) / "repo"
+        tree.mkdir()
+        plant(tree, files)
+        as_mise = hermetic.task_run(TASK, body)
+        env = hermetic.env(Path(tmp) / "home", ORG_BELT_DIR=str(BELT))
+        return subprocess.run(
+            as_mise.argv,
+            cwd=tree,
+            env=env | as_mise.env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+
 class Body(unittest.TestCase):
     """The task's body: the canon guard, then the helper."""
 
-    def run_body(self, files: dict[str, str]) -> subprocess.CompletedProcess[str]:
-        """Run the body in a planted tree.
-
-        Returns:
-            The finished run.
-
-        """
-        config = decoded.load_toml((BELT / "config.toml").read_bytes())
-        tasks = decoded.as_object(config["tasks"], "the belt's [tasks]")
-        body = decoded.as_str(decoded.as_object(tasks[TASK], TASK)["run"], TASK)
-        with tempfile.TemporaryDirectory() as tmp:
-            tree = Path(tmp) / "repo"
-            tree.mkdir()
-            plant(tree, files)
-            as_mise = hermetic.task_run(TASK, body)
-            env = hermetic.env(Path(tmp) / "home", ORG_BELT_DIR=str(BELT))
-            return subprocess.run(
-                as_mise.argv,
-                cwd=tree,
-                env=env | as_mise.env,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-
     def test_not_the_canon_skips(self) -> None:
         """No tracked security/identity.toml: skipped, exit 0."""
-        done = self.run_body({"README.md": "x\n"})
+        done = run_body({"README.md": "x\n"})
         self.assertEqual(
             (0, f"{TASK}: no tracked security/identity.toml, not the canon, skipped\n"),
             (done.returncode, done.stdout),
@@ -286,7 +290,7 @@ class Body(unittest.TestCase):
 
     def test_the_canon_reaches_the_helper(self) -> None:
         """The canon with no docs/: the helper's missing-input red."""
-        done = self.run_body({"security/identity.toml": "x\n"})
+        done = run_body({"security/identity.toml": "x\n"})
         self.assertEqual(1, done.returncode)
         self.assertIn(
             f"{TASK}: on the canon, and the input this leg walks is missing: docs/",
