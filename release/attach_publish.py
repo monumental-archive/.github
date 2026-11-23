@@ -51,6 +51,7 @@ sys.path.append(str(pathlib.Path(__file__).resolve().parents[1] / "mise"))
 import decoded
 import findings
 import workflow_command
+from belt_scripts import script
 
 HERE = pathlib.Path(__file__).resolve().parent
 DIST = pathlib.Path("dist")
@@ -220,7 +221,9 @@ def publish(tag: str, repo: str, *, dry_run: bool) -> None:
             "KIND": "rehearsal",
             "RUN_URL": f"{server}/{repo}/actions/runs/{run_id}",
         }
-        recorded = subprocess.run([str(HERE / "record-draft.sh")], env=env, check=False)
+        recorded = subprocess.run(
+            [str(script(HERE, "record-draft.sh"))], env=env, check=False
+        )
         if recorded.returncode != 0:
             raise SystemExit(recorded.returncode)
         workflow_command.warning(f"rehearsal: {tag} left as a draft, nothing published")

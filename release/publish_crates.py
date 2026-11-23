@@ -77,6 +77,7 @@ from typing import TYPE_CHECKING, Protocol
 # sibling is named through it.
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 import findings
+from belt_scripts import script
 
 try:
     import crates_index
@@ -202,7 +203,7 @@ def members(env: Mapping[str, str], cwd: Path) -> list[tuple[str, str]]:
         Each member's name and version.
 
     """
-    out = checked([str(HERE / "crates-io-members.sh")], env, cwd, capture=True)
+    out = checked([str(script(HERE, "crates-io-members.sh"))], env, cwd, capture=True)
     pairs: list[tuple[str, str]] = []
     for line in out.splitlines():
         if line:

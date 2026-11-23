@@ -33,12 +33,13 @@ from pathlib import Path
 
 import findings
 import tracked
+from belt_scripts import script
 
 EXIT_RED = 1
 EXIT_ERROR = 2
 BASH = shutil.which("bash") or "bash"
 DIFF = shutil.which("diff") or "diff"
-RENDER = Path(__file__).resolve().with_name("citation.sh")
+RENDER = script(Path(__file__).resolve().parent, "citation.sh")
 # grep's [[:space:]] within one line: lines split on "\n" alone, as grep's.
 SPACE = r"[ \t\r\f\v]"
 MINTING = re.compile(rf"^[^#]*mint-doi:{SPACE}*true")

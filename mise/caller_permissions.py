@@ -33,12 +33,13 @@ import sys
 from pathlib import Path
 
 import findings
+from belt_scripts import script
 
 EXIT_RED = 1
 EXIT_ERROR = 2
 # The canon and at least one workflow.
 MIN_ARGS = 2
-ADAPTER = Path(__file__).resolve().parent / "stele_findings.py"
+ADAPTER = script(Path(__file__).resolve().parent, "stele_findings.py")
 USAGE = "usage: caller_permissions.py CANON_DIR WORKFLOW..."
 
 

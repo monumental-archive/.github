@@ -42,6 +42,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parents[1] / "mise"))
 
 import findings
+from belt_scripts import script
 
 HERE = Path(__file__).resolve().parent
 PACKAGE = Path("target") / "package"
@@ -114,7 +115,7 @@ def published() -> list[tuple[str, str]]:
 
     """
     done = subprocess.run(
-        [str(HERE / "crates-io-members.sh")],
+        [str(script(HERE, "crates-io-members.sh"))],
         stdout=subprocess.PIPE,
         text=True,
         check=False,

@@ -14,10 +14,11 @@ tools their steps call.
 
 A call is a tool's command at command position (line start, after a
 separator, behind `xargs`), with quoted literals blanked so a message
-naming a tool is not a call; a Python helper calls what it hands
-`subprocess` as a quoted list element, what any belt module it
-imports does, and what a belt script it runs calls (#1911); any Python
-helper calls python3.
+naming a tool is not a call; a Python helper calls what
+mise/python_runs.py reads it to call (#2037: a literal lookup or argv
+head), what any belt module it imports does, and what a belt script it
+hands `belt_scripts.script()` calls (#1911); any Python helper calls
+python3.
 
 A GUARD is what a task tests before its first "skipped" exit: the
 pathspecs it hands `org_tracked` (mise/tracked.sh, #1986) or a `git
@@ -37,7 +38,6 @@ from pre-push. Every git here runs without any `GIT_*` variable.
 stdlib `unittest`, matching the other mise/test_*.py.
 """
 
-import ast
 import contextlib
 import dataclasses
 import io
@@ -53,6 +53,7 @@ from unittest import mock
 import decoded
 import gate_tools
 import hermetic
+import python_runs
 import typed_std
 
 CANON = Path(__file__).resolve().parent.parent
@@ -224,14 +225,33 @@ def expand(text: str, seen: set[str]) -> list[tuple[str, str]]:
             if name in seen or not path.is_file():
                 continue
             seen.add(name)
-            if name.endswith(".py"):
-                out.append((f"py:{name}", "python3"))
-                for script in spawned(name):
-                    if script not in seen:
-                        seen.add(script)
-                        out += expand(_source(script), seen)
-            else:
-                out += expand(path.read_text("utf-8"), seen)
+            out += ran(name, seen)
+    return out
+
+
+def ran(name: str, seen: set[str]) -> list[tuple[str, str]]:
+    """Inline one belt script, already marked seen, as `expand` does.
+
+    A Python helper stands as one "py:<file>" line, then every belt
+    script it, or a belt module it imports, hands `script()`
+    (mise/python_runs.py, the reader the release job installs share,
+    #2037): a `*.sh` is expanded as shell, the way a body's own script
+    is, and a `*.py` as a helper. rust_task.py's pgrx-env.sh reaches
+    findings.sh's jq for every task that provisions pgrx.
+
+    Returns:
+        (kind, line) pairs, as `expand` returns them.
+
+    """
+    if not name.endswith(".py"):
+        return expand(_source(name), seen)
+    out = [(f"py:{name}", "python3")]
+    for module in belt_imports(name):
+        for script in python_code(module).scripts:
+            if script in seen or not (BELT / script).is_file():
+                continue
+            seen.add(script)
+            out += ran(script, seen)
     return out
 
 
@@ -244,14 +264,27 @@ def _source(name: str) -> str:
     return _SOURCES[name]
 
 
-IMPORT = re.compile(r"^(?:import|from) (\w+)", re.MULTILINE)
+_CODE: dict[str, python_runs.Runs] = {}
+
+
+def python_code(name: str) -> python_runs.Runs:
+    """Read a belt helper through mise/python_runs.py, the one reader.
+
+    Returns:
+        What it runs: its commands, its scripts, its subprocess strings.
+
+    """
+    if name not in _CODE:
+        _CODE[name] = python_runs.python_code(_source(name), name)
+    return _CODE[name]
 
 
 def belt_imports(name: str) -> list[str]:
     """Name a Python helper and every belt module it imports, transitively.
 
-    A helper calls what a belt module it imports spawns: embedded_shell.py
-    reads `run:` values through workflow_yaml.py, which runs yq (#1846).
+    A helper calls what a belt module it imports calls: embedded_shell.py
+    reads `run:` values through workflow_yaml.py, which runs yq (#1846),
+    and exit_trap.py imports belt_shell.py inside a `try:` (#2037).
 
     Returns:
         File names in the belt, the helper's own first.
@@ -260,55 +293,11 @@ def belt_imports(name: str) -> list[str]:
     out = [name]
     todo = [name]
     while todo:
-        for module in found(IMPORT, _source(todo.pop())):
+        for module in sorted(python_code(todo.pop()).imports):
             imported = f"{module}.py"
             if imported not in out and (BELT / imported).is_file():
                 out.append(imported)
                 todo.append(imported)
-    return out
-
-
-SPAWNS = re.compile(r"^(?:import|from) subprocess", re.MULTILINE)
-BELT_SCRIPT = re.compile(r"(?<![\w.-])([\w-]+\.sh)\b")
-
-
-def spawned(name: str) -> list[str]:
-    """Name the belt shell scripts a Python helper runs (#1911).
-
-    A helper, or a belt module it imports, that imports subprocess and
-    names a belt `.sh` in a string of its code runs that script:
-    citation_check.py runs citation.sh, whose findings call jq. Its
-    docstrings are prose, never a run. A module that spawns nothing only
-    names a script (testing_adoption.py's table).
-
-    Returns:
-        Script names in the belt, each once, in the order found.
-
-    """
-    out: list[str] = []
-    for module in belt_imports(name):
-        text = _source(module)
-        if not SPAWNS.search(text):
-            continue
-        tree = ast.parse(text)
-        docs = {
-            id(node.body[0].value)
-            for node in ast.walk(tree)
-            if isinstance(
-                node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
-            )
-            and node.body
-            and isinstance(node.body[0], ast.Expr)
-            and isinstance(node.body[0].value, ast.Constant)
-        }
-        for node in ast.walk(tree):
-            if not (isinstance(node, ast.Constant) and isinstance(node.value, str)):
-                continue
-            if id(node) in docs:
-                continue
-            for script in found(BELT_SCRIPT, node.value):
-                if script not in out and (BELT / script).is_file():
-                    out.append(script)
     return out
 
 
@@ -350,21 +339,6 @@ def venv_command(line: str) -> str | None:
     return positionals[1] if len(positionals) > 1 else None
 
 
-def python_calls(text: str, commands: list[str]) -> bool:
-    """Say whether Python source spawns one of the commands.
-
-    A helper that imports no subprocess spawns nothing; one that does
-    names its command as a quoted list element (`["shfmt", "-d", f]`).
-
-    Returns:
-        True when it does.
-
-    """
-    if not re.search(r"^(?:import|from) subprocess", text, re.MULTILINE):
-        return False
-    return any(re.search(rf'[\[(,]\s*"{re.escape(c)}"', text) for c in commands)
-
-
 def first_call(lines: list[tuple[str, str]], cmds: list[str]) -> int | None:
     """Find where an expanded body first calls one of the commands.
 
@@ -379,7 +353,7 @@ def first_call(lines: list[tuple[str, str]], cmds: list[str]) -> int | None:
             break
         if kind.startswith("py:"):
             helper = belt_imports(kind[3:])
-            if any(python_calls(_source(f), cmds) for f in helper):
+            if any(python_code(f).commands & set(cmds) for f in helper):
                 return i
             if "python3" in cmds:
                 return i
@@ -744,46 +718,107 @@ class Table(unittest.TestCase):
         self.assertEqual(1, first_call(expand(text, set()), ["yq"]))
 
     def test_a_helper_calls_what_a_belt_script_it_runs_calls(self) -> None:
-        """Planted: a helper runs a belt script; the script's tool is called.
+        """Planted: a helper sources a script it hands `script()`; its tool is called.
 
-        Read alone, the helper spawns no tool, and the table's row for
-        the script's tool would be stale (#1911: citation_check.py runs
-        citation.sh, whose findings call jq). A script only named in a
-        docstring, or by a module that spawns nothing, is not run.
+        rust_task.py runs `bash -c '. <belt>/pgrx-env.sh; …'` for
+        rust_lint.py, pg_clippy.py and msrv_lint.py, and pgrx-env.sh's
+        findings call jq (#2037). A script only named in a string or a
+        docstring is not run, whether or not the helper spawns.
         """
         with tempfile.TemporaryDirectory() as tmp:
             belt_dir = Path(tmp)
-            (belt_dir / "planted.sh").write_text("hadolint Dockerfile\n", "utf-8")
+            (belt_dir / "planted.sh").write_text(
+                "f() {\n  hadolint Dockerfile\n}\n", "utf-8"
+            )
             (belt_dir / "named.sh").write_text("shfmt -d x\n", "utf-8")
             (belt_dir / "runs.py").write_text(
                 '"""Runs planted.sh, never named.sh."""\n'
                 "import subprocess\n"
-                'subprocess.run(["bash", "planted.sh"], check=True)\n',
+                "from pathlib import Path\n"
+                "from belt_scripts import script\n"
+                'HERE = script(Path(__file__).parent, "planted.sh")\n'
+                'NAMED = "named.sh"\n'
+                'subprocess.run(["bash", "-c", f". {HERE}; f"], check=True)\n',
                 "utf-8",
             )
-            (belt_dir / "names.py").write_text('SCRIPT = "named.sh"\n', "utf-8")
             here = sys.modules[__name__]
             with (
                 mock.patch.object(here, "BELT", belt_dir),
                 mock.patch.dict(_SOURCES, clear=True),
+                mock.patch.dict(_CODE, clear=True),
             ):
-                self.assertEqual("planted.sh", " ".join(spawned("runs.py")))
-                self.assertEqual("", " ".join(spawned("names.py")))
+                planted: list[str] = ["planted.sh"]
+                self.assertEqual(planted, python_code("runs.py").scripts)
                 runs = expand('"${ORG_PYTHON}" "${ORG_BELT_DIR}/runs.py"', set())
-                self.assertEqual(2, first_call(runs, ["hadolint"]))
+                self.assertEqual(3, first_call(runs, ["hadolint"]))
                 self.assertIsNone(first_call(runs, ["shfmt"]))
-                names = expand('"${ORG_PYTHON}" "${ORG_BELT_DIR}/names.py"', set())
-                self.assertIsNone(first_call(names, ["shfmt"]))
+
+    def test_a_name_in_a_message_is_charged_nothing(self) -> None:
+        """Planted: a tool and a script named only in a message (#1903).
+
+        The helper spawns git; hadolint and planted.sh are prose.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            belt_dir = Path(tmp)
+            (belt_dir / "planted.sh").write_text("hadolint Dockerfile\n", "utf-8")
+            (belt_dir / "says.py").write_text(
+                "import subprocess\n"
+                'print("run hadolint, or planted.sh, by hand")\n'
+                'subprocess.run(["git", "status"], check=True)\n',
+                "utf-8",
+            )
+            here = sys.modules[__name__]
+            with (
+                mock.patch.object(here, "BELT", belt_dir),
+                mock.patch.dict(_SOURCES, clear=True),
+                mock.patch.dict(_CODE, clear=True),
+            ):
+                says = expand('"${ORG_PYTHON}" "${ORG_BELT_DIR}/says.py"', set())
+                self.assertIsNone(first_call(says, ["hadolint"]))
+                self.assertEqual(1, first_call(says, ["git"]))
+
+    def test_a_list_a_wrapper_runs_is_a_call(self) -> None:
+        """Planted: an argv literal handed to the helper's own wrapper (#2037)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            belt_dir = Path(tmp)
+            (belt_dir / "wraps.py").write_text(
+                "import subprocess\n\n\n"
+                "def go(argv):\n    return subprocess.run(argv, check=False)\n\n\n"
+                'go(["hadolint", "x"])\n',
+                "utf-8",
+            )
+            here = sys.modules[__name__]
+            with (
+                mock.patch.object(here, "BELT", belt_dir),
+                mock.patch.dict(_SOURCES, clear=True),
+                mock.patch.dict(_CODE, clear=True),
+            ):
+                wraps = expand('"${ORG_PYTHON}" "${ORG_BELT_DIR}/wraps.py"', set())
+                self.assertEqual(1, first_call(wraps, ["hadolint"]))
 
     def test_the_belt_helpers_that_run_belt_scripts(self) -> None:
         """The belt's real helpers: run, and only named.
 
-        rust_lint.py runs the clippy ladder and the pgrx provisioning;
-        testing_adoption.py names the mutation scripts and runs none.
+        rust_lint.py and pg_clippy.py reach the clippy ladder and the
+        pgrx provisioning through rust_task.py; testing_adoption.py
+        names the mutation scripts and runs none.
         """
-        ran = " ".join(sorted(spawned("rust_lint.py")))
-        self.assertEqual("clippy-ladder.sh pgrx-env.sh", ran)
-        self.assertEqual("", " ".join(spawned("testing_adoption.py")))
+        for helper in ("rust_lint.py", "pg_clippy.py"):
+            with self.subTest(helper=helper):
+                reached: set[str] = {
+                    name
+                    for module in belt_imports(helper)
+                    for name in python_code(module).scripts
+                }
+                self.assertLessEqual({"clippy-ladder.sh", "pgrx-env.sh"}, reached)
+                lines = expand(f'"${{ORG_PYTHON}}" "${{ORG_BELT_DIR}}/{helper}"', set())
+                self.assertIsNotNone(first_call(lines, ["jq"]))
+        none: list[str] = []
+        self.assertEqual(none, python_code("testing_adoption.py").scripts)
+        adoption = expand(
+            '"${ORG_PYTHON}" "${ORG_BELT_DIR}/testing_adoption.py"', set()
+        )
+        self.assertIsNone(first_call(adoption, ["cargo-mutants", "cosmic-ray"]))
 
     def test_the_venv_check_uses_its_command(self) -> None:
         """`tool_python.py LABEL COMMAND` uses COMMAND's tool (#1788)."""
