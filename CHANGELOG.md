@@ -10,6 +10,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.78.0](https://github.com/monumental-archive/.github/compare/v1.77.0...v1.78.0) - 2026-11-23
+
+### Added
+
+- balance test shards and run test roots side by side ([#2057](https://github.com/monumental-archive/.github/pull/2057))
+
+### Fixed
+
+- read what a python helper runs by construction ([#2058](https://github.com/monumental-archive/.github/pull/2058))
+- clean the workspace before each show-env coverage run ([#2063](https://github.com/monumental-archive/.github/pull/2063))
+- claim a coverage build directory for one run ([#2064](https://github.com/monumental-archive/.github/pull/2064))
+- name the toolchain, not the image build, in the cargo key ([#2067](https://github.com/monumental-archive/.github/pull/2067))
+- update monumental-archive/signer to 06f903c ([#2068](https://github.com/monumental-archive/.github/pull/2068))
+- update jdx/mise to 2026.11.9 ([#2069](https://github.com/monumental-archive/.github/pull/2069))
+
 ## [1.77.0](https://github.com/monumental-archive/.github/compare/v1.76.0...v1.77.0) - 2026-11-23
 
 ### Added
