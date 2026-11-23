@@ -243,6 +243,7 @@ jobs:
           persist-credentials: false
 
       - name: Resolve the canon tree (the ref the caller pinned)
+        id: canon
         uses: $/.github/actions/canon
 
       # A MERGE GROUP IS ITS PULL REQUEST'S CURRENT HEAD (#1422). On
@@ -446,10 +447,17 @@ jobs:
       # build with. In the key, a bump misses; in the fallback prefix, a
       # pull request falls back only to an entry the same compiler
       # filled. No rustc is a red step, never an empty digest.
+      #
+      # The same step writes `inputs` (#2045): the sha256 of the runner
+      # image, the canon ref this run resolved and every tracked cargo
+      # manifest, lockfile, toolchain file and mise config. The key
+      # carries it after the digest; the fallback prefix does not.
       - name: Name the compiler the cargo caches hold
         id: rustc
         if: ${{ matrix.leg != 'properties' && hashFiles('Cargo.lock') != '' }}
-        run: '"${ORG_PYTHON}" .org-canon/mise/gate_cache_key.py cargo'
+        env:
+          ORG_CANON_REF: ${{ steps.canon.outputs.ref }}
+        run: '"${ORG_PYTHON}" .org-canon/mise/gate_cache_key.py cargo --canon-ref "${ORG_CANON_REF}"'
 
       # unattested-path: same standing as the Go caches above — this
       # gate signs and publishes nothing, cargo checks every registry
@@ -467,8 +475,20 @@ jobs:
       # The lint and test legs only, each under a name of its own
       # (#1740): clippy's `target` and the test build's are different
       # contents, so one shared entry would hold whichever leg saved it;
-      # each lint shard keeps its own (#2049). The key and its fallback carry the compiler's digest before
-      # Cargo.lock's hash (#1864), named in the step above.
+      # each lint shard keeps its own (#2049). The key and its fallback
+      # carry the compiler's digest (#1864), named in the step above.
+      #
+      # THE KEY NAMES WHAT DECIDES THE CONTENTS; AN ENTRY IS NEVER
+      # WRITTEN BACK (#2045). Only a default-branch run that missed
+      # saves, so an input the key left out kept a stale entry hitting
+      # for ever: edtf added pg19, and its lint leg built pgrx-pg-sys
+      # cold on every run under an exact hit, Cargo.lock and the
+      # compiler unchanged. So the key ends in `inputs`, the step
+      # above's digest of every declared input — the runner image, the
+      # canon ref, the tracked manifests, lockfiles, toolchain files and
+      # mise configs — and nothing is ever added to it by hand. The
+      # fallback prefix stops at the compiler's digest, so a pull
+      # request still falls back to any entry the same compiler filled.
       - name: Restore the cargo caches (unsigned gate only)
         id: cargo-cache
         if: ${{ matrix.leg != 'properties' && hashFiles('Cargo.lock') != '' }}
@@ -477,7 +497,7 @@ jobs:
           path: |
             ~/.cargo/registry
             target
-          key: gate-cargo-${{ env.ORG_SLOT }}-${{ runner.os }}-${{ steps.rustc.outputs.digest }}-${{ hashFiles('Cargo.lock') }}
+          key: gate-cargo-${{ env.ORG_SLOT }}-${{ runner.os }}-${{ steps.rustc.outputs.digest }}-${{ steps.rustc.outputs.inputs }}
           restore-keys: >-
             ${{ env.ORG_GATE_CACHE_FALLBACK == 'true'
             && format('gate-cargo-{0}-{1}-{2}-', env.ORG_SLOT, runner.os, steps.rustc.outputs.digest)
@@ -676,6 +696,7 @@ jobs:
           persist-credentials: false
 
       - name: Resolve the canon tree (the ref the caller pinned)
+        id: canon
         uses: $/.github/actions/canon
 
       # Same placement as the `gate` job's, for the same reason (#1165).
@@ -756,10 +777,13 @@ jobs:
           key: ${{ steps.tool-cache.outputs.cache-primary-key }}
 
       # The compiler the cargo caches hold (#1864), as in the `gate`
-      # job: this leg's own Rust, from the list it installed.
+      # job: this leg's own Rust, from the list it installed; and the
+      # inputs beside it (#2045), as there.
       - name: Name the compiler the cargo caches hold
         id: rustc
-        run: '"${ORG_PYTHON}" .org-canon/mise/gate_cache_key.py cargo'
+        env:
+          ORG_CANON_REF: ${{ steps.canon.outputs.ref }}
+        run: '"${ORG_PYTHON}" .org-canon/mise/gate_cache_key.py cargo --canon-ref "${ORG_CANON_REF}"'
 
       # unattested-path: this gate signs and publishes nothing, so the
       # cold-build rule (#117, docs/release.md) permits the cargo cache
@@ -767,8 +791,9 @@ jobs:
       # extension is its own artifact set; cargo checks registry sources
       # against Cargo.lock, so a poisoned entry cannot change what
       # compiles. Nothing pgrx writes rides with `target`, as in the
-      # `gate` job (#1940). The key and its fallback carry the
-      # compiler's digest before Cargo.lock's hash, as there (#1864).
+      # `gate` job (#1940). The key carries the compiler's digest and
+      # the inputs, its fallback the digest alone, as there (#1864,
+      # #2045).
       - name: Restore the cargo caches (unsigned gate only)
         id: cargo-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -776,7 +801,7 @@ jobs:
           path: |
             ~/.cargo/registry
             target
-          key: gate-pgrx-${{ matrix.major }}-${{ runner.os }}-${{ steps.rustc.outputs.digest }}-${{ hashFiles('Cargo.lock') }}
+          key: gate-pgrx-${{ matrix.major }}-${{ runner.os }}-${{ steps.rustc.outputs.digest }}-${{ steps.rustc.outputs.inputs }}
           restore-keys: >-
             ${{ env.ORG_GATE_CACHE_FALLBACK == 'true'
             && format('gate-pgrx-{0}-{1}-{2}-', matrix.major, runner.os, steps.rustc.outputs.digest)

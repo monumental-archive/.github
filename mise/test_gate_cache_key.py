@@ -8,19 +8,23 @@ mise.toml, digested as @actions/glob does — reproduced before this was
 written. If these rows pass and the first run after #1406 still misses,
 the reproduction is wrong, not the fixture. #1414 appends the belt
 lockfile's digest to that key; the rows hold both halves. #1864 adds the
-cargo caches' compiler digest, read from `rustc -vV`.
+cargo caches' compiler digest, read from `rustc -vV`; #2045 the digest
+of every other input that decides what the cargo caches hold.
 """
 
+import contextlib
 import hashlib
 import io
 import os
 import platform
 import stat
+import subprocess
 import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from typing import override
 from unittest import mock
 
 import gate_cache_key
@@ -392,8 +396,50 @@ def rustc_on_path(tmp: Path, script: str) -> str:
     return str(bin_dir)
 
 
-def cargo_main(path: str) -> tuple[int, str, str]:
-    """Run `cargo` with PATH set to `path`, as the workflow step does.
+# The workflow's ORG_MISE_CONFIG_GLOBS, read from the real gate, so the
+# rows hash exactly the configs the tool key does.
+CI = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "ci.yml"
+GLOBS = "\n".join(
+    line.strip()
+    for line in CI
+    .read_text("utf-8")
+    .split("ORG_MISE_CONFIG_GLOBS: |-\n", 1)[1]
+    .split("\n\n", 1)[0]
+    .splitlines()
+)
+CANON_REF = "v1.76.0"
+# A Rust tree as edtf's was before pg19: one crate, one major.
+TREE = {
+    "Cargo.toml": '[package]\nname = "edtf"\n\n[features]\npg18 = []\n',
+    "Cargo.lock": "version = 4\n",
+    "mise.toml": '[tools]\nrust = "1.97.1"\n',
+}
+
+
+def git_tree(root: Path, files: dict[str, str]) -> Path:
+    """Write `files` into a fresh repository at `root` and track them.
+
+    Returns:
+        `root`.
+
+    """
+    git = hermetic.tool("git")
+    env = hermetic.env()
+    subprocess.run([git, "init", "-q", str(root)], env=env, check=True)
+    for name, text in files.items():
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_text(text, "utf-8")
+    subprocess.run([git, "-C", str(root), "add", "--", *files], env=env, check=True)
+    return root
+
+
+def cargo_main(
+    path: str,
+    tree: Path | None = None,
+    canon_ref: str = CANON_REF,
+    **runner: str,
+) -> tuple[int, str, str]:
+    """Run `cargo` in `tree` with PATH set to `path`, as the workflow does.
 
     Returns:
         The exit code, what it wrote to GITHUB_OUTPUT and its stderr.
@@ -402,15 +448,38 @@ def cargo_main(path: str) -> tuple[int, str, str]:
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / "out"
         out.touch()
-        env = {**RUNNER, "GITHUB_OUTPUT": str(out), "PATH": path}
+        where = tree or git_tree(Path(tmp) / "tree", TREE)
+        env = {
+            **RUNNER,
+            "ImageVersion": "20261116.1.0",
+            "ORG_MISE_CONFIG_GLOBS": GLOBS,
+            "GITHUB_OUTPUT": str(out),
+            "PATH": path,
+            **runner,
+        }
         err = io.StringIO()
         with (
+            contextlib.chdir(where),
             mock.patch.dict(os.environ, env, clear=True),
             redirect_stdout(io.StringIO()),
             redirect_stderr(err),
         ):
-            code = gate_cache_key.main(["cargo"])
+            code = gate_cache_key.main(["cargo", "--canon-ref", canon_ref])
         return code, out.read_text("utf-8"), err.getvalue()
+
+
+def outputs(written: str) -> dict[str, str]:
+    """Read what a step wrote to GITHUB_OUTPUT.
+
+    Returns:
+        Each `name=value` line, by name.
+
+    """
+    out: dict[str, str] = {}
+    for line in written.splitlines():
+        name, _, value = line.partition("=")
+        out[name] = value
+    return out
 
 
 class Compiler(unittest.TestCase):
@@ -452,16 +521,19 @@ class Compiler(unittest.TestCase):
             path = rustc_on_path(Path(tmp), f"printf '%s' '{RUSTC}'")
             code, written, _ = cargo_main(path)
         self.assertEqual(0, code)
-        self.assertEqual(f"digest={gate_cache_key.rustc_digest(RUSTC)}\n", written)
+        self.assertEqual(gate_cache_key.rustc_digest(RUSTC), outputs(written)["digest"])
+        want: set[str] = {"digest", "inputs"}
+        got: set[str] = set(outputs(written))
+        self.assertEqual(want, got)
 
     def test_two_releases_on_path_give_two_keys(self) -> None:
         """Two toolchains differing only in release write two digests."""
         bumped = RUSTC.replace("release: 1.97.1", "release: 1.100.0")
-        written = []
+        written: list[str] = []
         for text in (RUSTC, bumped):
             with tempfile.TemporaryDirectory() as tmp:
                 path = rustc_on_path(Path(tmp), f"printf '%s' '{text}'")
-                written.append(cargo_main(path)[1])
+                written.append(outputs(cargo_main(path)[1])["digest"])
         self.assertNotEqual(written[0], written[1])
 
     def test_no_rustc_is_red(self) -> None:
@@ -480,6 +552,112 @@ class Compiler(unittest.TestCase):
         self.assertEqual(1, code)
         self.assertEqual("", written)
         self.assertIn("-vV exited 1: toolchain 1.100.0 is not installed", err)
+
+
+class CargoInputs(unittest.TestCase):
+    """The cargo key names every declared input of its builds (#2045)."""
+
+    @override
+    def setUp(self) -> None:
+        """Put a `rustc` on PATH for every row."""
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = rustc_on_path(Path(self.tmp.name), f"printf '%s' '{RUSTC}'")
+        self.trees = 0
+
+    def run_in(
+        self,
+        files: dict[str, str],
+        untracked: dict[str, str] | None = None,
+        **kw: str,
+    ) -> dict[str, str]:
+        """Run `cargo` in a tree of `files`, plus `untracked` beside them.
+
+        Returns:
+            The step's outputs.
+
+        """
+        self.trees += 1
+        tree = git_tree(Path(self.tmp.name) / f"tree{self.trees}", files)
+        for name, text in (untracked or {}).items():
+            (tree / name).parent.mkdir(parents=True, exist_ok=True)
+            (tree / name).write_text(text, "utf-8")
+        code, written, err = cargo_main(self.path, tree, **kw)
+        self.assertEqual(0, code, err)
+        return outputs(written)
+
+    def assert_moves_inputs_only(
+        self, before: dict[str, str], after: dict[str, str]
+    ) -> None:
+        """Hold the compiler's digest and move `inputs`."""
+        self.assertEqual(before["digest"], after["digest"])
+        self.assertNotEqual(before["inputs"], after["inputs"])
+
+    def test_a_feature_change_moves_inputs(self) -> None:
+        """Edtf's pg19: one manifest's features, the measured case."""
+        pg19 = TREE["Cargo.toml"] + "pg19 = []\n"
+        self.assert_moves_inputs_only(
+            self.run_in(TREE), self.run_in({**TREE, "Cargo.toml": pg19})
+        )
+
+    def test_a_member_manifest_change_moves_inputs(self) -> None:
+        """A workspace member's manifest is named as the root's is."""
+        member = {**TREE, "crates/pg/Cargo.toml": '[package]\nname = "pg"\n'}
+        bumped = {**member, "crates/pg/Cargo.toml": '[package]\nname = "pg2"\n'}
+        self.assert_moves_inputs_only(self.run_in(member), self.run_in(bumped))
+
+    def test_a_mise_config_change_moves_inputs(self) -> None:
+        """A tool pin (the Postgres pgrx records the path of) is an input."""
+        pinned = {**TREE, "mise.toml": TREE["mise.toml"] + 'postgres = "18.1"\n'}
+        self.assert_moves_inputs_only(self.run_in(TREE), self.run_in(pinned))
+
+    def test_a_canon_change_moves_inputs(self) -> None:
+        """The belt's flags and variables reach cargo: its ref is an input."""
+        self.assert_moves_inputs_only(
+            self.run_in(TREE), self.run_in(TREE, canon_ref="v1.77.0")
+        )
+
+    def test_an_image_change_moves_inputs(self) -> None:
+        """A newer runner image has newer system headers pgrx watches."""
+        self.assert_moves_inputs_only(
+            self.run_in(TREE), self.run_in(TREE, ImageVersion="20261123.2.0")
+        )
+
+    def test_identical_trees_give_the_same_inputs(self) -> None:
+        """Two runs over the same tree hit the same entry."""
+        self.assertEqual(self.run_in(TREE), self.run_in(TREE))
+
+    def test_an_untracked_manifest_changes_nothing(self) -> None:
+        """A file CI never checks out builds nothing and names nothing."""
+        stray = {"Cargo.toml": "[workspace]\n", "scratch/Cargo.toml": "x\n"}
+        self.assertEqual(
+            self.run_in({k: v for k, v in TREE.items() if k != "Cargo.toml"}),
+            self.run_in(
+                {k: v for k, v in TREE.items() if k != "Cargo.toml"},
+                untracked=stray,
+            ),
+        )
+
+    def test_no_canon_ref_is_red(self) -> None:
+        """An empty ref is refused, never hashed into a key."""
+        tree = git_tree(Path(self.tmp.name) / "tree", TREE)
+        code, written, err = cargo_main(self.path, tree, canon_ref="")
+        self.assertEqual(1, code)
+        self.assertEqual("", written)
+        self.assertIn("no --canon-ref", err)
+
+    def test_no_globs_is_red(self) -> None:
+        """A workflow that sets no mise globs would omit the tool pins."""
+        tree = git_tree(Path(self.tmp.name) / "tree", TREE)
+        code, written, err = cargo_main(self.path, tree, ORG_MISE_CONFIG_GLOBS="")
+        self.assertEqual(1, code)
+        self.assertEqual("", written)
+        self.assertIn("ORG_MISE_CONFIG_GLOBS is unset", err)
+
+    def test_the_globs_are_the_tool_keys(self) -> None:
+        """The rows read the gate's own list, which names mise.toml."""
+        self.assertIn("mise.toml", GLOBS.splitlines())
+        self.assertIn(".tool-versions", GLOBS.splitlines())
 
 
 def digest_main(path: str) -> tuple[int, str, str]:

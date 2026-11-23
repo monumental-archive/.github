@@ -117,6 +117,7 @@ def run(
         "ORG_PYTHON": sys.executable,
         "ORG_PYTHON_UNSET": "unset",
     }
+    hermetic.track(tree)
     as_mise = hermetic.task_run(task, script)
     return subprocess.run(
         as_mise.argv,

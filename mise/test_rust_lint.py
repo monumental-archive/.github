@@ -34,10 +34,12 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import override
+from unittest import mock
 
 import decoded
 import hermetic
 import rust_lint
+import rust_workspaces
 
 BELT = Path(__file__).resolve().parent
 METADATA = BELT.parent / "release" / "testdata" / "edtf-cargo-metadata.json"
@@ -52,8 +54,34 @@ MEMBERS = [
     "edtf-postgres",
 ]
 
-CARGO = """\
+# Every cargo stub answers `cargo locate-project` first, as the belt's
+# workspace derivation asks it (#2004), and logs nothing for it: a
+# manifest under fuzz/ is its own root (or STUB_FUZZ_ROOT's answer), any
+# other is the tree's top Cargo.toml, and STUB_LOCATE_FAILS fails each.
+# `manifest` is the call's --manifest-path, for the rest of the stub.
+LOCATE = """\
 #!/usr/bin/env bash
+manifest=""
+prev=""
+for arg in "$@"; do
+  [[ ${prev} != --manifest-path ]] || manifest=${arg}
+  prev=${arg}
+done
+if [[ $1 == locate-project ]]; then
+  if [[ -n ${STUB_LOCATE_FAILS:-} ]]; then
+    echo "error: planted: ${manifest} could not be read" >&2
+    exit 101
+  fi
+  case ${manifest} in
+    fuzz/*) echo "${STUB_FUZZ_ROOT:-${PWD}/fuzz/Cargo.toml}" ;;
+    *) echo "${PWD}/Cargo.toml" ;;
+  esac
+  exit 0
+fi
+"""
+CARGO = (
+    LOCATE
+    + """\
 case "$1" in
   fmt | fetch) ;;
   metadata) cat "${STUB_METADATA}" ;;
@@ -67,6 +95,7 @@ case "$1" in
   *) exit 1 ;;
 esac
 """
+)
 
 # The task asks `rustup ... | grep -q "^clippy"` under pipefail. grep -q
 # leaves at its first match, and a stub that is still writing the next
@@ -113,8 +142,9 @@ def assert_every_member_linted(
     case.assertEqual(101, done.returncode, done.stdout + done.stderr)
     want = [f"{m}@1.3.3" for m in MEMBERS]
     case.assertEqual(want, asked)
-    case.assertIn(f"lint:rust: 6 crate(s) linted: {' '.join(MEMBERS)}\n", done.stdout)
-    case.assertIn("lint:rust: red: edtf-core\n", done.stderr)
+    linted = f"lint:rust: Cargo.toml: 6 crate(s) linted: {' '.join(MEMBERS)}\n"
+    case.assertIn(linted, done.stdout)
+    case.assertIn("lint:rust: red: edtf-core (Cargo.toml)\n", done.stderr)
 
 
 class EveryMemberIsLinted(unittest.TestCase):
@@ -396,8 +426,11 @@ class TheStubOutlivesItsReader(unittest.TestCase):
 # are stubs on a PATH that holds nothing else, and each logs what it was
 # asked. The workspace: two plain members, `a` and `b`; `ext`, a pgrx
 # extension at majors 16 and 17; and `held`, named in CLIPPY_EXCLUDE.
-STUB_CARGO = """\
-#!/usr/bin/env bash
+# The fuzz root's metadata is STUB_FUZZ_METADATA's; STUB_FMT_RED names
+# the one root whose format check fails.
+STUB_CARGO = (
+    LOCATE
+    + """\
 printf 'cargo %s\\n' "$*" >> "${STUB_LOG}"
 if [[ $1 == clippy ]]; then
   printf '%s' "${STUB_CLIPPY_OUT:-}"
@@ -406,12 +439,26 @@ if [[ $1 == clippy ]]; then
   exit 0
 fi
 case "$1" in
-  fmt) printf '%s' "${STUB_FMT_OUT:-}"; exit "${STUB_FMT_STATUS:-0}" ;;
+  fmt)
+    if [[ ${manifest} == "${STUB_FMT_RED:-none}" ]]; then
+      echo "Diff in ${manifest}"
+      exit 1
+    fi
+    printf '%s' "${STUB_FMT_OUT:-}"
+    exit "${STUB_FMT_STATUS:-0}"
+    ;;
   fetch) exit "${STUB_FETCH_STATUS:-0}" ;;
-  metadata) cat "${STUB_METADATA}" ;;
+  metadata)
+    if [[ ${manifest} == fuzz/* ]]; then
+      cat "${STUB_FUZZ_METADATA}"
+    else
+      cat "${STUB_METADATA}"
+    fi
+    ;;
   *) exit 99 ;;
 esac
 """
+)
 STUB_RUSTUP = """\
 #!/usr/bin/env bash
 printf '%b' "${STUB_COMPONENTS-clippy-host\\nrustfmt-host\\n}"
@@ -445,14 +492,22 @@ import sys
 sys.stdin.read()
 sys.exit(int(os.environ.get("STUB_PIN_STATUS", "0")))
 """
-FIX_CARGO = """\
-#!/usr/bin/env bash
+FIX_CARGO = (
+    LOCATE
+    + """\
 marks="${STUB_PREPARED:-} ${STUB_MAJOR:-}"
 printf 'cargo %s [%s]\\n' "$*" "${marks}" >> "${STUB_LOG}"
-[[ $1 != metadata ]] || cat "${STUB_METADATA}"
+if [[ $1 == metadata ]]; then
+  if [[ ${manifest} == fuzz/* ]]; then
+    cat "${STUB_FUZZ_METADATA}"
+  else
+    cat "${STUB_METADATA}"
+  fi
+fi
 [[ $1 != clippy || $5 != ext ]] || exit "${STUB_EXT_STATUS:-0}"
 exit 0
 """
+)
 
 
 def member(name: str, *, pgrx: bool = False) -> dict[str, object]:
@@ -490,6 +545,17 @@ def workspace(*packages: dict[str, object]) -> str:
 
 FOUR = workspace(member("a"), member("b"), member("ext", pgrx=True), member("held"))
 PLAIN = workspace(member("a"), member("b"), member("held"))
+# The second root of a two-root tree: a cargo-fuzz crate, its own
+# workspace (#2004).
+FUZZ = workspace(member("parse"))
+EVERY_CRATE: list[str] = ["a@0.1.0", "b@0.1.0", "parse@0.1.0"]
+TWO_ROOTS = {"fuzz/Cargo.toml": "[workspace]\n", "fuzz/fuzz_targets/parse.rs": "\n"}
+OUTSIDE = (
+    "fuzz/Cargo.toml belongs to a workspace outside this tree: /elsewhere/Cargo.toml"
+)
+OUTSIDE_REMEDY = (
+    "give it its own [workspace] table, or make it a member of a tracked workspace"
+)
 SKIP_MESSAGE = [
     "#![rustfmt::skip] exempts an entire file — never allowed",
     "#[rustfmt::skip] must carry a '// rustfmt-skip: <why>' marker above it",
@@ -535,6 +601,8 @@ class Planted(unittest.TestCase):
         self.log = tmp / "log"
         self.metadata = tmp / "metadata.json"
         self.metadata.write_text(FOUR, encoding="utf-8")
+        self.fuzz_metadata = tmp / "fuzz-metadata.json"
+        self.fuzz_metadata.write_text(FUZZ, encoding="utf-8")
         self.env = hermetic.env(
             tmp / "home",
             PATH=os.pathsep.join((str(self.bins), "/usr/bin", "/bin")),
@@ -544,6 +612,7 @@ class Planted(unittest.TestCase):
             CLIPPY_EXCLUDE="held",
             STUB_LOG=str(self.log),
             STUB_METADATA=str(self.metadata),
+            STUB_FUZZ_METADATA=str(self.fuzz_metadata),
             STUB_REAL_BELT=str(BELT),
         )
         self.plant({"Cargo.toml": "[workspace]\n", "src/lib.rs": "\n"})
@@ -564,11 +633,14 @@ class Planted(unittest.TestCase):
             Its status and what it wrote.
 
         """
-        return hermetic.call_main(
-            lambda: rust_lint.main(list(argv)),
-            env=self.env | {"ORG_BELT_DIR": str(self.belt)} | stub,
-            cwd=self.tree,
-        )
+        # The derivation resolves cargo when it is imported; here, the
+        # stub on the row's PATH is the cargo it asks.
+        with mock.patch.object(rust_workspaces, "CARGO", str(self.bins / "cargo")):
+            return hermetic.call_main(
+                lambda: rust_lint.main(list(argv)),
+                env=self.env | {"ORG_BELT_DIR": str(self.belt)} | stub,
+                cwd=self.tree,
+            )
 
     def logged(self) -> list[str]:
         """Read what the stubs were asked.
@@ -718,7 +790,8 @@ class LintBeforeClippy(Planted):
         self.assert_finding(
             done,
             1,
-            "rustfmt warned — an ignored option means a weaker format, silently",
+            "Cargo.toml: rustfmt warned — an ignored option means a weaker format,"
+            " silently",
         )
         self.assertIn(out, done.stderr)
 
@@ -727,7 +800,9 @@ class LintBeforeClippy(Planted):
         out = "Diff in src/lib.rs at line 1:\n"
         done = self.call("lint", STUB_FMT_OUT=out, STUB_FMT_STATUS="1")
         self.assert_finding(
-            done, 1, "formatting differs from the org's — run 'mise run fix:rust'"
+            done,
+            1,
+            "Cargo.toml: formatting differs from the org's — run 'mise run fix:rust'",
         )
         self.assertIn(out, done.stderr)
         self.assertNotIn("formatting clean", done.stdout)
@@ -738,7 +813,7 @@ class LintBeforeClippy(Planted):
         done = self.call("lint")
         self.assertEqual(1, done.returncode)
         self.assertIn(UNSEEN, done.stderr)
-        self.assertNotIn("cargo fetch --locked", self.logged())
+        self.assertNotIn("cargo fetch", "\n".join(self.logged()))
 
 
 class LintClippy(Planted):
@@ -748,13 +823,15 @@ class LintClippy(Planted):
         """The ladder cannot be read: nothing is linted."""
         done = self.call("lint", STUB_LADDER_FAILS="1")
         self.assertEqual(3, done.returncode)
-        self.assertNotIn("cargo fetch --locked", self.logged())
+        self.assertNotIn("cargo fetch", "\n".join(self.logged()))
 
     def test_a_failing_fetch_keeps_its_status(self) -> None:
         """A failing `cargo fetch`: its status, and no metadata read."""
         done = self.call("lint", STUB_FETCH_STATUS="7")
         self.assertEqual(7, done.returncode)
-        self.assertEqual("cargo fetch --locked", self.logged()[-1])
+        self.assertEqual(
+            "cargo fetch --locked --manifest-path Cargo.toml", self.logged()[-1]
+        )
 
     def test_unreadable_metadata_is_red(self) -> None:
         """Metadata that is not JSON: gate_surface.py's status, nothing linted.
@@ -774,7 +851,8 @@ class LintClippy(Planted):
         self.assert_finding(
             done,
             1,
-            "a Cargo.toml is tracked but cargo metadata names no workspace member",
+            "Cargo.toml: a Cargo.toml is tracked but cargo metadata names no"
+            " workspace member",
         )
 
     def test_a_clean_workspace_prints_its_population(self) -> None:
@@ -782,21 +860,28 @@ class LintClippy(Planted):
         done = self.call("lint")
         self.assertEqual(0, done.returncode, done.stderr)
         said = [
-            "lint:rust: formatting clean",
-            "lint:rust: 2 crate(s) linted: a b",
-            "lint:rust: pgrx extension(s), linted by lint:pg-clippy: ext",
-            "lint:rust: excluded by CLIPPY_EXCLUDE: held",
+            "lint:rust: Cargo.toml: formatting clean",
+            "lint:rust: Cargo.toml: 2 crate(s) linted: a b",
+            "lint:rust: Cargo.toml: pgrx extension(s), linted by lint:pg-clippy: ext",
+            "lint:rust: Cargo.toml: excluded by CLIPPY_EXCLUDE: held",
             (
                 "lint:rust: clean at every group"
                 " (restriction minus 0 named contradictions)"
             ),
         ]
         self.assertEqual(said, done.stdout.splitlines())
-        clippy = "--no-deps --all-targets --all-features --locked --keep-going"
+        clippy = (
+            "--no-deps --all-targets --all-features --locked --keep-going"
+            " --manifest-path Cargo.toml"
+        )
+        fmt = "--manifest-path Cargo.toml -- --config-path"
         want = [
-            f"cargo fmt --all --check -- --config-path {self.belt}/rustfmt.toml",
-            "cargo fetch --locked",
-            "cargo metadata --no-deps --format-version 1 --locked",
+            "cargo fetch --locked --manifest-path Cargo.toml",
+            f"cargo fmt --all --check {fmt} {self.belt}/rustfmt.toml",
+            (
+                "cargo metadata --no-deps --format-version 1 --locked"
+                " --manifest-path Cargo.toml"
+            ),
             f"cargo clippy -p a@0.1.0 {clippy} -- -D warnings",
             f"cargo clippy -p b@0.1.0 {clippy} -- -D warnings",
         ]
@@ -808,15 +893,16 @@ class LintClippy(Planted):
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertIn(
             "cargo clippy -p a@0.1.0 --no-deps --all-targets --no-default-features"
-            " --features x --locked --keep-going -- -D warnings",
+            " --features x --locked --keep-going --manifest-path Cargo.toml"
+            " -- -D warnings",
             self.logged(),
         )
 
     def test_a_red_member_is_named_with_clippys_status(self) -> None:
         """A red `a`: every member is still asked, and cargo's 101 is kept."""
         done = self.call("lint", STUB_RED="a")
-        self.assert_finding(done, 101, "red: a")
-        self.assertIn("lint:rust: 2 crate(s) linted: a b\n", done.stdout)
+        self.assert_finding(done, 101, "red: a (Cargo.toml)")
+        self.assertIn("lint:rust: Cargo.toml: 2 crate(s) linted: a b\n", done.stdout)
         self.assertEqual(2, sum("cargo clippy" in line for line in self.logged()))
 
     def test_clippy_output_is_shown(self) -> None:
@@ -832,7 +918,10 @@ class LintClippy(Planted):
         self.assert_finding(
             done,
             1,
-            "CLIPPY_FEATURES names a feature some crate in this workspace lacks",
+            (
+                "Cargo.toml: CLIPPY_FEATURES names a feature some crate in this"
+                " workspace lacks"
+            ),
             (
                 "every crate is linted as its own package (#726),"
                 " so the value has to be one"
@@ -850,7 +939,10 @@ class LintClippy(Planted):
         self.assert_finding(
             done,
             1,
-            "a lint name above is unknown to this toolchain (see E0602/renamed above)",
+            (
+                "Cargo.toml: a lint name above is unknown to this toolchain"
+                " (see E0602/renamed above)"
+            ),
             (
                 "clippy renamed or removed it — update the exclusion list"
                 " in mise/config.toml"
@@ -862,7 +954,9 @@ class LintClippy(Planted):
         out = "warning: lint `x` has been renamed to `y`\n"
         done = self.call("lint", STUB_CLIPPY_OUT=out)
         self.assertEqual(1, done.returncode)
-        self.assertIn("lint:rust: a lint name above is unknown", done.stderr)
+        self.assertIn(
+            "lint:rust: Cargo.toml: a lint name above is unknown", done.stderr
+        )
 
     def test_no_extension_and_no_exclusion_print_neither_line(self) -> None:
         """Only the lines that name something are printed."""
@@ -909,39 +1003,38 @@ class FixBranches(Planted):
 
     def test_a_failing_format_keeps_its_status(self) -> None:
         """A failing `cargo fmt`: its status, and nothing fixed."""
-        (self.bins / "cargo").write_text(
-            "#!/usr/bin/env bash\nexit 4\n", encoding="utf-8"
-        )
+        (self.bins / "cargo").write_text(LOCATE + "exit 4\n", encoding="utf-8")
         done = self.call("fix")
         self.assertEqual(4, done.returncode)
         self.assertNotIn("formatted", done.stdout)
 
     def test_a_failing_ladder_keeps_its_status(self) -> None:
-        """The ladder cannot be read: formatted, nothing fixed."""
+        """The ladder cannot be read: nothing formatted or fixed."""
         done = self.call("fix", STUB_LADDER_FAILS="1")
         self.assertEqual(3, done.returncode)
-        formatted: list[str] = ["fix:rust: formatted"]
-        self.assertEqual(formatted, done.stdout.splitlines())
+        self.assertEqual("", done.stdout)
+        self.assertEqual(NOT_ASKED, self.logged())
 
     def test_a_workspace_without_extensions(self) -> None:
         """One --workspace pass, the excluded held out and named."""
         self.metadata.write_text(PLAIN, encoding="utf-8")
         done = self.call("fix")
         self.assertEqual(0, done.returncode, done.stderr)
+        at = "--manifest-path Cargo.toml"
         want = [
-            f"cargo fmt --all -- --config-path {self.belt}/rustfmt.toml [ ]",
-            "cargo fetch --locked [ ]",
-            "cargo metadata --no-deps --format-version 1 --locked [ ]",
+            f"cargo fmt --all {at} -- --config-path {self.belt}/rustfmt.toml [ ]",
+            f"cargo fetch --locked {at} [ ]",
+            f"cargo metadata --no-deps --format-version 1 --locked {at} [ ]",
             (
                 "cargo clippy --fix --allow-dirty --workspace --exclude held"
-                " --all-features --locked -- -D warnings [ ]"
+                f" --all-features --locked {at} -- -D warnings [ ]"
             ),
         ]
         self.assertEqual(want, self.logged())
         said = [
-            "fix:rust: formatted",
-            "fix:rust: a b rewritten where clippy could",
-            "fix:rust: excluded by CLIPPY_EXCLUDE: held",
+            "fix:rust: Cargo.toml: formatted",
+            "fix:rust: Cargo.toml: a b rewritten where clippy could",
+            "fix:rust: Cargo.toml: excluded by CLIPPY_EXCLUDE: held",
             "fix:rust: applied what is machine-applicable — the rest is judgement",
         ]
         self.assertEqual(said, done.stdout.splitlines())
@@ -951,13 +1044,15 @@ class FixBranches(Planted):
         self.metadata.write_text(workspace(member("held")), encoding="utf-8")
         done = self.call("fix")
         self.assertEqual(0, done.returncode, done.stderr)
-        self.assertIn("fix:rust: none rewritten where clippy could\n", done.stdout)
+        self.assertIn(
+            "fix:rust: Cargo.toml: none rewritten where clippy could\n", done.stdout
+        )
 
     def test_a_failing_fix_pass_keeps_its_status(self) -> None:
         """The workspace pass fails: its status, no extension pass."""
         self.plant({})
         (self.bins / "cargo").write_text(
-            "#!/usr/bin/env bash\n[[ $1 != clippy ]] || exit 6\n"
+            LOCATE + "[[ $1 != clippy ]] || exit 6\n"
             '[[ $1 != metadata ]] || cat "${STUB_METADATA}"\n',
             encoding="utf-8",
         )
@@ -977,21 +1072,23 @@ class FixBranches(Planted):
         want = [
             (
                 "cargo clippy --fix --allow-dirty --workspace --exclude held"
-                " --exclude ext --all-features --locked -- -D warnings [ ]"
+                " --exclude ext --all-features --locked --manifest-path Cargo.toml"
+                " -- -D warnings [ ]"
             ),
             "prepare 17",
             "mise ls aqua:theseus-rs/postgresql-binaries --json",
             (
                 "cargo clippy --fix --allow-dirty -p ext"
-                f" {own} --features pg17 -- -D warnings [yes pg17]"
+                f" {own} --features pg17 --manifest-path Cargo.toml"
+                " -- -D warnings [yes pg17]"
             ),
         ]
         self.assertEqual(want, self.logged()[3:])
         said = [
-            "fix:rust: formatted",
-            "fix:rust: a b rewritten where clippy could",
-            "fix:rust: pgrx extension(s) fixed: ext(pg17)",
-            "fix:rust: excluded by CLIPPY_EXCLUDE: held",
+            "fix:rust: Cargo.toml: formatted",
+            "fix:rust: Cargo.toml: a b rewritten where clippy could",
+            "fix:rust: Cargo.toml: pgrx extension(s) fixed: ext(pg17)",
+            "fix:rust: Cargo.toml: excluded by CLIPPY_EXCLUDE: held",
             "fix:rust: applied what is machine-applicable — the rest is judgement",
         ]
         self.assertEqual(said, done.stdout.splitlines())
@@ -1031,6 +1128,108 @@ class FixBranches(Planted):
         done = self.call("fix")
         self.assertEqual(2, done.returncode)
         self.assertNotIn("--fix", "\n".join(self.logged()))
+
+
+class EveryWorkspace(Planted):
+    """A tree of two workspaces: each is formatted, linted and fixed (#2004).
+
+    `Cargo.toml` holds `a`, `b`, `ext` and `held`; `fuzz/Cargo.toml` is a
+    cargo-fuzz crate, `parse`, its own workspace root. Before #2004 the
+    task ran cargo in the root workspace alone, and `parse` was never
+    formatted or linted.
+    """
+
+    @override
+    def setUp(self) -> None:
+        """Plant the fuzz crate as the tree's second root."""
+        super().setUp()
+        self.plant(TWO_ROOTS)
+
+    def asked(self, verb: str) -> list[str]:
+        """Read the stub log's calls of one cargo subcommand.
+
+        Returns:
+            Those lines, in order.
+
+        """
+        return [line for line in self.logged() if line.startswith(f"cargo {verb} ")]
+
+    def test_each_root_is_formatted_and_linted(self) -> None:
+        """An fmt and a clippy call for each root, one population line each."""
+        done = self.call("lint")
+        self.assertEqual(0, done.returncode, done.stderr)
+        fmt = self.asked("fmt")
+        self.assertEqual(2, len(fmt))
+        self.assertIn("--manifest-path Cargo.toml --", fmt[0])
+        self.assertIn("--manifest-path fuzz/Cargo.toml --", fmt[1])
+        clippy = [line.split()[3] for line in self.asked("clippy")]
+        self.assertEqual(EVERY_CRATE, clippy)
+        self.assertIn("--manifest-path fuzz/Cargo.toml --", self.asked("clippy")[2])
+        self.assertIn("lint:rust: Cargo.toml: 2 crate(s) linted: a b\n", done.stdout)
+        self.assertIn(
+            "lint:rust: fuzz/Cargo.toml: 1 crate(s) linted: parse\n", done.stdout
+        )
+
+    def test_an_unformatted_fuzz_root_is_red(self) -> None:
+        """A format check refused for fuzz/Cargo.toml only: red, naming it."""
+        done = self.call("lint", STUB_FMT_RED="fuzz/Cargo.toml")
+        self.assert_finding(
+            done,
+            1,
+            "fuzz/Cargo.toml: formatting differs from the org's"
+            " — run 'mise run fix:rust'",
+        )
+        self.assertIn("lint:rust: Cargo.toml: 2 crate(s) linted: a b\n", done.stdout)
+
+    def test_a_red_fuzz_crate_leaves_the_root_linted(self) -> None:
+        """Clippy refuses `parse` only: red names it, a and b were asked."""
+        done = self.call("lint", STUB_RED="parse")
+        self.assert_finding(done, 101, "red: parse (fuzz/Cargo.toml)")
+        clippy = [line.split()[3] for line in self.asked("clippy")]
+        self.assertEqual(EVERY_CRATE, clippy)
+
+    def test_a_root_outside_the_tree_is_red(self) -> None:
+        """locate-project names a workspace above the checkout: red, exact."""
+        done = self.call("lint", STUB_FUZZ_ROOT="/elsewhere/Cargo.toml")
+        self.assert_finding(done, 1, OUTSIDE, OUTSIDE_REMEDY)
+        self.assertEqual(NOT_ASKED, self.asked("clippy"))
+
+    def test_a_failing_locate_project_says_cargos_words(self) -> None:
+        """locate-project exits nonzero: cargo's own text is in the output."""
+        done = self.call("lint", STUB_LOCATE_FAILS="1")
+        self.assertEqual(1, done.returncode)
+        self.assertIn("error: planted: Cargo.toml could not be read", done.stderr)
+        self.assertEqual(NOT_ASKED, self.asked("clippy"))
+
+    def test_git_failing_to_name_the_tree_is_red(self) -> None:
+        """The derivation's git cannot name the top: red, git's words kept."""
+        git = self.bins / "failing-git"
+        git.write_text(
+            "#!/usr/bin/env bash\necho 'fatal: planted' >&2\nexit 128\n",
+            encoding="utf-8",
+        )
+        git.chmod(0o755)
+        with mock.patch.object(rust_workspaces, "GIT", str(git)):
+            done = self.call("lint")
+        self.assert_finding(done, 1, "git could not name the tree", "fatal: planted")
+        self.assertEqual(NOT_ASKED, self.asked("clippy"))
+
+    def test_fix_rust_formats_and_fixes_each_root(self) -> None:
+        """fix:rust: cargo fmt and clippy --fix for both roots."""
+        (self.bins / "cargo").write_text(FIX_CARGO, encoding="utf-8")
+        done = self.call("fix")
+        self.assertEqual(0, done.returncode, done.stderr)
+        fmt = self.asked("fmt")
+        self.assertEqual(2, len(fmt))
+        self.assertIn("--manifest-path fuzz/Cargo.toml --", fmt[1])
+        fixed = [line for line in self.asked("clippy") if "--workspace" in line.split()]
+        self.assertEqual(2, len(fixed))
+        self.assertIn("--manifest-path Cargo.toml --", fixed[0])
+        self.assertIn("--manifest-path fuzz/Cargo.toml --", fixed[1])
+        self.assertIn(
+            "fix:rust: fuzz/Cargo.toml: parse rewritten where clippy could\n",
+            done.stdout,
+        )
 
 
 if __name__ == "__main__":
