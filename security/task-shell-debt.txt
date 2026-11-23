@@ -84,7 +84,6 @@ mise/config.toml	lint:nested-permissions	30	# #1544 unassigned
 mise/config.toml	lint:audit-scheduled	68	# #1544 unassigned
 mise/config.toml	lint:canon-policy	19	# #1544 unassigned
 mise/config.toml	lint:policy-load	45	# #1544 unassigned
-mise/config.toml	lint:caller-permissions	18	# #1544 unassigned
 mise/config.toml	lint:runner-pin	28	# #1544 unassigned
 mise/config.toml	lint:canon-pins	50	# #1544 unassigned
 mise/config.toml	lint:hook-jobs	18	# #1544 unassigned
