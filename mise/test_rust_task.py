@@ -209,20 +209,24 @@ class BeltCalls(Planted):
     def test_a_belt_call_sources_the_script_and_calls_the_function(self) -> None:
         """The function's status and output; stdin reaches it."""
         os.environ |= {"PLANT_UNION": "16,17", "PLANT_UNION_STATUS": "2"}
-        got = rust_task.belt_call("pgrx-env.sh", "org_pgrx_union", stdin="lines")
+        got = rust_task.belt_call(rust_task.pgrx_env(), "org_pgrx_union", stdin="lines")
         self.assertEqual((2, "16,17\n"), got)
         self.assertEqual("lines", (self.tmp / "union-in").read_text(encoding="utf-8"))
 
     def test_exports_are_what_the_function_set_or_changed(self) -> None:
         """New and changed variables; not bash's own, not those unchanged."""
-        got = rust_task.belt_exports("pgrx-env.sh", "org_pgrx_darwin_prepare", "17")
+        got = rust_task.belt_exports(
+            rust_task.pgrx_env(), "org_pgrx_darwin_prepare", "17"
+        )
         self.assertEqual((0, {"PLANT_SDK": "sdk"}), got)
         self.assertEqual(PREPARED, self.logged())
 
     def test_a_failed_export_returns_its_status_and_nothing(self) -> None:
         """The function's status, and no variable taken from it."""
         os.environ["PLANT_PREPARE_STATUS"] = "6"
-        got = rust_task.belt_exports("pgrx-env.sh", "org_pgrx_darwin_prepare", "17")
+        got = rust_task.belt_exports(
+            rust_task.pgrx_env(), "org_pgrx_darwin_prepare", "17"
+        )
         self.assertEqual((6, {}), got)
 
     def test_the_ladder_is_its_flags_and_its_count(self) -> None:

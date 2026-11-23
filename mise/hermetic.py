@@ -102,6 +102,7 @@ from typing import TYPE_CHECKING
 from unittest import mock
 
 import decoded
+from belt_scripts import script
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator, Iterable, Mapping
@@ -256,7 +257,10 @@ def task_run(name: str, body: str) -> TaskRun:
     words = shlex.split(decoded.as_str(table["shell"], "task_config.shell"))
     return TaskRun(
         [tool(words[0]), *words[1:], body],
-        {"MISE_TASK_NAME": name, "BASH_ENV": str(CANON / "mise" / "findings.sh")},
+        {
+            "MISE_TASK_NAME": name,
+            "BASH_ENV": str(script(CANON / "mise", "findings.sh")),
+        },
     )
 
 

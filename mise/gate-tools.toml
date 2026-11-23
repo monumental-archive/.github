@@ -27,7 +27,10 @@ tasks = ["lint:actions", "lint:scaffold-assembly"]
 
 [tools.shellcheck]
 # lint:shell's guard is every tracked file through `shfmt --find`.
+# lint:bash-portability reads task bodies through exit_trap.py, which
+# imports belt_shell.py inside a `try:`, whose checks run it (#2037).
 tasks = [
+  "lint:bash-portability",
   "lint:belt-shell",
   "lint:scaffold-assembly",
   "lint:shell",

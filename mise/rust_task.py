@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import tracked
+from belt_scripts import script
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -67,6 +68,16 @@ def belt() -> Path:
 
     """
     return Path(os.environ.get("ORG_BELT_DIR") or Path(__file__).parent)
+
+
+def pgrx_env() -> Path:
+    """Name the belt's one pgrx derivation, mise/pgrx-env.sh.
+
+    Returns:
+        Its path in the belt the task runs from.
+
+    """
+    return script(belt(), "pgrx-env.sh")
 
 
 def python() -> str:
@@ -114,18 +125,20 @@ def output(argv: Sequence[str], stdin: str = "") -> tuple[int, str]:
     return done.returncode, done.stdout
 
 
-def belt_call(script: str, *call: str, stdin: str = "") -> tuple[int, str]:
-    """Call a function of a belt shell script.
+def belt_call(path: Path, *call: str, stdin: str = "") -> tuple[int, str]:
+    """Call a function of a belt shell script, named by `script()` (#2037).
 
     Returns:
         Its exit status and its standard output.
 
     """
-    return output([*SHELL, CALL, "belt", str(belt() / script), *call], stdin)
+    return output([*SHELL, CALL, "belt", str(path), *call], stdin)
 
 
-def belt_exports(script: str, *call: str) -> tuple[int, dict[str, str]]:
+def belt_exports(path: Path, *call: str) -> tuple[int, dict[str, str]]:
     """Call a belt function that exports, and take what it exported.
+
+    The script is named by `script()` (#2037).
 
     Returns:
         Its exit status, and every variable it set or changed in the
@@ -134,7 +147,7 @@ def belt_exports(script: str, *call: str) -> tuple[int, dict[str, str]]:
     """
     with tempfile.TemporaryDirectory() as tmp:
         dump = Path(tmp) / "exports"
-        status = run([*SHELL, EXPORTS, "belt", str(belt() / script), str(dump), *call])
+        status = run([*SHELL, EXPORTS, "belt", str(path), str(dump), *call])
         if status != 0:
             return status, {}
         listing = dump.read_bytes()
@@ -172,10 +185,10 @@ def pgrx_pairs(found: str) -> tuple[int, list[list[str]], str]:
         The status, `[spec, major]` per extension, and the majors.
 
     """
-    status, highest = belt_call("pgrx-env.sh", "org_pgrx_highest", stdin=found)
+    status, highest = belt_call(pgrx_env(), "org_pgrx_highest", stdin=found)
     if status != 0:
         return status, [], ""
-    status, majors = belt_call("pgrx-env.sh", "org_pgrx_union", stdin=highest)
+    status, majors = belt_call(pgrx_env(), "org_pgrx_union", stdin=highest)
     pairs = [line.split("\t") for line in highest.splitlines()]
     return status, [pair for pair in pairs if len(pair) > 1 and pair[0]], majors.strip()
 
@@ -191,7 +204,7 @@ def register(majors: str) -> tuple[int, dict[str, str]]:
         compiles after it.
 
     """
-    status, prepared = belt_exports("pgrx-env.sh", "org_pgrx_darwin_prepare", majors)
+    status, prepared = belt_exports(pgrx_env(), "org_pgrx_darwin_prepare", majors)
     if status != 0:
         return status, {}
     listed, installed = output([
@@ -201,7 +214,8 @@ def register(majors: str) -> tuple[int, dict[str, str]]:
         "--json",
     ])
     checked, _ = output(
-        [python(), str(belt() / "pgrx_postgres.py"), "--majors", majors], installed
+        [python(), str(script(belt(), "pgrx_postgres.py")), "--majors", majors],
+        installed,
     )
     return checked or listed, prepared
 
@@ -217,8 +231,7 @@ def at_major(major: str, argv: Sequence[str], prepared: Mapping[str, str]) -> in
         The command's status.
 
     """
-    pgrx_env = str(belt() / "pgrx-env.sh")
-    shell = [*SHELL, CALL, "belt", pgrx_env, "org_pgrx_major", major]
+    shell = [*SHELL, CALL, "belt", str(pgrx_env()), "org_pgrx_major", major]
     return run([*shell, *argv], {**os.environ, **prepared})
 
 
@@ -266,10 +279,12 @@ def ladder() -> tuple[int, list[str], str]:
         named contradictions.
 
     """
-    status, flags = belt_call("clippy-ladder.sh", "org_clippy_ladder")
+    status, flags = belt_call(script(belt(), "clippy-ladder.sh"), "org_clippy_ladder")
     if status != 0:
         return status, [], ""
-    status, count = belt_call("clippy-ladder.sh", "org_clippy_contradiction_count")
+    status, count = belt_call(
+        script(belt(), "clippy-ladder.sh"), "org_clippy_contradiction_count"
+    )
     return status, flags.split(), count.strip()
 
 
@@ -299,6 +314,7 @@ def surface(cargo: str, where: Sequence[str] = ()) -> tuple[int, str]:
     ])
     exclude = os.environ.get("CLIPPY_EXCLUDE", "")
     status, records = output(
-        [python(), str(belt() / "gate_surface.py"), "--exclude", exclude], meta
+        [python(), str(script(belt(), "gate_surface.py")), "--exclude", exclude],
+        meta,
     )
     return status or meta_status, records

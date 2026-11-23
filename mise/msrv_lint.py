@@ -39,6 +39,7 @@ from typing import TYPE_CHECKING
 import findings
 import rust_task
 import rust_workspaces
+from belt_scripts import script
 from rust_task import NO_CARGO, belt, features, output, python, run
 
 if TYPE_CHECKING:
@@ -104,7 +105,7 @@ def check(
     )
     if status != 0:
         failed = ["--failed", toolchain, specs, "--root", root]
-        run([python(), str(belt() / "msrv_plan.py"), *failed])
+        run([python(), str(script(belt(), "msrv_plan.py")), *failed])
     return status
 
 
@@ -134,7 +135,8 @@ def planned(root: str, toolchains: Path) -> tuple[int, str, str, str]:
         return status, "", "", ""
     exclude = os.environ.get("CLIPPY_EXCLUDE", "")
     status, surface = output(
-        [python(), str(belt() / "gate_surface.py"), "--exclude", exclude], metadata
+        [python(), str(script(belt(), "gate_surface.py")), "--exclude", exclude],
+        metadata,
     )
     if status != 0:
         return status, "", "", ""
@@ -150,7 +152,7 @@ def planned(root: str, toolchains: Path) -> tuple[int, str, str, str]:
     status, plan = output(
         [
             python(),
-            str(belt() / "msrv_plan.py"),
+            str(script(belt(), "msrv_plan.py")),
             "--toolchains",
             str(toolchains),
             "--exclude",
