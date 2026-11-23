@@ -583,7 +583,8 @@ python = "3.15.2"
 # upstream binary with its published sha256 into the lock — the
 # closest-to-policy path without aqua. Like biome and golangci-lint,
 # unprovable here: the canon tracks no Rust, so it is exercised first
-# in a consumer (docs/tooling-verdicts.md).
+# in a consumer (docs/tooling-verdicts.md); the task's file list is held
+# by planted rows (mise/test_machete.py, #2008).
 "github:bnjbvr/cargo-machete" = "v0.10.1"
 # Dockerfile lint (#403): every hadolint rule at maximum reach —
 # --failure-threshold style fails on ALL severities including style,
@@ -1101,7 +1102,9 @@ dir = "{{cwd}}"
 # is the belt's. A false positive (renamed crate, macro-only use) gets
 # a written [package.metadata.cargo-machete] ignored entry beside the
 # dependency it excuses, never a task-level skip. Exit 2 is a
-# processing error and fails like everything else.
+# processing error and fails like everything else. The tracked
+# manifests are its arguments: with none it walks the directory and
+# reads every Cargo.toml git does not ignore, tracked or not (#2008).
 run = '''
 set -euo pipefail
 manifests=() && org_tracked_read manifests ':!vendor/**' "Cargo.toml" "*/Cargo.toml"
@@ -1109,7 +1112,7 @@ manifests=() && org_tracked_read manifests ':!vendor/**' "Cargo.toml" "*/Cargo.t
   echo "lint:machete: no Cargo.toml tracked, skipped"
   exit 0
 }
-cargo-machete
+printf '%s\0' "${manifests[@]}" | xargs -0 cargo-machete
 echo "lint:machete: no unused dependencies"
 '''
 
