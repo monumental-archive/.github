@@ -1707,6 +1707,37 @@ class TestFuzzLegs(unittest.TestCase):
         self.assertEqual((0, ""), (status, err))
         self.assertEqual(NO_LINES, separate(parsed))
 
+    def test_a_target_within_the_band_keeps_its_line(self) -> None:
+        """Above its floor, below floor + band: the line stands, never goes.
+
+        edtf v2.0.0's Release PR lost three of four target lines this way
+        and went red on its own coverage:check.
+        """
+        text = record("83.4", measured="85.4") + fuzz_line(MARKER, "88", "90.0")
+        with Tree(text) as tree:
+            status, _, err = run(
+                cf.derive, tree.path, f"rust 86.0\n{MARKER} 89.0\n", "v1", adopt=False
+            )
+            parsed, problems = clean(tree.written())
+            # The release's own gate holds the file the release wrote.
+            gate = run(cf.hold, tree.path, "lbl", f"rust 86.0\n{MARKER} 89.0\n", GATE)
+        self.assertEqual((0, "", NO_PROBLEMS), (status, err, problems))
+        held: dict[str, tuple[Decimal, Decimal]] = {
+            MARKER: (Decimal(88), Decimal("90.0"))
+        }
+        self.assertEqual(held, separate(parsed))
+        self.assertEqual(
+            (
+                0,
+                (
+                    "lbl: rust leg holds the floor 84.0 (86.0%)\n"
+                    f"lbl: {MARKER} leg holds its floor 88.0 (89.0%)\n"
+                ),
+                "",
+            ),
+            gate,
+        )
+
     def test_the_legs_record_never_names_a_target(self) -> None:
         """A target keeps its own line; `legs:` naming one is refused."""
         parsed, problems = cf.parse(legs_record("83.4", f"go {MARKER}"))

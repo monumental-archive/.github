@@ -752,8 +752,9 @@ def carried(record: Record, fresh: dict[str, Decimal]) -> dict[str, Decimal]:
 
     A fresh figure that raises (or keeps) the leg's floor is written; one
     within the band keeps the measurement the record states, so the line
-    never falls; a SEPARATE leg this run did not measure is carried as it
-    stands. A fuzz leg is not (#1896): every derivation measures every
+    never falls — a fuzz leg's as much as any other's; a SEPARATE leg
+    this run did not measure is carried as it stands. A fuzz leg this run
+    did not measure is not (#1896): every derivation measures every
     target, so one it did not measure is gone, and reaches here only
     through its `dropped:` line (record_holds).
 
@@ -767,7 +768,8 @@ def carried(record: Record, fresh: dict[str, Decimal]) -> dict[str, Decimal]:
         for leg, measured in fresh.items()
         if leg not in holds or derive_floor(quantise(measured)) >= holds[leg][0]
     }
-    return {leg: m for leg, (_, m) in holds.items() if not fuzz(leg)} | rising
+    stood = {leg: m for leg, (_, m) in holds.items() if not fuzz(leg) or leg in fresh}
+    return stood | rising
 
 
 def write(  # ruff: ignore[too-many-arguments] -- one keyword per part of a measurement
