@@ -6544,26 +6544,14 @@ dir = "{{cwd}}"
 # asserts each jdx/mise-action step carries an explicit `version:`.
 # Grep-shaped like every belt lint: count steps, count pins, any
 # shortfall is red with the file named.
+# The counting is mise/installer_pinned.py (#1911).
 run = '''
 files=() && org_tracked_read files ':!vendor/**' ".github/workflows/*.y*ml"
 [[ -n ${files[0]+set} ]] || {
   echo "lint:installer-pinned: no workflows, skipped"
   exit 0
 }
-bad=""
-for f in "${files[@]}"; do
-  steps=$(grep -cE "^[^#]*uses:[[:space:]]*jdx/mise-action@" "${f}") || true
-  ((steps > 0)) || continue
-  pins=$(grep -cE "^[^#]*version:[[:space:]]*[0-9]{4}\.[0-9]+\.[0-9]+" "${f}") || true
-  ((steps <= pins)) || bad="${bad} ${f}(${steps} steps, ${pins} version pins)"
-done
-if [[ -n ${bad} ]]; then
-  org_finding "" "mise-action without a mise version pin:${bad}" \
-    "the installer is a build input — an unpinned mise delivers" \
-    "same-day releases straight into attested builds (v0.18.2 darwin leg)"
-  exit 1
-fi
-echo "lint:installer-pinned: ok"
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/installer_pinned.py" "${files[@]}"
 '''
 
 [tasks."lint:cold-attested"]
