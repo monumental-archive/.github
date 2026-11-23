@@ -10,6 +10,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.78.2](https://github.com/monumental-archive/.github/compare/v1.78.1...v1.78.2) - 2026-11-23
+
+### Fixed
+
+- update aqua:embarkstudios/cargo-deny to 0.21.0 ([#2074](https://github.com/monumental-archive/.github/pull/2074))
+- exclude the fuzz corpus from lint:typos ([#2080](https://github.com/monumental-archive/.github/pull/2080))
+
 ## [1.78.1](https://github.com/monumental-archive/.github/compare/v1.78.0...v1.78.1) - 2026-11-23
 
 ### Fixed
