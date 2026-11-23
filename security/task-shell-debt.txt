@@ -66,7 +66,6 @@ mise/config.toml	audit:citations	79	# #1544 unassigned
 mise/config.toml	audit:adoption	110	# #1544 unassigned
 mise/config.toml	audit:signer-surface	65	# #1544 unassigned
 mise/config.toml	audit:coverage-branches	20	# #1544 unassigned
-mise/config.toml	lint:citation	25	# #1544 unassigned
 mise/config.toml	lint:bestpractices	54	# #1544 unassigned
 mise/config.toml	lint:badges	28	# #1544 unassigned
 mise/config.toml	lint:release-stub	33	# #1544 unassigned
