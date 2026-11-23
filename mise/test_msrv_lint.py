@@ -203,7 +203,6 @@ class Body(unittest.TestCase):
         out, err = self.tmp / "out", self.tmp / "err"
         with (
             mock.patch.dict(os.environ, self.env, clear=True),
-            mock.patch.object(msrv_lint, "BELT", self.belt),
             captured(out, err),
         ):
             if manifest is None:
@@ -426,14 +425,7 @@ class Body(unittest.TestCase):
 
 
 class Helpers(unittest.TestCase):
-    """The small functions the body's steps lean on."""
-
-    def test_the_belts_python_falls_back_to_this_interpreter(self) -> None:
-        """ORG_PYTHON when set; this interpreter when it is unset or empty."""
-        with mock.patch.dict(os.environ, {"ORG_PYTHON": "/belt/python"}):
-            self.assertEqual("/belt/python", msrv_lint.python())
-        with mock.patch.dict(os.environ, {"ORG_PYTHON": ""}):
-            self.assertEqual(sys.executable, msrv_lint.python())
+    """The plan's records, as the compile loop reads them."""
 
     def test_a_short_record_is_padded_to_four_fields(self) -> None:
         """A note has two fields; the rest of a record rides in its last."""

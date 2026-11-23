@@ -10,10 +10,9 @@ coverage and mutation legs (CONTRIBUTING, "A helper's language").
 Behaviour, messages and exit statuses are the body's own, unchanged.
 
 The plan is mise/msrv_plan.py's and the compile surface
-mise/gate_surface.py's, each run as the body ran it; the pgrx
-derivation and provisioning stay in mise/pgrx-env.sh, written once for
-every task that needs them, and this file calls their functions through
-bash rather than restating them. The task's reasoning for the rule
+mise/gate_surface.py's, each run as the body ran it; the steps every
+Rust task's helper shares (the pgrx derivation and provisioning among
+them) are mise/rust_task.py's. The task's reasoning for the rule
 rides beside the task in mise/config.toml; the reasoning for each step
 rides beside the step below.
 
@@ -29,180 +28,30 @@ from __future__ import annotations
 
 import os
 import shutil
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import findings
-import tracked
+import rust_task
+from rust_task import belt, features, output, python, run
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-BELT = Path(__file__).parent
 TASK = "lint:msrv"
-BASH = shutil.which("bash") or "bash"
-# The task shell's flags ([task_config] shell), for the belt functions
-# this file calls: they ran under them in the body.
-SHELL = [BASH, "--norc", "-euo", "pipefail", "-c"]
-# Source a belt script, then call one of its functions with the rest.
-CALL = '. "$1" && shift && "$@"'
-# The same, then write every exported variable NUL-separated to a file:
-# what a function exported for the calls after it (org_pgrx_darwin_prepare).
-EXPORTS = (
-    '. "$1" && out=$2 && shift 2 && "$@" && '
-    '{ for name in $(compgen -e); do printf "%s=%s\\0" "${name}" "${!name}"; done; }'
-    ' > "${out}"'
-)
-# What bash itself exports or rewrites in every shell, which no function
-# exported for its callers.
-BASH_OWN = frozenset({"SHLVL", "_", "PWD", "OLDPWD"})
 NO_CARGO = "Cargo.toml present but cargo missing — pin rust in mise.toml"
 NO_MISE = "mise missing — the toolchain pins this reads are mise's"
 UNREADABLE = "unreadable plan record from msrv_plan.py"
-POSTGRES = "aqua:theseus-rs/postgresql-binaries"
 # Fields of an msrv_plan.py record: kind, toolchain or note, own flags,
 # specs.
 FIELDS = 4
 
 
-def python() -> str:
-    """Name the belt's Python, which runs the belt's other helpers.
-
-    Returns:
-        ORG_PYTHON, as the body read it; this interpreter where it is
-        unset.
-
-    """
-    return os.environ.get("ORG_PYTHON") or sys.executable
-
-
 def say(line: str) -> None:
     """Print one of the task's lines, before any command's own output."""
     print(f"{TASK}: {line}", flush=True)
-
-
-def run(argv: Sequence[str], env: Mapping[str, str] | None = None) -> int:
-    """Run a command with this process's streams.
-
-    Returns:
-        Its exit status.
-
-    """
-    return subprocess.run(argv, env=env, check=False).returncode
-
-
-def output(argv: Sequence[str], stdin: str = "") -> tuple[int, str]:
-    """Run a command, reading what it prints; its stderr is this process's.
-
-    Returns:
-        Its exit status and its standard output.
-
-    """
-    done = subprocess.run(
-        argv, input=stdin, stdout=subprocess.PIPE, text=True, check=False
-    )
-    return done.returncode, done.stdout
-
-
-def belt_call(script: str, *call: str, stdin: str = "") -> tuple[int, str]:
-    """Call a function of a belt shell script.
-
-    Returns:
-        Its exit status and its standard output.
-
-    """
-    return output([*SHELL, CALL, "belt", str(BELT / script), *call], stdin)
-
-
-def belt_exports(script: str, *call: str) -> tuple[int, dict[str, str]]:
-    """Call a belt function that exports, and take what it exported.
-
-    Returns:
-        Its exit status, and every variable it set or changed in the
-        environment, for the commands that run after it.
-
-    """
-    with tempfile.TemporaryDirectory() as tmp:
-        dump = Path(tmp) / "exports"
-        status = run([*SHELL, EXPORTS, "belt", str(BELT / script), str(dump), *call])
-        if status != 0:
-            return status, {}
-        listing = dump.read_bytes()
-    exported: dict[str, str] = {}
-    for entry in tracked.split(listing):
-        key, _, value = entry.partition("=")
-        if key not in BASH_OWN and os.environ.get(key) != value:
-            exported[key] = value
-    return 0, exported
-
-
-def features() -> list[str]:
-    """Take the gate's features, the ones the workspace is compiled with.
-
-    CLIPPY_FEATURES, read here rather than given an MSRV-flavoured twin:
-    the compile surface is the gate's, stated once.
-
-    Returns:
-        The flag words, split as bash splits an unquoted value.
-
-    """
-    return (os.environ.get("CLIPPY_FEATURES") or "--all-features").split()
-
-
-def pgrx_pairs(surface: str) -> tuple[int, str, str]:
-    """Take each extension's major, and the majors to register (#813, #1795).
-
-    pgrx-env.sh says, once, which major each is built at: its highest,
-    the same major lint:pg-clippy and fix:rust build it at. A pgrx crate
-    cannot be compiled with --all-features, so its own flags ride the
-    plan rather than this task guessing. One step per assignment, so a
-    failed derivation is never an empty list.
-
-    Returns:
-        The status, `<name>:<major>` per extension comma-joined for
-        msrv_plan.py --pgrx, and the majors.
-
-    """
-    status, highest = belt_call("pgrx-env.sh", "org_pgrx_highest", stdin=surface)
-    if status != 0:
-        return status, "", ""
-    status, majors = belt_call("pgrx-env.sh", "org_pgrx_union", stdin=highest)
-    if status != 0:
-        return status, "", ""
-    pgrx = [
-        f"{spec.rpartition('@')[0] or spec}:{major}"
-        for spec, _, major in (line.partition("\t") for line in highest.splitlines())
-        if spec
-    ]
-    return 0, ",".join(pgrx), majors.strip()
-
-
-def register(majors: str) -> tuple[int, dict[str, str]]:
-    """Ready this machine to build the extensions, before anything compiles.
-
-    A pgrx crate needs a Postgres before it can be compiled at all, at
-    the MSRV exactly as at the stable pin: each compile takes its own
-    through org_pgrx_major (#1940), and every major's pin is checked
-    here first. The SDK, and every extension's ICU headers checked
-    (#1774).
-
-    Returns:
-        The status, and what org_pgrx_darwin_prepare exported for the
-        compiles after it.
-
-    """
-    status, prepared = belt_exports("pgrx-env.sh", "org_pgrx_darwin_prepare", majors)
-    if status != 0:
-        return status, {}
-    mise = shutil.which("mise") or "mise"
-    listed, installed = output([mise, "ls", POSTGRES, "--json"])
-    checked, _ = output(
-        [python(), str(BELT / "pgrx_postgres.py"), "--majors", majors], installed
-    )
-    return checked or listed, prepared
 
 
 def records(plan: str) -> list[list[str]]:
@@ -245,11 +94,12 @@ def check(
     flags = f"-p {specs.replace(' ', ' -p ')}".split()
     major = "".join(c for c in own if c.isdigit())
     say(f"compiling at {toolchain}: {specs}")
-    shell = [*SHELL, CALL, "belt", str(BELT / "pgrx-env.sh"), "org_pgrx_major", major]
-    argv = [*shell, "cargo", "check", "--locked", *manifest, *use, *flags]
-    status = run(argv, {**os.environ, **prepared, "RUSTUP_TOOLCHAIN": toolchain})
+    argv = ["cargo", "check", "--locked", *manifest, *use, *flags]
+    status = rust_task.at_major(
+        major, argv, {**prepared, "RUSTUP_TOOLCHAIN": toolchain}
+    )
     if status != 0:
-        run([python(), str(BELT / "msrv_plan.py"), "--failed", toolchain, specs])
+        run([python(), str(belt() / "msrv_plan.py"), "--failed", toolchain, specs])
     return status
 
 
@@ -278,17 +128,23 @@ def planned(at: Sequence[str], toolchains: Path) -> tuple[int, str, str, str]:
         return status, "", "", ""
     exclude = os.environ.get("CLIPPY_EXCLUDE", "")
     status, surface = output(
-        [python(), str(BELT / "gate_surface.py"), "--exclude", exclude], metadata
+        [python(), str(belt() / "gate_surface.py"), "--exclude", exclude], metadata
     )
     if status != 0:
         return status, "", "", ""
-    status, pgrx, majors = pgrx_pairs(surface)
+    # pgrx-env.sh says, once, which major each extension is built at:
+    # its highest, the same major lint:pg-clippy and fix:rust build it
+    # at (#813, #1795). A pgrx crate cannot be compiled with
+    # --all-features, so its own flags ride the plan rather than this
+    # task guessing.
+    status, pairs, majors = rust_task.pgrx_pairs(surface)
     if status != 0:
         return status, "", "", ""
+    pgrx = ",".join(f"{rust_task.name_of(spec)}:{major}" for spec, major, *_ in pairs)
     status, plan = output(
         [
             python(),
-            str(BELT / "msrv_plan.py"),
+            str(belt() / "msrv_plan.py"),
             "--toolchains",
             str(toolchains),
             "--exclude",
@@ -296,7 +152,7 @@ def planned(at: Sequence[str], toolchains: Path) -> tuple[int, str, str, str]:
             "--pgrx",
             pgrx,
             "--floor",
-            str(BELT / "rust-floor.toml"),
+            str(belt() / "rust-floor.toml"),
         ],
         metadata,
     )
@@ -345,7 +201,7 @@ def workspace(manifest: Path | None, toolchains: Path) -> tuple[int, int]:
     # nothing.
     prepared: dict[str, str] = {}
     if pgrx and "--features pg" in plan:
-        status, prepared = register(majors)
+        status, prepared = rust_task.register(majors)
         if status != 0:
             return status, 0
     return compile_plan(plan, at, prepared)
