@@ -29,8 +29,6 @@ mise/config.toml	lint:belt-tree	63	# #1544 unassigned
 mise/config.toml	lint:commits	24	# #1544 unassigned
 mise/config.toml	lint:dco	24	# #1544 unassigned
 mise/config.toml	lint:exec-bits	18	# #1544 unassigned
-mise/config.toml	lint:rust	133	# #1544 unassigned
-mise/config.toml	fix:rust	61	# #1544 unassigned
 mise/config.toml	lint:msrv	70	# #1544 unassigned
 mise/config.toml	lint:pg-clippy	43	# #1544 unassigned
 mise/config.toml	lint:gate-surface	23	# #1544 unassigned
@@ -50,7 +48,6 @@ mise/config.toml	audit:org-pins	127	# #1544 unassigned
 mise/config.toml	audit:biome-rules	40	# #1544 unassigned
 mise/config.toml	lint:gate-stub	57	# #1544 unassigned
 mise/config.toml	lint:release-phases	112	# #1544 unassigned
-mise/config.toml	lint:signer-pin	44	# #1544 unassigned
 mise/config.toml	fix:input-forwarding	30	# #1544 unassigned
 mise/config.toml	lint:source-attest	75	# #1544 unassigned
 mise/config.toml	lint:actions-allowed	41	# #1544 unassigned
@@ -78,7 +75,6 @@ mise/config.toml	lint:toolbelt-lock	35	# #1544 unassigned
 mise/config.toml	lint:lock-platforms	21	# #1544 unassigned
 mise/config.toml	audit:lock-arch	63	# #1544 unassigned
 mise/config.toml	audit:lock-idempotent	100	# #1544 unassigned
-mise/config.toml	lint:nested-permissions	30	# #1544 unassigned
 mise/config.toml	lint:canon-policy	19	# #1544 unassigned
 mise/config.toml	lint:policy-load	45	# #1544 unassigned
 mise/config.toml	lint:caller-permissions	18	# #1544 unassigned
