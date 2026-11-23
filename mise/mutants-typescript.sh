@@ -98,7 +98,7 @@ if [[ -n ${others[0]+set} ]]; then
   done
   exit 1
 fi
-if ! git ls-files --error-unmatch -- "${adoption}" > /dev/null 2>&1; then
+if ! org_tracked_has "${adoption}"; then
   echo "${label}: no ${adoption} tracked, skipped"
   summary "0/1"$'\t'"skipped"
   exit 0
@@ -119,7 +119,7 @@ stryker=node_modules/.bin/stryker
     "@stryker-mutator/core and its runner plugin to devDependencies, and install"
   exit 1
 }
-if git ls-files --error-unmatch -- "${report}" > /dev/null 2>&1; then
+if org_tracked_has "${report}"; then
   org_finding "typescript" "${report} is tracked; it is StrykerJS's output, and the leg replaces it"
   exit 1
 fi

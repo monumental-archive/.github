@@ -71,7 +71,7 @@ summary() { # summary <row>: the counts the totals job reads
 }
 
 config=cosmic-ray.toml
-if ! git ls-files --error-unmatch "${config}" > /dev/null 2>&1; then
+if ! org_tracked_has "${config}"; then
   echo "${label}: no ${config} tracked at the repository's root, skipped"
   [[ ${shard} == plan ]] || summary "${shard}"$'\t'"skipped"
   exit 0

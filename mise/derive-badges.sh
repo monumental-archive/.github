@@ -27,7 +27,7 @@ org_task "fix:badges"
 # clean skip (#1565): project_licence.py runs under it below.
 : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
 
-[[ -f REUSE.toml ]] || {
+org_tracked_has REUSE.toml || {
   echo "fix:badges: no REUSE.toml, no badge surface, skipped"
   exit 0
 }
@@ -53,8 +53,12 @@ repo_url=$(grep "^SPDX-PackageDownloadLocation" REUSE.toml | sed -n 1p | sed -E 
 }
 repo="${repo_url##*/}"
 org_path="${repo_url#https://github.com/}"
-state() { [[ -f .badge-states ]] && awk -v k="${1}" '$1 == k {print $2; exit}' .badge-states || true; }
-states_extra() { [[ -f .badge-states ]] && awk -v k="${1}" '$1 == k {print $2}' .badge-states || true; }
+# Asked once, out here: state() runs inside $( ), where a git that
+# cannot answer would end only the subshell (#2013).
+states=""
+if org_tracked_has .badge-states; then states=.badge-states; fi
+state() { [[ -n ${states} ]] && awk -v k="${1}" '$1 == k {print $2; exit}' .badge-states || true; }
+states_extra() { [[ -n ${states} ]] && awk -v k="${1}" '$1 == k {print $2}' .badge-states || true; }
 # shields.io's static-badge escaping: a literal hyphen or underscore is
 # doubled, and anything a URL or a markdown link would trip on is
 # percent-encoded. `%` first, or the encodings would be re-encoded.
@@ -79,7 +83,7 @@ gate_wf=""
 # the canon's ci.yml is the gate every OTHER repo badges; its own
 # status lives on gate.yml.
 for wf in ci.yml gate.yml; do
-  [[ -f ".github/workflows/${wf}" ]] || continue
+  org_tracked_has ".github/workflows/${wf}" || continue
   grep -qE "^[[:space:]]+workflow_call:" ".github/workflows/${wf}" && continue
   gate_wf="${wf}"
   break
@@ -89,7 +93,7 @@ if [[ -n ${gate_wf} ]]; then
   emsg+="(https://github.com/${org_path}/actions/workflows/${gate_wf})"
   add "${emsg}"
 fi
-if [[ -f .github/workflows/scorecard.yml ]]; then
+if org_tracked_has .github/workflows/scorecard.yml; then
   emsg="[![OpenSSF"
   emsg+=" Scorecard](https://api.scorecard.dev/projects/github.com/${org_path}/badge)]"
   emsg+="(https://scorecard.dev/viewer/?uri=github.com/${org_path})"
@@ -210,7 +214,7 @@ add "[![license](https://img.shields.io/badge/license-${lic_esc}-blue)](LICENSES
 # it renders, Codecov never hears from the repository, and the image
 # reads "unknown" for ever (edtf and iiif-server, #1161). The belt
 # cannot pass the secret for a repository, so it refuses the render.
-if [[ -f .coverage-floor ]]; then
+if org_tracked_has .coverage-floor; then
   if ! grep -qsE "^[^#]*codecov-token:" .github/workflows/*.y*ml; then
     # The block of the ci job's `secrets:` in workflow-templates/ci.yml,
     # which test_derive_badges.py decodes and compares (#1923).
@@ -224,7 +228,7 @@ if [[ -f .coverage-floor ]]; then
   add "[![coverage](https://codecov.io/gh/${org_path}/branch/main/graph/badge.svg)](https://codecov.io/gh/${org_path})"
 fi
 cit=""
-[[ -f CITATION.cff ]] && cit=1
+! org_tracked_has CITATION.cff || cit=1
 concept=""
 [[ -n ${cit} ]] && concept=$(awk '/^identifiers:/{f=1} f && /value:/{print $NF; exit}' CITATION.cff)
 workflows=() && org_tracked_read workflows ".github/workflows/*.y*ml"
@@ -242,7 +246,7 @@ fi
 # back until the first one is published, the same set-it-last state the
 # human-step shields use: the audit asks GitHub whether a release
 # exists, and a tree cannot know that.
-if [[ -f .github/workflows/release.yml ]]; then
+if org_tracked_has .github/workflows/release.yml; then
   rel_state=$(state release)
   if [[ ${rel_state} == "pending" ]]; then
     emsg="<!-- pending (first release): release — remove 'release pending' from .badge-states once the first"
@@ -259,8 +263,8 @@ for f in .github/workflows/publish.yml .github/workflows/self-publish.yml; do
   # `|| true` per the note at the top: a publish workflow that declares
   # no `classes:` is a repo with no registry shields, not an error — and
   # the assignment is the LAST command of this `&&` list, so errexit was
-  # reached here where the `[[ -f ]]` on its left is exempt (#905).
-  [[ -f ${f} ]] && classes="${classes} $(grep -E "^[^#]*classes:" "${f}" | sed -n 1p \
+  # reached here where the test on its left is exempt (#905).
+  org_tracked_has "${f}" && classes="${classes} $(grep -E "^[^#]*classes:" "${f}" | sed -n 1p \
     | sed "s/.*classes:[[:space:]]*//" | tr -d "\"'" || true)"
 done
 # A continuous publisher (#1303) pushes an image on every push and has
@@ -282,7 +286,7 @@ if [[ -z ${cont_path} || -z ${cont_uses} ]]; then
   exit 1
 fi
 cont_img=""
-if git ls-files --error-unmatch -- "${cont_path}" > /dev/null 2>&1; then
+if org_tracked_has "${cont_path}"; then
   # `|| true` per the note at the top: a stub with no such call is a
   # repository that publishes no continuous image, not an error.
   cont_call=$(grep -E "^[^#]*uses:" "${cont_path}" | grep -F -- "${cont_uses}${cont_path}@" || true)
@@ -332,7 +336,7 @@ if [[ ${classes} == *oci-image* || ${classes} == *pgrx-extension* || -n ${cont_i
   [[ ${classes} == *oci-image* ]] && imgs="${repo}"
   if [[ ${classes} == *pgrx-extension* ]]; then
     for f in .github/workflows/publish.yml .github/workflows/self-publish.yml; do
-      [[ -f ${f} ]] || continue
+      org_tracked_has "${f}" || continue
       ext=$(grep -E "^[^#]*extension-crate-dir:" "${f}" | sed -n 1p \
         | sed -e "s/.*extension-crate-dir:[[:space:]]*//" -e "s/[[:space:]]*#.*//" | tr -d "\"'" || true)
       [[ -n ${ext} ]] && imgs="${imgs} $(basename "${ext}" | tr "[:upper:]" "[:lower:]")"
@@ -369,14 +373,14 @@ fi
 # — the script, test or workflow that makes the claim true — and the
 # shield links it. A claim with nothing in the tree behind it does not
 # render.
-if [[ -f .badge-states ]]; then
+if [[ -n ${states} ]]; then
   while read -r skey spath srest; do
     [[ ${skey} == "static" ]] || continue
     if [[ -z ${spath} || ${srest} != *=* || -z ${srest%%=*} || -z ${srest#*=} ]]; then
       org_finding "" "malformed static line — want 'static <path> <label>=<message>': ${skey} ${spath} ${srest}"
       exit 1
     fi
-    if ! git ls-files --error-unmatch -- "${spath}" > /dev/null 2>&1; then
+    if ! org_tracked_has "${spath}"; then
       org_finding "" "static shield '${srest}' names ${spath}, which is not a tracked file — a claim needs its enforcer"
       exit 1
     fi
@@ -408,7 +412,7 @@ if [[ -n ${BADGES_OUT:-} ]]; then
   echo "fix:badges: rendered block to ${BADGES_OUT}"
   exit 0
 fi
-[[ -f README.md ]] || {
+org_tracked_has README.md || {
   org_finding "" "no README.md"
   exit 1
 }

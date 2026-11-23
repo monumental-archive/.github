@@ -105,7 +105,7 @@ vitest="${PWD}/node_modules/.bin/vitest"
 config=""
 for base in vitest.config vite.config; do
   for ext in ts mts cts js mjs cjs; do
-    if [[ -z ${config} ]] && git ls-files --error-unmatch "${base}.${ext}" > /dev/null 2>&1; then
+    if [[ -z ${config} ]] && org_tracked_has "${base}.${ext}"; then
       config="${base}.${ext}"
     fi
   done

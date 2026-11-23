@@ -1469,6 +1469,10 @@ class TestThePlanFeedsTheHelper(unittest.TestCase):
             "PLANT_METADATA": str(metadata),
             "GITHUB_OUTPUT": str(self.output),
         }
+        # pgrx-plan.sh plans a tracked workspace only (#2013).
+        git = hermetic.tool("git")
+        for step in (["init", "-q"], ["add", "Cargo.toml"]):
+            subprocess.run([git, *step], cwd=self.tree, env=self.env, check=True)
 
     def run_in_tree(self, argv: list[str]) -> subprocess.CompletedProcess[str]:
         """Run a command in the planted tree.

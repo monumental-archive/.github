@@ -179,7 +179,7 @@ done <<< "${head_population}"
 snapshots=$(git ls-tree -r --name-only HEAD^1 | awk '$0 == "schema.snapshot.sql" || /\/schema\.snapshot\.sql$/')
 while IFS= read -r snapshot; do
   [[ -n ${snapshot} ]] || continue
-  if ! git ls-files --error-unmatch -- "${snapshot}" > /dev/null 2>&1; then
+  if ! org_tracked_has "${snapshot}"; then
     breaks+=("${label}: ${snapshot}: tracked in the base and not in the head")
     continue
   fi

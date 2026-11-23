@@ -697,7 +697,7 @@ python = "3.15.2"
 #     vendor law): bash-portability red on x/sys's codegen scripts,
 #     exec-bits on eight upstream .sh modes, shell on shfmt-formatting
 #     upstream trees — none of them the repo's defects. Existence
-#     probes (--error-unmatch, the licence emptiness check) and the
+#     probes (org_tracked_has, the licence emptiness check) and the
 #     repro full-tree copies deliberately keep the whole tree.
 #   - Write-mode siblings live under `fix:*`, never run by `ci`.
 [tasks.ci]
@@ -1191,7 +1191,7 @@ files=() && org_tracked_read files ':!vendor/**'
   echo "lint:editorconfig: empty tree, skipped"
   exit 0
 }
-if ! git ls-files --error-unmatch ".editorconfig" > /dev/null 2>&1; then
+if ! org_tracked_has ".editorconfig"; then
   org_finding "" "no .editorconfig tracked — copy scaffold/.editorconfig (#403)" \
     "without it every editorconfig-checker check vacuously passes"
   exit 1
@@ -1772,7 +1772,7 @@ if [[ -n ${detail[0]+set} ]]; then
   exit 1
 fi
 generated="biome-org.generated.json"
-if git ls-files --error-unmatch -- "${generated}" > /dev/null 2>&1; then
+if org_tracked_has "${generated}"; then
   org_finding "" "${generated} is tracked; the belt writes it for the length of one run"
   exit 1
 fi
@@ -1848,7 +1848,7 @@ if [[ -n ${detail[0]+set} ]]; then
   exit 1
 fi
 generated="biome-org.generated.json"
-if git ls-files --error-unmatch -- "${generated}" > /dev/null 2>&1; then
+if org_tracked_has "${generated}"; then
   org_finding "" "${generated} is tracked; the belt writes it for the length of one run"
   exit 1
 fi
@@ -1888,7 +1888,7 @@ dir = "{{cwd}}"
 run = '''
 set -euo pipefail
 table="mise/biome-domains.tsv"
-git ls-files --error-unmatch -- mise/biome-domains.tsv > /dev/null 2>&1 || {
+org_tracked_has mise/biome-domains.tsv || {
   echo "lint:biome-domains: the domain table is delivered, not tracked here, skipped"
   exit 0
 }
@@ -1943,7 +1943,7 @@ version=$(biome --version | awk '{print $2}')
 # the ones whose framework a repository is not. 87 explain calls, 1.0s
 # measured — paid here and nowhere else, exactly as above.
 nursery="mise/biome-nursery-domains.tsv"
-git ls-files --error-unmatch -- "${nursery}" > /dev/null 2>&1 || {
+org_tracked_has "${nursery}" || {
   echo "lint:biome-domains: ${rows} domains agree with biome ${version}; no nursery table"
   exit 0
 }
@@ -2486,7 +2486,7 @@ dir = "{{cwd}}"
 # outranks `.org-canon`'s global one, so the Source there is the
 # workspace tree's. Deterministic, no network — belongs in `ci`.
 run = '''
-if [[ ! -f mise/config.toml || ! -f mise/clippy.toml ]]; then
+if ! org_tracked_has mise/config.toml || ! org_tracked_has mise/clippy.toml; then
   echo "lint:belt-tree: no belt in this tree, skipped"
   exit 0
 fi
@@ -2661,7 +2661,7 @@ helper="${ORG_BELT_DIR}/belt_shell.py"
 description = "Conventional-commit check for the branch (committed)"
 dir = "{{cwd}}"
 # Only meaningful on a branch with an origin/main to diverge from. The
-# `[[ -f committed.toml ]]` half of this guard went with the file (#576):
+# committed.toml presence half of this guard went with the file (#576):
 # the rules are delivered now, so there is no longer a state in which a
 # repo has commits to check and no config to check them against. It was
 # a fail-open — a repo that never copied the file skipped the commit
@@ -3081,7 +3081,7 @@ fi
 # where the belt came from.
 conf_spec=("clippy.toml" ".clippy.toml" "*/clippy.toml" "*/.clippy.toml"
   "rustfmt.toml" ".rustfmt.toml" "*/rustfmt.toml" "*/.rustfmt.toml")
-if git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1; then
+if org_tracked_has security/identity.toml; then
   conf_spec+=(":!mise/clippy.toml" ":!mise/rustfmt.toml")
 fi
 local_conf=() && org_tracked_read local_conf "${conf_spec[@]}"
@@ -3933,7 +3933,7 @@ dir = "{{cwd}}"
 # Deterministic and offline — it reads two tracked files.
 run = '''
 set -euo pipefail
-[[ -f .github/workflows/publish.yml ]] || {
+org_tracked_has .github/workflows/publish.yml || {
   echo "lint:gate-surface: no publish.yml, nothing is published from here, skipped"
   exit 0
 }
@@ -4015,7 +4015,7 @@ command -v golangci-lint > /dev/null || {
 # (gci's import prefix) and, in stele, wrapcheck globs for that module's
 # own packages. Per-repo CONTENT, like deny.toml's skips — the belt can
 # deliver a config, not invent a repo's identity (#445).
-if ! git ls-files --error-unmatch ".golangci.yml" > /dev/null 2>&1; then
+if ! org_tracked_has ".golangci.yml"; then
   org_finding "" "Go is tracked but no .golangci.yml is — copy scaffold/.golangci.yml (#392)" \
     "without it golangci-lint runs its five default linters, not the org's default: all"
   exit 1
@@ -4341,7 +4341,7 @@ command -v mise > /dev/null || {
 # about the pull request. The canon tracks the belt, so the canon's own
 # copy is the answer, in CI and on a laptop alike.
 belt="${PWD}/mise/config.toml"
-git ls-files --error-unmatch "mise/config.toml" > /dev/null 2>&1 || {
+org_tracked_has "mise/config.toml" || {
   org_finding "" "scaffold/ is tracked but mise/config.toml is not" \
     "the assembled repository is run against this repository's own belt"
   exit 1
@@ -4803,14 +4803,15 @@ dir = "{{cwd}}"
 # what this leg READS, so on the canon its absence is a red that names
 # it — never the skip that a directory-shaped guard used to buy.
 run = '''
-git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
+org_tracked_has security/identity.toml || {
   echo "audit:blast-radius: no tracked security/identity.toml, not the canon, skipped"
   exit 0
 }
 missing=""
-for f in slsa/assert-policy.json security/vex; do
-  [[ -e ${f} ]] || missing="${missing} ${f}"
-done
+org_tracked_has slsa/assert-policy.json || missing="${missing} slsa/assert-policy.json"
+# git tracks no directory: the decisions are the files under it.
+vex=() && org_tracked_read vex security/vex
+[[ -n ${vex[0]+set} ]] || missing="${missing} security/vex"
 [[ -z ${missing} ]] || {
   org_finding "" "on the canon, and input(s) this leg reads are missing:${missing}" \
     "a canon-only audit reds on a missing input, never skips (#738)."
@@ -4847,13 +4848,13 @@ dir = "{{cwd}}"
 # cryptographically, so the trusted root is fetched here — the trust
 # boundary is the caller\'s to state (stele#19 tracks in-tool fetch).
 run = '''
-git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
+org_tracked_has security/identity.toml || {
   echo "audit:attestations: no tracked security/identity.toml, not the canon, skipped"
   exit 0
 }
 missing=""
 for f in slsa/assert-policy.json slsa/verify-policy.json; do
-  [[ -e ${f} ]] || missing="${missing} ${f}"
+  org_tracked_has "${f}" || missing="${missing} ${f}"
 done
 [[ -z ${missing} ]] || {
   org_finding "" "on the canon, and input(s) this leg reads are missing:${missing}" \
@@ -4894,13 +4895,13 @@ dir = "{{cwd}}"
 # (stele#69). The trusted root resolves through TUF from the anchor
 # pinned in the binary; the spec is stele's docs.
 run = '''
-git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
+org_tracked_has security/identity.toml || {
   echo "audit:source-vsa: no tracked security/identity.toml, not the canon, skipped"
   exit 0
 }
 missing=""
 for f in slsa/assert-policy.json slsa/verify-policy.json; do
-  [[ -e ${f} ]] || missing="${missing} ${f}"
+  org_tracked_has "${f}" || missing="${missing} ${f}"
 done
 [[ -z ${missing} ]] || {
   org_finding "" "on the canon, and input(s) this leg reads are missing:${missing}" \
@@ -4927,7 +4928,7 @@ dir = "{{cwd}}"
 # (#1633); its header says what it checks and why. The guard stays here
 # so a repository that is not the canon skips by name.
 run = '''
-git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
+org_tracked_has security/identity.toml || {
   echo "audit:badges: no tracked security/identity.toml, not the canon, skipped"
   exit 0
 }
@@ -4961,7 +4962,7 @@ dir = "{{cwd}}"
 # audit:*, not lint:*: the entry is a property of somebody else's
 # server, not of the change under review.
 run = '''
-git ls-files --error-unmatch .bestpractices.json > /dev/null 2>&1 || {
+org_tracked_has .bestpractices.json || {
   echo "audit:bestpractices: no tracked .bestpractices.json, skipped"
   exit 0
 }
@@ -5294,7 +5295,7 @@ run = '''
 # leg reads is the roster (#680), and the canon owes it, so its absence
 # is red by name below rather than a skip; the org listing, the clones
 # and the canon's own tags are the rest of its inputs.
-git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
+org_tracked_has security/identity.toml || {
   echo "audit:org-pins: no tracked security/identity.toml, not the canon, skipped"
   exit 0
 }
@@ -5336,7 +5337,7 @@ repos=$(gh api "orgs/${GITHUB_REPOSITORY_OWNER}/repos" --paginate --jq '.[].name
 # the guard above admitted, so it reads the roster from that tree; a
 # tree with no tracked roster is refused by name, never trusted on the
 # listing's own say-so.
-git ls-files --error-unmatch slsa/assert-policy.json > /dev/null 2>&1 || {
+org_tracked_has slsa/assert-policy.json || {
   org_finding "" "no tracked slsa/assert-policy.json — the roster names" \
     "the population, and without it an unseen repository cannot be told" \
     "from a clean one."
@@ -5602,7 +5603,7 @@ dir = "{{cwd}}"
 # locally: the version decision with its reasoning lines. Guarded: repos
 # without a release stub (the continuous archetype, this repo) skip
 # clean.
-run = 'if [[ -f .github/workflows/release.yml ]]; then stele derive version --git-dir .; else echo "release:preview: no release.yml, skipped"; fi'
+run = 'if org_tracked_has .github/workflows/release.yml; then stele derive version --git-dir .; else echo "release:preview: no release.yml, skipped"; fi'
 
 [tasks."lint:version-mirrors"]
 description = "Every version mirror carries the released version (stele derive bump --check)"
@@ -5623,7 +5624,7 @@ dir = "{{cwd}}"
 # gate that pattern-matches prose to decide whether to run is a
 # second source of truth about a fact the derivation already holds.
 run = '''
-[[ -f .github/workflows/release.yml ]] || {
+org_tracked_has .github/workflows/release.yml || {
   echo "lint:version-mirrors: no release.yml, not a versioned repo, skipped"
   exit 0
 }
@@ -5679,7 +5680,7 @@ dir = "{{cwd}}"
 # `cargo fetch --locked` first, the lint:rust precedent.
 run = '''
 set -euo pipefail
-git ls-files --error-unmatch -- Cargo.toml > /dev/null 2>&1 || {
+org_tracked_has Cargo.toml || {
   echo "lint:workspace-inherit: no root Cargo.toml tracked, skipped"
   exit 0
 }
@@ -5962,7 +5963,7 @@ dir = "{{cwd}}"
 run = '''
 orchestrators=""
 for f in .github/workflows/publish.yml .github/workflows/continuous.yml; do
-  [[ -f ${f} ]] || continue
+  org_tracked_has "${f}" || continue
   grep -qE "^[[:space:]]+workflow_call:" "${f}" || continue
   orchestrators="${orchestrators}${f} "
 done
@@ -6132,7 +6133,7 @@ if [[ -n ${literals} ]]; then
     '($/.github/actions/verify-signed from a canon-owned workflow)'
   exit 1
 fi
-if [[ -f security/signer.pin ]]; then
+if org_tracked_has security/signer.pin; then
   org_finding "" "security/signer.pin exists — the second copy of the signer identity was deleted (#316 finding 2)" \
     "the uses: lines are the single statement of the trusted signer; verifiers derive from them" \
     "(a standalone pin file has no Renovate manager the first-party group can match, so it" \
@@ -6266,7 +6267,7 @@ dir = "{{cwd}}"
 # place with nothing exercising it — quietly, in the gate, on the
 # identity half of the Source track.
 run = '''
-git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
+org_tracked_has security/identity.toml || {
   echo "lint:source-attest: no tracked security/identity.toml, not the canon, skipped"
   exit 0
 }
@@ -6276,9 +6277,9 @@ canon_owner=$(org_identity owner)
 canon_repo=$(org_identity repo)
 canon="${canon_owner}/${canon_repo}"
 missing=""
-for f in "${fixtures}/${canon}/rules" slsa/verify-policy.json; do
-  [[ -e ${f} ]] || missing="${missing} ${f}"
-done
+# The fixtures directory is a canon file read where it lies (#2013).
+[[ -e ${fixtures}/${canon}/rules ]] || missing="${missing} ${fixtures}/${canon}/rules"
+org_tracked_has slsa/verify-policy.json || missing="${missing} slsa/verify-policy.json"
 [[ -z ${missing} ]] || {
   org_finding "" "on the canon, and input(s) this check reads are missing:${missing}" \
     "a canon-only check reds on a missing input, never skips (#738)."
@@ -6433,7 +6434,7 @@ run = '''
 # The identity guard is the whole guard here (#738): the two things
 # compared are the live org setting and the belt's own enforcement
 # copy, so this leg has no tree input of its own to red on.
-git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
+org_tracked_has security/identity.toml || {
   echo "audit:actions-allowlist: no tracked security/identity.toml, not the canon, skipped"
   exit 0
 }
@@ -6505,13 +6506,13 @@ dir = "{{cwd}}"
 # default for new public repositories), never named by id. A read the
 # token cannot make is CANNOT_JUDGE naming the grant, never a pass.
 run = '''
-git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
+org_tracked_has security/identity.toml || {
   echo "audit:security-config: no tracked security/identity.toml, not the canon, skipped"
   exit 0
 }
 # Canon-only, so a missing input is red by name, never a skip (#738).
 for f in security/org-default.json security/org-private.json slsa/assert-policy.json; do
-  [[ -f ${f} ]] || {
+  org_tracked_has "${f}" || {
     org_finding "" "${f} missing — it is an input this audit holds to live"
     exit 1
   }
@@ -6901,7 +6902,7 @@ depends = [{ task = "test", optional = true }]
 run = '''
 floor=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/coverage_floor.py" read) || exit 1
 tracked=$(org_tracked '*.py' | tr '\0' '\n' && "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/coverage_floor.py" legs) || tracked=""
-if [[ -z ${floor} ]] || [[ ! -f Cargo.toml && ! -f go.mod && -z ${tracked} && ! -f package.json ]]; then
+if [[ -z ${floor} ]] || { ! org_tracked_has Cargo.toml && ! org_tracked_has go.mod && [[ -z ${tracked} ]] && ! org_tracked_has package.json; }; then
   if [[ -z ${floor} ]]; then
     echo "coverage:check: no .coverage-floor, skipped"
   else
@@ -7005,7 +7006,7 @@ dir = "{{cwd}}"
 # cargo-fuzz is asserted with a remedy, never installed mid-run — the
 # coverage:check/llvm-tools pattern.
 run = '''
-[[ -d fuzz && -f fuzz/Cargo.toml ]] || {
+org_tracked_has fuzz/Cargo.toml || {
   echo "lint:fuzz-build: no fuzz/, skipped"
   exit 0
 }
@@ -7014,7 +7015,7 @@ if ! command -v cargo-fuzz > /dev/null; then
     'mise.toml: "cargo:cargo-fuzz" = "<version>" (installed before tasks, never mid-run)'
   exit 1
 fi
-if [[ ! -f fuzz/Cargo.lock ]]; then
+if ! org_tracked_has fuzz/Cargo.lock; then
   org_finding "" "fuzz/Cargo.lock is not committed — an unlocked fuzz build is not deterministic"
   exit 1
 fi
@@ -7122,11 +7123,11 @@ dir = "{{cwd}}"
 # Prerequisite of the #83 transfers: one consumer is what made the
 # v1.23.1 break survivable, and transfers add consumers.
 run = '''
-git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
+org_tracked_has security/identity.toml || {
   echo "audit:caller-permissions: no tracked security/identity.toml, not the canon, skipped"
   exit 0
 }
-[[ -f slsa/assert-policy.json ]] || {
+org_tracked_has slsa/assert-policy.json || {
   org_finding "" "on the canon, and the input this leg reads is missing: slsa/assert-policy.json" \
     "a canon-only audit reds on a missing input, never skips (#738)."
   exit 1
@@ -7161,7 +7162,7 @@ dir = "{{cwd}}"
 # or parse failure is "unreadable", never "unchanged" — zero rows means
 # the page shape moved, and that too is a drift signal, named as such.
 run = '''
-git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
+org_tracked_has security/identity.toml || {
   echo "audit:spec-drift: no tracked security/identity.toml, not the canon, skipped"
   exit 0
 }
@@ -7170,7 +7171,7 @@ git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
 # has lost either has lost the claim, not the applicability (#738).
 missing=""
 for f in slsa/spec-source-matrix.txt slsa/requirements.toml; do
-  [[ -e ${f} ]] || missing="${missing} ${f}"
+  org_tracked_has "${f}" || missing="${missing} ${f}"
 done
 [[ -z ${missing} ]] || {
   org_finding "" "on the canon, and input(s) this leg reads are missing:${missing}" \
@@ -7270,7 +7271,7 @@ dir = "{{cwd}}"
 # guard here, exit 1 naming the drift. The helper renders; deciding
 # whether to render at all belongs to the caller that knows the tree.
 run = '''
-[[ -f slsa/levels.toml && -f slsa/requirements.toml ]] || {
+{ org_tracked_has slsa/levels.toml && org_tracked_has slsa/requirements.toml; } || {
   echo "fix:tracks: no track data, skipped"
   exit 0
 }
@@ -7298,14 +7299,14 @@ dir = "{{cwd}}"
 # now: every input this re-render reads is named, and its absence on
 # the canon reds instead of excusing the check.
 run = '''
-git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
+org_tracked_has security/identity.toml || {
   echo "lint:tracks: no tracked security/identity.toml, not the canon, skipped"
   exit 0
 }
 missing=""
 for f in slsa/levels.toml slsa/requirements.toml docs/direction.md \
   docs/source-track.md docs/build-track.md docs/dependency-track.md; do
-  [[ -e ${f} ]] || missing="${missing} ${f}"
+  org_tracked_has "${f}" || missing="${missing} ${f}"
 done
 [[ -z ${missing} ]] || {
   org_finding "" "on the canon, and input(s) this render reads are missing:${missing}" \
@@ -7347,11 +7348,11 @@ dir = "{{cwd}}"
 # never consulted: it cannot judge x509-in-the-PGP-slot and would
 # report every signed tag unsigned.
 run = '''
-git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
+org_tracked_has security/identity.toml || {
   echo "audit:release-tags: no tracked security/identity.toml, not the canon, skipped"
   exit 0
 }
-[[ -f slsa/assert-policy.json ]] || {
+org_tracked_has slsa/assert-policy.json || {
   org_finding "" "on the canon, and the input this leg reads is missing: slsa/assert-policy.json" \
     "the epochs are policy data, so without it no tag can be judged;" \
     "a canon-only audit reds on a missing input, never skips (#738)."
@@ -7414,7 +7415,7 @@ run = '''
 # The identity guard is the whole guard here (#738): the probe, the org
 # listing and each repo's releases are the inputs — nothing in the tree
 # — so this leg has no required input to red on.
-git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
+org_tracked_has security/identity.toml || {
   echo "audit:drafts: no tracked security/identity.toml, not the canon, skipped"
   exit 0
 }
@@ -7651,7 +7652,7 @@ dir = "{{cwd}}"
 # `docs/` was swept into it in one pass — measured, the same org
 # citations resolving before and after.
 run = '''
-git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
+org_tracked_has security/identity.toml || {
   echo "audit:citations: no tracked security/identity.toml, not the canon, skipped"
   exit 0
 }
@@ -7792,12 +7793,12 @@ dir = "{{cwd}}"
 # own name — read from security/identity.toml — is what spares it the
 # two subjects it has none of (public-api, own-audits; #1858).
 run = '''
-git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
+org_tracked_has security/identity.toml || {
   echo "audit:adoption: no tracked security/identity.toml, not the canon, skipped"
   exit 0
 }
 roster="slsa/assert-policy.json"
-[[ -f ${roster} ]] || {
+org_tracked_has "${roster}" || {
   org_finding "" "${roster} missing — the roster IS the population," \
     "so without it there is nothing to walk (#693); a canon-only audit" \
     "reds on a missing input, never skips (#738)"
@@ -7878,7 +7879,7 @@ while IFS=$'\t' read -r _ repo artifact names; do
   done
   checked=$((checked + 1))
   [[ ${found} == true ]] && continue
-  if [[ -f ${optout} ]] && grep -qE "^${repo}[[:space:]]+${artifact}[[:space:]]+[0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]]+\S" "${optout}"; then
+  if org_tracked_has "${optout}" && grep -qE "^${repo}[[:space:]]+${artifact}[[:space:]]+[0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]]+\S" "${optout}"; then
     continue
   fi
   fail="${fail}
@@ -7940,11 +7941,11 @@ dir = "{{cwd}}"
 # instead of an audit's sharp eye). Reads fail closed and say so: a leg
 # that cannot read the signer must not report agreement or drift.
 run = '''
-git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1 || {
+org_tracked_has security/identity.toml || {
   echo "audit:signer-surface: no tracked security/identity.toml, not the canon, skipped"
   exit 0
 }
-[[ -f security/signing-surface.toml ]] || {
+org_tracked_has security/signing-surface.toml || {
   org_finding "" "on the canon, and the input this leg reads is missing: security/signing-surface.toml" \
     "the declaration is one half of the reconciliation, so without it" \
     "there is nothing to compare the signer against; a canon-only audit" \
@@ -7990,7 +7991,7 @@ n=0
 while IFS=$'\t' read -r t c; do
   [[ -n ${t} ]] || continue
   n=$((n + 1))
-  if [[ ! -f ${c} ]]; then
+  if ! org_tracked_has "${c}"; then
     fail="${fail}
   declared caller does not exist: ${c} (for ${t})"
   elif ! grep -qF "predicate-type: ${t}" "${c}"; then
@@ -8064,7 +8065,7 @@ dir = "{{cwd}}"
 # stable, when this becomes one flag on the gate's leg
 # (docs/tooling-verdicts.md).
 run = '''
-[[ -f Cargo.toml ]] || {
+org_tracked_has Cargo.toml || {
   echo "audit:coverage-branches: no Cargo.toml, skipped"
   exit 0
 }
@@ -8098,7 +8099,7 @@ dir = "{{cwd}}"
 # coverage_floor.py, so a hand-typed line is refused as drift. Reopen:
 # Go gaining branch coverage of its own (docs/tooling-verdicts.md).
 run = '''
-[[ -f go.mod ]] || {
+org_tracked_has go.mod || {
   echo "audit:coverage-go-branches: no go.mod, skipped"
   exit 0
 }
@@ -8299,7 +8300,7 @@ dir = "{{cwd}}"
 # root REUSE.toml — a repo that has not declared yet skips clean
 # (lint:licence is what chases the declaration).
 run = '''
-git ls-files --error-unmatch "REUSE.toml" > /dev/null 2>&1 || {
+org_tracked_has "REUSE.toml" || {
   echo "lint:reuse: no tracked REUSE.toml, skipped"
   exit 0
 }
@@ -8371,7 +8372,7 @@ dir = "{{cwd}}"
 # cannot be universal.
 run = '''
 minting=$(org_tracked ':!vendor/**' ".github/workflows/*.y*ml" | xargs -0 grep -lE "^[^#]*mint-doi:[[:space:]]*true" 2> /dev/null || true)
-if [[ ! -f CITATION.cff ]]; then
+if ! org_tracked_has CITATION.cff; then
   if [[ -n ${minting} ]]; then
     IFS=$'\n' read -r -d '' -a detail <<< "${minting}" || true
     org_finding "" "mint-doi: true with no CITATION.cff — a citable repo carries its citation (#316 finding 6):" "${detail[@]}" \
@@ -8381,7 +8382,7 @@ if [[ ! -f CITATION.cff ]]; then
   echo "lint:citation: no CITATION.cff and no mint-doi request, skipped"
   exit 0
 fi
-if [[ ! -f REUSE.toml ]]; then
+if ! org_tracked_has REUSE.toml; then
   org_finding "" "CITATION.cff exists but REUSE.toml (its source of truth) does not"
   exit 1
 fi
@@ -8536,7 +8537,7 @@ dir = "{{cwd}}"
 # the block). Repos without the markers skip clean — adoption is a
 # per-repo step the Monday audit reports on org-wide.
 run = '''
-[[ -f README.md && -f REUSE.toml ]] || {
+{ org_tracked_has README.md && org_tracked_has REUSE.toml; } || {
   echo "lint:badges: no README or REUSE.toml, skipped"
   exit 0
 }
@@ -8599,7 +8600,7 @@ dir = "{{cwd}}"
 # — which is why the remedy is the scaffold's file rather than "write
 # one".
 run = '''
-[[ -f .github/workflows/release.yml ]] || {
+org_tracked_has .github/workflows/release.yml || {
   echo "lint:release-stub: no release.yml, not a versioned repo, skipped"
   exit 0
 }
@@ -8610,7 +8611,7 @@ canon="${canon_owner}/${canon_repo}"
 canon_re="${canon//./\\.}"
 bad=""
 for f in .github/workflows/release.yml .github/workflows/publish.yml; do
-  if [[ ! -f ${f} ]]; then
+  if ! org_tracked_has "${f}"; then
     bad="${bad} ${f}(missing)"
   # In the canon itself these two files ARE the reusable implementations
   # (they declare workflow_call), not caller stubs; the canon's wiring is
@@ -8625,7 +8626,7 @@ done
 # ref, so an untracked file on somebody's disk is not the file the
 # deriver will read.
 changelog=ok
-git ls-files --error-unmatch CHANGELOG.md > /dev/null 2>&1 || changelog=missing
+org_tracked_has CHANGELOG.md || changelog=missing
 if [[ -n ${bad} ]]; then
   org_finding "" "versioned repo with broken release stubs:${bad}" \
     "copy scaffold/ from ${canon}; the publish.yml filename is load-bearing"
@@ -8651,7 +8652,7 @@ dir = "{{cwd}}"
 run = '''
 cfg=""
 for c in mise/config.toml mise.toml .mise.toml; do
-  [[ -f ${c} ]] && {
+  org_tracked_has "${c}" && {
     cfg="${c}"
     break
   }
@@ -8662,7 +8663,7 @@ done
 }
 lock="mise.lock"
 [[ ${cfg} == */* ]] && lock="${cfg%/*}/mise.lock"
-[[ -f ${lock} ]] || {
+org_tracked_has "${lock}" || {
   echo "lint:toolbelt-lock: no ${lock}, skipped"
   exit 0
 }
@@ -8716,7 +8717,7 @@ dir = "{{cwd}}"
 run = '''
 cfg=""
 for c in mise/config.toml mise.toml .mise.toml; do
-  [[ -f ${c} ]] && {
+  org_tracked_has "${c}" && {
     cfg="${c}"
     break
   }
@@ -8727,7 +8728,7 @@ done
 }
 lock="mise.lock"
 [[ ${cfg} == */* ]] && lock="${cfg%/*}/mise.lock"
-[[ -f ${lock} ]] || {
+org_tracked_has "${lock}" || {
   echo "lint:lock-platforms: no ${lock}, skipped"
   exit 0
 }
@@ -8920,7 +8921,7 @@ for lock in "${locks[@]}"; do
   cp "${lock}" "${work}/${d}/mise.lock"
   copied=0
   for c in mise.toml .mise.toml config.toml; do
-    git ls-files --error-unmatch -- "${d}/${c}" > /dev/null 2>&1 || continue
+    org_tracked_has "${d}/${c}" || continue
     cp "${d}/${c}" "${work}/${d}/${c}"
     copied=1
   done
@@ -9110,7 +9111,7 @@ dir = "{{cwd}}"
 # permissions and env the task list cannot express.
 #
 # TWO HALVES, and the split is what #704 corrected. This lint used to
-# open with `[[ -f mise/config.toml ]] || exit 0` — so it enforced "a
+# open by skipping where mise/config.toml was absent — so it enforced "a
 # check nobody runs is no check" on exactly the one repository where
 # that was already true, and exempted every repository where it was
 # not. The asymmetry was invisible from inside the canon, which was the
@@ -9132,8 +9133,8 @@ dir = "{{cwd}}"
 # workflow runs the belt's legs and none of the repository's own.
 run = '''
 status=0
-
-if [[ -f mise/config.toml ]]; then
+. "${ORG_BELT_DIR}/own-audits.sh"
+if org_tracked_has mise/config.toml; then
   bad=""
   count=0
   audits=$(grep -oE '^\[tasks\."audit:[a-z-]+"\]' mise/config.toml \
@@ -9158,7 +9159,6 @@ if [[ -f mise/config.toml ]]; then
   fi
 fi
 
-. "${ORG_BELT_DIR}/own-audits.sh"
 own=$(own_audit_tasks)
 if [[ -z ${own} ]]; then
   echo "lint:audit-scheduled: this repository defines no audit:* of its own"
@@ -9233,13 +9233,13 @@ dir = "{{cwd}}"
 # would satisfy `-f` here while every leg skipped on it (#738).
 # Deterministic, tracked files only.
 run = '''
-git ls-files --error-unmatch mise/config.toml > /dev/null 2>&1 || {
+org_tracked_has mise/config.toml || {
   echo "lint:canon-policy: no belt tracked in this tree, not the canon, skipped"
   exit 0
 }
 missing=""
 for f in slsa/assert-policy.json slsa/verify-policy.json security/identity.toml; do
-  git ls-files --error-unmatch "${f}" > /dev/null 2>&1 || missing="${missing} ${f}"
+  org_tracked_has "${f}" || missing="${missing} ${f}"
 done
 if [[ -n ${missing} ]]; then
   org_finding "" "this tree carries the belt but does not track:${missing}" \
@@ -9290,7 +9290,7 @@ run = '''
 pending=""
 for pair in "slsa/assert-policy.json --assert-policy" "slsa/verify-policy.json --verify-policy"; do
   path="${pair% *}"
-  if git ls-files --error-unmatch "${path}" > /dev/null 2>&1; then
+  if org_tracked_has "${path}"; then
     pending="${pending}${pair}
 "
   fi
@@ -9365,7 +9365,7 @@ dir = "{{cwd}}"
 # derivation reading it out of each leg live in the helper's own header.
 run = '''
 policy=slsa/assert-policy.json
-git ls-files --error-unmatch "${policy}" > /dev/null 2>&1 || {
+org_tracked_has "${policy}" || {
   echo "lint:plan-producers: no committed assert policy, skipped"
   exit 0
 }
@@ -9589,12 +9589,12 @@ dir = "{{cwd}}"
 # Canon only: identity.toml tracked is the canon (#738); there the hook
 # file is a requirement, red by name when it is missing.
 run = '''
-if ! git ls-files --error-unmatch security/identity.toml > /dev/null 2>&1; then
+if ! org_tracked_has security/identity.toml; then
   echo "lint:hook-jobs: no tracked security/identity.toml, not the canon, skipped"
   exit 0
 fi
 hooks=lefthook/org-hooks.yml
-if ! git ls-files --error-unmatch "${hooks}" > /dev/null 2>&1; then
+if ! org_tracked_has "${hooks}"; then
   org_finding "" "${hooks} is not tracked; the canon delivers its hooks there"
   exit 1
 fi

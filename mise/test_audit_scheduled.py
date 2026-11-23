@@ -34,6 +34,7 @@ import hermetic
 
 BELT = Path(__file__).resolve().parent
 BASH = hermetic.tool("bash")
+GIT = hermetic.tool("git")
 OWN_AUDITS_STUB = "own_audit_tasks() { :; }\n"
 OWN_AUDIT_STUB = "own_audit_tasks() { echo audit:custom; }\n"
 CANON = "monumental-archive/.github/.github/workflows"
@@ -73,6 +74,8 @@ class Scheduled(unittest.TestCase):
         belt.mkdir()
         (belt / "own-audits.sh").write_text(OWN_AUDITS_STUB, encoding="utf-8")
         self.env = hermetic.env() | {"ORG_BELT_DIR": str(belt)}
+        for argv in (["init", "-q"], ["add", "mise/config.toml"]):
+            subprocess.run([GIT, *argv], cwd=self.tree, env=self.env, check=True)
 
     def workflow(self, name: str, task: str) -> None:
         """Plant a workflow whose one step runs one audit task."""
@@ -149,6 +152,7 @@ class OwnTasks(unittest.TestCase):
             "ORG_BELT_DIR": str(belt),
             "ORG_CANON_DIR": str(canon),
         }
+        subprocess.run([GIT, "init", "-q"], cwd=self.tree, env=self.env, check=True)
 
     def caller(self, name: str, callee: str) -> None:
         """Plant a stub whose one job calls a canon workflow by pin."""

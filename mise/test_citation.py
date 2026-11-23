@@ -23,12 +23,19 @@ import hermetic
 
 SCRIPT = Path(__file__).resolve().with_name("citation.sh")
 BASH = hermetic.tool("bash")
+GIT = hermetic.tool("git")
 
 LICENCE = '[[annotations]]\npath = "**"\nSPDX-License-Identifier = "0BSD"\n'
 SUPPLIER = 'SPDX-PackageSupplier = "A Maintainer <a@example.invalid>"\n'
 LOCATION = (
     'SPDX-PackageDownloadLocation = "https://github.com/monumental-archive/demo"\n'
 )
+
+
+def track(root: Path, env: dict[str, str]) -> None:
+    """Make `root` a repository tracking every file in it (#2013)."""
+    for argv in (["init", "-q"], ["add", "-A"]):
+        subprocess.run([GIT, *argv], cwd=root, env=env, check=True)
 
 
 def run(
@@ -49,6 +56,7 @@ def run(
         if states is not None:
             (root / ".badge-states").write_text(states, encoding="utf-8")
         env = hermetic.env()
+        track(root, env)
         env["CITATION_OUT"] = str(root / "out.cff")
         done = subprocess.run(
             [BASH, str(SCRIPT)],
@@ -178,6 +186,7 @@ class TheRenderMatchesTheStamp(unittest.TestCase):
                 tmp, "REUSE.toml", ".badge-states", stubs={"CITATION.cff": stamped}
             )
             env = hermetic.env()
+            track(root, env)
             env["CITATION_OUT"] = str(root / "out.cff")
             done = subprocess.run(
                 [BASH, str(SCRIPT)],

@@ -11,6 +11,7 @@ gate as `mise run test`.
 
 import contextlib
 import io
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -28,6 +29,7 @@ def setUpModule() -> None:
 
 
 HERE = Path(__file__).resolve().parent
+GIT = hermetic.tool("git")
 
 
 def run(files: dict[str, str], argv: list[str] | None = None) -> tuple[int, str, str]:
@@ -41,6 +43,10 @@ def run(files: dict[str, str], argv: list[str] | None = None) -> tuple[int, str,
         root = Path(scratch)
         for name, text in files.items():
             (root / name).write_text(text, encoding="utf-8")
+        # The reader asks git whether `.badge-states` is tracked (#2013).
+        env = hermetic.env(root / ".home")
+        for step in (["init", "-q"], ["add", "-A"]):
+            subprocess.run([GIT, *step], cwd=root, env=env, check=True)
         out, err = io.StringIO(), io.StringIO()
         with (
             contextlib.chdir(root),

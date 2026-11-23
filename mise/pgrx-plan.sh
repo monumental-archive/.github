@@ -27,7 +27,7 @@ unset org__here
 
 canon="${1:?usage: pgrx-plan.sh <canon tree>}"
 
-if [[ ! -f Cargo.toml ]]; then
+if ! org_tracked_has Cargo.toml; then
   echo "[]"
   exit 0
 fi

@@ -37,7 +37,7 @@ roster="${2:?usage: roster-reconcile.sh <caller> <roster.json> < listing}"
 # The task this script reports for, where mise named none (#1934).
 org_task "${caller}"
 
-[[ -f ${roster} ]] || {
+org_tracked_has "${roster}" || {
   org_finding "" "no roster at ${roster} — the population is named there, and" \
     "without it an unseen repository cannot be told from a clean one."
   exit 2

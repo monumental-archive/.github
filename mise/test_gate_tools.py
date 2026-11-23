@@ -369,7 +369,8 @@ def guard_paths(lines: list[tuple[str, str]]) -> set[str]:
         # `org_tracked() {` is the producer's definition, not a call, and
         # `org_tracked_read`'s first word is the array it fills.
         for seg in found(
-            r"(?:\bgit ls-files|\borg_tracked_read\s+\S+|\borg_tracked\b(?!\(\)))"
+            r"(?:\bgit ls-files|\borg_tracked_has\b(?!\(\))|\borg_tracked_read\s+\S+"
+            r"|\borg_tracked\b(?!\(\)))"
             r"([^|)>;&]*)",
             text,
         ):

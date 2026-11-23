@@ -31,6 +31,7 @@ from unittest import mock
 
 import decoded
 import hermetic
+import test_derive_badges as derive
 import tracked
 
 BELT = Path(__file__).resolve().parent
@@ -58,6 +59,7 @@ CLEAN_MARKDOWN = "# Title\n\nSome text.\n"
 
 # A git that fails every call, as git does outside a repository.
 FAILING_GIT = "#!/bin/sh\necho 'git: planted failure' >&2\nexit 128\n"
+FAILING_STUBS = {"git": FAILING_GIT}
 
 
 def read_into(
@@ -115,13 +117,14 @@ def run_task(
     files: dict[str, str],
     untracked: dict[str, str] | None = None,
     *,
-    failing_git: bool = False,
     shell: str = BASH,
+    stubs: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Plant a repository and run one task's body in it.
 
-    With `failing_git`, the body meets a `git` first on PATH that says
-    so on stderr and exits 128, as git does outside a repository.
+    `stubs` are commands first on PATH, name to script text: with
+    `FAILING_STUBS`, the body meets a `git` that says so on stderr and
+    exits 128, as git does outside a repository.
     `shell` replaces the belt's bash, with mise's flags kept.
 
     Returns:
@@ -133,12 +136,14 @@ def run_task(
         tree.mkdir()
         plant(tree, files, untracked or {})
         env = hermetic.env(Path(tmp) / "home", ORG_BELT_DIR=str(BELT))
-        if failing_git:
-            stubs = Path(tmp) / "stubs"
-            stubs.mkdir()
-            (stubs / "git").write_text(FAILING_GIT, encoding="utf-8")
-            (stubs / "git").chmod(0o755)
-            env["PATH"] = f"{stubs}:{env.get('PATH', '')}"
+        commands = dict(stubs or {})
+        if commands:
+            where = Path(tmp) / "stubs"
+            where.mkdir()
+            for name, text in commands.items():
+                (where / name).write_text(text, encoding="utf-8")
+                (where / name).chmod(0o755)
+            env["PATH"] = f"{where}:{env.get('PATH', '')}"
         as_mise = hermetic.task_run(task, body(task))
         return subprocess.run(
             [shell, *as_mise.argv[1:]],
@@ -333,7 +338,7 @@ class FailingGit(unittest.TestCase):
                 done = run_task(
                     "lint:markdown",
                     dict.fromkeys(NAMES, CLEAN_MARKDOWN),
-                    failing_git=True,
+                    stubs=FAILING_STUBS,
                     shell=shell,
                 )
                 self.assertNotEqual(0, done.returncode)
@@ -389,6 +394,157 @@ class Python(unittest.TestCase):
             " fixes; the rest by hand",
             done.stderr,
         )
+
+
+def has_status(
+    tree: Path, path: str, *, failing_git: bool = False
+) -> subprocess.CompletedProcess[str]:
+    """Run `org_tracked_has <path>; echo "status $?"` in `tree`.
+
+    Returns:
+        The finished run, both streams captured.
+
+    """
+    env = hermetic.env(tree.parent / "home") | {
+        "BASH_ENV": str(BELT / "findings.sh"),
+        "MISE_TASK_NAME": "fix:test",
+    }
+    if failing_git:
+        stubs = tree.parent / "stubs"
+        stubs.mkdir(exist_ok=True)
+        (stubs / "git").write_text(FAILING_GIT, encoding="utf-8")
+        (stubs / "git").chmod(0o755)
+        env["PATH"] = f"{stubs}:{env.get('PATH', '')}"
+    script = f'org_tracked_has {path} && s=0 || s=$?\necho "status ${{s}}"\n'
+    return subprocess.run(
+        [BASH, "--norc", "-euo", "pipefail", "-c", script],
+        cwd=tree,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+class Has(unittest.TestCase):
+    """org_tracked_has and tracked.has answer from the index (#2013)."""
+
+    def planted(self) -> Path:
+        """Track `kept` and `gone`, delete `gone`, leave `loose` untracked.
+
+        Returns:
+            The tree.
+
+        """
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        tree = Path(scratch.name) / "repo"
+        tree.mkdir()
+        plant(tree, {"kept": "x\n", "gone": "x\n"}, {"loose": "x\n"})
+        (tree / "gone").unlink()
+        return tree
+
+    def test_the_shell_answers_from_the_index(self) -> None:
+        """Tracked 0, untracked on disk 1, tracked and deleted 0."""
+        tree = self.planted()
+        for path, want in (("kept", 0), ("loose", 1), ("gone", 0)):
+            with self.subTest(path=path):
+                done = has_status(tree, path)
+                self.assertEqual((f"status {want}\n", ""), (done.stdout, done.stderr))
+
+    def test_python_answers_from_the_index(self) -> None:
+        """True, False, True: the same three."""
+        tree = self.planted()
+        got: list[bool] = [tracked.has(p, root=tree) for p in ("kept", "loose", "gone")]
+        want: list[bool] = [True, False, True]
+        self.assertEqual(want, got)
+
+    def test_the_shell_ends_on_a_git_that_cannot_answer(self) -> None:
+        """Exit 128: the finding, the shell gone, no status line."""
+        tree = self.planted()
+        done = has_status(tree, "kept", failing_git=True)
+        self.assertEqual(1, done.returncode)
+        self.assertEqual("", done.stdout)
+        self.assertEqual(
+            "fix:test: git could not say whether kept is tracked (exit 128)\n",
+            done.stderr,
+        )
+
+    def test_python_raises_on_a_git_that_cannot_answer(self) -> None:
+        """Exit 128 is never False."""
+        tree = self.planted()
+        stub = tree.parent / "git"
+        stub.write_text(FAILING_GIT, encoding="utf-8")
+        stub.chmod(0o755)
+        with (
+            mock.patch.object(tracked, "GIT", str(stub)),
+            self.assertRaisesRegex(
+                tracked.GitUnanswerableError,
+                r"^git could not say whether kept is tracked \(exit 128\)$",
+            ),
+        ):
+            tracked.has("kept", root=tree)
+
+    def test_a_task_whose_git_fails_is_red_not_skipped(self) -> None:
+        """lint:fuzz-build, git exiting 128: the finding, nonzero, no skip."""
+        done = run_task(
+            "lint:fuzz-build", {"fuzz/Cargo.toml": "[package]\n"}, stubs=FAILING_STUBS
+        )
+        self.assertEqual(1, done.returncode)
+        self.assertIn(
+            "lint:fuzz-build: git could not say whether fuzz/Cargo.toml is"
+            " tracked (exit 128)",
+            done.stderr,
+        )
+        self.assertNotIn("skipped", done.stdout + done.stderr)
+
+
+class UntrackedIsAbsent(unittest.TestCase):
+    """A file on disk that git does not track turns nothing on (#2013)."""
+
+    def test_fuzz_build_skips_an_untracked_fuzz_crate(self) -> None:
+        """Red at 50c77201: "fuzz/Cargo.lock is not committed"."""
+        done = run_task(
+            "lint:fuzz-build", {PLAIN: "x\n"}, {"fuzz/Cargo.toml": "[package]\n"}
+        )
+        self.assertEqual(
+            (0, "lint:fuzz-build: no fuzz/, skipped\n"), (done.returncode, done.stdout)
+        )
+
+    def test_deny_finds_no_deny_toml_where_it_is_untracked(self) -> None:
+        """Cargo.lock tracked, deny.toml beside it untracked: refused."""
+        done = run_task(
+            "lint:deny",
+            {"Cargo.lock": "version = 4\n"},
+            {"deny.toml": "[graph]\n"},
+            stubs={"cargo": "#!/bin/sh\nexit 0\n"},
+        )
+        self.assertEqual(1, done.returncode, done.stdout + done.stderr)
+        self.assertIn("lint:deny: Cargo.lock present but no deny.toml", done.stderr)
+
+    def test_pgrx_plan_plans_nothing_for_an_untracked_manifest(self) -> None:
+        """An untracked Cargo.toml is no crate: `[]`."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = Path(tmp) / "repo"
+            tree.mkdir()
+            plant(tree, {PLAIN: "x\n"}, {"Cargo.toml": "[workspace]\n"})
+            done = subprocess.run(
+                [BASH, str(BELT / "pgrx-plan.sh"), str(BELT.parent)],
+                cwd=tree,
+                env=hermetic.env(Path(tmp) / "home"),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertEqual((0, "[]\n", ""), (done.returncode, done.stdout, done.stderr))
+
+    def test_badges_render_no_coverage_shield_for_an_untracked_floor(self) -> None:
+        """Red at 50c77201: refused for a floor no workflow feeds."""
+        done, block = derive.render(
+            {".coverage-floor": "80\n"}, untracked=(".coverage-floor",)
+        )
+        self.assertEqual((0, ""), (done.returncode, done.stderr))
+        self.assertNotIn("codecov.io", block)
 
 
 if __name__ == "__main__":

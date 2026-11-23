@@ -41,7 +41,7 @@ command -v cargo > /dev/null || {
   org_finding "" "Cargo.lock present but cargo missing — pin rust in mise.toml"
   exit 1
 }
-[[ -f deny.toml ]] || {
+org_tracked_has deny.toml || {
   org_finding "" "Cargo.lock present but no deny.toml — copy scaffold/deny.toml from the canon"
   exit 1
 }

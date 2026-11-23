@@ -54,7 +54,7 @@ mise/config.toml	lint:capability-boundary	17	# #1544 unassigned
 mise/config.toml	lint:release-phases	112	# #1544 unassigned
 mise/config.toml	lint:signer-pin	44	# #1544 unassigned
 mise/config.toml	fix:input-forwarding	30	# #1544 unassigned
-mise/config.toml	lint:source-attest	75	# #1544 unassigned
+mise/config.toml	lint:source-attest	74	# #1544 unassigned
 mise/config.toml	lint:actions-allowed	41	# #1544 unassigned
 mise/config.toml	audit:actions-allowlist	43	# #1544 unassigned
 mise/config.toml	audit:security-config	25	# #1544 unassigned
