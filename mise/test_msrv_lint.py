@@ -439,7 +439,9 @@ class Task(unittest.TestCase):
     """The task's own body: its guard, and the call that starts the helper."""
 
     @staticmethod
-    def run_body(tree: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    def run_body(
+        tree: Path, overrides: dict[str, str]
+    ) -> subprocess.CompletedProcess[str]:
         """Run lint:msrv's body in a tree, as mise runs it.
 
         Returns:
@@ -450,7 +452,7 @@ class Task(unittest.TestCase):
         return subprocess.run(
             as_mise.argv,
             cwd=tree,
-            env=env | as_mise.env,
+            env=hermetic.env() | overrides | as_mise.env,
             capture_output=True,
             text=True,
             check=False,
@@ -461,11 +463,8 @@ class Task(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             tree = Path(tmp)
             subprocess.run([GIT, "init", "-q", tmp], check=True, env=hermetic.env())
-            env = hermetic.env() | {
-                "ORG_BELT_DIR": str(BELT),
-                "ORG_PYTHON": "/nonexistent",
-            }
-            done = Task.run_body(tree, env)
+            overrides = {"ORG_BELT_DIR": str(BELT), "ORG_PYTHON": "/nonexistent"}
+            done = Task.run_body(tree, overrides)
         self.assertEqual(
             (0, "lint:msrv: no Cargo.toml tracked, skipped\n"),
             (done.returncode, done.stdout),
@@ -485,13 +484,13 @@ class Task(unittest.TestCase):
             self.addCleanup(shutil.rmtree, bins)
             for tool in ("git", "bash", "dirname", "cat", "mktemp", "rm"):
                 (bins / tool).symlink_to(hermetic.tool(tool))
-            env = hermetic.env() | {
+            overrides = {
                 "PATH": str(bins),
                 "ORG_BELT_DIR": str(BELT),
                 "ORG_PYTHON": sys.executable,
                 "ORG_FINDINGS": "",
             }
-            done = Task.run_body(tree, env)
+            done = Task.run_body(tree, overrides)
         want = f"lint:msrv: {rust_task.NO_CARGO}\n"
         self.assertEqual((1, "", want), (done.returncode, done.stdout, done.stderr))
 
