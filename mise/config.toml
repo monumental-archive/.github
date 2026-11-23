@@ -5664,6 +5664,8 @@ dir = "{{cwd}}"
 # command, and the lab's literal sat frozen at the signer's FIRST commit
 # while its uses: line was bumped twice — every dispatch a guaranteed
 # identity mismatch, silently.
+# identity.sh fails closed on a missing field, so the helper is never
+# handed an empty signer. The logic is mise/signer_pin.py (#1911).
 run = '''
 files=() && org_tracked_read files ':!vendor/**' ".github/workflows/*.y*ml"
 [[ -n ${files[0]+set} ]] || {
@@ -5671,44 +5673,11 @@ files=() && org_tracked_read files ':!vendor/**' ".github/workflows/*.y*ml"
   exit 0
 }
 . "${ORG_BELT_DIR}/identity.sh"
-canon_owner=$(org_identity owner)
-canon_repo=$(org_identity repo)
-canon="${canon_owner}/${canon_repo}"
-signer_wf=$(org_identity signer-workflow)
-signer_re="${signer_wf//./\\.}"
-literals=$(printf '%s\0' "${files[@]}" | xargs -0 grep -nE -- "--signer-digest[[:space:]]+[0-9a-f]{40}" || true)
-if [[ -n ${literals} ]]; then
-  IFS=$'\n' read -r -d '' -a detail <<< "${literals}" || true
-  org_finding "" "hand-written --signer-digest literal — nothing bumps it, so it drifts from the uses: pin the certificate will carry (#314):" "${detail[@]}" \
-    "derive it instead: uses: ${canon}/.github/actions/verify-signed" \
-    '($/.github/actions/verify-signed from a canon-owned workflow)'
-  exit 1
-fi
-if [[ -f security/signer.pin ]]; then
-  org_finding "" "security/signer.pin exists — the second copy of the signer identity was deleted (#316 finding 2)" \
-    "the uses: lines are the single statement of the trusted signer; verifiers derive from them" \
-    "(a standalone pin file has no Renovate manager the first-party group can match, so it" \
-    "bumps on a separate branch that can never pass this lint — the two-branch split)"
-  exit 1
-fi
-readers=$(printf '%s\0' "${files[@]}" | xargs -0 grep -lE "^[^#]*security/signer\.pin" || true)
-if [[ -n ${readers} ]]; then
-  org_finding "" "workflows read security/signer.pin (on a non-comment line) but the file is deleted (#316 finding 2) — derive from the sign.yml uses: pin instead:${readers}"
-  exit 1
-fi
-refs=$(printf '%s\0' "${files[@]}" | xargs -0 grep -hoE "${signer_re}@[0-9a-f]{40}" | sort -u || true)
-[[ -n ${refs} ]] || {
-  echo "lint:signer-pin: no signer references, skipped"
-  exit 0
-}
-count=$(wc -l <<< "${refs}" | tr -d " ")
-if [[ ${count} != "1" ]]; then
-  IFS=$'\n' read -r -d '' -a detail <<< "${refs}" || true
-  org_finding "" "sign.yml pinned at more than one digest — a tree states the trusted signer once:" "${detail[@]}" \
-    "a partial bump left the tree disagreeing with itself; move every uses: line together"
-  exit 1
-fi
-echo "lint:signer-pin: all signer references agree on ${refs##*@}"
+owner=$(org_identity owner)
+repo=$(org_identity repo)
+signer=$(org_identity signer-workflow)
+"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/signer_pin.py" "${owner}/${repo}" \
+  "${signer}" "${files[@]}"
 '''
 
 [tasks."lint:input-forwarding"]

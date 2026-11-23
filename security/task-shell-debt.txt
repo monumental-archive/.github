@@ -48,7 +48,6 @@ mise/config.toml	audit:org-pins	127	# #1544 unassigned
 mise/config.toml	audit:biome-rules	40	# #1544 unassigned
 mise/config.toml	lint:gate-stub	57	# #1544 unassigned
 mise/config.toml	lint:release-phases	112	# #1544 unassigned
-mise/config.toml	lint:signer-pin	44	# #1544 unassigned
 mise/config.toml	fix:input-forwarding	30	# #1544 unassigned
 mise/config.toml	lint:source-attest	75	# #1544 unassigned
 mise/config.toml	lint:actions-allowed	41	# #1544 unassigned
