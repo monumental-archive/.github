@@ -67,7 +67,6 @@ mise/config.toml	audit:spec-drift	65	# #1544 unassigned
 mise/config.toml	lint:tracks	31	# #1544 unassigned
 mise/config.toml	audit:release-tags	22	# #1544 unassigned
 mise/config.toml	audit:drafts	130	# #1544 unassigned
-mise/config.toml	audit:citations	79	# #1544 unassigned
 mise/config.toml	audit:adoption	110	# #1544 unassigned
 mise/config.toml	audit:signer-surface	65	# #1544 unassigned
 mise/config.toml	audit:coverage-branches	20	# #1544 unassigned
