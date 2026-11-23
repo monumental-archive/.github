@@ -274,7 +274,9 @@ class LintDeny(Planted):
             done.stderr,
         )
         self.assertIn("  delete the entry from fuzz/deny.toml", done.stderr)
-        variant = [c for c in calls if c.startswith("cargo deny ") and c.endswith(" bans")]
+        variant = [
+            c for c in calls if c.startswith("cargo deny ") and c.endswith(" bans")
+        ]
         self.assertEqual(1, len(variant), calls)
         self.assertTrue(
             variant[0].startswith("cargo deny --manifest-path fuzz/Cargo.toml"),
