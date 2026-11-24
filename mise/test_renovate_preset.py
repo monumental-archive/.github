@@ -23,6 +23,12 @@ carries one.
 The fixtures are the shapes as tracked: edtf's Postgres array and ICU
 table on its main (2026-11-20), and #1774's two-table ICU array.
 
+The age rows (#2097) hold where the release-age floor sits and what it
+says. Renovate applies an extended preset's packageRules before this
+file's own, so a top-level age loses to any of them; the floor is this
+file's FIRST rule, the npm rule follows it, and both agree with the
+belt's mise and pnpm numbers, read from mise/config.toml.
+
 stdlib `unittest`, matching the other mise/test_*.py. Run through the
 gate as `mise run test`, which `ci` collects.
 """
@@ -32,6 +38,7 @@ import unittest
 from pathlib import Path
 
 import decoded
+import typed_std
 from subject_budget import JS_GROUP
 
 PRESET = Path(__file__).resolve().parent.parent / "default.json"
@@ -304,6 +311,149 @@ class Pgrx(unittest.TestCase):
             AssertionError, r"no packageRule matches the source .*/pgrx$"
         ):
             pgrx_groups(kept)
+
+
+BELT = Path(__file__).resolve().parent / "config.toml"
+AGE = re.compile(r"^([0-9]+) ?(h|days)$")
+
+
+def hours(age: str, where: str) -> int:
+    """Read a Renovate (`7 days`) or mise (`168h`) age as hours.
+
+    Returns:
+        The age in hours.
+
+    Raises:
+        AssertionError: the age has neither shape.
+
+    """
+    m = AGE.fullmatch(age)
+    if m is None:
+        msg = f"{where}: {age!r} is not an age in hours or days"
+        raise AssertionError(msg)
+    count = typed_std.group(m, 1) or "0"
+    return int(count) * (24 if typed_std.group(m, 2) == "days" else 1)
+
+
+def age_findings(doc: dict[str, object], belt: dict[str, object]) -> list[str]:
+    """Every way the preset's ages miss the shape #2097 decided.
+
+    Returns:
+        One message per miss; empty when the preset holds.
+
+    """
+    found: list[str] = []
+    if "minimumReleaseAge" in doc:
+        found.append(
+            "default.json: a top-level minimumReleaseAge loses to every"
+            " extended preset's packageRules; state it as the first rule"
+        )
+    raw = decoded.as_array(doc.get("packageRules", []), "packageRules")
+    rules = [decoded.as_object(r, "packageRules[]") for r in raw]
+    settings = decoded.as_object(belt["settings"], "[settings]")
+    env = decoded.as_object(belt["env"], "[env]")
+    floor = rules[0] if rules else {}
+    matchers = sorted(k for k in floor if k.startswith(("match", "exclude")))
+    if (
+        matchers != ["matchPackageNames"]
+        or floor["matchPackageNames"] != ["*"]
+        or "minimumReleaseAge" not in floor
+    ):
+        found.append("default.json: packageRules[0] is not the age floor over *")
+    else:
+        age = decoded.as_str(floor.get("minimumReleaseAge", ""), "floor")
+        mise = decoded.as_str(settings["minimum_release_age"], "settings")
+        if hours(age, "packageRules[0]") != hours(mise, "minimum_release_age"):
+            found.append(
+                f"default.json: the floor says {age}, the belt's"
+                f" minimum_release_age {mise}"
+            )
+    npm = [
+        i
+        for i, r in enumerate(rules)
+        if r.get("matchDatasources") == ["npm"] and "minimumReleaseAge" in r
+    ]
+    if npm != [1]:
+        found.append(
+            f"default.json: the npm age rule sits at {npm}, not right after the floor"
+        )
+    else:
+        age = decoded.as_str(rules[1]["minimumReleaseAge"], "npm rule")
+        pnpm = decoded.as_str(
+            env["pnpm_config_minimum_release_age"], "pnpm_config_minimum_release_age"
+        )
+        if hours(age, "npm rule") * 60 != int(pnpm):
+            found.append(
+                f"default.json: npm waits {age}, the belt's pnpm {pnpm} minutes"
+            )
+    return found
+
+
+def belt() -> dict[str, object]:
+    """Decode the belt's mise/config.toml.
+
+    Returns:
+        Its top-level table.
+
+    """
+    return decoded.load_toml(BELT.read_bytes())
+
+
+class Ages(unittest.TestCase):
+    """The age floor outranks every inherited rule (#2097)."""
+
+    def test_preset_holds(self) -> None:
+        """The tracked preset and belt agree, floor first."""
+        none: list[str] = []
+        self.assertEqual(age_findings(preset(), belt()), none)
+
+    def test_top_level_age_is_refused(self) -> None:
+        """Planted: the floor back at top level reds, by name."""
+        doc = {**preset(), "minimumReleaseAge": "7 days"}
+        found = age_findings(doc, belt())
+        self.assertEqual(len(found), 1)
+        self.assertRegex(found[0], r"top-level minimumReleaseAge loses")
+
+    def test_floor_not_first_is_refused(self) -> None:
+        """Planted: an exemption ahead of the floor reds."""
+        doc = preset()
+        raw = decoded.as_array(doc["packageRules"], "packageRules")
+        doc = {**doc, "packageRules": [raw[-1], *raw]}
+        found = age_findings(doc, belt())
+        self.assertRegex(found[0], r"packageRules\[0\] is not the age floor")
+
+    def test_floor_off_the_belt_is_refused(self) -> None:
+        """Planted: a floor that disagrees with mise reds."""
+        doc = preset()
+        raw = decoded.as_array(doc["packageRules"], "packageRules")
+        first = {**decoded.as_object(raw[0], "floor"), "minimumReleaseAge": "3 days"}
+        doc = {**doc, "packageRules": [first, *raw[1:]]}
+        found = age_findings(doc, belt())
+        floor = "default.json: the floor says 3 days"
+        want: list[str] = [f"{floor}, the belt's minimum_release_age 168h"]
+        self.assertEqual(found, want)
+
+    def test_npm_off_pnpm_is_refused(self) -> None:
+        """Planted: npm waiting less than pnpm reds."""
+        doc = preset()
+        raw = decoded.as_array(doc["packageRules"], "packageRules")
+        npm = {**decoded.as_object(raw[1], "npm"), "minimumReleaseAge": "2 days"}
+        doc = {**doc, "packageRules": [raw[0], npm, *raw[2:]]}
+        found = age_findings(doc, belt())
+        want: list[str] = [
+            "default.json: npm waits 2 days, the belt's pnpm 4320 minutes"
+        ]
+        self.assertEqual(found, want)
+
+    def test_npm_rule_missing_is_refused(self) -> None:
+        """Planted: without the npm rule, upstream's three days is unstated."""
+        doc = preset()
+        raw = decoded.as_array(doc["packageRules"], "packageRules")
+        doc = {**doc, "packageRules": [raw[0], *raw[2:]]}
+        found = age_findings(doc, belt())
+        where = "default.json: the npm age rule sits at []"
+        want: list[str] = [f"{where}, not right after the floor"]
+        self.assertEqual(found, want)
 
 
 if __name__ == "__main__":

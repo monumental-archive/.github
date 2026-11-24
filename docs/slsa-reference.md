@@ -712,9 +712,11 @@ flags the *absence* of trusted publishing.
 `docker:pinDigests`, `helpers:pinGitHubActionDigests`, `:configMigration`,
 `:pinDevDependencies`, `abandonments:recommended`,
 `security:minimumReleaseAgeNpm` (3 days, npm only) and
-`:maintainLockFilesWeekly`. This org's global `minimumReleaseAge: 7 days` is
-broader and stricter. The mise manager detects `mise/config.toml` and
-supports `mise.lock`, but refreshing it runs `mise lock`, which requires
+`:maintainLockFilesWeekly`. An extended preset's packageRules outrank a
+top-level option, so the org states its own ages as its first packageRules
+— seven days, three for npm — rather than at top level (#2097). The mise
+manager detects `mise/config.toml` and supports `mise.lock`, but
+refreshing it runs `mise lock`, which requires
 **`allowedUnsafeExecutions`** — a **self-hosted-only** setting that "must
 reside in bot/admin configuration … never in repository `renovate.json`".
 On the hosted App this is not ours to set.
