@@ -252,6 +252,16 @@ BASH_ENV = "{% if env.ORG_BELT_DIR %}{{ env.ORG_BELT_DIR }}/findings.sh{% endif 
 # drops to a reuse old enough that its build fails, at "7 days" it
 # resolves 6.2.0 unchanged.
 UV_EXCLUDE_NEWER = "7 days"
+# The npm floor, extended to pnpm (#2097): minutes, the three days
+# default.json's npm rule gives Renovate. pnpm reads `pnpm_config_*`
+# from the environment (not `npm_config_*`, which pnpm 12 ignores) and
+# re-checks every lockfile entry against it, a `--frozen-lockfile`
+# install included — measured on pnpm 12.20.0, knip 6.48.0 at two days
+# old refused with ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION. It may never
+# exceed Renovate's npm age, or pnpm refuses a version Renovate raised.
+# Renovate's own pnpm runs on Mend's machines without the belt, so a
+# pnpm repository still states the number in pnpm-workspace.yaml.
+pnpm_config_minimum_release_age = "4320"
 # Already uv's default, pinned explicitly on the ruby.compile precedent: a
 # default flip would land unattended through an automerged mise or uv
 # bump, and this particular default is the one standing between a
