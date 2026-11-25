@@ -311,7 +311,7 @@ jobs:
         uses: $/.github/actions/canon
 
       - name: Install mise and the pinned toolchain
-        uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
+        uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
         with:
           version: 2026.11.10
           cache: false
@@ -397,7 +397,7 @@ jobs:
         # taplo comes from the belt: the licence and repository fields are
         # read with a TOML parser, never grep. No tool cache in a job
         # whose output every image build consumes.
-        uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
+        uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
         with:
           version: 2026.11.10
           cache: false
@@ -497,7 +497,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         # stele, its scanner and the triage tasks. No tool cache in a job whose output
         # ships with the release.
-        uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
+        uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
         with:
           version: 2026.11.10
           cache: false
@@ -1386,7 +1386,7 @@ jobs:
         uses: $/.github/actions/canon
 
       - name: Install mise and the pinned toolchain
-        uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
+        uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
         with:
           version: 2026.11.10
           cache: false
@@ -1545,7 +1545,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         # stele, which judges the proofs and writes the decision. No tool
         # cache in a job that holds the decision's signing identity.
-        uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
+        uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
         with:
           version: 2026.11.10
           cache: false
