@@ -82,7 +82,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
         with:
-          version: 2026.11.9
+          version: 2026.11.10
           cache: false
 
       # Link liveness over the caller's own tracked markdown. Network-
@@ -132,7 +132,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
         with:
-          version: 2026.11.9
+          version: 2026.11.10
           cache: false
 
       # Tree-local by the #681 test (#1536): this repository's own
@@ -178,7 +178,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
         with:
-          version: 2026.11.9
+          version: 2026.11.10
           cache: false
 
       # Tree-local by the #681 test: the subject is this repository's

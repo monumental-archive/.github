@@ -140,7 +140,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
         with:
-          version: 2026.11.9
+          version: 2026.11.10
           cache: false
 
       # Bounded libFuzzer runs under AddressSanitizer — cargo-fuzz's own
@@ -330,7 +330,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
         with:
-          version: 2026.11.9
+          version: 2026.11.10
           cache: false
 
       # `cargo llvm-cov --branch` on the nightly the repo declares as
@@ -375,7 +375,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
         with:
-          version: 2026.11.9
+          version: 2026.11.10
           cache: false
 
       # The belt pins gobco `lazy`, so the bare install above skips it.
@@ -477,7 +477,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
         with:
-          version: 2026.11.9
+          version: 2026.11.10
           cache: false
 
       # The cron half of #1332, the Python mirror of the Go fuzz step:
@@ -524,7 +524,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
         with:
-          version: 2026.11.9
+          version: 2026.11.10
           cache: false
 
       # The caller's own vitest and fast-check, from its own tracked
@@ -583,7 +583,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
         with:
-          version: 2026.11.9
+          version: 2026.11.10
           cache: false
 
       # The cron half of #1930: the repository's own `test` task at a

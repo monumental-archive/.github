@@ -49,7 +49,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
         with:
-          version: 2026.11.9
+          version: 2026.11.10
           cache: false
 
       - name: Reconcile the belt's allowlist with the live org setting
@@ -92,7 +92,7 @@ jobs:
         id: mise
         uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
         with:
-          version: 2026.11.9
+          version: 2026.11.10
           cache: false
 
       - name: Mint the audit App's read token
@@ -197,7 +197,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
         with:
-          version: 2026.11.9
+          version: 2026.11.10
           cache: false
 
       - name: Enumerate the population against the required stub set
