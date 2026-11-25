@@ -191,7 +191,7 @@ jobs:
           # v0.18.2 darwin leg pulled same-day mise 2026.8.4 while every
           # pinned site ran 2026.8.3 (#117: nothing unpinned on an attested
           # path, the installer included).
-          version: 2026.11.9
+          version: 2026.11.10
           # No tool cache anywhere downstream of a signature.
           cache: false
           # Only what this job's steps call (#1333): the release path is
@@ -341,7 +341,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
         with:
-          version: 2026.11.9
+          version: 2026.11.10
           cache: false
           # Only what this job's steps call (#1333): the release path is
           # uncached, so every tool in scope is paid for on every run.
