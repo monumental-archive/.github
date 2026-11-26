@@ -38,6 +38,27 @@
 #            call in the run removes the workspace's own artifacts and
 #            the profiles earlier runs left (#1653, #2061).
 #
+# Then, where vitest is the tree's runner, it READS its own arguments
+# (#2105): vitest's coverage has no environment switch, so the
+# measurement is a few flags on the run's own command line.
+#
+#   typescript  in a tree with a tracked root lockfile that pins vitest
+#            and exactly one coverage provider, the first argument whose
+#            basename is `vitest`, with only a package manager's launcher
+#            before it, is the run: `run` is inserted where it has no
+#            subcommand, and the provider, the json-summary and lcov
+#            reporters and a reports directory in the run's directory
+#            are appended (coverage_js_runner.py reads the command). A
+#            vitest subcommand other than `run`, or no vitest argument,
+#            leaves the command unchanged. A `--coverage` argument of the
+#            command's own is refused by name, and so is a second vitest
+#            run in one test run: the leg measures one suite.
+#
+# go.mod, Cargo.toml and the lockfile are asked of git, as every belt
+# task asks whether a file is the repository's (#2013): a file on disk
+# that git does not track is no answer. The floor is not: coverage:adopt
+# creates it untracked on purpose.
+#
 # coverage:check reads the run directory after `test` ends. A
 # repository whose suite does not run through this script leaves no
 # data there, and its floor's record names the leg that measured
@@ -61,6 +82,12 @@ if [[ -z ${run} || -z ${root} || ! -f ${root}/.coverage-floor ]]; then
 fi
 
 belt=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
+# Whether a file is the repository's, asked of git with the path from
+# the root, so the answer is the same from any directory the command
+# runs in (#2013).
+# shellcheck source=mise/tracked.sh
+. "${belt}/tracked.sh"
 
 # The first call in a run clears what earlier runs left: the sweep and
 # why it is needed are coverage-run.sh's.
@@ -157,7 +184,7 @@ refuse_cover_flag() { # usage: refuse_cover_flag <where> <word>; refuses a measu
     *) ;;
   esac
 }
-if [[ -f ${root}/go.mod ]]; then
+if org_tracked_has "${root}/go.mod"; then
   if [[ -n ${GOCOVERDIR:-} ]]; then
     refuse_go "is set (GOCOVERDIR=${GOCOVERDIR})" "the environment's GOCOVERDIR"
   fi
@@ -216,7 +243,7 @@ refuse_rust() { # usage: refuse_rust <what>
   echo "  cargo the test command starts, instrumented into a target directory of its own" >&2
   exit 1
 }
-if [[ -f ${root}/Cargo.toml ]]; then
+if org_tracked_has "${root}/Cargo.toml"; then
   for name in CARGO_TARGET_DIR RUSTC_WRAPPER LLVM_PROFILE_FILE; do
     if [[ -n ${!name:-} ]]; then
       refuse_rust "the environment's ${name} is set (${name}=${!name})"
@@ -261,5 +288,50 @@ fi
 
 # plpgsql: one report per run; a value already set is kept.
 export ORG_PLPGSQL_COVERAGE="${ORG_PLPGSQL_COVERAGE:-${run}/plpgsql-coverage.json}"
+
+# typescript: the run's own vitest, measured where it runs (#2105). The
+# runner and the provider are the tracked root lockfile's, read by
+# coverage_js_runner.py, which also reads the command: it prints the
+# vitest run with the leg's flags, NUL-separated, or nothing when the
+# command is not one, and refuses a coverage flag of the command's own.
+# The reports go to the run's `typescript` directory, made without -p:
+# one there already is a second vitest run in this test run, refused by
+# name, because two suites cannot be one figure.
+js=()
+for name in package.json pnpm-lock.yaml package-lock.json yarn.lock bun.lock; do
+  if org_tracked_has "${root}/${name}"; then
+    js+=("${name}")
+  fi
+done
+if [[ ${js[0]:-} == package.json && -n ${js[1]+set} ]]; then
+  : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
+  ts_dir="${run}/typescript"
+  ts_argv="${run}/vitest-argv.$$"
+  (cd "${root}" && "${ORG_PYTHON}" "${belt}/coverage_js_runner.py" \
+    --measured-run "${ts_dir}" "${js[@]}" -- "$@") > "${ts_argv}" || {
+    rm -f -- "${ts_argv}"
+    exit 1
+  }
+  if [[ -s ${ts_argv} ]]; then
+    if ! mkdir "${ts_dir}" 2> /dev/null; then
+      rm -f -- "${ts_argv}"
+      if [[ -e ${ts_dir} ]]; then
+        echo "measured: a second vitest run in one test run (${ts_dir} exists):" >&2
+        echo "  the leg measures one suite; a repository with several uses vitest projects" >&2
+        exit 1
+      fi
+      mkdir "${ts_dir}"
+      exit 1
+    fi
+    words=()
+    while IFS= read -r -d '' word; do
+      words+=("${word}")
+    done < "${ts_argv}"
+    rm -f -- "${ts_argv}"
+    set -- "${words[@]}"
+  else
+    rm -f -- "${ts_argv}"
+  fi
+fi
 
 exec "$@"

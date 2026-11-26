@@ -49,7 +49,7 @@
 # extensions held out, one function below, not a copy — and prints
 # `rust-branches <percent>` for the Monday audit and `coverage:adopt`.
 #
-# The python and plpgsql legs run no suite (#1667). The repository's own
+# The python, plpgsql and typescript legs run no suite (#1667, #2105). The repository's own
 # `test` task runs once, through mise, and its test command runs through
 # `"${ORG_BELT_DIR}/measured"`, which measures where the suite runs and
 # writes into the run's directory, ORG_COVERAGE_RUN (coverage-run.sh).
@@ -137,7 +137,7 @@ if [[ ${legs} != probe && ${legs} != pgrx-majors ]]; then
   # Completion-guarded (#1233): on bash 3.2 a script with an EXIT trap
   # that dies on an unset variable would otherwise exit 0. One trap for
   # every directory the run makes: the legs below only set theirs.
-  cleanup() { rm -rf "${ts_work:-}" "${scratch:-}"; }
+  cleanup() { rm -rf "${scratch:-}"; }
   rc=0
   trap 'rc=$?; cleanup; [ -n "${org_done:-}" ] || [ "${rc}" -ne 0 ] || rc=1; exit "${rc}"' EXIT
   out=${ORG_COVERAGE_REPORTS:-}
@@ -626,8 +626,9 @@ fi
 
 if [[ -n ${ts_test} && ${legs} =~ ^(all|typescript)$ ]]; then
   # The repository's own runner under its own coverage provider (#1357):
-  # vitest from the repository's node_modules, the provider its lockfile
-  # pins. The belt pins neither, and adds no second instrumentation.
+  # the vitest its test task runs through `measured`, the provider its
+  # lockfile pins. The belt pins neither, and adds no second
+  # instrumentation.
   provider=${ts_runner#vitest }
   case "${provider}" in
     none)
@@ -643,54 +644,36 @@ if [[ -n ${ts_test} && ${legs} =~ ^(all|typescript)$ ]]; then
       ;;
     *) ;;
   esac
-  vitest="${PWD}/node_modules/.bin/vitest"
-  if [[ ! -x ${vitest} ]]; then
-    org_finding "" "vitest is in the lockfile but not installed — install from the" \
-      "tracked lockfile before measuring"
-    exit 1
+  # The run `measured` made of the repository's own vitest (#2105):
+  # its reports, in the run's directory. The leg runs nothing. No
+  # report is no figure, and the floor's record decides whether that
+  # is red (#1666).
+  ts_dir="${run:-/nonexistent}/typescript"
+  if [[ -z ${run} || ! -f ${ts_dir}/coverage-summary.json ]]; then
+    echo "${label}: typescript: the test run measured no TypeScript —" >&2
+    cat >&2 << 'REMEDY'
+  name vitest on the measured command line: "measured pnpm exec vitest run"
+REMEDY
+  else
+    ts_pct=$(jq -r '.total.lines.pct // empty' "${ts_dir}/coverage-summary.json" 2> /dev/null) || ts_pct=""
+    ts_br=$(jq -r '.total.branches.pct // empty' "${ts_dir}/coverage-summary.json" 2> /dev/null) || ts_br=""
+    # A total over nothing reads "Unknown", not a number.
+    if [[ ! ${ts_pct} =~ ^[0-9.]+$ || ! ${ts_br} =~ ^[0-9.]+$ ]]; then
+      org_finding "" "could not read a total from the vitest report — a" \
+        "measurement that reads nothing must not become a floor"
+      exit 1
+    fi
+    if [[ ! -f ${ts_dir}/lcov.info ]]; then
+      org_finding "" "the vitest run wrote a summary and no lcov.info — the" \
+        "upload is the measured run's own report"
+      exit 1
+    fi
+    # The upload is this run's own lcov (#707's law). A name of its own:
+    # lcov.info is the Rust leg's.
+    cp "${ts_dir}/lcov.info" "${out}/lcov-typescript.info"
+    echo "typescript ${ts_pct}"
+    echo "typescript-branches ${ts_br}"
   fi
-  # The vitest run the gate's `test` task makes, read from the steps
-  # task_walk.py walks (#1357 item 2, #1608): one plain invocation, its
-  # arguments and its task's dir, or a refusal by name. The reading of
-  # the scripts is coverage_js_runner.py's.
-  command_json=$("${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/coverage_js_runner.py" \
-    --vitest-command test) || exit 1
-  test_dir=$(jq -r '.dir' <<< "${command_json}")
-  args_lines=$(jq -r '.args[]' <<< "${command_json}")
-  test_args=()
-  while IFS= read -r arg; do
-    test_args+=("${arg}")
-  done <<< "${args_lines}"
-  # Removed by the EXIT trap above.
-  ts_work=$(mktemp -d)
-  # The repository's own vitest config decides what is in the suite and
-  # in the report (`coverage.include`: vitest counts only files a test
-  # loaded unless it is set). The leg sets only what makes the number
-  # readable here: the provider, the two reporters, and a directory of
-  # its own, so nothing lands in the tree unasked.
-  if ! (cd "${test_dir}" && "${vitest}" "${test_args[@]}" \
-    --coverage.enabled=true \
-    --coverage.provider="${provider}" \
-    --coverage.reporter=json-summary \
-    --coverage.reporter=lcov \
-    --coverage.reportsDirectory="${ts_work}") >&2; then
-    org_finding "" "the vitest suite failed under measurement — a suite that" \
-      "does not pass cannot measure a floor"
-    exit 1
-  fi
-  ts_pct=$(jq -r '.total.lines.pct // empty' "${ts_work}/coverage-summary.json" 2> /dev/null) || ts_pct=""
-  ts_br=$(jq -r '.total.branches.pct // empty' "${ts_work}/coverage-summary.json" 2> /dev/null) || ts_br=""
-  # A total over nothing reads "Unknown", not a number.
-  if [[ ! ${ts_pct} =~ ^[0-9.]+$ || ! ${ts_br} =~ ^[0-9.]+$ ]]; then
-    org_finding "" "could not read a total from the vitest report — a" \
-      "measurement that reads nothing must not become a floor"
-    exit 1
-  fi
-  # The upload is this run's own lcov (#707's law). A name of its own:
-  # lcov.info is the Rust leg's.
-  cp "${ts_work}/lcov.info" "${out}/lcov-typescript.info"
-  echo "typescript ${ts_pct}"
-  echo "typescript-branches ${ts_br}"
 fi
 if [[ -n ${run} && ${legs} =~ ^(all|plpgsql)$ && -f ${run}/plpgsql-coverage.json ]]; then
   # The report the test run's teardown wrote; the reading and every

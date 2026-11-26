@@ -1,44 +1,29 @@
 #!/usr/bin/env python3
-"""coverage_js_runner.py's readers, on lockfiles and scripts nobody wrote.
+"""coverage_js_runner.py's readers, on lockfiles and commands nobody wrote.
 
 The properties of `test_coverage_js_runner.py`'s fixed rows (#1548),
-over generated lockfile entries and task run scripts:
+over generated lockfile entries and `measured` command lines:
 
 - Invariance (V): `providers` names exactly the vitest coverage
   providers a lockfile's entries carry, in any of the four lockfile
   spellings and in any order, and nothing for a package whose name
   only begins like one.
-- Invariance (V): a command split across backslash continuations is
-  one logical line, the same as written on one line; blanks and
-  comments are dropped.
-- Invariance (V): `read_line` reads the arguments after vitest behind
-  any launcher the leg knows, and refuses vitest behind any other.
-- Refusal (R): any tasks `mise tasks info --json` can give (a run
-  script, or a list of scripts and `{ task = … }` / `{ tasks = […] }`
-  references) are walked by task_walk.py and answered by
-  `--vitest-command` with 0 and the command or 1 and its refusal, or
-  refused by the walk by name; never a traceback (#1555: a task
-  reference raised AttributeError until this found it).
+- Invariance (V): `measured_run` keeps every word of a vitest run
+  behind any launcher the leg knows, in order, inserts `run` only where
+  there is no subcommand, and appends the coverage flags last (#2105).
+- Refusal (R): vitest behind any other command, or no vitest at all,
+  is left unchanged: never a run the leg would measure.
 
 Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
 """
 
-import contextlib
-import io
 import unittest
 
 import coverage_js_runner as cj
-import decoded
-import hermetic
-import task_walk as tw
 from hypothesis import example
 from hypothesis import strategies as st
 from typed_hypothesis import given
-
-# The task that runs the helper, whose name its findings carry (#1934).
-RUN_AS = "coverage:check"
-
 
 VERSION = st.from_regex(r"[0-9]{1,2}\.[0-9]{1,2}\.[0-9]{1,2}", fullmatch=True)
 # One entry per lockfile dialect, for a package at a version.
@@ -92,121 +77,60 @@ class Providers(unittest.TestCase):
         self.assertEqual(cj.providers(text), expected)
 
 
-class LogicalLines(unittest.TestCase):
-    """A continuation is one line."""
-
-    @given(
-        st.lists(st.lists(WORD, min_size=1, max_size=5), min_size=1, max_size=4),
-        st.data(),
-    )
-    def test_continuations_join(
-        self, commands: list[list[str]], data: st.DataObject
-    ) -> None:
-        """Split at any word boundary, read as written on one line."""
-        script = []
-        for words in commands:
-            script.append(data.draw(st.sampled_from(["", "# a comment", "   "])))
-            pieces = [words[0]]
-            for word in words[1:]:
-                if data.draw(st.booleans()):
-                    pieces[-1] += " \\"
-                    pieces.append("  " + word)
-                else:
-                    pieces[-1] += " " + word
-            script.extend(pieces)
-        read = [" ".join(line.split()) for line in cj.logical_lines("\n".join(script))]
-        written = [" ".join(words) for words in commands]
-        self.assertEqual(read, written)
+BINARY = st.sampled_from(["vitest", "node_modules/.bin/vitest", "./x/vitest"])
 
 
-class ReadLine(unittest.TestCase):
-    """Known launchers read; any other command refused."""
-
-    @given(
-        st.sampled_from(cj.LAUNCHERS),
-        st.sampled_from(["vitest", "node_modules/.bin/vitest", "./x/vitest"]),
-        st.lists(WORD, max_size=4),
-    )
-    def test_a_known_launcher_reads_its_arguments(
-        self, launcher: tuple[str, ...], binary: str, args: list[str]
-    ) -> None:
-        """The arguments after vitest, verbatim."""
-        line = " ".join([*launcher, binary, *args])
-        self.assertEqual(cj.read_line(line), (args, None))
-
-    @given(
-        st.sampled_from(["sudo", "env", "time", "bunx", "nice"]),
-        st.lists(WORD, max_size=3),
-    )
-    def test_an_unknown_launcher_is_refused(self, prefix: str, args: list[str]) -> None:
-        """Refused by name, never read."""
-        line = " ".join([prefix, "vitest", *args])
-        got, reason = cj.read_line(line)
-        self.assertIsNone(got)
-        if reason is None:
-            self.fail("an unknown launcher was refused without a reason")
-        self.assertIn("does not read", reason)
-
-
-SCRIPT = st.one_of(
-    st.text(max_size=40),
-    st.sampled_from(["vitest run", "pnpm exec vitest --run x", "npx vitest watch"]),
-)
-REFERENCE: st.SearchStrategy[object] = st.one_of(
-    st.fixed_dictionaries({"task": WORD}),
-    st.fixed_dictionaries({"tasks": st.lists(WORD, max_size=2)}),
-)
-TASK: st.SearchStrategy[dict[str, object]] = st.fixed_dictionaries(
-    {"name": WORD},
-    optional={
-        "run": st.one_of(SCRIPT, st.lists(st.one_of(SCRIPT, REFERENCE), max_size=3)),
-        "dir": st.sampled_from(["", ".", "web"]),
-    },
-)
-# A task that runs another task, then vitest.
-REFERENCE_THEN_VITEST: list[dict[str, object]] = [
-    {"name": "test", "run": [{"task": "build"}, "vitest run"]}
-]
-
-
-def no_names() -> list[str]:
-    """Answer the walk's every-task question with no task.
+# Words after vitest: file filters and options, never a subcommand or a
+# coverage flag (WORD starts with a letter).
+def not_subcommand(word: str) -> bool:
+    """Say whether a word is not a vitest subcommand.
 
     Returns:
-        An empty list.
+        True for a file filter or an option.
 
     """
-    return []
+    return word not in cj.SUBCOMMANDS
 
 
-class VitestCommand(unittest.TestCase):
-    """Any task stream: the command, or the refusal."""
+ARGS = st.lists(WORD.filter(not_subcommand), max_size=4)
+# `run` given, or no subcommand at all.
+RUN: list[str] = ["run"]
+NONE: list[str] = []
+SUBCOMMAND = (RUN, NONE)
 
-    @given(st.lists(TASK, max_size=3))
-    @example(REFERENCE_THEN_VITEST)
-    def test_any_stream_is_answered(self, tasks: list[dict[str, object]]) -> None:
-        """0 with JSON on stdout, or 1 with the refusal on stderr."""
-        answers = {decoded.as_str(t["name"], "name"): t for t in tasks}
-        root = decoded.as_str(tasks[0]["name"], "name") if tasks else "test"
-        try:
-            walked = tw.walk(root, answers.get, no_names)
-        except tw.RefusedError as exc:
-            self.assertIn("task '", str(exc))
-            return
-        out, err = io.StringIO(), io.StringIO()
-        with (
-            hermetic.as_task(RUN_AS),
-            contextlib.redirect_stdout(out),
-            contextlib.redirect_stderr(err),
-        ):
-            status = cj.vitest_command(walked)
-        self.assertIn(status, (0, 1))
-        if status == 0:
-            printed = decoded.as_object(decoded.load_json(out.getvalue()), "stdout")
-            args = decoded.as_array(printed["args"], "args")
-            self.assertEqual(args[0], "run")
-        else:
-            self.assertIn("coverage:check: typescript:", err.getvalue())
+
+class MeasuredRun(unittest.TestCase):
+    """Known launchers measured; any other command left as it is."""
+
+    @given(st.sampled_from(cj.LAUNCHERS), BINARY, st.sampled_from(SUBCOMMAND), ARGS)
+    def test_a_known_launcher_keeps_its_words(
+        self, launcher: tuple[str, ...], binary: str, run: list[str], args: list[str]
+    ) -> None:
+        """Every word kept in order, `run` once, the flags appended."""
+        head = [*launcher, binary]
+        given_words = [*run, *args]
+        rest = given_words if given_words[:1] == ["run"] else ["run", *given_words]
+        got = cj.measured_run("v8", "/d", [*head, *given_words])
+        if got is None:
+            self.fail("a vitest run behind a known launcher went unmeasured")
+        self.assertEqual(got[: len(head)], head)
+        self.assertEqual(got[len(head) : len(head) + len(rest)], rest)
+        tail = got[len(head) + len(rest) :]
+        self.assertEqual(5, len(tail))
+        self.assertTrue(all(w.startswith("--coverage.") for w in tail), tail)
+
+    @given(st.sampled_from(["sudo", "env", "time", "bunx", "nice"]), BINARY, ARGS)
+    def test_an_unknown_launcher_is_unchanged(
+        self, prefix: str, binary: str, args: list[str]
+    ) -> None:
+        """Never measured, so the leg's report names the remedy."""
+        self.assertIsNone(cj.measured_run("v8", "/d", [prefix, binary, *args]))
+
+    @given(ARGS)
+    def test_no_vitest_is_unchanged(self, args: list[str]) -> None:
+        """A command naming no vitest is not the leg's."""
+        command = ["pytest", *(a for a in args if a != "vitest")]
+        self.assertIsNone(cj.measured_run("v8", "/d", command))
 
 
 if __name__ == "__main__":
