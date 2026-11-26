@@ -1781,10 +1781,22 @@ dir = "{{cwd}}"
 # the honest gate: any diagnostic, any severity, fails. On failure the
 # run repeats under the human reporter, because JSON has no code frames
 # and the second run only ever happens on the red path.
+#
+# A FILE-WIDE OR RANGE IGNORE IS REFUSED BEFORE BIOME RUNS (#2137).
+# biome reports a `biome-ignore` that suppresses nothing
+# (`suppressions/unused`) and never a `biome-ignore-all`,
+# `biome-ignore-start` or `biome-ignore-end` — measured on 2.5.7 with
+# nothing in the file to suppress. Those are biome's `allow`: they
+# outlive their reason silently and widen to hide new findings, the
+# defect #1857 closed for Rust. `mise/biome_suppressions.py` reads the
+# same tracked list biome is handed, comments only — the form in a
+# string, a template literal or a regex is not a suppression — and
+# names each file and line. The remedy is a one-line `biome-ignore`
+# above the finding, which expires, or a config change where the rule
+# is wrong for a class of file (#2116, #2117).
 run = '''
 set -euo pipefail
-files=() && org_tracked_read files ':!vendor/**' "*.js" "*.jsx" "*.mjs" "*.cjs" "*.ts" "*.tsx" "*.mts" "*.cts" \
-  "*.json" "*.jsonc" "*.css" "*.graphql" "*.gql"
+files=() && org_tracked_read files ':!vendor/**' "*.js" "*.jsx" "*.mjs" "*.cjs" "*.ts" "*.tsx" "*.mts" "*.cts" "*.json" "*.jsonc" "*.css" "*.graphql" "*.gql"
 [[ -n ${files[0]+set} ]] || {
   echo "lint:biome: nothing biome parses is tracked, skipped"
   exit 0
@@ -1802,6 +1814,7 @@ if org_tracked_has "${generated}"; then
   org_finding "" "${generated} is tracked; the belt writes it for the length of one run"
   exit 1
 fi
+printf '%s\0' "${files[@]}" | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/biome_suppressions.py"
 rc=0
 trap 'rc=$?; rm -f "${generated}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 bash "${ORG_BELT_DIR}/biome-generate.sh" "${generated}"
