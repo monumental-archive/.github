@@ -300,6 +300,9 @@ def measured_run(
 class Collecting(unittest.TestCase):
     """Collects from a planted database and reads the report."""
 
+    # The words the call names after `--`; None names none (#2114).
+    client: list[str] | None = None
+
     def measure(
         self,
         functions: dict[str, tuple[str, str]],
@@ -313,6 +316,7 @@ class Collecting(unittest.TestCase):
 
         `listing` replaces the function listing psql prints, verbatim;
         `lint` plants the static check's rows, keyed `<oid>.<relid>`.
+        `self.client` is the words the call names after `--`.
         The answers directory and the report stay on the row as
         `self.answers` and `self.report`.
 
@@ -332,7 +336,8 @@ class Collecting(unittest.TestCase):
         report = tmp / "report.json"
         self.answers, self.report = answers, report
         env = stub_env(stubs, answers, ORG_PLPGSQL_COVERAGE=str(report), **planted)
-        collected = call(["collect", "postgres://stub"], env, tmp)
+        named = [] if self.client is None else ["--", *self.client]
+        collected = call(["collect", "postgres://stub", *named], env, tmp)
         read = call(["totals", "leg", str(report)], env, tmp)
         return collected, read
 
@@ -727,6 +732,86 @@ class SuppressionRows(Collecting):
         )
 
 
+# A client the call names (#2114): logs the two words it was handed
+# before the helper's own, then runs the stub psql with the rest.
+CLIENT = """\
+#!/usr/bin/env bash
+printf '[%s][%s][%s]\\n' "$1" "$2" "$3" >> "${STUB_DIR}/client"
+shift 2
+exec "${STUB_PSQL}" "$@"
+"""
+
+OWN = "(the repository's own client)"
+REMEDY = (
+    "pass the client after --, for example:"
+    " collect <conninfo> -- docker exec -i <container> psql"
+)
+
+
+class ClientRows(Collecting):
+    """The client is psql on PATH unless the call names another."""
+
+    def named_client(self) -> list[str]:
+        """Plant CLIENT outside PATH; the stub psql is out of PATH too.
+
+        Returns:
+            The client's path.
+
+        """
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        client = tmp / "client"
+        client.write_text(CLIENT, encoding="utf-8")
+        client.chmod(0o755)
+        psql = tmp / "psql"
+        psql.write_text(PSQL, encoding="utf-8")
+        psql.chmod(0o755)
+        self.stub_psql = str(psql)
+        return [str(client)]
+
+    def test_no_client_named_runs_psql_on_path(self) -> None:
+        """`collect <conninfo>`, with or without a bare `--`, runs psql."""
+        clients: tuple[list[str] | None, ...] = (None, [])
+        for client in clients:
+            with self.subTest(client=client):
+                self.client = client
+                collected, read = self.measure(TWO)
+                self.assertEqual(0, collected.returncode, collected.stderr)
+                self.assertEqual(0, read.returncode, read.stderr)
+                self.assertTrue((self.answers / "linted").is_file())
+
+    def test_a_named_client_is_run_with_its_words_first(self) -> None:
+        """The words run as an argv, unjoined, then the helper's own."""
+        empty = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, empty, ignore_errors=True)
+        self.client = [*self.named_client(), "a b", "c"]
+        collected, read = self.measure(
+            TWO,
+            PATH=f"{empty}{os.pathsep}/usr/bin{os.pathsep}/bin",
+            STUB_PSQL=self.stub_psql,
+        )
+        self.assertEqual(0, collected.returncode, collected.stderr)
+        self.assertEqual(0, read.returncode, read.stderr)
+        self.assertTrue(self.report.is_file())
+        calls = (self.answers / "client").read_text(encoding="utf-8").splitlines()
+        self.assertGreater(len(calls), 3)
+        every: list[str] = ["[a b][c][-X]"] * len(calls)
+        self.assertEqual(every, calls)
+
+    def test_a_client_that_cannot_start_names_the_remedy(self) -> None:
+        """A named client that does not exist is refused, with the remedy."""
+        missing = "/nonexistent/client"
+        self.client = [missing, "exec"]
+        collected, read = self.measure(TWO)
+        self.assertEqual(0, collected.returncode, collected.stderr)
+        self.assertEqual(1, read.returncode)
+        self.assertEqual(
+            "leg: plpgsql: the teardown's collection failed:"
+            f" {missing} is not on PATH {OWN}; {REMEDY}\n",
+            read.stderr,
+        )
+
+
 class RefusalRows(Collecting):
     """Every way a collection or a report file is refused, by name."""
 
@@ -744,9 +829,7 @@ class RefusalRows(Collecting):
         self.addCleanup(shutil.rmtree, empty, ignore_errors=True)
         collected, read = self.measure(TWO, PATH=str(empty))
         self.assertEqual(0, collected.returncode, collected.stderr)
-        self.collection_failed(
-            read, "psql is not on PATH (the repository's own client)"
-        )
+        self.collection_failed(read, f"psql is not on PATH {OWN}; {REMEDY}")
 
     def test_a_database_psql_cannot_reach_fails_by_its_error(self) -> None:
         """The message psql printed is the reason, verbatim."""
@@ -883,7 +966,7 @@ class RefusalRows(Collecting):
                 self.assertEqual(2, done.returncode)
                 self.assertEqual(
                     f"{TASK}: usage: plpgsql-coverage collect <conninfo>"
-                    " | totals <label> <report>\n",
+                    " [-- <client> [<argument>...]] | totals <label> <report>\n",
                     done.stderr,
                 )
 

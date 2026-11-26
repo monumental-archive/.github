@@ -14,11 +14,17 @@ taken inside it: the repository's test teardown runs
     "${ORG_PYTHON}" "${ORG_BELT_DIR}/plpgsql_coverage.py" collect <conninfo>
 
 before it stops the database, when ORG_PLPGSQL_COVERAGE names the file
-to write. Postgres is reached through the repository's own `psql`,
-already needed to run its tests; the belt pins no client. Two
-subcommands:
+to write. Postgres is reached through the client the repository names:
+`psql` on PATH unless the call names another after `--` (#2114),
 
-  collect <conninfo>     the teardown's call. Writes the report, a JSON
+    collect <conninfo> -- <client> [<argument>...]
+
+whose words are run as they are, an argument vector and never a shell
+line, with the helper's own `psql` arguments after them. The belt pins
+no client. Two subcommands:
+
+  collect <conninfo> [-- <client> [<argument>...]]
+                         the teardown's call. Writes the report, a JSON
                          record of the profiler's state and of every
                          PL/pgSQL function's reading, to the file
                          ORG_PLPGSQL_COVERAGE names. It judges nothing:
@@ -255,12 +261,19 @@ class ReadError(Exception):
     """psql exited non-zero; the message is its stderr."""
 
 
+# The client when the call names none: the repository's psql on PATH.
+PSQL = ("psql",)
+
+
 class NotAReportError(Exception):
     """The report file does not decode to a coverage report."""
 
 
-def psql(conninfo: str, sql: str) -> list[list[str]]:
-    """Run one statement and return its rows, tab-split.
+def psql(client: tuple[str, ...], conninfo: str, sql: str) -> list[list[str]]:
+    """Run one statement through the client and return its rows, tab-split.
+
+    `client` is the command line the call named, or PSQL; psql's own
+    arguments are appended to it as words, never joined into a string.
 
     Returns:
         One list of fields per output row.
@@ -269,11 +282,10 @@ def psql(conninfo: str, sql: str) -> list[list[str]]:
         ReadError: psql exited non-zero.
 
     """
-    # The repository's own psql, by name on PATH: the belt pins no client.
-    # ruff: ignore[start-process-with-partial-path]
+    # The repository's own client: the belt pins none.
     done = subprocess.run(
         [
-            "psql",
+            *client,
             "-X",
             "-q",
             "-A",
@@ -296,7 +308,9 @@ def psql(conninfo: str, sql: str) -> list[list[str]]:
     return [line.split("\t") for line in done.stdout.splitlines() if line]
 
 
-def lint_function(conninfo: str, oid: str, relids: list[str]) -> tuple[Finding, ...]:
+def lint_function(
+    client: tuple[str, ...], conninfo: str, oid: str, relids: list[str]
+) -> tuple[Finding, ...]:
     """Ask plpgsql_check's static check about one function.
 
     Returns:
@@ -312,7 +326,7 @@ def lint_function(conninfo: str, oid: str, relids: list[str]) -> tuple[Finding, 
         if not OID.fullmatch(relid):
             msg = f"its trigger table oid '{relid}' is not a number"
             raise ReadError(msg)
-        for row in psql(conninfo, LINT_SQL.format(oid=oid, relid=relid)):
+        for row in psql(client, conninfo, LINT_SQL.format(oid=oid, relid=relid)):
             if len(row) != FINDING:
                 msg = f"unreadable finding: {row!r}"
                 raise ReadError(msg)
@@ -366,7 +380,7 @@ def suppressions_in(source: str) -> tuple[Suppression, ...]:
     return tuple(found)
 
 
-def read_source(conninfo: str, oid: str) -> str:
+def read_source(client: tuple[str, ...], conninfo: str, oid: str) -> str:
     """Read one function's source as the database holds it.
 
     Returns:
@@ -376,7 +390,7 @@ def read_source(conninfo: str, oid: str) -> str:
         ReadError: psql failed, or printed something not one source.
 
     """
-    rows = psql(conninfo, SOURCE_SQL.format(oid=oid))
+    rows = psql(client, conninfo, SOURCE_SQL.format(oid=oid))
     try:
         (encoded,) = rows[0]
         return base64.b64decode(encoded, validate=True).decode("utf-8")
@@ -386,7 +400,11 @@ def read_source(conninfo: str, oid: str) -> str:
 
 
 def read_function(
-    conninfo: str, oid: str, signature: str, relids: list[str]
+    client: tuple[str, ...],
+    conninfo: str,
+    oid: str,
+    signature: str,
+    relids: list[str],
 ) -> Reading | Unreadable:
     """Read one function's figures, or the reason they cannot be read.
 
@@ -397,9 +415,9 @@ def read_function(
     if not OID.fullmatch(oid):
         return Unreadable(signature, f"its oid '{oid}' is not a number")
     try:
-        rows = psql(conninfo, READ_SQL.format(oid=oid))
-        findings = lint_function(conninfo, oid, relids)
-        suppressed = suppressions_in(read_source(conninfo, oid))
+        rows = psql(client, conninfo, READ_SQL.format(oid=oid))
+        findings = lint_function(client, conninfo, oid, relids)
+        suppressed = suppressions_in(read_source(client, conninfo, oid))
     except ReadError as exc:
         return Unreadable(signature, str(exc))
     try:
@@ -418,7 +436,7 @@ def read_function(
         return Unreadable(signature, f"unreadable figures: {rows!r}")
 
 
-def gather(conninfo: str) -> Report | Failed:
+def gather(client: tuple[str, ...], conninfo: str) -> Report | Failed:
     """Read the settings and every function from the database.
 
     Returns:
@@ -426,11 +444,16 @@ def gather(conninfo: str) -> Report | Failed:
 
     """
     try:
-        settings = psql(conninfo, META_SQL)
-        psql(conninfo, CREATE_SQL)
-        listed = psql(conninfo, LIST_SQL)
+        settings = psql(client, conninfo, META_SQL)
+        psql(client, conninfo, CREATE_SQL)
+        listed = psql(client, conninfo, LIST_SQL)
     except FileNotFoundError:
-        return Failed("psql is not on PATH (the repository's own client)")
+        # One line: a finding escapes a newline, so the remedy follows a `;`.
+        return Failed(
+            f"{client[0]} is not on PATH (the repository's own client); "
+            "pass the client after --, for example:"
+            " collect <conninfo> -- docker exec -i <container> psql"
+        )
     except ReadError as exc:
         return Failed(str(exc))
     if len(settings) != 1 or len(settings[0]) != SETTINGS:
@@ -439,7 +462,9 @@ def gather(conninfo: str) -> Report | Failed:
     for row in listed:
         if len(row) != LISTING:
             return Failed(f"unreadable function listing: {row!r}")
-        functions.append(read_function(conninfo, row[0], row[1], row[2].split()))
+        functions.append(
+            read_function(client, conninfo, row[0], row[1], row[2].split())
+        )
     return Report(settings[0][0], settings[0][1], tuple(functions))
 
 
@@ -482,7 +507,7 @@ def encode(report: Report | Failed) -> str:
     return json.dumps(document, indent=2) + "\n"
 
 
-def collect(conninfo: str) -> int:
+def collect(conninfo: str, client: tuple[str, ...] = PSQL) -> int:
     """Write the report the teardown owes.
 
     Returns:
@@ -495,7 +520,7 @@ def collect(conninfo: str) -> int:
             "", f"{ENV} is not set — the leg sets it; call collect only then"
         )
         return 1
-    Path(target).write_text(encode(gather(conninfo)), encoding="utf-8")
+    Path(target).write_text(encode(gather(client, conninfo)), encoding="utf-8")
     return 0
 
 
@@ -859,13 +884,17 @@ def main(argv: list[str]) -> int:
 
     """
     match argv:
-        case ["collect", conninfo]:
+        case ["collect", conninfo] | ["collect", conninfo, "--"]:
             return collect(conninfo)
+        case ["collect", conninfo, "--", *client]:
+            return collect(conninfo, tuple(client))
         case ["totals", label, report]:
             return totals(label, report)
         case _:
             findings.finding(
-                "", f"usage: {NAME} collect <conninfo> | totals <label> <report>"
+                "",
+                f"usage: {NAME} collect <conninfo> [-- <client> [<argument>...]]"
+                " | totals <label> <report>",
             )
             return 2
 

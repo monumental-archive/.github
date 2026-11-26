@@ -32,7 +32,7 @@ honestly blocked on.
 | cargo-llvm-cov + `.coverage-floor` ratchet | Derived coverage floor in the gate (`coverage:check`), measured on the repository's own `test` run through `measured` and rendered by `cargo llvm-cov report` (#1653), re-derived by the release path, codecov badge feed off-gate; Rust branches as a floor of their own (`rust-branches`, #1359), measured with `--branch` on the repo's dated nightly and held by the Monday audit (`audit:coverage-branches`), never the gate |
 | coverage.py (`pipx:` backend via aqua-backed uv) | The `python` and `python-branches` legs of the same ratchet (#1331): the repository's own `test` task run under coverage, child processes included, statements and branches |
 | vitest's own coverage provider (the repository's, not the belt's) | The `typescript` and `typescript-branches` legs of the same ratchet (#1357): the repository's vitest under the provider its lockfile pins, lines and branches; the belt pins neither |
-| plpgsql_check (the repository's test stack, never a published image; the belt pins nothing) | The `plpgsql` and `plpgsql-branches` legs of the same ratchet (#1547): `mise/plpgsql_coverage.py` reads the profiler's statement and branch coverage in the suite's teardown, through the repository's own `psql` |
+| plpgsql_check (the repository's test stack, never a published image; the belt pins nothing) | The `plpgsql` and `plpgsql-branches` legs of the same ratchet (#1547): `mise/plpgsql_coverage.py` reads the profiler's statement and branch coverage in the suite's teardown, through the repository's own `psql` or the client the call names |
 | Hypothesis (`pipx:` backend via aqua-backed uv) | Python property testing (#1332): every tracked `prop_*.py`, fixed seed in the gate (`test:python-properties`), random seed and wider bounds on the Monday cron (`audit:python-properties`) |
 | fast-check (the repository's, not the belt's) | TypeScript property testing (#1549): every tracked `*.prop.test.{ts,tsx,mts,cts}` under the repository's own vitest, fixed seed in the gate (`test:typescript-properties`), random seed and 10,000 runs on the Monday cron (`audit:typescript-properties`); `lint:typescript-properties` refuses an import outside a property file and a restated seed; the belt pins neither tool |
 | proptest (the repository's, not the belt's) | Rust property testing (#1930): the repository's own `test` task draws from seed 1 in the gate (the belt's `[env]` sets `PROPTEST_RNG_SEED`), and from a fresh printed seed on the nightly run (`audit:rust-properties`); `lint:rust-properties` refuses a locked proptest below 1.7.0, which ignores the variable; the belt pins nothing |
@@ -3884,8 +3884,10 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
   asks `plpgsql_coverage_statements` and `plpgsql_coverage_branches`
   for each, and the leg prints `plpgsql <percent>` and
   `plpgsql-branches <percent>`; the floor holds both. Adoption is that
-  one teardown call plus the floor. The belt pins no client: `psql` is
-  the repository's own, already needed to run its tests.
+  one teardown call plus the floor. The belt pins no client: it is
+  `psql` on `PATH` unless the call names another after `--` (#2114),
+  as a repository whose test database runs in a container does:
+  `collect <conninfo> -- docker exec -i <container> psql`.
   Measured 2026-11-19 on the proving repository's runner gate, two
   runs per setting (monumental-archive/monumental-archive#373):
   the layer builds from PGDG's `postgresql-18-plpgsql-check`
