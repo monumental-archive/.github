@@ -42,6 +42,7 @@ if (`${helped()} ${moduled()}` !== "helper hm") {
 }
 """
 
+
 def plant(base: Path, ts: str, mts: str) -> Path:
     """Assemble and commit the fixture with the two specifier suffixes.
 
@@ -114,27 +115,18 @@ def run(tree: Path, task: str) -> subprocess.CompletedProcess[str]:
 class FileOnDisk(unittest.TestCase):
     """`./helper.ts` and `./hm.mts`: the form Node loads."""
 
-    @classmethod
-    def setUpClass(cls) -> None:
-        """Plant once; both rows read the same tree."""
-        cls.tmp = tempfile.TemporaryDirectory()
-        cls.tree = plant(Path(cls.tmp.name), ".ts", ".mts")
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        """Remove the tree."""
-        cls.tmp.cleanup()
-
     def test_lint_biome_is_clean(self) -> None:
         """The rule with no options accepts the source extension."""
-        done = run(self.tree, "lint:biome")
+        with tempfile.TemporaryDirectory() as tmp:
+            done = run(plant(Path(tmp), ".ts", ".mts"), "lint:biome")
         out = done.stdout + done.stderr
         self.assertEqual(done.returncode, 0, out)
         self.assertIn("lint:biome: clean across", out)
 
     def test_lint_types_is_clean(self) -> None:
         """The flag the belt forces makes the form legal (no TS5097)."""
-        done = run(self.tree, "lint:types")
+        with tempfile.TemporaryDirectory() as tmp:
+            done = run(plant(Path(tmp), ".ts", ".mts"), "lint:types")
         out = done.stdout + done.stderr
         self.assertEqual(done.returncode, 0, out)
         self.assertNotIn("TS5097", out)
