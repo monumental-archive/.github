@@ -10,6 +10,36 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.78.5](https://github.com/monumental-archive/.github/compare/v1.78.4...v1.78.5) - 2026-11-26
+
+### Fixed
+
+- update monumental-archive/signer to ebb82cb ([#2101](https://github.com/monumental-archive/.github/pull/2101))
+- update dependency-review-action to v5.0.1 ([#2102](https://github.com/monumental-archive/.github/pull/2102))
+- update jdx/mise to 2026.11.10 ([#2108](https://github.com/monumental-archive/.github/pull/2108))
+- update jdx/mise-action to v5.2.10 ([#2109](https://github.com/monumental-archive/.github/pull/2109))
+- update create-github-app-token to v3.4.0 ([#2111](https://github.com/monumental-archive/.github/pull/2111))
+- update monumental-archive/signer to cf4638e ([#2112](https://github.com/monumental-archive/.github/pull/2112))
+- update ossf/scorecard-action to v2.6.0 ([#2113](https://github.com/monumental-archive/.github/pull/2113))
+- update rumdl to 0.3.5 ([#2110](https://github.com/monumental-archive/.github/pull/2110))
+- update ruff to 0.17.6 ([#2121](https://github.com/monumental-archive/.github/pull/2121))
+- turn off noAwaitInLoops in the biome test override ([#2122](https://github.com/monumental-archive/.github/pull/2122))
+- seed every vitest project the property leg runs ([#2123](https://github.com/monumental-archive/.github/pull/2123))
+- let the plpgsql collect call name its client ([#2125](https://github.com/monumental-archive/.github/pull/2125))
+- update aqua:embarkstudios/cargo-deny to 0.22.0 ([#2124](https://github.com/monumental-archive/.github/pull/2124))
+- make each nightly crash its own finding (#2120) ([#2128](https://github.com/monumental-archive/.github/pull/2128))
+- name the file on disk in relative imports ([#2127](https://github.com/monumental-archive/.github/pull/2127))
+- build a cargo-fuzz crate with --cfg fuzzing ([#2126](https://github.com/monumental-archive/.github/pull/2126))
+- turn noNodejsModules off for projects typed with node ([#2129](https://github.com/monumental-archive/.github/pull/2129))
+- take the fuzz legs out of the coverage floor (#2090) ([#2130](https://github.com/monumental-archive/.github/pull/2130))
+- measure vitest in the test run, not a second one ([#2131](https://github.com/monumental-archive/.github/pull/2131))
+- ask tsc what a tsconfig says, in one place (#2133) ([#2134](https://github.com/monumental-archive/.github/pull/2134))
+
+### Documentation
+
+- db image carries plpgsql_check, loaded by none ([#2132](https://github.com/monumental-archive/.github/pull/2132))
+- say what typescript 6.0 does with a bad tsconfig (#2135) ([#2136](https://github.com/monumental-archive/.github/pull/2136))
+
 ## [1.78.4](https://github.com/monumental-archive/.github/compare/v1.78.3...v1.78.4) - 2026-11-24
 
 ### Fixed
