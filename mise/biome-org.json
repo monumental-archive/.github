@@ -165,7 +165,7 @@
       "linter": {
         "rules": {
           "complexity": { "noExcessiveLinesPerFunction": "off" },
-          "performance": { "useTopLevelRegex": "off" },
+          "performance": { "noAwaitInLoops": "off", "useTopLevelRegex": "off" },
           "style": { "noMagicNumbers": "off" }
         }
       }

@@ -1062,15 +1062,19 @@ and split into two kinds:
 
 - **Provenance** — never caller inputs, validated, fail-closed:
   - `revision`: the full 40-hex SHA the tag points at.
+
   - `version`: the guard's own output; the continuous archetype's map
     simply never contains it.
+
   - `source`: `server_url/repository`, verbatim case, no trailing slash,
     no `.git` — one canonical rendering.
+
   - `created`: the released commit's committer time, RFC 3339 UTC — the
     same instant is exported as `SOURCE_DATE_EPOCH`, which BuildKit
     propagates into the config and index `created` fields, so every
     timestamp surface is a function of one resolved value and none is
     wall clock.
+
   - `licenses`: **precedence chooses which declaration speaks; SPDX
     validation makes speaking safe.** `[workspace.package].license`,
     else `[package].license`, read with taplo, never grep; a repository
@@ -1267,11 +1271,13 @@ correctness-by-patching; this is the same knowledge by design):
   structural — pgrx's own downloaded Postgres builds green and fails at
   `CREATE EXTENSION` for exactly the person the artifact serves — and the
   test suite runs per cell against the same build, not a lookalike.
+
 - **The glibc floor is verified, not assumed**: bookworm sets 2.36, and
   readelf proves no symbol exceeds it, so a dependency dragging in a
   newer symbol fails the release instead of failing at dlopen on
   someone's Debian 12. Smoke runs on bookworm AND trixie: forward
   compatibility demonstrated, never presumed.
+
 - **Upgrade path derived, proven AND executed**: upgrade SQL is a build
   product, never authored (#132 — a hand-maintained stub is derived
   state written by humans, and forgetting it burned immutable version
@@ -1305,12 +1311,14 @@ correctness-by-patching; this is the same knowledge by design):
   `ALTER EXTENSION UPDATE` — the path executes, not merely exists.
   Majors the previous release did not ship skip execution: only
   installations that can exist can be stranded.
+
 - **The floor block is packaging, not schema** (#1274): a previous
   release's shipped `<ext>--<prev>.sql` begins with the PostgreSQL
   floor block (below), and the candidate, a package build, never
   carries it. The derivation drops it from the previous schema before
   the diff, and only as the one leading statement: its dollar-quote tag
   is reserved, so anywhere else, in either schema, it is a refusal.
+
 - **The installable set is recorded, not re-inferred** (#825): the same
   forge walk that picks the predecessor also answers, for every version
   the upgrade graph names, whether a non-draft release still carries its
@@ -1326,6 +1334,7 @@ correctness-by-patching; this is the same knowledge by design):
   second. The record may only ever accuse: a `from` half still owes a
   path whatever the record says, and a tree with no record yet says the
   question is open instead of closing it.
+
 - **Reproducible tarballs**, same flags and normalisation as rust-binary,
   two per cell, both subjects (checksummed, signed, in the manifest):
   `<ext>-<version>-pg<major>-linux-<arch>.tar.gz` holds the Debian
@@ -1360,12 +1369,14 @@ correctness-by-patching; this is the same knowledge by design):
   warning, never a refusal — most minors do not move the floor, so a
   library usually loads on an older one. Older minors are not tested,
   and we do not claim them.
+
 - **One artifact image per PG major**, `FROM scratch`, both
   architectures assembled in one build (nothing executes, so nothing is
   emulated), built in-run from the same verified tarballs the release
   attests — one byte path, no post-release download. The runnable
   convenience image deliberately does not exist in canon: its CVE
   posture would be its base's, refreshable only by a release.
+
 - **The image holds one layout, the same on every major** (#1298):
   `/lib` (the shared library) and `/share/extension` (the control file
   and the SQL scripts), and nothing else. No distribution's path is

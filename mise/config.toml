@@ -352,7 +352,7 @@ taplo = "0.10.0"
 shfmt = "3.14.1"
 # rumdl over markdownlint-cli2: same rule family, aqua-backed instead of
 # npm-backed — keeps Node out of the belt. Revisit if a JS suite lands.
-rumdl = "0.3.4"
+rumdl = "0.3.5"
 lychee = "0.24.2"
 # JSON on the command line, used by eleven belt tasks — nine audit tasks
 # parsing GitHub API responses, fix:tracks, and lint:bestpractices in the
@@ -383,7 +383,7 @@ yq = "4.54.3"
 # universal layer that dropped Python the moment the canon's own count
 # fell to two would have to re-adopt it for the first adopter who
 # writes one.
-ruff = "0.17.5"
+ruff = "0.17.6"
 # The org's JS/TS/JSON layer (#82), at every rule biome has: `preset:
 # "all"` for the eight stable groups plus each nursery rule NAMED in
 # mise/biome-org.json. 514 rules at 2.5.7, not the 525 this comment
@@ -1541,6 +1541,10 @@ dir = "{{cwd}}"
 # reports nothing. And a trap met while planting: `biome lint --only=`
 # BYPASSES `overrides` entirely — the same tree reports all three under
 # `--only`, so never measure an override with it.
+#
+# 2026-11-26 (#2117): `performance/noAwaitInLoops` joins the entry —
+# the override holds the rules that judge production cost or shape,
+# and a test's steps are ordered on purpose; outside tests it stays on.
 #
 # ONE ENTRY in the delivered file. biome documents that "if a file can
 # match three patterns, only the first one is used", but 2.5.7 applies

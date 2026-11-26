@@ -201,6 +201,7 @@ Two supported mechanisms, both better than the form:
   metal names (`floss_license`) or the lowercased OSPS form
   (`osps_ac_01_01`, never `OSPS-AC-01.01`).
   [Spec](https://github.com/ossf/best-practices-badge/blob/main/docs/automation-proposals.md).
+
 - **`.bestpractices.json`** — a file at the repo root (or
   `.project.d/bestpractices.json`) that the badge app reads to propose
   answers. A `?` or `"unknown"` status is ignored entirely, so
@@ -338,9 +339,11 @@ copying the canon's is wrong:
     `git archive` step, with no subdirectory recursion.
   - `build_repeatable` / `build_reproducible` — clause: *no building
     occurs*. Building **does** occur, so these are **Met**.
+
 - `build_repeatable` / `build_reproducible` — **Met for the canon**,
   and this is the trap that caught the first pass of these answers. See
   below.
+
 - `test_statement_coverage80` / `90`, `test_branch_coverage80` — met
   where the code is measured: stele's floor holds ≥ 90, Rust repos
   measure via cargo-llvm-cov, and the canon measures its own Python
@@ -348,8 +351,10 @@ copying the canon's is wrong:
   measured — see [`tooling-verdicts.md`](tooling-verdicts.md), the kcov
   entry). **A consuming repo can legitimately outscore the
   conformance root**, which should not read as a regression.
+
 - `dynamic_analysis` — Met only where fuzzing or property testing
   actually runs. The canon: Met, from `test:python-properties` (#1332).
+
 - Registry and DOI criteria follow the publish stub's `classes:`.
 
 ### The trap: "no compiled code" is not "no build"
