@@ -108,18 +108,23 @@ it and never will; see the entry below.
   that needs it — `biome-ignore-all lint/correctness/noNodejsModules:`
   with the reason — decided in the repo, like every other exception
   (#694).
+
 - `renovate.json` — extends the org preset
+
 - `lefthook.yml` — pulls the org git hooks by remote. Once per clone:
   `lefthook install`, then `lefthook run post-checkout`, which links
   `.config/mise/` to the belt the gate stub pins (#1686); every hook
   relinks first after that, and every belt task refuses another pin's
   belt (#1988)
+
 - no `committed.toml`: the commit canon is delivered (#576). A repo that
   restricts its commit SCOPES declares them as `ORG_COMMIT_SCOPES` in
   `mise.toml` `[env]` and the belt composes the two — the rules have one
   definition, the scope list stays repo identity
+
 - `mise.toml` — repo-specific tools/tasks; the belt arrives through the
   `.config/mise/` link, so a repository tracks nothing there
+
 - `.golangci.yml` — the Go canon (#392): golangci-lint v2 at
   `default: all` with per-rule written disables, gofumpt (extra rules)
   and gci as formatters, and the depguard ban on `encoding/json`
@@ -161,6 +166,7 @@ it and never will; see the entry below.
   should come from real artifacts the system has actually produced
   rather than hand-written examples — an input that was never emitted
   by the real thing proves little about the real thing.
+
 - `tsconfig.json` — the TypeScript canon (#445, corrected by #699). It
   carries **every one of the org's strictness dials**, and that is not
   duplication. This file had the opposite instruction until #699 — carry

@@ -26,6 +26,7 @@ written for two moments: wiring a repository in, and a release going wrong.
    the deriver reads a version inside an `h2` as that version's
    section, so an invented heading that merely mentions one fails with
    "already carries a section for" a version the file does not have.
+
 2. Copy the three workflow stubs from
    [`workflow-templates/`](../workflow-templates/): `ci.yml`,
    `release.yml`, `publish.yml` — **the publish.yml filename is
@@ -40,6 +41,7 @@ written for two moments: wiring a repository in, and a release going wrong.
    the one expected red run. Seed the notes ref while at it:
    `git notes add -m "source-track: notes ref seeded" HEAD && git push
    origin refs/notes/commits`.
+
 3. Declare the artifact classes in the publish stub's `classes:` line
    (comma-separated, any subset):
 
@@ -79,13 +81,16 @@ written for two moments: wiring a repository in, and a release going wrong.
    reasoning from "this repo builds nothing" (#347) — answer build,
    SBOM and signing questions from what the release publishes, never
    from a description of the repository.
+
 4. Run `settings/repo-baseline.sh apply` — settings baseline, immutable
    OIDC sub claim, and the `publish` **environment** (a repository object
    that cannot be shared; apply creates it automatically wherever the
    canonical entry `publish.yml` exists). Then `check` and fix any
    remaining drift it reports.
+
 5. Attach the org security configuration (Settings → Code security — the
    one manual step on every new repository).
+
 6. Org secrets and App installations: **nothing to do.** Every org secret
    (`TAG_MINT_APP_PRIVATE_KEY`, `ZENODO_TOKEN`, `CODECOV_TOKEN`) is
    readable by all organisation repositories, and all three App
@@ -93,15 +98,19 @@ written for two moments: wiring a repository in, and a release going wrong.
    repository is granted them by arriving. There is no tick step to
    forget, which is what killed the first transferred repo's release
    with a 404 (#757). Verify only if the baseline audit reports drift.
+
 7. Workspace shape: version via `[workspace.package]` inheritance; a pgrx
    crate is a member but **not** a default-member, and goes in the
    `exclude:` input.
+
 8. `lint:release-stub` (belt) enforces 2–3 from then on: `release.yml`
    present means the stubs must be, pinned, and a root `CHANGELOG.md`
    must be tracked.
+
 9. Copy `scaffold/CODEOWNERS` to `.github/CODEOWNERS` and grant the
    `owners` team write access — documentation and reviewer routing now,
    enforcement when a second maintainer flips the Code Owners toggle.
+
 10. **Score-ready extras**, so the repository badges the day it lands:
     run `mise run coverage:adopt` to commit a `.coverage-floor` (the
     floor is DERIVED STATE, #652: the task measures the repo and writes
@@ -160,12 +169,14 @@ That is the whole wiring.
   `publish`), and disable token publishing. Add the org team as owner:
   `cargo owner --add github:monumental-archive:owners <crate>` (needs a
   `change-owners`-scoped token; revoke it after).
+
 - **npm**: packages are scoped `@monumental-archive/...` (`npm-scope`
   input). First publish is manual: `wasm-pack build --release --scope
   monumental-archive <crate>`, then `npm publish --access public` from
   `pkg/`. Then package Settings: Trusted Publisher (org / repo /
   `publish.yml` / `publish`, allow `npm publish`) and "Require 2FA and
   disallow tokens".
+
 - **Zenodo**: `ZENODO_TOKEN` is an organisation secret readable by all
   organisation repositories — one production token (scopes
   `deposit:write` and `deposit:actions`), never per-repo tokens and no
@@ -177,6 +188,7 @@ That is the whole wiring.
   sandbox lever (#316): every mint is a real, permanent record, the
   lab's included — a rehearsal that mints test DOIs never proves the
   DOI path.
+
 - **Codecov**: use the **repository** upload token, not the org-wide
   global one — the global token does not identify a repo, so the CLI
   needs an extra org/slug flag the pinned action does not pass, and
@@ -256,10 +268,12 @@ roll-forward.
   caller's `publish.yml` **as committed at the tag** — if the fix changed
   the caller (pin bump), dispatch cannot pick it up and the fix ships as
   the next version instead. Delete the dead draft.
+
 - **Half-published** (e.g. crates uploaded, release not public): every
   publish step is resumable — a crate/package/tag already on the registry
   is a completed step, not a failure. Re-dispatch on the tag and it
   converges.
+
 - **Failed AFTER publish** (the DOI mint is the only job downstream of
   the commitment point — e.g. Zenodo down, the first mint of
   `.github@v1.20.0`): re-dispatch on the tag; attach proves the rebuilt
@@ -272,8 +286,10 @@ roll-forward.
   dispatch runs the tree AT THE TAG, so a fix on main never reaches an
   already-tagged release: version DOIs are not contiguous by design, the
   concept DOI covers the software, and the next release carries the fix.
+
 - **Gate red on the release PR**: fix on main; the release PR refreshes
   itself on the next push. Never edit the release branch by hand.
+
 - **A cell of a matrix class failed**: `fail-fast: false` means the other
   cells finished; collect refused the partial set; nothing signed or
   published. Fix and roll forward — tags are immutable, so the failed
@@ -282,6 +298,7 @@ roll-forward.
   the burn, and `audit:drafts` reports any draft that is not
   ([`release.md`](release.md), "A draft explains itself"). Complete its
   `Fixed forward in:` line when the fix ships.
+
 - **Tag push refused: the default branch's workflows moved** (the tag
   job's `::error` begins "the push of vX.Y.Z was refused"; GitHub's text
   is "refusing to allow a GitHub App to create or update workflow …
@@ -308,9 +325,11 @@ roll-forward.
   Do not queue a workflow-changing merge behind a Release PR. The tag
   job reaches its push within seconds, but two queue entries merging
   seconds apart can still beat it.
+
 - **Tag-mint App dead**: break-glass in
   [`continuity.md`](continuity.md) — an org owner disables the tag
   ruleset, mints by hand, re-enables, records the event.
+
 - **rekor-monitor: a certificate did not reconcile** (an issue titled
   `certificate at CT index N did not reconcile (<conditions>)`, one per
   certificate): `stele assert signer-certificates` found a certificate
@@ -329,6 +348,7 @@ roll-forward.
   the push to the signer repository that minted it (`signer-branch`
   names a commit off its default branch, or one no branch holds).
   Reconciled certificates are in the run's log, one line each.
+
 - **red: the signer-identity watch is gaining on the log
   (signer-identity-watch)** (the `gaining` job's red-check issue,
   #1966; its finding is "the signer-identity watch is behind", #1967):
@@ -356,12 +376,14 @@ roll-forward.
   prints the newest checkpoint's next index every run), never the
   log's head, which skips the unread range. `start-at` is refused
   while a checkpoint exists, and only the first leg is given it.
+
 - **Never watched (recorded 2026-11-15, #1237)**: issuance to the
   signer identity before the certificate-log checkpoint was founded.
   The Rekor scan this replaced completed no run after 2026-10-18, so
   certificates issued from then until the founding run on `main` were
   never checked. The CT log is not back-filled (hundreds of millions of
   entries); the founding run's log prints the tree size it started at.
+
 - **repro-check filed an issue**: the reproducibility audit did not pass
   for the class it rebuilt. Read the scope the run states before you
   diagnose, because the two finding kinds mean different things. A digest
@@ -372,6 +394,7 @@ roll-forward.
   even on a healthy release (#637). Neither is consumer-facing (the
   published bytes are still the attested ones); diagnose a divergence
   before the next release.
+
 - **`audit:source-vsa` red on a ledger fork** (a link's
   `ledgerPrev.noteSha256` matches no note that exists): since the
   `stele emit` cutover this defect class is structurally
@@ -384,6 +407,7 @@ roll-forward.
   #434 record in `source-track.md` is the worked example of
   misdiagnosing this red). Never re-found the chain; a fork is bad
   links, not a broken history.
+
 - **`startup_failure`, no jobs, no log**: a permissions elevation or an
   Actions-allowlist rejection. Check: does every `uses:` job restate its
   callee's permissions; is every action on the org allowlist (including
@@ -517,6 +541,7 @@ literal):
   itself; what the org verified is the tag→digest binding and the
   signed provenance at the index digest (`release.md`). Absent on
   dry-run releases, by design: a rehearsal must never sign "PASSED".
+
 - The dependency triage verdict (VEX): **every decision in the canon's
   `security/vex/` is in the attestation store too**, signed on merge
   (`vex-attest.yml`) through the org's one signer over the digests of
@@ -552,6 +577,7 @@ literal):
   same command against a file that is not a subject exits 1 with
   `HTTP 404` (measured on the same run) — a recipe nobody has watched
   fail is a recipe nobody has tested.
+
 - **The two comparisons the CLI has no flag for.** `gh attestation
   verify` compares builder identity and canonical source repository, but
   exposes nothing for `buildType` or `externalParameters` — the other
@@ -580,13 +606,18 @@ literal):
   does. The canon repository's entry workflow is `self-publish.yml`
   rather than `publish.yml`; everything else in the org uses the canon
   filename.
+
 - Images: same command with `oci://<image>@<digest>` (the **index**
   digest — per-arch digests are not covered).
+
 - Offline: add `--bundle attestations*.intoto.jsonl` from the release.
+
 - GitHub's own binding: `gh release verify <tag>` /
   `gh release verify-asset <tag> <file>`.
+
 - npm's independent provenance: `npm audit signatures` (names the
   caller's workflow, not the signer — two paths, both documented).
+
 - Checksums without tooling: `sha256sum -c checksums.txt`.
 
 ### The whole release in one command, and how to name an image subject
