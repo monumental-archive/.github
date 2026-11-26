@@ -84,6 +84,7 @@ a fresh session **started in the target repo's checkout**.
       (`.editorconfig`), GitHub (`renovate.json`), the release scripts, or
       the repo's own identity and policy (licences, `REUSE.toml`,
       `deny.toml`).
+
 - [ ] **The deletion rides the pin bump** (#620). A delivered config may
       only replace a repo-local copy once the consumer's pinned reference
       names a release whose belt actually reads the delivered one — the
@@ -111,12 +112,14 @@ a fresh session **started in the target repo's checkout**.
       bumps — so this window is longer than one release cycle, not one
       bot poll. While in it: verify with `mise run commits:check` and
       commit with `LEFTHOOK_EXCLUDE=committed`.
+
 - [ ] Copy the `scaffold/` stubs per `scaffold/README.md` (configs
       always; CITATION/REUSE/badge-block/SECURITY-INSIGHTS where the
       runbook's wiring section says so — CITATION.cff is rendered by
       `fix:citation` from REUSE.toml, never copied filled); fill the
       repo-specific holes (real tools and tasks in `mise.toml`, plus
       `ORG_COMMIT_SCOPES` there if the repo restricts commit scopes).
+
 - [ ] **Scorecard preflight** (the policy #83 executes against,
       formerly #88's ledger): run
       `scorecard --repo=github.com/<owner>/<repo>` locally before AND
@@ -128,19 +131,23 @@ a fresh session **started in the target repo's checkout**.
       first `fix:badges` render adds the Scorecard shield, and the
       Monday audit fails an unfloored shield, so a skipped preflight
       is a red cron, not a quiet gap.
+
 - [ ] **Pick and land the licence** (#214): `LICENSE` at the root,
       `LICENSES/<SPDX-ID>.txt`, the expression in `REUSE.toml`. The
       choice is per-repo (Rust convention `MIT OR Apache-2.0`; the
       canon is 0BSD). `lint:licence` reddens the gate until this is
       done, so a repo cannot be brought into conformance without it.
+
 - [ ] Convert the existing task runner to mise tasks: every Taskfile (or
       Makefile/script) target becomes a task or is deliberately dropped,
       with the mapping recorded in the migration PR body. Repo-specific
       lint tools enter as `lint:*` tasks (auto-collected into `ci`);
       write-mode ones as `fix:*`; network-bound ones as `audit:*`.
+
 - [ ] Delete tooling the survey retired. A repo carries no config for
       any belt tool unless it genuinely diverges — divergence is a
       documented exception, not a preference.
+
 - [ ] **If the repo fuzzes** (a tracked `fuzz/`, as edtf and iiif-server
       already have), declare the dated nightly beside the stable pin and
       name it — `rust = ["1.xx.x", "nightly-YYYY-MM-DD"]` plus
@@ -151,6 +158,7 @@ a fresh session **started in the target repo's checkout**.
       stable. What to fuzz is the repo's call and nobody else's — the
       belt enforces how fuzzing runs, never which functions deserve a
       target, the same division as `coverage:check` and its floor.
+
 - [ ] **If the repo is Go, there is nothing to declare** (#445). The
       fuzzing engine ships in the toolchain, so no nightly, no sanitizer
       flag and no extra pin: `go.mod` is the whole setup. Any
@@ -160,6 +168,7 @@ a fresh session **started in the target repo's checkout**.
       twice per target (plain, then race). `lint:go-tidy` needs nothing
       declared either. Same division as above: the belt enforces how
       fuzzing runs, the repo decides what deserves a target.
+
 - [ ] `mise trust && mise install && mise run hooks:install`.
       What the `pre-push` hook gates is the working tree at `HEAD`,
       on every push (#1281): `mise run ci`, an inline job in the
@@ -216,16 +225,21 @@ a fresh session **started in the target repo's checkout**.
   `set -euo pipefail` died on the runner with `set: Illegal option -o
   pipefail`, but a body without one ran under dash with errexit and no
   pipefail — so a failing tool inside a pipeline passed the check.
+
 - `pull_request` CI sits on a synthetic merge commit; `lint:commits`
   already handles it. Do not "fix" ranges per-repo.
+
 - Tool walkers find lefthook's remote cache inside `.git/`; belt tasks
   read the tracked files from `org_tracked`, NUL-separated (#1986).
   Repo-added lint tasks must do the same.
+
 - Fine-grained PATs are REST-only, and Administration needs read+write
   to see merge-settings fields.
+
 - Transferred repos inherit **nothing** automatically: not the security
   configuration, not baseline settings (org rulesets are the exception —
   scope `~ALL` covers arrivals). Phase 1 is not optional.
+
 - **Transfer flips the OIDC subject claim** (post-2026-07-15 rule) to the
   id-embedding `repo:owner@id/name@id:` format. Everything keyed on
   identity changes at that moment: registry trusted-publisher matches,

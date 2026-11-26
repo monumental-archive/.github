@@ -30,8 +30,10 @@ executable form:
    A clone that was never linked has no belt (`mise run ci` reports no
    such task): there is no machine-wide belt to fall back on, and
    `lefthook run post-checkout`, run in that clone, is its remedy.
+
 2. `mise run ci` locally is **exactly** the check CI runs. If it passes on
    your machine, it passes in CI.
+
 3. **A change that adds or changes behaviour adds the check that holds
    it.** In repositories with a test suite that means a test that fails
    without your change; in configuration and policy repositories it may
@@ -41,12 +43,15 @@ executable form:
    specification: functionality nothing enforces is functionality the
    next change may silently remove. A bug fix should add the case that
    reproduced the bug.
+
 4. Commit messages follow [Conventional Commits](https://www.conventionalcommits.org)
    with imperative, lowercase subjects (`feat: add the widget`). The
    `commit-msg` hook (`mise run hooks:install`) tells you immediately.
+
 5. Pull requests are squash-merged: the **PR title becomes the commit
    subject and the PR body becomes the commit body**. Write them as the
    permanent history they will be.
+
 6. **A citation of an org release in `docs/` names its repository beside
    the version**: `` `.github@v1.24.1` ``,
    `` `monumental-archive/stele@v0.2.2` ``, `stele v0.16.0`, or a link to
@@ -58,6 +63,7 @@ executable form:
    org's record and needs no anchor — which is exactly why the anchor is
    required of the claims that are. Prefer the `repo@version` form: the
    walk is line-based and a line wrap cannot split it.
+
 7. **Workflow shell**: `lint:workflow-shell` holds every `run:` block
    in a workflow, a composite action or a workflow template to **15**
    non-blank, non-comment lines, heredoc bodies included. A step is the
