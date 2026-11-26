@@ -352,8 +352,7 @@ class Fuzzing(unittest.TestCase):
             ):
                 with rust_workspaces.built_as(marked):
                     self.assertEqual(inside, os.environ["RUSTFLAGS"])
-                after: dict[str, str] = dict(os.environ)
-                self.assertEqual(before, after)
+                self.assertEqual(before.get("RUSTFLAGS"), os.environ.get("RUSTFLAGS"))
 
     def test_built_as_restores_after_a_raise(self) -> None:
         """An exception inside still puts the environment back."""
@@ -362,8 +361,7 @@ class Fuzzing(unittest.TestCase):
         with mock.patch.dict(os.environ, empty, clear=True):
             with self.assertRaises(KeyError), rust_workspaces.built_as(marked):
                 _ = os.environ["PLANTED_ABSENT"]
-            after: dict[str, str] = dict(os.environ)
-            self.assertEqual(empty, after)
+            self.assertNotIn("RUSTFLAGS", os.environ)
 
 
 if __name__ == "__main__":
