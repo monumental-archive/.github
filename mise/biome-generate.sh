@@ -46,7 +46,8 @@ if [[ -n ${cfgs[0]+set} ]] && ! command -v tsc > /dev/null; then
   exit 1
 fi
 resolved=$(mktemp -d)
-trap 'rm -rf "${resolved}"' EXIT
+rc=0
+trap 'rc=$?; rm -rf "${resolved}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
 projects=()
 n=0
 for cfg in ${cfgs[@]+"${cfgs[@]}"}; do
@@ -65,3 +66,4 @@ org_tracked ':!vendor/**' "package.json" "*/package.json" \
     --domains "${ORG_BELT_DIR}/biome-domains.tsv" \
     --nursery "${ORG_BELT_DIR}/biome-nursery-domains.tsv" \
     --out "${generated}" ${projects[@]+"${projects[@]}"}
+org_done=1
