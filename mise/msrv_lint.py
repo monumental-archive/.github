@@ -21,7 +21,8 @@ roots are mise/rust_workspaces.py's, `mise ls rust` is read once, and
 `workspace` runs each root's steps with `--manifest-path` naming it.
 Every root runs even when an earlier one is red; each finding about a
 member names its root as the subject, and the closing count covers
-every root.
+every root. A cargo-fuzz root is compiled with `--cfg fuzzing`, as
+cargo-fuzz builds it (#2093).
 
 Run in the repository's root, with cargo, mise and the belt on PATH;
 stdlib only.
@@ -227,7 +228,10 @@ def every_root(roots: Sequence[str], toolchains: Path) -> tuple[int, int]:
     status = 0
     checked = 0
     for root in roots:
-        red, compiled = workspace(root, toolchains)
+        # A cargo-fuzz crate is compiled with `--cfg fuzzing`, as
+        # cargo-fuzz builds it (#2093).
+        with rust_workspaces.built_as(root):
+            red, compiled = workspace(root, toolchains)
         status = status or red
         checked += compiled
     return status, checked

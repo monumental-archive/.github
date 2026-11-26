@@ -1546,10 +1546,13 @@ dir = "{{cwd}}"
 # the override holds the rules that judge production cost or shape,
 # and a test's steps are ordered on purpose; outside tests it stays on.
 #
-# ONE ENTRY, and the count is load-bearing: biome documents that "if a
-# file can match three patterns, only the first one is used". A second
-# entry added later does not compose with this one for a file matching
-# both — it replaces it.
+# ONE ENTRY in the delivered file. biome documents that "if a file can
+# match three patterns, only the first one is used", but 2.5.7 applies
+# every entry a file matches, in either order (measured at #2116: a
+# `.test.ts` file under a Node project's directory loses both
+# `noMagicNumbers` and `noNodejsModules` whichever entry comes first),
+# so the generated config's per-project Node entries compose with this
+# one.
 #
 # `suspicious/noMisplacedAssertion` IS NOT IN THIS OVERRIDE, ruled
 # separately and deliberately. Its 8 findings on the same tree are all
@@ -1636,66 +1639,54 @@ dir = "{{cwd}}"
 #
 # `correctness/useImportExtensions` rewrote `from "./App"` to
 # `from "./App.tsx"`, which `moduleResolution: bundler` without
-# `allowImportingTsExtensions` rejects outright (TS5097). The rule is
-# right that a relative import should carry an extension and wrong about
-# WHICH — so it is configured rather than demoted. `forceJsExtensions`
-# was that configuration and was half of it (#868): it answers `.js` for
-# every source extension, which is right for `.ts` and `.tsx` and wrong
-# for `.mts` and `.cts`, whose TypeScript counterparts are `.mjs` and
-# `.cjs`. `extensionMappings` states all four instead, so each extension
-# maps to the one TypeScript itself emits and resolves.
+# `allowImportingTsExtensions` rejects outright (TS5097). The 2026-08
+# answer configured the rule with `extensionMappings` — ts→js, tsx→js,
+# mts→mjs, cts→cjs (#758, #868) — measured as `fix:biome`, then `tsc`,
+# then `biome`, across three project shapes. It never ran the code.
 #
-# Measured on biome 2.5.7 and TypeScript 7.0.2 — the three option
-# settings crossed with the three project shapes the org has and all four
-# TypeScript source extensions, one extensionless relative import each,
-# full dial set, `fix:biome` then `tsc` then `biome`. What the fixer
-# writes never depends on the project shape, so the specifier is stated
-# once and the verdicts follow it:
+# WITHDRAWN 2026-11-26 (#2107): ONE IMPORT FORM, THE FILE ON DISK. A
+# repository run as `node src/index.ts` had 433 specifiers rewritten to
+# `.js`, and every entry point failed at its first import with
+# ERR_MODULE_NOT_FOUND: Node loads a specifier as written, and only tsc
+# and bundlers map `.js` back to `.ts`. The mapping satisfied the type
+# checker in projects lacking one compiler option, and the option was
+# never an org dial. It is now: `--allowImportingTsExtensions` is in
+# mise/tsc-flags.txt, so `lint:types` passes it and
+# `lint:tsconfig-dials` requires it in every tracked tsconfig.json —
+# legal everywhere, because `--noEmit` is forced too. The rule takes no
+# options here: `preset: "all"` keeps it on at its default.
 #
-#                      writes:  .ts   .tsx  .mts   .cts
-#   shipped default             .ts   .tsx  .mts   .cts
-#   forceJsExtensions           .js   .js   .js    .js
-#   extensionMappings           .js   .js   .mjs   .cjs
+# Measured 2026-11-26 (biome 2.5.7, tsc 7.0.2, Node 24.12.0), a
+# two-file project per shape, the dials of mise/tsc-flags.txt on tsc's
+# command line, one relative import of a `.ts` and one of a `.mts`:
 #
-#   verdict, per shape           shipped   force        mappings
-#   bundler, no allowImportingTs TS5097 ×4 ok ok ✗ ✗    ok ok ok ✗
-#   nodenext + allowImportingTs  ok ×4     ok ok ✗ ✗    ok ok ok ✗
-#   nodenext, plain (scaffold)   TS5097 ×4 ok ok ✗ ✗    ok ok ok ✗
+#   written:         ./helper.ts ./hm.mts           ./helper.js ./hm.mjs
+#                    tsc     +flag biome   node     tsc  biome  node
+#                                  default               mapped
+#   bundler, no flag TS5097  ok    clean   runs     ok   clean  NOT_FOUND
+#   nodenext + flag  ok      ok    clean   runs     ok   clean  NOT_FOUND
+#   nodenext, plain  TS5097  ok    clean   runs     ok   clean  NOT_FOUND
 #
-# ✗ is TS2307 for `force` and, for `mappings`, the `.cts` note below —
-# never a resolution failure. Read the `force` column: the project shape
-# never changed its answer, the source EXTENSION did, and the extension
-# was the variable the #758 measurement did not vary. Note also that the
-# shipped default was broken for the scaffold's own default project, so
-# this was never the per-repo accident the first issue took it for.
+# "+flag" is --allowImportingTsExtensions; "default" is the rule with no
+# options; "mapped" is the withdrawn extensionMappings; NOT_FOUND is
+# ERR_MODULE_NOT_FOUND. The `.ts` form with the flag is the only column
+# set clean in every tool and every shape, and the fixer writes it:
+# `biome lint --write` with the default rule turned `./helper.js` into
+# `./helper.ts` and `./hm.mjs` into `./hm.mts`, as a safe fix. Per
+# shape, in a tree of package.json ("type": "module"), tsconfig.json
+# (the shape's module and moduleResolution), src/helper.ts, src/hm.mts
+# and src/main.ts, with the flags file of that day:
 #
-# What the `.mts` cell cost before this: `./helper.js` cannot resolve
-# `helper.mts`, because TypeScript maps `.js`→`.ts`/`.tsx`, `.mjs`→`.mts`
-# and `.cjs`→`.cts`. So the fixer wrote a specifier `tsc` refused
-# (TS2307) and biome's OWN `noUnresolvedImports` refused as well — one
-# tool contradicting itself, with no repo-side edit that satisfies both.
+#   tsc -p tsconfig.json $(grep -v '^#' mise/tsc-flags.txt | sed 's/#.*//')
+#   tsc -p tsconfig.json <the same> --allowImportingTsExtensions
+#   biome lint src           (biome.json: the rule alone, default or mapped)
+#   node src/main.ts
+#   biome lint --write src   (the rule at its default, on the .js form)
 #
-# `.cts` is mapped because the mapping is what is true, and it cannot be
-# exercised: under the org's `verbatimModuleSyntax` + `erasableSyntaxOnly`
-# a `.cts` file can express no module syntax at all — ESM import/export
-# is TS1286/TS1287, and `import x = require()` / `export =` is TS1294.
-# The mapping does remove the resolution error (TS2307 is gone in all
-# three shapes); the two walls that remain are those dials working, each
-# named by the compiler in its own message, so the belt adds no ban of
-# its own on top.
-#
-# The option is used OUTSIDE its documented rationale, deliberately, and
-# the table above is why that is safe. biome documents
-# `forceJsExtensions` as "useful if you use the `module: node16` setting
-# when building your code with tsc" and `extensionMappings` as being for
-# bundling to a package — neither mentions `moduleResolution: bundler`,
-# and 2.5.7 ships NO bundler-aware option: both keys choose WHICH
-# extension is suggested and neither can suppress the suggestion.
-# Reading the docs alone gives the wrong answer here — it says no
-# configuration can serve the bundler case, which is what the first lane
-# concluded. Measuring says one does, in all three shapes. Docs
-# cross-check, binary decides — and the correction to the correction is
-# that a measurement is only as wide as the inputs it varied.
+# mise/test_import_extensions.py keeps the fixture: the `.ts` form clean
+# in lint:biome and lint:types, the `.js` form red in lint:biome by the
+# rule's name. A repository that emits JavaScript with tsc does so from
+# its own build config with `rewriteRelativeImportExtensions`.
 #
 # `nursery/useConsistentTestIt` renamed `test.prop(...)` to
 # `it.prop(...)` and left `import { test } from "@fast-check/vitest"`
@@ -1765,12 +1756,22 @@ dir = "{{cwd}}"
 # #788, so the live one is `useConsistentTestIt` — `test` domain, 2 → 2
 # on the same fixture whether or not the repo claims react.
 #
-# One rule the domains cannot reach, recorded so its absence is not read
-# as an oversight: `noNodejsModules` has NO domain at all (`biome
-# explain`), so no belt mechanism can scope it to browser code. A Node
-# application answers it where the org's rule is answered everywhere
-# else — in the repo, per file, with `biome-ignore-all
-# lint/correctness/noNodejsModules: <reason>` (#694).
+# One rule the domains cannot reach: `noNodejsModules` has NO domain at
+# all (`biome explain`), and whether a project runs on Node is a fact
+# about the project, not the org (#2116). The repository already states
+# it in each `tsconfig.json`'s `compilerOptions.types`, so the task
+# resolves every tracked tsconfig — the list `lint:types` reads — with
+# `tsc -p <config> --showConfig`, exactly as `lint:tsconfig-dials` does,
+# and the generator appends one override per project whose resolved
+# `types` holds `node`, switching the rule off under that tsconfig's
+# directory (`**` for a root one). Everywhere else it stays on: in a
+# browser project the compiler refuses `node:fs` (TS2591) only until a
+# dependency's own types pull Node in (vite's do), so biome's rule is
+# the only check there. A tsconfig `--showConfig` refuses ends the task
+# by name. `mise/biome-generate.sh` does the resolving and the generator
+# call for both this task and `fix:biome`. Measured on
+# monumental-archive with its 46 per-file comments removed:
+# noNodejsModules 55 → 0, every diagnostic 583 → 528.
 #
 # The severity floor is belt-side because --error-on-warnings is NOT one:
 # 123 of the 514 rules default to `info`, and an info diagnostic prints
@@ -1802,12 +1803,7 @@ if org_tracked_has "${generated}"; then
 fi
 rc=0
 trap 'rc=$?; rm -f "${generated}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
-org_tracked ':!vendor/**' "package.json" "*/package.json" \
-  | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/biome_config.py" \
-    --org "${ORG_BELT_DIR}/biome-org.json" \
-    --domains "${ORG_BELT_DIR}/biome-domains.tsv" \
-    --nursery "${ORG_BELT_DIR}/biome-nursery-domains.tsv" \
-    --out "${generated}"
+bash "${ORG_BELT_DIR}/biome-generate.sh" "${generated}"
 report=$(mktemp)
 printf '%s\0' "${files[@]}" \
   | xargs -0 biome ci --config-path "${generated}" --reporter=json --reporter-file="${report}" \
@@ -1878,12 +1874,7 @@ if org_tracked_has "${generated}"; then
 fi
 rc=0
 trap 'rc=$?; rm -f "${generated}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
-org_tracked ':!vendor/**' "package.json" "*/package.json" \
-  | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/biome_config.py" \
-    --org "${ORG_BELT_DIR}/biome-org.json" \
-    --domains "${ORG_BELT_DIR}/biome-domains.tsv" \
-    --nursery "${ORG_BELT_DIR}/biome-nursery-domains.tsv" \
-    --out "${generated}"
+bash "${ORG_BELT_DIR}/biome-generate.sh" "${generated}"
 printf '%s\0' "${files[@]}" | xargs -0 biome check --config-path "${generated}" --write
 org_done=1
 '''
@@ -6136,12 +6127,12 @@ depends = [{ task = "test", optional = true }]
 # (#1875, `--job gate`): a recorded `pgrx-pgNN` is the pgrx job's to
 # judge, and the plan job holds the record to the jobs it planned.
 #
-# Every fuzz target is a leg too, owned by this job (#1896): the
-# measurement's `fuzz` leg replays each target's committed corpus once
-# and prints `fuzz-<name> <percent>`, and each is held to a floor line
-# of its own, never to the main floor. A target with no line in the
-# floor is red by name, the remedy `mise run coverage:adopt`: a target
-# nobody measures is the defect, so there is no grace.
+# No fuzz target is measured here (#2090): a target's figure divides by
+# every line it links, so it fell whenever the crate grew. The nightly
+# search (audit:fuzz, audit:go-fuzz) compares a corpus with itself on
+# one commit and proposes what it lacks; lint:fuzz-build still builds
+# every target and replays its corpus. A `fuzz-*` line left in the
+# floor is refused by name, with the lines to delete.
 run = '''
 floor=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/coverage_floor.py" read) || exit 1
 tracked=$(org_tracked '*.py' | tr '\0' '\n' && "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/coverage_floor.py" legs) || tracked=""
@@ -6200,11 +6191,8 @@ dir = "{{cwd}}"
 # floor in its own pgrx job, so the floor is derived from them too. The
 # selector prints nothing where there is no extension.
 #
-# Every fuzz target gets its own `fuzz-<name>` line (#1896), measured in
-# the same `all` run that coverage:check makes, under the same law: one
-# floor per target, so a target whose corpus rots cannot hide behind one
-# that grows. A target that no longer exists leaves the floor only
-# through a `dropped:` line.
+# It writes no fuzz line (#2090): a fuzz target is no leg of the floor,
+# and its corpus's depth is the nightly search's to grow.
 #
 # A sequence, not one script (#1667): adoption measures the repository's
 # own `test` run, through `measured`, which measures only a tree whose

@@ -13,7 +13,8 @@ Behaviour, messages and exit statuses are the bodies' own, unchanged.
 Both run their cargo legs once per workspace the tree tracks (#2004),
 the roots named by mise/rust_workspaces.py, so a crate outside the root
 workspace (a cargo-fuzz crate is its own) is formatted, linted and
-fixed like any other.
+fixed like any other, and a cargo-fuzz crate is built the way
+cargo-fuzz builds it, with `--cfg fuzzing` (#2093).
 
 The task's reasoning for each step rides beside the step below. The
 steps every Rust task's helper shares (the belt and its Python, the
@@ -509,7 +510,10 @@ def clippy_leg(cargo: str) -> int:
     # is red, and the task exits with the last red status.
     red: list[str] = []
     for root in trees:
-        rooted, reds = lint_root(cargo, root, flags)
+        # A cargo-fuzz crate is built with `--cfg fuzzing`, as
+        # cargo-fuzz builds it (#2093).
+        with rust_workspaces.built_as(root):
+            rooted, reds = lint_root(cargo, root, flags)
         red += [f"{name} ({root})" for name in reds]
         status = rooted or status
     if red:
@@ -642,7 +646,8 @@ def fix_leg(cargo: str) -> int:
     # Every workspace in the tree, as the gate leg (#2004); each root is
     # fixed even when an earlier one failed.
     for root in trees:
-        status = fix_root(cargo, root, flags) or status
+        with rust_workspaces.built_as(root):
+            status = fix_root(cargo, root, flags) or status
     if status != 0:
         return status
     print("fix:rust: applied what is machine-applicable — the rest is judgement")

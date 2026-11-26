@@ -76,21 +76,6 @@
 # prints its `pgrx-pgNN <percent>` lines, for `coverage:adopt` and the
 # release path, which derive the floor.
 #
-# `fuzz` (#1896) is a leg per fuzz target, in `all`: the line coverage
-# of replaying the target's committed corpus once, a function of the
-# tree. It prints `fuzz-<name> <percent>` per target, each a floor line
-# of its own (coverage_floor.py), and writes no upload report. Rust:
-# every [[bin]] of fuzz/Cargo.toml, its tracked corpus copied out of the
-# tree by org_fuzz_corpus_copy (fuzz-corpus-lib.sh, the copy
-# lint:fuzz-build replays) and replayed by `cargo fuzz coverage -s none`
-# into a build directory of its compiler (#1877); the figure is
-# llvm-cov's over the tracked sources outside fuzz/fuzz_targets/. Go:
-# every `func Fuzz…(… *testing.F)` in a tracked _test.go of any tracked
-# module, the root's or a nested go.mod's (#1899; vendor/ excluded),
-# `go test -run '^<Name>$'` run in its module (which replays exactly the
-# seed corpus) with -coverpkg naming that module's packages its package
-# imports. Two targets deriving one leg name are red, naming both.
-#
 # Invoked directly, never through a nested `mise run`: a nested mise
 # inside a task races the parallel lint fan-out and fails to resolve its
 # own lockfile, which made `mise run ci` unrunnable locally (#82).
@@ -119,10 +104,10 @@ belt_dir=$(dirname "${BASH_SOURCE[0]}")
 # below.
 legs="${2:-all}"
 case "${legs}" in
-  all | go | rust | rust-branches | pgrx | pgrx-majors | python | typescript | plpgsql | fuzz | probe | reports) ;;
+  all | go | rust | rust-branches | pgrx | pgrx-majors | python | typescript | plpgsql | probe | reports) ;;
   *)
     why="unknown leg selector '${legs}' — expected all, go, rust,"
-    why+=" rust-branches, pgrx, pgrx-majors, python, typescript, plpgsql, fuzz, probe or reports"
+    why+=" rust-branches, pgrx, pgrx-majors, python, typescript, plpgsql, probe or reports"
     org_finding "" "${why}"
     exit 1
     ;;
@@ -142,9 +127,7 @@ esac
 # lines within a function, never within a file), so it is named and
 # never counted as a writer: where every leg measured is formatless the
 # step says so and passes, and the badge job finds no artifact and
-# skips, as it does for a tree without a floor. Every `fuzz-*` leg is
-# formatless too (#1896): its figure is a corpus's depth, which no
-# badge reports.
+# skips, as it does for a tree without a floor.
 reports=(lcov.info lcov-typescript.info coverage.txt coverage.xml)
 formatless=(plpgsql plpgsql-branches)
 # The leg lines a `reports` run printed, as a file in the same
@@ -154,7 +137,7 @@ if [[ ${legs} != probe && ${legs} != pgrx-majors ]]; then
   # Completion-guarded (#1233): on bash 3.2 a script with an EXIT trap
   # that dies on an unset variable would otherwise exit 0. One trap for
   # every directory the run makes: the legs below only set theirs.
-  cleanup() { rm -rf "${scratch:-}" "${fuzz_work:-}"; }
+  cleanup() { rm -rf "${scratch:-}"; }
   rc=0
   trap 'rc=$?; cleanup; [ -n "${org_done:-}" ] || [ "${rc}" -ne 0 ] || rc=1; exit "${rc}"' EXIT
   out=${ORG_COVERAGE_REPORTS:-}
@@ -191,7 +174,7 @@ if [[ ${legs} == reports ]]; then
     [[ ! -f ${out}/${f} ]] || files="${files:+${files},}${out}/${f}"
   done
   while read -r leg _; do
-    if [[ " ${formatless[*]} " == *" ${leg} "* || ${leg} == fuzz-* ]]; then
+    if [[ " ${formatless[*]} " == *" ${leg} "* ]]; then
       named="${named:+${named}, }${leg}"
     else
       writers=1
@@ -698,126 +681,5 @@ if [[ -n ${run} && ${legs} =~ ^(all|plpgsql)$ && -f ${run}/plpgsql-coverage.json
   # and the floor's record decides whether that is red.
   "${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/plpgsql_coverage.py" \
     totals "${label}" "${run}/plpgsql-coverage.json" || exit 1
-fi
-
-# The fuzz legs' names and their measurement (#1896, #1897).
-# shellcheck source=mise/fuzz-corpus-lib.sh
-. "${belt_dir}/fuzz-corpus-lib.sh"
-# shellcheck source=mise/fuzz-measure-lib.sh
-. "${belt_dir}/fuzz-measure-lib.sh"
-
-# The fuzz targets, enumerated before any is measured, so two that
-# derive one leg are refused before a minute is spent building: one
-# record per target in `fuzz_found`, `<leg> <kind> <where> <name>
-# <module>`, kind `rust` (where and module `-`) or `go` (where the
-# package directory, module the directory of the go.mod that owns it,
-# both from the repository root).
-fuzz_targets() {
-  local manifest target files mods file dir names name mod m module n
-  fuzz_found=""
-  if org_tracked_has fuzz/Cargo.toml; then
-    manifest=$("${ORG_PYTHON}" -c 'import sys, tomllib
-for b in tomllib.load(open(sys.argv[1], "rb")).get("bin", []):
-    print(b["name"])' fuzz/Cargo.toml) || {
-      org_finding "" "could not read the [[bin]] targets of fuzz/Cargo.toml"
-      exit 1
-    }
-    while IFS= read -r target; do
-      [[ -n ${target} ]] || continue
-      fuzz_found+="$(org_fuzz_leg_name "${target}") rust - ${target} -"$'\n'
-    done <<< "${manifest}"
-  fi
-  # Tracked files are read from a work tree; outside one there are none,
-  # as the python leg reads it. Inside one, a listing that fails is red,
-  # never a shorter list.
-  git rev-parse --is-inside-work-tree > /dev/null 2>&1 || return 0
-  # Every tracked module's tests, each owned by the deepest go.mod above
-  # it, as Go itself resolves a package's module; a test no module owns
-  # is no target. Nothing under a vendor/ directory.
-  mods=() && org_tracked_read mods 'go.mod' '*/go.mod' ':!vendor/**' ':!*/vendor/*'
-  [[ -n ${mods[0]+set} ]] || return 0
-  files=() && org_tracked_read files '*_test.go' ':!vendor/**' ':!*/vendor/*'
-  for file in ${files[@]+"${files[@]}"}; do
-    dir=$(dirname "${file}")
-    module=""
-    for mod in "${mods[@]}"; do
-      m=$(dirname "${mod}")
-      if [[ ${m} == . ]]; then
-        [[ -n ${module} ]] || module=.
-      elif [[ ${dir}/ == "${m}"/* && (${module} == . || ${#m} -gt ${#module}) ]]; then
-        module=${m}
-      fi
-    done
-    [[ -n ${module} ]] || continue
-    names=$(sed -nE 's/^func (Fuzz[A-Z0-9_][A-Za-z0-9_]*|Fuzz)\([A-Za-z_][A-Za-z0-9_]* \*testing\.F\).*/\1/p' "${file}") || exit 1
-    while IFS= read -r name; do
-      [[ -n ${name} ]] || continue
-      if [[ ${dir} == . ]]; then
-        n=$(org_fuzz_leg_name "${name#Fuzz}")
-      else
-        n=$(org_fuzz_leg_name "${dir}-${name#Fuzz}")
-      fi
-      fuzz_found+="${n} go ${dir} ${name} ${module}"$'\n'
-    done <<< "${names}"
-  done
-}
-
-# fuzz_origin <kind> <where> <name>: how a refusal names a target.
-fuzz_origin() {
-  if [[ $1 == rust ]]; then
-    printf "cargo-fuzz target '%s'" "$3"
-  else
-    printf "Go fuzz target %s in %s" "$3" "$2"
-  fi
-}
-
-if [[ ${legs} =~ ^(all|fuzz)$ ]]; then
-  fuzz_targets
-  # Two targets, one leg: red, naming both, before anything is built.
-  clash=""
-  while read -r leg kind where name _; do
-    [[ -n ${leg} ]] || continue
-    while read -r other okind owhere oname _; do
-      [[ ${other} == "${leg}" && "${okind} ${owhere} ${oname}" != "${kind} ${where} ${name}" ]] || continue
-      [[ " ${clash} " != *" ${leg} "* ]] || continue
-      clash+=" ${leg}"
-      one=$(fuzz_origin "${kind}" "${where}" "${name}")
-      two=$(fuzz_origin "${okind}" "${owhere}" "${oname}")
-      org_finding "" "${one} and ${two} both derive the leg ${leg} — rename one, so each target holds a floor of its own"
-    done <<< "${fuzz_found}"
-  done <<< "${fuzz_found}"
-  [[ -z ${clash} ]] || exit 1
-fi
-
-# The measurement itself is org_fuzz_measure (fuzz-measure-lib.sh), the
-# one the scheduled search (#1897) keeps a find by: this leg hands it
-# the tracked copy, the search that copy plus a candidate.
-if [[ ${legs} =~ ^(all|fuzz)$ && ${fuzz_found} == *" rust "* ]]; then
-  llvm_tools ""
-  if ! command -v cargo-fuzz > /dev/null; then
-    org_finding "" "fuzz/ exists but cargo-fuzz is missing — pin it as a build input:" \
-      'mise.toml: "cargo:cargo-fuzz" = "<version>" (installed before tasks, never mid-run)'
-    exit 1
-  fi
-  fuzz_work=$(mktemp -d)
-  while read -r leg kind _ target _; do
-    [[ ${kind} == rust ]] || continue
-    # A copy that fails says why itself and ends the run (errexit).
-    org_fuzz_corpus_copy "${target}" "${fuzz_work}/${target}" > /dev/null
-    pct=$(org_fuzz_measure "${label}" "${leg}" rust "${target}" "${fuzz_work}/${target}")
-    echo "${leg} ${pct}"
-  done <<< "${fuzz_found}"
-fi
-
-if [[ ${legs} =~ ^(all|fuzz)$ && ${fuzz_found} == *" go "* ]]; then
-  if ! command -v go > /dev/null; then
-    org_finding "" "go.mod present but go missing — pin go in mise.toml"
-    exit 1
-  fi
-  while read -r leg kind dir name _; do
-    [[ ${kind} == go ]] || continue
-    pct=$(org_fuzz_measure "${label}" "${leg}" go "${dir}" "${name}")
-    echo "${leg} ${pct}"
-  done <<< "${fuzz_found}"
 fi
 org_done=1

@@ -27,12 +27,10 @@ A job applies when:
 A job that runs one runner per entry of a list read from the tree
 (MATRICES) applies only where the list is not empty, and the list is an
 output of its own: `repo-deep-tests`'s `fuzz` job runs one runner per
-fuzz target (#1899), from `fuzz-targets`. The list is the one
-`coverage-measure.sh`'s `fuzz_targets` measures (#1896): every `[[bin]]`
-of a tracked fuzz/Cargo.toml, and every `func Fuzz…(… *testing.F)` in a
-tracked `_test.go` of any tracked Go module, the root's or a nested
-one's. A target the gate's floor holds
-is a target the nightly search runs, and no other.
+fuzz target (#1899), from `fuzz-targets`: every `[[bin]]` of a tracked
+fuzz/Cargo.toml, and every `func Fuzz…(… *testing.F)` in a tracked
+`_test.go` of any tracked Go module, the root's or a nested one's. No
+coverage floor holds them (#2090); the nightly search runs each.
 
 A job whose task reads a file's CONTENT before it runs (REFINES)
 applies only where the content says so: `repo-deep-tests`'s
@@ -207,7 +205,7 @@ def bin_names(manifest: bytes) -> list[str]:
 
 
 def fuzz_targets(root: Path, tracked: list[str]) -> list[Target]:
-    """List the fuzz targets, as coverage-measure.sh's `fuzz_targets` does.
+    """List the fuzz targets the nightly search runs.
 
     Rust: each `[[bin]]` name of a tracked fuzz/Cargo.toml, in its
     order. Go: each `func Fuzz…(… *testing.F)` in a tracked `_test.go`
@@ -261,7 +259,7 @@ def fuzz_targets(root: Path, tracked: list[str]) -> list[Target]:
 
 
 def leg_name(name: str) -> str:
-    """Derive a fuzz target's floor leg, as fuzz-measure-lib.sh does.
+    """Derive a fuzz target's leg name, as fuzz-measure-lib.sh does.
 
     `org_fuzz_leg_name`: `fuzz-<name>`, ASCII-lower-cased, every
     character but [a-z0-9] turned into `-`.

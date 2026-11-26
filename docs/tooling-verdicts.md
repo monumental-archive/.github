@@ -32,7 +32,7 @@ honestly blocked on.
 | cargo-llvm-cov + `.coverage-floor` ratchet | Derived coverage floor in the gate (`coverage:check`), measured on the repository's own `test` run through `measured` and rendered by `cargo llvm-cov report` (#1653), re-derived by the release path, codecov badge feed off-gate; Rust branches as a floor of their own (`rust-branches`, #1359), measured with `--branch` on the repo's dated nightly and held by the Monday audit (`audit:coverage-branches`), never the gate |
 | coverage.py (`pipx:` backend via aqua-backed uv) | The `python` and `python-branches` legs of the same ratchet (#1331): the repository's own `test` task run under coverage, child processes included, statements and branches |
 | vitest's own coverage provider (the repository's, not the belt's) | The `typescript` and `typescript-branches` legs of the same ratchet (#1357): the repository's vitest under the provider its lockfile pins, lines and branches; the belt pins neither |
-| plpgsql_check (the repository's test stack, never a published image; the belt pins nothing) | The `plpgsql` and `plpgsql-branches` legs of the same ratchet (#1547): `mise/plpgsql_coverage.py` reads the profiler's statement and branch coverage in the suite's teardown, through the repository's own `psql` or the client the call names |
+| plpgsql_check (present in the org's database image, loaded only where a consumer's tests start the image with it preloaded; the belt pins nothing) | The `plpgsql` and `plpgsql-branches` legs of the same ratchet (#1547): `mise/plpgsql_coverage.py` reads the profiler's statement and branch coverage in the suite's teardown, through the repository's own `psql` or the client the call names |
 | Hypothesis (`pipx:` backend via aqua-backed uv) | Python property testing (#1332): every tracked `prop_*.py`, fixed seed in the gate (`test:python-properties`), random seed and wider bounds on the Monday cron (`audit:python-properties`) |
 | fast-check (the repository's, not the belt's) | TypeScript property testing (#1549): every tracked `*.prop.test.{ts,tsx,mts,cts}` under the repository's own vitest, fixed seed in the gate (`test:typescript-properties`), random seed and 10,000 runs on the Monday cron (`audit:typescript-properties`); `lint:typescript-properties` refuses an import outside a property file and a restated seed; the belt pins neither tool |
 | proptest (the repository's, not the belt's) | Rust property testing (#1930): the repository's own `test` task draws from seed 1 in the gate (the belt's `[env]` sets `PROPTEST_RNG_SEED`), and from a fresh printed seed on the nightly run (`audit:rust-properties`); `lint:rust-properties` refuses a locked proptest below 1.7.0, which ignores the variable; the belt pins nothing |
@@ -288,6 +288,13 @@ population line names its root, and a root outside the checkout is
 red. Measured 2026-11-23 on the three
 repositories' fuzz crates at this ladder: 6, 13 and 27 findings, 6 to
 14 s cold each.
+
+*A cargo-fuzz crate is built as cargo-fuzz builds it* (#2093,
+2026-11-26): a root whose manifest carries `[package.metadata] cargo-fuzz =
+true` gets `--cfg fuzzing` appended to its `RUSTFLAGS` (or
+`CARGO_ENCODED_RUSTFLAGS`) in `lint:rust`, `fix:rust` and `lint:msrv`,
+so the targets a fuzzer runs are linted ungated; `lint:deny` reads the
+manifest, not a build, and is unchanged.
 
 *The exception mechanism is `#[expect(..., reason = "...")]` and nothing
 else.* No clippy flag can beat a source attribute: a crate-level
@@ -1472,68 +1479,65 @@ stops firing on an imported binding, the `fix` key comes out.
 
 `correctness/useImportExtensions` rewrote `from "./App"` to
 `from "./App.tsx"`, which `moduleResolution: bundler` without
-`allowImportingTsExtensions` rejects (TS5097). This one is **configured
-rather than demoted**, because the rule is right that a relative import
-should carry an extension and only wrong about which.
+`allowImportingTsExtensions` rejects (TS5097). The 2026-08 answer
+(#758, #868) configured the rule with `extensionMappings` — `ts`→`js`,
+`tsx`→`js`, `mts`→`mjs`, `cts`→`cjs` — measured as `fix:biome`, then
+`tsc`, then `biome`, across three project shapes and four source
+extensions. That measurement never ran the code.
 
-`forceJsExtensions: true` was the first answer and covered two of the
-four TypeScript source extensions (#868). It suggests `.js` whatever the
-source is, which is right for `.ts` and `.tsx` and wrong for `.mts` and
-`.cts`: TypeScript maps `.js`→`.ts`/`.tsx`, `.mjs`→`.mts` and
-`.cjs`→`.cts`, so `./helper.js` cannot resolve `helper.mts`. The fixer
-therefore wrote a specifier `tsc` refused with TS2307 **and biome's own
-`noUnresolvedImports` refused too** — one tool contradicting itself, with
-no repo-side edit that satisfies both. `extensionMappings` states all
-four instead, so each extension maps to the one TypeScript emits.
+**Withdrawn 2026-11-26 (#2107): one import form, the file on disk.**
+A repository whose server runs as `node src/index.ts` had 433
+specifiers in 105 files rewritten from `./app.ts` to `./app.js`, and
+every entry point then failed at its first import with
+`ERR_MODULE_NOT_FOUND`. Node loads a specifier as written; only
+TypeScript and bundlers map `.js` back to `.ts`. The mapping was chosen
+to satisfy the type checker in projects that lack one compiler option,
+and the option was never an org dial. It is one now:
+`--allowImportingTsExtensions` is in `mise/tsc-flags.txt`, so
+`lint:types` passes it and `lint:tsconfig-dials` requires it in every
+tracked `tsconfig.json`, and it is legal everywhere because the belt
+forces `--noEmit` too. The rule runs with no options: `preset: "all"`
+keeps it on at its default, which writes the file on disk. A repository
+that emits JavaScript with tsc does so from its own build config with
+`rewriteRelativeImportExtensions`.
 
-Measured on biome 2.5.7 and TypeScript 7.0.2, every option setting
-crossed with every project shape the org has and every source extension,
-at the full dial set. What the fixer writes never depends on the shape:
+Measured 2026-11-26 (biome 2.5.7, tsc 7.0.2, Node 24.12.0): a two-file
+project per shape, the dials of `mise/tsc-flags.txt` on tsc's command
+line, one relative import of a `.ts` file and one of a `.mts` file.
+"flag" is `--allowImportingTsExtensions`; "biome default" is the rule
+with no options; "mapped" is the withdrawn `extensionMappings`.
 
-| option | `.ts` | `.tsx` | `.mts` | `.cts` |
-|---|---|---|---|---|
-| shipped default | `.ts` | `.tsx` | `.mts` | `.cts` |
-| `forceJsExtensions: true` | `.js` | `.js` | `.js` | `.js` |
-| `extensionMappings` (org) | `.js` | `.js` | `.mjs` | `.cjs` |
+| shape | `./helper.ts` `./hm.mts`: tsc | tsc + flag | biome default | node | `./helper.js` `./hm.mjs`: tsc | biome mapped | node |
+|---|---|---|---|---|---|---|---|
+| bundler, no flag | TS5097 | ok | clean | runs | ok | clean | `ERR_MODULE_NOT_FOUND` |
+| nodenext + flag | ok | ok | clean | runs | ok | clean | `ERR_MODULE_NOT_FOUND` |
+| nodenext, plain | TS5097 | ok | clean | runs | ok | clean | `ERR_MODULE_NOT_FOUND` |
 
-| project | shipped default | `forceJsExtensions` | `extensionMappings` |
-|---|---|---|---|
-| bundler, no `allowImportingTsExtensions` | TS5097 ×4 | ok, ok, **TS2307**, **TS2307** | ok, ok, **ok**, ✳ |
-| nodenext + `allowImportingTsExtensions` | clean ×4 | ok, ok, **TS2307**, **TS2307** | ok, ok, **ok**, ✳ |
-| nodenext, plain — `scaffold/tsconfig.json` | TS5097 ×4 | ok, ok, **TS2307**, **TS2307** | ok, ok, **ok**, ✳ |
+The `.ts` form with the flag is the only column set clean in every tool
+and every shape. The fixer writes it: `biome lint --write` with the
+default rule turned `./helper.js` into `./helper.ts` and `./hm.mjs`
+into `./hm.mts`, as a safe fix. Produced, per shape, in a tree holding
+`package.json` (`"type": "module"`), `tsconfig.json` (the shape's
+`module` and `moduleResolution`, `lib: ["es2025"]`, `types: []`),
+`src/helper.ts`, `src/hm.mts` and `src/main.ts`, by:
 
-Two things to read off it. The shipped default was broken for the
-scaffold's own default project, so this was never the per-repo accident
-the first issue looked like. And in the `forceJsExtensions` column the
-project shape never changes the answer while the source extension does —
-the extension was the variable the first measurement did not vary, which
-is how a three-shape table can be complete and still miss half the
-population.
+```sh
+tsc -p tsconfig.json $(grep -v '^#' mise/tsc-flags.txt | sed 's/#.*//')
+tsc -p tsconfig.json <the same> --allowImportingTsExtensions
+biome lint src    # biome.json: the rule alone, default or mapped
+node src/main.ts
+biome lint --write src    # the rule at its default, on the .js form
+```
 
-✳ `.cts` never reaches a resolution verdict: under the org's
-`verbatimModuleSyntax` + `erasableSyntaxOnly` a `.cts` file can express
-no module syntax at all — ESM `import`/`export` is TS1286/TS1287, and
-`import x = require()` / `export =` is TS1294. The mapping is stated
-because it is what is true, and it does remove TS2307 in all three
-shapes; the two remaining walls are those dials working, each named by
-the compiler, so the belt adds no ban of its own.
+with the 2026-11-26 flags file, which did not yet name the flag.
+`mise/test_import_extensions.py` keeps the fixture in the suite: the
+`.ts` form clean in `lint:biome` and `lint:types`, the `.js` form red
+in `lint:biome` naming the rule.
 
-**The option is used outside its documented rationale on purpose.**
-biome documents `forceJsExtensions` for "the `module: node16` setting
-when building your code with `tsc`" and `extensionMappings` for bundling
-to a package; neither mentions `moduleResolution: bundler`, and 2.5.7
-ships **no bundler-aware option at all** — both keys choose which
-extension is suggested, and neither can suppress the suggestion. Read
-alone, that says no configuration serves the bundler case, which is what
-the first lane concluded and wrote down. The tables above are the
-correction, and the rule they repeat for this tool: the docs are the
-cross-check, the pinned binary decides — and a measurement is only as
-wide as the inputs it varied.
-
-Proven end to end on the fixture: after the change
-the fixer leaves `test.prop` alone, rewrites `./App` to `./App.js`,
-still touches 73 files, and the tree comes out with `TS5097: 0`, 22 test
-files and 337 tests passing.
+Proven end to end on the fixture: after the change the fixer leaves
+`test.prop` alone, rewrites `./App` to `./App.js` (the mapping withdrawn
+above), still touches 73 files, and the tree comes out with `TS5097: 0`,
+22 test files and 337 tests passing.
 
 What this costs the belt is a smaller promise, stated where the promise
 lives: `fix:biome` applies every fix biome calls safe **minus the ones
@@ -1655,9 +1659,10 @@ finding. Both directions and the near miss:
 | `probe.test.ts`, `src/colocated.test.ts` | clean |
 | `test/probe.test.ts`, `tests/unit/probe.test.ts` | clean |
 
-One entry, and the count is load-bearing: the docs state that when a
-file matches several patterns "only the first one is used", so a second
-entry added later would not compose with this one.
+One entry in the delivered file. The docs state that when a file
+matches several patterns "only the first one is used", but biome 2.5.7
+applies every entry a file matches, in either order (measured for
+issue 2116), so the generated per-project Node entries compose with it.
 
 **`suspicious/noMisplacedAssertion` is deliberately not in it.** Its 8
 findings on the same tree are all false, but not because they are in
@@ -1818,6 +1823,23 @@ turned off org-wide, because it is a real check for the browser code the
 org will import next. A Node application answers it where every other
 exception in this org is answered: in the repo, per file,
 `biome-ignore-all lint/correctness/noNodejsModules:` with a reason.
+
+**Amended 2026-11-26 (#2116): the rule is scoped per project after
+all, from a fact the repository already states.** Whether a project
+runs on Node is written in each `tsconfig.json`'s
+`compilerOptions.types`. `lint:biome` and `fix:biome` now resolve every
+tracked tsconfig with `tsc -p <config> --showConfig`, as
+`lint:tsconfig-dials` does, and the generator appends one override per
+project whose resolved `types` holds `node`, switching the rule off
+under that tsconfig's directory (`**` for a root one). The repository
+writes nothing, and its `biome.json` still may state only domains. It
+stays on everywhere else: in a browser project tsc refuses `node:fs`
+(TS2591) only until a dependency's own types pull Node in (vite's do),
+so biome's rule is the only check there. Measured on
+monumental-archive with its 46 per-file comments removed:
+`noNodejsModules` 55 → 0, every diagnostic 583 → 528. The per-file
+comments above are no longer the answer for a project that declares
+Node's types.
 
 **Nursery stays on, and this is the ruling rather than the default.**
 Biome prints "not yet stable and may change in the future" beside all 87
@@ -3824,6 +3846,30 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
   is not re-proposed: stdlib `trace` (no Codecov format, an order of
   magnitude slower, no branch coverage), and waiting for a bash tool
   before measuring anything.
+  **Amended 2026-11-26 (#2090): fuzz targets leave the floor.** #1896
+  made every fuzz target a leg of `.coverage-floor`: the line coverage
+  of replaying its committed corpus, held in the gate. The figure's
+  denominator is every tracked line the target links, most of which it
+  can never call, and nothing the belt builds can tell the two apart
+  (probed on cargo 1.97.1, cargo-fuzz 0.13.2: `cargo fuzz coverage` and
+  `cargo fuzz build` both keep a function nothing calls). So the figure
+  moved with the crate, not the corpus. Measured in edtf on 2026-11-23:
+  constructors and accessors a parser cannot reach took `fuzz-parse`
+  from 58.0 to 54.2 against a floor of 56.0, red, while the parser's own
+  file moved 98.4 to 97.7; a test-only module compiled under
+  `cfg(fuzzing)` dropped two targets below their floors, re-set by hand.
+  A fuzz line had no reset form, so the only route was deleting it and
+  adopting again, which records nothing. The gate now measures no fuzz
+  target and the floor holds no fuzz line; one left in a floor file is
+  refused by name. `lint:fuzz-build` still builds every target and
+  replays its corpus. Depth is the nightly search's (#1897): it compares
+  two measurements of one commit, so the denominator cancels, proposes
+  every input that reaches new code, and prints each target's figure as
+  information. Rejected, so it is not re-proposed: a `reset:` form for
+  fuzz lines, counting only reached functions or files (rot drops from
+  both sides and goes unseen), the linker's reachable set (probed: it
+  keeps unreachable functions), a second instrumented build against the
+  base commit in the gate, and documenting delete-and-adopt.
 - **TypeScript coverage (#1357)** — measured with the runner the
   repository already has, never a tool the belt pins. The `typescript`
   leg of `mise/coverage-measure.sh` applies where a tracked root
@@ -3878,19 +3924,30 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
   never runs), and merging several vitest runs' reports (vitest's own
   answer to several suites is projects, in one run with one report).
 - **PL/pgSQL coverage (#1547)** — measured with plpgsql_check, which
-  the repository's test stack carries and the belt does not. The org's
-  published database image ships a deliberately small set of
-  extensions, and a coverage extension is a test tool, so the
-  repository's tests run against a layer built from that image which
-  adds the distribution's package, preloads it
-  (`shared_preload_libraries` gains `plpgsql,plpgsql_check`) and starts
-  with `plpgsql_check.profiler=on`. The database lives only for the
-  suite, so the reading is taken inside it: whenever
-  `mise/coverage-measure.sh` runs the `test` task (and its depends) it
-  sets `ORG_PLPGSQL_COVERAGE` naming a report, and the repository's
-  teardown calls `mise/plpgsql_coverage.py collect <conninfo>` before
-  it stops the database. A report written is the leg's answer; the
-  leg searches no file. **Amended 2026-11-20 (#1666):** the first
+  the repository's test stack loads and the belt does not. The
+  published image carries the extension's files and loads nothing
+  new; a consumer's tests start that image with its own command plus
+  `plpgsql,plpgsql_check` appended to `shared_preload_libraries` and
+  `plpgsql_check.profiler=on`. The database lives only for the suite,
+  so the reading is taken inside it: the repository's `test` command
+  runs through `mise/measured`, which sets `ORG_PLPGSQL_COVERAGE`
+  naming a report, and the repository's teardown calls
+  `mise/plpgsql_coverage.py collect <conninfo>` before it stops the
+  database; the leg then calls `totals` on the report the teardown
+  wrote. A report written is the leg's answer; the leg searches no
+  file. **Amended 2026-11-26 (#2106): the extension ships in the
+  image, loaded by nothing.** The first build kept a coverage
+  extension out of the published image as a test tool and had each
+  consumer's tests build a layer over it adding the distribution's
+  package, which cost 38–53 s per uncached test run (measured below).
+  The property that rule protects is that production does not load a
+  test tool, not which files are on disk:
+  monumental-archive/monumental-archive-db#86 measured the package at
+  786 kB with no new dependency, and a start as shipped loads nothing
+  new, so the image carries the files and only a test start preloads
+  them. The same amendment drops a walk of the `test` task that #1667
+  had already replaced with `mise/measured`.
+  **Amended 2026-11-20 (#1666):** the first
   build switched the leg on wherever any tracked file carried the
   `LANGUAGE` clause, so a README or a fixture reddened a gate, and
   narrowing that search to `*.sql` would have missed functions declared

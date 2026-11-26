@@ -198,7 +198,10 @@ when = [
 
 [tools."github:microsoft/typescript-go"]
 # lint:tsc-flags rules on the pinned compiler's options with no guard.
+# lint:biome resolves every tracked tsconfig.json through
+# mise/biome-generate.sh (#2116), before biome runs.
 tasks = [
+  "lint:biome",
   "lint:scaffold-assembly",
   "lint:tsc-flags",
   "lint:tsconfig-dials",

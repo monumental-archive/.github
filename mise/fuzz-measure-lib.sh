@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # A fuzz target's leg name and its figure (#1896, #1897). Sourced, never
-# run: the coverage floor's fuzz leg (coverage-measure.sh) and the
-# scheduled search (fuzz-search-rust.sh, fuzz-search-go.sh) measure
-# through the one function here, so the search keeps a find by exactly
-# the figure the floor holds. Kept out of fuzz-corpus-lib.sh, which
-# lint:fuzz-build's replay sources and which needs none of these tools.
+# run: the scheduled search (fuzz-search-rust.sh, fuzz-search-go.sh)
+# measures through the one function here, the Rust and Go targets alike.
+# No coverage floor holds the figure (#2090). Kept out of
+# fuzz-corpus-lib.sh, which lint:fuzz-build's replay sources and which
+# needs none of these tools.
 # The writer beside this file, found with no command run (#1934).
 org__here=${BASH_SOURCE[0]%/*}
 [[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
@@ -13,12 +13,26 @@ org__here=${BASH_SOURCE[0]%/*}
 unset org__here
 
 # org_fuzz_leg_name <name>: a fuzz target's leg (#1896), `fuzz-<name>`
-# lower-cased, every character but [a-z0-9] turned into `-`, so it fits
-# coverage_floor.py's leg grammar whatever the target is called.
+# lower-cased, every character but [a-z0-9] turned into `-`: one name
+# per target, whatever the target is called.
 org_fuzz_leg_name() {
   local name
   name=$(LC_ALL=C tr '[:upper:]' '[:lower:]' <<< "$1")
   printf 'fuzz-%s\n' "${name//[^a-z0-9]/-}"
+}
+
+# org_fuzz_logged <file> <dir> <command…>: runs <command> in <dir>, all
+# of its output to <file>, which is required (#2090). Nothing is printed
+# unless it fails: then its last 40 lines are, on stderr, before the
+# caller's finding names the failure (#2120). A replay prints a line or
+# two per corpus file, and a search measures once per candidate.
+org_fuzz_logged() {
+  local file=${1:?org_fuzz_logged needs <file>, the log its command writes to} dir=$2 status=0
+  shift 2
+  (cd "${dir}" && "$@") > "${file}" 2>&1 || status=$?
+  ((status != 0)) || return 0
+  tail -n 40 -- "${file}" >&2
+  return "${status}"
 }
 
 # org_fuzz_measure <label> <leg> rust <target> <corpus>
@@ -26,11 +40,12 @@ org_fuzz_leg_name() {
 #
 # A fuzz target's figure (#1896): the line coverage of replaying its
 # corpus once, printed as a bare percent. The ONE measurement: the
-# coverage floor's fuzz leg (coverage-measure.sh) hands it the tracked
-# copy org_fuzz_corpus_copy made, and the scheduled search (#1897,
-# fuzz-search-lib.sh) hands it that copy plus a candidate, so the
-# search's figure and the floor's cannot differ. It reads no
-# environment variable of its own.
+# scheduled search (#1897, fuzz-search-lib.sh) hands it the corpus, then
+# the corpus plus a candidate, so both figures are taken one way. It
+# reads no environment variable of its own. The replay's output goes to
+# org_fuzz_logged's <file>, the shell variable org_fuzz_measure_log,
+# which is required: the search sets it beside its log (#2120), and an
+# unset one is refused before anything runs (#2090).
 #
 # Rust: <corpus> replayed by `cargo fuzz coverage -s none` into a build
 # directory of its compiler (#1877); the figure is llvm-cov's over the
@@ -46,6 +61,10 @@ org_fuzz_leg_name() {
 # caller checks. Returns 1, naming <leg> and the step, on any failure.
 org_fuzz_measure() {
   local label=$1 leg=$2 kind=$3
+  if [[ -z ${org_fuzz_measure_log:-} ]]; then
+    org_finding "" "${leg}: org_fuzz_measure_log is unset — the search sets it to the replay's log file before it measures"
+    return 1
+  fi
   case "${kind}" in
     rust) org__fuzz_measure_rust "${label}" "${leg}" "$4" "$5" ;;
     go) org__fuzz_measure_go "${label}" "${leg}" "$4" "$5" ;;
@@ -64,7 +83,7 @@ org__fuzz_measure_rust() {
   first=$(find "${corpus}" -type f -print -quit 2> /dev/null) || first=""
   if [[ -z ${first} ]]; then
     org_finding "" "${leg}: fuzz target '${target}' has no committed corpus — a" \
-      "measurement that reads nothing must not become a floor (lint:fuzz-build names the remedy)"
+      "measurement that reads nothing must not decide what the search keeps (lint:fuzz-build names the remedy)"
     return 1
   fi
   # The tracked sources, the figure's surface: everything the repository
@@ -107,7 +126,8 @@ org__fuzz_measure_rust() {
   # before its run, which would otherwise merge into this one's.
   [[ -e fuzz/coverage ]] || made=${root}/fuzz/coverage
   rm -rf -- "fuzz/coverage/${target}/raw"
-  if ! cargo fuzz coverage -s none --target-dir "${build}" "${target}" "${corpus}" >&2; then
+  if ! org_fuzz_logged "${org_fuzz_measure_log:?the search sets it before it measures}" . \
+    cargo fuzz coverage -s none --target-dir "${build}" "${target}" "${corpus}"; then
     org_finding "" "${leg}: cargo fuzz coverage failed replaying the committed corpus (above)"
     status=1
   fi
@@ -122,7 +142,7 @@ org__fuzz_measure_rust() {
   ((status == 0)) || return 1
   if [[ ! ${count:-} =~ ^[0-9]+$ || ! ${covered:-} =~ ^[0-9]+$ || ${count} == 0 ]]; then
     org_finding "" "${leg}: llvm-cov counted no tracked line (count '${count:-absent}') — a" \
-      "measurement that reads nothing must not become a floor"
+      "measurement that reads nothing must not decide what the search keeps"
     return 1
   fi
   awk -v n="${count}" -v c="${covered}" 'BEGIN { printf "%.16g\n", c * 100 / n }'
@@ -153,8 +173,8 @@ org__fuzz_measure_go() {
     return 1
   fi
   work=$(mktemp -d) || return 1
-  if ! (cd "${module}" && go test -count=1 -run "^${name}\$" -coverpkg="${coverpkg}" \
-    -coverprofile="${work}/${leg}.out" "./${rel}") >&2; then
+  if ! org_fuzz_logged "${org_fuzz_measure_log:?the search sets it before it measures}" "${module}" go test -count=1 \
+    -run "^${name}\$" -coverpkg="${coverpkg}" -coverprofile="${work}/${leg}.out" "./${rel}"; then
     org_finding "" "${leg}: ${name}'s seed corpus failed under measurement (above)"
     status=1
   fi
@@ -166,7 +186,7 @@ org__fuzz_measure_go() {
   ((status == 0)) || return 1
   if [[ -z ${pct} ]]; then
     org_finding "" "${leg}: could not read a total from the Go profile — a" \
-      "measurement that reads nothing must not become a floor"
+      "measurement that reads nothing must not decide what the search keeps"
     return 1
   fi
   echo "${pct}"

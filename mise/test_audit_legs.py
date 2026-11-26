@@ -20,10 +20,9 @@ jobs that need it and takes their guards.
 
 The helper's rows are trees the scheduled runs meet: an empty tree, a
 Rust-only tree shaped like edtf, a Go tree, and the canon's own. The
-fuzz job's runner list (#1899) has rows of its own, and one holding it
-to the targets coverage-measure.sh's `fuzz_targets` measures (#1896)
-on one planted tree: a target the floor holds is a target the nightly
-search runs.
+fuzz job's runner list (#1899) has rows of its own: every target a
+planted tree declares, each with the leg name the search reports it
+by.
 
 The scheduled workflows that run a repository's own code
 (repo-deep-tests.yml, repo-mutants.yml) are held to ci.yml's gate step
@@ -58,8 +57,6 @@ import workflow_yaml
 CANON = Path(__file__).resolve().parent.parent
 WORKFLOWS = CANON / ".github" / "workflows"
 GIT = hermetic.tool("git")
-BASH = hermetic.tool("bash")
-MEASURE = CANON / "mise" / "coverage-measure.sh"
 
 # The jobs that are the shape, not a subject: the decision itself, and
 # the red-check report every scheduled workflow ends with (#1887).
@@ -899,13 +896,12 @@ PLANTED_TARGETS = {
 }
 
 
-# One target as both enumerations name it: leg, kind, package, name and
-# module.
+# One target as the list names it: leg, kind, package, name and module.
 Record = tuple[str, str, str, str, str]
 
 
 class FuzzTargets(unittest.TestCase):
-    """The fuzz job runs one runner per target the floor measures (#1899)."""
+    """The fuzz job runs one runner per fuzz target (#1899)."""
 
     def test_two_bins_and_one_go_target_emit_three_entries(self) -> None:
         """Two [[bin]]s and FuzzLoad in internal/policy: three entries, fuzz on.
@@ -986,8 +982,8 @@ class FuzzTargets(unittest.TestCase):
                     err.getvalue(),
                 )
 
-    def test_the_list_is_the_targets_the_floor_measures(self) -> None:
-        """audit_legs.py and coverage-measure.sh's fuzz_targets agree on one tree."""
+    def test_the_list_names_every_target_and_its_leg(self) -> None:
+        """Every Rust and Go target of one tree, each with its leg name."""
         root = git_tree(PLANTED_TARGETS)
         (root / "internal" / "policy" / "y_test.go").write_text(
             "package policy\n\nfunc FuzzUntracked(f *testing.F) {}\n", "utf-8"
@@ -1011,7 +1007,6 @@ class FuzzTargets(unittest.TestCase):
             ("fuzz-", "go", ".", "Fuzz", "."),
         ]
         self.assertEqual(want, listed)
-        self.assertEqual(listed, measured_targets(root))
 
     def test_two_packages_sharing_a_fuzz_name_get_two_legs(self) -> None:
         """a/FuzzLoad and b/FuzzLoad: two entries, two legs, two artifacts."""
@@ -1025,50 +1020,8 @@ class FuzzTargets(unittest.TestCase):
         targets: list[str] = [t["target"] for t in entries]
         want_legs: list[str] = ["fuzz-a-load", "fuzz-b-load"]
         want_targets: list[str] = ["FuzzLoad", "FuzzLoad"]
-        floor: list[str] = [record[0] for record in measured_targets(root)]
         self.assertEqual(want_legs, legs)
         self.assertEqual(want_targets, targets)
-        self.assertEqual(legs, floor)
-
-
-def measured_targets(root: Path) -> list[Record]:
-    """Run coverage-measure.sh's own `fuzz_targets` over a tree.
-
-    The function is read out of the script, between its line and the
-    next closing brace in column one, and run with the libraries it
-    sources: the enumeration, not the measurement.
-
-    Returns:
-        Each target as (leg, kind, package directory or `-`, name,
-        module directory or `-`).
-
-    Raises:
-        AssertionError: the script defines no such function.
-
-    """
-    text = MEASURE.read_text(encoding="utf-8")
-    found = re.search(r"^fuzz_targets\(\) \{\n.*?^\}\n", text, re.MULTILINE | re.DOTALL)
-    if found is None:
-        msg = f"{MEASURE} defines no fuzz_targets function"
-        raise AssertionError(msg)
-    script = (
-        f'. "{CANON / "mise" / "fuzz-corpus-lib.sh"}"\n'
-        f'. "{CANON / "mise" / "fuzz-measure-lib.sh"}"\n'
-        f"{found.group(0)}"
-        'label=probe\nfuzz_targets\nprintf "%s" "${fuzz_found}"\n'
-    )
-    run = subprocess.run(
-        [BASH, "-euo", "pipefail", "-c", script],
-        cwd=root,
-        env=hermetic.env() | {"ORG_PYTHON": sys.executable},
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    records = [line.split(" ") for line in run.stdout.splitlines() if line]
-    return [
-        (leg, kind, where, name, module) for leg, kind, where, name, module in records
-    ]
 
 
 class Refusals(unittest.TestCase):

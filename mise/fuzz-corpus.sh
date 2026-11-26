@@ -22,8 +22,8 @@
 # last value given, so the replay names the scratch directory after it.
 #
 # The copy is org_fuzz_corpus_copy (fuzz-corpus-lib.sh), the one the
-# coverage floor's fuzz leg measures through (#1896), so the corpus
-# replayed here and the corpus measured there cannot differ.
+# nightly search starts from, so the corpus replayed here and the
+# corpus searched there cannot differ.
 #
 # Usage: fuzz-corpus.sh <count>, the target count the task measured, for
 # the closing line.

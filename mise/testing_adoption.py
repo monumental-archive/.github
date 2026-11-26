@@ -17,7 +17,7 @@ The tree says what a repository ships, by file name alone (no file is
 opened), from the names the belt already keys on:
 
 - Rust: a `Cargo.toml` at any depth, outside `vendor/` and `fuzz/`
-  (the fuzz workspace is the fuzz leg's, not a shipped crate).
+  (the fuzz workspace is the fuzz targets', not a shipped crate).
 - Go: `go.mod` at the root.
 - Python: a `*.py` outside `vendor/` whose name is not `test_*.py`,
   `prop_*.py` or `conftest.py`.
