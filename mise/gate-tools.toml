@@ -93,7 +93,8 @@ when = []
 [tools.jq]
 # lint:audit-scheduled calls it with no guard. The finding writer
 # (findings.sh) encodes each record with it, so every task whose belt
-# script reports a finding calls it too (#1934).
+# script reports a finding calls it too (#1934). tsconfig-resolve.sh
+# writes its scratch tsconfig with it (#2133).
 tasks = [
   "break:check",
   "commits:check",
@@ -126,6 +127,7 @@ tasks = [
   "lint:sql",
   "lint:template-pins",
   "lint:tracks",
+  "lint:tsconfig-dials",
   "lint:typescript-properties",
   "lint:vendored",
   "test:pgrx",
@@ -199,7 +201,8 @@ when = [
 [tools."github:microsoft/typescript-go"]
 # lint:tsc-flags rules on the pinned compiler's options with no guard.
 # lint:biome resolves every tracked tsconfig.json through
-# mise/biome-generate.sh (#2116), before biome runs.
+# mise/biome-generate.sh (#2116), before biome runs; the resolving is
+# mise/tsconfig-resolve.sh's, for it and lint:tsconfig-dials (#2133).
 tasks = [
   "lint:biome",
   "lint:scaffold-assembly",

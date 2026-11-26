@@ -38,6 +38,10 @@ the compiler, and a repository that states the dials once in a root
 config and inherits them everywhere passes without stating them twice.
 Measured: `--showConfig` does not materialise a default for a dial the
 config never mentions, which is what makes "absent" detectable at all.
+
+The resolving is `mise/tsconfig-resolve.sh`'s (#2133), which refuses a
+config tsc cannot parse before this is run: `--showConfig` alone prints
+the keys it could read from one and exits 0.
 """
 
 import argparse

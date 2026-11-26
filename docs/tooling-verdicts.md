@@ -1972,6 +1972,21 @@ Two mechanics worth recording, both measured rather than assumed:
   `--showConfig` does **not** materialise a default for a dial the
   config never mentions — which is the only reason "absent" is
   detectable at all.
+  **Amended 2026-11-26 (#2133):** `--showConfig`'s exit status is not
+  a verdict. tsc 7.0.2 exits 0 on a tsconfig it cannot parse (`{`, an
+  unknown option, a bad enum value, a value of the wrong type), prints
+  the keys it could read and no diagnostic, so a config stating every
+  dial beside one unknown option passed this check, and `lint:biome`
+  generated a config from it. Upstream returns success after printing
+  whatever the parse reported; TypeScript 5 refused. The resolving is
+  now one script, `mise/tsconfig-resolve.sh`, for this task and
+  `lint:biome`/`fix:biome`: after `--showConfig` it runs tsc once more
+  over a scratch tsconfig that `extends` the real one with a program of
+  one empty declaration file, and that run's exit status is the
+  verdict. Only the config's own diagnostics can be raised there, so a
+  source that does not parse, an `include` matching nothing (the
+  canon's own `scaffold/tsconfig.json`) and a type package that is not
+  installed stay `lint:types`' to report. 40ms a config, measured.
 - `declaration` is a required key, not an emit-only one. Setting
   `isolatedDeclarations` without it is `TS5069`, a hard config error, so
   a config carrying one and not the other does not load for any reader.

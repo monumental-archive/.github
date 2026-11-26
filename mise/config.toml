@@ -1767,10 +1767,11 @@ dir = "{{cwd}}"
 # directory (`**` for a root one). Everywhere else it stays on: in a
 # browser project the compiler refuses `node:fs` (TS2591) only until a
 # dependency's own types pull Node in (vite's do), so biome's rule is
-# the only check there. A tsconfig `--showConfig` refuses ends the task
-# by name. `mise/biome-generate.sh` does the resolving and the generator
-# call for both this task and `fix:biome`. Measured on
-# monumental-archive with its 46 per-file comments removed:
+# the only check there. A tsconfig tsc refuses ends the task by name:
+# `mise/tsconfig-resolve.sh` does the resolving for this task,
+# `fix:biome` and `lint:tsconfig-dials` (#2133), and
+# `mise/biome-generate.sh` the generator call for the first two.
+# Measured on monumental-archive with its 46 per-file comments removed:
 # noNodejsModules 55 → 0, every diagnostic 583 → 528.
 #
 # The severity floor is belt-side because --error-on-warnings is NOT one:
@@ -3712,6 +3713,13 @@ org_done=1
 # `--showConfig` does not materialise a default for a dial the config
 # never mentions, which is the only reason "absent" is detectable.
 #
+# The resolving is mise/tsconfig-resolve.sh's, shared with `lint:biome`
+# (#2133): `--showConfig` exits 0 on a tsconfig it cannot parse and
+# prints the keys it could read, so a config with every dial beside one
+# unknown option used to pass here. The script asks tsc a second time
+# whether the config parses, and a config it refuses is a finding with
+# the compiler's message, never "every dial absent".
+#
 # Same config enumeration as `lint:types`, deliberately character for
 # character: a config one task checks and the other does not is a
 # program checked at a level nobody stated.
@@ -3736,12 +3744,10 @@ trap 'rc=$?; rm -rf "${tmp}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exi
 count=0
 for cfg in "${cfgs[@]}"; do
   count=$((count + 1))
-  if ! tsc -p "${cfg}" --showConfig > "${tmp}/resolved.json" 2> "${tmp}/err"; then
-    IFS=$'\n' read -r -d '' -a detail < "${tmp}/err" || true
-    org_finding "" "${cfg} does not resolve" ${detail[@]+"${detail[@]}"}
+  bash "${ORG_BELT_DIR}/tsconfig-resolve.sh" "${cfg}" "${tmp}/resolved.json" || {
     rc=1
     continue
-  fi
+  }
   "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/tsconfig_dials.py" --flags "${ORG_BELT_DIR}/tsc-flags.txt" \
     --name "${cfg}" < "${tmp}/resolved.json" || rc=1
 done
