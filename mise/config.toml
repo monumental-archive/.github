@@ -1542,6 +1542,10 @@ dir = "{{cwd}}"
 # BYPASSES `overrides` entirely — the same tree reports all three under
 # `--only`, so never measure an override with it.
 #
+# 2026-11-26 (#2117): `performance/noAwaitInLoops` joins the entry —
+# the override holds the rules that judge production cost or shape,
+# and a test's steps are ordered on purpose; outside tests it stays on.
+#
 # ONE ENTRY, and the count is load-bearing: biome documents that "if a
 # file can match three patterns, only the first one is used". A second
 # entry added later does not compose with this one for a file matching
