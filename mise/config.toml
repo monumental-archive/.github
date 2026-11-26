@@ -438,7 +438,7 @@ ruff = "0.17.6"
 # half (bans+licenses+sources, deterministic over the lock) and the
 # advisories half (audit:deny, network). cargo-audit is skipped-subsumed:
 # same RustSec DB, strictly a subset.
-"aqua:EmbarkStudios/cargo-deny" = "0.21.0"
+"aqua:EmbarkStudios/cargo-deny" = "0.22.0"
 # Blast-radius scanning over published SBOMs (audit:blast-radius). The
 # aqua registry lags upstream by one release at standup (2.5.0 exists);
 # the pin advances via Renovate like everything else.
