@@ -1767,10 +1767,11 @@ dir = "{{cwd}}"
 # directory (`**` for a root one). Everywhere else it stays on: in a
 # browser project the compiler refuses `node:fs` (TS2591) only until a
 # dependency's own types pull Node in (vite's do), so biome's rule is
-# the only check there. A tsconfig `--showConfig` refuses ends the task
-# by name. `mise/biome-generate.sh` does the resolving and the generator
-# call for both this task and `fix:biome`. Measured on
-# monumental-archive with its 46 per-file comments removed:
+# the only check there. A tsconfig tsc refuses ends the task by name:
+# `mise/tsconfig-resolve.sh` does the resolving for this task,
+# `fix:biome` and `lint:tsconfig-dials` (#2133), and
+# `mise/biome-generate.sh` the generator call for the first two.
+# Measured on monumental-archive with its 46 per-file comments removed:
 # noNodejsModules 55 → 0, every diagnostic 583 → 528.
 #
 # The severity floor is belt-side because --error-on-warnings is NOT one:
@@ -3579,6 +3580,13 @@ dir = "{{cwd}}"
 # File selection is the one thing the command line cannot force, so it
 # is checked instead: every tracked .ts file must appear in some
 # project's program. A repo cannot `exclude` its way to a green gate.
+#
+# What each config SAYS is asked of the compiler, through the one
+# resolver (mise/tsconfig-resolve.sh, #2133), never of the file's text:
+# `references` used to be found by a grep, so the word in a comment was
+# a finding (mise/tsconfig-references.sh). A config tsc cannot parse
+# ends the task there, with the compiler's message. The projects are mise/tsconfig-files.sh's, the
+# selection `lint:tsconfig-dials` and `lint:biome` read too.
 run = '''
 set -euo pipefail
 ts=() && org_tracked_read ts ':!vendor/**' "*.ts" "*.tsx" "*.mts" "*.cts"
@@ -3586,8 +3594,8 @@ ts=() && org_tracked_read ts ':!vendor/**' "*.ts" "*.tsx" "*.mts" "*.cts"
   echo "lint:types: no TypeScript tracked, skipped"
   exit 0
 }
-cfgs=() && org_tracked_read cfgs ':!vendor/**' "tsconfig.json" "*/tsconfig.json" "*/*/tsconfig.json" \
-  "*/*/*/tsconfig.json"
+. "${ORG_BELT_DIR}/tsconfig-files.sh"
+cfgs=() && tsconfig_files cfgs
 if [[ -z ${cfgs[0]+set} ]]; then
   org_finding "" "TypeScript is tracked but no tsconfig.json is — copy scaffold/tsconfig.json" \
     "tsc refuses a file list when a project exists, so a project is how the org checks"
@@ -3619,15 +3627,7 @@ if [[ -n ${bare} ]]; then
     "the compiler retires the directive when the error goes; it cannot supply the why"
   exit 1
 fi
-refs=$(grep -l '"references"' "${cfgs[@]}" || true)
-if [[ -n ${refs} ]]; then
-  # shellcheck disable=SC2001  # an anchored per-line indent; ${x//from/to} has no line anchor
-  IFS=$'\n' read -r -d '' -a detail < <(sed 's/^/declares references: /' <<< "${refs}") || true
-  org_finding "" "project references are not supported org-wide" ${detail[@]+"${detail[@]}"} \
-    "tsc -b refuses the org's compiler flags (TS5094), so following references would" \
-    "mean checking at whatever level the repo chose. Give each project its own config."
-  exit 1
-fi
+bash "${ORG_BELT_DIR}/tsconfig-references.sh" "${cfgs[@]}"
 pkgs=() && org_tracked_read pkgs "package.json" "*/package.json"
 if [[ -n ${pkgs[0]+set} && ! -d node_modules ]]; then
   org_finding "" "dependencies are not installed, so their types cannot be read" \
@@ -3712,16 +3712,23 @@ org_done=1
 # `--showConfig` does not materialise a default for a dial the config
 # never mentions, which is the only reason "absent" is detectable.
 #
-# Same config enumeration as `lint:types`, deliberately character for
-# character: a config one task checks and the other does not is a
-# program checked at a level nobody stated.
+# The resolving is mise/tsconfig-resolve.sh's, shared with `lint:biome`
+# (#2133): `--showConfig` exits 0 on a tsconfig it cannot parse and
+# prints the keys it could read, so a config with every dial beside one
+# unknown option used to pass here. The script asks tsc a second time
+# whether the config parses, and a config it refuses is a finding with
+# the compiler's message, never "every dial absent".
+#
+# Same config enumeration as `lint:types`, because it is the same
+# function: mise/tsconfig-files.sh (#2133). A config one task checks and
+# the other does not is a program checked at a level nobody stated.
 [tasks."lint:tsconfig-dials"]
 description = "Every tracked tsconfig.json states the org's dials, none weaker (#699)"
 dir = "{{cwd}}"
 run = '''
 set -euo pipefail
-cfgs=() && org_tracked_read cfgs ':!vendor/**' "tsconfig.json" "*/tsconfig.json" "*/*/tsconfig.json" \
-  "*/*/*/tsconfig.json"
+. "${ORG_BELT_DIR}/tsconfig-files.sh"
+cfgs=() && tsconfig_files cfgs
 [[ -n ${cfgs[0]+set} ]] || {
   echo "lint:tsconfig-dials: no tsconfig.json tracked, skipped"
   exit 0
@@ -3736,12 +3743,10 @@ trap 'rc=$?; rm -rf "${tmp}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exi
 count=0
 for cfg in "${cfgs[@]}"; do
   count=$((count + 1))
-  if ! tsc -p "${cfg}" --showConfig > "${tmp}/resolved.json" 2> "${tmp}/err"; then
-    IFS=$'\n' read -r -d '' -a detail < "${tmp}/err" || true
-    org_finding "" "${cfg} does not resolve" ${detail[@]+"${detail[@]}"}
+  bash "${ORG_BELT_DIR}/tsconfig-resolve.sh" "${cfg}" "${tmp}/resolved.json" || {
     rc=1
     continue
-  fi
+  }
   "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/tsconfig_dials.py" --flags "${ORG_BELT_DIR}/tsc-flags.txt" \
     --name "${cfg}" < "${tmp}/resolved.json" || rc=1
 done

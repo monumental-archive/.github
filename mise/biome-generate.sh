@@ -13,15 +13,17 @@
 #
 # - every package.json, from which the generator refuses a domain the
 #   repository has and did not claim (#695);
-# - every tsconfig.json, the list `lint:types` reads, each resolved with
-#   `tsc -p <config> --showConfig` exactly as `lint:tsconfig-dials`
-#   does, so `extends` is followed and the text is read by TypeScript's
-#   own parser. A project whose resolved `compilerOptions.types` holds
-#   `node` gets `noNodejsModules` off under its own directory (#2116).
+# - every tsconfig.json, the list `lint:types` reads
+#   (mise/tsconfig-files.sh, the one selection), each resolved by
+#   mise/tsconfig-resolve.sh, the one resolver `lint:tsconfig-dials`
+#   calls too (#2133), so `extends` is followed and the text is read by
+#   TypeScript's own parser. A project whose resolved
+#   `compilerOptions.types` holds `node` gets `noNodejsModules` off
+#   under its own directory (#2116).
 #
 # A tsconfig tsc refuses ends the run by name, with the compiler's
-# message. tsc 7 prints that message (TS5058, a tracked tsconfig deleted
-# from the tree) on STDOUT, so both streams are read.
+# message: one deleted from the tree, and one tsc cannot parse, which
+# `--showConfig` alone would have resolved to a project with no `types`.
 #
 # Usage: biome-generate.sh <generated config path>
 set -euo pipefail
@@ -39,8 +41,9 @@ org_task "lint:biome"
 
 generated=${1:?usage: biome-generate.sh <generated config path>}
 
-cfgs=() && org_tracked_read cfgs ':!vendor/**' "tsconfig.json" "*/tsconfig.json" "*/*/tsconfig.json" \
-  "*/*/*/tsconfig.json"
+# shellcheck source=mise/tsconfig-files.sh
+. "${ORG_BELT_DIR}/tsconfig-files.sh"
+cfgs=() && tsconfig_files cfgs
 if [[ -n ${cfgs[0]+set} ]] && ! command -v tsc > /dev/null; then
   org_finding "" "tsc missing from the belt"
   exit 1
@@ -52,12 +55,7 @@ projects=()
 n=0
 for cfg in ${cfgs[@]+"${cfgs[@]}"}; do
   n=$((n + 1))
-  if ! tsc -p "${cfg}" --showConfig > "${resolved}/${n}.json" 2> "${resolved}/err"; then
-    detail=()
-    IFS=$'\n' read -r -d '' -a detail < <(cat "${resolved}/${n}.json" "${resolved}/err") || true
-    org_finding "" "${cfg} does not resolve" ${detail[@]+"${detail[@]}"}
-    exit 1
-  fi
+  bash "${ORG_BELT_DIR}/tsconfig-resolve.sh" "${cfg}" "${resolved}/${n}.json" || exit 1
   projects+=(--tsconfig "${cfg}" "${resolved}/${n}.json")
 done
 org_tracked ':!vendor/**' "package.json" "*/package.json" \
