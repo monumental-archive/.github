@@ -1,13 +1,8 @@
 #!/usr/bin/env python3
-"""Tests for coverage_js_runner.py's reading of task run entries.
+"""Tests for coverage_js_runner.py's readers (#1659, #2105).
 
-The regression row of the defect `prop_coverage_js_runner.py` found
-(#1555): `mise tasks info --json` reports a `{ task = "build" }` run
-entry as an object, and `--vitest-command` raised AttributeError on it,
-where the contract is the vitest command or a refusal by name.
-
-The walk itself is task_walk.py's, with its rows in test_task_walk.py
-(#1608).
+The runner line a tree's package.json and lockfile answer, and the
+vitest run `measured` reads off its own command line (`--measured-run`).
 
 stdlib `unittest`, matching the other mise/test_*.py; run through the
 gate as `mise run test`.
@@ -21,12 +16,9 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest import mock
 
 import coverage_js_runner as cj
-import decoded
 import hermetic
-import task_walk as tw
 
 # The task that runs the helper, whose name its findings carry (#1934).
 TASK = "coverage:check"
@@ -40,39 +32,8 @@ def setUpModule() -> None:
 HERE = Path(__file__).resolve().parent
 
 
-class TaskReferences(unittest.TestCase):
-    """A run entry that names another task holds no script to read."""
-
-    def test_a_task_reference_beside_the_script(self) -> None:
-        """The shrunk example, as mise 2026.11 reports it (measured).
-
-        The reference is the walk's to follow (#1608); the script beside
-        it is read.
-        """
-        answers: dict[str, object] = {
-            "test": {"run": [{"task": "build"}, "vitest run"]},
-            "build": {},
-        }
-        walked = tw.walk("test", answers.get, list)
-        out, err = io.StringIO(), io.StringIO()
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            status = cj.vitest_command(walked)
-        self.assertEqual(status, 0, err.getvalue())
-        want: dict[str, object] = {"dir": ".", "args": ["run"]}
-        self.assertEqual(decoded.load_json(out.getvalue()), want)
-
-    def test_no_vitest_names_the_tasks_walked(self) -> None:
-        """The refusal says where the leg looked (#1608 item 4)."""
-        walked = tw.Walk(("test", "lint"), (tw.Step("lint", "", "echo lint"),))
-        err = io.StringIO()
-        with contextlib.redirect_stderr(err):
-            status = cj.vitest_command(walked)
-        self.assertEqual(status, 1)
-        self.assertIn("  tasks walked: test, lint\n", err.getvalue())
-
-
 class Readers(unittest.TestCase):
-    """Every shape the runner and line readers decide (#1659)."""
+    """Every shape the runner reader decides (#1659)."""
 
     def test_other_runners_are_named_from_the_manifest(self) -> None:
         """A dependency, a `test` script, npm's placeholder, or nothing."""
@@ -87,29 +48,6 @@ class Readers(unittest.TestCase):
         ):
             with self.subTest(manifest=manifest):
                 self.assertEqual(runner, cj.other_runner(cj.read_manifest(manifest)))
-
-    def test_continued_lines_join_and_comments_drop(self) -> None:
-        """A backslash joins the next line; a dangling one ends the script."""
-        script = "vitest \\\n  run\n# a comment\n\nfoo \\"
-        lines: list[str] = ["vitest    run", "foo"]
-        self.assertEqual(lines, cj.logical_lines(script))
-
-    def test_an_unbalanced_quote_is_refused_only_where_vitest_is(self) -> None:
-        """The leg names a line it cannot read only if it runs vitest."""
-        self.assertEqual(
-            (None, "an unreadable line, `vitest 'run`"), cj.read_line("vitest 'run")
-        )
-        self.assertEqual((None, None), cj.read_line("echo 'x"))
-
-    def test_a_bare_vitest_runs_as_run(self) -> None:
-        """No subcommand is vitest's watch mode; the leg runs `run`."""
-        walked = tw.Walk(("test",), (tw.Step("test", "", "vitest --silent"),))
-        out = io.StringIO()
-        with contextlib.redirect_stdout(out):
-            status = cj.vitest_command(walked)
-        self.assertEqual(0, status)
-        want: dict[str, object] = {"dir": ".", "args": ["run", "--silent"]}
-        self.assertEqual(want, decoded.load_json(out.getvalue()))
 
 
 class Main(unittest.TestCase):
@@ -170,42 +108,87 @@ class Main(unittest.TestCase):
         )
 
 
-class VitestCommand(unittest.TestCase):
-    """`--vitest-command <task>`, through main in this process (#1696)."""
+FLAGS = [
+    "--coverage.enabled=true",
+    "--coverage.provider=v8",
+    "--coverage.reporter=json-summary",
+    "--coverage.reporter=lcov",
+    "--coverage.reportsDirectory=/run/typescript",
+]
 
-    def call(self, walked: tw.Walk | tw.RefusedError) -> tuple[int, str, str]:
-        """Call main with the walk mise would answer replaced by `walked`.
+
+class MeasuredRun(unittest.TestCase):
+    """`--measured-run`: the vitest run on `measured`'s line (#2105)."""
+
+    def call(
+        self, *command: str, files: dict[str, str] | None = None
+    ) -> tuple[int, str, str]:
+        """Call main in a scratch tree of a pnpm vitest tree with v8.
 
         Returns:
             The status, stdout and stderr.
 
         """
-
-        def walk_mise(root: str) -> tw.Walk:
-            self.assertEqual(root, "test")
-            if isinstance(walked, tw.RefusedError):
-                raise walked
-            return walked
-
-        with mock.patch.object(tw, "walk_mise", walk_mise):
-            done = hermetic.call_main(lambda: cj.main(["--vitest-command", "test"]))
+        lock = (
+            "lockfileVersion: '9.0'\npackages:\n"
+            "  vitest@4.1.12:\n  '@vitest/coverage-v8@4.1.12':\n"
+        )
+        planted = {"package.json": "{}", "pnpm-lock.yaml": lock} | (files or {})
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        for name, text in planted.items():
+            (Path(tmp.name) / name).write_text(text, encoding="utf-8")
+        argv = ["--measured-run", "/run/typescript", *planted, "--", *command]
+        done = hermetic.call_main(lambda: cj.main(argv), cwd=tmp.name)
         return done.returncode, done.stdout, done.stderr
 
-    def test_the_walked_vitest_command_is_printed(self) -> None:
-        """The one vitest run of the walked steps, as JSON."""
-        walked = tw.Walk(("test",), (tw.Step("test", "web", "pnpm exec vitest run"),))
-        status, out, err = self.call(walked)
+    def test_a_launched_run_gains_the_flags(self) -> None:
+        """`pnpm exec vitest run x`: the five flags, NUL-separated."""
+        status, out, err = self.call("pnpm", "exec", "vitest", "run", "x")
         self.assertEqual((0, ""), (status, err))
-        want: dict[str, object] = {"dir": "web", "args": ["run"]}
-        self.assertEqual(decoded.load_json(out), want)
+        want = ["pnpm", "exec", "vitest", "run", "x", *FLAGS]
+        self.assertEqual("".join(f"{w}\0" for w in want), out)
 
-    def test_a_walk_refused_is_named_under_the_leg(self) -> None:
-        """The walk's refusal, with the leg's label, and exit 1."""
-        refused = tw.RefusedError("task 'test' is a file task")
-        self.assertEqual(
-            (1, "", "coverage:check: typescript: task 'test' is a file task\n"),
-            self.call(refused),
+    def test_no_subcommand_is_run(self) -> None:
+        """A bare vitest is its watch mode; `run` is inserted."""
+        got = cj.measured_run(
+            "v8", "/run/typescript", ["node_modules/.bin/vitest", "--silent"]
         )
+        want: list[str] = ["node_modules/.bin/vitest", "run", "--silent", *FLAGS]
+        self.assertEqual(want, got)
+
+    def test_what_is_not_a_run_is_unchanged(self) -> None:
+        """Another subcommand, another launcher, or no vitest: nothing."""
+        for command in (
+            ["vitest", "list"],
+            ["bunx", "vitest", "run"],
+            ["python3", "-m", "unittest"],
+            [],
+        ):
+            with self.subTest(command=command):
+                self.assertEqual((0, "", ""), self.call(*command))
+
+    def test_a_tree_the_leg_reports_on_is_unchanged(self) -> None:
+        """No provider pinned: the leg names it; measured adds nothing."""
+        lock = "lockfileVersion: '9.0'\npackages:\n  vitest@4.1.12:\n"
+        self.assertEqual(
+            (0, "", ""), self.call("vitest", "run", files={"pnpm-lock.yaml": lock})
+        )
+
+    def test_a_coverage_flag_of_its_own_is_refused(self) -> None:
+        """The leg owns the coverage flags: exit 1, named."""
+        status, out, err = self.call("vitest", "run", "--coverage.enabled=false")
+        self.assertEqual((1, ""), (status, out))
+        self.assertTrue(
+            err.startswith("measured: --coverage.enabled=false is on the vitest run"),
+            err,
+        )
+
+    def test_no_separator_is_a_usage_error(self) -> None:
+        """The command follows `--`; without it nothing is read."""
+        done = hermetic.call_main(lambda: cj.main(["--measured-run", "/d"]))
+        self.assertEqual(2, done.returncode)
+        self.assertIn("usage", done.stderr)
 
 
 class Script(unittest.TestCase):

@@ -3834,22 +3834,31 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
   belt beside the runner — two instrumentations of one suite, and a
   provider version the belt would own where the repository's lockfile
   should.
-  **Amended 2026-11-18: the run measured is the `test` task's own.**
-  The first build ran vitest's whole configured suite, where the
-  Decided build says the repository's own test command (#707: the suite
-  measured is the suite the gate runs). The leg now reads the one vitest
-  invocation from the `test` task and the tasks it depends on (`mise
-  tasks info`), and runs the repository's vitest with exactly its
-  arguments, from its task's `dir`, plus the coverage flags. A task it
-  cannot read is refused by name: no vitest (`pnpm test` behind a
-  package.json script), two, a shell expansion, a compound line, an
-  unknown launcher, a subcommand other than `run`, or a coverage flag of
-  its own. A vitest tree with no `test` task skips clean, as a Python
-  one does. Running the task's scripts with a coverage-adding `vitest`
-  first on PATH was measured and refused: `pnpm exec` and `npx` put
-  `node_modules/.bin` at the head of PATH, so the repository's binary
-  runs and the shim never does, and vitest reads no environment variable
-  that enables coverage.
+  **Amended 2026-11-18: the run measured is the `test` task's own**
+  (#707: the suite measured is the suite the gate runs), where the
+  first build ran vitest's whole configured suite. A vitest tree with
+  no `test` task skips clean, as a Python one does.
+  **Amended 2026-11-26 (#2105): the run measured is the `test` run
+  itself.** The leg runs nothing: the repository's test command runs
+  through `"${ORG_BELT_DIR}/measured" pnpm exec vitest run`, as every
+  other language's does, and `measured` appends the coverage flags to
+  that run, so the suite runs once per gate, not twice. vitest's
+  coverage has no environment switch, so `measured` reads its own
+  arguments: the first whose basename is `vitest`, behind nothing but
+  a package manager's launcher, is the run (`run` inserted where it has
+  no subcommand), and the reports go to the run's `typescript`
+  directory, which the leg reads. A coverage flag of the command's own,
+  and a second vitest run in one test run, are refused by name (the
+  leg measures one suite; several are vitest projects). A floor
+  recording the leg with no report there is red, naming the remedy.
+  The figures do not move: the flags are the ones the leg passed, to
+  the same command. **Rejected, so it is not re-proposed:** a
+  `vitest.config.ts` switch read from the environment (every repository
+  would carry the belt's mechanism), keeping the second run and caching
+  the first (two runs can differ), a `vitest` shim first on PATH
+  (`pnpm exec` and `npx` put `node_modules/.bin` first, so the shim
+  never runs), and merging several vitest runs' reports (vitest's own
+  answer to several suites is projects, in one run with one report).
 - **PL/pgSQL coverage (#1547)** — measured with plpgsql_check, which
   the repository's test stack carries and the belt does not. The org's
   published database image ships a deliberately small set of

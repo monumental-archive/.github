@@ -26,47 +26,41 @@ The leg supports vitest. Any other runner is named, from the root
 package.json's dependencies or its `test` script, so a skip says what
 it skipped rather than reading as a tree with nothing to measure.
 
-`--vitest-command <task>` is the second question: WHICH vitest run
-the leg measures. #1357 item 2 says the leg runs the repository's own
-test command, so the suite measured is the suite the gate runs (#707),
-never vitest's whole configured suite where the `test` task runs a
-narrower one. The scripts are the `test` task's run as `task_walk.py`
-walks it (#1608), the one walk every leg reads. The one plain vitest
-invocation in them is printed as JSON,
-`{"dir": <the task's dir>, "args": [<its arguments>]}`, and the caller
-runs the repository's own vitest with exactly those arguments plus the
-coverage flags. Running the task's scripts with a coverage-adding
-`vitest` first on PATH was measured and refused: `pnpm exec` and `npx`
+`--measured-run <directory> <tracked…> -- <command…>` is the second
+question, asked by `measured` (#2105): whether the command it was
+handed is the vitest run the leg measures. vitest's coverage has no
+environment switch, so the measurement rides the test command's own
+line, as Go's `-cover` would were GOFLAGS not there. Where the tracked
+files above answer `vitest v8` or `vitest istanbul`, and the command
+runs vitest behind nothing but a package manager's launcher, the run
+is printed back, NUL-separated, with `run` inserted where vitest was
+given no subcommand and the leg's five coverage flags appended, the
+reports going to <directory>. Anything else prints nothing, and
+`measured` execs the command unchanged: a tree that is not vitest's,
+a provider the leg reports on (none, or both), a command with no
+vitest in it, or a vitest subcommand other than `run`. A coverage flag
+of the command's own is refused by name before anything runs, because
+the leg sets them. Running the command with a coverage-adding `vitest`
+first on PATH was measured and refused (#1357): `pnpm exec` and `npx`
 put `node_modules/.bin` at the head of PATH, so the repository's own
-binary runs and the shim never does, and vitest reads no environment
-variable that enables coverage.
-
-A task whose vitest command cannot be read is refused by name, never
-guessed at: no vitest command (a `pnpm test` behind a package.json
-script, say), more than one, a shell expansion in it, vitest inside a
-compound line, a vitest subcommand other than `run`, or a coverage
-flag the leg would contradict.
+binary runs and the shim never does.
 """
 
 import json
 import re
-import shlex
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-# The one walk of a task (#1608), a module beside this script.
+# The belt's helpers, modules beside this script.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import decoded
 import findings
-import task_walk
 import typed_std
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-
-    from task_walk import Step, Walk
 
 # Lockfiles the leg reads, in the order a package manager would prefer.
 LOCKFILES = ("pnpm-lock.yaml", "package-lock.json", "yarn.lock", "bun.lock")
@@ -171,9 +165,10 @@ def other_runner(manifest: Manifest) -> str | None:
     return None
 
 
-# What may stand before `vitest` on its line: the package managers'
-# ways of running a dependency's binary, or nothing. A path ending in
-# `/vitest` (`node_modules/.bin/vitest`) is the binary itself.
+# What may stand before `vitest` on `measured`'s command line: the
+# package managers' ways of running a dependency's binary, or nothing.
+# A path ending in `/vitest` (`node_modules/.bin/vitest`) is the binary
+# itself.
 LAUNCHERS = (
     (),
     ("pnpm",),
@@ -187,233 +182,150 @@ LAUNCHERS = (
     ("npm", "exec", "--"),
 )
 
-# Characters that make a line more than one plain command, or make its
-# arguments something only the shell can resolve.
-COMPOUND = re.compile(r"[;&|<>()]")
-EXPANSION = re.compile(r"[$`]")
-
-# vitest subcommands other than `run`; arguments that start with neither
-# are file filters, which `vitest run` takes as they are.
+# vitest subcommands other than `run`; a run given one of them is not
+# the suite's run, and `measured` leaves it as it is. An argument that
+# is none of them is a file filter or an option, which `vitest run`
+# takes as it is.
 SUBCOMMANDS = frozenset(
     {"watch", "dev", "bench", "init", "list", "related", "typecheck"},
 )
 
-FORMS = (
-    "`vitest …`, `pnpm exec vitest …`, `npx vitest …`, `yarn vitest …`"
-    " or `node_modules/.bin/vitest …`"
-)
+
+class RefusedError(Exception):
+    """The command sets what the measurement sets: refused by name."""
 
 
-def logical_lines(script: str) -> list[str]:
-    """Split a run script into lines, joining backslash continuations.
+def measured_run(
+    provider: str, directory: str, command: Sequence[str]
+) -> list[str] | None:
+    """Read a test command for the vitest run the leg measures.
 
-    Returns:
-        The script's logical lines, comments and blanks dropped.
-
-    """
-    out: list[str] = []
-    pending = ""
-    for raw in script.splitlines():
-        line = pending + raw
-        if line.rstrip().endswith("\\"):
-            pending = line.rstrip()[:-1] + " "
-            continue
-        pending = ""
-        stripped = line.strip()
-        if stripped and not stripped.startswith("#"):
-            out.append(stripped)
-    if pending.strip():
-        out.append(pending.strip())
-    return out
-
-
-def is_vitest(word: str) -> bool:
-    """Say whether a shell word names the vitest binary.
+    The first argument whose basename is `vitest`, with only one of the
+    LAUNCHERS before it, is the run; a next argument that is one of the
+    SUBCOMMANDS is not a run; no subcommand is `run`.
 
     Returns:
-        True for `vitest` and for a path ending in `/vitest`.
+        The command with `run` where vitest was given no subcommand and
+        the leg's coverage flags appended, or None when the command is
+        not a vitest run and goes unchanged.
+
+    Raises:
+        RefusedError: the run carries a `--coverage` argument of its own.
 
     """
-    return word == "vitest" or word.endswith("/vitest")
-
-
-def refusal(line: str, words: list[str]) -> str | None:
-    """Say why a line that runs vitest cannot be read, if it cannot.
-
-    Returns:
-        The reason, or None when the line is one plain invocation.
-
-    """
-    at = next(i for i, w in enumerate(words) if is_vitest(w))
-    checks = (
-        (EXPANSION.search(line), f"a shell expansion in `{line}`"),
-        (COMPOUND.search(line), f"vitest inside a compound line, `{line}`"),
-        (
-            tuple(words[:at]) not in LAUNCHERS,
-            f"vitest behind a command the leg does not read, `{line}`",
-        ),
+    at = next(
+        (i for i, word in enumerate(command) if Path(word).name == "vitest"), None
     )
-    return next((reason for failed, reason in checks if failed), None)
-
-
-def read_line(line: str) -> tuple[list[str] | None, str | None]:
-    """Read one logical line for a vitest invocation.
-
-    Returns:
-        The arguments after `vitest` and None; None and the reason the
-        line is refused; or (None, None) when the line runs no vitest.
-
-    """
-    try:
-        words = shlex.split(line, comments=True)
-    except ValueError:
-        reason = f"an unreadable line, `{line}`" if "vitest" in line else None
-        return None, reason
-    if not any(is_vitest(w) for w in words):
-        return None, None
-    reason = refusal(line, words)
-    if reason is not None:
-        return None, reason
-    at = next(i for i, w in enumerate(words) if is_vitest(w))
-    return words[at + 1 :], None
-
-
-def collect(steps: Sequence[Step]) -> tuple[list[tuple[str, list[str]]], list[str]]:
-    """Read every step's script for vitest invocations.
-
-    Returns:
-        Each readable invocation as (its task's dir, its arguments), and
-        each refused line as `<task>: <reason>`.
-
-    """
-    found: list[tuple[str, list[str]]] = []
-    refused: list[str] = []
-    for step in steps:
-        for line in logical_lines(step.script):
-            args, reason = read_line(line)
-            if reason is not None:
-                refused.append(f"{step.task}: {reason}")
-            elif args is not None:
-                found.append((step.dir or ".", args))
-    return found, refused
-
-
-def problems(
-    found: list[tuple[str, list[str]]], refused: list[str], walked: list[str]
-) -> list[str]:
-    """Say why the collected invocations are not one measurable run.
-
-    Returns:
-        The refusal's lines after its head, or none when there is one
-        plain `vitest run`.
-
-    """
-    if refused:
-        return [
-            ", and cannot read it —",
-            *(f"  {reason}" for reason in refused),
-            f"  write it as one plain line: {FORMS}",
-        ]
-    if not found:
-        return [
-            ", and the test task and its depends run none —",
-            f"  tasks walked: {', '.join(walked)}",
-            f"  run vitest from the test task as {FORMS}",
-        ]
-    if len(found) > 1:
-        return [
-            f", and the test task and its depends run {len(found)} —",
-            "  the leg measures one suite; run vitest once",
-        ]
-    args = found[0][1]
-    if args and args[0] in SUBCOMMANDS:
-        return [
-            f", and `vitest {args[0]}` is not a run —",
-            "  the leg measures `vitest run`",
-        ]
-    if any(a.startswith("--coverage") for a in args):
-        return [
-            ", and it sets coverage itself —",
-            "  the leg sets the coverage flags; drop them from the test task",
-        ]
-    return []
-
-
-def vitest_command(walked: Walk) -> int:
-    """Print the walked steps' one vitest invocation, or refuse it by name.
-
-    Returns:
-        0 with the JSON on stdout, or 1 with the refusal on stderr.
-
-    """
-    found, refused = collect(walked.steps)
-    lines = problems(found, refused, list(walked.tasks))
-    if lines:
-        findings.finding(
-            "typescript",
-            f"the leg measures the test task's own vitest command{lines[0]}",
-            [line.removeprefix("  ") for line in lines[1:]],
+    if at is None or tuple(command[:at]) not in LAUNCHERS:
+        return None
+    rest = list(command[at + 1 :])
+    if rest and rest[0] in SUBCOMMANDS:
+        return None
+    if not rest or rest[0] != "run":
+        rest = ["run", *rest]
+    own = next((word for word in rest if word.startswith("--coverage")), None)
+    if own is not None:
+        msg = (
+            f"{own} is on the vitest run, which would measure TypeScript a"
+            " second way or replace the measurement's own (#2105); drop it:"
+            " the typescript leg sets vitest's coverage flags on the measured run"
         )
-        return 1
-    directory, args = found[0]
-    if not args or args[0] != "run":
-        args = ["run", *args]
-    record: dict[str, object] = {"dir": directory, "args": args}
-    print(json.dumps(record))
-    return 0
+        raise RefusedError(msg)
+    # The repository's own vitest config decides what is in the suite and
+    # in the report (`coverage.include`: vitest counts only files a test
+    # loaded unless it is set). The leg sets only what makes the number
+    # readable: the provider, the two reporters, and the run's directory,
+    # so nothing lands in the tree unasked.
+    return [
+        *command[: at + 1],
+        *rest,
+        "--coverage.enabled=true",
+        f"--coverage.provider={provider}",
+        "--coverage.reporter=json-summary",
+        "--coverage.reporter=lcov",
+        f"--coverage.reportsDirectory={directory}",
+    ]
 
 
-def walked_command(root: str) -> int:
-    """Walk from the root task with mise and print its vitest command.
-
-    Returns:
-        vitest_command's status, or 1 when the walk refuses a task.
-
-    """
-    try:
-        walked = task_walk.walk_mise(root)
-    except task_walk.RefusedError as exc:
-        findings.finding("typescript", str(exc))
-        return 1
-    return vitest_command(walked)
-
-
-def main(argv: list[str]) -> int:
-    """Print the runner line for the tree, or answer `--vitest-command`.
-
-    `--vitest-command <task>` walks the task (walked_command);
-    any other arguments are the tracked files among package.json and
-    the lockfiles.
+def answer_measured(argv: list[str]) -> int:
+    """Answer `--measured-run <directory> <tracked…> -- <command…>`.
 
     Returns:
-        0, or 1 when the root package.json is not readable JSON;
-        walked_command's status for `--vitest-command`.
+        0 with the run on stdout, NUL-separated, or nothing when the
+        command goes unchanged; 1 with the refusal on stderr.
 
     """
-    if argv[:1] == ["--vitest-command"]:
-        return walked_command(argv[1])
-    tracked = argv
-    if "package.json" not in tracked:
-        return 0
+    if "--" not in argv[1:]:
+        sys.stderr.write(
+            "measured: usage: coverage_js_runner.py --measured-run"
+            " <directory> <tracked…> -- <command…>\n"
+        )
+        return 2
+    split = argv.index("--", 1)
+    directory, tracked, command = argv[0], argv[1:split], argv[split + 1 :]
     try:
-        manifest = read_manifest(decoded.load_json(Path("package.json").read_bytes()))
+        line = runner(tracked)
     except (OSError, decoded.UndecodableError) as exc:
         findings.finding("package.json", str(exc))
         return 1
+    if line not in {"vitest v8", "vitest istanbul"}:
+        return 0
+    try:
+        run = measured_run(line.removeprefix("vitest "), directory, command)
+    except RefusedError as exc:
+        sys.stderr.write(f"measured: {exc}\n")
+        return 1
+    if run is not None:
+        sys.stdout.write("".join(f"{word}\0" for word in run))
+    return 0
+
+
+def runner(tracked: Sequence[str]) -> str | None:
+    """Name the tree's runner and provider from its tracked files.
+
+    Returns:
+        The runner line, or None.
+
+    """
+    if "package.json" not in tracked:
+        return None
+    manifest = read_manifest(decoded.load_json(Path("package.json").read_bytes()))
     lockfile = next((name for name in LOCKFILES if name in tracked), None)
     lock = Path(lockfile).read_text(encoding="utf-8") if lockfile else ""
     if RUNNER.search(lock):
         found = providers(lock)
         provider = found.pop() if len(found) == 1 else ("both" if found else "none")
-        print(f"vitest {provider}")
-        return 0
-    runner = other_runner(manifest)
-    if runner == "vitest" or (runner is None and manifest.mentions_vitest):
+        return f"vitest {provider}"
+    other = other_runner(manifest)
+    if other == "vitest" or (other is None and manifest.mentions_vitest):
         # Declared, but the lockfile pins no vitest: nothing the leg may run.
-        print("unsupported vitest-without-a-lockfile-entry")
-        return 0
-    if runner is not None:
-        print(f"unsupported {runner}")
+        return "unsupported vitest-without-a-lockfile-entry"
+    if other is not None:
+        return f"unsupported {other}"
+    return None
+
+
+def main(argv: list[str]) -> int:
+    """Print the runner line for the tree, or answer `--measured-run`.
+
+    `--measured-run` reads `measured`'s command (answer_measured); any
+    other arguments are the tracked files among package.json and the
+    lockfiles.
+
+    Returns:
+        0, or 1 when the root package.json is not readable JSON;
+        answer_measured's status for `--measured-run`.
+
+    """
+    if argv[:1] == ["--measured-run"]:
+        return answer_measured(argv[1:])
+    try:
+        line = runner(argv)
+    except (OSError, decoded.UndecodableError) as exc:
+        findings.finding("package.json", str(exc))
+        return 1
+    if line is not None:
+        print(line)
     return 0
 
 

@@ -59,6 +59,11 @@ def plant(root: Path, *, floor: bool) -> Path:
     return tree
 
 
+def track(tree: Path, *names: str) -> None:
+    """Add planted files to the tree's index: `measured` asks git (#2013)."""
+    subprocess.run([GIT, "add", *names], cwd=tree, check=True, env=hermetic.env())
+
+
 def unchanged(given: dict[str, str], seen: dict[str, str]) -> dict[str, str]:
     """Compare what a child saw with what it was given.
 
@@ -343,6 +348,7 @@ class GoMerged(unittest.TestCase):
         """
         tree = plant(Path(tmp), floor=True)
         (tree / "go.mod").write_text("module example.com/x\n", encoding="utf-8")
+        track(tree, "go.mod")
         run_dir = Path(tmp) / "run"
         out = run(tree, argv, ORG_COVERAGE_RUN=str(run_dir), **given)
         return run_dir, out.stdout + out.stderr, out.returncode
@@ -479,6 +485,7 @@ class RustInstrumented(unittest.TestCase):
         if not tree.exists():
             tree = plant(base, floor=True)
             (tree / "Cargo.toml").write_text("[workspace]\n", encoding="utf-8")
+            track(tree, "Cargo.toml")
             stubs = base / "stubs"
             stubs.mkdir()
             (stubs / "cargo").write_text(CARGO, encoding="utf-8")
@@ -728,6 +735,121 @@ class RustInstrumented(unittest.TestCase):
             _, out, _ = self.rust_run(tmp, [SH, "-c", "echo llvm-cov"])
             self.assertEqual(0, out.returncode, out.stderr)
             self.assertEqual("llvm-cov\n", out.stdout)
+
+
+# A package manager that prints the command it was handed, NUL-separated.
+PNPM = """\
+#!/bin/sh
+printf '%s\\0' pnpm "$@"
+"""
+LOCK = (
+    "lockfileVersion: '9.0'\npackages:\n"
+    "  vitest@4.1.12:\n    resolution: {integrity: stub}\n"
+    "  '@vitest/coverage-v8@4.1.12':\n    resolution: {integrity: stub}\n"
+)
+
+
+class VitestMeasured(unittest.TestCase):
+    """In a vitest tree the run itself carries the coverage flags (#2105)."""
+
+    def vitest_run(
+        self, argv: list[str], *, floor: bool = True, calls: int = 1
+    ) -> tuple[Path, subprocess.CompletedProcess[str]]:
+        """Run `measured` `calls` times in one run of a pnpm vitest tree.
+
+        Returns:
+            The run's directory and the last call's process.
+
+        """
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        base = Path(tmp.name)
+        tree = plant(base, floor=floor)
+        (tree / "package.json").write_text("{}", encoding="utf-8")
+        (tree / "pnpm-lock.yaml").write_text(LOCK, encoding="utf-8")
+        track(tree, "package.json", "pnpm-lock.yaml")
+        stubs = base / "stubs"
+        stubs.mkdir()
+        (stubs / "pnpm").write_text(PNPM, encoding="utf-8")
+        (stubs / "pnpm").chmod(0o755)
+        run_dir = base / "run"
+        path = f"{stubs}{os.pathsep}{os.environ['PATH']}"
+        out = run(tree, argv, ORG_COVERAGE_RUN=str(run_dir), PATH=path)
+        for _ in range(calls - 1):
+            out = run(tree, argv, ORG_COVERAGE_RUN=str(run_dir), PATH=path)
+        return run_dir, out
+
+    @staticmethod
+    def execd(out: subprocess.CompletedProcess[str]) -> list[str]:
+        """Read the command the stub was exec'd as.
+
+        Returns:
+            Its words.
+
+        """
+        return out.stdout.split("\0")[:-1]
+
+    def test_the_run_carries_the_flags_and_the_run_directory(self) -> None:
+        """`pnpm exec vitest run` gains the five flags, reports in the run."""
+        run_dir, out = self.vitest_run(["pnpm", "exec", "vitest", "run"])
+        self.assertEqual(0, out.returncode, out.stderr)
+        want: list[str] = [
+            "pnpm",
+            "exec",
+            "vitest",
+            "run",
+            "--coverage.enabled=true",
+            "--coverage.provider=v8",
+            "--coverage.reporter=json-summary",
+            "--coverage.reporter=lcov",
+            f"--coverage.reportsDirectory={run_dir}/typescript",
+        ]
+        self.assertEqual(want, self.execd(out))
+        self.assertTrue((run_dir / "typescript").is_dir())
+
+    def test_no_floor_leaves_the_command_unchanged(self) -> None:
+        """Without a floor it is `exec "$@"`."""
+        _, out = self.vitest_run(["pnpm", "exec", "vitest", "run"], floor=False)
+        self.assertEqual(0, out.returncode, out.stderr)
+        want: list[str] = ["pnpm", "exec", "vitest", "run"]
+        self.assertEqual(want, self.execd(out))
+
+    def test_what_is_not_a_run_is_unchanged(self) -> None:
+        """`vitest list`, or a command with no vitest argument."""
+        for argv in (["pnpm", "exec", "vitest", "list"], ["pnpm", "run", "lint"]):
+            with self.subTest(argv=argv):
+                run_dir, out = self.vitest_run(argv)
+                self.assertEqual(0, out.returncode, out.stderr)
+                self.assertEqual(argv, self.execd(out))
+                self.assertFalse((run_dir / "typescript").exists())
+
+    def test_a_coverage_flag_of_its_own_is_refused(self) -> None:
+        """`--coverage.enabled`: refused by name, nothing run."""
+        _, out = self.vitest_run([
+            "pnpm",
+            "exec",
+            "vitest",
+            "run",
+            "--coverage.enabled",
+        ])
+        self.assertEqual(1, out.returncode)
+        self.assertEqual("", out.stdout)
+        self.assertIn(
+            "measured: --coverage.enabled is on the vitest run, which would"
+            " measure TypeScript a second way",
+            out.stderr,
+        )
+
+    def test_a_second_run_in_one_test_run_is_refused(self) -> None:
+        """The leg measures one suite: the second call is refused by name."""
+        _, out = self.vitest_run(["pnpm", "exec", "vitest", "run"], calls=2)
+        self.assertEqual(1, out.returncode)
+        self.assertEqual("", out.stdout)
+        self.assertIn(
+            "  the leg measures one suite; a repository with several uses"
+            " vitest projects\n",
+            out.stderr,
+        )
 
 
 if __name__ == "__main__":

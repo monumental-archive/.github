@@ -6073,7 +6073,7 @@ dir = "{{cwd}}"
 # after `test` ends. In `ci`, which depends on `test` too, mise runs it
 # once; run on its own (a person, the release derivation) this runs it.
 # Optional, as in `ci`: a tree with no `test` task measures through its
-# own commands (go, rust, typescript) or skips.
+# own commands (go, rust) or skips.
 depends = [{ task = "test", optional = true }]
 # The ratchet: the floor is DERIVED STATE that never falls (#652). The
 # release machinery writes it as `min(90, measured - band)` and commits

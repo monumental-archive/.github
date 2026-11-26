@@ -102,7 +102,6 @@ default = 2
 "mise/test_coverage_tasks.py" = 29
 "mise/test_pgrx_test.py" = 29
 "release/test_generate_pgrx_upgrade.py" = 29
-"mise/test_coverage_references.py" = 27
 "mise/test_measured.py" = 27
 "mise/test_mutants_go.py" = 25
 "mise/test_mutants_rust.py" = 23

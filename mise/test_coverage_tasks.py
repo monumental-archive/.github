@@ -102,39 +102,17 @@ esac
 
 MISE = """\
 #!/usr/bin/env bash
-# With STUB_FIXTURE, the captured mise answers (#1608): `tasks info`
-# from the capture, `test` being the task STUB_ROOT names, its probe
-# directory the planted tree; `tasks ls` the capture's names.
-if [[ -n ${STUB_FIXTURE:-} ]]; then
-  case "$1 $2" in
-    "tasks info")
-      n=$3
-      [[ ${n} != test ]] || n=${STUB_ROOT}
-      exec jq -e --arg n "${n}" --arg d "${STUB_DIR}" \\
-        '."tasks info --json"[$n] // empty | .dir |= sub("<probe>"; $d)' \\
-        "${STUB_FIXTURE}"
-      ;;
-    "tasks ls")
-      exec jq '[."tasks ls --hidden --json"[] | {name: .}]' "${STUB_FIXTURE}"
-      ;;
-    *) exit 1 ;;
-  esac
-fi
-# `tasks info <name> --json`: the planted test task, or a planted
-# dependency of it beside that file as task.<name>.json.
-if [[ "$1 $2" == "tasks info" ]]; then
-  f=${STUB_TASK}
-  [[ $3 == test ]] || f="${STUB_TASK%.json}.$3.json"
-  if [[ -f ${f} ]]; then
-    cat "${f}"
-    exit 0
-  fi
+# `tasks info test --json`: the planted test task.
+if [[ "$1 $2 $3" == "tasks info test" && -f ${STUB_TASK} ]]; then
+  cat "${STUB_TASK}"
+  exit 0
 fi
 exit 1
 """
 
 # The repository's own vitest, installed in node_modules: writes the
-# json-summary and lcov reports its provider would, with planted totals.
+# json-summary and lcov reports its provider would, with planted totals,
+# and counts its own runs, one line of arguments each, in STUB_VITEST_LOG.
 VITEST = """\
 #!/usr/bin/env bash
 set -euo pipefail
@@ -144,21 +122,15 @@ for arg in "$@"; do
 done
 echo "vitest suite ran" >&2
 echo "vitest args: $*" >&2
+echo "$*" >> "${STUB_VITEST_LOG}"
 [[ -n ${dir} ]] || exit 0
 lines='{"total": {"lines": {"pct": %s}, "branches": {"pct": %s}}}\\n'
 printf "${lines}" "${STUB_TS}" "${STUB_TS_BR}" > "${dir}/coverage-summary.json"
 echo "TN:" > "${dir}/lcov.info"
 """
 
-# `mise tasks info --json` for every task of a probe holding each way
-# mise 2026.11.7 documents for one task to run another (#1608), captured
-# from task-references/probe.toml.
-TASK_REFERENCES = BELT / "testdata" / "task-references" / "tasks-info.json"
-
-# The head of every refusal of the test task's vitest command.
-HEAD_MSG = (
-    "coverage:check: typescript: the leg measures the test task's own vitest command"
-)
+# A vitest tree's test command, through `measured` (#2105).
+MEASURED_VITEST = '"${ORG_BELT_DIR}/measured" node_modules/.bin/vitest run'
 
 # Lockfile entries, in pnpm's form, by what the row plants.
 PNPM_VITEST = "  vitest@4.1.12:\n    resolution: {integrity: stub}\n"
@@ -238,22 +210,6 @@ def init_tree(
         )
 
 
-def captured_env(captured_test: str | None, tree: Path) -> dict[str, str]:
-    """Point the mise stub at the task-references capture, if asked.
-
-    Returns:
-        The stub's variables, or none when no captured task is `test`.
-
-    """
-    if captured_test is None:
-        return {}
-    return {
-        "STUB_FIXTURE": str(TASK_REFERENCES),
-        "STUB_ROOT": captured_test,
-        "STUB_DIR": str(tree),
-    }
-
-
 def measuring_step(task: str) -> str:
     """Read the step of a coverage task that measures (#1667).
 
@@ -273,14 +229,17 @@ def measuring_step(task: str) -> str:
     return decoded.as_str(steps[-1], f"{task}'s last step")
 
 
-def plant_run(run: Path, *, python: bool = True) -> None:
+def plant_run(
+    run: Path, *, python: bool = True, typescript: tuple[str, str] | None = None
+) -> None:
     """Leave a run's directory as `measured` leaves it (#1667, #1651).
 
     The suite ran through `measured`, which wrote the run's rc file and
     coverage.py's data, and each Go test process its counters; the stub
     `coverage` and `go` read none of them, but the legs find them.
     `python` False leaves out coverage.py's data: a Python suite that ran
-    outside `measured`.
+    outside `measured`. `typescript`, the lines and branches totals of
+    the reports a measured vitest run writes (#2105).
     """
     (run / "go").mkdir(parents=True)
     (run / "go" / "covcounters.stub").write_text("", encoding="utf-8")
@@ -288,6 +247,44 @@ def plant_run(run: Path, *, python: bool = True) -> None:
         (run / "python").mkdir()
         (run / "coverage.rc").write_text("[run]\n", encoding="utf-8")
         (run / "python" / ".coverage.stub").write_text("", encoding="utf-8")
+    if typescript is not None:
+        (run / "typescript").mkdir()
+        lines, branches = typescript
+        summary = {
+            "total": {
+                "lines": {"pct": float(lines)},
+                "branches": {"pct": float(branches)},
+            }
+        }
+        (run / "typescript" / "coverage-summary.json").write_text(
+            json.dumps(summary), encoding="utf-8"
+        )
+        (run / "typescript" / "lcov.info").write_text("TN:\n", encoding="utf-8")
+
+
+def run_test_step(
+    tree: Path, env: dict[str, str], stubs: Path, test_run: str | None
+) -> subprocess.CompletedProcess[str]:
+    """Run the tree's test command, as mise runs `test` first.
+
+    The test runs without the measuring stubs: they answer the coverage
+    task's reads, and `measured` would start the stub `coverage` as
+    coverage.py.
+
+    Returns:
+        The finished process.
+
+    """
+    as_test = hermetic.task_run("test", test_run or "true")
+    test_path = env["PATH"].removeprefix(f"{stubs}{os.pathsep}")
+    return subprocess.run(
+        as_test.argv,
+        cwd=tree,
+        env=env | as_test.env | {"PATH": test_path},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
 
 
 def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fact
@@ -303,25 +300,27 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
     ts: str = "88.0",
     ts_branches: str = "81.0",
     test_run: str | None = None,
-    depends: dict[str, str] | None = None,
     go_profile: bool = True,
-    captured_test: str | None = None,
     reports_dir: bool | str = True,
     commit: bool = False,
     measured: bool = True,
     python_measured: bool = True,
+    legs: str | None = None,
+    run_test: bool = False,
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
     """Run one coverage task's body in a planted tree with stub tools.
 
-    `captured_test` names the captured task-references task mise
-    answers as `test`, every other task as captured. `reports_dir`
-    names `reports`, beside the tree and not yet made, as
+    `reports_dir` names `reports`, beside the tree and not yet made, as
     ORG_COVERAGE_REPORTS, as the gate job names one; False leaves the
     variable unset, as on a developer's machine; a path names that.
     `commit` commits the planted tree, so `git status` reads what the
     run changed. `measured` leaves the run's directory as a suite run
     through `measured` does (#1667); False, as one that ran outside it;
     `python_measured` False, with Go's counters and no Python data.
+    `legs` is the floor's `legs:` record (#1666). `run_test` runs the
+    test command in the tree first, as mise runs `test` before the
+    coverage task, and ends there if it fails, as a red `test` ends the
+    run; the processes' output is joined, the test's first.
 
     Returns:
         The finished process, and a snapshot directory holding the
@@ -339,17 +338,13 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
     (stubs / "python3").symlink_to(sys.executable)
     task_json = tmp / "task.json"
     if test_run is None and typescript is not None:
-        # A vitest tree's test task runs vitest (#1357 item 2); the python
-        # leg runs the same line, so it is the stub binary, not pnpm.
-        test_run = "node_modules/.bin/vitest run"
-    for name, run in (depends or {}).items():
-        answer: dict[str, object] = {"dir": str(tree), "run": [run]}
-        (tmp / f"task.{name}.json").write_text(json.dumps(answer), encoding="utf-8")
+        # A vitest tree's test task runs vitest through `measured` (#2105);
+        # the stub binary, not pnpm.
+        test_run = MEASURED_VITEST
     if test_task:
         test_answer: dict[str, object] = {
             "dir": str(tree),
             "run": [test_run or "echo suite ran"],
-            "depends": sorted(depends or {}),
         }
         task_json.write_text(json.dumps(test_answer), encoding="utf-8")
 
@@ -363,7 +358,10 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
     if typescript is not None:
         tracked += plant_typescript(tree, typescript)
     if floor:
-        (tree / ".coverage-floor").write_text(FLOOR, encoding="utf-8")
+        record = "" if legs is None else f"# legs: {legs}\n"
+        (tree / ".coverage-floor").write_text(
+            FLOOR.replace("80.0\n", f"{record}80.0\n"), encoding="utf-8"
+        )
         tracked.append(".coverage-floor")
 
     env = hermetic.env()
@@ -378,13 +376,17 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
         "STUB_TASK": str(task_json),
         "STUB_TS": ts,
         "STUB_TS_BR": ts_branches,
+        "STUB_VITEST_LOG": str(tmp / "vitest.log"),
     }
-    env |= captured_env(captured_test, tree)
     env |= reports_env(tmp, reports_dir=reports_dir)
     env["ORG_COVERAGE_RUN"] = str(tmp / "run")
     if measured:
-        plant_run(tmp / "run", python=python_measured)
+        planted_ts = (ts, ts_branches) if typescript == "vitest" else None
+        plant_run(tmp / "run", python=python_measured, typescript=planted_ts)
     init_tree(tree, env, tracked, commit=commit)
+    tested = run_test_step(tree, env, stubs, test_run) if run_test else None
+    if tested is not None and tested.returncode != 0:
+        return tested, tmp
     as_mise = hermetic.task_run(task, measuring_step(task))
     done = subprocess.run(
         as_mise.argv,
@@ -394,34 +396,56 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
         text=True,
         check=False,
     )
-    return done, tmp
+    return joined(tested, done), tmp
 
 
-class VitestPlant(TypedDict, total=False):
-    """`run_task`'s keyword parameters but the three `refused` sets."""
+def joined(
+    tested: subprocess.CompletedProcess[str] | None,
+    done: subprocess.CompletedProcess[str],
+) -> subprocess.CompletedProcess[str]:
+    """Join a test step's output to the coverage task's, the test's first.
+
+    Returns:
+        The coverage task's process, its output joined.
+
+    """
+    if tested is not None:
+        done.stdout = tested.stdout + done.stdout
+        done.stderr = tested.stderr + done.stderr
+    return done
+
+
+def vitest_runs(tree: Path) -> list[str]:
+    """Read the stub vitest's count of its own runs, beside the row's tree.
+
+    Returns:
+        Each run's arguments, one entry per run.
+
+    """
+    log = tree.parent / "vitest.log"
+    return log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+
+
+class Plant(TypedDict, total=False):
+    """The facts a row may plant: every `run_task` keyword parameter."""
 
     py: str
     branches: str
     go: str | None
     floor: bool
     test_task: bool
+    python: bool
+    typescript: str | None
     ts: str
     ts_branches: str
-    depends: dict[str, str] | None
+    test_run: str | None
     go_profile: bool
-    captured_test: str | None
     reports_dir: bool | str
     commit: bool
     measured: bool
     python_measured: bool
-
-
-class Plant(VitestPlant, total=False):
-    """The facts a row may plant: every `run_task` keyword parameter."""
-
-    python: bool
-    typescript: str | None
-    test_run: str | None
+    legs: str | None
+    run_test: bool
 
 
 class CoverageTaskCase(unittest.TestCase):
