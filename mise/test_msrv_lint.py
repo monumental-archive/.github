@@ -49,6 +49,7 @@ CARGO_STUB = r"""#!/usr/bin/env bash
 line="cargo $*"
 [[ -z ${BINDGEN_EXTRA_CLANG_ARGS:-} ]] || line="${line} [${BINDGEN_EXTRA_CLANG_ARGS}]"
 [[ -z ${RUSTUP_TOOLCHAIN:-} ]] || line="${line} {${RUSTUP_TOOLCHAIN}}"
+[[ -z ${RUSTFLAGS+set} ]] || line="${line} (${RUSTFLAGS})"
 printf '%s\n' "${line}" >> "${PLANT_LOG}"
 [[ ${PLANT_FAIL:-} != "cargo-$1" ]] || exit 101
 [[ $1 != metadata ]] || echo '{"planted": true}'
@@ -97,6 +98,12 @@ ROOT = "--manifest-path Cargo.toml"
 FETCH = f"cargo fetch --locked {ROOT}"
 METADATA = f"cargo metadata --format-version 1 --locked {ROOT} --all-features"
 PINS = "mise ls rust --json"
+# A root crate, and a crate under fuzz/ carrying the marker
+# `cargo fuzz init` writes: compiled with `--cfg fuzzing`, as cargo-fuzz
+# builds it (#2093).
+WORKSPACE = "[workspace]\n"
+MARKED = '[package]\nname = "parse"\n\n[package.metadata]\ncargo-fuzz = true\n'
+TWO_ROOTS = ("Cargo.toml", "fuzz/Cargo.toml")
 # Nothing printed, or nothing called, typed for the comparison.
 NONE: list[str] = []
 
@@ -172,6 +179,10 @@ class Planted(unittest.TestCase):
         )
         self.log = self.tmp / "log"
         self.log.touch()
+        # The tree each root's manifest is read from: the root's, and an
+        # unmarked one under fuzz/ unless a row plants the marker.
+        self.tree = self.tmp / "repo"
+        self.manifests(WORKSPACE)
         self.surface = self.tmp / "surface"
         self.plan = self.tmp / "plan"
         self.plant(PLAIN, CHECK)
@@ -187,6 +198,12 @@ class Planted(unittest.TestCase):
             "PLANT_SURFACE": str(self.surface),
             "PLANT_PLAN": str(self.plan),
         }
+
+    def manifests(self, fuzz: str) -> None:
+        """Write the tree's root manifest and fuzz/Cargo.toml."""
+        (self.tree / "fuzz").mkdir(parents=True, exist_ok=True)
+        (self.tree / "Cargo.toml").write_text(WORKSPACE, encoding="utf-8")
+        (self.tree / "fuzz" / "Cargo.toml").write_text(fuzz, encoding="utf-8")
 
     def plant(self, surface: str, plan: str) -> None:
         """Write the surface gate_surface.py answers and the plan msrv_plan.py does."""
@@ -218,6 +235,7 @@ class Planted(unittest.TestCase):
                 "resolved",
                 return_value=None if roots is None else list(roots),
             ),
+            contextlib.chdir(self.tree),
             captured(out, err),
         ):
             if manifest is None:
@@ -480,6 +498,65 @@ class Roots(Planted):
         status, said, _ = self.call(roots=None)
         self.assertEqual((1, NONE), (status, said))
         self.assertEqual(NONE, self.logged())
+
+
+class Fuzzing(Planted):
+    """A cargo-fuzz root is compiled as cargo-fuzz builds it (#2093)."""
+
+    def compiles(self) -> list[str]:
+        """Read the log's `cargo check` lines.
+
+        Returns:
+            One per compile, the root's first.
+
+        """
+        return [line for line in self.logged() if line.startswith("cargo check")]
+
+    @staticmethod
+    def compile_at(root: str, flags: str | None) -> str:
+        """Write the log line of one compile at the plan's check.
+
+        Returns:
+            The line, with RUSTFLAGS in parentheses when it was set.
+
+        """
+        at = f"--manifest-path {root} --all-features -p plain@0.1.0 -p other@0.1.0"
+        line = f"cargo check --locked {at} {{1.85.0}}"
+        return line if flags is None else f"{line} ({flags})"
+
+    def test_a_marked_root_is_compiled_with_cfg_fuzzing(self) -> None:
+        """The marker: its compile has the cfg, the root's has no RUSTFLAGS."""
+        self.manifests(MARKED)
+        status, _, _ = self.call(roots=TWO_ROOTS)
+        self.assertEqual(0, status)
+        want = [
+            self.compile_at("Cargo.toml", None),
+            self.compile_at("fuzz/Cargo.toml", "--cfg fuzzing"),
+        ]
+        self.assertEqual(want, self.compiles())
+        self.assertNotIn("RUSTFLAGS", os.environ)
+
+    def test_a_fuzz_directory_without_the_marker_gets_no_cfg(self) -> None:
+        """fuzz/Cargo.toml with no marker: neither compile has RUSTFLAGS."""
+        status, _, _ = self.call(roots=TWO_ROOTS)
+        self.assertEqual(0, status)
+        want = [
+            self.compile_at("Cargo.toml", None),
+            self.compile_at("fuzz/Cargo.toml", None),
+        ]
+        self.assertEqual(want, self.compiles())
+
+    def test_a_marked_root_keeps_the_rustflags_it_had(self) -> None:
+        """RUSTFLAGS=-Dwarnings set: the marked root's has the cfg appended."""
+        self.manifests(MARKED)
+        self.env["RUSTFLAGS"] = "-Dwarnings"
+        status, _, _ = self.call(roots=TWO_ROOTS)
+        self.assertEqual(0, status)
+        want = [
+            self.compile_at("Cargo.toml", "-Dwarnings"),
+            self.compile_at("fuzz/Cargo.toml", "-Dwarnings --cfg fuzzing"),
+        ]
+        self.assertEqual(want, self.compiles())
 
 
 class Helpers(unittest.TestCase):

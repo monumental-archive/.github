@@ -137,6 +137,9 @@ class TwoExtensions(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.tmp)
         self.tree = self.tmp / "tree"
         self.tree.mkdir()
+        # The manifest the stub git tracks, read for the cargo-fuzz
+        # marker (#2093): a plain workspace, so no root gets the cfg.
+        (self.tree / "Cargo.toml").write_text("[workspace]\n", encoding="utf-8")
         bins = self.tmp / "bin"
         bins.mkdir()
         for name, text in {
