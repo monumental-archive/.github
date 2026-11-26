@@ -15,6 +15,11 @@
 # search cannot find is red, naming it. Every step is checked where it
 # is taken, as the libraries' are: a failing target is named and the
 # run goes on to the next, so one crash never hides another's finds.
+# Each crash staged is a finding of its own, naming its input and
+# quoting what the log says crashed (#2120); the closing finding names
+# only the targets that failed with no crash staged. The merge and the
+# measurement write to files beside the target's log, printing their
+# last 40 lines only when they fail: they print per corpus file.
 set -uo pipefail
 
 # The writer beside this file, found with no command run (#1934).
@@ -30,6 +35,7 @@ org_task "audit:fuzz"
 # (completion-guarded, #1233).
 work=""
 failed=""
+crashed=0
 cleanup() {
   [[ -z ${work} ]] || rm -rf -- "${work}"
 }
@@ -135,22 +141,31 @@ while IFS= read -r target; do
   echo "audit:fuzz: ${target} for ${secs}s under AddressSanitizer (${FUZZ_TOOLCHAIN})"
   # finds/ first: libFuzzer writes what it finds into the first
   # directory. Each line is stamped with its second, for the summary.
+  ran=ok
   RUSTUP_TOOLCHAIN="${FUZZ_TOOLCHAIN}" cargo fuzz run -s address --careful "${target}" \
     "${finds}" "${base}" -- -max_total_time="${secs}" 2>&1 | org_fuzz_stamp | tee "${log}" \
-    || failed="${failed} ${target}"
+    || ran=""
   # Every crash libFuzzer wrote this run is staged into the corpus, so
-  # the gate's replay is red on the pull request until it is fixed.
+  # the gate's replay is red on the pull request until it is fixed, and
+  # each is a finding of its own (#2120).
   crashes=0
   list_dir "${artifacts}" || exit 1
   while IFS= read -r name; do
     [[ ${name} =~ ^(crash|timeout|oom)- ]] || continue
     [[ $'\n'${before}$'\n' != *$'\n'${name}$'\n'* ]] || continue
-    if org_fuzz_stage "${artifacts}/${name}" "fuzz/corpus/${target}/${name}"; then
+    staged="fuzz/corpus/${target}/${name}"
+    if org_fuzz_stage "${artifacts}/${name}" "${staged}"; then
       crashes=$((crashes + 1))
+      org_fuzz_crash rust "${log}" "${staged}" "${target} crashed; its input is staged at\
+ ${staged} for repo-deep-tests.yml to propose; replay it with:\
+ cargo fuzz run ${target} ${artifacts}/${name}" || exit 1
     else
       failed="${failed} ${target}(stage)"
     fi
   done <<< "${listing}"
+  crashed=$((crashed + crashes))
+  # A failed search that staged no crash is named by the closing finding.
+  [[ -n ${ran} || ${crashes} -gt 0 ]] || failed="${failed} ${target}"
   # The candidates: what libFuzzer's merge adds to the corpus from the
   # finds, with the same flags. `cargo fuzz cmin` is never used: it
   # deletes and renames tracked seeds.
@@ -158,8 +173,8 @@ while IFS= read -r target; do
     failed="${failed} ${target}(merge)"
     continue
   fi
-  if ! RUSTUP_TOOLCHAIN="${FUZZ_TOOLCHAIN}" cargo fuzz run -s address --careful "${target}" \
-    "${base}" "${finds}" -- -merge=1 >&2; then
+  if ! RUSTUP_TOOLCHAIN="${FUZZ_TOOLCHAIN}" org_fuzz_logged "${log}.merge" . \
+    cargo fuzz run -s address --careful "${target}" "${base}" "${finds}" -- -merge=1; then
     org_finding "" "${target}: libFuzzer's merge of the finds failed (above)"
     failed="${failed} ${target}(merge)"
     continue
@@ -170,6 +185,9 @@ while IFS= read -r target; do
     [[ -z ${name} || -e ${measured}/${name} ]] || candidates+=("${base}/${name}")
   done <<< "${listing}"
   leg=$(org_fuzz_leg_name "${target}") || exit 1
+  # Read by org_fuzz_measure (fuzz-measure-lib.sh): each replay's output.
+  # shellcheck disable=SC2034
+  org_fuzz_measure_log="${log}.measure"
   if ! kept=$(org_fuzz_select audit:fuzz "${leg}" "${measured}" "fuzz/corpus/${target}" \
     rust "${target}" "${measured}" -- ${candidates[@]+"${candidates[@]}"}); then
     failed="${failed} ${target}(measure)"
@@ -184,9 +202,10 @@ done <<< "${targets}"
 [[ -n ${ORG_FUZZ_CANDIDATES:-} ]] || echo "audit:fuzz: staged under ${org_fuzz_stage}"
 if [[ -n ${failed} ]]; then
   org_finding "" "failing target(s):${failed}" \
-    "a crash's input is staged at fuzz/corpus/<target>/crash-<hash> for repo-deep-tests.yml" \
-    "to propose; replay it with: cargo fuzz run <target> fuzz/artifacts/<target>/crash-<hash>"
+    "each failed with no crash staged; the output above says why"
   exit 1
 fi
+# Each crash is its own finding, above.
+[[ ${crashed} -eq 0 ]] || exit 1
 echo "audit:fuzz: all targets ran ${secs}s clean under ASan"
 org_done=1

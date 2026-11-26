@@ -88,6 +88,8 @@ case "$1 ${2:-}" in
   "fuzz run")
     target=$6 first=$7 second=$8
     if [[ " $* " == *" -merge=1 "* ]]; then
+      for ((i = 1; i <= ${STUB_MERGE_LINES:-0}; i++)); do echo "merge line ${i}"; done
+      [[ -z ${STUB_MERGE_FAIL:-} ]] || exit 1
       for f in "${second}"/*; do
         [[ -f ${f} && ! -e ${first}/${f##*/} ]] || continue
         cp "${f}" "${first}/"
@@ -100,13 +102,21 @@ case "$1 ${2:-}" in
     echo "#9\tNEW    cov: 12 ft: 12 corp: 2/2b"
     if [[ -n ${STUB_CRASH:-} ]]; then
       mkdir -p "fuzz/artifacts/${target}"
-      echo boom > "fuzz/artifacts/${target}/crash-0badc0de"
-      echo "==1==ERROR: AddressSanitizer: heap-buffer-overflow"
+      for name in ${STUB_CRASH}; do
+        echo boom > "fuzz/artifacts/${target}/${name}"
+      done
+      echo "thread '<unnamed>' panicked at src/lib.rs:7:3:"
+      echo "range forms disagree"
+      echo "==1== ERROR: libFuzzer: deadly signal"
+      echo "SUMMARY: libFuzzer: deadly signal"
+      echo "MS: 1 ChangeByte-; base unit: 0"
       exit 77
     fi
     ;;
   "fuzz coverage")
     target=$7 corpus=$8
+    for ((i = 1; i <= ${STUB_MEASURE_LINES:-0}; i++)); do echo "replay line ${i}"; done
+    [[ -z ${STUB_MEASURE_FAIL:-} ]] || exit 1
     mkdir -p "fuzz/coverage/${target}"
     echo "${corpus}" > "fuzz/coverage/${target}/coverage.profdata"
     ;;
@@ -131,9 +141,11 @@ printf '{"data": [{"totals": {"lines": {"count": 100, "covered": %s}}}]}\\n' \\
 # in (default internal/policy), imported as STUB_GO_IMPORT. Each call is
 # also logged with the directory it ran in, to go-dir.log. `test -fuzz`
 # writes the planted finds into the fuzz cache and prints the planted
-# log; with STUB_GO_CRASH the plain pass writes a failing input among
-# the seeds and fails. The measurement reads the seeds, and refuses a
-# failing input among them, as the real replay would.
+# log; with STUB_GO_CRASH (the names, space-separated) the plain pass
+# writes each as a failing input among the seeds, prints Go's failure
+# lines and fails. The measurement reads the seeds, and refuses a
+# failing input among them, as the real replay would; it prints
+# STUB_MEASURE_LINES lines first, and fails with STUB_MEASURE_FAIL.
 GO = """\
 #!/usr/bin/env bash
 echo "$*" >> "${STUB_DIR}/go.log"
@@ -161,13 +173,22 @@ case "$1 ${2:-}" in
     echo "fuzz: elapsed: 6s, execs: 200 (33/sec), new interesting: 1 (total: 2)"
     if [[ -n ${STUB_GO_CRASH:-} && $2 == -fuzz ]]; then
       mkdir -p "${seeds}"
-      echo 'go test fuzz v1' > "${seeds}/feedface"
-      echo "Failing input written to testdata/fuzz/FuzzLoad/feedface"
+      echo "--- FAIL: FuzzLoad (0.02s)"
+      echo "    --- FAIL: FuzzLoad (0.00s)"
+      echo "        load_test.go:7: range forms disagree"
+      for name in ${STUB_GO_CRASH}; do
+        echo 'go test fuzz v1' > "${seeds}/${name}"
+        echo "    Failing input written to testdata/fuzz/FuzzLoad/${name}"
+      done
+      echo "FAIL"
+      echo "exit status 1"
       exit 1
     fi
     ;;
   "test -count=1")
-    [[ ! -e ${seeds}/feedface ]] || exit 1
+    for ((i = 1; i <= ${STUB_MEASURE_LINES:-0}; i++)); do echo "replay line ${i}"; done
+    [[ -z ${STUB_MEASURE_FAIL:-} ]] || exit 1
+    for name in ${STUB_GO_CRASH:-}; do [[ ! -e ${seeds}/${name} ]] || exit 1; done
     n=$(grep -l '^raise' "${seeds}"/* 2> /dev/null | wc -l | tr -d ' ')
     echo "$((10 + n))" > "${out}"
     ;;
@@ -199,6 +220,27 @@ SEEDS = "internal/policy/testdata/fuzz/FuzzLoad"
 def same(case: unittest.TestCase, want: list[str], got: list[str]) -> None:
     """Assert two lists of strings are equal, typed so a literal is too."""
     case.assertEqual(want, got)
+
+
+def subject(record: dict[str, object]) -> str:
+    """Read a finding's subject.
+
+    Returns:
+        The subject.
+
+    """
+    return decoded.as_str(record["subject"], "subject")
+
+
+def detail(record: dict[str, object]) -> list[str]:
+    """Read a finding's detail lines.
+
+    Returns:
+        The lines.
+
+    """
+    lines = decoded.as_array(record["detail"], "detail")
+    return [decoded.as_str(line, "a detail line") for line in lines]
 
 
 def task_body(name: str) -> str:
@@ -379,6 +421,32 @@ class SearchCase(unittest.TestCase):
         path = self.tmp / f"{tool}.log"
         return path.read_text(encoding="utf-8").splitlines() if path.exists() else []
 
+    def recorded(self) -> list[dict[str, object]]:
+        """Read the findings the run recorded, in order.
+
+        Returns:
+            Each record; none when nothing was recorded.
+
+        """
+        path = self.tmp / "findings.jsonl"
+        if not path.exists():
+            return []
+        return [
+            decoded.as_object(decoded.load_json(line), "a finding")
+            for line in path.read_text(encoding="utf-8").splitlines()
+        ]
+
+    def crashes(self, task: str) -> list[dict[str, object]]:
+        """Run `task`, recording its findings, and keep its crash findings.
+
+        Returns:
+            The findings whose subject is a staged crash- path.
+
+        """
+        self.env["ORG_FINDINGS"] = str(self.tmp / "findings.jsonl")
+        self.result = self.run_task(task)
+        return [r for r in self.recorded() if "/crash-" in subject(r)]
+
 
 class RustSearch(SearchCase):
     """audit:fuzz keeps the finds that raise the figure, and every crash."""
@@ -427,11 +495,15 @@ class RustSearch(SearchCase):
     def test_a_crash_is_staged_into_the_corpus_and_the_run_is_red(self) -> None:
         """A crash- file libFuzzer wrote is staged in fuzz/corpus/<target>/."""
         self.rust()
-        self.env["STUB_CRASH"] = "1"
+        self.env["STUB_CRASH"] = "crash-0badc0de"
         result = self.run_task("audit:fuzz")
         self.assertEqual(1, result.returncode, result.stdout)
         same(self, ["fuzz/corpus/parse_marker/crash-0badc0de"], self.staged())
-        self.assertIn("audit:fuzz: failing target(s): parse_marker", result.stderr)
+        self.assertIn(
+            "audit:fuzz: fuzz/corpus/parse_marker/crash-0badc0de: parse_marker crashed",
+            result.stderr,
+        )
+        self.assertNotIn("failing target(s)", result.stderr)
         self.assertIn("1 crash(es)", result.stdout)
 
     def test_a_proposal_feeds_the_base_but_its_crash_does_not(self) -> None:
@@ -482,19 +554,237 @@ class GoSearch(SearchCase):
     def test_a_failing_input_is_staged_renamed_crash(self) -> None:
         """Go's failing input is staged as crash-<name> and the run is red."""
         self.go()
-        self.env["STUB_GO_CRASH"] = "1"
+        self.env["STUB_GO_CRASH"] = "feedface"
         status = self.git("status", "--porcelain", "--untracked-files=all")
         result = self.run_task("audit:go-fuzz")
         self.assertEqual(1, result.returncode, result.stdout)
         same(self, [f"{SEEDS}/crash-feedface"], self.staged())
         self.assertIn(
-            "audit:go-fuzz: failing target(s):"
-            " example.com/x/internal/policy.FuzzLoad(plain)",
+            f"audit:go-fuzz: {SEEDS}/crash-feedface: FuzzLoad in"
+            " example.com/x/internal/policy failed;",
             result.stderr,
         )
+        self.assertNotIn("failing target(s)", result.stderr)
         # Moved out of the tree, where it would fail the measurement.
         self.assertEqual(
             status, self.git("status", "--porcelain", "--untracked-files=all")
+        )
+
+
+class CrashFindings(SearchCase):
+    """Each crash is its own finding, saying what crashed (#2120)."""
+
+    def test_a_rust_crash_names_its_input_and_quotes_the_panic(self) -> None:
+        """The finding holds the target, the staged path and the panic.
+
+        Before #2120 the only finding was `failing target(s):` with a
+        placeholder path, so this row fails there.
+        """
+        self.rust()
+        self.env["STUB_CRASH"] = "crash-abc"
+        found = self.crashes("audit:fuzz")
+        self.assertEqual(1, self.result.returncode, self.result.stdout)
+        self.assertEqual(1, len(found), self.result.stderr)
+        crash = found[0]
+        self.assertEqual("fuzz/corpus/parse_marker/crash-abc", crash["subject"])
+        self.assertEqual(
+            "parse_marker crashed; its input is staged at"
+            " fuzz/corpus/parse_marker/crash-abc for repo-deep-tests.yml to propose;"
+            " replay it with: cargo fuzz run parse_marker"
+            " fuzz/artifacts/parse_marker/crash-abc",
+            crash["message"],
+        )
+        # Unstamped, from the panic to the SUMMARY line and no further.
+        same(
+            self,
+            [
+                "thread '<unnamed>' panicked at src/lib.rs:7:3:",
+                "range forms disagree",
+                "==1== ERROR: libFuzzer: deadly signal",
+                "SUMMARY: libFuzzer: deadly signal",
+            ],
+            detail(crash),
+        )
+        panic = "  thread '<unnamed>' panicked at src/lib.rs:7:3:"
+        self.assertIn(panic, self.result.stderr)
+        self.assertNotIn("failing target(s)", self.result.stderr)
+
+    def test_two_rust_crashes_are_two_findings(self) -> None:
+        """One finding per staged crash, each naming its own input."""
+        self.rust()
+        self.env["STUB_CRASH"] = "crash-abc crash-def"
+        found = self.crashes("audit:fuzz")
+        self.assertEqual(1, self.result.returncode, self.result.stdout)
+        same(
+            self,
+            [
+                "fuzz/corpus/parse_marker/crash-abc",
+                "fuzz/corpus/parse_marker/crash-def",
+            ],
+            sorted(subject(r) for r in found),
+        )
+
+    def test_two_go_crashes_are_two_findings_quoting_go(self) -> None:
+        """Each failing input is its own finding, with Go's failure lines."""
+        self.go()
+        self.env["STUB_GO_CRASH"] = "beefcafe feedface"
+        found = self.crashes("audit:go-fuzz")
+        self.assertEqual(1, self.result.returncode, self.result.stdout)
+        same(
+            self,
+            [f"{SEEDS}/crash-beefcafe", f"{SEEDS}/crash-feedface"],
+            sorted(subject(r) for r in found),
+        )
+        crash = next(r for r in found if r["subject"] == f"{SEEDS}/crash-feedface")
+        self.assertEqual(
+            "FuzzLoad in example.com/x/internal/policy failed; its input is staged"
+            f" at {SEEDS}/crash-feedface for repo-deep-tests.yml to propose;"
+            " replay it, once proposed, with: go test -run=FuzzLoad/crash-feedface"
+            " example.com/x/internal/policy",
+            crash["message"],
+        )
+        # Go's own lines, from `--- FAIL: ` to the package's `FAIL`.
+        same(
+            self,
+            [
+                "--- FAIL: FuzzLoad (0.02s)",
+                "    --- FAIL: FuzzLoad (0.00s)",
+                "        load_test.go:7: range forms disagree",
+                "    Failing input written to testdata/fuzz/FuzzLoad/beefcafe",
+                "    Failing input written to testdata/fuzz/FuzzLoad/feedface",
+                "FAIL",
+            ],
+            detail(crash),
+        )
+        self.assertNotIn("failing target(s)", self.result.stderr)
+
+
+class QuietSteps(SearchCase):
+    """The merge and the measurement print only when they fail (#2120)."""
+
+    def quiet(self, task: str, variable: str, prefix: str) -> None:
+        """Assert a step printing 1,000 lines and succeeding adds none."""
+        self.env[variable] = "1000"
+        result = self.run_task(task)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertNotIn(prefix, result.stdout + result.stderr)
+
+    def loud(self, task: str, variable: str, failing: str, prefix: str) -> str:
+        """Assert a step printing 1,000 lines and failing adds its last 40.
+
+        Returns:
+            The run's standard error.
+
+        """
+        self.env[variable] = "1000"
+        self.env[failing] = "1"
+        result = self.run_task(task)
+        self.assertEqual(1, result.returncode, result.stdout)
+        out = result.stdout + result.stderr
+        shown = [line for line in out.splitlines() if line.startswith(prefix)]
+        same(self, [f"{prefix}{i}" for i in range(961, 1001)], shown)
+        return result.stderr
+
+    def test_a_rust_merge_that_succeeds_prints_nothing(self) -> None:
+        """LibFuzzer's merge output stays in its file."""
+        self.rust()
+        self.quiet("audit:fuzz", "STUB_MERGE_LINES", "merge line ")
+
+    def test_a_rust_merge_that_fails_prints_its_last_40_lines(self) -> None:
+        """Its tail, then the finding naming the failure."""
+        self.rust()
+        err = self.loud(
+            "audit:fuzz", "STUB_MERGE_LINES", "STUB_MERGE_FAIL", "merge line "
+        )
+        named = "audit:fuzz: parse_marker: libFuzzer's merge of the finds failed"
+        self.assertIn(named, err)
+        self.assertLess(err.index("merge line 1000"), err.index(named))
+        self.assertIn("audit:fuzz: failing target(s): parse_marker(merge)", err)
+
+    def test_a_rust_measurement_that_succeeds_prints_nothing(self) -> None:
+        """Cargo fuzz coverage's output stays in its file."""
+        self.rust()
+        self.quiet("audit:fuzz", "STUB_MEASURE_LINES", "replay line ")
+
+    def test_a_rust_measurement_that_fails_prints_its_last_40_lines(self) -> None:
+        """Its tail, then the finding naming the failure."""
+        self.rust()
+        err = self.loud(
+            "audit:fuzz", "STUB_MEASURE_LINES", "STUB_MEASURE_FAIL", "replay line "
+        )
+        named = "cargo fuzz coverage failed"
+        self.assertLess(err.index("replay line 1000"), err.index(named))
+        self.assertIn("audit:fuzz: failing target(s): parse_marker(measure)", err)
+
+    def test_a_go_measurement_that_succeeds_prints_nothing(self) -> None:
+        """Go test -coverprofile's output stays in its file."""
+        self.go()
+        self.quiet("audit:go-fuzz", "STUB_MEASURE_LINES", "replay line ")
+
+    def test_a_go_measurement_that_fails_prints_its_last_40_lines(self) -> None:
+        """Its tail, then the finding naming the failure."""
+        self.go()
+        err = self.loud(
+            "audit:go-fuzz", "STUB_MEASURE_LINES", "STUB_MEASURE_FAIL", "replay line "
+        )
+        named = "failed under measurement"
+        self.assertLess(err.index("replay line 1000"), err.index(named))
+        self.assertIn(
+            "audit:go-fuzz: failing target(s):"
+            " example.com/x/internal/policy.FuzzLoad(measure)",
+            err,
+        )
+
+
+class FailureLines(unittest.TestCase):
+    """What a crash's finding quotes from the log (#2120)."""
+
+    def lines(self, kind: str, log: str) -> str:
+        """Run org_fuzz_failure_lines over a planted log.
+
+        Returns:
+            What it printed.
+
+        """
+        with tempfile.NamedTemporaryFile(
+            "w", encoding="utf-8", suffix=".log", delete=False
+        ) as f:
+            f.write(log)
+        self.addCleanup(os.unlink, f.name)
+        return lib('org_fuzz_failure_lines "$1" "$2"', kind, f.name)
+
+    def test_at_most_40_lines_are_quoted(self) -> None:
+        """A panic with no SUMMARY in reach is cut at 40 lines."""
+        log = "1 #2 NEW\n2 thread 'x' panicked at a.rs:1:1:\n"
+        log += "".join(f"3 frame {i}\n" for i in range(100))
+        quoted = self.lines("rust", log).splitlines()
+        self.assertEqual(40, len(quoted))
+        self.assertEqual("thread 'x' panicked at a.rs:1:1:", quoted[0])
+
+    def test_a_log_with_no_crash_line_quotes_nothing(self) -> None:
+        """No `panicked at`, `ERROR: ` or `--- FAIL: `: nothing."""
+        self.assertEqual("", self.lines("rust", "1 #2 NEW cov: 1\n2 Done\n"))
+        self.assertEqual("", self.lines("go", "fuzz: elapsed: 3s\nok\n"))
+
+    def test_a_crash_with_no_crash_line_says_so(self) -> None:
+        """The finding's detail names what the log lacked."""
+        with tempfile.NamedTemporaryFile(
+            "w", encoding="utf-8", suffix=".log", delete=False
+        ) as f:
+            f.write("1 #2 NEW cov: 1\n")
+        self.addCleanup(os.unlink, f.name)
+        script = f'. "{SEARCH_LIB}"; org_fuzz_crash rust "$1" s m'
+        err = subprocess.run(
+            [BASH, "-c", script, "lib", f.name],
+            capture_output=True,
+            text=True,
+            check=True,
+            env=hermetic.env() | {"ORG_FINDINGS": "", "MISE_TASK_NAME": "audit:fuzz"},
+        ).stderr
+        self.assertEqual(
+            "audit:fuzz: s: m\n  the run's log holds no line saying what crashed"
+            " (no 'panicked at' or 'ERROR: ' line)\n",
+            err,
         )
 
 

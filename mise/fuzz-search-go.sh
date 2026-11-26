@@ -17,6 +17,11 @@
 # search cannot find is red, naming it. Every step is checked where it
 # is taken, as the libraries' are: a failing target is named and the
 # run goes on to the next, so one crash never hides another's finds.
+# Each failing input staged is a finding of its own, naming it and
+# quoting Go's own failure lines (#2120); the closing finding names
+# only the passes that failed with no input staged. The measurement
+# writes to a file beside the target's logs, printing its last 40
+# lines only when it fails: it prints per seed.
 set -uo pipefail
 
 # The writer beside this file, found with no command run (#1934).
@@ -32,6 +37,7 @@ org_task "audit:go-fuzz"
 # however the run ends (completion-guarded, #1233).
 work=""
 failed=""
+crashed=0
 ran=0
 placed=()
 cleanup() {
@@ -132,25 +138,40 @@ for m in "${mods[@]}"; do
         failed="${failed} ${pkg}.${target}(cache)"
         continue
       fi
+      passes=""
       echo "audit:go-fuzz: ${target} in ${pkg} for ${half}s, plain"
       (cd "${d}" && go test -fuzz "^${target}\$" -fuzztime "${half}s" "${pkg}") 2>&1 \
-        | tee "${log}.plain" || failed="${failed} ${pkg}.${target}(plain)"
+        | tee "${log}.plain" || passes="${passes} ${pkg}.${target}(plain)"
       echo "audit:go-fuzz: ${target} in ${pkg} for ${half}s, race detector on"
       (cd "${d}" && CGO_ENABLED=1 go test -race -fuzz "^${target}\$" -fuzztime "${half}s" "${pkg}") 2>&1 \
-        | tee "${log}.race" || failed="${failed} ${pkg}.${target}(race)"
+        | tee "${log}.race" || passes="${passes} ${pkg}.${target}(race)"
       # A failing input Go wrote among the seeds: staged as crash-<name>
-      # and moved out of the tree, where it would fail the measurement.
+      # and moved out of the tree, where it would fail the measurement;
+      # each is a finding of its own, quoting the pass that wrote it
+      # (#2120).
       crashes=0
       others=$(git ls-files -o -- "${seeds}/") || exit 1
       while IFS= read -r file; do
         [[ -n ${file} && $'\n'${untracked}$'\n' != *$'\n'${file}$'\n'* ]] || continue
         [[ " ${placed[*]-} " != *" ${file} "* ]] || continue
-        if org_fuzz_stage "${file}" "${seeds}/crash-${file##*/}" && rm -f -- "${file}"; then
+        name=${file##*/}
+        staged="${seeds}/crash-${name}"
+        if org_fuzz_stage "${file}" "${staged}" && rm -f -- "${file}"; then
           crashes=$((crashes + 1))
+          wrote="${log}.plain"
+          grep -qF -- "${name}" "${wrote}" || wrote="${log}.race"
+          in=""
+          [[ ${d} == . ]] || in=" (from ${d})"
+          org_fuzz_crash go "${wrote}" "${staged}" "${target} in ${pkg} failed; its input is\
+ staged at ${staged} for repo-deep-tests.yml to propose; replay it, once proposed,\
+ with: go test -run=${target}/crash-${name} ${pkg}${in}" || exit 1
         else
           failed="${failed} ${pkg}.${target}(stage)"
         fi
       done <<< "${others}"
+      crashed=$((crashed + crashes))
+      # A failed pass that staged no input is named by the closing finding.
+      [[ ${crashes} -gt 0 ]] || failed="${failed}${passes}"
       cache=$(cd "${d}" && go env GOCACHE) || exit 1
       cache="${cache}/fuzz/${pkg}/${target}"
       candidates=()
@@ -168,6 +189,9 @@ for m in "${mods[@]}"; do
       else
         leg=$(org_fuzz_leg_name "${rel}-${target#Fuzz}") || exit 1
       fi
+      # Read by org_fuzz_measure (fuzz-measure-lib.sh): each replay's output.
+      # shellcheck disable=SC2034
+      org_fuzz_measure_log="${log}.measure"
       if ! kept=$(org_fuzz_select audit:go-fuzz "${leg}" "${seeds}" "${seeds}" \
         go "${rel}" "${target}" -- ${candidates[@]+"${candidates[@]}"}); then
         failed="${failed} ${pkg}.${target}(measure)"
@@ -192,9 +216,10 @@ done
 [[ -n ${ORG_FUZZ_CANDIDATES:-} ]] || echo "audit:go-fuzz: staged under ${org_fuzz_stage}"
 if [[ -n ${failed} ]]; then
   org_finding "" "failing target(s):${failed}" \
-    "a failing input is staged as testdata/fuzz/<Target>/crash-<name> for repo-deep-tests.yml" \
-    "to propose; its original name is in the output above"
+    "each failed with no input staged; the output above says why"
   exit 1
 fi
+# Each failing input is its own finding, above.
+[[ ${crashed} -eq 0 ]] || exit 1
 echo "audit:go-fuzz: ${ran} target(s) ran ${half}s plain and ${half}s raced, clean"
 org_done=1
