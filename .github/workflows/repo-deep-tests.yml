@@ -64,8 +64,8 @@ jobs:
   # skipped. A job of its own because `hashFiles` is step-only
   # (repo-mutants.yml's `adoption`); mise/test_audit_legs.py holds the
   # table and the `if:`s to the tasks' own guards. `fuzz-targets` is the
-  # fuzz job's matrix (#1899): the targets the coverage floor measures
-  # (#1896), and `fuzz` is false where there are none.
+  # fuzz job's matrix (#1899): every fuzz target the tree declares, and
+  # `fuzz` is false where there are none.
   applies:
     name: which jobs apply
     runs-on: ubuntu-26.04

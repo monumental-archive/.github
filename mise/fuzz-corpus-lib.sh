@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # The committed corpus of one cargo-fuzz target, as the belt reads it
-# (#1889, #1896). Sourced, never run: lint:fuzz-build's replay
-# (fuzz-corpus.sh) and the coverage floor's fuzz leg
-# (coverage-measure.sh) both copy through it, so the corpus the gate
-# replays and the corpus whose depth it measures cannot differ.
+# (#1889). Sourced, never run: lint:fuzz-build's replay
+# (fuzz-corpus.sh) and the nightly search (fuzz-search-rust.sh) both
+# copy through it, so the corpus the gate replays and the corpus the
+# search starts from cannot differ.
 #
 # org_fuzz_corpus_copy <target> <dest>
 #

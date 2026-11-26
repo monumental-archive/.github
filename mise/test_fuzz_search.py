@@ -274,6 +274,10 @@ def lib(script: str, *args: str) -> str:
     ).stdout
 
 
+# What a row expects when a stand-in was never called.
+NO_CALLS: list[str] = []
+
+
 class SearchCase(unittest.TestCase):
     """A planted repository, the stand-in tools and a stage, per row."""
 
@@ -492,6 +496,26 @@ class RustSearch(SearchCase):
         same(self, [], self.staged())
         self.assertIn("corpus 10% to 10%, 0 input(s) kept, 0 crash(es)", result.stdout)
 
+    def test_each_target_prints_its_figure_once(self) -> None:
+        """`<leg>: corpus reaches <percent>% of the lines it links` (#2090).
+
+        Information only: the run is green whatever the figure.
+        """
+        self.rust_two()
+        result = self.run_task("audit:fuzz")
+        self.assertEqual(0, result.returncode, result.stderr)
+        printed = [
+            line for line in result.stderr.splitlines() if "corpus reaches" in line
+        ]
+        same(
+            self,
+            [
+                "fuzz-parse-marker: corpus reaches 10% of the lines it links",
+                "fuzz-parse-date: corpus reaches 10% of the lines it links",
+            ],
+            printed,
+        )
+
     def test_a_crash_is_staged_into_the_corpus_and_the_run_is_red(self) -> None:
         """A crash- file libFuzzer wrote is staged in fuzz/corpus/<target>/."""
         self.rust()
@@ -523,6 +547,44 @@ class RustSearch(SearchCase):
         # Measured against what is already proposed: 10% plus `proposed`.
         self.assertIn("corpus 11% to 11%", result.stdout)
         same(self, [], self.staged())
+
+
+class MeasureNeedsItsLog(SearchCase):
+    """org_fuzz_measure refuses an unset org_fuzz_measure_log (#2090)."""
+
+    def test_an_unset_log_is_refused_before_any_tool_runs(self) -> None:
+        """No log, no measurement: red, the variable named, no cargo or go.
+
+        Before #2090's ruling an unset log sent the replay to stderr.
+        """
+        self.rust()
+        self.go()
+        measure = BELT / "fuzz-measure-lib.sh"
+        for kind, where, name in (
+            ("rust", "parse_marker", "fuzz/corpus/parse_marker"),
+            ("go", "internal/policy", "FuzzLoad"),
+        ):
+            script = (
+                f'. "{measure}"; unset org_fuzz_measure_log; '
+                f"org_fuzz_measure audit:fuzz fuzz-x {kind} {where} {name}"
+            )
+            done = subprocess.run(
+                [BASH, "-c", script],
+                cwd=self.tree,
+                env=self.env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            with self.subTest(kind):
+                self.assertEqual(1, done.returncode, done.stdout)
+                self.assertIn(
+                    "fuzz-x: org_fuzz_measure_log is unset — the search sets it to"
+                    " the replay's log file before it measures",
+                    done.stderr,
+                )
+                self.assertEqual("", done.stdout)
+                self.assertEqual(NO_CALLS, self.log("cargo") + self.log("go"))
 
 
 class GoSearch(SearchCase):

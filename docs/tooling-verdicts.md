@@ -3846,6 +3846,30 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
   is not re-proposed: stdlib `trace` (no Codecov format, an order of
   magnitude slower, no branch coverage), and waiting for a bash tool
   before measuring anything.
+  **Amended 2026-11-26 (#2090): fuzz targets leave the floor.** #1896
+  made every fuzz target a leg of `.coverage-floor`: the line coverage
+  of replaying its committed corpus, held in the gate. The figure's
+  denominator is every tracked line the target links, most of which it
+  can never call, and nothing the belt builds can tell the two apart
+  (probed on cargo 1.97.1, cargo-fuzz 0.13.2: `cargo fuzz coverage` and
+  `cargo fuzz build` both keep a function nothing calls). So the figure
+  moved with the crate, not the corpus. Measured in edtf on 2026-11-23:
+  constructors and accessors a parser cannot reach took `fuzz-parse`
+  from 58.0 to 54.2 against a floor of 56.0, red, while the parser's own
+  file moved 98.4 to 97.7; a test-only module compiled under
+  `cfg(fuzzing)` dropped two targets below their floors, re-set by hand.
+  A fuzz line had no reset form, so the only route was deleting it and
+  adopting again, which records nothing. The gate now measures no fuzz
+  target and the floor holds no fuzz line; one left in a floor file is
+  refused by name. `lint:fuzz-build` still builds every target and
+  replays its corpus. Depth is the nightly search's (#1897): it compares
+  two measurements of one commit, so the denominator cancels, proposes
+  every input that reaches new code, and prints each target's figure as
+  information. Rejected, so it is not re-proposed: a `reset:` form for
+  fuzz lines, counting only reached functions or files (rot drops from
+  both sides and goes unseen), the linker's reachable set (probed: it
+  keeps unreachable functions), a second instrumented build against the
+  base commit in the gate, and documenting delete-and-adopt.
 - **TypeScript coverage (#1357)** — measured with the runner the
   repository already has, never a tool the belt pins. The `typescript`
   leg of `mise/coverage-measure.sh` applies where a tracked root
