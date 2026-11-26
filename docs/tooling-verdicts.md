@@ -289,8 +289,8 @@ red. Measured 2026-11-23 on the three
 repositories' fuzz crates at this ladder: 6, 13 and 27 findings, 6 to
 14 s cold each.
 
-*A cargo-fuzz crate is built as cargo-fuzz builds it* (2026-11-26,
-#2093): a root whose manifest carries `[package.metadata] cargo-fuzz =
+*A cargo-fuzz crate is built as cargo-fuzz builds it* (#2093,
+2026-11-26): a root whose manifest carries `[package.metadata] cargo-fuzz =
 true` gets `--cfg fuzzing` appended to its `RUSTFLAGS` (or
 `CARGO_ENCODED_RUSTFLAGS`) in `lint:rust`, `fix:rust` and `lint:msrv`,
 so the targets a fuzzer runs are linted ungated; `lint:deny` reads the

@@ -49,7 +49,7 @@ import findings as writer
 import tracked
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping
+    from collections.abc import Generator, Mapping
 
 CARGO = shutil.which("cargo") or "cargo"
 GIT = shutil.which("git") or "git"
@@ -230,7 +230,7 @@ def rustflags(root: str, environ: Mapping[str, str]) -> dict[str, str]:
 
 
 @contextlib.contextmanager
-def built_as(root: str) -> Iterator[None]:
+def built_as(root: str) -> Generator[None]:
     """Hold one root's flags in this process's environment, then put it back.
 
     Every cargo call inside starts from `os.environ`, so the flags reach

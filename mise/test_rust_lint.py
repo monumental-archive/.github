@@ -432,7 +432,8 @@ STUB_CARGO = (
     LOCATE
     + """\
 printf 'cargo %s\\n' "$*" >> "${STUB_LOG}"
-[[ $1 != clippy ]] || printf '%s %s\\n' "${manifest}" "${RUSTFLAGS-unset}" >> "${STUB_LOG}.flags"
+flags="${manifest} ${RUSTFLAGS-unset}"
+[[ $1 != clippy ]] || printf '%s\\n' "${flags}" >> "${STUB_LOG}.flags"
 if [[ $1 == clippy ]]; then
   printf '%s' "${STUB_CLIPPY_OUT:-}"
   [[ $2 != --fix ]] || exit "${STUB_FIX_STATUS:-0}"
@@ -498,7 +499,8 @@ FIX_CARGO = (
     + """\
 marks="${STUB_PREPARED:-} ${STUB_MAJOR:-}"
 printf 'cargo %s [%s]\\n' "$*" "${marks}" >> "${STUB_LOG}"
-[[ $1 != clippy ]] || printf '%s %s\\n' "${manifest}" "${RUSTFLAGS-unset}" >> "${STUB_LOG}.flags"
+flags="${manifest} ${RUSTFLAGS-unset}"
+[[ $1 != clippy ]] || printf '%s\\n' "${flags}" >> "${STUB_LOG}.flags"
 if [[ $1 == metadata ]]; then
   if [[ ${manifest} == fuzz/* ]]; then
     cat "${STUB_FUZZ_METADATA}"
@@ -1270,8 +1272,10 @@ class EveryWorkspace(Planted):
         self.plant(MARKED)
         done = self.call("fix")
         self.assertEqual(0, done.returncode, done.stderr)
-        fixed = [line for line in self.flags() if not line.startswith("Cargo.toml ")]
-        self.assertEqual(["fuzz/Cargo.toml --cfg fuzzing"], fixed)
+        seen = self.flags()
+        fixed: list[str] = [line for line in seen if line.startswith("fuzz/")]
+        want: list[str] = ["fuzz/Cargo.toml --cfg fuzzing"]
+        self.assertEqual(want, fixed)
         self.assertIn("Cargo.toml unset", self.flags())
 
     def test_fix_rust_formats_and_fixes_each_root(self) -> None:

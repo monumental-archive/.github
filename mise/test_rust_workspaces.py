@@ -17,6 +17,7 @@ gate as `mise run test`.
 """
 
 import functools
+import os
 import subprocess
 import sys
 import tempfile
@@ -301,7 +302,7 @@ class Fuzzing(unittest.TestCase):
     def test_only_a_true_cargo_fuzz_in_package_metadata_is_the_marker(self) -> None:
         """Every other shape of the manifest is not a cargo-fuzz crate."""
         for text, want in (
-            ('[package]\nmetadata = { cargo-fuzz = true }\n', True),
+            ("[package]\nmetadata = { cargo-fuzz = true }\n", True),
             ('[package]\nmetadata = { cargo-fuzz = "true" }\n', False),
             ("[package]\nmetadata = { cargo-fuzz = false }\n", False),
             ("[package]\nmetadata = { other = true }\n", False),
@@ -333,29 +334,36 @@ class Fuzzing(unittest.TestCase):
     def test_an_unmarked_root_adds_nothing(self) -> None:
         """No marker: no variable is named, whatever is already set."""
         plain = self.manifest("[workspace]\n")
-        self.assertEqual({}, rust_workspaces.rustflags(plain, {"RUSTFLAGS": "-Cx"}))
+        nothing: dict[str, str] = {}
+        added = rust_workspaces.rustflags(plain, {"RUSTFLAGS": "-Cx"})
+        self.assertEqual(nothing, added)
 
     def test_built_as_holds_the_flags_and_puts_them_back(self) -> None:
         """Set inside, restored after: a value kept, an absent one removed."""
         marked = self.manifest("[package]\nmetadata = { cargo-fuzz = true }\n")
-        for before, inside in (
+        rows: list[tuple[dict[str, str], str]] = [
             ({}, "--cfg fuzzing"),
             ({"RUSTFLAGS": "-Cx"}, "-Cx --cfg fuzzing"),
-        ):
-            with self.subTest(before=before), mock.patch.dict(
-                "os.environ", before, clear=True
+        ]
+        for before, inside in rows:
+            with (
+                self.subTest(before=before),
+                mock.patch.dict(os.environ, before, clear=True),
             ):
                 with rust_workspaces.built_as(marked):
-                    self.assertEqual(inside, rust_workspaces.os.environ["RUSTFLAGS"])
-                self.assertEqual(before, dict(rust_workspaces.os.environ))
+                    self.assertEqual(inside, os.environ["RUSTFLAGS"])
+                after: dict[str, str] = dict(os.environ)
+                self.assertEqual(before, after)
 
     def test_built_as_restores_after_a_raise(self) -> None:
         """An exception inside still puts the environment back."""
         marked = self.manifest("[package]\nmetadata = { cargo-fuzz = true }\n")
-        with mock.patch.dict("os.environ", {}, clear=True):
+        empty: dict[str, str] = {}
+        with mock.patch.dict(os.environ, empty, clear=True):
             with self.assertRaises(KeyError), rust_workspaces.built_as(marked):
-                raise KeyError
-            self.assertEqual({}, dict(rust_workspaces.os.environ))
+                _ = os.environ["PLANTED_ABSENT"]
+            after: dict[str, str] = dict(os.environ)
+            self.assertEqual(empty, after)
 
 
 if __name__ == "__main__":
