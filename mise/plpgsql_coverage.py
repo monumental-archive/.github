@@ -5,8 +5,8 @@ Org canon (#1547). The `plpgsql` leg of `coverage-measure.sh`: the belt
 delivers this reader, the repository supplies the database. The figures
 are plpgsql_check's own (`plpgsql_coverage_statements` and
 `plpgsql_coverage_branches`), read from a test database that preloads
-the extension and runs with its profiler on. The extension belongs to
-the repository's test stack, never to a published image.
+the extension and runs with its profiler on. The extension is loaded
+only by a test stack, never by a published image's own start.
 
 The database lives only for the length of the suite, so the reading is
 taken inside it: the repository's test teardown runs
@@ -52,10 +52,9 @@ records every options line that turns a check off; `totals` names every
 one on every run and reds one with no comment line directly above it
 saying why.
 
-The run is not this helper's: `coverage-measure.sh` walks the `test`
-task and its depends once, for every leg that reads that run, and sets
-ORG_PLPGSQL_COVERAGE in it when the plpgsql leg is selected; the leg
-then calls `totals` on the report the teardown wrote.
+The run is not this helper's: the repository's `test` command runs
+through `mise/measured`, which sets ORG_PLPGSQL_COVERAGE; the leg then
+calls `totals` on the report the teardown wrote.
 
 The functions read are every PL/pgSQL function outside the system
 schemas that no extension owns: postgis alone owns 22 PL/pgSQL

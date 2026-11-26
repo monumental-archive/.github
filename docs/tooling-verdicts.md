@@ -32,7 +32,7 @@ honestly blocked on.
 | cargo-llvm-cov + `.coverage-floor` ratchet | Derived coverage floor in the gate (`coverage:check`), measured on the repository's own `test` run through `measured` and rendered by `cargo llvm-cov report` (#1653), re-derived by the release path, codecov badge feed off-gate; Rust branches as a floor of their own (`rust-branches`, #1359), measured with `--branch` on the repo's dated nightly and held by the Monday audit (`audit:coverage-branches`), never the gate |
 | coverage.py (`pipx:` backend via aqua-backed uv) | The `python` and `python-branches` legs of the same ratchet (#1331): the repository's own `test` task run under coverage, child processes included, statements and branches |
 | vitest's own coverage provider (the repository's, not the belt's) | The `typescript` and `typescript-branches` legs of the same ratchet (#1357): the repository's vitest under the provider its lockfile pins, lines and branches; the belt pins neither |
-| plpgsql_check (the repository's test stack, never a published image; the belt pins nothing) | The `plpgsql` and `plpgsql-branches` legs of the same ratchet (#1547): `mise/plpgsql_coverage.py` reads the profiler's statement and branch coverage in the suite's teardown, through the repository's own `psql` or the client the call names |
+| plpgsql_check (present in the org's database image, loaded only where a consumer's tests start the image with it preloaded; the belt pins nothing) | The `plpgsql` and `plpgsql-branches` legs of the same ratchet (#1547): `mise/plpgsql_coverage.py` reads the profiler's statement and branch coverage in the suite's teardown, through the repository's own `psql` or the client the call names |
 | Hypothesis (`pipx:` backend via aqua-backed uv) | Python property testing (#1332): every tracked `prop_*.py`, fixed seed in the gate (`test:python-properties`), random seed and wider bounds on the Monday cron (`audit:python-properties`) |
 | fast-check (the repository's, not the belt's) | TypeScript property testing (#1549): every tracked `*.prop.test.{ts,tsx,mts,cts}` under the repository's own vitest, fixed seed in the gate (`test:typescript-properties`), random seed and 10,000 runs on the Monday cron (`audit:typescript-properties`); `lint:typescript-properties` refuses an import outside a property file and a restated seed; the belt pins neither tool |
 | proptest (the repository's, not the belt's) | Rust property testing (#1930): the repository's own `test` task draws from seed 1 in the gate (the belt's `[env]` sets `PROPTEST_RNG_SEED`), and from a fresh printed seed on the nightly run (`audit:rust-properties`); `lint:rust-properties` refuses a locked proptest below 1.7.0, which ignores the variable; the belt pins nothing |
@@ -3873,19 +3873,30 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
   runs and the shim never does, and vitest reads no environment variable
   that enables coverage.
 - **PL/pgSQL coverage (#1547)** — measured with plpgsql_check, which
-  the repository's test stack carries and the belt does not. The org's
-  published database image ships a deliberately small set of
-  extensions, and a coverage extension is a test tool, so the
-  repository's tests run against a layer built from that image which
-  adds the distribution's package, preloads it
-  (`shared_preload_libraries` gains `plpgsql,plpgsql_check`) and starts
-  with `plpgsql_check.profiler=on`. The database lives only for the
-  suite, so the reading is taken inside it: whenever
-  `mise/coverage-measure.sh` runs the `test` task (and its depends) it
-  sets `ORG_PLPGSQL_COVERAGE` naming a report, and the repository's
-  teardown calls `mise/plpgsql_coverage.py collect <conninfo>` before
-  it stops the database. A report written is the leg's answer; the
-  leg searches no file. **Amended 2026-11-20 (#1666):** the first
+  the repository's test stack loads and the belt does not. The
+  published image carries the extension's files and loads nothing
+  new; a consumer's tests start that image with its own command plus
+  `plpgsql,plpgsql_check` appended to `shared_preload_libraries` and
+  `plpgsql_check.profiler=on`. The database lives only for the suite,
+  so the reading is taken inside it: the repository's `test` command
+  runs through `mise/measured`, which sets `ORG_PLPGSQL_COVERAGE`
+  naming a report, and the repository's teardown calls
+  `mise/plpgsql_coverage.py collect <conninfo>` before it stops the
+  database; the leg then calls `totals` on the report the teardown
+  wrote. A report written is the leg's answer; the leg searches no
+  file. **Amended 2026-11-26 (#2106): the extension ships in the
+  image, loaded by nothing.** The first build kept a coverage
+  extension out of the published image as a test tool and had each
+  consumer's tests build a layer over it adding the distribution's
+  package, which cost 38–53 s per uncached test run (measured below).
+  The property that rule protects is that production does not load a
+  test tool, not which files are on disk:
+  monumental-archive/monumental-archive-db#86 measured the package at
+  786 kB with no new dependency, and a start as shipped loads nothing
+  new, so the image carries the files and only a test start preloads
+  them. The same amendment drops a walk of the `test` task that #1667
+  had already replaced with `mise/measured`.
+  **Amended 2026-11-20 (#1666):** the first
   build switched the leg on wherever any tracked file carried the
   `LANGUAGE` clause, so a README or a fixture reddened a gate, and
   narrowing that search to `*.sql` would have missed functions declared
