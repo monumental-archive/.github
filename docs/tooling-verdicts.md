@@ -1977,8 +1977,11 @@ Two mechanics worth recording, both measured rather than assumed:
   unknown option, a bad enum value, a value of the wrong type), prints
   the keys it could read and no diagnostic, so a config stating every
   dial beside one unknown option passed this check, and `lint:biome`
-  generated a config from it. Upstream returns success after printing
-  whatever the parse reported; TypeScript 5 refused. The resolving is
+  generated a config from it. Measured beside typescript@6.0.3: the
+  option errors are new in 7 (6.0.3 prints them and exits 1; tsgo
+  prints the config without looking at the parse's errors), while a
+  JSON syntax error exits 0 in both, so no tsc pin retires the second
+  run below. The resolving is
   now one script, `mise/tsconfig-resolve.sh`, for this task and
   `lint:biome`/`fix:biome`: after `--showConfig` it runs tsc once more
   over a scratch tsconfig that `extends` the real one with a program of
