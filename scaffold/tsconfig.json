@@ -22,6 +22,7 @@
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
     "erasableSyntaxOnly": true,
+    "allowImportingTsExtensions": true,
     "isolatedDeclarations": true,
     "declaration": true
   },

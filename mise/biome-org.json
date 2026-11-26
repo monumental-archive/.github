@@ -122,19 +122,6 @@
       "complexity": {
         "useLiteralKeys": "off"
       },
-      "correctness": {
-        "useImportExtensions": {
-          "level": "on",
-          "options": {
-            "extensionMappings": {
-              "ts": "js",
-              "tsx": "js",
-              "mts": "mjs",
-              "cts": "cjs"
-            }
-          }
-        }
-      },
       "style": {
         "noTernary": "off",
         "useNamingConvention": {

@@ -248,6 +248,14 @@ class MainTest(unittest.TestCase):
         self.assertEqual(status, 1)
         self.assertIn("skipLibCheck", err)
 
+    def test_a_config_without_ts_extension_imports_fails(self) -> None:
+        """One import form, the file on disk, so every config states it (#2107)."""
+        options = dict(REQUIRED)
+        options.pop("allowImportingTsExtensions", None)
+        status, _out, err = self.invoke({"compilerOptions": options})
+        self.assertEqual(status, 1)
+        self.assertIn('"allowImportingTsExtensions" is absent', err)
+
     def test_a_config_with_no_compiler_options_fails(self) -> None:
         """Nothing stated is nothing enforced."""
         status, _out, _err = self.invoke({})

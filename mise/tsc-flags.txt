@@ -55,6 +55,14 @@
 --isolatedModules
 --verbatimModuleSyntax
 --erasableSyntaxOnly
+# A relative import names the file on disk — `./helper.ts`, `./hm.mts` —
+# because that is the only specifier Node loads when it runs TypeScript
+# directly: it loads a specifier as written, and only tsc and bundlers
+# map `.js` back to `.ts` (#2107). tsc refuses the form (TS5097) unless
+# this is set, and setting it is legal everywhere because `--noEmit`
+# above is forced too. A repository that emits JavaScript does so from
+# its own build config with `rewriteRelativeImportExtensions`.
+--allowImportingTsExtensions
 
 # Exports carry explicit types so other tools can derive declarations.
 # `--declaration` is not emit here (--noEmit wins); isolatedDeclarations
