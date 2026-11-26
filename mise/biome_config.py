@@ -32,18 +32,38 @@ would otherwise get react's rules turned off by this very mechanism.
 Over-claiming is deliberately legal. Naming a domain the repo has no
 dependency for turns rules ON, and the hazard is one-directional — the
 `lint:python-target` shape.
+
+One rule has no domain and is still a fact about the project rather than
+the org: `correctness/noNodejsModules`, which forbids `node:fs` and is
+right only for code that cannot reach Node (#2116). The repository
+already states which projects run on Node, in each `tsconfig.json`'s
+`compilerOptions.types`, so the belt reads it there: the task resolves
+every tracked tsconfig with `tsc --showConfig` and hands the documents
+here, and a project whose resolved `types` names `node` gets one
+`overrides` entry switching the rule off under the tsconfig's directory.
+No tsconfig text is parsed here, and the repository writes nothing.
 """
 
 import argparse
 import copy
 import json
 import sys
-from pathlib import Path
-from typing import NamedTuple
+from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING, NamedTuple
 
 import findings
-from decoded import UndecodableError, as_object, is_object, load_json
+from decoded import (
+    UndecodableError,
+    as_array,
+    as_object,
+    is_object,
+    is_strings,
+    load_json,
+)
 from tracked import stdin_paths
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 NAME = "biome-config"
 
@@ -73,6 +93,13 @@ MANIFEST_SECTIONS = (
 )
 
 
+# The `types` entry that makes a TypeScript project a Node program.
+NODE_TYPES = "node"
+
+# The one rule a Node project has switched off, as biome's config names it.
+NODE_RULE = ("correctness", "noNodejsModules")
+
+
 class Args(argparse.Namespace):
     """The parsed command line, typed."""
 
@@ -81,6 +108,7 @@ class Args(argparse.Namespace):
     nursery: Path
     out: Path
     declaration: Path
+    tsconfig: list[list[str]] | None = None
 
 
 class Domains(NamedTuple):
@@ -252,13 +280,60 @@ def silence_nursery(
     return silenced
 
 
+def is_node_project(resolved: object, name: str) -> bool:
+    """Say whether one resolved tsconfig declares Node's types.
+
+    `resolved` is `tsc -p <config> --showConfig`'s output, so `extends`
+    is already followed and the text already parsed by TypeScript.
+
+    Returns:
+        True when its `compilerOptions.types` holds "node".
+
+    """
+    document = as_object(resolved, name)
+    options = as_object(document.get("compilerOptions", {}), f"{name} compilerOptions")
+    types = options.get("types", [])
+    return is_strings(types) and NODE_TYPES in types
+
+
+def node_overrides(resolved: Mapping[str, object]) -> list[dict[str, object]]:
+    """Write one override per Node project, scoped to its tsconfig's directory.
+
+    `resolved` maps each tracked tsconfig's path to its resolved document.
+    The directory is the tsconfig's own, whatever its `include` says: a
+    file outside it keeps the rule, which is the safe direction.
+
+    Returns:
+        The entries, in tsconfig order; none when no project is Node.
+
+    """
+    group, rule = NODE_RULE
+    entries: list[dict[str, object]] = []
+    for name, document in resolved.items():
+        if not is_node_project(document, name):
+            continue
+        directory = PurePosixPath(name).parent
+        pattern = "**" if str(directory) == "." else f"{directory}/**"
+        entries.append({
+            "includes": [pattern],
+            "linter": {"rules": {group: {rule: SILENCED}}},
+        })
+    return entries
+
+
 def generate(
     org: dict[str, object],
     claimed: set[str],
     domains: Domains,
     nursery: dict[str, str],
+    resolved: Mapping[str, object] | None = None,
 ) -> tuple[dict[str, object], int]:
     """Merge the org's rules with the repository's identity.
+
+    `resolved` maps each tracked tsconfig to its `tsc --showConfig`
+    document; a Node project among them gets its override appended to
+    the org's. biome applies every override a file matches (measured on
+    2.5.7), so the org's test-file entry and a Node project's compose.
 
     Returns:
         The config biome is actually run against, and how many nursery
@@ -272,6 +347,10 @@ def generate(
     linter["domains"] = written
     config["linter"] = linter
     silenced = silence_nursery(config, claimed, domains, nursery)
+    entries = node_overrides(resolved or {})
+    if entries:
+        overrides = as_array(config.get("overrides", []), "overrides")
+        config["overrides"] = [*overrides, *entries]
     return config, silenced
 
 
@@ -284,6 +363,26 @@ def complain(headline: str, lines: list[str], remedy: str) -> int:
     """
     findings.finding("", headline, [*lines, remedy])
     return 1
+
+
+def read_resolved(pairs: list[list[str]]) -> dict[str, object]:
+    """Read each tsconfig's resolved document, keyed by the tsconfig's path.
+
+    Returns:
+        The tracked tsconfig path mapped to its decoded document.
+
+    Raises:
+        UndecodableError: a document is not JSON, naming its tsconfig.
+
+    """
+    resolved: dict[str, object] = {}
+    for name, path in pairs:
+        try:
+            resolved[name] = load_json(Path(path).read_text(encoding="utf-8"))
+        except UndecodableError as bad:
+            msg = f"{name}: tsc --showConfig printed no JSON: {bad}"
+            raise UndecodableError(msg) from bad
+    return resolved
 
 
 def run(args: Args, manifests: list[Path]) -> int:
@@ -324,8 +423,17 @@ def run(args: Args, manifests: list[Path]) -> int:
         )
 
     try:
+        resolved = read_resolved(args.tsconfig or [])
+        node = len(node_overrides(resolved))
+    except UndecodableError as bad:
+        return complain(
+            "a resolved tsconfig.json is not the shape the belt reads",
+            [str(bad)],
+            "it is tsc --showConfig's own output; re-run the task",
+        )
+    try:
         org = as_object(load_json(args.org.read_text(encoding="utf-8")), "the document")
-        config, silenced = generate(org, claimed, domains, nursery)
+        config, silenced = generate(org, claimed, domains, nursery, resolved)
     except UndecodableError as bad:
         return complain(
             f"{args.org} cannot be read",
@@ -334,7 +442,10 @@ def run(args: Args, manifests: list[Path]) -> int:
         )
     args.out.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
     named = ", ".join(sorted(claimed)) if claimed else "none"
-    print(f"{NAME}: domains claimed: {named}; {silenced} nursery rule(s) off")
+    print(
+        f"{NAME}: domains claimed: {named}; {silenced} nursery rule(s) off; "
+        f"noNodejsModules off in {node} Node project(s)"
+    )
     return 0
 
 
@@ -351,6 +462,13 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--nursery", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--declaration", type=Path, default=Path("biome.json"))
+    parser.add_argument(
+        "--tsconfig",
+        nargs=2,
+        action="append",
+        metavar=("CONFIG", "RESOLVED"),
+        help="a tracked tsconfig.json and the file holding its tsc --showConfig",
+    )
     args = parser.parse_args(argv, namespace=Args())
     manifests = [Path(path) for path in stdin_paths()]
     return run(args, manifests)
