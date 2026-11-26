@@ -432,6 +432,7 @@ STUB_CARGO = (
     LOCATE
     + """\
 printf 'cargo %s\\n' "$*" >> "${STUB_LOG}"
+[[ $1 != clippy ]] || printf '%s %s\\n' "${manifest}" "${RUSTFLAGS-unset}" >> "${STUB_LOG}.flags"
 if [[ $1 == clippy ]]; then
   printf '%s' "${STUB_CLIPPY_OUT:-}"
   [[ $2 != --fix ]] || exit "${STUB_FIX_STATUS:-0}"
@@ -497,6 +498,7 @@ FIX_CARGO = (
     + """\
 marks="${STUB_PREPARED:-} ${STUB_MAJOR:-}"
 printf 'cargo %s [%s]\\n' "$*" "${marks}" >> "${STUB_LOG}"
+[[ $1 != clippy ]] || printf '%s %s\\n' "${manifest}" "${RUSTFLAGS-unset}" >> "${STUB_LOG}.flags"
 if [[ $1 == metadata ]]; then
   if [[ ${manifest} == fuzz/* ]]; then
     cat "${STUB_FUZZ_METADATA}"
@@ -550,6 +552,18 @@ PLAIN = workspace(member("a"), member("b"), member("held"))
 FUZZ = workspace(member("parse"))
 EVERY_CRATE: list[str] = ["a@0.1.0", "b@0.1.0", "parse@0.1.0"]
 TWO_ROOTS = {"fuzz/Cargo.toml": "[workspace]\n", "fuzz/fuzz_targets/parse.rs": "\n"}
+# The same root carrying the marker `cargo fuzz init` writes, which
+# cargo-fuzz requires: built with `--cfg fuzzing`, as cargo-fuzz builds
+# it (#2093).
+MARKED = {
+    "fuzz/Cargo.toml": (
+        '[package]\nname = "parse"\n\n'
+        "[package.metadata]\ncargo-fuzz = true\n\n[workspace]\n"
+    )
+}
+# What each root's clippy calls saw in RUSTFLAGS: the root's first.
+UNMARKED = ["Cargo.toml unset", "Cargo.toml unset", "fuzz/Cargo.toml unset"]
+FUZZING = ["Cargo.toml unset", "Cargo.toml unset", "fuzz/Cargo.toml --cfg fuzzing"]
 OUTSIDE = (
     "fuzz/Cargo.toml belongs to a workspace outside this tree: /elsewhere/Cargo.toml"
 )
@@ -1213,6 +1227,52 @@ class EveryWorkspace(Planted):
             done = self.call("lint")
         self.assert_finding(done, 1, "git could not name the tree", "fatal: planted")
         self.assertEqual(NOT_ASKED, self.asked("clippy"))
+
+    def flags(self) -> list[str]:
+        """Read what RUSTFLAGS each clippy call saw, by its manifest.
+
+        Returns:
+            `<manifest> <RUSTFLAGS>` per call, `unset` for none.
+
+        """
+        log = self.log.with_name(f"{self.log.name}.flags")
+        return log.read_text(encoding="utf-8").splitlines()
+
+    def test_a_marked_fuzz_root_is_linted_with_cfg_fuzzing(self) -> None:
+        """The cargo-fuzz marker: its clippy has the cfg, the root's has not."""
+        self.plant(MARKED)
+        done = self.call("lint")
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertEqual(FUZZING, self.flags())
+        self.assertNotIn("RUSTFLAGS", os.environ)
+
+    def test_a_fuzz_directory_without_the_marker_gets_no_cfg(self) -> None:
+        """fuzz/Cargo.toml with no marker: no call is given the cfg."""
+        done = self.call("lint")
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertEqual(UNMARKED, self.flags())
+
+    def test_a_marked_root_keeps_the_rustflags_it_had(self) -> None:
+        """RUSTFLAGS=-Dwarnings set: the marked root's has the cfg appended."""
+        self.plant(MARKED)
+        done = self.call("lint", RUSTFLAGS="-Dwarnings")
+        self.assertEqual(0, done.returncode, done.stderr)
+        want = [
+            "Cargo.toml -Dwarnings",
+            "Cargo.toml -Dwarnings",
+            "fuzz/Cargo.toml -Dwarnings --cfg fuzzing",
+        ]
+        self.assertEqual(want, self.flags())
+
+    def test_fix_rust_fixes_a_marked_root_with_cfg_fuzzing(self) -> None:
+        """fix:rust: the marked root's clippy --fix has the cfg, the root's not."""
+        (self.bins / "cargo").write_text(FIX_CARGO, encoding="utf-8")
+        self.plant(MARKED)
+        done = self.call("fix")
+        self.assertEqual(0, done.returncode, done.stderr)
+        fixed = [line for line in self.flags() if not line.startswith("Cargo.toml ")]
+        self.assertEqual(["fuzz/Cargo.toml --cfg fuzzing"], fixed)
+        self.assertIn("Cargo.toml unset", self.flags())
 
     def test_fix_rust_formats_and_fixes_each_root(self) -> None:
         """fix:rust: cargo fmt and clippy --fix for both roots."""

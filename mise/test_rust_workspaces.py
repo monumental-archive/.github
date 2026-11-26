@@ -281,5 +281,82 @@ class Reader(unittest.TestCase):
                 self.assertEqual(LEFT, left)
 
 
+class Fuzzing(unittest.TestCase):
+    """A cargo-fuzz root is built with `--cfg fuzzing`, by its marker (#2093)."""
+
+    def manifest(self, text: str) -> str:
+        """Write a root manifest in a scratch directory.
+
+        Returns:
+            Its path.
+
+        """
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".toml", delete=False, encoding="utf-8"
+        ) as written:
+            written.write(text)
+        self.addCleanup(Path(written.name).unlink)
+        return written.name
+
+    def test_only_a_true_cargo_fuzz_in_package_metadata_is_the_marker(self) -> None:
+        """Every other shape of the manifest is not a cargo-fuzz crate."""
+        for text, want in (
+            ('[package]\nmetadata = { cargo-fuzz = true }\n', True),
+            ('[package]\nmetadata = { cargo-fuzz = "true" }\n', False),
+            ("[package]\nmetadata = { cargo-fuzz = false }\n", False),
+            ("[package]\nmetadata = { other = true }\n", False),
+            ("[package]\nmetadata = 1\n", False),
+            ('[package]\nname = "fuzz"\n', False),
+            ("package = 1\n", False),
+            ("[workspace]\nmetadata = { cargo-fuzz = true }\n", False),
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(want, rust_workspaces.fuzzing(self.manifest(text)))
+
+    def test_the_cfg_is_appended_to_the_variable_cargo_reads(self) -> None:
+        """RUSTFLAGS, or the encoded variable whenever it is set at all."""
+        marked = self.manifest("[package]\nmetadata = { cargo-fuzz = true }\n")
+        encoded = "CARGO_ENCODED_RUSTFLAGS"
+        for environ, want in (
+            ({}, {"RUSTFLAGS": "--cfg fuzzing"}),
+            ({"RUSTFLAGS": ""}, {"RUSTFLAGS": "--cfg fuzzing"}),
+            ({"RUSTFLAGS": "-Dwarnings"}, {"RUSTFLAGS": "-Dwarnings --cfg fuzzing"}),
+            ({encoded: ""}, {encoded: "--cfg\x1ffuzzing"}),
+            (
+                {encoded: "-D\x1fwarnings", "RUSTFLAGS": "-Cx"},
+                {encoded: "-D\x1fwarnings\x1f--cfg\x1ffuzzing"},
+            ),
+        ):
+            with self.subTest(environ=environ):
+                self.assertEqual(want, rust_workspaces.rustflags(marked, environ))
+
+    def test_an_unmarked_root_adds_nothing(self) -> None:
+        """No marker: no variable is named, whatever is already set."""
+        plain = self.manifest("[workspace]\n")
+        self.assertEqual({}, rust_workspaces.rustflags(plain, {"RUSTFLAGS": "-Cx"}))
+
+    def test_built_as_holds_the_flags_and_puts_them_back(self) -> None:
+        """Set inside, restored after: a value kept, an absent one removed."""
+        marked = self.manifest("[package]\nmetadata = { cargo-fuzz = true }\n")
+        for before, inside in (
+            ({}, "--cfg fuzzing"),
+            ({"RUSTFLAGS": "-Cx"}, "-Cx --cfg fuzzing"),
+        ):
+            with self.subTest(before=before), mock.patch.dict(
+                "os.environ", before, clear=True
+            ):
+                with rust_workspaces.built_as(marked):
+                    self.assertEqual(inside, rust_workspaces.os.environ["RUSTFLAGS"])
+                self.assertEqual(before, dict(rust_workspaces.os.environ))
+
+    def test_built_as_restores_after_a_raise(self) -> None:
+        """An exception inside still puts the environment back."""
+        marked = self.manifest("[package]\nmetadata = { cargo-fuzz = true }\n")
+        with mock.patch.dict("os.environ", {}, clear=True):
+            with self.assertRaises(KeyError), rust_workspaces.built_as(marked):
+                raise KeyError
+            self.assertEqual({}, dict(rust_workspaces.os.environ))
+
+
 if __name__ == "__main__":
     unittest.main()

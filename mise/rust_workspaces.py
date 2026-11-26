@@ -17,6 +17,12 @@ this tree", and every task that runs cargo loops over it.
   helper that loops over the roots (lint:msrv, #2011).
 - `rust_workspaces.py roots`: the same list, NUL-separated on stdout,
   for `org_rust_workspace_roots` in mise/rust-workspaces.sh.
+- `built_as(root)`: the environment one root's cargo calls run in, held
+  for the calls inside it (#2093). A cargo-fuzz workspace (its root
+  manifest carries `[package.metadata] cargo-fuzz = true`, the marker
+  `cargo fuzz init` writes and cargo-fuzz requires) is built as
+  cargo-fuzz builds it, with `--cfg fuzzing`; every other root is
+  unchanged.
 
 Two findings, both red, each reported for every manifest that has it:
 
@@ -29,15 +35,21 @@ Two findings, both red, each reported for every manifest that has it:
 stdlib only.
 """
 
+import contextlib
 import io
 import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
+import decoded
 import findings as writer
 import tracked
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator, Mapping
 
 CARGO = shutil.which("cargo") or "cargo"
 GIT = shutil.which("git") or "git"
@@ -50,6 +62,14 @@ PATHSPECS = (":!vendor/**", "Cargo.toml", "*/Cargo.toml")
 TOP_MANIFEST = "Cargo.toml"
 
 REMEDY = "give it its own [workspace] table, or make it a member of a tracked workspace"
+
+# What cargo-fuzz adds to every build of the crate it runs (#2093), and
+# the two variables cargo reads rustc's flags from: the encoded one,
+# whose arguments are split by SEPARATOR, wins whenever it is set.
+FUZZ_CFG = ("--cfg", "fuzzing")
+PLAIN = "RUSTFLAGS"
+ENCODED = "CARGO_ENCODED_RUSTFLAGS"
+SEPARATOR = "\x1f"
 
 
 class UnresolvedError(Exception):
@@ -166,6 +186,71 @@ def resolved() -> list[str] | None:
         text = os.fsdecode(said) if isinstance(said, bytes) else str(said)
         writer.finding("", "git could not name the tree", text.strip().splitlines())
         return None
+
+
+def fuzzing(root: str) -> bool:
+    """Say whether a workspace is a cargo-fuzz crate, by its own marker.
+
+    `root` is one of `roots()`'s answers, so a manifest the tree tracks
+    (#1986). The marker is the tool's own statement, never the
+    directory's name: cargo-fuzz takes `--fuzz-dir`.
+
+    Returns:
+        True when the root manifest's `[package.metadata]` sets
+        `cargo-fuzz = true`.
+
+    """
+    manifest = decoded.load_toml(Path(root).read_bytes())
+    package = manifest.get("package")
+    metadata = package.get("metadata") if decoded.is_object(package) else None
+    return decoded.is_object(metadata) and metadata.get("cargo-fuzz") is True
+
+
+def rustflags(root: str, environ: Mapping[str, str]) -> dict[str, str]:
+    """Name the flags one root's cargo calls add, as cargo-fuzz adds them.
+
+    cargo-fuzz builds its crate with `--cfg fuzzing` appended to the
+    flags the call already has, so a target that calls fuzzing-only
+    code is linted as the build that runs it (#2093). Appended to
+    whichever of the two variables cargo will read: the encoded one
+    when it is set at all, else RUSTFLAGS.
+
+    Returns:
+        The variable to set and its value; nothing for a root that is
+        not a cargo-fuzz crate.
+
+    """
+    if not fuzzing(root):
+        return {}
+    if ENCODED in environ:
+        had = environ[ENCODED]
+        return {ENCODED: SEPARATOR.join([*([had] if had else []), *FUZZ_CFG])}
+    had = environ.get(PLAIN, "")
+    return {PLAIN: " ".join([*([had] if had else []), *FUZZ_CFG])}
+
+
+@contextlib.contextmanager
+def built_as(root: str) -> Iterator[None]:
+    """Hold one root's flags in this process's environment, then put it back.
+
+    Every cargo call inside starts from `os.environ`, so the flags reach
+    each of the root's calls and no other root's.
+
+    Yields:
+        Nothing; the variable is restored, or removed, on the way out.
+
+    """
+    added = rustflags(root, os.environ)
+    saved = {key: os.environ.get(key) for key in added}
+    os.environ.update(added)
+    try:
+        yield
+    finally:
+        for key, value in saved.items():
+            if value is None:
+                del os.environ[key]
+            else:
+                os.environ[key] = value
 
 
 def main(argv: list[str]) -> int:
