@@ -10,8 +10,8 @@ own: the belt pins neither vitest nor fast-check (#1357's rule), so
 there is no real one to run here. The stub records its arguments, the
 seed and run count it was handed and the wrapper config it was given,
 prints a seed line per file and appends it to the seeded list as the
-belt's setup file would, and writes the JSON report the leg verifies. What fast-check does with
-the seed was measured on a real repository and is recorded in
+belt's setup file would, and writes the JSON report the leg verifies.
+What fast-check does with the seed was measured on a real repository and is recorded in
 docs/tooling-verdicts.md.
 
 Each row asserts the message, not just the exit status: a planted row
@@ -724,7 +724,7 @@ class Documents(unittest.TestCase):
         return out.getvalue().replace(str(path), "DOC")
 
     def test_a_missing_seeded_list_is_red(self) -> None:
-        """verify with no seeded list to read: red, named."""
+        """Refuse verify with no seeded list to read: red, named."""
         with tempfile.TemporaryDirectory() as scratch:
             report = Path(scratch, "report.json")
             report.write_text('{"testResults": []}', encoding="utf-8")
