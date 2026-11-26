@@ -1841,6 +1841,24 @@ monumental-archive with its 46 per-file comments removed:
 comments above are no longer the answer for a project that declares
 Node's types.
 
+**Amended 2026-11-26 (#2137): a file-wide or range ignore is refused
+outright.** biome reports a one-line `biome-ignore` that suppresses
+nothing (`suppressions/unused`) and never a `biome-ignore-all`,
+`biome-ignore-start` or `biome-ignore-end` — measured on 2.5.7 with
+nothing in the file to suppress. Those are biome's `allow`, the form
+`lint:rust` refuses for Rust (#1857): they outlive their reason
+silently and widen to hide new findings in the same file. On
+monumental-archive one file-wide `noUnresolvedImports` ignore
+suppressed nothing for three months, and its twin hid a finding under
+a false reason. `lint:biome` now refuses all three forms before biome
+runs: `mise/biome_suppressions.py` reads the tracked list biome is
+handed, comments only — the form in a string, a template literal or a
+regex is not a suppression — and names each file and line. The answer
+is a one-line `biome-ignore` above the line the finding lands on,
+which expires, or a config change where the rule is wrong for a class
+of file (this entry's #2116 route, and #2117's test-glob override). So
+the per-file `biome-ignore-all` above is no longer an answer at all.
+
 **Nursery stays on, and this is the ruling rather than the default.**
 Biome prints "not yet stable and may change in the future" beside all 87
 rules, and #695 asked whether a gate whose rule set can move in a patch
