@@ -274,6 +274,10 @@ def lib(script: str, *args: str) -> str:
     ).stdout
 
 
+# What a row expects when a stand-in was never called.
+NO_CALLS: list[str] = []
+
+
 class SearchCase(unittest.TestCase):
     """A planted repository, the stand-in tools and a stage, per row."""
 
@@ -543,6 +547,44 @@ class RustSearch(SearchCase):
         # Measured against what is already proposed: 10% plus `proposed`.
         self.assertIn("corpus 11% to 11%", result.stdout)
         same(self, [], self.staged())
+
+
+class MeasureNeedsItsLog(SearchCase):
+    """org_fuzz_measure refuses an unset org_fuzz_measure_log (#2090)."""
+
+    def test_an_unset_log_is_refused_before_any_tool_runs(self) -> None:
+        """No log, no measurement: red, the variable named, no cargo or go.
+
+        Before #2090's ruling an unset log sent the replay to stderr.
+        """
+        self.rust()
+        self.go()
+        measure = BELT / "fuzz-measure-lib.sh"
+        for kind, where, name in (
+            ("rust", "parse_marker", "fuzz/corpus/parse_marker"),
+            ("go", "internal/policy", "FuzzLoad"),
+        ):
+            script = (
+                f'. "{measure}"; unset org_fuzz_measure_log; '
+                f"org_fuzz_measure audit:fuzz fuzz-x {kind} {where} {name}"
+            )
+            done = subprocess.run(
+                [BASH, "-c", script],
+                cwd=self.tree,
+                env=self.env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            with self.subTest(kind):
+                self.assertEqual(1, done.returncode, done.stdout)
+                self.assertIn(
+                    "fuzz-x: org_fuzz_measure_log is unset — the search sets it to"
+                    " the replay's log file before it measures",
+                    done.stderr,
+                )
+                self.assertEqual("", done.stdout)
+                self.assertEqual(NO_CALLS, self.log("cargo") + self.log("go"))
 
 
 class GoSearch(SearchCase):
