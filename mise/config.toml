@@ -1781,8 +1781,9 @@ dir = "{{cwd}}"
 # dependency's own types pull Node in (vite's do), so biome's rule is
 # the only check there. A tsconfig `--showConfig` refuses ends the task
 # by name. `mise/biome-generate.sh` does the resolving and the generator
-# call for both this task and `fix:biome`. Measured on monumental-archive with its 46 per-file comments
-# removed: noNodejsModules 55 → 0, every diagnostic 583 → 528.
+# call for both this task and `fix:biome`. Measured on
+# monumental-archive with its 46 per-file comments removed:
+# noNodejsModules 55 → 0, every diagnostic 583 → 528.
 #
 # The severity floor is belt-side because --error-on-warnings is NOT one:
 # 123 of the 514 rules default to `info`, and an info diagnostic prints
