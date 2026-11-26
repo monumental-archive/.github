@@ -370,8 +370,11 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
     env |= reports_env(tmp, reports_dir=reports_dir)
     env["ORG_COVERAGE_RUN"] = str(tmp / "run")
     if measured:
-        planted_ts = (ts, ts_branches) if typescript == "vitest" else None
-        plant_run(tmp / "run", python=python_measured, typescript=planted_ts)
+        plant_run(
+            tmp / "run",
+            python=python_measured,
+            typescript=(ts, ts_branches) if typescript == "vitest" else None,
+        )
     init_tree(tree, env, tracked, commit=commit)
     # The test runs without the measuring stubs: they answer the coverage
     # task's reads, and `measured` would start the stub `coverage` as
