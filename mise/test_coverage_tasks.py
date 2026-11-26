@@ -263,27 +263,16 @@ def plant_run(
 
 
 def run_test_step(
-    tree: Path, env: dict[str, str], stubs: Path, test_run: str | None
+    tree: Path, env: dict[str, str], argv: list[str]
 ) -> subprocess.CompletedProcess[str]:
     """Run the tree's test command, as mise runs `test` first.
-
-    The test runs without the measuring stubs: they answer the coverage
-    task's reads, and `measured` would start the stub `coverage` as
-    coverage.py.
 
     Returns:
         The finished process.
 
     """
-    as_test = hermetic.task_run("test", test_run or "true")
-    test_path = env["PATH"].removeprefix(f"{stubs}{os.pathsep}")
     return subprocess.run(
-        as_test.argv,
-        cwd=tree,
-        env=env | as_test.env | {"PATH": test_path},
-        capture_output=True,
-        text=True,
-        check=False,
+        argv, cwd=tree, env=env, capture_output=True, text=True, check=False
     )
 
 
@@ -384,7 +373,13 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
         planted_ts = (ts, ts_branches) if typescript == "vitest" else None
         plant_run(tmp / "run", python=python_measured, typescript=planted_ts)
     init_tree(tree, env, tracked, commit=commit)
-    tested = run_test_step(tree, env, stubs, test_run) if run_test else None
+    # The test runs without the measuring stubs: they answer the coverage
+    # task's reads, and `measured` would start the stub `coverage` as
+    # coverage.py.
+    as_test = hermetic.task_run("test", test_run or "true")
+    test_path = env["PATH"].removeprefix(f"{stubs}{os.pathsep}")
+    test_env = env | as_test.env | {"PATH": test_path}
+    tested = run_test_step(tree, test_env, as_test.argv) if run_test else None
     if tested is not None and tested.returncode != 0:
         return tested, tmp
     as_mise = hermetic.task_run(task, measuring_step(task))
