@@ -12,6 +12,10 @@ Both directions are held. A config tsc cannot parse is refused, through
 `extends` too; and a fact about the tree rather than the config (a
 source that does not parse, an `include` matching nothing, a type
 package that is not installed) is not, because `lint:types` owns those.
+
+The selection beside it, `mise/tsconfig-files.sh`, is held the same
+way, and so is every caller: `lint:types`, `lint:tsconfig-dials` and
+the biome generator each run over a planted tree.
 """
 
 import subprocess
@@ -33,6 +37,7 @@ SCAFFOLD = BELT.parent / "scaffold" / "tsconfig.json"
 
 SOURCE = "export const a = 1;\n"
 GOOD = '{"compilerOptions": {"strict": true}, "include": ["src"]}\n'
+MODULE = '{"name": "fixture", "private": true, "type": "module"}\n'
 # What every accepted row's document states.
 STRICT = True
 # The file list `--listFilesOnly` prints beside a diagnostic.
@@ -242,28 +247,161 @@ def tracked_tree(tree: Path, config: str, env: dict[str, str]) -> None:
     subprocess.run([git, "add", "."], cwd=tree, env=env, check=True)
 
 
+def run_body(name: str, body: str, tree: Path) -> subprocess.CompletedProcess[str]:
+    """Run one task body in the tree, as mise runs it.
+
+    Returns:
+        The finished process.
+
+    """
+    as_mise = hermetic.task_run(name, body)
+    return subprocess.run(
+        as_mise.argv,
+        cwd=tree,
+        env=environment() | as_mise.env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def run_task(name: str, tree: Path) -> subprocess.CompletedProcess[str]:
+    """Run one belt task's own body in the tree.
+
+    Returns:
+        The finished process.
+
+    """
+    tasks = decoded.as_object(
+        decoded.load_toml((BELT / "config.toml").read_bytes())["tasks"], "tasks"
+    )
+    task = decoded.as_object(tasks[name], name)
+    return run_body(name, decoded.as_str(task["run"], f"{name}.run"), tree)
+
+
+SELECT = """
+. "${ORG_BELT_DIR}/tsconfig-files.sh"
+found=() && tsconfig_files found
+printf '%s\\n' ${found[@]+"${found[@]}"}
+"""
+
+# Tracked files, and whether each is one of the repository's projects.
+PROJECTS: tuple[tuple[str, bool], ...] = (
+    ("tsconfig.json", True),
+    ("apps/a/tsconfig.json", True),
+    ("one/two/three/four/five/tsconfig.json", True),
+    ("vendor/lib/tsconfig.json", False),
+    ("apps/a/xtsconfig.json", False),
+    ("apps/a/tsconfig.build.json", False),
+    ("apps/a/tsconfig.json.bak", False),
+)
+
+
+class SelectionTest(unittest.TestCase):
+    """mise/tsconfig-files.sh: which projects a repository has."""
+
+    def test_a_project_is_a_tracked_tsconfig_at_any_depth(self) -> None:
+        """Named exactly, outside vendor/, and tracked."""
+        env = environment()
+        git = hermetic.tool("git")
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = Path(tmp)
+            for name, _ in PROJECTS:
+                (tree / name).parent.mkdir(parents=True, exist_ok=True)
+                (tree / name).write_text("{}", encoding="utf-8")
+            subprocess.run([git, "init", "-q"], cwd=tree, env=env, check=True)
+            subprocess.run([git, "add", "."], cwd=tree, env=env, check=True)
+            (tree / "untracked").mkdir()
+            (tree / "untracked" / "tsconfig.json").write_text("{}", encoding="utf-8")
+            done = run_body("select", SELECT, tree)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        want: list[str] = sorted(name for name, selected in PROJECTS if selected)
+        found: list[str] = sorted(done.stdout.splitlines())
+        self.assertEqual(found, want)
+
+    def test_a_tree_with_none_selects_nothing(self) -> None:
+        """An empty list, and git's success."""
+        env = environment()
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = Path(tmp)
+            (tree / "README").write_text("x", encoding="utf-8")
+            git = hermetic.tool("git")
+            subprocess.run([git, "init", "-q"], cwd=tree, env=env, check=True)
+            subprocess.run([git, "add", "."], cwd=tree, env=env, check=True)
+            done = run_body("select", SELECT, tree)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout, "\n")
+
+    def test_a_git_that_cannot_answer_is_the_function_s_failure(self) -> None:
+        """Outside a repository the selection fails; it is never empty."""
+        with tempfile.TemporaryDirectory() as tmp:
+            done = run_body("select", SELECT, Path(tmp))
+        self.assertNotEqual(done.returncode, 0, done.stdout)
+
+
+def scaffold_with(extra: str) -> str:
+    """Write the scaffold's tsconfig with one more line before its options.
+
+    Returns:
+        The config's text.
+
+    """
+    text = SCAFFOLD.read_text(encoding="utf-8")
+    opened = '"compilerOptions": {'
+    return text.replace(opened, f"{extra}\n  {opened}", 1)
+
+
+class TypesTest(unittest.TestCase):
+    """`lint:types` asks the compiler what a config says, never its text."""
+
+    def test_the_word_references_in_a_comment_is_not_a_finding(self) -> None:
+        """A grep of the file's text refused this project."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = Path(tmp)
+            config = scaffold_with('// no "references" here, by the org\'s rule')
+            # An ES module, installed, for a project with no dependencies.
+            (tree / "package.json").write_text(MODULE, encoding="utf-8")
+            (tree / "node_modules").mkdir()
+            tracked_tree(tree, config, environment())
+            done = run_task("lint:types", tree)
+        self.assertEqual(done.returncode, 0, done.stderr + done.stdout)
+        self.assertIn("lint:types: 1 project(s) checked, 1 files covered", done.stdout)
+
+    def test_declared_references_are_refused_by_name(self) -> None:
+        """The refusal itself is unchanged."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = Path(tmp)
+            config = scaffold_with('"references": [{"path": "../other"}],')
+            tracked_tree(tree, config, environment())
+            done = run_task("lint:types", tree)
+        self.assertEqual(done.returncode, 1, done.stderr + done.stdout)
+        lines = done.stderr.splitlines()
+        said = "lint:types: project references are not supported org-wide"
+        self.assertEqual(lines[0], said)
+        self.assertEqual(lines[1], "  declares references: tsconfig.json")
+
+    def test_a_config_tsc_cannot_parse_ends_the_task_by_name(self) -> None:
+        """The one resolver's finding, before any program is built."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = Path(tmp)
+            tracked_tree(tree, with_one_unknown_option(), environment())
+            done = run_task("lint:types", tree)
+        self.assertEqual(done.returncode, 1, done.stderr + done.stdout)
+        lines = done.stderr.splitlines()
+        self.assertEqual(lines[0], "lint:types: tsconfig.json does not resolve")
+        self.assertIn("error TS5023: Unknown compiler option 'nonsense'", lines[1])
+
+
 class CallersTest(unittest.TestCase):
     """Both sites refuse the config `--showConfig` alone resolved (#2133)."""
 
     def test_the_dials_task_refuses_a_config_stating_every_dial(self) -> None:
         """Every dial is there, so before the resolver this passed."""
-        tasks = decoded.as_object(
-            decoded.load_toml((BELT / "config.toml").read_bytes())["tasks"], "tasks"
-        )
-        task = decoded.as_object(tasks[TASK], TASK)
-        as_mise = hermetic.task_run(TASK, decoded.as_str(task["run"], f"{TASK}.run"))
         env = environment()
         with tempfile.TemporaryDirectory() as tmp:
             tree = Path(tmp)
             tracked_tree(tree, with_one_unknown_option(), env)
-            done = subprocess.run(
-                as_mise.argv,
-                cwd=tree,
-                env=env | as_mise.env,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
+            done = run_task(TASK, tree)
         self.assertEqual(done.returncode, 1, done.stderr + done.stdout)
         lines = done.stderr.splitlines()
         self.assertEqual(lines[0], f"{TASK}: tsconfig.json does not resolve")

@@ -13,7 +13,8 @@
 #
 # - every package.json, from which the generator refuses a domain the
 #   repository has and did not claim (#695);
-# - every tsconfig.json, the list `lint:types` reads, each resolved by
+# - every tsconfig.json, the list `lint:types` reads
+#   (mise/tsconfig-files.sh, the one selection), each resolved by
 #   mise/tsconfig-resolve.sh, the one resolver `lint:tsconfig-dials`
 #   calls too (#2133), so `extends` is followed and the text is read by
 #   TypeScript's own parser. A project whose resolved
@@ -40,8 +41,9 @@ org_task "lint:biome"
 
 generated=${1:?usage: biome-generate.sh <generated config path>}
 
-cfgs=() && org_tracked_read cfgs ':!vendor/**' "tsconfig.json" "*/tsconfig.json" "*/*/tsconfig.json" \
-  "*/*/*/tsconfig.json"
+# shellcheck source=mise/tsconfig-files.sh
+. "${ORG_BELT_DIR}/tsconfig-files.sh"
+cfgs=() && tsconfig_files cfgs
 if [[ -n ${cfgs[0]+set} ]] && ! command -v tsc > /dev/null; then
   org_finding "" "tsc missing from the belt"
   exit 1

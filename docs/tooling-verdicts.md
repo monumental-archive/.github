@@ -1987,6 +1987,15 @@ Two mechanics worth recording, both measured rather than assumed:
   source that does not parse, an `include` matching nothing (the
   canon's own `scaffold/tsconfig.json`) and a type package that is not
   installed stay `lint:types`' to report. 40ms a config, measured.
+  The same change removed the other two ways a tsconfig was read
+  apart. The selection of projects was written three times
+  (`lint:types`, this task, the biome generator), kept alike by hand;
+  it is one function, `mise/tsconfig-files.sh`, and its two deeper
+  pathspecs are gone (measured: git's `*` crosses `/`, so they
+  selected nothing). And `lint:types` found `references` by a grep of
+  each config's text, which refused a project whose config says the
+  word in a comment; it reads the resolved document now, so no belt
+  task reads a tsconfig's text.
 - `declaration` is a required key, not an emit-only one. Setting
   `isolatedDeclarations` without it is `TS5069`, a hard config error, so
   a config carrying one and not the other does not load for any reader.

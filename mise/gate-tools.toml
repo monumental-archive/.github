@@ -94,7 +94,8 @@ when = []
 # lint:audit-scheduled calls it with no guard. The finding writer
 # (findings.sh) encodes each record with it, so every task whose belt
 # script reports a finding calls it too (#1934). tsconfig-resolve.sh
-# writes its scratch tsconfig with it (#2133).
+# writes its scratch tsconfig with it, and tsconfig-references.sh reads
+# the resolved document with it, for lint:types (#2133).
 tasks = [
   "break:check",
   "commits:check",
@@ -128,6 +129,7 @@ tasks = [
   "lint:template-pins",
   "lint:tracks",
   "lint:tsconfig-dials",
+  "lint:types",
   "lint:typescript-properties",
   "lint:vendored",
   "test:pgrx",
