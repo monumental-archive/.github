@@ -1472,68 +1472,65 @@ stops firing on an imported binding, the `fix` key comes out.
 
 `correctness/useImportExtensions` rewrote `from "./App"` to
 `from "./App.tsx"`, which `moduleResolution: bundler` without
-`allowImportingTsExtensions` rejects (TS5097). This one is **configured
-rather than demoted**, because the rule is right that a relative import
-should carry an extension and only wrong about which.
+`allowImportingTsExtensions` rejects (TS5097). The 2026-08 answer
+(#758, #868) configured the rule with `extensionMappings` — `ts`→`js`,
+`tsx`→`js`, `mts`→`mjs`, `cts`→`cjs` — measured as `fix:biome`, then
+`tsc`, then `biome`, across three project shapes and four source
+extensions. That measurement never ran the code.
 
-`forceJsExtensions: true` was the first answer and covered two of the
-four TypeScript source extensions (#868). It suggests `.js` whatever the
-source is, which is right for `.ts` and `.tsx` and wrong for `.mts` and
-`.cts`: TypeScript maps `.js`→`.ts`/`.tsx`, `.mjs`→`.mts` and
-`.cjs`→`.cts`, so `./helper.js` cannot resolve `helper.mts`. The fixer
-therefore wrote a specifier `tsc` refused with TS2307 **and biome's own
-`noUnresolvedImports` refused too** — one tool contradicting itself, with
-no repo-side edit that satisfies both. `extensionMappings` states all
-four instead, so each extension maps to the one TypeScript emits.
+**Withdrawn 2026-11-26 (#2107): one import form, the file on disk.**
+A repository whose server runs as `node src/index.ts` had 433
+specifiers in 105 files rewritten from `./app.ts` to `./app.js`, and
+every entry point then failed at its first import with
+`ERR_MODULE_NOT_FOUND`. Node loads a specifier as written; only
+TypeScript and bundlers map `.js` back to `.ts`. The mapping was chosen
+to satisfy the type checker in projects that lack one compiler option,
+and the option was never an org dial. It is one now:
+`--allowImportingTsExtensions` is in `mise/tsc-flags.txt`, so
+`lint:types` passes it and `lint:tsconfig-dials` requires it in every
+tracked `tsconfig.json`, and it is legal everywhere because the belt
+forces `--noEmit` too. The rule runs with no options: `preset: "all"`
+keeps it on at its default, which writes the file on disk. A repository
+that emits JavaScript with tsc does so from its own build config with
+`rewriteRelativeImportExtensions`.
 
-Measured on biome 2.5.7 and TypeScript 7.0.2, every option setting
-crossed with every project shape the org has and every source extension,
-at the full dial set. What the fixer writes never depends on the shape:
+Measured 2026-11-26 (biome 2.5.7, tsc 7.0.2, Node 24.12.0): a two-file
+project per shape, the dials of `mise/tsc-flags.txt` on tsc's command
+line, one relative import of a `.ts` file and one of a `.mts` file.
+"flag" is `--allowImportingTsExtensions`; "biome default" is the rule
+with no options; "mapped" is the withdrawn `extensionMappings`.
 
-| option | `.ts` | `.tsx` | `.mts` | `.cts` |
-|---|---|---|---|---|
-| shipped default | `.ts` | `.tsx` | `.mts` | `.cts` |
-| `forceJsExtensions: true` | `.js` | `.js` | `.js` | `.js` |
-| `extensionMappings` (org) | `.js` | `.js` | `.mjs` | `.cjs` |
+| shape | `./helper.ts` `./hm.mts`: tsc | tsc + flag | biome default | node | `./helper.js` `./hm.mjs`: tsc | biome mapped | node |
+|---|---|---|---|---|---|---|---|
+| bundler, no flag | TS5097 | ok | clean | runs | ok | clean | `ERR_MODULE_NOT_FOUND` |
+| nodenext + flag | ok | ok | clean | runs | ok | clean | `ERR_MODULE_NOT_FOUND` |
+| nodenext, plain | TS5097 | ok | clean | runs | ok | clean | `ERR_MODULE_NOT_FOUND` |
 
-| project | shipped default | `forceJsExtensions` | `extensionMappings` |
-|---|---|---|---|
-| bundler, no `allowImportingTsExtensions` | TS5097 ×4 | ok, ok, **TS2307**, **TS2307** | ok, ok, **ok**, ✳ |
-| nodenext + `allowImportingTsExtensions` | clean ×4 | ok, ok, **TS2307**, **TS2307** | ok, ok, **ok**, ✳ |
-| nodenext, plain — `scaffold/tsconfig.json` | TS5097 ×4 | ok, ok, **TS2307**, **TS2307** | ok, ok, **ok**, ✳ |
+The `.ts` form with the flag is the only column set clean in every tool
+and every shape. The fixer writes it: `biome lint --write` with the
+default rule turned `./helper.js` into `./helper.ts` and `./hm.mjs`
+into `./hm.mts`, as a safe fix. Produced, per shape, in a tree holding
+`package.json` (`"type": "module"`), `tsconfig.json` (the shape's
+`module` and `moduleResolution`, `lib: ["es2025"]`, `types: []`),
+`src/helper.ts`, `src/hm.mts` and `src/main.ts`, by:
 
-Two things to read off it. The shipped default was broken for the
-scaffold's own default project, so this was never the per-repo accident
-the first issue looked like. And in the `forceJsExtensions` column the
-project shape never changes the answer while the source extension does —
-the extension was the variable the first measurement did not vary, which
-is how a three-shape table can be complete and still miss half the
-population.
+```sh
+tsc -p tsconfig.json $(grep -v '^#' mise/tsc-flags.txt | sed 's/#.*//')
+tsc -p tsconfig.json <the same> --allowImportingTsExtensions
+biome lint src    # biome.json: the rule alone, default or mapped
+node src/main.ts
+biome lint --write src    # the rule at its default, on the .js form
+```
 
-✳ `.cts` never reaches a resolution verdict: under the org's
-`verbatimModuleSyntax` + `erasableSyntaxOnly` a `.cts` file can express
-no module syntax at all — ESM `import`/`export` is TS1286/TS1287, and
-`import x = require()` / `export =` is TS1294. The mapping is stated
-because it is what is true, and it does remove TS2307 in all three
-shapes; the two remaining walls are those dials working, each named by
-the compiler, so the belt adds no ban of its own.
+with the 2026-11-26 flags file, which did not yet name the flag.
+`mise/test_import_extensions.py` keeps the fixture in the suite: the
+`.ts` form clean in `lint:biome` and `lint:types`, the `.js` form red
+in `lint:biome` naming the rule.
 
-**The option is used outside its documented rationale on purpose.**
-biome documents `forceJsExtensions` for "the `module: node16` setting
-when building your code with `tsc`" and `extensionMappings` for bundling
-to a package; neither mentions `moduleResolution: bundler`, and 2.5.7
-ships **no bundler-aware option at all** — both keys choose which
-extension is suggested, and neither can suppress the suggestion. Read
-alone, that says no configuration serves the bundler case, which is what
-the first lane concluded and wrote down. The tables above are the
-correction, and the rule they repeat for this tool: the docs are the
-cross-check, the pinned binary decides — and a measurement is only as
-wide as the inputs it varied.
-
-Proven end to end on the fixture: after the change
-the fixer leaves `test.prop` alone, rewrites `./App` to `./App.js`,
-still touches 73 files, and the tree comes out with `TS5097: 0`, 22 test
-files and 337 tests passing.
+Proven end to end on the fixture: after the change the fixer leaves
+`test.prop` alone, rewrites `./App` to `./App.js` (the mapping withdrawn
+above), still touches 73 files, and the tree comes out with `TS5097: 0`,
+22 test files and 337 tests passing.
 
 What this costs the belt is a smaller promise, stated where the promise
 lives: `fix:biome` applies every fix biome calls safe **minus the ones
