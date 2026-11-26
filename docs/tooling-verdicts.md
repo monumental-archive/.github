@@ -1655,9 +1655,10 @@ finding. Both directions and the near miss:
 | `probe.test.ts`, `src/colocated.test.ts` | clean |
 | `test/probe.test.ts`, `tests/unit/probe.test.ts` | clean |
 
-One entry, and the count is load-bearing: the docs state that when a
-file matches several patterns "only the first one is used", so a second
-entry added later would not compose with this one.
+One entry in the delivered file. The docs state that when a file
+matches several patterns "only the first one is used", but biome 2.5.7
+applies every entry a file matches, in either order (measured for
+issue 2116), so the generated per-project Node entries compose with it.
 
 **`suspicious/noMisplacedAssertion` is deliberately not in it.** Its 8
 findings on the same tree are all false, but not because they are in
@@ -1818,6 +1819,23 @@ turned off org-wide, because it is a real check for the browser code the
 org will import next. A Node application answers it where every other
 exception in this org is answered: in the repo, per file,
 `biome-ignore-all lint/correctness/noNodejsModules:` with a reason.
+
+**Amended 2026-11-26 (#2116): the rule is scoped per project after
+all, from a fact the repository already states.** Whether a project
+runs on Node is written in each `tsconfig.json`'s
+`compilerOptions.types`. `lint:biome` and `fix:biome` now resolve every
+tracked tsconfig with `tsc -p <config> --showConfig`, as
+`lint:tsconfig-dials` does, and the generator appends one override per
+project whose resolved `types` holds `node`, switching the rule off
+under that tsconfig's directory (`**` for a root one). The repository
+writes nothing, and its `biome.json` still may state only domains. It
+stays on everywhere else: in a browser project tsc refuses `node:fs`
+(TS2591) only until a dependency's own types pull Node in (vite's do),
+so biome's rule is the only check there. Measured on
+monumental-archive with its 46 per-file comments removed:
+`noNodejsModules` 55 → 0, every diagnostic 583 → 528. The per-file
+comments above are no longer the answer for a project that declares
+Node's types.
 
 **Nursery stays on, and this is the ruling rather than the default.**
 Biome prints "not yet stable and may change in the future" beside all 87

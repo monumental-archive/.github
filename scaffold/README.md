@@ -102,12 +102,12 @@ it and never will; see the entry below.
   and you keep react's six, lose the other frameworks', and keep every
   rule that belongs to no framework at all.
 
-  What this file cannot do is scope a rule that has no domain.
-  `noNodejsModules` is the one that bites a Node service: biome gives it
-  no domain, so the answer is biome's own per-file directive in the file
-  that needs it — `biome-ignore-all lint/correctness/noNodejsModules:`
-  with the reason — decided in the repo, like every other exception
-  (#694).
+  What this file cannot do is scope a rule that has no domain, and it
+  does not need to for `noNodejsModules`, the one that bites a Node
+  service: the belt reads `compilerOptions.types` from each tracked
+  `tsconfig.json`, and a project whose types hold `node` has the rule
+  off under its own directory (#2116). Declare Node's types in the
+  tsconfig and write nothing here.
 - `renovate.json` — extends the org preset
 - `lefthook.yml` — pulls the org git hooks by remote. Once per clone:
   `lefthook install`, then `lefthook run post-checkout`, which links

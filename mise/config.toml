@@ -1542,10 +1542,13 @@ dir = "{{cwd}}"
 # BYPASSES `overrides` entirely — the same tree reports all three under
 # `--only`, so never measure an override with it.
 #
-# ONE ENTRY, and the count is load-bearing: biome documents that "if a
-# file can match three patterns, only the first one is used". A second
-# entry added later does not compose with this one for a file matching
-# both — it replaces it.
+# ONE ENTRY in the delivered file. biome documents that "if a file can
+# match three patterns, only the first one is used", but 2.5.7 applies
+# every entry a file matches, in either order (measured at #2116: a
+# `.test.ts` file under a Node project's directory loses both
+# `noMagicNumbers` and `noNodejsModules` whichever entry comes first),
+# so the generated config's per-project Node entries compose with this
+# one.
 #
 # `suspicious/noMisplacedAssertion` IS NOT IN THIS OVERRIDE, ruled
 # separately and deliberately. Its 8 findings on the same tree are all
@@ -1761,12 +1764,21 @@ dir = "{{cwd}}"
 # #788, so the live one is `useConsistentTestIt` — `test` domain, 2 → 2
 # on the same fixture whether or not the repo claims react.
 #
-# One rule the domains cannot reach, recorded so its absence is not read
-# as an oversight: `noNodejsModules` has NO domain at all (`biome
-# explain`), so no belt mechanism can scope it to browser code. A Node
-# application answers it where the org's rule is answered everywhere
-# else — in the repo, per file, with `biome-ignore-all
-# lint/correctness/noNodejsModules: <reason>` (#694).
+# One rule the domains cannot reach: `noNodejsModules` has NO domain at
+# all (`biome explain`), and whether a project runs on Node is a fact
+# about the project, not the org (#2116). The repository already states
+# it in each `tsconfig.json`'s `compilerOptions.types`, so the task
+# resolves every tracked tsconfig — the list `lint:types` reads — with
+# `tsc -p <config> --showConfig`, exactly as `lint:tsconfig-dials` does,
+# and the generator appends one override per project whose resolved
+# `types` holds `node`, switching the rule off under that tsconfig's
+# directory (`**` for a root one). Everywhere else it stays on: in a
+# browser project the compiler refuses `node:fs` (TS2591) only until a
+# dependency's own types pull Node in (vite's do), so biome's rule is
+# the only check there. A tsconfig `--showConfig` refuses ends the task
+# by name. `mise/biome-generate.sh` does the resolving and the generator
+# call for both this task and `fix:biome`. Measured on monumental-archive with its 46 per-file comments
+# removed: noNodejsModules 55 → 0, every diagnostic 583 → 528.
 #
 # The severity floor is belt-side because --error-on-warnings is NOT one:
 # 123 of the 514 rules default to `info`, and an info diagnostic prints
@@ -1798,12 +1810,7 @@ if org_tracked_has "${generated}"; then
 fi
 rc=0
 trap 'rc=$?; rm -f "${generated}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
-org_tracked ':!vendor/**' "package.json" "*/package.json" \
-  | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/biome_config.py" \
-    --org "${ORG_BELT_DIR}/biome-org.json" \
-    --domains "${ORG_BELT_DIR}/biome-domains.tsv" \
-    --nursery "${ORG_BELT_DIR}/biome-nursery-domains.tsv" \
-    --out "${generated}"
+bash "${ORG_BELT_DIR}/biome-generate.sh" "${generated}"
 report=$(mktemp)
 printf '%s\0' "${files[@]}" \
   | xargs -0 biome ci --config-path "${generated}" --reporter=json --reporter-file="${report}" \
@@ -1874,12 +1881,7 @@ if org_tracked_has "${generated}"; then
 fi
 rc=0
 trap 'rc=$?; rm -f "${generated}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
-org_tracked ':!vendor/**' "package.json" "*/package.json" \
-  | "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/biome_config.py" \
-    --org "${ORG_BELT_DIR}/biome-org.json" \
-    --domains "${ORG_BELT_DIR}/biome-domains.tsv" \
-    --nursery "${ORG_BELT_DIR}/biome-nursery-domains.tsv" \
-    --out "${generated}"
+bash "${ORG_BELT_DIR}/biome-generate.sh" "${generated}"
 printf '%s\0' "${files[@]}" | xargs -0 biome check --config-path "${generated}" --write
 org_done=1
 '''

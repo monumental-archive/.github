@@ -454,7 +454,7 @@ class TestFileOverrideTest(unittest.TestCase):
 
         """
         overrides = decoded.as_array(self.org["overrides"], "overrides")
-        self.assertEqual(len(overrides), 1, msg="biome uses only the FIRST match")
+        self.assertEqual(len(overrides), 1, msg="the delivered file carries one entry")
         return decoded.as_object(overrides[0], "overrides[0]")
 
     def test_the_glob_list_is_exactly_the_closed_list(self) -> None:
@@ -863,6 +863,342 @@ class RunTest(unittest.TestCase):
             status = biome_config.run(args, [])
         self.assertEqual(status, 1)
         self.assertIn("not valid JSON", stderr.getvalue())
+
+
+# A Node import, the one line noNodejsModules judges (#2116).
+NODE_IMPORT = (
+    'import { readFileSync } from "node:fs";\n\nexport const read = readFileSync;\n'
+)
+
+# What a row expects when no project is Node.
+NO_ENTRIES: list[dict[str, object]] = []
+
+# The override a Node project gets, as biome's config spells it.
+NODE_OFF = {"rules": {"correctness": {"noNodejsModules": "off"}}}
+
+
+def generate_main(tree: Path, out: Path, *extra: str) -> hermetic.Called:
+    """Run the generator's entry point with a tree's declaration.
+
+    Returns:
+        The finished call.
+
+    """
+    return hermetic.call_main(
+        lambda: biome_config.main([
+            *("--org", str(ORG_FILE), "--domains", str(DOMAINS_FILE)),
+            *("--nursery", str(NURSERY_FILE), "--out", str(out)),
+            *("--declaration", str(tree / "biome.json")),
+            *extra,
+        ]),
+        stdin="",
+    )
+
+
+def node_tsconfig(types: list[str]) -> str:
+    """Render a tsconfig.json declaring `types` over its own `src`.
+
+    Returns:
+        The file's text.
+
+    """
+    options: dict[str, object] = {"types": types}
+    config: dict[str, object] = {"compilerOptions": options, "include": ["src"]}
+    return json.dumps(config)
+
+
+def node_rule(entry: object) -> object:
+    """Read the rule an override sets for noNodejsModules.
+
+    Returns:
+        The setting, or None when the entry does not name the rule.
+
+    """
+    rules = table(entry, "linter", "rules")
+    return table_or_empty(rules, "correctness").get("noNodejsModules")
+
+
+class NodeOverridesTest(unittest.TestCase):
+    """noNodejsModules is off where a tsconfig declares Node's types (#2116)."""
+
+    @staticmethod
+    def resolved(types: object) -> dict[str, object]:
+        """Build a resolved document as `tsc --showConfig` prints one.
+
+        Returns:
+            The document, with `types` under `compilerOptions`.
+
+        """
+        return {"compilerOptions": {"strict": True, "types": types}}
+
+    def test_only_the_node_project_gets_an_override(self) -> None:
+        """apps/a declares node, apps/b does not: one entry, for apps/a/**."""
+        entries = biome_config.node_overrides({
+            "apps/a/tsconfig.json": self.resolved(["node"]),
+            "apps/b/tsconfig.json": self.resolved(["vite/client", "geojson"]),
+        })
+        expected: list[dict[str, object]] = [
+            {"includes": ["apps/a/**"], "linter": NODE_OFF},
+        ]
+        self.assertEqual(entries, expected)
+
+    def test_a_root_node_project_covers_the_whole_tree(self) -> None:
+        """The tsconfig's directory is the root, so the pattern is `**`."""
+        root = {"tsconfig.json": self.resolved(["node"])}
+        entries = biome_config.node_overrides(root)
+        includes = [decoded.as_object(e, "an entry")["includes"] for e in entries]
+        expected: list[object] = [["**"]]
+        self.assertEqual(includes, expected)
+
+    def test_no_tsconfig_yields_no_override(self) -> None:
+        """A repository with no TypeScript project keeps the rule everywhere."""
+        self.assertEqual(biome_config.node_overrides({}), NO_ENTRIES)
+
+    def test_a_document_with_no_types_yields_no_override(self) -> None:
+        """Absent `types` is not Node, whatever the compiler would load."""
+        documents: tuple[object, ...] = ({"compilerOptions": {"strict": True}}, {})
+        for document in documents:
+            with self.subTest(document=document):
+                project = {"apps/a/tsconfig.json": document}
+                entries = biome_config.node_overrides(project)
+                self.assertEqual(entries, NO_ENTRIES)
+
+    def test_a_types_entry_that_only_resembles_node_is_not_node(self) -> None:
+        """The entry is "node" exactly; `@types/node`-ish names are not it."""
+        shapes: tuple[object, ...] = (["node-fetch"], ["nodes"], [], "node")
+        for types in shapes:
+            with self.subTest(types=types):
+                project = {"a/tsconfig.json": self.resolved(types)}
+                entries = biome_config.node_overrides(project)
+                self.assertEqual(entries, NO_ENTRIES)
+
+    def test_a_resolved_document_that_is_not_an_object_is_refused(self) -> None:
+        """A shape the belt does not read is named, never read as "not Node"."""
+        rows: tuple[tuple[object, str], ...] = (
+            ([], "apps/a/tsconfig.json is not an object"),
+            ({"compilerOptions": []}, "apps/a/tsconfig.json compilerOptions is not"),
+        )
+        for document, said in rows:
+            refused = self.assertRaises(decoded.UndecodableError)
+            with self.subTest(said=said), refused as raised:
+                biome_config.node_overrides({"apps/a/tsconfig.json": document})
+            self.assertTrue(str(raised.exception).startswith(said), raised.exception)
+
+    def test_the_entries_follow_the_org_overrides_in_the_generated_config(self) -> None:
+        """Appended, so the org's test-file entry is kept and stays first."""
+        org = org_config()
+        config, _silenced = biome_config.generate(
+            org,
+            set(),
+            DELIVERED,
+            NURSERY,
+            {"apps/a/tsconfig.json": self.resolved(["node"])},
+        )
+        overrides = decoded.as_array(config["overrides"], "overrides")
+        delivered = decoded.as_array(org["overrides"], "overrides")
+        self.assertEqual(overrides[: len(delivered)], delivered)
+        self.assertEqual(len(overrides), len(delivered) + 1)
+        self.assertEqual(node_rule(overrides[-1]), "off")
+
+    def test_the_rule_stays_on_at_the_top_level(self) -> None:
+        """Only the override switches it off; the preset still carries it."""
+        config, _silenced = biome_config.generate(
+            org_config(),
+            set(),
+            DELIVERED,
+            NURSERY,
+            {"tsconfig.json": self.resolved(["node"])},
+        )
+        top = table(config, "linter", "rules")
+        self.assertEqual(top["preset"], "all")
+        self.assertNotIn("noNodejsModules", table_or_empty(top, "correctness"))
+
+    def test_a_repository_stating_the_rule_is_still_refused(self) -> None:
+        """The repository writes nothing: its own override is refused as before."""
+        stated: tuple[object, ...] = (
+            {"linter": NODE_OFF},
+            {"overrides": [{"includes": ["apps/a/**"], "linter": NODE_OFF}]},
+        )
+        for document in stated:
+            with self.subTest(document=document):
+                tree = Path(tempfile.mkdtemp())
+                text = declaration(document)
+                (tree / "biome.json").write_text(text, encoding="utf-8")
+                resolved = tree / "resolved.json"
+                node = json.dumps(self.resolved(["node"]))
+                resolved.write_text(node, encoding="utf-8")
+                out = tree / "generated.json"
+                done = generate_main(
+                    tree, out, "--tsconfig", "apps/a/tsconfig.json", str(resolved)
+                )
+                self.assertEqual(done.returncode, 1)
+                self.assertIn("says more than a repository may say", done.stderr)
+                self.assertFalse(out.exists())
+
+    def test_a_resolved_file_that_is_not_json_is_refused_by_its_tsconfig(self) -> None:
+        """The task hands over tsc's output; garbage there is named, not crashed on."""
+        tree = Path(tempfile.mkdtemp())
+        resolved = tree / "resolved.json"
+        resolved.write_text("{", encoding="utf-8")
+        out = tree / "generated.json"
+        done = generate_main(
+            tree, out, "--tsconfig", "apps/a/tsconfig.json", str(resolved)
+        )
+        self.assertEqual(done.returncode, 1)
+        lines = done.stderr.splitlines()
+        self.assertEqual(
+            lines[0],
+            f"{TASK}: a resolved tsconfig.json is not the shape the belt reads",
+        )
+        said = "  apps/a/tsconfig.json: tsc --showConfig"
+        self.assertTrue(lines[1].startswith(said))
+        self.assertFalse(out.exists())
+
+
+def show_configs(
+    tree: Path, env: dict[str, str], projects: tuple[str, ...]
+) -> list[str]:
+    """Resolve each project's tsconfig with real tsc, as the task does.
+
+    Returns:
+        The generator's `--tsconfig` arguments, one triple per project.
+
+    """
+    tsc = hermetic.tool("tsc")
+    pairs: list[str] = []
+    for project in projects:
+        cfg = f"apps/{project}/tsconfig.json"
+        resolved = tree / f"{project}.resolved.json"
+        shown = subprocess.run(
+            [tsc, "-p", cfg, "--showConfig"],
+            cwd=tree,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        resolved.write_text(shown.stdout, encoding="utf-8")
+        pairs += ["--tsconfig", cfg, str(resolved)]
+    return pairs
+
+
+class NodeFixtureTest(unittest.TestCase):
+    """The same `node:fs` import in two projects, under real tsc and biome (#2116).
+
+    Both tools are the belt's own: tsc resolves each tsconfig exactly as
+    the task does, the generator writes the config, and biome judges the
+    two files. Measured without `--only`, which turns a rule on whatever
+    the config says.
+    """
+
+    def test_the_node_project_is_clean_and_the_other_is_a_finding(self) -> None:
+        """apps/a declares node and passes; apps/b does not and is reported."""
+        biome = hermetic.tool("biome")
+        git = hermetic.tool("git")
+        with tempfile.TemporaryDirectory() as tmp:
+            # Resolved: biome anchors `includes` at the config's real
+            # directory, and macOS's /var is a link to /private/var.
+            tree = Path(tmp).resolve()
+            for project, types in (("a", ["node"]), ("b", [])):
+                (tree / "apps" / project / "src").mkdir(parents=True)
+                (tree / "apps" / project / "tsconfig.json").write_text(
+                    node_tsconfig(types), encoding="utf-8"
+                )
+                (tree / "apps" / project / "src" / "probe.ts").write_text(
+                    NODE_IMPORT, encoding="utf-8"
+                )
+            env = hermetic.env()
+            subprocess.run([git, "init", "-q"], cwd=tree, env=env, check=True)
+            pairs = show_configs(tree, env, ("a", "b"))
+            generated = tree / "biome-org.generated.json"
+            made = generate_main(tree, generated, *pairs)
+            self.assertEqual(made.returncode, 0, made.stderr)
+            self.assertIn("noNodejsModules off in 1 Node project(s)", made.stdout)
+            report = tree / "report.json"
+            subprocess.run(
+                [
+                    *(biome, "lint", "--config-path", str(generated)),
+                    *("--reporter=json", f"--reporter-file={report}"),
+                    *("apps/a/src/probe.ts", "apps/b/src/probe.ts"),
+                ],
+                cwd=tree,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            document = decoded.load_json(report.read_text(encoding="utf-8"))
+        found = [
+            decoded.as_str(table(d, "location")["path"], "path")
+            for d in decoded.as_array(table(document)["diagnostics"], "diagnostics")
+            if table(d)["category"] == "lint/correctness/noNodejsModules"
+        ]
+        expected: list[str] = ["apps/b/src/probe.ts"]
+        posix: list[str] = [Path(f).as_posix() for f in found]
+        self.assertEqual(posix, expected)
+
+
+class NodeTaskBodyTest(unittest.TestCase):
+    """The task resolves each tracked tsconfig; one tsc refuses ends it by name."""
+
+    def run_body(self, task: str) -> subprocess.CompletedProcess[str]:
+        """Run one belt task body over a tree whose tracked tsconfig is gone.
+
+        tsc 7.0.2's `--showConfig` exits 0 on a tsconfig it cannot parse;
+        the refusal it does make is TS5058, a path that does not exist,
+        which is what a tracked tsconfig deleted from the tree meets.
+
+        Returns:
+            The finished process.
+
+        """
+        tasks = decoded.as_object(
+            decoded.load_toml((BELT / "config.toml").read_bytes())["tasks"], "tasks"
+        )
+        table_ = decoded.as_object(tasks[task], task)
+        body = decoded.as_str(table_["run"], f"{task}.run")
+        git = hermetic.tool("git")
+        tsc = Path(hermetic.tool("tsc")).parent
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = Path(tmp)
+            (tree / "apps" / "a" / "src").mkdir(parents=True)
+            (tree / "apps" / "a" / "tsconfig.json").write_text(
+                node_tsconfig(["node"]), encoding="utf-8"
+            )
+            probe = tree / "apps" / "a" / "src" / "probe.ts"
+            probe.write_text(NODE_IMPORT, encoding="utf-8")
+            env = hermetic.env(
+                PATH=f"{tsc}:{hermetic.env().get('PATH', '')}",
+                ORG_PYTHON=sys.executable,
+                ORG_BELT_DIR=str(BELT),
+            )
+            subprocess.run([git, "init", "-q"], cwd=tree, env=env, check=True)
+            subprocess.run([git, "add", "."], cwd=tree, env=env, check=True)
+            (tree / "apps" / "a" / "tsconfig.json").unlink()
+            as_mise = hermetic.task_run(task, body)
+            done = subprocess.run(
+                as_mise.argv,
+                cwd=tree,
+                env=env | as_mise.env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            leftovers = sorted(p.name for p in tree.iterdir())
+        expected: list[str] = [".git", "apps"]
+        self.assertEqual(leftovers, expected, "the run left residue")
+        return done
+
+    def test_a_tsconfig_tsc_refuses_ends_both_tasks_by_name(self) -> None:
+        """The compiler's own message is printed under the tsconfig's name."""
+        for task in ("lint:biome", "fix:biome"):
+            with self.subTest(task=task):
+                done = self.run_body(task)
+                self.assertEqual(done.returncode, 1, done.stderr)
+                lines = done.stderr.splitlines()
+                said = f"{task}: apps/a/tsconfig.json does not resolve"
+                self.assertEqual(lines[0], said)
+                self.assertTrue(lines[1].startswith("  error TS5058:"), done.stderr)
 
 
 BIOME_STUB = """#!/bin/sh
