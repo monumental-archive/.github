@@ -6132,12 +6132,12 @@ depends = [{ task = "test", optional = true }]
 # (#1875, `--job gate`): a recorded `pgrx-pgNN` is the pgrx job's to
 # judge, and the plan job holds the record to the jobs it planned.
 #
-# Every fuzz target is a leg too, owned by this job (#1896): the
-# measurement's `fuzz` leg replays each target's committed corpus once
-# and prints `fuzz-<name> <percent>`, and each is held to a floor line
-# of its own, never to the main floor. A target with no line in the
-# floor is red by name, the remedy `mise run coverage:adopt`: a target
-# nobody measures is the defect, so there is no grace.
+# No fuzz target is measured here (#2090): a target's figure divides by
+# every line it links, so it fell whenever the crate grew. The nightly
+# search (audit:fuzz, audit:go-fuzz) compares a corpus with itself on
+# one commit and proposes what it lacks; lint:fuzz-build still builds
+# every target and replays its corpus. A `fuzz-*` line left in the
+# floor is refused by name, with the lines to delete.
 run = '''
 floor=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/coverage_floor.py" read) || exit 1
 tracked=$(org_tracked '*.py' | tr '\0' '\n' && "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/coverage_floor.py" legs) || tracked=""
@@ -6196,11 +6196,8 @@ dir = "{{cwd}}"
 # floor in its own pgrx job, so the floor is derived from them too. The
 # selector prints nothing where there is no extension.
 #
-# Every fuzz target gets its own `fuzz-<name>` line (#1896), measured in
-# the same `all` run that coverage:check makes, under the same law: one
-# floor per target, so a target whose corpus rots cannot hide behind one
-# that grows. A target that no longer exists leaves the floor only
-# through a `dropped:` line.
+# It writes no fuzz line (#2090): a fuzz target is no leg of the floor,
+# and its corpus's depth is the nightly search's to grow.
 #
 # A sequence, not one script (#1667): adoption measures the repository's
 # own `test` run, through `measured`, which measures only a tree whose

@@ -5,9 +5,8 @@
 #
 # The search never writes a find into the tracked corpus. A find is a
 # candidate, and a candidate is kept only when it raises its target's
-# line coverage as the coverage floor's fuzz leg measures it
-# (org_fuzz_measure in fuzz-measure-lib.sh, #1896), one at a time in
-# name order. A crashing
+# line coverage (org_fuzz_measure in fuzz-measure-lib.sh, #1896), one
+# at a time in name order. A crashing
 # input is kept as well. What is kept is STAGED: copied under the stage
 # directory at the path it would have in the repository, which
 # repo-deep-tests.yml uploads and its `propose` job turns into a pull
@@ -156,16 +155,20 @@ org_fuzz_proposed() {
 # org_fuzz_select <label> <leg> <dir> <stage dir> <measure...> -- <candidate...>
 #
 # Keeps the candidates that raise the figure (#1897 item 2). <measure>
-# is org_fuzz_measure's arguments after the leg (fuzz-measure-lib.sh,
-# the measurement the coverage floor's fuzz leg makes): `rust <target>
-# <dir>`, or `go <package dir> <Fuzz name>` with <dir> that package's
-# testdata/fuzz/<Fuzz name>. It measures <dir> as it is, then adds each
+# is org_fuzz_measure's arguments after the leg (fuzz-measure-lib.sh):
+# `rust <target> <dir>`, or `go <package dir> <Fuzz name>` with <dir>
+# that package's testdata/fuzz/<Fuzz name>. It measures <dir> as it is,
+# then adds each
 # candidate to it in name order and measures again: a candidate whose
 # figure is strictly higher is kept, staged at <stage dir>/<its name>,
 # and stays in <dir> for the next one's measurement; any other is taken
 # out again. A candidate whose name <dir> already holds is the same
 # input and is skipped. Every candidate added to <dir> is removed
 # before it returns, so <dir> is left as found.
+#
+# The first measurement is printed on stderr, once per target, as
+# `<leg>: corpus reaches <percent>% of the lines it links` (#2090):
+# information only, which nothing holds.
 #
 # Prints `<before> <after> <kept>`.
 org_fuzz_select() {
@@ -179,6 +182,7 @@ org_fuzz_select() {
   [[ $# -eq 0 ]] || shift
   mkdir -p -- "${dir}" || return 1
   before=$(org_fuzz_measure "${label}" "${leg}" "${measure[@]}") || return 1
+  echo "${leg}: corpus reaches ${before}% of the lines it links" >&2
   current=${before}
   # In name order: each candidate as `<name><tab><path>`, sorted.
   list=$(mktemp) || return 1

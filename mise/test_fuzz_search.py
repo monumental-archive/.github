@@ -424,6 +424,26 @@ class RustSearch(SearchCase):
         same(self, [], self.staged())
         self.assertIn("corpus 10% to 10%, 0 input(s) kept, 0 crash(es)", result.stdout)
 
+    def test_each_target_prints_its_figure_once(self) -> None:
+        """`<leg>: corpus reaches <percent>% of the lines it links` (#2090).
+
+        Information only: the run is green whatever the figure.
+        """
+        self.rust_two()
+        result = self.run_task("audit:fuzz")
+        self.assertEqual(0, result.returncode, result.stderr)
+        printed = [
+            line for line in result.stderr.splitlines() if "corpus reaches" in line
+        ]
+        same(
+            self,
+            [
+                "fuzz-parse-marker: corpus reaches 10% of the lines it links",
+                "fuzz-parse-date: corpus reaches 10% of the lines it links",
+            ],
+            printed,
+        )
+
     def test_a_crash_is_staged_into_the_corpus_and_the_run_is_red(self) -> None:
         """A crash- file libFuzzer wrote is staged in fuzz/corpus/<target>/."""
         self.rust()

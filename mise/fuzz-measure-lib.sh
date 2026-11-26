@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # A fuzz target's leg name and its figure (#1896, #1897). Sourced, never
-# run: the coverage floor's fuzz leg (coverage-measure.sh) and the
-# scheduled search (fuzz-search-rust.sh, fuzz-search-go.sh) measure
-# through the one function here, so the search keeps a find by exactly
-# the figure the floor holds. Kept out of fuzz-corpus-lib.sh, which
-# lint:fuzz-build's replay sources and which needs none of these tools.
+# run: the scheduled search (fuzz-search-rust.sh, fuzz-search-go.sh)
+# measures through the one function here, the Rust and Go targets alike.
+# No coverage floor holds the figure (#2090). Kept out of
+# fuzz-corpus-lib.sh, which lint:fuzz-build's replay sources and which
+# needs none of these tools.
 # The writer beside this file, found with no command run (#1934).
 org__here=${BASH_SOURCE[0]%/*}
 [[ ${org__here} != "${BASH_SOURCE[0]}" ]] || org__here=.
@@ -13,8 +13,8 @@ org__here=${BASH_SOURCE[0]%/*}
 unset org__here
 
 # org_fuzz_leg_name <name>: a fuzz target's leg (#1896), `fuzz-<name>`
-# lower-cased, every character but [a-z0-9] turned into `-`, so it fits
-# coverage_floor.py's leg grammar whatever the target is called.
+# lower-cased, every character but [a-z0-9] turned into `-`: one name
+# per target, whatever the target is called.
 org_fuzz_leg_name() {
   local name
   name=$(LC_ALL=C tr '[:upper:]' '[:lower:]' <<< "$1")
@@ -26,11 +26,9 @@ org_fuzz_leg_name() {
 #
 # A fuzz target's figure (#1896): the line coverage of replaying its
 # corpus once, printed as a bare percent. The ONE measurement: the
-# coverage floor's fuzz leg (coverage-measure.sh) hands it the tracked
-# copy org_fuzz_corpus_copy made, and the scheduled search (#1897,
-# fuzz-search-lib.sh) hands it that copy plus a candidate, so the
-# search's figure and the floor's cannot differ. It reads no
-# environment variable of its own.
+# scheduled search (#1897, fuzz-search-lib.sh) hands it the corpus, then
+# the corpus plus a candidate, so both figures are taken one way. It
+# reads no environment variable of its own.
 #
 # Rust: <corpus> replayed by `cargo fuzz coverage -s none` into a build
 # directory of its compiler (#1877); the figure is llvm-cov's over the

@@ -3,8 +3,7 @@
 # audit:go-fuzz, whose comment in mise/config.toml says what the run is
 # and is not; a script rather than a task body, which the belt holds to
 # fifteen lines. What a run keeps is fuzz-search-lib.sh's rule, measured
-# by fuzz-measure-lib.sh's org_fuzz_measure, the coverage floor's own
-# measurement.
+# by fuzz-measure-lib.sh's org_fuzz_measure.
 #
 # Run from the repository root, under the belt (ORG_PYTHON).
 # FUZZ_SECONDS is each target's whole budget, the belt's and no
@@ -161,8 +160,7 @@ for m in "${mods[@]}"; do
       done <<< "${listing}"
       # Every module's targets are measured (#1899): rel is the package
       # directory from the repository root, and org_fuzz_measure runs
-      # in the module that owns it, as the coverage floor's fuzz leg
-      # does.
+      # in the module that owns it.
       if [[ ${rel} == . ]]; then
         leg=$(org_fuzz_leg_name "${target#Fuzz}") || exit 1
       else
