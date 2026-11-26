@@ -17,12 +17,18 @@ process: `fc.configureGlobal`. vitest's CLI refuses `--setupFiles`
 (`CACError: Unknown option`), so the setup file reaches vitest through
 a WRAPPER CONFIG this script writes to a scratch directory and the
 shell hands vitest with `-c`. The wrapper imports the repository's own
-vitest config unchanged and adds four things for this run only: the
-belt's setup file, `include` narrowed to exactly the tracked property
-files (so a property the repository's own globs miss still runs), the
-default `exclude` (so a repository that keeps properties out of its own
-suite still has them run here), and a JSON report, which `verify`
-reads to prove every file ran. Nothing is written into the repository.
+vitest config unchanged and adds, for this run only, a JSON report,
+which `verify` reads to prove every file ran, and a reporter whose
+`onInit` hands the belt's setup file to every project vitest resolved,
+however the config declared it (#2104): a project does not inherit
+the root's `setupFiles`. The same hook sets each project's `exclude`
+to vitest's default, so a repository that keeps properties out of its
+own suite still has them run here. Where the config has no
+`test.projects`, the wrapper also narrows `include` to exactly the
+tracked property files, so a property the repository's own globs miss
+still runs; where it has projects, the file filters put each property
+file in the project whose `include` matches it, and a file no project
+includes does not run. Nothing is written into the repository.
 
 The setup file configures every fast-check instance the repository can
 import — `fast-check` itself and the `fc` that `@fast-check/vitest`
@@ -32,7 +38,11 @@ every example (verbosity 2) and installs a reporter that prints, per
 property, its test, run count, seed and a digest of every generated
 example: two gate runs of one commit print the same lines, which is
 the determinism claim made visible. A failure still throws fast-check's
-own report, counterexample and replay path included.
+own report, counterexample and replay path included. Last, it appends
+its test file's path to the file `ORG_PROPERTY_SEEDED` names: `onInit`
+changing a project's config is not a contract vitest documents, and
+that list is what makes a vitest that stops loading the seed red by
+name rather than green at fast-check's own random seed.
 
 Subcommands, run from the repository root:
 
@@ -45,8 +55,10 @@ Subcommands, run from the repository root:
   stage DIR [CONFIG]         writes the wrapper and setup file into
                              DIR; the property files come on stdin,
                              NUL-separated (org_tracked, #1986)
-  verify REPORT FILE...      exits 1 unless every FILE ran, with at
-                             least one test, in vitest's JSON report
+  verify REPORT SEEDED FILE...
+                             exits 1 unless every FILE ran, with at
+                             least one test, in vitest's JSON report,
+                             and is in SEEDED, the setup file's list
   collected LIST FILE...     exits 1, printing each, when a FILE is in
                              `vitest list --filesOnly --json`'s LIST:
                              the repository's own run collects it
@@ -66,10 +78,12 @@ import typed_std
 from tracked import stdin_paths
 
 EXIT_USAGE = 2
-# stage takes a directory and, optionally, the config; verify a report
+# stage takes a directory and, optionally, the config; verify a
+# report, the seeded list and at least one file; collected a listing
 # and at least one file.
 STAGE_ARGS = (1, 2)
-VERIFY_MIN_ARGS = 2
+VERIFY_MIN_ARGS = 3
+COLLECTED_MIN_ARGS = 2
 
 # The lockfile reader is coverage_js_runner.py's, so the TypeScript
 # legs agree on what "the lockfile pins vitest" means (#1357).
@@ -104,6 +118,7 @@ DEFAULT_EXCLUDE = ["**/node_modules/**", "**/.git/**"]
 SETUP = """\
 // Written by the belt's typescript_properties.py for one run (#1549).
 import { createHash } from "node:crypto";
+import { appendFileSync } from "node:fs";
 import { expect } from "vitest";
 
 const seed = Number(process.env.ORG_PROPERTY_SEED);
@@ -146,32 +161,49 @@ for (const fc of found) {
     },
   });
 }
+// The proof this file ran seeded (#2104): `verify` reds a file in the
+// report and not in this list, so a vitest that stops loading the seed
+// is red by name, never green at fast-check's own random seed.
+const seeded = process.env.ORG_PROPERTY_SEEDED;
+if (!seeded) {
+  throw new Error("typescript-properties: ORG_PROPERTY_SEEDED is unset");
+}
+appendFileSync(seeded, `${expect.getState().testPath}\\n`);
 """
 
 WRAPPER = """\
 // Written by the belt's typescript_properties.py for one run (#1549).
 {import_line}
 const files = {files};
+const setup = {setup};
+const exclude = {exclude};
+// Every project vitest resolved, however the config declared it (an
+// inline object, a string, a glob), takes the belt's seed (#2104). A
+// project does not inherit the root's setupFiles, and onInit runs once
+// after vitest has resolved them all, the root project included.
+const seeder = {{
+  onInit(vitest: any) {{
+    for (const project of vitest.projects) {{
+      project.config.setupFiles = [...project.config.setupFiles, setup];
+      project.config.exclude = [...exclude];
+    }}
+  }},
+}};
 export default async (env: any) => {{
   let config: any = {config_expr};
   if (typeof config === "function") config = await config(env);
   config = (await config) ?? {{}};
   const test = config.test ?? {{}};
-  if (test.projects !== undefined || test.workspace !== undefined) {{
-    throw new Error(
-      "typescript-properties: the vitest config defines test.projects, and a"
-      + " project does not inherit the root setupFiles the belt's seed rides on",
-    );
-  }}
-  const prior = test.setupFiles === undefined ? [] : [test.setupFiles].flat();
+  // Without projects the root's include is narrowed to exactly the
+  // tracked property files; with them, the file filters pick each
+  // file's project, and a file no project includes does not run.
+  const narrowed = test.projects === undefined ? {{ include: files, exclude }} : {{}};
   return {{
     ...config,
     test: {{
       ...test,
-      include: files,
-      exclude: {exclude},
-      setupFiles: [...prior, {setup}],
-      reporters: ["default", "json"],
+      ...narrowed,
+      reporters: ["default", "json", seeder],
       outputFile: {{ json: process.env.ORG_PROPERTY_REPORT }},
     }},
   }};
@@ -303,8 +335,8 @@ def listed_files(data: object) -> set[str]:
     return out
 
 
-def verify(report: str, files: list[str]) -> int:
-    """Prove every property file ran, with at least one test.
+def verify(report: str, seeded: str, files: list[str]) -> int:
+    """Prove every property file ran, with at least one test, seeded.
 
     Returns:
         0 when each did, 1 otherwise.
@@ -318,10 +350,22 @@ def verify(report: str, files: list[str]) -> int:
     except decoded.UndecodableError as err:
         print(f"no vitest JSON report at {report} ({err})")
         return 1
-    missing = [f for f in files if ran.get(str(Path(f).resolve()), 0) == 0]
-    for name in missing:
-        print(f"{name}: did not run, or ran no test")
-    return 1 if missing else 0
+    try:
+        lines = Path(seeded).read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError) as err:
+        print(f"no seeded list at {seeded} ({err.__class__.__name__})")
+        return 1
+    under_seed = {str(Path(line).resolve()) for line in lines if line}
+    found = []
+    for name in files:
+        path = str(Path(name).resolve())
+        if ran.get(path, 0) == 0:
+            found.append(f"{name}: did not run, or ran no test")
+        elif path not in under_seed:
+            found.append(f"{name}: ran without the belt's seed")
+    for finding in found:
+        print(finding)
+    return 1 if found else 0
 
 
 def collected(listing: str, files: list[str]) -> int:
@@ -361,8 +405,8 @@ def main(argv: list[str]) -> int:
         files = stdin_paths()
         return stage(args[0], args[1] if len(args) > 1 else None, files)
     if command == "verify" and len(args) >= VERIFY_MIN_ARGS:
-        return verify(args[0], args[1:])
-    if command == "collected" and len(args) >= VERIFY_MIN_ARGS:
+        return verify(args[0], args[1], args[2:])
+    if command == "collected" and len(args) >= COLLECTED_MIN_ARGS:
         return collected(args[0], args[1:])
     head, *rest = __doc__.split("Subcommands", 1)[0].strip().splitlines()
     findings.finding("", head, rest)

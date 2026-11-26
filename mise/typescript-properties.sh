@@ -150,8 +150,12 @@ if [[ ${profile} == audit ]]; then
 fi
 echo "${label}: seed ${seed}, ${runs} runs per property, ${config:-no vitest config}"
 status=0
+# Each property file's setup appends its path here; `verify` reds a file
+# that ran and is not in it (#2104).
+: > "${scratch}/seeded"
 ORG_PROPERTY_SEED="${seed}" ORG_PROPERTY_RUNS="${runs}" \
   ORG_PROPERTY_REPORT="${scratch}/report.json" \
+  ORG_PROPERTY_SEEDED="${scratch}/seeded" \
   "${vitest}" run --root "${PWD}" -c "${scratch}/org-property.config.mts" "${args[@]}" || status=$?
 if ((status != 0)); then
   if [[ ${profile} == audit ]]; then
@@ -161,8 +165,10 @@ if ((status != 0)); then
   exit "${status}"
 fi
 # vitest exits 0 for a filter that matched nothing it could run under a
-# config that passes with no tests; the report is the proof each ran.
-missing=$(python3 "${belt}/typescript_properties.py" verify "${scratch}/report.json" "${args[@]}") || {
+# config that passes with no tests, or for a file no project includes;
+# the report is the proof each ran, and the seeded list that it ran
+# under the belt's seed.
+missing=$(python3 "${belt}/typescript_properties.py" verify "${scratch}/report.json" "${scratch}/seeded" "${args[@]}") || {
   detail=()
   while IFS= read -r line; do detail+=("${line}"); done <<< "${missing}"
   org_finding "" "not every property file ran:" \

@@ -3482,8 +3482,26 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
     to the repository's vitest with `-c` and `--root`. Nothing is
     written into the repository. monumental-archive's real config
     (a custom sequencer, `globalSetup`, `include`) loaded through it
-    intact. A config with `test.projects` is refused by name: a
-    project does not inherit root `setupFiles`.
+    intact. A project does not inherit root `setupFiles`, so the
+    config with `test.projects` was at first refused by name; #2104
+    (2026-11-26) replaced the refusal. The wrapper leaves `projects`
+    untouched and adds a reporter whose `onInit` runs once, after
+    vitest has resolved every project however it was declared (inline,
+    a string, a glob), and appends the setup file to each project's
+    `setupFiles` and resets its `exclude`, the root project included,
+    so a config without projects takes the seed the same way and still
+    has `include` narrowed to the tracked property files. With projects,
+    the file filters put each property file in the project whose
+    `include` matches it; one no project includes does not run, and
+    `verify` reds it by name. Measured on vitest 5.1.1 and
+    `@fast-check/vitest` 0.5.0, two inline projects (one with a
+    `globalSetup`) and a `"packages/*"` entry: each project's property
+    printed `seed 1336`, the `globalSetup` ran, the orphan was red.
+    `onInit` changing a project's config is not a contract vitest
+    documents, so the setup file also appends its test file's path to
+    a list (`ORG_PROPERTY_SEEDED`), and a file in the report and not
+    in the list is red, `ran without the belt's seed`. A Vite plugin's
+    `configureVitest` reaches the root project only, and is refused.
   - The setup file must import what the repository locks: a bare
     `import "fast-check"` from it fails in that tree (`Cannot find
     package 'fast-check'`: pnpm keeps a transitive dependency off the
