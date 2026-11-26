@@ -11,10 +11,16 @@
 # option, a bad enum value, a value of the wrong type), prints whatever
 # keys it could read and no diagnostic. A config with `"strict": true`
 # beside an unknown option resolves to `strict` alone, so a reader of
-# the document sees a valid project. Upstream's own code returns
-# success after printing, whatever the parse reported
-# (microsoft/typescript-go internal/execute/tsc.go, at 7.0.2 and at
-# main on 2026-11-26); TypeScript 5 refused.
+# the document sees a valid project. Two causes, measured side by side
+# with typescript@6.0.3 on 2026-11-26:
+#
+# - An option error (an unknown option, a bad enum value, a wrong type,
+#   a missing `extends` target) is new in 7: 6.0.3 prints the error and
+#   exits 1, while tsgo returns success after printing without looking
+#   at the parse's errors (microsoft/typescript-go
+#   internal/execute/tsc.go, at 7.0.2 and at main).
+# - A JSON syntax error (`{`) exits 0 in both, so the second run below
+#   is needed whatever tsc a future pin brings.
 #
 # So the config is asked twice:
 #
