@@ -32,7 +32,7 @@ honestly blocked on.
 | cargo-llvm-cov + `.coverage-floor` ratchet | Derived coverage floor in the gate (`coverage:check`), measured on the repository's own `test` run through `measured` and rendered by `cargo llvm-cov report` (#1653), re-derived by the release path, codecov badge feed off-gate; Rust branches as a floor of their own (`rust-branches`, #1359), measured with `--branch` on the repo's dated nightly and held by the Monday audit (`audit:coverage-branches`), never the gate |
 | coverage.py (`pipx:` backend via aqua-backed uv) | The `python` and `python-branches` legs of the same ratchet (#1331): the repository's own `test` task run under coverage, child processes included, statements and branches |
 | vitest's own coverage provider (the repository's, not the belt's) | The `typescript` and `typescript-branches` legs of the same ratchet (#1357): the repository's vitest under the provider its lockfile pins, lines and branches; the belt pins neither |
-| plpgsql_check (the repository's test stack, never a published image; the belt pins nothing) | The `plpgsql` and `plpgsql-branches` legs of the same ratchet (#1547): `mise/plpgsql_coverage.py` reads the profiler's statement and branch coverage in the suite's teardown, through the repository's own `psql` |
+| plpgsql_check (the repository's test stack, never a published image; the belt pins nothing) | The `plpgsql` and `plpgsql-branches` legs of the same ratchet (#1547): `mise/plpgsql_coverage.py` reads the profiler's statement and branch coverage in the suite's teardown, through the repository's own `psql` or the client the call names |
 | Hypothesis (`pipx:` backend via aqua-backed uv) | Python property testing (#1332): every tracked `prop_*.py`, fixed seed in the gate (`test:python-properties`), random seed and wider bounds on the Monday cron (`audit:python-properties`) |
 | fast-check (the repository's, not the belt's) | TypeScript property testing (#1549): every tracked `*.prop.test.{ts,tsx,mts,cts}` under the repository's own vitest, fixed seed in the gate (`test:typescript-properties`), random seed and 10,000 runs on the Monday cron (`audit:typescript-properties`); `lint:typescript-properties` refuses an import outside a property file and a restated seed; the belt pins neither tool |
 | proptest (the repository's, not the belt's) | Rust property testing (#1930): the repository's own `test` task draws from seed 1 in the gate (the belt's `[env]` sets `PROPTEST_RNG_SEED`), and from a fresh printed seed on the nightly run (`audit:rust-properties`); `lint:rust-properties` refuses a locked proptest below 1.7.0, which ignores the variable; the belt pins nothing |
@@ -43,7 +43,7 @@ honestly blocked on.
 | yq (`aqua:mikefarah/yq`) | The one YAML parser the canon's laws read a workflow or an action through, by `mise/workflow_yaml.py` (#1840) |
 | pinact (`aqua:suzuki-shunsuke/pinact`) | The version-comment half of the pinning convention: `lint:action-pins` offline, `audit:action-pins` online, `fix:actions` |
 | lychee (`aqua:lycheeverse/lychee`) | Link liveness over tracked markdown (`audit:links` — network, Monday cron, per repo since #681), org policy in the canon's `mise/lychee.toml` |
-| biome (`aqua:biomejs/biome`) | JS/TS/JSON lint + format + assist in the gate (`lint:biome`) at `preset: "all"`, nursery included, domains from the repo's own `biome.json` and applied to nursery too (`lint:biome-domains`). **On this tool the pinned binary is the authority and the published docs are the cross-check, not the other way round:** biome's own configuration reference documents neither `linter.domains` nor `assist.actions.preset`, both of which exist in the 2.5.7 schema and both of which the org's config uses. Measure, then cite. Two stable rules are excluded — `complexity/useLiteralKeys`, a mechanical contradiction with the org's `noPropertyAccessFromIndexSignature` tsc dial (#759), the same class as clippy's `arbitrary_source_item_ordering` in #701, and `style/noTernary`, whose remedy does not exist in expression position (#767). Three more are off for TEST FILES only, through the org's one `overrides` entry — `style/noMagicNumbers` and `performance/useTopLevelRegex`, because in a test the literal IS the specification (#783), and `complexity/noExcessiveLinesPerFunction`, because a `describe` callback's span is the sum of its tests (#804); the glob list is closed, measured from every JS/TS file in the org, and a repository cannot widen it. One nursery rule is off beside them — `nursery/noConditionalExpect`, 8 findings and 8 false positives on its first real tree, one of them in production code, with an expiry at [biomejs/biome#11455](https://github.com/biomejs/biome/issues/11455) (#788). |
+| biome (`aqua:biomejs/biome`) | JS/TS/JSON lint + format + assist in the gate (`lint:biome`) at `preset: "all"`, nursery included, domains from the repo's own `biome.json` and applied to nursery too (`lint:biome-domains`). **On this tool the pinned binary is the authority and the published docs are the cross-check, not the other way round:** biome's own configuration reference documents neither `linter.domains` nor `assist.actions.preset`, both of which exist in the 2.5.7 schema and both of which the org's config uses. Measure, then cite. Two stable rules are excluded — `complexity/useLiteralKeys`, a mechanical contradiction with the org's `noPropertyAccessFromIndexSignature` tsc dial (#759), the same class as clippy's `arbitrary_source_item_ordering` in #701, and `style/noTernary`, whose remedy does not exist in expression position (#767). Four more are off for TEST FILES only, through the org's one `overrides` entry — `style/noMagicNumbers` and `performance/useTopLevelRegex`, because in a test the literal IS the specification (#783), `complexity/noExcessiveLinesPerFunction`, because a `describe` callback's span is the sum of its tests (#804), and `performance/noAwaitInLoops` — 2026-11-26 (#2117): the override holds the rules that judge production cost or shape, and a test's steps are ordered on purpose; outside tests the rule stays on; the glob list is closed, measured from every JS/TS file in the org, and a repository cannot widen it. One nursery rule is off beside them — `nursery/noConditionalExpect`, 8 findings and 8 false positives on its first real tree, one of them in production code, with an expiry at [biomejs/biome#11455](https://github.com/biomejs/biome/issues/11455) (#788). |
 | ruff (`aqua:astral-sh/ruff`) | Python lint + format in the gate (`lint:python`) at `select = ["ALL"]` + preview |
 | mypy (`pipx:` backend via aqua-backed uv) | Python type checking at its strictest (#1604), config delivered as `mise/mypy.ini`: `lint:python-types` in the gate |
 | golangci-lint (`aqua:golangci/golangci-lint`) | Go lint + format in the gate (`lint:go`) at `default: all` + curated disables; gofumpt (extra rules) + gci as its formatters |
@@ -3482,8 +3482,26 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
     to the repository's vitest with `-c` and `--root`. Nothing is
     written into the repository. monumental-archive's real config
     (a custom sequencer, `globalSetup`, `include`) loaded through it
-    intact. A config with `test.projects` is refused by name: a
-    project does not inherit root `setupFiles`.
+    intact. A project does not inherit root `setupFiles`, so the
+    config with `test.projects` was at first refused by name; #2104
+    (2026-11-26) replaced the refusal. The wrapper leaves `projects`
+    untouched and adds a reporter whose `onInit` runs once, after
+    vitest has resolved every project however it was declared (inline,
+    a string, a glob), and appends the setup file to each project's
+    `setupFiles` and resets its `exclude`, the root project included,
+    so a config without projects takes the seed the same way and still
+    has `include` narrowed to the tracked property files. With projects,
+    the file filters put each property file in the project whose
+    `include` matches it; one no project includes does not run, and
+    `verify` reds it by name. Measured on vitest 5.1.1 and
+    `@fast-check/vitest` 0.5.0, two inline projects (one with a
+    `globalSetup`) and a `"packages/*"` entry: each project's property
+    printed `seed 1336`, the `globalSetup` ran, the orphan was red.
+    `onInit` changing a project's config is not a contract vitest
+    documents, so the setup file also appends its test file's path to
+    a list (`ORG_PROPERTY_SEEDED`), and a file in the report and not
+    in the list is red, `ran without the belt's seed`. A Vite plugin's
+    `configureVitest` reaches the root project only, and is refused.
   - The setup file must import what the repository locks: a bare
     `import "fast-check"` from it fails in that tree (`Cannot find
     package 'fast-check'`: pnpm keeps a transitive dependency off the
@@ -3893,8 +3911,10 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
   asks `plpgsql_coverage_statements` and `plpgsql_coverage_branches`
   for each, and the leg prints `plpgsql <percent>` and
   `plpgsql-branches <percent>`; the floor holds both. Adoption is that
-  one teardown call plus the floor. The belt pins no client: `psql` is
-  the repository's own, already needed to run its tests.
+  one teardown call plus the floor. The belt pins no client: it is
+  `psql` on `PATH` unless the call names another after `--` (#2114),
+  as a repository whose test database runs in a container does:
+  `collect <conninfo> -- docker exec -i <container> psql`.
   Measured 2026-11-19 on the proving repository's runner gate, two
   runs per setting (monumental-archive/monumental-archive#373):
   the layer builds from PGDG's `postgresql-18-plpgsql-check`

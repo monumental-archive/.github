@@ -57,9 +57,11 @@ The policy, maximally defensible:
 - **licenses**: pure allowlist (the only shape the current config format
   offers — `unlicensed`/`copyleft`/`allow-osi-fsf-free` were removed
   upstream). Anything not allowed is denied by default.
+
 - **sources**: crates.io only. `unknown-registry = "deny"`,
   `unknown-git = "deny"` — where dependencies come from is a gated
   invariant, and a git dependency is a decision, not a default.
+
 - **bans**: `wildcards = "deny"`, with `allow-wildcard-paths = true`
   (#2009): a `publish = false` crate's bare path dependency, such as a
   fuzz crate's on the crate it exercises, is not a wildcard, because a

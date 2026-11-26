@@ -414,7 +414,7 @@ class ContradictionTest(unittest.TestCase):
 
 
 class TestFileOverrideTest(unittest.TestCase):
-    """The one `overrides` entry the org delivers (#783, #804).
+    """The one `overrides` entry the org delivers (#783, #804, #2117).
 
     In a test the literal — a number or a regex — IS the specification,
     so `style/noMagicNumbers` and `performance/useTopLevelRegex` are off
@@ -422,7 +422,9 @@ class TestFileOverrideTest(unittest.TestCase):
     SUM of its tests, so `complexity/noExcessiveLinesPerFunction` is off
     there too (#804): the rule has no per-construct selector on 2.5.7
     (`maxLines`, `skipBlankLines`, `skipIifes` only), so the override is
-    per-file and a long helper in a test file is the accepted cost.
+    per-file and a long helper in a test file is the accepted cost. A
+    test's steps run in order on purpose, so `performance/noAwaitInLoops`
+    is off there as well (#2117).
     Everything here is asserted against the literals biome understands
     rather than against a constant in this module: a test that compares
     a value to the thing that produced it passes whatever that thing
@@ -435,10 +437,11 @@ class TestFileOverrideTest(unittest.TestCase):
     # check, and reading the list out of the file under test would make
     # the assertion vacuous.
     GLOBS: ClassVar[list[str]] = ["**/*.test.ts", "**/test/**", "**/tests/**"]
-    SILENCED: ClassVar[dict[str, str]] = {
-        "complexity": "noExcessiveLinesPerFunction",
-        "performance": "useTopLevelRegex",
-        "style": "noMagicNumbers",
+    SILENCED: ClassVar[set[tuple[str, str]]] = {
+        ("complexity", "noExcessiveLinesPerFunction"),
+        ("performance", "noAwaitInLoops"),
+        ("performance", "useTopLevelRegex"),
+        ("style", "noMagicNumbers"),
     }
 
     @override
@@ -469,19 +472,18 @@ class TestFileOverrideTest(unittest.TestCase):
             with self.subTest(absent=absent):
                 self.assertNotIn(absent, joined)
 
-    def test_both_rules_are_off_against_the_literal(self) -> None:
+    def test_every_named_rule_is_off_against_the_literal(self) -> None:
         """Asserted against "off" itself; a mutant value must not survive."""
         rules = table(self.entry(), "linter", "rules")
-        for group, rule in self.SILENCED.items():
+        for group, rule in sorted(self.SILENCED):
             with self.subTest(rule=rule):
                 self.assertEqual(table(rules, group)[rule], "off")
 
-    def test_the_override_silences_those_three_rules_and_no_others(self) -> None:
-        """A fourth rule arriving here is a decision, not a drive-by."""
+    def test_the_override_silences_those_four_rules_and_no_others(self) -> None:
+        """A fifth rule arriving here is a decision, not a drive-by."""
         rules = table(self.entry(), "linter", "rules")
         named: set[tuple[str, str]] = {(g, r) for g in rules for r in table(rules, g)}
-        silenced = set(self.SILENCED.items())
-        self.assertEqual(named, silenced)
+        self.assertEqual(named, self.SILENCED)
 
     def test_the_override_carries_nothing_but_those_rules(self) -> None:
         """No `linter.enabled: false`, no formatter, no files — rules only."""
@@ -492,16 +494,16 @@ class TestFileOverrideTest(unittest.TestCase):
         sections = set(table(self.entry(), "linter"))
         self.assertEqual(sections, linter)
 
-    def test_neither_rule_is_switched_off_at_the_top_level(self) -> None:
+    def test_no_named_rule_is_switched_off_at_the_top_level(self) -> None:
         """The other direction: a magic number in production still reds.
 
-        All three rules are on by `preset: "all"` not naming them, so the
+        All four rules are on by `preset: "all"` not naming them, so the
         proof that production is untouched is that none appears in the
         top-level rule block at all.
         """
         top = table(self.org, "linter", "rules")
         self.assertEqual(top["preset"], "all")
-        for group, rule in self.SILENCED.items():
+        for group, rule in sorted(self.SILENCED):
             with self.subTest(rule=rule):
                 self.assertNotIn(rule, table_or_empty(top, group))
 
@@ -549,6 +551,82 @@ class TestFileOverrideTest(unittest.TestCase):
         )[1]
         self.assertTrue(problems)
         self.assertIn("overrides", problems[0])
+
+
+# Steps awaited one after another: the shape an integration test drives
+# on purpose, and the shape `noAwaitInLoops` judges in production.
+AWAIT_IN_LOOP = """\
+export async function run(steps: readonly (() => Promise<void>)[]): Promise<void> {
+  for (const step of steps) {
+    await step();
+  }
+}
+"""
+
+
+class AwaitInLoopsUnderBiomeTest(unittest.TestCase):
+    """`noAwaitInLoops` under the real pinned biome, both directions (#2117).
+
+    The same code is planted as `x.test.ts` and as `x.ts` and linted
+    against the generated config, the one `lint:biome` runs. The test
+    file is clean of the rule and the source file still reports it, so
+    the override reaches tests and nothing else. Run with `biome lint`
+    and never `--only`, which bypasses `overrides` entirely.
+    """
+
+    RULE = "lint/performance/noAwaitInLoops"
+
+    def reported(self) -> list[str]:
+        """Lint the two planted files and name each that reports the rule.
+
+        Returns:
+            The paths the rule fired on, sorted.
+
+        """
+        biome = hermetic.tool("biome")
+        config, _silenced = biome_config.generate(
+            org_config(),
+            set(),
+            DELIVERED,
+            NURSERY,
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            generated = root / "biome-org.generated.json"
+            generated.write_text(json.dumps(config), encoding="utf-8")
+            for name in ("x.ts", "x.test.ts"):
+                (root / name).write_text(AWAIT_IN_LOOP, encoding="utf-8")
+            done = subprocess.run(
+                [
+                    biome,
+                    "lint",
+                    "--config-path",
+                    str(generated),
+                    "--reporter=json",
+                    "x.ts",
+                    "x.test.ts",
+                ],
+                cwd=root,
+                env=hermetic.env(),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        report = decoded.as_object(decoded.load_json(done.stdout), "biome's report")
+        diagnostics = decoded.as_array(report["diagnostics"], "diagnostics")
+        fired: list[str] = []
+        for raw in diagnostics:
+            diagnostic = decoded.as_object(raw, "a diagnostic")
+            if diagnostic["category"] != self.RULE:
+                continue
+            location = decoded.as_object(diagnostic["location"], "location")
+            fired.append(decoded.as_str(location["path"], "location.path"))
+        return sorted(fired)
+
+    def test_a_test_file_is_clean_and_the_same_source_still_reports(self) -> None:
+        """The override silences `x.test.ts` only; `x.ts` keeps the finding."""
+        source: list[str] = ["x.ts"]
+        self.assertEqual(self.reported(), source)
 
 
 class ConditionalExpectTest(unittest.TestCase):

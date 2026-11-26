@@ -9,8 +9,9 @@ and they call the real `mise/typescript-properties.sh` and
 own: the belt pins neither vitest nor fast-check (#1357's rule), so
 there is no real one to run here. The stub records its arguments, the
 seed and run count it was handed and the wrapper config it was given,
-and writes the JSON report the leg verifies. What fast-check does with
-the seed was measured on a real repository and is recorded in
+prints a seed line per file and appends it to the seeded list as the
+belt's setup file would, and writes the JSON report the leg verifies.
+What fast-check does with the seed was measured on a real repository and is recorded in
 docs/tooling-verdicts.md.
 
 Each row asserts the message, not just the exit status: a planted row
@@ -87,7 +88,9 @@ test("one", () => {
 
 # The repository's runner: records what it was handed, then writes the
 # report vitest's JSON reporter would. STUB_SKIP leaves one file out of
-# the report; STUB_EXIT is its exit status. Asked to `list`, it answers
+# the report, as vitest does a file no project includes; STUB_UNSEEDED
+# runs one without the belt's setup file, so it prints no seed line and
+# is not in the seeded list; STUB_EXIT is its exit status. Asked to `list`, it answers
 # with STUB_COLLECTS, the repository's own collection.
 STUB = """\
 #!/usr/bin/env bash
@@ -123,6 +126,10 @@ cp "${config}" "${out}/wrapper"
 results=""
 for f in "${files[@]}"; do
   [[ ${f} == "${STUB_SKIP:-}" ]] && continue
+  if [[ ${f} != "${STUB_UNSEEDED:-}" ]]; then
+    echo "fast-check: ${f}: ${ORG_PROPERTY_RUNS} runs, seed ${ORG_PROPERTY_SEED}"
+    echo "${PWD}/${f}" >> "${ORG_PROPERTY_SEEDED:?}"
+  fi
   results+="${results:+,}{\\"name\\": \\"${PWD}/${f}\\", \\"assertionResults\\": [{}]}"
 done
 echo "{\\"testResults\\": [${results}]}" > "${ORG_PROPERTY_REPORT:?}"
@@ -376,6 +383,8 @@ class Gate(unittest.TestCase):
             done.stdout,
             "test:typescript-properties: seed 1336, 200 runs per property,"
             " vitest.config.ts\n"
+            "fast-check: src/a.prop.test.ts: 200 runs, seed 1336\n"
+            "fast-check: src/b.prop.test.tsx: 200 runs, seed 1336\n"
             "test:typescript-properties: every property file held\n",
         )
 
@@ -403,11 +412,25 @@ class Gate(unittest.TestCase):
             'const files = ["src/a.prop.test.ts", "src/b.prop.test.tsx"];',
             done.written(),
         )
-        self.assertIn('exclude: ["**/node_modules/**", "**/.git/**"]', done.written())
-        self.assertRegex(
-            done.written(), r'setupFiles: \[\.\.\.prior, ".*/org-property-setup\.mts"\]'
+        self.assertIn(
+            'const exclude = ["**/node_modules/**", "**/.git/**"];', done.written()
         )
-        self.assertIn("test.projects", done.written())
+        self.assertRegex(done.written(), r'const setup = ".*/org-property-setup\.mts";')
+        self.assertIn(
+            "project.config.setupFiles = [...project.config.setupFiles, setup];",
+            done.written(),
+        )
+        self.assertIn('reporters: ["default", "json", seeder],', done.written())
+
+    def test_a_config_without_projects_narrows_include(self) -> None:
+        """No test.projects: include is exactly the tracked property files."""
+        done = run(GATE, GATE_FILES)
+        self.assertIn(
+            "const narrowed = test.projects === undefined"
+            " ? { include: files, exclude } : {};",
+            done.written(),
+        )
+        self.assertIn("...narrowed,", done.written())
 
     def test_no_repository_config_still_runs(self) -> None:
         """No vitest config: the wrapper stands alone, named so."""
@@ -472,6 +495,17 @@ class Gate(unittest.TestCase):
         self.assertEqual(done.returncode, 1)
         self.assertNotIn("every property file held", done.stdout)
 
+    def test_a_file_that_ran_unseeded_is_red_by_name(self) -> None:
+        """In the report but not in the seeded list: red (#2104)."""
+        done = run(GATE, GATE_FILES, env={"STUB_UNSEEDED": "src/a.prop.test.ts"})
+        self.assertEqual(done.returncode, 1)
+        self.assertEqual(
+            done.stderr,
+            "test:typescript-properties: not every property file ran:\n"
+            "  src/a.prop.test.ts: ran without the belt's seed\n",
+        )
+        self.assertNotIn("every property file held", done.stdout)
+
     def test_a_file_the_runner_did_not_run_is_red(self) -> None:
         """Green from the runner but a file absent from its report: red."""
         done = run(GATE, GATE_FILES, env={"STUB_SKIP": "src/b.prop.test.tsx"})
@@ -480,6 +514,73 @@ class Gate(unittest.TestCase):
             "test:typescript-properties: not every property file ran:\n"
             "  src/b.prop.test.tsx: did not run, or ran no test\n",
             done.stderr,
+        )
+
+
+# Two inline projects, one with a globalSetup, and one declared as a
+# string: the config #2104 found refused.
+PROJECTS_CONFIG = """\
+export default {
+  test: {
+    projects: [
+      { test: { name: "unit", include: ["tests/unit/**/*.test.ts"] } },
+      {
+        test: {
+          name: "stack",
+          include: ["tests/stack/**/*.test.ts"],
+          globalSetup: ["./global-setup.ts"],
+        },
+      },
+      "packages/*",
+    ],
+  },
+};
+"""
+
+
+class Projects(unittest.TestCase):
+    """A config with test.projects: every project seeded, none refused."""
+
+    def test_the_staged_wrapper_seeds_projects_and_does_not_refuse(self) -> None:
+        """No refusal for test.projects; the onInit reporter is there."""
+        with tempfile.TemporaryDirectory() as scratch:
+            config = Path(scratch, "vitest.config.ts")
+            config.write_text(PROJECTS_CONFIG, encoding="utf-8")
+            staged = Path(scratch, "staged")
+            staged.mkdir()
+            tp.stage(str(staged), str(config), ["tests/unit/h.prop.test.ts"])
+            wrapper = (staged / "org-property.config.mts").read_text("utf-8")
+        self.assertNotIn("throw", wrapper)
+        self.assertNotIn("does not inherit the root setupFiles the belt", wrapper)
+        self.assertIn("onInit(vitest: any) {", wrapper)
+        self.assertIn("for (const project of vitest.projects) {", wrapper)
+        self.assertIn(
+            "project.config.setupFiles = [...project.config.setupFiles, setup];",
+            wrapper,
+        )
+        self.assertIn("project.config.exclude = [...exclude];", wrapper)
+        self.assertIn('reporters: ["default", "json", seeder],', wrapper)
+
+    def test_each_project_s_property_runs_seeded_and_an_orphan_is_red(
+        self,
+    ) -> None:
+        """A property per project prints seed 1336; one no project has is red."""
+        files = {
+            "pnpm-lock.yaml": LOCK_BOTH,
+            "vitest.config.ts": PROJECTS_CONFIG,
+            "tests/unit/h.prop.test.ts": PROPERTY,
+            "tests/stack/trig.prop.test.ts": PROPERTY,
+            "orphan/o.prop.test.ts": PROPERTY,
+        }
+        done = run(GATE, files, env={"STUB_SKIP": "orphan/o.prop.test.ts"})
+        self.assertEqual(done.returncode, 1)
+        for name in ("tests/stack/trig.prop.test.ts", "tests/unit/h.prop.test.ts"):
+            with self.subTest(name=name):
+                self.assertIn(f"fast-check: {name}: 200 runs, seed 1336\n", done.stdout)
+        self.assertEqual(
+            done.stderr,
+            "test:typescript-properties: not every property file ran:\n"
+            "  orphan/o.prop.test.ts: did not run, or ran no test\n",
         )
 
 
@@ -612,11 +713,30 @@ class Documents(unittest.TestCase):
         with tempfile.TemporaryDirectory() as scratch:
             path = Path(scratch, "doc.json")
             path.write_text(text, encoding="utf-8")
+            seeded = Path(scratch, "seeded")
+            seeded.write_text("", encoding="utf-8")
+            # verify also takes the seeded list; collected does not.
+            extra = [str(seeded)] if command == "verify" else []
             out = io.StringIO()
             with contextlib.redirect_stdout(out):
-                status = tp.main([command, str(path), "a.prop.test.ts"])
+                status = tp.main([command, str(path), *extra, "a.prop.test.ts"])
         self.assertEqual(status, 1)
         return out.getvalue().replace(str(path), "DOC")
+
+    def test_a_missing_seeded_list_is_red(self) -> None:
+        """Refuse verify with no seeded list to read: red, named."""
+        with tempfile.TemporaryDirectory() as scratch:
+            report = Path(scratch, "report.json")
+            report.write_text('{"testResults": []}', encoding="utf-8")
+            gone = Path(scratch, "seeded")
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                status = tp.main(["verify", str(report), str(gone), "a.prop.test.ts"])
+        self.assertEqual(status, 1)
+        self.assertEqual(
+            out.getvalue().replace(str(gone), "SEEDED"),
+            "no seeded list at SEEDED (FileNotFoundError)\n",
+        )
 
     def test_a_report_of_the_wrong_shape(self) -> None:
         """Each field the leg reads, by name."""
