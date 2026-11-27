@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""The judging half of audit:mutants' TypeScript leg (#1358).
+r"""The judging half of audit:mutants' TypeScript leg (#1358).
 
-Called by mutants-typescript.sh, twice:
+Called by mutants-typescript.sh three times:
 
 `config <stryker.config.json>`, before StrykerJS runs: the repository's
 config is the tool's own, and the leg reads it only to refuse what buys
@@ -22,6 +22,24 @@ no earlier results, so it would read as on and do nothing; the leg
 runs every mutant every week. Nothing is printed when the config is
 acceptable.
 
+`share <stryker.config.json> --shard k/n --out <file>`, before the run
+(#2153): StrykerJS has no sharding of its own, but `--mutate` takes the
+files to mutate, so the leg shares them out itself. The config's
+`mutate` list is expanded, in order, against the tracked files: an
+entry adds what it matches and an entry starting with `!` subtracts,
+as StrykerJS reads the list. Matching is StrykerJS's minimatch, spelled
+for `PurePosixPath.full_match`: braces expanded, a wildcard never
+matching a name that starts with `.`, `\x` a literal `x`. The result
+is sorted and shard `k` takes every file whose index `i` has
+`i % n == k`, the round-robin cut the other legs make. `--out` gets the
+share as one `--mutate` argument: comma-separated, each file escaped
+so minimatch reads it literally. Red by name: an entry with a mutation
+range (`file:1-5`), which cannot be shared out by file; an extglob,
+which `full_match` cannot spell; a file whose name StrykerJS's
+`--mutate` cannot carry (a comma, or a trailing range); and a list that
+matches no tracked file. A shard whose share is empty writes its zero
+row when a summary directory is given, and `--out` is left empty.
+
 `verdict <mutation.json>`, after it: StrykerJS 10's JSON report
 (`reports/mutation/mutation.json`, mutation-testing-report-schema 1.0)
 gives one `status` per mutant:
@@ -39,18 +57,26 @@ gives one `status` per mutant:
   checker rejected the mutant, so no test was asked anything;
 - RuntimeError, Pending and anything else were not judged, and are red.
 
+A whole run (`--shard k/1`) that holds no mutant mutated nothing and is
+not judged; one shard of several may hold none, when its files give no
+mutant.
+
 Prints each survivor and one summary line; writes `typescript.tsv` for
 the totals job when a summary directory is given and everything was
-judged. Exit 1 on any red.
+judged: `k/n`, the counts, and `shard`, since the excluded count is
+this shard's own files'. Exit 1 on any red.
 """
 
 import argparse
+import posixpath
+import re
 import sys
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import decoded
 import findings as writer
+import tracked
 
 KILLED = frozenset({"Killed", "Timeout"})
 NO_REASON = "Ignored using a comment"
@@ -198,6 +224,275 @@ def check_config(path: str) -> int:
     return 1 if found or incremental else 0
 
 
+# StrykerJS's own spelling of a mutation range (`mutate-pattern-constants`,
+# 10.1.1): `file:startLine[:startColumn]-endLine[:endColumn]`.
+RANGE = re.compile(r"(.*?):((\d+)(?::(\d+))?-(\d+)(?::(\d+))?)$")
+EXTGLOB = re.compile(r"[?*+@!]\(")
+# What minimatch reads as syntax; each is escaped to name a file literally.
+SYNTAX = re.compile(r"[\\*?\[\]{}()!]")
+
+
+class ShareError(ValueError):
+    """The config's `mutate` list cannot be shared out by file."""
+
+
+def parse_shard(shard: str) -> tuple[int, int]:
+    """Read `k/n`.
+
+    Returns:
+        k and n.
+
+    Raises:
+        ShareError: it is not two whole numbers with 0 <= k < n.
+
+    """
+    match = re.fullmatch(r"(\d+)/(\d+)", shard)
+    if match is None or int(match[1]) >= int(match[2]):
+        msg = f"MUTANTS_SHARD='{shard}' is not k/n with 0 <= k < n"
+        raise ShareError(msg)
+    return int(match[1]), int(match[2])
+
+
+def groups(pattern: str) -> list[tuple[int, int]]:
+    r"""Find every brace pair of a pattern, `\{` and `\}` never one.
+
+    Returns:
+        Each pair's opening and closing index, by opening index.
+
+    """
+    opened: list[int] = []
+    pairs: list[tuple[int, int]] = []
+    i = 0
+    while i < len(pattern):
+        char = pattern[i]
+        if char == "\\":
+            i += 2
+            continue
+        if char == "{":
+            opened.append(i)
+        elif char == "}" and opened:
+            pairs.append((opened.pop(), i))
+        i += 1
+    return sorted(pairs)
+
+
+def braces(pattern: str) -> list[str]:
+    """Expand a pattern's braces as minimatch does.
+
+    A brace with a comma is a list, `{1..3}` and `{a..c}` are ranges,
+    and a brace with neither is literal, while the braces inside it
+    still expand.
+
+    Returns:
+        Every pattern the braces spell, in order.
+
+    """
+    for start, end in groups(pattern):
+        items = alternatives(pattern[start + 1 : end])
+        if items is not None:
+            head, tail = pattern[:start], pattern[end + 1 :]
+            return [x for item in items for x in braces(head + item + tail)]
+    return [pattern]
+
+
+def span(a: int, b: int) -> list[int]:
+    """Count from a to b, either way, both ends included.
+
+    Returns:
+        The values, in order from a.
+
+    """
+    descending = b < a  # pragma: no mutate -- with a == b both orders are one value
+    low, high = sorted((a, b))
+    values = list(range(low, high + 1))
+    return values[::-1] if descending else values
+
+
+def alternatives(body: str) -> list[str] | None:
+    """Split a brace's body into its alternatives.
+
+    Returns:
+        The alternatives, or None when the brace is literal.
+
+    """
+    numbers = re.fullmatch(r"(-?\d+)\.\.(-?\d+)", body)
+    if numbers:
+        return [str(x) for x in span(int(numbers[1]), int(numbers[2]))]
+    letters = re.fullmatch(r"([a-zA-Z])\.\.([a-zA-Z])", body)
+    if letters:
+        return [chr(x) for x in span(ord(letters[1]), ord(letters[2]))]
+    items: list[str] = []
+    depth, start, i = 0, 0, 0
+    while i < len(body):
+        char = body[i]
+        if char == "\\":
+            i += 2
+            continue
+        depth += {"{": 1, "}": -1}.get(char, 0)
+        if char == "," and depth == 0:
+            items.append(body[start:i])
+            start = i + 1
+        i += 1
+    return [*items, body[start:]] if items else None
+
+
+def full_match_spelling(pattern: str) -> str:
+    r"""Spell a minimatch glob for `PurePosixPath.full_match`.
+
+    `\x` becomes `x`, bracketed where `x` is `*`, `?` or `[`, and a `[^`
+    class becomes `[!`.
+
+    Returns:
+        The pattern `full_match` reads the same way.
+
+    """
+    out, i = [], 0
+    while i < len(pattern):
+        char = pattern[i]
+        if char == "\\" and i + 1 < len(pattern):
+            literal = pattern[i + 1]
+            out.append(f"[{literal}]" if literal in "*?[" else literal)
+            i += 2
+            continue
+        if char == "[" and pattern[i + 1 : i + 2] == "^":
+            out.append("[!")
+            i += 2
+            continue
+        out.append(char)
+        i += 1
+    return "".join(out)
+
+
+def matches(path: str, pattern: str) -> bool:
+    """Say whether minimatch, with `dot: false`, matches a file to a glob.
+
+    A name starting with `.` is matched only by a pattern part that
+    itself starts with `.`, so `**` and `*` never reach one.
+
+    Returns:
+        True when the file matches.
+
+    """
+    pure = PurePosixPath(path)
+    if not pure.full_match(full_match_spelling(pattern)):
+        return False
+    dotted = [part for part in pattern.split("/") if part.startswith(".")]
+    return all(
+        any(PurePosixPath(name).full_match(full_match_spelling(p)) for p in dotted)
+        for name in pure.parts
+        if name.startswith(".")
+    )
+
+
+def relative(pattern: str, root: str) -> str | None:
+    """Resolve a pattern against the tree, as StrykerJS does.
+
+    Returns:
+        The pattern relative to the tree's top, or None outside it.
+
+    """
+    whole = posixpath.normpath(posixpath.join(root, pattern))
+    return whole.removeprefix(root + "/") if whole.startswith(root + "/") else None
+
+
+def expand(mutate: list[str], files: list[str], root: str) -> list[str]:
+    """Expand `mutate` against the tracked files, in its own order.
+
+    Returns:
+        The files to mutate, sorted.
+
+    Raises:
+        ShareError: an entry has a range or an extglob, or the list
+            matches no file.
+
+    """
+    chosen: set[str] = set()
+    for entry in mutate:
+        negate = entry.startswith("!")
+        glob = entry.removeprefix("!")
+        if RANGE.match(glob):
+            msg = (
+                f"`mutate` entry '{entry}' carries a mutation range; a range"
+                " cannot be shared out by file"
+            )
+            raise ShareError(msg)
+        if EXTGLOB.search(glob):
+            msg = f"`mutate` entry '{entry}' is an extglob, which the leg cannot expand"
+            raise ShareError(msg)
+        globs = [g for g in (relative(x, root) for x in braces(glob)) if g]
+        hit = {f for f in files if any(matches(f, g) for g in globs)}
+        chosen = chosen - hit if negate else chosen | hit
+    if not chosen:
+        msg = "`mutate` matches no tracked file"
+        raise ShareError(msg)
+    return sorted(chosen)
+
+
+def argument(files: list[str]) -> str:
+    """Spell files as one `--mutate` argument, each read literally.
+
+    Returns:
+        The files, escaped, joined by commas.
+
+    Raises:
+        ShareError: a file's name cannot be carried.
+
+    """
+    for path in files:
+        if "," in path or RANGE.match(path):
+            msg = (
+                f"{path}: StrykerJS's --mutate cannot name this file (a comma,"
+                " or a trailing range)"
+            )
+            raise ShareError(msg)
+    return ",".join(SYNTAX.sub(r"\\\g<0>", path) for path in files)
+
+
+def shares(path: str, shard: str) -> tuple[list[str], int]:
+    """Read the config and cut this shard's share of its files.
+
+    Returns:
+        The shard's files and how many the whole list holds.
+
+    Raises:
+        ShareError: the shard, the list or a file cannot be shared out.
+
+    """
+    k, n = parse_shard(shard)
+    mutate = decoded.as_object(decoded.load_json(Path(path).read_bytes()), path).get(
+        "mutate"
+    )
+    if not decoded.is_strings(mutate):
+        msg = f"{path} names no `mutate` list"
+        raise ShareError(msg)
+    root = Path.cwd()
+    every = expand(mutate, tracked.tracked(root=root), root.as_posix())
+    return every[k::n], len(every)
+
+
+def share(path: str, label: str, shard: str, out: str, summary_dir: str) -> int:
+    """Write this shard's share of the files to mutate.
+
+    Returns:
+        0 when shared, 1 on any red.
+
+    """
+    try:
+        mine, every = shares(path, shard)
+        text = argument(mine)
+    except (OSError, decoded.UndecodableError, ShareError) as err:
+        writer.finding(LANGUAGE, str(err))
+        return 1
+    print(f"{label}: shard {shard}: {len(mine)} of {every} files")
+    Path(out).write_text(text, encoding="utf-8")
+    if not mine and summary_dir:
+        Path(summary_dir).mkdir(parents=True, exist_ok=True)
+        Path(summary_dir, "typescript.tsv").write_text(
+            f"{shard}\t0\t0\t0\t0\tshard\n", encoding="utf-8"
+        )
+    return 0
+
+
 @dataclass(frozen=True)
 class Mutant:
     """One mutant of StrykerJS's JSON report, as the verdict reads it."""
@@ -316,8 +611,14 @@ def class_mutant(verdict: Verdict, mutant: Mutant, where: str) -> None:
         verdict.unjudged.append(f"{status}: {where}")
 
 
-def classify(files: dict[str, tuple[Mutant, ...]] | None) -> Verdict:
+def classify(
+    files: dict[str, tuple[Mutant, ...]] | None, *, whole: bool = True
+) -> Verdict:
     """Class every mutant of every file in the report.
+
+    A whole run that holds no mutant mutated nothing, and is not
+    judged; one shard of several may hold none, when its files have no
+    mutant to give (#2153).
 
     Returns:
         The verdict.
@@ -331,12 +632,12 @@ def classify(files: dict[str, tuple[Mutant, ...]] | None) -> Verdict:
         for mutant in files[path]:
             verdict.total += 1
             class_mutant(verdict, mutant, site(path, mutant))
-    if verdict.total == 0:
+    if verdict.total == 0 and whole:
         verdict.unjudged.append("the report holds no mutant — nothing was mutated")
     return verdict
 
 
-def judge(path: str, label: str, summary_dir: str) -> int:
+def judge(path: str, label: str, summary_dir: str, shard: str = "0/1") -> int:
     """Read the report, print the verdict, write the counts.
 
     Returns:
@@ -348,7 +649,7 @@ def judge(path: str, label: str, summary_dir: str) -> int:
     except (OSError, decoded.UndecodableError) as err:
         writer.finding(LANGUAGE, f"no readable report at {path}: {err}")
         return 1
-    verdict = classify(files)
+    verdict = classify(files, whole=shard.endswith("/1"))
     for where in verdict.survived:
         print(f"{label}: survived: {where}")
     for where in verdict.not_covered:
@@ -366,7 +667,8 @@ def judge(path: str, label: str, summary_dir: str) -> int:
         red = len(verdict.survived) + len(verdict.not_covered)
         Path(summary_dir).mkdir(parents=True, exist_ok=True)
         Path(summary_dir, "typescript.tsv").write_text(
-            f"0/1\t{verdict.total}\t{verdict.killed}\t{red}\t{verdict.excluded}\n",
+            f"{shard}\t{verdict.total}\t{verdict.killed}\t{red}"
+            f"\t{verdict.excluded}\tshard\n",
             encoding="utf-8",
         )
     if not verdict.green:
@@ -387,10 +689,12 @@ class Args(argparse.Namespace):
     command: str
     path: str
     summary_dir: str
+    shard: str
+    out: str
 
 
 def main(argv: list[str]) -> int:
-    """Answer `config` or `verdict`.
+    """Answer `config`, `share` or `verdict`.
 
     Returns:
         The subcommand's exit status.
@@ -404,10 +708,18 @@ def main(argv: list[str]) -> int:
     verdict = sub.add_parser("verdict")
     verdict.add_argument("path")
     verdict.add_argument("--summary-dir", default="")
+    verdict.add_argument("--shard", default="0/1")
+    shares = sub.add_parser("share")
+    shares.add_argument("path")
+    shares.add_argument("--shard", default="0/1")
+    shares.add_argument("--out", required=True)
+    shares.add_argument("--summary-dir", default="")
     args = parser.parse_args(argv, namespace=Args())
     if args.command == "config":
         return check_config(args.path)
-    return judge(args.path, args.label, args.summary_dir)
+    if args.command == "share":
+        return share(args.path, args.label, args.shard, args.out, args.summary_dir)
+    return judge(args.path, args.label, args.summary_dir, args.shard)
 
 
 if __name__ == "__main__":

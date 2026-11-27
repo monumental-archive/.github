@@ -23,6 +23,7 @@ stdlib `unittest`, the belt's one test idiom. Run through the gate as
 import contextlib
 import io
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -74,7 +75,12 @@ CONFIG: dict[str, object] = {
     "mutate": ["src/**/*.ts"],
 }
 SOURCE = "export const add = (a: number, b: number): number => a + b;\n"
-CALL = "stryker run stryker.config.json --inPlace --reporters json"
+CALL = (
+    "stryker run stryker.config.json --inPlace --mutate src/add.ts"
+    " --reporters json,progress-append-only"
+)
+# The share line every run of the planted one-file tree prints first.
+SHARED = f"{LABEL}: shard 0/1: 1 of 1 files"
 
 
 def mutant(
@@ -290,19 +296,322 @@ class Adoption(Planted):
         ]
         self.assertEqual(done.stderr.splitlines(), want)
 
-    def test_a_shard_other_than_whole_is_red(self) -> None:
-        """StrykerJS cannot shard: 1/2 is red before anything runs."""
+
+class Shards(Planted):
+    """MUTANTS_SHARD=k/n shares the files out; each shard reports its own."""
+
+    def test_a_shard_mutates_its_share_and_reports_its_shard(self) -> None:
+        """Shard 1/2 of two files names the second to StrykerJS, and its row."""
+        self.track("src/sub.ts", SOURCE)
+        self.plant(*KILLED)
         done, log = self.run_leg(MUTANTS_SHARD="1/2")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        want = [
+            f"{LABEL}: shard 1/2: 1 of 2 files",
+            (
+                f"{LABEL}: 2 mutants, 2 killed, 0 survived, 0 not covered,"
+                " 0 not viable, 0 excluded"
+            ),
+        ]
+        self.assertEqual(done.stdout.splitlines(), want)
+        want = [
+            (
+                "stryker run stryker.config.json --inPlace --mutate src/sub.ts"
+                " --reporters json,progress-append-only"
+            )
+        ]
+        self.assertEqual(log, want)
+        self.assertEqual(self.counts(), "1/2\t2\t2\t0\t0\tshard\n")
+
+    def test_an_empty_share_runs_nothing_and_counts_zero(self) -> None:
+        """More shards than files: the spare shard is a zero row, green."""
+        self.plant(*KILLED)
+        done, log = self.run_leg(MUTANTS_SHARD="2/3")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        want = [
+            f"{LABEL}: shard 2/3: 0 of 1 files",
+            f"{LABEL}: shard 2/3: no file to mutate, nothing run",
+        ]
+        self.assertEqual(done.stdout.splitlines(), want)
+        self.assertEqual(log, list[str]())
+        self.assertEqual(self.counts(), "2/3\t0\t0\t0\t0\tshard\n")
+
+    def test_a_shard_of_several_may_hold_no_mutant(self) -> None:
+        """Files with nothing to mutate, in one shard of several: zero, green."""
+        self.plant()
+        done, _ = self.run_leg(MUTANTS_SHARD="0/2")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(self.counts(), "0/2\t0\t0\t0\t0\tshard\n")
+
+    def test_progress_reaches_the_job_log_as_it_runs(self) -> None:
+        """StrykerJS's output is on stdout, not only in the scratch file."""
+        self.plant(*KILLED)
+        done, _ = self.run_leg(PLANT_OUTPUT="Mutation testing 50% (elapsed: ~1m)")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("Mutation testing 50% (elapsed: ~1m)", done.stdout.splitlines())
+
+    def test_a_ranged_entry_is_red_before_the_run(self) -> None:
+        """A mutation range cannot be shared out by file: red, by name."""
+        self.plant(*KILLED, config=CONFIG | {"mutate": ["src/add.ts:1-5"]})
+        done, log = self.run_leg()
         self.assertEqual(done.returncode, 1)
         want = [
             (
-                f"{LABEL}: MUTANTS_SHARD='1/2' — StrykerJS cannot shard; the"
-                " typescript"
-                " job runs one shard, 0/1"
+                f"{LABEL}: `mutate` entry 'src/add.ts:1-5' carries a mutation"
+                " range; a range cannot be shared out by file"
             )
         ]
         self.assertEqual(done.stderr.splitlines(), want)
         self.assertEqual(log, list[str]())
+
+    def test_a_malformed_shard_is_red(self) -> None:
+        """K must be below n: 2/2 is red before anything runs."""
+        self.plant(*KILLED)
+        done, log = self.run_leg(MUTANTS_SHARD="2/2")
+        self.assertEqual(done.returncode, 1)
+        want = [f"{LABEL}: MUTANTS_SHARD='2/2' is not k/n with 0 <= k < n"]
+        self.assertEqual(done.stderr.splitlines(), want)
+        self.assertEqual(log, list[str]())
+
+
+class ShareOut(unittest.TestCase):
+    """`share`: the config's `mutate` list, expanded and cut round-robin."""
+
+    FILES = (
+        "src/a.ts",
+        "src/b.ts",
+        "src/c.tsx",
+        "src/deep/d.ts",
+        "src/deep/d.test.ts",
+        "src/.hidden/h.ts",
+        "src/[id]/page.ts",
+        "lib/l.ts",
+        "README.md",
+    )
+
+    @override
+    def setUp(self) -> None:
+        """Plant a git tree of tracked files, and work in it."""
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp)
+        self.tree = tmp / "tree"
+        self.tree.mkdir()
+        self.out = tmp / "mutate"
+        git = [GIT, "-C", str(self.tree)]
+        subprocess.run([*git, "init", "-q"], env=hermetic.env(), check=True)
+        for path in self.FILES:
+            (self.tree / path).parent.mkdir(parents=True, exist_ok=True)
+            (self.tree / path).write_text(SOURCE, encoding="utf-8")
+        (self.tree / "untracked.ts").write_text(SOURCE, encoding="utf-8")
+        subprocess.run([*git, "add", "--", *self.FILES], env=hermetic.env(), check=True)
+        self.enterContext(contextlib.chdir(self.tree))
+
+    def share(self, mutate: list[str], shard: str) -> hermetic.Called:
+        """Write a config naming `mutate` and share it out.
+
+        Returns:
+            What `main` returned and wrote.
+
+        """
+        config = self.tree / "stryker.config.json"
+        config.write_text(json.dumps(CONFIG | {"mutate": mutate}), encoding="utf-8")
+        return call(["share", str(config), "--shard", shard, "--out", str(self.out)])
+
+    def shared(self, mutate: list[str], shard: str) -> list[str]:
+        """Share out and read the files back from the argument.
+
+        Returns:
+            The shard's files, unescaped, in order.
+
+        """
+        done = self.share(mutate, shard)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        text = self.out.read_text(encoding="utf-8")
+        return [re.sub(r"\\(.)", r"\1", f) for f in text.split(",") if f]
+
+    def test_three_shards_hold_every_file_exactly_once(self) -> None:
+        """A `!` entry subtracts; 0/3, 1/3 and 2/3 partition what is left."""
+        mutate = ["src/**/*.{ts,tsx}", "lib/*.ts", "!src/**/*.test.ts"]
+        every = [
+            "lib/l.ts",
+            "src/[id]/page.ts",
+            "src/a.ts",
+            "src/b.ts",
+            "src/c.tsx",
+            "src/deep/d.ts",
+        ]
+        shards = [self.shared(mutate, f"{k}/3") for k in range(3)]
+        want = [every[0::3], every[1::3], every[2::3]]
+        self.assertEqual(shards, want)
+        held = sorted(f for s in shards for f in s)
+        self.assertEqual(held, every)
+
+    def test_the_whole_share_prints_its_count(self) -> None:
+        """0/1 takes every file, and says how many of how many."""
+        done = self.share(["src/*.ts"], "0/1")
+        self.assertEqual(
+            done, hermetic.Called(0, f"{LABEL}: shard 0/1: 2 of 2 files\n", "")
+        )
+        self.assertEqual(self.out.read_text(encoding="utf-8"), "src/a.ts,src/b.ts")
+
+    def test_entries_apply_in_order(self) -> None:
+        """An entry after a `!` adds back what the `!` took, as StrykerJS reads it."""
+        mutate = ["src/*.ts", "!src/*.ts", "src/a.ts"]
+        want = ["src/a.ts"]
+        self.assertEqual(self.shared(mutate, "0/1"), want)
+
+    def test_a_dotted_name_is_matched_only_by_a_dotted_part(self) -> None:
+        """Minimatch's `dot: false`: `**` never reaches `.hidden`; `.hidden` does."""
+        self.assertNotIn("src/.hidden/h.ts", self.shared(["src/**/*.ts"], "0/1"))
+        want = ["src/.hidden/h.ts"]
+        self.assertEqual(self.shared(["src/.hidden/*.ts"], "0/1"), want)
+
+    def test_a_file_name_with_glob_syntax_is_escaped(self) -> None:
+        """`[id]` is named literally, so minimatch matches that file alone."""
+        self.share(["src/\\[id\\]/*.ts"], "0/1")
+        self.assertEqual(self.out.read_text(encoding="utf-8"), r"src/\[id\]/page.ts")
+
+    def test_a_ranged_entry_is_red_by_name(self) -> None:
+        """A range, even under `!`, cannot be shared out by file."""
+        done = self.share(["src/*.ts", "!src/a.ts:1:2-3:4"], "0/1")
+        want = (
+            f"{LABEL}: `mutate` entry '!src/a.ts:1:2-3:4' carries a mutation"
+            " range; a range cannot be shared out by file\n"
+        )
+        self.assertEqual(done, hermetic.Called(1, "", want))
+
+    def test_an_extglob_is_red_by_name(self) -> None:
+        """`full_match` cannot spell an extglob, so it is refused, not misread."""
+        done = self.share(["src/+(a|b).ts"], "0/1")
+        want = (
+            f"{LABEL}: `mutate` entry 'src/+(a|b).ts' is an extglob, which the"
+            " leg cannot expand\n"
+        )
+        self.assertEqual(done, hermetic.Called(1, "", want))
+
+    def test_a_list_matching_nothing_is_red(self) -> None:
+        """No tracked file matched: red, never an empty run."""
+        done = self.share(["untracked.ts"], "0/1")
+        want = f"{LABEL}: `mutate` matches no tracked file\n"
+        self.assertEqual(done, hermetic.Called(1, "", want))
+
+    def test_a_name_with_a_comma_is_red(self) -> None:
+        """--mutate splits on commas, so such a file cannot be named."""
+        (self.tree / "src/x,y.ts").write_text(SOURCE, encoding="utf-8")
+        subprocess.run([GIT, "add", "--", "src/x,y.ts"], env=hermetic.env(), check=True)
+        done = self.share(["src/x*.ts"], "0/1")
+        want = (
+            f"{LABEL}: src/x,y.ts: StrykerJS's --mutate cannot name this file"
+            " (a comma, or a trailing range)\n"
+        )
+        self.assertEqual(done, hermetic.Called(1, "", want))
+
+    def test_a_class_negated_with_a_caret_is_read_as_minimatch_reads_it(self) -> None:
+        """`[^a]` is every one character but `a`, as `[!a]` is."""
+        want = ["src/b.ts"]
+        self.assertEqual(self.shared(["src/[^a].ts"], "0/1"), want)
+
+    def test_entries_resolve_against_the_tree(self) -> None:
+        """`./`, a path back into the tree and an absolute one; outside is none."""
+        mutate = [
+            "./src/a.ts",
+            "../tree/src/b.ts",
+            f"{self.tree.resolve().as_posix()}/lib/*.ts",
+            "../elsewhere/*.ts",
+        ]
+        want = ["lib/l.ts", "src/a.ts", "src/b.ts"]
+        self.assertEqual(self.shared(mutate, "0/1"), want)
+
+    def test_a_shard_with_files_writes_no_counts(self) -> None:
+        """Only an empty share writes its row; a run's row is the verdict's."""
+        summary = self.out.parent / "summary"
+        config = self.tree / "stryker.config.json"
+        config.write_text(json.dumps(CONFIG), encoding="utf-8")
+        argv = ["share", str(config), "--out", str(self.out)]
+        done = call([*argv, "--summary-dir", str(summary)])
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertFalse(summary.exists())
+
+    def test_a_name_ending_in_a_range_is_red(self) -> None:
+        """--mutate would read the name's tail as a range: red, by name."""
+        (self.tree / "src/x:1-2").write_text(SOURCE, encoding="utf-8")
+        subprocess.run([GIT, "add", "--", "src/x:1-2"], env=hermetic.env(), check=True)
+        done = self.share(["src/x*"], "0/1")
+        want = (
+            f"{LABEL}: src/x:1-2: StrykerJS's --mutate cannot name this file"
+            " (a comma, or a trailing range)\n"
+        )
+        self.assertEqual(done, hermetic.Called(1, "", want))
+
+    def test_each_malformed_shard_is_red(self) -> None:
+        """Not two whole numbers, or k not below n: red, by name."""
+        for shard in ("x", "1/2/3", "2/2", "3/2", "-1/2"):
+            with self.subTest(shard=shard):
+                done = self.share(["src/*.ts"], shard)
+                want = f"{LABEL}: MUTANTS_SHARD='{shard}' is not k/n with 0 <= k < n\n"
+                self.assertEqual(done, hermetic.Called(1, "", want))
+
+    def test_a_config_with_no_mutate_list_is_red(self) -> None:
+        """`share` reads the list itself; a missing one is named."""
+        config = self.tree / "stryker.config.json"
+        bare: dict[str, object] = {"testRunner": "vitest"}
+        config.write_text(json.dumps(bare), encoding="utf-8")
+        done = call(["share", str(config), "--out", str(self.out)])
+        want = f"{LABEL}: {config} names no `mutate` list\n"
+        self.assertEqual(done, hermetic.Called(1, "", want))
+
+    def test_an_unreadable_config_is_red(self) -> None:
+        """No file: red, never an empty share."""
+        done = call(["share", str(self.tree / "none.json"), "--out", str(self.out)])
+        self.assertEqual(done.returncode, 1)
+        self.assertTrue(done.stderr.startswith(f"{LABEL}: "), done.stderr)
+
+
+class Braces(unittest.TestCase):
+    """minimatch's braces, expanded before `full_match` reads a pattern."""
+
+    ROWS: tuple[tuple[str, list[str]], ...] = (
+        ("a.{ts,tsx}", ["a.ts", "a.tsx"]),
+        ("{a,b{1,2}}.ts", ["a.ts", "b1.ts", "b2.ts"]),
+        ("{a{1,2},b}.ts", ["a1.ts", "a2.ts", "b.ts"]),
+        ("f{1..3}.ts", ["f1.ts", "f2.ts", "f3.ts"]),
+        ("f{3..1}.ts", ["f3.ts", "f2.ts", "f1.ts"]),
+        ("f{2..2}.ts", ["f2.ts"]),
+        ("{c..a}.ts", ["c.ts", "b.ts", "a.ts"]),
+        ("{x}.ts", ["{x}.ts"]),
+        ("{x}{a,b}", ["{x}a", "{x}b"]),
+        ("{x{a,b}}", ["{xa}", "{xb}"]),
+        ("\\{a,b}.ts", ["\\{a,b}.ts"]),
+        ("\\{{a,b}.ts", ["\\{a.ts", "\\{b.ts"]),
+        ("{a\\,,c}.ts", ["a\\,.ts", "c.ts"]),
+        ("{a,b.ts", ["{a,b.ts"]),
+        ("a,b}.ts", ["a,b}.ts"]),
+    )
+
+    def test_each_form(self) -> None:
+        """Lists, nested lists, ranges, literal braces and escaped ones."""
+        for pattern, want in self.ROWS:
+            with self.subTest(pattern=pattern):
+                self.assertEqual(mutants_typescript.braces(pattern), want)
+
+
+class Spelling(unittest.TestCase):
+    """minimatch's glob, spelled for `PurePosixPath.full_match`."""
+
+    ROWS: tuple[tuple[str, str], ...] = (
+        ("src/\\[id\\]/*.ts", "src/[[]id]/*.ts"),
+        ("a\\*b\\?c", "a[*]b[?]c"),
+        ("a\\!b", "a!b"),
+        ("[^a].ts", "[!a].ts"),
+        ("[a^].ts", "[a^].ts"),
+        ("a\\", "a\\"),
+    )
+
+    def test_each_form(self) -> None:
+        """An escape names its character; a `[^` class negates."""
+        for pattern, want in self.ROWS:
+            with self.subTest(pattern=pattern):
+                self.assertEqual(mutants_typescript.full_match_spelling(pattern), want)
 
 
 class Refusals(Planted):
@@ -404,16 +713,17 @@ class Verdict(Planted):
         done, log = self.run_leg()
         self.assertEqual(done.returncode, 0, done.stderr)
         want = [
+            SHARED,
             (
                 f"{LABEL}: 2 mutants, 2 killed, 0 survived, 0 not covered,"
                 " 0 not viable, 0 excluded"
-            )
+            ),
         ]
         self.assertEqual(done.stdout.splitlines(), want)
         self.assertEqual(done.stderr, "")
         want = [CALL]
         self.assertEqual(log, want)
-        self.assertEqual(self.counts(), "0/1\t2\t2\t0\t0\n")
+        self.assertEqual(self.counts(), "0/1\t2\t2\t0\t0\tshard\n")
         self.assertFalse((self.tree / "reports/mutation/mutation.json").exists())
 
     def test_one_survivor_is_red_by_file_and_line(self) -> None:
@@ -422,6 +732,7 @@ class Verdict(Planted):
         done, _ = self.run_leg()
         self.assertEqual(done.returncode, 1)
         want = [
+            SHARED,
             f"{LABEL}: survived: src/add.ts:7:54: ArithmeticOperator: a - b",
             (
                 f"{LABEL}: 3 mutants, 2 killed, 1 survived, 0 not covered,"
@@ -431,7 +742,7 @@ class Verdict(Planted):
         self.assertEqual(done.stdout.splitlines(), want)
         want = [RED_TAIL]
         self.assertEqual(done.stderr.splitlines(), want)
-        self.assertEqual(self.counts(), "0/1\t3\t2\t1\t0\n")
+        self.assertEqual(self.counts(), "0/1\t3\t2\t1\t0\tshard\n")
 
     def test_a_mutant_no_test_reaches_is_not_covered_and_red(self) -> None:
         """NoCoverage is a survivor of its own name, counted as survived."""
@@ -441,6 +752,7 @@ class Verdict(Planted):
         done, _ = self.run_leg()
         self.assertEqual(done.returncode, 1)
         want = [
+            SHARED,
             f"{LABEL}: not covered: src/add.ts:9:54: BlockStatement: {{}}",
             (
                 f"{LABEL}: 3 mutants, 2 killed, 0 survived, 1 not covered,"
@@ -448,7 +760,7 @@ class Verdict(Planted):
             ),
         ]
         self.assertEqual(done.stdout.splitlines(), want)
-        self.assertEqual(self.counts(), "0/1\t3\t2\t1\t0\n")
+        self.assertEqual(self.counts(), "0/1\t3\t2\t1\t0\tshard\n")
 
     def test_an_excluded_survivor_with_a_reason_is_green_and_counted(self) -> None:
         """A site comment with its reason: excluded, counted, green."""
@@ -456,13 +768,14 @@ class Verdict(Planted):
         done, _ = self.run_leg()
         self.assertEqual(done.returncode, 0, done.stderr)
         want = [
+            SHARED,
             (
                 f"{LABEL}: 3 mutants, 2 killed, 0 survived, 0 not covered,"
                 " 0 not viable, 1 excluded"
-            )
+            ),
         ]
         self.assertEqual(done.stdout.splitlines(), want)
-        self.assertEqual(self.counts(), "0/1\t3\t2\t0\t1\n")
+        self.assertEqual(self.counts(), "0/1\t3\t2\t0\t1\tshard\n")
 
     def test_an_exclusion_without_its_reason_is_red(self) -> None:
         """StrykerJS's default reason is no reason: red, by site."""
@@ -484,10 +797,11 @@ class Verdict(Planted):
         done, _ = self.run_leg()
         self.assertEqual(done.returncode, 0, done.stderr)
         want = [
+            SHARED,
             (
                 f"{LABEL}: 3 mutants, 2 killed, 0 survived, 0 not covered,"
                 " 1 not viable, 0 excluded"
-            )
+            ),
         ]
         self.assertEqual(done.stdout.splitlines(), want)
 
@@ -747,7 +1061,25 @@ class Main(unittest.TestCase):
         )
         self.assertEqual(
             (summary / "typescript.tsv").read_text(encoding="utf-8"),
-            "0/1\t2\t2\t0\t0\n",
+            "0/1\t2\t2\t0\t0\tshard\n",
+        )
+
+    def test_a_verdict_writes_the_shard_it_was_given(self) -> None:
+        """The row names `--shard`, never a fixed 0/1 (#2153)."""
+        path = self.write("mutation.json", report(*KILLED))
+        summary = path.parent / "summary"
+        done = call([
+            "verdict",
+            str(path),
+            "--shard",
+            "3/8",
+            "--summary-dir",
+            str(summary),
+        ])
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(
+            (summary / "typescript.tsv").read_text(encoding="utf-8"),
+            "3/8\t2\t2\t0\t0\tshard\n",
         )
 
     def test_a_survivor_is_red_and_writes_its_counts(self) -> None:

@@ -1081,7 +1081,8 @@ def report(judged: list[Judged], excluded: int, shard: str) -> int:
     if summary_dir:
         Path(summary_dir).mkdir(parents=True, exist_ok=True)
         Path(summary_dir, "python.tsv").write_text(
-            f"{shard}\t{len(judged)}\t{len(killed)}\t{len(survivors)}\t{excluded}\n",
+            f"{shard}\t{len(judged)}\t{len(killed)}\t{len(survivors)}"
+            f"\t{excluded}\twhole\n",
             encoding="utf-8",
         )
     status = EXIT_RED if any(j.restored for j in judged) else 0

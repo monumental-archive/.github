@@ -465,7 +465,8 @@ def report(args: Args, verdict: Verdict, excluded: int) -> None:
         red = len(verdict.survived) + len(verdict.not_covered)
         Path(args.summary_dir).mkdir(parents=True, exist_ok=True)
         Path(args.summary_dir, "go.tsv").write_text(
-            f"{args.shard}\t{verdict.total}\t{verdict.killed}\t{red}\t{excluded}\n",
+            f"{args.shard}\t{verdict.total}\t{verdict.killed}\t{red}"
+            f"\t{excluded}\twhole\n",
             encoding="utf-8",
         )
     if not verdict.green:
