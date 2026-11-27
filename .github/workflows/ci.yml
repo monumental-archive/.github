@@ -364,7 +364,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
         with:
-          version: 2026.11.10
+          version: 2026.11.11
           cache: false
 
       # unattested-path: the write half of the tool cache restored
@@ -774,7 +774,7 @@ jobs:
       - name: Install mise and the leg's tools
         uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
         with:
-          version: 2026.11.10
+          version: 2026.11.11
           cache: false
           # belt tools by the belt's keys, then the caller's inputs.
           # cargo-llvm-cov: a repository with a floor measures its
@@ -934,7 +934,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
         with:
-          version: 2026.11.10
+          version: 2026.11.11
           cache: false
 
       # unattested-path: the write half of the restore above, on its
