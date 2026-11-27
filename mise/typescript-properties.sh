@@ -12,9 +12,10 @@
 # replays. How the seed reaches fast-check, and why through a wrapper
 # config, is typescript_properties.py's header. The third mode, `lint`,
 # is `lint:typescript-properties`: the design conditions, no fast-check
-# import outside a property file and no property restating the seed or
-# run count, read from the source so a property that would override
-# the belt's seed is red before it runs.
+# import outside a property file and no property restating the seed,
+# the run count or a time bound (#2144: the belt runs properties with
+# no per-test limit), read from the source so a property that would
+# override the belt's bounds is red before it runs.
 set -euo pipefail
 
 # The writer beside this file, found with no command run (#1934).
@@ -75,7 +76,7 @@ if [[ ${profile} == lint ]]; then
   findings=$(printf '%s\0' "${sources[@]}" | xargs -0 python3 "${belt}/typescript_properties.py" lint) || {
     detail=()
     while IFS= read -r finding; do detail+=("${finding}"); done <<< "${findings}"
-    org_finding "" "properties live in *.prop.test.* files and take the belt's seed:" \
+    org_finding "" "properties live in *.prop.test.* files and take the belt's bounds:" \
       "${detail[@]}"
     exit 1
   }
