@@ -476,7 +476,6 @@ class UnparsableBody(ForgeCase):
         self.assert_not_clean(self.forge.check())
 
 
-
 class QueueByPlan(ForgeCase):
     """A repository carries the queue exactly when GitHub offers it (#2140).
 
