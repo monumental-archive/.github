@@ -207,6 +207,13 @@ class Figures(unittest.TestCase):
         """Read out of the zip, newline-terminated."""
         self.assertEqual(LEGS, figures.figures(figures.unpack(zipped(LEGS))))
 
+    def test_a_leg_not_held_is_a_leg_line(self) -> None:
+        """`<leg> not-held` (#2163) reaches the derivation, which keeps it."""
+        text = "plpgsql 95.00\nplpgsql-branches not-held\n"
+        self.assertEqual(text, figures.figures(figures.unpack(zipped(text))))
+        with self.assertRaises(figures.RefusedError):
+            figures.figures("plpgsql-branches held\n")
+
     def test_refusals_say_why(self) -> None:
         """Empty, a stray line, no file in the zip, not a zip."""
         for case, data, said in (

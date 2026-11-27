@@ -28,10 +28,12 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
+from typing import ClassVar, override
 from unittest import mock
 
 import coverage_floor as cf
@@ -115,6 +117,20 @@ case "${sql}" in
     planted="${STUB_DIR}/lint.${oid}.${relid}"
     [[ ! -f ${planted} ]] || cat "${planted}"
     ;;
+  *"ORDER BY stmtid"*)
+    # The ids of the statements that ran (#2163): those planted for the
+    # oid, else the first <executed> of its planted figures.
+    oid=${sql#*plpgsql_profiler_function_statements_tb(}
+    oid=${oid%%::*}
+    if [[ -f ${STUB_DIR}/ran.${oid} ]]; then
+      cat "${STUB_DIR}/ran.${oid}"
+    else
+      read -r _ _ _ executed _ < "${STUB_DIR}/read.${oid}" || true
+      if [[ ${executed:-} =~ ^[0-9]+$ ]]; then
+        for ((i = 1; i <= executed; i++)); do echo "${i}"; done
+      fi
+    fi
+    ;;
   *plpgsql_coverage_statements*)
     oid=${sql#*plpgsql_coverage_statements(}
     oid=${oid%%::*}
@@ -163,6 +179,9 @@ TWO_REPORT = (
     + "{label}: plpgsql: total statements 9 of 15 (60.00%), branches 66.66%"
     " statement-weighted\n"
 )
+
+# A source digest, as a report records one (#2163).
+SOURCE = "0" * 64
 
 # A branch-free function: no IF, CASE or loop, and the extension's 1.
 TOUCH = ("public.touch()", "1\t1\t2\t2\t0")
@@ -227,7 +246,7 @@ def stub_env(stubs: Path, answers: Path, **planted: str) -> dict[str, str]:
 
 
 def run(
-    argv: list[str], env: dict[str, str], cwd: Path
+    argv: list[str], env: dict[str, str], cwd: Path, stdin: str | None = None
 ) -> subprocess.CompletedProcess[str]:
     """Run a command and capture its output as text.
 
@@ -236,7 +255,13 @@ def run(
 
     """
     return subprocess.run(
-        argv, cwd=cwd, env=env, capture_output=True, text=True, check=False
+        argv,
+        cwd=cwd,
+        env=env,
+        input=stdin,
+        capture_output=True,
+        text=True,
+        check=False,
     )
 
 
@@ -271,15 +296,21 @@ def call(argv: list[str], env: dict[str, str], cwd: Path) -> Done:
     return Done(status, out.getvalue(), err.getvalue())
 
 
-def measured_run(
-    run_dir: Path, env: dict[str, str], tree: Path, *, python: bool, collects: bool
+def measured_run(  # ruff: ignore[too-many-arguments] -- one keyword per part of a run
+    run_dir: Path,
+    env: dict[str, str],
+    tree: Path,
+    *,
+    python: bool,
+    collects: bool,
+    databases: int = 1,
 ) -> None:
     """Leave a run's directory as a suite run through `measured` does (#1667).
 
     `python` plants the rc file and coverage.py's data the stub
     `coverage` reads; `collects` runs the suite's teardown, the helper
     called in-process (#1711), with the ORG_PLPGSQL_COVERAGE `measured`
-    names in the run.
+    names in the run, once for each of `databases` (#2163).
 
     Raises:
         AssertionError: the teardown failed; its output is the message.
@@ -290,8 +321,8 @@ def measured_run(
         (run_dir / "python").mkdir()
         (run_dir / "coverage.rc").write_text("[run]\n", encoding="utf-8")
         (run_dir / "python" / ".coverage.stub").write_text("", encoding="utf-8")
-    if collects:
-        report = {"ORG_PLPGSQL_COVERAGE": str(run_dir / "plpgsql-coverage.json")}
+    for _ in range(databases if collects else 0):
+        report = {"ORG_PLPGSQL_COVERAGE": str(run_dir / "plpgsql-coverage")}
         done = call(["collect", "postgres://stub"], env | report, tree)
         if done.returncode != 0:
             raise AssertionError(done.stderr)
@@ -333,12 +364,15 @@ class Collecting(unittest.TestCase):
             (answers / f"lint.{key}").write_text(rows, encoding="utf-8")
         for oid, source in (sources or {}).items():
             (answers / f"source.{oid}").write_text(source, encoding="utf-8")
-        report = tmp / "report.json"
-        self.answers, self.report = answers, report
-        env = stub_env(stubs, answers, ORG_PLPGSQL_COVERAGE=str(report), **planted)
+        reports = tmp / "reports"
+        env = stub_env(stubs, answers, ORG_PLPGSQL_COVERAGE=str(reports), **planted)
         named = [] if self.client is None else ["--", *self.client]
         collected = call(["collect", "postgres://stub", *named], env, tmp)
-        read = call(["totals", "leg", str(report)], env, tmp)
+        read = call(["totals", "leg", str(reports)], env, tmp)
+        # The one report the collection wrote, for the rows that read it.
+        written = sorted(reports.glob("*.json")) if reports.is_dir() else []
+        self.answers = answers
+        self.report = written[0] if len(written) == 1 else reports
         return collected, read
 
 
@@ -895,6 +929,8 @@ class RefusalRows(Collecting):
             "statement_count": 5,
             "executed": 4,
             "branch_free": False,
+            "ran": [1, 2, 3, 4],
+            "source": SOURCE,
             "findings": [],
             "suppressions": [],
         }
@@ -943,6 +979,40 @@ class RefusalRows(Collecting):
                 report({"function": "public.guard()", "error": 7}),
                 "function 0: 'error' is not a string",
             ),
+            (
+                report({k: v for k, v in good.items() if k != "ran"}),
+                "function 0: 'ran' is not a list of statement ids",
+            ),
+            (
+                report(good | {"ran": [1, True, 3, 4]}),
+                "function 0: 'ran' is not a list of statement ids",
+            ),
+            (
+                report(good | {"ran": [2, 1, 3, 4]}),
+                "function 0: 'ran' is not a list of statement ids",
+            ),
+            (
+                report(good | {"ran": [0, 1, 2, 3]}),
+                "function 0: 'ran' is not a list of statement ids",
+            ),
+            (
+                report(good | {"ran": [1, 2, 3]}),
+                (
+                    "function 0: 'ran' does not name 'executed' statements"
+                    " from 1 to 'statement_count'"
+                ),
+            ),
+            (
+                report(good | {"ran": [1, 2, 3, 6]}),
+                (
+                    "function 0: 'ran' does not name 'executed' statements"
+                    " from 1 to 'statement_count'"
+                ),
+            ),
+            (
+                report({k: v for k, v in good.items() if k != "source"}),
+                "function 0: 'source' is not a string",
+            ),
         ]
         for document, what in rows:
             with self.subTest(what=what):
@@ -990,7 +1060,7 @@ STRONG = {"101": ("public.guard()", "0.95\t0.88\t20\t19\t1")}
 class LegRows(unittest.TestCase):
     """`coverage:check` over the plpgsql leg, decided by the floor's record."""
 
-    def check(
+    def check(  # ruff: ignore[too-many-arguments] -- one keyword per part of a run
         self,
         functions: dict[str, tuple[str, str]],
         *,
@@ -998,14 +1068,17 @@ class LegRows(unittest.TestCase):
         files: dict[str, str],
         collects: bool = True,
         measured: dict[str, str] | None = None,
+        databases: int = 1,
     ) -> subprocess.CompletedProcess[str]:
         """Run coverage:check's body in a planted tree.
 
         `legs` is the floor's `legs:` record, each leg at 80.0 unless
         `measured` names the figure its floor was derived from (#2143),
         `files` the tracked files beside it, and `collects` whether the
-        suite's teardown calls the helper. A tracked `*.py` brings the
-        python leg in, measured by the stub coverage.py.
+        suite's teardown calls the helper, once per database of
+        `databases` (#2163). A tracked `*.py` brings the python leg in,
+        measured by the stub coverage.py. The floor file stays on the
+        row as `self.floor`.
 
         Returns:
             The finished task.
@@ -1027,6 +1100,7 @@ class LegRows(unittest.TestCase):
             "v1.0.0",
         )
         (tree / ".coverage-floor").write_text(floor, encoding="utf-8")
+        self.floor, self.planted = tree / ".coverage-floor", floor
         # The test task, for the read of it the python leg makes; the
         # check never runs it.
         task = tmp / "task.json"
@@ -1049,6 +1123,7 @@ class LegRows(unittest.TestCase):
             tree,
             python=any(name.endswith(".py") for name in files),
             collects=collects,
+            databases=databases,
         )
         check = as_object(TASKS["coverage:check"], "coverage:check")
         script = as_str(check["run"], "coverage:check's run")
@@ -1185,6 +1260,30 @@ class LegRows(unittest.TestCase):
             " this run measured none\n" + remedy.format(leg="plpgsql-branches"),
             done.stderr,
         )
+
+    def test_two_databases_leave_the_branch_floor_as_it_stands(self) -> None:
+        """Not held over two databases: named, and the floor file unchanged."""
+        done = self.check(
+            HELD,
+            legs="python python-branches plpgsql plpgsql-branches",
+            files={"helper.py": "print('hi')\n"},
+            databases=2,
+        )
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assert_held(
+            self.PYTHON_HELD
+            + "coverage:check: plpgsql leg holds its floor 80.0 (95.00%)\n"
+            "coverage:check: plpgsql-branches leg not held: this run cannot"
+            " measure it exactly (the measurement says why); its floor 80.0"
+            " stands\n",
+            done.stdout,
+        )
+        self.assertIn(
+            "coverage:check: plpgsql: plpgsql-branches: not held, 2 databases;"
+            " plpgsql_check cannot merge branches across databases (#2169)\n",
+            done.stderr,
+        )
+        self.assertEqual(self.planted, self.floor.read_text(encoding="utf-8"))
 
 
 # The coverage.py stub the python leg's rows use, read from its suite.
@@ -1325,6 +1424,547 @@ class ReadsTheRunRows(unittest.TestCase):
             "leg: plpgsql, plpgsql-branches: no upload format,"
             " not counted as a report writer\n",
             done.stderr,
+        )
+
+
+NOT_HELD_LINE = (
+    "leg: plpgsql: plpgsql-branches: not held, {n} databases; plpgsql_check"
+    " cannot merge branches across databases (#2169)\n"
+)
+
+
+class MergeRows(unittest.TestCase):
+    """Several databases' reports, merged by signature (#2163), on the stub."""
+
+    @override
+    def setUp(self) -> None:
+        """Plant the stub database and an empty reports directory."""
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.stubs, self.answers = plant_stubs(self.tmp, TWO)
+        self.reports = self.tmp / "reports"
+        self.env = stub_env(
+            self.stubs, self.answers, ORG_PLPGSQL_COVERAGE=str(self.reports)
+        )
+
+    def collect(self, ran: dict[str, str] | None = None) -> None:
+        """Tear one database down: plant what it ran, then collect it."""
+        for oid in TWO:
+            (self.answers / f"ran.{oid}").unlink(missing_ok=True)
+        for oid, ids in (ran or {}).items():
+            (self.answers / f"ran.{oid}").write_text(ids, encoding="utf-8")
+        done = call(["collect", "postgres://stub"], self.env, self.tmp)
+        self.assertEqual(0, done.returncode, done.stderr)
+
+    def totals(self) -> Done:
+        """Read every report the teardowns wrote.
+
+        Returns:
+            What `totals` returned and printed.
+
+        """
+        return call(["totals", "leg", str(self.reports)], self.env, self.tmp)
+
+    def test_each_collect_writes_a_report_of_its_own(self) -> None:
+        """Two teardowns, two files: neither replaces the other."""
+        self.collect()
+        self.collect()
+        written = sorted(p.name for p in self.reports.iterdir())
+        self.assertEqual(2, len(written), written)
+        for name in written:
+            self.assertRegex(name, r"^database-.+\.json$")
+
+    def test_statements_merge_as_the_union_of_what_ran(self) -> None:
+        """Half of stamp's statements in each database: all ten, merged."""
+        self.collect({"102": "1\n2\n3\n4\n5\n"})
+        self.collect({"102": "6\n7\n8\n9\n10\n"})
+        read = self.totals()
+        self.assertEqual(0, read.returncode, read.stderr)
+        self.assertEqual("plpgsql 93.33\nplpgsql-branches not-held\n", read.stdout)
+        self.assertEqual(
+            "leg: plpgsql: public.guard(): statements 4 of 5 (80.00%),"
+            " branches at least 100.00% (the highest one database read)\n"
+            "leg: plpgsql: public.stamp(integer): statements 10 of 10"
+            " (100.00%), branches at least 50.00% (the highest one database"
+            " read)\n"
+            "leg: plpgsql: total statements 14 of 15 (93.33%) across 2"
+            " databases, branches not held; at least 66.66%"
+            " statement-weighted, a lower bound from the highest fraction"
+            " one database read per function\n" + NOT_HELD_LINE.format(n=2),
+            read.stderr,
+        )
+
+    def test_no_branch_anywhere_prints_no_branch_leg_over_two(self) -> None:
+        """Branch-free functions only: nothing to hold or leave."""
+        (self.answers / "functions").write_text(
+            "103\tpublic.touch()\t\n", encoding="utf-8"
+        )
+        (self.answers / "read.103").write_text(f"{TOUCH[1]}\n", encoding="utf-8")
+        self.collect()
+        self.collect()
+        read = self.totals()
+        self.assertEqual(0, read.returncode, read.stderr)
+        self.assertEqual("plpgsql 100.00\n", read.stdout)
+        self.assertEqual(
+            TOUCH_LINE.format(label="leg")
+            + "leg: plpgsql: total statements 2 of 2 (100.00%) across 2"
+            " databases, branches none: no function has a branch\n",
+            read.stderr,
+        )
+
+    def test_one_signature_with_two_bodies_is_red_by_name(self) -> None:
+        """Statement ids number one body; two cannot be merged by id."""
+        self.collect()
+        (self.answers / "source.101").write_text("BEGIN RETURN 2; END", "utf-8")
+        self.collect()
+        read = self.totals()
+        self.assertEqual(1, read.returncode)
+        self.assertEqual("", read.stdout)
+        self.assertEqual(
+            "leg: plpgsql: public.guard(): its body differs between the"
+            " databases merged — statement ids are merged over one body only;"
+            " build every test database from the same schema\n",
+            read.stderr,
+        )
+
+    def test_a_function_no_database_ran_is_red_by_name(self) -> None:
+        """Present in both, run in neither: named, whatever the total."""
+        (self.answers / "functions").write_text(
+            "101\tpublic.guard()\t\n104\tpublic.idle()\t\n", encoding="utf-8"
+        )
+        (self.answers / "read.104").write_text("0\t0\t3\t0\t0\n", encoding="utf-8")
+        self.collect()
+        self.collect()
+        read = self.totals()
+        self.assertEqual(1, read.returncode)
+        self.assertEqual("", read.stdout)
+        self.assertEqual(
+            "leg: plpgsql: public.idle(): none of its 3 statements ran in any"
+            " of the 2 databases measured — a function no test runs is red,"
+            " whatever the total\n",
+            read.stderr,
+        )
+
+    def test_a_function_one_database_ran_is_covered(self) -> None:
+        """Run in one database and absent from the other: merged, green."""
+        self.collect()
+        (self.answers / "functions").write_text(
+            "101\tpublic.guard()\t\n", encoding="utf-8"
+        )
+        self.collect()
+        read = self.totals()
+        self.assertEqual(0, read.returncode, read.stderr)
+        self.assertEqual("plpgsql 60.00\nplpgsql-branches not-held\n", read.stdout)
+
+    def test_one_database_names_a_function_it_never_ran(self) -> None:
+        """The same rule over a single report."""
+        (self.answers / "read.102").write_text("0\t0\t10\t0\t2\n", encoding="utf-8")
+        self.collect()
+        read = self.totals()
+        self.assertEqual(1, read.returncode)
+        self.assertEqual(
+            "leg: plpgsql: public.stamp(integer): none of its 10 statements ran"
+            " in the database measured — a function no test runs is red,"
+            " whatever the total\n",
+            read.stderr,
+        )
+
+    def test_refusals_repeated_by_every_database_are_named_once(self) -> None:
+        """Two databases with the profiler off: one line, not two."""
+        self.env["STUB_PROFILER"] = "off"
+        self.collect()
+        self.collect()
+        read = self.totals()
+        self.assertEqual(1, read.returncode)
+        self.assertEqual(
+            "leg: plpgsql: plpgsql_check.profiler is 'off' — with the profiler"
+            " off every function reads 0%, which is not a measurement; start"
+            " the test database with -c plpgsql_check.profiler=on\n",
+            read.stderr,
+        )
+
+    def test_a_report_that_is_not_one_is_named_by_its_file(self) -> None:
+        """Among several, the bad file is named."""
+        self.collect()
+        (self.reports / "database-planted.json").write_text("[", encoding="utf-8")
+        read = self.totals()
+        self.assertEqual(1, read.returncode)
+        self.assertEqual(
+            "leg: plpgsql: the report database-planted.json is not a coverage"
+            " report: not JSON (Expecting value: line 1 column 2 (char 1))\n",
+            read.stderr,
+        )
+
+    def test_an_empty_directory_is_no_report(self) -> None:
+        """A directory no teardown wrote into holds no measurement."""
+        self.reports.mkdir()
+        read = self.totals()
+        self.assertEqual(1, read.returncode)
+        self.assertEqual(
+            "leg: plpgsql: the test task wrote no report — its teardown must"
+            " call plpgsql_coverage.py collect while ORG_PLPGSQL_COVERAGE is set\n",
+            read.stderr,
+        )
+
+    def test_a_report_path_that_is_a_file_is_refused_at_collect(self) -> None:
+        """The variable names a directory; a file there is not replaced."""
+        self.reports.write_text("kept\n", encoding="utf-8")
+        done = call(["collect", "postgres://stub"], self.env, self.tmp)
+        self.assertEqual(1, done.returncode)
+        self.assertEqual(
+            f"{TASK}: ORG_PLPGSQL_COVERAGE names {self.reports}, which is not a"
+            " directory of reports\n",
+            done.stderr,
+        )
+        self.assertEqual("kept\n", self.reports.read_text(encoding="utf-8"))
+
+    def test_statement_ids_psql_printed_wrong_are_unreadable(self) -> None:
+        """An id that is not a number is listed, red, never guessed."""
+        self.collect({"101": "1\nx\n"})
+        read = self.totals()
+        self.assertEqual(1, read.returncode)
+        self.assertIn(
+            "leg: plpgsql: plpgsql_check cannot read public.guard():"
+            " unreadable statement ids: [['1'], ['x']]\n",
+            read.stderr,
+        )
+
+
+# The database the real rows start (#2163): the org's image, digest-pinned.
+IMAGE_PIN = CANON / "docker" / "plpgsql-coverage-image.toml"
+# The image's own preloads, then the extension's, and the profiler on.
+POSTGRES = (
+    "postgres",
+    "-c",
+    "shared_preload_libraries=pg_stat_statements,pgaudit,plpgsql,plpgsql_check",
+    "-c",
+    "plpgsql_check.profiler=on",
+)
+# Seconds the database may take to start, once the image is pulled.
+READY = 120
+
+# The fixture schema every real database is built from: one function
+# with two branches, clean under every static check plpgsql_check has.
+FIXTURE = """\
+CREATE FUNCTION public.sign(n integer) RETURNS integer
+  LANGUAGE plpgsql IMMUTABLE AS $$
+BEGIN
+  IF n > 0 THEN
+    RETURN 1;
+  ELSE
+    RETURN -1;
+  END IF;
+END
+$$;
+"""
+# A second function, for the database set that never runs it.
+IDLE = """\
+CREATE FUNCTION public.idle() RETURNS integer
+  LANGUAGE plpgsql IMMUTABLE AS $$
+BEGIN
+  RETURN 0;
+END
+$$;
+"""
+
+
+def pinned_image() -> str:
+    """Read the image the real rows run on.
+
+    Returns:
+        The image reference, tag and digest.
+
+    """
+    pin = as_object(load_toml(IMAGE_PIN.read_text(encoding="utf-8")), "the pin")
+    return as_str(pin["image"], "the pin's image")
+
+
+class RealDatabaseRows(unittest.TestCase):
+    """The leg on a real Postgres with plpgsql_check (#2163).
+
+    One container from the digest-pinned org image serves every row;
+    each row makes databases of its own, so no row reads another's
+    profile (plpgsql_check keys its profile by database).
+    """
+
+    container = ""
+    docker = ""
+    env: ClassVar[dict[str, str]]
+
+    @classmethod
+    @override
+    def setUpClass(cls) -> None:
+        """Start the database and wait until it takes connections.
+
+        Raises:
+            AssertionError: it did not start, or took no connection in
+                time; docker's own words are the message.
+
+        """
+        cls.docker = hermetic.tool("docker")
+        cls.container = f"plpgsql-coverage-{os.getpid()}-{os.urandom(4).hex()}"
+        cls.env = hermetic.env(tools=("docker",), MISE_TASK_NAME=TASK)
+        started = subprocess.run(
+            [
+                cls.docker,
+                "run",
+                "--detach",
+                "--rm",
+                "--name",
+                cls.container,
+                "--env",
+                "POSTGRES_HOST_AUTH_METHOD=trust",
+                pinned_image(),
+                *POSTGRES,
+            ],
+            env=cls.env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if started.returncode != 0:
+            msg = f"the database did not start: {started.stderr}"
+            raise AssertionError(msg)
+        cls.addClassCleanup(cls.remove)
+        # Over TCP: the image's first start serves its socket only while
+        # it initialises, then restarts; the TCP listener is the last one.
+        for _ in range(READY * 2):
+            ready = subprocess.run(
+                [
+                    cls.docker,
+                    "exec",
+                    cls.container,
+                    "pg_isready",
+                    "-q",
+                    *("-h", "127.0.0.1", "-U", "postgres"),
+                ],
+                env=cls.env,
+                capture_output=True,
+                check=False,
+            )
+            if ready.returncode == 0:
+                return
+            time.sleep(0.5)
+        msg = f"the database took no connection within {READY} s"
+        raise AssertionError(msg)
+
+    @classmethod
+    def remove(cls) -> None:
+        """Remove the container and its databases with it."""
+        subprocess.run(
+            [cls.docker, "rm", "--force", cls.container],
+            env=cls.env,
+            capture_output=True,
+            check=False,
+        )
+
+    def client(self) -> list[str]:
+        """Name the client a container-hosted suite's teardown names (#2114).
+
+        Returns:
+            The client's words.
+
+        """
+        return [
+            self.docker,
+            *("exec", "-i", self.container, "psql"),
+            *("-h", "127.0.0.1", "-U", "postgres"),
+        ]
+
+    def sql(self, database: str, text: str) -> str:
+        """Run SQL in one database, as the suite does.
+
+        Returns:
+            What psql printed.
+
+        """
+        done = subprocess.run(
+            [
+                *self.client(),
+                *("-X", "-q", "-A", "-t", "-v", "ON_ERROR_STOP=1"),
+                *("-d", database),
+            ],
+            input=text,
+            env=self.env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(0, done.returncode, done.stderr)
+        return done.stdout
+
+    def database(self, *schema: str) -> str:
+        """Make a database of this row's from the fixture schema.
+
+        Returns:
+            Its name.
+
+        """
+        name = f"row_{os.urandom(6).hex()}"
+        self.sql("postgres", f"CREATE DATABASE {name};")
+        self.sql(name, "".join(schema or (FIXTURE,)))
+        return name
+
+    def collect(self, reports: Path, *databases: str) -> None:
+        """Tear each database down: the teardown's own call, in turn."""
+        for database in databases:
+            done = call(
+                ["collect", f"dbname={database}", "--", *self.client()],
+                self.env | {"ORG_PLPGSQL_COVERAGE": str(reports)},
+                CANON,
+            )
+            self.assertEqual(0, done.returncode, done.stderr)
+
+    def totals(self, reports: Path) -> Done:
+        """Read the reports.
+
+        Returns:
+            What `totals` returned and printed.
+
+        """
+        return call(["totals", "leg", str(reports)], self.env, CANON)
+
+    def scratch(self) -> Path:
+        """Make a directory this row removes.
+
+        Returns:
+            Its path.
+
+        """
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        return tmp
+
+    def two_databases(self) -> Path:
+        """Run a different branch of sign in each of two databases.
+
+        Returns:
+            The directory their two reports are in.
+
+        """
+        ahead, behind = self.database(), self.database()
+        self.sql(ahead, "SELECT public.sign(1);")
+        self.sql(behind, "SELECT public.sign(-1);")
+        reports = self.scratch() / "reports"
+        self.collect(reports, ahead, behind)
+        return reports
+
+    def test_two_databases_merge_to_one_database_running_both(self) -> None:
+        """Each branch in its own database reads as one database running both."""
+        both = self.database()
+        self.sql(both, "SELECT public.sign(1); SELECT public.sign(-1);")
+        alone = self.scratch() / "reports"
+        self.collect(alone, both)
+        merged, single = self.totals(self.two_databases()), self.totals(alone)
+        self.assertEqual(0, merged.returncode, merged.stderr)
+        self.assertEqual(0, single.returncode, single.stderr)
+        self.assertEqual(single.stdout.splitlines()[0], merged.stdout.splitlines()[0])
+        self.assertEqual("plpgsql 100.00", merged.stdout.splitlines()[0])
+        self.assertIn(
+            "leg: plpgsql: sign(integer): statements 4 of 4 (100.00%),"
+            " branches at least 50.00% (the highest one database read)\n",
+            merged.stderr,
+        )
+
+    def test_two_databases_leave_the_branch_floor_untouched(self) -> None:
+        """Not held, by name and count; coverage:check changes no floor line."""
+        read = self.totals(self.two_databases())
+        self.assertEqual(0, read.returncode, read.stderr)
+        self.assertEqual("plpgsql 100.00\nplpgsql-branches not-held\n", read.stdout)
+        self.assertIn(NOT_HELD_LINE.format(n=2), read.stderr)
+        tree = self.scratch()
+        floor = tree / ".coverage-floor"
+        # Each leg on its own line (#2143): the branch line apart from the
+        # statement one, so the row shows which line stands.
+        text = cf.render(
+            {
+                "plpgsql": cf.fresh(Decimal("82.0")),
+                "plpgsql-branches": cf.fresh(Decimal("60.0")),
+            },
+            "v1.0.0",
+        )
+        floor.write_text(text, encoding="utf-8")
+        held = run(
+            [
+                sys.executable,
+                str(BELT / "coverage_floor.py"),
+                *("hold", "--label", "coverage:check", "--job", "gate"),
+            ],
+            self.env | {"ORG_PYTHON": sys.executable},
+            tree,
+            stdin=read.stdout,
+        )
+        self.assertEqual(0, held.returncode, held.stderr)
+        self.assertEqual(
+            "coverage:check: plpgsql leg holds its floor 80.0 (100.00%)\n"
+            "coverage:check: plpgsql-branches leg not held: this run cannot"
+            " measure it exactly (the measurement says why); its floor 58.0"
+            " stands\n",
+            held.stdout,
+        )
+        self.assertEqual(text, floor.read_text(encoding="utf-8"))
+
+    def test_one_database_holds_the_branch_leg_as_now(self) -> None:
+        """One report: plpgsql_check's own branch figure, held."""
+        one = self.database()
+        self.sql(one, "SELECT public.sign(1);")
+        own = self.sql(
+            one,
+            "CREATE EXTENSION IF NOT EXISTS plpgsql_check;"
+            " SELECT plpgsql_coverage_branches('public.sign(integer)');",
+        )
+        reports = self.scratch() / "reports"
+        self.collect(reports, one)
+        read = self.totals(reports)
+        self.assertEqual(0, read.returncode, read.stderr)
+        self.assertEqual("0.5\n", own)
+        self.assertEqual("plpgsql 75.00\nplpgsql-branches 50.00\n", read.stdout)
+        self.assertNotIn("not held", read.stderr)
+
+    def test_two_concurrent_collects_leave_two_reports(self) -> None:
+        """Teardowns at the same moment write a report each."""
+        ahead, behind = self.database(), self.database()
+        reports = self.scratch() / "reports"
+        env = self.env | {"ORG_PLPGSQL_COVERAGE": str(reports)}
+        started = [
+            subprocess.Popen(
+                [
+                    sys.executable,
+                    *(str(HELPER), "collect", f"dbname={name}", "--"),
+                    *self.client(),
+                ],
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            for name in (ahead, behind)
+        ]
+        for process in started:
+            _, err = process.communicate()
+            self.assertEqual(0, process.returncode, err)
+        self.assertEqual(2, len(list(reports.glob("database-*.json"))))
+
+    def test_a_function_no_database_runs_is_red_by_name(self) -> None:
+        """Idle is in both databases and run in neither.
+
+        regprocedure names a function on the search path without its
+        schema, as the listing prints it.
+        """
+        ahead = self.database(FIXTURE, IDLE)
+        behind = self.database(FIXTURE, IDLE)
+        self.sql(ahead, "SELECT public.sign(1);")
+        self.sql(behind, "SELECT public.sign(-1);")
+        reports = self.scratch() / "reports"
+        self.collect(reports, ahead, behind)
+        read = self.totals(reports)
+        self.assertEqual(1, read.returncode)
+        self.assertEqual("", read.stdout)
+        self.assertEqual(
+            "leg: plpgsql: idle(): none of its 2 statements ran in any"
+            " of the 2 databases measured — a function no test runs is red,"
+            " whatever the total\n",
+            read.stderr,
         )
 
 

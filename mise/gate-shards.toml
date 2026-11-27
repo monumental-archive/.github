@@ -127,6 +127,9 @@ default = 2
 "mise/test_mutants_go.py" = 25
 "mise/test_mutants_rust.py" = 23
 "mise/test_coverage_go_rust.py" = 22
+# PR #2174's gate run 46082363673 (test 2/4): its rows on a real
+# database (#2163); unittest's durations leave out the image start.
+"mise/test_plpgsql_coverage.py" = 22
 "mise/test_standing_issue.py" = 21
 "mise/test_rust_lint.py" = 17
 "mise/test_audit_badges.py" = 16
@@ -140,7 +143,6 @@ default = 2
 "mise/test_coverage_fuzz.py" = 10
 "mise/test_break_check.py" = 9
 "mise/test_coverage_go_branches.py" = 9
-"mise/test_plpgsql_coverage.py" = 8
 "mise/test_prepush_hook.py" = 8
 "release/test_coverage_figures.py" = 8
 "mise/test_bestpractices_stub.py" = 7

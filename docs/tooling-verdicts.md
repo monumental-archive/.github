@@ -32,7 +32,7 @@ honestly blocked on.
 | cargo-llvm-cov + `.coverage-floor` ratchet | Derived coverage floor in the gate (`coverage:check`), measured on the repository's own `test` run through `measured` and rendered by `cargo llvm-cov report` (#1653), re-derived by the release path, codecov badge feed off-gate; Rust branches as a floor of their own (`rust-branches`, #1359), measured with `--branch` on the repo's dated nightly and held by the Monday audit (`audit:coverage-branches`), never the gate |
 | coverage.py (`pipx:` backend via aqua-backed uv) | The `python` and `python-branches` legs of the same ratchet (#1331): the repository's own `test` task run under coverage, child processes included, statements and branches |
 | vitest's own coverage provider (the repository's, not the belt's) | The `typescript` and `typescript-branches` legs of the same ratchet (#1357): the repository's vitest under the provider its lockfile pins, lines and branches; the belt pins neither |
-| plpgsql_check (present in the org's database image, loaded only where a consumer's tests start the image with it preloaded; the belt pins nothing) | The `plpgsql` and `plpgsql-branches` legs of the same ratchet (#1547): `mise/plpgsql_coverage.py` reads the profiler's statement and branch coverage in the suite's teardown, through the repository's own `psql` or the client the call names |
+| plpgsql_check (present in the org's database image, loaded only where a consumer's tests start the image with it preloaded; the belt pins nothing) | The `plpgsql` and `plpgsql-branches` legs of the same ratchet (#1547): `mise/plpgsql_coverage.py` reads the profiler's statement and branch coverage in each test database's teardown, through the repository's own `psql` or the client the call names, and merges every database's report (#2163) |
 | Hypothesis (`pipx:` backend via aqua-backed uv) | Python property testing (#1332): every tracked `prop_*.py`, fixed seed in the gate (`test:python-properties`), random seed and wider bounds on the Monday cron (`audit:python-properties`) |
 | fast-check (the repository's, not the belt's) | TypeScript property testing (#1549): every tracked `*.prop.test.{ts,tsx,mts,cts}` under the repository's own vitest, fixed seed in the gate (`test:typescript-properties`), random seed and 10,000 runs on the Monday cron (`audit:typescript-properties`), no per-test time limit in either (#2144); `lint:typescript-properties` refuses an import outside a property file, a restated seed or run count, and a time a property sets itself; the belt pins neither tool |
 | proptest (the repository's, not the belt's) | Rust property testing (#1930): the repository's own `test` task draws from seed 1 in the gate (the belt's `[env]` sets `PROPTEST_RNG_SEED`), and from a fresh printed seed on the nightly run (`audit:rust-properties`); `lint:rust-properties` refuses a locked proptest below 1.7.0, which ignores the variable; the belt pins nothing |
@@ -4022,11 +4022,48 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
   `plpgsql_check.profiler=on`. The database lives only for the suite,
   so the reading is taken inside it: the repository's `test` command
   runs through `mise/measured`, which sets `ORG_PLPGSQL_COVERAGE`
-  naming a report, and the repository's teardown calls
-  `mise/plpgsql_coverage.py collect <conninfo>` before it stops the
-  database; the leg then calls `totals` on the report the teardown
+  naming a directory of reports, and the repository's teardown calls
+  `mise/plpgsql_coverage.py collect <conninfo>` before it stops each
+  database; the leg then calls `totals` on the reports the teardowns
   wrote. A report written is the leg's answer; the leg searches no
-  file. **Amended 2026-11-26 (#2106): the extension ships in the
+  file. **Amended 2026-11-28 (#2163): every test database, merged.**
+  The first build read one report per run, and each teardown's
+  `collect` replaced the last, so a suite with a database per test
+  file was measured on whichever teardown ran last, and every function
+  run only in the others read 0% with nothing naming why
+  (monumental-archive/monumental-archive#520). Now each `collect`
+  writes a file of its own, created exclusively, and each report
+  records, per function, the ids of the statements that ran
+  (`exec_stmts > 0`) and a digest of the function's source. `totals`
+  merges the reports by signature (the oid differs per database) and
+  takes the union of the ids: a statement is covered if any database
+  ran it. A signature whose body differs between databases is refused
+  by name. After the merge, a function none of whose statements ran in
+  any database is red by name, whatever the total (the owner's ruling
+  of 2026-11-27). Branches do not merge: two probes on the pinned
+  2.10.16 measured that `plpgsql_profiler_function_statements_tb`
+  carries `parent_stmtid` and `block_num` but no `parent_note`, so an
+  `IF … ELSE` and an `IF … ELSIF` with its implicit else give
+  identical rows, an empty branch leaves no row, and the implicit else
+  needs `exec_count_cond_err`, which no column returns; and that the
+  shared profile is keyed by `db_oid`, so it never unions across
+  databases, even template clones with identical oid, xmin and ctid.
+  No release through v2.11.1 exposes branch membership. So with one
+  report the branch leg is held as below; with more than one it prints
+  `plpgsql-branches not-held`, names why (#2169, which holds it again
+  once plpgsql_check exposes branch membership) and prints the highest
+  fraction one database read per function as a lower bound;
+  `coverage:check` holds nothing against it, and the derivation
+  carries its own line (#2143) as it stands and keeps it in the
+  `legs:` record. Only `plpgsql-branches` may report `not-held`; any
+  other leg's is refused as a malformed measurement. Rejected:
+  that highest fraction as the enforced figure (it undercounts whenever
+  two databases took different branches), a branch derivation from
+  the statement tree, the shared profile, holding the leg red until
+  upstream changes, and requiring a suite to use one database. The
+  leg's own tests run on the org's database image, digest-pinned in
+  `docker/plpgsql-coverage-image.toml` and moved by Renovate.
+  **Amended 2026-11-26 (#2106): the extension ships in the
   image, loaded by nothing.** The first build kept a coverage
   extension out of the published image as a test tool and had each
   consumer's tests build a layer over it adding the distribution's
