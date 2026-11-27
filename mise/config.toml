@@ -3372,7 +3372,8 @@ dir = "{{cwd}}"
 # `vi.setConfig`) and fast-check's `timeout`, `interruptAfterTimeLimit`
 # and `skipAllAfterTimeLimit` are refused, the last two because they
 # end a run before the examples the belt asked for. Red by name, file
-# and line, read from the code, so a comment or string names nothing.
+# and line, matched on the raw text: a bound named in a comment or
+# string is red too, a loud false positive rather than a silent pass.
 # Skips clean where no tracked lockfile holds fast-check.
 run = '''
 "${ORG_BELT_DIR}/typescript-properties.sh" lint

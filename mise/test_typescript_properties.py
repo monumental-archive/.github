@@ -721,12 +721,44 @@ class Lint(unittest.TestCase):
                 self.assertIn(f"  {site}: restates {what}{tail}", done.stderr)
         self.assertEqual(done.stderr.count(": restates "), 7, done.stderr)
 
-    def test_time_in_text_or_a_body_is_not_a_bound(self) -> None:
-        """A comment, a string, a two-argument call: clean."""
+    def test_a_quote_in_a_regex_hides_no_bound(self) -> None:
+        """A regex literal's quote masks nothing: each bound still red."""
+        done = lint({
+            "a.prop.test.ts": 'import fc from "fast-check";\n'
+            "const q = /'/; fc.assert(p, { seed: 1, timeout: 9 });\n"
+            'const r = /"/; fc.assert(p, { numRuns: 5 });\n',
+        })
+        self.assertEqual(done.returncode, 1)
+        tail = "; the belt's seed, run count and time bound own every property\n"
+        for site, what in (
+            ("a.prop.test.ts:2", "seed"),
+            ("a.prop.test.ts:2", "fast-check's timeout"),
+            ("a.prop.test.ts:3", "numRuns"),
+        ):
+            with self.subTest(what=what):
+                self.assertIn(f"  {site}: restates {what}{tail}", done.stderr)
+        self.assertEqual(done.stderr.count(": restates "), 3, done.stderr)
+
+    def test_a_bound_named_in_text_is_red(self) -> None:
+        """A comment or string naming a bound reds: loud, never silent."""
         done = lint({
             "a.prop.test.ts": PROPERTY
-            + '// test("x", f, 5000) and { timeout: 1 }\n'
-            + 'const note = "vi.setConfig({ timeout: 1 })";\n'
+            + "// fc.assert(p, { timeout: 1 })\n"
+            + 'const note = "vi.setConfig({})";\n',
+        })
+        self.assertEqual(done.returncode, 1)
+        tail = "; the belt's seed, run count and time bound own every property\n"
+        for site, what in (
+            ("a.prop.test.ts:4", "fast-check's timeout"),
+            ("a.prop.test.ts:5", "vi.setConfig()"),
+        ):
+            with self.subTest(what=what):
+                self.assertIn(f"  {site}: restates {what}{tail}", done.stderr)
+
+    def test_a_two_argument_call_and_other_options_are_clean(self) -> None:
+        """A number inside a body, and options without timeout: clean."""
+        done = lint({
+            "a.prop.test.ts": PROPERTY
             + 'it("waits, 5000", () => {\n  expect(Math.max(f(1), 5)).toBe(5);\n});\n'
             + 'it("named", { retry: 2 }, () => {});\n',
         })

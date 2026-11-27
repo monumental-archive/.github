@@ -132,7 +132,8 @@ TIMEOUT = re.compile(r"\btimeout\b\s*[:,}]")
 
 # The head of a vitest test call: `test(`, `it(`, and any chain on them
 # (`test.prop([...])(`, `it.concurrent(`, `test.each(rows)(`). Read on
-# the masked source, so a name in a string or comment is not a call.
+# the masked source, for structure only: a finding is never decided
+# by it, since a quote in a regex literal masks to the end of a line.
 TEST_CALL = re.compile(r"(?<![\w$.])(?:test|it)((?:\s*\.\s*[A-Za-z_$][\w$]*)*)\s*\(")
 # Chain members whose own call comes before the test's arguments.
 CURRIED = ("prop", "each", "for")
@@ -411,6 +412,10 @@ def test_calls(code: str) -> list[list[tuple[int, int]]]:
 def time_bounds(name: str, text: str) -> list[str]:
     """Name each time a property file sets itself (#2144).
 
+    A `timeout` key is matched on the raw text, as RESTATED is; the
+    masked code only finds the test calls, their third argument and
+    which object arguments are a test's options, for the wording.
+
     Returns:
         One finding per vitest per-test timeout (a third argument, or a
         `timeout` in a test's options) and per fast-check `timeout`.
@@ -436,7 +441,7 @@ def time_bounds(name: str, text: str) -> list[str]:
             if third.strip() and not third.strip().startswith("{"):
                 at = start + len(third) - len(third.lstrip())
                 found.append((at, "a per-test timeout (test()'s third argument)"))
-    for match in TIMEOUT.finditer(code):
+    for match in TIMEOUT.finditer(text):
         at = match.start()
         vitest = any(start <= at < end for start, end in options)
         what = "vitest's timeout option" if vitest else "fast-check's timeout"
@@ -470,9 +475,10 @@ def lint(files: list[str]) -> int:
                     for match in IMPORT.finditer(line)
                 )
             continue
-        # A property file's bounds are read from its code: a comment or
-        # string that names one sets nothing.
-        for number, line in enumerate(masked(text).splitlines(), 1):
+        # Every bound is matched on the raw text, a comment or string
+        # included: a loud false positive, never a silent pass. The
+        # masked code only gives time_bounds the structure of a call.
+        for number, line in enumerate(text.splitlines(), 1):
             for match in RESTATED.finditer(line):
                 bound = typed_std.group(match, 1)
                 call = re.sub(r"\s+", "", typed_std.group(match, 2) or "")
