@@ -173,10 +173,27 @@ matches the commit it is stored in (#1529). The gate's squash-message
 step refuses such a body by line number, so it should not reach the
 queue.
 
-**Private repositories have no queue.** On the Team plan GitHub offers
-it to public repositories only, so `monumental-archive` keeps the
-rebase route; Renovate rebases its own pull requests there. `apply`
-skips a private repository and `check` expects no ruleset in one.
+**A repository carries the queue exactly when GitHub offers it one**
+(#2140): when it is public, or when the org's plan is Enterprise Cloud.
+The org has been on Enterprise Cloud since 2026-11-26, so the private
+`monumental-archive` carries the same ruleset as every public
+repository. One predicate decides both modes, and its inputs are read
+every run, never assumed: the repository's visibility, and the org's
+plan (`orgs/<org>` → `.plan.name`, served to owners only, read once at
+the first repository that is not public). `apply` creates or corrects
+the ruleset wherever the queue is offered and leaves it alone
+elsewhere; with the plan unreadable a private repository gets its
+settings and nothing is written to its queue. `check` reports a
+repository that is offered the queue and lacks it, and with the plan
+unreadable every private repository is drift, never passed over.
+
+**A lapsed plan is its own finding.** A private repository that still
+carries the queue on any plan but Enterprise Cloud has pull requests
+that cannot merge, because the ruleset requires a queue GitHub no
+longer runs for it. `check` says so by name — the repository, its
+visibility and the plan — and the fix is to delete the ruleset in
+Settings → Rules. That is the one way this goes wrong silently, so it
+is guarded rather than assumed away.
 
 **`required_signatures` and the tag rules earn no Scorecard points** —
 there is no probe for either. They are here because the attestation chain

@@ -185,6 +185,52 @@ labels="$(jq -c '.labels[]' "${baseline}")"
 label_count="$(jq '.labels | length' "${baseline}")"
 drift=0
 
+# Whether a repository carries merge-queue.json is whether GitHub offers
+# it the queue (#2140): a public repository always, a private one only
+# in an org on Enterprise Cloud. Both modes ask queue_offered, so a
+# lapsed plan is caught by the same predicate that admitted the private
+# repository.
+#
+# The plan is read, never assumed, the way visibility is: once per run,
+# at the first repository that is not public (a public one never needs
+# it, so an all-public org is never asked). A body with no `.plan`
+# (GitHub serves it to owners only) is unreadable, never "team".
+plan_name=""
+plan_read=0
+read_plan() {
+  local plan_status=0
+  plan_read=1
+  api_probe "the org's plan" \
+    "an org owner's token — GitHub serves .plan to owners only" "" \
+    "orgs/${org}" --jq '.plan.name // empty' || plan_status=$?
+  if [[ ${plan_status} -eq 0 && -z ${api_body} ]]; then
+    org_finding "" "cannot read the org's plan" \
+      "endpoint: orgs/${org}" \
+      "the body carries no .plan — GitHub serves it to owners only"
+  elif [[ ${plan_status} -eq 0 ]]; then
+    plan_name="${api_body}"
+  fi
+}
+
+# 0 offered, 1 not offered, 2 unknown (the plan is unreadable and the
+# repository is not public). Takes the repository's visibility. Reads
+# the plan on first need, which overwrites api_body.
+queue_offered() {
+  if [[ $1 == public ]]; then
+    return 0
+  fi
+  if [[ ${plan_read} -eq 0 ]]; then
+    read_plan
+  fi
+  if [[ -z ${plan_name} ]]; then
+    return 2
+  fi
+  if [[ ${plan_name} == enterprise ]]; then
+    return 0
+  fi
+  return 1
+}
+
 for repo in ${repos}; do
   case "${mode}" in
     apply)
@@ -255,10 +301,10 @@ for repo in ${repos}; do
           ;;
         *) ;;
       esac
-      # The merge queue (docs/rulesets.md). GitHub offers it to public
-      # repositories on this plan and to no private one, so visibility
-      # decides, and it is read rather than assumed: an unreadable
-      # repository gets no ruleset written on a guess.
+      # The merge queue (docs/rulesets.md), written where GitHub offers
+      # it: queue_offered, from the visibility and the org's plan, both
+      # read rather than assumed. Either unreadable, and the repository
+      # gets no ruleset written on a guess.
       vis_status=0
       api_probe "${repo}'s visibility" "Metadata: read" "" \
         "repos/${org}/${repo}" --jq '.visibility' || vis_status=$?
@@ -266,8 +312,15 @@ for repo in ${repos}; do
         echo "applied: ${repo} (settings only — visibility unreadable, queue untouched)"
         continue
       fi
-      if [[ ${api_body} != "public" ]]; then
-        echo "applied: ${repo} (no merge queue — GitHub offers none to a ${api_body} repository on this plan)"
+      repo_visibility="${api_body}"
+      offered=0
+      queue_offered "${repo_visibility}" || offered=$?
+      if [[ ${offered} -eq 2 ]]; then
+        echo "applied: ${repo} (settings only — org plan unreadable, queue untouched)"
+        continue
+      fi
+      if [[ ${offered} -ne 0 ]]; then
+        echo "applied: ${repo} (no merge queue — GitHub offers none to a ${repo_visibility} repository on plan ${plan_name})"
         continue
       fi
       own_status=0
@@ -435,13 +488,18 @@ for repo in ${repos}; do
       # this script has not heard of is a finding, not something to drop.
       #
       # One own ruleset is the baseline rather than drift: the merge
-      # queue, which GitHub will not let an org ruleset carry. A public
-      # repository must hold exactly the one in merge-queue.json; a
-      # private one cannot hold a queue at all on this plan, so there it
-      # stays drift like any other.
+      # queue, which GitHub will not let an org ruleset carry. A
+      # repository GitHub offers the queue (queue_offered: public, or
+      # any repository on Enterprise Cloud) must hold exactly the one in
+      # merge-queue.json. One it does not offer it — private on any
+      # other plan, the plan having lapsed — that still carries it has
+      # pull requests that cannot merge, and says so (#2140). With the
+      # plan unreadable a private repository is drift, never passed over.
       #
       # Reported, never deleted, like its two siblings (#761, #751).
       visibility="$(jq -r '.visibility' <<< "${actual}")"
+      offered=0
+      queue_offered "${visibility}" || offered=$?
       rulesets_status=0
       api_probe "${repo}'s own rulesets" "Administration: read" "" \
         "repos/${org}/${repo}/rulesets?includes_parents=false" \
@@ -455,7 +513,18 @@ for repo in ${repos}; do
           | @tsv' <<< "${own_rulesets}")
         while IFS=$'\t' read -r rs_id rs_name rs_target rs_state rs_source; do
           [[ -n ${rs_name} ]] || continue
-          if [[ ${rs_name} == "${queue_name}" && ${visibility} == "public" ]]; then
+          if [[ ${rs_name} == "${queue_name}" && ${offered} -eq 1 ]]; then
+            org_finding "" "${repo} carries the merge queue but GitHub no longer offers" \
+              "it one (${visibility}, plan ${plan_name}): its pull requests cannot" \
+              "merge until the ruleset is deleted in Settings -> Rules."
+            drift=1
+            continue
+          fi
+          if [[ ${rs_name} == "${queue_name}" && ${offered} -eq 2 ]]; then
+            # Said once per repository after the loop.
+            continue
+          fi
+          if [[ ${rs_name} == "${queue_name}" ]]; then
             queue_seen=1
             # The listing carries no rules, so the ruleset is read whole.
             queue_status=0
@@ -483,9 +552,14 @@ for repo in ${repos}; do
             "redundant with them or contradicts them (#876)."
           drift=1
         done <<< "${rs_rows}"
-        if [[ ${visibility} == "public" && ${queue_seen} -eq 0 ]]; then
+        if [[ ${offered} -eq 0 && ${queue_seen} -eq 0 ]]; then
           org_finding "" "${repo} has no ${queue_name} ruleset, so its pull requests" \
             "still need a rebase to merge — run: settings/repo-baseline.sh apply"
+          drift=1
+        fi
+        if [[ ${offered} -eq 2 ]]; then
+          org_finding "" "cannot tell whether GitHub offers ${repo} the merge queue" \
+            "(${visibility}, org plan unreadable)"
           drift=1
         fi
       fi

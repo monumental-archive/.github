@@ -90,6 +90,7 @@ ROSTER = roster()
 APPS = ("renovate", "monumental-archive-tag-mint", "codecov")
 LISTING = f"orgs/{ORG}/repos?per_page=100"
 PACKAGES = f"orgs/{ORG}/packages?package_type=container&per_page=100"
+PLAN = f"orgs/{ORG}"
 
 # The stand-in forge. A fixture file named after the call answers it
 # (`--jq` applied as gh applies it); `<key>.err` is printed to stderr
@@ -195,6 +196,25 @@ class Forge:
             },
         )
         self.answer(PACKAGES, [])
+        self.plan("enterprise")
+
+    def plan(self, name: str) -> None:
+        """Serve the org with `name` as its plan."""
+        self.answer(PLAN, {"login": ORG, "plan": {"name": name}})
+
+    def private(self, repo: str) -> None:
+        """Serve `repo` as a private repository, otherwise at the baseline."""
+        settings = {k: v for k, v in BASELINE.items() if k != "labels"}
+        settings |= {
+            "web_commit_signoff_required": True,
+            "default_branch": "main",
+            "visibility": "private",
+        }
+        self.answer(f"repos/{ORG}/{repo}", settings)
+
+    def no_own_rulesets(self, repo: str) -> None:
+        """Serve `repo` with no rulesets of its own."""
+        self.answer(f"repos/{ORG}/{repo}/rulesets?includes_parents=false", [])
 
     def answer(self, endpoint: str, body: object) -> None:
         """Serve `body` as JSON for a GET of `endpoint`."""
@@ -442,22 +462,118 @@ class UnparsableBody(ForgeCase):
     def test_an_unparsable_rulesets_body_is_not_clean(self) -> None:
         """A repository's own rulesets served as an object, not a list.
 
-        The repository is private: a public one with no rows read still
-        drifts on its missing merge-queue ruleset, which would hide the
-        unparsable body behind a finding about something else.
+        The repository is private on a plan that offers it no queue: a
+        repository offered one with no rows read still drifts on its
+        missing merge-queue ruleset, which would hide the unparsable
+        body behind a finding about something else.
         """
         repo = ROSTER[0]
-        settings = {k: v for k, v in BASELINE.items() if k != "labels"}
-        settings |= {
-            "web_commit_signoff_required": True,
-            "default_branch": "main",
-            "visibility": "private",
-        }
-        self.forge.answer(f"repos/{ORG}/{repo}", settings)
+        self.forge.plan("team")
+        self.forge.private(repo)
         self.forge.answer(
             f"repos/{ORG}/{repo}/rulesets?includes_parents=false", {"a": 1}
         )
         self.assert_not_clean(self.forge.check())
+
+
+
+class QueueByPlan(ForgeCase):
+    """A repository carries the queue exactly when GitHub offers it (#2140).
+
+    Visibility alone decided, which was GitHub's offer only on Team: on
+    Enterprise Cloud a private repository's queue read as a stray own
+    ruleset, and its absence was never asked about.
+    """
+
+    missing = "has no merge-queue ruleset, so its pull requests"
+    lapsed = "carries the merge queue but GitHub no longer offers"
+
+    def test_a_private_repo_on_enterprise_with_the_queue_is_clean(self) -> None:
+        """The hand-made ruleset on monumental-archive is the baseline's."""
+        repo = ROSTER[0]
+        self.forge.private(repo)
+        done = self.forge.check()
+        self.assertEqual(0, done.returncode, done.stdout + done.stderr)
+        self.assertNotIn("carries its OWN ruleset", done.stderr)
+        self.assertIn("no drift", done.stdout)
+
+    def test_a_private_repo_on_enterprise_without_the_queue_drifts(self) -> None:
+        """Offered the queue, so its absence is the missing-ruleset finding."""
+        repo = ROSTER[0]
+        self.forge.private(repo)
+        self.forge.no_own_rulesets(repo)
+        done = self.forge.check()
+        self.assertIn(f"repo-baseline: {repo} {self.missing}\n", done.stderr)
+        self.assertEqual(1, done.returncode)
+
+    def test_a_private_repo_on_team_carrying_the_queue_drifts(self) -> None:
+        """The plan lapsed: the queue is still there, and nothing can merge."""
+        repo = ROSTER[0]
+        self.forge.plan("team")
+        self.forge.private(repo)
+        done = self.forge.check()
+        self.assertIn(
+            f"repo-baseline: {repo} {self.lapsed}\n"
+            "  it one (private, plan team): its pull requests cannot\n"
+            "  merge until the ruleset is deleted in Settings -> Rules.\n",
+            done.stderr,
+        )
+        self.assertNotIn("carries its OWN ruleset", done.stderr)
+        self.assertEqual(1, done.returncode)
+
+    def test_a_private_repo_on_team_without_the_queue_is_clean(self) -> None:
+        """Not offered the queue, and not carrying it: nothing to say."""
+        repo = ROSTER[0]
+        self.forge.plan("team")
+        self.forge.private(repo)
+        self.forge.no_own_rulesets(repo)
+        done = self.forge.check()
+        self.assertEqual(0, done.returncode, done.stdout + done.stderr)
+
+    def test_an_org_body_without_a_plan_is_not_clean(self) -> None:
+        """A body with no `.plan` is unreadable, never read as Team.
+
+        GitHub serves the plan to owners only, so a narrower token gets
+        the org without it.
+        """
+        repo = ROSTER[0]
+        self.forge.answer(PLAN, {"login": ORG})
+        self.forge.private(repo)
+        done = self.forge.check()
+        self.assertIn("repo-baseline: cannot read the org's plan\n", done.stderr)
+        self.assertIn(
+            f"repo-baseline: cannot tell whether GitHub offers {repo}"
+            " the merge queue\n",
+            done.stderr,
+        )
+        self.assertNotIn(self.lapsed, done.stderr)
+        self.assertNotIn("no drift", done.stdout)
+        self.assertEqual(1, done.returncode)
+
+    def test_a_refused_plan_read_is_not_clean(self) -> None:
+        """A refused read of the org is unreadable too."""
+        repo = ROSTER[0]
+        self.forge.refuse(PLAN, "gh: Not Found (HTTP 404)")
+        self.forge.private(repo)
+        self.forge.no_own_rulesets(repo)
+        done = self.forge.check()
+        self.assertIn("repo-baseline: cannot read the org's plan\n", done.stderr)
+        self.assertNotIn("no drift", done.stdout)
+        self.assertEqual(1, done.returncode)
+
+    def test_a_public_repo_is_unaffected_by_the_plan(self) -> None:
+        """Public repositories carry the queue whatever the plan, read or not."""
+        for served in ({"login": ORG, "plan": {"name": "team"}}, {"login": ORG}):
+            with self.subTest(org=served):
+                self.forge.answer(PLAN, served)
+                done = self.forge.check()
+                self.assertEqual(0, done.returncode, done.stdout + done.stderr)
+                self.assertIn("no drift", done.stdout)
+        self.forge.no_own_rulesets(ROSTER[0])
+        self.forge.plan("team")
+        done = self.forge.check()
+        self.assertIn(f"repo-baseline: {ROSTER[0]} {self.missing}\n", done.stderr)
+        self.assertEqual(1, done.returncode)
 
 
 if __name__ == "__main__":
