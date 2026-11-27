@@ -707,6 +707,25 @@ class SqlSkipsOwnedSnapshots(unittest.TestCase):
         self.assertEqual(handed, want)
         self.assertIn("lint:sql: 2 file(s) linted, 0 pg-schema", out)
 
+    def test_sql_over_the_size_default_is_linted(self) -> None:
+        """A file past sqlfluff's 20 000-byte default is linted (#2142).
+
+        The default skips it with a WARNING and exit 0; the delivered
+        config sets no limit, so its one finding, on the last line, reds.
+        """
+        self.sql("db/big.sql", CLEAN_SQL.upper() * 2100 + "select 1;\n")
+        self.assertGreater((self.root / "db/big.sql").stat().st_size, 20000)
+        status, out, err, handed = self.run_task("lint:sql")
+        self.assertEqual(status, 1)
+        want = ["db/big.sql"]
+        self.assertEqual(handed, want)
+        self.assertIn(
+            "L:2101 | P:   1 | CP01 | Keywords must be consistently upper case.",
+            out,
+        )
+        self.assertNotIn("Skipping to avoid parser lock", out + err)
+        self.assertIn("lint:sql: findings above", err)
+
     def test_only_belt_owned_sql_skips_without_sqlfluff(self) -> None:
         """Nothing left to lint is a skip, not sqlfluff with no paths."""
         self.member("crates/ext", pgrx=True)

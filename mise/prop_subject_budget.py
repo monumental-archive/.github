@@ -12,7 +12,12 @@ generated dependency names, paths and commit templates:
 - `render`: the subject grows by exactly one column per `newValue`
   placeholder for each column of version width, carries the dependency
   name wherever the template asks for it, and reports a template as
-  unmodelled exactly when a placeholder it cannot resolve is left.
+  unmodelled exactly when a placeholder it cannot resolve is left;
+  and `newVersion` on the lock-file branch of the one conditional it
+  models, `newValue` on the other, each at its own width (#2145).
+- `coverage_js_runner.locked`: every lock format the belt reads
+  (pnpm, npm, yarn classic and berry, bun, Cargo) gives back the
+  version written into it, whatever the package's name.
 - Refusal (R): the dependency readers (`from_cargo`, `from_npm`,
   `from_gomod`, `from_actions`, `from_mise`) read any bytes, and any
   well-formed document of any shape, and answer with dependencies and
@@ -30,6 +35,7 @@ import unittest
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import coverage_js_runner
 import subject_budget as sb
 from hypothesis import example
 from hypothesis import strategies as st
@@ -82,6 +88,7 @@ TOKEN = st.sampled_from([
     "{{{depName}}}",
     "{{newValue}}",
     "{{{newValue}}}",
+    "{{newVersion}}",
     "{{unknownField}}",
 ])
 FIELD = st.lists(st.one_of(LITERAL, TOKEN), max_size=5).map("".join)
@@ -126,7 +133,9 @@ class Render(unittest.TestCase):
     ) -> None:
         """Growth per column, the name where asked, unmodelled when left."""
         fields = [config[k] for k in sb.MESSAGE_FIELDS]
-        versions = sum(f.count("{{newValue}}") for f in fields)
+        versions = sum(
+            f.count("{{newValue}}") + f.count("{{newVersion}}") for f in fields
+        )
         names = sum(f.count("{{depName}}") for f in fields)
         narrow, unmodelled = sb.render(config, dep, width)
         wide, _ = sb.render(config, dep, width + 1)
@@ -136,6 +145,107 @@ class Render(unittest.TestCase):
         left = any("{{unknownField}}" in f for f in fields)
         self.assertEqual(unmodelled is not None, left)
         self.assertTrue(narrow.endswith(sb.PR_TAIL))
+
+
+BRANCH = st.text(alphabet="abc -_()[]:.", max_size=8)
+
+
+class LockfileBranch(unittest.TestCase):
+    """The one conditional the model renders (#2145)."""
+
+    @given(BRANCH, BRANCH, DEP, st.integers(1, 20), st.integers(1, 20))
+    def test_each_branch_renders_its_own_width(
+        self, lock: str, other: str, dep: str, width: int, version: int
+    ) -> None:
+        """The lock-file branch carries newVersion, the other newValue."""
+        extra = (
+            f"to {{{{#if isLockfileUpdate}}}}{lock}{{{{newVersion}}}}"
+            f"{{{{else}}}}{other}{{{{newValue}}}}{{{{/if}}}}"
+        )
+        config = {
+            "semanticCommitType": "chore",
+            "semanticCommitScope": "deps",
+            **dict.fromkeys(sb.MESSAGE_FIELDS, ""),
+            "commitMessageExtra": extra,
+        }
+        locked, unmodelled = sb.render(
+            config, dep, width, version=version, lockfile=True
+        )
+        ordinary, left = sb.render(config, dep, width, version=version)
+        self.assertIsNone(unmodelled)
+        self.assertIsNone(left)
+        self.assertEqual(locked, f"chore(deps): to {lock}{'9' * version}{sb.PR_TAIL}")
+        self.assertEqual(ordinary, f"chore(deps): to {other}{'9' * width}{sb.PR_TAIL}")
+
+
+# A package name as the npm and cargo lockfiles write them, and a
+# version as they resolve one.
+PACKAGE = st.from_regex(
+    r"(@[a-z][a-z0-9-]{0,6}/)?[a-z][a-z0-9._-]{0,12}", fullmatch=True
+)
+VERSION = st.from_regex(
+    r"[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}(-[a-z0-9.]{1,8})?", fullmatch=True
+)
+
+
+def npm_lock(name: str, version: str) -> str:
+    """Write package-lock.json's entry for one package.
+
+    Returns:
+        The lockfile.
+
+    """
+    entry: dict[str, object] = {"version": version}
+    packages: dict[str, object] = {f"node_modules/{name}": entry}
+    document: dict[str, object] = {"packages": packages}
+    return json.dumps(document)
+
+
+def bun_lock(name: str, version: str) -> str:
+    """Write bun.lock's entry for one package.
+
+    Returns:
+        The lockfile.
+
+    """
+    entry: list[object] = [f"{name}@{version}", "", {}]
+    packages: dict[str, object] = {name: entry}
+    document: dict[str, object] = {"packages": packages}
+    return json.dumps(document)
+
+
+def cargo_lock(name: str, version: str) -> str:
+    """Write Cargo.lock's table for one crate.
+
+    Returns:
+        The lockfile.
+
+    """
+    return f"[[package]]\nname = {json.dumps(name)}\nversion = {json.dumps(version)}\n"
+
+
+LOCK_FORMATS: dict[str, Callable[[str, str], str]] = {
+    "pnpm-lock.yaml": lambda n, v: f"packages:\n\n  '{n}@{v}':\n    x: {{}}\n",
+    "package-lock.json": npm_lock,
+    "yarn.lock": lambda n, v: f'"{n}@^1", "{n}@npm:^1.2":\n  version "{v}"\n',
+    "berry.yarn.lock": lambda n, v: f'"{n}@npm:^1":\n  version: {v}\n',
+    "bun.lock": bun_lock,
+    "Cargo.lock": cargo_lock,
+}
+
+
+class LockReader(unittest.TestCase):
+    """Every lock format reads back the version written into it."""
+
+    @given(st.sampled_from(sorted(LOCK_FORMATS)), PACKAGE, VERSION)
+    def test_the_locked_version_is_read_back(
+        self, lockfile: str, name: str, version: str
+    ) -> None:
+        """One entry, one version, whatever the name and the version."""
+        lock = LOCK_FORMATS[lockfile](name, version)
+        read = coverage_js_runner.locked(lockfile.removeprefix("berry."), lock, name)
+        want: set[str] = {version}
+        self.assertEqual(want, read)
 
 
 SCALAR: st.SearchStrategy[object] = st.one_of(

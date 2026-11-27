@@ -3340,7 +3340,9 @@ dir = "{{cwd}}"
 # deterministic. This leg runs exactly the tracked
 # `*.prop.test.{ts,tsx,mts,cts}` files with the repository's own vitest
 # and fast-check (both read from its lockfile, the #1357 rule: the belt
-# pins neither) at a fixed seed and a bounded run count, and prints a
+# pins neither) at a fixed seed and a bounded run count, with no
+# per-test time limit (#2144: the job's timeout-minutes bounds it, and
+# the audit's 50 times the examples needs no limit tuned), and prints a
 # digest of each property's examples, so two runs of one commit print
 # the same lines. How the seed gets in is typescript_properties.py's
 # header: vitest refuses a setup file on its command line, so a wrapper
@@ -3357,15 +3359,22 @@ run = '''
 '''
 
 [tasks."lint:typescript-properties"]
-description = "fast-check is imported only by *.prop.test.* files, and no property restates the seed or run count"
+description = "fast-check is imported only by *.prop.test.* files, and no property restates the seed, run count or a time bound"
 dir = "{{cwd}}"
 # The design conditions of #1549, read from the source: the gate leg
 # runs exactly the property files, so a property written in any other
 # test file would run unseeded under the repository's own `test`; and
 # a `seed`, `numRuns` or `configureGlobal(...)` in a property file
 # would override the belt's, as a restated bound is refused for Python
-# (#1332). Red by name, file and line. Skips clean where no tracked
-# lockfile holds fast-check.
+# (#1332). So is any time a property sets itself (#2144): the belt
+# runs property files with no per-test limit, so a vitest per-test
+# timeout (`test()`'s third argument, a `timeout` option, or
+# `vi.setConfig`) and fast-check's `timeout`, `interruptAfterTimeLimit`
+# and `skipAllAfterTimeLimit` are refused, the last two because they
+# end a run before the examples the belt asked for. Red by name, file
+# and line, matched on the raw text: a bound named in a comment or
+# string is red too, a loud false positive rather than a silent pass.
+# Skips clean where no tracked lockfile holds fast-check.
 run = '''
 "${ORG_BELT_DIR}/typescript-properties.sh" lint
 '''
@@ -4598,10 +4607,10 @@ dir = "{{cwd}}"
 # So the alarm is on TIME SPENT CATCHABLE: the clock starts at the
 # EARLIEST tag newer than the stale reference, and only past 24 hours is
 # the state red. The 24-hour ceiling is generous by design — with
-# prPriority and the first-party group (default.json) the bump lands in
-# one bot cycle plus CI, measured 10-30 minutes — and exists so a Monday
-# cron landing just after a Sunday release does not cry wolf. Red means
-# Renovate paused, misconfigured or dead.
+# prPriority, no limits and the first-party group (default.json, #2162)
+# the bump lands in one bot cycle plus CI, measured 10-30 minutes — and
+# exists so a Monday cron landing just after a Sunday release does not
+# cry wolf. Red means Renovate paused, misconfigured or dead.
 run = '''
 . "${ORG_BELT_DIR}/identity.sh"
 canon_owner=$(org_identity owner)

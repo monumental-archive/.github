@@ -14,14 +14,22 @@
 # its own artifact, so the directory holds one subdirectory per shard
 # and, in each, `<language>.tsv`:
 #
-#   k/n <TAB> mutants <TAB> killed <TAB> survived <TAB> excluded
+#   k/n <TAB> mutants <TAB> killed <TAB> survived <TAB> excluded <TAB> whole|shard
 #   k/n <TAB> skipped
+#
+# The sixth column says what the excluded count covers (#2153). `whole`:
+# the whole population's figure, which every shard repeats, so it is
+# taken once and the shards must agree (Rust, Go, Python). `shard`: the
+# shard's own files' figure, so the shards' counts are summed
+# (TypeScript, shared out by file).
 #
 # Red, by name, when a shard of n is missing (a shard that died, or whose
 # run judged nothing, writes no file), when shards disagree about n,
-# about adoption, or about the whole-population excluded count (each
-# shard reports the same figure; it is taken once), and when any
-# survivor exists. No language is written here.
+# about adoption, about what the excluded count covers, or about a
+# `whole` excluded count, when the judged shards together hold no
+# mutant (each shard may hold none; the population may not), and when
+# any survivor exists. No language is
+# written here.
 set -euo pipefail
 
 # The writer beside this file, found with no command run (#1934).
@@ -62,7 +70,17 @@ verdict=$(awk -F '\t' -v label="${label}" -v lang="${lang}" '
     if ($2 == "skipped") { skipped++; next }
     judged++
     mutants += $2; killed += $3; survived += $4
-    if (excluded == "") excluded = $5
+    if ($6 != "whole" && $6 != "shard") {
+      printf "%s\037shard %s says its excluded count covers \"%s\", not whole or shard\n", lang, $1, $6
+      bad = 1; next
+    }
+    if (covers == "") covers = $6
+    else if ($6 != covers) {
+      printf "%s\037shards disagree about what excluded covers (%s, %s)\n", lang, covers, $6
+      bad = 1; next
+    }
+    if (covers == "shard") excluded += $5
+    else if (excluded == "") excluded = $5
     else if ($5 != excluded) { printf "%s\037shards disagree about excluded (%s, %s)\n", lang, excluded, $5; bad = 1 }
   }
   END {
@@ -73,6 +91,7 @@ verdict=$(awk -F '\t' -v label="${label}" -v lang="${lang}" '
     }
     if (bad) exit 1
     if (judged == 0) { printf "%s: not adopted, skipped in all %s shards\n", label, n; exit 0 }
+    if (mutants == 0) { printf "%s\037no shard mutated anything — across %s shards, 0 mutants\n", lang, n; exit 1 }
     printf "%s: across %s shards: %d mutants, %d killed, %d survived, %s excluded\n",
       label, n, mutants, killed, survived, excluded
     if (survived > 0) exit 2

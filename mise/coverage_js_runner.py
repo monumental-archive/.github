@@ -44,6 +44,12 @@ the leg sets them. Running the command with a coverage-adding `vitest`
 first on PATH was measured and refused (#1357): `pnpm exec` and `npx`
 put `node_modules/.bin` at the head of PATH, so the repository's own
 binary runs and the shim never does.
+
+`locked()` is the same reader asked for a version (#2145): the
+versions a lockfile resolves one package to, for the four lockfiles
+above and for Cargo.lock beside them. lint:subject-budget measures a
+lock-file update's subject with it, so the leg and the budget read a
+lockfile one way.
 """
 
 import json
@@ -75,6 +81,68 @@ PROVIDER = re.compile(
     ENTRY.format(name=r"@vitest/coverage-(?:v8|istanbul)"),
     re.MULTILINE,
 )
+
+# Where each lockfile writes the version an ENTRY resolves to, matched
+# from the end of the entry's package name (#2145): pnpm and bun write
+# it after the `@` (`vitest@4.1.12:`, `vitest@4.1.12(@types/node@…)`,
+# `"vitest@4.1.12"`); npm as the entry's `"version"` key; yarn, classic
+# and berry alike, on the line after the entry's header (`  version
+# "4.1.12"`, `  version: 4.1.12`), because the header names the RANGE.
+VERSION_AT = {
+    "pnpm-lock.yaml": re.compile(r"@(\d[^\s:('\",]*)"),
+    "package-lock.json": re.compile(r'"\s*:\s*\{[^{}]*?"version"\s*:\s*"([^"]+)"'),
+    "yarn.lock": re.compile(r'[^\n]*\n[ \t]+version:?[ \t]+"?([^"\s]+)'),
+    "bun.lock": re.compile(r'@(\d[^\s"]*)"'),
+}
+
+# Cargo's lockfile, read beside the four: its `[[package]]` tables name
+# every crate the workspace resolves, each at its exact version.
+CARGO_LOCK = "Cargo.lock"
+
+
+def locked(lockfile: str, lock: str, name: str) -> set[str]:
+    """Read the versions a lockfile resolves for one package.
+
+    The entries are ENTRY's for the four npm lockfiles, so this answers
+    the question RUNNER and PROVIDER ask, with the version: a package
+    the leg would see as pinned is one this reads a version for. A yarn
+    entry counts only at its header, the one line at the left margin;
+    berry's indented `resolution: "vitest@npm:4.1.12"` is the same entry
+    again. Cargo.lock is read as the TOML it is.
+
+    Returns:
+        Every version the lockfile resolves the package to, empty when
+        it carries no entry for it.
+
+    A Cargo.lock that is not TOML, or not the shape Cargo writes, raises
+    decoded's UndecodableError from its decoders.
+
+    """
+    base = Path(lockfile).name
+    if base == CARGO_LOCK:
+        doc = decoded.load_toml(lock)
+        packages = decoded.as_array(doc.get("package", []), "package")
+        found: set[str] = set()
+        for i, value in enumerate(packages):
+            package = decoded.as_object(value, f"package[{i}]")
+            if package.get("name") == name:
+                where = f"package[{i}].version"
+                found.add(decoded.as_str(package.get("version"), where))
+        return found
+    entry = re.compile(ENTRY.format(name=re.escape(name)), re.MULTILINE)
+    at = VERSION_AT[base]
+    versions: set[str] = set()
+    for match in entry.finditer(lock):
+        group = 1 if typed_std.group(match, 1) is not None else 2
+        if base == "yarn.lock":
+            line = lock.rfind("\n", 0, match.start(group)) + 1
+            if lock[line] in " \t":
+                continue
+        version = at.match(lock, match.end(group))
+        if version is not None:
+            versions.add(typed_std.group(version, 1) or "")
+    return versions - {""}
+
 
 # Runners the leg does not support, by the package that provides them.
 OTHER_RUNNERS = (
