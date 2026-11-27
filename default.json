@@ -210,6 +210,14 @@
       "groupName": "first-party canon",
       "semanticCommitType": "chore",
       "semanticCommitScope": "canon"
+    },
+    {
+      "description": "First-party images skip the age gate too. Renovate names an image with its registry, `ghcr.io/monumental-archive/iiif-server`, and a glob anchors at the start of the name, so `monumental-archive/**` above never reached one: every first-party image bump waited out the seven-day floor under the Dependency Dashboard's Pending Status Checks, with no branch made, until a human ticked it (monumental-archive's iiif-server 0.3.1 and its monumental-archive-db digest, 2026-11-28). The image is built, attested and gated by our own CI, the reason the rule above gives for its repos. A rule of its own rather than a second pattern above, because that rule's group and scope are the canon's: an image moves what a consumer deploys, not its lint config, so it keeps its own pull request and `chore(deps)`, and a red canon bump never holds it. The limits and priority are the rule above's, for its reason (#2162); mise/test_renovate_preset.py holds the age and the two zeros.",
+      "matchPackageNames": ["ghcr.io/monumental-archive/**"],
+      "minimumReleaseAge": "0 days",
+      "prPriority": 10,
+      "prConcurrentLimit": 0,
+      "prHourlyLimit": 0
     }
   ],
   "customManagers": [
