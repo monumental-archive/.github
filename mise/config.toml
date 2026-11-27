@@ -3340,7 +3340,9 @@ dir = "{{cwd}}"
 # deterministic. This leg runs exactly the tracked
 # `*.prop.test.{ts,tsx,mts,cts}` files with the repository's own vitest
 # and fast-check (both read from its lockfile, the #1357 rule: the belt
-# pins neither) at a fixed seed and a bounded run count, and prints a
+# pins neither) at a fixed seed and a bounded run count, with no
+# per-test time limit (#2144: the job's timeout-minutes bounds it, and
+# the audit's 50 times the examples needs no limit tuned), and prints a
 # digest of each property's examples, so two runs of one commit print
 # the same lines. How the seed gets in is typescript_properties.py's
 # header: vitest refuses a setup file on its command line, so a wrapper
@@ -3357,15 +3359,22 @@ run = '''
 '''
 
 [tasks."lint:typescript-properties"]
-description = "fast-check is imported only by *.prop.test.* files, and no property restates the seed or run count"
+description = "fast-check is imported only by *.prop.test.* files, and no property restates the seed, run count or a time bound"
 dir = "{{cwd}}"
 # The design conditions of #1549, read from the source: the gate leg
 # runs exactly the property files, so a property written in any other
 # test file would run unseeded under the repository's own `test`; and
 # a `seed`, `numRuns` or `configureGlobal(...)` in a property file
 # would override the belt's, as a restated bound is refused for Python
-# (#1332). Red by name, file and line. Skips clean where no tracked
-# lockfile holds fast-check.
+# (#1332). So is any time a property sets itself (#2144): the belt
+# runs property files with no per-test limit, so a vitest per-test
+# timeout (`test()`'s third argument, a `timeout` option, or
+# `vi.setConfig`) and fast-check's `timeout`, `interruptAfterTimeLimit`
+# and `skipAllAfterTimeLimit` are refused, the last two because they
+# end a run before the examples the belt asked for. Red by name, file
+# and line, matched on the raw text: a bound named in a comment or
+# string is red too, a loud false positive rather than a silent pass.
+# Skips clean where no tracked lockfile holds fast-check.
 run = '''
 "${ORG_BELT_DIR}/typescript-properties.sh" lint
 '''
@@ -6114,12 +6123,14 @@ depends = [{ task = "test", optional = true }]
 # language measures (statements for Go, lines for Rust, statements and
 # branches for Python, #1331, lines and branches for TypeScript, #1357,
 # statements and branches for PL/pgSQL through plpgsql_check, #1547);
-# the floor is a minimum in all of them,
-# and every leg must hold it. Which languages apply is the measurement
-# script's `probe`. The pathspec test before it is only the necessary
-# half, written where mise/gate_tools.py's derivation can read it
-# (#1410): a tree with none of these can measure nothing, so the gate
-# need not install a coverage tool for it.
+# each leg is held to a floor of its own, cut from its own figure
+# (#2143), and red by name below it. Which legs apply is the
+# measurement's own business, and every floor records its legs, so a
+# tree with a valid floor always has one to hold. The pathspec test
+# below is mise/gate_tools.py's to read (#1410): it is the guard that
+# lets the gate skip installing a coverage tool in a tree with none of
+# these. Its "no measurable language" branch runs only when the
+# tracked-file listing fails, since a floor's `legs` always answers.
 #
 # The badge is fed from this run (#1528). Every leg writes the report
 # Codecov parses beside its number, and the last line names the files
@@ -6162,11 +6173,6 @@ if [[ -z ${floor} ]] || { ! org_tracked_has Cargo.toml && ! org_tracked_has go.m
   fi
   exit 0
 fi
-applies=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:check probe) || exit 1
-if [[ -z ${applies} ]]; then
-  echo "coverage:check: no measurable language (go.mod, Cargo.toml, tracked *.py with a test task, package.json with vitest, or a floor recording its legs), skipped"
-  exit 0
-fi
 legs=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:check reports) || exit 1
 upload=${legs##*$'\n'} legs=${legs%$'\n'*}
 "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/coverage_floor.py" hold --label coverage:check --job gate <<< "${legs}" || exit 1
@@ -6181,10 +6187,12 @@ dir = "{{cwd}}"
 # guess: a repo joins the ratchet by measuring itself and committing
 # what it found, and a repo whose floor predates the derivation migrates
 # the same way, in one commit with the canon pin bump that brings the
-# new recipe.
+# new recipe. A floor in the shape before #2143 (one bare floor line,
+# cut from the weakest leg) is that migration too: every refusal of it
+# names this task, which writes each leg a floor of its own.
 #
 # It cannot lower a floor whose record parses — that is the ratchet, and
-# stepping down is a conscious `reset: <why>` a human writes and a
+# stepping down is a conscious `<leg> reset: <why>` a human writes and a
 # reviewer sees. A `coverage:*` sibling rather than a `fix:*` one: the
 # `fix` aggregate collects `fix:*`
 # wildcard, and a fixer that runs the whole test suite does not belong
@@ -6192,7 +6200,7 @@ dir = "{{cwd}}"
 #
 # A Rust repository that declares its dated nightly (FUZZ_TOOLCHAIN) also
 # gets its `rust-branches` line (#1359): measured here with `--branch` on
-# that nightly and written beside the main floor under the same law, for
+# that nightly and written beside the gate's legs under the same law, for
 # audit:coverage-branches to hold on the Monday cron. Without the nightly
 # the line is not written and the audit skips clean; a line already
 # committed is carried through, never dropped.
@@ -6205,8 +6213,8 @@ dir = "{{cwd}}"
 #
 # A workspace with a pgrx extension gets one `pgrx-pgNN` line per
 # declared major (#1656), measured by test:pgrx's own run (the `pgrx`
-# selector) and inside the minimum: the gate holds each major to the
-# floor in its own pgrx job, so the floor is derived from them too. The
+# selector) and in the `legs:` record: the gate holds each major to its
+# own floor in its own pgrx job, so each is derived like any leg. The
 # selector prints nothing where there is no extension.
 #
 # It writes no fuzz line (#2090): a fuzz target is no leg of the floor,
@@ -7218,7 +7226,7 @@ dir = "{{cwd}}"
 # workspace and exclusions the gate's `rust` leg uses (one function), and
 # the floor is the `rust-branches` line coverage:adopt derived — read
 # through coverage_floor.py, so a hand-typed line is refused as drift
-# here exactly as the main floor is in the gate. Reopen: `--branch` on
+# here exactly as the gate's legs are in the gate. Reopen: `--branch` on
 # stable, when this becomes one flag on the gate's leg
 # (docs/tooling-verdicts.md).
 run = '''
@@ -7238,10 +7246,10 @@ if [[ ${leg:-} != rust-branches || -z ${pct:-} ]]; then
   exit 1
 fi
 if awk -v p="${pct}" -v f="${floor}" 'BEGIN { exit !(p < f) }'; then
-  org_finding "rust-branches" "${pct}% is below the derived floor ${floor}%"
+  org_finding "rust-branches" "${pct}% is below its derived floor ${floor}%"
   exit 1
 fi
-echo "audit:coverage-branches: rust-branches holds the floor ${floor} (${pct}%)"
+echo "audit:coverage-branches: rust-branches holds its floor ${floor} (${pct}%)"
 '''
 
 [tasks."audit:coverage-go-branches"]
@@ -7267,10 +7275,10 @@ floor=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${ORG_BELT_DIR}/coverage_floor.py"
 }
 pct=$("${ORG_BELT_DIR}/coverage-go-branches.sh" audit:coverage-go-branches) || exit 1
 if [[ ${pct} != "go-branches "* ]] || awk -v p="${pct#go-branches }" -v f="${floor}" 'BEGIN { exit !(p < f) }'; then
-  org_finding "go-branches" "${pct#go-branches }% is below the derived floor ${floor}%"
+  org_finding "go-branches" "${pct#go-branches }% is below its derived floor ${floor}%"
   exit 1
 fi
-echo "audit:coverage-go-branches: go-branches holds the floor ${floor} (${pct#go-branches }%)"
+echo "audit:coverage-go-branches: go-branches holds its floor ${floor} (${pct#go-branches }%)"
 '''
 
 [tasks."audit:go-fuzz"]

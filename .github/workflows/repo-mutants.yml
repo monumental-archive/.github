@@ -575,16 +575,36 @@ jobs:
           retention-days: 1
 
   mutants-typescript:
-    name: mutants / typescript
+    name: mutants / typescript (shard ${{ matrix.shard }})
     needs: adoption
     if: needs.adoption.outputs.typescript == 'true'
     runs-on: ubuntu-26.04
-    # One job: StrykerJS has no sharding. No timeout of its own yet: it
-    # is set from monumental-archive's first runner run (#1358).
+    # The count is written twice, here and in MUTANTS_SHARDS below; move
+    # both together. No fail-fast: every shard reports its own
+    # survivors. StrykerJS has no sharding of its own, so the leg shares
+    # the files out (#2153): monumental-archive's first whole run, one
+    # job, was lost to its runner at 4 h 29 min. Eight is the first
+    # count; the count and the timeout are set from the first sharded
+    # run, by #1530's rule (slowest shard under 60 minutes, timeout
+    # about three times it), on monumental-archive#351. No timeout of
+    # its own until then.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard:
+          - 0
+          - 1
+          - 2
+          - 3
+          - 4
+          - 5
+          - 6
+          - 7
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
       MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
+      MUTANTS_SHARDS: "8"
     steps:
       - name: Check out caller repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -618,19 +638,21 @@ jobs:
 
       # The leg writes its counts for the totals job into the summary
       # directory (it creates it) as typescript.tsv.
-      - name: Mutate, in place, and name every unexplained survivor
+      - name: Mutate this shard, in place, and name every unexplained survivor
         env:
           MUTANTS_LEG: typescript
-          MUTANTS_SHARD: 0/1
+          MUTANTS_SHARD: ${{ matrix.shard }}/${{ env.MUTANTS_SHARDS }}
           MUTANTS_SUMMARY_DIR: ${{ runner.temp }}/mutants-summary
           ATLAS_TOKEN: ${{ secrets.atlas-token }}
         run: mise run audit:mutants
 
-      - name: Keep the counts for the totals
+      # Survivors or not: the totals job needs every shard's counts. A
+      # shard whose run judged nothing writes none, and is named there.
+      - name: Keep this shard's counts for the totals
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: mutants-typescript-summary-0
+          name: mutants-typescript-summary-${{ matrix.shard }}
           path: ${{ runner.temp }}/mutants-summary/
           if-no-files-found: ignore
           retention-days: 7
@@ -647,8 +669,9 @@ jobs:
 
   mutants-typescript-totals:
     name: mutants / typescript totals
-    # The same one answer every language states, from its own job. A
-    # run that judged nothing writes no counts and is named here.
+    # One answer across TypeScript's shards, whatever they did, wherever
+    # TypeScript adopts. A shard that judged nothing writes no counts
+    # and is named here.
     needs:
       - adoption
       - mutants-typescript
@@ -658,13 +681,13 @@ jobs:
       - name: Resolve the canon tree (the ref the caller pinned)
         uses: $/.github/actions/canon
 
-      - name: Collect the counts
+      - name: Collect every shard's counts
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: mutants-typescript-summary-*
           path: ${{ runner.temp }}/mutants-summaries
 
-      - name: State the totals
+      - name: State the totals across shards
         env:
           SUMMARIES: ${{ runner.temp }}/mutants-summaries
         run: bash .org-canon/mise/mutation-totals.sh "${SUMMARIES}" typescript

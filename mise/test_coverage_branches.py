@@ -49,13 +49,15 @@ NIGHTLY_DIR = gate_cache_key.directory_digest(hermetic.rustc_verbose(NIGHTLY))
 BRANCH_RUN = f"{NIGHTLY} llvm-cov --workspace --locked --branch --json --summary-only"
 SKIP = "audit:coverage-branches: no rust-branches line in .coverage-floor, skipped\n"
 
-# The main floor, measured 82.0 minus the band; the branch line beside it,
-# measured 72.0 minus the band. Both hold to the derived-state law.
+# The rust leg's floor, measured 82.0 minus the band; the branch line
+# beside it, measured 72.0 minus the band. Both hold to the derived-state
+# law, each a floor of its own (#2143).
 MAIN = """\
 # band: 2
-# measured: 82.0
 # derived: v1.0.0
-80.0
+# legs: rust
+# rust measured: 82.0
+rust 80.0
 """
 BRANCH = """\
 # rust-branches measured: 72.0
@@ -285,7 +287,7 @@ class AuditRows(BranchCase):
         done, _, calls = self.run_task(self.TASK)
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertEqual(
-            "audit:coverage-branches: rust-branches holds the floor 70.0 (75.5%)\n",
+            "audit:coverage-branches: rust-branches holds its floor 70.0 (75.5%)\n",
             done.stdout,
         )
         self.assertEqual(BRANCH_ONLY, calls)
@@ -297,7 +299,7 @@ class AuditRows(BranchCase):
         self.assertEqual("", done.stdout)
         self.assertIn(
             "audit:coverage-branches: rust-branches: 69.9% is below"
-            " the derived floor 70.0%\n",
+            " its derived floor 70.0%\n",
             done.stderr,
         )
 
@@ -389,7 +391,7 @@ class GateRows(BranchCase):
         done, tree, calls = self.run_task("coverage:check")
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertEqual(
-            "coverage:check: rust leg holds the floor 80.0 (90%)\n"
+            "coverage:check: rust leg holds its floor 80.0 (90%)\n"
             f"coverage:check: upload {tree.parent / 'reports' / 'lcov.info'}\n",
             done.stdout,
         )
@@ -406,7 +408,7 @@ class AdoptRows(BranchCase):
         )
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertIn(
-            "coverage-floor: adopted .coverage-floor at 88.0 (measured 90.0),"
+            "coverage-floor: adopted .coverage-floor: rust 88.0 (measured 90.0),"
             " rust-branches 71.4 (measured 73.4)\n",
             done.stdout,
         )
@@ -416,14 +418,14 @@ class AdoptRows(BranchCase):
         self.assertEqual(EMPTY, problems)
         if parsed is None:
             self.fail("the adopted .coverage-floor did not parse")
-        held: dict[str, tuple[Decimal, Decimal]] = {
-            "rust-branches": (Decimal("71.4"), Decimal("73.4"))
-        }
-        self.assertEqual(held, parsed.separate)
+        self.assertEqual(
+            cf.Held(Decimal("71.4"), Decimal("73.4"), None),
+            parsed.floors["rust-branches"],
+        )
         self.assertEqual(LINE_THEN_BRANCH, calls)
 
     def test_adopt_without_the_nightly_writes_no_line(self) -> None:
-        """No FUZZ_TOOLCHAIN: the main floor only, and the reason printed."""
+        """No FUZZ_TOOLCHAIN: the rust leg only, and the reason printed."""
         done, tree, calls = self.run_task("coverage:adopt", floor=None, toolchain=None)
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertIn(
@@ -440,7 +442,7 @@ class AdoptRows(BranchCase):
         done, tree, _ = self.run_task("coverage:adopt", branches="69.9")
         self.assertEqual(1, done.returncode)
         self.assertIn(
-            "coverage:adopt: rust-branches measured 69.9% is below its floor 70.0%.",
+            "coverage:adopt: rust-branches: measured 69.9% is below its floor 70.0%.",
             done.stderr,
         )
         self.assertEqual(

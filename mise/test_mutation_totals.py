@@ -59,10 +59,10 @@ class Totals(unittest.TestCase):
 
     def test_four_clean_shards_one_empty(self) -> None:
         """Counts summed, excluded taken once, an empty shard counts as zero."""
-        self.shard(0, "0/4\t3\t3\t0\t2")
-        self.shard(1, "1/4\t3\t3\t0\t2")
-        self.shard(2, "2/4\t3\t3\t0\t2")
-        self.shard(3, "3/4\t0\t0\t0\t2")
+        self.shard(0, "0/4\t3\t3\t0\t2\twhole")
+        self.shard(1, "1/4\t3\t3\t0\t2\twhole")
+        self.shard(2, "2/4\t3\t3\t0\t2\twhole")
+        self.shard(3, "3/4\t0\t0\t0\t2\twhole")
         done = self.run_totals()
         self.assertEqual(done.returncode, 0, done.stderr)
         want = [
@@ -73,8 +73,8 @@ class Totals(unittest.TestCase):
     def test_a_survivor_in_one_shard_reds_the_total(self) -> None:
         """The measure is one answer: any survivor anywhere is red."""
         for k in range(3):
-            self.shard(k, f"{k}/4\t3\t3\t0\t0")
-        self.shard(3, "3/4\t3\t2\t1\t0")
+            self.shard(k, f"{k}/4\t3\t3\t0\t0\twhole")
+        self.shard(3, "3/4\t3\t2\t1\t0\twhole")
         done = self.run_totals()
         self.assertEqual(done.returncode, 1)
         want = [
@@ -87,7 +87,7 @@ class Totals(unittest.TestCase):
     def test_missing_shard_is_red_by_name(self) -> None:
         """A shard that died writes nothing; its absence is named."""
         for k in (0, 1, 3):
-            self.shard(k, f"{k}/4\t3\t3\t0\t0")
+            self.shard(k, f"{k}/4\t3\t3\t0\t0\twhole")
         done = self.run_totals()
         self.assertEqual(done.returncode, 1)
         want = [f"{LABEL}: shard 2/4 reported nothing — it died or judged nothing"]
@@ -102,13 +102,65 @@ class Totals(unittest.TestCase):
         want = [f"{LABEL}: not adopted, skipped in all 4 shards"]
         self.assertEqual(done.stdout.splitlines(), want)
 
-    def test_shards_disagreeing_about_excluded_is_red(self) -> None:
-        """Each shard reports the whole population's figure; it must agree."""
-        self.shard(0, "0/2\t3\t3\t0\t1")
-        self.shard(1, "1/2\t3\t3\t0\t2")
+    def test_whole_shards_disagreeing_about_excluded_is_red(self) -> None:
+        """A `whole` row reports the population's figure; the rows must agree."""
+        self.shard(0, "0/2\t3\t3\t0\t1\twhole")
+        self.shard(1, "1/2\t3\t3\t0\t2\twhole")
         done = self.run_totals()
         self.assertEqual(done.returncode, 1)
         want = [f"{LABEL}: shards disagree about excluded (1, 2)"]
+        self.assertEqual(done.stderr.splitlines(), want)
+
+    def test_shard_rows_sum_their_excluded_counts(self) -> None:
+        """A `shard` row counts its own files' exclusions: summed (#2153)."""
+        self.shard(0, "0/3\t4\t3\t0\t1\tshard", lang="typescript")
+        self.shard(1, "1/3\t2\t2\t0\t2\tshard", lang="typescript")
+        self.shard(2, "2/3\t0\t0\t0\t0\tshard", lang="typescript")
+        done = self.run_totals("typescript")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        want = [
+            (
+                "audit:mutants: typescript: across 3 shards:"
+                " 6 mutants, 5 killed, 0 survived, 3 excluded"
+            )
+        ]
+        self.assertEqual(done.stdout.splitlines(), want)
+
+    def test_whole_and_shard_rows_mixed_is_red(self) -> None:
+        """Rows that disagree about what excluded covers cannot be totalled."""
+        self.shard(0, "0/2\t3\t3\t0\t1\twhole")
+        self.shard(1, "1/2\t3\t3\t0\t1\tshard")
+        done = self.run_totals()
+        self.assertEqual(done.returncode, 1)
+        want = [f"{LABEL}: shards disagree about what excluded covers (whole, shard)"]
+        self.assertEqual(done.stderr.splitlines(), want)
+
+    def test_a_row_with_no_coverage_column_is_red(self) -> None:
+        """A five-column row says nothing about its excluded count: red."""
+        self.shard(0, "0/1\t3\t3\t0\t1")
+        done = self.run_totals()
+        self.assertEqual(done.returncode, 1)
+        want = [
+            (
+                f'{LABEL}: shard 0/1 says its excluded count covers "",'
+                " not whole or shard"
+            )
+        ]
+        self.assertEqual(done.stderr.splitlines(), want)
+
+    def test_no_mutant_in_any_shard_is_red(self) -> None:
+        """Each shard may hold none; the whole population may not."""
+        self.shard(0, "0/2\t0\t0\t0\t0\tshard", lang="typescript")
+        self.shard(1, "1/2\t0\t0\t0\t0\tshard", lang="typescript")
+        done = self.run_totals("typescript")
+        self.assertEqual(done.returncode, 1)
+        want = [
+            (
+                "audit:mutants: typescript: no shard mutated anything"
+                " — across 2 shards, 0 mutants"
+            )
+        ]
+        self.assertEqual(done.stdout, "")
         self.assertEqual(done.stderr.splitlines(), want)
 
     def test_no_summary_at_all_is_red(self) -> None:
@@ -139,8 +191,8 @@ class Totals(unittest.TestCase):
     def test_only_the_named_language_is_totalled(self) -> None:
         """One language per call: another leg's files are not read."""
         for k in range(2):
-            self.shard(k, f"{k}/2\t2\t2\t0\t0")
-            self.shard(k, f"{k}/2\t5\t1\t4\t0", lang="go")
+            self.shard(k, f"{k}/2\t2\t2\t0\t0\twhole")
+            self.shard(k, f"{k}/2\t5\t1\t4\t0\twhole", lang="go")
         done = self.run_totals()
         self.assertEqual(done.returncode, 0, done.stderr)
         want = [

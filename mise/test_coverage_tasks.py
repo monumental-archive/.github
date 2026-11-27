@@ -5,7 +5,7 @@ The canon is a Python codebase, and the coverage machinery could not
 measure it: every `coverage:*` task skipped unless `Cargo.toml` or
 `go.mod` existed. The Python leg runs the repository's own `test` task
 under coverage.py and prints `python <percent>` and `python-branches
-<percent>`, and the floor is a minimum every leg must hold.
+<percent>`, and each leg is held to a floor of its own (#2143).
 
 The bodies under test are the tasks' own `run` strings, read out of
 mise/config.toml with decoded.load_toml and run by bash in a planted
@@ -29,9 +29,11 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from decimal import Decimal
 from pathlib import Path
 from typing import TypedDict, Unpack, override
 
+import coverage_floor
 import decoded
 import hermetic
 import workflow_yaml
@@ -43,13 +45,18 @@ GIT = hermetic.tool("git")
 
 CONFIG = decoded.load_toml((BELT / "config.toml").read_text(encoding="utf-8"))
 
-# A floor the derived-state law accepts: measured 82.0 minus the band.
-FLOOR = """\
-# band: 2
-# measured: 82.0
-# derived: v1.0.0
-80.0
-"""
+
+def floor_of(*legs: str) -> str:
+    """Write a floor the derived-state law accepts, as the derivation does.
+
+    Returns:
+        The file: each leg measured 82.0 and held at 80.0 (#2143).
+
+    """
+    return coverage_floor.render(
+        {leg: coverage_floor.fresh(Decimal("82.0")) for leg in legs}, "v1.0.0"
+    )
+
 
 # The measuring tools. Each answers only what the leg asks of it, with
 # the number the row planted in its environment.
@@ -306,7 +313,8 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
     run changed. `measured` leaves the run's directory as a suite run
     through `measured` does (#1667); False, as one that ran outside it;
     `python_measured` False, with Go's counters and no Python data.
-    `legs` is the floor's `legs:` record (#1666). `run_test` runs the
+    `legs` is the floor's `legs:` record (#1666), each leg at 80.0;
+    unset, the legs the planted languages measure. `run_test` runs the
     test command in the tree first, as mise runs `test` before the
     coverage task, and ends there if it fails, as a red `test` ends the
     run; the processes' output is joined, the test's first.
@@ -347,10 +355,20 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
     if typescript is not None:
         tracked += plant_typescript(tree, typescript)
     if floor:
-        record = "" if legs is None else f"# legs: {legs}\n"
-        (tree / ".coverage-floor").write_text(
-            FLOOR.replace("80.0\n", f"{record}80.0\n"), encoding="utf-8"
+        named = (
+            legs.split()
+            if legs is not None
+            else [
+                *(["python", "python-branches"] if python else []),
+                *(["go"] if go is not None else []),
+                *(
+                    ["typescript", "typescript-branches"]
+                    if typescript is not None
+                    else []
+                ),
+            ]
         )
+        (tree / ".coverage-floor").write_text(floor_of(*named), encoding="utf-8")
         tracked.append(".coverage-floor")
 
     env = hermetic.env()
@@ -467,12 +485,12 @@ class CheckRows(CoverageTaskCase):
     """`coverage:check` over the Python leg, alone and beside Go."""
 
     def test_python_only_tree_measures_and_holds(self) -> None:
-        """Both Python legs print, and each holds the floor by name."""
+        """Both Python legs print, and each holds its floor by name."""
         done, tree = self.run_task("coverage:check")
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertEqual(
-            "coverage:check: python leg holds the floor 80.0 (90.0%)\n"
-            "coverage:check: python-branches leg holds the floor 80.0 (85.0%)\n"
+            "coverage:check: python leg holds its floor 80.0 (90.0%)\n"
+            "coverage:check: python-branches leg holds its floor 80.0 (85.0%)\n"
             + upload_line(tree, "coverage.xml"),
             done.stdout,
         )
@@ -481,7 +499,9 @@ class CheckRows(CoverageTaskCase):
 
     def test_python_run_outside_measured_reports_no_figure(self) -> None:
         """A suite that ran outside `measured`: no python figure, by name."""
-        done, _ = self.run_task("coverage:check", go="91.0", python_measured=False)
+        done, _ = self.run_task(
+            "coverage:check", go="91.0", python_measured=False, legs="go"
+        )
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertIn(
             "coverage:check: python: the test run measured no Python — its test"
@@ -496,7 +516,7 @@ class CheckRows(CoverageTaskCase):
         done, _ = self.run_task("coverage:check", branches="79.9")
         self.assertEqual(1, done.returncode)
         self.assertIn(
-            "coverage:check: python-branches: 79.9% is below the derived floor 80.0%\n",
+            "coverage:check: python-branches: 79.9% is below its derived floor 80.0%\n",
             done.stderr,
         )
 
@@ -505,7 +525,7 @@ class CheckRows(CoverageTaskCase):
         done, _ = self.run_task("coverage:check", py="70.0")
         self.assertEqual(1, done.returncode)
         self.assertIn(
-            "coverage:check: python: 70.0% is below the derived floor 80.0%\n",
+            "coverage:check: python: 70.0% is below its derived floor 80.0%\n",
             done.stderr,
         )
 
@@ -516,16 +536,29 @@ class CheckRows(CoverageTaskCase):
         self.assertEqual("coverage:check: no .coverage-floor, skipped\n", done.stdout)
         self.assertNotIn("suite ran", done.stderr)
 
-    def test_python_without_a_test_task_skips_clean(self) -> None:
-        """Tracked Python with no suite has no corpus to hold a floor over."""
+    def test_python_without_a_test_task_is_red_by_name(self) -> None:
+        """A floor recording the Python legs and no suite: each leg named.
+
+        Every floor records its legs (#2143), so a tracked *.py with no
+        suite is a recorded leg that measured nothing, never a skip.
+        """
         done, _ = self.run_task("coverage:check", test_task=False)
-        self.assertEqual(0, done.returncode, done.stderr)
+        needs = (
+            "  the python leg needs tracked *.py and a `test` task whose test"
+            ' command runs through "${ORG_BELT_DIR}/measured"; or record the'
+            " leg's removal on purpose: `# dropped: LEG <reason>` in"
+            " .coverage-floor\n"
+        )
         self.assertEqual(
-            "coverage:check: no measurable language (go.mod, Cargo.toml,"
-            " tracked *.py with a test task, package.json with vitest, or"
-            " a floor recording its legs),"
-            " skipped\n",
-            done.stdout,
+            (
+                1,
+                "".join(
+                    f"coverage:check: the floor was derived with {leg} and this"
+                    " run measured none\n" + needs.replace("LEG", leg)
+                    for leg in ("python", "python-branches")
+                ),
+            ),
+            (done.returncode, done.stderr),
         )
 
     def test_mixed_go_and_python_prints_every_leg(self) -> None:
@@ -533,9 +566,9 @@ class CheckRows(CoverageTaskCase):
         done, tree = self.run_task("coverage:check", go="93.0")
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertEqual(
-            "coverage:check: go leg holds the floor 80.0 (93.0%)\n"
-            "coverage:check: python leg holds the floor 80.0 (90.0%)\n"
-            "coverage:check: python-branches leg holds the floor 80.0 (85.0%)\n"
+            "coverage:check: go leg holds its floor 80.0 (93.0%)\n"
+            "coverage:check: python leg holds its floor 80.0 (90.0%)\n"
+            "coverage:check: python-branches leg holds its floor 80.0 (85.0%)\n"
             + upload_line(tree, "coverage.txt", "coverage.xml"),
             done.stdout,
         )
@@ -545,7 +578,7 @@ class CheckRows(CoverageTaskCase):
         done, _ = self.run_task("coverage:check", go="75.0")
         self.assertEqual(1, done.returncode)
         self.assertIn(
-            "coverage:check: go: 75.0% is below the derived floor 80.0%\n",
+            "coverage:check: go: 75.0% is below its derived floor 80.0%\n",
             done.stderr,
         )
 
@@ -647,12 +680,13 @@ class UploadStep(unittest.TestCase):
 class AdoptRows(CoverageTaskCase):
     """The write-mode half reads the same measurement."""
 
-    def test_adopt_derives_from_the_weakest_python_leg(self) -> None:
-        """Branches below statements set the floor."""
+    def test_adopt_derives_each_python_leg_from_its_own_figure(self) -> None:
+        """Branches below statements set the branch floor alone (#2143)."""
         done, tree = self.run_task("coverage:adopt", floor=False, branches="83.47")
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertEqual(
-            "coverage-floor: adopted .coverage-floor at 81.4 (measured 83.4)\n",
+            "coverage-floor: adopted .coverage-floor: python 88.0 (measured"
+            " 90.0), python-branches 81.4 (measured 83.4)\n",
             done.stdout,
         )
         self.assertTrue((tree / ".coverage-floor").is_file())
@@ -830,7 +864,7 @@ class ReportsSelector(CoverageTaskCase):
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertTrue(
             done.stdout.endswith(
-                "python-branches leg holds the floor 80.0 (85.0%)\n"
+                "python-branches leg holds its floor 80.0 (85.0%)\n"
                 + upload_line(tree, "coverage.txt", "coverage.xml")
             ),
             done.stdout,
@@ -983,7 +1017,7 @@ class GoLegRows(CoverageTaskCase):
             "coverage:check: go: no test task: measuring `go test ./...`", done.stderr
         )
         self.assertIn(
-            "coverage:check: go leg holds the floor 80.0 (93.0%)", done.stdout
+            "coverage:check: go leg holds its floor 80.0 (93.0%)", done.stdout
         )
 
     def test_a_run_with_no_counters_is_refused_by_name(self) -> None:

@@ -52,7 +52,7 @@ criterion would notice; the audit's red is what says the form is owed.
 | --- | --- | --- |
 | `access_continuity` | Met | [continuity.md](continuity.md) — succession + break-glass |
 | `build_repeatable` | Met wherever the publish stub declares any class | the repro gate blocks every release on a bit-for-bit rebuild (#118); the scheduled repro-check re-verifies published history from cold. **This includes `source-archive`** — see the trap below. N/A only for a continuous repo that publishes nothing |
-| `test_statement_coverage80` | Met per repo once its `.coverage-floor` ≥ 80; the floor is derived (`min(90, measured - 2)`, never falling, #652, #1786), so it holds without anyone maintaining it. For the canon, **Met since 2026-11-18 (#1331)**: 94.9% of its Python statements under a floor of 89.1 — see the coverage section below | canonical `coverage:check` ratchet in the gate, Rust, Go, Python and TypeScript legs, gated on `.coverage-floor` so a repo with no measurable corpus skips clean |
+| `test_statement_coverage80` | Met per repo once its `.coverage-floor` ≥ 80; the floor is derived (`min(90, measured - 2)`, never falling, #652, #1786), so it holds without anyone maintaining it. For the canon, **Met since 2026-11-18 (#1331)**: 94.9% of its Python statements, each leg under a floor of its own (#2143) — see the coverage section below | canonical `coverage:check` ratchet in the gate, Rust, Go, Python and TypeScript legs, gated on `.coverage-floor` so a repo with no measurable corpus skips clean |
 | `signed_releases` | Met | Sigstore evidence bundle on every release |
 | `version_semver` / `version_tags` | Met | `stele derive version` + App-minted `v*` tags |
 | `version_tags_signed` | Met | the tag objects **are** signed — Sigstore keyless, by the release workflow. See the `no_user` trap below |
@@ -119,9 +119,10 @@ a statement-coverage corpus — stopped being true: the canon's Python
 (belt and release helpers, with stdlib `unittest` suites over three
 roots) outgrew its shell, and coverage.py now measures it in the gate,
 child processes included: 94.9% of statements and 91.1% of branches,
-held by a derived `.coverage-floor` of 89.1 (measured 91.1, the weaker
-leg, minus the band). So `test_statement_coverage80`, `90` and
-`test_branch_coverage80` are Met from that number. The scope is stated
+held by a derived `.coverage-floor`, each leg to a floor of its own
+(its measurement minus the band, capped at 90, #2143). So
+`test_statement_coverage80`, `90` and `test_branch_coverage80` are Met
+from that number. The scope is stated
 in every answer: the shell is not measured (kcov still fails the
 belt's priors, and the verdict says so), and the floor covers the
 Python legs only. A bash

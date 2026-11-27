@@ -126,9 +126,10 @@ fi
   exit 0
 }
 
-# The floor this run holds, or nothing. Read through coverage_floor.py,
-# the one reader, so a floor that disagrees with its own record is the
-# same refusal here as in coverage:check.
+# The floors this run holds, a `<leg> <floor>` line each (#2143), or
+# nothing. Read through coverage_floor.py, the one reader, so a floor
+# that disagrees with its own record is the same refusal here as in
+# coverage:check.
 floor=""
 if [[ ${mode} == test ]]; then
   floor=$("${ORG_PYTHON}" "${belt}/coverage_floor.py" read) || exit 1

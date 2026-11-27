@@ -158,10 +158,10 @@ func FuzzyHelper(t *testing.T) {}
 # A floor the derived-state law accepts, recording the go leg.
 FLOOR = """\
 # band: 2
-# measured: 82.0
 # derived: v1.0.0
 # legs: go
-80.0
+# go measured: 82.0
+go 80.0
 """
 
 # What a row expects when a stand-in was never called.
@@ -340,7 +340,7 @@ class FloorRows(FuzzCase):
         done = self.check()
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertIn(
-            "coverage:check: go leg holds the floor 80.0 (93.0%)\n", done.stdout
+            "coverage:check: go leg holds its floor 80.0 (93.0%)\n", done.stdout
         )
         self.assertNotIn("fuzz", done.stdout + done.stderr)
         self.assertEqual(NO_LINES, self.fuzz_calls())
@@ -380,7 +380,7 @@ class FloorRows(FuzzCase):
         )
         self.assertEqual(0, written.returncode, written.stderr)
         self.assertEqual(
-            "coverage-floor: adopted .coverage-floor at 90 (measured 93.0)\n",
+            "coverage-floor: adopted .coverage-floor: go 90 (measured 93.0)\n",
             written.stdout,
         )
         text = (self.tree / ".coverage-floor").read_text(encoding="utf-8")

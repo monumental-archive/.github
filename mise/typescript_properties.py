@@ -6,8 +6,8 @@ The Python half of `test:typescript-properties` (the gate),
 `lint:typescript-properties`, called by `typescript-properties.sh` and
 by the lint's body. #1332's shape for TypeScript: the runner (vitest)
 and fast-check are the repository's own, read from its lockfile, and
-the belt pins neither; what the belt owns is the seed and the run
-count.
+the belt pins neither; what the belt owns is every bound on a
+property: the seed, the run count and the time (#2144).
 
 HOW THE SEED REACHES FAST-CHECK, measured on vitest 4.1.12 and
 fast-check 4.9.0 as monumental-archive locks them (the verdict entry in
@@ -23,7 +23,13 @@ which `verify` reads to prove every file ran, and a reporter whose
 however the config declared it (#2104): a project does not inherit
 the root's `setupFiles`. The same hook sets each project's `exclude`
 to vitest's default, so a repository that keeps properties out of its
-own suite still has them run here. Where the config has no
+own suite still has them run here, and sets each project's
+`testTimeout` to 0, which vitest reads as no per-test limit (#2144):
+the audit runs 50 times the gate's examples, so a limit that scales
+with neither is the job's `timeout-minutes`, as `deadline=None` is for
+Python. Hook timeouts are untouched. A root `test.testTimeout` alone
+does not reach an inline project, so the bound is set where the seed
+is. Where the config has no
 `test.projects`, the wrapper also narrows `include` to exactly the
 tracked property files, so a property the repository's own globs miss
 still runs; where it has projects, the file filters put each property
@@ -51,7 +57,8 @@ Subcommands, run from the repository root:
   lint FILE...               every tracked TypeScript/JavaScript file;
                              prints each import of fast-check outside a
                              property file and each property file that
-                             restates the seed or run count
+                             restates the seed, the run count or a time
+                             bound
   stage DIR [CONFIG]         writes the wrapper and setup file into
                              DIR; the property files come on stdin,
                              NUL-separated (org_tracked, #1986)
@@ -107,10 +114,31 @@ IMPORT = re.compile(
     r"""["'](fast-check|@fast-check/[\w.-]+)(?:/[^"']*)?["']"""
 )
 
-# A property restating what the belt owns: a `seed` or `numRuns`
-# parameter (shorthand `{ seed }` included) or a call that replaces the
-# global configuration the setup file installs.
-RESTATED = re.compile(r"\b(seed|numRuns)\b\s*[:,}]|\b(configureGlobal)\s*\(")
+# A property restating what the belt owns (#2144: the seed, the run
+# count and the time): a `seed` or `numRuns` parameter (shorthand
+# `{ seed }` included), fast-check's two time limits that end a run
+# before its examples are done, or a call that replaces the global
+# configuration the setup file installs (fast-check's, or vitest's
+# `vi.setConfig`, which can set the test timeout). A `timeout` key is
+# TIMEOUT's, as it belongs to whichever call holds it.
+RESTATED = re.compile(
+    r"\b(seed|numRuns|interruptAfterTimeLimit|skipAllAfterTimeLimit)\b\s*[:,}]"
+    r"|\b(configureGlobal|vi\s*\.\s*setConfig)\s*\("
+)
+# A `timeout` key, shorthand included: vitest's per-test option where
+# it sits in an object argument of a `test`/`it` call, fast-check's
+# everywhere else (`fc.assert`'s parameters, `test.prop`'s first call).
+TIMEOUT = re.compile(r"\btimeout\b\s*[:,}]")
+
+# The head of a vitest test call: `test(`, `it(`, and any chain on them
+# (`test.prop([...])(`, `it.concurrent(`, `test.each(rows)(`). Read on
+# the masked source, for structure only: a finding is never decided
+# by it, since a quote in a regex literal masks to the end of a line.
+TEST_CALL = re.compile(r"(?<![\w$.])(?:test|it)((?:\s*\.\s*[A-Za-z_$][\w$]*)*)\s*\(")
+# Chain members whose own call comes before the test's arguments.
+CURRIED = ("prop", "each", "for")
+# vitest's third argument: a test's timeout, or its options.
+TEST_ARGS_TIMEOUT = 2
 
 # vitest's own default exclude (vitest 4: node_modules and .git only).
 DEFAULT_EXCLUDE = ["**/node_modules/**", "**/.git/**"]
@@ -186,6 +214,10 @@ const seeder = {{
     for (const project of vitest.projects) {{
       project.config.setupFiles = [...project.config.setupFiles, setup];
       project.config.exclude = [...exclude];
+      // No per-test limit (#2144): the job's timeout-minutes bounds the
+      // run, at 200 examples or 10,000. 0 is vitest's "no limit";
+      // hookTimeout stays the repository's.
+      project.config.testTimeout = 0;
     }}
   }},
 }};
@@ -226,6 +258,201 @@ def locked(lockfiles: list[str]) -> int:
     return 0
 
 
+def _quoted_end(text: str, i: int) -> int:
+    """Find where the string literal opening at `i` ends.
+
+    Returns:
+        The offset of its closing quote, or of the newline or end of
+        text that leaves it unclosed.
+
+    """
+    j = i + 1
+    while j < len(text) and text[j] not in {text[i], "\n"}:
+        j += 2 if text[j] == "\\" else 1
+    return min(j, len(text))
+
+
+def _comment_end(text: str, i: int) -> int:
+    """Find where the comment opening at `i` ends, or -1 for none there.
+
+    Returns:
+        The offset just past it: its newline kept, `*/` consumed.
+
+    """
+    if text.startswith("//", i):
+        end = text.find("\n", i)
+        return len(text) if end < 0 else end
+    if text.startswith("/*", i):
+        end = text.find("*/", i + 2)
+        return len(text) if end < 0 else end + 2
+    return -1
+
+
+def _template_step(text: str, i: int, stack: list[str]) -> tuple[int, bool]:
+    """Take one step inside a template literal's text.
+
+    Returns:
+        The next offset, and whether the characters stepped over are
+        the template's text, to blank.
+
+    """
+    if text[i] == "\\":
+        return i + 2, True
+    if text[i] == "`":
+        stack.pop()
+        return i + 1, False
+    if text.startswith("${", i):
+        stack.append("{")
+        return i + 2, False
+    return i + 1, True
+
+
+def _code_step(text: str, i: int, stack: list[str]) -> tuple[int, int]:
+    """Take one step in code: a comment, a string, or one character.
+
+    Returns:
+        The next offset, and where the span to blank starts (the next
+        offset when there is none).
+
+    """
+    comment = _comment_end(text, i)
+    if comment >= 0:
+        return comment, i
+    c = text[i]
+    if c in {'"', "'"}:
+        end = _quoted_end(text, i)
+        return end + 1, i + 1
+    if c in {"`", "{"} and (c == "`" or stack):
+        stack.append(c)
+    elif c == "}" and stack:
+        stack.pop()
+    return i + 1, i + 1
+
+
+def masked(text: str) -> str:
+    """Blank every comment and string body, keeping offsets and newlines.
+
+    Quotes and template delimiters stay; a template's `${...}` stays
+    code. A regex literal is read as code, which a property file's
+    test calls do not depend on.
+
+    Returns:
+        `text` of the same length, with those characters as spaces.
+
+    """
+    out = list(text)
+    stack: list[str] = []  # "`" in a template, "{" in code inside one
+    i = 0
+    while i < len(text):
+        if stack and stack[-1] == "`":
+            nxt, text_part = _template_step(text, i, stack)
+            blank_from = i if text_part else nxt
+            blank_to = nxt
+        else:
+            nxt, blank_from = _code_step(text, i, stack)
+            # A string's closing quote stays; a comment goes whole.
+            blank_to = nxt - 1 if blank_from == i + 1 and nxt > i + 1 else nxt
+        for k in range(blank_from, min(blank_to, len(text))):
+            if out[k] != "\n":
+                out[k] = " "
+        i = nxt
+    return "".join(out)
+
+
+def arguments_of(code: str, start: int) -> tuple[list[tuple[int, int]], int]:
+    """Split the bracketed group opening at `start` into its arguments.
+
+    Returns:
+        Each top-level argument's (start, end) span, and the offset just
+        past the group's closing bracket (len(code) when unclosed).
+
+    """
+    args: list[tuple[int, int]] = []
+    depth, begin, i = 0, start + 1, start
+    while i < len(code):
+        c = code[i]
+        if c in "([{":
+            depth += 1
+        elif c in ")]}":
+            depth -= 1
+            if depth == 0:
+                args.append((begin, i))
+                return args, i + 1
+        elif c == "," and depth == 1:
+            args.append((begin, i))
+            begin = i + 1
+        i += 1
+    args.append((begin, i))
+    return args, i
+
+
+def test_calls(code: str) -> list[list[tuple[int, int]]]:
+    """Find each vitest test call's own arguments in the masked source.
+
+    Returns:
+        Each call's argument spans, the curried calls skipped.
+
+    """
+    calls = []
+    for match in TEST_CALL.finditer(code):
+        chain: list[str] = re.findall(
+            r"[A-Za-z_$][\w$]*", typed_std.group(match, 1) or ""
+        )
+        at = match.end() - 1
+        args, after = arguments_of(code, at)
+        for _ in range(sum(member in CURRIED for member in chain)):
+            nxt = re.compile(r"\s*\(").match(code, after)
+            if nxt is None:
+                break
+            args, after = arguments_of(code, nxt.end() - 1)
+        calls.append(args)
+    return calls
+
+
+def time_bounds(name: str, text: str) -> list[str]:
+    """Name each time a property file sets itself (#2144).
+
+    A `timeout` key is matched on the raw text, as RESTATED is; the
+    masked code only finds the test calls, their third argument and
+    which object arguments are a test's options, for the wording.
+
+    Returns:
+        One finding per vitest per-test timeout (a third argument, or a
+        `timeout` in a test's options) and per fast-check `timeout`.
+
+    """
+    code = masked(text)
+
+    def line(offset: int) -> int:
+        return text.count("\n", 0, offset) + 1
+
+    found: list[tuple[int, str]] = []
+    options: list[tuple[int, int]] = []
+    for args in test_calls(code):
+        for start, end in args[1:]:
+            if code[start:end].strip().startswith("{"):
+                options.append((start, end))
+        # `test(name, fn, timeout)`; in `test(name, options, fn)` the
+        # third is the body, and the options' `timeout` is TIMEOUT's.
+        second = code[args[1][0] : args[1][1]].strip() if len(args) > 1 else ""
+        if len(args) > TEST_ARGS_TIMEOUT and not second.startswith("{"):
+            start, end = args[TEST_ARGS_TIMEOUT]
+            third = code[start:end]
+            if third.strip() and not third.strip().startswith("{"):
+                at = start + len(third) - len(third.lstrip())
+                found.append((at, "a per-test timeout (test()'s third argument)"))
+    for match in TIMEOUT.finditer(text):
+        at = match.start()
+        vitest = any(start <= at < end for start, end in options)
+        what = "vitest's timeout option" if vitest else "fast-check's timeout"
+        found.append((at, what))
+    return [
+        f"{name}:{line(at)}: restates {what}; the belt's seed, run count and"
+        " time bound own every property"
+        for at, what in sorted(found)
+    ]
+
+
 def lint(files: list[str]) -> int:
     """Name each import outside a property file and each restatement.
 
@@ -240,20 +467,27 @@ def lint(files: list[str]) -> int:
         except (OSError, UnicodeDecodeError) as err:
             findings.append(f"{name}: cannot be read ({err.__class__.__name__})")
             continue
-        for number, line in enumerate(text.splitlines(), 1):
-            if not PROPERTY.search(name):
+        if not PROPERTY.search(name):
+            for number, line in enumerate(text.splitlines(), 1):
                 findings.extend(
                     f"{name}:{number}: imports {typed_std.group(match, 1)} but is not a"
                     " *.prop.test.{ts,tsx,mts,cts} file"
                     for match in IMPORT.finditer(line)
                 )
-                continue
+            continue
+        # Every bound is matched on the raw text, a comment or string
+        # included: a loud false positive, never a silent pass. The
+        # masked code only gives time_bounds the structure of a call.
+        for number, line in enumerate(text.splitlines(), 1):
             for match in RESTATED.finditer(line):
-                what = typed_std.group(match, 1) or f"{typed_std.group(match, 2)}()"
+                bound = typed_std.group(match, 1)
+                call = re.sub(r"\s+", "", typed_std.group(match, 2) or "")
+                what = bound or f"{call}()"
                 findings.append(
-                    f"{name}:{number}: restates {what}; the belt's seed and run"
-                    " count own every property"
+                    f"{name}:{number}: restates {what}; the belt's seed, run"
+                    " count and time bound own every property"
                 )
+        findings.extend(time_bounds(name, text))
     for finding in findings:
         print(finding)
     return 1 if findings else 0

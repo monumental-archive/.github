@@ -4,7 +4,7 @@
   "extends": ["config:best-practices", ":dependencyDashboard"],
   "commitMessageAction": "update",
   "commitMessageTopic": "{{depName}}",
-  "commitMessageExtra": "to {{newValue}}",
+  "commitMessageExtra": "to {{#if isLockfileUpdate}}{{newVersion}}{{else}}{{newValue}}{{/if}}",
   "semanticCommitType": "chore",
   "semanticCommitScope": "deps",
   "packageRules": [
@@ -19,7 +19,7 @@
       "minimumReleaseAge": "3 days"
     },
     {
-      "description": "THE OWNED TEMPLATE (#576). Every permanent commit subject a machine mints in this org is composed from the five commitMessage/semanticCommit fields above and nowhere else. They are set EXPLICITLY, including where the value equals Renovate's own default: lint:subject-budget simulates this template to prove each declared dependency mints a subject that fits, and a simulation reading an upstream default it cannot see is the agreeing-by-memory failure #576 exists to kill. An absent field is a hard error there, never a fallback. The topic is restated as a catch-all rule here as well as at the top level because the managers carry their own defaults (`dependency {{depName}}`, `{{depName}} action`, `{{depName}} digest` — three shapes, none ours, costing eleven columns to say nothing), the documentation routes manager-specific topics through packageRules, and a rule unambiguously beats a manager default. The per-dependency rules below override this one in turn, later-wins. Each lists the depName BOTH with and without its mise backend prefix, because Renovate renders depName with it (`update dependency github:monumental-archive/stele …`, #574) while selecting on the stripped packageName (the same PR came out scoped `chore(canon)` from `monumental-archive/**`); a pattern that matches nothing costs nothing, and one of the two is right.",
+      "description": "THE OWNED TEMPLATE (#576). Every permanent commit subject a machine mints in this org is composed from the five commitMessage/semanticCommit fields above and nowhere else. They are set EXPLICITLY, including where the value equals Renovate's own default: lint:subject-budget simulates this template to prove each declared dependency mints a subject that fits, and a simulation reading an upstream default it cannot see is the agreeing-by-memory failure #576 exists to kill. An absent field is a hard error there, never a fallback. The extra is a conditional on `isLockfileUpdate` (#2145) because a lock-file update leaves `newValue`, the declared range, where it was: a subject naming the range is the same title on every bump, and Renovate, finding a merged PR of the same branch and title, turns automerge off on every bump after the first (`update tokio to 1`, measured on iiif-server). On a lock-file update the subject names `newVersion`, the version installed, which differs on every bump; every other update still names the new range or version. lint:subject-budget renders both branches and charges the wider, `newVersion` at the widest version the repository's lock file resolves. The topic is restated as a catch-all rule here as well as at the top level because the managers carry their own defaults (`dependency {{depName}}`, `{{depName}} action`, `{{depName}} digest` — three shapes, none ours, costing eleven columns to say nothing), the documentation routes manager-specific topics through packageRules, and a rule unambiguously beats a manager default. The per-dependency rules below override this one in turn, later-wins. Each lists the depName BOTH with and without its mise backend prefix, because Renovate renders depName with it (`update dependency github:monumental-archive/stele …`, #574) while selecting on the stripped packageName (the same PR came out scoped `chore(canon)` from `monumental-archive/**`); a pattern that matches nothing costs nothing, and one of the two is right.",
       "matchPackageNames": ["*"],
       "commitMessageTopic": "{{depName}}"
     },
@@ -210,6 +210,14 @@
       "groupName": "first-party canon",
       "semanticCommitType": "chore",
       "semanticCommitScope": "canon"
+    },
+    {
+      "description": "First-party images skip the age gate too. Renovate names an image with its registry, `ghcr.io/monumental-archive/iiif-server`, and a glob anchors at the start of the name, so `monumental-archive/**` above never reached one: every first-party image bump waited out the seven-day floor under the Dependency Dashboard's Pending Status Checks, with no branch made, until a human ticked it (monumental-archive's iiif-server 0.3.1 and its monumental-archive-db digest, 2026-11-28). The image is built, attested and gated by our own CI, the reason the rule above gives for its repos. A rule of its own rather than a second pattern above, because that rule's group and scope are the canon's: an image moves what a consumer deploys, not its lint config, so it keeps its own pull request and `chore(deps)`, and a red canon bump never holds it. The limits and priority are the rule above's, for its reason (#2162); mise/test_renovate_preset.py holds the age and the two zeros.",
+      "matchPackageNames": ["ghcr.io/monumental-archive/**"],
+      "minimumReleaseAge": "0 days",
+      "prPriority": 10,
+      "prConcurrentLimit": 0,
+      "prHourlyLimit": 0
     }
   ],
   "customManagers": [

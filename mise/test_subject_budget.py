@@ -70,6 +70,7 @@ PRESET: dict[str, object] = {
 # the comparison states the element type it is checking.
 NO_FINDINGS: list[sb.Finding] = []
 NO_DEPS: list[sb.Dep] = []
+NO_LINES: list[str] = []
 
 
 class Stops:
@@ -892,6 +893,229 @@ class TestJudge(unittest.TestCase):
         self.assertTrue(any("newMajor" in line for line in report))
 
 
+# The delivered extra since #2145: a lock-file update names the version it
+# installs, every other update the declared value.
+LOCK_EXTRA = "to {{#if isLockfileUpdate}}{{newVersion}}{{else}}{{newValue}}{{/if}}"
+LOCK_PRESET: dict[str, object] = {**PRESET, "commitMessageExtra": LOCK_EXTRA}
+
+# One lock file of each format the belt reads, each resolving one
+# package to a version wider than the range its manifest declares.
+PNPM_LOCK = (
+    "lockfileVersion: '9.0'\n\npackages:\n\n  vitest@4.1.12:\n"
+    "    resolution: {integrity: sha512-x}\n\nsnapshots:\n\n"
+    "  vitest@4.1.12(@types/node@22.0.0):\n    dependencies: {}\n"
+)
+NPM_LOCK = (
+    '{"lockfileVersion": 3, "packages": {"": {"devDependencies":'
+    ' {"vitest": "^4"}}, "node_modules/vitest": {"version": "4.1.12",'
+    ' "dev": true}}}'
+)
+YARN_LOCK = (
+    '# yarn lockfile v1\n\n\nvitest@^4, vitest@^4.1.0:\n  version "4.1.12"\n'
+    '  resolved "https://registry.yarnpkg.com/vitest/-/vitest-4.1.12.tgz"\n'
+)
+BERRY_LOCK = (
+    '__metadata:\n  version: 8\n\n"vitest@npm:^4":\n  version: 4.1.12\n'
+    '  resolution: "vitest@npm:4.1.12"\n'
+)
+BUN_LOCK = (
+    '{\n  "lockfileVersion": 1,\n  "packages": {\n'
+    '    "vitest": ["vitest@4.1.12", "", {}, "sha512-x"],\n  }\n}\n'
+)
+CARGO_LOCK = 'version = 4\n\n[[package]]\nname = "serde"\nversion = "1.0.154"\n'
+LOCKS: dict[str, tuple[str, str, str]] = {
+    "pnpm-lock.yaml": ("vitest", PNPM_LOCK, "4.1.12"),
+    "package-lock.json": ("vitest", NPM_LOCK, "4.1.12"),
+    "yarn.lock": ("vitest", YARN_LOCK, "4.1.12"),
+    "berry/yarn.lock": ("vitest", BERRY_LOCK, "4.1.12"),
+    "bun.lock": ("vitest", BUN_LOCK, "4.1.12"),
+    "Cargo.lock": ("serde", CARGO_LOCK, "1.0.154"),
+}
+# The two manifests the end-to-end rows declare a range in.
+HONO_MANIFEST = '{"dependencies": {"hono": "^4.1.0"}}'
+VITEST_MANIFEST = '{"devDependencies": {"vitest": "^4"}}'
+LOCK_PRESET_JSON = json.dumps(LOCK_PRESET)
+
+
+def locked_dep(lock: str, name: str, tmp: str) -> sb.Dep:
+    """Declare one package as a range beside a lock file in `tmp`.
+
+    Returns:
+        The dependency, its manifest in the lock file's directory.
+
+    """
+    manager = "cargo" if lock.endswith("Cargo.lock") else "npm"
+    manifest = "Cargo.toml" if manager == "cargo" else "package.json"
+    current = "1" if manager == "cargo" else "^4"
+    origin = Path(tmp) / Path(lock).parent / manifest
+    return sb.Dep(name, current, manager, str(origin))
+
+
+class TestLockfileBranch(unittest.TestCase):
+    """A lock-file update names the version it installs (#2145)."""
+
+    def test_both_branches_render_and_the_wider_one_binds(self) -> None:
+        """`newVersion` on the lock-file branch, `newValue` on the other."""
+        config = template(commitMessageExtra=LOCK_EXTRA)
+        lock, unmodelled = sb.render(config, "tokio", 4, version=9, lockfile=True)
+        other, _ = sb.render(config, "tokio", 4, version=9)
+        self.assertEqual(lock, "chore(deps): update tokio to 999999999 (#999999)")
+        self.assertEqual(other, "chore(deps): update tokio to 9999 (#999999)")
+        self.assertIsNone(unmodelled)
+        with TemporaryDirectory() as tmp:
+            row = [sb.Dep("tokio", "1", "cargo", f"{tmp}/Cargo.toml")]
+            Path(tmp, "Cargo.lock").write_text(
+                '[[package]]\nname = "tokio"\nversion = "1.48.0"\n', encoding="utf-8"
+            )
+            locks = sb.Locks([Path(tmp, "Cargo.lock")])
+            # `1.48.0` plus the growth allowance is the binding width.
+            wide, _ = sb.render(
+                config, "tokio", 4, version=6 + sb.VERSION_GROWTH, lockfile=True
+            )
+            limit = len(wide)
+            fits = sb.judge(row, owned(LOCK_PRESET), limit, [], locks)
+            over = sb.judge(row, owned(LOCK_PRESET), limit - 1, [], locks)
+        self.assertEqual(fits, NO_FINDINGS)
+        subjects: list[str] = [f.subject for f in over]
+        want: list[str] = [wide]
+        self.assertEqual(subjects, want)
+        self.assertEqual(locks.missing, NO_LINES)
+
+    def test_a_locked_version_wider_than_its_range_is_charged(self) -> None:
+        """`"1"` locks `1.0.154`: the subject is charged ten columns, not four."""
+        with TemporaryDirectory() as tmp:
+            dep_row = locked_dep("Cargo.lock", "serde", tmp)
+            Path(tmp, "Cargo.lock").write_text(CARGO_LOCK, encoding="utf-8")
+            locks = sb.Locks([Path(tmp, "Cargo.lock")])
+            (finding,) = sb.judge([dep_row], owned(LOCK_PRESET), 0, [], locks)
+        version = "9" * (len("1.0.154") + sb.VERSION_GROWTH)
+        self.assertEqual(
+            finding.subject, f"chore(deps): update serde to {version} (#999999)"
+        )
+        self.assertEqual(finding.width, len(finding.subject))
+
+    def test_each_lock_format_reads_the_locked_version(self) -> None:
+        """pnpm, npm, yarn classic and berry, bun and Cargo, one reader."""
+        for lock, (name, body, version) in LOCKS.items():
+            with self.subTest(lock=lock), TemporaryDirectory() as tmp:
+                path = Path(tmp, lock)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(body, encoding="utf-8")
+                locks = sb.Locks([path])
+                self.assertEqual(locks.widest(locked_dep(lock, name, tmp)), version)
+                self.assertEqual(locks.missing, NO_LINES)
+
+    def test_a_workspace_member_reads_the_root_lock_file(self) -> None:
+        """The nearest tracked lock file from the manifest up answers."""
+        with TemporaryDirectory() as tmp:
+            Path(tmp, "Cargo.lock").write_text(CARGO_LOCK, encoding="utf-8")
+            member = sb.Dep("serde", "1", "cargo", f"{tmp}/crates/a/Cargo.toml")
+            locks = sb.Locks([Path(tmp, "Cargo.lock")])
+            self.assertEqual(locks.widest(member), "1.0.154")
+
+    def test_an_unreadable_lock_file_is_a_finding(self) -> None:
+        """A lock file that cannot be read or decoded answers no version."""
+        with TemporaryDirectory() as tmp:
+            gone = sb.Dep("serde", "1", "cargo", f"{tmp}/Cargo.toml")
+            broken = sb.Dep("hono", "^4", "npm", f"{tmp}/web/package.json")
+            Path(tmp, "web").mkdir()
+            Path(tmp, "web", "pnpm-lock.yaml").write_bytes(b"\xff\xfe")
+            locks = sb.Locks([Path(tmp, "Cargo.lock"), Path(tmp, "web/pnpm-lock.yaml")])
+            self.assertIsNone(locks.widest(gone))
+            self.assertIsNone(locks.widest(broken))
+            Path(tmp, "Cargo.lock").write_text("[[package]\n", encoding="utf-8")
+            self.assertIsNone(sb.Locks([Path(tmp, "Cargo.lock")]).widest(gone))
+        said: list[str] = [line.split(", and ")[1] for line in locks.missing]
+        want: list[str] = [
+            f"{tmp}/Cargo.lock is unreadable",
+            f"{tmp}/web/pnpm-lock.yaml is unreadable",
+        ]
+        self.assertEqual(said, want)
+        self.assertEqual(len(locks.report), 2)
+
+    def test_a_missing_lock_file_for_a_range_is_a_finding(self) -> None:
+        """No tracked lock file: red by name, never the declared width."""
+        status, _, err = TestMainGuards.run_tree(
+            {
+                "renovate.json": "{}\n",
+                "default.json": LOCK_PRESET_JSON,
+                "package.json": HONO_MANIFEST,
+            },
+        )
+        self.assertEqual(status, 1)
+        self.assertIn(
+            "1 range-declared dependency has no locked version for the"
+            " lock-file branch's newVersion",
+            err,
+        )
+        self.assertIn(
+            "hono (npm, package.json) declares '^4.1.0', and no tracked"
+            " pnpm-lock.yaml or package-lock.json or yarn.lock or bun.lock"
+            " resolves it",
+            err,
+        )
+
+    def test_a_lock_file_without_the_entry_is_a_finding(self) -> None:
+        """A tracked lock file that resolves no version is no fallback either."""
+        status, _, err = TestMainGuards.run_tree(
+            {
+                "renovate.json": "{}\n",
+                "default.json": LOCK_PRESET_JSON,
+                "Cargo.toml": '[dependencies]\nserde = "1"\ntokio = "1"\n',
+                "Cargo.lock": CARGO_LOCK,
+            },
+        )
+        self.assertEqual(status, 1)
+        self.assertIn(
+            "tokio (cargo, Cargo.toml) declares '1', and Cargo.lock resolves no"
+            " version of it",
+            err,
+        )
+        self.assertNotIn("serde (cargo", err)
+
+    def test_a_locked_tree_passes_end_to_end(self) -> None:
+        """Every range resolved and every subject fitting is green."""
+        status, out, err = TestMainGuards.run_tree(
+            {
+                "renovate.json": "{}\n",
+                "default.json": LOCK_PRESET_JSON,
+                "package.json": VITEST_MANIFEST,
+                "pnpm-lock.yaml": PNPM_LOCK,
+            },
+        )
+        self.assertEqual(status, 0, err)
+        self.assertIn("every subject the owned template can mint fits", out)
+
+    def test_an_exact_pin_or_a_template_without_it_reads_no_lock(self) -> None:
+        """Only a range whose subject names `newVersion` needs a lock file."""
+        cases = (
+            (dep("hono", "4.1.0", "npm"), LOCK_PRESET),
+            (dep("hono", "workspace:^", "npm"), LOCK_PRESET),
+            (dep("serde", "=1.0.154", "cargo"), LOCK_PRESET),
+            (dep("ruff", "0.16.2", "mise"), LOCK_PRESET),
+            (dep("hono", "^4.1.0", "npm"), PRESET),
+        )
+        for row, source in cases:
+            with self.subTest(dep=row.current, manager=row.manager):
+                locks = sb.Locks([])
+                found = sb.judge([row], owned(source), 200, [], locks)
+                self.assertEqual(found, NO_FINDINGS)
+                self.assertEqual(locks.missing, NO_LINES)
+
+    def test_an_unrecognised_helper_is_still_unmodelled(self) -> None:
+        """Only the one conditional is rendered; any other block is reported."""
+        for extra in (
+            "to {{#if isMajor}}{{newMajor}}{{else}}{{newValue}}{{/if}}",
+            "to {{#unless isLockfileUpdate}}{{newValue}}{{/unless}}",
+            "to {{#if isLockfileUpdate}}{{#if x}}y{{/if}}{{else}}{{newValue}}{{/if}}",
+        ):
+            with self.subTest(extra=extra):
+                config = template(commitMessageExtra=extra)
+                for lockfile in (False, True):
+                    _, unmodelled = sb.render(config, "x", 3, lockfile=lockfile)
+                    self.assertEqual(unmodelled, f"commitMessageExtra: {extra}")
+
+
 class TestAdvisorySubject(unittest.TestCase):
     """The sixth field, and the allowance the advisory subject spends.
 
@@ -1362,7 +1586,7 @@ class TestMainGuards(unittest.TestCase):
     """The applicability guards, driven end to end in a real tree."""
 
     @staticmethod
-    def _run(tree: dict[str, str]) -> tuple[int, str, str]:
+    def run_tree(tree: dict[str, str]) -> tuple[int, str, str]:
         """Lay out a tree, run main() against it, capture everything.
 
         Returns:
@@ -1410,7 +1634,7 @@ class TestMainGuards(unittest.TestCase):
     def test_every_row_leaves_the_directory_where_it_started(self) -> None:
         """Each row's helper puts the process back where it found it (#1491).
 
-        The row that fails before #1491: `_run` read `Path.cwd()` after
+        The row that fails before #1491: `run_tree` read `Path.cwd()` after
         patching it, so its restore went back into the temporary root,
         which was then deleted under the process.
         """
@@ -1433,13 +1657,13 @@ class TestMainGuards(unittest.TestCase):
 
     def test_no_renovate_json_skips_clean(self) -> None:
         """Nothing mints subjects here, so there is nothing to bound."""
-        status, out, _ = self._run({"README.md": "# repo\n"})
+        status, out, _ = self.run_tree({"README.md": "# repo\n"})
         self.assertEqual(status, 0)
         self.assertIn("no renovate.json tracked, skipped", out)
 
     def test_a_declared_dependency_that_fits_passes(self) -> None:
         """The green path reports the count and the ceiling it met."""
-        status, out, _ = self._run(
+        status, out, _ = self.run_tree(
             {
                 "renovate.json": "{}\n",
                 "default.json": json.dumps(PRESET),
@@ -1452,7 +1676,7 @@ class TestMainGuards(unittest.TestCase):
 
     def test_an_over_budget_dependency_fails_with_the_remedy(self) -> None:
         """The red path names the dependency, the width, and the fix."""
-        status, _, err = self._run(
+        status, _, err = self.run_tree(
             {
                 "renovate.json": "{}\n",
                 "default.json": json.dumps(PRESET),
@@ -1490,7 +1714,7 @@ class TestMainGuards(unittest.TestCase):
             "customManagers": [manager],
             "packageRules": [short],
         }
-        status, out, _ = self._run(
+        status, out, _ = self.run_tree(
             {
                 "renovate.json": (
                     '{"extends":["github>monumental-archive/.github#v1.46.0"]}\n'
@@ -1514,7 +1738,7 @@ class TestMainGuards(unittest.TestCase):
             "default.json": json.dumps(PRESET),
             "mise.toml": f'[tools]\n"{name}" = "1.0.0"\n',
         }
-        status, out, _ = self._run(tree)
+        status, out, _ = self.run_tree(tree)
         self.assertEqual(status, 0)
         self.assertIn("fits 72 columns", out)
 
@@ -1526,7 +1750,7 @@ class TestMainGuards(unittest.TestCase):
                 },
             ],
         }
-        status, _, err = self._run({**tree, "renovate.json": json.dumps(widen)})
+        status, _, err = self.run_tree({**tree, "renovate.json": json.dumps(widen)})
         self.assertEqual(status, 1)
         self.assertIn("would mint a subject past 72 columns", err)
 
@@ -1543,7 +1767,7 @@ class TestMainGuards(unittest.TestCase):
             "default.json": json.dumps(PRESET),
             "mise.toml": f'[tools]\n"{name}" = "1.0.0"\n',
         }
-        status, _, err = self._run(tree)
+        status, _, err = self.run_tree(tree)
         self.assertEqual(status, 1)
         self.assertIn(SUFFIX, err)
         self.assertIn("would mint a subject past 72 columns", err)
@@ -1553,7 +1777,7 @@ class TestMainGuards(unittest.TestCase):
             "commitMessageTopic": "n" * 29,
         }
         doc: dict[str, object] = {**PRESET, "packageRules": [short]}
-        status, out, _ = self._run({**tree, "default.json": json.dumps(doc)})
+        status, out, _ = self.run_tree({**tree, "default.json": json.dumps(doc)})
         self.assertEqual(status, 0)
         self.assertIn("fits 72 columns", out)
 
@@ -1577,7 +1801,7 @@ class TestMainGuards(unittest.TestCase):
             "default.json": json.dumps(doc),
             "docker/images.toml": '"18" = "postgres:18.1-bookworm"\n',
         }
-        status, out, _ = self._run(tree)
+        status, out, _ = self.run_tree(tree)
         self.assertEqual(status, 0)
         self.assertIn("fits 72 columns", out)
 
@@ -1589,7 +1813,7 @@ class TestMainGuards(unittest.TestCase):
                 },
             ],
         }
-        status, _, err = self._run({**tree, "renovate.json": json.dumps(widen)})
+        status, _, err = self.run_tree({**tree, "renovate.json": json.dumps(widen)})
         self.assertEqual(status, 1)
         self.assertIn("would mint a subject past 72 columns", err)
 
@@ -1608,7 +1832,7 @@ class TestMainGuards(unittest.TestCase):
             "default.json": json.dumps(PRESET),
             "mise.toml": f'[tools]\n"{name}" = "1.0.0"\n',
         }
-        status, out, _ = self._run(tree)
+        status, out, _ = self.run_tree(tree)
         self.assertEqual(status, 0)
         self.assertIn("fits 72 columns", out)
 
@@ -1616,7 +1840,7 @@ class TestMainGuards(unittest.TestCase):
             "extends": ["github>monumental-archive/.github"],
             "semanticCommitType": "refactor",
         }
-        status, _, err = self._run({**tree, "renovate.json": json.dumps(widen)})
+        status, _, err = self.run_tree({**tree, "renovate.json": json.dumps(widen)})
         self.assertEqual(status, 1)
         self.assertIn("would mint a subject past 72 columns", err)
         self.assertIn("refactor(deps)", err)
@@ -1624,7 +1848,7 @@ class TestMainGuards(unittest.TestCase):
     def test_a_preset_with_no_advisory_suffix_stops_the_task(self) -> None:
         """The sixth field answers the same law as the other five."""
         thin = {k: v for k, v in PRESET.items() if k != "vulnerabilityAlerts"}
-        status, _, err = self._run(
+        status, _, err = self.run_tree(
             {
                 "renovate.json": "{}\n",
                 "default.json": json.dumps(thin),
@@ -1637,7 +1861,7 @@ class TestMainGuards(unittest.TestCase):
     def test_an_incomplete_template_stops_the_task(self) -> None:
         """A preset missing a field errors; it does not quietly assume."""
         thin = {k: v for k, v in PRESET.items() if k != "commitMessageAction"}
-        status, _, err = self._run(
+        status, _, err = self.run_tree(
             {
                 "renovate.json": "{}\n",
                 "default.json": json.dumps(thin),

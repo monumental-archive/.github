@@ -536,7 +536,7 @@ class Verdicts(Planted):
             done.stdout,
         )
         self.assertEqual(log, judged(KILLED))
-        self.assertEqual(self.counts(), "0/1\t1\t1\t0\t0\n")
+        self.assertEqual(self.counts(), "0/1\t1\t1\t0\t0\twhole\n")
         self.assertEqual(self.ran.read_text(encoding="utf-8"), "test_mod\n")
 
     def test_one_survivor_is_red_with_its_file_and_line(self) -> None:
@@ -554,7 +554,7 @@ class Verdicts(Planted):
         )
         self.assertEqual(done.stderr.splitlines(), RED)
         self.assertEqual(log, judged(SURVIVOR))
-        self.assertEqual(self.counts(), "0/1\t1\t0\t1\t0\n")
+        self.assertEqual(self.counts(), "0/1\t1\t0\t1\t0\twhole\n")
 
     def test_no_tests_runs_nothing(self) -> None:
         """A line no test file executes: "no tests", a survivor, nothing run."""
@@ -611,7 +611,7 @@ class Exclusions(Planted):
             )
         )
         self.assertEqual(log, calls())
-        self.assertEqual(self.counts(), "0/1\t0\t0\t0\t1\n")
+        self.assertEqual(self.counts(), "0/1\t0\t0\t0\t1\twhole\n")
 
     def test_pragma_without_a_reason_is_red_before_anything_runs(self) -> None:
         """No reason after ` -- `: red by name, no tool called."""
@@ -792,7 +792,7 @@ class Safety(Planted):
         want = [restored, *RED]
         self.assertEqual(done.stderr.splitlines(), want)
         self.assertEqual(log, judged(SURVIVOR, KILLED))
-        self.assertEqual(self.counts(), "0/1\t2\t1\t1\t0\n")
+        self.assertEqual(self.counts(), "0/1\t2\t1\t1\t0\twhole\n")
 
     def test_run_killed_mid_mutant_is_restored_by_the_trap(self) -> None:
         """The judge dies with a mutant applied: the exit trap restores it."""
@@ -866,7 +866,7 @@ class Ceiling(Planted):
             done.stdout,
         )
         self.assertEqual(log, judged(*FOUR[:2]))
-        self.assertEqual(self.counts(), "0/1\t2\t2\t0\t0\n")
+        self.assertEqual(self.counts(), "0/1\t2\t2\t0\t0\twhole\n")
 
 
 class Shards(Planted):
@@ -884,7 +884,7 @@ class Shards(Planted):
                 "judge", str(plan), str(pragmas), shard, str(self.tmp / shard[0])
             )
             self.assertEqual(done.returncode, 0, done.stderr)
-            self.assertEqual(self.counts(), f"{shard}\t2\t2\t0\t0\n")
+            self.assertEqual(self.counts(), f"{shard}\t2\t2\t0\t0\twhole\n")
             logs.append(self.log.read_text(encoding="utf-8").splitlines())
         want = [judged(FOUR[0], FOUR[2]), judged(FOUR[1], FOUR[3])]
         self.assertEqual(logs, want)
@@ -902,7 +902,7 @@ class Shards(Planted):
         self.assertEqual(done.returncode, 0, done.stderr)
         want = [f"cosmic-ray mutate-and-test pkg/mod.py {ADD} 0"]
         self.assertEqual(log, want)
-        self.assertEqual(self.counts(), "0/1\t1\t1\t0\t0\n")
+        self.assertEqual(self.counts(), "0/1\t1\t1\t0\t0\twhole\n")
 
     def test_shard_without_a_plan_is_red(self) -> None:
         """MUTANTS_PLAN naming no plan: red by name, nothing judged."""

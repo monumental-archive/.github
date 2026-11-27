@@ -23,6 +23,15 @@ from test_coverage_tasks import (
 
 # The stub vitest's count when the suite never ran.
 NO_RUNS: list[str] = []
+# Each typescript leg a floor records, lost from the run (#1666, #2143).
+LOST_TYPESCRIPT = "".join(
+    f"coverage:check: the floor was derived with {leg} and this run measured"
+    " none\n  the typescript leg needs a root package.json whose lockfile"
+    " pins vitest and a coverage provider, and a `test` task that runs"
+    f" vitest; or record the leg's removal on purpose: `# dropped: {leg}"
+    " <reason>` in .coverage-floor\n"
+    for leg in ("typescript", "typescript-branches")
+)
 
 
 class TypeScriptRows(CoverageTaskCase):
@@ -33,8 +42,8 @@ class TypeScriptRows(CoverageTaskCase):
         done, tree = self.run_task("coverage:check", python=False, typescript="vitest")
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertEqual(
-            "coverage:check: typescript leg holds the floor 80.0 (88.0%)\n"
-            "coverage:check: typescript-branches leg holds the floor 80.0 (81.0%)\n"
+            "coverage:check: typescript leg holds its floor 80.0 (88.0%)\n"
+            "coverage:check: typescript-branches leg holds its floor 80.0 (81.0%)\n"
             + upload_line(tree, "lcov-typescript.info"),
             done.stdout,
         )
@@ -69,7 +78,7 @@ class TypeScriptRows(CoverageTaskCase):
         )
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertIn(
-            "coverage:check: typescript leg holds the floor 80.0 (88.0%)\n", done.stdout
+            "coverage:check: typescript leg holds its floor 80.0 (88.0%)\n", done.stdout
         )
         runs = vitest_runs(tree)
         self.assertEqual(1, len(runs), runs)
@@ -82,7 +91,7 @@ class TypeScriptRows(CoverageTaskCase):
         )
         self.assertEqual(1, done.returncode)
         self.assertIn(
-            "coverage:check: typescript-branches: 79.5% is below the derived"
+            "coverage:check: typescript-branches: 79.5% is below its derived"
             " floor 80.0%\n",
             done.stderr,
         )
@@ -94,7 +103,7 @@ class TypeScriptRows(CoverageTaskCase):
         )
         self.assertEqual(1, done.returncode)
         self.assertIn(
-            "coverage:check: typescript: 60.0% is below the derived floor 80.0%\n",
+            "coverage:check: typescript: 60.0% is below its derived floor 80.0%\n",
             done.stderr,
         )
 
@@ -113,21 +122,16 @@ class TypeScriptRows(CoverageTaskCase):
         unmeasured: list[str] = ["run"]
         self.assertEqual(unmeasured, vitest_runs(tree))
 
-    def test_an_unsupported_runner_is_named_and_skipped(self) -> None:
-        """A jest tree is named, never guessed at or measured as nothing."""
+    def test_an_unsupported_runner_reds_its_recorded_legs(self) -> None:
+        """A jest tree's recorded typescript legs are red, never skipped.
+
+        Every floor records its legs (#2143), so each is red by name with
+        the remedy naming vitest; `coverage:adopt`'s probe names the
+        runner itself.
+        """
         done, _ = self.run_task("coverage:check", python=False, typescript="jest")
-        self.assertEqual(0, done.returncode, done.stderr)
-        self.assertIn(
-            "coverage:check: typescript: jest is not a runner the leg supports"
-            " (vitest), skipped\n",
-            done.stderr,
-        )
         self.assertEqual(
-            "coverage:check: no measurable language (go.mod, Cargo.toml,"
-            " tracked *.py with a test task, package.json with vitest, or"
-            " a floor recording its legs),"
-            " skipped\n",
-            done.stdout,
+            (1, "", LOST_TYPESCRIPT), (done.returncode, done.stdout, done.stderr)
         )
 
     def test_vitest_without_a_provider_reds_with_the_remedy(self) -> None:
@@ -148,10 +152,10 @@ class TypeScriptRows(CoverageTaskCase):
         done, tree = self.run_task("coverage:check", typescript="vitest")
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertEqual(
-            "coverage:check: python leg holds the floor 80.0 (90.0%)\n"
-            "coverage:check: python-branches leg holds the floor 80.0 (85.0%)\n"
-            "coverage:check: typescript leg holds the floor 80.0 (88.0%)\n"
-            "coverage:check: typescript-branches leg holds the floor 80.0 (81.0%)\n"
+            "coverage:check: python leg holds its floor 80.0 (90.0%)\n"
+            "coverage:check: python-branches leg holds its floor 80.0 (85.0%)\n"
+            "coverage:check: typescript leg holds its floor 80.0 (88.0%)\n"
+            "coverage:check: typescript-branches leg holds its floor 80.0 (81.0%)\n"
             + upload_line(tree, "lcov-typescript.info", "coverage.xml"),
             done.stdout,
         )
@@ -178,13 +182,12 @@ class TypeScriptRows(CoverageTaskCase):
         self.assertEqual(selection, runs[0][:2])
         self.assertIn("--coverage.enabled=true", runs[0])
 
-    def test_a_vitest_tree_without_a_test_task_skips_clean(self) -> None:
-        """No test task, no suite the gate runs: nothing to measure."""
+    def test_a_vitest_tree_without_a_test_task_reds_its_legs(self) -> None:
+        """No test task, no suite the gate runs: each recorded leg named."""
         done, _ = self.run_task(
             "coverage:check", python=False, typescript="vitest", test_task=False
         )
-        self.assertEqual(0, done.returncode, done.stderr)
-        self.assertIn("no measurable language", done.stdout)
+        self.assertEqual((1, LOST_TYPESCRIPT), (done.returncode, done.stderr))
 
     def test_a_coverage_flag_in_the_test_command_is_refused(self) -> None:
         """The leg owns the coverage flags: `test` reds before vitest runs."""

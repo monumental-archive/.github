@@ -1,18 +1,22 @@
 # Coverage floor -- DERIVED STATE, not a number to edit (#652).
 #
-# The release machinery re-derives this file at every release:
-# floor = min(90, measured - band), and the floor never falls. A
-# release whose measurement falls below the floor FAILS, loudly; the
-# resolution is tests, or a conscious reset recorded in place of the
-# derivation below (replace the `measured` and `derived` lines with
-# `reset: <reason>`).
+# The release machinery re-derives this file at every release. Each leg
+# has a floor of its own (#2143), floor = min(90, measured - band),
+# and no floor ever falls. A release whose measurement of a leg falls
+# below that leg's floor FAILS, loudly; the resolution is tests, or a
+# conscious reset recorded in place of the leg's derivation (replace
+# its `<leg> measured` line with `<leg> reset: <reason>`).
 # `coverage:check` refuses a floor that disagrees with this record as
-# drift, and never repairs it. `legs` names the legs the floor holds
+# drift, and never repairs it. `legs` names the legs the gate measures
 # (#1666): a leg it names that a run measures nothing of is red, and a
 # leg leaves it only through a line `dropped: <leg> <why>`.
 #
 # band: 2
-# measured: 94.4
-# derived: v1.78.6
+# derived: gate figures of 3ac3691 (#2143)
 # legs: python python-branches
-90
+#
+# python measured: 96.8
+python 90
+#
+# python-branches measured: 94.4
+python-branches 90
