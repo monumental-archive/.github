@@ -30,9 +30,13 @@ file's FIRST rule, the npm rule follows it, and both agree with the
 belt's mise and pnpm numbers, read from mise/config.toml.
 
 The limit rows (#2162) hold that no concurrency or hourly limit
-applies to the two deliveries the org depends on: lock file
-maintenance and the first-party rule each carry prConcurrentLimit 0
-and prHourlyLimit 0, because a shared limit skipped both.
+applies to the deliveries the org depends on: lock file maintenance
+and both first-party rules, repositories and ghcr images, carry
+prConcurrentLimit 0 and prHourlyLimit 0, because a shared limit
+skipped them. The first-party age rows hold that both rules wait
+zero days: Renovate names an image with its registry, so the
+repositories' glob never reached one, and every first-party image
+bump sat seven days under Pending Status Checks.
 
 stdlib `unittest`, matching the other mise/test_*.py. Run through the
 gate as `mise run test`, which `ci` collects.
@@ -462,7 +466,21 @@ class Ages(unittest.TestCase):
 
 
 FIRST_PARTY = ["monumental-archive/**"]
+# Renovate names an image with its registry, and a glob anchors at the
+# start of the name, so the repos' pattern never reaches one.
+FIRST_PARTY_IMAGES = ["ghcr.io/monumental-archive/**"]
 UNLIMITED = ("prConcurrentLimit", "prHourlyLimit")
+
+
+def rule_for(rules: list[dict[str, object]], names: list[str]) -> dict[str, object]:
+    """Find the one rule that selects exactly these names.
+
+    Returns:
+        That rule; empty when none or several do.
+
+    """
+    found = [r for r in rules if r.get("matchPackageNames") == names]
+    return found[0] if len(found) == 1 else {}
 
 
 def limit_findings(doc: dict[str, object]) -> list[str]:
@@ -474,7 +492,6 @@ def limit_findings(doc: dict[str, object]) -> list[str]:
     """
     raw = decoded.as_array(doc.get("packageRules", []), "packageRules")
     rules = [decoded.as_object(r, "packageRules[]") for r in raw]
-    first = [r for r in rules if r.get("matchPackageNames") == FIRST_PARTY]
     blocks: list[tuple[str, dict[str, object]]] = [
         (
             "lockFileMaintenance",
@@ -482,7 +499,8 @@ def limit_findings(doc: dict[str, object]) -> list[str]:
                 doc.get("lockFileMaintenance", {}), "lockFileMaintenance"
             ),
         ),
-        ("the first-party rule", first[0] if len(first) == 1 else {}),
+        ("the first-party rule", rule_for(rules, FIRST_PARTY)),
+        ("the first-party image rule", rule_for(rules, FIRST_PARTY_IMAGES)),
     ]
     found: list[str] = []
     for where, block in blocks:
@@ -493,6 +511,26 @@ def limit_findings(doc: dict[str, object]) -> list[str]:
                     f"default.json: {where} has {key} {value!r}, not 0;"
                     " a limit can skip it"
                 )
+    return found
+
+
+def first_party_age_findings(doc: dict[str, object]) -> list[str]:
+    """Every first-party selector the age floor still holds.
+
+    Returns:
+        One message per selector without its zero age, by name.
+
+    """
+    raw = decoded.as_array(doc.get("packageRules", []), "packageRules")
+    rules = [decoded.as_object(r, "packageRules[]") for r in raw]
+    found: list[str] = []
+    for names in (FIRST_PARTY, FIRST_PARTY_IMAGES):
+        age = rule_for(rules, names).get("minimumReleaseAge")
+        if age != "0 days":
+            found.append(
+                f"default.json: {names[0]} waits {age!r}, not 0 days;"
+                " the floor holds first-party"
+            )
     return found
 
 
@@ -531,6 +569,54 @@ class Limits(unittest.TestCase):
         found = limit_findings({**doc, "packageRules": planted})
         where = "default.json: the first-party rule has"
         want: list[str] = [f"{where} prHourlyLimit 2, not 0; a limit can skip it"]
+        self.assertEqual(found, want)
+
+    def test_image_limited_is_refused(self) -> None:
+        """Planted: the image rule without its zeros reds, by name."""
+        doc = preset()
+        raw = decoded.as_array(doc["packageRules"], "packageRules")
+        planted = [
+            {
+                k: v
+                for k, v in decoded.as_object(r, "packageRules[]").items()
+                if k not in UNLIMITED
+            }
+            if decoded.as_object(r, "packageRules[]").get("matchPackageNames")
+            == FIRST_PARTY_IMAGES
+            else r
+            for r in raw
+        ]
+        found = limit_findings({**doc, "packageRules": planted})
+        where = "default.json: the first-party image rule has"
+        want: list[str] = [
+            f"{where} prConcurrentLimit None, not 0; a limit can skip it",
+            f"{where} prHourlyLimit None, not 0; a limit can skip it",
+        ]
+        self.assertEqual(found, want)
+
+
+class FirstPartyAge(unittest.TestCase):
+    """No first-party package waits out the age floor, images included."""
+
+    def test_preset_holds(self) -> None:
+        """Both first-party selectors carry the zero age."""
+        none: list[str] = []
+        self.assertEqual(first_party_age_findings(preset()), none)
+
+    def test_image_rule_missing_is_refused(self) -> None:
+        """Planted: without the image rule, ghcr images wait seven days."""
+        doc = preset()
+        raw = decoded.as_array(doc["packageRules"], "packageRules")
+        kept = [
+            r
+            for r in raw
+            if decoded.as_object(r, "packageRules[]").get("matchPackageNames")
+            != FIRST_PARTY_IMAGES
+        ]
+        found = first_party_age_findings({**doc, "packageRules": kept})
+        where = "default.json: ghcr.io/monumental-archive/**"
+        why = "the floor holds first-party"
+        want: list[str] = [f"{where} waits None, not 0 days; {why}"]
         self.assertEqual(found, want)
 
 
