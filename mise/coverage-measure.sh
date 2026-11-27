@@ -98,8 +98,8 @@ org_task "${label}"
 belt_dir=$(dirname "${BASH_SOURCE[0]}")
 
 # Which language legs to run. Default `all`: every caller that reads
-# the percentages wants them all, because the floor is a minimum every
-# leg must hold. A single leg's selector measures that leg alone.
+# the percentages wants them all, because every leg is held to a floor
+# of its own (#2143). A single leg's selector measures that leg alone.
 # `reports` measures every leg and then names the reports it wrote,
 # below.
 legs="${2:-all}"
@@ -268,9 +268,9 @@ if [[ ${legs} == probe ]]; then
   exit 0
 fi
 
-# EVERY tracked language measures its own leg, because the floor is a
-# minimum and applying it per language is the only reading that means
-# anything: a mixed repository that measured Rust alone once reported
+# EVERY tracked language measures its own leg, because each leg is held
+# to a floor of its own (#2143) and a leg not measured is held to
+# nothing: a mixed repository that measured Rust alone once reported
 # "floor held" over a language nothing had measured (#392).
 if org_tracked_has go.mod && [[ ${legs} =~ ^(all|go)$ ]]; then
   if ! command -v go > /dev/null; then

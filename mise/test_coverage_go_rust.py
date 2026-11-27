@@ -23,9 +23,9 @@ import hermetic
 from test_coverage_tasks import (
     BASH,
     BELT,
-    FLOOR,
     GIT,
     GO,
+    floor_of,
     init_tree,
 )
 
@@ -409,7 +409,7 @@ class GoOneRun(unittest.TestCase):
             path.write_text(text, encoding="utf-8")
             path.chmod(0o755)
         (tree / "go.mod").write_text("module example.com/x\n", encoding="utf-8")
-        (tree / ".coverage-floor").write_text(FLOOR, encoding="utf-8")
+        (tree / ".coverage-floor").write_text(floor_of("go"), encoding="utf-8")
         (tree / "mise.toml").write_text(
             '[task_config]\nshell = "bash -euo pipefail -c"\n'
             '[tasks.test]\nenv = { GOFLAGS = "-trimpath" }\n'
@@ -469,7 +469,7 @@ class GoOneRun(unittest.TestCase):
             out = done.stdout + done.stderr
             self.assertEqual(0, done.returncode, out)
             self.assertEqual("ran\n", (Path(tmp) / "counter").read_text("utf-8"))
-            self.assertIn("coverage:check: go leg holds the floor 80.0 (91.0%)", out)
+            self.assertIn("coverage:check: go leg holds its floor 80.0 (91.0%)", out)
             self.assertEqual(
                 "-trimpath -cover -coverpkg=./... -covermode=atomic"
                 f" -exec={BELT}/go-test-exec\n",
@@ -573,7 +573,7 @@ class RustOneRun(unittest.TestCase):
             (stubs / name).chmod(0o755)
         hermetic.rustc(stubs)
         (tree / "Cargo.toml").write_text("[workspace]\n", encoding="utf-8")
-        (tree / ".coverage-floor").write_text(FLOOR, encoding="utf-8")
+        (tree / ".coverage-floor").write_text(floor_of("rust"), encoding="utf-8")
         (tree / "mise.toml").write_text(
             RUST_TASK.format(command=command), encoding="utf-8"
         )
@@ -639,7 +639,7 @@ class RustOneRun(unittest.TestCase):
             out = done.stdout + done.stderr
             self.assertEqual(0, done.returncode, out)
             self.assertEqual("ran\n", (Path(tmp) / "counter").read_text("utf-8"))
-            self.assertIn("coverage:check: rust leg holds the floor 80.0 (90%)", out)
+            self.assertIn("coverage:check: rust leg holds its floor 80.0 (90%)", out)
             calls = self.calls(Path(tmp))
             suites = [c for c in calls if c.startswith("test")]
             once: list[str] = ["test --workspace --all-features"]
@@ -703,7 +703,7 @@ class RustOneRun(unittest.TestCase):
             out = done.stdout + done.stderr
             self.assertEqual(0, done.returncode, out)
             # 18 of 20: the extension's 80 unhit lines are not counted.
-            self.assertIn("coverage:check: rust leg holds the floor 80.0 (90%)", out)
+            self.assertIn("coverage:check: rust leg holds its floor 80.0 (90%)", out)
             self.assertIn(
                 "coverage:check: pgrx-pg18: measured and held by test:pgrx", out
             )

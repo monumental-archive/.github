@@ -30,9 +30,11 @@ import sys
 import tempfile
 import unittest
 from dataclasses import dataclass
+from decimal import Decimal
 from pathlib import Path
 from unittest import mock
 
+import coverage_floor as cf
 import hermetic
 import plpgsql_coverage as pc
 import test_coverage_tasks
@@ -136,8 +138,6 @@ fi
 exit 1
 """
 
-# A floor the derived-state law accepts: measured 82.0 minus the band.
-FLOOR = "# band: 2\n# measured: 82.0\n# derived: v1.0.0\n80.0\n"
 
 # A reading, as psql prints it: the statement and branch fractions,
 # then statements, executed statements, and statements that branch.
@@ -983,6 +983,9 @@ HELD = {
     "102": ("public.stamp(integer)", "1\t0.8\t10\t10\t1"),
 }
 
+# One function: 19 of 20 statements, 88% of its branches (#2143).
+STRONG = {"101": ("public.guard()", "0.95\t0.88\t20\t19\t1")}
+
 
 class LegRows(unittest.TestCase):
     """`coverage:check` over the plpgsql leg, decided by the floor's record."""
@@ -994,13 +997,15 @@ class LegRows(unittest.TestCase):
         legs: str,
         files: dict[str, str],
         collects: bool = True,
+        measured: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         """Run coverage:check's body in a planted tree.
 
-        `legs` is the floor's `legs:` record, `files` the tracked files
-        beside it, and `collects` whether the suite's teardown calls the
-        helper. A tracked `*.py` brings the python leg in, measured by
-        the stub coverage.py.
+        `legs` is the floor's `legs:` record, each leg at 80.0 unless
+        `measured` names the figure its floor was derived from (#2143),
+        `files` the tracked files beside it, and `collects` whether the
+        suite's teardown calls the helper. A tracked `*.py` brings the
+        python leg in, measured by the stub coverage.py.
 
         Returns:
             The finished task.
@@ -1016,7 +1021,11 @@ class LegRows(unittest.TestCase):
         tree.mkdir()
         for name, text in files.items():
             (tree / name).write_text(text, encoding="utf-8")
-        floor = FLOOR.replace("80.0\n", f"# legs: {legs}\n80.0\n")
+        figures = dict.fromkeys(legs.split(), "82.0") | (measured or {})
+        floor = cf.render(
+            {leg: cf.fresh(Decimal(figure)) for leg, figure in figures.items()},
+            "v1.0.0",
+        )
         (tree / ".coverage-floor").write_text(floor, encoding="utf-8")
         # The test task, for the read of it the python leg makes; the
         # check never runs it.
@@ -1047,8 +1056,8 @@ class LegRows(unittest.TestCase):
         return run(as_mise.argv, env | as_mise.env, tree)
 
     PYTHON_HELD = (
-        "coverage:check: python leg holds the floor 80.0 (90.0%)\n"
-        "coverage:check: python-branches leg holds the floor 80.0 (85.0%)\n"
+        "coverage:check: python leg holds its floor 80.0 (90.0%)\n"
+        "coverage:check: python-branches leg holds its floor 80.0 (85.0%)\n"
     )
 
     def assert_held(self, held: str, stdout: str) -> None:
@@ -1083,8 +1092,8 @@ class LegRows(unittest.TestCase):
         self.assertEqual(0, done.returncode, done.stderr)
         self.assert_held(
             self.PYTHON_HELD
-            + "coverage:check: plpgsql leg holds the floor 80.0 (95.00%)\n"
-            "coverage:check: plpgsql-branches leg holds the floor 80.0 (90.00%)\n",
+            + "coverage:check: plpgsql leg holds its floor 80.0 (95.00%)\n"
+            "coverage:check: plpgsql-branches leg holds its floor 80.0 (90.00%)\n",
             done.stdout,
         )
 
@@ -1095,8 +1104,33 @@ class LegRows(unittest.TestCase):
         )
         self.assertEqual(1, done.returncode)
         self.assertIn(
-            "coverage:check: plpgsql: 60.00% is below the derived floor 80.0%\n",
+            "coverage:check: plpgsql: 60.00% is below its derived floor 80.0%\n",
             done.stderr,
+        )
+
+    def test_a_leg_below_its_own_floor_above_a_weaker_leg_is_red(self) -> None:
+        """plpgsql-branches at 88%: above python-branches, below its own 90.
+
+        Every leg is held to a floor of its own (#2143). Held to the
+        weakest leg's floor, the shape this replaced, the branch figure
+        stood eight points above it and the gate was green.
+        """
+        done = self.check(
+            STRONG,
+            legs="python python-branches plpgsql plpgsql-branches",
+            files={"helper.py": "print('hi')\n"},
+            measured={"plpgsql": "95.0", "plpgsql-branches": "95.0"},
+        )
+        self.assertEqual(1, done.returncode, done.stderr)
+        self.assertEqual(
+            "coverage:check: plpgsql-branches: 88.00% is below its derived floor 90%",
+            done.stderr.splitlines()[-1],
+        )
+        self.assertNotIn("python", done.stderr)
+        self.assertEqual(
+            self.PYTHON_HELD
+            + "coverage:check: plpgsql leg holds its floor 90 (95.00%)\n",
+            done.stdout,
         )
 
     def test_a_record_whose_every_leg_reports_nothing_names_them(self) -> None:

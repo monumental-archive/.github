@@ -52,14 +52,15 @@ TASK = "audit:coverage-go-branches"
 SKIP = f"{TASK}: no go-branches line in .coverage-floor, skipped\n"
 REMEDY = "    mise install go:github.com/rillig/gobco\n"
 
-# The main floor, measured 92.0 minus the band; the go-branches line
+# The go leg's floor, measured 92.0 minus the band; the go-branches line
 # beside it, measured 82.0 minus the band. Both hold to the derived-state
-# law.
+# law, each a floor of its own (#2143).
 MAIN = """\
 # band: 2
-# measured: 92.0
 # derived: v1.0.0
-90.0
+# legs: go
+# go measured: 92.0
+go 90.0
 """
 BRANCH = """\
 # go-branches measured: 82.0
@@ -317,7 +318,7 @@ class AuditRows(GoBranchCase):
         done, _, _ = self.run_task()
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertEqual(
-            f"{TASK}: go-branches holds the floor 80.0 (84%)\n", done.stdout
+            f"{TASK}: go-branches holds its floor 80.0 (84%)\n", done.stdout
         )
 
     def test_below_the_floor_reds_by_name(self) -> None:
@@ -326,7 +327,7 @@ class AuditRows(GoBranchCase):
         self.assertEqual(1, done.returncode)
         self.assertEqual("", done.stdout)
         self.assertIn(
-            f"{TASK}: go-branches: 78% is below the derived floor 80.0%\n",
+            f"{TASK}: go-branches: 78% is below its derived floor 80.0%\n",
             done.stderr,
         )
 
@@ -473,7 +474,7 @@ class GateRows(GoBranchCase):
         done, tmp, calls = self.run_task("coverage:check")
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertEqual(
-            "coverage:check: go leg holds the floor 90.0 (95.0%)\n"
+            "coverage:check: go leg holds its floor 90.0 (95.0%)\n"
             f"coverage:check: upload {tmp / 'reports' / 'coverage.txt'}\n",
             done.stdout,
         )
@@ -488,7 +489,7 @@ class AdoptRows(GoBranchCase):
         done, tmp, calls = self.run_task("coverage:adopt", floor=None)
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertIn(
-            "coverage-floor: adopted .coverage-floor at 90 (measured 95.0),"
+            "coverage-floor: adopted .coverage-floor: go 90 (measured 95.0),"
             " go-branches 82.0 (measured 84.0)\n",
             done.stdout,
         )
@@ -498,10 +499,10 @@ class AdoptRows(GoBranchCase):
         self.assertEqual(EMPTY, problems)
         if parsed is None:
             self.fail("the adopted .coverage-floor did not parse")
-        held: dict[str, tuple[Decimal, Decimal]] = {
-            "go-branches": (Decimal("82.0"), Decimal("84.0"))
-        }
-        self.assertEqual(held, parsed.separate)
+        self.assertEqual(
+            cf.Held(Decimal("82.0"), Decimal("84.0"), None),
+            parsed.floors["go-branches"],
+        )
         self.assertEqual(2, len(calls))
 
     def test_adopt_cannot_lower_the_go_branches_line(self) -> None:
@@ -509,7 +510,7 @@ class AdoptRows(GoBranchCase):
         done, tmp, _ = self.run_task("coverage:adopt", counts="a=5/8 b=34/42")
         self.assertEqual(1, done.returncode)
         self.assertIn(
-            "coverage:adopt: go-branches measured 78.0% is below its floor 80.0%.",
+            "coverage:adopt: go-branches: measured 78.0% is below its floor 80.0%.",
             done.stderr,
         )
         self.assertEqual(
