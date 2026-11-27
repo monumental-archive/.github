@@ -29,13 +29,13 @@ lint = 4
 ceiling = 128
 
 # Rust and Go four, round-robin (edtf #107 set Rust's from its first
-# run); Python 48 (cosmic-ray judges a mutant per suite run). TypeScript
-# runs as one job until StrykerJS takes a share of the files (#2153).
+# run); Python 48 (cosmic-ray judges a mutant per suite run);
+# TypeScript eight, StrykerJS given a share of the files (#2153).
 [shards.mutants]
 rust = 4
 go = 4
 python = 48
-typescript = 1
+typescript = 8
 
 # The Monday properties at a random seed: Python by position, eight
 # legs (#1631); TypeScript and Rust one job each.

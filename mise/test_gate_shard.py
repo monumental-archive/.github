@@ -50,7 +50,7 @@ class Table(unittest.TestCase):
         """The table's counts are defaults within the ceiling (#2160)."""
         costs = gate_shard.load()
         self.assertEqual(4, costs.lint_shards)
-        mutants: dict[str, int] = {"rust": 4, "go": 4, "python": 48, "typescript": 1}
+        mutants: dict[str, int] = {"rust": 4, "go": 4, "python": 48, "typescript": 8}
         deep: dict[str, int] = {"python": 8, "typescript": 1, "rust": 1}
         self.assertEqual(mutants, costs.languages["mutants"])
         self.assertEqual(deep, costs.languages["deep-tests"])

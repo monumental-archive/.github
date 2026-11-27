@@ -69,6 +69,11 @@ Subcommands, run from the repository root:
   collected LIST FILE...     exits 1, printing each, when a FILE is in
                              `vitest list --filesOnly --json`'s LIST:
                              the repository's own run collects it
+  share FILE...              prints, NUL-separated, the FILEs this shard
+                             runs (ORG_SHARD=k/n, mise/shard.py, #2160):
+                             sorted, every n-th from the k-th, every
+                             FILE where no shard is named; and writes
+                             the shard's report for the gate's union
 
 Exits 0 when clean, 1 on a finding, 2 on a usage error.
 """
@@ -81,6 +86,7 @@ from pathlib import Path
 import coverage_js_runner
 import decoded
 import findings
+import shard
 import typed_std
 from tracked import stdin_paths
 
@@ -623,6 +629,27 @@ def collected(listing: str, files: list[str]) -> int:
     return 1 if leaked else 0
 
 
+def share(files: list[str]) -> int:
+    """Print the property files this shard runs, NUL-separated.
+
+    Returns:
+        0; 2 after naming an ORG_SHARD that is not k/n.
+
+    """
+    try:
+        named = shard.read()
+    except SystemExit:
+        return EXIT_USAGE
+    if named is None:
+        mine = files
+    else:
+        k, n = named
+        mine = sorted(files)[k - 1 :: n]
+        shard.report("typescript-properties", "", files, mine)
+    sys.stdout.write("".join(f"{f}\0" for f in mine))
+    return 0
+
+
 def main(argv: list[str]) -> int:
     """Dispatch a subcommand.
 
@@ -631,17 +658,22 @@ def main(argv: list[str]) -> int:
 
     """
     command, args = (argv[0], argv[1:]) if argv else ("", [])
+    status: int | None = None
     if command == "locked" and args:
-        return locked(args)
-    if command == "lint":
-        return lint(args)
-    if command == "stage" and len(args) in STAGE_ARGS:
+        status = locked(args)
+    elif command == "lint":
+        status = lint(args)
+    elif command == "stage" and len(args) in STAGE_ARGS:
         files = stdin_paths()
-        return stage(args[0], args[1] if len(args) > 1 else None, files)
-    if command == "verify" and len(args) >= VERIFY_MIN_ARGS:
-        return verify(args[0], args[1], args[2:])
-    if command == "collected" and len(args) >= COLLECTED_MIN_ARGS:
-        return collected(args[0], args[1:])
+        status = stage(args[0], args[1] if len(args) > 1 else None, files)
+    elif command == "verify" and len(args) >= VERIFY_MIN_ARGS:
+        status = verify(args[0], args[1], args[2:])
+    elif command == "collected" and len(args) >= COLLECTED_MIN_ARGS:
+        status = collected(args[0], args[1:])
+    elif command == "share" and args:
+        status = share(args)
+    if status is not None:
+        return status
     head, *rest = __doc__.split("Subcommands", 1)[0].strip().splitlines()
     findings.finding("", head, rest)
     return EXIT_USAGE

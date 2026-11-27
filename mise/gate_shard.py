@@ -111,7 +111,7 @@ LANGUAGES = {
     "deep-tests": ("python", "typescript", "rust"),
 }
 ADAPTED = {
-    "mutants": ("rust", "go", "python"),
+    "mutants": ("rust", "go", "python", "typescript"),
     "deep-tests": ("python",),
 }
 
