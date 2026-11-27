@@ -3334,6 +3334,9 @@ not ruff's), so `mise/sqlfluff.cfg` exists for exactly one thing the
 tool refuses to guess: the dialect — postgres org-wide, the only SQL
 the org ships. `templater = raw`: org SQL is DDL/migrations, not
 Jinja, and a templater that expands nothing can corrupt nothing.
+`large_file_skip_byte_limit = 0` (#2142): the default skips any file
+over 20 000 bytes with a WARNING and exit 0, so every core rule held
+only for small files; with no limit, nothing is skipped by size.
 `lint:sql` is subject-named (one language, the lint:python rule) and
 asserts nothing: the config is delivered with `--config` from
 `ORG_BELT_DIR` (#455), so no repo tracks a `.sqlfluff` and the missing-
