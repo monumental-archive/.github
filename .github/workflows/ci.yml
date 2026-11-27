@@ -139,7 +139,8 @@ jobs:
     outputs:
       majors: ${{ steps.plan.outputs.majors }}
       legs: ${{ steps.shards.outputs.legs }}
-      test-shards: ${{ steps.shards.outputs.test-shards }}
+      split: ${{ steps.shards.outputs.split }}
+      test-split: ${{ steps.shards.outputs.test-split }}
     steps:
       - name: Check out caller repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -167,9 +168,11 @@ jobs:
           "${ORG_PYTHON}" .org-canon/mise/coverage_floor.py planned \
             --majors-json "${majors}"
 
-      # The gate's matrix, one row per runner (#2049): the lint leg's
-      # shards, the test leg's where its `test` runs the belt's test
-      # runner, and the properties leg. mise/gate_shard.py says how.
+      # The gate's matrix, one row per runner (#2049, #2160): the lint
+      # leg's shards, then one row per test or properties task and per
+      # shard of one, as the repository splits its own work (its tasks)
+      # and shards it (its tracked shards.toml). mise/gate_shard.py says
+      # how; a defect in the file is red here, by name.
       - name: Plan the gate's shards
         id: shards
         run: '"${ORG_PYTHON}" .org-canon/mise/gate_shard.py plan >> "${GITHUB_OUTPUT}"'
@@ -193,14 +196,17 @@ jobs:
   # each compile the workspace shared one runner's four cores: the lint
   # leg took 9m12s on release-lab and 6m00s on edtf, and the canon's
   # test suite is 611 CPU-seconds on four cores. The plan job lays out
-  # one row per runner (mise/gate_shard.py plan): four lint shards, each
-  # running its share of `lint:*` dealt longest first; four test shards
-  # where `test` runs the belt's test runner, which keeps one shard's
-  # files, else one; properties one. A leg of one shard runs `ci:<leg>`
-  # as a laptop does. Sharded tests keep their coverage data, and the
-  # `coverage` job below judges the floor once, over all of it.
+  # one row per runner (mise/gate_shard.py plan): the lint shards, each
+  # running its share of `lint:*` dealt longest first; then, as the
+  # REPOSITORY splits and shards its own work (#2160), one row per task
+  # in `test`'s closure and per shard of one, each shard named by
+  # ORG_SHARD=k/n, which the belt's adapters hand to the task's runner.
+  # A leg of one row runs `ci:<leg>` as a laptop does. Split test rows
+  # keep their coverage data and every shard its report of what it ran;
+  # the `coverage` job below judges the floor once, over all of it, and
+  # holds the shards' union to each task's whole population.
   gate:
-    name: gate (${{ matrix.leg }}${{ matrix.of > 1 && format(' {0}/{1}', matrix.shard, matrix.of) || '' }})
+    name: gate (${{ matrix.label }})
     needs: plan
     runs-on: ubuntu-26.04
     strategy:
@@ -219,9 +225,13 @@ jobs:
       MISE_LOCKED: "1"
       MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
       # What this runner's build caches are named for (#2049): the leg,
-      # and its shard where the leg has several, since each shard builds
-      # what its own lints compile. A leg of one keeps its old name.
-      ORG_SLOT: ${{ matrix.of > 1 && format('{0}-{1}', matrix.leg, matrix.shard) || matrix.leg }}
+      # its task where the leg is split (#2160), and its shard where it
+      # has several, since each row builds what its own work compiles. A
+      # leg of one keeps its old name.
+      ORG_SLOT: >-
+        ${{ matrix.task != format('ci:{0}', matrix.leg)
+        && format('{0}-{1}-{2}', matrix.leg, matrix.task, matrix.shard)
+        || matrix.of > 1 && format('{0}-{1}', matrix.leg, matrix.shard) || matrix.leg }}
     steps:
       - name: Check out caller repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -569,10 +579,12 @@ jobs:
       # blanks into the run: block and shfmt refuses them)
       # This leg's belt task, `ci:lint`, `ci:test` or `ci:properties`
       # (#1740); `ci` is the three of them. A lint shard runs its share
-      # of `ci:lint`'s tasks instead (#2049).
+      # of `ci:lint`'s tasks instead (#2049), and a split leg's row its
+      # task, or its task's shard (#2160).
       - name: Run the gate
         env:
           LEG: ${{ matrix.leg }}
+          TASK: ${{ matrix.task }}
           SHARD: ${{ matrix.shard }}
           OF: ${{ matrix.of }}
           ATLAS_TOKEN: ${{ secrets.atlas-token }}
@@ -584,25 +596,41 @@ jobs:
           # checkout, so nothing the gate measures lands in the tree
           # (#1628). The step below keeps this directory.
           ORG_COVERAGE_REPORTS: ${{ runner.temp }}/coverage-reports
-          # A test shard measures into a directory it keeps (#2049).
+          # A split test row measures into a directory it keeps (#2049).
           ORG_GATE_COVERAGE_RUN: >-
-            ${{ matrix.leg == 'test' && matrix.of > 1
+            ${{ matrix.leg == 'test' && matrix.task != 'ci:test'
             && format('{0}/coverage-run', runner.temp) || '' }}
-        run: '"${ORG_PYTHON}" .org-canon/mise/gate_shard.py run "${LEG}" "${SHARD}" "${OF}"'
+          # Where each shard writes what it ran (#2160, mise/shard.py).
+          ORG_SHARD_REPORTS: ${{ runner.temp }}/shard-reports
+        run: '"${ORG_PYTHON}" .org-canon/mise/gate_shard.py run "${LEG}" "${TASK}" "${SHARD}" "${OF}"'
 
-      # A TEST SHARD'S MEASUREMENT, KEPT FOR THE COVERAGE JOB (#2049):
-      # the run directory every measured python3 of this shard wrote
-      # into. coverage.py's data files are dot files, so hidden files
-      # are included; each file's name carries its host and pid, so the
-      # shards' files never collide when the job merges them.
-      - name: Keep this test shard's coverage data
-        if: ${{ matrix.leg == 'test' && matrix.of > 1 }}
+      # A SPLIT TEST ROW'S MEASUREMENT, KEPT FOR THE COVERAGE JOB (#2049,
+      # #2160): the run directory every measured command of this row
+      # wrote into, with the row's own Rust report beside it
+      # (rust-export). coverage.py's data files are dot files, so hidden
+      # files are included. One artifact per row, named for its index,
+      # downloaded each into a directory of its own and gathered there
+      # by mise/coverage_merge.py.
+      - name: Keep this test row's coverage data
+        if: ${{ matrix.leg == 'test' && matrix.task != 'ci:test' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: coverage-run-${{ matrix.shard }}
+          name: coverage-run-${{ strategy.job-index }}
           path: ${{ runner.temp }}/coverage-run
           include-hidden-files: true
-          if-no-files-found: error
+          if-no-files-found: ignore
+          retention-days: 1
+
+      # WHAT EACH SHARD RAN, KEPT FOR THE UNION (#2160): one report per
+      # runner that took a share (mise/shard.py). A shard that wrote none
+      # is named by the coverage job's union check, never passed.
+      - name: Keep this shard's report of what it ran
+        if: ${{ matrix.leg != 'lint' && matrix.of > 1 }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: shard-reports-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/shard-reports
+          if-no-files-found: ignore
           retention-days: 1
 
       # COVERAGE IS MEASURED ONCE, HERE (#1528). coverage:check, which
@@ -618,7 +646,7 @@ jobs:
       # without a floor writes none, and the badge job skips.
       - name: Keep the coverage reports for the badge (default branch only)
         if: >-
-          ${{ matrix.leg == 'test' && matrix.of == 1 && github.event_name == 'push'
+          ${{ matrix.leg == 'test' && matrix.task == 'ci:test' && github.event_name == 'push'
           && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -637,7 +665,7 @@ jobs:
       # commit and measures nothing; without it, it measures as before.
       - name: Keep the coverage figures for the release
         if: >-
-          ${{ matrix.leg == 'test' && matrix.of == 1 && (github.event_name == 'merge_group'
+          ${{ matrix.leg == 'test' && matrix.task == 'ci:test' && (github.event_name == 'merge_group'
           || (github.event_name == 'push'
           && github.ref == format('refs/heads/{0}', github.event.repository.default_branch))) }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -880,19 +908,23 @@ jobs:
             target
           key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
 
-  # THE FLOOR OVER EVERY TEST SHARD (#2049). A sharded test leg measures
-  # each share on its own runner, and no shard can judge a floor that
-  # belongs to the whole suite, so each keeps its run directory and this
-  # job gathers them into one and runs coverage:check over it, its
-  # depends skipped: the shards ran `test`. It writes the reports and
-  # figures the test leg writes when it is one runner. Skipped where the
-  # test leg is one runner, which judges its own floor.
+  # THE FLOOR OVER EVERY TEST ROW, AND EVERY SHARD'S UNION (#2049,
+  # #2160). A split test leg measures each task and each shard on its own
+  # runner, and no row can judge a floor that belongs to the whole
+  # suite, so each keeps its run directory and this job gathers them
+  # into one (mise/coverage_merge.py) and runs coverage:check over it,
+  # its depends skipped: the rows ran `test`. It writes the reports and
+  # figures the test leg writes when it is one runner. And every shard's
+  # report of what it ran is held here to its task's whole population,
+  # each item exactly once (mise/shard.py). Skipped where no leg is
+  # split; the floor step skipped where the test leg is one runner,
+  # which judges its own floor.
   coverage:
     name: gate (coverage)
     needs:
       - plan
       - gate
-    if: ${{ needs.plan.outputs.test-shards != '1' }}
+    if: ${{ needs.plan.outputs.split == 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     env:
@@ -948,14 +980,34 @@ jobs:
           path: ${{ steps.tool-key.outputs.dir }}
           key: ${{ steps.tool-cache.outputs.cache-primary-key }}
 
-      - name: Gather every test shard's coverage data
+      - name: Gather every shard's report of what it ran
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: shard-reports-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/shard-reports
+
+      - name: Every shard's share is its task's whole population
+        env:
+          REPORTS: ${{ runner.temp }}/shard-reports
+        run: '"${ORG_PYTHON}" .org-canon/mise/gate_shard.py union "${REPORTS}"'
+
+      - name: Gather every test row's coverage data
+        if: ${{ needs.plan.outputs.test-split == 'true' }}
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: coverage-run-*
-          merge-multiple: true
-          path: ${{ runner.temp }}/coverage-run
+          path: ${{ runner.temp }}/coverage-rows
 
-      - name: Judge the floor over every shard
+      - name: Merge the rows into one run
+        if: ${{ needs.plan.outputs.test-split == 'true' }}
+        env:
+          ROWS: ${{ runner.temp }}/coverage-rows
+          RUN: ${{ runner.temp }}/coverage-run
+        run: '"${ORG_PYTHON}" .org-canon/mise/coverage_merge.py "${ROWS}" "${RUN}"'
+
+      - name: Judge the floor over every row
+        if: ${{ needs.plan.outputs.test-split == 'true' }}
         env:
           ORG_GATE_COVERAGE_RUN: ${{ runner.temp }}/coverage-run
           ORG_COVERAGE_REPORTS: ${{ runner.temp }}/coverage-reports
@@ -963,7 +1015,7 @@ jobs:
 
       - name: Keep the coverage reports for the badge (default branch only)
         if: >-
-          ${{ github.event_name == 'push'
+          ${{ needs.plan.outputs.test-split == 'true' && github.event_name == 'push'
           && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -974,9 +1026,9 @@ jobs:
 
       - name: Keep the coverage figures for the release
         if: >-
-          ${{ github.event_name == 'merge_group'
+          ${{ needs.plan.outputs.test-split == 'true' && (github.event_name == 'merge_group'
           || (github.event_name == 'push'
-          && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)) }}
+          && github.ref == format('refs/heads/{0}', github.event.repository.default_branch))) }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage-figures-${{ github.sha }}
@@ -1007,17 +1059,17 @@ jobs:
           PGRX: ${{ needs.pgrx.result }}
           MAJORS: ${{ needs.plan.outputs.majors }}
           COVERAGE: ${{ needs.coverage.result }}
-          SHARDS: ${{ needs.plan.outputs.test-shards }}
+          SPLIT: ${{ needs.plan.outputs.split }}
         # Prints what the jobs above computed, one name/result pair at a
         # time; the pgrx legs may be skipped only when none were planned,
-        # and the coverage job only when the test leg was one runner.
+        # and the coverage job only when no leg was split.
         # Every branch is a row in mise/test_gate_verdict.py (#1386).
         run: |
           set -euo pipefail
           status=0
           for pair in "plan=${PLAN}" "gate=${GATE}" "pgrx legs=${PGRX}" "coverage=${COVERAGE}"; do
             name=${pair%%=*} result=${pair#*=}
-            [[ ${result} != success && "${name} ${result} ${SHARDS}" != "coverage skipped 1" ]] || continue
+            [[ ${result} != success && "${name} ${result} ${SPLIT}" != "coverage skipped false" ]] || continue
             if [[ ${name} == "pgrx legs" && ${result} == skipped ]]; then
               [[ ${MAJORS} != "[]" ]] || continue
               # No canon tree in this job: one printf, whose format is a literal

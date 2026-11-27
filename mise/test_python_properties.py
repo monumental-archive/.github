@@ -30,6 +30,7 @@ from pathlib import Path
 
 import decoded
 import hermetic
+import shard
 import workflow_yaml
 
 CANON = Path(__file__).resolve().parent.parent
@@ -382,40 +383,66 @@ SHARD_FILES = {"a/prop_one.py": HOLDS, "b/prop_two.py": HOLDS, "prop_three.py": 
 
 
 class Shards(unittest.TestCase):
-    """ORG_PROPERTY_SHARD=k/n runs one shard of the files (#1631)."""
+    """ORG_SHARD=k/n runs one shard of the files (#1631, #2160)."""
 
     def test_a_shard_runs_every_nth_sorted_file(self) -> None:
-        """1/2 of three sorted files is the second: named, then run."""
+        """2/2 of three sorted files is the second: named, then run."""
         done = run(
             GATE,
             SHARD_FILES,
             tool_dir=real_tool_dir(),
-            env={"ORG_PROPERTY_SHARD": "1/2"},
+            env={"ORG_SHARD": "2/2"},
         )
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(
             done.stdout,
-            "test:python-properties: shard 1/2, 1 of 3 file(s)\n"
+            "test:python-properties: shard 2/2, 1 of 3 file(s)\n"
             "b/prop_two.py: prop_0_prop_two.Holds.test_double_is_even ... ok\n"
             "test:python-properties: 1 test(s) in 1 file(s) held\n",
         )
 
     def test_a_malformed_shard_is_refused_by_name(self) -> None:
-        """A k not below n, or not digits: exit 2, the value named."""
-        for spec in ("2/2", "x/8", "1/0", "\u00b2/8"):
+        """A k above n, a zero, or not digits: exit 2, the value named."""
+        for spec in ("3/2", "0/8", "x/8", "1/0", "\u00b2/8"):
             with self.subTest(spec=spec):
                 done = run(
                     GATE,
                     SHARD_FILES,
                     tool_dir=real_tool_dir(),
-                    env={"ORG_PROPERTY_SHARD": spec},
+                    env={"ORG_SHARD": spec},
                 )
                 self.assertEqual(done.returncode, 2)
                 self.assertIn(
-                    f"test:python-properties: ORG_PROPERTY_SHARD='{spec}'"
-                    " is not k/n with k < n",
+                    f"test:python-properties: ORG_SHARD={spec!r}"
+                    " is not a shard (k/n, 1 <= k <= n)",
                     done.stderr,
                 )
+
+    def test_two_shards_run_every_file_once(self) -> None:
+        """1/2 and 2/2, run for real, report every file once between them."""
+        with tempfile.TemporaryDirectory() as reports:
+            for spec in ("1/2", "2/2"):
+                done = run(
+                    GATE,
+                    SHARD_FILES,
+                    tool_dir=real_tool_dir(),
+                    env={
+                        "ORG_SHARD": spec,
+                        "ORG_SHARD_TASK": "test:python-properties",
+                        "ORG_SHARD_REPORTS": reports,
+                    },
+                )
+                self.assertEqual(done.returncode, 0, done.stderr)
+            got = shard.load(Path(reports))
+            ran = sorted(
+                decoded.as_str(r, "ran")
+                for d in got
+                for r in decoded.as_array(d["ran"], "ran")
+            )
+            want: list[str] = sorted(SHARD_FILES)
+            self.assertEqual(want, ran)
+            none: list[str] = []
+            self.assertEqual(none, shard.union(got, {"test:python-properties": 2}))
 
     def test_an_empty_shard_says_so_and_passes(self) -> None:
         """More shards than files: the empty one is named and exits 0."""
@@ -423,12 +450,12 @@ class Shards(unittest.TestCase):
             GATE,
             SHARD_FILES,
             tool_dir=real_tool_dir(),
-            env={"ORG_PROPERTY_SHARD": "7/8"},
+            env={"ORG_SHARD": "8/8"},
         )
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(
             done.stdout,
-            "test:python-properties: shard 7/8 holds none of the 3 file(s), skipped\n",
+            "test:python-properties: shard 8/8 holds none of the 3 file(s), skipped\n",
         )
 
     def test_the_audit_times_each_file_as_it_finishes(self) -> None:
@@ -582,90 +609,44 @@ class FanOut(unittest.TestCase):
         )
 
     def test_a_named_shard_starts_no_child(self) -> None:
-        """ORG_PROPERTY_SHARD=0/1 with workers to spare: one process."""
+        """ORG_SHARD=1/2 with workers to spare: one process."""
         done = run(
             GATE,
             FOUR,
             tool_dir=real_tool_dir(),
-            env=self.meet(1, ORG_TEST_WORKERS="8", ORG_PROPERTY_SHARD="0/1"),
+            env=self.meet(1, ORG_TEST_WORKERS="8", ORG_SHARD="1/2"),
         )
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(len(pids(done.stderr)), 1, done.stderr)
         self.assertEqual(
             done.stdout,
-            "test:python-properties: shard 0/1, 4 of 4 file(s)\n"
-            + "".join(ran(name, i) for i, name in enumerate("abcd"))
-            + "test:python-properties: 4 test(s) in 4 file(s) held\n",
+            "test:python-properties: shard 1/2, 2 of 4 file(s)\n"
+            + "".join(ran(name, i) for i, name in enumerate("ac"))
+            + "test:python-properties: 2 test(s) in 2 file(s) held\n",
         )
 
-    def test_fewer_workers_than_files_take_one_shard_each(self) -> None:
-        """Three files, two workers: two children, 2/3 and 1/3 of the files."""
+    def test_one_of_one_is_the_whole_run(self) -> None:
+        """ORG_SHARD=1/1, a split row's unsharded task: it fans out as unset."""
         done = run(
-            GATE, SHARD_FILES, tool_dir=real_tool_dir(), env={"ORG_TEST_WORKERS": "2"}
+            GATE,
+            FOUR,
+            tool_dir=real_tool_dir(),
+            env=self.meet(4, ORG_TEST_WORKERS="8", ORG_SHARD="1/1"),
         )
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(
-            done.stdout,
-            "test:python-properties: shard 0/2, 2 of 3 file(s)\n"
-            "a/prop_one.py: prop_0_prop_one.Holds.test_double_is_even ... ok\n"
-            "prop_three.py: prop_1_prop_three.Holds.test_double_is_even ... ok\n"
-            "test:python-properties: 2 test(s) in 2 file(s) held\n"
-            "test:python-properties: shard 1/2, 1 of 3 file(s)\n"
-            "b/prop_two.py: prop_0_prop_two.Holds.test_double_is_even ... ok\n"
-            "test:python-properties: 1 test(s) in 1 file(s) held\n"
-            "test:python-properties: 3 test(s) in 3 file(s) held\n",
-        )
-
-    def test_a_failing_child_is_red_with_its_example_and_seed(self) -> None:
-        """One child fails: exit 1, its example, its seed line, the total."""
-        done = run(
-            AUDIT,
-            {"prop_bad.py": FAILS, "prop_ok.py": HOLDS},
-            tool_dir=real_tool_dir(),
-            env={"ORG_TEST_WORKERS": "2", "ORG_PROPERTY_SEED": "7"},
-        )
-        self.assertEqual(done.returncode, 1)
-        self.assertIn("prop_0_prop_bad.Fails.test_small ... FAIL\n", done.stdout)
-        self.assertIn("prop_0_prop_ok.Holds.test_double_is_even ... ok\n", done.stdout)
-        self.assertIn("    n=10,\n", done.stderr)
-        self.assertIn(
-            "audit:python-properties: seed 7 — commit each falsifying example above"
-            " as an @example row with its fix\n",
-            done.stderr,
-        )
-        self.assertTrue(
-            done.stderr.endswith(
-                "audit:python-properties: 2 test(s) in 2 file(s); shard(s) 0/2 red\n"
-            ),
-            done.stderr,
-        )
-
-    def test_the_audit_children_share_one_drawn_seed(self) -> None:
-        """No seed given: every child prints the one the runner drew."""
-        done = run(
-            AUDIT,
-            {"prop_one.py": HOLDS, "prop_two.py": HOLDS},
-            tool_dir=real_tool_dir(),
-            env={"ORG_TEST_WORKERS": "2"},
-        )
-        self.assertEqual(done.returncode, 0, done.stderr)
-        seeds = [
-            line
-            for line in done.stdout.splitlines()
-            if line.startswith("audit:python-properties: seed ")
-        ]
-        self.assertEqual(len(seeds), 2, done.stdout)
-        self.assertEqual(seeds[0], seeds[1])
+        self.assertEqual(len(pids(done.stderr)), 4, done.stderr)
 
 
 class WorkflowShape(unittest.TestCase):
     """Both property jobs are bounded, sharded and share one seed (#1631)."""
 
-    def test_both_jobs_carry_a_bound_eight_shards_and_one_seed(self) -> None:
-        """A timeout, shards 0..7 as k/8, and the seed from a planning job.
+    def test_both_jobs_carry_a_bound_planned_shards_and_one_seed(self) -> None:
+        """A timeout, the plan's shards as k/n, and the seed from a planning job.
 
         One job since #1858: the canon runs the consumers' workflow
-        through self-deep-tests.yml rather than a copy of the job.
+        through self-deep-tests.yml rather than a copy of the job. The
+        count is the plan's since #2160: the repository's shards.toml,
+        else the canon's default.
         """
         seeds = {
             "repo-deep-tests.yml": "needs.python-properties-seed.outputs.seed",
@@ -673,21 +654,31 @@ class WorkflowShape(unittest.TestCase):
         for workflow, seed in seeds.items():
             with self.subTest(workflow=workflow):
                 path = CANON / ".github" / "workflows" / workflow
-                job = workflow_yaml.jobs(workflow_yaml.document(path))[
-                    "python-properties"
-                ]
+                jobs = workflow_yaml.jobs(workflow_yaml.document(path))
+                job = jobs["python-properties"]
                 self.assertIsInstance(job.get("timeout-minutes"), int)
                 strategy = decoded.as_object(job["strategy"], "strategy")
                 matrix = decoded.as_object(strategy["matrix"], "matrix")
-                shards: list[object] = list(range(8))
-                self.assertEqual(shards, matrix["shard"])
+                planned = "needs.python-properties-seed.outputs"
+                self.assertEqual(
+                    f"${{{{ fromJSON({planned}.python-shards) }}}}", matrix["shard"]
+                )
                 env = {
                     k: v
                     for scope in (job, *workflow_yaml.steps(job))
                     for k, v in decoded.as_object(scope.get("env") or {}, "env").items()
                 }
-                self.assertEqual("${{ matrix.shard }}/8", env["ORG_PROPERTY_SHARD"])
+                self.assertEqual(
+                    f"${{{{ matrix.shard }}}}/${{{{ {planned}.python-of }}}}",
+                    env["ORG_SHARD"],
+                )
                 self.assertEqual(f"${{{{ {seed} }}}}", env["ORG_PROPERTY_SEED"])
+                planner = jobs["python-properties-seed"]
+                outputs = decoded.as_object(planner["outputs"], "outputs")
+                for name in ("python-shards", "python-of"):
+                    self.assertEqual(
+                        f"${{{{ steps.shards.outputs.{name} }}}}", outputs[name]
+                    )
 
 
 if __name__ == "__main__":

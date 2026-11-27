@@ -2381,18 +2381,17 @@ class GateCoverageReports(unittest.TestCase):
 # belongs to one leg says so in its `if:`. The cache steps' legs are held
 # in test_gate_caches.py beside the caches. The lint leg is several
 # shards (#2049), each run by gate_shard.py; a once-per-gate lint step
-# runs on the first.
+# runs on the first. A split leg is a row per task and shard (#2160).
 GATE_LEGS = ("lint", "test", "properties")
 RUN_LEG = (
-    '"${ORG_PYTHON}" .org-canon/mise/gate_shard.py run "${LEG}" "${SHARD}" "${OF}"'
+    '"${ORG_PYTHON}" .org-canon/mise/gate_shard.py run'
+    ' "${LEG}" "${TASK}" "${SHARD}" "${OF}"'
 )
-GATE_NAME = (
-    "gate (${{ matrix.leg }}${{ matrix.of > 1"
-    " && format(' {0}/{1}', matrix.shard, matrix.of) || '' }})"
-)
+# The row's name is the plan's (#2160): its leg, task and shard.
+GATE_NAME = "gate (${{ matrix.label }})"
 MATRIX = "${{ fromJSON(needs.plan.outputs.legs) }}"
 LINT_ONLY = "matrix.leg == 'lint' && matrix.shard == 1"
-TEST_ONLY = "matrix.leg == 'test' && matrix.of == 1"
+TEST_ONLY = "matrix.leg == 'test' && matrix.task == 'ci:test'"
 LEG_BOUND = {
     "A merge group is the pull request's current head": LINT_ONLY,
     "The squash message is the PR title and body — hold it to the commit canon": (
@@ -2417,8 +2416,8 @@ def matrix_findings(strategy: dict[str, object]) -> list[str]:
     """Hold the gate's matrix to the plan's (#2049).
 
     The rows are the plan job's, laid out by mise/gate_shard.py plan and
-    held there by mise/test_gate_shard.py: lint shards, test shards,
-    properties.
+    held there by mise/test_gate_shard.py: lint shards, then a row per
+    test or properties task and per shard of one.
 
     Returns:
         One line when the matrix is anything but the plan's output.
@@ -2454,7 +2453,7 @@ def leg_findings(text: str) -> list[str]:
     run_env = table(runs[0], "env") if len(runs) == 1 else {}
     if any(
         run_env.get(k) != f"${{{{ matrix.{k.lower()} }}}}"
-        for k in ("LEG", "SHARD", "OF")
+        for k in ("LEG", "TASK", "SHARD", "OF")
     ):
         out.append(f"gate: no step runs `{RUN_LEG}` with LEG from the matrix")
     by_name = {field(s, "name"): s for s in gate_steps}
@@ -2569,7 +2568,7 @@ class GateLegs(unittest.TestCase):
                 "the badge reports from every leg",
                 (
                     (
-                        "${{ matrix.leg == 'test' && matrix.of == 1"
+                        "${{ matrix.leg == 'test' && matrix.task == 'ci:test'"
                         " && github.event_name == 'push'"
                     ),
                     "${{ matrix.leg == 'test' && github.event_name == 'push'",
@@ -2577,21 +2576,22 @@ class GateLegs(unittest.TestCase):
                 (
                     "gate: 'Keep the coverage reports for the badge (default branch"
                     " only)' runs on every leg, not only where"
-                    " matrix.leg == 'test' && matrix.of == 1"
+                    " matrix.leg == 'test' && matrix.task == 'ci:test'"
                 ),
             ),
             (
                 "the release figures from every leg",
                 (
                     (
-                        "${{ matrix.leg == 'test' && matrix.of == 1"
+                        "${{ matrix.leg == 'test' && matrix.task == 'ci:test'"
                         " && (github.event_name == 'merge_group'"
                     ),
                     "${{ matrix.leg == 'test' && (github.event_name == 'merge_group'",
                 ),
                 (
                     "gate: 'Keep the coverage figures for the release' runs on every"
-                    " leg, not only where matrix.leg == 'test' && matrix.of == 1"
+                    " leg, not only where matrix.leg == 'test'"
+                    " && matrix.task == 'ci:test'"
                 ),
             ),
             (

@@ -104,10 +104,10 @@ belt_dir=$(dirname "${BASH_SOURCE[0]}")
 # below.
 legs="${2:-all}"
 case "${legs}" in
-  all | go | rust | rust-branches | pgrx | pgrx-majors | python | typescript | plpgsql | probe | reports) ;;
+  all | go | rust | rust-export | rust-branches | pgrx | pgrx-majors | python | typescript | plpgsql | probe | reports) ;;
   *)
     why="unknown leg selector '${legs}' — expected all, go, rust,"
-    why+=" rust-branches, pgrx, pgrx-majors, python, typescript, plpgsql, probe or reports"
+    why+=" rust-export, rust-branches, pgrx, pgrx-majors, python, typescript, plpgsql, probe or reports"
     org_finding "" "${why}"
     exit 1
     ;;
@@ -423,7 +423,19 @@ llvm_tools() {
   fi
 }
 
-if org_tracked_has Cargo.toml && [[ ${legs} =~ ^(all|rust)$ ]]; then
+# A SPLIT TEST LEG (#2160) measures Rust on every row that ran a cargo,
+# and a row's profiles need that row's own instrumented binaries to be
+# read. So each such row renders its own report, `rust-export`, into
+# the run directory it keeps (`rust-lcov.info`, the same report and the
+# same pgrx paths left out as below; a row that built no Rust writes
+# none and says so), and the coverage job's merge (coverage_merge.py)
+# adds the rows' reports line by line into one `rust-lcov.info`, which
+# this leg then reads in place of a report of profiles.
+merged_rust=""
+if [[ -n ${ORG_COVERAGE_RUN:-} && -f ${ORG_COVERAGE_RUN}/rust-lcov.info && ${legs} != rust-export ]]; then
+  merged_rust=${ORG_COVERAGE_RUN}/rust-lcov.info
+fi
+if org_tracked_has Cargo.toml && [[ ${legs} =~ ^(all|rust|rust-export)$ ]]; then
   rust_surface ""
   # The repository's own `test` run, measured where it ran (#1653): its
   # test command ran through `measured`, which instrumented every cargo it
@@ -441,8 +453,14 @@ if org_tracked_has Cargo.toml && [[ ${legs} =~ ^(all|rust)$ ]]; then
   # Profiles count only when this run's `measured` made its marker: the
   # profiles of an earlier run whose command no longer runs through it
   # would otherwise read as this one's.
-  if [[ -z ${ORG_COVERAGE_RUN:-} || ! -d ${ORG_COVERAGE_RUN}/rust ]] \
-    || ! compgen -G "$(dirname "${LLVM_PROFILE_FILE:-/nonexistent/x}")/*.profraw" > /dev/null; then
+  if [[ ${legs} == rust-export ]] && { [[ -z ${ORG_COVERAGE_RUN:-} || ! -d ${ORG_COVERAGE_RUN}/rust ]] \
+    || ! compgen -G "$(dirname "${LLVM_PROFILE_FILE:-/nonexistent/x}")/*.profraw" > /dev/null; }; then
+    echo "${label}: rust-export: this row ran no measured Rust, nothing to keep" >&2
+    org_done=1
+    exit 0
+  fi
+  if [[ -z ${merged_rust} ]] && { [[ -z ${ORG_COVERAGE_RUN:-} || ! -d ${ORG_COVERAGE_RUN}/rust ]] \
+    || ! compgen -G "$(dirname "${LLVM_PROFILE_FILE:-/nonexistent/x}")/*.profraw" > /dev/null; }; then
     # shellcheck disable=SC2016  # the remedy names the variable, unexpanded
     org_finding "" "the test task ran no measured Rust — its test command runs" \
       'through "${ORG_BELT_DIR}/measured" (#1653), or no suite ran under mise'
@@ -464,7 +482,17 @@ if org_tracked_has Cargo.toml && [[ ${legs} =~ ^(all|rust)$ ]]; then
       ignore+=(--ignore-filename-regex "^${at}/")
     fi
   done <<< "${pgrx_dirs}"
-  cargo llvm-cov report ${ignore[@]+"${ignore[@]}"} --lcov --output-path "${out}/lcov.info" >&2
+  if [[ ${legs} == rust-export ]]; then
+    cargo llvm-cov report ${ignore[@]+"${ignore[@]}"} --lcov --output-path "${ORG_COVERAGE_RUN}/rust-lcov.info" >&2
+    echo "${label}: rust-export: kept ${ORG_COVERAGE_RUN}/rust-lcov.info" >&2
+    org_done=1
+    exit 0
+  fi
+  if [[ -n ${merged_rust} ]]; then
+    cp "${merged_rust}" "${out}/lcov.info"
+  else
+    cargo llvm-cov report ${ignore[@]+"${ignore[@]}"} --lcov --output-path "${out}/lcov.info" >&2
+  fi
   # The number is read out of lcov.info, the report Codecov receives
   # (#1528): one run is both the floor's measurement and the badge's
   # upload. Lines found and hit (LF, LH) summed over every file are the

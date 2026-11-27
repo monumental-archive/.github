@@ -215,10 +215,12 @@ ORG_PYTHON_UNSET = '''unset — the belt Python is not installed here; run: mise
 # measured here; coverage:check and coverage:adopt read it after `test`.
 # A run's directory can outlive it; coverage-run.sh says who sweeps it.
 #
-# A sharded test leg names the directory instead (#2049): every shard
-# measures into ORG_GATE_COVERAGE_RUN and keeps it, and the gate's
-# coverage job gathers the shards' data there and runs coverage:check
-# over it, so the floor judges the whole suite. Nothing else sets it.
+# A split test leg names the directory instead (#2049, #2160): every
+# row (a task of `test`, or a shard of one) measures into
+# ORG_GATE_COVERAGE_RUN and keeps it, and the gate's coverage job
+# gathers the rows' data there (mise/coverage_merge.py) and runs
+# coverage:check over it, so the floor judges the whole suite. Nothing
+# else sets it.
 ORG_COVERAGE_RUN = "{% set gate = get_env(name='ORG_GATE_COVERAGE_RUN', default='') %}{% if gate %}{{ gate }}{% else %}{{ get_env(name='TMPDIR', default='') | default(value='/tmp', boolean=true) | trim_end(pat='/') }}/org-coverage-{{ mise_pid }}{% endif %}"
 # THE FINDINGS WRITER, IN EVERY TASK (#1934, owner's ruling): bash
 # sources the file BASH_ENV names before it runs a non-interactive
@@ -696,8 +698,10 @@ python = "3.15.2"
 # The task contract, in full:
 #   - `mise run ci` must pass in every repo. Repos do NOT define `ci`; the
 #     global task below assembles it as the sum of three legs, `ci:lint`,
-#     `ci:test` and `ci:properties`, which the gate runs side by side,
-#     one runner each (#1740). Repos do not define those either.
+#     `ci:test` and `ci:properties`, which the gate runs side by side
+#     (#1740), each across as many runners as the repository's tasks
+#     and its shards.toml split it into (#2160, mise/gate_shard.py).
+#     Repos do not define those either.
 #   - `lint:*` is claimed by the belt and wildcard-collected into
 #     `ci:lint`, so a linter added here is enforced in every repo with no
 #     repo change. Repos may add their own `lint:<thing>` tasks; same

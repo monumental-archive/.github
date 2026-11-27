@@ -15,13 +15,34 @@
 # mise/test_gate_shard.py holds every row to a lint the belt defines. A
 # repository's own lint is unlisted and weighs `lint.default`.
 
-# The shard counts: the lint leg always; the test leg where the tree's
-# `test` task runs the belt's test runner, mise/unittest_guarded.py,
-# which keeps one shard's files (ORG_TEST_SHARD), and one runner where it
-# does not: a `cargo test` or `go test` has no way to take a share.
+# The canon's DEFAULTS (#2160). How a repository's work is split and
+# sharded is the repository's own content, in its tracked root
+# `shards.toml` (mise/gate_shard.py reads it, in the plan only); these
+# are what a repository gets for anything its file does not name. The
+# lint leg's shards; one runner per test or properties task, so no test
+# count lives here; and one count per language for repo-mutants.yml and
+# repo-deep-tests.yml's properties. `ceiling` is the most any count may
+# be, here or in a repository's file, so every matrix stays under
+# GitHub's 256 jobs.
 [shards]
 lint = 4
-test = 4
+ceiling = 128
+
+# Rust and Go four, round-robin (edtf #107 set Rust's from its first
+# run); Python 48 (cosmic-ray judges a mutant per suite run). TypeScript
+# runs as one job until StrykerJS takes a share of the files (#2153).
+[shards.mutants]
+rust = 4
+go = 4
+python = 48
+typescript = 1
+
+# The Monday properties at a random seed: Python by position, eight
+# legs (#1631); TypeScript and Rust one job each.
+[shards.deep-tests]
+python = 8
+typescript = 1
+rust = 1
 
 [lint]
 default = 2

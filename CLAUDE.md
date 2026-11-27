@@ -57,7 +57,12 @@ shared lives here and nowhere else. Five layers:
    legs (#1740): `ci:lint` wildcard-collects `lint:*`, `ci:test` runs
    `test`/`build` optionally with the coverage ratchet and `test:pgrx`,
    and `ci:properties` runs the property tests. The gate runs the legs
-   side by side, one runner each. Repos never define `ci` or a leg;
+   side by side, each on as many runners as the repository splits and
+   shards it: a runner per task of its `test`, and the counts in its
+   own tracked `shards.toml`, with the belt's adapters handing each
+   shard (`ORG_SHARD=k/n`) to the runner (#2160); anything unnamed
+   gets the canon's default, `mise/gate-shards.toml`. Repos never
+   define `ci` or a leg;
    adding a `lint:<tool>` task here enforces that tool in every repo
    with no repo change. `fix:*` are write-mode siblings, never in the gate. `audit:*`
    are network-bound or noisy checks, structurally outside the gate.
@@ -158,10 +163,11 @@ are referenced as
 `mise run ci` locally runs exactly what CI runs — same tasks, same
 tools, same versions, from the same lockfile. The one difference is
 where: CI runs the gate as three legs, `ci:lint`, `ci:test` and
-`ci:properties`, one runner each (#1740), and a pgrx extension's
-suite on one machine per Postgres major (#1148); locally `ci` runs
-the three legs together and the same script runs those majors side
-by side. Shared-workflow changes are
+`ci:properties` (#1740), each split and sharded across runners as
+the repository's tasks and `shards.toml` say (#2160), and a pgrx
+extension's suite on one machine per Postgres major (#1148); locally
+`ci` runs the three legs together, ignoring the file, and the same
+script runs those majors side by side. Shared-workflow changes are
 exercised by this repo's own `gate.yml` on every PR, and the release
 half by the canon releasing itself. That is the proof for most
 changes: no repository waits on a lab run to move its pin.

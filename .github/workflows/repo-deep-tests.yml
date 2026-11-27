@@ -407,17 +407,34 @@ jobs:
           retention-days: 1
 
   # One seed for every leg of the property job (#1631), drawn once so a
-  # finding in any shard reruns with one ORG_PROPERTY_SEED.
+  # finding in any shard reruns with one ORG_PROPERTY_SEED, and the legs
+  # themselves (#2160): how many the repository's own shards.toml asks
+  # for (`[deep-tests] python`), else the canon's default in
+  # mise/gate-shards.toml. Read by the plan, never an input: this
+  # workflow takes none.
   python-properties-seed:
-    name: draw the python property seed
+    name: draw the python property seed and plan its legs
     needs: applies
     if: ${{ needs.applies.outputs.python-properties-seed == 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 5
-    permissions: {}
     outputs:
       seed: ${{ steps.seed.outputs.seed }}
+      python-shards: ${{ steps.shards.outputs.python-shards }}
+      python-of: ${{ steps.shards.outputs.python-of }}
     steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve the canon tree (the ref the caller pinned)
+        uses: $/.github/actions/canon
+
+      - name: Plan the properties' legs
+        id: shards
+        run: '"${ORG_PYTHON}" .org-canon/mise/gate_shard.py plan deep-tests >> "${GITHUB_OUTPUT}"'
+
       - name: Draw the property seed
         id: seed
         run: |
@@ -436,34 +453,28 @@ jobs:
           retention-days: 1
 
   python-properties:
-    name: python properties hold at a random seed (${{ matrix.shard }}/8)
+    name: python properties hold at a random seed (${{ matrix.shard }}/${{ needs.python-properties-seed.outputs.python-of }})
     needs:
       - applies
       - python-properties-seed
     if: ${{ needs.applies.outputs.python-properties == 'true' }}
     runs-on: ubuntu-26.04
-    # Eight legs by position, not by directory: a repository may keep
-    # every property under one (#1631). Measured on the canon's 58 files,
-    # audit run 44669302615 (2026-11-20): the slowest leg took 10m14s,
-    # so 60 is five times it rounded up to ten minutes.
+    # Legs by position, not by directory: a repository may keep every
+    # property under one (#1631). The count is the plan's (#2160): the
+    # repository's `[deep-tests] python`, else the canon's eight.
+    # Measured on the canon's 58 files at eight, audit run 44669302615
+    # (2026-11-20): the slowest leg took 10m14s, so 60 is five times it
+    # rounded up to ten minutes.
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        shard:
-          - 0
-          - 1
-          - 2
-          - 3
-          - 4
-          - 5
-          - 6
-          - 7
+        shard: ${{ fromJSON(needs.python-properties-seed.outputs.python-shards) }}
     env:
       MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
       MISE_LOCKED: "1"
       MISE_GLOBAL_CONFIG_FILE: ${{ github.workspace }}/.org-canon/mise/config.toml
-      ORG_PROPERTY_SHARD: ${{ matrix.shard }}/8
+      ORG_SHARD: ${{ matrix.shard }}/${{ needs.python-properties-seed.outputs.python-of }}
       ORG_PROPERTY_SEED: ${{ needs.python-properties-seed.outputs.seed }}
     steps:
       - name: Check out caller repository

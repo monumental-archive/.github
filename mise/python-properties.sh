@@ -11,8 +11,9 @@
 # installed. The gate half also holds that line: a tracked Python file
 # that is not a property file and imports Hypothesis is red by name.
 #
-# ORG_PROPERTY_SHARD=k/n passes through to the runner, which takes that
-# shard of the files listed here (#1631): the audit runs eight legs.
+# ORG_SHARD=k/n passes through to the runner, which takes that shard
+# of the files listed here (#1631, #2160): the audit runs eight legs,
+# and a repository's shards.toml may shard the gate's.
 #
 # THE INTERPRETER IS THE TOOL VENV'S, asserted to be the belt's pin.
 # The properties import the repository's own helpers, which the gate's
