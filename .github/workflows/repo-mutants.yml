@@ -162,7 +162,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
         with:
-          version: 2026.11.10
+          version: 2026.11.11
           cache: false
 
       # The belt pins cargo-mutants `lazy`, so the bare install above —
@@ -275,7 +275,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
         with:
-          version: 2026.11.10
+          version: 2026.11.11
           cache: false
 
       # The belt pins gomu `lazy`, so the bare install above — and every
@@ -376,7 +376,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
         with:
-          version: 2026.11.10
+          version: 2026.11.11
           cache: false
 
       # The belt pins cosmic-ray `lazy`, so the bare install above — and
@@ -495,7 +495,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
         with:
-          version: 2026.11.10
+          version: 2026.11.11
           cache: false
 
       - name: Install cosmic-ray, by name
@@ -600,7 +600,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
         with:
-          version: 2026.11.10
+          version: 2026.11.11
           cache: false
 
       # The caller's own dependencies, StrykerJS among them, from its own

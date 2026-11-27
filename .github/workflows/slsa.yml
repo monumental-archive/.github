@@ -109,7 +109,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
         with:
-          version: 2026.11.10
+          version: 2026.11.11
           cache: false
 
       - name: Prove nothing ships unattested
@@ -148,7 +148,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
         with:
-          version: 2026.11.10
+          version: 2026.11.11
           cache: false
 
       - name: Reconcile the declared surface with the signer and its callers
@@ -207,7 +207,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
         with:
-          version: 2026.11.10
+          version: 2026.11.11
           cache: false
 
       - name: Check every consumer grant against canon HEAD's requirements
@@ -246,7 +246,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
         with:
-          version: 2026.11.10
+          version: 2026.11.11
           cache: false
 
       - name: Compare the live SLSA source matrix with the pinned snapshot
@@ -308,7 +308,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
         with:
-          version: 2026.11.10
+          version: 2026.11.11
           cache: false
 
       - name: Check every draft release for its record
@@ -362,7 +362,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
         with:
-          version: 2026.11.10
+          version: 2026.11.11
           cache: false
 
       - name: Walk every founded chain and verify each link
@@ -421,7 +421,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
         with:
-          version: 2026.11.10
+          version: 2026.11.11
           cache: false
 
       - name: Check every org release tag against the signing epoch
@@ -488,7 +488,7 @@ jobs:
       - name: Install mise and the pinned toolchain
         uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
         with:
-          version: 2026.11.10
+          version: 2026.11.11
           cache: false
 
       - name: Walk every published SBOM and report the blast radius
