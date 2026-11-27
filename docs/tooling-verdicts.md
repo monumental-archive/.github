@@ -3131,7 +3131,7 @@ installs clean from the consumer's lockfile under pnpm's
 `strictDepBuilds` (no build script), and runs vitest 4.1.12. On one
 source file with one worker: 144 mutants in 35 s. The consumer's
 service-free scope instruments 932 mutants with a 2 s initial run, so
-there is one job and no sharding (StrykerJS has none).
+there was one job and no sharding (StrykerJS has none of its own).
 
 The belt pins no copy. StrykerJS is the repository's, in its
 devDependencies beside its runner plugin, the way its test runner is;
@@ -3177,9 +3177,33 @@ What the leg does, each measured on 10.1.1 and held by a stub row
   results, so `incremental: true` would read as on and do nothing, and
   the config check refuses it by name. Tracking the incremental file
   was rejected: the run rewrites it, which the clean-tree guard reds.
-  *Reopen* when a full weekly run no longer fits the job; the response
-  is a restored and saved incremental file outside the tree, in its
-  own issue.
+  The reopen fired (#2153): monumental-archive's first whole run,
+  one job, was lost to its runner at 4 h 29 min with no log. Sharding
+  answered the fit; incremental would answer re-running, and stays
+  deferred.
+- **Sharded by file** (#2153). StrykerJS has no sharding of its own,
+  but its `--mutate` (10.1.1) names "the subset of files or just one
+  specific file to be mutated", and it replaces the config's list. So
+  the leg expands `mutate` against the tracked files, in order (a `!`
+  entry subtracts, as StrykerJS reads the list), sorts the result and
+  gives shard `k` of `n` every file whose index `i` has
+  `i % n == k`, the round-robin cut of the other legs. The matching is
+  StrykerJS's minimatch, measured on 10.1.1's `FileMatcher` and spelled
+  for `PurePosixPath.full_match`: braces expanded, a wildcard never
+  reaching a name that starts with `.` (`dot: false`), each file passed
+  back escaped so minimatch reads it literally. Red by name: a `mutate`
+  entry with a mutation range (`file:1-5`), which cannot be shared out
+  by file; an extglob; a file name `--mutate` cannot carry (a comma, or
+  a trailing range). A shard whose share is empty runs nothing and
+  counts zero. Eight shards first; the count and the timeout come from
+  the first sharded run, by #1530's rule, on monumental-archive#351.
+  The excluded count is each shard's own files', so its row says
+  `shard` and the totals sum it.
+- **Progress in the job log.** The leg adds the built-in
+  `progress-append-only` reporter and copies StrykerJS's output to the
+  log as it runs, so a shard stopped by its timeout shows how far it
+  got. A lost runner keeps no log at all, so short shards are the
+  protection there.
 - **Under pnpm the config must name its runner in `plugins`.** Core
   sits in `.pnpm/` and cannot find its sibling ("no TestRunner
   plugins were loaded").
@@ -3191,7 +3215,7 @@ red) came out as the stub rows state.
 
 *Reopen:* StrykerJS's sandbox resolving workspace packages inside
 itself (the sandbox could then carry the run), or StrykerJS gaining
-sharding (the job splits like Rust's).
+sharding of its own (the leg's share-out gives way to it).
 
 **cargo-mutants as `audit:mutants`' Rust leg, compiled and kept out
 of every other job** (#1355, under #1336's testing standard). Coverage
@@ -3267,7 +3291,8 @@ crate: `--list` honours `--shard`, and the default slice sharding cut
 it 3/3/3/0 — an empty shard exits 0 and writes no `outcomes.json`, so
 the leg says "no mutants in this shard" and stays green. Excluded is a
 whole-population figure (a shard is cut after exclusion), reported the
-same by every shard and taken once. The first runner run
+same by every shard and taken once: its row says `whole` (#2153),
+where TypeScript's, cut by file, says `shard` and is summed. The first runner run
 (release-lab, run 44205918375, 2026-11-18) measured shards of 5m02s to
 6m54s, mostly the cold toolchain install (163-221 s) and lab-pg's pgrx
 baseline. The larger consumer's run moved both (edtf #107, run

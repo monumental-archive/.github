@@ -835,7 +835,7 @@ class Shards(Planted):
             ),
         ]
         self.assertEqual(self.calls(log), want)
-        self.assertEqual(self.summary(), "1/4\t2\t1\t1\t0\n")
+        self.assertEqual(self.summary(), "1/4\t2\t1\t1\t0\twhole\n")
 
     def test_empty_shard_is_green_by_name(self) -> None:
         """Measured: an empty shard exits 0 and writes no outcomes.json."""
@@ -858,7 +858,7 @@ class Shards(Planted):
             ),
             self.calls(log),
         )
-        self.assertEqual(self.summary(), "3/4\t0\t0\t0\t0\n")
+        self.assertEqual(self.summary(), "3/4\t0\t0\t0\t0\twhole\n")
 
     def test_excluded_is_the_whole_population(self) -> None:
         """Every shard reports the same excluded figure; totals take it once."""
@@ -873,7 +873,7 @@ class Shards(Planted):
         )
         done, _ = self.run_leg(**self.shard_env("0/4"))
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(self.summary(), "0/4\t1\t1\t0\t1\n")
+        self.assertEqual(self.summary(), "0/4\t1\t1\t0\t1\twhole\n")
 
     def test_unadopted_shard_writes_skipped(self) -> None:
         """No config: skipped by name, and the totals are told so."""
