@@ -21,6 +21,26 @@
       "name": "red-check",
       "color": "d93f0b",
       "description": "A scheduled workflow is red on the default branch; the body names each red job"
+    },
+    {
+      "name": "kind: brief",
+      "color": "5319e7",
+      "description": "A session's question — explore in talk mode, nothing settled"
+    },
+    {
+      "name": "kind: for-triage",
+      "color": "0e8a16",
+      "description": "Filed by a session: measured, not decided — waits for a Fable triage pass"
+    },
+    {
+      "name": "kind: work-order",
+      "color": "1d76db",
+      "description": "Agreed shape, buildable — the body is executable"
+    },
+    {
+      "name": "kind: recording",
+      "color": "fef2c0",
+      "description": "Write settled positions down (ADR/standards/docs), no build"
     }
   ]
 }
