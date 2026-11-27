@@ -26,7 +26,9 @@
 # Red, by name, when a shard of n is missing (a shard that died, or whose
 # run judged nothing, writes no file), when shards disagree about n,
 # about adoption, about what the excluded count covers, or about a
-# `whole` excluded count, and when any survivor exists. No language is
+# `whole` excluded count, when the judged shards together hold no
+# mutant (each shard may hold none; the population may not), and when
+# any survivor exists. No language is
 # written here.
 set -euo pipefail
 
@@ -89,6 +91,7 @@ verdict=$(awk -F '\t' -v label="${label}" -v lang="${lang}" '
     }
     if (bad) exit 1
     if (judged == 0) { printf "%s: not adopted, skipped in all %s shards\n", label, n; exit 0 }
+    if (mutants == 0) { printf "%s\037no shard mutated anything — across %s shards, 0 mutants\n", lang, n; exit 1 }
     printf "%s: across %s shards: %d mutants, %d killed, %d survived, %s excluded\n",
       label, n, mutants, killed, survived, excluded
     if (survived > 0) exit 2

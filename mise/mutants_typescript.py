@@ -302,10 +302,7 @@ def span(a: int, b: int) -> list[int]:
         The values, in order from a.
 
     """
-    descending = b < a  # pragma: no mutate -- with a == b both orders are one value
-    low, high = sorted((a, b))
-    values = list(range(low, high + 1))
-    return values[::-1] if descending else values
+    return list(range(a, b + 1)) or list(range(a, b - 1, -1))
 
 
 def alternatives(body: str) -> list[str] | None:

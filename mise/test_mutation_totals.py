@@ -148,6 +148,21 @@ class Totals(unittest.TestCase):
         ]
         self.assertEqual(done.stderr.splitlines(), want)
 
+    def test_no_mutant_in_any_shard_is_red(self) -> None:
+        """Each shard may hold none; the whole population may not."""
+        self.shard(0, "0/2\t0\t0\t0\t0\tshard", lang="typescript")
+        self.shard(1, "1/2\t0\t0\t0\t0\tshard", lang="typescript")
+        done = self.run_totals("typescript")
+        self.assertEqual(done.returncode, 1)
+        want = [
+            (
+                "audit:mutants: typescript: no shard mutated anything"
+                " — across 2 shards, 0 mutants"
+            )
+        ]
+        self.assertEqual(done.stdout, "")
+        self.assertEqual(done.stderr.splitlines(), want)
+
     def test_no_summary_at_all_is_red(self) -> None:
         """Nothing downloaded: every shard died, never a clean zero."""
         done = self.run_totals()
