@@ -1020,7 +1020,7 @@ version = "8.9.0"
 backend = "pipx:cosmic-ray"
 
 [[tools."pipx:coverage"]]
-version = "7.17.3"
+version = "7.17.4"
 backend = "pipx:coverage"
 
 [[tools."pipx:hypothesis"]]
