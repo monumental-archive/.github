@@ -25,8 +25,9 @@
 #            beside what is there, and COVERAGE_PROCESS_START names the
 #            run's rc file; every python3 the command starts is
 #            measured into the run's directory.
-#   plpgsql  ORG_PLPGSQL_COVERAGE names the report the suite's teardown
-#            writes, in the run directory.
+#   plpgsql  ORG_PLPGSQL_COVERAGE names the directory, in the run's,
+#            where each of the suite's teardowns writes its database's
+#            report, one file per database (#2163).
 #   go       in a tree with go.mod, GOFLAGS gains the cover flags and
 #            `-exec=<belt>/go-test-exec`, and GOCOVERDIR names the run's
 #            directory, so every test binary writes its counters there
@@ -286,8 +287,10 @@ if org_tracked_has "${root}/Cargo.toml"; then
     "${ORG_PYTHON}" "${belt}/coverage_owner.py" clean >&2 || exit 1
 fi
 
-# plpgsql: one report per run; a value already set is kept.
-export ORG_PLPGSQL_COVERAGE="${ORG_PLPGSQL_COVERAGE:-${run}/plpgsql-coverage.json}"
+# plpgsql: one directory per run, one report in it per database the
+# suite tears down (#2163); a value already set is kept. The teardown's
+# collect creates it, so a run that collected nothing leaves none.
+export ORG_PLPGSQL_COVERAGE="${ORG_PLPGSQL_COVERAGE:-${run}/plpgsql-coverage}"
 
 # typescript: the run's own vitest, measured where it runs (#2105). The
 # runner and the provider are the tracked root lockfile's, read by

@@ -62,8 +62,9 @@ ARGS = (2, 3)
 ONE_LEG = re.compile(r"pgrx-pg[0-9]+")
 # What the forge answered, piped in by the caller.
 STDIN = 0
-# One leg line as coverage-measure.sh prints it.
-LEG = re.compile(r"[a-z][a-z0-9-]*\s+[0-9]+(\.[0-9]+)?")
+# One leg line as coverage-measure.sh prints it: a percentage, or
+# `not-held` for a leg the run cannot measure exactly (#2163).
+LEG = re.compile(r"[a-z][a-z0-9-]*\s+([0-9]+(\.[0-9]+)?|not-held)")
 
 
 class RefusedError(Exception):

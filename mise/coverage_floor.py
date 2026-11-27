@@ -52,6 +52,14 @@ proposes what a corpus lacks; the floor holds no fuzz figure. A
 `fuzz-*` line, record or `dropped:`/`legs:` entry still in a file is
 refused by name, with the lines to delete.
 
+A leg can report that this run cannot measure it exactly:
+`<leg> not-held` in place of its percentage (#2163: `plpgsql-branches`
+over more than one test database, which plpgsql_check cannot merge,
+#2169). `hold` holds nothing against it and counts it as reported, so a
+recorded leg is not red for being unmeasurable; `write` keeps it in the
+`legs:` record and cuts no floor from it, so its floor is left as it
+stands, never lowered by a figure that was never taken.
+
 Opt-in is unchanged: a repository with no `.coverage-floor` owes nothing
 and skips clean in both directions. The belt offers the mechanism; the
 committed file is the repository's adoption and its number is the
@@ -125,6 +133,8 @@ FUZZ_LEFT = (
 KEYS = frozenset({BAND_KEY, MEASURED_KEY, DERIVED_KEY, RESET_KEY, LEGS_KEY})
 
 LEG_FIELDS = 2
+# A leg this run reports and cannot measure exactly (#2163).
+NOT_HELD = "not-held"
 
 
 def apart(leg: str) -> bool:
@@ -661,12 +671,28 @@ def legs(text: str) -> tuple[list[tuple[str, Decimal]], list[str]]:
         if not line:
             continue
         parts = line.split()
+        if len(parts) == LEG_FIELDS and parts[1] == NOT_HELD:
+            continue
         percent = number(parts[1]) if len(parts) == LEG_FIELDS else None
         if percent is None or not FLOOR_MIN <= percent <= FLOOR_MAX:
             problems.append(f"measurement {line!r} is not `<leg> <percent>`")
             continue
         measured.append((parts[0], percent))
     return measured, problems
+
+
+def unheld(text: str) -> list[str]:
+    """Name the legs a measurement reported as not held (#2163).
+
+    Returns:
+        Each leg printed `<leg> not-held`, in order.
+
+    """
+    return [
+        parts[0]
+        for parts in (raw.split() for raw in text.splitlines())
+        if len(parts) == LEG_FIELDS and parts[1] == NOT_HELD
+    ]
 
 
 def render(
@@ -941,6 +967,9 @@ def derive(path: Path, source: str, provenance: str, *, adopt: bool) -> int:
         return 1
     measured = [(leg, pct) for leg, pct in every if not apart(leg)]
     separate = {leg: pct for leg, pct in every if apart(leg)}
+    # Reported but not measured exactly: kept in the record, no floor cut
+    # from it, so its floor stands (#2163).
+    kept = [leg for leg in unheld(source) if not apart(leg)]
     if not measured:
         findings.finding(
             "",
@@ -958,7 +987,7 @@ def derive(path: Path, source: str, provenance: str, *, adopt: bool) -> int:
         provenance,
         adopt=adopt,
         separate=separate,
-        legs=[leg for leg, _ in measured],
+        legs=[leg for leg, _ in measured] + kept,
     )
 
 
@@ -1079,6 +1108,14 @@ def hold(path: Path, label: str, source: str, jobs: frozenset[str]) -> int:
                 f"{label}: {leg}: not yet in the floor's record: it joins at "
                 "the next derivation",
             )
+    for leg in unheld(source):
+        # Reported, so not missing; not measured exactly, so not held,
+        # and the floor is left as it stands (#2163).
+        print(
+            f"{label}: {leg} leg not held: this run cannot measure it exactly"
+            f" (the measurement says why); the floor {record.floor} stands",
+        )
+        names.append(leg)
     owned = [leg for leg in recorded(record) if owner(leg) in jobs and leg not in names]
     if unaccounted(record, owned):
         status = 1

@@ -364,6 +364,18 @@ class TestLegs(unittest.TestCase):
                 self.assertEqual(len(problems), 1)
                 self.assertIn("is not `<leg> <percent>`", problems[0])
 
+    def test_a_leg_not_held_is_no_figure_and_no_problem(self) -> None:
+        """`<leg> not-held` (#2163) is read apart from the figures."""
+        text = "plpgsql 85.0\nplpgsql-branches not-held\n"
+        measured, problems = cf.legs(text)
+        self.assertEqual(problems, NO_PROBLEMS)
+        one: list[tuple[str, Decimal]] = [("plpgsql", Decimal("85.0"))]
+        self.assertEqual(measured, one)
+        branches: list[str] = ["plpgsql-branches"]
+        none: list[str] = []
+        self.assertEqual(branches, cf.unheld(text))
+        self.assertEqual(none, cf.unheld("plpgsql 85.0\nnot-held\nx not-held y\n"))
+
 
 class TestRender(unittest.TestCase):
     """What the machinery writes, read back through the parser."""
@@ -1101,6 +1113,44 @@ class TestLegsRecord(unittest.TestCase):
             self.assertEqual((0, "", ""), run(cf.recorded_legs, tree.path))
         with Tree(None) as tree:
             self.assertEqual((0, "", ""), run(cf.recorded_legs, tree.path))
+
+    def test_a_recorded_leg_not_held_is_named_and_not_red(self) -> None:
+        """Reported but unmeasurable (#2163): not missing, nothing held."""
+        text = legs_record("83.4", "plpgsql plpgsql-branches")
+        with Tree(text) as tree:
+            status, out, err = run(
+                cf.hold,
+                tree.path,
+                "coverage:check",
+                "plpgsql 86.0\nplpgsql-branches not-held\n",
+                GATE,
+            )
+            after = tree.text()
+        self.assertEqual((0, ""), (status, err))
+        self.assertEqual(
+            "coverage:check: plpgsql leg holds the floor 83.4 (86.0%)\n"
+            "coverage:check: plpgsql-branches leg not held: this run cannot"
+            " measure it exactly (the measurement says why); the floor 83.4"
+            " stands\n",
+            out,
+        )
+        self.assertEqual(text, after)
+
+    def test_a_derivation_keeps_a_leg_not_held_in_the_record(self) -> None:
+        """Its floor is cut from nothing, and the record keeps demanding it."""
+        text = legs_record("83.4", "plpgsql plpgsql-branches")
+        with Tree(text) as tree:
+            status, _, err = run(
+                cf.derive,
+                tree.path,
+                "plpgsql 84.0\nplpgsql-branches not-held\n",
+                "v1.2.0",
+                adopt=False,
+            )
+            parsed, problems = clean(tree.written())
+        self.assertEqual((0, "", NO_PROBLEMS), (status, err, problems))
+        self.assertEqual(("plpgsql", "plpgsql-branches"), parsed.legs)
+        self.assertEqual(Decimal("83.4"), parsed.floor)
 
 
 def owned_record(legs: str) -> str:

@@ -185,17 +185,20 @@ class FloorMergesNeverReplaces(unittest.TestCase):
     def test_a_task_plpgsql_report_is_kept(self) -> None:
         """An ORG_PLPGSQL_COVERAGE the task set is not replaced."""
         with tempfile.TemporaryDirectory() as tmp:
-            seen = self.measured_env(tmp, ORG_PLPGSQL_COVERAGE="/own/report.json")
-            self.assertEqual("/own/report.json", seen["ORG_PLPGSQL_COVERAGE"])
+            seen = self.measured_env(tmp, ORG_PLPGSQL_COVERAGE="/own/reports")
+            self.assertEqual("/own/reports", seen["ORG_PLPGSQL_COVERAGE"])
 
-    def test_the_plpgsql_report_lands_in_the_run_directory(self) -> None:
-        """Unset by the task, the report is named in the run directory."""
+    def test_the_plpgsql_reports_land_in_the_run_directory(self) -> None:
+        """Unset by the task, the reports directory is the run's (#2163)."""
         with tempfile.TemporaryDirectory() as tmp:
             seen = self.measured_env(tmp)
             self.assertEqual(
-                str(Path(tmp) / "run" / "plpgsql-coverage.json"),
+                str(Path(tmp) / "run" / "plpgsql-coverage"),
                 seen["ORG_PLPGSQL_COVERAGE"],
             )
+            # Created by the teardown's collect, never by measured: a run
+            # that collected nothing leaves no directory to read.
+            self.assertFalse((Path(tmp) / "run" / "plpgsql-coverage").exists())
 
     def test_it_runs_under_sh(self) -> None:
         """Named from an `sh -c` line, as a task with `shell = "sh -c"` does."""

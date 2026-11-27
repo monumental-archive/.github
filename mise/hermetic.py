@@ -142,7 +142,15 @@ INHERITED: dict[str, str] = {
 # What a tool needs beyond INHERITED, per tool, each with why. A row
 # names the tools its fixture runs; nothing here reaches a row that
 # does not.
-TOOLS: dict[str, dict[str, str]] = {}
+TOOLS: dict[str, dict[str, str]] = {
+    # The PL/pgSQL leg's real database (#2163) runs in a container: the
+    # client finds its daemon through these, where they are set.
+    "docker": {
+        "DOCKER_HOST": "the daemon the client talks to",
+        "DOCKER_CONTEXT": "the context that names the daemon",
+        "DOCKER_CONFIG": "where the client's configuration lives",
+    },
+}
 
 IDENTITY_NAME = "hermetic harness"
 IDENTITY_EMAIL = "harness@example.invalid"
