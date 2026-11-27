@@ -10,14 +10,27 @@ in it, and writes the shard's report (what it chose from, what it kept)
 for the gate's union check. Three runners, each in its own terms:
 
     vitest    `--shard=k/n` on the run; the population and the share
-              are vitest's own `list --filesOnly`, without and with it.
-    nextest   `--partition count:k/n` on `cargo nextest run`; the
-              population and the share are `cargo nextest list`'s
-              matching tests, without and with it.
-    go test   the command's packages (`go list` over its patterns,
-              `.` where it names none), every n-th from the k-th; the
-              patterns are replaced by this shard's packages, and a
-              shard holding none runs `true`.
+              are vitest's own `list --filesOnly`, with the run's own
+              arguments, without and with it. vitest's contract
+              (measured on 5.1.1, #2160): k from 1; files sorted by the
+              sha1 of their root-relative path and cut in contiguous
+              slices, the first N mod n one file longer; k < 1, k > n
+              and n above the file count refused, exit 1 (without
+              --passWithNoTests), so no shard is ever empty.
+    nextest   `--partition slice:k/n` on `cargo nextest run`. nextest's
+              contract (its partitioning docs; `slice:` since 0.9.127,
+              `count:` deprecated): k from 1; every test across every
+              binary, after the filters, dealt round-robin. The
+              population is `cargo nextest list`'s matching tests, in
+              its order (binary, then test name); the share is dealt
+              here the same way, since the listing does not mark a
+              partition. A shard dealt none runs `true`: nextest's
+              default --no-tests=auto is exit 4.
+    go test   no shard of its own: the command's packages (`go list`
+              over its patterns, `.` where it names none; import paths,
+              sorted), every n-th from the k-th; the patterns are
+              replaced by this shard's packages, and a shard holding
+              none runs `true` (a bare `go test` would test `.`).
 
 A command with none of the three goes unchanged: `measured` also runs
 a task's setup lines, and the belt's own runners (unittest_guarded.py,
@@ -135,11 +148,10 @@ def vitest(command: Sequence[str], k: int, n: int) -> list[str] | None:
     if rest and rest[0] == "run":
         rest = rest[1:]
     head = list(command[: at + 1])
-    filters = [w for w in rest if not w.startswith("-")]
-    listing = [*head, "list", "--filesOnly", *filters]
-    every = run_out(listing).split()
-    mine = run_out([*listing, f"--shard={k}/{n}"]).split()
-    shard.report("vitest", " ".join(filters), every, mine)
+    listing = [*head, "list", "--filesOnly", *rest]
+    every = run_out(listing).splitlines()
+    mine = run_out([*listing, f"--shard={k}/{n}"]).splitlines()
+    shard.report("vitest", " ".join(rest), every, mine)
     return [*head, "run", *rest, f"--shard={k}/{n}"]
 
 
@@ -147,7 +159,8 @@ def nextest(command: Sequence[str], k: int, n: int) -> list[str] | None:
     """Give a `cargo nextest run` its partition.
 
     Returns:
-        The command with `--partition count:k/n`, or None when it is not one.
+        The command with `--partition slice:k/n`, `true` for a shard
+        dealt no test, or None when it is not one.
 
     """
     words = list(command)
@@ -166,26 +179,29 @@ def nextest(command: Sequence[str], k: int, n: int) -> list[str] | None:
     head, rest = words[: at + 2], words[at + 3 :]
     listing = [*head, "list", *rest, "--message-format", "json"]
     every = matching(run_out(listing))
-    mine = matching(run_out([*listing, "--partition", f"count:{k}/{n}"]))
+    mine = every[k - 1 :: n]
     shard.report("nextest", " ".join(rest), every, mine)
-    return [*head, "run", *rest, "--partition", f"count:{k}/{n}"]
+    if not mine:
+        return ["true"]
+    return [*head, "run", *rest, "--partition", f"slice:{k}/{n}"]
 
 
 def matching(listing: str) -> list[str]:
     """Read the tests a `cargo nextest list --message-format json` selects.
 
     Returns:
-        `<binary-id> <test>` for every test whose filter matches.
+        `<binary-id> <test>` for every test whose filter matches, by
+        binary id, then test name: the order nextest deals in.
 
     """
     doc = decoded.as_object(decoded.load_json(listing), "nextest list")
     suites = decoded.as_object(doc.get("rust-suites"), "rust-suites")
     out = []
-    for binary, suite in suites.items():
+    for binary, suite in sorted(suites.items()):
         cases = decoded.as_object(
             decoded.as_object(suite, binary).get("testcases"), "testcases"
         )
-        for name, case in cases.items():
+        for name, case in sorted(cases.items()):
             match = decoded.as_object(
                 decoded.as_object(case, name).get("filter-match"), "filter-match"
             )

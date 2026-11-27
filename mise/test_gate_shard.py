@@ -270,20 +270,69 @@ class Plan(Planted):
         ]
         self.assertEqual(want, rows[:2])
 
-    def test_a_named_properties_task_splits_the_leg(self) -> None:
-        """Naming a properties task splits the leg into its tasks."""
-        files = self.plant(THREE, '[properties]\n"test:python-properties" = 2\n')
-        rows = [
-            r
-            for r in legs(gate_shard.plan(COSTS, files, self.tree))
-            if r[0] == "properties"
+    def properties(self, files: list[str]) -> list[tuple[object, ...]]:
+        """Plan the planted tree and keep its properties rows.
+
+        Returns:
+            The properties leg's (leg, task, shard, of).
+
+        """
+        rows = legs(gate_shard.plan(COSTS, files, self.tree))
+        return [r for r in rows if r[0] == "properties"]
+
+    def test_properties_no_population_is_one_row(self) -> None:
+        """No property file tracked: no task applies, today's ci:properties."""
+        want: list[tuple[object, ...]] = [PROPERTIES_ROW]
+        self.assertEqual(want, self.properties(self.plant(THREE)))
+
+    def test_one_languages_properties_is_todays_matrix(self) -> None:
+        """Only Python properties: one applies, one row, today's ci:properties.
+
+        The TypeScript task's population is not tracked, so it plans no row.
+        """
+        files = [*self.plant(THREE), "pkg/prop_codec.py", "vendor/x/a.prop.test.ts"]
+        want: list[tuple[object, ...]] = [PROPERTIES_ROW]
+        self.assertEqual(want, self.properties(files))
+        whole = legs(gate_shard.plan(COSTS, files, self.tree))
+        rest: list[tuple[object, ...]] = [r for r in whole if r[0] != "test"]
+        want_rest: list[tuple[object, ...]] = [*LINT_ROWS, PROPERTIES_ROW]
+        self.assertEqual(want_rest, rest)
+
+    def test_both_languages_properties_plan_two_rows(self) -> None:
+        """Python and TypeScript properties tracked: a row each."""
+        files = [*self.plant(THREE), "prop_codec.py", "web/codec.prop.test.mts"]
+        want: list[tuple[object, ...]] = [
+            ("properties", "test:python-properties", 1, 1),
+            ("properties", "test:typescript-properties", 1, 1),
+        ]
+        self.assertEqual(want, self.properties(files))
+
+    def test_a_named_properties_task_is_sharded(self) -> None:
+        """A count on an applying properties task shards it; the other has no row."""
+        files = [
+            *self.plant(THREE, '[properties]\n"test:python-properties" = 2\n'),
+            "tests/prop_codec.py",
         ]
         want: list[tuple[object, ...]] = [
             ("properties", "test:python-properties", 1, 2),
             ("properties", "test:python-properties", 2, 2),
-            ("properties", "test:typescript-properties", 1, 1),
         ]
-        self.assertEqual(want, rows)
+        self.assertEqual(want, self.properties(files))
+
+    def test_the_applies_table_is_each_tasks_guard(self) -> None:
+        """Each pattern is in the task's own script, which lists that population."""
+        scripts = {
+            "test:python-properties": "python-properties.sh",
+            "test:typescript-properties": "typescript-properties.sh",
+        }
+        names: list[str] = sorted(scripts)
+        applied: list[str] = sorted(gate_shard.APPLIES)
+        self.assertEqual(names, applied)
+        for task, script in scripts.items():
+            text = (HERE / script).read_text("utf-8")
+            for pattern in gate_shard.APPLIES[task]:
+                with self.subTest(task=task, pattern=pattern):
+                    self.assertIn(f"'*{pattern.lstrip('*')}'", text)
 
     def test_an_untracked_config_is_not_read(self) -> None:
         """Only a tracked config plans: the gate reads tracked files only."""
@@ -311,6 +360,18 @@ class Plan(Planted):
 
 class Refused(Planted):
     """Every defect in the repository's file is red, by name (#2160)."""
+
+    def test_a_count_on_a_task_the_tree_gives_nothing_to_run(self) -> None:
+        """TypeScript properties counted, none tracked: red, by name."""
+        got = self.red(THREE, '[properties]\n"test:typescript-properties" = 2\n')
+        want: list[str] = [
+            (
+                "shards.toml: [properties] test:typescript-properties: the tree"
+                " tracks nothing it runs (*.prop.test.ts, *.prop.test.tsx,"
+                " *.prop.test.mts, *.prop.test.cts), so it has no row to shard"
+            )
+        ]
+        self.assertEqual(want, got)
 
     def test_a_count_on_a_task_with_no_adapter(self) -> None:
         """Cargo test cannot take a share: red, by name, never run n times."""

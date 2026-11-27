@@ -26,9 +26,16 @@ the whole suite:
                 profiles need its own binaries), merged the same way into
                 `rust-lcov.info`, which the rust leg reads in place of a
                 report of profiles.
-    plpgsql     one row's report, as it is: plpgsql_check reports each
-                function's percentages, not which statements ran, so
-                two rows' cannot be merged, and two are red by name.
+    plpgsql     every row's reports, side by side in one
+                `plpgsql-coverage/` directory, one file per test
+                database (#2163's shape, whose `totals` merges them):
+                a row's own directory's files keep their names, and a
+                row's single `plpgsql-coverage.json` goes in as
+                `<row>.json`. Where one row wrote the single file and
+                nothing else did, it is also kept as that file, for a
+                reader of the single report; two such reports are never
+                one file, so a reader of one reports nothing and the
+                floor's record reds the leg that reported nothing.
 
 A file two rows wrote under one name with different contents (other
 than the merged ones) is red by name: nothing is overwritten unseen.
@@ -199,6 +206,24 @@ def merged(rows: list[Path], report: str) -> Lcov | None:
     return data
 
 
+def plpgsql(rows: list[Path], run: Path, red: list[str]) -> None:
+    """Gather every row's PL/pgSQL reports into one directory."""
+    singles = [row / "plpgsql-coverage.json" for row in rows]
+    singles = [p for p in singles if p.is_file()]
+    into = run / "plpgsql-coverage"
+    for row in rows:
+        mine = row / "plpgsql-coverage"
+        for file in sorted(mine.iterdir()) if mine.is_dir() else []:
+            if file.is_file():
+                place(file, into / file.name, red)
+    for single in singles:
+        place(single, into / f"{single.parent.name}.json", red)
+    if len(singles) == 1 and not any(
+        (row / "plpgsql-coverage").is_dir() for row in rows
+    ):
+        place(singles[0], run / "plpgsql-coverage.json", red)
+
+
 def merge(rows: list[Path], run: Path) -> list[str]:
     """Gather the rows' run directories into one.
 
@@ -221,18 +246,7 @@ def merge(rows: list[Path], run: Path) -> list[str]:
     if rust is not None:
         (run / "rust").mkdir(exist_ok=True)
         (run / "rust-lcov.info").write_text(write_lcov(rust), "utf-8")
-    plpgsql = [row / "plpgsql-coverage.json" for row in rows]
-    plpgsql = [p for p in plpgsql if p.is_file()]
-    if len(plpgsql) > 1:
-        names = ", ".join(p.parent.name for p in plpgsql)
-        red.append(
-            f"plpgsql-coverage.json: {len(plpgsql)} rows wrote one ({names}):"
-            " plpgsql_check reports each function's percentages, not the"
-            " statements that ran, so two cannot be one figure; run the"
-            " database suite in one task, on one shard"
-        )
-    elif plpgsql:
-        place(plpgsql[0], run / "plpgsql-coverage.json", red)
+    plpgsql(rows, run, red)
     return red
 
 

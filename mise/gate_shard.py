@@ -17,8 +17,11 @@ file, with the belt's decoder, before any tool is installed. Every task
 in `test`'s dependency closure that has a run gets a row of its own, and
 so does `test`'s own run if it has one. A repository that wants its slow
 suite on a runner of its own makes that suite a task of its own. The
-properties leg is the closure of `ci:properties`, split the same way
-where SPLIT says so (the seam below).
+properties leg is the closure of `ci:properties`, split the same way,
+and a belt task there gets a row only where the tree tracks what it
+runs (APPLIES): the rule repo-mutants.yml's adoption keeps, decided
+from tracked files before any tool is installed. A leg of one row, or
+of none, is today's `ci:<leg>`.
 
 A row runs `mise run <task>`, its own depends included: a dependency
 that is also a row of its own runs twice, and that is accepted (ruled
@@ -97,11 +100,22 @@ CONFIGS = ("mise.toml", ".mise.toml", ".config/mise.toml", ".config/mise/config.
 # Where each split leg's closure starts, and whether the start's own run
 # is part of the leg (`test`'s is the suite; `ci:properties`'s is an echo).
 STARTS = {"test": ("test", True), "properties": ("ci:properties", False)}
-# THE SEAM (#2160, forks A with the owner): whether a leg the repository's
-# file says nothing about is split by task anyway. True: every task in the
-# leg's closure is a row. False: the leg is one `ci:<leg>` row until the
-# file names one of its tasks.
-SPLIT = {"test": True, "properties": False}
+# What each belt task the plan may leave out runs over (#2160, the
+# owner's ruling): a tracked file whose NAME matches one of the patterns,
+# outside vendor/, exactly the population the task's own guard lists
+# (python-properties.sh: `prop_*.py` at any depth; typescript-
+# properties.sh: `*.prop.test.{ts,tsx,mts,cts}`). The plan gives the
+# task no row where the tree tracks none: it would skip clean there.
+# mise/test_gate_shard.py holds each row to its task's guard.
+APPLIES = {
+    "test:python-properties": ("prop_*.py",),
+    "test:typescript-properties": (
+        "*.prop.test.ts",
+        "*.prop.test.tsx",
+        "*.prop.test.mts",
+        "*.prop.test.cts",
+    ),
+}
 # GitHub refuses a matrix of more than 256 jobs.
 MATRIX_LIMIT = 256
 # The languages each per-language count is for; a count above 1 needs
@@ -451,17 +465,43 @@ def adapter(task: Task) -> str | None:
     return None
 
 
-def leg_tasks(leg: str, tasks: dict[str, Task]) -> tuple[list[str], list[str]]:
+def applies(task: str, files: list[str]) -> bool:
+    """Say whether the tree tracks what a task runs over.
+
+    Returns:
+        True for a task APPLIES does not name, or one with a tracked
+        file outside vendor/ whose name matches one of its patterns.
+
+    """
+    patterns = APPLIES.get(task)
+    if patterns is None:
+        return True
+    return any(
+        fnmatch.fnmatchcase(f.rsplit("/", 1)[-1], p)
+        for f in files
+        if not f.startswith("vendor/")
+        for p in patterns
+    )
+
+
+def leg_tasks(
+    leg: str, tasks: dict[str, Task], files: list[str]
+) -> tuple[list[str], list[str], list[str]]:
     """List the tasks that are a split leg's rows.
 
     Returns:
-        The tasks with a command of their own, and the closure's defects.
+        The tasks with a command of their own that apply here, the ones
+        that do not, and the closure's defects.
 
     """
     start, own = STARTS[leg]
     reached, red = closure(start, tasks.get, sorted(tasks))
     rows = [n for n in reached if runs(tasks[n]) and (n != start or own)]
-    return rows, red
+    return (
+        [n for n in rows if applies(n, files)],
+        [n for n in rows if not applies(n, files)],
+        red,
+    )
 
 
 def plan(
@@ -486,9 +526,14 @@ def plan(
     ]
     for leg in ("test", "properties"):
         named = counts.tasks.get(leg, {})
-        names, defects = leg_tasks(leg, tasks)
+        names, idle, defects = leg_tasks(leg, tasks, files)
         red += defects
-        for task in sorted(set(named) - set(names)):
+        for task in sorted(set(named) & set(idle)):
+            red.append(
+                f"{FILE}: [{leg}] {task}: the tree tracks nothing it runs"
+                f" ({', '.join(APPLIES[task])}), so it has no row to shard"
+            )
+        for task in sorted(set(named) - set(names) - set(idle)):
             known = ", ".join(names) or "none"
             red.append(f"{FILE}: [{leg}] {task}: not a task of the {leg} leg ({known})")
         for task, got in sorted(named.items()):
@@ -499,8 +544,7 @@ def plan(
                     " tasks, or vitest, nextest or go test through measured), so"
                     " every shard would run all of it"
                 )
-        split = SPLIT[leg] or bool(named)
-        legs = [(t, named.get(t, 1)) for t in names] if split else []
+        legs = [(t, named.get(t, 1)) for t in names]
         if sum(n for _, n in legs) <= 1:
             legs = [(f"ci:{leg}", 1)]
         rows += [
@@ -656,12 +700,16 @@ def held(leg: str, mise: str) -> list[str]:
 
     start, own = STARTS[leg]
     reached, _ = closure(start, lookup, names)
+    files = tracked()
     live = [
         n
         for n in reached
-        if (t := lookup(n)) is not None and runs(t) and (n != start or own)
+        if (t := lookup(n)) is not None
+        and runs(t)
+        and (n != start or own)
+        and applies(n, files)
     ]
-    planned, _ = leg_tasks(leg, task_table(tracked(), Path.cwd()))
+    planned, _, _ = leg_tasks(leg, task_table(files, Path.cwd()), files)
     if live == planned:
         return []
     line = (

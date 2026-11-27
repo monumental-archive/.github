@@ -285,17 +285,41 @@ class Lcov(unittest.TestCase):
             want: list[str] = ["covmeta.x: two rows wrote it with different contents"]
             self.assertEqual(want, got)
 
-    def test_two_plpgsql_reports_are_red(self) -> None:
-        """plpgsql_check's per-function percentages cannot be merged: red by name."""
+    def test_two_rows_plpgsql_reports_reach_one_directory(self) -> None:
+        """Each row's reports, both shapes, side by side for #2163's merge."""
         with tempfile.TemporaryDirectory() as scratch:
             base = Path(scratch)
-            for index in range(2):
-                row = base / "rows" / f"r{index}"
-                row.mkdir(parents=True)
-                (row / "plpgsql-coverage.json").write_text("{}", "utf-8")
-            got = coverage_merge.merge(sorted((base / "rows").iterdir()), base / "run")
-            self.assertEqual(1, len(got))
-            self.assertIn("plpgsql-coverage.json: 2 rows wrote one (r0, r1)", got[0])
+            (base / "rows" / "r0" / "plpgsql-coverage").mkdir(parents=True)
+            (base / "rows" / "r0" / "plpgsql-coverage" / "db-a.json").write_text(
+                "{}", "utf-8"
+            )
+            (base / "rows" / "r1").mkdir(parents=True)
+            (base / "rows" / "r1" / "plpgsql-coverage.json").write_text("[]", "utf-8")
+            run = base / "run"
+            none: list[str] = []
+            got = coverage_merge.merge(sorted((base / "rows").iterdir()), run)
+            self.assertEqual(none, got)
+            files: list[str] = sorted(
+                p.name for p in (run / "plpgsql-coverage").iterdir()
+            )
+            want: list[str] = ["db-a.json", "r1.json"]
+            self.assertEqual(want, files)
+            self.assertFalse((run / "plpgsql-coverage.json").exists())
+
+    def test_one_single_report_is_kept_as_the_file(self) -> None:
+        """One row wrote the single report: kept as it is, and in the directory."""
+        with tempfile.TemporaryDirectory() as scratch:
+            base = Path(scratch)
+            (base / "rows" / "r0").mkdir(parents=True)
+            (base / "rows" / "r0" / "plpgsql-coverage.json").write_text("{}", "utf-8")
+            (base / "rows" / "r1").mkdir(parents=True)
+            run = base / "run"
+            none: list[str] = []
+            self.assertEqual(
+                none, coverage_merge.merge(sorted((base / "rows").iterdir()), run)
+            )
+            self.assertEqual("{}", (run / "plpgsql-coverage.json").read_text("utf-8"))
+            self.assertTrue((run / "plpgsql-coverage" / "r0.json").is_file())
 
     def test_the_command_line(self) -> None:
         """Two directories, or the usage exit."""
