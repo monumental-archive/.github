@@ -68,6 +68,17 @@ command -v gh > /dev/null || {
 # holds: Scorecard (#1621), Best Practices and the level shield had
 # kept a bare read each.
 ua="${GITHUB_REPOSITORY_OWNER}/.github audit:badges (https://github.com/${GITHUB_REPOSITORY_OWNER}/.github)"
+# A Best Practices entry is asked past the issuer's shared cache
+# (#2084). bestpractices.dev sends `Cache-Control: no-store`, yet the
+# varnish in front of it served iiif-server's entry with `Age: 692173`
+# and monumental-archive-db's with `Age: 613594`, so the week bound
+# below read both as unanswered while the issuer held both as passing.
+# A query the cache has never seen is a miss on both varnish layers and
+# the issuer's own answer (measured 2026-11-28: `x-cache: MISS, MISS`,
+# `Age: 0`); the issuer ignores the parameter. One value per run, so the
+# cache holds at most one dead key per entry per week, and every other
+# reader keeps the shared copy.
+fresh="fresh=$(date +%s)"
 ask_code=""
 ask_body=""
 ask_stale=""
@@ -248,7 +259,7 @@ while read -r repo; do
       https://www.bestpractices.dev/projects/*/badge | https://bestpractices.dev/projects/*/badge)
         id="${url##*/projects/}"
         id="${id%/badge}"
-        ask "https://www.bestpractices.dev/projects/${id}.json"
+        ask "https://www.bestpractices.dev/projects/${id}.json?${fresh}"
         bp="${ask_body}"
         hear "${bp}"
         if [[ ${heard} == absent ]]; then
@@ -274,7 +285,7 @@ while read -r repo; do
         # since withdrawn, is the drift #168 watches for.
         id="${url##*/projects/}"
         id="${id%/baseline}"
-        ask "https://www.bestpractices.dev/projects/${id}.json"
+        ask "https://www.bestpractices.dev/projects/${id}.json?${fresh}"
         bp="${ask_body}"
         hear "${bp}"
         if [[ ${heard} == absent ]]; then
