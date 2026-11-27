@@ -13,6 +13,10 @@ INPUT set, on the pull request where a human introduces the input.
 The model: for every dependency this repo declares, render the widest
 subject the org's owned template could mint for it, and hold that to the
 ceiling. A dependency that passes cannot produce a title that does not.
+Where the template names `newVersion` on a lock-file update (#2145), a
+range-declared npm or cargo dependency is measured at the widest version
+its tracked lock file resolves, read through coverage_js_runner.locked,
+the belt's one lock-file reader; one no lock file answers is a finding.
 
 Reads the tracked file list on stdin, NUL-separated, the belt
 convention: the task enumerates with `org_tracked` (#1986) and the
@@ -24,9 +28,11 @@ import os
 import re
 import sys
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
+import coverage_js_runner
 import decoded
 import findings as writer
 import typed_std
@@ -89,6 +95,13 @@ PR_NUMBER_DIGITS = 6
 # pull request — loudly, with the remedy this script prints — after
 # roughly three major-digit rollovers.
 VERSION_GROWTH = 3
+#
+# THE LOCK-FILE BRANCH (#2145). The template names `newVersion` where an
+# update moves only the lock file, because the range it declares does
+# not move and a subject naming it repeats on every bump. Its width is
+# the widest version the repository's lock file resolves for the
+# dependency, plus the same allowance: a version not in the tree yet is
+# the same problem whether the manifest or the lock file carries it.
 
 # The squash tail GitHub appends, at the pinned worst case. Named once
 # so the advisory rendering can say what it is not charging (#686).
@@ -170,6 +183,35 @@ BACKEND = re.compile(r"^[a-z][a-z0-9]*:")
 # Translating is the whole of the difference for the patterns a
 # customManager can carry — everything else in them is ordinary PCRE.
 JS_GROUP = re.compile(r"\(\?<(?=[A-Za-z_])")
+
+# The ONE block helper the model renders (#2145): the preset names the
+# installed version on a lock-file update and the declared value on
+# every other one. Both branches are rendered and the wider is charged,
+# because whether an update is a lock-file update is Renovate's to know
+# after its lookup, not this task's before it. Exactly this shape and
+# nothing wider: a branch holding another block, or any other helper,
+# is left in the text and reported as unmodelled, as every placeholder
+# this task cannot resolve is (#576: no simulation from memory).
+LOCKFILE_BRANCHES = re.compile(
+    r"\{\{#if isLockfileUpdate\}\}"
+    r"(?P<lock>(?:(?!\{\{[#/]|\{\{else\}\}).)*)"
+    r"\{\{else\}\}"
+    r"(?P<other>(?:(?!\{\{[#/]|\{\{else\}\}).)*)"
+    r"\{\{/if\}\}",
+    re.DOTALL,
+)
+# The managers whose declared value is a RANGE a lock file resolves, and
+# the lock files that resolve it, through the belt's one reader
+# (coverage_js_runner.locked). Go modules are exact in go.mod, and a
+# mise tool, an action or a regex-managed pin is its own version, so
+# none of those takes the lock-file branch with a value of its own.
+LOCK_MANAGERS: dict[str, tuple[str, ...]] = {
+    "npm": coverage_js_runner.LOCKFILES,
+    "cargo": (coverage_js_runner.CARGO_LOCK,),
+}
+# An exact npm version (`1.2.3`, `=1.2.3`, `v1.2.3-rc.1`): a pin, not a
+# range. Cargo reads a bare `1.2.3` as a caret range; only `=` is exact.
+EXACT_NPM = re.compile(r"=?v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.+-]*)?")
 
 
 class Dep(NamedTuple):
@@ -760,8 +802,31 @@ def advisory_suffix(preset: Renovate, repo_config: Renovate) -> str:
     raise SystemExit(1)
 
 
-def render(config: dict[str, str], dep_name: str, width: int) -> tuple[str, str | None]:
+def taken(branch: str, found: re.Match[str]) -> str:
+    """Keep one branch of a LOCKFILE_BRANCHES match.
+
+    Returns:
+        The text of the named branch.
+
+    """
+    return typed_std.group(found, branch) or ""
+
+
+def render(
+    config: dict[str, str],
+    dep_name: str,
+    width: int,
+    *,
+    version: int | None = None,
+    lockfile: bool = False,
+) -> tuple[str, str | None]:
     """Compose the widest subject the template can mint for a dependency.
+
+    `width` is the `newValue` width and `version` the `newVersion` one,
+    the same unless a lock file resolves the dependency to a version
+    wider than the range it declares (#2145). `lockfile` picks the
+    branch of LOCKFILE_BRANCHES the subject is rendered on; the caller
+    renders both.
 
     Returns:
         The subject, and the text of any field carrying a placeholder
@@ -770,13 +835,19 @@ def render(config: dict[str, str], dep_name: str, width: int) -> tuple[str, str 
 
     """
     unmodelled = None
-    version = "9" * width
+    branch = "lock" if lockfile else "other"
+    tokens = (
+        ("depName", dep_name),
+        ("newValue", "9" * width),
+        ("newVersion", "9" * (width if version is None else version)),
+    )
     parts = [f"{config['semanticCommitType']}({config['semanticCommitScope']}):"]
     for key in MESSAGE_FIELDS:
         text = config[key]
         if not text:
             continue
-        for token, value in (("depName", dep_name), ("newValue", version)):
+        text = LOCKFILE_BRANCHES.sub(partial(taken, branch), text)
+        for token, value in tokens:
             text = text.replace("{{{" + token + "}}}", value)
             text = text.replace("{{" + token + "}}", value)
         if "{{" in text:
@@ -1100,6 +1171,106 @@ def from_custom_managers(
 
 
 # ---------------------------------------------------------------------
+# The lock-file branch's version, read through the belt's one reader.
+
+
+def is_range(dep: Dep) -> bool:
+    """Test whether a dependency declares a range its lock file resolves.
+
+    Returns:
+        True for an npm or cargo dependency declared as a range: every
+        cargo requirement but `=`, every npm value that is neither an
+        exact version nor a protocol (`workspace:`, `file:`, `npm:`, a
+        git or tarball URL, a `user/repo` shorthand).
+
+    """
+    current = dep.current.strip()
+    if dep.manager == "cargo":
+        return not current.startswith("=")
+    if dep.manager == "npm":
+        protocol = ":" in current or "/" in current
+        return not (protocol or EXACT_NPM.fullmatch(current))
+    return False
+
+
+class Locks:
+    """The tracked lock files, read once each, and what they could not answer.
+
+    A range-declared dependency whose subject names `newVersion` takes
+    its width from the nearest tracked lock file of its manager, in its
+    manifest's directory or above it (a workspace member's lock file is
+    the root's). One it cannot read a version from is a finding, held in
+    `missing`, and never measured at the declared width instead (#2145):
+    that width is the one thing a lock-file update does not change.
+    """
+
+    def __init__(self, files: list[Path]) -> None:
+        """Hold the tracked files the lock files are looked up among."""
+        self.tracked = set(files)
+        self.texts: dict[Path, str | None] = {}
+        self.missing: list[str] = []
+        self.report: list[str] = []
+
+    def lockfile(self, dep: Dep) -> Path | None:
+        """Find the tracked lock file that resolves one dependency.
+
+        Returns:
+            Its path, or None when no directory from the manifest's up
+            tracks one.
+
+        """
+        here = Path(dep.origin).parent
+        for directory in (here, *here.parents):
+            for name in LOCK_MANAGERS[dep.manager]:
+                if directory / name in self.tracked:
+                    return directory / name
+        return None
+
+    def widest(self, dep: Dep) -> str | None:
+        """Read the widest version the lock file resolves one dependency to.
+
+        Returns:
+            The version, or None, with the reason in `missing`.
+
+        """
+        where = f"{dep.name} ({dep.manager}, {dep.origin}) declares {dep.current!r}"
+        lock = self.lockfile(dep)
+        if lock is None:
+            names = " or ".join(LOCK_MANAGERS[dep.manager])
+            self.missing.append(f"{where}, and no tracked {names} resolves it")
+            return None
+        if lock not in self.texts:
+            self.texts[lock] = read_text(lock, self.report)
+        text = self.texts[lock]
+        if text is None:
+            self.missing.append(f"{where}, and {lock} is unreadable")
+            return None
+        try:
+            versions = coverage_js_runner.locked(str(lock), text, dep.name)
+        except decoded.UndecodableError as exc:
+            self.missing.append(f"{where}, and {lock} is unreadable ({exc})")
+            return None
+        if not versions:
+            self.missing.append(f"{where}, and {lock} resolves no version of it")
+            return None
+        return max(sorted(versions), key=len)
+
+
+def names_version(template: Template, dep: Dep) -> bool:
+    """Test whether any subject the template mints for a dep names `newVersion`.
+
+    Returns:
+        True when a resolution's message fields carry the placeholder.
+
+    """
+    return any(
+        "newVersion" in config.get(key, "")
+        for config in effective(template, dep)
+        for key in MESSAGE_FIELDS
+    )
+
+
+# ---------------------------------------------------------------------
 
 
 def ceiling() -> int:
@@ -1155,15 +1326,18 @@ def widest_subject(
     dep: Dep,
     width: int,
     report: list[str],
+    version: int | None = None,
 ) -> tuple[str, int]:
     """Charge the widest subject any resolution of one dependency mints.
 
-    Two nested reasons for more than one candidate, and neither is
+    Three nested reasons for more than one candidate, and none is
     optional. Every resolution the rules can reach is rendered, because a
     rule carrying an unmodellable matcher may or may not apply (#724);
-    each of those is rendered twice, ordinarily and with the advisory
-    suffix, because Renovate mints both from the one template (#686). The
-    worst case is the widest of them all.
+    each of those on both branches of LOCKFILE_BRANCHES, because only
+    Renovate's lookup knows whether an update is a lock-file one (#2145);
+    and each of those twice, ordinarily and with the advisory suffix,
+    because Renovate mints both from the one template (#686). The worst
+    case is the widest of them all.
 
     Returns:
         That subject and the columns it is charged.
@@ -1171,18 +1345,21 @@ def widest_subject(
     """
     found, charged = "", 0
     for config in effective(template, dep):
-        for value in ("", template.suffix):
-            rendered = {**config, "commitMessageSuffix": value}
-            subject, unmodelled = render(rendered, dep.name, width)
-            line = f"{dep.name}: template field is unresolved — {unmodelled}"
-            if unmodelled and line not in report:
-                report.append(line)
-            # The advisory rendering spends the pull-request-number
-            # allowance on the suffix rather than charging both; the
-            # reasoning is pinned beside PR_TAIL.
-            cost = len(subject) - (len(PR_TAIL) if value else 0)
-            if cost > charged:
-                found, charged = subject, cost
+        for lockfile in (False, True):
+            for value in ("", template.suffix):
+                rendered = {**config, "commitMessageSuffix": value}
+                subject, unmodelled = render(
+                    rendered, dep.name, width, version=version, lockfile=lockfile
+                )
+                line = f"{dep.name}: template field is unresolved — {unmodelled}"
+                if unmodelled and line not in report:
+                    report.append(line)
+                # The advisory rendering spends the pull-request-number
+                # allowance on the suffix rather than charging both; the
+                # reasoning is pinned beside PR_TAIL.
+                cost = len(subject) - (len(PR_TAIL) if value else 0)
+                if cost > charged:
+                    found, charged = subject, cost
     return found, charged
 
 
@@ -1191,6 +1368,7 @@ def judge(
     template: Template,
     limit: int,
     report: list[str],
+    locks: Locks | None = None,
 ) -> list[Finding]:
     """Measure each dependency's widest subject against the ceiling.
 
@@ -1209,10 +1387,16 @@ def judge(
     fix. The subject printed carries the suffix where it is the culprit,
     which is what tells the two apart.
 
+    A range-declared dependency whose subject names `newVersion` is
+    measured at the version its lock file resolves (#2145), read through
+    `locks`; one the lock files cannot answer is left in `locks.missing`
+    and not measured at all. With no `locks`, no lock file is tracked.
+
     Returns:
         The dependencies that overrun it, widest first.
 
     """
+    locks = locks or Locks([])
     findings: list[Finding] = []
     seen: set[str] = set()
     for dep in sorted(deps):
@@ -1221,7 +1405,13 @@ def judge(
         seen.add(dep.name)
         growth = 0 if PSEUDO_VERSION.fullmatch(dep.current) else VERSION_GROWTH
         width = len(dep.current) + growth
-        widest, charged = widest_subject(template, dep, width, report)
+        version = None
+        if is_range(dep) and names_version(template, dep):
+            resolved = locks.widest(dep)
+            if resolved is None:
+                continue
+            version = len(resolved) + VERSION_GROWTH
+        widest, charged = widest_subject(template, dep, width, report, version)
         if charged > limit:
             findings.append(Finding(charged, dep, widest))
     return sorted(findings, reverse=True)
@@ -1264,7 +1454,8 @@ def main() -> int:
     """Run the budget over this repository.
 
     Returns:
-        0 when every declared dependency fits, 1 when any does not.
+        0 when every declared dependency fits, 1 when any does not or a
+        range-declared one has no locked version to measure.
 
     """
     files = [Path(path) for path in stdin_paths()]
@@ -1300,18 +1491,37 @@ def main() -> int:
         repo=repo_config,
         suffix=advisory_suffix(preset, repo_config),
     )
-    findings = judge(deps, template, limit, report)
-    for line in report:
+    locks = Locks(files)
+    findings = judge(deps, template, limit, report, locks)
+    for line in report + locks.report:
         print(f"lint:subject-budget: unmodelled — {line}", file=sys.stderr)
 
     counted = len({dep.name for dep in deps})
-    if not findings:
+    if locks.missing:
+        one = len(locks.missing) == 1
+        noun, verb = ("dependency", "has") if one else ("dependencies", "have")
+        writer.finding(
+            "",
+            f"{len(locks.missing)} range-declared {noun} {verb} no locked "
+            "version for the lock-file branch's newVersion",
+            [
+                "",
+                *locks.missing,
+                "",
+                "A lock-file update names the version it installs (#2145), and",
+                "the budget measures it from the lock file, never from the",
+                "declared range: track the lock file the manager writes.",
+            ],
+        )
+    if not findings and not locks.missing:
         noun = "dependency" if counted == 1 else "dependencies"
         print(
             f"lint:subject-budget: {counted} {noun}, every subject the "
             f"owned template can mint fits {limit} columns",
         )
         return 0
+    if not findings:
+        return 1
 
     noun = "dependency" if counted == 1 else "dependencies"
     writer.finding(
