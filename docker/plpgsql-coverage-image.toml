@@ -9,7 +9,9 @@
 # current together, as it does for docker/pgrx-base-images.toml. The
 # tag is the image's stream tag: the image has no version tags, and its
 # README says consumers pin the digest and the tag exists so Renovate
-# has something to resolve digest updates against.
+# has something to resolve digest updates against. A new digest waits
+# out the org's release-age floor like any other update until #2172
+# lets first-party images (`ghcr.io/monumental-archive/**`) skip it.
 
 # renovate: plpgsql-coverage-image
 image = "ghcr.io/monumental-archive/monumental-archive-db:latest@sha256:346b46139ebf9b9aa2514cda112161a909f4f30389b44c8163418043b0662439"

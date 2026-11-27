@@ -376,6 +376,16 @@ class TestLegs(unittest.TestCase):
         self.assertEqual(branches, cf.unheld(text))
         self.assertEqual(none, cf.unheld("plpgsql 85.0\nnot-held\nx not-held y\n"))
 
+    def test_only_a_ruled_leg_may_report_not_held(self) -> None:
+        """Any other leg's `not-held` is a malformed line (#2163)."""
+        measured, problems = cf.legs("python 90.0\npython-branches not-held\n")
+        python: list[tuple[str, Decimal]] = [("python", Decimal("90.0"))]
+        self.assertEqual(measured, python)
+        refused: list[str] = [OPT_OUT]
+        self.assertEqual(refused, problems)
+        none: list[str] = []
+        self.assertEqual(none, cf.unheld("python-branches not-held\n"))
+
 
 class TestRender(unittest.TestCase):
     """What the machinery writes, read back through the parser."""
@@ -1151,6 +1161,44 @@ class TestLegsRecord(unittest.TestCase):
         self.assertEqual((0, "", NO_PROBLEMS), (status, err, problems))
         self.assertEqual(("plpgsql", "plpgsql-branches"), parsed.legs)
         self.assertEqual(Decimal("83.4"), parsed.floor)
+
+    def test_a_leg_not_ruled_not_held_is_refused_by_hold(self) -> None:
+        """coverage:check refuses the line by name and holds nothing."""
+        text = legs_record("83.4", "python python-branches")
+        with Tree(text) as tree:
+            status, out, err = run(
+                cf.hold,
+                tree.path,
+                "coverage:check",
+                "python 86.0\npython-branches not-held\n",
+                GATE,
+            )
+            path = tree.path
+        self.assertEqual((1, ""), (status, out))
+        self.assertEqual(f"{TASK}: {path} {OPT_OUT}\n", err)
+
+    def test_a_leg_not_ruled_not_held_is_refused_by_derive(self) -> None:
+        """The derivation refuses the line by name and writes nothing."""
+        text = legs_record("83.4", "python python-branches")
+        with Tree(text) as tree:
+            status, _, err = run(
+                cf.derive,
+                tree.path,
+                "python 86.0\npython-branches not-held\n",
+                "v1.2.0",
+                adopt=False,
+            )
+            after, path = tree.text(), tree.path
+        self.assertEqual(1, status)
+        self.assertEqual(text, after)
+        self.assertEqual(f"{TASK}: {path} {OPT_OUT}\n", err)
+
+
+# A `not-held` from a leg no ruling allows (#2163), as legs() names it.
+OPT_OUT = (
+    "measurement 'python-branches not-held' is not `<leg> <percent>`: only"
+    " plpgsql-branches may report `not-held` (#2163)"
+)
 
 
 def owned_record(legs: str) -> str:

@@ -41,9 +41,8 @@
       "semanticCommitType": "fix"
     },
     {
-      "description": "The PL/pgSQL coverage leg's test database (#2163) is the org's own image, so it moves with no age gate, as the preset's first-party rule moves `monumental-archive/**`: that rule matches by package name, and this one's is `ghcr.io/monumental-archive/monumental-archive-db`, outside it. Selected by file, the base-image rule's precedent. It is a test input, never shipped, so it keeps the preset's `chore`; the topic is the image's short name so the subject fits lint:subject-budget.",
+      "description": "The PL/pgSQL coverage leg's test database (#2163), docker/plpgsql-coverage-image.toml: its topic is the image's short name, because the owned template would render the full `ghcr.io/monumental-archive/monumental-archive-db` past 72 columns (lint:subject-budget measured 92). Selected by file, the base-image rule's precedent. It is a test input, never shipped, so it keeps the preset's `chore`.",
       "matchFileNames": ["docker/plpgsql-coverage-image.toml"],
-      "minimumReleaseAge": "0 days",
       "commitMessageTopic": "monumental-archive-db"
     },
     {
