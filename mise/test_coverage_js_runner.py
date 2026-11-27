@@ -18,6 +18,7 @@ import unittest
 from pathlib import Path
 
 import coverage_js_runner as cj
+import decoded
 import hermetic
 
 # The task that runs the helper, whose name its findings carry (#1934).
@@ -48,6 +49,78 @@ class Readers(unittest.TestCase):
         ):
             with self.subTest(manifest=manifest):
                 self.assertEqual(runner, cj.other_runner(cj.read_manifest(manifest)))
+
+
+# One lockfile of each format the reader answers, and the versions each
+# resolves for its package.
+PNPM_LOCK = (
+    "packages:\n\n  vitest@4.1.12:\n    resolution: {}\n\nsnapshots:\n\n"
+    "  vitest@4.1.12(@types/node@22.0.0):\n    dependencies: {}\n"
+    "  vitest@3.2.4:\n    dependencies: {}\n"
+)
+# A nested node_modules entry is another package's copy, not the root's.
+NPM_LOCK = (
+    '{"packages": {"node_modules/vitest": {"version": "4.1.12"},'
+    ' "node_modules/x/node_modules/vitest": {"version": "1.0.0"}}}'
+)
+YARN_LOCK = 'vitest@^4, vitest@^4.1.0:\n  version "4.1.12"\n  resolved "x"\n'
+BERRY_LOCK = '"vitest@npm:^4":\n  version: 4.1.12\n  resolution: "vitest@npm:4.1.12"\n'
+BUN_LOCK = '{"packages": {"vitest": ["vitest@4.1.12", "", {}, "sha"]}}'
+CARGO_LOCK = (
+    '[[package]]\nname = "serde"\nversion = "1.0.154"\n\n'
+    '[[package]]\nname = "serde_json"\nversion = "1.0.140"\n'
+)
+NONE: set[str] = set()
+ONE: set[str] = {"4.1.12"}
+TWO: set[str] = {"4.1.12", "3.2.4"}
+CRATE: set[str] = {"1.0.154"}
+
+
+class Locked(unittest.TestCase):
+    """The version each lockfile resolves an entry to (#2145)."""
+
+    def test_every_format_reads_the_installed_version(self) -> None:
+        """The version installed, never the range the entry was asked for."""
+        for lockfile, lock, name, want in (
+            ("pnpm-lock.yaml", PNPM_LOCK, "vitest", TWO),
+            ("package-lock.json", NPM_LOCK, "vitest", ONE),
+            ("yarn.lock", YARN_LOCK, "vitest", ONE),
+            ("yarn.lock", BERRY_LOCK, "vitest", ONE),
+            ("bun.lock", BUN_LOCK, "vitest", ONE),
+            ("Cargo.lock", CARGO_LOCK, "serde", CRATE),
+        ):
+            with self.subTest(lockfile=lockfile, lock=lock[:24]):
+                self.assertEqual(want, cj.locked(lockfile, lock, name))
+
+    def test_an_indented_yarn_mention_is_not_an_entry(self) -> None:
+        """Berry's `resolution:` line repeats an entry; alone it is none."""
+        lock = '"other@npm:^1":\n  version: 1.0.0\n  resolution: "vitest@npm:4.1.12"\n'
+        self.assertEqual(NONE, cj.locked("yarn.lock", lock, "vitest"))
+
+    def test_a_name_is_matched_whole_and_literally(self) -> None:
+        """`vitest` is not `@vitest/expect`, and a dot in a name is a dot."""
+        lock = "packages:\n\n  '@vitest/expect@4.1.12':\n  lodashxget@4.4.2:\n"
+        self.assertEqual(NONE, cj.locked("pnpm-lock.yaml", lock, "vitest"))
+        self.assertEqual(NONE, cj.locked("pnpm-lock.yaml", lock, "lodash.get"))
+        self.assertEqual(ONE, cj.locked("pnpm-lock.yaml", lock, "@vitest/expect"))
+
+    def test_an_entry_without_a_version_reads_none(self) -> None:
+        """An entry whose version is not where its format writes one."""
+        for lockfile, lock in (
+            ("package-lock.json", '{"packages": {"node_modules/vitest": {}}}'),
+            ("yarn.lock", 'vitest@^4:\n  resolved "x"\n'),
+        ):
+            with self.subTest(lockfile=lockfile):
+                self.assertEqual(NONE, cj.locked(lockfile, lock, "vitest"))
+
+    def test_a_cargo_lock_of_the_wrong_shape_is_refused(self) -> None:
+        """Not TOML, or a package table of another shape, raises by where."""
+        for lock in ("[[package]\n", "package = 1\n", '[[package]]\nname = "a"\n'):
+            with (
+                self.subTest(lock=lock),
+                self.assertRaises(decoded.UndecodableError),
+            ):
+                cj.locked("Cargo.lock", lock, "a")
 
 
 class Main(unittest.TestCase):
