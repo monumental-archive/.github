@@ -618,14 +618,15 @@ def git_tree(files: dict[str, str]) -> Path:
 
 
 def floor_file(*legs: str) -> str:
-    """Write a .coverage-floor holding the given legs apart.
+    """Write a .coverage-floor holding the given legs read off the gate.
 
     Returns:
         The file, as the derivation writes it.
 
     """
+    measured = {"python": Decimal(95)} | dict.fromkeys(legs, Decimal(80))
     return coverage_floor.render(
-        Decimal(95), "v1.0.0", separate=dict.fromkeys(legs, Decimal(80))
+        {leg: coverage_floor.fresh(m) for leg, m in measured.items()}, "v1.0.0"
     )
 
 
@@ -1061,7 +1062,7 @@ class Refusals(unittest.TestCase):
             ("[w]\nx = 1\n", "w.x is not an object"),
             ('[w.x]\nwhen = "a"\n', "w.x.when is not a list of strings"),
             ("[w.x]\nwhen = [1]\n", "w.x.when is not a list of strings"),
-            ('[w.x]\nfloor = "python"\n', "w.x.floor is not a leg held apart"),
+            ('[w.x]\nfloor = "python"\n', "w.x.floor is not a leg read off the gate"),
             ('[w.x]\nfor = ["a"]\n', "w.x carries for: a row has `when` and `floor`"),
         ]
         for text, message in rows:

@@ -3,9 +3,9 @@
 # being released. Org canon — see docs/release.md and #652.
 #
 # The floor is DERIVED STATE, like the version, the changelog and the
-# pgrx upgrade scripts beside it: the machinery measures, writes
-# `floor = min(90, measured - band)`, and the file rides the release
-# commit (the cap, #1786). It
+# pgrx upgrade scripts beside it: the machinery measures, writes each
+# leg's own `floor = min(90, measured - band)` (#2143), and the file
+# rides the release commit (the cap, #1786). It
 # was a hand-typed number until the org measured what that costs —
 # stele's ceiling fell 6.5 points in two days with nothing red and
 # nothing noticed, because the floor sat far enough below the ceiling
@@ -13,10 +13,12 @@
 #
 # The ratchet law lives in mise/coverage_floor.py, with the drift check
 # `coverage:check` runs, so there is one definition of "the floor never
-# falls" rather than a release-time copy of it. If the measurement is
-# below the floor — the line the gate already held, so a merged pull
-# request cannot red this step (#1786) — that script refuses and this
-# step fails the Release PR, loudly, before a version number is spent.
+# falls" rather than a release-time copy of it. If a leg measures below
+# its floor — the line the gate already held, so a merged pull request
+# cannot red this step (#1786) — that script refuses by the leg's name
+# and this step fails the Release PR, loudly, before a version number
+# is spent. A floor file in the shape before #2143 is refused the same
+# way, naming `mise run coverage:adopt`: a release never migrates it.
 #
 # Reads, when the gate kept one: the `coverage-figures-<sha>` artifact of
 # the commit being released, through `gh api` with GH_TOKEN (#1622).

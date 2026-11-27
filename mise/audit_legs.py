@@ -113,7 +113,9 @@ def row_of(where: str, value: object) -> Row:
     floor = row.get("floor")
     if floor is not None and floor not in coverage_floor.SEPARATE:
         legs = " or ".join(coverage_floor.SEPARATE)
-        msg = f"{where}.floor is not a leg held apart in .coverage-floor ({legs})"
+        msg = (
+            f"{where}.floor is not a leg read off the gate in .coverage-floor ({legs})"
+        )
         raise decoded.UndecodableError(msg)
     return Row(
         when=None if when is None else tuple(when),
@@ -158,7 +160,7 @@ def recorded(root: Path, tracked: list[str], leg: str) -> str | None:
     if FLOOR not in tracked:
         return f"no {FLOOR} is tracked"
     record, _ = coverage_floor.parse((root / FLOOR).read_text(encoding="utf-8"))
-    if record is None or leg in (record.separate or {}):
+    if record is None or leg in record.floors:
         return None
     return f"no {leg} line in {FLOOR}"
 

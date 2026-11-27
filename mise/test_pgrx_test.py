@@ -33,9 +33,11 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from decimal import Decimal
 from pathlib import Path
 from typing import ClassVar, override
 
+import coverage_floor
 import gate_cache_key
 import hermetic
 
@@ -66,13 +68,15 @@ def task_body(name: str) -> str:
     return found.group(1)
 
 
-# A floor the derived-state law accepts: measured 82.0 minus the band.
-FLOOR = """\
-# band: 2
-# measured: 82.0
-# derived: v1.0.0
-80.0
-"""
+# A floor the derived-state law accepts: the gate's rust leg and both
+# majors, each measured 82.0 minus the band, each its own (#2143).
+FLOOR = coverage_floor.render(
+    {
+        leg: coverage_floor.fresh(Decimal("82.0"))
+        for leg in ("rust", "pgrx-pg17", "pgrx-pg18")
+    },
+    "v1.0.0",
+)
 
 CARGO_STUB = r"""#!/usr/bin/env bash
 printf 'cargo %s|cwd=%s|target=%s|profile=%s\n' "$*" "${PWD}" "${CARGO_TARGET_DIR:-}" \
@@ -385,18 +389,18 @@ class MeasuredRun(Planted):
         done, _ = self.run_pgrx()
         self.assertEqual(1, done.returncode)
         self.assertIn(
-            "test:pgrx: pgrx-pg18: 77.77777777777777% is below the derived floor 80.0%",
+            "test:pgrx: pgrx-pg18: 77.77777777777777% is below its derived floor 80.0%",
             done.stderr,
         )
 
     def test_a_major_at_the_floor_holds_it(self) -> None:
-        """18 of 18 holds the floor, and the hold names the major."""
+        """18 of 18 holds its floor, and the hold names the major."""
         self.floor()
         done, _ = self.run_pgrx(PLANT_LH="18")
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertIn("pgrx-pg18 100", done.stdout.splitlines())
         self.assertIn(
-            "test:pgrx: pgrx-pg18 leg holds the floor 80.0 (100%)", done.stderr
+            "test:pgrx: pgrx-pg18 leg holds its floor 80.0 (100%)", done.stderr
         )
 
     def test_the_hold_is_coverage_floor_py_scoped_to_its_major(self) -> None:
@@ -407,7 +411,7 @@ class MeasuredRun(Planted):
         the gate's. The hold is coverage_floor.py's (its line, its
         drift refusal), not a second comparison in the script.
         """
-        record = FLOOR.replace("80.0\n", "# legs: rust pgrx-pg17 pgrx-pg18\n80.0\n")
+        record = FLOOR
         (self.tree / ".coverage-floor").write_text(record, encoding="utf-8")
         done, _ = self.run_pgrx(PLANT_LH="18")
         self.assertEqual(0, done.returncode, done.stderr)
@@ -415,7 +419,7 @@ class MeasuredRun(Planted):
         got = [ln for ln in done.stdout.splitlines() if ln.startswith("pgrx-pg")]
         self.assertEqual(want, got)
         self.assertIn(
-            "test:pgrx: pgrx-pg18 leg holds the floor 80.0 (100%)", done.stderr
+            "test:pgrx: pgrx-pg18 leg holds its floor 80.0 (100%)", done.stderr
         )
         self.assertNotIn("measured none", done.stderr)
         # The floor read is coverage_floor.py's, so a floor off its own
@@ -438,7 +442,7 @@ class MeasuredRun(Planted):
         self.assertIn("pgrx-pg18 100", lines)
         for major in MAJORS:
             self.assertIn(
-                f"test:pgrx: pgrx-pg{major} leg holds the floor 80.0 (100%)",
+                f"test:pgrx: pgrx-pg{major} leg holds its floor 80.0 (100%)",
                 done.stderr,
             )
         targets = sorted(
@@ -677,7 +681,7 @@ class CoverageTasks(Planted):
         built = [ln for ln in log if ln.startswith("cargo llvm-cov --workspace")]
         self.assertEqual(NOTHING, built)
         self.assertIn(
-            "coverage:check: rust leg holds the floor 80.0 (90%)", done.stdout
+            "coverage:check: rust leg holds its floor 80.0 (90%)", done.stdout
         )
 
     def test_coverage_exclude_naming_the_extension_is_refused(self) -> None:
@@ -728,7 +732,7 @@ class CoverageTasks(Planted):
             "pgrx",
         ])
         self.assertEqual(0, done.returncode, done.stderr)
-        self.assertNotIn("below the derived floor", done.stderr)
+        self.assertNotIn("below its derived floor", done.stderr)
 
 
 class FannedPlan(Planted):

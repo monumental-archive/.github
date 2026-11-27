@@ -158,17 +158,28 @@ beside it (#652). [`release/derive-coverage-floor.sh`](../release/derive-coverag
 measures the tree being released — through
 [`mise/coverage-measure.sh`](../mise/coverage-measure.sh), the same
 measurement `coverage:check` enforces, so the gate and the derivation
-can never come from different flags — and writes
+can never come from different flags — and writes, for each leg,
 `floor = min(90, measured - band)`, band 2 points. The file rides the
 release commit as an `EXTRA_FILES` addition, exactly like the derived
 pgrx upgrade scripts.
 
-The law is a ratchet: **the floor never falls.** A release measuring
-below the floor FAILS here, in the Release PR, before a version number
-is spent; the resolution is tests, or a human consciously re-setting
-the floor with a recorded reason (`reset: <why>` in place of the
-derivation record). A release measuring within the band keeps the floor
-and its record as they stand; one measuring higher raises it.
+**Every leg is held to a floor of its own** (#2143): a `<leg> <floor>`
+line and a `<leg> measured:` record each, cut from that leg's own
+figure. The file once held one floor, cut from the weakest leg, and so
+held every stronger leg below its own figure — a language measuring
+well above the weakest could lose coverage down to it with nothing
+red. A file still in that shape (a bare floor line) is refused by name,
+with the command that rewrites it: `mise run coverage:adopt`. Each
+consumer rewrites its file in the same commit as the canon pin bump
+that brings the reader (the format-change rule, #652).
+
+The law is a ratchet: **no floor falls.** A release measuring a leg
+below its floor FAILS here, in the Release PR, before a version number
+is spent, naming the leg; the resolution is tests, or a human
+consciously re-setting that leg's floor with a recorded reason
+(`<leg> reset: <why>` in place of its `<leg> measured` record). A leg
+measuring within the band keeps its floor and its record as they
+stand; one measuring higher raises it.
 
 The release holds the line the gate holds — the floor itself — and not
 `floor + band` (#1786). The canon releases on every push to main, so a
@@ -176,13 +187,13 @@ release line above the gate's let a pull request pass its gate and then
 red main: three pushes running at 94.2 against a demanded 94.3, the
 same defect as #1659. What merges green now releases green.
 
-**The cap is 90** (#1786, ruled 2026-11-20). No floor is derived above
-it: above 90 coverage moves freely, and the floor stops chasing the
-ceiling towards 100. A floor written before the cap — above 90, agreeing
-with its record's uncapped derivation — is not drift: `coverage:check`
-enforces it at 90 and the next release rewrites it, so the canon bump
-reds no repository. The legs held apart (`rust-branches`,
-`go-branches`) live under the same cap and the same law.
+**The cap is 90** (#1786, ruled 2026-11-20), for every leg, the
+PL/pgSQL legs included (#2143): no floor is derived above it, so a leg
+measured at 100 is held at 90. Above 90 coverage moves freely, and the
+floor stops chasing the ceiling towards 100. The two legs the Monday
+audit reads rather than the gate (`rust-branches`, `go-branches`) live
+under the same cap and the same law; the release path, which measures
+neither, carries their lines through unchanged.
 
 It was a hand-typed number until the org measured what that costs:
 stele's ceiling fell 6.5 points in two days with four features landed,

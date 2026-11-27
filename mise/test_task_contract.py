@@ -524,8 +524,9 @@ class Lib(unittest.TestCase):
 """
 # A floor the derived-state law accepts, recording the python legs.
 FLOOR = (
-    "# band: 2\n# measured: 52.0\n# derived: v1.0.0\n"
-    "# legs: python python-branches\n50.0\n"
+    "# band: 2\n# derived: v1.0.0\n# legs: python python-branches\n"
+    "# python measured: 52.0\npython 50.0\n"
+    "# python-branches measured: 52.0\npython-branches 50.0\n"
 )
 SUITE_COMMAND = "python3 -m unittest discover -s tests -t ."
 
@@ -622,8 +623,8 @@ class OneRun(unittest.TestCase):
         )
 
     HELD = (
-        "coverage:check: python leg holds the floor 50.0 (100.0%)",
-        "coverage:check: python-branches leg holds the floor 50.0 (100.0%)",
+        "coverage:check: python leg holds its floor 50.0 (100.0%)",
+        "coverage:check: python-branches leg holds its floor 50.0 (100.0%)",
     )
 
     def test_ci_runs_the_suite_once_and_measures_the_bare_child(self) -> None:
@@ -647,10 +648,10 @@ class OneRun(unittest.TestCase):
             self.assertEqual(0, done.returncode, out)
             self.assertEqual(1, runs(tree), out)
             self.assertIn("coverage:check: no .coverage-floor, skipped", out)
-            self.assertNotIn("leg holds the floor", out)
+            self.assertNotIn("leg holds its floor", out)
 
     def test_coverage_check_alone_runs_test_once(self) -> None:
-        """Run on its own, coverage:check runs `test` and holds the floor."""
+        """Run on its own, coverage:check runs `test` and holds its floor."""
         with tempfile.TemporaryDirectory() as tmp:
             tree = plant(Path(tmp), "py")
             done = self.run_mise(tree, "coverage:check")

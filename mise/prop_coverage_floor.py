@@ -5,15 +5,15 @@ The properties of `test_coverage_floor.py`'s fixed rows (#1548), over
 generated measurements, provenances and floor files:
 
 - Round trip (T): a rendered file parses back to the record that
-  rendered it: the measurement quantised, the floor that measurement
-  minus the band (never below 0, never above the cap, #1786), the
-  provenance, and each separate leg likewise.
+  rendered it: each leg's measurement quantised, its floor that
+  measurement minus the band (never below 0, never above the cap,
+  #1786), the provenance, and the gate's legs in order (#2143).
 - Idempotence (I): quantising twice is quantising once, and never
   rounds up.
-- Invariance (V): the floor never falls: a write over a derived file
-  refuses, leaving it byte for byte, exactly when the measurement is
-  below the floor, and otherwise writes a floor no lower than the one
-  it replaced.
+- Invariance (V): no floor falls: a write over a derived file refuses,
+  leaving it byte for byte, exactly when a leg's measurement is below
+  that leg's floor, and otherwise writes every floor no lower than the
+  one it replaced.
 - Refusal (R): `parse` and `legs` read any text and answer with a
   record or their own problems, never a traceback.
 
@@ -45,10 +45,18 @@ PROVENANCE = (
     .map(str.strip)
     .filter(bool)
 )
-SEPARATE = st.dictionaries(st.sampled_from(cf.SEPARATE), PERCENT, max_size=1)
-# No separate leg, and one leg measured below a step.
+# A measurement: at least one leg the gate measures, and any read off it.
+LEGS = st.dictionaries(
+    st.sampled_from(["go", "rust", "python", "python-branches", "plpgsql"]),
+    PERCENT,
+    min_size=1,
+    max_size=3,
+)
+APART = st.dictionaries(st.sampled_from(cf.SEPARATE), PERCENT, max_size=1)
 NO_LEG: dict[str, Decimal] = {}
 SMALL_LEG: dict[str, Decimal] = {"rust-branches": Decimal("0.05")}
+FLOAT_LEG: dict[str, Decimal] = {"python": Decimal("61.53846153846154")}
+TINY_LEG: dict[str, Decimal] = {"go": Decimal("1.99")}
 
 
 def floor(measured: Decimal) -> Decimal:
@@ -65,24 +73,27 @@ def floor(measured: Decimal) -> Decimal:
 class RoundTrip(unittest.TestCase):
     """A rendered file reads back as what rendered it."""
 
-    @given(PERCENT, PROVENANCE, SEPARATE)
-    @example(Decimal("61.53846153846154"), "v1.0.0", NO_LEG)
-    @example(Decimal("1.99"), "x: y", SMALL_LEG)
+    @given(LEGS, PROVENANCE, APART)
+    @example(FLOAT_LEG, "v1.0.0", NO_LEG)
+    @example(TINY_LEG, "x: y", SMALL_LEG)
     def test_render_then_parse(
-        self, measured: Decimal, provenance: str, separate: dict[str, Decimal]
+        self, gate: dict[str, Decimal], provenance: str, apart: dict[str, Decimal]
     ) -> None:
-        """Floor, band, measurement, provenance and legs come back."""
-        record, problems = cf.parse(cf.render(measured, provenance, separate))
+        """Each leg's floor and measurement, the band and provenance come back."""
+        measured = gate | apart
+        floors = {leg: cf.fresh(m) for leg, m in measured.items()}
+        record, problems = cf.parse(cf.render(floors, provenance))
         self.assertEqual(problems, list[str]())
         if record is None:
             self.fail("a rendered file did not read back")
-        self.assertEqual(record.floor, floor(measured))
         self.assertEqual(record.band, cf.BAND)
-        self.assertEqual(record.measured, cf.quantise(measured))
         self.assertEqual(record.derived, provenance)
-        self.assertIsNone(record.reset)
-        legs = {leg: (floor(m), cf.quantise(m)) for leg, m in separate.items()}
-        self.assertEqual(record.separate, legs)
+        named: tuple[str, ...] = tuple(gate)
+        self.assertEqual(record.legs, named)
+        want = {
+            leg: cf.Held(floor(m), cf.quantise(m), None) for leg, m in measured.items()
+        }
+        self.assertEqual(record.floors, want)
 
 
 class Quantise(unittest.TestCase):
@@ -109,35 +120,47 @@ class Quantise(unittest.TestCase):
 
 
 class Ratchet(unittest.TestCase):
-    """The floor never falls, and the release holds the gate's line."""
+    """No floor falls, and the release holds the gate's line."""
 
-    @given(PERCENT, PERCENT, PROVENANCE)
-    @example(Decimal(50), Decimal("51.99"), "x")
-    @example(Decimal(50), Decimal(52), "x")
-    @example(Decimal(50), Decimal("47.99"), "x")
-    @example(Decimal("94.3"), Decimal("94.2"), "x")
+    @given(PERCENT, PERCENT, PERCENT, PERCENT, PROVENANCE)
+    @example(Decimal(50), Decimal(80), Decimal("51.99"), Decimal(80), "x")
+    @example(Decimal(50), Decimal(80), Decimal(52), Decimal("77.9"), "x")
+    @example(Decimal(50), Decimal(80), Decimal("47.99"), Decimal(90), "x")
+    @example(Decimal("94.3"), Decimal(80), Decimal("94.2"), Decimal(80), "x")
     def test_refuses_unchanged_or_rises(
-        self, first: Decimal, second: Decimal, provenance: str
+        self,
+        first: Decimal,
+        other: Decimal,
+        second: Decimal,
+        other_second: Decimal,
+        provenance: str,
     ) -> None:
-        """Refused: the file is untouched. Written: the floor is no lower."""
+        """Refused: the file is untouched. Written: no floor is lower."""
+        before_floors = {"go": cf.fresh(first), "rust": cf.fresh(other)}
         with tempfile.TemporaryDirectory() as scratch:
             path = Path(scratch) / ".coverage-floor"
-            before = cf.render(first, provenance)
+            before = cf.render(before_floors, provenance)
             path.write_text(before, encoding="utf-8")
             with (
                 contextlib.redirect_stdout(io.StringIO()),
                 contextlib.redirect_stderr(io.StringIO()),
             ):
-                status = cf.write(path, second, provenance, adopt=False)
+                status = cf.write(
+                    path, {"go": second, "rust": other_second}, provenance, adopt=False
+                )
             after = path.read_text(encoding="utf-8")
-        self.assertEqual(bool(status), cf.quantise(second) < floor(first))
+        falls = cf.quantise(second) < floor(first) or cf.quantise(other_second) < floor(
+            other
+        )
+        self.assertEqual(bool(status), falls)
         if status:
             self.assertEqual(after, before)
         else:
             written, _ = cf.parse(after)
             if written is None:
                 self.fail("the written file did not read back")
-            self.assertGreaterEqual(written.floor, floor(first))
+            for leg, held in before_floors.items():
+                self.assertGreaterEqual(written.floors[leg].floor, held.floor)
 
 
 class Refusal(unittest.TestCase):
@@ -149,22 +172,27 @@ class Refusal(unittest.TestCase):
             st.lists(
                 st.sampled_from([
                     "# band: 2",
-                    "# measured: 50.0",
                     "# derived: x",
-                    "# reset: why",
+                    "# legs: go",
+                    "# legs: go go",
+                    "# go measured: 50.0",
+                    "go 48.0",
+                    "# go reset: why",
                     "# rust-branches measured: 9",
                     "rust-branches 7",
                     "48.0",
-                    "nan",
-                    "1e999999",
+                    "go nan",
+                    "go 1e999999",
                     "-1",
                     "rust-branches",
+                    "# dropped: go",
                 ]),
                 max_size=8,
             ).map("\n".join),
         )
     )
     @example("rust-branches\n# band: 2\n48\n")
+    @example("# band: 2\n# legs: go\n# go measured: 50.0\ngo 48.0\n")
     def test_parse_answers_any_text(self, text: str) -> None:
         """A record, or None with at least one problem."""
         record, problems = cf.parse(text)
