@@ -176,6 +176,12 @@ seen_repos="$(wc -w <<< "${repos}" | tr -d ' ')"
 # scheduled security release (#1188), and a veto that does not exist
 # cannot be applied. Every repository carries them, adopter or not, so
 # the next adopter meets a veto that already works.
+#
+# The `kind:` labels are what the sessions act on: an issue's kind says
+# who settled it. `kind: for-triage` is what a session files from its
+# own work, measured and not decided; only a Fable triage pass turns it
+# into `kind: work-order`; `kind: brief` is a question filed on the
+# owner's word. A repository missing one cannot be triaged by label.
 keys="$(jq -r 'del(.labels) | keys[]' "${baseline}")"
 settings_body="$(jq -c 'del(.labels)' "${baseline}")"
 # One compact object per line, read on fd 3 in the loops below: no
