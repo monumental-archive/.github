@@ -1024,7 +1024,7 @@ version = "7.17.3"
 backend = "pipx:coverage"
 
 [[tools."pipx:hypothesis"]]
-version = "6.170.15"
+version = "6.170.16"
 backend = "pipx:hypothesis"
 
 [[tools."pipx:mypy"]]
