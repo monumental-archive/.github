@@ -183,7 +183,7 @@ jobs:
       # rest — base-attest.yml's rule, for the same reason.
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
-    uses: monumental-archive/signer/.github/workflows/sign.yml@fa0f874fd9335c9ccedf5b5d5f277c6362b3b7b1 # main
+    uses: monumental-archive/signer/.github/workflows/sign.yml@44a462f0cbb17a793a11661124d8715b58e5ef4b # main
     with:
       subjects: ${{ matrix.subjects }}
       predicate-type: https://openvex.dev/ns/v0.2.0
