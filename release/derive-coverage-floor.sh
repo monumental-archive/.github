@@ -62,17 +62,6 @@ fi
 # belt's own [env] and this runs as a plain step, not inside a mise task.
 belt="$(cd "$(dirname "${BASH_SOURCE[0]}")/../mise" && pwd)"
 
-# A floor with no measurable language is a repository mid-migration, not
-# a release to fail: `coverage:check` skips the same shape, and asks the
-# same `probe` which languages apply (#1331), so the two cannot disagree.
-applies=$("${belt}/coverage-measure.sh" "release:coverage-floor" probe)
-if [[ -z ${applies} ]]; then
-  echo ".coverage-floor with no measurable language (go.mod, Cargo.toml, tracked *.py"
-  echo "  with a test task, or package.json with vitest), skipped"
-  emit "files="
-  exit 0
-fi
-
 # The gate already measured this commit (#1622): the merge queue's run
 # judged the tree that lands, and kept the leg lines coverage:check held
 # to the floor as `coverage-figures-<sha>`. This reads that artifact

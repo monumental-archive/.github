@@ -6124,11 +6124,13 @@ depends = [{ task = "test", optional = true }]
 # branches for Python, #1331, lines and branches for TypeScript, #1357,
 # statements and branches for PL/pgSQL through plpgsql_check, #1547);
 # each leg is held to a floor of its own, cut from its own figure
-# (#2143), and red by name below it. Which languages apply is the
-# measurement script's `probe`. The pathspec test before it is only the
-# necessary half, written where mise/gate_tools.py's derivation can read
-# it (#1410): a tree with none of these can measure nothing, so the gate
-# need not install a coverage tool for it.
+# (#2143), and red by name below it. Which legs apply is the
+# measurement's own business, and every floor records its legs, so a
+# tree with a valid floor always has one to hold. The pathspec test
+# below is mise/gate_tools.py's to read (#1410): it is the guard that
+# lets the gate skip installing a coverage tool in a tree with none of
+# these. Its "no measurable language" branch runs only when the
+# tracked-file listing fails, since a floor's `legs` always answers.
 #
 # The badge is fed from this run (#1528). Every leg writes the report
 # Codecov parses beside its number, and the last line names the files
@@ -6169,11 +6171,6 @@ if [[ -z ${floor} ]] || { ! org_tracked_has Cargo.toml && ! org_tracked_has go.m
   else
     echo "coverage:check: no measurable language (go.mod, Cargo.toml, tracked *.py with a test task, package.json with vitest, or a floor recording its legs), skipped"
   fi
-  exit 0
-fi
-applies=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:check probe) || exit 1
-if [[ -z ${applies} ]]; then
-  echo "coverage:check: no measurable language (go.mod, Cargo.toml, tracked *.py with a test task, package.json with vitest, or a floor recording its legs), skipped"
   exit 0
 fi
 legs=$("${ORG_BELT_DIR}/coverage-measure.sh" coverage:check reports) || exit 1

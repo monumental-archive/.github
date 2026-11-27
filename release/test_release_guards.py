@@ -591,34 +591,6 @@ class CoverageFloorApplicability(unittest.TestCase):
         self.assertIn("no .coverage-floor, skipped", result.stdout)
         self.assertEqual("", files["files"])
 
-    def test_a_floor_with_no_measurable_language_skips_clean(self) -> None:
-        """Mid-migration is not a release to fail; `coverage:check` agrees.
-
-        This is the row that distinguishes a skip from a pass: the file
-        IS present, so the previous row's guard has been passed, and the
-        script still declines — for a different, stated reason.
-        """
-        with TemporaryDirectory() as d:
-            (Path(d) / ".coverage-floor").write_text("floor = 80.0\n")
-            # The probe asks git which manifests are tracked (#2013).
-            subprocess.run(
-                [hermetic.tool("git"), "init", "-q"],
-                cwd=d,
-                env=hermetic.env(Path(d) / ".home"),
-                check=True,
-            )
-            out = Path(d) / "outputs"
-            result = run_script(
-                "derive-coverage-floor.sh",
-                Path(d),
-                VERSION="1.0.0",
-                GITHUB_OUTPUT=str(out),
-            )
-            files = emitted(out)
-        self.assertEqual(0, result.returncode, result.stderr)
-        self.assertIn(".coverage-floor with no measurable language", result.stdout)
-        self.assertEqual("", files["files"])
-
 
 class RustBuildInputs(unittest.TestCase):
     """`rust-build.sh` validates its scope before it compiles anything."""

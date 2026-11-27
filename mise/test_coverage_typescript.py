@@ -122,20 +122,17 @@ class TypeScriptRows(CoverageTaskCase):
         unmeasured: list[str] = ["run"]
         self.assertEqual(unmeasured, vitest_runs(tree))
 
-    def test_an_unsupported_runner_is_named_and_its_legs_red(self) -> None:
-        """A jest tree is named, never guessed at or measured as nothing.
+    def test_an_unsupported_runner_reds_its_recorded_legs(self) -> None:
+        """A jest tree's recorded typescript legs are red, never skipped.
 
-        Every floor records its legs (#2143), so the typescript legs it
-        records are each red by name, never skipped.
+        Every floor records its legs (#2143), so each is red by name with
+        the remedy naming vitest; `coverage:adopt`'s probe names the
+        runner itself.
         """
         done, _ = self.run_task("coverage:check", python=False, typescript="jest")
-        self.assertEqual(1, done.returncode)
         self.assertEqual(
-            "coverage:check: typescript: jest is not a runner the leg supports"
-            " (vitest), skipped\n" + LOST_TYPESCRIPT,
-            done.stderr,
+            (1, "", LOST_TYPESCRIPT), (done.returncode, done.stdout, done.stderr)
         )
-        self.assertEqual("", done.stdout)
 
     def test_vitest_without_a_provider_reds_with_the_remedy(self) -> None:
         """The belt pins no provider; the lockfile must."""
