@@ -422,6 +422,16 @@ class Gate(unittest.TestCase):
         )
         self.assertIn('reporters: ["default", "json", seeder],', done.written())
 
+    def test_every_project_has_no_per_test_limit(self) -> None:
+        """No per-test limit per project, in both profiles; hooks untouched (#2144)."""
+        for body, files in ((GATE, GATE_FILES), (AUDIT, AUDIT_FILES)):
+            with self.subTest(task=NAMES[body]):
+                done = run(body, files)
+                self.assertEqual(done.returncode, 0, done.stderr)
+                written = done.written()
+                self.assertIn("project.config.testTimeout = 0;", written)
+                self.assertNotIn("hookTimeout =", written)
+
     def test_a_config_without_projects_narrows_include(self) -> None:
         """No test.projects: include is exactly the tracked property files."""
         done = run(GATE, GATE_FILES)
@@ -559,6 +569,7 @@ class Projects(unittest.TestCase):
             wrapper,
         )
         self.assertIn("project.config.exclude = [...exclude];", wrapper)
+        self.assertIn("project.config.testTimeout = 0;", wrapper)
         self.assertIn('reporters: ["default", "json", seeder],', wrapper)
 
     def test_each_project_s_property_runs_seeded_and_an_orphan_is_red(
@@ -670,7 +681,7 @@ class Lint(unittest.TestCase):
             "g.prop.test.cts": PROPERTY + "fc.configureGlobal({});\n",
         })
         self.assertEqual(done.returncode, 1)
-        tail = "; the belt's seed and run count own every property\n"
+        tail = "; the belt's seed, run count and time bound own every property\n"
         for site, what in (
             ("g.prop.test.cts:4", "configureGlobal()"),
             ("h.prop.test.mts:4", "seed"),
@@ -679,6 +690,48 @@ class Lint(unittest.TestCase):
         ):
             with self.subTest(site=site):
                 self.assertIn(f"  {site}: restates {what}{tail}", done.stderr)
+
+    def test_a_property_setting_its_own_time_is_red_by_name(self) -> None:
+        """Each of the six forms #2144 names, by name, file and line."""
+        done = lint({
+            "a.prop.test.ts": PROPERTY
+            + 'test.prop([fc.nat()])("x", (n) => n >= 0, 20_000);\n',
+            "b.prop.test.ts": PROPERTY
+            + 'it("x", { timeout: 9000 }, () => {});\n'
+            + 'test("y", () => {\n  return;\n}, { timeout });\n',
+            "c.prop.test.ts": PROPERTY + "vi.setConfig({ testTimeout: 1 });\n",
+            "d.prop.test.ts": PROPERTY + "fc.assert(p, { timeout: 100 });\n",
+            "e.prop.test.ts": PROPERTY
+            + 'test.prop([fc.nat()], { interruptAfterTimeLimit: 5 })("x", f);\n',
+            "f.prop.test.ts": PROPERTY
+            + "fc.assert(p, { skipAllAfterTimeLimit: 5 });\n",
+        })
+        self.assertEqual(done.returncode, 1)
+        tail = "; the belt's seed, run count and time bound own every property\n"
+        for site, what in (
+            ("a.prop.test.ts:4", "a per-test timeout (test()'s third argument)"),
+            ("b.prop.test.ts:4", "vitest's timeout option"),
+            ("b.prop.test.ts:7", "vitest's timeout option"),
+            ("c.prop.test.ts:4", "vi.setConfig()"),
+            ("d.prop.test.ts:4", "fast-check's timeout"),
+            ("e.prop.test.ts:4", "interruptAfterTimeLimit"),
+            ("f.prop.test.ts:4", "skipAllAfterTimeLimit"),
+        ):
+            with self.subTest(site=site):
+                self.assertIn(f"  {site}: restates {what}{tail}", done.stderr)
+        self.assertEqual(done.stderr.count(": restates "), 7, done.stderr)
+
+    def test_time_in_text_or_a_body_is_not_a_bound(self) -> None:
+        """A comment, a string, a two-argument call: clean."""
+        done = lint({
+            "a.prop.test.ts": PROPERTY
+            + '// test("x", f, 5000) and { timeout: 1 }\n'
+            + 'const note = "vi.setConfig({ timeout: 1 })";\n'
+            + 'it("waits, 5000", () => {\n  expect(Math.max(f(1), 5)).toBe(5);\n});\n'
+            + 'it("named", { retry: 2 }, () => {});\n',
+        })
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout, "lint:typescript-properties: 1 file(s) clean\n")
 
     def test_clean_files_pass_and_text_is_not_an_import(self) -> None:
         """A property file importing it, and the name in a string: clean."""
@@ -698,6 +751,30 @@ class Lint(unittest.TestCase):
             "lint:typescript-properties: no TypeScript or JavaScript tracked,"
             " skipped\n",
         )
+
+
+class Masked(unittest.TestCase):
+    """The lint reads a property file's code: strings and comments blank."""
+
+    def test_strings_and_comments_blank_with_offsets_kept(self) -> None:
+        """Each literal form, escapes and a template's code included."""
+        rows = (
+            ('a("x\\"y", 1)', 'a("    ", 1)'),
+            ("a('it''s')", "a('  '' ')"),
+            ("a(`t\\`${b({ c: 1 })}u`)", "a(`   ${b({ c: 1 })} `)"),
+            ("a(/* x */ 1) // y\nb()", "a(        1)     \nb()"),
+            ("a(1) /* open", "a(1)        "),
+            ('a("open\nb()', 'a("    \nb()'),
+            ("{ x } }", "{ x } }"),
+        )
+        for text, want in rows:
+            with self.subTest(text=text):
+                self.assertEqual(tp.masked(text), want)
+
+    def test_an_unclosed_call_and_a_bare_chain_still_read(self) -> None:
+        """An unclosed group runs to the end; `test.each` uncalled stops."""
+        self.assertEqual(tp.arguments_of("(a, b", 0), ([(1, 2), (3, 5)], 5))
+        self.assertEqual(len(tp.test_calls("test.each(rows);")), 1)
 
 
 class Documents(unittest.TestCase):

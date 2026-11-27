@@ -34,7 +34,7 @@ honestly blocked on.
 | vitest's own coverage provider (the repository's, not the belt's) | The `typescript` and `typescript-branches` legs of the same ratchet (#1357): the repository's vitest under the provider its lockfile pins, lines and branches; the belt pins neither |
 | plpgsql_check (present in the org's database image, loaded only where a consumer's tests start the image with it preloaded; the belt pins nothing) | The `plpgsql` and `plpgsql-branches` legs of the same ratchet (#1547): `mise/plpgsql_coverage.py` reads the profiler's statement and branch coverage in the suite's teardown, through the repository's own `psql` or the client the call names |
 | Hypothesis (`pipx:` backend via aqua-backed uv) | Python property testing (#1332): every tracked `prop_*.py`, fixed seed in the gate (`test:python-properties`), random seed and wider bounds on the Monday cron (`audit:python-properties`) |
-| fast-check (the repository's, not the belt's) | TypeScript property testing (#1549): every tracked `*.prop.test.{ts,tsx,mts,cts}` under the repository's own vitest, fixed seed in the gate (`test:typescript-properties`), random seed and 10,000 runs on the Monday cron (`audit:typescript-properties`); `lint:typescript-properties` refuses an import outside a property file and a restated seed; the belt pins neither tool |
+| fast-check (the repository's, not the belt's) | TypeScript property testing (#1549): every tracked `*.prop.test.{ts,tsx,mts,cts}` under the repository's own vitest, fixed seed in the gate (`test:typescript-properties`), random seed and 10,000 runs on the Monday cron (`audit:typescript-properties`), no per-test time limit in either (#2144); `lint:typescript-properties` refuses an import outside a property file, a restated seed or run count, and a time a property sets itself; the belt pins neither tool |
 | proptest (the repository's, not the belt's) | Rust property testing (#1930): the repository's own `test` task draws from seed 1 in the gate (the belt's `[env]` sets `PROPTEST_RNG_SEED`), and from a fresh printed seed on the nightly run (`audit:rust-properties`); `lint:rust-properties` refuses a locked proptest below 1.7.0, which ignores the variable; the belt pins nothing |
 | cargo-fuzz (`cargo:` backend) | Fuzz targets: in the gate (`lint:fuzz-build`, stable, no sanitizer) a build proof, a committed corpus required per target, and that corpus replayed once with no mutation (#1889); bounded runs under AddressSanitizer on the cron (`audit:fuzz`, repo-declared nightly), starting from the corpus the gate holds |
 | reuse (`pipx:` backend via aqua-backed uv) | REUSE-spec compliance in the gate (`lint:reuse`), pre-registration |
@@ -3598,16 +3598,34 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
     before running anything. Renaming properties outside the default
     include (`*.prop.ts`) and a lint reading the config as text are
     refused in the ruling.
+  - The time bound is the belt's too (#2144, 2026-11-28): the cron's
+    50 times the gate's examples met vitest's 5000 ms default per
+    test, and an audit red on a timeout alone showed no
+    counterexample. The wrapper's `onInit` sets each project's
+    `testTimeout` to 0, beside the seed, so the job's
+    `timeout-minutes` is the only bound, as `deadline=None` is for
+    Python. Measured on vitest 4.1.12, fast-check 4.9.0,
+    `@fast-check/vitest` 0.2.4: `testTimeout: 0` is no limit (a
+    6000 ms test passed; unset, it failed at 5005 ms); `hookTimeout`
+    still fired (`Hook timed out in 100ms`); a root `test.testTimeout`
+    did not reach an inline project (failed at 5006 ms), while
+    `onInit`'s did, with or without projects. Through the leg, a
+    property at 1 ms an example passed the audit's 10,000 runs in
+    11,795 ms, red at 5003 ms on the wrapper before; at 30 ms an
+    example the gate's 200 passed in 6227 ms.
   The gate's seed is fixed (1336) at 200 runs; the cron's is fresh,
   printed first and taken from `ORG_PROPERTY_SEED` when set, at
   10,000. A property restating `seed`, `numRuns` or
   `configureGlobal(...)` is refused by `lint:typescript-properties`,
-  as a restated bound is for Python; so is a fast-check import outside
-  a `*.prop.test.*` file. A second property library pinned by the
-  belt, an unseeded gate, and a coverage-guided TypeScript fuzzer are
-  refused in the issue. *Reopen:* vitest accepting `setupFiles` on
-  its command line (the wrapper retires), or fast-check reading a seed
-  from the environment.
+  as a restated bound is for Python, and so is a time a property sets
+  itself: a vitest per-test timeout (`test()`'s third argument or a
+  `timeout` option), `vi.setConfig`, and fast-check's `timeout`,
+  `interruptAfterTimeLimit` and `skipAllAfterTimeLimit` (#2144); so is
+  a fast-check import outside a `*.prop.test.*` file. A second
+  property library pinned by the belt, an unseeded gate, and a
+  coverage-guided TypeScript fuzzer are refused in the issue.
+  *Reopen:* vitest accepting `setupFiles` on its command line (the
+  wrapper retires), or fast-check reading a seed from the environment.
 - **proptest, adopted for Rust property testing (#1930,
   2026-11-21), the repository's own.** The Rust half of property 3
   (#1336), #1332's and #1549's split: a fixed seed in the gate, a
