@@ -4598,10 +4598,10 @@ dir = "{{cwd}}"
 # So the alarm is on TIME SPENT CATCHABLE: the clock starts at the
 # EARLIEST tag newer than the stale reference, and only past 24 hours is
 # the state red. The 24-hour ceiling is generous by design — with
-# prPriority and the first-party group (default.json) the bump lands in
-# one bot cycle plus CI, measured 10-30 minutes — and exists so a Monday
-# cron landing just after a Sunday release does not cry wolf. Red means
-# Renovate paused, misconfigured or dead.
+# prPriority, no limits and the first-party group (default.json, #2162)
+# the bump lands in one bot cycle plus CI, measured 10-30 minutes — and
+# exists so a Monday cron landing just after a Sunday release does not
+# cry wolf. Red means Renovate paused, misconfigured or dead.
 run = '''
 . "${ORG_BELT_DIR}/identity.sh"
 canon_owner=$(org_identity owner)
