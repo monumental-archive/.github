@@ -74,7 +74,8 @@ self-references — and leaves every consumer — at `vN-1` until Renovate's
 (the notes convention leaves the scope unmapped, ending the self-bump
 loop) and reaches
 the front of Renovate's queue via `prPriority` and the first-party
-group in `default.json`, so the window is one bot cycle plus CI.
+group in `default.json`, which no concurrency or hourly limit applies
+to (#2162), so the window is one bot cycle plus CI.
 
 **One bot cycle is Mend's poll, roughly hourly (#310).** Hosted Renovate
 discovers a new tag on its own schedule; no reference anywhere can move
