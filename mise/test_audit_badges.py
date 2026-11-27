@@ -89,7 +89,8 @@ while (($#)); do
   shift
 done
 echo "${url} ${ua}" >> "${STUBS}/curl.log"
-name="${url##*/}"
+name="${url%\\?fresh=*}"
+name="${name##*/}"
 code=$(cat "${STUBS}/${name}.code")
 if [[ -n ${dump} ]]; then
   printf 'HTTP/2 %s\\r\\n' "${code}" > "${dump}"
@@ -353,6 +354,30 @@ class BestPracticesRead(Planted):
                 "audit:badges: beta: bestpractices beta passing",
             ],
         )
+
+    def test_the_entry_is_asked_past_the_shared_cache(self) -> None:
+        """Each entry is asked at a key the cache never held (#2084).
+
+        Red when planted: dropping `?${fresh}` from either leg's ask
+        leaves the planted URL bare.
+        """
+        for shield in ("badge", "baseline"):
+            with self.subTest(shield=shield):
+                self.env["SHIELD"] = (
+                    f"https://www.bestpractices.dev/projects/@REPO@/{shield}"
+                )
+                (self.stubs / "curl.log").unlink(missing_ok=True)
+                self.org(self.ok, self.ok, ".json")
+                self.run_audit()
+                log = (self.stubs / "curl.log").read_text(encoding="utf-8")
+                asked = [line.split(" ", 1)[0] for line in log.splitlines()]
+                self.assertEqual(len(asked), 2)
+                for url in asked:
+                    self.assertRegex(
+                        url,
+                        r"^https://www\.bestpractices\.dev/projects/(alpha|beta)"
+                        r"\.json\?fresh=[0-9]+$",
+                    )
 
 
 class BaselineRead(Planted):

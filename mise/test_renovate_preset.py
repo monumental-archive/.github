@@ -29,6 +29,11 @@ file's own, so a top-level age loses to any of them; the floor is this
 file's FIRST rule, the npm rule follows it, and both agree with the
 belt's mise and pnpm numbers, read from mise/config.toml.
 
+The limit rows (#2162) hold that no concurrency or hourly limit
+applies to the two deliveries the org depends on: lock file
+maintenance and the first-party rule each carry prConcurrentLimit 0
+and prHourlyLimit 0, because a shared limit skipped both.
+
 stdlib `unittest`, matching the other mise/test_*.py. Run through the
 gate as `mise run test`, which `ci` collects.
 """
@@ -453,6 +458,79 @@ class Ages(unittest.TestCase):
         found = age_findings(doc, belt())
         where = "default.json: the npm age rule sits at []"
         want: list[str] = [f"{where}, not right after the floor"]
+        self.assertEqual(found, want)
+
+
+FIRST_PARTY = ["monumental-archive/**"]
+UNLIMITED = ("prConcurrentLimit", "prHourlyLimit")
+
+
+def limit_findings(doc: dict[str, object]) -> list[str]:
+    """Every delivery the org depends on that a limit can skip (#2162).
+
+    Returns:
+        One message per missing zero; empty when the preset holds.
+
+    """
+    raw = decoded.as_array(doc.get("packageRules", []), "packageRules")
+    rules = [decoded.as_object(r, "packageRules[]") for r in raw]
+    first = [r for r in rules if r.get("matchPackageNames") == FIRST_PARTY]
+    blocks: list[tuple[str, dict[str, object]]] = [
+        (
+            "lockFileMaintenance",
+            decoded.as_object(
+                doc.get("lockFileMaintenance", {}), "lockFileMaintenance"
+            ),
+        ),
+        ("the first-party rule", first[0] if len(first) == 1 else {}),
+    ]
+    found: list[str] = []
+    for where, block in blocks:
+        for key in UNLIMITED:
+            value = block.get(key)
+            if value != 0 or isinstance(value, bool):
+                found.append(
+                    f"default.json: {where} has {key} {value!r}, not 0;"
+                    " a limit can skip it"
+                )
+    return found
+
+
+class Limits(unittest.TestCase):
+    """No limit skips lock file maintenance or the canon bump (#2162)."""
+
+    def test_preset_holds(self) -> None:
+        """Both deliveries carry both zeros."""
+        none: list[str] = []
+        self.assertEqual(limit_findings(preset()), none)
+
+    def test_maintenance_limited_is_refused(self) -> None:
+        """Planted: lock file maintenance without the zeros reds, by name."""
+        doc = preset()
+        block = decoded.as_object(doc["lockFileMaintenance"], "lockFileMaintenance")
+        kept = {k: v for k, v in block.items() if k not in UNLIMITED}
+        found = limit_findings({**doc, "lockFileMaintenance": kept})
+        where = "default.json: lockFileMaintenance has"
+        want: list[str] = [
+            f"{where} prConcurrentLimit None, not 0; a limit can skip it",
+            f"{where} prHourlyLimit None, not 0; a limit can skip it",
+        ]
+        self.assertEqual(found, want)
+
+    def test_first_party_limited_is_refused(self) -> None:
+        """Planted: the first-party rule with a limit of 2 reds, by name."""
+        doc = preset()
+        raw = decoded.as_array(doc["packageRules"], "packageRules")
+        planted = [
+            {**decoded.as_object(r, "packageRules[]"), "prHourlyLimit": 2}
+            if decoded.as_object(r, "packageRules[]").get("matchPackageNames")
+            == FIRST_PARTY
+            else r
+            for r in raw
+        ]
+        found = limit_findings({**doc, "packageRules": planted})
+        where = "default.json: the first-party rule has"
+        want: list[str] = [f"{where} prHourlyLimit 2, not 0; a limit can skip it"]
         self.assertEqual(found, want)
 
 

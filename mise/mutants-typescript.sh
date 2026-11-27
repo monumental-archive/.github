@@ -51,14 +51,28 @@
 # file would be rewritten by the run and red the clean-tree guard; the
 # config check refuses `incremental` by name. Reopen when a full weekly
 # run no longer fits the job: a restored and saved incremental file
-# outside the tree, in its own issue.
+# outside the tree, in its own issue. The weekly run is sharded instead
+# (#2153), which answers the fit; incremental would answer re-running.
 #
-# StrykerJS has no sharding, so the leg runs whole: a shard other than
-# 0/1 is red, never a silent re-run of everything.
+# SHARDED BY FILE (#2153). StrykerJS has no sharding of its own, but its
+# `--mutate` names the files to mutate, so the leg shares them out:
+# mutants_typescript.py expands the config's `mutate` list against the
+# tracked files, sorts them, and shard k of MUTANTS_SHARD=k/n takes every
+# file whose index i has i % n == k, the round-robin cut the other legs
+# make. A `mutate` entry with a mutation range (`file:1-5`) is red by
+# name: a range cannot be shared out by file. A shard whose share is
+# empty runs nothing and counts zero.
+#
+# PROGRESS IN THE JOB LOG. StrykerJS's output, with its
+# `progress-append-only` reporter, is copied to the log as it runs, so a
+# shard stopped by its timeout shows how far it got; the scratch copy is
+# tailed again on a non-zero exit. A lost runner keeps no log at all
+# (#2153), so short shards are the protection there, not this.
 #
 # Prints each survivor (file:line:column, the mutator, the change) and
 # one summary line; given MUTANTS_SUMMARY_DIR, writes typescript.tsv
-# there for the job that states the totals.
+# there for the job that states the totals. Its excluded count is the
+# shard's own files', so the row says `shard` and the totals sum it.
 set -euo pipefail
 
 # The writer beside this file, found with no command run (#1934).
@@ -75,10 +89,6 @@ adoption="stryker.config.json"
 report="reports/mutation/mutation.json"
 
 shard="${MUTANTS_SHARD:-0/1}"
-if [[ ${shard} != 0/1 ]]; then
-  org_finding "typescript" "MUTANTS_SHARD='${shard}' — StrykerJS cannot shard; the typescript job runs one shard, 0/1"
-  exit 1
-fi
 
 summary() { # summary <row>: the counts the totals job reads
   [[ -n ${MUTANTS_SUMMARY_DIR:-} ]] || return 0
@@ -100,7 +110,7 @@ if [[ -n ${others[0]+set} ]]; then
 fi
 if ! org_tracked_has "${adoption}"; then
   echo "${label}: no ${adoption} tracked, skipped"
-  summary "0/1"$'\t'"skipped"
+  summary "${shard}"$'\t'"skipped"
   exit 0
 fi
 
@@ -137,9 +147,19 @@ rc=0
 scratch=$(mktemp -d)
 trap 'rc=$?; rm -rf "${scratch}"; [ -n "${org_done:-}" ] || [ "${rc}" -ne 0 ] || rc=1; exit "${rc}"' EXIT
 
+python3 "${belt}/mutants_typescript.py" --label "${label}" share "${adoption}" \
+  --shard "${shard}" --out "${scratch}/mutate" --summary-dir "${MUTANTS_SUMMARY_DIR:-}"
+mutate=$(< "${scratch}/mutate")
+if [[ -z ${mutate} ]]; then
+  echo "${label}: shard ${shard}: no file to mutate, nothing run"
+  org_done=1
+  exit 0
+fi
+
 rm -f "${report}"
 status=0
-"${stryker}" run "${adoption}" --inPlace --reporters json > "${scratch}/stryker.log" 2>&1 || status=$?
+"${stryker}" run "${adoption}" --inPlace --mutate "${mutate}" \
+  --reporters json,progress-append-only 2>&1 | tee "${scratch}/stryker.log" || status=$?
 
 left=$(git status --porcelain --untracked-files=no)
 if [[ -n ${left} ]]; then
@@ -162,5 +182,6 @@ fi
 mv "${report}" "${scratch}/mutation.json"
 
 python3 "${belt}/mutants_typescript.py" --label "${label}" \
-  verdict "${scratch}/mutation.json" --summary-dir "${MUTANTS_SUMMARY_DIR:-}"
+  verdict "${scratch}/mutation.json" --shard "${shard}" \
+  --summary-dir "${MUTANTS_SUMMARY_DIR:-}"
 org_done=1

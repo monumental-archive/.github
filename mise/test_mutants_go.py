@@ -826,7 +826,8 @@ class Shards(Planted):
         )
         self.assertEqual(len(self.calls("gomu")), 1)
         self.assertEqual(
-            (self.summary / "go.tsv").read_text(encoding="utf-8"), "1/2\t2\t1\t1\t1\n"
+            (self.summary / "go.tsv").read_text(encoding="utf-8"),
+            "1/2\t2\t1\t1\t1\twhole\n",
         )
 
     def test_a_malformed_shard_is_red(self) -> None:
@@ -963,7 +964,8 @@ class Main(unittest.TestCase):
             self.judge(), hermetic.Called(0, self.line(2, 2, 0, 0, 0, 0), "")
         )
         self.assertEqual(
-            (self.summary / "go.tsv").read_text(encoding="utf-8"), "whole\t2\t2\t0\t0\n"
+            (self.summary / "go.tsv").read_text(encoding="utf-8"),
+            "whole\t2\t2\t0\t0\twhole\n",
         )
 
     def test_a_covered_survivor_and_an_uncovered_one_are_red(self) -> None:

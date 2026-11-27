@@ -34,7 +34,7 @@ honestly blocked on.
 | vitest's own coverage provider (the repository's, not the belt's) | The `typescript` and `typescript-branches` legs of the same ratchet (#1357): the repository's vitest under the provider its lockfile pins, lines and branches; the belt pins neither |
 | plpgsql_check (present in the org's database image, loaded only where a consumer's tests start the image with it preloaded; the belt pins nothing) | The `plpgsql` and `plpgsql-branches` legs of the same ratchet (#1547): `mise/plpgsql_coverage.py` reads the profiler's statement and branch coverage in the suite's teardown, through the repository's own `psql` or the client the call names |
 | Hypothesis (`pipx:` backend via aqua-backed uv) | Python property testing (#1332): every tracked `prop_*.py`, fixed seed in the gate (`test:python-properties`), random seed and wider bounds on the Monday cron (`audit:python-properties`) |
-| fast-check (the repository's, not the belt's) | TypeScript property testing (#1549): every tracked `*.prop.test.{ts,tsx,mts,cts}` under the repository's own vitest, fixed seed in the gate (`test:typescript-properties`), random seed and 10,000 runs on the Monday cron (`audit:typescript-properties`); `lint:typescript-properties` refuses an import outside a property file and a restated seed; the belt pins neither tool |
+| fast-check (the repository's, not the belt's) | TypeScript property testing (#1549): every tracked `*.prop.test.{ts,tsx,mts,cts}` under the repository's own vitest, fixed seed in the gate (`test:typescript-properties`), random seed and 10,000 runs on the Monday cron (`audit:typescript-properties`), no per-test time limit in either (#2144); `lint:typescript-properties` refuses an import outside a property file, a restated seed or run count, and a time a property sets itself; the belt pins neither tool |
 | proptest (the repository's, not the belt's) | Rust property testing (#1930): the repository's own `test` task draws from seed 1 in the gate (the belt's `[env]` sets `PROPTEST_RNG_SEED`), and from a fresh printed seed on the nightly run (`audit:rust-properties`); `lint:rust-properties` refuses a locked proptest below 1.7.0, which ignores the variable; the belt pins nothing |
 | cargo-fuzz (`cargo:` backend) | Fuzz targets: in the gate (`lint:fuzz-build`, stable, no sanitizer) a build proof, a committed corpus required per target, and that corpus replayed once with no mutation (#1889); bounded runs under AddressSanitizer on the cron (`audit:fuzz`, repo-declared nightly), starting from the corpus the gate holds |
 | reuse (`pipx:` backend via aqua-backed uv) | REUSE-spec compliance in the gate (`lint:reuse`), pre-registration |
@@ -3131,7 +3131,7 @@ installs clean from the consumer's lockfile under pnpm's
 `strictDepBuilds` (no build script), and runs vitest 4.1.12. On one
 source file with one worker: 144 mutants in 35 s. The consumer's
 service-free scope instruments 932 mutants with a 2 s initial run, so
-there is one job and no sharding (StrykerJS has none).
+there was one job and no sharding (StrykerJS has none of its own).
 
 The belt pins no copy. StrykerJS is the repository's, in its
 devDependencies beside its runner plugin, the way its test runner is;
@@ -3177,9 +3177,33 @@ What the leg does, each measured on 10.1.1 and held by a stub row
   results, so `incremental: true` would read as on and do nothing, and
   the config check refuses it by name. Tracking the incremental file
   was rejected: the run rewrites it, which the clean-tree guard reds.
-  *Reopen* when a full weekly run no longer fits the job; the response
-  is a restored and saved incremental file outside the tree, in its
-  own issue.
+  The reopen fired (#2153): monumental-archive's first whole run,
+  one job, was lost to its runner at 4 h 29 min with no log. Sharding
+  answered the fit; incremental would answer re-running, and stays
+  deferred.
+- **Sharded by file** (#2153). StrykerJS has no sharding of its own,
+  but its `--mutate` (10.1.1) names "the subset of files or just one
+  specific file to be mutated", and it replaces the config's list. So
+  the leg expands `mutate` against the tracked files, in order (a `!`
+  entry subtracts, as StrykerJS reads the list), sorts the result and
+  gives shard `k` of `n` every file whose index `i` has
+  `i % n == k`, the round-robin cut of the other legs. The matching is
+  StrykerJS's minimatch, measured on 10.1.1's `FileMatcher` and spelled
+  for `PurePosixPath.full_match`: braces expanded, a wildcard never
+  reaching a name that starts with `.` (`dot: false`), each file passed
+  back escaped so minimatch reads it literally. Red by name: a `mutate`
+  entry with a mutation range (`file:1-5`), which cannot be shared out
+  by file; an extglob; a file name `--mutate` cannot carry (a comma, or
+  a trailing range). A shard whose share is empty runs nothing and
+  counts zero. Eight shards first; the count and the timeout come from
+  the first sharded run, by #1530's rule, on monumental-archive#351.
+  The excluded count is each shard's own files', so its row says
+  `shard` and the totals sum it.
+- **Progress in the job log.** The leg adds the built-in
+  `progress-append-only` reporter and copies StrykerJS's output to the
+  log as it runs, so a shard stopped by its timeout shows how far it
+  got. A lost runner keeps no log at all, so short shards are the
+  protection there.
 - **Under pnpm the config must name its runner in `plugins`.** Core
   sits in `.pnpm/` and cannot find its sibling ("no TestRunner
   plugins were loaded").
@@ -3191,7 +3215,7 @@ red) came out as the stub rows state.
 
 *Reopen:* StrykerJS's sandbox resolving workspace packages inside
 itself (the sandbox could then carry the run), or StrykerJS gaining
-sharding (the job splits like Rust's).
+sharding of its own (the leg's share-out gives way to it).
 
 **cargo-mutants as `audit:mutants`' Rust leg, compiled and kept out
 of every other job** (#1355, under #1336's testing standard). Coverage
@@ -3267,7 +3291,8 @@ crate: `--list` honours `--shard`, and the default slice sharding cut
 it 3/3/3/0 — an empty shard exits 0 and writes no `outcomes.json`, so
 the leg says "no mutants in this shard" and stays green. Excluded is a
 whole-population figure (a shard is cut after exclusion), reported the
-same by every shard and taken once. The first runner run
+same by every shard and taken once: its row says `whole` (#2153),
+where TypeScript's, cut by file, says `shard` and is summed. The first runner run
 (release-lab, run 44205918375, 2026-11-18) measured shards of 5m02s to
 6m54s, mostly the cold toolchain install (163-221 s) and lab-pg's pgrx
 baseline. The larger consumer's run moved both (edtf #107, run
@@ -3334,6 +3359,9 @@ not ruff's), so `mise/sqlfluff.cfg` exists for exactly one thing the
 tool refuses to guess: the dialect — postgres org-wide, the only SQL
 the org ships. `templater = raw`: org SQL is DDL/migrations, not
 Jinja, and a templater that expands nothing can corrupt nothing.
+`large_file_skip_byte_limit = 0` (#2142): the default skips any file
+over 20 000 bytes with a WARNING and exit 0, so every core rule held
+only for small files; with no limit, nothing is skipped by size.
 `lint:sql` is subject-named (one language, the lint:python rule) and
 asserts nothing: the config is delivered with `--config` from
 `ORG_BELT_DIR` (#455), so no repo tracks a `.sqlfluff` and the missing-
@@ -3598,16 +3626,34 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
     before running anything. Renaming properties outside the default
     include (`*.prop.ts`) and a lint reading the config as text are
     refused in the ruling.
+  - The time bound is the belt's too (#2144, 2026-11-28): the cron's
+    50 times the gate's examples met vitest's 5000 ms default per
+    test, and an audit red on a timeout alone showed no
+    counterexample. The wrapper's `onInit` sets each project's
+    `testTimeout` to 0, beside the seed, so the job's
+    `timeout-minutes` is the only bound, as `deadline=None` is for
+    Python. Measured on vitest 4.1.12, fast-check 4.9.0,
+    `@fast-check/vitest` 0.2.4: `testTimeout: 0` is no limit (a
+    6000 ms test passed; unset, it failed at 5005 ms); `hookTimeout`
+    still fired (`Hook timed out in 100ms`); a root `test.testTimeout`
+    did not reach an inline project (failed at 5006 ms), while
+    `onInit`'s did, with or without projects. Through the leg, a
+    property at 1 ms an example passed the audit's 10,000 runs in
+    11,795 ms, red at 5003 ms on the wrapper before; at 30 ms an
+    example the gate's 200 passed in 6227 ms.
   The gate's seed is fixed (1336) at 200 runs; the cron's is fresh,
   printed first and taken from `ORG_PROPERTY_SEED` when set, at
   10,000. A property restating `seed`, `numRuns` or
   `configureGlobal(...)` is refused by `lint:typescript-properties`,
-  as a restated bound is for Python; so is a fast-check import outside
-  a `*.prop.test.*` file. A second property library pinned by the
-  belt, an unseeded gate, and a coverage-guided TypeScript fuzzer are
-  refused in the issue. *Reopen:* vitest accepting `setupFiles` on
-  its command line (the wrapper retires), or fast-check reading a seed
-  from the environment.
+  as a restated bound is for Python, and so is a time a property sets
+  itself: a vitest per-test timeout (`test()`'s third argument or a
+  `timeout` option), `vi.setConfig`, and fast-check's `timeout`,
+  `interruptAfterTimeLimit` and `skipAllAfterTimeLimit` (#2144); so is
+  a fast-check import outside a `*.prop.test.*` file. A second
+  property library pinned by the belt, an unseeded gate, and a
+  coverage-guided TypeScript fuzzer are refused in the issue.
+  *Reopen:* vitest accepting `setupFiles` on its command line (the
+  wrapper retires), or fast-check reading a seed from the environment.
 - **proptest, adopted for Rust property testing (#1930,
   2026-11-21), the repository's own.** The Rust half of property 3
   (#1336), #1332's and #1549's split: a fixed seed in the gate, a

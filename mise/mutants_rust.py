@@ -690,7 +690,7 @@ def report(args: Args) -> int:
         Path(summary_dir).mkdir(parents=True, exist_ok=True)
         Path(summary_dir, "rust.tsv").write_text(
             f"{args.shard}\t{verdict.total}\t{verdict.killed}"
-            f"\t{verdict.survived}\t{verdict.excluded}\n",
+            f"\t{verdict.survived}\t{verdict.excluded}\twhole\n",
             encoding="utf-8",
         )
     if red(verdict):
