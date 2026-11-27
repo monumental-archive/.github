@@ -717,7 +717,8 @@ class SqlSkipsOwnedSnapshots(unittest.TestCase):
         self.assertGreater((self.root / "db/big.sql").stat().st_size, 20000)
         status, out, err, handed = self.run_task("lint:sql")
         self.assertEqual(status, 1)
-        self.assertEqual(handed, ["db/big.sql"])
+        want = ["db/big.sql"]
+        self.assertEqual(handed, want)
         self.assertIn(
             "L:2101 | P:   1 | CP01 | Keywords must be consistently upper case.",
             out,
