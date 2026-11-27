@@ -34,13 +34,16 @@ count and the root's wall time. When GITHUB_STEP_SUMMARY names a file,
 the same block is appended there, each line escaped as
 workflow_command escapes outside text, so a name cannot add a line.
 
-Third, a shard (#2049): with ORG_TEST_SHARD set to `<n>/<of>`, the run
-keeps only its share of the discovered test files, dealt costliest file
+Third, a shard (#2049, #2160): with ORG_SHARD set to `<k>/<n>` (the
+one variable every belt adapter reads, mise/shard.py), the run keeps
+only its share of the discovered test files, dealt costliest file
 first (mise/gate-shards.toml's measured seconds) to the shard with the
-least dealt, so `of` runs of the
-same tree, each on its own runner, run every file exactly once between
-them. A file that could not be imported goes to shard 1, which reports
-it. A shard dealt no file of a root passes: its files ran elsewhere.
+least dealt, so `n` runs of the same tree, each on its own runner, run
+every file exactly once between them. A file that could not be
+imported goes to shard 1, which reports it. A shard dealt no file of a
+root passes: its files ran elsewhere. Each shard reports the files it
+chose from and the ones it kept (`shard.report`), and the gate holds
+the union of every shard's to the whole discovery.
 
 Coverage needs nothing from here: a worker is `python3`, started with
 this process's environment, so the measurement's start-up hook reaches
@@ -63,6 +66,7 @@ from warnings import catch_warnings, simplefilter
 
 import decoded
 import findings
+import shard as shard_name
 import workflow_command
 from decoded import UndecodableError, load_json, load_toml
 
@@ -87,7 +91,7 @@ ACTIONS: dict[str, Action] = {
 # workstation running several gates at once should keep cores to spare.
 WORKER_CAP = 8
 WORKERS = "ORG_TEST_WORKERS"
-SHARD = "ORG_TEST_SHARD"
+SHARD = shard_name.VARIABLE
 # What each test file costs, beside this runner in the belt (#2054).
 COSTS = Path(__file__).resolve().parent / "gate-shards.toml"
 # How many of a root's slowest files its cost block names.
@@ -168,24 +172,30 @@ def workers() -> int:
 
 
 def shard() -> tuple[int, int] | None:
-    """Read this run's shard: ORG_TEST_SHARD, `<n>/<of>`.
+    """Read this run's shard: ORG_SHARD, `<k>/<n>` (mise/shard.py).
 
     Returns:
         The shard and the count, or None when the run is not sharded.
 
-    Raises:
-        SystemExit: the variable is set and is not `<n>/<of>` with
-            1 <= n <= of.
+    """
+    return shard_name.read()
+
+
+def unit_name(unit: Unit) -> str:
+    """Name a unit for the shard report: its module, or its test's id.
+
+    Returns:
+        The name.
 
     """
-    raw = os.environ.get(SHARD, "").strip()
-    if not raw:
-        return None
-    at, _, of = raw.partition("/")
-    if at.isdecimal() and of.isdecimal() and 1 <= int(at) <= int(of):
-        return int(at), int(of)
-    findings.finding("", f"{SHARD}={raw!r} is not a shard (<n>/<of>, 1 <= n <= of)")
-    raise SystemExit(1)
+    name, item = unit
+    return (
+        name
+        if name is not None
+        else item.id()
+        if isinstance(item, unittest.TestCase)
+        else repr(item)
+    )
 
 
 def file_costs(table: Path = COSTS) -> tuple[int, dict[str, int]]:
@@ -484,6 +494,12 @@ class GuardedRunner(unittest.TextTestRunner):
         if where is not None and isinstance(test, unittest.TestSuite):
             units = plan(test)
             mine = share(units, *where)
+            shard_name.report(
+                "unittest_guarded.py",
+                " ".join(sys.argv[1:]),
+                [unit_name(u) for u in units],
+                [unit_name(u) for u in mine],
+            )
             self.stream.writeln(
                 f"{SHARD}={where[0]}/{where[1]}: {len(mine)} of {len(units)} test files"
             )

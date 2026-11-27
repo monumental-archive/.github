@@ -38,17 +38,20 @@ byte-identical to the next; the audit prints each file's elapsed
 seconds after its tests, so its bound is measured from its own log
 (#1631).
 
-ORG_PROPERTY_SHARD=k/n takes one shard of the files (#1631, the
-mutation leg's MUTANTS_SHARD form): the files sorted, every n-th
-starting at the k-th. Unset is every file, as given. A value that is
-not k/n with k < n is refused by name; a shard that holds no file says
-so and exits 0. The audit runs n legs with one seed, each a shard, so a
-week's properties finish in the time of the slowest leg.
+ORG_SHARD=k/n (1 <= k <= n, the one variable every belt adapter reads,
+mise/shard.py, #2160) takes one shard of the files (#1631): the files
+sorted, every n-th starting at the k-th. Unset, or 1/1, is every file,
+as given. A value that is not k/n is refused by name; a shard that
+holds no file says so and exits 0. A shard reports the files it chose
+from and the ones it kept, and the gate holds the union of every
+shard's to the whole list. The audit runs n legs with one seed, each a
+shard, so a week's properties finish in the time of the slowest leg.
 
 With no shard named, more than one file and more than one worker, the
-runner fans out over that same form (#1741): it starts n children of
-itself, child k with ORG_PROPERTY_SHARD=k/n, n the smaller of the worker
-count and the file count, and so uses every core its job has. The
+runner fans out (#1741): it starts n children of itself, child k (from
+0) with ORG_PROPERTY_CHILD=k/n, n the smaller of the worker count and
+the file count, and so uses every core its job has. A child takes its
+files the same way, every n-th from the k-th. The
 worker count is the test runner's, `workers()` from unittest_guarded.py:
 ORG_TEST_WORKERS sets it, and 1 runs every file in this one process.
 Each child's output is printed whole, in shard order, once it has
@@ -81,6 +84,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import findings
+import shard
 from hypothesis import HealthCheck, seed, settings
 from unittest_guarded import workers
 
@@ -96,6 +100,8 @@ MIN_ARGS = 2
 # The belt: typed_hypothesis.py sits beside this runner.
 BELT = Path(__file__).resolve().parent
 LABELS = {"gate": "test:python-properties", "audit": "audit:python-properties"}
+# A fanned-out child's share: k/n from 0, set by this runner alone.
+CHILD = "ORG_PROPERTY_CHILD"
 # k/n in ASCII digits, n at least one; k < n is checked on the numbers.
 SHARD = re.compile(r"([0-9]+)/([1-9][0-9]*)")
 # Fewer files or workers than this run in one process.
@@ -279,7 +285,7 @@ def run_file(
 
 
 class ShardError(ValueError):
-    """An ORG_PROPERTY_SHARD this runner cannot read."""
+    """An ORG_PROPERTY_CHILD this runner cannot read."""
 
 
 def shard_of(files: list[Path], spec: str) -> list[Path]:
@@ -297,7 +303,7 @@ def shard_of(files: list[Path], spec: str) -> list[Path]:
         return files
     found = SHARD.fullmatch(spec)
     if found is None or int(found[1]) >= int(found[2]):
-        msg = f"ORG_PROPERTY_SHARD='{spec}' is not k/n with k < n"
+        msg = f"{CHILD}='{spec}' is not k/n with k < n"
         raise ShardError(msg)
     return sorted(files, key=str)[int(found[1]) :: int(found[2])]
 
@@ -346,9 +352,9 @@ def fan_out(profile_name: str, files: list[Path], count: int) -> int:
     argv += [str(f) for f in files]
 
     def child(k: int) -> subprocess.CompletedProcess[str]:
-        shard = {"ORG_PROPERTY_SHARD": f"{k}/{count}"}
+        share = {CHILD: f"{k}/{count}"}
         return subprocess.run(
-            argv, env=environ | shard, capture_output=True, text=True, check=False
+            argv, env=environ | share, capture_output=True, text=True, check=False
         )
 
     with ThreadPoolExecutor(max_workers=count) as pool:
@@ -425,18 +431,33 @@ def main(argv: list[str]) -> int:
     if len(args) < MIN_ARGS or args[0] not in LABELS:
         findings.finding("", "usage: python_properties.py gate|audit FILE...")
         return EXIT_USAGE
-    label, spec = LABELS[args[0]], os.environ.get("ORG_PROPERTY_SHARD", "")
+    label, spec = LABELS[args[0]], os.environ.get(CHILD, "")
     files = [Path(a) for a in args[1:]]
+    try:
+        named = None if spec else shard.parse(os.environ.get(shard.VARIABLE, ""))
+    except shard.ShardError as bad:
+        findings.finding("", str(bad))
+        return EXIT_USAGE
+    shown = spec
+    if named is not None and named != (1, 1):
+        shown, spec = f"{named[0]}/{named[1]}", f"{named[0] - 1}/{named[1]}"
     try:
         chosen = shard_of(files, spec)
     except ShardError as bad:
         findings.finding("", str(bad))
         return EXIT_USAGE
+    if shown != spec:
+        shard.report(
+            "python-properties",
+            label,
+            [str(f) for f in files],
+            [str(f) for f in chosen],
+        )
     if not chosen:
-        print(f"{label}: shard {spec} holds none of the {len(files)} file(s), skipped")
+        print(f"{label}: shard {shown} holds none of the {len(files)} file(s), skipped")
         return 0
     if spec:
-        print(f"{label}: shard {spec}, {len(chosen)} of {len(files)} file(s)")
+        print(f"{label}: shard {shown}, {len(chosen)} of {len(files)} file(s)")
     count = children(spec, files, workers())
     if count > 1:
         return fan_out(args[0], files, count)

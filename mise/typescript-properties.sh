@@ -149,6 +149,22 @@ fi
 if [[ ${profile} == audit ]]; then
   echo "${label}: seed ${seed} (reproduce: ORG_PROPERTY_SEED=${seed})"
 fi
+# A shard of the gate's row (#2160): ORG_SHARD=k/n keeps every n-th
+# property file from the k-th, and the shard reports what it kept for
+# the gate's union check. The collection check above holds every file.
+if [[ -n ${ORG_SHARD:-} && ${ORG_SHARD} != 1/1 ]]; then
+  python3 "${belt}/typescript_properties.py" share "${files[@]}" > "${scratch}/share" || exit 2
+  args=()
+  while IFS= read -r -d '' file; do
+    args+=("${file}")
+  done < "${scratch}/share"
+  if [[ -z ${args[0]+set} ]]; then
+    echo "${label}: shard ${ORG_SHARD} holds none of the ${#files[@]} file(s), skipped"
+    org_done=1
+    exit 0
+  fi
+  echo "${label}: shard ${ORG_SHARD}, ${#args[@]} of ${#files[@]} file(s)"
+fi
 echo "${label}: seed ${seed}, ${runs} runs per property, ${config:-no vitest config}"
 status=0
 # Each property file's setup appends its path here; `verify` reds a file

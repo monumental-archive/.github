@@ -72,7 +72,7 @@ class EveryPartPassed(unittest.TestCase):
         *,
         majors: str = "[16, 17]",
         coverage: str = "skipped",
-        shards: str = "1",
+        split: str = "false",
     ) -> subprocess.CompletedProcess[str]:
         """Run the lifted step on one set of job results.
 
@@ -90,7 +90,7 @@ class EveryPartPassed(unittest.TestCase):
                 PGRX=pgrx,
                 MAJORS=majors,
                 COVERAGE=coverage,
-                SHARDS=shards,
+                SPLIT=split,
             ),
             capture_output=True,
             text=True,
@@ -156,15 +156,15 @@ class EveryPartPassed(unittest.TestCase):
         )
 
     def test_sharded_tests_judged(self) -> None:
-        """A sharded test leg's coverage job passed: green (#2049)."""
+        """A split leg's coverage job passed: green (#2049, #2160)."""
         done = self.verdict(
-            "success", "success", "success", coverage="success", shards="4"
+            "success", "success", "success", coverage="success", split="true"
         )
         self.assertEqual(done.returncode, 0, done.stderr)
 
     def test_sharded_tests_never_judged(self) -> None:
-        """A sharded test leg whose coverage job was skipped is red, by name."""
-        done = self.verdict("success", "success", "success", shards="4")
+        """A split leg whose coverage job was skipped is red, by name."""
+        done = self.verdict("success", "success", "success", split="true")
         self.assertEqual(done.returncode, 1, done.stderr)
         self.assertEqual(
             done.stdout,
@@ -174,7 +174,7 @@ class EveryPartPassed(unittest.TestCase):
     def test_a_failed_coverage_job(self) -> None:
         """The coverage job's failure is named."""
         done = self.verdict(
-            "success", "success", "success", coverage="failure", shards="4"
+            "success", "success", "success", coverage="failure", split="true"
         )
         self.assertEqual(done.returncode, 1, done.stderr)
         self.assertEqual(

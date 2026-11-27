@@ -34,6 +34,7 @@ from pathlib import Path
 
 import decoded
 import hermetic
+import shard
 import typed_std
 import typescript_properties as tp
 
@@ -880,6 +881,65 @@ class Documents(unittest.TestCase):
                     self.answer("collected", text),
                     f"no readable vitest file list at DOC ({why})\n",
                 )
+
+
+class Shares(unittest.TestCase):
+    """ORG_SHARD=k/n keeps every n-th property file, each once (#2160)."""
+
+    FILES = ("c.prop.test.ts", "a.prop.test.ts", "b.prop.test.mts")
+
+    def share(self, spec: str, reports: str) -> list[str]:
+        """Ask the runner for one shard's files.
+
+        Returns:
+            The files it keeps.
+
+        """
+        done = subprocess.run(
+            [
+                hermetic.tool("python3"),
+                str(BELT / "typescript_properties.py"),
+                "share",
+                *self.FILES,
+            ],
+            env=hermetic.env(
+                ORG_SHARD=spec,
+                ORG_SHARD_TASK="test:typescript-properties",
+                ORG_SHARD_REPORTS=reports,
+            ),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(0, done.returncode, done.stderr)
+        return [f for f in done.stdout.split("\0") if f]
+
+    def test_two_shards_hold_every_file_once(self) -> None:
+        """1/2 and 2/2: sorted, every second file, the union whole."""
+        with tempfile.TemporaryDirectory() as reports:
+            first, second = self.share("1/2", reports), self.share("2/2", reports)
+            want: list[list[str]] = [
+                ["a.prop.test.ts", "c.prop.test.ts"],
+                ["b.prop.test.mts"],
+            ]
+            got_shares: list[list[str]] = [first, second]
+            self.assertEqual(want, got_shares)
+            none: list[str] = []
+            got = shard.union(
+                shard.load(Path(reports)), {"test:typescript-properties": 2}
+            )
+            self.assertEqual(none, got)
+
+    def test_no_shard_is_every_file(self) -> None:
+        """Unset or 1/1: every file, as given, and no report."""
+        with tempfile.TemporaryDirectory() as reports:
+            for spec in ("", "1/1"):
+                with self.subTest(spec=spec):
+                    every: list[str] = list(self.FILES)
+                    self.assertEqual(every, self.share(spec, reports))
+            written: list[Path] = list(Path(reports).iterdir())
+            nothing: list[Path] = []
+            self.assertEqual(nothing, written)
 
 
 if __name__ == "__main__":

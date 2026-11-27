@@ -18,7 +18,7 @@ the rest of this run keeps the bounds it was started with.
   any n, the shards 0/n to (n-1)/n partition the files: every file in
   exactly one, sizes within one of each other, whatever order the
   files were listed in (#1631).
-- Refusal (R): any ORG_PROPERTY_SHARD that is not k/n with k < n, in
+- Refusal (R): any ORG_PROPERTY_CHILD that is not k/n with k < n, in
   ASCII digits, is refused with ShardError naming it (#1631).
 """
 
@@ -273,7 +273,7 @@ class ShardRefusal(unittest.TestCase):
         try:
             got = pp.shard_of(files, spec)
         except pp.ShardError as bad:
-            self.assertIn(f"ORG_PROPERTY_SHARD='{spec}'", str(bad))
+            self.assertIn(f"ORG_PROPERTY_CHILD='{spec}'", str(bad))
             return
         self.assertLessEqual(len(got), len(files))
 

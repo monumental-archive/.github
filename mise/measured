@@ -72,6 +72,29 @@ USAGE
   exit 2
 fi
 
+# A SHARD FIRST (#2160): with ORG_SHARD naming one other than 1/1, the
+# command's runner is handed this shard's share in its own terms (vitest
+# `--shard`, nextest `--partition`, a share of `go test`'s packages), and
+# the shard's report is written for the gate's union check; any other
+# command goes as it is (a setup line, or a belt runner that reads
+# ORG_SHARD itself). shard_runner.py reads the command and prints it
+# back, NUL-separated. Before the floor's switch: a share is not
+# coverage.
+if [[ -n ${ORG_SHARD:-} && ${ORG_SHARD} != 1/1 ]]; then
+  : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
+  shard_argv=$(mktemp)
+  "${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/shard_runner.py" -- "$@" > "${shard_argv}" || {
+    rm -f -- "${shard_argv}"
+    exit 1
+  }
+  words=()
+  while IFS= read -r -d '' word; do
+    words+=("${word}")
+  done < "${shard_argv}"
+  rm -f -- "${shard_argv}"
+  set -- "${words[@]}"
+fi
+
 run=${ORG_COVERAGE_RUN:-}
 root=""
 if [[ -n ${run} ]]; then
