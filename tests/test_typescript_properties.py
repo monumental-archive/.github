@@ -17,8 +17,6 @@ Each row asserts the message, not just the exit status: a planted row
 scored on exit alone can pass for the wrong reason.
 """
 
-import contextlib
-import io
 import json
 import os
 import re
@@ -26,6 +24,7 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -33,6 +32,9 @@ from belt import decoded, shard, typed_std
 from belt import typescript_properties as tp
 from belt.typed_pytest import fixture
 from tests import support
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 CANON = support.CANON
 BELT = CANON / "mise"
@@ -851,25 +853,20 @@ def test_an_unclosed_call_and_a_bare_chain_still_read() -> None:
 
 
 # vitest's report and file list, each refused by name when misshapen.
-def answer(command: str, text: str) -> str:
-    """Run verify or collected on one document; return its one line.
+def document(tmp_path: Path, command: str, text: str) -> list[str]:
+    """Write one document for verify or collected; spell the call's argv.
 
     Returns:
-        What the subcommand printed, after asserting it was red.
+        The argv, the document's path second.
 
     """
-    with tempfile.TemporaryDirectory() as scratch:
-        path = Path(scratch, "doc.json")
-        path.write_text(text, encoding="utf-8")
-        seeded = Path(scratch, "seeded")
-        seeded.write_text("", encoding="utf-8")
-        # verify also takes the seeded list; collected does not.
-        extra = [str(seeded)] if command == "verify" else []
-        out = io.StringIO()
-        with contextlib.redirect_stdout(out):
-            status = tp.main([command, str(path), *extra, "a.prop.test.ts"])
-    assert status == 1
-    return out.getvalue().replace(str(path), "DOC")
+    path = tmp_path / "doc.json"
+    path.write_text(text, encoding="utf-8")
+    seeded = tmp_path / "seeded"
+    seeded.write_text("", encoding="utf-8")
+    # verify also takes the seeded list; collected does not.
+    extra = [str(seeded)] if command == "verify" else []
+    return [command, str(path), *extra, "a.prop.test.ts"]
 
 
 def test_a_missing_seeded_list_is_red(capfd: pytest.CaptureFixture[str]) -> None:
@@ -887,7 +884,9 @@ def test_a_missing_seeded_list_is_red(capfd: pytest.CaptureFixture[str]) -> None
     )
 
 
-def test_a_report_of_the_wrong_shape() -> None:
+def test_a_report_of_the_wrong_shape(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
     """Each field the leg reads, by name."""
     rows = (
         ("[]", "the report is not an object"),
@@ -901,10 +900,15 @@ def test_a_report_of_the_wrong_shape() -> None:
         ('{"a": 1, "a": 2}', 'duplicate key "a"'),
     )
     for text, why in rows:
-        assert answer("verify", text) == f"no vitest JSON report at DOC ({why})\n"
+        argv = document(tmp_path, "verify", text)
+        assert tp.main(argv) == 1
+        said = capfd.readouterr().out.replace(argv[1], "DOC")
+        assert said == f"no vitest JSON report at DOC ({why})\n"
 
 
-def test_a_listing_of_the_wrong_shape() -> None:
+def test_a_listing_of_the_wrong_shape(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
     """The list itself, an entry, and its file."""
     rows = (
         ("{}", "the listing is not a list"),
@@ -912,69 +916,79 @@ def test_a_listing_of_the_wrong_shape() -> None:
         ("[{}]", "listing[0].file is not a string"),
     )
     for text, why in rows:
-        assert (
-            answer("collected", text)
-            == f"no readable vitest file list at DOC ({why})\n"
-        )
+        argv = document(tmp_path, "collected", text)
+        assert tp.main(argv) == 1
+        said = capfd.readouterr().out.replace(argv[1], "DOC")
+        assert said == f"no readable vitest file list at DOC ({why})\n"
 
 
 FILES = ("c.prop.test.ts", "a.prop.test.ts", "b.prop.test.mts")
 
 
-class Shares:
-    """ORG_SHARD=k/n keeps every n-th property file, each once (#2160)."""
-
-    def __init__(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """Hold the descriptors' capture for `share`."""
-        self.capfd = capfd
-
-    def share(self, spec: str, reports: str) -> list[str]:
-        """Ask the runner, in process, for one shard's files.
-
-        Returns:
-            The files it keeps.
-
-        """
-        with pytest.MonkeyPatch.context() as patched:
-            for name, value in {
-                "ORG_SHARD": spec,
-                "ORG_SHARD_TASK": "test:typescript-properties",
-                "ORG_SHARD_REPORTS": reports,
-            }.items():
-                patched.setenv(name, value)
-            status = tp.main(["share", *FILES])
-        out, err = self.capfd.readouterr()
-        assert status == 0, err
-        return [f for f in out.split("\0") if f]
-
-
 @fixture
-def shares(capfd: pytest.CaptureFixture[str]) -> Shares:
-    """Give each row its own Shares."""
-    return Shares(capfd)
+def sharded(monkeypatch: pytest.MonkeyPatch) -> Callable[[str, str], None]:
+    """Hand the runner one shard of the property files (#2160).
+
+    Returns:
+        A function that sets ORG_SHARD to `spec`, reporting to `reports`.
+
+    """
+
+    def hand(spec: str, reports: str) -> None:
+        for name, value in {
+            "ORG_SHARD": spec,
+            "ORG_SHARD_TASK": "test:typescript-properties",
+            "ORG_SHARD_REPORTS": reports,
+        }.items():
+            monkeypatch.setenv(name, value)
+
+    return hand
 
 
-def test_two_shards_hold_every_file_once(shares: Shares) -> None:
+def kept(out: str) -> list[str]:
+    """Read the files `share` printed, NUL-separated.
+
+    Returns:
+        The files it keeps.
+
+    """
+    return [f for f in out.split("\0") if f]
+
+
+def test_two_shards_hold_every_file_once(
+    sharded: Callable[[str, str], None], capfd: pytest.CaptureFixture[str]
+) -> None:
     """1/2 and 2/2: sorted, every second file, the union whole."""
     with tempfile.TemporaryDirectory() as reports:
-        first, second = shares.share("1/2", reports), shares.share("2/2", reports)
+        got_shares: list[list[str]] = []
+        for spec in ("1/2", "2/2"):
+            sharded(spec, reports)
+            status = tp.main(["share", *FILES])
+            out, err = capfd.readouterr()
+            assert status == 0, err
+            got_shares.append(kept(out))
         want: list[list[str]] = [
             ["a.prop.test.ts", "c.prop.test.ts"],
             ["b.prop.test.mts"],
         ]
-        got_shares: list[list[str]] = [first, second]
         assert want == got_shares
         none: list[str] = []
         got = shard.union(shard.load(Path(reports)), {"test:typescript-properties": 2})
         assert none == got
 
 
-def test_no_shard_is_every_file(shares: Shares) -> None:
+def test_no_shard_is_every_file(
+    sharded: Callable[[str, str], None], capfd: pytest.CaptureFixture[str]
+) -> None:
     """Unset or 1/1: every file, as given, and no report."""
     with tempfile.TemporaryDirectory() as reports:
         for spec in ("", "1/1"):
+            sharded(spec, reports)
+            status = tp.main(["share", *FILES])
+            out, err = capfd.readouterr()
+            assert status == 0, err
             every: list[str] = list(FILES)
-            assert every == shares.share(spec, reports)
+            assert every == kept(out)
         written: list[Path] = list(Path(reports).iterdir())
         nothing: list[Path] = []
         assert nothing == written
