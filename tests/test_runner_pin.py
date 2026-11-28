@@ -1,4 +1,4 @@
-"""Table tests for lint:runner-pin and mise/runner_pin.py (#1911).
+"""Table tests for lint:runner-pin and belt/runner_pin.py (#1911).
 
 Each row plants workflows and templates and asserts the exit status
 and every line of the message: pinned labels (plain, suffixed, quoted,

@@ -1,4 +1,4 @@
-"""Run `release/repro_resolve.py` against a stub `gh` (#1386).
+"""Run `belt/release/repro_resolve.py` against a stub `gh` (#1386).
 
 `repro-check.yml`'s "Read the latest release" step is now one call to
 the helper. These rows call its `main` in this process (#1698), with a

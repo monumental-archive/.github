@@ -1,6 +1,6 @@
 """The two writers of findings (#1890).
 
-Rows for `mise/findings.sh` and `mise/findings.py`, each run as a task
+Rows for `mise/findings.sh` and `belt/findings.py`, each run as a task
 runs it: a script that sources or imports the writer, in a child
 process. The shell rows run under the belt's bash and under
 `/bin/bash` (3.2 on macOS), with `set -euo pipefail` as every task

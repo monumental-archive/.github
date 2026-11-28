@@ -3,7 +3,7 @@
 The bodies under test are the tasks' own `run` strings, read out of
 mise/config.toml with tomllib and run by bash in a planted git tree,
 and they call the real `mise/rust-properties.sh` and
-`mise/rust_properties.py`. `mise` is a STUB on PATH: the audit runs the
+`belt/rust_properties.py`. `mise` is a STUB on PATH: the audit runs the
 repository's own `test` task through it, and the stub records each
 call, the ORG_PROPERTY_SEED it was handed and whether a PROPTEST_CASES
 reached it. What proptest does with the seed the belt's `[env]` hands

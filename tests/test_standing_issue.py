@@ -1064,7 +1064,7 @@ def test_tail_is_at_most_four_thousand() -> None:
 def records(directory: Path, name: str, *found: standing.Finding) -> None:
     """Write a findings file as the writer appends it.
 
-    The record is mise/findings.py's own encoding, so the report reads
+    The record is belt/findings.py's own encoding, so the report reads
     what the writer writes.
     """
     directory.mkdir(parents=True, exist_ok=True)

@@ -1,7 +1,7 @@
 """stele's report, read into finding records (#1935).
 
-Rows for `mise/stele_findings.py`, run as a task runs it: a child
-process with ORG_FINDINGS and MISE_TASK_NAME set, over a stub `stele`
+Rows for `belt stele-findings`, its `main` called in this process as
+a task runs it, ORG_FINDINGS and MISE_TASK_NAME set, over a stub `stele`
 on PATH that logs its arguments, says a line on stderr, prints the
 row's document and exits with the row's status. One row runs the
 belt's pinned stele itself on an SPDX document with one versionless

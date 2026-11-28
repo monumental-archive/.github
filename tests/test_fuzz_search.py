@@ -19,7 +19,7 @@ it was handed:
   raise the figure.
 
 The run's length is read from planted logs through the library's own
-reader, and the workflow is read through mise/workflow_yaml.py for the
+reader, and the workflow is read through belt/workflow_yaml.py for the
 steps and jobs the rows hold to.
 
 Each row asserts the message, not just the exit status: a planted row

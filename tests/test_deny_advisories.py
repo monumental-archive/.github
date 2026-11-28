@@ -2,7 +2,7 @@
 
 Two halves, one table each.
 
-`mise/deny_advisories.py`, which `lint:deny` runs in the gate over a
+`belt/deny_advisories.py`, which `lint:deny` runs in the gate over a
 tracked deny.toml: an `[advisories] ignore` entry that names an
 advisory, a bare string or a table with `id`, is red, named, with the
 remedy; an entry keyed by `crate` (a yanked version) is green, and so
@@ -17,7 +17,7 @@ and `stele` (the form test_semver_audit.py uses). The stubs log their
 arguments; cargo hands `cargo deny` to cargo-deny as cargo does;
 cargo-deny writes its JSON to stderr and exits 1, as the real one does
 for a finding; stele prints the row's report and exits the row's
-status. The real mise/stele_findings.py reads it. So a row asserts
+status. The real belt/stele_findings.py reads it. So a row asserts
 that cargo-deny's status is not the verdict and stele's is.
 """
 

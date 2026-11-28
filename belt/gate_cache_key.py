@@ -63,7 +63,7 @@ major's leg, is kept apart by the NAME (`mise-pgrx-v1-pg18`), which is
 the prefix. Without `--install` the key is the one above, to the byte.
 
 THE BELT TOOLS LEFT OUT (#1410). The gate disables the belt tools a tree
-does not need (mise/gate_tools.py), and what it installs then changes
+does not need (belt/gate_tools.py), and what it installs then changes
 with the tree's files, which neither hash sees: a first Dockerfile needs
 hadolint under the same key. An exact hit is never re-saved, so that
 restore would lack hadolint and fetch it on every run until the key

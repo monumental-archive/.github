@@ -1,6 +1,6 @@
 """Rows for the one derivation of the tree's Rust workspaces (#2004).
 
-`mise/rust_workspaces.py` resolves every tracked manifest outside
+`belt/rust_workspaces.py` resolves every tracked manifest outside
 `vendor/` to its workspace root with `cargo locate-project`, and
 `org_rust_workspace_roots` (mise/rust-workspaces.sh) reads its list into
 a task's array. Each row plants a tree with two roots, `Cargo.toml` and

@@ -1,10 +1,10 @@
 """lint:pg-clippy's body, one row per branch with its message (#1911).
 
-The task's body after its guard is mise/pg_clippy.py. Each row calls
+The task's body after its guard is belt/pg_clippy.py. Each row calls
 its `main` in this process, in a planted git tree, against a planted
 belt whose clippy ladder and pgrx provisioning are the stubs
 test_rust_lint.py plants for rust_lint.py, whose plumbing this helper
-shares through mise/rust_task.py. cargo, rustup and mise are stubs on
+shares through belt/rust_task.py. cargo, rustup and mise are stubs on
 PATH that log what they were asked; the workspace's cargo metadata is
 read by the belt's real gate_surface.py, and its extension's major
 derived by the real pgrx-env.sh. Every row asserts the whole log, so a

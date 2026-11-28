@@ -1,6 +1,6 @@
 """Every shard's share is its task's whole population, each item once (#2160).
 
-mise/shard.py names a shard (ORG_SHARD=k/n), writes what each shard
+belt/shard.py names a shard (ORG_SHARD=k/n), writes what each shard
 ran, and holds the union of every shard's report to the population it
 chose from. These rows plant the union's two failures (a shard that
 drops an item, one that repeats one) and each of its other refusals, by

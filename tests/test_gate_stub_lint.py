@@ -1,6 +1,6 @@
-"""Table tests for mise/gate_stub.py, lint:gate-stub's helper (#1911).
+"""Table tests for belt/gate_stub.py, lint:gate-stub's helper (#1911).
 
-mise/test_gate_stub.py holds the concurrency requirement through the
+tests/test_gate_stub.py holds the concurrency requirement through the
 task's own body, on the canon's real stub and gate. These rows hold the
 rest of the helper, a row per branch, each asserting its message: the
 `edited` type (as a list item and on a `types:` line, and named only in

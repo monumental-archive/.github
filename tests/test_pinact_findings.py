@@ -1,7 +1,7 @@
 """pinact's SARIF report, read into finding records (#1955).
 
-Rows for `mise/pinact_findings.py`, run as a task runs it: a child
-process with ORG_FINDINGS and MISE_TASK_NAME set, over a stub `pinact`
+Rows for `belt pinact-findings`, its `main` called in this process as
+a task runs it, ORG_FINDINGS and MISE_TASK_NAME set, over a stub `pinact`
 on PATH that logs its arguments, writes the diff line pinact writes to
 stderr, prints the row's document and exits with the row's status.
 

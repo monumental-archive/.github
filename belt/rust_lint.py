@@ -10,7 +10,7 @@ coverage and mutation legs (CONTRIBUTING, "A helper's language").
 Behaviour, messages and exit statuses are the bodies' own, unchanged.
 
 Both run their cargo legs once per workspace the tree tracks (#2004),
-the roots named by mise/rust_workspaces.py, so a crate outside the root
+the roots named by belt/rust_workspaces.py, so a crate outside the root
 workspace (a cargo-fuzz crate is its own) is formatted, linted and
 fixed like any other, and a cargo-fuzz crate is built the way
 cargo-fuzz builds it, with `--cfg fuzzing` (#2093).
@@ -18,7 +18,7 @@ cargo-fuzz builds it, with `--cfg fuzzing` (#2093).
 The task's reasoning for each step rides beside the step below. The
 steps every Rust task's helper shares (the belt and its Python, the
 compile surface, the clippy ladder, the pgrx derivation and
-provisioning) are mise/rust_task.py's.
+provisioning) are belt/rust_task.py's.
 
 Run in the repository's root, with cargo, rustup and the belt on PATH;
 stdlib only.

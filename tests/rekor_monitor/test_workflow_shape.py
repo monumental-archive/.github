@@ -9,7 +9,7 @@ reading every leg's report and counting all the legs. None of it
 can run here, so this reads the workflow and names each part that is not
 as built; a planted copy per rule proves the message.
 
-The workflow is read through mise/workflow_yaml.py (#1840), the belt's
+The workflow is read through belt/workflow_yaml.py (#1840), the belt's
 one YAML parser; a planted copy is written to a scratch file and read
 the same way.
 """
@@ -204,7 +204,7 @@ def problems(text: str) -> list[str]:
     found = run_wide(document)
     by_id = workflow_yaml.jobs(document)
     # `report` is every scheduled workflow's last job (#1887), held by
-    # mise/test_report_job.py; this file holds the legs' shape.
+    # tests/test_report_job.py; this file holds the legs' shape.
     if sorted(by_id) != ["gaining", "report", "start", "watch"]:
         expected = "start, watch, gaining and report"
         return [*found, f"the jobs are {sorted(by_id)}, not {expected}"]

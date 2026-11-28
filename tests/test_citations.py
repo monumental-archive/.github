@@ -1,4 +1,4 @@
-"""Rows for audit:citations and mise/citations.py, one per branch (#1911).
+"""Rows for audit:citations and belt/citations.py, one per branch (#1911).
 
 The body was 79 lines of shell; its logic is the helper now, and each
 message it printed is asserted here, word for word. The live org is a

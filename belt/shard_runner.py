@@ -3,7 +3,7 @@
     belt shard-runner -- <command> [<argument>…]
 
 `measured` runs this first, whenever ORG_SHARD names a shard other than
-1/1 (mise/shard.py). It reads the command the repository's `test` task
+1/1 (belt/shard.py). It reads the command the repository's `test` task
 gives `measured`, prints it back NUL-separated with this shard's share
 in it, and writes the shard's report (what it chose from, what it kept)
 for the gate's union check. Four runners, each in its own terms:

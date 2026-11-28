@@ -1,4 +1,4 @@
-"""Table tests for mise/rust_task.py, the Rust task helpers' shared steps.
+"""Table tests for belt/rust_task.py, the Rust task helpers' shared steps.
 
 One row per branch, in this process. The belt is a directory of this
 file's own scripts, named by ORG_BELT_DIR: a `pgrx-env.sh` whose

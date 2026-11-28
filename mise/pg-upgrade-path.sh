@@ -79,7 +79,7 @@ fi
 # for the same reason (#652, #825). This name is also written by
 # release/generate-pgrx-upgrade.sh; the two are released together at one
 # canon resolution, and the end-to-end row in
-# release/test_generate_pgrx_upgrade.py derives a tree and lints it, so a
+# tests/release/test_generate_pgrx_upgrade.py derives a tree and lints it, so a
 # rename on one side reds rather than silently reading nothing.
 record=".pgrx-installable"
 

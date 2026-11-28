@@ -1,6 +1,6 @@
-"""Run `release/registry.py` against a stub `docker` and a fake registry.
+"""Run `belt/release/registry.py` against a stub `docker` and a fake registry.
 
-#1382 moved four workflows' registry plumbing into `release/registry.py`
+#1382 moved four workflows' registry plumbing into `belt/release/registry.py`
 (the buildx floor, flags from the facts, push by digest, the index's
 assembly and upload, tagging a gated digest). None of the four blocks
 had a test. These rows run the helper in-process, as the steps call it,

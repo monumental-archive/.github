@@ -1,11 +1,11 @@
-"""Table tests for mise/msrv_lint.py, lint:msrv's body (#1911).
+"""Table tests for belt/msrv_lint.py, lint:msrv's body (#1911).
 
 One row per branch of the body, each asserting the message it prints
 and the commands it ran, in order. The helper runs in this process;
 `cargo` and `mise` are stubs on PATH that log what they were asked,
 `ORG_PYTHON` is a stub that answers each belt helper by name, and the
 belt is planted with pgrx-env.sh's prepare and a major's environment
-replaced by marks (the mise/test_pgrx_task_majors.py shape). Every
+replaced by marks (the tests/test_pgrx_task_majors.py shape). Every
 stream is captured at the descriptor, so a stub's or a belt function's
 line lands beside the helper's own. One row runs the task's own body,
 read from mise/config.toml, for the guard and the script contract.
@@ -234,7 +234,7 @@ class Planted:
 
         `roots` is what rust_workspaces.resolved answers, None for a tree
         it refused: the root manifest alone unless a row says otherwise
-        (mise/test_msrv_roots.py runs the real one).
+        (tests/test_msrv_roots.py runs the real one).
         """
         monkeypatch.chdir(self.tree)
         for name in list(os.environ):

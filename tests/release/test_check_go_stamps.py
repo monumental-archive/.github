@@ -1,4 +1,4 @@
-"""Run release/check_go_stamps.py, the go-binary stamp check, on a stub go.
+"""Run belt/release/check_go_stamps.py, the go-binary stamp check, on a stub go.
 
 #1371 moved the step "Refuse a binary whose stamp is not the released
 commit" out of build-go-binary.yml into the helper, refusals unchanged.

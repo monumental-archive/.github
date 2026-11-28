@@ -1098,8 +1098,8 @@ def test_prepare_is_the_sdk_and_the_check(with_icu: WithIcu) -> None:
 # workspace-wide audit runs its workspace command at the default major
 # org_pgrx_provision names beside its per-extension one (#1940).
 # fix:rust's, lint:msrv's and lint:pg-clippy's compiles left their
-# bodies for mise/rust_lint.py, mise/msrv_lint.py and mise/pg_clippy.py
-# (#1911), whose one call is mise/rust_task.py's `at_major`:
+# bodies for belt/rust_lint.py, belt/msrv_lint.py and belt/pg_clippy.py
+# (#1911), whose one call is belt/rust_task.py's `at_major`:
 # test_pgrx_task_majors.py proves each of them carries its own major's
 # headers and not the last one's.
 SITES = {

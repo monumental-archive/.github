@@ -223,7 +223,7 @@ propose() {
 }
 
 # Sourced, the functions alone (the path rows of
-# release/test_propose_fuzz_corpus.py); run, the mode.
+# tests/release/test_propose_fuzz_corpus.py); run, the mode.
 [[ ${BASH_SOURCE[0]} == "$0" ]] || return 0
 case "${1:-}" in
   handover)

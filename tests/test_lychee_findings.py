@@ -1,7 +1,7 @@
 """lychee's report, read into finding records (#1955).
 
-Rows for `mise/lychee_findings.py`, run as a task runs it: a child
-process with ORG_FINDINGS and MISE_TASK_NAME set, over a stub `lychee`
+Rows for `belt lychee-findings`, its `main` called in this process as
+a task runs it, ORG_FINDINGS and MISE_TASK_NAME set, over a stub `lychee`
 on PATH that logs its arguments, says a line on stderr, prints the
 row's document and exits with the row's status.
 

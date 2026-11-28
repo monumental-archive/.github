@@ -11,7 +11,7 @@ Usage:
 
 runs `stele assert <target> --json <arguments>`, stele's stderr passed
 through, and decodes the one document stele writes to stdout. Each
-entry of its `findings` goes through mise/findings.py: the subject is
+entry of its `findings` goes through belt/findings.py: the subject is
 the entry's, the message `<assertion>: <detail>` (the assertion alone
 without a detail), the detail lines `expected: ...` and `actual: ...`
 for those present. A verdict other than PASS with no findings is one
@@ -37,7 +37,7 @@ from belt import decoded, findings
 
 SCHEMA = 9
 # The belt's stele, as PATH answers it; read as the command by the job
-# install law (release/test_job_installs.py).
+# install law (tests/release/test_job_installs.py).
 STELE = shutil.which("stele") or "stele"
 # The one verdict that is not a finding.
 SOUND = frozenset({"PASS"})

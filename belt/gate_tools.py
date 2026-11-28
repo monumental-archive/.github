@@ -4,7 +4,7 @@ The gate job used to install the whole belt in every repository and then
 skip the lints that did not apply: 34 tools for 74 lints, 29 of which
 printed "skipped" on stele. `mise/gate-tools.toml` says, for every tool
 the belt pins, the tracked-file condition under which some gate task that
-calls it does not skip; this helper reads the tracked files (mise/tracked.py)
+calls it does not skip; this helper reads the tracked files (belt/tracked.py)
 against it.
 
 A tool is needed when any of:
@@ -33,7 +33,7 @@ not installed by `mise install`, not auto-installed by `mise run`, and
 not on PATH: absent, so a lint that needs it reds by name. A tool the
 repository pins itself is never disabled: mise disables by tool name,
 and the repository's own pin would go with it (the name rule is
-`release/caller_pins.py`'s).
+`belt/release/caller_pins.py`'s).
 
     belt gate-tools [--root DIR] [--table FILE] list
         prints one needed belt key per line, the reason for every belt
@@ -41,10 +41,10 @@ and the repository's own pin would go with it (the name rule is
     belt gate-tools [--root DIR] [--table FILE] disable
         appends `MISE_DISABLE_TOOLS=<keys>` to $GITHUB_ENV, and the set's
         digest as `ORG_GATE_BELT_DIGEST` for the tool cache's key
-        (mise/gate_cache_key.py), printing the reasons. Nothing disabled
+        (belt/gate_cache_key.py), printing the reasons. Nothing disabled
         writes nothing.
 
-The table test (`mise/test_gate_tools.py`) holds the table to the tasks:
+The table test (`tests/test_gate_tools.py`) holds the table to the tasks:
 every tool a gate task calls has a row, under a condition no narrower
 than that task's guard.
 """
@@ -332,7 +332,7 @@ def tracked_files(root: Path) -> list[str]:
     """List the tree's tracked files.
 
     Returns:
-        The tracked files in the root, from mise/tracked.py (#1986),
+        The tracked files in the root, from belt/tracked.py (#1986),
         which keeps every `GIT_*` variable from git (#857).
 
     """

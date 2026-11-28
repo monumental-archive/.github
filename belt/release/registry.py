@@ -4,7 +4,7 @@ One helper for the registry plumbing four workflows wrote out in bash
 (#1382): the buildx floor, labels and index annotations from the image
 facts, a push by digest, the index's assembly and upload, and tagging a
 gated digest. Each operation is a function here and a subcommand below;
-`release/test_registry.py` runs them against a stub `docker` and a
+`tests/release/test_registry.py` runs them against a stub `docker` and a
 local fake registry.
 
 - `push` (build-oci-image.yml, one leg per architecture; and

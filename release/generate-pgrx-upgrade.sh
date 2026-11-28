@@ -304,7 +304,7 @@ apt-get update -qq
 # (#1157): unversioned, apt serves the newest minor, and the library
 # links against symbols the image's server does not have. Textually
 # identical to the install in release/pgrx/build-root.sh, asserted by
-# release/test_generate_pgrx_upgrade.py: the two containers mount
+# tests/release/test_generate_pgrx_upgrade.py: the two containers mount
 # different trees, so they cannot share one script.
 server=$(dpkg-query -W -f="\${Version}" "postgresql-${PG}")
 if ! apt-cache show "postgresql-server-dev-${PG}=${server}" > /dev/null 2>&1; then

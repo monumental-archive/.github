@@ -1443,7 +1443,7 @@ def explain(findings: list[Finding], limit: int) -> list[str]:
         "  suffix spends that allowance in place of.\n\n"
         f"  Widths above allow {VERSION_GROWTH} characters of version growth, and\n"
         f"  an ordinary subject a {PR_NUMBER_DIGITS}-digit pull request number;\n"
-        "  both are pinned and reasoned in mise/subject_budget.py."
+        "  both are pinned and reasoned in belt/subject_budget.py."
     )
     return lines + [line.removeprefix("  ") for line in remedy.splitlines()]
 

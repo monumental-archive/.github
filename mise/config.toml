@@ -219,7 +219,7 @@ ORG_PYTHON_UNSET = '''unset — the belt Python is not installed here; run: mise
 # A split test leg names the directory instead (#2049, #2160): every
 # row (a task of `test`, or a shard of one) measures into
 # ORG_GATE_COVERAGE_RUN and keeps it, and the gate's coverage job
-# gathers the rows' data there (mise/coverage_merge.py) and runs
+# gathers the rows' data there (belt/coverage_merge.py) and runs
 # coverage:check over it, so the floor judges the whole suite. Nothing
 # else sets it.
 ORG_COVERAGE_RUN = "{% set gate = get_env(name='ORG_GATE_COVERAGE_RUN', default='') %}{% if gate %}{{ gate }}{% else %}{{ get_env(name='TMPDIR', default='') | default(value='/tmp', boolean=true) | trim_end(pat='/') }}/org-coverage-{{ mise_pid }}{% endif %}"
@@ -364,7 +364,7 @@ lychee = "0.24.2"
 # check that was attempted for that class and why it was abandoned (#82).
 jq = "1.8.2"
 # YAML as JSON, for the laws that read a workflow or an action (#1840).
-# They read it through mise/workflow_yaml.py, one parser in one module,
+# They read it through belt/workflow_yaml.py, one parser in one module,
 # where each test file once carried a hand-written guess at the grammar.
 yq = "4.54.3"
 # The other half of the pinning convention (#82). CLAUDE.md requires every
@@ -381,7 +381,7 @@ yq = "4.54.3"
 # security/workflow-permissions.py, which computed the caller/callee
 # permissions join until stele#148 replaced it; that file is gone and
 # the reason with it. Re-adjudicated 2026-08-20 and KEPT: the belt's
-# own helpers are Python (mise/deny_skips.py, mise/embedded_shell.py),
+# own helpers are Python (belt/deny_skips.py, belt/embedded_shell.py),
 # so the language a belt tool must cover is still in the tree, and a
 # universal layer that dropped Python the moment the canon's own count
 # fell to two would have to re-adopt it for the first adopter who
@@ -604,7 +604,7 @@ python = "3.15.2"
 # closest-to-policy path without aqua. Like biome and golangci-lint,
 # unprovable here: the canon tracks no Rust, so it is exercised first
 # in a consumer (docs/tooling-verdicts.md); the task's file list is held
-# by planted rows (mise/test_machete.py, #2008).
+# by planted rows (tests/test_machete.py, #2008).
 "github:bnjbvr/cargo-machete" = "v0.10.1"
 # Dockerfile lint (#403): every hadolint rule at maximum reach —
 # --failure-threshold style fails on ALL severities including style,
@@ -675,7 +675,7 @@ python = "3.15.2"
 #     global task below assembles it as the sum of three legs, `ci:lint`,
 #     `ci:test` and `ci:properties`, which the gate runs side by side
 #     (#1740), each across as many runners as the repository's tasks
-#     and its shards.toml split it into (#2160, mise/gate_shard.py).
+#     and its shards.toml split it into (#2160, belt/gate_shard.py).
 #     Repos do not define those either.
 #   - `lint:*` is claimed by the belt and wildcard-collected into
 #     `ci:lint`, so a linter added here is enforced in every repo with no
@@ -703,7 +703,7 @@ dir = "{{cwd}}"
 # The sum of the three legs and nothing else (#1740). The gate job in
 # ci.yml runs one leg per runner, side by side; a laptop runs `ci` and
 # gets all three, exactly what one gate run checks. Every line the gate
-# runs belongs to one leg, and mise/test_task_contract.py holds the
+# runs belongs to one leg, and tests/test_task_contract.py holds the
 # legs' depends together to the gate's list: nothing dropped, nothing
 # twice.
 depends = ["ci:lint", "ci:test", "ci:properties"]
@@ -1662,7 +1662,7 @@ dir = "{{cwd}}"
 #   node src/main.ts
 #   biome lint --write src   (the rule at its default, on the .js form)
 #
-# mise/test_import_extensions.py keeps the fixture: the `.ts` form clean
+# tests/test_import_extensions.py keeps the fixture: the `.ts` form clean
 # in lint:biome and lint:types, the `.js` form red in lint:biome by the
 # rule's name. A repository that emits JavaScript with tsc does so from
 # its own build config with `rewriteRelativeImportExtensions`.
@@ -1767,7 +1767,7 @@ dir = "{{cwd}}"
 # `biome-ignore-start` or `biome-ignore-end` — measured on 2.5.7 with
 # nothing in the file to suppress. Those are biome's `allow`: they
 # outlive their reason silently and widen to hide new findings, the
-# defect #1857 closed for Rust. `mise/biome_suppressions.py` reads the
+# defect #1857 closed for Rust. `belt/biome_suppressions.py` reads the
 # same tracked list biome is handed, comments only — the form in a
 # string, a template literal or a regex is not a suppression — and
 # names each file and line. The remedy is a one-line `biome-ignore`
@@ -2270,7 +2270,7 @@ dir = "{{cwd}}"
 # would hide it from zizmor, whose github-env and template-injection
 # audits read run: content and cannot follow a script call.
 #
-# The values are read by the parser, mise/workflow_yaml.py on the
+# The values are read by the parser, belt/workflow_yaml.py on the
 # belt's yq (#1846): every run: value, however the YAML spells it — a
 # block, a single line, anchored, in a flow mapping, under a quoted
 # key. A literal block and a single-line value get shfmt and
@@ -2312,7 +2312,7 @@ dir = "{{cwd}}"
 # key; line numbers rot). There is no per-block ignore: the debt file is
 # the one exception. Where the logic goes is CONTRIBUTING.md's rule.
 #
-# The counter is mise/embedded_shell.py's reader, the one that hands
+# The counter is belt/embedded_shell.py's reader, the one that hands
 # values to shfmt and shellcheck in lint:shell-embedded: the parser
 # (#1846), so the ceiling sees every run: value however it is written,
 # and a folded block weighs the lines the file holds, not the one line
@@ -3029,7 +3029,7 @@ dir = "{{cwd}}"
 # precedent — fetching pinned inputs is the same category as fetching the
 # toolchain.
 #
-# The body after its guard is mise/rust_lint.py's `lint`, which says
+# The body after its guard is belt/rust_lint.py's `lint`, which says
 # why each step is there (#1911).
 run = '''
 manifests=() && org_tracked_read manifests ':!vendor/**' "Cargo.toml" "*/Cargo.toml"
@@ -3070,7 +3070,7 @@ dir = "{{cwd}}"
 # --allow-staged would add nothing (`git add -p` then `mise run fix` is
 # the case that would otherwise still red).
 #
-# The body after its guard is mise/rust_lint.py's `fix` (#1911).
+# The body after its guard is belt/rust_lint.py's `fix` (#1911).
 run = '''
 manifests=() && org_tracked_read manifests ':!vendor/**' "Cargo.toml" "*/Cargo.toml"
 [[ -n ${manifests[0]+set} ]] || {
@@ -3158,7 +3158,7 @@ dir = "{{cwd}}"
 # of the tree, the lock, the canon's floor file and two pinned
 # toolchains. `cargo fetch --locked` first, same precedent.
 #
-# The body after its guard is mise/msrv_lint.py, which says why each
+# The body after its guard is belt/msrv_lint.py, which says why each
 # step is there (#1911).
 run = '''
 set -euo pipefail
@@ -3203,8 +3203,8 @@ dir = "{{cwd}}"
 # --no-default-features, where their lint expectations do not fire and
 # `-D warnings` turns each one into an error.
 #
-# The body after its guard is mise/pg_clippy.py (#1911), on the plumbing
-# lint:rust and fix:rust share in mise/rust_lint.py.
+# The body after its guard is belt/pg_clippy.py (#1911), on the plumbing
+# lint:rust and fix:rust share in belt/rust_lint.py.
 run = '''
 manifests=() && org_tracked_read manifests ':!vendor/**' "Cargo.toml" "*/Cargo.toml"
 [[ -n ${manifests[0]+set} ]] || {
@@ -3298,10 +3298,9 @@ dir = "{{cwd}}"
 # (python_properties.py); a test restating a bound is refused.
 #
 # `prop_*.py`, never `test_*.py`: a repository's own `test` task does
-# not collect them, so its ordinary suites stay stdlib `unittest` and
-# run with nothing installed (#364's refusal stands for them). The
-# Hypothesis venv's interpreter runs them, asserted to be the belt's
-# python pin. Named in `ci` explicitly, the `test:pgrx` precedent.
+# not collect them, so its ordinary suites run without Hypothesis
+# installed. The Hypothesis venv's interpreter runs them, asserted to
+# be the belt's python pin. Named in `ci` explicitly, the `test:pgrx` precedent.
 run = '''
 "${ORG_BELT_DIR}/python-properties.sh" gate
 '''
@@ -3362,7 +3361,7 @@ dir = "{{cwd}}"
 # a repository's own `test` task draws the same proptest inputs on every
 # gate run; a proptest below 1.7.0 ignores the variable without a word,
 # and the gate would draw a fresh seed every run with nothing red.
-# Reads lock files only (mise/rust_properties.py, tomllib), every
+# Reads lock files only (belt/rust_properties.py, tomllib), every
 # tracked Cargo.lock outside vendor/. Red by file and version; skips
 # clean, by name, where no tracked lock holds proptest.
 run = '''
@@ -4552,7 +4551,7 @@ files=() && workflow_template_files files
 canon_owner=$(org_identity owner)
 canon_repo=$(org_identity repo)
 # The pin, the drift since it, and the post-release window (#290,
-# #310): mise/template_drift.py (#1911).
+# #310): belt/template_drift.py (#1911).
 "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" template-drift \
   "${canon_owner}/${canon_repo}" "${files[@]}"
 '''
@@ -5007,7 +5006,7 @@ env = { SHELLCHECK_OPTS = "--enable=all --exclude=SC2310 --external-sources --ex
 #
 # actionlint is given the tracked workflows (#2007), never the directory
 # it would walk, untracked files and all; the call, its flags and the
-# link are mise/actions_lint.py, moved out when the selection took the
+# link are belt/actions_lint.py, moved out when the selection took the
 # body past the 15-line ceiling.
 run = '''
 . "${ORG_BELT_DIR}/action-files.sh"
@@ -5016,7 +5015,7 @@ files=() && workflow_files files
   echo "lint:actions: no workflows, skipped"
   exit 0
 }
-# The two -ignore flags and the `.org-canon` link: mise/actions_lint.py.
+# The two -ignore flags and the `.org-canon` link: belt/actions_lint.py.
 "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" actions-lint "${files[@]}"
 '''
 
@@ -5171,7 +5170,7 @@ files=() && workflow_files files
 . "${ORG_BELT_DIR}/identity.sh"
 canon_owner=$(org_identity owner)
 canon_repo=$(org_identity repo)
-# The three requirements and their messages: mise/gate_stub.py (#1911).
+# The three requirements and their messages: belt/gate_stub.py (#1911).
 "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" gate-stub \
   "${canon_owner}/${canon_repo}" "${files[@]}"
 '''
@@ -5259,7 +5258,7 @@ files=() && workflow_files files
 }
 # Only a real grant counts: a workflow that says "no id-token, ever" in
 # a comment is documenting the boundary, not breaching it. The logic is
-# mise/capability_boundary.py (#1911).
+# belt/capability_boundary.py (#1911).
 "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" capability-boundary "${files[@]}"
 '''
 
@@ -5484,7 +5483,7 @@ dir = "{{cwd}}"
 # while its uses: line was bumped twice — every dispatch a guaranteed
 # identity mismatch, silently.
 # identity.sh fails closed on a missing field, so the helper is never
-# handed an empty signer. The logic is mise/signer_pin.py (#1911).
+# handed an empty signer. The logic is belt/signer_pin.py (#1911).
 run = '''
 . "${ORG_BELT_DIR}/action-files.sh"
 files=() && workflow_files files
@@ -5838,7 +5837,7 @@ dir = "{{cwd}}"
 # #1213: security/org-default.json and org-private.json are the record
 # of the org's code security settings, and nothing compared them with
 # the live org — a record edit or a UI click left them disagreeing with
-# nothing red. mise/security_config.py holds the four comparisons and
+# nothing red. belt/security_config.py holds the four comparisons and
 # says why each is shaped as it is; its table tests are built from the
 # live answers fetched for #1213.
 #
@@ -5926,7 +5925,7 @@ dir = "{{cwd}}"
 # asserts each jdx/mise-action step carries an explicit `version:`.
 # Grep-shaped like every belt lint: count steps, count pins, any
 # shortfall is red with the file named.
-# The counting is mise/installer_pinned.py (#1911).
+# The counting is belt/installer_pinned.py (#1911).
 run = '''
 . "${ORG_BELT_DIR}/action-files.sh"
 files=() && workflow_files files
@@ -6015,7 +6014,7 @@ files=() && workflow_files files
   echo "lint:cold-attested: no workflows, skipped"
   exit 0
 }
-# The marker rules above are mise/cold_attested.py's logic (#1911).
+# The marker rules above are belt/cold_attested.py's logic (#1911).
 "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" cold-attested "${files[@]}"
 '''
 
@@ -6030,7 +6029,7 @@ dir = "{{cwd}}"
 # coverage.py pragmas, Rust's coverage(off) and cfg(coverage), the
 # istanbul, c8 and v8 ignore comments, and Go's coverage build
 # constraint and coverage:ignore. Where a marker counts, per language,
-# is the helper's docstring (mise/coverage_exclusions.py): a marker
+# is the helper's docstring (belt/coverage_exclusions.py): a marker
 # quoted in a string is text, not an exclusion.
 #
 # No allow-list and no per-site escape: the standard has none, and an
@@ -6056,7 +6055,7 @@ dir = "{{cwd}}"
 # (#1910). The tree says what a repository ships, so the rule reads it
 # — file names only, nothing opened — and names, per missing file, the
 # language, one file that ships it, and the remedy. The language table
-# and each row's mutation leg live in mise/testing_adoption.py; its
+# and each row's mutation leg live in belt/testing_adoption.py; its
 # test reads each leg's guard, so the two cannot name different files.
 # What an adoption file must contain stays each leg's business. No
 # repository list and no small-code exemption: a repository that does
@@ -6103,7 +6102,7 @@ depends = [{ task = "test", optional = true }]
 # (#2143), and red by name below it. Which legs apply is the
 # measurement's own business, and every floor records its legs, so a
 # tree with a valid floor always has one to hold. The pathspec test
-# below is mise/gate_tools.py's to read (#1410): it is the guard that
+# below is belt/gate_tools.py's to read (#1410): it is the guard that
 # lets the gate skip installing a coverage tool in a tree with none of
 # these. Its "no measurable language" branch runs only when the
 # tracked-file listing fails, since a floor's `legs` always answers.
@@ -6886,7 +6885,7 @@ dir = "{{cwd}}"
 # `docs/` was swept into it in one pass — measured, the same org
 # citations resolving before and after.
 #
-# The walk is mise/citations.py (#1911), which reads docs/ from git.
+# The walk is belt/citations.py (#1911), which reads docs/ from git.
 run = '''
 org_tracked_has security/identity.toml || {
   echo "audit:citations: no tracked security/identity.toml, not the canon, skipped"
@@ -6925,7 +6924,7 @@ dir = "{{cwd}}"
 # tag. The canon keeps no second reading of the roster.
 #
 # The obligation set is derived per repository from what its declared
-# membership makes applicable — mise/adoption_population.py holds that
+# membership makes applicable — belt/adoption_population.py holds that
 # table, read off stele's document, and the table tests for it. "Does
 # not apply" and "has not got" are different sentences, and only the
 # second is debt.
@@ -7375,7 +7374,7 @@ dir = "{{cwd}}"
 # NEVER IN `ci` AND NEVER ON A PULL REQUEST: a mutation run repeats the
 # suite once per mutant. repo-mutants.yml runs it weekly: per language a
 # shard matrix (`mutants-<language>`, MUTANTS_SHARD=k/n) and a totals job
-# stating the one answer across shards (mise/mutation-totals.sh). mise/test_task_contract.py holds `ci` to
+# stating the one answer across shards (mise/mutation-totals.sh). tests/test_task_contract.py holds `ci` to
 # reaching no audit task at all.
 #
 # The measure is "no unexplained survivor", never a score; adoption is
@@ -7511,7 +7510,7 @@ dir = "{{cwd}}"
 # renders from its sources. Deterministic, tracked files only, skips
 # clean where neither condition applies — a linter that cannot skip
 # cannot be universal.
-# The logic is mise/citation_check.py (#1911); the render it compares
+# The logic is belt/citation_check.py (#1911); the render it compares
 # against is mise/citation.sh, fix:citation's.
 run = '''
 . "${ORG_BELT_DIR}/action-files.sh"
@@ -8164,7 +8163,7 @@ files=() && workflow_files files
 }
 # Any file with a `uses:` job — reusable workflows AND caller stubs —
 # since the trap is the same in both; the logic is
-# mise/nested_permissions.py (#1911).
+# belt/nested_permissions.py (#1911).
 "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" nested-permissions "${files[@]}"
 '''
 
@@ -8184,7 +8183,7 @@ dir = "{{cwd}}"
 # pins-and-belt.yml, badges.yml; #1884), publish.yml, the repo-*.yml subject workflows (#1858), and
 # repo-mutants.yml for audit:mutants, which runs apart so a survivor
 # never reds another subject's run (#1355).
-# mise/test_audit_scheduled.py holds the message to those names.
+# tests/test_audit_scheduled.py holds the message to those names.
 # Deliberately no opt-out row — an unscheduled audit task IS the
 # defect; a task nobody should run should not exist. Linted, not
 # generated: generating the scheduling workflows from the task list would mean
@@ -8224,7 +8223,7 @@ if [[ -n ${own} && -n ${flows[0]+set} ]]; then
   repo=$(org_identity repo)
   canon="${owner}/${repo}"
 fi
-# Both halves and their messages: mise/audit_scheduled.py (#1911).
+# Both halves and their messages: belt/audit_scheduled.py (#1911).
 "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" audit-scheduled \
   --own "${own}" --canon "${canon}" ${flows[@]+"${flows[@]}"}
 '''
@@ -8442,7 +8441,7 @@ files=() && workflow_files files
   echo "lint:caller-permissions: no workflows, skipped"
   exit 0
 }
-# stele's join and its messages: mise/caller_permissions.py (#1911).
+# stele's join and its messages: belt/caller_permissions.py (#1911).
 "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" caller-permissions \
   "${ORG_CANON_DIR}" "${files[@]}"
 '''
@@ -8452,7 +8451,7 @@ description = "Workflow templates pin one released SHA; scorecard pins no reusab
 dir = "{{cwd}}"
 # Every canon pin in workflow-templates/ is one full SHA, an ancestor of
 # HEAD, that names a released tag; scorecard.yml pins the canon action
-# alone, never a reusable workflow. mise/template_pins.py has the rules
+# alone, never a reusable workflow. belt/template_pins.py has the rules
 # and their history (#28, #233, #1887); the canon is the identity's.
 run = '''
 . "${ORG_BELT_DIR}/action-files.sh"
@@ -8493,7 +8492,7 @@ templates=() && workflow_template_files templates
   echo "lint:runner-pin: no workflows, skipped"
   exit 0
 }
-# The two checks and their message: mise/runner_pin.py (#1911).
+# The two checks and their message: belt/runner_pin.py (#1911).
 "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" runner-pin \
   --workflows ${workflows[@]+"${workflows[@]}"} --templates ${templates[@]+"${templates[@]}"}
 '''
@@ -8529,7 +8528,7 @@ hooks=() && org_tracked_read hooks ':!vendor/**' "lefthook.yml" "*/lefthook.yml"
 presets=() && org_tracked_read presets ':!vendor/**' "renovate.json" "*/renovate.json" ".github/renovate.json"
 . "${ORG_BELT_DIR}/action-files.sh"
 workflows=() && workflow_files workflows
-# The four surfaces, the skip and the message: mise/canon_pins.py (#1911).
+# The four surfaces, the skip and the message: belt/canon_pins.py (#1911).
 "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${ORG_CANON_DIR}/belt" canon-pins "${canon_owner}/${canon_repo}" \
   --yaml ${yml[@]+"${yml[@]}"} --lefthook ${hooks[@]+"${hooks[@]}"} \
   --renovate ${presets[@]+"${presets[@]}"} --workflows ${workflows[@]+"${workflows[@]}"}

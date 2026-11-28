@@ -16,7 +16,7 @@ concurrency block is refused by name and left as it is: where to put a
 block in someone's workflow is a decision, not a rewrite.
 
 The wanted text is the lint's, restated; the rows in
-mise/test_gate_stub.py run this helper and then the lint on its output,
+tests/test_gate_stub.py run this helper and then the lint on its output,
 so the two cannot drift apart.
 """
 

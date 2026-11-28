@@ -1,7 +1,7 @@
 """Run the npm publisher against a stub `npm` (#1383).
 
 publish-wasm-npm.yml's Publish step had no test. Its body is now
-release/publish_npm.py, run here in-process through `run`, with a stub
+belt/release/publish_npm.py, run here in-process through `run`, with a stub
 `npm` first on PATH: `--version` answers STUB_NPM_VERSION, `view` exits
 STUB_VIEW_RC, `config get logs-dir` answers STUB_LOGS_DIR, and `publish`
 logs its arguments, writes a debug log beside the real npm's, and exits

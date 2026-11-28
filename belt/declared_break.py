@@ -14,7 +14,7 @@ A change is declared breaking when either
   `BREAKING-CHANGE` footer in the body, read line by line as stele
   reads §10.
 
-Both are held to the reader: `mise/test_break_check.py` runs the belt's
+Both are held to the reader: `tests/test_break_check.py` runs the belt's
 stele over the same messages and asserts it files exactly these under
 "Breaking".
 

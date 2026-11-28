@@ -14,7 +14,7 @@ known bugs. The deterministic properties:
   scorecard.yml calls no reusable workflow: it is self-contained by
   design, since Scorecard's publish validation rejects reusables. Its
   one canon pin is the canon action (.github/actions/canon), which its
-  `report` job needs for the belt's Python and mise/standing_issue.py
+  `report` job needs for the belt's Python and belt/standing_issue.py
   (#1887, owner's ruling 2026-11-21); that pin is held to the same
   released SHA as every other.
 

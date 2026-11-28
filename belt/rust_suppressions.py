@@ -16,7 +16,7 @@ command:
   day the flag order changed. One rule for every tool's table.
 
 Reads tracked paths, NUL-separated on stdin (`org_tracked`, #1986), or
-as a list from `check`, which mise/rust_lint.py calls (#1911): each
+as a list from `check`, which belt/rust_lint.py calls (#1911): each
 `Cargo.toml` is decoded with `tomllib` (through `decoded`, never
 grepped), every other path is read as Rust source. Prints one finding
 per line to stderr, then the remedy, and exits 1; prints nothing and

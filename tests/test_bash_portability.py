@@ -6,7 +6,7 @@ form, the near misses that are not one, comment lines (dropped before
 numbering), several hits in one file and across files, a named path
 that is not a regular file, the `printf %b` expansion the message went
 through (escapes, `\c`, a NUL, an unknown escape), an unguarded EXIT
-trap (mise/exit_trap.py's finding, red alone or beside the syntax), a
+trap (belt/exit_trap.py's finding, red alone or beside the syntax), a
 file that is not UTF-8, and the usage error. Four rows run the task's
 own body, read from mise/config.toml: the skip, untracked files (never
 read), a clean tree counted, and hits end to end; the rest call the
@@ -417,7 +417,7 @@ def test_a_script_exit_trap_cannot_read_is_an_error(
     for name, said in (
         (rel, f"{TASK}: {rel}: cannot be read as UTF-8:"),
         (conf, f"{TASK}: {conf}: cannot be read as UTF-8:"),
-        ("d.sh", f"{TASK}: mise/exit_trap.py cannot read a file:"),
+        ("d.sh", f"{TASK}: belt/exit_trap.py cannot read a file:"),
     ):
         lists = ("--configs", name) if name == conf else ("--scripts", name)
         planted.enter(monkeypatch)

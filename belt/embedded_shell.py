@@ -778,7 +778,7 @@ TASK_HEADER = """\
 # carries `#1544 unassigned`.
 #
 # Generated from the tree by the lint's own counter
-# (mise/embedded_shell.py), never typed.
+# (belt/embedded_shell.py), never typed.
 """
 
 

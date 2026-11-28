@@ -429,7 +429,7 @@ def test_a_reader_that_has_gone_does_not_kill_the_stub(env: support.Env) -> None
     assert done.returncode == 0
 
 
-# The rows below call mise/rust_lint.py's `main` in this process (#1911),
+# The rows below call belt/rust_lint.py's `main` in this process (#1911),
 # in a planted tree, against a planted belt whose ladder, pgrx
 # provisioning and Postgres pin check are stubs. cargo, rustup and mise
 # are stubs on a PATH that holds nothing else, and each logs what it was

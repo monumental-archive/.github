@@ -1,6 +1,6 @@
-"""Table tests for mise/audit_scheduled.py, lint:audit-scheduled's helper (#1911).
+"""Table tests for belt/audit_scheduled.py, lint:audit-scheduled's helper (#1911).
 
-mise/test_audit_scheduled.py runs the task's own body for the named
+tests/test_audit_scheduled.py runs the task's own body for the named
 schedulers and the collecting caller. These rows hold the rest of the
 helper, a row per branch, each asserting its message: zero belt audit
 tasks, a name that is a prefix of another's, no config and no own task,

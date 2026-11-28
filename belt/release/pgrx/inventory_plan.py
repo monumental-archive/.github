@@ -13,7 +13,7 @@ the artifact IS (stele#126).
 
 Usage: belt inventory-plan CRATE_DIR MAJOR, with PLAN_DOC_PREFIX the
 class's planned prefix — stated on the step, where the producer join
-(mise/plan_producers.py) reads it. A build leg carries no belt, so this
+(belt/plan_producers.py) reads it. A build leg carries no belt, so this
 is stdlib Python run from the canon tree. The bytes are the ones the
 step's jq wrote: two-space indentation and a trailing newline.
 

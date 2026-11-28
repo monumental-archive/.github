@@ -1,4 +1,4 @@
-"""Table tests for lint:template-pins and mise/template_pins.py (#1887).
+"""Table tests for lint:template-pins and belt/template_pins.py (#1887).
 
 Each row plants workflow templates in a git tree with tagged commits,
 and asserts the exit status and every line of the message: a pin that

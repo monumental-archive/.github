@@ -1,7 +1,7 @@
 """The crates.io sparse index: where a crate's record lives, once (#1383).
 
 Two readers ask the index whether a crate is published: the crates
-publisher (release/publish_crates.py), resuming a release crate by crate,
+publisher (belt/release/publish_crates.py), resuming a release crate by crate,
 and audit:semver (mise/semver-audit.sh), asking whether a crate has a
 baseline to judge against. Each used to carry its own copy of the path
 rule, and a copy that drifted would read a published crate as absent —

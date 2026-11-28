@@ -1,6 +1,6 @@
 """The gate's plan: the repository's split, its counts, the lint deal.
 
-mise/gate_shard.py lays out the gate's rows from the repository's own
+belt/gate_shard.py lays out the gate's rows from the repository's own
 tasks and shards.toml (#2160), and deals the `lint:*` tasks across the
 lint shards from mise/gate-shards.toml (#2049). These rows hold the
 plan to the split (one row per task, a count per task, today's matrix

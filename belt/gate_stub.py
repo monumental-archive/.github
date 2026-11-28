@@ -15,7 +15,7 @@ held to three requirements, each red with its own message:
   trailing comment dropped, is exactly the wanted one; no line of
   either is red too.
 
-The wanted text is fix:gate-stub's, imported from mise/gate_stub_fix.py,
+The wanted text is fix:gate-stub's, imported from belt/gate_stub_fix.py,
 so the lint and its write-mode sibling hold one text.
 
 Usage:

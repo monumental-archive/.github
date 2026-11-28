@@ -10,7 +10,7 @@ the only exit cargo-deny offers, so it is the copy that drifts.
 
 So `lint:deny` refuses every entry of `[advisories] ignore` that names
 an advisory, a bare string or a table with `id`, one finding each,
-through mise/findings.py. An entry keyed by `crate` is a yanked
+through belt/findings.py. An entry keyed by `crate` is a yanked
 version: it names no advisory, so no decision could stand for it, and
 it is not refused.
 

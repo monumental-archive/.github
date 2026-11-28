@@ -9,7 +9,7 @@ inside the job, after the runner and the install were spent.
 `mise/audit-legs.toml` says, for every job of the reusable subject
 workflows, the tracked-file condition under which its task does not
 skip. Each workflow's first job, `applies`, runs this helper over the
-tracked files (mise/tracked.py) with no toolchain installed, and each
+tracked files (belt/tracked.py) with no toolchain installed, and each
 conditional job carries `if: needs.applies.outputs.<job> == 'true'`, so GitHub skips it
 without starting a runner. The pathspec meaning and the tracked-file
 listing are #1410's (`gate_tools.matches`, `gate_tools.tracked_files`):
@@ -42,7 +42,7 @@ applies only where the content says so: `repo-deep-tests`'s
         `<output>=<JSON list>` for each of its matrices, and the reason
         for each job on stderr.
 
-The table test (`mise/test_audit_legs.py`) holds the table to the
+The table test (`tests/test_audit_legs.py`) holds the table to the
 tasks: every guarded job has a row no narrower than its task's guard,
 and an `if:` on it.
 """

@@ -8,13 +8,13 @@ canon's own gate: for every task `ci` reaches, they read the task body
 and every belt script it runs, find each belt tool it calls, find the
 guard it skips on, and fail when the table lacks the tool or gives it a
 condition narrower than the guard. The reading follows
-`release/test_job_installs.py` (#1333), which holds release jobs to the
+`tests/release/test_job_installs.py` (#1333), which holds release jobs to the
 tools their steps call.
 
 A call is a tool's command at command position (line start, after a
 separator, behind `xargs`), with quoted literals blanked so a message
 naming a tool is not a call; a Python helper calls what
-mise/python_runs.py reads it to call (#2037: a literal lookup or argv
+belt/python_runs.py reads it to call (#2037: a literal lookup or argv
 head), what any belt module it imports does, and what a belt script it
 hands `belt_scripts.script()` calls (#1911); any Python helper calls
 python3.
@@ -241,7 +241,7 @@ def ran(name: str, seen: set[str]) -> list[tuple[str, str]]:
 
     A Python helper stands as one "py:<file>" line, then every belt
     script it, or a belt module it imports, hands `script()`
-    (mise/python_runs.py, the reader the release job installs share,
+    (belt/python_runs.py, the reader the release job installs share,
     #2037): a `*.sh` is expanded as shell, the way a body's own script
     is, and a `*.py` as a helper. rust_task.py's pgrx-env.sh reaches
     findings.sh's jq for every task that provisions pgrx.
@@ -276,7 +276,7 @@ _CODE: dict[str, python_runs.Runs] = {}
 
 
 def python_code(name: str) -> python_runs.Runs:
-    """Read a belt helper through mise/python_runs.py, the one reader.
+    """Read a belt helper through belt/python_runs.py, the one reader.
 
     Returns:
         What it runs: its commands, its scripts, its subprocess strings.

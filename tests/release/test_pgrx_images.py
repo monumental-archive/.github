@@ -2,7 +2,7 @@
 
 build-pgrx-images.yml staged the per-architecture trees and proved the
 pushed image in 82 lines of inline shell with no test. The staging is
-release/pgrx_images.py; the proof is release/pgrx-image-proof.sh running
+belt/release/pgrx_images.py; the proof is release/pgrx-image-proof.sh running
 the tracked docker/pgrx-consumer*.Dockerfile and docker/pgrx-*-proof.sh.
 
 The staging rows plant real gzip tarballs and run the helper as the

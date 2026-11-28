@@ -1,10 +1,10 @@
 # shellcheck shell=bash
 # The shell writer of findings (#1890). Sourced, never run:
-# `. "<canon tree>/mise/findings.sh"`. mise/findings.py is the Python
+# `. "<canon tree>/mise/findings.sh"`. belt/findings.py is the Python
 # writer; docs/findings.md is the rule both serve.
 #
 # A finding is printed for the person reading the log, and recorded for
-# the report that reads the run (mise/standing_issue.py): one JSON
+# the report that reads the run (belt/standing_issue.py): one JSON
 # object on one line,
 #
 #   {"v": 1, "task": …, "subject": …, "message": …, "detail": […]}

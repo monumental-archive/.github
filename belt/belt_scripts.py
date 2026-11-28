@@ -7,10 +7,10 @@ with the file name as a string literal:
     belt_call(script(belt(), "pgrx-env.sh"), "org_pgrx_union")
     subprocess.run([str(script(HERE, "record-draft.sh"))], check=False)
 
-mise/python_runs.py reads that literal as the run, and nothing else:
+belt/python_runs.py reads that literal as the run, and nothing else:
 a script named in a message, a table or the helper's own usage line
-runs nothing. So the gate's tool table (mise/test_gate_tools.py) and
-the release job installs (release/test_job_installs.py) see exactly
+runs nothing. So the gate's tool table (tests/test_gate_tools.py) and
+the release job installs (tests/release/test_job_installs.py) see exactly
 the scripts a helper runs, and charge their calls.
 
 Stdlib only; a release helper reaches it by appending the `mise` root

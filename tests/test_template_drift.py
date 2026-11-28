@@ -1,4 +1,4 @@
-"""Table tests for audit:template-pins and mise/template_drift.py (#1911).
+"""Table tests for audit:template-pins and belt/template_drift.py (#1911).
 
 Each row plants workflow templates in a git tree of dated, tagged
 commits and asserts the exit status and every line of the report: no

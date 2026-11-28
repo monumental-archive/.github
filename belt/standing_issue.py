@@ -67,7 +67,7 @@ definition when the repository does not have it.
 
 With `--findings DIR` the body is also written from the run's findings
 (#1890, docs/findings.md): every `*.jsonl` in DIR, one record per line
-as mise/findings.sh and mise/findings.py append them. A line that is
+as mise/findings.sh and belt/findings.py append them. A line that is
 not a record is counted, and the body says how many. A failing step
 ran a task when the task is named after `mise run ` in the step's name,
 in a `[<task>] ` prefix of its output, is the command a `belt

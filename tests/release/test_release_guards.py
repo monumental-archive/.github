@@ -143,12 +143,12 @@ IDENTITY_EMAIL = "harness@example.invalid"
 # supplies several of them ambiently — `GITHUB_REPOSITORY`, `GITHUB_SHA`,
 # `RUNNER_TEMP` — as the release job supplies its step inputs
 # (`VERSION`, `PLAN`, `APP_SLUG`). So nothing reaches a fixture by
-# inheritance except what mise/support.py names; every input a row wants is
+# inheritance except what tests/support.py names; every input a row wants is
 # supplied explicitly through `overrides`.
 
 
 def hermetic_env(home: Path, *, env: support.Env, **overrides: str) -> dict[str, str]:
-    """Build a fixture's environment through mise/support.py (#1508, #1514).
+    """Build a fixture's environment through tests/support.py (#1508, #1514).
 
     Returns:
         support.env for `home`, with this harness's git identity, and

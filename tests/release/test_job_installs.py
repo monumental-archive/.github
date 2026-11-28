@@ -6,7 +6,7 @@ every tool in it, every release: edtf's v1.3.5 publish spent 4,484 runner
 seconds installing, most of it compiling tools no job called. So every
 uncached `jdx/mise-action` step on those paths installs a named list
 (`install_args`): the belt's tools by the belt's own keys, the caller's
-build inputs by `release/caller_pins.py`, which reads their versions from
+build inputs by `belt/release/caller_pins.py`, which reads their versions from
 the caller's config.
 
 The cost of a list is that a tool a job starts calling is missing on the
@@ -173,7 +173,7 @@ GATE_NONE = {
 }
 
 # The caller's build inputs, by the commands that run them: the tool name
-# is what `release/caller_pins.py` is asked for.
+# is what `belt/release/caller_pins.py` is asked for.
 CALLER_COMMANDS = {
     "cargo": "rust",
     "rustup": "rust",
@@ -400,7 +400,7 @@ def tool_cache_restored(job: Job) -> bool:
 
     The gate's jobs install with `cache: false` because `actions/cache`
     steps either side restore and save the tool cache instead: cached, so
-    not a release install, and held by release/test_gate_caches.py.
+    not a release install, and held by tests/release/test_gate_caches.py.
 
     Returns:
         True when an `actions/cache/restore` step restores the mise dir.
@@ -901,7 +901,7 @@ def readers(path: Path, text: str, root: Path = CANON) -> list[str]:
     return [
         (
             f"{path.relative_to(root)}: reads a caller's mise config itself;"
-            " read it through release/caller_pins.py (#1333)"
+            " read it through belt/release/caller_pins.py (#1333)"
         )
     ]
 
@@ -1825,7 +1825,7 @@ def test_every_import_form_is_read() -> None:
     assert expected == python_runs.calls(ast.parse(helper))
 
 
-# release/caller_pins.py is the canon's one reader of a caller's pins.
+# belt/release/caller_pins.py is the canon's one reader of a caller's pins.
 def test_no_other_reader_in_release_or_the_workflows() -> None:
     """Every script under release/ and every workflow, read whole."""
     root = CANON
@@ -1847,7 +1847,7 @@ def test_a_planted_reader_is_named() -> None:
     )
     assert strings(
         ".github/workflows/build-pgrx-extension.yml: reads a caller's"
-        " mise config itself; read it through release/caller_pins.py"
+        " mise config itself; read it through belt/release/caller_pins.py"
         " (#1333)"
     ) == readers(path, text)
 
@@ -2077,10 +2077,10 @@ def test_a_start_by_first_line_is_named(env: support.Env) -> None:
     """Planted: a helper executed by its own `#!` line, in both shapes."""
     text = PLANTED_JOB + (
         "      - name: Attach\n"
-        "        run: .org-canon/release/attach_publish.py\n"
+        "        run: .org-canon/belt/release/attach_publish.py\n"
         "      - name: Fetch\n"
         "        run: |\n"
-        "          prev=$(.org-canon/release/pgrx/previous_release.py fetch \\\n"
+        "          prev=$(.org-canon/belt/release/pgrx/previous_release.py fetch \\\n"
         '            --tag "${TAG}")\n'
     )
     assert strings(
@@ -2122,7 +2122,7 @@ def test_org_python_before_the_canon_action_is_named(env: support.Env) -> None:
     text = (
         "jobs:\n  plan:\n    runs-on: ubuntu-26.04\n    steps:\n"
         "      - name: Plan\n"
-        "        run: '\"${ORG_PYTHON}\" release/matrix.py base-images'\n"
+        "        run: '\"${ORG_PYTHON}\" belt/release/matrix.py base-images'\n"
         "      - name: Resolve the canon tree\n"
         "        uses: $/.github/actions/canon\n"
     )
@@ -2536,8 +2536,8 @@ def flat(value: str) -> str:
 def matrix_findings(strategy: dict[str, object]) -> list[str]:
     """Hold the gate's matrix to the plan's (#2049).
 
-    The rows are the plan job's, laid out by mise/gate_shard.py plan and
-    held there by mise/test_gate_shard.py: lint shards, then a row per
+    The rows are the plan job's, laid out by belt/gate_shard.py plan and
+    held there by tests/test_gate_shard.py: lint shards, then a row per
     test or properties task and per shard of one.
 
     Returns:

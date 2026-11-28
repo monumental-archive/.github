@@ -345,7 +345,7 @@ jobs:
 
       - name: Read the caller's pinned build inputs
         # The caller's config decides the versions; the canon decides
-        # which tools (#1333). One reader, release/caller_pins.py.
+        # which tools (#1333). One reader, belt/release/caller_pins.py.
         if: ${{ inputs.prepare != '' || inputs.binary-crate != '' }}
         id: pins
         run: |
@@ -367,7 +367,7 @@ jobs:
           cache: false
           # Only what this job's steps call (#1333): the release path is
           # uncached, so every tool in scope is paid for on every run.
-          # release/test_job_installs.py holds the list to the calls.
+          # tests/release/test_job_installs.py holds the list to the calls.
           install_args: ${{ steps.pins.outputs.install }}
 
       - name: Materialise build artifacts into the context (prepare)
@@ -557,8 +557,8 @@ jobs:
         # already resolved: builder state, not a cache anyone else can
         # poison. The push, its determinism set (#118), the digest check
         # and the per-arch record (a file, because a matrix job's outputs
-        # overwrite one another) are release/registry.py (#1382), tested
-        # by release/test_registry.py.
+        # overwrite one another) are belt/release/registry.py (#1382), tested
+        # by tests/release/test_registry.py.
         run: >-
           "${ORG_PYTHON}" -I .org-canon/belt registry push --image "${IMAGE}"
           --file "${UNTRUSTED_CONTEXT}/${UNTRUSTED_DOCKERFILE}"

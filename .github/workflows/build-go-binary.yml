@@ -176,7 +176,7 @@ jobs:
 
       - name: Read the caller's pinned build inputs
         # The caller's config decides the versions; the canon decides
-        # which tools (#1333). One reader, release/caller_pins.py.
+        # which tools (#1333). One reader, belt/release/caller_pins.py.
         id: pins
         run: |
           "${ORG_PYTHON}" -I .org-canon/belt caller-pins install \
@@ -193,7 +193,7 @@ jobs:
           cache: false
           # Only what this job's steps call (#1333): the release path is
           # uncached, so every tool in scope is paid for on every run.
-          # release/test_job_installs.py holds the list to the calls.
+          # tests/release/test_job_installs.py holds the list to the calls.
           install_args: ${{ steps.pins.outputs.install }}
 
       - name: Assert the toolchain and the leg
@@ -236,7 +236,7 @@ jobs:
         # Every main package `go list` names, refusing none and a binary
         # name two would share. The .org-canon link stays: the canon
         # action lists it in the clone's info/exclude, so go never sees
-        # it as a change (#1944). release/build_go_commands.py.
+        # it as a change (#1944). belt/release/build_go_commands.py.
         run: |
           "${ORG_PYTHON}" -I .org-canon/belt build-go-commands
       - name: Refuse a binary whose stamp is not the released commit
@@ -245,7 +245,7 @@ jobs:
         # (stele#7) — so each staged binary's stamp must be the released
         # commit, from a clean tree, carrying its modules: the canon
         # action keeps its own link out of what git calls the tree
-        # (#1944). release/check_go_stamps.py (#1371).
+        # (#1944). belt/release/check_go_stamps.py (#1371).
         run: |
           "${ORG_PYTHON}" -I .org-canon/belt check-go-stamps
       - name: Smoke the binaries
@@ -319,7 +319,7 @@ jobs:
           cache: false
           # Only what this job's steps call (#1333): the release path is
           # uncached, so every tool in scope is paid for on every run.
-          # release/test_job_installs.py holds the list to the calls.
+          # tests/release/test_job_installs.py holds the list to the calls.
           install_args: github:monumental-archive/stele
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2

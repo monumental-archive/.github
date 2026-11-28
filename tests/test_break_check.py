@@ -9,7 +9,7 @@ the head's is the checkout's. `cargo-semver-checks` is a stub that logs
 its arguments and `CARGO_TARGET_DIR`, and exits with the status the row
 plants for the crate. Each red row asserts its message.
 
-The declaration's reading (mise/declared_break.py) is held to the
+The declaration's reading (belt/declared_break.py) is held to the
 reader: a class runs the belt's pinned stele over scratch commits and
 asserts it files a commit under "Breaking" exactly when the reading says
 the pull request declares a break.

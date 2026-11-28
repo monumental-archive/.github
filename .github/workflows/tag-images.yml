@@ -4,11 +4,11 @@
 # compared under each tag: fetch the manifest by digest, PUT the same
 # bytes to the tag name, and assert the tag resolves to the digest. No
 # re-assembly, no imagetools create, so the digest cannot change under
-# the tag: the crane-tag pattern, in release/registry.py (#1382).
+# the tag: the crane-tag pattern, in belt/release/registry.py (#1382).
 #
 # capability-boundary: this workflow runs no caller-supplied code — its
 # inputs are typed and whitelist-validated, its body is the canon's own
-# release/registry.py against ghcr.io — and it holds no id-token;
+# belt/release/registry.py against ghcr.io — and it holds no id-token;
 # `packages: write` is the only capability, spent on manifest PUTs to
 # names the digests already live under.
 ---
@@ -46,7 +46,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         # The input's validation (whole, before any tag is applied), the
         # registry token, the manifest GET and PUT and the resolve check
-        # are release/registry.py (#1382), tested against a stub docker
-        # and a fake registry by release/test_registry.py.
+        # are belt/release/registry.py (#1382), tested against a stub docker
+        # and a fake registry by tests/release/test_registry.py.
         run: '"${ORG_PYTHON}" -I .org-canon/belt registry tag'
 ...

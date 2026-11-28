@@ -4,7 +4,7 @@ build-pgrx-extension.yml carried this logic as shell three quotes deep
 inside `docker run … bash -c '… su postgres -c "…"'`, with no tests. It
 now lives in belt/release/pgrx/ and release/pgrx/ as plain scripts the
 containers run from the pinned canon tree, and in
-release/pgrx/previous_release.py on the runner. Each guard branch is a
+belt/release/pgrx/previous_release.py on the runner. Each guard branch is a
 row here, and every refusal row asserts its message, word for word,
 against the wording the workflow carried. previous_release.py's rows
 call its `main` in this process (#1698).
@@ -904,7 +904,7 @@ def test_the_guard_owes_no_downgrade_path(
 # `gh release view` with no tag answers GitHub's latest release, which
 # is the forge's opinion of newest and not what an installation can be
 # sitting on. The predecessor is previous_release.py's to answer.
-NOT_A_PREDECESSOR = ("release/repro_resolve.py",)
+NOT_A_PREDECESSOR = ("belt/release/repro_resolve.py",)
 UNTAGGED = re.compile(r"""\brelease["',\s]*view["',]*\s+["']?--""")
 
 

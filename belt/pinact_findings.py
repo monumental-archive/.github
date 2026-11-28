@@ -4,7 +4,7 @@
 version comment or a pin younger than the floor never reached the
 red-check issue as a record (#1890). pinact already holds each finding
 as data: `--format sarif`, its only machine format, a SARIF 2.1.0 log
-on stdout. This is the one reader of it; mise/stele_findings.py is the
+on stdout. This is the one reader of it; belt/stele_findings.py is the
 shape it follows.
 
 Usage:
@@ -12,7 +12,7 @@ Usage:
 
 runs `pinact run --format sarif <arguments>` once, pinact's stderr (its
 diff) passed through, and decodes the one log pinact writes to stdout.
-Each result of each run goes through mise/findings.py: the subject is
+Each result of each run goes through belt/findings.py: the subject is
 the result's artifact URI, the message `<ruleId>: <the file's line at
 region.startLine, trimmed>` (the owner's ruling on #1955), read here
 from that file, the detail its `message.text` and
@@ -39,7 +39,7 @@ from belt.decoded import UndecodableError
 
 VERSION = "2.1.0"
 # The belt's pinact, as PATH answers it; read as the command by the job
-# install law (release/test_job_installs.py).
+# install law (tests/release/test_job_installs.py).
 PINACT = shutil.which("pinact") or "pinact"
 EXIT_REFUSED = 1
 

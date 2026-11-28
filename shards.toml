@@ -1,11 +1,12 @@
 # How this repository's gate is split and sharded (#2160). The canon
-# supplies the means (mise/gate_shard.py reads this file in the plan
+# supplies the means (belt/gate_shard.py reads this file in the plan
 # job, before any tool is installed); the repository decides the
 # counts. Anything not named here gets the canon's default from
 # mise/gate-shards.toml: one runner per task, four lint shards.
 #
-# The canon's `test` runs the belt's test runner, unittest_guarded.py,
-# which keeps one shard's files (ORG_SHARD=k/n): four runners, the
-# count the canon-wide `shards.test` used to set for every repository.
+# The canon's `test` runs pytest through `measured`, which hands each
+# runner its share of the test files (ORG_SHARD=k/n, #2177): four
+# runners, the count the canon-wide `shards.test` used to set for every
+# repository.
 [test]
 test = 4

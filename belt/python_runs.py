@@ -1,8 +1,8 @@
 """Read what a Python helper runs, exactly, from its syntax tree (#2037).
 
 Two laws ask what a belt or release helper runs: the release job
-installs (release/test_job_installs.py, #1333) and the gate's install
-table (mise/test_gate_tools.py, #1410). The first holds a list to
+installs (tests/release/test_job_installs.py, #1333) and the gate's install
+table (tests/test_gate_tools.py, #1410). The first holds a list to
 cover its calls; the second is held equal to its callers, so a reader
 that guesses is red there in both directions. Both read a helper here,
 and nothing here guesses: a helper names what it runs in shapes that
@@ -30,7 +30,7 @@ time is not read at all, and needs no list: the gate table is held
 both ways, so a row the reader cannot charge is red, and a tool the
 table omits is not installed, so the task fails in the gate.
 
-Stdlib plus mise/call_names.py.
+Stdlib plus belt/call_names.py.
 """
 
 import ast

@@ -41,7 +41,7 @@ extend-exclude = ["release/spdx-license-data.json", "fuzz/corpus/"]
 # what any entry matches. There is no upper bound because none is
 # observable: typos already skips hex tokens of 32+ characters on its
 # own (measured: 31 red, 32/40/64 green), so any cap of 32 or more
-# changes nothing. `mise/test_typos_config.py` drives the rows.
+# changes nothing. `tests/test_typos_config.py` drives the rows.
 extend-ignore-re = [
   '\b[0-9][0-9a-f]{6,}\b',
   '\b[0-9a-f][0-9][0-9a-f]{5,}\b',

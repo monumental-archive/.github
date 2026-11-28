@@ -11,10 +11,10 @@ Nothing reads a finding back out of a log.
 1. **A check reports a finding through a writer**, never by printing
    it alone. Shell sources `mise/findings.sh` and calls
    `org_finding <subject> <message> [<detail>…]`; Python imports
-   `mise/findings.py` and calls `finding(subject, message, detail)`.
+   `belt/findings.py` and calls `finding(subject, message, detail)`.
    Nothing else writes a record.
 2. **Each red job's issue is written from records.** The report
-   (`mise/standing_issue.py --findings <dir>`) reads every `*.jsonl`
+   (`belt standing-issue --findings <dir>`) reads every `*.jsonl`
    in the directory. A red job's issue lists the findings whose task
    one of its failing steps ran: named after `mise run` in the step's
    name, in a `[<task>]` prefix of its output, or the file name of a
@@ -121,12 +121,12 @@ no `[env]` names the file. The writer creates the file's directory and
 appends one line per finding.
 
 Every job of a reporting workflow (one whose `report` job runs
-`mise/standing_issue.py`) that has steps ends by uploading
+`belt/standing_issue.py`) that has steps ends by uploading
 `${RUNNER_TEMP}/findings/` as `findings-<job>-<index>`, unless the run
 was cancelled, and the report job downloads every job's into one
 directory (#1933). Every job, not only those that run a belt task, so
 no way of writing a record falls outside the set;
-`mise/test_findings_handoff.py` holds each job to it. A job that calls
+`tests/test_findings_handoff.py` holds each job to it. A job that calls
 a reusable workflow has no steps of its own and uploads nothing.
 
 A record that cannot be appended is said in one more line on stderr

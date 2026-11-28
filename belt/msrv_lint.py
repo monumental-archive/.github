@@ -8,15 +8,15 @@ message; everything after the guard is here, so it comes under the
 coverage and mutation legs (CONTRIBUTING, "A helper's language").
 Behaviour, messages and exit statuses are the body's own, unchanged.
 
-The plan is mise/msrv_plan.py's and the compile surface
-mise/gate_surface.py's, each run as the body ran it; the steps every
+The plan is belt/msrv_plan.py's and the compile surface
+belt/gate_surface.py's, each run as the body ran it; the steps every
 Rust task's helper shares (the pgrx derivation and provisioning among
-them) are mise/rust_task.py's. The task's reasoning for the rule
+them) are belt/rust_task.py's. The task's reasoning for the rule
 rides beside the task in mise/config.toml; the reasoning for each step
 rides beside the step below.
 
 Every workspace in the tree is held, not only the root's (#2011): the
-roots are mise/rust_workspaces.py's, `mise ls rust` is read once, and
+roots are belt/rust_workspaces.py's, `mise ls rust` is read once, and
 `workspace` runs each root's steps with `--manifest-path` naming it.
 Every root runs even when an earlier one is red; each finding about a
 member names its root as the subject, and the closing count covers

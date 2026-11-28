@@ -209,12 +209,15 @@ belt's `measured`:
 
 ```toml
 [tasks.test]
-run = '"${ORG_BELT_DIR}/measured" python3 -m unittest discover'
+run = '"${ORG_BELT_DIR}/measured" pytest'
 ```
 
 With a `.coverage-floor` in the tree, `measured` adds the measurement
 to the command's own environment, merging and never replacing, and
-`coverage:check` reads what the run measured after it ends. Without a
+`coverage:check` reads what the run measured after it ends. Python is
+measured in a pytest run (`pytest …` or `python3 -m pytest …`), which
+`measured` runs under coverage from the belt's pytest venv (#2177);
+any other Python command measures no Python. Without a
 floor it runs the command unchanged. A suite that does not run through
 `measured` measures nothing, and a floor whose record names that leg
 is red by name.

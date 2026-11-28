@@ -7,7 +7,7 @@
 # Pulls the image back BY DIGEST, never by tag, and runs exactly the
 # documented recipes (docs/release.md) against the stock postgres the
 # extension was built on (docker/pgrx-base-images.toml, [build]). Each
-# recipe's Dockerfile is rendered by release/pgrx_images.py, which
+# recipe's Dockerfile is rendered by belt/release/pgrx_images.py, which
 # refuses any reference not pinned by digest:
 #
 #   every major   `copy`: the image's one layout COPYed into the system

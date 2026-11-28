@@ -1,4 +1,4 @@
-"""Run `mise/queue_head.py` against scratch repositories (#1422).
+"""Run `belt/queue_head.py` against scratch repositories (#1422).
 
 Each row builds an `origin` holding `refs/pull/<n>/head` and a checkout
 holding the group's base and group commit, the way the gate job's

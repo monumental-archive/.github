@@ -11,7 +11,7 @@ and any workflow that still reads it.
 Each row runs the task's own `run` body, read from mise/config.toml,
 in a planted git tree, with the belt as ORG_BELT_DIR and this
 repository as ORG_CANON_DIR, so the identity it reads is the real one.
-The `Branches` rows call mise/signer_pin.py's `main` in this process,
+The `Branches` rows call belt/signer_pin.py's `main` in this process,
 one per branch, each message asserted whole (#1911).
 """
 

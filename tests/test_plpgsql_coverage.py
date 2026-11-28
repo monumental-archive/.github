@@ -1,6 +1,6 @@
 """Table tests for the PL/pgSQL coverage leg (#1547).
 
-Two tables. The helper's rows run `mise/plpgsql_coverage.py collect`
+Two tables. The helper's rows run `belt/plpgsql_coverage.py collect`
 against a stub `psql` that answers with planted figures, then `totals`
 over the report it wrote, and assert the exact messages. The leg's rows
 run `coverage:check`'s own `run` string, read out of mise/config.toml,

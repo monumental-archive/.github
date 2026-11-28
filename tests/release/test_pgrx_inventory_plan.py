@@ -156,7 +156,7 @@ def test_the_shipped_step_calls_the_helper() -> None:
 
 
 def test_the_step_states_its_prefix_and_its_marker() -> None:
-    """mise/plan_producers.py joins the marker to PLAN_DOC_PREFIX."""
+    """belt/plan_producers.py joins the marker to PLAN_DOC_PREFIX."""
     declared, _ = plan_producers.markers(WORKFLOW.read_text("utf-8"))
     assert ("pgrx-extension", "sbom-pgrx-") in declared
     env = decoded.as_object(step()["env"], "env")

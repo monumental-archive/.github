@@ -12,7 +12,7 @@ logic (#1911). Two halves:
   violation, and each hit's number is its line's in what is left, as
   `grep -v | grep -n` numbered it. A named file that is not a regular
   file is counted and not read.
-  EXIT traps in the shell files and mise configs: mise/exit_trap.py,
+  EXIT traps in the shell files and mise configs: belt/exit_trap.py,
   its findings its own; a regular file it cannot decode as UTF-8 is
   exit 2, by name.
 
@@ -200,7 +200,7 @@ def hits(name: str, text: str) -> str:
 
 
 def traps(names: list[str]) -> int:
-    """Hold the EXIT traps to the guard, through mise/exit_trap.py.
+    """Hold the EXIT traps to the guard, through belt/exit_trap.py.
 
     exit_trap.py reads each file as UTF-8, strictly, and its error does
     not name the file, so a regular file it could not decode is named
@@ -225,7 +225,7 @@ def traps(names: list[str]) -> int:
     try:
         return exit_trap.main(names)
     except (OSError, UnicodeDecodeError) as err:
-        msg = f"mise/exit_trap.py cannot read a file: {err}"
+        msg = f"belt/exit_trap.py cannot read a file: {err}"
         raise ValueError(msg) from err
 
 

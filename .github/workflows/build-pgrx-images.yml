@@ -157,7 +157,7 @@ jobs:
           cache: false
           # Only what this job's steps call (#1333): the release path is
           # uncached, so every tool in scope is paid for on every run.
-          # release/test_job_installs.py holds the list to the calls.
+          # tests/release/test_job_installs.py holds the list to the calls.
           install_args: jq github:monumental-archive/stele
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -167,7 +167,7 @@ jobs:
 
       # The image's one layout (#1298), the same on every major: /lib and
       # /share/extension from the Debian tree each verified tarball
-      # installs (release/pgrx_images.py, tested; #1381).
+      # installs (belt/release/pgrx_images.py, tested; #1381).
       - name: Stage the per-arch trees from the verified tarballs
         env:
           UNTRUSTED_VERSION: ${{ inputs.version }}
@@ -199,8 +199,8 @@ jobs:
         # One build, both platforms: FROM scratch runs nothing, so no
         # emulation is involved and the native-hardware rule is not in
         # play. The buildx floor, labels and index annotations from the
-        # facts, the push and its digest check are release/registry.py
-        # (#1382), tested by release/test_registry.py. The tag NAME rides
+        # facts, the push and its digest check are belt/release/registry.py
+        # (#1382), tested by tests/release/test_registry.py. The tag NAME rides
         # along in the record, applied only post-gate by tag-images.yml,
         # so the step that names the tag is the step that records it.
         run: >-
@@ -276,7 +276,7 @@ jobs:
           cache: false
           # Only what this job's steps call (#1333): the release path is
           # uncached, so every tool in scope is paid for on every run.
-          # release/test_job_installs.py holds the list to the calls.
+          # tests/release/test_job_installs.py holds the list to the calls.
           install_args: jq github:monumental-archive/stele
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2

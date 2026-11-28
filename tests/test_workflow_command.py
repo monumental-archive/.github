@@ -1,6 +1,6 @@
 """The one writer of workflow commands, and the law that keeps it one (#1660).
 
-Rows for `mise/workflow_command.py`: what it writes for a message that
+Rows for `belt/workflow_command.py`: what it writes for a message that
 carries a newline, a CR or a `%`, and for each property; and the row
 #1660 names, a helper that quoted outside text into a refusal printing
 it as ONE line.

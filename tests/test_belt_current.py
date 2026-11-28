@@ -4,7 +4,7 @@ The script reads the mise version CI runs from the belt's own ci.yml
 and compares this machine's: older is red, newer is a note, equal is
 one line. Whether the belt answering is the tree's pin is not this
 script's (#1988): every belt task refuses another pin's belt, and
-mise/test_belt_refused.py holds that.
+tests/test_belt_refused.py holds that.
 
 Each row plants a canon tree pinning CI's mise and a stub `mise` that
 answers the row's version, then runs the shipped script with

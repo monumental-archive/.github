@@ -225,7 +225,7 @@ def pinned_names(root: Path) -> set[str]:
     """Name every tool the repository pins, under any backend key.
 
     The gate leaves belt tools out of a tree that does not need them
-    (#1410, mise/gate_tools.py), and must never leave out one the
+    (#1410, belt/gate_tools.py), and must never leave out one the
     repository pins itself: mise disables a tool by name, and the
     repository's own pin would go with it.
 

@@ -64,7 +64,7 @@ jobs:
   # job (#1966): for each red job of a run on the default branch, one
   # issue titled "red: <job> (<workflow>)" and labelled red-check holds
   # its findings and each red leg's log tail; the next run with every
-  # leg green or skipped closes it. mise/standing_issue.py has the
+  # leg green or skipped closes it. belt/standing_issue.py has the
   # outcomes. Only `needs:` names the jobs above, so it grows with them.
   report:
     name: Report red jobs

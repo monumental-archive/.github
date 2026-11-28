@@ -17,7 +17,7 @@ now keeps exactly the crates release/crates-io-members.sh names (the
 helper the publisher reads too) and fails by name on one it names that
 cargo did not write.
 
-WHAT RUNS. The Package step's helper, release/package_crates.py
+WHAT RUNS. The Package step's helper, belt/release/package_crates.py
 (#1384), its `main` called in this process (#1698), then the `run:`
 bodies of `Compute the subject manifest` and `Emit the inventory
 plan`, cut out of `.github/workflows/build-rust-crate.yml` as shipped,

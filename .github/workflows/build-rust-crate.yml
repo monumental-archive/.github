@@ -92,7 +92,7 @@ jobs:
 
       - name: Read the caller's pinned build inputs
         # The caller's config decides the versions; the canon decides
-        # which tools (#1333). One reader, release/caller_pins.py.
+        # which tools (#1333). One reader, belt/release/caller_pins.py.
         id: pins
         run: |
           "${ORG_PYTHON}" -I .org-canon/belt caller-pins install \
@@ -111,7 +111,7 @@ jobs:
           cache: false
           # Only what this job's steps call (#1333): the release path is
           # uncached, so every tool in scope is paid for on every run.
-          # release/test_job_installs.py holds the list to the calls.
+          # tests/release/test_job_installs.py holds the list to the calls.
           install_args: jq github:monumental-archive/stele ${{ steps.pins.outputs.install }}
 
       - name: Resolve the exclusion flags
@@ -155,7 +155,7 @@ jobs:
         # fails from its packaged form. An excluded member is packaged by
         # a second, unverified run that must rewrite every verified crate
         # byte for byte (#1273), and the set is then cut to what crates.io
-        # receives (#1310). release/package_crates.py, which says why.
+        # receives (#1310). belt/release/package_crates.py, which says why.
         run: '"${ORG_PYTHON}" -I .org-canon/belt package-crates'
       - name: Compute the subject manifest
         id: hash

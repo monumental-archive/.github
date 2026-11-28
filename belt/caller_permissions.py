@@ -9,7 +9,7 @@ comment in mise/config.toml has the history; this is its logic (#1911).
 
   no stele on PATH: red, by name, before anything runs;
   stele's assertion passes: its report, and exit 0;
-  otherwise red: stele's findings (mise/stele_findings.py), then one
+  otherwise red: stele's findings (belt/stele_findings.py), then one
   more naming the fix.
 
 The workflows are the task's guard: the selection that says this tree

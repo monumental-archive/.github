@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Write the generated biome config a repository is checked against. Org
-# canon — the mechanism is mise/biome_config.py; this script hands it
+# canon — the mechanism is belt/biome_config.py; this script hands it
 # what the repository states.
 #
 # ONE derivation site, two callers: lint:biome and fix:biome have to see

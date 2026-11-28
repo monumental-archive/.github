@@ -1,4 +1,4 @@
-"""Run release/source_archive.py, the source-archive build, on a stub git.
+"""Run belt/release/source_archive.py, the source-archive build, on a stub git.
 
 #1384 moved the step "Build the archive twice and prove determinism"
 out of build-source-archive.yml into the helper, refusals unchanged.

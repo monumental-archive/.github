@@ -50,7 +50,7 @@ read by the plan only, never a workflow input. A count is an exact
 integer from 1 to the canon's ceiling; anything else, an unknown key, a
 task that does not exist, or a count above 1 on a task whose command has
 no ADAPTER is red by name. Every row of a shard gets ORG_SHARD=k/n, the
-one variable every adapter reads (mise/shard.py), and reports what it
+one variable every adapter reads (belt/shard.py), and reports what it
 ran; `union` holds the reports to each task's whole population.
 
 The plan can fail a gate, never pass one: the first row of a split leg
@@ -104,7 +104,7 @@ STARTS = {"test": ("test", True), "properties": ("ci:properties", False)}
 # (python-properties.sh: `prop_*.py` at any depth; typescript-
 # properties.sh: `*.prop.test.{ts,tsx,mts,cts}`). The plan gives the
 # task no row where the tree tracks none: it would skip clean there.
-# mise/test_gate_shard.py holds each row to its task's guard.
+# tests/test_gate_shard.py holds each row to its task's guard.
 APPLIES = {
     "test:python-properties": ("prop_*.py",),
     "test:typescript-properties": (

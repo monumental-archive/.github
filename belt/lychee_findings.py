@@ -3,14 +3,14 @@
 `audit:links` used to show only lychee's human lines, so a dead link
 never reached the red-check issue as a record (#1890). lychee already
 holds each failure as data: its `--format json` report. This is the one
-reader of it; mise/stele_findings.py is the shape it follows.
+reader of it; belt/stele_findings.py is the shape it follows.
 
 Usage:
   belt lychee-findings [<lychee's arguments>...]
 
 runs `lychee --format json <arguments>` once, lychee's stderr passed
 through, and decodes the one document lychee writes to stdout. Each
-entry of its `error_map` goes through mise/findings.py: the subject is
+entry of its `error_map` goes through belt/findings.py: the subject is
 the file the entry is about (the map's key), the message
 `<url>: <status.text>`, the detail `line <span.line>`. The line is
 never in the subject or the message, so an edit above a broken link
@@ -34,7 +34,7 @@ from dataclasses import dataclass
 from belt import decoded, findings
 
 # The belt's lychee, as PATH answers it; read as the command by the job
-# install law (release/test_job_installs.py).
+# install law (tests/release/test_job_installs.py).
 LYCHEE = shutil.which("lychee") or "lychee"
 EXIT_REFUSED = 1
 

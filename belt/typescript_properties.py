@@ -69,7 +69,7 @@ Subcommands, run from the repository root:
                              `vitest list --filesOnly --json`'s LIST:
                              the repository's own run collects it
   share FILE...              prints, NUL-separated, the FILEs this shard
-                             runs (ORG_SHARD=k/n, mise/shard.py, #2160):
+                             runs (ORG_SHARD=k/n, belt/shard.py, #2160):
                              sorted, every n-th from the k-th, every
                              FILE where no shard is named; and writes
                              the shard's report for the gate's union

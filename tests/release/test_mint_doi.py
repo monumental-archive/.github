@@ -1,7 +1,7 @@
-"""Run `release/mint_doi.py` against a local fake Zenodo.
+"""Run `belt/release/mint_doi.py` against a local fake Zenodo.
 
 #1365 moved the `mint-doi` step's Zenodo client out of the workflow
-into `release/mint_doi.py`; the step is now one call to it. These rows
+into `belt/release/mint_doi.py`; the step is now one call to it. These rows
 run that helper as the step does, in-process, against an
 `http.server` on 127.0.0.1 standing in for zenodo.org, with a stub `gh`
 first on PATH for the tag's tarball and CITATION.cff. The fake refuses

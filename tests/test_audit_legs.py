@@ -7,7 +7,7 @@ a table is that a task's guard widens and the row does not, so the job
 is skipped where its task would have run. These rows move that into the
 canon's own gate: for every job of every subject workflow they read the
 `mise run audit:*` tasks its steps run, and every belt script those run,
-with `mise/test_gate_tools.py`'s readers (#1410), find the guard each
+with `tests/test_gate_tools.py`'s readers (#1410), find the guard each
 skips on, and fail when the row is narrower than the guard or the job
 carries no `if:` on it.
 

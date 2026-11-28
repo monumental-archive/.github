@@ -14,7 +14,7 @@
 # number is the largest claim in its range: if every merged change
 # declares its own break, the number is right.
 #
-# THE DECLARATION is mise/declared_break.py's: `type!:`/`type(scope)!:`
+# THE DECLARATION is belt/declared_break.py's: `type!:`/`type(scope)!:`
 # in the title, or a BREAKING CHANGE footer in the body read as the
 # release engine reads it (#1924). Declared, nothing is measured.
 #

@@ -11,7 +11,7 @@
 # nothing noticed, because the floor sat far enough below the ceiling
 # that the headroom became a landing zone.
 #
-# The ratchet law lives in mise/coverage_floor.py, with the drift check
+# The ratchet law lives in belt/coverage_floor.py, with the drift check
 # `coverage:check` runs, so there is one definition of "the floor never
 # falls" rather than a release-time copy of it. If a leg measures below
 # its floor — the line the gate already held, so a merged pull request

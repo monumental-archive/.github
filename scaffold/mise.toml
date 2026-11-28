@@ -37,7 +37,7 @@ shell = "bash -euo pipefail -c"
 # cargo-auditable in its prebuilt form: upstream's checksummed release
 # binary, installed in seconds where the cargo: backend compiled it from
 # source on every uncached job (#1334). The canon reads it by tool, under
-# any key (release/caller_pins.py).
+# any key (belt/release/caller_pins.py).
 # "github:rust-secure-code/cargo-auditable" = "0.7.7"
 # Repos that FUZZ (a tracked fuzz/ directory) declare a second, DATED
 # nightly beside the stable one — mise holds and locks both — because
@@ -85,6 +85,7 @@ shell = "bash -euo pipefail -c"
 # The suite runs through the belt's `measured` (#1667): with a
 # `.coverage-floor`, coverage is measured in this one run and
 # coverage:check reads it; without one the command runs unchanged.
-# e.g. run = '"${ORG_BELT_DIR}/measured" python3 -m unittest discover'
+# e.g. run = '"${ORG_BELT_DIR}/measured" pytest' (Python is measured in a
+# pytest run, #2177)
 [tasks.test]
 run = "echo TODO: this repo has no tests yet && exit 1"

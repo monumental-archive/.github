@@ -1,5 +1,5 @@
 # When the gate needs each belt tool (#1410). One row per key in
-# config.toml's [tools]; mise/gate_tools.py reads it against
+# config.toml's [tools]; belt/gate_tools.py reads it against
 # `git ls-files` and the gate job installs what it names.
 #
 #   tasks  the gate tasks that call the tool (`ci`'s lint:* wildcard,
@@ -10,7 +10,7 @@
 #   for    install dependencies: needed whenever one of these is
 #   run    the commands the tool puts on PATH, where not its key's name
 #
-# The rows are derived, not remembered: mise/test_gate_tools.py reads
+# The rows are derived, not remembered: tests/test_gate_tools.py reads
 # every gate task and the belt scripts it runs, and fails when a task
 # calls a tool missing here, or one whose `when` misses a pathspec the
 # task's guard tests. A call before a task's first "skipped" exit, or a
@@ -138,8 +138,8 @@ tasks = [
 ]
 
 [tools.yq]
-# mise/embedded_shell.py reads every run: value through
-# mise/workflow_yaml.py (#1846), one yq call per selected file: the
+# belt/embedded_shell.py reads every run: value through
+# belt/workflow_yaml.py (#1846), one yq call per selected file: the
 # action lints' selection (action-files.sh) and, for the ceiling, the
 # workflow templates. lint:task-shell runs the same helper, so the
 # derivation, which reads a helper whole, counts it too.

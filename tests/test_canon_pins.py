@@ -1,4 +1,4 @@
-"""Table tests for lint:canon-pins and mise/canon_pins.py (#1911).
+"""Table tests for lint:canon-pins and belt/canon_pins.py (#1911).
 
 Each row plants files on the four surfaces and asserts the exit status
 and every line printed: versioned and unversioned workflow pins (no

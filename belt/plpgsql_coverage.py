@@ -10,7 +10,7 @@ only by a test stack, never by a published image's own start.
 The database lives only for the length of the suite, so the reading is
 taken inside it: the repository's test teardown runs
 
-    "${ORG_PYTHON}" "${ORG_BELT_DIR}/plpgsql_coverage.py" collect <conninfo>
+    "${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt" plpgsql-coverage collect <conninfo>
 
 before it stops the database, when ORG_PLPGSQL_COVERAGE names the
 directory to write into. A suite may use any number of databases, each

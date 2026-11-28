@@ -4,7 +4,7 @@
 #
 #   <array>=() && org_rust_workspace_roots <array>
 #
-# Fills the named array with mise/rust_workspaces.py's roots: one
+# Fills the named array with belt/rust_workspaces.py's roots: one
 # manifest path per workspace in the tree, relative to its top, the root
 # Cargo.toml first when there is one and the rest sorted. A task that
 # runs cargo runs it once per element, `--manifest-path "${root}"`.

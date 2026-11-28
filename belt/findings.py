@@ -2,7 +2,7 @@ r"""The Python writer of findings (#1890).
 
 mise/findings.sh is the shell writer; docs/findings.md is the rule both
 serve. A finding is printed for the person reading the log, and
-recorded for the report that reads the run (mise/standing_issue.py):
+recorded for the report that reads the run (belt/standing_issue.py):
 one JSON object on one line,
 
     {"v": 1, "task": …, "subject": …, "message": …, "detail": […]}
@@ -16,7 +16,7 @@ or unset off a runner, nothing is recorded.
 `finding(subject, message, detail)` prints to stderr `<task>: <subject>:
 <message>` (or `<task>: <message>` with an empty subject), then each
 detail line indented two spaces. With `annotate=True` the first line is
-an error annotation instead, through mise/workflow_command.py. The
+an error annotation instead, through belt/workflow_command.py. The
 record is the same.
 
 `task` is `MISE_TASK_NAME`, which a Python child of a mise task

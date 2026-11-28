@@ -364,7 +364,7 @@ def tracked(root: Path | str, *pathspecs: str, **overrides: str) -> list[str]:
     """Name the files a tree tracks, relative to the tree's root (#1618).
 
     `root` is a checkout's top: the listing is git's NUL-separated one
-    there, as mise/tracked.py reads it, for the pathspecs given, under
+    there, as belt/tracked.py reads it, for the pathspecs given, under
     `env` with the row's `overrides`.
 
     Returns:

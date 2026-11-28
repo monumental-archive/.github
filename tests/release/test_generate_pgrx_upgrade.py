@@ -178,7 +178,7 @@ IDENTITY_EMAIL = "harness@example.invalid"
 
 
 def hermetic_env(home: Path, *, env: support.Env, **overrides: str) -> dict[str, str]:
-    """Build a fixture's environment through mise/support.py (#1508, #1514).
+    """Build a fixture's environment through tests/support.py (#1508, #1514).
 
     Returns:
         support.env for `home`, with this harness's git identity, and

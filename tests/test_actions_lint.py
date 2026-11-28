@@ -1,4 +1,4 @@
-"""Table tests for mise/actions_lint.py, lint:actions' call (#2007).
+"""Table tests for belt/actions_lint.py, lint:actions' call (#2007).
 
 A row per branch, each asserting its message: a clean workflow passes
 with nothing written in the tree, a finding is actionlint's report and
@@ -6,8 +6,8 @@ then the one finding naming the fix, both `-ignore` patterns reach
 actionlint (the `$/` self-reference and the ubuntu-26.04 label pass), no
 workflow named, no ORG_CANON_DIR, and no actionlint on PATH. The
 `.org-canon` link and the shellcheck it serves are held end to end by
-mise/test_action_lints.py; the untracked-file rows by
-mise/test_workflow_files.py.
+tests/test_action_lints.py; the untracked-file rows by
+tests/test_workflow_files.py.
 
 The rows that run actionlint use the belt's, so this file runs under the
 belt's tools (`mise run test`, or `mise x --`).

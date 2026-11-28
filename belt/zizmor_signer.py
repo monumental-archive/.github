@@ -33,7 +33,7 @@ Usage:
 runs `zizmor --format=json <arguments>` once (#1955), its stderr passed
 through unchanged, and decodes the finding array it writes to stdout.
 Each finding that remains after the drop goes through
-mise/findings.py: the subject is its first location's file, the
+belt/findings.py: the subject is its first location's file, the
 message `<ident>: <the first line of the feature of the first Primary
 location, trimmed>` (the owner's ruling on #1955: `desc` is one text
 per audit, so it is no identity; Hidden and Related locations are
@@ -77,7 +77,7 @@ from belt.decoded import UndecodableError
 from belt.typed_std import group
 
 # The belt's zizmor, as PATH answers it; read as the command by the job
-# install law (release/test_job_installs.py).
+# install law (tests/release/test_job_installs.py).
 ZIZMOR = shutil.which("zizmor") or "zizmor"
 EXIT_REFUSED = 1
 # zizmor's statuses for a run with findings, one per severity.

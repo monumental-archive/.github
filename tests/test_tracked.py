@@ -1,6 +1,6 @@
 """Rows for the one producer of the tracked-file list (#1986).
 
-`mise/tracked.sh` (`org_tracked`) and `mise/tracked.py` (`tracked`) list
+`mise/tracked.sh` (`org_tracked`) and `belt/tracked.py` (`tracked`) list
 exactly the files git tracks, NUL-separated and unquoted, and the belt's
 linters read that list and nothing else. Two defects came from building
 the list by hand, one way per task, and both are planted here:
@@ -279,7 +279,7 @@ def test_tracked_lists_the_working_directory_by_pathspec(
     """No root: the working directory's tree; a pathspec narrows it.
 
     The call inherits the environment, so it gets the fixture's: the
-    suite runs under mise/git_decoy.py (#1463), which sets GIT_DIR
+    suite runs under belt/git_decoy.py (#1463), which sets GIT_DIR
     and GIT_INDEX_FILE at an empty decoy repository, and an
     inheriting call would list the decoy's index. Production carries
     those two only in a git hook (pre-commit runs lint:typos,

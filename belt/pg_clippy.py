@@ -11,12 +11,12 @@ Behaviour, messages and exit statuses are the body's own, unchanged.
 The crate this lints is the one the gate never compiled (#813): the
 task's comment carries that history. The plumbing it shares with
 lint:rust and fix:rust — the compile surface, the clippy ladder, the
-pgrx provisioning and the per-major subshell — is mise/rust_task.py's,
+pgrx provisioning and the per-major subshell — is belt/rust_task.py's,
 which calls mise/clippy-ladder.sh and mise/pgrx-env.sh rather than
 restating them, so all three tasks build an extension the same way.
 
 It runs once per workspace the tree tracks (#2004), the roots named by
-mise/rust_workspaces.py, so an extension outside the root workspace is
+belt/rust_workspaces.py, so an extension outside the root workspace is
 linted like one inside it.
 
 Run in the repository's root, with cargo, rustup and the belt on PATH;

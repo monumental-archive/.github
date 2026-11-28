@@ -13,7 +13,7 @@ the runner unescapes it: the message's `%`, CR and LF as `%25`, `%0D`
 and `%0A`; a property's value (`file`, `line`, `title`) also its `:`
 and `,` as `%3A` and `%2C`. One line, flushed. Nothing else in the
 canon's Python prints any workflow command;
-mise/test_workflow_command.py holds that law over the tracked helpers.
+tests/test_workflow_command.py holds that law over the tracked helpers.
 
 A helper in another directory reaches this one the way #1643 set out:
 `sys.path.append` of the sibling root, then `import workflow_command`.

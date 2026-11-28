@@ -19,13 +19,13 @@ here, as edtf's caller would have set it, so a row proves the step's
 bytes no longer read it; a member with `publish = false` (`"publish":
 []` in cargo metadata, measured on cargo 1.97.1) is the only way out.
 
-WHAT RUNS. release/publish_crates.py, the step's body since #1383,
+WHAT RUNS. belt/release/publish_crates.py, the step's body since #1383,
 in-process through its `run`, with a stub `cargo` first on PATH and the
 helper's one HTTP function replaced by a stub that answers the index
 from a directory laid out like the index host. `jq` and `sha256sum` are
 the real ones, and so is release/crates-io-members.sh, the member set
 the publisher shares with the build (#1310). The index path is the
-belt's one rule (mise/crates_index.py), so a wrong layout reads as 404
+belt's one rule (belt/crates_index.py), so a wrong layout reads as 404
 and fails the "some published" row rather than passing quietly. Until
 #1383 these rows cut the step's `run:` block out of the workflow; they
 are the same rows, re-pointed.

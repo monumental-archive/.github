@@ -87,7 +87,7 @@ Silver now stands on one remaining MUST:
   stele test is missing (stele#486). The checklists on #1360 and
   #1545 name each.
 
-  `mise/regression_count.py` sorts every `fix`-typed commit into test
+  `belt/regression_count.py` sorts every `fix`-typed commit into test
   added, no test, not a code fix (docs, data, pins, Renovate's
   `fix(deps)` and `fix(canon)`) and unclassifiable, and reports 58 of
   234 (24.8%) for the window. That is tests that arrived with the fix:
@@ -114,21 +114,20 @@ is met by a number nothing hand
 maintains rather than by one nobody was watching.
 
 **The canon measures itself since 2026-11-18 (#1331).** The sentence
-that stood here — that what remains in the canon is orchestration, not
-a statement-coverage corpus — stopped being true: the canon's Python
-(belt and release helpers, with stdlib `unittest` suites over three
-roots) outgrew its shell, and coverage.py now measures it in the gate,
-child processes included: 94.9% of statements and 91.1% of branches,
-held by a derived `.coverage-floor`, each leg to a floor of its own
-(its measurement minus the band, capped at 90, #2143). So
+that stood here — that what remains in the canon is orchestration, not a
+statement-coverage corpus — stopped being true: the canon's Python (the
+belt package and its release helpers, with pytest suites under one root,
+tests/, #2177) outgrew its shell, and coverage.py now measures it in the
+gate, child processes included: 94.9% of statements and 91.1% of
+branches, held by a derived `.coverage-floor`, each leg to a floor of
+its own (its measurement minus the band, capped at 90, #2143). So
 `test_statement_coverage80`, `90` and `test_branch_coverage80` are Met
-from that number. The scope is stated
-in every answer: the shell is not measured (kcov still fails the
-belt's priors, and the verdict says so), and the floor covers the
-Python legs only. A bash
-test framework was considered as the separable half and **refused**
-(#364): it would neither produce a number — the criterion needs
-coverage, not tests — nor survive the port.
+from that number. The scope is stated in every answer: the shell is not
+measured (kcov still fails the belt's priors, and the verdict says so),
+and the floor covers the Python legs only. A bash test framework was
+considered as the separable half and **refused** (#364): it would
+neither produce a number — the criterion needs coverage, not tests — nor
+survive the port.
 
 ## Gold — walled by headcount, deliberately not claimed
 
