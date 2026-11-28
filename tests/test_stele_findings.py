@@ -10,17 +10,17 @@ PURL: the row that meets the real tool.
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
-from belt import decoded
+from belt import decoded, stele_findings
 from tests import support
 
 HERE = support.MISE
-ADAPTER = HERE / "stele_findings.py"
 TASK = "audit:inventory"
 
 STUB = """\
@@ -116,8 +116,11 @@ class TestAdapter:
     """The adapter over a stub stele."""
 
     @pytest.fixture
-    def _set_up_test_adapter(self, tmp_path: Path) -> None:
+    def _set_up_test_adapter(
+        self, tmp_path: Path, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Lay out a stub stele, its log, and the findings file."""
+        self.capfd = capfd
         self.dir = Path(str(tmp_path))
         self.bin = self.dir / "bin"
         self.bin.mkdir()
@@ -127,6 +130,28 @@ class TestAdapter:
         self.log = self.dir / "stele.log"
         self.doc = self.dir / "doc.json"
         self.file = self.dir / "findings" / "job.jsonl"
+
+    def adapt(
+        self, argv: list[str], env: dict[str, str]
+    ) -> subprocess.CompletedProcess[str]:
+        """Call the adapter as a task runs it, in process, under `env`.
+
+        The tool is looked up on `env`'s PATH, as a process started with
+        it would find it.
+
+        Returns:
+            Its status and what it wrote, as a finished process's.
+
+        """
+        found = shutil.which("stele", path=env["PATH"]) or "stele"
+        with pytest.MonkeyPatch.context() as patched:
+            for name, value in env.items():
+                patched.setenv(name, value)
+            patched.setattr(stele_findings, "STELE", found)
+            patched.chdir(self.dir)
+            status = stele_findings.main(argv)
+        out, err = self.capfd.readouterr()
+        return subprocess.CompletedProcess(argv, status, out, err)
 
     def run_adapter(
         self, document: str, status: int, *args: str, path: str | None = None
@@ -148,15 +173,7 @@ class TestAdapter:
             PYTHONUTF8="1",
         )
         argv = list(args) or ["assert", "inventory", "a.spdx.json"]
-        return subprocess.run(
-            [sys.executable, str(ADAPTER), *argv],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            env=env,
-            cwd=self.dir,
-            check=False,
-        )
+        return self.adapt([*argv], env)
 
     def records(self) -> list[dict[str, object]]:
         """Read every record the adapter appended.
@@ -309,16 +326,11 @@ class TestAdapter:
         if stele is None:
             pytest.skip("the belt's stele is not on PATH")
         (self.dir / "a.spdx.json").write_text(json.dumps(SPDX), encoding="utf-8")
-        done = subprocess.run(
-            [sys.executable, str(ADAPTER), "assert", "inventory", "a.spdx.json"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            env=support.env(
+        done = self.adapt(
+            ["assert", "inventory", "a.spdx.json"],
+            support.env(
                 ORG_FINDINGS=str(self.file), MISE_TASK_NAME=TASK, PYTHONUTF8="1"
             ),
-            cwd=self.dir,
-            check=False,
         )
         same(done.returncode, 1, done.stderr)
         want: list[dict[str, object]] = [QUOTED_RECORD]

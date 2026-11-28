@@ -15,17 +15,17 @@ its human mode and recorded nothing.
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
-from belt import decoded
+from belt import decoded, lychee_findings
 from tests import support
 
 HERE = support.MISE
-ADAPTER = HERE / "lychee_findings.py"
 TASK = "audit:links"
 GIT = support.tool("git")
 NOT_FOUND = "File not found. Check if file exists and path is correct"
@@ -111,8 +111,11 @@ class TestAdapter:
     """The adapter over a stub lychee."""
 
     @pytest.fixture
-    def _set_up_test_adapter(self, tmp_path: Path) -> None:
+    def _set_up_test_adapter(
+        self, tmp_path: Path, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Lay out a stub lychee, its log, and the findings file."""
+        self.capfd = capfd
         self.dir = Path(str(tmp_path))
         self.bin = self.dir / "bin"
         self.bin.mkdir()
@@ -122,6 +125,28 @@ class TestAdapter:
         self.log = self.dir / "lychee.log"
         self.doc = self.dir / "doc.json"
         self.file = self.dir / "findings" / "job.jsonl"
+
+    def adapt(
+        self, argv: list[str], env: dict[str, str]
+    ) -> subprocess.CompletedProcess[str]:
+        """Call the adapter as a task runs it, in process, under `env`.
+
+        The tool is looked up on `env`'s PATH, as a process started with
+        it would find it.
+
+        Returns:
+            Its status and what it wrote, as a finished process's.
+
+        """
+        found = shutil.which("lychee", path=env["PATH"]) or "lychee"
+        with pytest.MonkeyPatch.context() as patched:
+            for name, value in env.items():
+                patched.setenv(name, value)
+            patched.setattr(lychee_findings, "LYCHEE", found)
+            patched.chdir(self.dir)
+            status = lychee_findings.main(argv)
+        out, err = self.capfd.readouterr()
+        return subprocess.CompletedProcess(argv, status, out, err)
 
     def run_adapter(
         self, document: str, status: int, *args: str, path: str | None = None
@@ -142,15 +167,7 @@ class TestAdapter:
             STUB_RC=str(status),
             PYTHONUTF8="1",
         )
-        return subprocess.run(
-            [sys.executable, str(ADAPTER), *(args or ("a.md",))],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            env=env,
-            cwd=self.dir,
-            check=False,
-        )
+        return self.adapt([*(args or ("a.md",))], env)
 
     def test_one_broken_link_is_one_record(self) -> None:
         """One entry: one record, the line in the detail, lychee's 2."""

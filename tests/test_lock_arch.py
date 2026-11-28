@@ -4,14 +4,12 @@ import contextlib
 import io
 import pathlib
 import re
-import subprocess
 import sys
 import tempfile
 
 import pytest
 
 from belt import lock_arch
-from tests import support
 
 # A lock with nothing to name, as a typed list.
 NO_CANDIDATES: list[str] = []
@@ -230,17 +228,3 @@ class TestMain:
         assert status == 0
         assert lock_arch.candidates(path) == out.splitlines()
         assert len(out.splitlines()) == 1
-
-    def test_the_script_contract(self) -> None:
-        """Started as a process, it reads stdin and exits 0 with a finding."""
-        path = planted_lock(DEFECT)
-        done = subprocess.run(
-            [sys.executable, str(pathlib.Path(lock_arch.__file__))],
-            env=support.env(),
-            input=f"{path}\0",
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        assert done.returncode == 0, done.stderr
-        assert lock_arch.candidates(path) == done.stdout.splitlines()

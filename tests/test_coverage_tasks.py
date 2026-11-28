@@ -25,7 +25,7 @@ import sys
 import tempfile
 from decimal import Decimal
 from pathlib import Path
-from typing import TypedDict, Unpack, override
+from typing import TypedDict, Unpack
 
 import pytest
 
@@ -77,6 +77,32 @@ case "${cmd}" in
   *) exit 1 ;;
 esac
 """
+
+# The pytest tool venv's interpreter, as the python leg finds it beside
+# `pytest` on PATH (tool_python.py): `-m coverage` is the coverage stub,
+# anything else the suite's own python3, so the version check agrees.
+VENV_PYTHON = """\
+#!/usr/bin/env bash
+if [[ ${1:-} == -m && ${2:-} == coverage ]]; then
+  shift 2
+  exec coverage "$@"
+fi
+exec "${STUB_PYTHON}" "$@"
+"""
+
+
+def plant_pytest_venv(stubs: Path) -> None:
+    """Plant a pytest tool venv in `stubs`, its `pytest` on PATH there."""
+    venv = stubs / "pytest-venv" / "bin"
+    venv.mkdir(parents=True)
+    for name, text in (
+        ("pytest", "#!/usr/bin/env bash\nexit 0\n"),
+        ("python", VENV_PYTHON),
+    ):
+        (venv / name).write_text(text, encoding="utf-8")
+        (venv / name).chmod(0o755)
+    (stubs / "pytest").symlink_to(venv / "pytest")
+
 
 GO = """\
 #!/usr/bin/env bash
@@ -327,6 +353,7 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
         (stubs / name).write_text(text, encoding="utf-8")
         (stubs / name).chmod(0o755)
     (stubs / "python3").symlink_to(sys.executable)
+    plant_pytest_venv(stubs)
     task_json = tmp / "task.json"
     if test_run is None and typescript is not None:
         # A vitest tree's test task runs vitest through `measured` (#2105);
@@ -503,8 +530,10 @@ class TestCheckRows(TestCoverageTaskCase):
         assert done.returncode == 0, done.stderr
         assert (
             "coverage:check: python: the test run measured no Python — its test"
-            ' command runs\n  through "${ORG_BELT_DIR}/measured" (#1667),'
-            " or no suite ran under mise\n"
+            ' command runs\n  pytest through "${ORG_BELT_DIR}/measured" (#1667,'
+            " #2177): `measured pytest …` or\n  `measured python3 -m pytest …`;"
+            " any other Python command is not measured,\n  or no suite ran under"
+            " mise\n"
         ) in done.stderr
         assert "python" not in done.stdout
 
@@ -886,17 +915,33 @@ NO_SOURCE_MSG = (
 )
 
 
-def run_python_leg(test_run: str) -> tuple[subprocess.CompletedProcess[str], bool]:
+# The planted suite: one test starting `sub/helper.py` as a child of the
+# measured pytest, from the directory CHILD_CWD names. `patch =
+# subprocess` measures the child, which runs the venv's interpreter.
+CHILD_TEST = """\
+import subprocess
+import sys
+
+
+def test_child():
+    subprocess.run([sys.executable, {script!r}], cwd={cwd!r}, check=True)
+"""
+
+
+def run_python_leg(cwd: str) -> tuple[subprocess.CompletedProcess[str], bool]:
     """Measure a planted tree's python leg with the real coverage.py.
 
-    The tree tracks `sub/helper.py` and an empty floor. `test_run` runs
+    The tree tracks `sub/helper.py` and an empty floor. The suite, one
+    test starting the helper from `cwd` (`sub` or the root `.`), runs
     first through the real `measured`, as the repository's test task
-    would (#1667), then the leg reads the run it measured.
+    would (#1667, #2177), then the leg reads the run it measured.
 
     Returns:
         The finished measurement, and whether it wrote coverage.xml.
 
     """
+    script = "helper.py" if cwd == "sub" else "sub/helper.py"
+    test_run = "pytest -q -p no:cacheprovider test_child.py"
     with tempfile.TemporaryDirectory() as tmp:
         tree = Path(tmp) / "tree"
         stubs = Path(tmp) / "stubs"
@@ -905,6 +950,9 @@ def run_python_leg(test_run: str) -> tuple[subprocess.CompletedProcess[str], boo
         (stubs / "mise").write_text(MISE, encoding="utf-8")
         (stubs / "mise").chmod(0o755)
         (tree / "sub" / "helper.py").write_text("print('hi')\n", encoding="utf-8")
+        (tree / "test_child.py").write_text(
+            CHILD_TEST.format(script=script, cwd=cwd), encoding="utf-8"
+        )
         task = Path(tmp) / "task.json"
         answer: dict[str, object] = {"dir": str(tree), "run": [test_run]}
         task.write_text(json.dumps(answer), encoding="utf-8")
@@ -912,6 +960,7 @@ def run_python_leg(test_run: str) -> tuple[subprocess.CompletedProcess[str], boo
         env = support.env()
         env |= {
             "ORG_BELT_DIR": str(BELT),
+            "ORG_PYTHON": os.environ.get("ORG_PYTHON") or sys.executable,
             "PATH": f"{stubs}{os.pathsep}{env.get('PATH', '')}",
             "STUB_TASK": str(task),
             "ORG_COVERAGE_REPORTS": str(Path(tmp) / "reports"),
@@ -920,7 +969,7 @@ def run_python_leg(test_run: str) -> tuple[subprocess.CompletedProcess[str], boo
         for args in (["init", "-q"], ["add", "sub/helper.py"]):
             subprocess.run([GIT, *args], cwd=tree, env=env, check=True)
         subprocess.run(
-            [str(BELT / "measured"), BASH, "-c", test_run],
+            [str(BELT / "measured"), *test_run.split()],
             cwd=tree,
             env=env,
             capture_output=True,
@@ -937,6 +986,7 @@ def run_python_leg(test_run: str) -> tuple[subprocess.CompletedProcess[str], boo
         return done, (Path(tmp) / "reports" / "coverage.xml").is_file()
 
 
+@pytest.mark.usefixtures("_pytest_tool")
 class TestChildFromAnotherDirectory:
     """A child measured from a subdirectory is refused by name (#1528).
 
@@ -946,20 +996,21 @@ class TestChildFromAnotherDirectory:
     since #1528, where it rendered only the JSON before.
     """
 
+    @pytest.fixture(scope="class")
     @classmethod
-    @override
-    def setUpClass(cls) -> None:
+    def _pytest_tool(cls) -> None:
         """Assert the tool first, as the belt's tasks assert theirs.
 
         The rows run the python leg with the real coverage.py the belt
-        pins, not a stub: what they hold is coverage's own reading of a
-        child started from another directory (#1528).
+        pins, from the pytest tool venv, not a stub: what they hold is
+        coverage's own reading of a child started from another
+        directory (#1528).
         """
-        support.tool("coverage")
+        support.tool("pytest")
 
     def test_a_child_run_from_a_subdirectory_is_red_by_name(self) -> None:
         """The belt's words, the recorded file, and the remedy."""
-        done, wrote = run_python_leg("cd sub && python3 helper.py")
+        done, wrote = run_python_leg("sub")
         assert done.returncode == 1, done.stderr
         assert NO_SOURCE_MSG in done.stderr
         assert done.stdout == ""
@@ -967,7 +1018,7 @@ class TestChildFromAnotherDirectory:
 
     def test_the_same_child_from_the_root_renders_the_report(self) -> None:
         """Control: started from the root, it measures and renders."""
-        done, wrote = run_python_leg("python3 sub/helper.py")
+        done, wrote = run_python_leg(".")
         assert done.returncode == 0, done.stderr
         assert done.stdout == "python 100.0\npython-branches 100.0\n"
         assert wrote

@@ -1221,7 +1221,7 @@ def totals(label: str, report_path: str) -> int:
         findings.finding(
             LEG,
             "the test task wrote no report — its teardown"
-            f" must call plpgsql_coverage.py collect while {ENV} is set",
+            f" must call belt plpgsql-coverage collect while {ENV} is set",
         )
         return 1
     decoded = read_reports(paths)

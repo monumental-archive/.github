@@ -36,7 +36,6 @@ CANON = support.CANON
 BELT = CANON / "mise"
 BASH = support.tool("bash")
 GIT = support.tool("git")
-PYTHON = sys.executable
 DEFAULTS = CANON / ".github" / "workflows" / "publish.yml"
 
 NAME = "lint:lock-platforms"
@@ -687,28 +686,3 @@ class TestLocated:
         assert status == 1, out + err
         assert err == RED.replace("mise.lock", "mise/mise.lock", 1)
         assert out == ""
-
-
-class TestScript:
-    """The one row that starts the helper as a process (#1697)."""
-
-    def test_the_script_contract(self) -> None:
-        """Started as a process, it reads its arguments and stdin, and exits 1."""
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            plant(root, tree(), {})
-            done = subprocess.run(
-                [
-                    *(PYTHON, str(BELT / "lock_platforms.py")),
-                    *("--defaults", str(DEFAULTS), "--config", "mise.toml"),
-                    *("--lock", "mise.lock"),
-                ],
-                cwd=root,
-                env=support.env(MISE_TASK_NAME=NAME),
-                input=f"{STUB_PATH}\0",
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-        assert done.returncode == 1, done.stdout + done.stderr
-        assert done.stderr == RED

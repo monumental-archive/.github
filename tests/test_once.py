@@ -1,12 +1,13 @@
 """Table tests for once.py: a command at most once per marker (#2061).
 
-Each row runs the helper as `measured` does, as a process, with a
-command that appends a line to the row's log, and asserts what the log
-and the marker hold afterwards.
+Each row calls the helper's `main` in this process, as `measured`
+starts it, with a command that appends a line to the row's log, and
+asserts what the log and the marker hold afterwards. The race is two
+threads: the lock is `flock`, which each open of the lock file holds
+apart, as two processes would.
 """
 
-import subprocess
-import sys
+from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
 
 import pytest
@@ -18,7 +19,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-ONCE = support.MISE / "once.py"
 SH = support.tool("sh")
 # The task whose call the rows stand in for (#1934).
 TASK = "test"
@@ -48,37 +48,23 @@ class TestOnce:
     """One branch per row: run, skip, fail and retry, race."""
 
     @pytest.fixture
-    def _set_up_test_once(self, tmp_path: Path) -> None:
+    def _set_up_test_once(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Make the row's scratch, its log and its marker's path."""
         self.tmp = tmp_path
         self.log = self.tmp / "log"
         self.marker = self.tmp / "rust"
-
-    def start(self, line: str) -> subprocess.Popen[str]:
-        """Start the helper on a shell line, its marker the row's.
-
-        Returns:
-            The running helper.
-
-        """
-        return subprocess.Popen(
-            [sys.executable, str(ONCE), str(self.marker), "--", SH, "-c", line],
-            env=support.env(LOG=str(self.log)),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
+        monkeypatch.setenv("LOG", str(self.log))
 
     def call(self, line: str) -> int:
-        """Run the helper on a shell line to the end.
+        """Run the helper on a shell line to the end, its marker the row's.
 
         Returns:
             Its exit status.
 
         """
-        helper = self.start(line)
-        helper.communicate(timeout=60)
-        return helper.returncode
+        return once.main([str(self.marker), "--", SH, "-c", line])
 
     def ran(self) -> list[str]:
         """Read the row's log.
@@ -112,10 +98,9 @@ class TestOnce:
     def test_two_concurrent_callers_run_it_once(self) -> None:
         """Side by side: one runs it, the other waits for it and skips."""
         line = 'echo start >> "${LOG}"; sleep 1; echo end >> "${LOG}"'
-        helpers = [self.start(line) for _ in range(2)]
-        for helper in helpers:
-            _, err = helper.communicate(timeout=60)
-            assert helper.returncode == 0, err
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            statuses = list(pool.map(self.call, [line, line]))
+        assert statuses == [0, 0]
         assert lines("start", "end") == self.ran()
 
     def test_no_separator_is_a_usage_error(self) -> None:

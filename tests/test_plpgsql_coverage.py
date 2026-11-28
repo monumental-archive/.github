@@ -25,10 +25,11 @@ import subprocess
 import sys
 import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar, override
+from typing import TYPE_CHECKING, ClassVar
 
 import pytest
 
@@ -38,7 +39,7 @@ from belt.decoded import as_array, as_object, as_str, load_json, load_toml
 from tests import support, test_coverage_tasks
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
 
 # The task that runs the helper, whose name its findings carry (#1934).
 TASK = "leg"
@@ -55,7 +56,6 @@ pytestmark = pytest.mark.usefixtures("_task")
 
 CANON = support.CANON
 BELT = CANON / "mise"
-HELPER = BELT / "plpgsql_coverage.py"
 BASH = support.tool("bash")
 GIT = support.tool("git")
 CONFIG = load_toml((BELT / "config.toml").read_text(encoding="utf-8"))
@@ -1029,13 +1029,9 @@ class TestRefusalRows(TestCollecting):
             )
 
     @pytest.mark.parametrize("argv", [[], ["measure", "leg"]])
-    def test_a_usage_error_names_both_subcommands(self, argv: object) -> None:
+    def test_a_usage_error_names_both_subcommands(self, argv: list[str]) -> None:
         """No subcommand, or an unknown one, is exit 2 with the usage."""
-        done = run(
-            [sys.executable, str(HELPER), *argv],
-            support.env(MISE_TASK_NAME=TASK),
-            CANON,
-        )
+        done = call(list(argv), support.env(MISE_TASK_NAME=TASK), CANON)
         assert done.returncode == 2
         assert (
             f"{TASK}: usage: plpgsql-coverage collect <conninfo>"
@@ -1097,6 +1093,7 @@ class TestLegRows:
         (stubs / "coverage").write_text(COVERAGE, encoding="utf-8")
         (stubs / "coverage").chmod(0o755)
         (stubs / "python3").symlink_to(sys.executable)
+        test_coverage_tasks.plant_pytest_venv(stubs)
         tree = tmp / "tree"
         tree.mkdir()
         for name, text in files.items():
@@ -1344,6 +1341,7 @@ class TestReadsTheRunRows:
             (stubs / name).write_text(text, encoding="utf-8")
             (stubs / name).chmod(0o755)
         (stubs / "python3").symlink_to(sys.executable)
+        test_coverage_tasks.plant_pytest_venv(stubs)
         tree = tmp / "tree"
         tree.mkdir()
         defs = tmp / "tasks"
@@ -1666,7 +1664,7 @@ def pinned_image() -> str:
     return as_str(pin["image"], "the pin's image")
 
 
-@pytest.mark.usefixtures("_tmp")
+@pytest.mark.usefixtures("_database", "_tmp")
 class TestRealDatabaseRows:
     """The leg on a real Postgres with plpgsql_check (#2163).
 
@@ -1684,10 +1682,13 @@ class TestRealDatabaseRows:
     docker = ""
     env: ClassVar[dict[str, str]]
 
+    @pytest.fixture(scope="class")
     @classmethod
-    @override
-    def setUpClass(cls) -> None:
-        """Start the database and wait until it takes connections.
+    def _database(cls) -> Iterator[None]:
+        """Start the database, wait until it takes connections, remove it after.
+
+        Yields:
+            Once the database takes connections.
 
         Raises:
             AssertionError: it did not start, or took no connection in
@@ -1718,7 +1719,20 @@ class TestRealDatabaseRows:
         if started.returncode != 0:
             msg = f"the database did not start: {started.stderr}"
             raise AssertionError(msg)
-        cls.addClassCleanup(cls.remove)
+        try:
+            cls.ready()
+            yield
+        finally:
+            cls.remove()
+
+    @classmethod
+    def ready(cls) -> None:
+        """Wait until the database takes connections over TCP.
+
+        Raises:
+            AssertionError: it took no connection in time.
+
+        """
         # Over TCP: the image's first start serves its socket only while
         # it initialises, then restarts; the TCP listener is the last one.
         for _ in range(READY * 2):
@@ -1857,7 +1871,9 @@ class TestRealDatabaseRows:
             " branches at least 50.00% (the highest one database read)\n"
         ) in merged.stderr
 
-    def test_two_databases_leave_the_branch_floor_untouched(self) -> None:
+    def test_two_databases_leave_the_branch_floor_untouched(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Not held, by name and count; coverage:check changes no floor line."""
         read = self.totals(self.two_databases())
         assert read.returncode == 0, read.stderr
@@ -1875,16 +1891,14 @@ class TestRealDatabaseRows:
             "v1.0.0",
         )
         floor.write_text(text, encoding="utf-8")
-        held = run(
-            [
-                sys.executable,
-                str(BELT / "coverage_floor.py"),
-                *("hold", "--label", "coverage:check", "--job", "gate"),
-            ],
-            self.env | {"ORG_PYTHON": sys.executable},
-            tree,
-            stdin=read.stdout,
-        )
+        with pytest.MonkeyPatch.context() as patched:
+            for name, value in self.env.items():
+                patched.setenv(name, value)
+            patched.chdir(tree)
+            patched.setattr(sys, "stdin", io.StringIO(read.stdout))
+            status = cf.main(["hold", "--label", "coverage:check", "--job", "gate"])
+        out, err = capfd.readouterr()
+        held = Done(status, out, err)
         assert held.returncode == 0, held.stderr
         assert held.stdout == (
             "coverage:check: plpgsql leg holds its floor 80.0 (100.00%)\n"
@@ -1911,28 +1925,22 @@ class TestRealDatabaseRows:
         assert read.stdout == "plpgsql 75.00\nplpgsql-branches 50.00\n"
         assert "not held" not in read.stderr
 
-    def test_two_concurrent_collects_leave_two_reports(self) -> None:
+    def test_two_concurrent_collects_leave_two_reports(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Teardowns at the same moment write a report each."""
         ahead, behind = self.database(), self.database()
         reports = self.scratch() / "reports"
-        env = self.env | {"ORG_PLPGSQL_COVERAGE": str(reports)}
-        started = [
-            subprocess.Popen(
-                [
-                    sys.executable,
-                    *(str(HELPER), "collect", f"dbname={name}", "--"),
-                    *self.client(),
-                ],
-                env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
+        for name, value in (self.env | {"ORG_PLPGSQL_COVERAGE": str(reports)}).items():
+            monkeypatch.setenv(name, value)
+        client = tuple(self.client())
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            statuses = list(
+                pool.map(
+                    lambda name: pc.collect(f"dbname={name}", client), (ahead, behind)
+                )
             )
-            for name in (ahead, behind)
-        ]
-        for process in started:
-            _, err = process.communicate()
-            assert process.returncode == 0, err
+        assert statuses == [0, 0]
         assert len(list(reports.glob("database-*.json"))) == 2
 
     def test_a_function_no_database_runs_is_red_by_name(self) -> None:

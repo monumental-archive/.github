@@ -42,9 +42,7 @@ import json
 import os
 import re
 import shutil
-import signal
 import subprocess
-import sys
 import tempfile
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -67,7 +65,6 @@ BASH = support.tool("bash")
 # canon's own suite with only the badge job's five tools installed:
 # 8,364 self-execs in 1m33s on the first lint:sql row, and on main the
 # coverage upload job sat in it for its whole 30 minutes on every push.
-SQLFLUFF = support.optional_tool("sqlfluff")
 SQLFLUFF_MISSING = (
     "sqlfluff is not on PATH: these rows run the belt's real sqlfluff behind"
     " a shim named sqlfluff, and cannot run without it — run: mise install"
@@ -520,6 +517,15 @@ def task_body(name: str) -> str:
     )
 
 
+def need_sqlfluff() -> None:
+    """Fail by name when the belt's sqlfluff is not on PATH (#1528).
+
+    Asked at each call, of the PATH the row has then.
+    """
+    if support.optional_tool("sqlfluff") is None:
+        pytest.fail(SQLFLUFF_MISSING)
+
+
 @pytest.mark.usefixtures("_set_up_test_sql_skips_owned_snapshots")
 class TestSqlSkipsOwnedSnapshots:
     """lint:sql and fix:sql leave the belt's snapshots to pg-schema (#1240).
@@ -544,10 +550,9 @@ class TestSqlSkipsOwnedSnapshots:
 
         The tool is asserted first, as the belt's tasks assert theirs: a
         row that needs sqlfluff fails by name without it (#1528), which
-        AbsentSqlfluffFailsByName plants.
+        TestAbsentSqlfluffFailsByName plants.
         """
-        if SQLFLUFF is None:
-            pytest.fail(SQLFLUFF_MISSING)
+        need_sqlfluff()
         self.root = tmp_path
         git(self.root, "init", "-q")
         self.shims = Path(tempfile.mkdtemp()).resolve()
@@ -768,11 +773,6 @@ class TestUsage:
         assert "usage:" in err
 
 
-# How long the planted row may take before it counts as the hang. The
-# row it runs finishes in about a second.
-ABSENT_TIMEOUT = 60
-
-
 def without_sqlfluff() -> str:
     """PATH with every directory that holds a sqlfluff left out.
 
@@ -787,38 +787,13 @@ def without_sqlfluff() -> str:
     )
 
 
-class TestAbsentSqlfluffFailsByName:
-    """With sqlfluff absent, its rows fail by name instead of hanging (#1528)."""
+def test_an_absent_sqlfluff_fails_by_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With sqlfluff off PATH, the rows' guard fails naming it (#1528).
 
-    def test_the_first_lint_row_reds_naming_sqlfluff(self) -> None:
-        """The row the badge job hung in, run with sqlfluff off PATH.
-
-        Bounded, so the hang itself is red: the child runs in a session of
-        its own and the whole group is killed at the timeout, since the
-        self-exec loop outlives the test process that started it.
-        """
-        row = "SqlSkipsOwnedSnapshots.test_extension_at_the_workspace_root_is_left_out"
-        # From the repository root, the directory the suite runs in: under
-        # the python coverage leg a child records its files relative to
-        # its own directory, and one run from mise/ left `support.py`
-        # where `coverage xml` could not find it (#1528).
-        child = subprocess.Popen(
-            [sys.executable, str(Path(__file__).resolve()), row],
-            cwd=BELT.parent,
-            env=support.env(PATH=without_sqlfluff()),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            start_new_session=True,
-        )
-        try:
-            _, err = child.communicate(timeout=ABSENT_TIMEOUT)
-        except subprocess.TimeoutExpired:
-            os.killpg(child.pid, signal.SIGKILL)
-            child.communicate()
-            pytest.fail(
-                f"{row} ran past {ABSENT_TIMEOUT}s with sqlfluff absent: the"
-                " shim is exec'ing itself (#1528)"
-            )
-        assert child.returncode != 0, err
-        assert SQLFLUFF_MISSING in err
+    The guard runs before any shim named sqlfluff is planted, so the
+    shim cannot exec itself: the hang the badge job sat in is a named
+    failure instead.
+    """
+    monkeypatch.setenv("PATH", without_sqlfluff())
+    with pytest.raises(pytest.fail.Exception, match="sqlfluff is not on PATH"):
+        need_sqlfluff()

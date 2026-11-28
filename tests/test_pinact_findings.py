@@ -31,20 +31,20 @@ pinact in its human mode and recorded nothing.
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from typing import TYPE_CHECKING
 
 import pytest
 
-from belt import decoded
+from belt import decoded, pinact_findings
 from tests import support
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 HERE = support.MISE
-ADAPTER = HERE / "pinact_findings.py"
 TASK = "audit:action-pins"
 GIT = support.tool("git")
 WORKFLOW = ".github/workflows/a.yml"
@@ -214,8 +214,11 @@ class TestStubbed:
     """A stub pinact on PATH, its log, the findings file."""
 
     @pytest.fixture
-    def _set_up_test_stubbed(self, tmp_path: Path) -> None:
+    def _set_up_test_stubbed(
+        self, tmp_path: Path, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Lay out the stub, its log, and the findings file."""
+        self.capfd = capfd
         self.dir = tmp_path
         self.bin = self.dir / "bin"
         self.bin.mkdir()
@@ -227,6 +230,28 @@ class TestStubbed:
         self.file = self.dir / "findings" / "job.jsonl"
         (self.dir / ".github" / "workflows").mkdir(parents=True)
         (self.dir / WORKFLOW).write_text(SOURCE, encoding="utf-8")
+
+    def adapt(
+        self, argv: list[str], env: dict[str, str]
+    ) -> subprocess.CompletedProcess[str]:
+        """Call the adapter as a task runs it, in process, under `env`.
+
+        The tool is looked up on `env`'s PATH, as a process started with
+        it would find it.
+
+        Returns:
+            Its status and what it wrote, as a finished process's.
+
+        """
+        found = shutil.which("pinact", path=env["PATH"]) or "pinact"
+        with pytest.MonkeyPatch.context() as patched:
+            for name, value in env.items():
+                patched.setenv(name, value)
+            patched.setattr(pinact_findings, "PINACT", found)
+            patched.chdir(self.dir)
+            status = pinact_findings.main(argv)
+        out, err = self.capfd.readouterr()
+        return subprocess.CompletedProcess(argv, status, out, err)
 
     def stub_env(self, document: str, status: int, path: str | None) -> dict[str, str]:
         """Give a run the stub's answer and the findings file.
@@ -259,14 +284,8 @@ class TestAdapter(TestStubbed):
             The finished process.
 
         """
-        return subprocess.run(
-            [sys.executable, str(ADAPTER), *(args or (WORKFLOW,))],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            env=self.stub_env(document, status, path),
-            cwd=self.dir,
-            check=False,
+        return self.adapt(
+            [*(args or (WORKFLOW,))], self.stub_env(document, status, path)
         )
 
     def test_the_quoted_report_is_two_records(self) -> None:
@@ -398,16 +417,11 @@ class TestAdapter(TestStubbed):
             "      - uses: actions/setup-go@v5\n",
             encoding="utf-8",
         )
-        done = subprocess.run(
-            [sys.executable, str(ADAPTER), "--fix=false", "--no-api", WORKFLOW],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            env=support.env(
+        done = self.adapt(
+            ["--fix=false", "--no-api", WORKFLOW],
+            support.env(
                 ORG_FINDINGS=str(self.file), MISE_TASK_NAME=TASK, PYTHONUTF8="1"
             ),
-            cwd=self.dir,
-            check=False,
         )
         assert done.returncode != 0, done.stderr
         cannot = "failed to handle a line: action can't be pinned"
