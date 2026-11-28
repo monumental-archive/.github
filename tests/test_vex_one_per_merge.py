@@ -45,7 +45,6 @@ A = "security/vex/RUSTSEC-0000-0001.openvex.json"
 B = "security/vex/RUSTSEC-0000-0002.openvex.json"
 C = "security/vex/RUSTSEC-0000-0003.openvex.json"
 README = "security/vex/README.md"
-HELPER = BELT / "vex_one_per_merge.py"
 
 
 def body() -> str:

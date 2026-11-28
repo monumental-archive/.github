@@ -116,7 +116,7 @@ def audit(
         ):
             for name, value in named.items():
                 patched.setenv(name, value)
-            status = citations.main(org, tree)
+            status = citations.main([], net=org, top=tree)
         return status, out.getvalue(), err.getvalue()
 
 
@@ -136,7 +136,7 @@ class TestInputs:
             (tree / "docs" / "a.md").write_text("x\n", encoding="utf-8")
             err = io.StringIO()
             with contextlib.redirect_stderr(err):
-                status = citations.main(Org(), tree)
+                status = citations.main([], net=Org(), top=tree)
         assert status == 1
         assert (
             f"{TASK}: on the canon, and the input this leg walks is missing: docs/\n"

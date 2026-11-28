@@ -1,10 +1,10 @@
 """Every gate row's measurement merges to one runner's figure (#2160).
 
 A split test leg measures each task, and each shard of one, on a runner
-of its own; mise/coverage_merge.py gathers the rows' run directories
+of its own; belt coverage-merge gathers the rows' run directories
 into the one coverage:check reads. These rows plant a two-task,
 two-shard layout, measure each of the four rows for real (coverage.py
-under the belt's test runner, at ORG_SHARD 1/2 and 2/2), merge them,
+over pytest, each shard's share of its task's files at 1/2 and 2/2), merge them,
 and hold the figure to one runner's over the same suite; then the lcov
 merge (the TypeScript and Rust legs) to its union, its totals to
 istanbul's own rounding, and each refusal to its message.
@@ -12,6 +12,7 @@ istanbul's own rounding, and each refusal to its message.
 
 import contextlib
 import io
+import os
 import shutil
 import subprocess
 import tempfile
@@ -22,9 +23,9 @@ import pytest
 from belt import coverage_merge, decoded
 from tests import support
 
-HERE = support.MISE
-RUNNER = HERE / "unittest_guarded.py"
-COVERAGE = support.tool("coverage")
+# coverage.py from the pytest tool venv, as `measured` runs it (#2177).
+VENV_PYTHON = str(Path(os.path.realpath(support.tool("pytest"))).parent / "python")
+COVERAGE = [VENV_PYTHON, "-m", "coverage"]
 
 CODE = """\
 def f(x):
@@ -51,10 +52,7 @@ def case(name: str, body: str) -> str:
         The file's text.
 
     """
-    return (
-        "import unittest\n\nimport code_under_test\n\n\n"
-        f"class T(unittest.TestCase):\n    def test_{name}(self):\n        {body}\n"
-    )
+    return f"import code_under_test\n\n\ndef test_{name}():\n    {body}\n"
 
 
 # Two tasks, each two files, each file reaching code the others do not.
@@ -105,24 +103,25 @@ class TestMeasured:
         return path
 
     def measure(self, task: str, spec: str) -> None:
-        """Run one row: one task's suite, one shard, measured."""
+        """Run one row: one task's suite, one shard, measured.
+
+        The shard's share is every n-th of the task's sorted files from
+        the k-th, as shard_runner.py hands a pytest run its share; "" is
+        the whole task, unsharded.
+        """
         rc = self.rc()
+        k, n = (int(part) for part in (spec or "1/1").split("/"))
+        files = sorted(TASKS[task])[k - 1 :: n]
         done = subprocess.run(
             [
-                COVERAGE,
+                *COVERAGE,
                 "run",
                 f"--rcfile={rc}",
-                str(RUNNER),
-                "discover",
-                "--start-directory",
-                task,
-                "--pattern",
-                "test_*.py",
+                *("-m", "pytest", "-q", "-p", "no:cacheprovider", "--rootdir", "."),
+                *(f"{task}/{name}" for name in files),
             ],
             cwd=self.tree,
-            env=support.env(
-                ORG_SHARD=spec, ORG_TEST_WORKERS="1", PYTHONPATH=f"{self.tree}:{HERE}"
-            ),
+            env=support.env(PYTHONPATH=str(self.tree), PYTHONDONTWRITEBYTECODE="1"),
             capture_output=True,
             text=True,
             check=False,
@@ -142,7 +141,7 @@ class TestMeasured:
             ["json", "--quiet", "-o", str(run / "c.json")],
         ):
             done = subprocess.run(
-                [COVERAGE, *args, f"--rcfile={rc}"],
+                [*COVERAGE, *args, f"--rcfile={rc}"],
                 cwd=self.tree,
                 env=support.env(),
                 capture_output=True,

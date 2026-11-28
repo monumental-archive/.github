@@ -859,36 +859,35 @@ class TestDocuments:
             )
 
 
+@pytest.mark.usefixtures("_capfd")
 class TestShares:
     """ORG_SHARD=k/n keeps every n-th property file, each once (#2160)."""
 
     FILES = ("c.prop.test.ts", "a.prop.test.ts", "b.prop.test.mts")
 
+    @pytest.fixture
+    def _capfd(self, capfd: pytest.CaptureFixture[str]) -> None:
+        """Hold the descriptors' capture for `share`."""
+        self.capfd = capfd
+
     def share(self, spec: str, reports: str) -> list[str]:
-        """Ask the runner for one shard's files.
+        """Ask the runner, in process, for one shard's files.
 
         Returns:
             The files it keeps.
 
         """
-        done = subprocess.run(
-            [
-                support.tool("python3"),
-                str(BELT / "typescript_properties.py"),
-                "share",
-                *self.FILES,
-            ],
-            env=support.env(
-                ORG_SHARD=spec,
-                ORG_SHARD_TASK="test:typescript-properties",
-                ORG_SHARD_REPORTS=reports,
-            ),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        assert done.returncode == 0, done.stderr
-        return [f for f in done.stdout.split("\0") if f]
+        with pytest.MonkeyPatch.context() as patched:
+            for name, value in {
+                "ORG_SHARD": spec,
+                "ORG_SHARD_TASK": "test:typescript-properties",
+                "ORG_SHARD_REPORTS": reports,
+            }.items():
+                patched.setenv(name, value)
+            status = tp.main(["share", *self.FILES])
+        out, err = self.capfd.readouterr()
+        assert status == 0, err
+        return [f for f in out.split("\0") if f]
 
     def test_two_shards_hold_every_file_once(self) -> None:
         """1/2 and 2/2: sorted, every second file, the union whole."""
