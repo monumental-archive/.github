@@ -160,148 +160,156 @@ def run_tree(files: dict[str, bytes | str]) -> subprocess.CompletedProcess[str]:
         return Tree(d, files).lint()
 
 
-class TestTheTable:
-    """Every branch the issue names, red with its own message or green."""
+# Every branch the issue names, red with its own message or green.
+def assert_red(result: subprocess.CompletedProcess[str], message: str) -> None:
+    """Red, with `message` on stderr."""
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert message in result.stderr
 
-    def assert_red(
-        self, result: subprocess.CompletedProcess[str], message: str
-    ) -> None:
-        """Red, with `message` on stderr."""
-        assert result.returncode == 1, result.stdout + result.stderr
-        assert message in result.stderr
 
-    def test_no_vendor_directory_skips_clean(self) -> None:
-        """A linter that cannot skip cannot be universal."""
-        result = run_tree({"README.md": "ours\n"})
-        assert result.returncode == 0, result.stderr
-        assert (
-            result.stdout
-            == "lint:vendored: no tracked file under a vendor/ directory, skipped\n"
-        )
+def test_no_vendor_directory_skips_clean() -> None:
+    """A linter that cannot skip cannot be universal."""
+    result = run_tree({"README.md": "ours\n"})
+    assert result.returncode == 0, result.stderr
+    assert (
+        result.stdout
+        == "lint:vendored: no tracked file under a vendor/ directory, skipped\n"
+    )
 
-    def test_an_untracked_vendor_tree_skips_clean(self) -> None:
-        """Tracked files only: a vendor/ git does not hold is not ours to ask."""
-        with TemporaryDirectory() as d:
-            tree = Tree(d, {"README.md": "ours\n"})
-            (tree.root / "vendor").mkdir()
-            (tree.root / "vendor" / "stray.md").write_text("untracked\n")
-            result = tree.lint()
-        assert result.returncode == 0, result.stderr
-        assert "skipped" in result.stdout
 
-    def test_a_correct_tree_passes_and_counts(self) -> None:
-        """Two files listed and matching; the manifest is not counted."""
-        result = run_tree(skill_tree())
-        assert result.returncode == 0, result.stderr
-        assert result.stdout == "lint:vendored: 2 files verified against 1 manifests\n"
+def test_an_untracked_vendor_tree_skips_clean() -> None:
+    """Tracked files only: a vendor/ git does not hold is not ours to ask."""
+    with TemporaryDirectory() as d:
+        tree = Tree(d, {"README.md": "ours\n"})
+        (tree.root / "vendor").mkdir()
+        (tree.root / "vendor" / "stray.md").write_text("untracked\n")
+        result = tree.lint()
+    assert result.returncode == 0, result.stderr
+    assert "skipped" in result.stdout
 
-    def test_an_unlisted_file_reds(self) -> None:
-        """Every file is covered, not only `.md` — the old check's gap."""
-        result = run_tree(skill_tree({"vendor/atlas/extra/run.sh": b"#!/bin/sh\n"}))
-        self.assert_red(
-            result,
-            "lint:vendored: vendor/atlas/extra/run.sh is tracked but not listed "
-            "in vendor/atlas/PINNED.toml",
-        )
 
-    def test_a_listed_file_that_is_missing_reds(self) -> None:
-        """Listed and not tracked: the manifest describes a tree that is not here."""
-        result = run_tree(skill_tree({"vendor/atlas/references/lint.md": None}))
-        self.assert_red(
-            result,
-            "lint:vendored: vendor/atlas/references/lint.md is listed in "
-            "vendor/atlas/PINNED.toml but not tracked under it",
-        )
+def test_a_correct_tree_passes_and_counts() -> None:
+    """Two files listed and matching; the manifest is not counted."""
+    result = run_tree(skill_tree())
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "lint:vendored: 2 files verified against 1 manifests\n"
 
-    def test_a_drifted_file_reds(self) -> None:
-        """Edited in place: the bytes are no longer the pinned commit's."""
-        result = run_tree(skill_tree({"vendor/atlas/SKILL.md": b"# edited\n"}))
-        self.assert_red(
-            result,
-            "lint:vendored: vendor/atlas/SKILL.md does not match its sha256 in "
-            "vendor/atlas/PINNED.toml",
-        )
 
-    def test_a_short_commit_reds(self) -> None:
-        """Seven characters is a prefix, and can come to name another commit."""
-        result = run_tree(skill_tree({MANIFEST: manifest(PINNED, commit=COMMIT[:7])}))
-        self.assert_red(
-            result,
-            "lint:vendored: vendor/atlas/PINNED.toml pins commit '90dacfc' — a full "
-            "40-character commit SHA is required; a branch, a tag or a short SHA moves",
-        )
+def test_an_unlisted_file_reds() -> None:
+    """Every file is covered, not only `.md` — the old check's gap."""
+    result = run_tree(skill_tree({"vendor/atlas/extra/run.sh": b"#!/bin/sh\n"}))
+    assert_red(
+        result,
+        "lint:vendored: vendor/atlas/extra/run.sh is tracked but not listed "
+        "in vendor/atlas/PINNED.toml",
+    )
 
-    def test_a_branch_reds(self) -> None:
-        """A branch name is the moving ref the pin exists to refuse."""
-        result = run_tree(skill_tree({MANIFEST: manifest(PINNED, commit="master")}))
-        self.assert_red(result, "pins commit 'master' — a full 40-character")
 
-    @pytest.mark.parametrize("key", ["repo", "commit", "upstream_path"])
-    def test_a_missing_key_reds(self, key: object) -> None:
-        """repo, commit and upstream_path are each required."""
-        result = run_tree(skill_tree({MANIFEST: manifest(PINNED, drop=key)}))
-        self.assert_red(
-            result,
-            f"lint:vendored: vendor/atlas/PINNED.toml is missing required key '{key}'",
-        )
+def test_a_listed_file_that_is_missing_reds() -> None:
+    """Listed and not tracked: the manifest describes a tree that is not here."""
+    result = run_tree(skill_tree({"vendor/atlas/references/lint.md": None}))
+    assert_red(
+        result,
+        "lint:vendored: vendor/atlas/references/lint.md is listed in "
+        "vendor/atlas/PINNED.toml but not tracked under it",
+    )
 
-    def test_a_missing_manifest_reds(self) -> None:
-        """A vendored file with nothing covering it is pinned to nothing."""
-        result = run_tree(skill_tree({"vendor/atlas/PINNED.toml": None}))
-        self.assert_red(
-            result,
-            "lint:vendored: vendor/atlas/SKILL.md has no PINNED.toml in its "
-            "directory or any ancestor under vendor/ — vendored text must be "
-            "pinned to an upstream commit",
-        )
 
-    def test_a_malformed_files_entry_reds(self) -> None:
-        """A [files] line that does not parse is never silently skipped."""
-        bad = manifest(PINNED).replace(
-            f'"SKILL.md" = "{sha(SKILL)}"', '"SKILL.md" = "not-a-sha"'
-        )
-        result = run_tree(skill_tree({"vendor/atlas/PINNED.toml": bad}))
-        self.assert_red(
-            result,
-            "lint:vendored: vendor/atlas/PINNED.toml:8 is not a "
-            '"<path>" = "<sha256>" entry',
-        )
+def test_a_drifted_file_reds() -> None:
+    """Edited in place: the bytes are no longer the pinned commit's."""
+    result = run_tree(skill_tree({"vendor/atlas/SKILL.md": b"# edited\n"}))
+    assert_red(
+        result,
+        "lint:vendored: vendor/atlas/SKILL.md does not match its sha256 in "
+        "vendor/atlas/PINNED.toml",
+    )
 
-    def test_the_nearest_manifest_covers_and_an_ancestor_one_reaches_down(
-        self,
-    ) -> None:
-        """An ancestor's manifest covers a subtree that has none of its own."""
-        nested = {"a/SKILL.md": SKILL, "a/deep/ref.md": REFERENCE}
-        result = run_tree(
-            skill_tree({
-                "vendor/atlas/PINNED.toml": manifest({**PINNED, **nested}),
-                "vendor/atlas/a/SKILL.md": SKILL,
-                "vendor/atlas/a/deep/ref.md": REFERENCE,
-                # A second tree with its own manifest: its files are its
-                # own, and the outer manifest must not be asked about them.
-                "vendor/atlas/b/PINNED.toml": manifest({"x.md": SKILL}),
-                "vendor/atlas/b/x.md": SKILL,
-            })
-        )
-        assert result.returncode == 0, result.stderr
-        assert result.stdout == "lint:vendored: 5 files verified against 2 manifests\n"
 
-    def test_a_nested_vendor_directory_is_bounded_by_its_own_root(self) -> None:
-        """A manifest above vendor/ is outside it and covers nothing inside."""
-        result = run_tree({
-            "web/PINNED.toml": manifest({"vendor/lib.js": SKILL}),
-            "web/vendor/lib.js": SKILL,
+def test_a_short_commit_reds() -> None:
+    """Seven characters is a prefix, and can come to name another commit."""
+    result = run_tree(skill_tree({MANIFEST: manifest(PINNED, commit=COMMIT[:7])}))
+    assert_red(
+        result,
+        "lint:vendored: vendor/atlas/PINNED.toml pins commit '90dacfc' — a full "
+        "40-character commit SHA is required; a branch, a tag or a short SHA moves",
+    )
+
+
+def test_a_branch_reds() -> None:
+    """A branch name is the moving ref the pin exists to refuse."""
+    result = run_tree(skill_tree({MANIFEST: manifest(PINNED, commit="master")}))
+    assert_red(result, "pins commit 'master' — a full 40-character")
+
+
+@pytest.mark.parametrize("key", ["repo", "commit", "upstream_path"])
+def test_a_missing_key_reds(key: object) -> None:
+    """repo, commit and upstream_path are each required."""
+    result = run_tree(skill_tree({MANIFEST: manifest(PINNED, drop=key)}))
+    assert_red(
+        result,
+        f"lint:vendored: vendor/atlas/PINNED.toml is missing required key '{key}'",
+    )
+
+
+def test_a_missing_manifest_reds() -> None:
+    """A vendored file with nothing covering it is pinned to nothing."""
+    result = run_tree(skill_tree({"vendor/atlas/PINNED.toml": None}))
+    assert_red(
+        result,
+        "lint:vendored: vendor/atlas/SKILL.md has no PINNED.toml in its "
+        "directory or any ancestor under vendor/ — vendored text must be "
+        "pinned to an upstream commit",
+    )
+
+
+def test_a_malformed_files_entry_reds() -> None:
+    """A [files] line that does not parse is never silently skipped."""
+    bad = manifest(PINNED).replace(
+        f'"SKILL.md" = "{sha(SKILL)}"', '"SKILL.md" = "not-a-sha"'
+    )
+    result = run_tree(skill_tree({"vendor/atlas/PINNED.toml": bad}))
+    assert_red(
+        result,
+        "lint:vendored: vendor/atlas/PINNED.toml:8 is not a "
+        '"<path>" = "<sha256>" entry',
+    )
+
+
+def test_the_nearest_manifest_covers_and_an_ancestor_one_reaches_down() -> None:
+    """An ancestor's manifest covers a subtree that has none of its own."""
+    nested = {"a/SKILL.md": SKILL, "a/deep/ref.md": REFERENCE}
+    result = run_tree(
+        skill_tree({
+            "vendor/atlas/PINNED.toml": manifest({**PINNED, **nested}),
+            "vendor/atlas/a/SKILL.md": SKILL,
+            "vendor/atlas/a/deep/ref.md": REFERENCE,
+            # A second tree with its own manifest: its files are its
+            # own, and the outer manifest must not be asked about them.
+            "vendor/atlas/b/PINNED.toml": manifest({"x.md": SKILL}),
+            "vendor/atlas/b/x.md": SKILL,
         })
-        self.assert_red(
-            result,
-            "lint:vendored: web/vendor/lib.js has no PINNED.toml in its "
-            "directory or any ancestor under web/vendor/",
-        )
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "lint:vendored: 5 files verified against 2 manifests\n"
 
-    def test_the_summary_on_red_counts_what_did_verify(self) -> None:
-        """One bad file does not hide how much of the tree held."""
-        result = run_tree(skill_tree({"vendor/atlas/SKILL.md": b"# edited\n"}))
-        self.assert_red(
-            result,
-            "lint:vendored: 1 files verified against 1 manifests, 1 problems above",
-        )
+
+def test_a_nested_vendor_directory_is_bounded_by_its_own_root() -> None:
+    """A manifest above vendor/ is outside it and covers nothing inside."""
+    result = run_tree({
+        "web/PINNED.toml": manifest({"vendor/lib.js": SKILL}),
+        "web/vendor/lib.js": SKILL,
+    })
+    assert_red(
+        result,
+        "lint:vendored: web/vendor/lib.js has no PINNED.toml in its "
+        "directory or any ancestor under web/vendor/",
+    )
+
+
+def test_the_summary_on_red_counts_what_did_verify() -> None:
+    """One bad file does not hide how much of the tree held."""
+    result = run_tree(skill_tree({"vendor/atlas/SKILL.md": b"# edited\n"}))
+    assert_red(
+        result,
+        "lint:vendored: 1 files verified against 1 manifests, 1 problems above",
+    )

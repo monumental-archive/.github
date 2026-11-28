@@ -38,27 +38,23 @@ Hit = tuple[str, int, str, str, str]
 Profile = tuple[str, dict[str, str], dict[str, list[range]]]
 
 
-class TestRecords:
-    """A grep hit reads back as the comment it found."""
-
-    @given(
-        st.lists(st.tuples(PATH, st.integers(1, 9999), CODE, KIND, REASON), max_size=5)
+# A grep hit reads back as the comment it found.
+@given(st.lists(st.tuples(PATH, st.integers(1, 9999), CODE, KIND, REASON), max_size=5))
+def test_hits_read_back(hits: list[Hit]) -> None:
+    """Path, line, site, mutator and reason."""
+    text = "".join(
+        f"{p}:{n}:{code}{mg.MARK} {kind} {reason}\n"
+        for p, n, code, kind, reason in hits
     )
-    def test_hits_read_back(self, hits: list[Hit]) -> None:
-        """Path, line, site, mutator and reason."""
-        text = "".join(
-            f"{p}:{n}:{code}{mg.MARK} {kind} {reason}\n"
-            for p, n, code, kind, reason in hits
-        )
-        with tempfile.TemporaryDirectory() as scratch:
-            (Path(scratch) / "records.txt").write_text(text, encoding="utf-8")
-            got = mg.read_records(Path(scratch))
-        read = [(r.path, r.line, r.site, r.kind, r.reason) for r in got]
-        written = [
-            (p, n, n if code.strip() else n + 1, kind, reason)
-            for p, n, code, kind, reason in hits
-        ]
-        assert read == written
+    with tempfile.TemporaryDirectory() as scratch:
+        (Path(scratch) / "records.txt").write_text(text, encoding="utf-8")
+        got = mg.read_records(Path(scratch))
+    read = [(r.path, r.line, r.site, r.kind, r.reason) for r in got]
+    written = [
+        (p, n, n if code.strip() else n + 1, kind, reason)
+        for p, n, code, kind, reason in hits
+    ]
+    assert read == written
 
 
 def draw_profile(draw: st.DrawFn) -> Profile:
@@ -101,64 +97,55 @@ def draw_profile(draw: st.DrawFn) -> Profile:
 profile = st.composite(draw_profile)
 
 
-class TestCoverage:
-    """Executed blocks, under the path from the root."""
-
-    @given(profile())
-    def test_profile_reads_back(self, drawn: Profile) -> None:
-        """Count-zero and foreign blocks dropped; the rest as ranges."""
-        text, packages, expected = drawn
-        with tempfile.TemporaryDirectory() as scratch:
-            (Path(scratch) / "cover.out").write_text(text, encoding="utf-8")
-            assert mg.read_coverage(Path(scratch), packages) == expected
+# Executed blocks, under the path from the root.
+@given(profile())
+def test_profile_reads_back(drawn: Profile) -> None:
+    """Count-zero and foreign blocks dropped; the rest as ranges."""
+    text, packages, expected = drawn
+    with tempfile.TemporaryDirectory() as scratch:
+        (Path(scratch) / "cover.out").write_text(text, encoding="utf-8")
+        assert mg.read_coverage(Path(scratch), packages) == expected
 
 
-class TestRelative:
-    """A path from the root, either way the root is spelt."""
-
-    @given(PATH, st.lists(SEGMENT, min_size=1, max_size=3), st.sampled_from(["", "/"]))
-    def test_relative_strips_the_root(
-        self, path: str, root: list[str], slash: str
-    ) -> None:
-        """root/path is path; the root itself is empty."""
-        top = "/" + "/".join(root)
-        assert mg.relative(f"{top}/{path}", top + slash) == path
-        assert mg.relative(top, top) == ""
+# A path from the root, either way the root is spelt.
+@given(PATH, st.lists(SEGMENT, min_size=1, max_size=3), st.sampled_from(["", "/"]))
+def test_relative_strips_the_root(path: str, root: list[str], slash: str) -> None:
+    """root/path is path; the root itself is empty."""
+    top = "/" + "/".join(root)
+    assert mg.relative(f"{top}/{path}", top + slash) == path
+    assert mg.relative(top, top) == ""
 
 
-class TestSurvivors:
-    """Not covered, explained, or a survivor."""
-
-    @given(
-        st.data(),
-        st.tuples(PATH, st.integers(1, 200), KIND),
-        st.sampled_from(["uncovered", "explained", "survived"]),
-        st.lists(st.tuples(st.integers(1, 200), KIND), max_size=4),
-    )
-    def test_three_classes(
-        self,
-        data: st.DataObject,
-        site: tuple[str, int, str],
-        how: str,
-        others: list[tuple[int, str]],
-    ) -> None:
-        """The class follows coverage and a matching sound record."""
-        path, line, kind = site
-        records = [
-            mg.Record(path=path, line=n, site=n, kind=k, reason="why")
-            for n, k in others
-            if (n, k) != (line, kind)
-        ]
-        if how == "explained":
-            records.append(
-                mg.Record(path=path, line=line, site=line, kind=kind, reason="why")
-            )
-        records = data.draw(st.permutations(records))
-        covered = {} if how == "uncovered" else {path: [range(line, line + 1)]}
-        shard = mg.Shard("/r", {}, {path}, {path}, covered, records)
-        verdict = mg.Verdict()
-        mutant = mg.Mutant(file=f"/r/{path}", line=line, column=1, kind=kind)
-        mg.class_survivor(shard, verdict, mutant, "site")
-        named, unnamed = ["site"], list[str]()
-        assert verdict.not_covered == (named if how == "uncovered" else unnamed)
-        assert verdict.survived == (named if how == "survived" else unnamed)
+# Not covered, explained, or a survivor.
+@given(
+    st.data(),
+    st.tuples(PATH, st.integers(1, 200), KIND),
+    st.sampled_from(["uncovered", "explained", "survived"]),
+    st.lists(st.tuples(st.integers(1, 200), KIND), max_size=4),
+)
+def test_three_classes(
+    data: st.DataObject,
+    site: tuple[str, int, str],
+    how: str,
+    others: list[tuple[int, str]],
+) -> None:
+    """The class follows coverage and a matching sound record."""
+    path, line, kind = site
+    records = [
+        mg.Record(path=path, line=n, site=n, kind=k, reason="why")
+        for n, k in others
+        if (n, k) != (line, kind)
+    ]
+    if how == "explained":
+        records.append(
+            mg.Record(path=path, line=line, site=line, kind=kind, reason="why")
+        )
+    records = data.draw(st.permutations(records))
+    covered = {} if how == "uncovered" else {path: [range(line, line + 1)]}
+    shard = mg.Shard("/r", {}, {path}, {path}, covered, records)
+    verdict = mg.Verdict()
+    mutant = mg.Mutant(file=f"/r/{path}", line=line, column=1, kind=kind)
+    mg.class_survivor(shard, verdict, mutant, "site")
+    named, unnamed = ["site"], list[str]()
+    assert verdict.not_covered == (named if how == "uncovered" else unnamed)
+    assert verdict.survived == (named if how == "survived" else unnamed)

@@ -139,107 +139,107 @@ def step() -> dict[str, object]:
     return found
 
 
-class TestPlanStepIsTheHelper:
-    """The cell runs the helper these rows run, and the join can see it."""
-
-    def test_the_shipped_step_calls_the_helper(self) -> None:
-        """The run: is the call alone, from the canon tree."""
-        assert step()["run"] == (
-            '"${ORG_PYTHON}" -I .org-canon/belt inventory-plan'
-            ' "${UNTRUSTED_CRATE_DIR}" "${PG}"\n'
-        )
-
-    def test_the_step_states_its_prefix_and_its_marker(self) -> None:
-        """mise/plan_producers.py joins the marker to PLAN_DOC_PREFIX."""
-        declared, _ = plan_producers.markers(WORKFLOW.read_text("utf-8"))
-        assert ("pgrx-extension", "sbom-pgrx-") in declared
-        env = decoded.as_object(step()["env"], "env")
-        assert env["PLAN_DOC_PREFIX"] == "sbom-pgrx-"
+# The cell runs the helper these rows run, and the join can see it.
+def test_the_shipped_step_calls_the_helper() -> None:
+    """The run: is the call alone, from the canon tree."""
+    assert step()["run"] == (
+        '"${ORG_PYTHON}" -I .org-canon/belt inventory-plan'
+        ' "${UNTRUSTED_CRATE_DIR}" "${PG}"\n'
+    )
 
 
-class TestWrites:
-    """The plan the step's jq wrote, byte for byte."""
-
-    def test_the_cell_plan_is_the_shells_bytes(self, run_helper: Helper) -> None:
-        """Crate pg_edtf, major 16: the recorded golden."""
-        run = run_helper()
-        assert run.returncode == 0, run.stdout + run.stderr
-        assert run.plan == GOLDEN
-        assert (
-            run.stdout
-            == "::notice::plans inventory sbom-pgrx-pg_edtf-pg16 for package pg_edtf\n"
-        )
-
-    def test_the_major_names_the_artifact_and_the_feature(
-        self, run_helper: Helper
-    ) -> None:
-        """Another major is another artifact, built with its own feature."""
-        run = run_helper(args=("crate", "18"))
-        assert run.returncode == 0, run.stdout + run.stderr
-        assert GOLDEN.replace("16", "18") == run.plan
+def test_the_step_states_its_prefix_and_its_marker() -> None:
+    """mise/plan_producers.py joins the marker to PLAN_DOC_PREFIX."""
+    declared, _ = plan_producers.markers(WORKFLOW.read_text("utf-8"))
+    assert ("pgrx-extension", "sbom-pgrx-") in declared
+    env = decoded.as_object(step()["env"], "env")
+    assert env["PLAN_DOC_PREFIX"] == "sbom-pgrx-"
 
 
-class TestRefuses:
-    """One row per refusal, each message asserted; nothing is written."""
+# The plan the step's jq wrote, byte for byte.
+def test_the_cell_plan_is_the_shells_bytes(run_helper: Helper) -> None:
+    """Crate pg_edtf, major 16: the recorded golden."""
+    run = run_helper()
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert run.plan == GOLDEN
+    assert (
+        run.stdout
+        == "::notice::plans inventory sbom-pgrx-pg_edtf-pg16 for package pg_edtf\n"
+    )
 
-    def assert_refused(self, run: Run, want: str) -> None:
-        """Hold one refusal to its status, its line, and no plan."""
-        assert run.returncode == 1, run.stderr
-        assert f"::error::inventory-plan: {want}\n" == run.stderr
-        assert run.plan is None
 
-    def test_no_prefix_is_refused(self, run_helper: Helper) -> None:
-        """The class's prefix names the document; the leg never invents one."""
-        self.assert_refused(
-            run_helper(prefix=None),
-            "PLAN_DOC_PREFIX is unset — the class's planned prefix names the document",
-        )
+def test_the_major_names_the_artifact_and_the_feature(run_helper: Helper) -> None:
+    """Another major is another artifact, built with its own feature."""
+    run = run_helper(args=("crate", "18"))
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert GOLDEN.replace("16", "18") == run.plan
 
-    def test_a_major_that_is_not_a_number_is_refused(self, run_helper: Helper) -> None:
-        """A matrix value that is not a Postgres major."""
-        self.assert_refused(
-            run_helper(args=("crate", "pg16")), "major 'pg16' is not a Postgres major"
-        )
 
-    def test_no_manifest_is_refused(self, run_helper: Helper) -> None:
-        """The crate directory holds no Cargo.toml."""
-        run = run_helper(manifest=None)
-        assert run.returncode == 1
-        assert run.stderr.startswith(MANIFEST_REFUSAL), run.stderr
-        assert run.plan is None
+# One row per refusal, each message asserted; nothing is written.
+def assert_refused(run: Run, want: str) -> None:
+    """Hold one refusal to its status, its line, and no plan."""
+    assert run.returncode == 1, run.stderr
+    assert f"::error::inventory-plan: {want}\n" == run.stderr
+    assert run.plan is None
 
-    def test_a_manifest_that_is_not_toml_is_refused(self, run_helper: Helper) -> None:
-        """A manifest the reader cannot parse."""
-        run = run_helper(manifest="[package\n")
-        assert run.returncode == 1
-        assert run.stderr.startswith(MANIFEST_REFUSAL), run.stderr
-        assert run.plan is None
 
-    def test_a_workspace_manifest_is_refused(self, run_helper: Helper) -> None:
-        """A manifest with no [package] names no crate this cell built."""
-        self.assert_refused(
-            run_helper(manifest="[workspace]\n"),
-            "crate/Cargo.toml names no package — a cell plans the crate it built",
-        )
+def test_no_prefix_is_refused(run_helper: Helper) -> None:
+    """The class's prefix names the document; the leg never invents one."""
+    assert_refused(
+        run_helper(prefix=None),
+        "PLAN_DOC_PREFIX is unset — the class's planned prefix names the document",
+    )
 
-    def test_a_nameless_package_is_refused(self, run_helper: Helper) -> None:
-        """A [package] table with no name."""
-        self.assert_refused(
-            run_helper(manifest='[package]\nversion = "1.0.0"\n'),
-            "crate/Cargo.toml names no package — a cell plans the crate it built",
-        )
 
-    def test_a_package_that_is_not_a_table_is_refused(self, run_helper: Helper) -> None:
-        """`package = false` (#1556's shrunk example): an AttributeError before."""
-        self.assert_refused(
-            run_helper(manifest="package = false\n"),
-            "crate/Cargo.toml names no package — a cell plans the crate it built",
-        )
+def test_a_major_that_is_not_a_number_is_refused(run_helper: Helper) -> None:
+    """A matrix value that is not a Postgres major."""
+    assert_refused(
+        run_helper(args=("crate", "pg16")), "major 'pg16' is not a Postgres major"
+    )
 
-    def test_a_wrong_argument_count_is_usage(self, run_helper: Helper) -> None:
-        """Two positional arguments, never fewer."""
-        run = run_helper(args=("crate",))
-        assert run.returncode == 2
-        assert (
-            run.stderr == "inventory-plan: usage: belt inventory-plan CRATE_DIR MAJOR\n"
-        )
+
+def test_no_manifest_is_refused(run_helper: Helper) -> None:
+    """The crate directory holds no Cargo.toml."""
+    run = run_helper(manifest=None)
+    assert run.returncode == 1
+    assert run.stderr.startswith(MANIFEST_REFUSAL), run.stderr
+    assert run.plan is None
+
+
+def test_a_manifest_that_is_not_toml_is_refused(run_helper: Helper) -> None:
+    """A manifest the reader cannot parse."""
+    run = run_helper(manifest="[package\n")
+    assert run.returncode == 1
+    assert run.stderr.startswith(MANIFEST_REFUSAL), run.stderr
+    assert run.plan is None
+
+
+def test_a_workspace_manifest_is_refused(run_helper: Helper) -> None:
+    """A manifest with no [package] names no crate this cell built."""
+    assert_refused(
+        run_helper(manifest="[workspace]\n"),
+        "crate/Cargo.toml names no package — a cell plans the crate it built",
+    )
+
+
+def test_a_nameless_package_is_refused(run_helper: Helper) -> None:
+    """A [package] table with no name."""
+    assert_refused(
+        run_helper(manifest='[package]\nversion = "1.0.0"\n'),
+        "crate/Cargo.toml names no package — a cell plans the crate it built",
+    )
+
+
+def test_a_package_that_is_not_a_table_is_refused(run_helper: Helper) -> None:
+    """`package = false` (#1556's shrunk example): an AttributeError before."""
+    assert_refused(
+        run_helper(manifest="package = false\n"),
+        "crate/Cargo.toml names no package — a cell plans the crate it built",
+    )
+
+
+def test_a_wrong_argument_count_is_usage(run_helper: Helper) -> None:
+    """Two positional arguments, never fewer."""
+    run = run_helper(args=("crate",))
+    assert run.returncode == 2
+    assert run.stderr == "inventory-plan: usage: belt inventory-plan CRATE_DIR MAJOR\n"

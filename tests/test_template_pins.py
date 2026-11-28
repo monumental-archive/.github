@@ -102,12 +102,10 @@ def red(*violations: str) -> list[str]:
     return [head, *TAIL]
 
 
-@pytest.mark.usefixtures("_set_up_test_pins")
-class TestPins:
+class Pins:
     """Planted templates in a tree with a released commit."""
 
-    @fixture
-    def _set_up_test_pins(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Plant a tree whose first commit is released as v1.0.0."""
         self.tree = tmp_path
         self.env = support.env(
@@ -193,110 +191,6 @@ class TestPins:
             check=False,
         )
 
-    def test_no_templates_is_skipped_by_name(self) -> None:
-        """No workflow-templates/: the task says it skipped."""
-        shutil.rmtree(self.tree / "workflow-templates")
-        done = self.task()
-        same(done.returncode, 0, done.stderr)
-        skipped = ["lint:template-pins: no workflow-templates/, skipped"]
-        same(done.stdout.splitlines(), skipped)
-
-    def test_canon_action_pin_passes(self) -> None:
-        """The canon action, at a released SHA, is scorecard's one pin."""
-        self.plant(SCORECARD, template(ACTION, self.sha))
-        done = self.task()
-        same(done.returncode, 0, done.stderr)
-        expected = (
-            "lint:template-pins: 1 pins at one ancestor SHA, scorecard calls no"
-            " reusable, released as v1.0.0"
-        )
-        same(done.stdout.splitlines(), [expected])
-
-    def test_reusable_workflow_pin_is_red(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A reusable workflow pinned in scorecard.yml is red by message."""
-        self.plant(SCORECARD, template(REUSABLE, self.sha))
-        status, _out, err = self.helper(SCORECARD, capfd=capfd)
-        same(status, 1)
-        violation = f"{SCORECARD}(pins a reusable workflow: self-contained by design)"
-        same(err.splitlines(), red(violation))
-
-    def test_short_sha_is_red(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """A pin that is not 40 hex is red by message."""
-        self.plant(STUB, template(REUSABLE, self.sha[:12]))
-        status, _out, err = self.helper(STUB, capfd=capfd)
-        same(status, 1)
-        violation = f"{STUB}(pin is not a full 40-hex SHA)"
-        same(err.splitlines(), red(violation))
-
-    def test_foreign_history_is_red(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """A SHA HEAD does not contain is red, and names no release."""
-        home = self.git("branch", "--show-current").strip()
-        self.git("checkout", "-q", "--orphan", "other")
-        foreign = self.commit("v9.0.0")
-        self.git("checkout", "-q", home)
-        self.plant(STUB, template(REUSABLE, foreign))
-        status, _out, err = self.helper(STUB, capfd=capfd)
-        same(status, 1)
-        violation = f"{STUB}({foreign[:8]} not an ancestor of HEAD)"
-        same(err.splitlines(), red(violation))
-
-    def test_templates_disagree_is_red(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """Two templates on two SHAs are red, both named."""
-        newer = self.commit("v1.1.0")
-        self.plant(STUB, template(REUSABLE, self.sha))
-        self.plant(SCORECARD, template(ACTION, newer))
-        status, _out, err = self.helper(STUB, SCORECARD, capfd=capfd)
-        same(status, 1)
-        violation = f"(templates disagree, 2 distinct SHAs: {self.sha} {newer})"
-        same(err.splitlines(), red(violation))
-
-    def test_unreleased_sha_is_red(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """An ancestor no tag names is red: a pin names a release."""
-        untagged = self.commit()
-        self.plant(STUB, template(REUSABLE, untagged))
-        status, _out, err = self.helper(STUB, capfd=capfd)
-        same(status, 1)
-        violation = (
-            f"({untagged[:8]} names no released tag — pins must name a release,"
-            " not any ancestor)"
-        )
-        same(err.splitlines(), red(violation))
-
-    def test_no_tags_skips_the_release_check_by_name(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A clone with no tags says it skipped the released-tag check."""
-        self.git("tag", "-d", "v1.0.0")
-        self.plant(STUB, template(REUSABLE, self.sha))
-        status, out, err = self.helper(STUB, capfd=capfd)
-        same(status, 0, err)
-        expected = (
-            "lint:template-pins: 1 pins at one ancestor SHA, scorecard calls no"
-            " reusable, released as (no tags in this clone, released-tag check"
-            " skipped)"
-        )
-        same(out.splitlines(), [expected])
-
-    def test_not_utf8_is_an_error(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """A template that is not UTF-8 is refused by name, exit 2."""
-        self.plant(STUB, b"jobs: \xff\n")
-        status, _out, err = self.helper(STUB, capfd=capfd)
-        same(status, template_pins.EXIT_ERROR)
-        assert err.startswith(
-            f"lint:template-pins: {STUB}: cannot be read as UTF-8:"
-        ), err
-
-    def test_no_canon_is_a_usage_error(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """No canon, or one missing its owner or repository: exit 2."""
-        usage = "lint:template-pins: usage: belt template-pins OWNER/REPO TEMPLATE..."
-        calls: list[list[str]] = [[], ["/repo", STUB], ["owner/", STUB]]
-        for argv in calls:
-            status, _out, err = self.refused(argv, capfd=capfd)
-            same(status, template_pins.EXIT_ERROR)
-            same(err.splitlines(), [usage])
-
     def refused(
         self, argv: list[str], *, capfd: pytest.CaptureFixture[str]
     ) -> tuple[int, str, str]:
@@ -312,3 +206,125 @@ class TestPins:
             status = template_pins.main(argv)
         out, err = capfd.readouterr()
         return status, out, err
+
+
+@fixture
+def pins(tmp_path: Path) -> Pins:
+    """Give each row its own Pins."""
+    return Pins(tmp_path)
+
+
+def test_no_templates_is_skipped_by_name(pins: Pins) -> None:
+    """No workflow-templates/: the task says it skipped."""
+    shutil.rmtree(pins.tree / "workflow-templates")
+    done = pins.task()
+    same(done.returncode, 0, done.stderr)
+    skipped = ["lint:template-pins: no workflow-templates/, skipped"]
+    same(done.stdout.splitlines(), skipped)
+
+
+def test_canon_action_pin_passes(pins: Pins) -> None:
+    """The canon action, at a released SHA, is scorecard's one pin."""
+    pins.plant(SCORECARD, template(ACTION, pins.sha))
+    done = pins.task()
+    same(done.returncode, 0, done.stderr)
+    expected = (
+        "lint:template-pins: 1 pins at one ancestor SHA, scorecard calls no"
+        " reusable, released as v1.0.0"
+    )
+    same(done.stdout.splitlines(), [expected])
+
+
+def test_reusable_workflow_pin_is_red(
+    pins: Pins, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A reusable workflow pinned in scorecard.yml is red by message."""
+    pins.plant(SCORECARD, template(REUSABLE, pins.sha))
+    status, _out, err = pins.helper(SCORECARD, capfd=capfd)
+    same(status, 1)
+    violation = f"{SCORECARD}(pins a reusable workflow: self-contained by design)"
+    same(err.splitlines(), red(violation))
+
+
+def test_short_sha_is_red(pins: Pins, capfd: pytest.CaptureFixture[str]) -> None:
+    """A pin that is not 40 hex is red by message."""
+    pins.plant(STUB, template(REUSABLE, pins.sha[:12]))
+    status, _out, err = pins.helper(STUB, capfd=capfd)
+    same(status, 1)
+    violation = f"{STUB}(pin is not a full 40-hex SHA)"
+    same(err.splitlines(), red(violation))
+
+
+def test_foreign_history_is_red(pins: Pins, capfd: pytest.CaptureFixture[str]) -> None:
+    """A SHA HEAD does not contain is red, and names no release."""
+    home = pins.git("branch", "--show-current").strip()
+    pins.git("checkout", "-q", "--orphan", "other")
+    foreign = pins.commit("v9.0.0")
+    pins.git("checkout", "-q", home)
+    pins.plant(STUB, template(REUSABLE, foreign))
+    status, _out, err = pins.helper(STUB, capfd=capfd)
+    same(status, 1)
+    violation = f"{STUB}({foreign[:8]} not an ancestor of HEAD)"
+    same(err.splitlines(), red(violation))
+
+
+def test_templates_disagree_is_red(
+    pins: Pins, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Two templates on two SHAs are red, both named."""
+    newer = pins.commit("v1.1.0")
+    pins.plant(STUB, template(REUSABLE, pins.sha))
+    pins.plant(SCORECARD, template(ACTION, newer))
+    status, _out, err = pins.helper(STUB, SCORECARD, capfd=capfd)
+    same(status, 1)
+    violation = f"(templates disagree, 2 distinct SHAs: {pins.sha} {newer})"
+    same(err.splitlines(), red(violation))
+
+
+def test_unreleased_sha_is_red(pins: Pins, capfd: pytest.CaptureFixture[str]) -> None:
+    """An ancestor no tag names is red: a pin names a release."""
+    untagged = pins.commit()
+    pins.plant(STUB, template(REUSABLE, untagged))
+    status, _out, err = pins.helper(STUB, capfd=capfd)
+    same(status, 1)
+    violation = (
+        f"({untagged[:8]} names no released tag — pins must name a release,"
+        " not any ancestor)"
+    )
+    same(err.splitlines(), red(violation))
+
+
+def test_no_tags_skips_the_release_check_by_name(
+    pins: Pins, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A clone with no tags says it skipped the released-tag check."""
+    pins.git("tag", "-d", "v1.0.0")
+    pins.plant(STUB, template(REUSABLE, pins.sha))
+    status, out, err = pins.helper(STUB, capfd=capfd)
+    same(status, 0, err)
+    expected = (
+        "lint:template-pins: 1 pins at one ancestor SHA, scorecard calls no"
+        " reusable, released as (no tags in this clone, released-tag check"
+        " skipped)"
+    )
+    same(out.splitlines(), [expected])
+
+
+def test_not_utf8_is_an_error(pins: Pins, capfd: pytest.CaptureFixture[str]) -> None:
+    """A template that is not UTF-8 is refused by name, exit 2."""
+    pins.plant(STUB, b"jobs: \xff\n")
+    status, _out, err = pins.helper(STUB, capfd=capfd)
+    same(status, template_pins.EXIT_ERROR)
+    assert err.startswith(f"lint:template-pins: {STUB}: cannot be read as UTF-8:"), err
+
+
+def test_no_canon_is_a_usage_error(
+    pins: Pins, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """No canon, or one missing its owner or repository: exit 2."""
+    usage = "lint:template-pins: usage: belt template-pins OWNER/REPO TEMPLATE..."
+    calls: list[list[str]] = [[], ["/repo", STUB], ["owner/", STUB]]
+    for argv in calls:
+        status, _out, err = pins.refused(argv, capfd=capfd)
+        same(status, template_pins.EXIT_ERROR)
+        same(err.splitlines(), [usage])

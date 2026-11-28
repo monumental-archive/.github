@@ -82,41 +82,40 @@ def crate(item: object) -> str:
     return decoded.as_str(item, "entry")
 
 
-class TestVariants:
-    """One variant per skip, each missing exactly that skip."""
+# One variant per skip, each missing exactly that skip.
+@given(config())
+def test_entries_in_order(drawn: Drawn) -> None:
+    """Every skip and skip-tree entry, in declaration order."""
+    text, skips, _ = drawn
+    assert ds.entries(decoded.load_toml(text)) == skips
 
-    @given(config())
-    def test_entries_in_order(self, drawn: Drawn) -> None:
-        """Every skip and skip-tree entry, in declaration order."""
-        text, skips, _ = drawn
-        assert ds.entries(decoded.load_toml(text)) == skips
 
-    @given(config())
-    @example((
-        '[bans]\ndeny = [\n  { crate = "foo" },\n]\nskip = [\n  "foo@1.0",\n]\n',
-        [("skip", "foo@1.0")],
-        ["foo"],
-    ))
-    @example((
-        '[bans]\nskip = [\n  "w@0.48",\n  "w@0.52",\n]\n',
-        [("skip", "w@0.48"), ("skip", "w@0.52")],
-        [],
-    ))
-    def test_each_variant_drops_exactly_its_entry(self, drawn: Drawn) -> None:
-        """The variant reads back with one skip gone and the rest kept."""
-        text, skips, denied = drawn
-        lines = text.splitlines(keepends=True)
-        for key, spec in skips:
-            kept = ds.variant_without(lines, key, spec)
-            if kept is None:
-                pytest.fail(f"no variant without {key} {spec}")
-            bans = decoded.load_toml("".join(kept))["bans"]
-            back = decoded.as_object(bans, "bans")
-            for other in ds.SKIP_KEYS:
-                expected = [s for k, s in skips if k == other and (k, s) != (key, spec)]
-                read = decoded.as_array(back.get(other, []), other)
-                crates = [crate(i) for i in read]
-                assert crates == expected
-            deny = decoded.as_array(back.get("deny", []), "deny")
-            denied_back = [crate(i) for i in deny]
-            assert denied_back == denied
+@given(config())
+@example((
+    '[bans]\ndeny = [\n  { crate = "foo" },\n]\nskip = [\n  "foo@1.0",\n]\n',
+    [("skip", "foo@1.0")],
+    ["foo"],
+))
+@example((
+    '[bans]\nskip = [\n  "w@0.48",\n  "w@0.52",\n]\n',
+    [("skip", "w@0.48"), ("skip", "w@0.52")],
+    [],
+))
+def test_each_variant_drops_exactly_its_entry(drawn: Drawn) -> None:
+    """The variant reads back with one skip gone and the rest kept."""
+    text, skips, denied = drawn
+    lines = text.splitlines(keepends=True)
+    for key, spec in skips:
+        kept = ds.variant_without(lines, key, spec)
+        if kept is None:
+            pytest.fail(f"no variant without {key} {spec}")
+        bans = decoded.load_toml("".join(kept))["bans"]
+        back = decoded.as_object(bans, "bans")
+        for other in ds.SKIP_KEYS:
+            expected = [s for k, s in skips if k == other and (k, s) != (key, spec)]
+            read = decoded.as_array(back.get(other, []), other)
+            crates = [crate(i) for i in read]
+            assert crates == expected
+        deny = decoded.as_array(back.get("deny", []), "deny")
+        denied_back = [crate(i) for i in deny]
+        assert denied_back == denied

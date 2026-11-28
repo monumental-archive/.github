@@ -83,49 +83,45 @@ def producer(data: st.DataObject, klass: str, prefix: str) -> str:
     )
 
 
-class TestJoin:
-    """Every obligation produced, or each missing one named."""
-
-    @given(st.data(), obligations())
-    def test_clean_then_one_missing(
-        self, data: st.DataObject, pairs: list[tuple[str, str]]
-    ) -> None:
-        """Clean with all producers; one finding per producer removed."""
-        files = {f"w{i}.yml": producer(data, k, p) for i, (k, p) in enumerate(pairs)}
-        order = data.draw(st.permutations(sorted(files)))
-        files = {name: files[name] for name in order}
-        assert pp.judge(policy(pairs), files) == list[str]()
-        gone = data.draw(st.integers(0, len(pairs) - 1))
-        del files[f"w{gone}.yml"]
-        found = pp.judge(policy(pairs), files)
-        klass, prefix = pairs[gone]
-        assert len(found) == 1, found
-        assert f"class {klass!r} declares the planned obligation {prefix!r}" in found[0]
+# Every obligation produced, or each missing one named.
+@given(st.data(), obligations())
+def test_clean_then_one_missing(
+    data: st.DataObject, pairs: list[tuple[str, str]]
+) -> None:
+    """Clean with all producers; one finding per producer removed."""
+    files = {f"w{i}.yml": producer(data, k, p) for i, (k, p) in enumerate(pairs)}
+    order = data.draw(st.permutations(sorted(files)))
+    files = {name: files[name] for name in order}
+    assert pp.judge(policy(pairs), files) == list[str]()
+    gone = data.draw(st.integers(0, len(pairs) - 1))
+    del files[f"w{gone}.yml"]
+    found = pp.judge(policy(pairs), files)
+    klass, prefix = pairs[gone]
+    assert len(found) == 1, found
+    assert f"class {klass!r} declares the planned obligation {prefix!r}" in found[0]
 
 
-class TestStripMarkers:
-    """A marker cannot be its own evidence."""
-
-    @given(
-        st.lists(
-            st.one_of(
-                st.text(
-                    st.characters(blacklist_categories=("Cc", "Zl", "Zp", "Cs")),
-                    max_size=20,
-                ),
-                st.sampled_from([
-                    "# plan-producer: a b",
-                    "  #plan-producer:x",
-                    "#plan-producer",
-                ]),
+# A marker cannot be its own evidence.
+@given(
+    st.lists(
+        st.one_of(
+            st.text(
+                st.characters(blacklist_categories=("Cc", "Zl", "Zp", "Cs")),
+                max_size=20,
             ),
-            max_size=8,
-        )
+            st.sampled_from([
+                "# plan-producer: a b",
+                "  #plan-producer:x",
+                "#plan-producer",
+            ]),
+        ),
+        max_size=8,
     )
-    def test_every_other_line_kept(self, lines: list[str]) -> None:
-        """The non-marker lines, in order, and no marker."""
-        text = "\n".join(lines)
-        kept = [line for line in text.splitlines() if not pp.MARKER.match(line)]
-        got = [line for line in pp.strip_markers(text).splitlines() if line]
-        unblank = [line for line in kept if line]
-        assert got == unblank
+)
+def test_every_other_line_kept(lines: list[str]) -> None:
+    """The non-marker lines, in order, and no marker."""
+    text = "\n".join(lines)
+    kept = [line for line in text.splitlines() if not pp.MARKER.match(line)]
+    got = [line for line in pp.strip_markers(text).splitlines() if line]
+    unblank = [line for line in kept if line]
+    assert got == unblank

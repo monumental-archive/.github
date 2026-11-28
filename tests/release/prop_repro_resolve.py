@@ -113,43 +113,41 @@ def model(first: object) -> str:
     return name if isinstance(name, str) else json.dumps(name)
 
 
-class TestOnlyTheFirstEntry:
-    """V: the first entry decides; the rest, in any order, do not."""
-
-    @given(ENTRY | JSON, st.lists(ENTRY | JSON, max_size=4), st.randoms())
-    def test_the_rest_never_moves_it(
-        self, first: object, rest: list[object], shuffle: random.Random
-    ) -> None:
-        """Same first entry, any tail in any order: the same answer."""
-        alone = read({"entries": [first]})
-        assert alone == model(first)
-        shuffle.shuffle(rest)
-        assert read({"entries": [first, *rest]}) == alone
+# V: the first entry decides; the rest, in any order, do not.
+@given(ENTRY | JSON, st.lists(ENTRY | JSON, max_size=4), st.randoms())
+def test_the_rest_never_moves_it(
+    first: object, rest: list[object], shuffle: random.Random
+) -> None:
+    """Same first entry, any tail in any order: the same answer."""
+    alone = read({"entries": [first]})
+    assert alone == model(first)
+    shuffle.shuffle(rest)
+    assert read({"entries": [first, *rest]}) == alone
 
 
-class TestAnyInput:
-    """R: answered or refused by name on anything."""
+# R: answered or refused by name on anything.
+@given(ENTRIES | JSON)
+@example(ENTRIES_TRUE)
+@example(ENTRIES_OBJECT)
+def test_any_json(doc: object) -> None:
+    """Any JSON document: an answer, or the step's own refusal."""
+    read_text(json.dumps(doc))
 
-    @given(ENTRIES | JSON)
-    @example(ENTRIES_TRUE)
-    @example(ENTRIES_OBJECT)
-    def test_any_json(self, doc: object) -> None:
-        """Any JSON document: an answer, or the step's own refusal."""
-        self.read_text(json.dumps(doc))
 
-    @given(st.text())
-    def test_any_text(self, text: str) -> None:
-        """Any text: an answer, or the step's own refusal."""
-        self.read_text(text)
+@given(st.text())
+def test_any_text(text: str) -> None:
+    """Any text: an answer, or the step's own refusal."""
+    read_text(text)
 
-    def read_text(self, text: str) -> None:
-        """Hold one manifest's reading to a str or a StepError."""
-        path = written(text)
-        try:
-            name = resolve.first_entry_name(path)
-        except resolve.StepError as refused:
-            assert str(refused).startswith(f"{path} is not "), refused
-        else:
-            assert isinstance(name, str)
-        finally:
-            path.unlink()
+
+def read_text(text: str) -> None:
+    """Hold one manifest's reading to a str or a StepError."""
+    path = written(text)
+    try:
+        name = resolve.first_entry_name(path)
+    except resolve.StepError as refused:
+        assert str(refused).startswith(f"{path} is not "), refused
+    else:
+        assert isinstance(name, str)
+    finally:
+        path.unlink()

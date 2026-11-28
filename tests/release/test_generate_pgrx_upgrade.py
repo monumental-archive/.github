@@ -48,9 +48,10 @@ import re
 import subprocess
 import textwrap
 from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import ClassVar, NamedTuple
+from typing import NamedTuple
 
 import pytest
 
@@ -355,15 +356,12 @@ def releases(name: str) -> list[Release]:
     return out
 
 
-@pytest.mark.usefixtures("_set_up_test_needs_jq")
-class TestNeedsJq:
-    """Rows that drive the gh stub, which jq answers; no rows of its own."""
-
-    @fixture
-    def _set_up_test_needs_jq(self) -> None:
-        """Skip the row where jq is missing."""
-        if not JQ:
-            pytest.skip("jq is a belt tool and drives the gh stub")
+# Rows that drive the gh stub, which jq answers; no rows of its own.
+@fixture
+def _set_up_test_needs_jq() -> None:
+    """Skip the row where jq is missing."""
+    if not JQ:
+        pytest.skip("jq is a belt tool and drives the gh stub")
 
 
 # A list that holds nothing: assets, args.
@@ -385,79 +383,84 @@ EDTF_EDGES = [
 ]
 
 
-class TestSelectsThePredecessor(TestNeedsJq):
-    """The three cases the old code collapsed into one."""
-
-    def test_burned_head_falls_back_to_the_newest_installable(self) -> None:
-        """Select 1.2.3: #816 itself, where only the graph head is burned."""
-        with TemporaryDirectory() as d:
-            repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.1", EDTF_EDGES)
-            out = repo.derive("1.3.1", "1.3.0", "edtf-releases.json").stdout
-        assert "1.3.0 is in the upgrade graph but no non-draft release" in out
-        assert "deriving edtf_postgres from 1.2.3" in out
-        assert "first publish" not in out
-
-    def test_the_fixture_really_carries_the_shape_that_caused_it(self) -> None:
-        """Guard the guard: the capture still says what the bug needed.
-
-        A refreshed listing that lost the draft v1.3.0, or the tarballs on
-        edtf-postgres-v1.2.3, would turn every test above into a tautology
-        without failing. So assert the fixture's shape, not just its use.
-        """
-        by_tag = {r.tag: r for r in releases("edtf-releases.json")}
-        burned = by_tag["v1.3.0"]
-        assert burned.draft, "v1.3.0 must still be the burn draft"
-        assert burned.assets == NOTHING, "v1.3.0 must carry nothing"
-        carried = by_tag["edtf-postgres-v1.2.3"].assets
-        assert any(a.startswith("edtf_postgres-1.2.3-pg") for a in carried), (
-            "the real predecessor must still carry its tarballs"
-        )
-
-    def test_mid_life_adoption_has_no_predecessor(self) -> None:
-        """Real releases, no extension tarballs: first publish is correct."""
-        with TemporaryDirectory() as d:
-            repo = Repo(d, "demo_pg", "demo-pg", "1.1.0", [("1.0.0", "1.0.1")])
-            result = repo.derive("1.1.0", "1.0.1", "stele-releases.json")
-        assert "no non-draft release carries any demo_pg tarball" in result.stdout
-        assert "first publish" in result.stdout
-        assert result.returncode == 0, result.stderr
-
-    def test_true_first_publish_never_asks_the_forge(self) -> None:
-        """An empty graph is decided before any release call is made."""
-        with TemporaryDirectory() as d:
-            repo = Repo(d, "demo_pg", "demo-pg", "1.0.0", [])
-            result = repo.derive("1.0.0", "", "stele-releases.json")
-        assert "no upgrade graph" in result.stdout
-        assert result.returncode == 0, result.stderr
-        assert "gh stub" not in result.stderr
-
-    def test_a_graph_that_already_reaches_the_version_derives_nothing(self) -> None:
-        """A re-run over an unchanged graph is a no-op, not a re-derivation."""
-        with TemporaryDirectory() as d:
-            repo = Repo(d, "demo_pg", "demo-pg", "1.0.1", [("1.0.0", "1.0.1")])
-            result = repo.derive("1.0.1", "1.0.0", "stele-releases.json")
-        assert "already reaches 1.0.1" in result.stdout
-        assert result.returncode == 0, result.stderr
+# The three cases the old code collapsed into one.
+@pytest.mark.usefixtures("_set_up_test_needs_jq")
+def test_burned_head_falls_back_to_the_newest_installable() -> None:
+    """Select 1.2.3: #816 itself, where only the graph head is burned."""
+    with TemporaryDirectory() as d:
+        repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.1", EDTF_EDGES)
+        out = repo.derive("1.3.1", "1.3.0", "edtf-releases.json").stdout
+    assert "1.3.0 is in the upgrade graph but no non-draft release" in out
+    assert "deriving edtf_postgres from 1.2.3" in out
+    assert "first publish" not in out
 
 
-class TestReadsThePinsThroughTheOneReader:
-    """The pins come from `belt caller-pins`, as the build leg's do (#1333)."""
+@pytest.mark.usefixtures("_set_up_test_needs_jq")
+def test_the_fixture_really_carries_the_shape_that_caused_it() -> None:
+    """Guard the guard: the capture still says what the bug needed.
 
-    def test_an_unpinned_cargo_pgrx_is_refused_with_its_remedy(self) -> None:
-        """The reader names the tool, the script keeps its own finding."""
-        with TemporaryDirectory() as d:
-            repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.1", EDTF_EDGES)
-            (repo.root / "mise.toml").write_text('[tools]\nrust = "1.97.1"\n')
-            result = repo.derive("1.3.1", "1.3.0", "edtf-releases.json")
-        assert result.returncode == 1
-        assert (
-            "::error::caller-pins: cargo-pgrx missing — pin cargo-pgrx in this"
-            " repository's mise config; it is a build input of the"
-            " pgrx-extension class\n"
-            "generate-pgrx-upgrade.sh: rust and cargo:cargo-pgrx must be pinned"
-            " in this"
-            " repository's mise config\n"
-        ) in result.stderr
+    A refreshed listing that lost the draft v1.3.0, or the tarballs on
+    edtf-postgres-v1.2.3, would turn every test above into a tautology
+    without failing. So assert the fixture's shape, not just its use.
+    """
+    by_tag = {r.tag: r for r in releases("edtf-releases.json")}
+    burned = by_tag["v1.3.0"]
+    assert burned.draft, "v1.3.0 must still be the burn draft"
+    assert burned.assets == NOTHING, "v1.3.0 must carry nothing"
+    carried = by_tag["edtf-postgres-v1.2.3"].assets
+    assert any(a.startswith("edtf_postgres-1.2.3-pg") for a in carried), (
+        "the real predecessor must still carry its tarballs"
+    )
+
+
+@pytest.mark.usefixtures("_set_up_test_needs_jq")
+def test_mid_life_adoption_has_no_predecessor() -> None:
+    """Real releases, no extension tarballs: first publish is correct."""
+    with TemporaryDirectory() as d:
+        repo = Repo(d, "demo_pg", "demo-pg", "1.1.0", [("1.0.0", "1.0.1")])
+        result = repo.derive("1.1.0", "1.0.1", "stele-releases.json")
+    assert "no non-draft release carries any demo_pg tarball" in result.stdout
+    assert "first publish" in result.stdout
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.usefixtures("_set_up_test_needs_jq")
+def test_true_first_publish_never_asks_the_forge() -> None:
+    """An empty graph is decided before any release call is made."""
+    with TemporaryDirectory() as d:
+        repo = Repo(d, "demo_pg", "demo-pg", "1.0.0", [])
+        result = repo.derive("1.0.0", "", "stele-releases.json")
+    assert "no upgrade graph" in result.stdout
+    assert result.returncode == 0, result.stderr
+    assert "gh stub" not in result.stderr
+
+
+@pytest.mark.usefixtures("_set_up_test_needs_jq")
+def test_a_graph_that_already_reaches_the_version_derives_nothing() -> None:
+    """A re-run over an unchanged graph is a no-op, not a re-derivation."""
+    with TemporaryDirectory() as d:
+        repo = Repo(d, "demo_pg", "demo-pg", "1.0.1", [("1.0.0", "1.0.1")])
+        result = repo.derive("1.0.1", "1.0.0", "stele-releases.json")
+    assert "already reaches 1.0.1" in result.stdout
+    assert result.returncode == 0, result.stderr
+
+
+# The pins come from `belt caller-pins`, as the build leg's do (#1333).
+def test_an_unpinned_cargo_pgrx_is_refused_with_its_remedy() -> None:
+    """The reader names the tool, the script keeps its own finding."""
+    with TemporaryDirectory() as d:
+        repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.1", EDTF_EDGES)
+        (repo.root / "mise.toml").write_text('[tools]\nrust = "1.97.1"\n')
+        result = repo.derive("1.3.1", "1.3.0", "edtf-releases.json")
+    assert result.returncode == 1
+    assert (
+        "::error::caller-pins: cargo-pgrx missing — pin cargo-pgrx in this"
+        " repository's mise config; it is a build input of the"
+        " pgrx-extension class\n"
+        "generate-pgrx-upgrade.sh: rust and cargo:cargo-pgrx must be pinned"
+        " in this"
+        " repository's mise config\n"
+    ) in result.stderr
 
 
 # Stub `git` that fails `ls-files` as git does outside a repository and
@@ -471,23 +474,21 @@ exec {GIT} "$@"
 """
 
 
-class TestAFailedControlListingIsNotAbsence:
-    """A `git ls-files` that failed is not "no control files" (#2001)."""
+# A `git ls-files` that failed is not "no control files" (#2001).
+def test_a_failed_listing_is_not_read_as_not_applicable() -> None:
+    """The listing was read through process substitution.
 
-    def test_a_failed_listing_is_not_read_as_not_applicable(self) -> None:
-        """The listing was read through process substitution.
-
-        A failed git read as no rows: "not applicable", `files=`, exit 0.
-        """
-        with TemporaryDirectory() as d:
-            repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.1", EDTF_EDGES)
-            bindir = repo.root / "stubbin"
-            bindir.mkdir()
-            (bindir / "git").write_text(GIT_LS_FILES_FAILS)
-            (bindir / "git").chmod(0o755)
-            result = repo.derive("1.3.1", "1.3.0", "edtf-releases.json")
-        assert result.returncode != 0, result.stdout + result.stderr
-        assert "not applicable" not in result.stdout + result.stderr
+    A failed git read as no rows: "not applicable", `files=`, exit 0.
+    """
+    with TemporaryDirectory() as d:
+        repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.1", EDTF_EDGES)
+        bindir = repo.root / "stubbin"
+        bindir.mkdir()
+        (bindir / "git").write_text(GIT_LS_FILES_FAILS)
+        (bindir / "git").chmod(0o755)
+        result = repo.derive("1.3.1", "1.3.0", "edtf-releases.json")
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "not applicable" not in result.stdout + result.stderr
 
 
 RECORD = ".pgrx-installable"
@@ -516,229 +517,239 @@ def entries(written: str) -> list[str]:
     return [line for line in written.splitlines() if not line.startswith("#")]
 
 
-class TestWritesTheInstallableSet(TestNeedsJq):
-    """#825: the forge walk is recorded, because the gate cannot repeat it.
+# #825: the forge walk is recorded, because the gate cannot repeat it.
+#
+# Selection asks which versions a non-draft release CARRIES. That is
+# the same question `lint:pg-upgrade-path` needs to tell a burned dead
+# end from a stranded installation and cannot ask, being deterministic
+# and offline. So the answer for EVERY version in the graph is written
+# down here, as derived state, and rides the release commit.
+@pytest.mark.usefixtures("_set_up_test_needs_jq")
+def test_it_names_the_versions_the_forge_carries_newest_first() -> None:
+    """The real edtf listing carries three of its eleven graph versions."""
+    with TemporaryDirectory() as d:
+        repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.1", EDTF_EDGES)
+        repo.derive("1.3.1", "1.3.0", "edtf-releases.json")
+        written = written_record(repo.root)
+    want: list[str] = ["edtf_postgres 1.2.3 1.1.2 1.1.0"]
+    assert want == entries(written)
 
-    Selection asks which versions a non-draft release CARRIES. That is
-    the same question `lint:pg-upgrade-path` needs to tell a burned dead
-    end from a stranded installation and cannot ask, being deterministic
-    and offline. So the answer for EVERY version in the graph is written
-    down here, as derived state, and rides the release commit.
+
+@pytest.mark.usefixtures("_set_up_test_needs_jq")
+def test_the_burned_head_is_absent_and_that_is_the_whole_point() -> None:
+    """1.3.0 is in the graph, carried by nothing, and must not appear.
+
+    This is the fact the lint could not otherwise have. Assert it
+    directly rather than trusting the line above to imply it.
     """
-
-    def test_it_names_the_versions_the_forge_carries_newest_first(self) -> None:
-        """The real edtf listing carries three of its eleven graph versions."""
-        with TemporaryDirectory() as d:
-            repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.1", EDTF_EDGES)
-            repo.derive("1.3.1", "1.3.0", "edtf-releases.json")
-            written = written_record(repo.root)
-        want: list[str] = ["edtf_postgres 1.2.3 1.1.2 1.1.0"]
-        assert want == entries(written)
-
-    def test_the_burned_head_is_absent_and_that_is_the_whole_point(self) -> None:
-        """1.3.0 is in the graph, carried by nothing, and must not appear.
-
-        This is the fact the lint could not otherwise have. Assert it
-        directly rather than trusting the line above to imply it.
-        """
-        with TemporaryDirectory() as d:
-            repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.1", EDTF_EDGES)
-            repo.derive("1.3.1", "1.3.0", "edtf-releases.json")
-            written = written_record(repo.root)
-        assert "1.3.0" not in written
-
-    def test_it_carries_its_own_derivation(self) -> None:
-        """Derived state states how it was derived, like `.coverage-floor`."""
-        with TemporaryDirectory() as d:
-            repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.1", EDTF_EDGES)
-            repo.derive("1.3.1", "1.3.0", "edtf-releases.json")
-            written = written_record(repo.root)
-        assert "# derived: v1.3.1" in written
-        observed = next(
-            ln.split(":", 1)[1].strip()
-            for ln in written.splitlines()
-            if ln.startswith("# observed:")
-        )
-        assert re.search(ISO_DATE, observed)
-
-    def test_an_extension_the_forge_carries_nothing_for_is_recorded_empty(
-        self,
-    ) -> None:
-        """Mid-life adoption: asked, and the answer was none. Not silence."""
-        with TemporaryDirectory() as d:
-            repo = Repo(d, "demo_pg", "demo-pg", "1.1.0", [("1.0.0", "1.0.1")])
-            repo.derive("1.1.0", "1.0.1", "stele-releases.json")
-            written = written_record(repo.root)
-        want: list[str] = ["demo_pg"]
-        assert want == entries(written)
-
-    def test_it_rides_the_release_commit(self) -> None:
-        """A record the Release PR does not carry never reaches the gate.
-
-        `files=` feeds EXTRA_FILES in release.yml, so this is the whole
-        delivery path. Run separately from `Repo.derive`, which drops
-        GITHUB_OUTPUT on purpose; the `already reaches` branch settles
-        the record and exits without wanting a container.
-        """
-        with TemporaryDirectory() as d:
-            repo = Repo(d, "demo_pg", "demo-pg", "1.0.1", [("1.0.0", "1.0.1")])
-            repo.derive("1.0.1", "1.0.0", "stele-releases.json")
-            out = repo.root / "gh-output"
-            env = hermetic_env(
-                repo.home,
-                PATH=f"{repo.root / 'stubbin'}:{os.environ['PATH']}",
-                VERSION="1.0.1",
-                PREV_MANIFEST="1.0.0",
-                GH_TOKEN="stub",  # ruff: ignore[hardcoded-password-func-arg]
-                GITHUB_REPOSITORY="monumental-archive/under-test",
-                GH_FIXTURE=str(TESTDATA / "stele-releases.json"),
-                GITHUB_OUTPUT=str(out),
-            )
-            result = subprocess.run(
-                [BASH, str(SCRIPT)],
-                cwd=repo.root,
-                env=env,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            emitted = out.read_text()
-        assert result.returncode == 0, result.stderr
-        assert f"files={RECORD}" in emitted
-
-    def test_the_lint_reads_exactly_what_this_wrote(self) -> None:
-        """End to end, across the two scripts that must agree on the name.
-
-        The record's filename is written in `generate-pgrx-upgrade.sh`
-        and read in `pg-upgrade-path.sh`. Nothing but this row would
-        notice a rename on one side: the lint would simply find no
-        record and take its interim path, in green, forever.
-        """
-        if not CARGO:
-            pytest.skip("the lint resolves the crate version with cargo")
-        edges = [("1.1.0", "1.1.2"), ("1.1.2", "1.2.3")]
-        with TemporaryDirectory() as d:
-            repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.2.3", edges)
-            written = repo.derive("1.2.3", "1.1.2", "edtf-releases.json")
-            assert "already reaches 1.2.3" in written.stdout
-
-            crate = repo.root / "crates" / "edtf-postgres"
-            (crate / "src").mkdir()
-            (crate / "src" / "lib.rs").write_text("pub fn f() {}\n")
-            # Rust's two homes, threaded explicitly. `hermetic_env`
-            # redirects HOME to keep the caller's git config out of a
-            # fixture, and that hides `~/.cargo` and `~/.rustup` with
-            # it — on a rustup-managed machine the `cargo` on PATH is a
-            # shim, and it exits 1 with "could not choose a version of
-            # cargo to run" rather than anything about HOME.
-            #
-            # mise's data directory is under HOME too, and on a machine
-            # where the `cargo` on PATH is a mise shim it is threaded the
-            # same way. Without it, a caller that names a belt through
-            # MISE_GLOBAL_CONFIG_FILE (a linked worktree must) sends the
-            # shim looking for the belt's Rust pin in an empty data
-            # directory: it starts an install and exits 1 (#1201).
-            env = hermetic_env(
-                repo.home,
-                CARGO_HOME=os.environ.get("CARGO_HOME", str(Path.home() / ".cargo")),
-                RUSTUP_HOME=os.environ.get("RUSTUP_HOME", str(Path.home() / ".rustup")),
-                MISE_DATA_DIR=mise_data_dir(),
-            )
-            subprocess.run(
-                [
-                    support.tool("cargo"),
-                    "generate-lockfile",
-                    "--offline",
-                    "--manifest-path",
-                    str(crate / "Cargo.toml"),
-                ],
-                cwd=repo.root,
-                env=env,
-                check=True,
-                capture_output=True,
-            )
-            linted = subprocess.run(
-                [BASH, str(LINT)],
-                cwd=repo.root,
-                env=env,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-        assert linted.returncode == 0, linted.stdout + linted.stderr
-        assert "every installable edtf_postgres version reaches 1.2.3" in linted.stdout
-        assert "installable set recorded v1.2.3" in linted.stdout
+    with TemporaryDirectory() as d:
+        repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.1", EDTF_EDGES)
+        repo.derive("1.3.1", "1.3.0", "edtf-releases.json")
+        written = written_record(repo.root)
+    assert "1.3.0" not in written
 
 
-class TestTagHistoryShapes(TestNeedsJq):
-    """The three tag histories the predecessor search must tell apart (#762).
+@pytest.mark.usefixtures("_set_up_test_needs_jq")
+def test_it_carries_its_own_derivation() -> None:
+    """Derived state states how it was derived, like `.coverage-floor`."""
+    with TemporaryDirectory() as d:
+        repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.1", EDTF_EDGES)
+        repo.derive("1.3.1", "1.3.0", "edtf-releases.json")
+        written = written_record(repo.root)
+    assert "# derived: v1.3.1" in written
+    observed = next(
+        ln.split(":", 1)[1].strip()
+        for ln in written.splitlines()
+        if ln.startswith("# observed:")
+    )
+    assert re.search(ISO_DATE, observed)
 
-    Selection succeeds silently — the script prints no tag on the happy
-    path — so the assertion is the FETCH it goes on to attempt, which the
-    stub refuses by name on stderr. That is the decision itself rather
-    than a proxy for it: a wrong tag would be a wrong download.
+
+@pytest.mark.usefixtures("_set_up_test_needs_jq")
+def test_an_extension_the_forge_carries_nothing_for_is_recorded_empty() -> None:
+    """Mid-life adoption: asked, and the answer was none. Not silence."""
+    with TemporaryDirectory() as d:
+        repo = Repo(d, "demo_pg", "demo-pg", "1.1.0", [("1.0.0", "1.0.1")])
+        repo.derive("1.1.0", "1.0.1", "stele-releases.json")
+        written = written_record(repo.root)
+    want: list[str] = ["demo_pg"]
+    assert want == entries(written)
+
+
+@pytest.mark.usefixtures("_set_up_test_needs_jq")
+def test_it_rides_the_release_commit() -> None:
+    """A record the Release PR does not carry never reaches the gate.
+
+    `files=` feeds EXTRA_FILES in release.yml, so this is the whole
+    delivery path. Run separately from `Repo.derive`, which drops
+    GITHUB_OUTPUT on purpose; the `already reaches` branch settles
+    the record and exits without wanting a container.
     """
-
-    def test_always_released_as_v_star(self) -> None:
-        """release-lab: predecessor tarballs live on a plain `v*` tag."""
-        with TemporaryDirectory() as d:
-            repo = Repo(d, "lab_pg", "lab-pg", "0.29.0", [("0.27.0", "0.28.1")])
-            result = repo.derive("0.29.0", "0.28.1", "release-lab-releases.json")
-        assert "release download v0.28.1" in result.stderr
-        assert "deriving lab_pg: 0.28.1 -> 0.29.0" in result.stdout
-        assert "first publish" not in result.stdout
-
-    def test_imported_previous_release_under_another_scheme(self) -> None:
-        """edtf: the same bytes sit on `edtf-postgres-v1.2.3` (#762).
-
-        `v1.2.3` exists in edtf as a tag with no release object, so the
-        tag test this replaced saw "not a v* release" and derived nothing
-        for an extension with eleven published versions.
-        """
-        with TemporaryDirectory() as d:
-            repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.1", EDTF_EDGES)
-            result = repo.derive("1.3.1", "1.3.0", "edtf-releases.json")
-        assert "release download edtf-postgres-v1.2.3" in result.stderr
-        assert "deriving edtf_postgres: 1.2.3 -> 1.3.1" in result.stdout
-        assert "first publish" not in result.stdout
-
-    def test_no_releases_at_all(self) -> None:
-        """signer: the listing is empty, so nothing is installable.
-
-        A non-empty graph with an empty listing is NOT the same input as
-        an empty graph, and this is the row that says so: the script must
-        reach the forge, be told there is nothing, and only then conclude
-        first publish. It must not attempt a download.
-        """
-        with TemporaryDirectory() as d:
-            repo = Repo(d, "demo_pg", "demo-pg", "1.1.0", [("1.0.0", "1.0.1")])
-            result = repo.derive("1.1.0", "1.0.1", "signer-releases.json")
-        assert "no non-draft release carries any demo_pg tarball" in result.stdout
-        assert "first publish" in result.stdout
-        assert "release download" not in result.stderr
-        assert result.returncode == 0, result.stderr
-
-    def test_the_new_fixtures_carry_the_shapes_they_are_named_for(self) -> None:
-        """Guard the guards: a refreshed capture must not go tautological.
-
-        Same reasoning as the edtf fixture's own shape check — a listing
-        that lost its `v*` tarballs, or a `signer` that acquired a
-        release, would leave the rows above asserting nothing while
-        staying green.
-        """
-        carriers = [
-            r.tag
-            for r in releases("release-lab-releases.json")
-            if not r.draft and any(a.startswith("lab_pg-0.28.1-pg") for a in r.assets)
-        ]
-        want: list[str] = ["v0.28.1"]
-        assert want == carriers, "the v*-scheme predecessor must still be v0.28.1"
-        none: list[Release] = []
-        assert none == releases("signer-releases.json")
-        tags = [r.tag for r in releases("edtf-releases.json")]
-        assert "v1.2.3" not in tags, (
-            "edtf's imported scheme is the point: no v1.2.3 release object"
+    with TemporaryDirectory() as d:
+        repo = Repo(d, "demo_pg", "demo-pg", "1.0.1", [("1.0.0", "1.0.1")])
+        repo.derive("1.0.1", "1.0.0", "stele-releases.json")
+        out = repo.root / "gh-output"
+        env = hermetic_env(
+            repo.home,
+            PATH=f"{repo.root / 'stubbin'}:{os.environ['PATH']}",
+            VERSION="1.0.1",
+            PREV_MANIFEST="1.0.0",
+            GH_TOKEN="stub",  # ruff: ignore[hardcoded-password-func-arg]
+            GITHUB_REPOSITORY="monumental-archive/under-test",
+            GH_FIXTURE=str(TESTDATA / "stele-releases.json"),
+            GITHUB_OUTPUT=str(out),
         )
+        result = subprocess.run(
+            [BASH, str(SCRIPT)],
+            cwd=repo.root,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        emitted = out.read_text()
+    assert result.returncode == 0, result.stderr
+    assert f"files={RECORD}" in emitted
+
+
+@pytest.mark.usefixtures("_set_up_test_needs_jq")
+def test_the_lint_reads_exactly_what_this_wrote() -> None:
+    """End to end, across the two scripts that must agree on the name.
+
+    The record's filename is written in `generate-pgrx-upgrade.sh`
+    and read in `pg-upgrade-path.sh`. Nothing but this row would
+    notice a rename on one side: the lint would simply find no
+    record and take its interim path, in green, forever.
+    """
+    if not CARGO:
+        pytest.skip("the lint resolves the crate version with cargo")
+    edges = [("1.1.0", "1.1.2"), ("1.1.2", "1.2.3")]
+    with TemporaryDirectory() as d:
+        repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.2.3", edges)
+        written = repo.derive("1.2.3", "1.1.2", "edtf-releases.json")
+        assert "already reaches 1.2.3" in written.stdout
+
+        crate = repo.root / "crates" / "edtf-postgres"
+        (crate / "src").mkdir()
+        (crate / "src" / "lib.rs").write_text("pub fn f() {}\n")
+        # Rust's two homes, threaded explicitly. `hermetic_env`
+        # redirects HOME to keep the caller's git config out of a
+        # fixture, and that hides `~/.cargo` and `~/.rustup` with
+        # it — on a rustup-managed machine the `cargo` on PATH is a
+        # shim, and it exits 1 with "could not choose a version of
+        # cargo to run" rather than anything about HOME.
+        #
+        # mise's data directory is under HOME too, and on a machine
+        # where the `cargo` on PATH is a mise shim it is threaded the
+        # same way. Without it, a caller that names a belt through
+        # MISE_GLOBAL_CONFIG_FILE (a linked worktree must) sends the
+        # shim looking for the belt's Rust pin in an empty data
+        # directory: it starts an install and exits 1 (#1201).
+        env = hermetic_env(
+            repo.home,
+            CARGO_HOME=os.environ.get("CARGO_HOME", str(Path.home() / ".cargo")),
+            RUSTUP_HOME=os.environ.get("RUSTUP_HOME", str(Path.home() / ".rustup")),
+            MISE_DATA_DIR=mise_data_dir(),
+        )
+        subprocess.run(
+            [
+                support.tool("cargo"),
+                "generate-lockfile",
+                "--offline",
+                "--manifest-path",
+                str(crate / "Cargo.toml"),
+            ],
+            cwd=repo.root,
+            env=env,
+            check=True,
+            capture_output=True,
+        )
+        linted = subprocess.run(
+            [BASH, str(LINT)],
+            cwd=repo.root,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    assert linted.returncode == 0, linted.stdout + linted.stderr
+    assert "every installable edtf_postgres version reaches 1.2.3" in linted.stdout
+    assert "installable set recorded v1.2.3" in linted.stdout
+
+
+# The three tag histories the predecessor search must tell apart (#762).
+#
+# Selection succeeds silently — the script prints no tag on the happy
+# path — so the assertion is the FETCH it goes on to attempt, which the
+# stub refuses by name on stderr. That is the decision itself rather
+# than a proxy for it: a wrong tag would be a wrong download.
+@pytest.mark.usefixtures("_set_up_test_needs_jq")
+def test_always_released_as_v_star() -> None:
+    """release-lab: predecessor tarballs live on a plain `v*` tag."""
+    with TemporaryDirectory() as d:
+        repo = Repo(d, "lab_pg", "lab-pg", "0.29.0", [("0.27.0", "0.28.1")])
+        result = repo.derive("0.29.0", "0.28.1", "release-lab-releases.json")
+    assert "release download v0.28.1" in result.stderr
+    assert "deriving lab_pg: 0.28.1 -> 0.29.0" in result.stdout
+    assert "first publish" not in result.stdout
+
+
+@pytest.mark.usefixtures("_set_up_test_needs_jq")
+def test_imported_previous_release_under_another_scheme() -> None:
+    """edtf: the same bytes sit on `edtf-postgres-v1.2.3` (#762).
+
+    `v1.2.3` exists in edtf as a tag with no release object, so the
+    tag test this replaced saw "not a v* release" and derived nothing
+    for an extension with eleven published versions.
+    """
+    with TemporaryDirectory() as d:
+        repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.1", EDTF_EDGES)
+        result = repo.derive("1.3.1", "1.3.0", "edtf-releases.json")
+    assert "release download edtf-postgres-v1.2.3" in result.stderr
+    assert "deriving edtf_postgres: 1.2.3 -> 1.3.1" in result.stdout
+    assert "first publish" not in result.stdout
+
+
+@pytest.mark.usefixtures("_set_up_test_needs_jq")
+def test_no_releases_at_all() -> None:
+    """signer: the listing is empty, so nothing is installable.
+
+    A non-empty graph with an empty listing is NOT the same input as
+    an empty graph, and this is the row that says so: the script must
+    reach the forge, be told there is nothing, and only then conclude
+    first publish. It must not attempt a download.
+    """
+    with TemporaryDirectory() as d:
+        repo = Repo(d, "demo_pg", "demo-pg", "1.1.0", [("1.0.0", "1.0.1")])
+        result = repo.derive("1.1.0", "1.0.1", "signer-releases.json")
+    assert "no non-draft release carries any demo_pg tarball" in result.stdout
+    assert "first publish" in result.stdout
+    assert "release download" not in result.stderr
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.usefixtures("_set_up_test_needs_jq")
+def test_the_new_fixtures_carry_the_shapes_they_are_named_for() -> None:
+    """Guard the guards: a refreshed capture must not go tautological.
+
+    Same reasoning as the edtf fixture's own shape check — a listing
+    that lost its `v*` tarballs, or a `signer` that acquired a
+    release, would leave the rows above asserting nothing while
+    staying green.
+    """
+    carriers = [
+        r.tag
+        for r in releases("release-lab-releases.json")
+        if not r.draft and any(a.startswith("lab_pg-0.28.1-pg") for a in r.assets)
+    ]
+    want: list[str] = ["v0.28.1"]
+    assert want == carriers, "the v*-scheme predecessor must still be v0.28.1"
+    none: list[Release] = []
+    assert none == releases("signer-releases.json")
+    tags = [r.tag for r in releases("edtf-releases.json")]
+    assert "v1.2.3" not in tags, (
+        "edtf's imported scheme is the point: no v1.2.3 release object"
+    )
 
 
 def captured_edges(tag: str) -> list[tuple[str, str]]:
@@ -759,66 +770,64 @@ def captured_edges(tag: str) -> list[tuple[str, str]]:
     return pairs
 
 
-class TestAsksTheOnePredecessor(TestNeedsJq):
-    """The derivation acts on previous_release.py's answer (#1592).
-
-    edtf on 2026-11-19: v1.3.5 published and carries its tarballs, the
-    drafts v1.3.0 to v1.3.3 burned, and the graph at v1.3.5 reaches it.
-    The derivation already answered from the graph, so this row is the
-    same on main by construction; what it holds is that the derivation,
-    its record and the guards' rows in test_pgrx_build.py now read one
-    function over the same captures.
-    """
-
-    def test_the_next_release_derives_from_the_newest_installable(self) -> None:
-        """Release 1.3.6 derives from 1.3.5 on `v1.3.5`, and records it."""
-        with TemporaryDirectory() as d:
-            edges = captured_edges("v1.3.5")
-            repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.6", edges)
-            result = repo.derive("1.3.6", "1.3.5", "edtf-releases-v1.3.5.json")
-            written = written_record(repo.root)
-        assert "deriving edtf_postgres: 1.3.5 -> 1.3.6" in result.stdout
-        assert "release download v1.3.5" in result.stderr
-        assert "NOTE:" not in result.stdout
-        want: list[str] = ["edtf_postgres 1.3.5 1.3.4 1.2.3 1.1.2 1.1.0"]
-        assert want == entries(written)
-
-    def test_the_captures_carry_the_shapes_they_are_named_for(self) -> None:
-        """Guard the guard: v1.3.5 carries tarballs, its burned drafts none."""
-        by_tag = {r.tag: r for r in releases("edtf-releases-v1.3.5.json")}
-        for burned in ("v1.3.0", "v1.3.1", "v1.3.2", "v1.3.3"):
-            assert by_tag[burned].draft, burned
-            assert by_tag[burned].assets == NOTHING, burned
-        names = by_tag["v1.3.5"].assets
-        assert "edtf_postgres-1.3.5-pg18-linux-amd64.tar.gz" in names
-        assert ("1.2.3", "1.3.0") in captured_edges("v1.3.1")
-        assert ("1.2.3", "1.3.0") not in captured_edges("v1.2.3")
+# The derivation acts on previous_release.py's answer (#1592).
+#
+# edtf on 2026-11-19: v1.3.5 published and carries its tarballs, the
+# drafts v1.3.0 to v1.3.3 burned, and the graph at v1.3.5 reaches it.
+# The derivation already answered from the graph, so this row is the
+# same on main by construction; what it holds is that the derivation,
+# its record and the guards' rows in test_pgrx_build.py now read one
+# function over the same captures.
+@pytest.mark.usefixtures("_set_up_test_needs_jq")
+def test_the_next_release_derives_from_the_newest_installable() -> None:
+    """Release 1.3.6 derives from 1.3.5 on `v1.3.5`, and records it."""
+    with TemporaryDirectory() as d:
+        edges = captured_edges("v1.3.5")
+        repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.6", edges)
+        result = repo.derive("1.3.6", "1.3.5", "edtf-releases-v1.3.5.json")
+        written = written_record(repo.root)
+    assert "deriving edtf_postgres: 1.3.5 -> 1.3.6" in result.stdout
+    assert "release download v1.3.5" in result.stderr
+    assert "NOTE:" not in result.stdout
+    want: list[str] = ["edtf_postgres 1.3.5 1.3.4 1.2.3 1.1.2 1.1.0"]
+    assert want == entries(written)
 
 
-class TestDerivesOnTheOlderLine(TestNeedsJq):
-    """Releasing 1.2.5 beside a published 1.3.0 derives from 1.2.4 (#1592).
+@pytest.mark.usefixtures("_set_up_test_needs_jq")
+def test_the_captures_carry_the_shapes_they_are_named_for() -> None:
+    """Guard the guard: v1.3.5 carries tarballs, its burned drafts none."""
+    by_tag = {r.tag: r for r in releases("edtf-releases-v1.3.5.json")}
+    for burned in ("v1.3.0", "v1.3.1", "v1.3.2", "v1.3.3"):
+        assert by_tag[burned].draft, burned
+        assert by_tag[burned].assets == NOTHING, burned
+    names = by_tag["v1.3.5"].assets
+    assert "edtf_postgres-1.3.5-pg18-linux-amd64.tar.gz" in names
+    assert ("1.2.3", "1.3.0") in captured_edges("v1.3.1")
+    assert ("1.2.3", "1.3.0") not in captured_edges("v1.2.3")
 
-    The listing is authored, in the REST shape the captures have: no
-    real repository has released on an older line yet, and the row is
-    about the rule, not a history.
-    """
 
-    def test_the_derivation_starts_below_the_version(self) -> None:
-        """1.2.4 on v1.2.4, and no NOTE calls 1.3.0 uninstallable."""
-        tarball = "lab_pg-{}-pg18-linux-amd64.tar.gz"
-        listing: list[dict[str, object]] = [
-            {"assets": [{"name": tarball.format(v)}], "draft": False, "tag_name": t}
-            for v, t in (("1.3.0", "v1.3.0"), ("1.2.4", "v1.2.4"))
-        ]
-        with TemporaryDirectory() as d:
-            fixture = Path(d) / "listing.json"
-            fixture.write_text(json.dumps(listing))
-            edges = [("1.2.3", "1.2.4"), ("1.2.4", "1.3.0")]
-            repo = Repo(d, "lab_pg", "lab-pg", "1.2.5", edges)
-            result = repo.derive("1.2.5", "1.2.4", str(fixture))
-        assert "deriving lab_pg: 1.2.4 -> 1.2.5" in result.stdout
-        assert "release download v1.2.4" in result.stderr
-        assert "NOTE:" not in result.stdout
+# Releasing 1.2.5 beside a published 1.3.0 derives from 1.2.4 (#1592).
+#
+# The listing is authored, in the REST shape the captures have: no
+# real repository has released on an older line yet, and the row is
+# about the rule, not a history.
+@pytest.mark.usefixtures("_set_up_test_needs_jq")
+def test_the_derivation_starts_below_the_version() -> None:
+    """1.2.4 on v1.2.4, and no NOTE calls 1.3.0 uninstallable."""
+    tarball = "lab_pg-{}-pg18-linux-amd64.tar.gz"
+    listing: list[dict[str, object]] = [
+        {"assets": [{"name": tarball.format(v)}], "draft": False, "tag_name": t}
+        for v, t in (("1.3.0", "v1.3.0"), ("1.2.4", "v1.2.4"))
+    ]
+    with TemporaryDirectory() as d:
+        fixture = Path(d) / "listing.json"
+        fixture.write_text(json.dumps(listing))
+        edges = [("1.2.3", "1.2.4"), ("1.2.4", "1.3.0")]
+        repo = Repo(d, "lab_pg", "lab-pg", "1.2.5", edges)
+        result = repo.derive("1.2.5", "1.2.4", str(fixture))
+    assert "deriving lab_pg: 1.2.4 -> 1.2.5" in result.stdout
+    assert "release download v1.2.4" in result.stderr
+    assert "NOTE:" not in result.stdout
 
 
 def previous_archive(dest: Path, top: str, files: list[str]) -> Path:
@@ -854,58 +863,62 @@ NO_ROOT = (
 )
 
 
-class TestReadsThePreviousArchive(TestNeedsJq):
-    """Every top level the predecessor's archive may have (#780, #1274).
+# Every top level the predecessor's archive may have (#780, #1274).
+#
+# #1274 packs the tarball from `pkgroot/` alone: the CloudNativePG
+# mirror beside it is gone. The derivation must still find the
+# package root and the previous schema, and reach the candidate
+# build, which the stub `docker` refuses by name. A layout it cannot
+# read stops before that with its own message.
+def run_with(top: str, files: list[str]) -> subprocess.CompletedProcess[str]:
+    """Derive lab_pg 0.29.0 from a 0.28.1 archive of this shape.
 
-    #1274 packs the tarball from `pkgroot/` alone: the CloudNativePG
-    mirror beside it is gone. The derivation must still find the
-    package root and the previous schema, and reach the candidate
-    build, which the stub `docker` refuses by name. A layout it cannot
-    read stops before that with its own message.
+    Returns:
+        The completed process.
+
     """
+    with TemporaryDirectory() as d:
+        archive = previous_archive(Path(d), top, files)
+        repo = Repo(d, "lab_pg", "lab-pg", "0.29.0", [("0.27.0", "0.28.1")])
+        return repo.derive("0.29.0", "0.28.1", "release-lab-releases.json", archive)
 
-    @staticmethod
-    def run_with(top: str, files: list[str]) -> subprocess.CompletedProcess[str]:
-        """Derive lab_pg 0.29.0 from a 0.28.1 archive of this shape.
 
-        Returns:
-            The completed process.
+@pytest.mark.usefixtures("_set_up_test_needs_jq")
+def test_pkgroot_and_nothing_else() -> None:
+    """The #1274 tarball: `pkgroot/` is the archive's only top level."""
+    result = run_with("pkgroot", PREV_FILES)
+    assert "deriving lab_pg: 0.28.1 -> 0.29.0 (pg18)" in result.stdout
+    assert "docker stub: refusing 'run --rm" in result.stderr
+    assert "generate-pgrx-upgrade.sh: " not in result.stderr
 
-        """
-        with TemporaryDirectory() as d:
-            archive = previous_archive(Path(d), top, files)
-            repo = Repo(d, "lab_pg", "lab-pg", "0.29.0", [("0.27.0", "0.28.1")])
-            return repo.derive("0.29.0", "0.28.1", "release-lab-releases.json", archive)
 
-    def test_pkgroot_and_nothing_else(self) -> None:
-        """The #1274 tarball: `pkgroot/` is the archive's only top level."""
-        result = self.run_with("pkgroot", PREV_FILES)
-        assert "deriving lab_pg: 0.28.1 -> 0.29.0 (pg18)" in result.stdout
-        assert "docker stub: refusing 'run --rm" in result.stderr
-        assert "generate-pgrx-upgrade.sh: " not in result.stderr
+@pytest.mark.usefixtures("_set_up_test_needs_jq")
+def test_an_imported_archive_packed_from_root() -> None:
+    """An imported repository's tarball carries `./usr/...` directly."""
+    result = run_with(".", PREV_FILES)
+    assert "docker stub: refusing 'run --rm" in result.stderr
+    assert "generate-pgrx-upgrade.sh: " not in result.stderr
 
-    def test_an_imported_archive_packed_from_root(self) -> None:
-        """An imported repository's tarball carries `./usr/...` directly."""
-        result = self.run_with(".", PREV_FILES)
-        assert "docker stub: refusing 'run --rm" in result.stderr
-        assert "generate-pgrx-upgrade.sh: " not in result.stderr
 
-    def test_neither_layout_is_refused_by_name(self) -> None:
-        """A root holding neither shape stops before any container."""
-        result = self.run_with("cnpgroot", ["lib/lab_pg.so"])
-        assert NO_ROOT in result.stderr
-        assert "docker stub" not in result.stderr
-        assert result.returncode == 1
+@pytest.mark.usefixtures("_set_up_test_needs_jq")
+def test_neither_layout_is_refused_by_name() -> None:
+    """A root holding neither shape stops before any container."""
+    result = run_with("cnpgroot", ["lib/lab_pg.so"])
+    assert NO_ROOT in result.stderr
+    assert "docker stub" not in result.stderr
+    assert result.returncode == 1
 
-    def test_no_previous_schema_is_refused_by_name(self) -> None:
-        """A package root without the previous schema stops before a build."""
-        result = self.run_with("pkgroot", PREV_FILES[:2])
-        assert (
-            "generate-pgrx-upgrade.sh: v0.28.1 tarball carries no generated schema"
-            " lab_pg--0.28.1.sql"
-        ) in result.stderr
-        assert "docker stub" not in result.stderr
-        assert result.returncode == 1
+
+@pytest.mark.usefixtures("_set_up_test_needs_jq")
+def test_no_previous_schema_is_refused_by_name() -> None:
+    """A package root without the previous schema stops before a build."""
+    result = run_with("pkgroot", PREV_FILES[:2])
+    assert (
+        "generate-pgrx-upgrade.sh: v0.28.1 tarball carries no generated schema"
+        " lab_pg--0.28.1.sql"
+    ) in result.stderr
+    assert "docker stub" not in result.stderr
+    assert result.returncode == 1
 
 
 WORKFLOW = CANON / ".github" / "workflows" / "build-pgrx-extension.yml"
@@ -1000,87 +1013,85 @@ def run_header_install(
         return result, (tmp / "args").read_text().splitlines()
 
 
-class TestInstallsHeadersAtTheImagesServer:
-    """Headers at exactly the server the pinned image carries (#1157).
+# Headers at exactly the server the pinned image carries (#1157).
+#
+# November's minors: apt served 18.7 headers into an 18.6 image, and
+# the library linked against `heap_datum_check`, which the image's
+# server does not export. Both build sites install the same block.
+def test_both_sites_pin_the_headers_and_check_the_server() -> None:
+    """Each site names the pinned headers and the unchanged check."""
+    for site in (SCRIPT, BUILD_ROOT):
+        text = site.read_text()
+        block = "\n".join(header_install(text))
+        assert HEADER_PIN in block
+        assert SERVER_UNCHANGED in block
+        assert '"postgresql-server-dev-${PG}" ' not in text
+    # The image the remedy names reaches each container: the build
+    # leg's docker run is release/pgrx/build-in-container.sh (#1660).
+    container = CANON / "release" / "pgrx" / "build-in-container.sh"
+    for site in (SCRIPT, container):
+        assert "--env BUILD_IMAGE" in site.read_text()
 
-    November's minors: apt served 18.7 headers into an 18.6 image, and
-    the library linked against `heap_datum_check`, which the image's
-    server does not export. Both build sites install the same block.
+
+def test_the_two_sites_are_textually_identical() -> None:
+    """They cannot share a script; they must not drift apart."""
+    assert header_install(SCRIPT.read_text()) == header_install(BUILD_ROOT.read_text())
+
+
+@pytest.mark.parametrize("site", [SCRIPT, BUILD_ROOT])
+def test_install_line_carries_the_clang_driver_and_llvm(site: object) -> None:
+    """A pgrx 0.20 build needs a clang driver and llvm-ar (#1847).
+
+    Its bindgen step needs the `clang` and the `llvm-ar` of the
+    `libclang` release it binds through. The packages are
+    unversioned, so all three follow the image's default LLVM.
     """
+    block = header_install(site.read_text())
+    start = next(
+        i for i, line in enumerate(block) if line.startswith("apt-get install")
+    )
+    end = next(i for i in range(start, len(block)) if not block[i].endswith("\\"))
+    words = " ".join(line.removesuffix("\\") for line in block[start : end + 1]).split()
+    for package in ("clang", "llvm", "libclang-dev"):
+        assert package in words
 
-    def test_both_sites_pin_the_headers_and_check_the_server(self) -> None:
-        """Each site names the pinned headers and the unchanged check."""
-        for site in (SCRIPT, BUILD_ROOT):
-            text = site.read_text()
-            block = "\n".join(header_install(text))
-            assert HEADER_PIN in block
-            assert SERVER_UNCHANGED in block
-            assert '"postgresql-server-dev-${PG}" ' not in text
-        # The image the remedy names reaches each container: the build
-        # leg's docker run is release/pgrx/build-in-container.sh (#1660).
-        container = CANON / "release" / "pgrx" / "build-in-container.sh"
-        for site in (SCRIPT, container):
-            assert "--env BUILD_IMAGE" in site.read_text()
 
-    def test_the_two_sites_are_textually_identical(self) -> None:
-        """They cannot share a script; they must not drift apart."""
-        assert header_install(SCRIPT.read_text()) == header_install(
-            BUILD_ROOT.read_text()
-        )
+def test_installs_the_headers_at_the_server_version() -> None:
+    """Every minor served, the image's own is the one installed."""
+    result, args = run_header_install([
+        "postgresql-server-dev-18=18.4-1.pgdg120+1",
+        "postgresql-server-dev-18=18.6-1.pgdg120+1",
+        "postgresql-server-dev-18=18.7-1.pgdg120+1",
+    ])
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "postgresql-server-dev-18=18.6-1.pgdg120+1" in args
+    assert "postgresql-server-dev-18" not in args
 
-    @pytest.mark.parametrize("site", [SCRIPT, BUILD_ROOT])
-    def test_install_line_carries_the_clang_driver_and_llvm(self, site: object) -> None:
-        """A pgrx 0.20 build needs a clang driver and llvm-ar (#1847).
 
-        Its bindgen step needs the `clang` and the `llvm-ar` of the
-        `libclang` release it binds through. The packages are
-        unversioned, so all three follow the image's default LLVM.
-        """
-        block = header_install(site.read_text())
-        start = next(
-            i for i, line in enumerate(block) if line.startswith("apt-get install")
-        )
-        end = next(i for i in range(start, len(block)) if not block[i].endswith("\\"))
-        words = " ".join(
-            line.removesuffix("\\") for line in block[start : end + 1]
-        ).split()
-        for package in ("clang", "llvm", "libclang-dev"):
-            assert package in words
+def test_refuses_with_the_remedy_when_apt_dropped_the_headers() -> None:
+    """The skew is a red with its cause and its fix in it."""
+    result, args = run_header_install(["postgresql-server-dev-18=18.7-1.pgdg120+1"])
+    assert result.returncode == 1
+    assert result.stderr == (
+        "::error::generate-pgrx-upgrade.sh: image"
+        " postgres:18-bookworm@sha256:planted carries server"
+        " 18.6-1.pgdg120+1; the apt repository no longer serves its"
+        " headers — move the image pin in docker/pgrx-base-images.toml\n"
+    )
+    assert args == NOTHING
 
-    def test_installs_the_headers_at_the_server_version(self) -> None:
-        """Every minor served, the image's own is the one installed."""
-        result, args = run_header_install([
-            "postgresql-server-dev-18=18.4-1.pgdg120+1",
-            "postgresql-server-dev-18=18.6-1.pgdg120+1",
-            "postgresql-server-dev-18=18.7-1.pgdg120+1",
-        ])
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "postgresql-server-dev-18=18.6-1.pgdg120+1" in args
-        assert "postgresql-server-dev-18" not in args
 
-    def test_refuses_with_the_remedy_when_apt_dropped_the_headers(self) -> None:
-        """The skew is a red with its cause and its fix in it."""
-        result, args = run_header_install(["postgresql-server-dev-18=18.7-1.pgdg120+1"])
-        assert result.returncode == 1
-        assert result.stderr == (
-            "::error::generate-pgrx-upgrade.sh: image"
-            " postgres:18-bookworm@sha256:planted carries server"
-            " 18.6-1.pgdg120+1; the apt repository no longer serves its"
-            " headers — move the image pin in docker/pgrx-base-images.toml\n"
-        )
-        assert args == NOTHING
-
-    def test_refuses_a_build_that_moved_the_server(self) -> None:
-        """An install that upgrades the server is caught after the fact."""
-        result, _ = run_header_install(
-            ["postgresql-server-dev-18=18.6-1.pgdg120+1"],
-            move_to="18.7-1.pgdg120+1",
-        )
-        assert result.returncode == 1
-        assert result.stderr == (
-            "::error::generate-pgrx-upgrade.sh: the build moved the server"
-            " from 18.6-1.pgdg120+1 to 18.7-1.pgdg120+1\n"
-        )
+def test_refuses_a_build_that_moved_the_server() -> None:
+    """An install that upgrades the server is caught after the fact."""
+    result, _ = run_header_install(
+        ["postgresql-server-dev-18=18.6-1.pgdg120+1"],
+        move_to="18.7-1.pgdg120+1",
+    )
+    assert result.returncode == 1
+    assert result.stderr == (
+        "::error::generate-pgrx-upgrade.sh: the build moved the server"
+        " from 18.6-1.pgdg120+1 to 18.7-1.pgdg120+1\n"
+    )
 
 
 def floor_template() -> str:
@@ -1141,93 +1152,27 @@ PG_BIN = postgres_bindir()
 ON_RUNNER = os.environ.get("GITHUB_ACTIONS") == "true"
 
 
-class TestFloorTemplateShape:
-    """The template carries every field the build fills, and its tag."""
-
-    def test_every_field_and_the_tag(self) -> None:
-        """Each placeholder is there, and none survives the fill."""
-        template = floor_template()
-        for field in ("@NUM@", "@XY@", "@EXT@", "@VERSION@"):
-            assert field in template
-        assert template.startswith("DO $pgrx_floor$\n")
-        assert template.endswith("\n$pgrx_floor$;")
-        assert "@" not in fill(template, 180007, "18.7")
+# The template carries every field the build fills, and its tag.
+def test_every_field_and_the_tag() -> None:
+    """Each placeholder is there, and none survives the fill."""
+    template = floor_template()
+    for field in ("@NUM@", "@XY@", "@EXT@", "@VERSION@"):
+        assert field in template
+    assert template.startswith("DO $pgrx_floor$\n")
+    assert template.endswith("\n$pgrx_floor$;")
+    assert "@" not in fill(template, 180007, "18.7")
 
 
-@pytest.mark.usefixtures("_live_server", "_set_up_test_live_server")
-class TestLiveServer:
-    """A throwaway server from the gate's own Postgres, shared by the rows.
+@dataclass(frozen=True)
+class PgServer:
+    """A throwaway server from the gate's own Postgres, shared by the rows."""
 
-    Holds no rows itself, so the loader never starts it on its own.
-    """
+    bindir: Path
+    sock: Path
+    num: int
+    version: str
 
-    # False where this machine has no Postgres: every row skips by name.
-    running: ClassVar[bool] = False
-    bindir: ClassVar[Path]
-    data: ClassVar[Path]
-    sock: ClassVar[Path]
-    num: ClassVar[int]
-    version: ClassVar[str]
-
-    @fixture(scope="class")
-    @classmethod
-    def _live_server(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
-        """Start a throwaway server on a private socket, no TCP; stop it after.
-
-        One per class that takes it, as each class's rows share it.
-
-        Raises:
-            AssertionError: on the gate's runner with no Postgres found,
-                where a skip would read like a pass.
-
-        """
-        if not (PG_BIN or ON_RUNNER):
-            yield
-            return
-        if PG_BIN is None:
-            msg = "the gate's runner carries no /usr/lib/postgresql/*/bin"
-            raise AssertionError(msg)
-        cls.bindir = PG_BIN
-        tmp = tmp_path_factory.mktemp("pg")
-        cls.data = tmp / "data"
-        cls.sock = tmp
-        run = [str(cls.bindir / "initdb"), "-D", str(cls.data), "-A", "trust"]
-        subprocess.run([*run, "-U", "postgres", "-N"], check=True, capture_output=True)
-        opts = f"-c listen_addresses= -k {cls.sock}"
-        subprocess.run(
-            [
-                *(str(cls.bindir / "pg_ctl"), "-D", str(cls.data), "-o", opts),
-                *("-w", "-l", str(tmp / "log"), "start"),
-            ],
-            check=True,
-            capture_output=True,
-        )
-        cls.num = int(cls.psql("SHOW server_version_num").stdout.strip())
-        cls.version = cls.psql("SHOW server_version").stdout.strip()
-        cls.running = True
-        yield
-        subprocess.run(
-            [
-                str(cls.bindir / "pg_ctl"),
-                "-D",
-                str(cls.data),
-                "-m",
-                "immediate",
-                "stop",
-            ],
-            check=False,
-            capture_output=True,
-        )
-        cls.running = False
-
-    @fixture
-    def _set_up_test_live_server(self) -> None:
-        """Skip the row where this machine has no Postgres to start."""
-        if not self.running:
-            pytest.skip("no Postgres on this machine")
-
-    @classmethod
-    def psql(cls, sql: str, *args: str) -> subprocess.CompletedProcess[str]:
+    def psql(self, sql: str, *args: str) -> subprocess.CompletedProcess[str]:
         """Run one command string against the throwaway server.
 
         `args` replace the default `-c sql`: the snapshot row passes
@@ -1238,69 +1183,116 @@ class TestLiveServer:
             The completed process; stderr carries any WARNING.
 
         """
-        return subprocess.run(
-            [
-                str(cls.bindir / "psql"),
-                "-X",
-                "-q",
-                "-tA",
-                "-v",
-                "ON_ERROR_STOP=1",
-                "-h",
-                str(cls.sock),
-                "-U",
-                "postgres",
-                "-d",
-                "postgres",
-                *(args or ("-c", sql)),
-            ],
-            capture_output=True,
-            text=True,
+        return psql(self.bindir, self.sock, *(args or ("-c", sql)))
+
+
+def psql(bindir: Path, sock: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    """Run psql against the server on `sock`, as `postgres`.
+
+    Returns:
+        The completed process.
+
+    """
+    return subprocess.run(
+        [
+            str(bindir / "psql"),
+            *("-X", "-q", "-tA", "-v", "ON_ERROR_STOP=1"),
+            *("-h", str(sock), "-U", "postgres", "-d", "postgres"),
+            *args,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+@fixture(scope="module")
+def live_server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[PgServer]:
+    """Start a throwaway server on a private socket, no TCP; stop it after.
+
+    One per module, as its rows share it; a machine with no Postgres
+    skips every row by name.
+
+    Yields:
+        The running server.
+
+    Raises:
+        AssertionError: on the gate's runner with no Postgres found,
+            where a skip would read like a pass.
+
+    """
+    if PG_BIN is None:
+        if ON_RUNNER:
+            msg = "the gate's runner carries no /usr/lib/postgresql/*/bin"
+            raise AssertionError(msg)
+        pytest.skip("no Postgres on this machine")
+    tmp = tmp_path_factory.mktemp("pg")
+    data = tmp / "data"
+    run = [str(PG_BIN / "initdb"), "-D", str(data), "-A", "trust"]
+    subprocess.run([*run, "-U", "postgres", "-N"], check=True, capture_output=True)
+    opts = f"-c listen_addresses= -k {tmp}"
+    subprocess.run(
+        [
+            *(str(PG_BIN / "pg_ctl"), "-D", str(data), "-o", opts),
+            *("-w", "-l", str(tmp / "log"), "start"),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    try:
+        num = int(psql(PG_BIN, tmp, "-c", "SHOW server_version_num").stdout.strip())
+        version = psql(PG_BIN, tmp, "-c", "SHOW server_version").stdout.strip()
+        yield PgServer(PG_BIN, tmp, num, version)
+    finally:
+        subprocess.run(
+            [str(PG_BIN / "pg_ctl"), "-D", str(data), "-m", "immediate", "stop"],
             check=False,
+            capture_output=True,
         )
 
 
-class TestWarnsBelowTheFloor(TestLiveServer):
-    """The floor block alone, against a live server (#1274).
+# The floor block alone, against a live server (#1274).
+#
+# The gate's own server stands in for the one a person installs on:
+# a floor set above its version is the older-server case and must
+# warn with the exact sentence; a floor at its version is the build's
+# own server and must say nothing.
 
-    The gate's own server stands in for the one a person installs on:
-    a floor set above its version is the older-server case and must
-    warn with the exact sentence; a floor at its version is the build's
-    own server and must say nothing.
+
+def block(num: int) -> str:
+    """Fill the shipped template with a floor of `num`.
+
+    Returns:
+        The DO block, its X.Y derived from `num` as the build does.
+
     """
+    xy = f"{num // 10000}.{num % 10000}"
+    return fill(floor_template(), num, xy)
 
-    @staticmethod
-    def block(num: int) -> str:
-        """Fill the shipped template with a floor of `num`.
 
-        Returns:
-            The DO block, its X.Y derived from `num` as the build does.
+def test_below_the_floor_warns_with_the_sentence(live_server: PgServer) -> None:
+    """A server one minor older than the build's warns, exactly."""
+    floor = live_server.num + 1
+    xy = f"{floor // 10000}.{floor % 10000}"
+    result = live_server.psql(block(floor))
+    assert result.returncode == 0, result.stderr
+    assert (
+        f"WARNING:  {FLOOR_EXT} {FLOOR_VERSION} was built against PostgreSQL"
+        f" {xy}; this server is {live_server.version}. If loading fails below,"
+        f" update PostgreSQL to {xy} or newer.\n"
+    ) == result.stderr
 
-        """
-        xy = f"{num // 10000}.{num % 10000}"
-        return fill(floor_template(), num, xy)
 
-    def test_below_the_floor_warns_with_the_sentence(self) -> None:
-        """A server one minor older than the build's warns, exactly."""
-        floor = self.num + 1
-        xy = f"{floor // 10000}.{floor % 10000}"
-        result = self.psql(self.block(floor))
-        assert result.returncode == 0, result.stderr
-        assert (
-            f"WARNING:  {FLOOR_EXT} {FLOOR_VERSION} was built against PostgreSQL"
-            f" {xy}; this server is {self.version}. If loading fails below,"
-            f" update PostgreSQL to {xy} or newer.\n"
-        ) == result.stderr
+def test_at_the_floor_is_silent(live_server: PgServer) -> None:
+    """The build's own server prints nothing."""
+    result = live_server.psql(block(live_server.num))
+    assert (result.returncode, result.stderr) == (0, "")
 
-    def test_at_the_floor_is_silent(self) -> None:
-        """The build's own server prints nothing."""
-        result = self.psql(self.block(self.num))
-        assert (result.returncode, result.stderr) == (0, "")
 
-    def test_above_the_floor_is_silent(self) -> None:
-        """A newer server than the build's prints nothing."""
-        result = self.psql(self.block(self.num - 1))
-        assert (result.returncode, result.stderr) == (0, "")
+def test_above_the_floor_is_silent(live_server: PgServer) -> None:
+    """A newer server than the build's prints nothing."""
+    result = live_server.psql(block(live_server.num - 1))
+    assert (result.returncode, result.stderr) == (0, "")
 
 
 def snapshot_sql(text: str) -> str:
@@ -1324,25 +1316,23 @@ def snapshot_sql(text: str) -> str:
     return match.group(1)
 
 
-class TestSnapshotReadsTheCatalog(TestLiveServer):
-    """The shipped snapshot query, against a live server (#1324).
+# The shipped snapshot query, against a live server (#1324).
+#
+# `plpgsql` is an extension every server carries, so its member rows
+# are there to read without building anything. Until #1324 the query
+# died at parse time on `"char" || unknown`, and the proof compared
+# two empty files.
 
-    `plpgsql` is an extension every server carries, so its member rows
-    are there to read without building anything. Until #1324 the query
-    died at parse time on `"char" || unknown`, and the proof compared
-    two empty files.
-    """
 
-    def test_plpgsql_members_are_read(self) -> None:
-        """The query exits 0 and returns the extension's member rows."""
-        with TemporaryDirectory() as tmp:
-            sql = Path(tmp) / "snapshot.sql"
-            sql.write_text(snapshot_sql(SCRIPT.read_text()), encoding="utf-8")
-            result = self.psql("", "-v", "ext=plpgsql", "-f", str(sql))
-        assert (result.returncode, result.stderr) == (0, "")
-        rows = [r for r in result.stdout.splitlines() if r.startswith("(")]
-        assert len(rows) >= 1, result.stdout
-        assert "(language,,plpgsql,plpgsql) | " in rows
+def test_plpgsql_members_are_read(live_server: PgServer, tmp_path: Path) -> None:
+    """The query exits 0 and returns the extension's member rows."""
+    sql = tmp_path / "snapshot.sql"
+    sql.write_text(snapshot_sql(SCRIPT.read_text()), encoding="utf-8")
+    result = live_server.psql("", "-v", "ext=plpgsql", "-f", str(sql))
+    assert (result.returncode, result.stderr) == (0, "")
+    rows = [r for r in result.stdout.splitlines() if r.startswith("(")]
+    assert len(rows) >= 1, result.stdout
+    assert "(language,,plpgsql,plpgsql) | " in rows
 
 
 PSQL_ERROR = (
@@ -1417,149 +1407,147 @@ def proof_sh(text: str) -> str:
     return match.group(1)
 
 
-class TestProofReadsBeforeItCompares:
-    """proof.sh with a stand-in psql, one row per outcome (#1324).
+# proof.sh with a stand-in psql, one row per outcome (#1324).
+#
+# The shipped script runs as written but for one rewrite: its
+# container paths (/usr/lib/postgresql, /usr/share/postgresql, /tmp,
+# /work) are moved under a scratch root, since the rows run on the
+# host. `su`, `cp`, `createdb` and the server binaries stand in as
+# no-ops; psql answers from the row's files.
+def run_proof(
+    upgraded: str, fresh: str
+) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+    """Run the shipped proof.sh against the given snapshot answers.
 
-    The shipped script runs as written but for one rewrite: its
-    container paths (/usr/lib/postgresql, /usr/share/postgresql, /tmp,
-    /work) are moved under a scratch root, since the rows run on the
-    host. `su`, `cp`, `createdb` and the server binaries stand in as
-    no-ops; psql answers from the row's files.
+    Returns:
+        The completed run, and the argument line of every psql call.
+
     """
-
-    @staticmethod
-    def run_proof(
-        upgraded: str, fresh: str
-    ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
-        """Run the shipped proof.sh against the given snapshot answers.
-
-        Returns:
-            The completed run, and the argument line of every psql call.
-
-        """
-        with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            stubs = root / "stubs"
-            server = root / "usr" / "lib" / "postgresql" / "18" / "bin"
-            rows = root / "rows"
-            for d in (stubs, server, rows, root / "tmp", root / "work"):
-                d.mkdir(parents=True)
-            for path, body in (
-                (stubs / "psql", PSQL_STUB),
-                (stubs / "su", SU_STUB),
-                (stubs / "cp", TRUE_STUB),
-                (stubs / "createdb", TRUE_STUB),
-                (server / "initdb", TRUE_STUB),
-                (server / "pg_ctl", TRUE_STUB),
-            ):
-                path.write_text(body, encoding="utf-8")
-                path.chmod(0o755)
-            (rows / "upgraded").write_text(upgraded, encoding="utf-8")
-            (rows / "fresh").write_text(fresh, encoding="utf-8")
-            (root / "work" / "snapshot.sql").write_text(
-                snapshot_sql(SCRIPT.read_text()), encoding="utf-8"
-            )
-            # The writers the real run copies into /work (#1660, #1934).
-            for writer in ("findings.sh", "workflow-command.sh", "tracked.sh"):
-                (root / "work" / writer).write_bytes(
-                    (CANON / "mise" / writer).read_bytes()
-                )
-            script = proof_sh(SCRIPT.read_text())
-            # One pass, never a replace() per prefix: on Linux the scratch
-            # root is itself under /tmp/, so a later replace() rewrote the
-            # paths an earlier one produced (/tmp/x/tmp/x/usr/...) and no
-            # stand-in was found. The Mac's /var/folders root hid it.
-            container = re.compile(
-                "|".join(
-                    re.escape(prefix)
-                    for prefix in (
-                        "/usr/lib/postgresql/",
-                        "/usr/share/postgresql/",
-                        # The proof's own container path, moved OFF the
-                        # host's /tmp: the opposite of the rule's concern.
-                        "/tmp/",
-                        "/work/",
-                    )
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        stubs = root / "stubs"
+        server = root / "usr" / "lib" / "postgresql" / "18" / "bin"
+        rows = root / "rows"
+        for d in (stubs, server, rows, root / "tmp", root / "work"):
+            d.mkdir(parents=True)
+        for path, body in (
+            (stubs / "psql", PSQL_STUB),
+            (stubs / "su", SU_STUB),
+            (stubs / "cp", TRUE_STUB),
+            (stubs / "createdb", TRUE_STUB),
+            (server / "initdb", TRUE_STUB),
+            (server / "pg_ctl", TRUE_STUB),
+        ):
+            path.write_text(body, encoding="utf-8")
+            path.chmod(0o755)
+        (rows / "upgraded").write_text(upgraded, encoding="utf-8")
+        (rows / "fresh").write_text(fresh, encoding="utf-8")
+        (root / "work" / "snapshot.sql").write_text(
+            snapshot_sql(SCRIPT.read_text()), encoding="utf-8"
+        )
+        # The writers the real run copies into /work (#1660, #1934).
+        for writer in ("findings.sh", "workflow-command.sh", "tracked.sh"):
+            (root / "work" / writer).write_bytes((CANON / "mise" / writer).read_bytes())
+        script = proof_sh(SCRIPT.read_text())
+        # One pass, never a replace() per prefix: on Linux the scratch
+        # root is itself under /tmp/, so a later replace() rewrote the
+        # paths an earlier one produced (/tmp/x/tmp/x/usr/...) and no
+        # stand-in was found. The Mac's /var/folders root hid it.
+        container = re.compile(
+            "|".join(
+                re.escape(prefix)
+                for prefix in (
+                    "/usr/lib/postgresql/",
+                    "/usr/share/postgresql/",
+                    # The proof's own container path, moved OFF the
+                    # host's /tmp: the opposite of the rule's concern.
+                    "/tmp/",
+                    "/work/",
                 )
             )
+        )
 
-            def rooted(m: re.Match[str]) -> str:
-                return f"{root}{m.group(0)}"
+        def rooted(m: re.Match[str]) -> str:
+            return f"{root}{m.group(0)}"
 
-            script = container.sub(rooted, script)
-            log = root / "psql.log"
-            env = hermetic_env(
-                root,
-                PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}",
-                PG="18",
-                NAME="demo_ext",
-                PREV="1.0.0",
-                NEW="1.1.0",
-                STUB_LOG=str(log),
-                STUB_ROWS=str(rows),
-                STUB_ERROR=PSQL_ERROR,
-                STUB_COUNT="2",
-            )
-            result = subprocess.run(
-                [BASH, "-c", script],
-                env=env,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            calls = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
-        return result, calls
+        script = container.sub(rooted, script)
+        log = root / "psql.log"
+        env = hermetic_env(
+            root,
+            PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}",
+            PG="18",
+            NAME="demo_ext",
+            PREV="1.0.0",
+            NEW="1.1.0",
+            STUB_LOG=str(log),
+            STUB_ROWS=str(rows),
+            STUB_ERROR=PSQL_ERROR,
+            STUB_COUNT="2",
+        )
+        result = subprocess.run(
+            [BASH, "-c", script],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        calls = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+    return result, calls
 
-    def test_an_sql_error_stops_the_step_with_psqls_message(self) -> None:
-        """The step stops with psql's own status and message."""
-        result, _ = self.run_proof("error", ROW_A + ROW_B)
-        assert result.returncode == 3
-        assert result.stderr == PSQL_ERROR
-        assert "proof:" not in result.stdout
-        assert "::error::" not in result.stdout
 
-    @pytest.mark.parametrize(
-        ("empty", "upgraded", "fresh"),
-        [
-            ("upgraded", "", ROW_A + ROW_B),
-            ("fresh", ROW_A + ROW_B, ""),
-        ],
+def test_an_sql_error_stops_the_step_with_psqls_message() -> None:
+    """The step stops with psql's own status and message."""
+    result, _ = run_proof("error", ROW_A + ROW_B)
+    assert result.returncode == 3
+    assert result.stderr == PSQL_ERROR
+    assert "proof:" not in result.stdout
+    assert "::error::" not in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("empty", "upgraded", "fresh"),
+    [
+        ("upgraded", "", ROW_A + ROW_B),
+        ("fresh", ROW_A + ROW_B, ""),
+    ],
+)
+def test_an_empty_snapshot_is_refused_by_name(
+    empty: object, upgraded: object, fresh: object
+) -> None:
+    """Either database's empty read fails with the exact message."""
+    result, _ = run_proof(upgraded, fresh)
+    assert result.returncode == 1
+    assert (
+        f"::error::generate-pgrx-upgrade.sh: {empty} catalog snapshot"
+        " of demo_ext is empty — the proof read nothing\n"
+    ) == result.stderr
+
+
+def test_equal_snapshots_pass_with_the_object_count() -> None:
+    """The success line says how many objects it compared."""
+    result, _ = run_proof(ROW_A + ROW_B, ROW_A + ROW_B)
+    assert (result.returncode, result.stderr) == (0, "")
+    assert result.stdout == (
+        "proof: demo_ext 1.0.0 -> 1.1.0 upgraded catalog identical"
+        " to fresh install (2 objects)\n"
     )
-    def test_an_empty_snapshot_is_refused_by_name(
-        self, empty: object, upgraded: object, fresh: object
-    ) -> None:
-        """Either database's empty read fails with the exact message."""
-        result, _ = self.run_proof(upgraded, fresh)
-        assert result.returncode == 1
-        assert (
-            f"::error::generate-pgrx-upgrade.sh: {empty} catalog snapshot"
-            " of demo_ext is empty — the proof read nothing\n"
-        ) == result.stderr
 
-    def test_equal_snapshots_pass_with_the_object_count(self) -> None:
-        """The success line says how many objects it compared."""
-        result, _ = self.run_proof(ROW_A + ROW_B, ROW_A + ROW_B)
-        assert (result.returncode, result.stderr) == (0, "")
-        assert result.stdout == (
-            "proof: demo_ext 1.0.0 -> 1.1.0 upgraded catalog identical"
-            " to fresh install (2 objects)\n"
-        )
 
-    def test_different_snapshots_fail_with_the_diff(self) -> None:
-        """A differing catalog keeps the existing message."""
-        result, _ = self.run_proof(ROW_A, ROW_A + ROW_B)
-        assert result.returncode == 1
-        assert "+" + ROW_B in result.stdout
-        assert result.stderr == (
-            "::error::generate-pgrx-upgrade.sh: upgraded demo_ext catalog differs"
-            " from a fresh 1.1.0 install — the derived script is unsound; see the"
-            " diff above\n"
-        )
+def test_different_snapshots_fail_with_the_diff() -> None:
+    """A differing catalog keeps the existing message."""
+    result, _ = run_proof(ROW_A, ROW_A + ROW_B)
+    assert result.returncode == 1
+    assert "+" + ROW_B in result.stdout
+    assert result.stderr == (
+        "::error::generate-pgrx-upgrade.sh: upgraded demo_ext catalog differs"
+        " from a fresh 1.1.0 install — the derived script is unsound; see the"
+        " diff above\n"
+    )
 
-    def test_every_psql_call_stops_on_error(self) -> None:
-        """No psql in the proof can fail and exit 0."""
-        _, calls = self.run_proof(ROW_A + ROW_B, ROW_A + ROW_B)
-        assert len(calls) == 7, calls
-        for call in calls:
-            assert call.startswith("-v ON_ERROR_STOP=1 "), call
 
+def test_every_psql_call_stops_on_error() -> None:
+    """No psql in the proof can fail and exit 0."""
+    _, calls = run_proof(ROW_A + ROW_B, ROW_A + ROW_B)
+    assert len(calls) == 7, calls
+    for call in calls:
+        assert call.startswith("-v ON_ERROR_STOP=1 "), call

@@ -26,8 +26,6 @@ import subprocess
 import sys
 from typing import TYPE_CHECKING
 
-import pytest
-
 from belt import decoded
 from belt.typed_pytest import fixture
 from tests import support
@@ -108,12 +106,10 @@ def body() -> str:
     return decoded.as_str(entry["run"], f"{TASK}.run")
 
 
-@pytest.mark.usefixtures("_set_up_test_two_roots")
-class TestTwoRoots:
+class TwoRoots:
     """A tree of two workspaces: the root's and a fuzz crate's."""
 
-    @fixture
-    def _set_up_test_two_roots(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Plant the tree, its metadata, the stubs and the log."""
         tmp = tmp_path
         self.tree = tmp / "tree"
@@ -185,50 +181,63 @@ class TestTwoRoots:
         logged = self.log.read_text(encoding="utf-8").splitlines()
         return [line for line in logged if line.startswith("cargo check ")]
 
-    def test_the_second_roots_undeclared_crate_is_red_by_name(self) -> None:
-        """The fuzz crate declares nothing: the undeclared finding, its root."""
-        self.plant("1.85", None)
-        done = self.run_task()
-        assert done.returncode != 0
-        head = (
-            f"{TASK}: {FUZZ}: a minimum is undeclared or differs from the one"
-            " the rule derives"
-        )
-        err = done.stderr.splitlines()
-        assert head in err
-        named = err[err.index(head) + 1]
-        assert "app-fuzz" in named
-        assert f"{TASK}: Cargo.toml: a minimum" not in done.stderr
 
-    def test_both_roots_declaring_the_derived_number_compile_each(self) -> None:
-        """A check per root, each naming its manifest; the count covers both."""
-        self.plant("1.85", "1.85")
-        done = self.run_task()
-        assert done.returncode == 0, done.stderr
-        want = [
-            (
-                "cargo check --locked --manifest-path Cargo.toml --all-features"
-                " -p app@0.1.0 {1.85.0}"
-            ),
-            (
-                f"cargo check --locked --manifest-path {FUZZ} --all-features"
-                " -p app-fuzz@0.1.0 {1.85.0}"
-            ),
-        ]
-        assert want == self.checks()
-        said = f"{TASK}: 2 declared minimum(s) compiled at the toolchain they name"
-        assert said == done.stdout.splitlines()[-1]
+@fixture
+def two_roots(tmp_path: Path) -> TwoRoots:
+    """Give each row its own TwoRoots."""
+    return TwoRoots(tmp_path)
 
-    def test_a_red_second_root_leaves_the_first_roots_check_run(self) -> None:
-        """Only the fuzz check is refused: red, and the root's check ran."""
-        self.plant("1.85", "1.85")
-        done = self.run_task(PLANT_REFUSE=FUZZ)
-        assert done.returncode == 101, done.stderr
-        first = (
+
+def test_the_second_roots_undeclared_crate_is_red_by_name(two_roots: TwoRoots) -> None:
+    """The fuzz crate declares nothing: the undeclared finding, its root."""
+    two_roots.plant("1.85", None)
+    done = two_roots.run_task()
+    assert done.returncode != 0
+    head = (
+        f"{TASK}: {FUZZ}: a minimum is undeclared or differs from the one"
+        " the rule derives"
+    )
+    err = done.stderr.splitlines()
+    assert head in err
+    named = err[err.index(head) + 1]
+    assert "app-fuzz" in named
+    assert f"{TASK}: Cargo.toml: a minimum" not in done.stderr
+
+
+def test_both_roots_declaring_the_derived_number_compile_each(
+    two_roots: TwoRoots,
+) -> None:
+    """A check per root, each naming its manifest; the count covers both."""
+    two_roots.plant("1.85", "1.85")
+    done = two_roots.run_task()
+    assert done.returncode == 0, done.stderr
+    want = [
+        (
             "cargo check --locked --manifest-path Cargo.toml --all-features"
             " -p app@0.1.0 {1.85.0}"
-        )
-        assert first == self.checks()[0]
-        assert len(self.checks()) == 2
-        failed = f"{TASK}: {FUZZ}: app-fuzz@0.1.0 failed to compile at 1.85.0,"
-        assert failed in done.stderr.splitlines()
+        ),
+        (
+            f"cargo check --locked --manifest-path {FUZZ} --all-features"
+            " -p app-fuzz@0.1.0 {1.85.0}"
+        ),
+    ]
+    assert want == two_roots.checks()
+    said = f"{TASK}: 2 declared minimum(s) compiled at the toolchain they name"
+    assert said == done.stdout.splitlines()[-1]
+
+
+def test_a_red_second_root_leaves_the_first_roots_check_run(
+    two_roots: TwoRoots,
+) -> None:
+    """Only the fuzz check is refused: red, and the root's check ran."""
+    two_roots.plant("1.85", "1.85")
+    done = two_roots.run_task(PLANT_REFUSE=FUZZ)
+    assert done.returncode == 101, done.stderr
+    first = (
+        "cargo check --locked --manifest-path Cargo.toml --all-features"
+        " -p app@0.1.0 {1.85.0}"
+    )
+    assert first == two_roots.checks()[0]
+    assert len(two_roots.checks()) == 2
+    failed = f"{TASK}: {FUZZ}: app-fuzz@0.1.0 failed to compile at 1.85.0,"
+    assert failed in done.stderr.splitlines()

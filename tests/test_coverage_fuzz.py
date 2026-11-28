@@ -185,12 +185,10 @@ def task_body(name: str) -> str:
     return decoded.as_str(decoded.as_object(tasks[name], name)["run"], f"{name}'s run")
 
 
-@pytest.mark.usefixtures("_set_up_test_fuzz_case")
-class TestFuzzCase:
+class FuzzCase:
     """A planted repository and the stand-in tools, one per row."""
 
-    @fixture
-    def _set_up_test_fuzz_case(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Plant an empty repository and the stubs beside it."""
         self.tmp = tmp_path
         self.tree = self.tmp / "tree"
@@ -323,65 +321,73 @@ class TestFuzzCase:
         self.write("fuzz/corpus/parse_marker/seed", "parse_marker-seed")
 
 
-class TestFloorRows(TestFuzzCase):
-    """The floor holds no fuzz target, and refuses a line still stating one."""
+@fixture
+def fuzz_case(tmp_path: Path) -> FuzzCase:
+    """Give each row its own FuzzCase."""
+    return FuzzCase(tmp_path)
 
-    def test_a_floor_with_no_fuzz_line_passes_and_no_target_is_measured(
-        self,
-    ) -> None:
-        """A Rust and a Go target, no fuzz line: green, no fuzz call.
 
-        Before #2090 the gate measured both targets and refused the
-        floor: "the fuzz target has no line".
-        """
-        self.both()
-        self.write(".coverage-floor", FLOOR)
-        done = self.check()
-        assert done.returncode == 0, done.stderr
-        assert "coverage:check: go leg holds its floor 80.0 (93.0%)\n" in done.stdout
-        # The row's own scratch path carries its name, which says "fuzz".
-        said = (done.stdout + done.stderr).replace(str(self.tmp), "<tmp>")
-        assert "fuzz" not in said
-        assert self.fuzz_calls() == NO_LINES
+def test_a_floor_with_no_fuzz_line_passes_and_no_target_is_measured(
+    fuzz_case: FuzzCase,
+) -> None:
+    """A Rust and a Go target, no fuzz line: green, no fuzz call.
 
-    def test_a_fuzz_line_and_its_record_are_refused_by_name(self) -> None:
-        """`fuzz-x 50` and its record: red before anything is measured."""
-        self.both()
-        self.write(".coverage-floor", f"{FLOOR}# fuzz-x measured: 52.0\nfuzz-x 50\n")
-        done = self.check()
-        assert done.returncode == 1, done.stdout
-        assert f"coverage:check: .coverage-floor states fuzz-x: {LEFT}\n" == done.stderr
-        assert self.log("go") == NO_LINES
+    Before #2090 the gate measured both targets and refused the
+    floor: "the fuzz target has no line".
+    """
+    fuzz_case.both()
+    fuzz_case.write(".coverage-floor", FLOOR)
+    done = fuzz_case.check()
+    assert done.returncode == 0, done.stderr
+    assert "coverage:check: go leg holds its floor 80.0 (93.0%)\n" in done.stdout
+    # The row's own scratch path carries its name, which says "fuzz".
+    said = (done.stdout + done.stderr).replace(str(fuzz_case.tmp), "<tmp>")
+    assert "fuzz" not in said
+    assert fuzz_case.fuzz_calls() == NO_LINES
 
-    def test_adopt_writes_no_fuzz_line(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """coverage:adopt's measurement and writer, over fuzz targets: no `fuzz-`."""
-        self.both()
-        measured = self.measure()
-        assert measured.returncode == 0, measured.stderr
-        assert measured.stdout == "go 93.0\n"
-        capfd.readouterr()
-        with pytest.MonkeyPatch.context() as patched:
-            for key, value in self.env.items():
-                patched.setenv(key, value)
-            patched.delenv("MISE_TASK_NAME", raising=False)
-            patched.chdir(self.tree)
-            patched.setattr(sys, "stdin", io.StringIO(measured.stdout))
-            patched.setattr(sys, "argv", ["coverage-floor"])
-            status = cf.main(["write", "--provenance", "coverage:adopt", "--adopt"])
-        out, err = capfd.readouterr()
-        assert status == 0, err
-        assert out == "coverage-floor: adopted .coverage-floor: go 90 (measured 93.0)\n"
-        text = (self.tree / ".coverage-floor").read_text(encoding="utf-8")
-        assert "fuzz-" not in text
-        parsed, problems = cf.parse(text)
-        assert problems == NO_LINES
-        assert parsed is not None
-        assert self.fuzz_calls() == NO_LINES
 
-    def test_the_fuzz_selector_is_gone(self) -> None:
-        """`fuzz` is no leg the script accepts, so no caller can ask for one."""
-        self.both()
-        done = self.measure("fuzz")
-        assert done.returncode == 1, done.stdout
-        assert "unknown leg selector 'fuzz'" in done.stderr
-        assert self.fuzz_calls() == NO_LINES
+def test_a_fuzz_line_and_its_record_are_refused_by_name(fuzz_case: FuzzCase) -> None:
+    """`fuzz-x 50` and its record: red before anything is measured."""
+    fuzz_case.both()
+    fuzz_case.write(".coverage-floor", f"{FLOOR}# fuzz-x measured: 52.0\nfuzz-x 50\n")
+    done = fuzz_case.check()
+    assert done.returncode == 1, done.stdout
+    assert f"coverage:check: .coverage-floor states fuzz-x: {LEFT}\n" == done.stderr
+    assert fuzz_case.log("go") == NO_LINES
+
+
+def test_adopt_writes_no_fuzz_line(
+    fuzz_case: FuzzCase, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """coverage:adopt's measurement and writer, over fuzz targets: no `fuzz-`."""
+    fuzz_case.both()
+    measured = fuzz_case.measure()
+    assert measured.returncode == 0, measured.stderr
+    assert measured.stdout == "go 93.0\n"
+    capfd.readouterr()
+    with pytest.MonkeyPatch.context() as patched:
+        for key, value in fuzz_case.env.items():
+            patched.setenv(key, value)
+        patched.delenv("MISE_TASK_NAME", raising=False)
+        patched.chdir(fuzz_case.tree)
+        patched.setattr(sys, "stdin", io.StringIO(measured.stdout))
+        patched.setattr(sys, "argv", ["coverage-floor"])
+        status = cf.main(["write", "--provenance", "coverage:adopt", "--adopt"])
+    out, err = capfd.readouterr()
+    assert status == 0, err
+    assert out == "coverage-floor: adopted .coverage-floor: go 90 (measured 93.0)\n"
+    text = (fuzz_case.tree / ".coverage-floor").read_text(encoding="utf-8")
+    assert "fuzz-" not in text
+    parsed, problems = cf.parse(text)
+    assert problems == NO_LINES
+    assert parsed is not None
+    assert fuzz_case.fuzz_calls() == NO_LINES
+
+
+def test_the_fuzz_selector_is_gone(fuzz_case: FuzzCase) -> None:
+    """`fuzz` is no leg the script accepts, so no caller can ask for one."""
+    fuzz_case.both()
+    done = fuzz_case.measure("fuzz")
+    assert done.returncode == 1, done.stdout
+    assert "unknown leg selector 'fuzz'" in done.stderr
+    assert fuzz_case.fuzz_calls() == NO_LINES

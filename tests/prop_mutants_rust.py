@@ -58,42 +58,37 @@ def draw_config(draw: st.DrawFn) -> Drawn:
 config = st.composite(draw_config)
 
 
-class TestReasons:
-    """Each entry without a reason, by line and key."""
-
-    @given(config())
-    def test_exactly_the_unexplained_entries(self, drawn: Drawn) -> None:
-        """Named at their lines; explained ones never."""
-        text, expected = drawn
-        assert mr.unexplained(text) == expected, text
-
-    @given(st.text(max_size=200))
-    def test_any_text_is_read(self, text: str) -> None:
-        """A list of findings, never a traceback."""
-        assert isinstance(mr.unexplained(text), list)
+# Each entry without a reason, by line and key.
+@given(config())
+def test_exactly_the_unexplained_entries(drawn: Drawn) -> None:
+    """Named at their lines; explained ones never."""
+    text, expected = drawn
+    assert mr.unexplained(text) == expected, text
 
 
-class TestDefaultMajor:
-    """One pgNN in default, or nothing."""
+@given(st.text(max_size=200))
+def test_any_text_is_read(text: str) -> None:
+    """A list of findings, never a traceback."""
+    assert isinstance(mr.unexplained(text), list)
 
-    @given(
-        st.data(),
-        st.lists(st.integers(10, 30).map("pg{}".format), unique=True, max_size=3),
-        st.lists(
-            st.sampled_from(["cshim", "pg_test", "serde"]), unique=True, max_size=3
-        ),
+
+# One pgNN in default, or nothing.
+@given(
+    st.data(),
+    st.lists(st.integers(10, 30).map("pg{}".format), unique=True, max_size=3),
+    st.lists(st.sampled_from(["cshim", "pg_test", "serde"]), unique=True, max_size=3),
+)
+def test_the_one_major(
+    data: st.DataObject, majors: list[str], others: list[str]
+) -> None:
+    """The feature when there is exactly one, else empty."""
+    default = data.draw(st.permutations(majors + others))
+    metadata = {
+        "packages": [
+            {"name": "other", "features": {"default": ["pg99"]}},
+            {"name": "ext", "features": {"default": default}},
+        ]
+    }
+    assert mr.default_major(mr.read_metadata(metadata), "ext") == (
+        majors[0] if len(majors) == 1 else ""
     )
-    def test_the_one_major(
-        self, data: st.DataObject, majors: list[str], others: list[str]
-    ) -> None:
-        """The feature when there is exactly one, else empty."""
-        default = data.draw(st.permutations(majors + others))
-        metadata = {
-            "packages": [
-                {"name": "other", "features": {"default": ["pg99"]}},
-                {"name": "ext", "features": {"default": default}},
-            ]
-        }
-        assert mr.default_major(mr.read_metadata(metadata), "ext") == (
-            majors[0] if len(majors) == 1 else ""
-        )

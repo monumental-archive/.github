@@ -67,6 +67,34 @@ def test_a_class_fixture_is_set_up_once_for_its_class(
     pytester.runpytest_inprocess("-p", "no:randomly").assert_outcomes(passed=2)
 
 
+def test_a_module_fixture_is_set_up_once_for_its_module(
+    pytester: pytest.Pytester,
+) -> None:
+    """`@fixture(scope="module")`: one value, shared by the module's rows."""
+    pytester.makepyfile(
+        test_module="""
+        from belt.typed_pytest import fixture
+
+        MADE = []
+
+
+        @fixture(scope="module")
+        def shared():
+            MADE.append(1)
+            return 1
+
+
+        def test_one(shared):
+            assert shared == 1
+
+
+        def test_two(shared):
+            assert MADE == [1]
+        """
+    )
+    pytester.runpytest_inprocess("-p", "no:randomly").assert_outcomes(passed=2)
+
+
 def test_a_fixture_called_directly_fails(pytester: pytest.Pytester) -> None:
     """The definition pytest returns refuses a direct call, as its type does."""
     pytester.makepyfile(

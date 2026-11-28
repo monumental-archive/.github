@@ -129,19 +129,17 @@ ONE_BIT: Workspace = (
 )
 
 
-class TestAnyDifferenceRefused:
-    """V: a verified crate's bytes may not move, by so much as a bit."""
-
-    @given(st.data())
-    @example(None)
-    def test_refused_exactly_on_moved_bytes(self, data: st.DataObject | None) -> None:
-        """Each moved crate is named with both digests; no other is."""
-        drawn = workspaces(data) if data else ONE_BIT
-        _, first, second, moved = drawn
-        refused = run_package(drawn)
-        want = [
-            f"{name} changed when packaged again without verifying:"
-            f" {digest(first[name])} verified, {digest(second[name])} now"
-            for name in sorted(moved)
-        ]
-        assert refused == want
+# V: a verified crate's bytes may not move, by so much as a bit.
+@given(st.data())
+@example(None)
+def test_refused_exactly_on_moved_bytes(data: st.DataObject | None) -> None:
+    """Each moved crate is named with both digests; no other is."""
+    drawn = workspaces(data) if data else ONE_BIT
+    _, first, second, moved = drawn
+    refused = run_package(drawn)
+    want = [
+        f"{name} changed when packaged again without verifying:"
+        f" {digest(first[name])} verified, {digest(second[name])} now"
+        for name in sorted(moved)
+    ]
+    assert refused == want

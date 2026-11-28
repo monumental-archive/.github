@@ -14,8 +14,6 @@ from __future__ import annotations
 import subprocess
 from typing import TYPE_CHECKING
 
-import pytest
-
 from belt import decoded
 from belt.typed_pytest import fixture
 from tests import support
@@ -64,12 +62,10 @@ def body() -> str:
     return decoded.as_str(task["run"], f"{NAME}'s run")
 
 
-@pytest.mark.usefixtures("_set_up_test_the_belt_claims_its_directory")
-class TestTheBeltClaimsItsDirectory:
+class TheBeltClaimsItsDirectory:
     """Each row: what the repository tracks under .config/mise/."""
 
-    @fixture
-    def _set_up_test_the_belt_claims_its_directory(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Plant an empty repository."""
         self.tmp = tmp_path
         self.env = support.env(self.tmp)
@@ -99,28 +95,45 @@ class TestTheBeltClaimsItsDirectory:
         as_mise = support.task_run("lint:belt-link", body())
         return run(as_mise.argv, self.repo, self.env | as_mise.env)
 
-    def test_a_tracked_config_toml_is_red(self) -> None:
-        """A repository's own `.config/mise/config.toml`: red by name."""
-        self.track(".config/mise/config.toml")
-        done = self.lint()
-        assert done.returncode == 1, done.stdout
-        assert done.stderr == CLAIM + "  .config/mise/config.toml\n"
 
-    def test_a_tracked_conf_d_file_is_red(self) -> None:
-        """A tracked conf.d file, beside where the belt link goes: red."""
-        self.track(".config/mise/conf.d/x.toml")
-        self.track("mise.toml")
-        done = self.lint()
-        assert done.returncode == 1, done.stdout
-        assert done.stderr == CLAIM + "  .config/mise/conf.d/x.toml\n"
+@fixture
+def the_belt_claims_its_directory(tmp_path: Path) -> TheBeltClaimsItsDirectory:
+    """Give each row its own TheBeltClaimsItsDirectory."""
+    return TheBeltClaimsItsDirectory(tmp_path)
 
-    def test_nothing_tracked_there_is_green(self) -> None:
-        """The untracked links the hooks write are not the repository's."""
-        self.track("mise.toml")
-        conf = self.repo / ".config" / "mise" / "conf.d"
-        conf.mkdir(parents=True)
-        (conf / "belt.toml").symlink_to(self.tmp / "belt.toml")
-        (conf.parent / "mise.lock").symlink_to(self.tmp / "mise.lock")
-        done = self.lint()
-        assert (done.returncode, done.stderr) == (0, "")
-        assert done.stdout == "lint:belt-link: nothing tracked under .config/mise/\n"
+
+def test_a_tracked_config_toml_is_red(
+    the_belt_claims_its_directory: TheBeltClaimsItsDirectory,
+) -> None:
+    """A repository's own `.config/mise/config.toml`: red by name."""
+    the_belt_claims_its_directory.track(".config/mise/config.toml")
+    done = the_belt_claims_its_directory.lint()
+    assert done.returncode == 1, done.stdout
+    assert done.stderr == CLAIM + "  .config/mise/config.toml\n"
+
+
+def test_a_tracked_conf_d_file_is_red(
+    the_belt_claims_its_directory: TheBeltClaimsItsDirectory,
+) -> None:
+    """A tracked conf.d file, beside where the belt link goes: red."""
+    the_belt_claims_its_directory.track(".config/mise/conf.d/x.toml")
+    the_belt_claims_its_directory.track("mise.toml")
+    done = the_belt_claims_its_directory.lint()
+    assert done.returncode == 1, done.stdout
+    assert done.stderr == CLAIM + "  .config/mise/conf.d/x.toml\n"
+
+
+def test_nothing_tracked_there_is_green(
+    the_belt_claims_its_directory: TheBeltClaimsItsDirectory,
+) -> None:
+    """The untracked links the hooks write are not the repository's."""
+    the_belt_claims_its_directory.track("mise.toml")
+    conf = the_belt_claims_its_directory.repo / ".config" / "mise" / "conf.d"
+    conf.mkdir(parents=True)
+    (conf / "belt.toml").symlink_to(the_belt_claims_its_directory.tmp / "belt.toml")
+    (conf.parent / "mise.lock").symlink_to(
+        the_belt_claims_its_directory.tmp / "mise.lock"
+    )
+    done = the_belt_claims_its_directory.lint()
+    assert (done.returncode, done.stderr) == (0, "")
+    assert done.stdout == "lint:belt-link: nothing tracked under .config/mise/\n"

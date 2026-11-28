@@ -145,12 +145,10 @@ def bare_curls(source: str) -> list[str]:
     return found
 
 
-@pytest.mark.usefixtures("_set_up_test_planted")
-class TestPlanted:
+class Planted:
     """A planted canon and org, alpha then beta, each wearing one shield."""
 
-    @fixture
-    def _set_up_test_planted(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Plant the canon tree, the floors and the stub tools."""
         tmp = tmp_path
         self.tree = support.canon(
@@ -229,7 +227,13 @@ class TestPlanted:
             assert UA in line
 
 
-class TestScorecardRead(TestPlanted):
+@fixture
+def planted_state(tmp_path: Path) -> Planted:
+    """Give each row its own Planted."""
+    return Planted(tmp_path)
+
+
+class ScorecardRead(Planted):
     """The Scorecard leg (#1621)."""
 
     def asked_identified(self) -> None:
@@ -241,52 +245,64 @@ class TestScorecardRead(TestPlanted):
         for line in log:
             assert UA in line
 
-    def test_404_is_a_shield_over_nothing_and_the_walk_goes_on(self) -> None:
-        """No result for alpha: its finding is named and beta still read."""
-        self.org((404, ""), (200, '{"score": 5.1}'))
-        done = self.run_audit()
-        assert done.returncode == 1, done.stderr
-        assert "audit:badges: beta: scorecard 5.1 (floor 5.0)" in done.stdout
-        assert done.stderr.splitlines()[0] == (
-            "audit:badges: shield defects: alpha(scorecard: issuer returned"
-            " no score — a shield over nothing)"
-        )
 
-    def test_503_is_a_question_unanswered(self) -> None:
-        """An outage is never reported as a missing score."""
-        self.org((503, "down"), (200, '{"score": 5.1}'))
-        done = self.run_audit()
-        assert done.returncode == 1, done.stderr
-        assert "audit:badges: beta: scorecard 5.1 (floor 5.0)" in done.stdout
-        assert done.stderr.splitlines()[0] == (
-            "audit:badges: shield defects: alpha(scorecard: api.scorecard.dev,"
-            " about alpha, did not answer — HTTP 503, a question unanswered,"
-            " not an absence)"
-        )
+@fixture
+def scorecard_read(tmp_path: Path) -> ScorecardRead:
+    """Give each row its own ScorecardRead."""
+    return ScorecardRead(tmp_path)
 
-    def test_200_below_the_floor_is_a_regression(self) -> None:
-        """A score under its floor reds as before, asked identified."""
-        self.org((200, '{"score": 4.2}'), (200, '{"score": 5.1}'))
-        done = self.run_audit()
-        assert done.returncode == 1, done.stderr
-        assert done.stderr.splitlines()[0] == (
-            "audit:badges: shield defects: alpha(scorecard: 4.2 below floor"
-            " 5.0 — regression)"
-        )
-        self.asked_identified()
 
-    def test_200_above_the_floor_reads_clean(self) -> None:
-        """Scores at or above their floors: green, asked identified."""
-        self.org((200, '{"score": 5.0}'), (200, '{"score": 5.1}'))
-        done = self.run_audit()
-        assert done.returncode == 0, done.stderr
-        expected = [
-            "audit:badges: alpha: scorecard 5.0 (floor 5.0)",
-            "audit:badges: beta: scorecard 5.1 (floor 5.0)",
-            "audit:badges: 2 shield(s) checked, all agree with their issuers",
-        ]
-        assert done.stdout.splitlines() == expected
-        self.asked_identified()
+def test_404_is_a_shield_over_nothing_and_the_walk_goes_on(
+    scorecard_read: ScorecardRead,
+) -> None:
+    """No result for alpha: its finding is named and beta still read."""
+    scorecard_read.org((404, ""), (200, '{"score": 5.1}'))
+    done = scorecard_read.run_audit()
+    assert done.returncode == 1, done.stderr
+    assert "audit:badges: beta: scorecard 5.1 (floor 5.0)" in done.stdout
+    assert done.stderr.splitlines()[0] == (
+        "audit:badges: shield defects: alpha(scorecard: issuer returned"
+        " no score — a shield over nothing)"
+    )
+
+
+def test_503_is_a_question_unanswered(scorecard_read: ScorecardRead) -> None:
+    """An outage is never reported as a missing score."""
+    scorecard_read.org((503, "down"), (200, '{"score": 5.1}'))
+    done = scorecard_read.run_audit()
+    assert done.returncode == 1, done.stderr
+    assert "audit:badges: beta: scorecard 5.1 (floor 5.0)" in done.stdout
+    assert done.stderr.splitlines()[0] == (
+        "audit:badges: shield defects: alpha(scorecard: api.scorecard.dev,"
+        " about alpha, did not answer — HTTP 503, a question unanswered,"
+        " not an absence)"
+    )
+
+
+def test_200_below_the_floor_is_a_regression(scorecard_read: ScorecardRead) -> None:
+    """A score under its floor reds as before, asked identified."""
+    scorecard_read.org((200, '{"score": 4.2}'), (200, '{"score": 5.1}'))
+    done = scorecard_read.run_audit()
+    assert done.returncode == 1, done.stderr
+    assert done.stderr.splitlines()[0] == (
+        "audit:badges: shield defects: alpha(scorecard: 4.2 below floor"
+        " 5.0 — regression)"
+    )
+    scorecard_read.asked_identified()
+
+
+def test_200_above_the_floor_reads_clean(scorecard_read: ScorecardRead) -> None:
+    """Scores at or above their floors: green, asked identified."""
+    scorecard_read.org((200, '{"score": 5.0}'), (200, '{"score": 5.1}'))
+    done = scorecard_read.run_audit()
+    assert done.returncode == 0, done.stderr
+    expected = [
+        "audit:badges: alpha: scorecard 5.0 (floor 5.0)",
+        "audit:badges: beta: scorecard 5.1 (floor 5.0)",
+        "audit:badges: 2 shield(s) checked, all agree with their issuers",
+    ]
+    assert done.stdout.splitlines() == expected
+    scorecard_read.asked_identified()
 
 
 DEFECTS = "audit:badges: shield defects: "
@@ -305,153 +321,192 @@ def entry(repo: str, **fields: object) -> str:
     return json.dumps(bound | fields)
 
 
-@pytest.mark.usefixtures("_set_up_test_best_practices_read")
-class TestBestPracticesRead(TestPlanted):
+class BestPracticesRead(Planted):
     """The Best Practices badge leg, asked through `ask` (#1633)."""
 
-    @fixture
-    def _set_up_test_best_practices_read(self) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Wear the passing badge, whose id the stub reads as the repo."""
+        super().__init__(tmp_path)
         self.env["SHIELD"] = "https://www.bestpractices.dev/projects/@REPO@/badge"
         self.ok = (200, entry("beta", badge_percentage_0=100))
 
-    def test_404_names_the_missing_project(self) -> None:
-        """No entry: the finding the leg already words; beta still read."""
-        self.org((404, ""), self.ok, ".json")
-        self.verdict(
-            1,
-            ["audit:badges: beta: bestpractices beta passing"],
-            f"{DEFECTS}alpha(bestpractices: issuer returned nothing for project alpha)",
+
+@fixture
+def best_practices_read(tmp_path: Path) -> BestPracticesRead:
+    """Give each row its own BestPracticesRead."""
+    return BestPracticesRead(tmp_path)
+
+
+def test_404_names_the_missing_project(best_practices_read: BestPracticesRead) -> None:
+    """No entry: the finding the leg already words; beta still read."""
+    best_practices_read.org((404, ""), best_practices_read.ok, ".json")
+    best_practices_read.verdict(
+        1,
+        ["audit:badges: beta: bestpractices beta passing"],
+        f"{DEFECTS}alpha(bestpractices: issuer returned nothing for project alpha)",
+    )
+
+
+def test_best_practices_read_503_is_a_question_unanswered(
+    best_practices_read: BestPracticesRead,
+) -> None:
+    """An outage is never reported as a missing project."""
+    best_practices_read.org((503, "down"), best_practices_read.ok, ".json")
+    best_practices_read.verdict(
+        1,
+        ["audit:badges: beta: bestpractices beta passing"],
+        f"{DEFECTS}alpha(bestpractices: bestpractices.dev, about project alpha,"
+        f" {UNANSWERED}",
+    )
+
+
+def test_200_is_read_for_its_verdict(best_practices_read: BestPracticesRead) -> None:
+    """Passing entries bound to their wearers read clean."""
+    best_practices_read.org(
+        (200, entry("alpha", badge_percentage_0=100)), best_practices_read.ok, ".json"
+    )
+    best_practices_read.verdict(
+        0,
+        [
+            "audit:badges: alpha: bestpractices alpha passing",
+            "audit:badges: beta: bestpractices beta passing",
+        ],
+    )
+
+
+@pytest.mark.parametrize("shield", ["badge", "baseline"])
+def test_the_entry_is_asked_past_the_shared_cache(
+    best_practices_read: BestPracticesRead, shield: object
+) -> None:
+    """Each entry is asked at a key the cache never held (#2084).
+
+    Red when planted: dropping `?${fresh}` from either leg's ask
+    leaves the planted URL bare.
+    """
+    best_practices_read.env["SHIELD"] = (
+        f"https://www.bestpractices.dev/projects/@REPO@/{shield}"
+    )
+    (best_practices_read.stubs / "curl.log").unlink(missing_ok=True)
+    best_practices_read.org(best_practices_read.ok, best_practices_read.ok, ".json")
+    best_practices_read.run_audit()
+    log = (best_practices_read.stubs / "curl.log").read_text(encoding="utf-8")
+    asked = [line.split(" ", 1)[0] for line in log.splitlines()]
+    assert len(asked) == 2
+    for url in asked:
+        assert re.search(
+            r"^https://www\.bestpractices\.dev/projects/(alpha|beta)"
+            r"\.json\?fresh=[0-9]+$",
+            url,
         )
 
-    def test_503_is_a_question_unanswered(self) -> None:
-        """An outage is never reported as a missing project."""
-        self.org((503, "down"), self.ok, ".json")
-        self.verdict(
-            1,
-            ["audit:badges: beta: bestpractices beta passing"],
-            f"{DEFECTS}alpha(bestpractices: bestpractices.dev, about project alpha,"
-            f" {UNANSWERED}",
-        )
 
-    def test_200_is_read_for_its_verdict(self) -> None:
-        """Passing entries bound to their wearers read clean."""
-        self.org((200, entry("alpha", badge_percentage_0=100)), self.ok, ".json")
-        self.verdict(
-            0,
-            [
-                "audit:badges: alpha: bestpractices alpha passing",
-                "audit:badges: beta: bestpractices beta passing",
-            ],
-        )
-
-    @pytest.mark.parametrize("shield", ["badge", "baseline"])
-    def test_the_entry_is_asked_past_the_shared_cache(self, shield: object) -> None:
-        """Each entry is asked at a key the cache never held (#2084).
-
-        Red when planted: dropping `?${fresh}` from either leg's ask
-        leaves the planted URL bare.
-        """
-        self.env["SHIELD"] = f"https://www.bestpractices.dev/projects/@REPO@/{shield}"
-        (self.stubs / "curl.log").unlink(missing_ok=True)
-        self.org(self.ok, self.ok, ".json")
-        self.run_audit()
-        log = (self.stubs / "curl.log").read_text(encoding="utf-8")
-        asked = [line.split(" ", 1)[0] for line in log.splitlines()]
-        assert len(asked) == 2
-        for url in asked:
-            assert re.search(
-                r"^https://www\.bestpractices\.dev/projects/(alpha|beta)"
-                r"\.json\?fresh=[0-9]+$",
-                url,
-            )
-
-
-@pytest.mark.usefixtures("_set_up_test_baseline_read")
-class TestBaselineRead(TestPlanted):
+class BaselineRead(Planted):
     """The OSPS Baseline leg, asked through `ask` (#1633)."""
 
-    @fixture
-    def _set_up_test_baseline_read(self) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Wear the Baseline shield on the same entry."""
+        super().__init__(tmp_path)
         self.env["SHIELD"] = "https://www.bestpractices.dev/projects/@REPO@/baseline"
         self.ok = (200, entry("beta", achieved_baseline_1_at="2026-01-01"))
 
-    def test_404_names_the_missing_project(self) -> None:
-        """No entry: the finding the leg already words; beta still read."""
-        self.org((404, ""), self.ok, ".json")
-        self.verdict(
-            1,
-            ["audit:badges: beta: OSPS Baseline level 1 achieved"],
-            f"{DEFECTS}alpha(baseline: issuer returned nothing for project alpha)",
-        )
 
-    def test_503_is_a_question_unanswered(self) -> None:
-        """An outage is never reported as a missing project."""
-        self.org((503, "down"), self.ok, ".json")
-        self.verdict(
-            1,
-            ["audit:badges: beta: OSPS Baseline level 1 achieved"],
-            f"{DEFECTS}alpha(baseline: bestpractices.dev, about project alpha,"
-            f" {UNANSWERED}",
-        )
-
-    def test_200_is_read_for_its_level(self) -> None:
-        """Achieved levels read clean, each by its own number."""
-        alpha = entry(
-            "alpha", achieved_baseline_1_at="2026-01-01", achieved_baseline_2_at="x"
-        )
-        self.org((200, alpha), self.ok, ".json")
-        self.verdict(
-            0,
-            [
-                "audit:badges: alpha: OSPS Baseline level 2 achieved",
-                "audit:badges: beta: OSPS Baseline level 1 achieved",
-            ],
-        )
+@fixture
+def baseline_read(tmp_path: Path) -> BaselineRead:
+    """Give each row its own BaselineRead."""
+    return BaselineRead(tmp_path)
 
 
-@pytest.mark.usefixtures("_set_up_test_level_shield_read")
-class TestLevelShieldRead(TestPlanted):
+def test_baseline_read_404_names_the_missing_project(
+    baseline_read: BaselineRead,
+) -> None:
+    """No entry: the finding the leg already words; beta still read."""
+    baseline_read.org((404, ""), baseline_read.ok, ".json")
+    baseline_read.verdict(
+        1,
+        ["audit:badges: beta: OSPS Baseline level 1 achieved"],
+        f"{DEFECTS}alpha(baseline: issuer returned nothing for project alpha)",
+    )
+
+
+def test_baseline_read_503_is_a_question_unanswered(
+    baseline_read: BaselineRead,
+) -> None:
+    """An outage is never reported as a missing project."""
+    baseline_read.org((503, "down"), baseline_read.ok, ".json")
+    baseline_read.verdict(
+        1,
+        ["audit:badges: beta: OSPS Baseline level 1 achieved"],
+        f"{DEFECTS}alpha(baseline: bestpractices.dev, about project alpha,"
+        f" {UNANSWERED}",
+    )
+
+
+def test_200_is_read_for_its_level(baseline_read: BaselineRead) -> None:
+    """Achieved levels read clean, each by its own number."""
+    alpha = entry(
+        "alpha", achieved_baseline_1_at="2026-01-01", achieved_baseline_2_at="x"
+    )
+    baseline_read.org((200, alpha), baseline_read.ok, ".json")
+    baseline_read.verdict(
+        0,
+        [
+            "audit:badges: alpha: OSPS Baseline level 2 achieved",
+            "audit:badges: beta: OSPS Baseline level 1 achieved",
+        ],
+    )
+
+
+class LevelShieldRead(Planted):
     """The level shield's published document, asked through `ask` (#1633)."""
 
-    @fixture
-    def _set_up_test_level_shield_read(self) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Wear a shields endpoint over a document named for the repo."""
+        super().__init__(tmp_path)
         self.env["SHIELD"] = (
             "https://img.shields.io/endpoint?url=https%3A%2F%2Fpages.example%2F@REPO@.json"
         )
         self.ok = (200, '{"schemaVersion": 1, "label": "slsa", "message": "L3"}')
 
-    def test_404_is_a_shield_over_nothing(self) -> None:
-        """No document: the finding the leg already words; beta still read."""
-        self.org((404, ""), self.ok, ".json")
-        self.verdict(
-            1,
-            ["audit:badges: beta: level shield slsa L3 published and live"],
-            f"{DEFECTS}alpha(level-shield: published judgment {PAGES}/alpha.json"
-            " unreadable — the badge renders nothing)",
-        )
 
-    def test_503_is_a_question_unanswered(self) -> None:
-        """An outage is never reported as an unpublished judgment."""
-        self.org((503, "down"), self.ok, ".json")
-        self.verdict(
-            1,
-            ["audit:badges: beta: level shield slsa L3 published and live"],
-            f"{DEFECTS}alpha(level-shield: {PAGES}/alpha.json {UNANSWERED}",
-        )
+@fixture
+def level_shield_read(tmp_path: Path) -> LevelShieldRead:
+    """Give each row its own LevelShieldRead."""
+    return LevelShieldRead(tmp_path)
 
-    def test_200_is_read_for_its_shield(self) -> None:
-        """A live endpoint document reads clean, by its label and message."""
-        self.org(self.ok, self.ok, ".json")
-        self.verdict(
-            0,
-            [
-                "audit:badges: alpha: level shield slsa L3 published and live",
-                "audit:badges: beta: level shield slsa L3 published and live",
-            ],
-        )
+
+def test_404_is_a_shield_over_nothing(level_shield_read: LevelShieldRead) -> None:
+    """No document: the finding the leg already words; beta still read."""
+    level_shield_read.org((404, ""), level_shield_read.ok, ".json")
+    level_shield_read.verdict(
+        1,
+        ["audit:badges: beta: level shield slsa L3 published and live"],
+        f"{DEFECTS}alpha(level-shield: published judgment {PAGES}/alpha.json"
+        " unreadable — the badge renders nothing)",
+    )
+
+
+def test_level_shield_read_503_is_a_question_unanswered(
+    level_shield_read: LevelShieldRead,
+) -> None:
+    """An outage is never reported as an unpublished judgment."""
+    level_shield_read.org((503, "down"), level_shield_read.ok, ".json")
+    level_shield_read.verdict(
+        1,
+        ["audit:badges: beta: level shield slsa L3 published and live"],
+        f"{DEFECTS}alpha(level-shield: {PAGES}/alpha.json {UNANSWERED}",
+    )
+
+
+def test_200_is_read_for_its_shield(level_shield_read: LevelShieldRead) -> None:
+    """A live endpoint document reads clean, by its label and message."""
+    level_shield_read.org(level_shield_read.ok, level_shield_read.ok, ".json")
+    level_shield_read.verdict(
+        0,
+        [
+            "audit:badges: alpha: level shield slsa L3 published and live",
+            "audit:badges: beta: level shield slsa L3 published and live",
+        ],
+    )
 
 
 STALE = ("age: 43302", "cache-control: public, max-age=600")
@@ -549,7 +604,7 @@ LEGS: tuple[Leg, ...] = (
 )
 
 
-class TestStaleAnswer(TestPlanted):
+class StaleAnswer(Planted):
     """What an answer's cache age costs depends on what it says (#1649).
 
     An absence has to be the issuer's current word, so a stale one is a
@@ -569,133 +624,150 @@ class TestStaleAnswer(TestPlanted):
         (self.stubs / "main.body").write_text(COVERED, encoding="utf-8")
         self.headers("main", *headers)
 
-    def test_a_stale_404_is_a_question_unanswered(self) -> None:
-        """The measured stale 404 names the cache, never an absence."""
-        self.org((404, ""), (200, '{"score": 5.1}'))
-        self.headers("alpha", *STALE)
-        self.verdict(
-            1,
-            ["audit:badges: beta: scorecard 5.1 (floor 5.0)"],
-            f"{DEFECTS}alpha(scorecard: api.scorecard.dev, about alpha, did not"
-            f" answer — HTTP 404, {PAST}{NOT_ANSWERED}",
-        )
 
-    @pytest.mark.parametrize(
-        ("alpha", "code", "said"),
+@fixture
+def stale_answer(tmp_path: Path) -> StaleAnswer:
+    """Give each row its own StaleAnswer."""
+    return StaleAnswer(tmp_path)
+
+
+def test_a_stale_404_is_a_question_unanswered(stale_answer: StaleAnswer) -> None:
+    """The measured stale 404 names the cache, never an absence."""
+    stale_answer.org((404, ""), (200, '{"score": 5.1}'))
+    stale_answer.headers("alpha", *STALE)
+    stale_answer.verdict(
+        1,
+        ["audit:badges: beta: scorecard 5.1 (floor 5.0)"],
+        f"{DEFECTS}alpha(scorecard: api.scorecard.dev, about alpha, did not"
+        f" answer — HTTP 404, {PAST}{NOT_ANSWERED}",
+    )
+
+
+@pytest.mark.parametrize(
+    ("alpha", "code", "said"),
+    [
+        ("5.0", 0, ""),
+        ("4.2", 1, f"{DEFECTS}alpha(scorecard: 4.2 below floor 5.0 — regression)"),
+    ],
+)
+def test_a_stale_200_is_judged_on_its_score(
+    stale_answer: StaleAnswer, alpha: object, code: object, said: object
+) -> None:
+    """A dated result past `max-age` passes or fails on its score."""
+    (stale_answer.stubs / "curl.log").unlink(missing_ok=True)
+    stale_answer.org((200, f'{{"score": {alpha}}}'), (200, '{"score": 5.1}'))
+    stale_answer.headers("alpha", *AGED)
+    stale_answer.headers("beta", *AGED)
+    beta = "audit:badges: beta: scorecard 5.1 (floor 5.0)"
+    stale_answer.verdict(code, [beta], said)
+
+
+@pytest.mark.parametrize(
+    "lines", [OLD, ("age: 700000", "cache-control: max-age=31536000")]
+)
+def test_an_answer_older_than_the_week_is_unanswered(
+    stale_answer: StaleAnswer, lines: object
+) -> None:
+    """Past the audit's own period, whatever `max-age` says."""
+    (stale_answer.stubs / "curl.log").unlink(missing_ok=True)
+    stale_answer.org((200, '{"score": 5.0}'), (200, '{"score": 5.1}'))
+    stale_answer.headers("alpha", *lines)
+    stale_answer.verdict(
+        1,
+        ["audit:badges: beta: scorecard 5.1 (floor 5.0)"],
+        f"{DEFECTS}alpha(scorecard: api.scorecard.dev, about alpha, did"
+        f" not answer — HTTP 200, {WEEK}{NOT_ANSWERED}",
+    )
+
+
+def test_the_scorecard_note_names_its_result_date(stale_answer: StaleAnswer) -> None:
+    """The result's own date is printed beside the score, not judged."""
+    dated = '{"score": 5.0, "date": "2026-11-18T18:00:22Z"}'
+    stale_answer.org((200, dated), (200, '{"score": 5.1}'))
+    stale_answer.verdict(
+        0,
         [
-            ("5.0", 0, ""),
-            ("4.2", 1, f"{DEFECTS}alpha(scorecard: 4.2 below floor 5.0 — regression)"),
+            "audit:badges: alpha: scorecard 5.0 (floor 5.0, result of 2026-11-18)",
+            "audit:badges: beta: scorecard 5.1 (floor 5.0)",
         ],
     )
-    def test_a_stale_200_is_judged_on_its_score(
-        self, alpha: object, code: object, said: object
-    ) -> None:
-        """A dated result past `max-age` passes or fails on its score."""
-        (self.stubs / "curl.log").unlink(missing_ok=True)
-        self.org((200, f'{{"score": {alpha}}}'), (200, '{"score": 5.1}'))
-        self.headers("alpha", *AGED)
-        self.headers("beta", *AGED)
-        beta = "audit:badges: beta: scorecard 5.1 (floor 5.0)"
-        self.verdict(code, [beta], said)
 
-    @pytest.mark.parametrize(
-        "lines", [OLD, ("age: 700000", "cache-control: max-age=31536000")]
+
+@pytest.mark.parametrize(
+    "lines",
+    [
+        ("age: 100", "cache-control: max-age=600"),
+        # s-maxage is the shared cache's lifetime and wins over max-age.
+        ("age: 700", "cache-control: max-age=600, s-maxage=1000"),
+        ("age: 43302",),
+        ("cache-control: max-age=600",),
+        (),
+    ],
+)
+def test_fresh_or_headerless_answers_read_as_today(
+    stale_answer: StaleAnswer, lines: object
+) -> None:
+    """Within its lifetime, or with no claim either way: read as today."""
+    absent = (
+        f"{DEFECTS}alpha(scorecard: issuer returned no score — a shield over nothing)"
     )
-    def test_an_answer_older_than_the_week_is_unanswered(self, lines: object) -> None:
-        """Past the audit's own period, whatever `max-age` says."""
-        (self.stubs / "curl.log").unlink(missing_ok=True)
-        self.org((200, '{"score": 5.0}'), (200, '{"score": 5.1}'))
-        self.headers("alpha", *lines)
-        self.verdict(
-            1,
-            ["audit:badges: beta: scorecard 5.1 (floor 5.0)"],
-            f"{DEFECTS}alpha(scorecard: api.scorecard.dev, about alpha, did"
-            f" not answer — HTTP 200, {WEEK}{NOT_ANSWERED}",
-        )
+    beta = "audit:badges: beta: scorecard 5.1 (floor 5.0)"
+    (stale_answer.stubs / "curl.log").unlink(missing_ok=True)
+    stale_answer.org((404, ""), (200, '{"score": 5.1}'))
+    stale_answer.headers("alpha", *lines)
+    stale_answer.headers("beta", *lines)
+    stale_answer.verdict(1, [beta], absent)
 
-    def test_the_scorecard_note_names_its_result_date(self) -> None:
-        """The result's own date is printed beside the score, not judged."""
-        dated = '{"score": 5.0, "date": "2026-11-18T18:00:22Z"}'
-        self.org((200, dated), (200, '{"score": 5.1}'))
-        self.verdict(
-            0,
-            [
-                "audit:badges: alpha: scorecard 5.0 (floor 5.0, result of 2026-11-18)",
-                "audit:badges: beta: scorecard 5.1 (floor 5.0)",
-            ],
-        )
 
-    @pytest.mark.parametrize(
-        "lines",
-        [
-            ("age: 100", "cache-control: max-age=600"),
-            # s-maxage is the shared cache's lifetime and wins over max-age.
-            ("age: 700", "cache-control: max-age=600, s-maxage=1000"),
-            ("age: 43302",),
-            ("cache-control: max-age=600",),
-            (),
-        ],
+@pytest.mark.parametrize(("leg", "shield", "suffix", "_who", "body", "note"), LEGS)
+def test_every_leg_judges_a_stale_presence(
+    stale_answer: StaleAnswer,
+    leg: object,
+    shield: object,
+    suffix: object,
+    _who: object,
+    body: object,
+    note: object,
+) -> None:
+    """Each leg reads a 200 past `max-age` on its content."""
+    (stale_answer.stubs / "curl.log").unlink(missing_ok=True)
+    stale_answer.env["SHIELD"] = shield
+    stale_answer.plant(suffix, body, AGED)
+    asks = 2
+    stale_answer.verdict(0, [note("alpha"), note("beta")], asks=asks)
+
+
+@pytest.mark.parametrize(("leg", "shield", "suffix", "who", "body", "_note"), LEGS)
+def test_every_leg_reads_the_week_bound(
+    stale_answer: StaleAnswer,
+    leg: object,
+    shield: object,
+    suffix: object,
+    who: object,
+    body: object,
+    _note: object,
+) -> None:
+    """Each leg sends an answer older than the week to `unanswered`."""
+    (stale_answer.stubs / "curl.log").unlink(missing_ok=True)
+    stale_answer.env["SHIELD"] = shield
+    stale_answer.plant(suffix, body, OLD)
+    said = f"({leg}: {who} did not answer — HTTP 200, {WEEK}{NOT_ANSWERED}"
+    beta = said.replace("alpha", "beta")
+    stale_answer.verdict(1, [], f"{DEFECTS}alpha{said} beta{beta}")
+
+
+def test_codecov_stale_empty_branch_is_unanswered(stale_answer: StaleAnswer) -> None:
+    """No coverage in a stale branch answer is an absence: unanswered."""
+    stale_answer.env["SHIELD"] = CODECOV
+    stale_answer.plant("", lambda _r: "", ())
+    (stale_answer.stubs / "main.body").write_text('{"name": "main"}', encoding="utf-8")
+    stale_answer.headers("main", *STALE)
+    said = (
+        "(codecov: Codecov, about alpha's main, did not answer"
+        f" — HTTP 200, {PAST}{NOT_ANSWERED}"
     )
-    def test_fresh_or_headerless_answers_read_as_today(self, lines: object) -> None:
-        """Within its lifetime, or with no claim either way: read as today."""
-        absent = (
-            f"{DEFECTS}alpha(scorecard: issuer returned no score"
-            " — a shield over nothing)"
-        )
-        beta = "audit:badges: beta: scorecard 5.1 (floor 5.0)"
-        (self.stubs / "curl.log").unlink(missing_ok=True)
-        self.org((404, ""), (200, '{"score": 5.1}'))
-        self.headers("alpha", *lines)
-        self.headers("beta", *lines)
-        self.verdict(1, [beta], absent)
-
-    @pytest.mark.parametrize(("leg", "shield", "suffix", "_who", "body", "note"), LEGS)
-    def test_every_leg_judges_a_stale_presence(
-        self,
-        leg: object,
-        shield: object,
-        suffix: object,
-        _who: object,
-        body: object,
-        note: object,
-    ) -> None:
-        """Each leg reads a 200 past `max-age` on its content."""
-        (self.stubs / "curl.log").unlink(missing_ok=True)
-        self.env["SHIELD"] = shield
-        self.plant(suffix, body, AGED)
-        asks = 2
-        self.verdict(0, [note("alpha"), note("beta")], asks=asks)
-
-    @pytest.mark.parametrize(("leg", "shield", "suffix", "who", "body", "_note"), LEGS)
-    def test_every_leg_reads_the_week_bound(
-        self,
-        leg: object,
-        shield: object,
-        suffix: object,
-        who: object,
-        body: object,
-        _note: object,
-    ) -> None:
-        """Each leg sends an answer older than the week to `unanswered`."""
-        (self.stubs / "curl.log").unlink(missing_ok=True)
-        self.env["SHIELD"] = shield
-        self.plant(suffix, body, OLD)
-        said = f"({leg}: {who} did not answer — HTTP 200, {WEEK}{NOT_ANSWERED}"
-        beta = said.replace("alpha", "beta")
-        self.verdict(1, [], f"{DEFECTS}alpha{said} beta{beta}")
-
-    def test_codecov_stale_empty_branch_is_unanswered(self) -> None:
-        """No coverage in a stale branch answer is an absence: unanswered."""
-        self.env["SHIELD"] = CODECOV
-        self.plant("", lambda _r: "", ())
-        (self.stubs / "main.body").write_text('{"name": "main"}', encoding="utf-8")
-        self.headers("main", *STALE)
-        said = (
-            "(codecov: Codecov, about alpha's main, did not answer"
-            f" — HTTP 200, {PAST}{NOT_ANSWERED}"
-        )
-        beta = said.replace("alpha", "beta")
-        self.verdict(1, [], f"{DEFECTS}alpha{said} beta{beta}")
+    beta = said.replace("alpha", "beta")
+    stale_answer.verdict(1, [], f"{DEFECTS}alpha{said} beta{beta}")
 
 
 def both(said: str) -> str:
@@ -708,17 +780,16 @@ def both(said: str) -> str:
     return f"{DEFECTS}alpha{said} beta{said.replace('alpha', 'beta')}"
 
 
-@pytest.mark.usefixtures("_set_up_test_codecov_read")
-class TestCodecovRead(TestPlanted):
+class CodecovRead(Planted):
     """One question to Codecov, its branch route (#1668).
 
     The stub's GitHub says each repository's default branch is `main`
     at `abc1234`, committed at HEAD_AT (now, unless a row says).
     """
 
-    @fixture
-    def _set_up_test_codecov_read(self) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Wear the Codecov shield."""
+        super().__init__(tmp_path)
         self.env["SHIELD"] = CODECOV
 
     def branch(self, code: int, text: str) -> None:
@@ -736,90 +807,107 @@ class TestCodecovRead(TestPlanted):
         log = (self.stubs / "curl.log").read_text(encoding="utf-8").splitlines()
         return [line.split(" ", 1)[0] for line in log]
 
-    def test_the_detail_route_is_never_asked(self) -> None:
-        """A 404 on /repos/<name> is not asked about; the branch is judged."""
-        self.org((404, '{"detail": "Not found."}'), (404, '{"detail": "Not found."}'))
-        self.branch(200, COVERED)
-        self.verdict(
-            0,
-            [
-                "audit:badges: alpha: codecov holds 90.5% for alpha at abc1234",
-                "audit:badges: beta: codecov holds 90.5% for beta at abc1234",
-            ],
-        )
-        api = f"https://api.codecov.io/api/v2/github/{OWNER}/repos"
-        expected = [f"{api}/alpha/branches/main", f"{api}/beta/branches/main"]
-        assert self.asked() == expected
 
-    def test_branch_route_404_is_no_record(self) -> None:
-        """Codecov knows neither the repository nor the branch."""
-        self.branch(404, '{"detail": "Not found."}')
-        self.verdict(1, [], both("(codecov: issuer has no record of alpha)"))
-
-    def test_no_coverage_is_a_shield_reading_unknown(self) -> None:
-        """The branch is known and its head has no report."""
-        self.branch(200, '{"name": "main", "head_commit": {"commitid": "abc1234"}}')
-        self.verdict(
-            1,
-            [],
-            both(
-                "(codecov: no coverage report for alpha's main — the shield reads"
-                " unknown; the gate stub must pass codecov-token)"
-            ),
-        )
-
-    def test_a_head_behind_the_forge_after_an_hour_is_stale(self) -> None:
-        """Codecov's head is not GitHub's, and GitHub's is over an hour old."""
-        self.branch(200, COVERED.replace("abc1234", "0ld0000"))
-        self.env["HEAD_AT"] = "1000000000"
-        self.verdict(
-            1,
-            [],
-            both(
-                "(codecov: stale — Codecov last heard about 0ld0000, main is at"
-                " abc1234; the upload job is not running)"
-            ),
-        )
-
-    def test_a_head_behind_the_forge_within_the_hour_is_in_flight(self) -> None:
-        """An upload still in flight: the figure Codecov holds is noted."""
-        self.branch(200, COVERED.replace("abc1234", "0ld0000"))
-        self.verdict(
-            0,
-            [
-                "audit:badges: alpha: codecov holds 90.5% for alpha at 0ld0000",
-                "audit:badges: beta: codecov holds 90.5% for beta at 0ld0000",
-            ],
-        )
-
-    def test_503_is_a_question_unanswered(self) -> None:
-        """An outage is never reported as a missing record."""
-        self.branch(503, "down")
-        self.verdict(
-            1,
-            [],
-            both(
-                "(codecov: Codecov, about alpha's main, did not answer — HTTP 503,"
-                " a question unanswered, not an absence)"
-            ),
-        )
+@fixture
+def codecov_read(tmp_path: Path) -> CodecovRead:
+    """Give each row its own CodecovRead."""
+    return CodecovRead(tmp_path)
 
 
-class TestBareCurl:
-    """`ask` is the walk's one curl (#1633)."""
+def test_the_detail_route_is_never_asked(codecov_read: CodecovRead) -> None:
+    """A 404 on /repos/<name> is not asked about; the branch is judged."""
+    codecov_read.org(
+        (404, '{"detail": "Not found."}'), (404, '{"detail": "Not found."}')
+    )
+    codecov_read.branch(200, COVERED)
+    codecov_read.verdict(
+        0,
+        [
+            "audit:badges: alpha: codecov holds 90.5% for alpha at abc1234",
+            "audit:badges: beta: codecov holds 90.5% for beta at abc1234",
+        ],
+    )
+    api = f"https://api.codecov.io/api/v2/github/{OWNER}/repos"
+    expected = [f"{api}/alpha/branches/main", f"{api}/beta/branches/main"]
+    assert codecov_read.asked() == expected
 
-    def test_script_curls_only_inside_ask(self) -> None:
-        """Every issuer read in the script goes through `ask`."""
-        assert bare_curls(SCRIPT.read_text(encoding="utf-8")) == list[str]()
 
-    def test_a_bare_read_is_found(self) -> None:
-        """A planted bare read is named; ask's own curl and comments are not."""
-        planted = (
-            "# a bare `curl -sf` in prose\n"
-            "ask() {\n"
-            '  out=$(curl -s -w "%{http_code}" "$@" || true)\n'
-            "}\n"
-            'bp=$(curl -sf "https://y/${id}.json" || true)\n'
-        )
-        expected = ['5: bp=$(curl -sf "https://y/${id}.json" || true)']
-        assert bare_curls(planted) == expected
+def test_branch_route_404_is_no_record(codecov_read: CodecovRead) -> None:
+    """Codecov knows neither the repository nor the branch."""
+    codecov_read.branch(404, '{"detail": "Not found."}')
+    codecov_read.verdict(1, [], both("(codecov: issuer has no record of alpha)"))
+
+
+def test_no_coverage_is_a_shield_reading_unknown(codecov_read: CodecovRead) -> None:
+    """The branch is known and its head has no report."""
+    codecov_read.branch(200, '{"name": "main", "head_commit": {"commitid": "abc1234"}}')
+    codecov_read.verdict(
+        1,
+        [],
+        both(
+            "(codecov: no coverage report for alpha's main — the shield reads"
+            " unknown; the gate stub must pass codecov-token)"
+        ),
+    )
+
+
+def test_a_head_behind_the_forge_after_an_hour_is_stale(
+    codecov_read: CodecovRead,
+) -> None:
+    """Codecov's head is not GitHub's, and GitHub's is over an hour old."""
+    codecov_read.branch(200, COVERED.replace("abc1234", "0ld0000"))
+    codecov_read.env["HEAD_AT"] = "1000000000"
+    codecov_read.verdict(
+        1,
+        [],
+        both(
+            "(codecov: stale — Codecov last heard about 0ld0000, main is at"
+            " abc1234; the upload job is not running)"
+        ),
+    )
+
+
+def test_a_head_behind_the_forge_within_the_hour_is_in_flight(
+    codecov_read: CodecovRead,
+) -> None:
+    """An upload still in flight: the figure Codecov holds is noted."""
+    codecov_read.branch(200, COVERED.replace("abc1234", "0ld0000"))
+    codecov_read.verdict(
+        0,
+        [
+            "audit:badges: alpha: codecov holds 90.5% for alpha at 0ld0000",
+            "audit:badges: beta: codecov holds 90.5% for beta at 0ld0000",
+        ],
+    )
+
+
+def test_codecov_read_503_is_a_question_unanswered(codecov_read: CodecovRead) -> None:
+    """An outage is never reported as a missing record."""
+    codecov_read.branch(503, "down")
+    codecov_read.verdict(
+        1,
+        [],
+        both(
+            "(codecov: Codecov, about alpha's main, did not answer — HTTP 503,"
+            " a question unanswered, not an absence)"
+        ),
+    )
+
+
+# `ask` is the walk's one curl (#1633).
+def test_script_curls_only_inside_ask() -> None:
+    """Every issuer read in the script goes through `ask`."""
+    assert bare_curls(SCRIPT.read_text(encoding="utf-8")) == list[str]()
+
+
+def test_a_bare_read_is_found() -> None:
+    """A planted bare read is named; ask's own curl and comments are not."""
+    planted = (
+        "# a bare `curl -sf` in prose\n"
+        "ask() {\n"
+        '  out=$(curl -s -w "%{http_code}" "$@" || true)\n'
+        "}\n"
+        'bp=$(curl -sf "https://y/${id}.json" || true)\n'
+    )
+    expected = ['5: bp=$(curl -sf "https://y/${id}.json" || true)']
+    assert bare_curls(planted) == expected

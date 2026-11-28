@@ -94,12 +94,10 @@ def red(*offences: str) -> list[str]:
     return [f"{TASK}: floating or unpinned runner labels:{listed}", *TAIL]
 
 
-@pytest.mark.usefixtures("_set_up_test_planted")
-class TestPlanted:
+class Planted:
     """A planted git tree of workflows and templates."""
 
-    @fixture
-    def _set_up_test_planted(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Plant an empty tree."""
         self.tree = tmp_path
         self.env = support.env(
@@ -184,192 +182,203 @@ class TestPlanted:
         )
 
 
-class TestTask(TestPlanted):
-    """The task's own body: its guard and its two lists."""
-
-    def test_nothing_tracked_is_skipped_by_name(self) -> None:
-        """No workflow and no template: the task says it skipped."""
-        done = self.task()
-        same(done.returncode, 0, done.stderr)
-        same(done.stdout.splitlines(), SKIPPED)
-
-    def test_an_untracked_workflow_is_no_workflow(self) -> None:
-        """A workflow git does not track: still skipped, never read."""
-        self.plant(".github/workflows/ci.yml", job("ubuntu-latest"), track=False)
-        done = self.task()
-        same(done.returncode, 0, done.stderr)
-        same(done.stdout.splitlines(), SKIPPED)
-
-    def test_both_lists_through_the_task(self) -> None:
-        """Offenders in a workflow and a template: one finding, workflows first."""
-        self.plant("workflow-templates/a.yaml", job("macos-latest"))
-        self.flow("z.yml", job("self-hosted"))
-        self.flow("ok.yaml", job("ubuntu-26.04"))
-        done = self.task()
-        same(done.returncode, runner_pin.EXIT_RED)
-        expected = red(
-            ".github/workflows/z.yml(runs-on: self-hosted)",
-            "workflow-templates/a.yaml(runs-on: macos-latest)",
-            "workflow-templates/a.yaml(floating label: 3:    runs-on: macos-latest)",
-        )
-        same(done.stderr.splitlines(), expected)
-
-    def test_a_template_alone_is_checked(self) -> None:
-        """Templates and no workflow: checked, not skipped."""
-        self.plant("workflow-templates/a.yml", job("ubuntu-24.04-arm"))
-        done = self.task()
-        same(done.returncode, 0, done.stderr)
-        same(done.stdout.splitlines(), OK)
+@fixture
+def planted(tmp_path: Path) -> Planted:
+    """Give each row its own Planted."""
+    return Planted(tmp_path)
 
 
-class TestLabels(TestPlanted):
-    """The runs-on values the helper accepts and refuses."""
+def test_nothing_tracked_is_skipped_by_name(planted: Planted) -> None:
+    """No workflow and no template: the task says it skipped."""
+    done = planted.task()
+    same(done.returncode, 0, done.stderr)
+    same(done.stdout.splitlines(), SKIPPED)
 
-    @pytest.mark.parametrize(
-        "value",
-        [
-            "ubuntu-24.04",
-            "ubuntu-24.04-arm",
-            "macos-15-intel",
-            '"ubuntu-26.04"',
-            "'windows-2025'",
-            "ubuntu-24.04 # the named pin",
-            "ubuntu-24.04# no blank",
-            "${{ matrix.os }}",
-            "${{matrix.runner}}",
-            "${{ fromJSON(matrix.runner) }}",
-        ],
+
+def test_an_untracked_workflow_is_no_workflow(planted: Planted) -> None:
+    """A workflow git does not track: still skipped, never read."""
+    planted.plant(".github/workflows/ci.yml", job("ubuntu-latest"), track=False)
+    done = planted.task()
+    same(done.returncode, 0, done.stderr)
+    same(done.stdout.splitlines(), SKIPPED)
+
+
+def test_both_lists_through_the_task(planted: Planted) -> None:
+    """Offenders in a workflow and a template: one finding, workflows first."""
+    planted.plant("workflow-templates/a.yaml", job("macos-latest"))
+    planted.flow("z.yml", job("self-hosted"))
+    planted.flow("ok.yaml", job("ubuntu-26.04"))
+    done = planted.task()
+    same(done.returncode, runner_pin.EXIT_RED)
+    expected = red(
+        ".github/workflows/z.yml(runs-on: self-hosted)",
+        "workflow-templates/a.yaml(runs-on: macos-latest)",
+        "workflow-templates/a.yaml(floating label: 3:    runs-on: macos-latest)",
     )
-    def test_pinned_values_are_clean(
-        self, value: object, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """Pinned literals, suffixed, quoted or commented: clean."""
-        status, out, err = self.check(job(value), capfd=capfd)
-        same(status, 0, err)
-        same(out.splitlines(), OK)
+    same(done.stderr.splitlines(), expected)
 
-    @pytest.mark.parametrize(
-        ("value", "shown"),
-        [
-            ("self-hosted", "self-hosted"),
-            ("Ubuntu-24.04", "Ubuntu-24.04"),
-            ("ubuntu-24.04 extra", "ubuntu-24.04 extra"),
-            ("${{ inputs.runner }}", "${{ inputs.runner }}"),
-            ("${{ matrix }}", "${{ matrix }}"),
-            ("[ubuntu-24.04]", "[ubuntu-24.04]"),
-            ("", ""),
-            ("# just a comment", ""),
-        ],
+
+def test_a_template_alone_is_checked(planted: Planted) -> None:
+    """Templates and no workflow: checked, not skipped."""
+    planted.plant("workflow-templates/a.yml", job("ubuntu-24.04-arm"))
+    done = planted.task()
+    same(done.returncode, 0, done.stderr)
+    same(done.stdout.splitlines(), OK)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "ubuntu-24.04",
+        "ubuntu-24.04-arm",
+        "macos-15-intel",
+        '"ubuntu-26.04"',
+        "'windows-2025'",
+        "ubuntu-24.04 # the named pin",
+        "ubuntu-24.04# no blank",
+        "${{ matrix.os }}",
+        "${{matrix.runner}}",
+        "${{ fromJSON(matrix.runner) }}",
+    ],
+)
+def test_pinned_values_are_clean(
+    planted: Planted, value: object, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Pinned literals, suffixed, quoted or commented: clean."""
+    status, out, err = planted.check(job(value), capfd=capfd)
+    same(status, 0, err)
+    same(out.splitlines(), OK)
+
+
+@pytest.mark.parametrize(
+    ("value", "shown"),
+    [
+        ("self-hosted", "self-hosted"),
+        ("Ubuntu-24.04", "Ubuntu-24.04"),
+        ("ubuntu-24.04 extra", "ubuntu-24.04 extra"),
+        ("${{ inputs.runner }}", "${{ inputs.runner }}"),
+        ("${{ matrix }}", "${{ matrix }}"),
+        ("[ubuntu-24.04]", "[ubuntu-24.04]"),
+        ("", ""),
+        ("# just a comment", ""),
+    ],
+)
+def test_unpinned_values_are_red(
+    planted: Planted, value: object, shown: object, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A literal with no version, or an expression that is no matrix one."""
+    rel = ".github/workflows/ci.yml"
+    status, _out, err = planted.check(job(value), capfd=capfd)
+    same(status, runner_pin.EXIT_RED)
+    same(err.splitlines(), red(f"{rel}(runs-on: {shown})"))
+
+
+def test_a_carriage_return_is_part_of_the_value(
+    planted: Planted, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Lines split on newline alone: a trailing CR leaves the value unpinned.
+
+    The finding writer prints the CR as its escape, as the shell's did.
+    """
+    status, _out, err = planted.check(
+        "jobs:\n  a:\n    runs-on: ubuntu-24.04\r\n", capfd=capfd
     )
-    def test_unpinned_values_are_red(
-        self, value: object, shown: object, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A literal with no version, or an expression that is no matrix one."""
-        rel = ".github/workflows/ci.yml"
-        status, _out, err = self.check(job(value), capfd=capfd)
-        same(status, runner_pin.EXIT_RED)
-        same(err.splitlines(), red(f"{rel}(runs-on: {shown})"))
-
-    def test_a_carriage_return_is_part_of_the_value(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """Lines split on newline alone: a trailing CR leaves the value unpinned.
-
-        The finding writer prints the CR as its escape, as the shell's did.
-        """
-        status, _out, err = self.check(
-            "jobs:\n  a:\n    runs-on: ubuntu-24.04\r\n", capfd=capfd
-        )
-        same(status, runner_pin.EXIT_RED)
-        expected = red(".github/workflows/ci.yml(runs-on: ubuntu-24.04\\r)")
-        same(err.splitlines(), expected)
+    same(status, runner_pin.EXIT_RED)
+    expected = red(".github/workflows/ci.yml(runs-on: ubuntu-24.04\\r)")
+    same(err.splitlines(), expected)
 
 
-class TestFloating(TestPlanted):
-    """A floating label anywhere outside a comment."""
-
-    def test_a_matrix_include_is_red(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """ubuntu-latest reaching runs-on through a matrix: the first line named."""
-        text = (
-            "jobs:\n  a:\n    strategy:\n      matrix:\n"
-            "        os: [ubuntu-latest, windows-latest]\n"
-            "        also: macos-latest\n"
-            "    runs-on: ${{ matrix.os }}\n"
-        )
-        status, _out, err = self.check(text, capfd=capfd)
-        same(status, runner_pin.EXIT_RED)
-        named = "        os: [ubuntu-latest, windows-latest]"
-        expected = red(f".github/workflows/ci.yml(floating label: 5:{named})")
-        same(err.splitlines(), expected)
-
-    def test_a_comment_is_not_a_label(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """A comment line naming ubuntu-latest: not counted."""
-        text = "# never ubuntu-latest\n   # nor macos-latest\n" + job("ubuntu-24.04")
-        status, out, err = self.check(text, capfd=capfd)
-        same(status, 0, err)
-        same(out.splitlines(), OK)
-
-    def test_a_trailing_comment_still_counts(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A label before a comment on the same line is a float."""
-        text = job("ubuntu-24.04") + "      - run: echo ubuntu-latest # no\n"
-        status, _out, err = self.check(text, capfd=capfd)
-        same(status, runner_pin.EXIT_RED)
-        line = "      - run: echo ubuntu-latest # no"
-        expected = red(f".github/workflows/ci.yml(floating label: 6:{line})")
-        same(err.splitlines(), expected)
+def test_a_matrix_include_is_red(
+    planted: Planted, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """ubuntu-latest reaching runs-on through a matrix: the first line named."""
+    text = (
+        "jobs:\n  a:\n    strategy:\n      matrix:\n"
+        "        os: [ubuntu-latest, windows-latest]\n"
+        "        also: macos-latest\n"
+        "    runs-on: ${{ matrix.os }}\n"
+    )
+    status, _out, err = planted.check(text, capfd=capfd)
+    same(status, runner_pin.EXIT_RED)
+    named = "        os: [ubuntu-latest, windows-latest]"
+    expected = red(f".github/workflows/ci.yml(floating label: 5:{named})")
+    same(err.splitlines(), expected)
 
 
-class TestCalls(TestPlanted):
-    """Reading the files, and the call itself."""
+def test_a_comment_is_not_a_label(
+    planted: Planted, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A comment line naming ubuntu-latest: not counted."""
+    text = "# never ubuntu-latest\n   # nor macos-latest\n" + job("ubuntu-24.04")
+    status, out, err = planted.check(text, capfd=capfd)
+    same(status, 0, err)
+    same(out.splitlines(), OK)
 
-    def test_the_order_is_the_arguments(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """Workflows then templates, each file's runs-on before its float."""
-        one = self.flow("b.yml", job("ubuntu-latest"))
-        two = self.flow("a.yml", job("x"))
-        three = self.plant("workflow-templates/c.yml", job("y"))
-        status, _out, err = self.helper(one, two, "--", three, capfd=capfd)
-        same(status, runner_pin.EXIT_RED)
-        expected = red(
-            f"{one}(runs-on: ubuntu-latest)",
-            f"{one}(floating label: 3:    runs-on: ubuntu-latest)",
-            f"{two}(runs-on: x)",
-            f"{three}(runs-on: y)",
-        )
-        same(err.splitlines(), expected)
 
-    def test_nothing_given_is_clean(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """A separator and no file: nothing to name."""
-        status, out, err = self.helper("--", capfd=capfd)
-        same(status, 0, err)
-        same(out.splitlines(), OK)
+def test_a_trailing_comment_still_counts(
+    planted: Planted, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A label before a comment on the same line is a float."""
+    text = job("ubuntu-24.04") + "      - run: echo ubuntu-latest # no\n"
+    status, _out, err = planted.check(text, capfd=capfd)
+    same(status, runner_pin.EXIT_RED)
+    line = "      - run: echo ubuntu-latest # no"
+    expected = red(f".github/workflows/ci.yml(floating label: 6:{line})")
+    same(err.splitlines(), expected)
 
-    def test_not_utf8_is_an_error(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """A workflow that is not UTF-8 is refused by name, exit 2."""
-        rel = self.flow("ci.yml", b"jobs: \xff\n")
-        status, _out, err = self.helper(rel, "--", capfd=capfd)
-        same(status, runner_pin.EXIT_ERROR)
-        assert err.startswith(f"{TASK}: {rel}: cannot be read as UTF-8:"), err
 
-    def test_a_missing_file_is_an_error(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A named file that is not there is refused by name, exit 2."""
-        status, _out, err = self.helper(
-            "--", "workflow-templates/gone.yml", capfd=capfd
-        )
-        same(status, runner_pin.EXIT_ERROR)
-        assert err.startswith(
-            f"{TASK}: workflow-templates/gone.yml: cannot be read as UTF-8:"
-        ), err
+def test_the_order_is_the_arguments(
+    planted: Planted, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Workflows then templates, each file's runs-on before its float."""
+    one = planted.flow("b.yml", job("ubuntu-latest"))
+    two = planted.flow("a.yml", job("x"))
+    three = planted.plant("workflow-templates/c.yml", job("y"))
+    status, _out, err = planted.helper(one, two, "--", three, capfd=capfd)
+    same(status, runner_pin.EXIT_RED)
+    expected = red(
+        f"{one}(runs-on: ubuntu-latest)",
+        f"{one}(floating label: 3:    runs-on: ubuntu-latest)",
+        f"{two}(runs-on: x)",
+        f"{three}(runs-on: y)",
+    )
+    same(err.splitlines(), expected)
 
-    def test_no_separator_is_a_usage_error(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """No `--` between the lists: exit 2 with the usage line."""
-        status, _out, err = self.helper(".github/workflows/ci.yml", capfd=capfd)
-        same(status, runner_pin.EXIT_ERROR)
-        same(err.splitlines(), [f"{TASK}: {runner_pin.USAGE}"])
+
+def test_nothing_given_is_clean(
+    planted: Planted, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A separator and no file: nothing to name."""
+    status, out, err = planted.helper("--", capfd=capfd)
+    same(status, 0, err)
+    same(out.splitlines(), OK)
+
+
+def test_not_utf8_is_an_error(
+    planted: Planted, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A workflow that is not UTF-8 is refused by name, exit 2."""
+    rel = planted.flow("ci.yml", b"jobs: \xff\n")
+    status, _out, err = planted.helper(rel, "--", capfd=capfd)
+    same(status, runner_pin.EXIT_ERROR)
+    assert err.startswith(f"{TASK}: {rel}: cannot be read as UTF-8:"), err
+
+
+def test_a_missing_file_is_an_error(
+    planted: Planted, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A named file that is not there is refused by name, exit 2."""
+    status, _out, err = planted.helper("--", "workflow-templates/gone.yml", capfd=capfd)
+    same(status, runner_pin.EXIT_ERROR)
+    assert err.startswith(
+        f"{TASK}: workflow-templates/gone.yml: cannot be read as UTF-8:"
+    ), err
+
+
+def test_no_separator_is_a_usage_error(
+    planted: Planted, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """No `--` between the lists: exit 2 with the usage line."""
+    status, _out, err = planted.helper(".github/workflows/ci.yml", capfd=capfd)
+    same(status, runner_pin.EXIT_ERROR)
+    same(err.splitlines(), [f"{TASK}: {runner_pin.USAGE}"])

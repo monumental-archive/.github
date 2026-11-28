@@ -43,52 +43,50 @@ def guarded(body: str) -> bool:
     return any(line.startswith("committer") for line in body.split("\n"))
 
 
-class TestCompose:
-    """The message is its parts."""
-
-    @given(TITLE, BODY, NUMBER)
-    @example("fix: x", " \r\n\t", "12")
-    @example("fix: x (#12)", "", "123")
-    @example("", "committer", "1")
-    def test_reads_back_as_its_parts(self, title: str, body: str, number: str) -> None:
-        """Subject, blank line, body; the subject alone; or the guard's refusal."""
-        if title.endswith(f"(#{number})"):
-            return
-        clean = body.replace("\r", "")
-        if guarded(clean):
-            with pytest.raises(sm.StepError):
-                sm.compose(title, body, number)
-            return
-        message = sm.compose(title, body, number)
-        subject = f"{title} (#{number})"
-        if not clean.strip(string.whitespace):
-            assert message == subject + "\n"
-        else:
-            assert message == f"{subject}\n\n{clean}\n"
-
-    @given(TITLE, BODY, NUMBER)
-    @example("", "committer", "1")
-    def test_crlf_is_lf(self, title: str, body: str, number: str) -> None:
-        """The API's CRLF body composes, or is refused, as the LF one."""
-        if title.endswith(f"(#{number})"):
-            return
-        lf = body.replace("\r", "")
-        if guarded(lf):
-            for spelt in (lf, lf.replace("\n", "\r\n")):
-                with pytest.raises(sm.StepError):
-                    sm.compose(title, spelt, number)
-            return
-        assert sm.compose(title, lf.replace("\n", "\r\n"), number) == sm.compose(
-            title, lf, number
-        )
-
-    @given(TITLE, NUMBER, NUMBER)
-    @example("fix: x", "12", "123")
-    def test_refuses_only_its_own_reference(
-        self, title: str, own: str, other: str
-    ) -> None:
-        """Ending in its own ref is refused; ending in another is not."""
+# The message is its parts.
+@given(TITLE, BODY, NUMBER)
+@example("fix: x", " \r\n\t", "12")
+@example("fix: x (#12)", "", "123")
+@example("", "committer", "1")
+def test_reads_back_as_its_parts(title: str, body: str, number: str) -> None:
+    """Subject, blank line, body; the subject alone; or the guard's refusal."""
+    if title.endswith(f"(#{number})"):
+        return
+    clean = body.replace("\r", "")
+    if guarded(clean):
         with pytest.raises(sm.StepError):
-            sm.compose(f"{title} (#{own})", "", own)
-        if other != own:
-            sm.compose(f"{title} (#{other})", "", own)
+            sm.compose(title, body, number)
+        return
+    message = sm.compose(title, body, number)
+    subject = f"{title} (#{number})"
+    if not clean.strip(string.whitespace):
+        assert message == subject + "\n"
+    else:
+        assert message == f"{subject}\n\n{clean}\n"
+
+
+@given(TITLE, BODY, NUMBER)
+@example("", "committer", "1")
+def test_crlf_is_lf(title: str, body: str, number: str) -> None:
+    """The API's CRLF body composes, or is refused, as the LF one."""
+    if title.endswith(f"(#{number})"):
+        return
+    lf = body.replace("\r", "")
+    if guarded(lf):
+        for spelt in (lf, lf.replace("\n", "\r\n")):
+            with pytest.raises(sm.StepError):
+                sm.compose(title, spelt, number)
+        return
+    assert sm.compose(title, lf.replace("\n", "\r\n"), number) == sm.compose(
+        title, lf, number
+    )
+
+
+@given(TITLE, NUMBER, NUMBER)
+@example("fix: x", "12", "123")
+def test_refuses_only_its_own_reference(title: str, own: str, other: str) -> None:
+    """Ending in its own ref is refused; ending in another is not."""
+    with pytest.raises(sm.StepError):
+        sm.compose(f"{title} (#{own})", "", own)
+    if other != own:
+        sm.compose(f"{title} (#{other})", "", own)

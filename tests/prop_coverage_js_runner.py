@@ -65,15 +65,13 @@ def draw_lockfile(draw: st.DrawFn) -> tuple[str, set[str]]:
 lockfile = st.composite(draw_lockfile)
 
 
-class TestProviders:
-    """Every dialect, every order."""
-
-    @given(lockfile())
-    @example(('"node_modules/@vitest/coverage-v8x": {\n', set()))
-    def test_exactly_the_providers_named(self, drawn: tuple[str, set[str]]) -> None:
-        """v8 and istanbul as the entries carry them, nothing else."""
-        text, expected = drawn
-        assert cj.providers(text) == expected
+# Every dialect, every order.
+@given(lockfile())
+@example(('"node_modules/@vitest/coverage-v8x": {\n', set()))
+def test_exactly_the_providers_named(drawn: tuple[str, set[str]]) -> None:
+    """v8 and istanbul as the entries carry them, nothing else."""
+    text, expected = drawn
+    assert cj.providers(text) == expected
 
 
 BINARY = st.sampled_from(["vitest", "node_modules/.bin/vitest", "./x/vitest"])
@@ -98,35 +96,35 @@ NONE: list[str] = []
 SUBCOMMAND = (RUN, NONE)
 
 
-class TestMeasuredRun:
-    """Known launchers measured; any other command left as it is."""
+# Known launchers measured; any other command left as it is.
+@given(st.sampled_from(cj.LAUNCHERS), BINARY, st.sampled_from(SUBCOMMAND), ARGS)
+def test_a_known_launcher_keeps_its_words(
+    launcher: tuple[str, ...], binary: str, run: list[str], args: list[str]
+) -> None:
+    """Every word kept in order, `run` once, the flags appended."""
+    head = [*launcher, binary]
+    given_words = [*run, *args]
+    rest = given_words if given_words[:1] == ["run"] else ["run", *given_words]
+    got = cj.measured_run("v8", "/d", [*head, *given_words])
+    if got is None:
+        pytest.fail("a vitest run behind a known launcher went unmeasured")
+    assert got[: len(head)] == head
+    assert got[len(head) : len(head) + len(rest)] == rest
+    tail = got[len(head) + len(rest) :]
+    assert len(tail) == 5
+    assert all(w.startswith("--coverage.") for w in tail), tail
 
-    @given(st.sampled_from(cj.LAUNCHERS), BINARY, st.sampled_from(SUBCOMMAND), ARGS)
-    def test_a_known_launcher_keeps_its_words(
-        self, launcher: tuple[str, ...], binary: str, run: list[str], args: list[str]
-    ) -> None:
-        """Every word kept in order, `run` once, the flags appended."""
-        head = [*launcher, binary]
-        given_words = [*run, *args]
-        rest = given_words if given_words[:1] == ["run"] else ["run", *given_words]
-        got = cj.measured_run("v8", "/d", [*head, *given_words])
-        if got is None:
-            pytest.fail("a vitest run behind a known launcher went unmeasured")
-        assert got[: len(head)] == head
-        assert got[len(head) : len(head) + len(rest)] == rest
-        tail = got[len(head) + len(rest) :]
-        assert len(tail) == 5
-        assert all(w.startswith("--coverage.") for w in tail), tail
 
-    @given(st.sampled_from(["sudo", "env", "time", "bunx", "nice"]), BINARY, ARGS)
-    def test_an_unknown_launcher_is_unchanged(
-        self, prefix: str, binary: str, args: list[str]
-    ) -> None:
-        """Never measured, so the leg's report names the remedy."""
-        assert cj.measured_run("v8", "/d", [prefix, binary, *args]) is None
+@given(st.sampled_from(["sudo", "env", "time", "bunx", "nice"]), BINARY, ARGS)
+def test_an_unknown_launcher_is_unchanged(
+    prefix: str, binary: str, args: list[str]
+) -> None:
+    """Never measured, so the leg's report names the remedy."""
+    assert cj.measured_run("v8", "/d", [prefix, binary, *args]) is None
 
-    @given(ARGS)
-    def test_no_vitest_is_unchanged(self, args: list[str]) -> None:
-        """A command naming no vitest is not the leg's."""
-        command = ["pytest", *(a for a in args if a != "vitest")]
-        assert cj.measured_run("v8", "/d", command) is None
+
+@given(ARGS)
+def test_no_vitest_is_unchanged(args: list[str]) -> None:
+    """A command naming no vitest is not the leg's."""
+    command = ["pytest", *(a for a in args if a != "vitest")]
+    assert cj.measured_run("v8", "/d", command) is None

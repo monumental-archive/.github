@@ -136,90 +136,82 @@ def step(name: str) -> dict[str, object]:
     return found
 
 
-class TestBuildStepIsTheHelper:
-    """The job runs the helper these rows run, through the one link."""
-
-    def test_the_shipped_step_calls_the_helper(self) -> None:
-        """The run: is the call alone, through `.org-canon`."""
-        body = step("Build every command")["run"]
-        assert body == '"${ORG_PYTHON}" -I .org-canon/belt build-go-commands\n'
+# The job runs the helper these rows run, through the one link.
+def test_the_shipped_step_calls_the_helper() -> None:
+    """The run: is the call alone, through `.org-canon`."""
+    body = step("Build every command")["run"]
+    assert body == '"${ORG_PYTHON}" -I .org-canon/belt build-go-commands\n'
 
 
-class TestBuilds:
-    """Every main package becomes one staged binary."""
-
-    def test_two_commands_build_two_binaries(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """Each named by its import path's last element."""
-        run = run_helper(
-            "example.com/m/cmd/stele\nexample.com/m/cmd/probe\n", capfd=capfd
-        )
-        assert run.returncode == 0, run.stdout + run.stderr
-        staged: list[str] = ["probe", "stele"]
-        assert staged == run.staged
-        go: list[str] = [
-            f"list -f {TEMPLATE} ./...",
-            "build -o staged/stele example.com/m/cmd/stele",
-            "build -o staged/probe example.com/m/cmd/probe",
-        ]
-        assert go == run.go
-        assert run.stdout == ""
-
-    def test_the_blank_lines_of_go_list_are_no_package(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """Non-main packages print an empty line each."""
-        run = run_helper("\n\nexample.com/m\n\n", capfd=capfd)
-        assert run.returncode == 0, run.stdout + run.stderr
-        staged: list[str] = ["m"]
-        assert staged == run.staged
+# Every main package becomes one staged binary.
+def test_two_commands_build_two_binaries(capfd: pytest.CaptureFixture[str]) -> None:
+    """Each named by its import path's last element."""
+    run = run_helper("example.com/m/cmd/stele\nexample.com/m/cmd/probe\n", capfd=capfd)
+    assert run.returncode == 0, run.stdout + run.stderr
+    staged: list[str] = ["probe", "stele"]
+    assert staged == run.staged
+    go: list[str] = [
+        f"list -f {TEMPLATE} ./...",
+        "build -o staged/stele example.com/m/cmd/stele",
+        "build -o staged/probe example.com/m/cmd/probe",
+    ]
+    assert go == run.go
+    assert run.stdout == ""
 
 
-class TestRefuses:
-    """One row per refusal, each message asserted."""
+def test_the_blank_lines_of_go_list_are_no_package(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """Non-main packages print an empty line each."""
+    run = run_helper("\n\nexample.com/m\n\n", capfd=capfd)
+    assert run.returncode == 0, run.stdout + run.stderr
+    staged: list[str] = ["m"]
+    assert staged == run.staged
 
-    def test_a_module_with_no_main_package_is_refused(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A library is the wrong class."""
-        run = run_helper("\n\n", capfd=capfd)
-        assert run.returncode == 1
-        assert run.stderr == (
-            "::error::build-go-commands: no main packages in this module —"
-            " go-binary is the wrong class\n"
-        )
-        assert run.staged == NOTHING
 
-    def test_two_commands_with_one_binary_name_are_refused(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """The second would overwrite the first; it is never built."""
-        run = run_helper(
-            "example.com/m/cmd/tool\nexample.com/m/internal/tool\n", capfd=capfd
-        )
-        assert run.returncode == 1
-        assert run.stderr == (
-            "::error::build-go-commands: two main packages both build a binary"
-            " named tool\n"
-        )
-        staged: list[str] = ["tool"]
-        assert staged == run.staged
-        assert "build -o staged/tool example.com/m/internal/tool" not in run.go
+# One row per refusal, each message asserted.
+def test_a_module_with_no_main_package_is_refused(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """A library is the wrong class."""
+    run = run_helper("\n\n", capfd=capfd)
+    assert run.returncode == 1
+    assert run.stderr == (
+        "::error::build-go-commands: no main packages in this module —"
+        " go-binary is the wrong class\n"
+    )
+    assert run.staged == NOTHING
 
-    def test_a_failing_build_fails_the_step_with_its_status(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """The failing build's run.returncode and message; none after it is built.
 
-        The script row: go's message is on the child's own stderr.
-        """
-        run = run_helper(
-            "example.com/m/cmd/a\nexample.com/m/cmd/b\n",
-            broken="example.com/m/cmd/a",
-            capfd=capfd,
-        )
-        assert run.returncode == 1
-        assert run.stderr == "example.com/m/cmd/a: undefined: x\n"
-        assert run.stdout == ""
-        assert run.staged == NOTHING
+def test_two_commands_with_one_binary_name_are_refused(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """The second would overwrite the first; it is never built."""
+    run = run_helper(
+        "example.com/m/cmd/tool\nexample.com/m/internal/tool\n", capfd=capfd
+    )
+    assert run.returncode == 1
+    assert run.stderr == (
+        "::error::build-go-commands: two main packages both build a binary named tool\n"
+    )
+    staged: list[str] = ["tool"]
+    assert staged == run.staged
+    assert "build -o staged/tool example.com/m/internal/tool" not in run.go
+
+
+def test_a_failing_build_fails_the_step_with_its_status(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """The failing build's run.returncode and message; none after it is built.
+
+    The script row: go's message is on the child's own stderr.
+    """
+    run = run_helper(
+        "example.com/m/cmd/a\nexample.com/m/cmd/b\n",
+        broken="example.com/m/cmd/a",
+        capfd=capfd,
+    )
+    assert run.returncode == 1
+    assert run.stderr == "example.com/m/cmd/a: undefined: x\n"
+    assert run.stdout == ""
+    assert run.staged == NOTHING

@@ -79,12 +79,10 @@ def red(*files: str) -> list[str]:
     ]
 
 
-@pytest.mark.usefixtures("_set_up_test_boundary")
-class TestBoundary:
+class Boundary:
     """Planted workflows; the boundary's verdict on them."""
 
-    @fixture
-    def _set_up_test_boundary(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Plant an empty workflows directory."""
         self.tree = tmp_path
         (self.tree / ".github" / "workflows").mkdir(parents=True)
@@ -145,87 +143,106 @@ class TestBoundary:
             check=False,
         )
 
-    def test_no_workflows_is_skipped_by_name(self) -> None:
-        """No workflow file: the task says it skipped."""
-        done = self.task()
-        same(done.returncode, 0, done.stderr)
-        skipped = ["lint:capability-boundary: no workflows, skipped"]
-        same(done.stdout.splitlines(), skipped)
 
-    def test_breach_is_red_through_the_task(self) -> None:
-        """The task body hands the helper every workflow; a breach is red."""
-        self.plant("clean.yml", CALLED + JOBS)
-        bad = self.plant("sign.yaml", CALLED + GRANT + JOBS)
-        done = self.task()
-        same(done.returncode, capability_boundary.EXIT_RED)
-        same(done.stderr.splitlines(), red(bad))
+@fixture
+def boundary(tmp_path: Path) -> Boundary:
+    """Give each row its own Boundary."""
+    return Boundary(tmp_path)
 
-    def test_inside_the_boundary_is_ok(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """Not called, no grant, a grant in prose, a marked signer: ok."""
-        rows = {
-            "not called": "on: push\n" + GRANT + JOBS,
-            "no grant": CALLED + JOBS,
-            "grant in a comment": CALLED + "# no id-token: write, ever\n" + JOBS,
-            "grant after a hash": CALLED + "x: 1 # id-token: write\n" + JOBS,
-            "marked": CALLED + GRANT + MARKER + JOBS,
-            "marked, indented": CALLED + GRANT + JOBS + "  #  " + MARKER[2:],
-        }
-        for text in rows.values():
-            rel = self.plant("wf.yml", text)
-            status, out, err = self.helper(rel, capfd=capfd)
-            same(status, 0, err)
-            same(out.splitlines(), OK)
-            same(err, "")
 
-    def test_breaches_are_red_and_named(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """No marker, or a marker only in prose: red, every file named."""
-        bare = self.plant("bare.yml", CALLED + GRANT + JOBS)
-        prose = self.plant(
-            "prose.yml",
-            CALLED + GRANT + "# see the capability-boundary: rule\n" + JOBS,
-        )
-        tabbed = self.plant("tabbed.yml", "on:\n\tworkflow_call:\n\tid-token:\twrite\n")
-        clean = self.plant("clean.yml", CALLED + JOBS)
-        status, out, err = self.helper(bare, clean, prose, tabbed, capfd=capfd)
-        same(status, capability_boundary.EXIT_RED)
-        same(err.splitlines(), red(bare, prose, tabbed))
-        same(out, "")
+def test_no_workflows_is_skipped_by_name(boundary: Boundary) -> None:
+    """No workflow file: the task says it skipped."""
+    done = boundary.task()
+    same(done.returncode, 0, done.stderr)
+    skipped = ["lint:capability-boundary: no workflows, skipped"]
+    same(done.stdout.splitlines(), skipped)
 
-    def test_a_line_is_split_on_newline_alone(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A carriage return or form feed inside a line does not end it."""
-        text = "on:\n  workflow_call:\nx: '#'\rid-token: write\n"
-        rel = self.plant("cr.yml", text)
-        status, out, err = self.helper(rel, capfd=capfd)
+
+def test_breach_is_red_through_the_task(boundary: Boundary) -> None:
+    """The task body hands the helper every workflow; a breach is red."""
+    boundary.plant("clean.yml", CALLED + JOBS)
+    bad = boundary.plant("sign.yaml", CALLED + GRANT + JOBS)
+    done = boundary.task()
+    same(done.returncode, capability_boundary.EXIT_RED)
+    same(done.stderr.splitlines(), red(bad))
+
+
+def test_inside_the_boundary_is_ok(
+    boundary: Boundary, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Not called, no grant, a grant in prose, a marked signer: ok."""
+    rows = {
+        "not called": "on: push\n" + GRANT + JOBS,
+        "no grant": CALLED + JOBS,
+        "grant in a comment": CALLED + "# no id-token: write, ever\n" + JOBS,
+        "grant after a hash": CALLED + "x: 1 # id-token: write\n" + JOBS,
+        "marked": CALLED + GRANT + MARKER + JOBS,
+        "marked, indented": CALLED + GRANT + JOBS + "  #  " + MARKER[2:],
+    }
+    for text in rows.values():
+        rel = boundary.plant("wf.yml", text)
+        status, out, err = boundary.helper(rel, capfd=capfd)
         same(status, 0, err)
         same(out.splitlines(), OK)
+        same(err, "")
 
-    def test_not_utf8_is_an_error(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """A workflow that is not UTF-8 is refused by name, exit 2."""
-        rel = self.plant("bad.yml", b"on: \xff\n")
-        status, _out, err = self.helper(rel, capfd=capfd)
-        same(status, capability_boundary.EXIT_ERROR)
-        assert err.startswith(
-            f"lint:capability-boundary: {rel}: cannot be read as UTF-8:"
-        ), err
 
-    def test_missing_file_is_an_error(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """A named workflow that does not exist is refused by name, exit 2."""
-        status, _out, err = self.helper(".github/workflows/gone.yml", capfd=capfd)
-        same(status, capability_boundary.EXIT_ERROR)
-        assert err.startswith(
-            "lint:capability-boundary: .github/workflows/gone.yml:"
-            " cannot be read as UTF-8:"
-        ), err
+def test_breaches_are_red_and_named(
+    boundary: Boundary, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """No marker, or a marker only in prose: red, every file named."""
+    bare = boundary.plant("bare.yml", CALLED + GRANT + JOBS)
+    prose = boundary.plant(
+        "prose.yml",
+        CALLED + GRANT + "# see the capability-boundary: rule\n" + JOBS,
+    )
+    tabbed = boundary.plant("tabbed.yml", "on:\n\tworkflow_call:\n\tid-token:\twrite\n")
+    clean = boundary.plant("clean.yml", CALLED + JOBS)
+    status, out, err = boundary.helper(bare, clean, prose, tabbed, capfd=capfd)
+    same(status, capability_boundary.EXIT_RED)
+    same(err.splitlines(), red(bare, prose, tabbed))
+    same(out, "")
 
-    def test_no_workflows_is_a_usage_error(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """No workflow named: exit 2 with the usage line."""
-        status, _out, err = self.helper(capfd=capfd)
-        same(status, capability_boundary.EXIT_ERROR)
-        usage = "lint:capability-boundary: usage: belt capability-boundary WORKFLOW..."
-        same(err.splitlines(), [usage])
+
+def test_a_line_is_split_on_newline_alone(
+    boundary: Boundary, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A carriage return or form feed inside a line does not end it."""
+    text = "on:\n  workflow_call:\nx: '#'\rid-token: write\n"
+    rel = boundary.plant("cr.yml", text)
+    status, out, err = boundary.helper(rel, capfd=capfd)
+    same(status, 0, err)
+    same(out.splitlines(), OK)
+
+
+def test_not_utf8_is_an_error(
+    boundary: Boundary, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A workflow that is not UTF-8 is refused by name, exit 2."""
+    rel = boundary.plant("bad.yml", b"on: \xff\n")
+    status, _out, err = boundary.helper(rel, capfd=capfd)
+    same(status, capability_boundary.EXIT_ERROR)
+    assert err.startswith(
+        f"lint:capability-boundary: {rel}: cannot be read as UTF-8:"
+    ), err
+
+
+def test_missing_file_is_an_error(
+    boundary: Boundary, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A named workflow that does not exist is refused by name, exit 2."""
+    status, _out, err = boundary.helper(".github/workflows/gone.yml", capfd=capfd)
+    same(status, capability_boundary.EXIT_ERROR)
+    assert err.startswith(
+        "lint:capability-boundary: .github/workflows/gone.yml: cannot be read as UTF-8:"
+    ), err
+
+
+def test_no_workflows_is_a_usage_error(
+    boundary: Boundary, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """No workflow named: exit 2 with the usage line."""
+    status, _out, err = boundary.helper(capfd=capfd)
+    same(status, capability_boundary.EXIT_ERROR)
+    usage = "lint:capability-boundary: usage: belt capability-boundary WORKFLOW..."
+    same(err.splitlines(), [usage])

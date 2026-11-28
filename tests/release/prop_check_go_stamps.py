@@ -160,67 +160,61 @@ STAMPED = st.tuples(
 HEAD_A, HEAD_B = "a" * 40, "b" * 40
 
 
-class TestAcceptedExactly:
-    """V: accepted exactly when revision is HEAD, clean, and stamped."""
-
-    @given(STAMPED)
-    @example((
+# V: accepted exactly when revision is HEAD, clean, and stamped.
+@given(STAMPED)
+@example((
+    HEAD_A,
+    render(
+        None,
+        None,
+        "example.com/m",
+        [],
+        [
+            ("-ldflags", f"-X=main.v=vcs.revision={HEAD_A}"),
+            ("-ldflags", "-X=main.m=vcs.modified=false"),
+        ],
+    ),
+    False,
+))
+@example((
+    HEAD_A,
+    render(
+        HEAD_B,
+        "false",
+        "example.com/m",
+        [],
+        [
+            ("-ldflags", f"-X=main.v=vcs.revision={HEAD_A}"),
+        ],
+    ),
+    False,
+))
+@example((
+    HEAD_A,
+    render(
         HEAD_A,
-        render(
-            None,
-            None,
-            "example.com/m",
-            [],
-            [
-                ("-ldflags", f"-X=main.v=vcs.revision={HEAD_A}"),
-                ("-ldflags", "-X=main.m=vcs.modified=false"),
-            ],
-        ),
-        False,
-    ))
-    @example((
-        HEAD_A,
-        render(
-            HEAD_B,
-            "false",
-            "example.com/m",
-            [],
-            [
-                ("-ldflags", f"-X=main.v=vcs.revision={HEAD_A}"),
-            ],
-        ),
-        False,
-    ))
-    @example((
-        HEAD_A,
-        render(
-            HEAD_A,
-            "true",
-            "example.com/m",
-            [],
-            [
-                ("-ldflags", '"-X main.m=vcs.modified=false"'),
-            ],
-        ),
-        False,
-    ))
-    def test_accepted_exactly_when_stamped_with_head(
-        self, drawn: tuple[str, str, bool]
-    ) -> None:
-        """No other setting, dependency or value moves the verdict."""
-        head, info, good = drawn
-        refused = verdict(info, head)
-        assert (refused is None) == good, f"{info!r}: {refused}"
-        if refused is not None:
-            assert refused.startswith(f"{BINARY.name}: "), refused
+        "true",
+        "example.com/m",
+        [],
+        [
+            ("-ldflags", '"-X main.m=vcs.modified=false"'),
+        ],
+    ),
+    False,
+))
+def test_accepted_exactly_when_stamped_with_head(drawn: tuple[str, str, bool]) -> None:
+    """No other setting, dependency or value moves the verdict."""
+    head, info, good = drawn
+    refused = verdict(info, head)
+    assert (refused is None) == good, f"{info!r}: {refused}"
+    if refused is not None:
+        assert refused.startswith(f"{BINARY.name}: "), refused
 
 
-class TestAnyText:
-    """R: any text is accepted or refused by name."""
-
-    @given(st.text(), st.text(max_size=40))
-    def test_refuses_by_name_only(self, info: str, head: str) -> None:
-        """The check raises nothing but its own refusal, which names the binary."""
-        refused = verdict(info, head)
-        if refused is not None:
-            assert refused.startswith(f"{BINARY.name}: "), refused
+# R: any text is accepted or refused by name.
+@given(st.text(), st.text(max_size=40))
+def test_refuses_by_name_only(info: str, head: str) -> None:
+    """The check raises nothing but its own refusal, which names the binary."""
+    refused = verdict(info, head)
+    if refused is not None:
+        assert refused.startswith(f"{BINARY.name}: "), refused

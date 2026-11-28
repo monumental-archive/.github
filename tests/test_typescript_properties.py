@@ -263,88 +263,85 @@ def args_after_config(argv: list[str]) -> list[str]:
     return argv[argv.index("-c") + 2 :]
 
 
-class TestSkips:
-    """Nothing to run: exit 0, skipped, named."""
+# Nothing to run: exit 0, skipped, named.
+@pytest.mark.parametrize(
+    ("body", "label"),
+    [
+        (GATE, "test:typescript-properties"),
+        (AUDIT, "audit:typescript-properties"),
+        (LINT, "lint:typescript-properties"),
+    ],
+)
+def test_no_fast_check_skips_clean_by_name(body: object, label: object) -> None:
+    """A vitest lockfile without fast-check: every leg skips."""
+    files = {"pnpm-lock.yaml": LOCK_VITEST, "a.prop.test.ts": PROPERTY}
+    done = run(body, files)
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == f"{label}: no fast-check in a tracked lockfile, skipped\n"
+    assert done.argv is None
 
-    @pytest.mark.parametrize(
-        ("body", "label"),
-        [
-            (GATE, "test:typescript-properties"),
-            (AUDIT, "audit:typescript-properties"),
-            (LINT, "lint:typescript-properties"),
-        ],
+
+def test_no_lockfile_skips_clean_by_name() -> None:
+    """No lockfile tracked at all: the same skip."""
+    done = run(GATE, {"a.prop.test.ts": PROPERTY})
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == (
+        "test:typescript-properties: no fast-check in a tracked lockfile, skipped\n"
     )
-    def test_no_fast_check_skips_clean_by_name(
-        self, body: object, label: object
-    ) -> None:
-        """A vitest lockfile without fast-check: every leg skips."""
-        files = {"pnpm-lock.yaml": LOCK_VITEST, "a.prop.test.ts": PROPERTY}
-        done = run(body, files)
-        assert done.returncode == 0, done.stderr
-        assert done.stdout == f"{label}: no fast-check in a tracked lockfile, skipped\n"
-        assert done.argv is None
-
-    def test_no_lockfile_skips_clean_by_name(self) -> None:
-        """No lockfile tracked at all: the same skip."""
-        done = run(GATE, {"a.prop.test.ts": PROPERTY})
-        assert done.returncode == 0, done.stderr
-        assert done.stdout == (
-            "test:typescript-properties: no fast-check in a tracked lockfile, skipped\n"
-        )
-
-    def test_an_untracked_lockfile_is_not_read(self) -> None:
-        """A lockfile git does not track is not the repository's."""
-        done = run(GATE, {"a.prop.test.ts": PROPERTY, ".gitignore": "pnpm-lock.yaml\n"})
-        assert "no fast-check in a tracked lockfile, skipped" in done.stdout
-
-    def test_no_property_file_skips_clean_by_name(self) -> None:
-        """fast-check locked, no *.prop.test.*: skipped, named."""
-        done = run(GATE, {"pnpm-lock.yaml": LOCK_BOTH, "a.test.ts": ORDINARY})
-        assert done.returncode == 0, done.stderr
-        assert done.stdout == (
-            "test:typescript-properties: no *.prop.test.{ts,tsx,mts,cts} tracked,"
-            " skipped\n"
-        )
-        assert done.argv is None
 
 
-class TestRefusals:
-    """Properties tracked, but nothing the leg may run them with."""
+def test_an_untracked_lockfile_is_not_read() -> None:
+    """A lockfile git does not track is not the repository's."""
+    done = run(GATE, {"a.prop.test.ts": PROPERTY, ".gitignore": "pnpm-lock.yaml\n"})
+    assert "no fast-check in a tracked lockfile, skipped" in done.stdout
 
-    def test_no_vitest_in_the_lockfile_is_red(self) -> None:
-        """fast-check locked, vitest not: red, named."""
-        done = run(GATE, {"pnpm-lock.yaml": LOCK_FC_ONLY, "a.prop.test.ts": PROPERTY})
-        assert done.returncode == 1
-        assert (
-            "test:typescript-properties: *.prop.test.* tracked but the lockfile pins"
-            " no vitest"
-        ) in done.stderr
 
-    def test_vitest_not_installed_is_red(self) -> None:
-        """Locked but no node_modules/.bin/vitest: red, with the remedy."""
-        done = run(
-            GATE,
-            {"pnpm-lock.yaml": LOCK_BOTH, "a.prop.test.ts": PROPERTY},
-            runner=False,
-        )
-        assert done.returncode == 1
-        assert (
-            "test:typescript-properties: vitest is in the lockfile but not installed"
-            in done.stderr
-        )
+def test_no_property_file_skips_clean_by_name() -> None:
+    """fast-check locked, no *.prop.test.*: skipped, named."""
+    done = run(GATE, {"pnpm-lock.yaml": LOCK_BOTH, "a.test.ts": ORDINARY})
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == (
+        "test:typescript-properties: no *.prop.test.{ts,tsx,mts,cts} tracked, skipped\n"
+    )
+    assert done.argv is None
 
-    def test_a_bad_audit_seed_is_a_usage_error(self) -> None:
-        """ORG_PROPERTY_SEED that is not an integer: exit 2, named."""
-        done = run(
-            AUDIT,
-            {"pnpm-lock.yaml": LOCK_BOTH, "a.prop.test.ts": PROPERTY},
-            env={"ORG_PROPERTY_SEED": "seven"},
-        )
-        assert done.returncode == 2
-        assert (
-            "ORG_PROPERTY_SEED must be a non-negative integer, got 'seven'"
-            in done.stderr
-        )
+
+# Properties tracked, but nothing the leg may run them with.
+def test_no_vitest_in_the_lockfile_is_red() -> None:
+    """fast-check locked, vitest not: red, named."""
+    done = run(GATE, {"pnpm-lock.yaml": LOCK_FC_ONLY, "a.prop.test.ts": PROPERTY})
+    assert done.returncode == 1
+    assert (
+        "test:typescript-properties: *.prop.test.* tracked but the lockfile pins"
+        " no vitest"
+    ) in done.stderr
+
+
+def test_vitest_not_installed_is_red() -> None:
+    """Locked but no node_modules/.bin/vitest: red, with the remedy."""
+    done = run(
+        GATE,
+        {"pnpm-lock.yaml": LOCK_BOTH, "a.prop.test.ts": PROPERTY},
+        runner=False,
+    )
+    assert done.returncode == 1
+    assert (
+        "test:typescript-properties: vitest is in the lockfile but not installed"
+        in done.stderr
+    )
+
+
+def test_a_bad_audit_seed_is_a_usage_error() -> None:
+    """ORG_PROPERTY_SEED that is not an integer: exit 2, named."""
+    done = run(
+        AUDIT,
+        {"pnpm-lock.yaml": LOCK_BOTH, "a.prop.test.ts": PROPERTY},
+        env={"ORG_PROPERTY_SEED": "seven"},
+    )
+    assert done.returncode == 2
+    assert (
+        "ORG_PROPERTY_SEED must be a non-negative integer, got 'seven'" in done.stderr
+    )
 
 
 GATE_FILES = {
@@ -358,159 +355,166 @@ GATE_FILES = {
 AUDIT_FILES = {"pnpm-lock.yaml": LOCK_BOTH, "a.prop.test.ts": PROPERTY}
 
 
-class TestGate:
-    """The gate leg: the fixed seed, and only the property files."""
-
-    def test_the_runner_gets_the_fixed_seed_and_only_property_files(self) -> None:
-        """Seed 1336, 200 runs, the two property files and nothing else."""
-        done = run(GATE, GATE_FILES)
-        assert done.returncode == 0, done.stderr
-        assert (done.seed, done.runs) == ("1336", "200")
-        argv = done.handed()
-        head: list[str] = ["run", "--root", done.root]
-        assert argv[:3] == head
-        assert argv[3] == "-c"
-        assert argv[4].endswith("/org-property.config.mts"), argv
-        filters: list[str] = ["src/a.prop.test.ts", "src/b.prop.test.tsx"]
-        assert args_after_config(argv) == filters
-        assert done.stdout == (
-            "test:typescript-properties: seed 1336, 200 runs per property,"
-            " vitest.config.ts\n"
-            "fast-check: src/a.prop.test.ts: 200 runs, seed 1336\n"
-            "fast-check: src/b.prop.test.tsx: 200 runs, seed 1336\n"
-            "test:typescript-properties: every property file held\n"
-        )
-
-    def test_two_runs_hand_the_runner_the_same_seed(self) -> None:
-        """Deterministic: the seed does not move between runs."""
-        first, second = run(GATE, GATE_FILES), run(GATE, GATE_FILES)
-        assert (first.seed, first.handed()[5:]) == (second.seed, second.handed()[5:])
-
-    def test_the_gate_ignores_a_given_seed(self) -> None:
-        """ORG_PROPERTY_SEED is the audit's replay, never the gate's."""
-        done = run(GATE, GATE_FILES, env={"ORG_PROPERTY_SEED": "7"})
-        assert done.seed == "1336"
-
-    def test_the_wrapper_imports_the_repository_config(self) -> None:
-        """The repo's config, the exact files and the belt's setup file."""
-        done = run(GATE, GATE_FILES)
-        assert (
-            f"import * as repo from {json.dumps(done.root + '/vitest.config.ts')};"
-            in done.written()
-        )
-        assert (
-            'const files = ["src/a.prop.test.ts", "src/b.prop.test.tsx"];'
-            in done.written()
-        )
-        assert 'const exclude = ["**/node_modules/**", "**/.git/**"];' in done.written()
-        assert re.search(r'const setup = ".*/org-property-setup\.mts";', done.written())
-        assert (
-            "project.config.setupFiles = [...project.config.setupFiles, setup];"
-            in done.written()
-        )
-        assert 'reporters: ["default", "json", seeder],' in done.written()
-
-    @pytest.mark.parametrize(
-        ("body", "files"), [(GATE, GATE_FILES), (AUDIT, AUDIT_FILES)]
+# The gate leg: the fixed seed, and only the property files.
+def test_the_runner_gets_the_fixed_seed_and_only_property_files() -> None:
+    """Seed 1336, 200 runs, the two property files and nothing else."""
+    done = run(GATE, GATE_FILES)
+    assert done.returncode == 0, done.stderr
+    assert (done.seed, done.runs) == ("1336", "200")
+    argv = done.handed()
+    head: list[str] = ["run", "--root", done.root]
+    assert argv[:3] == head
+    assert argv[3] == "-c"
+    assert argv[4].endswith("/org-property.config.mts"), argv
+    filters: list[str] = ["src/a.prop.test.ts", "src/b.prop.test.tsx"]
+    assert args_after_config(argv) == filters
+    assert done.stdout == (
+        "test:typescript-properties: seed 1336, 200 runs per property,"
+        " vitest.config.ts\n"
+        "fast-check: src/a.prop.test.ts: 200 runs, seed 1336\n"
+        "fast-check: src/b.prop.test.tsx: 200 runs, seed 1336\n"
+        "test:typescript-properties: every property file held\n"
     )
-    def test_every_project_has_no_per_test_limit(
-        self, body: object, files: object
-    ) -> None:
-        """No per-test limit per project, in both profiles; hooks untouched (#2144)."""
-        done = run(body, files)
-        assert done.returncode == 0, done.stderr
-        written = done.written()
-        assert "project.config.testTimeout = 0;" in written
-        assert "hookTimeout =" not in written
 
-    def test_a_config_without_projects_narrows_include(self) -> None:
-        """No test.projects: include is exactly the tracked property files."""
-        done = run(GATE, GATE_FILES)
-        assert (
-            "const narrowed = test.projects === undefined"
-            " ? { include: files, exclude } : {};"
-        ) in done.written()
-        assert "...narrowed," in done.written()
 
-    def test_no_repository_config_still_runs(self) -> None:
-        """No vitest config: the wrapper stands alone, named so."""
-        files = {k: v for k, v in GATE_FILES.items() if k != "vitest.config.ts"}
-        done = run(GATE, files)
-        assert done.returncode == 0, done.stderr
-        assert "200 runs per property, no vitest config\n" in done.stdout
-        assert "let config: any = {};" in done.written()
-        assert "import * as repo" not in done.written()
+def test_two_runs_hand_the_runner_the_same_seed() -> None:
+    """Deterministic: the seed does not move between runs."""
+    first, second = run(GATE, GATE_FILES), run(GATE, GATE_FILES)
+    assert (first.seed, first.handed()[5:]) == (second.seed, second.handed()[5:])
 
-    def test_vitest_config_wins_over_vite_config(self) -> None:
-        """Follow vitest's own lookup order: vitest.config.* first."""
-        files = {**GATE_FILES, "vite.config.ts": "export default {};\n"}
-        done = run(GATE, files)
-        assert "200 runs per property, vitest.config.ts\n" in done.stdout
 
-    def test_a_config_excluding_the_properties_passes(self) -> None:
-        """The repo's own run collects only ordinary tests: green."""
-        done = run(GATE, GATE_FILES, env={"STUB_COLLECTS": "src/c.test.ts"})
-        assert done.returncode == 0, done.stderr
-        assert done.argv is not None
+def test_the_gate_ignores_a_given_seed() -> None:
+    """ORG_PROPERTY_SEED is the audit's replay, never the gate's."""
+    done = run(GATE, GATE_FILES, env={"ORG_PROPERTY_SEED": "7"})
+    assert done.seed == "1336"
 
-    def test_a_config_collecting_a_property_is_red_by_name(self) -> None:
-        """The repo's own run would run a property unseeded: red, the fix."""
-        done = run(
-            GATE,
-            GATE_FILES,
-            env={"STUB_COLLECTS": "src/c.test.ts src/b.prop.test.tsx"},
-        )
-        assert done.returncode == 1
-        assert done.stderr == (
-            "test:typescript-properties: the repository's own vitest run collects"
-            " these property files,\n"
-            "  so its test task runs them a second time with no seed:\n"
-            "    src/b.prop.test.tsx\n"
-            "  add the property pattern to test.exclude in vitest.config.ts,"
-            " beside vitest's\n"
-            "  defaults (configDefaults from vitest/config):\n"
-            '    exclude: [...configDefaults.exclude, "**/*.prop.test.*"],\n'
-        )
-        assert done.argv is None, "nothing may run before the refusal"
 
-    def test_a_listing_that_fails_is_red(self) -> None:
-        """Refuse when vitest cannot resolve the repo's config: red, its output kept."""
-        done = run(GATE, GATE_FILES, env={"STUB_LIST_EXIT": "1"})
-        assert done.returncode == 1
-        assert (
-            "test:typescript-properties: vitest could not list the files the"
-            " repository's own config collects:\n  listed\n"
-        ) in done.stderr
+def test_the_wrapper_imports_the_repository_config() -> None:
+    """The repo's config, the exact files and the belt's setup file."""
+    done = run(GATE, GATE_FILES)
+    assert (
+        f"import * as repo from {json.dumps(done.root + '/vitest.config.ts')};"
+        in done.written()
+    )
+    assert (
+        'const files = ["src/a.prop.test.ts", "src/b.prop.test.tsx"];' in done.written()
+    )
+    assert 'const exclude = ["**/node_modules/**", "**/.git/**"];' in done.written()
+    assert re.search(r'const setup = ".*/org-property-setup\.mts";', done.written())
+    assert (
+        "project.config.setupFiles = [...project.config.setupFiles, setup];"
+        in done.written()
+    )
+    assert 'reporters: ["default", "json", seeder],' in done.written()
 
-    def test_the_audit_does_not_ask(self) -> None:
-        """The refusal is the gate's: the audit runs regardless."""
-        done = run(AUDIT, AUDIT_FILES, env={"STUB_COLLECTS": "a.prop.test.ts"})
-        assert done.returncode == 0, done.stderr
 
-    def test_a_failing_property_is_red(self) -> None:
-        """The runner's red is the leg's red, its status kept."""
-        done = run(GATE, GATE_FILES, env={"STUB_EXIT": "1"})
-        assert done.returncode == 1
-        assert "every property file held" not in done.stdout
+@pytest.mark.parametrize(("body", "files"), [(GATE, GATE_FILES), (AUDIT, AUDIT_FILES)])
+def test_every_project_has_no_per_test_limit(body: object, files: object) -> None:
+    """No per-test limit per project, in both profiles; hooks untouched (#2144)."""
+    done = run(body, files)
+    assert done.returncode == 0, done.stderr
+    written = done.written()
+    assert "project.config.testTimeout = 0;" in written
+    assert "hookTimeout =" not in written
 
-    def test_a_file_that_ran_unseeded_is_red_by_name(self) -> None:
-        """In the report but not in the seeded list: red (#2104)."""
-        done = run(GATE, GATE_FILES, env={"STUB_UNSEEDED": "src/a.prop.test.ts"})
-        assert done.returncode == 1
-        assert done.stderr == (
-            "test:typescript-properties: not every property file ran:\n"
-            "  src/a.prop.test.ts: ran without the belt's seed\n"
-        )
-        assert "every property file held" not in done.stdout
 
-    def test_a_file_the_runner_did_not_run_is_red(self) -> None:
-        """Green from the runner but a file absent from its report: red."""
-        done = run(GATE, GATE_FILES, env={"STUB_SKIP": "src/b.prop.test.tsx"})
-        assert done.returncode == 1
-        assert (
-            "test:typescript-properties: not every property file ran:\n"
-            "  src/b.prop.test.tsx: did not run, or ran no test\n"
-        ) in done.stderr
+def test_a_config_without_projects_narrows_include() -> None:
+    """No test.projects: include is exactly the tracked property files."""
+    done = run(GATE, GATE_FILES)
+    assert (
+        "const narrowed = test.projects === undefined"
+        " ? { include: files, exclude } : {};"
+    ) in done.written()
+    assert "...narrowed," in done.written()
+
+
+def test_no_repository_config_still_runs() -> None:
+    """No vitest config: the wrapper stands alone, named so."""
+    files = {k: v for k, v in GATE_FILES.items() if k != "vitest.config.ts"}
+    done = run(GATE, files)
+    assert done.returncode == 0, done.stderr
+    assert "200 runs per property, no vitest config\n" in done.stdout
+    assert "let config: any = {};" in done.written()
+    assert "import * as repo" not in done.written()
+
+
+def test_vitest_config_wins_over_vite_config() -> None:
+    """Follow vitest's own lookup order: vitest.config.* first."""
+    files = {**GATE_FILES, "vite.config.ts": "export default {};\n"}
+    done = run(GATE, files)
+    assert "200 runs per property, vitest.config.ts\n" in done.stdout
+
+
+def test_a_config_excluding_the_properties_passes() -> None:
+    """The repo's own run collects only ordinary tests: green."""
+    done = run(GATE, GATE_FILES, env={"STUB_COLLECTS": "src/c.test.ts"})
+    assert done.returncode == 0, done.stderr
+    assert done.argv is not None
+
+
+def test_a_config_collecting_a_property_is_red_by_name() -> None:
+    """The repo's own run would run a property unseeded: red, the fix."""
+    done = run(
+        GATE,
+        GATE_FILES,
+        env={"STUB_COLLECTS": "src/c.test.ts src/b.prop.test.tsx"},
+    )
+    assert done.returncode == 1
+    assert done.stderr == (
+        "test:typescript-properties: the repository's own vitest run collects"
+        " these property files,\n"
+        "  so its test task runs them a second time with no seed:\n"
+        "    src/b.prop.test.tsx\n"
+        "  add the property pattern to test.exclude in vitest.config.ts,"
+        " beside vitest's\n"
+        "  defaults (configDefaults from vitest/config):\n"
+        '    exclude: [...configDefaults.exclude, "**/*.prop.test.*"],\n'
+    )
+    assert done.argv is None, "nothing may run before the refusal"
+
+
+def test_a_listing_that_fails_is_red() -> None:
+    """Refuse when vitest cannot resolve the repo's config: red, its output kept."""
+    done = run(GATE, GATE_FILES, env={"STUB_LIST_EXIT": "1"})
+    assert done.returncode == 1
+    assert (
+        "test:typescript-properties: vitest could not list the files the"
+        " repository's own config collects:\n  listed\n"
+    ) in done.stderr
+
+
+def test_the_audit_does_not_ask() -> None:
+    """The refusal is the gate's: the audit runs regardless."""
+    done = run(AUDIT, AUDIT_FILES, env={"STUB_COLLECTS": "a.prop.test.ts"})
+    assert done.returncode == 0, done.stderr
+
+
+def test_a_failing_property_is_red() -> None:
+    """The runner's red is the leg's red, its status kept."""
+    done = run(GATE, GATE_FILES, env={"STUB_EXIT": "1"})
+    assert done.returncode == 1
+    assert "every property file held" not in done.stdout
+
+
+def test_a_file_that_ran_unseeded_is_red_by_name() -> None:
+    """In the report but not in the seeded list: red (#2104)."""
+    done = run(GATE, GATE_FILES, env={"STUB_UNSEEDED": "src/a.prop.test.ts"})
+    assert done.returncode == 1
+    assert done.stderr == (
+        "test:typescript-properties: not every property file ran:\n"
+        "  src/a.prop.test.ts: ran without the belt's seed\n"
+    )
+    assert "every property file held" not in done.stdout
+
+
+def test_a_file_the_runner_did_not_run_is_red() -> None:
+    """Green from the runner but a file absent from its report: red."""
+    done = run(GATE, GATE_FILES, env={"STUB_SKIP": "src/b.prop.test.tsx"})
+    assert done.returncode == 1
+    assert (
+        "test:typescript-properties: not every property file ran:\n"
+        "  src/b.prop.test.tsx: did not run, or ran no test\n"
+    ) in done.stderr
 
 
 # Two inline projects, one with a globalSetup, and one declared as a
@@ -534,82 +538,78 @@ export default {
 """
 
 
-class TestProjects:
-    """A config with test.projects: every project seeded, none refused."""
-
-    def test_the_staged_wrapper_seeds_projects_and_does_not_refuse(self) -> None:
-        """No refusal for test.projects; the onInit reporter is there."""
-        with tempfile.TemporaryDirectory() as scratch:
-            config = Path(scratch, "vitest.config.ts")
-            config.write_text(PROJECTS_CONFIG, encoding="utf-8")
-            staged = Path(scratch, "staged")
-            staged.mkdir()
-            tp.stage(str(staged), str(config), ["tests/unit/h.prop.test.ts"])
-            wrapper = (staged / "org-property.config.mts").read_text("utf-8")
-        assert "throw" not in wrapper
-        assert "does not inherit the root setupFiles the belt" not in wrapper
-        assert "onInit(vitest: any) {" in wrapper
-        assert "for (const project of vitest.projects) {" in wrapper
-        assert (
-            "project.config.setupFiles = [...project.config.setupFiles, setup];"
-            in wrapper
-        )
-        assert "project.config.exclude = [...exclude];" in wrapper
-        assert "project.config.testTimeout = 0;" in wrapper
-        assert 'reporters: ["default", "json", seeder],' in wrapper
-
-    def test_each_project_s_property_runs_seeded_and_an_orphan_is_red(
-        self,
-    ) -> None:
-        """A property per project prints seed 1336; one no project has is red."""
-        files = {
-            "pnpm-lock.yaml": LOCK_BOTH,
-            "vitest.config.ts": PROJECTS_CONFIG,
-            "tests/unit/h.prop.test.ts": PROPERTY,
-            "tests/stack/trig.prop.test.ts": PROPERTY,
-            "orphan/o.prop.test.ts": PROPERTY,
-        }
-        done = run(GATE, files, env={"STUB_SKIP": "orphan/o.prop.test.ts"})
-        assert done.returncode == 1
-        for name in ("tests/stack/trig.prop.test.ts", "tests/unit/h.prop.test.ts"):
-            assert f"fast-check: {name}: 200 runs, seed 1336\n" in done.stdout
-        assert done.stderr == (
-            "test:typescript-properties: not every property file ran:\n"
-            "  orphan/o.prop.test.ts: did not run, or ran no test\n"
-        )
+# A config with test.projects: every project seeded, none refused.
+def test_the_staged_wrapper_seeds_projects_and_does_not_refuse() -> None:
+    """No refusal for test.projects; the onInit reporter is there."""
+    with tempfile.TemporaryDirectory() as scratch:
+        config = Path(scratch, "vitest.config.ts")
+        config.write_text(PROJECTS_CONFIG, encoding="utf-8")
+        staged = Path(scratch, "staged")
+        staged.mkdir()
+        tp.stage(str(staged), str(config), ["tests/unit/h.prop.test.ts"])
+        wrapper = (staged / "org-property.config.mts").read_text("utf-8")
+    assert "throw" not in wrapper
+    assert "does not inherit the root setupFiles the belt" not in wrapper
+    assert "onInit(vitest: any) {" in wrapper
+    assert "for (const project of vitest.projects) {" in wrapper
+    assert (
+        "project.config.setupFiles = [...project.config.setupFiles, setup];" in wrapper
+    )
+    assert "project.config.exclude = [...exclude];" in wrapper
+    assert "project.config.testTimeout = 0;" in wrapper
+    assert 'reporters: ["default", "json", seeder],' in wrapper
 
 
-class TestAudit:
-    """The cron leg: a printed seed and a far larger run count."""
+def test_each_project_s_property_runs_seeded_and_an_orphan_is_red() -> None:
+    """A property per project prints seed 1336; one no project has is red."""
+    files = {
+        "pnpm-lock.yaml": LOCK_BOTH,
+        "vitest.config.ts": PROJECTS_CONFIG,
+        "tests/unit/h.prop.test.ts": PROPERTY,
+        "tests/stack/trig.prop.test.ts": PROPERTY,
+        "orphan/o.prop.test.ts": PROPERTY,
+    }
+    done = run(GATE, files, env={"STUB_SKIP": "orphan/o.prop.test.ts"})
+    assert done.returncode == 1
+    for name in ("tests/stack/trig.prop.test.ts", "tests/unit/h.prop.test.ts"):
+        assert f"fast-check: {name}: 200 runs, seed 1336\n" in done.stdout
+    assert done.stderr == (
+        "test:typescript-properties: not every property file ran:\n"
+        "  orphan/o.prop.test.ts: did not run, or ran no test\n"
+    )
 
-    def test_the_audit_prints_its_seed_first_and_honours_a_given_one(self) -> None:
-        """ORG_PROPERTY_SEED reproduces a run; the seed line comes first."""
-        done = run(AUDIT, AUDIT_FILES, env={"ORG_PROPERTY_SEED": "7"})
-        assert done.returncode == 0, done.stderr
-        assert done.stdout.startswith(
-            "audit:typescript-properties: seed 7 (reproduce: ORG_PROPERTY_SEED=7)\n"
-        ), done.stdout
-        assert (done.seed, done.runs) == ("7", "10000")
 
-    def test_an_unset_seed_is_random_and_printed(self) -> None:
-        """No seed given: a fresh one, and the printed one is the one used."""
-        done = run(AUDIT, AUDIT_FILES)
-        printed = re.match(
-            r"audit:typescript-properties: seed (\d+)"
-            r" \(reproduce: ORG_PROPERTY_SEED=\1\)\n",
-            done.stdout,
-        )
-        assert printed is not None, done.stdout
-        assert done.seed == (typed_std.group(printed, 1) if printed else None)
+# The cron leg: a printed seed and a far larger run count.
+def test_the_audit_prints_its_seed_first_and_honours_a_given_one() -> None:
+    """ORG_PROPERTY_SEED reproduces a run; the seed line comes first."""
+    done = run(AUDIT, AUDIT_FILES, env={"ORG_PROPERTY_SEED": "7"})
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.startswith(
+        "audit:typescript-properties: seed 7 (reproduce: ORG_PROPERTY_SEED=7)\n"
+    ), done.stdout
+    assert (done.seed, done.runs) == ("7", "10000")
 
-    def test_a_failure_says_where_the_example_lands(self) -> None:
-        """Red at a seed: the seed and the remedy, on stderr."""
-        done = run(AUDIT, AUDIT_FILES, env={"ORG_PROPERTY_SEED": "7", "STUB_EXIT": "1"})
-        assert done.returncode == 1
-        assert (
-            "audit:typescript-properties: seed 7 — commit each counterexample above"
-            in done.stderr
-        )
+
+def test_an_unset_seed_is_random_and_printed() -> None:
+    """No seed given: a fresh one, and the printed one is the one used."""
+    done = run(AUDIT, AUDIT_FILES)
+    printed = re.match(
+        r"audit:typescript-properties: seed (\d+)"
+        r" \(reproduce: ORG_PROPERTY_SEED=\1\)\n",
+        done.stdout,
+    )
+    assert printed is not None, done.stdout
+    assert done.seed == (typed_std.group(printed, 1) if printed else None)
+
+
+def test_a_failure_says_where_the_example_lands() -> None:
+    """Red at a seed: the seed and the remedy, on stderr."""
+    done = run(AUDIT, AUDIT_FILES, env={"ORG_PROPERTY_SEED": "7", "STUB_EXIT": "1"})
+    assert done.returncode == 1
+    assert (
+        "audit:typescript-properties: seed 7 — commit each counterexample above"
+        in done.stderr
+    )
 
 
 def lint(files: dict[str, str]) -> Ran:
@@ -622,252 +622,253 @@ def lint(files: dict[str, str]) -> Ran:
     return run(LINT, {"pnpm-lock.yaml": LOCK_BOTH, **files}, runner=False)
 
 
-class TestLint:
-    """Imports outside a property file, and restated seeds, by name."""
+# Imports outside a property file, and restated seeds, by name.
+def test_an_import_outside_a_property_file_is_red_by_name() -> None:
+    """Every import form, in an ordinary test and a .js file."""
+    done = lint({
+        "a.prop.test.ts": PROPERTY,
+        "src/plain.test.ts": PROPERTY,
+        "src/more.ts": (
+            'import fc from "fast-check";\n'
+            'const m = await import("fast-check/lib/x");\n'
+            'const r = require("@fast-check/jest");\n'
+            'import "@fast-check/worker";\n'
+        ),
+        "src/helper.prop.test.js": 'export * from "fast-check";\n',
+    })
+    assert done.returncode == 1
+    suffix = " but is not a *.prop.test.{ts,tsx,mts,cts} file\n"
+    for site, package in (
+        ("src/helper.prop.test.js:1", "fast-check"),
+        ("src/more.ts:1", "fast-check"),
+        ("src/more.ts:2", "fast-check"),
+        ("src/more.ts:3", "@fast-check/jest"),
+        ("src/more.ts:4", "@fast-check/worker"),
+        ("src/plain.test.ts:1", "@fast-check/vitest"),
+    ):
+        assert f"  {site}: imports {package}{suffix}" in done.stderr
+    assert "a.prop.test.ts" not in done.stderr
 
-    def test_an_import_outside_a_property_file_is_red_by_name(self) -> None:
-        """Every import form, in an ordinary test and a .js file."""
-        done = lint({
-            "a.prop.test.ts": PROPERTY,
-            "src/plain.test.ts": PROPERTY,
-            "src/more.ts": (
-                'import fc from "fast-check";\n'
-                'const m = await import("fast-check/lib/x");\n'
-                'const r = require("@fast-check/jest");\n'
-                'import "@fast-check/worker";\n'
-            ),
-            "src/helper.prop.test.js": 'export * from "fast-check";\n',
-        })
-        assert done.returncode == 1
-        suffix = " but is not a *.prop.test.{ts,tsx,mts,cts} file\n"
-        for site, package in (
-            ("src/helper.prop.test.js:1", "fast-check"),
-            ("src/more.ts:1", "fast-check"),
-            ("src/more.ts:2", "fast-check"),
-            ("src/more.ts:3", "@fast-check/jest"),
-            ("src/more.ts:4", "@fast-check/worker"),
-            ("src/plain.test.ts:1", "@fast-check/vitest"),
-        ):
-            assert f"  {site}: imports {package}{suffix}" in done.stderr
-        assert "a.prop.test.ts" not in done.stderr
 
-    @pytest.mark.parametrize(
-        ("site", "what"),
-        [
-            ("g.prop.test.cts:4", "configureGlobal()"),
-            ("h.prop.test.mts:4", "seed"),
-            ("n.prop.test.tsx:4", "numRuns"),
-            ("s.prop.test.ts:4", "seed"),
-        ],
-    )
-    def test_a_property_restating_the_seed_is_red_by_name(
-        self, site: object, what: object
-    ) -> None:
-        """seed, shorthand seed, numRuns, configureGlobal: each named."""
-        done = lint({
-            "s.prop.test.ts": PROPERTY + "fc.assert(p, { seed: 4 });\n",
-            "h.prop.test.mts": PROPERTY + "fc.assert(p, { seed });\n",
-            "n.prop.test.tsx": PROPERTY
-            + 'test.prop([fc.nat()], { numRuns: 5 })("x", () => true);\n',
-            "g.prop.test.cts": PROPERTY + "fc.configureGlobal({});\n",
-        })
-        assert done.returncode == 1
-        tail = "; the belt's seed, run count and time bound own every property\n"
+@pytest.mark.parametrize(
+    ("site", "what"),
+    [
+        ("g.prop.test.cts:4", "configureGlobal()"),
+        ("h.prop.test.mts:4", "seed"),
+        ("n.prop.test.tsx:4", "numRuns"),
+        ("s.prop.test.ts:4", "seed"),
+    ],
+)
+def test_a_property_restating_the_seed_is_red_by_name(
+    site: object, what: object
+) -> None:
+    """seed, shorthand seed, numRuns, configureGlobal: each named."""
+    done = lint({
+        "s.prop.test.ts": PROPERTY + "fc.assert(p, { seed: 4 });\n",
+        "h.prop.test.mts": PROPERTY + "fc.assert(p, { seed });\n",
+        "n.prop.test.tsx": PROPERTY
+        + 'test.prop([fc.nat()], { numRuns: 5 })("x", () => true);\n',
+        "g.prop.test.cts": PROPERTY + "fc.configureGlobal({});\n",
+    })
+    assert done.returncode == 1
+    tail = "; the belt's seed, run count and time bound own every property\n"
+    assert f"  {site}: restates {what}{tail}" in done.stderr
+
+
+def test_a_property_setting_its_own_time_is_red_by_name() -> None:
+    """Each of the six forms #2144 names, by name, file and line."""
+    done = lint({
+        "a.prop.test.ts": PROPERTY
+        + 'test.prop([fc.nat()])("x", (n) => n >= 0, 20_000);\n',
+        "b.prop.test.ts": PROPERTY
+        + 'it("x", { timeout: 9000 }, () => {});\n'
+        + 'test("y", () => {\n  return;\n}, { timeout });\n',
+        "c.prop.test.ts": PROPERTY + "vi.setConfig({ testTimeout: 1 });\n",
+        "d.prop.test.ts": PROPERTY + "fc.assert(p, { timeout: 100 });\n",
+        "e.prop.test.ts": PROPERTY
+        + 'test.prop([fc.nat()], { interruptAfterTimeLimit: 5 })("x", f);\n',
+        "f.prop.test.ts": PROPERTY + "fc.assert(p, { skipAllAfterTimeLimit: 5 });\n",
+    })
+    assert done.returncode == 1
+    tail = "; the belt's seed, run count and time bound own every property\n"
+    for site, what in (
+        ("a.prop.test.ts:4", "a per-test timeout (test()'s third argument)"),
+        ("b.prop.test.ts:4", "vitest's timeout option"),
+        ("b.prop.test.ts:7", "vitest's timeout option"),
+        ("c.prop.test.ts:4", "vi.setConfig()"),
+        ("d.prop.test.ts:4", "fast-check's timeout"),
+        ("e.prop.test.ts:4", "interruptAfterTimeLimit"),
+        ("f.prop.test.ts:4", "skipAllAfterTimeLimit"),
+    ):
         assert f"  {site}: restates {what}{tail}" in done.stderr
+    assert done.stderr.count(": restates ") == 7, done.stderr
 
-    def test_a_property_setting_its_own_time_is_red_by_name(self) -> None:
-        """Each of the six forms #2144 names, by name, file and line."""
-        done = lint({
-            "a.prop.test.ts": PROPERTY
-            + 'test.prop([fc.nat()])("x", (n) => n >= 0, 20_000);\n',
-            "b.prop.test.ts": PROPERTY
-            + 'it("x", { timeout: 9000 }, () => {});\n'
-            + 'test("y", () => {\n  return;\n}, { timeout });\n',
-            "c.prop.test.ts": PROPERTY + "vi.setConfig({ testTimeout: 1 });\n",
-            "d.prop.test.ts": PROPERTY + "fc.assert(p, { timeout: 100 });\n",
-            "e.prop.test.ts": PROPERTY
-            + 'test.prop([fc.nat()], { interruptAfterTimeLimit: 5 })("x", f);\n',
-            "f.prop.test.ts": PROPERTY
-            + "fc.assert(p, { skipAllAfterTimeLimit: 5 });\n",
-        })
-        assert done.returncode == 1
-        tail = "; the belt's seed, run count and time bound own every property\n"
-        for site, what in (
-            ("a.prop.test.ts:4", "a per-test timeout (test()'s third argument)"),
-            ("b.prop.test.ts:4", "vitest's timeout option"),
-            ("b.prop.test.ts:7", "vitest's timeout option"),
-            ("c.prop.test.ts:4", "vi.setConfig()"),
-            ("d.prop.test.ts:4", "fast-check's timeout"),
-            ("e.prop.test.ts:4", "interruptAfterTimeLimit"),
-            ("f.prop.test.ts:4", "skipAllAfterTimeLimit"),
-        ):
-            assert f"  {site}: restates {what}{tail}" in done.stderr
-        assert done.stderr.count(": restates ") == 7, done.stderr
 
-    def test_a_quote_in_a_regex_hides_no_bound(self) -> None:
-        """A regex literal's quote masks nothing: each bound still red."""
-        done = lint({
-            "a.prop.test.ts": 'import fc from "fast-check";\n'
-            "const q = /'/; fc.assert(p, { seed: 1, timeout: 9 });\n"
-            'const r = /"/; fc.assert(p, { numRuns: 5 });\n',
-        })
-        assert done.returncode == 1
-        tail = "; the belt's seed, run count and time bound own every property\n"
-        for site, what in (
-            ("a.prop.test.ts:2", "seed"),
-            ("a.prop.test.ts:2", "fast-check's timeout"),
-            ("a.prop.test.ts:3", "numRuns"),
-        ):
-            assert f"  {site}: restates {what}{tail}" in done.stderr
-        assert done.stderr.count(": restates ") == 3, done.stderr
-
-    @pytest.mark.parametrize(
-        ("site", "what"),
-        [
-            ("a.prop.test.ts:4", "fast-check's timeout"),
-            ("a.prop.test.ts:5", "vi.setConfig()"),
-        ],
-    )
-    def test_a_bound_named_in_text_is_red(self, site: object, what: object) -> None:
-        """A comment or string naming a bound reds: loud, never silent."""
-        done = lint({
-            "a.prop.test.ts": PROPERTY
-            + "// fc.assert(p, { timeout: 1 })\n"
-            + 'const note = "vi.setConfig({})";\n',
-        })
-        assert done.returncode == 1
-        tail = "; the belt's seed, run count and time bound own every property\n"
+def test_a_quote_in_a_regex_hides_no_bound() -> None:
+    """A regex literal's quote masks nothing: each bound still red."""
+    done = lint({
+        "a.prop.test.ts": 'import fc from "fast-check";\n'
+        "const q = /'/; fc.assert(p, { seed: 1, timeout: 9 });\n"
+        'const r = /"/; fc.assert(p, { numRuns: 5 });\n',
+    })
+    assert done.returncode == 1
+    tail = "; the belt's seed, run count and time bound own every property\n"
+    for site, what in (
+        ("a.prop.test.ts:2", "seed"),
+        ("a.prop.test.ts:2", "fast-check's timeout"),
+        ("a.prop.test.ts:3", "numRuns"),
+    ):
         assert f"  {site}: restates {what}{tail}" in done.stderr
-
-    def test_a_two_argument_call_and_other_options_are_clean(self) -> None:
-        """A number inside a body, and options without timeout: clean."""
-        done = lint({
-            "a.prop.test.ts": PROPERTY
-            + 'it("waits, 5000", () => {\n  expect(Math.max(f(1), 5)).toBe(5);\n});\n'
-            + 'it("named", { retry: 2 }, () => {});\n',
-        })
-        assert done.returncode == 0, done.stderr
-        assert done.stdout == "lint:typescript-properties: 1 file(s) clean\n"
-
-    def test_clean_files_pass_and_text_is_not_an_import(self) -> None:
-        """A property file importing it, and the name in a string: clean."""
-        done = lint({
-            "a.prop.test.ts": PROPERTY,
-            "b.ts": 'export const name = "fast-check";\n// from fast-check\n',
-        })
-        assert done.returncode == 0, done.stderr
-        assert done.stdout == "lint:typescript-properties: 2 file(s) clean\n"
-
-    def test_vendored_code_is_not_the_repository_s(self) -> None:
-        """vendor/ is upstream's code (the belt's walk rule)."""
-        done = lint({"vendor/x.ts": 'import fc from "fast-check";\n'})
-        assert done.returncode == 0, done.stderr
-        assert done.stdout == (
-            "lint:typescript-properties: no TypeScript or JavaScript tracked, skipped\n"
-        )
+    assert done.stderr.count(": restates ") == 3, done.stderr
 
 
-class TestMasked:
-    """The lint reads a property file's code: strings and comments blank."""
-
-    def test_strings_and_comments_blank_with_offsets_kept(self) -> None:
-        """Each literal form, escapes and a template's code included."""
-        rows = (
-            ('a("x\\"y", 1)', 'a("    ", 1)'),
-            ("a('it''s')", "a('  '' ')"),
-            ("a(`t\\`${b({ c: 1 })}u`)", "a(`   ${b({ c: 1 })} `)"),
-            ("a(/* x */ 1) // y\nb()", "a(        1)     \nb()"),
-            ("a(1) /* open", "a(1)        "),
-            ('a("open\nb()', 'a("    \nb()'),
-            ("{ x } }", "{ x } }"),
-        )
-        for text, want in rows:
-            assert tp.masked(text) == want
-
-    def test_an_unclosed_call_and_a_bare_chain_still_read(self) -> None:
-        """An unclosed group runs to the end; `test.each` uncalled stops."""
-        assert tp.arguments_of("(a, b", 0) == ([(1, 2), (3, 5)], 5)
-        assert len(tp.test_calls("test.each(rows);")) == 1
+@pytest.mark.parametrize(
+    ("site", "what"),
+    [
+        ("a.prop.test.ts:4", "fast-check's timeout"),
+        ("a.prop.test.ts:5", "vi.setConfig()"),
+    ],
+)
+def test_a_bound_named_in_text_is_red(site: object, what: object) -> None:
+    """A comment or string naming a bound reds: loud, never silent."""
+    done = lint({
+        "a.prop.test.ts": PROPERTY
+        + "// fc.assert(p, { timeout: 1 })\n"
+        + 'const note = "vi.setConfig({})";\n',
+    })
+    assert done.returncode == 1
+    tail = "; the belt's seed, run count and time bound own every property\n"
+    assert f"  {site}: restates {what}{tail}" in done.stderr
 
 
-class TestDocuments:
-    """vitest's report and file list, each refused by name when misshapen."""
+def test_a_two_argument_call_and_other_options_are_clean() -> None:
+    """A number inside a body, and options without timeout: clean."""
+    done = lint({
+        "a.prop.test.ts": PROPERTY
+        + 'it("waits, 5000", () => {\n  expect(Math.max(f(1), 5)).toBe(5);\n});\n'
+        + 'it("named", { retry: 2 }, () => {});\n',
+    })
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == "lint:typescript-properties: 1 file(s) clean\n"
 
-    def answer(self, command: str, text: str) -> str:
-        """Run verify or collected on one document; return its one line.
 
-        Returns:
-            What the subcommand printed, after asserting it was red.
+def test_clean_files_pass_and_text_is_not_an_import() -> None:
+    """A property file importing it, and the name in a string: clean."""
+    done = lint({
+        "a.prop.test.ts": PROPERTY,
+        "b.ts": 'export const name = "fast-check";\n// from fast-check\n',
+    })
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == "lint:typescript-properties: 2 file(s) clean\n"
 
-        """
-        with tempfile.TemporaryDirectory() as scratch:
-            path = Path(scratch, "doc.json")
-            path.write_text(text, encoding="utf-8")
-            seeded = Path(scratch, "seeded")
-            seeded.write_text("", encoding="utf-8")
-            # verify also takes the seeded list; collected does not.
-            extra = [str(seeded)] if command == "verify" else []
-            out = io.StringIO()
-            with contextlib.redirect_stdout(out):
-                status = tp.main([command, str(path), *extra, "a.prop.test.ts"])
-        assert status == 1
-        return out.getvalue().replace(str(path), "DOC")
 
-    def test_a_missing_seeded_list_is_red(self) -> None:
-        """Refuse verify with no seeded list to read: red, named."""
-        with tempfile.TemporaryDirectory() as scratch:
-            report = Path(scratch, "report.json")
-            report.write_text('{"testResults": []}', encoding="utf-8")
-            gone = Path(scratch, "seeded")
-            out = io.StringIO()
-            with contextlib.redirect_stdout(out):
-                status = tp.main(["verify", str(report), str(gone), "a.prop.test.ts"])
-        assert status == 1
+def test_vendored_code_is_not_the_repository_s() -> None:
+    """vendor/ is upstream's code (the belt's walk rule)."""
+    done = lint({"vendor/x.ts": 'import fc from "fast-check";\n'})
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == (
+        "lint:typescript-properties: no TypeScript or JavaScript tracked, skipped\n"
+    )
+
+
+# The lint reads a property file's code: strings and comments blank.
+def test_strings_and_comments_blank_with_offsets_kept() -> None:
+    """Each literal form, escapes and a template's code included."""
+    rows = (
+        ('a("x\\"y", 1)', 'a("    ", 1)'),
+        ("a('it''s')", "a('  '' ')"),
+        ("a(`t\\`${b({ c: 1 })}u`)", "a(`   ${b({ c: 1 })} `)"),
+        ("a(/* x */ 1) // y\nb()", "a(        1)     \nb()"),
+        ("a(1) /* open", "a(1)        "),
+        ('a("open\nb()', 'a("    \nb()'),
+        ("{ x } }", "{ x } }"),
+    )
+    for text, want in rows:
+        assert tp.masked(text) == want
+
+
+def test_an_unclosed_call_and_a_bare_chain_still_read() -> None:
+    """An unclosed group runs to the end; `test.each` uncalled stops."""
+    assert tp.arguments_of("(a, b", 0) == ([(1, 2), (3, 5)], 5)
+    assert len(tp.test_calls("test.each(rows);")) == 1
+
+
+# vitest's report and file list, each refused by name when misshapen.
+def answer(command: str, text: str) -> str:
+    """Run verify or collected on one document; return its one line.
+
+    Returns:
+        What the subcommand printed, after asserting it was red.
+
+    """
+    with tempfile.TemporaryDirectory() as scratch:
+        path = Path(scratch, "doc.json")
+        path.write_text(text, encoding="utf-8")
+        seeded = Path(scratch, "seeded")
+        seeded.write_text("", encoding="utf-8")
+        # verify also takes the seeded list; collected does not.
+        extra = [str(seeded)] if command == "verify" else []
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            status = tp.main([command, str(path), *extra, "a.prop.test.ts"])
+    assert status == 1
+    return out.getvalue().replace(str(path), "DOC")
+
+
+def test_a_missing_seeded_list_is_red() -> None:
+    """Refuse verify with no seeded list to read: red, named."""
+    with tempfile.TemporaryDirectory() as scratch:
+        report = Path(scratch, "report.json")
+        report.write_text('{"testResults": []}', encoding="utf-8")
+        gone = Path(scratch, "seeded")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            status = tp.main(["verify", str(report), str(gone), "a.prop.test.ts"])
+    assert status == 1
+    assert (
+        out.getvalue().replace(str(gone), "SEEDED")
+        == "no seeded list at SEEDED (FileNotFoundError)\n"
+    )
+
+
+def test_a_report_of_the_wrong_shape() -> None:
+    """Each field the leg reads, by name."""
+    rows = (
+        ("[]", "the report is not an object"),
+        ('{"testResults": "x"}', "testResults is not a list"),
+        ('{"testResults": [5]}', "testResults[0] is not an object"),
+        ('{"testResults": [{"name": 3}]}', "testResults[0].name is not a string"),
+        (
+            '{"testResults": [{"name": "a", "assertionResults": "x"}]}',
+            "testResults[0].assertionResults is not a list",
+        ),
+        ('{"a": 1, "a": 2}', 'duplicate key "a"'),
+    )
+    for text, why in rows:
+        assert answer("verify", text) == f"no vitest JSON report at DOC ({why})\n"
+
+
+def test_a_listing_of_the_wrong_shape() -> None:
+    """The list itself, an entry, and its file."""
+    rows = (
+        ("{}", "the listing is not a list"),
+        ("[3]", "listing[0] is not an object"),
+        ("[{}]", "listing[0].file is not a string"),
+    )
+    for text, why in rows:
         assert (
-            out.getvalue().replace(str(gone), "SEEDED")
-            == "no seeded list at SEEDED (FileNotFoundError)\n"
+            answer("collected", text)
+            == f"no readable vitest file list at DOC ({why})\n"
         )
 
-    def test_a_report_of_the_wrong_shape(self) -> None:
-        """Each field the leg reads, by name."""
-        rows = (
-            ("[]", "the report is not an object"),
-            ('{"testResults": "x"}', "testResults is not a list"),
-            ('{"testResults": [5]}', "testResults[0] is not an object"),
-            ('{"testResults": [{"name": 3}]}', "testResults[0].name is not a string"),
-            (
-                '{"testResults": [{"name": "a", "assertionResults": "x"}]}',
-                "testResults[0].assertionResults is not a list",
-            ),
-            ('{"a": 1, "a": 2}', 'duplicate key "a"'),
-        )
-        for text, why in rows:
-            assert (
-                self.answer("verify", text) == f"no vitest JSON report at DOC ({why})\n"
-            )
 
-    def test_a_listing_of_the_wrong_shape(self) -> None:
-        """The list itself, an entry, and its file."""
-        rows = (
-            ("{}", "the listing is not a list"),
-            ("[3]", "listing[0] is not an object"),
-            ("[{}]", "listing[0].file is not a string"),
-        )
-        for text, why in rows:
-            assert (
-                self.answer("collected", text)
-                == f"no readable vitest file list at DOC ({why})\n"
-            )
+FILES = ("c.prop.test.ts", "a.prop.test.ts", "b.prop.test.mts")
 
 
-@pytest.mark.usefixtures("_capfd")
-class TestShares:
+class Shares:
     """ORG_SHARD=k/n keeps every n-th property file, each once (#2160)."""
 
-    FILES = ("c.prop.test.ts", "a.prop.test.ts", "b.prop.test.mts")
-
-    @fixture
-    def _capfd(self, capfd: pytest.CaptureFixture[str]) -> None:
+    def __init__(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Hold the descriptors' capture for `share`."""
         self.capfd = capfd
 
@@ -885,33 +886,39 @@ class TestShares:
                 "ORG_SHARD_REPORTS": reports,
             }.items():
                 patched.setenv(name, value)
-            status = tp.main(["share", *self.FILES])
+            status = tp.main(["share", *FILES])
         out, err = self.capfd.readouterr()
         assert status == 0, err
         return [f for f in out.split("\0") if f]
 
-    def test_two_shards_hold_every_file_once(self) -> None:
-        """1/2 and 2/2: sorted, every second file, the union whole."""
-        with tempfile.TemporaryDirectory() as reports:
-            first, second = self.share("1/2", reports), self.share("2/2", reports)
-            want: list[list[str]] = [
-                ["a.prop.test.ts", "c.prop.test.ts"],
-                ["b.prop.test.mts"],
-            ]
-            got_shares: list[list[str]] = [first, second]
-            assert want == got_shares
-            none: list[str] = []
-            got = shard.union(
-                shard.load(Path(reports)), {"test:typescript-properties": 2}
-            )
-            assert none == got
 
-    def test_no_shard_is_every_file(self) -> None:
-        """Unset or 1/1: every file, as given, and no report."""
-        with tempfile.TemporaryDirectory() as reports:
-            for spec in ("", "1/1"):
-                every: list[str] = list(self.FILES)
-                assert every == self.share(spec, reports)
-            written: list[Path] = list(Path(reports).iterdir())
-            nothing: list[Path] = []
-            assert nothing == written
+@fixture
+def shares(capfd: pytest.CaptureFixture[str]) -> Shares:
+    """Give each row its own Shares."""
+    return Shares(capfd)
+
+
+def test_two_shards_hold_every_file_once(shares: Shares) -> None:
+    """1/2 and 2/2: sorted, every second file, the union whole."""
+    with tempfile.TemporaryDirectory() as reports:
+        first, second = shares.share("1/2", reports), shares.share("2/2", reports)
+        want: list[list[str]] = [
+            ["a.prop.test.ts", "c.prop.test.ts"],
+            ["b.prop.test.mts"],
+        ]
+        got_shares: list[list[str]] = [first, second]
+        assert want == got_shares
+        none: list[str] = []
+        got = shard.union(shard.load(Path(reports)), {"test:typescript-properties": 2})
+        assert none == got
+
+
+def test_no_shard_is_every_file(shares: Shares) -> None:
+    """Unset or 1/1: every file, as given, and no report."""
+    with tempfile.TemporaryDirectory() as reports:
+        for spec in ("", "1/1"):
+            every: list[str] = list(FILES)
+            assert every == shares.share(spec, reports)
+        written: list[Path] = list(Path(reports).iterdir())
+        nothing: list[Path] = []
+        assert nothing == written

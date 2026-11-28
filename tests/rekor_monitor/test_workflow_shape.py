@@ -321,26 +321,32 @@ ROWS = [
 ]
 
 
-@pytest.mark.usefixtures("_set_up_test_shape")
-class TestShape:
+class Shape:
     """The workflow as built, and one planted copy per rule."""
 
-    @fixture
-    def _set_up_test_shape(self) -> None:
+    def __init__(self) -> None:
         """Read the workflow."""
         self.text = WORKFLOW.read_text(encoding="utf-8")
 
-    def test_the_workflow_holds(self) -> None:
-        """The workflow as built names no problem.
 
-        The gaining job's `always()` is #1149's: a leg ended by its timeout is
-        cancelled, which `failure()` does not match, and nothing was filed.
-        """
-        assert problems(self.text) == list[str]()
+@fixture
+def shape() -> Shape:
+    """Give each row its own Shape."""
+    return Shape()
 
-    @pytest.mark.parametrize(("old", "new", "message"), ROWS)
-    def test_rows(self, old: object, new: object, message: object) -> None:
-        """Each planted change is named by its own message, and only it."""
-        assert self.text.count(old) == 1
-        named: list[str] = [message]
-        assert problems(self.text.replace(old, new)) == named
+
+def test_the_workflow_holds(shape: Shape) -> None:
+    """The workflow as built names no problem.
+
+    The gaining job's `always()` is #1149's: a leg ended by its timeout is
+    cancelled, which `failure()` does not match, and nothing was filed.
+    """
+    assert problems(shape.text) == list[str]()
+
+
+@pytest.mark.parametrize(("old", "new", "message"), ROWS)
+def test_rows(shape: Shape, old: object, new: object, message: object) -> None:
+    """Each planted change is named by its own message, and only it."""
+    assert shape.text.count(old) == 1
+    named: list[str] = [message]
+    assert problems(shape.text.replace(old, new)) == named

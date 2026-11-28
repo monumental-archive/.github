@@ -40,81 +40,74 @@ COMMAND = st.sampled_from(["shfmt", "taplo", "cargo-deny", "jq"])
 SHELLISH = st.text(alphabet="ab $'\"\\\n#|;()`", max_size=120)
 
 
-class TestMatches:
-    """git's default pathspec meaning."""
-
-    @given(PATH, PATH, st.sampled_from(["", "/"]))
-    def test_a_literal_names_itself_and_below(
-        self, base: list[str], below: list[str], slash: str
-    ) -> None:
-        """Itself and its descendants; a prefix sibling never."""
-        pattern = "/".join(base) + slash
-        path = "/".join(base)
-        assert gt.matches(pattern, path)
-        assert gt.matches(pattern, f"{path}/{'/'.join(below)}")
-        assert not gt.matches(pattern, f"{path}x")
-
-    @given(PATH, st.data())
-    def test_a_path_matches_its_globs(
-        self, segments: list[str], data: st.DataObject
-    ) -> None:
-        """Segments turned into `*`, or one leading `*` for directories."""
-        parts = [s if not data.draw(st.booleans()) else "*" for s in segments]
-        if len(parts) > 1 and data.draw(st.booleans()):
-            parts = ["*", parts[-1]]
-        if "*" not in parts:
-            parts[0] = "*"
-        assert gt.matches("/".join(parts), "/".join(segments))
+# git's default pathspec meaning.
+@given(PATH, PATH, st.sampled_from(["", "/"]))
+def test_a_literal_names_itself_and_below(
+    base: list[str], below: list[str], slash: str
+) -> None:
+    """Itself and its descendants; a prefix sibling never."""
+    pattern = "/".join(base) + slash
+    path = "/".join(base)
+    assert gt.matches(pattern, path)
+    assert gt.matches(pattern, f"{path}/{'/'.join(below)}")
+    assert not gt.matches(pattern, f"{path}x")
 
 
-class TestStripLiterals:
-    """Blanking literals is stable and keeps every line."""
-
-    @given(SHELLISH)
-    @example("x='a\"b' \"c'd\"")
-    @example('"$(shfmt)" \\\n y')
-    def test_twice_is_once(self, text: str) -> None:
-        """Same line count; a second pass changes nothing."""
-        once = gt.strip_literals(text)
-        assert len(once.splitlines()) == len(text.replace("\\\n", " \n").splitlines())
-        assert gt.strip_literals(once) == once
+@given(PATH, st.data())
+def test_a_path_matches_its_globs(segments: list[str], data: st.DataObject) -> None:
+    """Segments turned into `*`, or one leading `*` for directories."""
+    parts = [s if not data.draw(st.booleans()) else "*" for s in segments]
+    if len(parts) > 1 and data.draw(st.booleans()):
+        parts = ["*", parts[-1]]
+    if "*" not in parts:
+        parts[0] = "*"
+    assert gt.matches("/".join(parts), "/".join(segments))
 
 
-class TestShellCalls:
-    """A run command is found; a quoted or commented word is not."""
+# Blanking literals is stable and keeps every line.
+@given(SHELLISH)
+@example("x='a\"b' \"c'd\"")
+@example('"$(shfmt)" \\\n y')
+def test_twice_is_once(text: str) -> None:
+    """Same line count; a second pass changes nothing."""
+    once = gt.strip_literals(text)
+    assert len(once.splitlines()) == len(text.replace("\\\n", " \n").splitlines())
+    assert gt.strip_literals(once) == once
 
-    @given(
-        st.lists(
-            st.tuples(
-                st.sampled_from([
-                    "run",
-                    "pipe",
-                    "xargs",
-                    "single",
-                    "double",
-                    "comment",
-                    "none",
-                ]),
-                COMMAND,
-            ),
-            max_size=6,
+
+# A run command is found; a quoted or commented word is not.
+@given(
+    st.lists(
+        st.tuples(
+            st.sampled_from([
+                "run",
+                "pipe",
+                "xargs",
+                "single",
+                "double",
+                "comment",
+                "none",
+            ]),
+            COMMAND,
         ),
+        max_size=6,
+    ),
+)
+def test_first_call_line(rows: list[tuple[str, str]]) -> None:
+    """The first line that runs a command, or None."""
+    forms = {
+        "run": "{c} --check x",
+        "pipe": "org_tracked | {c} -",
+        "xargs": "org_tracked | xargs -0 {c}",
+        "single": "echo '{c} is a tool'",
+        "double": 'echo "{c} is a tool"',
+        "comment": "# {c} runs here",
+        "none": "echo nothing",
+    }
+    lines = [forms[how].format(c=cmd) for how, cmd in rows]
+    wanted = sorted({cmd for _, cmd in rows})
+    expected = next(
+        (i for i, (how, _) in enumerate(rows) if how in {"run", "pipe", "xargs"}),
+        None,
     )
-    def test_first_call_line(self, rows: list[tuple[str, str]]) -> None:
-        """The first line that runs a command, or None."""
-        forms = {
-            "run": "{c} --check x",
-            "pipe": "org_tracked | {c} -",
-            "xargs": "org_tracked | xargs -0 {c}",
-            "single": "echo '{c} is a tool'",
-            "double": 'echo "{c} is a tool"',
-            "comment": "# {c} runs here",
-            "none": "echo nothing",
-        }
-        lines = [forms[how].format(c=cmd) for how, cmd in rows]
-        wanted = sorted({cmd for _, cmd in rows})
-        expected = next(
-            (i for i, (how, _) in enumerate(rows) if how in {"run", "pipe", "xargs"}),
-            None,
-        )
-        assert gt.shell_calls("\n".join(lines), wanted or ["shfmt"]) == expected, lines
+    assert gt.shell_calls("\n".join(lines), wanted or ["shfmt"]) == expected, lines

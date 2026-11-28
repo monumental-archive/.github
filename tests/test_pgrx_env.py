@@ -83,16 +83,14 @@ OLD = 946684800  # 2000-01-01 00:00 UTC
 RACERS = 6
 
 
-@pytest.mark.usefixtures("_set_up_test_postgres_case")
-class TestPostgresCase:
+class PostgresCase:
     """A stand-in cargo and a planted Postgres install (#1940).
 
     The install is its `bin/pg_config` and a file beside it. The kernel
     and `cp` are the machine's own, so the clone is the one a task makes.
     """
 
-    @fixture
-    def _set_up_test_postgres_case(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Plant the install, its listing and the stand-ins."""
         self.root = Path(str(tmp_path)).resolve()
         bindir = self.root / "bin"
@@ -203,160 +201,177 @@ class TestPostgresCase:
         return log.read_text(encoding="utf-8").splitlines()[-1].split("|")
 
 
-class TestOwnPostgres(TestPostgresCase):
-    """No pgrx task writes or reads state another can see (#1940)."""
-
-    def test_the_build_sees_its_clone_and_an_empty_home(self) -> None:
-        """PGRX_PG_CONFIG_PATH is a clone under the target's hash; no init.
-
-        Red at 1c4fbe22: the belt ran `cargo pgrx init` and pgrx read
-        the one config.toml every task on the machine rewrote.
-        """
-        code, out, err = self.bash(
-            "org_pgrx_major 16 cargo build\n"
-            'echo "after|${PGRX_PG_CONFIG_PATH:-}|${PGRX_HOME:-}"'
-        )
-        assert code == 0, err
-        assert out == "after||\n", "the variables outlived the command"
-        calls = self.seen()
-        args, config, home = calls[-1]
-        assert args == "build"
-        key = hashlib.sha256(str(self.target).encode()).hexdigest()[:16]
-        clone = self.cache / "org-belt" / "pgrx-postgres" / key / "pg16" / INSTALL
-        assert str(clone / "bin" / "pg_config") == config
-        assert (clone / "share" / "marker").read_text() == "pinned\n"
-        assert str(self.cache / "org-belt" / "pgrx-home") == home
-        # Real paths with the install's dates, and a home dated 2000:
-        # made fresh on a runner, neither reads as newer than a cached
-        # build (#1940).
-        assert not clone.is_symlink()
-        assert str(clone) == str(clone.resolve())
-        marker = self.root / "pg" / "16.16.0" / INSTALL / "share" / "marker"
-        assert (
-            marker.stat().st_mtime_ns == (clone / "share" / "marker").stat().st_mtime_ns
-        )
-        assert int(Path(home).stat().st_mtime) == OLD
-        entries = [entry.name for entry in Path(home).iterdir()]
-        empty: list[str] = []
-        assert empty == entries
-        assert not any(c[0].startswith("pgrx init") for c in calls), calls
-        # The pinned install itself is never written.
-        pinned = self.root / "pg" / "16.16.0" / INSTALL
-        untouched = ["marker"]
-        written = sorted(p.name for p in (pinned / "share").iterdir())
-        assert untouched == written
-
-    def test_one_target_one_clone_two_targets_two(self) -> None:
-        """CARGO_TARGET_DIR picks the clone: the same one twice, another apart."""
-        first = self.built(CARGO_TARGET_DIR=str(self.root / "a"))[1]
-        again = self.built(CARGO_TARGET_DIR=str(self.root / "a"))[1]
-        other = self.built(CARGO_TARGET_DIR=str(self.root / "b"))[1]
-        assert first == again
-        assert first != other
-        # Relative, it is the directory cargo would use: under the cwd.
-        relative = self.built(CARGO_TARGET_DIR="a")[1]
-        key = hashlib.sha256(str(self.root / "work" / "a").encode()).hexdigest()[:16]
-        assert f"/pgrx-postgres/{key}/" in relative
-        # Unset, cargo's own answer, and no other call to cargo.
-        unset = self.built()[1]
-        key = hashlib.sha256(str(self.target).encode()).hexdigest()[:16]
-        assert f"/pgrx-postgres/{key}/" in unset
-
-    def test_racing_tasks_leave_one_published_clone(self) -> None:
-        """Tasks cloning one new Postgres at once publish one; losers clean up."""
-        tasks = [self.start("org_pgrx_major 16 cargo build") for _ in range(RACERS)]
-        errors = [t.communicate(timeout=120)[1] for t in tasks]
-        codes = [t.wait() for t in tasks]
-        clean = [0] * RACERS
-        assert clean == codes, errors
-        paths = {call[1] for call in self.seen() if call[0] == "build"}
-        assert len(paths) == 1, paths
-        held = Path(paths.pop()).parent.parent
-        # The published clone, a directory under its own name, and
-        # nothing else: every loser removed its own `<name>.<random>`.
-        names = [p.name for p in held.parent.iterdir()]
-        want = [INSTALL]
-        assert want == names
-        assert not held.is_symlink()
-        assert (held / "share" / "marker").read_text() == "pinned\n"
-
-    def test_a_moved_pin_removes_the_old_clone_and_keeps_other_majors(self) -> None:
-        """Another version of this major is removed; another major's is not."""
-        old = self.built()[1]
-        held = Path(old).parent.parent.parent
-        # Another major's clone under the same target, made by its task.
-        other = held.parent / "pg17" / "postgresql-17.6.0-x"
-        other.mkdir(parents=True)
-        # The pin moves: a new install name for the same major.
-        moved = "postgresql-16.17.0-x86_64-unknown-linux-gnu"
-        self.install(self.root / "pg" / "16.17.0", moved)
-        new = self.built()[1]
-        assert str(held / moved / "bin" / "pg_config") == new
-        names = [p.name for p in held.iterdir()]
-        assert INSTALL not in names
-        assert not any(n.startswith(f"{INSTALL}.") for n in names), names
-        assert other.is_dir()
-
-    def test_no_major_runs_the_command_as_it_is(self) -> None:
-        """Empty: no Postgres looked up, nothing exported, nothing cloned."""
-        code, _, err = self.bash("org_pgrx_major '' cargo check")
-        assert code == 0, err
-        want = [["check", "", ""]]
-        assert want == self.seen()
-        assert not self.cache.exists()
-
-    def test_an_unpinned_major_runs_nothing(self) -> None:
-        """No pin for the major: red in pgrx_postgres.py's words, no command."""
-        code, _, err = self.bash("org_pgrx_major 17 cargo build")
-        assert code == 1
-        assert "no Postgres 17.x is pinned" in err
-        none: list[list[str]] = []
-        assert none == self.seen()
+@fixture
+def postgres_case(tmp_path: Path) -> PostgresCase:
+    """Give each row its own PostgresCase."""
+    return PostgresCase(tmp_path)
 
 
-class TestClang(TestPostgresCase):
-    """Every pgrx compile is given its clang; pgrx searches nothing (#2022)."""
+def test_the_build_sees_its_clone_and_an_empty_home(
+    postgres_case: PostgresCase,
+) -> None:
+    """PGRX_PG_CONFIG_PATH is a clone under the target's hash; no init.
 
-    def test_the_build_sees_the_real_driver_and_its_libclang(self) -> None:
-        """CLANG_PATH is the driver's real path, LIBCLANG_PATH its lib.
+    Red at 1c4fbe22: the belt ran `cargo pgrx init` and pgrx read
+    the one config.toml every task on the machine rewrote.
+    """
+    code, out, err = postgres_case.bash(
+        "org_pgrx_major 16 cargo build\n"
+        'echo "after|${PGRX_PG_CONFIG_PATH:-}|${PGRX_HOME:-}"'
+    )
+    assert code == 0, err
+    assert out == "after||\n", "the variables outlived the command"
+    calls = postgres_case.seen()
+    args, config, home = calls[-1]
+    assert args == "build"
+    key = hashlib.sha256(str(postgres_case.target).encode()).hexdigest()[:16]
+    clone = postgres_case.cache / "org-belt" / "pgrx-postgres" / key / "pg16" / INSTALL
+    assert str(clone / "bin" / "pg_config") == config
+    assert (clone / "share" / "marker").read_text() == "pinned\n"
+    assert str(postgres_case.cache / "org-belt" / "pgrx-home") == home
+    # Real paths with the install's dates, and a home dated 2000:
+    # made fresh on a runner, neither reads as newer than a cached
+    # build (#1940).
+    assert not clone.is_symlink()
+    assert str(clone) == str(clone.resolve())
+    marker = postgres_case.root / "pg" / "16.16.0" / INSTALL / "share" / "marker"
+    assert marker.stat().st_mtime_ns == (clone / "share" / "marker").stat().st_mtime_ns
+    assert int(Path(home).stat().st_mtime) == OLD
+    entries = [entry.name for entry in Path(home).iterdir()]
+    empty: list[str] = []
+    assert empty == entries
+    assert not any(c[0].startswith("pgrx init") for c in calls), calls
+    # The pinned install itself is never written.
+    pinned = postgres_case.root / "pg" / "16.16.0" / INSTALL
+    untouched = ["marker"]
+    written = sorted(p.name for p in (pinned / "share").iterdir())
+    assert untouched == written
 
-        Red at d917a760: neither was set, so pgrx searched PATH for
-        clang and watched every directory it passed.
-        """
-        self.built()
-        driver = self.llvm / "bin" / "clang-19"
-        want = [str(driver), str(self.llvm / "lib")]
-        assert want == self.clang()
-        assert Path(self.clang()[0]).is_absolute()
 
-    def test_a_callers_clang_path_is_passed_through_alone(self) -> None:
-        """A caller's CLANG_PATH reaches cargo as it is, no libclang added.
+def test_one_target_one_clone_two_targets_two(postgres_case: PostgresCase) -> None:
+    """CARGO_TARGET_DIR picks the clone: the same one twice, another apart."""
+    first = postgres_case.built(CARGO_TARGET_DIR=str(postgres_case.root / "a"))[1]
+    again = postgres_case.built(CARGO_TARGET_DIR=str(postgres_case.root / "a"))[1]
+    other = postgres_case.built(CARGO_TARGET_DIR=str(postgres_case.root / "b"))[1]
+    assert first == again
+    assert first != other
+    # Relative, it is the directory cargo would use: under the cwd.
+    relative = postgres_case.built(CARGO_TARGET_DIR="a")[1]
+    key = hashlib.sha256(str(postgres_case.root / "work" / "a").encode()).hexdigest()[
+        :16
+    ]
+    assert f"/pgrx-postgres/{key}/" in relative
+    # Unset, cargo's own answer, and no other call to cargo.
+    unset = postgres_case.built()[1]
+    key = hashlib.sha256(str(postgres_case.target).encode()).hexdigest()[:16]
+    assert f"/pgrx-postgres/{key}/" in unset
 
-        A caller's LIBCLANG_PATH alone is kept too, and the driver is
-        still named: the half the caller did not set is the belt's.
-        Red at d917a760 on that second half, which named no driver.
-        """
-        self.built(CLANG_PATH="/opt/llvm/bin/clang")
-        want = ["/opt/llvm/bin/clang", "unset"]
-        assert want == self.clang()
-        self.built(LIBCLANG_PATH="/opt/llvm/lib")
-        driver = self.llvm / "bin" / "clang-19"
-        want = [str(driver), "/opt/llvm/lib"]
-        assert want == self.clang()
 
-    def test_no_clang_on_path_is_red_and_runs_nothing(self) -> None:
-        """No driver to name: red with the remedy, before any command."""
-        bare = self.root / "bare"
-        bare.mkdir()
-        for name, body in (("cargo", CARGO_STUB), ("xcrun", NO_XCRUN_STUB)):
-            (bare / name).write_text(body, encoding="utf-8")
-            (bare / name).chmod(0o755)
-        (bare / "uname").symlink_to(support.tool("uname"))
-        code, _, err = self.bash("org_pgrx_major 16 cargo build", PATH=str(bare))
-        assert code == 1, err
-        assert f"{TASK}: {NO_CLANG}" == err.splitlines()[0]
-        none: list[list[str]] = []
-        assert none == self.seen()
+def test_racing_tasks_leave_one_published_clone(postgres_case: PostgresCase) -> None:
+    """Tasks cloning one new Postgres at once publish one; losers clean up."""
+    tasks = [
+        postgres_case.start("org_pgrx_major 16 cargo build") for _ in range(RACERS)
+    ]
+    errors = [t.communicate(timeout=120)[1] for t in tasks]
+    codes = [t.wait() for t in tasks]
+    clean = [0] * RACERS
+    assert clean == codes, errors
+    paths = {call[1] for call in postgres_case.seen() if call[0] == "build"}
+    assert len(paths) == 1, paths
+    held = Path(paths.pop()).parent.parent
+    # The published clone, a directory under its own name, and
+    # nothing else: every loser removed its own `<name>.<random>`.
+    names = [p.name for p in held.parent.iterdir()]
+    want = [INSTALL]
+    assert want == names
+    assert not held.is_symlink()
+    assert (held / "share" / "marker").read_text() == "pinned\n"
+
+
+def test_a_moved_pin_removes_the_old_clone_and_keeps_other_majors(
+    postgres_case: PostgresCase,
+) -> None:
+    """Another version of this major is removed; another major's is not."""
+    old = postgres_case.built()[1]
+    held = Path(old).parent.parent.parent
+    # Another major's clone under the same target, made by its task.
+    other = held.parent / "pg17" / "postgresql-17.6.0-x"
+    other.mkdir(parents=True)
+    # The pin moves: a new install name for the same major.
+    moved = "postgresql-16.17.0-x86_64-unknown-linux-gnu"
+    postgres_case.install(postgres_case.root / "pg" / "16.17.0", moved)
+    new = postgres_case.built()[1]
+    assert str(held / moved / "bin" / "pg_config") == new
+    names = [p.name for p in held.iterdir()]
+    assert INSTALL not in names
+    assert not any(n.startswith(f"{INSTALL}.") for n in names), names
+    assert other.is_dir()
+
+
+def test_no_major_runs_the_command_as_it_is(postgres_case: PostgresCase) -> None:
+    """Empty: no Postgres looked up, nothing exported, nothing cloned."""
+    code, _, err = postgres_case.bash("org_pgrx_major '' cargo check")
+    assert code == 0, err
+    want = [["check", "", ""]]
+    assert want == postgres_case.seen()
+    assert not postgres_case.cache.exists()
+
+
+def test_an_unpinned_major_runs_nothing(postgres_case: PostgresCase) -> None:
+    """No pin for the major: red in pgrx_postgres.py's words, no command."""
+    code, _, err = postgres_case.bash("org_pgrx_major 17 cargo build")
+    assert code == 1
+    assert "no Postgres 17.x is pinned" in err
+    none: list[list[str]] = []
+    assert none == postgres_case.seen()
+
+
+def test_the_build_sees_the_real_driver_and_its_libclang(
+    postgres_case: PostgresCase,
+) -> None:
+    """CLANG_PATH is the driver's real path, LIBCLANG_PATH its lib.
+
+    Red at d917a760: neither was set, so pgrx searched PATH for
+    clang and watched every directory it passed.
+    """
+    postgres_case.built()
+    driver = postgres_case.llvm / "bin" / "clang-19"
+    want = [str(driver), str(postgres_case.llvm / "lib")]
+    assert want == postgres_case.clang()
+    assert Path(postgres_case.clang()[0]).is_absolute()
+
+
+def test_a_callers_clang_path_is_passed_through_alone(
+    postgres_case: PostgresCase,
+) -> None:
+    """A caller's CLANG_PATH reaches cargo as it is, no libclang added.
+
+    A caller's LIBCLANG_PATH alone is kept too, and the driver is
+    still named: the half the caller did not set is the belt's.
+    Red at d917a760 on that second half, which named no driver.
+    """
+    postgres_case.built(CLANG_PATH="/opt/llvm/bin/clang")
+    want = ["/opt/llvm/bin/clang", "unset"]
+    assert want == postgres_case.clang()
+    postgres_case.built(LIBCLANG_PATH="/opt/llvm/lib")
+    driver = postgres_case.llvm / "bin" / "clang-19"
+    want = [str(driver), "/opt/llvm/lib"]
+    assert want == postgres_case.clang()
+
+
+def test_no_clang_on_path_is_red_and_runs_nothing(postgres_case: PostgresCase) -> None:
+    """No driver to name: red with the remedy, before any command."""
+    bare = postgres_case.root / "bare"
+    bare.mkdir()
+    for name, body in (("cargo", CARGO_STUB), ("xcrun", NO_XCRUN_STUB)):
+        (bare / name).write_text(body, encoding="utf-8")
+        (bare / name).chmod(0o755)
+    (bare / "uname").symlink_to(support.tool("uname"))
+    code, _, err = postgres_case.bash("org_pgrx_major 16 cargo build", PATH=str(bare))
+    assert code == 1, err
+    assert f"{TASK}: {NO_CLANG}" == err.splitlines()[0]
+    none: list[list[str]] = []
+    assert none == postgres_case.seen()
 
 
 def member(name: str, root: Path, default: list[str] | None) -> dict[str, object]:
@@ -386,7 +401,7 @@ def member(name: str, root: Path, default: list[str] | None) -> dict[str, object
     }
 
 
-class TestProvision(TestPostgresCase):
+class Provision(PostgresCase):
     """org_pgrx_provision names the workspace's default major (#1940).
 
     The real function, gate_surface.py and mutants_rust.py over planted
@@ -432,25 +447,34 @@ class TestProvision(TestPostgresCase):
             **env,
         )
 
-    def test_one_extension_names_its_default(self) -> None:
-        """An extension defaulting to pg18 beside a plain crate: 18."""
-        env = self.plant(plain=None, ext=["pg18"])
-        code, out, err = self.provision(env)
-        assert (code, out) == (0, "rc=0 default=[18]\n"), err
 
-    def test_no_extension_leaves_it_empty(self) -> None:
-        """No extension: nothing provisioned, the command runs as it is."""
-        env = self.plant(plain=None)
-        code, out, err = self.provision(env)
-        assert (code, out) == (0, "rc=0 default=[]\n"), err
+@fixture
+def provision_state(tmp_path: Path) -> Provision:
+    """Give each row its own Provision."""
+    return Provision(tmp_path)
 
-    def test_two_defaults_are_red_by_name(self) -> None:
-        """Two extensions at different defaults: one build cannot hold both."""
-        env = self.plant(first=["pg17"], second=["pg18"])
-        code, out, err = self.provision(env)
-        assert (code, out) == (0, "rc=1 default=[]\n"), err
-        want = f"{TASK}: the workspace's extensions default to different majors: 17, 18"
-        assert want == err.splitlines()[0]
+
+def test_one_extension_names_its_default(provision_state: Provision) -> None:
+    """An extension defaulting to pg18 beside a plain crate: 18."""
+    env = provision_state.plant(plain=None, ext=["pg18"])
+    code, out, err = provision_state.provision(env)
+    assert (code, out) == (0, "rc=0 default=[18]\n"), err
+
+
+def test_no_extension_leaves_it_empty(provision_state: Provision) -> None:
+    """No extension: nothing provisioned, the command runs as it is."""
+    env = provision_state.plant(plain=None)
+    code, out, err = provision_state.provision(env)
+    assert (code, out) == (0, "rc=0 default=[]\n"), err
+
+
+def test_two_defaults_are_red_by_name(provision_state: Provision) -> None:
+    """Two extensions at different defaults: one build cannot hold both."""
+    env = provision_state.plant(first=["pg17"], second=["pg18"])
+    code, out, err = provision_state.provision(env)
+    assert (code, out) == (0, "rc=1 default=[]\n"), err
+    want = f"{TASK}: the workspace's extensions default to different majors: 17, 18"
+    assert want == err.splitlines()[0]
 
 
 # gate_surface.py's records: two extensions, one plain crate between
@@ -463,78 +487,78 @@ TWO_EXTENSIONS = (
 )
 
 
-class TestMajors:
-    """Each extension's major and their union, derived once (#1795)."""
+# Each extension's major and their union, derived once (#1795).
+def derive(surface: str) -> subprocess.CompletedProcess[str]:
+    """Run both functions as a task does, over `surface` on stdin.
 
-    @staticmethod
-    def derive(surface: str) -> subprocess.CompletedProcess[str]:
-        """Run both functions as a task does, over `surface` on stdin.
+    Returns:
+        The finished bash: the pairs, then `union=` and the union.
 
-        Returns:
-            The finished bash: the pairs, then `union=` and the union.
+    """
+    script = (
+        f'. "{ENV_SH}"\n'
+        "pairs=$(org_pgrx_highest)\n"
+        'majors=$(org_pgrx_union <<< "${pairs}")\n'
+        'printf \'%s\\n\' "${pairs}" "union=${majors}"\n'
+    )
+    return subprocess.run(
+        [BASH, "-euo", "pipefail", "-c", script],
+        input=surface,
+        env=support.env(MISE_TASK_NAME=TASK),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
 
-        """
-        script = (
-            f'. "{ENV_SH}"\n'
-            "pairs=$(org_pgrx_highest)\n"
-            'majors=$(org_pgrx_union <<< "${pairs}")\n'
-            'printf \'%s\\n\' "${pairs}" "union=${majors}"\n'
-        )
-        return subprocess.run(
-            [BASH, "-euo", "pipefail", "-c", script],
-            input=surface,
-            env=support.env(MISE_TASK_NAME=TASK),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
 
-    def test_two_extensions_each_at_its_own_highest(self) -> None:
-        """Two extensions: a line each at its highest, and the union of both.
+def test_two_extensions_each_at_its_own_highest() -> None:
+    """Two extensions: a line each at its highest, and the union of both.
 
-        The excluded extension and the plain crate print nothing.
-        """
-        done = self.derive(TWO_EXTENSIONS)
-        assert done.returncode == 0, done.stderr
-        want = ["first@0.1.0\t17", "second@0.1.0\t16", "union=16,17"]
-        assert want == done.stdout.splitlines()
-        assert done.stderr == ""
+    The excluded extension and the plain crate print nothing.
+    """
+    done = derive(TWO_EXTENSIONS)
+    assert done.returncode == 0, done.stderr
+    want = ["first@0.1.0\t17", "second@0.1.0\t16", "union=16,17"]
+    assert want == done.stdout.splitlines()
+    assert done.stderr == ""
 
-    def test_a_shared_highest_is_registered_once(self) -> None:
-        """Two extensions at the same highest major name it once."""
-        surface = "crate\ta@1.0.0\tpgrx\t15,16,17\ta\ncrate\tb@1.0.0\tpgrx\t17\tb\n"
-        done = self.derive(surface)
-        assert done.returncode == 0, done.stderr
-        want = ["a@1.0.0\t17", "b@1.0.0\t17", "union=17"]
-        assert want == done.stdout.splitlines()
 
-    def test_no_extension_yields_nothing(self) -> None:
-        """Plain crates and an excluded extension: no pairs, no majors."""
-        surface = (
-            "crate\tplain@0.1.0\tplain\t-\tplain\n"
-            "excluded\theld@0.1.0\tpgrx\t18\theld\n"
-        )
-        done = self.derive(surface)
-        assert done.returncode == 0, done.stderr
-        want = ["", "union="]
-        assert want == done.stdout.splitlines()
-        assert done.stderr == ""
+def test_a_shared_highest_is_registered_once() -> None:
+    """Two extensions at the same highest major name it once."""
+    surface = "crate\ta@1.0.0\tpgrx\t15,16,17\ta\ncrate\tb@1.0.0\tpgrx\t17\tb\n"
+    done = derive(surface)
+    assert done.returncode == 0, done.stderr
+    want = ["a@1.0.0\t17", "b@1.0.0\t17", "union=17"]
+    assert want == done.stdout.splitlines()
 
-    def test_a_major_that_is_no_number_is_red_by_name(self) -> None:
-        """A line whose major is not a number stops the union, named."""
-        script = f'. "{ENV_SH}"\norg_pgrx_union'
-        done = subprocess.run(
-            [BASH, "-euo", "pipefail", "-c", script],
-            input="first@0.1.0\t17\nsecond@0.1.0\tpg16\n",
-            env=support.env(MISE_TASK_NAME=TASK),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        assert done.returncode == 1
-        assert done.stdout == ""
-        want = [f"{TASK}: second@0.1.0 names no Postgres major: 'pg16'"]
-        assert want == done.stderr.splitlines()
+
+def test_no_extension_yields_nothing() -> None:
+    """Plain crates and an excluded extension: no pairs, no majors."""
+    surface = (
+        "crate\tplain@0.1.0\tplain\t-\tplain\nexcluded\theld@0.1.0\tpgrx\t18\theld\n"
+    )
+    done = derive(surface)
+    assert done.returncode == 0, done.stderr
+    want = ["", "union="]
+    assert want == done.stdout.splitlines()
+    assert done.stderr == ""
+
+
+def test_a_major_that_is_no_number_is_red_by_name() -> None:
+    """A line whose major is not a number stops the union, named."""
+    script = f'. "{ENV_SH}"\norg_pgrx_union'
+    done = subprocess.run(
+        [BASH, "-euo", "pipefail", "-c", script],
+        input="first@0.1.0\t17\nsecond@0.1.0\tpg16\n",
+        env=support.env(MISE_TASK_NAME=TASK),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert done.returncode == 1
+    assert done.stdout == ""
+    want = [f"{TASK}: second@0.1.0 names no Postgres major: 'pg16'"]
+    assert want == done.stderr.splitlines()
 
 
 # `mise ls <package> --json`, answered from the listing a row planted
@@ -624,12 +648,10 @@ def entry(version: str, where: Path) -> dict[str, object]:
     }
 
 
-@pytest.mark.usefixtures("_set_up_test_icu_case")
-class TestIcuCase:
+class IcuCase:
     """A Mac with planted Postgres and ICU pins, and nothing else."""
 
-    @fixture
-    def _set_up_test_icu_case(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Lay out the stand-ins; each row plants its own pins."""
         self.root = Path(str(tmp_path)).resolve()
         bindir = self.root / "bin"
@@ -757,190 +779,215 @@ class TestIcuCase:
         return f"pg{major}|{flags} parent-b|{flags} parent-c"
 
 
-@pytest.mark.usefixtures("_set_up_test_mixed_icu_set")
-class TestMixedIcuSet(TestIcuCase):
+@fixture
+def icu_case(tmp_path: Path) -> IcuCase:
+    """Give each row its own IcuCase."""
+    return IcuCase(tmp_path)
+
+
+class MixedIcuSet(IcuCase):
     """Two Postgres majors built against two ICU majors (#1774)."""
 
-    @fixture
-    def _set_up_test_mixed_icu_set(self) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Pin pg17 built against ICU 78 and pg18 built against ICU 79."""
+        super().__init__(tmp_path)
         self.postgres({"17.6.0": homebrew(78), "18.1.0": homebrew(79)})
 
-    def test_both_pinned_each_major_exports_its_own_include_path(self) -> None:
-        """Each subshell carries its own major's headers and nothing else.
 
-        Before #1774 this was a refusal: one include path for the whole
-        task, so two ICU majors could not both be served.
-        """
-        self.icu({"78.3": True, "79.1": True})
-        done = self.per_major(17, 18)
-        assert done.returncode == 0, done.stderr
-        want = [
-            self.exported(17, "78.3"),
-            self.exported(18, "79.1"),
-            "parent|parent-b|parent-c",
-        ]
-        assert want == done.stdout.splitlines()
-        assert done.stderr == ""
-        checked = self.check("17,18")
-        assert (checked.returncode, checked.stderr) == (0, "")
-
-    def test_only_78_pinned_reds_naming_79_and_the_pin_line(self) -> None:
-        """A held-back major's ICU is pinned; the new one is named, with the array."""
-        self.icu({"78.3": True})
-        expected = [
-            other_pinned(18, 79, "78.3"),
-            WRONG_MAJOR,
-            PIN_HEAD,
-            '  "github:unicode-org/icu" = [',
-            f'    {{ version = "78.3", {KEYS} }},',
-            f'    {{ version = "79.<minor>", {KEYS} }},',
-            "  ]",
-        ]
-        checked = self.check("17,18")
-        assert checked.returncode == 1, checked.stderr
-        assert expected == checked.stderr.splitlines()
-        # The per-call refusal says the same, so it is never the weaker guard.
-        done = self.per_major(18)
-        assert done.returncode == 1, done.stderr
-        assert expected == done.stderr.splitlines()
-        # And the held-back major still builds.
-        done = self.per_major(17)
-        assert done.returncode == 0, done.stderr
-        assert self.exported(17, "78.3") in done.stdout.splitlines()
-
-    def test_neither_pinned_names_both_at_once(self) -> None:
-        """One red before any compile, naming every ICU major to add."""
-        checked = self.check("17,18")
-        assert checked.returncode == 1, checked.stderr
-        want = [
-            none_pinned(17, 78),
-            NO_PIN,
-            none_pinned(18, 79),
-            NO_PIN,
-            PIN_HEAD,
-            '  "github:unicode-org/icu" = [',
-            f'    {{ version = "78.<minor>", {KEYS} }},',
-            f'    {{ version = "79.<minor>", {KEYS} }},',
-            "  ]",
-        ]
-        assert want == checked.stderr.splitlines()
+@fixture
+def mixed_icu_set(tmp_path: Path) -> MixedIcuSet:
+    """Give each row its own MixedIcuSet."""
+    return MixedIcuSet(tmp_path)
 
 
-@pytest.mark.usefixtures("_set_up_test_one_icu_major")
-class TestOneIcuMajor(TestIcuCase):
+def test_both_pinned_each_major_exports_its_own_include_path(
+    mixed_icu_set: MixedIcuSet,
+) -> None:
+    """Each subshell carries its own major's headers and nothing else.
+
+    Before #1774 this was a refusal: one include path for the whole
+    task, so two ICU majors could not both be served.
+    """
+    mixed_icu_set.icu({"78.3": True, "79.1": True})
+    done = mixed_icu_set.per_major(17, 18)
+    assert done.returncode == 0, done.stderr
+    want = [
+        mixed_icu_set.exported(17, "78.3"),
+        mixed_icu_set.exported(18, "79.1"),
+        "parent|parent-b|parent-c",
+    ]
+    assert want == done.stdout.splitlines()
+    assert done.stderr == ""
+    checked = mixed_icu_set.check("17,18")
+    assert (checked.returncode, checked.stderr) == (0, "")
+
+
+def test_only_78_pinned_reds_naming_79_and_the_pin_line(
+    mixed_icu_set: MixedIcuSet,
+) -> None:
+    """A held-back major's ICU is pinned; the new one is named, with the array."""
+    mixed_icu_set.icu({"78.3": True})
+    expected = [
+        other_pinned(18, 79, "78.3"),
+        WRONG_MAJOR,
+        PIN_HEAD,
+        '  "github:unicode-org/icu" = [',
+        f'    {{ version = "78.3", {KEYS} }},',
+        f'    {{ version = "79.<minor>", {KEYS} }},',
+        "  ]",
+    ]
+    checked = mixed_icu_set.check("17,18")
+    assert checked.returncode == 1, checked.stderr
+    assert expected == checked.stderr.splitlines()
+    # The per-call refusal says the same, so it is never the weaker guard.
+    done = mixed_icu_set.per_major(18)
+    assert done.returncode == 1, done.stderr
+    assert expected == done.stderr.splitlines()
+    # And the held-back major still builds.
+    done = mixed_icu_set.per_major(17)
+    assert done.returncode == 0, done.stderr
+    assert mixed_icu_set.exported(17, "78.3") in done.stdout.splitlines()
+
+
+def test_neither_pinned_names_both_at_once(mixed_icu_set: MixedIcuSet) -> None:
+    """One red before any compile, naming every ICU major to add."""
+    checked = mixed_icu_set.check("17,18")
+    assert checked.returncode == 1, checked.stderr
+    want = [
+        none_pinned(17, 78),
+        NO_PIN,
+        none_pinned(18, 79),
+        NO_PIN,
+        PIN_HEAD,
+        '  "github:unicode-org/icu" = [',
+        f'    {{ version = "78.<minor>", {KEYS} }},',
+        f'    {{ version = "79.<minor>", {KEYS} }},',
+        "  ]",
+    ]
+    assert want == checked.stderr.splitlines()
+
+
+class OneIcuMajor(IcuCase):
     """One Postgres major, one ICU pin: the case before #1774, unchanged."""
 
-    @fixture
-    def _set_up_test_one_icu_major(self) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Pin pg18 built against ICU 78."""
+        super().__init__(tmp_path)
         self.postgres({"18.1.0": homebrew(78)})
 
-    def test_one_major_one_pin(self) -> None:
-        """The headers are added, and the check passes."""
-        self.icu({"78.3": True})
-        done = self.per_major(18)
-        assert done.returncode == 0, done.stderr
-        want = [self.exported(18, "78.3"), "parent|parent-b|parent-c"]
-        assert want == done.stdout.splitlines()
-        checked = self.check("18")
-        assert (checked.returncode, checked.stderr) == (0, "")
 
-    def test_no_pin_names_the_single_table(self) -> None:
-        """Remedy one: nothing pinned, so the one-table form to add."""
-        checked = self.check("18")
-        assert checked.returncode == 1, checked.stderr
-        want = [
-            none_pinned(18, 78),
-            NO_PIN,
-            PIN_HEAD,
-            f'  "github:unicode-org/icu" = {{ version = "78.<minor>", {KEYS} }}',
-        ]
-        assert want == checked.stderr.splitlines()
-
-    def test_another_major_only_names_the_array(self) -> None:
-        """Remedy two: a pin of another ICU major only, kept beside the new one."""
-        self.icu({"79.1": True})
-        checked = self.check("18")
-        assert checked.returncode == 1, checked.stderr
-        want = [
-            other_pinned(18, 78, "79.1"),
-            WRONG_MAJOR,
-            PIN_HEAD,
-            '  "github:unicode-org/icu" = [',
-            f'    {{ version = "79.1", {KEYS} }},',
-            f'    {{ version = "78.<minor>", {KEYS} }},',
-            "  ]",
-        ]
-        assert want == checked.stderr.splitlines()
-
-    def test_not_the_source_archive(self) -> None:
-        """Remedy three: the right major, and no headers in it."""
-        self.icu({"78.3": False})
-        where = self.root / "icu" / "78.3"
-        reason = [
-            (
-                f"{TASK}: ICU 78.3 at {where} carries no headers"
-                " under source/common and source/i18n"
-            ),
-            (
-                "  the pin must be ICU's SOURCE archive"
-                ' (asset_pattern = "icu4c-*-sources.tgz")'
-            ),
-        ]
-        checked = self.check("18")
-        assert checked.returncode == 1, checked.stderr
-        assert reason == checked.stderr.splitlines()
-        done = self.per_major(18)
-        assert done.returncode == 1, done.stderr
-        assert reason == done.stderr.splitlines()
-
-    def test_not_macos_adds_nothing_and_reads_nothing(self) -> None:
-        """Any kernel but Darwin: no headers, no listing read, no red."""
-        done = self.bash(
-            "( org_pgrx_darwin_icu 18; "
-            'echo "pg18|$BINDGEN_EXTRA_CLANG_ARGS|$CFLAGS" )\n'
-            'org_pgrx_darwin_icu_check 18\necho "check $?"',
-            PLANT_KERNEL="Linux",
-        )
-        assert done.returncode == 0, done.stderr
-        want = ["pg18|parent-b|parent-c", "check 0"]
-        assert want == done.stdout.splitlines()
-        assert done.stderr == ""
-        assert not (self.root / "mise.log").exists()
-
-    def test_sdk_correction_adds_no_icu(self) -> None:
-        """org_pgrx_darwin_flags is the SDK and nothing else now."""
-        self.icu({"78.3": True})
-        done = self.bash(
-            'org_pgrx_darwin_flags\necho "$BINDGEN_EXTRA_CLANG_ARGS|$CFLAGS"'
-        )
-        assert done.returncode == 0, done.stderr
-        want = ["-isysroot /sdk parent-b|-isysroot /sdk parent-c"]
-        assert want == done.stdout.splitlines()
+@fixture
+def one_icu_major(tmp_path: Path) -> OneIcuMajor:
+    """Give each row its own OneIcuMajor."""
+    return OneIcuMajor(tmp_path)
 
 
-class TestNoIcuNamed(TestIcuCase):
-    """A Postgres whose flags name no ICU."""
-
-    def test_exports_nothing_and_checks_clean(self) -> None:
-        """Nothing was built against an ICU, so there is nothing to add."""
-        self.postgres({"18.1.0": LINUX_FLAGS})
-        done = self.per_major(18)
-        assert done.returncode == 0, done.stderr
-        want = ["pg18|parent-b|parent-c", "parent|parent-b|parent-c"]
-        assert want == done.stdout.splitlines()
-        checked = self.check("18")
-        assert (checked.returncode, checked.stderr) == (0, "")
+def test_one_major_one_pin(one_icu_major: OneIcuMajor) -> None:
+    """The headers are added, and the check passes."""
+    one_icu_major.icu({"78.3": True})
+    done = one_icu_major.per_major(18)
+    assert done.returncode == 0, done.stderr
+    want = [one_icu_major.exported(18, "78.3"), "parent|parent-b|parent-c"]
+    assert want == done.stdout.splitlines()
+    checked = one_icu_major.check("18")
+    assert (checked.returncode, checked.stderr) == (0, "")
 
 
-@pytest.mark.usefixtures("_set_up_test_with_icu")
-class TestWithIcu(TestIcuCase):
+def test_no_pin_names_the_single_table(one_icu_major: OneIcuMajor) -> None:
+    """Remedy one: nothing pinned, so the one-table form to add."""
+    checked = one_icu_major.check("18")
+    assert checked.returncode == 1, checked.stderr
+    want = [
+        none_pinned(18, 78),
+        NO_PIN,
+        PIN_HEAD,
+        f'  "github:unicode-org/icu" = {{ version = "78.<minor>", {KEYS} }}',
+    ]
+    assert want == checked.stderr.splitlines()
+
+
+def test_another_major_only_names_the_array(one_icu_major: OneIcuMajor) -> None:
+    """Remedy two: a pin of another ICU major only, kept beside the new one."""
+    one_icu_major.icu({"79.1": True})
+    checked = one_icu_major.check("18")
+    assert checked.returncode == 1, checked.stderr
+    want = [
+        other_pinned(18, 78, "79.1"),
+        WRONG_MAJOR,
+        PIN_HEAD,
+        '  "github:unicode-org/icu" = [',
+        f'    {{ version = "79.1", {KEYS} }},',
+        f'    {{ version = "78.<minor>", {KEYS} }},',
+        "  ]",
+    ]
+    assert want == checked.stderr.splitlines()
+
+
+def test_not_the_source_archive(one_icu_major: OneIcuMajor) -> None:
+    """Remedy three: the right major, and no headers in it."""
+    one_icu_major.icu({"78.3": False})
+    where = one_icu_major.root / "icu" / "78.3"
+    reason = [
+        (
+            f"{TASK}: ICU 78.3 at {where} carries no headers"
+            " under source/common and source/i18n"
+        ),
+        (
+            "  the pin must be ICU's SOURCE archive"
+            ' (asset_pattern = "icu4c-*-sources.tgz")'
+        ),
+    ]
+    checked = one_icu_major.check("18")
+    assert checked.returncode == 1, checked.stderr
+    assert reason == checked.stderr.splitlines()
+    done = one_icu_major.per_major(18)
+    assert done.returncode == 1, done.stderr
+    assert reason == done.stderr.splitlines()
+
+
+def test_not_macos_adds_nothing_and_reads_nothing(one_icu_major: OneIcuMajor) -> None:
+    """Any kernel but Darwin: no headers, no listing read, no red."""
+    done = one_icu_major.bash(
+        "( org_pgrx_darwin_icu 18; "
+        'echo "pg18|$BINDGEN_EXTRA_CLANG_ARGS|$CFLAGS" )\n'
+        'org_pgrx_darwin_icu_check 18\necho "check $?"',
+        PLANT_KERNEL="Linux",
+    )
+    assert done.returncode == 0, done.stderr
+    want = ["pg18|parent-b|parent-c", "check 0"]
+    assert want == done.stdout.splitlines()
+    assert done.stderr == ""
+    assert not (one_icu_major.root / "mise.log").exists()
+
+
+def test_sdk_correction_adds_no_icu(one_icu_major: OneIcuMajor) -> None:
+    """org_pgrx_darwin_flags is the SDK and nothing else now."""
+    one_icu_major.icu({"78.3": True})
+    done = one_icu_major.bash(
+        'org_pgrx_darwin_flags\necho "$BINDGEN_EXTRA_CLANG_ARGS|$CFLAGS"'
+    )
+    assert done.returncode == 0, done.stderr
+    want = ["-isysroot /sdk parent-b|-isysroot /sdk parent-c"]
+    assert want == done.stdout.splitlines()
+
+
+def test_exports_nothing_and_checks_clean(icu_case: IcuCase) -> None:
+    """Nothing was built against an ICU, so there is nothing to add."""
+    icu_case.postgres({"18.1.0": LINUX_FLAGS})
+    done = icu_case.per_major(18)
+    assert done.returncode == 0, done.stderr
+    want = ["pg18|parent-b|parent-c", "parent|parent-b|parent-c"]
+    assert want == done.stdout.splitlines()
+    checked = icu_case.check("18")
+    assert (checked.returncode, checked.stderr) == (0, "")
+
+
+class WithIcu(IcuCase):
     """org_pgrx_major: one command, its major's headers, then gone."""
 
-    @fixture
-    def _set_up_test_with_icu(self) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Pin pg17 and pg18 against ICU 78 and 79, both pinned."""
+        super().__init__(tmp_path)
         self.postgres({"17.6.0": homebrew(78), "18.1.0": homebrew(79)})
         self.icu({"78.3": True, "79.1": True})
 
@@ -954,51 +1001,63 @@ class TestWithIcu(TestIcuCase):
         """
         return super().bash(f"org_pgrx_postgres() {{ :; }}\n{script}", **env)
 
-    def test_each_command_sees_its_own_and_the_parent_keeps_its_flags(self) -> None:
-        """Sequential commands: no major's include path reaches the next."""
-        show = "bash -c 'echo \"$0|$BINDGEN_EXTRA_CLANG_ARGS|$CFLAGS\"'"
-        done = self.bash(
-            f"org_pgrx_major 17 {show} pg17\n"
-            f"org_pgrx_major 18 {show} pg18\n"
-            f"org_pgrx_major '' {show} plain\n"
-            'echo "parent|$BINDGEN_EXTRA_CLANG_ARGS|$CFLAGS"'
-        )
-        assert done.returncode == 0, done.stderr
-        want = [
-            self.exported(17, "78.3"),
-            self.exported(18, "79.1"),
-            "plain|parent-b|parent-c",
-            "parent|parent-b|parent-c",
-        ]
-        assert want == done.stdout.splitlines()
 
-    def test_missing_headers_run_nothing(self) -> None:
-        """A major whose headers are not pinned reds before its command."""
-        self.icu({"78.3": True})
-        done = self.bash("org_pgrx_major 18 echo ran")
-        assert done.returncode == 1
-        assert done.stdout == ""
-        assert other_pinned(18, 79, "78.3") == done.stderr.splitlines()[0]
+@fixture
+def with_icu(tmp_path: Path) -> WithIcu:
+    """Give each row its own WithIcu."""
+    return WithIcu(tmp_path)
 
-    def test_the_command_status_is_its_own(self) -> None:
-        """A failed compile is the helper's failure, in a condition too."""
-        done = self.bash(
-            "if org_pgrx_major 17 false; then echo ok; else echo red $?; fi"
-        )
-        assert (done.returncode, done.stdout) == (0, "red 1\n")
 
-    def test_prepare_is_the_sdk_and_the_check(self) -> None:
-        """The SDK for every major, and one red naming each missing ICU."""
-        done = self.bash(
-            'org_pgrx_darwin_prepare "17,18"\necho "$BINDGEN_EXTRA_CLANG_ARGS|$CFLAGS"'
-        )
-        assert done.returncode == 0, done.stderr
-        want = ["-isysroot /sdk parent-b|-isysroot /sdk parent-c"]
-        assert want == done.stdout.splitlines()
-        self.icu({"79.1": True})
-        done = self.bash('org_pgrx_darwin_prepare "17,18"')
-        assert done.returncode == 1
-        assert other_pinned(17, 78, "79.1") == done.stderr.splitlines()[0]
+def test_each_command_sees_its_own_and_the_parent_keeps_its_flags(
+    with_icu: WithIcu,
+) -> None:
+    """Sequential commands: no major's include path reaches the next."""
+    show = "bash -c 'echo \"$0|$BINDGEN_EXTRA_CLANG_ARGS|$CFLAGS\"'"
+    done = with_icu.bash(
+        f"org_pgrx_major 17 {show} pg17\n"
+        f"org_pgrx_major 18 {show} pg18\n"
+        f"org_pgrx_major '' {show} plain\n"
+        'echo "parent|$BINDGEN_EXTRA_CLANG_ARGS|$CFLAGS"'
+    )
+    assert done.returncode == 0, done.stderr
+    want = [
+        with_icu.exported(17, "78.3"),
+        with_icu.exported(18, "79.1"),
+        "plain|parent-b|parent-c",
+        "parent|parent-b|parent-c",
+    ]
+    assert want == done.stdout.splitlines()
+
+
+def test_missing_headers_run_nothing(with_icu: WithIcu) -> None:
+    """A major whose headers are not pinned reds before its command."""
+    with_icu.icu({"78.3": True})
+    done = with_icu.bash("org_pgrx_major 18 echo ran")
+    assert done.returncode == 1
+    assert done.stdout == ""
+    assert other_pinned(18, 79, "78.3") == done.stderr.splitlines()[0]
+
+
+def test_the_command_status_is_its_own(with_icu: WithIcu) -> None:
+    """A failed compile is the helper's failure, in a condition too."""
+    done = with_icu.bash(
+        "if org_pgrx_major 17 false; then echo ok; else echo red $?; fi"
+    )
+    assert (done.returncode, done.stdout) == (0, "red 1\n")
+
+
+def test_prepare_is_the_sdk_and_the_check(with_icu: WithIcu) -> None:
+    """The SDK for every major, and one red naming each missing ICU."""
+    done = with_icu.bash(
+        'org_pgrx_darwin_prepare "17,18"\necho "$BINDGEN_EXTRA_CLANG_ARGS|$CFLAGS"'
+    )
+    assert done.returncode == 0, done.stderr
+    want = ["-isysroot /sdk parent-b|-isysroot /sdk parent-c"]
+    assert want == done.stdout.splitlines()
+    with_icu.icu({"79.1": True})
+    done = with_icu.bash('org_pgrx_darwin_prepare "17,18"')
+    assert done.returncode == 1
+    assert other_pinned(17, 78, "79.1") == done.stderr.splitlines()[0]
 
 
 # Every site that compiles the extension (#1774), and how many compiles
@@ -1093,56 +1152,54 @@ def subshell(lines: list[str], at: int) -> list[str]:
     return []
 
 
-class TestNoLeak:
-    """No call site lets one major's include path reach the next (#1774).
+# No call site lets one major's include path reach the next (#1774).
+#
+# A subshell cannot change its parent's BINDGEN_EXTRA_CLANG_ARGS or
+# CFLAGS, which WithIcu and MixedIcuSet show in bash. Here every site
+# is read for that shape: each compile goes through org_pgrx_major,
+# whose subshell ends with the command, or adds the headers (and the
+# Postgres, #1940) itself with org_pgrx_major_env inside a subshell
+# that compiles after it. And the check runs first.
+@pytest.mark.parametrize(("site", "calls"), SITES.items())
+def test_every_compile_carries_its_major_in_a_subshell(
+    site: object, calls: object
+) -> None:
+    """Each site's compiles are the shapes above, and checked first."""
+    lines = site_text(site).splitlines()
+    hits = [
+        i
+        for i, line in enumerate(lines)
+        if CALL.search(line) and not line.lstrip().startswith("#")
+    ]
+    assert calls == len(hits)
+    text = "\n".join(lines)
+    first_check = CHECK.search(text)
+    first_call = CALL.search(text)
+    assert first_check is not None, "no check before compiling"
+    assert first_call is not None
+    if first_check is None or first_call is None:
+        return
+    assert first_check.start() < first_call.start()
+    for at in hits:
+        if "org_pgrx_major " in lines[at]:
+            assert re.search(COMPILE, command(lines, at))
+            continue
+        block = subshell(lines, at)
+        assert block, f"line {at + 1} is in no subshell"
+        after = block[block.index(lines[at]) + 1 :]
+        assert any(COMPILE.search(line) for line in after), (
+            f"line {at + 1}'s subshell compiles nothing after it"
+        )
 
-    A subshell cannot change its parent's BINDGEN_EXTRA_CLANG_ARGS or
-    CFLAGS, which WithIcu and MixedIcuSet show in bash. Here every site
-    is read for that shape: each compile goes through org_pgrx_major,
-    whose subshell ends with the command, or adds the headers (and the
-    Postgres, #1940) itself with org_pgrx_major_env inside a subshell
-    that compiles after it. And the check runs first.
-    """
 
-    @pytest.mark.parametrize(("site", "calls"), SITES.items())
-    def test_every_compile_carries_its_major_in_a_subshell(
-        self, site: object, calls: object
-    ) -> None:
-        """Each site's compiles are the shapes above, and checked first."""
-        lines = site_text(site).splitlines()
-        hits = [
-            i
-            for i, line in enumerate(lines)
-            if CALL.search(line) and not line.lstrip().startswith("#")
-        ]
-        assert calls == len(hits)
-        text = "\n".join(lines)
-        first_check = CHECK.search(text)
-        first_call = CALL.search(text)
-        assert first_check is not None, "no check before compiling"
-        assert first_call is not None
-        if first_check is None or first_call is None:
-            return
-        assert first_check.start() < first_call.start()
-        for at in hits:
-            if "org_pgrx_major " in lines[at]:
-                assert re.search(COMPILE, command(lines, at))
-                continue
-            block = subshell(lines, at)
-            assert block, f"line {at + 1} is in no subshell"
-            after = block[block.index(lines[at]) + 1 :]
-            assert any(COMPILE.search(line) for line in after), (
-                f"line {at + 1}'s subshell compiles nothing after it"
-            )
-
-    def test_no_site_beyond_the_table(self) -> None:
-        """A new compile site cannot add headers without joining the table."""
-        found = set()
-        for path in sorted((CANON / "mise").glob("*.sh")):
-            text = path.read_text(encoding="utf-8")
-            if path.name != "pgrx-env.sh" and CALL.search(text):
-                found.add(f"mise/{path.name}")
-        config = (CANON / "mise" / "config.toml").read_text(encoding="utf-8")
-        assert len(list(CALL.finditer(config))) == 0
-        sites = set(SITES)
-        assert sites == found
+def test_no_site_beyond_the_table() -> None:
+    """A new compile site cannot add headers without joining the table."""
+    found = set()
+    for path in sorted((CANON / "mise").glob("*.sh")):
+        text = path.read_text(encoding="utf-8")
+        if path.name != "pgrx-env.sh" and CALL.search(text):
+            found.add(f"mise/{path.name}")
+    config = (CANON / "mise" / "config.toml").read_text(encoding="utf-8")
+    assert len(list(CALL.finditer(config))) == 0
+    sites = set(SITES)
+    assert sites == found

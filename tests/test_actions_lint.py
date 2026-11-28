@@ -63,14 +63,10 @@ def names(tree: Path) -> list[str]:
     return sorted(found)
 
 
-@pytest.mark.usefixtures("_set_up_test_actions_lint")
-class TestActionsLint:
+class ActionsLint:
     """One planted workflow; actionlint's verdict through the helper."""
 
-    @fixture
-    def _set_up_test_actions_lint(
-        self, tmp_path: Path, capfd: pytest.CaptureFixture[str]
-    ) -> None:
+    def __init__(self, tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:
         """Plant an empty workflows directory."""
         self.tree = tmp_path
         self.capfd = capfd
@@ -102,70 +98,89 @@ class TestActionsLint:
         out, err = self.capfd.readouterr()
         return subprocess.CompletedProcess(list(argv), status, out, err)
 
-    def test_a_clean_workflow_passes_and_writes_nothing(self) -> None:
-        """`$/` and ubuntu-26.04 pass under the two ignores; the tree is untouched."""
-        rel = self.plant(CLEAN)
-        before = names(self.tree)
-        done = self.run_helper(rel)
-        assert done.returncode == 0, done.stdout + done.stderr
-        assert (done.stdout, done.stderr) == ("", "")
-        assert names(self.tree) == before
 
-    def test_a_finding_names_the_fix(self) -> None:
-        """Actionlint's report, then the one finding, exit 1."""
-        rel = self.plant(CLEAN.replace("echo ok", 'echo "${{ nope.x }}"'))
-        done = self.run_helper(rel)
-        assert done.returncode == actions_lint.EXIT_RED
-        assert "nope" in done.stdout
-        fix: list[str] = [FIX]
-        assert done.stderr.splitlines() == fix
+@fixture
+def actions_lint_state(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> ActionsLint:
+    """Give each row its own ActionsLint."""
+    return ActionsLint(tmp_path, capfd)
 
-    def test_the_two_ignores_are_anchored(self) -> None:
-        """Each pattern names its exception and no other."""
-        assert actions_lint.SELF_REF == 'specifying action "\\$/'
-        runner = 'label "ubuntu-26\\.04(-arm)?" is unknown'
-        assert runner == actions_lint.RUNNER
 
-    def test_no_workflow_is_a_usage_error(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """No file named: exit 2, never a walk of the directory."""
-        with pytest.MonkeyPatch.context() as patched:
-            patched.chdir(self.tree)
-            status = actions_lint.main([])
-        _out, err = capfd.readouterr()
-        assert status == actions_lint.EXIT_ERROR
-        usage: list[str] = ["lint:actions: usage: belt actions-lint WORKFLOW..."]
-        assert err.splitlines() == usage
+def test_a_clean_workflow_passes_and_writes_nothing(
+    actions_lint_state: ActionsLint,
+) -> None:
+    """`$/` and ubuntu-26.04 pass under the two ignores; the tree is untouched."""
+    rel = actions_lint_state.plant(CLEAN)
+    before = names(actions_lint_state.tree)
+    done = actions_lint_state.run_helper(rel)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert (done.stdout, done.stderr) == ("", "")
+    assert names(actions_lint_state.tree) == before
 
-    def test_no_canon_tree_is_refused(self) -> None:
-        """No ORG_CANON_DIR: exit 2, named."""
-        rel = self.plant(CLEAN)
-        done = self.run_helper(rel, ORG_CANON_DIR="")
-        assert done.returncode == actions_lint.EXIT_ERROR
-        refused: list[str] = [
-            (
-                "lint:actions: ORG_CANON_DIR is unset — no canon tree for"
-                " shellcheck to follow"
-            )
-        ]
-        assert done.stderr.splitlines() == refused
 
-    def test_no_actionlint_is_refused(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """Actionlint not found: exit 2, named, never a pass."""
-        rel = self.plant(CLEAN)
-        missing = str(self.tree / "no-such-actionlint")
-        env = support.env(
-            MISE_TASK_NAME=TASK, ORG_FINDINGS="", ORG_CANON_DIR=str(CANON_DIR)
+def test_a_finding_names_the_fix(actions_lint_state: ActionsLint) -> None:
+    """Actionlint's report, then the one finding, exit 1."""
+    rel = actions_lint_state.plant(CLEAN.replace("echo ok", 'echo "${{ nope.x }}"'))
+    done = actions_lint_state.run_helper(rel)
+    assert done.returncode == actions_lint.EXIT_RED
+    assert "nope" in done.stdout
+    fix: list[str] = [FIX]
+    assert done.stderr.splitlines() == fix
+
+
+@pytest.mark.usefixtures("actions_lint_state")
+def test_the_two_ignores_are_anchored() -> None:
+    """Each pattern names its exception and no other."""
+    assert actions_lint.SELF_REF == 'specifying action "\\$/'
+    runner = 'label "ubuntu-26\\.04(-arm)?" is unknown'
+    assert runner == actions_lint.RUNNER
+
+
+def test_no_workflow_is_a_usage_error(
+    actions_lint_state: ActionsLint, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """No file named: exit 2, never a walk of the directory."""
+    with pytest.MonkeyPatch.context() as patched:
+        patched.chdir(actions_lint_state.tree)
+        status = actions_lint.main([])
+    _out, err = capfd.readouterr()
+    assert status == actions_lint.EXIT_ERROR
+    usage: list[str] = ["lint:actions: usage: belt actions-lint WORKFLOW..."]
+    assert err.splitlines() == usage
+
+
+def test_no_canon_tree_is_refused(actions_lint_state: ActionsLint) -> None:
+    """No ORG_CANON_DIR: exit 2, named."""
+    rel = actions_lint_state.plant(CLEAN)
+    done = actions_lint_state.run_helper(rel, ORG_CANON_DIR="")
+    assert done.returncode == actions_lint.EXIT_ERROR
+    refused: list[str] = [
+        (
+            "lint:actions: ORG_CANON_DIR is unset — no canon tree for"
+            " shellcheck to follow"
         )
+    ]
+    assert done.stderr.splitlines() == refused
+
+
+def test_no_actionlint_is_refused(
+    actions_lint_state: ActionsLint, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Actionlint not found: exit 2, named, never a pass."""
+    rel = actions_lint_state.plant(CLEAN)
+    missing = str(actions_lint_state.tree / "no-such-actionlint")
+    env = support.env(
+        MISE_TASK_NAME=TASK, ORG_FINDINGS="", ORG_CANON_DIR=str(CANON_DIR)
+    )
+    with pytest.MonkeyPatch.context() as patched:
+        patched.setattr(actions_lint, "ACTIONLINT", missing)
         with pytest.MonkeyPatch.context() as patched:
-            patched.setattr(actions_lint, "ACTIONLINT", missing)
-            with pytest.MonkeyPatch.context() as patched:
-                for name, value in env.items():
-                    patched.setenv(name, value)
-                patched.chdir(self.tree)
-                status = actions_lint.main([rel])
-            _out, err = capfd.readouterr()
-        assert status == actions_lint.EXIT_ERROR
-        missing_tool: list[str] = ["lint:actions: actionlint is not on PATH"]
-        assert err.splitlines() == missing_tool
+            for name, value in env.items():
+                patched.setenv(name, value)
+            patched.chdir(actions_lint_state.tree)
+            status = actions_lint.main([rel])
+        _out, err = capfd.readouterr()
+    assert status == actions_lint.EXIT_ERROR
+    missing_tool: list[str] = ["lint:actions: actionlint is not on PATH"]
+    assert err.splitlines() == missing_tool

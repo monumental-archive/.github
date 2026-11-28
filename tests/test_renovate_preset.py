@@ -178,90 +178,93 @@ def versions(dep: str, content: str) -> list[str]:
     return [g["currentValue"] for g in recursive(patterns, content, {})]
 
 
-class TestManagers:
-    """Each manager takes every entry after the first, and only those."""
-
-    def test_postgres_five_entries_yield_the_last_four(self) -> None:
-        """The native manager has 18.7.0; the regex one the other four."""
-        last_four: list[str] = ["17.11.1", "16.15.1", "15.19.1", "14.24.1"]
-        assert versions(POSTGRES, POSTGRES_FIVE) == last_four
-
-    def test_postgres_one_string_yields_none(self) -> None:
-        """A one-version pin is the native manager's alone (rust's array too)."""
-        assert versions(POSTGRES, POSTGRES_ONE) == NONE
-
-    def test_icu_two_tables_yield_the_second(self) -> None:
-        """The native manager has 78.3; the regex one 79.1."""
-        regex_only: list[str] = ["79.1"]
-        assert versions(ICU, ICU_TWO) == regex_only
-
-    def test_icu_one_table_yields_none(self) -> None:
-        """A one-table pin, as edtf tracks it, is the native manager's alone."""
-        assert versions(ICU, ICU_ONE) == NONE
-
-    @pytest.mark.parametrize("dep", [POSTGRES, ICU])
-    def test_shape(self, dep: object) -> None:
-        """Recursive, github-releases, and the file pattern hits mise.toml."""
-        m = manager(dep)
-        assert m["customType"] == "regex"
-        assert m["matchStringsStrategy"] == "recursive"
-        assert m["datasourceTemplate"] == "github-releases"
-        files = MISE_FILES[1:-1]
-        assert re.search(files, "mise.toml")
-        assert re.search(files, "crates/x/mise.toml")
-        assert not re.search(files, "mise/config.toml")
-
-    def test_icu_tag_to_version(self) -> None:
-        """ICU tags `release-79.1`; the lookup compares the bare version."""
-        template = compiled(
-            decoded.as_str(manager(ICU)["extractVersionTemplate"], "template")
-        )
-        found = template.search("release-79.1")
-        assert found is not None
-        assert (found.group("version") if found else None) == "79.1"
-        assert template.search("icu4x/2026-08-31/79.x") is None
-
-    def test_not_re2_is_refused(self) -> None:
-        """The RE2 guard itself reds on a lookbehind, by name."""
-        with pytest.raises(AssertionError, match=r"not RE2.*\(\?<="):
-            compiled('(?<=,)\\s*"(?<currentValue>[0-9.]+)"')
+# Each manager takes every entry after the first, and only those.
+def test_postgres_five_entries_yield_the_last_four() -> None:
+    """The native manager has 18.7.0; the regex one the other four."""
+    last_four: list[str] = ["17.11.1", "16.15.1", "15.19.1", "14.24.1"]
+    assert versions(POSTGRES, POSTGRES_FIVE) == last_four
 
 
-class TestRules:
-    """Postgres moves as one set, each entry inside its own major."""
+def test_postgres_one_string_yields_none() -> None:
+    """A one-version pin is the native manager's alone (rust's array too)."""
+    assert versions(POSTGRES, POSTGRES_ONE) == NONE
 
-    @staticmethod
-    def rules(name: str) -> list[dict[str, object]]:
-        """Every packageRule that names `name` in matchPackageNames.
 
-        Returns:
-            The rules, in preset order.
+def test_icu_two_tables_yield_the_second() -> None:
+    """The native manager has 78.3; the regex one 79.1."""
+    regex_only: list[str] = ["79.1"]
+    assert versions(ICU, ICU_TWO) == regex_only
 
-        """
-        raw = decoded.as_array(preset()["packageRules"], "packageRules")
-        rules = [decoded.as_object(r, "packageRules[]") for r in raw]
-        return [
-            r
-            for r in rules
-            if name in decoded.as_array(r.get("matchPackageNames", []), "names")
-        ]
 
-    @pytest.mark.parametrize("name", [POSTGRES, f"aqua:{POSTGRES}"])
-    def test_postgres_grouped(self, name: object) -> None:
-        """Every entry's update lands in one pull request."""
-        groups = [r["groupName"] for r in self.rules(name) if "groupName" in r]
-        group: list[str] = ["postgresql-binaries"]
-        assert groups == group
+def test_icu_one_table_yields_none() -> None:
+    """A one-table pin, as edtf tracks it, is the native manager's alone."""
+    assert versions(ICU, ICU_ONE) == NONE
 
-    @pytest.mark.parametrize("name", [POSTGRES, f"aqua:{POSTGRES}"])
-    def test_postgres_major_disabled(self, name: object) -> None:
-        """A new major is a new entry, added by hand with its crate feature."""
-        off = [
-            r
-            for r in self.rules(name)
-            if r.get("matchUpdateTypes") == ["major"] and r.get("enabled") is False
-        ]
-        assert len(off) == 1
+
+@pytest.mark.parametrize("dep", [POSTGRES, ICU])
+def test_shape(dep: object) -> None:
+    """Recursive, github-releases, and the file pattern hits mise.toml."""
+    m = manager(dep)
+    assert m["customType"] == "regex"
+    assert m["matchStringsStrategy"] == "recursive"
+    assert m["datasourceTemplate"] == "github-releases"
+    files = MISE_FILES[1:-1]
+    assert re.search(files, "mise.toml")
+    assert re.search(files, "crates/x/mise.toml")
+    assert not re.search(files, "mise/config.toml")
+
+
+def test_icu_tag_to_version() -> None:
+    """ICU tags `release-79.1`; the lookup compares the bare version."""
+    template = compiled(
+        decoded.as_str(manager(ICU)["extractVersionTemplate"], "template")
+    )
+    found = template.search("release-79.1")
+    assert found is not None
+    assert (found.group("version") if found else None) == "79.1"
+    assert template.search("icu4x/2026-08-31/79.x") is None
+
+
+def test_not_re2_is_refused() -> None:
+    """The RE2 guard itself reds on a lookbehind, by name."""
+    with pytest.raises(AssertionError, match=r"not RE2.*\(\?<="):
+        compiled('(?<=,)\\s*"(?<currentValue>[0-9.]+)"')
+
+
+# Postgres moves as one set, each entry inside its own major.
+def rules(name: str) -> list[dict[str, object]]:
+    """Every packageRule that names `name` in matchPackageNames.
+
+    Returns:
+        The rules, in preset order.
+
+    """
+    raw = decoded.as_array(preset()["packageRules"], "packageRules")
+    rules = [decoded.as_object(r, "packageRules[]") for r in raw]
+    return [
+        r
+        for r in rules
+        if name in decoded.as_array(r.get("matchPackageNames", []), "names")
+    ]
+
+
+@pytest.mark.parametrize("name", [POSTGRES, f"aqua:{POSTGRES}"])
+def test_postgres_grouped(name: object) -> None:
+    """Every entry's update lands in one pull request."""
+    groups = [r["groupName"] for r in rules(name) if "groupName" in r]
+    group: list[str] = ["postgresql-binaries"]
+    assert groups == group
+
+
+@pytest.mark.parametrize("name", [POSTGRES, f"aqua:{POSTGRES}"])
+def test_postgres_major_disabled(name: object) -> None:
+    """A new major is a new entry, added by hand with its crate feature."""
+    off = [
+        r
+        for r in rules(name)
+        if r.get("matchUpdateTypes") == ["major"] and r.get("enabled") is False
+    ]
+    assert len(off) == 1
 
 
 def pgrx_groups(rules: list[object]) -> list[str]:
@@ -286,32 +289,31 @@ def pgrx_groups(rules: list[object]) -> list[str]:
     return groups
 
 
-class TestPgrx:
-    """pgrx's packages release together, so they move as one set (#1867)."""
+# pgrx's packages release together, so they move as one set (#1867).
+def test_pgrx_grouped_by_source() -> None:
+    """Exactly one rule matches pgrx's source, and it groups as pgrx."""
+    raw = decoded.as_array(preset()["packageRules"], "packageRules")
+    group: list[str] = ["pgrx"]
+    assert pgrx_groups(raw) == group
 
-    def test_pgrx_grouped_by_source(self) -> None:
-        """Exactly one rule matches pgrx's source, and it groups as pgrx."""
-        raw = decoded.as_array(preset()["packageRules"], "packageRules")
-        group: list[str] = ["pgrx"]
-        assert pgrx_groups(raw) == group
 
-    def test_pgrx_rule_removed_is_refused(self) -> None:
-        """Planted: the preset without the rule reds, by name."""
-        raw = decoded.as_array(preset()["packageRules"], "packageRules")
-        kept = [
-            r
-            for r in raw
-            if PGRX
-            not in decoded.as_array(
-                decoded.as_object(r, "packageRules[]").get("matchSourceUrls", []),
-                "matchSourceUrls",
-            )
-        ]
-        assert len(kept) == len(raw) - 1
-        with pytest.raises(
-            AssertionError, match=r"no packageRule matches the source .*/pgrx$"
-        ):
-            pgrx_groups(kept)
+def test_pgrx_rule_removed_is_refused() -> None:
+    """Planted: the preset without the rule reds, by name."""
+    raw = decoded.as_array(preset()["packageRules"], "packageRules")
+    kept = [
+        r
+        for r in raw
+        if PGRX
+        not in decoded.as_array(
+            decoded.as_object(r, "packageRules[]").get("matchSourceUrls", []),
+            "matchSourceUrls",
+        )
+    ]
+    assert len(kept) == len(raw) - 1
+    with pytest.raises(
+        AssertionError, match=r"no packageRule matches the source .*/pgrx$"
+    ):
+        pgrx_groups(kept)
 
 
 BELT = support.MISE / "config.toml"
@@ -400,61 +402,62 @@ def belt() -> dict[str, object]:
     return decoded.load_toml(BELT.read_bytes())
 
 
-class TestAges:
-    """The age floor outranks every inherited rule (#2097)."""
+# The age floor outranks every inherited rule (#2097).
+def test_preset_holds() -> None:
+    """The tracked preset and belt agree, floor first."""
+    none: list[str] = []
+    assert age_findings(preset(), belt()) == none
 
-    def test_preset_holds(self) -> None:
-        """The tracked preset and belt agree, floor first."""
-        none: list[str] = []
-        assert age_findings(preset(), belt()) == none
 
-    def test_top_level_age_is_refused(self) -> None:
-        """Planted: the floor back at top level reds, by name."""
-        doc = {**preset(), "minimumReleaseAge": "7 days"}
-        found = age_findings(doc, belt())
-        assert len(found) == 1
-        assert r"top-level minimumReleaseAge loses" in found[0]
+def test_top_level_age_is_refused() -> None:
+    """Planted: the floor back at top level reds, by name."""
+    doc = {**preset(), "minimumReleaseAge": "7 days"}
+    found = age_findings(doc, belt())
+    assert len(found) == 1
+    assert r"top-level minimumReleaseAge loses" in found[0]
 
-    def test_floor_not_first_is_refused(self) -> None:
-        """Planted: an exemption ahead of the floor reds."""
-        doc = preset()
-        raw = decoded.as_array(doc["packageRules"], "packageRules")
-        doc = {**doc, "packageRules": [raw[-1], *raw]}
-        found = age_findings(doc, belt())
-        assert re.search(r"packageRules\[0\] is not the age floor", found[0])
 
-    def test_floor_off_the_belt_is_refused(self) -> None:
-        """Planted: a floor that disagrees with mise reds."""
-        doc = preset()
-        raw = decoded.as_array(doc["packageRules"], "packageRules")
-        first = {**decoded.as_object(raw[0], "floor"), "minimumReleaseAge": "3 days"}
-        doc = {**doc, "packageRules": [first, *raw[1:]]}
-        found = age_findings(doc, belt())
-        floor = "default.json: the floor says 3 days"
-        want: list[str] = [f"{floor}, the belt's minimum_release_age 168h"]
-        assert found == want
+def test_floor_not_first_is_refused() -> None:
+    """Planted: an exemption ahead of the floor reds."""
+    doc = preset()
+    raw = decoded.as_array(doc["packageRules"], "packageRules")
+    doc = {**doc, "packageRules": [raw[-1], *raw]}
+    found = age_findings(doc, belt())
+    assert re.search(r"packageRules\[0\] is not the age floor", found[0])
 
-    def test_npm_off_pnpm_is_refused(self) -> None:
-        """Planted: npm waiting less than pnpm reds."""
-        doc = preset()
-        raw = decoded.as_array(doc["packageRules"], "packageRules")
-        npm = {**decoded.as_object(raw[1], "npm"), "minimumReleaseAge": "2 days"}
-        doc = {**doc, "packageRules": [raw[0], npm, *raw[2:]]}
-        found = age_findings(doc, belt())
-        want: list[str] = [
-            "default.json: npm waits 2 days, the belt's pnpm 4320 minutes"
-        ]
-        assert found == want
 
-    def test_npm_rule_missing_is_refused(self) -> None:
-        """Planted: without the npm rule, upstream's three days is unstated."""
-        doc = preset()
-        raw = decoded.as_array(doc["packageRules"], "packageRules")
-        doc = {**doc, "packageRules": [raw[0], *raw[2:]]}
-        found = age_findings(doc, belt())
-        where = "default.json: the npm age rule sits at []"
-        want: list[str] = [f"{where}, not right after the floor"]
-        assert found == want
+def test_floor_off_the_belt_is_refused() -> None:
+    """Planted: a floor that disagrees with mise reds."""
+    doc = preset()
+    raw = decoded.as_array(doc["packageRules"], "packageRules")
+    first = {**decoded.as_object(raw[0], "floor"), "minimumReleaseAge": "3 days"}
+    doc = {**doc, "packageRules": [first, *raw[1:]]}
+    found = age_findings(doc, belt())
+    floor = "default.json: the floor says 3 days"
+    want: list[str] = [f"{floor}, the belt's minimum_release_age 168h"]
+    assert found == want
+
+
+def test_npm_off_pnpm_is_refused() -> None:
+    """Planted: npm waiting less than pnpm reds."""
+    doc = preset()
+    raw = decoded.as_array(doc["packageRules"], "packageRules")
+    npm = {**decoded.as_object(raw[1], "npm"), "minimumReleaseAge": "2 days"}
+    doc = {**doc, "packageRules": [raw[0], npm, *raw[2:]]}
+    found = age_findings(doc, belt())
+    want: list[str] = ["default.json: npm waits 2 days, the belt's pnpm 4320 minutes"]
+    assert found == want
+
+
+def test_npm_rule_missing_is_refused() -> None:
+    """Planted: without the npm rule, upstream's three days is unstated."""
+    doc = preset()
+    raw = decoded.as_array(doc["packageRules"], "packageRules")
+    doc = {**doc, "packageRules": [raw[0], *raw[2:]]}
+    found = age_findings(doc, belt())
+    where = "default.json: the npm age rule sits at []"
+    want: list[str] = [f"{where}, not right after the floor"]
+    assert found == want
 
 
 FIRST_PARTY = ["monumental-archive/**"]
@@ -526,87 +529,87 @@ def first_party_age_findings(doc: dict[str, object]) -> list[str]:
     return found
 
 
-class TestLimits:
-    """No limit skips lock file maintenance or the canon bump (#2162)."""
-
-    def test_preset_holds(self) -> None:
-        """Both deliveries carry both zeros."""
-        none: list[str] = []
-        assert limit_findings(preset()) == none
-
-    def test_maintenance_limited_is_refused(self) -> None:
-        """Planted: lock file maintenance without the zeros reds, by name."""
-        doc = preset()
-        block = decoded.as_object(doc["lockFileMaintenance"], "lockFileMaintenance")
-        kept = {k: v for k, v in block.items() if k not in UNLIMITED}
-        found = limit_findings({**doc, "lockFileMaintenance": kept})
-        where = "default.json: lockFileMaintenance has"
-        want: list[str] = [
-            f"{where} prConcurrentLimit None, not 0; a limit can skip it",
-            f"{where} prHourlyLimit None, not 0; a limit can skip it",
-        ]
-        assert found == want
-
-    def test_first_party_limited_is_refused(self) -> None:
-        """Planted: the first-party rule with a limit of 2 reds, by name."""
-        doc = preset()
-        raw = decoded.as_array(doc["packageRules"], "packageRules")
-        planted = [
-            {**decoded.as_object(r, "packageRules[]"), "prHourlyLimit": 2}
-            if decoded.as_object(r, "packageRules[]").get("matchPackageNames")
-            == FIRST_PARTY
-            else r
-            for r in raw
-        ]
-        found = limit_findings({**doc, "packageRules": planted})
-        where = "default.json: the first-party rule has"
-        want: list[str] = [f"{where} prHourlyLimit 2, not 0; a limit can skip it"]
-        assert found == want
-
-    def test_image_limited_is_refused(self) -> None:
-        """Planted: the image rule without its zeros reds, by name."""
-        doc = preset()
-        raw = decoded.as_array(doc["packageRules"], "packageRules")
-        planted = [
-            {
-                k: v
-                for k, v in decoded.as_object(r, "packageRules[]").items()
-                if k not in UNLIMITED
-            }
-            if decoded.as_object(r, "packageRules[]").get("matchPackageNames")
-            == FIRST_PARTY_IMAGES
-            else r
-            for r in raw
-        ]
-        found = limit_findings({**doc, "packageRules": planted})
-        where = "default.json: the first-party image rule has"
-        want: list[str] = [
-            f"{where} prConcurrentLimit None, not 0; a limit can skip it",
-            f"{where} prHourlyLimit None, not 0; a limit can skip it",
-        ]
-        assert found == want
+# No limit skips lock file maintenance or the canon bump (#2162).
+def test_limits_preset_holds() -> None:
+    """Both deliveries carry both zeros."""
+    none: list[str] = []
+    assert limit_findings(preset()) == none
 
 
-class TestFirstPartyAge:
-    """No first-party package waits out the age floor, images included."""
+def test_maintenance_limited_is_refused() -> None:
+    """Planted: lock file maintenance without the zeros reds, by name."""
+    doc = preset()
+    block = decoded.as_object(doc["lockFileMaintenance"], "lockFileMaintenance")
+    kept = {k: v for k, v in block.items() if k not in UNLIMITED}
+    found = limit_findings({**doc, "lockFileMaintenance": kept})
+    where = "default.json: lockFileMaintenance has"
+    want: list[str] = [
+        f"{where} prConcurrentLimit None, not 0; a limit can skip it",
+        f"{where} prHourlyLimit None, not 0; a limit can skip it",
+    ]
+    assert found == want
 
-    def test_preset_holds(self) -> None:
-        """Both first-party selectors carry the zero age."""
-        none: list[str] = []
-        assert first_party_age_findings(preset()) == none
 
-    def test_image_rule_missing_is_refused(self) -> None:
-        """Planted: without the image rule, ghcr images wait seven days."""
-        doc = preset()
-        raw = decoded.as_array(doc["packageRules"], "packageRules")
-        kept = [
-            r
-            for r in raw
-            if decoded.as_object(r, "packageRules[]").get("matchPackageNames")
-            != FIRST_PARTY_IMAGES
-        ]
-        found = first_party_age_findings({**doc, "packageRules": kept})
-        where = "default.json: ghcr.io/monumental-archive/**"
-        why = "the floor holds first-party"
-        want: list[str] = [f"{where} waits None, not 0 days; {why}"]
-        assert found == want
+def test_first_party_limited_is_refused() -> None:
+    """Planted: the first-party rule with a limit of 2 reds, by name."""
+    doc = preset()
+    raw = decoded.as_array(doc["packageRules"], "packageRules")
+    planted = [
+        {**decoded.as_object(r, "packageRules[]"), "prHourlyLimit": 2}
+        if decoded.as_object(r, "packageRules[]").get("matchPackageNames")
+        == FIRST_PARTY
+        else r
+        for r in raw
+    ]
+    found = limit_findings({**doc, "packageRules": planted})
+    where = "default.json: the first-party rule has"
+    want: list[str] = [f"{where} prHourlyLimit 2, not 0; a limit can skip it"]
+    assert found == want
+
+
+def test_image_limited_is_refused() -> None:
+    """Planted: the image rule without its zeros reds, by name."""
+    doc = preset()
+    raw = decoded.as_array(doc["packageRules"], "packageRules")
+    planted = [
+        {
+            k: v
+            for k, v in decoded.as_object(r, "packageRules[]").items()
+            if k not in UNLIMITED
+        }
+        if decoded.as_object(r, "packageRules[]").get("matchPackageNames")
+        == FIRST_PARTY_IMAGES
+        else r
+        for r in raw
+    ]
+    found = limit_findings({**doc, "packageRules": planted})
+    where = "default.json: the first-party image rule has"
+    want: list[str] = [
+        f"{where} prConcurrentLimit None, not 0; a limit can skip it",
+        f"{where} prHourlyLimit None, not 0; a limit can skip it",
+    ]
+    assert found == want
+
+
+# No first-party package waits out the age floor, images included.
+def test_first_party_age_preset_holds() -> None:
+    """Both first-party selectors carry the zero age."""
+    none: list[str] = []
+    assert first_party_age_findings(preset()) == none
+
+
+def test_image_rule_missing_is_refused() -> None:
+    """Planted: without the image rule, ghcr images wait seven days."""
+    doc = preset()
+    raw = decoded.as_array(doc["packageRules"], "packageRules")
+    kept = [
+        r
+        for r in raw
+        if decoded.as_object(r, "packageRules[]").get("matchPackageNames")
+        != FIRST_PARTY_IMAGES
+    ]
+    found = first_party_age_findings({**doc, "packageRules": kept})
+    where = "default.json: ghcr.io/monumental-archive/**"
+    why = "the floor holds first-party"
+    want: list[str] = [f"{where} waits None, not 0 days; {why}"]
+    assert found == want

@@ -236,111 +236,118 @@ jobs:
 {report}"""
 
 
-class TestCanon:
-    """The canon's own workflows."""
-
-    def test_every_job_hands_its_findings_on(self) -> None:
-        """Every job uploads as its last step; every report reads them."""
-        same(problems(CANON), [])
-
-    def test_the_set_is_the_reporting_workflows(self) -> None:
-        """The computation reaches a direct workflow, a callee and a stub."""
-        names = {p.name for p in population(CANON)}
-        assert "slsa.yml" in names
-        assert "repo-mutants.yml" in names
-        assert "self-records.yml" in names
-        assert "gate.yml" not in names
+# The canon's own workflows.
+def test_every_job_hands_its_findings_on() -> None:
+    """Every job uploads as its last step; every report reads them."""
+    same(problems(CANON), [])
 
 
-class TestPlanted:
-    """A planted reporting workflow, red by message."""
+def test_the_set_is_the_reporting_workflows() -> None:
+    """The computation reaches a direct workflow, a callee and a stub."""
+    names = {p.name for p in population(CANON)}
+    assert "slsa.yml" in names
+    assert "repo-mutants.yml" in names
+    assert "self-records.yml" in names
+    assert "gate.yml" not in names
 
-    @staticmethod
-    def plant(check: str, report: str) -> list[str]:
-        """Write a planted workflow and check its tree.
 
-        Returns:
-            The messages.
+# A planted reporting workflow, red by message.
+def plant(check: str, report: str) -> list[str]:
+    """Write a planted workflow and check its tree.
 
-        """
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / WORKFLOWS).mkdir(parents=True)
-            (root / WORKFLOWS / "planted.yml").write_text(
-                PLANTED.format(check=check, report=report), encoding="utf-8"
-            )
-            return problems(root)
+    Returns:
+        The messages.
 
-    def test_as_built_passes(self) -> None:
-        """An upload after the check and a download the helper reads pass."""
-        same(self.plant(CHECK + UPLOAD_STEP, DOWNLOAD_STEP + HELPER_STEP), [])
-
-    def test_a_job_with_no_upload(self) -> None:
-        """A job that runs `mise run` and uploads nothing is red by name."""
-        same(
-            self.plant(CHECK, DOWNLOAD_STEP + HELPER_STEP),
-            [f"planted.yml: check: uploads no {NAME}"],
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / WORKFLOWS).mkdir(parents=True)
+        (root / WORKFLOWS / "planted.yml").write_text(
+            PLANTED.format(check=check, report=report), encoding="utf-8"
         )
+        return problems(root)
 
-    def test_a_plain_run_job_with_no_upload(self) -> None:
-        """A job that records only through a plain `run:` step is in the set."""
-        same(
-            self.plant(PLAIN, DOWNLOAD_STEP + HELPER_STEP),
-            [f"planted.yml: check: uploads no {NAME}"],
-        )
 
-    def test_a_job_with_no_steps_is_not_in_the_set(self) -> None:
-        """A job that calls a reusable workflow uploads nothing and passes."""
-        same(self.plant(PLAIN + UPLOAD_STEP, DOWNLOAD_STEP + HELPER_STEP), [])
+def test_as_built_passes() -> None:
+    """An upload after the check and a download the helper reads pass."""
+    same(plant(CHECK + UPLOAD_STEP, DOWNLOAD_STEP + HELPER_STEP), [])
 
-    def test_an_upload_that_is_not_last(self) -> None:
-        """An upload with a step after it is red by name."""
-        same(
-            self.plant(PLAIN + UPLOAD_STEP + PLAIN, DOWNLOAD_STEP + HELPER_STEP),
-            [f"planted.yml: check: {NOT_LAST}"],
-        )
 
-    def test_an_upload_under_another_name(self) -> None:
-        """An upload of the findings path under another name is red by name."""
-        renamed = UPLOAD_STEP.replace(NAME, "findings-${{ github.job }}")
-        same(
-            self.plant(PLAIN + renamed, DOWNLOAD_STEP + HELPER_STEP),
-            [f"planted.yml: check: the findings upload's name is not {NAME}"],
-        )
+def test_a_job_with_no_upload() -> None:
+    """A job that runs `mise run` and uploads nothing is red by name."""
+    same(
+        plant(CHECK, DOWNLOAD_STEP + HELPER_STEP),
+        [f"planted.yml: check: uploads no {NAME}"],
+    )
 
-    def test_an_upload_from_another_path(self) -> None:
-        """An upload under the findings name from another path is red by name."""
-        moved = UPLOAD_STEP.replace(UPLOAD_PATH, "${{ runner.temp }}/out/")
-        same(
-            self.plant(PLAIN + moved, DOWNLOAD_STEP + HELPER_STEP),
-            [f"planted.yml: check: the findings upload's path is not {UPLOAD_PATH}"],
-        )
 
-    def test_an_upload_that_runs_only_on_success(self) -> None:
-        """An upload a failed check would skip is red by name."""
-        skipped = UPLOAD_STEP.replace(NOT_CANCELLED, "${{ success() }}")
-        same(
-            self.plant(CHECK + skipped, DOWNLOAD_STEP + HELPER_STEP),
-            [f"planted.yml: check: the findings upload is not if: {NOT_CANCELLED}"],
-        )
+def test_a_plain_run_job_with_no_upload() -> None:
+    """A job that records only through a plain `run:` step is in the set."""
+    same(
+        plant(PLAIN, DOWNLOAD_STEP + HELPER_STEP),
+        [f"planted.yml: check: uploads no {NAME}"],
+    )
 
-    def test_a_report_with_no_download(self) -> None:
-        """A report job that downloads nothing is red by name."""
-        same(
-            self.plant(CHECK + UPLOAD_STEP, HELPER_STEP),
-            [f"planted.yml: report: downloads no {PATTERN} before {HELPER}"],
-        )
 
-    def test_a_download_after_the_helper(self) -> None:
-        """A download the helper runs before is no download."""
-        same(
-            self.plant(CHECK + UPLOAD_STEP, HELPER_STEP + DOWNLOAD_STEP),
-            [f"planted.yml: report: downloads no {PATTERN} before {HELPER}"],
-        )
+def test_a_job_with_no_steps_is_not_in_the_set() -> None:
+    """A job that calls a reusable workflow uploads nothing and passes."""
+    same(plant(PLAIN + UPLOAD_STEP, DOWNLOAD_STEP + HELPER_STEP), [])
 
-    def test_a_report_that_does_not_pass_the_flag(self) -> None:
-        """A report job whose helper is not passed `--findings` is red by name."""
-        same(
-            self.plant(CHECK + UPLOAD_STEP, DOWNLOAD_STEP + BARE_HELPER_STEP),
-            [f"planted.yml: report: {HELPER} is not passed {FLAG}"],
-        )
+
+def test_an_upload_that_is_not_last() -> None:
+    """An upload with a step after it is red by name."""
+    same(
+        plant(PLAIN + UPLOAD_STEP + PLAIN, DOWNLOAD_STEP + HELPER_STEP),
+        [f"planted.yml: check: {NOT_LAST}"],
+    )
+
+
+def test_an_upload_under_another_name() -> None:
+    """An upload of the findings path under another name is red by name."""
+    renamed = UPLOAD_STEP.replace(NAME, "findings-${{ github.job }}")
+    same(
+        plant(PLAIN + renamed, DOWNLOAD_STEP + HELPER_STEP),
+        [f"planted.yml: check: the findings upload's name is not {NAME}"],
+    )
+
+
+def test_an_upload_from_another_path() -> None:
+    """An upload under the findings name from another path is red by name."""
+    moved = UPLOAD_STEP.replace(UPLOAD_PATH, "${{ runner.temp }}/out/")
+    same(
+        plant(PLAIN + moved, DOWNLOAD_STEP + HELPER_STEP),
+        [f"planted.yml: check: the findings upload's path is not {UPLOAD_PATH}"],
+    )
+
+
+def test_an_upload_that_runs_only_on_success() -> None:
+    """An upload a failed check would skip is red by name."""
+    skipped = UPLOAD_STEP.replace(NOT_CANCELLED, "${{ success() }}")
+    same(
+        plant(CHECK + skipped, DOWNLOAD_STEP + HELPER_STEP),
+        [f"planted.yml: check: the findings upload is not if: {NOT_CANCELLED}"],
+    )
+
+
+def test_a_report_with_no_download() -> None:
+    """A report job that downloads nothing is red by name."""
+    same(
+        plant(CHECK + UPLOAD_STEP, HELPER_STEP),
+        [f"planted.yml: report: downloads no {PATTERN} before {HELPER}"],
+    )
+
+
+def test_a_download_after_the_helper() -> None:
+    """A download the helper runs before is no download."""
+    same(
+        plant(CHECK + UPLOAD_STEP, HELPER_STEP + DOWNLOAD_STEP),
+        [f"planted.yml: report: downloads no {PATTERN} before {HELPER}"],
+    )
+
+
+def test_a_report_that_does_not_pass_the_flag() -> None:
+    """A report job whose helper is not passed `--findings` is red by name."""
+    same(
+        plant(CHECK + UPLOAD_STEP, DOWNLOAD_STEP + BARE_HELPER_STEP),
+        [f"planted.yml: report: {HELPER} is not passed {FLAG}"],
+    )

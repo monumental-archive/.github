@@ -96,62 +96,59 @@ def crates(bans: dict[str, object], key: str) -> list[str]:
     ]
 
 
-class TestOneEntry:
-    """Each variant is missing its own entry and nothing else."""
-
-    def test_two_versions_of_one_crate_are_two_variants(self) -> None:
-        """Each version's variant keeps the other version's skip."""
-        got = variants(TWO_VERSIONS)
-        skipped = [(spec, crates(bans, "skip")) for spec, bans in got]
-        want: list[tuple[str, list[str]]] = [
-            ("windows-sys@0.48", ["windows-sys@0.52"]),
-            ("windows-sys@0.52", ["windows-sys@0.48"]),
-        ]
-        assert skipped == want
-
-    def test_a_deny_entry_for_the_crate_is_kept(self) -> None:
-        """Only the skip goes; the deny entry stays."""
-        [(spec, bans)] = variants(DENIED_TOO)
-        assert spec == "openssl@0.10"
-        none: list[object] = []
-        assert bans["skip"] == none
-        denied: list[str] = ["openssl"]
-        assert crates(bans, "deny") == denied
+# Each variant is missing its own entry and nothing else.
+def test_two_versions_of_one_crate_are_two_variants() -> None:
+    """Each version's variant keeps the other version's skip."""
+    got = variants(TWO_VERSIONS)
+    skipped = [(spec, crates(bans, "skip")) for spec, bans in got]
+    want: list[tuple[str, list[str]]] = [
+        ("windows-sys@0.48", ["windows-sys@0.52"]),
+        ("windows-sys@0.52", ["windows-sys@0.48"]),
+    ]
+    assert skipped == want
 
 
-class TestRefusals:
-    """A deny.toml the helper cannot read is refused by name."""
+def test_a_deny_entry_for_the_crate_is_kept() -> None:
+    """Only the skip goes; the deny entry stays."""
+    [(spec, bans)] = variants(DENIED_TOO)
+    assert spec == "openssl@0.10"
+    none: list[object] = []
+    assert bans["skip"] == none
+    denied: list[str] = ["openssl"]
+    assert crates(bans, "deny") == denied
 
-    @staticmethod
-    def refused(text: str) -> tuple[int, str, str]:
-        """Run the helper on a deny.toml, capturing both streams.
 
-        Returns:
-            The status, stdout, and stderr with the path written PATH.
+# A deny.toml the helper cannot read is refused by name.
+def refused(text: str) -> tuple[int, str, str]:
+    """Run the helper on a deny.toml, capturing both streams.
 
-        """
-        with tempfile.TemporaryDirectory() as scratch:
-            path = Path(scratch) / "deny.toml"
-            path.write_text(text, encoding="utf-8")
-            out, err = io.StringIO(), io.StringIO()
-            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-                status = ds.main([str(path)])
-            return status, out.getvalue(), err.getvalue().replace(str(path), "PATH")
+    Returns:
+        The status, stdout, and stderr with the path written PATH.
 
-    @pytest.mark.parametrize(
-        ("text", "said"),
-        [
-            ("[bans\n", "lint:deny: PATH: Expected ']' at the end of a table"),
-            ("bans = 1\n", "lint:deny: PATH: bans is not an object\n"),
-            ("[bans]\nskip = 1\n", "lint:deny: PATH: bans.skip is not a list\n"),
-            (
-                "[bans]\nskip-tree = {}\n",
-                "lint:deny: PATH: bans.skip-tree is not a list\n",
-            ),
-        ],
-    )
-    def test_each_wrong_document_is_named(self, text: object, said: object) -> None:
-        """Not TOML, `bans` not a table, a skip key not an array."""
-        status, out, err = self.refused(text)
-        assert (status, out) == (1, "")
-        assert err.startswith(said), err
+    """
+    with tempfile.TemporaryDirectory() as scratch:
+        path = Path(scratch) / "deny.toml"
+        path.write_text(text, encoding="utf-8")
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            status = ds.main([str(path)])
+        return status, out.getvalue(), err.getvalue().replace(str(path), "PATH")
+
+
+@pytest.mark.parametrize(
+    ("text", "said"),
+    [
+        ("[bans\n", "lint:deny: PATH: Expected ']' at the end of a table"),
+        ("bans = 1\n", "lint:deny: PATH: bans is not an object\n"),
+        ("[bans]\nskip = 1\n", "lint:deny: PATH: bans.skip is not a list\n"),
+        (
+            "[bans]\nskip-tree = {}\n",
+            "lint:deny: PATH: bans.skip-tree is not a list\n",
+        ),
+    ],
+)
+def test_each_wrong_document_is_named(text: object, said: object) -> None:
+    """Not TOML, `bans` not a table, a skip key not an array."""
+    status, out, err = refused(text)
+    assert (status, out) == (1, "")
+    assert err.startswith(said), err

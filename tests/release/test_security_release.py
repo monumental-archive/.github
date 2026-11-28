@@ -35,8 +35,6 @@ import subprocess
 import textwrap
 from pathlib import Path
 
-import pytest
-
 from belt import decoded
 from belt.typed_pytest import fixture
 from tests import support
@@ -290,12 +288,10 @@ NOTHING_REMEDIED = (
 ISSUE_TITLE = "the supported release carries an advisory and main does not remedy it"
 
 
-@pytest.mark.usefixtures("_set_up_test_decision_case")
-class TestDecisionCase:
+class DecisionCase:
     """A fresh passing case per row; each row breaks exactly one input."""
 
-    @fixture
-    def _set_up_test_decision_case(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Build the passing case."""
         self.repo = Repo(Path(str(tmp_path)))
 
@@ -309,232 +305,264 @@ class TestDecisionCase:
         assert "pr" not in got
 
 
-class TestTheYes(TestDecisionCase):
-    """The one path that ends in a merge, and what it took to get there."""
+@fixture
+def decision_case(tmp_path: Path) -> DecisionCase:
+    """Give each row its own DecisionCase."""
+    return DecisionCase(tmp_path)
 
-    def test_an_affected_release_that_main_remedies_releases(self) -> None:
-        """The real report against the real main: twenty remedied, a yes."""
-        done = self.repo.run()
-        assert done.returncode == 0, done.stderr
-        want: dict[str, str] = {
-            "merge": "true",
-            "pr": "274",
-            "reason": "stele@v0.20.0 is affected and main remedies it",
+
+def test_an_affected_release_that_main_remedies_releases(
+    decision_case: DecisionCase,
+) -> None:
+    """The real report against the real main: twenty remedied, a yes."""
+    done = decision_case.repo.run()
+    assert done.returncode == 0, done.stderr
+    want: dict[str, str] = {
+        "merge": "true",
+        "pr": "274",
+        "reason": "stele@v0.20.0 is affected and main remedies it",
+    }
+    assert decision_case.repo.outputs() == want
+    # All twenty findings of the real report are remedied by the real
+    # main, and the report says which.
+    assert "GO-2026-6603:golang.org/x/net@v0.57.0" in done.stdout
+    assert done.stdout.count("\n  G") == 20, done.stdout
+    # Both publish-path checks ran, on this tree, before the yes.
+    assert "mise run audit:deny" in decision_case.repo.calls()
+    assert "mise run audit:go-vulns" in decision_case.repo.calls()
+
+
+def test_the_org_canary_is_not_asked_of_one_repository(
+    decision_case: DecisionCase,
+) -> None:
+    """The canary lives in another repository's history; it is dropped."""
+    decision_case.repo.run()
+    text = (decision_case.repo.fake / "policy-seen.json").read_text()
+    seen = decoded.as_object(decoded.load_json(text), "the policy")
+    blast = decoded.as_object(seen["blastRadius"], "blastRadius")
+    assert "canary" not in blast
+    assert blast["supported"] == "latest-release"
+
+
+def test_nothing_to_release(decision_case: DecisionCase) -> None:
+    """A plan that releases nothing ends the run."""
+    decision_case.repo.plan({"release": False})
+    decision_case.declines(
+        "nothing to release: main carries no releasable change since the last tag"
+    )
+
+
+def test_a_breaking_release_waits_for_a_maintainer(decision_case: DecisionCase) -> None:
+    """Stele's own v0.21.0: 0.x applied a minor bump, the range asked major."""
+    bump = {"applied": "minor", "requested": "major", "declared": False}
+    decision_case.repo.plan({**PLAN, "bump": bump})
+    decision_case.declines(
+        "the pending release carries a breaking change, which waits for a maintainer"
+    )
+
+
+def test_no_release_pr(decision_case: DecisionCase) -> None:
+    """No open pull request on the plan's branch."""
+    decision_case.repo.pr(None)
+    decision_case.declines("no open Release PR on release/next")
+
+
+def test_a_release_pr_for_another_version_is_stale(decision_case: DecisionCase) -> None:
+    """A PR not yet refreshed to the release main describes is left."""
+    decision_case.repo.pr({**PR, "title": "chore: release v0.20.0"})
+    decision_case.declines(
+        "Release PR #274 is not the release main now describes"
+        " (chore: release v0.20.1) — it has not been refreshed yet"
+    )
+
+
+def test_the_hold_label_is_a_veto(decision_case: DecisionCase) -> None:
+    """The maintainer's stop, among other labels."""
+    decision_case.repo.pr({
+        **PR,
+        "labels": [{"name": "dependencies"}, {"name": "hold"}],
+    })
+    decision_case.declines("Release PR #274 carries the hold label")
+
+
+def test_a_release_pr_that_is_not_clean_is_left_alone(
+    decision_case: DecisionCase,
+) -> None:
+    """Mergeable NOW, or not at all — nothing is armed for later."""
+    decision_case.repo.pr({**PR, "mergeStateStatus": "BLOCKED"})
+    decision_case.declines("Release PR #274 is not mergeable as it stands (BLOCKED)")
+
+
+def test_a_clean_supported_release_needs_no_release(
+    decision_case: DecisionCase,
+) -> None:
+    """iiif-server on the day v0.2.3 answered for v0.2.2."""
+    decision_case.repo.report(CLEAN, 0)
+    # The clean report is iiif-server's; ask as that repository.
+    done = decision_case.repo.run(GITHUB_REPOSITORY="monumental-archive/iiif-server")
+    assert done.returncode == 0, done.stderr
+    assert (
+        decision_case.repo.outputs().get("reason")
+        == "the supported release iiif-server@v0.2.3 carries no undecided advisory"
+    )
+
+
+def test_no_support_window_declared(decision_case: DecisionCase) -> None:
+    """A policy with no window yields no fact, and the run says so."""
+    bare = report_of(AFFECTED)
+    bare["facts"] = []
+    decision_case.repo.report(dumps(bare), 1)
+    decision_case.declines(
+        "no supported release could be named for stele:"
+        " the policy declares no support window"
+    )
+
+
+def test_a_name_with_a_dot_matches_only_itself(decision_case: DecisionCase) -> None:
+    """`a.b` is not a pattern: `axb@` is another repository (#1637).
+
+    No release of this repository is in the fact, so the reader
+    prints nothing and succeeds, and the run says no window.
+    """
+    decoy = report_of(AFFECTED)
+    decoy["facts"] = [
+        {"name": "supportedReleases", "value": "axb@v0.20.0"},
+        {"name": "supportedReleasesAffected", "value": "axb@v0.20.0"},
+    ]
+    decision_case.repo.report(dumps(decoy), 1)
+    done = decision_case.repo.run(GITHUB_REPOSITORY="monumental-archive/a.b")
+    assert done.returncode == 0, done.stderr
+    assert decision_case.repo.outputs().get("reason") == (
+        "no supported release could be named for a.b:"
+        " the policy declares no support window"
+    )
+
+
+def test_a_withheld_window_is_said_in_the_engines_words(
+    decision_case: DecisionCase,
+) -> None:
+    """A newest release not read whole: stele's reason is passed on."""
+    withheld = report_of(AFFECTED)
+    why = "stele@v0.20.0(not read whole)"
+    withheld["facts"] = [{"name": "supersessionWithheld", "value": why}]
+    decision_case.repo.report(dumps(withheld), 1)
+    decision_case.declines(f"no supported release could be named for stele: {why}")
+
+
+def test_a_scan_that_cannot_judge_releases_nothing(decision_case: DecisionCase) -> None:
+    """CANNOT_JUDGE is a no, not an error and not a yes."""
+    decision_case.repo.report(AFFECTED, 4)
+    decision_case.declines(
+        "the published SBOMs could not be judged (stele: CANNOT_JUDGE)"
+    )
+
+
+def test_a_main_that_fixed_nothing_needs_a_human(decision_case: DecisionCase) -> None:
+    """v0.20.0's own module versions on main: a release changes nothing."""
+    (decision_case.repo.fake / "go-modules").write_text(GO_UNFIXED)
+    decision_case.declines(NOTHING_REMEDIED)
+    # Not asked to file, so nothing was filed and no audit was run.
+    assert "issue create" not in decision_case.repo.calls()
+    assert "mise run" not in decision_case.repo.calls()
+
+
+def test_one_remedied_package_is_enough(decision_case: DecisionCase) -> None:
+    """Everything unfixed but grpc: a release remedies something."""
+    partly = GO_UNFIXED.replace("grpc@v1.82.1", "grpc@v1.84.0")
+    (decision_case.repo.fake / "go-modules").write_text(partly)
+    done = decision_case.repo.run()
+    assert decision_case.repo.outputs().get("merge") == "true", done.stdout
+    assert "GO-2026-6443:google.golang.org/grpc@v1.82.1" in done.stdout
+    assert "golang.org/x/net@v0.57.0" not in done.stdout
+
+
+def test_a_tree_that_would_refuse_its_own_publish_is_not_tagged(
+    decision_case: DecisionCase,
+) -> None:
+    """Stele v0.17.0's burn, caught before the version number is spent."""
+    (decision_case.repo.fake / "fail-audit:go-vulns").write_text("")
+    decision_case.declines(
+        "main would refuse its own publish:"
+        " audit:go-vulns fails on the tree being released"
+    )
+
+
+def test_the_issue_is_filed_once(decision_case: DecisionCase) -> None:
+    """Filed when asked and none is open; never a second time."""
+    (decision_case.repo.fake / "go-modules").write_text(GO_UNFIXED)
+    decision_case.repo.run(FILE_ISSUE="true")
+    assert decision_case.repo.calls().count("gh issue create") == 1
+    assert ISSUE_TITLE in decision_case.repo.calls()
+    # An open one already says it.
+    (decision_case.repo.fake / "issues-open").write_text("1\n")
+    (decision_case.repo.fake / "calls").write_text("")
+    decision_case.repo.run(FILE_ISSUE="true")
+    assert "gh issue create" not in decision_case.repo.calls()
+
+
+def test_findings_only_in_an_ecosystem_this_tree_does_not_resolve(
+    decision_case: DecisionCase,
+) -> None:
+    """An image red only in its OS layer: the rebuild is the remedy."""
+    os_only = report_of(AFFECTED)
+    for listed in decoded.as_array(os_only["findings"], "findings"):
+        finding = decoded.as_object(listed, "a finding")
+        finding["assertion"] = "CVE-2026-0001:libssl3@3.5.1-1"
+        finding["detail"] = "CVE-2026-0001 affects libssl3@3.5.1-1 (Debian:13)"
+    decision_case.repo.report(dumps(os_only), 1)
+    done = decision_case.repo.run()
+    assert decision_case.repo.outputs().get("merge") == "true", done.stdout
+    assert "a rebuild is the remedy" in done.stdout
+
+
+def test_a_cargo_lock_is_read_for_crates(decision_case: DecisionCase) -> None:
+    """The same question asked of a Rust tree, both answers."""
+    crates = report_of(AFFECTED)
+    crates["findings"] = [
+        {
+            "subject": "stele@v0.20.0",
+            "assertion": "RUSTSEC-2026-0386:tokio@1.53.1",
+            "detail": "RUSTSEC-2026-0386 affects tokio@1.53.1 (crates.io)",
         }
-        assert self.repo.outputs() == want
-        # All twenty findings of the real report are remedied by the real
-        # main, and the report says which.
-        assert "GO-2026-6603:golang.org/x/net@v0.57.0" in done.stdout
-        assert done.stdout.count("\n  G") == 20, done.stdout
-        # Both publish-path checks ran, on this tree, before the yes.
-        assert "mise run audit:deny" in self.repo.calls()
-        assert "mise run audit:go-vulns" in self.repo.calls()
-
-    def test_the_org_canary_is_not_asked_of_one_repository(self) -> None:
-        """The canary lives in another repository's history; it is dropped."""
-        self.repo.run()
-        text = (self.repo.fake / "policy-seen.json").read_text()
-        seen = decoded.as_object(decoded.load_json(text), "the policy")
-        blast = decoded.as_object(seen["blastRadius"], "blastRadius")
-        assert "canary" not in blast
-        assert blast["supported"] == "latest-release"
+    ]
+    decision_case.repo.report(dumps(crates), 1)
+    (decision_case.repo.tree / "go.mod").unlink()
+    lock = '[[package]]\nname = "tokio"\nversion = "{}"\nsource = "registry"\n'
+    (decision_case.repo.tree / "Cargo.lock").write_text(lock.format("1.53.1"))
+    decision_case.declines(NOTHING_REMEDIED)
+    (decision_case.repo.tree / "Cargo.lock").write_text(lock.format("1.54.1"))
+    done = decision_case.repo.run()
+    assert decision_case.repo.outputs().get("merge") == "true", done.stdout
 
 
-class TestTheReleaseIsNotOneToCut(TestDecisionCase):
-    """Questions 1 and 2: the pending release and its pull request."""
+def test_a_module_with_no_toolchain_is_loud(decision_case: DecisionCase) -> None:
+    """Found by the live run.
 
-    def test_nothing_to_release(self) -> None:
-        """A plan that releases nothing ends the run."""
-        self.repo.plan({"release": False})
-        self.declines(
-            "nothing to release: main carries no releasable change since the last tag"
-        )
-
-    def test_a_breaking_release_waits_for_a_maintainer(self) -> None:
-        """Stele's own v0.21.0: 0.x applied a minor bump, the range asked major."""
-        bump = {"applied": "minor", "requested": "major", "declared": False}
-        self.repo.plan({**PLAN, "bump": bump})
-        self.declines(
-            "the pending release carries a breaking change,"
-            " which waits for a maintainer"
-        )
-
-    def test_no_release_pr(self) -> None:
-        """No open pull request on the plan's branch."""
-        self.repo.pr(None)
-        self.declines("no open Release PR on release/next")
-
-    def test_a_release_pr_for_another_version_is_stale(self) -> None:
-        """A PR not yet refreshed to the release main describes is left."""
-        self.repo.pr({**PR, "title": "chore: release v0.20.0"})
-        self.declines(
-            "Release PR #274 is not the release main now describes"
-            " (chore: release v0.20.1) — it has not been refreshed yet"
-        )
-
-    def test_the_hold_label_is_a_veto(self) -> None:
-        """The maintainer's stop, among other labels."""
-        self.repo.pr({**PR, "labels": [{"name": "dependencies"}, {"name": "hold"}]})
-        self.declines("Release PR #274 carries the hold label")
-
-    def test_a_release_pr_that_is_not_clean_is_left_alone(self) -> None:
-        """Mergeable NOW, or not at all — nothing is armed for later."""
-        self.repo.pr({**PR, "mergeStateStatus": "BLOCKED"})
-        self.declines("Release PR #274 is not mergeable as it stands (BLOCKED)")
+    With no `go`, every Go finding compared against nothing and the
+    answer was "main remedies nothing" about a tree nobody had
+    looked at.
+    """
+    (decision_case.repo.bin / "go").unlink()
+    done = decision_case.repo.run()
+    assert done.returncode == 1
+    assert "go.mod present but go missing" in done.stderr
+    assert "merge" not in decision_case.repo.outputs()
 
 
-class TestTheSupportedReleaseIsNotAffected(TestDecisionCase):
-    """Question 3: what was published, as the engine states it."""
-
-    def test_a_clean_supported_release_needs_no_release(self) -> None:
-        """iiif-server on the day v0.2.3 answered for v0.2.2."""
-        self.repo.report(CLEAN, 0)
-        # The clean report is iiif-server's; ask as that repository.
-        done = self.repo.run(GITHUB_REPOSITORY="monumental-archive/iiif-server")
-        assert done.returncode == 0, done.stderr
-        assert (
-            self.repo.outputs().get("reason")
-            == "the supported release iiif-server@v0.2.3 carries no undecided advisory"
-        )
-
-    def test_no_support_window_declared(self) -> None:
-        """A policy with no window yields no fact, and the run says so."""
-        bare = report_of(AFFECTED)
-        bare["facts"] = []
-        self.repo.report(dumps(bare), 1)
-        self.declines(
-            "no supported release could be named for stele:"
-            " the policy declares no support window"
-        )
-
-    def test_a_name_with_a_dot_matches_only_itself(self) -> None:
-        """`a.b` is not a pattern: `axb@` is another repository (#1637).
-
-        No release of this repository is in the fact, so the reader
-        prints nothing and succeeds, and the run says no window.
-        """
-        decoy = report_of(AFFECTED)
-        decoy["facts"] = [
-            {"name": "supportedReleases", "value": "axb@v0.20.0"},
-            {"name": "supportedReleasesAffected", "value": "axb@v0.20.0"},
-        ]
-        self.repo.report(dumps(decoy), 1)
-        done = self.repo.run(GITHUB_REPOSITORY="monumental-archive/a.b")
-        assert done.returncode == 0, done.stderr
-        assert self.repo.outputs().get("reason") == (
-            "no supported release could be named for a.b:"
-            " the policy declares no support window"
-        )
-
-    def test_a_withheld_window_is_said_in_the_engines_words(self) -> None:
-        """A newest release not read whole: stele's reason is passed on."""
-        withheld = report_of(AFFECTED)
-        why = "stele@v0.20.0(not read whole)"
-        withheld["facts"] = [{"name": "supersessionWithheld", "value": why}]
-        self.repo.report(dumps(withheld), 1)
-        self.declines(f"no supported release could be named for stele: {why}")
-
-    def test_a_scan_that_cannot_judge_releases_nothing(self) -> None:
-        """CANNOT_JUDGE is a no, not an error and not a yes."""
-        self.repo.report(AFFECTED, 4)
-        self.declines("the published SBOMs could not be judged (stele: CANNOT_JUDGE)")
+def test_a_forge_that_cannot_be_read_is_not_an_absent_pr(
+    decision_case: DecisionCase,
+) -> None:
+    """A failed read reds the run; it is never read as "no PR"."""
+    (decision_case.repo.fake / "gh.fail").write_text("")
+    done = decision_case.repo.run()
+    assert done.returncode == 1
+    assert "could not read this repository's pull requests" in done.stderr
+    assert "merge" not in decision_case.repo.outputs()
 
 
-class TestMainDoesNotRemedyIt(TestDecisionCase):
-    """Questions 4 and 5: would a release fix anything, and survive it."""
-
-    def test_a_main_that_fixed_nothing_needs_a_human(self) -> None:
-        """v0.20.0's own module versions on main: a release changes nothing."""
-        (self.repo.fake / "go-modules").write_text(GO_UNFIXED)
-        self.declines(NOTHING_REMEDIED)
-        # Not asked to file, so nothing was filed and no audit was run.
-        assert "issue create" not in self.repo.calls()
-        assert "mise run" not in self.repo.calls()
-
-    def test_one_remedied_package_is_enough(self) -> None:
-        """Everything unfixed but grpc: a release remedies something."""
-        partly = GO_UNFIXED.replace("grpc@v1.82.1", "grpc@v1.84.0")
-        (self.repo.fake / "go-modules").write_text(partly)
-        done = self.repo.run()
-        assert self.repo.outputs().get("merge") == "true", done.stdout
-        assert "GO-2026-6443:google.golang.org/grpc@v1.82.1" in done.stdout
-        assert "golang.org/x/net@v0.57.0" not in done.stdout
-
-    def test_a_tree_that_would_refuse_its_own_publish_is_not_tagged(self) -> None:
-        """Stele v0.17.0's burn, caught before the version number is spent."""
-        (self.repo.fake / "fail-audit:go-vulns").write_text("")
-        self.declines(
-            "main would refuse its own publish:"
-            " audit:go-vulns fails on the tree being released"
-        )
-
-    def test_the_issue_is_filed_once(self) -> None:
-        """Filed when asked and none is open; never a second time."""
-        (self.repo.fake / "go-modules").write_text(GO_UNFIXED)
-        self.repo.run(FILE_ISSUE="true")
-        assert self.repo.calls().count("gh issue create") == 1
-        assert ISSUE_TITLE in self.repo.calls()
-        # An open one already says it.
-        (self.repo.fake / "issues-open").write_text("1\n")
-        (self.repo.fake / "calls").write_text("")
-        self.repo.run(FILE_ISSUE="true")
-        assert "gh issue create" not in self.repo.calls()
-
-    def test_findings_only_in_an_ecosystem_this_tree_does_not_resolve(self) -> None:
-        """An image red only in its OS layer: the rebuild is the remedy."""
-        os_only = report_of(AFFECTED)
-        for listed in decoded.as_array(os_only["findings"], "findings"):
-            finding = decoded.as_object(listed, "a finding")
-            finding["assertion"] = "CVE-2026-0001:libssl3@3.5.1-1"
-            finding["detail"] = "CVE-2026-0001 affects libssl3@3.5.1-1 (Debian:13)"
-        self.repo.report(dumps(os_only), 1)
-        done = self.repo.run()
-        assert self.repo.outputs().get("merge") == "true", done.stdout
-        assert "a rebuild is the remedy" in done.stdout
-
-    def test_a_cargo_lock_is_read_for_crates(self) -> None:
-        """The same question asked of a Rust tree, both answers."""
-        crates = report_of(AFFECTED)
-        crates["findings"] = [
-            {
-                "subject": "stele@v0.20.0",
-                "assertion": "RUSTSEC-2026-0386:tokio@1.53.1",
-                "detail": "RUSTSEC-2026-0386 affects tokio@1.53.1 (crates.io)",
-            }
-        ]
-        self.repo.report(dumps(crates), 1)
-        (self.repo.tree / "go.mod").unlink()
-        lock = '[[package]]\nname = "tokio"\nversion = "{}"\nsource = "registry"\n'
-        (self.repo.tree / "Cargo.lock").write_text(lock.format("1.53.1"))
-        self.declines(NOTHING_REMEDIED)
-        (self.repo.tree / "Cargo.lock").write_text(lock.format("1.54.1"))
-        done = self.repo.run()
-        assert self.repo.outputs().get("merge") == "true", done.stdout
-
-    def test_a_module_with_no_toolchain_is_loud(self) -> None:
-        """Found by the live run.
-
-        With no `go`, every Go finding compared against nothing and the
-        answer was "main remedies nothing" about a tree nobody had
-        looked at.
-        """
-        (self.repo.bin / "go").unlink()
-        done = self.repo.run()
-        assert done.returncode == 1
-        assert "go.mod present but go missing" in done.stderr
-        assert "merge" not in self.repo.outputs()
-
-    def test_a_forge_that_cannot_be_read_is_not_an_absent_pr(self) -> None:
-        """A failed read reds the run; it is never read as "no PR"."""
-        (self.repo.fake / "gh.fail").write_text("")
-        done = self.repo.run()
-        assert done.returncode == 1
-        assert "could not read this repository's pull requests" in done.stderr
-        assert "merge" not in self.repo.outputs()
-
-    def test_an_engine_that_crashes_is_not_a_verdict(self) -> None:
-        """Any exit but PASS, FAIL or CANNOT_JUDGE reds the run."""
-        self.repo.report("", 2)
-        done = self.repo.run()
-        assert done.returncode == 1
-        assert "stele assert blast-radius exited 2" in done.stderr
+def test_an_engine_that_crashes_is_not_a_verdict(decision_case: DecisionCase) -> None:
+    """Any exit but PASS, FAIL or CANNOT_JUDGE reds the run."""
+    decision_case.repo.report("", 2)
+    done = decision_case.repo.run()
+    assert done.returncode == 1
+    assert "stele assert blast-radius exited 2" in done.stderr

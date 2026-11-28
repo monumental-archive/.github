@@ -220,12 +220,10 @@ def outcomes(
     }
 
 
-@pytest.mark.usefixtures("_set_up_test_planted")
-class TestPlanted:
+class Planted:
     """A planted tree, a stub PATH and a belt with stub provisioning."""
 
-    @fixture
-    def _set_up_test_planted(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Plant a git tree, the stubs and the belt the leg reads."""
         self.tmp = tmp_path
         self.tree = self.tmp / "tree"
@@ -325,228 +323,235 @@ class TestPlanted:
         )
         return done, self.log.read_text(encoding="utf-8").splitlines()
 
-    @staticmethod
-    def calls(log: list[str]) -> list[str]:
-        """Spell each logged call with the scratch output directory blanked.
 
-        Returns:
-            The log, `--output <dir>` written as `--output OUT`.
-
-        """
-        spelled = []
-        for line in log:
-            words = line.split(" ")
-            if words[1:3] == ["mutants", "--output"]:
-                words[3] = "OUT"
-            spelled.append(" ".join(words))
-        return spelled
+@fixture
+def planted(tmp_path: Path) -> Planted:
+    """Give each row its own Planted."""
+    return Planted(tmp_path)
 
 
-class TestAdoption(TestPlanted):
-    """Adoption is the tracked config file; without it, a named skip."""
+def calls(log: list[str]) -> list[str]:
+    """Spell each logged call with the scratch output directory blanked.
 
-    def test_no_config_skips_clean_by_name(self) -> None:
-        """No .cargo/mutants.toml: exit 0, named, nothing called."""
-        self.track("Cargo.toml", "[workspace]\n")
-        done, log = self.run_leg()
-        assert done.returncode == 0, done.stderr
-        want = [f"{LABEL}: no {CONFIG} tracked, skipped"]
-        assert done.stdout.splitlines() == want
-        assert log == list[str]()
+    Returns:
+        The log, `--output <dir>` written as `--output OUT`.
 
-    def test_untracked_config_is_not_adoption(self) -> None:
-        """A config on disk that git does not track adopts nothing."""
-        self.track("Cargo.toml", "[workspace]\n")
-        (self.tree / ".cargo").mkdir()
-        (self.tree / CONFIG).write_text("", encoding="utf-8")
-        done, log = self.run_leg()
-        assert done.returncode == 0, done.stderr
-        want = [f"{LABEL}: no {CONFIG} tracked, skipped"]
-        assert done.stdout.splitlines() == want
-        assert log == list[str]()
+    """
+    spelled = []
+    for line in log:
+        words = line.split(" ")
+        if words[1:3] == ["mutants", "--output"]:
+            words[3] = "OUT"
+        spelled.append(" ".join(words))
+    return spelled
 
 
-class TestVerdict(TestPlanted):
-    """Survivors, exclusions and the summary line."""
-
-    def test_clean(self) -> None:
-        """Every mutant killed: exit 0 and the summary line."""
-        self.plant(package("alpha", str(self.tree)), result=outcomes(3, 3, 0))
-        done, log = self.run_leg(PLANT_DEFAULT="18")
-        assert done.returncode == 0, done.stderr
-        want = [
-            f"{LABEL}: mutating workspace (3 mutants, 0 excluded)",
-            f"{LABEL}: 3 mutants, 3 killed, 0 survived, 0 excluded",
-        ]
-        assert done.stdout.splitlines() == want
-        assert done.stderr == ""
-        want = [
-            METADATA,
-            "cargo mutants --list --no-config --package alpha",
-            "cargo mutants --list --package alpha",
-            "cargo mutants --output OUT --package alpha",
-        ]
-        assert self.calls(log) == want
-
-    def test_one_survivor_is_red_with_file_and_line(self) -> None:
-        """A survivor: red, printed as file:line:col and the mutation."""
-        self.plant(
-            package("alpha", str(self.tree)),
-            result=outcomes(3, 2, 1),
-            missed=[SURVIVOR],
-        )
-        done, _ = self.run_leg(PLANT_STATUS="2")
-        assert done.returncode == 1
-        want = [
-            f"{LABEL}: mutating workspace (3 mutants, 0 excluded)",
-            f"{LABEL}: survived: {SURVIVOR}",
-            f"{LABEL}: 3 mutants, 2 killed, 1 survived, 0 excluded",
-        ]
-        assert done.stdout.splitlines() == want
-        assert done.stderr.splitlines() == RED
-
-    def test_excluded_survivor_with_reason_is_counted_excluded(self) -> None:
-        """An exclude_re entry under a # reason: exit 0, counted excluded."""
-        config = (
-            "exclude_re = [\n"
-            "  # the answer is a fixture constant no caller can observe\n"
-            '  "replace answer -> u32",\n'
-            "]\n"
-        )
-        kept = [n for n in NAMES if n != SURVIVOR]
-        self.plant(
-            package("alpha", str(self.tree)),
-            config=config,
-            listed=kept,
-            result=outcomes(2, 2, 0),
-        )
-        done, _ = self.run_leg()
-        assert done.returncode == 0, done.stderr
-        want = [
-            f"{LABEL}: mutating workspace (2 mutants, 1 excluded)",
-            f"{LABEL}: 2 mutants, 2 killed, 0 survived, 1 excluded",
-        ]
-        assert done.stdout.splitlines() == want
-
-    def test_timeout_counts_as_killed(self) -> None:
-        """Exit 3 (timeouts) is a result: a hung suite noticed the mutant."""
-        self.plant(package("alpha", str(self.tree)), result=outcomes(3, 2, 0, 1))
-        done, _ = self.run_leg(PLANT_STATUS="3")
-        assert done.returncode == 0, done.stderr
-        assert (
-            f"{LABEL}: 3 mutants, 3 killed, 0 survived, 0 excluded"
-            in done.stdout.splitlines()
-        )
-
-    def test_red_baseline_judges_nothing(self) -> None:
-        """Exit 4 (the unmutated suite failed) is red, never a clean zero."""
-        self.plant(package("alpha", str(self.tree)))
-        done, _ = self.run_leg(PLANT_STATUS="4")
-        assert done.returncode == 1
-        want = [
-            (
-                f"{LABEL}: workspace: cargo mutants exited 4"
-                " — nothing judged (a red baseline is exit 4)"
-            ),
-            *RED,
-        ]
-        assert done.stderr.splitlines() == want
-
-    def test_an_outcomes_json_that_does_not_decode_is_red_by_name(self) -> None:
-        """A document decoded's loader refuses is not judged, never a crash."""
-        self.plant(package("alpha", str(self.tree)), result=outcomes(3, 3, 0))
-        self.files["outcomes.json"].write_text(
-            '{"missed": 0, "missed": 1}', encoding="utf-8"
-        )
-        done, _ = self.run_leg()
-        assert done.returncode == 1
-        want = [f'{LABEL}: workspace: outcomes.json: duplicate key "missed"', *RED]
-        assert done.stderr.splitlines() == want
-
-    def test_a_count_outcomes_json_does_not_state_is_red_by_name(self) -> None:
-        """No `timeout` in outcomes.json: not judged, never read as zero."""
-        result = outcomes(3, 3, 0)
-        del result["timeout"]
-        self.plant(package("alpha", str(self.tree)), result=result)
-        done, _ = self.run_leg(MUTANTS_SUMMARY_DIR=str(self.tmp / "summary"))
-        assert done.returncode == 1
-        want = [f"{LABEL}: workspace: outcomes.json states no timeout", *RED]
-        assert done.stderr.splitlines() == want
-        assert (
-            f"{LABEL}: 0 mutants, 0 killed, 0 survived, 0 excluded"
-            in done.stdout.splitlines()
-        )
-        assert not (self.tmp / "summary" / "rust.tsv").exists()
+def test_no_config_skips_clean_by_name(planted: Planted) -> None:
+    """No .cargo/mutants.toml: exit 0, named, nothing called."""
+    planted.track("Cargo.toml", "[workspace]\n")
+    done, log = planted.run_leg()
+    assert done.returncode == 0, done.stderr
+    want = [f"{LABEL}: no {CONFIG} tracked, skipped"]
+    assert done.stdout.splitlines() == want
+    assert log == list[str]()
 
 
-class TestReasons(TestPlanted):
-    """Every exclusion carries its reason, in the repository's own file."""
+def test_untracked_config_is_not_adoption(planted: Planted) -> None:
+    """A config on disk that git does not track adopts nothing."""
+    planted.track("Cargo.toml", "[workspace]\n")
+    (planted.tree / ".cargo").mkdir()
+    (planted.tree / CONFIG).write_text("", encoding="utf-8")
+    done, log = planted.run_leg()
+    assert done.returncode == 0, done.stderr
+    want = [f"{LABEL}: no {CONFIG} tracked, skipped"]
+    assert done.stdout.splitlines() == want
+    assert log == list[str]()
 
-    def test_exclude_re_without_reason_is_red_by_name(self) -> None:
-        """An entry with no # line above it: red, by line and entry."""
-        config = (
-            "exclude_re = [\n"
-            "  # the banner is cosmetic\n"
-            '  "replace banner",\n'
-            '  "replace answer -> u32",\n'
-            "]\n"
-        )
-        self.plant(package("alpha", str(self.tree)), config=config)
-        done, log = self.run_leg()
-        assert done.returncode == 1
-        want = [
-            (
-                f"{LABEL}: {CONFIG}:4: exclude_re entry"
-                ' "replace answer -> u32" has no # reason line above it'
-            ),
-            REASON,
-        ]
-        assert done.stderr.splitlines() == want
-        assert log == list[str]()
 
-    def test_exclude_globs_needs_a_reason_too(self) -> None:
-        """A whole-file exclusion is an exclusion: the same rule."""
-        config = 'exclude_globs = [\n  "src/generated.rs",\n]\n'
-        self.plant(package("alpha", str(self.tree)), config=config)
-        done, _ = self.run_leg()
-        assert done.returncode == 1
-        want = [
-            (
-                f"{LABEL}: {CONFIG}:2: exclude_globs entry"
-                ' "src/generated.rs" has no # reason line above it'
-            ),
-            REASON,
-        ]
-        assert done.stderr.splitlines() == want
+def test_clean(planted: Planted) -> None:
+    """Every mutant killed: exit 0 and the summary line."""
+    planted.plant(package("alpha", str(planted.tree)), result=outcomes(3, 3, 0))
+    done, log = planted.run_leg(PLANT_DEFAULT="18")
+    assert done.returncode == 0, done.stderr
+    want = [
+        f"{LABEL}: mutating workspace (3 mutants, 0 excluded)",
+        f"{LABEL}: 3 mutants, 3 killed, 0 survived, 0 excluded",
+    ]
+    assert done.stdout.splitlines() == want
+    assert done.stderr == ""
+    want = [
+        METADATA,
+        "cargo mutants --list --no-config --package alpha",
+        "cargo mutants --list --package alpha",
+        "cargo mutants --output OUT --package alpha",
+    ]
+    assert calls(log) == want
 
-    def test_entry_on_the_opening_line_is_red(self) -> None:
-        """`exclude_re = ["x"]` leaves nowhere to write the reason."""
-        config = '# cosmetic\nexclude_re = ["replace banner"]\n'
-        self.plant(package("alpha", str(self.tree)), config=config)
-        done, _ = self.run_leg()
-        assert done.returncode == 1
-        want = [
-            (
-                f"{LABEL}: {CONFIG}:2: exclude_re entry"
-                " an entry on the opening line has no # reason line above it"
-            ),
-            REASON,
-        ]
-        assert done.stderr.splitlines() == want
 
-    def test_mutants_skip_attribute_is_refused(self) -> None:
-        """#[mutants::skip] is an exclusion with nowhere for the reason."""
-        self.plant(package("alpha", str(self.tree)), result=outcomes(3, 3, 0))
-        self.track("alpha/src/lib.rs", "#[mutants::skip]\nfn f() {}\n")
-        done, log = self.run_leg()
-        assert done.returncode == 1
-        want = [
-            f"{LABEL}: #[mutants::skip] in the tree:",
-            "  alpha/src/lib.rs:1:#[mutants::skip]",
-            (f"  record an equivalent mutant at its site instead: {SPELLING}"),
-        ]
-        assert done.stderr.splitlines() == want
-        assert log == list[str]()
+def test_one_survivor_is_red_with_file_and_line(planted: Planted) -> None:
+    """A survivor: red, printed as file:line:col and the mutation."""
+    planted.plant(
+        package("alpha", str(planted.tree)),
+        result=outcomes(3, 2, 1),
+        missed=[SURVIVOR],
+    )
+    done, _ = planted.run_leg(PLANT_STATUS="2")
+    assert done.returncode == 1
+    want = [
+        f"{LABEL}: mutating workspace (3 mutants, 0 excluded)",
+        f"{LABEL}: survived: {SURVIVOR}",
+        f"{LABEL}: 3 mutants, 2 killed, 1 survived, 0 excluded",
+    ]
+    assert done.stdout.splitlines() == want
+    assert done.stderr.splitlines() == RED
+
+
+def test_excluded_survivor_with_reason_is_counted_excluded(planted: Planted) -> None:
+    """An exclude_re entry under a # reason: exit 0, counted excluded."""
+    config = (
+        "exclude_re = [\n"
+        "  # the answer is a fixture constant no caller can observe\n"
+        '  "replace answer -> u32",\n'
+        "]\n"
+    )
+    kept = [n for n in NAMES if n != SURVIVOR]
+    planted.plant(
+        package("alpha", str(planted.tree)),
+        config=config,
+        listed=kept,
+        result=outcomes(2, 2, 0),
+    )
+    done, _ = planted.run_leg()
+    assert done.returncode == 0, done.stderr
+    want = [
+        f"{LABEL}: mutating workspace (2 mutants, 1 excluded)",
+        f"{LABEL}: 2 mutants, 2 killed, 0 survived, 1 excluded",
+    ]
+    assert done.stdout.splitlines() == want
+
+
+def test_timeout_counts_as_killed(planted: Planted) -> None:
+    """Exit 3 (timeouts) is a result: a hung suite noticed the mutant."""
+    planted.plant(package("alpha", str(planted.tree)), result=outcomes(3, 2, 0, 1))
+    done, _ = planted.run_leg(PLANT_STATUS="3")
+    assert done.returncode == 0, done.stderr
+    assert (
+        f"{LABEL}: 3 mutants, 3 killed, 0 survived, 0 excluded"
+        in done.stdout.splitlines()
+    )
+
+
+def test_red_baseline_judges_nothing(planted: Planted) -> None:
+    """Exit 4 (the unmutated suite failed) is red, never a clean zero."""
+    planted.plant(package("alpha", str(planted.tree)))
+    done, _ = planted.run_leg(PLANT_STATUS="4")
+    assert done.returncode == 1
+    want = [
+        (
+            f"{LABEL}: workspace: cargo mutants exited 4"
+            " — nothing judged (a red baseline is exit 4)"
+        ),
+        *RED,
+    ]
+    assert done.stderr.splitlines() == want
+
+
+def test_an_outcomes_json_that_does_not_decode_is_red_by_name(planted: Planted) -> None:
+    """A document decoded's loader refuses is not judged, never a crash."""
+    planted.plant(package("alpha", str(planted.tree)), result=outcomes(3, 3, 0))
+    planted.files["outcomes.json"].write_text(
+        '{"missed": 0, "missed": 1}', encoding="utf-8"
+    )
+    done, _ = planted.run_leg()
+    assert done.returncode == 1
+    want = [f'{LABEL}: workspace: outcomes.json: duplicate key "missed"', *RED]
+    assert done.stderr.splitlines() == want
+
+
+def test_a_count_outcomes_json_does_not_state_is_red_by_name(planted: Planted) -> None:
+    """No `timeout` in outcomes.json: not judged, never read as zero."""
+    result = outcomes(3, 3, 0)
+    del result["timeout"]
+    planted.plant(package("alpha", str(planted.tree)), result=result)
+    done, _ = planted.run_leg(MUTANTS_SUMMARY_DIR=str(planted.tmp / "summary"))
+    assert done.returncode == 1
+    want = [f"{LABEL}: workspace: outcomes.json states no timeout", *RED]
+    assert done.stderr.splitlines() == want
+    assert (
+        f"{LABEL}: 0 mutants, 0 killed, 0 survived, 0 excluded"
+        in done.stdout.splitlines()
+    )
+    assert not (planted.tmp / "summary" / "rust.tsv").exists()
+
+
+def test_exclude_re_without_reason_is_red_by_name(planted: Planted) -> None:
+    """An entry with no # line above it: red, by line and entry."""
+    config = (
+        "exclude_re = [\n"
+        "  # the banner is cosmetic\n"
+        '  "replace banner",\n'
+        '  "replace answer -> u32",\n'
+        "]\n"
+    )
+    planted.plant(package("alpha", str(planted.tree)), config=config)
+    done, log = planted.run_leg()
+    assert done.returncode == 1
+    want = [
+        (
+            f"{LABEL}: {CONFIG}:4: exclude_re entry"
+            ' "replace answer -> u32" has no # reason line above it'
+        ),
+        REASON,
+    ]
+    assert done.stderr.splitlines() == want
+    assert log == list[str]()
+
+
+def test_exclude_globs_needs_a_reason_too(planted: Planted) -> None:
+    """A whole-file exclusion is an exclusion: the same rule."""
+    config = 'exclude_globs = [\n  "src/generated.rs",\n]\n'
+    planted.plant(package("alpha", str(planted.tree)), config=config)
+    done, _ = planted.run_leg()
+    assert done.returncode == 1
+    want = [
+        (
+            f"{LABEL}: {CONFIG}:2: exclude_globs entry"
+            ' "src/generated.rs" has no # reason line above it'
+        ),
+        REASON,
+    ]
+    assert done.stderr.splitlines() == want
+
+
+def test_entry_on_the_opening_line_is_red(planted: Planted) -> None:
+    """`exclude_re = ["x"]` leaves nowhere to write the reason."""
+    config = '# cosmetic\nexclude_re = ["replace banner"]\n'
+    planted.plant(package("alpha", str(planted.tree)), config=config)
+    done, _ = planted.run_leg()
+    assert done.returncode == 1
+    want = [
+        (
+            f"{LABEL}: {CONFIG}:2: exclude_re entry"
+            " an entry on the opening line has no # reason line above it"
+        ),
+        REASON,
+    ]
+    assert done.stderr.splitlines() == want
+
+
+def test_mutants_skip_attribute_is_refused(planted: Planted) -> None:
+    """#[mutants::skip] is an exclusion with nowhere for the reason."""
+    planted.plant(package("alpha", str(planted.tree)), result=outcomes(3, 3, 0))
+    planted.track("alpha/src/lib.rs", "#[mutants::skip]\nfn f() {}\n")
+    done, log = planted.run_leg()
+    assert done.returncode == 1
+    want = [
+        f"{LABEL}: #[mutants::skip] in the tree:",
+        "  alpha/src/lib.rs:1:#[mutants::skip]",
+        (f"  record an equivalent mutant at its site instead: {SPELLING}"),
+    ]
+    assert done.stderr.splitlines() == want
+    assert log == list[str]()
 
 
 def source(**lines: str) -> str:
@@ -561,233 +566,234 @@ def source(**lines: str) -> str:
     )
 
 
-class TestSiteRecords(TestPlanted):
-    """An equivalent mutant is recorded at its site, and moves with it (#1987)."""
+def test_the_leg_end_to_end_derives_counts_and_holds_its_records(
+    planted: Planted,
+) -> None:
+    """One run, two records: the sound one excludes, the stale one reds.
 
-    def test_the_leg_end_to_end_derives_counts_and_holds_its_records(self) -> None:
-        """One run, two records: the sound one excludes, the stale one reds.
+    The config excludes nothing and the unconfigured listing names
+    three mutants, so the one excluded is the record's (test_clean,
+    on the same planting, is 0). Every cut listing and the run carry
+    exactly the records' derived patterns; the stale record is named
+    by its file and line.
+    """
+    planted.plant(package("alpha", str(planted.tree)), result=outcomes(2, 2, 0))
+    text = source(
+        l3=f"    {MARK} delete !: the flag is always set",
+        l19=f"    {MARK} {EQUAL}: a and b are one value",
+    )
+    planted.track("src/lib.rs", text)
+    done, log = planted.run_leg()
+    assert done.returncode == 1
+    want = [
+        f"{LABEL}: mutating workspace (2 mutants, 1 excluded)",
+        f"{LABEL}: 2 mutants, 2 killed, 0 survived, 1 excluded",
+    ]
+    assert done.stdout.splitlines() == want
+    want = [
+        (
+            f"{LABEL}: src/lib.rs:3: {MARK} delete ! is stale:"
+            " no such mutant at line 4 — delete it"
+        ),
+        *RED,
+    ]
+    assert done.stderr.splitlines() == want
+    stale = r"^src/lib\.rs:4:[0-9]+: delete !( in .*)?$"
+    derived = f"--exclude-re {stale} --exclude-re {DERIVED}"
+    want = [
+        METADATA,
+        "cargo mutants --list --no-config --package alpha",
+        f"cargo mutants --list {derived} --package alpha",
+        f"cargo mutants --output OUT {derived} --package alpha",
+    ]
+    assert calls(log) == want
 
-        The config excludes nothing and the unconfigured listing names
-        three mutants, so the one excluded is the record's (test_clean,
-        on the same planting, is 0). Every cut listing and the run carry
-        exactly the records' derived patterns; the stale record is named
-        by its file and line.
-        """
-        self.plant(package("alpha", str(self.tree)), result=outcomes(2, 2, 0))
-        text = source(
-            l3=f"    {MARK} delete !: the flag is always set",
-            l19=f"    {MARK} {EQUAL}: a and b are one value",
+
+# Each record and config rule, through mutants_rust.py's own steps.
+def records_step(grep: str) -> tuple[int, str, str]:
+    """Run the `records` step on a planted `git grep -n`.
+
+    Returns:
+        Its exit status, stdout and stderr.
+
+    """
+    out, err = io.StringIO(), io.StringIO()
+    with (
+        pytest.MonkeyPatch.context() as patched,
+        contextlib.redirect_stdout(out),
+        contextlib.redirect_stderr(err),
+    ):
+        patched.setattr("sys.stdin", io.StringIO(grep))
+        status = helper.main(["records"])
+    return status, out.getvalue(), err.getvalue()
+
+
+def reasons_step(config: str) -> tuple[int, str]:
+    """Run the `reasons` step on a planted config, from its tree.
+
+    Returns:
+        Its exit status and stderr.
+
+    """
+    err = io.StringIO()
+    with tempfile.TemporaryDirectory() as tmp:
+        (Path(tmp) / ".cargo").mkdir()
+        (Path(tmp) / CONFIG).write_text(config, encoding="utf-8")
+        with contextlib.chdir(tmp), contextlib.redirect_stderr(err):
+            status = helper.main(["reasons", CONFIG])
+    return status, err.getvalue()
+
+
+def test_a_trailing_record_derives_its_lines_pattern() -> None:
+    """Code before the comment: the site is the comment's own line."""
+    grep = f"src/lib.rs:20:if a == b {{ {MARK} {EQUAL}: one value\n"
+    assert records_step(grep) == (0, f"{DERIVED}\n", "")
+
+
+def test_a_record_on_the_line_above_derives_the_next_lines_pattern() -> None:
+    """A comment alone on its line: the site is the line below it."""
+    grep = f"src/lib.rs:19:    {MARK} {EQUAL}: one value\n"
+    assert records_step(grep) == (0, f"{DERIVED}\n", "")
+
+
+def test_a_record_with_no_mutation_text_is_red_by_file_and_line() -> None:
+    """A reason with nothing before it: nothing to match, no pattern."""
+    grep = f"src/lib.rs:19:    {MARK} : one value\n"
+    want = f"{LABEL}: src/lib.rs:19: {MARK} names no mutation\n{FORM}\n"
+    assert records_step(grep) == (1, "", want)
+
+
+def test_a_record_with_no_reason_is_red_by_file_and_line() -> None:
+    """Mutation text and no reason: nothing says why it cannot be killed."""
+    grep = f"src/lib.rs:19:    {MARK} {EQUAL}:\n"
+    want = f"{LABEL}: src/lib.rs:19: {MARK} {EQUAL} gives no reason\n{FORM}\n"
+    assert records_step(grep) == (1, "", want)
+
+
+def test_a_record_in_a_file_the_run_does_not_mutate_is_red() -> None:
+    """No mutant of the listing is in its file: named, never matched."""
+    found = helper.read_records(f"src/other.rs:2:    {MARK} delete !: why\n")
+    want = [f"src/other.rs:2: {MARK} delete ! is in no mutated file"]
+    assert helper.unmatched(found, NAMES) == want
+
+
+def test_a_stale_record_is_red_by_file_and_line() -> None:
+    """Its file is mutated, but no mutant of its text is at its site."""
+    found = helper.read_records(
+        f"src/lib.rs:3:    {MARK} delete !: why\n"
+        f"src/lib.rs:19:    {MARK} {EQUAL}: why\n"
+    )
+    want = [
+        (
+            f"src/lib.rs:3: {MARK} delete ! is stale:"
+            " no such mutant at line 4 — delete it"
         )
-        self.track("src/lib.rs", text)
-        done, log = self.run_leg()
-        assert done.returncode == 1
-        want = [
-            f"{LABEL}: mutating workspace (2 mutants, 1 excluded)",
-            f"{LABEL}: 2 mutants, 2 killed, 0 survived, 1 excluded",
-        ]
-        assert done.stdout.splitlines() == want
-        want = [
-            (
-                f"{LABEL}: src/lib.rs:3: {MARK} delete ! is stale:"
-                " no such mutant at line 4 — delete it"
-            ),
-            *RED,
-        ]
-        assert done.stderr.splitlines() == want
-        stale = r"^src/lib\.rs:4:[0-9]+: delete !( in .*)?$"
-        derived = f"--exclude-re {stale} --exclude-re {DERIVED}"
-        want = [
-            METADATA,
-            "cargo mutants --list --no-config --package alpha",
-            f"cargo mutants --list {derived} --package alpha",
-            f"cargo mutants --output OUT {derived} --package alpha",
-        ]
-        assert self.calls(log) == want
+    ]
+    assert helper.unmatched(found, NAMES) == want
 
 
-class TestSiteRules:
-    """Each record and config rule, through mutants_rust.py's own steps."""
-
-    @staticmethod
-    def records_step(grep: str) -> tuple[int, str, str]:
-        """Run the `records` step on a planted `git grep -n`.
-
-        Returns:
-            Its exit status, stdout and stderr.
-
-        """
-        out, err = io.StringIO(), io.StringIO()
-        with (
-            pytest.MonkeyPatch.context() as patched,
-            contextlib.redirect_stdout(out),
-            contextlib.redirect_stderr(err),
-        ):
-            patched.setattr("sys.stdin", io.StringIO(grep))
-            status = helper.main(["records"])
-        return status, out.getvalue(), err.getvalue()
-
-    @staticmethod
-    def reasons_step(config: str) -> tuple[int, str]:
-        """Run the `reasons` step on a planted config, from its tree.
-
-        Returns:
-            Its exit status and stderr.
-
-        """
-        err = io.StringIO()
-        with tempfile.TemporaryDirectory() as tmp:
-            (Path(tmp) / ".cargo").mkdir()
-            (Path(tmp) / CONFIG).write_text(config, encoding="utf-8")
-            with contextlib.chdir(tmp), contextlib.redirect_stderr(err):
-                status = helper.main(["reasons", CONFIG])
-        return status, err.getvalue()
-
-    def test_a_trailing_record_derives_its_lines_pattern(self) -> None:
-        """Code before the comment: the site is the comment's own line."""
-        grep = f"src/lib.rs:20:if a == b {{ {MARK} {EQUAL}: one value\n"
-        assert self.records_step(grep) == (0, f"{DERIVED}\n", "")
-
-    def test_a_record_on_the_line_above_derives_the_next_lines_pattern(self) -> None:
-        """A comment alone on its line: the site is the line below it."""
-        grep = f"src/lib.rs:19:    {MARK} {EQUAL}: one value\n"
-        assert self.records_step(grep) == (0, f"{DERIVED}\n", "")
-
-    def test_a_record_with_no_mutation_text_is_red_by_file_and_line(self) -> None:
-        """A reason with nothing before it: nothing to match, no pattern."""
-        grep = f"src/lib.rs:19:    {MARK} : one value\n"
-        want = f"{LABEL}: src/lib.rs:19: {MARK} names no mutation\n{FORM}\n"
-        assert self.records_step(grep) == (1, "", want)
-
-    def test_a_record_with_no_reason_is_red_by_file_and_line(self) -> None:
-        """Mutation text and no reason: nothing says why it cannot be killed."""
-        grep = f"src/lib.rs:19:    {MARK} {EQUAL}:\n"
-        want = f"{LABEL}: src/lib.rs:19: {MARK} {EQUAL} gives no reason\n{FORM}\n"
-        assert self.records_step(grep) == (1, "", want)
-
-    def test_a_record_in_a_file_the_run_does_not_mutate_is_red(self) -> None:
-        """No mutant of the listing is in its file: named, never matched."""
-        found = helper.read_records(f"src/other.rs:2:    {MARK} delete !: why\n")
-        want = [f"src/other.rs:2: {MARK} delete ! is in no mutated file"]
-        assert helper.unmatched(found, NAMES) == want
-
-    def test_a_stale_record_is_red_by_file_and_line(self) -> None:
-        """Its file is mutated, but no mutant of its text is at its site."""
-        found = helper.read_records(
-            f"src/lib.rs:3:    {MARK} delete !: why\n"
-            f"src/lib.rs:19:    {MARK} {EQUAL}: why\n"
-        )
-        want = [
-            (
-                f"src/lib.rs:3: {MARK} delete ! is stale:"
-                " no such mutant at line 4 — delete it"
-            )
-        ]
-        assert helper.unmatched(found, NAMES) == want
-
-    def test_a_pinned_exclude_re_entry_is_red_by_name(self) -> None:
-        """`:line:col:` in an entry: record it at its site instead."""
-        config = (
-            "exclude_re = [\n"
-            "  # a and b are one value\n"
-            '  "src/lib\\\\.rs:20:9: replace == with !=",\n'
-            "]\n"
-        )
-        want = (
-            f"{LABEL}: {CONFIG}:3: exclude_re entry"
-            ' "src/lib\\\\.rs:20:9: replace == with !=" pins a line and column\n'
-            "  record the mutant at its site instead, on its line or"
-            f" the line above: {SPELLING}\n"
-        )
-        assert self.reasons_step(config) == (1, want)
-
-    def test_an_unpinned_exclude_re_entry_with_its_reason_is_accepted(self) -> None:
-        """A rule that is not a site stays in the config; [0-9]+ is no position."""
-        config = (
-            "exclude_re = [\n"
-            "  # pgrx's generated test shims are not the extension's code\n"
-            '  "tests::",\n'
-            "  # every banner is cosmetic\n"
-            '  "src/lib\\\\.rs:[0-9]+:[0-9]+: replace banner",\n'
-            "]\n"
-        )
-        assert self.reasons_step(config) == (0, "")
+def test_a_pinned_exclude_re_entry_is_red_by_name() -> None:
+    """`:line:col:` in an entry: record it at its site instead."""
+    config = (
+        "exclude_re = [\n"
+        "  # a and b are one value\n"
+        '  "src/lib\\\\.rs:20:9: replace == with !=",\n'
+        "]\n"
+    )
+    want = (
+        f"{LABEL}: {CONFIG}:3: exclude_re entry"
+        ' "src/lib\\\\.rs:20:9: replace == with !=" pins a line and column\n'
+        "  record the mutant at its site instead, on its line or"
+        f" the line above: {SPELLING}\n"
+    )
+    assert reasons_step(config) == (1, want)
 
 
-class TestPgrx(TestPlanted):
-    """A pgrx extension: its own run, under its default major, provisioned."""
-
-    def test_pgrx_crate_runs_under_its_default_major(self) -> None:
-        """Every member mutated; the extension under pg18 with pg_test."""
-        root = str(self.tree)
-        self.plant(
-            package("alpha", root),
-            package("ext", root, default=["pg18"]),
-            result=outcomes(3, 3, 0),
-        )
-        done, log = self.run_leg(PLANT_DEFAULT="18")
-        assert done.returncode == 0, done.stderr
-        want = [
-            f"{LABEL}: mutating workspace (3 mutants, 0 excluded)",
-            (
-                f"{LABEL}: ext is a pgrx extension,"
-                " mutated under its default major, pg18"
-            ),
-            f"{LABEL}: mutating ext-pg18 (3 mutants, 0 excluded)",
-            f"{LABEL}: 6 mutants, 6 killed, 0 survived, 0 excluded",
-        ]
-        assert done.stdout.splitlines() == want
-        want = [
-            METADATA,
-            # Provisioned once, before the workspace run, which compiles
-            # at the default major it names (#1940).
-            "provision",
-            "major 18",
-            "cargo mutants --list --no-config --package alpha",
-            "cargo mutants --list --package alpha",
-            "cargo mutants --output OUT --package alpha",
-            "major 18",
-            "cargo mutants --list --no-config --package ext --features pg_test",
-            "cargo mutants --list --package ext --features pg_test",
-            "cargo mutants --output OUT --package ext --features pg_test",
-        ]
-        assert self.calls(log) == want
-
-    def test_pgrx_crate_without_a_single_default_major_is_red(self) -> None:
-        """No pgNN in `default`: red by name, never a guessed major."""
-        self.plant(package("ext", str(self.tree), default=[]))
-        done, log = self.run_leg()
-        assert done.returncode == 1
-        want = [
-            (
-                f"{LABEL}: ext: a pgrx extension whose default features name"
-                " no single pgNN — it is mutated under its default major"
-            ),
-            *RED,
-        ]
-        assert done.stderr.splitlines() == want
-        mutated = [c for c in log if "--package ext" in c]
-        assert mutated == list[str]()
-
-    def test_failed_provisioning_is_red(self) -> None:
-        """No Postgres: the extension is red, never skipped."""
-        self.plant(package("ext", str(self.tree), default=["pg18"]))
-        done, _ = self.run_leg(PLANT_PROVISION="1")
-        assert done.returncode == 1
-        want = [f"{LABEL}: ext at pg18: no Postgres could be provisioned", *RED]
-        assert done.stderr.splitlines() == want
-
-    def test_missing_icu_headers_are_red(self) -> None:
-        """No ICU headers for the default major: red by name, never mutated."""
-        self.plant(package("ext", str(self.tree), default=["pg18"]))
-        done, log = self.run_leg(PLANT_ICU_CHECK="1")
-        assert done.returncode == 1
-        want = [f"{LABEL}: ext at pg18: no ICU headers for it are pinned (above)", *RED]
-        assert done.stderr.splitlines() == want
-        mutated = [c for c in log if c.startswith("cargo mutants")]
-        assert mutated == list[str]()
+def test_an_unpinned_exclude_re_entry_with_its_reason_is_accepted() -> None:
+    """A rule that is not a site stays in the config; [0-9]+ is no position."""
+    config = (
+        "exclude_re = [\n"
+        "  # pgrx's generated test shims are not the extension's code\n"
+        '  "tests::",\n'
+        "  # every banner is cosmetic\n"
+        '  "src/lib\\\\.rs:[0-9]+:[0-9]+: replace banner",\n'
+        "]\n"
+    )
+    assert reasons_step(config) == (0, "")
 
 
-class TestShards(TestPlanted):
+def test_pgrx_crate_runs_under_its_default_major(planted: Planted) -> None:
+    """Every member mutated; the extension under pg18 with pg_test."""
+    root = str(planted.tree)
+    planted.plant(
+        package("alpha", root),
+        package("ext", root, default=["pg18"]),
+        result=outcomes(3, 3, 0),
+    )
+    done, log = planted.run_leg(PLANT_DEFAULT="18")
+    assert done.returncode == 0, done.stderr
+    want = [
+        f"{LABEL}: mutating workspace (3 mutants, 0 excluded)",
+        (f"{LABEL}: ext is a pgrx extension, mutated under its default major, pg18"),
+        f"{LABEL}: mutating ext-pg18 (3 mutants, 0 excluded)",
+        f"{LABEL}: 6 mutants, 6 killed, 0 survived, 0 excluded",
+    ]
+    assert done.stdout.splitlines() == want
+    want = [
+        METADATA,
+        # Provisioned once, before the workspace run, which compiles
+        # at the default major it names (#1940).
+        "provision",
+        "major 18",
+        "cargo mutants --list --no-config --package alpha",
+        "cargo mutants --list --package alpha",
+        "cargo mutants --output OUT --package alpha",
+        "major 18",
+        "cargo mutants --list --no-config --package ext --features pg_test",
+        "cargo mutants --list --package ext --features pg_test",
+        "cargo mutants --output OUT --package ext --features pg_test",
+    ]
+    assert calls(log) == want
+
+
+def test_pgrx_crate_without_a_single_default_major_is_red(planted: Planted) -> None:
+    """No pgNN in `default`: red by name, never a guessed major."""
+    planted.plant(package("ext", str(planted.tree), default=[]))
+    done, log = planted.run_leg()
+    assert done.returncode == 1
+    want = [
+        (
+            f"{LABEL}: ext: a pgrx extension whose default features name"
+            " no single pgNN — it is mutated under its default major"
+        ),
+        *RED,
+    ]
+    assert done.stderr.splitlines() == want
+    mutated = [c for c in log if "--package ext" in c]
+    assert mutated == list[str]()
+
+
+def test_failed_provisioning_is_red(planted: Planted) -> None:
+    """No Postgres: the extension is red, never skipped."""
+    planted.plant(package("ext", str(planted.tree), default=["pg18"]))
+    done, _ = planted.run_leg(PLANT_PROVISION="1")
+    assert done.returncode == 1
+    want = [f"{LABEL}: ext at pg18: no Postgres could be provisioned", *RED]
+    assert done.stderr.splitlines() == want
+
+
+def test_missing_icu_headers_are_red(planted: Planted) -> None:
+    """No ICU headers for the default major: red by name, never mutated."""
+    planted.plant(package("ext", str(planted.tree), default=["pg18"]))
+    done, log = planted.run_leg(PLANT_ICU_CHECK="1")
+    assert done.returncode == 1
+    want = [f"{LABEL}: ext at pg18: no ICU headers for it are pinned (above)", *RED]
+    assert done.stderr.splitlines() == want
+    mutated = [c for c in log if c.startswith("cargo mutants")]
+    assert mutated == list[str]()
+
+
+class Shards(Planted):
     """One shard of repo-mutants.yml's matrix: MUTANTS_SHARD=k/n."""
 
     def summary(self) -> str:
@@ -812,315 +818,333 @@ class TestShards(TestPlanted):
             "MUTANTS_SUMMARY_DIR": str(self.tmp / "summary"),
         }
 
-    def test_shard_runs_its_round_robin_share_and_reports_its_counts(self) -> None:
-        """Round-robin --shard cuts listing and run; summary names the shard."""
-        self.plant(
-            package("alpha", str(self.tree)),
-            shard=NAMES[:2],
-            result=outcomes(2, 1, 1),
-            missed=[SURVIVOR],
-        )
-        done, log = self.run_leg(PLANT_STATUS="2", **self.shard_env("1/4"))
-        assert done.returncode == 1
-        want = [
-            f"{LABEL}: mutating workspace, shard 1/4 (2 mutants, 0 excluded)",
-            f"{LABEL}: survived: {SURVIVOR}",
-            f"{LABEL}: shard 1/4: 2 mutants, 1 killed, 1 survived, 0 excluded",
-        ]
-        assert done.stdout.splitlines() == want
-        want = [
-            METADATA,
-            "cargo mutants --list --no-config --package alpha",
-            "cargo mutants --list --package alpha",
-            ("cargo mutants --list --shard 1/4 --sharding round-robin --package alpha"),
-            (
-                "cargo mutants --output OUT --shard 1/4 --sharding round-robin"
-                " --package alpha"
-            ),
-        ]
-        assert self.calls(log) == want
-        assert self.summary() == "1/4\t2\t1\t1\t0\twhole\n"
 
-    def test_empty_shard_is_green_by_name(self) -> None:
-        """Measured: an empty shard exits 0 and writes no outcomes.json."""
-        self.plant(package("alpha", str(self.tree)), shard=[])
-        done, log = self.run_leg(**self.shard_env("3/4"))
-        assert done.returncode == 0, done.stderr
-        want = [
-            f"{LABEL}: mutating workspace, shard 3/4 (0 mutants, 0 excluded)",
-            (
-                f"{LABEL}: workspace, shard 3/4:"
-                " no mutants in this shard, nothing to run"
-            ),
-            f"{LABEL}: shard 3/4: 0 mutants, 0 killed, 0 survived, 0 excluded",
-        ]
-        assert done.stdout.splitlines() == want
-        assert (
-            "cargo mutants --output OUT --shard 3/4 --sharding round-robin"
+@fixture
+def shards(tmp_path: Path) -> Shards:
+    """Give each row its own Shards."""
+    return Shards(tmp_path)
+
+
+def test_shard_runs_its_round_robin_share_and_reports_its_counts(
+    shards: Shards,
+) -> None:
+    """Round-robin --shard cuts listing and run; summary names the shard."""
+    shards.plant(
+        package("alpha", str(shards.tree)),
+        shard=NAMES[:2],
+        result=outcomes(2, 1, 1),
+        missed=[SURVIVOR],
+    )
+    done, log = shards.run_leg(PLANT_STATUS="2", **shards.shard_env("1/4"))
+    assert done.returncode == 1
+    want = [
+        f"{LABEL}: mutating workspace, shard 1/4 (2 mutants, 0 excluded)",
+        f"{LABEL}: survived: {SURVIVOR}",
+        f"{LABEL}: shard 1/4: 2 mutants, 1 killed, 1 survived, 0 excluded",
+    ]
+    assert done.stdout.splitlines() == want
+    want = [
+        METADATA,
+        "cargo mutants --list --no-config --package alpha",
+        "cargo mutants --list --package alpha",
+        ("cargo mutants --list --shard 1/4 --sharding round-robin --package alpha"),
+        (
+            "cargo mutants --output OUT --shard 1/4 --sharding round-robin"
             " --package alpha"
-        ) not in self.calls(log)
-        assert self.summary() == "3/4\t0\t0\t0\t0\twhole\n"
-
-    def test_excluded_is_the_whole_population(self) -> None:
-        """Every shard reports the same excluded figure; totals take it once."""
-        kept = [n for n in NAMES if n != SURVIVOR]
-        config = 'exclude_re = [\n  # fixture constant\n  "replace answer",\n]\n'
-        self.plant(
-            package("alpha", str(self.tree)),
-            config=config,
-            listed=kept,
-            shard=kept[:1],
-            result=outcomes(1, 1, 0),
-        )
-        done, _ = self.run_leg(**self.shard_env("0/4"))
-        assert done.returncode == 0, done.stderr
-        assert self.summary() == "0/4\t1\t1\t0\t1\twhole\n"
-
-    def test_unadopted_shard_writes_skipped(self) -> None:
-        """No config: skipped by name, and the totals are told so."""
-        self.track("Cargo.toml", "[workspace]\n")
-        done, _ = self.run_leg(**self.shard_env("2/4"))
-        assert done.returncode == 0, done.stderr
-        assert self.summary() == "2/4\tskipped\n"
-
-    def test_red_run_writes_no_counts(self) -> None:
-        """A run that judged nothing reports nothing; the totals name it."""
-        self.plant(package("alpha", str(self.tree)), shard=NAMES[:1])
-        done, _ = self.run_leg(PLANT_STATUS="4", **self.shard_env("0/4"))
-        assert done.returncode == 1
-        assert not (self.tmp / "summary" / "rust.tsv").exists()
-
-    @pytest.mark.parametrize("bad", ["4/4", "1", "a/4", "1/0"])
-    def test_malformed_shard_is_red(self, bad: object) -> None:
-        """Shard k must be below n: a typo never quietly runs everything n times."""
-        self.plant(package("alpha", str(self.tree)))
-        done, log = self.run_leg(MUTANTS_SHARD=bad)
-        assert done.returncode == 1
-        want = [f"{LABEL}: MUTANTS_SHARD='{bad}' is not k/n with k < n"]
-        assert done.stderr.splitlines() == want
-        assert log == list[str]()
+        ),
+    ]
+    assert calls(log) == want
+    assert shards.summary() == "1/4\t2\t1\t1\t0\twhole\n"
 
 
-class TestReasonRule:
-    """mutants_rust.py's reader of `.cargo/mutants.toml`, on planted text (#1486)."""
-
-    def test_every_entry_under_its_reason_is_clean(self) -> None:
-        """A `#` line above each entry, blank lines between allowed."""
-        text = (
-            "exclude_re = [\n"
-            "  # the width is a constant\n"
-            '  "replace width",\n'
-            "  # a log line\n"
-            "\n"
-            '  "delete log",\n'
-            "]\n"
-        )
-        assert helper.unexplained(text) == list[tuple[int, str, str]]()
-
-    def test_an_entry_with_no_reason_is_named_with_its_line(self) -> None:
-        """The second entry follows the first, not a comment."""
-        text = 'exclude_re = [\n  # why\n  "one",\n  "two",\n]\n'
-        want = [(4, "exclude_re", '"two"')]
-        assert helper.unexplained(text) == want
-
-    def test_an_entry_on_the_opening_line_has_nowhere_for_a_reason(self) -> None:
-        """`key = ["x"]` is named as such, for either key."""
-        text = 'exclude_globs = ["src/gen.rs"]\n'
-        want = [(1, "exclude_globs", "an entry on the opening line")]
-        assert helper.unexplained(text) == want
-
-    def test_a_closing_bracket_on_the_entry_ends_the_list(self) -> None:
-        """After `"x"]`, a quoted line is not an entry."""
-        text = 'exclude_re = [\n  # why\n  "x"]\n"not = an entry"\n'
-        assert helper.unexplained(text) == list[tuple[int, str, str]]()
-
-    def test_other_keys_are_not_read(self) -> None:
-        """Only the two exclusion lists carry the rule."""
-        text = 'additional_cargo_args = [\n  "--all-features",\n]\n'
-        assert helper.unexplained(text) == list[tuple[int, str, str]]()
+def test_empty_shard_is_green_by_name(shards: Shards) -> None:
+    """Measured: an empty shard exits 0 and writes no outcomes.json."""
+    shards.plant(package("alpha", str(shards.tree)), shard=[])
+    done, log = shards.run_leg(**shards.shard_env("3/4"))
+    assert done.returncode == 0, done.stderr
+    want = [
+        f"{LABEL}: mutating workspace, shard 3/4 (0 mutants, 0 excluded)",
+        (f"{LABEL}: workspace, shard 3/4: no mutants in this shard, nothing to run"),
+        f"{LABEL}: shard 3/4: 0 mutants, 0 killed, 0 survived, 0 excluded",
+    ]
+    assert done.stdout.splitlines() == want
+    assert (
+        "cargo mutants --output OUT --shard 3/4 --sharding round-robin --package alpha"
+    ) not in calls(log)
+    assert shards.summary() == "3/4\t0\t0\t0\t0\twhole\n"
 
 
-class TestReaders:
-    """mutants_rust.py's other readers, directly (#1486)."""
+def test_excluded_is_the_whole_population(shards: Shards) -> None:
+    """Every shard reports the same excluded figure; totals take it once."""
+    kept = [n for n in NAMES if n != SURVIVOR]
+    config = 'exclude_re = [\n  # fixture constant\n  "replace answer",\n]\n'
+    shards.plant(
+        package("alpha", str(shards.tree)),
+        config=config,
+        listed=kept,
+        shard=kept[:1],
+        result=outcomes(1, 1, 0),
+    )
+    done, _ = shards.run_leg(**shards.shard_env("0/4"))
+    assert done.returncode == 0, done.stderr
+    assert shards.summary() == "0/4\t1\t1\t0\t1\twhole\n"
 
-    def test_default_major_is_the_one_pg_feature(self) -> None:
-        """One pgNN in `default` is the major; none or two is no answer."""
-        meta = {
-            "packages": [
-                {"name": "one", "features": {"default": ["pg17", "serde"]}},
-                {"name": "two", "features": {"default": ["pg17", "pg18"]}},
-                {"name": "none", "features": {"default": []}},
-                {"name": "bare", "features": {}},
-            ]
-        }
-        packages = helper.read_metadata(meta)
-        assert helper.default_major(packages, "one") == "pg17"
-        assert helper.default_major(packages, "two") == ""
-        assert helper.default_major(packages, "none") == ""
-        assert helper.default_major(packages, "bare") == ""
-        assert helper.default_major(packages, "absent") == ""
 
-    def test_metadata_of_the_wrong_shape_is_refused_by_name(self) -> None:
-        """Each field the default major reads, where it is."""
-        rows: tuple[tuple[object, str], ...] = (
-            ([], "the metadata is not an object"),
-            ({"packages": {}}, "packages is not a list"),
-            ({"packages": [3]}, "packages[0] is not an object"),
-            ({"packages": [{"name": 3}]}, "packages[0].name is not a string"),
-            (
-                {"packages": [{"name": "a", "features": ["default"]}]},
-                "packages[0].features is not an object",
-            ),
-            (
-                {"packages": [{"name": "a", "features": {"default": "pg17"}}]},
-                "packages[0].features.default is not a list",
-            ),
-            (
-                {"packages": [{"name": "a", "features": {"default": [17]}}]},
-                "packages[0].features.default[0] is not a string",
-            ),
-        )
-        for value, why in rows:
-            with pytest.raises(decoded.UndecodableError) as caught:
-                helper.read_metadata(value)
-            assert str(caught.value) == why
+def test_unadopted_shard_writes_skipped(shards: Shards) -> None:
+    """No config: skipped by name, and the totals are told so."""
+    shards.track("Cargo.toml", "[workspace]\n")
+    done, _ = shards.run_leg(**shards.shard_env("2/4"))
+    assert done.returncode == 0, done.stderr
+    assert shards.summary() == "2/4\tskipped\n"
 
-    def test_default_major_refuses_metadata_it_cannot_read(self) -> None:
-        """The step says so on stderr and exits 1; the leg stops with it."""
-        err = io.StringIO()
-        with pytest.MonkeyPatch.context() as patched, contextlib.redirect_stderr(err):
-            patched.setattr("sys.stdin", io.StringIO('{"packages": 1}'))
-            status = helper.main(["default-major", "a"])
-        assert status == 1
-        assert err.getvalue() == f"{LABEL}: cargo metadata: packages is not a list\n"
 
-    def test_a_listing_counts_lines_with_anything_on_them(self) -> None:
-        """Blank and whitespace-only lines are not mutants."""
-        assert helper.count_listed("a\n\n  \t\nb\n") == 2
-        assert helper.count_listed("") == 0
+def test_red_run_writes_no_counts(shards: Shards) -> None:
+    """A run that judged nothing reports nothing; the totals name it."""
+    shards.plant(package("alpha", str(shards.tree)), shard=NAMES[:1])
+    done, _ = shards.run_leg(PLANT_STATUS="4", **shards.shard_env("0/4"))
+    assert done.returncode == 1
+    assert not (shards.tmp / "summary" / "rust.tsv").exists()
 
-    def test_excluded_is_the_unconfigured_minus_the_configured(self) -> None:
-        """Never the shard's figure."""
-        assert helper.Plan(every=7, listed=5, here=1).excluded == 2
 
-    def test_a_timeout_is_killed(self) -> None:
-        """Caught plus timeout is killed; missed is survived."""
-        counts = {"total_mutants": 6, "caught": 3, "timeout": 2, "missed": 1}
-        assert helper.tally(counts) == (6, 5, 1)
+@pytest.mark.parametrize("bad", ["4/4", "1", "a/4", "1/0"])
+def test_malformed_shard_is_red(shards: Shards, bad: object) -> None:
+    """Shard k must be below n: a typo never quietly runs everything n times."""
+    shards.plant(package("alpha", str(shards.tree)))
+    done, log = shards.run_leg(MUTANTS_SHARD=bad)
+    assert done.returncode == 1
+    want = [f"{LABEL}: MUTANTS_SHARD='{bad}' is not k/n with k < n"]
+    assert done.stderr.splitlines() == want
+    assert log == list[str]()
 
-    def test_a_count_not_stated_is_named_never_zero(self) -> None:
-        """Absent, null, a string or a bool is not a stated count."""
-        counts = {"total_mutants": 6, "caught": None, "timeout": "2", "missed": True}
-        want = ["caught", "timeout", "missed"]
-        assert helper.missing_counts(counts) == want
-        every = list(helper.COUNTS)
-        assert helper.missing_counts([]) == every
-        complete = dict.fromkeys(helper.COUNTS, 0)
-        assert helper.missing_counts(complete) == list[str]()
 
-    def test_red_is_a_survivor_or_a_run_that_judged_nothing(self) -> None:
-        """Clean is neither."""
-        assert not helper.red(helper.TestVerdict(total=3, killed=3))
-        assert helper.red(helper.TestVerdict(survived=1))
-        assert helper.red(helper.TestVerdict(runs=["x: exited 1"]))
+# mutants_rust.py's reader of `.cargo/mutants.toml`, on planted text (#1486).
+def test_every_entry_under_its_reason_is_clean() -> None:
+    """A `#` line above each entry, blank lines between allowed."""
+    text = (
+        "exclude_re = [\n"
+        "  # the width is a constant\n"
+        '  "replace width",\n'
+        "  # a log line\n"
+        "\n"
+        '  "delete log",\n'
+        "]\n"
+    )
+    assert helper.unexplained(text) == list[tuple[int, str, str]]()
 
-    def test_a_pattern_escapes_what_rusts_regex_escape_escapes(self) -> None:
-        """Every meta character behind a backslash; `<`, `>`, `:` and `!` bare."""
-        assert helper.escape(r"a.b+c*?()|[]{}^$#&-~\\") == (
-            r"a\.b\+c\*\?\(\)\|\[\]\{\}\^\$\#\&\-\~\\\\"
-        )
-        assert helper.escape("-> Option<u8> with None!:") == (
-            r"\-> Option<u8> with None!:"
-        )
 
-    def test_a_record_reads_its_mutation_up_to_the_first_colon_and_space(
-        self,
-    ) -> None:
-        """`String::new()` is part of the mutation; `: ` begins the reason."""
-        hit = (
-            "crates/a/src/x.rs:7:    v // mutants:equivalent replace f -> String"
-            " with String::new(): the caller trims: always empty here\n"
-        )
-        (record,) = helper.read_records(hit + "\n")
-        assert record.site == 7
-        assert record.mutation == "replace f -> String with String::new()"
-        assert record.reason == "the caller trims: always empty here"
-        assert record.pattern == (
-            r"^crates/a/src/x\.rs:7:[0-9]+:"
-            r" replace f \-> String with String::new\(\)( in .*)?$"
-        )
+def test_an_entry_with_no_reason_is_named_with_its_line() -> None:
+    """The second entry follows the first, not a comment."""
+    text = 'exclude_re = [\n  # why\n  "one",\n  "two",\n]\n'
+    want = [(4, "exclude_re", '"two"')]
+    assert helper.unexplained(text) == want
 
-    def test_a_derived_pattern_matches_its_site_with_or_without_a_function(
-        self,
-    ) -> None:
-        """Any column, an optional ` in <fn>`, and nothing else."""
-        (record,) = helper.read_records(f"src/lib.rs:19:  {MARK} {EQUAL}: why\n")
-        pattern = re.compile(record.pattern)
-        for name in (
-            "src/lib.rs:20:9: replace == with != in check",
-            "src/lib.rs:20:13: replace == with !=",
-        ):
-            assert pattern.search(name) is not None, name
-        for name in (
-            "src/lib.rs:21:9: replace == with != in check",
-            "src/lib.rs:200:9: replace == with != in check",
-            "xsrc/lib.rs:20:9: replace == with != in check",
-            "src/libXrs:20:9: replace == with != in check",
-            "src/lib.rs:20:9: replace == with !== in check",
-        ):
-            assert pattern.search(name) is None, name
 
-    def test_a_malformed_record_is_named_for_its_first_fault(self) -> None:
-        """No mutation outranks no reason; a colon or blanks are no reason."""
-        rows = (
-            (f"{MARK}", "names no mutation"),
-            (f"{MARK} : why", "names no mutation"),
-            (f"{MARK}   ", "names no mutation"),
-            (f"{MARK} {EQUAL}", f"{EQUAL} gives no reason"),
-            (f"{MARK} {EQUAL}:", f"{EQUAL} gives no reason"),
-            (f"{MARK} {EQUAL}:  \t", f"{EQUAL} gives no reason"),
-        )
-        for comment, fault in rows:
-            found = helper.read_records(f"src/lib.rs:19:  {comment}\n")
-            want = [f"src/lib.rs:19: {MARK} {fault}"]
-            assert helper.malformed(found) == want
-        sound = helper.read_records(f"src/lib.rs:19: {MARK} {EQUAL}: why\n")
-        assert helper.malformed(sound) == list[str]()
+def test_an_entry_on_the_opening_line_has_nowhere_for_a_reason() -> None:
+    """`key = ["x"]` is named as such, for either key."""
+    text = 'exclude_globs = ["src/gen.rs"]\n'
+    want = [(1, "exclude_globs", "an entry on the opening line")]
+    assert helper.unexplained(text) == want
 
-    def test_records_prints_each_pattern_when_every_record_is_sound(self) -> None:
-        """One pattern a line, in the grep's order; blank input is no record."""
-        out = io.StringIO()
-        grep = (
-            f"src/lib.rs:19:  {MARK} {EQUAL}: why\n"
-            f"src/lib.rs:20:  x {MARK} delete -: why\n\n"
-        )
-        with pytest.MonkeyPatch.context() as patched, contextlib.redirect_stdout(out):
-            patched.setattr("sys.stdin", io.StringIO(grep))
-            status = helper.main(["records"])
-        assert status == 0
-        want = [DERIVED, r"^src/lib\.rs:20:[0-9]+: delete \-( in .*)?$"]
-        assert out.getvalue().splitlines() == want
 
-    def test_a_pinned_entry_is_an_exclude_re_entry_holding_a_position(self) -> None:
-        """Digits between colons, in exclude_re only."""
-        text = (
-            "exclude_re = [\n"
-            "  # one\n"
-            '  "a\\\\.rs:20:9: replace",\n'
-            "  # two\n"
-            '  "a\\\\.rs:[0-9]+:[0-9]+: replace",\n'
-            "  # three\n"
-            '  "a:1: b",\n'
-            "]\n"
-            "exclude_globs = [\n"
-            "  # four\n"
-            '  "x:1:2:",\n'
-            "]\n"
-        )
-        want = [(3, '"a\\\\.rs:20:9: replace"')]
-        assert helper.pinned(text) == want
+def test_a_closing_bracket_on_the_entry_ends_the_list() -> None:
+    """After `"x"]`, a quoted line is not an entry."""
+    text = 'exclude_re = [\n  # why\n  "x"]\n"not = an entry"\n'
+    assert helper.unexplained(text) == list[tuple[int, str, str]]()
 
-    def test_only_0_2_and_3_are_judged(self) -> None:
-        """4 is a red baseline; 1 is a failure to run."""
-        want = frozenset({0, 2, 3})
-        assert want == helper.JUDGED
+
+def test_other_keys_are_not_read() -> None:
+    """Only the two exclusion lists carry the rule."""
+    text = 'additional_cargo_args = [\n  "--all-features",\n]\n'
+    assert helper.unexplained(text) == list[tuple[int, str, str]]()
+
+
+# mutants_rust.py's other readers, directly (#1486).
+def test_default_major_is_the_one_pg_feature() -> None:
+    """One pgNN in `default` is the major; none or two is no answer."""
+    meta = {
+        "packages": [
+            {"name": "one", "features": {"default": ["pg17", "serde"]}},
+            {"name": "two", "features": {"default": ["pg17", "pg18"]}},
+            {"name": "none", "features": {"default": []}},
+            {"name": "bare", "features": {}},
+        ]
+    }
+    packages = helper.read_metadata(meta)
+    assert helper.default_major(packages, "one") == "pg17"
+    assert helper.default_major(packages, "two") == ""
+    assert helper.default_major(packages, "none") == ""
+    assert helper.default_major(packages, "bare") == ""
+    assert helper.default_major(packages, "absent") == ""
+
+
+def test_metadata_of_the_wrong_shape_is_refused_by_name() -> None:
+    """Each field the default major reads, where it is."""
+    rows: tuple[tuple[object, str], ...] = (
+        ([], "the metadata is not an object"),
+        ({"packages": {}}, "packages is not a list"),
+        ({"packages": [3]}, "packages[0] is not an object"),
+        ({"packages": [{"name": 3}]}, "packages[0].name is not a string"),
+        (
+            {"packages": [{"name": "a", "features": ["default"]}]},
+            "packages[0].features is not an object",
+        ),
+        (
+            {"packages": [{"name": "a", "features": {"default": "pg17"}}]},
+            "packages[0].features.default is not a list",
+        ),
+        (
+            {"packages": [{"name": "a", "features": {"default": [17]}}]},
+            "packages[0].features.default[0] is not a string",
+        ),
+    )
+    for value, why in rows:
+        with pytest.raises(decoded.UndecodableError) as caught:
+            helper.read_metadata(value)
+        assert str(caught.value) == why
+
+
+def test_default_major_refuses_metadata_it_cannot_read() -> None:
+    """The step says so on stderr and exits 1; the leg stops with it."""
+    err = io.StringIO()
+    with pytest.MonkeyPatch.context() as patched, contextlib.redirect_stderr(err):
+        patched.setattr("sys.stdin", io.StringIO('{"packages": 1}'))
+        status = helper.main(["default-major", "a"])
+    assert status == 1
+    assert err.getvalue() == f"{LABEL}: cargo metadata: packages is not a list\n"
+
+
+def test_a_listing_counts_lines_with_anything_on_them() -> None:
+    """Blank and whitespace-only lines are not mutants."""
+    assert helper.count_listed("a\n\n  \t\nb\n") == 2
+    assert helper.count_listed("") == 0
+
+
+def test_excluded_is_the_unconfigured_minus_the_configured() -> None:
+    """Never the shard's figure."""
+    assert helper.Plan(every=7, listed=5, here=1).excluded == 2
+
+
+def test_a_timeout_is_killed() -> None:
+    """Caught plus timeout is killed; missed is survived."""
+    counts = {"total_mutants": 6, "caught": 3, "timeout": 2, "missed": 1}
+    assert helper.tally(counts) == (6, 5, 1)
+
+
+def test_a_count_not_stated_is_named_never_zero() -> None:
+    """Absent, null, a string or a bool is not a stated count."""
+    counts = {"total_mutants": 6, "caught": None, "timeout": "2", "missed": True}
+    want = ["caught", "timeout", "missed"]
+    assert helper.missing_counts(counts) == want
+    every = list(helper.COUNTS)
+    assert helper.missing_counts([]) == every
+    complete = dict.fromkeys(helper.COUNTS, 0)
+    assert helper.missing_counts(complete) == list[str]()
+
+
+def test_red_is_a_survivor_or_a_run_that_judged_nothing() -> None:
+    """Clean is neither."""
+    assert not helper.red(helper.TestVerdict(total=3, killed=3))
+    assert helper.red(helper.TestVerdict(survived=1))
+    assert helper.red(helper.TestVerdict(runs=["x: exited 1"]))
+
+
+def test_a_pattern_escapes_what_rusts_regex_escape_escapes() -> None:
+    """Every meta character behind a backslash; `<`, `>`, `:` and `!` bare."""
+    assert helper.escape(r"a.b+c*?()|[]{}^$#&-~\\") == (
+        r"a\.b\+c\*\?\(\)\|\[\]\{\}\^\$\#\&\-\~\\\\"
+    )
+    assert helper.escape("-> Option<u8> with None!:") == (r"\-> Option<u8> with None!:")
+
+
+def test_a_record_reads_its_mutation_up_to_the_first_colon_and_space() -> None:
+    """`String::new()` is part of the mutation; `: ` begins the reason."""
+    hit = (
+        "crates/a/src/x.rs:7:    v // mutants:equivalent replace f -> String"
+        " with String::new(): the caller trims: always empty here\n"
+    )
+    (record,) = helper.read_records(hit + "\n")
+    assert record.site == 7
+    assert record.mutation == "replace f -> String with String::new()"
+    assert record.reason == "the caller trims: always empty here"
+    assert record.pattern == (
+        r"^crates/a/src/x\.rs:7:[0-9]+:"
+        r" replace f \-> String with String::new\(\)( in .*)?$"
+    )
+
+
+def test_a_derived_pattern_matches_its_site_with_or_without_a_function() -> None:
+    """Any column, an optional ` in <fn>`, and nothing else."""
+    (record,) = helper.read_records(f"src/lib.rs:19:  {MARK} {EQUAL}: why\n")
+    pattern = re.compile(record.pattern)
+    for name in (
+        "src/lib.rs:20:9: replace == with != in check",
+        "src/lib.rs:20:13: replace == with !=",
+    ):
+        assert pattern.search(name) is not None, name
+    for name in (
+        "src/lib.rs:21:9: replace == with != in check",
+        "src/lib.rs:200:9: replace == with != in check",
+        "xsrc/lib.rs:20:9: replace == with != in check",
+        "src/libXrs:20:9: replace == with != in check",
+        "src/lib.rs:20:9: replace == with !== in check",
+    ):
+        assert pattern.search(name) is None, name
+
+
+def test_a_malformed_record_is_named_for_its_first_fault() -> None:
+    """No mutation outranks no reason; a colon or blanks are no reason."""
+    rows = (
+        (f"{MARK}", "names no mutation"),
+        (f"{MARK} : why", "names no mutation"),
+        (f"{MARK}   ", "names no mutation"),
+        (f"{MARK} {EQUAL}", f"{EQUAL} gives no reason"),
+        (f"{MARK} {EQUAL}:", f"{EQUAL} gives no reason"),
+        (f"{MARK} {EQUAL}:  \t", f"{EQUAL} gives no reason"),
+    )
+    for comment, fault in rows:
+        found = helper.read_records(f"src/lib.rs:19:  {comment}\n")
+        want = [f"src/lib.rs:19: {MARK} {fault}"]
+        assert helper.malformed(found) == want
+    sound = helper.read_records(f"src/lib.rs:19: {MARK} {EQUAL}: why\n")
+    assert helper.malformed(sound) == list[str]()
+
+
+def test_records_prints_each_pattern_when_every_record_is_sound() -> None:
+    """One pattern a line, in the grep's order; blank input is no record."""
+    out = io.StringIO()
+    grep = (
+        f"src/lib.rs:19:  {MARK} {EQUAL}: why\n"
+        f"src/lib.rs:20:  x {MARK} delete -: why\n\n"
+    )
+    with pytest.MonkeyPatch.context() as patched, contextlib.redirect_stdout(out):
+        patched.setattr("sys.stdin", io.StringIO(grep))
+        status = helper.main(["records"])
+    assert status == 0
+    want = [DERIVED, r"^src/lib\.rs:20:[0-9]+: delete \-( in .*)?$"]
+    assert out.getvalue().splitlines() == want
+
+
+def test_a_pinned_entry_is_an_exclude_re_entry_holding_a_position() -> None:
+    """Digits between colons, in exclude_re only."""
+    text = (
+        "exclude_re = [\n"
+        "  # one\n"
+        '  "a\\\\.rs:20:9: replace",\n'
+        "  # two\n"
+        '  "a\\\\.rs:[0-9]+:[0-9]+: replace",\n'
+        "  # three\n"
+        '  "a:1: b",\n'
+        "]\n"
+        "exclude_globs = [\n"
+        "  # four\n"
+        '  "x:1:2:",\n'
+        "]\n"
+    )
+    want = [(3, '"a\\\\.rs:20:9: replace"')]
+    assert helper.pinned(text) == want
+
+
+def test_only_0_2_and_3_are_judged() -> None:
+    """4 is a red baseline; 1 is a failure to run."""
+    want = frozenset({0, 2, 3})
+    assert want == helper.JUDGED

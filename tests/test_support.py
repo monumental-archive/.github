@@ -213,6 +213,21 @@ def dotted(node: ast.AST) -> str | None:
     return None
 
 
+def traced(node: ast.AST) -> str | None:
+    """Spell what an environment is held in: a name, or an attribute by its name.
+
+    An attribute is spelled `.env` whatever object holds it: a state
+    class sets `self.env` and its rows read `state.env` (#2177).
+
+    Returns:
+        The spelling, or None for anything else.
+
+    """
+    if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+        return f".{node.attr}"
+    return dotted(node)
+
+
 def starts_process(spelled: str | None) -> bool:
     """Say whether a call, by its dotted name, starts a process.
 
@@ -273,7 +288,7 @@ class Environments:
                     node.targets if isinstance(node, ast.Assign) else [node.target]
                 )
                 for target in targets:
-                    name = dotted(target)
+                    name = traced(target)
                     if name is not None:
                         scope = self.module if "." in name else self.scope(node)
                         self.assigned.setdefault((scope, name), []).append(node.value)
@@ -321,7 +336,7 @@ class Environments:
         start = self.start(node)
         if start is not None:
             return start is not False and bool(self.hermetic(start, seen))
-        name = dotted(node)
+        name = traced(node)
         if name is None:
             return False
         if name in seen:
@@ -681,90 +696,84 @@ def plants_from_tree(source: str) -> list[int]:
 EXCEPTED = frozenset({"tests/support.py", "tests/test_support.py"})
 
 
-class TestEnv:
-    """What support.env lets through."""
-
-    def test_planted_variables_do_not_reach_a_fixture(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """The job's inputs and git's own variables stay with the suite."""
-        for name, value in PLANTED.items():
-            monkeypatch.setenv(name, value)
-        env = support.env("/fixture-home")
-        reached = sorted(set(PLANTED) & set(env))
-        assert reached == NOTHING
-
-    def test_only_the_allow_list_is_inherited(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Every inherited name is INHERITED's, or one the helper sets."""
-        set_here = {
-            "HOME",
-            "ORG_CANON_DIR",
-            "GIT_EDITOR",
-            "GIT_AUTHOR_NAME",
-            "GIT_AUTHOR_EMAIL",
-            "GIT_COMMITTER_NAME",
-            "GIT_COMMITTER_EMAIL",
-        }
-        for name, value in PLANTED.items():
-            monkeypatch.setenv(name, value)
-        env = support.env()
-        extra = set(env) - set(support.INHERITED) - set_here
-        assert extra == NO_NAMES
-
-    def test_a_rows_override_reaches_the_fixture(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """A row states its own input, and that wins over the suite's."""
-        for name, value in PLANTED.items():
-            monkeypatch.setenv(name, value)
-        env = support.env("/fixture-home", VERSION="2.0.0")
-        assert env["VERSION"] == "2.0.0"
-
-    def test_home_is_the_fixtures_or_the_suites(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """A given home wins; without one the suite's HOME is kept."""
-        monkeypatch.setenv("HOME", "/suite-home")
-        assert support.env("/fixture-home")["HOME"] == "/fixture-home"
-        assert support.env()["HOME"] == "/suite-home"
-
-    def test_each_tool_adds_exactly_its_names(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """A tool extension adds its variables and nothing else."""
-        every = {n for names in support.TOOLS.values() for n in names}
-        planted = dict.fromkeys(every | set(support.INHERITED), "x")
-        for name, value in planted.items():
-            monkeypatch.setenv(name, value)
-        base = set(support.env())
-        for tool, names in support.TOOLS.items():
-            assert set(names) - base == set(support.env(tools=(tool,))) - base
-
-    def test_an_unknown_tool_is_refused(self) -> None:
-        """A tool nobody measured has no extension to borrow."""
-        with pytest.raises(KeyError):
-            support.env(tools=("no-such-tool",))
-
-    def test_a_task_body_runs_under_the_belt_shell_and_writer(self) -> None:
-        """task_run: the [task_config] shell, the task's name, the writer."""
-        writer = support.CANON / "mise" / "findings.sh"
-        run = support.task_run("lint:demo", "true")
-        want: dict[str, str] = {"MISE_TASK_NAME": "lint:demo", "BASH_ENV": str(writer)}
-        assert want == run.env
-        bash: str = support.tool("bash")
-        argv: list[str] = [bash, "--norc", "-euo", "pipefail", "-c", "true"]
-        assert argv == run.argv
-        assert writer.is_file()
+# What support.env lets through.
+def test_planted_variables_do_not_reach_a_fixture(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The job's inputs and git's own variables stay with the suite."""
+    for name, value in PLANTED.items():
+        monkeypatch.setenv(name, value)
+    env = support.env("/fixture-home")
+    reached = sorted(set(PLANTED) & set(env))
+    assert reached == NOTHING
 
 
-@pytest.mark.usefixtures("_set_up_test_tracked")
-class TestTracked:
+def test_only_the_allow_list_is_inherited(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every inherited name is INHERITED's, or one the helper sets."""
+    set_here = {
+        "HOME",
+        "ORG_CANON_DIR",
+        "GIT_EDITOR",
+        "GIT_AUTHOR_NAME",
+        "GIT_AUTHOR_EMAIL",
+        "GIT_COMMITTER_NAME",
+        "GIT_COMMITTER_EMAIL",
+    }
+    for name, value in PLANTED.items():
+        monkeypatch.setenv(name, value)
+    env = support.env()
+    extra = set(env) - set(support.INHERITED) - set_here
+    assert extra == NO_NAMES
+
+
+def test_a_rows_override_reaches_the_fixture(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A row states its own input, and that wins over the suite's."""
+    for name, value in PLANTED.items():
+        monkeypatch.setenv(name, value)
+    env = support.env("/fixture-home", VERSION="2.0.0")
+    assert env["VERSION"] == "2.0.0"
+
+
+def test_home_is_the_fixtures_or_the_suites(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A given home wins; without one the suite's HOME is kept."""
+    monkeypatch.setenv("HOME", "/suite-home")
+    assert support.env("/fixture-home")["HOME"] == "/fixture-home"
+    assert support.env()["HOME"] == "/suite-home"
+
+
+def test_each_tool_adds_exactly_its_names(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A tool extension adds its variables and nothing else."""
+    every = {n for names in support.TOOLS.values() for n in names}
+    planted = dict.fromkeys(every | set(support.INHERITED), "x")
+    for name, value in planted.items():
+        monkeypatch.setenv(name, value)
+    base = set(support.env())
+    for tool, names in support.TOOLS.items():
+        assert set(names) - base == set(support.env(tools=(tool,))) - base
+
+
+def test_an_unknown_tool_is_refused() -> None:
+    """A tool nobody measured has no extension to borrow."""
+    with pytest.raises(KeyError):
+        support.env(tools=("no-such-tool",))
+
+
+def test_a_task_body_runs_under_the_belt_shell_and_writer() -> None:
+    """task_run: the [task_config] shell, the task's name, the writer."""
+    writer = support.CANON / "mise" / "findings.sh"
+    run = support.task_run("lint:demo", "true")
+    want: dict[str, str] = {"MISE_TASK_NAME": "lint:demo", "BASH_ENV": str(writer)}
+    assert want == run.env
+    bash: str = support.tool("bash")
+    argv: list[str] = [bash, "--norc", "-euo", "pipefail", "-c", "true"]
+    assert argv == run.argv
+    assert writer.is_file()
+
+
+class Tracked:
     """support.tracked, in a checkout (#1618)."""
 
-    @fixture
-    def _set_up_test_tracked(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Plant a repository with tracked files in and out of `vendor/`."""
         self.root = tmp_path
         for name in ("a.py", "pkg/b.py", "pkg/c.sh", "vendor/v.py", "d.py"):
@@ -777,19 +786,27 @@ class TestTracked:
         """Run git in the planted repository."""
         subprocess.run([GIT, *args], cwd=self.root, env=support.env(), check=True)
 
-    def test_a_checkout_lists_what_git_tracks(self) -> None:
-        """The pathspecs select from the tracked files, excludes kept."""
-        specs = (":!vendor/**", "*.py", "*.sh")
-        selected: list[str] = ["a.py", "d.py", "pkg/b.py", "pkg/c.sh"]
-        assert support.tracked(self.root, *specs) == selected
 
-    def test_an_empty_listing_is_red_by_name(self) -> None:
-        """Files asked for and none listed is never a pass."""
-        with pytest.raises(RuntimeError) as raised:
-            support.tracked(self.root, "*.rs")
-        assert str(raised.value) == (
-            f"support.tracked: git lists no tracked file under {self.root} for ['*.rs']"
-        )
+@fixture
+def tracked_state(tmp_path: Path) -> Tracked:
+    """Give each row its own Tracked."""
+    return Tracked(tmp_path)
+
+
+def test_a_checkout_lists_what_git_tracks(tracked_state: Tracked) -> None:
+    """The pathspecs select from the tracked files, excludes kept."""
+    specs = (":!vendor/**", "*.py", "*.sh")
+    selected: list[str] = ["a.py", "d.py", "pkg/b.py", "pkg/c.sh"]
+    assert support.tracked(tracked_state.root, *specs) == selected
+
+
+def test_an_empty_listing_is_red_by_name(tracked_state: Tracked) -> None:
+    """Files asked for and none listed is never a pass."""
+    with pytest.raises(RuntimeError) as raised:
+        support.tracked(tracked_state.root, "*.rs")
+    assert str(raised.value) == (
+        f"support.tracked: git lists no tracked file under {tracked_state.root} for ['*.rs']"
+    )
 
 
 def on_path(path: str) -> AbstractContextManager[object]:
@@ -803,532 +820,566 @@ def on_path(path: str) -> AbstractContextManager[object]:
     return mock.patch.dict(os.environ, values)
 
 
-@pytest.mark.usefixtures("_tmp", "_set_up_test_tool")
-class TestTool:
+class Tool:
     """support.tool and support.optional_tool (#1684)."""
 
-    @fixture
-    def _tmp(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
+        """Set up the rows' state."""
+        self.set_up_tmp(tmp_path)
+        self.set_up_test_tool(tmp_path)
+
+    def set_up_tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
 
-    @fixture
-    def _set_up_test_tool(self, tmp_path: Path) -> None:
+    def set_up_test_tool(self, tmp_path: Path) -> None:
         """Plant a directory holding one executable, `planted-tool`."""
         self.bin = tmp_path
         (self.bin / "planted-tool").write_text("#!/bin/sh\n", encoding="utf-8")
         (self.bin / "planted-tool").chmod(0o755)
 
-    def test_a_present_tool_is_its_absolute_path(self) -> None:
-        """Found on PATH, the path is absolute."""
-        with on_path(str(self.bin)):
-            found = support.tool("planted-tool")
-        assert str(self.bin / "planted-tool") == found
-        assert Path(found).is_absolute()
 
-    def test_a_relative_path_entry_still_gives_an_absolute_path(self) -> None:
-        """A relative PATH entry is made absolute and normal, never resolved."""
-        with on_path(os.path.relpath(self.bin)):
-            found = support.tool("planted-tool")
-        assert str(self.bin / "planted-tool") == found
+@fixture
+def tool_state(tmp_path: Path) -> Tool:
+    """Give each row its own Tool."""
+    return Tool(tmp_path)
 
-    def test_a_link_is_not_resolved(self) -> None:
-        """A mise shim is a link that dispatches on its own name."""
-        shims = Path(tempfile.mkdtemp(dir=self.tmp)).resolve()
-        (shims / "shim").symlink_to(self.bin / "planted-tool")
-        assert str(shims / "shim") == support.tool("shim", path=str(shims))
 
-    def test_a_missing_tool_is_red_by_name(self) -> None:
-        """The message names the tool, where it looked, and the remedy."""
-        with (
-            on_path(str(self.bin)),
-            pytest.raises(support.MissingToolError) as raised,
-        ):
-            support.tool("no-such-tool")
-        assert str(raised.value) == (
-            "support.tool: no-such-tool is not on PATH;"
-            " the belt provides it: run mise install"
+def test_a_present_tool_is_its_absolute_path(tool_state: Tool) -> None:
+    """Found on PATH, the path is absolute."""
+    with on_path(str(tool_state.bin)):
+        found = support.tool("planted-tool")
+    assert str(tool_state.bin / "planted-tool") == found
+    assert Path(found).is_absolute()
+
+
+def test_a_relative_path_entry_still_gives_an_absolute_path(tool_state: Tool) -> None:
+    """A relative PATH entry is made absolute and normal, never resolved."""
+    with on_path(os.path.relpath(tool_state.bin)):
+        found = support.tool("planted-tool")
+    assert str(tool_state.bin / "planted-tool") == found
+
+
+def test_a_link_is_not_resolved(tool_state: Tool) -> None:
+    """A mise shim is a link that dispatches on its own name."""
+    shims = Path(tempfile.mkdtemp(dir=tool_state.tmp)).resolve()
+    (shims / "shim").symlink_to(tool_state.bin / "planted-tool")
+    assert str(shims / "shim") == support.tool("shim", path=str(shims))
+
+
+def test_a_missing_tool_is_red_by_name(tool_state: Tool) -> None:
+    """The message names the tool, where it looked, and the remedy."""
+    with (
+        on_path(str(tool_state.bin)),
+        pytest.raises(support.MissingToolError) as raised,
+    ):
+        support.tool("no-such-tool")
+    assert str(raised.value) == (
+        "support.tool: no-such-tool is not on PATH;"
+        " the belt provides it: run mise install"
+    )
+
+
+def test_the_search_path_is_honoured(tool_state: Tool) -> None:
+    """`path=` is searched instead of the suite's PATH, both ways."""
+    empty = Path(tempfile.mkdtemp(dir=tool_state.tmp)).resolve()
+    with on_path(str(empty)):
+        found = support.tool("planted-tool", path=str(tool_state.bin))
+    assert str(tool_state.bin / "planted-tool") == found
+    with (
+        on_path(str(tool_state.bin)),
+        pytest.raises(support.MissingToolError) as raised,
+    ):
+        support.tool("planted-tool", path=str(empty))
+    assert f"the search path {str(empty)!r}" in str(raised.value)
+
+
+def test_an_optional_tool_is_none_when_absent(tool_state: Tool) -> None:
+    """Absence is the row's decision: None, never a raise."""
+    with on_path(str(tool_state.bin)):
+        assert support.optional_tool("no-such-tool") is None
+        assert str(tool_state.bin / "planted-tool") == support.optional_tool(
+            "planted-tool"
         )
 
-    def test_the_search_path_is_honoured(self) -> None:
-        """`path=` is searched instead of the suite's PATH, both ways."""
-        empty = Path(tempfile.mkdtemp(dir=self.tmp)).resolve()
-        with on_path(str(empty)):
-            found = support.tool("planted-tool", path=str(self.bin))
-        assert str(self.bin / "planted-tool") == found
-        with (
-            on_path(str(self.bin)),
-            pytest.raises(support.MissingToolError) as raised,
-        ):
-            support.tool("planted-tool", path=str(empty))
-        assert f"the search path {str(empty)!r}" in str(raised.value)
 
-    def test_an_optional_tool_is_none_when_absent(self) -> None:
-        """Absence is the row's decision: None, never a raise."""
-        with on_path(str(self.bin)):
-            assert support.optional_tool("no-such-tool") is None
-            assert str(self.bin / "planted-tool") == support.optional_tool(
-                "planted-tool"
-            )
-
-
-@pytest.mark.usefixtures("_tmp")
-class TestRustc:
+class Rustc:
     """support.rustc prints support.rustc_verbose (#1877)."""
 
-    @fixture
-    def _tmp(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
 
-    def test_the_stand_in_prints_the_text_for_its_toolchain(self) -> None:
-        """Unset is `stable`; RUSTUP_TOOLCHAIN names the release."""
-        bin_dir = Path(tempfile.mkdtemp(dir=self.tmp)).resolve()
-        stub = str(support.rustc(bin_dir))
-        rows = (("", "stable"), ("nightly-2026-07-20", "nightly-2026-07-20"))
-        for given, toolchain in rows:
-            env = support.env()
-            env.pop("RUSTUP_TOOLCHAIN", None)
-            if given:
-                env["RUSTUP_TOOLCHAIN"] = given
-            done = subprocess.run(
-                [stub, "-vV"], env=env, capture_output=True, text=True, check=True
-            )
-            assert support.rustc_verbose(toolchain) == done.stdout
+
+@fixture
+def rustc_state(tmp_path: Path) -> Rustc:
+    """Give each row its own Rustc."""
+    return Rustc(tmp_path)
 
 
-@pytest.mark.usefixtures("_set_up_test_belt")
-class TestBelt:
+def test_the_stand_in_prints_the_text_for_its_toolchain(rustc_state: Rustc) -> None:
+    """Unset is `stable`; RUSTUP_TOOLCHAIN names the release."""
+    bin_dir = Path(tempfile.mkdtemp(dir=rustc_state.tmp)).resolve()
+    stub = str(support.rustc(bin_dir))
+    rows = (("", "stable"), ("nightly-2026-07-20", "nightly-2026-07-20"))
+    for given, toolchain in rows:
+        env = support.env()
+        env.pop("RUSTUP_TOOLCHAIN", None)
+        if given:
+            env["RUSTUP_TOOLCHAIN"] = given
+        done = subprocess.run(
+            [stub, "-vV"], env=env, capture_output=True, text=True, check=True
+        )
+        assert support.rustc_verbose(toolchain) == done.stdout
+
+
+class Belt:
     """support.belt and support.canon (#1714)."""
 
-    @fixture
-    def _set_up_test_belt(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Give each row a scratch directory."""
         self.tmp = tmp_path
 
-    def test_every_tracked_belt_file_is_a_link_to_it(self) -> None:
-        """The whole belt, nothing more, each file the real one by link."""
-        belt = support.belt(self.tmp / "belt")
-        names = {n.removeprefix("mise/") for n in support.tracked(CANON, "mise/")}
-        planted = {str(p.relative_to(belt)) for p in belt.rglob("*") if not p.is_dir()}
-        assert names == planted
-        unlinked = [
-            n
-            for n in sorted(names)
-            if not (belt / n).is_symlink()
-            or (belt / n).resolve() != (CANON / "mise" / n).resolve()
-        ]
-        assert list[str]() == unlinked
 
-    def test_a_stub_replaces_its_link_and_keeps_the_mode(self) -> None:
-        """A stub is a file of its own, executable where the real one is."""
-        name = "action-files.sh"
-        real = CANON / "mise" / name
-        mode = real.stat().st_mode & 0o7777
-        assert mode & 0o100, f"{name} is not executable in the belt"
-        belt = support.belt(
-            self.tmp / "belt", stubs={name: "stub\n", "new.txt": "new\n"}
-        )
-        assert not (belt / name).is_symlink()
-        assert (belt / name).read_text(encoding="utf-8") == "stub\n"
-        assert mode == (belt / name).stat().st_mode & 0o7777
-        assert real.read_text(encoding="utf-8") != "stub\n"
-        assert (belt / "new.txt").read_text(encoding="utf-8") == "new\n"
-
-    def test_a_stub_never_writes_the_canon(self) -> None:
-        """The stub is in the planted file; the canon's file is untouched (#1869)."""
-        real = CANON / "mise" / "config.toml"
-        before = real.read_bytes()
-        dest = support.plant(
-            self.tmp / "belt", ["mise/config.toml"], {"mise/config.toml": "stub\n"}
-        )
-        assert dest != CANON
-        assert not (dest / "mise" / "config.toml").is_symlink()
-        assert (dest / "mise" / "config.toml").read_text(encoding="utf-8") == "stub\n"
-        assert before == real.read_bytes()
-
-    def test_a_file_added_to_the_belt_appears_unasked(self) -> None:
-        """A new helper, or a new sibling a script starts, needs no row change."""
-        scratch = self.tmp / "canon"
-        (scratch / "mise").mkdir(parents=True)
-        (scratch / "mise" / "a.py").write_text("x\n", encoding="utf-8")
-        self.git(scratch, "init", "-q")
-        self.git(scratch, "add", ".")
-        with pytest.MonkeyPatch.context() as patched:
-            patched.setattr(support, "CANON", scratch)
-            before = support.belt(self.tmp / "before")
-            (scratch / "mise" / "sub").mkdir()
-            (scratch / "mise" / "sub" / "b.sh").write_text("x\n", encoding="utf-8")
-            self.git(scratch, "add", ".")
-            after = support.belt(self.tmp / "after")
-        found: list[str] = sorted(
-            str(p.relative_to(before)) for p in before.rglob("*.*")
-        )
-        grown: list[str] = sorted(str(p.relative_to(after)) for p in after.rglob("*.*"))
-        once: list[str] = ["a.py"]
-        both: list[str] = ["a.py", "sub/b.sh"]
-        assert once == found
-        assert both == grown
-        assert scratch / "mise" / "sub" / "b.sh" == (after / "sub" / "b.sh").readlink()
-
-    def test_a_canon_holds_mise_release_and_what_the_row_names(self) -> None:
-        """`mise/` and `release/` always; anything else only when named."""
-        tree = support.canon(
-            self.tmp / "canon",
-            "security/identity.toml",
-            stubs={"release/planted.py": "x\n"},
-        )
-        for name in (
-            "belt/findings.py",
-            "release/derive-coverage-floor.sh",
-            "security/identity.toml",
-        ):
-            assert CANON / name == (tree / name).readlink()
-        assert not (tree / "slsa").exists()
-        assert not (tree / "release" / "planted.py").is_symlink()
-
-    @staticmethod
-    def git(cwd: Path, *args: str) -> None:
-        """Run git in a scratch canon."""
-        subprocess.run([GIT, *args], cwd=cwd, env=support.env(), check=True)
+@fixture
+def belt_state(tmp_path: Path) -> Belt:
+    """Give each row its own Belt."""
+    return Belt(tmp_path)
 
 
-class TestTheLaw:
-    """No test file copies the caller's environment (#1514 item 3)."""
+def test_every_tracked_belt_file_is_a_link_to_it(belt_state: Belt) -> None:
+    """The whole belt, nothing more, each file the real one by link."""
+    belt = support.belt(belt_state.tmp / "belt")
+    names = {n.removeprefix("mise/") for n in support.tracked(CANON, "mise/")}
+    planted = {str(p.relative_to(belt)) for p in belt.rglob("*") if not p.is_dir()}
+    assert names == planted
+    unlinked = [
+        n
+        for n in sorted(names)
+        if not (belt / n).is_symlink()
+        or (belt / n).resolve() != (CANON / "mise" / n).resolve()
+    ]
+    assert list[str]() == unlinked
 
-    def test_no_test_file_copies_the_callers_environment(self) -> None:
-        """Every fixture environment is built through support.env."""
-        offenders = [
-            f"{path}:{line}"
-            for path in listed_test_files()
-            if path not in EXCEPTED
-            for line in copies(source_text(path))
-        ]
-        assert offenders == NOTHING
 
-    def test_no_test_builds_a_child_environment_by_hand(self) -> None:
-        """Every child environment starts from support.env (#1542)."""
-        offenders = [
-            f"{path}:{line}"
-            for path in listed_test_files()
-            if path not in EXCEPTED
-            for line in Environments(source_text(path)).built_by_hand()
-        ]
-        assert offenders == NOTHING
+def test_a_stub_replaces_its_link_and_keeps_the_mode(belt_state: Belt) -> None:
+    """A stub is a file of its own, executable where the real one is."""
+    name = "action-files.sh"
+    real = CANON / "mise" / name
+    mode = real.stat().st_mode & 0o7777
+    assert mode & 0o100, f"{name} is not executable in the belt"
+    belt = support.belt(
+        belt_state.tmp / "belt", stubs={name: "stub\n", "new.txt": "new\n"}
+    )
+    assert not (belt / name).is_symlink()
+    assert (belt / name).read_text(encoding="utf-8") == "stub\n"
+    assert mode == (belt / name).stat().st_mode & 0o7777
+    assert real.read_text(encoding="utf-8") != "stub\n"
+    assert (belt / "new.txt").read_text(encoding="utf-8") == "new\n"
 
-    def test_each_way_to_build_an_environment_is_judged(self) -> None:
-        """Planted: hand-built environments refused by line; derived ones pass."""
-        head = "import subprocess\n"
-        refused = {
-            "display": head + 'subprocess.run(a, env={"PATH": p})\n',
-            "dict()": head + "subprocess.run(a, env=dict(PATH=p))\n",
-            "a name": head + 'e = {"PATH": p}\nsubprocess.run(a, env=e)\n',
-            "an attribute": head
-            + 'self.env = {"A": "1"}\nsubprocess.run(a, env=self.env)\n',
-            "a wrapper's parameter": head
-            + "def run(env):\n    subprocess.run(a, env=env)\n"
-            + 'run({"PATH": p})\n',
-            "os.exec": (
-                "import os\nos.execve(p, a, {'PATH': p})\nos.execvpe(p, a, env={})\n"
+
+def test_a_stub_never_writes_the_canon(belt_state: Belt) -> None:
+    """The stub is in the planted file; the canon's file is untouched (#1869)."""
+    real = CANON / "mise" / "config.toml"
+    before = real.read_bytes()
+    dest = support.plant(
+        belt_state.tmp / "belt", ["mise/config.toml"], {"mise/config.toml": "stub\n"}
+    )
+    assert dest != CANON
+    assert not (dest / "mise" / "config.toml").is_symlink()
+    assert (dest / "mise" / "config.toml").read_text(encoding="utf-8") == "stub\n"
+    assert before == real.read_bytes()
+
+
+def test_a_file_added_to_the_belt_appears_unasked(belt_state: Belt) -> None:
+    """A new helper, or a new sibling a script starts, needs no row change."""
+    scratch = belt_state.tmp / "canon"
+    (scratch / "mise").mkdir(parents=True)
+    (scratch / "mise" / "a.py").write_text("x\n", encoding="utf-8")
+    git(scratch, "init", "-q")
+    git(scratch, "add", ".")
+    with pytest.MonkeyPatch.context() as patched:
+        patched.setattr(support, "CANON", scratch)
+        before = support.belt(belt_state.tmp / "before")
+        (scratch / "mise" / "sub").mkdir()
+        (scratch / "mise" / "sub" / "b.sh").write_text("x\n", encoding="utf-8")
+        git(scratch, "add", ".")
+        after = support.belt(belt_state.tmp / "after")
+    found: list[str] = sorted(str(p.relative_to(before)) for p in before.rglob("*.*"))
+    grown: list[str] = sorted(str(p.relative_to(after)) for p in after.rglob("*.*"))
+    once: list[str] = ["a.py"]
+    both: list[str] = ["a.py", "sub/b.sh"]
+    assert once == found
+    assert both == grown
+    assert scratch / "mise" / "sub" / "b.sh" == (after / "sub" / "b.sh").readlink()
+
+
+def test_a_canon_holds_mise_release_and_what_the_row_names(belt_state: Belt) -> None:
+    """`mise/` and `release/` always; anything else only when named."""
+    tree = support.canon(
+        belt_state.tmp / "canon",
+        "security/identity.toml",
+        stubs={"release/planted.py": "x\n"},
+    )
+    for name in (
+        "belt/findings.py",
+        "release/derive-coverage-floor.sh",
+        "security/identity.toml",
+    ):
+        assert CANON / name == (tree / name).readlink()
+    assert not (tree / "slsa").exists()
+    assert not (tree / "release" / "planted.py").is_symlink()
+
+
+def git(cwd: Path, *args: str) -> None:
+    """Run git in a scratch canon."""
+    subprocess.run([GIT, *args], cwd=cwd, env=support.env(), check=True)
+
+
+# No test file copies the caller's environment (#1514 item 3).
+def test_no_test_file_copies_the_callers_environment() -> None:
+    """Every fixture environment is built through support.env."""
+    offenders = [
+        f"{path}:{line}"
+        for path in listed_test_files()
+        if path not in EXCEPTED
+        for line in copies(source_text(path))
+    ]
+    assert offenders == NOTHING
+
+
+def test_no_test_builds_a_child_environment_by_hand() -> None:
+    """Every child environment starts from support.env (#1542)."""
+    offenders = [
+        f"{path}:{line}"
+        for path in listed_test_files()
+        if path not in EXCEPTED
+        for line in Environments(source_text(path)).built_by_hand()
+    ]
+    assert offenders == NOTHING
+
+
+def test_each_way_to_build_an_environment_is_judged() -> None:
+    """Planted: hand-built environments refused by line; derived ones pass."""
+    head = "import subprocess\n"
+    refused = {
+        "display": head + 'subprocess.run(a, env={"PATH": p})\n',
+        "dict()": head + "subprocess.run(a, env=dict(PATH=p))\n",
+        "a name": head + 'e = {"PATH": p}\nsubprocess.run(a, env=e)\n',
+        "an attribute": head
+        + 'self.env = {"A": "1"}\nsubprocess.run(a, env=self.env)\n',
+        "a wrapper's parameter": head
+        + "def run(env):\n    subprocess.run(a, env=env)\n"
+        + 'run({"PATH": p})\n',
+        "os.exec": (
+            "import os\nos.execve(p, a, {'PATH': p})\nos.execvpe(p, a, env={})\n"
+        ),
+    }
+    lines = {
+        "display": [2],
+        "dict()": [2],
+        "a name": [3],
+        "an attribute": [3],
+        "a wrapper's parameter": [4],
+        "os.exec": [2, 3],
+    }
+    for name, source in refused.items():
+        assert lines[name] == Environments(source).built_by_hand()
+
+    allowed = {
+        "the call": head + "subprocess.run(a, env=support.env(A='1'))\n",
+        "extended": head + "subprocess.run(a, env=support.env() | {'A': '1'})\n",
+        "spread": head + "subprocess.run(a, env={**support.env(), 'A': '1'})\n",
+        "a name, then edited": head
+        + "e = support.env()\ne.pop('A', None)\nsubprocess.run(a, env=e)\n",
+        "a wrapper": head
+        + "def clean():\n    return support.env(A='1')\n"
+        + "subprocess.run(a, env=clean())\n",
+        "an alias": head + "h = support.env\nsubprocess.run(a, env=h())\n",
+        "a filter": head
+        + "e = {k: v for k, v in support.env().items() if k}\n"
+        + "subprocess.run(a, env=e)\n",
+        "a wrapper's parameter": head
+        + "def run(env):\n    subprocess.run(a, env=env)\n"
+        + "run(support.env())\n",
+        "no env": head + "subprocess.run(a)\n",
+        "not a process": "f(env={'A': '1'})\n",
+    }
+    for name, source in allowed.items():
+        assert Environments(source).built_by_hand() == NOTHING
+
+
+def test_every_spelling_of_a_process_start_is_judged() -> None:
+    """Planted: each import form and each starter, refused at its line."""
+    hand = "{'PATH': p}"
+    refused = {
+        "import as": f"import subprocess as sp\nsp.run(a, env={hand})\n",
+        "from import": f"from subprocess import run\nrun(a, env={hand})\n",
+        "from import as": (
+            f"from subprocess import Popen as Spawn\nSpawn(a, env={hand})\n"
+        ),
+        "os as": f"import os as o\no.execve(p, a, {hand})\n",
+        "from os": f"from os import execve\nexecve(p, a, {hand})\n",
+        "posix_spawn": f"import os\nos.posix_spawn(p, a, {hand})\n",
+        "posix_spawnp env=": f"import os\nos.posix_spawnp(p, a, env={hand})\n",
+        "asyncio exec": (
+            f"import asyncio\nasyncio.create_subprocess_exec(p, env={hand})\n"
+        ),
+        "asyncio shell": (
+            f"from asyncio import create_subprocess_shell as sh\nsh(p, env={hand})\n"
+        ),
+        "conditional": (
+            "import subprocess\n"
+            f"subprocess.run(a, env=support.env() if c else {hand})\n"
+        ),
+    }
+    for source in refused.values():
+        assert Environments(source).built_by_hand() == LINE_TWO
+    allowed = {
+        "import as": "import subprocess as sp\nsp.run(a, env=support.env())\n",
+        "posix_spawn": "import os\nos.posix_spawn(p, a, support.env())\n",
+        "a local run": "def run(a, env):\n    pass\nrun(a, env={'A': '1'})\n",
+    }
+    for source in allowed.values():
+        assert Environments(source).built_by_hand() == NOTHING
+
+
+def test_every_spelling_of_a_copy_is_found() -> None:
+    """Planted: each way to read the environment whole, at its line."""
+    planted = {
+        "display": "import os\nenv = {**os.environ}\n",
+        "multi-line display": (
+            "import os\nenv = {\n    **os.environ,\n    'A': '1',\n}\n"
+        ),
+        "spaced display": "import os\nenv = { **os.environ }\n",
+        "dict(env)": "import os\nenv = dict(os.environ)\n",
+        "dict(**env)": "import os\nenv = dict(**os.environ)\n",
+        "copy": "import os\nenv = os.environ.copy()\n",
+        "items": "import os\nenv = dict(os.environ.items())\n",
+        "keys": "import os\nnames = list(os.environ.keys())\n",
+        "values": "import os\nvals = list(os.environ.values())\n",
+        "or": "import os\nenv = os.environ | {'A': '1'}\n",
+        "or, no space": "import os\nenv = os.environ|{'A': '1'}\n",
+        "or, right": "import os\nenv = {'A': '1'} | os.environ\n",
+        "or-assign": "import os\nenv = {}\nenv |= os.environ\n",
+        "update": "import os\nenv = {}\nenv.update(os.environ)\n",
+        "update **": "import os\nenv = {}\nenv.update(**os.environ)\n",
+        "comprehension": (
+            "import os\nenv = {k: v for k, v in\n    os.environ.items()}\n"
+        ),
+        "comprehension over keys": "import os\nenv = {k: 1 for k in os.environ}\n",
+        "for": "import os\nenv = {}\nfor k in os.environ:\n    env[k] = 1\n",
+        "from os import environ": "from os import environ\nenv = {**environ}\n",
+        "from os import environ as e": (
+            "from os import environ as e\nenv = e.copy()\n"
+        ),
+        "import os as x": "import os as x\nenv = dict(x.environ)\n",
+        "name = os.environ": "import os\nsrc = os.environ\nenv = {**src}\n",
+    }
+    lines = {
+        "display": [2],
+        "multi-line display": [2],
+        "spaced display": [2],
+        "dict(env)": [2],
+        "dict(**env)": [2],
+        "copy": [2],
+        "items": [2],
+        "keys": [2],
+        "values": [2],
+        "or": [2],
+        "or, no space": [2],
+        "or, right": [2],
+        "or-assign": [3],
+        "update": [3],
+        "update **": [3],
+        "comprehension": [3],
+        "comprehension over keys": [2],
+        "for": [3],
+        "from os import environ": [2],
+        "from os import environ as e": [2],
+        "import os as x": [2],
+        "name = os.environ": [3],
+    }
+    for name, source in planted.items():
+        assert lines[name] == copies(source)
+
+
+def test_a_single_read_is_not_a_copy() -> None:
+    """One variable, or a replacement of the whole, is allowed."""
+    allowed = {
+        "key": "import os\nx = os.environ['A']\n",
+        "get": "import os\nx = os.environ.get('A', '')\n",
+        "in": "import os\nx = 'A' in os.environ\n",
+        "patch.dict": (
+            "import os\nfrom unittest import mock\n"
+            "with mock.patch.dict(os.environ, env, clear=True):\n    pass\n"
+        ),
+        "set one": "import os\nos.environ['A'] = '1'\n",
+    }
+    for source in allowed.values():
+        assert copies(source) == NOTHING
+
+
+def test_no_test_file_looks_a_tool_up_itself() -> None:
+    """Every lookup is support.tool or support.optional_tool (#1684)."""
+    offenders = [
+        f"{path}:{line}"
+        for path in listed_test_files()
+        if path not in EXCEPTED
+        for line in which_calls(source_text(path))
+    ]
+    assert list[str]() == offenders
+
+
+def test_every_spelling_of_a_lookup_is_found() -> None:
+    """Planted: each way to call `shutil.which`, at its line."""
+    planted = {
+        "shutil.which": "import shutil\nX = shutil.which('git')\n",
+        "with a fallback": "import shutil\nX = shutil.which('git') or 'git'\n",
+        "from shutil import which": "from shutil import which\nX = which('git')\n",
+        "from shutil import which as w": (
+            "from shutil import which as w\nX = w('git')\n"
+        ),
+        "import shutil as s": "import shutil as s\nX = s.which('git')\n",
+        "in a row": (
+            "import shutil\nclass T:\n    def f(self):\n"
+            "        return shutil.which('git', path='/bin')\n"
+        ),
+        "in a decorator": (
+            "import shutil\nimport unittest\n"
+            "@unittest.skipUnless(shutil.which('dash'), 'no dash')\n"
+            "class T(unittest.TestCase):\n    pass\n"
+        ),
+    }
+    lines = {
+        "shutil.which": [2],
+        "with a fallback": [2],
+        "from shutil import which": [2],
+        "from shutil import which as w": [2],
+        "import shutil as s": [2],
+        "in a row": [4],
+        "in a decorator": [3],
+    }
+    for name, source in planted.items():
+        assert lines[name] == which_calls(source)
+
+
+def test_the_fixture_lookup_is_allowed() -> None:
+    """The fixture's lookups, a patched `which`, and another `which` pass."""
+    allowed = {
+        "tool": "import hermetic\nX = support.tool('git')\n",
+        "optional_tool": "import hermetic\nX = support.optional_tool('dash')\n",
+        "patched, not called": (
+            "import shutil\nfrom unittest import mock\n"
+            "with mock.patch.object(shutil, 'which', return_value=None):\n"
+            "    pass\n"
+        ),
+        "a local which": "def which(x):\n    return x\nX = which('git')\n",
+    }
+    for source in allowed.values():
+        assert list[int]() == which_calls(source)
+
+
+def test_no_test_file_plants_the_belt_or_canon_itself() -> None:
+    """Every planted belt or canon is support.belt or support.canon (#1714)."""
+    offenders = [
+        f"{path}:{line}"
+        for path in listed_test_files()
+        if path not in EXCEPTED
+        for line in plants_from_tree(source_text(path))
+    ]
+    assert list[str]() == offenders
+
+
+def test_every_spelling_of_a_plant_is_found() -> None:
+    """Planted: each way to link or copy the tree, at its line."""
+    head = "import shutil\nfrom pathlib import Path\nBELT = support.MISE\n"
+    planted = {
+        "symlink_to": (head + "Path('x').symlink_to(BELT / 'a.py')\n", [4]),
+        "hardlink_to": (head + "Path('x').hardlink_to(BELT / 'a.py')\n", [4]),
+        "copy": (head + "shutil.copy(BELT / 'a.py', 'x')\n", [4]),
+        "copy2": (head + "shutil.copy2(BELT / 'a.py', 'x')\n", [4]),
+        "copyfile": (head + "shutil.copyfile(BELT / 'a.py', 'x')\n", [4]),
+        "copytree": (head + "shutil.copytree(BELT, 'x')\n", [4]),
+        "src=": (head + "shutil.copy(src=BELT / 'a', dst='x')\n", [4]),
+        "os.symlink": (head + "import os\nos.symlink(BELT / 'a', 'x')\n", [5]),
+        "from shutil import copy as c": (
+            (
+                "from shutil import copy as c\nfrom pathlib import Path\n"
+                "HERE = support.MISE\nc(HERE / 'a', 'x')\n"
             ),
-        }
-        lines = {
-            "display": [2],
-            "dict()": [2],
-            "a name": [3],
-            "an attribute": [3],
-            "a wrapper's parameter": [4],
-            "os.exec": [2, 3],
-        }
-        for name, source in refused.items():
-            assert lines[name] == Environments(source).built_by_hand()
+            [4],
+        ),
+        "a constant": (head + "S = BELT / 'a.sh'\nshutil.copy2(S, 'x')\n", [5]),
+        "a local in a row": (
+            head + "def f():\n    canon = support.CANON\n"
+            "    shutil.copyfile(canon / 'REUSE.toml', 'x')\n",
+            [6],
+        ),
+        "a loop over the tree": (
+            head + "def f():\n    for p in BELT.iterdir():\n"
+            "        Path('x').symlink_to(p)\n",
+            [6],
+        ),
+    }
+    for source, lines in planted.values():
+        assert lines == plants_from_tree(source)
 
-        allowed = {
-            "the call": head + "subprocess.run(a, env=support.env(A='1'))\n",
-            "extended": head + "subprocess.run(a, env=support.env() | {'A': '1'})\n",
-            "spread": head + "subprocess.run(a, env={**support.env(), 'A': '1'})\n",
-            "a name, then edited": head
-            + "e = support.env()\ne.pop('A', None)\nsubprocess.run(a, env=e)\n",
-            "a wrapper": head
-            + "def clean():\n    return support.env(A='1')\n"
-            + "subprocess.run(a, env=clean())\n",
-            "an alias": head + "h = support.env\nsubprocess.run(a, env=h())\n",
-            "a filter": head
-            + "e = {k: v for k, v in support.env().items() if k}\n"
-            + "subprocess.run(a, env=e)\n",
-            "a wrapper's parameter": head
-            + "def run(env):\n    subprocess.run(a, env=env)\n"
-            + "run(support.env())\n",
-            "no env": head + "subprocess.run(a)\n",
-            "not a process": "f(env={'A': '1'})\n",
-        }
-        for name, source in allowed.items():
-            assert Environments(source).built_by_hand() == NOTHING
 
-    def test_every_spelling_of_a_process_start_is_judged(self) -> None:
-        """Planted: each import form and each starter, refused at its line."""
-        hand = "{'PATH': p}"
-        refused = {
-            "import as": f"import subprocess as sp\nsp.run(a, env={hand})\n",
-            "from import": f"from subprocess import run\nrun(a, env={hand})\n",
-            "from import as": (
-                f"from subprocess import Popen as Spawn\nSpawn(a, env={hand})\n"
-            ),
-            "os as": f"import os as o\no.execve(p, a, {hand})\n",
-            "from os": f"from os import execve\nexecve(p, a, {hand})\n",
-            "posix_spawn": f"import os\nos.posix_spawn(p, a, {hand})\n",
-            "posix_spawnp env=": f"import os\nos.posix_spawnp(p, a, env={hand})\n",
-            "asyncio exec": (
-                f"import asyncio\nasyncio.create_subprocess_exec(p, env={hand})\n"
-            ),
-            "asyncio shell": (
-                "from asyncio import create_subprocess_shell as sh\n"
-                f"sh(p, env={hand})\n"
-            ),
-            "conditional": (
-                "import subprocess\n"
-                f"subprocess.run(a, env=support.env() if c else {hand})\n"
-            ),
-        }
-        for source in refused.values():
-            assert Environments(source).built_by_hand() == LINE_TWO
-        allowed = {
-            "import as": "import subprocess as sp\nsp.run(a, env=support.env())\n",
-            "posix_spawn": "import os\nos.posix_spawn(p, a, support.env())\n",
-            "a local run": "def run(a, env):\n    pass\nrun(a, env={'A': '1'})\n",
-        }
-        for source in allowed.values():
-            assert Environments(source).built_by_hand() == NOTHING
+def test_the_fixture_and_the_tests_own_files_are_allowed() -> None:
+    """The fixture's planting, a file the row wrote, a fixture, a tool."""
+    head = "import shutil\nfrom pathlib import Path\nBELT = support.MISE\n"
+    allowed = {
+        "belt": head + "import hermetic\nhermetic.belt('x', stubs={})\n",
+        "a file the row wrote": (
+            head + "def f(tmp):\n    src = tmp / 'a'\n    src.write_text('x')\n"
+            "    shutil.copy(src, tmp / 'b')\n"
+        ),
+        "a fixture": (
+            head + "DATA = BELT / 'testdata' / 'x'\nshutil.copy(DATA / 'a', 'y')\n"
+        ),
+        "a tool": head + "import hermetic\nPath('x').symlink_to(support.tool('git'))\n",
+        "a local of the same name": (
+            head + "def f(tmp):\n    BELT = tmp\n    shutil.copy(BELT / 'a', 'x')\n"
+        ),
+    }
+    for source in allowed.values():
+        assert list[int]() == plants_from_tree(source)
 
-    def test_every_spelling_of_a_copy_is_found(self) -> None:
-        """Planted: each way to read the environment whole, at its line."""
-        planted = {
-            "display": "import os\nenv = {**os.environ}\n",
-            "multi-line display": (
-                "import os\nenv = {\n    **os.environ,\n    'A': '1',\n}\n"
-            ),
-            "spaced display": "import os\nenv = { **os.environ }\n",
-            "dict(env)": "import os\nenv = dict(os.environ)\n",
-            "dict(**env)": "import os\nenv = dict(**os.environ)\n",
-            "copy": "import os\nenv = os.environ.copy()\n",
-            "items": "import os\nenv = dict(os.environ.items())\n",
-            "keys": "import os\nnames = list(os.environ.keys())\n",
-            "values": "import os\nvals = list(os.environ.values())\n",
-            "or": "import os\nenv = os.environ | {'A': '1'}\n",
-            "or, no space": "import os\nenv = os.environ|{'A': '1'}\n",
-            "or, right": "import os\nenv = {'A': '1'} | os.environ\n",
-            "or-assign": "import os\nenv = {}\nenv |= os.environ\n",
-            "update": "import os\nenv = {}\nenv.update(os.environ)\n",
-            "update **": "import os\nenv = {}\nenv.update(**os.environ)\n",
-            "comprehension": (
-                "import os\nenv = {k: v for k, v in\n    os.environ.items()}\n"
-            ),
-            "comprehension over keys": "import os\nenv = {k: 1 for k in os.environ}\n",
-            "for": "import os\nenv = {}\nfor k in os.environ:\n    env[k] = 1\n",
-            "from os import environ": "from os import environ\nenv = {**environ}\n",
-            "from os import environ as e": (
-                "from os import environ as e\nenv = e.copy()\n"
-            ),
-            "import os as x": "import os as x\nenv = dict(x.environ)\n",
-            "name = os.environ": "import os\nsrc = os.environ\nenv = {**src}\n",
-        }
-        lines = {
-            "display": [2],
-            "multi-line display": [2],
-            "spaced display": [2],
-            "dict(env)": [2],
-            "dict(**env)": [2],
-            "copy": [2],
-            "items": [2],
-            "keys": [2],
-            "values": [2],
-            "or": [2],
-            "or, no space": [2],
-            "or, right": [2],
-            "or-assign": [3],
-            "update": [3],
-            "update **": [3],
-            "comprehension": [3],
-            "comprehension over keys": [2],
-            "for": [3],
-            "from os import environ": [2],
-            "from os import environ as e": [2],
-            "import os as x": [2],
-            "name = os.environ": [3],
-        }
-        for name, source in planted.items():
-            assert lines[name] == copies(source)
 
-    def test_a_single_read_is_not_a_copy(self) -> None:
-        """One variable, or a replacement of the whole, is allowed."""
-        allowed = {
-            "key": "import os\nx = os.environ['A']\n",
-            "get": "import os\nx = os.environ.get('A', '')\n",
-            "in": "import os\nx = 'A' in os.environ\n",
-            "patch.dict": (
-                "import os\nfrom unittest import mock\n"
-                "with mock.patch.dict(os.environ, env, clear=True):\n    pass\n"
-            ),
-            "set one": "import os\nos.environ['A'] = '1'\n",
-        }
-        for source in allowed.values():
-            assert copies(source) == NOTHING
+def test_no_test_file_asks_git_for_a_plain_listing() -> None:
+    """Every listing of what a tree tracks goes through tracked (#1618)."""
+    offenders = [
+        f"{path}:{line}"
+        for path in listed_test_files()
+        for line in plain_listings(source_text(path))
+    ]
+    assert offenders == NOTHING
 
-    def test_no_test_file_looks_a_tool_up_itself(self) -> None:
-        """Every lookup is support.tool or support.optional_tool (#1684)."""
-        offenders = [
-            f"{path}:{line}"
-            for path in listed_test_files()
-            if path not in EXCEPTED
-            for line in which_calls(source_text(path))
-        ]
-        assert list[str]() == offenders
 
-    def test_every_spelling_of_a_lookup_is_found(self) -> None:
-        """Planted: each way to call `shutil.which`, at its line."""
-        planted = {
-            "shutil.which": "import shutil\nX = shutil.which('git')\n",
-            "with a fallback": "import shutil\nX = shutil.which('git') or 'git'\n",
-            "from shutil import which": "from shutil import which\nX = which('git')\n",
-            "from shutil import which as w": (
-                "from shutil import which as w\nX = w('git')\n"
-            ),
-            "import shutil as s": "import shutil as s\nX = s.which('git')\n",
-            "in a row": (
-                "import shutil\nclass T:\n    def f(self):\n"
-                "        return shutil.which('git', path='/bin')\n"
-            ),
-            "in a decorator": (
-                "import shutil\nimport unittest\n"
-                "@unittest.skipUnless(shutil.which('dash'), 'no dash')\n"
-                "class T(unittest.TestCase):\n    pass\n"
-            ),
-        }
-        lines = {
-            "shutil.which": [2],
-            "with a fallback": [2],
-            "from shutil import which": [2],
-            "from shutil import which as w": [2],
-            "import shutil as s": [2],
-            "in a row": [4],
-            "in a decorator": [3],
-        }
-        for name, source in planted.items():
-            assert lines[name] == which_calls(source)
-
-    def test_the_fixture_lookup_is_allowed(self) -> None:
-        """The fixture's lookups, a patched `which`, and another `which` pass."""
-        allowed = {
-            "tool": "import hermetic\nX = support.tool('git')\n",
-            "optional_tool": "import hermetic\nX = support.optional_tool('dash')\n",
-            "patched, not called": (
-                "import shutil\nfrom unittest import mock\n"
-                "with mock.patch.object(shutil, 'which', return_value=None):\n"
-                "    pass\n"
-            ),
-            "a local which": "def which(x):\n    return x\nX = which('git')\n",
-        }
-        for source in allowed.values():
-            assert list[int]() == which_calls(source)
-
-    def test_no_test_file_plants_the_belt_or_canon_itself(self) -> None:
-        """Every planted belt or canon is support.belt or support.canon (#1714)."""
-        offenders = [
-            f"{path}:{line}"
-            for path in listed_test_files()
-            if path not in EXCEPTED
-            for line in plants_from_tree(source_text(path))
-        ]
-        assert list[str]() == offenders
-
-    def test_every_spelling_of_a_plant_is_found(self) -> None:
-        """Planted: each way to link or copy the tree, at its line."""
-        head = "import shutil\nfrom pathlib import Path\nBELT = support.MISE\n"
-        planted = {
-            "symlink_to": (head + "Path('x').symlink_to(BELT / 'a.py')\n", [4]),
-            "hardlink_to": (head + "Path('x').hardlink_to(BELT / 'a.py')\n", [4]),
-            "copy": (head + "shutil.copy(BELT / 'a.py', 'x')\n", [4]),
-            "copy2": (head + "shutil.copy2(BELT / 'a.py', 'x')\n", [4]),
-            "copyfile": (head + "shutil.copyfile(BELT / 'a.py', 'x')\n", [4]),
-            "copytree": (head + "shutil.copytree(BELT, 'x')\n", [4]),
-            "src=": (head + "shutil.copy(src=BELT / 'a', dst='x')\n", [4]),
-            "os.symlink": (head + "import os\nos.symlink(BELT / 'a', 'x')\n", [5]),
-            "from shutil import copy as c": (
-                (
-                    "from shutil import copy as c\nfrom pathlib import Path\n"
-                    "HERE = support.MISE\nc(HERE / 'a', 'x')\n"
-                ),
-                [4],
-            ),
-            "a constant": (head + "S = BELT / 'a.sh'\nshutil.copy2(S, 'x')\n", [5]),
-            "a local in a row": (
-                head + "def f():\n    canon = support.CANON\n"
-                "    shutil.copyfile(canon / 'REUSE.toml', 'x')\n",
-                [6],
-            ),
-            "a loop over the tree": (
-                head + "def f():\n    for p in BELT.iterdir():\n"
-                "        Path('x').symlink_to(p)\n",
-                [6],
-            ),
-        }
-        for source, lines in planted.values():
-            assert lines == plants_from_tree(source)
-
-    def test_the_fixture_and_the_tests_own_files_are_allowed(self) -> None:
-        """The fixture's planting, a file the row wrote, a fixture, a tool."""
-        head = "import shutil\nfrom pathlib import Path\nBELT = support.MISE\n"
-        allowed = {
-            "belt": head + "import hermetic\nhermetic.belt('x', stubs={})\n",
-            "a file the row wrote": (
-                head + "def f(tmp):\n    src = tmp / 'a'\n    src.write_text('x')\n"
-                "    shutil.copy(src, tmp / 'b')\n"
-            ),
-            "a fixture": (
-                head + "DATA = BELT / 'testdata' / 'x'\nshutil.copy(DATA / 'a', 'y')\n"
-            ),
-            "a tool": head
-            + "import hermetic\nPath('x').symlink_to(support.tool('git'))\n",
-            "a local of the same name": (
-                head + "def f(tmp):\n    BELT = tmp\n    shutil.copy(BELT / 'a', 'x')\n"
-            ),
-        }
-        for source in allowed.values():
-            assert list[int]() == plants_from_tree(source)
-
-    def test_no_test_file_asks_git_for_a_plain_listing(self) -> None:
-        """Every listing of what a tree tracks goes through tracked (#1618)."""
-        offenders = [
-            f"{path}:{line}"
-            for path in listed_test_files()
-            for line in plain_listings(source_text(path))
-        ]
-        assert offenders == NOTHING
-
-    def test_each_plain_listing_is_refused_whatever_the_root(self) -> None:
-        """Planted: the parameter that leaked, cwd=, -C, a scratch tree, a wrapper."""
-        refused = {
-            "a parameter": (
-                "def judge(root):\n"
-                '    run([GIT, "-C", str(root), "ls-files", "--", "*.py"])\n'
-            ),
-            "cwd": 'run([GIT, "ls-files"], cwd=CANON)\n',
-            "-C": 'run([GIT, "-C", str(CANON), "ls-files", "-z", "*.sh"])\n',
-            "a scratch tree": 'tree = make()\nrun([GIT, "ls-files"], cwd=tree)\n',
-            "a wrapper": 'files = git(["ls-files"], linked, home)\n',
-            "a name": 'argv = (GIT, "ls-files", "--full-name")\nrun(argv)\n',
-        }
-        lines = {"a parameter": [2], "a scratch tree": [2]}
-        for name, source in refused.items():
-            assert lines.get(name, [1]) == plain_listings(source)
-        allowed = {
-            "another question": (
-                'run([GIT, "ls-files", "--others", "--modified",'
-                ' "--exclude-standard"])\n'
-            ),
-            "the index": 'run([GIT, "ls-files", "--stage", "a"])\n',
-            "tracked": 'support.tracked(tree, "*.py")\n',
-            "text": 'X = "git ls-files"\n',
-        }
-        for name, source in allowed.items():
-            assert list[int]() == plain_listings(source)
+def test_each_plain_listing_is_refused_whatever_the_root() -> None:
+    """Planted: the parameter that leaked, cwd=, -C, a scratch tree, a wrapper."""
+    refused = {
+        "a parameter": (
+            "def judge(root):\n"
+            '    run([GIT, "-C", str(root), "ls-files", "--", "*.py"])\n'
+        ),
+        "cwd": 'run([GIT, "ls-files"], cwd=CANON)\n',
+        "-C": 'run([GIT, "-C", str(CANON), "ls-files", "-z", "*.sh"])\n',
+        "a scratch tree": 'tree = make()\nrun([GIT, "ls-files"], cwd=tree)\n',
+        "a wrapper": 'files = git(["ls-files"], linked, home)\n',
+        "a name": 'argv = (GIT, "ls-files", "--full-name")\nrun(argv)\n',
+    }
+    lines = {"a parameter": [2], "a scratch tree": [2]}
+    for name, source in refused.items():
+        assert lines.get(name, [1]) == plain_listings(source)
+    allowed = {
+        "another question": (
+            'run([GIT, "ls-files", "--others", "--modified", "--exclude-standard"])\n'
+        ),
+        "the index": 'run([GIT, "ls-files", "--stage", "a"])\n',
+        "tracked": 'support.tracked(tree, "*.py")\n',
+        "text": 'X = "git ls-files"\n',
+    }
+    for name, source in allowed.items():
+        assert list[int]() == plain_listings(source)

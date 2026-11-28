@@ -54,82 +54,70 @@ QUOTED_PRAGMA: list[tuple[str, str]] = [("string", "# pragma: no cover")]
 QUOTED_MARKER: list[tuple[str, int]] = [("string", 0)]
 
 
-class TestPython:
-    """A Python pragma counts as a comment only."""
-
-    @given(
-        st.lists(
-            st.tuples(st.sampled_from(["comment", "string", "plain"]), python_marker()),
-            max_size=8,
-        )
+# A Python pragma counts as a comment only.
+@given(
+    st.lists(
+        st.tuples(st.sampled_from(["comment", "string", "plain"]), python_marker()),
+        max_size=8,
     )
-    @example(QUOTED_PRAGMA)
-    def test_comments_count_strings_do_not(self, rows: list[tuple[str, str]]) -> None:
-        """Every comment marker at its line; no string marker at all."""
-        lines, expected = [], []
-        for number, (how, marker) in enumerate(rows, start=1):
-            if how == "comment":
-                lines.append(f"x = 1  {marker}")
-                expected.append(number)
-            elif how == "string":
-                lines.append(f"x = {marker!r}")
-            else:
-                lines.append("x = 1")
-        found = ce.python("m.py", "\n".join(lines) + "\n")
-        found_lines = [f.line for f in found]
-        assert found_lines == expected, lines
+)
+@example(QUOTED_PRAGMA)
+def test_comments_count_strings_do_not(rows: list[tuple[str, str]]) -> None:
+    """Every comment marker at its line; no string marker at all."""
+    lines, expected = [], []
+    for number, (how, marker) in enumerate(rows, start=1):
+        if how == "comment":
+            lines.append(f"x = 1  {marker}")
+            expected.append(number)
+        elif how == "string":
+            lines.append(f"x = {marker!r}")
+        else:
+            lines.append("x = 1")
+    found = ce.python("m.py", "\n".join(lines) + "\n")
+    found_lines = [f.line for f in found]
+    assert found_lines == expected, lines
 
 
-class TestByLine:
-    """The other languages: a quoted marker is not a marker."""
-
-    @given(
-        st.sampled_from(sorted(LINE_MARKERS)),
-        st.lists(
-            st.tuples(
-                st.sampled_from(["comment", "string", "plain"]), st.integers(0, 2)
-            ),
-            max_size=8,
-        ),
-    )
-    @example(".ts", QUOTED_MARKER)
-    def test_quoted_markers_never_count(
-        self, suffix: str, rows: list[tuple[str, int]]
-    ) -> None:
-        """Every marker line is found; the same text quoted is not."""
-        markers, code = LINE_MARKERS[suffix]
-        rules = {".rs": ce.RUST_RULES, ".ts": ce.SCRIPT_RULES, ".go": ce.GO_RULES}[
-            suffix
-        ]
-        lines, expected = [], []
-        for number, (how, pick) in enumerate(rows, start=1):
-            marker = markers[pick % len(markers)]
-            if how == "comment":
-                lines.append(marker)
-                expected.append(number)
-            elif how == "string":
-                lines.append(f'{code} s = "{marker}";')
-            else:
-                lines.append(code)
-        found = ce.by_line(f"m{suffix}", "\n".join(lines), rules)
-        found_lines = [f.line for f in found]
-        assert found_lines == expected, lines
+# The other languages: a quoted marker is not a marker.
+@given(
+    st.sampled_from(sorted(LINE_MARKERS)),
+    st.lists(
+        st.tuples(st.sampled_from(["comment", "string", "plain"]), st.integers(0, 2)),
+        max_size=8,
+    ),
+)
+@example(".ts", QUOTED_MARKER)
+def test_quoted_markers_never_count(suffix: str, rows: list[tuple[str, int]]) -> None:
+    """Every marker line is found; the same text quoted is not."""
+    markers, code = LINE_MARKERS[suffix]
+    rules = {".rs": ce.RUST_RULES, ".ts": ce.SCRIPT_RULES, ".go": ce.GO_RULES}[suffix]
+    lines, expected = [], []
+    for number, (how, pick) in enumerate(rows, start=1):
+        marker = markers[pick % len(markers)]
+        if how == "comment":
+            lines.append(marker)
+            expected.append(number)
+        elif how == "string":
+            lines.append(f'{code} s = "{marker}";')
+        else:
+            lines.append(code)
+    found = ce.by_line(f"m{suffix}", "\n".join(lines), rules)
+    found_lines = [f.line for f in found]
+    assert found_lines == expected, lines
 
 
-class TestRefusal:
-    """Any file, any language: findings, never a traceback."""
-
-    @given(
-        st.binary(max_size=200),
-        st.sampled_from([".py", ".pyi", ".rs", ".ts", ".go", ".txt"]),
-    )
-    @example(b"x = '''\n# pragma: no cover\n", ".py")
-    @example(b"\x00# pragma: no cover\n", ".py")
-    def test_scan_answers_any_bytes(self, data: bytes, suffix: str) -> None:
-        """A list of findings, each on a line the file has."""
-        with tempfile.TemporaryDirectory() as scratch:
-            path = Path(scratch) / f"m{suffix}"
-            path.write_bytes(data)
-            found = ce.scan(str(path))
-        for finding in found:
-            assert finding.line >= 1
+# Any file, any language: findings, never a traceback.
+@given(
+    st.binary(max_size=200),
+    st.sampled_from([".py", ".pyi", ".rs", ".ts", ".go", ".txt"]),
+)
+@example(b"x = '''\n# pragma: no cover\n", ".py")
+@example(b"\x00# pragma: no cover\n", ".py")
+def test_scan_answers_any_bytes(data: bytes, suffix: str) -> None:
+    """A list of findings, each on a line the file has."""
+    with tempfile.TemporaryDirectory() as scratch:
+        path = Path(scratch) / f"m{suffix}"
+        path.write_bytes(data)
+        found = ce.scan(str(path))
+    for finding in found:
+        assert finding.line >= 1

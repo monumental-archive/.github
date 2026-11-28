@@ -116,81 +116,75 @@ def refused_or(call: Callable[[], object]) -> object:
         return None
 
 
-class TestImagesReadBack:
-    """T: the images output, read back, is the images written."""
-
-    @given(st.lists(st.tuples(IMAGE, TAG, DIGEST, EXTRA), min_size=1, max_size=4))
-    def test_parse_images_reads_back(
-        self, entries: list[tuple[str, str, str, dict[str, object]]]
-    ) -> None:
-        """Rendered as assemble renders it, read back whole."""
-        docs: list[dict[str, object]] = [
-            {**x, "image": i, "tag": t, "digest": d} for i, t, d, x in entries
-        ]
-        raw = json.dumps(docs, separators=(",", ":"), ensure_ascii=False)
-        want: list[tuple[str, str, str]] = [(i, t, d) for i, t, d, _ in entries]
-        assert registry.parse_images(raw) == want
+# T: the images output, read back, is the images written.
+@given(st.lists(st.tuples(IMAGE, TAG, DIGEST, EXTRA), min_size=1, max_size=4))
+def test_parse_images_reads_back(
+    entries: list[tuple[str, str, str, dict[str, object]]],
+) -> None:
+    """Rendered as assemble renders it, read back whole."""
+    docs: list[dict[str, object]] = [
+        {**x, "image": i, "tag": t, "digest": d} for i, t, d, x in entries
+    ]
+    raw = json.dumps(docs, separators=(",", ":"), ensure_ascii=False)
+    want: list[tuple[str, str, str]] = [(i, t, d) for i, t, d, _ in entries]
+    assert registry.parse_images(raw) == want
 
 
-class TestIndexBytes:
-    """T: the manifest bytes are the dry run's, less its newline."""
-
-    @given(st.dictionaries(st.text(max_size=6), JSON, max_size=3))
-    def test_index_bytes_takes_the_manifest_back(self, rest: dict[str, object]) -> None:
-        """Body and digest follow the printed bytes, nothing else."""
-        doc: dict[str, object] = {**rest, "mediaType": registry.OCI_INDEX}
-        manifest = json.dumps(doc).encode()
-        body, ctype = registry.index_bytes(manifest + b"\n")
-        assert (body, ctype) == (manifest, registry.OCI_INDEX)
-        assert hashlib.sha256(body).hexdigest() == hashlib.sha256(manifest).hexdigest()
+# T: the manifest bytes are the dry run's, less its newline.
+@given(st.dictionaries(st.text(max_size=6), JSON, max_size=3))
+def test_index_bytes_takes_the_manifest_back(rest: dict[str, object]) -> None:
+    """Body and digest follow the printed bytes, nothing else."""
+    doc: dict[str, object] = {**rest, "mediaType": registry.OCI_INDEX}
+    manifest = json.dumps(doc).encode()
+    body, ctype = registry.index_bytes(manifest + b"\n")
+    assert (body, ctype) == (manifest, registry.OCI_INDEX)
+    assert hashlib.sha256(body).hexdigest() == hashlib.sha256(manifest).hexdigest()
 
 
-class TestArchOrder:
-    """V: the digests come back in the order asked, not the order written."""
-
-    @given(
-        st.dictionaries(
-            st.from_regex(r"[a-z0-9]{1,8}", fullmatch=True),
-            DIGEST,
-            min_size=1,
-            max_size=4,
-        ),
-        st.randoms(),
-    )
-    def test_asked_order(self, digests: dict[str, str], shuffle: random.Random) -> None:
-        """Files written in any order read back in the asked order."""
-        written = list(digests)
-        shuffle.shuffle(written)
-        asked = list(digests)
-        shuffle.shuffle(asked)
-        with tempfile.TemporaryDirectory() as tmp:
-            for arch in written:
-                (Path(tmp) / arch).write_text(digests[arch] + "\n", "utf-8")
-            got = registry.read_arch_digests(Path(tmp), asked)
-        want: list[str] = [digests[a] for a in asked]
-        assert got == want
+# V: the digests come back in the order asked, not the order written.
+@given(
+    st.dictionaries(
+        st.from_regex(r"[a-z0-9]{1,8}", fullmatch=True),
+        DIGEST,
+        min_size=1,
+        max_size=4,
+    ),
+    st.randoms(),
+)
+def test_asked_order(digests: dict[str, str], shuffle: random.Random) -> None:
+    """Files written in any order read back in the asked order."""
+    written = list(digests)
+    shuffle.shuffle(written)
+    asked = list(digests)
+    shuffle.shuffle(asked)
+    with tempfile.TemporaryDirectory() as tmp:
+        for arch in written:
+            (Path(tmp) / arch).write_text(digests[arch] + "\n", "utf-8")
+        got = registry.read_arch_digests(Path(tmp), asked)
+    want: list[str] = [digests[a] for a in asked]
+    assert got == want
 
 
-class TestAnyInput:
-    """R: the readers answer, or refuse by name, on anything."""
+# R: the readers answer, or refuse by name, on anything.
+@given(JSON.map(dumped) | st.text())
+@example(DEEP)
+def test_parse_images(raw: str) -> None:
+    """Triples, or the step's own refusal."""
+    got = refused_or(lambda: registry.parse_images(raw))
+    assert got is None or isinstance(got, list)
 
-    @given(JSON.map(dumped) | st.text())
-    @example(DEEP)
-    def test_parse_images(self, raw: str) -> None:
-        """Triples, or the step's own refusal."""
-        got = refused_or(lambda: registry.parse_images(raw))
-        assert got is None or isinstance(got, list)
 
-    @given(JSON.map(dumped) | st.text())
-    @example(DEEP)
-    def test_facts_pairs(self, facts: str) -> None:
-        """Pairs, or the step's own refusal."""
-        got = refused_or(lambda: registry.facts_pairs(facts))
-        assert got is None or isinstance(got, list)
+@given(JSON.map(dumped) | st.text())
+@example(DEEP)
+def test_facts_pairs(facts: str) -> None:
+    """Pairs, or the step's own refusal."""
+    got = refused_or(lambda: registry.facts_pairs(facts))
+    assert got is None or isinstance(got, list)
 
-    @given(st.binary() | JSON.map(dumped_line))
-    @example(DEEP.encode() + b"\n")
-    def test_index_bytes(self, dry_run: bytes) -> None:
-        """A manifest, or the step's own refusal."""
-        got = refused_or(lambda: registry.index_bytes(dry_run))
-        assert got is None or isinstance(got, tuple)
+
+@given(st.binary() | JSON.map(dumped_line))
+@example(DEEP.encode() + b"\n")
+def test_index_bytes(dry_run: bytes) -> None:
+    """A manifest, or the step's own refusal."""
+    got = refused_or(lambda: registry.index_bytes(dry_run))
+    assert got is None or isinstance(got, tuple)

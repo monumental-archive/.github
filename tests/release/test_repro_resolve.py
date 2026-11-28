@@ -79,12 +79,10 @@ CHECKSUMS = "aaaa  tool-1.2.3-linux.tar.gz\n"
 TYPED = {"schema": 5, "entries": [{"name": "tool-1.2.3-linux.tar.gz"}]}
 
 
-@pytest.mark.usefixtures("_set_up_test_read_the_latest_release")
-class TestReadTheLatestRelease:
+class ReadTheLatestRelease:
     """Each row: the latest release, and what the step handed on."""
 
-    @fixture
-    def _set_up_test_read_the_latest_release(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Give each row a working directory, fixtures and a stub `gh`."""
         self.tmp = tmp_path
         self.bindir = self.tmp / "bin"
@@ -138,111 +136,140 @@ class TestReadTheLatestRelease:
         out, err = capfd.readouterr()
         return status, out, err, output.read_text(encoding="utf-8")
 
-    def test_typed_release_hands_its_manifest_on(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """stele#185: a typed manifest scopes the population."""
-        manifest = json.dumps(TYPED, indent=2) + "\n\n"
-        status, out, err, written = self.resolve(manifest=manifest, capfd=capfd)
-        assert status == 0, out + err
-        assert written == (
-            f"checksums<<CHECKSUMS_EOF\n{CHECKSUMS}CHECKSUMS_EOF\n"
-            f"manifest<<MANIFEST_EOF\n{json.dumps(TYPED, indent=2)}\nMANIFEST_EOF\n"
-            "tag=v1.2.3\nversion=1.2.3\n"
-        )
-        assert out == (
-            "::notice::v1.2.3 types its entries — the rebuilt class scopes the"
-            " population\n::notice::proving v1.2.3 reproduces\n"
-        )
 
-    def test_schema_one_manifest_is_not_handed_on(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """An untyped manifest would seal CANNOT_JUDGE (exit 4): withheld."""
-        status, out, err, written = self.resolve(
-            manifest=dumps({"schema": 1}), capfd=capfd
-        )
-        assert status == 0, out + err
-        assert "manifest<<MANIFEST_EOF\n\nMANIFEST_EOF\n" in written
-        assert (
-            "::notice::v1.2.3 carries no per-class typing — judging every build"
-            " subject it published\n"
-        ) in out
+@fixture
+def read_the_latest_release(tmp_path: Path) -> ReadTheLatestRelease:
+    """Give each row its own ReadTheLatestRelease."""
+    return ReadTheLatestRelease(tmp_path)
 
-    def test_entries_with_no_name_are_not_typing(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A first entry with no name answers nothing either."""
-        status, out, err, written = self.resolve(
-            manifest=dumps({"entries": [{"type": "x"}]}), capfd=capfd
-        )
-        assert status == 0, out + err
-        assert "manifest<<MANIFEST_EOF\n\nMANIFEST_EOF\n" in written
 
-    def test_no_manifest_judges_the_whole_release(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A release older than the manifest keeps the whole-set comparison."""
-        status, out, err, written = self.resolve(capfd=capfd)
-        assert status == 0, out + err
-        assert "manifest<<MANIFEST_EOF\n\nMANIFEST_EOF\n" in written
-        assert "carries no per-class typing" in out
+def test_typed_release_hands_its_manifest_on(
+    read_the_latest_release: ReadTheLatestRelease, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """stele#185: a typed manifest scopes the population."""
+    manifest = json.dumps(TYPED, indent=2) + "\n\n"
+    status, out, err, written = read_the_latest_release.resolve(
+        manifest=manifest, capfd=capfd
+    )
+    assert status == 0, out + err
+    assert written == (
+        f"checksums<<CHECKSUMS_EOF\n{CHECKSUMS}CHECKSUMS_EOF\n"
+        f"manifest<<MANIFEST_EOF\n{json.dumps(TYPED, indent=2)}\nMANIFEST_EOF\n"
+        "tag=v1.2.3\nversion=1.2.3\n"
+    )
+    assert out == (
+        "::notice::v1.2.3 types its entries — the rebuilt class scopes the"
+        " population\n::notice::proving v1.2.3 reproduces\n"
+    )
 
-    def test_latest_release_that_is_not_a_v_release(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """Refused by name, nothing written."""
-        status, out, err, written = self.resolve("nightly", capfd=capfd)
-        assert status == 1, out + err
-        assert err == (
-            "::error::repro-resolve: latest release tag nightly is not a v* release\n"
-        )
-        assert written == ""
 
-    def test_empty_checksums(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """Nothing to prove against is refused."""
-        status, out, err, written = self.resolve(checksums="", capfd=capfd)
-        assert status == 1, out + err
-        assert err == (
-            "::error::repro-resolve: release v1.2.3 has no checksums.txt — nothing"
-            " to prove against\n"
-        )
-        assert written == ""
+def test_schema_one_manifest_is_not_handed_on(
+    read_the_latest_release: ReadTheLatestRelease, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """An untyped manifest would seal CANNOT_JUDGE (exit 4): withheld."""
+    status, out, err, written = read_the_latest_release.resolve(
+        manifest=dumps({"schema": 1}), capfd=capfd
+    )
+    assert status == 0, out + err
+    assert "manifest<<MANIFEST_EOF\n\nMANIFEST_EOF\n" in written
+    assert (
+        "::notice::v1.2.3 carries no per-class typing — judging every build"
+        " subject it published\n"
+    ) in out
 
-    def test_absent_checksums_fails_with_gh(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A release with no checksums asset fails the download, as gh does."""
-        with pytest.raises(SystemExit) as stopped:
-            self.resolve(checksums=None, capfd=capfd)
-        assert stopped.value.code == 1
-        assert "release asset not found" in capfd.readouterr().err
-        assert (self.tmp / "github-output").read_text(encoding="utf-8") == ""
 
-    def test_manifest_that_is_not_json(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """A manifest that cannot be read refuses rather than guessing."""
-        status, out, err, written = self.resolve(manifest="{", capfd=capfd)
-        assert status == 1, out + err
-        assert err.startswith(
-            "::error::repro-resolve: evidence-manifest.json is not JSON:"
-        ), err
-        assert written == ""
+def test_entries_with_no_name_are_not_typing(
+    read_the_latest_release: ReadTheLatestRelease, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A first entry with no name answers nothing either."""
+    status, out, err, written = read_the_latest_release.resolve(
+        manifest=dumps({"entries": [{"type": "x"}]}), capfd=capfd
+    )
+    assert status == 0, out + err
+    assert "manifest<<MANIFEST_EOF\n\nMANIFEST_EOF\n" in written
 
-    @pytest.mark.parametrize("entries", [True, {"": None}, "abc"])
-    def test_manifest_whose_entries_are_not_a_list(
-        self, entries: object, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """Refused by name (#1556's shrunk examples), nothing written.
 
-        `true` died with a TypeError and `{"": null}` with a KeyError.
-        """
-        status, out, err, written = self.resolve(
-            manifest=dumps({"entries": entries}), capfd=capfd
-        )
-        assert status == 1, out + err
-        assert err == (
-            "::error::repro-resolve: evidence-manifest.json is not an"
-            " evidence manifest:"
-            " its entries are not a list\n"
-        )
-        assert written == ""
+def test_no_manifest_judges_the_whole_release(
+    read_the_latest_release: ReadTheLatestRelease, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A release older than the manifest keeps the whole-set comparison."""
+    status, out, err, written = read_the_latest_release.resolve(capfd=capfd)
+    assert status == 0, out + err
+    assert "manifest<<MANIFEST_EOF\n\nMANIFEST_EOF\n" in written
+    assert "carries no per-class typing" in out
+
+
+def test_latest_release_that_is_not_a_v_release(
+    read_the_latest_release: ReadTheLatestRelease, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Refused by name, nothing written."""
+    status, out, err, written = read_the_latest_release.resolve("nightly", capfd=capfd)
+    assert status == 1, out + err
+    assert err == (
+        "::error::repro-resolve: latest release tag nightly is not a v* release\n"
+    )
+    assert written == ""
+
+
+def test_empty_checksums(
+    read_the_latest_release: ReadTheLatestRelease, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Nothing to prove against is refused."""
+    status, out, err, written = read_the_latest_release.resolve(
+        checksums="", capfd=capfd
+    )
+    assert status == 1, out + err
+    assert err == (
+        "::error::repro-resolve: release v1.2.3 has no checksums.txt — nothing"
+        " to prove against\n"
+    )
+    assert written == ""
+
+
+def test_absent_checksums_fails_with_gh(
+    read_the_latest_release: ReadTheLatestRelease, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A release with no checksums asset fails the download, as gh does."""
+    with pytest.raises(SystemExit) as stopped:
+        read_the_latest_release.resolve(checksums=None, capfd=capfd)
+    assert stopped.value.code == 1
+    assert "release asset not found" in capfd.readouterr().err
+    assert (read_the_latest_release.tmp / "github-output").read_text(
+        encoding="utf-8"
+    ) == ""
+
+
+def test_manifest_that_is_not_json(
+    read_the_latest_release: ReadTheLatestRelease, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A manifest that cannot be read refuses rather than guessing."""
+    status, out, err, written = read_the_latest_release.resolve(
+        manifest="{", capfd=capfd
+    )
+    assert status == 1, out + err
+    assert err.startswith(
+        "::error::repro-resolve: evidence-manifest.json is not JSON:"
+    ), err
+    assert written == ""
+
+
+@pytest.mark.parametrize("entries", [True, {"": None}, "abc"])
+def test_manifest_whose_entries_are_not_a_list(
+    read_the_latest_release: ReadTheLatestRelease,
+    entries: object,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """Refused by name (#1556's shrunk examples), nothing written.
+
+    `true` died with a TypeError and `{"": null}` with a KeyError.
+    """
+    status, out, err, written = read_the_latest_release.resolve(
+        manifest=dumps({"entries": entries}), capfd=capfd
+    )
+    assert status == 1, out + err
+    assert err == (
+        "::error::repro-resolve: evidence-manifest.json is not an"
+        " evidence manifest:"
+        " its entries are not a list\n"
+    )
+    assert written == ""

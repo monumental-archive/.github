@@ -203,118 +203,126 @@ def run(
 CLEAN = {"a.py": "X: int = 1\n"}
 
 
-class TestTheWiring:
-    """The task's own decisions, with a stub mypy."""
+# The task's own decisions, with a stub mypy.
+def test_no_python_is_skipped_clean() -> None:
+    """A tree with no .py or .pyi skips, and mypy is never asked."""
+    done = run({"README.md": "x\n"}, stub={})
+    assert done.returncode == 0, done.stderr
+    assert f"{LABEL}: no Python tracked, skipped\n" == done.stdout
+    assert list[str]() == done.args
 
-    def test_no_python_is_skipped_clean(self) -> None:
-        """A tree with no .py or .pyi skips, and mypy is never asked."""
-        done = run({"README.md": "x\n"}, stub={})
-        assert done.returncode == 0, done.stderr
-        assert f"{LABEL}: no Python tracked, skipped\n" == done.stdout
-        assert list[str]() == done.args
 
-    def test_a_pytest_venv_with_no_interpreter_is_red(self) -> None:
-        """The tool venv mypy would read has no python: refused (#1788)."""
-        done = run(CLEAN, stub={}, stale_venv=True)
-        assert done.returncode == 1
-        assert re.search(
-            rf"\A{LABEL}: pytest runs on 'no interpreter' but the suite's"
-            r" python3 is '3\.[^']+' — the tool venv must be built on the"
-            r" belt's python pin \(reinstall: mise install -f pipx:pytest\)\n\Z",
-            done.stderr,
-        )
-        assert list[str]() == done.args
+def test_a_pytest_venv_with_no_interpreter_is_red() -> None:
+    """The tool venv mypy would read has no python: refused (#1788)."""
+    done = run(CLEAN, stub={}, stale_venv=True)
+    assert done.returncode == 1
+    assert re.search(
+        rf"\A{LABEL}: pytest runs on 'no interpreter' but the suite's"
+        r" python3 is '3\.[^']+' — the tool venv must be built on the"
+        r" belt's python pin \(reinstall: mise install -f pipx:pytest\)\n\Z",
+        done.stderr,
+    )
+    assert list[str]() == done.args
 
-    def test_the_delivered_config_missing_is_red(self) -> None:
-        """No mypy.ini in the belt: red by name, mypy never asked."""
-        done = run(CLEAN, missing=("mypy.ini",), stub={})
-        assert done.returncode == 1
-        assert (
-            f"{LABEL}: <belt>/mypy.ini is missing — the belt did not arrive\n"
-            in done.stderr
-        )
-        assert list[str]() == done.args
 
-    def test_a_mypy_that_is_not_the_pin_is_red(self) -> None:
-        """A stale install is named with the pin, before it checks anything."""
-        done = run(CLEAN, stub={"STUB_VERSION": "0.0.1"})
-        assert done.returncode == 1
-        assert (
-            f"{LABEL}: mypy 0.0.1 is running but the belt pins '{pinned()}'\n"
-            in done.stderr
-        )
-        assert list[str]() == done.args
+def test_the_delivered_config_missing_is_red() -> None:
+    """No mypy.ini in the belt: red by name, mypy never asked."""
+    done = run(CLEAN, missing=("mypy.ini",), stub={})
+    assert done.returncode == 1
+    assert (
+        f"{LABEL}: <belt>/mypy.ini is missing — the belt did not arrive\n"
+        in done.stderr
+    )
+    assert list[str]() == done.args
 
-    def test_the_belt_config_is_the_one_passed(self) -> None:
-        """The stub gets --config-file <belt>/mypy.ini and every tracked file."""
-        done = run({**CLEAN, "mypy.ini": "[mypy]\nignore_errors = True\n"}, stub={})
-        assert done.returncode == 0, done.stderr
-        config = ["--config-file", "<belt>/mypy.ini"]
-        files = ["a.py"]
-        assert config == done.args[:2]
-        assert files == done.args[4:]
-        assert f"{LABEL}: 1 file(s) clean under mypy {pinned()}\n" in done.stdout
 
-    def test_a_finding_is_red(self) -> None:
-        """The task exits as mypy did, with its output kept."""
-        out = 'a.py:1: error: Expression has type "Any"  [misc]'
-        done = run(CLEAN, stub={"STUB_OUT": out, "STUB_RC": "1"})
-        assert done.returncode == 1
-        assert out + "\n" in done.stdout
-        assert f"{LABEL}: mypy exited 1;" in done.stderr
+def test_a_mypy_that_is_not_the_pin_is_red() -> None:
+    """A stale install is named with the pin, before it checks anything."""
+    done = run(CLEAN, stub={"STUB_VERSION": "0.0.1"})
+    assert done.returncode == 1
+    assert (
+        f"{LABEL}: mypy 0.0.1 is running but the belt pins '{pinned()}'\n"
+        in done.stderr
+    )
+    assert list[str]() == done.args
 
-    def test_a_config_mypy_could_not_load_is_red(self) -> None:
-        """A warning about the config is red, though mypy exits 0."""
-        out = "@CFG@: [mypy]: Unrecognized option: stirct = True"
-        done = run(CLEAN, stub={"STUB_OUT": out})
-        assert done.returncode == 1
-        assert "<belt>/mypy.ini: [mypy]: Unrecognized option" in done.stdout
-        assert (
-            f"{LABEL}: mypy did not load <belt>/mypy.ini cleanly (above)" in done.stderr
-        )
 
-    def test_a_bare_ignore_is_red(self) -> None:
-        """`# type: ignore` with no code is named, even at the module's top."""
-        done = run({"a.py": "# type: ignore\nX: int = 1\n"}, stub={})
-        assert done.returncode == 1
-        assert f"  a.py:1: {IGNORED}\n" in done.stderr
+def test_the_belt_config_is_the_one_passed() -> None:
+    """The stub gets --config-file <belt>/mypy.ini and every tracked file."""
+    done = run({**CLEAN, "mypy.ini": "[mypy]\nignore_errors = True\n"}, stub={})
+    assert done.returncode == 0, done.stderr
+    config = ["--config-file", "<belt>/mypy.ini"]
+    files = ["a.py"]
+    assert config == done.args[:2]
+    assert files == done.args[4:]
+    assert f"{LABEL}: 1 file(s) clean under mypy {pinned()}\n" in done.stdout
 
-    def test_an_inline_config_is_red(self) -> None:
-        """A `# mypy:` comment lowering its file's level is named."""
-        done = run({"a.py": "# mypy: ignore-errors\nX: int = 1\n"}, stub={})
-        assert done.returncode == 1
-        assert (
-            "  a.py:1: an inline `# mypy:` comment sets options for its file\n"
-            in done.stderr
-        )
 
-    def test_no_type_check_is_red(self) -> None:
-        """`typing.no_type_check`, imported or by attribute, is named."""
-        text = "import typing\n\n\n@typing.no_type_check\ndef f(x):\n    return x\n"
-        done = run({"a.py": text}, stub={})
-        assert done.returncode == 1
-        assert "  a.py:4: `no_type_check` skips type checking\n" in done.stderr
+def test_a_finding_is_red() -> None:
+    """The task exits as mypy did, with its output kept."""
+    out = 'a.py:1: error: Expression has type "Any"  [misc]'
+    done = run(CLEAN, stub={"STUB_OUT": out, "STUB_RC": "1"})
+    assert done.returncode == 1
+    assert out + "\n" in done.stdout
+    assert f"{LABEL}: mypy exited 1;" in done.stderr
 
-    def test_markers_in_strings_are_not_seams(self) -> None:
-        """The same text inside a string is not a finding."""
-        text = 'S = "# type: ignore  # mypy: ignore-errors  no_type_check"\n'
-        done = run({"a.py": text}, stub={})
-        assert done.returncode == 0, done.stderr
 
-    def test_two_files_that_are_one_module_are_red_by_name(self) -> None:
-        """Two roots each holding helper.py: named, and mypy never asked."""
-        files = {"a/helper.py": "X = 1\n", "b/helper.py": "X = 2\n"}
-        done = run(files, stub={})
-        assert done.returncode == 1
-        assert "  helper: a/helper, b/helper\n" in done.stderr
-        assert f"{LABEL}: rename one of each pair above" in done.stderr
-        assert list[str]() == done.args
+def test_a_config_mypy_could_not_load_is_red() -> None:
+    """A warning about the config is red, though mypy exits 0."""
+    out = "@CFG@: [mypy]: Unrecognized option: stirct = True"
+    done = run(CLEAN, stub={"STUB_OUT": out})
+    assert done.returncode == 1
+    assert "<belt>/mypy.ini: [mypy]: Unrecognized option" in done.stdout
+    assert f"{LABEL}: mypy did not load <belt>/mypy.ini cleanly (above)" in done.stderr
 
-    def test_a_coded_ignore_is_red(self) -> None:
-        """`# type: ignore[<code>]` hides its finding too (owner, #1604)."""
-        done = run({"a.py": "f(1)  # type: ignore[arg-type]\n"}, stub={})
-        assert done.returncode == 1
-        assert f"  a.py:1: {IGNORED}\n" in done.stderr
+
+def test_a_bare_ignore_is_red() -> None:
+    """`# type: ignore` with no code is named, even at the module's top."""
+    done = run({"a.py": "# type: ignore\nX: int = 1\n"}, stub={})
+    assert done.returncode == 1
+    assert f"  a.py:1: {IGNORED}\n" in done.stderr
+
+
+def test_an_inline_config_is_red() -> None:
+    """A `# mypy:` comment lowering its file's level is named."""
+    done = run({"a.py": "# mypy: ignore-errors\nX: int = 1\n"}, stub={})
+    assert done.returncode == 1
+    assert (
+        "  a.py:1: an inline `# mypy:` comment sets options for its file\n"
+        in done.stderr
+    )
+
+
+def test_no_type_check_is_red() -> None:
+    """`typing.no_type_check`, imported or by attribute, is named."""
+    text = "import typing\n\n\n@typing.no_type_check\ndef f(x):\n    return x\n"
+    done = run({"a.py": text}, stub={})
+    assert done.returncode == 1
+    assert "  a.py:4: `no_type_check` skips type checking\n" in done.stderr
+
+
+def test_markers_in_strings_are_not_seams() -> None:
+    """The same text inside a string is not a finding."""
+    text = 'S = "# type: ignore  # mypy: ignore-errors  no_type_check"\n'
+    done = run({"a.py": text}, stub={})
+    assert done.returncode == 0, done.stderr
+
+
+def test_two_files_that_are_one_module_are_red_by_name() -> None:
+    """Two roots each holding helper.py: named, and mypy never asked."""
+    files = {"a/helper.py": "X = 1\n", "b/helper.py": "X = 2\n"}
+    done = run(files, stub={})
+    assert done.returncode == 1
+    assert "  helper: a/helper, b/helper\n" in done.stderr
+    assert f"{LABEL}: rename one of each pair above" in done.stderr
+    assert list[str]() == done.args
+
+
+def test_a_coded_ignore_is_red() -> None:
+    """`# type: ignore[<code>]` hides its finding too (owner, #1604)."""
+    done = run({"a.py": "f(1)  # type: ignore[arg-type]\n"}, stub={})
+    assert done.returncode == 1
+    assert f"  a.py:1: {IGNORED}\n" in done.stderr
 
 
 def seams(
@@ -358,224 +366,223 @@ def roots(
     return status, out, err
 
 
-class TestTheHelpers:
-    """The seams and the roots, called in the test process (#1697)."""
+# The seams and the roots, called in the test process (#1697).
+def test_a_bare_ignore_is_a_seam(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """`# type: ignore` with no code is named, even at the module's top."""
+    status, out, _err = seams(
+        "# type: ignore\nX: int = 1\n",
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        capfd=capfd,
+    )
+    assert (1, f"a.py:1: {IGNORED}\n") == (status, out)
 
-    def test_a_bare_ignore_is_a_seam(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-        capfd: pytest.CaptureFixture[str],
-    ) -> None:
-        """`# type: ignore` with no code is named, even at the module's top."""
-        status, out, _err = seams(
-            "# type: ignore\nX: int = 1\n",
-            tmp_path=tmp_path,
-            monkeypatch=monkeypatch,
-            capfd=capfd,
-        )
-        assert (1, f"a.py:1: {IGNORED}\n") == (status, out)
 
-    def test_an_inline_config_is_a_seam(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-        capfd: pytest.CaptureFixture[str],
-    ) -> None:
-        """A `# mypy:` comment lowering its file's level is named."""
-        status, out, _err = seams(
-            "# mypy: ignore-errors\nX: int = 1\n",
-            tmp_path=tmp_path,
-            monkeypatch=monkeypatch,
-            capfd=capfd,
-        )
-        assert (status, out) == (
-            1,
-            "a.py:1: an inline `# mypy:` comment sets options for its file\n",
-        )
+def test_an_inline_config_is_a_seam(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """A `# mypy:` comment lowering its file's level is named."""
+    status, out, _err = seams(
+        "# mypy: ignore-errors\nX: int = 1\n",
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        capfd=capfd,
+    )
+    assert (status, out) == (
+        1,
+        "a.py:1: an inline `# mypy:` comment sets options for its file\n",
+    )
 
-    def test_no_type_check_is_a_seam(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-        capfd: pytest.CaptureFixture[str],
-    ) -> None:
-        """`typing.no_type_check`, by attribute, is named."""
-        text = "import typing\n\n\n@typing.no_type_check\ndef f(x):\n    return x\n"
-        status, out, _err = seams(
-            text, tmp_path=tmp_path, monkeypatch=monkeypatch, capfd=capfd
-        )
-        assert (status, out) == (
-            1,
-            "a.py:4: `no_type_check` skips type checking\n",
-        )
 
-    def test_markers_in_strings_are_not_seams(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-        capfd: pytest.CaptureFixture[str],
-    ) -> None:
-        """The same text inside a string is not a finding."""
-        status, out, _err = seams(
-            'S = "# type: ignore  # mypy: ignore-errors  no_type_check"\n',
-            tmp_path=tmp_path,
-            monkeypatch=monkeypatch,
-            capfd=capfd,
-        )
-        assert (status, out) == (0, "")
+def test_no_type_check_is_a_seam(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """`typing.no_type_check`, by attribute, is named."""
+    text = "import typing\n\n\n@typing.no_type_check\ndef f(x):\n    return x\n"
+    status, out, _err = seams(
+        text, tmp_path=tmp_path, monkeypatch=monkeypatch, capfd=capfd
+    )
+    assert (status, out) == (
+        1,
+        "a.py:4: `no_type_check` skips type checking\n",
+    )
 
-    def test_a_coded_ignore_is_a_seam(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-        capfd: pytest.CaptureFixture[str],
-    ) -> None:
-        """`# type: ignore[arg-type]` is named: it hides its finding."""
-        status, out, _err = seams(
-            "f(1)  # type: ignore[arg-type]\n",
-            tmp_path=tmp_path,
-            monkeypatch=monkeypatch,
-            capfd=capfd,
-        )
-        assert (1, f"a.py:1: {IGNORED}\n") == (status, out)
 
-    def test_the_roots_are_printed(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-        capfd: pytest.CaptureFixture[str],
-    ) -> None:
-        """Each file's root, then the belt's, joined for MYPYPATH."""
-        status, out, err = roots(
-            "top.py",
-            "a/helper.py",
-            tmp_path=tmp_path,
-            monkeypatch=monkeypatch,
-            capfd=capfd,
-        )
-        assert (0, f"a:{BELT}\n", "") == (status, out, err)
+def test_the_helpers_markers_in_strings_are_not_seams(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """The same text inside a string is not a finding."""
+    status, out, _err = seams(
+        'S = "# type: ignore  # mypy: ignore-errors  no_type_check"\n',
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        capfd=capfd,
+    )
+    assert (status, out) == (0, "")
 
-    def test_two_files_that_are_one_module_are_named(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-        capfd: pytest.CaptureFixture[str],
-    ) -> None:
-        """Two roots each holding helper.py: a clash, by module name."""
-        status, _out, err = roots(
-            "a/helper.py",
-            "b/helper.py",
-            tmp_path=tmp_path,
-            monkeypatch=monkeypatch,
-            capfd=capfd,
-        )
-        assert status == 1
-        assert (
-            f"{TASK}: these tracked files would be one module, so an import"
-            " of that name reaches only one of them:\n  helper: a/helper, b/helper\n"
-        ) == err
 
-    def test_too_few_arguments_is_a_usage_error(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """No belt or no file: exit 2 with the usage."""
-        assert python_roots.main([str(BELT)]) == 2
-        assert capfd.readouterr().err == (
-            f"{TASK}: usage: belt python-roots <belt-root> <file>...\n"
-        )
+def test_a_coded_ignore_is_a_seam(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """`# type: ignore[arg-type]` is named: it hides its finding."""
+    status, out, _err = seams(
+        "f(1)  # type: ignore[arg-type]\n",
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        capfd=capfd,
+    )
+    assert (1, f"a.py:1: {IGNORED}\n") == (status, out)
+
+
+def test_the_roots_are_printed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """Each file's root, then the belt's, joined for MYPYPATH."""
+    status, out, err = roots(
+        "top.py",
+        "a/helper.py",
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        capfd=capfd,
+    )
+    assert (0, f"a:{BELT}\n", "") == (status, out, err)
+
+
+def test_two_files_that_are_one_module_are_named(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """Two roots each holding helper.py: a clash, by module name."""
+    status, _out, err = roots(
+        "a/helper.py",
+        "b/helper.py",
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        capfd=capfd,
+    )
+    assert status == 1
+    assert (
+        f"{TASK}: these tracked files would be one module, so an import"
+        " of that name reaches only one of them:\n  helper: a/helper, b/helper\n"
+    ) == err
+
+
+def test_too_few_arguments_is_a_usage_error(capfd: pytest.CaptureFixture[str]) -> None:
+    """No belt or no file: exit 2 with the usage."""
+    assert python_roots.main([str(BELT)]) == 2
+    assert capfd.readouterr().err == (
+        f"{TASK}: usage: belt python-roots <belt-root> <file>...\n"
+    )
+
+
+# What the delivered config makes the pinned mypy refuse.
+@fixture
+def _set_up_test_the_config() -> None:
+    """Skip the row where the belt's pinned mypy is not installed."""
+    if not MYPY:
+        pytest.skip("the belt's pinned mypy is not installed here")
 
 
 @pytest.mark.usefixtures("_set_up_test_the_config")
-class TestTheConfig:
-    """What the delivered config makes the pinned mypy refuse."""
+def test_the_config_a_finding_is_red() -> None:
+    """An unvalidated json value is refused where it is read."""
+    text = "import json\n\n\ndef f(s: str) -> int:\n    return len(json.loads(s))\n"
+    done = run({"a.py": text})
+    assert done.returncode == 1
+    assert 'a.py:5: error: Expression has type "Any"  [misc]' in done.stdout
 
-    @fixture
-    def _set_up_test_the_config(self) -> None:
-        """Skip the row where the belt's pinned mypy is not installed."""
-        if not MYPY:
-            pytest.skip("the belt's pinned mypy is not installed here")
 
-    def test_a_finding_is_red(self) -> None:
-        """An unvalidated json value is refused where it is read."""
-        text = "import json\n\n\ndef f(s: str) -> int:\n    return len(json.loads(s))\n"
-        done = run({"a.py": text})
-        assert done.returncode == 1
-        assert 'a.py:5: error: Expression has type "Any"  [misc]' in done.stdout
+@pytest.mark.usefixtures("_set_up_test_the_config")
+def test_an_untyped_fixture_builder_is_red() -> None:
+    """A test's data builder with no signature reds the gate (#1604).
 
-    def test_an_untyped_fixture_builder_is_red(self) -> None:
-        """A test's data builder with no signature reds the gate (#1604).
+    The shape #1604 ran down: a function that builds test data with
+    no signature. It fails before the rename, with no such task.
+    """
+    text = "def build(name):\n    return {'name': name}\n"
+    done = run({"test_a.py": text})
+    assert done.returncode == 1
+    assert (
+        "test_a.py:1: error: Function is missing a type annotation  [no-untyped-def]"
+    ) in done.stdout
+    assert f"{LABEL}: mypy exited 1" in done.stderr
 
-        The shape #1604 ran down: a function that builds test data with
-        no signature. It fails before the rename, with no such task.
-        """
-        text = "def build(name):\n    return {'name': name}\n"
-        done = run({"test_a.py": text})
-        assert done.returncode == 1
-        assert (
-            "test_a.py:1: error: Function is missing a type annotation"
-            "  [no-untyped-def]"
-        ) in done.stdout
-        assert f"{LABEL}: mypy exited 1" in done.stderr
 
-    def test_an_unused_suppression_is_red(self) -> None:
-        """A coded ignore that suppresses nothing is mypy's unused-ignore."""
-        done = run({"a.py": "X: int = 1  # type: ignore[misc]\n"})
-        assert done.returncode == 1
-        assert (
-            'a.py:1: error: Unused "type: ignore" comment  [unused-ignore]'
-            in done.stdout
-        )
+@pytest.mark.usefixtures("_set_up_test_the_config")
+def test_an_unused_suppression_is_red() -> None:
+    """A coded ignore that suppresses nothing is mypy's unused-ignore."""
+    done = run({"a.py": "X: int = 1  # type: ignore[misc]\n"})
+    assert done.returncode == 1
+    assert (
+        'a.py:1: error: Unused "type: ignore" comment  [unused-ignore]' in done.stdout
+    )
 
-    def test_a_used_coded_suppression_is_red(self) -> None:
-        """No escape is left: mypy is satisfied, and the seam guard reds it."""
-        done = run({"a.py": 'X: int = "s"  # type: ignore[assignment]\n'})
-        assert done.returncode == 1
-        assert "a.py:1: error" not in done.stdout
-        assert f"  a.py:1: {IGNORED}\n" in done.stderr
 
-    def test_a_neighbour_and_a_sibling_root_are_imported_typed(self) -> None:
-        """Both imports are read from the derived roots (#1634).
+@pytest.mark.usefixtures("_set_up_test_the_config")
+def test_a_used_coded_suppression_is_red() -> None:
+    """No escape is left: mypy is satisfied, and the seam guard reds it."""
+    done = run({"a.py": 'X: int = "s"  # type: ignore[assignment]\n'})
+    assert done.returncode == 1
+    assert "a.py:1: error" not in done.stdout
+    assert f"  a.py:1: {IGNORED}\n" in done.stderr
 
-        `test_x.py` imports a helper beside it, and one in a sibling root
-        named from its own `__file__`; each is typed, so a wrong use of
-        either is a finding, not an untyped `Any`.
-        """
-        files = {
-            "lib/helper.py": "NAME: str = 'x'\n",
-            "tools/shared.py": "COUNT: int = 1\n",
-            "lib/test_x.py": (
-                "import sys\n"
-                "from pathlib import Path\n\n"
-                "import helper\n\n"
-                "sys.path.append(str(support.CANON"
-                ' / "tools"))\n\n'
-                "import shared\n\n"
-                "A: int = helper.NAME\n"
-                "B: str = shared.COUNT\n"
-            ),
-        }
-        done = run(files)
-        assert done.returncode == 1
-        assert "import-not-found" not in done.stdout
-        wrong = "error: Incompatible types in assignment (expression has type"
-        assert (
-            f'lib/test_x.py:10: {wrong} "str", variable has type "int")' in done.stdout
-        )
-        assert (
-            f'lib/test_x.py:11: {wrong} "int", variable has type "str")' in done.stdout
-        )
 
-    def test_a_repository_config_does_not_outrank_the_belt(self) -> None:
-        """mypy.ini and pyproject.toml saying ignore_errors change nothing."""
-        files = {
-            "a.py": 'X: int = "s"\n',
-            "mypy.ini": "[mypy]\nignore_errors = True\n",
-            "pyproject.toml": "[tool.mypy]\nignore_errors = true\n",
-        }
-        done = run(files)
-        assert done.returncode == 1
-        assert "a.py:1: error: Incompatible types in assignment" in done.stdout
+@pytest.mark.usefixtures("_set_up_test_the_config")
+def test_a_neighbour_and_a_sibling_root_are_imported_typed() -> None:
+    """Both imports are read from the derived roots (#1634).
+
+    `test_x.py` imports a helper beside it, and one in a sibling root
+    named from its own `__file__`; each is typed, so a wrong use of
+    either is a finding, not an untyped `Any`.
+    """
+    files = {
+        "lib/helper.py": "NAME: str = 'x'\n",
+        "tools/shared.py": "COUNT: int = 1\n",
+        "lib/test_x.py": (
+            "import sys\n"
+            "from pathlib import Path\n\n"
+            "import helper\n\n"
+            "sys.path.append(str(support.CANON"
+            ' / "tools"))\n\n'
+            "import shared\n\n"
+            "A: int = helper.NAME\n"
+            "B: str = shared.COUNT\n"
+        ),
+    }
+    done = run(files)
+    assert done.returncode == 1
+    assert "import-not-found" not in done.stdout
+    wrong = "error: Incompatible types in assignment (expression has type"
+    assert f'lib/test_x.py:10: {wrong} "str", variable has type "int")' in done.stdout
+    assert f'lib/test_x.py:11: {wrong} "int", variable has type "str")' in done.stdout
+
+
+@pytest.mark.usefixtures("_set_up_test_the_config")
+def test_a_repository_config_does_not_outrank_the_belt() -> None:
+    """mypy.ini and pyproject.toml saying ignore_errors change nothing."""
+    files = {
+        "a.py": 'X: int = "s"\n',
+        "mypy.ini": "[mypy]\nignore_errors = True\n",
+        "pyproject.toml": "[tool.mypy]\nignore_errors = true\n",
+    }
+    done = run(files)
+    assert done.returncode == 1
+    assert "a.py:1: error: Incompatible types in assignment" in done.stdout
 
 
 PROPERTY = """\
@@ -595,42 +602,45 @@ class Holds:
 """
 
 
+# The belt's `given` under the unmodified config (#1604).
+@fixture
+def _set_up_test_the_typed_given() -> None:
+    """Skip the row where the pinned mypy or the belt's Hypothesis is absent."""
+    if not MYPY:
+        pytest.skip("the belt's pinned mypy is not installed here")
+    if not HYPOTHESIS:
+        pytest.skip("the belt's pytest venv is not installed here")
+
+
 @pytest.mark.usefixtures("_set_up_test_the_typed_given")
-class TestTheTypedGiven:
-    """The belt's `given` under the unmodified config (#1604)."""
+def test_a_property_is_clean() -> None:
+    """No finding on the decorator or the decorated test."""
+    done = run({"prop_a.py": PROPERTY})
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert f"{LABEL}: 1 file(s) clean under mypy" in done.stdout
 
-    @fixture
-    def _set_up_test_the_typed_given(self) -> None:
-        """Skip the row where the pinned mypy or the belt's Hypothesis is absent."""
-        if not MYPY:
-            pytest.skip("the belt's pinned mypy is not installed here")
-        if not HYPOTHESIS:
-            pytest.skip("the belt's pytest venv is not installed here")
 
-    def test_a_property_is_clean(self) -> None:
-        """No finding on the decorator or the decorated test."""
-        done = run({"prop_a.py": PROPERTY})
-        assert done.returncode == 0, done.stdout + done.stderr
-        assert f"{LABEL}: 1 file(s) clean under mypy" in done.stdout
+@pytest.mark.usefixtures("_set_up_test_the_typed_given")
+def test_the_body_is_still_checked() -> None:
+    """An `int` parameter used as a `str` is red."""
+    text = PROPERTY.replace("% 2 == 0\n", "% 2 == 0\n        n.upper()\n")
+    assert text != PROPERTY
+    done = run({"prop_a.py": text})
+    assert done.returncode == 1
+    assert 'error: "int" has no attribute "upper"  [attr-defined]' in done.stdout
 
-    def test_the_body_is_still_checked(self) -> None:
-        """An `int` parameter used as a `str` is red."""
-        text = PROPERTY.replace("% 2 == 0\n", "% 2 == 0\n        n.upper()\n")
-        assert text != PROPERTY
-        done = run({"prop_a.py": text})
-        assert done.returncode == 1
-        assert 'error: "int" has no attribute "upper"  [attr-defined]' in done.stdout
 
-    def test_a_strategy_that_does_not_match_its_parameter_is_red(self) -> None:
-        """An `int` strategy feeding a `str` parameter names the argument."""
-        text = PROPERTY.replace("n: int,", "n: str,")
-        done = run({"prop_a.py": text})
-        assert done.returncode == 1
-        assert (
-            'error: Argument 1 to "__call__" of "Given2" has incompatible type'
-            ' "Callable[[Holds, str, DataObject], None]";'
-            ' expected "Callable[[Holds, int, DataObject], None]"  [arg-type]'
-        ) in done.stdout
+@pytest.mark.usefixtures("_set_up_test_the_typed_given")
+def test_a_strategy_that_does_not_match_its_parameter_is_red() -> None:
+    """An `int` strategy feeding a `str` parameter names the argument."""
+    text = PROPERTY.replace("n: int,", "n: str,")
+    done = run({"prop_a.py": text})
+    assert done.returncode == 1
+    assert (
+        'error: Argument 1 to "__call__" of "Given2" has incompatible type'
+        ' "Callable[[Holds, str, DataObject], None]";'
+        ' expected "Callable[[Holds, int, DataObject], None]"  [arg-type]'
+    ) in done.stdout
 
 
 @fixture

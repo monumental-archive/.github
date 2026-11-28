@@ -45,49 +45,42 @@ def spelled(triple: tuple[int, int, int]) -> str:
     return ".".join(map(str, triple))
 
 
-class TestSemverOrder:
-    """V: the key's order is semver's, part by part."""
-
-    @given(TRIPLE, TRIPLE)
-    @example((9, 10, 0), (9, 9, 0))
-    @example((11, 5, 1), (11, 5, 1))
-    def test_orders_as_semver(
-        self, a: tuple[int, int, int], b: tuple[int, int, int]
-    ) -> None:
-        """The keys compare as the triples do."""
-        ka, kb = publish.version_key(spelled(a)), publish.version_key(spelled(b))
-        assert (ka < kb) == (a < b)
-        assert (ka == kb) == (a == b)
-
-    @given(TRIPLE)
-    @example((11, 5, 0))
-    @example((11, 5, 1))
-    @example((11, 4, 99))
-    def test_gate_refuses_exactly_below_the_need(
-        self, have: tuple[int, int, int]
-    ) -> None:
-        """The run's first check: refused iff the triple is below 11.5.1."""
-        refused = publish.version_key(spelled(have)) < publish.version_key(publish.NEED)
-        assert refused == (have < NEED)
+# V: the key's order is semver's, part by part.
+@given(TRIPLE, TRIPLE)
+@example((9, 10, 0), (9, 9, 0))
+@example((11, 5, 1), (11, 5, 1))
+def test_orders_as_semver(a: tuple[int, int, int], b: tuple[int, int, int]) -> None:
+    """The keys compare as the triples do."""
+    ka, kb = publish.version_key(spelled(a)), publish.version_key(spelled(b))
+    assert (ka < kb) == (a < b)
+    assert (ka == kb) == (a == b)
 
 
-class TestMaskedLog:
-    """V: nothing credential-shaped survives the mask."""
+@given(TRIPLE)
+@example((11, 5, 0))
+@example((11, 5, 1))
+@example((11, 4, 99))
+def test_gate_refuses_exactly_below_the_need(have: tuple[int, int, int]) -> None:
+    """The run's first check: refused iff the triple is below 11.5.1."""
+    refused = publish.version_key(spelled(have)) < publish.version_key(publish.NEED)
+    assert refused == (have < NEED)
 
-    @given(
-        st.lists(
-            st.one_of(
-                LINE,
-                st.builds(lambda a, c, b: f"{a}{c}{b}", LINE, CREDENTIAL, LINE),
-                st.builds(lambda a, t, b: f"{a} {t} {b}", LINE, SECRET, LINE),
-            ),
-            max_size=8,
+
+# V: nothing credential-shaped survives the mask.
+@given(
+    st.lists(
+        st.one_of(
+            LINE,
+            st.builds(lambda a, c, b: f"{a}{c}{b}", LINE, CREDENTIAL, LINE),
+            st.builds(lambda a, t, b: f"{a} {t} {b}", LINE, SECRET, LINE),
         ),
-    )
-    def test_no_credential_survives(self, lines: list[str]) -> None:
-        """No credential line, no 32-char token run, at most the tail."""
-        kept = publish.masked("\n".join(lines))
-        assert len(kept) <= publish.LOG_TAIL
-        for line in kept:
-            assert publish.CREDENTIAL_LINE.search(line) is None, line
-            assert publish.TOKEN_SHAPED.search(line) is None, line
+        max_size=8,
+    ),
+)
+def test_no_credential_survives(lines: list[str]) -> None:
+    """No credential line, no 32-char token run, at most the tail."""
+    kept = publish.masked("\n".join(lines))
+    assert len(kept) <= publish.LOG_TAIL
+    for line in kept:
+        assert publish.CREDENTIAL_LINE.search(line) is None, line
+        assert publish.TOKEN_SHAPED.search(line) is None, line

@@ -128,12 +128,10 @@ def measured(crate: str) -> str:
     )
 
 
-@pytest.mark.usefixtures("_set_up_test_planted")
-class TestPlanted:
+class Planted:
     """A planted repository, stub PATH and belt; the rows are below."""
 
-    @fixture
-    def _set_up_test_planted(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Plant an empty repository, the stubs and a belt."""
         self.tmp = tmp_path
         self.tree = self.tmp / "tree"
@@ -234,22 +232,29 @@ class TestPlanted:
         )
         return done, self.log.read_text(encoding="utf-8").splitlines()
 
-    def assert_lines(self, actual: list[str], expected: list[str]) -> None:
-        """Assert two lists of lines are equal, typed for the checker."""
-        assert actual == expected
 
-    @staticmethod
-    def measurements(log: list[str]) -> list[str]:
-        """Keep only the cargo-semver-checks calls from a call log.
-
-        Returns:
-            The calls, in order.
-
-        """
-        return [line for line in log if line.startswith("cargo-semver-checks")]
+@fixture
+def planted(tmp_path: Path) -> Planted:
+    """Give each row its own Planted."""
+    return Planted(tmp_path)
 
 
-class TestTheDeclaration(TestPlanted):
+def assert_lines(actual: list[str], expected: list[str]) -> None:
+    """Assert two lists of lines are equal, typed for the checker."""
+    assert actual == expected
+
+
+def measurements(log: list[str]) -> list[str]:
+    """Keep only the cargo-semver-checks calls from a call log.
+
+    Returns:
+        The calls, in order.
+
+    """
+    return [line for line in log if line.startswith("cargo-semver-checks")]
+
+
+class TheDeclaration(Planted):
     """A break the title or body declares is not measured."""
 
     def assert_declared(self, title: str, body: str = "") -> None:
@@ -258,284 +263,289 @@ class TestTheDeclaration(TestPlanted):
         self.red("core", 100)
         done, log = self.run_check(title, body)
         assert (done.returncode, done.stdout) == (0, DECLARED), done.stderr
-        self.assert_lines(log, [])
-
-    def test_an_undeclared_break_is_red(self) -> None:
-        """The measured break under `feat: x`, naming the crate and the remedy."""
-        self.crates([package("core")], [package("core")])
-        self.red("core", 100)
-        done, log = self.run_check("feat: x")
-        assert done.returncode == 1, done.stdout + done.stderr
-        self.assert_lines(
-            done.stderr.splitlines(),
-            [
-                f"{LABEL}: core: cargo-semver-checks measured a break (above)",
-                REMEDY,
-            ],
-        )
-        self.assert_lines(self.measurements(log), [measured("core")])
-
-    def test_bang_in_the_title(self) -> None:
-        """`feat!:` declares the break."""
-        self.assert_declared("feat!: x")
-
-    def test_bang_after_a_scope(self) -> None:
-        """`feat(scope)!:` declares the break."""
-        self.assert_declared("feat(scope)!: x")
-
-    def test_a_footer_in_the_body(self) -> None:
-        """A `BREAKING CHANGE: ` footer in the body declares the break."""
-        self.assert_declared("feat: x", "Why.\r\n\r\nBREAKING CHANGE: x is gone.\r\n")
-
-    def test_unset_title_is_red_by_name(self) -> None:
-        """No PR_TITLE: nothing to hold the change to."""
-        self.crates([package("core")], [package("core")])
-        done, log = self.run_check(None)
-        assert done.returncode == 1, done.stdout + done.stderr
-        assert done.stderr == (
-            f"{LABEL}: PR_TITLE is unset — the gate step sets it from the pull"
-            " request, and without it there is no declaration to hold\n"
-        )
-        self.assert_lines(log, [])
+        assert_lines(log, [])
 
 
-class TestTheRustApi(TestPlanted):
-    """An ordinary library crate in both trees is measured by the tool."""
-
-    def test_no_break_is_green(self) -> None:
-        """Exit 0: the crate is named, and the run is green."""
-        self.crates([package("core")], [package("core")])
-        done, log = self.run_check()
-        assert done.returncode == 0, done.stdout + done.stderr
-        assert (
-            done.stdout
-            == f"{LABEL}: measuring core against HEAD^1\n{LABEL}: core: no break\n"
-        )
-        self.assert_lines(self.measurements(log), [measured("core")])
-
-    def test_any_other_exit_could_not_be_measured(self) -> None:
-        """Exit 1 is not a pass and not a break: red, by name."""
-        self.crates([package("core")], [package("core")])
-        self.red("core", 1)
-        done, _ = self.run_check()
-        assert done.returncode == 1, done.stdout + done.stderr
-        self.assert_lines(
-            done.stderr.splitlines(),
-            [
-                f"{LABEL}: core: could not be measured (cargo-semver-checks exited 1)",
-                UNMEASURED,
-            ],
-        )
-
-    def test_the_call_and_its_target_directory(self) -> None:
-        """Against HEAD^1 at minor, building outside the checkout."""
-        self.crates([package("core")], [package("core")])
-        self.run_check()
-        targets = Path(f"{self.log}.target").read_text(encoding="utf-8").split()
-        assert len(targets) == 1
-        target = Path(targets[0]).resolve()
-        assert target.is_absolute()
-        assert not target.is_relative_to(self.tree.resolve()), target
-
-    def test_every_crate_is_measured_before_the_verdict(self) -> None:
-        """A red crate does not stop the next one."""
-        self.crates([package("a"), package("b")], [package("a"), package("b")])
-        self.red("a", 100)
-        done, log = self.run_check()
-        assert done.returncode == 1, done.stdout + done.stderr
-        self.assert_lines(self.measurements(log), [measured("a"), measured("b")])
-        assert f"{LABEL}: b: no break" in done.stdout
+@fixture
+def the_declaration(tmp_path: Path) -> TheDeclaration:
+    """Give each row its own TheDeclaration."""
+    return TheDeclaration(tmp_path)
 
 
-class TestThePopulation(TestPlanted):
-    """The crates judged, in the base and in the head."""
-
-    def test_a_removed_crate_is_a_break(self) -> None:
-        """Judged in the base and not in the head."""
-        self.crates([package("core"), package("gone")], [package("core")])
-        done, _ = self.run_check()
-        assert done.returncode == 1, done.stdout + done.stderr
-        self.assert_lines(
-            done.stderr.splitlines(),
-            [
-                (
-                    f"{LABEL}: gone: judged in the base and not in the head —"
-                    " crate removed or renamed"
-                ),
-                REMEDY,
-            ],
-        )
-
-    def test_a_new_crate_is_named(self) -> None:
-        """Judged in the head and not in the base: nothing to break."""
-        self.crates([package("core")], [package("core"), package("fresh")])
-        done, log = self.run_check()
-        assert done.returncode == 0, done.stdout + done.stderr
-        assert f"{LABEL}: fresh: new, nothing to break" in done.stdout
-        self.assert_lines(self.measurements(log), [measured("core")])
-
-    def test_unjudged_crates_are_not_measured(self) -> None:
-        """`publish = false` and no library target: named, never measured."""
-        both = [
-            package("core"),
-            package("private", publish=[]),
-            package("cli", kinds=(["bin"],)),
-        ]
-        self.crates(both, both)
-        done, log = self.run_check()
-        assert done.returncode == 0, done.stdout + done.stderr
-        self.assert_lines(
-            done.stdout.splitlines(),
-            [
-                f"{LABEL}: measuring core against HEAD^1",
-                f"{LABEL}: core: no break",
-                f"{LABEL}: private: publish = false, not judged",
-                f"{LABEL}: cli: no library target, not judged",
-            ],
-        )
-        self.assert_lines(self.measurements(log), [measured("core")])
-
-    def test_a_base_without_rust(self) -> None:
-        """The pull request adds the workspace: every crate is new."""
-        self.merge(
-            {"README.md": "x\n"},
-            {
-                "Cargo.toml": "[workspace]\n",
-                "metadata.json": metadata(package("core")),
-            },
-        )
-        done, log = self.run_check()
-        assert done.returncode == 0, done.stdout + done.stderr
-        assert done.stdout == f"{LABEL}: core: new, nothing to break\n"
-        self.assert_lines(self.measurements(log), [])
+def test_an_undeclared_break_is_red(the_declaration: TheDeclaration) -> None:
+    """The measured break under `feat: x`, naming the crate and the remedy."""
+    the_declaration.crates([package("core")], [package("core")])
+    the_declaration.red("core", 100)
+    done, log = the_declaration.run_check("feat: x")
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert_lines(
+        done.stderr.splitlines(),
+        [
+            f"{LABEL}: core: cargo-semver-checks measured a break (above)",
+            REMEDY,
+        ],
+    )
+    assert_lines(measurements(log), [measured("core")])
 
 
-class TestThePgrxSurface(TestPlanted):
-    """A pgrx crate is held by its features and its SQL snapshot."""
-
-    def test_a_removed_major_is_a_break(self) -> None:
-        """pg14 and pg15 in the base, pg15 in the head; no Rust build."""
-        self.crates(
-            [package("core"), package("ext", majors=(14, 15))],
-            [package("core"), package("ext", majors=(15,))],
-        )
-        done, log = self.run_check()
-        assert done.returncode == 1, done.stdout + done.stderr
-        self.assert_lines(
-            done.stderr.splitlines(),
-            [f"{LABEL}: ext: feature pg14 removed", REMEDY],
-        )
-        self.assert_lines(self.measurements(log), [measured("core")])
-
-    def test_kept_features_are_green(self) -> None:
-        """An added major is not a break."""
-        self.crates([package("ext", majors=(15,))], [package("ext", majors=(15, 16))])
-        done, log = self.run_check()
-        assert done.returncode == 0, done.stdout + done.stderr
-        assert done.stdout == f"{LABEL}: ext: every feature of the base kept\n"
-        self.assert_lines(self.measurements(log), [])
-
-    def test_a_snapshot_that_loses_a_line(self) -> None:
-        """The lost line is named."""
-        self.crates(
-            [],
-            [],
-            base_files={"ext/schema.snapshot.sql": f"{FN_A}{FN_B}"},
-            head_files={"ext/schema.snapshot.sql": "CREATE FUNCTION a();\n"},
-        )
-        done, _ = self.run_check()
-        assert done.returncode == 1, done.stdout + done.stderr
-        self.assert_lines(
-            done.stderr.splitlines(),
-            [f"{LABEL}: ext/schema.snapshot.sql: lost CREATE FUNCTION b();", REMEDY],
-        )
-
-    def test_a_snapshot_that_gains_a_line(self) -> None:
-        """An added line is not a break."""
-        self.crates(
-            [],
-            [],
-            base_files={"schema.snapshot.sql": "CREATE FUNCTION a();\n"},
-            head_files={"schema.snapshot.sql": f"{FN_A}{FN_B}"},
-        )
-        done, _ = self.run_check()
-        assert done.returncode == 0, done.stdout + done.stderr
-        assert (
-            done.stdout
-            == f"{LABEL}: schema.snapshot.sql: every line of the base kept\n"
-        )
-
-    def test_a_snapshot_no_longer_tracked(self) -> None:
-        """The file is gone from the head."""
-        self.crates(
-            [],
-            [],
-            base_files={"ext/schema.snapshot.sql": "CREATE FUNCTION a();\n"},
-            head_files={"ext/schema.snapshot.sql": None},
-        )
-        done, _ = self.run_check()
-        assert done.returncode == 1, done.stdout + done.stderr
-        self.assert_lines(
-            done.stderr.splitlines(),
-            [
-                (
-                    f"{LABEL}: ext/schema.snapshot.sql: tracked in the base and"
-                    " not in the head"
-                ),
-                REMEDY,
-            ],
-        )
+def test_bang_in_the_title(the_declaration: TheDeclaration) -> None:
+    """`feat!:` declares the break."""
+    the_declaration.assert_declared("feat!: x")
 
 
-class TestTheCheckout(TestPlanted):
-    """What the task stands on: a merge commit, and a tracked Cargo.toml."""
-
-    def test_one_parent_is_red_by_name(self) -> None:
-        """HEAD is not a merge commit: there is no base to measure against."""
-        self.commit({"Cargo.toml": "[workspace]\n", "metadata.json": metadata()}, "x")
-        self.commit({"README.md": "y\n"}, "y")
-        done, log = self.run_check()
-        assert done.returncode == 1, done.stdout + done.stderr
-        assert done.stderr == (
-            f"{LABEL}: HEAD has 1 parent(s), not 2 — the gate checks out the pull"
-            " request's merge commit, whose first parent is the base it is"
-            " measured against\n"
-        )
-        self.assert_lines(log, [])
-
-    def test_no_cargo_toml_is_skipped(self) -> None:
-        """No tracked Cargo.toml: the skip line, and nothing runs."""
-        self.merge({"README.md": "x\n"}, {"README.md": "y\n"})
-        done, log = self.run_check()
-        assert done.returncode == 0, done.stdout + done.stderr
-        assert done.stdout == f"{LABEL}: no Cargo.toml tracked, skipped\n"
-        self.assert_lines(log, [])
+def test_bang_after_a_scope(the_declaration: TheDeclaration) -> None:
+    """`feat(scope)!:` declares the break."""
+    the_declaration.assert_declared("feat(scope)!: x")
 
 
-class TestTheStep:
-    """ci.yml runs the task on every pull request, in the test leg."""
+def test_a_footer_in_the_body(the_declaration: TheDeclaration) -> None:
+    """A `BREAKING CHANGE: ` footer in the body declares the break."""
+    the_declaration.assert_declared(
+        "feat: x", "Why.\r\n\r\nBREAKING CHANGE: x is gone.\r\n"
+    )
 
-    def test_the_step(self) -> None:
-        """In the gate job, before "Run the gate", with no author condition."""
-        gate = workflow_yaml.steps(
-            workflow_yaml.jobs(workflow_yaml.document(CI))["gate"]
-        )
-        names = [step.get("name") for step in gate]
-        at = names.index("The title declares what the change breaks")
-        step = gate[at]
-        assert at < names.index("Run the gate")
-        restore = names.index("Restore the cargo caches (unsigned gate only)")
-        assert restore < at
-        assert step.get("if") == (
-            "${{ matrix.leg == 'test' && matrix.shard == 1"
-            " && github.event_name == 'pull_request' }}"
-        )
-        assert step.get("run") == "mise run break:check"
-        env: dict[str, object] = {
-            "PR_TITLE": "${{ github.event.pull_request.title }}",
-            "PR_BODY": "${{ github.event.pull_request.body }}",
-        }
-        assert step.get("env") == env
+
+def test_unset_title_is_red_by_name(the_declaration: TheDeclaration) -> None:
+    """No PR_TITLE: nothing to hold the change to."""
+    the_declaration.crates([package("core")], [package("core")])
+    done, log = the_declaration.run_check(None)
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert done.stderr == (
+        f"{LABEL}: PR_TITLE is unset — the gate step sets it from the pull"
+        " request, and without it there is no declaration to hold\n"
+    )
+    assert_lines(log, [])
+
+
+def test_no_break_is_green(planted: Planted) -> None:
+    """Exit 0: the crate is named, and the run is green."""
+    planted.crates([package("core")], [package("core")])
+    done, log = planted.run_check()
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert (
+        done.stdout
+        == f"{LABEL}: measuring core against HEAD^1\n{LABEL}: core: no break\n"
+    )
+    assert_lines(measurements(log), [measured("core")])
+
+
+def test_any_other_exit_could_not_be_measured(planted: Planted) -> None:
+    """Exit 1 is not a pass and not a break: red, by name."""
+    planted.crates([package("core")], [package("core")])
+    planted.red("core", 1)
+    done, _ = planted.run_check()
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert_lines(
+        done.stderr.splitlines(),
+        [
+            f"{LABEL}: core: could not be measured (cargo-semver-checks exited 1)",
+            UNMEASURED,
+        ],
+    )
+
+
+def test_the_call_and_its_target_directory(planted: Planted) -> None:
+    """Against HEAD^1 at minor, building outside the checkout."""
+    planted.crates([package("core")], [package("core")])
+    planted.run_check()
+    targets = Path(f"{planted.log}.target").read_text(encoding="utf-8").split()
+    assert len(targets) == 1
+    target = Path(targets[0]).resolve()
+    assert target.is_absolute()
+    assert not target.is_relative_to(planted.tree.resolve()), target
+
+
+def test_every_crate_is_measured_before_the_verdict(planted: Planted) -> None:
+    """A red crate does not stop the next one."""
+    planted.crates([package("a"), package("b")], [package("a"), package("b")])
+    planted.red("a", 100)
+    done, log = planted.run_check()
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert_lines(measurements(log), [measured("a"), measured("b")])
+    assert f"{LABEL}: b: no break" in done.stdout
+
+
+def test_a_removed_crate_is_a_break(planted: Planted) -> None:
+    """Judged in the base and not in the head."""
+    planted.crates([package("core"), package("gone")], [package("core")])
+    done, _ = planted.run_check()
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert_lines(
+        done.stderr.splitlines(),
+        [
+            (
+                f"{LABEL}: gone: judged in the base and not in the head —"
+                " crate removed or renamed"
+            ),
+            REMEDY,
+        ],
+    )
+
+
+def test_a_new_crate_is_named(planted: Planted) -> None:
+    """Judged in the head and not in the base: nothing to break."""
+    planted.crates([package("core")], [package("core"), package("fresh")])
+    done, log = planted.run_check()
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert f"{LABEL}: fresh: new, nothing to break" in done.stdout
+    assert_lines(measurements(log), [measured("core")])
+
+
+def test_unjudged_crates_are_not_measured(planted: Planted) -> None:
+    """`publish = false` and no library target: named, never measured."""
+    both = [
+        package("core"),
+        package("private", publish=[]),
+        package("cli", kinds=(["bin"],)),
+    ]
+    planted.crates(both, both)
+    done, log = planted.run_check()
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert_lines(
+        done.stdout.splitlines(),
+        [
+            f"{LABEL}: measuring core against HEAD^1",
+            f"{LABEL}: core: no break",
+            f"{LABEL}: private: publish = false, not judged",
+            f"{LABEL}: cli: no library target, not judged",
+        ],
+    )
+    assert_lines(measurements(log), [measured("core")])
+
+
+def test_a_base_without_rust(planted: Planted) -> None:
+    """The pull request adds the workspace: every crate is new."""
+    planted.merge(
+        {"README.md": "x\n"},
+        {
+            "Cargo.toml": "[workspace]\n",
+            "metadata.json": metadata(package("core")),
+        },
+    )
+    done, log = planted.run_check()
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert done.stdout == f"{LABEL}: core: new, nothing to break\n"
+    assert_lines(measurements(log), [])
+
+
+def test_a_removed_major_is_a_break(planted: Planted) -> None:
+    """pg14 and pg15 in the base, pg15 in the head; no Rust build."""
+    planted.crates(
+        [package("core"), package("ext", majors=(14, 15))],
+        [package("core"), package("ext", majors=(15,))],
+    )
+    done, log = planted.run_check()
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert_lines(
+        done.stderr.splitlines(),
+        [f"{LABEL}: ext: feature pg14 removed", REMEDY],
+    )
+    assert_lines(measurements(log), [measured("core")])
+
+
+def test_kept_features_are_green(planted: Planted) -> None:
+    """An added major is not a break."""
+    planted.crates([package("ext", majors=(15,))], [package("ext", majors=(15, 16))])
+    done, log = planted.run_check()
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert done.stdout == f"{LABEL}: ext: every feature of the base kept\n"
+    assert_lines(measurements(log), [])
+
+
+def test_a_snapshot_that_loses_a_line(planted: Planted) -> None:
+    """The lost line is named."""
+    planted.crates(
+        [],
+        [],
+        base_files={"ext/schema.snapshot.sql": f"{FN_A}{FN_B}"},
+        head_files={"ext/schema.snapshot.sql": "CREATE FUNCTION a();\n"},
+    )
+    done, _ = planted.run_check()
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert_lines(
+        done.stderr.splitlines(),
+        [f"{LABEL}: ext/schema.snapshot.sql: lost CREATE FUNCTION b();", REMEDY],
+    )
+
+
+def test_a_snapshot_that_gains_a_line(planted: Planted) -> None:
+    """An added line is not a break."""
+    planted.crates(
+        [],
+        [],
+        base_files={"schema.snapshot.sql": "CREATE FUNCTION a();\n"},
+        head_files={"schema.snapshot.sql": f"{FN_A}{FN_B}"},
+    )
+    done, _ = planted.run_check()
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert done.stdout == f"{LABEL}: schema.snapshot.sql: every line of the base kept\n"
+
+
+def test_a_snapshot_no_longer_tracked(planted: Planted) -> None:
+    """The file is gone from the head."""
+    planted.crates(
+        [],
+        [],
+        base_files={"ext/schema.snapshot.sql": "CREATE FUNCTION a();\n"},
+        head_files={"ext/schema.snapshot.sql": None},
+    )
+    done, _ = planted.run_check()
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert_lines(
+        done.stderr.splitlines(),
+        [
+            (
+                f"{LABEL}: ext/schema.snapshot.sql: tracked in the base and"
+                " not in the head"
+            ),
+            REMEDY,
+        ],
+    )
+
+
+def test_one_parent_is_red_by_name(planted: Planted) -> None:
+    """HEAD is not a merge commit: there is no base to measure against."""
+    planted.commit({"Cargo.toml": "[workspace]\n", "metadata.json": metadata()}, "x")
+    planted.commit({"README.md": "y\n"}, "y")
+    done, log = planted.run_check()
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert done.stderr == (
+        f"{LABEL}: HEAD has 1 parent(s), not 2 — the gate checks out the pull"
+        " request's merge commit, whose first parent is the base it is"
+        " measured against\n"
+    )
+    assert_lines(log, [])
+
+
+def test_no_cargo_toml_is_skipped(planted: Planted) -> None:
+    """No tracked Cargo.toml: the skip line, and nothing runs."""
+    planted.merge({"README.md": "x\n"}, {"README.md": "y\n"})
+    done, log = planted.run_check()
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert done.stdout == f"{LABEL}: no Cargo.toml tracked, skipped\n"
+    assert_lines(log, [])
+
+
+# ci.yml runs the task on every pull request, in the test leg.
+def test_the_step() -> None:
+    """In the gate job, before "Run the gate", with no author condition."""
+    gate = workflow_yaml.steps(workflow_yaml.jobs(workflow_yaml.document(CI))["gate"])
+    names = [step.get("name") for step in gate]
+    at = names.index("The title declares what the change breaks")
+    step = gate[at]
+    assert at < names.index("Run the gate")
+    restore = names.index("Restore the cargo caches (unsigned gate only)")
+    assert restore < at
+    assert step.get("if") == (
+        "${{ matrix.leg == 'test' && matrix.shard == 1"
+        " && github.event_name == 'pull_request' }}"
+    )
+    assert step.get("run") == "mise run break:check"
+    env: dict[str, object] = {
+        "PR_TITLE": "${{ github.event.pull_request.title }}",
+        "PR_BODY": "${{ github.event.pull_request.body }}",
+    }
+    assert step.get("env") == env
 
 
 # The declarations held to the reader: a title and body, and whether
@@ -551,12 +561,10 @@ DECLARATIONS: dict[str, tuple[str, str, bool]] = {
 }
 
 
-@pytest.mark.usefixtures("_set_up_test_the_reader_agrees")
-class TestTheReaderAgrees:
+class TheReaderAgrees:
     """#1906: "declared breaking" is what stele files under "Breaking"."""
 
-    @fixture
-    def _set_up_test_the_reader_agrees(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Skip unless the belt's stele is installed; plant a repository."""
         if not STELE:
             pytest.skip("stele is the belt's release engine and renders the notes")
@@ -606,9 +614,16 @@ class TestTheReaderAgrees:
         self.git("tag", f"v{tags + 1}.0.0")
         return "### Breaking\n" in done.stdout
 
-    def test_every_declaration(self) -> None:
-        """The reading and the reader agree, row by row."""
-        for title, body, breaking in DECLARATIONS.values():
-            reading = declared_break.declared(title, body)
-            filed = self.filed_breaking(title, body)
-            assert (reading, filed) == (breaking, breaking)
+
+@fixture
+def the_reader_agrees(tmp_path: Path) -> TheReaderAgrees:
+    """Give each row its own TheReaderAgrees."""
+    return TheReaderAgrees(tmp_path)
+
+
+def test_every_declaration(the_reader_agrees: TheReaderAgrees) -> None:
+    """The reading and the reader agree, row by row."""
+    for title, body, breaking in DECLARATIONS.values():
+        reading = declared_break.declared(title, body)
+        filed = the_reader_agrees.filed_breaking(title, body)
+        assert (reading, filed) == (breaking, breaking)

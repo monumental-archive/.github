@@ -90,12 +90,10 @@ def red(*offenders: str) -> list[str]:
     return [head, *(f"  {o}" for o in offenders), *TAIL]
 
 
-@pytest.mark.usefixtures("_set_up_test_nested")
-class TestNested:
+class Nested:
     """Planted workflows; the lint's verdict on them."""
 
-    @fixture
-    def _set_up_test_nested(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Plant an empty workflows directory."""
         self.tree = tmp_path
         (self.tree / ".github" / "workflows").mkdir(parents=True)
@@ -156,118 +154,138 @@ class TestNested:
             check=False,
         )
 
-    def test_no_workflows_is_skipped_by_name(self) -> None:
-        """No workflow file: the task says it skipped."""
-        done = self.task()
-        same(done.returncode, 0, done.stderr)
-        skipped = ["lint:nested-permissions: no workflows, skipped"]
-        same(done.stdout.splitlines(), skipped)
 
-    def test_offender_is_red_through_the_task(self) -> None:
-        """The task body hands the helper every workflow; an offender is red."""
-        self.plant("clean.yml", "jobs:\n  ci:\n" + CALL + GRANT)
-        bad = self.plant("stub.yaml", "jobs:\n  ci:\n" + CALL)
-        done = self.task()
-        same(done.returncode, nested_permissions.EXIT_RED)
-        same(done.stderr.splitlines(), red(f"{bad}:ci"))
+@fixture
+def nested(tmp_path: Path) -> Nested:
+    """Give each row its own Nested."""
+    return Nested(tmp_path)
 
-    def test_stated_permissions_are_clean(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """Every uses: job states permissions; only files with one count."""
-        one = self.plant("one.yml", "jobs:\n  ci:\n" + CALL + GRANT)
-        two = self.plant(
-            "two.yml",
-            "jobs:\n  a:\n" + GRANT + CALL + "  b:\n" + STEP + "  c:\n" + CALL + GRANT,
-        )
-        none = self.plant("none.yml", "jobs:\n  build:\n" + STEP)
-        status, out, err = self.helper(one, two, none, capfd=capfd)
-        same(status, 0, err)
-        same(out.splitlines(), ok(2))
-        same(err, "")
 
-    def test_offenders_are_named_in_file_order(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """First, middle and last jobs offend: each named, file by file."""
-        first = self.plant(
-            "first.yml",
-            "jobs:\n  a:\n" + CALL + "  b:\n" + CALL + GRANT + "  c:\n" + CALL,
-        )
-        second = self.plant("second.yml", "jobs:\n  m:\n" + STEP + "  n:\n" + CALL)
-        status, out, err = self.helper(first, second, capfd=capfd)
-        same(status, nested_permissions.EXIT_RED)
-        same(
-            err.splitlines(),
-            red(f"{first}:a", f"{first}:c", f"{second}:n"),
-        )
-        same(out, "")
+def test_no_workflows_is_skipped_by_name(nested: Nested) -> None:
+    """No workflow file: the task says it skipped."""
+    done = nested.task()
+    same(done.returncode, 0, done.stderr)
+    skipped = ["lint:nested-permissions: no workflows, skipped"]
+    same(done.stdout.splitlines(), skipped)
 
-    def test_keys_before_jobs_are_not_jobs(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A two-space key above `jobs:` opens no job."""
-        text = "on:\n  workflow_call:\n" + CALL + "jobs:\n  ci:\n" + CALL + GRANT
-        rel = self.plant("wf.yml", text)
-        status, out, err = self.helper(rel, capfd=capfd)
-        same(status, 0, err)
-        same(out.splitlines(), ok(1))
 
-    def test_a_second_jobs_line_closes_nothing(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A repeated `jobs:` line leaves the open job open."""
-        text = "jobs:\n  ci:\n" + CALL + "jobs:\n" + GRANT
-        rel = self.plant("wf.yml", text)
-        status, out, err = self.helper(rel, capfd=capfd)
-        same(status, 0, err)
-        same(out.splitlines(), ok(1))
+def test_offender_is_red_through_the_task(nested: Nested) -> None:
+    """The task body hands the helper every workflow; an offender is red."""
+    nested.plant("clean.yml", "jobs:\n  ci:\n" + CALL + GRANT)
+    bad = nested.plant("stub.yaml", "jobs:\n  ci:\n" + CALL)
+    done = nested.task()
+    same(done.returncode, nested_permissions.EXIT_RED)
+    same(done.stderr.splitlines(), red(f"{bad}:ci"))
 
-    def test_trailing_blanks_and_carriage_returns(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """Trailing blanks still open a job; a carriage return stays in its name.
 
-        awk's first field keeps the carriage return, so its `:` is not
-        the last character and stays; the writer prints it escaped.
-        """
-        blanks = self.plant("blanks.yml", "jobs: \t\n  ci:  \n" + CALL)
-        crlf = self.plant("crlf.yml", "jobs:\r\n  ci:\r\n" + CALL)
-        status, _out, err = self.helper(blanks, crlf, capfd=capfd)
-        same(status, nested_permissions.EXIT_RED)
-        same(err.splitlines(), red(f"{blanks}:ci", f"{crlf}:ci:\\r"))
+def test_stated_permissions_are_clean(
+    nested: Nested, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Every uses: job states permissions; only files with one count."""
+    one = nested.plant("one.yml", "jobs:\n  ci:\n" + CALL + GRANT)
+    two = nested.plant(
+        "two.yml",
+        "jobs:\n  a:\n" + GRANT + CALL + "  b:\n" + STEP + "  c:\n" + CALL + GRANT,
+    )
+    none = nested.plant("none.yml", "jobs:\n  build:\n" + STEP)
+    status, out, err = nested.helper(one, two, none, capfd=capfd)
+    same(status, 0, err)
+    same(out.splitlines(), ok(2))
+    same(err, "")
 
-    def test_not_a_job_key(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """Deeper, shallower or valued keys open no job."""
-        text = "jobs:\n  ci:\n" + GRANT + "  x: y\n   deep:\n" + CALL
-        rel = self.plant("wf.yml", text)
-        status, out, err = self.helper(rel, capfd=capfd)
-        same(status, 0, err)
-        same(out.splitlines(), ok(1))
 
-    def test_not_utf8_is_an_error(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """A workflow that is not UTF-8 is refused by name, exit 2."""
-        rel = self.plant("bad.yml", b"jobs: \xff\n")
-        status, _out, err = self.helper(rel, capfd=capfd)
-        same(status, nested_permissions.EXIT_ERROR)
-        assert err.startswith(
-            f"lint:nested-permissions: {rel}: cannot be read as UTF-8:"
-        ), err
+def test_offenders_are_named_in_file_order(
+    nested: Nested, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """First, middle and last jobs offend: each named, file by file."""
+    first = nested.plant(
+        "first.yml",
+        "jobs:\n  a:\n" + CALL + "  b:\n" + CALL + GRANT + "  c:\n" + CALL,
+    )
+    second = nested.plant("second.yml", "jobs:\n  m:\n" + STEP + "  n:\n" + CALL)
+    status, out, err = nested.helper(first, second, capfd=capfd)
+    same(status, nested_permissions.EXIT_RED)
+    same(
+        err.splitlines(),
+        red(f"{first}:a", f"{first}:c", f"{second}:n"),
+    )
+    same(out, "")
 
-    def test_missing_file_is_an_error(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """A named workflow that does not exist is refused by name, exit 2."""
-        status, _out, err = self.helper(".github/workflows/gone.yml", capfd=capfd)
-        same(status, nested_permissions.EXIT_ERROR)
-        assert err.startswith(
-            "lint:nested-permissions: .github/workflows/gone.yml:"
-            " cannot be read as UTF-8:"
-        ), err
 
-    def test_no_workflows_is_a_usage_error(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """No workflow named: exit 2 with the usage line."""
-        status, _out, err = self.helper(capfd=capfd)
-        same(status, nested_permissions.EXIT_ERROR)
-        usage = "lint:nested-permissions: usage: belt nested-permissions WORKFLOW..."
-        same(err.splitlines(), [usage])
+def test_keys_before_jobs_are_not_jobs(
+    nested: Nested, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A two-space key above `jobs:` opens no job."""
+    text = "on:\n  workflow_call:\n" + CALL + "jobs:\n  ci:\n" + CALL + GRANT
+    rel = nested.plant("wf.yml", text)
+    status, out, err = nested.helper(rel, capfd=capfd)
+    same(status, 0, err)
+    same(out.splitlines(), ok(1))
+
+
+def test_a_second_jobs_line_closes_nothing(
+    nested: Nested, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A repeated `jobs:` line leaves the open job open."""
+    text = "jobs:\n  ci:\n" + CALL + "jobs:\n" + GRANT
+    rel = nested.plant("wf.yml", text)
+    status, out, err = nested.helper(rel, capfd=capfd)
+    same(status, 0, err)
+    same(out.splitlines(), ok(1))
+
+
+def test_trailing_blanks_and_carriage_returns(
+    nested: Nested, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Trailing blanks still open a job; a carriage return stays in its name.
+
+    awk's first field keeps the carriage return, so its `:` is not
+    the last character and stays; the writer prints it escaped.
+    """
+    blanks = nested.plant("blanks.yml", "jobs: \t\n  ci:  \n" + CALL)
+    crlf = nested.plant("crlf.yml", "jobs:\r\n  ci:\r\n" + CALL)
+    status, _out, err = nested.helper(blanks, crlf, capfd=capfd)
+    same(status, nested_permissions.EXIT_RED)
+    same(err.splitlines(), red(f"{blanks}:ci", f"{crlf}:ci:\\r"))
+
+
+def test_not_a_job_key(nested: Nested, capfd: pytest.CaptureFixture[str]) -> None:
+    """Deeper, shallower or valued keys open no job."""
+    text = "jobs:\n  ci:\n" + GRANT + "  x: y\n   deep:\n" + CALL
+    rel = nested.plant("wf.yml", text)
+    status, out, err = nested.helper(rel, capfd=capfd)
+    same(status, 0, err)
+    same(out.splitlines(), ok(1))
+
+
+def test_not_utf8_is_an_error(
+    nested: Nested, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A workflow that is not UTF-8 is refused by name, exit 2."""
+    rel = nested.plant("bad.yml", b"jobs: \xff\n")
+    status, _out, err = nested.helper(rel, capfd=capfd)
+    same(status, nested_permissions.EXIT_ERROR)
+    assert err.startswith(
+        f"lint:nested-permissions: {rel}: cannot be read as UTF-8:"
+    ), err
+
+
+def test_missing_file_is_an_error(
+    nested: Nested, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A named workflow that does not exist is refused by name, exit 2."""
+    status, _out, err = nested.helper(".github/workflows/gone.yml", capfd=capfd)
+    same(status, nested_permissions.EXIT_ERROR)
+    assert err.startswith(
+        "lint:nested-permissions: .github/workflows/gone.yml: cannot be read as UTF-8:"
+    ), err
+
+
+def test_no_workflows_is_a_usage_error(
+    nested: Nested, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """No workflow named: exit 2 with the usage line."""
+    status, _out, err = nested.helper(capfd=capfd)
+    same(status, nested_permissions.EXIT_ERROR)
+    usage = "lint:nested-permissions: usage: belt nested-permissions WORKFLOW..."
+    same(err.splitlines(), [usage])

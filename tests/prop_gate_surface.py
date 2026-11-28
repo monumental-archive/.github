@@ -49,32 +49,30 @@ CLASS = st.sampled_from([
 ])
 
 
-class TestMajors:
-    """pgNN features of a pgrx dependent, and nothing else."""
-
-    @given(
-        st.data(),
-        st.lists(FEATURE, unique=True, max_size=6),
-        st.lists(NAME, max_size=3),
-        st.sampled_from(["pgrx", "plain"]),
+# pgNN features of a pgrx dependent, and nothing else.
+@given(
+    st.data(),
+    st.lists(FEATURE, unique=True, max_size=6),
+    st.lists(NAME, max_size=3),
+    st.sampled_from(["pgrx", "plain"]),
+)
+def test_majors_are_the_pg_features(
+    data: st.DataObject, features: list[str], deps: list[str], kind: str
+) -> None:
+    """Sorted majors, in any feature or dependency order."""
+    pgrx = kind == "pgrx"
+    names = [*deps, "pgrx"] if pgrx else [d for d in deps if d != "pgrx"]
+    declared: dict[str, list[str]] = {
+        f: [] for f in data.draw(st.permutations(features))
+    }
+    pkg: dict[str, object] = {
+        "features": declared,
+        "dependencies": [{"name": n} for n in data.draw(st.permutations(names))],
+    }
+    expected = sorted(
+        int(f[2:]) for f in features if f[2:].isdigit() and f.startswith("pg")
     )
-    def test_majors_are_the_pg_features(
-        self, data: st.DataObject, features: list[str], deps: list[str], kind: str
-    ) -> None:
-        """Sorted majors, in any feature or dependency order."""
-        pgrx = kind == "pgrx"
-        names = [*deps, "pgrx"] if pgrx else [d for d in deps if d != "pgrx"]
-        declared: dict[str, list[str]] = {
-            f: [] for f in data.draw(st.permutations(features))
-        }
-        pkg: dict[str, object] = {
-            "features": declared,
-            "dependencies": [{"name": n} for n in data.draw(st.permutations(names))],
-        }
-        expected = sorted(
-            int(f[2:]) for f in features if f[2:].isdigit() and f.startswith("pg")
-        )
-        assert gs.majors(gs.package(pkg)) == (expected if pgrx else list[int]())
+    assert gs.majors(gs.package(pkg)) == (expected if pgrx else list[int]())
 
 
 def draw_stub(draw: st.DrawFn) -> tuple[str, dict[str, str]]:
@@ -107,55 +105,53 @@ def draw_stub(draw: st.DrawFn) -> tuple[str, dict[str, str]]:
 stub = st.composite(draw_stub)
 
 
-class TestStub:
-    """The stub's inputs, as written."""
+# The stub's inputs, as written.
+@given(stub())
+def test_inputs_read_back(drawn: tuple[str, dict[str, str]]) -> None:
+    """Comments, blanks and quotes change nothing."""
+    text, keys = drawn
+    assert gs.stub_inputs(text) == (keys, [])
 
-    @given(stub())
-    def test_inputs_read_back(self, drawn: tuple[str, dict[str, str]]) -> None:
-        """Comments, blanks and quotes change nothing."""
-        text, keys = drawn
-        assert gs.stub_inputs(text) == (keys, [])
 
-    @given(
-        st.data(),
-        st.lists(CLASS, unique=True, min_size=1),
-        st.lists(
-            st.fixed_dictionaries({
-                "name": NAME,
-                "dir": st.sampled_from(["", "a", "b/c"]),
-            }),
-            max_size=5,
-        ),
-        st.lists(NAME, max_size=3),
+@given(
+    st.data(),
+    st.lists(CLASS, unique=True, min_size=1),
+    st.lists(
+        st.fixed_dictionaries({
+            "name": NAME,
+            "dir": st.sampled_from(["", "a", "b/c"]),
+        }),
+        max_size=5,
+    ),
+    st.lists(NAME, max_size=3),
+)
+def test_published_does_not_depend_on_spelling(
+    data: st.DataObject,
+    classes: list[str],
+    records: list[dict[str, str]],
+    excluded: list[str],
+) -> None:
+    """Order and spaces of the lists change nothing; exclusions hold."""
+    surface = [gs.Crate(r["name"], r["name"], (), r["dir"]) for r in records]
+
+    def spell(items: list[str]) -> str:
+        return ",".join(f" {i} " for i in data.draw(st.permutations(items)))
+
+    one = gs.published(
+        {
+            "classes": ",".join(classes),
+            "exclude": ",".join(excluded),
+            "crate-dir": "a",
+        },
+        surface,
     )
-    def test_published_does_not_depend_on_spelling(
-        self,
-        data: st.DataObject,
-        classes: list[str],
-        records: list[dict[str, str]],
-        excluded: list[str],
-    ) -> None:
-        """Order and spaces of the lists change nothing; exclusions hold."""
-        surface = [gs.Crate(r["name"], r["name"], (), r["dir"]) for r in records]
-
-        def spell(items: list[str]) -> str:
-            return ",".join(f" {i} " for i in data.draw(st.permutations(items)))
-
-        one = gs.published(
-            {
-                "classes": ",".join(classes),
-                "exclude": ",".join(excluded),
-                "crate-dir": "a",
-            },
-            surface,
-        )
-        two = gs.published(
-            {"classes": spell(classes), "exclude": spell(excluded), "crate-dir": "a/"},
-            surface,
-        )
-        assert one == two
-        if not set(classes) & {"pgrx-extension", "wasm-npm"}:
-            assert not one & set(excluded)
+    two = gs.published(
+        {"classes": spell(classes), "exclude": spell(excluded), "crate-dir": "a/"},
+        surface,
+    )
+    assert one == two
+    if not set(classes) & {"pgrx-extension", "wasm-npm"}:
+        assert not one & set(excluded)
 
 
 SCALAR: st.SearchStrategy[object] = (
@@ -207,28 +203,26 @@ NO_DOCUMENT: list[object] = []
 NUMBER_PACKAGE: dict[str, object] = {"packages": [1], "workspace_members": []}
 
 
-class TestRefusal:
-    """Any metadata document: the surface, or a refusal by name."""
-
-    @given(DOCUMENT)
-    @example(NO_DOCUMENT)
-    @example(NUMBER_PACKAGE)
-    def test_main_answers_any_document(self, doc: object) -> None:
-        """0, or 1 with the reason on stderr."""
-        out, err = io.StringIO(), io.StringIO()
-        old = sys.stdin
-        sys.stdin = io.StringIO(json.dumps(doc))
-        try:
-            with (
-                pytest.MonkeyPatch.context() as patched,
-                contextlib.redirect_stdout(out),
-                contextlib.redirect_stderr(err),
-            ):
-                patched.setenv("MISE_TASK_NAME", TASK)
-                patched.setenv("ORG_FINDINGS", "")
-                status = gs.main([])
-        finally:
-            sys.stdin = old
-        assert status in {0, 1}
-        if status:
-            assert f"{TASK}: " in err.getvalue()
+# Any metadata document: the surface, or a refusal by name.
+@given(DOCUMENT)
+@example(NO_DOCUMENT)
+@example(NUMBER_PACKAGE)
+def test_main_answers_any_document(doc: object) -> None:
+    """0, or 1 with the reason on stderr."""
+    out, err = io.StringIO(), io.StringIO()
+    old = sys.stdin
+    sys.stdin = io.StringIO(json.dumps(doc))
+    try:
+        with (
+            pytest.MonkeyPatch.context() as patched,
+            contextlib.redirect_stdout(out),
+            contextlib.redirect_stderr(err),
+        ):
+            patched.setenv("MISE_TASK_NAME", TASK)
+            patched.setenv("ORG_FINDINGS", "")
+            status = gs.main([])
+    finally:
+        sys.stdin = old
+    assert status in {0, 1}
+    if status:
+        assert f"{TASK}: " in err.getvalue()

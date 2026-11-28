@@ -121,12 +121,10 @@ def ungrouped(files: str) -> list[str]:
     ]
 
 
-@pytest.mark.usefixtures("_set_up_test_lint")
-class TestLint:
+class Lint:
     """Planted callers; the helper's verdict on them."""
 
-    @fixture
-    def _set_up_test_lint(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Plant an empty workflows directory."""
         self.tree = tmp_path
         (self.tree / ".github" / "workflows").mkdir(parents=True)
@@ -170,118 +168,138 @@ class TestLint:
         out, err = capfd.readouterr()
         return status, out, err
 
-    def test_no_workflows_is_skipped_by_name(self) -> None:
-        """No workflow file: the task says it skipped."""
-        support.track(self.tree)
-        as_mise = support.task_run(TASK, body())
-        done = subprocess.run(
-            as_mise.argv,
-            cwd=self.tree,
-            env=self.env | as_mise.env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        same(done.returncode, 0, done.stderr)
-        same(done.stdout.splitlines(), ["lint:gate-stub: no workflows, skipped"])
 
-    def test_a_conforming_caller_is_ok(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """Every requirement met, `edited` as a list item too: ok."""
-        listed = GOOD.replace(
-            "    types: [opened, synchronize, reopened, edited]\n",
-            "    types:\n      - opened\n      -   edited\n",
-        )
-        one = self.plant("gate.yml", GOOD)
-        two = self.plant("listed.yaml", listed)
-        status, out, err = self.helper(CANON, one, two, capfd=capfd)
-        same(status, 0, err)
-        same(out.splitlines(), OK)
-        same(err, "")
+@fixture
+def lint(tmp_path: Path) -> Lint:
+    """Give each row its own Lint."""
+    return Lint(tmp_path)
 
-    def test_not_a_gate_caller_is_not_held(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """No ci.yml call, another repository's, or no pull_request: not held."""
-        rows = {
-            "no call": "on:\n  pull_request:\njobs:\n  a:\n    runs-on: x\n",
-            "foreign": "on:\n  pull_request:\n" + JOB.replace(CANON, "other/repo"),
-            "no pull_request": "on:\n  push:\n" + JOB,
-        }
-        names = [self.plant(f"{i}.yml", text) for i, text in enumerate(rows.values())]
-        status, out, err = self.helper(CANON, *names, capfd=capfd)
-        same(status, 0, err)
-        same(out.splitlines(), OK)
 
-    def test_edited_only_in_a_comment_is_red(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """`edited` after a `#` on the types line is not the type."""
-        rel = self.plant(
-            "gate.yml",
-            GOOD.replace("reopened, edited]", "reopened] # edited"),
-        )
-        status, out, err = self.helper(CANON, rel, capfd=capfd)
-        same(status, gate_stub.EXIT_RED)
-        same(err.splitlines(), unedited(f" {rel}"))
-        same(out, "")
+def test_no_workflows_is_skipped_by_name(lint: Lint) -> None:
+    """No workflow file: the task says it skipped."""
+    support.track(lint.tree)
+    as_mise = support.task_run(TASK, body())
+    done = subprocess.run(
+        as_mise.argv,
+        cwd=lint.tree,
+        env=lint.env | as_mise.env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    same(done.returncode, 0, done.stderr)
+    same(done.stdout.splitlines(), ["lint:gate-stub: no workflows, skipped"])
 
-    def test_an_unindented_merge_group_is_red(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """`merge_group:` at column 0 is not a trigger under `on:`."""
-        rel = self.plant("gate.yml", GOOD.replace("  merge_group:", "merge_group:"))
-        status, _out, err = self.helper(CANON, rel, capfd=capfd)
-        same(status, gate_stub.EXIT_RED)
-        same(err.splitlines(), unqueued(f" {rel}"))
 
-    def test_all_three_unmet_name_every_caller(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A bare caller in the canon (`./`) and one elsewhere: three messages."""
-        own = "jobs:\n  ci:\n    uses: ./.github/workflows/ci.yaml\n"
-        local = self.plant("self.yml", "on:\n  pull_request:\n" + own)
-        bare = self.plant("bare.yml", "on:\n  pull_request:\n" + JOB)
-        clean = self.plant("clean.yml", GOOD)
-        status, _out, err = self.helper(CANON, local, clean, bare, capfd=capfd)
-        same(status, gate_stub.EXIT_RED)
-        files = f" {local} {bare}"
-        expected = [*unedited(files), *unqueued(files), *ungrouped(files)]
-        same(err.splitlines(), expected)
+def test_a_conforming_caller_is_ok(
+    lint: Lint, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Every requirement met, `edited` as a list item too: ok."""
+    listed = GOOD.replace(
+        "    types: [opened, synchronize, reopened, edited]\n",
+        "    types:\n      - opened\n      -   edited\n",
+    )
+    one = lint.plant("gate.yml", GOOD)
+    two = lint.plant("listed.yaml", listed)
+    status, out, err = lint.helper(CANON, one, two, capfd=capfd)
+    same(status, 0, err)
+    same(out.splitlines(), OK)
+    same(err, "")
 
-    def test_a_cancel_line_compares_without_its_comment(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """Indent, a trailing comment and trailing blanks are dropped first."""
-        commented = GOOD.replace(
-            f"  cancel-in-progress: {gate_stub_fix.CANCEL}\n",
-            f"\t cancel-in-progress: {gate_stub_fix.CANCEL} \t# why  \n",
-        )
-        rel = self.plant("gate.yml", commented)
-        status, out, err = self.helper(CANON, rel, capfd=capfd)
-        same(status, 0, err)
-        same(out.splitlines(), OK)
 
-    def test_not_utf8_is_an_error(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """A workflow that is not UTF-8 is refused by name, exit 2."""
-        rel = self.plant("bad.yml", b"on: \xff\n")
-        status, _out, err = self.helper(CANON, rel, capfd=capfd)
+def test_not_a_gate_caller_is_not_held(
+    lint: Lint, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """No ci.yml call, another repository's, or no pull_request: not held."""
+    rows = {
+        "no call": "on:\n  pull_request:\njobs:\n  a:\n    runs-on: x\n",
+        "foreign": "on:\n  pull_request:\n" + JOB.replace(CANON, "other/repo"),
+        "no pull_request": "on:\n  push:\n" + JOB,
+    }
+    names = [lint.plant(f"{i}.yml", text) for i, text in enumerate(rows.values())]
+    status, out, err = lint.helper(CANON, *names, capfd=capfd)
+    same(status, 0, err)
+    same(out.splitlines(), OK)
+
+
+def test_edited_only_in_a_comment_is_red(
+    lint: Lint, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """`edited` after a `#` on the types line is not the type."""
+    rel = lint.plant(
+        "gate.yml",
+        GOOD.replace("reopened, edited]", "reopened] # edited"),
+    )
+    status, out, err = lint.helper(CANON, rel, capfd=capfd)
+    same(status, gate_stub.EXIT_RED)
+    same(err.splitlines(), unedited(f" {rel}"))
+    same(out, "")
+
+
+def test_an_unindented_merge_group_is_red(
+    lint: Lint, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """`merge_group:` at column 0 is not a trigger under `on:`."""
+    rel = lint.plant("gate.yml", GOOD.replace("  merge_group:", "merge_group:"))
+    status, _out, err = lint.helper(CANON, rel, capfd=capfd)
+    same(status, gate_stub.EXIT_RED)
+    same(err.splitlines(), unqueued(f" {rel}"))
+
+
+def test_all_three_unmet_name_every_caller(
+    lint: Lint, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A bare caller in the canon (`./`) and one elsewhere: three messages."""
+    own = "jobs:\n  ci:\n    uses: ./.github/workflows/ci.yaml\n"
+    local = lint.plant("self.yml", "on:\n  pull_request:\n" + own)
+    bare = lint.plant("bare.yml", "on:\n  pull_request:\n" + JOB)
+    clean = lint.plant("clean.yml", GOOD)
+    status, _out, err = lint.helper(CANON, local, clean, bare, capfd=capfd)
+    same(status, gate_stub.EXIT_RED)
+    files = f" {local} {bare}"
+    expected = [*unedited(files), *unqueued(files), *ungrouped(files)]
+    same(err.splitlines(), expected)
+
+
+def test_a_cancel_line_compares_without_its_comment(
+    lint: Lint, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Indent, a trailing comment and trailing blanks are dropped first."""
+    commented = GOOD.replace(
+        f"  cancel-in-progress: {gate_stub_fix.CANCEL}\n",
+        f"\t cancel-in-progress: {gate_stub_fix.CANCEL} \t# why  \n",
+    )
+    rel = lint.plant("gate.yml", commented)
+    status, out, err = lint.helper(CANON, rel, capfd=capfd)
+    same(status, 0, err)
+    same(out.splitlines(), OK)
+
+
+def test_not_utf8_is_an_error(lint: Lint, capfd: pytest.CaptureFixture[str]) -> None:
+    """A workflow that is not UTF-8 is refused by name, exit 2."""
+    rel = lint.plant("bad.yml", b"on: \xff\n")
+    status, _out, err = lint.helper(CANON, rel, capfd=capfd)
+    same(status, gate_stub.EXIT_ERROR)
+    assert err.startswith(f"lint:gate-stub: {rel}: cannot be read as UTF-8:"), err
+
+
+def test_missing_file_is_an_error(
+    lint: Lint, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A named workflow that does not exist is refused by name, exit 2."""
+    rel = ".github/workflows/gone.yml"
+    status, _out, err = lint.helper(CANON, rel, capfd=capfd)
+    same(status, gate_stub.EXIT_ERROR)
+    assert err.startswith(f"lint:gate-stub: {rel}: cannot be read as UTF-8:"), err
+
+
+def test_a_bad_call_is_a_usage_error(
+    lint: Lint, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """No canon, half a canon, or no workflow: exit 2 with the usage line."""
+    usage = "lint:gate-stub: usage: belt gate-stub OWNER/REPO WORKFLOW..."
+    calls: list[list[str]] = [[], [CANON], ["/repo", "x"], ["owner/", "x"]]
+    for argv in calls:
+        status, _out, err = lint.helper(*argv, capfd=capfd)
         same(status, gate_stub.EXIT_ERROR)
-        assert err.startswith(f"lint:gate-stub: {rel}: cannot be read as UTF-8:"), err
-
-    def test_missing_file_is_an_error(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """A named workflow that does not exist is refused by name, exit 2."""
-        rel = ".github/workflows/gone.yml"
-        status, _out, err = self.helper(CANON, rel, capfd=capfd)
-        same(status, gate_stub.EXIT_ERROR)
-        assert err.startswith(f"lint:gate-stub: {rel}: cannot be read as UTF-8:"), err
-
-    def test_a_bad_call_is_a_usage_error(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """No canon, half a canon, or no workflow: exit 2 with the usage line."""
-        usage = "lint:gate-stub: usage: belt gate-stub OWNER/REPO WORKFLOW..."
-        calls: list[list[str]] = [[], [CANON], ["/repo", "x"], ["owner/", "x"]]
-        for argv in calls:
-            status, _out, err = self.helper(*argv, capfd=capfd)
-            same(status, gate_stub.EXIT_ERROR)
-            same(err.splitlines(), [usage])
+        same(err.splitlines(), [usage])

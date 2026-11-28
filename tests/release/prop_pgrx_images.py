@@ -115,77 +115,69 @@ def assert_answered(got: tuple[int, str, str]) -> None:
         assert err.count("\n") == 1, err
 
 
-class TestTarballNameParsesBack:
-    """T: the name says the crate, version, major and arch it was made of."""
-
-    @given(
-        st.lists(SEGMENT, min_size=1, max_size=3),
-        VERSION,
-        MAJOR,
-        st.sampled_from(images.ARCHES),
-    )
-    @example(DASHED, "1.3.4-rc.1", "16", "arm64")
-    def test_parses_back(
-        self, segments: list[str], version: str, pg: str, arch: str
-    ) -> None:
-        """Read back from the name alone."""
-        name = images.tarball_name("/".join(segments), version, pg, arch)
-        found = PARSE.fullmatch(name)
-        if found is None:
-            pytest.fail(name)
-        # Every group is required, so the default is never used.
-        groups: dict[str, str] = found.groupdict("")
-        want: dict[str, str] = {
-            "name": segments[-1].replace("-", "_"),
-            "version": version,
-            "pg": pg,
-            "arch": arch,
-        }
-        assert groups == want
+# T: the name says the crate, version, major and arch it was made of.
+@given(
+    st.lists(SEGMENT, min_size=1, max_size=3),
+    VERSION,
+    MAJOR,
+    st.sampled_from(images.ARCHES),
+)
+@example(DASHED, "1.3.4-rc.1", "16", "arm64")
+def test_parses_back(segments: list[str], version: str, pg: str, arch: str) -> None:
+    """Read back from the name alone."""
+    name = images.tarball_name("/".join(segments), version, pg, arch)
+    found = PARSE.fullmatch(name)
+    if found is None:
+        pytest.fail(name)
+    # Every group is required, so the default is never used.
+    groups: dict[str, str] = found.groupdict("")
+    want: dict[str, str] = {
+        "name": segments[-1].replace("-", "_"),
+        "version": version,
+        "pg": pg,
+        "arch": arch,
+    }
+    assert groups == want
 
 
-class TestAnyTable:
-    """R: any base-image table is read or refused by name."""
+# R: any base-image table is read or refused by name.
+@given(
+    st.one_of(
+        st.dictionaries(MAJOR, VALUE, max_size=3),
+        VALUE,
+    ),
+    MAJOR,
+)
+@example("x16", "16")
+@example(AN_ARRAY, "16")
+@example(NOT_A_STRING, "16")
+def test_base_image(build: object, pg: str) -> None:
+    """One reference, or the step's own refusal."""
+    with tempfile.TemporaryDirectory() as tmp:
+        table = Path(tmp) / "pgrx-base-images.toml"
+        table.write_text(f"build = {toml_value(build)}\n", "utf-8")
+        got = run(["base-image", "--pg", pg, "--table", str(table)])
+    assert_answered(got)
 
-    @given(
+
+# R: any extension tree is named or refused by name.
+@given(
+    st.lists(
         st.one_of(
-            st.dictionaries(MAJOR, VALUE, max_size=3),
-            VALUE,
+            st.builds("{}.control".format, SEGMENT),
+            st.builds("{}.sql".format, SEGMENT),
+            SEGMENT,
         ),
-        MAJOR,
+        max_size=4,
+        unique=True,
     )
-    @example("x16", "16")
-    @example(AN_ARRAY, "16")
-    @example(NOT_A_STRING, "16")
-    def test_base_image(self, build: object, pg: str) -> None:
-        """One reference, or the step's own refusal."""
-        with tempfile.TemporaryDirectory() as tmp:
-            table = Path(tmp) / "pgrx-base-images.toml"
-            table.write_text(f"build = {toml_value(build)}\n", "utf-8")
-            got = run(["base-image", "--pg", pg, "--table", str(table)])
-        assert_answered(got)
-
-
-class TestAnyTree:
-    """R: any extension tree is named or refused by name."""
-
-    @given(
-        st.lists(
-            st.one_of(
-                st.builds("{}.control".format, SEGMENT),
-                st.builds("{}.sql".format, SEGMENT),
-                SEGMENT,
-            ),
-            max_size=4,
-            unique=True,
-        )
-    )
-    def test_extension_name(self, files: list[str]) -> None:
-        """One name, or the step's own refusal."""
-        with tempfile.TemporaryDirectory() as tmp:
-            for f in files:
-                (Path(tmp) / f).write_text("", "utf-8")
-            got = run(["extension-name", "--tree", tmp])
-        assert_answered(got)
-        controls = [f for f in files if f.endswith(".control")]
-        assert (got[0] == 0) == (len(controls) == 1), files
+)
+def test_extension_name(files: list[str]) -> None:
+    """One name, or the step's own refusal."""
+    with tempfile.TemporaryDirectory() as tmp:
+        for f in files:
+            (Path(tmp) / f).write_text("", "utf-8")
+        got = run(["extension-name", "--tree", tmp])
+    assert_answered(got)
+    controls = [f for f in files if f.endswith(".control")]
+    assert (got[0] == 0) == (len(controls) == 1), files

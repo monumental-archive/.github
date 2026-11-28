@@ -33,23 +33,19 @@ def _task(as_task: Callable[[str], None]) -> None:
 pytestmark = pytest.mark.usefixtures("_task")
 
 
-
-
-class TestReaders:
-    """Every shape the runner reader decides (#1659)."""
-
-    def test_other_runners_are_named_from_the_manifest(self) -> None:
-        """A dependency, a `test` script, npm's placeholder, or nothing."""
-        placeholder = 'echo "Error: no test specified" && exit 1'
-        for manifest, runner in (
-            ({"devDependencies": {"cypress": "13"}}, "cypress"),
-            ({"dependencies": "not a table", "scripts": {"test": "ava -v"}}, "ava"),
-            ({"scripts": {"test": "node --test src/"}}, "node --test"),
-            ({"scripts": {"test": placeholder}}, None),
-            ({"scripts": {"test": "   "}}, None),
-            ({"scripts": "not a table"}, None),
-        ):
-            assert runner == cj.other_runner(cj.read_manifest(manifest))
+# Every shape the runner reader decides (#1659).
+def test_other_runners_are_named_from_the_manifest() -> None:
+    """A dependency, a `test` script, npm's placeholder, or nothing."""
+    placeholder = 'echo "Error: no test specified" && exit 1'
+    for manifest, runner in (
+        ({"devDependencies": {"cypress": "13"}}, "cypress"),
+        ({"dependencies": "not a table", "scripts": {"test": "ava -v"}}, "ava"),
+        ({"scripts": {"test": "node --test src/"}}, "node --test"),
+        ({"scripts": {"test": placeholder}}, None),
+        ({"scripts": {"test": "   "}}, None),
+        ({"scripts": "not a table"}, None),
+    ):
+        assert runner == cj.other_runner(cj.read_manifest(manifest))
 
 
 # One lockfile of each format the reader answers, and the versions each
@@ -77,66 +73,64 @@ TWO: set[str] = {"4.1.12", "3.2.4"}
 CRATE: set[str] = {"1.0.154"}
 
 
-class TestLocked:
-    """The version each lockfile resolves an entry to (#2145)."""
-
-    @pytest.mark.parametrize(
-        ("lockfile", "lock", "name", "want"),
-        [
-            ("pnpm-lock.yaml", PNPM_LOCK, "vitest", TWO),
-            ("package-lock.json", NPM_LOCK, "vitest", ONE),
-            ("yarn.lock", YARN_LOCK, "vitest", ONE),
-            ("yarn.lock", BERRY_LOCK, "vitest", ONE),
-            ("bun.lock", BUN_LOCK, "vitest", ONE),
-            ("Cargo.lock", CARGO_LOCK, "serde", CRATE),
-        ],
-    )
-    def test_every_format_reads_the_installed_version(
-        self, lockfile: object, lock: object, name: object, want: object
-    ) -> None:
-        """The version installed, never the range the entry was asked for."""
-        assert want == cj.locked(lockfile, lock, name)
-
-    def test_an_indented_yarn_mention_is_not_an_entry(self) -> None:
-        """Berry's `resolution:` line repeats an entry; alone it is none."""
-        lock = '"other@npm:^1":\n  version: 1.0.0\n  resolution: "vitest@npm:4.1.12"\n'
-        assert cj.locked("yarn.lock", lock, "vitest") == NONE
-
-    def test_a_name_is_matched_whole_and_literally(self) -> None:
-        """`vitest` is not `@vitest/expect`, and a dot in a name is a dot."""
-        lock = "packages:\n\n  '@vitest/expect@4.1.12':\n  lodashxget@4.4.2:\n"
-        assert cj.locked("pnpm-lock.yaml", lock, "vitest") == NONE
-        assert cj.locked("pnpm-lock.yaml", lock, "lodash.get") == NONE
-        assert cj.locked("pnpm-lock.yaml", lock, "@vitest/expect") == ONE
-
-    @pytest.mark.parametrize(
-        ("lockfile", "lock"),
-        [
-            ("package-lock.json", '{"packages": {"node_modules/vitest": {}}}'),
-            ("yarn.lock", 'vitest@^4:\n  resolved "x"\n'),
-        ],
-    )
-    def test_an_entry_without_a_version_reads_none(
-        self, lockfile: object, lock: object
-    ) -> None:
-        """An entry whose version is not where its format writes one."""
-        assert cj.locked(lockfile, lock, "vitest") == NONE
-
-    @pytest.mark.parametrize(
-        "lock", ["[[package]\n", "package = 1\n", '[[package]]\nname = "a"\n']
-    )
-    def test_a_cargo_lock_of_the_wrong_shape_is_refused(self, lock: object) -> None:
-        """Not TOML, or a package table of another shape, raises by where."""
-        with pytest.raises(decoded.UndecodableError):
-            cj.locked("Cargo.lock", lock, "a")
+# The version each lockfile resolves an entry to (#2145).
+@pytest.mark.parametrize(
+    ("lockfile", "lock", "name", "want"),
+    [
+        ("pnpm-lock.yaml", PNPM_LOCK, "vitest", TWO),
+        ("package-lock.json", NPM_LOCK, "vitest", ONE),
+        ("yarn.lock", YARN_LOCK, "vitest", ONE),
+        ("yarn.lock", BERRY_LOCK, "vitest", ONE),
+        ("bun.lock", BUN_LOCK, "vitest", ONE),
+        ("Cargo.lock", CARGO_LOCK, "serde", CRATE),
+    ],
+)
+def test_every_format_reads_the_installed_version(
+    lockfile: object, lock: object, name: object, want: object
+) -> None:
+    """The version installed, never the range the entry was asked for."""
+    assert want == cj.locked(lockfile, lock, name)
 
 
-@pytest.mark.usefixtures("_tmp")
-class TestMain:
+def test_an_indented_yarn_mention_is_not_an_entry() -> None:
+    """Berry's `resolution:` line repeats an entry; alone it is none."""
+    lock = '"other@npm:^1":\n  version: 1.0.0\n  resolution: "vitest@npm:4.1.12"\n'
+    assert cj.locked("yarn.lock", lock, "vitest") == NONE
+
+
+def test_a_name_is_matched_whole_and_literally() -> None:
+    """`vitest` is not `@vitest/expect`, and a dot in a name is a dot."""
+    lock = "packages:\n\n  '@vitest/expect@4.1.12':\n  lodashxget@4.4.2:\n"
+    assert cj.locked("pnpm-lock.yaml", lock, "vitest") == NONE
+    assert cj.locked("pnpm-lock.yaml", lock, "lodash.get") == NONE
+    assert cj.locked("pnpm-lock.yaml", lock, "@vitest/expect") == ONE
+
+
+@pytest.mark.parametrize(
+    ("lockfile", "lock"),
+    [
+        ("package-lock.json", '{"packages": {"node_modules/vitest": {}}}'),
+        ("yarn.lock", 'vitest@^4:\n  resolved "x"\n'),
+    ],
+)
+def test_an_entry_without_a_version_reads_none(lockfile: object, lock: object) -> None:
+    """An entry whose version is not where its format writes one."""
+    assert cj.locked(lockfile, lock, "vitest") == NONE
+
+
+@pytest.mark.parametrize(
+    "lock", ["[[package]\n", "package = 1\n", '[[package]]\nname = "a"\n']
+)
+def test_a_cargo_lock_of_the_wrong_shape_is_refused(lock: object) -> None:
+    """Not TOML, or a package table of another shape, raises by where."""
+    with pytest.raises(decoded.UndecodableError):
+        cj.locked("Cargo.lock", lock, "a")
+
+
+class Main:
     """The runner line for a planted tree's package.json (#1659)."""
 
-    @fixture
-    def _tmp(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
 
@@ -159,39 +153,50 @@ class TestMain:
             status = cj.main(tracked)
         return status, out.getvalue(), err.getvalue()
 
-    def test_no_tracked_package_json_prints_nothing(self) -> None:
-        """An untracked package.json is never read."""
-        assert self.main([], {"package.json": "{"}) == (0, "", "")
 
-    def test_an_unreadable_package_json_is_refused(self) -> None:
-        """Broken JSON is exit 1, named, never read as no runner."""
-        status, out, err = self.main(["package.json"], {"package.json": "{"})
-        assert (status, out) == (1, "")
-        assert err.startswith(f"{TASK}: package.json: "), err
+@fixture
+def main_state(tmp_path: Path) -> Main:
+    """Give each row its own Main."""
+    return Main(tmp_path)
 
-    def test_a_package_json_that_is_not_an_object_names_no_runner(self) -> None:
-        """A JSON array declares nothing."""
-        assert self.main(["package.json"], {"package.json": "[]"}) == (0, "", "")
 
-    def test_vitest_declared_without_a_lockfile_entry_is_named(self) -> None:
-        """Declared but not pinned: nothing the leg may run."""
-        declared: dict[str, object] = {"devDependencies": {"vitest": "4.1.12"}}
-        manifest = json.dumps(declared)
-        assert self.main(["package.json"], {"package.json": manifest}) == (
-            0,
-            "unsupported vitest-without-a-lockfile-entry\n",
-            "",
-        )
+def test_no_tracked_package_json_prints_nothing(main_state: Main) -> None:
+    """An untracked package.json is never read."""
+    assert main_state.main([], {"package.json": "{"}) == (0, "", "")
 
-    def test_another_runner_is_named(self) -> None:
-        """A jest tree is named so the skip says what it skipped."""
-        declared: dict[str, object] = {"devDependencies": {"jest": "29"}}
-        manifest = json.dumps(declared)
-        assert self.main(["package.json"], {"package.json": manifest}) == (
-            0,
-            "unsupported jest\n",
-            "",
-        )
+
+def test_an_unreadable_package_json_is_refused(main_state: Main) -> None:
+    """Broken JSON is exit 1, named, never read as no runner."""
+    status, out, err = main_state.main(["package.json"], {"package.json": "{"})
+    assert (status, out) == (1, "")
+    assert err.startswith(f"{TASK}: package.json: "), err
+
+
+def test_a_package_json_that_is_not_an_object_names_no_runner(main_state: Main) -> None:
+    """A JSON array declares nothing."""
+    assert main_state.main(["package.json"], {"package.json": "[]"}) == (0, "", "")
+
+
+def test_vitest_declared_without_a_lockfile_entry_is_named(main_state: Main) -> None:
+    """Declared but not pinned: nothing the leg may run."""
+    declared: dict[str, object] = {"devDependencies": {"vitest": "4.1.12"}}
+    manifest = json.dumps(declared)
+    assert main_state.main(["package.json"], {"package.json": manifest}) == (
+        0,
+        "unsupported vitest-without-a-lockfile-entry\n",
+        "",
+    )
+
+
+def test_another_runner_is_named(main_state: Main) -> None:
+    """A jest tree is named so the skip says what it skipped."""
+    declared: dict[str, object] = {"devDependencies": {"jest": "29"}}
+    manifest = json.dumps(declared)
+    assert main_state.main(["package.json"], {"package.json": manifest}) == (
+        0,
+        "unsupported jest\n",
+        "",
+    )
 
 
 FLAGS = [
@@ -203,12 +208,10 @@ FLAGS = [
 ]
 
 
-@pytest.mark.usefixtures("_tmp")
-class TestMeasuredRun:
+class MeasuredRun:
     """`--measured-run`: the vitest run on `measured`'s line (#2105)."""
 
-    @fixture
-    def _tmp(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
 
@@ -239,64 +242,78 @@ class TestMeasuredRun:
         out, err = capfd.readouterr()
         return status, out, err
 
-    def test_a_launched_run_gains_the_flags(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """`pnpm exec vitest run x`: the five flags, NUL-separated."""
-        status, out, err = self.call("pnpm", "exec", "vitest", "run", "x", capfd=capfd)
-        assert (status, err) == (0, "")
-        want = ["pnpm", "exec", "vitest", "run", "x", *FLAGS]
-        assert "".join(f"{w}\0" for w in want) == out
 
-    def test_no_subcommand_is_run(self) -> None:
-        """A bare vitest is its watch mode; `run` is inserted."""
-        got = cj.measured_run(
-            "v8", "/run/typescript", ["node_modules/.bin/vitest", "--silent"]
-        )
-        want: list[str] = ["node_modules/.bin/vitest", "run", "--silent", *FLAGS]
-        assert want == got
+@fixture
+def measured_run_state(tmp_path: Path) -> MeasuredRun:
+    """Give each row its own MeasuredRun."""
+    return MeasuredRun(tmp_path)
 
-    @pytest.mark.parametrize(
-        "command",
-        [
-            ["vitest", "list"],
-            ["bunx", "vitest", "run"],
-            ["python3", "-m", "unittest"],
-            [],
-        ],
+
+def test_a_launched_run_gains_the_flags(
+    measured_run_state: MeasuredRun, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """`pnpm exec vitest run x`: the five flags, NUL-separated."""
+    status, out, err = measured_run_state.call(
+        "pnpm", "exec", "vitest", "run", "x", capfd=capfd
     )
-    def test_what_is_not_a_run_is_unchanged(
-        self, command: object, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """Another subcommand, another launcher, or no vitest: nothing."""
-        assert self.call(*command, capfd=capfd) == (0, "", "")
+    assert (status, err) == (0, "")
+    want = ["pnpm", "exec", "vitest", "run", "x", *FLAGS]
+    assert "".join(f"{w}\0" for w in want) == out
 
-    def test_a_tree_the_leg_reports_on_is_unchanged(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """No provider pinned: the leg names it; measured adds nothing."""
-        lock = "lockfileVersion: '9.0'\npackages:\n  vitest@4.1.12:\n"
-        assert self.call(
-            "vitest", "run", files={"pnpm-lock.yaml": lock}, capfd=capfd
-        ) == (0, "", "")
 
-    def test_a_coverage_flag_of_its_own_is_refused(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """The leg owns the coverage flags: exit 1, named."""
-        status, out, err = self.call(
-            "vitest", "run", "--coverage.enabled=false", capfd=capfd
-        )
-        assert (status, out) == (1, "")
-        assert err.startswith(
-            "measured: --coverage.enabled=false is on the vitest run"
-        ), err
+@pytest.mark.usefixtures("measured_run_state")
+def test_no_subcommand_is_run() -> None:
+    """A bare vitest is its watch mode; `run` is inserted."""
+    got = cj.measured_run(
+        "v8", "/run/typescript", ["node_modules/.bin/vitest", "--silent"]
+    )
+    want: list[str] = ["node_modules/.bin/vitest", "run", "--silent", *FLAGS]
+    assert want == got
 
-    def test_no_separator_is_a_usage_error(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """The command follows `--`; without it nothing is read."""
-        status = cj.main(["--measured-run", "/d"])
-        _out, err = capfd.readouterr()
-        assert status == 2
-        assert "usage" in err
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["vitest", "list"],
+        ["bunx", "vitest", "run"],
+        ["python3", "-m", "unittest"],
+        [],
+    ],
+)
+def test_what_is_not_a_run_is_unchanged(
+    measured_run_state: MeasuredRun, command: object, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Another subcommand, another launcher, or no vitest: nothing."""
+    assert measured_run_state.call(*command, capfd=capfd) == (0, "", "")
+
+
+def test_a_tree_the_leg_reports_on_is_unchanged(
+    measured_run_state: MeasuredRun, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """No provider pinned: the leg names it; measured adds nothing."""
+    lock = "lockfileVersion: '9.0'\npackages:\n  vitest@4.1.12:\n"
+    assert measured_run_state.call(
+        "vitest", "run", files={"pnpm-lock.yaml": lock}, capfd=capfd
+    ) == (0, "", "")
+
+
+def test_a_coverage_flag_of_its_own_is_refused(
+    measured_run_state: MeasuredRun, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """The leg owns the coverage flags: exit 1, named."""
+    status, out, err = measured_run_state.call(
+        "vitest", "run", "--coverage.enabled=false", capfd=capfd
+    )
+    assert (status, out) == (1, "")
+    assert err.startswith("measured: --coverage.enabled=false is on the vitest run"), (
+        err
+    )
+
+
+@pytest.mark.usefixtures("measured_run_state")
+def test_no_separator_is_a_usage_error(capfd: pytest.CaptureFixture[str]) -> None:
+    """The command follows `--`; without it nothing is read."""
+    status = cj.main(["--measured-run", "/d"])
+    _out, err = capfd.readouterr()
+    assert status == 2
+    assert "usage" in err

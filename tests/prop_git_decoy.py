@@ -52,51 +52,46 @@ def state(refs: dict[str, str], config: str) -> gd.State:
     )
 
 
-class TestScrubbed:
-    """No repository reaches a scrubbed git."""
-
-    @given(st.dictionaries(ENV_NAME, VALUE, max_size=10))
-    def test_every_git_name_and_nothing_else(self, environ: dict[str, str]) -> None:
-        """GIT_* gone; the rest kept as they were."""
-        with pytest.MonkeyPatch.context() as patched:
-            for name in list(os.environ):
-                patched.delenv(name)
-            for name, value in environ.items():
-                patched.setenv(name, value)
-            got = gd.scrubbed()
-        kept = {k: v for k, v in environ.items() if not k.startswith("GIT_")}
-        assert got == kept
+# No repository reaches a scrubbed git.
+@given(st.dictionaries(ENV_NAME, VALUE, max_size=10))
+def test_every_git_name_and_nothing_else(environ: dict[str, str]) -> None:
+    """GIT_* gone; the rest kept as they were."""
+    with pytest.MonkeyPatch.context() as patched:
+        for name in list(os.environ):
+            patched.delenv(name)
+        for name, value in environ.items():
+            patched.setenv(name, value)
+        got = gd.scrubbed()
+    kept = {k: v for k, v in environ.items() if not k.startswith("GIT_")}
+    assert got == kept
 
 
-class TestChanges:
-    """Each change named once; no change, no line."""
+# Each change named once; no change, no line.
+@given(REFS, HASH)
+def test_a_state_against_itself_is_nothing(refs: dict[str, str], config: str) -> None:
+    """Equal states, empty list."""
+    one = state(refs, config)
+    assert gd.changes(Path("/nonexistent"), one, one) == list[str]()
 
-    @given(REFS, HASH)
-    def test_a_state_against_itself_is_nothing(
-        self, refs: dict[str, str], config: str
-    ) -> None:
-        """Equal states, empty list."""
-        one = state(refs, config)
-        assert gd.changes(Path("/nonexistent"), one, one) == list[str]()
 
-    @given(REFS, REFS, HASH, HASH)
-    def test_each_ref_and_config_change_named_once(
-        self, before: dict[str, str], after: dict[str, str], c1: str, c2: str
-    ) -> None:
-        """New, moved and lost refs, and the config, each once."""
-        got = gd.changes(Path("/nonexistent"), state(before, c1), state(after, c2))
-        expected = [
-            *(
-                f"new or moved ref: {n}"
-                for o, n in sorted((o, n) for n, o in after.items())
-                if before.get(n) != o
-            ),
-            *(
-                f"lost ref: {n}"
-                for o, n in sorted((o, n) for n, o in before.items())
-                if after.get(n) != o
-            ),
-        ]
-        if c1 != c2:
-            expected.append("config rewritten")
-        assert got == expected
+@given(REFS, REFS, HASH, HASH)
+def test_each_ref_and_config_change_named_once(
+    before: dict[str, str], after: dict[str, str], c1: str, c2: str
+) -> None:
+    """New, moved and lost refs, and the config, each once."""
+    got = gd.changes(Path("/nonexistent"), state(before, c1), state(after, c2))
+    expected = [
+        *(
+            f"new or moved ref: {n}"
+            for o, n in sorted((o, n) for n, o in after.items())
+            if before.get(n) != o
+        ),
+        *(
+            f"lost ref: {n}"
+            for o, n in sorted((o, n) for n, o in before.items())
+            if after.get(n) != o
+        ),
+    ]
+    if c1 != c2:
+        expected.append("config rewritten")
+    assert got == expected

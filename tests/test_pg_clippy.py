@@ -90,14 +90,10 @@ def clippy(spec: str, belt: Path, root: str = "Cargo.toml") -> str:
     return f"cargo clippy -p {spec} {at} {OWN} {LADDER} [yes pg17 {belt}]"
 
 
-@pytest.mark.usefixtures("_set_up_test_planted")
-class TestPlanted:
+class Planted:
     """A planted tree, a planted belt and the stubs."""
 
-    @fixture
-    def _set_up_test_planted(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def __init__(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Plant the tree, the belt and the stubs."""
         # `belt pgrx-postgres`, which the registration calls in process.
         monkeypatch.setattr(pgrx_postgres, "main", planted.stub_pin)
@@ -185,210 +181,234 @@ class TestPlanted:
         want = list(lines)
         assert want == self.logged()
 
-    def assert_finding(
-        self, called: tuple[int, str, str], status: int, *lines: str
-    ) -> None:
-        """Assert the status, and the finding's lines in order on stderr."""
-        code, out, err = called
-        assert status == code, out + err
-        head, *detail = lines
-        want = f"{TASK}: {head}\n" + "".join(f"  {line}\n" for line in detail)
-        assert want in err
+
+@fixture
+def planted_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Planted:
+    """Give each row its own Planted."""
+    return Planted(tmp_path, monkeypatch)
 
 
-class TestBranches(TestPlanted):
-    """Each branch of lint:pg-clippy's body, its message asserted."""
-
-    def test_an_argument_is_a_usage_error(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """The task passes none; anything else is a caller's mistake."""
-        done = self.call("lint", capfd=capfd)
-        self.assert_finding(done, 2, "usage: belt pg-clippy")
-        self.assert_logged()
-
-    def test_cargo_missing_is_red(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """No cargo on PATH: the toolchain is broken, never a skip."""
-        (self.bins / "cargo").unlink()
-        done = self.call(capfd=capfd)
-        self.assert_finding(
-            done, 1, "Cargo.toml present but cargo missing — pin rust in mise.toml"
-        )
-        self.assert_logged()
-
-    def test_a_red_fetch_keeps_its_status(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """`cargo fetch --locked` fails: nothing is derived after it."""
-        status, out, _err = self.call(STUB_FETCH_STATUS="7", capfd=capfd)
-        assert status == 7
-        self.assert_logged(FETCH)
-        assert out == ""
-
-    def test_a_red_metadata_is_never_a_workspace_with_no_extension(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A failing cargo metadata gives its status, not the skip."""
-        status, out, _err = self.call(STUB_METADATA_STATUS="4", capfd=capfd)
-        assert status == 4
-        self.assert_logged(FETCH, METADATA)
-        assert "skipped" not in out
-
-    def test_a_red_surface_is_never_a_workspace_with_no_extension(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """gate_surface.py refuses the metadata: its status, not the skip."""
-        self.metadata.write_text("not json", encoding="utf-8")
-        status, out, err = self.call(capfd=capfd)
-        assert status == 1
-        assert err.startswith("lint:pg-clippy: cargo metadata did not give JSON\n"), err
-        self.assert_logged(FETCH, METADATA)
-        assert out == ""
-
-    def test_a_major_that_is_not_a_number_is_red(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """pgrx-env.sh's union refuses it by name (#1795)."""
-        status, out, err = self.call(STUB_BAD_MAJOR="1", capfd=capfd)
-        assert status == 1
-        assert err == "lint:pg-clippy: ext@0.1.0 names no Postgres major: 'pg17'\n"
-        self.assert_logged(FETCH, METADATA)
-        assert out == ""
-
-    def test_no_extension_skips_clean(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """A workspace of plain crates has nothing for this task."""
-        self.metadata.write_text(
-            planted.workspace(planted.member("a")), encoding="utf-8"
-        )
-        status, out, err = self.call(capfd=capfd)
-        assert status == 0, err
-        assert out == "lint:pg-clippy: no pgrx extension tracked, skipped\n"
-        self.assert_logged(FETCH, METADATA)
-
-    def test_clippy_missing_is_red(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """A rustup that lists no clippy: the remedy names the pin."""
-        done = self.call(STUB_COMPONENTS="rustfmt-host\\n", capfd=capfd)
-        self.assert_finding(
-            done,
-            1,
-            "clippy component missing — declare it with the rust pin in mise.toml:",
-            'rust = { version = "1.xx.x", components = "clippy,rustfmt,llvm-tools" }',
-        )
-        self.assert_logged(FETCH, METADATA)
-
-    def test_a_red_ladder_keeps_its_status(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """clippy-ladder.sh fails: nothing is registered or linted."""
-        status, _out, _err = self.call(STUB_LADDER_FAILS="1", capfd=capfd)
-        assert status == 3
-        self.assert_logged(FETCH, METADATA)
-
-    def test_a_red_prepare_keeps_its_status(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """The SDK or an ICU check fails: nothing is linted (#1774)."""
-        status, _out, _err = self.call(STUB_PREPARE_FAILS="1", capfd=capfd)
-        assert status == 5
-        self.assert_logged(FETCH, METADATA, "prepare 17")
-
-    def test_a_missing_postgres_pin_keeps_its_status(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """pgrx_postgres.py reds a declared major with no pin (#1940)."""
-        status, _out, _err = self.call(STUB_PIN_STATUS="6", capfd=capfd)
-        assert status == 6
-        self.assert_logged(FETCH, METADATA, *REGISTER)
-
-    def test_a_red_extension_keeps_clippys_status(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A refused extension gives cargo's 101, and no summary."""
-        status, out, _err = self.call(STUB_RED="ext", capfd=capfd)
-        assert status == 101
-        self.assert_logged(FETCH, METADATA, *REGISTER, clippy("ext@0.1.0", self.belt))
-        assert out == ""
-
-    def test_a_clean_extension_says_what_was_linted(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """At its highest major, with the canon's clippy.toml, under the ladder.
-
-        `other` is excluded by CLIPPY_EXCLUDE and not linted; `a` is no
-        extension.
-        """
-        status, out, err = self.call(capfd=capfd)
-        assert status == 0, err
-        self.assert_logged(FETCH, METADATA, *REGISTER, clippy("ext@0.1.0", self.belt))
-        said = [
-            "lint:pg-clippy: Cargo.toml: 1 extension(s) linted: ext(pg17)",
-            (
-                "lint:pg-clippy: clean at every group"
-                " (restriction minus 0 named contradictions)"
-            ),
-        ]
-        assert said == out.splitlines()
+def assert_finding(called: tuple[int, str, str], status: int, *lines: str) -> None:
+    """Assert the status, and the finding's lines in order on stderr."""
+    code, out, err = called
+    assert status == code, out + err
+    head, *detail = lines
+    want = f"{TASK}: {head}\n" + "".join(f"  {line}\n" for line in detail)
+    assert want in err
 
 
-class TestWorkspace(TestPlanted):
-    """Every workspace the tree tracks is linted (#2004)."""
+def test_an_argument_is_a_usage_error(
+    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """The task passes none; anything else is a caller's mistake."""
+    done = planted_state.call("lint", capfd=capfd)
+    assert_finding(done, 2, "usage: belt pg-clippy")
+    planted_state.assert_logged()
 
-    def test_the_manifest_path_reaches_every_cargo_command(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """Fetch, metadata and clippy each name the workspace they read."""
-        with pytest.MonkeyPatch.context() as patched:
-            for name, value in (self.env | {"ORG_BELT_DIR": str(self.belt)}).items():
-                patched.setenv(name, value)
-            patched.chdir(self.tree)
-            status = pg_clippy.workspace(
-                str(self.bins / "cargo"), "crates/Cargo.toml"
-            ).status
-        _out, err = capfd.readouterr()
-        assert status == 0, err
-        tail = "--manifest-path crates/Cargo.toml"
-        self.assert_logged(
-            f"cargo fetch --locked {tail} [  ]",
-            f"cargo metadata --no-deps --format-version 1 --locked {tail} [  ]",
-            *REGISTER,
-            f"cargo clippy -p ext@0.1.0 {tail} {OWN} {LADDER} [yes pg17 {self.belt}]",
-        )
 
-    def test_an_extension_in_a_second_root_is_linted_there(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A pgrx extension in fuzz/Cargo.toml, its own root: linted at it.
+def test_cargo_missing_is_red(
+    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """No cargo on PATH: the toolchain is broken, never a skip."""
+    (planted_state.bins / "cargo").unlink()
+    done = planted_state.call(capfd=capfd)
+    assert_finding(
+        done, 1, "Cargo.toml present but cargo missing — pin rust in mise.toml"
+    )
+    planted_state.assert_logged()
 
-        The root workspace holds a plain crate only; before #2004 the
-        task read the root workspace alone and skipped clean.
-        """
-        self.metadata.write_text(
-            planted.workspace(planted.member("a")), encoding="utf-8"
-        )
-        self.fuzz_metadata.write_text(
-            planted.workspace(planted.member("ext", pgrx=True)), encoding="utf-8"
-        )
-        (self.tree / "fuzz").mkdir()
-        (self.tree / "fuzz" / "Cargo.toml").write_text(
-            "[workspace]\n", encoding="utf-8"
-        )
-        self.track()
-        status, out, err = self.call(capfd=capfd)
-        assert status == 0, err
-        fuzz = "--manifest-path fuzz/Cargo.toml"
-        self.assert_logged(
-            FETCH,
-            METADATA,
-            f"cargo fetch --locked {fuzz} [  ]",
-            f"cargo metadata --no-deps --format-version 1 --locked {fuzz} [  ]",
-            *REGISTER,
-            clippy("ext@0.1.0", self.belt, "fuzz/Cargo.toml"),
-        )
-        said = [
-            "lint:pg-clippy: fuzz/Cargo.toml: 1 extension(s) linted: ext(pg17)",
-            (
-                "lint:pg-clippy: clean at every group"
-                " (restriction minus 0 named contradictions)"
-            ),
-        ]
-        assert said == out.splitlines()
+
+def test_a_red_fetch_keeps_its_status(
+    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """`cargo fetch --locked` fails: nothing is derived after it."""
+    status, out, _err = planted_state.call(STUB_FETCH_STATUS="7", capfd=capfd)
+    assert status == 7
+    planted_state.assert_logged(FETCH)
+    assert out == ""
+
+
+def test_a_red_metadata_is_never_a_workspace_with_no_extension(
+    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A failing cargo metadata gives its status, not the skip."""
+    status, out, _err = planted_state.call(STUB_METADATA_STATUS="4", capfd=capfd)
+    assert status == 4
+    planted_state.assert_logged(FETCH, METADATA)
+    assert "skipped" not in out
+
+
+def test_a_red_surface_is_never_a_workspace_with_no_extension(
+    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """gate_surface.py refuses the metadata: its status, not the skip."""
+    planted_state.metadata.write_text("not json", encoding="utf-8")
+    status, out, err = planted_state.call(capfd=capfd)
+    assert status == 1
+    assert err.startswith("lint:pg-clippy: cargo metadata did not give JSON\n"), err
+    planted_state.assert_logged(FETCH, METADATA)
+    assert out == ""
+
+
+def test_a_major_that_is_not_a_number_is_red(
+    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """pgrx-env.sh's union refuses it by name (#1795)."""
+    status, out, err = planted_state.call(STUB_BAD_MAJOR="1", capfd=capfd)
+    assert status == 1
+    assert err == "lint:pg-clippy: ext@0.1.0 names no Postgres major: 'pg17'\n"
+    planted_state.assert_logged(FETCH, METADATA)
+    assert out == ""
+
+
+def test_no_extension_skips_clean(
+    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A workspace of plain crates has nothing for this task."""
+    planted_state.metadata.write_text(
+        planted.workspace(planted.member("a")), encoding="utf-8"
+    )
+    status, out, err = planted_state.call(capfd=capfd)
+    assert status == 0, err
+    assert out == "lint:pg-clippy: no pgrx extension tracked, skipped\n"
+    planted_state.assert_logged(FETCH, METADATA)
+
+
+def test_clippy_missing_is_red(
+    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A rustup that lists no clippy: the remedy names the pin."""
+    done = planted_state.call(STUB_COMPONENTS="rustfmt-host\\n", capfd=capfd)
+    assert_finding(
+        done,
+        1,
+        "clippy component missing — declare it with the rust pin in mise.toml:",
+        'rust = { version = "1.xx.x", components = "clippy,rustfmt,llvm-tools" }',
+    )
+    planted_state.assert_logged(FETCH, METADATA)
+
+
+def test_a_red_ladder_keeps_its_status(
+    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """clippy-ladder.sh fails: nothing is registered or linted."""
+    status, _out, _err = planted_state.call(STUB_LADDER_FAILS="1", capfd=capfd)
+    assert status == 3
+    planted_state.assert_logged(FETCH, METADATA)
+
+
+def test_a_red_prepare_keeps_its_status(
+    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """The SDK or an ICU check fails: nothing is linted (#1774)."""
+    status, _out, _err = planted_state.call(STUB_PREPARE_FAILS="1", capfd=capfd)
+    assert status == 5
+    planted_state.assert_logged(FETCH, METADATA, "prepare 17")
+
+
+def test_a_missing_postgres_pin_keeps_its_status(
+    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """pgrx_postgres.py reds a declared major with no pin (#1940)."""
+    status, _out, _err = planted_state.call(STUB_PIN_STATUS="6", capfd=capfd)
+    assert status == 6
+    planted_state.assert_logged(FETCH, METADATA, *REGISTER)
+
+
+def test_a_red_extension_keeps_clippys_status(
+    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A refused extension gives cargo's 101, and no summary."""
+    status, out, _err = planted_state.call(STUB_RED="ext", capfd=capfd)
+    assert status == 101
+    planted_state.assert_logged(
+        FETCH, METADATA, *REGISTER, clippy("ext@0.1.0", planted_state.belt)
+    )
+    assert out == ""
+
+
+def test_a_clean_extension_says_what_was_linted(
+    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """At its highest major, with the canon's clippy.toml, under the ladder.
+
+    `other` is excluded by CLIPPY_EXCLUDE and not linted; `a` is no
+    extension.
+    """
+    status, out, err = planted_state.call(capfd=capfd)
+    assert status == 0, err
+    planted_state.assert_logged(
+        FETCH, METADATA, *REGISTER, clippy("ext@0.1.0", planted_state.belt)
+    )
+    said = [
+        "lint:pg-clippy: Cargo.toml: 1 extension(s) linted: ext(pg17)",
+        (
+            "lint:pg-clippy: clean at every group"
+            " (restriction minus 0 named contradictions)"
+        ),
+    ]
+    assert said == out.splitlines()
+
+
+def test_the_manifest_path_reaches_every_cargo_command(
+    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Fetch, metadata and clippy each name the workspace they read."""
+    with pytest.MonkeyPatch.context() as patched:
+        for name, value in (
+            planted_state.env | {"ORG_BELT_DIR": str(planted_state.belt)}
+        ).items():
+            patched.setenv(name, value)
+        patched.chdir(planted_state.tree)
+        status = pg_clippy.workspace(
+            str(planted_state.bins / "cargo"), "crates/Cargo.toml"
+        ).status
+    _out, err = capfd.readouterr()
+    assert status == 0, err
+    tail = "--manifest-path crates/Cargo.toml"
+    planted_state.assert_logged(
+        f"cargo fetch --locked {tail} [  ]",
+        f"cargo metadata --no-deps --format-version 1 --locked {tail} [  ]",
+        *REGISTER,
+        f"cargo clippy -p ext@0.1.0 {tail} {OWN} {LADDER} [yes pg17 {planted_state.belt}]",
+    )
+
+
+def test_an_extension_in_a_second_root_is_linted_there(
+    planted_state: Planted, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A pgrx extension in fuzz/Cargo.toml, its own root: linted at it.
+
+    The root workspace holds a plain crate only; before #2004 the
+    task read the root workspace alone and skipped clean.
+    """
+    planted_state.metadata.write_text(
+        planted.workspace(planted.member("a")), encoding="utf-8"
+    )
+    planted_state.fuzz_metadata.write_text(
+        planted.workspace(planted.member("ext", pgrx=True)), encoding="utf-8"
+    )
+    (planted_state.tree / "fuzz").mkdir()
+    (planted_state.tree / "fuzz" / "Cargo.toml").write_text(
+        "[workspace]\n", encoding="utf-8"
+    )
+    planted_state.track()
+    status, out, err = planted_state.call(capfd=capfd)
+    assert status == 0, err
+    fuzz = "--manifest-path fuzz/Cargo.toml"
+    planted_state.assert_logged(
+        FETCH,
+        METADATA,
+        f"cargo fetch --locked {fuzz} [  ]",
+        f"cargo metadata --no-deps --format-version 1 --locked {fuzz} [  ]",
+        *REGISTER,
+        clippy("ext@0.1.0", planted_state.belt, "fuzz/Cargo.toml"),
+    )
+    said = [
+        "lint:pg-clippy: fuzz/Cargo.toml: 1 extension(s) linted: ext(pg17)",
+        (
+            "lint:pg-clippy: clean at every group"
+            " (restriction minus 0 named contradictions)"
+        ),
+    ]
+    assert said == out.splitlines()

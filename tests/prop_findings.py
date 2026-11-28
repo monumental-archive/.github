@@ -45,36 +45,32 @@ LONE: list[str] = ["\udfff"]
 NONE: list[str] = []
 
 
-class TestOneRecordReadsBack:
-    """R: one line, read back as the text the log line shows."""
-
-    @given(st.text(), st.text(), st.lists(st.text(), max_size=4))
-    @example("bad\udcffname", "x\ud800y", LONE)
-    @example("", "", NONE)
-    def test_one_record_reads_back(
-        self, subject: str, message: str, detail: list[str]
-    ) -> None:
-        """Exactly one line; each field is `_text` of what was given."""
-        with tempfile.TemporaryDirectory() as scratch:
-            file = Path(scratch) / "out" / "job.jsonl"
-            env = {"ORG_FINDINGS": str(file), "MISE_TASK_NAME": "lint:demo"}
-            with (
-                pytest.MonkeyPatch.context() as patched,
-                redirect_stderr(io.StringIO()),
-            ):
-                for name, value in env.items():
-                    patched.setenv(name, value)
-                findings.finding(subject, message, detail)
-            text = file.read_text(encoding="utf-8")
-        assert text.endswith("\n"), text
-        assert text.count("\n") == 1, text
-        record = decoded.as_object(decoded.load_json(text), "the record")
-        lines: list[object] = [printed(line) for line in detail]
-        expected: dict[str, object] = {
-            "v": findings.VERSION,
-            "task": "lint:demo",
-            "subject": printed(subject),
-            "message": printed(message),
-            "detail": lines,
-        }
-        assert record == expected
+# R: one line, read back as the text the log line shows.
+@given(st.text(), st.text(), st.lists(st.text(), max_size=4))
+@example("bad\udcffname", "x\ud800y", LONE)
+@example("", "", NONE)
+def test_one_record_reads_back(subject: str, message: str, detail: list[str]) -> None:
+    """Exactly one line; each field is `_text` of what was given."""
+    with tempfile.TemporaryDirectory() as scratch:
+        file = Path(scratch) / "out" / "job.jsonl"
+        env = {"ORG_FINDINGS": str(file), "MISE_TASK_NAME": "lint:demo"}
+        with (
+            pytest.MonkeyPatch.context() as patched,
+            redirect_stderr(io.StringIO()),
+        ):
+            for name, value in env.items():
+                patched.setenv(name, value)
+            findings.finding(subject, message, detail)
+        text = file.read_text(encoding="utf-8")
+    assert text.endswith("\n"), text
+    assert text.count("\n") == 1, text
+    record = decoded.as_object(decoded.load_json(text), "the record")
+    lines: list[object] = [printed(line) for line in detail]
+    expected: dict[str, object] = {
+        "v": findings.VERSION,
+        "task": "lint:demo",
+        "subject": printed(subject),
+        "message": printed(message),
+        "detail": lines,
+    }
+    assert record == expected

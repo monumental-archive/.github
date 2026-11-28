@@ -68,27 +68,25 @@ def run_build(pkgs: list[str]) -> tuple[str | None, list[str], list[str]]:
     return refused, built, staged
 
 
-class TestSameNameRefused:
-    """V: one binary name, two packages: refused whatever the order."""
-
-    @given(
-        st.lists(IMPORT_PATH, min_size=1, max_size=6, unique=True),
-        st.randoms(use_true_random=False),
-    )
-    @example(CLASHING, None)
-    def test_refused_exactly_on_a_shared_last_element(
-        self, pkgs: list[str], shuffle: random.Random | None
-    ) -> None:
-        """A shared element is refused by name; distinct ones each build."""
-        if shuffle is not None:
-            shuffle.shuffle(pkgs)
-        names = [p.rpartition("/")[2] for p in pkgs]
-        refused, built, staged = run_build(pkgs)
-        clash = [n for i, n in enumerate(names) if n in names[:i]]
-        if clash:
-            assert refused == f"two main packages both build a binary named {clash[0]}"
-        else:
-            assert refused is None
-            assert built == pkgs
-            want: list[str] = sorted(names)
-            assert staged == want
+# V: one binary name, two packages: refused whatever the order.
+@given(
+    st.lists(IMPORT_PATH, min_size=1, max_size=6, unique=True),
+    st.randoms(use_true_random=False),
+)
+@example(CLASHING, None)
+def test_refused_exactly_on_a_shared_last_element(
+    pkgs: list[str], shuffle: random.Random | None
+) -> None:
+    """A shared element is refused by name; distinct ones each build."""
+    if shuffle is not None:
+        shuffle.shuffle(pkgs)
+    names = [p.rpartition("/")[2] for p in pkgs]
+    refused, built, staged = run_build(pkgs)
+    clash = [n for i, n in enumerate(names) if n in names[:i]]
+    if clash:
+        assert refused == f"two main packages both build a binary named {clash[0]}"
+    else:
+        assert refused is None
+        assert built == pkgs
+        want: list[str] = sorted(names)
+        assert staged == want

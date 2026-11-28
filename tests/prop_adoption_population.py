@@ -135,52 +135,49 @@ def printed(members: list[MemberDoc]) -> str:
     return out.getvalue()
 
 
-class TestObligations:
-    """Membership derives the obligations."""
-
-    @given(st.tuples(MEMBER, st.booleans()))
-    def test_what_a_member_owes(self, case: tuple[MemberDoc, bool]) -> None:
-        """Each artifact owed exactly when its condition holds."""
-        member, is_canon = case
-        canon = member["repo"] if is_canon else f"{member['repo']}-canon"
-        owed = {
-            artifact for artifact, _ in ap.obligations(ap.Member.of(member, "m"), canon)
-        }
-        assert {"ci", "dependencies", "deep-tests", "records"} <= owed
-        assert "audit" not in owed
-        assert ("public-api" in owed) == (not is_canon)
-        assert ("own-audits" in owed) == (not is_canon)
-        public = member["visibility"] != "private"
-        assert ("scorecard" in owed) == public
-        assert ("dependency-review" in owed) == public
-        assert ("source-attest" in owed) == ("source" in member["tracks"])
-        assert ("release" in owed) == member["releaseTags"]
-        assert ("publish" in owed) == member["releaseTags"]
-
-    @given(st.data(), MEMBERS)
-    def test_member_order_does_not_matter(
-        self, data: st.DataObject, members: list[MemberDoc]
-    ) -> None:
-        """The same members in any order print the same lines."""
-        shuffled = data.draw(st.permutations(members))
-        assert printed(members) == printed(shuffled)
+# Membership derives the obligations.
+@given(st.tuples(MEMBER, st.booleans()))
+def test_what_a_member_owes(case: tuple[MemberDoc, bool]) -> None:
+    """Each artifact owed exactly when its condition holds."""
+    member, is_canon = case
+    canon = member["repo"] if is_canon else f"{member['repo']}-canon"
+    owed = {
+        artifact for artifact, _ in ap.obligations(ap.Member.of(member, "m"), canon)
+    }
+    assert {"ci", "dependencies", "deep-tests", "records"} <= owed
+    assert "audit" not in owed
+    assert ("public-api" in owed) == (not is_canon)
+    assert ("own-audits" in owed) == (not is_canon)
+    public = member["visibility"] != "private"
+    assert ("scorecard" in owed) == public
+    assert ("dependency-review" in owed) == public
+    assert ("source-attest" in owed) == ("source" in member["tracks"])
+    assert ("release" in owed) == member["releaseTags"]
+    assert ("publish" in owed) == member["releaseTags"]
 
 
-class TestRefusal:
-    """Any document is read or refused by name."""
+@given(st.data(), MEMBERS)
+def test_member_order_does_not_matter(
+    data: st.DataObject, members: list[MemberDoc]
+) -> None:
+    """The same members in any order print the same lines."""
+    shuffled = data.draw(st.permutations(members))
+    assert printed(members) == printed(shuffled)
 
-    @given(
-        st.one_of(
-            JSON.map(dumped),
-            st.lists(st.one_of(MEMBER, JSON), max_size=3).map(document),
-            st.text(max_size=40),
-        )
+
+# Any document is read or refused by name.
+@given(
+    st.one_of(
+        JSON.map(dumped),
+        st.lists(st.one_of(MEMBER, JSON), max_size=3).map(document),
+        st.text(max_size=40),
     )
-    @example('{"schema": 9, "members": [{"repo": "a", "tracks": []}]}')
-    def test_members_or_refusal(self, stdin: str) -> None:
-        """A list of members, or RefusalError."""
-        try:
-            members = ap.load_members(io.StringIO(stdin))
-        except ap.RefusalError:
-            return
-        assert members
+)
+@example('{"schema": 9, "members": [{"repo": "a", "tracks": []}]}')
+def test_members_or_refusal(stdin: str) -> None:
+    """A list of members, or RefusalError."""
+    try:
+        members = ap.load_members(io.StringIO(stdin))
+    except ap.RefusalError:
+        return
+    assert members

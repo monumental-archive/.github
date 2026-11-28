@@ -22,9 +22,8 @@ import json
 import os
 import re
 import subprocess
-import tempfile
+from dataclasses import dataclass
 from pathlib import Path
-from typing import ClassVar, override
 
 import pytest
 
@@ -268,293 +267,297 @@ class Forge:
         return calls
 
 
-@pytest.mark.usefixtures("_set_up_test_forge_case")
-class TestForgeCase:
+class ForgeCase:
     """A row with a fresh clean org."""
 
-    @fixture
-    def _set_up_test_forge_case(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Build the clean org in a temporary directory."""
         self.forge = Forge(Path(str(tmp_path)))
 
 
-class TestCleanOrg:
+@fixture
+def forge_case(tmp_path: Path) -> ForgeCase:
+    """Give each row its own ForgeCase."""
+    return ForgeCase(tmp_path)
+
+
+@dataclass(frozen=True)
+class CleanOrg:
     """What a check of a clean org reads and says: one run, three rows."""
 
-    forge: ClassVar[Forge]
-    done: ClassVar[subprocess.CompletedProcess[str]]
-
-    @classmethod
-    @override
-    def setUpClass(cls) -> None:
-        """Check the clean org once; every row reads the same run."""
-        tmp = tempfile.TemporaryDirectory()
-        cls.addClassCleanup(tmp.cleanup)
-        cls.forge = Forge(Path(tmp.name))
-        cls.done = cls.forge.check()
-
-    def test_a_clean_check_says_what_it_checked(self) -> None:
-        """A clean run names its coverage; silence is no proof (#311).
-
-        A check that exited 0 printing nothing could not be told apart
-        from one that checked nothing.
-        """
-        done = self.done
-        assert done.returncode == 0, done.stdout + done.stderr
-        assert re.search(
-            rf"\Arepo-baseline: {len(ROSTER)} repos checked \(.*\), no drift\n\Z",
-            done.stdout,
-        )
-
-    def test_the_listing_is_read_over_rest(self) -> None:
-        """The population is read from the REST API, never `gh repo list` (#30).
-
-        `gh repo list` is GraphQL, and the audit's fine-grained token
-        supports only REST: the listing 401'd and the check ran on
-        nothing.
-        """
-        done = self.done
-        assert done.returncode == 0, done.stdout + done.stderr
-        args = [a for _, a in self.forge.calls()]
-        assert f"api {LISTING} --paginate --jq .[].name" in args
-        assert not any(a.startswith("repo ") for a in args), args
-
-    def test_packages_are_read_with_the_packages_token(self) -> None:
-        """The container listing carries PACKAGES_TOKEN, not the audit token (#194).
-
-        The org's packages API needs a classic token with
-        read:packages; the audit token is a fine-grained one scoped to
-        an environment, and cannot read them.
-        """
-        tokens = [t for t, a in self.forge.calls() if PACKAGES in a]
-        want: list[str] = ["packages-token"]
-        assert want == tokens
+    forge: Forge
+    done: subprocess.CompletedProcess[str]
 
 
-class TestPublishEnvironment(TestForgeCase):
-    """Only an ENTRY publish.yml needs a publish environment (#104)."""
-
-    def test_a_reusable_publish_yml_needs_no_environment(self) -> None:
-        """A `workflow_call` publish.yml is the canon's shared one, not an entry.
-
-        The probe matched the canon's reusable publish.yml and demanded
-        an environment of the repository that publishes nothing.
-        """
-        repo = ROSTER[0]
-        self.forge.publish_yml(repo, "on:\n  workflow_call:\n    inputs: {}\n")
-        done = self.forge.check()
-        assert (
-            f"repo-baseline: {repo} has publish.yml but no publish environment"
-            not in done.stderr
-        )
-        assert done.returncode == 0, done.stdout + done.stderr
-
-    def test_an_entry_publish_yml_without_an_environment_drifts(self) -> None:
-        """The other half: a tag-triggered caller stub does need one."""
-        repo = ROSTER[0]
-        self.forge.publish_yml(repo, "on:\n  push:\n    tags: ['v*']\n")
-        done = self.forge.check()
-        assert (
-            f"repo-baseline: {repo} has publish.yml but no publish environment\n"
-            in done.stderr
-        )
-        assert done.returncode == 1
-
-    def test_an_undecodable_publish_yml_is_unreadable(self) -> None:
-        """A publish.yml that does not decode is unreadable, not an entry (#1997).
-
-        The decode was unchecked inside a function whose status both
-        callers read in a condition, where bash suspends `set -e`: a
-        failed `base64 -d` printed its error and returned 0, "entry
-        workflow", so check read the repository as one that needs a
-        publish environment and apply created one.
-        """
-        repo = ROSTER[0]
-        self.forge.answer(
-            f"repos/{ORG}/{repo}/contents/.github/workflows/publish.yml",
-            {"content": "@not base64@"},
-        )
-        done = self.forge.check()
-        assert (
-            f"repo-baseline: cannot read {repo}'s publish.yml:"
-            " publish.yml did not decode\n"
-        ) in done.stderr
-        assert "has publish.yml but no publish environment" not in done.stderr
-        touched = [a for _, a in self.forge.calls() if "environments/publish" in a]
-        want: list[str] = []
-        assert want == touched
-        assert done.returncode == 1
+@fixture(scope="module")
+def clean_org(tmp_path_factory: pytest.TempPathFactory) -> CleanOrg:
+    """Check the clean org once; every row reads the same run."""
+    forge = Forge(tmp_path_factory.mktemp("clean-org"))
+    return CleanOrg(forge, forge.check())
 
 
-class TestSignoff(TestForgeCase):
-    """The org-enforced commit signoff is read back, not assumed (#104)."""
+def test_a_clean_check_says_what_it_checked(clean_org: CleanOrg) -> None:
+    """A clean run names its coverage; silence is no proof (#311).
 
-    def test_a_repo_without_signoff_drifts(self) -> None:
-        """Enforced at the org, so the baseline stopped PATCHing it; check reads it."""
-        repo = ROSTER[0]
-        settings = {k: v for k, v in BASELINE.items() if k != "labels"}
-        settings |= {
-            "web_commit_signoff_required": False,
-            "default_branch": "main",
-            "visibility": "public",
-        }
-        self.forge.answer(f"repos/{ORG}/{repo}", settings)
-        done = self.forge.check()
-        assert (
-            f"repo-baseline: {repo} web commit signoff is false"
-            " (org enforcement regressed?)\n"
-        ) in done.stderr
-
-
-class TestRefusedRead(TestForgeCase):
-    """A refused read names its endpoint and grant (#862, #895)."""
-
-    def test_a_refused_listing_says_which_call_and_what_it_needs(self) -> None:
-        """One line of gh's was the whole output of a dead audit leg.
-
-        Under `set -e` the first refused read killed the run with
-        `gh: Resource not accessible by personal access token (HTTP
-        403)` and nothing to say which call it answered.
-        """
-        said = "gh: Resource not accessible by personal access token (HTTP 403)"
-        self.forge.refuse(LISTING, said)
-        done = self.forge.check()
-        assert done.returncode == 1
-        assert (
-            "repo-baseline: cannot read the org's repository listing\n"
-            f"  endpoint: {LISTING}\n"
-            "  needs:    an org owner's token — a fine-grained PAT scoped"
-            " to SELECTED repositories is refused here\n"
-            f"  gh said:  {said}\n"
-            "repo-baseline: nothing was checked — the population is unreadable.\n"
-        ) == done.stderr
-        assert done.stdout == ""
-
-
-class TestUnparsableBody(TestForgeCase):
-    """A body the check cannot parse is not a clean org (#2001).
-
-    The loops read jq's rows through process substitution, so a jq
-    that failed read as no rows, and the check printed its clean line.
+    A check that exited 0 printing nothing could not be told apart
+    from one that checked nothing.
     """
-
-    def assert_not_clean(self, done: subprocess.CompletedProcess[str]) -> None:
-        """Assert the run stopped nonzero and never said it found no drift."""
-        assert done.returncode != 0, done.stdout + done.stderr
-        assert "no drift" not in done.stdout
-
-    def test_an_unparsable_packages_body_is_not_clean(self) -> None:
-        """The org's packages served as an object, not a list."""
-        self.forge.answer(PACKAGES, {"a": 1})
-        self.assert_not_clean(self.forge.check())
-
-    def test_an_unparsable_rulesets_body_is_not_clean(self) -> None:
-        """A repository's own rulesets served as an object, not a list.
-
-        The repository is private on a plan that offers it no queue: a
-        repository offered one with no rows read still drifts on its
-        missing merge-queue ruleset, which would hide the unparsable
-        body behind a finding about something else.
-        """
-        repo = ROSTER[0]
-        self.forge.plan("team")
-        self.forge.private(repo)
-        self.forge.answer(
-            f"repos/{ORG}/{repo}/rulesets?includes_parents=false", {"a": 1}
-        )
-        self.assert_not_clean(self.forge.check())
+    done = clean_org.done
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert re.search(
+        rf"\Arepo-baseline: {len(ROSTER)} repos checked \(.*\), no drift\n\Z",
+        done.stdout,
+    )
 
 
-class TestQueueByPlan(TestForgeCase):
-    """A repository carries the queue exactly when GitHub offers it (#2140).
+def test_the_listing_is_read_over_rest(clean_org: CleanOrg) -> None:
+    """The population is read from the REST API, never `gh repo list` (#30).
 
-    Visibility alone decided, which was GitHub's offer only on Team: on
-    Enterprise Cloud a private repository's queue read as a stray own
-    ruleset, and its absence was never asked about.
+    `gh repo list` is GraphQL, and the audit's fine-grained token
+    supports only REST: the listing 401'd and the check ran on
+    nothing.
     """
+    done = clean_org.done
+    assert done.returncode == 0, done.stdout + done.stderr
+    args = [a for _, a in clean_org.forge.calls()]
+    assert f"api {LISTING} --paginate --jq .[].name" in args
+    assert not any(a.startswith("repo ") for a in args), args
 
-    missing = "has no merge-queue ruleset, so its pull requests"
-    lapsed = "carries the merge queue but GitHub no longer offers"
 
-    def test_a_private_repo_on_enterprise_with_the_queue_is_clean(self) -> None:
-        """The hand-made ruleset on monumental-archive is the baseline's."""
-        repo = ROSTER[0]
-        self.forge.private(repo)
-        done = self.forge.check()
+def test_packages_are_read_with_the_packages_token(clean_org: CleanOrg) -> None:
+    """The container listing carries PACKAGES_TOKEN, not the audit token (#194).
+
+    The org's packages API needs a classic token with
+    read:packages; the audit token is a fine-grained one scoped to
+    an environment, and cannot read them.
+    """
+    tokens = [t for t, a in clean_org.forge.calls() if PACKAGES in a]
+    want: list[str] = ["packages-token"]
+    assert want == tokens
+
+
+def test_a_reusable_publish_yml_needs_no_environment(forge_case: ForgeCase) -> None:
+    """A `workflow_call` publish.yml is the canon's shared one, not an entry.
+
+    The probe matched the canon's reusable publish.yml and demanded
+    an environment of the repository that publishes nothing.
+    """
+    repo = ROSTER[0]
+    forge_case.forge.publish_yml(repo, "on:\n  workflow_call:\n    inputs: {}\n")
+    done = forge_case.forge.check()
+    assert (
+        f"repo-baseline: {repo} has publish.yml but no publish environment"
+        not in done.stderr
+    )
+    assert done.returncode == 0, done.stdout + done.stderr
+
+
+def test_an_entry_publish_yml_without_an_environment_drifts(
+    forge_case: ForgeCase,
+) -> None:
+    """The other half: a tag-triggered caller stub does need one."""
+    repo = ROSTER[0]
+    forge_case.forge.publish_yml(repo, "on:\n  push:\n    tags: ['v*']\n")
+    done = forge_case.forge.check()
+    assert (
+        f"repo-baseline: {repo} has publish.yml but no publish environment\n"
+        in done.stderr
+    )
+    assert done.returncode == 1
+
+
+def test_an_undecodable_publish_yml_is_unreadable(forge_case: ForgeCase) -> None:
+    """A publish.yml that does not decode is unreadable, not an entry (#1997).
+
+    The decode was unchecked inside a function whose status both
+    callers read in a condition, where bash suspends `set -e`: a
+    failed `base64 -d` printed its error and returned 0, "entry
+    workflow", so check read the repository as one that needs a
+    publish environment and apply created one.
+    """
+    repo = ROSTER[0]
+    forge_case.forge.answer(
+        f"repos/{ORG}/{repo}/contents/.github/workflows/publish.yml",
+        {"content": "@not base64@"},
+    )
+    done = forge_case.forge.check()
+    assert (
+        f"repo-baseline: cannot read {repo}'s publish.yml: publish.yml did not decode\n"
+    ) in done.stderr
+    assert "has publish.yml but no publish environment" not in done.stderr
+    touched = [a for _, a in forge_case.forge.calls() if "environments/publish" in a]
+    want: list[str] = []
+    assert want == touched
+    assert done.returncode == 1
+
+
+def test_a_repo_without_signoff_drifts(forge_case: ForgeCase) -> None:
+    """Enforced at the org, so the baseline stopped PATCHing it; check reads it."""
+    repo = ROSTER[0]
+    settings = {k: v for k, v in BASELINE.items() if k != "labels"}
+    settings |= {
+        "web_commit_signoff_required": False,
+        "default_branch": "main",
+        "visibility": "public",
+    }
+    forge_case.forge.answer(f"repos/{ORG}/{repo}", settings)
+    done = forge_case.forge.check()
+    assert (
+        f"repo-baseline: {repo} web commit signoff is false"
+        " (org enforcement regressed?)\n"
+    ) in done.stderr
+
+
+def test_a_refused_listing_says_which_call_and_what_it_needs(
+    forge_case: ForgeCase,
+) -> None:
+    """One line of gh's was the whole output of a dead audit leg.
+
+    Under `set -e` the first refused read killed the run with
+    `gh: Resource not accessible by personal access token (HTTP
+    403)` and nothing to say which call it answered.
+    """
+    said = "gh: Resource not accessible by personal access token (HTTP 403)"
+    forge_case.forge.refuse(LISTING, said)
+    done = forge_case.forge.check()
+    assert done.returncode == 1
+    assert (
+        "repo-baseline: cannot read the org's repository listing\n"
+        f"  endpoint: {LISTING}\n"
+        "  needs:    an org owner's token — a fine-grained PAT scoped"
+        " to SELECTED repositories is refused here\n"
+        f"  gh said:  {said}\n"
+        "repo-baseline: nothing was checked — the population is unreadable.\n"
+    ) == done.stderr
+    assert done.stdout == ""
+
+
+def assert_not_clean(done: subprocess.CompletedProcess[str]) -> None:
+    """Assert the run stopped nonzero and never said it found no drift."""
+    assert done.returncode != 0, done.stdout + done.stderr
+    assert "no drift" not in done.stdout
+
+
+def test_an_unparsable_packages_body_is_not_clean(forge_case: ForgeCase) -> None:
+    """The org's packages served as an object, not a list."""
+    forge_case.forge.answer(PACKAGES, {"a": 1})
+    assert_not_clean(forge_case.forge.check())
+
+
+def test_an_unparsable_rulesets_body_is_not_clean(forge_case: ForgeCase) -> None:
+    """A repository's own rulesets served as an object, not a list.
+
+    The repository is private on a plan that offers it no queue: a
+    repository offered one with no rows read still drifts on its
+    missing merge-queue ruleset, which would hide the unparsable
+    body behind a finding about something else.
+    """
+    repo = ROSTER[0]
+    forge_case.forge.plan("team")
+    forge_case.forge.private(repo)
+    forge_case.forge.answer(
+        f"repos/{ORG}/{repo}/rulesets?includes_parents=false", {"a": 1}
+    )
+    assert_not_clean(forge_case.forge.check())
+
+
+missing = "has no merge-queue ruleset, so its pull requests"
+lapsed = "carries the merge queue but GitHub no longer offers"
+
+
+def test_a_private_repo_on_enterprise_with_the_queue_is_clean(
+    forge_case: ForgeCase,
+) -> None:
+    """The hand-made ruleset on monumental-archive is the baseline's."""
+    repo = ROSTER[0]
+    forge_case.forge.private(repo)
+    done = forge_case.forge.check()
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "carries its OWN ruleset" not in done.stderr
+    assert "no drift" in done.stdout
+
+
+def test_a_private_repo_on_enterprise_without_the_queue_drifts(
+    forge_case: ForgeCase,
+) -> None:
+    """Offered the queue, so its absence is the missing-ruleset finding."""
+    repo = ROSTER[0]
+    forge_case.forge.private(repo)
+    forge_case.forge.no_own_rulesets(repo)
+    done = forge_case.forge.check()
+    assert f"repo-baseline: {repo} {missing}\n" in done.stderr
+    assert done.returncode == 1
+
+
+def test_a_private_repo_on_team_carrying_the_queue_drifts(
+    forge_case: ForgeCase,
+) -> None:
+    """The plan lapsed: the queue is still there, and nothing can merge."""
+    repo = ROSTER[0]
+    forge_case.forge.plan("team")
+    forge_case.forge.private(repo)
+    done = forge_case.forge.check()
+    assert (
+        f"repo-baseline: {repo} {lapsed}\n"
+        "  it one (private, plan team): its pull requests cannot\n"
+        "  merge until the ruleset is deleted in Settings -> Rules.\n"
+    ) in done.stderr
+    assert "carries its OWN ruleset" not in done.stderr
+    assert done.returncode == 1
+
+
+def test_a_private_repo_on_team_without_the_queue_is_clean(
+    forge_case: ForgeCase,
+) -> None:
+    """Not offered the queue, and not carrying it: nothing to say."""
+    repo = ROSTER[0]
+    forge_case.forge.plan("team")
+    forge_case.forge.private(repo)
+    forge_case.forge.no_own_rulesets(repo)
+    done = forge_case.forge.check()
+    assert done.returncode == 0, done.stdout + done.stderr
+
+
+def test_an_org_body_without_a_plan_is_not_clean(forge_case: ForgeCase) -> None:
+    """A body with no `.plan` is unreadable, never read as Team.
+
+    GitHub serves the plan to owners only, so a narrower token gets
+    the org without it.
+    """
+    repo = ROSTER[0]
+    forge_case.forge.answer(PLAN, {"login": ORG})
+    forge_case.forge.private(repo)
+    done = forge_case.forge.check()
+    assert "repo-baseline: cannot read the org's plan\n" in done.stderr
+    assert (
+        f"repo-baseline: cannot tell whether GitHub offers {repo} the merge queue\n"
+    ) in done.stderr
+    assert lapsed not in done.stderr
+    assert "no drift" not in done.stdout
+    assert done.returncode == 1
+
+
+def test_a_refused_plan_read_is_not_clean(forge_case: ForgeCase) -> None:
+    """A refused read of the org is unreadable too."""
+    repo = ROSTER[0]
+    forge_case.forge.refuse(PLAN, "gh: Not Found (HTTP 404)")
+    forge_case.forge.private(repo)
+    forge_case.forge.no_own_rulesets(repo)
+    done = forge_case.forge.check()
+    assert "repo-baseline: cannot read the org's plan\n" in done.stderr
+    assert "no drift" not in done.stdout
+    assert done.returncode == 1
+
+
+def test_a_public_repo_is_unaffected_by_the_plan(forge_case: ForgeCase) -> None:
+    """Public repositories carry the queue whatever the plan, read or not."""
+    for served in ({"login": ORG, "plan": {"name": "team"}}, {"login": ORG}):
+        forge_case.forge.answer(PLAN, served)
+        done = forge_case.forge.check()
         assert done.returncode == 0, done.stdout + done.stderr
-        assert "carries its OWN ruleset" not in done.stderr
         assert "no drift" in done.stdout
-
-    def test_a_private_repo_on_enterprise_without_the_queue_drifts(self) -> None:
-        """Offered the queue, so its absence is the missing-ruleset finding."""
-        repo = ROSTER[0]
-        self.forge.private(repo)
-        self.forge.no_own_rulesets(repo)
-        done = self.forge.check()
-        assert f"repo-baseline: {repo} {self.missing}\n" in done.stderr
-        assert done.returncode == 1
-
-    def test_a_private_repo_on_team_carrying_the_queue_drifts(self) -> None:
-        """The plan lapsed: the queue is still there, and nothing can merge."""
-        repo = ROSTER[0]
-        self.forge.plan("team")
-        self.forge.private(repo)
-        done = self.forge.check()
-        assert (
-            f"repo-baseline: {repo} {self.lapsed}\n"
-            "  it one (private, plan team): its pull requests cannot\n"
-            "  merge until the ruleset is deleted in Settings -> Rules.\n"
-        ) in done.stderr
-        assert "carries its OWN ruleset" not in done.stderr
-        assert done.returncode == 1
-
-    def test_a_private_repo_on_team_without_the_queue_is_clean(self) -> None:
-        """Not offered the queue, and not carrying it: nothing to say."""
-        repo = ROSTER[0]
-        self.forge.plan("team")
-        self.forge.private(repo)
-        self.forge.no_own_rulesets(repo)
-        done = self.forge.check()
-        assert done.returncode == 0, done.stdout + done.stderr
-
-    def test_an_org_body_without_a_plan_is_not_clean(self) -> None:
-        """A body with no `.plan` is unreadable, never read as Team.
-
-        GitHub serves the plan to owners only, so a narrower token gets
-        the org without it.
-        """
-        repo = ROSTER[0]
-        self.forge.answer(PLAN, {"login": ORG})
-        self.forge.private(repo)
-        done = self.forge.check()
-        assert "repo-baseline: cannot read the org's plan\n" in done.stderr
-        assert (
-            f"repo-baseline: cannot tell whether GitHub offers {repo} the merge queue\n"
-        ) in done.stderr
-        assert self.lapsed not in done.stderr
-        assert "no drift" not in done.stdout
-        assert done.returncode == 1
-
-    def test_a_refused_plan_read_is_not_clean(self) -> None:
-        """A refused read of the org is unreadable too."""
-        repo = ROSTER[0]
-        self.forge.refuse(PLAN, "gh: Not Found (HTTP 404)")
-        self.forge.private(repo)
-        self.forge.no_own_rulesets(repo)
-        done = self.forge.check()
-        assert "repo-baseline: cannot read the org's plan\n" in done.stderr
-        assert "no drift" not in done.stdout
-        assert done.returncode == 1
-
-    def test_a_public_repo_is_unaffected_by_the_plan(self) -> None:
-        """Public repositories carry the queue whatever the plan, read or not."""
-        for served in ({"login": ORG, "plan": {"name": "team"}}, {"login": ORG}):
-            self.forge.answer(PLAN, served)
-            done = self.forge.check()
-            assert done.returncode == 0, done.stdout + done.stderr
-            assert "no drift" in done.stdout
-        self.forge.no_own_rulesets(ROSTER[0])
-        self.forge.plan("team")
-        done = self.forge.check()
-        assert f"repo-baseline: {ROSTER[0]} {self.missing}\n" in done.stderr
-        assert done.returncode == 1
+    forge_case.forge.no_own_rulesets(ROSTER[0])
+    forge_case.forge.plan("team")
+    done = forge_case.forge.check()
+    assert f"repo-baseline: {ROSTER[0]} {missing}\n" in done.stderr
+    assert done.returncode == 1

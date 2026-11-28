@@ -82,94 +82,85 @@ def ids_or_refusal(licence: str) -> list[str] | None:
         return None
 
 
-class TestAnyCitation:
-    """R: the citation readers answer, or refuse by name, on anything."""
-
-    @given(st.text())
-    def test_read_citation_answers(self, text: str) -> None:
-        """Any text: three fields, never a raise."""
-        cite = mint.read_citation(text)
-        assert isinstance(cite.licence, str)
-        assert isinstance(cite.concept_doi, str)
-
-    @given(st.text())
-    @example("MIT WITH")
-    @example("")
-    def test_licence_ids_answers_or_refuses(self, licence: str) -> None:
-        """Any licence line: ids, or the step's own refusal."""
-        ids = ids_or_refusal(licence)
-        if ids is not None:
-            assert ids
+# R: the citation readers answer, or refuse by name, on anything.
+@given(st.text())
+def test_read_citation_answers(text: str) -> None:
+    """Any text: three fields, never a raise."""
+    cite = mint.read_citation(text)
+    assert isinstance(cite.licence, str)
+    assert isinstance(cite.concept_doi, str)
 
 
-class TestWrittenReadsBack:
-    """T: what the generator writes, the reader reads."""
-
-    @given(NAME, NAME, DOI, NOISE, NOISE)
-    def test_author_and_concept(
-        self, family: str, given_: str, doi: str, before: list[str], after: list[str]
-    ) -> None:
-        """An author block and an identifiers block read back as written."""
-        lines = [
-            "cff-version: 1.2.0",
-            "authors:",
-            f'  - family-names: "{family}"',
-            f'    given-names: "{given_}"',
-            "identifiers:",
-            "  - type: doi",
-            f"    value: {doi}",
-        ]
-        text = "\n".join([
-            *[n for n in before if "value:" not in n and not n.startswith("identif")],
-            *lines,
-            *after,
-        ])
-        cite = mint.read_citation(text)
-        assert f"{family}, {given_}" in cite.creators
-        assert cite.concept_doi == doi
+@given(st.text())
+@example("MIT WITH")
+@example("")
+def test_licence_ids_answers_or_refuses(licence: str) -> None:
+    """Any licence line: ids, or the step's own refusal."""
+    ids = ids_or_refusal(licence)
+    if ids is not None:
+        assert ids
 
 
-class TestLicenceOrder:
-    """V: reordering the ids moves nothing but their order."""
-
-    @given(st.lists(WORD, min_size=1, max_size=4), st.data())
-    @example(TWO_IDS, None)
-    def test_order_insensitive(
-        self, words: list[str], data: st.DataObject | None
-    ) -> None:
-        """Same verdict, same ids, whatever order the ids are in."""
-        joins = (
-            data.draw(st.lists(JOIN, min_size=len(words) - 1, max_size=len(words) - 1))
-            if data
-            else ["OR"] * (len(words) - 1)
-        )
-        moved = data.draw(st.permutations(words)) if data else list(reversed(words))
-
-        def expression(ids: list[str]) -> str:
-            parts = [ids[0]]
-            for join, word in zip(joins, ids[1:], strict=True):
-                parts += [join, word]
-            return " ".join(parts)
-
-        first, second = (
-            ids_or_refusal(expression(words)),
-            ids_or_refusal(expression(moved)),
-        )
-        assert (first is None) == (second is None), (words, moved)
-        if first is not None and second is not None:
-            sorted_first: list[str] = sorted(first)
-            sorted_second: list[str] = sorted(second)
-            assert sorted_first == sorted_second
-            lowered: list[str] = [w.lower() for w in words]
-            assert first == lowered
+# T: what the generator writes, the reader reads.
+@given(NAME, NAME, DOI, NOISE, NOISE)
+def test_author_and_concept(
+    family: str, given_: str, doi: str, before: list[str], after: list[str]
+) -> None:
+    """An author block and an identifiers block read back as written."""
+    lines = [
+        "cff-version: 1.2.0",
+        "authors:",
+        f'  - family-names: "{family}"',
+        f'    given-names: "{given_}"',
+        "identifiers:",
+        "  - type: doi",
+        f"    value: {doi}",
+    ]
+    text = "\n".join([
+        *[n for n in before if "value:" not in n and not n.startswith("identif")],
+        *lines,
+        *after,
+    ])
+    cite = mint.read_citation(text)
+    assert f"{family}, {given_}" in cite.creators
+    assert cite.concept_doi == doi
 
 
-class TestCompactIdempotent:
-    """I and T: compacting twice is compacting once, and reads back."""
+# V: reordering the ids moves nothing but their order.
+@given(st.lists(WORD, min_size=1, max_size=4), st.data())
+@example(TWO_IDS, None)
+def test_order_insensitive(words: list[str], data: st.DataObject | None) -> None:
+    """Same verdict, same ids, whatever order the ids are in."""
+    joins = (
+        data.draw(st.lists(JOIN, min_size=len(words) - 1, max_size=len(words) - 1))
+        if data
+        else ["OR"] * (len(words) - 1)
+    )
+    moved = data.draw(st.permutations(words)) if data else list(reversed(words))
 
-    @given(JSON)
-    def test_compact_twice(self, value: object) -> None:
-        """compact(parse(compact(v))) == compact(v), and parses to v."""
-        once = mint.compact(value)
-        assert mint.compact(decoded.load_json(once)) == once
-        assert decoded.load_json(once) == value
+    def expression(ids: list[str]) -> str:
+        parts = [ids[0]]
+        for join, word in zip(joins, ids[1:], strict=True):
+            parts += [join, word]
+        return " ".join(parts)
+
+    first, second = (
+        ids_or_refusal(expression(words)),
+        ids_or_refusal(expression(moved)),
+    )
+    assert (first is None) == (second is None), (words, moved)
+    if first is not None and second is not None:
+        sorted_first: list[str] = sorted(first)
+        sorted_second: list[str] = sorted(second)
+        assert sorted_first == sorted_second
+        lowered: list[str] = [w.lower() for w in words]
+        assert first == lowered
+
+
+# I and T: compacting twice is compacting once, and reads back.
+@given(JSON)
+def test_compact_twice(value: object) -> None:
+    """compact(parse(compact(v))) == compact(v), and parses to v."""
+    once = mint.compact(value)
+    assert mint.compact(decoded.load_json(once)) == once
+    assert decoded.load_json(once) == value

@@ -28,7 +28,6 @@ the ordinary suite (`mise run test`) never imports this file.
 import json
 from pathlib import Path
 
-import pytest
 from hypothesis import example
 from hypothesis import strategies as st
 
@@ -153,94 +152,99 @@ SMUGGLED: list[dict[str, object]] = [
 IDENTITY: list[str] = ["identity"]
 
 
-class TestTitleRoundTrip:
-    """The dedup pattern finds its own title and no other."""
-
-    @given(INDEX, INDEX, CONDITIONS)
-    @example(12, 123, IDENTITY)
-    @example(123, 12, IDENTITY)
-    def test_own_index_only(
-        self, index: int, other: int, conditions: list[str]
-    ) -> None:
-        """Index n's pattern matches n's title, never another index's."""
-        assert certificate_issues.filed_title(index).match(
-            certificate_issues.title(index, conditions)
-        )
-        if other != index:
-            assert (
-                certificate_issues.filed_title(other).match(
-                    certificate_issues.title(index, conditions)
-                )
-                is None
+# The dedup pattern finds its own title and no other.
+@given(INDEX, INDEX, CONDITIONS)
+@example(12, 123, IDENTITY)
+@example(123, 12, IDENTITY)
+def test_own_index_only(index: int, other: int, conditions: list[str]) -> None:
+    """Index n's pattern matches n's title, never another index's."""
+    assert certificate_issues.filed_title(index).match(
+        certificate_issues.title(index, conditions)
+    )
+    if other != index:
+        assert (
+            certificate_issues.filed_title(other).match(
+                certificate_issues.title(index, conditions)
             )
+            is None
+        )
 
 
-@pytest.mark.usefixtures("_set_up_test_report_reading")
-class TestReportReading:
+class ReportReading:
     """Whatever the report file holds: a grouping, or the refusal."""
 
-    @fixture
-    def _set_up_test_report_reading(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Hold one scratch report file for the test's examples."""
         self.path = Path(str(tmp_path)) / "report.json"
 
-    @given(REPORT)
-    @example(NOT_AN_OBJECT)
-    @example(NUMBER_SUBJECT)
-    @example(NOT_A_LIST)
-    def test_refuses_by_name_or_groups_every_finding(self, report: object) -> None:
-        """Only FindingsError escapes; a grouping holds each finding once."""
-        self.path.write_text(dumps(report), encoding="utf-8")
-        try:
-            grouped = certificate_issues.by_certificate(
-                certificate_issues.read_report(self.path)
-            )
-        except certificate_issues.FindingsError:
-            return
-        given_findings = decoded.as_object(report, "the report").get("findings")
-        listed = decoded.as_array(given_findings, "findings") if given_findings else []
-        total = sum(len(v) for v in grouped.values())
-        assert total == len(listed)
-        for index, group in grouped.items():
-            for finding in group:
-                assert finding.index == index
 
-    @given(st.binary(max_size=64))
-    @example(DEEP)
-    @example(b"\xff")
-    @example(b"1" * 5000)
-    def test_any_bytes_refused_by_name(self, content: bytes) -> None:
-        """Whatever bytes the file holds: a report, or FindingsError."""
-        self.path.write_bytes(content)
-        try:
-            certificate_issues.read_report(self.path)
-        except certificate_issues.FindingsError:
-            return
+@fixture
+def report_reading(tmp_path: Path) -> ReportReading:
+    """Give each row its own ReportReading."""
+    return ReportReading(tmp_path)
 
 
-class TestBodyConditions:
-    """V: the body names each failed condition once, on its own line."""
+@given(REPORT)
+@example(NOT_AN_OBJECT)
+@example(NUMBER_SUBJECT)
+@example(NOT_A_LIST)
+def test_refuses_by_name_or_groups_every_finding(
+    report_reading: ReportReading, report: object
+) -> None:
+    """Only FindingsError escapes; a grouping holds each finding once."""
+    report_reading.path.write_text(dumps(report), encoding="utf-8")
+    try:
+        grouped = certificate_issues.by_certificate(
+            certificate_issues.read_report(report_reading.path)
+        )
+    except certificate_issues.FindingsError:
+        return
+    given_findings = decoded.as_object(report, "the report").get("findings")
+    listed = decoded.as_array(given_findings, "findings") if given_findings else []
+    total = sum(len(v) for v in grouped.values())
+    assert total == len(listed)
+    for index, group in grouped.items():
+        for finding in group:
+            assert finding.index == index
 
-    @given(INDEX, st.lists(FILED, min_size=1, max_size=6), st.text(max_size=12))
-    @example(7, TWICE, "log")
-    @example(7, SMUGGLED, "log")
-    def test_each_condition_once(
-        self, index: int, group: list[dict[str, object]], log: str
-    ) -> None:
-        """One line per condition, in the title's order; more findings add none."""
-        named = (str(f.get("assertion", "")) for f in group)
-        conditions = list(dict.fromkeys(named, True))
-        self.assert_names(condition_lines(index, group, log), conditions)
-        again = condition_lines(index, [*group, group[0]], log)
-        self.assert_names(again, conditions)
-        fresh = "".join(conditions) + "+"
-        added = condition_lines(index, [*group, {"assertion": fresh}], log)
-        self.assert_names(added, [*conditions, fresh])
 
-    def assert_names(self, lines: list[str], conditions: list[str]) -> None:
-        """Line i names condition i, and there is no other line."""
-        assert len(lines) == len(conditions), lines
-        for line, condition in zip(lines, conditions, strict=True):
-            assert line.startswith(
-                f"- **{certificate_issues.one_line(condition)}**: "
-            ), line
+@given(st.binary(max_size=64))
+@example(DEEP)
+@example(b"\xff")
+@example(b"1" * 5000)
+def test_any_bytes_refused_by_name(
+    report_reading: ReportReading, content: bytes
+) -> None:
+    """Whatever bytes the file holds: a report, or FindingsError."""
+    report_reading.path.write_bytes(content)
+    try:
+        certificate_issues.read_report(report_reading.path)
+    except certificate_issues.FindingsError:
+        return
+
+
+# V: the body names each failed condition once, on its own line.
+@given(INDEX, st.lists(FILED, min_size=1, max_size=6), st.text(max_size=12))
+@example(7, TWICE, "log")
+@example(7, SMUGGLED, "log")
+def test_each_condition_once(
+    index: int, group: list[dict[str, object]], log: str
+) -> None:
+    """One line per condition, in the title's order; more findings add none."""
+    named = (str(f.get("assertion", "")) for f in group)
+    conditions = list(dict.fromkeys(named, True))
+    assert_names(condition_lines(index, group, log), conditions)
+    again = condition_lines(index, [*group, group[0]], log)
+    assert_names(again, conditions)
+    fresh = "".join(conditions) + "+"
+    added = condition_lines(index, [*group, {"assertion": fresh}], log)
+    assert_names(added, [*conditions, fresh])
+
+
+def assert_names(lines: list[str], conditions: list[str]) -> None:
+    """Line i names condition i, and there is no other line."""
+    assert len(lines) == len(conditions), lines
+    for line, condition in zip(lines, conditions, strict=True):
+        assert line.startswith(f"- **{certificate_issues.one_line(condition)}**: "), (
+            line
+        )

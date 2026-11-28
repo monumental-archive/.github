@@ -91,78 +91,74 @@ def draw_admissible(draw: st.DrawFn) -> dict[str, object]:
 admissible = st.composite(draw_admissible)
 
 
-class TestDeclaration:
-    """A repository states its domains and nothing else."""
-
-    @given(admissible())
-    def test_admissible_has_no_problem(self, document: dict[str, object]) -> None:
-        """Identity domains at "all", any order: nothing to say."""
-        problems = bc.declaration(document, DOMAINS.identity)[1]
-        assert problems == list[str]()
-
-    @given(admissible(), DOMAIN, VALUE)
-    def test_anything_more_is_a_problem(
-        self, document: dict[str, object], domain: str, value: object
-    ) -> None:
-        """A non-identity domain, or a value other than "all", is named."""
-        table(document, "linter", "domains")[domain] = value
-        problems = bc.declaration(document, DOMAINS.identity)[1]
-        allowed = domain in DOMAINS.identity and value == "all"
-        assert (problems == []) == allowed, problems
-
-    @given(JSON)
-    @example(LINTER_LIST)
-    @example(DOMAINS_STRING)
-    def test_any_json_is_judged(self, document: object) -> None:
-        """A list of problems, never a traceback."""
-        assert isinstance(bc.declaration(document, DOMAINS.identity)[1], list)
+# A repository states its domains and nothing else.
+@given(admissible())
+def test_admissible_has_no_problem(document: dict[str, object]) -> None:
+    """Identity domains at "all", any order: nothing to say."""
+    problems = bc.declaration(document, DOMAINS.identity)[1]
+    assert problems == list[str]()
 
 
-class TestOmissions:
-    """A domain the repository has must be claimed."""
-
-    @given(
-        CLAIMED,
-        st.dictionaries(
-            st.sampled_from(["react", "react-dom", "vue", "left-pad"]),
-            st.lists(st.sampled_from(["a/package.json", "package.json"]), min_size=1),
-        ),
-    )
-    def test_missing_exactly_when_declared_and_unclaimed(
-        self, claimed: set[str], packages: dict[str, list[str]]
-    ) -> None:
-        """Each unclaimed domain with a declared trigger, once."""
-        found = bc.omissions(claimed, DOMAINS.identity, packages)
-        expected = {
-            d
-            for d, triggers in DOMAINS.identity.items()
-            if d not in claimed and any(t in packages for t in triggers)
-        }
-        named = {line.split('"')[1] for line in found}
-        assert named == expected
+@given(admissible(), DOMAIN, VALUE)
+def test_anything_more_is_a_problem(
+    document: dict[str, object], domain: str, value: object
+) -> None:
+    """A non-identity domain, or a value other than "all", is named."""
+    table(document, "linter", "domains")[domain] = value
+    problems = bc.declaration(document, DOMAINS.identity)[1]
+    allowed = domain in DOMAINS.identity and value == "all"
+    assert (problems == []) == allowed, problems
 
 
-class TestGenerate:
-    """The generated config is a fixed point, and the org's rules stay."""
+@given(JSON)
+@example(LINTER_LIST)
+@example(DOMAINS_STRING)
+def test_any_json_is_judged(document: object) -> None:
+    """A list of problems, never a traceback."""
+    assert isinstance(bc.declaration(document, DOMAINS.identity)[1], list)
 
-    @given(CLAIMED, NURSERY)
-    def test_twice_is_once(self, claimed: set[str], nursery: dict[str, str]) -> None:
-        """Generating over the output changes nothing; org untouched."""
-        org: dict[str, object] = {
-            "linter": {"rules": {"nursery": dict.fromkeys(nursery, "on")}}
-        }
-        before = copy.deepcopy(org)
-        once, _ = bc.generate(org, claimed, DOMAINS, nursery)
-        twice, _ = bc.generate(once, claimed, DOMAINS, nursery)
-        assert org == before
-        assert json.dumps(twice, sort_keys=True) == json.dumps(once, sort_keys=True)
-        for rule, domain in nursery.items():
-            off = domain in DOMAINS.identity and domain not in claimed
-            assert table(once, "linter", "rules", "nursery")[rule] == (
-                "off" if off else "on"
-            )
-        written = table(once, "linter", "domains")
-        for domain in DOMAINS.identity:
-            assert written[domain] == ("all" if domain in claimed else "none")
-        for domain in DOMAINS.org:
-            assert written[domain] == "all"
+
+# A domain the repository has must be claimed.
+@given(
+    CLAIMED,
+    st.dictionaries(
+        st.sampled_from(["react", "react-dom", "vue", "left-pad"]),
+        st.lists(st.sampled_from(["a/package.json", "package.json"]), min_size=1),
+    ),
+)
+def test_missing_exactly_when_declared_and_unclaimed(
+    claimed: set[str], packages: dict[str, list[str]]
+) -> None:
+    """Each unclaimed domain with a declared trigger, once."""
+    found = bc.omissions(claimed, DOMAINS.identity, packages)
+    expected = {
+        d
+        for d, triggers in DOMAINS.identity.items()
+        if d not in claimed and any(t in packages for t in triggers)
+    }
+    named = {line.split('"')[1] for line in found}
+    assert named == expected
+
+
+# The generated config is a fixed point, and the org's rules stay.
+@given(CLAIMED, NURSERY)
+def test_twice_is_once(claimed: set[str], nursery: dict[str, str]) -> None:
+    """Generating over the output changes nothing; org untouched."""
+    org: dict[str, object] = {
+        "linter": {"rules": {"nursery": dict.fromkeys(nursery, "on")}}
+    }
+    before = copy.deepcopy(org)
+    once, _ = bc.generate(org, claimed, DOMAINS, nursery)
+    twice, _ = bc.generate(once, claimed, DOMAINS, nursery)
+    assert org == before
+    assert json.dumps(twice, sort_keys=True) == json.dumps(once, sort_keys=True)
+    for rule, domain in nursery.items():
+        off = domain in DOMAINS.identity and domain not in claimed
+        assert table(once, "linter", "rules", "nursery")[rule] == (
+            "off" if off else "on"
+        )
+    written = table(once, "linter", "domains")
+    for domain in DOMAINS.identity:
+        assert written[domain] == ("all" if domain in claimed else "none")
+    for domain in DOMAINS.org:
+        assert written[domain] == "all"

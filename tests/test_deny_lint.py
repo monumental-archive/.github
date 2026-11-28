@@ -26,8 +26,6 @@ import subprocess
 import sys
 from typing import TYPE_CHECKING
 
-import pytest
-
 from belt import decoded
 from belt.typed_pytest import fixture
 from tests import support
@@ -164,12 +162,10 @@ def top_only() -> list[str]:
     return [lint_call("Cargo.toml")]
 
 
-@pytest.mark.usefixtures("_set_up_test_planted")
-class TestPlanted:
+class Planted:
     """A two-root tree, the stubs and the tools, per row."""
 
-    @fixture
-    def _set_up_test_planted(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Plant the stubs and the tools; the tree is planted per row."""
         self.tmp = tmp_path
         self.root = self.tmp / "tree"
@@ -237,114 +233,122 @@ class TestPlanted:
         return done, calls
 
 
-class TestLintDeny(TestPlanted):
-    """lint:deny checks each root against its own deny.toml."""
-
-    def test_both_roots_are_checked_each_with_its_own_policy(self) -> None:
-        """One policy check per root, each with its manifest and config."""
-        done, calls = self.run_task("lint:deny", TREE)
-        assert done.returncode == 0, done.stdout + done.stderr
-        assert both() == checks(calls)
-        fetches = [c for c in calls if c.startswith("cargo fetch")]
-        want = [f"cargo fetch --locked --manifest-path {r}" for r in ROOTS]
-        assert want == fetches
-
-    def test_a_missing_fuzz_policy_is_red_naming_fuzz(self) -> None:
-        """No fuzz/deny.toml: the finding names `fuzz`; the top is still checked."""
-        files = {k: v for k, v in TREE.items() if k != "fuzz/deny.toml"}
-        done, calls = self.run_task("lint:deny", files)
-        assert done.returncode == 1, done.stdout + done.stderr
-        assert done.stderr == NO_POLICY
-        assert top_only() == checks(calls)
-
-    def test_a_red_second_root_does_not_hide_the_first(self) -> None:
-        """The stub refuses fuzz only: red, and the top was still checked."""
-        done, calls = self.run_task("lint:deny", TREE, deny_fails="fuzz/Cargo.toml")
-        assert done.returncode == 1, done.stdout + done.stderr
-        assert both() == checks(calls)
-        assert "rejected licence in fuzz/Cargo.toml" in done.stdout
-
-    def test_a_red_first_root_does_not_hide_the_second(self) -> None:
-        """The stub refuses the top: red, and fuzz is still checked."""
-        done, calls = self.run_task("lint:deny", TREE, deny_fails="Cargo.toml")
-        assert done.returncode == 1, done.stdout + done.stderr
-        assert both() == checks(calls)
-
-    def test_an_advisory_ignore_in_the_fuzz_policy_is_refused_by_file(self) -> None:
-        """deny_advisories.py names fuzz/deny.toml, and fuzz is not checked."""
-        files = dict(TREE)
-        files["fuzz/deny.toml"] = f'[advisories]\nignore = ["{ADVISORY}"]\n'
-        done, calls = self.run_task("lint:deny", files)
-        assert done.returncode == 1, done.stdout + done.stderr
-        assert (
-            f"lint:deny: {ADVISORY}: an advisory ignore in fuzz/deny.toml\n"
-            "  delete the entry: the decision is the canon's security/vex/ file\n"
-            "  for that advisory and package version, which audit:deny reads\n"
-        ) == done.stderr
-        assert top_only() == checks(calls)
-
-    def test_a_stale_skip_in_the_fuzz_policy_is_named_with_its_root(self) -> None:
-        """A skip the fuzz graph no longer needs: the variant runs there."""
-        files = dict(TREE)
-        files["fuzz/deny.toml"] = (
-            POLICY + 'skip = [\n  { crate = "jobserver@0.1.0", reason = "x" },\n]\n'
-        )
-        done, calls = self.run_task("lint:deny", files)
-        assert done.returncode == 1, done.stdout + done.stderr
-        assert (
-            "lint:deny: fuzz: duplicate-version skip no longer needed:"
-            " jobserver@0.1.0\n"
-        ) in done.stderr
-        assert "  delete the entry from fuzz/deny.toml" in done.stderr
-        variant = [
-            c for c in calls if c.startswith("cargo deny ") and c.endswith(" bans")
-        ]
-        assert len(variant) == 1, calls
-        assert variant[0].startswith("cargo deny --manifest-path fuzz/Cargo.toml"), (
-            variant
-        )
-
-    def test_a_lock_with_no_manifest_is_red(self) -> None:
-        """A tracked lock and no Cargo.toml: nothing to check is a finding."""
-        done, calls = self.run_task("lint:deny", {"Cargo.lock": "# planted\n"})
-        assert done.returncode == 1, done.stdout + done.stderr
-        assert done.stderr == (
-            "lint:deny: Cargo.lock tracked but no Cargo.toml"
-            " — a lock with no manifest is checked by nothing\n"
-        )
-        assert list[str]() == calls
+@fixture
+def planted(tmp_path: Path) -> Planted:
+    """Give each row its own Planted."""
+    return Planted(tmp_path)
 
 
-class TestAuditDeny(TestPlanted):
-    """audit:deny scans each root and has stele judge each scan."""
+def test_both_roots_are_checked_each_with_its_own_policy(planted: Planted) -> None:
+    """One policy check per root, each with its manifest and config."""
+    done, calls = planted.run_task("lint:deny", TREE)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert both() == checks(calls)
+    fetches = [c for c in calls if c.startswith("cargo fetch")]
+    want = [f"cargo fetch --locked --manifest-path {r}" for r in ROOTS]
+    assert want == fetches
 
-    def test_each_root_is_scanned_and_judged_against_its_lock(self) -> None:
-        """Two scans, two stele calls, `--subject` each root's lock."""
-        done, calls = self.run_task("audit:deny", TREE)
-        assert done.returncode == 0, done.stdout + done.stderr
-        scans = [
-            c
-            for c in calls
-            if c.startswith("cargo deny ") and c.endswith("check advisories")
-        ]
-        want = [
-            f"cargo deny --manifest-path {r} --config"
-            f" {r.replace('Cargo.toml', 'deny.toml')} --format json check advisories"
-            for r in ROOTS
-        ]
-        assert want == scans
-        stele = [c.split(" ") for c in calls if c.startswith("stele ")]
-        subjects = [args[args.index("--subject") + 1] for args in stele]
-        locks: list[str] = ["Cargo.lock", "fuzz/Cargo.lock"]
-        assert locks == subjects
-        assert done.stdout == "audit:deny: stele: PASS\n" * 2
 
-    def test_a_missing_fuzz_policy_is_red_and_the_top_still_scanned(self) -> None:
-        """No fuzz/deny.toml: its finding; the top root judged as before."""
-        files = {k: v for k, v in TREE.items() if k != "fuzz/deny.toml"}
-        done, calls = self.run_task("audit:deny", files)
-        assert done.returncode == 1, done.stdout + done.stderr
-        assert NO_POLICY.replace("lint:deny", "audit:deny") == done.stderr
-        stele = [c for c in calls if c.startswith("stele ")]
-        assert len(stele) == 1, calls
-        assert "--subject Cargo.lock" in stele[0]
+def test_a_missing_fuzz_policy_is_red_naming_fuzz(planted: Planted) -> None:
+    """No fuzz/deny.toml: the finding names `fuzz`; the top is still checked."""
+    files = {k: v for k, v in TREE.items() if k != "fuzz/deny.toml"}
+    done, calls = planted.run_task("lint:deny", files)
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert done.stderr == NO_POLICY
+    assert top_only() == checks(calls)
+
+
+def test_a_red_second_root_does_not_hide_the_first(planted: Planted) -> None:
+    """The stub refuses fuzz only: red, and the top was still checked."""
+    done, calls = planted.run_task("lint:deny", TREE, deny_fails="fuzz/Cargo.toml")
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert both() == checks(calls)
+    assert "rejected licence in fuzz/Cargo.toml" in done.stdout
+
+
+def test_a_red_first_root_does_not_hide_the_second(planted: Planted) -> None:
+    """The stub refuses the top: red, and fuzz is still checked."""
+    done, calls = planted.run_task("lint:deny", TREE, deny_fails="Cargo.toml")
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert both() == checks(calls)
+
+
+def test_an_advisory_ignore_in_the_fuzz_policy_is_refused_by_file(
+    planted: Planted,
+) -> None:
+    """deny_advisories.py names fuzz/deny.toml, and fuzz is not checked."""
+    files = dict(TREE)
+    files["fuzz/deny.toml"] = f'[advisories]\nignore = ["{ADVISORY}"]\n'
+    done, calls = planted.run_task("lint:deny", files)
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert (
+        f"lint:deny: {ADVISORY}: an advisory ignore in fuzz/deny.toml\n"
+        "  delete the entry: the decision is the canon's security/vex/ file\n"
+        "  for that advisory and package version, which audit:deny reads\n"
+    ) == done.stderr
+    assert top_only() == checks(calls)
+
+
+def test_a_stale_skip_in_the_fuzz_policy_is_named_with_its_root(
+    planted: Planted,
+) -> None:
+    """A skip the fuzz graph no longer needs: the variant runs there."""
+    files = dict(TREE)
+    files["fuzz/deny.toml"] = (
+        POLICY + 'skip = [\n  { crate = "jobserver@0.1.0", reason = "x" },\n]\n'
+    )
+    done, calls = planted.run_task("lint:deny", files)
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert (
+        "lint:deny: fuzz: duplicate-version skip no longer needed: jobserver@0.1.0\n"
+    ) in done.stderr
+    assert "  delete the entry from fuzz/deny.toml" in done.stderr
+    variant = [c for c in calls if c.startswith("cargo deny ") and c.endswith(" bans")]
+    assert len(variant) == 1, calls
+    assert variant[0].startswith("cargo deny --manifest-path fuzz/Cargo.toml"), variant
+
+
+def test_a_lock_with_no_manifest_is_red(planted: Planted) -> None:
+    """A tracked lock and no Cargo.toml: nothing to check is a finding."""
+    done, calls = planted.run_task("lint:deny", {"Cargo.lock": "# planted\n"})
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert done.stderr == (
+        "lint:deny: Cargo.lock tracked but no Cargo.toml"
+        " — a lock with no manifest is checked by nothing\n"
+    )
+    assert list[str]() == calls
+
+
+def test_each_root_is_scanned_and_judged_against_its_lock(planted: Planted) -> None:
+    """Two scans, two stele calls, `--subject` each root's lock."""
+    done, calls = planted.run_task("audit:deny", TREE)
+    assert done.returncode == 0, done.stdout + done.stderr
+    scans = [
+        c
+        for c in calls
+        if c.startswith("cargo deny ") and c.endswith("check advisories")
+    ]
+    want = [
+        f"cargo deny --manifest-path {r} --config"
+        f" {r.replace('Cargo.toml', 'deny.toml')} --format json check advisories"
+        for r in ROOTS
+    ]
+    assert want == scans
+    stele = [c.split(" ") for c in calls if c.startswith("stele ")]
+    subjects = [args[args.index("--subject") + 1] for args in stele]
+    locks: list[str] = ["Cargo.lock", "fuzz/Cargo.lock"]
+    assert locks == subjects
+    assert done.stdout == "audit:deny: stele: PASS\n" * 2
+
+
+def test_a_missing_fuzz_policy_is_red_and_the_top_still_scanned(
+    planted: Planted,
+) -> None:
+    """No fuzz/deny.toml: its finding; the top root judged as before."""
+    files = {k: v for k, v in TREE.items() if k != "fuzz/deny.toml"}
+    done, calls = planted.run_task("audit:deny", files)
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert NO_POLICY.replace("lint:deny", "audit:deny") == done.stderr
+    stele = [c for c in calls if c.startswith("stele ")]
+    assert len(stele) == 1, calls
+    assert "--subject Cargo.lock" in stele[0]

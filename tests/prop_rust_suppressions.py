@@ -90,23 +90,22 @@ source = st.lists(st.composite(draw_line)(), max_size=12)
 manifest = st.composite(draw_manifest)
 
 
-class TestFindings:
-    """Exactly the suppressions clippy cannot see, nothing else."""
+# Exactly the suppressions clippy cannot see, nothing else.
+@given(source)
+@example(DECOY_THEN_REAL)
+def test_every_inner_allow_and_no_decoy(lines: list[Line]) -> None:
+    """Each real allow at its line; every decoy passed over."""
+    text = "".join(f"{line}\n" for line, _ in lines)
+    expected = [(n, line) for n, (line, real) in enumerate(lines, 1) if real]
+    assert expected == rsup.inner_allows(text)
 
-    @given(source)
-    @example(DECOY_THEN_REAL)
-    def test_every_inner_allow_and_no_decoy(self, lines: list[Line]) -> None:
-        """Each real allow at its line; every decoy passed over."""
-        text = "".join(f"{line}\n" for line, _ in lines)
-        expected = [(n, line) for n, (line, real) in enumerate(lines, 1) if real]
-        assert expected == rsup.inner_allows(text)
 
-    @given(manifest())
-    @example((
-        '[lints.rust]\ndead_code = "allow"\n',
-        ['[lints.rust] dead_code = "allow"'],
-    ))
-    def test_every_manifest_allow(self, drawn: Manifest) -> None:
-        """Each `allow` level, in both forms, in every table."""
-        text, expected = drawn
-        assert expected == rsup.manifest_allows(decoded.load_toml(text))
+@given(manifest())
+@example((
+    '[lints.rust]\ndead_code = "allow"\n',
+    ['[lints.rust] dead_code = "allow"'],
+))
+def test_every_manifest_allow(drawn: Manifest) -> None:
+    """Each `allow` level, in both forms, in every table."""
+    text, expected = drawn
+    assert expected == rsup.manifest_allows(decoded.load_toml(text))

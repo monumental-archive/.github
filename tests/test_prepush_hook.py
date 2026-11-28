@@ -83,12 +83,10 @@ def write(cwd: Path, name: str) -> None:
     (cwd / name).write_text(f"{name}\n", encoding="utf-8")
 
 
-@pytest.mark.usefixtures("_set_up_test_pre_push_gate")
-class TestPrePushGate:
+class PrePushGate:
     """Every push runs the gate exactly once; none is skipped."""
 
-    @fixture
-    def _set_up_test_pre_push_gate(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Build the canon remote, a seeded consumer remote and a clone."""
         if LEFTHOOK is None or GIT is None:
             pytest.skip("lefthook (or git) not on PATH")
@@ -218,108 +216,131 @@ class TestPrePushGate:
         assert self.marker.exists(), f"the gate never ran:\n{output}"
         assert self.marker.read_text(encoding="utf-8") == GATE_RAN, output
 
-    def test_a_new_branch_that_adds_a_file_is_gated(self) -> None:
-        """The control: the row lefthook never skipped."""
-        clone = self.consumer()
-        self.git(clone, "switch", "-q", "-c", "adds")
-        write(clone, "new.txt")
-        self.commit(clone, "add")
-        self.assert_gated(self.push(clone, "-u", "origin", "adds"))
 
-    def test_a_push_that_only_deletes_files_is_gated(self) -> None:
-        """Upstream set; the commit's one change is a deletion."""
-        clone = self.consumer()
-        self.git(clone, "switch", "-q", "-c", "deletes")
-        write(clone, "new.txt")
-        self.commit(clone, "add")
-        self.git(clone, "push", "-q", "--no-verify", "-u", "origin", "deletes")
-        self.git(clone, "rm", "-q", "doomed.txt")
-        self.commit(clone, "delete")
-        self.assert_gated(self.push(clone, "origin", "deletes"))
+@fixture
+def pre_push_gate(tmp_path: Path) -> PrePushGate:
+    """Give each row its own PrePushGate."""
+    return PrePushGate(tmp_path)
 
-    def test_commits_that_add_then_delete_are_gated(self) -> None:
-        """A new branch whose commits leave the tree as it was."""
-        clone = self.consumer()
-        self.git(clone, "switch", "-q", "-c", "roundtrip")
-        write(clone, "brief.txt")
-        self.commit(clone, "add")
-        self.git(clone, "rm", "-q", "brief.txt")
-        self.commit(clone, "delete")
-        self.assert_gated(self.push(clone, "origin", "roundtrip"))
 
-    def test_a_branch_pushed_while_head_is_elsewhere_is_gated(self) -> None:
-        """A worktree's branch pushed from a checkout at origin/main."""
-        clone = self.consumer()
-        self.git(clone, "switch", "-q", "-c", "elsewhere")
-        write(clone, "new.txt")
-        self.commit(clone, "add")
-        self.git(clone, "switch", "-q", "--detach", "origin/main")
-        self.assert_gated(self.push(clone, "origin", "elsewhere"))
+def test_a_new_branch_that_adds_a_file_is_gated(pre_push_gate: PrePushGate) -> None:
+    """The control: the row lefthook never skipped."""
+    clone = pre_push_gate.consumer()
+    pre_push_gate.git(clone, "switch", "-q", "-c", "adds")
+    write(clone, "new.txt")
+    pre_push_gate.commit(clone, "add")
+    pre_push_gate.assert_gated(pre_push_gate.push(clone, "-u", "origin", "adds"))
 
-    def test_a_branch_already_on_the_default_branch_is_gated(self) -> None:
-        """A new branch whose commits origin/main already has."""
-        clone = self.consumer()
-        self.git(clone, "switch", "-q", "-c", "merged")
-        write(clone, "new.txt")
-        self.commit(clone, "add")
-        self.git(clone, "push", "-q", "--no-verify", "origin", "merged:main")
-        self.git(clone, "fetch", "-q", "origin")
-        self.git(clone, "switch", "-q", "-c", "again")
-        self.assert_gated(self.push(clone, "origin", "again"))
 
-    def test_another_source_dir_still_gets_the_gate(self) -> None:
-        """A consumer's own `source_dir` changes nothing for an inline job.
+def test_a_push_that_only_deletes_files_is_gated(pre_push_gate: PrePushGate) -> None:
+    """Upstream set; the commit's one change is a deletion."""
+    clone = pre_push_gate.consumer()
+    pre_push_gate.git(clone, "switch", "-q", "-c", "deletes")
+    write(clone, "new.txt")
+    pre_push_gate.commit(clone, "add")
+    pre_push_gate.git(clone, "push", "-q", "--no-verify", "-u", "origin", "deletes")
+    pre_push_gate.git(clone, "rm", "-q", "doomed.txt")
+    pre_push_gate.commit(clone, "delete")
+    pre_push_gate.assert_gated(pre_push_gate.push(clone, "origin", "deletes"))
 
-        The job was a script, found under the consumer's `source_dir`,
-        and a repository that set its own got a failed push (#1281). An
-        inline `run:` has no file to find.
-        """
-        clone = self.consumer(source_dir=".hooks/")
-        self.git(clone, "switch", "-q", "-c", "elsewhere-dir")
-        write(clone, "new.txt")
-        self.commit(clone, "add")
-        self.assert_gated(self.push(clone, "origin", "elsewhere-dir"))
 
-    def test_the_canon_tree_gates_once(self) -> None:
-        """The canon consumes its own hooks and runs the gate once."""
-        clone = self.consumer()
-        self.git(clone, "switch", "-q", "-c", "canon")
-        plant_canon(clone, "security/identity.toml")
-        self.commit(clone, "be the canon")
-        self.assert_gated(self.push(clone, "origin", "canon"))
+def test_commits_that_add_then_delete_are_gated(pre_push_gate: PrePushGate) -> None:
+    """A new branch whose commits leave the tree as it was."""
+    clone = pre_push_gate.consumer()
+    pre_push_gate.git(clone, "switch", "-q", "-c", "roundtrip")
+    write(clone, "brief.txt")
+    pre_push_gate.commit(clone, "add")
+    pre_push_gate.git(clone, "rm", "-q", "brief.txt")
+    pre_push_gate.commit(clone, "delete")
+    pre_push_gate.assert_gated(pre_push_gate.push(clone, "origin", "roundtrip"))
 
-    def test_a_consumer_planting_its_own_script_still_gets_the_gate(self) -> None:
-        """A consumer's own pre-push ci.sh neither runs nor replaces the gate."""
-        clone = self.consumer()
-        self.git(clone, "switch", "-q", "-c", "planted")
-        own = clone / ".lefthook" / "pre-push" / "ci.sh"
-        own.parent.mkdir(parents=True)
-        own.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
-        own.chmod(0o755)
-        self.commit(clone, "plant a script")
-        self.assert_gated(self.push(clone, "origin", "planted"))
 
-    def test_a_worktree_on_another_canon_ref_cannot_evict_the_gate(self) -> None:
-        """Another worktree's hook mid-gate does not fail this push (#1426).
+def test_a_branch_pushed_while_head_is_elsewhere_is_gated(
+    pre_push_gate: PrePushGate,
+) -> None:
+    """A worktree's branch pushed from a checkout at origin/main."""
+    clone = pre_push_gate.consumer()
+    pre_push_gate.git(clone, "switch", "-q", "-c", "elsewhere")
+    write(clone, "new.txt")
+    pre_push_gate.commit(clone, "add")
+    pre_push_gate.git(clone, "switch", "-q", "--detach", "origin/main")
+    pre_push_gate.assert_gated(pre_push_gate.push(clone, "origin", "elsewhere"))
 
-        Two worktrees of one repository share .git/info/lefthook-remotes/,
-        which holds one canon ref at a time. Mid-gate, the stub runs a
-        hook in a second worktree pinned to v2; lefthook syncs v2 there
-        and deletes this worktree's v1 checkout. The push still goes
-        through, gated once: nothing the job runs lives in that cache.
-        The cache listing proves the eviction happened.
-        """
-        clone = self.consumer()
-        other = self.root / "other"
-        self.git(clone, "worktree", "add", "-q", "-b", "other", str(other))
-        (other / "lefthook.yml").write_text(
-            consumer_config(self.canon, ref="v2"), encoding="utf-8"
-        )
-        self.commit(other, "pin v2")
-        self.git(clone, "switch", "-q", "-c", "evicted")
-        write(clone, "new.txt")
-        self.commit(clone, "add")
-        self.env["PREPUSH_EVICT"] = str(other)
-        self.assert_gated(self.push(clone, "origin", "evicted"))
-        cache = (self.root / "marker.cache").read_text(encoding="utf-8")
-        assert cache == "canon-v2\n"
+
+def test_a_branch_already_on_the_default_branch_is_gated(
+    pre_push_gate: PrePushGate,
+) -> None:
+    """A new branch whose commits origin/main already has."""
+    clone = pre_push_gate.consumer()
+    pre_push_gate.git(clone, "switch", "-q", "-c", "merged")
+    write(clone, "new.txt")
+    pre_push_gate.commit(clone, "add")
+    pre_push_gate.git(clone, "push", "-q", "--no-verify", "origin", "merged:main")
+    pre_push_gate.git(clone, "fetch", "-q", "origin")
+    pre_push_gate.git(clone, "switch", "-q", "-c", "again")
+    pre_push_gate.assert_gated(pre_push_gate.push(clone, "origin", "again"))
+
+
+def test_another_source_dir_still_gets_the_gate(pre_push_gate: PrePushGate) -> None:
+    """A consumer's own `source_dir` changes nothing for an inline job.
+
+    The job was a script, found under the consumer's `source_dir`,
+    and a repository that set its own got a failed push (#1281). An
+    inline `run:` has no file to find.
+    """
+    clone = pre_push_gate.consumer(source_dir=".hooks/")
+    pre_push_gate.git(clone, "switch", "-q", "-c", "elsewhere-dir")
+    write(clone, "new.txt")
+    pre_push_gate.commit(clone, "add")
+    pre_push_gate.assert_gated(pre_push_gate.push(clone, "origin", "elsewhere-dir"))
+
+
+def test_the_canon_tree_gates_once(pre_push_gate: PrePushGate) -> None:
+    """The canon consumes its own hooks and runs the gate once."""
+    clone = pre_push_gate.consumer()
+    pre_push_gate.git(clone, "switch", "-q", "-c", "canon")
+    plant_canon(clone, "security/identity.toml")
+    pre_push_gate.commit(clone, "be the canon")
+    pre_push_gate.assert_gated(pre_push_gate.push(clone, "origin", "canon"))
+
+
+def test_a_consumer_planting_its_own_script_still_gets_the_gate(
+    pre_push_gate: PrePushGate,
+) -> None:
+    """A consumer's own pre-push ci.sh neither runs nor replaces the gate."""
+    clone = pre_push_gate.consumer()
+    pre_push_gate.git(clone, "switch", "-q", "-c", "planted")
+    own = clone / ".lefthook" / "pre-push" / "ci.sh"
+    own.parent.mkdir(parents=True)
+    own.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    own.chmod(0o755)
+    pre_push_gate.commit(clone, "plant a script")
+    pre_push_gate.assert_gated(pre_push_gate.push(clone, "origin", "planted"))
+
+
+def test_a_worktree_on_another_canon_ref_cannot_evict_the_gate(
+    pre_push_gate: PrePushGate,
+) -> None:
+    """Another worktree's hook mid-gate does not fail this push (#1426).
+
+    Two worktrees of one repository share .git/info/lefthook-remotes/,
+    which holds one canon ref at a time. Mid-gate, the stub runs a
+    hook in a second worktree pinned to v2; lefthook syncs v2 there
+    and deletes this worktree's v1 checkout. The push still goes
+    through, gated once: nothing the job runs lives in that cache.
+    The cache listing proves the eviction happened.
+    """
+    clone = pre_push_gate.consumer()
+    other = pre_push_gate.root / "other"
+    pre_push_gate.git(clone, "worktree", "add", "-q", "-b", "other", str(other))
+    (other / "lefthook.yml").write_text(
+        consumer_config(pre_push_gate.canon, ref="v2"), encoding="utf-8"
+    )
+    pre_push_gate.commit(other, "pin v2")
+    pre_push_gate.git(clone, "switch", "-q", "-c", "evicted")
+    write(clone, "new.txt")
+    pre_push_gate.commit(clone, "add")
+    pre_push_gate.env["PREPUSH_EVICT"] = str(other)
+    pre_push_gate.assert_gated(pre_push_gate.push(clone, "origin", "evicted"))
+    cache = (pre_push_gate.root / "marker.cache").read_text(encoding="utf-8")
+    assert cache == "canon-v2\n"

@@ -65,46 +65,43 @@ def url(repo: str, tag: str, name: str) -> str:
     return f"https://github.com/{repo}/releases/download/{tag}/{name}"
 
 
-class TestJudge:
-    """The asset agrees with its key, or it is a candidate."""
-
-    @given(st.data(), OS, ARCH, SOURCE)
-    def test_own_architecture_is_never_a_candidate(
-        self, data: st.DataObject, os_family: str, arch: str, source: tuple[str, str]
-    ) -> None:
-        """Any spelling, either order: agreement."""
-        name = data.draw(asset(os_family, arch))
-        value = {"url": url(*source, name)}
-        assert la.entry_line(LOCK, "t", f"platforms.{os_family}-{arch}", value) is None
-
-    @given(st.data(), OS, ARCH, SOURCE)
-    def test_another_architecture_always_is(
-        self, data: st.DataObject, os_family: str, arch: str, source: tuple[str, str]
-    ) -> None:
-        """The other family is named, with the regex for the right asset."""
-        other = "arm64" if arch == "x64" else "x64"
-        name = data.draw(asset(os_family, other))
-        value = {"url": url(*source, name)}
-        line = la.entry_line(LOCK, "t", f"platforms.{os_family}-{arch}", value)
-        if line is None:
-            pytest.fail(name)
-        fields = line.split("\t")
-        named = [name, *source]
-        assert fields[4:7] == named
-        native = data.draw(asset(os_family, arch))
-        assert re.search(fields[7], native.lower()), (fields[7], native)
+# The asset agrees with its key, or it is a candidate.
+@given(st.data(), OS, ARCH, SOURCE)
+def test_own_architecture_is_never_a_candidate(
+    data: st.DataObject, os_family: str, arch: str, source: tuple[str, str]
+) -> None:
+    """Any spelling, either order: agreement."""
+    name = data.draw(asset(os_family, arch))
+    value = {"url": url(*source, name)}
+    assert la.entry_line(LOCK, "t", f"platforms.{os_family}-{arch}", value) is None
 
 
-class TestReleaseSource:
-    """A release URL names its repository and tag."""
+@given(st.data(), OS, ARCH, SOURCE)
+def test_another_architecture_always_is(
+    data: st.DataObject, os_family: str, arch: str, source: tuple[str, str]
+) -> None:
+    """The other family is named, with the regex for the right asset."""
+    other = "arm64" if arch == "x64" else "x64"
+    name = data.draw(asset(os_family, other))
+    value = {"url": url(*source, name)}
+    line = la.entry_line(LOCK, "t", f"platforms.{os_family}-{arch}", value)
+    if line is None:
+        pytest.fail(name)
+    fields = line.split("\t")
+    named = [name, *source]
+    assert fields[4:7] == named
+    native = data.draw(asset(os_family, arch))
+    assert re.search(fields[7], native.lower()), (fields[7], native)
 
-    @given(OWNER, TOOL, TAG, TOOL)
-    def test_round_trip(self, owner: str, repo: str, tag: str, name: str) -> None:
-        """Built from (repo, tag), read back as (repo, tag)."""
-        assert la.release_source(url(f"{owner}/{repo}", tag, name)) == (
-            f"{owner}/{repo}",
-            tag,
-        )
+
+# A release URL names its repository and tag.
+@given(OWNER, TOOL, TAG, TOOL)
+def test_round_trip(owner: str, repo: str, tag: str, name: str) -> None:
+    """Built from (repo, tag), read back as (repo, tag)."""
+    assert la.release_source(url(f"{owner}/{repo}", tag, name)) == (
+        f"{owner}/{repo}",
+        tag,
+    )
 
 
 SCALAR: st.SearchStrategy[object] = (
@@ -132,16 +129,12 @@ ENTRY: st.SearchStrategy[object] = st.one_of(
 )
 
 
-class TestRefusal:
-    """Any entry is judged."""
-
-    @given(
-        st.one_of(
-            st.text(max_size=30), st.text(max_size=20).map("platforms.{}".format)
-        ),
-        ENTRY,
-    )
-    def test_entry_line_answers_anything(self, key: str, value: object) -> None:
-        """A candidate line or None."""
-        line = la.entry_line(LOCK, "t", key, value)
-        assert line is None or line.startswith("mise.lock\t")
+# Any entry is judged.
+@given(
+    st.one_of(st.text(max_size=30), st.text(max_size=20).map("platforms.{}".format)),
+    ENTRY,
+)
+def test_entry_line_answers_anything(key: str, value: object) -> None:
+    """A candidate line or None."""
+    line = la.entry_line(LOCK, "t", key, value)
+    assert line is None or line.startswith("mise.lock\t")

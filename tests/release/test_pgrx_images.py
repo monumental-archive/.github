@@ -137,12 +137,10 @@ def images(capfd: pytest.CaptureFixture[str]) -> Images:
     return call
 
 
-@pytest.mark.usefixtures("_set_up_test_stage")
-class TestStage:
+class Stage:
     """`pgrx_images.py stage`: every branch, messages asserted."""
 
-    @fixture
-    def _set_up_test_stage(self, tmp_path: Path, images: Images) -> None:
+    def __init__(self, tmp_path: Path, images: Images) -> None:
         """Make a workspace with a tarballs/ directory, removed after."""
         self.root = tmp_path
         self.images = images
@@ -174,71 +172,82 @@ class TestStage:
             cwd=self.root,
         )
 
-    def test_both_architectures_staged(self) -> None:
-        """The one layout, for amd64 and arm64, from pkgroot only."""
-        for arch in ("amd64", "arm64"):
-            self.plant("17", arch, link=True)
-        result = self.stage("17")
-        assert result.returncode == 0, result.stderr
-        for arch in ("amd64", "arm64"):
-            image = self.root / "staged" / arch / "image"
-            found = sorted(
-                str(p.relative_to(image)) for p in image.rglob("*") if not p.is_dir()
-            )
-            want: list[str] = [
-                "lib/edtf.so",
-                "lib/edtf_postgres.so",
-                "share/extension/edtf_postgres--1.2.3.sql",
-                "share/extension/edtf_postgres.control",
-            ]
-            assert want == found
-            so = image / "lib" / "edtf_postgres.so"
-            assert stat.S_IMODE(so.stat().st_mode) == 0o755
-            assert (image / "lib" / "edtf.so").is_symlink()
 
-    def test_a_missing_tarball(self) -> None:
-        """No amd64 tarball: the build did not produce the cell."""
-        self.plant("18", "arm64")
-        result = self.stage("18")
-        assert result.returncode == 1
-        assert result.stderr == (
-            "::error::pgrx-images: missing"
-            " tarballs/edtf_postgres-1.2.3-pg18-linux-amd64.tar.gz"
-            " — the extension build did not produce this cell\n"
+@fixture
+def stage_state(tmp_path: Path, images: Images) -> Stage:
+    """Give each row its own Stage."""
+    return Stage(tmp_path, images)
+
+
+def test_both_architectures_staged(stage_state: Stage) -> None:
+    """The one layout, for amd64 and arm64, from pkgroot only."""
+    for arch in ("amd64", "arm64"):
+        stage_state.plant("17", arch, link=True)
+    result = stage_state.stage("17")
+    assert result.returncode == 0, result.stderr
+    for arch in ("amd64", "arm64"):
+        image = stage_state.root / "staged" / arch / "image"
+        found = sorted(
+            str(p.relative_to(image)) for p in image.rglob("*") if not p.is_dir()
         )
+        want: list[str] = [
+            "lib/edtf.so",
+            "lib/edtf_postgres.so",
+            "share/extension/edtf_postgres--1.2.3.sql",
+            "share/extension/edtf_postgres.control",
+        ]
+        assert want == found
+        so = image / "lib" / "edtf_postgres.so"
+        assert stat.S_IMODE(so.stat().st_mode) == 0o755
+        assert (image / "lib" / "edtf.so").is_symlink()
 
-    def test_a_missing_second_architecture(self) -> None:
-        """amd64 stages, arm64 is missing and named."""
-        self.plant("18", "amd64")
-        result = self.stage("18")
-        assert result.returncode == 1
-        assert result.stderr == (
-            "::error::pgrx-images: missing"
-            " tarballs/edtf_postgres-1.2.3-pg18-linux-arm64.tar.gz"
-            " — the extension build did not produce this cell\n"
-        )
 
-    def test_a_tarball_without_lib(self) -> None:
-        """Only the second copy's lib: refused, never read (#1274)."""
-        shown = self.plant("16", "amd64", lib=False)
-        self.plant("16", "arm64")
-        result = self.stage("16")
-        assert result.returncode == 1
-        assert (
-            f"::error::pgrx-images: {shown} has no pkgroot/usr/lib/postgresql/16/lib\n"
-        ) == result.stderr
-        image_lib = self.root / "staged" / "amd64" / "image" / "lib"
-        assert not image_lib.exists()
+def test_a_missing_tarball(stage_state: Stage) -> None:
+    """No amd64 tarball: the build did not produce the cell."""
+    stage_state.plant("18", "arm64")
+    result = stage_state.stage("18")
+    assert result.returncode == 1
+    assert result.stderr == (
+        "::error::pgrx-images: missing"
+        " tarballs/edtf_postgres-1.2.3-pg18-linux-amd64.tar.gz"
+        " — the extension build did not produce this cell\n"
+    )
 
-    def test_a_tarball_without_extension(self) -> None:
-        """No share/postgresql/<major>/extension: refused by path."""
-        shown = self.plant("15", "amd64", share=False)
-        result = self.stage("15")
-        assert result.returncode == 1
-        assert (
-            f"::error::pgrx-images: {shown} has no"
-            f" pkgroot/usr/share/postgresql/15/extension\n"
-        ) == result.stderr
+
+def test_a_missing_second_architecture(stage_state: Stage) -> None:
+    """amd64 stages, arm64 is missing and named."""
+    stage_state.plant("18", "amd64")
+    result = stage_state.stage("18")
+    assert result.returncode == 1
+    assert result.stderr == (
+        "::error::pgrx-images: missing"
+        " tarballs/edtf_postgres-1.2.3-pg18-linux-arm64.tar.gz"
+        " — the extension build did not produce this cell\n"
+    )
+
+
+def test_a_tarball_without_lib(stage_state: Stage) -> None:
+    """Only the second copy's lib: refused, never read (#1274)."""
+    shown = stage_state.plant("16", "amd64", lib=False)
+    stage_state.plant("16", "arm64")
+    result = stage_state.stage("16")
+    assert result.returncode == 1
+    assert (
+        f"::error::pgrx-images: {shown} has no pkgroot/usr/lib/postgresql/16/lib\n"
+    ) == result.stderr
+    image_lib = stage_state.root / "staged" / "amd64" / "image" / "lib"
+    assert not image_lib.exists()
+
+
+def test_a_tarball_without_extension(stage_state: Stage) -> None:
+    """No share/postgresql/<major>/extension: refused by path."""
+    shown = stage_state.plant("15", "amd64", share=False)
+    result = stage_state.stage("15")
+    assert result.returncode == 1
+    assert (
+        f"::error::pgrx-images: {shown} has no"
+        f" pkgroot/usr/share/postgresql/15/extension\n"
+    ) == result.stderr
 
 
 def build_rows() -> dict[str, str]:
@@ -260,63 +269,62 @@ A_TABLE_THAT_IS_NOT_MAJORS_TO_REFERENCES_ROWS = [
 ]
 
 
-class TestBaseImage:
-    """`pgrx_images.py base-image`: the [build] row, or a refusal."""
-
-    def test_every_major_names_its_build_image(self, images: Images) -> None:
-        """Each [build] row is what the verb prints."""
-        rows = build_rows()
-        for pg, ref in rows.items():
-            result = images(
-                "base-image",
-                "--pg",
-                pg,
-                "--table",
-                str(TABLE),
-            )
-            assert (0, f"{ref}\n") == (result.returncode, result.stdout)
-            assert "@sha256:" in ref
-
-    def test_a_major_with_no_row(self, images: Images) -> None:
-        """A major the table does not pin is refused by name."""
+# `pgrx_images.py base-image`: the [build] row, or a refusal.
+def test_every_major_names_its_build_image(images: Images) -> None:
+    """Each [build] row is what the verb prints."""
+    rows = build_rows()
+    for pg, ref in rows.items():
         result = images(
             "base-image",
             "--pg",
-            "13",
+            pg,
             "--table",
             str(TABLE),
         )
-        assert result.returncode == 1
-        assert (
-            f"::error::pgrx-images: pg13 has no build image in {TABLE}\n"
-            == result.stderr
-        )
+        assert (0, f"{ref}\n") == (result.returncode, result.stdout)
+        assert "@sha256:" in ref
 
-    @pytest.mark.parametrize(
-        ("text", "want"), A_TABLE_THAT_IS_NOT_MAJORS_TO_REFERENCES_ROWS
+
+def test_a_major_with_no_row(images: Images) -> None:
+    """A major the table does not pin is refused by name."""
+    result = images(
+        "base-image",
+        "--pg",
+        "13",
+        "--table",
+        str(TABLE),
     )
-    def test_a_table_that_is_not_majors_to_references(
-        self, text: str, want: str, images: Images
-    ) -> None:
-        """#1556's shrunk examples are refused by name.
+    assert result.returncode == 1
+    assert (
+        f"::error::pgrx-images: pg13 has no build image in {TABLE}\n" == result.stderr
+    )
 
-        `build = false` and a row of `[]` died with a TypeError, and
-        `build = "x16"` matched pg 16 as a substring before dying.
-        """
-        with tempfile.TemporaryDirectory() as tmp:
-            table = Path(tmp) / "pgrx-base-images.toml"
-            table.write_text(text, "utf-8")
-            result = images(
-                "base-image",
-                "--pg",
-                "16",
-                "--table",
-                str(table),
-            )
-            assert (1, f"::error::pgrx-images: {want.format(t=table)}\n") == (
-                result.returncode,
-                result.stderr,
-            )
+
+@pytest.mark.parametrize(
+    ("text", "want"), A_TABLE_THAT_IS_NOT_MAJORS_TO_REFERENCES_ROWS
+)
+def test_a_table_that_is_not_majors_to_references(
+    text: str, want: str, images: Images
+) -> None:
+    """#1556's shrunk examples are refused by name.
+
+    `build = false` and a row of `[]` died with a TypeError, and
+    `build = "x16"` matched pg 16 as a substring before dying.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        table = Path(tmp) / "pgrx-base-images.toml"
+        table.write_text(text, "utf-8")
+        result = images(
+            "base-image",
+            "--pg",
+            "16",
+            "--table",
+            str(table),
+        )
+        assert (1, f"::error::pgrx-images: {want.format(t=table)}\n") == (
+            result.returncode,
+            result.stderr,
+        )
 
 
 def build_image(pg: str) -> str:
@@ -356,64 +364,66 @@ def render(images: Images) -> Render:
     return call
 
 
-class TestConsumerDockerfile:
-    """`pgrx_images.py consumer-dockerfile`: the recipes, pinned or refused."""
+# `pgrx_images.py consumer-dockerfile`: the recipes, pinned or refused.
+def test_the_copy_recipe(render: Render) -> None:
+    """The text the workflow's first heredoc wrote, byte for byte."""
+    result = render("copy", PINNED, build_image("17"), "17")
+    assert result.returncode == 0, result.stderr
+    assert (
+        f"FROM {PINNED} AS ext\n"
+        f"FROM {build_image('17')}\n"
+        "COPY --from=ext /lib/ /usr/lib/postgresql/17/lib/\n"
+        "COPY --from=ext /share/extension/ /usr/share/postgresql/17/extension/\n"
+    ) == result.stdout
 
-    def test_the_copy_recipe(self, render: Render) -> None:
-        """The text the workflow's first heredoc wrote, byte for byte."""
-        result = render("copy", PINNED, build_image("17"), "17")
-        assert result.returncode == 0, result.stderr
-        assert (
-            f"FROM {PINNED} AS ext\n"
-            f"FROM {build_image('17')}\n"
-            "COPY --from=ext /lib/ /usr/lib/postgresql/17/lib/\n"
-            "COPY --from=ext /share/extension/ /usr/share/postgresql/17/extension/\n"
-        ) == result.stdout
 
-    def test_the_path_recipe(self, render: Render) -> None:
-        """The text the workflow's second heredoc wrote, byte for byte."""
-        result = render("path", PINNED, build_image("18"), "18")
-        assert result.returncode == 0, result.stderr
-        assert (
-            f"FROM {PINNED} AS ext\n"
-            f"FROM {build_image('18')}\n"
-            "COPY --from=ext / /extensions/ext/\n"
-        ) == result.stdout
+def test_the_path_recipe(render: Render) -> None:
+    """The text the workflow's second heredoc wrote, byte for byte."""
+    result = render("path", PINNED, build_image("18"), "18")
+    assert result.returncode == 0, result.stderr
+    assert (
+        f"FROM {PINNED} AS ext\n"
+        f"FROM {build_image('18')}\n"
+        "COPY --from=ext / /extensions/ext/\n"
+    ) == result.stdout
 
-    def test_every_rendered_from_is_pinned(self, render: Render) -> None:
-        """Every recipe on every [build] row: each FROM carries a digest."""
-        rows = build_rows()
-        for pg, base in rows.items():
-            for recipe in ("copy", "path"):
-                result = render(recipe, PINNED, base, pg)
-                assert result.returncode == 0, result.stderr
-                from_lines = [
-                    ln for ln in result.stdout.splitlines() if ln.startswith("FROM")
-                ]
-                assert len(from_lines) == 2
-                for line in from_lines:
-                    assert "@sha256:" in line.split()[1]
 
-    def test_an_unpinned_extension_image(self, render: Render) -> None:
-        """A tag, not a digest: refused, nothing rendered."""
-        result = render("copy", IMAGE + ":1.2.3-pg17-artifact", build_image("17"), "17")
-        assert (result.returncode, result.stdout) == (1, "")
-        assert (
-            f"::error::pgrx-images: the extension image"
-            f" {IMAGE}:1.2.3-pg17-artifact is not"
-            " pinned by digest (@sha256:); the consumer proof builds only from"
-            " pinned references\n"
-        ) == result.stderr
+def test_every_rendered_from_is_pinned(render: Render) -> None:
+    """Every recipe on every [build] row: each FROM carries a digest."""
+    rows = build_rows()
+    for pg, base in rows.items():
+        for recipe in ("copy", "path"):
+            result = render(recipe, PINNED, base, pg)
+            assert result.returncode == 0, result.stderr
+            from_lines = [
+                ln for ln in result.stdout.splitlines() if ln.startswith("FROM")
+            ]
+            assert len(from_lines) == 2
+            for line in from_lines:
+                assert "@sha256:" in line.split()[1]
 
-    def test_an_unpinned_base_image(self, render: Render) -> None:
-        """A stock postgres by tag: refused, nothing rendered."""
-        result = render("path", PINNED, "postgres:18-bookworm", "18")
-        assert (result.returncode, result.stdout) == (1, "")
-        assert result.stderr == (
-            "::error::pgrx-images: the base image postgres:18-bookworm is not"
-            " pinned by digest"
-            " (@sha256:); the consumer proof builds only from pinned references\n"
-        )
+
+def test_an_unpinned_extension_image(render: Render) -> None:
+    """A tag, not a digest: refused, nothing rendered."""
+    result = render("copy", IMAGE + ":1.2.3-pg17-artifact", build_image("17"), "17")
+    assert (result.returncode, result.stdout) == (1, "")
+    assert (
+        f"::error::pgrx-images: the extension image"
+        f" {IMAGE}:1.2.3-pg17-artifact is not"
+        " pinned by digest (@sha256:); the consumer proof builds only from"
+        " pinned references\n"
+    ) == result.stderr
+
+
+def test_an_unpinned_base_image(render: Render) -> None:
+    """A stock postgres by tag: refused, nothing rendered."""
+    result = render("path", PINNED, "postgres:18-bookworm", "18")
+    assert (result.returncode, result.stdout) == (1, "")
+    assert result.stderr == (
+        "::error::pgrx-images: the base image postgres:18-bookworm is not"
+        " pinned by digest"
+        " (@sha256:); the consumer proof builds only from pinned references\n"
+    )
 
 
 # A recording docker: each call's arguments, then the Dockerfile it was
@@ -429,12 +439,10 @@ done
 """
 
 
-@pytest.mark.usefixtures("_set_up_test_proof")
-class TestProof:
+class Proof:
     """`pgrx-image-proof.sh`: the recipes it runs, per Postgres major."""
 
-    @fixture
-    def _set_up_test_proof(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Put a recording docker first on PATH, beside a digest record."""
         self.root = tmp_path
         bin_dir = self.root / "bin"
@@ -480,103 +488,113 @@ class TestProof:
         lines = self.log.read_text().splitlines() if self.log.exists() else []
         return result, lines
 
-    def test_below_18_runs_the_copy_recipe_only(self) -> None:
-        """pg17: one build, one run, and the branch says why it stops."""
-        result, lines = self.prove("17")
-        assert result.returncode == 0, result.stderr
-        assert (
-            result.stdout
-            == "pg17: below 18, no extension_control_path; path proof not applicable\n"
-        )
-        calls = [ln for ln in lines if not ln.startswith("  | ")]
-        built = [ln[4:] for ln in lines if ln.startswith("  | ")]
-        assert len(calls) == 2, lines
-        assert re.search(
-            r"^buildx build --file \S+/copy\.Dockerfile --load"
-            r" --tag consumer-proof:pg17 \S+$",
-            calls[0],
-        )
-        want: list[str] = [
-            f"FROM {PINNED} AS ext",
-            f"FROM {build_image('17')}",
-            "COPY --from=ext /lib/ /usr/lib/postgresql/17/lib/",
-            "COPY --from=ext /share/extension/ /usr/share/postgresql/17/extension/",
-        ]
-        assert want == built
-        docker_dir = (CANON / "docker").resolve()
-        assert (
-            f"run --rm -v {docker_dir}:/proof:ro {WRITER_MOUNT} consumer-proof:pg17"
-            " bash /proof/pgrx-copy-proof.sh edtf_postgres"
-        ) == calls[1]
 
-    def test_18_adds_the_path_recipe(self) -> None:
-        """pg18: the copy recipe, then the image mounted whole, as postgres."""
-        result, lines = self.prove("18")
-        assert result.returncode == 0, result.stderr
-        assert result.stdout == ""
-        calls = [ln for ln in lines if not ln.startswith("  | ")]
-        built = [ln[4:] for ln in lines if ln.startswith("  | ")]
-        assert len(calls) == 4, lines
-        assert re.search(
-            r"^buildx build --file \S+/path\.Dockerfile --load"
-            r" --tag consumer-path-proof:pg18 \S+$",
-            calls[2],
-        )
-        want: list[str] = [
-            f"FROM {PINNED} AS ext",
-            f"FROM {build_image('18')}",
-            "COPY --from=ext / /extensions/ext/",
-        ]
-        assert want == built[4:]
-        docker_dir = (CANON / "docker").resolve()
-        assert (
-            f"run --rm --user postgres -v {docker_dir}:/proof:ro {WRITER_MOUNT}"
-            " consumer-path-proof:pg18 bash /proof/pgrx-path-proof.sh"
-        ) == calls[3]
-
-    def test_a_major_with_no_build_image_builds_nothing(self) -> None:
-        """No [build] row: refused before any docker call."""
-        result, lines = self.prove("13")
-        assert result.returncode == 1
-        assert "::error::pgrx-images: pg13 has no build image in" in result.stderr
-        assert list[str]() == lines
-
-    def test_a_record_without_a_digest_builds_nothing(self) -> None:
-        """An empty digest renders no Dockerfile, so docker never runs."""
-        result, lines = self.prove("18", digest="")
-        assert result.returncode == 1
-        assert (
-            f"::error::pgrx-images: the extension image {IMAGE}@ is not pinned by"
-            f" digest"
-        ) in result.stderr
-        assert list[str]() == lines
-
-    @pytest.mark.parametrize("name", ["pgrx-copy-proof.sh", "pgrx-path-proof.sh"])
-    def test_the_in_image_scripts_are_tracked(self, name: object) -> None:
-        """What runs inside the images is files a person can read and run."""
-        assert os.access(CANON / "docker" / name, os.X_OK)
-
-    def test_a_staged_tree_without_one_extension_builds_nothing(self) -> None:
-        """None or two control files in the artifact's tree: no docker call."""
-        (self.staged / "edtf_postgres.control").unlink()
-        result, lines = self.prove("17")
-        assert result.returncode == 1
-        assert "holds no extension control file" in result.stderr
-        assert list[str]() == lines
-        (self.staged / "a.control").write_text("")
-        (self.staged / "b.control").write_text("")
-        result, lines = self.prove("17")
-        assert result.returncode == 1
-        assert "holds 2 extension control files (a, b)" in result.stderr
-        assert list[str]() == lines
+@fixture
+def proof(tmp_path: Path) -> Proof:
+    """Give each row its own Proof."""
+    return Proof(tmp_path)
 
 
-@pytest.mark.usefixtures("_set_up_test_extension_name")
-class TestExtensionName:
+def test_below_18_runs_the_copy_recipe_only(proof: Proof) -> None:
+    """pg17: one build, one run, and the branch says why it stops."""
+    result, lines = proof.prove("17")
+    assert result.returncode == 0, result.stderr
+    assert (
+        result.stdout
+        == "pg17: below 18, no extension_control_path; path proof not applicable\n"
+    )
+    calls = [ln for ln in lines if not ln.startswith("  | ")]
+    built = [ln[4:] for ln in lines if ln.startswith("  | ")]
+    assert len(calls) == 2, lines
+    assert re.search(
+        r"^buildx build --file \S+/copy\.Dockerfile --load"
+        r" --tag consumer-proof:pg17 \S+$",
+        calls[0],
+    )
+    want: list[str] = [
+        f"FROM {PINNED} AS ext",
+        f"FROM {build_image('17')}",
+        "COPY --from=ext /lib/ /usr/lib/postgresql/17/lib/",
+        "COPY --from=ext /share/extension/ /usr/share/postgresql/17/extension/",
+    ]
+    assert want == built
+    docker_dir = (CANON / "docker").resolve()
+    assert (
+        f"run --rm -v {docker_dir}:/proof:ro {WRITER_MOUNT} consumer-proof:pg17"
+        " bash /proof/pgrx-copy-proof.sh edtf_postgres"
+    ) == calls[1]
+
+
+def test_18_adds_the_path_recipe(proof: Proof) -> None:
+    """pg18: the copy recipe, then the image mounted whole, as postgres."""
+    result, lines = proof.prove("18")
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == ""
+    calls = [ln for ln in lines if not ln.startswith("  | ")]
+    built = [ln[4:] for ln in lines if ln.startswith("  | ")]
+    assert len(calls) == 4, lines
+    assert re.search(
+        r"^buildx build --file \S+/path\.Dockerfile --load"
+        r" --tag consumer-path-proof:pg18 \S+$",
+        calls[2],
+    )
+    want: list[str] = [
+        f"FROM {PINNED} AS ext",
+        f"FROM {build_image('18')}",
+        "COPY --from=ext / /extensions/ext/",
+    ]
+    assert want == built[4:]
+    docker_dir = (CANON / "docker").resolve()
+    assert (
+        f"run --rm --user postgres -v {docker_dir}:/proof:ro {WRITER_MOUNT}"
+        " consumer-path-proof:pg18 bash /proof/pgrx-path-proof.sh"
+    ) == calls[3]
+
+
+def test_a_major_with_no_build_image_builds_nothing(proof: Proof) -> None:
+    """No [build] row: refused before any docker call."""
+    result, lines = proof.prove("13")
+    assert result.returncode == 1
+    assert "::error::pgrx-images: pg13 has no build image in" in result.stderr
+    assert list[str]() == lines
+
+
+def test_a_record_without_a_digest_builds_nothing(proof: Proof) -> None:
+    """An empty digest renders no Dockerfile, so docker never runs."""
+    result, lines = proof.prove("18", digest="")
+    assert result.returncode == 1
+    assert (
+        f"::error::pgrx-images: the extension image {IMAGE}@ is not pinned by digest"
+    ) in result.stderr
+    assert list[str]() == lines
+
+
+@pytest.mark.usefixtures("proof")
+@pytest.mark.parametrize("name", ["pgrx-copy-proof.sh", "pgrx-path-proof.sh"])
+def test_the_in_image_scripts_are_tracked(name: object) -> None:
+    """What runs inside the images is files a person can read and run."""
+    assert os.access(CANON / "docker" / name, os.X_OK)
+
+
+def test_a_staged_tree_without_one_extension_builds_nothing(proof: Proof) -> None:
+    """None or two control files in the artifact's tree: no docker call."""
+    (proof.staged / "edtf_postgres.control").unlink()
+    result, lines = proof.prove("17")
+    assert result.returncode == 1
+    assert "holds no extension control file" in result.stderr
+    assert list[str]() == lines
+    (proof.staged / "a.control").write_text("")
+    (proof.staged / "b.control").write_text("")
+    result, lines = proof.prove("17")
+    assert result.returncode == 1
+    assert "holds 2 extension control files (a, b)" in result.stderr
+    assert list[str]() == lines
+
+
+class ExtensionName:
     """`pgrx_images.py extension-name`: the one shipped extension (#1439)."""
 
-    @fixture
-    def _set_up_test_extension_name(self, tmp_path: Path, images: Images) -> None:
+    def __init__(self, tmp_path: Path, images: Images) -> None:
         """Make an empty staged share/extension tree, removed after."""
         self.tree = tmp_path
         self.images = images
@@ -590,36 +608,47 @@ class TestExtensionName:
         """
         return self.images("extension-name", "--tree", str(self.tree))
 
-    def test_one_control_file_names_the_extension(self) -> None:
-        """The stem of the one control file, SQL scripts beside it ignored."""
-        (self.tree / "edtf_postgres.control").write_text("")
-        (self.tree / "edtf_postgres--1.2.3.sql").write_text("")
-        result = self.extension_name()
-        assert (result.returncode, result.stdout) == (0, "edtf_postgres\n")
 
-    def test_no_control_file(self) -> None:
-        """An artifact that ships no extension is refused by name."""
-        (self.tree / "edtf_postgres--1.2.3.sql").write_text("")
-        result = self.extension_name()
-        assert (result.returncode, result.stdout) == (1, "")
-        assert (
-            f"::error::pgrx-images: {self.tree} holds no extension control file;"
-            f" the artifact"
-            " image ships no extension for the consumer proof to create\n"
-        ) == result.stderr
+@fixture
+def extension_name_state(tmp_path: Path, images: Images) -> ExtensionName:
+    """Give each row its own ExtensionName."""
+    return ExtensionName(tmp_path, images)
 
-    def test_two_control_files(self) -> None:
-        """Two control files: the proof cannot tell which it is proving."""
-        (self.tree / "edtf_postgres.control").write_text("")
-        (self.tree / "amcheck.control").write_text("")
-        result = self.extension_name()
-        assert (result.returncode, result.stdout) == (1, "")
-        assert (
-            f"::error::pgrx-images: {self.tree} holds 2 extension control files"
-            f" (amcheck,"
-            " edtf_postgres); the consumer proof creates the one extension the"
-            " artifact image ships and cannot tell which\n"
-        ) == result.stderr
+
+def test_one_control_file_names_the_extension(
+    extension_name_state: ExtensionName,
+) -> None:
+    """The stem of the one control file, SQL scripts beside it ignored."""
+    (extension_name_state.tree / "edtf_postgres.control").write_text("")
+    (extension_name_state.tree / "edtf_postgres--1.2.3.sql").write_text("")
+    result = extension_name_state.extension_name()
+    assert (result.returncode, result.stdout) == (0, "edtf_postgres\n")
+
+
+def test_no_control_file(extension_name_state: ExtensionName) -> None:
+    """An artifact that ships no extension is refused by name."""
+    (extension_name_state.tree / "edtf_postgres--1.2.3.sql").write_text("")
+    result = extension_name_state.extension_name()
+    assert (result.returncode, result.stdout) == (1, "")
+    assert (
+        f"::error::pgrx-images: {extension_name_state.tree} holds no extension control file;"
+        f" the artifact"
+        " image ships no extension for the consumer proof to create\n"
+    ) == result.stderr
+
+
+def test_two_control_files(extension_name_state: ExtensionName) -> None:
+    """Two control files: the proof cannot tell which it is proving."""
+    (extension_name_state.tree / "edtf_postgres.control").write_text("")
+    (extension_name_state.tree / "amcheck.control").write_text("")
+    result = extension_name_state.extension_name()
+    assert (result.returncode, result.stdout) == (1, "")
+    assert (
+        f"::error::pgrx-images: {extension_name_state.tree} holds 2 extension control files"
+        f" (amcheck,"
+        " edtf_postgres); the consumer proof creates the one extension the"
+        " artifact image ships and cannot tell which\n"
+    ) == result.stderr
 
 
 COPY_PROOF = CANON / "docker" / "pgrx-copy-proof.sh"
@@ -632,12 +661,10 @@ printf '%s\\n' "$*" >> "${PSQL_LOG}"
 """
 
 
-@pytest.mark.usefixtures("_set_up_test_copy_proof")
-class TestCopyProof:
+class CopyProof:
     """docker/pgrx-copy-proof.sh, run for real against a planted root."""
 
-    @fixture
-    def _set_up_test_copy_proof(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Plant a stock postgres's directories and stub su and psql."""
         self.root = tmp_path
         share = self.root / "usr" / "share" / "postgresql" / "17" / "extension"
@@ -666,22 +693,34 @@ class TestCopyProof:
             PSQL_LOG=str(self.log),
         )
 
-    def test_copy_proof_creates_the_shipped_extension(self) -> None:
-        """Create edtf_postgres, though amcheck sorts first in the destination."""
-        result = run([BASH, str(COPY_PROOF), "edtf_postgres"], self.root, self.env)
-        assert result.returncode == 0, result.stderr
-        want: list[str] = ["-c CREATE EXTENSION edtf_postgres;"]
-        assert want == self.log.read_text().splitlines()
-        assert result.stdout == "created extension edtf_postgres from the COPY recipe\n"
 
-    def test_a_copy_that_did_not_land(self) -> None:
-        """The shipped control file is absent from the destination: refused."""
-        (self.share / "edtf_postgres.control").unlink()
-        result = run([BASH, str(COPY_PROOF), "edtf_postgres"], self.root, self.env)
-        assert result.returncode == 1
-        assert result.stderr == (
-            "::error::pgrx-copy-proof.sh: edtf_postgres: edtf_postgres.control"
-            " is not under /usr/share/postgresql/*/extension; the COPY did not"
-            " place the shipped extension\n"
-        )
-        assert not self.log.exists()
+@fixture
+def copy_proof(tmp_path: Path) -> CopyProof:
+    """Give each row its own CopyProof."""
+    return CopyProof(tmp_path)
+
+
+def test_copy_proof_creates_the_shipped_extension(copy_proof: CopyProof) -> None:
+    """Create edtf_postgres, though amcheck sorts first in the destination."""
+    result = run(
+        [BASH, str(COPY_PROOF), "edtf_postgres"], copy_proof.root, copy_proof.env
+    )
+    assert result.returncode == 0, result.stderr
+    want: list[str] = ["-c CREATE EXTENSION edtf_postgres;"]
+    assert want == copy_proof.log.read_text().splitlines()
+    assert result.stdout == "created extension edtf_postgres from the COPY recipe\n"
+
+
+def test_a_copy_that_did_not_land(copy_proof: CopyProof) -> None:
+    """The shipped control file is absent from the destination: refused."""
+    (copy_proof.share / "edtf_postgres.control").unlink()
+    result = run(
+        [BASH, str(COPY_PROOF), "edtf_postgres"], copy_proof.root, copy_proof.env
+    )
+    assert result.returncode == 1
+    assert result.stderr == (
+        "::error::pgrx-copy-proof.sh: edtf_postgres: edtf_postgres.control"
+        " is not under /usr/share/postgresql/*/extension; the COPY did not"
+        " place the shipped extension\n"
+    )
+    assert not copy_proof.log.exists()

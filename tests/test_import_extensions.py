@@ -110,37 +110,34 @@ def run(tree: Path, task: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-class TestFileOnDisk:
-    """`./helper.ts` and `./hm.mts`: the form Node loads."""
-
-    def test_lint_biome_is_clean(self) -> None:
-        """The rule with no options accepts the source extension."""
-        with tempfile.TemporaryDirectory() as tmp:
-            done = run(plant(Path(tmp), ".ts", ".mts"), "lint:biome")
-        out = done.stdout + done.stderr
-        assert done.returncode == 0, out
-        assert "lint:biome: clean across" in out
-
-    def test_lint_types_is_clean(self) -> None:
-        """The flag the belt forces makes the form legal (no TS5097)."""
-        with tempfile.TemporaryDirectory() as tmp:
-            done = run(plant(Path(tmp), ".ts", ".mts"), "lint:types")
-        out = done.stdout + done.stderr
-        assert done.returncode == 0, out
-        assert "TS5097" not in out
-        assert "lint:types: 1 project(s) checked, 3 files covered" in out
+# `./helper.ts` and `./hm.mts`: the form Node loads.
+def test_lint_biome_is_clean() -> None:
+    """The rule with no options accepts the source extension."""
+    with tempfile.TemporaryDirectory() as tmp:
+        done = run(plant(Path(tmp), ".ts", ".mts"), "lint:biome")
+    out = done.stdout + done.stderr
+    assert done.returncode == 0, out
+    assert "lint:biome: clean across" in out
 
 
-class TestMappedToJavaScript:
-    """`./helper.js` and `./hm.mjs`: the withdrawn mapping's form."""
+def test_lint_types_is_clean() -> None:
+    """The flag the belt forces makes the form legal (no TS5097)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        done = run(plant(Path(tmp), ".ts", ".mts"), "lint:types")
+    out = done.stdout + done.stderr
+    assert done.returncode == 0, out
+    assert "TS5097" not in out
+    assert "lint:types: 1 project(s) checked, 3 files covered" in out
 
-    def test_lint_biome_names_the_rule(self) -> None:
-        """Red by name, for each of the two specifiers."""
-        with tempfile.TemporaryDirectory() as tmp:
-            tree = plant(Path(tmp), ".js", ".mjs")
-            done = run(tree, "lint:biome")
-        out = STYLE.sub("", done.stdout + done.stderr)
-        assert done.returncode != 0, out
-        assert out.count("lint/correctness/useImportExtensions") == 2, out
-        assert "Safe fix: Add import extension .ts." in out
-        assert "Safe fix: Add import extension .mts." in out
+
+# `./helper.js` and `./hm.mjs`: the withdrawn mapping's form.
+def test_lint_biome_names_the_rule() -> None:
+    """Red by name, for each of the two specifiers."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = plant(Path(tmp), ".js", ".mjs")
+        done = run(tree, "lint:biome")
+    out = STYLE.sub("", done.stdout + done.stderr)
+    assert done.returncode != 0, out
+    assert out.count("lint/correctness/useImportExtensions") == 2, out
+    assert "Safe fix: Add import extension .ts." in out
+    assert "Safe fix: Add import extension .mts." in out

@@ -71,78 +71,82 @@ def entry(repo_url: str) -> dict[str, object]:
     return {**CANON, "repo_url": repo_url}
 
 
-class TestRealEntries:
-    """The two entries as the issuer serves them."""
-
-    def test_13998_is_not_monumental_archive_dbs(self) -> None:
-        """The defect as measured: red, naming both URLs."""
-        status, said = run(DB, DB_WEARER)
-        assert status == 1
-        assert said == (
-            "project 13998's repo_url is "
-            "https://github.com/CarlAllenn/monumental-archive-db, not "
-            "https://github.com/monumental-archive/monumental-archive-db, "
-            "the repository wearing it\n"
-        )
-
-    def test_14058_is_the_canons(self) -> None:
-        """The canon's own entry passes, silently."""
-        assert run(CANON, CANON_WEARER) == (0, "")
+# The two entries as the issuer serves them.
+def test_13998_is_not_monumental_archive_dbs() -> None:
+    """The defect as measured: red, naming both URLs."""
+    status, said = run(DB, DB_WEARER)
+    assert status == 1
+    assert said == (
+        "project 13998's repo_url is "
+        "https://github.com/CarlAllenn/monumental-archive-db, not "
+        "https://github.com/monumental-archive/monumental-archive-db, "
+        "the repository wearing it\n"
+    )
 
 
-class TestNormalisation:
-    """Case, one trailing slash and one trailing .git; nothing else."""
+def test_14058_is_the_canons() -> None:
+    """The canon's own entry passes, silently."""
+    assert run(CANON, CANON_WEARER) == (0, "")
 
-    def test_case_is_ignored(self) -> None:
-        """GitHub owners are case-insensitive."""
-        shouted = entry("https://github.com/Monumental-Archive/.GitHub")
-        assert run(shouted, CANON_WEARER)[0] == 0
 
-    def test_a_trailing_slash_is_ignored(self) -> None:
-        """A slash on either side."""
-        assert run(entry(CANON_WEARER + "/"), CANON_WEARER)[0] == 0
-        assert run(CANON, CANON_WEARER + "/")[0] == 0
+# Case, one trailing slash and one trailing .git; nothing else.
+def test_case_is_ignored() -> None:
+    """GitHub owners are case-insensitive."""
+    shouted = entry("https://github.com/Monumental-Archive/.GitHub")
+    assert run(shouted, CANON_WEARER)[0] == 0
 
-    def test_a_trailing_git_is_ignored(self) -> None:
-        """The clone URL form."""
-        assert run(entry(CANON_WEARER + ".git"), CANON_WEARER)[0] == 0
-        assert run(entry(CANON_WEARER + ".git/"), CANON_WEARER)[0] == 0
 
-    def test_an_old_owner_is_still_a_mismatch(self) -> None:
-        """A redirect from a renamed owner is not followed."""
-        moved = entry("https://github.com/CarlAllenn/.github")
-        status, said = run(moved, CANON_WEARER)
-        assert status == 1
-        assert "https://github.com/CarlAllenn/.github" in said
-        assert CANON_WEARER in said
+def test_a_trailing_slash_is_ignored() -> None:
+    """A slash on either side."""
+    assert run(entry(CANON_WEARER + "/"), CANON_WEARER)[0] == 0
+    assert run(CANON, CANON_WEARER + "/")[0] == 0
 
-    def test_another_host_is_a_mismatch(self) -> None:
-        """Only the three named differences fold."""
-        elsewhere = entry("https://gitlab.com/monumental-archive/.github")
-        assert run(elsewhere, CANON_WEARER)[0] == 1
 
-    def test_a_missing_repo_url_is_red(self) -> None:
-        """An entry naming no repository binds to none."""
-        entry = {k: v for k, v in CANON.items() if k != "repo_url"}
-        status, said = run(entry, CANON_WEARER)
-        assert status == 1
-        assert said == (
-            "project 14058 names no repo_url, so nothing binds it to "
-            "https://github.com/monumental-archive/.github\n"
-        )
+def test_a_trailing_git_is_ignored() -> None:
+    """The clone URL form."""
+    assert run(entry(CANON_WEARER + ".git"), CANON_WEARER)[0] == 0
+    assert run(entry(CANON_WEARER + ".git/"), CANON_WEARER)[0] == 0
 
-    def test_a_process_with_no_stdin_is_red_by_name(self) -> None:
-        """No standard input is named, never a traceback (#1681)."""
-        out = io.StringIO()
-        with pytest.MonkeyPatch.context() as patched, redirect_stdout(out):
-            patched.setattr("sys.stdin", None)
-            status = owner.main([CANON_WEARER])
-        assert status == 1
-        assert out.getvalue() == (
-            "the issuer's answer cannot be read: no standard input: the"
-            " process was started without one\n"
-        )
 
-    def test_a_non_object_answer_is_red(self) -> None:
-        """A list is not a project."""
-        assert run([CANON], CANON_WEARER)[0] == 1
+def test_an_old_owner_is_still_a_mismatch() -> None:
+    """A redirect from a renamed owner is not followed."""
+    moved = entry("https://github.com/CarlAllenn/.github")
+    status, said = run(moved, CANON_WEARER)
+    assert status == 1
+    assert "https://github.com/CarlAllenn/.github" in said
+    assert CANON_WEARER in said
+
+
+def test_another_host_is_a_mismatch() -> None:
+    """Only the three named differences fold."""
+    elsewhere = entry("https://gitlab.com/monumental-archive/.github")
+    assert run(elsewhere, CANON_WEARER)[0] == 1
+
+
+def test_a_missing_repo_url_is_red() -> None:
+    """An entry naming no repository binds to none."""
+    entry = {k: v for k, v in CANON.items() if k != "repo_url"}
+    status, said = run(entry, CANON_WEARER)
+    assert status == 1
+    assert said == (
+        "project 14058 names no repo_url, so nothing binds it to "
+        "https://github.com/monumental-archive/.github\n"
+    )
+
+
+def test_a_process_with_no_stdin_is_red_by_name() -> None:
+    """No standard input is named, never a traceback (#1681)."""
+    out = io.StringIO()
+    with pytest.MonkeyPatch.context() as patched, redirect_stdout(out):
+        patched.setattr("sys.stdin", None)
+        status = owner.main([CANON_WEARER])
+    assert status == 1
+    assert out.getvalue() == (
+        "the issuer's answer cannot be read: no standard input: the"
+        " process was started without one\n"
+    )
+
+
+def test_a_non_object_answer_is_red() -> None:
+    """A list is not a project."""
+    assert run([CANON], CANON_WEARER)[0] == 1

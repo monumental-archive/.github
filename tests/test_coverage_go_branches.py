@@ -288,229 +288,257 @@ class Plant(TypedDict, total=False):
     silent: bool
 
 
-@pytest.mark.usefixtures("_tmp")
-class TestGoBranchCase:
+class GoBranchCase:
     """Runs a task and removes the planted tree afterwards."""
 
-    @fixture
-    def _tmp(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
 
-    def run_task(
-        self, task: str = TASK, **plant: Unpack[Plant]
-    ) -> tuple[subprocess.CompletedProcess[str], Path, list[str]]:
-        """Run a task and schedule its tree for removal.
 
-        Returns:
-            The finished process, the temporary directory, and one line
-            per gobco call: the package, its arguments, and its `go`.
-
-        """
-        done, tmp = run_task(task, **plant)
-        calls = (tmp / "gobco.log").read_text(encoding="utf-8").splitlines()
-        return done, tmp, calls
+@fixture
+def go_branch_case(tmp_path: Path) -> GoBranchCase:
+    """Give each row its own GoBranchCase."""
+    return GoBranchCase(tmp_path)
 
 
-class TestAuditRows(TestGoBranchCase):
-    """`audit:coverage-go-branches`: held, red by name, and the skips."""
+def go_branch_case_run_task(
+    task: str = TASK, **plant: Unpack[Plant]
+) -> tuple[subprocess.CompletedProcess[str], Path, list[str]]:
+    """Run a task and schedule its tree for removal.
 
-    def test_a_floor_held(self) -> None:
-        """A measurement at or above the line holds it, by name."""
-        done, _, _ = self.run_task()
-        assert done.returncode == 0, done.stderr
-        assert f"{TASK}: go-branches holds its floor 80.0 (84%)\n" == done.stdout
+    Returns:
+        The finished process, the temporary directory, and one line
+        per gobco call: the package, its arguments, and its `go`.
 
-    def test_below_the_floor_reds_by_name(self) -> None:
-        """39 of 50 is 78%, under the 80.0 line: red, naming both numbers."""
-        done, _, _ = self.run_task(counts="a=5/8 b=34/42")
-        assert done.returncode == 1
-        assert done.stdout == ""
-        assert (
-            f"{TASK}: go-branches: 78% is below its derived floor 80.0%\n"
-            in done.stderr
-        )
-
-    def test_one_package_per_call_with_the_real_go_first(self) -> None:
-        """Each package is its own gobco call, default mode, real go first."""
-        done, tmp, calls = self.run_task()
-        assert done.returncode == 0, done.stderr
-        go = tmp / "goroot" / "bin" / "go"
-        both: list[str] = [f"a [] go={go}", f"b [] go={go}"]
-        assert both == calls
-
-    def test_a_shim_is_resolved_to_the_binary(self) -> None:
-        """A gobco found as a mise shim runs as the binary `mise which` names."""
-        done, tmp, calls = self.run_task(gobco="shim")
-        assert done.returncode == 0, done.stderr
-        go = tmp / "goroot" / "bin" / "go"
-        both: list[str] = [f"a [] go={go}", f"b [] go={go}"]
-        assert both == calls
-
-    def test_no_go_module_skips_clean(self) -> None:
-        """A tree with no go.mod has no Go condition to measure."""
-        done, _, calls = self.run_task(go_mod=False)
-        assert done.returncode == 0, done.stderr
-        assert f"{TASK}: no go.mod, skipped\n" == done.stdout
-        assert calls == EMPTY
-
-    def test_no_such_line_skips_clean(self) -> None:
-        """A floor with no go-branches line measures nothing at all."""
-        done, _, calls = self.run_task(floor=MAIN)
-        assert done.returncode == 0, done.stderr
-        assert done.stdout == SKIP
-        assert calls == EMPTY
-
-    def test_no_floor_file_skips_clean(self) -> None:
-        """A repository that adopted no floor owes no condition figure either."""
-        done, _, calls = self.run_task(floor=None)
-        assert done.returncode == 0, done.stderr
-        assert done.stdout == SKIP
-        assert calls == EMPTY
-
-    def test_a_build_go_older_than_the_running_go_is_refused(self) -> None:
-        """A gobco built with Go 1.24.13 under Go 1.27.4 is red, unrun."""
-        done, tmp, calls = self.run_task(built="go1.24.13")
-        assert done.returncode == 1
-        assert done.stdout == ""
-        assert (
-            f"{TASK}: {tmp}/stubs/gobco was built with go1.24.13, older than the"
-            " go1.27.4 it runs under —\n"
-            "  rebuild it with the repository's go:\n" + REMEDY
-        ) == done.stderr
-        assert calls == EMPTY
-
-    def test_an_older_patch_release_is_refused(self) -> None:
-        """go1.27.3 under go1.27.4 is older too."""
-        done, _, calls = self.run_task(built="go1.27.3")
-        assert done.returncode == 1
-        assert "was built with go1.27.3, older than the go1.27.4" in done.stderr
-        assert calls == EMPTY
-
-    def test_an_unreadable_build_go_is_refused(self) -> None:
-        """No build version reads as older, never as fine."""
-        done, _, calls = self.run_task(built="")
-        assert done.returncode == 1
-        assert "was built with an unreadable Go, older than the go1.27.4" in done.stderr
-        assert calls == EMPTY
-
-    def test_a_newer_build_go_runs(self) -> None:
-        """A build Go later than the running one reads its syntax."""
-        done, _, calls = self.run_task(built="go1.28.0")
-        assert done.returncode == 0, done.stderr
-        assert len(calls) == 2
-
-    def test_gobco_missing_reds_with_the_install_line(self) -> None:
-        """The belt pins it lazy; a missing gobco is named, never skipped."""
-        done, _, _ = self.run_task(gobco="missing")
-        assert done.returncode == 1
-        assert (
-            f"{TASK}: gobco missing — the belt pins it lazy; install it by name:\n"
-            + REMEDY
-        ) == done.stderr
-
-    def test_a_failing_package_reds_by_name(self) -> None:
-        """A suite that fails under gobco is refused, naming the package."""
-        done, _, calls = self.run_task(fail="a")
-        assert done.returncode == 1
-        assert done.stdout == ""
-        assert (
-            f"{TASK}: gobco failed in a — a suite that does not pass\n" in done.stderr
-        )
-        assert len(calls) == 1
-
-    def test_no_count_printed_is_refused(self) -> None:
-        """A gobco run that prints no count is refused, never read as 0."""
-        done, _, _ = self.run_task(silent=True)
-        assert done.returncode == 1
-        assert f"{TASK}: gobco printed no condition count in a — a\n" in done.stderr
-
-    def test_no_conditions_counted_is_refused(self) -> None:
-        """0 of 0 is a run that measured nothing, never a 0% to compare."""
-        done, _, _ = self.run_task(counts="a=0/0 b=0/0")
-        assert done.returncode == 1
-        assert (
-            f"{TASK}: gobco counted no conditions in any package — a\n" in done.stderr
-        )
-
-    def test_a_typed_line_is_refused_as_drift(self) -> None:
-        """A go-branches number typed over its record reds before measuring."""
-        typed = MAIN + "# go-branches measured: 82.0\ngo-branches 60.0\n"
-        done, _, calls = self.run_task(floor=typed)
-        assert done.returncode == 1
-        assert (
-            "go-branches floor 60.0 disagrees with its own record: measured"
-            " 82.0 under band 2 and the cap 90 derives 80.0."
-        ) in done.stderr
-        assert calls == EMPTY
-
-    def test_the_tree_is_left_untouched(self) -> None:
-        """The leg writes nothing into the tree it measures."""
-        done, tmp, _ = self.run_task()
-        assert done.returncode == 0, done.stderr
-        status = subprocess.run(
-            [GIT, "ls-files", "--others", "--modified", "--exclude-standard"],
-            cwd=tmp / "tree",
-            env=support.env(),
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        assert status.stdout == ""
+    """
+    done, tmp = run_task(task, **plant)
+    calls = (tmp / "gobco.log").read_text(encoding="utf-8").splitlines()
+    return done, tmp, calls
 
 
-class TestGateRows(TestGoBranchCase):
-    """The gate's coverage:check never reaches gobco."""
-
-    def test_check_measures_statements_beside_a_go_branches_line(self) -> None:
-        """A committed go-branches line changes nothing the gate runs."""
-        done, tmp, calls = self.run_task("coverage:check")
-        assert done.returncode == 0, done.stderr
-        assert (
-            "coverage:check: go leg holds its floor 90.0 (95.0%)\n"
-            f"coverage:check: upload {tmp / 'reports' / 'coverage.txt'}\n"
-        ) == done.stdout
-        assert calls == EMPTY
+@pytest.mark.usefixtures("go_branch_case")
+def test_a_floor_held() -> None:
+    """A measurement at or above the line holds it, by name."""
+    done, _, _ = go_branch_case_run_task()
+    assert done.returncode == 0, done.stderr
+    assert f"{TASK}: go-branches holds its floor 80.0 (84%)\n" == done.stdout
 
 
-class TestAdoptRows(TestGoBranchCase):
-    """`coverage:adopt` derives the line from a measurement, never a guess."""
+@pytest.mark.usefixtures("go_branch_case")
+def test_below_the_floor_reds_by_name() -> None:
+    """39 of 50 is 78%, under the 80.0 line: red, naming both numbers."""
+    done, _, _ = go_branch_case_run_task(counts="a=5/8 b=34/42")
+    assert done.returncode == 1
+    assert done.stdout == ""
+    assert f"{TASK}: go-branches: 78% is below its derived floor 80.0%\n" in done.stderr
 
-    def test_adopt_writes_a_derived_go_branches_line(self) -> None:
-        """Both legs measured; the file parses with the line derived."""
-        done, tmp, calls = self.run_task("coverage:adopt", floor=None)
-        assert done.returncode == 0, done.stderr
-        assert (
-            "coverage-floor: adopted .coverage-floor: go 90 (measured 95.0),"
-            " go-branches 82.0 (measured 84.0)\n"
-        ) in done.stdout
-        parsed, problems = cf.parse(
-            (tmp / "tree" / ".coverage-floor").read_text(encoding="utf-8")
-        )
-        assert problems == EMPTY
-        if parsed is None:
-            pytest.fail("the adopted .coverage-floor did not parse")
-        assert (
-            cf.Held(Decimal("82.0"), Decimal("84.0"), None)
-            == parsed.floors["go-branches"]
-        )
-        assert len(calls) == 2
 
-    def test_adopt_cannot_lower_the_go_branches_line(self) -> None:
-        """Below its floor, nothing is written."""
-        done, tmp, _ = self.run_task("coverage:adopt", counts="a=5/8 b=34/42")
-        assert done.returncode == 1
-        assert (
-            "coverage:adopt: go-branches: measured 78.0% is below its floor 80.0%."
-            in done.stderr
-        )
-        assert (tmp / "tree" / ".coverage-floor").read_text(
-            encoding="utf-8"
-        ) == MAIN + BRANCH
+@pytest.mark.usefixtures("go_branch_case")
+def test_one_package_per_call_with_the_real_go_first() -> None:
+    """Each package is its own gobco call, default mode, real go first."""
+    done, tmp, calls = go_branch_case_run_task()
+    assert done.returncode == 0, done.stderr
+    go = tmp / "goroot" / "bin" / "go"
+    both: list[str] = [f"a [] go={go}", f"b [] go={go}"]
+    assert both == calls
 
-    def test_adopt_with_gobco_missing_writes_nothing(self) -> None:
-        """A Go tree's adoption owes the line; a missing gobco is red."""
-        done, tmp, _ = self.run_task("coverage:adopt", floor=None, gobco="missing")
-        assert done.returncode == 1
-        assert "coverage:adopt: gobco missing — the belt pins it lazy" in done.stderr
-        assert not (tmp / "tree" / ".coverage-floor").exists()
+
+@pytest.mark.usefixtures("go_branch_case")
+def test_a_shim_is_resolved_to_the_binary() -> None:
+    """A gobco found as a mise shim runs as the binary `mise which` names."""
+    done, tmp, calls = go_branch_case_run_task(gobco="shim")
+    assert done.returncode == 0, done.stderr
+    go = tmp / "goroot" / "bin" / "go"
+    both: list[str] = [f"a [] go={go}", f"b [] go={go}"]
+    assert both == calls
+
+
+@pytest.mark.usefixtures("go_branch_case")
+def test_no_go_module_skips_clean() -> None:
+    """A tree with no go.mod has no Go condition to measure."""
+    done, _, calls = go_branch_case_run_task(go_mod=False)
+    assert done.returncode == 0, done.stderr
+    assert f"{TASK}: no go.mod, skipped\n" == done.stdout
+    assert calls == EMPTY
+
+
+@pytest.mark.usefixtures("go_branch_case")
+def test_no_such_line_skips_clean() -> None:
+    """A floor with no go-branches line measures nothing at all."""
+    done, _, calls = go_branch_case_run_task(floor=MAIN)
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == SKIP
+    assert calls == EMPTY
+
+
+@pytest.mark.usefixtures("go_branch_case")
+def test_no_floor_file_skips_clean() -> None:
+    """A repository that adopted no floor owes no condition figure either."""
+    done, _, calls = go_branch_case_run_task(floor=None)
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == SKIP
+    assert calls == EMPTY
+
+
+@pytest.mark.usefixtures("go_branch_case")
+def test_a_build_go_older_than_the_running_go_is_refused() -> None:
+    """A gobco built with Go 1.24.13 under Go 1.27.4 is red, unrun."""
+    done, tmp, calls = go_branch_case_run_task(built="go1.24.13")
+    assert done.returncode == 1
+    assert done.stdout == ""
+    assert (
+        f"{TASK}: {tmp}/stubs/gobco was built with go1.24.13, older than the"
+        " go1.27.4 it runs under —\n"
+        "  rebuild it with the repository's go:\n" + REMEDY
+    ) == done.stderr
+    assert calls == EMPTY
+
+
+@pytest.mark.usefixtures("go_branch_case")
+def test_an_older_patch_release_is_refused() -> None:
+    """go1.27.3 under go1.27.4 is older too."""
+    done, _, calls = go_branch_case_run_task(built="go1.27.3")
+    assert done.returncode == 1
+    assert "was built with go1.27.3, older than the go1.27.4" in done.stderr
+    assert calls == EMPTY
+
+
+@pytest.mark.usefixtures("go_branch_case")
+def test_an_unreadable_build_go_is_refused() -> None:
+    """No build version reads as older, never as fine."""
+    done, _, calls = go_branch_case_run_task(built="")
+    assert done.returncode == 1
+    assert "was built with an unreadable Go, older than the go1.27.4" in done.stderr
+    assert calls == EMPTY
+
+
+@pytest.mark.usefixtures("go_branch_case")
+def test_a_newer_build_go_runs() -> None:
+    """A build Go later than the running one reads its syntax."""
+    done, _, calls = go_branch_case_run_task(built="go1.28.0")
+    assert done.returncode == 0, done.stderr
+    assert len(calls) == 2
+
+
+@pytest.mark.usefixtures("go_branch_case")
+def test_gobco_missing_reds_with_the_install_line() -> None:
+    """The belt pins it lazy; a missing gobco is named, never skipped."""
+    done, _, _ = go_branch_case_run_task(gobco="missing")
+    assert done.returncode == 1
+    assert (
+        f"{TASK}: gobco missing — the belt pins it lazy; install it by name:\n" + REMEDY
+    ) == done.stderr
+
+
+@pytest.mark.usefixtures("go_branch_case")
+def test_a_failing_package_reds_by_name() -> None:
+    """A suite that fails under gobco is refused, naming the package."""
+    done, _, calls = go_branch_case_run_task(fail="a")
+    assert done.returncode == 1
+    assert done.stdout == ""
+    assert f"{TASK}: gobco failed in a — a suite that does not pass\n" in done.stderr
+    assert len(calls) == 1
+
+
+@pytest.mark.usefixtures("go_branch_case")
+def test_no_count_printed_is_refused() -> None:
+    """A gobco run that prints no count is refused, never read as 0."""
+    done, _, _ = go_branch_case_run_task(silent=True)
+    assert done.returncode == 1
+    assert f"{TASK}: gobco printed no condition count in a — a\n" in done.stderr
+
+
+@pytest.mark.usefixtures("go_branch_case")
+def test_no_conditions_counted_is_refused() -> None:
+    """0 of 0 is a run that measured nothing, never a 0% to compare."""
+    done, _, _ = go_branch_case_run_task(counts="a=0/0 b=0/0")
+    assert done.returncode == 1
+    assert f"{TASK}: gobco counted no conditions in any package — a\n" in done.stderr
+
+
+@pytest.mark.usefixtures("go_branch_case")
+def test_a_typed_line_is_refused_as_drift() -> None:
+    """A go-branches number typed over its record reds before measuring."""
+    typed = MAIN + "# go-branches measured: 82.0\ngo-branches 60.0\n"
+    done, _, calls = go_branch_case_run_task(floor=typed)
+    assert done.returncode == 1
+    assert (
+        "go-branches floor 60.0 disagrees with its own record: measured"
+        " 82.0 under band 2 and the cap 90 derives 80.0."
+    ) in done.stderr
+    assert calls == EMPTY
+
+
+@pytest.mark.usefixtures("go_branch_case")
+def test_the_tree_is_left_untouched() -> None:
+    """The leg writes nothing into the tree it measures."""
+    done, tmp, _ = go_branch_case_run_task()
+    assert done.returncode == 0, done.stderr
+    status = subprocess.run(
+        [GIT, "ls-files", "--others", "--modified", "--exclude-standard"],
+        cwd=tmp / "tree",
+        env=support.env(),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert status.stdout == ""
+
+
+@pytest.mark.usefixtures("go_branch_case")
+def test_check_measures_statements_beside_a_go_branches_line() -> None:
+    """A committed go-branches line changes nothing the gate runs."""
+    done, tmp, calls = go_branch_case_run_task("coverage:check")
+    assert done.returncode == 0, done.stderr
+    assert (
+        "coverage:check: go leg holds its floor 90.0 (95.0%)\n"
+        f"coverage:check: upload {tmp / 'reports' / 'coverage.txt'}\n"
+    ) == done.stdout
+    assert calls == EMPTY
+
+
+@pytest.mark.usefixtures("go_branch_case")
+def test_adopt_writes_a_derived_go_branches_line() -> None:
+    """Both legs measured; the file parses with the line derived."""
+    done, tmp, calls = go_branch_case_run_task("coverage:adopt", floor=None)
+    assert done.returncode == 0, done.stderr
+    assert (
+        "coverage-floor: adopted .coverage-floor: go 90 (measured 95.0),"
+        " go-branches 82.0 (measured 84.0)\n"
+    ) in done.stdout
+    parsed, problems = cf.parse(
+        (tmp / "tree" / ".coverage-floor").read_text(encoding="utf-8")
+    )
+    assert problems == EMPTY
+    if parsed is None:
+        pytest.fail("the adopted .coverage-floor did not parse")
+    assert (
+        cf.Held(Decimal("82.0"), Decimal("84.0"), None) == parsed.floors["go-branches"]
+    )
+    assert len(calls) == 2
+
+
+@pytest.mark.usefixtures("go_branch_case")
+def test_adopt_cannot_lower_the_go_branches_line() -> None:
+    """Below its floor, nothing is written."""
+    done, tmp, _ = go_branch_case_run_task("coverage:adopt", counts="a=5/8 b=34/42")
+    assert done.returncode == 1
+    assert (
+        "coverage:adopt: go-branches: measured 78.0% is below its floor 80.0%."
+        in done.stderr
+    )
+    assert (tmp / "tree" / ".coverage-floor").read_text(
+        encoding="utf-8"
+    ) == MAIN + BRANCH
+
+
+@pytest.mark.usefixtures("go_branch_case")
+def test_adopt_with_gobco_missing_writes_nothing() -> None:
+    """A Go tree's adoption owes the line; a missing gobco is red."""
+    done, tmp, _ = go_branch_case_run_task(
+        "coverage:adopt", floor=None, gobco="missing"
+    )
+    assert done.returncode == 1
+    assert "coverage:adopt: gobco missing — the belt pins it lazy" in done.stderr
+    assert not (tmp / "tree" / ".coverage-floor").exists()

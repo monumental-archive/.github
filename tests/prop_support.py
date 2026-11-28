@@ -46,38 +46,34 @@ LEAKING: dict[str, str] = {"GIT_DIR": "/real/.git", "VERSION": "1.0"}
 NO_OVERRIDE: dict[str, str] = {}
 
 
-class TestEnv:
-    """Nothing reaches a fixture that the allow-list does not name."""
-
-    @given(ENVIRON, OVERRIDES, st.one_of(st.none(), st.just("/fixture/home")))
-    @example(LEAKING, NO_OVERRIDE, None)
-    def test_only_the_allow_list_reaches_it(
-        self, environ: dict[str, str], overrides: dict[str, str], home: str | None
-    ) -> None:
-        """Allow-list, HOME and identity; overrides last."""
-        with pytest.MonkeyPatch.context() as patched:
-            for name in list(os.environ):
-                patched.delenv(name)
-            for name, value in environ.items():
-                patched.setenv(name, value)
-            got = he.env(home, **overrides)
-        # ORG_CANON_DIR is the package's canon, set for every fixture.
-        allowed = (
-            set(he.INHERITED) | {"HOME", "ORG_CANON_DIR"} | set(IDENTITY) | set(overrides)
-        )
-        assert set(got) <= allowed
-        for name, value in overrides.items():
+# Nothing reaches a fixture that the allow-list does not name.
+@given(ENVIRON, OVERRIDES, st.one_of(st.none(), st.just("/fixture/home")))
+@example(LEAKING, NO_OVERRIDE, None)
+def test_only_the_allow_list_reaches_it(
+    environ: dict[str, str], overrides: dict[str, str], home: str | None
+) -> None:
+    """Allow-list, HOME and identity; overrides last."""
+    with pytest.MonkeyPatch.context() as patched:
+        for name in list(os.environ):
+            patched.delenv(name)
+        for name, value in environ.items():
+            patched.setenv(name, value)
+        got = he.env(home, **overrides)
+    # ORG_CANON_DIR is the package's canon, set for every fixture.
+    allowed = (
+        set(he.INHERITED) | {"HOME", "ORG_CANON_DIR"} | set(IDENTITY) | set(overrides)
+    )
+    assert set(got) <= allowed
+    for name, value in overrides.items():
+        assert got[name] == value
+    for name, value in IDENTITY.items():
+        if name not in overrides:
             assert got[name] == value
-        for name, value in IDENTITY.items():
-            if name not in overrides:
-                assert got[name] == value
-        for name in he.INHERITED:
-            if name not in overrides:
-                assert got.get(name) == environ.get(name)
-        if "HOME" not in overrides:
-            assert got.get("HOME") == (
-                home if home is not None else environ.get("HOME")
-            )
-        for name in got:
-            if name.startswith("GIT_") and name not in overrides:
-                assert name in IDENTITY
+    for name in he.INHERITED:
+        if name not in overrides:
+            assert got.get(name) == environ.get(name)
+    if "HOME" not in overrides:
+        assert got.get("HOME") == (home if home is not None else environ.get("HOME"))
+    for name in got:
+        if name.startswith("GIT_") and name not in overrides:
+            assert name in IDENTITY

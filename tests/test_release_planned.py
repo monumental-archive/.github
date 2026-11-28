@@ -117,12 +117,10 @@ class History:
         )
 
 
-@pytest.mark.usefixtures("_set_up_test_release_planned")
-class TestReleasePlanned:
+class ReleasePlanned:
     """Green where planned, red with both commits and the count, else skip."""
 
-    @fixture
-    def _set_up_test_release_planned(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Build a history with one commit on the default branch."""
         if GIT is None or BASH is None:
             pytest.skip("git (or bash) not on PATH")
@@ -143,64 +141,97 @@ class TestReleasePlanned:
         assert done.stderr == message
         assert done.stdout == ""
 
-    def test_a_release_on_its_planned_commit_is_green(self) -> None:
-        """Planned-At equals HEAD^: nothing landed in between."""
-        self.repo.commit(f"{RELEASE}\nPlanned-At: {self.planned}\n")
-        self.assert_out(f"the release lands on {self.planned}, where it was planned")
 
-    def test_a_release_three_commits_past_its_plan_is_red(self) -> None:
-        """Three pull requests landed ahead of it in the queue: red, by count."""
-        parent = [self.repo.commit(f"fix: queued ahead {n}") for n in range(3)][-1]
-        self.repo.commit(f"{RELEASE}\nPlanned-At: {self.planned}\n")
-        self.assert_red(
-            f"{NAME}: the release was planned at {self.planned}"
-            f" but lands on {parent}:\n"
-            "  3 commits would ship without release notes;\n"
-            "  the Release PR is regenerated on the next push (#1472)\n"
-        )
+@fixture
+def release_planned(tmp_path: Path) -> ReleasePlanned:
+    """Give each row its own ReleasePlanned."""
+    return ReleasePlanned(tmp_path)
 
-    def test_one_commit_past_its_plan_is_named_in_the_singular(self) -> None:
-        """One pull request ahead of it: "1 commit", seen live on #1476."""
-        parent = self.repo.commit("fix: queued ahead")
-        self.repo.commit(f"{RELEASE}\nPlanned-At: {self.planned}\n")
-        self.assert_red(
-            f"{NAME}: the release was planned at {self.planned}"
-            f" but lands on {parent}:\n"
-            "  1 commit would ship without release notes;\n"
-            "  the Release PR is regenerated on the next push (#1472)\n"
-        )
 
-    def test_the_trailer_amid_other_trailers_is_read(self) -> None:
-        """The squash appends its own trailers after the body's."""
-        self.repo.commit(
-            f"{RELEASE}\nPlanned-At: {self.planned}\n"
-            "Signed-off-by: bot <1+bot@users.noreply.github.com>\n"
-        )
-        self.assert_out(f"the release lands on {self.planned}, where it was planned")
+def test_a_release_on_its_planned_commit_is_green(
+    release_planned: ReleasePlanned,
+) -> None:
+    """Planned-At equals HEAD^: nothing landed in between."""
+    release_planned.repo.commit(f"{RELEASE}\nPlanned-At: {release_planned.planned}\n")
+    release_planned.assert_out(
+        f"the release lands on {release_planned.planned}, where it was planned"
+    )
 
-    def test_a_commit_without_the_trailer_skips(self) -> None:
-        """Every commit that is not a release commit skips clean, by name."""
-        self.repo.commit("fix: an ordinary pull request")
-        self.assert_out(
-            "HEAD carries no Planned-At trailer, not a release commit, skipped"
-        )
 
-    def test_a_trailer_that_is_not_a_full_sha_is_red(self) -> None:
-        """A short or garbled trailer is never read as a match or a skip."""
-        self.repo.commit(f"{RELEASE}\nPlanned-At: {self.planned[:12]}\n")
-        self.assert_red(
-            f"{NAME}: HEAD's Planned-At trailer is not one full commit sha:\n"
-            f"  Planned-At: {self.planned[:12]}\n"
-        )
+def test_a_release_three_commits_past_its_plan_is_red(
+    release_planned: ReleasePlanned,
+) -> None:
+    """Three pull requests landed ahead of it in the queue: red, by count."""
+    parent = [release_planned.repo.commit(f"fix: queued ahead {n}") for n in range(3)][
+        -1
+    ]
+    release_planned.repo.commit(f"{RELEASE}\nPlanned-At: {release_planned.planned}\n")
+    release_planned.assert_red(
+        f"{NAME}: the release was planned at {release_planned.planned}"
+        f" but lands on {parent}:\n"
+        "  3 commits would ship without release notes;\n"
+        "  the Release PR is regenerated on the next push (#1472)\n"
+    )
 
-    def test_a_plan_missing_from_the_checkout_is_red_by_name(self) -> None:
-        """An unknown planned commit still reds, saying it is not here."""
-        absent = "f" * 40
-        self.repo.commit(f"{RELEASE}\nPlanned-At: {absent}\n")
-        self.assert_red(
-            f"{NAME}: the release was planned at {absent}"
-            f" but lands on {self.planned}:\n"
-            f"  commits ({absent} is not in this checkout) would ship"
-            " without release notes;\n"
-            "  the Release PR is regenerated on the next push (#1472)\n"
-        )
+
+def test_one_commit_past_its_plan_is_named_in_the_singular(
+    release_planned: ReleasePlanned,
+) -> None:
+    """One pull request ahead of it: "1 commit", seen live on #1476."""
+    parent = release_planned.repo.commit("fix: queued ahead")
+    release_planned.repo.commit(f"{RELEASE}\nPlanned-At: {release_planned.planned}\n")
+    release_planned.assert_red(
+        f"{NAME}: the release was planned at {release_planned.planned}"
+        f" but lands on {parent}:\n"
+        "  1 commit would ship without release notes;\n"
+        "  the Release PR is regenerated on the next push (#1472)\n"
+    )
+
+
+def test_the_trailer_amid_other_trailers_is_read(
+    release_planned: ReleasePlanned,
+) -> None:
+    """The squash appends its own trailers after the body's."""
+    release_planned.repo.commit(
+        f"{RELEASE}\nPlanned-At: {release_planned.planned}\n"
+        "Signed-off-by: bot <1+bot@users.noreply.github.com>\n"
+    )
+    release_planned.assert_out(
+        f"the release lands on {release_planned.planned}, where it was planned"
+    )
+
+
+def test_a_commit_without_the_trailer_skips(release_planned: ReleasePlanned) -> None:
+    """Every commit that is not a release commit skips clean, by name."""
+    release_planned.repo.commit("fix: an ordinary pull request")
+    release_planned.assert_out(
+        "HEAD carries no Planned-At trailer, not a release commit, skipped"
+    )
+
+
+def test_a_trailer_that_is_not_a_full_sha_is_red(
+    release_planned: ReleasePlanned,
+) -> None:
+    """A short or garbled trailer is never read as a match or a skip."""
+    release_planned.repo.commit(
+        f"{RELEASE}\nPlanned-At: {release_planned.planned[:12]}\n"
+    )
+    release_planned.assert_red(
+        f"{NAME}: HEAD's Planned-At trailer is not one full commit sha:\n"
+        f"  Planned-At: {release_planned.planned[:12]}\n"
+    )
+
+
+def test_a_plan_missing_from_the_checkout_is_red_by_name(
+    release_planned: ReleasePlanned,
+) -> None:
+    """An unknown planned commit still reds, saying it is not here."""
+    absent = "f" * 40
+    release_planned.repo.commit(f"{RELEASE}\nPlanned-At: {absent}\n")
+    release_planned.assert_red(
+        f"{NAME}: the release was planned at {absent}"
+        f" but lands on {release_planned.planned}:\n"
+        f"  commits ({absent} is not in this checkout) would ship"
+        " without release notes;\n"
+        "  the Release PR is regenerated on the next push (#1472)\n"
+    )

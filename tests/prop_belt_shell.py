@@ -83,57 +83,51 @@ LINE = st.one_of(
 )
 
 
-class TestScrubKeepsOffsets:
-    """An offset into the scrubbed text is an offset into the source."""
-
-    @given(SHELL_TEXT)
-    @example("foo \\\n  bar\nmise run x\n")
-    @example('x="a\\\nb"\nmise run y\n')
-    def test_every_offset_survives(self, source: str) -> None:
-        """Same length; kept or blanked; only an escaped newline blanked."""
-        scrubbed = bs.scrub(source)
-        assert len(scrubbed) == len(source)
-        for i, (got, was) in enumerate(zip(scrubbed, source, strict=True)):
-            kept_or_blank = {was, " "}
-            assert got in kept_or_blank
-            if was == "\n" and got != was:
-                assert source[i - 1] == "\\", f"newline {i} blanked unescaped"
+# An offset into the scrubbed text is an offset into the source.
+@given(SHELL_TEXT)
+@example("foo \\\n  bar\nmise run x\n")
+@example('x="a\\\nb"\nmise run y\n')
+def test_every_offset_survives(source: str) -> None:
+    """Same length; kept or blanked; only an escaped newline blanked."""
+    scrubbed = bs.scrub(source)
+    assert len(scrubbed) == len(source)
+    for i, (got, was) in enumerate(zip(scrubbed, source, strict=True)):
+        kept_or_blank = {was, " "}
+        assert got in kept_or_blank
+        if was == "\n" and got != was:
+            assert source[i - 1] == "\\", f"newline {i} blanked unescaped"
 
 
-class TestNestedRunsNamesTheLine:
-    """Every executed `mise run`, on the line it is written on."""
-
-    @given(
-        st.lists(st.one_of(FILLER, st.just(RUN)), max_size=12),
-    )
-    @example(HIDDEN_RUN)
-    @example(CONTINUED_RUN)
-    def test_exactly_the_executed_lines(self, lines: list[str]) -> None:
-        """A run is executed unless the line before continues onto it."""
-        source = "\n".join(lines) + "\n"
-        expected = [
-            i
-            for i, line in enumerate(lines)
-            if line == RUN and not (i and lines[i - 1].endswith("\\"))
-        ]
-        found = list(bs.nested_runs(source))
-        assert found == expected
+# Every executed `mise run`, on the line it is written on.
+@given(
+    st.lists(st.one_of(FILLER, st.just(RUN)), max_size=12),
+)
+@example(HIDDEN_RUN)
+@example(CONTINUED_RUN)
+def test_exactly_the_executed_lines(lines: list[str]) -> None:
+    """A run is executed unless the line before continues onto it."""
+    source = "\n".join(lines) + "\n"
+    expected = [
+        i
+        for i, line in enumerate(lines)
+        if line == RUN and not (i and lines[i - 1].endswith("\\"))
+    ]
+    found = list(bs.nested_runs(source))
+    assert found == expected
 
 
-class TestShellifyRoundTrip:
-    """`unshellify` restores what `shellify` commented out, or refuses."""
-
-    @given(st.lists(LINE, max_size=10))
-    def test_restores_or_refuses(self, lines: list[str]) -> None:
-        """The body comes back line for line, or None when it cannot."""
-        source = "\n".join(lines)
-        shell, tera = bs.shellify(source)
-        back = bs.unshellify(shell, tera)
-        lookalikes = any(bs.UNTERA_RE.match(line) for line in source.splitlines())
-        if lookalikes:
-            assert back is None
-        else:
-            assert back == "\n".join(source.splitlines()) + "\n"
+# `unshellify` restores what `shellify` commented out, or refuses.
+@given(st.lists(LINE, max_size=10))
+def test_restores_or_refuses(lines: list[str]) -> None:
+    """The body comes back line for line, or None when it cannot."""
+    source = "\n".join(lines)
+    shell, tera = bs.shellify(source)
+    back = bs.unshellify(shell, tera)
+    lookalikes = any(bs.UNTERA_RE.match(line) for line in source.splitlines())
+    if lookalikes:
+        assert back is None
+    else:
+        assert back == "\n".join(source.splitlines()) + "\n"
 
 
 SCALAR: st.SearchStrategy[object] = st.one_of(
@@ -238,15 +232,13 @@ def draw_config(draw: st.DrawFn) -> str:
 config = st.composite(draw_config)
 
 
-class TestReadAnyConfig:
-    """Any mise config is read, never a traceback."""
-
-    @given(config())
-    def test_read_and_locate_answer(self, text: str) -> None:
-        """Bodies, env names and a shell or None."""
-        with tempfile.TemporaryDirectory() as scratch:
-            path = Path(scratch) / "mise.toml"
-            path.write_text(text, encoding="utf-8")
-            got = bs.read(path)
-        assert isinstance(got.env, set)
-        assert isinstance(bs.locate(text), dict)
+# Any mise config is read, never a traceback.
+@given(config())
+def test_read_and_locate_answer(text: str) -> None:
+    """Bodies, env names and a shell or None."""
+    with tempfile.TemporaryDirectory() as scratch:
+        path = Path(scratch) / "mise.toml"
+        path.write_text(text, encoding="utf-8")
+        got = bs.read(path)
+    assert isinstance(got.env, set)
+    assert isinstance(bs.locate(text), dict)

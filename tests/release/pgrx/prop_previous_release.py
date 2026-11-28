@@ -219,121 +219,111 @@ def quietly(
     return code, out.getvalue()
 
 
-class TestOneAnswer:
-    """V: the predecessor is the definition's, in any order."""
-
-    @given(rows("demo"), EDGES, VERSION, st.booleans())
-    @example(listing=STRING_SORTED, edges=TO_1_0_10, version="1.2.3", backwards=False)
-    @example(listing=NEWER_FIRST, edges=TO_1_3_0, version="1.2.3", backwards=False)
-    def test_the_greatest_carried_target(
-        self,
-        listing: list[tuple[str, str]],
-        edges: list[tuple[str, str]],
-        version: str,
-        backwards: bool,  # ruff: ignore[boolean-type-hint-positional-argument] - drawn
-    ) -> None:
-        """The newest installable target below `version`, its first carrier."""
-        want = model(listing, edges, "demo", version)
-        with tempfile.TemporaryDirectory() as tmp:
-            sql = Path(tmp) / "sql"
-            lay(sql, "demo", edges[::-1] if backwards else edges)
-            got = previous.predecessor(listing, sql, "demo", version)
-        assert want == (None if got is None else (got.version, got.tag))
+# V: the predecessor is the definition's, in any order.
+@given(rows("demo"), EDGES, VERSION, st.booleans())
+@example(listing=STRING_SORTED, edges=TO_1_0_10, version="1.2.3", backwards=False)
+@example(listing=NEWER_FIRST, edges=TO_1_3_0, version="1.2.3", backwards=False)
+def test_the_greatest_carried_target(
+    listing: list[tuple[str, str]],
+    edges: list[tuple[str, str]],
+    version: str,
+    backwards: bool,  # ruff: ignore[boolean-type-hint-positional-argument] - drawn
+) -> None:
+    """The newest installable target below `version`, its first carrier."""
+    want = model(listing, edges, "demo", version)
+    with tempfile.TemporaryDirectory() as tmp:
+        sql = Path(tmp) / "sql"
+        lay(sql, "demo", edges[::-1] if backwards else edges)
+        got = previous.predecessor(listing, sql, "demo", version)
+    assert want == (None if got is None else (got.version, got.tag))
 
 
-class TestGuardRefusesExactly:
-    """V: a stranded installation, and only that, is refused."""
-
-    @given(st.data(), CRATE, EDGES, VERSION, st.sampled_from([0, 4]), st.booleans())
-    def test_refused_exactly_when_stranded(  # ruff: ignore[too-many-arguments, too-many-positional-arguments] - one per drawn input
-        self,
-        data: st.DataObject,
-        crate: str,
-        edges: list[tuple[str, str]],
-        version: str,
-        list_rc: int,
-        scripted: bool,  # ruff: ignore[boolean-type-hint-positional-argument] - drawn
-    ) -> None:
-        """The model's verdict is the guard's."""
-        name = posixpath.basename(crate).replace("-", "_")
-        listing = data.draw(rows(name))
-        run = fake(served(listing), list_rc)
-        rerun = any(a.startswith(f"{name}-{version}-pg") for _, a in listing)
-        prev = model(listing, edges, name, version)
-        here = Path.cwd()
-        with tempfile.TemporaryDirectory() as tmp:
-            os.chdir(tmp)
-            try:
-                lay(Path(crate) / "sql", name, edges)
-                script = ""
-                if prev is not None:
-                    script = f"{crate}/sql/{name}--{prev[0]}--{version}.sql"
-                    if scripted:
-                        Path(script).write_text("", encoding="utf-8")
-                code, out = quietly(run, lambda: previous.guard("o/r", version, crate))
-            finally:
-                os.chdir(here)
-        if list_rc:
-            want = list_rc
-        elif rerun or prev is None or scripted or (prev[0], version) in edges:
-            want = 0
-        else:
-            want = 1
-        assert code == want, out
-        # 1 is the model's refusal alone, which needs a predecessor.
-        if want == 1 and prev is not None:
-            assert (
-                f"::error::previous_release.py: no upgrade path {script} from"
-                f" published {prev[0]}"
-                f" ({prev[1]})"
-            ) in out
+# V: a stranded installation, and only that, is refused.
+@given(st.data(), CRATE, EDGES, VERSION, st.sampled_from([0, 4]), st.booleans())
+def test_refused_exactly_when_stranded(  # ruff: ignore[too-many-arguments, too-many-positional-arguments] - one per drawn input
+    data: st.DataObject,
+    crate: str,
+    edges: list[tuple[str, str]],
+    version: str,
+    list_rc: int,
+    scripted: bool,  # ruff: ignore[boolean-type-hint-positional-argument] - drawn
+) -> None:
+    """The model's verdict is the guard's."""
+    name = posixpath.basename(crate).replace("-", "_")
+    listing = data.draw(rows(name))
+    run = fake(served(listing), list_rc)
+    rerun = any(a.startswith(f"{name}-{version}-pg") for _, a in listing)
+    prev = model(listing, edges, name, version)
+    here = Path.cwd()
+    with tempfile.TemporaryDirectory() as tmp:
+        os.chdir(tmp)
+        try:
+            lay(Path(crate) / "sql", name, edges)
+            script = ""
+            if prev is not None:
+                script = f"{crate}/sql/{name}--{prev[0]}--{version}.sql"
+                if scripted:
+                    Path(script).write_text("", encoding="utf-8")
+            code, out = quietly(run, lambda: previous.guard("o/r", version, crate))
+        finally:
+            os.chdir(here)
+    if list_rc:
+        want = list_rc
+    elif rerun or prev is None or scripted or (prev[0], version) in edges:
+        want = 0
+    else:
+        want = 1
+    assert code == want, out
+    # 1 is the model's refusal alone, which needs a predecessor.
+    if want == 1 and prev is not None:
+        assert (
+            f"::error::previous_release.py: no upgrade path {script} from"
+            f" published {prev[0]}"
+            f" ({prev[1]})"
+        ) in out
 
 
-class TestExtensionName:
-    """V: the name is `basename DIR | tr - _`."""
-
-    @given(CRATE, st.integers(0, 2))
-    def test_basename(self, crate: str, slashes: int) -> None:
-        """Trailing slashes or not, the last segment, dashes as underscores."""
-        assert previous.extension_name(crate + "/" * slashes) == posixpath.basename(
-            crate
-        ).replace("-", "_")
+# V: the name is `basename DIR | tr - _`.
+@given(CRATE, st.integers(0, 2))
+def test_basename(crate: str, slashes: int) -> None:
+    """Trailing slashes or not, the last segment, dashes as underscores."""
+    assert previous.extension_name(crate + "/" * slashes) == posixpath.basename(
+        crate
+    ).replace("-", "_")
 
 
-class TestAnyListing:
-    """R: any listing text and any gh answer are answered by a status."""
-
-    @given(
-        st.text(max_size=40),
-        st.sampled_from([0, 1, 4]),
-        st.sampled_from([0, 1]),
-        st.sampled_from([0, 2]),
-        VERSION,
-    )
-    def test_guard_and_fetch_answer(
-        self, listing: str, rc: int, dl_rc: int, tar_rc: int, version: str
-    ) -> None:
-        """A status, never a raise."""
-        run = fake(listing, rc, tar_rc, dl_rc)
-        here = Path.cwd()
-        with tempfile.TemporaryDirectory() as tmp:
-            os.chdir(tmp)
-            try:
-                lay(Path("crate") / "sql", "crate", [("0.2.0", "1.0.2")])
-                code, _ = quietly(run, lambda: previous.guard("o/r", version, "crate"))
-                guarded: set[int] = {0, 1, rc}
-                assert code in guarded
-                args = previous.Args(
-                    repo="o/r",
-                    version=version,
-                    crate_dir="crate",
-                    pg="16",
-                    arch="amd64",
-                    tarball="prev.tar.gz",
-                    dest="prev",
-                )
-                code, _ = quietly(run, lambda: previous.fetch(args))
-                fetched: set[int] = {0, rc, tar_rc}
-                assert code in fetched
-            finally:
-                os.chdir(here)
+# R: any listing text and any gh answer are answered by a status.
+@given(
+    st.text(max_size=40),
+    st.sampled_from([0, 1, 4]),
+    st.sampled_from([0, 1]),
+    st.sampled_from([0, 2]),
+    VERSION,
+)
+def test_guard_and_fetch_answer(
+    listing: str, rc: int, dl_rc: int, tar_rc: int, version: str
+) -> None:
+    """A status, never a raise."""
+    run = fake(listing, rc, tar_rc, dl_rc)
+    here = Path.cwd()
+    with tempfile.TemporaryDirectory() as tmp:
+        os.chdir(tmp)
+        try:
+            lay(Path("crate") / "sql", "crate", [("0.2.0", "1.0.2")])
+            code, _ = quietly(run, lambda: previous.guard("o/r", version, "crate"))
+            guarded: set[int] = {0, 1, rc}
+            assert code in guarded
+            args = previous.Args(
+                repo="o/r",
+                version=version,
+                crate_dir="crate",
+                pg="16",
+                arch="amd64",
+                tarball="prev.tar.gz",
+                dest="prev",
+            )
+            code, _ = quietly(run, lambda: previous.fetch(args))
+            fetched: set[int] = {0, rc, tar_rc}
+            assert code in fetched
+        finally:
+            os.chdir(here)

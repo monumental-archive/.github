@@ -79,66 +79,62 @@ def ours(entry: object) -> bool:
     )
 
 
-class TestTheChoiceIsThisCommits:
-    """C: only this commit's unexpired artifact, the newest of them."""
+# C: only this commit's unexpired artifact, the newest of them.
+@given(st.lists(ENTRY, max_size=6))
+def test_the_choice(entries: Sequence[object]) -> None:
+    """The pick is the newest eligible entry, or a refusal when none is."""
+    ids: list[int] = []
+    for entry in entries:
+        got = figures.ident(entry.get("id")) if decoded.is_object(entry) else None
+        if ours(entry) and got is not None:
+            ids.append(got)
+    try:
+        choice = figures.choose({"artifacts": list(entries)}, SHA)
+    except figures.RefusedError:
+        assert not ids, "an eligible artifact was refused"
+        return
+    assert max(ids) == choice.artifact
 
-    @given(st.lists(ENTRY, max_size=6))
-    def test_the_choice(self, entries: Sequence[object]) -> None:
-        """The pick is the newest eligible entry, or a refusal when none is."""
-        ids: list[int] = []
-        for entry in entries:
-            got = figures.ident(entry.get("id")) if decoded.is_object(entry) else None
-            if ours(entry) and got is not None:
-                ids.append(got)
+
+# F: what comes back is leg lines, all of them.
+@given(st.lists(LEG, min_size=1, max_size=5), st.lists(st.just(""), max_size=2))
+def test_leg_lines_come_back(legs: list[str], blanks: list[str]) -> None:
+    """Leg lines with blanks among them: the legs, in order."""
+    text = "\n".join([*blanks, *legs, *blanks])
+    assert "".join(f"{leg}\n" for leg in legs) == figures.figures(text)
+
+
+# R: answered or refused by name on anything.
+@given(JSON)
+def test_any_listing_and_run(doc: object) -> None:
+    """Any JSON as a listing and as a run: an answer or a refusal."""
+    for decide in (figures.choose, figures.judge):
         try:
-            choice = figures.choose({"artifacts": list(entries)}, SHA)
-        except figures.RefusedError:
-            assert not ids, "an eligible artifact was refused"
-            return
-        assert max(ids) == choice.artifact
+            got = decide(doc, SHA)
+        except figures.RefusedError as refused:
+            assert str(refused), "a refusal says why"
+        else:
+            assert got is not None
 
 
-class TestOnlyLegLines:
-    """F: what comes back is leg lines, all of them."""
-
-    @given(st.lists(LEG, min_size=1, max_size=5), st.lists(st.just(""), max_size=2))
-    def test_leg_lines_come_back(self, legs: list[str], blanks: list[str]) -> None:
-        """Leg lines with blanks among them: the legs, in order."""
-        text = "\n".join([*blanks, *legs, *blanks])
-        assert "".join(f"{leg}\n" for leg in legs) == figures.figures(text)
-
-
-class TestAnyInput:
-    """R: answered or refused by name on anything."""
-
-    @given(JSON)
-    def test_any_listing_and_run(self, doc: object) -> None:
-        """Any JSON as a listing and as a run: an answer or a refusal."""
-        for decide in (figures.choose, figures.judge):
-            try:
-                got = decide(doc, SHA)
-            except figures.RefusedError as refused:
-                assert str(refused), "a refusal says why"
-            else:
-                assert got is not None
-
-    @given(st.binary(max_size=64) | st.text(max_size=64).map(str.encode))
-    def test_any_bytes(self, data: bytes) -> None:
-        """Any download and any answer: an answer or a refusal."""
-        for command in ("choose", "judge", "figures"):
-            try:
-                said = figures.answer(command, SHA, data)
-            except figures.RefusedError as refused:
-                assert str(refused), "a refusal says why"
-            else:
-                assert said.endswith("\n"), said
-
-    @given(st.text(max_size=80))
-    def test_any_figures_text(self, text: str) -> None:
-        """Any text as the figures file: leg lines, or a refusal."""
+@given(st.binary(max_size=64) | st.text(max_size=64).map(str.encode))
+def test_any_bytes(data: bytes) -> None:
+    """Any download and any answer: an answer or a refusal."""
+    for command in ("choose", "judge", "figures"):
         try:
-            got = figures.figures(text)
-        except figures.RefusedError:
-            return
-        for line in got.splitlines():
-            assert re.search(figures.LEG, line)
+            said = figures.answer(command, SHA, data)
+        except figures.RefusedError as refused:
+            assert str(refused), "a refusal says why"
+        else:
+            assert said.endswith("\n"), said
+
+
+@given(st.text(max_size=80))
+def test_any_figures_text(text: str) -> None:
+    """Any text as the figures file: leg lines, or a refusal."""
+    try:
+        got = figures.figures(text)
+    except figures.RefusedError:
+        return
+    for line in got.splitlines():
+        assert re.search(figures.LEG, line)

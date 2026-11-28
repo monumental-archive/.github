@@ -26,7 +26,6 @@ import json
 from pathlib import Path
 from typing import TypedDict
 
-import pytest
 from hypothesis import example
 from hypothesis import strategies as st
 
@@ -206,73 +205,69 @@ CLEAN_EXIT: Reported = {
 }
 
 
-@pytest.mark.usefixtures("_set_up_test_scratch")
-class TestScratch:
+class Scratch:
     """One scratch report file for a test's examples."""
 
-    @fixture
-    def _set_up_test_scratch(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Hold the scratch file."""
         self.path = Path(str(tmp_path)) / "report.json"
 
 
-class TestReading(TestScratch):
-    """R: whatever the report file holds, a Report."""
-
-    @given(CONTENT)
-    @example(DEEP)
-    @example(b"\xff")
-    @example(b'{"target": "assert signer-certificates", "facts": [1]}')
-    def test_never_raises(self, content: bytes) -> None:
-        """Only a Report comes back; a report it could not read names why."""
-        self.path.write_bytes(content)
-        report = verdict.read_report(self.path)
-        assert isinstance(report, verdict.Report)
-        if report.missing is not None:
-            assert (report.facts, report.findings) == ({}, 0)
+@fixture
+def scratch(tmp_path: Path) -> Scratch:
+    """Give each row its own Scratch."""
+    return Scratch(tmp_path)
 
 
-class TestTable:
-    """V: the docstring's table, for every combination."""
-
-    @given(LEG)
-    @example(NOT_JUDGED)
-    @example(JUDGED_NONE)
-    @example(ONE_FOUND)
-    @example(UNREAD)
-    def test_table_holds(self, leg: Leg) -> None:
-        """Each row of the table, and only that row, decides the colour."""
-        code, judged, missing = leg["code"], leg["judged"], leg["missing"]
-        facts = {"stopped": leg["stopped"]}
-        if judged is not None:
-            facts["judged"] = judged
-        report = verdict.Report(facts, leg["found"], missing)
-        red, why = verdict.judge(code, report, saved=leg["saved"])
-        if not code.isdigit():
-            expected = True
-            assert why == verdict.KILLED
-        elif not leg["saved"] or missing or leg["found"]:
-            expected = True
-        elif code in {"0", "4"}:
-            expected = False
-        else:
-            expected = True
-        assert red == expected, why
+@given(CONTENT)
+@example(DEEP)
+@example(b"\xff")
+@example(b'{"target": "assert signer-certificates", "facts": [1]}')
+def test_never_raises(scratch: Scratch, content: bytes) -> None:
+    """Only a Report comes back; a report it could not read names why."""
+    scratch.path.write_bytes(content)
+    report = verdict.read_report(scratch.path)
+    assert isinstance(report, verdict.Report)
+    if report.missing is not None:
+        assert (report.facts, report.findings) == ({}, 0)
 
 
-class TestAnyFindingIsRed(TestScratch):
-    """V: a finding in the report is red, whatever else it says."""
+# V: the docstring's table, for every combination.
+@given(LEG)
+@example(NOT_JUDGED)
+@example(JUDGED_NONE)
+@example(ONE_FOUND)
+@example(UNREAD)
+def test_table_holds(leg: Leg) -> None:
+    """Each row of the table, and only that row, decides the colour."""
+    code, judged, missing = leg["code"], leg["judged"], leg["missing"]
+    facts = {"stopped": leg["stopped"]}
+    if judged is not None:
+        facts["judged"] = judged
+    report = verdict.Report(facts, leg["found"], missing)
+    red, why = verdict.judge(code, report, saved=leg["saved"])
+    if not code.isdigit():
+        expected = True
+        assert why == verdict.KILLED
+    elif not leg["saved"] or missing or leg["found"]:
+        expected = True
+    elif code in {"0", "4"}:
+        expected = False
+    else:
+        expected = True
+    assert red == expected, why
 
-    @given(REPORTED)
-    @example(CLEAN_EXIT)
-    def test_finding_is_red(self, leg: Reported) -> None:
-        """Whatever the exit code, saved or not, whatever the facts."""
-        doc: dict[str, object] = {
-            "target": verdict.TARGET,
-            "findings": leg["findings"],
-            "facts": leg["facts"],
-        }
-        self.path.write_text(json.dumps(doc), encoding="utf-8")
-        report = verdict.read_report(self.path)
-        red, _ = verdict.judge(leg["code"], report, saved=leg["saved"])
-        assert red
+
+@given(REPORTED)
+@example(CLEAN_EXIT)
+def test_finding_is_red(scratch: Scratch, leg: Reported) -> None:
+    """Whatever the exit code, saved or not, whatever the facts."""
+    doc: dict[str, object] = {
+        "target": verdict.TARGET,
+        "findings": leg["findings"],
+        "facts": leg["facts"],
+    }
+    scratch.path.write_text(json.dumps(doc), encoding="utf-8")
+    report = verdict.read_report(scratch.path)
+    red, _ = verdict.judge(leg["code"], report, saved=leg["saved"])
+    assert red

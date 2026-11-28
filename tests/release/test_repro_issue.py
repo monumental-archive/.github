@@ -59,12 +59,10 @@ for arg in "$@"; do printf '%s\\0' "${arg}"; done > "${GH_ARGS}"
 """
 
 
-@pytest.mark.usefixtures("_set_up_test_file_an_issue")
-class TestFileAnIssue:
+class FileAnIssue:
     """Each row: the compare outcome, and the exact issue filed."""
 
-    @fixture
-    def _set_up_test_file_an_issue(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Give each row its own directory and stub `gh`."""
         self.tmp = tmp_path
         bindir = self.tmp / "bin"
@@ -118,47 +116,58 @@ class TestFileAnIssue:
         assert len(args) == 8, args
         return args[5], args[7]
 
-    def test_failure_is_a_verdict_and_files_as_before(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A comparison that ran and failed keeps its title and body."""
-        title, body = self.file("failure", capfd=capfd)
-        assert title == VERDICT_TITLE
-        assert body == VERDICT_BODY
 
-    def test_skipped_files_could_not_be_compared(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """release-lab#305: the install died, the compare never ran."""
-        title, body = self.file("skipped", capfd=capfd)
-        assert title == NO_VERDICT_TITLE
-        assert body == NO_VERDICT_BODY.format(outcome="skipped")
-        self.assert_no_verdict_words(title, body)
+@fixture
+def file_an_issue(tmp_path: Path) -> FileAnIssue:
+    """Give each row its own FileAnIssue."""
+    return FileAnIssue(tmp_path)
 
-    def test_cancelled_files_could_not_be_compared(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A cancelled comparison reached no verdict either."""
-        title, body = self.file("cancelled", capfd=capfd)
-        assert title == NO_VERDICT_TITLE
-        assert body == NO_VERDICT_BODY.format(outcome="cancelled")
-        self.assert_no_verdict_words(title, body)
 
-    def test_untyped_release_names_the_unscoped_population(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """No typed manifest: the verdict says it judged the whole release."""
-        title, body = self.file("failure", manifest=" \n", capfd=capfd)
-        assert title == VERDICT_TITLE
-        assert body == VERDICT_BODY.replace(
-            "the pgrx-extension artifacts v0.28.1 published",
-            "every build subject v0.28.1 published — it carries no per-class"
-            " typing, so this pgrx-extension rebuild could not be scoped to its"
-            " own class",
-        )
+def test_failure_is_a_verdict_and_files_as_before(
+    file_an_issue: FileAnIssue, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A comparison that ran and failed keeps its title and body."""
+    title, body = file_an_issue.file("failure", capfd=capfd)
+    assert title == VERDICT_TITLE
+    assert body == VERDICT_BODY
 
-    def assert_no_verdict_words(self, title: str, body: str) -> None:
-        """No word of a verdict, in any case, in title or body."""
-        for text in (title, body):
-            for word in BANNED:
-                assert word not in text.lower()
+
+def test_skipped_files_could_not_be_compared(
+    file_an_issue: FileAnIssue, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """release-lab#305: the install died, the compare never ran."""
+    title, body = file_an_issue.file("skipped", capfd=capfd)
+    assert title == NO_VERDICT_TITLE
+    assert body == NO_VERDICT_BODY.format(outcome="skipped")
+    assert_no_verdict_words(title, body)
+
+
+def test_cancelled_files_could_not_be_compared(
+    file_an_issue: FileAnIssue, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A cancelled comparison reached no verdict either."""
+    title, body = file_an_issue.file("cancelled", capfd=capfd)
+    assert title == NO_VERDICT_TITLE
+    assert body == NO_VERDICT_BODY.format(outcome="cancelled")
+    assert_no_verdict_words(title, body)
+
+
+def test_untyped_release_names_the_unscoped_population(
+    file_an_issue: FileAnIssue, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """No typed manifest: the verdict says it judged the whole release."""
+    title, body = file_an_issue.file("failure", manifest=" \n", capfd=capfd)
+    assert title == VERDICT_TITLE
+    assert body == VERDICT_BODY.replace(
+        "the pgrx-extension artifacts v0.28.1 published",
+        "every build subject v0.28.1 published — it carries no per-class"
+        " typing, so this pgrx-extension rebuild could not be scoped to its"
+        " own class",
+    )
+
+
+def assert_no_verdict_words(title: str, body: str) -> None:
+    """No word of a verdict, in any case, in title or body."""
+    for text in (title, body):
+        for word in BANNED:
+            assert word not in text.lower()

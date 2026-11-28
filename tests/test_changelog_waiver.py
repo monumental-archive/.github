@@ -46,30 +46,29 @@ def section() -> str:
     return text[head : min(s for s in starts if s > head)]
 
 
-class TestScaffoldedChangelogLints:
-    """The waiver in the scaffold's header covers the entries below it."""
+# The waiver in the scaffold's header covers the entries below it.
+def test_the_section_is_long_enough_to_need_the_waiver() -> None:
+    """The captured section has a subject past 80 before its link."""
+    subjects = [line.split(" ([#")[0] for line in section().splitlines()]
+    assert any(len(subject) > WIDTH for subject in subjects)
 
-    def test_the_section_is_long_enough_to_need_the_waiver(self) -> None:
-        """The captured section has a subject past 80 before its link."""
-        subjects = [line.split(" ([#")[0] for line in section().splitlines()]
-        assert any(len(subject) > WIDTH for subject in subjects)
 
-    def test_a_release_section_under_the_scaffold_header_lints_clean(self) -> None:
-        """No MD013 for a verbatim subject under the scaffold's preamble."""
-        preamble = (CANON / "scaffold" / "CHANGELOG.md").read_text(encoding="utf-8")
-        with tempfile.TemporaryDirectory() as tmp:
-            changelog = Path(tmp) / "CHANGELOG.md"
-            changelog.write_text(
-                preamble.rstrip("\n") + "\n\n" + section().rstrip("\n") + "\n",
-                encoding="utf-8",
-            )
-            done = subprocess.run(
-                [RUMDL, "check", "--config", str(BELT / "rumdl.toml"), "CHANGELOG.md"],
-                cwd=tmp,
-                env=support.env(),
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            assert "MD013" not in done.stdout + done.stderr
-            assert done.returncode == 0, done.stdout + done.stderr
+def test_a_release_section_under_the_scaffold_header_lints_clean() -> None:
+    """No MD013 for a verbatim subject under the scaffold's preamble."""
+    preamble = (CANON / "scaffold" / "CHANGELOG.md").read_text(encoding="utf-8")
+    with tempfile.TemporaryDirectory() as tmp:
+        changelog = Path(tmp) / "CHANGELOG.md"
+        changelog.write_text(
+            preamble.rstrip("\n") + "\n\n" + section().rstrip("\n") + "\n",
+            encoding="utf-8",
+        )
+        done = subprocess.run(
+            [RUMDL, "check", "--config", str(BELT / "rumdl.toml"), "CHANGELOG.md"],
+            cwd=tmp,
+            env=support.env(),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert "MD013" not in done.stdout + done.stderr
+        assert done.returncode == 0, done.stdout + done.stderr

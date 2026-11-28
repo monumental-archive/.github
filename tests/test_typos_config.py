@@ -120,77 +120,83 @@ def typos(text: str, *, belt: bool = True) -> subprocess.CompletedProcess[str]:
         )
 
 
-class TestTyposShaTest:
-    """A short SHA is skipped; words around and like it are not."""
-
-    def assert_green(self, text: str) -> None:
-        """Red under typos' defaults, green under the belt config."""
-        control = typos(text, belt=False)
-        assert control.returncode == 2, control.stdout
-        result = typos(text)
-        assert result.returncode == 0, result.stdout
-
-    def assert_red(self, text: str, message: str) -> str:
-        """Red under the belt config with exactly `message`.
-
-        Returns:
-            typos' stdout, for further assertions.
-
-        """
-        result = typos(text)
-        assert result.returncode == 2, result.stdout
-        assert message in result.stdout
-        return result.stdout
-
-    def test_the_release_sha_passes(self) -> None:
-        """`3ede177`, the token that reddened the v1.67.1 release PR."""
-        self.assert_green(f"3{RUN}177")
-
-    def test_the_release_changelog_line_passes(self) -> None:
-        """The release PR's CHANGELOG line, verbatim from the fixture."""
-        self.assert_green(CHANGELOG_LINE.read_text(encoding="utf-8").rstrip("\n"))
-
-    @pytest.mark.parametrize("token", BY_POSITION)
-    def test_every_digit_position_passes(self, token: object) -> None:
-        """Each enumerated entry, by where the first digit sits."""
-        self.assert_green(token)
-
-    def test_a_misspelling_beside_the_sha_still_reds(self) -> None:
-        """The skip covers the SHA, not the line it is on."""
-        out = self.assert_red(f"3{RUN}177 {PROSE}", PROSE_MESSAGE)
-        assert RUN_MESSAGE not in out
-
-    def test_an_all_letter_hex_misspelling_is_still_checked(self) -> None:
-        """No digit, no skip: a-f-only words stay words."""
-        self.assert_red(HEX_WORD, HEX_WORD_MESSAGE)
-
-    def test_a_short_hex_token_is_still_checked(self) -> None:
-        """Below seven characters the token is not taken for a SHA."""
-        self.assert_red(f"{RUN}12", RUN_MESSAGE)
+# A short SHA is skipped; words around and like it are not.
+def assert_green(text: str) -> None:
+    """Red under typos' defaults, green under the belt config."""
+    control = typos(text, belt=False)
+    assert control.returncode == 2, control.stdout
+    result = typos(text)
+    assert result.returncode == 0, result.stdout
 
 
-class TestTyposFuzzCorpusTest:
-    """The root `fuzz/corpus/` is data; the same bytes elsewhere are not."""
+def assert_red(text: str, message: str) -> str:
+    """Red under the belt config with exactly `message`.
 
-    def assert_red_at(self, path: str) -> None:
-        """Red under the belt config at `path`, with the exact message."""
-        result = typos_at(path, CORPUS_INPUT)
-        assert result.returncode == 2, result.stdout
-        assert CORPUS_MESSAGE in result.stdout
-        assert path in result.stdout
+    Returns:
+        typos' stdout, for further assertions.
 
-    def test_a_corpus_input_passes(self) -> None:
-        """The edtf input, at its own path: green, and red without the belt."""
-        control = typos_at(CORPUS_FILE, CORPUS_INPUT, belt=False)
-        assert control.returncode == 2, control.stdout
-        assert CORPUS_MESSAGE in control.stdout
-        result = typos_at(CORPUS_FILE, CORPUS_INPUT)
-        assert result.returncode == 0, result.stdout
+    """
+    result = typos(text)
+    assert result.returncode == 2, result.stdout
+    assert message in result.stdout
+    return result.stdout
 
-    def test_the_same_bytes_outside_the_corpus_still_red(self) -> None:
-        """The exclusion is the path, not the content."""
-        self.assert_red_at("fuzz/normalize.txt")
 
-    def test_a_nested_corpus_is_still_checked(self) -> None:
-        """Anchored at the root: cargo-fuzz writes nowhere deeper."""
-        self.assert_red_at("vendor/fuzz/corpus/normalize/input")
+def test_the_release_sha_passes() -> None:
+    """`3ede177`, the token that reddened the v1.67.1 release PR."""
+    assert_green(f"3{RUN}177")
+
+
+def test_the_release_changelog_line_passes() -> None:
+    """The release PR's CHANGELOG line, verbatim from the fixture."""
+    assert_green(CHANGELOG_LINE.read_text(encoding="utf-8").rstrip("\n"))
+
+
+@pytest.mark.parametrize("token", BY_POSITION)
+def test_every_digit_position_passes(token: object) -> None:
+    """Each enumerated entry, by where the first digit sits."""
+    assert_green(token)
+
+
+def test_a_misspelling_beside_the_sha_still_reds() -> None:
+    """The skip covers the SHA, not the line it is on."""
+    out = assert_red(f"3{RUN}177 {PROSE}", PROSE_MESSAGE)
+    assert RUN_MESSAGE not in out
+
+
+def test_an_all_letter_hex_misspelling_is_still_checked() -> None:
+    """No digit, no skip: a-f-only words stay words."""
+    assert_red(HEX_WORD, HEX_WORD_MESSAGE)
+
+
+def test_a_short_hex_token_is_still_checked() -> None:
+    """Below seven characters the token is not taken for a SHA."""
+    assert_red(f"{RUN}12", RUN_MESSAGE)
+
+
+# The root `fuzz/corpus/` is data; the same bytes elsewhere are not.
+def assert_red_at(path: str) -> None:
+    """Red under the belt config at `path`, with the exact message."""
+    result = typos_at(path, CORPUS_INPUT)
+    assert result.returncode == 2, result.stdout
+    assert CORPUS_MESSAGE in result.stdout
+    assert path in result.stdout
+
+
+def test_a_corpus_input_passes() -> None:
+    """The edtf input, at its own path: green, and red without the belt."""
+    control = typos_at(CORPUS_FILE, CORPUS_INPUT, belt=False)
+    assert control.returncode == 2, control.stdout
+    assert CORPUS_MESSAGE in control.stdout
+    result = typos_at(CORPUS_FILE, CORPUS_INPUT)
+    assert result.returncode == 0, result.stdout
+
+
+def test_the_same_bytes_outside_the_corpus_still_red() -> None:
+    """The exclusion is the path, not the content."""
+    assert_red_at("fuzz/normalize.txt")
+
+
+def test_a_nested_corpus_is_still_checked() -> None:
+    """Anchored at the root: cargo-fuzz writes nowhere deeper."""
+    assert_red_at("vendor/fuzz/corpus/normalize/input")

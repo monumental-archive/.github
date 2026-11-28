@@ -58,60 +58,58 @@ def draw_spelt(draw: st.DrawFn, statements: list[list[str]]) -> str:
 spelt = st.composite(draw_spelt)
 
 
-class TestNormalise:
-    """The surface is the set of statements, nothing else."""
-
-    @given(st.text(max_size=300))
-    @example("a /* x */ - - b;")
-    @example("/--x\n*;")
-    def test_twice_is_once(self, text: str) -> None:
-        """A normalised surface is its own normal form."""
-        once = ps.normalise(text)
-        assert ps.normalise(once) == once
-
-    @given(st.data(), st.lists(STATEMENT, min_size=1, max_size=6))
-    def test_spelling_does_not_matter(
-        self, data: st.DataObject, statements: list[list[str]]
-    ) -> None:
-        """Two spellings of the same statements are one surface."""
-        one = data.draw(spelt(statements))
-        two = data.draw(spelt(statements))
-        assert ps.normalise(one) == ps.normalise(two)
-        expected = "\n".join(sorted(" ".join(s) + ";" for s in statements)) + "\n"
-        assert ps.normalise(one) == expected
-
-    @given(st.data(), st.lists(STATEMENT, min_size=1, max_size=6), WORD)
-    def test_a_changed_statement_changes_it(
-        self, data: st.DataObject, statements: list[list[str]], word: str
-    ) -> None:
-        """Appending a word to one statement is a different surface."""
-        changed = [list(s) for s in statements]
-        changed[data.draw(st.integers(0, len(changed) - 1))].append(word)
-        assert ps.normalise(data.draw(spelt(statements))) != ps.normalise(
-            data.draw(spelt(changed))
-        )
+# The surface is the set of statements, nothing else.
+@given(st.text(max_size=300))
+@example("a /* x */ - - b;")
+@example("/--x\n*;")
+def test_twice_is_once(text: str) -> None:
+    """A normalised surface is its own normal form."""
+    once = ps.normalise(text)
+    assert ps.normalise(once) == once
 
 
-class TestRefusal:
-    """Any generated file: a surface, or a refusal by name."""
+@given(st.data(), st.lists(STATEMENT, min_size=1, max_size=6))
+def test_spelling_does_not_matter(
+    data: st.DataObject, statements: list[list[str]]
+) -> None:
+    """Two spellings of the same statements are one surface."""
+    one = data.draw(spelt(statements))
+    two = data.draw(spelt(statements))
+    assert ps.normalise(one) == ps.normalise(two)
+    expected = "\n".join(sorted(" ".join(s) + ";" for s in statements)) + "\n"
+    assert ps.normalise(one) == expected
 
-    @given(st.binary(max_size=200))
-    @example(b"\xff;")
-    @example(b"-- only a comment\n")
-    def test_surface_answers_any_bytes(self, data: bytes) -> None:
-        """A non-empty surface, or None and a message."""
-        err = io.StringIO()
-        with tempfile.TemporaryDirectory() as scratch:
-            path = Path(scratch) / "raw.sql"
-            path.write_bytes(data)
-            with (
-                pytest.MonkeyPatch.context() as patched,
-                contextlib.redirect_stderr(err),
-            ):
-                patched.setenv("MISE_TASK_NAME", "lint:pg-schema")
-                patched.setenv("ORG_FINDINGS", "")
-                got = ps.surface(str(path))
-        if got is None:
-            assert "lint:pg-schema:" in err.getvalue()
-        else:
-            assert got.endswith(";\n")
+
+@given(st.data(), st.lists(STATEMENT, min_size=1, max_size=6), WORD)
+def test_a_changed_statement_changes_it(
+    data: st.DataObject, statements: list[list[str]], word: str
+) -> None:
+    """Appending a word to one statement is a different surface."""
+    changed = [list(s) for s in statements]
+    changed[data.draw(st.integers(0, len(changed) - 1))].append(word)
+    assert ps.normalise(data.draw(spelt(statements))) != ps.normalise(
+        data.draw(spelt(changed))
+    )
+
+
+# Any generated file: a surface, or a refusal by name.
+@given(st.binary(max_size=200))
+@example(b"\xff;")
+@example(b"-- only a comment\n")
+def test_surface_answers_any_bytes(data: bytes) -> None:
+    """A non-empty surface, or None and a message."""
+    err = io.StringIO()
+    with tempfile.TemporaryDirectory() as scratch:
+        path = Path(scratch) / "raw.sql"
+        path.write_bytes(data)
+        with (
+            pytest.MonkeyPatch.context() as patched,
+            contextlib.redirect_stderr(err),
+        ):
+            patched.setenv("MISE_TASK_NAME", "lint:pg-schema")
+            patched.setenv("ORG_FINDINGS", "")
+            got = ps.surface(str(path))
+    if got is None:
+        assert "lint:pg-schema:" in err.getvalue()
+    else:
+        assert got.endswith(";\n")

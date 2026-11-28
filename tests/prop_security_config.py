@@ -55,49 +55,46 @@ RECORD: st.SearchStrategy[dict[str, object]] = st.dictionaries(
 )
 
 
-class TestDescribe:
-    """The record's rendering decodes to the value."""
-
-    @given(JSON)
-    def test_round_trip(self, value: object) -> None:
-        """load_json(describe(v)) == v."""
-        assert decoded.load_json(sc.describe(value)) == value
+# The record's rendering decodes to the value.
+@given(JSON)
+def test_round_trip(value: object) -> None:
+    """load_json(describe(v)) == v."""
+    assert decoded.load_json(sc.describe(value)) == value
 
 
-class TestCompare:
-    """Agreement, or one finding per field."""
+# Agreement, or one finding per field.
+@given(st.data(), RECORD)
+def test_the_record_itself_agrees(
+    data: st.DataObject, record: dict[str, object]
+) -> None:
+    """Any key order, server fields beside it: no finding."""
+    server: dict[str, object] = dict.fromkeys(
+        data.draw(st.sets(st.sampled_from(sorted(sc.SERVER_FIELDS)))), 1
+    )
+    pairs = [*record.items(), *server.items()]
+    items = data.draw(st.permutations(pairs))
+    own: dict[str, object] = {"name": "org default", "description": "x"}
+    found = sc.compare_record({**record, **own}, dict(items), 7)
+    assert found == list[str]()
 
-    @given(st.data(), RECORD)
-    def test_the_record_itself_agrees(
-        self, data: st.DataObject, record: dict[str, object]
-    ) -> None:
-        """Any key order, server fields beside it: no finding."""
-        server: dict[str, object] = dict.fromkeys(
-            data.draw(st.sets(st.sampled_from(sorted(sc.SERVER_FIELDS)))), 1
-        )
-        pairs = [*record.items(), *server.items()]
-        items = data.draw(st.permutations(pairs))
-        own: dict[str, object] = {"name": "org default", "description": "x"}
-        found = sc.compare_record({**record, **own}, dict(items), 7)
-        assert found == list[str]()
 
-    @given(st.data(), RECORD, st.sampled_from(["change", "drop", "extra"]), FIELD)
-    def test_one_difference_one_finding(
-        self, data: st.DataObject, record: dict[str, object], how: str, extra: str
-    ) -> None:
-        """The changed, dropped or unstated field is named once."""
-        live = dict(record)
-        field = data.draw(st.sampled_from(sorted(record)))
-        if how == "change":
-            nested_value: list[object] = [live[field]]
-            live[field] = nested_value
-        elif how == "drop":
-            del live[field]
-        else:
-            if extra in record:
-                return
-            live[extra] = True
-            field = extra
-        found = sc.compare_record(record, live, 7)
-        assert len(found) == 1, found
-        assert f"{field}=" in found[0]
+@given(st.data(), RECORD, st.sampled_from(["change", "drop", "extra"]), FIELD)
+def test_one_difference_one_finding(
+    data: st.DataObject, record: dict[str, object], how: str, extra: str
+) -> None:
+    """The changed, dropped or unstated field is named once."""
+    live = dict(record)
+    field = data.draw(st.sampled_from(sorted(record)))
+    if how == "change":
+        nested_value: list[object] = [live[field]]
+        live[field] = nested_value
+    elif how == "drop":
+        del live[field]
+    else:
+        if extra in record:
+            return
+        live[extra] = True
+        field = extra
+    found = sc.compare_record(record, live, 7)
+    assert len(found) == 1, found
+    assert f"{field}=" in found[0]

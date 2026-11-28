@@ -562,324 +562,334 @@ def drift(
     return out
 
 
-class TestTable:
-    """The table covers every tool every gate task calls."""
+# The table covers every tool every gate task calls.
+def test_table_names_every_belt_tool() -> None:
+    """One row per [tools] key, no more, no fewer."""
+    tools = sorted(belt_tools())
+    rows = sorted(gate_tools.load_table())
+    assert tools == rows
 
-    def test_table_names_every_belt_tool(self) -> None:
-        """One row per [tools] key, no more, no fewer."""
-        tools = sorted(belt_tools())
-        rows = sorted(gate_tools.load_table())
-        assert tools == rows
 
-    def test_table_holds_the_tasks(self) -> None:
-        """The real table against the real task bodies."""
-        none: list[str] = []
-        assert none == drift(gate_tools.load_table(), derivation())
+def test_table_holds_the_tasks() -> None:
+    """The real table against the real task bodies."""
+    none: list[str] = []
+    assert none == drift(gate_tools.load_table(), derivation())
 
-    def test_every_dynamic_dispatch_is_named(self) -> None:
-        """A task that runs a computed task name is in DISPATCH."""
-        tasks = belt_tasks()
-        dynamic = sorted(
-            t for t in tasks if re.search(r'mise run "\$\{?\w+\}?"', body(tasks[t]))
-        )
-        named = sorted(DISPATCH)
-        assert named == dynamic
 
-    def test_a_new_tool_call_is_named(self) -> None:
-        """Planted: a lint starts calling a tool the table has no row for."""
-        table = gate_tools.load_table()
-        del table["aqua:hadolint/hadolint"]
-        assert (
-            "lint:hadolint calls aqua:hadolint/hadolint;"
-            " mise/gate-tools.toml has no row"
-        ) in drift(table, derivation())
-
-    def test_a_narrow_condition_is_named(self) -> None:
-        """Planted: hadolint's row forgets the `*.Dockerfile` form."""
-        table = gate_tools.load_table()
-        row = table["aqua:hadolint/hadolint"]
-        when = tuple(w for w in row.when or () if w != "*.Dockerfile")
-        table["aqua:hadolint/hadolint"] = dataclasses.replace(row, when=when)
-        assert (
-            "lint:hadolint runs aqua:hadolint/hadolint on a tree tracking"
-            " *.Dockerfile; its row's `when` does not install it there"
-        ) in drift(table, derivation())
-
-    def test_a_call_before_the_guard_is_named(self) -> None:
-        """Planted: a task calls a conditional tool before it can skip."""
-        tasks = belt_tasks()
-        tasks["lint:hadolint"] = {
-            "run": "hadolint --version\n" + body(tasks["lint:hadolint"])
-        }
-        assert (
-            "lint:hadolint calls aqua:hadolint/hadolint before any guard;"
-            " its row must carry no `when`"
-        ) in drift(gate_tools.load_table(), derivation(tasks))
-
-    def test_a_planted_task_call_is_named(self) -> None:
-        """Planted: a new lint calls golangci-lint behind no guard."""
-        tasks = belt_tasks()
-        tasks["lint:planted"] = {"run": "golangci-lint run ./..."}
-        assert (
-            "lint:planted calls aqua:golangci/golangci-lint; its row does"
-            " not list the task"
-        ) in drift(gate_tools.load_table(), derivation(tasks))
-
-    def test_a_message_is_not_a_call(self) -> None:
-        """A tool named in a quoted message or a comment is not called."""
-        lines = expand(
-            '# hadolint would\necho "run hadolint first"\nbad="${bad} (hadolint)"\n'
-            "hadolint=$(state hadolint)\nif [[ ${hadolint} == x ]]; then :; fi\n",
-            set(),
-        )
-        assert first_call(lines, ["hadolint"]) is None
-
-    def test_a_continued_selection_is_read_whole(self) -> None:
-        """A backslash-continued `org_tracked` is one guard (#1410, lint:biome)."""
-        lines = expand(
-            "files=() && while IFS= read -r -d '' f; do files+=(\"${f}\"); done"
-            ' < <(org_tracked ":!vendor/**" "*.js" \\\n  "*.json" "*.css")\n'
-            '[[ -n ${files[0]+set} ]] || {\n  echo "x: skipped"\n  exit 0\n}\n',
-            set(),
-        )
-        skip = first_skip(lines)
-        if skip is None:
-            pytest.fail("the planted body never skips")
-        selected: set[str] = {"*.js", "*.json", "*.css"}
-        assert selected == guard_paths(lines[: skip + 1])
-
-    @pytest.mark.parametrize(
-        ("call", "want"),
-        [
-            ("workflow_files", {".github/workflows/*.y*ml"}),
-            ("workflow_template_files", {"workflow-templates/*.y*ml"}),
-            (
-                "action_files",
-                {
-                    ".github/workflows/*.y*ml",
-                    "action.yml",
-                    "action.yaml",
-                    "*/action.yml",
-                    "*/action.yaml",
-                },
-            ),
-        ],
+def test_every_dynamic_dispatch_is_named() -> None:
+    """A task that runs a computed task name is in DISPATCH."""
+    tasks = belt_tasks()
+    dynamic = sorted(
+        t for t in tasks if re.search(r'mise run "\$\{?\w+\}?"', body(tasks[t]))
     )
-    def test_a_sourced_selector_guards_with_its_own_pathspec(
-        self, call: object, want: object
-    ) -> None:
-        """Only the function a body calls joins its guard (#2007).
+    named = sorted(DISPATCH)
+    assert named == dynamic
 
-        mise/action-files.sh defines three selectors; a task calling
-        workflow_files is guarded on the workflows alone, and one calling
-        workflow_template_files on the templates alone. Read whole, every
-        selector's pathspecs would join every caller's guard.
-        """
-        skip = '[[ -n ${f[0]+set} ]] || {\n  echo "x: skipped"\n  exit 0\n}\n'
-        source = '. "${ORG_BELT_DIR}/action-files.sh"\n'
-        lines = expand(f"{source}f=() && {call} f\n{skip}", set())
-        at = first_skip(lines)
-        if at is None:
-            pytest.fail("the planted body never skips")
-        assert want == guard_paths(lines[: at + 1])
 
-    def test_an_uncalled_function_is_dropped_and_a_nested_one_kept(self) -> None:
-        """A function counts when called, or called by one that is."""
-        text = (
-            'a() { org_tracked_read "$1" one; }\n'
-            'b() {\n  a "$1"\n}\n'
-            'c() { org_tracked_read "$1" three; }\n'
-            "f=() && b f\n"
-        )
-        assert (
-            called_only(text)
-            == 'a() { org_tracked_read "$1" one; }\nb() {\n  a "$1"\n}\nf=() && b f\n'
-        )
+def test_a_new_tool_call_is_named() -> None:
+    """Planted: a lint starts calling a tool the table has no row for."""
+    table = gate_tools.load_table()
+    del table["aqua:hadolint/hadolint"]
+    assert (
+        "lint:hadolint calls aqua:hadolint/hadolint; mise/gate-tools.toml has no row"
+    ) in drift(table, derivation())
 
-    @pytest.mark.parametrize(
-        ("text", "cmd"),
-        [
-            ('xargs -0 hadolint "$f"', "hadolint"),
-            ("cargo deny check bans", "cargo-deny"),
-            ("out=$(jq -r .x f)", "jq"),
-            ("FOO=1 stele verify", "stele"),
-        ],
+
+def test_a_narrow_condition_is_named() -> None:
+    """Planted: hadolint's row forgets the `*.Dockerfile` form."""
+    table = gate_tools.load_table()
+    row = table["aqua:hadolint/hadolint"]
+    when = tuple(w for w in row.when or () if w != "*.Dockerfile")
+    table["aqua:hadolint/hadolint"] = dataclasses.replace(row, when=when)
+    assert (
+        "lint:hadolint runs aqua:hadolint/hadolint on a tree tracking"
+        " *.Dockerfile; its row's `when` does not install it there"
+    ) in drift(table, derivation())
+
+
+def test_a_call_before_the_guard_is_named() -> None:
+    """Planted: a task calls a conditional tool before it can skip."""
+    tasks = belt_tasks()
+    tasks["lint:hadolint"] = {
+        "run": "hadolint --version\n" + body(tasks["lint:hadolint"])
+    }
+    assert (
+        "lint:hadolint calls aqua:hadolint/hadolint before any guard;"
+        " its row must carry no `when`"
+    ) in drift(gate_tools.load_table(), derivation(tasks))
+
+
+def test_a_planted_task_call_is_named() -> None:
+    """Planted: a new lint calls golangci-lint behind no guard."""
+    tasks = belt_tasks()
+    tasks["lint:planted"] = {"run": "golangci-lint run ./..."}
+    assert (
+        "lint:planted calls aqua:golangci/golangci-lint; its row does not list the task"
+    ) in drift(gate_tools.load_table(), derivation(tasks))
+
+
+def test_a_message_is_not_a_call() -> None:
+    """A tool named in a quoted message or a comment is not called."""
+    lines = expand(
+        '# hadolint would\necho "run hadolint first"\nbad="${bad} (hadolint)"\n'
+        "hadolint=$(state hadolint)\nif [[ ${hadolint} == x ]]; then :; fi\n",
+        set(),
     )
-    def test_xargs_and_cargo_subcommands_are_calls(
-        self, text: object, cmd: object
-    ) -> None:
-        """`xargs -0 tool` and `cargo deny` are calls."""
-        assert first_call(expand(text, set()), [cmd]) == 0
+    assert first_call(lines, ["hadolint"]) is None
 
-    def test_a_helper_calls_what_its_belt_import_spawns(self) -> None:
-        """embedded_shell.py runs yq through workflow_yaml.py (#1846).
 
-        Read alone, the helper names no yq; the table's yq row would be
-        stale and a consumer's gate would lack the parser.
-        """
-        text = '"${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt" embedded-shell ${files}'
-        assert "workflow_yaml.py" in belt_imports("embedded_shell.py")
-        assert first_call(expand(text, set()), ["yq"]) == 1
+def test_a_continued_selection_is_read_whole() -> None:
+    """A backslash-continued `org_tracked` is one guard (#1410, lint:biome)."""
+    lines = expand(
+        "files=() && while IFS= read -r -d '' f; do files+=(\"${f}\"); done"
+        ' < <(org_tracked ":!vendor/**" "*.js" \\\n  "*.json" "*.css")\n'
+        '[[ -n ${files[0]+set} ]] || {\n  echo "x: skipped"\n  exit 0\n}\n',
+        set(),
+    )
+    skip = first_skip(lines)
+    if skip is None:
+        pytest.fail("the planted body never skips")
+    selected: set[str] = {"*.js", "*.json", "*.css"}
+    assert selected == guard_paths(lines[: skip + 1])
 
-    def test_a_helper_calls_what_a_belt_script_it_runs_calls(self) -> None:
-        """Planted: a helper sources a script it hands `script()`; its tool is called.
 
-        rust_task.py runs `bash -c '. <belt>/pgrx-env.sh; …'` for
-        rust_lint.py, pg_clippy.py and msrv_lint.py, and pgrx-env.sh's
-        findings call jq (#2037). A script only named in a string or a
-        docstring is not run, whether or not the helper spawns.
-        """
-        with tempfile.TemporaryDirectory() as tmp:
-            belt_dir = Path(tmp)
-            (belt_dir / "belt").mkdir()
-            (belt_dir / "planted.sh").write_text(
-                "f() {\n  hadolint Dockerfile\n}\n", "utf-8"
-            )
-            (belt_dir / "named.sh").write_text("shfmt -d x\n", "utf-8")
-            (belt_dir / "belt" / "runs.py").write_text(
-                '"""Runs planted.sh, never named.sh."""\n'
-                "import subprocess\n"
-                "from pathlib import Path\n"
-                "from belt.belt_scripts import script\n"
-                'HERE = script(support.MISE, "planted.sh")\n'
-                'NAMED = "named.sh"\n'
-                'subprocess.run(["bash", "-c", f". {HERE}; f"], check=True)\n',
-                "utf-8",
-            )
-            here = sys.modules[__name__]
-            with pytest.MonkeyPatch.context() as patched:
-                patched.setattr(here, "BELT", belt_dir)
-                patched.setattr(here, "PACKAGE", belt_dir / "belt")
-                for key in list(_SOURCES):
-                    patched.delitem(_SOURCES, key)
-                for key in list(_CODE):
-                    patched.delitem(_CODE, key)
-                planted: list[str] = ["planted.sh"]
-                assert planted == python_code("runs.py").scripts
-                runs = expand('"${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt" runs', set())
-                assert first_call(runs, ["hadolint"]) == 3
-                assert first_call(runs, ["shfmt"]) is None
+@pytest.mark.parametrize(
+    ("call", "want"),
+    [
+        ("workflow_files", {".github/workflows/*.y*ml"}),
+        ("workflow_template_files", {"workflow-templates/*.y*ml"}),
+        (
+            "action_files",
+            {
+                ".github/workflows/*.y*ml",
+                "action.yml",
+                "action.yaml",
+                "*/action.yml",
+                "*/action.yaml",
+            },
+        ),
+    ],
+)
+def test_a_sourced_selector_guards_with_its_own_pathspec(
+    call: object, want: object
+) -> None:
+    """Only the function a body calls joins its guard (#2007).
 
-    def test_a_name_in_a_message_is_charged_nothing(self) -> None:
-        """Planted: a tool and a script named only in a message (#1903).
+    mise/action-files.sh defines three selectors; a task calling
+    workflow_files is guarded on the workflows alone, and one calling
+    workflow_template_files on the templates alone. Read whole, every
+    selector's pathspecs would join every caller's guard.
+    """
+    skip = '[[ -n ${f[0]+set} ]] || {\n  echo "x: skipped"\n  exit 0\n}\n'
+    source = '. "${ORG_BELT_DIR}/action-files.sh"\n'
+    lines = expand(f"{source}f=() && {call} f\n{skip}", set())
+    at = first_skip(lines)
+    if at is None:
+        pytest.fail("the planted body never skips")
+    assert want == guard_paths(lines[: at + 1])
 
-        The helper spawns git; hadolint and planted.sh are prose.
-        """
-        with tempfile.TemporaryDirectory() as tmp:
-            belt_dir = Path(tmp)
-            (belt_dir / "belt").mkdir()
-            (belt_dir / "planted.sh").write_text("hadolint Dockerfile\n", "utf-8")
-            (belt_dir / "belt" / "says.py").write_text(
-                "import subprocess\n"
-                'print("run hadolint, or planted.sh, by hand")\n'
-                'subprocess.run(["git", "status"], check=True)\n',
-                "utf-8",
-            )
-            here = sys.modules[__name__]
-            with pytest.MonkeyPatch.context() as patched:
-                patched.setattr(here, "BELT", belt_dir)
-                patched.setattr(here, "PACKAGE", belt_dir / "belt")
-                for key in list(_SOURCES):
-                    patched.delitem(_SOURCES, key)
-                for key in list(_CODE):
-                    patched.delitem(_CODE, key)
-                says = expand('"${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt" says', set())
-                assert first_call(says, ["hadolint"]) is None
-                assert first_call(says, ["git"]) == 1
 
-    def test_a_list_a_wrapper_runs_is_a_call(self) -> None:
-        """Planted: an argv literal handed to the helper's own wrapper (#2037)."""
-        with tempfile.TemporaryDirectory() as tmp:
-            belt_dir = Path(tmp)
-            (belt_dir / "belt").mkdir()
-            (belt_dir / "belt" / "wraps.py").write_text(
-                "import subprocess\n\n\n"
-                "def go(argv):\n    return subprocess.run(argv, check=False)\n\n\n"
-                'go(["hadolint", "x"])\n',
-                "utf-8",
-            )
-            here = sys.modules[__name__]
-            with pytest.MonkeyPatch.context() as patched:
-                patched.setattr(here, "BELT", belt_dir)
-                patched.setattr(here, "PACKAGE", belt_dir / "belt")
-                for key in list(_SOURCES):
-                    patched.delitem(_SOURCES, key)
-                for key in list(_CODE):
-                    patched.delitem(_CODE, key)
-                wraps = expand(
-                    '"${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt" wraps', set()
-                )
-                assert first_call(wraps, ["hadolint"]) == 1
+def test_an_uncalled_function_is_dropped_and_a_nested_one_kept() -> None:
+    """A function counts when called, or called by one that is."""
+    text = (
+        'a() { org_tracked_read "$1" one; }\n'
+        'b() {\n  a "$1"\n}\n'
+        'c() { org_tracked_read "$1" three; }\n'
+        "f=() && b f\n"
+    )
+    assert (
+        called_only(text)
+        == 'a() { org_tracked_read "$1" one; }\nb() {\n  a "$1"\n}\nf=() && b f\n'
+    )
 
-    def test_the_belt_helpers_that_run_belt_scripts(self) -> None:
-        """The belt's real helpers: run, and only named.
 
-        rust_lint.py and pg_clippy.py reach the clippy ladder and the
-        pgrx provisioning through rust_task.py; testing_adoption.py
-        names the mutation scripts and runs none.
-        """
-        for helper in ("rust_lint.py", "pg_clippy.py"):
-            reached: set[str] = {
-                name
-                for module in belt_imports(helper)
-                for name in python_code(module).scripts
-            }
-            assert {"clippy-ladder.sh", "pgrx-env.sh"} <= reached
-            command = helper.removesuffix(".py").replace("_", "-")
-            lines = expand(
-                f'"${{ORG_PYTHON}}" -I "${{ORG_CANON_DIR}}/belt" {command}', set()
-            )
-            assert first_call(lines, ["jq"]) is not None
-        none: list[str] = []
-        assert none == python_code("testing_adoption.py").scripts
-        adoption = expand(
-            '"${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt" testing-adoption', set()
+@pytest.mark.parametrize(
+    ("text", "cmd"),
+    [
+        ('xargs -0 hadolint "$f"', "hadolint"),
+        ("cargo deny check bans", "cargo-deny"),
+        ("out=$(jq -r .x f)", "jq"),
+        ("FOO=1 stele verify", "stele"),
+    ],
+)
+def test_xargs_and_cargo_subcommands_are_calls(text: object, cmd: object) -> None:
+    """`xargs -0 tool` and `cargo deny` are calls."""
+    assert first_call(expand(text, set()), [cmd]) == 0
+
+
+def test_a_helper_calls_what_its_belt_import_spawns() -> None:
+    """embedded_shell.py runs yq through workflow_yaml.py (#1846).
+
+    Read alone, the helper names no yq; the table's yq row would be
+    stale and a consumer's gate would lack the parser.
+    """
+    text = '"${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt" embedded-shell ${files}'
+    assert "workflow_yaml.py" in belt_imports("embedded_shell.py")
+    assert first_call(expand(text, set()), ["yq"]) == 1
+
+
+def test_a_helper_calls_what_a_belt_script_it_runs_calls() -> None:
+    """Planted: a helper sources a script it hands `script()`; its tool is called.
+
+    rust_task.py runs `bash -c '. <belt>/pgrx-env.sh; …'` for
+    rust_lint.py, pg_clippy.py and msrv_lint.py, and pgrx-env.sh's
+    findings call jq (#2037). A script only named in a string or a
+    docstring is not run, whether or not the helper spawns.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        belt_dir = Path(tmp)
+        (belt_dir / "belt").mkdir()
+        (belt_dir / "planted.sh").write_text(
+            "f() {\n  hadolint Dockerfile\n}\n", "utf-8"
         )
-        assert first_call(adoption, ["cargo-mutants", "mutmut"]) is None
+        (belt_dir / "named.sh").write_text("shfmt -d x\n", "utf-8")
+        (belt_dir / "belt" / "runs.py").write_text(
+            '"""Runs planted.sh, never named.sh."""\n'
+            "import subprocess\n"
+            "from pathlib import Path\n"
+            "from belt.belt_scripts import script\n"
+            'HERE = script(support.MISE, "planted.sh")\n'
+            'NAMED = "named.sh"\n'
+            'subprocess.run(["bash", "-c", f". {HERE}; f"], check=True)\n',
+            "utf-8",
+        )
+        here = sys.modules[__name__]
+        with pytest.MonkeyPatch.context() as patched:
+            patched.setattr(here, "BELT", belt_dir)
+            patched.setattr(here, "PACKAGE", belt_dir / "belt")
+            for key in list(_SOURCES):
+                patched.delitem(_SOURCES, key)
+            for key in list(_CODE):
+                patched.delitem(_CODE, key)
+            planted: list[str] = ["planted.sh"]
+            assert planted == python_code("runs.py").scripts
+            runs = expand('"${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt" runs', set())
+            assert first_call(runs, ["hadolint"]) == 3
+            assert first_call(runs, ["shfmt"]) is None
 
-    def test_the_venv_check_uses_its_command(self) -> None:
-        """`belt tool-python LABEL COMMAND` uses COMMAND's tool (#1788)."""
-        run = '"${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt" tool-python'
-        for text, used in (
-            (f'v=$({run} "${{label}}" hypothesis) || exit 1', True),
-            (f"{run} x hypothesis --site hypothesis > /dev/null || exit 1", True),
-            (f"{run} --site hypothesis x hypothesis", True),
-            (f"{run} --site=hypothesis x hypothesis", True),
-            (f"{run} x coverage --site hypothesis", False),
-            (f"{run} --site hypothesis x coverage", False),
-            (f"{run} --site=x y hypothesis", True),
-            (f"{run} x coverage", False),
-        ):
-            at = first_call(expand(text, set()), ["hypothesis"])
-            assert (1 if used else None) == at
-        # A shell operator ends the arguments: the words after it are
-        # another command's, not a COMMAND.
-        assert venv_command(f"v=$({run} x) || y hypothesis") is None
 
-    def test_jq_the_gate_calls_is_a_pinned_belt_tool(self) -> None:
-        """Jq was a gate dependency that was never pinned (#390).
+def test_a_name_in_a_message_is_charged_nothing() -> None:
+    """Planted: a tool and a script named only in a message (#1903).
 
-        The runner image happens to carry a jq, so nothing reddened: a
-        call to a command no [tools] key provides is invisible to the
-        derivation above, which only looks for the tools the belt has.
-        So the callers are found by the command's own name.
-        """
-        tasks = belt_tasks()
-        callers = [
+    The helper spawns git; hadolint and planted.sh are prose.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        belt_dir = Path(tmp)
+        (belt_dir / "belt").mkdir()
+        (belt_dir / "planted.sh").write_text("hadolint Dockerfile\n", "utf-8")
+        (belt_dir / "belt" / "says.py").write_text(
+            "import subprocess\n"
+            'print("run hadolint, or planted.sh, by hand")\n'
+            'subprocess.run(["git", "status"], check=True)\n',
+            "utf-8",
+        )
+        here = sys.modules[__name__]
+        with pytest.MonkeyPatch.context() as patched:
+            patched.setattr(here, "BELT", belt_dir)
+            patched.setattr(here, "PACKAGE", belt_dir / "belt")
+            for key in list(_SOURCES):
+                patched.delitem(_SOURCES, key)
+            for key in list(_CODE):
+                patched.delitem(_CODE, key)
+            says = expand('"${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt" says', set())
+            assert first_call(says, ["hadolint"]) is None
+            assert first_call(says, ["git"]) == 1
+
+
+def test_a_list_a_wrapper_runs_is_a_call() -> None:
+    """Planted: an argv literal handed to the helper's own wrapper (#2037)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        belt_dir = Path(tmp)
+        (belt_dir / "belt").mkdir()
+        (belt_dir / "belt" / "wraps.py").write_text(
+            "import subprocess\n\n\n"
+            "def go(argv):\n    return subprocess.run(argv, check=False)\n\n\n"
+            'go(["hadolint", "x"])\n',
+            "utf-8",
+        )
+        here = sys.modules[__name__]
+        with pytest.MonkeyPatch.context() as patched:
+            patched.setattr(here, "BELT", belt_dir)
+            patched.setattr(here, "PACKAGE", belt_dir / "belt")
+            for key in list(_SOURCES):
+                patched.delitem(_SOURCES, key)
+            for key in list(_CODE):
+                patched.delitem(_CODE, key)
+            wraps = expand('"${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt" wraps', set())
+            assert first_call(wraps, ["hadolint"]) == 1
+
+
+def test_the_belt_helpers_that_run_belt_scripts() -> None:
+    """The belt's real helpers: run, and only named.
+
+    rust_lint.py and pg_clippy.py reach the clippy ladder and the
+    pgrx provisioning through rust_task.py; testing_adoption.py
+    names the mutation scripts and runs none.
+    """
+    for helper in ("rust_lint.py", "pg_clippy.py"):
+        reached: set[str] = {
             name
-            for name in gate_tasks(tasks)
-            if first_call(expand(body(tasks[name]), set()), ["jq"]) is not None
-        ]
-        none: list[str] = []
-        assert none != callers
-        table = gate_tools.load_table()
-        providers = [
-            key
-            for key in belt_tools()
-            if "jq" in gate_tools.commands(key, table.get(key, gate_tools.Row()))
-        ]
-        jq: list[str] = ["jq"]
-        assert jq == providers, f"gate tasks call jq: {callers}"
+            for module in belt_imports(helper)
+            for name in python_code(module).scripts
+        }
+        assert {"clippy-ladder.sh", "pgrx-env.sh"} <= reached
+        command = helper.removesuffix(".py").replace("_", "-")
+        lines = expand(
+            f'"${{ORG_PYTHON}}" -I "${{ORG_CANON_DIR}}/belt" {command}', set()
+        )
+        assert first_call(lines, ["jq"]) is not None
+    none: list[str] = []
+    assert none == python_code("testing_adoption.py").scripts
+    adoption = expand(
+        '"${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt" testing-adoption', set()
+    )
+    assert first_call(adoption, ["cargo-mutants", "mutmut"]) is None
+
+
+def test_the_venv_check_uses_its_command() -> None:
+    """`belt tool-python LABEL COMMAND` uses COMMAND's tool (#1788)."""
+    run = '"${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt" tool-python'
+    for text, used in (
+        (f'v=$({run} "${{label}}" hypothesis) || exit 1', True),
+        (f"{run} x hypothesis --site hypothesis > /dev/null || exit 1", True),
+        (f"{run} --site hypothesis x hypothesis", True),
+        (f"{run} --site=hypothesis x hypothesis", True),
+        (f"{run} x coverage --site hypothesis", False),
+        (f"{run} --site hypothesis x coverage", False),
+        (f"{run} --site=x y hypothesis", True),
+        (f"{run} x coverage", False),
+    ):
+        at = first_call(expand(text, set()), ["hypothesis"])
+        assert (1 if used else None) == at
+    # A shell operator ends the arguments: the words after it are
+    # another command's, not a COMMAND.
+    assert venv_command(f"v=$({run} x) || y hypothesis") is None
+
+
+def test_jq_the_gate_calls_is_a_pinned_belt_tool() -> None:
+    """Jq was a gate dependency that was never pinned (#390).
+
+    The runner image happens to carry a jq, so nothing reddened: a
+    call to a command no [tools] key provides is invisible to the
+    derivation above, which only looks for the tools the belt has.
+    So the callers are found by the command's own name.
+    """
+    tasks = belt_tasks()
+    callers = [
+        name
+        for name in gate_tasks(tasks)
+        if first_call(expand(body(tasks[name]), set()), ["jq"]) is not None
+    ]
+    none: list[str] = []
+    assert none != callers
+    table = gate_tools.load_table()
+    providers = [
+        key
+        for key in belt_tools()
+        if "jq" in gate_tools.commands(key, table.get(key, gate_tools.Row()))
+    ]
+    jq: list[str] = ["jq"]
+    assert jq == providers, f"gate tasks call jq: {callers}"
 
 
 def clean_env() -> dict[str, str]:
@@ -938,158 +948,162 @@ def always() -> set[str]:
 WORKFLOW = {".github/workflows/ci.yml": "on: push\n", "README.md": "# x\n"}
 
 
-class TestHelper:
-    """The helper's list for the trees the gate meets."""
+# The helper's list for the trees the gate meets.
+def test_an_empty_tree_gets_the_unconditional_tools_only() -> None:
+    """Nothing tracked: no conditional row fires."""
+    table = gate_tools.load_table()
+    unconditional = {k for k, r in table.items() if r.when is None}
+    assert unconditional <= always()
+    assert "aqua:hadolint/hadolint" not in always()
+    assert "aqua:golangci/golangci-lint" not in always()
 
-    def test_an_empty_tree_gets_the_unconditional_tools_only(self) -> None:
-        """Nothing tracked: no conditional row fires."""
-        table = gate_tools.load_table()
-        unconditional = {k for k, r in table.items() if r.when is None}
-        assert unconditional <= always()
-        assert "aqua:hadolint/hadolint" not in always()
-        assert "aqua:golangci/golangci-lint" not in always()
 
-    def test_a_go_tree(self) -> None:
-        """go.mod brings golangci-lint and nothing Rust."""
-        got = install(git_tree({**WORKFLOW, "go.mod": "module x\n"}))
-        assert "aqua:golangci/golangci-lint" in got
-        assert "github:bnjbvr/cargo-machete" not in got
-        assert "aqua:EmbarkStudios/cargo-deny" not in got
+def test_a_go_tree() -> None:
+    """go.mod brings golangci-lint and nothing Rust."""
+    got = install(git_tree({**WORKFLOW, "go.mod": "module x\n"}))
+    assert "aqua:golangci/golangci-lint" in got
+    assert "github:bnjbvr/cargo-machete" not in got
+    assert "aqua:EmbarkStudios/cargo-deny" not in got
 
-    def test_a_rust_tree(self) -> None:
-        """Cargo.toml and Cargo.lock bring the Rust lints' tools."""
-        got = install(
-            git_tree({**WORKFLOW, "Cargo.toml": "[package]\n", "Cargo.lock": ""})
-        )
-        assert "github:bnjbvr/cargo-machete" in got
-        assert "aqua:EmbarkStudios/cargo-deny" in got
-        assert "aqua:golangci/golangci-lint" not in got
 
-    def test_a_pgrx_tree(self) -> None:
-        """A pgrx crate with SQL brings the SQL linter."""
-        got = install(
-            git_tree({
-                **WORKFLOW,
-                "Cargo.toml": "[workspace]\n",
-                "crates/x-pg/Cargo.toml": "[package]\n",
-                "crates/x-pg/sql/x--1.0.sql": "select 1;\n",
-            })
-        )
-        assert "pipx:sqlfluff" in got
-        assert "aqua:astral-sh/uv" in got
-        assert "github:bnjbvr/cargo-machete" in got
+def test_a_rust_tree() -> None:
+    """Cargo.toml and Cargo.lock bring the Rust lints' tools."""
+    got = install(git_tree({**WORKFLOW, "Cargo.toml": "[package]\n", "Cargo.lock": ""}))
+    assert "github:bnjbvr/cargo-machete" in got
+    assert "aqua:EmbarkStudios/cargo-deny" in got
+    assert "aqua:golangci/golangci-lint" not in got
 
-    def test_a_json_only_tree_needs_biome(self) -> None:
-        """lint:biome lints JSON: renovate.json alone brings biome (#1410)."""
-        assert "aqua:biomejs/biome" in install(git_tree({"renovate.json": "{}\n"}))
 
-    @pytest.mark.parametrize(
-        "name",
-        [
-            "Dockerfile",
-            "docker/Dockerfile",
-            "x.Dockerfile",
-            "Dockerfile.ci",
-        ],
-    )
-    def test_a_dockerfile_tree(self, name: object) -> None:
-        """Each Dockerfile form brings hadolint."""
-        got = install(git_tree({**WORKFLOW, name: "FROM x\n"}))
-        assert "aqua:hadolint/hadolint" in got
-
-    def test_the_canon_tree(self) -> None:
-        """The canon runs lint:scaffold-assembly, which runs every task."""
-        table = gate_tools.load_table()
-        reached = {k for k, r in table.items() if r.when != ()}
-        assert reached == install(CANON) & reached
-
-    def test_a_caller_task_brings_a_belt_tool(self) -> None:
-        """A repository's own task calling hadolint gets it installed."""
-        tree = {
+def test_a_pgrx_tree() -> None:
+    """A pgrx crate with SQL brings the SQL linter."""
+    got = install(
+        git_tree({
             **WORKFLOW,
-            "mise.toml": '[tasks.test]\nrun = "scripts/t.sh"\n',
-            "scripts/t.sh": "#!/bin/sh\nhadolint --version\n",
-        }
-        assert "aqua:hadolint/hadolint" in install(git_tree(tree))
-        tree["scripts/t.sh"] = "#!/bin/sh\necho hadolint\n"
-        assert "aqua:hadolint/hadolint" not in install(git_tree(tree))
-
-    def test_a_caller_pin_is_never_disabled(self) -> None:
-        """Mise disables by name: the repository's own pin would go too."""
-        tree = {**WORKFLOW, "mise.toml": '[tools]\n"github:hadolint/hadolint" = "1"\n'}
-        assert "aqua:hadolint/hadolint" in install(git_tree(tree))
-        tree["mise.toml"] = '[tools]\ngo = "1.27.4"\n'
-        assert "aqua:hadolint/hadolint" not in install(git_tree(tree))
-
-    def test_the_canon_pins_no_tool_of_its_own(self) -> None:
-        """The canon's own mise.toml declares no [tools] (#1733).
-
-        A tool the canon's own config pinned is never disabled, so the
-        gate would install it for this repository alone; the belt pins
-        no language, and the canon pins none either.
-        """
-        config = decoded.load_toml((CANON / "mise.toml").read_text("utf-8"))
-        none: dict[str, object] = {}
-        assert none == config.get("tools", none), "the canon's mise.toml pins"
-
-    def test_the_disable_env(self) -> None:
-        """The left-out keys, sorted, and their digest; nothing for none."""
-        assert gate_tools.disable_env([]) == ""
-        out = gate_tools.disable_env(["zizmor", "aqua:hadolint/hadolint"])
-        lines = out.splitlines()
-        assert lines[0] == "MISE_DISABLE_TOOLS=aqua:hadolint/hadolint,zizmor"
-        assert re.search(r"^ORG_GATE_BELT_DIGEST=[0-9a-f]{12}$", lines[1])
-        assert out == gate_tools.disable_env(["aqua:hadolint/hadolint", "zizmor"])
-
-    @pytest.mark.parametrize("tree", ["go", "canon"])
-    def test_the_disable_mode(
-        self, tree: str, tmp_path: Path, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A Go tree leaves hadolint out; the canon leaves nothing out."""
-        root = git_tree({**WORKFLOW, "go.mod": "module x\n"}) if tree == "go" else CANON
-        env_file = tmp_path / "env"
-        env_file.write_text("")
-        with pytest.MonkeyPatch.context() as patched:
-            for name, value in (clean_env() | {"GITHUB_ENV": str(env_file)}).items():
-                patched.setenv(name, value)
-            patched.setattr(sys, "argv", [STEP])
-            status = gate_tools.main(["--root", str(root), "disable"])
-        out, err = capfd.readouterr()
-        assert status == 0, err
-        written = env_file.read_text()
-        assert "gate-tools: aqua:golangci/golangci-lint: needed" in out
-        if tree == "go":
-            assert "aqua:hadolint/hadolint" in written
-            assert "golangci" not in written
-        else:
-            assert written == ""
-
-    def test_the_helper_refuses_a_table_out_of_step(
-        self, tmp_path: Path, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A belt key with no row is refused by name, not left out."""
-        text = (BELT / "gate-tools.toml").read_text("utf-8")
-        stub = text.replace('[tools."aqua:hadolint/hadolint"]', "[x]")
-        table = (
-            support.belt(tmp_path, stubs={"gate-tools.toml": stub}) / "gate-tools.toml"
-        )
-        with pytest.MonkeyPatch.context() as patched:
-            for name, value in (support.env()).items():
-                patched.setenv(name, value)
-            patched.chdir(CANON)
-            patched.setattr(sys, "argv", [STEP])
-            status = gate_tools.main(["--table", str(table), "list"])
-        _out, err = capfd.readouterr()
-        assert status == 1
-        assert f"::error::{STEP}: aqua:hadolint/hadolint is in one of" in err
+            "Cargo.toml": "[workspace]\n",
+            "crates/x-pg/Cargo.toml": "[package]\n",
+            "crates/x-pg/sql/x--1.0.sql": "select 1;\n",
+        })
+    )
+    assert "pipx:sqlfluff" in got
+    assert "aqua:astral-sh/uv" in got
+    assert "github:bnjbvr/cargo-machete" in got
 
 
-@pytest.mark.usefixtures("_tmp")
-class TestRefusals:
+def test_a_json_only_tree_needs_biome() -> None:
+    """lint:biome lints JSON: renovate.json alone brings biome (#1410)."""
+    assert "aqua:biomejs/biome" in install(git_tree({"renovate.json": "{}\n"}))
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "Dockerfile",
+        "docker/Dockerfile",
+        "x.Dockerfile",
+        "Dockerfile.ci",
+    ],
+)
+def test_a_dockerfile_tree(name: object) -> None:
+    """Each Dockerfile form brings hadolint."""
+    got = install(git_tree({**WORKFLOW, name: "FROM x\n"}))
+    assert "aqua:hadolint/hadolint" in got
+
+
+def test_the_canon_tree() -> None:
+    """The canon runs lint:scaffold-assembly, which runs every task."""
+    table = gate_tools.load_table()
+    reached = {k for k, r in table.items() if r.when != ()}
+    assert reached == install(CANON) & reached
+
+
+def test_a_caller_task_brings_a_belt_tool() -> None:
+    """A repository's own task calling hadolint gets it installed."""
+    tree = {
+        **WORKFLOW,
+        "mise.toml": '[tasks.test]\nrun = "scripts/t.sh"\n',
+        "scripts/t.sh": "#!/bin/sh\nhadolint --version\n",
+    }
+    assert "aqua:hadolint/hadolint" in install(git_tree(tree))
+    tree["scripts/t.sh"] = "#!/bin/sh\necho hadolint\n"
+    assert "aqua:hadolint/hadolint" not in install(git_tree(tree))
+
+
+def test_a_caller_pin_is_never_disabled() -> None:
+    """Mise disables by name: the repository's own pin would go too."""
+    tree = {**WORKFLOW, "mise.toml": '[tools]\n"github:hadolint/hadolint" = "1"\n'}
+    assert "aqua:hadolint/hadolint" in install(git_tree(tree))
+    tree["mise.toml"] = '[tools]\ngo = "1.27.4"\n'
+    assert "aqua:hadolint/hadolint" not in install(git_tree(tree))
+
+
+def test_the_canon_pins_no_tool_of_its_own() -> None:
+    """The canon's own mise.toml declares no [tools] (#1733).
+
+    A tool the canon's own config pinned is never disabled, so the
+    gate would install it for this repository alone; the belt pins
+    no language, and the canon pins none either.
+    """
+    config = decoded.load_toml((CANON / "mise.toml").read_text("utf-8"))
+    none: dict[str, object] = {}
+    assert none == config.get("tools", none), "the canon's mise.toml pins"
+
+
+def test_the_disable_env() -> None:
+    """The left-out keys, sorted, and their digest; nothing for none."""
+    assert gate_tools.disable_env([]) == ""
+    out = gate_tools.disable_env(["zizmor", "aqua:hadolint/hadolint"])
+    lines = out.splitlines()
+    assert lines[0] == "MISE_DISABLE_TOOLS=aqua:hadolint/hadolint,zizmor"
+    assert re.search(r"^ORG_GATE_BELT_DIGEST=[0-9a-f]{12}$", lines[1])
+    assert out == gate_tools.disable_env(["aqua:hadolint/hadolint", "zizmor"])
+
+
+@pytest.mark.parametrize("tree", ["go", "canon"])
+def test_the_disable_mode(
+    tree: str, tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A Go tree leaves hadolint out; the canon leaves nothing out."""
+    root = git_tree({**WORKFLOW, "go.mod": "module x\n"}) if tree == "go" else CANON
+    env_file = tmp_path / "env"
+    env_file.write_text("")
+    with pytest.MonkeyPatch.context() as patched:
+        for name, value in (clean_env() | {"GITHUB_ENV": str(env_file)}).items():
+            patched.setenv(name, value)
+        patched.setattr(sys, "argv", [STEP])
+        status = gate_tools.main(["--root", str(root), "disable"])
+    out, err = capfd.readouterr()
+    assert status == 0, err
+    written = env_file.read_text()
+    assert "gate-tools: aqua:golangci/golangci-lint: needed" in out
+    if tree == "go":
+        assert "aqua:hadolint/hadolint" in written
+        assert "golangci" not in written
+    else:
+        assert written == ""
+
+
+def test_the_helper_refuses_a_table_out_of_step(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A belt key with no row is refused by name, not left out."""
+    text = (BELT / "gate-tools.toml").read_text("utf-8")
+    stub = text.replace('[tools."aqua:hadolint/hadolint"]', "[x]")
+    table = support.belt(tmp_path, stubs={"gate-tools.toml": stub}) / "gate-tools.toml"
+    with pytest.MonkeyPatch.context() as patched:
+        for name, value in (support.env()).items():
+            patched.setenv(name, value)
+        patched.chdir(CANON)
+        patched.setattr(sys, "argv", [STEP])
+        status = gate_tools.main(["--table", str(table), "list"])
+    _out, err = capfd.readouterr()
+    assert status == 1
+    assert f"::error::{STEP}: aqua:hadolint/hadolint is in one of" in err
+
+
+class Refusals:
     """A table or belt config of the wrong shape is refused by name."""
 
-    @fixture
-    def _tmp(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
 
@@ -1116,48 +1130,57 @@ class TestRefusals:
             status = gate_tools.main(["--table", str(table), "list"])
         return status, err.getvalue(), table
 
-    def test_wrong_shapes_in_the_table(self) -> None:
-        """Each shape the decoder refuses, with the field it names."""
-        rows = [
-            ("[tools\n", "Expected ']'"),
-            ("tools = 1\n", "[tools] is not an object"),
-            ("[tools]\nx = 1\n", "tools.x is not an object"),
-            ('[tools.x]\ntasks = "lint:a"\n', "tools.x.tasks is not a list of strings"),
-            ("[tools.x]\nwhen = [1]\n", "tools.x.when is not a list of strings"),
-            ("[tools.x]\nfor = {}\n", "tools.x.for is not a list of strings"),
-            ('[tools.x]\nrun = [""," ", 2]\n', "tools.x.run is not a list of strings"),
-        ]
-        for text, message in rows:
-            status, err, table = self.run_main(text, "[tools]\n")
-            assert status == 1
-            assert err.startswith(f"::error::{STEP}: {table}: "), err
-            assert message in err
 
-    def test_belt_tools_not_a_table(self) -> None:
-        """The belt config's [tools] is read through the same decoder."""
-        status, err, table = self.run_main("[tools]\n", "tools = []\n")
+@fixture
+def refusals(tmp_path: Path) -> Refusals:
+    """Give each row its own Refusals."""
+    return Refusals(tmp_path)
+
+
+def test_wrong_shapes_in_the_table(refusals: Refusals) -> None:
+    """Each shape the decoder refuses, with the field it names."""
+    rows = [
+        ("[tools\n", "Expected ']'"),
+        ("tools = 1\n", "[tools] is not an object"),
+        ("[tools]\nx = 1\n", "tools.x is not an object"),
+        ('[tools.x]\ntasks = "lint:a"\n', "tools.x.tasks is not a list of strings"),
+        ("[tools.x]\nwhen = [1]\n", "tools.x.when is not a list of strings"),
+        ("[tools.x]\nfor = {}\n", "tools.x.for is not a list of strings"),
+        ('[tools.x]\nrun = [""," ", 2]\n', "tools.x.run is not a list of strings"),
+    ]
+    for text, message in rows:
+        status, err, table = refusals.run_main(text, "[tools]\n")
         assert status == 1
-        assert (
-            f"::error::{STEP}: {table.parent / 'config.toml'}: [tools] "
-            "is not an object\n"
-        ) == err
+        assert err.startswith(f"::error::{STEP}: {table}: "), err
+        assert message in err
 
-    def test_a_well_formed_row_decodes(self) -> None:
-        """Absent fields take their defaults; `for` is the row's needs."""
-        with tempfile.TemporaryDirectory() as d:
-            table = Path(d) / "t.toml"
-            table.write_text(
-                '[tools.a]\ntasks = ["lint:a"]\nwhen = []\nfor = ["b"]\n'
-                '[tools.b]\nrun = ["b1"]\n',
-                encoding="utf-8",
-            )
-            got = gate_tools.load_table(table)
-        rows: dict[str, gate_tools.Row] = {
-            "a": gate_tools.Row(tasks=("lint:a",), when=(), needs=("b",)),
-            "b": gate_tools.Row(run=("b1",)),
-        }
-        assert rows == got
-        b1: list[str] = ["b1"]
-        assert b1 == gate_tools.commands("b", got["b"])
-        a: list[str] = ["a"]
-        assert a == gate_tools.commands("a", got["a"])
+
+def test_belt_tools_not_a_table(refusals: Refusals) -> None:
+    """The belt config's [tools] is read through the same decoder."""
+    status, err, table = refusals.run_main("[tools]\n", "tools = []\n")
+    assert status == 1
+    assert (
+        f"::error::{STEP}: {table.parent / 'config.toml'}: [tools] is not an object\n"
+    ) == err
+
+
+@pytest.mark.usefixtures("refusals")
+def test_a_well_formed_row_decodes() -> None:
+    """Absent fields take their defaults; `for` is the row's needs."""
+    with tempfile.TemporaryDirectory() as d:
+        table = Path(d) / "t.toml"
+        table.write_text(
+            '[tools.a]\ntasks = ["lint:a"]\nwhen = []\nfor = ["b"]\n'
+            '[tools.b]\nrun = ["b1"]\n',
+            encoding="utf-8",
+        )
+        got = gate_tools.load_table(table)
+    rows: dict[str, gate_tools.Row] = {
+        "a": gate_tools.Row(tasks=("lint:a",), when=(), needs=("b",)),
+        "b": gate_tools.Row(run=("b1",)),
+    }
+    assert rows == got
+    b1: list[str] = ["b1"]
+    assert b1 == gate_tools.commands("b", got["b"])
+    a: list[str] = ["a"]
+    assert a == gate_tools.commands("a", got["a"])

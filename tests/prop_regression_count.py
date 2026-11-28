@@ -43,61 +43,60 @@ def draw_pinned_line(draw: st.DrawFn) -> list[tuple[str | None, str]]:
 pinned_line = st.composite(draw_pinned_line)
 
 
-class TestPins:
-    """Pins are blanked; nothing else is."""
+# Pins are blanked; nothing else is.
+@given(st.text(max_size=80))
+def test_twice_is_once(line: str) -> None:
+    """A normalised line is its own normal form."""
+    once = rc.normalise_pin_line(line)
+    assert rc.normalise_pin_line(once) == once
 
-    @given(st.text(max_size=80))
-    def test_twice_is_once(self, line: str) -> None:
-        """A normalised line is its own normal form."""
-        once = rc.normalise_pin_line(line)
-        assert rc.normalise_pin_line(once) == once
 
-    @given(st.data(), st.lists(pinned_line(), min_size=1, max_size=5))
-    def test_a_pin_bump_is_pin_only(
-        self, data: st.DataObject, lines: list[list[tuple[str | None, str]]]
-    ) -> None:
-        """Every pin moved, nothing else: pin-only, in any line order."""
-        removed = [" ".join(w for _, w in line) for line in lines]
-        added = [
-            " ".join(data.draw(PINS[k]) if k else w for k, w in line) for line in lines
-        ]
-        patch = "\n".join(
-            data.draw(
-                st.permutations([f"-{r}" for r in removed] + [f"+{a}" for a in added])
-            )
+@given(st.data(), st.lists(pinned_line(), min_size=1, max_size=5))
+def test_a_pin_bump_is_pin_only(
+    data: st.DataObject, lines: list[list[tuple[str | None, str]]]
+) -> None:
+    """Every pin moved, nothing else: pin-only, in any line order."""
+    removed = [" ".join(w for _, w in line) for line in lines]
+    added = [
+        " ".join(data.draw(PINS[k]) if k else w for k, w in line) for line in lines
+    ]
+    patch = "\n".join(
+        data.draw(
+            st.permutations([f"-{r}" for r in removed] + [f"+{a}" for a in added])
         )
-        assert rc.is_pin_only(f"--- a/x\n+++ b/x\n{patch}\n")
-
-    @given(st.lists(pinned_line(), min_size=1, max_size=5), WORD)
-    def test_another_word_is_not(
-        self, lines: list[list[tuple[str | None, str]]], extra: str
-    ) -> None:
-        """A word added to one line: not pin-only."""
-        removed = [" ".join(w for _, w in line) for line in lines]
-        added = [*removed[:-1], removed[-1] + " " + extra]
-        patch = "\n".join([*(f"-{r}" for r in removed), *(f"+{a}" for a in added)])
-        assert not rc.is_pin_only(patch)
-
-
-class TestPaths:
-    """Tests by name, anywhere; anything under a test directory."""
-
-    @given(
-        st.lists(SEGMENT, max_size=3),
-        st.sampled_from(["test_x.py", "x_test.go", "x.test.ts", "x.spec.js"]),
     )
-    def test_named_tests_anywhere(self, dirs: list[str], name: str) -> None:
-        """The basename decides."""
-        assert rc.is_test_path("/".join([*dirs, name]))
+    assert rc.is_pin_only(f"--- a/x\n+++ b/x\n{patch}\n")
 
-    @given(
-        st.lists(SEGMENT, max_size=2),
-        st.sampled_from(sorted(rc.TEST_DIRS)),
-        st.lists(SEGMENT, max_size=2),
-        SEGMENT,
-    )
-    def test_under_a_test_dir(
-        self, above: list[str], tests: str, below: list[str], name: str
-    ) -> None:
-        """Any file below a test directory."""
-        assert rc.is_test_path("/".join([*above, tests, *below, name]))
+
+@given(st.lists(pinned_line(), min_size=1, max_size=5), WORD)
+def test_another_word_is_not(
+    lines: list[list[tuple[str | None, str]]], extra: str
+) -> None:
+    """A word added to one line: not pin-only."""
+    removed = [" ".join(w for _, w in line) for line in lines]
+    added = [*removed[:-1], removed[-1] + " " + extra]
+    patch = "\n".join([*(f"-{r}" for r in removed), *(f"+{a}" for a in added)])
+    assert not rc.is_pin_only(patch)
+
+
+# Tests by name, anywhere; anything under a test directory.
+@given(
+    st.lists(SEGMENT, max_size=3),
+    st.sampled_from(["test_x.py", "x_test.go", "x.test.ts", "x.spec.js"]),
+)
+def test_named_tests_anywhere(dirs: list[str], name: str) -> None:
+    """The basename decides."""
+    assert rc.is_test_path("/".join([*dirs, name]))
+
+
+@given(
+    st.lists(SEGMENT, max_size=2),
+    st.sampled_from(sorted(rc.TEST_DIRS)),
+    st.lists(SEGMENT, max_size=2),
+    SEGMENT,
+)
+def test_under_a_test_dir(
+    above: list[str], tests: str, below: list[str], name: str
+) -> None:
+    """Any file below a test directory."""
+    assert rc.is_test_path("/".join([*above, tests, *below, name]))

@@ -99,12 +99,10 @@ def helper(
     return status, out, err
 
 
-@pytest.mark.usefixtures("_tmp")
-class TestMarkers:
+class Markers:
     """The helper over one planted file at a time."""
 
-    @fixture
-    def _tmp(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
 
@@ -120,44 +118,53 @@ class TestMarkers:
         (root / name).write_text(body, encoding="utf-8")
         return root
 
-    @pytest.mark.parametrize(("name", "body", "rule"), MARKERS)
-    def test_each_marker_is_red_by_file_line_and_rule(
-        self,
-        name: str,
-        body: str,
-        rule: str,
-        capfd: pytest.CaptureFixture[str],
-    ) -> None:
-        """Every marker of every measured language is a finding, located."""
-        status, _out, err = helper(self.plant(name, body), name, capfd=capfd)
-        assert status == 1, err
-        line = next(
-            i
-            for i, text in enumerate(body.splitlines(), 1)
-            if ("cover" in text or "ignore" in text or "branch" in text)
-        )
-        assert f"{name}:{line}: {rule}\n" in err
-        assert "lint:coverage-exclusions: 1 coverage exclusion(s)" in err
-        assert "There is no allow-list." in err
 
-    @pytest.mark.parametrize(("name", "body"), QUOTED)
-    def test_a_quoted_marker_is_text_not_an_exclusion(
-        self, name: str, body: str, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A marker inside a string literal is not a finding, in any language."""
-        status, _out, err = helper(self.plant(name, body), name, capfd=capfd)
-        assert status == 0, err
-        assert err == ""
+@fixture
+def markers(tmp_path: Path) -> Markers:
+    """Give each row its own Markers."""
+    return Markers(tmp_path)
 
-    def test_other_languages_are_not_read(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A marker in a file of a language the belt does not measure passes."""
-        status, out, err = helper(
-            self.plant("notes.md", f"{PRAGMA} cover\n"), "notes.md", capfd=capfd
-        )
-        assert status == 0, err
-        assert out == "lint:coverage-exclusions: 1 file(s), no coverage exclusions\n"
+
+@pytest.mark.parametrize(("name", "body", "rule"), MARKERS)
+def test_each_marker_is_red_by_file_line_and_rule(
+    markers: Markers,
+    name: str,
+    body: str,
+    rule: str,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """Every marker of every measured language is a finding, located."""
+    status, _out, err = helper(markers.plant(name, body), name, capfd=capfd)
+    assert status == 1, err
+    line = next(
+        i
+        for i, text in enumerate(body.splitlines(), 1)
+        if ("cover" in text or "ignore" in text or "branch" in text)
+    )
+    assert f"{name}:{line}: {rule}\n" in err
+    assert "lint:coverage-exclusions: 1 coverage exclusion(s)" in err
+    assert "There is no allow-list." in err
+
+
+@pytest.mark.parametrize(("name", "body"), QUOTED)
+def test_a_quoted_marker_is_text_not_an_exclusion(
+    markers: Markers, name: str, body: str, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A marker inside a string literal is not a finding, in any language."""
+    status, _out, err = helper(markers.plant(name, body), name, capfd=capfd)
+    assert status == 0, err
+    assert err == ""
+
+
+def test_other_languages_are_not_read(
+    markers: Markers, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A marker in a file of a language the belt does not measure passes."""
+    status, out, err = helper(
+        markers.plant("notes.md", f"{PRAGMA} cover\n"), "notes.md", capfd=capfd
+    )
+    assert status == 0, err
+    assert out == "lint:coverage-exclusions: 1 file(s), no coverage exclusions\n"
 
 
 def task_body() -> str:
@@ -173,12 +180,10 @@ def task_body() -> str:
     return decoded.as_str(decoded.as_object(tasks[name], name)["run"], f"{name}'s run")
 
 
-@pytest.mark.usefixtures("_tmp")
-class TestTask:
+class Task:
     """The task body, in a scratch repository."""
 
-    @fixture
-    def _tmp(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
 
@@ -200,65 +205,72 @@ class TestTask:
             )
         return root
 
-    @staticmethod
-    def run_task(root: Path) -> subprocess.CompletedProcess[str]:
-        """Run the body under the interpreter mise uses.
 
-        Returns:
-            The finished process.
-
-        """
-        as_mise = support.task_run("lint:coverage-exclusions", task_body())
-        return subprocess.run(
-            as_mise.argv,
-            cwd=root,
-            env=support.env(ORG_BELT_DIR=str(_HERE), **GIT_CONFIG) | as_mise.env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-
-    def test_no_measured_language_skips_clean_by_name(self) -> None:
-        """A tree with none of the languages says so and exits 0."""
-        r = self.run_task(self.repo({"README.md": f"{PRAGMA} cover\n"}))
-        assert r.returncode == 0, r.stderr
-        assert (
-            "lint:coverage-exclusions: no Python, Rust, Go, TypeScript or "
-            "JavaScript tracked, skipped"
-        ) in r.stdout
-
-    def test_a_tracked_marker_is_red(self) -> None:
-        """The body hands tracked source to the helper."""
-        r = self.run_task(self.repo({"src/a.py": f"x = 1  {PRAGMA} cover\n"}))
-        assert r.returncode == 1, r.stderr
-        assert "src/a.py:1: python: pragma no cover" in r.stderr
-
-    def test_vendor_is_not_read(self) -> None:
-        """A marker under vendor/ is outside the lint; the rest is read."""
-        r = self.run_task(
-            self.repo({
-                "vendor/x/a.py": f"x = 1  {PRAGMA} cover\n",
-                "src/b.py": "y = 2\n",
-            })
-        )
-        assert r.returncode == 0, r.stderr
-        assert "1 file(s), no coverage exclusions" in r.stdout
+@fixture
+def task(tmp_path: Path) -> Task:
+    """Give each row its own Task."""
+    return Task(tmp_path)
 
 
-class TestCanon:
-    """The canon holds its own rule."""
+def run_task(root: Path) -> subprocess.CompletedProcess[str]:
+    """Run the body under the interpreter mise uses.
 
-    def test_the_canon_carries_no_coverage_exclusion(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """Every tracked source file in this repository is clean.
+    Returns:
+        The finished process.
 
-        The row that fails before #1522: seven `_SPEC is None` guards
-        carried a coverage pragma.
-        """
-        root = _HERE.parent
-        listing = support.tracked(
-            root, ":!vendor/**", "*.py", "*.rs", "*.go", "*.ts", "*.js", **GIT_CONFIG
-        )
-        status, _out, err = helper(root, *listing, capfd=capfd)
-        assert status == 0, err
+    """
+    as_mise = support.task_run("lint:coverage-exclusions", task_body())
+    return subprocess.run(
+        as_mise.argv,
+        cwd=root,
+        env=support.env(ORG_BELT_DIR=str(_HERE), **GIT_CONFIG) | as_mise.env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_no_measured_language_skips_clean_by_name(task: Task) -> None:
+    """A tree with none of the languages says so and exits 0."""
+    r = run_task(task.repo({"README.md": f"{PRAGMA} cover\n"}))
+    assert r.returncode == 0, r.stderr
+    assert (
+        "lint:coverage-exclusions: no Python, Rust, Go, TypeScript or "
+        "JavaScript tracked, skipped"
+    ) in r.stdout
+
+
+def test_a_tracked_marker_is_red(task: Task) -> None:
+    """The body hands tracked source to the helper."""
+    r = run_task(task.repo({"src/a.py": f"x = 1  {PRAGMA} cover\n"}))
+    assert r.returncode == 1, r.stderr
+    assert "src/a.py:1: python: pragma no cover" in r.stderr
+
+
+def test_vendor_is_not_read(task: Task) -> None:
+    """A marker under vendor/ is outside the lint; the rest is read."""
+    r = run_task(
+        task.repo({
+            "vendor/x/a.py": f"x = 1  {PRAGMA} cover\n",
+            "src/b.py": "y = 2\n",
+        })
+    )
+    assert r.returncode == 0, r.stderr
+    assert "1 file(s), no coverage exclusions" in r.stdout
+
+
+# The canon holds its own rule.
+def test_the_canon_carries_no_coverage_exclusion(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """Every tracked source file in this repository is clean.
+
+    The row that fails before #1522: seven `_SPEC is None` guards
+    carried a coverage pragma.
+    """
+    root = _HERE.parent
+    listing = support.tracked(
+        root, ":!vendor/**", "*.py", "*.rs", "*.go", "*.ts", "*.js", **GIT_CONFIG
+    )
+    status, _out, err = helper(root, *listing, capfd=capfd)
+    assert status == 0, err

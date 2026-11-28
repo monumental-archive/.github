@@ -243,139 +243,148 @@ GO_RESTORE = "'Restore the Go caches (unsigned gate only)'"
 EVERY_REF = "writes a cache from every ref"
 
 
-class TestReal:
-    """The tree's ci.yml conforms, and its caches are where #1406 says."""
-
-    def test_ci_conforms(self) -> None:
-        """No breach in the real workflow."""
-        assert findings(real()) == NONE
-
-    def test_every_job_has_its_caches(self) -> None:
-        """The two jobs each restore and save their tool cache."""
-        for job_id in CACHE_JOBS:
-            job = workflow_yaml.jobs(parsed(real()))[job_id]
-            names = job_installs.names(job)
-            assert TOOL_RESTORE.strip("'") in names
-            assert TOOL_SAVE.strip("'") in names
+# The tree's ci.yml conforms, and its caches are where #1406 says.
+def test_ci_conforms() -> None:
+    """No breach in the real workflow."""
+    assert findings(real()) == NONE
 
 
-class TestPlanted:
-    """Each property, broken once on the real file, is named."""
+def test_every_job_has_its_caches() -> None:
+    """The two jobs each restore and save their tool cache."""
+    for job_id in CACHE_JOBS:
+        job = workflow_yaml.jobs(parsed(real()))[job_id]
+        names = job_installs.names(job)
+        assert TOOL_RESTORE.strip("'") in names
+        assert TOOL_SAVE.strip("'") in names
 
-    def assert_named(self, text: str, message: str) -> None:
-        """Assert the breach is reported with its message."""
-        got = findings(text)
-        assert any(message in g for g in got), f"{message!r} not in {got}"
 
-    def test_an_unconditioned_save(self) -> None:
-        """A save with its condition dropped writes from every ref."""
-        self.assert_named(
-            plant(TOOL_SAVE_IF, ""),
-            f"gate: {TOOL_SAVE} saves a cache without the default-branch condition",
-        )
+# Each property, broken once on the real file, is named.
+def assert_named(text: str, message: str) -> None:
+    """Assert the breach is reported with its message."""
+    got = findings(text)
+    assert any(message in g for g in got), f"{message!r} not in {got}"
 
-    def test_a_save_conditioned_on_something_else(self) -> None:
-        """A condition that is not the default branch's is no condition."""
-        text = plant(
-            "if: ${{ env.ORG_GATE_CACHE_SAVE == 'true' && steps.tool-cache",
-            "if: ${{ github.event_name != 'schedule' && steps.tool-cache",
-        )
-        self.assert_named(text, "saves a cache without the default-branch condition")
 
-    def test_a_save_in_a_fourth_job(self) -> None:
-        """A save step added to the plan job is a cache outside the three."""
-        # The plan job's last step ends where the gate job's header begins:
-        # the save goes in as the plan job's final step, after whatever
-        # its run block holds.
-        gate = "  # Everything the gate runs except the extension's own suite"
-        save = (
-            "      - name: Save the plan cache (default branch only)\n"
-            "        if: ${{ env.ORG_GATE_CACHE_SAVE == 'true' && always() }}\n"
-            "        uses: actions/cache/save@"
-            "55cc8345863c7cc4c66a329aec7e433d2d1c52a9\n"
-            "        with:\n"
-            "          path: target\n"
-            "          key: ${{ steps.plan-cache.outputs.cache-primary-key }}\n"
-        )
-        self.assert_named(
-            plant(gate, save + gate),
-            "plan: 'Save the plan cache (default branch only)' is a cache outside"
-            " ['coverage', 'gate', 'pgrx']",
-        )
+def test_an_unconditioned_save() -> None:
+    """A save with its condition dropped writes from every ref."""
+    assert_named(
+        plant(TOOL_SAVE_IF, ""),
+        f"gate: {TOOL_SAVE} saves a cache without the default-branch condition",
+    )
 
-    def test_a_fallback_on_the_default_branch(self) -> None:
-        """An unconditioned restore-keys falls back on the default branch too."""
-        self.assert_named(
-            plant(
-                GO_KEYS,
-                "restore-keys: gate-go-v2-${{ env.ORG_SLOT }}-${{ runner.os }}-",
-            ),
-            f"gate: {GO_RESTORE} carries a fallback on the default branch",
-        )
 
-    def test_a_restore_without_its_fallback(self) -> None:
-        """A restore with no restore-keys leaves a pull request cold."""
-        self.assert_named(
-            plant(TOOL_KEYS, ""),
-            f"gate: {TOOL_RESTORE} restores off the default branch with no fallback",
-        )
+def test_a_save_conditioned_on_something_else() -> None:
+    """A condition that is not the default branch's is no condition."""
+    text = plant(
+        "if: ${{ env.ORG_GATE_CACHE_SAVE == 'true' && steps.tool-cache",
+        "if: ${{ github.event_name != 'schedule' && steps.tool-cache",
+    )
+    assert_named(text, "saves a cache without the default-branch condition")
 
-    def test_the_combined_action_returns(self) -> None:
-        """The combined actions/cache saves in its post step from any ref."""
-        self.assert_named(
-            plant("actions/cache/restore@", "actions/cache@"),
-            f"{EVERY_REF}: combined actions/cache saves from every ref",
-        )
 
-    def test_mise_action_caching_again(self) -> None:
-        """mise-action's own cache saves from every ref."""
-        self.assert_named(
-            plant("          cache: false\n", "          cache: true\n"),
-            f"{EVERY_REF}: mise-action with its cache on",
-        )
+def test_a_save_in_a_fourth_job() -> None:
+    """A save step added to the plan job is a cache outside the three."""
+    # The plan job's last step ends where the gate job's header begins:
+    # the save goes in as the plan job's final step, after whatever
+    # its run block holds.
+    gate = "  # Everything the gate runs except the extension's own suite"
+    save = (
+        "      - name: Save the plan cache (default branch only)\n"
+        "        if: ${{ env.ORG_GATE_CACHE_SAVE == 'true' && always() }}\n"
+        "        uses: actions/cache/save@"
+        "55cc8345863c7cc4c66a329aec7e433d2d1c52a9\n"
+        "        with:\n"
+        "          path: target\n"
+        "          key: ${{ steps.plan-cache.outputs.cache-primary-key }}\n"
+    )
+    assert_named(
+        plant(gate, save + gate),
+        "plan: 'Save the plan cache (default branch only)' is a cache outside"
+        " ['coverage', 'gate', 'pgrx']",
+    )
 
-    def test_mise_action_cache_by_default(self) -> None:
-        """mise-action caches unless told not to."""
-        self.assert_named(
-            plant("          cache: false\n", ""),
-            f"{EVERY_REF}: mise-action with its cache on",
-        )
 
-    def test_a_restore_never_saved(self) -> None:
-        """A restore with no save starves the default branch's copy."""
-        text = plant(
-            GO_SAVE_KEY,
-            "          key: gate-go-v2-${{ env.ORG_SLOT }}-${{ runner.os }}-\n",
-        )
-        self.assert_named(text, f"gate: {GO_RESTORE} is restored and never saved")
-        self.assert_named(
-            text, f"gate: {GO_SAVE} saves under a key no restore in the job computed"
-        )
+def test_a_fallback_on_the_default_branch() -> None:
+    """An unconditioned restore-keys falls back on the default branch too."""
+    assert_named(
+        plant(
+            GO_KEYS,
+            "restore-keys: gate-go-v2-${{ env.ORG_SLOT }}-${{ runner.os }}-",
+        ),
+        f"gate: {GO_RESTORE} carries a fallback on the default branch",
+    )
 
-    def test_a_save_of_other_paths(self) -> None:
-        """A save must write what its restore reads, or the next hit misses."""
-        paths = "            ~/go/pkg/mod\n            ~/.cache/go-build\n"
-        self.assert_named(
-            plant(paths + GO_SAVE_KEY, "            ~/go/pkg/mod\n" + GO_SAVE_KEY),
-            f"gate: {GO_SAVE} saves other paths than",
-        )
 
-    def test_a_loosened_save_predicate(self) -> None:
-        """A SAVE that is true off the default branch is named."""
-        self.assert_named(
-            plant(
-                "    ${{ github.event_name == 'push'\n",
-                "    ${{ github.event_name != 'schedule'\n",
-            ),
-            "ORG_GATE_CACHE_SAVE is not",
-        )
+def test_a_restore_without_its_fallback() -> None:
+    """A restore with no restore-keys leaves a pull request cold."""
+    assert_named(
+        plant(TOOL_KEYS, ""),
+        f"gate: {TOOL_RESTORE} restores off the default branch with no fallback",
+    )
 
-    def test_a_loosened_fallback_predicate(self) -> None:
-        """A FALLBACK that is true on the default branch is named."""
-        self.assert_named(
-            plant("    ${{ github.ref != format(", "    ${{ github.ref == format("),
-            "ORG_GATE_CACHE_FALLBACK is not",
-        )
+
+def test_the_combined_action_returns() -> None:
+    """The combined actions/cache saves in its post step from any ref."""
+    assert_named(
+        plant("actions/cache/restore@", "actions/cache@"),
+        f"{EVERY_REF}: combined actions/cache saves from every ref",
+    )
+
+
+def test_mise_action_caching_again() -> None:
+    """mise-action's own cache saves from every ref."""
+    assert_named(
+        plant("          cache: false\n", "          cache: true\n"),
+        f"{EVERY_REF}: mise-action with its cache on",
+    )
+
+
+def test_mise_action_cache_by_default() -> None:
+    """mise-action caches unless told not to."""
+    assert_named(
+        plant("          cache: false\n", ""),
+        f"{EVERY_REF}: mise-action with its cache on",
+    )
+
+
+def test_a_restore_never_saved() -> None:
+    """A restore with no save starves the default branch's copy."""
+    text = plant(
+        GO_SAVE_KEY,
+        "          key: gate-go-v2-${{ env.ORG_SLOT }}-${{ runner.os }}-\n",
+    )
+    assert_named(text, f"gate: {GO_RESTORE} is restored and never saved")
+    assert_named(
+        text, f"gate: {GO_SAVE} saves under a key no restore in the job computed"
+    )
+
+
+def test_a_save_of_other_paths() -> None:
+    """A save must write what its restore reads, or the next hit misses."""
+    paths = "            ~/go/pkg/mod\n            ~/.cache/go-build\n"
+    assert_named(
+        plant(paths + GO_SAVE_KEY, "            ~/go/pkg/mod\n" + GO_SAVE_KEY),
+        f"gate: {GO_SAVE} saves other paths than",
+    )
+
+
+def test_a_loosened_save_predicate() -> None:
+    """A SAVE that is true off the default branch is named."""
+    assert_named(
+        plant(
+            "    ${{ github.event_name == 'push'\n",
+            "    ${{ github.event_name != 'schedule'\n",
+        ),
+        "ORG_GATE_CACHE_SAVE is not",
+    )
+
+
+def test_a_loosened_fallback_predicate() -> None:
+    """A FALLBACK that is true on the default branch is named."""
+    assert_named(
+        plant("    ${{ github.ref != format(", "    ${{ github.ref == format("),
+        "ORG_GATE_CACHE_FALLBACK is not",
+    )
 
 
 # WHICH LEG HOLDS WHICH CACHE (#1740). The gate is a matrix of three
@@ -432,69 +441,68 @@ def leg_cache_findings(text: str) -> list[str]:
     return out
 
 
-class TestLegCaches:
-    """Each gate leg holds the caches it builds (#1740)."""
+# Each gate leg holds the caches it builds (#1740).
+def test_the_real_gate_conforms() -> None:
+    """Two build legs keyed by leg, one tool-cache saver."""
+    assert leg_cache_findings(real()) == NONE
 
-    def test_the_real_gate_conforms(self) -> None:
-        """Two build legs keyed by leg, one tool-cache saver."""
-        assert leg_cache_findings(real()) == NONE
 
-    def test_planted_breaches_are_named(self) -> None:
-        """Each property broken once on the real file, by its message."""
-        rows = [
+def test_planted_breaches_are_named() -> None:
+    """Each property broken once on the real file, by its message."""
+    rows = [
+        (
+            "a shared cargo key",
             (
-                "a shared cargo key",
-                (
-                    "key: gate-cargo-${{ env.ORG_SLOT }}-${{ runner.os }}",
-                    "key: gate-cargo-${{ runner.os }}",
-                ),
-                (
-                    "gate: the cargo-cache key does not start"
-                    " gate-cargo-${{ env.ORG_SLOT }}-"
-                ),
+                "key: gate-cargo-${{ env.ORG_SLOT }}-${{ runner.os }}",
+                "key: gate-cargo-${{ runner.os }}",
             ),
             (
-                "a shared Go fallback",
-                (GO_KEYS, GO_KEYS.replace("{0}-{1}-', env.ORG_SLOT, ", "{0}-', ")),
+                "gate: the cargo-cache key does not start"
+                " gate-cargo-${{ env.ORG_SLOT }}-"
+            ),
+        ),
+        (
+            "a shared Go fallback",
+            (GO_KEYS, GO_KEYS.replace("{0}-{1}-', env.ORG_SLOT, ", "{0}-', ")),
+            (
+                "gate: the go-cache fallback is not"
+                " format('gate-go-v2-{0}-{1}-', env.ORG_SLOT, runner.os)"
+            ),
+        ),
+        (
+            "every leg saves the tools",
+            (" && matrix.leg == 'test'\n", "\n"),
+            (
+                f"gate: {TOOL_SAVE} runs on every leg, not only where"
+                " matrix.leg == 'test'"
+            ),
+        ),
+        (
+            "the properties leg restores cargo",
+            (
                 (
-                    "gate: the go-cache fallback is not"
-                    " format('gate-go-v2-{0}-{1}-', env.ORG_SLOT, runner.os)"
+                    "id: cargo-cache\n        if: ${{ matrix.leg != 'properties'"
+                    " && hashFiles('Cargo.lock')"
                 ),
+                "id: cargo-cache\n        if: ${{ hashFiles('Cargo.lock')",
             ),
             (
-                "every leg saves the tools",
-                (" && matrix.leg == 'test'\n", "\n"),
-                (
-                    f"gate: {TOOL_SAVE} runs on every leg, not only where"
-                    " matrix.leg == 'test'"
-                ),
+                "gate: 'Restore the cargo caches (unsigned gate only)' runs on"
+                " every leg, not only where matrix.leg != 'properties'"
             ),
+        ),
+        (
+            "one leg restores the tools",
             (
-                "the properties leg restores cargo",
-                (
-                    (
-                        "id: cargo-cache\n        if: ${{ matrix.leg != 'properties'"
-                        " && hashFiles('Cargo.lock')"
-                    ),
-                    "id: cargo-cache\n        if: ${{ hashFiles('Cargo.lock')",
-                ),
-                (
-                    "gate: 'Restore the cargo caches (unsigned gate only)' runs on"
-                    " every leg, not only where matrix.leg != 'properties'"
-                ),
+                "        id: tool-cache\n",
+                "        id: tool-cache\n        if: ${{ matrix.leg == 'test' }}\n",
             ),
-            (
-                "one leg restores the tools",
-                (
-                    "        id: tool-cache\n",
-                    "        id: tool-cache\n        if: ${{ matrix.leg == 'test' }}\n",
-                ),
-                f"gate: {TOOL_RESTORE} is not restored by every leg",
-            ),
-        ]
-        for _label, (old, new), message in rows:
-            want: list[str] = [message]
-            assert want == leg_cache_findings(plant(old, new))
+            f"gate: {TOOL_RESTORE} is not restored by every leg",
+        ),
+    ]
+    for _label, (old, new), message in rows:
+        want: list[str] = [message]
+        assert want == leg_cache_findings(plant(old, new))
 
 
 # THE CARGO CACHES NAME THEIR COMPILER (#1864). `target` is what the
@@ -630,111 +638,113 @@ HANDED = (
 )
 
 
-class TestCompiler:
-    """Every cargo cache names the compiler that fills it (#1864)."""
+# Every cargo cache names the compiler that fills it (#1864).
+def test_compiler_the_real_gate_conforms() -> None:
+    """Both jobs' cargo caches key on the digest."""
+    assert compiler_findings(real()) == NONE
 
-    def test_the_real_gate_conforms(self) -> None:
-        """Both jobs' cargo caches key on the digest."""
-        assert compiler_findings(real()) == NONE
 
-    @pytest.mark.parametrize("path", sorted(WORKFLOWS.glob("*.yml")))
-    def test_every_workflow_conforms(self, path: object) -> None:
-        """No workflow holds a cargo cache keyed otherwise."""
-        text = path.read_text("utf-8")
-        assert compiler_findings(text, path.name) == NONE
+@pytest.mark.parametrize("path", sorted(WORKFLOWS.glob("*.yml")))
+def test_every_workflow_conforms(path: object) -> None:
+    """No workflow holds a cargo cache keyed otherwise."""
+    text = path.read_text("utf-8")
+    assert compiler_findings(text, path.name) == NONE
 
-    def test_the_gate_and_pgrx_hold_the_cargo_caches(self) -> None:
-        """The surface today: one restore in each of two jobs."""
-        held: set[str] = {
-            job_id
-            for job_id, job in workflow_yaml.jobs(parsed(real())).items()
-            for s in workflow_yaml.steps(job)
-            if holds_cargo(s)
-        }
-        want: set[str] = {"gate", "pgrx"}
-        assert want == held
 
-    def test_planted_breaches_are_named(self) -> None:
-        """Each property broken once on the real file, by its message."""
-        gate = "ci.yml: gate: 'Restore the cargo caches (unsigned gate only)'"
-        pgrx = "ci.yml: pgrx: 'Restore the cargo caches (unsigned gate only)'"
-        rows = [
+def test_the_gate_and_pgrx_hold_the_cargo_caches() -> None:
+    """The surface today: one restore in each of two jobs."""
+    held: set[str] = {
+        job_id
+        for job_id, job in workflow_yaml.jobs(parsed(real())).items()
+        for s in workflow_yaml.steps(job)
+        if holds_cargo(s)
+    }
+    want: set[str] = {"gate", "pgrx"}
+    assert want == held
+
+
+def test_compiler_planted_breaches_are_named() -> None:
+    """Each property broken once on the real file, by its message."""
+    gate = "ci.yml: gate: 'Restore the cargo caches (unsigned gate only)'"
+    pgrx = "ci.yml: pgrx: 'Restore the cargo caches (unsigned gate only)'"
+    rows = [
+        (
+            "a key on Cargo.lock alone",
             (
-                "a key on Cargo.lock alone",
+                "${{ runner.os }}-${{ steps.rustc.outputs.digest }}-",
+                "${{ runner.os }}-",
+            ),
+            f"{gate} key does not end {COMPILER_KEY}",
+        ),
+        (
+            "the gate's key omits inputs",
+            (f"{KEYED}{RESTORE}gate-cargo-", f"{LOCKED}{RESTORE}gate-cargo-"),
+            f"{gate} key does not end {COMPILER_KEY}",
+        ),
+        (
+            "the pgrx key omits inputs",
+            (f"{KEYED}{RESTORE}gate-pgrx-", f"{UNKEYED}{RESTORE}gate-pgrx-"),
+            f"{pgrx} key does not end {COMPILER_KEY}",
+        ),
+        (
+            "a fallback carrying inputs",
+            (FALLBACK_END, FALLBACK_INPUTS),
+            f"{gate} fallback carries {INPUTS}",
+        ),
+        (
+            "the cargo step not handed the canon ref",
+            (HANDED, HANDED.replace(CANON_REF, "${{ github.sha }}")),
+            f"ci.yml: gate: the cargo step is not handed {CANON_REF}",
+        ),
+        (
+            "a fallback across compilers",
+            (
                 (
-                    "${{ runner.os }}-${{ steps.rustc.outputs.digest }}-",
-                    "${{ runner.os }}-",
+                    "format('gate-pgrx-{0}-{1}-{2}-', matrix.major, runner.os,"
+                    " steps.rustc.outputs.digest)"
                 ),
-                f"{gate} key does not end {COMPILER_KEY}",
+                "format('gate-pgrx-{0}-{1}-', matrix.major, runner.os)",
             ),
+            f"{pgrx} fallback does not carry {DIGEST}",
+        ),
+        (
+            "the digest on the properties leg too",
             (
-                "the gate's key omits inputs",
-                (f"{KEYED}{RESTORE}gate-cargo-", f"{LOCKED}{RESTORE}gate-cargo-"),
-                f"{gate} key does not end {COMPILER_KEY}",
-            ),
-            (
-                "the pgrx key omits inputs",
-                (f"{KEYED}{RESTORE}gate-pgrx-", f"{UNKEYED}{RESTORE}gate-pgrx-"),
-                f"{pgrx} key does not end {COMPILER_KEY}",
-            ),
-            (
-                "a fallback carrying inputs",
-                (FALLBACK_END, FALLBACK_INPUTS),
-                f"{gate} fallback carries {INPUTS}",
-            ),
-            (
-                "the cargo step not handed the canon ref",
-                (HANDED, HANDED.replace(CANON_REF, "${{ github.sha }}")),
-                f"ci.yml: gate: the cargo step is not handed {CANON_REF}",
-            ),
-            (
-                "a fallback across compilers",
                 (
-                    (
-                        "format('gate-pgrx-{0}-{1}-{2}-', matrix.major, runner.os,"
-                        " steps.rustc.outputs.digest)"
-                    ),
-                    "format('gate-pgrx-{0}-{1}-', matrix.major, runner.os)",
+                    "        id: rustc\n"
+                    "        if: ${{ matrix.leg != 'properties'"
+                    " && hashFiles('Cargo.lock') != '' }}\n"
                 ),
-                f"{pgrx} fallback does not carry {DIGEST}",
+                "        id: rustc\n",
             ),
-            (
-                "the digest on the properties leg too",
-                (
-                    (
-                        "        id: rustc\n"
-                        "        if: ${{ matrix.leg != 'properties'"
-                        " && hashFiles('Cargo.lock') != '' }}\n"
-                    ),
-                    "        id: rustc\n",
-                ),
-                f"{gate} runs under another condition than its digest",
-            ),
-            (
-                "no digest step",
-                (f"{CARGO_RUN}\n\n      # unattested", "'true'\n\n      # unattested"),
-                "ci.yml: gate: no `belt gate-cache-key cargo` step with id rustc",
-            ),
-        ]
-        for _label, (old, new), message in rows:
-            want: list[str] = [message]
-            assert want == compiler_findings(plant(old, new))
+            f"{gate} runs under another condition than its digest",
+        ),
+        (
+            "no digest step",
+            (f"{CARGO_RUN}\n\n      # unattested", "'true'\n\n      # unattested"),
+            "ci.yml: gate: no `belt gate-cache-key cargo` step with id rustc",
+        ),
+    ]
+    for _label, (old, new), message in rows:
+        want: list[str] = [message]
+        assert want == compiler_findings(plant(old, new))
 
-    def test_a_digest_read_before_the_install_is_named(self) -> None:
-        """Planted: the step moved above mise-action reads no toolchain."""
-        step = (
-            "      - name: Name the compiler the cargo caches hold\n"
-            "        id: rustc\n"
-            "        env:\n"
-            f"          ORG_CANON_REF: {CANON_REF}\n"
-            f"        run: {CARGO_RUN}\n"
-            "\n"
-        )
-        install = "      - name: Install mise and the leg's tools\n"
-        text = plant(step, "")
-        text = text.replace(install, step + install, 1)
-        want: list[str] = ["ci.yml: pgrx: the rustc digest is read before the install"]
-        assert want == compiler_findings(text)
+
+def test_a_digest_read_before_the_install_is_named() -> None:
+    """Planted: the step moved above mise-action reads no toolchain."""
+    step = (
+        "      - name: Name the compiler the cargo caches hold\n"
+        "        id: rustc\n"
+        "        env:\n"
+        f"          ORG_CANON_REF: {CANON_REF}\n"
+        f"        run: {CARGO_RUN}\n"
+        "\n"
+    )
+    install = "      - name: Install mise and the leg's tools\n"
+    text = plant(step, "")
+    text = text.replace(install, step + install, 1)
+    want: list[str] = ["ci.yml: pgrx: the rustc digest is read before the install"]
+    assert want == compiler_findings(text)
 
 
 def install_key_findings(text: str) -> list[str]:
@@ -766,42 +776,40 @@ def install_key_findings(text: str) -> list[str]:
     return out
 
 
-class TestInstallKeys:
-    """A listed job's cache key digests what it installs (#1408)."""
+# A listed job's cache key digests what it installs (#1408).
+def test_the_real_jobs_agree() -> None:
+    """The legs key by their own install list."""
+    assert install_key_findings(real()) == NONE
 
-    def test_the_real_jobs_agree(self) -> None:
-        """The legs key by their own install list."""
-        assert install_key_findings(real()) == NONE
 
-    def test_the_listed_jobs_pass_their_list(self) -> None:
-        """The listed job names a list; the gate names none."""
-        jobs = workflow_yaml.jobs(parsed(real()))
-        for job_id, wanted in (("pgrx", True),):
-            (named,) = [
-                s
-                for s in workflow_yaml.steps(jobs[job_id])
-                if field(s, "id") == "tool-key"
-            ]
-            assert wanted == bool(table(named, "env").get("ORG_TOOL_INSTALL"))
-            assert "--install" in field(named, "run")
-        (gate,) = [
-            s for s in workflow_yaml.steps(jobs["gate"]) if field(s, "id") == "tool-key"
+def test_the_listed_jobs_pass_their_list() -> None:
+    """The listed job names a list; the gate names none."""
+    jobs = workflow_yaml.jobs(parsed(real()))
+    for job_id, wanted in (("pgrx", True),):
+        (named,) = [
+            s for s in workflow_yaml.steps(jobs[job_id]) if field(s, "id") == "tool-key"
         ]
-        assert "--install" not in field(gate, "run")
+        assert wanted == bool(table(named, "env").get("ORG_TOOL_INSTALL"))
+        assert "--install" in field(named, "run")
+    (gate,) = [
+        s for s in workflow_yaml.steps(jobs["gate"]) if field(s, "id") == "tool-key"
+    ]
+    assert "--install" not in field(gate, "run")
 
-    def test_a_list_the_key_does_not_carry_is_named(self) -> None:
-        """Planted: the leg installs a tool its key's list leaves out."""
-        listed = "jq aqua:taiki-e/cargo-llvm-cov"
-        pins = "${{ steps.pins.outputs.install }}"
-        text = plant(
-            f"          install_args: {listed} {pins}",
-            f"          install_args: {listed} typos {pins}",
+
+def test_a_list_the_key_does_not_carry_is_named() -> None:
+    """Planted: the leg installs a tool its key's list leaves out."""
+    listed = "jq aqua:taiki-e/cargo-llvm-cov"
+    pins = "${{ steps.pins.outputs.install }}"
+    text = plant(
+        f"          install_args: {listed} {pins}",
+        f"          install_args: {listed} typos {pins}",
+    )
+    want: list[str] = [
+        (
+            f"pgrx: the cache key digests '{listed} {pins}'"
+            " and the job installs"
+            f" '{listed} typos {pins}'"
         )
-        want: list[str] = [
-            (
-                f"pgrx: the cache key digests '{listed} {pins}'"
-                " and the job installs"
-                f" '{listed} typos {pins}'"
-            )
-        ]
-        assert want == install_key_findings(text)
+    ]
+    assert want == install_key_findings(text)

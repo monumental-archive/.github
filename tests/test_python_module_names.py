@@ -81,66 +81,70 @@ def lint(files: list[str]) -> subprocess.CompletedProcess[str]:
         return run(tree, root / "home")
 
 
-class TestPythonModuleNames:
-    """A Python file is named as a module, or the lint names it."""
+# A Python file is named as a module, or the lint names it.
+def test_a_planted_hyphenated_file_is_red_by_name() -> None:
+    """Each hyphenated file is named; a hyphenated directory is not."""
+    done = lint([
+        "release/caller-pins.py",
+        "stubs/old-name.pyi",
+        "my-tools/fine_name.py",
+        "mise/module_name.py",
+    ])
+    assert done.returncode == 1
+    assert done.stdout == ""
+    assert (
+        f"{TASK}: not a module name, so nothing can import it (#1634):\n"
+        "  release/caller-pins.py\n"
+        "  stubs/old-name.pyi\n"
+        "  name it with underscores in place of the hyphens\n"
+    ) == done.stderr
 
-    def test_a_planted_hyphenated_file_is_red_by_name(self) -> None:
-        """Each hyphenated file is named; a hyphenated directory is not."""
-        done = lint([
-            "release/caller-pins.py",
-            "stubs/old-name.pyi",
-            "my-tools/fine_name.py",
-            "mise/module_name.py",
-        ])
-        assert done.returncode == 1
-        assert done.stdout == ""
-        assert (
-            f"{TASK}: not a module name, so nothing can import it (#1634):\n"
-            "  release/caller-pins.py\n"
-            "  stubs/old-name.pyi\n"
-            "  name it with underscores in place of the hyphens\n"
-        ) == done.stderr
 
-    def test_two_files_that_are_one_module_are_red_by_name(self) -> None:
-        """One basename in two roots is one module: both are named (#1737)."""
-        done = lint(["mise/test_steps.py", "release/test_steps.py"])
-        assert done.returncode == 1
-        assert done.stdout == ""
-        assert (
-            f"lint:python-module-names: these tracked files would be one module,"
-            " so an import of that name reaches only one of them:\n"
-            "  test_steps: mise/test_steps, release/test_steps\n"
-            f"{TASK}: rename one of each pair above so every module"
-            " name is one file's\n"
-        ) == done.stderr
+def test_two_files_that_are_one_module_are_red_by_name() -> None:
+    """One basename in two roots is one module: both are named (#1737)."""
+    done = lint(["mise/test_steps.py", "release/test_steps.py"])
+    assert done.returncode == 1
+    assert done.stdout == ""
+    assert (
+        f"lint:python-module-names: these tracked files would be one module,"
+        " so an import of that name reaches only one of them:\n"
+        "  test_steps: mise/test_steps, release/test_steps\n"
+        f"{TASK}: rename one of each pair above so every module"
+        " name is one file's\n"
+    ) == done.stderr
 
-    def test_a_stub_beside_its_module_is_one_module(self) -> None:
-        """A `.pyi` beside its own `.py` is that module's stub."""
-        done = lint(["mise/helper.py", "mise/helper.pyi"])
-        assert done.returncode == 0, done.stderr
-        assert f"{TASK}: ok\n" == done.stdout
 
-    def test_module_names_are_green(self) -> None:
-        """A tree of module names passes."""
-        done = lint(["mise/module_name.py", "my-tools/fine_name.py"])
-        assert done.returncode == 0, done.stderr
-        assert f"{TASK}: ok\n" == done.stdout
+def test_a_stub_beside_its_module_is_one_module() -> None:
+    """A `.pyi` beside its own `.py` is that module's stub."""
+    done = lint(["mise/helper.py", "mise/helper.pyi"])
+    assert done.returncode == 0, done.stderr
+    assert f"{TASK}: ok\n" == done.stdout
 
-    def test_a_vendored_file_is_not_ours(self) -> None:
-        """vendor/ is someone else's naming, as in every belt lint."""
-        done = lint(["vendor/their-tool.py"])
-        assert done.returncode == 0, done.stderr
-        assert f"{TASK}: no Python tracked, skipped\n" == done.stdout
 
-    def test_no_python_skips(self) -> None:
-        """A tree with no Python skips clean."""
-        done = lint([])
-        assert done.returncode == 0, done.stderr
-        assert f"{TASK}: no Python tracked, skipped\n" == done.stdout
+def test_module_names_are_green() -> None:
+    """A tree of module names passes."""
+    done = lint(["mise/module_name.py", "my-tools/fine_name.py"])
+    assert done.returncode == 0, done.stderr
+    assert f"{TASK}: ok\n" == done.stdout
 
-    def test_the_canon_tree_is_green(self) -> None:
-        """The canon's own tracked Python passes both halves."""
-        with tempfile.TemporaryDirectory() as tmp:
-            done = run(BELT.parent, Path(tmp) / "home")
-        assert done.returncode == 0, done.stderr
-        assert f"{TASK}: ok\n" == done.stdout
+
+def test_a_vendored_file_is_not_ours() -> None:
+    """vendor/ is someone else's naming, as in every belt lint."""
+    done = lint(["vendor/their-tool.py"])
+    assert done.returncode == 0, done.stderr
+    assert f"{TASK}: no Python tracked, skipped\n" == done.stdout
+
+
+def test_no_python_skips() -> None:
+    """A tree with no Python skips clean."""
+    done = lint([])
+    assert done.returncode == 0, done.stderr
+    assert f"{TASK}: no Python tracked, skipped\n" == done.stdout
+
+
+def test_the_canon_tree_is_green() -> None:
+    """The canon's own tracked Python passes both halves."""
+    with tempfile.TemporaryDirectory() as tmp:
+        done = run(BELT.parent, Path(tmp) / "home")
+    assert done.returncode == 0, done.stderr
+    assert f"{TASK}: ok\n" == done.stdout

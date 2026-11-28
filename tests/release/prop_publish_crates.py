@@ -72,46 +72,41 @@ def read(body: bytes, version: str) -> str | None:
     return publish.published_checksum(NAME, version, UA, answer(200, body))
 
 
-class TestPresentIsPublished:
-    """V: present means published with its checksum; absent means not."""
-
-    @given(
-        st.dictionaries(VERSION, st.tuples(CKSUM, EXTRA), min_size=1, max_size=6),
-        VERSION,
-        st.randoms(),
-    )
-    def test_present_and_absent(
-        self,
-        records: dict[str, tuple[str, Extra]],
-        probe: str,
-        shuffle: random.Random,
-    ) -> None:
-        """Every recorded version reads its checksum; another reads None."""
-        lines: list[str] = []
-        for v, (c, extra) in records.items():
-            record: dict[str, object] = {**extra, "vers": v, "cksum": c}
-            lines.append(json.dumps(record))
-        shuffle.shuffle(lines)
-        body = ("\n".join(lines) + "\n").encode()
-        for version, (cksum, _) in records.items():
-            assert read(body, version) == cksum
-        if probe not in records:
-            assert read(body, probe) is None
+# V: present means published with its checksum; absent means not.
+@given(
+    st.dictionaries(VERSION, st.tuples(CKSUM, EXTRA), min_size=1, max_size=6),
+    VERSION,
+    st.randoms(),
+)
+def test_present_and_absent(
+    records: dict[str, tuple[str, Extra]],
+    probe: str,
+    shuffle: random.Random,
+) -> None:
+    """Every recorded version reads its checksum; another reads None."""
+    lines: list[str] = []
+    for v, (c, extra) in records.items():
+        record: dict[str, object] = {**extra, "vers": v, "cksum": c}
+        lines.append(json.dumps(record))
+    shuffle.shuffle(lines)
+    body = ("\n".join(lines) + "\n").encode()
+    for version, (cksum, _) in records.items():
+        assert read(body, version) == cksum
+    if probe not in records:
+        assert read(body, probe) is None
 
 
-class TestAnyIndexText:
-    """R: any body is answered or refused by name."""
-
-    @given(st.binary() | st.text().map(str.encode), VERSION)
-    @example(b"\xff", "1.0.0")
-    @example(b"{", "1.0.0")
-    @example(b"[]", "1.0.0")
-    @example(b'{"vers": "1.0.0"}', "1.0.0")
-    def test_answers_or_refuses(self, body: bytes, version: str) -> None:
-        """A checksum, None, or the step's own refusal naming the crate."""
-        try:
-            got = read(body, version)
-        except publish.RefusalError as refused:
-            assert NAME in str(refused)
-        else:
-            assert got is None or isinstance(got, str)
+# R: any body is answered or refused by name.
+@given(st.binary() | st.text().map(str.encode), VERSION)
+@example(b"\xff", "1.0.0")
+@example(b"{", "1.0.0")
+@example(b"[]", "1.0.0")
+@example(b'{"vers": "1.0.0"}', "1.0.0")
+def test_answers_or_refuses(body: bytes, version: str) -> None:
+    """A checksum, None, or the step's own refusal naming the crate."""
+    try:
+        got = read(body, version)
+    except publish.RefusalError as refused:
+        assert NAME in str(refused)
+    else:
+        assert got is None or isinstance(got, str)

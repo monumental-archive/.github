@@ -137,151 +137,159 @@ SHEBANGS = [
 ]
 
 
-class TestLint:
-    """The rule over planted scripts and task bodies."""
+# The rule over planted scripts and task bodies.
+def test_unguarded_trap_reds_both_ways() -> None:
+    """A bare trap owes the guard, and the mark it reads."""
+    status, lines, shaped = lint(("a.sh", script("tmp=$(mktemp)", BARE, "echo ok")))
+    assert (status, shaped) == (1, True)
+    want: list[str] = [f"a.sh:4: {NOT_GUARDED}", f"a.sh:5: {NOT_MARKED}"]
+    assert lines == want
 
-    def test_unguarded_trap_reds_both_ways(self) -> None:
-        """A bare trap owes the guard, and the mark it reads."""
-        status, lines, shaped = lint(("a.sh", script("tmp=$(mktemp)", BARE, "echo ok")))
-        assert (status, shaped) == (1, True)
-        want: list[str] = [f"a.sh:4: {NOT_GUARDED}", f"a.sh:5: {NOT_MARKED}"]
-        assert lines == want
 
-    def test_guarded_without_the_mark_reds(self) -> None:
-        """The guard alone turns every clean run into a failure."""
-        status, lines, shaped = lint((
+def test_guarded_without_the_mark_reds() -> None:
+    """The guard alone turns every clean run into a failure."""
+    status, lines, shaped = lint((
+        "a.sh",
+        script("tmp=$(mktemp)", GUARDED, "echo ok"),
+    ))
+    assert (status, shaped) == (1, True)
+    want: list[str] = [f"a.sh:5: {NOT_MARKED}"]
+    assert lines == want
+
+
+def test_mark_not_last_reds() -> None:
+    """A mark followed by more script is not the last statement."""
+    status, lines, shaped = lint(
+        ("a.sh", script(GUARDED, "org_done=1", 'exit "${status}"')),
+    )
+    assert (status, shaped) == (1, True)
+    want: list[str] = [f"a.sh:5: {NOT_MARKED}"]
+    assert lines == want
+
+
+def test_guard_on_a_combined_signal_list_reds() -> None:
+    """The shape is EXIT alone; `EXIT INT` is a different trap."""
+    status, lines, shaped = lint(
+        ("a.sh", script(GUARDED.replace("' EXIT", "' EXIT INT"), "org_done=1")),
+    )
+    assert (status, shaped) == (1, True)
+    want: list[str] = [f"a.sh:3: {NOT_GUARDED}"]
+    assert lines == want
+
+
+def test_guarded_and_marked_is_clean() -> None:
+    """The two lines, with comments and blanks after the mark."""
+    status, lines, shaped = lint(
+        (
             "a.sh",
-            script("tmp=$(mktemp)", GUARDED, "echo ok"),
-        ))
-        assert (status, shaped) == (1, True)
-        want: list[str] = [f"a.sh:5: {NOT_MARKED}"]
-        assert lines == want
-
-    def test_mark_not_last_reds(self) -> None:
-        """A mark followed by more script is not the last statement."""
-        status, lines, shaped = lint(
-            ("a.sh", script(GUARDED, "org_done=1", 'exit "${status}"')),
-        )
-        assert (status, shaped) == (1, True)
-        want: list[str] = [f"a.sh:5: {NOT_MARKED}"]
-        assert lines == want
-
-    def test_guard_on_a_combined_signal_list_reds(self) -> None:
-        """The shape is EXIT alone; `EXIT INT` is a different trap."""
-        status, lines, shaped = lint(
-            ("a.sh", script(GUARDED.replace("' EXIT", "' EXIT INT"), "org_done=1")),
-        )
-        assert (status, shaped) == (1, True)
-        want: list[str] = [f"a.sh:3: {NOT_GUARDED}"]
-        assert lines == want
-
-    def test_guarded_and_marked_is_clean(self) -> None:
-        """The two lines, with comments and blanks after the mark."""
-        status, lines, shaped = lint(
-            (
-                "a.sh",
-                script(
-                    "tmp=$(mktemp)",
-                    et.PREASSIGN,
-                    GUARDED,
-                    "echo ok",
-                    "org_done=1  # the last statement",
-                    "",
-                    "# trailing prose",
-                ),
-            ),
-        )
-        assert (status, lines, shaped) == (0, [], False)
-
-    def test_each_form_under_each_shebang(self) -> None:
-        """POSIX is clean anywhere; `[[ ]]` only under a bash shebang."""
-        for shebang, is_bash in SHEBANGS:
-            body = script(
+            script(
                 "tmp=$(mktemp)",
                 et.PREASSIGN,
-                "{guard}",
+                GUARDED,
                 "echo ok",
-                "org_done=1",
-                shebang=shebang,
+                "org_done=1  # the last statement",
+                "",
+                "# trailing prose",
+            ),
+        ),
+    )
+    assert (status, lines, shaped) == (0, [], False)
+
+
+def test_each_form_under_each_shebang() -> None:
+    """POSIX is clean anywhere; `[[ ]]` only under a bash shebang."""
+    for shebang, is_bash in SHEBANGS:
+        body = script(
+            "tmp=$(mktemp)",
+            et.PREASSIGN,
+            "{guard}",
+            "echo ok",
+            "org_done=1",
+            shebang=shebang,
+        )
+        # The guard is the fifth line, or the fourth without a shebang.
+        line = 5 if shebang else 4
+        for guard, want in (
+            (GUARDED, []),
+            (BASH_GUARDED, [] if is_bash else [f"a.sh:{line}: {NOT_BASH}"]),
+        ):
+            status, lines, shaped = lint(("a.sh", body.format(guard=guard)))
+            assert (status, lines, shaped) == (
+                1 if want else 0,
+                want,
+                bool(want),
             )
-            # The guard is the fifth line, or the fourth without a shebang.
-            line = 5 if shebang else 4
-            for guard, want in (
-                (GUARDED, []),
-                (BASH_GUARDED, [] if is_bash else [f"a.sh:{line}: {NOT_BASH}"]),
-            ):
-                status, lines, shaped = lint(("a.sh", body.format(guard=guard)))
-                assert (status, lines, shaped) == (
-                    1 if want else 0,
-                    want,
-                    bool(want),
-                )
 
-    def test_bare_trap_under_sh_reds_as_unguarded(self) -> None:
-        """Under `#!/bin/sh` a bare trap owes the guard as anywhere."""
-        status, lines, shaped = lint(
-            ("a.sh", script(BARE, "org_done=1", shebang="#!/bin/sh")),
-        )
-        assert (status, shaped) == (1, True)
-        want: list[str] = [f"a.sh:3: {NOT_GUARDED}"]
-        assert lines == want
 
-    def test_task_body_takes_either_form(self) -> None:
-        """A task body runs under the belt's bash: both forms are clean."""
-        config = (
-            '[tasks."lint:a"]\n'
-            "run = '''\n"
-            f"{et.PREASSIGN}\n{GUARDED}\norg_done=1\n"
-            "'''\n\n"
-            '[tasks."lint:b"]\n'
-            "run = '''\n"
-            f"{et.PREASSIGN}\n{BASH_GUARDED}\norg_done=1\n"
-            "'''\n"
-        )
-        assert lint(("mise.toml", config)) == (0, [], False)
+def test_bare_trap_under_sh_reds_as_unguarded() -> None:
+    """Under `#!/bin/sh` a bare trap owes the guard as anywhere."""
+    status, lines, shaped = lint(
+        ("a.sh", script(BARE, "org_done=1", shebang="#!/bin/sh")),
+    )
+    assert (status, shaped) == (1, True)
+    want: list[str] = [f"a.sh:3: {NOT_GUARDED}"]
+    assert lines == want
 
-    def test_no_trap_and_reset_owe_nothing(self) -> None:
-        """No EXIT trap, a comment naming one, and `trap - EXIT`."""
-        status, lines, shaped = lint(
-            ("a.sh", script("echo ok")),
-            ("b.sh", script(f"# {BARE}", "trap - EXIT", "echo ok")),
-        )
-        assert (status, lines, shaped) == (0, [], False)
 
-    def test_task_body_points_at_the_config_line(self) -> None:
-        """Each body is its own script; findings carry the file line."""
-        config = (
-            '[tasks."lint:a"]\n'
-            "run = '''\n"
-            "tmp=$(mktemp)\n"
-            f"{BARE}\n"
-            "echo ok\n"
-            "'''\n\n"
-            '[tasks."lint:b"]\n'
-            "run = '''\n"
-            f"{GUARDED}\n"
-            "org_done=1\n"
-            "'''\n"
-        )
-        status, lines, shaped = lint(("mise.toml", config))
-        assert (status, shaped) == (1, True)
-        want: list[str] = [
-            f"mise.toml:4: task lint:a: {NOT_GUARDED}",
-            f"mise.toml:5: task lint:a: {NOT_MARKED}",
-        ]
-        assert lines == want
+def test_task_body_takes_either_form() -> None:
+    """A task body runs under the belt's bash: both forms are clean."""
+    config = (
+        '[tasks."lint:a"]\n'
+        "run = '''\n"
+        f"{et.PREASSIGN}\n{GUARDED}\norg_done=1\n"
+        "'''\n\n"
+        '[tasks."lint:b"]\n'
+        "run = '''\n"
+        f"{et.PREASSIGN}\n{BASH_GUARDED}\norg_done=1\n"
+        "'''\n"
+    )
+    assert lint(("mise.toml", config)) == (0, [], False)
 
-    def test_one_line_body_is_its_run_line(self) -> None:
-        """A `run = "…"` body starts on the `run =` line itself."""
-        status, lines, shaped = lint(
-            ("mise.toml", "[tasks.a]\nrun = \"trap 'rm -f x' EXIT\"\n"),
-        )
-        assert (status, shaped) == (1, True)
-        want: list[str] = [
-            f"mise.toml:2: task a: {NOT_GUARDED}",
-            f"mise.toml:2: task a: {NOT_MARKED}",
-        ]
-        assert lines == want
+
+def test_no_trap_and_reset_owe_nothing() -> None:
+    """No EXIT trap, a comment naming one, and `trap - EXIT`."""
+    status, lines, shaped = lint(
+        ("a.sh", script("echo ok")),
+        ("b.sh", script(f"# {BARE}", "trap - EXIT", "echo ok")),
+    )
+    assert (status, lines, shaped) == (0, [], False)
+
+
+def test_task_body_points_at_the_config_line() -> None:
+    """Each body is its own script; findings carry the file line."""
+    config = (
+        '[tasks."lint:a"]\n'
+        "run = '''\n"
+        "tmp=$(mktemp)\n"
+        f"{BARE}\n"
+        "echo ok\n"
+        "'''\n\n"
+        '[tasks."lint:b"]\n'
+        "run = '''\n"
+        f"{GUARDED}\n"
+        "org_done=1\n"
+        "'''\n"
+    )
+    status, lines, shaped = lint(("mise.toml", config))
+    assert (status, shaped) == (1, True)
+    want: list[str] = [
+        f"mise.toml:4: task lint:a: {NOT_GUARDED}",
+        f"mise.toml:5: task lint:a: {NOT_MARKED}",
+    ]
+    assert lines == want
+
+
+def test_one_line_body_is_its_run_line() -> None:
+    """A `run = "…"` body starts on the `run =` line itself."""
+    status, lines, shaped = lint(
+        ("mise.toml", "[tasks.a]\nrun = \"trap 'rm -f x' EXIT\"\n"),
+    )
+    assert (status, shaped) == (1, True)
+    want: list[str] = [
+        f"mise.toml:2: task a: {NOT_GUARDED}",
+        f"mise.toml:2: task a: {NOT_MARKED}",
+    ]
+    assert lines == want
 
 
 def run_bash(*body: str, shell: str = str(BASH), shebang: str = "") -> int:
@@ -304,63 +312,72 @@ def run_bash(*body: str, shell: str = str(BASH), shebang: str = "") -> int:
         return done.returncode
 
 
+# The defect, then the guard, on the shell that has the defect.
+@fixture
+def _set_up_test_pattern() -> None:
+    """Skip every row unless /bin/bash is the shell with the defect."""
+    if not IS_32:
+        pytest.skip("/bin/bash is not 3.2; the defect is 3.2's (macOS)")
+
+
 @pytest.mark.usefixtures("_set_up_test_pattern")
-class TestPattern:
-    """The defect, then the guard, on the shell that has the defect."""
+def test_bare_trap_reproduces_the_defect() -> None:
+    """The issue's four rows, as measured on 3.2.57."""
+    rows = [
+        ((BARE, 'echo "${nope}"'), 0),
+        ((BARE, ': "${nope:?unset}"'), 0),
+        ((BARE, "false"), 1),
+        (('echo "${nope}"',), 1),
+    ]
+    for body, code in rows:
+        assert run_bash(*body) == code
 
-    @fixture
-    def _set_up_test_pattern(self) -> None:
-        """Skip every row unless /bin/bash is the shell with the defect."""
-        if not IS_32:
-            pytest.skip("/bin/bash is not 3.2; the defect is 3.2's (macOS)")
 
-    def test_bare_trap_reproduces_the_defect(self) -> None:
-        """The issue's four rows, as measured on 3.2.57."""
-        rows = [
-            ((BARE, 'echo "${nope}"'), 0),
-            ((BARE, ': "${nope:?unset}"'), 0),
-            ((BARE, "false"), 1),
-            (('echo "${nope}"',), 1),
-        ]
-        for body, code in rows:
-            assert run_bash(*body) == code
+@pytest.mark.usefixtures("_set_up_test_pattern")
+def test_guard_fails_the_unfinished_run() -> None:
+    """Both unset-variable deaths exit 1 under either form."""
+    for guard in (GUARDED, BASH_GUARDED):
+        for death in ('echo "${nope}"', ': "${nope:?unset}"'):
+            assert run_bash(guard, death, "org_done=1") == 1
 
-    def test_guard_fails_the_unfinished_run(self) -> None:
-        """Both unset-variable deaths exit 1 under either form."""
-        for guard in (GUARDED, BASH_GUARDED):
-            for death in ('echo "${nope}"', ': "${nope:?unset}"'):
-                assert run_bash(guard, death, "org_done=1") == 1
 
-    @pytest.mark.parametrize("guard", [GUARDED, BASH_GUARDED])
-    def test_guard_passes_the_finished_run(self, guard: object) -> None:
-        """A run that reaches the mark exits 0."""
-        assert run_bash(guard, "echo ok", "org_done=1") == 0
+@pytest.mark.usefixtures("_set_up_test_pattern")
+@pytest.mark.parametrize("guard", [GUARDED, BASH_GUARDED])
+def test_guard_passes_the_finished_run(guard: object) -> None:
+    """A run that reaches the mark exits 0."""
+    assert run_bash(guard, "echo ok", "org_done=1") == 0
 
-    @pytest.mark.parametrize("guard", [GUARDED, BASH_GUARDED])
-    def test_guard_keeps_an_explicit_code(self, guard: object) -> None:
-        """A non-zero exit, explicit or from errexit, keeps its code."""
-        assert run_bash(guard, "exit 3", "org_done=1") == 3
-        assert run_bash(guard, "false", "org_done=1") == 1
 
-    @pytest.mark.parametrize("guard", [GUARDED, BASH_GUARDED])
-    def test_early_exit_zero_needs_the_mark(self, guard: object) -> None:
-        """`exit 0` reads as a death unless the mark is set first."""
-        assert run_bash(guard, "exit 0", "org_done=1") == 1
-        assert run_bash(guard, "org_done=1", "exit 0", "org_done=1") == 0
+@pytest.mark.usefixtures("_set_up_test_pattern")
+@pytest.mark.parametrize("guard", [GUARDED, BASH_GUARDED])
+def test_guard_keeps_an_explicit_code(guard: object) -> None:
+    """A non-zero exit, explicit or from errexit, keeps its code."""
+    assert run_bash(guard, "exit 3", "org_done=1") == 3
+    assert run_bash(guard, "false", "org_done=1") == 1
 
-    def test_cleanup_still_runs(self) -> None:
-        """The guard wraps the cleanup; it does not replace it."""
-        with TemporaryDirectory() as scratch:
-            left = Path(scratch) / "left"
-            status = run_bash(
-                f'tmp="{left}"',
-                'touch "${tmp}"',
-                GUARDED,
-                'echo "${nope}"',
-                "org_done=1",
-            )
-            assert status == 1
-            assert not left.exists()
+
+@pytest.mark.usefixtures("_set_up_test_pattern")
+@pytest.mark.parametrize("guard", [GUARDED, BASH_GUARDED])
+def test_early_exit_zero_needs_the_mark(guard: object) -> None:
+    """`exit 0` reads as a death unless the mark is set first."""
+    assert run_bash(guard, "exit 0", "org_done=1") == 1
+    assert run_bash(guard, "org_done=1", "exit 0", "org_done=1") == 0
+
+
+@pytest.mark.usefixtures("_set_up_test_pattern")
+def test_cleanup_still_runs() -> None:
+    """The guard wraps the cleanup; it does not replace it."""
+    with TemporaryDirectory() as scratch:
+        left = Path(scratch) / "left"
+        status = run_bash(
+            f'tmp="{left}"',
+            'touch "${tmp}"',
+            GUARDED,
+            'echo "${nope}"',
+            "org_done=1",
+        )
+        assert status == 1
+        assert not left.exists()
 
 
 # The printed guard in a `#!/bin/sh` script: each body, and the exit code
@@ -394,39 +411,37 @@ def run_sh(shell: str, body: str) -> int:
     )
 
 
-class TestPosix:
-    """The printed guard under the shells a `#!/bin/sh` script meets."""
-
-    @pytest.mark.parametrize(("body", "as_32", "as_dash"), POSIX_ROWS)
-    def test_under_bin_sh(self, body: object, as_32: object, as_dash: object) -> None:
-        """`/bin/sh` gives the row for the shell it is."""
-        if not (SH_IS_32 or SH_IS_DASH):
-            pytest.skip("/bin/sh is neither bash 3.2 nor dash")
-        want = as_32 if SH_IS_32 else as_dash
-        assert run_sh(str(SH), body) == want
-
-    @pytest.mark.parametrize(("body", "_", "as_dash"), POSIX_ROWS)
-    def test_under_dash(self, body: object, _: object, as_dash: object) -> None:
-        """Under dash the guard runs: a clean run exits 0, no `[[: not found`."""
-        if not DASH:
-            pytest.skip("dash is not installed")
-        assert run_sh(support.tool("dash"), body) == as_dash
+# The printed guard under the shells a `#!/bin/sh` script meets.
+@pytest.mark.parametrize(("body", "as_32", "as_dash"), POSIX_ROWS)
+def test_under_bin_sh(body: object, as_32: object, as_dash: object) -> None:
+    """`/bin/sh` gives the row for the shell it is."""
+    if not (SH_IS_32 or SH_IS_DASH):
+        pytest.skip("/bin/sh is neither bash 3.2 nor dash")
+    want = as_32 if SH_IS_32 else as_dash
+    assert run_sh(str(SH), body) == want
 
 
-class TestShape:
-    """The printed shape is the one the rule accepts."""
+@pytest.mark.parametrize(("body", "_", "as_dash"), POSIX_ROWS)
+def test_under_dash(body: object, _: object, as_dash: object) -> None:
+    """Under dash the guard runs: a clean run exits 0, no `[[: not found`."""
+    if not DASH:
+        pytest.skip("dash is not installed")
+    assert run_sh(support.tool("dash"), body) == as_dash
 
-    def test_guard_matches_its_own_rule(self) -> None:
-        """Each form matches its own pattern and not the other's."""
-        assert re.search(et.POSIX_RE, GUARDED)
-        assert re.search(et.BASH_RE, BASH_GUARDED)
-        assert re.match(et.BASH_RE, GUARDED) is None
-        assert re.match(et.POSIX_RE, BASH_GUARDED) is None
-        for pattern in (et.POSIX_RE, et.BASH_RE):
-            assert re.match(pattern, BARE) is None
 
-    def test_printed_shape_is_posix_and_waiver_free(self) -> None:
-        """The remedy is the POSIX form after `rc=0`, with no directive."""
-        assert "[[" not in et.SHAPE
-        assert "shellcheck" not in et.SHAPE
-        assert f"    {et.PREASSIGN}\n    {SHAPE_LINE}\n" in et.SHAPE
+# The printed shape is the one the rule accepts.
+def test_guard_matches_its_own_rule() -> None:
+    """Each form matches its own pattern and not the other's."""
+    assert re.search(et.POSIX_RE, GUARDED)
+    assert re.search(et.BASH_RE, BASH_GUARDED)
+    assert re.match(et.BASH_RE, GUARDED) is None
+    assert re.match(et.POSIX_RE, BASH_GUARDED) is None
+    for pattern in (et.POSIX_RE, et.BASH_RE):
+        assert re.match(pattern, BARE) is None
+
+
+def test_printed_shape_is_posix_and_waiver_free() -> None:
+    """The remedy is the POSIX form after `rc=0`, with no directive."""
+    assert "[[" not in et.SHAPE
+    assert "shellcheck" not in et.SHAPE
+    assert f"    {et.PREASSIGN}\n    {SHAPE_LINE}\n" in et.SHAPE

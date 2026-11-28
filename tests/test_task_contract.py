@@ -131,48 +131,49 @@ def closure(root: str, defined: dict[str, dict[str, object]]) -> set[str]:
     return seen
 
 
-class TestGate:
-    """`ci` reaches no audit task and no mutation leg."""
+# `ci` reaches no audit task and no mutation leg.
+def test_ci_reaches_no_audit_task() -> None:
+    """Network-bound and slow checks are the cron's, never the gate's."""
+    defined = tasks()
+    reached = closure("ci", defined)
+    assert "lint:typos" in reached, "the closure walk found no lint"
+    audits: list[str] = sorted(n for n in reached if n.startswith("audit"))
+    none: list[str] = []
+    assert audits == none
 
-    def test_ci_reaches_no_audit_task(self) -> None:
-        """Network-bound and slow checks are the cron's, never the gate's."""
-        defined = tasks()
-        reached = closure("ci", defined)
-        assert "lint:typos" in reached, "the closure walk found no lint"
-        audits: list[str] = sorted(n for n in reached if n.startswith("audit"))
-        none: list[str] = []
-        assert audits == none
 
-    def test_ci_runs_no_mutation_leg(self) -> None:
-        """No task the gate reaches names a leg or cargo-mutants."""
-        defined = tasks()
-        leg = re.compile(r"mutants-[a-z]+\.sh|cargo[ -]mutants")
-        hits = sorted(
-            name
-            for name in closure("ci", defined)
-            if leg.search(str(defined[name].get("run", "")))
-        )
-        none: list[str] = []
-        assert hits == none
-
-    @pytest.mark.parametrize(
-        "leg", ["test:python-properties", "test:typescript-properties"]
+def test_ci_runs_no_mutation_leg() -> None:
+    """No task the gate reaches names a leg or cargo-mutants."""
+    defined = tasks()
+    leg = re.compile(r"mutants-[a-z]+\.sh|cargo[ -]mutants")
+    hits = sorted(
+        name
+        for name in closure("ci", defined)
+        if leg.search(str(defined[name].get("run", "")))
     )
-    def test_ci_names_each_property_leg(self, leg: object) -> None:
-        """A belt test leg is named in the gate, never collected (#1332, #1549).
+    none: list[str] = []
+    assert hits == none
 
-        `test` is the repository's, so a belt-defined test reaches the
-        gate only by a line of its own in a leg's depends: the
-        properties leg's since #1740.
-        """
-        direct = [named(entry) for entry in depends_of(tasks()["ci:properties"])]
-        assert leg in direct
 
-    def test_the_walk_sees_a_planted_audit(self) -> None:
-        """The walk is not vacuous: a planted depends on audit is found."""
-        defined = tasks()
-        defined["ci"] = {**defined["ci"], "depends": ["lint:*", "audit:mutants"]}
-        assert "audit:mutants" in closure("ci", defined)
+@pytest.mark.parametrize(
+    "leg", ["test:python-properties", "test:typescript-properties"]
+)
+def test_ci_names_each_property_leg(leg: object) -> None:
+    """A belt test leg is named in the gate, never collected (#1332, #1549).
+
+    `test` is the repository's, so a belt-defined test reaches the
+    gate only by a line of its own in a leg's depends: the
+    properties leg's since #1740.
+    """
+    direct = [named(entry) for entry in depends_of(tasks()["ci:properties"])]
+    assert leg in direct
+
+
+def test_the_walk_sees_a_planted_audit() -> None:
+    """The walk is not vacuous: a planted depends on audit is found."""
+    defined = tasks()
+    defined["ci"] = {**defined["ci"], "depends": ["lint:*", "audit:mutants"]}
+    assert "audit:mutants" in closure("ci", defined)
 
 
 # The gate's three legs (#1740): ci.yml's `gate` job runs one per runner,
@@ -238,96 +239,100 @@ def leg_findings(defined: dict[str, dict[str, object]]) -> list[str]:
     return out
 
 
-class TestLegs:
-    """`ci` is the sum of three legs, and they run what it ran (#1740)."""
+# `ci` is the sum of three legs, and they run what it ran (#1740).
+def test_the_belt_conforms() -> None:
+    """The real config: three legs, the gate's list split among them."""
+    none: list[str] = []
+    assert none == leg_findings(tasks())
 
-    def test_the_belt_conforms(self) -> None:
-        """The real config: three legs, the gate's list split among them."""
-        none: list[str] = []
-        assert none == leg_findings(tasks())
 
-    def test_each_leg_holds_its_share(self) -> None:
-        """Coverage is judged on the leg that measures it."""
-        legs = {leg: [spelt(e) for e in depends_of(tasks()[leg])] for leg in LEGS}
-        lint: list[str] = ["lint:*"]
-        test: list[str] = [
-            "test (optional)",
-            "build (optional)",
+def test_each_leg_holds_its_share() -> None:
+    """Coverage is judged on the leg that measures it."""
+    legs = {leg: [spelt(e) for e in depends_of(tasks()[leg])] for leg in LEGS}
+    lint: list[str] = ["lint:*"]
+    test: list[str] = [
+        "test (optional)",
+        "build (optional)",
+        "coverage:check",
+        "test:pgrx",
+    ]
+    properties: list[str] = [
+        "test:python-properties",
+        "test:typescript-properties",
+    ]
+    assert lint == legs["ci:lint"]
+    assert test == legs["ci:test"]
+    assert properties == legs["ci:properties"]
+
+
+def legs_plant(leg: str, depends: list[object]) -> list[str]:
+    """Replace one task's depends in the real config.
+
+    Returns:
+        The findings for the planted config.
+
+    """
+    defined = tasks()
+    defined[leg] = {**defined[leg], "depends": depends}
+    return leg_findings(defined)
+
+
+def test_a_fourth_line_in_ci_is_named() -> None:
+    """Planted: `ci` names a task beside its legs."""
+    want: list[str] = [
+        (
+            "ci depends on"
+            " ['ci:lint', 'ci:test', 'ci:properties', 'test:pgrx'],"
+            " not the three legs ['ci:lint', 'ci:test', 'ci:properties']"
+        ),
+    ]
+    assert want == legs_plant("ci", [*LEGS, "test:pgrx"])
+
+
+def test_a_dropped_entry_is_named() -> None:
+    """Planted: the test leg loses the coverage ratchet."""
+    want: list[str] = ["no leg runs coverage:check"]
+    assert want == legs_plant(
+        "ci:test",
+        [
+            {"task": "test", "optional": True},
+            {"task": "build", "optional": True},
+            "test:pgrx",
+        ],
+    )
+
+
+def test_an_entry_in_two_legs_is_named() -> None:
+    """Planted: the lint leg runs the properties too."""
+    want: list[str] = [
+        "test:python-properties is run 2 times, by ['ci:lint', 'ci:properties']",
+    ]
+    assert want == legs_plant("ci:lint", ["lint:*", "test:python-properties"])
+
+
+def test_test_made_required_is_named() -> None:
+    """Planted: `test` loses its optional flag, which every repo needs."""
+    want: list[str] = [
+        "no leg runs test (optional)",
+        "test is in ['ci:test'] and was never in the gate",
+    ]
+    assert want == legs_plant(
+        "ci:test",
+        [
+            "test",
+            {"task": "build", "optional": True},
             "coverage:check",
             "test:pgrx",
-        ]
-        properties: list[str] = [
-            "test:python-properties",
-            "test:typescript-properties",
-        ]
-        assert lint == legs["ci:lint"]
-        assert test == legs["ci:test"]
-        assert properties == legs["ci:properties"]
+        ],
+    )
 
-    @staticmethod
-    def plant(leg: str, depends: list[object]) -> list[str]:
-        """Replace one task's depends in the real config.
 
-        Returns:
-            The findings for the planted config.
-
-        """
-        defined = tasks()
-        defined[leg] = {**defined[leg], "depends": depends}
-        return leg_findings(defined)
-
-    def test_a_fourth_line_in_ci_is_named(self) -> None:
-        """Planted: `ci` names a task beside its legs."""
-        want: list[str] = [
-            (
-                "ci depends on"
-                " ['ci:lint', 'ci:test', 'ci:properties', 'test:pgrx'],"
-                " not the three legs ['ci:lint', 'ci:test', 'ci:properties']"
-            ),
-        ]
-        assert want == self.plant("ci", [*LEGS, "test:pgrx"])
-
-    def test_a_dropped_entry_is_named(self) -> None:
-        """Planted: the test leg loses the coverage ratchet."""
-        want: list[str] = ["no leg runs coverage:check"]
-        assert want == self.plant(
-            "ci:test",
-            [
-                {"task": "test", "optional": True},
-                {"task": "build", "optional": True},
-                "test:pgrx",
-            ],
-        )
-
-    def test_an_entry_in_two_legs_is_named(self) -> None:
-        """Planted: the lint leg runs the properties too."""
-        want: list[str] = [
-            "test:python-properties is run 2 times, by ['ci:lint', 'ci:properties']",
-        ]
-        assert want == self.plant("ci:lint", ["lint:*", "test:python-properties"])
-
-    def test_test_made_required_is_named(self) -> None:
-        """Planted: `test` loses its optional flag, which every repo needs."""
-        want: list[str] = [
-            "no leg runs test (optional)",
-            "test is in ['ci:test'] and was never in the gate",
-        ]
-        assert want == self.plant(
-            "ci:test",
-            [
-                "test",
-                {"task": "build", "optional": True},
-                "coverage:check",
-                "test:pgrx",
-            ],
-        )
-
-    def test_a_missing_leg_is_named(self) -> None:
-        """Before #1740 there was no `ci:lint`: every lint is unrun."""
-        defined = tasks()
-        del defined["ci:lint"]
-        want: list[str] = ["no leg runs lint:*"]
-        assert want == leg_findings(defined)
+def test_a_missing_leg_is_named() -> None:
+    """Before #1740 there was no `ci:lint`: every lint is unrun."""
+    defined = tasks()
+    del defined["ci:lint"]
+    want: list[str] = ["no leg runs lint:*"]
+    assert want == leg_findings(defined)
 
 
 LEG_LINE = re.compile(r"^leg ([a-z]+)$", re.MULTILINE)
@@ -376,64 +381,60 @@ def leg_stub(lang: str) -> tuple[str, str]:
     return f"belt/mutants_{lang}.py", STUB_COMMAND_LEG.replace("{lang}", lang)
 
 
-class TestMutants:
-    """Every delivered leg is one line of `audit:mutants`, run on its own."""
+# Every delivered leg is one line of `audit:mutants`, run on its own.
+def test_mutants_run_in_their_own_workflow() -> None:
+    """repo-mutants.yml runs the task; no other subject workflow does.
 
-    def test_mutants_run_in_their_own_workflow(self) -> None:
-        """repo-mutants.yml runs the task; no other subject workflow does.
-
-        A survivor reds the mutation run and never another subject's,
-        so each run's result keeps meaning one thing (owner, #1355).
-        """
-        workflows = BELT.parent / ".github" / "workflows"
-        run = re.compile(r"mise run audit:mutants\b")
-        own = (workflows / "repo-mutants.yml").read_text(encoding="utf-8")
-        assert run.search(own) is not None
-        for other in sorted(workflows.glob("*.yml")):
-            if other.name != "repo-mutants.yml":
-                text = other.read_text(encoding="utf-8")
-                assert run.search(text) is None
-        stub = BELT.parent / "workflow-templates" / "mutants.yml"
-        assert "/.github/workflows/repo-mutants.yml@" in stub.read_text(
-            encoding="utf-8"
-        )
-
-    @pytest.mark.parametrize("lang", leg_files())
-    def test_each_language_has_its_own_jobs(self, lang: object) -> None:
-        """One `mutants-<language>` job per leg, selecting only that leg.
-
-        Each language's jobs are its own tick, shard count and timeout,
-        so a red names its language at the job level (owner, #1355).
-        """
-        own = (BELT.parent / ".github" / "workflows" / "repo-mutants.yml").read_text(
-            encoding="utf-8"
-        )
-        assert f"\n  mutants-{lang}:\n" in own
-        assert f"\n  mutants-{lang}-totals:\n" in own
-        assert f"MUTANTS_LEG: {lang}\n" in own
-        assert f'mutation-totals.sh "${{SUMMARIES}}" {lang}\n' in own
-
-    def test_every_leg_is_one_line_of_the_task(self) -> None:
-        """Each delivered leg is exactly one `leg` line.
-
-        A leg file nobody runs cannot exist, nor a line naming a missing leg.
-        """
-        assert tasks()["audit:mutants"]["run"] == '"${ORG_BELT_DIR}/mutants.sh"'
-        body = (BELT / "mutants.sh").read_text(encoding="utf-8")
-        named = [typed_std.group(m, 1) or "" for m in LEG_LINE.finditer(body)]
-        none: list[str] = []
-        assert named != none
-        ordered: list[str] = sorted(named)
-        assert ordered == leg_files()
-        assert len(named) == len(set(named))
+    A survivor reds the mutation run and never another subject's,
+    so each run's result keeps meaning one thing (owner, #1355).
+    """
+    workflows = BELT.parent / ".github" / "workflows"
+    run = re.compile(r"mise run audit:mutants\b")
+    own = (workflows / "repo-mutants.yml").read_text(encoding="utf-8")
+    assert run.search(own) is not None
+    for other in sorted(workflows.glob("*.yml")):
+        if other.name != "repo-mutants.yml":
+            text = other.read_text(encoding="utf-8")
+            assert run.search(text) is None
+    stub = BELT.parent / "workflow-templates" / "mutants.yml"
+    assert "/.github/workflows/repo-mutants.yml@" in stub.read_text(encoding="utf-8")
 
 
-@pytest.mark.usefixtures("_set_up_test_selection")
-class TestSelection:
+@pytest.mark.parametrize("lang", leg_files())
+def test_each_language_has_its_own_jobs(lang: object) -> None:
+    """One `mutants-<language>` job per leg, selecting only that leg.
+
+    Each language's jobs are its own tick, shard count and timeout,
+    so a red names its language at the job level (owner, #1355).
+    """
+    own = (BELT.parent / ".github" / "workflows" / "repo-mutants.yml").read_text(
+        encoding="utf-8"
+    )
+    assert f"\n  mutants-{lang}:\n" in own
+    assert f"\n  mutants-{lang}-totals:\n" in own
+    assert f"MUTANTS_LEG: {lang}\n" in own
+    assert f'mutation-totals.sh "${{SUMMARIES}}" {lang}\n' in own
+
+
+def test_every_leg_is_one_line_of_the_task() -> None:
+    """Each delivered leg is exactly one `leg` line.
+
+    A leg file nobody runs cannot exist, nor a line naming a missing leg.
+    """
+    assert tasks()["audit:mutants"]["run"] == '"${ORG_BELT_DIR}/mutants.sh"'
+    body = (BELT / "mutants.sh").read_text(encoding="utf-8")
+    named = [typed_std.group(m, 1) or "" for m in LEG_LINE.finditer(body)]
+    none: list[str] = []
+    assert named != none
+    ordered: list[str] = sorted(named)
+    assert ordered == leg_files()
+    assert len(named) == len(set(named))
+
+
+class Selection:
     """MUTANTS_LEG selects one leg; unset, every leg runs."""
 
-    @fixture
-    def _set_up_test_selection(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Plant a belt of the real body and stub legs that only say they ran."""
         tmp = tmp_path
         self.belt = support.belt(
@@ -458,39 +459,49 @@ class TestSelection:
             check=False,
         )
 
-    def test_unset_runs_every_leg(self) -> None:
-        """Locally, `mise run audit:mutants` runs every adopted leg."""
-        done = self.run_task()
-        assert done.returncode == 0, done.stderr
-        ran: list[str] = [f"ran {g}" for g in leg_files()]
-        assert done.stdout.splitlines() == ran
 
-    def test_named_leg_runs_alone(self) -> None:
-        """A language's job runs only its own leg."""
-        done = self.run_task(MUTANTS_LEG="rust")
-        assert done.returncode == 0, done.stderr
-        want: list[str] = ["ran rust"]
-        assert done.stdout.splitlines() == want
+@fixture
+def selection(tmp_path: Path) -> Selection:
+    """Give each row its own Selection."""
+    return Selection(tmp_path)
 
-    def test_red_leg_is_named(self) -> None:
-        """A red leg reds the task, by language."""
-        done = self.run_task(MUTANTS_LEG="rust", PLANT_RED="1")
-        assert done.returncode == 1
-        want: list[str] = ["audit:mutants: red leg(s): rust"]
-        assert done.stderr.splitlines() == want
 
-    def test_unknown_leg_is_red_by_name(self) -> None:
-        """A typo never runs nothing and passes."""
-        done = self.run_task(MUTANTS_LEG="cobol")
-        assert done.returncode == 1
-        assert done.stdout == ""
-        want: list[str] = [
-            (
-                "audit:mutants: MUTANTS_LEG='cobol' names no leg"
-                " (mise/mutants-<language>.sh or belt mutants-<language>)"
-            ),
-        ]
-        assert done.stderr.splitlines() == want
+def test_unset_runs_every_leg(selection: Selection) -> None:
+    """Locally, `mise run audit:mutants` runs every adopted leg."""
+    done = selection.run_task()
+    assert done.returncode == 0, done.stderr
+    ran: list[str] = [f"ran {g}" for g in leg_files()]
+    assert done.stdout.splitlines() == ran
+
+
+def test_named_leg_runs_alone(selection: Selection) -> None:
+    """A language's job runs only its own leg."""
+    done = selection.run_task(MUTANTS_LEG="rust")
+    assert done.returncode == 0, done.stderr
+    want: list[str] = ["ran rust"]
+    assert done.stdout.splitlines() == want
+
+
+def test_red_leg_is_named(selection: Selection) -> None:
+    """A red leg reds the task, by language."""
+    done = selection.run_task(MUTANTS_LEG="rust", PLANT_RED="1")
+    assert done.returncode == 1
+    want: list[str] = ["audit:mutants: red leg(s): rust"]
+    assert done.stderr.splitlines() == want
+
+
+def test_unknown_leg_is_red_by_name(selection: Selection) -> None:
+    """A typo never runs nothing and passes."""
+    done = selection.run_task(MUTANTS_LEG="cobol")
+    assert done.returncode == 1
+    assert done.stdout == ""
+    want: list[str] = [
+        (
+            "audit:mutants: MUTANTS_LEG='cobol' names no leg"
+            " (mise/mutants-<language>.sh or belt mutants-<language>)"
+        ),
+    ]
+    assert done.stderr.splitlines() == want
 
 
 # The planted repository's code and suite: each test takes one branch of
@@ -579,113 +590,116 @@ def runs(tree: Path) -> int:
     return len(counter.read_text("utf-8").splitlines()) if counter.exists() else 0
 
 
-class TestOneRun:
-    """The belt's real tasks, run by a real mise in planted trees (#1667)."""
+# The belt's real tasks, run by a real mise in planted trees (#1667).
+HELD = (
+    "coverage:check: python leg holds its floor 50.0 (100.0%)",
+    "coverage:check: python-branches leg holds its floor 50.0 (100.0%)",
+)
 
-    @staticmethod
-    def run_mise(tree: Path, task: str) -> subprocess.CompletedProcess[str]:
-        """Run `task` in `tree` with the belt as the global config.
 
-        Returns:
-            The finished run, its output in `stdout` and `stderr`.
+def run_mise(tree: Path, task: str) -> subprocess.CompletedProcess[str]:
+    """Run `task` in `tree` with the belt as the global config.
 
-        """
-        found = support.tool("mise")
-        config = tree.parent / f"{tree.name}-config"
-        config.mkdir()
-        env = support.env(
-            MISE_CONFIG_DIR=str(config),
-            XDG_CONFIG_HOME=str(config),
-            MISE_GLOBAL_CONFIG_FILE=str(CONFIG),
-            MISE_TRUSTED_CONFIG_PATHS=f"{tree.parent}:{CONFIG.parent.parent}",
-            MISE_OFFLINE="1",
-            MISE_YES="1",
-            MISE_AUTO_INSTALL="0",
-            MISE_TASK_RUN_AUTO_INSTALL="0",
-        )
-        return subprocess.run(
-            [str(found), "run", task],
-            cwd=tree,
-            env=env,
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=600,
-        )
+    Returns:
+        The finished run, its output in `stdout` and `stderr`.
 
-    HELD = (
-        "coverage:check: python leg holds its floor 50.0 (100.0%)",
-        "coverage:check: python-branches leg holds its floor 50.0 (100.0%)",
+    """
+    found = support.tool("mise")
+    config = tree.parent / f"{tree.name}-config"
+    config.mkdir()
+    env = support.env(
+        MISE_CONFIG_DIR=str(config),
+        XDG_CONFIG_HOME=str(config),
+        MISE_GLOBAL_CONFIG_FILE=str(CONFIG),
+        MISE_TRUSTED_CONFIG_PATHS=f"{tree.parent}:{CONFIG.parent.parent}",
+        MISE_OFFLINE="1",
+        MISE_YES="1",
+        MISE_AUTO_INSTALL="0",
+        MISE_TASK_RUN_AUTO_INSTALL="0",
+    )
+    return subprocess.run(
+        [str(found), "run", task],
+        cwd=tree,
+        env=env,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=600,
     )
 
-    def test_ci_runs_the_suite_once_and_measures_every_worker(self) -> None:
-        """One run: the depend's own path kept, both workers measured, the figures."""
-        with tempfile.TemporaryDirectory() as tmp:
-            tree = plant(Path(tmp), "py")
-            done = self.run_mise(tree, "ci")
-            out = done.stdout + done.stderr
-            assert done.returncode == 0, out
-            assert runs(tree) == 1, out
-            for line in self.HELD:
-                assert line in out
-            assert "ci: all gates green" in out
 
-    def test_no_floor_runs_test_once_and_measures_nothing(self) -> None:
-        """Without a floor `measured` is plain exec and coverage:check skips."""
-        with tempfile.TemporaryDirectory() as tmp:
-            tree = plant(Path(tmp), "py", floor=False)
-            done = self.run_mise(tree, "ci")
-            out = done.stdout + done.stderr
-            assert done.returncode == 0, out
-            assert runs(tree) == 1, out
-            assert "coverage:check: no .coverage-floor, skipped" in out
-            assert "leg holds its floor" not in out
+def test_ci_runs_the_suite_once_and_measures_every_worker() -> None:
+    """One run: the depend's own path kept, both workers measured, the figures."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = plant(Path(tmp), "py")
+        done = run_mise(tree, "ci")
+        out = done.stdout + done.stderr
+        assert done.returncode == 0, out
+        assert runs(tree) == 1, out
+        for line in HELD:
+            assert line in out
+        assert "ci: all gates green" in out
 
-    def test_coverage_check_alone_runs_test_once(self) -> None:
-        """Run on its own, coverage:check runs `test` and holds its floor."""
-        with tempfile.TemporaryDirectory() as tmp:
-            tree = plant(Path(tmp), "py")
-            done = self.run_mise(tree, "coverage:check")
-            out = done.stdout + done.stderr
-            assert done.returncode == 0, out
-            assert runs(tree) == 1, out
-            for line in self.HELD:
-                assert line in out
 
-    def test_a_suite_outside_measured_is_red_by_the_record(self) -> None:
-        """Not through `measured`: the recorded legs are named, with the remedy."""
-        with tempfile.TemporaryDirectory() as tmp:
-            tree = plant(Path(tmp), "py", measured=False)
-            done = self.run_mise(tree, "coverage:check")
-            out = done.stdout + done.stderr
-            assert done.returncode == 1, out
-            assert runs(tree) == 1, out
-            for leg in ("python", "python-branches"):
-                assert (
-                    f"coverage:check: the floor was derived with {leg} and this"
-                    " run measured none\n"
-                    "  the python leg needs tracked *.py and a `test` task whose"
-                    ' test command runs through "${ORG_BELT_DIR}/measured"; or'
-                    " record the leg's removal on purpose:"
-                    f" `# dropped: {leg} <reason>` in .coverage-floor\n"
-                ) in done.stderr
+def test_no_floor_runs_test_once_and_measures_nothing() -> None:
+    """Without a floor `measured` is plain exec and coverage:check skips."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = plant(Path(tmp), "py", floor=False)
+        done = run_mise(tree, "ci")
+        out = done.stdout + done.stderr
+        assert done.returncode == 0, out
+        assert runs(tree) == 1, out
+        assert "coverage:check: no .coverage-floor, skipped" in out
+        assert "leg holds its floor" not in out
 
-    def test_measured_reaches_a_file_task(self) -> None:
-        """A file task with a `#!/bin/sh` shebang runs through `measured` too."""
-        with tempfile.TemporaryDirectory() as tmp:
-            tree = plant(Path(tmp), "py")
-            tasks_dir = tree / "mise-tasks"
-            tasks_dir.mkdir()
-            probe = tasks_dir / "probe"
-            probe.write_text(
-                '#!/bin/sh\nPYTHONPATH=src "$ORG_BELT_DIR/measured" python3 -m pytest -q'
-                ' -p no:cacheprovider tests && ls "$ORG_COVERAGE_RUN"\n',
-                encoding="utf-8",
-            )
-            probe.chmod(0o755)
-            done = self.run_mise(tree, "probe")
-            out = done.stdout + done.stderr
-            assert done.returncode == 0, out
-            assert "2 passed" in done.stdout, out
-            assert "coverage.rc\n" in done.stdout, out
+
+def test_coverage_check_alone_runs_test_once() -> None:
+    """Run on its own, coverage:check runs `test` and holds its floor."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = plant(Path(tmp), "py")
+        done = run_mise(tree, "coverage:check")
+        out = done.stdout + done.stderr
+        assert done.returncode == 0, out
+        assert runs(tree) == 1, out
+        for line in HELD:
+            assert line in out
+
+
+def test_a_suite_outside_measured_is_red_by_the_record() -> None:
+    """Not through `measured`: the recorded legs are named, with the remedy."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = plant(Path(tmp), "py", measured=False)
+        done = run_mise(tree, "coverage:check")
+        out = done.stdout + done.stderr
+        assert done.returncode == 1, out
+        assert runs(tree) == 1, out
+        for leg in ("python", "python-branches"):
+            assert (
+                f"coverage:check: the floor was derived with {leg} and this"
+                " run measured none\n"
+                "  the python leg needs tracked *.py and a `test` task whose"
+                ' test command runs through "${ORG_BELT_DIR}/measured"; or'
+                " record the leg's removal on purpose:"
+                f" `# dropped: {leg} <reason>` in .coverage-floor\n"
+            ) in done.stderr
+
+
+def test_measured_reaches_a_file_task() -> None:
+    """A file task with a `#!/bin/sh` shebang runs through `measured` too."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = plant(Path(tmp), "py")
+        tasks_dir = tree / "mise-tasks"
+        tasks_dir.mkdir()
+        probe = tasks_dir / "probe"
+        probe.write_text(
+            '#!/bin/sh\nPYTHONPATH=src "$ORG_BELT_DIR/measured" python3 -m pytest -q'
+            ' -p no:cacheprovider tests && ls "$ORG_COVERAGE_RUN"\n',
+            encoding="utf-8",
+        )
+        probe.chmod(0o755)
+        done = run_mise(tree, "probe")
+        out = done.stdout + done.stderr
+        assert done.returncode == 0, out
+        assert "2 passed" in done.stdout, out
+        assert "coverage.rc\n" in done.stdout, out

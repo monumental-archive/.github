@@ -75,49 +75,41 @@ def read(text: str) -> list[dict[str, str]]:
         return lp.publish_calls(path)
 
 
-class TestStub:
-    """The publish calls' inputs, as written."""
-
-    @given(workflow())
-    def test_inputs_read_back(self, drawn: tuple[str, list[dict[str, str]]]) -> None:
-        """Each publish job's `with:` block, and only those."""
-        text, calls = drawn
-        assert read(text) == calls
-
-    @given(st.text(max_size=200))
-    def test_any_text_is_read(self, text: str) -> None:
-        """A list of calls, never a traceback."""
-        assert isinstance(read(text), list)
+# The publish calls' inputs, as written.
+@given(workflow())
+def test_inputs_read_back(drawn: tuple[str, list[dict[str, str]]]) -> None:
+    """Each publish job's `with:` block, and only those."""
+    text, calls = drawn
+    assert read(text) == calls
 
 
-class TestScalar:
-    """A plain scalar, however quoted; anything else refused."""
-
-    @given(VALUE, st.sampled_from(["", "'", '"']), st.sampled_from(["", "  # why"]))
-    def test_plain_scalar_reads_bare(
-        self, value: str, quote: str, comment: str
-    ) -> None:
-        """Quotes and comment stripped."""
-        assert lp.scalar(f"{quote}{value}{quote}{comment}", "w") == value
-
-    @given(st.sampled_from([">", "|", "[a]", "{a: b}", "&x", "*x", "${{ inputs.x }}"]))
-    def test_other_forms_refused(self, raw: str) -> None:
-        """UnreadableError, by name."""
-        with pytest.raises(lp.UnreadableError):
-            lp.scalar(raw, "w")
+@given(st.text(max_size=200))
+def test_any_text_is_read(text: str) -> None:
+    """A list of calls, never a traceback."""
+    assert isinstance(read(text), list)
 
 
-class TestInstallsOn:
-    """An os restriction excludes what it does not name."""
+# A plain scalar, however quoted; anything else refused.
+@given(VALUE, st.sampled_from(["", "'", '"']), st.sampled_from(["", "  # why"]))
+def test_plain_scalar_reads_bare(value: str, quote: str, comment: str) -> None:
+    """Quotes and comment stripped."""
+    assert lp.scalar(f"{quote}{value}{quote}{comment}", "w") == value
 
-    @given(
-        st.lists(
-            st.sampled_from(["linux", "macos", "windows"]), min_size=1, unique=True
-        ),
-        st.sampled_from(["linux", "macos", "windows"]),
-        st.sampled_from(["x64", "arm64"]),
-    )
-    def test_restriction(self, allowed: list[str], os_name: str, arch: str) -> None:
-        """Installs exactly where the restriction names the OS."""
-        rows: list[tuple[str | None, list[str] | None]] = [("1.0", allowed)]
-        assert lp.installs_on(rows, "1.0", f"{os_name}-{arch}") == (os_name in allowed)
+
+@given(st.sampled_from([">", "|", "[a]", "{a: b}", "&x", "*x", "${{ inputs.x }}"]))
+def test_other_forms_refused(raw: str) -> None:
+    """UnreadableError, by name."""
+    with pytest.raises(lp.UnreadableError):
+        lp.scalar(raw, "w")
+
+
+# An os restriction excludes what it does not name.
+@given(
+    st.lists(st.sampled_from(["linux", "macos", "windows"]), min_size=1, unique=True),
+    st.sampled_from(["linux", "macos", "windows"]),
+    st.sampled_from(["x64", "arm64"]),
+)
+def test_restriction(allowed: list[str], os_name: str, arch: str) -> None:
+    """Installs exactly where the restriction names the OS."""
+    rows: list[tuple[str | None, list[str] | None]] = [("1.0", allowed)]
+    assert lp.installs_on(rows, "1.0", f"{os_name}-{arch}") == (os_name in allowed)

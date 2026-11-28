@@ -148,241 +148,257 @@ def delivered() -> tuple[pp.Policy, dict[str, str]]:
 WHOLE = crate(CRATE_LEG)
 
 
+# The canon's own policy and workflows, exactly as they ship.
+@fixture
+def _set_up_test_delivered_tree_test() -> None:
+    """Skip where the canon's documents are not in the tree."""
+    if not POLICY.exists() or not WORKFLOWS.is_dir():
+        pytest.skip("not the canon's tree")
+
+
 @pytest.mark.usefixtures("_set_up_test_delivered_tree_test")
-class TestDeliveredTreeTest:
-    """The canon's own policy and workflows, exactly as they ship."""
-
-    @fixture
-    def _set_up_test_delivered_tree_test(self) -> None:
-        """Skip where the canon's documents are not in the tree."""
-        if not POLICY.exists() or not WORKFLOWS.is_dir():
-            pytest.skip("not the canon's tree")
-
-    def test_the_delivered_tree_joins_clean(self) -> None:
-        """Every planned obligation the org declares has its producer."""
-        policy, files = delivered()
-        assert pp.judge(policy, files) == list[str]()
-
-    def test_the_policy_declares_planned_obligations(self) -> None:
-        """An empty obligation set would make every row above vacuous."""
-        policy, _ = delivered()
-        assert pp.obligations(policy)
-
-    def test_the_crate_class_is_among_them(self) -> None:
-        """The defect's own class, joined rather than merely present.
-
-        stele writes the crate plan (stele#396, #1371): the leg names its
-        class, and the prefix is the policy's own, read back here.
-        """
-        policy, files = delivered()
-        assert ("rust-crate", "sbom-cargo-") in pp.obligations(policy)
-        crate = files[".github/workflows/build-rust-crate.yml"]
-        assert ("rust-crate", "sbom-cargo-") in pp.markers(crate)[0]
-        assert "sbom-cargo-" in pp.emitted(crate, policy)
-        assert pp.emitted(crate) == set[str]()
+def test_the_delivered_tree_joins_clean() -> None:
+    """Every planned obligation the org declares has its producer."""
+    policy, files = delivered()
+    assert pp.judge(policy, files) == list[str]()
 
 
-class TestObligationsTest:
-    """Which rows of the policy are this check's population."""
-
-    def test_planned_entries_are_read(self) -> None:
-        """The judged set is the planned obligations, both classes."""
-        want = {("rust-crate", "sbom-cargo-"), ("pgrx-extension", "sbom-pgrx-")}
-        assert pp.obligations(POLICY_UNDER_TEST) == want
-
-    def test_an_unplanned_prefix_is_not_an_obligation(self) -> None:
-        """`attestations-extimg-pg` is attached by a leg, not planned."""
-        prefixes = {p for _, p in pp.obligations(POLICY_UNDER_TEST)}
-        assert "attestations-extimg-pg" not in prefixes
-
-    def test_a_class_owing_only_bundles_is_absent(self) -> None:
-        """A class with no planned prefix demands no producer."""
-        classes = {c for c, _ in pp.obligations(POLICY_UNDER_TEST)}
-        assert "source-archive" not in classes
+@pytest.mark.usefixtures("_set_up_test_delivered_tree_test")
+def test_the_policy_declares_planned_obligations() -> None:
+    """An empty obligation set would make every row above vacuous."""
+    policy, _ = delivered()
+    assert pp.obligations(policy)
 
 
-class TestJoinTest:
-    """The three directions the defect reads, planted both ways."""
+@pytest.mark.usefixtures("_set_up_test_delivered_tree_test")
+def test_the_crate_class_is_among_them() -> None:
+    """The defect's own class, joined rather than merely present.
 
-    def test_the_whole_tree_passes(self) -> None:
-        """The green direction, so every red row below means something."""
-        assert pp.judge(POLICY_UNDER_TEST, WHOLE) == list[str]()
-
-    def test_a_class_with_no_producer_is_named(self) -> None:
-        """#833 itself: the declaration stands and the leg is gone."""
-        gone = tree(**{"build-pgrx-extension": PGRX_LEG})
-        findings = pp.judge(POLICY_UNDER_TEST, gone)
-        assert len(findings) == 1
-        assert "rust-crate" in findings[0]
-        assert "sbom-cargo-" in findings[0]
-
-    def test_restoring_the_producer_makes_it_green(self) -> None:
-        """The other direction of the same row."""
-        assert pp.judge(POLICY_UNDER_TEST, WHOLE) == list[str]()
-
-    def test_the_emission_alone_does_not_satisfy_the_class(self) -> None:
-        """A leg that emits the prefix but claims it for nobody."""
-        leg = CRATE_LEG.replace("# plan-producer: rust-crate sbom-cargo-\n", "")
-        findings = pp.judge(POLICY_UNDER_TEST, crate(leg))
-        assert len(findings) == 2
-        assert any("declares itself its producer" in f for f in findings)
-        assert any("marker claims it for a class" in f for f in findings)
-
-    def test_a_sibling_producer_does_not_satisfy_the_obligation(self) -> None:
-        """The prefix is shared; the join is the class, never the prefix."""
-        leg = CRATE_LEG.replace("rust-crate", "rust-binary")
-        findings = pp.judge(
-            POLICY_UNDER_TEST,
-            tree(**{"build-rust-binary": leg, "build-pgrx-extension": PGRX_LEG}),
-        )
-        assert any("rust-crate" in f and "sbom-cargo-" in f for f in findings)
-
-    def test_a_marker_for_an_undeclared_class_is_refused(self) -> None:
-        """A producer for a class the policy never heard of."""
-        leg = CRATE_LEG.replace(
-            "# plan-producer: rust-crate sbom-cargo-",
-            "# plan-producer: rust-crate-next sbom-cargo-",
-        )
-        findings = pp.judge(POLICY_UNDER_TEST, crate(leg))
-        assert any("does not declare" in f for f in findings)
-
-    def test_a_prefix_the_class_never_declared_is_refused(self) -> None:
-        """Drift on the producer side."""
-        leg = CRATE_LEG.replace(
-            "# plan-producer: rust-crate sbom-cargo-",
-            "# plan-producer: rust-crate sbom-crates-",
-        )
-        findings = pp.judge(POLICY_UNDER_TEST, crate(leg))
-        assert any("no such planned obligation" in f for f in findings)
-
-    def test_a_rename_on_the_policy_side_only_is_refused(self) -> None:
-        """The same drift, arrived at from the other file."""
-        policy = decoded.load_json(json.dumps(POLICY_DOC))
-        evidence = decoded.as_object(
-            decoded.as_object(policy, "policy")["evidence"], "evidence"
-        )
-        classes = decoded.as_object(evidence["classes"], "classes")
-        crate_class = decoded.as_object(classes["rust-crate"], "rust-crate")
-        prefixes = decoded.as_array(crate_class["assetPrefixes"], "assetPrefixes")
-        entry = decoded.as_object(prefixes[0], "assetPrefixes[0]")
-        entry["prefix"] = "sbom-crates-"
-        findings = pp.judge(pp.read_policy(policy), WHOLE)
-        assert any("no such planned obligation" in f for f in findings)
-        assert any("sbom-crates-" in f for f in findings)
-
-    def test_a_marker_no_leg_emits_is_refused(self) -> None:
-        """A producer removed under a marker nobody deleted."""
-        leg = "\n".join(
-            line
-            for line in CRATE_LEG.splitlines()
-            if "sbom-cargo-" not in line or "plan-producer" in line
-        )
-        findings = pp.judge(POLICY_UNDER_TEST, crate(leg))
-        assert any("renamed" in f or "removed" in f for f in findings)
-
-    def test_a_plan_upload_with_no_readable_prefix_is_refused(self) -> None:
-        """Fail-closed: a new producer cannot arrive invisible."""
-        leg = "\n".join(
-            line for line in CRATE_LEG.splitlines() if "sbom-cargo-" not in line
-        )
-        findings = pp.judge(POLICY_UNDER_TEST, crate(leg))
-        assert any("states no document prefix" in f for f in findings)
-
-    def test_a_marker_away_from_its_class_is_refused(self) -> None:
-        """The marker belongs where the class name is written."""
-        leg = PGRX_LEG + "# plan-producer: rust-crate sbom-cargo-\n"
-        findings = pp.judge(POLICY_UNDER_TEST, tree(**{"build-pgrx-extension": leg}))
-        assert any("never states" in f for f in findings)
-
-    def test_a_malformed_marker_is_refused(self) -> None:
-        """A marker nobody can read is a join nobody made."""
-        leg = CRATE_LEG.replace(
-            "# plan-producer: rust-crate sbom-cargo-",
-            "# plan-producer: rust-crate",
-        )
-        findings = pp.judge(POLICY_UNDER_TEST, crate(leg))
-        assert any("is not `# plan-producer:" in f for f in findings)
+    stele writes the crate plan (stele#396, #1371): the leg names its
+    class, and the prefix is the policy's own, read back here.
+    """
+    policy, files = delivered()
+    assert ("rust-crate", "sbom-cargo-") in pp.obligations(policy)
+    crate = files[".github/workflows/build-rust-crate.yml"]
+    assert ("rust-crate", "sbom-cargo-") in pp.markers(crate)[0]
+    assert "sbom-cargo-" in pp.emitted(crate, policy)
+    assert pp.emitted(crate) == set[str]()
 
 
-class TestReaderTest:
-    """The two emission idioms and the marker, read off real shapes."""
-
-    def test_the_env_idiom_is_read(self) -> None:
-        """`release/rust-build.sh`'s caller states the prefix as env."""
-        env = "          PLAN_DOC_PREFIX: sbom-image-\n"
-        want = {"sbom-image-"}
-        assert pp.emitted(env) == want
-
-    def test_a_quoted_env_value_is_read(self) -> None:
-        """YAML quoting is not a second prefix."""
-        want = {"sbom-npm-"}
-        assert pp.emitted('  PLAN_DOC_PREFIX: "sbom-npm-"\n') == want
-
-    def test_the_jq_idiom_is_read(self) -> None:
-        """The inline emitters build the document name in jq."""
-        want = {"sbom-npm-"}
-        assert (
-            pp.emitted('  | map({class: "wasm-npm", doc: ("sbom-npm-" + .),\n') == want
-        )
-
-    def test_the_stele_idiom_is_read_from_the_policy(self) -> None:
-        """A stele-written plan emits under its class's planned prefix."""
-        call = "  stele derive inventory-plan --class rust-crate --policy p.json \\\n"
-        want = {"sbom-cargo-"}
-        assert pp.emitted(call, POLICY_UNDER_TEST) == want
-
-    def test_the_stele_idiom_names_nothing_without_the_policy(self) -> None:
-        """The prefix lives in the policy, never in the leg."""
-        call = "  stele derive inventory-plan --class rust-crate --policy p.json\n"
-        assert pp.emitted(call) == set[str]()
-
-    def test_a_stele_plan_for_a_class_planning_nothing_is_refused(self) -> None:
-        """Fail-closed: a class with no planned prefix names no document."""
-        leg = (
-            "name: build-source\n"
-            "# plan-producer: source-archive sbom-src-\n"
-            "      - run: stele derive inventory-plan --class source-archive\n"
-            "          name: sbom-plan-src\n"
-        )
-        planted = {**WHOLE, **tree(**{"build-source": leg})}
-        findings = pp.judge(POLICY_UNDER_TEST, planted)
-        assert any("states no document prefix" in f for f in findings)
-
-    def test_prose_about_a_prefix_is_not_an_emission(self) -> None:
-        """A comment naming a document must not count as producing one."""
-        prose = "          # `sbom-image-*` document, the second nothing\n"
-        assert pp.emitted(prose) == set[str]()
-
-    def test_a_download_pattern_is_not_an_upload(self) -> None:
-        """publish.yml fetches the plans and emits none."""
-        assert not pp.uploads_plan("          pattern: sbom-plan-*\n")
-
-    def test_an_upload_is_an_upload(self) -> None:
-        """The producing half of the same string."""
-        up = "          name: sbom-plan-binary-${{ matrix.target }}\n"
-        assert pp.uploads_plan(up)
-
-    def test_a_marker_is_not_its_own_evidence(self) -> None:
-        """The placement tie reads the file without its markers."""
-        parked = "name: build-oci-image\n# plan-producer: rust-crate sbom-cargo-\n"
-        assert "rust-crate" not in pp.strip_markers(parked)
+# Which rows of the policy are this check's population.
+def test_planned_entries_are_read() -> None:
+    """The judged set is the planned obligations, both classes."""
+    want = {("rust-crate", "sbom-cargo-"), ("pgrx-extension", "sbom-pgrx-")}
+    assert pp.obligations(POLICY_UNDER_TEST) == want
 
 
-class TestMainTest:
-    """The exits, which are what the gate actually reads."""
+def test_an_unplanned_prefix_is_not_an_obligation() -> None:
+    """`attestations-extimg-pg` is attached by a leg, not planned."""
+    prefixes = {p for _, p in pp.obligations(POLICY_UNDER_TEST)}
+    assert "attestations-extimg-pg" not in prefixes
 
-    def test_a_policy_with_no_planned_obligations_is_nothing_to_join(self) -> None:
-        """An adopter's policy that plans nothing is not a defect."""
-        empty = {"evidence": {"classes": {"source-archive": {"bundles": ["a"]}}}}
-        assert pp.obligations(pp.read_policy(empty)) == set[tuple[str, str]]()
 
-    def test_an_unreadable_policy_is_this_checks_own_input(self) -> None:
-        """A policy that will not decode stops the check, loudly."""
-        missing = REPO / "slsa" / "no-such-policy.json"
-        err = io.StringIO()
-        with redirect_stderr(err):
-            assert pp.main(["--policy", str(missing)]) == 1
-        assert "does not read as JSON" in err.getvalue()
+def test_a_class_owing_only_bundles_is_absent() -> None:
+    """A class with no planned prefix demands no producer."""
+    classes = {c for c, _ in pp.obligations(POLICY_UNDER_TEST)}
+    assert "source-archive" not in classes
+
+
+# The three directions the defect reads, planted both ways.
+def test_the_whole_tree_passes() -> None:
+    """The green direction, so every red row below means something."""
+    assert pp.judge(POLICY_UNDER_TEST, WHOLE) == list[str]()
+
+
+def test_a_class_with_no_producer_is_named() -> None:
+    """#833 itself: the declaration stands and the leg is gone."""
+    gone = tree(**{"build-pgrx-extension": PGRX_LEG})
+    findings = pp.judge(POLICY_UNDER_TEST, gone)
+    assert len(findings) == 1
+    assert "rust-crate" in findings[0]
+    assert "sbom-cargo-" in findings[0]
+
+
+def test_restoring_the_producer_makes_it_green() -> None:
+    """The other direction of the same row."""
+    assert pp.judge(POLICY_UNDER_TEST, WHOLE) == list[str]()
+
+
+def test_the_emission_alone_does_not_satisfy_the_class() -> None:
+    """A leg that emits the prefix but claims it for nobody."""
+    leg = CRATE_LEG.replace("# plan-producer: rust-crate sbom-cargo-\n", "")
+    findings = pp.judge(POLICY_UNDER_TEST, crate(leg))
+    assert len(findings) == 2
+    assert any("declares itself its producer" in f for f in findings)
+    assert any("marker claims it for a class" in f for f in findings)
+
+
+def test_a_sibling_producer_does_not_satisfy_the_obligation() -> None:
+    """The prefix is shared; the join is the class, never the prefix."""
+    leg = CRATE_LEG.replace("rust-crate", "rust-binary")
+    findings = pp.judge(
+        POLICY_UNDER_TEST,
+        tree(**{"build-rust-binary": leg, "build-pgrx-extension": PGRX_LEG}),
+    )
+    assert any("rust-crate" in f and "sbom-cargo-" in f for f in findings)
+
+
+def test_a_marker_for_an_undeclared_class_is_refused() -> None:
+    """A producer for a class the policy never heard of."""
+    leg = CRATE_LEG.replace(
+        "# plan-producer: rust-crate sbom-cargo-",
+        "# plan-producer: rust-crate-next sbom-cargo-",
+    )
+    findings = pp.judge(POLICY_UNDER_TEST, crate(leg))
+    assert any("does not declare" in f for f in findings)
+
+
+def test_a_prefix_the_class_never_declared_is_refused() -> None:
+    """Drift on the producer side."""
+    leg = CRATE_LEG.replace(
+        "# plan-producer: rust-crate sbom-cargo-",
+        "# plan-producer: rust-crate sbom-crates-",
+    )
+    findings = pp.judge(POLICY_UNDER_TEST, crate(leg))
+    assert any("no such planned obligation" in f for f in findings)
+
+
+def test_a_rename_on_the_policy_side_only_is_refused() -> None:
+    """The same drift, arrived at from the other file."""
+    policy = decoded.load_json(json.dumps(POLICY_DOC))
+    evidence = decoded.as_object(
+        decoded.as_object(policy, "policy")["evidence"], "evidence"
+    )
+    classes = decoded.as_object(evidence["classes"], "classes")
+    crate_class = decoded.as_object(classes["rust-crate"], "rust-crate")
+    prefixes = decoded.as_array(crate_class["assetPrefixes"], "assetPrefixes")
+    entry = decoded.as_object(prefixes[0], "assetPrefixes[0]")
+    entry["prefix"] = "sbom-crates-"
+    findings = pp.judge(pp.read_policy(policy), WHOLE)
+    assert any("no such planned obligation" in f for f in findings)
+    assert any("sbom-crates-" in f for f in findings)
+
+
+def test_a_marker_no_leg_emits_is_refused() -> None:
+    """A producer removed under a marker nobody deleted."""
+    leg = "\n".join(
+        line
+        for line in CRATE_LEG.splitlines()
+        if "sbom-cargo-" not in line or "plan-producer" in line
+    )
+    findings = pp.judge(POLICY_UNDER_TEST, crate(leg))
+    assert any("renamed" in f or "removed" in f for f in findings)
+
+
+def test_a_plan_upload_with_no_readable_prefix_is_refused() -> None:
+    """Fail-closed: a new producer cannot arrive invisible."""
+    leg = "\n".join(
+        line for line in CRATE_LEG.splitlines() if "sbom-cargo-" not in line
+    )
+    findings = pp.judge(POLICY_UNDER_TEST, crate(leg))
+    assert any("states no document prefix" in f for f in findings)
+
+
+def test_a_marker_away_from_its_class_is_refused() -> None:
+    """The marker belongs where the class name is written."""
+    leg = PGRX_LEG + "# plan-producer: rust-crate sbom-cargo-\n"
+    findings = pp.judge(POLICY_UNDER_TEST, tree(**{"build-pgrx-extension": leg}))
+    assert any("never states" in f for f in findings)
+
+
+def test_a_malformed_marker_is_refused() -> None:
+    """A marker nobody can read is a join nobody made."""
+    leg = CRATE_LEG.replace(
+        "# plan-producer: rust-crate sbom-cargo-",
+        "# plan-producer: rust-crate",
+    )
+    findings = pp.judge(POLICY_UNDER_TEST, crate(leg))
+    assert any("is not `# plan-producer:" in f for f in findings)
+
+
+# The two emission idioms and the marker, read off real shapes.
+def test_the_env_idiom_is_read() -> None:
+    """`release/rust-build.sh`'s caller states the prefix as env."""
+    env = "          PLAN_DOC_PREFIX: sbom-image-\n"
+    want = {"sbom-image-"}
+    assert pp.emitted(env) == want
+
+
+def test_a_quoted_env_value_is_read() -> None:
+    """YAML quoting is not a second prefix."""
+    want = {"sbom-npm-"}
+    assert pp.emitted('  PLAN_DOC_PREFIX: "sbom-npm-"\n') == want
+
+
+def test_the_jq_idiom_is_read() -> None:
+    """The inline emitters build the document name in jq."""
+    want = {"sbom-npm-"}
+    assert pp.emitted('  | map({class: "wasm-npm", doc: ("sbom-npm-" + .),\n') == want
+
+
+def test_the_stele_idiom_is_read_from_the_policy() -> None:
+    """A stele-written plan emits under its class's planned prefix."""
+    call = "  stele derive inventory-plan --class rust-crate --policy p.json \\\n"
+    want = {"sbom-cargo-"}
+    assert pp.emitted(call, POLICY_UNDER_TEST) == want
+
+
+def test_the_stele_idiom_names_nothing_without_the_policy() -> None:
+    """The prefix lives in the policy, never in the leg."""
+    call = "  stele derive inventory-plan --class rust-crate --policy p.json\n"
+    assert pp.emitted(call) == set[str]()
+
+
+def test_a_stele_plan_for_a_class_planning_nothing_is_refused() -> None:
+    """Fail-closed: a class with no planned prefix names no document."""
+    leg = (
+        "name: build-source\n"
+        "# plan-producer: source-archive sbom-src-\n"
+        "      - run: stele derive inventory-plan --class source-archive\n"
+        "          name: sbom-plan-src\n"
+    )
+    planted = {**WHOLE, **tree(**{"build-source": leg})}
+    findings = pp.judge(POLICY_UNDER_TEST, planted)
+    assert any("states no document prefix" in f for f in findings)
+
+
+def test_prose_about_a_prefix_is_not_an_emission() -> None:
+    """A comment naming a document must not count as producing one."""
+    prose = "          # `sbom-image-*` document, the second nothing\n"
+    assert pp.emitted(prose) == set[str]()
+
+
+def test_a_download_pattern_is_not_an_upload() -> None:
+    """publish.yml fetches the plans and emits none."""
+    assert not pp.uploads_plan("          pattern: sbom-plan-*\n")
+
+
+def test_an_upload_is_an_upload() -> None:
+    """The producing half of the same string."""
+    up = "          name: sbom-plan-binary-${{ matrix.target }}\n"
+    assert pp.uploads_plan(up)
+
+
+def test_a_marker_is_not_its_own_evidence() -> None:
+    """The placement tie reads the file without its markers."""
+    parked = "name: build-oci-image\n# plan-producer: rust-crate sbom-cargo-\n"
+    assert "rust-crate" not in pp.strip_markers(parked)
+
+
+# The exits, which are what the gate actually reads.
+def test_a_policy_with_no_planned_obligations_is_nothing_to_join() -> None:
+    """An adopter's policy that plans nothing is not a defect."""
+    empty = {"evidence": {"classes": {"source-archive": {"bundles": ["a"]}}}}
+    assert pp.obligations(pp.read_policy(empty)) == set[tuple[str, str]]()
+
+
+def test_an_unreadable_policy_is_this_checks_own_input() -> None:
+    """A policy that will not decode stops the check, loudly."""
+    missing = REPO / "slsa" / "no-such-policy.json"
+    err = io.StringIO()
+    with redirect_stderr(err):
+        assert pp.main(["--policy", str(missing)]) == 1
+    assert "does not read as JSON" in err.getvalue()
 
 
 # Every field the check reads, wrongly shaped, and its refusal.
@@ -417,48 +433,49 @@ WRONG_SHAPES: list[tuple[object, str]] = [
 ]
 
 
-class TestPolicyShapeTest:
-    """A policy field of the wrong shape is refused by its path."""
+# A policy field of the wrong shape is refused by its path.
+@pytest.mark.parametrize(("doc", "message"), WRONG_SHAPES)
+def test_each_wrong_shape_names_its_field(doc: object, message: str) -> None:
+    """Every field the check reads, wrongly shaped in turn."""
+    with pytest.raises(decoded.UndecodableError) as cm:
+        pp.read_policy(doc)
+    assert str(cm.value) == message
 
-    @pytest.mark.parametrize(("doc", "message"), WRONG_SHAPES)
-    def test_each_wrong_shape_names_its_field(self, doc: object, message: str) -> None:
-        """Every field the check reads, wrongly shaped in turn."""
-        with pytest.raises(decoded.UndecodableError) as cm:
-            pp.read_policy(doc)
-        assert str(cm.value) == message
 
-    def test_the_fixture_decodes(self) -> None:
-        """Classes are every declared class; obligations only the planned."""
-        assert (
-            pp.Policy(
-                frozenset({"rust-crate", "pgrx-extension", "source-archive"}),
-                frozenset({
-                    ("rust-crate", "sbom-cargo-"),
-                    ("pgrx-extension", "sbom-pgrx-"),
-                }),
-            )
-            == POLICY_UNDER_TEST
+def test_the_fixture_decodes() -> None:
+    """Classes are every declared class; obligations only the planned."""
+    assert (
+        pp.Policy(
+            frozenset({"rust-crate", "pgrx-extension", "source-archive"}),
+            frozenset({
+                ("rust-crate", "sbom-cargo-"),
+                ("pgrx-extension", "sbom-pgrx-"),
+            }),
         )
+        == POLICY_UNDER_TEST
+    )
 
-    def test_main_refuses_a_wrongly_shaped_policy(self) -> None:
-        """The refusal reaches the exit, by file and field."""
-        with tempfile.TemporaryDirectory() as tmp:
-            bad = Path(tmp) / "policy.json"
-            bad.write_text('{"evidence": {"classes": []}}', encoding="utf-8")
-            err = io.StringIO()
-            with redirect_stderr(err):
-                assert pp.main(["--policy", str(bad)]) == 1
-        assert err.getvalue() == f"{TASK}: {bad}: evidence.classes is not an object\n"
 
-    def test_main_refuses_a_duplicate_key_as_json(self) -> None:
-        """The strict loader's refusal keeps the check's own words."""
-        with tempfile.TemporaryDirectory() as tmp:
-            bad = Path(tmp) / "policy.json"
-            bad.write_text('{"evidence": {}, "evidence": {}}', encoding="utf-8")
-            err = io.StringIO()
-            with redirect_stderr(err):
-                assert pp.main(["--policy", str(bad)]) == 1
-        assert (
-            err.getvalue()
-            == f'{TASK}: {bad} does not read as JSON\n  duplicate key "evidence"\n'
-        )
+def test_main_refuses_a_wrongly_shaped_policy() -> None:
+    """The refusal reaches the exit, by file and field."""
+    with tempfile.TemporaryDirectory() as tmp:
+        bad = Path(tmp) / "policy.json"
+        bad.write_text('{"evidence": {"classes": []}}', encoding="utf-8")
+        err = io.StringIO()
+        with redirect_stderr(err):
+            assert pp.main(["--policy", str(bad)]) == 1
+    assert err.getvalue() == f"{TASK}: {bad}: evidence.classes is not an object\n"
+
+
+def test_main_refuses_a_duplicate_key_as_json() -> None:
+    """The strict loader's refusal keeps the check's own words."""
+    with tempfile.TemporaryDirectory() as tmp:
+        bad = Path(tmp) / "policy.json"
+        bad.write_text('{"evidence": {}, "evidence": {}}', encoding="utf-8")
+        err = io.StringIO()
+        with redirect_stderr(err):
+            assert pp.main(["--policy", str(bad)]) == 1
+    assert (
+        err.getvalue()
+        == f'{TASK}: {bad} does not read as JSON\n  duplicate key "evidence"\n'
+    )

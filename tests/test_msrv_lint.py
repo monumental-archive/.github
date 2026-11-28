@@ -157,14 +157,10 @@ def body() -> str:
     return decoded.as_str(entry["run"], f"{TASK}.run")
 
 
-@pytest.mark.usefixtures("_set_up_test_planted")
-class TestPlanted:
+class Planted:
     """The planted belt, stubs and log every in-process row runs in."""
 
-    @fixture
-    def _set_up_test_planted(
-        self, tmp_path: Path, capfd: pytest.CaptureFixture[str]
-    ) -> None:
+    def __init__(self, tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:
         """Plant the stubs, the surface, the plan and the belt."""
         self.tmp = tmp_path
         self.capfd = capfd
@@ -263,253 +259,262 @@ class TestPlanted:
         masked = re.sub(r"\S*/toolchains\.json", "<tmp>/toolchains.json", text)
         return masked.replace(str(self.belt), "<belt>").splitlines()
 
-    @staticmethod
-    def planned(pgrx: str = "") -> list[str]:
-        """Name the calls up to and including the plan.
 
-        Returns:
-            The log lines every row that plans begins with.
-
-        """
-        plan = (
-            "belt msrv-plan --toolchains <tmp>/toolchains.json --exclude "
-            f" --pgrx {pgrx} --floor <belt>/rust-floor.toml --root Cargo.toml {META}"
-        )
-        return [PINS, FETCH, METADATA, f"belt gate-surface --exclude  {META}", plan]
+@fixture
+def planted(tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> Planted:
+    """Give each row its own Planted."""
+    return Planted(tmp_path, capfd)
 
 
-class TestBody(TestPlanted):
-    """Each branch of the body: its commands, its lines, its status."""
+def planned(pgrx: str = "") -> list[str]:
+    """Name the calls up to and including the plan.
 
-    def test_one_group_compiles_at_its_toolchain_and_is_counted(self) -> None:
-        """A plain group: one `-p` per spec, the gate's features, the count."""
-        status, said, err = self.call()
-        assert (status, err) == (0, NONE)
-        check = (
-            f"cargo check --locked {ROOT} --all-features -p plain@0.1.0 -p other@0.1.0"
-        )
-        assert lines(*self.planned(), f"{check} {{1.85.0}}") == self.logged()
-        want = [
-            "lint:msrv: compiling at 1.85.0: plain@0.1.0 other@0.1.0",
-            "lint:msrv: 1 declared minimum(s) compiled at the toolchain they name",
-        ]
-        assert want == said
+    Returns:
+        The log lines every row that plans begins with.
 
-    def test_the_gates_features_are_clippy_features(self) -> None:
-        """CLIPPY_FEATURES and CLIPPY_EXCLUDE reach every step that reads them."""
-        self.env |= {"CLIPPY_FEATURES": "--features a", "CLIPPY_EXCLUDE": "gone"}
-        status, _, _ = self.call()
-        assert status == 0
-        logged = self.logged()
-        assert (
-            f"cargo metadata --format-version 1 --locked {ROOT} --features a"
-            == logged[2]
-        )
-        assert f"belt gate-surface --exclude gone {META}" == logged[3]
-        assert "--exclude gone --pgrx " in logged[4]
-        check = (
-            f"cargo check --locked {ROOT} --features a -p plain@0.1.0 -p other@0.1.0"
-        )
-        assert f"{check} {{1.85.0}}" == logged[5]
-
-    def test_a_note_is_said_and_nothing_verified_says_so(self) -> None:
-        """Every minimum excluded: the note, then both lines, and green."""
-        self.plant(PLAIN, NOTE)
-        status, said, err = self.call()
-        assert (status, err) == (0, NONE)
-        assert self.planned() == self.logged()
-        want = [
-            "lint:msrv: unverified: gone@0.1.0 (CLIPPY_EXCLUDE)",
-            "lint:msrv: every declared minimum sits outside the gate's compile surface",
-            "lint:msrv: nothing verified — the exclusions above are what to remove",
-        ]
-        assert want == said
-
-    def test_an_extension_is_registered_and_compiled_at_its_major(self) -> None:
-        """Its own flags in place of the gate's, prepared, at its major."""
-        self.plant(PLAIN + EXTENSION, CHECK + PG_CHECK)
-        status, said, err = self.call()
-        assert (status, err) == (0, NONE)
-        own = (
-            f"cargo check --locked {ROOT} --no-default-features --features pg17"
-            " -p ext@0.2.0"
-        )
-        want = [
-            *self.planned("ext:17"),
-            "prepare 17",
-            "mise ls aqua:theseus-rs/postgresql-binaries --json",
-            "belt pgrx-postgres --majors 17 <[]>",
-            (
-                f"cargo check --locked {ROOT} --all-features"
-                " -p plain@0.1.0 -p other@0.1.0 {1.85.0}"
-            ),
-            f"{own} [-Iicu-pg17-sdk] {{1.85.0}}",
-        ]
-        assert want == self.logged()
-        said_want = lines(
-            "lint:msrv: compiling at 1.85.0: plain@0.1.0 other@0.1.0",
-            "lint:msrv: compiling at 1.85.0: ext@0.2.0",
-            "lint:msrv: 2 declared minimum(s) compiled at the toolchain they name",
-        )
-        assert said_want == said
-
-    def test_an_extension_the_plan_never_compiles_registers_nothing(self) -> None:
-        """An extension on the surface but no pg check in the plan: no prepare."""
-        self.plant(PLAIN + EXTENSION, CHECK)
-        status, _, _ = self.call()
-        assert status == 0
-        assert "prepare 17" not in self.logged()
-        assert len(self.logged()) == 6
-
-    def test_a_red_compile_says_the_rule_and_keeps_cargos_status(self) -> None:
-        """msrv_plan.py --failed for the group, cargo's 101, and nothing after."""
-        self.plant(PLAIN, CHECK + CHECK)
-        self.env["PLANT_FAIL"] = "cargo-check"
-        status, said, err = self.call()
-        assert status == 101
-        failed = "belt msrv-plan --failed 1.85.0 plain@0.1.0 other@0.1.0 --root Cargo.toml <>"
-        assert failed == self.logged()[-1]
-        assert len(self.logged()) == 7
-        compiling = lines("lint:msrv: compiling at 1.85.0: plain@0.1.0 other@0.1.0")
-        assert compiling == said
-        assert lines("lint:msrv: remedy for 1.85.0") == err
-
-    def test_an_unreadable_record_is_red_by_its_kind(self) -> None:
-        """A kind the plan never writes is a finding, and nothing compiles."""
-        self.plant(PLAIN, "verdict\tx\n" + CHECK)
-        status, said, err = self.call()
-        assert (status, said) == (1, NONE)
-        unreadable = (
-            "lint:msrv: Cargo.toml: unreadable plan record from belt msrv-plan: verdict"
-        )
-        assert lines(unreadable) == err
-        assert self.planned() == self.logged()
-
-    def test_a_blank_plan_line_is_skipped(self) -> None:
-        """An empty record is no record, as the body's `read` loop had it."""
-        self.plant(PLAIN, "\n" + CHECK)
-        status, said, _ = self.call()
-        assert status == 0
-        assert len(said) == 2
-
-    def test_no_cargo_is_red(self) -> None:
-        """Cargo absent with a Cargo.toml tracked is the vacuous-success failure."""
-        (self.bins / "cargo").unlink()
-        self.env["PATH"] = str(self.bins)
-        status, said, err = self.call()
-        assert (status, said) == (1, NONE)
-        missing = (
-            "lint:msrv: Cargo.toml present but cargo missing — pin rust in mise.toml"
-        )
-        assert lines(missing) == err
-        assert self.logged() == NONE
-
-    def test_no_mise_is_red(self) -> None:
-        """Mise absent: a check that sees no pins would call a repo unpinned."""
-        (self.bins / "mise").unlink()
-        self.env["PATH"] = str(self.bins)
-        status, said, err = self.call()
-        assert (status, said) == (1, NONE)
-        missing = "lint:msrv: mise missing — the toolchain pins this reads are mise's"
-        assert lines(missing) == err
-        assert self.logged() == NONE
-
-    def test_each_step_that_fails_stops_the_run_with_its_status(self) -> None:
-        """The first failure's own status, and no step after it."""
-        rows = {
-            "mise-rust": (3, 1),
-            "cargo-fetch": (101, 2),
-            "cargo-metadata": (101, 3),
-            "gate-surface": (5, 4),
-            "msrv-plan": (5, 5),
-        }
-        for step, (code, calls) in rows.items():
-            self.log.write_text("", encoding="utf-8")
-            self.env["PLANT_FAIL"] = step
-            status, said, _ = self.call()
-            assert (code, NONE) == (status, said)
-            assert self.planned()[:calls] == self.logged()
-
-    @pytest.mark.parametrize(
-        ("step", "code", "last"),
-        [
-            ("prepare", 4, "prepare 17"),
-            ("pgrx-postgres", 5, "belt pgrx-postgres --majors 17 <[]>"),
-            (
-                "mise-aqua:theseus-rs/postgresql-binaries",
-                3,
-                "belt pgrx-postgres --majors 17 <>",
-            ),
-        ],
+    """
+    plan = (
+        "belt msrv-plan --toolchains <tmp>/toolchains.json --exclude "
+        f" --pgrx {pgrx} --floor <belt>/rust-floor.toml --root Cargo.toml {META}"
     )
-    def test_a_failed_registration_stops_before_any_compile(
-        self, step: str, code: int, last: str
-    ) -> None:
-        """The prepare's status, or the Postgres check's, and nothing compiled."""
-        self.plant(PLAIN + EXTENSION, PG_CHECK)
-        self.log.write_text("", encoding="utf-8")
-        self.env["PLANT_FAIL"] = step
-        status, said, _ = self.call()
+    return [PINS, FETCH, METADATA, f"belt gate-surface --exclude  {META}", plan]
+
+
+def test_one_group_compiles_at_its_toolchain_and_is_counted(planted: Planted) -> None:
+    """A plain group: one `-p` per spec, the gate's features, the count."""
+    status, said, err = planted.call()
+    assert (status, err) == (0, NONE)
+    check = f"cargo check --locked {ROOT} --all-features -p plain@0.1.0 -p other@0.1.0"
+    assert lines(*planned(), f"{check} {{1.85.0}}") == planted.logged()
+    want = [
+        "lint:msrv: compiling at 1.85.0: plain@0.1.0 other@0.1.0",
+        "lint:msrv: 1 declared minimum(s) compiled at the toolchain they name",
+    ]
+    assert want == said
+
+
+def test_the_gates_features_are_clippy_features(planted: Planted) -> None:
+    """CLIPPY_FEATURES and CLIPPY_EXCLUDE reach every step that reads them."""
+    planted.env |= {"CLIPPY_FEATURES": "--features a", "CLIPPY_EXCLUDE": "gone"}
+    status, _, _ = planted.call()
+    assert status == 0
+    logged = planted.logged()
+    assert (
+        f"cargo metadata --format-version 1 --locked {ROOT} --features a" == logged[2]
+    )
+    assert f"belt gate-surface --exclude gone {META}" == logged[3]
+    assert "--exclude gone --pgrx " in logged[4]
+    check = f"cargo check --locked {ROOT} --features a -p plain@0.1.0 -p other@0.1.0"
+    assert f"{check} {{1.85.0}}" == logged[5]
+
+
+def test_a_note_is_said_and_nothing_verified_says_so(planted: Planted) -> None:
+    """Every minimum excluded: the note, then both lines, and green."""
+    planted.plant(PLAIN, NOTE)
+    status, said, err = planted.call()
+    assert (status, err) == (0, NONE)
+    assert planned() == planted.logged()
+    want = [
+        "lint:msrv: unverified: gone@0.1.0 (CLIPPY_EXCLUDE)",
+        "lint:msrv: every declared minimum sits outside the gate's compile surface",
+        "lint:msrv: nothing verified — the exclusions above are what to remove",
+    ]
+    assert want == said
+
+
+def test_an_extension_is_registered_and_compiled_at_its_major(planted: Planted) -> None:
+    """Its own flags in place of the gate's, prepared, at its major."""
+    planted.plant(PLAIN + EXTENSION, CHECK + PG_CHECK)
+    status, said, err = planted.call()
+    assert (status, err) == (0, NONE)
+    own = (
+        f"cargo check --locked {ROOT} --no-default-features --features pg17"
+        " -p ext@0.2.0"
+    )
+    want = [
+        *planned("ext:17"),
+        "prepare 17",
+        "mise ls aqua:theseus-rs/postgresql-binaries --json",
+        "belt pgrx-postgres --majors 17 <[]>",
+        (
+            f"cargo check --locked {ROOT} --all-features"
+            " -p plain@0.1.0 -p other@0.1.0 {1.85.0}"
+        ),
+        f"{own} [-Iicu-pg17-sdk] {{1.85.0}}",
+    ]
+    assert want == planted.logged()
+    said_want = lines(
+        "lint:msrv: compiling at 1.85.0: plain@0.1.0 other@0.1.0",
+        "lint:msrv: compiling at 1.85.0: ext@0.2.0",
+        "lint:msrv: 2 declared minimum(s) compiled at the toolchain they name",
+    )
+    assert said_want == said
+
+
+def test_an_extension_the_plan_never_compiles_registers_nothing(
+    planted: Planted,
+) -> None:
+    """An extension on the surface but no pg check in the plan: no prepare."""
+    planted.plant(PLAIN + EXTENSION, CHECK)
+    status, _, _ = planted.call()
+    assert status == 0
+    assert "prepare 17" not in planted.logged()
+    assert len(planted.logged()) == 6
+
+
+def test_a_red_compile_says_the_rule_and_keeps_cargos_status(planted: Planted) -> None:
+    """msrv_plan.py --failed for the group, cargo's 101, and nothing after."""
+    planted.plant(PLAIN, CHECK + CHECK)
+    planted.env["PLANT_FAIL"] = "cargo-check"
+    status, said, err = planted.call()
+    assert status == 101
+    failed = (
+        "belt msrv-plan --failed 1.85.0 plain@0.1.0 other@0.1.0 --root Cargo.toml <>"
+    )
+    assert failed == planted.logged()[-1]
+    assert len(planted.logged()) == 7
+    compiling = lines("lint:msrv: compiling at 1.85.0: plain@0.1.0 other@0.1.0")
+    assert compiling == said
+    assert lines("lint:msrv: remedy for 1.85.0") == err
+
+
+def test_an_unreadable_record_is_red_by_its_kind(planted: Planted) -> None:
+    """A kind the plan never writes is a finding, and nothing compiles."""
+    planted.plant(PLAIN, "verdict\tx\n" + CHECK)
+    status, said, err = planted.call()
+    assert (status, said) == (1, NONE)
+    unreadable = (
+        "lint:msrv: Cargo.toml: unreadable plan record from belt msrv-plan: verdict"
+    )
+    assert lines(unreadable) == err
+    assert planned() == planted.logged()
+
+
+def test_a_blank_plan_line_is_skipped(planted: Planted) -> None:
+    """An empty record is no record, as the body's `read` loop had it."""
+    planted.plant(PLAIN, "\n" + CHECK)
+    status, said, _ = planted.call()
+    assert status == 0
+    assert len(said) == 2
+
+
+def test_no_cargo_is_red(planted: Planted) -> None:
+    """Cargo absent with a Cargo.toml tracked is the vacuous-success failure."""
+    (planted.bins / "cargo").unlink()
+    planted.env["PATH"] = str(planted.bins)
+    status, said, err = planted.call()
+    assert (status, said) == (1, NONE)
+    missing = "lint:msrv: Cargo.toml present but cargo missing — pin rust in mise.toml"
+    assert lines(missing) == err
+    assert planted.logged() == NONE
+
+
+def test_no_mise_is_red(planted: Planted) -> None:
+    """Mise absent: a check that sees no pins would call a repo unpinned."""
+    (planted.bins / "mise").unlink()
+    planted.env["PATH"] = str(planted.bins)
+    status, said, err = planted.call()
+    assert (status, said) == (1, NONE)
+    missing = "lint:msrv: mise missing — the toolchain pins this reads are mise's"
+    assert lines(missing) == err
+    assert planted.logged() == NONE
+
+
+def test_each_step_that_fails_stops_the_run_with_its_status(planted: Planted) -> None:
+    """The first failure's own status, and no step after it."""
+    rows = {
+        "mise-rust": (3, 1),
+        "cargo-fetch": (101, 2),
+        "cargo-metadata": (101, 3),
+        "gate-surface": (5, 4),
+        "msrv-plan": (5, 5),
+    }
+    for step, (code, calls) in rows.items():
+        planted.log.write_text("", encoding="utf-8")
+        planted.env["PLANT_FAIL"] = step
+        status, said, _ = planted.call()
         assert (code, NONE) == (status, said)
-        assert last == self.logged()[-1]
-
-    def test_an_extension_naming_no_major_is_red_before_the_plan(self) -> None:
-        """pgrx-env.sh's union refuses it by name; msrv_plan.py never runs."""
-        self.plant("crate\text@0.2.0\tpgrx\tnext\text\n", PG_CHECK)
-        status, said, err = self.call()
-        assert (status, said) == (1, NONE)
-        refused = "lint:msrv: ext@0.2.0 names no Postgres major: 'next'"
-        assert lines(refused) == err
-        assert self.planned()[:4] == self.logged()
+        assert planned()[:calls] == planted.logged()
 
 
-class TestRoots(TestPlanted):
-    """The workspace roots: each one run, every red one past, one count."""
-
-    def test_a_workspace_manifest_reaches_every_cargo_call(self) -> None:
-        """`workspace` at a manifest: the fetch, the graph and each compile name it."""
-        self.plant(PLAIN, CHECK)
-        status, said, _ = self.call("fuzz/Cargo.toml")
-        assert status == 0
-        at = "--manifest-path fuzz/Cargo.toml"
-        logged = self.logged()
-        assert f"cargo fetch --locked {at}" == logged[0]
-        assert (
-            f"cargo metadata --format-version 1 --locked {at} --all-features"
-            == logged[1]
-        )
-        check = (
-            f"cargo check --locked {at} --all-features -p plain@0.1.0 -p other@0.1.0"
-        )
-        assert f"{check} {{1.85.0}}" == logged[-1]
-        assert said[-1] == "lint:msrv: 1 checked"
-
-    def test_every_root_runs_past_a_red_one(self) -> None:
-        """Two roots, every compile refused: both roots run, the first red kept."""
-        self.env["PLANT_FAIL"] = "cargo-check"
-        status, said, _ = self.call(roots=("Cargo.toml", "fuzz/Cargo.toml"))
-        assert status == 101
-        fetched = [line for line in self.logged() if line.startswith("cargo fetch")]
-        want = [FETCH, "cargo fetch --locked --manifest-path fuzz/Cargo.toml"]
-        assert want == fetched
-        assert len(said) == 2
-
-    def test_the_count_covers_every_root(self) -> None:
-        """Two roots of one group each: one count line, of both."""
-        status, said, _ = self.call(roots=("Cargo.toml", "fuzz/Cargo.toml"))
-        assert status == 0
-        count = "lint:msrv: 2 declared minimum(s) compiled at the toolchain they name"
-        assert count == said[-1]
-        assert len(said) == 3
-
-    def test_a_tree_whose_roots_cannot_be_named_is_red(self) -> None:
-        """rust_workspaces.resolved said why: status 1, and nothing run."""
-        status, said, _ = self.call(roots=None)
-        assert (status, said) == (1, NONE)
-        assert self.logged() == NONE
+@pytest.mark.parametrize(
+    ("step", "code", "last"),
+    [
+        ("prepare", 4, "prepare 17"),
+        ("pgrx-postgres", 5, "belt pgrx-postgres --majors 17 <[]>"),
+        (
+            "mise-aqua:theseus-rs/postgresql-binaries",
+            3,
+            "belt pgrx-postgres --majors 17 <>",
+        ),
+    ],
+)
+def test_a_failed_registration_stops_before_any_compile(
+    planted: Planted, step: str, code: int, last: str
+) -> None:
+    """The prepare's status, or the Postgres check's, and nothing compiled."""
+    planted.plant(PLAIN + EXTENSION, PG_CHECK)
+    planted.log.write_text("", encoding="utf-8")
+    planted.env["PLANT_FAIL"] = step
+    status, said, _ = planted.call()
+    assert (code, NONE) == (status, said)
+    assert last == planted.logged()[-1]
 
 
-class TestFuzzing(TestPlanted):
+def test_an_extension_naming_no_major_is_red_before_the_plan(planted: Planted) -> None:
+    """pgrx-env.sh's union refuses it by name; msrv_plan.py never runs."""
+    planted.plant("crate\text@0.2.0\tpgrx\tnext\text\n", PG_CHECK)
+    status, said, err = planted.call()
+    assert (status, said) == (1, NONE)
+    refused = "lint:msrv: ext@0.2.0 names no Postgres major: 'next'"
+    assert lines(refused) == err
+    assert planned()[:4] == planted.logged()
+
+
+def test_a_workspace_manifest_reaches_every_cargo_call(planted: Planted) -> None:
+    """`workspace` at a manifest: the fetch, the graph and each compile name it."""
+    planted.plant(PLAIN, CHECK)
+    status, said, _ = planted.call("fuzz/Cargo.toml")
+    assert status == 0
+    at = "--manifest-path fuzz/Cargo.toml"
+    logged = planted.logged()
+    assert f"cargo fetch --locked {at}" == logged[0]
+    assert (
+        f"cargo metadata --format-version 1 --locked {at} --all-features" == logged[1]
+    )
+    check = f"cargo check --locked {at} --all-features -p plain@0.1.0 -p other@0.1.0"
+    assert f"{check} {{1.85.0}}" == logged[-1]
+    assert said[-1] == "lint:msrv: 1 checked"
+
+
+def test_every_root_runs_past_a_red_one(planted: Planted) -> None:
+    """Two roots, every compile refused: both roots run, the first red kept."""
+    planted.env["PLANT_FAIL"] = "cargo-check"
+    status, said, _ = planted.call(roots=("Cargo.toml", "fuzz/Cargo.toml"))
+    assert status == 101
+    fetched = [line for line in planted.logged() if line.startswith("cargo fetch")]
+    want = [FETCH, "cargo fetch --locked --manifest-path fuzz/Cargo.toml"]
+    assert want == fetched
+    assert len(said) == 2
+
+
+def test_the_count_covers_every_root(planted: Planted) -> None:
+    """Two roots of one group each: one count line, of both."""
+    status, said, _ = planted.call(roots=("Cargo.toml", "fuzz/Cargo.toml"))
+    assert status == 0
+    count = "lint:msrv: 2 declared minimum(s) compiled at the toolchain they name"
+    assert count == said[-1]
+    assert len(said) == 3
+
+
+def test_a_tree_whose_roots_cannot_be_named_is_red(planted: Planted) -> None:
+    """rust_workspaces.resolved said why: status 1, and nothing run."""
+    status, said, _ = planted.call(roots=None)
+    assert (status, said) == (1, NONE)
+    assert planted.logged() == NONE
+
+
+class Fuzzing(Planted):
     """A cargo-fuzz root is compiled as cargo-fuzz builds it (#2093)."""
 
     def compiles(self) -> list[str]:
@@ -521,123 +526,136 @@ class TestFuzzing(TestPlanted):
         """
         return [line for line in self.logged() if line.startswith("cargo check")]
 
-    @staticmethod
-    def compile_at(root: str, flags: str | None) -> str:
-        """Write the log line of one compile at the plan's check.
 
-        Returns:
-            The line, with RUSTFLAGS in parentheses when it was set.
-
-        """
-        at = f"--manifest-path {root} --all-features -p plain@0.1.0 -p other@0.1.0"
-        line = f"cargo check --locked {at} {{1.85.0}}"
-        return line if flags is None else f"{line} ({flags})"
-
-    def test_a_marked_root_is_compiled_with_cfg_fuzzing(self) -> None:
-        """The marker: its compile has the cfg, the root's has no RUSTFLAGS."""
-        self.manifests(MARKED)
-        status, _, _ = self.call(roots=TWO_ROOTS)
-        assert status == 0
-        want = [
-            self.compile_at("Cargo.toml", None),
-            self.compile_at("fuzz/Cargo.toml", "--cfg fuzzing"),
-        ]
-        assert want == self.compiles()
-        assert "RUSTFLAGS" not in os.environ
-
-    def test_a_fuzz_directory_without_the_marker_gets_no_cfg(self) -> None:
-        """fuzz/Cargo.toml with no marker: neither compile has RUSTFLAGS."""
-        status, _, _ = self.call(roots=TWO_ROOTS)
-        assert status == 0
-        want = [
-            self.compile_at("Cargo.toml", None),
-            self.compile_at("fuzz/Cargo.toml", None),
-        ]
-        assert want == self.compiles()
-
-    def test_a_marked_root_keeps_the_rustflags_it_had(self) -> None:
-        """RUSTFLAGS=-Dwarnings set: the marked root's has the cfg appended."""
-        self.manifests(MARKED)
-        self.env["RUSTFLAGS"] = "-Dwarnings"
-        status, _, _ = self.call(roots=TWO_ROOTS)
-        assert status == 0
-        want = [
-            self.compile_at("Cargo.toml", "-Dwarnings"),
-            self.compile_at("fuzz/Cargo.toml", "-Dwarnings --cfg fuzzing"),
-        ]
-        assert want == self.compiles()
+@fixture
+def fuzzing(tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> Fuzzing:
+    """Give each row its own Fuzzing."""
+    return Fuzzing(tmp_path, capfd)
 
 
-class TestHelpers:
-    """The plan's records, as the compile loop reads them."""
+def compile_at(root: str, flags: str | None) -> str:
+    """Write the log line of one compile at the plan's check.
 
-    def test_a_short_record_is_padded_to_four_fields(self) -> None:
-        """A note has two fields; the rest of a record rides in its last."""
-        got = msrv_lint.records("note\tsaid\n\ncheck\t1.85.0\tdefault\ta b\tc\n")
-        want = [["note", "said", "", ""], ["check", "1.85.0", "default", "a b\tc"]]
-        assert want == got
+    Returns:
+        The line, with RUSTFLAGS in parentheses when it was set.
+
+    """
+    at = f"--manifest-path {root} --all-features -p plain@0.1.0 -p other@0.1.0"
+    line = f"cargo check --locked {at} {{1.85.0}}"
+    return line if flags is None else f"{line} ({flags})"
 
 
-@pytest.mark.usefixtures("_tmp")
-class TestTask:
+def test_a_marked_root_is_compiled_with_cfg_fuzzing(fuzzing: Fuzzing) -> None:
+    """The marker: its compile has the cfg, the root's has no RUSTFLAGS."""
+    fuzzing.manifests(MARKED)
+    status, _, _ = fuzzing.call(roots=TWO_ROOTS)
+    assert status == 0
+    want = [
+        compile_at("Cargo.toml", None),
+        compile_at("fuzz/Cargo.toml", "--cfg fuzzing"),
+    ]
+    assert want == fuzzing.compiles()
+    assert "RUSTFLAGS" not in os.environ
+
+
+def test_a_fuzz_directory_without_the_marker_gets_no_cfg(fuzzing: Fuzzing) -> None:
+    """fuzz/Cargo.toml with no marker: neither compile has RUSTFLAGS."""
+    status, _, _ = fuzzing.call(roots=TWO_ROOTS)
+    assert status == 0
+    want = [
+        compile_at("Cargo.toml", None),
+        compile_at("fuzz/Cargo.toml", None),
+    ]
+    assert want == fuzzing.compiles()
+
+
+def test_a_marked_root_keeps_the_rustflags_it_had(fuzzing: Fuzzing) -> None:
+    """RUSTFLAGS=-Dwarnings set: the marked root's has the cfg appended."""
+    fuzzing.manifests(MARKED)
+    fuzzing.env["RUSTFLAGS"] = "-Dwarnings"
+    status, _, _ = fuzzing.call(roots=TWO_ROOTS)
+    assert status == 0
+    want = [
+        compile_at("Cargo.toml", "-Dwarnings"),
+        compile_at("fuzz/Cargo.toml", "-Dwarnings --cfg fuzzing"),
+    ]
+    assert want == fuzzing.compiles()
+
+
+# The plan's records, as the compile loop reads them.
+def test_a_short_record_is_padded_to_four_fields() -> None:
+    """A note has two fields; the rest of a record rides in its last."""
+    got = msrv_lint.records("note\tsaid\n\ncheck\t1.85.0\tdefault\ta b\tc\n")
+    want = [["note", "said", "", ""], ["check", "1.85.0", "default", "a b\tc"]]
+    assert want == got
+
+
+class Task:
     """The task's own body: its guard, and the call that starts the helper."""
 
-    @fixture
-    def _tmp(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
 
-    @staticmethod
-    def run_body(
-        tree: Path, overrides: dict[str, str]
-    ) -> subprocess.CompletedProcess[str]:
-        """Run lint:msrv's body in a tree, as mise runs it.
 
-        Returns:
-            The finished process.
+@fixture
+def task(tmp_path: Path) -> Task:
+    """Give each row its own Task."""
+    return Task(tmp_path)
 
-        """
-        as_mise = support.task_run(TASK, body())
-        return subprocess.run(
-            as_mise.argv,
-            cwd=tree,
-            env=support.env() | overrides | as_mise.env,
-            capture_output=True,
-            text=True,
-            check=False,
+
+def run_body(tree: Path, overrides: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    """Run lint:msrv's body in a tree, as mise runs it.
+
+    Returns:
+        The finished process.
+
+    """
+    as_mise = support.task_run(TASK, body())
+    return subprocess.run(
+        as_mise.argv,
+        cwd=tree,
+        env=support.env() | overrides | as_mise.env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+@pytest.mark.usefixtures("task")
+def test_no_cargo_toml_tracked_is_skipped() -> None:
+    """No tracked Cargo.toml: the skip line, green, and no helper."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = Path(tmp)
+        subprocess.run([GIT, "init", "-q", tmp], check=True, env=support.env())
+        overrides = {"ORG_BELT_DIR": str(BELT), "ORG_PYTHON": "/nonexistent"}
+        done = run_body(tree, overrides)
+    assert (done.returncode, done.stdout) == (
+        0,
+        "lint:msrv: no Cargo.toml tracked, skipped\n",
+    )
+
+
+@pytest.mark.usefixtures("task")
+def test_the_body_starts_the_helper_which_exits_with_its_status() -> None:
+    """A tracked Cargo.toml and no cargo: the helper's finding and its 1."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = Path(tmp)
+        subprocess.run([GIT, "init", "-q", tmp], check=True, env=support.env())
+        (tree / "Cargo.toml").write_text("", encoding="utf-8")
+        subprocess.run(
+            [GIT, "-C", tmp, "add", "Cargo.toml"], check=True, env=support.env()
         )
-
-    def test_no_cargo_toml_tracked_is_skipped(self) -> None:
-        """No tracked Cargo.toml: the skip line, green, and no helper."""
-        with tempfile.TemporaryDirectory() as tmp:
-            tree = Path(tmp)
-            subprocess.run([GIT, "init", "-q", tmp], check=True, env=support.env())
-            overrides = {"ORG_BELT_DIR": str(BELT), "ORG_PYTHON": "/nonexistent"}
-            done = TestTask.run_body(tree, overrides)
-        assert (done.returncode, done.stdout) == (
-            0,
-            "lint:msrv: no Cargo.toml tracked, skipped\n",
-        )
-
-    def test_the_body_starts_the_helper_which_exits_with_its_status(self) -> None:
-        """A tracked Cargo.toml and no cargo: the helper's finding and its 1."""
-        with tempfile.TemporaryDirectory() as tmp:
-            tree = Path(tmp)
-            subprocess.run([GIT, "init", "-q", tmp], check=True, env=support.env())
-            (tree / "Cargo.toml").write_text("", encoding="utf-8")
-            subprocess.run(
-                [GIT, "-C", tmp, "add", "Cargo.toml"], check=True, env=support.env()
-            )
-            bins = tree.parent / f"{tree.name}-bin"
-            bins.mkdir()
-            for tool in ("git", "bash", "dirname", "cat", "mktemp", "rm"):
-                (bins / tool).symlink_to(support.tool(tool))
-            overrides = {
-                "PATH": str(bins),
-                "ORG_BELT_DIR": str(BELT),
-                "ORG_PYTHON": sys.executable,
-                "ORG_FINDINGS": "",
-            }
-            done = TestTask.run_body(tree, overrides)
-        want = f"lint:msrv: {rust_task.NO_CARGO}\n"
-        assert (1, "", want) == (done.returncode, done.stdout, done.stderr)
+        bins = tree.parent / f"{tree.name}-bin"
+        bins.mkdir()
+        for tool in ("git", "bash", "dirname", "cat", "mktemp", "rm"):
+            (bins / tool).symlink_to(support.tool(tool))
+        overrides = {
+            "PATH": str(bins),
+            "ORG_BELT_DIR": str(BELT),
+            "ORG_PYTHON": sys.executable,
+            "ORG_FINDINGS": "",
+        }
+        done = run_body(tree, overrides)
+    want = f"lint:msrv: {rust_task.NO_CARGO}\n"
+    assert (1, "", want) == (done.returncode, done.stdout, done.stderr)

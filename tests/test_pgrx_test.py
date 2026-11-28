@@ -181,15 +181,13 @@ def package(
     }
 
 
-@pytest.mark.usefixtures("_set_up_test_planted")
-class TestPlanted:
+class Planted:
     """A planted extension-shaped tree, a stub PATH and a belt."""
 
     # The majors the planted extension declares.
     declares: ClassVar[tuple[int, ...]] = tuple(MAJORS)
 
-    @fixture
-    def _set_up_test_planted(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Plant a tracked workspace with one extension and one plain crate."""
         self.tmp = Path(str(tmp_path)).resolve()
         self.tree = self.tmp / "tree"
@@ -295,179 +293,185 @@ class TestPlanted:
             **({"ORG_PGRX_MAJOR": "18"} | env),
         )
 
-    @staticmethod
-    def suites(log: list[str]) -> list[str]:
-        """Keep only the suite runs from a call log.
 
-        Returns:
-            The `cargo pgrx test` lines, in order.
-
-        """
-        return [ln for ln in log if ln.startswith("cargo pgrx test")]
+@fixture
+def planted(tmp_path: Path) -> Planted:
+    """Give each row its own Planted."""
+    return Planted(tmp_path)
 
 
-class TestMeasuredRun(TestPlanted):
-    """With a floor, one major's run is the measurement (#1656)."""
+def suites(log: list[str]) -> list[str]:
+    """Keep only the suite runs from a call log.
 
-    def test_one_major_runs_instrumented_and_prints_its_figure(self) -> None:
-        """The Done-when row: own target dir, absolute profile, the leg line.
+    Returns:
+        The `cargo pgrx test` lines, in order.
 
-        On main the run took no instrumentation and printed no leg line.
-        """
-        self.floor()
-        reports = self.tmp / "reports"
-        done, log = self.run_pgrx(PLANT_LH="17", ORG_COVERAGE_REPORTS=str(reports))
+    """
+    return [ln for ln in log if ln.startswith("cargo pgrx test")]
+
+
+def test_one_major_runs_instrumented_and_prints_its_figure(planted: Planted) -> None:
+    """The Done-when row: own target dir, absolute profile, the leg line.
+
+    On main the run took no instrumentation and printed no leg line.
+    """
+    planted.floor()
+    reports = planted.tmp / "reports"
+    done, log = planted.run_pgrx(PLANT_LH="17", ORG_COVERAGE_REPORTS=str(reports))
+    assert done.returncode == 0, done.stderr
+    assert "pgrx-pg18 94.44444444444444" in done.stdout.splitlines()
+    (suite,) = suites(log)
+    # The major's directory names its compiler too (#1877).
+    target = planted.tree / "target" / f"llvm-cov-pgrx-pg18-{STABLE}"
+    assert f"|cwd={planted.tree / 'crates' / 'lab-pg'}|" in suite
+    assert f"|target={target}|" in suite
+    assert f"|profile={target}/lab-%p-%m.profraw" in suite
+    (report,) = [ln for ln in log if ln.startswith("cargo llvm-cov report")]
+    assert report.startswith(
+        "cargo llvm-cov report -p lab-pg --lcov --output-path "
+        f"{reports}/lcov-pgrx-pg18.info|"
+    ), report
+    assert (reports / "lcov-pgrx-pg18.info").is_file()
+
+
+def test_a_held_major_keeps_its_figure_beside_its_report(planted: Planted) -> None:
+    """coverage-figures.txt: the line held, for the release job (#1692)."""
+    planted.floor()
+    reports = planted.tmp / "reports"
+    done, _ = planted.run_pgrx(PLANT_LH="17", ORG_COVERAGE_REPORTS=str(reports))
+    assert done.returncode == 0, done.stderr
+    assert (reports / "coverage-figures.txt").read_text(
+        encoding="utf-8"
+    ) == "pgrx-pg18 94.44444444444444\n"
+
+
+def test_a_major_below_the_floor_keeps_no_figure(planted: Planted) -> None:
+    """Red before it is kept: nothing for the release to read."""
+    planted.floor()
+    reports = planted.tmp / "reports"
+    done, _ = planted.run_pgrx(ORG_COVERAGE_REPORTS=str(reports))
+    assert done.returncode == 1
+    assert not (reports / "coverage-figures.txt").exists()
+
+
+def test_a_measured_run_leaves_the_tree_clean(planted: Planted) -> None:
+    """No report in the tree, named directory or not (#1628).
+
+    A report in the working tree is one `git add -A` from a commit.
+    Without ORG_COVERAGE_REPORTS it goes to a scratch directory the
+    script removes on exit, after the figure is read.
+    """
+    planted.floor()
+    (planted.tree / ".gitignore").write_text("target/\n", encoding="utf-8")
+    planted.git("add", "-A")
+    planted.git("commit", "-q", "-m", "planted")
+    for named in ({"ORG_COVERAGE_REPORTS": str(planted.tmp / "reports")}, {}):
+        done, _ = planted.run_pgrx(PLANT_LH="17", **named)
         assert done.returncode == 0, done.stderr
         assert "pgrx-pg18 94.44444444444444" in done.stdout.splitlines()
-        (suite,) = self.suites(log)
-        # The major's directory names its compiler too (#1877).
-        target = self.tree / "target" / f"llvm-cov-pgrx-pg18-{STABLE}"
-        assert f"|cwd={self.tree / 'crates' / 'lab-pg'}|" in suite
-        assert f"|target={target}|" in suite
-        assert f"|profile={target}/lab-%p-%m.profraw" in suite
-        (report,) = [ln for ln in log if ln.startswith("cargo llvm-cov report")]
-        assert report.startswith(
-            "cargo llvm-cov report -p lab-pg --lcov --output-path "
-            f"{reports}/lcov-pgrx-pg18.info|"
-        ), report
-        assert (reports / "lcov-pgrx-pg18.info").is_file()
+        status = subprocess.run(
+            [GIT, "status", "--porcelain"],
+            cwd=planted.tree,
+            env=support.env(),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert status.stdout == ""
 
-    def test_a_held_major_keeps_its_figure_beside_its_report(self) -> None:
-        """coverage-figures.txt: the line held, for the release job (#1692)."""
-        self.floor()
-        reports = self.tmp / "reports"
-        done, _ = self.run_pgrx(PLANT_LH="17", ORG_COVERAGE_REPORTS=str(reports))
-        assert done.returncode == 0, done.stderr
-        assert (reports / "coverage-figures.txt").read_text(
-            encoding="utf-8"
-        ) == "pgrx-pg18 94.44444444444444\n"
 
-    def test_a_major_below_the_floor_keeps_no_figure(self) -> None:
-        """Red before it is kept: nothing for the release to read."""
-        self.floor()
-        reports = self.tmp / "reports"
-        done, _ = self.run_pgrx(ORG_COVERAGE_REPORTS=str(reports))
-        assert done.returncode == 1
-        assert not (reports / "coverage-figures.txt").exists()
+def test_a_major_below_the_floor_is_red_by_name(planted: Planted) -> None:
+    """14 of 18 is 77.8%, under the planted floor of 80.0."""
+    planted.floor()
+    done, _ = planted.run_pgrx()
+    assert done.returncode == 1
+    assert (
+        "test:pgrx: pgrx-pg18: 77.77777777777777% is below its derived floor 80.0%"
+        in done.stderr
+    )
 
-    def test_a_measured_run_leaves_the_tree_clean(self) -> None:
-        """No report in the tree, named directory or not (#1628).
 
-        A report in the working tree is one `git add -A` from a commit.
-        Without ORG_COVERAGE_REPORTS it goes to a scratch directory the
-        script removes on exit, after the figure is read.
-        """
-        self.floor()
-        (self.tree / ".gitignore").write_text("target/\n", encoding="utf-8")
-        self.git("add", "-A")
-        self.git("commit", "-q", "-m", "planted")
-        for named in ({"ORG_COVERAGE_REPORTS": str(self.tmp / "reports")}, {}):
-            done, _ = self.run_pgrx(PLANT_LH="17", **named)
-            assert done.returncode == 0, done.stderr
-            assert "pgrx-pg18 94.44444444444444" in done.stdout.splitlines()
-            status = subprocess.run(
-                [GIT, "status", "--porcelain"],
-                cwd=self.tree,
-                env=support.env(),
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-            assert status.stdout == ""
+def test_a_major_at_the_floor_holds_it(planted: Planted) -> None:
+    """18 of 18 holds its floor, and the hold names the major."""
+    planted.floor()
+    done, _ = planted.run_pgrx(PLANT_LH="18")
+    assert done.returncode == 0, done.stderr
+    assert "pgrx-pg18 100" in done.stdout.splitlines()
+    assert "test:pgrx: pgrx-pg18 leg holds its floor 80.0 (100%)" in done.stderr
 
-    def test_a_major_below_the_floor_is_red_by_name(self) -> None:
-        """14 of 18 is 77.8%, under the planted floor of 80.0."""
-        self.floor()
-        done, _ = self.run_pgrx()
-        assert done.returncode == 1
+
+def test_the_hold_is_coverage_floor_py_scoped_to_its_major(planted: Planted) -> None:
+    """End to end (#1875): one holder, judging only the job's own legs.
+
+    The floor records the gate's rust leg and both majors. The pg18
+    job reports pg18 alone and holds: pg17 is the pg17 job's and rust
+    the gate's. The hold is coverage_floor.py's (its line, its
+    drift refusal), not a second comparison in the script.
+    """
+    record = FLOOR
+    (planted.tree / ".coverage-floor").write_text(record, encoding="utf-8")
+    done, _ = planted.run_pgrx(PLANT_LH="18")
+    assert done.returncode == 0, done.stderr
+    want: list[str] = ["pgrx-pg18 100"]
+    got = [ln for ln in done.stdout.splitlines() if ln.startswith("pgrx-pg")]
+    assert want == got
+    assert "test:pgrx: pgrx-pg18 leg holds its floor 80.0 (100%)" in done.stderr
+    assert "measured none" not in done.stderr
+    # The floor read is coverage_floor.py's, so a floor off its own
+    # record is refused here as everywhere (the measured 82.0 derives
+    # 80.0; 81.0 is drift).
+    (planted.tree / ".coverage-floor").write_text(
+        record.replace("80.0\n", "81.0\n"), encoding="utf-8"
+    )
+    done, _ = planted.run_pgrx(PLANT_LH="18")
+    assert done.returncode == 1
+    assert "test:pgrx: .coverage-floor" in done.stderr
+
+
+def test_every_declared_major_side_by_side_holds_its_own(planted: Planted) -> None:
+    """The local form: each major its own target dir and its own line."""
+    planted.floor()
+    done, log = planted.run_pgrx(ORG_PGRX_MAJOR="", PLANT_LH="18")
+    assert done.returncode == 0, done.stderr
+    lines = done.stdout.splitlines()
+    assert "pgrx-pg17 100" in lines
+    assert "pgrx-pg18 100" in lines
+    for major in MAJORS:
         assert (
-            "test:pgrx: pgrx-pg18: 77.77777777777777% is below its derived floor 80.0%"
-            in done.stderr
+            f"test:pgrx: pgrx-pg{major} leg holds its floor 80.0 (100%)" in done.stderr
         )
-
-    def test_a_major_at_the_floor_holds_it(self) -> None:
-        """18 of 18 holds its floor, and the hold names the major."""
-        self.floor()
-        done, _ = self.run_pgrx(PLANT_LH="18")
-        assert done.returncode == 0, done.stderr
-        assert "pgrx-pg18 100" in done.stdout.splitlines()
-        assert "test:pgrx: pgrx-pg18 leg holds its floor 80.0 (100%)" in done.stderr
-
-    def test_the_hold_is_coverage_floor_py_scoped_to_its_major(self) -> None:
-        """End to end (#1875): one holder, judging only the job's own legs.
-
-        The floor records the gate's rust leg and both majors. The pg18
-        job reports pg18 alone and holds: pg17 is the pg17 job's and rust
-        the gate's. The hold is coverage_floor.py's (its line, its
-        drift refusal), not a second comparison in the script.
-        """
-        record = FLOOR
-        (self.tree / ".coverage-floor").write_text(record, encoding="utf-8")
-        done, _ = self.run_pgrx(PLANT_LH="18")
-        assert done.returncode == 0, done.stderr
-        want: list[str] = ["pgrx-pg18 100"]
-        got = [ln for ln in done.stdout.splitlines() if ln.startswith("pgrx-pg")]
-        assert want == got
-        assert "test:pgrx: pgrx-pg18 leg holds its floor 80.0 (100%)" in done.stderr
-        assert "measured none" not in done.stderr
-        # The floor read is coverage_floor.py's, so a floor off its own
-        # record is refused here as everywhere (the measured 82.0 derives
-        # 80.0; 81.0 is drift).
-        (self.tree / ".coverage-floor").write_text(
-            record.replace("80.0\n", "81.0\n"), encoding="utf-8"
-        )
-        done, _ = self.run_pgrx(PLANT_LH="18")
-        assert done.returncode == 1
-        assert "test:pgrx: .coverage-floor" in done.stderr
-
-    def test_every_declared_major_side_by_side_holds_its_own(self) -> None:
-        """The local form: each major its own target dir and its own line."""
-        self.floor()
-        done, log = self.run_pgrx(ORG_PGRX_MAJOR="", PLANT_LH="18")
-        assert done.returncode == 0, done.stderr
-        lines = done.stdout.splitlines()
-        assert "pgrx-pg17 100" in lines
-        assert "pgrx-pg18 100" in lines
-        for major in MAJORS:
-            assert (
-                f"test:pgrx: pgrx-pg{major} leg holds its floor 80.0 (100%)"
-                in done.stderr
-            )
-        targets = sorted(
-            ln.split("|target=")[1].split("|")[0] for ln in self.suites(log)
-        )
-        want = [
-            str(self.tree / "target" / f"llvm-cov-pgrx-pg17-{STABLE}"),
-            str(self.tree / "target" / f"llvm-cov-pgrx-pg18-{STABLE}"),
-        ]
-        assert want == targets
-
-    @pytest.mark.parametrize("major", MAJORS)
-    def test_each_major_cleans_its_workspace_before_its_suite(
-        self, major: object
-    ) -> None:
-        """`llvm-cov clean --workspace` in the major's own directory, first (#2061).
-
-        On main the run cleaned `--profraw-only`, so a workspace
-        executable an earlier build left (a version bump renames them
-        all) stayed and `report` counted it with zero hits.
-        """
-        self.floor()
-        done, log = self.run_pgrx(ORG_PGRX_MAJOR="", PLANT_LH="18")
-        assert done.returncode == 0, done.stderr
-        target = self.tree / "target" / f"llvm-cov-pgrx-pg{major}-{STABLE}"
-        mine = [ln for ln in log if f"|target={target}|" in ln]
-        cleans = [
-            i for i, ln in enumerate(mine) if ln.startswith("cargo llvm-cov clean ")
-        ]
-        once: list[str] = ["cargo llvm-cov clean --workspace|"]
-        seen: list[str] = [mine[i].split("cwd=")[0] for i in cleans]
-        assert once == seen
-        suite = next(i for i, ln in enumerate(mine) if ln.startswith("cargo pgrx test"))
-        assert cleans[0] < suite
+    targets = sorted(ln.split("|target=")[1].split("|")[0] for ln in suites(log))
+    want = [
+        str(planted.tree / "target" / f"llvm-cov-pgrx-pg17-{STABLE}"),
+        str(planted.tree / "target" / f"llvm-cov-pgrx-pg18-{STABLE}"),
+    ]
+    assert want == targets
 
 
-class TestIcuPerMajor(TestPlanted):
+@pytest.mark.parametrize("major", MAJORS)
+def test_each_major_cleans_its_workspace_before_its_suite(
+    planted: Planted, major: object
+) -> None:
+    """`llvm-cov clean --workspace` in the major's own directory, first (#2061).
+
+    On main the run cleaned `--profraw-only`, so a workspace
+    executable an earlier build left (a version bump renames them
+    all) stayed and `report` counted it with zero hits.
+    """
+    planted.floor()
+    done, log = planted.run_pgrx(ORG_PGRX_MAJOR="", PLANT_LH="18")
+    assert done.returncode == 0, done.stderr
+    target = planted.tree / "target" / f"llvm-cov-pgrx-pg{major}-{STABLE}"
+    mine = [ln for ln in log if f"|target={target}|" in ln]
+    cleans = [i for i, ln in enumerate(mine) if ln.startswith("cargo llvm-cov clean ")]
+    once: list[str] = ["cargo llvm-cov clean --workspace|"]
+    seen: list[str] = [mine[i].split("cwd=")[0] for i in cleans]
+    assert once == seen
+    suite = next(i for i, ln in enumerate(mine) if ln.startswith("cargo pgrx test"))
+    assert cleans[0] < suite
+
+
+class IcuPerMajor(Planted):
     """Every suite run compiles with its own major's ICU headers (#1774)."""
 
     def icu(self) -> list[str]:
@@ -481,138 +485,142 @@ class TestIcuPerMajor(TestPlanted):
         lines = Path(f"{self.log}.icu").read_text(encoding="utf-8").splitlines()
         return lines[:1] + sorted(lines[1:])
 
-    @staticmethod
-    def flags(*majors: int) -> list[str]:
-        """Spell what each major's suite saw, with the parent's flags behind.
 
-        Returns:
-            One line per major.
-
-        """
-        return [f"pg{m}|-Iicu-pg{m} parent-b|-Iicu-pg{m} parent-c" for m in majors]
-
-    def test_every_run_shape_sees_its_own_major_only(self) -> None:
-        """Side by side plain, side by side measured, and one major alone."""
-        parent = {
-            "BINDGEN_EXTRA_CLANG_ARGS": "parent-b",
-            "CFLAGS": "parent-c",
-            "PLANT_LH": "18",
-        }
-        shapes: tuple[tuple[str, dict[str, str], str, tuple[int, ...]], ...] = (
-            ("plain, side by side", {"ORG_PGRX_MAJOR": ""}, "17,18", (17, 18)),
-            ("one major", {}, "18", (18,)),
-        )
-        for _name, env, checked, majors in shapes:
-            for floor in (False, True):
-                if floor:
-                    self.floor()
-                Path(f"{self.log}.icu").unlink(missing_ok=True)
-                done, _ = self.run_pgrx(**(parent | env))
-                assert done.returncode == 0, done.stderr
-                want: list[str] = [f"icu-check [{checked}]", *self.flags(*majors)]
-                assert want == self.icu()
-                (self.tree / ".coverage-floor").unlink(missing_ok=True)
+@fixture
+def icu_per_major(tmp_path: Path) -> IcuPerMajor:
+    """Give each row its own IcuPerMajor."""
+    return IcuPerMajor(tmp_path)
 
 
-class TestPlainOrRefused(TestPlanted):
-    """No floor, a failed suite, and a pass that measured nothing."""
+def flags(*majors: int) -> list[str]:
+    """Spell what each major's suite saw, with the parent's flags behind.
 
-    def test_no_floor_runs_the_plain_suite_and_prints_no_figure(self) -> None:
-        """No `.coverage-floor`: today's run, untouched."""
-        done, log = self.run_pgrx()
-        assert done.returncode == 0, done.stderr
-        assert "pgrx-pg18" not in done.stdout
-        (suite,) = self.suites(log)
-        assert "|target=|profile=" in suite
-        coverage = [ln for ln in log if ln.startswith("cargo llvm-cov")]
-        assert coverage == NOTHING
-        assert "test:pgrx: 1 suite run: crates/lab-pg(pg18)" in done.stdout
+    Returns:
+        One line per major.
 
-    def test_a_failed_suite_prints_no_figure(self) -> None:
-        """The suite's exit status gates the figure."""
-        self.floor()
-        done, log = self.run_pgrx(PLANT_FAIL="1")
-        assert done.returncode == 1
-        assert "pgrx-pg18" not in done.stdout
-        assert (
-            "test:pgrx: crates/lab-pg at pg18 failed — a suite that does not pass"
-            " measures nothing"
-        ) in done.stderr
-        reports = [ln for ln in log if ln.startswith("cargo llvm-cov report")]
-        assert reports == NOTHING
-
-    def test_a_pass_that_wrote_no_profile_is_refused_by_name(self) -> None:
-        """An extension that measured nothing must not read as held."""
-        self.floor()
-        done, _ = self.run_pgrx(PLANT_NO_PROFILE="1")
-        assert done.returncode == 1
-        assert "pgrx-pg18" not in done.stdout
-        assert (
-            "test:pgrx: pgrx-pg18: the suite passed and wrote no coverage profile"
-            in done.stderr
-        )
-
-    def test_a_relative_profile_path_is_refused(self) -> None:
-        """The backends' working directory is deleted when pgrx stops them."""
-        self.floor()
-        done, log = self.run_pgrx(PLANT_PROFILE_DIR="")
-        assert done.returncode == 1
-        assert (
-            "test:pgrx: pg18: the profile path 'lab-%p-%m.profraw' is not absolute"
-            in done.stderr
-        )
-        assert self.suites(log) == NOTHING
+    """
+    return [f"pg{m}|-Iicu-pg{m} parent-b|-Iicu-pg{m} parent-c" for m in majors]
 
 
-class TestOwnedBuildDirectory(TestPlanted):
-    """A major's build directory is claimed for this run first (#2062)."""
-
-    def test_a_directory_another_live_run_holds_is_refused(self) -> None:
-        """The planted row: nothing is cleaned or built, and the run is named.
-
-        On main the run cleaned the other run's profiles and built into
-        its directory.
-        """
-        self.floor()
-        target = self.tree / "target" / f"llvm-cov-pgrx-pg18-{STABLE}"
-        target.mkdir(parents=True)
-        other = self.tmp / f"org-coverage-{os.getpid()}"
-        other.mkdir()
-        (target / ".org-coverage-owner").write_text(f"{other}\n", encoding="utf-8")
-        done, log = self.run_pgrx()
-        assert done.returncode == 1
-        assert (
-            f"{target} is being measured by another run ({other});"
-            " wait for it to finish"
-        ) in done.stderr
-        assert "pgrx-pg18" not in done.stdout
-        cleaned = [ln for ln in log if ln.startswith("cargo llvm-cov clean")]
-        assert cleaned == NOTHING
-        assert self.suites(log) == NOTHING
-
-    def test_the_run_is_claimed_before_the_clean(self) -> None:
-        """A measured major records this run as its directory's owner."""
-        self.floor()
-        done, _ = self.run_pgrx(PLANT_LH="17")
-        assert done.returncode == 0, done.stderr
-        target = self.tree / "target" / f"llvm-cov-pgrx-pg18-{STABLE}"
-        assert f"{self.run_dir}\n" == (target / ".org-coverage-owner").read_text(
-            encoding="utf-8"
-        )
-
-    def test_an_empty_run_is_red_by_name(self) -> None:
-        """Outside the belt there is no run to claim for: red, naming it."""
-        self.floor()
-        done, log = self.run_pgrx(ORG_COVERAGE_RUN="")
-        assert done.returncode == 1
-        assert (
-            "test:pgrx: ORG_COVERAGE_RUN is empty — the run a measured build"
-            " directory is"
-        ) in done.stderr
-        assert self.suites(log) == NOTHING
+def test_every_run_shape_sees_its_own_major_only(icu_per_major: IcuPerMajor) -> None:
+    """Side by side plain, side by side measured, and one major alone."""
+    parent = {
+        "BINDGEN_EXTRA_CLANG_ARGS": "parent-b",
+        "CFLAGS": "parent-c",
+        "PLANT_LH": "18",
+    }
+    shapes: tuple[tuple[str, dict[str, str], str, tuple[int, ...]], ...] = (
+        ("plain, side by side", {"ORG_PGRX_MAJOR": ""}, "17,18", (17, 18)),
+        ("one major", {}, "18", (18,)),
+    )
+    for _name, env, checked, majors in shapes:
+        for floor in (False, True):
+            if floor:
+                icu_per_major.floor()
+            Path(f"{icu_per_major.log}.icu").unlink(missing_ok=True)
+            done, _ = icu_per_major.run_pgrx(**(parent | env))
+            assert done.returncode == 0, done.stderr
+            want: list[str] = [f"icu-check [{checked}]", *flags(*majors)]
+            assert want == icu_per_major.icu()
+            (icu_per_major.tree / ".coverage-floor").unlink(missing_ok=True)
 
 
-class TestCoverageTasks(TestPlanted):
+def test_no_floor_runs_the_plain_suite_and_prints_no_figure(planted: Planted) -> None:
+    """No `.coverage-floor`: today's run, untouched."""
+    done, log = planted.run_pgrx()
+    assert done.returncode == 0, done.stderr
+    assert "pgrx-pg18" not in done.stdout
+    (suite,) = suites(log)
+    assert "|target=|profile=" in suite
+    coverage = [ln for ln in log if ln.startswith("cargo llvm-cov")]
+    assert coverage == NOTHING
+    assert "test:pgrx: 1 suite run: crates/lab-pg(pg18)" in done.stdout
+
+
+def test_a_failed_suite_prints_no_figure(planted: Planted) -> None:
+    """The suite's exit status gates the figure."""
+    planted.floor()
+    done, log = planted.run_pgrx(PLANT_FAIL="1")
+    assert done.returncode == 1
+    assert "pgrx-pg18" not in done.stdout
+    assert (
+        "test:pgrx: crates/lab-pg at pg18 failed — a suite that does not pass"
+        " measures nothing"
+    ) in done.stderr
+    reports = [ln for ln in log if ln.startswith("cargo llvm-cov report")]
+    assert reports == NOTHING
+
+
+def test_a_pass_that_wrote_no_profile_is_refused_by_name(planted: Planted) -> None:
+    """An extension that measured nothing must not read as held."""
+    planted.floor()
+    done, _ = planted.run_pgrx(PLANT_NO_PROFILE="1")
+    assert done.returncode == 1
+    assert "pgrx-pg18" not in done.stdout
+    assert (
+        "test:pgrx: pgrx-pg18: the suite passed and wrote no coverage profile"
+        in done.stderr
+    )
+
+
+def test_a_relative_profile_path_is_refused(planted: Planted) -> None:
+    """The backends' working directory is deleted when pgrx stops them."""
+    planted.floor()
+    done, log = planted.run_pgrx(PLANT_PROFILE_DIR="")
+    assert done.returncode == 1
+    assert (
+        "test:pgrx: pg18: the profile path 'lab-%p-%m.profraw' is not absolute"
+        in done.stderr
+    )
+    assert suites(log) == NOTHING
+
+
+def test_a_directory_another_live_run_holds_is_refused(planted: Planted) -> None:
+    """The planted row: nothing is cleaned or built, and the run is named.
+
+    On main the run cleaned the other run's profiles and built into
+    its directory.
+    """
+    planted.floor()
+    target = planted.tree / "target" / f"llvm-cov-pgrx-pg18-{STABLE}"
+    target.mkdir(parents=True)
+    other = planted.tmp / f"org-coverage-{os.getpid()}"
+    other.mkdir()
+    (target / ".org-coverage-owner").write_text(f"{other}\n", encoding="utf-8")
+    done, log = planted.run_pgrx()
+    assert done.returncode == 1
+    assert (
+        f"{target} is being measured by another run ({other}); wait for it to finish"
+    ) in done.stderr
+    assert "pgrx-pg18" not in done.stdout
+    cleaned = [ln for ln in log if ln.startswith("cargo llvm-cov clean")]
+    assert cleaned == NOTHING
+    assert suites(log) == NOTHING
+
+
+def test_the_run_is_claimed_before_the_clean(planted: Planted) -> None:
+    """A measured major records this run as its directory's owner."""
+    planted.floor()
+    done, _ = planted.run_pgrx(PLANT_LH="17")
+    assert done.returncode == 0, done.stderr
+    target = planted.tree / "target" / f"llvm-cov-pgrx-pg18-{STABLE}"
+    assert f"{planted.run_dir}\n" == (target / ".org-coverage-owner").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_an_empty_run_is_red_by_name(planted: Planted) -> None:
+    """Outside the belt there is no run to claim for: red, naming it."""
+    planted.floor()
+    done, log = planted.run_pgrx(ORG_COVERAGE_RUN="")
+    assert done.returncode == 1
+    assert (
+        "test:pgrx: ORG_COVERAGE_RUN is empty — the run a measured build directory is"
+    ) in done.stderr
+    assert suites(log) == NOTHING
+
+
+class CoverageTasks(Planted):
     """coverage:check leaves the extension to test:pgrx; `pgrx` measures it."""
 
     def measured_run(self) -> dict[str, str]:
@@ -629,87 +637,105 @@ class TestCoverageTasks(TestPlanted):
         (profiles / "lab-1-1.profraw").touch()
         return {"ORG_COVERAGE_RUN": str(run)}
 
-    def test_check_runs_no_suite_names_the_legs_and_excludes_the_crate(self) -> None:
-        """Zero suite runs, both majors named, lab-pg's files out of the report."""
-        self.floor()
-        body = task_body("coverage:check")
-        done, log = self.run_bash(
-            ["-c", body],
-            PLANT_LF="10",
-            PLANT_LH="9",
-            **self.as_mise("coverage:check"),
-            **self.measured_run(),
-        )
-        assert done.returncode == 0, done.stderr
-        assert self.suites(log) == NOTHING
-        for major in MAJORS:
-            assert (
-                f"coverage:check: pgrx-pg{major}: measured and held by test:pgrx"
-                in done.stderr
-            )
-        (report,) = [ln for ln in log if ln.startswith("cargo llvm-cov report")]
-        ext = "".join(
-            f"\\{c}" if c in "[]\\.*^$+?(){}|" else c
-            for c in str(self.tree / "crates" / "lab-pg")
-        )
-        assert report.startswith(
-            f"cargo llvm-cov report --ignore-filename-regex ^{ext}/ --lcov"
-        ), report
-        built = [ln for ln in log if ln.startswith("cargo llvm-cov --workspace")]
-        assert built == NOTHING
-        assert "coverage:check: rust leg holds its floor 80.0 (90%)" in done.stdout
 
-    def test_coverage_exclude_naming_the_extension_is_refused(self) -> None:
-        """The removed variable is refused whatever it names (#1653)."""
-        self.floor()
-        body = task_body("coverage:check")
-        done, _ = self.run_bash(
-            ["-c", body], COVERAGE_EXCLUDE="lab-pg", **self.as_mise("coverage:check")
-        )
-        assert done.returncode == 1
+@fixture
+def coverage_tasks(tmp_path: Path) -> CoverageTasks:
+    """Give each row its own CoverageTasks."""
+    return CoverageTasks(tmp_path)
+
+
+def test_check_runs_no_suite_names_the_legs_and_excludes_the_crate(
+    coverage_tasks: CoverageTasks,
+) -> None:
+    """Zero suite runs, both majors named, lab-pg's files out of the report."""
+    coverage_tasks.floor()
+    body = task_body("coverage:check")
+    done, log = coverage_tasks.run_bash(
+        ["-c", body],
+        PLANT_LF="10",
+        PLANT_LH="9",
+        **coverage_tasks.as_mise("coverage:check"),
+        **coverage_tasks.measured_run(),
+    )
+    assert done.returncode == 0, done.stderr
+    assert suites(log) == NOTHING
+    for major in MAJORS:
         assert (
-            "coverage:check: COVERAGE_EXCLUDE is set (lab-pg) — it is removed"
-            " (#1653):\n"
-        ) in done.stderr
-
-    def test_the_pgrx_selector_prints_one_line_per_declared_major(self) -> None:
-        """Every major, measured, stdout holding the leg lines and no more."""
-        done, log = self.run_bash(
-            [str(self.belt / "coverage-measure.sh"), "coverage:adopt", "pgrx"],
-            ORG_PGRX_MAJOR="18",
+            f"coverage:check: pgrx-pg{major}: measured and held by test:pgrx"
+            in done.stderr
         )
-        assert done.returncode == 0, done.stderr
-        want = ["pgrx-pg17 77.77777777777777", "pgrx-pg18 77.77777777777777"]
-        got = sorted(done.stdout.splitlines())
-        assert want == got
-        assert len(self.suites(log)) == 2
-
-    def test_the_majors_selector_lists_what_the_pgrx_selector_measures(
-        self,
-    ) -> None:
-        """pgrx-majors: the same majors, one per line, and no suite run (#1692)."""
-        done, log = self.run_bash([
-            str(self.belt / "coverage-measure.sh"),
-            "release:coverage-floor",
-            "pgrx-majors",
-        ])
-        assert done.returncode == 0, done.stderr
-        assert done.stdout == "17\n18\n"
-        assert not self.suites(log), log
-
-    def test_the_pgrx_selector_holds_no_floor(self) -> None:
-        """Adoption and the release derive the floor; measuring is not holding."""
-        self.floor()
-        done, _ = self.run_bash([
-            str(self.belt / "coverage-measure.sh"),
-            "coverage:adopt",
-            "pgrx",
-        ])
-        assert done.returncode == 0, done.stderr
-        assert "below its derived floor" not in done.stderr
+    (report,) = [ln for ln in log if ln.startswith("cargo llvm-cov report")]
+    ext = "".join(
+        f"\\{c}" if c in "[]\\.*^$+?(){}|" else c
+        for c in str(coverage_tasks.tree / "crates" / "lab-pg")
+    )
+    assert report.startswith(
+        f"cargo llvm-cov report --ignore-filename-regex ^{ext}/ --lcov"
+    ), report
+    built = [ln for ln in log if ln.startswith("cargo llvm-cov --workspace")]
+    assert built == NOTHING
+    assert "coverage:check: rust leg holds its floor 80.0 (90%)" in done.stdout
 
 
-class TestFannedPlan(TestPlanted):
+def test_coverage_exclude_naming_the_extension_is_refused(
+    coverage_tasks: CoverageTasks,
+) -> None:
+    """The removed variable is refused whatever it names (#1653)."""
+    coverage_tasks.floor()
+    body = task_body("coverage:check")
+    done, _ = coverage_tasks.run_bash(
+        ["-c", body],
+        COVERAGE_EXCLUDE="lab-pg",
+        **coverage_tasks.as_mise("coverage:check"),
+    )
+    assert done.returncode == 1
+    assert (
+        "coverage:check: COVERAGE_EXCLUDE is set (lab-pg) — it is removed (#1653):\n"
+    ) in done.stderr
+
+
+def test_the_pgrx_selector_prints_one_line_per_declared_major(
+    coverage_tasks: CoverageTasks,
+) -> None:
+    """Every major, measured, stdout holding the leg lines and no more."""
+    done, log = coverage_tasks.run_bash(
+        [str(coverage_tasks.belt / "coverage-measure.sh"), "coverage:adopt", "pgrx"],
+        ORG_PGRX_MAJOR="18",
+    )
+    assert done.returncode == 0, done.stderr
+    want = ["pgrx-pg17 77.77777777777777", "pgrx-pg18 77.77777777777777"]
+    got = sorted(done.stdout.splitlines())
+    assert want == got
+    assert len(suites(log)) == 2
+
+
+def test_the_majors_selector_lists_what_the_pgrx_selector_measures(
+    coverage_tasks: CoverageTasks,
+) -> None:
+    """pgrx-majors: the same majors, one per line, and no suite run (#1692)."""
+    done, log = coverage_tasks.run_bash([
+        str(coverage_tasks.belt / "coverage-measure.sh"),
+        "release:coverage-floor",
+        "pgrx-majors",
+    ])
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == "17\n18\n"
+    assert not suites(log), log
+
+
+def test_the_pgrx_selector_holds_no_floor(coverage_tasks: CoverageTasks) -> None:
+    """Adoption and the release derive the floor; measuring is not holding."""
+    coverage_tasks.floor()
+    done, _ = coverage_tasks.run_bash([
+        str(coverage_tasks.belt / "coverage-measure.sh"),
+        "coverage:adopt",
+        "pgrx",
+    ])
+    assert done.returncode == 0, done.stderr
+    assert "below its derived floor" not in done.stderr
+
+
+class FannedPlan(Planted):
     """`ORG_PGRX_FANNED` is the plan's JSON, decoded, never parsed in shell (#1880).
 
     The value is pgrx-plan.sh's stdout as the workflow hands it on: a
@@ -719,31 +745,41 @@ class TestFannedPlan(TestPlanted):
 
     declares: ClassVar[tuple[int, ...]] = (15, 16, 17, 18)
 
-    def test_the_producers_stdout_holds_against_the_declaration(self) -> None:
-        """pgrx-plan.sh's literal stdout for pg15 to pg18 is the planned list."""
-        plan, _ = self.run_bash([
-            str(BELT / "pgrx-plan.sh"),
-            str(BELT.parent),
-        ])
-        assert plan.returncode == 0, plan.stderr
-        assert plan.stdout == '["15","16","17","18"]\n'
-        done, log = self.run_pgrx(ORG_PGRX_FANNED=plan.stdout)
-        assert done.returncode == 0, done.stderr
-        assert (
-            "test:pgrx: run by the gate's fan-out, one leg per major: 15,16,17,18"
-            in done.stdout
-        )
-        assert self.suites(log) == NOTHING
 
-    @pytest.mark.parametrize("value", ["[15]", '"15"', "15,16"])
-    def test_a_value_that_is_not_the_plans_shape_is_refused(
-        self, value: object
-    ) -> None:
-        """A number, a bare string and a comma list are each refused by name."""
-        done, log = self.run_pgrx(ORG_PGRX_FANNED=value)
-        assert done.returncode == 1
-        assert (
-            f"test:pgrx: ORG_PGRX_FANNED '{value}' is not a JSON array of"
-            " canonical major strings\n"
-        ) == done.stderr
-        assert self.suites(log) == NOTHING
+@fixture
+def fanned_plan(tmp_path: Path) -> FannedPlan:
+    """Give each row its own FannedPlan."""
+    return FannedPlan(tmp_path)
+
+
+def test_the_producers_stdout_holds_against_the_declaration(
+    fanned_plan: FannedPlan,
+) -> None:
+    """pgrx-plan.sh's literal stdout for pg15 to pg18 is the planned list."""
+    plan, _ = fanned_plan.run_bash([
+        str(BELT / "pgrx-plan.sh"),
+        str(BELT.parent),
+    ])
+    assert plan.returncode == 0, plan.stderr
+    assert plan.stdout == '["15","16","17","18"]\n'
+    done, log = fanned_plan.run_pgrx(ORG_PGRX_FANNED=plan.stdout)
+    assert done.returncode == 0, done.stderr
+    assert (
+        "test:pgrx: run by the gate's fan-out, one leg per major: 15,16,17,18"
+        in done.stdout
+    )
+    assert suites(log) == NOTHING
+
+
+@pytest.mark.parametrize("value", ["[15]", '"15"', "15,16"])
+def test_a_value_that_is_not_the_plans_shape_is_refused(
+    fanned_plan: FannedPlan, value: object
+) -> None:
+    """A number, a bare string and a comma list are each refused by name."""
+    done, log = fanned_plan.run_pgrx(ORG_PGRX_FANNED=value)
+    assert done.returncode == 1
+    assert (
+        f"test:pgrx: ORG_PGRX_FANNED '{value}' is not a JSON array of"
+        " canonical major strings\n"
+    ) == done.stderr
+    assert suites(log) == NOTHING

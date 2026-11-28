@@ -100,14 +100,10 @@ def body() -> str:
     return decoded.as_str(task["run"], f"{TASK}.run")
 
 
-@pytest.mark.usefixtures("_set_up_test_planted")
-class TestPlanted:
+class Planted:
     """A planted git tree, and a stub stele first on PATH."""
 
-    @fixture
-    def _set_up_test_planted(
-        self, tmp_path: Path, request: pytest.FixtureRequest
-    ) -> None:
+    def __init__(self, tmp_path: Path, request: pytest.FixtureRequest) -> None:
         """Plant an empty tree and the stub, which answers PASS."""
         self.tree = tmp_path
         self.bin = Path(tempfile.mkdtemp())
@@ -206,6 +202,12 @@ class TestPlanted:
         )
 
 
+@fixture
+def planted(tmp_path: Path, request: pytest.FixtureRequest) -> Planted:
+    """Give each row its own Planted."""
+    return Planted(tmp_path, request)
+
+
 CALL = "\t".join([
     "assert",
     "permissions",
@@ -220,81 +222,82 @@ CALL = "\t".join([
 SKIPPED = ["lint:caller-permissions: no workflows, skipped"]
 
 
-class TestTask(TestPlanted):
-    """The task's own body: its guard, and the call."""
-
-    def test_no_workflows_is_skipped_by_name(self) -> None:
-        """No tracked workflow: the task says it skipped, stele never runs."""
-        done = self.task()
-        same(done.returncode, 0, done.stderr)
-        same(done.stdout.splitlines(), SKIPPED)
-        same(self.logged(), [])
-
-    def test_an_untracked_workflow_is_no_workflow(self) -> None:
-        """A workflow git does not track: still skipped."""
-        self.plant("ci.yml", track=False)
-        done = self.task()
-        same(done.returncode, 0, done.stderr)
-        same(done.stdout.splitlines(), SKIPPED)
-
-    def test_a_pass_through_the_task(self) -> None:
-        """A tracked workflow: the body calls stele on the canon tree, PASS."""
-        self.plant("ci.yml")
-        done = self.task()
-        same(done.returncode, 0, done.stderr)
-        same(done.stdout.splitlines(), ["lint:caller-permissions: stele: PASS"])
-        same(done.stderr.splitlines(), ["stub stele: walking"])
-        same(self.logged(), [CALL])
+def test_no_workflows_is_skipped_by_name(planted: Planted) -> None:
+    """No tracked workflow: the task says it skipped, stele never runs."""
+    done = planted.task()
+    same(done.returncode, 0, done.stderr)
+    same(done.stdout.splitlines(), SKIPPED)
+    same(planted.logged(), [])
 
 
-class TestHelper(TestPlanted):
-    """The helper's branches, called in this process."""
+def test_an_untracked_workflow_is_no_workflow(planted: Planted) -> None:
+    """A workflow git does not track: still skipped."""
+    planted.plant("ci.yml", track=False)
+    done = planted.task()
+    same(done.returncode, 0, done.stderr)
+    same(done.stdout.splitlines(), SKIPPED)
 
-    def test_stele_missing_is_red(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """No stele on PATH: red by name, nothing run."""
-        rel = self.plant("ci.yml")
-        self.env["PATH"] = str(self.tree)
-        status, out, err = self.helper(CANON, rel, capfd=capfd)
-        same(status, caller_permissions.EXIT_RED)
-        same(out, "")
-        expected = ["lint:caller-permissions: stele missing from the belt"]
-        same(err.splitlines(), expected)
-        same(self.logged(), [])
 
-    def test_a_short_grant_is_red_with_the_fix(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A FAIL from stele: its findings, its verdict, then the fix."""
-        rel = self.plant("ci.yml")
-        self.answer(FAIL, 1)
-        status, out, err = self.helper(CANON, rel, capfd=capfd)
-        same(status, caller_permissions.EXIT_RED)
-        same(out.splitlines(), ["lint:caller-permissions: stele: FAIL"])
-        expected = [
-            "stub stele: walking",
-            "lint:caller-permissions: .github/workflows/release.yml: caller-grant",
-            "  expected: id-token: write",
-            "  actual: absent",
-            *FIX,
-        ]
-        same(err.splitlines(), expected)
-        same(self.logged(), [CALL])
+def test_a_pass_through_the_task(planted: Planted) -> None:
+    """A tracked workflow: the body calls stele on the canon tree, PASS."""
+    planted.plant("ci.yml")
+    done = planted.task()
+    same(done.returncode, 0, done.stderr)
+    same(done.stdout.splitlines(), ["lint:caller-permissions: stele: PASS"])
+    same(done.stderr.splitlines(), ["stub stele: walking"])
+    same(planted.logged(), [CALL])
 
-    def test_a_pass_is_quiet(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """A PASS from stele: its report alone, exit 0."""
-        rel = self.plant("ci.yml")
-        status, out, err = self.helper(CANON, rel, capfd=capfd)
-        same(status, 0, err)
-        same(out.splitlines(), ["lint:caller-permissions: stele: PASS"])
 
-    def test_a_bad_call_is_a_usage_error(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """No canon, an empty canon, or no workflow: exit 2 with the usage line."""
-        usage = f"{TASK}: {caller_permissions.USAGE}"
-        calls: list[list[str]] = [[], [CANON], ["", "ci.yml"]]
-        for argv in calls:
-            status, _out, err = self.helper(*argv, capfd=capfd)
-            same(status, caller_permissions.EXIT_ERROR)
-            same(err.splitlines(), [usage])
-        same(self.logged(), [])
+def test_stele_missing_is_red(
+    planted: Planted, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """No stele on PATH: red by name, nothing run."""
+    rel = planted.plant("ci.yml")
+    planted.env["PATH"] = str(planted.tree)
+    status, out, err = planted.helper(CANON, rel, capfd=capfd)
+    same(status, caller_permissions.EXIT_RED)
+    same(out, "")
+    expected = ["lint:caller-permissions: stele missing from the belt"]
+    same(err.splitlines(), expected)
+    same(planted.logged(), [])
+
+
+def test_a_short_grant_is_red_with_the_fix(
+    planted: Planted, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A FAIL from stele: its findings, its verdict, then the fix."""
+    rel = planted.plant("ci.yml")
+    planted.answer(FAIL, 1)
+    status, out, err = planted.helper(CANON, rel, capfd=capfd)
+    same(status, caller_permissions.EXIT_RED)
+    same(out.splitlines(), ["lint:caller-permissions: stele: FAIL"])
+    expected = [
+        "stub stele: walking",
+        "lint:caller-permissions: .github/workflows/release.yml: caller-grant",
+        "  expected: id-token: write",
+        "  actual: absent",
+        *FIX,
+    ]
+    same(err.splitlines(), expected)
+    same(planted.logged(), [CALL])
+
+
+def test_a_pass_is_quiet(planted: Planted, capfd: pytest.CaptureFixture[str]) -> None:
+    """A PASS from stele: its report alone, exit 0."""
+    rel = planted.plant("ci.yml")
+    status, out, err = planted.helper(CANON, rel, capfd=capfd)
+    same(status, 0, err)
+    same(out.splitlines(), ["lint:caller-permissions: stele: PASS"])
+
+
+def test_a_bad_call_is_a_usage_error(
+    planted: Planted, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """No canon, an empty canon, or no workflow: exit 2 with the usage line."""
+    usage = f"{TASK}: {caller_permissions.USAGE}"
+    calls: list[list[str]] = [[], [CANON], ["", "ci.yml"]]
+    for argv in calls:
+        status, _out, err = planted.helper(*argv, capfd=capfd)
+        same(status, caller_permissions.EXIT_ERROR)
+        same(err.splitlines(), [usage])
+    same(planted.logged(), [])

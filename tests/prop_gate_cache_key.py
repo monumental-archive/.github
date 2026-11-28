@@ -42,29 +42,28 @@ def spelt(data: st.DataObject, tools: list[str]) -> str:
     return "".join(data.draw(SPACE) + w for w in words) + data.draw(SPACE)
 
 
-class TestInstall:
-    """The digest is of the set of tools."""
+# The digest is of the set of tools.
+@given(st.data(), st.lists(TOOL, unique=True, max_size=6))
+def test_order_flags_and_space_do_not_matter(
+    data: st.DataObject, tools: list[str]
+) -> None:
+    """Two spellings of the same tools, one digest."""
+    one = gk.install_digest(spelt(data, tools))
+    two = gk.install_digest(spelt(data, tools))
+    assert one == two
+    assert (not one) == (not tools)
 
-    @given(st.data(), st.lists(TOOL, unique=True, max_size=6))
-    def test_order_flags_and_space_do_not_matter(
-        self, data: st.DataObject, tools: list[str]
-    ) -> None:
-        """Two spellings of the same tools, one digest."""
-        one = gk.install_digest(spelt(data, tools))
-        two = gk.install_digest(spelt(data, tools))
-        assert one == two
-        assert (not one) == (not tools)
 
-    @given(st.data(), st.lists(TOOL, unique=True, max_size=6), TOOL)
-    def test_another_tool_changes_it(
-        self, data: st.DataObject, tools: list[str], extra: str
-    ) -> None:
-        """Adding a tool is a different digest."""
-        if extra in tools:
-            return
-        assert gk.install_digest(spelt(data, tools)) != gk.install_digest(
-            spelt(data, [*tools, extra])
-        )
+@given(st.data(), st.lists(TOOL, unique=True, max_size=6), TOOL)
+def test_another_tool_changes_it(
+    data: st.DataObject, tools: list[str], extra: str
+) -> None:
+    """Adding a tool is a different digest."""
+    if extra in tools:
+        return
+    assert gk.install_digest(spelt(data, tools)) != gk.install_digest(
+        spelt(data, [*tools, extra])
+    )
 
 
 ENV: st.SearchStrategy[dict[str, str]] = st.fixed_dictionaries(
@@ -78,73 +77,69 @@ ENV: st.SearchStrategy[dict[str, str]] = st.fixed_dictionaries(
 )
 
 
-class TestNames:
-    """One key per input, stable within a period."""
-
-    @given(ENV, VERSION, HEX, st.integers(0, 1000), st.lists(TOOL, max_size=3))
-    def test_prefix_and_period(
-        self,
-        env: dict[str, str],
-        version: str,
-        belt: str,
-        period: int,
-        tools: list[str],
-    ) -> None:
-        """The prefix leads; the period's first and last second agree."""
-        install = " ".join(tools)
-        start = gk.Facts(version, "linux-x64", period * PERIOD, belt)
-        end = start._replace(now=(period + 1) * PERIOD - 1)
-        one = gk.names("tools", env, start, install)
-        assert one["key"].startswith(one["prefix"])
-        assert one == gk.names("tools", env, end, install)
-
-    @given(
-        ENV,
-        VERSION,
-        HEX,
-        st.sampled_from(["version", "belt", "config", "install", "period"]),
-    )
-    def test_each_input_moves_the_key(
-        self, env: dict[str, str], version: str, belt: str, what: str
-    ) -> None:
-        """Change one input, a different key."""
-        facts = gk.Facts(version, "linux-x64", 0.0, belt)
-        before = gk.names("tools", env, facts, "a b")["key"]
-        install = "a b"
-        if what == "version":
-            facts = facts._replace(version=version + "1")
-        elif what == "belt":
-            facts = facts._replace(belt=belt + "0")
-        elif what == "config":
-            env = {
-                **env,
-                "ORG_MISE_CONFIG_HASH": env.get("ORG_MISE_CONFIG_HASH", "") + "f",
-            }
-        elif what == "install":
-            install = "a b c"
-        else:
-            facts = facts._replace(now=float(PERIOD))
-        assert gk.names("tools", env, facts, install)["key"] != before
+# One key per input, stable within a period.
+@given(ENV, VERSION, HEX, st.integers(0, 1000), st.lists(TOOL, max_size=3))
+def test_prefix_and_period(
+    env: dict[str, str],
+    version: str,
+    belt: str,
+    period: int,
+    tools: list[str],
+) -> None:
+    """The prefix leads; the period's first and last second agree."""
+    install = " ".join(tools)
+    start = gk.Facts(version, "linux-x64", period * PERIOD, belt)
+    end = start._replace(now=(period + 1) * PERIOD - 1)
+    one = gk.names("tools", env, start, install)
+    assert one["key"].startswith(one["prefix"])
+    assert one == gk.names("tools", env, end, install)
 
 
-class TestRefusal:
-    """Any workflow text: one version, or the helper's refusal."""
+@given(
+    ENV,
+    VERSION,
+    HEX,
+    st.sampled_from(["version", "belt", "config", "install", "period"]),
+)
+def test_each_input_moves_the_key(
+    env: dict[str, str], version: str, belt: str, what: str
+) -> None:
+    """Change one input, a different key."""
+    facts = gk.Facts(version, "linux-x64", 0.0, belt)
+    before = gk.names("tools", env, facts, "a b")["key"]
+    install = "a b"
+    if what == "version":
+        facts = facts._replace(version=version + "1")
+    elif what == "belt":
+        facts = facts._replace(belt=belt + "0")
+    elif what == "config":
+        env = {
+            **env,
+            "ORG_MISE_CONFIG_HASH": env.get("ORG_MISE_CONFIG_HASH", "") + "f",
+        }
+    elif what == "install":
+        install = "a b c"
+    else:
+        facts = facts._replace(now=float(PERIOD))
+    assert gk.names("tools", env, facts, install)["key"] != before
 
-    @given(
-        st.lists(
-            st.one_of(
-                VERSION.map(lambda v: f"          version: {v}"),
-                st.text(max_size=30),
-            ),
-            max_size=6,
-        ).map("\n".join)
-    )
-    @example("  version: 2026.11.7\n  version: 2026.11.7\n")
-    @example("  version: 2026.11.7\n  version: 2026.11.6\n")
-    def test_one_version_or_value_error(self, workflow: str) -> None:
-        """A version that the text pins, or ValueError."""
-        try:
-            got = gk.mise_version(workflow)
-        except ValueError:
-            return
-        assert got in workflow
+
+# Any workflow text: one version, or the helper's refusal.
+@given(
+    st.lists(
+        st.one_of(
+            VERSION.map(lambda v: f"          version: {v}"),
+            st.text(max_size=30),
+        ),
+        max_size=6,
+    ).map("\n".join)
+)
+@example("  version: 2026.11.7\n  version: 2026.11.7\n")
+@example("  version: 2026.11.7\n  version: 2026.11.6\n")
+def test_one_version_or_value_error(workflow: str) -> None:
+    """A version that the text pins, or ValueError."""
+    try:
+        got = gk.mise_version(workflow)
+    except ValueError:
+        return
+    assert got in workflow

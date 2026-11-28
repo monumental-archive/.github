@@ -70,34 +70,33 @@ def run_of(drawn: tuple[str, str, str, str, str]) -> repro.Run:
 RUNS = st.tuples(RUN_ID, TAG, CLASS, MANIFEST, COMPARE).map(run_of)
 
 
-class TestNamesTheComparisonOnlyWhenItFailed:
-    """V: a verdict is worded exactly when the comparison failed."""
+# V: a verdict is worded exactly when the comparison failed.
+@given(RUNS)
+@example(repro.Run("v1.0.0", "go-binary", "", "skipped", "7", "https://x/7"))
+@example(repro.Run("v1.0.0", "go-binary", " \n", "failure", "7", "https://x/7"))
+def test_verdict_exactly_on_failure(run: repro.Run) -> None:
+    """The verdict words appear iff compare is `failure`."""
+    title, body = repro.issue(run)
+    failed = run.compare == "failure"
+    # The outcome is echoed as written; its own words are not a verdict.
+    echoed = f"(the compare step was {run.compare})"
+    text = f"{title}\n{body.replace(echoed, '')}"
+    for words in VERDICT:
+        assert (words in text) == failed, (words, run)
+    assert ("could not be compared" in title) == (not failed)
+    if not failed:
+        assert "no verdict was reached" in body
+        assert f"(the compare step was {run.compare})" in body
+    assert title.startswith(f"repro-check: {run.tag} {run.cls} "), title
+    assert title.endswith(f"(run {run.run_id})"), title
+    assert run.run_url in body
 
-    @given(RUNS)
-    @example(repro.Run("v1.0.0", "go-binary", "", "skipped", "7", "https://x/7"))
-    @example(repro.Run("v1.0.0", "go-binary", " \n", "failure", "7", "https://x/7"))
-    def test_verdict_exactly_on_failure(self, run: repro.Run) -> None:
-        """The verdict words appear iff compare is `failure`."""
-        title, body = repro.issue(run)
-        failed = run.compare == "failure"
-        # The outcome is echoed as written; its own words are not a verdict.
-        echoed = f"(the compare step was {run.compare})"
-        text = f"{title}\n{body.replace(echoed, '')}"
-        for words in VERDICT:
-            assert (words in text) == failed, (words, run)
-        assert ("could not be compared" in title) == (not failed)
-        if not failed:
-            assert "no verdict was reached" in body
-            assert f"(the compare step was {run.compare})" in body
-        assert title.startswith(f"repro-check: {run.tag} {run.cls} "), title
-        assert title.endswith(f"(run {run.run_id})"), title
-        assert run.run_url in body
 
-    @given(RUNS)
-    def test_scope_follows_the_manifest(self, run: repro.Run) -> None:
-        """Per-class scope iff the manifest is not blank."""
-        failed = dataclasses.replace(run, compare="failure")
-        _, body = repro.issue(failed)
-        scoped = f"Judged population: the {run.cls} artifacts {run.tag} published."
-        assert (scoped in body) == bool(run.manifest.strip()), run
-        assert ("carries no per-class typing" in body) == (not run.manifest.strip())
+@given(RUNS)
+def test_scope_follows_the_manifest(run: repro.Run) -> None:
+    """Per-class scope iff the manifest is not blank."""
+    failed = dataclasses.replace(run, compare="failure")
+    _, body = repro.issue(failed)
+    scoped = f"Judged population: the {run.cls} artifacts {run.tag} published."
+    assert (scoped in body) == bool(run.manifest.strip()), run
+    assert ("carries no per-class typing" in body) == (not run.manifest.strip())

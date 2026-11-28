@@ -164,14 +164,10 @@ def vitest_key(path: str) -> str:
     return hashlib.sha1(f"/{path}".encode(), usedforsecurity=False).hexdigest()
 
 
-@pytest.mark.usefixtures("_set_up_test_runner")
-class TestRunner:
+class Runner:
     """A stand-in on PATH, the adapter run against it shard by shard."""
 
-    @fixture
-    def _set_up_test_runner(
-        self, tmp_path: Path, capfd: pytest.CaptureFixture[str]
-    ) -> None:
+    def __init__(self, tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:
         """Make the stand-ins' directory and the reports directory."""
         self.capfd = capfd
         self.base = tmp_path
@@ -267,6 +263,12 @@ class TestRunner:
         assert mine == kept
 
 
+@fixture
+def runner(tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> Runner:
+    """Give each row its own Runner."""
+    return Runner(tmp_path, capfd)
+
+
 FILES = [
     "src/a.test.ts",
     "src/b.test.ts",
@@ -276,43 +278,43 @@ FILES = [
 ]
 
 
-class TestVitest(TestRunner):
-    """The vitest `--shard=k/n`: contiguous slices of the hash order."""
+@pytest.mark.parametrize("n", [2, 3])
+def test_two_and_three_shards_run_the_suite_once(runner: Runner, n: object) -> None:
+    """1/2 and 2/2, then 1/3 to 3/3: every file once, as reported."""
+    for old in runner.reports.glob("*") if runner.reports.is_dir() else []:
+        old.unlink()
+    fixture = {"STUB_FILES": " ".join(FILES)}
+    shares = runner.shards(n, ["vitest", "run", "src"], fixture)
+    runner.whole(n, shares, FILES)
 
-    @pytest.mark.parametrize("n", [2, 3])
-    def test_two_and_three_shards_run_the_suite_once(self, n: object) -> None:
-        """1/2 and 2/2, then 1/3 to 3/3: every file once, as reported."""
-        for old in self.reports.glob("*") if self.reports.is_dir() else []:
-            old.unlink()
-        fixture = {"STUB_FILES": " ".join(FILES)}
-        shares = self.shards(n, ["vitest", "run", "src"], fixture)
-        self.whole(n, shares, FILES)
 
-    def test_the_contract_the_stand_in_keeps(self) -> None:
-        """The first N mod n slices are one longer, in sha1 order."""
-        order = sorted(FILES, key=vitest_key)
-        shares = self.shards(2, ["vitest", "run"], {"STUB_FILES": " ".join(FILES)})
-        want: list[list[str]] = [sorted(order[:3]), sorted(order[3:])]
-        got: list[list[str]] = [sorted(s) for s in shares]
-        assert want == got
+def test_the_contract_the_stand_in_keeps(runner: Runner) -> None:
+    """The first N mod n slices are one longer, in sha1 order."""
+    order = sorted(FILES, key=vitest_key)
+    shares = runner.shards(2, ["vitest", "run"], {"STUB_FILES": " ".join(FILES)})
+    want: list[list[str]] = [sorted(order[:3]), sorted(order[3:])]
+    got: list[list[str]] = [sorted(s) for s in shares]
+    assert want == got
 
-    def test_the_command_gains_the_flag(self) -> None:
-        """`run` and the repository's own arguments kept, `--shard` appended."""
-        status, out, err = self.adapt(
-            "2/2", ["vitest", "--project", "unit"], {"STUB_FILES": " ".join(FILES)}
-        )
-        assert status == 0, err
-        want: list[str] = ["vitest", "run", "--project", "unit", "--shard=2/2"]
-        assert want == words(out)
 
-    def test_more_shards_than_files_is_red(self) -> None:
-        """More shards than files: vitest refuses, so the adapter is red, by name."""
-        status, _out, err = self.adapt(
-            "1/9", ["vitest", "run"], {"STUB_FILES": " ".join(FILES)}
-        )
-        assert status == 1
-        assert "--shard <count> must be a smaller than count of test files" in err
-        assert "so the share cannot be listed" in err
+def test_the_command_gains_the_flag(runner: Runner) -> None:
+    """`run` and the repository's own arguments kept, `--shard` appended."""
+    status, out, err = runner.adapt(
+        "2/2", ["vitest", "--project", "unit"], {"STUB_FILES": " ".join(FILES)}
+    )
+    assert status == 0, err
+    want: list[str] = ["vitest", "run", "--project", "unit", "--shard=2/2"]
+    assert want == words(out)
+
+
+def test_more_shards_than_files_is_red(runner: Runner) -> None:
+    """More shards than files: vitest refuses, so the adapter is red, by name."""
+    status, _out, err = runner.adapt(
+        "1/9", ["vitest", "run"], {"STUB_FILES": " ".join(FILES)}
+    )
+    assert status == 1
+    assert "--shard <count> must be a smaller than count of test files" in err
+    assert "so the share cannot be listed" in err
 
 
 TESTS = [
@@ -324,44 +326,45 @@ TESTS = [
 ]
 
 
-class TestNextest(TestRunner):
-    """nextest `--partition slice:k/n`: round-robin over every binary."""
+@pytest.mark.parametrize("n", [2, 3])
+def test_nextest_two_and_three_shards_run_the_suite_once(
+    runner: Runner, n: object
+) -> None:
+    """Every test once, across binaries, as reported."""
+    for old in runner.reports.glob("*") if runner.reports.is_dir() else []:
+        old.unlink()
+    fixture = {"STUB_TESTS": "\n".join(TESTS)}
+    shares = runner.shards(n, ["cargo", "nextest", "run", "--workspace"], fixture)
+    runner.whole(n, shares, TESTS)
 
-    @pytest.mark.parametrize("n", [2, 3])
-    def test_two_and_three_shards_run_the_suite_once(self, n: object) -> None:
-        """Every test once, across binaries, as reported."""
-        for old in self.reports.glob("*") if self.reports.is_dir() else []:
-            old.unlink()
-        fixture = {"STUB_TESTS": "\n".join(TESTS)}
-        shares = self.shards(n, ["cargo", "nextest", "run", "--workspace"], fixture)
-        self.whole(n, shares, TESTS)
 
-    def test_the_command_gains_the_partition(self) -> None:
-        """`--partition slice:k/n`, after the repository's own arguments."""
-        status, out, err = self.adapt(
-            "1/2",
-            ["cargo", "nextest", "run", "-p", "x"],
-            {"STUB_TESTS": "\n".join(TESTS)},
-        )
-        assert status == 0, err
-        want: list[str] = [
-            "cargo",
-            "nextest",
-            "run",
-            "-p",
-            "x",
-            "--partition",
-            "slice:1/2",
-        ]
-        assert want == words(out)
+def test_the_command_gains_the_partition(runner: Runner) -> None:
+    """`--partition slice:k/n`, after the repository's own arguments."""
+    status, out, err = runner.adapt(
+        "1/2",
+        ["cargo", "nextest", "run", "-p", "x"],
+        {"STUB_TESTS": "\n".join(TESTS)},
+    )
+    assert status == 0, err
+    want: list[str] = [
+        "cargo",
+        "nextest",
+        "run",
+        "-p",
+        "x",
+        "--partition",
+        "slice:1/2",
+    ]
+    assert want == words(out)
 
-    def test_a_shard_dealt_nothing_runs_true(self) -> None:
-        """Two tests on three shards: the third runs `true`, never exit 4."""
-        status, out, err = self.adapt(
-            "3/3", ["cargo", "nextest", "run"], {"STUB_TESTS": "\n".join(TESTS[:2])}
-        )
-        assert status == 0, err
-        assert words(out) == TRUE
+
+def test_a_shard_dealt_nothing_runs_true(runner: Runner) -> None:
+    """Two tests on three shards: the third runs `true`, never exit 4."""
+    status, out, err = runner.adapt(
+        "3/3", ["cargo", "nextest", "run"], {"STUB_TESTS": "\n".join(TESTS[:2])}
+    )
+    assert status == 0, err
+    assert words(out) == TRUE
 
 
 PACKAGES = [
@@ -380,101 +383,100 @@ TEST_FILES = [
 ]
 
 
-class TestPytest(TestRunner):
-    """pytest: every n-th of the sorted test files, from the k-th (#2177)."""
-
-    @pytest.mark.parametrize("n", [2, 3])
-    def test_the_share_is_this_shards_files_and_the_union_the_population(
-        self, n: int
-    ) -> None:
-        """Each shard runs its own files; together, every file once."""
-        fixture = {"STUB_FILES": " ".join(TEST_FILES)}
-        command = ["pytest", "-c", "mise/pytest.toml", "-n", "auto", "tests"]
-        shares = self.shards(n, command, fixture)
-        self.whole(n, shares, TEST_FILES)
-        assert shares[0] == sorted(TEST_FILES)[::n]
-
-    def test_options_stay_and_paths_become_files(self) -> None:
-        """A valued option's value is not a path; the paths become the share."""
-        status, out, err = self.adapt(
-            "1/2",
-            ["python3", "-m", "pytest", "-c", "cfg.toml", "--durations=10", "tests"],
-            {"STUB_FILES": " ".join(TEST_FILES)},
-        )
-        assert status == 0, err
-        want: list[str] = [
-            "python3", "-m", "pytest", "-c", "cfg.toml", "--durations=10",
-            "tests/sub/test_c.py", "tests/test_b.py",
-        ]  # fmt: skip
-        assert want == words(out)
-
-    def test_a_shard_dealt_nothing_runs_true(self) -> None:
-        """One file on two shards: the second runs `true`, not every test."""
-        status, out, err = self.adapt(
-            "2/2", ["pytest", "tests"], {"STUB_FILES": TEST_FILES[0]}
-        )
-        assert status == 0, err
-        assert words(out) == TRUE
+@pytest.mark.parametrize("n", [2, 3])
+def test_the_share_is_this_shards_files_and_the_union_the_population(
+    runner: Runner, n: int
+) -> None:
+    """Each shard runs its own files; together, every file once."""
+    fixture = {"STUB_FILES": " ".join(TEST_FILES)}
+    command = ["pytest", "-c", "mise/pytest.toml", "-n", "auto", "tests"]
+    shares = runner.shards(n, command, fixture)
+    runner.whole(n, shares, TEST_FILES)
+    assert shares[0] == sorted(TEST_FILES)[::n]
 
 
-class TestGoTest(TestRunner):
-    """`go test`: every n-th of the sorted packages, from the k-th."""
-
-    @pytest.mark.parametrize("n", [2, 3])
-    def test_two_and_three_shards_run_the_suite_once(self, n: object) -> None:
-        """Every package once, as reported."""
-        for old in self.reports.glob("*") if self.reports.is_dir() else []:
-            old.unlink()
-        fixture = {"STUB_PACKAGES": " ".join(PACKAGES)}
-        shares = self.shards(n, ["go", "test", "-run", "X", "./..."], fixture)
-        self.whole(n, shares, PACKAGES)
-
-    def test_flags_stay_and_patterns_become_packages(self) -> None:
-        """A valued flag's value is not a package; `-args` and after stay."""
-        status, out, err = self.adapt(
-            "1/2",
-            ["go", "test", "-run", "X", "-v", "./...", "-args", "-x"],
-            {"STUB_PACKAGES": " ".join(PACKAGES)},
-        )
-        assert status == 0, err
-        want: list[str] = [
-            "go", "test", "-run", "X", "-v",
-            "example.com/m/a", "example.com/m/c", "-args", "-x",
-        ]  # fmt: skip
-        assert want == words(out)
-
-    def test_a_shard_dealt_nothing_runs_true(self) -> None:
-        """One package on two shards: the second runs `true`, not `go test .`."""
-        status, out, err = self.adapt(
-            "2/2", ["go", "test", "./..."], {"STUB_PACKAGES": "example.com/m/a"}
-        )
-        assert status == 0, err
-        assert words(out) == TRUE
+def test_options_stay_and_paths_become_files(runner: Runner) -> None:
+    """A valued option's value is not a path; the paths become the share."""
+    status, out, err = runner.adapt(
+        "1/2",
+        ["python3", "-m", "pytest", "-c", "cfg.toml", "--durations=10", "tests"],
+        {"STUB_FILES": " ".join(TEST_FILES)},
+    )
+    assert status == 0, err
+    want: list[str] = [
+        "python3", "-m", "pytest", "-c", "cfg.toml", "--durations=10",
+        "tests/sub/test_c.py", "tests/test_b.py",
+    ]  # fmt: skip
+    assert want == words(out)
 
 
-class TestUnchanged(TestRunner):
-    """Any other command, or no shard, goes as it is."""
+def test_pytest_a_shard_dealt_nothing_runs_true(runner: Runner) -> None:
+    """One file on two shards: the second runs `true`, not every test."""
+    status, out, err = runner.adapt(
+        "2/2", ["pytest", "tests"], {"STUB_FILES": TEST_FILES[0]}
+    )
+    assert status == 0, err
+    assert words(out) == TRUE
 
-    def test_no_adapter_passes_through(self) -> None:
-        """A setup line under a shard: unchanged, no report."""
-        status, out, err = self.adapt("1/2", ["python3", "setup.py"], {})
-        assert status == 0, err
-        assert argv_of("python3", "setup.py") == words(out)
-        assert not self.reports.exists()
 
-    def test_no_shard_passes_through(self) -> None:
-        """ORG_SHARD empty: the vitest run as given."""
-        _status, out, _err = self.adapt("", ["vitest", "run"], {"STUB_FILES": "a"})
-        assert argv_of("vitest", "run") == words(out)
+@pytest.mark.parametrize("n", [2, 3])
+def test_go_test_two_and_three_shards_run_the_suite_once(
+    runner: Runner, n: object
+) -> None:
+    """Every package once, as reported."""
+    for old in runner.reports.glob("*") if runner.reports.is_dir() else []:
+        old.unlink()
+    fixture = {"STUB_PACKAGES": " ".join(PACKAGES)}
+    shares = runner.shards(n, ["go", "test", "-run", "X", "./..."], fixture)
+    runner.whole(n, shares, PACKAGES)
 
-    def test_usage(self, as_task: Callable[[str], None]) -> None:
-        """No `--`: the usage exit."""
-        as_task("test")
-        status = shard_runner.main(["vitest"])
-        assert status == USAGE
-        assert self.capfd.readouterr().err == (
-            "test: usage: belt shard-runner -- <command> [<argument>…]\n"
-        )
+
+def test_flags_stay_and_patterns_become_packages(runner: Runner) -> None:
+    """A valued flag's value is not a package; `-args` and after stay."""
+    status, out, err = runner.adapt(
+        "1/2",
+        ["go", "test", "-run", "X", "-v", "./...", "-args", "-x"],
+        {"STUB_PACKAGES": " ".join(PACKAGES)},
+    )
+    assert status == 0, err
+    want: list[str] = [
+        "go", "test", "-run", "X", "-v",
+        "example.com/m/a", "example.com/m/c", "-args", "-x",
+    ]  # fmt: skip
+    assert want == words(out)
+
+
+def test_go_test_a_shard_dealt_nothing_runs_true(runner: Runner) -> None:
+    """One package on two shards: the second runs `true`, not `go test .`."""
+    status, out, err = runner.adapt(
+        "2/2", ["go", "test", "./..."], {"STUB_PACKAGES": "example.com/m/a"}
+    )
+    assert status == 0, err
+    assert words(out) == TRUE
+
+
+def test_no_adapter_passes_through(runner: Runner) -> None:
+    """A setup line under a shard: unchanged, no report."""
+    status, out, err = runner.adapt("1/2", ["python3", "setup.py"], {})
+    assert status == 0, err
+    assert argv_of("python3", "setup.py") == words(out)
+    assert not runner.reports.exists()
+
+
+def test_no_shard_passes_through(runner: Runner) -> None:
+    """ORG_SHARD empty: the vitest run as given."""
+    _status, out, _err = runner.adapt("", ["vitest", "run"], {"STUB_FILES": "a"})
+    assert argv_of("vitest", "run") == words(out)
+
+
+def test_usage(runner: Runner, as_task: Callable[[str], None]) -> None:
+    """No `--`: the usage exit."""
+    as_task("test")
+    status = shard_runner.main(["vitest"])
+    assert status == USAGE
+    assert runner.capfd.readouterr().err == (
+        "test: usage: belt shard-runner -- <command> [<argument>…]\n"
+    )
 
 
 @pytest.mark.parametrize(

@@ -96,24 +96,20 @@ def run_build(repository: str, version: str) -> tuple[str, list[list[str]], list
     return notice, calls, dist
 
 
-class TestAssetName:
-    """V: the name after the owner, one leading dot stripped."""
-
-    @given(OWNER, NAME, VERSION)
-    @example("monumental-archive", ".github", "1.70.2")
-    @example("o", "..x", "1.0.0")
-    @example("o", "x.", "1.0.0")
-    def test_one_leading_dot_stripped(
-        self, owner: str, name: str, version: str
-    ) -> None:
-        """The asset, its prefix and the tag follow the stripped name."""
-        shipped = name[1:] if name.startswith(".") else name
-        base = f"{shipped}-{version}"
-        notice, calls, dist = run_build(f"{owner}/{name}", version)
-        want: list[str] = [f"{base}.tar.gz"]
-        assert dist == want
-        assert notice.startswith(f"{base}.tar.gz: "), notice
-        assert len(calls) == 2
-        for call in calls:
-            assert f"--prefix={base}/" in call
-            assert call[-1] == f"v{version}"
+# V: the name after the owner, one leading dot stripped.
+@given(OWNER, NAME, VERSION)
+@example("monumental-archive", ".github", "1.70.2")
+@example("o", "..x", "1.0.0")
+@example("o", "x.", "1.0.0")
+def test_one_leading_dot_stripped(owner: str, name: str, version: str) -> None:
+    """The asset, its prefix and the tag follow the stripped name."""
+    shipped = name[1:] if name.startswith(".") else name
+    base = f"{shipped}-{version}"
+    notice, calls, dist = run_build(f"{owner}/{name}", version)
+    want: list[str] = [f"{base}.tar.gz"]
+    assert dist == want
+    assert notice.startswith(f"{base}.tar.gz: "), notice
+    assert len(calls) == 2
+    for call in calls:
+        assert f"--prefix={base}/" in call
+        assert call[-1] == f"v{version}"

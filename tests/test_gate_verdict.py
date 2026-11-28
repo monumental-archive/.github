@@ -56,119 +56,119 @@ def step_script() -> str:
     return "\n".join(line[indent:] for line in block) + "\n"
 
 
-class TestEveryPartPassed:
-    """Each row: the jobs' results, and the verdict printed."""
+# Each row: the jobs' results, and the verdict printed.
+def verdict(  # ruff: ignore[too-many-arguments] -- one keyword per job result
+    plan: str,
+    gate: str,
+    pgrx: str,
+    *,
+    majors: str = "[16, 17]",
+    coverage: str = "skipped",
+    split: str = "false",
+) -> subprocess.CompletedProcess[str]:
+    """Run the lifted step on one set of job results.
 
-    @staticmethod
-    def verdict(  # ruff: ignore[too-many-arguments] -- one keyword per job result
-        plan: str,
-        gate: str,
-        pgrx: str,
-        *,
-        majors: str = "[16, 17]",
-        coverage: str = "skipped",
-        split: str = "false",
-    ) -> subprocess.CompletedProcess[str]:
-        """Run the lifted step on one set of job results.
+    Returns:
+        The run.
 
-        Returns:
-            The run.
+    """
+    bash = support.tool("bash")
+    return subprocess.run(
+        [bash, "-c", step_script()],
+        env=support.env(
+            PATH=os.environ["PATH"],
+            PLAN=plan,
+            GATE=gate,
+            PGRX=pgrx,
+            MAJORS=majors,
+            COVERAGE=coverage,
+            SPLIT=split,
+        ),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
 
-        """
-        bash = support.tool("bash")
-        return subprocess.run(
-            [bash, "-c", step_script()],
-            env=support.env(
-                PATH=os.environ["PATH"],
-                PLAN=plan,
-                GATE=gate,
-                PGRX=pgrx,
-                MAJORS=majors,
-                COVERAGE=coverage,
-                SPLIT=split,
-            ),
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=60,
-        )
 
-    def test_every_part_green(self) -> None:
-        """Plan, gate and every planned leg passed."""
-        done = self.verdict("success", "success", "success")
-        assert done.returncode == 0, done.stderr
-        assert (
-            done.stdout
-            == "ci: plan, gate and every pgrx leg (\\[16\\,\\ 17\\]) passed\n"
-        )
+def test_every_part_green() -> None:
+    """Plan, gate and every planned leg passed."""
+    done = verdict("success", "success", "success")
+    assert done.returncode == 0, done.stderr
+    assert (
+        done.stdout == "ci: plan, gate and every pgrx leg (\\[16\\,\\ 17\\]) passed\n"
+    )
 
-    def test_no_legs_planned_and_none_ran(self) -> None:
-        """A tree with no extension skips the legs, and that is green."""
-        done = self.verdict("success", "success", "skipped", majors="[]")
-        assert done.returncode == 0, done.stderr
-        assert done.stdout == "ci: plan, gate and every pgrx leg (\\[\\]) passed\n"
 
-    def test_planned_legs_that_were_skipped(self) -> None:
-        """A skipped required leg must not count as passing."""
-        done = self.verdict("success", "success", "skipped")
-        assert done.returncode == 1, done.stderr
-        assert done.stdout == (
-            "::error::pgrx legs were skipped although majors were planned\n"
-            "  planned: \\[16\\,\\ 17\\]\n"
-        )
+def test_no_legs_planned_and_none_ran() -> None:
+    """A tree with no extension skips the legs, and that is green."""
+    done = verdict("success", "success", "skipped", majors="[]")
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == "ci: plan, gate and every pgrx leg (\\[\\]) passed\n"
 
-    def test_a_failed_plan(self) -> None:
-        """The plan's result is named."""
-        done = self.verdict("failure", "skipped", "skipped", majors="")
-        assert done.returncode == 1, done.stderr
-        assert done.stdout == (
-            "::error::a job the gate needs did not succeed\n  job plan: failure\n"
-            "::error::a job the gate needs did not succeed\n  job gate: skipped\n"
-            "::error::pgrx legs were skipped although majors were planned\n"
-            "  planned: ''\n"
-        )
 
-    def test_a_cancelled_gate(self) -> None:
-        """The gate's result is named."""
-        done = self.verdict("success", "cancelled", "success")
-        assert done.returncode == 1, done.stderr
-        assert (
-            done.stdout
-            == "::error::a job the gate needs did not succeed\n  job gate: cancelled\n"
-        )
+def test_planned_legs_that_were_skipped() -> None:
+    """A skipped required leg must not count as passing."""
+    done = verdict("success", "success", "skipped")
+    assert done.returncode == 1, done.stderr
+    assert done.stdout == (
+        "::error::pgrx legs were skipped although majors were planned\n"
+        "  planned: \\[16\\,\\ 17\\]\n"
+    )
 
-    def test_a_failed_leg(self) -> None:
-        """A leg's failure is named."""
-        done = self.verdict("success", "success", "failure")
-        assert done.returncode == 1, done.stderr
-        assert done.stdout == (
-            "::error::a job the gate needs did not succeed\n"
-            "  job pgrx\\ legs: failure\n"
-        )
 
-    def test_sharded_tests_judged(self) -> None:
-        """A split leg's coverage job passed: green (#2049, #2160)."""
-        done = self.verdict(
-            "success", "success", "success", coverage="success", split="true"
-        )
-        assert done.returncode == 0, done.stderr
+def test_a_failed_plan() -> None:
+    """The plan's result is named."""
+    done = verdict("failure", "skipped", "skipped", majors="")
+    assert done.returncode == 1, done.stderr
+    assert done.stdout == (
+        "::error::a job the gate needs did not succeed\n  job plan: failure\n"
+        "::error::a job the gate needs did not succeed\n  job gate: skipped\n"
+        "::error::pgrx legs were skipped although majors were planned\n"
+        "  planned: ''\n"
+    )
 
-    def test_sharded_tests_never_judged(self) -> None:
-        """A split leg whose coverage job was skipped is red, by name."""
-        done = self.verdict("success", "success", "success", split="true")
-        assert done.returncode == 1, done.stderr
-        assert (
-            done.stdout
-            == "::error::a job the gate needs did not succeed\n  job coverage: skipped\n"
-        )
 
-    def test_a_failed_coverage_job(self) -> None:
-        """The coverage job's failure is named."""
-        done = self.verdict(
-            "success", "success", "success", coverage="failure", split="true"
-        )
-        assert done.returncode == 1, done.stderr
-        assert (
-            done.stdout
-            == "::error::a job the gate needs did not succeed\n  job coverage: failure\n"
-        )
+def test_a_cancelled_gate() -> None:
+    """The gate's result is named."""
+    done = verdict("success", "cancelled", "success")
+    assert done.returncode == 1, done.stderr
+    assert (
+        done.stdout
+        == "::error::a job the gate needs did not succeed\n  job gate: cancelled\n"
+    )
+
+
+def test_a_failed_leg() -> None:
+    """A leg's failure is named."""
+    done = verdict("success", "success", "failure")
+    assert done.returncode == 1, done.stderr
+    assert done.stdout == (
+        "::error::a job the gate needs did not succeed\n  job pgrx\\ legs: failure\n"
+    )
+
+
+def test_sharded_tests_judged() -> None:
+    """A split leg's coverage job passed: green (#2049, #2160)."""
+    done = verdict("success", "success", "success", coverage="success", split="true")
+    assert done.returncode == 0, done.stderr
+
+
+def test_sharded_tests_never_judged() -> None:
+    """A split leg whose coverage job was skipped is red, by name."""
+    done = verdict("success", "success", "success", split="true")
+    assert done.returncode == 1, done.stderr
+    assert (
+        done.stdout
+        == "::error::a job the gate needs did not succeed\n  job coverage: skipped\n"
+    )
+
+
+def test_a_failed_coverage_job() -> None:
+    """The coverage job's failure is named."""
+    done = verdict("success", "success", "success", coverage="failure", split="true")
+    assert done.returncode == 1, done.stderr
+    assert (
+        done.stdout
+        == "::error::a job the gate needs did not succeed\n  job coverage: failure\n"
+    )

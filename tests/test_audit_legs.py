@@ -315,120 +315,125 @@ def drift(
     return out
 
 
-class TestDerivation:
-    """The table and the `if:`s cover every guard every job's task tests."""
+# The table and the `if:`s cover every guard every job's task tests.
+def test_the_table_holds_the_workflows() -> None:
+    """The real table against the real workflows and task bodies."""
+    none: list[str] = []
+    assert none == drift(audit_legs.load_table())
 
-    def test_the_table_holds_the_workflows(self) -> None:
-        """The real table against the real workflows and task bodies."""
-        none: list[str] = []
-        assert none == drift(audit_legs.load_table())
 
-    def test_a_narrow_row_is_named(self) -> None:
-        """Planted: go-vulns's row forgets the nested go.mod forms."""
-        table = audit_legs.load_table()
-        table["repo-dependencies"]["go-vulns"] = audit_legs.Row(when=("go.mod",))
-        assert (
-            "repo-dependencies.yml: go-vulns runs audit:go-vulns on a tree"
-            " tracking */*/go.mod */go.mod; its row's `when` does not run it there"
-        ) in drift(table)
+def test_a_narrow_row_is_named() -> None:
+    """Planted: go-vulns's row forgets the nested go.mod forms."""
+    table = audit_legs.load_table()
+    table["repo-dependencies"]["go-vulns"] = audit_legs.Row(when=("go.mod",))
+    assert (
+        "repo-dependencies.yml: go-vulns runs audit:go-vulns on a tree"
+        " tracking */*/go.mod */go.mod; its row's `when` does not run it there"
+    ) in drift(table)
 
-    def test_a_guarded_job_with_no_if_is_named(self) -> None:
-        """Planted: a job runs a guarded task with no `if:` on applies."""
-        documents = subject_workflows()
-        planted = copy.deepcopy(documents["repo-dependencies"])
-        jobs = decoded.as_object(planted["jobs"], "jobs")
-        jobs["planted"] = {
-            "runs-on": "ubuntu-26.04",
-            "steps": [{"run": "mise run audit:deny"}],
-        }
-        documents["repo-dependencies"] = planted
-        table = audit_legs.load_table()
-        table["repo-dependencies"]["planted"] = audit_legs.Row(
-            when=("Cargo.lock", "*/Cargo.lock")
-        )
-        assert (
-            "repo-dependencies.yml: planted runs audit:deny, which skips on a"
-            " tree tracking none of */Cargo.lock Cargo.lock; the job carries no"
-            " `if: ${{ needs.applies.outputs.planted == 'true' }}`"
-        ) in drift(table, documents)
 
-    def test_a_row_on_an_unguarded_job_is_named(self) -> None:
-        """Planted: links runs everywhere, so a `when` would skip it."""
-        table = audit_legs.load_table()
-        table["repo-records"]["links"] = audit_legs.Row(when=("*.md",))
-        got = drift(table)
-        assert (
-            "repo-records.yml: links runs audit:links before any guard;"
-            " its row must carry no `when`"
-        ) in got
-        assert (
-            "repo-records.yml: applies declares bestpractices; the conditional"
-            " rows and lists are bestpractices links"
-        ) in got
+def test_a_guarded_job_with_no_if_is_named() -> None:
+    """Planted: a job runs a guarded task with no `if:` on applies."""
+    documents = subject_workflows()
+    planted = copy.deepcopy(documents["repo-dependencies"])
+    jobs = decoded.as_object(planted["jobs"], "jobs")
+    jobs["planted"] = {
+        "runs-on": "ubuntu-26.04",
+        "steps": [{"run": "mise run audit:deny"}],
+    }
+    documents["repo-dependencies"] = planted
+    table = audit_legs.load_table()
+    table["repo-dependencies"]["planted"] = audit_legs.Row(
+        when=("Cargo.lock", "*/Cargo.lock")
+    )
+    assert (
+        "repo-dependencies.yml: planted runs audit:deny, which skips on a"
+        " tree tracking none of */Cargo.lock Cargo.lock; the job carries no"
+        " `if: ${{ needs.applies.outputs.planted == 'true' }}`"
+    ) in drift(table, documents)
 
-    def test_a_task_free_job_takes_its_users_guards(self) -> None:
-        """The seed draw applies where the property job does."""
-        guards = derivation(subject_workflows())["repo-deep-tests"]
-        seed = guards["python-properties-seed"]
-        assert guards["python-properties"].paths == seed.paths
-        assert seed.who == "nothing (it exists for python-properties)"
 
-    def test_a_floor_no_task_reads_is_named(self) -> None:
-        """Planted: semver's row names a floor its task never reads."""
-        table = audit_legs.load_table()
-        row = table["repo-public-api"]["semver"]
-        table["repo-public-api"]["semver"] = audit_legs.Row(
-            when=row.when, floor="rust-branches"
-        )
-        assert (
-            "repo-public-api.semver: its floor rust-branches is no leg its tasks read"
-            in drift(table)
-        )
+def test_a_row_on_an_unguarded_job_is_named() -> None:
+    """Planted: links runs everywhere, so a `when` would skip it."""
+    table = audit_legs.load_table()
+    table["repo-records"]["links"] = audit_legs.Row(when=("*.md",))
+    got = drift(table)
+    assert (
+        "repo-records.yml: links runs audit:links before any guard;"
+        " its row must carry no `when`"
+    ) in got
+    assert (
+        "repo-records.yml: applies declares bestpractices; the conditional"
+        " rows and lists are bestpractices links"
+    ) in got
 
-    def test_rows_and_jobs_match_one_for_one(self) -> None:
-        """A job with no row, a row with no job, and the wiring are named."""
-        table = audit_legs.load_table()
-        del table["repo-records"]["regression-tests"]
-        table["repo-records"]["gone"] = audit_legs.Row()
-        table["nowhere"] = {}
-        documents = subject_workflows()
-        records = copy.deepcopy(documents["repo-records"])
-        jobs = decoded.as_object(records["jobs"], "jobs")
-        report = decoded.as_object(jobs["report"], "report")
-        report["needs"] = ["links"]
-        applies = decoded.as_object(jobs["applies"], "applies")
-        applies["steps"] = []
-        documents["repo-records"] = records
-        public = copy.deepcopy(documents["repo-public-api"])
-        del decoded.as_object(public["jobs"], "jobs")["applies"]
-        documents["repo-public-api"] = public
-        got = drift(table, documents)
-        for line in (
-            "repo-records.yml: regression-tests has no row in mise/audit-legs.toml",
-            "mise/audit-legs.toml: repo-records.gone names no job of repo-records.yml",
-            "mise/audit-legs.toml: nowhere is no subject workflow",
-            "repo-records.yml: report does not need applies",
-            "repo-records.yml: applies runs no `belt audit-legs repo-records`",
-            "repo-public-api.yml: rows semver are conditional; no `applies` job",
-        ):
-            assert line in got
-        del table["repo-records"]
-        assert "repo-records.yml has no table in mise/audit-legs.toml" in drift(table)
 
-    def test_an_if_with_no_row_is_named(self) -> None:
-        """Planted: regression-tests reads an output no row declares."""
-        documents = subject_workflows()
-        records = copy.deepcopy(documents["repo-records"])
-        job = decoded.as_object(
-            decoded.as_object(records["jobs"], "jobs")["regression-tests"], "job"
-        )
-        job["needs"] = "applies"
-        job["if"] = "${{ needs.applies.outputs.regression-tests == 'true' }}"
-        documents["repo-records"] = records
-        assert (
-            "repo-records.yml: regression-tests reads its applies output;"
-            " its row carries no `when`"
-        ) in drift(audit_legs.load_table(), documents)
+def test_a_task_free_job_takes_its_users_guards() -> None:
+    """The seed draw applies where the property job does."""
+    guards = derivation(subject_workflows())["repo-deep-tests"]
+    seed = guards["python-properties-seed"]
+    assert guards["python-properties"].paths == seed.paths
+    assert seed.who == "nothing (it exists for python-properties)"
+
+
+def test_a_floor_no_task_reads_is_named() -> None:
+    """Planted: semver's row names a floor its task never reads."""
+    table = audit_legs.load_table()
+    row = table["repo-public-api"]["semver"]
+    table["repo-public-api"]["semver"] = audit_legs.Row(
+        when=row.when, floor="rust-branches"
+    )
+    assert (
+        "repo-public-api.semver: its floor rust-branches is no leg its tasks read"
+        in drift(table)
+    )
+
+
+def test_rows_and_jobs_match_one_for_one() -> None:
+    """A job with no row, a row with no job, and the wiring are named."""
+    table = audit_legs.load_table()
+    del table["repo-records"]["regression-tests"]
+    table["repo-records"]["gone"] = audit_legs.Row()
+    table["nowhere"] = {}
+    documents = subject_workflows()
+    records = copy.deepcopy(documents["repo-records"])
+    jobs = decoded.as_object(records["jobs"], "jobs")
+    report = decoded.as_object(jobs["report"], "report")
+    report["needs"] = ["links"]
+    applies = decoded.as_object(jobs["applies"], "applies")
+    applies["steps"] = []
+    documents["repo-records"] = records
+    public = copy.deepcopy(documents["repo-public-api"])
+    del decoded.as_object(public["jobs"], "jobs")["applies"]
+    documents["repo-public-api"] = public
+    got = drift(table, documents)
+    for line in (
+        "repo-records.yml: regression-tests has no row in mise/audit-legs.toml",
+        "mise/audit-legs.toml: repo-records.gone names no job of repo-records.yml",
+        "mise/audit-legs.toml: nowhere is no subject workflow",
+        "repo-records.yml: report does not need applies",
+        "repo-records.yml: applies runs no `belt audit-legs repo-records`",
+        "repo-public-api.yml: rows semver are conditional; no `applies` job",
+    ):
+        assert line in got
+    del table["repo-records"]
+    assert "repo-records.yml has no table in mise/audit-legs.toml" in drift(table)
+
+
+def test_an_if_with_no_row_is_named() -> None:
+    """Planted: regression-tests reads an output no row declares."""
+    documents = subject_workflows()
+    records = copy.deepcopy(documents["repo-records"])
+    job = decoded.as_object(
+        decoded.as_object(records["jobs"], "jobs")["regression-tests"], "job"
+    )
+    job["needs"] = "applies"
+    job["if"] = "${{ needs.applies.outputs.regression-tests == 'true' }}"
+    documents["repo-records"] = records
+    assert (
+        "repo-records.yml: regression-tests reads its applies output;"
+        " its row carries no `when`"
+    ) in drift(audit_legs.load_table(), documents)
 
 
 # The scheduled workflows that run a repository's own code, which must
@@ -520,51 +525,49 @@ def read_tests_run() -> dict[str, Document]:
     }
 
 
-class TestGateSecrets:
-    """The scheduled runs hand the tests what the gate hands them."""
+# The scheduled runs hand the tests what the gate hands them.
+def test_the_gate_exports_the_atlas_token() -> None:
+    """The reading finds what #830 put on the gate's step."""
+    want = {"atlas-token": "ATLAS_TOKEN"}
+    assert want == gate_secrets(read_ci())
 
-    def test_the_gate_exports_the_atlas_token(self) -> None:
-        """The reading finds what #830 put on the gate's step."""
-        want = {"atlas-token": "ATLAS_TOKEN"}
-        assert want == gate_secrets(read_ci())
 
-    def test_every_test_run_carries_the_gate_secrets(self) -> None:
-        """The real workflows declare and export every gate secret."""
-        none: list[str] = []
-        assert none == secret_drift(read_ci(), read_tests_run())
+def test_every_test_run_carries_the_gate_secrets() -> None:
+    """The real workflows declare and export every gate secret."""
+    none: list[str] = []
+    assert none == secret_drift(read_ci(), read_tests_run())
 
-    def test_a_second_gate_secret_is_named(self) -> None:
-        """Planted: the gate's step exports a secret no other declares."""
-        ci = read_ci()
-        for job in workflow_yaml.jobs(ci).values():
-            for step in workflow_yaml.steps(job):
-                if step.get("name") == GATE_STEP:
-                    env = decoded.as_object(step["env"], "env")
-                    env["PLANTED"] = "${{ secrets.planted-token }}"
-        got = secret_drift(ci, read_tests_run())
-        assert (
-            got[0]
-            == "repo-deep-tests.yml does not declare the gate's secret planted-token"
-        )
-        assert (
-            "repo-mutants.yml does not declare the gate's secret planted-token" in got
-        )
 
-    def test_a_step_without_the_export_is_named(self) -> None:
-        """Planted: one `mise run` step loses its ATLAS_TOKEN."""
-        documents = read_tests_run()
-        job = workflow_yaml.jobs(documents["repo-deep-tests"])["coverage-branches"]
+def test_a_second_gate_secret_is_named() -> None:
+    """Planted: the gate's step exports a secret no other declares."""
+    ci = read_ci()
+    for job in workflow_yaml.jobs(ci).values():
         for step in workflow_yaml.steps(job):
-            if "env" in step:
-                del decoded.as_object(step["env"], "env")["ATLAS_TOKEN"]
-        want = [
-            (
-                "repo-deep-tests.yml: coverage-branches step 'Hold the Rust"
-                " branch-coverage floor' runs `mise run` without ATLAS_TOKEN:"
-                " ${{ secrets.atlas-token }}"
-            )
-        ]
-        assert want == secret_drift(read_ci(), documents)
+            if step.get("name") == GATE_STEP:
+                env = decoded.as_object(step["env"], "env")
+                env["PLANTED"] = "${{ secrets.planted-token }}"
+    got = secret_drift(ci, read_tests_run())
+    assert (
+        got[0] == "repo-deep-tests.yml does not declare the gate's secret planted-token"
+    )
+    assert "repo-mutants.yml does not declare the gate's secret planted-token" in got
+
+
+def test_a_step_without_the_export_is_named() -> None:
+    """Planted: one `mise run` step loses its ATLAS_TOKEN."""
+    documents = read_tests_run()
+    job = workflow_yaml.jobs(documents["repo-deep-tests"])["coverage-branches"]
+    for step in workflow_yaml.steps(job):
+        if "env" in step:
+            del decoded.as_object(step["env"], "env")["ATLAS_TOKEN"]
+    want = [
+        (
+            "repo-deep-tests.yml: coverage-branches step 'Hold the Rust"
+            " branch-coverage floor' runs `mise run` without ATLAS_TOKEN:"
+            " ${{ secrets.atlas-token }}"
+        )
+    ]
+    assert want == secret_drift(read_ci(), documents)
 
 
 # A workflow step runs the helper outside mise, so its findings carry the
@@ -728,142 +731,141 @@ NOT_EDTF = (
 )
 
 
-class TestHelper:
-    """The helper's outputs for the trees the scheduled runs meet."""
+# The helper's outputs for the trees the scheduled runs meet.
+def test_an_empty_tree_runs_the_unconditional_jobs_only() -> None:
+    """Nothing tracked: every conditional job is skipped."""
+    got = every(git_tree({}))
+    for rows in audit_legs.load_table().values():
+        for job, row in rows.items():
+            assert (row.when is None) == got[job]
 
-    def test_an_empty_tree_runs_the_unconditional_jobs_only(self) -> None:
-        """Nothing tracked: every conditional job is skipped."""
-        got = every(git_tree({}))
-        for rows in audit_legs.load_table().values():
-            for job, row in rows.items():
-                assert (row.when is None) == got[job]
 
-    def test_a_rust_only_tree_shaped_like_edtf(self) -> None:
-        """The jobs edtf ran for languages it lacks come out false."""
-        got = every(git_tree(EDTF))
-        for job in NOT_EDTF:
-            assert not got[job]
-        for job in (
-            "deny",
-            "fuzz",
-            "semver",
-            "coverage-branches",
-            "actions",
-            "action-pins",
-            "lock-arch",
-            "bestpractices",
-        ):
-            assert got[job]
+def test_a_rust_only_tree_shaped_like_edtf() -> None:
+    """The jobs edtf ran for languages it lacks come out false."""
+    got = every(git_tree(EDTF))
+    for job in NOT_EDTF:
+        assert not got[job]
+    for job in (
+        "deny",
+        "fuzz",
+        "semver",
+        "coverage-branches",
+        "actions",
+        "action-pins",
+        "lock-arch",
+        "bestpractices",
+    ):
+        assert got[job]
 
-    @pytest.mark.parametrize(
-        ("job", "want"),
-        [
-            ("go-vulns", True),
-            ("coverage-go-branches", True),
-            ("fuzz", True),
-            ("deny", False),
-            ("semver", False),
-            ("coverage-branches", False),
-            ("python-properties", False),
-        ],
-    )
-    def test_a_go_tree(self, job: object, want: object) -> None:
-        """go.mod brings the Go jobs and fuzz, and nothing Rust."""
-        got = every(git_tree(GO))
-        assert want == got[job]
 
-    @pytest.mark.parametrize(
-        ("job", "want"),
-        [
-            ("python-properties-seed", True),
-            ("python-properties", True),
-            ("lock-idempotent", True),
-            ("bestpractices", True),
-            ("deny", False),
-            ("go-vulns", False),
-            ("fuzz", False),
-            ("coverage-branches", False),
-            ("coverage-go-branches", False),
-            ("typescript-properties", False),
-        ],
-    )
-    def test_the_canon_tree(self, job: object, want: object) -> None:
-        """The canon has Python properties, workflows and a lock; no Rust or Go."""
-        got = every(CANON)
-        assert want == got[job]
+@pytest.mark.parametrize(
+    ("job", "want"),
+    [
+        ("go-vulns", True),
+        ("coverage-go-branches", True),
+        ("fuzz", True),
+        ("deny", False),
+        ("semver", False),
+        ("coverage-branches", False),
+        ("python-properties", False),
+    ],
+)
+def test_a_go_tree(job: object, want: object) -> None:
+    """go.mod brings the Go jobs and fuzz, and nothing Rust."""
+    got = every(git_tree(GO))
+    assert want == got[job]
 
-    def test_a_floor_leg_must_be_recorded(self) -> None:
-        """A floor job applies only where .coverage-floor records its leg."""
-        for files, want in (
-            (
-                {**GO, ".coverage-floor": floor_file()},
-                "skipped: no go-branches line in .coverage-floor",
-            ),
-            (
-                {k: v for k, v in GO.items() if k != ".coverage-floor"},
-                "skipped: no .coverage-floor is tracked",
-            ),
-            ({**GO, ".coverage-floor": "not a floor\n"}, "applies: go.mod is tracked"),
-            (GO, "applies: go.mod is tracked"),
-        ):
-            root = git_tree(files)
-            rows = audit_legs.load_table()["repo-deep-tests"]
-            reasons = audit_legs.applies(rows, root, gate_tools.tracked_files(root))
-            assert want == reasons["coverage-go-branches"]
+
+@pytest.mark.parametrize(
+    ("job", "want"),
+    [
+        ("python-properties-seed", True),
+        ("python-properties", True),
+        ("lock-idempotent", True),
+        ("bestpractices", True),
+        ("deny", False),
+        ("go-vulns", False),
+        ("fuzz", False),
+        ("coverage-branches", False),
+        ("coverage-go-branches", False),
+        ("typescript-properties", False),
+    ],
+)
+def test_the_canon_tree(job: object, want: object) -> None:
+    """The canon has Python properties, workflows and a lock; no Rust or Go."""
+    got = every(CANON)
+    assert want == got[job]
+
+
+def test_a_floor_leg_must_be_recorded() -> None:
+    """A floor job applies only where .coverage-floor records its leg."""
+    for files, want in (
+        (
+            {**GO, ".coverage-floor": floor_file()},
+            "skipped: no go-branches line in .coverage-floor",
+        ),
+        (
+            {k: v for k, v in GO.items() if k != ".coverage-floor"},
+            "skipped: no .coverage-floor is tracked",
+        ),
+        ({**GO, ".coverage-floor": "not a floor\n"}, "applies: go.mod is tracked"),
+        (GO, "applies: go.mod is tracked"),
+    ):
+        root = git_tree(files)
+        rows = audit_legs.load_table()["repo-deep-tests"]
+        reasons = audit_legs.applies(rows, root, gate_tools.tracked_files(root))
+        assert want == reasons["coverage-go-branches"]
 
 
 PROPTEST_LOCK = 'version = 4\n\n[[package]]\nname = "proptest"\nversion = "1.12.0"\n'
 RAND_LOCK = 'version = 4\n\n[[package]]\nname = "rand"\nversion = "0.9.0"\n'
 
 
-class TestRustProperties:
-    """The rust-properties job runs where a lock holds proptest (#1930)."""
+# The rust-properties job runs where a lock holds proptest (#1930).
+@pytest.mark.parametrize("name", ["Cargo.lock", "crates/a/Cargo.lock"])
+def test_a_lock_holding_proptest_runs_the_job(name: object) -> None:
+    """At the root, or a workspace member's own lock."""
+    got = outputs(git_tree({name: PROPTEST_LOCK}), "repo-deep-tests")
+    assert got["rust-properties"]
 
-    @pytest.mark.parametrize("name", ["Cargo.lock", "crates/a/Cargo.lock"])
-    def test_a_lock_holding_proptest_runs_the_job(self, name: object) -> None:
-        """At the root, or a workspace member's own lock."""
-        got = outputs(git_tree({name: PROPTEST_LOCK}), "repo-deep-tests")
-        assert got["rust-properties"]
 
-    @pytest.mark.parametrize(
-        "files",
-        [
-            {"Cargo.lock": RAND_LOCK},
-            {"Cargo.lock": RAND_LOCK, "vendor/x/Cargo.lock": PROPTEST_LOCK},
-            {},
-        ],
+@pytest.mark.parametrize(
+    "files",
+    [
+        {"Cargo.lock": RAND_LOCK},
+        {"Cargo.lock": RAND_LOCK, "vendor/x/Cargo.lock": PROPTEST_LOCK},
+        {},
+    ],
+)
+def test_a_lock_without_proptest_skips_the_job(files: object) -> None:
+    """A Cargo.lock alone is not a property, nor a vendored proptest."""
+    got = outputs(git_tree(files), "repo-deep-tests")
+    assert not got["rust-properties"]
+
+
+def test_the_skip_names_what_was_read() -> None:
+    """The reason says the lock was read and held no proptest."""
+    root = git_tree({"Cargo.lock": RAND_LOCK})
+    tracked = gate_tools.tracked_files(root)
+    rows = audit_legs.load_table()["repo-deep-tests"]
+    reasons = audit_legs.refine(
+        "repo-deep-tests", audit_legs.applies(rows, root, tracked), root, tracked
     )
-    def test_a_lock_without_proptest_skips_the_job(self, files: object) -> None:
-        """A Cargo.lock alone is not a property, nor a vendored proptest."""
-        got = outputs(git_tree(files), "repo-deep-tests")
-        assert not got["rust-properties"]
+    assert reasons["rust-properties"] == "skipped: no tracked Cargo.lock locks proptest"
 
-    def test_the_skip_names_what_was_read(self) -> None:
-        """The reason says the lock was read and held no proptest."""
-        root = git_tree({"Cargo.lock": RAND_LOCK})
-        tracked = gate_tools.tracked_files(root)
-        rows = audit_legs.load_table()["repo-deep-tests"]
-        reasons = audit_legs.refine(
-            "repo-deep-tests", audit_legs.applies(rows, root, tracked), root, tracked
-        )
-        assert (
-            reasons["rust-properties"]
-            == "skipped: no tracked Cargo.lock locks proptest"
-        )
 
-    def test_the_job_is_gated_and_runs_the_audit(self) -> None:
-        """repo-deep-tests.yml's job reads the output and runs the task."""
-        document = workflow_yaml.document(WORKFLOWS / "repo-deep-tests.yml")
-        job = workflow_yaml.jobs(document)["rust-properties"]
-        assert condition(job) == "needs.applies.outputs.rust-properties == 'true'"
-        assert "applies" in needs_of(job)
-        runs = [
-            decoded.as_str(step.get("run", ""), "run")
-            for step in workflow_yaml.steps(job)
-        ]
-        assert "mise run audit:rust-properties" in runs
-        report = workflow_yaml.jobs(document)["report"]
-        assert "rust-properties" in needs_of(report)
+def test_the_job_is_gated_and_runs_the_audit() -> None:
+    """repo-deep-tests.yml's job reads the output and runs the task."""
+    document = workflow_yaml.document(WORKFLOWS / "repo-deep-tests.yml")
+    job = workflow_yaml.jobs(document)["rust-properties"]
+    assert condition(job) == "needs.applies.outputs.rust-properties == 'true'"
+    assert "applies" in needs_of(job)
+    runs = [
+        decoded.as_str(step.get("run", ""), "run") for step in workflow_yaml.steps(job)
+    ]
+    assert "mise run audit:rust-properties" in runs
+    report = workflow_yaml.jobs(document)["report"]
+    assert "rust-properties" in needs_of(report)
 
 
 # Every shape the enumeration meets: two Rust targets, a root-package
@@ -888,133 +890,132 @@ PLANTED_TARGETS = {
 Record = tuple[str, str, str, str, str]
 
 
-class TestFuzzTargets:
-    """The fuzz job runs one runner per fuzz target (#1899)."""
+# The fuzz job runs one runner per fuzz target (#1899).
+def test_two_bins_and_one_go_target_emit_three_entries() -> None:
+    """Two [[bin]]s and FuzzLoad in internal/policy: three entries, fuzz on.
 
-    def test_two_bins_and_one_go_target_emit_three_entries(self) -> None:
-        """Two [[bin]]s and FuzzLoad in internal/policy: three entries, fuzz on.
-
-        Against the helper before #1899 there is no `fuzz-targets`
-        output, so this row fails there.
-        """
-        got = raw_outputs(
-            git_tree({
-                "fuzz/Cargo.toml": fuzz_manifest("parse", "roundtrip"),
-                "go.mod": "module example.com/x\n",
-                "internal/policy/x_test.go": GO_FUZZ_TEST,
-            }),
-            "repo-deep-tests",
-        )
-        want: list[audit_legs.Target] = [
-            {"kind": "rust", "target": "parse", "leg": "fuzz-parse"},
-            {"kind": "rust", "target": "roundtrip", "leg": "fuzz-roundtrip"},
-            {
-                "kind": "go",
-                "target": "FuzzLoad",
-                "leg": "fuzz-internal-policy-load",
-                "package": "internal/policy",
-                "module": ".",
-            },
-        ]
-        entries = decoded.as_array(decoded.load_json(got["fuzz-targets"]), "list")
-        got_entries: list[dict[str, object]] = [
-            decoded.as_object(e, "entry") for e in entries
-        ]
-        assert want == got_entries
-        assert got["fuzz"] == "true"
-
-    def test_a_tree_with_neither_emits_an_empty_list(self) -> None:
-        """No fuzz crate and no Go fuzz target: `[]`, and fuzz is off."""
-        trees: list[dict[str, str]] = [
-            {},
-            {**GO, "internal/policy/x_test.go": "package policy\n"},
-        ]
-        for files in trees:
-            got = raw_outputs(git_tree(files), "repo-deep-tests")
-            assert got["fuzz-targets"] == "[]"
-            assert got["fuzz"] == "false"
-
-    def test_a_fuzz_crate_with_no_bin_is_skipped_by_name(self) -> None:
-        """fuzz/ applies by the table, but no [[bin]] means no runner."""
-        root = git_tree({"fuzz/Cargo.toml": fuzz_manifest()})
-        rows = audit_legs.load_table()["repo-deep-tests"]
-        tracked = gate_tools.tracked_files(root)
-        reasons, lists = audit_legs.matrices(
-            "repo-deep-tests", audit_legs.applies(rows, root, tracked), root, tracked
-        )
-        assert reasons["fuzz"] == "skipped: no fuzz target is declared"
-        names: list[str] = list(lists)
-        want: list[str] = ["fuzz-targets"]
-        assert want == names
-        assert len(lists["fuzz-targets"]) == 0
-
-    def test_an_unreadable_fuzz_manifest_is_red_naming_it(self) -> None:
-        """A fuzz/Cargo.toml that will not parse fails the applies job by name."""
-        for text, message in (
-            ("[[bin]\n", "fuzz/Cargo.toml: "),
-            ("[[bin]]\npath = 'x.rs'\n", "fuzz/Cargo.toml: [[bin]] 1.name is not"),
-        ):
-            root = git_tree({"fuzz/Cargo.toml": text})
-            err = io.StringIO()
-            with (
-                as_step(),
-                contextlib.redirect_stderr(err),
-                contextlib.redirect_stdout(io.StringIO()),
-            ):
-                status = audit_legs.main(["--root", str(root), "repo-deep-tests"])
-            assert status == 1
-            assert err.getvalue().startswith(f"::error::{STEP}: {message}"), (
-                err.getvalue()
-            )
-
-    def test_the_list_names_every_target_and_its_leg(self) -> None:
-        """Every Rust and Go target of one tree, each with its leg name."""
-        root = git_tree(PLANTED_TARGETS)
-        (root / "internal" / "policy" / "y_test.go").write_text(
-            "package policy\n\nfunc FuzzUntracked(f *testing.F) {}\n", "utf-8"
-        )
-        listed: list[Record] = [
-            (
-                t["leg"],
-                t["kind"],
-                t.get("package", "-"),
-                t["target"],
-                t.get("module", "-"),
-            )
-            for t in audit_legs.fuzz_targets(root, gate_tools.tracked_files(root))
-        ]
-        want: list[Record] = [
-            ("fuzz-parse", "rust", "-", "parse", "-"),
-            ("fuzz-roundtrip", "rust", "-", "roundtrip", "-"),
-            ("fuzz-internal-policy-load", "go", "internal/policy", "FuzzLoad", "."),
-            ("fuzz-internal-policy-save", "go", "internal/policy", "FuzzSave", "."),
-            ("fuzz-tools-gen-gen", "go", "tools/gen", "FuzzGen", "tools"),
-            ("fuzz-", "go", ".", "Fuzz", "."),
-        ]
-        assert want == listed
-
-    def test_two_packages_sharing_a_fuzz_name_get_two_legs(self) -> None:
-        """a/FuzzLoad and b/FuzzLoad: two entries, two legs, two artifacts."""
-        root = git_tree({
+    Against the helper before #1899 there is no `fuzz-targets`
+    output, so this row fails there.
+    """
+    got = raw_outputs(
+        git_tree({
+            "fuzz/Cargo.toml": fuzz_manifest("parse", "roundtrip"),
             "go.mod": "module example.com/x\n",
-            "a/a_test.go": GO_FUZZ_TEST,
-            "b/b_test.go": GO_FUZZ_TEST,
-        })
-        entries = audit_legs.fuzz_targets(root, gate_tools.tracked_files(root))
-        legs: list[str] = [t["leg"] for t in entries]
-        targets: list[str] = [t["target"] for t in entries]
-        want_legs: list[str] = ["fuzz-a-load", "fuzz-b-load"]
-        want_targets: list[str] = ["FuzzLoad", "FuzzLoad"]
-        assert want_legs == legs
-        assert want_targets == targets
+            "internal/policy/x_test.go": GO_FUZZ_TEST,
+        }),
+        "repo-deep-tests",
+    )
+    want: list[audit_legs.Target] = [
+        {"kind": "rust", "target": "parse", "leg": "fuzz-parse"},
+        {"kind": "rust", "target": "roundtrip", "leg": "fuzz-roundtrip"},
+        {
+            "kind": "go",
+            "target": "FuzzLoad",
+            "leg": "fuzz-internal-policy-load",
+            "package": "internal/policy",
+            "module": ".",
+        },
+    ]
+    entries = decoded.as_array(decoded.load_json(got["fuzz-targets"]), "list")
+    got_entries: list[dict[str, object]] = [
+        decoded.as_object(e, "entry") for e in entries
+    ]
+    assert want == got_entries
+    assert got["fuzz"] == "true"
 
 
-@pytest.mark.usefixtures("_tmp")
-class TestRefusals:
+def test_a_tree_with_neither_emits_an_empty_list() -> None:
+    """No fuzz crate and no Go fuzz target: `[]`, and fuzz is off."""
+    trees: list[dict[str, str]] = [
+        {},
+        {**GO, "internal/policy/x_test.go": "package policy\n"},
+    ]
+    for files in trees:
+        got = raw_outputs(git_tree(files), "repo-deep-tests")
+        assert got["fuzz-targets"] == "[]"
+        assert got["fuzz"] == "false"
+
+
+def test_a_fuzz_crate_with_no_bin_is_skipped_by_name() -> None:
+    """fuzz/ applies by the table, but no [[bin]] means no runner."""
+    root = git_tree({"fuzz/Cargo.toml": fuzz_manifest()})
+    rows = audit_legs.load_table()["repo-deep-tests"]
+    tracked = gate_tools.tracked_files(root)
+    reasons, lists = audit_legs.matrices(
+        "repo-deep-tests", audit_legs.applies(rows, root, tracked), root, tracked
+    )
+    assert reasons["fuzz"] == "skipped: no fuzz target is declared"
+    names: list[str] = list(lists)
+    want: list[str] = ["fuzz-targets"]
+    assert want == names
+    assert len(lists["fuzz-targets"]) == 0
+
+
+def test_an_unreadable_fuzz_manifest_is_red_naming_it() -> None:
+    """A fuzz/Cargo.toml that will not parse fails the applies job by name."""
+    for text, message in (
+        ("[[bin]\n", "fuzz/Cargo.toml: "),
+        ("[[bin]]\npath = 'x.rs'\n", "fuzz/Cargo.toml: [[bin]] 1.name is not"),
+    ):
+        root = git_tree({"fuzz/Cargo.toml": text})
+        err = io.StringIO()
+        with (
+            as_step(),
+            contextlib.redirect_stderr(err),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            status = audit_legs.main(["--root", str(root), "repo-deep-tests"])
+        assert status == 1
+        assert err.getvalue().startswith(f"::error::{STEP}: {message}"), err.getvalue()
+
+
+def test_the_list_names_every_target_and_its_leg() -> None:
+    """Every Rust and Go target of one tree, each with its leg name."""
+    root = git_tree(PLANTED_TARGETS)
+    (root / "internal" / "policy" / "y_test.go").write_text(
+        "package policy\n\nfunc FuzzUntracked(f *testing.F) {}\n", "utf-8"
+    )
+    listed: list[Record] = [
+        (
+            t["leg"],
+            t["kind"],
+            t.get("package", "-"),
+            t["target"],
+            t.get("module", "-"),
+        )
+        for t in audit_legs.fuzz_targets(root, gate_tools.tracked_files(root))
+    ]
+    want: list[Record] = [
+        ("fuzz-parse", "rust", "-", "parse", "-"),
+        ("fuzz-roundtrip", "rust", "-", "roundtrip", "-"),
+        ("fuzz-internal-policy-load", "go", "internal/policy", "FuzzLoad", "."),
+        ("fuzz-internal-policy-save", "go", "internal/policy", "FuzzSave", "."),
+        ("fuzz-tools-gen-gen", "go", "tools/gen", "FuzzGen", "tools"),
+        ("fuzz-", "go", ".", "Fuzz", "."),
+    ]
+    assert want == listed
+
+
+def test_two_packages_sharing_a_fuzz_name_get_two_legs() -> None:
+    """a/FuzzLoad and b/FuzzLoad: two entries, two legs, two artifacts."""
+    root = git_tree({
+        "go.mod": "module example.com/x\n",
+        "a/a_test.go": GO_FUZZ_TEST,
+        "b/b_test.go": GO_FUZZ_TEST,
+    })
+    entries = audit_legs.fuzz_targets(root, gate_tools.tracked_files(root))
+    legs: list[str] = [t["leg"] for t in entries]
+    targets: list[str] = [t["target"] for t in entries]
+    want_legs: list[str] = ["fuzz-a-load", "fuzz-b-load"]
+    want_targets: list[str] = ["FuzzLoad", "FuzzLoad"]
+    assert want_legs == legs
+    assert want_targets == targets
+
+
+class Refusals:
     """A table of the wrong shape, or a workflow it lacks, is refused by name."""
 
-    @fixture
-    def _tmp(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
 
@@ -1043,41 +1044,51 @@ class TestRefusals:
             ])
         return status, err.getvalue(), table
 
-    def test_wrong_shapes_in_the_table(self) -> None:
-        """Each shape the decoder refuses, with the field it names."""
-        rows = [
-            ("[w\n", "Expected ']'"),
-            ("w = 1\n", "w is not an object"),
-            ("[w]\nx = 1\n", "w.x is not an object"),
-            ('[w.x]\nwhen = "a"\n', "w.x.when is not a list of strings"),
-            ("[w.x]\nwhen = [1]\n", "w.x.when is not a list of strings"),
-            ('[w.x]\nfloor = "python"\n', "w.x.floor is not a leg read off the gate"),
-            ('[w.x]\nfor = ["a"]\n', "w.x carries for: a row has `when` and `floor`"),
-        ]
-        for text, message in rows:
-            status, err, table = self.run_main(text)
-            assert status == 1
-            assert err.startswith(f"::error::{STEP}: {table}: "), err
-            assert message in err
 
-    def test_an_unknown_workflow(self) -> None:
-        """A workflow the table has no section for is refused, not run."""
-        status, err, table = self.run_main("[w.x]\n", "v")
+@fixture
+def refusals(tmp_path: Path) -> Refusals:
+    """Give each row its own Refusals."""
+    return Refusals(tmp_path)
+
+
+def test_wrong_shapes_in_the_table(refusals: Refusals) -> None:
+    """Each shape the decoder refuses, with the field it names."""
+    rows = [
+        ("[w\n", "Expected ']'"),
+        ("w = 1\n", "w is not an object"),
+        ("[w]\nx = 1\n", "w.x is not an object"),
+        ('[w.x]\nwhen = "a"\n', "w.x.when is not a list of strings"),
+        ("[w.x]\nwhen = [1]\n", "w.x.when is not a list of strings"),
+        ('[w.x]\nfloor = "python"\n', "w.x.floor is not a leg read off the gate"),
+        ('[w.x]\nfor = ["a"]\n', "w.x carries for: a row has `when` and `floor`"),
+    ]
+    for text, message in rows:
+        status, err, table = refusals.run_main(text)
         assert status == 1
-        assert f"::error::{STEP}: {table} has no table for v\n" == err
+        assert err.startswith(f"::error::{STEP}: {table}: "), err
+        assert message in err
 
-    def test_a_well_formed_table_decodes(self) -> None:
-        """Absent fields take their defaults."""
-        with tempfile.TemporaryDirectory() as d:
-            table = Path(d) / "t.toml"
-            table.write_text(
-                '[w.a]\nwhen = ["x"]\nfloor = "go-branches"\n[w.b]\n', encoding="utf-8"
-            )
-            got = audit_legs.load_table(table)
-        want: Table = {
-            "w": {
-                "a": audit_legs.Row(when=("x",), floor="go-branches"),
-                "b": audit_legs.Row(),
-            }
+
+def test_an_unknown_workflow(refusals: Refusals) -> None:
+    """A workflow the table has no section for is refused, not run."""
+    status, err, table = refusals.run_main("[w.x]\n", "v")
+    assert status == 1
+    assert f"::error::{STEP}: {table} has no table for v\n" == err
+
+
+@pytest.mark.usefixtures("refusals")
+def test_a_well_formed_table_decodes() -> None:
+    """Absent fields take their defaults."""
+    with tempfile.TemporaryDirectory() as d:
+        table = Path(d) / "t.toml"
+        table.write_text(
+            '[w.a]\nwhen = ["x"]\nfloor = "go-branches"\n[w.b]\n', encoding="utf-8"
+        )
+        got = audit_legs.load_table(table)
+    want: Table = {
+        "w": {
+            "a": audit_legs.Row(when=("x",), floor="go-branches"),
+            "b": audit_legs.Row(),
         }
-        assert want == got
+    }
+    assert want == got

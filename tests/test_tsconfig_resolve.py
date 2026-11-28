@@ -146,89 +146,89 @@ def options(tree: Path) -> dict[str, object]:
     return decoded.as_object(document["compilerOptions"], "compilerOptions")
 
 
-class TestRefusedTest:
-    """A tsconfig tsc cannot parse is a finding with the compiler's message."""
-
-    @pytest.mark.parametrize(("name", "config", "said"), REFUSED)
-    def test_each_malformed_config_is_refused_by_its_diagnostic(
-        self, name: object, config: object, said: object
-    ) -> None:
-        """One row per way `--showConfig` reads a bad config as a good one."""
-        with tempfile.TemporaryDirectory() as tmp:
-            tree = Path(tmp)
-            plant(tree, config)
-            done = resolve(tree)
-            assert done.returncode == 1, done.stderr
-            lines = done.stderr.splitlines()
-            assert lines[0] == f"{TASK}: tsconfig.json does not resolve"
-            assert lines[1].startswith(f"  {said}"), done.stderr
-            assert LIB not in done.stderr, "the file list was printed"
-
-    def test_a_malformed_parent_is_named_through_extends(self) -> None:
-        """The diagnostic points at the config that is wrong, not the child."""
-        with tempfile.TemporaryDirectory() as tmp:
-            tree = Path(tmp)
-            plant(tree, '{"extends": "./base.json", "include": ["src"]}')
-            (tree / "base.json").write_text(
-                '{"compilerOptions": {"strict": true, "nonsense": 1}}',
-                encoding="utf-8",
-            )
-            done = resolve(tree)
+# A tsconfig tsc cannot parse is a finding with the compiler's message.
+@pytest.mark.parametrize(("name", "config", "said"), REFUSED)
+def test_each_malformed_config_is_refused_by_its_diagnostic(
+    name: object, config: object, said: object
+) -> None:
+    """One row per way `--showConfig` reads a bad config as a good one."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = Path(tmp)
+        plant(tree, config)
+        done = resolve(tree)
         assert done.returncode == 1, done.stderr
         lines = done.stderr.splitlines()
         assert lines[0] == f"{TASK}: tsconfig.json does not resolve"
-        assert lines[1].startswith("  base.json(1,38): error TS5023:"), lines
-
-    def test_a_tsconfig_that_is_not_there_carries_the_reason(self) -> None:
-        """TS5058 is printed on stdout; the finding has it all the same."""
-        with tempfile.TemporaryDirectory() as tmp:
-            done = resolve(Path(tmp))
-        assert done.returncode == 1, done.stderr
-        lines = done.stderr.splitlines()
-        assert lines[0] == f"{TASK}: tsconfig.json does not resolve"
-        assert lines[1].startswith("  error TS5058:"), done.stderr
+        assert lines[1].startswith(f"  {said}"), done.stderr
+        assert LIB not in done.stderr, "the file list was printed"
 
 
-class TestAcceptedTest:
-    """What `lint:types` owns is not the resolver's to refuse."""
+def test_a_malformed_parent_is_named_through_extends() -> None:
+    """The diagnostic points at the config that is wrong, not the child."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = Path(tmp)
+        plant(tree, '{"extends": "./base.json", "include": ["src"]}')
+        (tree / "base.json").write_text(
+            '{"compilerOptions": {"strict": true, "nonsense": 1}}',
+            encoding="utf-8",
+        )
+        done = resolve(tree)
+    assert done.returncode == 1, done.stderr
+    lines = done.stderr.splitlines()
+    assert lines[0] == f"{TASK}: tsconfig.json does not resolve"
+    assert lines[1].startswith("  base.json(1,38): error TS5023:"), lines
 
-    @pytest.mark.parametrize(("name", "config", "source"), ACCEPTED)
-    def test_each_parsed_config_resolves_whatever_its_tree(
-        self, name: object, config: object, source: object
-    ) -> None:
-        """The document is written and nothing is said."""
-        with tempfile.TemporaryDirectory() as tmp:
-            tree = Path(tmp)
-            plant(tree, config, source)
-            done = resolve(tree)
-            assert done.returncode == 0, done.stderr + done.stdout
-            assert done.stderr == ""
-            assert options(tree)["strict"] == STRICT
-            leftovers = sorted(p.name for p in tree.iterdir())
-            expected: list[str] = ["resolved.json", "src", "tsconfig.json"]
-            assert leftovers == expected, "the run left residue"
 
-    def test_a_value_inherited_through_extends_is_resolved(self) -> None:
-        """The reason the document is tsc's and not the file's text."""
-        with tempfile.TemporaryDirectory() as tmp:
-            tree = Path(tmp)
-            plant(tree, '{"extends": "./base.json", "include": ["src"]}')
-            (tree / "base.json").write_text(
-                '{"compilerOptions": {"types": ["node"]}}', encoding="utf-8"
-            )
-            done = resolve(tree)
-            assert done.returncode == 0, done.stderr
-            types: list[str] = ["node"]
-            assert options(tree)["types"] == types
+def test_a_tsconfig_that_is_not_there_carries_the_reason() -> None:
+    """TS5058 is printed on stdout; the finding has it all the same."""
+    with tempfile.TemporaryDirectory() as tmp:
+        done = resolve(Path(tmp))
+    assert done.returncode == 1, done.stderr
+    lines = done.stderr.splitlines()
+    assert lines[0] == f"{TASK}: tsconfig.json does not resolve"
+    assert lines[1].startswith("  error TS5058:"), done.stderr
 
-    def test_the_scaffold_stub_resolves_with_no_source_beside_it(self) -> None:
-        """The canon tracks the stub alone; its `include` matches nothing."""
-        with tempfile.TemporaryDirectory() as tmp:
-            tree = Path(tmp)
-            (tree / "tsconfig.json").write_bytes(SCAFFOLD.read_bytes())
-            done = resolve(tree)
-            assert done.returncode == 0, done.stderr
-            assert options(tree)["strict"] == STRICT
+
+# What `lint:types` owns is not the resolver's to refuse.
+@pytest.mark.parametrize(("name", "config", "source"), ACCEPTED)
+def test_each_parsed_config_resolves_whatever_its_tree(
+    name: object, config: object, source: object
+) -> None:
+    """The document is written and nothing is said."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = Path(tmp)
+        plant(tree, config, source)
+        done = resolve(tree)
+        assert done.returncode == 0, done.stderr + done.stdout
+        assert done.stderr == ""
+        assert options(tree)["strict"] == STRICT
+        leftovers = sorted(p.name for p in tree.iterdir())
+        expected: list[str] = ["resolved.json", "src", "tsconfig.json"]
+        assert leftovers == expected, "the run left residue"
+
+
+def test_a_value_inherited_through_extends_is_resolved() -> None:
+    """The reason the document is tsc's and not the file's text."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = Path(tmp)
+        plant(tree, '{"extends": "./base.json", "include": ["src"]}')
+        (tree / "base.json").write_text(
+            '{"compilerOptions": {"types": ["node"]}}', encoding="utf-8"
+        )
+        done = resolve(tree)
+        assert done.returncode == 0, done.stderr
+        types: list[str] = ["node"]
+        assert options(tree)["types"] == types
+
+
+def test_the_scaffold_stub_resolves_with_no_source_beside_it() -> None:
+    """The canon tracks the stub alone; its `include` matches nothing."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = Path(tmp)
+        (tree / "tsconfig.json").write_bytes(SCAFFOLD.read_bytes())
+        done = resolve(tree)
+        assert done.returncode == 0, done.stderr
+        assert options(tree)["strict"] == STRICT
 
 
 def with_one_unknown_option() -> str:
@@ -301,46 +301,46 @@ PROJECTS: tuple[tuple[str, bool], ...] = (
 )
 
 
-class TestSelectionTest:
-    """mise/tsconfig-files.sh: which projects a repository has."""
+# mise/tsconfig-files.sh: which projects a repository has.
+def test_a_project_is_a_tracked_tsconfig_at_any_depth() -> None:
+    """Named exactly, outside vendor/, and tracked."""
+    env = environment()
+    git = support.tool("git")
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = Path(tmp)
+        for name, _ in PROJECTS:
+            (tree / name).parent.mkdir(parents=True, exist_ok=True)
+            (tree / name).write_text("{}", encoding="utf-8")
+        subprocess.run([git, "init", "-q"], cwd=tree, env=env, check=True)
+        subprocess.run([git, "add", "."], cwd=tree, env=env, check=True)
+        (tree / "untracked").mkdir()
+        (tree / "untracked" / "tsconfig.json").write_text("{}", encoding="utf-8")
+        done = run_body("select", SELECT, tree)
+    assert done.returncode == 0, done.stderr
+    want: list[str] = sorted(name for name, selected in PROJECTS if selected)
+    found: list[str] = sorted(done.stdout.splitlines())
+    assert found == want
 
-    def test_a_project_is_a_tracked_tsconfig_at_any_depth(self) -> None:
-        """Named exactly, outside vendor/, and tracked."""
-        env = environment()
+
+def test_a_tree_with_none_selects_nothing() -> None:
+    """An empty list, and git's success."""
+    env = environment()
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = Path(tmp)
+        (tree / "README").write_text("x", encoding="utf-8")
         git = support.tool("git")
-        with tempfile.TemporaryDirectory() as tmp:
-            tree = Path(tmp)
-            for name, _ in PROJECTS:
-                (tree / name).parent.mkdir(parents=True, exist_ok=True)
-                (tree / name).write_text("{}", encoding="utf-8")
-            subprocess.run([git, "init", "-q"], cwd=tree, env=env, check=True)
-            subprocess.run([git, "add", "."], cwd=tree, env=env, check=True)
-            (tree / "untracked").mkdir()
-            (tree / "untracked" / "tsconfig.json").write_text("{}", encoding="utf-8")
-            done = run_body("select", SELECT, tree)
-        assert done.returncode == 0, done.stderr
-        want: list[str] = sorted(name for name, selected in PROJECTS if selected)
-        found: list[str] = sorted(done.stdout.splitlines())
-        assert found == want
+        subprocess.run([git, "init", "-q"], cwd=tree, env=env, check=True)
+        subprocess.run([git, "add", "."], cwd=tree, env=env, check=True)
+        done = run_body("select", SELECT, tree)
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == "\n"
 
-    def test_a_tree_with_none_selects_nothing(self) -> None:
-        """An empty list, and git's success."""
-        env = environment()
-        with tempfile.TemporaryDirectory() as tmp:
-            tree = Path(tmp)
-            (tree / "README").write_text("x", encoding="utf-8")
-            git = support.tool("git")
-            subprocess.run([git, "init", "-q"], cwd=tree, env=env, check=True)
-            subprocess.run([git, "add", "."], cwd=tree, env=env, check=True)
-            done = run_body("select", SELECT, tree)
-        assert done.returncode == 0, done.stderr
-        assert done.stdout == "\n"
 
-    def test_a_git_that_cannot_answer_is_the_function_s_failure(self) -> None:
-        """Outside a repository the selection fails; it is never empty."""
-        with tempfile.TemporaryDirectory() as tmp:
-            done = run_body("select", SELECT, Path(tmp))
-        assert done.returncode != 0, done.stdout
+def test_a_git_that_cannot_answer_is_the_function_s_failure() -> None:
+    """Outside a repository the selection fails; it is never empty."""
+    with tempfile.TemporaryDirectory() as tmp:
+        done = run_body("select", SELECT, Path(tmp))
+    assert done.returncode != 0, done.stdout
 
 
 def scaffold_with(extra: str) -> str:
@@ -355,82 +355,81 @@ def scaffold_with(extra: str) -> str:
     return text.replace(opened, f"{extra}\n  {opened}", 1)
 
 
-class TestTypesTest:
-    """`lint:types` asks the compiler what a config says, never its text."""
-
-    def test_the_word_references_in_a_comment_is_not_a_finding(self) -> None:
-        """A grep of the file's text refused this project."""
-        with tempfile.TemporaryDirectory() as tmp:
-            tree = Path(tmp)
-            config = scaffold_with('// no "references" here, by the org\'s rule')
-            # An ES module, installed, for a project with no dependencies.
-            (tree / "package.json").write_text(MODULE, encoding="utf-8")
-            (tree / "node_modules").mkdir()
-            tracked_tree(tree, config, environment())
-            done = run_task("lint:types", tree)
-        assert done.returncode == 0, done.stderr + done.stdout
-        assert "lint:types: 1 project(s) checked, 1 files covered" in done.stdout
-
-    def test_declared_references_are_refused_by_name(self) -> None:
-        """The refusal itself is unchanged."""
-        with tempfile.TemporaryDirectory() as tmp:
-            tree = Path(tmp)
-            config = scaffold_with('"references": [{"path": "../other"}],')
-            tracked_tree(tree, config, environment())
-            done = run_task("lint:types", tree)
-        assert done.returncode == 1, done.stderr + done.stdout
-        lines = done.stderr.splitlines()
-        said = "lint:types: project references are not supported org-wide"
-        assert lines[0] == said
-        assert lines[1] == "  declares references: tsconfig.json"
-
-    def test_a_config_tsc_cannot_parse_ends_the_task_by_name(self) -> None:
-        """The one resolver's finding, before any program is built."""
-        with tempfile.TemporaryDirectory() as tmp:
-            tree = Path(tmp)
-            tracked_tree(tree, with_one_unknown_option(), environment())
-            done = run_task("lint:types", tree)
-        assert done.returncode == 1, done.stderr + done.stdout
-        lines = done.stderr.splitlines()
-        assert lines[0] == "lint:types: tsconfig.json does not resolve"
-        assert "error TS5023: Unknown compiler option 'nonsense'" in lines[1]
+# `lint:types` asks the compiler what a config says, never its text.
+def test_the_word_references_in_a_comment_is_not_a_finding() -> None:
+    """A grep of the file's text refused this project."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = Path(tmp)
+        config = scaffold_with('// no "references" here, by the org\'s rule')
+        # An ES module, installed, for a project with no dependencies.
+        (tree / "package.json").write_text(MODULE, encoding="utf-8")
+        (tree / "node_modules").mkdir()
+        tracked_tree(tree, config, environment())
+        done = run_task("lint:types", tree)
+    assert done.returncode == 0, done.stderr + done.stdout
+    assert "lint:types: 1 project(s) checked, 1 files covered" in done.stdout
 
 
-class TestCallersTest:
-    """Both sites refuse the config `--showConfig` alone resolved (#2133)."""
+def test_declared_references_are_refused_by_name() -> None:
+    """The refusal itself is unchanged."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = Path(tmp)
+        config = scaffold_with('"references": [{"path": "../other"}],')
+        tracked_tree(tree, config, environment())
+        done = run_task("lint:types", tree)
+    assert done.returncode == 1, done.stderr + done.stdout
+    lines = done.stderr.splitlines()
+    said = "lint:types: project references are not supported org-wide"
+    assert lines[0] == said
+    assert lines[1] == "  declares references: tsconfig.json"
 
-    def test_the_dials_task_refuses_a_config_stating_every_dial(self) -> None:
-        """Every dial is there, so before the resolver this passed."""
-        env = environment()
-        with tempfile.TemporaryDirectory() as tmp:
-            tree = Path(tmp)
-            tracked_tree(tree, with_one_unknown_option(), env)
-            done = run_task(TASK, tree)
-        assert done.returncode == 1, done.stderr + done.stdout
-        lines = done.stderr.splitlines()
-        assert lines[0] == f"{TASK}: tsconfig.json does not resolve"
-        assert "error TS5023: Unknown compiler option 'nonsense'" in lines[1]
-        assert "dial(s) at the org's level" not in done.stdout
 
-    def test_the_biome_generator_refuses_a_malformed_node_project(self) -> None:
-        """It used to generate a config from a project tsc itself refuses."""
-        env = environment() | {"MISE_TASK_NAME": "lint:biome"}
-        config = '{"compilerOptions": {"types": ["node"], "nonsense": true}}'
-        with tempfile.TemporaryDirectory() as tmp:
-            tree = Path(tmp)
-            tracked_tree(tree, config, env)
-            out = tree / "generated.json"
-            done = subprocess.run(
-                [support.tool("bash"), str(GENERATE), str(out)],
-                cwd=tree,
-                env=env,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            written = out.exists()
-        assert done.returncode == 1, done.stderr + done.stdout
-        lines = done.stderr.splitlines()
-        assert lines[0] == "lint:biome: tsconfig.json does not resolve"
-        assert "error TS5023: Unknown compiler option 'nonsense'" in lines[1]
-        assert not written, "a config was generated from a refused project"
+def test_a_config_tsc_cannot_parse_ends_the_task_by_name() -> None:
+    """The one resolver's finding, before any program is built."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = Path(tmp)
+        tracked_tree(tree, with_one_unknown_option(), environment())
+        done = run_task("lint:types", tree)
+    assert done.returncode == 1, done.stderr + done.stdout
+    lines = done.stderr.splitlines()
+    assert lines[0] == "lint:types: tsconfig.json does not resolve"
+    assert "error TS5023: Unknown compiler option 'nonsense'" in lines[1]
+
+
+# Both sites refuse the config `--showConfig` alone resolved (#2133).
+def test_the_dials_task_refuses_a_config_stating_every_dial() -> None:
+    """Every dial is there, so before the resolver this passed."""
+    env = environment()
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = Path(tmp)
+        tracked_tree(tree, with_one_unknown_option(), env)
+        done = run_task(TASK, tree)
+    assert done.returncode == 1, done.stderr + done.stdout
+    lines = done.stderr.splitlines()
+    assert lines[0] == f"{TASK}: tsconfig.json does not resolve"
+    assert "error TS5023: Unknown compiler option 'nonsense'" in lines[1]
+    assert "dial(s) at the org's level" not in done.stdout
+
+
+def test_the_biome_generator_refuses_a_malformed_node_project() -> None:
+    """It used to generate a config from a project tsc itself refuses."""
+    env = environment() | {"MISE_TASK_NAME": "lint:biome"}
+    config = '{"compilerOptions": {"types": ["node"], "nonsense": true}}'
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = Path(tmp)
+        tracked_tree(tree, config, env)
+        out = tree / "generated.json"
+        done = subprocess.run(
+            [support.tool("bash"), str(GENERATE), str(out)],
+            cwd=tree,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        written = out.exists()
+    assert done.returncode == 1, done.stderr + done.stdout
+    lines = done.stderr.splitlines()
+    assert lines[0] == "lint:biome: tsconfig.json does not resolve"
+    assert "error TS5023: Unknown compiler option 'nonsense'" in lines[1]
+    assert not written, "a config was generated from a refused project"

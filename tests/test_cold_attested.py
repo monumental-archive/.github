@@ -218,12 +218,10 @@ def body() -> str:
     return decoded.as_str(task["run"], f"{TASK}.run")
 
 
-@pytest.mark.usefixtures("_set_up_test_cold_attested")
-class TestColdAttested:
+class ColdAttested:
     """Planted workflows; the lint's verdict on them."""
 
-    @fixture
-    def _set_up_test_cold_attested(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Plant an empty workflows directory."""
         self.tree = tmp_path
         (self.tree / WF).mkdir(parents=True)
@@ -283,80 +281,104 @@ class TestColdAttested:
             check=False,
         )
 
-    def test_no_workflows_is_skipped_by_name(self) -> None:
-        """No workflow file: the task says it skipped."""
-        done = self.task()
-        same(done.returncode, 0, done.stderr)
-        skipped = ["lint:cold-attested: no workflows, skipped"]
-        same(done.stdout.splitlines(), skipped)
 
-    def test_a_clean_tree_passes_through_the_task(self) -> None:
-        """No cache anywhere: green, the summary on stdout."""
-        self.plant({"a.yml": HEAD + CHECKOUT})
-        done = self.task()
-        same((done.returncode, done.stderr), (0, ""))
-        same(done.stdout.splitlines(), CLEAN)
+@fixture
+def cold_attested_state(tmp_path: Path) -> ColdAttested:
+    """Give each row its own ColdAttested."""
+    return ColdAttested(tmp_path)
 
-    def test_each_finding_is_its_own_line_through_the_task(self) -> None:
-        """A default-cache step and a stray marker: two findings, in order."""
-        self.plant({"a.yml": HEAD + MISE + MARK + "\n"})
-        done = self.task()
-        same((done.returncode, done.stdout), (1, ""))
-        same(
-            done.stderr.splitlines(),
-            red(
-                (f"{WF}/a.yml:7", cold_attested.NO_STEP),
-                (f"{WF}/a.yml:6", default("mise-action")),
-            ),
+
+def test_no_workflows_is_skipped_by_name(cold_attested_state: ColdAttested) -> None:
+    """No workflow file: the task says it skipped."""
+    done = cold_attested_state.task()
+    same(done.returncode, 0, done.stderr)
+    skipped = ["lint:cold-attested: no workflows, skipped"]
+    same(done.stdout.splitlines(), skipped)
+
+
+def test_a_clean_tree_passes_through_the_task(
+    cold_attested_state: ColdAttested,
+) -> None:
+    """No cache anywhere: green, the summary on stdout."""
+    cold_attested_state.plant({"a.yml": HEAD + CHECKOUT})
+    done = cold_attested_state.task()
+    same((done.returncode, done.stderr), (0, ""))
+    same(done.stdout.splitlines(), CLEAN)
+
+
+def test_each_finding_is_its_own_line_through_the_task(
+    cold_attested_state: ColdAttested,
+) -> None:
+    """A default-cache step and a stray marker: two findings, in order."""
+    cold_attested_state.plant({"a.yml": HEAD + MISE + MARK + "\n"})
+    done = cold_attested_state.task()
+    same((done.returncode, done.stdout), (1, ""))
+    same(
+        done.stderr.splitlines(),
+        red(
+            (f"{WF}/a.yml:7", cold_attested.NO_STEP),
+            (f"{WF}/a.yml:6", default("mise-action")),
+        ),
+    )
+
+
+def test_an_unmarked_cache_is_red_through_the_task(
+    cold_attested_state: ColdAttested,
+) -> None:
+    """The task body hands the helper every workflow, in glob order."""
+    cold_attested_state.plant({"a.yaml": HEAD + CACHE, "b.yml": HEAD + MARK + CACHE})
+    done = cold_attested_state.task()
+    same(done.returncode, cold_attested.EXIT_RED)
+    same(done.stdout, "")
+    same(
+        done.stderr.splitlines(),
+        red((f"{WF}/a.yaml:6", cold_attested.NO_MARKER)),
+    )
+
+
+def test_cases(
+    cold_attested_state: ColdAttested, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Every row of CASES, through the helper's main."""
+    for files, status, out, err in CASES.values():
+        for old in (cold_attested_state.tree / WF).iterdir():
+            old.unlink()
+        status, out, err = cold_attested_state.helper(
+            *cold_attested_state.plant(files), capfd=capfd
         )
+        same(status, status, err)
+        same(out.splitlines(), out)
+        same(err.splitlines(), err)
 
-    def test_an_unmarked_cache_is_red_through_the_task(self) -> None:
-        """The task body hands the helper every workflow, in glob order."""
-        self.plant({"a.yaml": HEAD + CACHE, "b.yml": HEAD + MARK + CACHE})
-        done = self.task()
-        same(done.returncode, cold_attested.EXIT_RED)
-        same(done.stdout, "")
-        same(
-            done.stderr.splitlines(),
-            red((f"{WF}/a.yaml:6", cold_attested.NO_MARKER)),
-        )
 
-    def test_cases(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """Every row of CASES, through the helper's main."""
-        for files, status, out, err in CASES.values():
-            for old in (self.tree / WF).iterdir():
-                old.unlink()
-            status, out, err = self.helper(*self.plant(files), capfd=capfd)
-            same(status, status, err)
-            same(out.splitlines(), out)
-            same(err.splitlines(), err)
+def test_no_workflow_is_a_usage_error(
+    cold_attested_state: ColdAttested, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Called with nothing to read: exit 2, saying how to call it."""
+    status, _out, err = cold_attested_state.helper(capfd=capfd)
+    same(status, cold_attested.EXIT_ERROR)
+    same(
+        err.splitlines(),
+        [f"{TASK}: usage: cold_attested.py WORKFLOW..."],
+    )
 
-    def test_no_workflow_is_a_usage_error(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """Called with nothing to read: exit 2, saying how to call it."""
-        status, _out, err = self.helper(capfd=capfd)
-        same(status, cold_attested.EXIT_ERROR)
-        same(
-            err.splitlines(),
-            [f"{TASK}: usage: cold_attested.py WORKFLOW..."],
-        )
 
-    def test_a_missing_workflow_is_a_read_error(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A named file that is not there: exit 2, naming it."""
-        status, out, err = self.helper(f"{WF}/gone.yml", capfd=capfd)
-        same(status, cold_attested.EXIT_ERROR)
-        same(out, "")
-        assert err.startswith(f"{TASK}: {WF}/gone.yml: cannot be read as UTF-8: "), err
+def test_a_missing_workflow_is_a_read_error(
+    cold_attested_state: ColdAttested, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A named file that is not there: exit 2, naming it."""
+    status, out, err = cold_attested_state.helper(f"{WF}/gone.yml", capfd=capfd)
+    same(status, cold_attested.EXIT_ERROR)
+    same(out, "")
+    assert err.startswith(f"{TASK}: {WF}/gone.yml: cannot be read as UTF-8: "), err
 
-    def test_a_workflow_not_utf8_is_a_read_error(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """Bytes that are not UTF-8: exit 2, naming the file."""
-        (self.tree / WF / "a.yml").write_bytes(b"on: push\n# \xe9\n")
-        status, out, err = self.helper(f"{WF}/a.yml", capfd=capfd)
-        same(status, cold_attested.EXIT_ERROR)
-        same(out, "")
-        assert err.startswith(f"{TASK}: {WF}/a.yml: cannot be read as UTF-8: "), err
+
+def test_a_workflow_not_utf8_is_a_read_error(
+    cold_attested_state: ColdAttested, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Bytes that are not UTF-8: exit 2, naming the file."""
+    (cold_attested_state.tree / WF / "a.yml").write_bytes(b"on: push\n# \xe9\n")
+    status, out, err = cold_attested_state.helper(f"{WF}/a.yml", capfd=capfd)
+    same(status, cold_attested.EXIT_ERROR)
+    same(out, "")
+    assert err.startswith(f"{TASK}: {WF}/a.yml: cannot be read as UTF-8: "), err

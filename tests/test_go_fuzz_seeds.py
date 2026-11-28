@@ -123,14 +123,10 @@ def task_body(name: str) -> str:
     )
 
 
-@pytest.mark.usefixtures("_set_up_test_go_fuzz_seeds")
-class TestGoFuzzSeeds:
+class GoFuzzSeeds:
     """lint:go-fuzz-seeds runs exactly the packages the listing names."""
 
-    @fixture
-    def _set_up_test_go_fuzz_seeds(
-        self, tmp_path: Path, request: pytest.FixtureRequest
-    ) -> None:
+    def __init__(self, tmp_path: Path, request: pytest.FixtureRequest) -> None:
         """Plant an empty git checkout, the go stub, and the tool links."""
         self.root = tmp_path
         self.git("init", "-q")
@@ -205,74 +201,95 @@ class TestGoFuzzSeeds:
         ]
         return done.returncode, done.stdout, done.stderr, calls
 
-    def test_runs_only_the_packages_that_declare_a_target(self) -> None:
-        """Two of five packages declare targets: exactly those two run."""
-        self.module(".", FIVE)
-        code, out, err, calls = self.run_lint()
-        assert code == 0, err
-        want: list[str] = [
-            f".|{LIST}",
-            f".|{RUN} example.com/probe/a example.com/probe/b",
-        ]
-        assert calls == want
-        assert out.endswith(
-            "lint:go-fuzz-seeds: 2 target(s) built, seed corpora clean\n"
-        ), out
 
-    def test_each_module_runs_its_own_packages_in_its_own_directory(self) -> None:
-        """A module with no target is listed and skipped; the other runs."""
-        self.module(".", NONE)
-        self.module("tools/gen", FIVE)
-        code, out, err, calls = self.run_lint()
-        assert code == 0, err
-        want: list[str] = [
-            f".|{LIST}",
-            f"tools/gen|{LIST}",
-            f"tools/gen|{RUN} example.com/probe/a example.com/probe/b",
-        ]
-        assert calls == want
-        assert out.endswith("2 target(s) built, seed corpora clean\n"), out
+@fixture
+def go_fuzz_seeds(tmp_path: Path, request: pytest.FixtureRequest) -> GoFuzzSeeds:
+    """Give each row its own GoFuzzSeeds."""
+    return GoFuzzSeeds(tmp_path, request)
 
-    def test_no_fuzz_target_skips(self) -> None:
-        """Tests but no target: listed, never run, skipped as before."""
-        self.module(".", NONE)
-        code, out, err, calls = self.run_lint()
-        assert (code, out, err) == (0, SKIPPED, "")
-        want: list[str] = [f".|{LIST}"]
-        assert calls == want
 
-    def test_a_failing_seed_is_red_and_names_the_package(self) -> None:
-        """A seed that fails reds the task, go's FAIL line and ours naming it."""
-        d = self.module(".", FIVE)
-        (d / ".seed-fails").write_text("", encoding="utf-8")
-        code, out, err, calls = self.run_lint()
-        assert code == 1
-        assert "FAIL\texample.com/probe/a\t" in out
-        assert err == (
-            "lint:go-fuzz-seeds: a seed corpus failed in . — packages run: "
-            "example.com/probe/a example.com/probe/b\n"
-        )
-        assert calls[-1] == f".|{RUN} example.com/probe/a example.com/probe/b"
+def test_runs_only_the_packages_that_declare_a_target(
+    go_fuzz_seeds: GoFuzzSeeds,
+) -> None:
+    """Two of five packages declare targets: exactly those two run."""
+    go_fuzz_seeds.module(".", FIVE)
+    code, out, err, calls = go_fuzz_seeds.run_lint()
+    assert code == 0, err
+    want: list[str] = [
+        f".|{LIST}",
+        f".|{RUN} example.com/probe/a example.com/probe/b",
+    ]
+    assert calls == want
+    assert out.endswith(
+        "lint:go-fuzz-seeds: 2 target(s) built, seed corpora clean\n"
+    ), out
 
-    def test_a_listing_that_fails_is_red_not_a_shorter_list(self) -> None:
-        """A package whose tests do not compile cannot drop out of the run."""
-        self.module(".", BROKEN, status=1)
-        code, _out, err, calls = self.run_lint()
-        assert code == 1
-        assert err == (
-            BROKEN + "lint:go-fuzz-seeds: go test -list failed in . — "
-            "the fuzz targets cannot be enumerated\n"
-        )
-        want: list[str] = [f".|{LIST}"]
-        assert calls == want
 
-    def test_go_missing_with_go_mod_tracked_is_refused(self) -> None:
-        """The existing refusal, unchanged."""
-        self.module(".", FIVE)
-        code, out, err, calls = self.run_lint(with_go=False)
-        assert (code, out, err, calls) == (1, "", NO_GO, [])
+def test_each_module_runs_its_own_packages_in_its_own_directory(
+    go_fuzz_seeds: GoFuzzSeeds,
+) -> None:
+    """A module with no target is listed and skipped; the other runs."""
+    go_fuzz_seeds.module(".", NONE)
+    go_fuzz_seeds.module("tools/gen", FIVE)
+    code, out, err, calls = go_fuzz_seeds.run_lint()
+    assert code == 0, err
+    want: list[str] = [
+        f".|{LIST}",
+        f"tools/gen|{LIST}",
+        f"tools/gen|{RUN} example.com/probe/a example.com/probe/b",
+    ]
+    assert calls == want
+    assert out.endswith("2 target(s) built, seed corpora clean\n"), out
 
-    def test_no_go_mod_skips(self) -> None:
-        """No module tracked: skipped before go is consulted."""
-        code, out, err, calls = self.run_lint(with_go=False)
-        assert (code, out, err, calls) == (0, NO_MOD, "", [])
+
+def test_no_fuzz_target_skips(go_fuzz_seeds: GoFuzzSeeds) -> None:
+    """Tests but no target: listed, never run, skipped as before."""
+    go_fuzz_seeds.module(".", NONE)
+    code, out, err, calls = go_fuzz_seeds.run_lint()
+    assert (code, out, err) == (0, SKIPPED, "")
+    want: list[str] = [f".|{LIST}"]
+    assert calls == want
+
+
+def test_a_failing_seed_is_red_and_names_the_package(
+    go_fuzz_seeds: GoFuzzSeeds,
+) -> None:
+    """A seed that fails reds the task, go's FAIL line and ours naming it."""
+    d = go_fuzz_seeds.module(".", FIVE)
+    (d / ".seed-fails").write_text("", encoding="utf-8")
+    code, out, err, calls = go_fuzz_seeds.run_lint()
+    assert code == 1
+    assert "FAIL\texample.com/probe/a\t" in out
+    assert err == (
+        "lint:go-fuzz-seeds: a seed corpus failed in . — packages run: "
+        "example.com/probe/a example.com/probe/b\n"
+    )
+    assert calls[-1] == f".|{RUN} example.com/probe/a example.com/probe/b"
+
+
+def test_a_listing_that_fails_is_red_not_a_shorter_list(
+    go_fuzz_seeds: GoFuzzSeeds,
+) -> None:
+    """A package whose tests do not compile cannot drop out of the run."""
+    go_fuzz_seeds.module(".", BROKEN, status=1)
+    code, _out, err, calls = go_fuzz_seeds.run_lint()
+    assert code == 1
+    assert err == (
+        BROKEN + "lint:go-fuzz-seeds: go test -list failed in . — "
+        "the fuzz targets cannot be enumerated\n"
+    )
+    want: list[str] = [f".|{LIST}"]
+    assert calls == want
+
+
+def test_go_missing_with_go_mod_tracked_is_refused(go_fuzz_seeds: GoFuzzSeeds) -> None:
+    """The existing refusal, unchanged."""
+    go_fuzz_seeds.module(".", FIVE)
+    code, out, err, calls = go_fuzz_seeds.run_lint(with_go=False)
+    assert (code, out, err, calls) == (1, "", NO_GO, [])
+
+
+def test_no_go_mod_skips(go_fuzz_seeds: GoFuzzSeeds) -> None:
+    """No module tracked: skipped before go is consulted."""
+    code, out, err, calls = go_fuzz_seeds.run_lint(with_go=False)
+    assert (code, out, err, calls) == (0, NO_MOD, "", [])

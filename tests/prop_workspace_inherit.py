@@ -85,37 +85,35 @@ def typed(members: list[dict[str, object]]) -> list[wi.Member]:
     return [wi.read_member(m, decoded.as_str(m["name"], "name")) for m in members]
 
 
-class TestJudge:
-    """A key nobody takes, and only that, is a finding."""
+# A key nobody takes, and only that, is a finding.
+@given(workspace())
+def test_a_finding_exactly_when_nobody_takes_it(drawn: Drawn) -> None:
+    """Findings are the declared keys no member reports."""
+    table, members, taken = drawn
+    report: list[str] = []
+    found = wi.judge(table, typed(members), ROOT, report)
+    keys = {f.key for f in found}
+    untaken = set(table) - taken
+    assert keys == untaken
+    assert report == list[str]()
 
-    @given(workspace())
-    def test_a_finding_exactly_when_nobody_takes_it(self, drawn: Drawn) -> None:
-        """Findings are the declared keys no member reports."""
-        table, members, taken = drawn
-        report: list[str] = []
-        found = wi.judge(table, typed(members), ROOT, report)
-        keys = {f.key for f in found}
-        untaken = set(table) - taken
-        assert keys == untaken
-        assert report == list[str]()
 
-    @given(st.data(), workspace())
-    def test_member_order_does_not_matter(
-        self, data: st.DataObject, drawn: Drawn
-    ) -> None:
-        """The same members in any order, the same keys found."""
-        table, members, _ = drawn
-        shuffled = data.draw(st.permutations(members))
-        one = [f.key for f in wi.judge(table, typed(members), ROOT, [])]
-        two = [f.key for f in wi.judge(table, typed(shuffled), ROOT, [])]
-        assert one == two
+@given(st.data(), workspace())
+def test_member_order_does_not_matter(data: st.DataObject, drawn: Drawn) -> None:
+    """The same members in any order, the same keys found."""
+    table, members, _ = drawn
+    shuffled = data.draw(st.permutations(members))
+    one = [f.key for f in wi.judge(table, typed(members), ROOT, [])]
+    two = [f.key for f in wi.judge(table, typed(shuffled), ROOT, [])]
+    assert one == two
 
-    @given(st.sampled_from(sorted(wi.UNRESOLVABLE)), workspace())
-    def test_unjudgeable_keys_are_reported(self, key: str, drawn: Drawn) -> None:
-        """Named in the report, never a finding."""
-        table, members, _ = drawn
-        report: list[str] = []
-        found = wi.judge({**table, key: False}, typed(members), ROOT, report)
-        keys = {f.key for f in found}
-        assert key not in keys
-        assert f"{key}: {wi.UNRESOLVABLE[key]}" in report
+
+@given(st.sampled_from(sorted(wi.UNRESOLVABLE)), workspace())
+def test_unjudgeable_keys_are_reported(key: str, drawn: Drawn) -> None:
+    """Named in the report, never a finding."""
+    table, members, _ = drawn
+    report: list[str] = []
+    found = wi.judge({**table, key: False}, typed(members), ROOT, report)
+    keys = {f.key for f in found}
+    assert key not in keys
+    assert f"{key}: {wi.UNRESOLVABLE[key]}" in report

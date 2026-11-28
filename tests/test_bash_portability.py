@@ -96,12 +96,10 @@ def clean(count: int) -> str:
     return f"lint:bash-portability: {count} files clean"
 
 
-@pytest.mark.usefixtures("_set_up_test_planted")
-class TestPlanted:
+class Planted:
     """A planted git tree."""
 
-    @fixture
-    def _set_up_test_planted(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Plant an empty tree."""
         self.tree = tmp_path
         self.env = support.env(
@@ -178,228 +176,234 @@ class TestPlanted:
         )
 
 
-class TestTask(TestPlanted):
-    """The task's own body: its three selections and the guard."""
-
-    def test_nothing_to_check_is_skipped(self) -> None:
-        """No workflow, shell file or mise config: skipped, by name."""
-        self.plant("README.md", "hi\n")
-        done = self.task()
-        same(done.returncode, 0, done.stderr)
-        same(done.stdout.splitlines(), SKIPPED)
-
-    def test_untracked_files_are_never_read(self) -> None:
-        """Offending files git does not track: still a skip."""
-        self.plant("a.sh", SCRIPT + "mapfile -t x\n", track=False)
-        self.plant(".github/workflows/ci.yml", "x: ${a,,}\n", track=False)
-        done = self.task()
-        same(done.returncode, 0, done.stderr)
-        same(done.stdout.splitlines(), SKIPPED)
-
-    def test_a_clean_tree_is_counted(self) -> None:
-        """Workflows and shell files counted, mise configs read for traps only."""
-        self.plant(".github/workflows/ci.yml", "jobs: {}\n")
-        self.plant("a.sh", SCRIPT + "echo ok\n")
-        self.plant("mise.toml", "[tasks.a]\nrun = 'true'\n")
-        done = self.task()
-        same(done.returncode, 0, done.stderr)
-        expected = [
-            "exit-trap: 2 script(s) and task body(ies), every EXIT trap guarded",
-            clean(2),
-        ]
-        same(done.stdout.splitlines(), expected)
-
-    def test_hits_through_the_task(self) -> None:
-        """A workflow's hit and a shell file's, workflows first."""
-        self.plant("b.sh", SCRIPT + "declare -A m\n")
-        self.plant(".github/workflows/ci.yml", "run: echo ${x^^}\n")
-        done = self.task()
-        same(done.returncode, bash_portability.EXIT_RED)
-        expected = red(
-            "  .github/workflows/ci.yml: 1:run: echo ${x^^}",
-            "  b.sh: 2:declare -A m",
-        )
-        same(done.stderr.splitlines(), expected)
+@fixture
+def planted(tmp_path: Path) -> Planted:
+    """Give each row its own Planted."""
+    return Planted(tmp_path)
 
 
-class TestSyntax(TestPlanted):
-    """The forms the lint names, and the ones it does not."""
+def test_nothing_to_check_is_skipped(planted: Planted) -> None:
+    """No workflow, shell file or mise config: skipped, by name."""
+    planted.plant("README.md", "hi\n")
+    done = planted.task()
+    same(done.returncode, 0, done.stderr)
+    same(done.stdout.splitlines(), SKIPPED)
 
-    @pytest.mark.parametrize(
-        "line",
-        [
-            "echo ${v,,}",
-            "echo ${v^^}",
-            "echo ${v,}",
-            "echo ${v^}",
-            "echo ${a[0],,}",
-            "echo ${a[@]^}",
-            "declare -A m",
-            "typeset  -gA m",
-            "local x; mapfile -t x < f",
-            "readarray\tx",
-            "cmd &>> log",
-        ],
+
+def test_untracked_files_are_never_read(planted: Planted) -> None:
+    """Offending files git does not track: still a skip."""
+    planted.plant("a.sh", SCRIPT + "mapfile -t x\n", track=False)
+    planted.plant(".github/workflows/ci.yml", "x: ${a,,}\n", track=False)
+    done = planted.task()
+    same(done.returncode, 0, done.stderr)
+    same(done.stdout.splitlines(), SKIPPED)
+
+
+def test_a_clean_tree_is_counted(planted: Planted) -> None:
+    """Workflows and shell files counted, mise configs read for traps only."""
+    planted.plant(".github/workflows/ci.yml", "jobs: {}\n")
+    planted.plant("a.sh", SCRIPT + "echo ok\n")
+    planted.plant("mise.toml", "[tasks.a]\nrun = 'true'\n")
+    done = planted.task()
+    same(done.returncode, 0, done.stderr)
+    expected = [
+        "exit-trap: 2 script(s) and task body(ies), every EXIT trap guarded",
+        clean(2),
+    ]
+    same(done.stdout.splitlines(), expected)
+
+
+def test_hits_through_the_task(planted: Planted) -> None:
+    """A workflow's hit and a shell file's, workflows first."""
+    planted.plant("b.sh", SCRIPT + "declare -A m\n")
+    planted.plant(".github/workflows/ci.yml", "run: echo ${x^^}\n")
+    done = planted.task()
+    same(done.returncode, bash_portability.EXIT_RED)
+    expected = red(
+        "  .github/workflows/ci.yml: 1:run: echo ${x^^}",
+        "  b.sh: 2:declare -A m",
     )
-    def test_each_form_is_named(
-        self, line: object, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """Every bash 4 form, on its own line."""
-        status, _out, err = self.script(SCRIPT + line + "\n", capfd=capfd)
-        same(status, bash_portability.EXIT_RED)
-        same(err.splitlines(), red(f"  a.sh: 2:{line}"))
+    same(done.stderr.splitlines(), expected)
 
-    def test_near_misses_are_clean(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """Bash 3 forms that look alike: not named."""
-        text = SCRIPT + "".join(
-            f"{line}\n"
-            for line in (
-                "echo ${v:-a,b}",
-                "echo ${1,,}",
-                "declare -a list",
-                "declare -r A=1",
-                "my_mapfile x",
-                "echo mapfile",
-                "cmd &> log",
-                "cmd >> log 2>&1",
-            )
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "echo ${v,,}",
+        "echo ${v^^}",
+        "echo ${v,}",
+        "echo ${v^}",
+        "echo ${a[0],,}",
+        "echo ${a[@]^}",
+        "declare -A m",
+        "typeset  -gA m",
+        "local x; mapfile -t x < f",
+        "readarray\tx",
+        "cmd &>> log",
+    ],
+)
+def test_each_form_is_named(
+    planted: Planted, line: object, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Every bash 4 form, on its own line."""
+    status, _out, err = planted.script(SCRIPT + line + "\n", capfd=capfd)
+    same(status, bash_portability.EXIT_RED)
+    same(err.splitlines(), red(f"  a.sh: 2:{line}"))
+
+
+def test_near_misses_are_clean(
+    planted: Planted, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Bash 3 forms that look alike: not named."""
+    text = SCRIPT + "".join(
+        f"{line}\n"
+        for line in (
+            "echo ${v:-a,b}",
+            "echo ${1,,}",
+            "declare -a list",
+            "declare -r A=1",
+            "my_mapfile x",
+            "echo mapfile",
+            "cmd &> log",
+            "cmd >> log 2>&1",
         )
-        status, out, err = self.script(text, capfd=capfd)
-        same(status, 0, err)
-        same(out.splitlines()[-1], clean(1))
-
-    def test_comments_are_dropped_before_numbering(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A comment naming a form is no hit, and numbers skip it."""
-        text = SCRIPT + "# never ${v,,}\n  # nor mapfile x\n\necho ${v^}\n"
-        status, _out, err = self.script(text, capfd=capfd)
-        same(status, bash_portability.EXIT_RED)
-        same(err.splitlines(), red("  a.sh: 3:echo ${v^}"))
-
-    def test_hits_in_one_file_and_across_files(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A file's first hit carries its name; its others do not."""
-        one = self.plant(".github/workflows/a.yml", "a: ${x,}\nb: ok\nc: ${y^}\n")
-        two = self.plant("b.sh", SCRIPT + "mapfile x\n")
-        status, _out, err = self.helper(one, "--", two, "--", capfd=capfd)
-        same(status, bash_portability.EXIT_RED)
-        expected = red(f"  {one}: 1:a: ${{x,}}", "3:c: ${y^}", f"  {two}: 2:mapfile x")
-        same(err.splitlines(), expected)
-
-    def test_a_path_that_is_not_a_file_is_counted_unread(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A named directory or a missing path: counted, never read."""
-        (self.tree / "d.yml").mkdir()
-        status, out, err = self.helper(
-            ".github/workflows/gone.yml", "d.yml", "--", "--", capfd=capfd
-        )
-        same(status, 0, err)
-        same(out.splitlines()[-1], clean(2))
-
-
-class TestExpansion(TestPlanted):
-    """The message went through `printf %b`, and a newline-split read."""
-
-    @pytest.mark.parametrize(
-        ("line", "shown"),
-        [
-            ("echo ${v,,} '\\t'", ["  a.sh: 2:echo ${v,,} '\t'"]),
-            ("printf '\\101\\x42\\0103' ${v,,}", ["  a.sh: 2:printf 'ABC' ${v,,}"]),
-            ("echo ${v,,} \\q \\\\", ["  a.sh: 2:echo ${v,,} \\q \\"]),
-            ("echo ${v,,} 'a\\nb'", ["  a.sh: 2:echo ${v,,} 'a", "b'"]),
-            ("echo ${v,,} \\n\\n x", ["  a.sh: 2:echo ${v,,} ", " x"]),
-            ("echo ${v,,} \\u00e9 \\x4g", ["  a.sh: 2:echo ${v,,} é \x04g"]),
-            ("echo ${v,,} \\", ["  a.sh: 2:echo ${v,,} \\"]),
-        ],
     )
-    def test_escapes_are_expanded(
-        self, line: object, shown: object, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """Bash's escapes in a hit line expand; an unknown one stays."""
-        status, _out, err = self.script(SCRIPT + line + "\n", capfd=capfd)
-        same(status, bash_portability.EXIT_RED)
-        same(err.splitlines(), red(*shown))
-
-    @pytest.mark.parametrize("stop", ["\\c", "\\0"])
-    def test_backslash_c_and_nul_end_the_text(
-        self, stop: object, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        r"""`\c` stops printf, a NUL stops the read: later hits are dropped."""
-        one = self.plant("a.sh", SCRIPT + f"echo ${{v,,}} x{stop}y\n")
-        two = self.plant("b.sh", SCRIPT + "mapfile x\n")
-        status, _out, err = self.helper("--", one, two, "--", capfd=capfd)
-        same(status, bash_portability.EXIT_RED)
-        expected = red("  a.sh: 2:echo ${v,,} x")
-        same(err.splitlines(), expected)
-
-    def test_the_expansion_by_itself(self) -> None:
-        r"""Octal past a byte wraps, a big \U stays, \e is escape."""
-        same(bash_portability.expand("\\777\\e\\E"), "\udcff\x1b\x1b")
-        same(bash_portability.expand("\\UFFFFFFFF"), "\\UFFFFFFFF")
-        same(bash_portability.expand("\\u"), "\\u")
-        same(bash_portability.expand("\\a\\b\\f\\r\\v"), "\a\b\f\r\v")
+    status, out, err = planted.script(text, capfd=capfd)
+    same(status, 0, err)
+    same(out.splitlines()[-1], clean(1))
 
 
-class TestTraps(TestPlanted):
-    """The EXIT trap half, mise/exit_trap.py's own."""
-
-    def test_an_unguarded_trap_is_red_alone(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """No bash 4 syntax, an unguarded trap: red, the trap's finding only."""
-        status, out, err = self.script(SCRIPT + TRAP, capfd=capfd)
-        same(status, bash_portability.EXIT_RED)
-        same(out, "")
-        assert HEAD not in err
-        assert f"{TASK}: a.sh" in err
-
-    def test_both_halves_red(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """An unguarded trap and bash 4 syntax: both findings, the trap's first."""
-        status, _out, err = self.script(SCRIPT + TRAP + "mapfile x\n", capfd=capfd)
-        same(status, bash_portability.EXIT_RED)
-        head, _, rest = err.partition(HEAD + "\n")
-        assert f"{TASK}: a.sh" in head
-        same([HEAD, *rest.splitlines()], red("  a.sh: 3:mapfile x"))
+def test_comments_are_dropped_before_numbering(
+    planted: Planted, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A comment naming a form is no hit, and numbers skip it."""
+    text = SCRIPT + "# never ${v,,}\n  # nor mapfile x\n\necho ${v^}\n"
+    status, _out, err = planted.script(text, capfd=capfd)
+    same(status, bash_portability.EXIT_RED)
+    same(err.splitlines(), red("  a.sh: 3:echo ${v^}"))
 
 
-class TestCalls(TestPlanted):
-    """Reading the files, and the call itself."""
+def test_hits_in_one_file_and_across_files(
+    planted: Planted, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A file's first hit carries its name; its others do not."""
+    one = planted.plant(".github/workflows/a.yml", "a: ${x,}\nb: ok\nc: ${y^}\n")
+    two = planted.plant("b.sh", SCRIPT + "mapfile x\n")
+    status, _out, err = planted.helper(one, "--", two, "--", capfd=capfd)
+    same(status, bash_portability.EXIT_RED)
+    expected = red(f"  {one}: 1:a: ${{x,}}", "3:c: ${y^}", f"  {two}: 2:mapfile x")
+    same(err.splitlines(), expected)
 
-    def test_a_workflow_not_utf8_is_judged_on_its_bytes(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A workflow that is not UTF-8 is read as grep reads it."""
-        rel = self.plant("a.yml", b"x: \xff\nmapfile x\n")
-        status, _out, err = self.helper(rel, "--", "--", capfd=capfd)
-        same(status, bash_portability.EXIT_RED)
-        same(err.splitlines(), red(f"  {rel}: 2:mapfile x"))
 
-    def test_a_script_exit_trap_cannot_read_is_an_error(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A shell file or config not UTF-8, or a directory: exit 2."""
-        rel = self.plant("a.sh", b"#!/bin/bash\n\xff\n")
-        conf = self.plant("mise.toml", b"[tasks.a]\nrun = '\xff'\n")
-        (self.tree / "d.sh").mkdir()
-        for name, said in (
-            (rel, f"{TASK}: {rel}: cannot be read as UTF-8:"),
-            (conf, f"{TASK}: {conf}: cannot be read as UTF-8:"),
-            ("d.sh", f"{TASK}: mise/exit_trap.py cannot read a file:"),
-        ):
-            lists = ("--", name, "--") if name != conf else ("--", "--", name)
-            status, _out, err = self.helper(*lists, capfd=capfd)
-            same(status, bash_portability.EXIT_ERROR)
-            assert err.startswith(said), err
+def test_a_path_that_is_not_a_file_is_counted_unread(
+    planted: Planted, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A named directory or a missing path: counted, never read."""
+    (planted.tree / "d.yml").mkdir()
+    status, out, err = planted.helper(
+        ".github/workflows/gone.yml", "d.yml", "--", "--", capfd=capfd
+    )
+    same(status, 0, err)
+    same(out.splitlines()[-1], clean(2))
 
-    @pytest.mark.parametrize("argv", [[], ["a.sh"], ["--"], ["--", "--", "--"]])
-    def test_a_bad_call_is_a_usage_error(
-        self, argv: object, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """Not two separators: exit 2 with the usage line."""
-        usage = f"{TASK}: {bash_portability.USAGE}"
-        status, _out, err = self.helper(*argv, capfd=capfd)
+
+@pytest.mark.parametrize(
+    ("line", "shown"),
+    [
+        ("echo ${v,,} '\\t'", ["  a.sh: 2:echo ${v,,} '\t'"]),
+        ("printf '\\101\\x42\\0103' ${v,,}", ["  a.sh: 2:printf 'ABC' ${v,,}"]),
+        ("echo ${v,,} \\q \\\\", ["  a.sh: 2:echo ${v,,} \\q \\"]),
+        ("echo ${v,,} 'a\\nb'", ["  a.sh: 2:echo ${v,,} 'a", "b'"]),
+        ("echo ${v,,} \\n\\n x", ["  a.sh: 2:echo ${v,,} ", " x"]),
+        ("echo ${v,,} \\u00e9 \\x4g", ["  a.sh: 2:echo ${v,,} é \x04g"]),
+        ("echo ${v,,} \\", ["  a.sh: 2:echo ${v,,} \\"]),
+    ],
+)
+def test_escapes_are_expanded(
+    planted: Planted, line: object, shown: object, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Bash's escapes in a hit line expand; an unknown one stays."""
+    status, _out, err = planted.script(SCRIPT + line + "\n", capfd=capfd)
+    same(status, bash_portability.EXIT_RED)
+    same(err.splitlines(), red(*shown))
+
+
+@pytest.mark.parametrize("stop", ["\\c", "\\0"])
+def test_backslash_c_and_nul_end_the_text(
+    planted: Planted, stop: object, capfd: pytest.CaptureFixture[str]
+) -> None:
+    r"""`\c` stops printf, a NUL stops the read: later hits are dropped."""
+    one = planted.plant("a.sh", SCRIPT + f"echo ${{v,,}} x{stop}y\n")
+    two = planted.plant("b.sh", SCRIPT + "mapfile x\n")
+    status, _out, err = planted.helper("--", one, two, "--", capfd=capfd)
+    same(status, bash_portability.EXIT_RED)
+    expected = red("  a.sh: 2:echo ${v,,} x")
+    same(err.splitlines(), expected)
+
+
+@pytest.mark.usefixtures("planted")
+def test_the_expansion_by_itself() -> None:
+    r"""Octal past a byte wraps, a big \U stays, \e is escape."""
+    same(bash_portability.expand("\\777\\e\\E"), "\udcff\x1b\x1b")
+    same(bash_portability.expand("\\UFFFFFFFF"), "\\UFFFFFFFF")
+    same(bash_portability.expand("\\u"), "\\u")
+    same(bash_portability.expand("\\a\\b\\f\\r\\v"), "\a\b\f\r\v")
+
+
+def test_an_unguarded_trap_is_red_alone(
+    planted: Planted, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """No bash 4 syntax, an unguarded trap: red, the trap's finding only."""
+    status, out, err = planted.script(SCRIPT + TRAP, capfd=capfd)
+    same(status, bash_portability.EXIT_RED)
+    same(out, "")
+    assert HEAD not in err
+    assert f"{TASK}: a.sh" in err
+
+
+def test_both_halves_red(planted: Planted, capfd: pytest.CaptureFixture[str]) -> None:
+    """An unguarded trap and bash 4 syntax: both findings, the trap's first."""
+    status, _out, err = planted.script(SCRIPT + TRAP + "mapfile x\n", capfd=capfd)
+    same(status, bash_portability.EXIT_RED)
+    head, _, rest = err.partition(HEAD + "\n")
+    assert f"{TASK}: a.sh" in head
+    same([HEAD, *rest.splitlines()], red("  a.sh: 3:mapfile x"))
+
+
+def test_a_workflow_not_utf8_is_judged_on_its_bytes(
+    planted: Planted, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A workflow that is not UTF-8 is read as grep reads it."""
+    rel = planted.plant("a.yml", b"x: \xff\nmapfile x\n")
+    status, _out, err = planted.helper(rel, "--", "--", capfd=capfd)
+    same(status, bash_portability.EXIT_RED)
+    same(err.splitlines(), red(f"  {rel}: 2:mapfile x"))
+
+
+def test_a_script_exit_trap_cannot_read_is_an_error(
+    planted: Planted, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A shell file or config not UTF-8, or a directory: exit 2."""
+    rel = planted.plant("a.sh", b"#!/bin/bash\n\xff\n")
+    conf = planted.plant("mise.toml", b"[tasks.a]\nrun = '\xff'\n")
+    (planted.tree / "d.sh").mkdir()
+    for name, said in (
+        (rel, f"{TASK}: {rel}: cannot be read as UTF-8:"),
+        (conf, f"{TASK}: {conf}: cannot be read as UTF-8:"),
+        ("d.sh", f"{TASK}: mise/exit_trap.py cannot read a file:"),
+    ):
+        lists = ("--", name, "--") if name != conf else ("--", "--", name)
+        status, _out, err = planted.helper(*lists, capfd=capfd)
         same(status, bash_portability.EXIT_ERROR)
-        same(err.splitlines(), [usage])
+        assert err.startswith(said), err
+
+
+@pytest.mark.parametrize("argv", [[], ["a.sh"], ["--"], ["--", "--", "--"]])
+def test_a_bad_call_is_a_usage_error(
+    planted: Planted, argv: object, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Not two separators: exit 2 with the usage line."""
+    usage = f"{TASK}: {bash_portability.USAGE}"
+    status, _out, err = planted.helper(*argv, capfd=capfd)
+    same(status, bash_portability.EXIT_ERROR)
+    same(err.splitlines(), [usage])

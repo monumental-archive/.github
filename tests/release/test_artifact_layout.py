@@ -195,43 +195,43 @@ def first(docs: dict[str, Doc], family: str, action: str) -> Step:
     )
 
 
-class TestLayout:
-    """Each family is laid out by the artifact, never by the match count."""
+# Each family is laid out by the artifact, never by the match count.
+def test_the_canon_lays_every_family_out_by_name() -> None:
+    """Every named upload is staged and every named download merged."""
+    none: list[str] = []
+    assert none == findings(canon())
 
-    def test_the_canon_lays_every_family_out_by_name(self) -> None:
-        """Every named upload is staged and every named download merged."""
-        none: list[str] = []
-        assert none == findings(canon())
 
-    @pytest.mark.parametrize("family", NAMED)
-    def test_a_download_without_merge_multiple_is_red(self, family: object) -> None:
-        """A planted pattern download with no merge-multiple is named."""
-        docs = copy.deepcopy(canon())
-        step = first(docs, family, DOWNLOAD)
-        given = _with(step)
-        del given["merge-multiple"]
-        red = findings(docs)
-        assert len(red) == 1, red
-        assert re.search(
-            rf"the {family}\* download sets no merge-multiple: true, "
-            "so a lone match unpacks flat$",
-            red[0],
-        )
+@pytest.mark.parametrize("family", NAMED)
+def test_a_download_without_merge_multiple_is_red(family: object) -> None:
+    """A planted pattern download with no merge-multiple is named."""
+    docs = copy.deepcopy(canon())
+    step = first(docs, family, DOWNLOAD)
+    given = _with(step)
+    del given["merge-multiple"]
+    red = findings(docs)
+    assert len(red) == 1, red
+    assert re.search(
+        rf"the {family}\* download sets no merge-multiple: true, "
+        "so a lone match unpacks flat$",
+        red[0],
+    )
 
-    @pytest.mark.parametrize("family", NAMED)
-    def test_an_upload_of_the_bare_path_is_red(self, family: object) -> None:
-        """A planted upload of the row's own path, not its stage, is named."""
-        docs = copy.deepcopy(canon())
-        step = first(docs, family, UPLOAD)
-        given = _with(step)
-        given["path"] = "plan/plan.json"
-        artifact = given["name"]
-        red = findings(docs)
-        assert len(red) == 1, red
-        assert red[0].endswith(
-            f": the {artifact} upload's root does not hold {artifact}/: "
-            "stage it under STAGE as ARTIFACT, and upload STAGE"
-        ), red[0]
+
+@pytest.mark.parametrize("family", NAMED)
+def test_an_upload_of_the_bare_path_is_red(family: object) -> None:
+    """A planted upload of the row's own path, not its stage, is named."""
+    docs = copy.deepcopy(canon())
+    step = first(docs, family, UPLOAD)
+    given = _with(step)
+    given["path"] = "plan/plan.json"
+    artifact = given["name"]
+    red = findings(docs)
+    assert len(red) == 1, red
+    assert red[0].endswith(
+        f": the {artifact} upload's root does not hold {artifact}/: "
+        "stage it under STAGE as ARTIFACT, and upload STAGE"
+    ), red[0]
 
 
 def plant(base: Path, *, directory: bool) -> tuple[Path, list[str]]:
@@ -252,61 +252,68 @@ def plant(base: Path, *, directory: bool) -> tuple[Path, list[str]]:
     return source, ["plan.json"]
 
 
-@pytest.mark.usefixtures("_tmp")
-class TestStaged:
+class Staged:
     """Each staging step's own body makes the layout the consumer reads."""
 
-    @fixture
-    def _tmp(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
 
-    def stage(self, step: Step, source: Path, stage: Path, artifact: str) -> None:
-        """Run one staging step's body against planted paths."""
-        body = step.get("run")
-        assert isinstance(body, str), step
-        done = subprocess.run(
-            [BASH, "-e", "-c", str(body)],
-            env=support.env(SOURCE=str(source), STAGE=str(stage), ARTIFACT=artifact),
-            capture_output=True,
-            text=True,
-            check=False,
+
+@fixture
+def staged(tmp_path: Path) -> Staged:
+    """Give each row its own Staged."""
+    return Staged(tmp_path)
+
+
+def stage(step: Step, source: Path, stage: Path, artifact: str) -> None:
+    """Run one staging step's body against planted paths."""
+    body = step.get("run")
+    assert isinstance(body, str), step
+    done = subprocess.run(
+        [BASH, "-e", "-c", str(body)],
+        env=support.env(SOURCE=str(source), STAGE=str(stage), ARTIFACT=artifact),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr
+
+
+def test_each_stage_holds_the_artifacts_own_directory(staged: Staged) -> None:
+    """The staged root holds `<artifact>/` and the row's files inside it."""
+    steps = stagings(canon())
+    assert steps
+    for step in steps:
+        env = _env(step)
+        family = _family(env.get("ARTIFACT"))
+        scratch = tempfile.mkdtemp(dir=staged.tmp)
+        base = Path(scratch)
+        staging = base / "up"
+        artifact = f"{family}7"
+        source, inside = plant(base, directory=family == "coverage-run-")
+        stage(step, source, staging, artifact)
+        want: list[str] = [artifact]
+        names = [p.name for p in staging.iterdir()]
+        assert want == names
+        found = sorted(
+            str(p.relative_to(staging / artifact))
+            for p in (staging / artifact).rglob("*")
+            if p.is_file()
         )
-        assert done.returncode == 0, done.stderr
+        assert inside == found
 
-    def test_each_stage_holds_the_artifacts_own_directory(self) -> None:
-        """The staged root holds `<artifact>/` and the row's files inside it."""
-        steps = stagings(canon())
-        assert steps
-        for step in steps:
-            env = _env(step)
-            family = _family(env.get("ARTIFACT"))
-            scratch = tempfile.mkdtemp(dir=self.tmp)
-            base = Path(scratch)
-            stage = base / "up"
-            artifact = f"{family}7"
-            source, inside = plant(base, directory=family == "coverage-run-")
-            self.stage(step, source, stage, artifact)
-            want: list[str] = [artifact]
-            names = [p.name for p in stage.iterdir()]
-            assert want == names
-            found = sorted(
-                str(p.relative_to(stage / artifact))
-                for p in (stage / artifact).rglob("*")
-                if p.is_file()
-            )
-            assert inside == found
 
-    def test_a_row_that_measured_nothing_stages_nothing(self) -> None:
-        """No run directory, no stage: the upload then finds no files."""
-        steps = [
-            s
-            for s in stagings(canon())
-            if _family(_env(s).get("ARTIFACT")) == "coverage-run-"
-        ]
-        assert steps
-        for step in steps:
-            scratch = tempfile.mkdtemp(dir=self.tmp)
-            base = Path(scratch)
-            self.stage(step, base / "coverage-run", base / "up", "coverage-run-1")
-            assert not (base / "up").exists()
+def test_a_row_that_measured_nothing_stages_nothing(staged: Staged) -> None:
+    """No run directory, no stage: the upload then finds no files."""
+    steps = [
+        s
+        for s in stagings(canon())
+        if _family(_env(s).get("ARTIFACT")) == "coverage-run-"
+    ]
+    assert steps
+    for step in steps:
+        scratch = tempfile.mkdtemp(dir=staged.tmp)
+        base = Path(scratch)
+        stage(step, base / "coverage-run", base / "up", "coverage-run-1")
+        assert not (base / "up").exists()

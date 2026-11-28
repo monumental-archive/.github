@@ -65,12 +65,10 @@ def bash() -> str:
     return support.tool("bash")
 
 
-@pytest.mark.usefixtures("_set_up_test_install_the_belts_python")
-class TestInstallTheBeltsPython:
+class InstallTheBeltsPython:
     """Each row: the planted tree and stub, and what the step did."""
 
-    @fixture
-    def _set_up_test_install_the_belts_python(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Give each row a canon tree, a stub mise and a runner's files."""
         self.tmp = tmp_path
         self.root = self.tmp / "_actions" / "example-org" / ".github" / "v1.0.0"
@@ -143,80 +141,107 @@ class TestInstallTheBeltsPython:
         """
         return self.log.read_text(encoding="utf-8") if self.log.exists() else ""
 
-    def test_the_interpreters_path_is_exported(self) -> None:
-        """Locked, from the belt's config, out of the caller's tree."""
-        done = self.install()
-        assert done.returncode == 0, done.stdout + done.stderr
-        assert done.stdout == f"the belt's python {VERSION}: {self.python}\n"
-        assert (
-            self.env_file.read_text(encoding="utf-8") == f"ORG_PYTHON={self.python}\n"
-        )
-        work = self.runner_temp / "org-python"
-        call = (
-            f"cwd: {work / 'cwd'}\n"
-            "MISE_LOCKED=1\n"
-            f"MISE_GLOBAL_CONFIG_FILE={self.root / 'mise' / 'config.toml'}\n"
-            f"MISE_TRUSTED_CONFIG_PATHS={self.root}\n"
-            f"MISE_DATA_DIR={work / 'data'}\n"
-        )
-        assert (
-            self.calls()
-            == f"args: install python\n{call}args: where python@{VERSION}\n{call}"
-        )
 
-    def test_a_failed_install_is_red_by_name(self) -> None:
-        """Nothing is exported, and the message names the version and lock."""
-        done = self.install(status=1)
-        assert done.returncode == 1, done.stdout + done.stderr
-        assert done.stderr == (
-            f"::error::python.sh: mise could not install python {VERSION}"
-            f" from {self.root / 'mise' / 'mise.lock'}\n"
-        )
-        assert self.env_file.read_text(encoding="utf-8") == ""
+@fixture
+def install_the_belts_python(tmp_path: Path) -> InstallTheBeltsPython:
+    """Give each row its own InstallTheBeltsPython."""
+    return InstallTheBeltsPython(tmp_path)
 
-    def test_a_lock_without_the_version_is_red_by_name(self) -> None:
-        """The config pins a version the lock does not hold: mise never runs."""
-        self.plant(config=VERSION, lock="3.15.1")
-        done = self.install()
-        assert done.returncode == 1, done.stdout + done.stderr
-        assert done.stderr == (
-            f"::error::python.sh: {self.root / 'mise' / 'mise.lock'} does"
-            f" not hold python {VERSION} (it holds '3.15.1'), so the install"
-            " cannot be checked\n"
-        )
-        assert self.calls() == ""
-        assert self.env_file.read_text(encoding="utf-8") == ""
 
-    def test_a_config_without_a_python_pin_is_red_by_name(self) -> None:
-        """No pin: nothing to install, and nothing is guessed."""
-        self.plant(config=None, lock=VERSION)
-        done = self.install()
-        assert done.returncode == 1, done.stdout + done.stderr
-        assert done.stderr == (
-            f"::error::python.sh: {self.root / 'mise' / 'config.toml'}"
-            " does not pin exactly one python version\n"
-        )
-        assert self.calls() == ""
+def test_the_interpreters_path_is_exported(
+    install_the_belts_python: InstallTheBeltsPython,
+) -> None:
+    """Locked, from the belt's config, out of the caller's tree."""
+    done = install_the_belts_python.install()
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert (
+        done.stdout
+        == f"the belt's python {VERSION}: {install_the_belts_python.python}\n"
+    )
+    assert (
+        install_the_belts_python.env_file.read_text(encoding="utf-8")
+        == f"ORG_PYTHON={install_the_belts_python.python}\n"
+    )
+    work = install_the_belts_python.runner_temp / "org-python"
+    call = (
+        f"cwd: {work / 'cwd'}\n"
+        "MISE_LOCKED=1\n"
+        f"MISE_GLOBAL_CONFIG_FILE={install_the_belts_python.root / 'mise' / 'config.toml'}\n"
+        f"MISE_TRUSTED_CONFIG_PATHS={install_the_belts_python.root}\n"
+        f"MISE_DATA_DIR={work / 'data'}\n"
+    )
+    assert (
+        install_the_belts_python.calls()
+        == f"args: install python\n{call}args: where python@{VERSION}\n{call}"
+    )
 
-    def test_an_install_with_no_interpreter_is_red_by_name(self) -> None:
-        """The stub says where, and nothing executable is there."""
-        self.python.unlink()
-        done = self.install()
-        assert done.returncode == 1, done.stdout + done.stderr
-        assert (
-            done.stderr
-            == f"::error::python.sh: {self.python} is not an executable interpreter\n"
-        )
-        assert self.env_file.read_text(encoding="utf-8") == ""
 
-    def test_the_shipped_pin_is_in_the_shipped_lock(self) -> None:
-        """The real belt: the script's own two checks pass on it."""
-        config = (CANON / "mise" / "config.toml").read_text(encoding="utf-8")
-        lock = (CANON / "mise" / "mise.lock").read_text(encoding="utf-8")
-        pins = [ln for ln in config.splitlines() if ln.startswith('python = "')]
-        assert len(pins) == 1, pins
-        version = pins[0].split('"')[1]
-        assert f'[[tools.python]]\nversion = "{version}"\n' in lock
+def test_a_failed_install_is_red_by_name(
+    install_the_belts_python: InstallTheBeltsPython,
+) -> None:
+    """Nothing is exported, and the message names the version and lock."""
+    done = install_the_belts_python.install(status=1)
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert done.stderr == (
+        f"::error::python.sh: mise could not install python {VERSION}"
+        f" from {install_the_belts_python.root / 'mise' / 'mise.lock'}\n"
+    )
+    assert install_the_belts_python.env_file.read_text(encoding="utf-8") == ""
+
+
+def test_a_lock_without_the_version_is_red_by_name(
+    install_the_belts_python: InstallTheBeltsPython,
+) -> None:
+    """The config pins a version the lock does not hold: mise never runs."""
+    install_the_belts_python.plant(config=VERSION, lock="3.15.1")
+    done = install_the_belts_python.install()
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert done.stderr == (
+        f"::error::python.sh: {install_the_belts_python.root / 'mise' / 'mise.lock'} does"
+        f" not hold python {VERSION} (it holds '3.15.1'), so the install"
+        " cannot be checked\n"
+    )
+    assert install_the_belts_python.calls() == ""
+    assert install_the_belts_python.env_file.read_text(encoding="utf-8") == ""
+
+
+def test_a_config_without_a_python_pin_is_red_by_name(
+    install_the_belts_python: InstallTheBeltsPython,
+) -> None:
+    """No pin: nothing to install, and nothing is guessed."""
+    install_the_belts_python.plant(config=None, lock=VERSION)
+    done = install_the_belts_python.install()
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert done.stderr == (
+        f"::error::python.sh: {install_the_belts_python.root / 'mise' / 'config.toml'}"
+        " does not pin exactly one python version\n"
+    )
+    assert install_the_belts_python.calls() == ""
+
+
+def test_an_install_with_no_interpreter_is_red_by_name(
+    install_the_belts_python: InstallTheBeltsPython,
+) -> None:
+    """The stub says where, and nothing executable is there."""
+    install_the_belts_python.python.unlink()
+    done = install_the_belts_python.install()
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert (
+        done.stderr
+        == f"::error::python.sh: {install_the_belts_python.python} is not an executable interpreter\n"
+    )
+    assert install_the_belts_python.env_file.read_text(encoding="utf-8") == ""
+
+
+@pytest.mark.usefixtures("install_the_belts_python")
+def test_the_shipped_pin_is_in_the_shipped_lock() -> None:
+    """The real belt: the script's own two checks pass on it."""
+    config = (CANON / "mise" / "config.toml").read_text(encoding="utf-8")
+    lock = (CANON / "mise" / "mise.lock").read_text(encoding="utf-8")
+    pins = [ln for ln in config.splitlines() if ln.startswith('python = "')]
+    assert len(pins) == 1, pins
+    version = pins[0].split('"')[1]
+    assert f'[[tools.python]]\nversion = "{version}"\n' in lock
 
 
 def starters() -> list[pathlib.Path]:
@@ -273,49 +298,46 @@ def run_without(argv: list[str], value: str | None) -> subprocess.CompletedProce
 SOURCED = {"pgrx-env.sh", "rust-coverage-env.sh"}
 
 
-class TestAnUnsetOrgPythonIsRefused:
-    """A script that starts a helper names ORG_PYTHON when it is missing."""
+# A script that starts a helper names ORG_PYTHON when it is missing.
+def test_the_scripts_are_found() -> None:
+    """Not vacuous: the release and belt scripts that start helpers."""
+    names = {p.name for p in starters()}
+    assert {
+        "derive-coverage-floor.sh",
+        "pgrx-image-proof.sh",
+        "pgrx-plan.sh",
+    } <= names
+    assert len(names) >= 14
 
-    def test_the_scripts_are_found(self) -> None:
-        """Not vacuous: the release and belt scripts that start helpers."""
-        names = {p.name for p in starters()}
-        assert {
-            "derive-coverage-floor.sh",
-            "pgrx-image-proof.sh",
-            "pgrx-plan.sh",
-        } <= names
-        assert len(names) >= 14
 
-    def test_every_script_refuses_an_unset_or_empty_org_python(self) -> None:
-        """Run each one: red, with ORG_PYTHON named, before anything else."""
-        for script in starters():
-            if script.name in SOURCED:
-                continue
-            for value in (None, ""):
-                done = run_without([bash(), str(script)], value)
-                assert done.returncode != 0, done.stdout
-                assert REFUSAL in done.stderr
-                assert done.stdout == ""
+def test_every_script_refuses_an_unset_or_empty_org_python() -> None:
+    """Run each one: red, with ORG_PYTHON named, before anything else."""
+    for script in starters():
+        if script.name in SOURCED:
+            continue
+        for value in (None, ""):
+            done = run_without([bash(), str(script)], value)
+            assert done.returncode != 0, done.stdout
+            assert REFUSAL in done.stderr
+            assert done.stdout == ""
 
-    @pytest.mark.parametrize("value", [None, ""])
-    def test_the_sourced_provisioner_refuses_an_unset_org_python(
-        self, value: object
-    ) -> None:
-        """pgrx-env.sh is sourced: its helper call refuses at the call."""
-        env_sh = CANON / "mise" / "pgrx-env.sh"
-        # A major's Postgres is found through pgrx_postgres.py (#1940).
-        postgres = f'. "{env_sh}"; org_pgrx_postgres 17'
-        done = run_without([bash(), "-c", postgres], value)
-        assert done.returncode != 0, done.stdout
-        assert REFUSAL in done.stderr
 
-    @pytest.mark.parametrize("value", [None, ""])
-    def test_the_sourced_coverage_env_refuses_an_unset_org_python(
-        self, value: object
-    ) -> None:
-        """rust-coverage-env.sh is sourced: its function refuses (#1877)."""
-        env_sh = CANON / "mise" / "rust-coverage-env.sh"
-        call = f'. "{env_sh}"; org_rust_coverage_env measured'
-        done = run_without([bash(), "-c", call], value)
-        assert done.returncode != 0, done.stdout
-        assert REFUSAL in done.stderr
+@pytest.mark.parametrize("value", [None, ""])
+def test_the_sourced_provisioner_refuses_an_unset_org_python(value: object) -> None:
+    """pgrx-env.sh is sourced: its helper call refuses at the call."""
+    env_sh = CANON / "mise" / "pgrx-env.sh"
+    # A major's Postgres is found through pgrx_postgres.py (#1940).
+    postgres = f'. "{env_sh}"; org_pgrx_postgres 17'
+    done = run_without([bash(), "-c", postgres], value)
+    assert done.returncode != 0, done.stdout
+    assert REFUSAL in done.stderr
+
+
+@pytest.mark.parametrize("value", [None, ""])
+def test_the_sourced_coverage_env_refuses_an_unset_org_python(value: object) -> None:
+    """rust-coverage-env.sh is sourced: its function refuses (#1877)."""
+    env_sh = CANON / "mise" / "rust-coverage-env.sh"
+    call = f'. "{env_sh}"; org_rust_coverage_env measured'
+    done = run_without([bash(), "-c", call], value)
+    assert done.returncode != 0, done.stdout
+    assert REFUSAL in done.stderr

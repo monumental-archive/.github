@@ -80,58 +80,55 @@ def written(text: str) -> Path:
     return path
 
 
-class TestDigestsReadBack:
-    """T: what the list records for a name is what `digests` reads."""
-
-    @given(st.lists(st.tuples(DIGEST, NAME), max_size=8), NAME)
-    @example(SIGNED, "tool")
-    def test_every_name_reads_back(
-        self, records: list[tuple[str, str]], probe: str
-    ) -> None:
-        """Each name, and one maybe absent, reads back its digests."""
-        path = written("".join(f"{d}  {n}\n" for d, n in records))
-        try:
-            for name in {n for _, n in records} | {probe}:
-                want = "\n".join(d for d, n in records if n == name)
-                assert attach.digests(path, name) == want, name
-        finally:
-            path.unlink()
+# T: what the list records for a name is what `digests` reads.
+@given(st.lists(st.tuples(DIGEST, NAME), max_size=8), NAME)
+@example(SIGNED, "tool")
+def test_every_name_reads_back(records: list[tuple[str, str]], probe: str) -> None:
+    """Each name, and one maybe absent, reads back its digests."""
+    path = written("".join(f"{d}  {n}\n" for d, n in records))
+    try:
+        for name in {n for _, n in records} | {probe}:
+            want = "\n".join(d for d, n in records if n == name)
+            assert attach.digests(path, name) == want, name
+    finally:
+        path.unlink()
 
 
-class TestAnyInput:
-    """R: the readers answer, or refuse by name, on anything."""
+# R: the readers answer, or refuse by name, on anything.
+@given(st.text(), st.text(max_size=12))
+def test_digests_answers_on_any_text(text: str, name: str) -> None:
+    """Any list, any name: an answer, never a raise."""
+    path = written(text)
+    try:
+        assert isinstance(attach.digests(path, name), str)
+    finally:
+        path.unlink()
 
-    @given(st.text(), st.text(max_size=12))
-    def test_digests_answers_on_any_text(self, text: str, name: str) -> None:
-        """Any list, any name: an answer, never a raise."""
-        path = written(text)
-        try:
-            assert isinstance(attach.digests(path, name), str)
-        finally:
-            path.unlink()
 
-    @given(MANIFEST | JSON)
-    @example(ENTRIES_TRUE)
-    @example(ENTRIES_ONE)
-    def test_build_subjects_answers_or_refuses(self, doc: object) -> None:
-        """Any JSON: a list of names, or the step's own refusal."""
-        self.read_manifest(json.dumps(doc))
+@given(MANIFEST | JSON)
+@example(ENTRIES_TRUE)
+@example(ENTRIES_ONE)
+def test_build_subjects_answers_or_refuses(doc: object) -> None:
+    """Any JSON: a list of names, or the step's own refusal."""
+    read_manifest(json.dumps(doc))
 
-    @given(st.text())
-    def test_build_subjects_on_any_text(self, text: str) -> None:
-        """Any text: a list of names, or the step's own refusal."""
-        self.read_manifest(text)
 
-    def read_manifest(self, text: str) -> None:
-        """Hold one manifest's reading to an answer or a StepError."""
-        path = written(text)
-        try:
-            names = attach.build_subjects(path)
-        except attach.StepError as refused:
-            assert str(refused).startswith(f"{path} is not "), refused
-        else:
-            assert isinstance(names, list)
-            for name in names:
-                assert isinstance(name, str)
-        finally:
-            path.unlink()
+@given(st.text())
+def test_build_subjects_on_any_text(text: str) -> None:
+    """Any text: a list of names, or the step's own refusal."""
+    read_manifest(text)
+
+
+def read_manifest(text: str) -> None:
+    """Hold one manifest's reading to an answer or a StepError."""
+    path = written(text)
+    try:
+        names = attach.build_subjects(path)
+    except attach.StepError as refused:
+        assert str(refused).startswith(f"{path} is not "), refused
+    else:
+        assert isinstance(names, list)
+        for name in names:
+            assert isinstance(name, str)
+    finally:
+        path.unlink()

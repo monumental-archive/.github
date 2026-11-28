@@ -77,63 +77,60 @@ def run_helper(
         return result, (tmp / "cargo.log").read_text().splitlines()
 
 
-class TestOnePublishKeyPerRow:
-    """Each shape of the key, alone in a workspace."""
-
-    def test_the_key_decides(self) -> None:
-        """Unset and a list naming crates-io ship; false and elsewhere do not."""
-        rows: tuple[tuple[str, list[str] | None, str], ...] = (
-            ("unset", None, "fx-unset\t0.1.0\n"),
-            ("false", [], ""),
-            ("crates-io", ["crates-io"], "fx-crates-io\t0.1.0\n"),
-            ("among others", ["x", "crates-io"], "fx-among-others\t0.1.0\n"),
-            ("another registry only", ["x"], ""),
-        )
-        for label, key, expected in rows:
-            name = "fx-" + label.replace(" ", "-")
-            result, _ = run_helper({name: key}, (name,))
-            assert result.returncode == 0, result.stderr
-            assert expected == result.stdout
-
-
-class TestTheWholeWorkspace:
-    """Every shape at once, plus a package outside the workspace."""
-
-    def test_members_that_publish_to_crates_io_in_metadata_order(self) -> None:
-        """Only workspace members, only crates.io's, name TAB version."""
-        packages: dict[str, list[str] | None] = {
-            "fx-unset": None,
-            "fx-false": [],
-            "fx-crates-io": ["crates-io"],
-            "fx-elsewhere": ["x"],
-            "fx-outside": None,
-        }
-        result, calls = run_helper(
-            packages, ("fx-unset", "fx-false", "fx-crates-io", "fx-elsewhere")
-        )
+# Each shape of the key, alone in a workspace.
+def test_the_key_decides() -> None:
+    """Unset and a list naming crates-io ship; false and elsewhere do not."""
+    rows: tuple[tuple[str, list[str] | None, str], ...] = (
+        ("unset", None, "fx-unset\t0.1.0\n"),
+        ("false", [], ""),
+        ("crates-io", ["crates-io"], "fx-crates-io\t0.1.0\n"),
+        ("among others", ["x", "crates-io"], "fx-among-others\t0.1.0\n"),
+        ("another registry only", ["x"], ""),
+    )
+    for label, key, expected in rows:
+        name = "fx-" + label.replace(" ", "-")
+        result, _ = run_helper({name: key}, (name,))
         assert result.returncode == 0, result.stderr
-        assert result.stdout == "fx-unset\t0.1.0\nfx-crates-io\t0.1.0\n"
-        want: list[str] = ["metadata --format-version 1 --no-deps --locked"]
-        assert want == calls
+        assert expected == result.stdout
 
-    def test_a_cargo_failure_fails_the_helper(self) -> None:
-        """An unread workspace is never an empty one."""
-        with TemporaryDirectory() as d:
-            stub = Path(d) / "cargo"
-            stub.write_text(
-                "#!/usr/bin/env bash\n"
-                "echo 'error: lock file needs updating' >&2\n"
-                "exit 101\n"
-            )
-            stub.chmod(0o755)
-            result = subprocess.run(
-                [BASH, str(HELPER)],
-                env=support.env(PATH=f"{d}{os.pathsep}{os.environ['PATH']}"),
-                capture_output=True,
-                text=True,
-                check=False,
-                cwd=d,
-            )
-        assert result.returncode == 101
-        assert result.stdout == ""
-        assert result.stderr == "error: lock file needs updating\n"
+
+# Every shape at once, plus a package outside the workspace.
+def test_members_that_publish_to_crates_io_in_metadata_order() -> None:
+    """Only workspace members, only crates.io's, name TAB version."""
+    packages: dict[str, list[str] | None] = {
+        "fx-unset": None,
+        "fx-false": [],
+        "fx-crates-io": ["crates-io"],
+        "fx-elsewhere": ["x"],
+        "fx-outside": None,
+    }
+    result, calls = run_helper(
+        packages, ("fx-unset", "fx-false", "fx-crates-io", "fx-elsewhere")
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "fx-unset\t0.1.0\nfx-crates-io\t0.1.0\n"
+    want: list[str] = ["metadata --format-version 1 --no-deps --locked"]
+    assert want == calls
+
+
+def test_a_cargo_failure_fails_the_helper() -> None:
+    """An unread workspace is never an empty one."""
+    with TemporaryDirectory() as d:
+        stub = Path(d) / "cargo"
+        stub.write_text(
+            "#!/usr/bin/env bash\n"
+            "echo 'error: lock file needs updating' >&2\n"
+            "exit 101\n"
+        )
+        stub.chmod(0o755)
+        result = subprocess.run(
+            [BASH, str(HELPER)],
+            env=support.env(PATH=f"{d}{os.pathsep}{os.environ['PATH']}"),
+            capture_output=True,
+            text=True,
+            check=False,
+            cwd=d,
+        )
+    assert result.returncode == 101
+    assert result.stdout == ""
+    assert result.stderr == "error: lock file needs updating\n"

@@ -162,265 +162,268 @@ def a_function(name: str, returns: str = "INT /* i32 */", args: str = "") -> str
     )
 
 
-class TestTheGuardArithmetic:
-    """The psql guard must fit 80 columns AND stay one line (#792, #801)."""
+# The psql guard must fit 80 columns AND stay one line (#792, #801).
+def test_the_real_derived_script_is_reproduced_byte_for_byte(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """The oracle row: real inputs, real published output.
 
-    def test_the_real_derived_script_is_reproduced_byte_for_byte(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """The oracle row: real inputs, real published output.
-
-        release-lab v0.28.1 shipped this exact file. If the generator
-        stops producing it, something in the emission changed under a
-        release path whose output is immutable once tagged.
-        """
-        with TemporaryDirectory() as d:
-            result, script = Derivation(d, capfd).run(REAL_PREV, REAL_NEW)
-        assert result.returncode == 0, result.stderr
-        assert script == REAL_DERIVED
-
-    def test_the_guard_is_one_line_carrying_both_meta_commands(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        r"""#801's invariant: only `\echo` lines are ignored by the loader.
-
-        A bare `\\quit` on its own line is parsed by the server and
-        fails. This is the shape assertion that v1.58.2 would not have
-        survived.
-        """
-        with TemporaryDirectory() as d:
-            _, script = Derivation(d, capfd).run(REAL_PREV, REAL_NEW)
-        first = script.splitlines()[0]
-        assert first.startswith("\\echo "), first
-        assert "\\quit" in first
-        assert "\\quit" not in script.splitlines()[1:]
-
-    def test_every_emitted_line_fits_the_orgs_eighty_columns(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """The org's derived files meet the org's own rules (#792, ruled (a))."""
-        with TemporaryDirectory() as d:
-            _, script = Derivation(d, capfd).run(REAL_PREV, REAL_NEW)
-        too_long = [line for line in script.splitlines() if len(line) > GUARD_COLUMNS]
-        assert list[str]() == too_long
-
-    def test_the_longest_name_that_fits_is_emitted_at_exactly_eighty(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """The ceiling is a measured boundary, not a rounded one."""
-        name = "e" * LONGEST_NAME_THAT_FITS
-        with TemporaryDirectory() as d:
-            result, script = Derivation(d, capfd).run(REAL_PREV, REAL_NEW, ext=name)
-        assert result.returncode == 0, result.stderr
-        assert len(script.splitlines()[0]) == GUARD_COLUMNS
-
-    def test_one_character_more_refuses_with_the_arithmetic(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A name a database would accept but the guard cannot carry.
-
-        A PostgreSQL identifier may be 63 bytes, so this is a real
-        ceiling. Failing here with the sum beats failing two minutes
-        later in `lint:sql` with a column count.
-        """
-        name = "e" * (LONGEST_NAME_THAT_FITS + 1)
-        with TemporaryDirectory() as d:
-            result, script = Derivation(d, capfd).run(REAL_PREV, REAL_NEW, ext=name)
-        assert result.returncode == 1
-        assert "the psql guard would exceed 80 columns" in result.stderr
-        assert f"= {GUARD_COLUMNS + 1} > {GUARD_COLUMNS}" in result.stderr
-        assert script == ""
-
-
-class TestTheStatementDecisions:
-    """What the diff of two generated schemas is allowed to become.
-
-    Four classes, each with its own rule: functions are replaceable,
-    named objects are creatable and droppable but not changeable,
-    COMMENT/GRANT/REVOKE are always replayable, and everything else is
-    opaque — fine while identical, underivable otherwise.
+    release-lab v0.28.1 shipped this exact file. If the generator
+    stops producing it, something in the emission changed under a
+    release path whose output is immutable once tagged.
     """
+    with TemporaryDirectory() as d:
+        result, script = Derivation(d, capfd).run(REAL_PREV, REAL_NEW)
+    assert result.returncode == 0, result.stderr
+    assert script == REAL_DERIVED
 
-    def test_identical_schemas_derive_a_library_only_release(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """No DDL at all is a valid answer, and says which release it was."""
-        with TemporaryDirectory() as d:
-            result, script = Derivation(d, capfd).run(REAL_PREV, REAL_PREV)
-        assert result.returncode == 0, result.stderr
-        assert "No schema change between 0.27.0 and 0.28.1" in script
-        assert "CREATE" not in script
 
-    def test_a_new_function_is_created_replaceably(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """CREATE OR REPLACE, so a re-run over a partial upgrade is safe."""
-        with TemporaryDirectory() as d:
-            result, script = Derivation(d, capfd).run(
-                REAL_PREV, REAL_PREV + a_function("lab_extra")
-            )
-        assert result.returncode == 0, result.stderr
-        assert 'CREATE OR REPLACE FUNCTION "lab_extra"()' in script
+def test_the_guard_is_one_line_carrying_both_meta_commands(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    r"""#801's invariant: only `\echo` lines are ignored by the loader.
 
-    def test_an_unchanged_function_emits_nothing(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """The previous install already ran it; re-emitting it is noise."""
-        with TemporaryDirectory() as d:
-            _, script = Derivation(d, capfd).run(
-                REAL_PREV, REAL_PREV + a_function("lab_extra")
-            )
-        assert "lab_answer" not in script
-        assert "lab_version" not in script
+    A bare `\\quit` on its own line is parsed by the server and
+    fails. This is the shape assertion that v1.58.2 would not have
+    survived.
+    """
+    with TemporaryDirectory() as d:
+        _, script = Derivation(d, capfd).run(REAL_PREV, REAL_NEW)
+    first = script.splitlines()[0]
+    assert first.startswith("\\echo "), first
+    assert "\\quit" in first
+    assert "\\quit" not in script.splitlines()[1:]
 
-    def test_a_removed_function_is_dropped_by_signature(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """DROP FUNCTION names the identity arguments, never the defaults."""
-        with TemporaryDirectory() as d:
-            result, script = Derivation(d, capfd).run(
-                REAL_PREV + a_function("lab_extra", args="a INT DEFAULT 1, b TEXT"),
-                REAL_PREV,
-            )
-        assert result.returncode == 0, result.stderr
-        assert 'DROP FUNCTION "lab_extra"(a INT, b TEXT);' in script
-        assert "DEFAULT" not in script
 
-    def test_a_changed_return_type_is_dropped_before_it_is_recreated(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """CREATE OR REPLACE cannot change a return type; Postgres refuses it."""
-        with TemporaryDirectory() as d:
-            result, script = Derivation(d, capfd).run(
-                REAL_PREV + a_function("lab_extra", returns="INT /* i32 */"),
-                REAL_PREV + a_function("lab_extra", returns="TEXT /* String */"),
-            )
-        assert result.returncode == 0, result.stderr
-        drop = script.index('DROP FUNCTION "lab_extra"()')
-        create = script.index('CREATE OR REPLACE FUNCTION "lab_extra"()')
-        assert drop < create, script
+def test_every_emitted_line_fits_the_orgs_eighty_columns(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """The org's derived files meet the org's own rules (#792, ruled (a))."""
+    with TemporaryDirectory() as d:
+        _, script = Derivation(d, capfd).run(REAL_PREV, REAL_NEW)
+    too_long = [line for line in script.splitlines() if len(line) > GUARD_COLUMNS]
+    assert list[str]() == too_long
 
-    def test_drops_come_out_in_reverse_creation_order(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """The closest thing to a correct destroy order two schemas offer."""
-        removed = a_function("lab_first") + a_function("lab_second")
-        with TemporaryDirectory() as d:
-            _, script = Derivation(d, capfd).run(REAL_PREV + removed, REAL_PREV)
-        assert script.index('DROP FUNCTION "lab_second"') < script.index(
-            'DROP FUNCTION "lab_first"'
-        ), script
 
-    def test_a_new_named_object_is_created_and_a_removed_one_dropped(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """Named kinds are creatable when new and droppable when gone."""
-        typ = PAIR_OF_INTS
-        with TemporaryDirectory() as d:
-            added, _ = Derivation(d, capfd).run(REAL_PREV, REAL_PREV + typ), None
-            result_added, script_added = added
-            result_gone, script_gone = Derivation(d, capfd).run(
-                REAL_PREV + typ, REAL_PREV
-            )
-        assert result_added.returncode == 0, result_added.stderr
-        assert "CREATE TYPE lab_pair AS (a INT, b INT);" in script_added
-        assert result_gone.returncode == 0, result_gone.stderr
-        assert "DROP TYPE lab_pair;" in script_gone
+def test_the_longest_name_that_fits_is_emitted_at_exactly_eighty(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """The ceiling is a measured boundary, not a rounded one."""
+    name = "e" * LONGEST_NAME_THAT_FITS
+    with TemporaryDirectory() as d:
+        result, script = Derivation(d, capfd).run(REAL_PREV, REAL_NEW, ext=name)
+    assert result.returncode == 0, result.stderr
+    assert len(script.splitlines()[0]) == GUARD_COLUMNS
 
-    def test_a_changed_named_object_refuses_and_names_the_remedy(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """An in-place change to a TYPE is not derivable from two schemas."""
-        with TemporaryDirectory() as d:
-            result, script = Derivation(d, capfd).run(
-                REAL_PREV + PAIR_OF_INTS, REAL_PREV + PAIR_WIDENED
-            )
-        assert result.returncode == 1
-        assert "TYPE lab_pair changed since 0.27.0" in result.stderr
-        assert "sql/next-data.sql" in result.stderr
-        assert script == ""
 
-    def test_a_new_opaque_statement_refuses(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """Anything the generator cannot classify must not be guessed at."""
-        with TemporaryDirectory() as d:
-            result, _ = Derivation(d, capfd).run(REAL_PREV, REAL_PREV + SEED_ROW)
-        assert result.returncode == 1
-        assert "new since 0.27.0 and not derivable" in result.stderr
+def test_one_character_more_refuses_with_the_arithmetic(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """A name a database would accept but the guard cannot carry.
 
-    def test_a_removed_opaque_statement_refuses(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """Both directions: a disappearing opaque statement is not a drop."""
-        with TemporaryDirectory() as d:
-            result, _ = Derivation(d, capfd).run(REAL_PREV + SEED_ROW, REAL_PREV)
-        assert result.returncode == 1
-        assert "removed since 0.27.0 and not derivable" in result.stderr
+    A PostgreSQL identifier may be 63 bytes, so this is a real
+    ceiling. Failing here with the sum beats failing two minutes
+    later in `lint:sql` with a column count.
+    """
+    name = "e" * (LONGEST_NAME_THAT_FITS + 1)
+    with TemporaryDirectory() as d:
+        result, script = Derivation(d, capfd).run(REAL_PREV, REAL_NEW, ext=name)
+    assert result.returncode == 1
+    assert "the psql guard would exceed 80 columns" in result.stderr
+    assert f"= {GUARD_COLUMNS + 1} > {GUARD_COLUMNS}" in result.stderr
+    assert script == ""
 
-    def test_an_unchanged_opaque_statement_is_fine_and_silent(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """It is already in the installed extension; replaying it is not owed."""
-        opaque = SEED_ROW
-        with TemporaryDirectory() as d:
-            result, script = Derivation(d, capfd).run(
-                REAL_PREV + opaque, REAL_PREV + opaque
-            )
-        assert result.returncode == 0, result.stderr
-        assert "INSERT" not in script
 
-    def test_a_new_comment_is_replayed(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """COMMENT/GRANT/REVOKE are always safe to re-apply."""
-        with TemporaryDirectory() as d:
-            result, script = Derivation(d, capfd).run(
-                REAL_PREV,
-                REAL_PREV + ANSWER_COMMENT,
-            )
-        assert result.returncode == 0, result.stderr
-        assert "COMMENT ON FUNCTION lab_answer() IS 'the answer';" in script
+# What the diff of two generated schemas is allowed to become.
+#
+# Four classes, each with its own rule: functions are replaceable,
+# named objects are creatable and droppable but not changeable,
+# COMMENT/GRANT/REVOKE are always replayable, and everything else is
+# opaque — fine while identical, underivable otherwise.
+def test_identical_schemas_derive_a_library_only_release(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """No DDL at all is a valid answer, and says which release it was."""
+    with TemporaryDirectory() as d:
+        result, script = Derivation(d, capfd).run(REAL_PREV, REAL_PREV)
+    assert result.returncode == 0, result.stderr
+    assert "No schema change between 0.27.0 and 0.28.1" in script
+    assert "CREATE" not in script
 
-    def test_an_unchanged_comment_is_not_replayed(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """Replayable is not the same as replayed: identical means nothing to do."""
-        comment = ANSWER_COMMENT
-        with TemporaryDirectory() as d:
-            _, script = Derivation(d, capfd).run(
-                REAL_PREV + comment, REAL_PREV + comment
-            )
-        assert "COMMENT ON" not in script
 
-    def test_a_data_fragment_downgrades_refusals_and_is_folded_in(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """`sql/next-data.sql` is the author declaring they handled it.
+def test_a_new_function_is_created_replaceably(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """CREATE OR REPLACE, so a re-run over a partial upgrade is safe."""
+    with TemporaryDirectory() as d:
+        result, script = Derivation(d, capfd).run(
+            REAL_PREV, REAL_PREV + a_function("lab_extra")
+        )
+    assert result.returncode == 0, result.stderr
+    assert 'CREATE OR REPLACE FUNCTION "lab_extra"()' in script
 
-        The declaration is not trusted — the round-trip proof still
-        compares catalogs — but it must stop the generator refusing, and
-        the fragment must reach the emitted script.
-        """
-        with TemporaryDirectory() as d:
-            result, script = Derivation(d, capfd).run(
-                REAL_PREV + PAIR_OF_INTS,
-                REAL_PREV + PAIR_WIDENED,
-                data=WIDEN_MIGRATION,
-            )
-        assert result.returncode == 0, result.stderr
-        assert "::warning::" in result.stderr
-        assert "the round-trip proof decides" in result.stderr
-        assert "ALTER TYPE lab_pair ALTER ATTRIBUTE b TYPE TEXT;" in script
 
-    def test_an_unterminated_statement_fails_rather_than_truncating(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A schema the splitter cannot finish reading is not a smaller schema."""
-        with TemporaryDirectory() as d:
-            result, _ = Derivation(d, capfd).run(
-                REAL_PREV, REAL_PREV + PAIR_OF_INTS.replace(";\n", "\n")
-            )
-        assert result.returncode == 1
-        assert "unterminated statement" in result.stdout + result.stderr
+def test_an_unchanged_function_emits_nothing(capfd: pytest.CaptureFixture[str]) -> None:
+    """The previous install already ran it; re-emitting it is noise."""
+    with TemporaryDirectory() as d:
+        _, script = Derivation(d, capfd).run(
+            REAL_PREV, REAL_PREV + a_function("lab_extra")
+        )
+    assert "lab_answer" not in script
+    assert "lab_version" not in script
+
+
+def test_a_removed_function_is_dropped_by_signature(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """DROP FUNCTION names the identity arguments, never the defaults."""
+    with TemporaryDirectory() as d:
+        result, script = Derivation(d, capfd).run(
+            REAL_PREV + a_function("lab_extra", args="a INT DEFAULT 1, b TEXT"),
+            REAL_PREV,
+        )
+    assert result.returncode == 0, result.stderr
+    assert 'DROP FUNCTION "lab_extra"(a INT, b TEXT);' in script
+    assert "DEFAULT" not in script
+
+
+def test_a_changed_return_type_is_dropped_before_it_is_recreated(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """CREATE OR REPLACE cannot change a return type; Postgres refuses it."""
+    with TemporaryDirectory() as d:
+        result, script = Derivation(d, capfd).run(
+            REAL_PREV + a_function("lab_extra", returns="INT /* i32 */"),
+            REAL_PREV + a_function("lab_extra", returns="TEXT /* String */"),
+        )
+    assert result.returncode == 0, result.stderr
+    drop = script.index('DROP FUNCTION "lab_extra"()')
+    create = script.index('CREATE OR REPLACE FUNCTION "lab_extra"()')
+    assert drop < create, script
+
+
+def test_drops_come_out_in_reverse_creation_order(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """The closest thing to a correct destroy order two schemas offer."""
+    removed = a_function("lab_first") + a_function("lab_second")
+    with TemporaryDirectory() as d:
+        _, script = Derivation(d, capfd).run(REAL_PREV + removed, REAL_PREV)
+    assert script.index('DROP FUNCTION "lab_second"') < script.index(
+        'DROP FUNCTION "lab_first"'
+    ), script
+
+
+def test_a_new_named_object_is_created_and_a_removed_one_dropped(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """Named kinds are creatable when new and droppable when gone."""
+    typ = PAIR_OF_INTS
+    with TemporaryDirectory() as d:
+        added, _ = Derivation(d, capfd).run(REAL_PREV, REAL_PREV + typ), None
+        result_added, script_added = added
+        result_gone, script_gone = Derivation(d, capfd).run(REAL_PREV + typ, REAL_PREV)
+    assert result_added.returncode == 0, result_added.stderr
+    assert "CREATE TYPE lab_pair AS (a INT, b INT);" in script_added
+    assert result_gone.returncode == 0, result_gone.stderr
+    assert "DROP TYPE lab_pair;" in script_gone
+
+
+def test_a_changed_named_object_refuses_and_names_the_remedy(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """An in-place change to a TYPE is not derivable from two schemas."""
+    with TemporaryDirectory() as d:
+        result, script = Derivation(d, capfd).run(
+            REAL_PREV + PAIR_OF_INTS, REAL_PREV + PAIR_WIDENED
+        )
+    assert result.returncode == 1
+    assert "TYPE lab_pair changed since 0.27.0" in result.stderr
+    assert "sql/next-data.sql" in result.stderr
+    assert script == ""
+
+
+def test_a_new_opaque_statement_refuses(capfd: pytest.CaptureFixture[str]) -> None:
+    """Anything the generator cannot classify must not be guessed at."""
+    with TemporaryDirectory() as d:
+        result, _ = Derivation(d, capfd).run(REAL_PREV, REAL_PREV + SEED_ROW)
+    assert result.returncode == 1
+    assert "new since 0.27.0 and not derivable" in result.stderr
+
+
+def test_a_removed_opaque_statement_refuses(capfd: pytest.CaptureFixture[str]) -> None:
+    """Both directions: a disappearing opaque statement is not a drop."""
+    with TemporaryDirectory() as d:
+        result, _ = Derivation(d, capfd).run(REAL_PREV + SEED_ROW, REAL_PREV)
+    assert result.returncode == 1
+    assert "removed since 0.27.0 and not derivable" in result.stderr
+
+
+def test_an_unchanged_opaque_statement_is_fine_and_silent(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """It is already in the installed extension; replaying it is not owed."""
+    opaque = SEED_ROW
+    with TemporaryDirectory() as d:
+        result, script = Derivation(d, capfd).run(
+            REAL_PREV + opaque, REAL_PREV + opaque
+        )
+    assert result.returncode == 0, result.stderr
+    assert "INSERT" not in script
+
+
+def test_a_new_comment_is_replayed(capfd: pytest.CaptureFixture[str]) -> None:
+    """COMMENT/GRANT/REVOKE are always safe to re-apply."""
+    with TemporaryDirectory() as d:
+        result, script = Derivation(d, capfd).run(
+            REAL_PREV,
+            REAL_PREV + ANSWER_COMMENT,
+        )
+    assert result.returncode == 0, result.stderr
+    assert "COMMENT ON FUNCTION lab_answer() IS 'the answer';" in script
+
+
+def test_an_unchanged_comment_is_not_replayed(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """Replayable is not the same as replayed: identical means nothing to do."""
+    comment = ANSWER_COMMENT
+    with TemporaryDirectory() as d:
+        _, script = Derivation(d, capfd).run(REAL_PREV + comment, REAL_PREV + comment)
+    assert "COMMENT ON" not in script
+
+
+def test_a_data_fragment_downgrades_refusals_and_is_folded_in(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """`sql/next-data.sql` is the author declaring they handled it.
+
+    The declaration is not trusted — the round-trip proof still
+    compares catalogs — but it must stop the generator refusing, and
+    the fragment must reach the emitted script.
+    """
+    with TemporaryDirectory() as d:
+        result, script = Derivation(d, capfd).run(
+            REAL_PREV + PAIR_OF_INTS,
+            REAL_PREV + PAIR_WIDENED,
+            data=WIDEN_MIGRATION,
+        )
+    assert result.returncode == 0, result.stderr
+    assert "::warning::" in result.stderr
+    assert "the round-trip proof decides" in result.stderr
+    assert "ALTER TYPE lab_pair ALTER ATTRIBUTE b TYPE TEXT;" in script
+
+
+def test_an_unterminated_statement_fails_rather_than_truncating(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """A schema the splitter cannot finish reading is not a smaller schema."""
+    with TemporaryDirectory() as d:
+        result, _ = Derivation(d, capfd).run(
+            REAL_PREV, REAL_PREV + PAIR_OF_INTS.replace(";\n", "\n")
+        )
+    assert result.returncode == 1
+    assert "unterminated statement" in result.stdout + result.stderr
 
 
 FLOOR_SQL = CANON / "release" / "pgrx" / "floor.sql.in"
@@ -477,63 +480,61 @@ A_CANDIDATE_CARRYING_THE_BLOCK_IS_REFUSED_NOT_DIFFED_ROWS = [
 ]
 
 
-class TestTheFloorBlock:
-    """The floor block is packaging, not schema (#1274).
-
-    A previous release's shipped schema begins with it; the candidate,
-    a package build, never does. Dropped from the previous schema as its
-    one leading statement, refused anywhere else, in either schema.
-    """
-
-    def test_a_leading_block_derives_what_the_bare_pair_derives(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """The block changes nothing: the real oracle pair, and a delta."""
-        news = (REAL_NEW, REAL_NEW + a_function("lab_extra"))
-        for new in news:
-            with TemporaryDirectory() as d:
-                bare, bare_script = Derivation(d, capfd).run(REAL_PREV, new)
-                floored, floored_script = Derivation(d, capfd).run(
-                    floor_block() + REAL_PREV, new
-                )
-            assert floored.returncode == 0, floored.stderr
-            assert (bare.returncode, bare.stderr, bare_script) == (
-                floored.returncode,
-                floored.stderr,
-                floored_script,
+# The floor block is packaging, not schema (#1274).
+#
+# A previous release's shipped schema begins with it; the candidate,
+# a package build, never does. Dropped from the previous schema as its
+# one leading statement, refused anywhere else, in either schema.
+def test_a_leading_block_derives_what_the_bare_pair_derives(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """The block changes nothing: the real oracle pair, and a delta."""
+    news = (REAL_NEW, REAL_NEW + a_function("lab_extra"))
+    for new in news:
+        with TemporaryDirectory() as d:
+            bare, bare_script = Derivation(d, capfd).run(REAL_PREV, new)
+            floored, floored_script = Derivation(d, capfd).run(
+                floor_block() + REAL_PREV, new
             )
-        with TemporaryDirectory() as d:
-            _, script = Derivation(d, capfd).run(floor_block() + REAL_PREV, REAL_NEW)
-        assert script == REAL_DERIVED
+        assert floored.returncode == 0, floored.stderr
+        assert (bare.returncode, bare.stderr, bare_script) == (
+            floored.returncode,
+            floored.stderr,
+            floored_script,
+        )
+    with TemporaryDirectory() as d:
+        _, script = Derivation(d, capfd).run(floor_block() + REAL_PREV, REAL_NEW)
+    assert script == REAL_DERIVED
 
-    def test_without_the_block_nothing_changes(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A previous release from before #1274 derives as it always did."""
-        with TemporaryDirectory() as d:
-            result, script = Derivation(d, capfd).run(REAL_PREV, REAL_NEW)
-        assert (result.returncode, result.stderr) == (0, "")
-        assert script == REAL_DERIVED
 
-    @pytest.mark.parametrize(
-        ("name", "prev", "new"), THE_TAG_ANYWHERE_ELSE_IS_REFUSED_BY_NAME_ROWS
-    )
-    def test_the_tag_anywhere_else_is_refused_by_name(
-        self, name: str, prev: object, new: object, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A block that is not the one leading statement is never stripped."""
-        with TemporaryDirectory() as d:
-            result, script = Derivation(d, capfd).run(prev, new)
-        assert (result.returncode, result.stderr, script) == (1, PREV_REFUSED, "")
+def test_without_the_block_nothing_changes(capfd: pytest.CaptureFixture[str]) -> None:
+    """A previous release from before #1274 derives as it always did."""
+    with TemporaryDirectory() as d:
+        result, script = Derivation(d, capfd).run(REAL_PREV, REAL_NEW)
+    assert (result.returncode, result.stderr) == (0, "")
+    assert script == REAL_DERIVED
 
-    @pytest.mark.parametrize(
-        ("name", "prev", "new"),
-        A_CANDIDATE_CARRYING_THE_BLOCK_IS_REFUSED_NOT_DIFFED_ROWS,
-    )
-    def test_a_candidate_carrying_the_block_is_refused_not_diffed(
-        self, name: str, prev: object, new: object, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """The candidate is a package build; the block there is a defect."""
-        with TemporaryDirectory() as d:
-            result, script = Derivation(d, capfd).run(prev, new)
-        assert (result.returncode, result.stderr, script) == (1, NEW_REFUSED, "")
+
+@pytest.mark.parametrize(
+    ("name", "prev", "new"), THE_TAG_ANYWHERE_ELSE_IS_REFUSED_BY_NAME_ROWS
+)
+def test_the_tag_anywhere_else_is_refused_by_name(
+    name: str, prev: object, new: object, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A block that is not the one leading statement is never stripped."""
+    with TemporaryDirectory() as d:
+        result, script = Derivation(d, capfd).run(prev, new)
+    assert (result.returncode, result.stderr, script) == (1, PREV_REFUSED, "")
+
+
+@pytest.mark.parametrize(
+    ("name", "prev", "new"),
+    A_CANDIDATE_CARRYING_THE_BLOCK_IS_REFUSED_NOT_DIFFED_ROWS,
+)
+def test_a_candidate_carrying_the_block_is_refused_not_diffed(
+    name: str, prev: object, new: object, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """The candidate is a package build; the block there is a defect."""
+    with TemporaryDirectory() as d:
+        result, script = Derivation(d, capfd).run(prev, new)
+    assert (result.returncode, result.stderr, script) == (1, NEW_REFUSED, "")

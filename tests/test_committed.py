@@ -68,22 +68,22 @@ def check(subject: str) -> subprocess.CompletedProcess[str]:
         )
 
 
-class TestMappedTypesAreAllowed:
-    """A type the notes group is a type the gate passes (#55)."""
+# A type the notes group is a type the gate passes (#55).
+def test_the_convention_maps_the_three_the_default_omits() -> None:
+    """The reader finds build, ci and revert, so the rows below run."""
+    assert {"build", "ci", "revert"} <= set(mapped_types())
 
-    def test_the_convention_maps_the_three_the_default_omits(self) -> None:
-        """The reader finds build, ci and revert, so the rows below run."""
-        assert {"build", "ci", "revert"} <= set(mapped_types())
 
-    @pytest.mark.parametrize("kind", mapped_types())
-    def test_every_mapped_type_passes_the_gate(self, kind: object) -> None:
-        """Each mapped type, as a whole subject, is accepted by committed."""
-        done = check(f"{kind}: carry the thing")
-        assert f"Disallowed type `{kind}`" not in done.stdout + done.stderr
-        assert done.returncode == 0, done.stdout + done.stderr
+@pytest.mark.parametrize("kind", mapped_types())
+def test_every_mapped_type_passes_the_gate(kind: object) -> None:
+    """Each mapped type, as a whole subject, is accepted by committed."""
+    done = check(f"{kind}: carry the thing")
+    assert f"Disallowed type `{kind}`" not in done.stdout + done.stderr
+    assert done.returncode == 0, done.stdout + done.stderr
 
-    def test_an_unmapped_type_is_still_refused(self) -> None:
-        """The list is a list: a type nobody maps stays red, by name."""
-        done = check("bogus: carry the thing")
-        assert done.returncode == 1
-        assert "error Disallowed type `bogus` used" in done.stdout + done.stderr
+
+def test_an_unmapped_type_is_still_refused() -> None:
+    """The list is a list: a type nobody maps stays red, by name."""
+    done = check("bogus: carry the thing")
+    assert done.returncode == 1
+    assert "error Disallowed type `bogus` used" in done.stdout + done.stderr

@@ -184,136 +184,125 @@ def step(name: str) -> dict[str, object]:
     return found
 
 
-class TestStampStepIsTheHelper:
-    """The job runs the helper these rows run, through the one link."""
-
-    def test_the_shipped_step_calls_the_helper(self) -> None:
-        """The run: is the call alone, through `.org-canon`."""
-        body = step("Refuse a binary whose stamp is not the released commit")["run"]
-        assert body == '"${ORG_PYTHON}" -I .org-canon/belt check-go-stamps\n'
+# The job runs the helper these rows run, through the one link.
+def test_the_shipped_step_calls_the_helper() -> None:
+    """The run: is the call alone, through `.org-canon`."""
+    body = step("Refuse a binary whose stamp is not the released commit")["run"]
+    assert body == '"${ORG_PYTHON}" -I .org-canon/belt check-go-stamps\n'
 
 
-class TestPasses:
-    """A clean build of the released commit passes, every binary."""
-
-    def test_every_binary_stamped_with_the_released_commit(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """Two binaries, both clean, both carrying their modules."""
-        run = run_helper({"tool": info("{head}"), "probe": info("{head}")}, capfd=capfd)
-        assert run.returncode == 0, run.stdout + run.stderr
-        assert run.stdout == ""
+# A clean build of the released commit passes, every binary.
+def test_every_binary_stamped_with_the_released_commit(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """Two binaries, both clean, both carrying their modules."""
+    run = run_helper({"tool": info("{head}"), "probe": info("{head}")}, capfd=capfd)
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert run.stdout == ""
 
 
-class TestRefuses:
-    """One row per refusal, each message asserted."""
-
-    def assert_refused(self, run: Run, want: str) -> None:
-        """Hold one refusal to its exit status and its exact line."""
-        assert run.returncode == 1, run.stderr
-        assert f"::error::check-go-stamps: {want}\n" == run.stderr.replace(
-            run.head, "HEAD"
-        )
-
-    def test_another_revision_is_refused(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """Bytes built from some other commit."""
-        rev = "f" * 40
-        self.assert_refused(
-            run_helper({"tool": info(rev)}, capfd=capfd),
-            f"tool: stamped revision {rev} is not the released commit HEAD",
-        )
-
-    def test_no_revision_is_refused(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """Bytes built outside a checkout or with -buildvcs=false."""
-        self.assert_refused(
-            run_helper({"tool": info(None)}, capfd=capfd),
-            "tool: stamped revision <none> is not the released commit HEAD",
-        )
-
-    def test_a_modified_tree_is_refused(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """Bytes that match no commit."""
-        self.assert_refused(
-            run_helper({"tool": info("{head}", "true")}, capfd=capfd),
-            "tool: vcs.modified=true — a release builds a clean tree",
-        )
-
-    def test_no_modified_stamp_is_refused(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A tree whose cleanliness the stamp does not state."""
-        self.assert_refused(
-            run_helper({"tool": info("{head}", None)}, capfd=capfd),
-            "tool: vcs.modified=<none> — a release builds a clean tree",
-        )
-
-    def test_no_module_stamp_is_refused(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """Bytes that carry no inventory at all."""
-        self.assert_refused(
-            run_helper({"tool": info("{head}", module=False)}, capfd=capfd),
-            "tool: no module stamp — the shipped bytes must carry their inventory",
-        )
-
-    def test_a_setting_value_that_spells_the_stamp_is_not_the_stamp(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """An -ldflags value naming HEAD is not a stamp (#1556's shrunk example).
-
-        The setting read was the first `vcs.revision=` anywhere in the
-        text, so this binary, with no VCS stamp at all, passed.
-        """
-        spelled = (
-            "staged/tool: go1.26.6\n"
-            "\tpath\texample.com/m/cmd/tool\n"
-            "\tmod\texample.com/m\tv1.0.0\t\n"
-            "\tbuild\t-ldflags=-X=main.v=vcs.revision={head}\n"
-            "\tbuild\t-ldflags=-X=main.m=vcs.modified=false\n"
-        )
-        self.assert_refused(
-            run_helper({"tool": spelled}, capfd=capfd),
-            "tool: stamped revision <none> is not the released commit HEAD",
-        )
-
-    def test_the_first_bad_binary_in_name_order_is_named(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """staged/ is read in name order, as the shell's glob read it."""
-        run = run_helper(
-            {"b": info("{head}", "true"), "a": info("f" * 40)}, capfd=capfd
-        )
-        assert "::error::check-go-stamps: a: stamped revision" in run.stderr
-
-    def test_an_empty_staged_directory_is_refused(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """Nothing built is nothing checked, and never a pass."""
-        self.assert_refused(
-            run_helper({}, capfd=capfd),
-            "staged/ holds no binary — nothing was built to check",
-        )
+# One row per refusal, each message asserted.
+def assert_refused(run: Run, want: str) -> None:
+    """Hold one refusal to its exit status and its exact line."""
+    assert run.returncode == 1, run.stderr
+    assert f"::error::check-go-stamps: {want}\n" == run.stderr.replace(run.head, "HEAD")
 
 
-class TestToolFailures:
-    """go's or git's own failure fails the step with its status."""
+def test_another_revision_is_refused(capfd: pytest.CaptureFixture[str]) -> None:
+    """Bytes built from some other commit."""
+    rev = "f" * 40
+    assert_refused(
+        run_helper({"tool": info(rev)}, capfd=capfd),
+        f"tool: stamped revision {rev} is not the released commit HEAD",
+    )
 
-    def test_a_file_go_cannot_read_fails_the_step(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """Not a Go binary: go's run.returncode and message."""
-        run = run_helper({"tool": info("{head}")}, fail=True, capfd=capfd)
-        assert run.returncode == 1
-        assert run.stderr == "go: not a Go binary\n"
-        assert run.stdout == ""
 
-    def test_outside_a_repository_git_fails_the_step(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """No released commit to hold the stamp to."""
-        run = run_helper({"tool": info("f" * 40)}, repo=False, capfd=capfd)
-        assert run.returncode == 128
-        assert run.stdout == ""
+def test_no_revision_is_refused(capfd: pytest.CaptureFixture[str]) -> None:
+    """Bytes built outside a checkout or with -buildvcs=false."""
+    assert_refused(
+        run_helper({"tool": info(None)}, capfd=capfd),
+        "tool: stamped revision <none> is not the released commit HEAD",
+    )
+
+
+def test_a_modified_tree_is_refused(capfd: pytest.CaptureFixture[str]) -> None:
+    """Bytes that match no commit."""
+    assert_refused(
+        run_helper({"tool": info("{head}", "true")}, capfd=capfd),
+        "tool: vcs.modified=true — a release builds a clean tree",
+    )
+
+
+def test_no_modified_stamp_is_refused(capfd: pytest.CaptureFixture[str]) -> None:
+    """A tree whose cleanliness the stamp does not state."""
+    assert_refused(
+        run_helper({"tool": info("{head}", None)}, capfd=capfd),
+        "tool: vcs.modified=<none> — a release builds a clean tree",
+    )
+
+
+def test_no_module_stamp_is_refused(capfd: pytest.CaptureFixture[str]) -> None:
+    """Bytes that carry no inventory at all."""
+    assert_refused(
+        run_helper({"tool": info("{head}", module=False)}, capfd=capfd),
+        "tool: no module stamp — the shipped bytes must carry their inventory",
+    )
+
+
+def test_a_setting_value_that_spells_the_stamp_is_not_the_stamp(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """An -ldflags value naming HEAD is not a stamp (#1556's shrunk example).
+
+    The setting read was the first `vcs.revision=` anywhere in the
+    text, so this binary, with no VCS stamp at all, passed.
+    """
+    spelled = (
+        "staged/tool: go1.26.6\n"
+        "\tpath\texample.com/m/cmd/tool\n"
+        "\tmod\texample.com/m\tv1.0.0\t\n"
+        "\tbuild\t-ldflags=-X=main.v=vcs.revision={head}\n"
+        "\tbuild\t-ldflags=-X=main.m=vcs.modified=false\n"
+    )
+    assert_refused(
+        run_helper({"tool": spelled}, capfd=capfd),
+        "tool: stamped revision <none> is not the released commit HEAD",
+    )
+
+
+def test_the_first_bad_binary_in_name_order_is_named(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """staged/ is read in name order, as the shell's glob read it."""
+    run = run_helper({"b": info("{head}", "true"), "a": info("f" * 40)}, capfd=capfd)
+    assert "::error::check-go-stamps: a: stamped revision" in run.stderr
+
+
+def test_an_empty_staged_directory_is_refused(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """Nothing built is nothing checked, and never a pass."""
+    assert_refused(
+        run_helper({}, capfd=capfd),
+        "staged/ holds no binary — nothing was built to check",
+    )
+
+
+# go's or git's own failure fails the step with its status.
+def test_a_file_go_cannot_read_fails_the_step(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """Not a Go binary: go's run.returncode and message."""
+    run = run_helper({"tool": info("{head}")}, fail=True, capfd=capfd)
+    assert run.returncode == 1
+    assert run.stderr == "go: not a Go binary\n"
+    assert run.stdout == ""
+
+
+def test_outside_a_repository_git_fails_the_step(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """No released commit to hold the stamp to."""
+    run = run_helper({"tool": info("f" * 40)}, repo=False, capfd=capfd)
+    assert run.returncode == 128
+    assert run.stdout == ""

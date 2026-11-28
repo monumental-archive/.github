@@ -32,8 +32,6 @@ import re
 import subprocess
 from pathlib import Path
 
-import pytest
-
 from belt.typed_pytest import fixture
 from tests import support
 
@@ -176,12 +174,10 @@ def at(crate: str, major: int) -> str:
     return judged(crate, "--only-explicit-features", "--features", f"pg{major}")
 
 
-@pytest.mark.usefixtures("_set_up_test_planted")
-class TestPlanted:
+class Planted:
     """A planted tree, stub PATH and belt; the rows are in the classes below."""
 
-    @fixture
-    def _set_up_test_planted(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Plant a tracked tree, a stub PATH and a belt with stub provisioning."""
         self.tmp = tmp_path
         self.tree = self.tmp / "tree"
@@ -251,308 +247,324 @@ class TestPlanted:
         )
         return done, self.log.read_text(encoding="utf-8").splitlines()
 
-    @staticmethod
-    def semver_calls(log: list[str]) -> list[str]:
-        """Keep only the judgments from a call log.
 
-        Returns:
-            The cargo-semver-checks lines, in order.
-
-        """
-        return [line for line in log if line.startswith("cargo-semver-checks ")]
-
-    @staticmethod
-    def verdicts(done: subprocess.CompletedProcess[str]) -> list[str]:
-        """Keep only the closing verdict lines from stdout.
-
-        Returns:
-            Every stdout line but the per-judgment progress lines.
-
-        """
-        return [
-            line
-            for line in done.stdout.splitlines()
-            if not line.startswith(f"{LABEL}: judging ")
-        ]
+@fixture
+def planted(tmp_path: Path) -> Planted:
+    """Give each row its own Planted."""
+    return Planted(tmp_path)
 
 
-class TestJudgment(TestPlanted):
-    """Lookup, judgment and verdict: what happens to a crate that is asked."""
+def semver_calls(log: list[str]) -> list[str]:
+    """Keep only the judgments from a call log.
 
-    def test_ordinary_published_crate(self) -> None:
-        """One call, no feature flags, judged clean."""
-        self.plant(package("alpha", str(self.tree)))
-        done, log = self.run_helper()
-        assert done.returncode == 0, done.stderr
-        want = [
-            "cargo metadata --no-deps --format-version 1 --locked",
-            f"curl {INDEX}/al/ph/alpha",
-            judged("alpha"),
-        ]
-        assert log == want
-        want = [f"{LABEL}: alpha: judged clean"]
-        assert self.verdicts(done) == want
+    Returns:
+        The cargo-semver-checks lines, in order.
 
-    def test_no_baseline_is_named_not_judged(self) -> None:
-        """A definite 404 names the crate, judges nothing and exits 0."""
-        self.plant(package("lab-core", str(self.tree)), index={"lab-core": "404"})
-        done, log = self.run_helper()
-        assert done.returncode == 0, done.stderr
-        assert self.semver_calls(log) == list[str]()
-        assert f"curl {INDEX}/la/b-/lab-core" in log
-        want = [f"{LABEL}: lab-core: no published baseline on crates.io, not judged"]
-        assert self.verdicts(done) == want
+    """
+    return [line for line in log if line.startswith("cargo-semver-checks ")]
 
-    def test_index_error_is_red_by_name(self) -> None:
-        """A 500 is red and names the crate; it is never read as no baseline."""
-        self.plant(package("alpha", str(self.tree)), index={"alpha": "500"})
-        done, log = self.run_helper()
-        assert done.returncode == 1
-        assert self.semver_calls(log) == list[str]()
-        want = [f"{LABEL}: alpha: could not read the crates.io index (HTTP 500)"]
-        assert self.verdicts(done) == want
-        assert f"{LABEL}: red" in done.stderr
 
-    def test_no_answer_is_red(self) -> None:
-        """A lookup that got no answer at all is red, not a skip."""
-        self.plant(package("alpha", str(self.tree)), index={"alpha": "000"})
-        done, _ = self.run_helper()
-        assert done.returncode == 1
-        want = [f"{LABEL}: alpha: could not read the crates.io index (HTTP 000)"]
-        assert self.verdicts(done) == want
+def verdicts(done: subprocess.CompletedProcess[str]) -> list[str]:
+    """Keep only the closing verdict lines from stdout.
 
-    def test_throttle_is_red(self) -> None:
-        """A 429 is a throttle, not a fact about the crate."""
-        self.plant(package("alpha", str(self.tree)), index={"alpha": "429"})
-        done, _ = self.run_helper()
-        assert done.returncode == 1
-        want = [f"{LABEL}: alpha: could not read the crates.io index (HTTP 429)"]
-        assert self.verdicts(done) == want
+    Returns:
+        Every stdout line but the per-judgment progress lines.
 
-    def test_pgrx_crate_judged_per_major(self) -> None:
-        """Five majors, five calls, each with only its own pgNN."""
-        self.plant(
-            package(
-                "edtf-postgres",
-                str(self.tree),
-                pgrx=True,
-                kinds=(["cdylib", "lib"],),
-            )
+    """
+    return [
+        line
+        for line in done.stdout.splitlines()
+        if not line.startswith(f"{LABEL}: judging ")
+    ]
+
+
+def test_ordinary_published_crate(planted: Planted) -> None:
+    """One call, no feature flags, judged clean."""
+    planted.plant(package("alpha", str(planted.tree)))
+    done, log = planted.run_helper()
+    assert done.returncode == 0, done.stderr
+    want = [
+        "cargo metadata --no-deps --format-version 1 --locked",
+        f"curl {INDEX}/al/ph/alpha",
+        judged("alpha"),
+    ]
+    assert log == want
+    want = [f"{LABEL}: alpha: judged clean"]
+    assert verdicts(done) == want
+
+
+def test_no_baseline_is_named_not_judged(planted: Planted) -> None:
+    """A definite 404 names the crate, judges nothing and exits 0."""
+    planted.plant(package("lab-core", str(planted.tree)), index={"lab-core": "404"})
+    done, log = planted.run_helper()
+    assert done.returncode == 0, done.stderr
+    assert semver_calls(log) == list[str]()
+    assert f"curl {INDEX}/la/b-/lab-core" in log
+    want = [f"{LABEL}: lab-core: no published baseline on crates.io, not judged"]
+    assert verdicts(done) == want
+
+
+def test_index_error_is_red_by_name(planted: Planted) -> None:
+    """A 500 is red and names the crate; it is never read as no baseline."""
+    planted.plant(package("alpha", str(planted.tree)), index={"alpha": "500"})
+    done, log = planted.run_helper()
+    assert done.returncode == 1
+    assert semver_calls(log) == list[str]()
+    want = [f"{LABEL}: alpha: could not read the crates.io index (HTTP 500)"]
+    assert verdicts(done) == want
+    assert f"{LABEL}: red" in done.stderr
+
+
+def test_no_answer_is_red(planted: Planted) -> None:
+    """A lookup that got no answer at all is red, not a skip."""
+    planted.plant(package("alpha", str(planted.tree)), index={"alpha": "000"})
+    done, _ = planted.run_helper()
+    assert done.returncode == 1
+    want = [f"{LABEL}: alpha: could not read the crates.io index (HTTP 000)"]
+    assert verdicts(done) == want
+
+
+def test_throttle_is_red(planted: Planted) -> None:
+    """A 429 is a throttle, not a fact about the crate."""
+    planted.plant(package("alpha", str(planted.tree)), index={"alpha": "429"})
+    done, _ = planted.run_helper()
+    assert done.returncode == 1
+    want = [f"{LABEL}: alpha: could not read the crates.io index (HTTP 429)"]
+    assert verdicts(done) == want
+
+
+def test_pgrx_crate_judged_per_major(planted: Planted) -> None:
+    """Five majors, five calls, each with only its own pgNN."""
+    planted.plant(
+        package(
+            "edtf-postgres",
+            str(planted.tree),
+            pgrx=True,
+            kinds=(["cdylib", "lib"],),
         )
-        done, log = self.run_helper()
-        assert done.returncode == 0, done.stderr
-        want = [
-            "cargo metadata --no-deps --format-version 1 --locked",
-            "provision",
-            f"curl {INDEX}/ed/tf/edtf-postgres",
-            *[at("edtf-postgres", m) for m in MAJORS],
-        ]
-        assert log == want
-        verdicts = [f"{LABEL}: edtf-postgres at pg{m}: judged clean" for m in MAJORS]
-        assert self.verdicts(done) == verdicts
+    )
+    done, log = planted.run_helper()
+    assert done.returncode == 0, done.stderr
+    want = [
+        "cargo metadata --no-deps --format-version 1 --locked",
+        "provision",
+        f"curl {INDEX}/ed/tf/edtf-postgres",
+        *[at("edtf-postgres", m) for m in MAJORS],
+    ]
+    assert log == want
+    judged = [f"{LABEL}: edtf-postgres at pg{m}: judged clean" for m in MAJORS]
+    assert verdicts(done) == judged
 
-    def test_each_major_compiles_with_its_own_icu_only(self) -> None:
-        """No major's ICU include path reaches the next major's compile (#1774).
 
-        Each judgment runs in a subshell with its own major's headers,
-        and the parent's flags are what every subshell started from.
-        """
-        self.plant(package("ext", str(self.tree), pgrx=True))
-        done, _ = self.run_helper(
-            BINDGEN_EXTRA_CLANG_ARGS="parent-b", CFLAGS="parent-c"
-        )
-        assert done.returncode == 0, done.stderr
-        icu = Path(f"{self.log}.icu").read_text(encoding="utf-8").splitlines()
-        want = [
-            f"icu-check [{','.join(map(str, MAJORS))}]",
-            *[f"pg{m}|-Iicu-pg{m} parent-b|-Iicu-pg{m} parent-c" for m in MAJORS],
-        ]
-        assert icu == want
+def test_each_major_compiles_with_its_own_icu_only(planted: Planted) -> None:
+    """No major's ICU include path reaches the next major's compile (#1774).
 
-    def test_missing_icu_headers_red_the_majors_and_go_on(self) -> None:
-        """A failed ICU check reds that crate by name; nothing is compiled."""
-        self.plant(package("ext", str(self.tree), pgrx=True))
-        done, log = self.run_helper(PLANT_ICU_CHECK="1")
-        assert done.returncode == 1, done.stderr
-        assert self.semver_calls(log) == list[str]()
-        verdicts = [
-            f"{LABEL}: ext at pg{m}: no ICU headers pinned for every major (above), red"
+    Each judgment runs in a subshell with its own major's headers,
+    and the parent's flags are what every subshell started from.
+    """
+    planted.plant(package("ext", str(planted.tree), pgrx=True))
+    done, _ = planted.run_helper(BINDGEN_EXTRA_CLANG_ARGS="parent-b", CFLAGS="parent-c")
+    assert done.returncode == 0, done.stderr
+    icu = Path(f"{planted.log}.icu").read_text(encoding="utf-8").splitlines()
+    want = [
+        f"icu-check [{','.join(map(str, MAJORS))}]",
+        *[f"pg{m}|-Iicu-pg{m} parent-b|-Iicu-pg{m} parent-c" for m in MAJORS],
+    ]
+    assert icu == want
+
+
+def test_missing_icu_headers_red_the_majors_and_go_on(planted: Planted) -> None:
+    """A failed ICU check reds that crate by name; nothing is compiled."""
+    planted.plant(package("ext", str(planted.tree), pgrx=True))
+    done, log = planted.run_helper(PLANT_ICU_CHECK="1")
+    assert done.returncode == 1, done.stderr
+    assert semver_calls(log) == list[str]()
+    judged = [
+        f"{LABEL}: ext at pg{m}: no ICU headers pinned for every major (above), red"
+        for m in MAJORS
+    ]
+    assert verdicts(done) == judged
+
+
+def test_pgrx_major_red_is_its_own_verdict(planted: Planted) -> None:
+    """A red at one major does not stop the others."""
+    planted.plant(package("ext", str(planted.tree), pgrx=True))
+    bins = Path(planted.env["PATH"].split(os.pathsep)[0])
+    (bins / "cargo-semver-checks").write_text(
+        SEMVER_STUB.replace(
+            '[[ " ${PLANT_RED:-} " != *" $3 "* ]] || exit 1',
+            f'[[ "$*" != *"--features pg{RED_MAJOR}" ]] || exit 1',
+        ),
+        encoding="utf-8",
+    )
+    done, log = planted.run_helper()
+    assert done.returncode == 1
+    calls = [at("ext", m) for m in MAJORS]
+    assert semver_calls(log) == calls
+    judged = [
+        f"{LABEL}: ext at pg{m}: judged {'red' if m == RED_MAJOR else 'clean'}"
+        for m in MAJORS
+    ]
+    assert verdicts(done) == judged
+
+
+def test_failed_provisioning_reds_majors_and_goes_on(planted: Planted) -> None:
+    """No Postgres reds every major; the next crate is still judged."""
+    planted.plant(
+        package("ext", str(planted.tree), pgrx=True),
+        package("zeta", str(planted.tree)),
+    )
+    done, log = planted.run_helper(PLANT_PROVISION="1")
+    assert done.returncode == 1
+    want = [judged("zeta")]
+    assert semver_calls(log) == want
+    want = [
+        *[
+            f"{LABEL}: ext at pg{m}: no Postgres could be provisioned, red"
             for m in MAJORS
-        ]
-        assert self.verdicts(done) == verdicts
-
-    def test_pgrx_major_red_is_its_own_verdict(self) -> None:
-        """A red at one major does not stop the others."""
-        self.plant(package("ext", str(self.tree), pgrx=True))
-        bins = Path(self.env["PATH"].split(os.pathsep)[0])
-        (bins / "cargo-semver-checks").write_text(
-            SEMVER_STUB.replace(
-                '[[ " ${PLANT_RED:-} " != *" $3 "* ]] || exit 1',
-                f'[[ "$*" != *"--features pg{RED_MAJOR}" ]] || exit 1',
-            ),
-            encoding="utf-8",
-        )
-        done, log = self.run_helper()
-        assert done.returncode == 1
-        calls = [at("ext", m) for m in MAJORS]
-        assert self.semver_calls(log) == calls
-        verdicts = [
-            f"{LABEL}: ext at pg{m}: judged {'red' if m == RED_MAJOR else 'clean'}"
-            for m in MAJORS
-        ]
-        assert self.verdicts(done) == verdicts
-
-    def test_failed_provisioning_reds_majors_and_goes_on(self) -> None:
-        """No Postgres reds every major; the next crate is still judged."""
-        self.plant(
-            package("ext", str(self.tree), pgrx=True),
-            package("zeta", str(self.tree)),
-        )
-        done, log = self.run_helper(PLANT_PROVISION="1")
-        assert done.returncode == 1
-        want = [judged("zeta")]
-        assert self.semver_calls(log) == want
-        want = [
-            *[
-                f"{LABEL}: ext at pg{m}: no Postgres could be provisioned, red"
-                for m in MAJORS
-            ],
-            f"{LABEL}: zeta: judged clean",
-        ]
-        assert self.verdicts(done) == want
+        ],
+        f"{LABEL}: zeta: judged clean",
+    ]
+    assert verdicts(done) == want
 
 
-class TestPopulation(TestPlanted):
-    """Which crates are asked at all: publish setting, targets, no manifest."""
+def test_publish_false_and_empty_are_skipped(planted: Planted) -> None:
+    """Both spellings arrive as `[]`: no lookup, no judgment."""
+    planted.plant(
+        package("closed", str(planted.tree), publish=[]),
+        package("shut", str(planted.tree), publish=[]),
+    )
+    done, log = planted.run_helper()
+    assert done.returncode == 0, done.stderr
+    want = ["cargo metadata --no-deps --format-version 1 --locked"]
+    assert log == want
+    want = [
+        f"{LABEL}: closed: publish = false, skipped",
+        f"{LABEL}: shut: publish = false, skipped",
+    ]
+    assert verdicts(done) == want
 
-    def test_publish_false_and_empty_are_skipped(self) -> None:
-        """Both spellings arrive as `[]`: no lookup, no judgment."""
-        self.plant(
-            package("closed", str(self.tree), publish=[]),
-            package("shut", str(self.tree), publish=[]),
-        )
-        done, log = self.run_helper()
-        assert done.returncode == 0, done.stderr
-        want = ["cargo metadata --no-deps --format-version 1 --locked"]
-        assert log == want
-        want = [
-            f"{LABEL}: closed: publish = false, skipped",
-            f"{LABEL}: shut: publish = false, skipped",
-        ]
-        assert self.verdicts(done) == want
 
-    def test_other_registry_named_not_judged(self) -> None:
-        """A crate published elsewhere only is named, with the registry."""
-        self.plant(
-            package("inner", str(self.tree), publish=["corp"]),
-            package("both", str(self.tree), publish=["corp", "crates-io"]),
-        )
-        done, log = self.run_helper()
-        assert done.returncode == 0, done.stderr
-        want = [judged("both")]
-        assert self.semver_calls(log) == want
-        want = [
-            f"{LABEL}: inner: published to corp, not crates.io, not judged",
-            f"{LABEL}: both: judged clean",
-        ]
-        assert self.verdicts(done) == want
+def test_other_registry_named_not_judged(planted: Planted) -> None:
+    """A crate published elsewhere only is named, with the registry."""
+    planted.plant(
+        package("inner", str(planted.tree), publish=["corp"]),
+        package("both", str(planted.tree), publish=["corp", "crates-io"]),
+    )
+    done, log = planted.run_helper()
+    assert done.returncode == 0, done.stderr
+    want = [judged("both")]
+    assert semver_calls(log) == want
+    want = [
+        f"{LABEL}: inner: published to corp, not crates.io, not judged",
+        f"{LABEL}: both: judged clean",
+    ]
+    assert verdicts(done) == want
 
-    def test_one_red_among_three(self) -> None:
-        """All three are judged before the exit, which is 1."""
-        root = str(self.tree)
-        self.plant(package("aaa", root), package("bb", root), package("c", root))
-        done, log = self.run_helper(PLANT_RED="bb")
-        assert done.returncode == 1
-        want = [
-            "cargo metadata --no-deps --format-version 1 --locked",
-            f"curl {INDEX}/3/a/aaa",
-            judged("aaa"),
-            f"curl {INDEX}/2/bb",
-            judged("bb"),
-            f"curl {INDEX}/1/c",
-            judged("c"),
-        ]
-        assert log == want
-        want = [
-            f"{LABEL}: aaa: judged clean",
-            f"{LABEL}: bb: judged red",
-            f"{LABEL}: c: judged clean",
-        ]
-        assert self.verdicts(done) == want
-        assert f"{LABEL}: red" in done.stderr
 
-    def test_bin_only_crate_is_named_not_judged(self) -> None:
-        """No library target: no lookup, no judgment, exit 0."""
-        self.plant(package("cli", str(self.tree), kinds=(["bin"], ["test"])))
-        done, log = self.run_helper()
-        assert done.returncode == 0, done.stderr
-        want = ["cargo metadata --no-deps --format-version 1 --locked"]
-        assert log == want
-        want = [f"{LABEL}: cli: no library target, no API to judge, not judged"]
-        assert self.verdicts(done) == want
+def test_one_red_among_three(planted: Planted) -> None:
+    """All three are judged before the exit, which is 1."""
+    root = str(planted.tree)
+    planted.plant(package("aaa", root), package("bb", root), package("c", root))
+    done, log = planted.run_helper(PLANT_RED="bb")
+    assert done.returncode == 1
+    want = [
+        "cargo metadata --no-deps --format-version 1 --locked",
+        f"curl {INDEX}/3/a/aaa",
+        judged("aaa"),
+        f"curl {INDEX}/2/bb",
+        judged("bb"),
+        f"curl {INDEX}/1/c",
+        judged("c"),
+    ]
+    assert log == want
+    want = [
+        f"{LABEL}: aaa: judged clean",
+        f"{LABEL}: bb: judged red",
+        f"{LABEL}: c: judged clean",
+    ]
+    assert verdicts(done) == want
+    assert f"{LABEL}: red" in done.stderr
 
-    def test_proc_macro_crate_is_named_not_judged(self) -> None:
-        """The tool does not count proc-macro as a library target; nor does this."""
-        self.plant(package("derive", str(self.tree), kinds=(["proc-macro"],)))
-        done, log = self.run_helper()
-        assert done.returncode == 0, done.stderr
-        want = ["cargo metadata --no-deps --format-version 1 --locked"]
-        assert log == want
-        want = [f"{LABEL}: derive: no library target, no API to judge, not judged"]
-        assert self.verdicts(done) == want
 
-    def test_lib_and_bin_crate_is_judged(self) -> None:
-        """A library beside a binary is judged, once."""
-        self.plant(package("both", str(self.tree), kinds=(["lib"], ["bin"])))
-        done, log = self.run_helper()
-        assert done.returncode == 0, done.stderr
-        want = [judged("both")]
-        assert self.semver_calls(log) == want
-        want = [f"{LABEL}: both: judged clean"]
-        assert self.verdicts(done) == want
+def test_bin_only_crate_is_named_not_judged(planted: Planted) -> None:
+    """No library target: no lookup, no judgment, exit 0."""
+    planted.plant(package("cli", str(planted.tree), kinds=(["bin"], ["test"])))
+    done, log = planted.run_helper()
+    assert done.returncode == 0, done.stderr
+    want = ["cargo metadata --no-deps --format-version 1 --locked"]
+    assert log == want
+    want = [f"{LABEL}: cli: no library target, no API to judge, not judged"]
+    assert verdicts(done) == want
 
-    def test_every_library_kind_is_judged(self) -> None:
-        """rlib, dylib, cdylib and staticlib count, as the tool counts them."""
-        root = str(self.tree)
-        self.plant(
-            package("wasm", root, kinds=(["cdylib", "rlib"],)),
-            package("dyn", root, kinds=(["dylib"],)),
-            package("static", root, kinds=(["staticlib"],)),
-        )
-        done, log = self.run_helper()
-        assert done.returncode == 0, done.stderr
-        want = [judged("wasm"), judged("dyn"), judged("static")]
-        assert self.semver_calls(log) == want
 
-    def test_bin_only_among_judged_crates(self) -> None:
-        """The crates around a bin-only one are still judged."""
-        root = str(self.tree)
-        self.plant(
-            package("core", root),
-            package("cli", root, kinds=(["bin"],)),
-            package("wasm", root, kinds=(["cdylib", "rlib"],)),
-        )
-        done, log = self.run_helper()
-        assert done.returncode == 0, done.stderr
-        want = [judged("core"), judged("wasm")]
-        assert self.semver_calls(log) == want
-        assert f"curl {INDEX}/3/c/cli" not in log
-        want = [
-            f"{LABEL}: core: judged clean",
-            f"{LABEL}: cli: no library target, no API to judge, not judged",
-            f"{LABEL}: wasm: judged clean",
-        ]
-        assert self.verdicts(done) == want
+def test_proc_macro_crate_is_named_not_judged(planted: Planted) -> None:
+    """The tool does not count proc-macro as a library target; nor does this."""
+    planted.plant(package("derive", str(planted.tree), kinds=(["proc-macro"],)))
+    done, log = planted.run_helper()
+    assert done.returncode == 0, done.stderr
+    want = ["cargo metadata --no-deps --format-version 1 --locked"]
+    assert log == want
+    want = [f"{LABEL}: derive: no library target, no API to judge, not judged"]
+    assert verdicts(done) == want
 
-    def test_index_path_lowercases(self) -> None:
-        """The sparse index is keyed on the lowercased name."""
-        self.plant(package("Mixed_Case", str(self.tree)))
-        _, log = self.run_helper()
-        assert f"curl {INDEX}/mi/xe/mixed_case" in log
 
-    def test_no_cargo_toml_skips_clean(self) -> None:
-        """No tracked manifest: nothing is asked of cargo, exit 0."""
-        done, log = self.run_helper()
-        assert done.returncode == 0, done.stderr
-        assert log == list[str]()
-        assert done.stdout == f"{LABEL}: no Cargo.toml tracked, skipped\n"
+def test_lib_and_bin_crate_is_judged(planted: Planted) -> None:
+    """A library beside a binary is judged, once."""
+    planted.plant(package("both", str(planted.tree), kinds=(["lib"], ["bin"])))
+    done, log = planted.run_helper()
+    assert done.returncode == 0, done.stderr
+    want = [judged("both")]
+    assert semver_calls(log) == want
+    want = [f"{LABEL}: both: judged clean"]
+    assert verdicts(done) == want
+
+
+def test_every_library_kind_is_judged(planted: Planted) -> None:
+    """rlib, dylib, cdylib and staticlib count, as the tool counts them."""
+    root = str(planted.tree)
+    planted.plant(
+        package("wasm", root, kinds=(["cdylib", "rlib"],)),
+        package("dyn", root, kinds=(["dylib"],)),
+        package("static", root, kinds=(["staticlib"],)),
+    )
+    done, log = planted.run_helper()
+    assert done.returncode == 0, done.stderr
+    want = [judged("wasm"), judged("dyn"), judged("static")]
+    assert semver_calls(log) == want
+
+
+def test_bin_only_among_judged_crates(planted: Planted) -> None:
+    """The crates around a bin-only one are still judged."""
+    root = str(planted.tree)
+    planted.plant(
+        package("core", root),
+        package("cli", root, kinds=(["bin"],)),
+        package("wasm", root, kinds=(["cdylib", "rlib"],)),
+    )
+    done, log = planted.run_helper()
+    assert done.returncode == 0, done.stderr
+    want = [judged("core"), judged("wasm")]
+    assert semver_calls(log) == want
+    assert f"curl {INDEX}/3/c/cli" not in log
+    want = [
+        f"{LABEL}: core: judged clean",
+        f"{LABEL}: cli: no library target, no API to judge, not judged",
+        f"{LABEL}: wasm: judged clean",
+    ]
+    assert verdicts(done) == want
+
+
+def test_index_path_lowercases(planted: Planted) -> None:
+    """The sparse index is keyed on the lowercased name."""
+    planted.plant(package("Mixed_Case", str(planted.tree)))
+    _, log = planted.run_helper()
+    assert f"curl {INDEX}/mi/xe/mixed_case" in log
+
+
+def test_no_cargo_toml_skips_clean(planted: Planted) -> None:
+    """No tracked manifest: nothing is asked of cargo, exit 0."""
+    done, log = planted.run_helper()
+    assert done.returncode == 0, done.stderr
+    assert log == list[str]()
+    assert done.stdout == f"{LABEL}: no Cargo.toml tracked, skipped\n"

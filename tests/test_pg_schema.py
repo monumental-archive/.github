@@ -281,14 +281,10 @@ def git(root: Path, *args: str) -> None:
     )
 
 
-@pytest.mark.usefixtures("_set_up_test_in_repo")
-class TestInRepo:
+class InRepo:
     """A fresh git repository as the working directory for each row."""
 
-    @fixture
-    def _set_up_test_in_repo(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def __init__(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Make the repository and the extension directory, and enter it."""
         self.root = tmp_path
         git(self.root, "init", "-q")
@@ -305,169 +301,184 @@ class TestInRepo:
         git(self.root, "add", SNAPSHOT)
 
 
-class TestUnchanged:
-    """What must NOT diff: everything that is not the surface."""
-
-    def test_edtf_raw_normalises_to_its_tracked_snapshot(self) -> None:
-        """Real pgrx output reduces to edtf's tracked file, byte for byte."""
-        assert normalise(RAW) == EDTF_SNAPSHOT
-
-    def test_line_number_shift_is_invisible(self) -> None:
-        """The property a naive diff gets wrong: a blank line above."""
-        shifted = shift_lines(RAW, 1)
-        assert shifted != RAW
-        assert normalise(shifted) == normalise(RAW)
-
-    def test_item_order_is_invisible(self) -> None:
-        """The order pgrx's own header calls unstable."""
-        moved = reorder(RAW)
-        assert moved != RAW
-        assert normalise(moved) == normalise(RAW)
-
-    def test_whitespace_is_invisible(self) -> None:
-        """Indentation and blank lines are layout, not surface."""
-        spaced = RAW.replace("\t", "    ").replace("\n", "\n\n")
-        assert normalise(spaced) == normalise(RAW)
-
-    def test_type_annotation_comments_are_invisible(self) -> None:
-        """The Rust type pgrx notes beside each SQL type is a comment."""
-        renamed = RAW.replace("/* & str */", "/* &'static str */")
-        assert renamed != RAW
-        assert normalise(renamed) == normalise(RAW)
+@fixture
+def in_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> InRepo:
+    """Give each row its own InRepo."""
+    return InRepo(tmp_path, monkeypatch)
 
 
-class TestChanged:
-    """What MUST diff: the surface itself."""
-
-    def test_added_argument_changes_exactly_that_statement(self) -> None:
-        """The planted signature change, and nothing else, differs."""
-        before = normalise(RAW).splitlines()
-        after = normalise(add_argument(RAW)).splitlines()
-        assert len(before) == len(after)
-        changed = [(b, a) for b, a in zip(before, after, strict=True) if b != a]
-        assert len(changed) == 1
-        assert '"edtf_level"( "input" TEXT )' in changed[0][0]
-        assert '"edtf_level"( "input" TEXT, "_strict" bool )' in changed[0][1]
-
-    def test_added_argument_survives_a_line_shift(self) -> None:
-        """A real change is not hidden by the shift that accompanies it."""
-        assert normalise(shift_lines(add_argument(RAW), 1)) != normalise(RAW)
-
-    def test_return_type_change_diffs(self) -> None:
-        """A return type is part of the signature."""
-        changed = RAW.replace(") RETURNS INT /*", ") RETURNS bigint /*")
-        assert changed != RAW
-        assert normalise(changed) != normalise(RAW)
-
-    def test_removed_function_diffs(self) -> None:
-        """A dropped object is a surface change an upgrade script owes."""
-        head, *blocks = RAW.split(BLOCK)
-        fewer = head + "".join(BLOCK + b for b in blocks if "edtf_max" not in b)
-        assert normalise(fewer) != normalise(RAW)
-
-    def test_volatility_change_diffs(self) -> None:
-        """Volatility is declared surface, as an index on it depends on it."""
-        changed = RAW.replace("IMMUTABLE STRICT", "STABLE STRICT", 1)
-        assert normalise(changed) != normalise(RAW)
+# What must NOT diff: everything that is not the surface.
+def test_edtf_raw_normalises_to_its_tracked_snapshot() -> None:
+    """Real pgrx output reduces to edtf's tracked file, byte for byte."""
+    assert normalise(RAW) == EDTF_SNAPSHOT
 
 
-class TestCheck(TestInRepo):
-    """`lint:pg-schema`'s judgment: tracked, readable, equal."""
-
-    def test_tracked_matching_snapshot_passes(self) -> None:
-        """The green path: nothing printed, status 0."""
-        self.track(EDTF_SNAPSHOT)
-        assert run_main(["check", write(RAW), SNAPSHOT]) == (0, "", "")
-
-    def test_absent_snapshot_is_red_naming_file_and_fixer(self) -> None:
-        """An extension with no snapshot is red, never a skip (#896)."""
-        status, out, err = run_main(["check", write(RAW), SNAPSHOT])
-        assert (status, out) == (1, "")
-        assert err == (
-            f"lint:pg-schema: no snapshot tracked at {SNAPSHOT}\n"
-            "  run `mise run fix:pg-schema` to write it, read it, and commit it\n"
-        )
-
-    def test_absent_snapshot_is_red_before_reading_the_generation(self) -> None:
-        """The task's pre-build shortcut passes /dev/null; same message."""
-        status, _, err = run_main(["check", os.devnull, SNAPSHOT])
-        assert status == 1
-        assert f"no snapshot tracked at {SNAPSHOT}" in err
-
-    def test_untracked_file_on_disk_is_the_same_red(self) -> None:
-        """A snapshot written and never committed guards nothing in CI."""
-        (self.root / SNAPSHOT).write_text(EDTF_SNAPSHOT, encoding="utf-8")
-        status, _, err = run_main(["check", write(RAW), SNAPSHOT])
-        assert status == 1
-        assert f"no snapshot tracked at {SNAPSHOT}" in err
-
-    def test_surface_change_is_red_with_the_diff_and_read_it_first(self) -> None:
-        """The diff is the review; the fixer is named after it."""
-        self.track(EDTF_SNAPSHOT)
-        status, out, err = run_main(["check", write(add_argument(RAW)), SNAPSHOT])
-        assert status == 1
-        assert '-CREATE FUNCTION "edtf_level"( "input" TEXT )' in out
-        assert '+CREATE FUNCTION "edtf_level"( "input" TEXT, "_strict"' in out
-        assert err == (
-            f"lint:pg-schema: the SQL surface differs from {SNAPSHOT}\n"
-            "  read the diff above first: it is the surface change this commit"
-            " makes\n"
-            "  if it is intended, run `mise run fix:pg-schema` and commit the"
-            " snapshot with\n"
-            "  the upgrade script it implies (sql/<ext>--<previous>--<this>.sql)\n"
-        )
-
-    def test_line_shift_passes_end_to_end(self) -> None:
-        """The normalisation property, through the judging entry point."""
-        self.track(EDTF_SNAPSHOT)
-        status, _, _ = run_main(["check", write(shift_lines(RAW, 1)), SNAPSHOT])
-        assert status == 0
-
-    def test_comment_only_output_is_red_not_an_empty_match(self) -> None:
-        """The header block alone is a broken generation, never a match."""
-        self.track("")
-        header = RAW.split(BLOCK, 2)[1]
-        status, out, err = run_main(["check", write(BLOCK + header), SNAPSHOT])
-        assert (status, out) == (1, "")
-        assert "normalised to nothing" in err
-
-    def test_missing_generation_is_red(self) -> None:
-        """A generation that wrote nothing is named, not skipped."""
-        self.track(EDTF_SNAPSHOT)
-        missing = str(Path(tempfile.mkdtemp()) / "absent.sql")
-        status, _, err = run_main(["check", missing, SNAPSHOT])
-        assert status == 1
-        assert "cannot read the generated schema" in err
+def test_line_number_shift_is_invisible() -> None:
+    """The property a naive diff gets wrong: a blank line above."""
+    shifted = shift_lines(RAW, 1)
+    assert shifted != RAW
+    assert normalise(shifted) == normalise(RAW)
 
 
-class TestWrite(TestInRepo):
-    """`fix:pg-schema`: writes what the lint then passes."""
+def test_item_order_is_invisible() -> None:
+    """The order pgrx's own header calls unstable."""
+    moved = reorder(RAW)
+    assert moved != RAW
+    assert normalise(moved) == normalise(RAW)
 
-    def test_written_snapshot_is_what_check_passes(self) -> None:
-        """Absent, written, tracked, green: the fixer's whole contract."""
-        raw = write(RAW)
-        assert run_main(["check", raw, SNAPSHOT])[0] == 1
-        status, out, err = run_main(["write", raw, SNAPSHOT])
-        assert (status, out, err) == (0, f"fix:pg-schema: wrote {SNAPSHOT}\n", "")
-        assert (self.root / SNAPSHOT).read_text(encoding="utf-8") == EDTF_SNAPSHOT
-        git(self.root, "add", SNAPSHOT)
-        assert run_main(["check", raw, SNAPSHOT]) == (0, "", "")
 
-    def test_rewrite_after_a_surface_change_turns_the_lint_green(self) -> None:
-        """The intended-change path: red, write, green."""
-        self.track(EDTF_SNAPSHOT)
-        raw = write(add_argument(RAW))
-        assert run_main(["check", raw, SNAPSHOT])[0] == 1
-        assert run_main(["write", raw, SNAPSHOT])[0] == 0
-        assert run_main(["check", raw, SNAPSHOT]) == (0, "", "")
+def test_whitespace_is_invisible() -> None:
+    """Indentation and blank lines are layout, not surface."""
+    spaced = RAW.replace("\t", "    ").replace("\n", "\n\n")
+    assert normalise(spaced) == normalise(RAW)
 
-    def test_empty_generation_writes_nothing(self) -> None:
-        """An unusable generation must not overwrite a good snapshot."""
-        self.track(EDTF_SNAPSHOT)
-        status, _, err = run_main(["write", write(""), SNAPSHOT])
-        assert status == 1
-        assert "fix:pg-schema: the generated schema normalised" in err
-        assert (self.root / SNAPSHOT).read_text(encoding="utf-8") == EDTF_SNAPSHOT
+
+def test_type_annotation_comments_are_invisible() -> None:
+    """The Rust type pgrx notes beside each SQL type is a comment."""
+    renamed = RAW.replace("/* & str */", "/* &'static str */")
+    assert renamed != RAW
+    assert normalise(renamed) == normalise(RAW)
+
+
+# What MUST diff: the surface itself.
+def test_added_argument_changes_exactly_that_statement() -> None:
+    """The planted signature change, and nothing else, differs."""
+    before = normalise(RAW).splitlines()
+    after = normalise(add_argument(RAW)).splitlines()
+    assert len(before) == len(after)
+    changed = [(b, a) for b, a in zip(before, after, strict=True) if b != a]
+    assert len(changed) == 1
+    assert '"edtf_level"( "input" TEXT )' in changed[0][0]
+    assert '"edtf_level"( "input" TEXT, "_strict" bool )' in changed[0][1]
+
+
+def test_added_argument_survives_a_line_shift() -> None:
+    """A real change is not hidden by the shift that accompanies it."""
+    assert normalise(shift_lines(add_argument(RAW), 1)) != normalise(RAW)
+
+
+def test_return_type_change_diffs() -> None:
+    """A return type is part of the signature."""
+    changed = RAW.replace(") RETURNS INT /*", ") RETURNS bigint /*")
+    assert changed != RAW
+    assert normalise(changed) != normalise(RAW)
+
+
+def test_removed_function_diffs() -> None:
+    """A dropped object is a surface change an upgrade script owes."""
+    head, *blocks = RAW.split(BLOCK)
+    fewer = head + "".join(BLOCK + b for b in blocks if "edtf_max" not in b)
+    assert normalise(fewer) != normalise(RAW)
+
+
+def test_volatility_change_diffs() -> None:
+    """Volatility is declared surface, as an index on it depends on it."""
+    changed = RAW.replace("IMMUTABLE STRICT", "STABLE STRICT", 1)
+    assert normalise(changed) != normalise(RAW)
+
+
+def test_tracked_matching_snapshot_passes(in_repo: InRepo) -> None:
+    """The green path: nothing printed, status 0."""
+    in_repo.track(EDTF_SNAPSHOT)
+    assert run_main(["check", write(RAW), SNAPSHOT]) == (0, "", "")
+
+
+@pytest.mark.usefixtures("in_repo")
+def test_absent_snapshot_is_red_naming_file_and_fixer() -> None:
+    """An extension with no snapshot is red, never a skip (#896)."""
+    status, out, err = run_main(["check", write(RAW), SNAPSHOT])
+    assert (status, out) == (1, "")
+    assert err == (
+        f"lint:pg-schema: no snapshot tracked at {SNAPSHOT}\n"
+        "  run `mise run fix:pg-schema` to write it, read it, and commit it\n"
+    )
+
+
+@pytest.mark.usefixtures("in_repo")
+def test_absent_snapshot_is_red_before_reading_the_generation() -> None:
+    """The task's pre-build shortcut passes /dev/null; same message."""
+    status, _, err = run_main(["check", os.devnull, SNAPSHOT])
+    assert status == 1
+    assert f"no snapshot tracked at {SNAPSHOT}" in err
+
+
+def test_untracked_file_on_disk_is_the_same_red(in_repo: InRepo) -> None:
+    """A snapshot written and never committed guards nothing in CI."""
+    (in_repo.root / SNAPSHOT).write_text(EDTF_SNAPSHOT, encoding="utf-8")
+    status, _, err = run_main(["check", write(RAW), SNAPSHOT])
+    assert status == 1
+    assert f"no snapshot tracked at {SNAPSHOT}" in err
+
+
+def test_surface_change_is_red_with_the_diff_and_read_it_first(in_repo: InRepo) -> None:
+    """The diff is the review; the fixer is named after it."""
+    in_repo.track(EDTF_SNAPSHOT)
+    status, out, err = run_main(["check", write(add_argument(RAW)), SNAPSHOT])
+    assert status == 1
+    assert '-CREATE FUNCTION "edtf_level"( "input" TEXT )' in out
+    assert '+CREATE FUNCTION "edtf_level"( "input" TEXT, "_strict"' in out
+    assert err == (
+        f"lint:pg-schema: the SQL surface differs from {SNAPSHOT}\n"
+        "  read the diff above first: it is the surface change this commit"
+        " makes\n"
+        "  if it is intended, run `mise run fix:pg-schema` and commit the"
+        " snapshot with\n"
+        "  the upgrade script it implies (sql/<ext>--<previous>--<this>.sql)\n"
+    )
+
+
+def test_line_shift_passes_end_to_end(in_repo: InRepo) -> None:
+    """The normalisation property, through the judging entry point."""
+    in_repo.track(EDTF_SNAPSHOT)
+    status, _, _ = run_main(["check", write(shift_lines(RAW, 1)), SNAPSHOT])
+    assert status == 0
+
+
+def test_comment_only_output_is_red_not_an_empty_match(in_repo: InRepo) -> None:
+    """The header block alone is a broken generation, never a match."""
+    in_repo.track("")
+    header = RAW.split(BLOCK, 2)[1]
+    status, out, err = run_main(["check", write(BLOCK + header), SNAPSHOT])
+    assert (status, out) == (1, "")
+    assert "normalised to nothing" in err
+
+
+def test_missing_generation_is_red(in_repo: InRepo) -> None:
+    """A generation that wrote nothing is named, not skipped."""
+    in_repo.track(EDTF_SNAPSHOT)
+    missing = str(Path(tempfile.mkdtemp()) / "absent.sql")
+    status, _, err = run_main(["check", missing, SNAPSHOT])
+    assert status == 1
+    assert "cannot read the generated schema" in err
+
+
+def test_written_snapshot_is_what_check_passes(in_repo: InRepo) -> None:
+    """Absent, written, tracked, green: the fixer's whole contract."""
+    raw = write(RAW)
+    assert run_main(["check", raw, SNAPSHOT])[0] == 1
+    status, out, err = run_main(["write", raw, SNAPSHOT])
+    assert (status, out, err) == (0, f"fix:pg-schema: wrote {SNAPSHOT}\n", "")
+    assert (in_repo.root / SNAPSHOT).read_text(encoding="utf-8") == EDTF_SNAPSHOT
+    git(in_repo.root, "add", SNAPSHOT)
+    assert run_main(["check", raw, SNAPSHOT]) == (0, "", "")
+
+
+def test_rewrite_after_a_surface_change_turns_the_lint_green(in_repo: InRepo) -> None:
+    """The intended-change path: red, write, green."""
+    in_repo.track(EDTF_SNAPSHOT)
+    raw = write(add_argument(RAW))
+    assert run_main(["check", raw, SNAPSHOT])[0] == 1
+    assert run_main(["write", raw, SNAPSHOT])[0] == 0
+    assert run_main(["check", raw, SNAPSHOT]) == (0, "", "")
+
+
+def test_empty_generation_writes_nothing(in_repo: InRepo) -> None:
+    """An unusable generation must not overwrite a good snapshot."""
+    in_repo.track(EDTF_SNAPSHOT)
+    status, _, err = run_main(["write", write(""), SNAPSHOT])
+    assert status == 1
+    assert "fix:pg-schema: the generated schema normalised" in err
+    assert (in_repo.root / SNAPSHOT).read_text(encoding="utf-8") == EDTF_SNAPSHOT
 
 
 # release-lab's tracked `crates/lab-pg/schema.snapshot.sql` at its
@@ -527,8 +538,7 @@ def need_sqlfluff() -> None:
         pytest.fail(SQLFLUFF_MISSING)
 
 
-@pytest.mark.usefixtures("_set_up_test_sql_skips_owned_snapshots")
-class TestSqlSkipsOwnedSnapshots:
+class SqlSkipsOwnedSnapshots:
     """lint:sql and fix:sql leave the belt's snapshots to pg-schema (#1240).
 
     The body under test is each task's own `run` string from
@@ -543,10 +553,7 @@ class TestSqlSkipsOwnedSnapshots:
     reds 1; a root crate's path left as `./schema.snapshot.sql` reds 1.
     """
 
-    @fixture
-    def _set_up_test_sql_skips_owned_snapshots(
-        self, tmp_path: Path, request: pytest.FixtureRequest
-    ) -> None:
+    def __init__(self, tmp_path: Path, request: pytest.FixtureRequest) -> None:
         """Make a repository, the shims, and an empty member list.
 
         The tool is asserted first, as the belt's tasks assert theirs: a
@@ -631,147 +638,186 @@ class TestSqlSkipsOwnedSnapshots:
         )
         return done.returncode, done.stdout, done.stderr, sorted(handed)
 
-    def test_the_planted_snapshot_is_one_sqlfluff_reds(self) -> None:
-        """Precondition: without the skip, the snapshot row would be red."""
-        path = self.root / "snapshot.sql"
-        path.write_text(LAB_SNAPSHOT, encoding="utf-8")
-        done = subprocess.run(
-            [
-                support.tool("sqlfluff"),
-                "lint",
-                "--config",
-                str(BELT / "sqlfluff.cfg"),
-                str(path),
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        assert done.returncode == 1
-        assert "LT05" in done.stdout
-        assert "RF06" in done.stdout
 
-    def test_extension_snapshot_is_left_out_and_lint_is_green(self) -> None:
-        """The snapshot sqlfluff would red is not handed to sqlfluff."""
-        self.member("crates/ext", pgrx=True)
-        self.sql(SNAPSHOT, LAB_SNAPSHOT)
-        self.sql("crates/ext/sql/ext--0.1.0--0.2.0.sql", CLEAN_SQL)
-        status, out, err, handed = self.run_task("lint:sql")
-        assert (status, err) == (0, "")
-        want = ["crates/ext/sql/ext--0.1.0--0.2.0.sql"]
-        assert handed == want
-        assert (
-            "lint:sql: 1 file(s) linted, 1 pg-schema snapshot(s) left to "
-            "lint:pg-schema\n"
-        ) in out
-
-    def test_extension_at_the_workspace_root_is_left_out(self) -> None:
-        """A root crate's snapshot is spelled the way git ls-files spells it."""
-        self.member(".", pgrx=True)
-        self.sql("schema.snapshot.sql", LAB_SNAPSHOT)
-        self.sql("sql/up.sql", CLEAN_SQL)
-        status, _, err, handed = self.run_task("lint:sql")
-        assert (status, err) == (0, "")
-        want = ["sql/up.sql"]
-        assert handed == want
-
-    def test_same_name_outside_an_extension_is_still_linted(self) -> None:
-        """Derived from the crates, never matched by filename."""
-        self.member("crates/ext", pgrx=True)
-        self.member("crates/plain", pgrx=False)
-        self.sql(SNAPSHOT, LAB_SNAPSHOT)
-        self.sql("crates/plain/schema.snapshot.sql", LAB_SNAPSHOT)
-        self.sql("db/schema.snapshot.sql", CLEAN_SQL)
-        status, out, err, handed = self.run_task("lint:sql")
-        assert status == 1
-        want = ["crates/plain/schema.snapshot.sql", "db/schema.snapshot.sql"]
-        assert handed == want
-        assert "crates/plain/schema.snapshot.sql] FAIL" in out
-        assert "lint:sql: findings above" in err
-
-    def test_no_extension_excludes_nothing(self) -> None:
-        """A Rust workspace with no pgrx member owns no SQL."""
-        self.member("crates/plain", pgrx=False)
-        self.sql("crates/plain/schema.snapshot.sql", LAB_SNAPSHOT)
-        self.sql("db/up.sql", CLEAN_SQL)
-        status, _, _, handed = self.run_task("lint:sql")
-        assert status == 1
-        want = ["crates/plain/schema.snapshot.sql", "db/up.sql"]
-        assert handed == want
-
-    def test_no_cargo_manifest_excludes_nothing_and_asks_no_cargo(self) -> None:
-        """No Cargo.toml tracked: the shim would exit 101 if asked."""
-        self.sql("schema.snapshot.sql", CLEAN_SQL)
-        self.sql("db/up.sql", CLEAN_SQL)
-        status, out, err, handed = self.run_task("lint:sql")
-        assert (status, err) == (0, "")
-        want = ["db/up.sql", "schema.snapshot.sql"]
-        assert handed == want
-        assert "lint:sql: 2 file(s) linted, 0 pg-schema" in out
-
-    def test_sql_over_the_size_default_is_linted(self) -> None:
-        """A file past sqlfluff's 20 000-byte default is linted (#2142).
-
-        The default skips it with a WARNING and exit 0; the delivered
-        config sets no limit, so its one finding, on the last line, reds.
-        """
-        self.sql("db/big.sql", CLEAN_SQL.upper() * 2100 + "select 1;\n")
-        assert (self.root / "db/big.sql").stat().st_size > 20000
-        status, out, err, handed = self.run_task("lint:sql")
-        assert status == 1
-        want = ["db/big.sql"]
-        assert handed == want
-        assert (
-            "L:2101 | P:   1 | CP01 | Keywords must be consistently upper case." in out
-        )
-        assert "Skipping to avoid parser lock" not in out + err
-        assert "lint:sql: findings above" in err
-
-    def test_only_belt_owned_sql_skips_without_sqlfluff(self) -> None:
-        """Nothing left to lint is a skip, not sqlfluff with no paths."""
-        self.member("crates/ext", pgrx=True)
-        self.sql(SNAPSHOT, LAB_SNAPSHOT)
-        status, out, err, handed = self.run_task("lint:sql")
-        assert (status, err, handed) == (0, "", [])
-        assert out == (
-            "lint:sql: only belt-owned SQL tracked (1 pg-schema snapshot(s)), skipped\n"
-        )
-
-    def test_a_red_derivation_reds_the_lint_before_sqlfluff(self) -> None:
-        """A broken cargo must not read as "the belt owns nothing"."""
-        self.member("crates/ext", pgrx=True)
-        self.sql(SNAPSHOT, LAB_SNAPSHOT)
-        self.sql("db/up.sql", CLEAN_SQL)
-        self.packages.clear()  # no metadata document: the shim exits 101
-        status, _, _, handed = self.run_task("lint:sql")
-        assert (status, handed) == (101, [])
-
-    def test_fix_leaves_the_snapshot_byte_for_byte(self) -> None:
-        """fix:sql hands sqlfluff the same list and never rewrites it."""
-        self.member("crates/ext", pgrx=True)
-        self.sql(SNAPSHOT, LAB_SNAPSHOT)
-        self.sql("crates/plain/schema.snapshot.sql", LAB_SNAPSHOT)
-        status, _, _, handed = self.run_task("fix:sql")
-        want = ["crates/plain/schema.snapshot.sql"]
-        assert handed == want
-        assert (self.root / SNAPSHOT).read_text(encoding="utf-8") == LAB_SNAPSHOT
-        assert (self.root / "crates/plain/schema.snapshot.sql").read_text(
-            encoding="utf-8",
-        ) != LAB_SNAPSHOT
-        assert status == 0
+@fixture
+def sql_skips_owned_snapshots(
+    tmp_path: Path, request: pytest.FixtureRequest
+) -> SqlSkipsOwnedSnapshots:
+    """Give each row its own SqlSkipsOwnedSnapshots."""
+    return SqlSkipsOwnedSnapshots(tmp_path, request)
 
 
-class TestUsage:
-    """The entry point's argument guard."""
-
-    @pytest.mark.parametrize(
-        "argv", [[], ["check", "a"], ["check", "a", "b", "c"], ["diff", "a", "b"]]
+def test_the_planted_snapshot_is_one_sqlfluff_reds(
+    sql_skips_owned_snapshots: SqlSkipsOwnedSnapshots,
+) -> None:
+    """Precondition: without the skip, the snapshot row would be red."""
+    path = sql_skips_owned_snapshots.root / "snapshot.sql"
+    path.write_text(LAB_SNAPSHOT, encoding="utf-8")
+    done = subprocess.run(
+        [
+            support.tool("sqlfluff"),
+            "lint",
+            "--config",
+            str(BELT / "sqlfluff.cfg"),
+            str(path),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
     )
-    def test_wrong_arguments_are_red(self, argv: object) -> None:
-        """The task passes a mode and exactly two paths."""
-        status, out, err = run_main(argv)
-        assert (status, out) == (1, "")
-        assert "usage:" in err
+    assert done.returncode == 1
+    assert "LT05" in done.stdout
+    assert "RF06" in done.stdout
+
+
+def test_extension_snapshot_is_left_out_and_lint_is_green(
+    sql_skips_owned_snapshots: SqlSkipsOwnedSnapshots,
+) -> None:
+    """The snapshot sqlfluff would red is not handed to sqlfluff."""
+    sql_skips_owned_snapshots.member("crates/ext", pgrx=True)
+    sql_skips_owned_snapshots.sql(SNAPSHOT, LAB_SNAPSHOT)
+    sql_skips_owned_snapshots.sql("crates/ext/sql/ext--0.1.0--0.2.0.sql", CLEAN_SQL)
+    status, out, err, handed = sql_skips_owned_snapshots.run_task("lint:sql")
+    assert (status, err) == (0, "")
+    want = ["crates/ext/sql/ext--0.1.0--0.2.0.sql"]
+    assert handed == want
+    assert (
+        "lint:sql: 1 file(s) linted, 1 pg-schema snapshot(s) left to lint:pg-schema\n"
+    ) in out
+
+
+def test_extension_at_the_workspace_root_is_left_out(
+    sql_skips_owned_snapshots: SqlSkipsOwnedSnapshots,
+) -> None:
+    """A root crate's snapshot is spelled the way git ls-files spells it."""
+    sql_skips_owned_snapshots.member(".", pgrx=True)
+    sql_skips_owned_snapshots.sql("schema.snapshot.sql", LAB_SNAPSHOT)
+    sql_skips_owned_snapshots.sql("sql/up.sql", CLEAN_SQL)
+    status, _, err, handed = sql_skips_owned_snapshots.run_task("lint:sql")
+    assert (status, err) == (0, "")
+    want = ["sql/up.sql"]
+    assert handed == want
+
+
+def test_same_name_outside_an_extension_is_still_linted(
+    sql_skips_owned_snapshots: SqlSkipsOwnedSnapshots,
+) -> None:
+    """Derived from the crates, never matched by filename."""
+    sql_skips_owned_snapshots.member("crates/ext", pgrx=True)
+    sql_skips_owned_snapshots.member("crates/plain", pgrx=False)
+    sql_skips_owned_snapshots.sql(SNAPSHOT, LAB_SNAPSHOT)
+    sql_skips_owned_snapshots.sql("crates/plain/schema.snapshot.sql", LAB_SNAPSHOT)
+    sql_skips_owned_snapshots.sql("db/schema.snapshot.sql", CLEAN_SQL)
+    status, out, err, handed = sql_skips_owned_snapshots.run_task("lint:sql")
+    assert status == 1
+    want = ["crates/plain/schema.snapshot.sql", "db/schema.snapshot.sql"]
+    assert handed == want
+    assert "crates/plain/schema.snapshot.sql] FAIL" in out
+    assert "lint:sql: findings above" in err
+
+
+def test_no_extension_excludes_nothing(
+    sql_skips_owned_snapshots: SqlSkipsOwnedSnapshots,
+) -> None:
+    """A Rust workspace with no pgrx member owns no SQL."""
+    sql_skips_owned_snapshots.member("crates/plain", pgrx=False)
+    sql_skips_owned_snapshots.sql("crates/plain/schema.snapshot.sql", LAB_SNAPSHOT)
+    sql_skips_owned_snapshots.sql("db/up.sql", CLEAN_SQL)
+    status, _, _, handed = sql_skips_owned_snapshots.run_task("lint:sql")
+    assert status == 1
+    want = ["crates/plain/schema.snapshot.sql", "db/up.sql"]
+    assert handed == want
+
+
+def test_no_cargo_manifest_excludes_nothing_and_asks_no_cargo(
+    sql_skips_owned_snapshots: SqlSkipsOwnedSnapshots,
+) -> None:
+    """No Cargo.toml tracked: the shim would exit 101 if asked."""
+    sql_skips_owned_snapshots.sql("schema.snapshot.sql", CLEAN_SQL)
+    sql_skips_owned_snapshots.sql("db/up.sql", CLEAN_SQL)
+    status, out, err, handed = sql_skips_owned_snapshots.run_task("lint:sql")
+    assert (status, err) == (0, "")
+    want = ["db/up.sql", "schema.snapshot.sql"]
+    assert handed == want
+    assert "lint:sql: 2 file(s) linted, 0 pg-schema" in out
+
+
+def test_sql_over_the_size_default_is_linted(
+    sql_skips_owned_snapshots: SqlSkipsOwnedSnapshots,
+) -> None:
+    """A file past sqlfluff's 20 000-byte default is linted (#2142).
+
+    The default skips it with a WARNING and exit 0; the delivered
+    config sets no limit, so its one finding, on the last line, reds.
+    """
+    sql_skips_owned_snapshots.sql(
+        "db/big.sql", CLEAN_SQL.upper() * 2100 + "select 1;\n"
+    )
+    assert (sql_skips_owned_snapshots.root / "db/big.sql").stat().st_size > 20000
+    status, out, err, handed = sql_skips_owned_snapshots.run_task("lint:sql")
+    assert status == 1
+    want = ["db/big.sql"]
+    assert handed == want
+    assert "L:2101 | P:   1 | CP01 | Keywords must be consistently upper case." in out
+    assert "Skipping to avoid parser lock" not in out + err
+    assert "lint:sql: findings above" in err
+
+
+def test_only_belt_owned_sql_skips_without_sqlfluff(
+    sql_skips_owned_snapshots: SqlSkipsOwnedSnapshots,
+) -> None:
+    """Nothing left to lint is a skip, not sqlfluff with no paths."""
+    sql_skips_owned_snapshots.member("crates/ext", pgrx=True)
+    sql_skips_owned_snapshots.sql(SNAPSHOT, LAB_SNAPSHOT)
+    status, out, err, handed = sql_skips_owned_snapshots.run_task("lint:sql")
+    assert (status, err, handed) == (0, "", [])
+    assert out == (
+        "lint:sql: only belt-owned SQL tracked (1 pg-schema snapshot(s)), skipped\n"
+    )
+
+
+def test_a_red_derivation_reds_the_lint_before_sqlfluff(
+    sql_skips_owned_snapshots: SqlSkipsOwnedSnapshots,
+) -> None:
+    """A broken cargo must not read as "the belt owns nothing"."""
+    sql_skips_owned_snapshots.member("crates/ext", pgrx=True)
+    sql_skips_owned_snapshots.sql(SNAPSHOT, LAB_SNAPSHOT)
+    sql_skips_owned_snapshots.sql("db/up.sql", CLEAN_SQL)
+    sql_skips_owned_snapshots.packages.clear()  # no metadata document: the shim exits 101
+    status, _, _, handed = sql_skips_owned_snapshots.run_task("lint:sql")
+    assert (status, handed) == (101, [])
+
+
+def test_fix_leaves_the_snapshot_byte_for_byte(
+    sql_skips_owned_snapshots: SqlSkipsOwnedSnapshots,
+) -> None:
+    """fix:sql hands sqlfluff the same list and never rewrites it."""
+    sql_skips_owned_snapshots.member("crates/ext", pgrx=True)
+    sql_skips_owned_snapshots.sql(SNAPSHOT, LAB_SNAPSHOT)
+    sql_skips_owned_snapshots.sql("crates/plain/schema.snapshot.sql", LAB_SNAPSHOT)
+    status, _, _, handed = sql_skips_owned_snapshots.run_task("fix:sql")
+    want = ["crates/plain/schema.snapshot.sql"]
+    assert handed == want
+    assert (sql_skips_owned_snapshots.root / SNAPSHOT).read_text(
+        encoding="utf-8"
+    ) == LAB_SNAPSHOT
+    assert (
+        sql_skips_owned_snapshots.root / "crates/plain/schema.snapshot.sql"
+    ).read_text(
+        encoding="utf-8",
+    ) != LAB_SNAPSHOT
+    assert status == 0
+
+
+# The entry point's argument guard.
+@pytest.mark.parametrize(
+    "argv", [[], ["check", "a"], ["check", "a", "b", "c"], ["diff", "a", "b"]]
+)
+def test_wrong_arguments_are_red(argv: object) -> None:
+    """The task passes a mode and exactly two paths."""
+    status, out, err = run_main(argv)
+    assert (status, out) == (1, "")
+    assert "usage:" in err
 
 
 def without_sqlfluff() -> str:

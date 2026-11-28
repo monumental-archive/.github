@@ -181,124 +181,123 @@ class Planted:
         )
 
 
-class TestRoots:
-    """roots(): the distinct workspaces, the top one first."""
-
-    def test_two_roots_top_first_vendor_never_asked(
-        self, tmp_path: Path, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """Cargo.toml, then fuzz/Cargo.toml; the member folds into the top."""
-        planted = Planted(tmp_path)
-        status, out, err = planted.main(capfd)
-        assert (status, err) == (0, "")
-        assert out == "Cargo.toml\0fuzz/Cargo.toml\0"
-        asked: list[str] = sorted(planted.asked())
-        want = ["Cargo.toml", "crates/a/Cargo.toml", "fuzz/Cargo.toml"]
-        assert want == asked
-
-    def test_a_tree_with_no_top_manifest_lists_the_rest_sorted(self) -> None:
-        """No Cargo.toml at the top: nothing is put first."""
-        bare: list[str] = ["a", "b"]
-        topped: list[str] = ["Cargo.toml", "a", "z"]
-        assert bare == rust_workspaces.ordered({"b", "a"})
-        assert topped == rust_workspaces.ordered({"z", "Cargo.toml", "a"})
-
-    def test_a_root_outside_the_tree_is_red_by_name(
-        self, tmp_path: Path, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """fuzz/Cargo.toml resolved outside: the message and remedy, exact."""
-        planted = Planted(tmp_path / "outside", "outside")
-        status, out, err = planted.main(capfd)
-        assert (status, out) == (1, "")
-        want = OUTSIDE_MESSAGE.format(root=planted.outside / "Cargo.toml")
-        assert want == err
-
-    def test_a_failing_locate_project_carries_cargos_text(
-        self, tmp_path: Path, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """Cargo exits 101: its own words, and every other manifest still asked."""
-        planted = Planted(tmp_path, "fail")
-        status, out, err = planted.main(capfd)
-        assert (status, out) == (1, "")
-        assert err == FAILED_MESSAGE
-        assert len(planted.asked()) == 3
-
-    def test_git_failing_is_red_with_gits_words(
-        self, tmp_path: Path, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """Outside a repository: git's error, never an empty list."""
-        planted = Planted(tmp_path)
-        outside = planted.base / "plain"
-        outside.mkdir()
-        status, out, err = planted.call(
-            lambda: rust_workspaces.main(["roots"]), capfd, outside
-        )
-        assert (status, out) == (1, "")
-        assert "lint:rust: git could not name the tree\n" in err
-        assert "not a git repository" in err
-
-    def test_resolved_is_the_roots_or_none_having_said_why(
-        self, tmp_path: Path, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """The roots; None on an unresolved manifest; None on git, said."""
-        planted = Planted(tmp_path)
-        roots: list[str] = ["Cargo.toml", "fuzz/Cargo.toml"]
-        status, out, err = planted.call(
-            lambda: 0 if rust_workspaces.resolved() == roots else 3, capfd
-        )
-        assert (status, err) == (0, "")
-        refused = Planted(tmp_path / "outside", "outside")
-        status, out, err = refused.call(
-            lambda: 0 if rust_workspaces.resolved() is None else 3, capfd
-        )
-        assert status == 0
-        assert "belongs to a workspace outside this tree" in err
-        outside = planted.base / "plain"
-        outside.mkdir()
-        status, _out, err = planted.call(
-            lambda: 0 if rust_workspaces.resolved() is None else 3, capfd, outside
-        )
-        assert status == 0
-        assert "lint:rust: git could not name the tree\n" in err
-
-    @pytest.mark.parametrize("argv", [[], ["root"], ["roots", "x"]])
-    def test_anything_but_roots_is_a_usage_error(
-        self, argv: list[str], capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """No subcommand, or another: exit 2 and the usage line."""
-        assert rust_workspaces.main(argv) == 2
-        assert capfd.readouterr() == ("", "usage: belt rust-workspaces roots\n")
+# roots(): the distinct workspaces, the top one first.
+def test_two_roots_top_first_vendor_never_asked(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Cargo.toml, then fuzz/Cargo.toml; the member folds into the top."""
+    planted = Planted(tmp_path)
+    status, out, err = planted.main(capfd)
+    assert (status, err) == (0, "")
+    assert out == "Cargo.toml\0fuzz/Cargo.toml\0"
+    asked: list[str] = sorted(planted.asked())
+    want = ["Cargo.toml", "crates/a/Cargo.toml", "fuzz/Cargo.toml"]
+    assert want == asked
 
 
-class TestReader:
-    """org_rust_workspace_roots fills the array, or fails."""
+def test_a_tree_with_no_top_manifest_lists_the_rest_sorted() -> None:
+    """No Cargo.toml at the top: nothing is put first."""
+    bare: list[str] = ["a", "b"]
+    topped: list[str] = ["Cargo.toml", "a", "z"]
+    assert bare == rust_workspaces.ordered({"b", "a"})
+    assert topped == rust_workspaces.ordered({"z", "Cargo.toml", "a"})
 
-    @pytest.mark.parametrize("shell", SHELLS)
-    def test_the_reader_fills_one_element_per_root(
-        self, shell: object, tmp_path: Path
-    ) -> None:
-        """Both roots in order, no empty last element, no file left."""
-        planted = Planted(tmp_path)
-        done = planted.read(shell)
-        left: list[str] = sorted(p.name for p in planted.base.iterdir())
-        assert (done.returncode, done.stdout, done.stderr) == (
-            0,
-            "Cargo.toml\nfuzz/Cargo.toml\n",
-            "",
-        )
-        assert left == LEFT
 
-    @pytest.mark.parametrize("shell", SHELLS)
-    def test_the_reader_fails_when_the_helper_fails(
-        self, shell: object, tmp_path: Path
-    ) -> None:
-        """A finding: exit 1 under errexit, the message, nothing filled."""
-        planted = Planted(tmp_path, "fail")
-        done = planted.read(shell)
-        left: list[str] = sorted(p.name for p in planted.base.iterdir())
-        assert (done.returncode, done.stdout) == (1, "")
-        assert FAILED_MESSAGE in done.stderr
-        assert left == LEFT
+def test_a_root_outside_the_tree_is_red_by_name(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """fuzz/Cargo.toml resolved outside: the message and remedy, exact."""
+    planted = Planted(tmp_path / "outside", "outside")
+    status, out, err = planted.main(capfd)
+    assert (status, out) == (1, "")
+    want = OUTSIDE_MESSAGE.format(root=planted.outside / "Cargo.toml")
+    assert want == err
+
+
+def test_a_failing_locate_project_carries_cargos_text(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Cargo exits 101: its own words, and every other manifest still asked."""
+    planted = Planted(tmp_path, "fail")
+    status, out, err = planted.main(capfd)
+    assert (status, out) == (1, "")
+    assert err == FAILED_MESSAGE
+    assert len(planted.asked()) == 3
+
+
+def test_git_failing_is_red_with_gits_words(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Outside a repository: git's error, never an empty list."""
+    planted = Planted(tmp_path)
+    outside = planted.base / "plain"
+    outside.mkdir()
+    status, out, err = planted.call(
+        lambda: rust_workspaces.main(["roots"]), capfd, outside
+    )
+    assert (status, out) == (1, "")
+    assert "lint:rust: git could not name the tree\n" in err
+    assert "not a git repository" in err
+
+
+def test_resolved_is_the_roots_or_none_having_said_why(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """The roots; None on an unresolved manifest; None on git, said."""
+    planted = Planted(tmp_path)
+    roots: list[str] = ["Cargo.toml", "fuzz/Cargo.toml"]
+    status, out, err = planted.call(
+        lambda: 0 if rust_workspaces.resolved() == roots else 3, capfd
+    )
+    assert (status, err) == (0, "")
+    refused = Planted(tmp_path / "outside", "outside")
+    status, out, err = refused.call(
+        lambda: 0 if rust_workspaces.resolved() is None else 3, capfd
+    )
+    assert status == 0
+    assert "belongs to a workspace outside this tree" in err
+    outside = planted.base / "plain"
+    outside.mkdir()
+    status, _out, err = planted.call(
+        lambda: 0 if rust_workspaces.resolved() is None else 3, capfd, outside
+    )
+    assert status == 0
+    assert "lint:rust: git could not name the tree\n" in err
+
+
+@pytest.mark.parametrize("argv", [[], ["root"], ["roots", "x"]])
+def test_anything_but_roots_is_a_usage_error(
+    argv: list[str], capfd: pytest.CaptureFixture[str]
+) -> None:
+    """No subcommand, or another: exit 2 and the usage line."""
+    assert rust_workspaces.main(argv) == 2
+    assert capfd.readouterr() == ("", "usage: belt rust-workspaces roots\n")
+
+
+# org_rust_workspace_roots fills the array, or fails.
+@pytest.mark.parametrize("shell", SHELLS)
+def test_the_reader_fills_one_element_per_root(shell: object, tmp_path: Path) -> None:
+    """Both roots in order, no empty last element, no file left."""
+    planted = Planted(tmp_path)
+    done = planted.read(shell)
+    left: list[str] = sorted(p.name for p in planted.base.iterdir())
+    assert (done.returncode, done.stdout, done.stderr) == (
+        0,
+        "Cargo.toml\nfuzz/Cargo.toml\n",
+        "",
+    )
+    assert left == LEFT
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_the_reader_fails_when_the_helper_fails(shell: object, tmp_path: Path) -> None:
+    """A finding: exit 1 under errexit, the message, nothing filled."""
+    planted = Planted(tmp_path, "fail")
+    done = planted.read(shell)
+    left: list[str] = sorted(p.name for p in planted.base.iterdir())
+    assert (done.returncode, done.stdout) == (1, "")
+    assert FAILED_MESSAGE in done.stderr
+    assert left == LEFT
 
 
 BUILT_AS_HOLDS_THE_FLAGS_AND_PUTS_THEM_BACK_ROWS: list[tuple[dict[str, str], str]] = [
@@ -307,12 +306,10 @@ BUILT_AS_HOLDS_THE_FLAGS_AND_PUTS_THEM_BACK_ROWS: list[tuple[dict[str, str], str
 ]
 
 
-@pytest.mark.usefixtures("_tmp")
-class TestFuzzing:
+class Fuzzing:
     """A cargo-fuzz root is built with `--cfg fuzzing`, by its marker (#2093)."""
 
-    @fixture
-    def _tmp(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
 
@@ -329,74 +326,87 @@ class TestFuzzing:
             written.write(text)
         return written.name
 
-    @pytest.mark.parametrize(
-        ("text", "want"),
-        [
-            ("[package]\nmetadata = { cargo-fuzz = true }\n", True),
-            ('[package]\nmetadata = { cargo-fuzz = "true" }\n', False),
-            ("[package]\nmetadata = { cargo-fuzz = false }\n", False),
-            ("[package]\nmetadata = { other = true }\n", False),
-            ("[package]\nmetadata = 1\n", False),
-            ('[package]\nname = "fuzz"\n', False),
-            ("package = 1\n", False),
-            ("[workspace]\nmetadata = { cargo-fuzz = true }\n", False),
-        ],
-    )
-    def test_only_a_true_cargo_fuzz_in_package_metadata_is_the_marker(
-        self, text: object, want: object
-    ) -> None:
-        """Every other shape of the manifest is not a cargo-fuzz crate."""
-        assert want == rust_workspaces.fuzzing(self.manifest(text))
 
-    def test_the_cfg_is_appended_to_the_variable_cargo_reads(self) -> None:
-        """RUSTFLAGS, or the encoded variable whenever it is set at all."""
-        marked = self.manifest("[package]\nmetadata = { cargo-fuzz = true }\n")
-        encoded = "CARGO_ENCODED_RUSTFLAGS"
-        for environ, want in (
-            ({}, {"RUSTFLAGS": "--cfg fuzzing"}),
-            ({"RUSTFLAGS": ""}, {"RUSTFLAGS": "--cfg fuzzing"}),
-            ({"RUSTFLAGS": "-Dwarnings"}, {"RUSTFLAGS": "-Dwarnings --cfg fuzzing"}),
-            ({encoded: ""}, {encoded: "--cfg\x1ffuzzing"}),
-            (
-                {encoded: "-D\x1fwarnings", "RUSTFLAGS": "-Cx"},
-                {encoded: "-D\x1fwarnings\x1f--cfg\x1ffuzzing"},
-            ),
-        ):
-            assert want == rust_workspaces.rustflags(marked, environ)
+@fixture
+def fuzzing_state(tmp_path: Path) -> Fuzzing:
+    """Give each row its own Fuzzing."""
+    return Fuzzing(tmp_path)
 
-    def test_an_unmarked_root_adds_nothing(self) -> None:
-        """No marker: no variable is named, whatever is already set."""
-        plain = self.manifest("[workspace]\n")
-        nothing: dict[str, str] = {}
-        added = rust_workspaces.rustflags(plain, {"RUSTFLAGS": "-Cx"})
-        assert nothing == added
 
-    @pytest.mark.parametrize(
-        ("before", "inside"), BUILT_AS_HOLDS_THE_FLAGS_AND_PUTS_THEM_BACK_ROWS
-    )
-    def test_built_as_holds_the_flags_and_puts_them_back(
-        self, before: dict[str, str], inside: str
-    ) -> None:
-        """Set inside, restored after: a value kept, an absent one removed."""
-        marked = self.manifest("[package]\nmetadata = { cargo-fuzz = true }\n")
-        with pytest.MonkeyPatch.context() as patched:
-            for name in list(os.environ):
-                patched.delenv(name)
-            for name, value in before.items():
-                patched.setenv(name, value)
-            with rust_workspaces.built_as(marked):
-                assert inside == os.environ["RUSTFLAGS"]
-            assert before.get("RUSTFLAGS") == os.environ.get("RUSTFLAGS")
+@pytest.mark.parametrize(
+    ("text", "want"),
+    [
+        ("[package]\nmetadata = { cargo-fuzz = true }\n", True),
+        ('[package]\nmetadata = { cargo-fuzz = "true" }\n', False),
+        ("[package]\nmetadata = { cargo-fuzz = false }\n", False),
+        ("[package]\nmetadata = { other = true }\n", False),
+        ("[package]\nmetadata = 1\n", False),
+        ('[package]\nname = "fuzz"\n', False),
+        ("package = 1\n", False),
+        ("[workspace]\nmetadata = { cargo-fuzz = true }\n", False),
+    ],
+)
+def test_only_a_true_cargo_fuzz_in_package_metadata_is_the_marker(
+    fuzzing_state: Fuzzing, text: object, want: object
+) -> None:
+    """Every other shape of the manifest is not a cargo-fuzz crate."""
+    assert want == rust_workspaces.fuzzing(fuzzing_state.manifest(text))
 
-    def test_built_as_restores_after_a_raise(self) -> None:
-        """An exception inside still puts the environment back."""
-        marked = self.manifest("[package]\nmetadata = { cargo-fuzz = true }\n")
-        empty: dict[str, str] = {}
-        with pytest.MonkeyPatch.context() as patched:
-            for name in list(os.environ):
-                patched.delenv(name)
-            for name, value in empty.items():
-                patched.setenv(name, value)
-            with pytest.raises(KeyError), rust_workspaces.built_as(marked):
-                _ = os.environ["PLANTED_ABSENT"]
-            assert "RUSTFLAGS" not in os.environ
+
+def test_the_cfg_is_appended_to_the_variable_cargo_reads(
+    fuzzing_state: Fuzzing,
+) -> None:
+    """RUSTFLAGS, or the encoded variable whenever it is set at all."""
+    marked = fuzzing_state.manifest("[package]\nmetadata = { cargo-fuzz = true }\n")
+    encoded = "CARGO_ENCODED_RUSTFLAGS"
+    for environ, want in (
+        ({}, {"RUSTFLAGS": "--cfg fuzzing"}),
+        ({"RUSTFLAGS": ""}, {"RUSTFLAGS": "--cfg fuzzing"}),
+        ({"RUSTFLAGS": "-Dwarnings"}, {"RUSTFLAGS": "-Dwarnings --cfg fuzzing"}),
+        ({encoded: ""}, {encoded: "--cfg\x1ffuzzing"}),
+        (
+            {encoded: "-D\x1fwarnings", "RUSTFLAGS": "-Cx"},
+            {encoded: "-D\x1fwarnings\x1f--cfg\x1ffuzzing"},
+        ),
+    ):
+        assert want == rust_workspaces.rustflags(marked, environ)
+
+
+def test_an_unmarked_root_adds_nothing(fuzzing_state: Fuzzing) -> None:
+    """No marker: no variable is named, whatever is already set."""
+    plain = fuzzing_state.manifest("[workspace]\n")
+    nothing: dict[str, str] = {}
+    added = rust_workspaces.rustflags(plain, {"RUSTFLAGS": "-Cx"})
+    assert nothing == added
+
+
+@pytest.mark.parametrize(
+    ("before", "inside"), BUILT_AS_HOLDS_THE_FLAGS_AND_PUTS_THEM_BACK_ROWS
+)
+def test_built_as_holds_the_flags_and_puts_them_back(
+    fuzzing_state: Fuzzing, before: dict[str, str], inside: str
+) -> None:
+    """Set inside, restored after: a value kept, an absent one removed."""
+    marked = fuzzing_state.manifest("[package]\nmetadata = { cargo-fuzz = true }\n")
+    with pytest.MonkeyPatch.context() as patched:
+        for name in list(os.environ):
+            patched.delenv(name)
+        for name, value in before.items():
+            patched.setenv(name, value)
+        with rust_workspaces.built_as(marked):
+            assert inside == os.environ["RUSTFLAGS"]
+        assert before.get("RUSTFLAGS") == os.environ.get("RUSTFLAGS")
+
+
+def test_built_as_restores_after_a_raise(fuzzing_state: Fuzzing) -> None:
+    """An exception inside still puts the environment back."""
+    marked = fuzzing_state.manifest("[package]\nmetadata = { cargo-fuzz = true }\n")
+    empty: dict[str, str] = {}
+    with pytest.MonkeyPatch.context() as patched:
+        for name in list(os.environ):
+            patched.delenv(name)
+        for name, value in empty.items():
+            patched.setenv(name, value)
+        with pytest.raises(KeyError), rust_workspaces.built_as(marked):
+            _ = os.environ["PLANTED_ABSENT"]
+        assert "RUSTFLAGS" not in os.environ

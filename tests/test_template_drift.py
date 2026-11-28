@@ -104,12 +104,10 @@ def window(pin_tag: str, age_hours: int, since: str) -> list[str]:
     ]
 
 
-@pytest.mark.usefixtures("_set_up_test_planted")
-class TestPlanted:
+class Planted:
     """Planted templates in a tree of dated commits."""
 
-    @fixture
-    def _set_up_test_planted(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Plant a tree whose first commit, day 0, touches mise/."""
         self.tree = tmp_path
         self.env = support.env(
@@ -222,175 +220,193 @@ class TestPlanted:
         return [f"  {line}" for line in out.splitlines()]
 
 
-class TestPins(TestPlanted):
-    """What the templates pin, and the task's own body."""
+@fixture
+def planted(tmp_path: Path) -> Planted:
+    """Give each row its own Planted."""
+    return Planted(tmp_path)
 
-    def test_no_templates_is_skipped_by_name(self) -> None:
-        """No workflow-templates/: the task says it skipped."""
-        shutil.rmtree(self.tree / "workflow-templates")
-        done = self.task()
-        same(done.returncode, 0, done.stderr)
-        skipped = ["audit:template-pins: no workflow-templates/, skipped"]
-        same(done.stdout.splitlines(), skipped)
 
-    def test_clean_pin_through_the_task(self) -> None:
-        """The body hands the helper the canon and the templates; no drift is ok."""
-        self.commit("docs/a.md")
-        self.plant(template(self.pin))
-        done = self.task()
-        same(done.returncode, 0, done.stderr)
-        ok = (
-            f"audit:template-pins: pin {self.pin[:8]} carries all shipped"
-            " workflow and belt changes"
+def test_no_templates_is_skipped_by_name(planted: Planted) -> None:
+    """No workflow-templates/: the task says it skipped."""
+    shutil.rmtree(planted.tree / "workflow-templates")
+    done = planted.task()
+    same(done.returncode, 0, done.stderr)
+    skipped = ["audit:template-pins: no workflow-templates/, skipped"]
+    same(done.stdout.splitlines(), skipped)
+
+
+def test_clean_pin_through_the_task(planted: Planted) -> None:
+    """The body hands the helper the canon and the templates; no drift is ok."""
+    planted.commit("docs/a.md")
+    planted.plant(template(planted.pin))
+    done = planted.task()
+    same(done.returncode, 0, done.stderr)
+    ok = (
+        f"audit:template-pins: pin {planted.pin[:8]} carries all shipped"
+        " workflow and belt changes"
+    )
+    same(done.stdout.splitlines(), [ok])
+
+
+def test_no_org_pin_is_skipped_by_name(
+    planted: Planted, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Templates that pin no canon SHA: skipped, by name."""
+    rel = planted.plant(template())
+    status, out, err = planted.helper(CANON, rel, capfd=capfd)
+    same(status, 0, err)
+    skipped = ["audit:template-pins: no org pins in templates, skipped"]
+    same(out.splitlines(), skipped)
+
+
+def test_a_short_pin_is_no_pin(
+    planted: Planted, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A pin that is not 40 hex is not read as one."""
+    rel = planted.plant(template(planted.pin[:12]))
+    status, out, err = planted.helper(CANON, rel, capfd=capfd)
+    same(status, 0, err)
+    skipped = ["audit:template-pins: no org pins in templates, skipped"]
+    same(out.splitlines(), skipped)
+
+
+def test_two_shas_are_red(planted: Planted, capfd: pytest.CaptureFixture[str]) -> None:
+    """Two distinct pinned SHAs: red, naming the lint that missed it."""
+    other = planted.commit("mise/b.sh")
+    rel = planted.plant(template(planted.pin, other, planted.pin))
+    status, _out, err = planted.helper(CANON, rel, capfd=capfd)
+    same(status, template_drift.EXIT_RED)
+    expected = [
+        (
+            "audit:template-pins: templates pin more than one SHA"
+            " (lint:template-pins should have failed)"
         )
-        same(done.stdout.splitlines(), [ok])
-
-    def test_no_org_pin_is_skipped_by_name(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """Templates that pin no canon SHA: skipped, by name."""
-        rel = self.plant(template())
-        status, out, err = self.helper(CANON, rel, capfd=capfd)
-        same(status, 0, err)
-        skipped = ["audit:template-pins: no org pins in templates, skipped"]
-        same(out.splitlines(), skipped)
-
-    def test_a_short_pin_is_no_pin(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """A pin that is not 40 hex is not read as one."""
-        rel = self.plant(template(self.pin[:12]))
-        status, out, err = self.helper(CANON, rel, capfd=capfd)
-        same(status, 0, err)
-        skipped = ["audit:template-pins: no org pins in templates, skipped"]
-        same(out.splitlines(), skipped)
-
-    def test_two_shas_are_red(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """Two distinct pinned SHAs: red, naming the lint that missed it."""
-        other = self.commit("mise/b.sh")
-        rel = self.plant(template(self.pin, other, self.pin))
-        status, _out, err = self.helper(CANON, rel, capfd=capfd)
-        same(status, template_drift.EXIT_RED)
-        expected = [
-            (
-                "audit:template-pins: templates pin more than one SHA"
-                " (lint:template-pins should have failed)"
-            )
-        ]
-        same(err.splitlines(), expected)
-
-    def test_a_sha_not_in_the_clone_is_red(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A pin the clone lacks: red, naming a shallow clone."""
-        absent = "b" * 40
-        rel = self.plant(template(absent))
-        status, _out, err = self.helper(CANON, rel, capfd=capfd)
-        same(status, template_drift.EXIT_RED)
-        expected = [
-            (
-                "audit:template-pins: pinned SHA bbbbbbbb not in local history"
-                " (shallow clone?)"
-            )
-        ]
-        same(err.splitlines(), expected)
+    ]
+    same(err.splitlines(), expected)
 
 
-class TestDrift(TestPlanted):
-    """Commits since the pin, and the post-release window."""
+def test_a_sha_not_in_the_clone_is_red(
+    planted: Planted, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A pin the clone lacks: red, naming a shallow clone."""
+    absent = "b" * 40
+    rel = planted.plant(template(absent))
+    status, _out, err = planted.helper(CANON, rel, capfd=capfd)
+    same(status, template_drift.EXIT_RED)
+    expected = [
+        (
+            "audit:template-pins: pinned SHA bbbbbbbb not in local history"
+            " (shallow clone?)"
+        )
+    ]
+    same(err.splitlines(), expected)
 
-    def test_drift_with_an_untagged_pin_is_red(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """Commits since an untagged pin touching either path: red, listed."""
-        self.commit("docs/a.md")
-        self.commit(".github/workflows/ci.yml")
-        self.commit("mise/b.sh")
-        rel = self.plant(template(self.pin))
-        status, _out, err = self.helper(CANON, rel, capfd=capfd)
-        same(status, template_drift.EXIT_RED)
-        head = f"audit:template-pins: pin {self.pin[:8]} misses shipped canon changes:"
-        same(err.splitlines(), [head, *self.log(self.pin), *TAIL])
-        same(len(self.log(self.pin)), 2)
 
-    def test_inside_the_window_from_the_next_tag(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """Drift within 24h of the next tag in VERSION order: reported, ok."""
-        self.git("tag", "v1.9.0", self.pin)
-        self.commit("mise/b.sh", tag="v1.10.0")
-        self.commit("mise/c.sh", tag="v1.11.0")
-        rel = self.plant(template(self.pin))
-        now = T0 + DAY + 5 * 3600 + 59
-        status, out, err = self.helper(CANON, rel, now=now, capfd=capfd)
-        same(status, 0, err)
-        same(out.splitlines(), window("v1.9.0", 5, "v1.10.0"))
+def test_drift_with_an_untagged_pin_is_red(
+    planted: Planted, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Commits since an untagged pin touching either path: red, listed."""
+    planted.commit("docs/a.md")
+    planted.commit(".github/workflows/ci.yml")
+    planted.commit("mise/b.sh")
+    rel = planted.plant(template(planted.pin))
+    status, _out, err = planted.helper(CANON, rel, capfd=capfd)
+    same(status, template_drift.EXIT_RED)
+    head = f"audit:template-pins: pin {planted.pin[:8]} misses shipped canon changes:"
+    same(err.splitlines(), [head, *planted.log(planted.pin), *TAIL])
+    same(len(planted.log(planted.pin)), 2)
 
-    def test_past_the_window_is_red(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """Drift a full day after the next tag: red, every commit listed."""
-        self.git("tag", "v1.0.0", self.pin)
-        self.commit("mise/b.sh", tag="v1.1.0")
-        rel = self.plant(template(self.pin))
-        status, _out, err = self.helper(CANON, rel, now=T0 + 2 * DAY, capfd=capfd)
-        same(status, template_drift.EXIT_RED)
-        head = f"audit:template-pins: pin {self.pin[:8]} misses shipped canon changes:"
-        same(err.splitlines(), [head, *self.log(self.pin), *TAIL])
 
-    def test_newest_tag_measures_from_its_own(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A pin on the newest tag, with drift after it: the pin's own tag dates it."""
-        self.git("tag", "v1.0.0", self.pin)
-        self.commit("mise/b.sh")
-        rel = self.plant(template(self.pin))
-        status, out, err = self.helper(CANON, rel, now=T0 + 3 * 3600, capfd=capfd)
-        same(status, 0, err)
-        same(out.splitlines(), window("v1.0.0", 3, "v1.0.0"))
+def test_inside_the_window_from_the_next_tag(
+    planted: Planted, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Drift within 24h of the next tag in VERSION order: reported, ok."""
+    planted.git("tag", "v1.9.0", planted.pin)
+    planted.commit("mise/b.sh", tag="v1.10.0")
+    planted.commit("mise/c.sh", tag="v1.11.0")
+    rel = planted.plant(template(planted.pin))
+    now = T0 + DAY + 5 * 3600 + 59
+    status, out, err = planted.helper(CANON, rel, now=now, capfd=capfd)
+    same(status, 0, err)
+    same(out.splitlines(), window("v1.9.0", 5, "v1.10.0"))
 
-    def test_a_negative_age_truncates_toward_zero(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A tag dated after `now`: its hours truncate as bash's `/` does."""
-        self.git("tag", "v1.0.0", self.pin)
-        self.commit("mise/b.sh", tag="v1.1.0")
-        rel = self.plant(template(self.pin))
-        status, out, err = self.helper(CANON, rel, now=T0 + DAY - 5400, capfd=capfd)
-        same(status, 0, err)
-        same(out.splitlines(), window("v1.0.0", -1, "v1.1.0"))
 
-    def test_a_failed_git_call_is_an_error(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """HEAD unborn: the diff fails, and that is no empty drift."""
-        rel = self.plant(template(self.pin))
-        self.git("checkout", "-q", "--orphan", "unborn")
-        status, _out, err = self.helper(CANON, rel, capfd=capfd)
+def test_past_the_window_is_red(
+    planted: Planted, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Drift a full day after the next tag: red, every commit listed."""
+    planted.git("tag", "v1.0.0", planted.pin)
+    planted.commit("mise/b.sh", tag="v1.1.0")
+    rel = planted.plant(template(planted.pin))
+    status, _out, err = planted.helper(CANON, rel, now=T0 + 2 * DAY, capfd=capfd)
+    same(status, template_drift.EXIT_RED)
+    head = f"audit:template-pins: pin {planted.pin[:8]} misses shipped canon changes:"
+    same(err.splitlines(), [head, *planted.log(planted.pin), *TAIL])
+
+
+def test_newest_tag_measures_from_its_own(
+    planted: Planted, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A pin on the newest tag, with drift after it: the pin's own tag dates it."""
+    planted.git("tag", "v1.0.0", planted.pin)
+    planted.commit("mise/b.sh")
+    rel = planted.plant(template(planted.pin))
+    status, out, err = planted.helper(CANON, rel, now=T0 + 3 * 3600, capfd=capfd)
+    same(status, 0, err)
+    same(out.splitlines(), window("v1.0.0", 3, "v1.0.0"))
+
+
+def test_a_negative_age_truncates_toward_zero(
+    planted: Planted, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A tag dated after `now`: its hours truncate as bash's `/` does."""
+    planted.git("tag", "v1.0.0", planted.pin)
+    planted.commit("mise/b.sh", tag="v1.1.0")
+    rel = planted.plant(template(planted.pin))
+    status, out, err = planted.helper(CANON, rel, now=T0 + DAY - 5400, capfd=capfd)
+    same(status, 0, err)
+    same(out.splitlines(), window("v1.0.0", -1, "v1.1.0"))
+
+
+def test_a_failed_git_call_is_an_error(
+    planted: Planted, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """HEAD unborn: the diff fails, and that is no empty drift."""
+    rel = planted.plant(template(planted.pin))
+    planted.git("checkout", "-q", "--orphan", "unborn")
+    status, _out, err = planted.helper(CANON, rel, capfd=capfd)
+    same(status, template_drift.EXIT_ERROR)
+    assert err.startswith(
+        f"audit:template-pins: git diff --name-only {planted.pin}..HEAD --"
+        " .github/workflows/ mise/ failed (128):"
+    ), err
+
+
+def test_not_utf8_is_an_error(
+    planted: Planted, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A template that is not UTF-8 is refused by name, exit 2."""
+    rel = planted.plant(b"jobs: \xff\n")
+    status, _out, err = planted.helper(CANON, rel, capfd=capfd)
+    same(status, template_drift.EXIT_ERROR)
+    assert err.startswith(f"audit:template-pins: {rel}: cannot be read as UTF-8:"), err
+
+
+def test_a_bad_call_is_a_usage_error(
+    planted: Planted, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """No canon, half a canon, or no template: exit 2 with the usage line."""
+    usage = "audit:template-pins: usage: belt template-drift OWNER/REPO TEMPLATE..."
+    calls: list[list[str]] = [[], [CANON], ["/repo", STUB], ["owner/", STUB]]
+    for argv in calls:
+        status, _out, err = planted.helper(*argv, capfd=capfd)
         same(status, template_drift.EXIT_ERROR)
-        assert err.startswith(
-            f"audit:template-pins: git diff --name-only {self.pin}..HEAD --"
-            " .github/workflows/ mise/ failed (128):"
-        ), err
+        same(err.splitlines(), [usage])
 
-    def test_not_utf8_is_an_error(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """A template that is not UTF-8 is refused by name, exit 2."""
-        rel = self.plant(b"jobs: \xff\n")
-        status, _out, err = self.helper(CANON, rel, capfd=capfd)
-        same(status, template_drift.EXIT_ERROR)
-        assert err.startswith(
-            f"audit:template-pins: {rel}: cannot be read as UTF-8:"
-        ), err
 
-    def test_a_bad_call_is_a_usage_error(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """No canon, half a canon, or no template: exit 2 with the usage line."""
-        usage = "audit:template-pins: usage: belt template-drift OWNER/REPO TEMPLATE..."
-        calls: list[list[str]] = [[], [CANON], ["/repo", STUB], ["owner/", STUB]]
-        for argv in calls:
-            status, _out, err = self.helper(*argv, capfd=capfd)
-            same(status, template_drift.EXIT_ERROR)
-            same(err.splitlines(), [usage])
-
-    def test_version_order(self) -> None:
-        """Digit runs order as numbers: v1.10.0 after v1.9.0."""
-        tags = ["v1.10.0", "v1.9.0", "v2.0.0", "v1.9.1"]
-        ordered = sorted(tags, key=template_drift.version_key)
-        same(ordered, ["v1.9.0", "v1.9.1", "v1.10.0", "v2.0.0"])
+@pytest.mark.usefixtures("planted")
+def test_version_order() -> None:
+    """Digit runs order as numbers: v1.10.0 after v1.9.0."""
+    tags = ["v1.10.0", "v1.9.0", "v2.0.0", "v1.9.1"]
+    ordered = sorted(tags, key=template_drift.version_key)
+    same(ordered, ["v1.9.0", "v1.9.1", "v1.10.0", "v2.0.0"])

@@ -78,24 +78,24 @@ def check(source: str) -> subprocess.CompletedProcess[str]:
         )
 
 
-class TestSubprocessRules:
-    """The rules code can pass stay on; the two it cannot are off."""
+# The rules code can pass stay on; the two it cannot are off.
+def test_shell_true_is_red_by_name() -> None:
+    """S602: a command line through a shell is a finding."""
+    done = check(SHELL)
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert "subprocess-popen-with-shell-equals-true" in done.stdout
 
-    def test_shell_true_is_red_by_name(self) -> None:
-        """S602: a command line through a shell is a finding."""
-        done = check(SHELL)
-        assert done.returncode == 1, done.stdout + done.stderr
-        assert "subprocess-popen-with-shell-equals-true" in done.stdout
 
-    def test_a_partial_path_is_red_by_name(self) -> None:
-        """S607: an executable found by name on PATH is a finding."""
-        done = check(PARTIAL)
-        assert done.returncode == 1, done.stdout + done.stderr
-        assert "start-process-with-partial-path" in done.stdout
+def test_a_partial_path_is_red_by_name() -> None:
+    """S607: an executable found by name on PATH is a finding."""
+    done = check(PARTIAL)
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert "start-process-with-partial-path" in done.stdout
 
-    def test_a_given_argument_needs_no_comment(self) -> None:
-        """S404 and S603 are off: the import and the call are clean."""
-        done = check(CLEAN)
-        assert done.returncode == 0, done.stdout + done.stderr
-        assert "suspicious-subprocess-import" not in done.stdout
-        assert "subprocess-without-shell-equals-true" not in done.stdout
+
+def test_a_given_argument_needs_no_comment() -> None:
+    """S404 and S603 are off: the import and the call are clean."""
+    done = check(CLEAN)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "suspicious-subprocess-import" not in done.stdout
+    assert "subprocess-without-shell-equals-true" not in done.stdout

@@ -143,159 +143,158 @@ def run_step(classes: str, *, dry_run: bool = False, **outputs: str) -> Run:
         )
 
 
-class TestTheCall:
-    """The pre-release form, the release's identity, the policy."""
-
-    def test_the_call_is_the_pre_release_form(self) -> None:
-        """--classes is the guard's list; repo, tag and policy are named."""
-        run = run_step("rust-crate", FIRST_rust_crate=CRATES, REBUILD_rust_crate=CRATES)
-        assert run.returncode == 0, run.stderr
-        want: list[str] = [
-            "verify",
-            "repro",
-            "--repo",
-            "monumental-archive/edtf",
-            "--tag",
-            "v1.3.5",
-            "--classes",
-            "rust-crate",
-            "--assert-policy",
-            ".org-canon/slsa/assert-policy.json",
-            "--rehearsal=false",
-            "--first",
-            "rust-crate=first-rust-crate",
-            "--rebuild",
-            "rust-crate=rebuild-rust-crate",
-        ]
-        assert want == run.argv
-
-    def test_a_failing_verdict_fails_the_step(self) -> None:
-        """Stele's status is the step's."""
-        run = run_step(
-            "rust-crate",
-            FIRST_rust_crate=CRATES,
-            REBUILD_rust_crate=CRATES,
-            STUB_EXIT="1",
-        )
-        assert run.returncode == 1
+# The pre-release form, the release's identity, the policy.
+def test_the_call_is_the_pre_release_form() -> None:
+    """--classes is the guard's list; repo, tag and policy are named."""
+    run = run_step("rust-crate", FIRST_rust_crate=CRATES, REBUILD_rust_crate=CRATES)
+    assert run.returncode == 0, run.stderr
+    want: list[str] = [
+        "verify",
+        "repro",
+        "--repo",
+        "monumental-archive/edtf",
+        "--tag",
+        "v1.3.5",
+        "--classes",
+        "rust-crate",
+        "--assert-policy",
+        ".org-canon/slsa/assert-policy.json",
+        "--rehearsal=false",
+        "--first",
+        "rust-crate=first-rust-crate",
+        "--rebuild",
+        "rust-crate=rebuild-rust-crate",
+    ]
+    assert want == run.argv
 
 
-class TestInputs:
-    """Each declared class's outputs, in the shape stele reads."""
-
-    def test_a_manifest_is_written_to_a_file_whole(self) -> None:
-        """Every line of a file class's manifest reaches stele."""
-        run = run_step("rust-crate", FIRST_rust_crate=CRATES, REBUILD_rust_crate=CRATES)
-        assert (
-            f"== rust-crate=first-rust-crate\n{CRATES}\n"
-            f"== rust-crate=rebuild-rust-crate\n{CRATES}\n"
-        ) == run.files
-
-    def test_a_digest_directory_is_passed_as_it_is(self) -> None:
-        """A registry class's downloads are named, never rewritten."""
-        run = run_step(
-            "oci-image-crate",
-            FIRST_oci_image_crate="oci-a",
-            REBUILD_oci_image_crate="oci-b",
-        )
-        want: list[str] = [
-            "--first oci-image-crate=oci-a",
-            "--rebuild oci-image-crate=oci-b",
-        ]
-        assert want == run.inputs()
-        assert run.files == ""
-
-    def test_only_the_declared_classes_reach_the_call(self) -> None:
-        """A job's output for a class the evidence did not declare stays out."""
-        run = run_step(
-            "wasm-npm",
-            FIRST_wasm_npm=WASM,
-            REBUILD_wasm_npm=WASM,
-            FIRST_rust_crate=CRATES,
-            REBUILD_rust_crate=CRATES,
-        )
-        want: list[str] = [
-            "--first wasm-npm=first-wasm-npm",
-            "--rebuild wasm-npm=rebuild-wasm-npm",
-        ]
-        assert want == run.inputs()
-
-    def test_an_empty_side_is_not_named(self) -> None:
-        """Stele refuses the class by name; no empty file stands in."""
-        run = run_step("rust-crate", FIRST_rust_crate=CRATES, REBUILD_rust_crate="")
-        want: list[str] = ["--first rust-crate=first-rust-crate"]
-        assert want == run.inputs()
-
-    def test_every_class_in_the_expanded_list_is_wired(self) -> None:
-        """The lab's real expansion: five classes, ten inputs, in order."""
-        classes = (
-            "rust-binary,oci-image-crate,wasm-npm,pgrx-extension,pgrx-extension-image"
-        )
-        outputs = {
-            "FIRST_rust_binary": "dd  a.tar.gz",
-            "REBUILD_rust_binary": "dd  a.tar.gz",
-            "FIRST_oci_image_crate": "oci-a",
-            "REBUILD_oci_image_crate": "oci-b",
-            "FIRST_wasm_npm": WASM,
-            "REBUILD_wasm_npm": WASM,
-            "FIRST_pgrx_extension": "ee  b.tar.gz",
-            "REBUILD_pgrx_extension": "ee  b.tar.gz",
-            "FIRST_pgrx_extension_image": "pgrx-a",
-            "REBUILD_pgrx_extension_image": "pgrx-b",
-        }
-        run = run_step(classes, dry_run=False, **outputs)
-        want: list[str] = [
-            "--first rust-binary=first-rust-binary",
-            "--rebuild rust-binary=rebuild-rust-binary",
-            "--first oci-image-crate=oci-a",
-            "--rebuild oci-image-crate=oci-b",
-            "--first wasm-npm=first-wasm-npm",
-            "--rebuild wasm-npm=rebuild-wasm-npm",
-            "--first pgrx-extension=first-pgrx-extension",
-            "--rebuild pgrx-extension=rebuild-pgrx-extension",
-            "--first pgrx-extension-image=pgrx-a",
-            "--rebuild pgrx-extension-image=pgrx-b",
-        ]
-        assert want == run.inputs()
+def test_a_failing_verdict_fails_the_step() -> None:
+    """Stele's status is the step's."""
+    run = run_step(
+        "rust-crate",
+        FIRST_rust_crate=CRATES,
+        REBUILD_rust_crate=CRATES,
+        STUB_EXIT="1",
+    )
+    assert run.returncode == 1
 
 
-class TestRehearsal:
-    """A dry run pushed no image."""
+# Each declared class's outputs, in the shape stele reads.
+def test_a_manifest_is_written_to_a_file_whole() -> None:
+    """Every line of a file class's manifest reaches stele."""
+    run = run_step("rust-crate", FIRST_rust_crate=CRATES, REBUILD_rust_crate=CRATES)
+    assert (
+        f"== rust-crate=first-rust-crate\n{CRATES}\n"
+        f"== rust-crate=rebuild-rust-crate\n{CRATES}\n"
+    ) == run.files
 
-    def test_a_rehearsal_names_no_digest_directory(self) -> None:
-        """The workflow leaves the registry values empty; stele says so."""
-        run = run_step(
-            "rust-crate,oci-image",
-            dry_run=True,
-            FIRST_rust_crate=CRATES,
-            REBUILD_rust_crate=CRATES,
-            FIRST_oci_image="",
-            REBUILD_oci_image="",
-        )
-        assert "--rehearsal=true" in run.argv
-        want: list[str] = [
-            "--first rust-crate=first-rust-crate",
-            "--rebuild rust-crate=rebuild-rust-crate",
-        ]
-        assert want == run.inputs()
 
-    def test_a_rehearsal_of_images_alone_still_calls_stele(self) -> None:
-        """No inputs at all: the call is made, and stele refuses it."""
-        run = run_step("oci-image", dry_run=True)
-        assert run.returncode == 0, run.stderr
-        assert list[str]() == run.inputs()
-        assert "--rehearsal=true" in run.argv
+def test_a_digest_directory_is_passed_as_it_is() -> None:
+    """A registry class's downloads are named, never rewritten."""
+    run = run_step(
+        "oci-image-crate",
+        FIRST_oci_image_crate="oci-a",
+        REBUILD_oci_image_crate="oci-b",
+    )
+    want: list[str] = [
+        "--first oci-image-crate=oci-a",
+        "--rebuild oci-image-crate=oci-b",
+    ]
+    assert want == run.inputs()
+    assert run.files == ""
 
-    def test_the_workflow_empties_the_registry_values_on_a_dry_run(self) -> None:
-        """Every digest directory is named only when the run pushed."""
-        env = decoded.as_object(step()["env"], "env")
-        for var, path in (
-            ("oci_image", "oci"),
-            ("oci_image_crate", "oci"),
-            ("pgrx_extension_image", "pgrx"),
-        ):
-            for side, suffix in (("FIRST", "a"), ("REBUILD", "b")):
-                assert (
-                    f"${{{{ !inputs.dry-run && '{path}-{suffix}' || '' }}}}"
-                    == env[f"{side}_{var}"]
-                )
+
+def test_only_the_declared_classes_reach_the_call() -> None:
+    """A job's output for a class the evidence did not declare stays out."""
+    run = run_step(
+        "wasm-npm",
+        FIRST_wasm_npm=WASM,
+        REBUILD_wasm_npm=WASM,
+        FIRST_rust_crate=CRATES,
+        REBUILD_rust_crate=CRATES,
+    )
+    want: list[str] = [
+        "--first wasm-npm=first-wasm-npm",
+        "--rebuild wasm-npm=rebuild-wasm-npm",
+    ]
+    assert want == run.inputs()
+
+
+def test_an_empty_side_is_not_named() -> None:
+    """Stele refuses the class by name; no empty file stands in."""
+    run = run_step("rust-crate", FIRST_rust_crate=CRATES, REBUILD_rust_crate="")
+    want: list[str] = ["--first rust-crate=first-rust-crate"]
+    assert want == run.inputs()
+
+
+def test_every_class_in_the_expanded_list_is_wired() -> None:
+    """The lab's real expansion: five classes, ten inputs, in order."""
+    classes = "rust-binary,oci-image-crate,wasm-npm,pgrx-extension,pgrx-extension-image"
+    outputs = {
+        "FIRST_rust_binary": "dd  a.tar.gz",
+        "REBUILD_rust_binary": "dd  a.tar.gz",
+        "FIRST_oci_image_crate": "oci-a",
+        "REBUILD_oci_image_crate": "oci-b",
+        "FIRST_wasm_npm": WASM,
+        "REBUILD_wasm_npm": WASM,
+        "FIRST_pgrx_extension": "ee  b.tar.gz",
+        "REBUILD_pgrx_extension": "ee  b.tar.gz",
+        "FIRST_pgrx_extension_image": "pgrx-a",
+        "REBUILD_pgrx_extension_image": "pgrx-b",
+    }
+    run = run_step(classes, dry_run=False, **outputs)
+    want: list[str] = [
+        "--first rust-binary=first-rust-binary",
+        "--rebuild rust-binary=rebuild-rust-binary",
+        "--first oci-image-crate=oci-a",
+        "--rebuild oci-image-crate=oci-b",
+        "--first wasm-npm=first-wasm-npm",
+        "--rebuild wasm-npm=rebuild-wasm-npm",
+        "--first pgrx-extension=first-pgrx-extension",
+        "--rebuild pgrx-extension=rebuild-pgrx-extension",
+        "--first pgrx-extension-image=pgrx-a",
+        "--rebuild pgrx-extension-image=pgrx-b",
+    ]
+    assert want == run.inputs()
+
+
+# A dry run pushed no image.
+def test_a_rehearsal_names_no_digest_directory() -> None:
+    """The workflow leaves the registry values empty; stele says so."""
+    run = run_step(
+        "rust-crate,oci-image",
+        dry_run=True,
+        FIRST_rust_crate=CRATES,
+        REBUILD_rust_crate=CRATES,
+        FIRST_oci_image="",
+        REBUILD_oci_image="",
+    )
+    assert "--rehearsal=true" in run.argv
+    want: list[str] = [
+        "--first rust-crate=first-rust-crate",
+        "--rebuild rust-crate=rebuild-rust-crate",
+    ]
+    assert want == run.inputs()
+
+
+def test_a_rehearsal_of_images_alone_still_calls_stele() -> None:
+    """No inputs at all: the call is made, and stele refuses it."""
+    run = run_step("oci-image", dry_run=True)
+    assert run.returncode == 0, run.stderr
+    assert list[str]() == run.inputs()
+    assert "--rehearsal=true" in run.argv
+
+
+def test_the_workflow_empties_the_registry_values_on_a_dry_run() -> None:
+    """Every digest directory is named only when the run pushed."""
+    env = decoded.as_object(step()["env"], "env")
+    for var, path in (
+        ("oci_image", "oci"),
+        ("oci_image_crate", "oci"),
+        ("pgrx_extension_image", "pgrx"),
+    ):
+        for side, suffix in (("FIRST", "a"), ("REBUILD", "b")):
+            assert (
+                f"${{{{ !inputs.dry-run && '{path}-{suffix}' || '' }}}}"
+                == env[f"{side}_{var}"]
+            )

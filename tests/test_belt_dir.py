@@ -26,8 +26,6 @@ import re
 import subprocess
 from typing import TYPE_CHECKING
 
-import pytest
-
 from belt import decoded
 from belt.typed_pytest import fixture
 from tests import support
@@ -92,12 +90,10 @@ def plant_belt(tree: Path) -> Path:
     return belt
 
 
-@pytest.mark.usefixtures("_set_up_test_planted")
-class TestPlanted:
+class Planted:
     """A repository and one tree for each carrier; the rows are below."""
 
-    @fixture
-    def _set_up_test_planted(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Plant a repository and one tree for each carrier."""
         self.tmp = tmp_path
         self.home = self.tmp / "home"
@@ -176,76 +172,87 @@ class TestPlanted:
         assert done.stdout == (f"{belt}\n" if belt else "")
 
 
-class TestWhereTheBeltIs(TestPlanted):
-    """Each row: the carriers planted, and which one answers."""
+@fixture
+def planted(tmp_path: Path) -> Planted:
+    """Give each row its own Planted."""
+    return Planted(tmp_path)
 
-    def test_ci_carrier_wins_over_all_three(self) -> None:
-        """1. MISE_GLOBAL_CONFIG_FILE, with every other belt present."""
-        self.own_tree()
-        self.link(str(self.cache / "config.toml"))
-        self.machine_link()
-        self.global_file = str(self.ci / "config.toml")
-        self.assert_answers(self.ci, self.link_dir())
 
-    def test_the_tree_itself_wins_over_link_and_machine(self) -> None:
-        """2. The canon's own tree, with a link and a machine belt present."""
-        own = self.own_tree()
-        self.link(str(self.cache / "config.toml"))
-        self.machine_link()
-        self.assert_answers(own, own)
+def test_ci_carrier_wins_over_all_three(planted: Planted) -> None:
+    """1. MISE_GLOBAL_CONFIG_FILE, with every other belt present."""
+    planted.own_tree()
+    planted.link(str(planted.cache / "config.toml"))
+    planted.machine_link()
+    planted.global_file = str(planted.ci / "config.toml")
+    planted.assert_answers(planted.ci, planted.link_dir())
 
-    def test_the_link_answers_with_a_machine_belt_present(self) -> None:
-        """3. A consumer's link to its pin's cache tree, machine belt present."""
-        self.link(str(self.cache / "config.toml"))
-        self.machine_link()
-        self.assert_answers(self.cache, self.link_dir())
 
-    def test_a_machine_belt_is_not_followed(self) -> None:
-        """No fourth source: an unlinked clone has no belt (#1739)."""
-        self.machine_link()
-        self.assert_answers(None, self.repo)
+def test_the_tree_itself_wins_over_link_and_machine(planted: Planted) -> None:
+    """2. The canon's own tree, with a link and a machine belt present."""
+    own = planted.own_tree()
+    planted.link(str(planted.cache / "config.toml"))
+    planted.machine_link()
+    planted.assert_answers(own, own)
 
-    def test_a_machine_belt_is_not_followed_from_its_own_conf_d(self) -> None:
-        """Run where mise runs a machine conf.d exec: still nothing."""
-        self.machine_link()
-        self.assert_answers(None, self.xdg / "mise" / "conf.d")
 
-    def test_a_relative_link_is_read_from_its_own_directory(self) -> None:
-        """A link written relative resolves against conf.d, not the cwd."""
-        self.link(
-            os.path.relpath(
-                self.cache / "config.toml", self.repo / ".config/mise/conf.d"
-            )
+def test_the_link_answers_with_a_machine_belt_present(planted: Planted) -> None:
+    """3. A consumer's link to its pin's cache tree, machine belt present."""
+    planted.link(str(planted.cache / "config.toml"))
+    planted.machine_link()
+    planted.assert_answers(planted.cache, planted.link_dir())
+
+
+def test_a_machine_belt_is_not_followed(planted: Planted) -> None:
+    """No fourth source: an unlinked clone has no belt (#1739)."""
+    planted.machine_link()
+    planted.assert_answers(None, planted.repo)
+
+
+def test_a_machine_belt_is_not_followed_from_its_own_conf_d(planted: Planted) -> None:
+    """Run where mise runs a machine conf.d exec: still nothing."""
+    planted.machine_link()
+    planted.assert_answers(None, planted.xdg / "mise" / "conf.d")
+
+
+def test_a_relative_link_is_read_from_its_own_directory(planted: Planted) -> None:
+    """A link written relative resolves against conf.d, not the cwd."""
+    planted.link(
+        os.path.relpath(
+            planted.cache / "config.toml", planted.repo / ".config/mise/conf.d"
         )
-        self.assert_answers(self.cache, self.link_dir())
-
-    def test_a_link_to_a_tree_that_is_no_belt_answers_nothing(self) -> None:
-        """No clippy.toml beside the link's target: no belt, machine unread."""
-        (self.cache / "clippy.toml").unlink()
-        self.link(str(self.cache / "config.toml"))
-        self.machine_link()
-        self.assert_answers(None, self.link_dir())
-
-    def test_no_carrier_is_empty_and_exit_zero(self) -> None:
-        """Nothing anywhere: no output, exit 0 (#569)."""
-        self.assert_answers(None, self.repo)
-
-    def test_no_git_is_still_total(self) -> None:
-        """Without git (Renovate's container): no belt, exit 0."""
-        self.link(str(self.cache / "config.toml"))
-        self.machine_link()
-        bare = self.tmp / "bin"
-        bare.mkdir()
-        for name in ("dirname", "readlink", "cat"):
-            found = support.optional_tool(name)
-            if found is not None:
-                (bare / name).symlink_to(found)
-        done = self.resolve(self.link_dir(), path=str(bare))
-        assert done.returncode == 0, done.stderr
-        assert done.stdout == ""
+    )
+    planted.assert_answers(planted.cache, planted.link_dir())
 
 
-class TestUnderAHook(TestPlanted):
+def test_a_link_to_a_tree_that_is_no_belt_answers_nothing(planted: Planted) -> None:
+    """No clippy.toml beside the link's target: no belt, machine unread."""
+    (planted.cache / "clippy.toml").unlink()
+    planted.link(str(planted.cache / "config.toml"))
+    planted.machine_link()
+    planted.assert_answers(None, planted.link_dir())
+
+
+def test_no_carrier_is_empty_and_exit_zero(planted: Planted) -> None:
+    """Nothing anywhere: no output, exit 0 (#569)."""
+    planted.assert_answers(None, planted.repo)
+
+
+def test_no_git_is_still_total(planted: Planted) -> None:
+    """Without git (Renovate's container): no belt, exit 0."""
+    planted.link(str(planted.cache / "config.toml"))
+    planted.machine_link()
+    bare = planted.tmp / "bin"
+    bare.mkdir()
+    for name in ("dirname", "readlink", "cat"):
+        found = support.optional_tool(name)
+        if found is not None:
+            (bare / name).symlink_to(found)
+    done = planted.resolve(planted.link_dir(), path=str(bare))
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == ""
+
+
+class UnderAHook(Planted):
     """The same question with git's own variables exported (#1744).
 
     git hands a hook GIT_DIR, and in a linked worktree no GIT_WORK_TREE
@@ -289,34 +296,48 @@ class TestUnderAHook(TestPlanted):
         )
         return done.stdout.strip()
 
-    def test_a_hook_in_a_linked_worktree_reads_its_link(self) -> None:
-        """GIT_DIR with no work tree, as git hands a hook there (#1744)."""
-        conf = self.worktree()
-        self.machine_link()
-        self.git_vars = {"GIT_DIR": self.hook_git_dir(conf)}
-        self.assert_answers(self.cache, conf)
 
-    def test_a_hook_that_names_its_work_tree_reads_its_link(self) -> None:
-        """GIT_DIR and GIT_WORK_TREE both exported: the same answer."""
-        conf = self.worktree()
-        self.machine_link()
-        self.git_vars = {
-            "GIT_DIR": self.hook_git_dir(conf),
-            "GIT_WORK_TREE": str(conf.parents[2]),
-        }
-        self.assert_answers(self.cache, conf)
+@fixture
+def under_a_hook(tmp_path: Path) -> UnderAHook:
+    """Give each row its own UnderAHook."""
+    return UnderAHook(tmp_path)
 
-    def test_a_hook_with_its_own_index_reads_its_link(self) -> None:
-        """GIT_INDEX_FILE beside GIT_DIR, as a commit hook is handed."""
-        conf = self.worktree()
-        self.machine_link()
-        git_dir = self.hook_git_dir(conf)
-        self.git_vars = {"GIT_DIR": git_dir, "GIT_INDEX_FILE": f"{git_dir}/index"}
-        self.assert_answers(self.cache, conf)
 
-    def test_a_foreign_git_dir_does_not_move_the_canon_tree(self) -> None:
-        """2 under a hook: the canon's own tree still answers from mise/."""
-        own = self.own_tree()
-        self.machine_link()
-        self.git_vars = {"GIT_DIR": str(self.repo / ".git")}
-        self.assert_answers(own, own)
+def test_a_hook_in_a_linked_worktree_reads_its_link(under_a_hook: UnderAHook) -> None:
+    """GIT_DIR with no work tree, as git hands a hook there (#1744)."""
+    conf = under_a_hook.worktree()
+    under_a_hook.machine_link()
+    under_a_hook.git_vars = {"GIT_DIR": under_a_hook.hook_git_dir(conf)}
+    under_a_hook.assert_answers(under_a_hook.cache, conf)
+
+
+def test_a_hook_that_names_its_work_tree_reads_its_link(
+    under_a_hook: UnderAHook,
+) -> None:
+    """GIT_DIR and GIT_WORK_TREE both exported: the same answer."""
+    conf = under_a_hook.worktree()
+    under_a_hook.machine_link()
+    under_a_hook.git_vars = {
+        "GIT_DIR": under_a_hook.hook_git_dir(conf),
+        "GIT_WORK_TREE": str(conf.parents[2]),
+    }
+    under_a_hook.assert_answers(under_a_hook.cache, conf)
+
+
+def test_a_hook_with_its_own_index_reads_its_link(under_a_hook: UnderAHook) -> None:
+    """GIT_INDEX_FILE beside GIT_DIR, as a commit hook is handed."""
+    conf = under_a_hook.worktree()
+    under_a_hook.machine_link()
+    git_dir = under_a_hook.hook_git_dir(conf)
+    under_a_hook.git_vars = {"GIT_DIR": git_dir, "GIT_INDEX_FILE": f"{git_dir}/index"}
+    under_a_hook.assert_answers(under_a_hook.cache, conf)
+
+
+def test_a_foreign_git_dir_does_not_move_the_canon_tree(
+    under_a_hook: UnderAHook,
+) -> None:
+    """2 under a hook: the canon's own tree still answers from mise/."""
+    own = under_a_hook.own_tree()
+    under_a_hook.machine_link()
+    under_a_hook.git_vars = {"GIT_DIR": str(under_a_hook.repo / ".git")}
+    under_a_hook.assert_answers(own, own)

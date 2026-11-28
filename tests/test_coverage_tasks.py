@@ -486,124 +486,114 @@ class Plant(TypedDict, total=False):
     run_test: bool
 
 
-@pytest.mark.usefixtures("_tmp")
-class TestCoverageTaskCase:
-    """Runs a task and removes the planted tree afterwards."""
+def run_in_tree(
+    task: str, **plant: Unpack[Plant]
+) -> tuple[subprocess.CompletedProcess[str], Path]:
+    """Run a task in a planted tree.
 
-    @fixture
-    def _tmp(self, tmp_path: Path) -> None:
-        """Give the row's scratch directories one home, removed after it."""
-        self.tmp = tmp_path
+    Returns:
+        The finished process and the planted tree.
 
-    def run_task(
-        self, task: str, **plant: Unpack[Plant]
-    ) -> tuple[subprocess.CompletedProcess[str], Path]:
-        """Run a task and schedule its tree for removal.
-
-        Returns:
-            The finished process and the planted tree.
-
-        """
-        done, tmp = run_task(task, **plant)
-        return done, tmp / "tree"
+    """
+    done, tmp = run_task(task, **plant)
+    return done, tmp / "tree"
 
 
-class TestCheckRows(TestCoverageTaskCase):
-    """`coverage:check` over the Python leg, alone and beside Go."""
+def test_python_only_tree_measures_and_holds() -> None:
+    """Both Python legs print, and each holds its floor by name."""
+    done, tree = run_in_tree("coverage:check")
+    assert done.returncode == 0, done.stderr
+    assert (
+        "coverage:check: python leg holds its floor 80.0 (90.0%)\n"
+        "coverage:check: python-branches leg holds its floor 80.0 (85.0%)\n"
+        + upload_line(tree, "coverage.xml")
+    ) == done.stdout
+    # The check reads the run `measured` left and runs no suite (#1667).
+    assert "suite ran" not in done.stderr
 
-    def test_python_only_tree_measures_and_holds(self) -> None:
-        """Both Python legs print, and each holds its floor by name."""
-        done, tree = self.run_task("coverage:check")
-        assert done.returncode == 0, done.stderr
-        assert (
-            "coverage:check: python leg holds its floor 80.0 (90.0%)\n"
-            "coverage:check: python-branches leg holds its floor 80.0 (85.0%)\n"
-            + upload_line(tree, "coverage.xml")
-        ) == done.stdout
-        # The check reads the run `measured` left and runs no suite (#1667).
-        assert "suite ran" not in done.stderr
 
-    def test_python_run_outside_measured_reports_no_figure(self) -> None:
-        """A suite that ran outside `measured`: no python figure, by name."""
-        done, _ = self.run_task(
-            "coverage:check", go="91.0", python_measured=False, legs="go"
-        )
-        assert done.returncode == 0, done.stderr
-        assert (
-            "coverage:check: python: the test run measured no Python — its test"
-            ' command runs\n  pytest through "${ORG_BELT_DIR}/measured" (#1667,'
-            " #2177): `measured pytest …` or\n  `measured python3 -m pytest …`;"
-            " any other Python command is not measured,\n  or no suite ran under"
-            " mise\n"
-        ) in done.stderr
-        assert "python" not in done.stdout
+def test_python_run_outside_measured_reports_no_figure() -> None:
+    """A suite that ran outside `measured`: no python figure, by name."""
+    done, _ = run_in_tree("coverage:check", go="91.0", python_measured=False, legs="go")
+    assert done.returncode == 0, done.stderr
+    assert (
+        "coverage:check: python: the test run measured no Python — its test"
+        ' command runs\n  pytest through "${ORG_BELT_DIR}/measured" (#1667,'
+        " #2177): `measured pytest …` or\n  `measured python3 -m pytest …`;"
+        " any other Python command is not measured,\n  or no suite ran under"
+        " mise\n"
+    ) in done.stderr
+    assert "python" not in done.stdout
 
-    def test_branches_below_the_floor_red_by_name(self) -> None:
-        """Statements holding does not carry the branch leg."""
-        done, _ = self.run_task("coverage:check", branches="79.9")
-        assert done.returncode == 1
-        assert (
-            "coverage:check: python-branches: 79.9% is below its derived floor 80.0%\n"
-            in done.stderr
-        )
 
-    def test_statements_below_the_floor_red_by_name(self) -> None:
-        """The line leg reds before the branch leg is read."""
-        done, _ = self.run_task("coverage:check", py="70.0")
-        assert done.returncode == 1
-        assert (
-            "coverage:check: python: 70.0% is below its derived floor 80.0%\n"
-            in done.stderr
-        )
+def test_branches_below_the_floor_red_by_name() -> None:
+    """Statements holding does not carry the branch leg."""
+    done, _ = run_in_tree("coverage:check", branches="79.9")
+    assert done.returncode == 1
+    assert (
+        "coverage:check: python-branches: 79.9% is below its derived floor 80.0%\n"
+        in done.stderr
+    )
 
-    def test_no_floor_skips_clean(self) -> None:
-        """A repository that tracks Python but adopted no floor owes nothing."""
-        done, _ = self.run_task("coverage:check", floor=False)
-        assert done.returncode == 0, done.stderr
-        assert done.stdout == "coverage:check: no .coverage-floor, skipped\n"
-        assert "suite ran" not in done.stderr
 
-    def test_python_without_a_test_task_is_red_by_name(self) -> None:
-        """A floor recording the Python legs and no suite: each leg named.
+def test_statements_below_the_floor_red_by_name() -> None:
+    """The line leg reds before the branch leg is read."""
+    done, _ = run_in_tree("coverage:check", py="70.0")
+    assert done.returncode == 1
+    assert (
+        "coverage:check: python: 70.0% is below its derived floor 80.0%\n"
+        in done.stderr
+    )
 
-        Every floor records its legs (#2143), so a tracked *.py with no
-        suite is a recorded leg that measured nothing, never a skip.
-        """
-        done, _ = self.run_task("coverage:check", test_task=False)
-        needs = (
-            "  the python leg needs tracked *.py and a `test` task whose test"
-            ' command runs through "${ORG_BELT_DIR}/measured"; or record the'
-            " leg's removal on purpose: `# dropped: LEG <reason>` in"
-            " .coverage-floor\n"
-        )
-        assert (
-            1,
-            "".join(
-                f"coverage:check: the floor was derived with {leg} and this"
-                " run measured none\n" + needs.replace("LEG", leg)
-                for leg in ("python", "python-branches")
-            ),
-        ) == (done.returncode, done.stderr)
 
-    def test_mixed_go_and_python_prints_every_leg(self) -> None:
-        """A mixed tree measures each language it tracks."""
-        done, tree = self.run_task("coverage:check", go="93.0")
-        assert done.returncode == 0, done.stderr
-        assert (
-            "coverage:check: go leg holds its floor 80.0 (93.0%)\n"
-            "coverage:check: python leg holds its floor 80.0 (90.0%)\n"
-            "coverage:check: python-branches leg holds its floor 80.0 (85.0%)\n"
-            + upload_line(tree, "coverage.txt", "coverage.xml")
-        ) == done.stdout
+def test_no_floor_skips_clean() -> None:
+    """A repository that tracks Python but adopted no floor owes nothing."""
+    done, _ = run_in_tree("coverage:check", floor=False)
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == "coverage:check: no .coverage-floor, skipped\n"
+    assert "suite ran" not in done.stderr
 
-    def test_mixed_tree_every_leg_must_hold(self) -> None:
-        """Python holding does not carry a Go leg below the floor."""
-        done, _ = self.run_task("coverage:check", go="75.0")
-        assert done.returncode == 1
-        assert (
-            "coverage:check: go: 75.0% is below its derived floor 80.0%\n"
-            in done.stderr
-        )
+
+def test_python_without_a_test_task_is_red_by_name() -> None:
+    """A floor recording the Python legs and no suite: each leg named.
+
+    Every floor records its legs (#2143), so a tracked *.py with no
+    suite is a recorded leg that measured nothing, never a skip.
+    """
+    done, _ = run_in_tree("coverage:check", test_task=False)
+    needs = (
+        "  the python leg needs tracked *.py and a `test` task whose test"
+        ' command runs through "${ORG_BELT_DIR}/measured"; or record the'
+        " leg's removal on purpose: `# dropped: LEG <reason>` in"
+        " .coverage-floor\n"
+    )
+    assert (
+        1,
+        "".join(
+            f"coverage:check: the floor was derived with {leg} and this"
+            " run measured none\n" + needs.replace("LEG", leg)
+            for leg in ("python", "python-branches")
+        ),
+    ) == (done.returncode, done.stderr)
+
+
+def test_mixed_go_and_python_prints_every_leg() -> None:
+    """A mixed tree measures each language it tracks."""
+    done, tree = run_in_tree("coverage:check", go="93.0")
+    assert done.returncode == 0, done.stderr
+    assert (
+        "coverage:check: go leg holds its floor 80.0 (93.0%)\n"
+        "coverage:check: python leg holds its floor 80.0 (90.0%)\n"
+        "coverage:check: python-branches leg holds its floor 80.0 (85.0%)\n"
+        + upload_line(tree, "coverage.txt", "coverage.xml")
+    ) == done.stdout
+
+
+def test_mixed_tree_every_leg_must_hold() -> None:
+    """Python holding does not carry a Go leg below the floor."""
+    done, _ = run_in_tree("coverage:check", go="75.0")
+    assert done.returncode == 1
+    assert "coverage:check: go: 75.0% is below its derived floor 80.0%\n" in done.stderr
 
 
 def upload_step() -> str:
@@ -652,256 +642,236 @@ def run_upload_step(
         return done
 
 
-class TestUploadStep:
-    """ci.yml's upload job hands Codecov what the gate's artifact holds.
+# ci.yml's upload job hands Codecov what the gate's artifact holds.
+#
+# The job measures nothing (#1528): it downloads the reports the gate's
+# coverage:check wrote and lists them, in coverage:check's order. These
+# rows run the lifted step in a directory holding the planted reports.
+def test_every_report_the_gate_wrote_is_named_and_uploaded() -> None:
+    """A mixed tree uploads each report, in coverage:check's order."""
+    done = run_upload_step(["coverage.xml", "lcov.info", "coverage.txt"])
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == (
+        "upload lcov.info\\,coverage.txt\\,coverage.xml\n"
+        "files=lcov.info,coverage.txt,coverage.xml\n"
+    )
 
-    The job measures nothing (#1528): it downloads the reports the gate's
-    coverage:check wrote and lists them, in coverage:check's order. These
-    rows run the lifted step in a directory holding the planted reports.
+
+def test_a_python_only_tree_uploads() -> None:
+    """The step once skipped any tree without Cargo.toml or go.mod."""
+    done = run_upload_step(["coverage.xml"])
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == "upload coverage.xml\nfiles=coverage.xml\n"
+
+
+def test_no_token_skips_and_says_why() -> None:
+    """No token: nothing is uploaded, and the step says why."""
+    done = run_upload_step(["coverage.xml"], has_token=False)
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == "::notice::no token; badge upload skipped\nfiles=\n"
+
+
+def test_no_report_skips_by_name() -> None:
+    """Nothing came down: skipped by name, never an upload of nothing.
+
+    The job reads no gate output (#1740), so a tree without a floor,
+    whose gate wrote no report, reaches this step with none.
     """
-
-    def test_every_report_the_gate_wrote_is_named_and_uploaded(self) -> None:
-        """A mixed tree uploads each report, in coverage:check's order."""
-        done = run_upload_step(["coverage.xml", "lcov.info", "coverage.txt"])
-        assert done.returncode == 0, done.stderr
-        assert done.stdout == (
-            "upload lcov.info\\,coverage.txt\\,coverage.xml\n"
-            "files=lcov.info,coverage.txt,coverage.xml\n"
-        )
-
-    def test_a_python_only_tree_uploads(self) -> None:
-        """The step once skipped any tree without Cargo.toml or go.mod."""
-        done = run_upload_step(["coverage.xml"])
-        assert done.returncode == 0, done.stderr
-        assert done.stdout == "upload coverage.xml\nfiles=coverage.xml\n"
-
-    def test_no_token_skips_and_says_why(self) -> None:
-        """No token: nothing is uploaded, and the step says why."""
-        done = run_upload_step(["coverage.xml"], has_token=False)
-        assert done.returncode == 0, done.stderr
-        assert done.stdout == "::notice::no token; badge upload skipped\nfiles=\n"
-
-    def test_no_report_skips_by_name(self) -> None:
-        """Nothing came down: skipped by name, never an upload of nothing.
-
-        The job reads no gate output (#1740), so a tree without a floor,
-        whose gate wrote no report, reaches this step with none.
-        """
-        done = run_upload_step(["unrelated.txt"])
-        assert done.returncode == 0, done.stderr
-        assert done.stdout == (
-            "::notice::no coverage report came down from the gate;"
-            " badge upload skipped\nfiles=\n"
-        )
+    done = run_upload_step(["unrelated.txt"])
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == (
+        "::notice::no coverage report came down from the gate;"
+        " badge upload skipped\nfiles=\n"
+    )
 
 
-class TestAdoptRows(TestCoverageTaskCase):
-    """The write-mode half reads the same measurement."""
-
-    def test_adopt_derives_each_python_leg_from_its_own_figure(self) -> None:
-        """Branches below statements set the branch floor alone (#2143)."""
-        done, tree = self.run_task("coverage:adopt", floor=False, branches="83.47")
-        assert done.returncode == 0, done.stderr
-        assert done.stdout == (
-            "coverage-floor: adopted .coverage-floor: python 88.0 (measured"
-            " 90.0), python-branches 81.4 (measured 83.4)\n"
-        )
-        assert (tree / ".coverage-floor").is_file()
-
-    def test_adopt_without_a_measurable_language_measures_nothing(self) -> None:
-        """No suite, nothing to adopt."""
-        done, _ = self.run_task("coverage:adopt", floor=False, test_task=False)
-        assert done.returncode == 0, done.stderr
-        assert done.stdout == (
-            "coverage:adopt: no measurable language (go.mod, Cargo.toml,"
-            " tracked *.py with a test task, package.json with vitest, or"
-            " a floor recording its legs),"
-            " nothing to measure\n"
-        )
+def test_adopt_derives_each_python_leg_from_its_own_figure() -> None:
+    """Branches below statements set the branch floor alone (#2143)."""
+    done, tree = run_in_tree("coverage:adopt", floor=False, branches="83.47")
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == (
+        "coverage-floor: adopted .coverage-floor: python 88.0 (measured"
+        " 90.0), python-branches 81.4 (measured 83.4)\n"
+    )
+    assert (tree / ".coverage-floor").is_file()
 
 
-class TestCheckUploadLine(TestCoverageTaskCase):
-    """coverage:check names the reports this run wrote (#1528).
+def test_adopt_without_a_measurable_language_measures_nothing() -> None:
+    """No suite, nothing to adopt."""
+    done, _ = run_in_tree("coverage:adopt", floor=False, test_task=False)
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == (
+        "coverage:adopt: no measurable language (go.mod, Cargo.toml,"
+        " tracked *.py with a test task, package.json with vitest, or"
+        " a floor recording its legs),"
+        " nothing to measure\n"
+    )
 
-    The badge job uploads what the gate measured instead of measuring
-    again, so the gate's run must write each leg's report and say which.
+
+def test_the_line_lists_the_report_the_run_wrote() -> None:
+    """The Cobertura report is rendered from the leg's own run."""
+    done, tree = run_in_tree("coverage:check")
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.endswith(upload_line(tree, "coverage.xml")), done.stdout
+    assert (tree.parent / "reports" / "coverage.xml").read_text(
+        "utf-8"
+    ) == "<coverage/>\n"
+
+
+def status(tree: Path) -> str:
+    """Read the planted tree's `git status --porcelain`.
+
+    Returns:
+        The status, empty for a tree as it was planted.
+
     """
+    return subprocess.run(
+        [GIT, "status", "--porcelain"],
+        cwd=tree,
+        env=support.env(),
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
 
-    def test_the_line_lists_the_report_the_run_wrote(self) -> None:
-        """The Cobertura report is rendered from the leg's own run."""
-        done, tree = self.run_task("coverage:check")
-        assert done.returncode == 0, done.stderr
-        assert done.stdout.endswith(upload_line(tree, "coverage.xml")), done.stdout
-        assert (tree.parent / "reports" / "coverage.xml").read_text(
-            "utf-8"
-        ) == "<coverage/>\n"
 
+def named(stdout: str) -> list[Path]:
+    """Read the paths the upload line names.
 
-class TestCheckLeavesTheTree(TestCoverageTaskCase):
-    """A coverage run leaves the working tree as it found it (#1628).
+    Returns:
+        Each path, in the line's order.
 
-    The reports were written into the tree, where nothing ignores them,
-    and a local run followed by `git add -A` committed them.
     """
-
-    @staticmethod
-    def status(tree: Path) -> str:
-        """Read the planted tree's `git status --porcelain`.
-
-        Returns:
-            The status, empty for a tree as it was planted.
-
-        """
-        return subprocess.run(
-            [GIT, "status", "--porcelain"],
-            cwd=tree,
-            env=support.env(),
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout
-
-    def named(self, stdout: str) -> list[Path]:
-        """Read the paths the upload line names.
-
-        Returns:
-            Each path, in the line's order.
-
-        """
-        line = stdout.splitlines()[-1]
-        assert line.startswith("coverage:check: upload "), stdout
-        return [Path(p) for p in line.split(" upload ", 1)[1].split(",")]
-
-    def test_a_named_directory_holds_every_report_and_the_tree_is_clean(
-        self,
-    ) -> None:
-        """The gate's shape: the files the line names exist, outside it."""
-        done, tree = self.run_task("coverage:check", go="93.0", commit=True)
-        assert done.returncode == 0, done.stderr
-        assert self.status(tree) == ""
-        named = self.named(done.stdout)
-        reports = [
-            tree.parent / "reports" / n for n in ("coverage.txt", "coverage.xml")
-        ]
-        assert reports == named
-        for path in named:
-            assert path.is_file(), path
-
-    def test_the_figures_the_check_judged_are_kept_beside_the_reports(
-        self,
-    ) -> None:
-        """coverage-figures.txt: the leg lines, for the release job (#1622)."""
-        done, tree = self.run_task("coverage:check", go="93.0", commit=True)
-        assert done.returncode == 0, done.stderr
-        assert (tree.parent / "reports" / "coverage-figures.txt").read_text(
-            encoding="utf-8"
-        ) == "go 93.0\npython 90.0\npython-branches 85.0\n"
-        assert "coverage-figures.txt" not in done.stdout
-
-    def test_unset_writes_a_scratch_directory_and_removes_it(self) -> None:
-        """A developer's run: the tree is clean and the scratch is gone."""
-        done, tree = self.run_task(
-            "coverage:check", go="93.0", reports_dir=False, commit=True
-        )
-        assert done.returncode == 0, done.stderr
-        assert self.status(tree) == ""
-        named = self.named(done.stdout)
-        files: list[str] = ["coverage.txt", "coverage.xml"]
-        names = [p.name for p in named]
-        assert files == names
-        scratch = named[0].parent
-        assert tree != scratch
-        assert tree not in scratch.parents
-        assert not scratch.exists(), scratch
-
-    def test_a_run_that_wrote_no_report_is_refused(self) -> None:
-        """A leg that ran and left no report is refused by the task."""
-        # The Go stub measures but writes no profile, so the Go leg ran
-        # and nothing exists to upload.
-        done, _ = self.run_task(
-            "coverage:check", go="90.0", python=False, go_profile=False
-        )
-        assert done.returncode == 1, done.stdout
-        assert (
-            "coverage:check: the legs measured wrote no report — nothing for"
-            " the badge to upload"
-        ) in done.stderr
-        assert "upload " not in done.stdout
-
-    def test_no_floor_lists_nothing(self) -> None:
-        """No floor: skipped, and no upload line for the badge to read."""
-        done, _ = self.run_task("coverage:check", floor=False)
-        assert done.returncode == 0, done.stderr
-        assert "upload" not in done.stdout
-
-    def test_report_task_is_gone(self) -> None:
-        """The badge's second measurement no longer exists to drift."""
-        assert "coverage:report" not in decoded.as_object(
-            CONFIG["tasks"], "the belt's [tasks]"
-        )
+    line = stdout.splitlines()[-1]
+    assert line.startswith("coverage:check: upload "), stdout
+    return [Path(p) for p in line.split(" upload ", 1)[1].split(",")]
 
 
-class TestReportsSelector(TestCoverageTaskCase):
-    """`reports` names what a run wrote, and refuses a run of nothing (#1528)."""
+def test_a_named_directory_holds_every_report_and_the_tree_is_clean() -> None:
+    """The gate's shape: the files the line names exist, outside it."""
+    done, tree = run_in_tree("coverage:check", go="93.0", commit=True)
+    assert done.returncode == 0, done.stderr
+    assert status(tree) == ""
+    listed = named(done.stdout)
+    reports = [tree.parent / "reports" / n for n in ("coverage.txt", "coverage.xml")]
+    assert reports == listed
+    for path in listed:
+        assert path.is_file(), path
 
-    @staticmethod
-    def reports(tree: Path) -> subprocess.CompletedProcess[str]:
-        """Run the `reports` selector in a planted tree.
 
-        Returns:
-            The finished process.
+def test_the_figures_the_check_judged_are_kept_beside_the_reports() -> None:
+    """coverage-figures.txt: the leg lines, for the release job (#1622)."""
+    done, tree = run_in_tree("coverage:check", go="93.0", commit=True)
+    assert done.returncode == 0, done.stderr
+    assert (tree.parent / "reports" / "coverage-figures.txt").read_text(
+        encoding="utf-8"
+    ) == "go 93.0\npython 90.0\npython-branches 85.0\n"
+    assert "coverage-figures.txt" not in done.stdout
 
-        """
-        env = support.env()
-        env |= {
-            "ORG_BELT_DIR": str(BELT),
-            "ORG_COVERAGE_REPORTS": str(tree.parent / "reports"),
-        }
-        return subprocess.run(
-            [BASH, str(BELT / "coverage-measure.sh"), "coverage:test", "reports"],
-            cwd=tree,
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
 
-    def test_the_legs_print_then_the_line_names_each_report(self) -> None:
-        """The legs' lines, then the reports in the badge job's order."""
-        done, tree = self.run_task("coverage:check", go="93.0")
+def test_unset_writes_a_scratch_directory_and_removes_it() -> None:
+    """A developer's run: the tree is clean and the scratch is gone."""
+    done, tree = run_in_tree(
+        "coverage:check", go="93.0", reports_dir=False, commit=True
+    )
+    assert done.returncode == 0, done.stderr
+    assert status(tree) == ""
+    listed = named(done.stdout)
+    files: list[str] = ["coverage.txt", "coverage.xml"]
+    names = [p.name for p in listed]
+    assert files == names
+    scratch = listed[0].parent
+    assert tree != scratch
+    assert tree not in scratch.parents
+    assert not scratch.exists(), scratch
+
+
+def test_a_run_that_wrote_no_report_is_refused() -> None:
+    """A leg that ran and left no report is refused by the task."""
+    # The Go stub measures but writes no profile, so the Go leg ran
+    # and nothing exists to upload.
+    done, _ = run_in_tree("coverage:check", go="90.0", python=False, go_profile=False)
+    assert done.returncode == 1, done.stdout
+    assert (
+        "coverage:check: the legs measured wrote no report — nothing for"
+        " the badge to upload"
+    ) in done.stderr
+    assert "upload " not in done.stdout
+
+
+def test_no_floor_lists_nothing() -> None:
+    """No floor: skipped, and no upload line for the badge to read."""
+    done, _ = run_in_tree("coverage:check", floor=False)
+    assert done.returncode == 0, done.stderr
+    assert "upload" not in done.stdout
+
+
+def test_report_task_is_gone() -> None:
+    """The badge's second measurement no longer exists to drift."""
+    assert "coverage:report" not in decoded.as_object(
+        CONFIG["tasks"], "the belt's [tasks]"
+    )
+
+
+def reports(tree: Path) -> subprocess.CompletedProcess[str]:
+    """Run the `reports` selector in a planted tree.
+
+    Returns:
+        The finished process.
+
+    """
+    env = support.env()
+    env |= {
+        "ORG_BELT_DIR": str(BELT),
+        "ORG_COVERAGE_REPORTS": str(tree.parent / "reports"),
+    }
+    return subprocess.run(
+        [BASH, str(BELT / "coverage-measure.sh"), "coverage:test", "reports"],
+        cwd=tree,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_the_legs_print_then_the_line_names_each_report() -> None:
+    """The legs' lines, then the reports in the badge job's order."""
+    done, tree = run_in_tree("coverage:check", go="93.0")
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.endswith(
+        "python-branches leg holds its floor 80.0 (85.0%)\n"
+        + upload_line(tree, "coverage.txt", "coverage.xml")
+    ), done.stdout
+
+
+def test_a_stale_report_in_a_named_directory_is_not_listed() -> None:
+    """An earlier run's report is cleared: the list is this run's."""
+    with tempfile.TemporaryDirectory() as tmp:
+        stale = Path(tmp) / "lcov.info"
+        stale.write_text("stale\n", encoding="utf-8")
+        done, _ = run_in_tree("coverage:check", reports_dir=tmp)
         assert done.returncode == 0, done.stderr
         assert done.stdout.endswith(
-            "python-branches leg holds its floor 80.0 (85.0%)\n"
-            + upload_line(tree, "coverage.txt", "coverage.xml")
+            f"coverage:check: upload {Path(tmp) / 'coverage.xml'}\n"
         ), done.stdout
+        assert not stale.exists()
 
-    def test_a_stale_report_in_a_named_directory_is_not_listed(self) -> None:
-        """An earlier run's report is cleared: the list is this run's."""
-        with tempfile.TemporaryDirectory() as tmp:
-            stale = Path(tmp) / "lcov.info"
-            stale.write_text("stale\n", encoding="utf-8")
-            done, _ = self.run_task("coverage:check", reports_dir=tmp)
-            assert done.returncode == 0, done.stderr
-            assert done.stdout.endswith(
-                f"coverage:check: upload {Path(tmp) / 'coverage.xml'}\n"
-            ), done.stdout
-            assert not stale.exists()
 
-    def test_a_run_that_measured_nothing_is_refused(self) -> None:
-        """No leg lines: refused before any report is read."""
-        with tempfile.TemporaryDirectory() as tmp:
-            tree = Path(tmp) / "tree"
-            tree.mkdir()
-            (Path(tmp) / "reports").mkdir()
-            (Path(tmp) / "reports" / "coverage.xml").write_text("x\n", "utf-8")
-            subprocess.run([GIT, "init", "-q"], cwd=tree, env=support.env(), check=True)
-            done = self.reports(tree)
-        assert done.returncode == 1
-        assert done.stdout == ""
-        assert (
-            "coverage:test: no leg was measured — a check that reads nothing"
-            " must not pass"
-        ) in done.stderr
+def test_a_run_that_measured_nothing_is_refused() -> None:
+    """No leg lines: refused before any report is read."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = Path(tmp) / "tree"
+        tree.mkdir()
+        (Path(tmp) / "reports").mkdir()
+        (Path(tmp) / "reports" / "coverage.xml").write_text("x\n", "utf-8")
+        subprocess.run([GIT, "init", "-q"], cwd=tree, env=support.env(), check=True)
+        done = reports(tree)
+    assert done.returncode == 1
+    assert done.stdout == ""
+    assert (
+        "coverage:test: no leg was measured — a check that reads nothing must not pass"
+    ) in done.stderr
 
 
 # The refusal the python leg prints when coverage recorded a file that
@@ -987,67 +957,60 @@ def run_python_leg(cwd: str) -> tuple[subprocess.CompletedProcess[str], bool]:
         return done, (Path(tmp) / "reports" / "coverage.xml").is_file()
 
 
-@pytest.mark.usefixtures("_pytest_tool")
-class TestChildFromAnotherDirectory:
-    """A child measured from a subdirectory is refused by name (#1528).
+# A child measured from a subdirectory is refused by name (#1528).
+#
+# Under `relative_files` a child records its files relative to its own
+# directory, so a child started in `sub/` records `helper.py`, and the
+# report cannot find it. The gate renders coverage.xml on every run
+# since #1528, where it rendered only the JSON before.
 
-    Under `relative_files` a child records its files relative to its own
-    directory, so a child started in `sub/` records `helper.py`, and the
-    report cannot find it. The gate renders coverage.xml on every run
-    since #1528, where it rendered only the JSON before.
+
+@fixture
+def _pytest_tool() -> None:
+    """Assert the tool first, as the belt's tasks assert theirs.
+
+    The rows run the python leg with the real coverage.py the belt
+    pins, from the pytest tool venv, not a stub: what they hold is
+    coverage's own reading of a child started from another
+    directory (#1528).
     """
-
-    @fixture(scope="class")
-    @classmethod
-    def _pytest_tool(cls) -> None:
-        """Assert the tool first, as the belt's tasks assert theirs.
-
-        The rows run the python leg with the real coverage.py the belt
-        pins, from the pytest tool venv, not a stub: what they hold is
-        coverage's own reading of a child started from another
-        directory (#1528).
-        """
-        support.tool("pytest")
-
-    def test_a_child_run_from_a_subdirectory_is_red_by_name(self) -> None:
-        """The belt's words, the recorded file, and the remedy."""
-        done, wrote = run_python_leg("sub")
-        assert done.returncode == 1, done.stderr
-        assert NO_SOURCE_MSG in done.stderr
-        assert done.stdout == ""
-        assert not wrote
-
-    def test_the_same_child_from_the_root_renders_the_report(self) -> None:
-        """Control: started from the root, it measures and renders."""
-        done, wrote = run_python_leg(".")
-        assert done.returncode == 0, done.stderr
-        assert done.stdout == "python 100.0\npython-branches 100.0\n"
-        assert wrote
+    support.tool("pytest")
 
 
-class TestGoLegRows(TestCoverageTaskCase):
-    """The go leg reads the test task's own run, or says it measures itself."""
+@pytest.mark.usefixtures("_pytest_tool")
+def test_a_child_run_from_a_subdirectory_is_red_by_name() -> None:
+    """The belt's words, the recorded file, and the remedy."""
+    done, wrote = run_python_leg("sub")
+    assert done.returncode == 1, done.stderr
+    assert NO_SOURCE_MSG in done.stderr
+    assert done.stdout == ""
+    assert not wrote
 
-    def test_no_test_task_measures_go_test_itself_by_name(self) -> None:
-        """go.mod and no test task: today's command, named."""
-        done, _ = self.run_task(
-            "coverage:check", go="93.0", python=False, test_task=False
-        )
-        assert done.returncode == 0, done.stderr
-        assert (
-            "coverage:check: go: no test task: measuring `go test ./...`" in done.stderr
-        )
-        assert "coverage:check: go leg holds its floor 80.0 (93.0%)" in done.stdout
 
-    def test_a_run_with_no_counters_is_refused_by_name(self) -> None:
-        """A test task whose run measured no Go: refused, no figure."""
-        done, _ = self.run_task(
-            "coverage:check", go="93.0", python=False, measured=False
-        )
-        assert done.returncode == 1
-        assert (
-            "coverage:check: the test task ran no measured Go — its test command"
-            ' runs\n  through "${ORG_BELT_DIR}/measured" (#1651), or no suite ran'
-            " under mise\n"
-        ) in done.stderr
-        assert "go leg holds" not in done.stdout
+@pytest.mark.usefixtures("_pytest_tool")
+def test_the_same_child_from_the_root_renders_the_report() -> None:
+    """Control: started from the root, it measures and renders."""
+    done, wrote = run_python_leg(".")
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == "python 100.0\npython-branches 100.0\n"
+    assert wrote
+
+
+def test_no_test_task_measures_go_test_itself_by_name() -> None:
+    """go.mod and no test task: today's command, named."""
+    done, _ = run_in_tree("coverage:check", go="93.0", python=False, test_task=False)
+    assert done.returncode == 0, done.stderr
+    assert "coverage:check: go: no test task: measuring `go test ./...`" in done.stderr
+    assert "coverage:check: go leg holds its floor 80.0 (93.0%)" in done.stdout
+
+
+def test_a_run_with_no_counters_is_refused_by_name() -> None:
+    """A test task whose run measured no Go: refused, no figure."""
+    done, _ = run_in_tree("coverage:check", go="93.0", python=False, measured=False)
+    assert done.returncode == 1
+    assert (
+        "coverage:check: the test task ran no measured Go — its test command"
+        ' runs\n  through "${ORG_BELT_DIR}/measured" (#1651), or no suite ran'
+        " under mise\n"
+    ) in done.stderr
+    assert "go leg holds" not in done.stdout

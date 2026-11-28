@@ -172,197 +172,205 @@ def run(live: Live, recs: sc.Records) -> tuple[int, str, str]:
     return rc, out.getvalue(), err.getvalue()
 
 
-class TestSecurityConfigTest:
-    """Agreement passes; each single disagreement reds by name."""
-
-    def test_agreement_passes_with_a_line_per_repository(self) -> None:
-        """The live answers against the tree's records agree."""
-        rc, out, err = run(Live(), records())
-        assert rc == 0, err
-        assert err == ""
+# Agreement passes; each single disagreement reds by name.
+def test_agreement_passes_with_a_line_per_repository() -> None:
+    """The live answers against the tree's records agree."""
+    rc, out, err = run(Live(), records())
+    assert rc == 0, err
+    assert err == ""
+    assert (
+        "org-default.json: 22 fields equal configuration 265775 "
+        "(the default for new public repositories), nothing unstated"
+    ) in out
+    for repo in (
+        "edtf",
+        "iiif-server",
+        "monumental-archive-db",
+        "monumental-archive-ledger",
+        "release-lab",
+        "signer",
+        ".github",
+        "stele",
+    ):
         assert (
-            "org-default.json: 22 fields equal configuration 265775 "
-            "(the default for new public repositories), nothing unstated"
+            f"audit:security-config: {repo}: public, attached to "
+            "configuration 265775, enforced\n"
         ) in out
-        for repo in (
-            "edtf",
-            "iiif-server",
-            "monumental-archive-db",
-            "monumental-archive-ledger",
-            "release-lab",
-            "signer",
-            ".github",
-            "stele",
-        ):
-            assert (
-                f"audit:security-config: {repo}: public, attached to "
-                "configuration 265775, enforced\n"
-            ) in out
-        assert (
-            "audit:security-config: monumental-archive: private, 7 fields "
-            "equal org-private.json, not attached to configuration 265775 "
-            "(12 fields have no repository-level reading)\n"
-        ) in out
+    assert (
+        "audit:security-config: monumental-archive: private, 7 fields "
+        "equal org-private.json, not attached to configuration 265775 "
+        "(12 fields have no repository-level reading)\n"
+    ) in out
 
-    def test_changed_record_field_reds(self) -> None:
-        """A record value that differs from live names both values."""
-        recs = records()
-        recs.public["secret_scanning_validity_checks"] = OFF
-        rc, _, err = run(Live(), recs)
-        assert rc == 1
-        assert (
-            'org-default.json states secret_scanning_validity_checks="disabled"; '
-            'configuration 265775 has "enabled"'
-        ) in err
 
-    def test_unstated_live_field_reds(self) -> None:
-        """A live field the record does not state is red."""
-        recs = records()
-        del recs.public["secret_scanning_generic_secrets_push_protection"]
-        rc, _, err = run(Live(), recs)
-        assert rc == 1
-        assert (
-            "configuration 265775 sets "
-            'secret_scanning_generic_secrets_push_protection="disabled", '
-            "which org-default.json does not state"
-        ) in err
+def test_changed_record_field_reds() -> None:
+    """A record value that differs from live names both values."""
+    recs = records()
+    recs.public["secret_scanning_validity_checks"] = OFF
+    rc, _, err = run(Live(), recs)
+    assert rc == 1
+    assert (
+        'org-default.json states secret_scanning_validity_checks="disabled"; '
+        'configuration 265775 has "enabled"'
+    ) in err
 
-    def test_server_and_own_fields_are_not_findings(self) -> None:
-        """id, url, timestamps, target_type, name and description are excepted."""
-        _, _, err = run(Live(), records())
-        for key in sorted(sc.SERVER_FIELDS | sc.OWN_FIELDS):
-            assert f"sets {key}=" not in err
 
-    def test_unattached_public_repository_reds(self) -> None:
-        """A public roster member missing from the attachment list is named."""
-        live = Live()
-        ep = ATTACHED
-        rows = rows_of(live, ep)
-        live.answers[ep] = (
-            200,
-            [r for r in rows if field(r, "repository", "name") != "stele"],
-        )
-        rc, _, err = run(live, records())
-        assert rc == 1
-        assert (
-            "audit:security-config: stele: public and not attached to "
-            "configuration 265775\n"
-        ) in err
+def test_unstated_live_field_reds() -> None:
+    """A live field the record does not state is red."""
+    recs = records()
+    del recs.public["secret_scanning_generic_secrets_push_protection"]
+    rc, _, err = run(Live(), recs)
+    assert rc == 1
+    assert (
+        "configuration 265775 sets "
+        'secret_scanning_generic_secrets_push_protection="disabled", '
+        "which org-default.json does not state"
+    ) in err
 
-    def test_unenforced_public_repository_reds(self) -> None:
-        """Attached but not enforced is red with its status."""
-        live = Live()
-        ep = ATTACHED
-        rows = rows_of(live, ep)
-        for r in rows:
-            if field(r, "repository", "name") == "edtf":
-                decoded.as_object(r, "a row")["status"] = "failed"
-        live.answers[ep] = (200, rows)
-        rc, _, err = run(live, records())
-        assert rc == 1
-        assert (
-            "edtf: public and attached to configuration 265775 "
-            "with status failed, not enforced"
-        ) in err
 
-    def test_private_repository_with_secret_scanning_on_reds(self) -> None:
-        """The metered product switched on by one click is named."""
-        live = Live()
-        ep = PRIVATE
-        body = body_of(live, ep)
-        scanning = field(body, "security_and_analysis", "secret_scanning")
-        decoded.as_object(scanning, "secret_scanning")["status"] = "enabled"
-        live.answers[ep] = (200, body)
-        rc, _, err = run(live, records())
-        assert rc == 1
-        assert (
-            "monumental-archive: secret_scanning: org-private.json states "
-            "disabled; secret_scanning is enabled"
-        ) in err
+def test_server_and_own_fields_are_not_findings() -> None:
+    """id, url, timestamps, target_type, name and description are excepted."""
+    _, _, err = run(Live(), records())
+    for key in sorted(sc.SERVER_FIELDS | sc.OWN_FIELDS):
+        assert f"sets {key}=" not in err
 
-    def test_live_private_security_updates_disagree_with_the_record(self) -> None:
-        """The tree's record against the live answer as fetched."""
-        rc, _, err = run(Live(), records(agreeing_private=False))
-        assert rc == 1
-        assert (
-            "monumental-archive: dependabot_security_updates: org-private.json "
-            "states disabled; dependabot_security_updates is enabled"
-        ) in err
 
-    def test_private_repository_attached_to_public_shape_reds(self) -> None:
-        """A private member on the public configuration bills, and is named."""
-        live = Live()
-        ep = ATTACHED
-        rows = rows_of(live, ep)
-        rows.append({
-            "status": "enforced",
-            "repository": {"name": "monumental-archive", "private": True},
-        })
-        live.answers[ep] = (200, rows)
-        rc, _, err = run(live, records())
-        assert rc == 1
-        assert (
-            "monumental-archive: private and attached to the public "
-            "configuration 265775"
-        ) in err
+def test_unattached_public_repository_reds() -> None:
+    """A public roster member missing from the attachment list is named."""
+    live = Live()
+    ep = ATTACHED
+    rows = rows_of(live, ep)
+    live.answers[ep] = (
+        200,
+        [r for r in rows if field(r, "repository", "name") != "stele"],
+    )
+    rc, _, err = run(live, records())
+    assert rc == 1
+    assert (
+        "audit:security-config: stele: public and not attached to "
+        "configuration 265775\n"
+    ) in err
 
-    def test_private_alerts_off_reds(self) -> None:
-        """A 404 from vulnerability-alerts reads as disabled."""
-        live = Live()
-        live.answers[ALERTS] = (404, None)
-        rc, _, err = run(live, records())
-        assert rc == 1
-        assert "dependabot_alerts: org-private.json states enabled;" in err
 
-    def test_org_403_is_cannot_judge_naming_the_grant(self) -> None:
-        """A refused org read is never a pass, and names the grant."""
-        live = Live()
-        live.answers[DEFAULTS] = (403, None)
-        rc, out, err = run(live, records())
-        assert rc == 1
-        assert "public, attached" not in out
-        assert (
-            f"CANNOT_JUDGE {DEFAULTS} "
-            "(HTTP 403) — needs organisation permission Administration: read"
-        ) in err
+def test_unenforced_public_repository_reds() -> None:
+    """Attached but not enforced is red with its status."""
+    live = Live()
+    ep = ATTACHED
+    rows = rows_of(live, ep)
+    for r in rows:
+        if field(r, "repository", "name") == "edtf":
+            decoded.as_object(r, "a row")["status"] = "failed"
+    live.answers[ep] = (200, rows)
+    rc, _, err = run(live, records())
+    assert rc == 1
+    assert (
+        "edtf: public and attached to configuration 265775 "
+        "with status failed, not enforced"
+    ) in err
 
-    def test_hidden_security_and_analysis_is_cannot_judge(self) -> None:
-        """Without admin GitHub omits the block; that is blind, not clean."""
-        live = Live()
-        ep = PRIVATE
-        body = body_of(live, ep)
-        del body["security_and_analysis"]
-        live.answers[ep] = (200, body)
-        rc, out, err = run(live, records())
-        assert rc == 1
-        assert "monumental-archive: private" not in out
-        assert (
-            f"CANNOT_JUDGE {PRIVATE} security_and_analysis "
-            "(no HTTP status) — needs repository permission Administration: read"
-        ) in err
 
-    def test_no_public_default_reds(self) -> None:
-        """With no default for new public repositories there is nothing to describe."""
-        live = Live()
-        ep = DEFAULTS
-        rows = rows_of(live, ep)
-        decoded.as_object(rows[0], "[0]")["default_for_new_repos"] = (
-            "private_and_internal"
-        )
-        live.answers[ep] = (200, rows)
-        rc, _, err = run(live, records())
-        assert rc == 1
-        assert "0 configurations are the default for new public repositories" in err
+def test_private_repository_with_secret_scanning_on_reds() -> None:
+    """The metered product switched on by one click is named."""
+    live = Live()
+    ep = PRIVATE
+    body = body_of(live, ep)
+    scanning = field(body, "security_and_analysis", "secret_scanning")
+    decoded.as_object(scanning, "secret_scanning")["status"] = "enabled"
+    live.answers[ep] = (200, body)
+    rc, _, err = run(live, records())
+    assert rc == 1
+    assert (
+        "monumental-archive: secret_scanning: org-private.json states "
+        "disabled; secret_scanning is enabled"
+    ) in err
 
-    def test_roster_member_missing_from_listing_reds(self) -> None:
-        """A roster repository the listing lacks is named."""
-        live = Live()
-        ep = LISTING
-        rows = rows_of(live, ep)
-        live.answers[ep] = (200, [r for r in rows if field(r, "name") != "signer"])
-        rc, _, err = run(live, records())
-        assert rc == 1
-        assert "signer: in the roster and not in the org listing" in err
+
+def test_live_private_security_updates_disagree_with_the_record() -> None:
+    """The tree's record against the live answer as fetched."""
+    rc, _, err = run(Live(), records(agreeing_private=False))
+    assert rc == 1
+    assert (
+        "monumental-archive: dependabot_security_updates: org-private.json "
+        "states disabled; dependabot_security_updates is enabled"
+    ) in err
+
+
+def test_private_repository_attached_to_public_shape_reds() -> None:
+    """A private member on the public configuration bills, and is named."""
+    live = Live()
+    ep = ATTACHED
+    rows = rows_of(live, ep)
+    rows.append({
+        "status": "enforced",
+        "repository": {"name": "monumental-archive", "private": True},
+    })
+    live.answers[ep] = (200, rows)
+    rc, _, err = run(live, records())
+    assert rc == 1
+    assert (
+        "monumental-archive: private and attached to the public configuration 265775"
+    ) in err
+
+
+def test_private_alerts_off_reds() -> None:
+    """A 404 from vulnerability-alerts reads as disabled."""
+    live = Live()
+    live.answers[ALERTS] = (404, None)
+    rc, _, err = run(live, records())
+    assert rc == 1
+    assert "dependabot_alerts: org-private.json states enabled;" in err
+
+
+def test_org_403_is_cannot_judge_naming_the_grant() -> None:
+    """A refused org read is never a pass, and names the grant."""
+    live = Live()
+    live.answers[DEFAULTS] = (403, None)
+    rc, out, err = run(live, records())
+    assert rc == 1
+    assert "public, attached" not in out
+    assert (
+        f"CANNOT_JUDGE {DEFAULTS} "
+        "(HTTP 403) — needs organisation permission Administration: read"
+    ) in err
+
+
+def test_hidden_security_and_analysis_is_cannot_judge() -> None:
+    """Without admin GitHub omits the block; that is blind, not clean."""
+    live = Live()
+    ep = PRIVATE
+    body = body_of(live, ep)
+    del body["security_and_analysis"]
+    live.answers[ep] = (200, body)
+    rc, out, err = run(live, records())
+    assert rc == 1
+    assert "monumental-archive: private" not in out
+    assert (
+        f"CANNOT_JUDGE {PRIVATE} security_and_analysis "
+        "(no HTTP status) — needs repository permission Administration: read"
+    ) in err
+
+
+def test_no_public_default_reds() -> None:
+    """With no default for new public repositories there is nothing to describe."""
+    live = Live()
+    ep = DEFAULTS
+    rows = rows_of(live, ep)
+    decoded.as_object(rows[0], "[0]")["default_for_new_repos"] = "private_and_internal"
+    live.answers[ep] = (200, rows)
+    rc, _, err = run(live, records())
+    assert rc == 1
+    assert "0 configurations are the default for new public repositories" in err
+
+
+def test_roster_member_missing_from_listing_reds() -> None:
+    """A roster repository the listing lacks is named."""
+    live = Live()
+    ep = LISTING
+    rows = rows_of(live, ep)
+    live.answers[ep] = (200, [r for r in rows if field(r, "name") != "signer"])
+    rc, _, err = run(live, records())
+    assert rc == 1
+    assert "signer: in the roster and not in the org listing" in err
 
 
 ROSTER = load(TREE / "slsa" / "assert-policy.json")
@@ -431,71 +439,73 @@ LIVE_ANSWERS_ROWS: list[tuple[str, object, str]] = [
 ]
 
 
-class TestShapeTest:
-    """An input or a live answer of the wrong shape is refused by name."""
+# An input or a live answer of the wrong shape is refused by name.
+@pytest.mark.parametrize(("call", "message"), RECORDS_AND_ROSTER_ROWS)
+def test_records_and_roster(call: Callable[[], object], message: str) -> None:
+    """Each input field the audit reads, wrongly shaped in turn."""
+    with pytest.raises(decoded.UndecodableError) as cm:
+        call()
+    assert str(cm.value) == message
 
-    @pytest.mark.parametrize(("call", "message"), RECORDS_AND_ROSTER_ROWS)
-    def test_records_and_roster(self, call: Callable[[], object], message: str) -> None:
-        """Each input field the audit reads, wrongly shaped in turn."""
-        with pytest.raises(decoded.UndecodableError) as cm:
-            call()
-        assert str(cm.value) == message
 
-    def test_status_readings(self) -> None:
-        """A status is read; an absent block or status is no reading."""
-        assert sc.repo_status({"k": {"status": "on"}}, "k") == "on"
-        assert sc.repo_status({"k": {}}, "k") is None
-        assert sc.repo_status({"k": "on"}, "k") is None
-        flat: list[object] = [1, 2, 3]
-        assert sc.pages("e", [[1], [], [2, 3]]) == flat
+def test_status_readings() -> None:
+    """A status is read; an absent block or status is no reading."""
+    assert sc.repo_status({"k": {"status": "on"}}, "k") == "on"
+    assert sc.repo_status({"k": {}}, "k") is None
+    assert sc.repo_status({"k": "on"}, "k") is None
+    flat: list[object] = [1, 2, 3]
+    assert sc.pages("e", [[1], [], [2, 3]]) == flat
 
-    @pytest.mark.parametrize(("endpoint", "body", "message"), LIVE_ANSWERS_ROWS)
-    def test_live_answers(self, endpoint: str, body: object, message: str) -> None:
-        """Each live field the audit reads, wrongly shaped in turn."""
-        live = Live()
-        live.answers[endpoint] = (200, body)
-        audit = sc.Audit(OWNER, records(), live)
-        with pytest.raises(decoded.UndecodableError) as cm:
-            audit.run()
-        assert str(cm.value) == message
 
-    def test_gh_reads_strictly_and_names_the_endpoint(self) -> None:
-        """A duplicate key in gh's output is refused with the endpoint."""
-        done = subprocess.CompletedProcess([], 0, stdout='{"a": 1, "a": 2}', stderr="")
-        with (
-            pytest.MonkeyPatch.context() as patched,
-            pytest.raises(decoded.UndecodableError) as cm,
-        ):
-            patched.setattr(subprocess, "run", lambda *_args, **_kwargs: done)
-            sc.gh_fetch("x/y")
-        assert str(cm.value) == 'x/y: duplicate key "a"'
-        pages = subprocess.CompletedProcess([], 0, stdout="[[1], [2]]", stderr="")
-        with pytest.MonkeyPatch.context() as patched:
-            patched.setattr(subprocess, "run", lambda *_args, **_kwargs: pages)
-            assert sc.gh_fetch("x/y", paginate=True) == (200, [1, 2])
+@pytest.mark.parametrize(("endpoint", "body", "message"), LIVE_ANSWERS_ROWS)
+def test_live_answers(endpoint: str, body: object, message: str) -> None:
+    """Each live field the audit reads, wrongly shaped in turn."""
+    live = Live()
+    live.answers[endpoint] = (200, body)
+    audit = sc.Audit(OWNER, records(), live)
+    with pytest.raises(decoded.UndecodableError) as cm:
+        audit.run()
+    assert str(cm.value) == message
 
-    def test_main_reports_a_refusal_as_an_unreadable_input(self) -> None:
-        """The refusal exits as the audit's other input errors exit."""
-        with tempfile.TemporaryDirectory() as tmp:
-            bad = Path(tmp) / "roster.json"
-            bad.write_text('{"population": {"repositories": [{}]}}', encoding="utf-8")
-            err = io.StringIO()
-            with redirect_stderr(err):
-                rc = sc.main(
-                    [
-                        "--owner",
-                        OWNER,
-                        "--record",
-                        str(TREE / "security" / "org-default.json"),
-                        "--private-record",
-                        str(TREE / "security" / "org-private.json"),
-                        "--roster",
-                        str(bad),
-                    ],
-                    Live(),
-                )
-        assert rc == 1
-        assert err.getvalue() == (
-            "audit:security-config: cannot read an input: "
-            "population.repositories[0].repo is not a string\n"
-        )
+
+def test_gh_reads_strictly_and_names_the_endpoint() -> None:
+    """A duplicate key in gh's output is refused with the endpoint."""
+    done = subprocess.CompletedProcess([], 0, stdout='{"a": 1, "a": 2}', stderr="")
+    with (
+        pytest.MonkeyPatch.context() as patched,
+        pytest.raises(decoded.UndecodableError) as cm,
+    ):
+        patched.setattr(subprocess, "run", lambda *_args, **_kwargs: done)
+        sc.gh_fetch("x/y")
+    assert str(cm.value) == 'x/y: duplicate key "a"'
+    pages = subprocess.CompletedProcess([], 0, stdout="[[1], [2]]", stderr="")
+    with pytest.MonkeyPatch.context() as patched:
+        patched.setattr(subprocess, "run", lambda *_args, **_kwargs: pages)
+        assert sc.gh_fetch("x/y", paginate=True) == (200, [1, 2])
+
+
+def test_main_reports_a_refusal_as_an_unreadable_input() -> None:
+    """The refusal exits as the audit's other input errors exit."""
+    with tempfile.TemporaryDirectory() as tmp:
+        bad = Path(tmp) / "roster.json"
+        bad.write_text('{"population": {"repositories": [{}]}}', encoding="utf-8")
+        err = io.StringIO()
+        with redirect_stderr(err):
+            rc = sc.main(
+                [
+                    "--owner",
+                    OWNER,
+                    "--record",
+                    str(TREE / "security" / "org-default.json"),
+                    "--private-record",
+                    str(TREE / "security" / "org-private.json"),
+                    "--roster",
+                    str(bad),
+                ],
+                Live(),
+            )
+    assert rc == 1
+    assert err.getvalue() == (
+        "audit:security-config: cannot read an input: "
+        "population.repositories[0].repo is not a string\n"
+    )

@@ -107,170 +107,175 @@ def declaration(body: object) -> str:
     return json.dumps(body)
 
 
-class TestReadDomainsTest:
-    """The delivered table parses into the split the belt relies on."""
-
-    def test_identity_and_org_are_both_populated(self) -> None:
-        """Neither half may be empty, or the mechanism is vacuous."""
-        assert DELIVERED.identity
-        assert DELIVERED.org
-
-    def test_org_domains_are_the_three_with_no_dependency_trigger(self) -> None:
-        """project, types and test are org strictness, never repo identity."""
-        org: list[str] = ["project", "test", "types"]
-        delivered = sorted(DELIVERED.org)
-        assert delivered == org
-
-    @pytest.mark.parametrize(("domain", "triggers"), DELIVERED.identity.items())
-    def test_every_identity_domain_names_at_least_one_trigger(
-        self, domain: object, triggers: object
-    ) -> None:
-        """An identity domain with no trigger could never be checked for."""
-        assert triggers
-
-    def test_react_carries_its_measured_trigger(self) -> None:
-        """The fixture domain, spot-checked against `biome explain`."""
-        triggers: list[str] = ["react"]
-        assert DELIVERED.identity["react"] == triggers
-
-    def test_comments_and_blank_lines_are_not_rows(self) -> None:
-        """The file is commented heavily; none of it may become a domain."""
-        assert "#" not in "".join(DELIVERED.identity)
+# The delivered table parses into the split the belt relies on.
+def test_identity_and_org_are_both_populated() -> None:
+    """Neither half may be empty, or the mechanism is vacuous."""
+    assert DELIVERED.identity
+    assert DELIVERED.org
 
 
-class TestDeclarationProblemsTest:
-    """What a repository may and may not put in its own biome.json."""
+def test_org_domains_are_the_three_with_no_dependency_trigger() -> None:
+    """project, types and test are org strictness, never repo identity."""
+    org: list[str] = ["project", "test", "types"]
+    delivered = sorted(DELIVERED.org)
+    assert delivered == org
 
-    def check(self, document: object, *, admissible: bool) -> list[str]:
-        """Judge one declaration.
 
-        Returns:
-            The refusals.
+@pytest.mark.parametrize(("domain", "triggers"), DELIVERED.identity.items())
+def test_every_identity_domain_names_at_least_one_trigger(
+    domain: object, triggers: object
+) -> None:
+    """An identity domain with no trigger could never be checked for."""
+    assert triggers
 
-        """
-        problems = biome_config.declaration(document, DELIVERED.identity)[1]
-        assert (not problems) == admissible, f"{document} -> {problems}"
-        return problems
 
-    def test_admissible_declarations(self) -> None:
-        """Everything a conforming repository is allowed to write."""
-        documents: tuple[object, ...] = (
-            {},
-            {"linter": {}},
-            {"linter": {"domains": {}}},
-            {"linter": {"domains": {"react": "all"}}},
-            {"$schema": "./x.json", "linter": {"domains": {"react": "all"}}},
-            {"linter": {"domains": {"react": "all", "next": "all"}}},
-            # Over-claiming is legal on purpose: it turns rules ON.
-            {"linter": {"domains": {"vue": "all"}}},
-        )
-        for document in documents:
-            self.check(document, admissible=True)
+def test_react_carries_its_measured_trigger() -> None:
+    """The fixture domain, spot-checked against `biome explain`."""
+    triggers: list[str] = ["react"]
+    assert DELIVERED.identity["react"] == triggers
 
-    def test_a_repository_may_not_write_none(self) -> None:
-        """The word "none" is the belt's — writing it here switches a domain off."""
-        problems = self.check(
-            {"linter": {"domains": {"react": "none"}}},
-            admissible=False,
-        )
-        assert "none" in problems[0]
 
-    def test_a_repository_may_not_lower_a_domain_it_claims(self) -> None:
-        """A "recommended" value is below the org's level, so it is refused."""
-        self.check({"linter": {"domains": {"react": "recommended"}}}, admissible=False)
+def test_comments_and_blank_lines_are_not_rows() -> None:
+    """The file is commented heavily; none of it may become a domain."""
+    assert "#" not in "".join(DELIVERED.identity)
 
-    @pytest.mark.parametrize("domain", DELIVERED.org)
-    def test_org_domains_may_not_be_named_at_all(self, domain: object) -> None:
-        """project, types and test are strictness, not identity."""
-        problems = self.check(
-            {"linter": {"domains": {domain: "all"}}},
-            admissible=False,
-        )
-        assert domain in problems[0]
 
-    def test_an_unknown_domain_is_refused(self) -> None:
-        """A typo must red rather than silently claim nothing."""
-        self.check({"linter": {"domains": {"raect": "all"}}}, admissible=False)
+# What a repository may and may not put in its own biome.json.
+def check(document: object, *, admissible: bool) -> list[str]:
+    """Judge one declaration.
 
-    def test_rules_may_not_travel_with_the_declaration(self) -> None:
-        """The whole point: no repo-side surface on which to lower a rule."""
-        problems = self.check(
-            {"linter": {"rules": {"correctness": {"noNodejsModules": "off"}}}},
-            admissible=False,
-        )
-        assert "linter.rules" in problems[0]
+    Returns:
+        The refusals.
 
-    @pytest.mark.parametrize(
-        "key", ["overrides", "formatter", "assist", "files", "extends"]
+    """
+    problems = biome_config.declaration(document, DELIVERED.identity)[1]
+    assert (not problems) == admissible, f"{document} -> {problems}"
+    return problems
+
+
+def test_admissible_declarations() -> None:
+    """Everything a conforming repository is allowed to write."""
+    documents: tuple[object, ...] = (
+        {},
+        {"linter": {}},
+        {"linter": {"domains": {}}},
+        {"linter": {"domains": {"react": "all"}}},
+        {"$schema": "./x.json", "linter": {"domains": {"react": "all"}}},
+        {"linter": {"domains": {"react": "all", "next": "all"}}},
+        # Over-claiming is legal on purpose: it turns rules ON.
+        {"linter": {"domains": {"vue": "all"}}},
     )
-    def test_other_biome_sections_are_refused(self, key: object) -> None:
-        """An overrides block is a per-path weakening surface; so is formatter."""
-        self.check({key: {}}, admissible=False)
-
-    def test_wrong_shapes_are_refused_rather_than_crashing(self) -> None:
-        """A malformed file must produce a refusal, never a traceback."""
-        shapes: tuple[object, ...] = (
-            [],
-            "react",
-            {"linter": []},
-            {"linter": {"domains": []}},
-        )
-        for document in shapes:
-            self.check(document, admissible=False)
+    for document in documents:
+        check(document, admissible=True)
 
 
-class TestOmissionsTest:
-    """Silence is the other way to lower a rule, so silence is checked."""
+def test_a_repository_may_not_write_none() -> None:
+    """The word "none" is the belt's — writing it here switches a domain off."""
+    problems = check(
+        {"linter": {"domains": {"react": "none"}}},
+        admissible=False,
+    )
+    assert "none" in problems[0]
 
-    def test_a_declared_dependency_must_be_claimed(self) -> None:
-        """The #695 case: a react repo that says nothing gets react turned off."""
-        missing = biome_config.omissions(
-            set(),
+
+def test_a_repository_may_not_lower_a_domain_it_claims() -> None:
+    """A "recommended" value is below the org's level, so it is refused."""
+    check({"linter": {"domains": {"react": "recommended"}}}, admissible=False)
+
+
+@pytest.mark.parametrize("domain", DELIVERED.org)
+def test_org_domains_may_not_be_named_at_all(domain: object) -> None:
+    """project, types and test are strictness, not identity."""
+    problems = check(
+        {"linter": {"domains": {domain: "all"}}},
+        admissible=False,
+    )
+    assert domain in problems[0]
+
+
+def test_an_unknown_domain_is_refused() -> None:
+    """A typo must red rather than silently claim nothing."""
+    check({"linter": {"domains": {"raect": "all"}}}, admissible=False)
+
+
+def test_rules_may_not_travel_with_the_declaration() -> None:
+    """The whole point: no repo-side surface on which to lower a rule."""
+    problems = check(
+        {"linter": {"rules": {"correctness": {"noNodejsModules": "off"}}}},
+        admissible=False,
+    )
+    assert "linter.rules" in problems[0]
+
+
+@pytest.mark.parametrize(
+    "key", ["overrides", "formatter", "assist", "files", "extends"]
+)
+def test_other_biome_sections_are_refused(key: object) -> None:
+    """An overrides block is a per-path weakening surface; so is formatter."""
+    check({key: {}}, admissible=False)
+
+
+def test_wrong_shapes_are_refused_rather_than_crashing() -> None:
+    """A malformed file must produce a refusal, never a traceback."""
+    shapes: tuple[object, ...] = (
+        [],
+        "react",
+        {"linter": []},
+        {"linter": {"domains": []}},
+    )
+    for document in shapes:
+        check(document, admissible=False)
+
+
+# Silence is the other way to lower a rule, so silence is checked.
+def test_a_declared_dependency_must_be_claimed() -> None:
+    """The #695 case: a react repo that says nothing gets react turned off."""
+    missing = biome_config.omissions(
+        set(),
+        DELIVERED.identity,
+        {"react": ["apps/web/package.json"]},
+    )
+    assert len(missing) == 1
+    assert "react" in missing[0]
+    assert "apps/web/package.json" in missing[0]
+
+
+def test_claiming_it_satisfies_the_check() -> None:
+    """The remedy the message names actually works."""
+    assert (
+        biome_config.omissions(
+            {"react"},
             DELIVERED.identity,
             {"react": ["apps/web/package.json"]},
         )
-        assert len(missing) == 1
-        assert "react" in missing[0]
-        assert "apps/web/package.json" in missing[0]
-
-    def test_claiming_it_satisfies_the_check(self) -> None:
-        """The remedy the message names actually works."""
-        assert (
-            biome_config.omissions(
-                {"react"},
-                DELIVERED.identity,
-                {"react": ["apps/web/package.json"]},
-            )
-            == NO_PROBLEMS
-        )
-
-    def test_an_unrelated_dependency_demands_nothing(self) -> None:
-        """Only trigger packages carry the obligation."""
-        assert (
-            biome_config.omissions(set(), DELIVERED.identity, {"hono": ["p.json"]})
-            == NO_PROBLEMS
-        )
-
-    @pytest.mark.parametrize("package", DELIVERED.identity["qwik"])
-    def test_either_trigger_of_a_two_package_domain_counts(
-        self, package: object
-    ) -> None:
-        """Qwik ships under two names; both oblige."""
-        missing = biome_config.omissions(
-            set(),
-            DELIVERED.identity,
-            {package: ["package.json"]},
-        )
-        assert len(missing) == 1
-        assert "qwik" in missing[0]
+        == NO_PROBLEMS
+    )
 
 
-@pytest.mark.usefixtures("_tmp")
-class TestDeclaredPackagesTest:
+def test_an_unrelated_dependency_demands_nothing() -> None:
+    """Only trigger packages carry the obligation."""
+    assert (
+        biome_config.omissions(set(), DELIVERED.identity, {"hono": ["p.json"]})
+        == NO_PROBLEMS
+    )
+
+
+@pytest.mark.parametrize("package", DELIVERED.identity["qwik"])
+def test_either_trigger_of_a_two_package_domain_counts(package: object) -> None:
+    """Qwik ships under two names; both oblige."""
+    missing = biome_config.omissions(
+        set(),
+        DELIVERED.identity,
+        {package: ["package.json"]},
+    )
+    assert len(missing) == 1
+    assert "qwik" in missing[0]
+
+
+class DeclaredPackagesTest:
     """Where a dependency may be declared, and what is not a manifest."""
 
-    @fixture
-    def _tmp(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
 
@@ -286,33 +291,45 @@ class TestDeclaredPackagesTest:
         path.write_text(json.dumps(body), encoding="utf-8")
         return path
 
-    @pytest.mark.parametrize("section", biome_config.MANIFEST_SECTIONS)
-    def test_every_dependency_section_is_read(self, section: object) -> None:
-        """A framework declared as a peer dependency is still a framework."""
-        path = self.manifest({section: {"react": "19"}})
-        assert "react" in biome_config.declared_packages([path])
 
-    def test_a_non_dependency_section_is_not_read(self) -> None:
-        """Scripts named after a framework declare nothing."""
-        path = self.manifest({"scripts": {"react": "echo"}})
-        assert "react" not in biome_config.declared_packages([path])
-
-    def test_unreadable_and_malformed_manifests_are_skipped(self) -> None:
-        """A broken manifest is another task's finding, not a crash here."""
-        broken = Path(tempfile.mkdtemp()) / "package.json"
-        broken.write_text("{not json", encoding="utf-8")
-        assert (
-            biome_config.declared_packages([broken, Path("/nonexistent/package.json")])
-            == NO_PACKAGES
-        )
+@fixture
+def declared_packages_test(tmp_path: Path) -> DeclaredPackagesTest:
+    """Give each row its own DeclaredPackagesTest."""
+    return DeclaredPackagesTest(tmp_path)
 
 
-@pytest.mark.usefixtures("_set_up_test_generate_test")
-class TestGenerateTest:
+@pytest.mark.parametrize("section", biome_config.MANIFEST_SECTIONS)
+def test_every_dependency_section_is_read(
+    declared_packages_test: DeclaredPackagesTest, section: object
+) -> None:
+    """A framework declared as a peer dependency is still a framework."""
+    path = declared_packages_test.manifest({section: {"react": "19"}})
+    assert "react" in biome_config.declared_packages([path])
+
+
+def test_a_non_dependency_section_is_not_read(
+    declared_packages_test: DeclaredPackagesTest,
+) -> None:
+    """Scripts named after a framework declare nothing."""
+    path = declared_packages_test.manifest({"scripts": {"react": "echo"}})
+    assert "react" not in biome_config.declared_packages([path])
+
+
+@pytest.mark.usefixtures("declared_packages_test")
+def test_unreadable_and_malformed_manifests_are_skipped() -> None:
+    """A broken manifest is another task's finding, not a crash here."""
+    broken = Path(tempfile.mkdtemp()) / "package.json"
+    broken.write_text("{not json", encoding="utf-8")
+    assert (
+        biome_config.declared_packages([broken, Path("/nonexistent/package.json")])
+        == NO_PACKAGES
+    )
+
+
+class GenerateTest:
     """The arithmetic the repository is not allowed to do for itself."""
 
-    @fixture
-    def _set_up_test_generate_test(self) -> None:
+    def __init__(self) -> None:
         """Generate against the real org config and the real tables."""
         self.org = org_config()
         self.config, self.silenced = biome_config.generate(
@@ -323,110 +340,138 @@ class TestGenerateTest:
         )
         self.written = table(self.config, "linter", "domains")
 
-    def test_every_domain_is_written_explicitly(self) -> None:
-        """Nothing is left to biome's auto-detection or to preset: all."""
-        written = sorted(self.written)
-        every = sorted([*DELIVERED.identity, *DELIVERED.org])
-        assert written == every
 
-    def test_the_claimed_domain_is_all(self) -> None:
-        """What the repository said it is."""
-        assert self.written["react"] == "all"
-
-    def test_every_unclaimed_identity_domain_is_none(self) -> None:
-        """The measured half: only "none" changes anything under preset all."""
-        for domain in DELIVERED.identity:
-            if domain != "react":
-                assert self.written[domain] == "none"
-
-    @pytest.mark.parametrize("domain", DELIVERED.org)
-    def test_org_domains_are_all_whatever_the_repository_said(
-        self, domain: object
-    ) -> None:
-        """project, types and test never move."""
-        assert self.written[domain] == "all"
-
-    def test_the_org_rules_survive_untouched(self) -> None:
-        """The merge adds identity and silences nursery; nothing else moves."""
-        generated = table(self.config, "linter", "rules")
-        original = table(self.org, "linter", "rules")
-        assert generated["preset"] == original["preset"]
-        kept = {k: v for k, v in generated.items() if k != "nursery"}
-        before = {k: v for k, v in original.items() if k != "nursery"}
-        assert kept == before
-        assert self.config["assist"] == self.org["assist"]
-
-    def test_the_org_config_is_not_mutated_in_place(self) -> None:
-        """Two runs in one process must not accumulate."""
-        assert "domains" not in table_or_empty(self.org, "linter")
-
-    def test_a_repository_claiming_nothing_gets_every_identity_off(self) -> None:
-        """The canon's own case: no framework, no framework rules."""
-        config, _silenced = biome_config.generate(self.org, set(), DELIVERED, NURSERY)
-        written = table(config, "linter", "domains")
-        claimed = {d for d, v in written.items() if v == "all"}
-        org = set(DELIVERED.org)
-        assert claimed == org
+@fixture
+def generate_test() -> GenerateTest:
+    """Give each row its own GenerateTest."""
+    return GenerateTest()
 
 
-class TestContradictionTest:
-    """Rules the org delivers that another org control forbids (#759).
+def test_every_domain_is_written_explicitly(generate_test: GenerateTest) -> None:
+    """Nothing is left to biome's auto-detection or to preset: all."""
+    written = sorted(generate_test.written)
+    every = sorted([*DELIVERED.identity, *DELIVERED.org])
+    assert written == every
 
-    This is a CROSS-FILE invariant and it lives here because nothing else
-    reads both files. `lint:biome` reads biome-org.json, `lint:types`
-    reads tsc-flags.txt, and each is green in isolation while the pair is
-    unsatisfiable on a real tree — which is exactly how it survived.
+
+def test_the_claimed_domain_is_all(generate_test: GenerateTest) -> None:
+    """What the repository said it is."""
+    assert generate_test.written["react"] == "all"
+
+
+def test_every_unclaimed_identity_domain_is_none(generate_test: GenerateTest) -> None:
+    """The measured half: only "none" changes anything under preset all."""
+    for domain in DELIVERED.identity:
+        if domain != "react":
+            assert generate_test.written[domain] == "none"
+
+
+@pytest.mark.parametrize("domain", DELIVERED.org)
+def test_org_domains_are_all_whatever_the_repository_said(
+    generate_test: GenerateTest, domain: object
+) -> None:
+    """project, types and test never move."""
+    assert generate_test.written[domain] == "all"
+
+
+def test_the_org_rules_survive_untouched(generate_test: GenerateTest) -> None:
+    """The merge adds identity and silences nursery; nothing else moves."""
+    generated = table(generate_test.config, "linter", "rules")
+    original = table(generate_test.org, "linter", "rules")
+    assert generated["preset"] == original["preset"]
+    kept = {k: v for k, v in generated.items() if k != "nursery"}
+    before = {k: v for k, v in original.items() if k != "nursery"}
+    assert kept == before
+    assert generate_test.config["assist"] == generate_test.org["assist"]
+
+
+def test_the_org_config_is_not_mutated_in_place(generate_test: GenerateTest) -> None:
+    """Two runs in one process must not accumulate."""
+    assert "domains" not in table_or_empty(generate_test.org, "linter")
+
+
+def test_a_repository_claiming_nothing_gets_every_identity_off(
+    generate_test: GenerateTest,
+) -> None:
+    """The canon's own case: no framework, no framework rules."""
+    config, _silenced = biome_config.generate(
+        generate_test.org, set(), DELIVERED, NURSERY
+    )
+    written = table(config, "linter", "domains")
+    claimed = {d for d, v in written.items() if v == "all"}
+    org = set(DELIVERED.org)
+    assert claimed == org
+
+
+# Rules the org delivers that another org control forbids (#759).
+#
+# This is a CROSS-FILE invariant and it lives here because nothing else
+# reads both files. `lint:biome` reads biome-org.json, `lint:types`
+# reads tsc-flags.txt, and each is green in isolation while the pair is
+# unsatisfiable on a real tree — which is exactly how it survived.
+def tsc_dials() -> set[str]:
+    """Read the dial names the org forces on the compiler.
+
+    Returns:
+        Every flag named in tsc-flags.txt, without its leading dashes.
+
     """
-
-    @staticmethod
-    def tsc_dials() -> set[str]:
-        """Read the dial names the org forces on the compiler.
-
-        Returns:
-            Every flag named in tsc-flags.txt, without its leading dashes.
-
-        """
-        dials: set[str] = set()
-        for raw in TSC_FLAGS_FILE.read_text(encoding="utf-8").splitlines():
-            line = raw.split("#", 1)[0].strip()
-            if line.startswith("--"):
-                dials.add(line.split()[0].removeprefix("--"))
-        return dials
-
-    @staticmethod
-    def rule_setting(group: str, rule: str) -> object:
-        """Read one rule's setting out of the delivered config.
-
-        Returns:
-            The setting, or None when the group does not name the rule.
-
-        """
-        rules = table(org_config(), "linter", "rules")
-        return table_or_empty(rules, group).get(rule)
-
-    def test_useliteralkeys_is_off_while_the_tsc_dial_is_forced(self) -> None:
-        """The #759 pair, pinned so it cannot silently re-open.
-
-        `useLiteralKeys` wants `row.id`; `noPropertyAccessFromIndexSignature`
-        makes that TS4111 on an index-signature type. Measured on
-        monumental-archive at 590 sites. If the dial is ever dropped from
-        tsc-flags.txt the rule may come back — but not before.
-        """
-        if "noPropertyAccessFromIndexSignature" not in self.tsc_dials():
-            pytest.skip("the org no longer forces the dial that contradicts it")
-        assert self.rule_setting("complexity", "useLiteralKeys") == "off"
-
-    def test_naming_that_rule_does_not_disable_its_whole_group(self) -> None:
-        """Only the one rule is named; the preset still carries the rest."""
-        rules = table(org_config(), "linter", "rules")
-        assert rules["preset"] == "all"
-        named: set[str] = {"useLiteralKeys"}
-        complexity = set(table(rules, "complexity"))
-        assert complexity == named
+    dials: set[str] = set()
+    for raw in TSC_FLAGS_FILE.read_text(encoding="utf-8").splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if line.startswith("--"):
+            dials.add(line.split()[0].removeprefix("--"))
+    return dials
 
 
-@pytest.mark.usefixtures("_set_up_test_file_override_test")
-class TestFileOverrideTest:
+def rule_setting(group: str, rule: str) -> object:
+    """Read one rule's setting out of the delivered config.
+
+    Returns:
+        The setting, or None when the group does not name the rule.
+
+    """
+    rules = table(org_config(), "linter", "rules")
+    return table_or_empty(rules, group).get(rule)
+
+
+def test_useliteralkeys_is_off_while_the_tsc_dial_is_forced() -> None:
+    """The #759 pair, pinned so it cannot silently re-open.
+
+    `useLiteralKeys` wants `row.id`; `noPropertyAccessFromIndexSignature`
+    makes that TS4111 on an index-signature type. Measured on
+    monumental-archive at 590 sites. If the dial is ever dropped from
+    tsc-flags.txt the rule may come back — but not before.
+    """
+    if "noPropertyAccessFromIndexSignature" not in tsc_dials():
+        pytest.skip("the org no longer forces the dial that contradicts it")
+    assert rule_setting("complexity", "useLiteralKeys") == "off"
+
+
+def test_naming_that_rule_does_not_disable_its_whole_group() -> None:
+    """Only the one rule is named; the preset still carries the rest."""
+    rules = table(org_config(), "linter", "rules")
+    assert rules["preset"] == "all"
+    named: set[str] = {"useLiteralKeys"}
+    complexity = set(table(rules, "complexity"))
+    assert complexity == named
+
+
+# The closed list, measured across every JS/TS file in the org
+# (monumental-archive is the whole population; the other repos have
+# none). Repeated here as literals ON PURPOSE — this is the mutation
+# check, and reading the list out of the file under test would make
+# the assertion vacuous.
+GLOBS: ClassVar[list[str]] = ["**/*.test.ts", "**/test/**", "**/tests/**"]
+SILENCED: ClassVar[set[tuple[str, str]]] = {
+    ("complexity", "noExcessiveLinesPerFunction"),
+    ("performance", "noAwaitInLoops"),
+    ("performance", "useTopLevelRegex"),
+    ("style", "noMagicNumbers"),
+}
+
+
+class FileOverrideTest:
     """The one `overrides` entry the org delivers (#783, #804, #2117).
 
     In a test the literal — a number or a regex — IS the specification,
@@ -444,21 +489,7 @@ class TestFileOverrideTest:
     says.
     """
 
-    # The closed list, measured across every JS/TS file in the org
-    # (monumental-archive is the whole population; the other repos have
-    # none). Repeated here as literals ON PURPOSE — this is the mutation
-    # check, and reading the list out of the file under test would make
-    # the assertion vacuous.
-    GLOBS: ClassVar[list[str]] = ["**/*.test.ts", "**/test/**", "**/tests/**"]
-    SILENCED: ClassVar[set[tuple[str, str]]] = {
-        ("complexity", "noExcessiveLinesPerFunction"),
-        ("performance", "noAwaitInLoops"),
-        ("performance", "useTopLevelRegex"),
-        ("style", "noMagicNumbers"),
-    }
-
-    @fixture
-    def _set_up_test_file_override_test(self) -> None:
+    def __init__(self) -> None:
         """Read the delivered config, not a copy of it."""
         self.org = org_config()
 
@@ -473,93 +504,128 @@ class TestFileOverrideTest:
         assert len(overrides) == 1, "the delivered file carries one entry"
         return decoded.as_object(overrides[0], "overrides[0]")
 
-    def test_the_glob_list_is_exactly_the_closed_list(self) -> None:
-        """Widening the list is an edit to this test as well as the config."""
-        assert self.entry()["includes"] == self.GLOBS
 
-    @pytest.mark.parametrize("absent", ["spec", "__tests__", "tsx", ".js"])
-    def test_the_shapes_the_org_does_not_have_are_absent(self, absent: object) -> None:
-        """`*.spec.*` and `__tests__/**` exist in no org repo, so are unnamed."""
-        includes = decoded.as_array(self.entry()["includes"], "includes")
-        joined = " ".join(decoded.as_str(glob, "a glob") for glob in includes)
-        assert absent not in joined
+@fixture
+def file_override_test() -> FileOverrideTest:
+    """Give each row its own FileOverrideTest."""
+    return FileOverrideTest()
 
-    def test_every_named_rule_is_off_against_the_literal(self) -> None:
-        """Asserted against "off" itself; a mutant value must not survive."""
-        rules = table(self.entry(), "linter", "rules")
-        for group, rule in sorted(self.SILENCED):
-            assert table(rules, group)[rule] == "off"
 
-    def test_the_override_silences_those_four_rules_and_no_others(self) -> None:
-        """A fifth rule arriving here is a decision, not a drive-by."""
-        rules = table(self.entry(), "linter", "rules")
-        named: set[tuple[str, str]] = {(g, r) for g in rules for r in table(rules, g)}
-        assert named == self.SILENCED
+def test_the_glob_list_is_exactly_the_closed_list(
+    file_override_test: FileOverrideTest,
+) -> None:
+    """Widening the list is an edit to this test as well as the config."""
+    assert file_override_test.entry()["includes"] == GLOBS
 
-    def test_the_override_carries_nothing_but_those_rules(self) -> None:
-        """No `linter.enabled: false`, no formatter, no files — rules only."""
-        keys: set[str] = {"includes", "linter"}
-        carried = set(self.entry())
-        assert carried == keys
-        linter: set[str] = {"rules"}
-        sections = set(table(self.entry(), "linter"))
-        assert sections == linter
 
-    def test_no_named_rule_is_switched_off_at_the_top_level(self) -> None:
-        """The other direction: a magic number in production still reds.
+@pytest.mark.parametrize("absent", ["spec", "__tests__", "tsx", ".js"])
+def test_the_shapes_the_org_does_not_have_are_absent(
+    file_override_test: FileOverrideTest, absent: object
+) -> None:
+    """`*.spec.*` and `__tests__/**` exist in no org repo, so are unnamed."""
+    includes = decoded.as_array(file_override_test.entry()["includes"], "includes")
+    joined = " ".join(decoded.as_str(glob, "a glob") for glob in includes)
+    assert absent not in joined
 
-        All four rules are on by `preset: "all"` not naming them, so the
-        proof that production is untouched is that none appears in the
-        top-level rule block at all.
-        """
-        top = table(self.org, "linter", "rules")
-        assert top["preset"] == "all"
-        for group, rule in sorted(self.SILENCED):
-            assert rule not in table_or_empty(top, group)
 
-    def test_the_other_two_structural_rules_stay_on_in_tests(self) -> None:
-        """#804 turns off the line-count rule only.
+def test_every_named_rule_is_off_against_the_literal(
+    file_override_test: FileOverrideTest,
+) -> None:
+    """Asserted against "off" itself; a mutant value must not survive."""
+    rules = table(file_override_test.entry(), "linter", "rules")
+    for group, rule in sorted(SILENCED):
+        assert table(rules, group)[rule] == "off"
 
-        A 1,400-line test file genuinely splits along concerns and a test
-        body's branching is real, so `noExcessiveLinesPerFile` and
-        `noExcessiveCognitiveComplexity` are judged in tests as anywhere.
-        """
-        complexity = table(self.entry(), "linter", "rules", "complexity")
-        named: set[str] = {"noExcessiveLinesPerFunction"}
-        rules = set(complexity)
-        assert rules == named
 
-    def test_nomisplacedassertion_is_not_in_the_override(self) -> None:
-        """#783's ruling: its 8 false positives are not a file-type question.
+def test_the_override_silences_those_four_rules_and_no_others(
+    file_override_test: FileOverrideTest,
+) -> None:
+    """A fifth rule arriving here is a decision, not a drive-by."""
+    rules = table(file_override_test.entry(), "linter", "rules")
+    named: set[tuple[str, str]] = {(g, r) for g in rules for r in table(rules, g)}
+    assert named == SILENCED
 
-        Six are the assertion-helper pattern and two are the rule not
-        knowing `test.prop` (biomejs/biome#11454). A test-glob override
-        would remove the class it guards — an `expect` stranded outside
-        `it`/`test`, which reports nothing and passes green.
-        """
-        rules = table(self.entry(), "linter", "rules")
-        assert "noMisplacedAssertion" not in table_or_empty(rules, "suspicious")
-        assert "suspicious" not in table(self.org, "linter", "rules")
 
-    @pytest.mark.parametrize("claimed", CLAIMS)
-    def test_the_override_survives_generation_untouched(self, claimed: object) -> None:
-        """A repository's identity moves domains and nursery, never this."""
-        config, _silenced = biome_config.generate(
-            self.org,
-            claimed,
-            DELIVERED,
-            NURSERY,
-        )
-        assert config["overrides"] == self.org["overrides"]
+def test_the_override_carries_nothing_but_those_rules(
+    file_override_test: FileOverrideTest,
+) -> None:
+    """No `linter.enabled: false`, no formatter, no files — rules only."""
+    keys: set[str] = {"includes", "linter"}
+    carried = set(file_override_test.entry())
+    assert carried == keys
+    linter: set[str] = {"rules"}
+    sections = set(table(file_override_test.entry(), "linter"))
+    assert sections == linter
 
-    def test_a_repository_may_not_declare_an_override_of_its_own(self) -> None:
-        """The widening a repo would reach for is refused by name (#695)."""
-        problems = biome_config.declaration(
-            {"overrides": [{"includes": ["src/**"], "linter": {"rules": {}}}]},
-            DELIVERED.identity,
-        )[1]
-        assert problems
-        assert "overrides" in problems[0]
+
+def test_no_named_rule_is_switched_off_at_the_top_level(
+    file_override_test: FileOverrideTest,
+) -> None:
+    """The other direction: a magic number in production still reds.
+
+    All four rules are on by `preset: "all"` not naming them, so the
+    proof that production is untouched is that none appears in the
+    top-level rule block at all.
+    """
+    top = table(file_override_test.org, "linter", "rules")
+    assert top["preset"] == "all"
+    for group, rule in sorted(SILENCED):
+        assert rule not in table_or_empty(top, group)
+
+
+def test_the_other_two_structural_rules_stay_on_in_tests(
+    file_override_test: FileOverrideTest,
+) -> None:
+    """#804 turns off the line-count rule only.
+
+    A 1,400-line test file genuinely splits along concerns and a test
+    body's branching is real, so `noExcessiveLinesPerFile` and
+    `noExcessiveCognitiveComplexity` are judged in tests as anywhere.
+    """
+    complexity = table(file_override_test.entry(), "linter", "rules", "complexity")
+    named: set[str] = {"noExcessiveLinesPerFunction"}
+    rules = set(complexity)
+    assert rules == named
+
+
+def test_nomisplacedassertion_is_not_in_the_override(
+    file_override_test: FileOverrideTest,
+) -> None:
+    """#783's ruling: its 8 false positives are not a file-type question.
+
+    Six are the assertion-helper pattern and two are the rule not
+    knowing `test.prop` (biomejs/biome#11454). A test-glob override
+    would remove the class it guards — an `expect` stranded outside
+    `it`/`test`, which reports nothing and passes green.
+    """
+    rules = table(file_override_test.entry(), "linter", "rules")
+    assert "noMisplacedAssertion" not in table_or_empty(rules, "suspicious")
+    assert "suspicious" not in table(file_override_test.org, "linter", "rules")
+
+
+@pytest.mark.parametrize("claimed", CLAIMS)
+def test_the_override_survives_generation_untouched(
+    file_override_test: FileOverrideTest, claimed: object
+) -> None:
+    """A repository's identity moves domains and nursery, never this."""
+    config, _silenced = biome_config.generate(
+        file_override_test.org,
+        claimed,
+        DELIVERED,
+        NURSERY,
+    )
+    assert config["overrides"] == file_override_test.org["overrides"]
+
+
+@pytest.mark.usefixtures("file_override_test")
+def test_a_repository_may_not_declare_an_override_of_its_own() -> None:
+    """The widening a repo would reach for is refused by name (#695)."""
+    problems = biome_config.declaration(
+        {"overrides": [{"includes": ["src/**"], "linter": {"rules": {}}}]},
+        DELIVERED.identity,
+    )[1]
+    assert problems
+    assert "overrides" in problems[0]
 
 
 # Steps awaited one after another: the shape an integration test drives
@@ -573,73 +639,74 @@ export async function run(steps: readonly (() => Promise<void>)[]): Promise<void
 """
 
 
-class TestAwaitInLoopsUnderBiomeTest:
-    """`noAwaitInLoops` under the real pinned biome, both directions (#2117).
+# `noAwaitInLoops` under the real pinned biome, both directions (#2117).
+#
+# The same code is planted as `x.test.ts` and as `x.ts` and linted
+# against the generated config, the one `lint:biome` runs. The test
+# file is clean of the rule and the source file still reports it, so
+# the override reaches tests and nothing else. Run with `biome lint`
+# and never `--only`, which bypasses `overrides` entirely.
+RULE = "lint/performance/noAwaitInLoops"
 
-    The same code is planted as `x.test.ts` and as `x.ts` and linted
-    against the generated config, the one `lint:biome` runs. The test
-    file is clean of the rule and the source file still reports it, so
-    the override reaches tests and nothing else. Run with `biome lint`
-    and never `--only`, which bypasses `overrides` entirely.
+
+def reported() -> list[str]:
+    """Lint the two planted files and name each that reports the rule.
+
+    Returns:
+        The paths the rule fired on, sorted.
+
     """
-
-    RULE = "lint/performance/noAwaitInLoops"
-
-    def reported(self) -> list[str]:
-        """Lint the two planted files and name each that reports the rule.
-
-        Returns:
-            The paths the rule fired on, sorted.
-
-        """
-        biome = support.tool("biome")
-        config, _silenced = biome_config.generate(
-            org_config(),
-            set(),
-            DELIVERED,
-            NURSERY,
+    biome = support.tool("biome")
+    config, _silenced = biome_config.generate(
+        org_config(),
+        set(),
+        DELIVERED,
+        NURSERY,
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        generated = root / "biome-org.generated.json"
+        generated.write_text(json.dumps(config), encoding="utf-8")
+        for name in ("x.ts", "x.test.ts"):
+            (root / name).write_text(AWAIT_IN_LOOP, encoding="utf-8")
+        done = subprocess.run(
+            [
+                biome,
+                "lint",
+                "--config-path",
+                str(generated),
+                "--reporter=json",
+                "x.ts",
+                "x.test.ts",
+            ],
+            cwd=root,
+            env=support.env(),
+            capture_output=True,
+            text=True,
+            check=False,
         )
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            generated = root / "biome-org.generated.json"
-            generated.write_text(json.dumps(config), encoding="utf-8")
-            for name in ("x.ts", "x.test.ts"):
-                (root / name).write_text(AWAIT_IN_LOOP, encoding="utf-8")
-            done = subprocess.run(
-                [
-                    biome,
-                    "lint",
-                    "--config-path",
-                    str(generated),
-                    "--reporter=json",
-                    "x.ts",
-                    "x.test.ts",
-                ],
-                cwd=root,
-                env=support.env(),
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-        report = decoded.as_object(decoded.load_json(done.stdout), "biome's report")
-        diagnostics = decoded.as_array(report["diagnostics"], "diagnostics")
-        fired: list[str] = []
-        for raw in diagnostics:
-            diagnostic = decoded.as_object(raw, "a diagnostic")
-            if diagnostic["category"] != self.RULE:
-                continue
-            location = decoded.as_object(diagnostic["location"], "location")
-            fired.append(decoded.as_str(location["path"], "location.path"))
-        return sorted(fired)
-
-    def test_a_test_file_is_clean_and_the_same_source_still_reports(self) -> None:
-        """The override silences `x.test.ts` only; `x.ts` keeps the finding."""
-        source: list[str] = ["x.ts"]
-        assert self.reported() == source
+    report = decoded.as_object(decoded.load_json(done.stdout), "biome's report")
+    diagnostics = decoded.as_array(report["diagnostics"], "diagnostics")
+    fired: list[str] = []
+    for raw in diagnostics:
+        diagnostic = decoded.as_object(raw, "a diagnostic")
+        if diagnostic["category"] != RULE:
+            continue
+        location = decoded.as_object(diagnostic["location"], "location")
+        fired.append(decoded.as_str(location["path"], "location.path"))
+    return sorted(fired)
 
 
-@pytest.mark.usefixtures("_set_up_test_conditional_expect_test")
-class TestConditionalExpectTest:
+def test_a_test_file_is_clean_and_the_same_source_still_reports() -> None:
+    """The override silences `x.test.ts` only; `x.ts` keeps the finding."""
+    source: list[str] = ["x.ts"]
+    assert reported() == source
+
+
+CONDITIONAL_EXPECT_TEST_RULE = "noConditionalExpect"
+
+
+class ConditionalExpectTest:
     """The one nursery rule the org switches off by name (#788).
 
     Eight findings on the first real tree, eight false positives, one of
@@ -648,302 +715,323 @@ class TestConditionalExpectTest:
     expiry at biomejs/biome#11455.
     """
 
-    RULE = "noConditionalExpect"
-
-    @fixture
-    def _set_up_test_conditional_expect_test(self) -> None:
+    def __init__(self) -> None:
         """Read the delivered config, not a copy of it."""
         self.org = org_config()
         self.nursery = table(self.org, "linter", "rules", "nursery")
 
-    def test_the_rule_is_off_against_the_literal(self) -> None:
-        """Asserted against "off" itself, never against a constant."""
-        assert self.nursery[self.RULE] == "off"
 
-    def test_the_rule_is_still_named(self) -> None:
-        """`preset: "all"` never reaches nursery, so the 87 names are the list.
-
-        Deleting the name would leave the rule off by accident rather
-        than by decision, and indistinguishable from one nobody ruled on.
-        """
-        assert self.RULE in self.nursery
-        assert self.RULE in NURSERY
-
-    def test_its_domain_is_org_fixed_so_no_repo_can_move_it(self) -> None:
-        """`test` is org strictness; a repository cannot claim or lower it."""
-        assert NURSERY[self.RULE] == "test"
-        assert NURSERY[self.RULE] in DELIVERED.org
-        assert NURSERY[self.RULE] not in DELIVERED.identity
-
-    def test_no_repository_identity_turns_it_back_on(self) -> None:
-        """The generator only ever writes "off"; assert it never writes "on"."""
-        for claimed in (*CLAIMS, set(DELIVERED.identity)):
-            config, _silenced = biome_config.generate(
-                self.org,
-                claimed,
-                DELIVERED,
-                NURSERY,
-            )
-            rule = table(config, "linter", "rules", "nursery")[self.RULE]
-            assert rule == "off"
-
-    def test_it_is_not_in_the_test_file_override(self) -> None:
-        """The reason it is off org-wide: one of the eight is production code.
-
-        `apps/door/src/submit.ts:176` — a local `assert` verb, not a test
-        assertion. #783's globs would never have reached it.
-        """
-        for item in decoded.as_array(self.org["overrides"], "overrides"):
-            entry = decoded.as_object(item, "an override")
-            rules = table_or_empty(table_or_empty(entry, "linter"), "rules")
-            assert self.RULE not in table_or_empty(rules, "nursery")
+@fixture
+def conditional_expect_test() -> ConditionalExpectTest:
+    """Give each row its own ConditionalExpectTest."""
+    return ConditionalExpectTest()
 
 
-class TestNurseryTableTest:
-    """The delivered rule-to-domain table, and what the generator does with it."""
-
-    def test_every_enforced_nursery_rule_is_mapped(self) -> None:
-        """An unmapped rule escapes its domain — the whole #720 defect."""
-        enforced = set(table(org_config(), "linter", "rules", "nursery"))
-        assert enforced - set(NURSERY) == NO_NAMES
-
-    def test_the_table_maps_nothing_the_org_does_not_enforce(self) -> None:
-        """A mapped rule nobody enables is a row that means nothing."""
-        enforced = set(table(org_config(), "linter", "rules", "nursery"))
-        assert set(NURSERY) - enforced == NO_NAMES
-
-    def test_no_domain_is_stated_rather_than_left_blank(self) -> None:
-        """`-` is a statement; an empty column is a field someone forgot."""
-        assert biome_config.NO_DOMAIN == "-"
-        assert "" not in NURSERY.values()
-        assert "-" in NURSERY.values()
-
-    @pytest.mark.parametrize(("rule", "domain"), NURSERY.items())
-    def test_every_stated_domain_is_a_domain_the_org_knows(
-        self, rule: object, domain: object
-    ) -> None:
-        """A row naming a domain outside the table could never be claimed."""
-        known = {*DELIVERED.identity, *DELIVERED.org, biome_config.NO_DOMAIN}
-        assert domain in known
-
-    def test_the_measured_fixture_rule_is_mapped_to_reactnative(self) -> None:
-        """The rule that proved the defect, spot-checked."""
-        assert NURSERY["noReactNativeRawText"] == "reactNative"
-
-    def test_comments_are_not_rows(self) -> None:
-        """The file is commented heavily; none of it may become a rule."""
-        assert "#" not in "".join(NURSERY)
+def test_the_rule_is_off_against_the_literal(
+    conditional_expect_test: ConditionalExpectTest,
+) -> None:
+    """Asserted against "off" itself, never against a constant."""
+    assert conditional_expect_test.nursery[CONDITIONAL_EXPECT_TEST_RULE] == "off"
 
 
-class TestSilenceNurseryTest:
-    """Which nursery rules a repository's identity switches off."""
+def test_the_rule_is_still_named(
+    conditional_expect_test: ConditionalExpectTest,
+) -> None:
+    """`preset: "all"` never reaches nursery, so the 87 names are the list.
 
-    @staticmethod
-    def build(
-        claimed: set[str], table_: dict[str, str]
-    ) -> tuple[dict[str, object], int]:
-        """Silence one small nursery block.
-
-        Returns:
-            The resulting block and the count reported.
-
-        """
-        config: dict[str, object] = {
-            "linter": {"rules": {"nursery": dict.fromkeys(table_, "on")}}
-        }
-        silenced = biome_config.silence_nursery(config, claimed, DELIVERED, table_)
-        return table(config, "linter", "rules", "nursery"), silenced
-
-    def test_the_silencing_value_is_the_literal_biome_understands(self) -> None:
-        """Asserted against "off" itself, never against the constant.
-
-        Comparing a result to the constant that produced it passes whatever
-        the constant says — proven: a mutant setting SILENCED to "on"
-        survived a whole suite that did exactly that.
-        """
-        assert biome_config.SILENCED == "off"
-
-    def test_an_unclaimed_framework_rule_is_switched_off(self) -> None:
-        """The #720 case, in miniature."""
-        block, silenced = self.build(set(), {"noReactNativeRawText": "reactNative"})
-        assert block["noReactNativeRawText"] == "off"
-        assert silenced == 1
-
-    def test_a_claimed_framework_rule_stays_on(self) -> None:
-        """A React repo keeps react's nursery rules."""
-        block, silenced = self.build({"react"}, {"noJsxLeakedDollar": "react"})
-        assert block["noJsxLeakedDollar"] == "on"
-        assert silenced == 0
-
-    def test_a_rule_with_no_domain_stays_on_everywhere(self) -> None:
-        """31 of the 87 are not statements about what a repo is."""
-        block, silenced = self.build(set(), {"useExplicitType": "-"})
-        assert block["useExplicitType"] == "on"
-        assert silenced == 0
-
-    @pytest.mark.parametrize("domain", DELIVERED.org)
-    def test_org_fixed_domains_are_never_silenced(self, domain: object) -> None:
-        """project, types and test are the org's level, not repo identity."""
-        block, silenced = self.build(set(), {"aRule": domain})
-        assert block["aRule"] == "on"
-        assert silenced == 0
-
-    def test_a_rule_missing_from_the_table_stays_on(self) -> None:
-        """Fail OPEN here: the gate's own guard is what catches an omission."""
-        block, silenced = self.build(set(), {})
-        assert block == EMPTY_BLOCK
-        assert silenced == 0
-
-    def test_the_delivered_tables_silence_the_measured_counts(self) -> None:
-        """34 for a repo claiming nothing, 28 for one claiming react."""
-        org = org_config()
-        _config, none = biome_config.generate(org, set(), DELIVERED, NURSERY)
-        _config, react = biome_config.generate(org, {"react"}, DELIVERED, NURSERY)
-        assert none == 34
-        assert react == 28
-        # The difference is exactly react's own nursery rules, which is
-        # what claiming a domain buys back.
-        react_rules = sum(1 for d in NURSERY.values() if d == "react")
-        assert none - react == react_rules
+    Deleting the name would leave the rule off by accident rather
+    than by decision, and indistinguishable from one nobody ruled on.
+    """
+    assert CONDITIONAL_EXPECT_TEST_RULE in conditional_expect_test.nursery
+    assert CONDITIONAL_EXPECT_TEST_RULE in NURSERY
 
 
-class TestRunTest:
-    """End to end, through the same entry point the belt task calls."""
+@pytest.mark.usefixtures("conditional_expect_test")
+def test_its_domain_is_org_fixed_so_no_repo_can_move_it() -> None:
+    """`test` is org strictness; a repository cannot claim or lower it."""
+    assert NURSERY[CONDITIONAL_EXPECT_TEST_RULE] == "test"
+    assert NURSERY[CONDITIONAL_EXPECT_TEST_RULE] in DELIVERED.org
+    assert NURSERY[CONDITIONAL_EXPECT_TEST_RULE] not in DELIVERED.identity
 
-    @staticmethod
-    def invoke(
-        body: object, manifests: dict[str, object], *, capfd: pytest.CaptureFixture[str]
-    ) -> tuple[int, str, str, Path]:
-        """Run the generator in a temporary tree.
 
-        Returns:
-            Exit status, stdout, stderr and the generated config path.
+def test_no_repository_identity_turns_it_back_on(
+    conditional_expect_test: ConditionalExpectTest,
+) -> None:
+    """The generator only ever writes "off"; assert it never writes "on"."""
+    for claimed in (*CLAIMS, set(DELIVERED.identity)):
+        config, _silenced = biome_config.generate(
+            conditional_expect_test.org,
+            claimed,
+            DELIVERED,
+            NURSERY,
+        )
+        rule = table(config, "linter", "rules", "nursery")[CONDITIONAL_EXPECT_TEST_RULE]
+        assert rule == "off"
 
-        """
-        tree = Path(tempfile.mkdtemp())
-        declared = tree / "biome.json"
-        if body is not None:
-            declared.write_text(declaration(body), encoding="utf-8")
-        paths: list[Path] = []
-        for name, content in manifests.items():
-            path = tree / name
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps(content), encoding="utf-8")
-            paths.append(path)
-        generated = tree / "generated.json"
-        with pytest.MonkeyPatch.context() as patched:
-            patched.setattr(
-                sys, "stdin", io.StringIO("".join(f"{path}\0" for path in paths))
-            )
-            status = biome_config.main([
-                *("--org", str(ORG_FILE), "--domains", str(DOMAINS_FILE)),
-                *("--nursery", str(NURSERY_FILE), "--out", str(generated)),
-                *("--declaration", str(declared)),
-            ])
-        out, err = capfd.readouterr()
-        return status, out, err, generated
 
-    @pytest.mark.parametrize(
-        ("text", "said"),
-        [
-            ("{", "Expecting property name enclosed in double quotes"),
-            ("[]", "the document is not an object"),
-            ('{"linter": []}', "linter is not an object"),
-            ('{"linter": {"rules": {"nursery": 1}}}', "linter.rules.nursery is not"),
-        ],
+def test_it_is_not_in_the_test_file_override(
+    conditional_expect_test: ConditionalExpectTest,
+) -> None:
+    """The reason it is off org-wide: one of the eight is production code.
+
+    `apps/door/src/submit.ts:176` — a local `assert` verb, not a test
+    assertion. #783's globs would never have reached it.
+    """
+    for item in decoded.as_array(conditional_expect_test.org["overrides"], "overrides"):
+        entry = decoded.as_object(item, "an override")
+        rules = table_or_empty(table_or_empty(entry, "linter"), "rules")
+        assert CONDITIONAL_EXPECT_TEST_RULE not in table_or_empty(rules, "nursery")
+
+
+# The delivered rule-to-domain table, and what the generator does with it.
+def test_every_enforced_nursery_rule_is_mapped() -> None:
+    """An unmapped rule escapes its domain — the whole #720 defect."""
+    enforced = set(table(org_config(), "linter", "rules", "nursery"))
+    assert enforced - set(NURSERY) == NO_NAMES
+
+
+def test_the_table_maps_nothing_the_org_does_not_enforce() -> None:
+    """A mapped rule nobody enables is a row that means nothing."""
+    enforced = set(table(org_config(), "linter", "rules", "nursery"))
+    assert set(NURSERY) - enforced == NO_NAMES
+
+
+def test_no_domain_is_stated_rather_than_left_blank() -> None:
+    """`-` is a statement; an empty column is a field someone forgot."""
+    assert biome_config.NO_DOMAIN == "-"
+    assert "" not in NURSERY.values()
+    assert "-" in NURSERY.values()
+
+
+@pytest.mark.parametrize(("rule", "domain"), NURSERY.items())
+def test_every_stated_domain_is_a_domain_the_org_knows(
+    rule: object, domain: object
+) -> None:
+    """A row naming a domain outside the table could never be claimed."""
+    known = {*DELIVERED.identity, *DELIVERED.org, biome_config.NO_DOMAIN}
+    assert domain in known
+
+
+def test_the_measured_fixture_rule_is_mapped_to_reactnative() -> None:
+    """The rule that proved the defect, spot-checked."""
+    assert NURSERY["noReactNativeRawText"] == "reactNative"
+
+
+def test_comments_are_not_rows() -> None:
+    """The file is commented heavily; none of it may become a rule."""
+    assert "#" not in "".join(NURSERY)
+
+
+# Which nursery rules a repository's identity switches off.
+def build(claimed: set[str], table_: dict[str, str]) -> tuple[dict[str, object], int]:
+    """Silence one small nursery block.
+
+    Returns:
+        The resulting block and the count reported.
+
+    """
+    config: dict[str, object] = {
+        "linter": {"rules": {"nursery": dict.fromkeys(table_, "on")}}
+    }
+    silenced = biome_config.silence_nursery(config, claimed, DELIVERED, table_)
+    return table(config, "linter", "rules", "nursery"), silenced
+
+
+def test_the_silencing_value_is_the_literal_biome_understands() -> None:
+    """Asserted against "off" itself, never against the constant.
+
+    Comparing a result to the constant that produced it passes whatever
+    the constant says — proven: a mutant setting SILENCED to "on"
+    survived a whole suite that did exactly that.
+    """
+    assert biome_config.SILENCED == "off"
+
+
+def test_an_unclaimed_framework_rule_is_switched_off() -> None:
+    """The #720 case, in miniature."""
+    block, silenced = build(set(), {"noReactNativeRawText": "reactNative"})
+    assert block["noReactNativeRawText"] == "off"
+    assert silenced == 1
+
+
+def test_a_claimed_framework_rule_stays_on() -> None:
+    """A React repo keeps react's nursery rules."""
+    block, silenced = build({"react"}, {"noJsxLeakedDollar": "react"})
+    assert block["noJsxLeakedDollar"] == "on"
+    assert silenced == 0
+
+
+def test_a_rule_with_no_domain_stays_on_everywhere() -> None:
+    """31 of the 87 are not statements about what a repo is."""
+    block, silenced = build(set(), {"useExplicitType": "-"})
+    assert block["useExplicitType"] == "on"
+    assert silenced == 0
+
+
+@pytest.mark.parametrize("domain", DELIVERED.org)
+def test_org_fixed_domains_are_never_silenced(domain: object) -> None:
+    """project, types and test are the org's level, not repo identity."""
+    block, silenced = build(set(), {"aRule": domain})
+    assert block["aRule"] == "on"
+    assert silenced == 0
+
+
+def test_a_rule_missing_from_the_table_stays_on() -> None:
+    """Fail OPEN here: the gate's own guard is what catches an omission."""
+    block, silenced = build(set(), {})
+    assert block == EMPTY_BLOCK
+    assert silenced == 0
+
+
+def test_the_delivered_tables_silence_the_measured_counts() -> None:
+    """34 for a repo claiming nothing, 28 for one claiming react."""
+    org = org_config()
+    _config, none = biome_config.generate(org, set(), DELIVERED, NURSERY)
+    _config, react = biome_config.generate(org, {"react"}, DELIVERED, NURSERY)
+    assert none == 34
+    assert react == 28
+    # The difference is exactly react's own nursery rules, which is
+    # what claiming a domain buys back.
+    react_rules = sum(1 for d in NURSERY.values() if d == "react")
+    assert none - react == react_rules
+
+
+# End to end, through the same entry point the belt task calls.
+def invoke(
+    body: object, manifests: dict[str, object], *, capfd: pytest.CaptureFixture[str]
+) -> tuple[int, str, str, Path]:
+    """Run the generator in a temporary tree.
+
+    Returns:
+        Exit status, stdout, stderr and the generated config path.
+
+    """
+    tree = Path(tempfile.mkdtemp())
+    declared = tree / "biome.json"
+    if body is not None:
+        declared.write_text(declaration(body), encoding="utf-8")
+    paths: list[Path] = []
+    for name, content in manifests.items():
+        path = tree / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(content), encoding="utf-8")
+        paths.append(path)
+    generated = tree / "generated.json"
+    with pytest.MonkeyPatch.context() as patched:
+        patched.setattr(
+            sys, "stdin", io.StringIO("".join(f"{path}\0" for path in paths))
+        )
+        status = biome_config.main([
+            *("--org", str(ORG_FILE), "--domains", str(DOMAINS_FILE)),
+            *("--nursery", str(NURSERY_FILE), "--out", str(generated)),
+            *("--declaration", str(declared)),
+        ])
+    out, err = capfd.readouterr()
+    return status, out, err, generated
+
+
+@pytest.mark.parametrize(
+    ("text", "said"),
+    [
+        ("{", "Expecting property name enclosed in double quotes"),
+        ("[]", "the document is not an object"),
+        ('{"linter": []}', "linter is not an object"),
+        ('{"linter": {"rules": {"nursery": 1}}}', "linter.rules.nursery is not"),
+    ],
+)
+def test_an_org_config_it_cannot_read_is_refused_by_name(
+    text: object, said: object
+) -> None:
+    """Not JSON, or a linter / rules / nursery not an object: named."""
+    tree = Path(tempfile.mkdtemp())
+    args = biome_config.Args()
+    args.org = tree / "biome-org.json"
+    args.org.write_text(text, encoding="utf-8")
+    args.domains = DOMAINS_FILE
+    args.nursery = NURSERY_FILE
+    args.out = tree / "generated.json"
+    args.declaration = tree / "biome.json"
+    err = io.StringIO()
+    with redirect_stderr(err):
+        status = biome_config.run(args, [])
+    lines = err.getvalue().splitlines()
+    assert status == 1
+    assert f"{TASK}: {args.org} cannot be read" == lines[0]
+    assert lines[1].startswith(f"  {said}"), lines[1]
+    assert lines[2] == "  it is the belt's delivered config; restore it from the canon"
+    assert not args.out.exists()
+
+
+def test_a_conforming_react_repository_generates(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """The MA shape: one claim, one matching dependency."""
+    status, out, _err, path = invoke(
+        {"linter": {"domains": {"react": "all"}}},
+        {"apps/web/package.json": {"dependencies": {"react": "19.2.8"}}},
+        capfd=capfd,
     )
-    def test_an_org_config_it_cannot_read_is_refused_by_name(
-        self, text: object, said: object
-    ) -> None:
-        """Not JSON, or a linter / rules / nursery not an object: named."""
-        tree = Path(tempfile.mkdtemp())
-        args = biome_config.Args()
-        args.org = tree / "biome-org.json"
-        args.org.write_text(text, encoding="utf-8")
-        args.domains = DOMAINS_FILE
-        args.nursery = NURSERY_FILE
-        args.out = tree / "generated.json"
-        args.declaration = tree / "biome.json"
-        err = io.StringIO()
-        with redirect_stderr(err):
-            status = biome_config.run(args, [])
-        lines = err.getvalue().splitlines()
-        assert status == 1
-        assert f"{TASK}: {args.org} cannot be read" == lines[0]
-        assert lines[1].startswith(f"  {said}"), lines[1]
-        assert (
-            lines[2] == "  it is the belt's delivered config; restore it from the canon"
-        )
-        assert not args.out.exists()
+    assert status == 0
+    assert "react" in out
+    generated = decoded.load_json(path.read_text(encoding="utf-8"))
+    written = table(generated, "linter", "domains")
+    assert written["react"] == "all"
+    assert written["qwik"] == "none"
 
-    def test_a_conforming_react_repository_generates(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """The MA shape: one claim, one matching dependency."""
-        status, out, _err, path = self.invoke(
-            {"linter": {"domains": {"react": "all"}}},
-            {"apps/web/package.json": {"dependencies": {"react": "19.2.8"}}},
-            capfd=capfd,
-        )
-        assert status == 0
-        assert "react" in out
-        generated = decoded.load_json(path.read_text(encoding="utf-8"))
-        written = table(generated, "linter", "domains")
-        assert written["react"] == "all"
-        assert written["qwik"] == "none"
 
-    def test_a_repository_with_no_declaration_and_no_framework_generates(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """The canon itself must keep working with no biome.json at all."""
-        status, _out, _err, path = self.invoke(None, {}, capfd=capfd)
-        assert status == 0
-        assert path.is_file()
+def test_a_repository_with_no_declaration_and_no_framework_generates(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """The canon itself must keep working with no biome.json at all."""
+    status, _out, _err, path = invoke(None, {}, capfd=capfd)
+    assert status == 0
+    assert path.is_file()
 
-    def test_an_undeclared_framework_fails_with_the_manifest_named(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """Lowering by silence, refused, with the evidence in the message."""
-        status, _out, err, path = self.invoke(
-            None,
-            {"apps/web/package.json": {"dependencies": {"react": "19.2.8"}}},
-            capfd=capfd,
-        )
-        assert status == 1
-        assert "react" in err
-        assert "apps/web/package.json" in err
-        assert not path.exists()
 
-    def test_a_declaration_carrying_rules_fails(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """No config is written when the declaration is refused."""
-        status, _out, err, path = self.invoke(
-            {"linter": {"rules": {"correctness": {"noNodejsModules": "off"}}}},
-            {},
-            capfd=capfd,
-        )
-        assert status == 1
-        assert "linter.rules" in err
-        assert not path.exists()
+def test_an_undeclared_framework_fails_with_the_manifest_named(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """Lowering by silence, refused, with the evidence in the message."""
+    status, _out, err, path = invoke(
+        None,
+        {"apps/web/package.json": {"dependencies": {"react": "19.2.8"}}},
+        capfd=capfd,
+    )
+    assert status == 1
+    assert "react" in err
+    assert "apps/web/package.json" in err
+    assert not path.exists()
 
-    def test_invalid_json_fails_without_a_traceback(self) -> None:
-        """A hand-edited file that does not parse gets a sentence, not a stack."""
-        tree = Path(tempfile.mkdtemp())
-        declared = tree / "biome.json"
-        declared.write_text("{", encoding="utf-8")
 
-        args = biome_config.Args()
-        args.org = ORG_FILE
-        args.domains = DOMAINS_FILE
-        args.nursery = NURSERY_FILE
-        args.out = tree / "generated.json"
-        args.declaration = declared
-        stderr = io.StringIO()
-        with redirect_stderr(stderr):
-            status = biome_config.run(args, [])
-        assert status == 1
-        assert "not valid JSON" in stderr.getvalue()
+def test_a_declaration_carrying_rules_fails(capfd: pytest.CaptureFixture[str]) -> None:
+    """No config is written when the declaration is refused."""
+    status, _out, err, path = invoke(
+        {"linter": {"rules": {"correctness": {"noNodejsModules": "off"}}}},
+        {},
+        capfd=capfd,
+    )
+    assert status == 1
+    assert "linter.rules" in err
+    assert not path.exists()
+
+
+def test_invalid_json_fails_without_a_traceback() -> None:
+    """A hand-edited file that does not parse gets a sentence, not a stack."""
+    tree = Path(tempfile.mkdtemp())
+    declared = tree / "biome.json"
+    declared.write_text("{", encoding="utf-8")
+
+    args = biome_config.Args()
+    args.org = ORG_FILE
+    args.domains = DOMAINS_FILE
+    args.nursery = NURSERY_FILE
+    args.out = tree / "generated.json"
+    args.declaration = declared
+    stderr = io.StringIO()
+    with redirect_stderr(stderr):
+        status = biome_config.run(args, [])
+    assert status == 1
+    assert "not valid JSON" in stderr.getvalue()
 
 
 # A Node import, the one line noNodejsModules judges (#2116).
@@ -1010,151 +1098,157 @@ A_RESOLVED_DOCUMENT_THAT_IS_NOT_AN_OBJECT_IS_REFUSED_ROWS: tuple[
 )
 
 
-class TestNodeOverridesTest:
-    """noNodejsModules is off where a tsconfig declares Node's types (#2116)."""
+# noNodejsModules is off where a tsconfig declares Node's types (#2116).
+def resolved(types: object) -> dict[str, object]:
+    """Build a resolved document as `tsc --showConfig` prints one.
 
-    @staticmethod
-    def resolved(types: object) -> dict[str, object]:
-        """Build a resolved document as `tsc --showConfig` prints one.
+    Returns:
+        The document, with `types` under `compilerOptions`.
 
-        Returns:
-            The document, with `types` under `compilerOptions`.
+    """
+    return {"compilerOptions": {"strict": True, "types": types}}
 
-        """
-        return {"compilerOptions": {"strict": True, "types": types}}
 
-    def test_only_the_node_project_gets_an_override(self) -> None:
-        """apps/a declares node, apps/b does not: one entry, for apps/a/**."""
-        entries = biome_config.node_overrides({
-            "apps/a/tsconfig.json": self.resolved(["node"]),
-            "apps/b/tsconfig.json": self.resolved(["vite/client", "geojson"]),
-        })
-        expected: list[dict[str, object]] = [
-            {"includes": ["apps/a/**"], "linter": NODE_OFF},
-        ]
-        assert entries == expected
+def test_only_the_node_project_gets_an_override() -> None:
+    """apps/a declares node, apps/b does not: one entry, for apps/a/**."""
+    entries = biome_config.node_overrides({
+        "apps/a/tsconfig.json": resolved(["node"]),
+        "apps/b/tsconfig.json": resolved(["vite/client", "geojson"]),
+    })
+    expected: list[dict[str, object]] = [
+        {"includes": ["apps/a/**"], "linter": NODE_OFF},
+    ]
+    assert entries == expected
 
-    def test_a_root_node_project_covers_the_whole_tree(self) -> None:
-        """The tsconfig's directory is the root, so the pattern is `**`."""
-        root = {"tsconfig.json": self.resolved(["node"])}
-        entries = biome_config.node_overrides(root)
-        includes = [decoded.as_object(e, "an entry")["includes"] for e in entries]
-        expected: list[object] = [["**"]]
-        assert includes == expected
 
-    def test_no_tsconfig_yields_no_override(self) -> None:
-        """A repository with no TypeScript project keeps the rule everywhere."""
-        assert biome_config.node_overrides({}) == NO_ENTRIES
+def test_a_root_node_project_covers_the_whole_tree() -> None:
+    """The tsconfig's directory is the root, so the pattern is `**`."""
+    root = {"tsconfig.json": resolved(["node"])}
+    entries = biome_config.node_overrides(root)
+    includes = [decoded.as_object(e, "an entry")["includes"] for e in entries]
+    expected: list[object] = [["**"]]
+    assert includes == expected
 
-    def test_a_document_with_no_types_yields_no_override(self) -> None:
-        """Absent `types` is not Node, whatever the compiler would load."""
-        documents: tuple[object, ...] = ({"compilerOptions": {"strict": True}}, {})
-        for document in documents:
-            project = {"apps/a/tsconfig.json": document}
-            entries = biome_config.node_overrides(project)
-            assert entries == NO_ENTRIES
 
-    def test_a_types_entry_that_only_resembles_node_is_not_node(self) -> None:
-        """The entry is "node" exactly; `@types/node`-ish names are not it."""
-        shapes: tuple[object, ...] = (["node-fetch"], ["nodes"], [], "node")
-        for types in shapes:
-            project = {"a/tsconfig.json": self.resolved(types)}
-            entries = biome_config.node_overrides(project)
-            assert entries == NO_ENTRIES
+def test_no_tsconfig_yields_no_override() -> None:
+    """A repository with no TypeScript project keeps the rule everywhere."""
+    assert biome_config.node_overrides({}) == NO_ENTRIES
 
-    @pytest.mark.parametrize(
-        ("document", "said"), A_RESOLVED_DOCUMENT_THAT_IS_NOT_AN_OBJECT_IS_REFUSED_ROWS
+
+def test_a_document_with_no_types_yields_no_override() -> None:
+    """Absent `types` is not Node, whatever the compiler would load."""
+    documents: tuple[object, ...] = ({"compilerOptions": {"strict": True}}, {})
+    for document in documents:
+        project = {"apps/a/tsconfig.json": document}
+        entries = biome_config.node_overrides(project)
+        assert entries == NO_ENTRIES
+
+
+def test_a_types_entry_that_only_resembles_node_is_not_node() -> None:
+    """The entry is "node" exactly; `@types/node`-ish names are not it."""
+    shapes: tuple[object, ...] = (["node-fetch"], ["nodes"], [], "node")
+    for types in shapes:
+        project = {"a/tsconfig.json": resolved(types)}
+        entries = biome_config.node_overrides(project)
+        assert entries == NO_ENTRIES
+
+
+@pytest.mark.parametrize(
+    ("document", "said"), A_RESOLVED_DOCUMENT_THAT_IS_NOT_AN_OBJECT_IS_REFUSED_ROWS
+)
+def test_a_resolved_document_that_is_not_an_object_is_refused(
+    document: object, said: str
+) -> None:
+    """A shape the belt does not read is named, never read as "not Node"."""
+    with pytest.raises(decoded.UndecodableError) as raised:
+        biome_config.node_overrides({"apps/a/tsconfig.json": document})
+    assert str(raised.value).startswith(said), raised.value
+
+
+def test_the_entries_follow_the_org_overrides_in_the_generated_config() -> None:
+    """Appended, so the org's test-file entry is kept and stays first."""
+    org = org_config()
+    config, _silenced = biome_config.generate(
+        org,
+        set(),
+        DELIVERED,
+        NURSERY,
+        {"apps/a/tsconfig.json": resolved(["node"])},
     )
-    def test_a_resolved_document_that_is_not_an_object_is_refused(
-        self, document: object, said: str
-    ) -> None:
-        """A shape the belt does not read is named, never read as "not Node"."""
-        with pytest.raises(decoded.UndecodableError) as raised:
-            biome_config.node_overrides({"apps/a/tsconfig.json": document})
-        assert str(raised.value).startswith(said), raised.value
+    overrides = decoded.as_array(config["overrides"], "overrides")
+    delivered = decoded.as_array(org["overrides"], "overrides")
+    assert overrides[: len(delivered)] == delivered
+    assert len(overrides) == len(delivered) + 1
+    assert node_rule(overrides[-1]) == "off"
 
-    def test_the_entries_follow_the_org_overrides_in_the_generated_config(self) -> None:
-        """Appended, so the org's test-file entry is kept and stays first."""
-        org = org_config()
-        config, _silenced = biome_config.generate(
-            org,
-            set(),
-            DELIVERED,
-            NURSERY,
-            {"apps/a/tsconfig.json": self.resolved(["node"])},
-        )
-        overrides = decoded.as_array(config["overrides"], "overrides")
-        delivered = decoded.as_array(org["overrides"], "overrides")
-        assert overrides[: len(delivered)] == delivered
-        assert len(overrides) == len(delivered) + 1
-        assert node_rule(overrides[-1]) == "off"
 
-    def test_the_rule_stays_on_at_the_top_level(self) -> None:
-        """Only the override switches it off; the preset still carries it."""
-        config, _silenced = biome_config.generate(
-            org_config(),
-            set(),
-            DELIVERED,
-            NURSERY,
-            {"tsconfig.json": self.resolved(["node"])},
-        )
-        top = table(config, "linter", "rules")
-        assert top["preset"] == "all"
-        assert "noNodejsModules" not in table_or_empty(top, "correctness")
+def test_the_rule_stays_on_at_the_top_level() -> None:
+    """Only the override switches it off; the preset still carries it."""
+    config, _silenced = biome_config.generate(
+        org_config(),
+        set(),
+        DELIVERED,
+        NURSERY,
+        {"tsconfig.json": resolved(["node"])},
+    )
+    top = table(config, "linter", "rules")
+    assert top["preset"] == "all"
+    assert "noNodejsModules" not in table_or_empty(top, "correctness")
 
-    def test_a_repository_stating_the_rule_is_still_refused(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """The repository writes nothing: its own override is refused as before."""
-        stated: tuple[object, ...] = (
-            {"linter": NODE_OFF},
-            {"overrides": [{"includes": ["apps/a/**"], "linter": NODE_OFF}]},
-        )
-        for document in stated:
-            tree = Path(tempfile.mkdtemp())
-            text = declaration(document)
-            (tree / "biome.json").write_text(text, encoding="utf-8")
-            resolved = tree / "resolved.json"
-            node = json.dumps(self.resolved(["node"]))
-            resolved.write_text(node, encoding="utf-8")
-            generated = tree / "generated.json"
-            status, out, err = generate_main(
-                tree,
-                generated,
-                "--tsconfig",
-                "apps/a/tsconfig.json",
-                str(resolved),
-                capfd=capfd,
-            )
-            assert status == 1
-            assert "says more than a repository may say" in err
-            assert not generated.exists()
 
-    def test_a_resolved_file_that_is_not_json_is_refused_by_its_tsconfig(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """The task hands over tsc's output; garbage there is named, not crashed on."""
+def test_a_repository_stating_the_rule_is_still_refused(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """The repository writes nothing: its own override is refused as before."""
+    stated: tuple[object, ...] = (
+        {"linter": NODE_OFF},
+        {"overrides": [{"includes": ["apps/a/**"], "linter": NODE_OFF}]},
+    )
+    for document in stated:
         tree = Path(tempfile.mkdtemp())
-        resolved = tree / "resolved.json"
-        resolved.write_text("{", encoding="utf-8")
+        text = declaration(document)
+        (tree / "biome.json").write_text(text, encoding="utf-8")
+        shown = tree / "shown.json"
+        node = json.dumps(resolved(["node"]))
+        shown.write_text(node, encoding="utf-8")
         generated = tree / "generated.json"
         status, out, err = generate_main(
             tree,
             generated,
             "--tsconfig",
             "apps/a/tsconfig.json",
-            str(resolved),
+            str(shown),
             capfd=capfd,
         )
         assert status == 1
-        lines = err.splitlines()
-        assert (
-            lines[0]
-            == f"{TASK}: a resolved tsconfig.json is not the shape the belt reads"
-        )
-        said = "  apps/a/tsconfig.json: tsc --showConfig"
-        assert lines[1].startswith(said)
+        assert "says more than a repository may say" in err
         assert not generated.exists()
+
+
+def test_a_resolved_file_that_is_not_json_is_refused_by_its_tsconfig(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """The task hands over tsc's output; garbage there is named, not crashed on."""
+    tree = Path(tempfile.mkdtemp())
+    resolved = tree / "resolved.json"
+    resolved.write_text("{", encoding="utf-8")
+    generated = tree / "generated.json"
+    status, out, err = generate_main(
+        tree,
+        generated,
+        "--tsconfig",
+        "apps/a/tsconfig.json",
+        str(resolved),
+        capfd=capfd,
+    )
+    assert status == 1
+    lines = err.splitlines()
+    assert (
+        lines[0] == f"{TASK}: a resolved tsconfig.json is not the shape the belt reads"
+    )
+    said = "  apps/a/tsconfig.json: tsc --showConfig"
+    assert lines[1].startswith(said)
+    assert not generated.exists()
 
 
 def show_configs(
@@ -1184,124 +1278,120 @@ def show_configs(
     return pairs
 
 
-class TestNodeFixtureTest:
-    """The same `node:fs` import in two projects, under real tsc and biome (#2116).
-
-    Both tools are the belt's own: tsc resolves each tsconfig exactly as
-    the task does, the generator writes the config, and biome judges the
-    two files. Measured without `--only`, which turns a rule on whatever
-    the config says.
-    """
-
-    def test_the_node_project_is_clean_and_the_other_is_a_finding(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """apps/a declares node and passes; apps/b does not and is reported."""
-        biome = support.tool("biome")
-        git = support.tool("git")
-        with tempfile.TemporaryDirectory() as tmp:
-            # Resolved: biome anchors `includes` at the config's real
-            # directory, and macOS's /var is a link to /private/var.
-            tree = Path(tmp).resolve()
-            for project, types in (("a", ["node"]), ("b", [])):
-                (tree / "apps" / project / "src").mkdir(parents=True)
-                (tree / "apps" / project / "tsconfig.json").write_text(
-                    node_tsconfig(types), encoding="utf-8"
-                )
-                (tree / "apps" / project / "src" / "probe.ts").write_text(
-                    NODE_IMPORT, encoding="utf-8"
-                )
-            env = support.env()
-            subprocess.run([git, "init", "-q"], cwd=tree, env=env, check=True)
-            pairs = show_configs(tree, env, ("a", "b"))
-            generated = tree / "biome-org.generated.json"
-            status, out, err = generate_main(tree, generated, *pairs, capfd=capfd)
-            assert status == 0, err
-            assert "noNodejsModules off in 1 Node project(s)" in out
-            report = tree / "report.json"
-            subprocess.run(
-                [
-                    *(biome, "lint", "--config-path", str(generated)),
-                    *("--reporter=json", f"--reporter-file={report}"),
-                    *("apps/a/src/probe.ts", "apps/b/src/probe.ts"),
-                ],
-                cwd=tree,
-                env=env,
-                capture_output=True,
-                text=True,
-                check=False,
+# The same `node:fs` import in two projects, under real tsc and biome (#2116).
+#
+# Both tools are the belt's own: tsc resolves each tsconfig exactly as
+# the task does, the generator writes the config, and biome judges the
+# two files. Measured without `--only`, which turns a rule on whatever
+# the config says.
+def test_the_node_project_is_clean_and_the_other_is_a_finding(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """apps/a declares node and passes; apps/b does not and is reported."""
+    biome = support.tool("biome")
+    git = support.tool("git")
+    with tempfile.TemporaryDirectory() as tmp:
+        # Resolved: biome anchors `includes` at the config's real
+        # directory, and macOS's /var is a link to /private/var.
+        tree = Path(tmp).resolve()
+        for project, types in (("a", ["node"]), ("b", [])):
+            (tree / "apps" / project / "src").mkdir(parents=True)
+            (tree / "apps" / project / "tsconfig.json").write_text(
+                node_tsconfig(types), encoding="utf-8"
             )
-            document = decoded.load_json(report.read_text(encoding="utf-8"))
-        found = [
-            decoded.as_str(table(d, "location")["path"], "path")
-            for d in decoded.as_array(table(document)["diagnostics"], "diagnostics")
-            if table(d)["category"] == "lint/correctness/noNodejsModules"
-        ]
-        expected: list[str] = ["apps/b/src/probe.ts"]
-        posix: list[str] = [Path(f).as_posix() for f in found]
-        assert posix == expected
-
-
-class TestNodeTaskBodyTest:
-    """The task resolves each tracked tsconfig; one tsc refuses ends it by name."""
-
-    def run_body(self, task: str) -> subprocess.CompletedProcess[str]:
-        """Run one belt task body over a tree whose tracked tsconfig is gone.
-
-        tsc 7.0.2's `--showConfig` exits 0 on a tsconfig it cannot parse;
-        the refusal it does make is TS5058, a path that does not exist,
-        which is what a tracked tsconfig deleted from the tree meets.
-
-        Returns:
-            The finished process.
-
-        """
-        tasks = decoded.as_object(
-            decoded.load_toml((BELT / "config.toml").read_bytes())["tasks"], "tasks"
+            (tree / "apps" / project / "src" / "probe.ts").write_text(
+                NODE_IMPORT, encoding="utf-8"
+            )
+        env = support.env()
+        subprocess.run([git, "init", "-q"], cwd=tree, env=env, check=True)
+        pairs = show_configs(tree, env, ("a", "b"))
+        generated = tree / "biome-org.generated.json"
+        status, out, err = generate_main(tree, generated, *pairs, capfd=capfd)
+        assert status == 0, err
+        assert "noNodejsModules off in 1 Node project(s)" in out
+        report = tree / "report.json"
+        subprocess.run(
+            [
+                *(biome, "lint", "--config-path", str(generated)),
+                *("--reporter=json", f"--reporter-file={report}"),
+                *("apps/a/src/probe.ts", "apps/b/src/probe.ts"),
+            ],
+            cwd=tree,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
         )
-        table_ = decoded.as_object(tasks[task], task)
-        body = decoded.as_str(table_["run"], f"{task}.run")
-        git = support.tool("git")
-        tsc = Path(support.tool("tsc")).parent
-        with tempfile.TemporaryDirectory() as tmp:
-            tree = Path(tmp)
-            (tree / "apps" / "a" / "src").mkdir(parents=True)
-            (tree / "apps" / "a" / "tsconfig.json").write_text(
-                node_tsconfig(["node"]), encoding="utf-8"
-            )
-            probe = tree / "apps" / "a" / "src" / "probe.ts"
-            probe.write_text(NODE_IMPORT, encoding="utf-8")
-            env = support.env(
-                PATH=f"{tsc}:{support.env().get('PATH', '')}",
-                ORG_PYTHON=sys.executable,
-                ORG_BELT_DIR=str(BELT),
-            )
-            subprocess.run([git, "init", "-q"], cwd=tree, env=env, check=True)
-            subprocess.run([git, "add", "."], cwd=tree, env=env, check=True)
-            (tree / "apps" / "a" / "tsconfig.json").unlink()
-            as_mise = support.task_run(task, body)
-            done = subprocess.run(
-                as_mise.argv,
-                cwd=tree,
-                env=env | as_mise.env,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            leftovers = sorted(p.name for p in tree.iterdir())
-        expected: list[str] = [".git", "apps"]
-        assert leftovers == expected, "the run left residue"
-        return done
+        document = decoded.load_json(report.read_text(encoding="utf-8"))
+    found = [
+        decoded.as_str(table(d, "location")["path"], "path")
+        for d in decoded.as_array(table(document)["diagnostics"], "diagnostics")
+        if table(d)["category"] == "lint/correctness/noNodejsModules"
+    ]
+    expected: list[str] = ["apps/b/src/probe.ts"]
+    posix: list[str] = [Path(f).as_posix() for f in found]
+    assert posix == expected
 
-    @pytest.mark.parametrize("task", ["lint:biome", "fix:biome"])
-    def test_a_tsconfig_tsc_refuses_ends_both_tasks_by_name(self, task: object) -> None:
-        """The compiler's own message is printed under the tsconfig's name."""
-        done = self.run_body(task)
-        assert done.returncode == 1, done.stderr
-        lines = done.stderr.splitlines()
-        said = f"{task}: apps/a/tsconfig.json does not resolve"
-        assert lines[0] == said
-        assert lines[1].startswith("  error TS5058:"), done.stderr
+
+# The task resolves each tracked tsconfig; one tsc refuses ends it by name.
+def run_body(task: str) -> subprocess.CompletedProcess[str]:
+    """Run one belt task body over a tree whose tracked tsconfig is gone.
+
+    tsc 7.0.2's `--showConfig` exits 0 on a tsconfig it cannot parse;
+    the refusal it does make is TS5058, a path that does not exist,
+    which is what a tracked tsconfig deleted from the tree meets.
+
+    Returns:
+        The finished process.
+
+    """
+    tasks = decoded.as_object(
+        decoded.load_toml((BELT / "config.toml").read_bytes())["tasks"], "tasks"
+    )
+    table_ = decoded.as_object(tasks[task], task)
+    body = decoded.as_str(table_["run"], f"{task}.run")
+    git = support.tool("git")
+    tsc = Path(support.tool("tsc")).parent
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = Path(tmp)
+        (tree / "apps" / "a" / "src").mkdir(parents=True)
+        (tree / "apps" / "a" / "tsconfig.json").write_text(
+            node_tsconfig(["node"]), encoding="utf-8"
+        )
+        probe = tree / "apps" / "a" / "src" / "probe.ts"
+        probe.write_text(NODE_IMPORT, encoding="utf-8")
+        env = support.env(
+            PATH=f"{tsc}:{support.env().get('PATH', '')}",
+            ORG_PYTHON=sys.executable,
+            ORG_BELT_DIR=str(BELT),
+        )
+        subprocess.run([git, "init", "-q"], cwd=tree, env=env, check=True)
+        subprocess.run([git, "add", "."], cwd=tree, env=env, check=True)
+        (tree / "apps" / "a" / "tsconfig.json").unlink()
+        as_mise = support.task_run(task, body)
+        done = subprocess.run(
+            as_mise.argv,
+            cwd=tree,
+            env=env | as_mise.env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        leftovers = sorted(p.name for p in tree.iterdir())
+    expected: list[str] = [".git", "apps"]
+    assert leftovers == expected, "the run left residue"
+    return done
+
+
+@pytest.mark.parametrize("task", ["lint:biome", "fix:biome"])
+def test_a_tsconfig_tsc_refuses_ends_both_tasks_by_name(task: object) -> None:
+    """The compiler's own message is printed under the tsconfig's name."""
+    done = run_body(task)
+    assert done.returncode == 1, done.stderr
+    lines = done.stderr.splitlines()
+    said = f"{task}: apps/a/tsconfig.json does not resolve"
+    assert lines[0] == said
+    assert lines[1].startswith("  error TS5058:"), done.stderr
 
 
 BIOME_STUB = """#!/bin/sh
@@ -1315,55 +1405,53 @@ exit 1
 ORG_NAMES_NO_Z = '{"linter": {"rules": {"nursery": {"noZ": "error"}}}}\n'
 
 
-class TestBiomeDomainsDriftTest:
-    """lint:biome-domains, the nursery table against the org config."""
+# lint:biome-domains, the nursery table against the org config.
+def test_both_directions_of_drift_are_named_grouped() -> None:
+    """Each side's rule is named, every enforced one before every mapped one.
 
-    def test_both_directions_of_drift_are_named_grouped(self) -> None:
-        """Each side's rule is named, every enforced one before every mapped one.
-
-        `noA` sorts before `noZ`, so `comm -3` lists the table's rule
-        first: the finding still groups the config's rule ahead of it.
-        """
-        tasks = decoded.as_object(
-            decoded.load_toml((BELT / "config.toml").read_bytes())["tasks"], "tasks"
+    `noA` sorts before `noZ`, so `comm -3` lists the table's rule
+    first: the finding still groups the config's rule ahead of it.
+    """
+    tasks = decoded.as_object(
+        decoded.load_toml((BELT / "config.toml").read_bytes())["tasks"], "tasks"
+    )
+    task = decoded.as_object(tasks["lint:biome-domains"], "lint:biome-domains")
+    body = decoded.as_str(task["run"], "lint:biome-domains.run")
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        stubs = root / "stubs"
+        stubs.mkdir()
+        (stubs / "biome").write_text(BIOME_STUB, encoding="utf-8")
+        (stubs / "biome").chmod(0o755)
+        tree = root / "tree"
+        (tree / "mise").mkdir(parents=True)
+        planted = {
+            "mise/biome-domains.tsv": "# no domain rows\n",
+            "mise/biome-nursery-domains.tsv": "noA\tnext\n",
+            "mise/biome-org.json": ORG_NAMES_NO_Z,
+        }
+        for name, text in planted.items():
+            (tree / name).write_text(text, encoding="utf-8")
+        jq = Path(support.tool("jq")).parent
+        env = support.env(PATH=f"{stubs}:{jq}:{support.env().get('PATH', '')}")
+        git = support.tool("git")
+        subprocess.run([git, "init", "-q"], cwd=tree, env=env, check=True)
+        subprocess.run([git, "add", "."], cwd=tree, env=env, check=True)
+        as_mise = support.task_run("lint:biome-domains", body)
+        done = subprocess.run(
+            as_mise.argv,
+            cwd=tree,
+            env=env | as_mise.env,
+            capture_output=True,
+            text=True,
+            check=False,
         )
-        task = decoded.as_object(tasks["lint:biome-domains"], "lint:biome-domains")
-        body = decoded.as_str(task["run"], "lint:biome-domains.run")
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            stubs = root / "stubs"
-            stubs.mkdir()
-            (stubs / "biome").write_text(BIOME_STUB, encoding="utf-8")
-            (stubs / "biome").chmod(0o755)
-            tree = root / "tree"
-            (tree / "mise").mkdir(parents=True)
-            planted = {
-                "mise/biome-domains.tsv": "# no domain rows\n",
-                "mise/biome-nursery-domains.tsv": "noA\tnext\n",
-                "mise/biome-org.json": ORG_NAMES_NO_Z,
-            }
-            for name, text in planted.items():
-                (tree / name).write_text(text, encoding="utf-8")
-            jq = Path(support.tool("jq")).parent
-            env = support.env(PATH=f"{stubs}:{jq}:{support.env().get('PATH', '')}")
-            git = support.tool("git")
-            subprocess.run([git, "init", "-q"], cwd=tree, env=env, check=True)
-            subprocess.run([git, "add", "."], cwd=tree, env=env, check=True)
-            as_mise = support.task_run("lint:biome-domains", body)
-            done = subprocess.run(
-                as_mise.argv,
-                cwd=tree,
-                env=env | as_mise.env,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-        assert done.returncode == 1, done.stderr
-        assert done.stderr == (
-            "lint:biome-domains: the nursery table and the org config name"
-            " different rules\n"
-            "  enforced but unmapped: noZ\n"
-            "  mapped but not enforced: noA\n"
-            "  an unmapped rule escapes its domain and runs in every repo"
-            " whatever the repo is\n"
-        )
+    assert done.returncode == 1, done.stderr
+    assert done.stderr == (
+        "lint:biome-domains: the nursery table and the org config name"
+        " different rules\n"
+        "  enforced but unmapped: noZ\n"
+        "  mapped but not enforced: noA\n"
+        "  an unmapped rule escapes its domain and runs in every repo"
+        " whatever the repo is\n"
+    )

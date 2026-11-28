@@ -75,36 +75,32 @@ RELATIVE_IMPORT: list[tuple[str, str]] = [("from . import hypothesis", "top")]
 QUOTED_IMPORT: list[tuple[str, str]] = [("x = 'import hypothesis'", "def")]
 
 
-class TestInvariance:
-    """An importer is a statement, wherever it sits."""
-
-    @given(st.lists(STATEMENT, max_size=6))
-    @example(RELATIVE_IMPORT)
-    @example(QUOTED_IMPORT)
-    def test_importer_exactly_when_a_statement_imports(
-        self, statements: list[tuple[str, str]]
-    ) -> None:
-        """Strings, lookalikes and relative imports never count."""
-        source = "".join(starmap(wrapped, statements))
-        expected = any(s in IMPORTERS for s, _ in statements)
-        assert hi.imports_hypothesis(ast.parse(source)) == expected, source
+# An importer is a statement, wherever it sits.
+@given(st.lists(STATEMENT, max_size=6))
+@example(RELATIVE_IMPORT)
+@example(QUOTED_IMPORT)
+def test_importer_exactly_when_a_statement_imports(
+    statements: list[tuple[str, str]],
+) -> None:
+    """Strings, lookalikes and relative imports never count."""
+    source = "".join(starmap(wrapped, statements))
+    expected = any(s in IMPORTERS for s, _ in statements)
+    assert hi.imports_hypothesis(ast.parse(source)) == expected, source
 
 
-class TestRefusal:
-    """Any file is answered, never a traceback."""
-
-    @given(st.binary(max_size=200))
-    @example(b"\xff\xfe")
-    @example(b"x = 1\x00")
-    @example(b"(" * 300)
-    def test_main_answers_any_bytes(self, data: bytes) -> None:
-        """Exit 0; the file is named or not, never an exception."""
-        with tempfile.TemporaryDirectory() as scratch:
-            path = Path(scratch) / "m.py"
-            path.write_bytes(data)
-            out = io.StringIO()
-            with contextlib.redirect_stdout(out):
-                status = hi.main([str(path)])
-        assert status == 0
-        for line in out.getvalue().splitlines():
-            assert line.startswith(str(path))
+# Any file is answered, never a traceback.
+@given(st.binary(max_size=200))
+@example(b"\xff\xfe")
+@example(b"x = 1\x00")
+@example(b"(" * 300)
+def test_main_answers_any_bytes(data: bytes) -> None:
+    """Exit 0; the file is named or not, never an exception."""
+    with tempfile.TemporaryDirectory() as scratch:
+        path = Path(scratch) / "m.py"
+        path.write_bytes(data)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            status = hi.main([str(path)])
+    assert status == 0
+    for line in out.getvalue().splitlines():
+        assert line.startswith(str(path))

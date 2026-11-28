@@ -69,30 +69,29 @@ def run(message: str) -> subprocess.CompletedProcess[str]:
         )
 
 
-class TestSignOff:
-    """The author's own sign-off is found wherever the trailers run on."""
+# The author's own sign-off is found wherever the trailers run on.
+def test_a_sign_off_ahead_of_many_trailers_is_found() -> None:
+    """The author's sign-off, then 4,000 more: the commit is signed.
 
-    def test_a_sign_off_ahead_of_many_trailers_is_found(self) -> None:
-        """The author's sign-off, then 4,000 more: the commit is signed.
+    Measured on main before the fix: the trailer grep, killed
+    writing past the first match, red the commit 50 runs in 50. A
+    long message after one sign-off does not fire it (the trailer
+    grep writes once), so the row plants trailers.
+    """
+    others = "".join(
+        f"Signed-off-by: Co {n} <co{n}@example.invalid>\n" for n in range(4000)
+    )
+    done = run(f"fix: planted\n\n{SIGN_OFF}\n{others}")
+    assert done.stderr == ""
+    assert done.returncode == 0
 
-        Measured on main before the fix: the trailer grep, killed
-        writing past the first match, red the commit 50 runs in 50. A
-        long message after one sign-off does not fire it (the trailer
-        grep writes once), so the row plants trailers.
-        """
-        others = "".join(
-            f"Signed-off-by: Co {n} <co{n}@example.invalid>\n" for n in range(4000)
-        )
-        done = run(f"fix: planted\n\n{SIGN_OFF}\n{others}")
-        assert done.stderr == ""
-        assert done.returncode == 0
 
-    def test_a_commit_without_the_authors_sign_off_is_red(self) -> None:
-        """Another person's sign-off is not the author's."""
-        done = run("fix: planted\n\nSigned-off-by: Other <other@example.invalid>\n")
-        assert done.returncode == 1
-        assert re.search(
-            r"^lint:dco: commits missing a sign-off matching their author:"
-            r" [0-9a-f]{8}\n  fix with: git commit -s",
-            done.stderr,
-        )
+def test_a_commit_without_the_authors_sign_off_is_red() -> None:
+    """Another person's sign-off is not the author's."""
+    done = run("fix: planted\n\nSigned-off-by: Other <other@example.invalid>\n")
+    assert done.returncode == 1
+    assert re.search(
+        r"^lint:dco: commits missing a sign-off matching their author:"
+        r" [0-9a-f]{8}\n  fix with: git commit -s",
+        done.stderr,
+    )

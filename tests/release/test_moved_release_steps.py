@@ -23,8 +23,6 @@ import subprocess
 import tarfile
 from pathlib import Path
 
-import pytest
-
 from belt import decoded
 from belt.typed_pytest import fixture
 from tests import support
@@ -54,12 +52,10 @@ def strings(*items: str) -> list[str]:
     return list(items)
 
 
-@pytest.mark.usefixtures("_set_up_test_script")
-class TestScript:
+class Script:
     """A scratch directory, stub tools, and the script run in it."""
 
-    @fixture
-    def _set_up_test_script(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Make the scratch directory and its stub bin."""
         self.root = Path(str(tmp_path))
         self.work = self.root / "work"
@@ -110,10 +106,17 @@ class TestScript:
         return [block.split("\n") for block in text.split("\n\n") if block.strip()]
 
 
-class TestTagVersion(TestScript):
-    """release/pgrx/tag-version.sh."""
+@fixture
+def script_state(tmp_path: Path) -> Script:
+    """Give each row its own Script."""
+    return Script(tmp_path)
 
-    SCRIPT = PGRX / "tag-version.sh"
+
+SCRIPT = PGRX / "tag-version.sh"
+
+
+class TagVersion(Script):
+    """release/pgrx/tag-version.sh."""
 
     def plant(self, crate: str, workspace: str | None = None) -> None:
         """Write the crate's manifest, and the workspace's when given."""
@@ -122,74 +125,50 @@ class TestTagVersion(TestScript):
         if workspace is not None:
             (self.work / "Cargo.toml").write_text(workspace, "utf-8")
 
-    def test_the_manifests_version_passes(self) -> None:
-        """The tag and the manifest agree: nothing printed, exit 0."""
-        self.plant('[package]\nname = "ext"\nversion = "1.2.3"\n')
-        done = self.run_script(
-            self.SCRIPT, UNTRUSTED_VERSION="1.2.3", UNTRUSTED_CRATE_DIR="ext"
-        )
-        assert (done.returncode, done.stdout) == (0, ""), done.stderr
 
-    def test_another_version_is_refused_by_name(self) -> None:
-        """Both versions in the one error command."""
-        self.plant('[package]\nname = "ext"\nversion = "1.2.3"\n')
-        done = self.run_script(
-            self.SCRIPT, UNTRUSTED_VERSION="1.2.4", UNTRUSTED_CRATE_DIR="ext"
-        )
-        assert (done.returncode, done.stderr) == (
-            1,
-            "::error::tag-version.sh: tag says 1.2.4, manifest says 1.2.3\n",
-        )
-
-    def test_a_workspace_version_is_read_from_the_workspace(self) -> None:
-        """`version.workspace = true` reads the workspace's version."""
-        self.plant(
-            '[package]\nname = "ext"\nversion.workspace = true\n',
-            '[workspace.package]\nversion = "2.0.0"\n',
-        )
-        done = self.run_script(
-            self.SCRIPT, UNTRUSTED_VERSION="2.0.0", UNTRUSTED_CRATE_DIR="ext"
-        )
-        assert (done.returncode, done.stdout) == (0, ""), done.stderr
+@fixture
+def tag_version(tmp_path: Path) -> TagVersion:
+    """Give each row its own TagVersion."""
+    return TagVersion(tmp_path)
 
 
-class TestContainers(TestScript):
+def test_the_manifests_version_passes(tag_version: TagVersion) -> None:
+    """The tag and the manifest agree: nothing printed, exit 0."""
+    tag_version.plant('[package]\nname = "ext"\nversion = "1.2.3"\n')
+    done = tag_version.run_script(
+        SCRIPT, UNTRUSTED_VERSION="1.2.3", UNTRUSTED_CRATE_DIR="ext"
+    )
+    assert (done.returncode, done.stdout) == (0, ""), done.stderr
+
+
+def test_another_version_is_refused_by_name(tag_version: TagVersion) -> None:
+    """Both versions in the one error command."""
+    tag_version.plant('[package]\nname = "ext"\nversion = "1.2.3"\n')
+    done = tag_version.run_script(
+        SCRIPT, UNTRUSTED_VERSION="1.2.4", UNTRUSTED_CRATE_DIR="ext"
+    )
+    assert (done.returncode, done.stderr) == (
+        1,
+        "::error::tag-version.sh: tag says 1.2.4, manifest says 1.2.3\n",
+    )
+
+
+def test_a_workspace_version_is_read_from_the_workspace(
+    tag_version: TagVersion,
+) -> None:
+    """`version.workspace = true` reads the workspace's version."""
+    tag_version.plant(
+        '[package]\nname = "ext"\nversion.workspace = true\n',
+        '[workspace.package]\nversion = "2.0.0"\n',
+    )
+    done = tag_version.run_script(
+        SCRIPT, UNTRUSTED_VERSION="2.0.0", UNTRUSTED_CRATE_DIR="ext"
+    )
+    assert (done.returncode, done.stdout) == (0, ""), done.stderr
+
+
+class Containers(Script):
     """release/pgrx/build-in-container.sh and upgrade-previous.sh."""
-
-    def mounts(self, argv: list[str]) -> None:
-        """Hold one docker run to the canon's mounts and the writer's name."""
-        assert f"{PGRX}:/pgrx:ro" in argv
-        assert f"{WRITERS}/findings.sh:/opt/org/findings.sh:ro" in argv
-        assert f"{WRITERS}/workflow-command.sh:/opt/org/workflow-command.sh:ro" in argv
-        assert f"{WRITERS}/tracked.sh:/opt/org/tracked.sh:ro" in argv
-        assert "ORG_FINDINGS_WRITER=/opt/org/findings.sh" in argv
-
-    def test_the_build_mounts_the_canon_and_the_writer(self) -> None:
-        """One docker run, build-root.sh in the build image."""
-        self.stub("docker")
-        subprocess.run(
-            [GIT, "init", "-q"], cwd=self.work, check=True, env=support.env()
-        )
-        subprocess.run(
-            [GIT, "commit", "-q", "--allow-empty", "-m", "c"],
-            cwd=self.work,
-            check=True,
-            env=support.env(),
-        )
-        done = self.run_script(
-            PGRX / "build-in-container.sh",
-            BUILD_IMAGE="postgres:17@sha256:planted",
-            UNTRUSTED_VERSION="1.2.3",
-            UNTRUSTED_CRATE_DIR="ext",
-        )
-        assert done.returncode == 0, done.stderr
-        (argv,) = self.calls()
-        assert argv[:3] == strings("docker", "run", "--rm")
-        self.mounts(argv)
-        assert "VERSION=1.2.3" in argv
-        assert argv[-3:] == strings(
-            "postgres:17@sha256:planted", "bash", "/pgrx/build-root.sh"
-        )
 
     def fetcher(self, prev: str) -> str:
         """Write a stand-in for ORG_PYTHON that prints the previous version.
@@ -222,67 +201,109 @@ class TestContainers(TestScript):
             SMOKE_IMAGE="postgres:16@sha256:smoke",
         )
 
-    def test_the_upgrade_runs_and_says_so(self) -> None:
-        """The upgrade container, then one notice naming both versions."""
-        done = self.upgrade("1.0.0")
-        assert done.returncode == 0, done.stderr
-        (argv,) = self.calls()
-        self.mounts(argv)
-        assert "NAME=edtf_pg" in argv
-        assert "PREV=1.0.0" in argv
-        assert argv[-3:] == strings(
-            "postgres:16@sha256:smoke", "bash", "/pgrx/upgrade.sh"
-        )
-        assert done.stdout == "::notice::pg16/amd64: 1.0.0 -> 1.1.0 upgrade executed\n"
 
-    def test_no_previous_release_skips_clean(self) -> None:
-        """No version fetched: no container, nothing printed, exit 0."""
-        done = self.upgrade("")
-        assert (done.returncode, done.stdout) == (0, ""), done.stderr
-        none: list[list[str]] = []
-        assert self.calls() == none
+@fixture
+def containers(tmp_path: Path) -> Containers:
+    """Give each row its own Containers."""
+    return Containers(tmp_path)
 
 
-class TestWasmPlan(TestScript):
-    """release/wasm-inventory-plan.sh."""
+def mounts(argv: list[str]) -> None:
+    """Hold one docker run to the canon's mounts and the writer's name."""
+    assert f"{PGRX}:/pgrx:ro" in argv
+    assert f"{WRITERS}/findings.sh:/opt/org/findings.sh:ro" in argv
+    assert f"{WRITERS}/workflow-command.sh:/opt/org/workflow-command.sh:ro" in argv
+    assert f"{WRITERS}/tracked.sh:/opt/org/tracked.sh:ro" in argv
+    assert "ORG_FINDINGS_WRITER=/opt/org/findings.sh" in argv
 
-    def test_the_plan_and_its_notice(self) -> None:
-        """One package, one entry, one notice."""
-        crate = self.work / "crates" / "edtf-wasm"
-        crate.mkdir(parents=True)
-        (crate / "Cargo.toml").write_text("[package]\n", "utf-8")
-        meta = {
-            "packages": [
-                {
-                    "name": "edtf-wasm",
-                    "manifest_path": str((crate / "Cargo.toml").resolve()),
-                },
-                {"name": "other", "manifest_path": "/elsewhere/Cargo.toml"},
-            ]
-        }
-        (self.root / "meta.json").write_text(json.dumps(meta), "utf-8")
-        self.stub("cargo", f"#!/usr/bin/env bash\ncat '{self.root / 'meta.json'}'\n")
-        done = self.run_script(
-            CANON / "release" / "wasm-inventory-plan.sh",
-            UNTRUSTED_CRATE_DIR="crates/edtf-wasm",
-            PLAN_DOC_PREFIX="sbom-npm-",
-        )
-        assert done.returncode == 0, done.stderr
-        plan: list[object] = [
+
+def test_the_build_mounts_the_canon_and_the_writer(containers: Containers) -> None:
+    """One docker run, build-root.sh in the build image."""
+    containers.stub("docker")
+    subprocess.run(
+        [GIT, "init", "-q"], cwd=containers.work, check=True, env=support.env()
+    )
+    subprocess.run(
+        [GIT, "commit", "-q", "--allow-empty", "-m", "c"],
+        cwd=containers.work,
+        check=True,
+        env=support.env(),
+    )
+    done = containers.run_script(
+        PGRX / "build-in-container.sh",
+        BUILD_IMAGE="postgres:17@sha256:planted",
+        UNTRUSTED_VERSION="1.2.3",
+        UNTRUSTED_CRATE_DIR="ext",
+    )
+    assert done.returncode == 0, done.stderr
+    (argv,) = containers.calls()
+    assert argv[:3] == strings("docker", "run", "--rm")
+    mounts(argv)
+    assert "VERSION=1.2.3" in argv
+    assert argv[-3:] == strings(
+        "postgres:17@sha256:planted", "bash", "/pgrx/build-root.sh"
+    )
+
+
+def test_the_upgrade_runs_and_says_so(containers: Containers) -> None:
+    """The upgrade container, then one notice naming both versions."""
+    done = containers.upgrade("1.0.0")
+    assert done.returncode == 0, done.stderr
+    (argv,) = containers.calls()
+    mounts(argv)
+    assert "NAME=edtf_pg" in argv
+    assert "PREV=1.0.0" in argv
+    assert argv[-3:] == strings("postgres:16@sha256:smoke", "bash", "/pgrx/upgrade.sh")
+    assert done.stdout == "::notice::pg16/amd64: 1.0.0 -> 1.1.0 upgrade executed\n"
+
+
+def test_no_previous_release_skips_clean(containers: Containers) -> None:
+    """No version fetched: no container, nothing printed, exit 0."""
+    done = containers.upgrade("")
+    assert (done.returncode, done.stdout) == (0, ""), done.stderr
+    none: list[list[str]] = []
+    assert containers.calls() == none
+
+
+def test_the_plan_and_its_notice(script_state: Script) -> None:
+    """One package, one entry, one notice."""
+    crate = script_state.work / "crates" / "edtf-wasm"
+    crate.mkdir(parents=True)
+    (crate / "Cargo.toml").write_text("[package]\n", "utf-8")
+    meta = {
+        "packages": [
             {
-                "class": "wasm-npm",
-                "doc": "sbom-npm-edtf-wasm",
-                "params": {"cargoPackage": "edtf-wasm"},
-            }
+                "name": "edtf-wasm",
+                "manifest_path": str((crate / "Cargo.toml").resolve()),
+            },
+            {"name": "other", "manifest_path": "/elsewhere/Cargo.toml"},
         ]
-        assert (
-            decoded.load_json((self.work / "plan" / "plan.json").read_text("utf-8"))
-            == plan
-        )
-        assert (
-            done.stdout
-            == "::notice::plans inventory sbom-npm-edtf-wasm for package edtf-wasm\n"
-        )
+    }
+    (script_state.root / "meta.json").write_text(json.dumps(meta), "utf-8")
+    script_state.stub(
+        "cargo", f"#!/usr/bin/env bash\ncat '{script_state.root / 'meta.json'}'\n"
+    )
+    done = script_state.run_script(
+        CANON / "release" / "wasm-inventory-plan.sh",
+        UNTRUSTED_CRATE_DIR="crates/edtf-wasm",
+        PLAN_DOC_PREFIX="sbom-npm-",
+    )
+    assert done.returncode == 0, done.stderr
+    plan: list[object] = [
+        {
+            "class": "wasm-npm",
+            "doc": "sbom-npm-edtf-wasm",
+            "params": {"cargoPackage": "edtf-wasm"},
+        }
+    ]
+    assert (
+        decoded.load_json((script_state.work / "plan" / "plan.json").read_text("utf-8"))
+        == plan
+    )
+    assert (
+        done.stdout
+        == "::notice::plans inventory sbom-npm-edtf-wasm for package edtf-wasm\n"
+    )
 
 
 TRIVY = """#!/usr/bin/env bash
@@ -297,7 +318,7 @@ printf '{"name": "%s"}' "${ref}" > "${out}"
 SHA = "sha256:" + "a" * 64
 
 
-class TestInventory(TestScript):
+class Inventory(Script):
     """release/inventory-digests.sh."""
 
     def run_inventory(
@@ -326,29 +347,37 @@ class TestInventory(TestScript):
             GITHUB_OUTPUT=str(output),
         )
 
-    def test_both_arches_are_inventoried_and_judged(self) -> None:
-        """Each digest's document, then stele over both, then the subjects."""
-        done = self.run_inventory({"amd64": SHA, "arm64": SHA})
-        assert done.returncode == 0, done.stderr
-        tools = [argv[0] for argv in self.calls()]
-        assert tools == strings("docker", "trivy", "trivy", "stele")
-        ref = f"ghcr.io/org/repo@{SHA}"
-        assert (
-            self.output.read_text("utf-8")
-            == f"subjects={ref}=dist/amd64.spdx.json,{ref}=dist/arm64.spdx.json\n"
-        )
 
-    def test_a_partial_image_is_refused_by_name(self) -> None:
-        """A missing arm64 digest: one error command, no stele."""
-        done = self.run_inventory({"amd64": SHA})
-        assert done.returncode == 1
-        assert done.stderr == (
-            "::error::inventory-digests.sh: no arm64 digest to inventory; refusing"
-            " to decide about a"
-            " partial image\n"
-        )
-        called: list[str] = [argv[0] for argv in self.calls()]
-        assert "stele" not in called
+@fixture
+def inventory(tmp_path: Path) -> Inventory:
+    """Give each row its own Inventory."""
+    return Inventory(tmp_path)
+
+
+def test_both_arches_are_inventoried_and_judged(inventory: Inventory) -> None:
+    """Each digest's document, then stele over both, then the subjects."""
+    done = inventory.run_inventory({"amd64": SHA, "arm64": SHA})
+    assert done.returncode == 0, done.stderr
+    tools = [argv[0] for argv in inventory.calls()]
+    assert tools == strings("docker", "trivy", "trivy", "stele")
+    ref = f"ghcr.io/org/repo@{SHA}"
+    assert (
+        inventory.output.read_text("utf-8")
+        == f"subjects={ref}=dist/amd64.spdx.json,{ref}=dist/arm64.spdx.json\n"
+    )
+
+
+def test_a_partial_image_is_refused_by_name(inventory: Inventory) -> None:
+    """A missing arm64 digest: one error command, no stele."""
+    done = inventory.run_inventory({"amd64": SHA})
+    assert done.returncode == 1
+    assert done.stderr == (
+        "::error::inventory-digests.sh: no arm64 digest to inventory; refusing"
+        " to decide about a"
+        " partial image\n"
+    )
+    called: list[str] = [argv[0] for argv in inventory.calls()]
+    assert "stele" not in called
 
 
 # The runner's own directories, without the belt: a row that needs stele
@@ -357,7 +386,7 @@ SYSTEM_PATH = "/usr/bin:/bin"
 NO_STELE = "::error::{}: stele is not on the runner — it is a belt tool\n"
 
 
-class TestHelper(TestScript):
+class Helper(Script):
     """A #1934 helper: its stele refusal, run with no stele on PATH."""
 
     def run_bare(self, script: Path, **env: str) -> subprocess.CompletedProcess[str]:
@@ -385,16 +414,22 @@ class TestHelper(TestScript):
         )
 
 
+@fixture
+def helper(tmp_path: Path) -> Helper:
+    """Give each row its own Helper."""
+    return Helper(tmp_path)
+
+
 FACTS = """#!/usr/bin/env bash
 { printf '%s\\n' "$(basename "$0")" "$@"; echo; } >> "${STUB_LOG}"
 printf 'facts=planted\\nepoch=1\\nlicence: MIT\\n'
 """
 
+DERIVE_FACTS_SCRIPT = CANON / "release" / "derive-facts.sh"
 
-class TestDeriveFacts(TestHelper):
+
+class DeriveFacts(Helper):
     """release/derive-facts.sh: publish.yml's facts step (#1934)."""
-
-    SCRIPT = CANON / "release" / "derive-facts.sh"
 
     def env(self) -> dict[str, str]:
         """Name the step's inputs and its output file.
@@ -414,48 +449,57 @@ class TestDeriveFacts(TestHelper):
             "GITHUB_OUTPUT": str(self.output),
         }
 
-    def test_the_facts_are_derived_and_split(self) -> None:
-        """Stele's facts and epoch are outputs; its other lines print."""
-        self.stub("stele", FACTS)
-        done = self.run_script(self.SCRIPT, **self.env())
-        assert done.returncode == 0, done.stderr
-        assert self.output.read_text("utf-8") == "facts=planted\nepoch=1\n"
-        assert done.stdout == "licence: MIT\n"
-        expected: list[list[str]] = [
-            strings(
-                "stele",
-                "derive",
-                "facts",
-                "--archetype",
-                "versioned",
-                "--version",
-                "1.2.3",
-                "--repo",
-                "org/repo",
-                "--server-url",
-                "https://github.com",
-                "--git-dir",
-                ".",
-                "--title",
-                "Repo",
-                "--description",
-                "an image",
-            )
-        ]
-        assert self.calls() == expected
 
-    def test_no_stele_is_refused_by_name(self) -> None:
-        """No stele on the runner: one finding, nothing written."""
-        done = self.run_bare(self.SCRIPT, **self.env())
-        assert (done.returncode, done.stdout) == (1, ""), done.stderr
-        assert done.stderr == NO_STELE.format("derive-facts.sh")
-        assert self.output.read_text("utf-8") == ""
+@fixture
+def derive_facts(tmp_path: Path) -> DeriveFacts:
+    """Give each row its own DeriveFacts."""
+    return DeriveFacts(tmp_path)
 
 
-class TestUnpackGoLegs(TestHelper):
+def test_the_facts_are_derived_and_split(derive_facts: DeriveFacts) -> None:
+    """Stele's facts and epoch are outputs; its other lines print."""
+    derive_facts.stub("stele", FACTS)
+    done = derive_facts.run_script(DERIVE_FACTS_SCRIPT, **derive_facts.env())
+    assert done.returncode == 0, done.stderr
+    assert derive_facts.output.read_text("utf-8") == "facts=planted\nepoch=1\n"
+    assert done.stdout == "licence: MIT\n"
+    expected: list[list[str]] = [
+        strings(
+            "stele",
+            "derive",
+            "facts",
+            "--archetype",
+            "versioned",
+            "--version",
+            "1.2.3",
+            "--repo",
+            "org/repo",
+            "--server-url",
+            "https://github.com",
+            "--git-dir",
+            ".",
+            "--title",
+            "Repo",
+            "--description",
+            "an image",
+        )
+    ]
+    assert derive_facts.calls() == expected
+
+
+def test_no_stele_is_refused_by_name(derive_facts: DeriveFacts) -> None:
+    """No stele on the runner: one finding, nothing written."""
+    done = derive_facts.run_bare(DERIVE_FACTS_SCRIPT, **derive_facts.env())
+    assert (done.returncode, done.stdout) == (1, ""), done.stderr
+    assert done.stderr == NO_STELE.format("derive-facts.sh")
+    assert derive_facts.output.read_text("utf-8") == ""
+
+
+UNPACK_GO_LEGS_SCRIPT = CANON / "release" / "unpack-go-legs.sh"
+
+
+class UnpackGoLegs(Helper):
     """release/unpack-go-legs.sh: publish.yml's go-binary unpack (#1934)."""
-
-    SCRIPT = CANON / "release" / "unpack-go-legs.sh"
 
     def unpack(self) -> subprocess.CompletedProcess[str]:
         """Run the unpack with a fresh GITHUB_ENV.
@@ -467,7 +511,7 @@ class TestUnpackGoLegs(TestHelper):
         self.github_env = self.root / "github-env"
         self.github_env.write_text("", "utf-8")
         (self.work / "shipped-archives").mkdir(exist_ok=True)
-        return self.run_script(self.SCRIPT, GITHUB_ENV=str(self.github_env))
+        return self.run_script(UNPACK_GO_LEGS_SCRIPT, GITHUB_ENV=str(self.github_env))
 
     def archive(self, leg: str) -> None:
         """Pack one leg's archive holding a `tool` command."""
@@ -479,95 +523,102 @@ class TestUnpackGoLegs(TestHelper):
         with tarfile.open(out, "w:gz") as packed:
             packed.add(src / "tool", arcname="tool")
 
-    def test_each_leg_gets_its_own_directory(self) -> None:
-        """Two legs shipping one basename both survive."""
-        for leg in ("tool_linux_amd64", "tool_linux_arm64"):
-            self.archive(leg)
-        done = self.unpack()
-        assert done.returncode == 0, done.stderr
-        for leg in ("tool_linux_amd64", "tool_linux_arm64"):
-            tool = self.work / "shipped" / leg / "tool"
-            assert tool.read_text("utf-8") == leg
-        assert (
-            self.github_env.read_text("utf-8")
-            == f"BINARIES_DIR={self.work.resolve()}/shipped\n"
+
+@fixture
+def unpack_go_legs(tmp_path: Path) -> UnpackGoLegs:
+    """Give each row its own UnpackGoLegs."""
+    return UnpackGoLegs(tmp_path)
+
+
+def test_each_leg_gets_its_own_directory(unpack_go_legs: UnpackGoLegs) -> None:
+    """Two legs shipping one basename both survive."""
+    for leg in ("tool_linux_amd64", "tool_linux_arm64"):
+        unpack_go_legs.archive(leg)
+    done = unpack_go_legs.unpack()
+    assert done.returncode == 0, done.stderr
+    for leg in ("tool_linux_amd64", "tool_linux_arm64"):
+        tool = unpack_go_legs.work / "shipped" / leg / "tool"
+        assert tool.read_text("utf-8") == leg
+    assert (
+        unpack_go_legs.github_env.read_text("utf-8")
+        == f"BINARIES_DIR={unpack_go_legs.work.resolve()}/shipped\n"
+    )
+
+
+def test_no_archive_is_refused_by_name(unpack_go_legs: UnpackGoLegs) -> None:
+    """An artifact with no archive: one finding, no BINARIES_DIR."""
+    done = unpack_go_legs.unpack()
+    assert (done.returncode, done.stdout) == (1, ""), done.stderr
+    assert done.stderr == (
+        "::error::unpack-go-legs.sh: the go-binary build artifact holds no archives\n"
+    )
+    assert unpack_go_legs.github_env.read_text("utf-8") == ""
+
+
+DERIVE_VEX_SCRIPT = CANON / "release" / "derive-vex.sh"
+
+
+def env(basename: str) -> dict[str, str]:
+    """Name the step's inputs.
+
+    Returns:
+        The variables.
+
+    """
+    return {
+        "VERSION": "1.2.3",
+        "SBOM_BASENAME": basename,
+        "SBOM_CREATED": "2026-11-22T00:00:00Z",
+        "GITHUB_REPOSITORY": "org/.repo",
+    }
+
+
+def test_the_policies_and_the_release_view_are_named(helper: Helper) -> None:
+    """No basename: the repository's name, its leading dot dropped."""
+    helper.stub("stele")
+    done = helper.run_script(DERIVE_VEX_SCRIPT, **env(""))
+    assert done.returncode == 0, done.stderr
+    canon = str(CANON.resolve())
+    expected: list[list[str]] = [
+        strings(
+            "stele",
+            "derive",
+            "vex",
+            "--policy",
+            f"{canon}/slsa/assert-policy.json",
+            "--verify-policy",
+            f"{canon}/slsa/verify-policy.json",
+            "--inventories",
+            "dist",
+            "--release-view",
+            "dist/repo-1.2.3.spdx.json",
+            "--vex",
+            f"{canon}/security/vex",
+            "--repo",
+            "org/.repo",
+            "--version",
+            "1.2.3",
+            "--released",
+            "2026-11-22T00:00:00Z",
+            "--out",
+            "dist/repo-1.2.3.vex.openvex.json",
         )
-
-    def test_no_archive_is_refused_by_name(self) -> None:
-        """An artifact with no archive: one finding, no BINARIES_DIR."""
-        done = self.unpack()
-        assert (done.returncode, done.stdout) == (1, ""), done.stderr
-        assert done.stderr == (
-            "::error::unpack-go-legs.sh: the go-binary build artifact holds no"
-            " archives\n"
-        )
-        assert self.github_env.read_text("utf-8") == ""
+    ]
+    assert helper.calls() == expected
 
 
-class TestDeriveVex(TestHelper):
-    """release/derive-vex.sh: publish.yml's VEX gate (#1934)."""
+def test_a_basename_names_the_documents(helper: Helper) -> None:
+    """A declared basename is the documents' name."""
+    helper.stub("stele")
+    done = helper.run_script(DERIVE_VEX_SCRIPT, **env("edtf"))
+    assert done.returncode == 0, done.stderr
+    argv = helper.calls()[0]
+    assert "dist/edtf-1.2.3.spdx.json" in argv
+    assert "dist/edtf-1.2.3.vex.openvex.json" in argv
 
-    SCRIPT = CANON / "release" / "derive-vex.sh"
 
-    @staticmethod
-    def env(basename: str) -> dict[str, str]:
-        """Name the step's inputs.
-
-        Returns:
-            The variables.
-
-        """
-        return {
-            "VERSION": "1.2.3",
-            "SBOM_BASENAME": basename,
-            "SBOM_CREATED": "2026-11-22T00:00:00Z",
-            "GITHUB_REPOSITORY": "org/.repo",
-        }
-
-    def test_the_policies_and_the_release_view_are_named(self) -> None:
-        """No basename: the repository's name, its leading dot dropped."""
-        self.stub("stele")
-        done = self.run_script(self.SCRIPT, **self.env(""))
-        assert done.returncode == 0, done.stderr
-        canon = str(CANON.resolve())
-        expected: list[list[str]] = [
-            strings(
-                "stele",
-                "derive",
-                "vex",
-                "--policy",
-                f"{canon}/slsa/assert-policy.json",
-                "--verify-policy",
-                f"{canon}/slsa/verify-policy.json",
-                "--inventories",
-                "dist",
-                "--release-view",
-                "dist/repo-1.2.3.spdx.json",
-                "--vex",
-                f"{canon}/security/vex",
-                "--repo",
-                "org/.repo",
-                "--version",
-                "1.2.3",
-                "--released",
-                "2026-11-22T00:00:00Z",
-                "--out",
-                "dist/repo-1.2.3.vex.openvex.json",
-            )
-        ]
-        assert self.calls() == expected
-
-    def test_a_basename_names_the_documents(self) -> None:
-        """A declared basename is the documents' name."""
-        self.stub("stele")
-        done = self.run_script(self.SCRIPT, **self.env("edtf"))
-        assert done.returncode == 0, done.stderr
-        argv = self.calls()[0]
-        assert "dist/edtf-1.2.3.spdx.json" in argv
-        assert "dist/edtf-1.2.3.vex.openvex.json" in argv
-
-    def test_no_stele_is_refused_by_name(self) -> None:
-        """No stele on the runner: one finding."""
-        done = self.run_bare(self.SCRIPT, **self.env(""))
-        assert (done.returncode, done.stdout) == (1, ""), done.stderr
-        assert done.stderr == NO_STELE.format("derive-vex.sh")
+def test_derive_vex_no_stele_is_refused_by_name(helper: Helper) -> None:
+    """No stele on the runner: one finding."""
+    done = helper.run_bare(DERIVE_VEX_SCRIPT, **env(""))
+    assert (done.returncode, done.stdout) == (1, ""), done.stderr
+    assert done.stderr == NO_STELE.format("derive-vex.sh")

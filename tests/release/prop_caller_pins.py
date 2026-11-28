@@ -243,61 +243,58 @@ def first(pin: Pin) -> str:
     return pin[0]
 
 
-class TestWrittenReadsBack:
-    """T: a pin written is read back as `key@version`."""
-
-    @given(st.lists(PINNED, min_size=1, max_size=4, unique_by=first))
-    def test_install_and_env_read_the_pin(self, pins: list[Pin]) -> None:
-        """Every tool, named in any order, answers with its own pin."""
-        tools: dict[str, object] = {key: value for _, key, _, value in pins}
-        config = toml_document({"tools": tools})
-        names = [name for name, _, _, _ in pins]
-        code, out, err = run(config, ["install", "--input-of", INPUT_OF, *names])
-        assert (code, err) == (0, ""), config
-        want = " ".join(f"{key}@{version}" for _, key, version, _ in pins)
-        assert out == f"install={want}\n"
-        pairs = [f"V{i}={name}" for i, name in enumerate(names)]
-        code, out, err = run(config, ["env", "--input-of", INPUT_OF, *pairs])
-        assert (code, err) == (0, ""), config
-        want = "".join(f"V{i}={version}\n" for i, (_, _, version, _) in enumerate(pins))
-        assert out == want
+# T: a pin written is read back as `key@version`.
+@given(st.lists(PINNED, min_size=1, max_size=4, unique_by=first))
+def test_install_and_env_read_the_pin(pins: list[Pin]) -> None:
+    """Every tool, named in any order, answers with its own pin."""
+    tools: dict[str, object] = {key: value for _, key, _, value in pins}
+    config = toml_document({"tools": tools})
+    names = [name for name, _, _, _ in pins]
+    code, out, err = run(config, ["install", "--input-of", INPUT_OF, *names])
+    assert (code, err) == (0, ""), config
+    want = " ".join(f"{key}@{version}" for _, key, version, _ in pins)
+    assert out == f"install={want}\n"
+    pairs = [f"V{i}={name}" for i, name in enumerate(names)]
+    code, out, err = run(config, ["env", "--input-of", INPUT_OF, *pairs])
+    assert (code, err) == (0, ""), config
+    want = "".join(f"V{i}={version}\n" for i, (_, _, version, _) in enumerate(pins))
+    assert out == want
 
 
-class TestAnyToml:
-    """R: any TOML document is answered or refused by name."""
+# R: any TOML document is answered or refused by name.
+@given(DOCUMENT, st.lists(NAME, max_size=3), st.lists(NAME, max_size=2))
+@example(TOOLS_STRING, RUST, NONE)
+@example(TOOLS_LIST, RUST, NONE)
+@example(TOOLS_INT, NONE, RUST)
+def test_answers_or_refuses(
+    doc: dict[str, object], needed: list[str], optional: list[str]
+) -> None:
+    """Exit 0 with a pin line, or 1 with `::error::` lines; never a raise."""
+    config = toml_document(doc)
+    argv = ["install", "--input-of", INPUT_OF, *needed]
+    for name in optional:
+        argv += ["--if-pinned", name]
+    if not needed and not optional:
+        argv.append("rust")
+    code, out, err = run(config, argv)
+    if code == 0:
+        assert out.startswith("install="), out
+        assert err == ""
+    else:
+        assert code == 1
+        assert out == ""
+        assert err
+        for line in err.splitlines():
+            assert line.startswith("::error::"), line
 
-    @given(DOCUMENT, st.lists(NAME, max_size=3), st.lists(NAME, max_size=2))
-    @example(TOOLS_STRING, RUST, NONE)
-    @example(TOOLS_LIST, RUST, NONE)
-    @example(TOOLS_INT, NONE, RUST)
-    def test_answers_or_refuses(
-        self, doc: dict[str, object], needed: list[str], optional: list[str]
-    ) -> None:
-        """Exit 0 with a pin line, or 1 with `::error::` lines; never a raise."""
-        config = toml_document(doc)
-        argv = ["install", "--input-of", INPUT_OF, *needed]
-        for name in optional:
-            argv += ["--if-pinned", name]
-        if not needed and not optional:
-            argv.append("rust")
-        code, out, err = run(config, argv)
-        if code == 0:
-            assert out.startswith("install="), out
-            assert err == ""
-        else:
-            assert code == 1
-            assert out == ""
-            assert err
-            for line in err.splitlines():
-                assert line.startswith("::error::"), line
 
-    @given(DOCUMENT)
-    @example(TOOLS_INT)
-    @example(TOOLS_TABLES)
-    def test_pinned_names_never_raises(self, doc: dict[str, object]) -> None:
-        """The gate's question, which tools are pinned, has an answer."""
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / "mise.toml").write_text(toml_document(doc), "utf-8")
-            names = caller_pins.pinned_names(root)
-        assert isinstance(names, set)
+@given(DOCUMENT)
+@example(TOOLS_INT)
+@example(TOOLS_TABLES)
+def test_pinned_names_never_raises(doc: dict[str, object]) -> None:
+    """The gate's question, which tools are pinned, has an answer."""
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "mise.toml").write_text(toml_document(doc), "utf-8")
+        names = caller_pins.pinned_names(root)
+    assert isinstance(names, set)

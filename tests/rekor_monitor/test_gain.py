@@ -107,12 +107,10 @@ def expect(*text: str) -> list[str]:
     return list(text)
 
 
-@pytest.mark.usefixtures("_set_up_test_rows")
-class TestRows:
+class Rows:
     """The run's two checkpoints, the legs' reports, and the helper run."""
 
-    @fixture
-    def _set_up_test_rows(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Lay out a run that did not advance, every leg stopped by its budget."""
         self.dir = Path(str(tmp_path))
         self.start = self.dir / "run-start.json"
@@ -120,25 +118,17 @@ class TestRows:
         self.reports = self.dir / "reports"
         self.reports.mkdir()
         self.findings = self.dir / "findings" / "gaining-0.jsonl"
-        self.write(self.start, checkpoint())
-        self.write(self.end, checkpoint())
+        write(self.start, checkpoint())
+        write(self.end, checkpoint())
         self.legs([BUDGET] * LEGS)
         self.env = support.env(ORG_FINDINGS=str(self.findings))
-
-    @staticmethod
-    def write(path: Path, doc: dict[str, object]) -> None:
-        """Write a checkpoint or report where the helper reads it."""
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(doc), encoding="utf-8")
 
     def legs(self, stops: list[str | None]) -> None:
         """Lay out one downloaded report per leg, as download-artifact does."""
         shutil.rmtree(self.reports, ignore_errors=True)
         self.reports.mkdir()
         for leg, stopped in enumerate(stops, start=1):
-            self.write(
-                self.reports / f"watch-report-{leg}" / "report.json", report(stopped)
-            )
+            write(self.reports / f"watch-report-{leg}" / "report.json", report(stopped))
 
     def arguments(self, kept: str, legs: int = LEGS) -> list[str]:
         """Build the gaining job's command line.
@@ -213,261 +203,297 @@ class TestRows:
         ]
 
 
-class TestBehind(TestRows):
-    """Each outcome the header calls behind: exit 1, one record."""
-
-    def test_did_not_advance(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """Not advanced: red, the detail lines in order, the reason counted."""
-        status, _out, err = self.run_helper(capfd=capfd)
-        assert status == 1, err
-        why = "the checkpoint did not advance in this run (next 448196522)"
-        assert self.detail() == expect(
-            f"{NEXT}448,196,522",
-            f"{HEAD}448,222,427 at 2026-11-17T18:32:08Z",
-            f"{STARTED}25,905",
-            f"{NOW}25,905",
-            f"{THIS_RUN}{why}",
-            f"14 legs: {BUDGET}",
-        )
-        assert f"::error::gain: {MESSAGE}\n" in err
-        assert f"  {THIS_RUN}{why}\n" in err
-
-    def test_advanced_not_gaining(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """Advanced, but the log grew faster: red, both counts (green before #1967)."""
-        grown = checkpoint(next=BEHIND_NEXT + 1000, size=BEHIND_SIZE + 5000)
-        self.write(self.end, grown)
-        status, _out, err = self.run_helper(capfd=capfd)
-        assert status == 1, err
-        lines = self.detail()
-        assert lines[2:4] == expect(f"{STARTED}25,905", f"{NOW}29,905")
-        assert lines[4] == (
-            f"{THIS_RUN}advanced but not gaining: outstanding 25,905 at the start,"
-            " 29,905 now"
-        )
-
-    def test_advanced_outstanding_equal(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """Advanced, outstanding exactly as at the start: not smaller, red."""
-        level = checkpoint(next=BEHIND_NEXT + 1000, size=BEHIND_SIZE + 1000)
-        self.write(self.end, level)
-        status, _out, err = self.run_helper(capfd=capfd)
-        assert status == 1, err
-        assert self.detail()[3] == f"{NOW}25,905"
-
-    def test_no_newest_checkpoint(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """No checkpoint at all (before the founding run): red, named."""
-        self.start.unlink()
-        self.end.unlink()
-        status, _out, err = self.run_helper(kept="false", capfd=capfd)
-        assert status == 1, err
-        missing = "unknown: no checkpoint file"
-        assert self.detail()[:5] == expect(
-            f"{NEXT}{missing}",
-            f"{HEAD}{missing}",
-            f"{STARTED}none counted: this run founded the checkpoint",
-            f"{NOW}{missing}",
-            f"{THIS_RUN}the newest checkpoint: no checkpoint file",
-        )
-
-    def test_start_not_kept(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """The start job did not finish: red, the count named unknown."""
-        status, _out, err = self.run_helper(kept="", capfd=capfd)
-        assert status == 1, err
-        lines = self.detail()
-        assert lines[2] == f"{STARTED}unknown: the start job did not finish"
-        assert lines[4] == (
-            f"{THIS_RUN}the checkpoint the run started from was not kept"
-            " (the start job did not finish)"
-        )
-
-    def test_kept_but_not_restored(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """The start was kept but its copy is gone: red, named."""
-        self.start.unlink()
-        status, _out, err = self.run_helper(capfd=capfd)
-        assert status == 1, err
-        assert self.detail()[4] == (
-            f"{THIS_RUN}the checkpoint the run started from was not kept"
-            " (no checkpoint file)"
-        )
+@fixture
+def rows_state(tmp_path: Path) -> Rows:
+    """Give each row its own Rows."""
+    return Rows(tmp_path)
 
 
-class TestReasons(TestRows):
-    """Why the legs stopped: one line per distinct reason, with its count."""
-
-    def test_two_reasons_counted(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """Three stopped for one reason, two for another: counts 3 and 2."""
-        self.legs([THROTTLED, BUDGET, THROTTLED, BUDGET, THROTTLED])
-        status, _out, err = self.run_helper(legs=5, capfd=capfd)
-        assert status == 1, err
-        assert self.detail()[5:] == expect(f"3 legs: {THROTTLED}", f"2 legs: {BUDGET}")
-
-    def test_missing_report_is_counted(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """Twelve reports for fourteen legs: two counted as "no report"."""
-        self.legs([THROTTLED] * 12)
-        status, _out, err = self.run_helper(capfd=capfd)
-        assert status == 1, err
-        assert self.detail()[5:] == expect(f"12 legs: {THROTTLED}", "2 legs: no report")
-
-    def test_empty_report_is_no_report(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """A leg whose stele wrote nothing hands on an empty file: no report."""
-        self.legs([THROTTLED] * 13)
-        empty = self.reports / "watch-report-14" / "report.json"
-        empty.parent.mkdir()
-        empty.write_text("", encoding="utf-8")
-        status, _out, err = self.run_helper(capfd=capfd)
-        assert status == 1, err
-        assert self.detail()[5:] == expect(f"13 legs: {THROTTLED}", "1 leg: no report")
-
-    def test_report_without_stopped_fact(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A report with no `stopped` fact: named, never dropped."""
-        self.legs([None] * LEGS)
-        status, _out, err = self.run_helper(capfd=capfd)
-        assert status == 1, err
-        assert self.detail()[5:] == expect("14 legs: no reason given")
-
-    def test_report_at_the_head(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """A leg that judged to the head gave no reason: said so."""
-        self.legs([])
-        at_head = self.reports / "watch-report-1" / "report.json"
-        self.write(
-            at_head,
-            decoded.as_object(
-                decoded.load_json((DATA / "report-pass.json").read_bytes()), "pass"
-            ),
-        )
-        status, _out, err = self.run_helper(capfd=capfd)
-        assert status == 1, err
-        assert self.detail()[5:] == expect(
-            "13 legs: no report", "1 leg: judged to the head of the log"
-        )
-
-    def test_unreadable_report(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """A report that is not stele's: the reader's own reason."""
-        self.legs([BUDGET] * 13)
-        bad = self.reports / "watch-report-14" / "report.json"
-        bad.parent.mkdir()
-        bad.write_text("[", encoding="utf-8")
-        status, _out, err = self.run_helper(capfd=capfd)
-        assert status == 1, err
-        assert self.detail()[5:] == expect(
-            f"13 legs: {BUDGET}", "1 leg: the report could not be read"
-        )
-
-    def test_no_reports_directory(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """No report reached the job at all: every leg counted."""
-        shutil.rmtree(self.reports)
-        status, _out, err = self.run_helper(capfd=capfd)
-        assert status == 1, err
-        assert self.detail()[5:] == expect("14 legs: no report")
+def write(path: Path, doc: dict[str, object]) -> None:
+    """Write a checkpoint or report where the helper reads it."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(doc), encoding="utf-8")
 
 
-class TestGreen(TestRows):
-    """Each outcome the header calls green: exit 0, nothing appended."""
-
-    def test_gaining(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """Advanced, outstanding smaller than at the start: green."""
-        self.write(self.end, checkpoint(next=BEHIND_NEXT + 10000))
-        status, out, err = self.run_helper(capfd=capfd)
-        assert status == 0, err
-        assert self.recorded() == list[dict[str, object]]()
-        assert (
-            "gain: green: gaining: outstanding 25,905 at the start, 15,905 now" in out
-        )
-
-    def test_caught_up(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """Newest checkpoint at its head: green, whatever the start."""
-        self.write(self.end, checkpoint("checkpoint-pass.json"))
-        status, out, err = self.run_helper(kept="", capfd=capfd)
-        assert status == 0, err
-        assert self.recorded() == list[dict[str, object]]()
-        assert "gain: the newest checkpoint: next index 448221522" in out
-        assert "gain: green: judged to the head of the log" in out
-
-    def test_founded(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """No checkpoint at the start: no earlier count, by name, green."""
-        self.start.unlink()
-        status, out, err = self.run_helper(kept="false", capfd=capfd)
-        assert status == 0, err
-        assert self.recorded() == list[dict[str, object]]()
-        assert (
-            "gain: green: advanced to 448196522; no earlier count, this run founded it"
-            in out
-        )
+def test_did_not_advance(rows_state: Rows, capfd: pytest.CaptureFixture[str]) -> None:
+    """Not advanced: red, the detail lines in order, the reason counted."""
+    status, _out, err = rows_state.run_helper(capfd=capfd)
+    assert status == 1, err
+    why = "the checkpoint did not advance in this run (next 448196522)"
+    assert rows_state.detail() == expect(
+        f"{NEXT}448,196,522",
+        f"{HEAD}448,222,427 at 2026-11-17T18:32:08Z",
+        f"{STARTED}25,905",
+        f"{NOW}25,905",
+        f"{THIS_RUN}{why}",
+        f"14 legs: {BUDGET}",
+    )
+    assert f"::error::gain: {MESSAGE}\n" in err
+    assert f"  {THIS_RUN}{why}\n" in err
 
 
-class TestDecoded(TestRows):
-    """Each checkpoint gain.py reads, decoded where it is read (#1683)."""
+def test_advanced_not_gaining(
+    rows_state: Rows, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Advanced, but the log grew faster: red, both counts (green before #1967)."""
+    grown = checkpoint(next=BEHIND_NEXT + 1000, size=BEHIND_SIZE + 5000)
+    write(rows_state.end, grown)
+    status, _out, err = rows_state.run_helper(capfd=capfd)
+    assert status == 1, err
+    lines = rows_state.detail()
+    assert lines[2:4] == expect(f"{STARTED}25,905", f"{NOW}29,905")
+    assert lines[4] == (
+        f"{THIS_RUN}advanced but not gaining: outstanding 25,905 at the start,"
+        " 29,905 now"
+    )
 
-    def test_a_checkpoint_field_that_is_not_an_integer(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """next, treeSize or timestamp of another kind: named unreadable."""
-        rows: dict[str, tuple[str, object]] = {
-            "next as text": ("next", "448196522"),
-            "next as a boolean": ("next", True),
-            "a tree size with a fraction": ("treeSize", 448222427.5),
-            "a timestamp as text": ("timestamp", "1794940328655"),
-        }
-        for field, value in rows.values():
-            self.findings.unlink(missing_ok=True)
-            doc = checkpoint()
-            if field == "next":
-                doc["next"] = value
-            else:
-                tree_head(doc)[field] = value
-            self.write(self.end, doc)
-            status, _out, err = self.run_helper(capfd=capfd)
-            assert status == 1, err
-            assert self.detail()[4] == (
-                f"{THIS_RUN}the newest checkpoint:"
-                " the checkpoint file could not be read"
-            )
 
-    def test_next_infinity_is_unreadable(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A `next` of Infinity: named unreadable, never a traceback (#1557)."""
-        text = json.dumps(checkpoint())
-        self.end.write_text(
-            text.replace(f'"next": {BEHIND_NEXT}', '"next": Infinity'),
-            encoding="utf-8",
-        )
-        status, _out, err = self.run_helper(capfd=capfd)
-        assert status == 1, err
-        assert (
-            self.detail()[0] == f"{NEXT}unknown: the checkpoint file could not be read"
-        )
+def test_advanced_outstanding_equal(
+    rows_state: Rows, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Advanced, outstanding exactly as at the start: not smaller, red."""
+    level = checkpoint(next=BEHIND_NEXT + 1000, size=BEHIND_SIZE + 1000)
+    write(rows_state.end, level)
+    status, _out, err = rows_state.run_helper(capfd=capfd)
+    assert status == 1, err
+    assert rows_state.detail()[3] == f"{NOW}25,905"
 
-    def test_timestamp_out_of_range_is_unreadable(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A head time past the platform's range: named, never a traceback.
 
-        prop_gain.py's shrunk example (#1557): the start's timestamp
-        9.223372036854776e+21.
-        """
+def test_no_newest_checkpoint(
+    rows_state: Rows, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """No checkpoint at all (before the founding run): red, named."""
+    rows_state.start.unlink()
+    rows_state.end.unlink()
+    status, _out, err = rows_state.run_helper(kept="false", capfd=capfd)
+    assert status == 1, err
+    missing = "unknown: no checkpoint file"
+    assert rows_state.detail()[:5] == expect(
+        f"{NEXT}{missing}",
+        f"{HEAD}{missing}",
+        f"{STARTED}none counted: this run founded the checkpoint",
+        f"{NOW}{missing}",
+        f"{THIS_RUN}the newest checkpoint: no checkpoint file",
+    )
+
+
+def test_start_not_kept(rows_state: Rows, capfd: pytest.CaptureFixture[str]) -> None:
+    """The start job did not finish: red, the count named unknown."""
+    status, _out, err = rows_state.run_helper(kept="", capfd=capfd)
+    assert status == 1, err
+    lines = rows_state.detail()
+    assert lines[2] == f"{STARTED}unknown: the start job did not finish"
+    assert lines[4] == (
+        f"{THIS_RUN}the checkpoint the run started from was not kept"
+        " (the start job did not finish)"
+    )
+
+
+def test_kept_but_not_restored(
+    rows_state: Rows, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """The start was kept but its copy is gone: red, named."""
+    rows_state.start.unlink()
+    status, _out, err = rows_state.run_helper(capfd=capfd)
+    assert status == 1, err
+    assert rows_state.detail()[4] == (
+        f"{THIS_RUN}the checkpoint the run started from was not kept"
+        " (no checkpoint file)"
+    )
+
+
+def test_two_reasons_counted(
+    rows_state: Rows, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Three stopped for one reason, two for another: counts 3 and 2."""
+    rows_state.legs([THROTTLED, BUDGET, THROTTLED, BUDGET, THROTTLED])
+    status, _out, err = rows_state.run_helper(legs=5, capfd=capfd)
+    assert status == 1, err
+    assert rows_state.detail()[5:] == expect(
+        f"3 legs: {THROTTLED}", f"2 legs: {BUDGET}"
+    )
+
+
+def test_missing_report_is_counted(
+    rows_state: Rows, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Twelve reports for fourteen legs: two counted as "no report"."""
+    rows_state.legs([THROTTLED] * 12)
+    status, _out, err = rows_state.run_helper(capfd=capfd)
+    assert status == 1, err
+    assert rows_state.detail()[5:] == expect(
+        f"12 legs: {THROTTLED}", "2 legs: no report"
+    )
+
+
+def test_empty_report_is_no_report(
+    rows_state: Rows, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A leg whose stele wrote nothing hands on an empty file: no report."""
+    rows_state.legs([THROTTLED] * 13)
+    empty = rows_state.reports / "watch-report-14" / "report.json"
+    empty.parent.mkdir()
+    empty.write_text("", encoding="utf-8")
+    status, _out, err = rows_state.run_helper(capfd=capfd)
+    assert status == 1, err
+    assert rows_state.detail()[5:] == expect(
+        f"13 legs: {THROTTLED}", "1 leg: no report"
+    )
+
+
+def test_report_without_stopped_fact(
+    rows_state: Rows, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A report with no `stopped` fact: named, never dropped."""
+    rows_state.legs([None] * LEGS)
+    status, _out, err = rows_state.run_helper(capfd=capfd)
+    assert status == 1, err
+    assert rows_state.detail()[5:] == expect("14 legs: no reason given")
+
+
+def test_report_at_the_head(
+    rows_state: Rows, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A leg that judged to the head gave no reason: said so."""
+    rows_state.legs([])
+    at_head = rows_state.reports / "watch-report-1" / "report.json"
+    write(
+        at_head,
+        decoded.as_object(
+            decoded.load_json((DATA / "report-pass.json").read_bytes()), "pass"
+        ),
+    )
+    status, _out, err = rows_state.run_helper(capfd=capfd)
+    assert status == 1, err
+    assert rows_state.detail()[5:] == expect(
+        "13 legs: no report", "1 leg: judged to the head of the log"
+    )
+
+
+def test_unreadable_report(rows_state: Rows, capfd: pytest.CaptureFixture[str]) -> None:
+    """A report that is not stele's: the reader's own reason."""
+    rows_state.legs([BUDGET] * 13)
+    bad = rows_state.reports / "watch-report-14" / "report.json"
+    bad.parent.mkdir()
+    bad.write_text("[", encoding="utf-8")
+    status, _out, err = rows_state.run_helper(capfd=capfd)
+    assert status == 1, err
+    assert rows_state.detail()[5:] == expect(
+        f"13 legs: {BUDGET}", "1 leg: the report could not be read"
+    )
+
+
+def test_no_reports_directory(
+    rows_state: Rows, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """No report reached the job at all: every leg counted."""
+    shutil.rmtree(rows_state.reports)
+    status, _out, err = rows_state.run_helper(capfd=capfd)
+    assert status == 1, err
+    assert rows_state.detail()[5:] == expect("14 legs: no report")
+
+
+def test_gaining(rows_state: Rows, capfd: pytest.CaptureFixture[str]) -> None:
+    """Advanced, outstanding smaller than at the start: green."""
+    write(rows_state.end, checkpoint(next=BEHIND_NEXT + 10000))
+    status, out, err = rows_state.run_helper(capfd=capfd)
+    assert status == 0, err
+    assert rows_state.recorded() == list[dict[str, object]]()
+    assert "gain: green: gaining: outstanding 25,905 at the start, 15,905 now" in out
+
+
+def test_caught_up(rows_state: Rows, capfd: pytest.CaptureFixture[str]) -> None:
+    """Newest checkpoint at its head: green, whatever the start."""
+    write(rows_state.end, checkpoint("checkpoint-pass.json"))
+    status, out, err = rows_state.run_helper(kept="", capfd=capfd)
+    assert status == 0, err
+    assert rows_state.recorded() == list[dict[str, object]]()
+    assert "gain: the newest checkpoint: next index 448221522" in out
+    assert "gain: green: judged to the head of the log" in out
+
+
+def test_founded(rows_state: Rows, capfd: pytest.CaptureFixture[str]) -> None:
+    """No checkpoint at the start: no earlier count, by name, green."""
+    rows_state.start.unlink()
+    status, out, err = rows_state.run_helper(kept="false", capfd=capfd)
+    assert status == 0, err
+    assert rows_state.recorded() == list[dict[str, object]]()
+    assert (
+        "gain: green: advanced to 448196522; no earlier count, this run founded it"
+        in out
+    )
+
+
+def test_a_checkpoint_field_that_is_not_an_integer(
+    rows_state: Rows, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """next, treeSize or timestamp of another kind: named unreadable."""
+    rows: dict[str, tuple[str, object]] = {
+        "next as text": ("next", "448196522"),
+        "next as a boolean": ("next", True),
+        "a tree size with a fraction": ("treeSize", 448222427.5),
+        "a timestamp as text": ("timestamp", "1794940328655"),
+    }
+    for field, value in rows.values():
+        rows_state.findings.unlink(missing_ok=True)
         doc = checkpoint()
-        tree_head(doc)["timestamp"] = 9.223372036854776e21
-        self.write(self.start, doc)
-        status, _out, err = self.run_helper(capfd=capfd)
+        if field == "next":
+            doc["next"] = value
+        else:
+            tree_head(doc)[field] = value
+        write(rows_state.end, doc)
+        status, _out, err = rows_state.run_helper(capfd=capfd)
         assert status == 1, err
-        assert self.detail()[4] == (
-            f"{THIS_RUN}the checkpoint the run started from was not kept"
-            " (the checkpoint file could not be read)"
+        assert rows_state.detail()[4] == (
+            f"{THIS_RUN}the newest checkpoint: the checkpoint file could not be read"
         )
 
-    def test_nested_past_the_parser_is_unreadable(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """JSON nested past the parser's depth: named, never a traceback."""
-        self.end.write_bytes(b"[" * 100_000)
-        status, _out, err = self.run_helper(capfd=capfd)
-        assert status == 1, err
-        assert (
-            self.detail()[4]
-            == f"{THIS_RUN}the newest checkpoint: the checkpoint file could not be read"
-        )
-        assert f"::error::gain: {MESSAGE}\n" in err
+
+def test_next_infinity_is_unreadable(
+    rows_state: Rows, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A `next` of Infinity: named unreadable, never a traceback (#1557)."""
+    text = json.dumps(checkpoint())
+    rows_state.end.write_text(
+        text.replace(f'"next": {BEHIND_NEXT}', '"next": Infinity'),
+        encoding="utf-8",
+    )
+    status, _out, err = rows_state.run_helper(capfd=capfd)
+    assert status == 1, err
+    assert (
+        rows_state.detail()[0]
+        == f"{NEXT}unknown: the checkpoint file could not be read"
+    )
+
+
+def test_timestamp_out_of_range_is_unreadable(
+    rows_state: Rows, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A head time past the platform's range: named, never a traceback.
+
+    prop_gain.py's shrunk example (#1557): the start's timestamp
+    9.223372036854776e+21.
+    """
+    doc = checkpoint()
+    tree_head(doc)["timestamp"] = 9.223372036854776e21
+    write(rows_state.start, doc)
+    status, _out, err = rows_state.run_helper(capfd=capfd)
+    assert status == 1, err
+    assert rows_state.detail()[4] == (
+        f"{THIS_RUN}the checkpoint the run started from was not kept"
+        " (the checkpoint file could not be read)"
+    )
+
+
+def test_nested_past_the_parser_is_unreadable(
+    rows_state: Rows, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """JSON nested past the parser's depth: named, never a traceback."""
+    rows_state.end.write_bytes(b"[" * 100_000)
+    status, _out, err = rows_state.run_helper(capfd=capfd)
+    assert status == 1, err
+    assert (
+        rows_state.detail()[4]
+        == f"{THIS_RUN}the newest checkpoint: the checkpoint file could not be read"
+    )
+    assert f"::error::gain: {MESSAGE}\n" in err

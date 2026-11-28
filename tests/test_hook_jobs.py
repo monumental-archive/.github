@@ -136,67 +136,72 @@ def canon(hooks: str = HOOKS) -> dict[str, str]:
     return {IDENTITY_PATH: IDENTITY, HOOKS_PATH: hooks}
 
 
-class TestHookJobs:
-    """The delivered config is green; every script form is red by line."""
+# The delivered config is green; every script form is red by line.
+def assert_red(files: dict[str, str], message: str) -> None:
+    """Assert exit 1 with exactly `message` on stderr."""
+    done = lint(files)
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert done.stderr == message
+    assert done.stdout == ""
 
-    def assert_red(self, files: dict[str, str], message: str) -> None:
-        """Assert exit 1 with exactly `message` on stderr."""
-        done = lint(files)
-        assert done.returncode == 1, done.stdout + done.stderr
-        assert done.stderr == message
-        assert done.stdout == ""
 
-    def assert_out(self, files: dict[str, str], line: str) -> None:
-        """Assert exit 0 with exactly one stdout line and no stderr."""
-        done = lint(files)
-        assert done.returncode == 0, done.stderr
-        assert done.stdout == f"{NAME}: {line}\n"
-        assert done.stderr == ""
+def assert_out(files: dict[str, str], line: str) -> None:
+    """Assert exit 0 with exactly one stdout line and no stderr."""
+    done = lint(files)
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == f"{NAME}: {line}\n"
+    assert done.stderr == ""
 
-    def test_the_delivered_config_is_green(self) -> None:
-        """The canon's own hook file, as tracked, passes."""
-        self.assert_out(canon(), f"every job in {HOOKS_PATH} is an inline run:")
 
-    def test_the_job_as_it_shipped_before_is_red(self) -> None:
-        """`script: ci.sh`, the pre-push job before #1426, reds by line."""
-        hooks, line = with_job(BEFORE_JOB)
-        self.assert_red(canon(hooks), red([f"{line}:      script: ci.sh"]))
+def test_the_delivered_config_is_green() -> None:
+    """The canon's own hook file, as tracked, passes."""
+    assert_out(canon(), f"every job in {HOOKS_PATH} is an inline run:")
 
-    def test_a_scripts_map_is_red(self) -> None:
-        """The older `scripts:` map runs from the same cache."""
-        job = (
-            '    - name: ci\n      run: "true"\n'
-            '  scripts:\n    "ci.sh":\n      runner: bash\n'
-        )
-        hooks, line = with_job(job)
-        self.assert_red(canon(hooks), red([f"{line + 1}:  scripts:"]))
 
-    def test_a_flow_mapping_job_is_red(self) -> None:
-        """A job written as a flow mapping is read the same way."""
-        flow = "    - {name: ci, script: ci.sh, runner: bash}"
-        hooks, line = with_job(f"{flow}\n")
-        self.assert_red(canon(hooks), red([f"{line - 1}:{flow}"]))
+def test_the_job_as_it_shipped_before_is_red() -> None:
+    """`script: ci.sh`, the pre-push job before #1426, reds by line."""
+    hooks, line = with_job(BEFORE_JOB)
+    assert_red(canon(hooks), red([f"{line}:      script: ci.sh"]))
 
-    def test_a_script_in_a_comment_is_green(self) -> None:
-        """A comment may name the rule; only YAML keys are read."""
-        hooks = HOOKS.replace(
-            "    - name: ci\n", "    # script: ci.sh was the old form\n    - name: ci\n"
-        )
-        assert hooks != HOOKS
-        self.assert_out(canon(hooks), f"every job in {HOOKS_PATH} is an inline run:")
 
-    def test_outside_the_canon_it_skips(self) -> None:
-        """No tracked identity: not the canon, whatever the hook file says."""
-        hooks, _ = with_job(BEFORE_JOB)
-        self.assert_out(
-            {HOOKS_PATH: hooks},
-            "no tracked security/identity.toml, not the canon, skipped",
-        )
+def test_a_scripts_map_is_red() -> None:
+    """The older `scripts:` map runs from the same cache."""
+    job = (
+        '    - name: ci\n      run: "true"\n'
+        '  scripts:\n    "ci.sh":\n      runner: bash\n'
+    )
+    hooks, line = with_job(job)
+    assert_red(canon(hooks), red([f"{line + 1}:  scripts:"]))
 
-    def test_the_canon_without_its_hook_file_is_red_by_name(self) -> None:
-        """In the canon the hook file is a requirement, never a skip."""
-        self.assert_red(
-            {IDENTITY_PATH: IDENTITY},
-            f"{NAME}: {HOOKS_PATH} is not tracked;"
-            " the canon delivers its hooks there\n",
-        )
+
+def test_a_flow_mapping_job_is_red() -> None:
+    """A job written as a flow mapping is read the same way."""
+    flow = "    - {name: ci, script: ci.sh, runner: bash}"
+    hooks, line = with_job(f"{flow}\n")
+    assert_red(canon(hooks), red([f"{line - 1}:{flow}"]))
+
+
+def test_a_script_in_a_comment_is_green() -> None:
+    """A comment may name the rule; only YAML keys are read."""
+    hooks = HOOKS.replace(
+        "    - name: ci\n", "    # script: ci.sh was the old form\n    - name: ci\n"
+    )
+    assert hooks != HOOKS
+    assert_out(canon(hooks), f"every job in {HOOKS_PATH} is an inline run:")
+
+
+def test_outside_the_canon_it_skips() -> None:
+    """No tracked identity: not the canon, whatever the hook file says."""
+    hooks, _ = with_job(BEFORE_JOB)
+    assert_out(
+        {HOOKS_PATH: hooks},
+        "no tracked security/identity.toml, not the canon, skipped",
+    )
+
+
+def test_the_canon_without_its_hook_file_is_red_by_name() -> None:
+    """In the canon the hook file is a requirement, never a skip."""
+    assert_red(
+        {IDENTITY_PATH: IDENTITY},
+        f"{NAME}: {HOOKS_PATH} is not tracked; the canon delivers its hooks there\n",
+    )

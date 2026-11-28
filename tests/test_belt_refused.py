@@ -22,8 +22,6 @@ from __future__ import annotations
 import subprocess
 from typing import TYPE_CHECKING
 
-import pytest
-
 from belt import decoded
 from belt.typed_pytest import fixture
 from tests import support
@@ -122,12 +120,10 @@ def stub(tree: Path, sha: str, name: str = "gate.yml") -> None:
     )
 
 
-@pytest.mark.usefixtures("_set_up_test_planted")
-class TestPlanted:
+class Planted:
     """The cache trees of A and B, and a consumer with no pin yet."""
 
-    @fixture
-    def _set_up_test_planted(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Plant both cache trees and an empty consumer repository."""
         self.tmp = tmp_path
         self.home = self.tmp / "home"
@@ -234,114 +230,134 @@ class TestPlanted:
         assert done.stdout == "ran\n"
 
 
-class TestTheBeltAnswersOnlyForItsPin(TestPlanted):
-    """Each row: the tree's pin, the belt that answers, and the verdict."""
-
-    def test_a_link_to_another_pin_refuses(self) -> None:
-        """Pin B, link A: exit 1, one line naming A, B and the remedy."""
-        self.pin(self.repo, B)
-        self.link(self.repo, A)
-        self.assert_refused(self.repo, A, B)
-
-    def test_a_link_to_the_pin_runs(self) -> None:
-        """Pin B, link B: the task runs."""
-        self.pin(self.repo, B)
-        self.link(self.repo, B)
-        self.assert_runs(self.repo)
-
-    def test_the_refusal_holds_from_a_subdirectory(self) -> None:
-        """Invoked below the top: the tree is still the one judged."""
-        self.pin(self.repo, B)
-        self.link(self.repo, A)
-        below = self.repo / "src" / "it's here"
-        below.mkdir(parents=True)
-        self.assert_refused(below, A, B)
-
-    def test_mise_run_itself_refuses(self) -> None:
-        """Through `mise run`: the task's body never runs."""
-        self.pin(self.repo, B)
-        self.link(self.repo, A)
-        done = self.mise(self.repo, "run", TASK)
-        assert done.returncode == 1, done.stdout
-        assert "ran" not in done.stdout
-        assert refusal(A, B) in done.stderr
-
-    def test_a_nested_worktree_with_no_link_refuses(self) -> None:
-        """Parent pinned and linked to A; a worktree inside it pins B, unlinked."""
-        self.pin(self.repo, A)
-        self.git(self.repo, "add", "-A")
-        self.git(self.repo, "commit", "-q", "-m", "pin A")
-        self.link(self.repo, A)
-        nested = self.repo / ".claude" / "worktrees" / "lane"
-        self.git(self.repo, "worktree", "add", "-q", "-b", "lane", str(nested))
-        self.pin(nested, B)
-        assert not (nested / ".config").exists()
-        self.assert_refused(nested, A, B)
-
-    def test_a_nested_worktree_on_its_parents_pin_runs(self) -> None:
-        """The same nesting, the same pin: the belt answering is the pinned."""
-        self.pin(self.repo, A)
-        self.git(self.repo, "add", "-A")
-        self.git(self.repo, "commit", "-q", "-m", "pin A")
-        self.link(self.repo, A)
-        nested = self.repo / ".claude" / "worktrees" / "lane"
-        self.git(self.repo, "worktree", "add", "-q", "-b", "lane", str(nested))
-        self.assert_runs(nested)
-
-    def test_a_belt_named_by_the_global_carrier_runs(self) -> None:
-        """Carrier 1, MISE_GLOBAL_CONFIG_FILE, named on purpose: runs."""
-        self.pin(self.repo, B)
-        named = str(self.trees[A] / "mise" / "config.toml")
-        self.assert_runs(self.repo, MISE_GLOBAL_CONFIG_FILE=named)
-
-    def test_the_canons_own_tree_runs(self) -> None:
-        """Carrier 2: the tree is its own belt, whatever stub or link it holds."""
-        support.belt(self.repo, stubs={"config.toml": belt_lines()})
-        self.pin(self.repo, B)
-        self.link(self.repo, A)
-        self.assert_runs(self.repo)
-
-    def test_an_untracked_stray_does_not_choose_the_pin(self) -> None:
-        """Tracked stub pins B, linked B; an untracked stray pinning A sorts first.
-
-        Fails before #2018: the glob read the stray, so the right belt
-        was refused.
-        """
-        self.pin(self.repo, B)
-        stub(self.repo, A, "a-stray.yml")
-        self.link(self.repo, B)
-        self.assert_runs(self.repo)
-
-    def test_an_untracked_stray_does_not_excuse_a_wrong_link(self) -> None:
-        """Tracked stub pins B, linked A; a stray pinning A: still refused."""
-        self.pin(self.repo, B)
-        stub(self.repo, A, "a-stray.yml")
-        self.link(self.repo, A)
-        self.assert_refused(self.repo, A, B)
-
-    def test_a_tree_with_no_pin_runs(self) -> None:
-        """No gate stub: nothing to compare, nothing refused."""
-        self.link(self.repo, A)
-        self.assert_runs(self.repo)
+@fixture
+def planted(tmp_path: Path) -> Planted:
+    """Give each row its own Planted."""
+    return Planted(tmp_path)
 
 
-@pytest.mark.usefixtures("_set_up_test_only_tasks_refuse")
-class TestOnlyTasksRefuse(TestPlanted):
+def test_a_link_to_another_pin_refuses(planted: Planted) -> None:
+    """Pin B, link A: exit 1, one line naming A, B and the remedy."""
+    planted.pin(planted.repo, B)
+    planted.link(planted.repo, A)
+    planted.assert_refused(planted.repo, A, B)
+
+
+def test_a_link_to_the_pin_runs(planted: Planted) -> None:
+    """Pin B, link B: the task runs."""
+    planted.pin(planted.repo, B)
+    planted.link(planted.repo, B)
+    planted.assert_runs(planted.repo)
+
+
+def test_the_refusal_holds_from_a_subdirectory(planted: Planted) -> None:
+    """Invoked below the top: the tree is still the one judged."""
+    planted.pin(planted.repo, B)
+    planted.link(planted.repo, A)
+    below = planted.repo / "src" / "it's here"
+    below.mkdir(parents=True)
+    planted.assert_refused(below, A, B)
+
+
+def test_mise_run_itself_refuses(planted: Planted) -> None:
+    """Through `mise run`: the task's body never runs."""
+    planted.pin(planted.repo, B)
+    planted.link(planted.repo, A)
+    done = planted.mise(planted.repo, "run", TASK)
+    assert done.returncode == 1, done.stdout
+    assert "ran" not in done.stdout
+    assert refusal(A, B) in done.stderr
+
+
+def test_a_nested_worktree_with_no_link_refuses(planted: Planted) -> None:
+    """Parent pinned and linked to A; a worktree inside it pins B, unlinked."""
+    planted.pin(planted.repo, A)
+    planted.git(planted.repo, "add", "-A")
+    planted.git(planted.repo, "commit", "-q", "-m", "pin A")
+    planted.link(planted.repo, A)
+    nested = planted.repo / ".claude" / "worktrees" / "lane"
+    planted.git(planted.repo, "worktree", "add", "-q", "-b", "lane", str(nested))
+    planted.pin(nested, B)
+    assert not (nested / ".config").exists()
+    planted.assert_refused(nested, A, B)
+
+
+def test_a_nested_worktree_on_its_parents_pin_runs(planted: Planted) -> None:
+    """The same nesting, the same pin: the belt answering is the pinned."""
+    planted.pin(planted.repo, A)
+    planted.git(planted.repo, "add", "-A")
+    planted.git(planted.repo, "commit", "-q", "-m", "pin A")
+    planted.link(planted.repo, A)
+    nested = planted.repo / ".claude" / "worktrees" / "lane"
+    planted.git(planted.repo, "worktree", "add", "-q", "-b", "lane", str(nested))
+    planted.assert_runs(nested)
+
+
+def test_a_belt_named_by_the_global_carrier_runs(planted: Planted) -> None:
+    """Carrier 1, MISE_GLOBAL_CONFIG_FILE, named on purpose: runs."""
+    planted.pin(planted.repo, B)
+    named = str(planted.trees[A] / "mise" / "config.toml")
+    planted.assert_runs(planted.repo, MISE_GLOBAL_CONFIG_FILE=named)
+
+
+def test_the_canons_own_tree_runs(planted: Planted) -> None:
+    """Carrier 2: the tree is its own belt, whatever stub or link it holds."""
+    support.belt(planted.repo, stubs={"config.toml": belt_lines()})
+    planted.pin(planted.repo, B)
+    planted.link(planted.repo, A)
+    planted.assert_runs(planted.repo)
+
+
+def test_an_untracked_stray_does_not_choose_the_pin(planted: Planted) -> None:
+    """Tracked stub pins B, linked B; an untracked stray pinning A sorts first.
+
+    Fails before #2018: the glob read the stray, so the right belt
+    was refused.
+    """
+    planted.pin(planted.repo, B)
+    stub(planted.repo, A, "a-stray.yml")
+    planted.link(planted.repo, B)
+    planted.assert_runs(planted.repo)
+
+
+def test_an_untracked_stray_does_not_excuse_a_wrong_link(planted: Planted) -> None:
+    """Tracked stub pins B, linked A; a stray pinning A: still refused."""
+    planted.pin(planted.repo, B)
+    stub(planted.repo, A, "a-stray.yml")
+    planted.link(planted.repo, A)
+    planted.assert_refused(planted.repo, A, B)
+
+
+def test_a_tree_with_no_pin_runs(planted: Planted) -> None:
+    """No gate stub: nothing to compare, nothing refused."""
+    planted.link(planted.repo, A)
+    planted.assert_runs(planted.repo)
+
+
+class OnlyTasksRefuse(Planted):
     """A refused tree: mise's own commands still work, so the remedy can run."""
 
-    @fixture
-    def _set_up_test_only_tasks_refuse(self) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Plant the refused tree: pin B, link A."""
+        super().__init__(tmp_path)
         self.pin(self.repo, B)
         self.link(self.repo, A)
 
-    def test_mise_env_exits_0(self) -> None:
-        """`mise env` renders the refusal and exits 0."""
-        assert self.rendered(self.repo)["ORG_BELT_REFUSED"] == refusal(A, B).rstrip(
-            "\n"
-        )
 
-    def test_mise_install_exits_0(self) -> None:
-        """`mise install` runs no task body, and exits 0."""
-        done = self.mise(self.repo, "install")
-        assert done.returncode == 0, done.stderr
+@fixture
+def only_tasks_refuse(tmp_path: Path) -> OnlyTasksRefuse:
+    """Give each row its own OnlyTasksRefuse."""
+    return OnlyTasksRefuse(tmp_path)
+
+
+def test_mise_env_exits_0(only_tasks_refuse: OnlyTasksRefuse) -> None:
+    """`mise env` renders the refusal and exits 0."""
+    assert only_tasks_refuse.rendered(only_tasks_refuse.repo)[
+        "ORG_BELT_REFUSED"
+    ] == refusal(A, B).rstrip("\n")
+
+
+def test_mise_install_exits_0(only_tasks_refuse: OnlyTasksRefuse) -> None:
+    """`mise install` runs no task body, and exits 0."""
+    done = only_tasks_refuse.mise(only_tasks_refuse.repo, "install")
+    assert done.returncode == 0, done.stderr

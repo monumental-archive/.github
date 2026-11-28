@@ -168,263 +168,270 @@ def rewritten(
     return changed
 
 
-class TestRealCanonOutput:
-    """The canon's own zizmor run, as it came."""
-
-    def test_the_fixture_is_the_ten_signer_findings(self) -> None:
-        """The fixture is what the issue measured: ten, one rule, one ref."""
-        assert len(REAL) == 10
-        idents: set[object] = {f["ident"] for f in REAL}
-        rules: set[object] = {"stale-action-refs"}
-        assert rules == idents
-        refs = {r for f in REAL for r in signer.references(f)}
-        want: set[str] = {SIGNER_REF}
-        assert want == refs
-
-    def test_all_ten_are_dropped_and_counted(self) -> None:
-        """The canon goes green, and says what it dropped."""
-        status, out, err = run(REAL)
-        assert status == 0, err
-        assert "10 stale-action-refs finding(s) on the signer dropped" in out
-        assert err == ""
+# The canon's own zizmor run, as it came.
+def test_the_fixture_is_the_ten_signer_findings() -> None:
+    """The fixture is what the issue measured: ten, one rule, one ref."""
+    assert len(REAL) == 10
+    idents: set[object] = {f["ident"] for f in REAL}
+    rules: set[object] = {"stale-action-refs"}
+    assert rules == idents
+    refs = {r for f in REAL for r in signer.references(f)}
+    want: set[str] = {SIGNER_REF}
+    assert want == refs
 
 
-class TestRefVersionMismatch:
-    """The signer's `# main` pin behind `main` (#1340), as zizmor wrote it."""
-
-    def test_the_fixture_is_one_signer_mismatch(self) -> None:
-        """The fixture is the measured shape: the reference rides the Hidden job."""
-        assert len(MISMATCH) == 1
-        assert MISMATCH[0]["ident"] == "ref-version-mismatch"
-        primary = [
-            concrete(loc)["feature"]
-            for loc in locations(MISMATCH[0])
-            if symbolic(loc)["kind"] == "Primary"
-        ]
-        feature: list[object] = ["main"]
-        assert feature == primary
-        want: list[str] = [MISMATCH_REF]
-        assert want == signer.references(MISMATCH[0])
-
-    def test_the_signer_mismatch_is_dropped_and_counted(self) -> None:
-        """The signer's `# main` behind its branch head goes green, said aloud."""
-        status, out, err = run(MISMATCH)
-        assert status == 0, err
-        assert (
-            "1 ref-version-mismatch finding(s) on the signer dropped"
-            " (monumental-archive/signer is pinned on `# main`"
-        ) in out
-        assert err == ""
-
-    def test_both_audits_together_are_dropped(self) -> None:
-        """The scheduled run carries both; each is counted on its own line."""
-        status, out, err = run([*REAL, *MISMATCH])
-        assert status == 0, err
-        assert "10 stale-action-refs finding(s) on the signer dropped" in out
-        assert "1 ref-version-mismatch finding(s) on the signer dropped" in out
-
-    def test_another_owner_mismatch_is_kept(self) -> None:
-        """The same finding on another owner's repository still reds."""
-        other = rewritten(
-            MISMATCH[0],
-            "Hidden",
-            "monumental-archive/signer/",
-            "someone-else/signer/",
-        )
-        status, out, _ = run([other])
-        assert status == 14
-        assert "0 ref-version-mismatch finding(s) on the signer dropped" in out
-        assert "1 finding(s) remain: ref-version-mismatch" in out
-
-    def test_a_mismatch_with_no_readable_reference_is_kept(self) -> None:
-        """A Hidden location with no `uses:` line names nothing; it is kept."""
-        blind = rewritten(MISMATCH[0], "Hidden", "uses:", "calls:")
-        none: list[str] = []
-        assert none == signer.references(blind)
-        status, out, _ = run([blind])
-        assert status == 14
-        assert "1 finding(s) remain: ref-version-mismatch" in out
-
-    def test_the_comment_alone_is_not_read_as_a_reference(self) -> None:
-        """Primary carries only `main`; dropping the Hidden location blinds it."""
-        blind = copy.deepcopy(MISMATCH[0])
-        blind["locations"] = [
-            loc for loc in locations(blind) if symbolic(loc)["kind"] == "Primary"
-        ]
-        status, out, _ = run([blind])
-        assert status == 14
-        assert "1 finding(s) remain: ref-version-mismatch" in out
-
-    def test_a_uses_in_prose_is_not_a_reference(self) -> None:
-        """A commented `uses:` beside the signer's is not read as a second ref."""
-        prose = rewritten(
-            MISMATCH[0],
-            "Hidden",
-            "    with:\n",
-            "    # relative `uses: actions/checkout@v4` in prose\n    with:\n",
-        )
-        want: list[str] = [MISMATCH_REF]
-        assert want == signer.references(prose)
-        assert run([prose])[0] == 0
-
-    def test_a_second_reference_elsewhere_keeps_it(self) -> None:
-        """Every named reference must be the signer's, not just one of them."""
-        two = rewritten(
-            MISMATCH[0],
-            "Hidden",
-            "    with:\n",
-            "    with:\n      - uses: actions/checkout@v4\n",
-        )
-        status, out, _ = run([two])
-        assert status == 14
-        assert "1 finding(s) remain: ref-version-mismatch" in out
-
-    def test_another_audit_on_the_signer_is_kept(self) -> None:
-        """An unrelated audit carrying the same locations still reds."""
-        other_rule = copy.deepcopy(MISMATCH[0])
-        other_rule["ident"] = "unpinned-uses"
-        status, out, _ = run([other_rule])
-        assert status == 14
-        assert "1 finding(s) remain: unpinned-uses" in out
+def test_all_ten_are_dropped_and_counted() -> None:
+    """The canon goes green, and says what it dropped."""
+    status, out, err = run(REAL)
+    assert status == 0, err
+    assert "10 stale-action-refs finding(s) on the signer dropped" in out
+    assert err == ""
 
 
-class TestKept:
-    """Every finding the exemption does not name still reds."""
-
-    def test_another_repository_reusable_workflow_is_kept(self) -> None:
-        """The same audit on someone else's reusable workflow is reported."""
-        other = repointed(
-            REAL[0],
-            "monumental-archive/other/.github/workflows/sign.yml@" + "a" * 40,
-        )
-        status, out, _ = run([other])
-        assert status == 14
-        assert "0 stale-action-refs finding(s) on the signer dropped" in out
-        assert "1 finding(s) remain: stale-action-refs" in out
-
-    def test_a_third_party_action_is_kept(self) -> None:
-        """A stale third-party action pin is exactly what the audit is for."""
-        third = repointed(REAL[0], "actions/checkout@" + "b" * 40)
-        status, out, _ = run([*REAL, third])
-        assert status == 14
-        assert "1 finding(s) remain" in out
-
-    def test_a_repository_that_only_shares_the_prefix_is_kept(self) -> None:
-        """`signer-fork` is not `signer`: repositories match whole."""
-        near = repointed(
-            REAL[0],
-            "monumental-archive/signer-fork/.github/workflows/sign.yml@" + "c" * 40,
-        )
-        assert run([near])[0] == 14
-
-    def test_another_audit_on_the_signer_is_kept(self) -> None:
-        """The exemption is one rule wide, not the signer wide."""
-        other_rule = copy.deepcopy(REAL[0])
-        other_rule["ident"] = "impostor-commit"
-        status, out, _ = run([other_rule])
-        assert status == 14
-        assert "remain: impostor-commit" in out
-
-    def test_a_finding_with_no_readable_reference_is_kept(self) -> None:
-        """When zizmor's shape gives no reference, nothing is assumed."""
-        blind = copy.deepcopy(REAL[0])
-        for location in locations(blind):
-            symbolic(location)["kind"] = "Related"
-        status, out, err = run([blind])
-        assert status == 1
-        assert "findings[0]: no location is Primary" in err
-        assert out == ""
-
-    def test_a_reference_without_a_ref_is_kept(self) -> None:
-        """A Primary feature with no `@` is not a reference."""
-        assert run([repointed(REAL[0], "monumental-archive/signer")])[0] == 14
+# The signer's `# main` pin behind `main` (#1340), as zizmor wrote it.
+def test_the_fixture_is_one_signer_mismatch() -> None:
+    """The fixture is the measured shape: the reference rides the Hidden job."""
+    assert len(MISMATCH) == 1
+    assert MISMATCH[0]["ident"] == "ref-version-mismatch"
+    primary = [
+        concrete(loc)["feature"]
+        for loc in locations(MISMATCH[0])
+        if symbolic(loc)["kind"] == "Primary"
+    ]
+    feature: list[object] = ["main"]
+    assert feature == primary
+    want: list[str] = [MISMATCH_REF]
+    assert want == signer.references(MISMATCH[0])
 
 
-class TestMatching:
-    """How the signer's repository is read and compared."""
-
-    def test_case_differences_do_not_matter(self) -> None:
-        """GitHub owner and repository names are case-insensitive."""
-        upper = repointed(REAL[0], SIGNER_REF.replace("signer", "Signer", 1))
-        assert run([upper])[0] == 0
-
-    def test_an_ignored_finding_is_not_reported(self) -> None:
-        """Per-site `zizmor: ignore` comments are zizmor's, not this filter's."""
-        ignored = repointed(REAL[0], "actions/checkout@" + "d" * 40)
-        ignored["ignored"] = True
-        assert run([*REAL, ignored])[0] == 0
-
-    def test_no_findings_is_green_and_counts_zero(self) -> None:
-        """An empty run drops nothing and passes."""
-        status, out, _ = run([])
-        assert status == 0
-        assert "0 stale-action-refs finding(s) on the signer dropped" in out
+def test_the_signer_mismatch_is_dropped_and_counted() -> None:
+    """The signer's `# main` behind its branch head goes green, said aloud."""
+    status, out, err = run(MISMATCH)
+    assert status == 0, err
+    assert (
+        "1 ref-version-mismatch finding(s) on the signer dropped"
+        " (monumental-archive/signer is pinned on `# main`"
+    ) in out
+    assert err == ""
 
 
-class TestRefusals:
-    """Reports the filter will not guess about: exit 1, by name."""
+def test_both_audits_together_are_dropped() -> None:
+    """The scheduled run carries both; each is counted on its own line."""
+    status, out, err = run([*REAL, *MISMATCH])
+    assert status == 0, err
+    assert "10 stale-action-refs finding(s) on the signer dropped" in out
+    assert "1 ref-version-mismatch finding(s) on the signer dropped" in out
 
-    def test_a_signer_declaration_with_no_repository_is_refused(self) -> None:
-        """A declaration that names no owner/repo cannot exempt anything."""
-        status, _, err = run(REAL, workflow="signer")
-        assert status == 1
-        assert "names no owner/repository" in err
 
-    def test_a_finding_of_the_wrong_shape_is_refused_not_raised(self) -> None:
-        """The shrunk examples (#1555): refused by name, never a traceback."""
-        shapes: tuple[tuple[dict[str, object], str], ...] = (
-            ({"ident": []}, "findings[0]: ident is not a string"),
-            (
-                {"ident": "stale-action-refs", "locations": [{"symbolic": "x"}]},
-                "findings[0]: desc is not a string",
-            ),
-            (
-                {"ident": "stale-action-refs", "desc": "d", "locations": 5},
-                "findings[0]: determinations is not an object",
-            ),
-            (
-                {
-                    "ident": "stale-action-refs",
-                    "desc": "d",
-                    "determinations": {"severity": "Low"},
-                    "locations": [{"symbolic": {"kind": "Primary"}, "concrete": 1}],
-                },
-                "findings[0]: locations[0]: symbolic.key is not an object",
-            ),
-        )
-        for finding, said in shapes:
-            status, _, err = run([finding])
-            assert status == 1
-            assert (
-                f"{TASK}: zizmor exited 14: the output is not zizmor's report: {said}"
-            ) in err
+def test_another_owner_mismatch_is_kept() -> None:
+    """The same finding on another owner's repository still reds."""
+    other = rewritten(
+        MISMATCH[0],
+        "Hidden",
+        "monumental-archive/signer/",
+        "someone-else/signer/",
+    )
+    status, out, _ = run([other])
+    assert status == 14
+    assert "0 ref-version-mismatch finding(s) on the signer dropped" in out
+    assert "1 finding(s) remain: ref-version-mismatch" in out
 
-    def test_a_finding_with_no_primary_location_is_refused(self) -> None:
-        """A remaining finding with no location at fault: refused by name."""
-        third = repointed(REAL[0], "actions/checkout@" + "d" * 40)
-        for location in locations(third):
-            symbolic(location)["kind"] = "Hidden"
-        status, _, err = run([third])
+
+def test_a_mismatch_with_no_readable_reference_is_kept() -> None:
+    """A Hidden location with no `uses:` line names nothing; it is kept."""
+    blind = rewritten(MISMATCH[0], "Hidden", "uses:", "calls:")
+    none: list[str] = []
+    assert none == signer.references(blind)
+    status, out, _ = run([blind])
+    assert status == 14
+    assert "1 finding(s) remain: ref-version-mismatch" in out
+
+
+def test_the_comment_alone_is_not_read_as_a_reference() -> None:
+    """Primary carries only `main`; dropping the Hidden location blinds it."""
+    blind = copy.deepcopy(MISMATCH[0])
+    blind["locations"] = [
+        loc for loc in locations(blind) if symbolic(loc)["kind"] == "Primary"
+    ]
+    status, out, _ = run([blind])
+    assert status == 14
+    assert "1 finding(s) remain: ref-version-mismatch" in out
+
+
+def test_a_uses_in_prose_is_not_a_reference() -> None:
+    """A commented `uses:` beside the signer's is not read as a second ref."""
+    prose = rewritten(
+        MISMATCH[0],
+        "Hidden",
+        "    with:\n",
+        "    # relative `uses: actions/checkout@v4` in prose\n    with:\n",
+    )
+    want: list[str] = [MISMATCH_REF]
+    assert want == signer.references(prose)
+    assert run([prose])[0] == 0
+
+
+def test_a_second_reference_elsewhere_keeps_it() -> None:
+    """Every named reference must be the signer's, not just one of them."""
+    two = rewritten(
+        MISMATCH[0],
+        "Hidden",
+        "    with:\n",
+        "    with:\n      - uses: actions/checkout@v4\n",
+    )
+    status, out, _ = run([two])
+    assert status == 14
+    assert "1 finding(s) remain: ref-version-mismatch" in out
+
+
+def test_another_audit_on_the_signer_is_kept() -> None:
+    """An unrelated audit carrying the same locations still reds."""
+    other_rule = copy.deepcopy(MISMATCH[0])
+    other_rule["ident"] = "unpinned-uses"
+    status, out, _ = run([other_rule])
+    assert status == 14
+    assert "1 finding(s) remain: unpinned-uses" in out
+
+
+# Every finding the exemption does not name still reds.
+def test_another_repository_reusable_workflow_is_kept() -> None:
+    """The same audit on someone else's reusable workflow is reported."""
+    other = repointed(
+        REAL[0],
+        "monumental-archive/other/.github/workflows/sign.yml@" + "a" * 40,
+    )
+    status, out, _ = run([other])
+    assert status == 14
+    assert "0 stale-action-refs finding(s) on the signer dropped" in out
+    assert "1 finding(s) remain: stale-action-refs" in out
+
+
+def test_a_third_party_action_is_kept() -> None:
+    """A stale third-party action pin is exactly what the audit is for."""
+    third = repointed(REAL[0], "actions/checkout@" + "b" * 40)
+    status, out, _ = run([*REAL, third])
+    assert status == 14
+    assert "1 finding(s) remain" in out
+
+
+def test_a_repository_that_only_shares_the_prefix_is_kept() -> None:
+    """`signer-fork` is not `signer`: repositories match whole."""
+    near = repointed(
+        REAL[0],
+        "monumental-archive/signer-fork/.github/workflows/sign.yml@" + "c" * 40,
+    )
+    assert run([near])[0] == 14
+
+
+def test_kept_another_audit_on_the_signer_is_kept() -> None:
+    """The exemption is one rule wide, not the signer wide."""
+    other_rule = copy.deepcopy(REAL[0])
+    other_rule["ident"] = "impostor-commit"
+    status, out, _ = run([other_rule])
+    assert status == 14
+    assert "remain: impostor-commit" in out
+
+
+def test_a_finding_with_no_readable_reference_is_kept() -> None:
+    """When zizmor's shape gives no reference, nothing is assumed."""
+    blind = copy.deepcopy(REAL[0])
+    for location in locations(blind):
+        symbolic(location)["kind"] = "Related"
+    status, out, err = run([blind])
+    assert status == 1
+    assert "findings[0]: no location is Primary" in err
+    assert out == ""
+
+
+def test_a_reference_without_a_ref_is_kept() -> None:
+    """A Primary feature with no `@` is not a reference."""
+    assert run([repointed(REAL[0], "monumental-archive/signer")])[0] == 14
+
+
+# How the signer's repository is read and compared.
+def test_case_differences_do_not_matter() -> None:
+    """GitHub owner and repository names are case-insensitive."""
+    upper = repointed(REAL[0], SIGNER_REF.replace("signer", "Signer", 1))
+    assert run([upper])[0] == 0
+
+
+def test_an_ignored_finding_is_not_reported() -> None:
+    """Per-site `zizmor: ignore` comments are zizmor's, not this filter's."""
+    ignored = repointed(REAL[0], "actions/checkout@" + "d" * 40)
+    ignored["ignored"] = True
+    assert run([*REAL, ignored])[0] == 0
+
+
+def test_no_findings_is_green_and_counts_zero() -> None:
+    """An empty run drops nothing and passes."""
+    status, out, _ = run([])
+    assert status == 0
+    assert "0 stale-action-refs finding(s) on the signer dropped" in out
+
+
+# Reports the filter will not guess about: exit 1, by name.
+def test_a_signer_declaration_with_no_repository_is_refused() -> None:
+    """A declaration that names no owner/repo cannot exempt anything."""
+    status, _, err = run(REAL, workflow="signer")
+    assert status == 1
+    assert "names no owner/repository" in err
+
+
+def test_a_finding_of_the_wrong_shape_is_refused_not_raised() -> None:
+    """The shrunk examples (#1555): refused by name, never a traceback."""
+    shapes: tuple[tuple[dict[str, object], str], ...] = (
+        ({"ident": []}, "findings[0]: ident is not a string"),
+        (
+            {"ident": "stale-action-refs", "locations": [{"symbolic": "x"}]},
+            "findings[0]: desc is not a string",
+        ),
+        (
+            {"ident": "stale-action-refs", "desc": "d", "locations": 5},
+            "findings[0]: determinations is not an object",
+        ),
+        (
+            {
+                "ident": "stale-action-refs",
+                "desc": "d",
+                "determinations": {"severity": "Low"},
+                "locations": [{"symbolic": {"kind": "Primary"}, "concrete": 1}],
+            },
+            "findings[0]: locations[0]: symbolic.key is not an object",
+        ),
+    )
+    for finding, said in shapes:
+        status, _, err = run([finding])
         assert status == 1
         assert (
-            f"{TASK}: zizmor exited 14: the output is not zizmor's report:"
-            " findings[0]: no location is Primary"
+            f"{TASK}: zizmor exited 14: the output is not zizmor's report: {said}"
         ) in err
 
-    def test_input_that_is_not_the_finding_array_is_refused(self) -> None:
-        """A SARIF document or an error object is not silently empty."""
-        status, out, err = run({"runs": []})
-        assert status == 1
-        assert "it is not zizmor's finding array" in err
-        assert out == ""
+
+def test_a_finding_with_no_primary_location_is_refused() -> None:
+    """A remaining finding with no location at fault: refused by name."""
+    third = repointed(REAL[0], "actions/checkout@" + "d" * 40)
+    for location in locations(third):
+        symbolic(location)["kind"] = "Hidden"
+    status, _, err = run([third])
+    assert status == 1
+    assert (
+        f"{TASK}: zizmor exited 14: the output is not zizmor's report:"
+        " findings[0]: no location is Primary"
+    ) in err
 
 
-@pytest.mark.usefixtures("_set_up_test_records")
-class TestRecords:
+def test_input_that_is_not_the_finding_array_is_refused() -> None:
+    """A SARIF document or an error object is not silently empty."""
+    status, out, err = run({"runs": []})
+    assert status == 1
+    assert "it is not zizmor's finding array" in err
+    assert out == ""
+
+
+class Records:
     """What remains is recorded; zizmor runs once, its status the exit."""
 
-    @fixture
-    def _set_up_test_records(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Lay out the findings file and the environment a task gives."""
         self.file = Path(str(tmp_path)) / "findings" / "job.jsonl"
         self.env = {
@@ -470,120 +477,131 @@ class TestRecords:
         lines = self.file.read_text(encoding="utf-8").splitlines()
         return [decoded.load_json(line) for line in lines]
 
-    def test_a_remaining_finding_is_one_record(self) -> None:
-        """A third-party stale ref: one record, its lines, zizmor's 11.
 
-        Its Hidden location (the job) comes first: the subject is that
-        location's file, the message the Primary location's source.
-        """
-        third = repointed(REAL[0], "actions/checkout@" + "d" * 40)
-        both: list[dict[str, object]] = [*REAL, third]
-        doc = json.dumps(both).encode()
-        status, out, err, asked = self.main(signer.Ran(11, doc, b" INFO zizmor\n"))
-        assert status == 11, err
-        assert asked == [list(ARGS)]
-        path = ".github/workflows/continuous.yml"
-        want: list[object] = [
-            {
-                "v": 1,
-                "task": TASK,
-                "subject": path,
-                "message": "stale-action-refs: actions/checkout@" + "d" * 40,
-                "detail": [
-                    "commit hash does not point to a Git tag",
-                    "severity: Low",
-                    f"{path}:640: this job",
-                    f"{path}:643: this job",
-                ],
-            }
-        ]
-        assert want == self.records()
-        assert err.startswith(" INFO zizmor\n"), err
-        assert f"{TASK}: 1 finding(s) remain: stale-action-refs" in out
-        assert "10 stale-action-refs finding(s) on the signer dropped" in out
+@fixture
+def records_state(tmp_path: Path) -> Records:
+    """Give each row its own Records."""
+    return Records(tmp_path)
 
-    def test_all_dropped_is_no_record_and_green(self) -> None:
-        """Every finding the signer's: no record, 0, though zizmor said 11."""
-        status, _, err, _ = self.main(signer.Ran(11, json.dumps(REAL).encode(), b""))
-        assert status == 0, err
-        assert not self.records()
 
-    def test_a_clean_run_is_green(self) -> None:
-        """No findings: no record, zizmor's 0."""
-        status, _, err, _ = self.main(signer.Ran(0, b"[]", b""))
-        assert status == 0, err
-        assert not self.records()
+def test_a_remaining_finding_is_one_record(records_state: Records) -> None:
+    """A third-party stale ref: one record, its lines, zizmor's 11.
 
-    def test_zizmor_failing_is_its_status_and_its_stderr(self) -> None:
-        """A status outside 0 and 10-14: zizmor's, its stderr, no record."""
-        status, _, err, _ = self.main(signer.Ran(2, b"", b"error: bad input\n"))
-        assert status == 2
-        assert err == "error: bad input\n"
-        assert not self.records()
+    Its Hidden location (the job) comes first: the subject is that
+    location's file, the message the Primary location's source.
+    """
+    third = repointed(REAL[0], "actions/checkout@" + "d" * 40)
+    both: list[dict[str, object]] = [*REAL, third]
+    doc = json.dumps(both).encode()
+    status, out, err, asked = records_state.main(signer.Ran(11, doc, b" INFO zizmor\n"))
+    assert status == 11, err
+    assert asked == [list(ARGS)]
+    path = ".github/workflows/continuous.yml"
+    want: list[object] = [
+        {
+            "v": 1,
+            "task": TASK,
+            "subject": path,
+            "message": "stale-action-refs: actions/checkout@" + "d" * 40,
+            "detail": [
+                "commit hash does not point to a Git tag",
+                "severity: Low",
+                f"{path}:640: this job",
+                f"{path}:643: this job",
+            ],
+        }
+    ]
+    assert want == records_state.records()
+    assert err.startswith(" INFO zizmor\n"), err
+    assert f"{TASK}: 1 finding(s) remain: stale-action-refs" in out
+    assert "10 stale-action-refs finding(s) on the signer dropped" in out
 
-    def test_no_token_is_a_finding_before_zizmor_runs(self) -> None:
-        """GH_TOKEN unset: the blindness finding, 1, zizmor never run."""
-        self.env["GH_TOKEN"] = ""
-        status, _, _, asked = self.main(signer.Ran(0, b"[]", b""))
-        assert status == 1
-        assert asked == []
-        want: list[object] = [
-            {
-                "v": 1,
-                "task": TASK,
-                "subject": "",
-                "message": "GH_TOKEN is unset — the offline run skips every",
-                "detail": [
-                    "API-backed audit this task exists for; refusing to pass blind"
-                ],
-            }
-        ]
-        assert want == self.records()
 
-    def test_an_offline_degradation_is_a_finding(self) -> None:
-        """Zizmor dropped to offline: its stderr, the finding, 1."""
-        said = b" WARN zizmor: running in offline mode\n"
-        status, _, err, _ = self.main(signer.Ran(0, b"[]", said))
-        assert status == 1
-        assert err.startswith(said.decode()), err
-        want: list[object] = [
-            {
-                "v": 1,
-                "task": TASK,
-                "subject": "",
-                "message": "zizmor degraded to offline despite GH_TOKEN —",
-                "detail": [
-                    "the online audits did not run; a green result would be blind"
-                ],
-            }
-        ]
-        assert want == self.records()
+def test_all_dropped_is_no_record_and_green(records_state: Records) -> None:
+    """Every finding the signer's: no record, 0, though zizmor said 11."""
+    status, _, err, _ = records_state.main(
+        signer.Ran(11, json.dumps(REAL).encode(), b"")
+    )
+    assert status == 0, err
+    assert not records_state.records()
 
-    def test_no_zizmor_is_refused_by_name(self) -> None:
-        """No zizmor on PATH: refused by name, 1, its one record (#1934)."""
-        with pytest.MonkeyPatch.context() as patched:
-            patched.setattr(signer, "ZIZMOR", "/nonexistent/zizmor")
-            out, err = io.StringIO(), io.StringIO()
-            with (
-                pytest.MonkeyPatch.context() as patched,
-                redirect_stdout(out),
-                redirect_stderr(err),
-            ):
-                for name, value in self.env.items():
-                    patched.setenv(name, value)
-                status = signer.main(["--signer-workflow", SIGNER_WORKFLOW])
-        assert status == 1
-        assert f"{TASK}: zizmor is not on PATH" in err.getvalue()
-        want: list[object] = [
-            {
-                "v": 1,
-                "task": TASK,
-                "subject": "",
-                "message": "zizmor is not on PATH",
-                "detail": [],
-            }
-        ]
-        assert want == self.records()
+
+def test_a_clean_run_is_green(records_state: Records) -> None:
+    """No findings: no record, zizmor's 0."""
+    status, _, err, _ = records_state.main(signer.Ran(0, b"[]", b""))
+    assert status == 0, err
+    assert not records_state.records()
+
+
+def test_zizmor_failing_is_its_status_and_its_stderr(records_state: Records) -> None:
+    """A status outside 0 and 10-14: zizmor's, its stderr, no record."""
+    status, _, err, _ = records_state.main(signer.Ran(2, b"", b"error: bad input\n"))
+    assert status == 2
+    assert err == "error: bad input\n"
+    assert not records_state.records()
+
+
+def test_no_token_is_a_finding_before_zizmor_runs(records_state: Records) -> None:
+    """GH_TOKEN unset: the blindness finding, 1, zizmor never run."""
+    records_state.env["GH_TOKEN"] = ""
+    status, _, _, asked = records_state.main(signer.Ran(0, b"[]", b""))
+    assert status == 1
+    assert asked == []
+    want: list[object] = [
+        {
+            "v": 1,
+            "task": TASK,
+            "subject": "",
+            "message": "GH_TOKEN is unset — the offline run skips every",
+            "detail": ["API-backed audit this task exists for; refusing to pass blind"],
+        }
+    ]
+    assert want == records_state.records()
+
+
+def test_an_offline_degradation_is_a_finding(records_state: Records) -> None:
+    """Zizmor dropped to offline: its stderr, the finding, 1."""
+    said = b" WARN zizmor: running in offline mode\n"
+    status, _, err, _ = records_state.main(signer.Ran(0, b"[]", said))
+    assert status == 1
+    assert err.startswith(said.decode()), err
+    want: list[object] = [
+        {
+            "v": 1,
+            "task": TASK,
+            "subject": "",
+            "message": "zizmor degraded to offline despite GH_TOKEN —",
+            "detail": ["the online audits did not run; a green result would be blind"],
+        }
+    ]
+    assert want == records_state.records()
+
+
+def test_no_zizmor_is_refused_by_name(records_state: Records) -> None:
+    """No zizmor on PATH: refused by name, 1, its one record (#1934)."""
+    with pytest.MonkeyPatch.context() as patched:
+        patched.setattr(signer, "ZIZMOR", "/nonexistent/zizmor")
+        out, err = io.StringIO(), io.StringIO()
+        with (
+            pytest.MonkeyPatch.context() as patched,
+            redirect_stdout(out),
+            redirect_stderr(err),
+        ):
+            for name, value in records_state.env.items():
+                patched.setenv(name, value)
+            status = signer.main(["--signer-workflow", SIGNER_WORKFLOW])
+    assert status == 1
+    assert f"{TASK}: zizmor is not on PATH" in err.getvalue()
+    want: list[object] = [
+        {
+            "v": 1,
+            "task": TASK,
+            "subject": "",
+            "message": "zizmor is not on PATH",
+            "detail": [],
+        }
+    ]
+    assert want == records_state.records()
 
 
 WORKFLOW = """\
@@ -602,12 +620,10 @@ jobs:
 """
 
 
-@pytest.mark.usefixtures("_tmp")
-class TestPinnedZizmor:
+class PinnedZizmor:
     """The belt's pinned zizmor, `--offline`, on a planted workflow."""
 
-    @fixture
-    def _tmp(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
 
@@ -644,45 +660,53 @@ class TestPinnedZizmor:
         got: list[object] = [decoded.load_json(line) for line in lines]
         return status, got, err
 
-    def test_an_unpinned_action_is_the_record(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """One unpinned `uses:`: the record read back, zizmor's 14."""
-        status, got, err = self.judged(WORKFLOW, capfd=capfd)
-        assert status == 14, err
-        path = ".github/workflows/a.yml"
-        want: list[object] = [
-            {
-                "v": 1,
-                "task": TASK,
-                "subject": path,
-                "message": "unpinned-uses: actions/setup-go@v5",
-                "detail": [
-                    "unpinned action reference",
-                    "severity: High",
-                    f"{path}:12: this step",
-                    (
-                        f"{path}:12: action is not pinned to a hash"
-                        " (required by blanket policy)"
-                    ),
-                ],
-            }
-        ]
-        assert want == got
 
-    def test_two_of_one_audit_in_one_file_are_two_messages(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """Two unpinned `uses:` in one file: two records, two messages."""
-        two = WORKFLOW + "      - uses: actions/setup-node@v4\n"
-        status, got, err = self.judged(two, capfd=capfd)
-        assert status == 14, err
-        messages = [decoded.as_object(r, "a record")["message"] for r in got]
-        want: list[object] = [
-            "unpinned-uses: actions/setup-go@v5",
-            "unpinned-uses: actions/setup-node@v4",
-        ]
-        assert want == messages
+@fixture
+def pinned_zizmor(tmp_path: Path) -> PinnedZizmor:
+    """Give each row its own PinnedZizmor."""
+    return PinnedZizmor(tmp_path)
+
+
+def test_an_unpinned_action_is_the_record(
+    pinned_zizmor: PinnedZizmor, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """One unpinned `uses:`: the record read back, zizmor's 14."""
+    status, got, err = pinned_zizmor.judged(WORKFLOW, capfd=capfd)
+    assert status == 14, err
+    path = ".github/workflows/a.yml"
+    want: list[object] = [
+        {
+            "v": 1,
+            "task": TASK,
+            "subject": path,
+            "message": "unpinned-uses: actions/setup-go@v5",
+            "detail": [
+                "unpinned action reference",
+                "severity: High",
+                f"{path}:12: this step",
+                (
+                    f"{path}:12: action is not pinned to a hash"
+                    " (required by blanket policy)"
+                ),
+            ],
+        }
+    ]
+    assert want == got
+
+
+def test_two_of_one_audit_in_one_file_are_two_messages(
+    pinned_zizmor: PinnedZizmor, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Two unpinned `uses:` in one file: two records, two messages."""
+    two = WORKFLOW + "      - uses: actions/setup-node@v4\n"
+    status, got, err = pinned_zizmor.judged(two, capfd=capfd)
+    assert status == 14, err
+    messages = [decoded.as_object(r, "a record")["message"] for r in got]
+    want: list[object] = [
+        "unpinned-uses: actions/setup-go@v5",
+        "unpinned-uses: actions/setup-node@v4",
+    ]
+    assert want == messages
 
 
 STUB = """\
@@ -695,12 +719,10 @@ sys.exit(int(os.environ["STUB_RC"]))
 """
 
 
-@pytest.mark.usefixtures("_tmp")
-class TestTask:
+class Task:
     """audit:actions' own body over a stub zizmor, in a planted tree."""
 
-    @fixture
-    def _tmp(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
 
@@ -759,21 +781,29 @@ class TestTask:
             check=False,
         )
 
-    def test_a_remaining_finding_is_recorded_and_zizmor_s_red(self) -> None:
-        """A third-party stale ref: one record, zizmor's 11, one run."""
-        third = repointed(REAL[0], "actions/checkout@" + "d" * 40)
-        done = self.run_task([third], 11)
-        assert done.returncode == 11, done.stderr
-        logged: list[str] = self.log.read_text(encoding="utf-8").splitlines()
-        once: list[str] = ["--format=json\t--persona=auditor\t.github/workflows/a.yml"]
-        assert logged == once
-        lines = self.file.read_text(encoding="utf-8").splitlines()
-        assert len(lines) == 1
-        record = decoded.as_object(decoded.load_json(lines[0]), "the record")
-        assert record["subject"] == ".github/workflows/continuous.yml"
 
-    def test_a_clean_run_is_no_record_and_green(self) -> None:
-        """No findings: no record, 0."""
-        done = self.run_task([], 0)
-        assert done.returncode == 0, done.stderr
-        assert not self.file.exists()
+@fixture
+def task(tmp_path: Path) -> Task:
+    """Give each row its own Task."""
+    return Task(tmp_path)
+
+
+def test_a_remaining_finding_is_recorded_and_zizmor_s_red(task: Task) -> None:
+    """A third-party stale ref: one record, zizmor's 11, one run."""
+    third = repointed(REAL[0], "actions/checkout@" + "d" * 40)
+    done = task.run_task([third], 11)
+    assert done.returncode == 11, done.stderr
+    logged: list[str] = task.log.read_text(encoding="utf-8").splitlines()
+    once: list[str] = ["--format=json\t--persona=auditor\t.github/workflows/a.yml"]
+    assert logged == once
+    lines = task.file.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1
+    record = decoded.as_object(decoded.load_json(lines[0]), "the record")
+    assert record["subject"] == ".github/workflows/continuous.yml"
+
+
+def test_a_clean_run_is_no_record_and_green(task: Task) -> None:
+    """No findings: no record, 0."""
+    done = task.run_task([], 0)
+    assert done.returncode == 0, done.stderr
+    assert not task.file.exists()

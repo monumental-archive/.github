@@ -79,12 +79,10 @@ def red(*short: str) -> list[str]:
     ]
 
 
-@pytest.mark.usefixtures("_set_up_test_pinned")
-class TestPinned:
+class Pinned:
     """Planted workflows; the installer pin's verdict on them."""
 
-    @fixture
-    def _set_up_test_pinned(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Plant an empty workflows directory."""
         self.tree = tmp_path
         (self.tree / ".github" / "workflows").mkdir(parents=True)
@@ -148,72 +146,88 @@ class TestPinned:
             check=False,
         )
 
-    def test_no_tracked_workflows_is_skipped_by_name(self) -> None:
-        """An untracked workflow only: the task says it skipped."""
-        self.plant("loose.yml", STEP)
-        done = self.task()
-        same(done.returncode, 0, done.stderr)
-        skipped = ["lint:installer-pinned: no workflows, skipped"]
-        same(done.stdout.splitlines(), skipped)
 
-    def test_shortfall_is_red_through_the_task(self) -> None:
-        """The task body hands the helper the tracked workflows only."""
-        good = self.plant("good.yml", STEP + PIN)
-        bad = self.plant("bad.yaml", STEP)
-        self.plant("loose.yml", STEP)
-        done = self.task(good, bad)
-        same(done.returncode, installer_pinned.EXIT_RED)
-        same(done.stderr.splitlines(), red(f"{bad}(1 steps, 0 version pins)"))
+@fixture
+def pinned(tmp_path: Path) -> Pinned:
+    """Give each row its own Pinned."""
+    return Pinned(tmp_path)
 
-    def test_holding_workflows_are_ok(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """No step, a pin per step, spare pins, a step in a comment: ok."""
-        rows = {
-            "no step": "on: push\n",
-            "pinned": STEP + PIN,
-            "tabs, no final newline": "uses:\tjdx/mise-action@v3\nversion:\t2026.1.1",
-            "spare pins": STEP + PIN + PIN,
-            "step in a comment": "# uses: jdx/mise-action@v3\n",
-            "step after a hash": "x: 1 # uses: jdx/mise-action@v3\n",
-        }
-        for text in rows.values():
-            rel = self.plant("wf.yml", text)
-            status, out, err = self.helper(rel, capfd=capfd)
-            same(status, 0, err)
-            same(out.splitlines(), OK)
-            same(err, "")
 
-    def test_shortfalls_are_red_with_counts(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """No pin, too few, a pin in prose or short: each named, in order."""
-        bare = self.plant("bare.yml", STEP)
-        few = self.plant("few.yml", STEP + PIN + STEP)
-        prose = self.plant("prose.yml", STEP + "  # version: 2026.11.3\n")
-        short = self.plant("short.yml", STEP + "version: 2026.1\n")
-        clean = self.plant("clean.yml", STEP + PIN)
-        status, out, err = self.helper(bare, clean, few, prose, short, capfd=capfd)
-        same(status, installer_pinned.EXIT_RED)
-        want = red(
-            f"{bare}(1 steps, 0 version pins)",
-            f"{few}(2 steps, 1 version pins)",
-            f"{prose}(1 steps, 0 version pins)",
-            f"{short}(1 steps, 0 version pins)",
-        )
-        same(err.splitlines(), want)
-        same(out, "")
+def test_no_tracked_workflows_is_skipped_by_name(pinned: Pinned) -> None:
+    """An untracked workflow only: the task says it skipped."""
+    pinned.plant("loose.yml", STEP)
+    done = pinned.task()
+    same(done.returncode, 0, done.stderr)
+    skipped = ["lint:installer-pinned: no workflows, skipped"]
+    same(done.stdout.splitlines(), skipped)
 
-    def test_not_utf8_is_an_error(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """A workflow that is not UTF-8 is refused by name, exit 2."""
-        rel = self.plant("bad.yml", b"on: \xff\n")
-        status, _out, err = self.helper(rel, capfd=capfd)
-        same(status, installer_pinned.EXIT_ERROR)
-        assert err.startswith(f"{TASK}: {rel}: cannot be read as UTF-8:"), err
 
-    def test_no_workflows_is_a_usage_error(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """No workflow named: exit 2 with the usage line."""
-        status, _out, err = self.helper(capfd=capfd)
-        same(status, installer_pinned.EXIT_ERROR)
-        usage = f"{TASK}: usage: installer_pinned.py WORKFLOW..."
-        same(err.splitlines(), [usage])
+def test_shortfall_is_red_through_the_task(pinned: Pinned) -> None:
+    """The task body hands the helper the tracked workflows only."""
+    good = pinned.plant("good.yml", STEP + PIN)
+    bad = pinned.plant("bad.yaml", STEP)
+    pinned.plant("loose.yml", STEP)
+    done = pinned.task(good, bad)
+    same(done.returncode, installer_pinned.EXIT_RED)
+    same(done.stderr.splitlines(), red(f"{bad}(1 steps, 0 version pins)"))
+
+
+def test_holding_workflows_are_ok(
+    pinned: Pinned, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """No step, a pin per step, spare pins, a step in a comment: ok."""
+    rows = {
+        "no step": "on: push\n",
+        "pinned": STEP + PIN,
+        "tabs, no final newline": "uses:\tjdx/mise-action@v3\nversion:\t2026.1.1",
+        "spare pins": STEP + PIN + PIN,
+        "step in a comment": "# uses: jdx/mise-action@v3\n",
+        "step after a hash": "x: 1 # uses: jdx/mise-action@v3\n",
+    }
+    for text in rows.values():
+        rel = pinned.plant("wf.yml", text)
+        status, out, err = pinned.helper(rel, capfd=capfd)
+        same(status, 0, err)
+        same(out.splitlines(), OK)
+        same(err, "")
+
+
+def test_shortfalls_are_red_with_counts(
+    pinned: Pinned, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """No pin, too few, a pin in prose or short: each named, in order."""
+    bare = pinned.plant("bare.yml", STEP)
+    few = pinned.plant("few.yml", STEP + PIN + STEP)
+    prose = pinned.plant("prose.yml", STEP + "  # version: 2026.11.3\n")
+    short = pinned.plant("short.yml", STEP + "version: 2026.1\n")
+    clean = pinned.plant("clean.yml", STEP + PIN)
+    status, out, err = pinned.helper(bare, clean, few, prose, short, capfd=capfd)
+    same(status, installer_pinned.EXIT_RED)
+    want = red(
+        f"{bare}(1 steps, 0 version pins)",
+        f"{few}(2 steps, 1 version pins)",
+        f"{prose}(1 steps, 0 version pins)",
+        f"{short}(1 steps, 0 version pins)",
+    )
+    same(err.splitlines(), want)
+    same(out, "")
+
+
+def test_not_utf8_is_an_error(
+    pinned: Pinned, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A workflow that is not UTF-8 is refused by name, exit 2."""
+    rel = pinned.plant("bad.yml", b"on: \xff\n")
+    status, _out, err = pinned.helper(rel, capfd=capfd)
+    same(status, installer_pinned.EXIT_ERROR)
+    assert err.startswith(f"{TASK}: {rel}: cannot be read as UTF-8:"), err
+
+
+def test_no_workflows_is_a_usage_error(
+    pinned: Pinned, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """No workflow named: exit 2 with the usage line."""
+    status, _out, err = pinned.helper(capfd=capfd)
+    same(status, installer_pinned.EXIT_ERROR)
+    usage = f"{TASK}: usage: installer_pinned.py WORKFLOW..."
+    same(err.splitlines(), [usage])

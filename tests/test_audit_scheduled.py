@@ -24,8 +24,6 @@ import subprocess
 import sys
 from typing import TYPE_CHECKING
 
-import pytest
-
 from belt import decoded
 from belt.typed_pytest import fixture
 from tests import support
@@ -59,12 +57,10 @@ def body() -> str:
     return decoded.as_str(task["run"], "lint:audit-scheduled.run")
 
 
-@pytest.mark.usefixtures("_set_up_test_scheduled")
-class TestScheduled:
+class Scheduled:
     """A planted belt config and workflows; the lint's verdict on them."""
 
-    @fixture
-    def _set_up_test_scheduled(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Plant a tree with two belt audit tasks and a stub belt."""
         self.tmp = tmp_path
         self.tree = self.tmp / "tree"
@@ -108,57 +104,66 @@ class TestScheduled:
             check=False,
         )
 
-    def test_mutants_scheduled_by_its_own_workflow(self) -> None:
-        """repo-mutants.yml counts as the scheduler of audit:mutants."""
-        self.workflow("repo-dependencies.yml", "fuzz")
-        self.workflow("repo-mutants.yml", "mutants")
-        done = self.run_lint()
-        assert done.returncode == 0, done.stderr
-        expected = [
-            "lint:audit-scheduled: 2 belt audit task(s), every one scheduled",
-            "lint:audit-scheduled: this repository defines no audit:* of its own",
-        ]
-        assert done.stdout.splitlines() == expected
 
-    def test_an_untracked_belt_config_holds_nothing_to_schedule(self) -> None:
-        """mise/config.toml on disk, not in git: no belt half (#2013)."""
-        self.workflow("repo-dependencies.yml", "fuzz")
-        done = self.run_lint(untracked=("mise/config.toml",))
-        assert done.returncode == 0, done.stderr
-        expected = [
-            "lint:audit-scheduled: this repository defines no audit:* of its own",
-        ]
-        assert done.stdout.splitlines() == expected
-
-    def test_unscheduled_task_is_red_and_names_the_schedulers(self) -> None:
-        """No workflow runs audit:mutants: red, and repo-mutants.yml named."""
-        self.workflow("repo-dependencies.yml", "fuzz")
-        done = self.run_lint()
-        assert done.returncode == 1
-        expected = [
-            (
-                "lint:audit-scheduled: belt audit task(s) no workflow ever runs:"
-                " audit:mutants"
-            ),
-            (
-                "  schedule each in .github/workflows/ (slsa.yml or a sibling,"
-                " publish.yml, a"
-            ),
-            (
-                "  repo-*.yml subject workflow or repo-mutants.yml) or delete the"
-                " task — a check"
-            ),
-            "  nobody runs is a claim, not a check (#358 seam 1).",
-        ]
-        assert done.stderr.splitlines() == expected
+@fixture
+def scheduled(tmp_path: Path) -> Scheduled:
+    """Give each row its own Scheduled."""
+    return Scheduled(tmp_path)
 
 
-@pytest.mark.usefixtures("_set_up_test_own_tasks")
-class TestOwnTasks:
+def test_mutants_scheduled_by_its_own_workflow(scheduled: Scheduled) -> None:
+    """repo-mutants.yml counts as the scheduler of audit:mutants."""
+    scheduled.workflow("repo-dependencies.yml", "fuzz")
+    scheduled.workflow("repo-mutants.yml", "mutants")
+    done = scheduled.run_lint()
+    assert done.returncode == 0, done.stderr
+    expected = [
+        "lint:audit-scheduled: 2 belt audit task(s), every one scheduled",
+        "lint:audit-scheduled: this repository defines no audit:* of its own",
+    ]
+    assert done.stdout.splitlines() == expected
+
+
+def test_an_untracked_belt_config_holds_nothing_to_schedule(
+    scheduled: Scheduled,
+) -> None:
+    """mise/config.toml on disk, not in git: no belt half (#2013)."""
+    scheduled.workflow("repo-dependencies.yml", "fuzz")
+    done = scheduled.run_lint(untracked=("mise/config.toml",))
+    assert done.returncode == 0, done.stderr
+    expected = [
+        "lint:audit-scheduled: this repository defines no audit:* of its own",
+    ]
+    assert done.stdout.splitlines() == expected
+
+
+def test_unscheduled_task_is_red_and_names_the_schedulers(scheduled: Scheduled) -> None:
+    """No workflow runs audit:mutants: red, and repo-mutants.yml named."""
+    scheduled.workflow("repo-dependencies.yml", "fuzz")
+    done = scheduled.run_lint()
+    assert done.returncode == 1
+    expected = [
+        (
+            "lint:audit-scheduled: belt audit task(s) no workflow ever runs:"
+            " audit:mutants"
+        ),
+        (
+            "  schedule each in .github/workflows/ (slsa.yml or a sibling,"
+            " publish.yml, a"
+        ),
+        (
+            "  repo-*.yml subject workflow or repo-mutants.yml) or delete the"
+            " task — a check"
+        ),
+        "  nobody runs is a claim, not a check (#358 seam 1).",
+    ]
+    assert done.stderr.splitlines() == expected
+
+
+class OwnTasks:
     """The repository half: its own audit tasks need a collecting caller."""
 
-    @fixture
-    def _set_up_test_own_tasks(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Plant a consumer tree (no belt config) defining one audit task."""
         self.tmp = tmp_path
         self.tree = self.tmp / "tree"
@@ -197,43 +202,49 @@ class TestOwnTasks:
             check=False,
         )
 
-    def test_the_own_audits_caller_collects_them(self) -> None:
-        """A tree whose only caller is repo-own-audits.yml passes."""
-        self.caller("own-audits.yml", "repo-own-audits.yml")
-        done = self.run_lint()
-        assert done.returncode == 0, done.stderr
-        expected = (
-            "lint:audit-scheduled: 1 repo-defined audit task(s),"
-            " collected by repo-own-audits.yml\n"
-        )
-        assert (done.stdout, done.stderr) == (expected, "")
 
-    def test_the_retired_caller_collects_nothing(self) -> None:
-        """A tree whose only caller is the retired workflow is red, by name."""
-        self.caller("audit.yml", RETIRED)
-        done = self.run_lint()
-        assert done.returncode == 1, done.stdout
-        expected = [
-            (
-                "lint:audit-scheduled: repo-defined audit task(s) no workflow"
-                " runs: audit:custom"
-            ),
-            ("  wire the own-audits stub (workflow-templates/own-audits.yml), which"),
-            (
-                "  calls repo-own-audits.yml and runs every audit:* this"
-                " repository defines,"
-            ),
-            "  or run each from a workflow here — or delete the task. A check",
-            "  nobody runs is a claim, not a check (#358 seam 1, #704).",
-        ]
-        assert done.stderr.splitlines() == expected
+@fixture
+def own_tasks(tmp_path: Path) -> OwnTasks:
+    """Give each row its own OwnTasks."""
+    return OwnTasks(tmp_path)
 
-    def test_another_subject_caller_collects_nothing(self) -> None:
-        """A caller of a belt-only subject workflow runs no repository task."""
-        self.caller("records.yml", "repo-records.yml")
-        done = self.run_lint()
-        assert done.returncode == 1, done.stdout
-        assert done.stderr.startswith(
+
+def test_the_own_audits_caller_collects_them(own_tasks: OwnTasks) -> None:
+    """A tree whose only caller is repo-own-audits.yml passes."""
+    own_tasks.caller("own-audits.yml", "repo-own-audits.yml")
+    done = own_tasks.run_lint()
+    assert done.returncode == 0, done.stderr
+    expected = (
+        "lint:audit-scheduled: 1 repo-defined audit task(s),"
+        " collected by repo-own-audits.yml\n"
+    )
+    assert (done.stdout, done.stderr) == (expected, "")
+
+
+def test_the_retired_caller_collects_nothing(own_tasks: OwnTasks) -> None:
+    """A tree whose only caller is the retired workflow is red, by name."""
+    own_tasks.caller("audit.yml", RETIRED)
+    done = own_tasks.run_lint()
+    assert done.returncode == 1, done.stdout
+    expected = [
+        (
             "lint:audit-scheduled: repo-defined audit task(s) no workflow"
-            " runs: audit:custom\n"
-        ), done.stderr
+            " runs: audit:custom"
+        ),
+        ("  wire the own-audits stub (workflow-templates/own-audits.yml), which"),
+        ("  calls repo-own-audits.yml and runs every audit:* this repository defines,"),
+        "  or run each from a workflow here — or delete the task. A check",
+        "  nobody runs is a claim, not a check (#358 seam 1, #704).",
+    ]
+    assert done.stderr.splitlines() == expected
+
+
+def test_another_subject_caller_collects_nothing(own_tasks: OwnTasks) -> None:
+    """A caller of a belt-only subject workflow runs no repository task."""
+    own_tasks.caller("records.yml", "repo-records.yml")
+    done = own_tasks.run_lint()
+    assert done.returncode == 1, done.stdout
+    assert done.stderr.startswith(
+        "lint:audit-scheduled: repo-defined audit task(s) no workflow"
+        " runs: audit:custom\n"
+    ), done.stderr

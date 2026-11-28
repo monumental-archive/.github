@@ -122,12 +122,10 @@ def task_env(task: str) -> dict[str, str]:
     return {name: decoded.as_str(value, name) for name, value in env.items()}
 
 
-@pytest.mark.usefixtures("_set_up_test_planted")
-class TestPlanted:
+class Planted:
     """A planted git repository and the belt's tasks run in it."""
 
-    @fixture
-    def _set_up_test_planted(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Plant an empty repository."""
         self.tmp = tmp_path
         self.tree = self.tmp / "tree"
@@ -189,7 +187,13 @@ class TestPlanted:
         )
 
 
-class TestUntracked(TestPlanted):
+@fixture
+def planted(tmp_path: Path) -> Planted:
+    """Give each row its own Planted."""
+    return Planted(tmp_path)
+
+
+class Untracked(Planted):
     """An untracked workflow that breaks a rule is never read; tracked, it is."""
 
     def assert_read_only_when_tracked(self, task: str) -> None:
@@ -204,110 +208,117 @@ class TestUntracked(TestPlanted):
         assert done.returncode != 0, done.stdout + done.stderr
         assert "stray.yml" in done.stdout + done.stderr
 
-    def test_lint_actions(self) -> None:
-        """Actionlint reads the list, so an untracked expression error is not read."""
-        self.assert_read_only_when_tracked("lint:actions")
 
-    def test_lint_gate_stub(self) -> None:
-        """A gate caller missing all three requirements, untracked."""
-        self.assert_read_only_when_tracked("lint:gate-stub")
-
-    def test_lint_capability_boundary(self) -> None:
-        """A called workflow granting id-token with no marker, untracked."""
-        self.assert_read_only_when_tracked("lint:capability-boundary")
-
-    def test_lint_nested_permissions(self) -> None:
-        """A `uses:` job with no permissions block, untracked."""
-        self.assert_read_only_when_tracked("lint:nested-permissions")
-
-    def test_lint_cold_attested(self) -> None:
-        """An actions/cache step with no unattested-path marker, untracked."""
-        self.assert_read_only_when_tracked("lint:cold-attested")
-
-    def test_fix_gate_stub_leaves_an_untracked_stub_alone(self) -> None:
-        """A stale stub fix:gate-stub would rewrite is left byte for byte."""
-        self.plant(".github/workflows/clean.yml", CLEAN)
-        self.plant(STRAY, STALE_STUB, track=False)
-        done = self.task("fix:gate-stub")
-        assert done.returncode == 0, done.stdout + done.stderr
-        assert (self.tree / STRAY).read_text(encoding="utf-8") == STALE_STUB
-        self.git("add", "--", STRAY)
-        done = self.task("fix:gate-stub")
-        assert done.returncode == 0, done.stdout + done.stderr
-        assert WANT_GROUP in (self.tree / STRAY).read_text(encoding="utf-8")
+@fixture
+def untracked(tmp_path: Path) -> Untracked:
+    """Give each row its own Untracked."""
+    return Untracked(tmp_path)
 
 
-class TestOnlyUntracked(TestPlanted):
-    """A tree whose only workflow or template is untracked has none."""
-
-    @pytest.mark.parametrize(("task", "line"), SKIPPED.items())
-    def test_each_task_skips(self, task: object, line: object) -> None:
-        """Seven tasks print their skip line and pass."""
-        self.plant(STRAY, CLEAN, track=False)
-        done = self.task(task)
-        assert done.returncode == 0, done.stdout + done.stderr
-        want: list[str] = [line]
-        assert done.stdout.splitlines() == want
-
-    def test_audit_template_pins_skips(self) -> None:
-        """An untracked template holding an org pin is not read."""
-        pin = (
-            "jobs:\n  a:\n    uses: monumental-archive/.github/.github/workflows/"
-            "ci.yml@" + "b" * 40 + " # v1.0.0\n"
-        )
-        self.plant("workflow-templates/ci.yml", pin, track=False)
-        done = self.task("audit:template-pins")
-        assert done.returncode == 0, done.stdout + done.stderr
-        skipped = ["audit:template-pins: no workflow-templates/, skipped"]
-        assert done.stdout.splitlines() == skipped
-
-    def test_audit_scheduled_has_no_workflows(self) -> None:
-        """Own audit tasks and only an untracked runner: the no-workflows branch."""
-        runner = "jobs:\n  a:\n    steps:\n      - run: mise run audit:custom\n"
-        self.plant(STRAY, runner, track=False)
-        stubs = {"own-audits.sh": OWN_AUDIT_STUB}
-        belt = support.belt(self.tmp / "belt", stubs=stubs)
-        done = self.task("lint:audit-scheduled", ORG_BELT_DIR=str(belt))
-        assert done.returncode == 1, done.stdout + done.stderr
-        expected = [
-            "lint:audit-scheduled: repo-defined audit task(s) and NO workflows at all:",
-            "    audit:custom",
-            "  wire the own-audits stub (workflow-templates/own-audits.yml) —",
-            "  it calls repo-own-audits.yml, whose one leg runs every audit:*",
-            "  this repository defines (#704, #1858).",
-        ]
-        assert done.stderr.splitlines() == expected
+def test_lint_actions(untracked: Untracked) -> None:
+    """Actionlint reads the list, so an untracked expression error is not read."""
+    untracked.assert_read_only_when_tracked("lint:actions")
 
 
-class TestDeriveBadges(TestPlanted):
-    """derive-badges.sh's coverage check reads tracked workflows only."""
+def test_lint_gate_stub(untracked: Untracked) -> None:
+    """A gate caller missing all three requirements, untracked."""
+    untracked.assert_read_only_when_tracked("lint:gate-stub")
 
-    def test_an_untracked_token_feeds_no_shield(self) -> None:
-        """`.coverage-floor` with codecov-token only in an untracked workflow: red."""
-        reuse = (
-            "version = 1\n"
-            'SPDX-PackageDownloadLocation = "https://github.com/'
-            'monumental-archive/demo"\n\n'
-            '[[annotations]]\npath = "**"\nSPDX-License-Identifier = "0BSD"\n'
-        )
-        self.plant("REUSE.toml", reuse)
-        self.plant(".coverage-floor", "80\n")
-        self.plant(
-            STRAY,
-            "jobs:\n  ci:\n    secrets:\n      codecov-token: ${{ secrets.X }}\n",
-            track=False,
-        )
-        out = self.tmp / "block.md"
-        done = subprocess.run(
-            [BASH, str(BELT / "derive-badges.sh")],
-            cwd=self.tree,
-            env=self.env | {"BADGES_OUT": str(out)},
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        assert done.returncode == 1, done.stdout + done.stderr
-        assert done.stderr.startswith(
-            "fix:badges: .coverage-floor is tracked and no workflow passes"
-            " codecov-token"
-        ), done.stderr
+
+def test_lint_capability_boundary(untracked: Untracked) -> None:
+    """A called workflow granting id-token with no marker, untracked."""
+    untracked.assert_read_only_when_tracked("lint:capability-boundary")
+
+
+def test_lint_nested_permissions(untracked: Untracked) -> None:
+    """A `uses:` job with no permissions block, untracked."""
+    untracked.assert_read_only_when_tracked("lint:nested-permissions")
+
+
+def test_lint_cold_attested(untracked: Untracked) -> None:
+    """An actions/cache step with no unattested-path marker, untracked."""
+    untracked.assert_read_only_when_tracked("lint:cold-attested")
+
+
+def test_fix_gate_stub_leaves_an_untracked_stub_alone(untracked: Untracked) -> None:
+    """A stale stub fix:gate-stub would rewrite is left byte for byte."""
+    untracked.plant(".github/workflows/clean.yml", CLEAN)
+    untracked.plant(STRAY, STALE_STUB, track=False)
+    done = untracked.task("fix:gate-stub")
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert (untracked.tree / STRAY).read_text(encoding="utf-8") == STALE_STUB
+    untracked.git("add", "--", STRAY)
+    done = untracked.task("fix:gate-stub")
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert WANT_GROUP in (untracked.tree / STRAY).read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(("task", "line"), SKIPPED.items())
+def test_each_task_skips(planted: Planted, task: object, line: object) -> None:
+    """Seven tasks print their skip line and pass."""
+    planted.plant(STRAY, CLEAN, track=False)
+    done = planted.task(task)
+    assert done.returncode == 0, done.stdout + done.stderr
+    want: list[str] = [line]
+    assert done.stdout.splitlines() == want
+
+
+def test_audit_template_pins_skips(planted: Planted) -> None:
+    """An untracked template holding an org pin is not read."""
+    pin = (
+        "jobs:\n  a:\n    uses: monumental-archive/.github/.github/workflows/"
+        "ci.yml@" + "b" * 40 + " # v1.0.0\n"
+    )
+    planted.plant("workflow-templates/ci.yml", pin, track=False)
+    done = planted.task("audit:template-pins")
+    assert done.returncode == 0, done.stdout + done.stderr
+    skipped = ["audit:template-pins: no workflow-templates/, skipped"]
+    assert done.stdout.splitlines() == skipped
+
+
+def test_audit_scheduled_has_no_workflows(planted: Planted) -> None:
+    """Own audit tasks and only an untracked runner: the no-workflows branch."""
+    runner = "jobs:\n  a:\n    steps:\n      - run: mise run audit:custom\n"
+    planted.plant(STRAY, runner, track=False)
+    stubs = {"own-audits.sh": OWN_AUDIT_STUB}
+    belt = support.belt(planted.tmp / "belt", stubs=stubs)
+    done = planted.task("lint:audit-scheduled", ORG_BELT_DIR=str(belt))
+    assert done.returncode == 1, done.stdout + done.stderr
+    expected = [
+        "lint:audit-scheduled: repo-defined audit task(s) and NO workflows at all:",
+        "    audit:custom",
+        "  wire the own-audits stub (workflow-templates/own-audits.yml) —",
+        "  it calls repo-own-audits.yml, whose one leg runs every audit:*",
+        "  this repository defines (#704, #1858).",
+    ]
+    assert done.stderr.splitlines() == expected
+
+
+def test_an_untracked_token_feeds_no_shield(planted: Planted) -> None:
+    """`.coverage-floor` with codecov-token only in an untracked workflow: red."""
+    reuse = (
+        "version = 1\n"
+        'SPDX-PackageDownloadLocation = "https://github.com/'
+        'monumental-archive/demo"\n\n'
+        '[[annotations]]\npath = "**"\nSPDX-License-Identifier = "0BSD"\n'
+    )
+    planted.plant("REUSE.toml", reuse)
+    planted.plant(".coverage-floor", "80\n")
+    planted.plant(
+        STRAY,
+        "jobs:\n  ci:\n    secrets:\n      codecov-token: ${{ secrets.X }}\n",
+        track=False,
+    )
+    out = planted.tmp / "block.md"
+    done = subprocess.run(
+        [BASH, str(BELT / "derive-badges.sh")],
+        cwd=planted.tree,
+        env=planted.env | {"BADGES_OUT": str(out)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert done.stderr.startswith(
+        "fix:badges: .coverage-floor is tracked and no workflow passes codecov-token"
+    ), done.stderr

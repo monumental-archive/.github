@@ -29,8 +29,6 @@ import subprocess
 import sys
 from typing import TYPE_CHECKING
 
-import pytest
-
 from belt import decoded
 from belt.typed_pytest import fixture
 from tests import support
@@ -127,12 +125,10 @@ def body(task: str) -> str:
     return decoded.as_str(entry["run"], f"{task}.run")
 
 
-@pytest.mark.usefixtures("_set_up_test_two_extensions")
-class TestTwoExtensions:
+class TwoExtensions:
     """A workspace of two extensions at different highest majors."""
 
-    @fixture
-    def _set_up_test_two_extensions(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Plant the stubs, the surface, the plan and the belt."""
         self.tmp = tmp_path
         self.tree = self.tmp / "tree"
@@ -213,121 +209,134 @@ class TestTwoExtensions:
         masked = re.sub(r"\S*/toolchains\.json", "<tmp>/toolchains.json", text)
         return masked.splitlines()
 
-    def test_fix_rust_fixes_each_extension_at_its_own_major(self) -> None:
-        """fix:rust registers 16,17 and fixes first at pg17, second at pg16.
 
-        Before #1795 it registered `14,15,16`, the last extension's
-        majors, and fixed both extensions with `--features pg16`.
-        """
-        done = self.run_task("fix:rust")
-        assert done.returncode == 0, done.stderr
-        fix = "cargo clippy --fix --allow-dirty"
-        own = "--no-deps --all-targets --locked --no-default-features"
-        at = "--manifest-path Cargo.toml"
-        want = [
-            f"cargo fmt --all {at} -- --config-path {self.belt}/rustfmt.toml",
-            f"cargo fetch --locked {at}",
-            f"{METADATA} {at}",
-            "belt gate-surface --exclude ",
-            (
-                f"{fix} --workspace --exclude first --exclude second"
-                f" --all-features --locked {at} -- -D warnings"
-            ),
-            *REGISTER,
-            f"{fix} -p first {own} --features pg17 {at} -- -D warnings [-Iicu-pg17]",
-            f"{fix} -p second {own} --features pg16 {at} -- -D warnings [-Iicu-pg16]",
-        ]
-        assert want == self.logged()
-        said = [
-            "fix:rust: Cargo.toml: formatted",
-            "fix:rust: Cargo.toml: plain rewritten where clippy could",
-            "fix:rust: Cargo.toml: pgrx extension(s) fixed: first(pg17) second(pg16)",
-            "fix:rust: applied what is machine-applicable — the rest is judgement",
-        ]
-        assert said == done.stdout.splitlines()
+@fixture
+def two_extensions(tmp_path: Path) -> TwoExtensions:
+    """Give each row its own TwoExtensions."""
+    return TwoExtensions(tmp_path)
 
-    def test_lint_pg_clippy_lints_each_extension_at_its_own_major(self) -> None:
-        """lint:pg-clippy registers 16,17 and lints first at pg17, second at pg16."""
-        done = self.run_task("lint:pg-clippy")
-        assert done.returncode == 0, done.stderr
-        own = "--no-deps --all-targets --locked --keep-going --no-default-features"
-        at = "--manifest-path Cargo.toml"
-        want = [
-            f"cargo fetch --locked {at}",
-            f"{METADATA} {at}",
-            "belt gate-surface --exclude ",
-            *REGISTER,
-            (
-                f"cargo clippy -p first@0.1.0 {at} {own} --features pg17"
-                " -- -D warnings [-Iicu-pg17]"
-            ),
-            (
-                f"cargo clippy -p second@0.1.0 {at} {own} --features pg16"
-                " -- -D warnings [-Iicu-pg16]"
-            ),
-        ]
-        assert want == self.logged()
-        said = [
-            (
-                "lint:pg-clippy: Cargo.toml: 2 extension(s) linted:"
-                " first(pg17) second(pg16)"
-            ),
-            (
-                "lint:pg-clippy: clean at every group"
-                " (restriction minus 0 named contradictions)"
-            ),
-        ]
-        assert said == done.stdout.splitlines()
 
-    def test_lint_msrv_registers_every_extensions_major(self) -> None:
-        """lint:msrv registers 16,17 and compiles each group at its own.
+def test_fix_rust_fixes_each_extension_at_its_own_major(
+    two_extensions: TwoExtensions,
+) -> None:
+    """fix:rust registers 16,17 and fixes first at pg17, second at pg16.
 
-        Before #1795 it registered `16` alone, the text after the last
-        colon of its `name:major` list, and handed the ICU check that
-        list rather than majors.
-        """
-        done = self.run_task("lint:msrv")
-        assert done.returncode == 0, done.stderr
-        at = "--manifest-path Cargo.toml"
-        check = f"cargo check --locked {at} --no-default-features"
-        want = [
-            # The pins once, then each of the tree's workspaces (#2011).
-            "mise ls rust --json",
-            f"cargo fetch --locked {at}",
-            # The whole graph, resolved with the gate's features (#1850).
-            f"cargo metadata --format-version 1 --locked {at} --all-features",
-            "belt gate-surface --exclude ",
-            (
-                "belt msrv-plan --toolchains <tmp>/toolchains.json --exclude "
-                f" --pgrx first:17,second:16 --floor {self.belt}/rust-floor.toml"
-                " --root Cargo.toml"
-            ),
-            *REGISTER,
-            f"{check} --features pg17 -p first@0.1.0 [-Iicu-pg17] {{1.82.0}}",
-            f"{check} --features pg16 -p second@0.1.0 [-Iicu-pg16] {{1.82.0}}",
-        ]
-        assert want == self.logged()
-        said = [
-            "lint:msrv: compiling at 1.82.0: first@0.1.0",
-            "lint:msrv: compiling at 1.82.0: second@0.1.0",
-            "lint:msrv: 2 declared minimum(s) compiled at the toolchain they name",
-        ]
-        assert said == done.stdout.splitlines()
+    Before #1795 it registered `14,15,16`, the last extension's
+    majors, and fixed both extensions with `--features pg16`.
+    """
+    done = two_extensions.run_task("fix:rust")
+    assert done.returncode == 0, done.stderr
+    fix = "cargo clippy --fix --allow-dirty"
+    own = "--no-deps --all-targets --locked --no-default-features"
+    at = "--manifest-path Cargo.toml"
+    want = [
+        f"cargo fmt --all {at} -- --config-path {two_extensions.belt}/rustfmt.toml",
+        f"cargo fetch --locked {at}",
+        f"{METADATA} {at}",
+        "belt gate-surface --exclude ",
+        (
+            f"{fix} --workspace --exclude first --exclude second"
+            f" --all-features --locked {at} -- -D warnings"
+        ),
+        *REGISTER,
+        f"{fix} -p first {own} --features pg17 {at} -- -D warnings [-Iicu-pg17]",
+        f"{fix} -p second {own} --features pg16 {at} -- -D warnings [-Iicu-pg16]",
+    ]
+    assert want == two_extensions.logged()
+    said = [
+        "fix:rust: Cargo.toml: formatted",
+        "fix:rust: Cargo.toml: plain rewritten where clippy could",
+        "fix:rust: Cargo.toml: pgrx extension(s) fixed: first(pg17) second(pg16)",
+        "fix:rust: applied what is machine-applicable — the rest is judgement",
+    ]
+    assert said == done.stdout.splitlines()
 
-    def test_lint_msrv_red_compile_says_the_rule_and_keeps_its_status(self) -> None:
-        """A red compile at the derived number runs item 4's remedy (#1850).
 
-        From msrv_lint.py's `check` (#1911; the body's EXIT trap before
-        it), for the group that failed and no other, and
-        the task exits with cargo's own status rather than the remedy's.
-        """
-        self.env["PLANT_CHECK_FAILS"] = "1"
-        done = self.run_task("lint:msrv")
-        assert done.returncode == 101, done.stderr
-        failed = [line for line in self.logged() if "--failed" in line]
-        want: list[str] = [
-            "belt msrv-plan --failed 1.82.0 first@0.1.0 --root Cargo.toml"
-        ]
-        assert want == failed
-        said = ["lint:msrv: compiling at 1.82.0: first@0.1.0"]
-        assert said == done.stdout.splitlines()
+def test_lint_pg_clippy_lints_each_extension_at_its_own_major(
+    two_extensions: TwoExtensions,
+) -> None:
+    """lint:pg-clippy registers 16,17 and lints first at pg17, second at pg16."""
+    done = two_extensions.run_task("lint:pg-clippy")
+    assert done.returncode == 0, done.stderr
+    own = "--no-deps --all-targets --locked --keep-going --no-default-features"
+    at = "--manifest-path Cargo.toml"
+    want = [
+        f"cargo fetch --locked {at}",
+        f"{METADATA} {at}",
+        "belt gate-surface --exclude ",
+        *REGISTER,
+        (
+            f"cargo clippy -p first@0.1.0 {at} {own} --features pg17"
+            " -- -D warnings [-Iicu-pg17]"
+        ),
+        (
+            f"cargo clippy -p second@0.1.0 {at} {own} --features pg16"
+            " -- -D warnings [-Iicu-pg16]"
+        ),
+    ]
+    assert want == two_extensions.logged()
+    said = [
+        ("lint:pg-clippy: Cargo.toml: 2 extension(s) linted: first(pg17) second(pg16)"),
+        (
+            "lint:pg-clippy: clean at every group"
+            " (restriction minus 0 named contradictions)"
+        ),
+    ]
+    assert said == done.stdout.splitlines()
+
+
+def test_lint_msrv_registers_every_extensions_major(
+    two_extensions: TwoExtensions,
+) -> None:
+    """lint:msrv registers 16,17 and compiles each group at its own.
+
+    Before #1795 it registered `16` alone, the text after the last
+    colon of its `name:major` list, and handed the ICU check that
+    list rather than majors.
+    """
+    done = two_extensions.run_task("lint:msrv")
+    assert done.returncode == 0, done.stderr
+    at = "--manifest-path Cargo.toml"
+    check = f"cargo check --locked {at} --no-default-features"
+    want = [
+        # The pins once, then each of the tree's workspaces (#2011).
+        "mise ls rust --json",
+        f"cargo fetch --locked {at}",
+        # The whole graph, resolved with the gate's features (#1850).
+        f"cargo metadata --format-version 1 --locked {at} --all-features",
+        "belt gate-surface --exclude ",
+        (
+            "belt msrv-plan --toolchains <tmp>/toolchains.json --exclude "
+            f" --pgrx first:17,second:16 --floor {two_extensions.belt}/rust-floor.toml"
+            " --root Cargo.toml"
+        ),
+        *REGISTER,
+        f"{check} --features pg17 -p first@0.1.0 [-Iicu-pg17] {{1.82.0}}",
+        f"{check} --features pg16 -p second@0.1.0 [-Iicu-pg16] {{1.82.0}}",
+    ]
+    assert want == two_extensions.logged()
+    said = [
+        "lint:msrv: compiling at 1.82.0: first@0.1.0",
+        "lint:msrv: compiling at 1.82.0: second@0.1.0",
+        "lint:msrv: 2 declared minimum(s) compiled at the toolchain they name",
+    ]
+    assert said == done.stdout.splitlines()
+
+
+def test_lint_msrv_red_compile_says_the_rule_and_keeps_its_status(
+    two_extensions: TwoExtensions,
+) -> None:
+    """A red compile at the derived number runs item 4's remedy (#1850).
+
+    From msrv_lint.py's `check` (#1911; the body's EXIT trap before
+    it), for the group that failed and no other, and
+    the task exits with cargo's own status rather than the remedy's.
+    """
+    two_extensions.env["PLANT_CHECK_FAILS"] = "1"
+    done = two_extensions.run_task("lint:msrv")
+    assert done.returncode == 101, done.stderr
+    failed = [line for line in two_extensions.logged() if "--failed" in line]
+    want: list[str] = ["belt msrv-plan --failed 1.82.0 first@0.1.0 --root Cargo.toml"]
+    assert want == failed
+    said = ["lint:msrv: compiling at 1.82.0: first@0.1.0"]
+    assert said == done.stdout.splitlines()

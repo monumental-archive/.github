@@ -884,234 +884,236 @@ def readers(path: Path, text: str, root: Path = CANON) -> list[str]:
     ]
 
 
-class TestCoverage:
-    """The rows hold the real surface, not a remembered list."""
+# The rows hold the real surface, not a remembered list.
+def test_every_uncached_install_in_scope_is_held() -> None:
+    """Every uncached mise-action job outside item 4 is a row."""
+    found = sorted(
+        (path.name, job_id)
+        for path in (CANON / ".github" / "workflows").glob("*.yml")
+        if path.name not in OUT_OF_SCOPE
+        for job_id, job in documents(path).items()
+        if any(uncached(s) for s in mise_steps(job)) and not tool_cache_restored(job)
+    )
+    scoped: list[tuple[str, str]] = sorted(IN_SCOPE)
+    assert scoped == found
 
-    def test_every_uncached_install_in_scope_is_held(self) -> None:
-        """Every uncached mise-action job outside item 4 is a row."""
-        found = sorted(
-            (path.name, job_id)
-            for path in (CANON / ".github" / "workflows").glob("*.yml")
-            if path.name not in OUT_OF_SCOPE
-            for job_id, job in documents(path).items()
-            if any(uncached(s) for s in mise_steps(job))
-            and not tool_cache_restored(job)
-        )
-        scoped: list[tuple[str, str]] = sorted(IN_SCOPE)
-        assert scoped == found
 
-    def test_every_job_names_its_list(self) -> None:
-        """No job installs the whole config, and none can be empty."""
-        for workflow, job_id in IN_SCOPE:
-            job = load(workflow)[job_id]
-            assert strings() == whole_config(workflow, job_id, job)
-            if (workflow, job_id) not in WHOLE_CONFIG:
-                keys, needed, _ = installs(job)
-                assert keys or needed, "an empty list installs all"
+def test_every_job_names_its_list() -> None:
+    """No job installs the whole config, and none can be empty."""
+    for workflow, job_id in IN_SCOPE:
+        job = load(workflow)[job_id]
+        assert strings() == whole_config(workflow, job_id, job)
+        if (workflow, job_id) not in WHOLE_CONFIG:
+            keys, needed, _ = installs(job)
+            assert keys or needed, "an empty list installs all"
 
-    @pytest.mark.parametrize(("workflow", "job_id"), WHOLE_CONFIG)
-    def test_the_exemption_is_still_true(
-        self, workflow: object, job_id: object
-    ) -> None:
-        """The exempt job really installs the whole config, and is in scope."""
-        assert (workflow, job_id) in IN_SCOPE
+
+@pytest.mark.parametrize(("workflow", "job_id"), WHOLE_CONFIG)
+def test_the_exemption_is_still_true(workflow: object, job_id: object) -> None:
+    """The exempt job really installs the whole config, and is in scope."""
+    assert (workflow, job_id) in IN_SCOPE
+    (step,) = mise_steps(load(workflow)[job_id])
+    assert "install_args" not in inputs(step)
+
+
+def test_a_second_whole_config_job_is_named() -> None:
+    """Planted: a job loses its list and is not the exempt one."""
+    job = load("attach-release.yml")["attach"]
+    (step,) = mise_steps(job)
+    decoded.as_object(step["with"], "with").pop("install_args")
+    assert strings(
+        "attach-release.yml attach: installs the whole mise config;"
+        " name its tools in install_args (#1333)"
+    ) == whole_config("attach-release.yml", "attach", job)
+
+
+def test_every_gate_install_is_held() -> None:
+    """Every mise-action job in ci.yml names a list or is the exemption."""
+    found = sorted(
+        ("ci.yml", job_id) for job_id, job in load("ci.yml").items() if mise_steps(job)
+    )
+    gated: list[tuple[str, str]] = sorted([*GATE_LISTS, *GATE_WHOLE])
+    assert gated == found
+
+
+def test_the_gate_lists_are_lists() -> None:
+    """The legs name their tools; the gate does not."""
+    for workflow, job_id in GATE_LISTS:
+        job = load(workflow)[job_id]
+        keys, needed, optional = installs(job)
+        assert keys
+        assert needed or optional
+    for workflow, job_id in GATE_WHOLE:
         (step,) = mise_steps(load(workflow)[job_id])
         assert "install_args" not in inputs(step)
 
-    def test_a_second_whole_config_job_is_named(self) -> None:
-        """Planted: a job loses its list and is not the exempt one."""
-        job = load("attach-release.yml")["attach"]
-        (step,) = mise_steps(job)
-        decoded.as_object(step["with"], "with").pop("install_args")
-        assert strings(
-            "attach-release.yml attach: installs the whole mise config;"
-            " name its tools in install_args (#1333)"
-        ) == whole_config("attach-release.yml", "attach", job)
 
-    def test_every_gate_install_is_held(self) -> None:
-        """Every mise-action job in ci.yml names a list or is the exemption."""
-        found = sorted(
-            ("ci.yml", job_id)
-            for job_id, job in load("ci.yml").items()
-            if mise_steps(job)
-        )
-        gated: list[tuple[str, str]] = sorted([*GATE_LISTS, *GATE_WHOLE])
-        assert gated == found
-
-    def test_the_gate_lists_are_lists(self) -> None:
-        """The legs name their tools; the gate does not."""
-        for workflow, job_id in GATE_LISTS:
-            job = load(workflow)[job_id]
-            keys, needed, optional = installs(job)
-            assert keys
-            assert needed or optional
-        for workflow, job_id in GATE_WHOLE:
-            (step,) = mise_steps(load(workflow)[job_id])
-            assert "install_args" not in inputs(step)
-
-    def test_every_belt_key_is_a_belt_key(self) -> None:
-        """A misspelt key would install nothing and say nothing."""
-        known = set(belt_table("tools"))
-        listed = [j for j in IN_SCOPE if j not in WHOLE_CONFIG]
-        for workflow, job_id in [*listed, *GATE_LISTS]:
-            keys, _, _ = installs(load(workflow)[job_id])
-            unknown: list[str] = [k for k in keys if k not in known]
-            assert strings() == unknown
+def test_every_belt_key_is_a_belt_key() -> None:
+    """A misspelt key would install nothing and say nothing."""
+    known = set(belt_table("tools"))
+    listed = [j for j in IN_SCOPE if j not in WHOLE_CONFIG]
+    for workflow, job_id in [*listed, *GATE_LISTS]:
+        keys, _, _ = installs(load(workflow)[job_id])
+        unknown: list[str] = [k for k in keys if k not in known]
+        assert strings() == unknown
 
 
-class TestJobInstalls:
-    """Each job installs what it calls."""
+# Each job installs what it calls.
+@pytest.mark.parametrize(
+    ("workflow", "job_id"), [j for j in IN_SCOPE if j not in WHOLE_CONFIG]
+)
+def test_every_job_installs_what_it_calls(workflow: object, job_id: object) -> None:
+    """The real jobs against their real steps and scripts."""
+    assert strings() == uninstalled(workflow, job_id, load(workflow)[job_id])
 
-    @pytest.mark.parametrize(
-        ("workflow", "job_id"), [j for j in IN_SCOPE if j not in WHOLE_CONFIG]
+
+def test_the_tag_job_installs_three_belt_tools() -> None:
+    """The tag job's list (#1322), unchanged by the generalisation."""
+    assert installs(load("release.yml")["tag"]) == (
+        ["jq", "github:monumental-archive/stele", "aqua:sigstore/gitsign"],
+        [],
+        [],
     )
-    def test_every_job_installs_what_it_calls(
-        self, workflow: object, job_id: object
-    ) -> None:
-        """The real jobs against their real steps and scripts."""
-        assert strings() == uninstalled(workflow, job_id, load(workflow)[job_id])
-
-    def test_the_tag_job_installs_three_belt_tools(self) -> None:
-        """The tag job's list (#1322), unchanged by the generalisation."""
-        assert installs(load("release.yml")["tag"]) == (
-            ["jq", "github:monumental-archive/stele", "aqua:sigstore/gitsign"],
-            [],
-            [],
-        )
-
-    def test_a_dropped_install_is_named(self) -> None:
-        """Planted: the tag job without gitsign, which signs the tag."""
-        job = planted_job("release.yml", "tag", " aqua:sigstore/gitsign")
-        assert strings(
-            "release.yml tag: calls aqua:sigstore/gitsign and does not install it"
-        ) == uninstalled("release.yml", "tag", job)
-
-    def test_a_dropped_caller_input_is_named(self) -> None:
-        """Planted: the binary build without cargo-auditable."""
-        job = planted_job(
-            "build-rust-binary.yml", "build", "rust cargo-auditable >>", "rust >>"
-        )
-        assert strings(
-            "build-rust-binary.yml build: calls cargo-auditable and does not install it"
-        ) == uninstalled("build-rust-binary.yml", "build", job)
-
-    def test_a_new_call_is_named(self) -> None:
-        """Planted: a step starts calling a belt tool the job lacks."""
-        job = appended(
-            load("attach-release.yml")["attach"],
-            {"name": "Planted", "run": "cosign verify-blob dist/checksums.txt"},
-        )
-        assert strings(
-            "attach-release.yml attach: calls aqua:sigstore/cosign and does not"
-            " install it"
-        ) == uninstalled("attach-release.yml", "attach", job)
-
-    def test_a_new_indirect_call_is_named(self) -> None:
-        """Planted: stele's VEX derivation execs osv-scanner."""
-        job = appended(
-            load("attach-release.yml")["attach"],
-            {"name": "Planted", "run": "stele derive vex --out dist/x.json"},
-        )
-        assert strings(
-            "attach-release.yml attach: calls aqua:google/osv-scanner and does"
-            " not install it"
-        ) == uninstalled("attach-release.yml", "attach", job)
-
-    def test_a_tool_named_only_in_a_comment_is_not_a_call(self) -> None:
-        """Prose about a tool installs nothing and needs nothing."""
-        job = appended(
-            load("attach-release.yml")["attach"],
-            {"name": "Planted", "run": "# cosign could verify this one day\ntrue\n"},
-        )
-        assert strings() == uninstalled("attach-release.yml", "attach", job)
 
 
-class TestGateInstalls:
-    """The gate's pgrx legs install what they call (#1408)."""
+def test_a_dropped_install_is_named() -> None:
+    """Planted: the tag job without gitsign, which signs the tag."""
+    job = planted_job("release.yml", "tag", " aqua:sigstore/gitsign")
+    assert strings(
+        "release.yml tag: calls aqua:sigstore/gitsign and does not install it"
+    ) == uninstalled("release.yml", "tag", job)
 
-    @pytest.mark.parametrize(("workflow", "job_id"), GATE_LISTS)
-    def test_every_gate_list_installs_what_it_calls(
-        self, workflow: object, job_id: object
-    ) -> None:
-        """The real jobs against pgrx-test.sh and pgrx-env.sh."""
-        assert strings() == uninstalled(workflow, job_id, load(workflow)[job_id])
 
-    @pytest.mark.parametrize(("workflow", "job_id"), GATE_LISTS)
-    def test_no_gate_list_is_undone_by_mise_run(
-        self, workflow: object, job_id: object
-    ) -> None:
-        """Each listed job that runs a task keeps `mise run` to the list."""
-        assert strings() == auto_installs(workflow, job_id, load(workflow)[job_id])
+def test_a_dropped_caller_input_is_named() -> None:
+    """Planted: the binary build without cargo-auditable."""
+    job = planted_job(
+        "build-rust-binary.yml", "build", "rust cargo-auditable >>", "rust >>"
+    )
+    assert strings(
+        "build-rust-binary.yml build: calls cargo-auditable and does not install it"
+    ) == uninstalled("build-rust-binary.yml", "build", job)
 
-    def test_a_leg_that_lets_mise_run_install_is_named(self) -> None:
-        """Planted: the setting gone, `mise run test:pgrx` installs it all."""
-        job = load("ci.yml")["pgrx"]
-        decoded.as_object(job["env"], "env").pop("MISE_TASK_RUN_AUTO_INSTALL")
-        assert strings(
-            "ci.yml pgrx: runs `mise run`, which installs every tool the"
-            ' config pins unless MISE_TASK_RUN_AUTO_INSTALL is "false"'
-        ) == auto_installs("ci.yml", "pgrx", job)
 
-    def test_a_task_named_in_a_followed_scripts_comment_is_not_reached(
-        self,
-    ) -> None:
-        """The reader follows a script's code, never its comments (#1408).
+def test_a_new_call_is_named() -> None:
+    """Planted: a step starts calling a belt tool the job lacks."""
+    job = appended(
+        load("attach-release.yml")["attach"],
+        {"name": "Planted", "run": "cosign verify-blob dist/checksums.txt"},
+    )
+    assert strings(
+        "attach-release.yml attach: calls aqua:sigstore/cosign and does not install it"
+    ) == uninstalled("attach-release.yml", "attach", job)
 
-        pgrx-env.sh's comments name `coverage:check` and its siblings.
-        `scripts()` once reassigned the text it searched for task names to
-        each followed file's whole source, comments included, so a step
-        sourcing it seemed to reach coverage-measure.sh and call Go. It
-        runs no `cargo pgrx` since #1940: the tasks that source it do.
-        """
-        job: Job = {
-            "steps": [{"name": "Planted", "run": '. "${ORG_BELT_DIR}/pgrx-env.sh"'}]
-        }
-        assert ({"jq"}, {"rust", "postgresql-binaries"}) == calls(job, carries=True)
 
-    def test_a_leg_installs_rust_cargo_pgrx_and_its_postgres(self) -> None:
-        """The leg's list as derived: no linter, node, fuzz or MSRV."""
-        assert installs(load("ci.yml")["pgrx"]) == (
-            ["jq", "aqua:taiki-e/cargo-llvm-cov"],
-            ["postgresql-binaries", "rust", "cargo-pgrx"],
-            [],
-        )
+def test_a_new_indirect_call_is_named() -> None:
+    """Planted: stele's VEX derivation execs osv-scanner."""
+    job = appended(
+        load("attach-release.yml")["attach"],
+        {"name": "Planted", "run": "stele derive vex --out dist/x.json"},
+    )
+    assert strings(
+        "attach-release.yml attach: calls aqua:google/osv-scanner and does"
+        " not install it"
+    ) == uninstalled("attach-release.yml", "attach", job)
 
-    def test_a_leg_that_drops_cargo_pgrx_is_named(self) -> None:
-        """Planted: cargo-pgrx gone from the leg, which runs `cargo pgrx`."""
-        job = planted_job("ci.yml", "pgrx", "rust cargo-pgrx >>", "rust >>")
-        assert strings(
-            "ci.yml pgrx: calls cargo-pgrx and does not install it"
-        ) == uninstalled("ci.yml", "pgrx", job)
 
-    def test_a_leg_that_drops_its_postgres_is_named(self) -> None:
-        """Planted: no `--major`, so no Postgres for pgrx_postgres.py."""
-        job = planted_job(
-            "ci.yml",
-            "pgrx",
-            '            --major "postgresql-binaries=${ORG_PGRX_MAJOR}" \\\n',
-        )
-        assert strings(
-            "ci.yml pgrx: calls postgresql-binaries and does not install it"
-        ) == uninstalled("ci.yml", "pgrx", job)
+def test_a_tool_named_only_in_a_comment_is_not_a_call() -> None:
+    """Prose about a tool installs nothing and needs nothing."""
+    job = appended(
+        load("attach-release.yml")["attach"],
+        {"name": "Planted", "run": "# cosign could verify this one day\ntrue\n"},
+    )
+    assert strings() == uninstalled("attach-release.yml", "attach", job)
 
-    def test_a_new_call_in_a_leg_is_named(self) -> None:
-        """Planted: a leg starts building the fuzz targets."""
-        job = appended(
-            load("ci.yml")["pgrx"],
-            {"name": "Planted", "run": "cargo fuzz build --sanitizer none"},
-        )
-        assert strings(
-            "ci.yml pgrx: calls cargo-fuzz and does not install it"
-        ) == uninstalled("ci.yml", "pgrx", job)
 
-    def test_a_new_belt_call_in_a_leg_is_named(self) -> None:
-        """Planted: a leg starts running a belt linter."""
-        job = appended(
-            load("ci.yml")["pgrx"], {"name": "Planted", "run": "typos --format brief"}
-        )
-        assert strings(
-            "ci.yml pgrx: calls typos and does not install it"
-        ) == uninstalled("ci.yml", "pgrx", job)
+# The gate's pgrx legs install what they call (#1408).
+@pytest.mark.parametrize(("workflow", "job_id"), GATE_LISTS)
+def test_every_gate_list_installs_what_it_calls(
+    workflow: object, job_id: object
+) -> None:
+    """The real jobs against pgrx-test.sh and pgrx-env.sh."""
+    assert strings() == uninstalled(workflow, job_id, load(workflow)[job_id])
+
+
+@pytest.mark.parametrize(("workflow", "job_id"), GATE_LISTS)
+def test_no_gate_list_is_undone_by_mise_run(workflow: object, job_id: object) -> None:
+    """Each listed job that runs a task keeps `mise run` to the list."""
+    assert strings() == auto_installs(workflow, job_id, load(workflow)[job_id])
+
+
+def test_a_leg_that_lets_mise_run_install_is_named() -> None:
+    """Planted: the setting gone, `mise run test:pgrx` installs it all."""
+    job = load("ci.yml")["pgrx"]
+    decoded.as_object(job["env"], "env").pop("MISE_TASK_RUN_AUTO_INSTALL")
+    assert strings(
+        "ci.yml pgrx: runs `mise run`, which installs every tool the"
+        ' config pins unless MISE_TASK_RUN_AUTO_INSTALL is "false"'
+    ) == auto_installs("ci.yml", "pgrx", job)
+
+
+def test_a_task_named_in_a_followed_scripts_comment_is_not_reached() -> None:
+    """The reader follows a script's code, never its comments (#1408).
+
+    pgrx-env.sh's comments name `coverage:check` and its siblings.
+    `scripts()` once reassigned the text it searched for task names to
+    each followed file's whole source, comments included, so a step
+    sourcing it seemed to reach coverage-measure.sh and call Go. It
+    runs no `cargo pgrx` since #1940: the tasks that source it do.
+    """
+    job: Job = {
+        "steps": [{"name": "Planted", "run": '. "${ORG_BELT_DIR}/pgrx-env.sh"'}]
+    }
+    assert ({"jq"}, {"rust", "postgresql-binaries"}) == calls(job, carries=True)
+
+
+def test_a_leg_installs_rust_cargo_pgrx_and_its_postgres() -> None:
+    """The leg's list as derived: no linter, node, fuzz or MSRV."""
+    assert installs(load("ci.yml")["pgrx"]) == (
+        ["jq", "aqua:taiki-e/cargo-llvm-cov"],
+        ["postgresql-binaries", "rust", "cargo-pgrx"],
+        [],
+    )
+
+
+def test_a_leg_that_drops_cargo_pgrx_is_named() -> None:
+    """Planted: cargo-pgrx gone from the leg, which runs `cargo pgrx`."""
+    job = planted_job("ci.yml", "pgrx", "rust cargo-pgrx >>", "rust >>")
+    assert strings(
+        "ci.yml pgrx: calls cargo-pgrx and does not install it"
+    ) == uninstalled("ci.yml", "pgrx", job)
+
+
+def test_a_leg_that_drops_its_postgres_is_named() -> None:
+    """Planted: no `--major`, so no Postgres for pgrx_postgres.py."""
+    job = planted_job(
+        "ci.yml",
+        "pgrx",
+        '            --major "postgresql-binaries=${ORG_PGRX_MAJOR}" \\\n',
+    )
+    assert strings(
+        "ci.yml pgrx: calls postgresql-binaries and does not install it"
+    ) == uninstalled("ci.yml", "pgrx", job)
+
+
+def test_a_new_call_in_a_leg_is_named() -> None:
+    """Planted: a leg starts building the fuzz targets."""
+    job = appended(
+        load("ci.yml")["pgrx"],
+        {"name": "Planted", "run": "cargo fuzz build --sanitizer none"},
+    )
+    assert strings(
+        "ci.yml pgrx: calls cargo-fuzz and does not install it"
+    ) == uninstalled("ci.yml", "pgrx", job)
+
+
+def test_a_new_belt_call_in_a_leg_is_named() -> None:
+    """Planted: a leg starts running a belt linter."""
+    job = appended(
+        load("ci.yml")["pgrx"], {"name": "Planted", "run": "typos --format brief"}
+    )
+    assert strings("ci.yml pgrx: calls typos and does not install it") == uninstalled(
+        "ci.yml", "pgrx", job
+    )
 
 
 def measures(workflow: str, job_id: str, job: Job) -> list[str]:
@@ -1158,132 +1160,133 @@ def names(job: Job) -> list[str]:
     return [field(s, "name") for s in workflow_yaml.steps(job)]
 
 
-class TestCoverageFigures:
-    """The gate keeps its figures; the release job reads them (#1622)."""
-
-    def test_the_gate_keeps_the_figures_for_the_commit_that_lands(self) -> None:
-        """Merge group and default-branch push only, named for the commit."""
-        kept = step(load("ci.yml")["gate"], "Keep the coverage figures for the release")
-        when = flat(field(kept, "if"))
-        assert "github.event_name == 'merge_group'" in when
-        assert "github.event_name == 'push'" in when
-        assert (
-            "github.ref == format('refs/heads/{0}',"
-            " github.event.repository.default_branch)"
-        ) in when
-        assert "refs/heads/main" not in when
-        assert "pull_request" not in when
-        assert inputs(kept)["name"] == "coverage-figures-${{ github.sha }}"
-        assert (
-            inputs(kept)["path"]
-            == "${{ runner.temp }}/coverage-reports/coverage-figures.txt"
-        )
-
-    def test_the_release_job_reads_with_a_token_that_can(self) -> None:
-        """The floor step has a token, and its job may read artifacts."""
-        job = load("release.yml")["release-pr"]
-        floor = step(job, "Re-derive the coverage floor")
-        assert floor["run"] == ".org-canon/release/derive-coverage-floor.sh"
-        assert table(floor, "env")["GH_TOKEN"] == "${{ github.token }}"
-        assert table(job, "permissions").get("actions") == "read"
-
-    @pytest.mark.parametrize(
-        "path",
-        [
-            CANON / "workflow-templates" / "release.yml",
-            WORKFLOWS / "self-release.yml",
-        ],
+# The gate keeps its figures; the release job reads them (#1622).
+def test_the_gate_keeps_the_figures_for_the_commit_that_lands() -> None:
+    """Merge group and default-branch push only, named for the commit."""
+    kept = step(load("ci.yml")["gate"], "Keep the coverage figures for the release")
+    when = flat(field(kept, "if"))
+    assert "github.event_name == 'merge_group'" in when
+    assert "github.event_name == 'push'" in when
+    assert (
+        "github.ref == format('refs/heads/{0}', github.event.repository.default_branch)"
+    ) in when
+    assert "refs/heads/main" not in when
+    assert "pull_request" not in when
+    assert inputs(kept)["name"] == "coverage-figures-${{ github.sha }}"
+    assert (
+        inputs(kept)["path"]
+        == "${{ runner.temp }}/coverage-reports/coverage-figures.txt"
     )
-    def test_every_caller_grants_the_read(self, path: object) -> None:
-        """The template and the canon's own caller grant `actions: read`."""
-        assert re.search(r"\n {6}actions: read\b", path.read_text("utf-8"))
-
-    def test_each_pgrx_job_keeps_its_figure(self) -> None:
-        """The pgrx job: the two events, the name with major and commit (#1692)."""
-        job = load("ci.yml")["pgrx"]
-        kept = step(job, "Keep the leg's coverage figure for the release")
-        when = flat(field(kept, "if"))
-        assert "github.event_name == 'merge_group'" in when
-        assert "github.event_name == 'push'" in when
-        assert (
-            "github.ref == format('refs/heads/{0}',"
-            " github.event.repository.default_branch)"
-        ) in when
-        assert "pull_request" not in when
-        assert (
-            inputs(kept)["name"]
-            == "coverage-figures-pgrx-pg${{ matrix.major }}-${{ github.sha }}"
-        )
-        assert (
-            inputs(kept)["path"]
-            == "${{ runner.temp }}/coverage-reports/coverage-figures.txt"
-        )
-        order = names(job)
-        assert order.index("Run the extension's suite at this major") < order.index(
-            "Keep the leg's coverage figure for the release"
-        )
-
-    def test_the_figures_step_follows_the_gate(self) -> None:
-        """Kept only after `mise run ci` passed: a red gate keeps nothing."""
-        order = names(load("ci.yml")["gate"])
-        assert order.index("Run the gate") < order.index(
-            "Keep the coverage figures for the release"
-        )
 
 
-class TestGateUploadMeasuresNothing:
-    """The coverage upload installs no measurement tool (#1528)."""
+def test_the_release_job_reads_with_a_token_that_can() -> None:
+    """The floor step has a token, and its job may read artifacts."""
+    job = load("release.yml")["release-pr"]
+    floor = step(job, "Re-derive the coverage floor")
+    assert floor["run"] == ".org-canon/release/derive-coverage-floor.sh"
+    assert table(floor, "env")["GH_TOKEN"] == "${{ github.token }}"
+    assert table(job, "permissions").get("actions") == "read"
 
-    def test_the_upload_installs_and_runs_nothing(self) -> None:
-        """The real job: download, list, hand to Codecov."""
-        for workflow, job_id in GATE_NONE.keys():
-            assert strings() == measures(workflow, job_id, load(workflow)[job_id])
 
-    def test_the_upload_that_hung_on_main_is_named(self) -> None:
-        """Planted: the job as it was, re-measuring with five tools."""
-        job = appended(
-            load("ci.yml")["coverage-upload"],
-            {
-                "name": "Install mise and the report's tools",
-                "uses": "jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b",
-                "with": {
-                    "install_args": (
-                        "jq aqua:taiki-e/cargo-llvm-cov python aqua:astral-sh/uv"
-                    )
-                },
+@pytest.mark.parametrize(
+    "path",
+    [
+        CANON / "workflow-templates" / "release.yml",
+        WORKFLOWS / "self-release.yml",
+    ],
+)
+def test_every_caller_grants_the_read(path: object) -> None:
+    """The template and the canon's own caller grant `actions: read`."""
+    assert re.search(r"\n {6}actions: read\b", path.read_text("utf-8"))
+
+
+def test_each_pgrx_job_keeps_its_figure() -> None:
+    """The pgrx job: the two events, the name with major and commit (#1692)."""
+    job = load("ci.yml")["pgrx"]
+    kept = step(job, "Keep the leg's coverage figure for the release")
+    when = flat(field(kept, "if"))
+    assert "github.event_name == 'merge_group'" in when
+    assert "github.event_name == 'push'" in when
+    assert (
+        "github.ref == format('refs/heads/{0}', github.event.repository.default_branch)"
+    ) in when
+    assert "pull_request" not in when
+    assert (
+        inputs(kept)["name"]
+        == "coverage-figures-pgrx-pg${{ matrix.major }}-${{ github.sha }}"
+    )
+    assert (
+        inputs(kept)["path"]
+        == "${{ runner.temp }}/coverage-reports/coverage-figures.txt"
+    )
+    order = names(job)
+    assert order.index("Run the extension's suite at this major") < order.index(
+        "Keep the leg's coverage figure for the release"
+    )
+
+
+def test_the_figures_step_follows_the_gate() -> None:
+    """Kept only after `mise run ci` passed: a red gate keeps nothing."""
+    order = names(load("ci.yml")["gate"])
+    assert order.index("Run the gate") < order.index(
+        "Keep the coverage figures for the release"
+    )
+
+
+# The coverage upload installs no measurement tool (#1528).
+def test_the_upload_installs_and_runs_nothing() -> None:
+    """The real job: download, list, hand to Codecov."""
+    for workflow, job_id in GATE_NONE.keys():
+        assert strings() == measures(workflow, job_id, load(workflow)[job_id])
+
+
+def test_the_upload_that_hung_on_main_is_named() -> None:
+    """Planted: the job as it was, re-measuring with five tools."""
+    job = appended(
+        load("ci.yml")["coverage-upload"],
+        {
+            "name": "Install mise and the report's tools",
+            "uses": "jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b",
+            "with": {
+                "install_args": (
+                    "jq aqua:taiki-e/cargo-llvm-cov python aqua:astral-sh/uv"
+                )
             },
-            {"name": "Generate the report", "run": "report=$(mise run coverage:check)"},
+        },
+        {"name": "Generate the report", "run": "report=$(mise run coverage:check)"},
+    )
+    found = measures("ci.yml", "coverage-upload", job)
+    assert (
+        strings(
+            "ci.yml coverage-upload: installs tools with jdx/mise-action",
+            "ci.yml coverage-upload: runs a mise task",
         )
-        found = measures("ci.yml", "coverage-upload", job)
-        assert (
-            strings(
-                "ci.yml coverage-upload: installs tools with jdx/mise-action",
-                "ci.yml coverage-upload: runs a mise task",
-            )
-            == found[:2]
-        )
-        # Followed into coverage:check and the measurement it runs.
-        for tool in ("aqua:taiki-e/cargo-llvm-cov", "pipx:pytest", "go"):
-            assert f"ci.yml coverage-upload: calls {tool}" in found
+        == found[:2]
+    )
+    # Followed into coverage:check and the measurement it runs.
+    for tool in ("aqua:taiki-e/cargo-llvm-cov", "pipx:pytest", "go"):
+        assert f"ci.yml coverage-upload: calls {tool}" in found
 
-    def test_a_measuring_call_in_the_upload_is_named(self) -> None:
-        """Planted: the upload starts rendering a report itself."""
-        job = appended(
-            load("ci.yml")["coverage-upload"],
-            {
-                "name": "Planted",
-                "run": "cargo llvm-cov --workspace --lcov --output-path lcov.info",
-            },
-        )
-        assert strings(
-            "ci.yml coverage-upload: calls aqua:taiki-e/cargo-llvm-cov",
-            "ci.yml coverage-upload: calls rust",
-        ) == measures("ci.yml", "coverage-upload", job)
 
-    def test_no_gate_job_is_both_listed_and_measureless(self) -> None:
-        """A job is a list, the whole config, or nothing: one of them."""
-        none: set[tuple[str, str]] = set()
-        assert none == set(GATE_NONE) & {*GATE_LISTS, *GATE_WHOLE}
+def test_a_measuring_call_in_the_upload_is_named() -> None:
+    """Planted: the upload starts rendering a report itself."""
+    job = appended(
+        load("ci.yml")["coverage-upload"],
+        {
+            "name": "Planted",
+            "run": "cargo llvm-cov --workspace --lcov --output-path lcov.info",
+        },
+    )
+    assert strings(
+        "ci.yml coverage-upload: calls aqua:taiki-e/cargo-llvm-cov",
+        "ci.yml coverage-upload: calls rust",
+    ) == measures("ci.yml", "coverage-upload", job)
+
+
+def test_no_gate_job_is_both_listed_and_measureless() -> None:
+    """A job is a list, the whole config, or nothing: one of them."""
+    none: set[tuple[str, str]] = set()
+    assert none == set(GATE_NONE) & {*GATE_LISTS, *GATE_WHOLE}
 
 
 # The variable a named-list job sets "false" in its own env (#1412).
@@ -1315,121 +1318,124 @@ def task_auto_install(workflow: str, job_id: str, job: Job) -> list[str]:
     ]
 
 
-class TestTaskAutoInstall:
-    """A named list stays the whole install when a task runs (#1412)."""
-
-    @pytest.mark.parametrize(("workflow", "job_id"), IN_SCOPE)
-    def test_every_named_list_job_turns_task_auto_install_off(
-        self, workflow: object, job_id: object
-    ) -> None:
-        """Every job in scope that installs a list, the exempt one aside."""
-        job = load(workflow)[job_id]
-        assert strings() == task_auto_install(workflow, job_id, job)
-
-    def test_a_job_without_the_setting_is_named(self) -> None:
-        """Planted: the SBOM job, which runs audit:deny, loses the line."""
-        job = load("publish.yml")["sbom"]
-        decoded.as_object(job["env"], "env").pop(NO_TASK_INSTALL)
-        assert strings(
-            "publish.yml sbom: installs a named list but leaves mise's task"
-            ' auto-install on; set MISE_TASK_RUN_AUTO_INSTALL: "false" in'
-            " the job's env (#1412)"
-        ) == task_auto_install("publish.yml", "sbom", job)
-
-    def test_a_tool_only_a_task_calls_must_be_listed(self) -> None:
-        """Planted: cargo-deny is reached only through `mise run audit:deny`."""
-        job = planted_job("publish.yml", "sbom", " aqua:EmbarkStudios/cargo-deny")
-        assert strings(
-            "publish.yml sbom: calls aqua:EmbarkStudios/cargo-deny and does"
-            " not install it"
-        ) == uninstalled("publish.yml", "sbom", job)
+# A named list stays the whole install when a task runs (#1412).
+@pytest.mark.parametrize(("workflow", "job_id"), IN_SCOPE)
+def test_every_named_list_job_turns_task_auto_install_off(
+    workflow: object, job_id: object
+) -> None:
+    """Every job in scope that installs a list, the exempt one aside."""
+    job = load(workflow)[job_id]
+    assert strings() == task_auto_install(workflow, job_id, job)
 
 
-class TestPythonCode:
-    """A Python helper is read through its syntax tree alone (#1903).
+def test_a_job_without_the_setting_is_named() -> None:
+    """Planted: the SBOM job, which runs audit:deny, loses the line."""
+    job = load("publish.yml")["sbom"]
+    decoded.as_object(job["env"], "env").pop(NO_TASK_INSTALL)
+    assert strings(
+        "publish.yml sbom: installs a named list but leaves mise's task"
+        ' auto-install on; set MISE_TASK_RUN_AUTO_INSTALL: "false" in'
+        " the job's env (#1412)"
+    ) == task_auto_install("publish.yml", "sbom", job)
 
-    A tool named in a comment, a message, a variable or a function runs
-    nothing; a subprocess argv and an import are what the tree says
-    runs. Each planted row adds a step running the helper to the attach
-    job, which installs no ruff.
+
+def test_a_tool_only_a_task_calls_must_be_listed() -> None:
+    """Planted: cargo-deny is reached only through `mise run audit:deny`."""
+    job = planted_job("publish.yml", "sbom", " aqua:EmbarkStudios/cargo-deny")
+    assert strings(
+        "publish.yml sbom: calls aqua:EmbarkStudios/cargo-deny and does not install it"
+    ) == uninstalled("publish.yml", "sbom", job)
+
+
+# A Python helper is read through its syntax tree alone (#1903).
+#
+# A tool named in a comment, a message, a variable or a function runs
+# nothing; a subprocess argv and an import are what the tree says
+# runs. Each planted row adds a step running the helper to the attach
+# job, which installs no ruff.
+def test_an_inline_suppression_is_not_a_call() -> None:
+    """Measured on #1490: `# ruff: ignore[...]` after the code."""
+    helper = (
+        "import subprocess\n"
+        'subprocess.run(["git", "status"], check=True)'
+        "  # ruff: ignore[start-process-with-partial-path]\n"
+    )
+    expected: set[str] = {"git", "subprocess"}
+    assert expected == python_code(helper).commands
+
+
+def test_a_hash_inside_a_string_is_code() -> None:
+    """A `#` in a string literal is not a comment; the argv stays whole."""
+    line = 'subprocess.run(["sh", "-c", "echo # not a comment"])  # a comment'
+    runs = python_code(f"import subprocess\n{line}\n")
+    run: set[str] = {"sh", "subprocess"}
+    argv: list[str] = ["sh", "-c", "echo # not a comment"]
+    assert run == runs.commands
+    assert argv == runs.tasks
+
+
+def test_an_unreadable_helper_fails_by_name() -> None:
+    """Never "calls nothing" for a helper the parser cannot read."""
+    with pytest.raises(
+        ValueError, match=r"^release/broken\.py: the parser cannot read it \("
+    ):
+        python_code('import subprocess\nx = """unterminated\n', "release/broken.py")
+
+
+def test_a_tool_in_a_string_is_not_a_call() -> None:
+    """Measured on #1895: a message naming a belt tool. Red on main."""
+    helper = (
+        "import subprocess\n"
+        'print("a ruff check must name it")\n'
+        'subprocess.run(["git", "status"], check=True)\n'
+    )
+    assert strings() == planted_uninstalled(helper)
+
+
+def test_a_function_or_variable_name_is_not_a_call() -> None:
+    """`def ruff()` and `coverage = 1` read code. Red on main."""
+    helper = (
+        "import subprocess\n\n\n"
+        "def ruff():\n    return 1\n\n\n"
+        "coverage = 1\n"
+        'subprocess.run(["git", "status"], check=True)\n'
+    )
+    assert strings() == planted_uninstalled(helper)
+
+
+@pytest.mark.parametrize("line", ["import ruff.api", "from ruff import api"])
+def test_an_imported_tool_module_is_a_call(line: object) -> None:
+    """A helper that imports a belt tool's module needs it installed."""
+    assert planted_uninstalled(f"{line}\n") == PLANTED_RED
+
+
+def test_a_script_handed_to_script_is_followed() -> None:
+    """`script()` reaches a script; a string or a docstring does not (#2037).
+
+    A file name in a constant, a message or a table runs nothing:
+    testing_adoption.py names the mutation scripts and runs none.
     """
+    nxt = "ruff check .\n"
+    located = (
+        "from belt.belt_scripts import script\n"
+        'NEXT = script(RELEASE, "planted-next.sh")\n'
+    )
+    for helper, red in (
+        (located, PLANTED_RED),
+        ('import sys\nNEXT = "planted-next.sh"\n', strings()),
+        ('"""Runs planted-next.sh, once."""\n', strings()),
+    ):
+        assert red == planted_uninstalled(helper, {"release/planted-next.sh": nxt})
 
-    def test_an_inline_suppression_is_not_a_call(self) -> None:
-        """Measured on #1490: `# ruff: ignore[...]` after the code."""
-        helper = (
-            "import subprocess\n"
-            'subprocess.run(["git", "status"], check=True)'
-            "  # ruff: ignore[start-process-with-partial-path]\n"
-        )
-        expected: set[str] = {"git", "subprocess"}
-        assert expected == python_code(helper).commands
 
-    def test_a_hash_inside_a_string_is_code(self) -> None:
-        """A `#` in a string literal is not a comment; the argv stays whole."""
-        line = 'subprocess.run(["sh", "-c", "echo # not a comment"])  # a comment'
-        runs = python_code(f"import subprocess\n{line}\n")
-        run: set[str] = {"sh", "subprocess"}
-        argv: list[str] = ["sh", "-c", "echo # not a comment"]
-        assert run == runs.commands
-        assert argv == runs.tasks
-
-    def test_an_unreadable_helper_fails_by_name(self) -> None:
-        """Never "calls nothing" for a helper the parser cannot read."""
-        with pytest.raises(
-            ValueError, match=r"^release/broken\.py: the parser cannot read it \("
-        ):
-            python_code('import subprocess\nx = """unterminated\n', "release/broken.py")
-
-    def test_a_tool_in_a_string_is_not_a_call(self) -> None:
-        """Measured on #1895: a message naming a belt tool. Red on main."""
-        helper = (
-            "import subprocess\n"
-            'print("a ruff check must name it")\n'
-            'subprocess.run(["git", "status"], check=True)\n'
-        )
-        assert strings() == planted_uninstalled(helper)
-
-    def test_a_function_or_variable_name_is_not_a_call(self) -> None:
-        """`def ruff()` and `coverage = 1` read code. Red on main."""
-        helper = (
-            "import subprocess\n\n\n"
-            "def ruff():\n    return 1\n\n\n"
-            "coverage = 1\n"
-            'subprocess.run(["git", "status"], check=True)\n'
-        )
-        assert strings() == planted_uninstalled(helper)
-
-    @pytest.mark.parametrize("line", ["import ruff.api", "from ruff import api"])
-    def test_an_imported_tool_module_is_a_call(self, line: object) -> None:
-        """A helper that imports a belt tool's module needs it installed."""
-        assert planted_uninstalled(f"{line}\n") == PLANTED_RED
-
-    def test_a_script_handed_to_script_is_followed(self) -> None:
-        """`script()` reaches a script; a string or a docstring does not (#2037).
-
-        A file name in a constant, a message or a table runs nothing:
-        testing_adoption.py names the mutation scripts and runs none.
-        """
-        nxt = "ruff check .\n"
-        located = (
-            "from belt.belt_scripts import script\n"
-            'NEXT = script(RELEASE, "planted-next.sh")\n'
-        )
-        for helper, red in (
-            (located, PLANTED_RED),
-            ('import sys\nNEXT = "planted-next.sh"\n', strings()),
-            ('"""Runs planted-next.sh, once."""\n', strings()),
-        ):
-            assert red == planted_uninstalled(helper, {"release/planted-next.sh": nxt})
-
-    def test_a_task_in_an_argv_is_followed(self) -> None:
-        """A task a subprocess call runs is reached; one a message names is not."""
-        git = 'subprocess.run(["git", "status"], check=True)\n'
-        for helper, red in (
-            ('subprocess.run(["mise", "run", "audit:deny"], check=True)\n', DENY_RED),
-            (f'print("run mise run audit:deny by hand")\n{git}', strings()),
-        ):
-            assert red == planted_uninstalled(f"import subprocess\n{helper}")
+def test_a_task_in_an_argv_is_followed() -> None:
+    """A task a subprocess call runs is reached; one a message names is not."""
+    git = 'subprocess.run(["git", "status"], check=True)\n'
+    for helper, red in (
+        ('subprocess.run(["mise", "run", "audit:deny"], check=True)\n', DENY_RED),
+        (f'print("run mise run audit:deny by hand")\n{git}', strings()),
+    ):
+        assert red == planted_uninstalled(f"import subprocess\n{helper}")
 
 
 DENY_RED = [
@@ -1492,236 +1498,238 @@ def planted_shell(helper: str) -> list[str]:
             return uninstalled("attach-release.yml", "attach", job)
 
 
-class TestUnsetMessages:
-    """A `${NAME:?message}` message is prose, not a call (#1782).
+# A `${NAME:?message}` message is prose, not a call (#1782).
+#
+# Each planted shell helper names lefthook, which the attach job does
+# not install, in the message of an unset expansion. The shell prints
+# that message and exits; it runs nothing in it.
+def test_a_local_assignment_message_is_not_a_call() -> None:
+    """`local x="${V:?…}"`, the pgrx-env.sh shape."""
+    helper = 'f() {\n  local x="${V:?run: lefthook run post-checkout}"\n}\n'
+    assert strings() == planted_shell(helper)
 
-    Each planted shell helper names lefthook, which the attach job does
-    not install, in the message of an unset expansion. The shell prints
-    that message and exits; it runs nothing in it.
+
+def test_a_colon_command_message_is_not_a_call() -> None:
+    """`: "${V:?…}"`, the identity.sh shape."""
+    helper = ': "${V:?run: lefthook run post-checkout}"\n'
+    assert strings() == planted_shell(helper)
+
+
+@pytest.mark.parametrize("op", [":?", "?"])
+def test_a_sourced_path_message_is_not_a_call(op: object) -> None:
+    """`. "${V:?…}/f.sh"`, the audit-badges.sh shape; `?` alone too."""
+    helper = f'. "${{V{op}run: lefthook run post-checkout}}/f.sh"\n'
+    assert strings() == planted_shell(helper)
+
+
+@pytest.mark.parametrize("sub", ["$(lefthook version)", "`lefthook version`"])
+def test_a_substitution_in_a_message_is_a_call(sub: object) -> None:
+    """`${V:?$(lefthook …)}`: the shell runs it, so it stays code."""
+    helper = f': "${{V:?{sub}}}"\n'
+    assert planted_shell(helper) == UNSET_RED
+
+
+# What is prose in shell is read from shfmt's tree (#1785).
+#
+# The call rows are the shapes the line regex dropped whole; the
+# prose rows are the remedy lines it existed to drop.
+@pytest.mark.parametrize(
+    "helper",
+    [
+        'x="$(lefthook version)"\n',
+        'x="`lefthook version`"\n',
+        'echo "$(lefthook version)"\n',
+        "echo ok | lefthook version\n",
+    ],
+)
+def test_a_call_beside_prose_is_named(helper: object) -> None:
+    """A quoted substitution and a pipe out of a print are calls."""
+    assert planted_shell(helper) == UNSET_RED
+
+
+@pytest.mark.parametrize(
+    "helper",
+    [
+        'emsg+="run lefthook install"\n',
+        'echo "run lefthook install"\n',
+    ],
+)
+def test_a_remedy_line_names_nothing(helper: object) -> None:
+    """A quoted literal assigned or printed is prose."""
+    assert strings() == planted_shell(helper)
+
+
+@pytest.mark.parametrize(
+    "rel", ["mise/roster-reconcile.sh", "release/inventory-digests.sh"]
+)
+def test_the_jq_calls_on_assignment_lines_are_read(rel: object) -> None:
+    """The two `jq` calls the line regex dropped are seen."""
+    text = (CANON / rel).read_text("utf-8")
+    assert word("jq", code(text)), rel
+
+
+def test_each_span_is_blanked_or_kept() -> None:
+    """One row per branch: what goes to spaces, what stays."""
+    rows = [
+        # A print's arguments go; its command word stays.
+        ('echo "run: typos --fix"', "echo" + " " * 19),
+        ("printf '%s' x", "printf" + " " * 7),
+        # A substitution inside a blanked span stays: the shell runs it.
+        ('echo "a $(taplo fmt) b"', "echo    $(taplo fmt)   "),
+        ('printf "%s" <(taplo fmt)', "printf      <(taplo fmt)"),
+        # A command after a print's pipe is its own call.
+        ("echo x | sed s/x/y/", "echo   | sed s/x/y/"),
+        # Not a print: the first word is not the literal.
+        ('"echo" lefthook', '"echo" lefthook'),
+        # A value made only of quoted parts goes, double or single.
+        ('emsg+="run lefthook install"', "emsg+=                      "),
+        ("x='lefthook'", "x=          "),
+        ("x=\"a\"'b'", "x=      "),
+        ('local y="lefthook"', "local y=          "),
+        # ... keeping its substitution, backquoted or not.
+        ('x="$(jq -r .x)" || exit 1', "x= $(jq -r .x)  || exit 1"),
+        ('x="`jq`"', "x= `jq` "),
+        # A value with an unquoted part stays whole.
+        ('x=a"lefthook"', 'x=a"lefthook"'),
+        ("x=$(jq)", "x=$(jq)"),
+        # An unset expansion's message goes, `:?` or `?`.
+        (': "${V:?run: lefthook}"', ': "${V:?             }"'),
+        (': "${V?run: lefthook}"', ': "${V?             }"'),
+        ('x="${V:?$(taplo fmt)}"', "x=      $(taplo fmt)  "),
+        # Any other operator's word is code.
+        (': "${V:-lefthook}"', ': "${V:-lefthook}"'),
+        # A comment line goes; a heredoc body stays.
+        ("# lefthook\nls", "ls"),
+        ("cat <<EOF\nlefthook\nEOF", "cat <<EOF\nlefthook\nEOF"),
+        # Every newline a span holds is kept.
+        ('echo "a\nb" x', "echo   \n    "),
+    ]
+    for text, want in rows:
+        assert want == code(text)
+
+
+def test_text_shfmt_refuses_is_named() -> None:
+    """No fallback: a parse error is a ValueError naming shfmt's message."""
+    with pytest.raises(
+        ValueError,
+        match=r"^shfmt cannot parse the text: 1:1: `if` must be followed",
+    ):
+        code("if then\n")
+
+
+def test_a_job_is_only_uncommented() -> None:
+    """A whole job's YAML loses its comment lines and nothing else."""
+    job = '  # lefthook\n  run: echo "x"\n  x: ${{ y }}'
+    assert uncommented(job) == '  run: echo "x"\n  x: ${{ y }}'
+
+
+# A command a Python helper runs is a call (#1499).
+#
+# Each planted helper sits beside the real release scripts in a scratch
+# canon root whose mise/ is the real belt, and the attach job gains a
+# step that runs it. The job installs no ruff.
+def test_a_list_argv_is_a_call() -> None:
+    """`subprocess.run(["ruff", "check"])`: red on main, which saw nothing."""
+    helper = 'import subprocess\nsubprocess.run(["ruff", "check"], check=True)\n'
+    assert planted_uninstalled(helper) == PLANTED_RED
+
+
+def test_a_string_command_is_a_call() -> None:
+    """The first word of a string argv is the command."""
+    helper = 'import subprocess\nsubprocess.run("ruff check .", shell=True)\n'
+    assert planted_uninstalled(helper) == PLANTED_RED
+
+
+@pytest.mark.parametrize("binding", ['"ruff"', 'shutil.which("ruff") or "ruff"'])
+def test_a_module_constant_argv_is_a_call(binding: object) -> None:
+    """A module name bound to the command, plain or through which()."""
+    helper = (
+        "import shutil\nimport subprocess\n"
+        f"RUFF = {binding}\n"
+        'subprocess.check_output([RUFF, "check"])\n'
+    )
+    assert planted_uninstalled(helper) == PLANTED_RED
+
+
+def test_a_name_in_a_message_is_not_a_call() -> None:
+    """A tool named in a message string runs nothing (#1903)."""
+    helper = (
+        "import subprocess\n"
+        'print("ruff: not run here")\n'
+        'subprocess.run(["git", "status"], check=True)\n'
+    )
+    assert strings() == planted_uninstalled(helper)
+
+
+@pytest.mark.parametrize(
+    "helper",
+    [
+        (
+            'import subprocess\nRUFF = ["ruff", "check"]\n'
+            'subprocess.run([*RUFF, "."], check=True)\n'
+        ),
+        'import rust_task\nrust_task.run(["ruff", "check"])\n',
+        'import shutil\nRUFF = shutil.which("ruff")\n',
+    ],
+)
+def test_a_tool_headed_list_is_a_call_wherever_it_stands(helper: object) -> None:
+    """An argv literal is a call in a constant or a wrapper's list (#2037).
+
+    belt_shell.py splats `SHFMT`, and rust_lint.py hands its argvs
+    to rust_task.run: the list is the call, not the subprocess line.
     """
-
-    def test_a_local_assignment_message_is_not_a_call(self) -> None:
-        """`local x="${V:?…}"`, the pgrx-env.sh shape."""
-        helper = 'f() {\n  local x="${V:?run: lefthook run post-checkout}"\n}\n'
-        assert strings() == planted_shell(helper)
-
-    def test_a_colon_command_message_is_not_a_call(self) -> None:
-        """`: "${V:?…}"`, the identity.sh shape."""
-        helper = ': "${V:?run: lefthook run post-checkout}"\n'
-        assert strings() == planted_shell(helper)
-
-    @pytest.mark.parametrize("op", [":?", "?"])
-    def test_a_sourced_path_message_is_not_a_call(self, op: object) -> None:
-        """`. "${V:?…}/f.sh"`, the audit-badges.sh shape; `?` alone too."""
-        helper = f'. "${{V{op}run: lefthook run post-checkout}}/f.sh"\n'
-        assert strings() == planted_shell(helper)
-
-    @pytest.mark.parametrize("sub", ["$(lefthook version)", "`lefthook version`"])
-    def test_a_substitution_in_a_message_is_a_call(self, sub: object) -> None:
-        """`${V:?$(lefthook …)}`: the shell runs it, so it stays code."""
-        helper = f': "${{V:?{sub}}}"\n'
-        assert planted_shell(helper) == UNSET_RED
+    assert planted_uninstalled(helper) == PLANTED_RED
 
 
-class TestProseFromTheParser:
-    """What is prose in shell is read from shfmt's tree (#1785).
-
-    The call rows are the shapes the line regex dropped whole; the
-    prose rows are the remedy lines it existed to drop.
-    """
-
-    @pytest.mark.parametrize(
-        "helper",
-        [
-            'x="$(lefthook version)"\n',
-            'x="`lefthook version`"\n',
-            'echo "$(lefthook version)"\n',
-            "echo ok | lefthook version\n",
-        ],
+def test_every_import_form_is_read() -> None:
+    """An aliased module and an imported function, all four calls."""
+    helper = (
+        "import subprocess as sp\n"
+        "from subprocess import Popen as Spawn, check_call\n"
+        'sp.run(["one"])\nsp.check_output(("two", "x"))\n'
+        'check_call(args=["three"])\nSpawn("four x")\n'
     )
-    def test_a_call_beside_prose_is_named(self, helper: object) -> None:
-        """A quoted substitution and a pipe out of a print are calls."""
-        assert planted_shell(helper) == UNSET_RED
+    expected: set[str] = {"one", "two", "three", "four"}
+    assert expected == python_runs.calls(ast.parse(helper))
 
-    @pytest.mark.parametrize(
-        "helper",
-        [
-            'emsg+="run lefthook install"\n',
-            'echo "run lefthook install"\n',
-        ],
+
+# release/caller_pins.py is the canon's one reader of a caller's pins.
+def test_no_other_reader_in_release_or_the_workflows() -> None:
+    """Every script under release/ and every workflow, read whole."""
+    root = CANON
+    paths = [
+        *sorted((root / "release").glob("*.sh")),
+        *sorted((root / "release").glob("*.py")),
+        *sorted((root / ".github" / "workflows").glob("*.yml")),
+    ]
+    found = [ln for p in paths for ln in readers(p, p.read_text("utf-8"), root)]
+    assert strings() == found
+
+
+def test_a_planted_reader_is_named() -> None:
+    """Planted: the inline reader the pgrx build carried before #1333."""
+    path = WORKFLOWS / "build-pgrx-extension.yml"
+    text = path.read_text("utf-8") + (
+        '          tools = t.get("tools", {})\n'
+        '          pgrx = tools.get("cargo:cargo-pgrx", "")\n'
     )
-    def test_a_remedy_line_names_nothing(self, helper: object) -> None:
-        """A quoted literal assigned or printed is prose."""
-        assert strings() == planted_shell(helper)
-
-    @pytest.mark.parametrize(
-        "rel", ["mise/roster-reconcile.sh", "release/inventory-digests.sh"]
-    )
-    def test_the_jq_calls_on_assignment_lines_are_read(self, rel: object) -> None:
-        """The two `jq` calls the line regex dropped are seen."""
-        text = (CANON / rel).read_text("utf-8")
-        assert word("jq", code(text)), rel
-
-    def test_each_span_is_blanked_or_kept(self) -> None:
-        """One row per branch: what goes to spaces, what stays."""
-        rows = [
-            # A print's arguments go; its command word stays.
-            ('echo "run: typos --fix"', "echo" + " " * 19),
-            ("printf '%s' x", "printf" + " " * 7),
-            # A substitution inside a blanked span stays: the shell runs it.
-            ('echo "a $(taplo fmt) b"', "echo    $(taplo fmt)   "),
-            ('printf "%s" <(taplo fmt)', "printf      <(taplo fmt)"),
-            # A command after a print's pipe is its own call.
-            ("echo x | sed s/x/y/", "echo   | sed s/x/y/"),
-            # Not a print: the first word is not the literal.
-            ('"echo" lefthook', '"echo" lefthook'),
-            # A value made only of quoted parts goes, double or single.
-            ('emsg+="run lefthook install"', "emsg+=                      "),
-            ("x='lefthook'", "x=          "),
-            ("x=\"a\"'b'", "x=      "),
-            ('local y="lefthook"', "local y=          "),
-            # ... keeping its substitution, backquoted or not.
-            ('x="$(jq -r .x)" || exit 1', "x= $(jq -r .x)  || exit 1"),
-            ('x="`jq`"', "x= `jq` "),
-            # A value with an unquoted part stays whole.
-            ('x=a"lefthook"', 'x=a"lefthook"'),
-            ("x=$(jq)", "x=$(jq)"),
-            # An unset expansion's message goes, `:?` or `?`.
-            (': "${V:?run: lefthook}"', ': "${V:?             }"'),
-            (': "${V?run: lefthook}"', ': "${V?             }"'),
-            ('x="${V:?$(taplo fmt)}"', "x=      $(taplo fmt)  "),
-            # Any other operator's word is code.
-            (': "${V:-lefthook}"', ': "${V:-lefthook}"'),
-            # A comment line goes; a heredoc body stays.
-            ("# lefthook\nls", "ls"),
-            ("cat <<EOF\nlefthook\nEOF", "cat <<EOF\nlefthook\nEOF"),
-            # Every newline a span holds is kept.
-            ('echo "a\nb" x', "echo   \n    "),
-        ]
-        for text, want in rows:
-            assert want == code(text)
-
-    def test_text_shfmt_refuses_is_named(self) -> None:
-        """No fallback: a parse error is a ValueError naming shfmt's message."""
-        with pytest.raises(
-            ValueError,
-            match=r"^shfmt cannot parse the text: 1:1: `if` must be followed",
-        ):
-            code("if then\n")
-
-    def test_a_job_is_only_uncommented(self) -> None:
-        """A whole job's YAML loses its comment lines and nothing else."""
-        job = '  # lefthook\n  run: echo "x"\n  x: ${{ y }}'
-        assert uncommented(job) == '  run: echo "x"\n  x: ${{ y }}'
+    assert strings(
+        ".github/workflows/build-pgrx-extension.yml: reads a caller's"
+        " mise config itself; read it through release/caller_pins.py"
+        " (#1333)"
+    ) == readers(path, text)
 
 
-class TestArgvCalls:
-    """A command a Python helper runs is a call (#1499).
-
-    Each planted helper sits beside the real release scripts in a scratch
-    canon root whose mise/ is the real belt, and the attach job gains a
-    step that runs it. The job installs no ruff.
-    """
-
-    def test_a_list_argv_is_a_call(self) -> None:
-        """`subprocess.run(["ruff", "check"])`: red on main, which saw nothing."""
-        helper = 'import subprocess\nsubprocess.run(["ruff", "check"], check=True)\n'
-        assert planted_uninstalled(helper) == PLANTED_RED
-
-    def test_a_string_command_is_a_call(self) -> None:
-        """The first word of a string argv is the command."""
-        helper = 'import subprocess\nsubprocess.run("ruff check .", shell=True)\n'
-        assert planted_uninstalled(helper) == PLANTED_RED
-
-    @pytest.mark.parametrize("binding", ['"ruff"', 'shutil.which("ruff") or "ruff"'])
-    def test_a_module_constant_argv_is_a_call(self, binding: object) -> None:
-        """A module name bound to the command, plain or through which()."""
-        helper = (
-            "import shutil\nimport subprocess\n"
-            f"RUFF = {binding}\n"
-            'subprocess.check_output([RUFF, "check"])\n'
-        )
-        assert planted_uninstalled(helper) == PLANTED_RED
-
-    def test_a_name_in_a_message_is_not_a_call(self) -> None:
-        """A tool named in a message string runs nothing (#1903)."""
-        helper = (
-            "import subprocess\n"
-            'print("ruff: not run here")\n'
-            'subprocess.run(["git", "status"], check=True)\n'
-        )
-        assert strings() == planted_uninstalled(helper)
-
-    @pytest.mark.parametrize(
-        "helper",
-        [
-            (
-                'import subprocess\nRUFF = ["ruff", "check"]\n'
-                'subprocess.run([*RUFF, "."], check=True)\n'
-            ),
-            'import rust_task\nrust_task.run(["ruff", "check"])\n',
-            'import shutil\nRUFF = shutil.which("ruff")\n',
-        ],
-    )
-    def test_a_tool_headed_list_is_a_call_wherever_it_stands(
-        self, helper: object
-    ) -> None:
-        """An argv literal is a call in a constant or a wrapper's list (#2037).
-
-        belt_shell.py splats `SHFMT`, and rust_lint.py hands its argvs
-        to rust_task.run: the list is the call, not the subprocess line.
-        """
-        assert planted_uninstalled(helper) == PLANTED_RED
-
-    def test_every_import_form_is_read(self) -> None:
-        """An aliased module and an imported function, all four calls."""
-        helper = (
-            "import subprocess as sp\n"
-            "from subprocess import Popen as Spawn, check_call\n"
-            'sp.run(["one"])\nsp.check_output(("two", "x"))\n'
-            'check_call(args=["three"])\nSpawn("four x")\n'
-        )
-        expected: set[str] = {"one", "two", "three", "four"}
-        assert expected == python_runs.calls(ast.parse(helper))
-
-
-class TestOneReader:
-    """release/caller_pins.py is the canon's one reader of a caller's pins."""
-
-    def test_no_other_reader_in_release_or_the_workflows(self) -> None:
-        """Every script under release/ and every workflow, read whole."""
-        root = CANON
-        paths = [
-            *sorted((root / "release").glob("*.sh")),
-            *sorted((root / "release").glob("*.py")),
-            *sorted((root / ".github" / "workflows").glob("*.yml")),
-        ]
-        found = [ln for p in paths for ln in readers(p, p.read_text("utf-8"), root)]
-        assert strings() == found
-
-    def test_a_planted_reader_is_named(self) -> None:
-        """Planted: the inline reader the pgrx build carried before #1333."""
-        path = WORKFLOWS / "build-pgrx-extension.yml"
-        text = path.read_text("utf-8") + (
-            '          tools = t.get("tools", {})\n'
-            '          pgrx = tools.get("cargo:cargo-pgrx", "")\n'
-        )
-        assert strings(
-            ".github/workflows/build-pgrx-extension.yml: reads a caller's"
-            " mise config itself; read it through release/caller_pins.py"
-            " (#1333)"
-        ) == readers(path, text)
-
-    @pytest.mark.parametrize(
-        "path",
-        [
-            WORKFLOWS / "build-pgrx-extension.yml",
-            CANON / "release" / "generate-pgrx-upgrade.sh",
-        ],
-    )
-    def test_the_pgrx_build_calls_the_reader(self, path: object) -> None:
-        """Both pgrx readers moved onto the helper, not merely deleted."""
-        assert "caller-pins" in support.launched(path.read_text("utf-8"))
+@pytest.mark.parametrize(
+    "path",
+    [
+        WORKFLOWS / "build-pgrx-extension.yml",
+        CANON / "release" / "generate-pgrx-upgrade.sh",
+    ],
+)
+def test_the_pgrx_build_calls_the_reader(path: object) -> None:
+    """Both pgrx readers moved onto the helper, not merely deleted."""
+    assert "caller-pins" in support.launched(path.read_text("utf-8"))
 
 
 # The canon's helpers run under the belt's Python (#1543). The runner's
@@ -1896,108 +1904,109 @@ PLANTED_JOB = """jobs:
 """
 
 
-class TestBeltPython:
-    """Every helper a workflow or action starts runs under ORG_PYTHON (#1543)."""
+# Every helper a workflow or action starts runs under ORG_PYTHON (#1543).
+def test_every_helper_start_names_org_python() -> None:
+    """The tree: no step starts a tracked helper any other way."""
+    assert strings() == interpreter_findings(
+        workflow_and_action_texts(), tracked_helpers()
+    )
 
-    def test_every_helper_start_names_org_python(self) -> None:
-        """The tree: no step starts a tracked helper any other way."""
-        assert strings() == interpreter_findings(
-            workflow_and_action_texts(), tracked_helpers()
-        )
 
-    def test_the_scan_reaches_the_helper_starts(self) -> None:
-        """Not vacuous: the tree starts helpers under ORG_PYTHON, many times."""
-        assert {"registry.py", "caller_pins.py", "verdict.py"} <= tracked_helpers()
-        starts = sum(
-            text.count('"${ORG_PYTHON}" ')
-            for text in workflow_and_action_texts().values()
-        )
-        assert starts > 40
+def test_the_scan_reaches_the_helper_starts() -> None:
+    """Not vacuous: the tree starts helpers under ORG_PYTHON, many times."""
+    assert {"registry.py", "caller_pins.py", "verdict.py"} <= tracked_helpers()
+    starts = sum(
+        text.count('"${ORG_PYTHON}" ') for text in workflow_and_action_texts().values()
+    )
+    assert starts > 40
 
-    def test_the_runners_python3_is_named(self) -> None:
-        """Planted: the image publish's call before #1543."""
-        text = PLANTED_JOB + (
-            "      - name: Push the image\n"
-            "        run: |\n"
-            '          python3 -I .org-canon/belt registry push --image "${IMAGE}"\n'
-        )
-        assert strings(
-            ".github/workflows/x.yml build: step 'Push the image' starts"
-            " belt registry with the runner's python3; run it as"
-            ' "${ORG_PYTHON}" belt registry (#1543)'
-        ) == interpreter_findings({".github/workflows/x.yml": text}, {"registry.py"})
 
-    def test_a_start_by_first_line_is_named(self) -> None:
-        """Planted: a helper executed by its own `#!` line, in both shapes."""
-        text = PLANTED_JOB + (
-            "      - name: Attach\n"
-            "        run: .org-canon/release/attach_publish.py\n"
-            "      - name: Fetch\n"
-            "        run: |\n"
-            "          prev=$(.org-canon/release/pgrx/previous_release.py fetch \\\n"
-            '            --tag "${TAG}")\n'
-        )
-        assert strings(
-            (
-                ".github/workflows/x.yml build: step 'Attach' starts"
-                " belt attach-publish by its own first line; run it as"
-                ' "${ORG_PYTHON}" belt attach-publish (#1543)'
-            ),
-            (
-                ".github/workflows/x.yml build: step 'Fetch' starts"
-                " belt previous-release by its own first line; run it as"
-                ' "${ORG_PYTHON}" belt previous-release (#1543)'
-            ),
-        ) == interpreter_findings(
-            {".github/workflows/x.yml": text},
-            {"attach_publish.py", "previous_release.py"},
-        )
+def test_the_runners_python3_is_named() -> None:
+    """Planted: the image publish's call before #1543."""
+    text = PLANTED_JOB + (
+        "      - name: Push the image\n"
+        "        run: |\n"
+        '          python3 -I .org-canon/belt registry push --image "${IMAGE}"\n'
+    )
+    assert strings(
+        ".github/workflows/x.yml build: step 'Push the image' starts"
+        " belt registry with the runner's python3; run it as"
+        ' "${ORG_PYTHON}" belt registry (#1543)'
+    ) == interpreter_findings({".github/workflows/x.yml": text}, {"registry.py"})
 
-    def test_a_start_in_an_action_is_named(self) -> None:
-        """Planted: an action file is held as a workflow is."""
-        text = (
-            "name: x\nruns:\n  using: composite\n  steps:\n"
-            "    - name: Derive\n      shell: bash\n"
-            '      run: python3 "${GITHUB_ACTION_PATH}/derive.py"\n'
-        )
-        assert strings(
-            ".github/actions/x/action.yml runs: step 'Derive' starts"
-            " derive.py with the runner's python3; run it as"
-            ' "${ORG_PYTHON}" derive.py (#1543)'
-        ) == interpreter_findings({".github/actions/x/action.yml": text}, {"derive.py"})
 
-    def test_org_python_before_the_canon_action_is_named(self) -> None:
-        """Planted: the name used where nothing has exported it yet."""
-        text = (
-            "jobs:\n  plan:\n    runs-on: ubuntu-26.04\n    steps:\n"
-            "      - name: Plan\n"
-            "        run: '\"${ORG_PYTHON}\" release/matrix.py base-images'\n"
-            "      - name: Resolve the canon tree\n"
-            "        uses: $/.github/actions/canon\n"
-        )
-        assert strings(
-            ".github/workflows/x.yml plan: step 'Plan' uses ORG_PYTHON and no"
-            " step before it runs $/.github/actions/canon, which exports it"
-            " (#1543)"
-        ) == interpreter_findings({".github/workflows/x.yml": text}, {"matrix.py"})
+def test_a_start_by_first_line_is_named() -> None:
+    """Planted: a helper executed by its own `#!` line, in both shapes."""
+    text = PLANTED_JOB + (
+        "      - name: Attach\n"
+        "        run: .org-canon/release/attach_publish.py\n"
+        "      - name: Fetch\n"
+        "        run: |\n"
+        "          prev=$(.org-canon/release/pgrx/previous_release.py fetch \\\n"
+        '            --tag "${TAG}")\n'
+    )
+    assert strings(
+        (
+            ".github/workflows/x.yml build: step 'Attach' starts"
+            " belt attach-publish by its own first line; run it as"
+            ' "${ORG_PYTHON}" belt attach-publish (#1543)'
+        ),
+        (
+            ".github/workflows/x.yml build: step 'Fetch' starts"
+            " belt previous-release by its own first line; run it as"
+            ' "${ORG_PYTHON}" belt previous-release (#1543)'
+        ),
+    ) == interpreter_findings(
+        {".github/workflows/x.yml": text},
+        {"attach_publish.py", "previous_release.py"},
+    )
 
-    def test_an_argument_an_untracked_file_and_inline_code_are_not_starts(
-        self,
-    ) -> None:
-        """Only a tracked helper in a command's place is a start."""
-        text = PLANTED_JOB + (
-            "      - name: Others\n"
-            "        run: |\n"
-            "          git ls-files '*.py' | wc -l\n"
-            "          ./caller-build.py --release\n"
-            "          python3 -c 'print(1)'\n"
-            '          "${ORG_PYTHON}" -I .org-canon/belt gate-tools'
-            " --helper registry.py\n"
-            "          # python3 -I .org-canon/belt registry tag\n"
-        )
-        assert strings() == interpreter_findings(
-            {".github/workflows/x.yml": text}, {"registry.py", "gate_tools.py"}
-        )
+
+def test_a_start_in_an_action_is_named() -> None:
+    """Planted: an action file is held as a workflow is."""
+    text = (
+        "name: x\nruns:\n  using: composite\n  steps:\n"
+        "    - name: Derive\n      shell: bash\n"
+        '      run: python3 "${GITHUB_ACTION_PATH}/derive.py"\n'
+    )
+    assert strings(
+        ".github/actions/x/action.yml runs: step 'Derive' starts"
+        " derive.py with the runner's python3; run it as"
+        ' "${ORG_PYTHON}" derive.py (#1543)'
+    ) == interpreter_findings({".github/actions/x/action.yml": text}, {"derive.py"})
+
+
+def test_org_python_before_the_canon_action_is_named() -> None:
+    """Planted: the name used where nothing has exported it yet."""
+    text = (
+        "jobs:\n  plan:\n    runs-on: ubuntu-26.04\n    steps:\n"
+        "      - name: Plan\n"
+        "        run: '\"${ORG_PYTHON}\" release/matrix.py base-images'\n"
+        "      - name: Resolve the canon tree\n"
+        "        uses: $/.github/actions/canon\n"
+    )
+    assert strings(
+        ".github/workflows/x.yml plan: step 'Plan' uses ORG_PYTHON and no"
+        " step before it runs $/.github/actions/canon, which exports it"
+        " (#1543)"
+    ) == interpreter_findings({".github/workflows/x.yml": text}, {"matrix.py"})
+
+
+def test_an_argument_an_untracked_file_and_inline_code_are_not_starts() -> None:
+    """Only a tracked helper in a command's place is a start."""
+    text = PLANTED_JOB + (
+        "      - name: Others\n"
+        "        run: |\n"
+        "          git ls-files '*.py' | wc -l\n"
+        "          ./caller-build.py --release\n"
+        "          python3 -c 'print(1)'\n"
+        '          "${ORG_PYTHON}" -I .org-canon/belt gate-tools'
+        " --helper registry.py\n"
+        "          # python3 -I .org-canon/belt registry tag\n"
+    )
+    assert strings() == interpreter_findings(
+        {".github/workflows/x.yml": text}, {"registry.py", "gate_tools.py"}
+    )
 
 
 JOB_TOKENS = ("github.token", "secrets.GITHUB_TOKEN")
@@ -2005,40 +2014,36 @@ STELE_VERB = re.compile(r"(?<![\w/.:-])stele\s+[a-z]")
 ORG_FLAG = re.compile(r"(?<![\w-])--org\b")
 
 
-class TestStepHeaders:
-    """A commented block header hides no body from these laws (#1837).
+# A commented block header hides no body from these laws (#1837).
+#
+# Each header form is read by workflow_yaml, whose own rows hold them;
+# these hold the tree's commented header and a start beneath one.
+def test_the_commented_header_in_the_tree_is_read() -> None:
+    """source-attest's `run: | # zizmor: ...` step is read whole."""
+    action = workflow_yaml.document(CANON / ".github/actions/source-attest/action.yml")
+    runs = decoded.as_object(action["runs"], "runs")
+    found = [
+        s
+        for s in workflow_yaml.steps(runs)
+        if field(s, "name") == "Install the belt's cosign and stele"
+    ]
+    assert len(found) == 1
+    assert "set -euo pipefail" in field(found[0], "run")
 
-    Each header form is read by workflow_yaml, whose own rows hold them;
-    these hold the tree's commented header and a start beneath one.
-    """
 
-    def test_the_commented_header_in_the_tree_is_read(self) -> None:
-        """source-attest's `run: | # zizmor: ...` step is read whole."""
-        action = workflow_yaml.document(
-            CANON / ".github/actions/source-attest/action.yml"
-        )
-        runs = decoded.as_object(action["runs"], "runs")
-        found = [
-            s
-            for s in workflow_yaml.steps(runs)
-            if field(s, "name") == "Install the belt's cosign and stele"
-        ]
-        assert len(found) == 1
-        assert "set -euo pipefail" in field(found[0], "run")
-
-    def test_a_start_under_a_commented_header_is_named(self) -> None:
-        """Planted: a helper started in a commented-header body is red."""
-        text = (
-            "name: x\nruns:\n  using: composite\n  steps:\n"
-            "    - name: Derive\n      shell: bash\n"
-            "      run: | # zizmor: ignore[github-env]\n"
-            '        python3 "${GITHUB_ACTION_PATH}/derive.py"\n'
-        )
-        assert strings(
-            ".github/actions/x/action.yml runs: step 'Derive' starts"
-            " derive.py with the runner's python3; run it as"
-            ' "${ORG_PYTHON}" derive.py (#1543)'
-        ) == interpreter_findings({".github/actions/x/action.yml": text}, {"derive.py"})
+def test_a_start_under_a_commented_header_is_named() -> None:
+    """Planted: a helper started in a commented-header body is red."""
+    text = (
+        "name: x\nruns:\n  using: composite\n  steps:\n"
+        "    - name: Derive\n      shell: bash\n"
+        "      run: | # zizmor: ignore[github-env]\n"
+        '        python3 "${GITHUB_ACTION_PATH}/derive.py"\n'
+    )
+    assert strings(
+        ".github/actions/x/action.yml runs: step 'Derive' starts"
+        " derive.py with the runner's python3; run it as"
+        ' "${ORG_PYTHON}" derive.py (#1543)'
+    ) == interpreter_findings({".github/actions/x/action.yml": text}, {"derive.py"})
 
 
 def population_reads_on_job_token(texts: dict[str, str]) -> list[str]:
@@ -2072,67 +2077,65 @@ def population_reads_on_job_token(texts: dict[str, str]) -> list[str]:
     return found
 
 
-class TestPopulationToken:
-    """A population read holds a token that sees the population (#1602)."""
+# A population read holds a token that sees the population (#1602).
+def test_no_stele_org_step_reads_on_the_job_token() -> None:
+    """The tree: every `stele ... --org` step holds a minted token."""
+    root = CANON
+    texts = {
+        str(p.relative_to(root)): p.read_text("utf-8")
+        for p in sorted((root / ".github" / "workflows").glob("*.yml"))
+    }
+    assert strings() == population_reads_on_job_token(texts)
 
-    def test_no_stele_org_step_reads_on_the_job_token(self) -> None:
-        """The tree: every `stele ... --org` step holds a minted token."""
-        root = CANON
-        texts = {
-            str(p.relative_to(root)): p.read_text("utf-8")
-            for p in sorted((root / ".github" / "workflows").glob("*.yml"))
-        }
-        assert strings() == population_reads_on_job_token(texts)
 
-    def test_the_scan_reaches_the_population_reads(self) -> None:
-        """Not vacuous: the tree's population reads are all in view."""
-        root = CANON
-        texts = {
-            str(p.relative_to(root)): p.read_text("utf-8")
-            for p in sorted((root / ".github" / "workflows").glob("*.yml"))
-        }
-        planted = {
-            rel: text.replace("steps.token.outputs.token", "github.token")
-            for rel, text in texts.items()
-        }
-        reads = population_reads_on_job_token(planted)
-        assert (
-            ".github/workflows/vex-attest.yml: plan / "
-            "Resolve subjects from the products the statements name"
-        ) in reads
-        assert len(reads) >= 4
+def test_the_scan_reaches_the_population_reads() -> None:
+    """Not vacuous: the tree's population reads are all in view."""
+    root = CANON
+    texts = {
+        str(p.relative_to(root)): p.read_text("utf-8")
+        for p in sorted((root / ".github" / "workflows").glob("*.yml"))
+    }
+    planted = {
+        rel: text.replace("steps.token.outputs.token", "github.token")
+        for rel, text in texts.items()
+    }
+    reads = population_reads_on_job_token(planted)
+    assert (
+        ".github/workflows/vex-attest.yml: plan / "
+        "Resolve subjects from the products the statements name"
+    ) in reads
+    assert len(reads) >= 4
 
-    def test_the_job_token_is_named_at_every_level(self) -> None:
-        """Planted: step, job and workflow env, and the secrets spelling."""
-        run = (
-            "        run: |\n"
-            '          args=(--org "${OWNER}")\n'
-            '          stele derive vex-subjects "${args[@]}"\n'
-        )
-        step = "    steps:\n      - name: Read\n"
-        texts = {
-            "a.yml": "jobs:\n  a:\n"
-            + step
-            + "        env:\n          GH_TOKEN: ${{ github.token }}\n"
-            + run,
-            "b.yml": "jobs:\n  b:\n    env:\n      GH_TOKEN: "
-            "${{ secrets.GITHUB_TOKEN }}\n" + step + run,
-            "c.yml": "env:\n  GH_TOKEN: ${{ github.token }}\njobs:\n  c:\n"
-            + step
-            + run,
-            "d.yml": "env:\n  GH_TOKEN: ${{ github.token }}\njobs:\n  d:\n"
-            + step
-            + "        env:\n          GH_TOKEN: ${{ steps.token.outputs.token }}\n"
-            + run,
-            "e.yml": "jobs:\n  e:\n"
-            + step
-            + "        env:\n          GH_TOKEN: ${{ github.token }}\n"
-            "        run: |\n          # stele level --org x\n"
-            "          gh release list --org-less\n",
-        }
-        assert strings(
-            "a.yml: a / Read", "b.yml: b / Read", "c.yml: c / Read"
-        ) == population_reads_on_job_token(texts)
+
+def test_the_job_token_is_named_at_every_level() -> None:
+    """Planted: step, job and workflow env, and the secrets spelling."""
+    run = (
+        "        run: |\n"
+        '          args=(--org "${OWNER}")\n'
+        '          stele derive vex-subjects "${args[@]}"\n'
+    )
+    step = "    steps:\n      - name: Read\n"
+    texts = {
+        "a.yml": "jobs:\n  a:\n"
+        + step
+        + "        env:\n          GH_TOKEN: ${{ github.token }}\n"
+        + run,
+        "b.yml": "jobs:\n  b:\n    env:\n      GH_TOKEN: "
+        "${{ secrets.GITHUB_TOKEN }}\n" + step + run,
+        "c.yml": "env:\n  GH_TOKEN: ${{ github.token }}\njobs:\n  c:\n" + step + run,
+        "d.yml": "env:\n  GH_TOKEN: ${{ github.token }}\njobs:\n  d:\n"
+        + step
+        + "        env:\n          GH_TOKEN: ${{ steps.token.outputs.token }}\n"
+        + run,
+        "e.yml": "jobs:\n  e:\n"
+        + step
+        + "        env:\n          GH_TOKEN: ${{ github.token }}\n"
+        "        run: |\n          # stele level --org x\n"
+        "          gh release list --org-less\n",
+    }
+    assert strings(
+        "a.yml: a / Read", "b.yml: b / Read", "c.yml: c / Read"
+    ) == population_reads_on_job_token(texts)
 
 
 def mint_step(workflow: str, job_id: str) -> tuple[int, Step]:
@@ -2157,52 +2160,49 @@ VEX_GRANTS = {
 }
 
 
-class TestPopulationGrants:
-    """vex-attest's population read is granted three reads, no more (#1602)."""
-
-    def test_the_vex_attest_mint_names_three_reads(self) -> None:
-        """Contents, metadata and attestations: no review history."""
-        _, mint = mint_step("vex-attest.yml", "plan")
-        grants: dict[str, str] = {
-            k: v for k, v in inputs(mint).items() if k.startswith("perm")
-        }
-        assert grants == VEX_GRANTS
+# vex-attest's population read is granted three reads, no more (#1602).
+def test_the_vex_attest_mint_names_three_reads() -> None:
+    """Contents, metadata and attestations: no review history."""
+    _, mint = mint_step("vex-attest.yml", "plan")
+    grants: dict[str, str] = {
+        k: v for k, v in inputs(mint).items() if k.startswith("perm")
+    }
+    assert grants == VEX_GRANTS
 
 
-class TestVexAttestToken:
-    """vex-attest's plan job mints the audit App's read token (#1602)."""
+# vex-attest's plan job mints the audit App's read token (#1602).
+def test_the_plan_mints_before_the_step_that_reads() -> None:
+    """The mint precedes the derivation, which holds its output."""
+    at, mint = mint_step("vex-attest.yml", "plan")
+    plan = workflow_yaml.steps(load("vex-attest.yml")["plan"])
+    reads = [i for i, s in enumerate(plan) if field(s, "id") == "collect"]
+    assert len(reads) == 1
+    assert field(mint, "id") == "token"
+    assert at < reads[0]
+    assert (
+        table(plan[reads[0]], "env")["GH_TOKEN"] == "${{ steps.token.outputs.token }}"
+    )
 
-    def test_the_plan_mints_before_the_step_that_reads(self) -> None:
-        """The mint precedes the derivation, which holds its output."""
-        at, mint = mint_step("vex-attest.yml", "plan")
-        plan = workflow_yaml.steps(load("vex-attest.yml")["plan"])
-        reads = [i for i, s in enumerate(plan) if field(s, "id") == "collect"]
-        assert len(reads) == 1
-        assert field(mint, "id") == "token"
-        assert at < reads[0]
-        assert (
-            table(plan[reads[0]], "env")["GH_TOKEN"]
-            == "${{ steps.token.outputs.token }}"
-        )
 
-    def test_the_mint_mirrors_the_audit_walks(self) -> None:
-        """Same pin, same client and key, owner scope as the audit's mint."""
-        _, mint = mint_step("vex-attest.yml", "plan")
-        _, audit = mint_step("slsa.yml", "blast-radius")
-        assert field(audit, "uses") == field(mint, "uses")
-        keys = ("client-id", "private-key", "owner")
-        audits: dict[str, str | None] = {k: inputs(audit).get(k) for k in keys}
-        mints: dict[str, str | None] = {k: inputs(mint).get(k) for k in keys}
-        assert audits == mints
+def test_the_mint_mirrors_the_audit_walks() -> None:
+    """Same pin, same client and key, owner scope as the audit's mint."""
+    _, mint = mint_step("vex-attest.yml", "plan")
+    _, audit = mint_step("slsa.yml", "blast-radius")
+    assert field(audit, "uses") == field(mint, "uses")
+    keys = ("client-id", "private-key", "owner")
+    audits: dict[str, str | None] = {k: inputs(audit).get(k) for k in keys}
+    mints: dict[str, str | None] = {k: inputs(mint).get(k) for k in keys}
+    assert audits == mints
 
-    def test_the_signing_jobs_never_see_the_token(self) -> None:
-        """Only the plan job names the App or its token."""
-        for job_id, job in load("vex-attest.yml").items():
-            if job_id == "plan":
-                continue
-            values = "\n".join(scalars(job))
-            assert "AUDIT_APP" not in values, job_id
-            assert "steps.token" not in values, job_id
+
+def test_the_signing_jobs_never_see_the_token() -> None:
+    """Only the plan job names the App or its token."""
+    for job_id, job in load("vex-attest.yml").items():
+        if job_id == "plan":
+            continue
+        values = "\n".join(scalars(job))
+        assert "AUDIT_APP" not in values, job_id
+        assert "steps.token" not in values, job_id
 
 
 # Each environment's secrets, as the forge issues them (measured
@@ -2250,111 +2250,108 @@ def secrets_outside_environment(texts: dict[str, str]) -> list[str]:
     return found
 
 
-class TestEnvironmentSecrets:
-    """A job reading an environment's secret declares it (#1602)."""
-
-    def test_every_job_declares_its_secrets_environment(self) -> None:
-        """The tree: no tracked workflow reads a key it is not issued."""
-        root = CANON
-        texts = {
-            rel: (root / rel).read_text("utf-8")
-            for rel in support.tracked(root, ".github/workflows/*.yml")
-        }
-        assert strings() == secrets_outside_environment(texts)
-
-    def test_the_scan_reaches_the_environment_jobs(self) -> None:
-        """Not vacuous: stripping every declaration names each reader."""
-        root = CANON
-        texts = {
-            rel: re.sub(
-                r"^    environment: .*\n",
-                "",
-                (root / rel).read_text("utf-8"),
-                flags=re.MULTILINE,
-            )
-            for rel in support.tracked(root, ".github/workflows/*.yml")
-        }
-        found = secrets_outside_environment(texts)
-        assert (
-            ".github/workflows/vex-attest.yml: plan reads AUDIT_APP_PRIVATE_KEY"
-            " outside environment audit"
-        ) in found
-        assert (
-            ".github/workflows/source-attest.yml: claims reads"
-            " SOURCE_RULES_TOKEN outside environment source-attest"
-        ) in found
-        assert len(found) >= 10
-
-    def test_each_form_and_a_wrong_environment_are_read(self) -> None:
-        """Planted: none, the wrong one, both forms, a comment."""
-        step = "    steps:\n      - run: x\n        env:\n"
-        key = "          K: ${{ secrets.AUDIT_TOKEN }}\n"
-        texts = {
-            "a.yml": "jobs:\n  a:\n" + step + key,
-            "b.yml": "jobs:\n  b:\n    environment: publish\n" + step + key,
-            "c.yml": "jobs:\n  c:\n    environment: audit # why\n" + step + key,
-            "d.yml": "jobs:\n  d:\n    environment:\n      name: audit\n" + step + key,
-            "e.yml": "jobs:\n  e:\n" + step + "        # secrets.AUDIT_TOKEN\n",
-        }
-        assert strings(
-            "a.yml: a reads AUDIT_TOKEN outside environment audit",
-            "b.yml: b reads AUDIT_TOKEN outside environment audit",
-        ) == secrets_outside_environment(texts)
+# A job reading an environment's secret declares it (#1602).
+def test_every_job_declares_its_secrets_environment() -> None:
+    """The tree: no tracked workflow reads a key it is not issued."""
+    root = CANON
+    texts = {
+        rel: (root / rel).read_text("utf-8")
+        for rel in support.tracked(root, ".github/workflows/*.yml")
+    }
+    assert strings() == secrets_outside_environment(texts)
 
 
-class TestGateCoverageReports:
-    """The gate keeps coverage:check's reports from outside the tree (#1628).
-
-    The reports were written into the checkout, where nothing ignores
-    them and one `git add -A` commits them. The gate names a directory
-    under the runner's temporary directory, and keeps that directory.
-    """
-
-    REPORTS = "${{ runner.temp }}/coverage-reports"
-
-    def test_the_gate_names_the_directory_its_artifact_keeps(self) -> None:
-        """The run step's variable is the artifact step's path."""
-        gate = workflow_yaml.steps(load("ci.yml")["gate"])
-        runs = [s for s in gate if field(s, "run").strip() == RUN_LEG]
-        keeps = [s for s in gate if inputs(s).get("name") == "coverage-reports"]
-        assert len(runs) == 1
-        assert len(keeps) == 1
-        assert table(runs[0], "env").get("ORG_COVERAGE_REPORTS") == self.REPORTS
-        assert inputs(keeps[0]).get("path") == self.REPORTS
-
-    def test_each_pgrx_leg_names_the_directory_its_artifact_keeps(self) -> None:
-        """The leg's suite writes where its artifact step reads (#1656)."""
-        leg = workflow_yaml.steps(load("ci.yml")["pgrx"])
-        runs = [s for s in leg if field(s, "run").strip() == "mise run test:pgrx"]
-        # The badge's report upload; the figures the release reads are
-        # kept by a step of their own (#1692), held in CoverageFigures.
-        keeps = [
-            s
-            for s in leg
-            if "upload-artifact" in field(s, "uses")
-            and inputs(s).get("name", "").startswith("coverage-reports")
-        ]
-        assert len(runs) == 1
-        assert len(keeps) == 1
-        assert table(runs[0], "env").get("ORG_COVERAGE_REPORTS") == self.REPORTS
-        assert inputs(keeps[0]).get("path") == self.REPORTS
-        assert (
-            inputs(keeps[0]).get("name")
-            == "coverage-reports-pgrx-pg${{ matrix.major }}"
+def test_the_scan_reaches_the_environment_jobs() -> None:
+    """Not vacuous: stripping every declaration names each reader."""
+    root = CANON
+    texts = {
+        rel: re.sub(
+            r"^    environment: .*\n",
+            "",
+            (root / rel).read_text("utf-8"),
+            flags=re.MULTILINE,
         )
+        for rel in support.tracked(root, ".github/workflows/*.yml")
+    }
+    found = secrets_outside_environment(texts)
+    assert (
+        ".github/workflows/vex-attest.yml: plan reads AUDIT_APP_PRIVATE_KEY"
+        " outside environment audit"
+    ) in found
+    assert (
+        ".github/workflows/source-attest.yml: claims reads"
+        " SOURCE_RULES_TOKEN outside environment source-attest"
+    ) in found
+    assert len(found) >= 10
 
-    def test_the_badge_job_downloads_beside_the_checkout(self) -> None:
-        """Every report artifact lands in the workspace, where the list reads it.
 
-        The gate's and each pgrx leg's (#1656), merged: their file names
-        never collide.
-        """
-        upload = workflow_yaml.steps(load("ci.yml")["coverage-upload"])
-        fetch = [s for s in upload if "download-artifact" in field(s, "uses")]
-        assert len(fetch) == 1
-        assert inputs(fetch[0]).get("pattern") == "coverage-reports*"
-        assert inputs(fetch[0]).get("merge-multiple") == "true"
-        assert "path" not in inputs(fetch[0])
+def test_each_form_and_a_wrong_environment_are_read() -> None:
+    """Planted: none, the wrong one, both forms, a comment."""
+    step = "    steps:\n      - run: x\n        env:\n"
+    key = "          K: ${{ secrets.AUDIT_TOKEN }}\n"
+    texts = {
+        "a.yml": "jobs:\n  a:\n" + step + key,
+        "b.yml": "jobs:\n  b:\n    environment: publish\n" + step + key,
+        "c.yml": "jobs:\n  c:\n    environment: audit # why\n" + step + key,
+        "d.yml": "jobs:\n  d:\n    environment:\n      name: audit\n" + step + key,
+        "e.yml": "jobs:\n  e:\n" + step + "        # secrets.AUDIT_TOKEN\n",
+    }
+    assert strings(
+        "a.yml: a reads AUDIT_TOKEN outside environment audit",
+        "b.yml: b reads AUDIT_TOKEN outside environment audit",
+    ) == secrets_outside_environment(texts)
+
+
+# The gate keeps coverage:check's reports from outside the tree (#1628).
+#
+# The reports were written into the checkout, where nothing ignores
+# them and one `git add -A` commits them. The gate names a directory
+# under the runner's temporary directory, and keeps that directory.
+REPORTS = "${{ runner.temp }}/coverage-reports"
+
+
+def test_the_gate_names_the_directory_its_artifact_keeps() -> None:
+    """The run step's variable is the artifact step's path."""
+    gate = workflow_yaml.steps(load("ci.yml")["gate"])
+    runs = [s for s in gate if field(s, "run").strip() == RUN_LEG]
+    keeps = [s for s in gate if inputs(s).get("name") == "coverage-reports"]
+    assert len(runs) == 1
+    assert len(keeps) == 1
+    assert table(runs[0], "env").get("ORG_COVERAGE_REPORTS") == REPORTS
+    assert inputs(keeps[0]).get("path") == REPORTS
+
+
+def test_each_pgrx_leg_names_the_directory_its_artifact_keeps() -> None:
+    """The leg's suite writes where its artifact step reads (#1656)."""
+    leg = workflow_yaml.steps(load("ci.yml")["pgrx"])
+    runs = [s for s in leg if field(s, "run").strip() == "mise run test:pgrx"]
+    # The badge's report upload; the figures the release reads are
+    # kept by a step of their own (#1692), held in CoverageFigures.
+    keeps = [
+        s
+        for s in leg
+        if "upload-artifact" in field(s, "uses")
+        and inputs(s).get("name", "").startswith("coverage-reports")
+    ]
+    assert len(runs) == 1
+    assert len(keeps) == 1
+    assert table(runs[0], "env").get("ORG_COVERAGE_REPORTS") == REPORTS
+    assert inputs(keeps[0]).get("path") == REPORTS
+    assert inputs(keeps[0]).get("name") == "coverage-reports-pgrx-pg${{ matrix.major }}"
+
+
+def test_the_badge_job_downloads_beside_the_checkout() -> None:
+    """Every report artifact lands in the workspace, where the list reads it.
+
+    The gate's and each pgrx leg's (#1656), merged: their file names
+    never collide.
+    """
+    upload = workflow_yaml.steps(load("ci.yml")["coverage-upload"])
+    fetch = [s for s in upload if "download-artifact" in field(s, "uses")]
+    assert len(fetch) == 1
+    assert inputs(fetch[0]).get("pattern") == "coverage-reports*"
+    assert inputs(fetch[0]).get("merge-multiple") == "true"
+    assert "path" not in inputs(fetch[0])
 
 
 # THE GATE'S THREE LEGS (#1740). One job, a matrix over the legs, its
@@ -2476,138 +2473,138 @@ def planted(old: str, new: str) -> str:
     return text.replace(old, new, 1)
 
 
-class TestGateLegs:
-    """The gate is three legs side by side (#1740)."""
+# The gate is three legs side by side (#1740).
+def test_the_real_gate_conforms() -> None:
+    """A matrix of the three, each one-leg step carrying its leg."""
+    assert strings() == leg_findings(ci_text())
 
-    def test_the_real_gate_conforms(self) -> None:
-        """A matrix of the three, each one-leg step carrying its leg."""
-        assert strings() == leg_findings(ci_text())
 
-    def test_one_job_and_no_copies(self) -> None:
-        """One matrix job, not three copied ones."""
-        found = workflow_yaml.jobs(parsed(ci_text()))
-        copies: list[str] = [j for j in found if j.startswith("gate-")]
-        assert strings() == copies
+def test_one_job_and_no_copies() -> None:
+    """One matrix job, not three copied ones."""
+    found = workflow_yaml.jobs(parsed(ci_text()))
+    copies: list[str] = [j for j in found if j.startswith("gate-")]
+    assert strings() == copies
 
-    def test_planted_breaches_are_named(self) -> None:
-        """Each property broken once on the real file, by its message."""
-        rows = [
+
+def test_planted_breaches_are_named() -> None:
+    """Each property broken once on the real file, by its message."""
+    rows = [
+        (
+            "a static matrix",
+            (f"      matrix: {MATRIX}\n", "      matrix:\n        leg: [lint]\n"),
+            f"gate: the matrix is not the plan's, {MATRIX}",
+        ),
+        (
+            "fail-fast on",
             (
-                "a static matrix",
-                (f"      matrix: {MATRIX}\n", "      matrix:\n        leg: [lint]\n"),
-                f"gate: the matrix is not the plan's, {MATRIX}",
+                "      fail-fast: false\n      matrix:",
+                "      fail-fast: true\n      matrix:",
+            ),
+            "gate: fail-fast is not false, so one red leg cancels the others",
+        ),
+        (
+            "the plain name",
+            (f"    name: {GATE_NAME}", "    name: gate"),
+            "gate: its name does not carry the leg",
+        ),
+        (
+            "the whole gate on every leg",
+            (RUN_LEG, "mise run ci"),
+            f"gate: no step runs `{RUN_LEG}` with LEG from the matrix",
+        ),
+        (
+            "the squash check on every leg",
+            (
+                (
+                    "${{ matrix.leg == 'lint' && matrix.shard == 1"
+                    " && github.event_name == 'pull_request'"
+                ),
+                "${{ matrix.leg == 'lint' && github.event_name == 'pull_request'",
             ),
             (
-                "fail-fast on",
+                "gate: 'The squash message is the PR title and body — hold it to"
+                " the commit canon' runs on every leg, not only where"
+                " matrix.leg == 'lint' && matrix.shard == 1"
+            ),
+        ),
+        (
+            "the merge-group check on every leg",
+            (
                 (
-                    "      fail-fast: false\n      matrix:",
-                    "      fail-fast: true\n      matrix:",
+                    "${{ matrix.leg == 'lint' && matrix.shard == 1"
+                    " && github.event_name == 'merge_group' }}"
                 ),
-                "gate: fail-fast is not false, so one red leg cancels the others",
+                "${{ matrix.leg == 'lint' && github.event_name == 'merge_group' }}",
             ),
             (
-                "the plain name",
-                (f"    name: {GATE_NAME}", "    name: gate"),
-                "gate: its name does not carry the leg",
+                "gate: 'A merge group is the pull request's current head' runs on"
+                " every leg, not only where"
+                " matrix.leg == 'lint' && matrix.shard == 1"
+            ),
+        ),
+        (
+            "the badge reports from every leg",
+            (
+                (
+                    "${{ matrix.leg == 'test' && matrix.task == 'ci:test'"
+                    " && github.event_name == 'push'"
+                ),
+                "${{ matrix.leg == 'test' && github.event_name == 'push'",
             ),
             (
-                "the whole gate on every leg",
-                (RUN_LEG, "mise run ci"),
-                f"gate: no step runs `{RUN_LEG}` with LEG from the matrix",
+                "gate: 'Keep the coverage reports for the badge (default branch"
+                " only)' runs on every leg, not only where"
+                " matrix.leg == 'test' && matrix.task == 'ci:test'"
+            ),
+        ),
+        (
+            "the release figures from every leg",
+            (
+                (
+                    "${{ matrix.leg == 'test' && matrix.task == 'ci:test'"
+                    " && (github.event_name == 'merge_group'"
+                ),
+                "${{ matrix.leg == 'test' && (github.event_name == 'merge_group'",
             ),
             (
-                "the squash check on every leg",
-                (
-                    (
-                        "${{ matrix.leg == 'lint' && matrix.shard == 1"
-                        " && github.event_name == 'pull_request'"
-                    ),
-                    "${{ matrix.leg == 'lint' && github.event_name == 'pull_request'",
-                ),
-                (
-                    "gate: 'The squash message is the PR title and body — hold it to"
-                    " the commit canon' runs on every leg, not only where"
-                    " matrix.leg == 'lint' && matrix.shard == 1"
-                ),
+                "gate: 'Keep the coverage figures for the release' runs on every"
+                " leg, not only where matrix.leg == 'test'"
+                " && matrix.task == 'ci:test'"
             ),
+        ),
+        (
+            "a job output",
             (
-                "the merge-group check on every leg",
+                "    timeout-minutes: 30\n    env:\n      # Both checkouts",
                 (
-                    (
-                        "${{ matrix.leg == 'lint' && matrix.shard == 1"
-                        " && github.event_name == 'merge_group' }}"
-                    ),
-                    "${{ matrix.leg == 'lint' && github.event_name == 'merge_group' }}",
-                ),
-                (
-                    "gate: 'A merge group is the pull request's current head' runs on"
-                    " every leg, not only where"
-                    " matrix.leg == 'lint' && matrix.shard == 1"
+                    "    timeout-minutes: 30\n    outputs:\n      x: y\n"
+                    "    env:\n      # Both checkouts"
                 ),
             ),
+            "gate: declares a job output, which one leg's result overwrites",
+        ),
+        (
+            "ci without the gate",
             (
-                "the badge reports from every leg",
-                (
-                    (
-                        "${{ matrix.leg == 'test' && matrix.task == 'ci:test'"
-                        " && github.event_name == 'push'"
-                    ),
-                    "${{ matrix.leg == 'test' && github.event_name == 'push'",
-                ),
-                (
-                    "gate: 'Keep the coverage reports for the badge (default branch"
-                    " only)' runs on every leg, not only where"
-                    " matrix.leg == 'test' && matrix.task == 'ci:test'"
-                ),
+                "      - plan\n      - gate\n      - pgrx\n",
+                "      - plan\n      - pgrx\n",
             ),
+            "ci: does not need gate, so a red leg would not red ci / ci",
+        ),
+        (
+            "the badge reading an output",
             (
-                "the release figures from every leg",
+                "      ${{ !cancelled() && needs.ci.result == 'success'\n",
                 (
-                    (
-                        "${{ matrix.leg == 'test' && matrix.task == 'ci:test'"
-                        " && (github.event_name == 'merge_group'"
-                    ),
-                    "${{ matrix.leg == 'test' && (github.event_name == 'merge_group'",
-                ),
-                (
-                    "gate: 'Keep the coverage figures for the release' runs on every"
-                    " leg, not only where matrix.leg == 'test'"
-                    " && matrix.task == 'ci:test'"
+                    "      ${{ !cancelled() && needs.ci.result == 'success'\n"
+                    "      && needs.gate.outputs.coverage-reports != ''\n"
                 ),
             ),
-            (
-                "a job output",
-                (
-                    "    timeout-minutes: 30\n    env:\n      # Both checkouts",
-                    (
-                        "    timeout-minutes: 30\n    outputs:\n      x: y\n"
-                        "    env:\n      # Both checkouts"
-                    ),
-                ),
-                "gate: declares a job output, which one leg's result overwrites",
-            ),
-            (
-                "ci without the gate",
-                (
-                    "      - plan\n      - gate\n      - pgrx\n",
-                    "      - plan\n      - pgrx\n",
-                ),
-                "ci: does not need gate, so a red leg would not red ci / ci",
-            ),
-            (
-                "the badge reading an output",
-                (
-                    "      ${{ !cancelled() && needs.ci.result == 'success'\n",
-                    (
-                        "      ${{ !cancelled() && needs.ci.result == 'success'\n"
-                        "      && needs.gate.outputs.coverage-reports != ''\n"
-                    ),
-                ),
-                "coverage-upload: reads a gate output, which a matrix cannot keep",
-            ),
-        ]
-        for _label, (old, new), message in rows:
-            assert strings(message) == leg_findings(planted(old, new))
+            "coverage-upload: reads a gate output, which a matrix cannot keep",
+        ),
+    ]
+    for _label, (old, new), message in rows:
+        assert strings(message) == leg_findings(planted(old, new))
 
 
 # A default-branch test compares the ref with the event's own name for
@@ -2667,72 +2664,77 @@ def literal_branches(label: str, text: str) -> list[str]:
     return found
 
 
-class TestDefaultBranchByName:
-    """No `if:` tests for the default branch by a literal name (#1693)."""
+# No `if:` tests for the default branch by a literal name (#1693).
+PUSH = "      - name: x\n        if: ${{ github.event_name == 'push' && %s }}\n"
 
-    PUSH = "      - name: x\n        if: ${{ github.event_name == 'push' && %s }}\n"
 
-    def test_no_workflow_or_template_names_the_branch(self) -> None:
-        """Every workflow and workflow template, read whole."""
-        root = CANON
-        paths = sorted(
-            path
-            for home in (root / ".github" / "workflows", root / "workflow-templates")
-            for pattern in ("*.yml", "*.yaml")
-            for path in home.glob(pattern)
+def test_no_workflow_or_template_names_the_branch() -> None:
+    """Every workflow and workflow template, read whole."""
+    root = CANON
+    paths = sorted(
+        path
+        for home in (root / ".github" / "workflows", root / "workflow-templates")
+        for pattern in ("*.yml", "*.yaml")
+        for path in home.glob(pattern)
+    )
+    found = [
+        hit
+        for path in paths
+        for hit in literal_branches(
+            str(path.relative_to(root)), path.read_text("utf-8")
         )
-        found = [
-            hit
-            for path in paths
-            for hit in literal_branches(
-                str(path.relative_to(root)), path.read_text("utf-8")
-            )
-        ]
-        assert strings() == found
+    ]
+    assert strings() == found
 
-    def test_a_literal_ref_is_refused_by_line(self) -> None:
-        """The form ci.yml carried at three sites before #1693."""
-        text = "jobs:\n" + self.PUSH % "github.ref == 'refs/heads/main'"
-        assert strings("x.yml:3") == literal_branches("x.yml", text)
 
-    def test_a_literal_ref_name_is_refused(self) -> None:
-        """The short name is the same test."""
-        text = "jobs:\n" + self.PUSH % "github.ref_name == 'main'"
-        assert strings("x.yml:3") == literal_branches("x.yml", text)
+def test_a_literal_ref_is_refused_by_line() -> None:
+    """The form ci.yml carried at three sites before #1693."""
+    text = "jobs:\n" + PUSH % "github.ref == 'refs/heads/main'"
+    assert strings("x.yml:3") == literal_branches("x.yml", text)
 
-    def test_the_literal_first_and_not_equal_are_refused(self) -> None:
-        """Operand order and the operator do not change what is named."""
-        text = "jobs:\n" + self.PUSH % "'refs/heads/trunk' != github.ref"
-        assert strings("x.yml:3") == literal_branches("x.yml", text)
 
-    def test_a_folded_condition_names_the_literal_line(self) -> None:
-        """The coverage-upload job's shape: the literal three lines down."""
-        text = (
-            "jobs:\n  up:\n    if: >-\n      ${{ !cancelled()\n"
-            "      && github.event_name == 'push'\n"
-            "      && github.ref == 'refs/heads/main' }}\n"
-            "    runs-on: ubuntu-26.04\n"
-        )
-        assert strings("x.yml:6") == literal_branches("x.yml", text)
+def test_a_literal_ref_name_is_refused() -> None:
+    """The short name is the same test."""
+    text = "jobs:\n" + PUSH % "github.ref_name == 'main'"
+    assert strings("x.yml:3") == literal_branches("x.yml", text)
 
-    def test_the_default_branch_form_is_allowed(self) -> None:
-        """The event's own name for the branch."""
-        text = "jobs:\n" + self.PUSH % (
-            "github.ref == format('refs/heads/{0}',"
-            " github.event.repository.default_branch)"
-        )
-        assert strings() == literal_branches("x.yml", text)
 
-    def test_a_tag_literal_is_not_a_branch(self) -> None:
-        """A tag ref is not a default-branch test."""
-        text = "jobs:\n" + self.PUSH % "github.ref != 'refs/tags/v1'"
-        assert strings() == literal_branches("x.yml", text)
+def test_the_literal_first_and_not_equal_are_refused() -> None:
+    """Operand order and the operator do not change what is named."""
+    text = "jobs:\n" + PUSH % "'refs/heads/trunk' != github.ref"
+    assert strings("x.yml:3") == literal_branches("x.yml", text)
 
-    def test_an_identity_string_outside_an_if_is_not_matched(self) -> None:
-        """The source-attest identity is a signed name, not a condition."""
-        text = (
-            "env:\n  ID: x.yml@refs/heads/main\n"
-            "  REF: ${{ github.ref == 'refs/heads/main' }}\n"
-            "jobs:\n" + self.PUSH % "true"
-        )
-        assert strings() == literal_branches("x.yml", text)
+
+def test_a_folded_condition_names_the_literal_line() -> None:
+    """The coverage-upload job's shape: the literal three lines down."""
+    text = (
+        "jobs:\n  up:\n    if: >-\n      ${{ !cancelled()\n"
+        "      && github.event_name == 'push'\n"
+        "      && github.ref == 'refs/heads/main' }}\n"
+        "    runs-on: ubuntu-26.04\n"
+    )
+    assert strings("x.yml:6") == literal_branches("x.yml", text)
+
+
+def test_the_default_branch_form_is_allowed() -> None:
+    """The event's own name for the branch."""
+    text = "jobs:\n" + PUSH % (
+        "github.ref == format('refs/heads/{0}', github.event.repository.default_branch)"
+    )
+    assert strings() == literal_branches("x.yml", text)
+
+
+def test_a_tag_literal_is_not_a_branch() -> None:
+    """A tag ref is not a default-branch test."""
+    text = "jobs:\n" + PUSH % "github.ref != 'refs/tags/v1'"
+    assert strings() == literal_branches("x.yml", text)
+
+
+def test_an_identity_string_outside_an_if_is_not_matched() -> None:
+    """The source-attest identity is a signed name, not a condition."""
+    text = (
+        "env:\n  ID: x.yml@refs/heads/main\n"
+        "  REF: ${{ github.ref == 'refs/heads/main' }}\n"
+        "jobs:\n" + PUSH % "true"
+    )
+    assert strings() == literal_branches("x.yml", text)

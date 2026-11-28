@@ -23,8 +23,6 @@ import shutil
 import subprocess
 from pathlib import Path
 
-import pytest
-
 from belt import decoded, typed_std
 from belt.typed_pytest import fixture
 from tests import support
@@ -157,96 +155,99 @@ def findings(texts: dict[str, str], tracked: set[str]) -> list[str]:
     return out
 
 
-class TestTaskBodiesStartHelpersUnderTheBeltsPython:
-    """The law: every belt task body starts a helper the guarded way."""
+# The law: every belt task body starts a helper the guarded way.
+def test_every_belt_task_starts_its_helpers_under_org_python() -> None:
+    """The tree: no belt task starts a tracked helper any other way."""
+    none: list[str] = []
+    assert none == findings(
+        {"mise/config.toml": BELT.read_text("utf-8")}, tracked_helpers()
+    )
 
-    def test_every_belt_task_starts_its_helpers_under_org_python(self) -> None:
-        """The tree: no belt task starts a tracked helper any other way."""
-        none: list[str] = []
-        assert none == findings(
-            {"mise/config.toml": BELT.read_text("utf-8")}, tracked_helpers()
-        )
 
-    def test_the_scan_reaches_the_helper_starts(self) -> None:
-        """Not vacuous: the belt starts helpers the guarded way, many times."""
-        text = BELT.read_text("utf-8")
-        assert {
-            "gate_surface.py",
-            "belt_shell.py",
-            "coverage_floor.py",
-        } <= tracked_helpers()
-        guarded = [b for b in bodies(text).values() if GUARDED in b]
-        assert len(guarded) >= 30
+def test_the_scan_reaches_the_helper_starts() -> None:
+    """Not vacuous: the belt starts helpers the guarded way, many times."""
+    text = BELT.read_text("utf-8")
+    assert {
+        "gate_surface.py",
+        "belt_shell.py",
+        "coverage_floor.py",
+    } <= tracked_helpers()
+    guarded = [b for b in bodies(text).values() if GUARDED in b]
+    assert len(guarded) >= 30
 
-    def test_a_python3_start_is_named(self) -> None:
-        """Planted: the shape every belt task had before #1582."""
-        text = (
-            "[tasks.\"lint:x\"]\nrun = '''\n"
-            'python3 -I "${ORG_CANON_DIR}/belt" gate-surface --exclude ""\n'
-            'plan=$(python3 -I "${ORG_CANON_DIR}/belt" msrv-plan \\\n  --x y)\n'
-            "'''\n"
-        )
-        want: list[str] = [
-            (
-                "mise/config.toml lint:x: starts belt gate-surface with the"
-                f" repository's python3; run it as {GUARDED} gate_surface.py"
-                " (#1582)"
-            ),
-            (
-                "mise/config.toml lint:x: starts belt msrv-plan with the"
-                f" repository's python3; run it as {GUARDED} msrv_plan.py"
-                " (#1582)"
-            ),
-        ]
-        assert want == findings(
-            {"mise/config.toml": text}, {"gate_surface.py", "msrv_plan.py"}
-        )
 
-    def test_a_start_through_a_variable_is_named(self) -> None:
-        """Planted: the helper's path is in a variable the body assigns."""
-        text = (
-            "[tasks.\"lint:deny\"]\nrun = '''\n"
-            'helper="${ORG_BELT_DIR}/deny_skips.py"\n'
-            'variants=$(python3 "${helper}" deny.toml)\n'
-            "'''\n"
-        )
-        want: list[str] = [
-            (
-                "mise/config.toml lint:deny: starts belt deny-skips with the"
-                f" repository's python3; run it as {GUARDED} deny_skips.py"
-                " (#1582)"
-            )
-        ]
-        assert want == findings({"mise/config.toml": text}, {"deny_skips.py"})
+def test_a_python3_start_is_named() -> None:
+    """Planted: the shape every belt task had before #1582."""
+    text = (
+        "[tasks.\"lint:x\"]\nrun = '''\n"
+        'python3 -I "${ORG_CANON_DIR}/belt" gate-surface --exclude ""\n'
+        'plan=$(python3 -I "${ORG_CANON_DIR}/belt" msrv-plan \\\n  --x y)\n'
+        "'''\n"
+    )
+    want: list[str] = [
+        (
+            "mise/config.toml lint:x: starts belt gate-surface with the"
+            f" repository's python3; run it as {GUARDED} gate_surface.py"
+            " (#1582)"
+        ),
+        (
+            "mise/config.toml lint:x: starts belt msrv-plan with the"
+            f" repository's python3; run it as {GUARDED} msrv_plan.py"
+            " (#1582)"
+        ),
+    ]
+    assert want == findings(
+        {"mise/config.toml": text}, {"gate_surface.py", "msrv_plan.py"}
+    )
 
-    def test_a_start_by_first_line_is_named(self) -> None:
-        """Planted: a helper executed by its own `#!` line, in a pipe."""
-        text = (
-            '[tasks."lint:y"]\n'
-            "run = ['git ls-files | \"${ORG_BELT_DIR}/subject_budget.py\"']\n"
-        )
-        want: list[str] = [
-            (
-                "mise/config.toml lint:y: starts belt subject-budget by its own"
-                f" first line; run it as {GUARDED} subject_budget.py (#1582)"
-            )
-        ]
-        assert want == findings({"mise/config.toml": text}, {"subject_budget.py"})
 
-    def test_the_guarded_start_inline_code_and_arguments_pass(self) -> None:
-        """Only an unguarded start of a tracked helper is red."""
-        text = (
-            "[tasks.\"lint:z\"]\nrun = '''\n"
-            f'{GUARDED} "${{ORG_BELT_DIR}}/gate_surface.py" --helper registry.py\n'
-            "actual=$(python3 -c 'import sys; print(sys.version)')\n"
-            "python3 caller-build.py\n"
-            "# python3 -I belt registry\n"
-            "'''\n"
+def test_a_start_through_a_variable_is_named() -> None:
+    """Planted: the helper's path is in a variable the body assigns."""
+    text = (
+        "[tasks.\"lint:deny\"]\nrun = '''\n"
+        'helper="${ORG_BELT_DIR}/deny_skips.py"\n'
+        'variants=$(python3 "${helper}" deny.toml)\n'
+        "'''\n"
+    )
+    want: list[str] = [
+        (
+            "mise/config.toml lint:deny: starts belt deny-skips with the"
+            f" repository's python3; run it as {GUARDED} deny_skips.py"
+            " (#1582)"
         )
-        none: list[str] = []
-        assert none == findings(
-            {"mise/config.toml": text}, {"gate_surface.py", "registry.py"}
+    ]
+    assert want == findings({"mise/config.toml": text}, {"deny_skips.py"})
+
+
+def test_a_start_by_first_line_is_named() -> None:
+    """Planted: a helper executed by its own `#!` line, in a pipe."""
+    text = (
+        '[tasks."lint:y"]\n'
+        "run = ['git ls-files | \"${ORG_BELT_DIR}/subject_budget.py\"']\n"
+    )
+    want: list[str] = [
+        (
+            "mise/config.toml lint:y: starts belt subject-budget by its own"
+            f" first line; run it as {GUARDED} subject_budget.py (#1582)"
         )
+    ]
+    assert want == findings({"mise/config.toml": text}, {"subject_budget.py"})
+
+
+def test_the_guarded_start_inline_code_and_arguments_pass() -> None:
+    """Only an unguarded start of a tracked helper is red."""
+    text = (
+        "[tasks.\"lint:z\"]\nrun = '''\n"
+        f'{GUARDED} "${{ORG_BELT_DIR}}/gate_surface.py" --helper registry.py\n'
+        "actual=$(python3 -c 'import sys; print(sys.version)')\n"
+        "python3 caller-build.py\n"
+        "# python3 -I belt registry\n"
+        "'''\n"
+    )
+    none: list[str] = []
+    assert none == findings(
+        {"mise/config.toml": text}, {"gate_surface.py", "registry.py"}
+    )
 
 
 def mise() -> str:
@@ -276,14 +277,10 @@ def belt_version() -> str:
 STUB = '#!/bin/sh\ncat > /dev/null\necho "{who} $*"\n'
 
 
-@pytest.mark.usefixtures("_set_up_test_a_scratch_repository_pinning_its_own_python")
-class TestAScratchRepositoryPinningItsOwnPython:
+class AScratchRepositoryPinningItsOwnPython:
     """The real belt under a real mise, in a repository that pins Python."""
 
-    @fixture
-    def _set_up_test_a_scratch_repository_pinning_its_own_python(
-        self, tmp_path: Path
-    ) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Plant the repository, an empty config dir and the two stubs."""
         self.tmp = tmp_path
         self.repo = self.tmp / "repo"
@@ -336,27 +333,49 @@ class TestAScratchRepositoryPinningItsOwnPython:
             timeout=120,
         )
 
-    def test_a_belt_task_runs_its_helper_under_the_belts_python(self) -> None:
-        """The belt's stub answers, never the repository's."""
-        done = self.run_task("lint:subject-budget")
-        assert done.returncode == 0, done.stdout + done.stderr
-        assert f"belt {CANON / 'mise' / 'subject_budget.py'}\n" in done.stdout
-        assert "repo " not in done.stdout
 
-    def test_the_own_task_keeps_the_pinned_python(self) -> None:
-        """PATH is untouched: the repository's task gets what it pins."""
-        done = self.run_task("own")
-        assert done.returncode == 0, done.stdout + done.stderr
-        assert "repo own.py\n" in done.stdout
-        assert "belt " not in done.stdout
+@fixture
+def a_scratch_repository_pinning_its_own_python(
+    tmp_path: Path,
+) -> AScratchRepositoryPinningItsOwnPython:
+    """Give each row its own AScratchRepositoryPinningItsOwnPython."""
+    return AScratchRepositoryPinningItsOwnPython(tmp_path)
 
-    def test_an_absent_belt_python_is_refused_with_its_install(self) -> None:
-        """Never installed beside the repository's: red, naming the fix."""
-        shutil.rmtree(self.data / "installs" / "python" / belt_version())
-        done = self.run_task("lint:subject-budget")
-        assert done.returncode != 0, done.stdout
-        assert (
-            "ORG_PYTHON: unset — the belt Python is not installed here; run:"
-            f" mise install python@{belt_version()} (CI: the canon action)"
-        ) in done.stderr
-        assert "repo " not in done.stdout
+
+def test_a_belt_task_runs_its_helper_under_the_belts_python(
+    a_scratch_repository_pinning_its_own_python: AScratchRepositoryPinningItsOwnPython,
+) -> None:
+    """The belt's stub answers, never the repository's."""
+    done = a_scratch_repository_pinning_its_own_python.run_task("lint:subject-budget")
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert f"belt {CANON / 'mise' / 'subject_budget.py'}\n" in done.stdout
+    assert "repo " not in done.stdout
+
+
+def test_the_own_task_keeps_the_pinned_python(
+    a_scratch_repository_pinning_its_own_python: AScratchRepositoryPinningItsOwnPython,
+) -> None:
+    """PATH is untouched: the repository's task gets what it pins."""
+    done = a_scratch_repository_pinning_its_own_python.run_task("own")
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "repo own.py\n" in done.stdout
+    assert "belt " not in done.stdout
+
+
+def test_an_absent_belt_python_is_refused_with_its_install(
+    a_scratch_repository_pinning_its_own_python: AScratchRepositoryPinningItsOwnPython,
+) -> None:
+    """Never installed beside the repository's: red, naming the fix."""
+    shutil.rmtree(
+        a_scratch_repository_pinning_its_own_python.data
+        / "installs"
+        / "python"
+        / belt_version()
+    )
+    done = a_scratch_repository_pinning_its_own_python.run_task("lint:subject-budget")
+    assert done.returncode != 0, done.stdout
+    assert (
+        "ORG_PYTHON: unset — the belt Python is not installed here; run:"
+        f" mise install python@{belt_version()} (CI: the canon action)"
+    ) in done.stderr
+    assert "repo " not in done.stdout

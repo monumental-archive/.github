@@ -208,32 +208,12 @@ def run_helper(
     return status, out, err
 
 
-@pytest.mark.usefixtures("_set_up_test_queue_head")
-class TestQueueHead:
+class QueueHead:
     """Each row: a merge group, and the pull request it was queued from."""
 
-    @fixture
-    def _set_up_test_queue_head(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Give each row its own scratch directory."""
         self.tmp = tmp_path
-
-    @staticmethod
-    def refused(done: tuple[int, str, str], message: str) -> None:
-        """Assert the step is red with exactly this message."""
-        status, out, err = done
-        assert status == 1, out + err
-        assert err == f"::error::{STEP}: {message}\n"
-
-    @staticmethod
-    def passed(done: tuple[int, str, str], group: str, head: str, base: str) -> None:
-        """Assert the step is green and names the group, head and base."""
-        status, out, err = done
-        assert status == 0, out + err
-        assert re.search(
-            rf"^queue-head: merge group {group} is pull request #{NUMBER}'s current"
-            rf" head {head} merged onto {base} \(tree [0-9a-f]{{40}}\)\n$",
-            out,
-        )
 
     def moved(self) -> tuple[Repos, str, str]:
         """Queue a pull request at one head, then push another.
@@ -252,295 +232,332 @@ class TestQueueHead:
         repos.publish(NUMBER, current)
         return repos, older, current
 
-    def test_a_group_built_from_an_older_head_is_refused(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A squash of the older head, checked against a moved head, is red."""
-        repos, older, current = self.moved()
-        repos.clone()
-        group = repos.squash(repos.base, older)
-        status, out, err = run_helper(
-            repos.checkout,
-            queue_ref(NUMBER, repos.base),
-            repos.base,
-            group,
-            capfd=capfd,
-        )
-        have = git(repos.checkout, "rev-parse", f"{group}^{{tree}}")
-        want = git(repos.checkout, "merge-tree", "--write-tree", repos.base, current)
-        self.refused(
-            (status, out, err),
-            f"the merge group {group} was not built from pull request #{NUMBER}'s"
-            f" current head {current}: the pull request moved after it was queued."
-            f" The group's tree is {have}; {current} merged onto the base"
-            f" {repos.base} is {want}. Re-queue it, and the group is built from the"
-            " real head",
-        )
 
-    def test_a_group_built_from_the_current_head_passes(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A squash of the head the pull request holds is green."""
-        repos, _, current = self.moved()
-        repos.clone()
-        group = repos.squash(repos.base, current)
-        status, out, err = run_helper(
-            repos.checkout,
-            queue_ref(NUMBER, repos.base),
-            repos.base,
-            group,
-            capfd=capfd,
-        )
-        self.passed((status, out, err), group, current, repos.base)
-
-    def test_edtf_265_is_refused(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """The real case: edtf#265's group carries its old head's tree."""
-        checkout = self.tmp / "checkout"
-        origin = self.tmp / "origin"
-        bundle = self.tmp / "edtf-265.bundle"
-        bundle.write_bytes(gzip.decompress(BUNDLE.read_bytes()))
-        for repo in (checkout, origin):
-            git(self.tmp, "init", "-q", str(repo))
-            # The bundle holds the four commits and no history behind
-            # the base, so both repositories treat the base as a root.
-            (repo / ".git" / "shallow").write_text(f"{EDTF_BASE}\n", encoding="utf-8")
-        git(
-            checkout,
-            "fetch",
-            "-q",
-            str(bundle),
-            "refs/heads/base:refs/heads/main",
-            "refs/heads/group:refs/heads/group",
-            "refs/heads/old-head:refs/heads/old-head",
-        )
-        git(
-            origin,
-            "fetch",
-            "-q",
-            str(bundle),
-            "refs/heads/current-head:refs/pull/265/head",
-        )
-        git(checkout, "remote", "add", "origin", str(origin))
-        # What the queue did: the old head merged onto the base is the
-        # tree that merged, and the current head's is not.
-        assert git(checkout, "rev-parse", f"{EDTF_GROUP}^{{tree}}") == EDTF_MERGED_TREE
-        assert (
-            git(checkout, "merge-tree", "--write-tree", EDTF_BASE, EDTF_OLD_HEAD)
-            == EDTF_MERGED_TREE
-        )
-        status, out, err = run_helper(
-            checkout, queue_ref("265", EDTF_BASE), EDTF_BASE, EDTF_GROUP, capfd=capfd
-        )
-        assert status == 1, out + err
-        assert err == (
-            f"::error::{STEP}: the merge group {EDTF_GROUP} was not built from"
-            f" pull request #265's current head {EDTF_HEAD}: the pull request moved"
-            f" after it was queued. The group's tree is {EDTF_MERGED_TREE};"
-            f" {EDTF_HEAD} merged onto the base {EDTF_BASE} is {EDTF_HEAD_TREE}."
-            " Re-queue it, and the group is built from the real head\n"
-        )
-
-    def test_a_ref_that_is_not_a_queue_ref_is_refused(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A merge group whose head_ref names no queue entry is red."""
-        repos, _, current = self.moved()
-        repos.clone()
-        group = repos.squash(repos.base, current)
-        status, out, err = run_helper(
-            repos.checkout, "refs/heads/main", repos.base, group, capfd=capfd
-        )
-        self.refused(
-            (status, out, err),
-            "the merge group's head_ref 'refs/heads/main' is not a merge-queue ref"
-            " (refs/heads/gh-readonly-queue/<base>/pr-<n>-<sha>), so the pull"
-            " request it came from is unknown and the group is unverified",
-        )
-
-    def test_a_missing_base_is_refused(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """A base the checkout does not hold is red."""
-        repos, _, current = self.moved()
-        repos.clone()
-        group = repos.squash(repos.base, current)
-        absent = "0" * 40
-        status, out, err = run_helper(
-            repos.checkout, queue_ref(NUMBER, absent), absent, group, capfd=capfd
-        )
-        self.refused(
-            (status, out, err),
-            f"the merge group's base commit '{absent}' is not in the checkout,"
-            " so the group is unverified",
-        )
-
-    def test_a_missing_group_is_refused(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A group commit the checkout does not hold is red."""
-        repos, _, _ = self.moved()
-        repos.clone()
-        absent = "f" * 40
-        status, out, err = run_helper(
-            repos.checkout,
-            queue_ref(NUMBER, repos.base),
-            repos.base,
-            absent,
-            capfd=capfd,
-        )
-        self.refused(
-            (status, out, err),
-            f"the merge group's group commit '{absent}' is not in the checkout,"
-            " so the group is unverified",
-        )
-
-    def test_a_fetch_that_fails_is_refused(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """No refs/pull/<n>/head on origin: the fetch fails, and it is red."""
-        repos, _, current = self.moved()
-        git(repos.origin, "update-ref", "-d", f"refs/pull/{NUMBER}/head")
-        repos.clone()
-        group = repos.squash(repos.base, current)
-        status, out, err = run_helper(
-            repos.checkout,
-            queue_ref(NUMBER, repos.base),
-            repos.base,
-            group,
-            capfd=capfd,
-        )
-        assert status == 1, out + err
-        assert re.search(
-            rf"^::error::{STEP}: fetching pull request #{NUMBER}'s head"
-            rf" \(refs/pull/{NUMBER}/head\) from origin failed, so the group is"
-            r" unverified: .*couldn't find remote ref refs/pull/7/head\n$",
-            err,
-        )
-
-    def test_a_merge_that_conflicts_is_refused(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A head that conflicts with the base is red, not compared."""
-        repos, _, current = self.moved()
-        git(repos.origin, "checkout", "-q", "main")
-        repos.write("a.txt", "one\nZWEI\nthree\n")
-        moved_base = repos.commit("main moved")
-        repos.clone()
-        status, out, err = run_helper(
-            repos.checkout,
-            queue_ref(NUMBER, moved_base),
-            moved_base,
-            moved_base,
-            capfd=capfd,
-        )
-        self.refused(
-            (status, out, err),
-            f"pull request #{NUMBER}'s current head {current} conflicts with the"
-            f" group's base {moved_base}, so the group is unverified",
-        )
-
-    def test_the_second_entry_of_a_batch_passes(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """Entry two's base is entry one's group commit, and it is green."""
-        repos = Repos(self.tmp)
-        repos.branch("first", repos.base)
-        repos.write("a.txt", "one\nTWO\nthree\n")
-        first = repos.commit("first")
-        repos.branch("second", repos.base)
-        repos.write("b.txt", "ALPHA\n")
-        second = repos.commit("second")
-        repos.publish(NUMBER, second)
-        repos.clone()
-        group_one = repos.squash(repos.base, first)
-        group_two = repos.squash(group_one, second)
-        status, out, err = run_helper(
-            repos.checkout,
-            queue_ref(NUMBER, group_one),
-            group_one,
-            group_two,
-            capfd=capfd,
-        )
-        self.passed((status, out, err), group_two, second, group_one)
-
-    def test_a_merge_commit_group_passes(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A merge-commit queue's group is green."""
-        repos, _, current = self.moved()
-        git(repos.origin, "checkout", "-q", "main")
-        repos.write("b.txt", "ALPHA\n")
-        moved_base = repos.commit("main moved")
-        repos.clone()
-        tree = git(repos.checkout, "merge-tree", "--write-tree", moved_base, current)
-        group = git(
-            repos.checkout,
-            "commit-tree",
-            tree,
-            "-p",
-            moved_base,
-            "-p",
-            current,
-            "-m",
-            "merge",
-        )
-        status, out, err = run_helper(
-            repos.checkout,
-            queue_ref(NUMBER, moved_base),
-            moved_base,
-            group,
-            capfd=capfd,
-        )
-        self.passed((status, out, err), group, current, moved_base)
-
-    def test_a_rebased_group_passes(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """A rebase queue's group, the head's commits replayed, is green."""
-        repos, _, current = self.moved()
-        git(repos.origin, "checkout", "-q", "main")
-        repos.write("b.txt", "ALPHA\n")
-        moved_base = repos.commit("main moved")
-        repos.clone()
-        git(repos.checkout, "checkout", "-q", "-b", "rebased", current)
-        git(repos.checkout, "rebase", "-q", moved_base)
-        group = git(repos.checkout, "rev-parse", "HEAD")
-        assert group != current
-        status, out, err = run_helper(
-            repos.checkout,
-            queue_ref(NUMBER, moved_base),
-            moved_base,
-            group,
-            capfd=capfd,
-        )
-        self.passed((status, out, err), group, current, moved_base)
+@fixture
+def queue_head_state(tmp_path: Path) -> QueueHead:
+    """Give each row its own QueueHead."""
+    return QueueHead(tmp_path)
 
 
-class TestWorkflow:
-    """The step exists in the gate job, on merge_group only, as one line."""
+def refused(done: tuple[int, str, str], message: str) -> None:
+    """Assert the step is red with exactly this message."""
+    status, out, err = done
+    assert status == 1, out + err
+    assert err == f"::error::{STEP}: {message}\n"
 
-    def test_the_step_runs_on_merge_group_only_as_one_line(self) -> None:
-        """One gate step calls the helper; its `if:` and `run:` are held."""
-        gate = workflow_yaml.jobs(workflow_yaml.document(CI))["gate"]
-        found = [
-            (i, s)
-            for i, s in enumerate(workflow_yaml.steps(gate))
-            if "belt queue-head" in str(s.get("run", ""))
-        ]
-        assert len(found) == 1, found
-        ((at, step),) = found
-        # Once per run: the gate's lint leg (#1740), its first shard (#2049).
-        assert step.get("if") == (
-            "${{ matrix.leg == 'lint' && matrix.shard == 1"
-            " && github.event_name == 'merge_group' }}"
-        )
-        # Under the belt's Python (#1543), written on one line.
-        (run,) = [
-            r for r in workflow_yaml.runs(CI) if r.path == f"jobs/gate/steps/{at}"
-        ]
-        assert run.text == '"${ORG_PYTHON}" -I .org-canon/belt queue-head'
-        assert run.style == "single"
-        env = decoded.as_object(step["env"], "env")
-        for key, value in (
-            ("ORG_QUEUE_BASE", "github.event.merge_group.base_sha"),
-            ("ORG_QUEUE_GROUP", "github.event.merge_group.head_sha"),
-            ("ORG_QUEUE_REF", "github.event.merge_group.head_ref"),
-            ("ORG_QUEUE_TOKEN", "github.token"),
-        ):
-            assert f"${{{{ {value} }}}}" == env[key]
+
+def passed(done: tuple[int, str, str], group: str, head: str, base: str) -> None:
+    """Assert the step is green and names the group, head and base."""
+    status, out, err = done
+    assert status == 0, out + err
+    assert re.search(
+        rf"^queue-head: merge group {group} is pull request #{NUMBER}'s current"
+        rf" head {head} merged onto {base} \(tree [0-9a-f]{{40}}\)\n$",
+        out,
+    )
+
+
+def test_a_group_built_from_an_older_head_is_refused(
+    queue_head_state: QueueHead, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A squash of the older head, checked against a moved head, is red."""
+    repos, older, current = queue_head_state.moved()
+    repos.clone()
+    group = repos.squash(repos.base, older)
+    status, out, err = run_helper(
+        repos.checkout,
+        queue_ref(NUMBER, repos.base),
+        repos.base,
+        group,
+        capfd=capfd,
+    )
+    have = git(repos.checkout, "rev-parse", f"{group}^{{tree}}")
+    want = git(repos.checkout, "merge-tree", "--write-tree", repos.base, current)
+    refused(
+        (status, out, err),
+        f"the merge group {group} was not built from pull request #{NUMBER}'s"
+        f" current head {current}: the pull request moved after it was queued."
+        f" The group's tree is {have}; {current} merged onto the base"
+        f" {repos.base} is {want}. Re-queue it, and the group is built from the"
+        " real head",
+    )
+
+
+def test_a_group_built_from_the_current_head_passes(
+    queue_head_state: QueueHead, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A squash of the head the pull request holds is green."""
+    repos, _, current = queue_head_state.moved()
+    repos.clone()
+    group = repos.squash(repos.base, current)
+    status, out, err = run_helper(
+        repos.checkout,
+        queue_ref(NUMBER, repos.base),
+        repos.base,
+        group,
+        capfd=capfd,
+    )
+    passed((status, out, err), group, current, repos.base)
+
+
+def test_edtf_265_is_refused(
+    queue_head_state: QueueHead, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """The real case: edtf#265's group carries its old head's tree."""
+    checkout = queue_head_state.tmp / "checkout"
+    origin = queue_head_state.tmp / "origin"
+    bundle = queue_head_state.tmp / "edtf-265.bundle"
+    bundle.write_bytes(gzip.decompress(BUNDLE.read_bytes()))
+    for repo in (checkout, origin):
+        git(queue_head_state.tmp, "init", "-q", str(repo))
+        # The bundle holds the four commits and no history behind
+        # the base, so both repositories treat the base as a root.
+        (repo / ".git" / "shallow").write_text(f"{EDTF_BASE}\n", encoding="utf-8")
+    git(
+        checkout,
+        "fetch",
+        "-q",
+        str(bundle),
+        "refs/heads/base:refs/heads/main",
+        "refs/heads/group:refs/heads/group",
+        "refs/heads/old-head:refs/heads/old-head",
+    )
+    git(
+        origin,
+        "fetch",
+        "-q",
+        str(bundle),
+        "refs/heads/current-head:refs/pull/265/head",
+    )
+    git(checkout, "remote", "add", "origin", str(origin))
+    # What the queue did: the old head merged onto the base is the
+    # tree that merged, and the current head's is not.
+    assert git(checkout, "rev-parse", f"{EDTF_GROUP}^{{tree}}") == EDTF_MERGED_TREE
+    assert (
+        git(checkout, "merge-tree", "--write-tree", EDTF_BASE, EDTF_OLD_HEAD)
+        == EDTF_MERGED_TREE
+    )
+    status, out, err = run_helper(
+        checkout, queue_ref("265", EDTF_BASE), EDTF_BASE, EDTF_GROUP, capfd=capfd
+    )
+    assert status == 1, out + err
+    assert err == (
+        f"::error::{STEP}: the merge group {EDTF_GROUP} was not built from"
+        f" pull request #265's current head {EDTF_HEAD}: the pull request moved"
+        f" after it was queued. The group's tree is {EDTF_MERGED_TREE};"
+        f" {EDTF_HEAD} merged onto the base {EDTF_BASE} is {EDTF_HEAD_TREE}."
+        " Re-queue it, and the group is built from the real head\n"
+    )
+
+
+def test_a_ref_that_is_not_a_queue_ref_is_refused(
+    queue_head_state: QueueHead, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A merge group whose head_ref names no queue entry is red."""
+    repos, _, current = queue_head_state.moved()
+    repos.clone()
+    group = repos.squash(repos.base, current)
+    status, out, err = run_helper(
+        repos.checkout, "refs/heads/main", repos.base, group, capfd=capfd
+    )
+    refused(
+        (status, out, err),
+        "the merge group's head_ref 'refs/heads/main' is not a merge-queue ref"
+        " (refs/heads/gh-readonly-queue/<base>/pr-<n>-<sha>), so the pull"
+        " request it came from is unknown and the group is unverified",
+    )
+
+
+def test_a_missing_base_is_refused(
+    queue_head_state: QueueHead, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A base the checkout does not hold is red."""
+    repos, _, current = queue_head_state.moved()
+    repos.clone()
+    group = repos.squash(repos.base, current)
+    absent = "0" * 40
+    status, out, err = run_helper(
+        repos.checkout, queue_ref(NUMBER, absent), absent, group, capfd=capfd
+    )
+    refused(
+        (status, out, err),
+        f"the merge group's base commit '{absent}' is not in the checkout,"
+        " so the group is unverified",
+    )
+
+
+def test_a_missing_group_is_refused(
+    queue_head_state: QueueHead, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A group commit the checkout does not hold is red."""
+    repos, _, _ = queue_head_state.moved()
+    repos.clone()
+    absent = "f" * 40
+    status, out, err = run_helper(
+        repos.checkout,
+        queue_ref(NUMBER, repos.base),
+        repos.base,
+        absent,
+        capfd=capfd,
+    )
+    refused(
+        (status, out, err),
+        f"the merge group's group commit '{absent}' is not in the checkout,"
+        " so the group is unverified",
+    )
+
+
+def test_a_fetch_that_fails_is_refused(
+    queue_head_state: QueueHead, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """No refs/pull/<n>/head on origin: the fetch fails, and it is red."""
+    repos, _, current = queue_head_state.moved()
+    git(repos.origin, "update-ref", "-d", f"refs/pull/{NUMBER}/head")
+    repos.clone()
+    group = repos.squash(repos.base, current)
+    status, out, err = run_helper(
+        repos.checkout,
+        queue_ref(NUMBER, repos.base),
+        repos.base,
+        group,
+        capfd=capfd,
+    )
+    assert status == 1, out + err
+    assert re.search(
+        rf"^::error::{STEP}: fetching pull request #{NUMBER}'s head"
+        rf" \(refs/pull/{NUMBER}/head\) from origin failed, so the group is"
+        r" unverified: .*couldn't find remote ref refs/pull/7/head\n$",
+        err,
+    )
+
+
+def test_a_merge_that_conflicts_is_refused(
+    queue_head_state: QueueHead, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A head that conflicts with the base is red, not compared."""
+    repos, _, current = queue_head_state.moved()
+    git(repos.origin, "checkout", "-q", "main")
+    repos.write("a.txt", "one\nZWEI\nthree\n")
+    moved_base = repos.commit("main moved")
+    repos.clone()
+    status, out, err = run_helper(
+        repos.checkout,
+        queue_ref(NUMBER, moved_base),
+        moved_base,
+        moved_base,
+        capfd=capfd,
+    )
+    refused(
+        (status, out, err),
+        f"pull request #{NUMBER}'s current head {current} conflicts with the"
+        f" group's base {moved_base}, so the group is unverified",
+    )
+
+
+def test_the_second_entry_of_a_batch_passes(
+    queue_head_state: QueueHead, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Entry two's base is entry one's group commit, and it is green."""
+    repos = Repos(queue_head_state.tmp)
+    repos.branch("first", repos.base)
+    repos.write("a.txt", "one\nTWO\nthree\n")
+    first = repos.commit("first")
+    repos.branch("second", repos.base)
+    repos.write("b.txt", "ALPHA\n")
+    second = repos.commit("second")
+    repos.publish(NUMBER, second)
+    repos.clone()
+    group_one = repos.squash(repos.base, first)
+    group_two = repos.squash(group_one, second)
+    status, out, err = run_helper(
+        repos.checkout,
+        queue_ref(NUMBER, group_one),
+        group_one,
+        group_two,
+        capfd=capfd,
+    )
+    passed((status, out, err), group_two, second, group_one)
+
+
+def test_a_merge_commit_group_passes(
+    queue_head_state: QueueHead, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A merge-commit queue's group is green."""
+    repos, _, current = queue_head_state.moved()
+    git(repos.origin, "checkout", "-q", "main")
+    repos.write("b.txt", "ALPHA\n")
+    moved_base = repos.commit("main moved")
+    repos.clone()
+    tree = git(repos.checkout, "merge-tree", "--write-tree", moved_base, current)
+    group = git(
+        repos.checkout,
+        "commit-tree",
+        tree,
+        "-p",
+        moved_base,
+        "-p",
+        current,
+        "-m",
+        "merge",
+    )
+    status, out, err = run_helper(
+        repos.checkout,
+        queue_ref(NUMBER, moved_base),
+        moved_base,
+        group,
+        capfd=capfd,
+    )
+    passed((status, out, err), group, current, moved_base)
+
+
+def test_a_rebased_group_passes(
+    queue_head_state: QueueHead, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A rebase queue's group, the head's commits replayed, is green."""
+    repos, _, current = queue_head_state.moved()
+    git(repos.origin, "checkout", "-q", "main")
+    repos.write("b.txt", "ALPHA\n")
+    moved_base = repos.commit("main moved")
+    repos.clone()
+    git(repos.checkout, "checkout", "-q", "-b", "rebased", current)
+    git(repos.checkout, "rebase", "-q", moved_base)
+    group = git(repos.checkout, "rev-parse", "HEAD")
+    assert group != current
+    status, out, err = run_helper(
+        repos.checkout,
+        queue_ref(NUMBER, moved_base),
+        moved_base,
+        group,
+        capfd=capfd,
+    )
+    passed((status, out, err), group, current, moved_base)
+
+
+# The step exists in the gate job, on merge_group only, as one line.
+def test_the_step_runs_on_merge_group_only_as_one_line() -> None:
+    """One gate step calls the helper; its `if:` and `run:` are held."""
+    gate = workflow_yaml.jobs(workflow_yaml.document(CI))["gate"]
+    found = [
+        (i, s)
+        for i, s in enumerate(workflow_yaml.steps(gate))
+        if "belt queue-head" in str(s.get("run", ""))
+    ]
+    assert len(found) == 1, found
+    ((at, step),) = found
+    # Once per run: the gate's lint leg (#1740), its first shard (#2049).
+    assert step.get("if") == (
+        "${{ matrix.leg == 'lint' && matrix.shard == 1"
+        " && github.event_name == 'merge_group' }}"
+    )
+    # Under the belt's Python (#1543), written on one line.
+    (run,) = [r for r in workflow_yaml.runs(CI) if r.path == f"jobs/gate/steps/{at}"]
+    assert run.text == '"${ORG_PYTHON}" -I .org-canon/belt queue-head'
+    assert run.style == "single"
+    env = decoded.as_object(step["env"], "env")
+    for key, value in (
+        ("ORG_QUEUE_BASE", "github.event.merge_group.base_sha"),
+        ("ORG_QUEUE_GROUP", "github.event.merge_group.head_sha"),
+        ("ORG_QUEUE_REF", "github.event.merge_group.head_ref"),
+        ("ORG_QUEUE_TOKEN", "github.token"),
+    ):
+        assert f"${{{{ {value} }}}}" == env[key]

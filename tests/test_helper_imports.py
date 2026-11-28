@@ -63,28 +63,28 @@ def offenders(root: Path) -> list[str]:
     return out
 
 
-class TestTheLaw:
-    """No tracked Python file loads another by path."""
+# No tracked Python file loads another by path.
+def test_no_tracked_file_loads_another_by_path() -> None:
+    """Every helper is imported by name, in tests and helpers alike."""
+    none: list[str] = []
+    assert none == offenders(CANON)
 
-    def test_no_tracked_file_loads_another_by_path(self) -> None:
-        """Every helper is imported by name, in tests and helpers alike."""
-        none: list[str] = []
-        assert none == offenders(CANON)
 
-    def test_each_loader_is_found(self) -> None:
-        """Every spelling of a load by path is read as one."""
-        text = (
-            "import importlib.util, runpy\n"
-            "from importlib.machinery import SourceFileLoader\n"
-            "a = importlib.util.spec_from_file_location('a', 'a.py')\n"
-            "b = runpy.run_path('b.py')\n"
-            "c = runpy.run_module('c')\n"
-            "d = SourceFileLoader('d', 'd.py')\n"
-        )
-        lines: list[int] = [3, 4, 5, 6]
-        assert lines == loads(text)
+def test_each_loader_is_found() -> None:
+    """Every spelling of a load by path is read as one."""
+    text = (
+        "import importlib.util, runpy\n"
+        "from importlib.machinery import SourceFileLoader\n"
+        "a = importlib.util.spec_from_file_location('a', 'a.py')\n"
+        "b = runpy.run_path('b.py')\n"
+        "c = runpy.run_module('c')\n"
+        "d = SourceFileLoader('d', 'd.py')\n"
+    )
+    lines: list[int] = [3, 4, 5, 6]
+    assert lines == loads(text)
 
-    def test_a_name_in_a_string_is_not_a_load(self) -> None:
-        """A fixture naming a loader in its text loads nothing."""
-        none: list[int] = []
-        assert none == loads("X = 'runpy.run_path(\"a.py\")'\nimport b\n")
+
+def test_a_name_in_a_string_is_not_a_load() -> None:
+    """A fixture naming a loader in its text loads nothing."""
+    none: list[int] = []
+    assert none == loads("X = 'runpy.run_path(\"a.py\")'\nimport b\n")

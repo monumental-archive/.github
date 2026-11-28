@@ -82,180 +82,188 @@ def run(files: dict[str, str]) -> tuple[int, str]:
         return status, err.getvalue()
 
 
-class TestIdentifiers:
-    """An expression splits into the identifiers whose texts it needs."""
-
-    def test_operators_and_parentheses_are_not_identifiers(self) -> None:
-        """OR, AND and WITH in either case, and brackets, name nothing."""
-        named: list[str] = [
-            "MIT",
-            "Apache-2.0",
-            "GPL-2.0-only",
-            "Classpath-exception-2.0",
-        ]
-        assert named == lt.identifiers(
-            "(MIT or Apache-2.0) AND GPL-2.0-only WITH Classpath-exception-2.0"
-        )
-
-    def test_or_later_needs_the_base_text(self) -> None:
-        """`GPL-2.0+` is GPL-2.0's text with the or-later operator."""
-        base: list[str] = ["GPL-2.0"]
-        assert base == lt.identifiers("GPL-2.0+")
-
-    def test_a_list_of_expressions_is_read_whole(self) -> None:
-        """SPDX-License-Identifier may be a list of strings."""
-        config: dict[str, object] = {
-            "annotations": [
-                {"SPDX-License-Identifier": ["MIT", "CC0-1.0"]},
-                {"SPDX-License-Identifier": "0BSD"},
-                {"path": "no-licence"},
-            ]
-        }
-        every: list[str] = ["MIT", "CC0-1.0", "0BSD"]
-        assert every == lt.expressions(config)
-
-
-class TestLicenceTexts:
-    """Every identifier a tracked REUSE.toml names has its tracked text."""
-
-    def test_an_identifier_with_no_text_is_red_by_name(self) -> None:
-        """A missing text names the identifier and the file naming it."""
-        status, err = run({
-            "REUSE.toml": '[[annotations]]\nSPDX-License-Identifier = "MIT"\n',
-            "LICENSES/0BSD.txt": "0BSD\n",
-        })
-        assert status == 1
-        assert (
-            err
-            == "lint:licence: REUSE.toml names MIT, and LICENSES/MIT.txt is not tracked\n"
-        )
-
-    def test_an_or_expression_needs_both_texts(self) -> None:
-        """One text of a dual licence is not enough: the other is named."""
-        status, err = run({
-            "REUSE.toml": FIXTURE_ENTRY,
-            "LICENSES/0BSD.txt": "0BSD\n",
-            "LICENSES/MIT.txt": "MIT\n",
-        })
-        assert status == 1
-        assert err == (
-            "lint:licence: REUSE.toml names Apache-2.0,"
-            " and LICENSES/Apache-2.0.txt is not tracked\n"
-        )
-
-    def test_main_with_the_relabel_and_no_texts_is_red(self) -> None:
-        """Main's tree after item 1 alone: both new texts named (fails before)."""
-        status, err = run({
-            "REUSE.toml": FIXTURE_ENTRY,
-            "LICENSES/0BSD.txt": "0BSD\n",
-        })
-        assert status == 1
-        assert err == (
-            "lint:licence: REUSE.toml names MIT,"
-            " and LICENSES/MIT.txt is not tracked\n"
-            "lint:licence: REUSE.toml names Apache-2.0,"
-            " and LICENSES/Apache-2.0.txt is not tracked\n"
-        )
-
-    def test_every_text_present_is_green(self) -> None:
-        """The dual-licensed fixture entry with all three texts passes."""
-        status, err = run({
-            "REUSE.toml": FIXTURE_ENTRY,
-            "LICENSES/0BSD.txt": "0BSD\n",
-            "LICENSES/MIT.txt": "MIT\n",
-            "LICENSES/Apache-2.0.txt": "Apache\n",
-        })
-        assert (status, err) == (0, "")
-
-    def test_a_nested_reuse_toml_is_held_too(self) -> None:
-        """Any tracked REUSE.toml, against the root LICENSES/."""
-        status, err = run({
-            "REUSE.toml": '[[annotations]]\nSPDX-License-Identifier = "0BSD"\n',
-            "sub/REUSE.toml": '[[annotations]]\nSPDX-License-Identifier = "MIT"\n',
-            "LICENSES/0BSD.txt": "0BSD\n",
-        })
-        assert status == 1
-        assert err == (
-            "lint:licence: sub/REUSE.toml names MIT,"
-            " and LICENSES/MIT.txt is not tracked\n"
-        )
-
-    def test_a_text_elsewhere_does_not_count(self) -> None:
-        """A text outside LICENSES/, or not `.txt`, is not REUSE's place."""
-        status, err = run({
-            "REUSE.toml": '[[annotations]]\nSPDX-License-Identifier = "MIT"\n',
-            "LICENSE-MIT": "MIT\n",
-            "LICENSES/MIT.md": "MIT\n",
-        })
-        assert status == 1
-        assert (
-            err
-            == "lint:licence: REUSE.toml names MIT, and LICENSES/MIT.txt is not tracked\n"
-        )
-
-    def test_the_placeholder_is_still_refused(self) -> None:
-        """The scaffold's placeholder keeps its message from before (#214)."""
-        status, err = run({
-            "REUSE.toml": (
-                '[[annotations]]\nSPDX-License-Identifier = "<SPDX expression>"\n'
-            ),
-            "LICENSES/0BSD.txt": "0BSD\n",
-        })
-        assert status == 1
-        assert err == (
-            "lint:licence: REUSE.toml still carries the scaffold's"
-            " <SPDX expression> placeholder — pick the licence (#214)\n"
-        )
-
-    def test_a_malformed_file_is_red_by_name(self) -> None:
-        """A REUSE.toml that is not TOML is named, never read as empty."""
-        status, err = run({"REUSE.toml": "[[annotations]\n"})
-        assert status == 1
-        assert err.startswith("lint:licence: REUSE.toml does not parse: "), err
-
-    @pytest.mark.parametrize(
-        ("reuse", "where"),
-        [
-            ("annotations = 1\n", "annotations is not a list"),
-            ("annotations = [1]\n", "annotations[0] is not an object"),
-            (
-                "[[annotations]]\nSPDX-License-Identifier = 1\n",
-                (
-                    "annotations[0].SPDX-License-Identifier is not a string or"
-                    " a list of strings"
-                ),
-            ),
-        ],
+# An expression splits into the identifiers whose texts it needs.
+def test_operators_and_parentheses_are_not_identifiers() -> None:
+    """OR, AND and WITH in either case, and brackets, name nothing."""
+    named: list[str] = [
+        "MIT",
+        "Apache-2.0",
+        "GPL-2.0-only",
+        "Classpath-exception-2.0",
+    ]
+    assert named == lt.identifiers(
+        "(MIT or Apache-2.0) AND GPL-2.0-only WITH Classpath-exception-2.0"
     )
-    def test_a_wrong_shape_is_red_by_where(self, reuse: object, where: object) -> None:
-        """An annotation of the wrong shape is refused, naming where."""
-        status, err = run({"REUSE.toml": reuse})
-        assert status == 1
-        assert f"lint:licence: REUSE.toml: {where}\n" == err
 
-    def test_no_reuse_toml_is_green(self) -> None:
-        """A repository that has not declared yet has nothing to check."""
-        assert run({"LICENSE": "0BSD\n"}) == (0, "")
 
-    def test_the_canons_own_tree_is_green(self) -> None:
-        """The canon's REUSE.toml against the canon's LICENSES/."""
-        tracked = ["REUSE.toml"] + [
-            f"LICENSES/{path.name}" for path in (ROOT / "LICENSES").iterdir()
+def test_or_later_needs_the_base_text() -> None:
+    """`GPL-2.0+` is GPL-2.0's text with the or-later operator."""
+    base: list[str] = ["GPL-2.0"]
+    assert base == lt.identifiers("GPL-2.0+")
+
+
+def test_a_list_of_expressions_is_read_whole() -> None:
+    """SPDX-License-Identifier may be a list of strings."""
+    config: dict[str, object] = {
+        "annotations": [
+            {"SPDX-License-Identifier": ["MIT", "CC0-1.0"]},
+            {"SPDX-License-Identifier": "0BSD"},
+            {"path": "no-licence"},
         ]
-        clean: list[str] = []
-        assert clean == lt.findings(ROOT, tracked)
-        # The relabel is what makes this row mean something: the canon
-        # names licences other than its own, and drops either text red.
-        for name in ("MIT", "Apache-2.0"):
-            without = [p for p in tracked if p != f"LICENSES/{name}.txt"]
-            want: list[str] = [
-                f"REUSE.toml names {name}, and LICENSES/{name}.txt is not tracked"
-            ]
-            assert want == lt.findings(ROOT, without)
+    }
+    every: list[str] = ["MIT", "CC0-1.0", "0BSD"]
+    assert every == lt.expressions(config)
 
-    def test_usage(self) -> None:
-        """An argument is a usage error, not a pass."""
-        err = io.StringIO()
-        with contextlib.redirect_stderr(err):
-            assert lt.main(["extra"]) == 2
-        assert f"{TASK}: usage: org_tracked | belt licence-texts\n" == err.getvalue()
+
+# Every identifier a tracked REUSE.toml names has its tracked text.
+def test_an_identifier_with_no_text_is_red_by_name() -> None:
+    """A missing text names the identifier and the file naming it."""
+    status, err = run({
+        "REUSE.toml": '[[annotations]]\nSPDX-License-Identifier = "MIT"\n',
+        "LICENSES/0BSD.txt": "0BSD\n",
+    })
+    assert status == 1
+    assert (
+        err
+        == "lint:licence: REUSE.toml names MIT, and LICENSES/MIT.txt is not tracked\n"
+    )
+
+
+def test_an_or_expression_needs_both_texts() -> None:
+    """One text of a dual licence is not enough: the other is named."""
+    status, err = run({
+        "REUSE.toml": FIXTURE_ENTRY,
+        "LICENSES/0BSD.txt": "0BSD\n",
+        "LICENSES/MIT.txt": "MIT\n",
+    })
+    assert status == 1
+    assert err == (
+        "lint:licence: REUSE.toml names Apache-2.0,"
+        " and LICENSES/Apache-2.0.txt is not tracked\n"
+    )
+
+
+def test_main_with_the_relabel_and_no_texts_is_red() -> None:
+    """Main's tree after item 1 alone: both new texts named (fails before)."""
+    status, err = run({
+        "REUSE.toml": FIXTURE_ENTRY,
+        "LICENSES/0BSD.txt": "0BSD\n",
+    })
+    assert status == 1
+    assert err == (
+        "lint:licence: REUSE.toml names MIT,"
+        " and LICENSES/MIT.txt is not tracked\n"
+        "lint:licence: REUSE.toml names Apache-2.0,"
+        " and LICENSES/Apache-2.0.txt is not tracked\n"
+    )
+
+
+def test_every_text_present_is_green() -> None:
+    """The dual-licensed fixture entry with all three texts passes."""
+    status, err = run({
+        "REUSE.toml": FIXTURE_ENTRY,
+        "LICENSES/0BSD.txt": "0BSD\n",
+        "LICENSES/MIT.txt": "MIT\n",
+        "LICENSES/Apache-2.0.txt": "Apache\n",
+    })
+    assert (status, err) == (0, "")
+
+
+def test_a_nested_reuse_toml_is_held_too() -> None:
+    """Any tracked REUSE.toml, against the root LICENSES/."""
+    status, err = run({
+        "REUSE.toml": '[[annotations]]\nSPDX-License-Identifier = "0BSD"\n',
+        "sub/REUSE.toml": '[[annotations]]\nSPDX-License-Identifier = "MIT"\n',
+        "LICENSES/0BSD.txt": "0BSD\n",
+    })
+    assert status == 1
+    assert err == (
+        "lint:licence: sub/REUSE.toml names MIT, and LICENSES/MIT.txt is not tracked\n"
+    )
+
+
+def test_a_text_elsewhere_does_not_count() -> None:
+    """A text outside LICENSES/, or not `.txt`, is not REUSE's place."""
+    status, err = run({
+        "REUSE.toml": '[[annotations]]\nSPDX-License-Identifier = "MIT"\n',
+        "LICENSE-MIT": "MIT\n",
+        "LICENSES/MIT.md": "MIT\n",
+    })
+    assert status == 1
+    assert (
+        err
+        == "lint:licence: REUSE.toml names MIT, and LICENSES/MIT.txt is not tracked\n"
+    )
+
+
+def test_the_placeholder_is_still_refused() -> None:
+    """The scaffold's placeholder keeps its message from before (#214)."""
+    status, err = run({
+        "REUSE.toml": (
+            '[[annotations]]\nSPDX-License-Identifier = "<SPDX expression>"\n'
+        ),
+        "LICENSES/0BSD.txt": "0BSD\n",
+    })
+    assert status == 1
+    assert err == (
+        "lint:licence: REUSE.toml still carries the scaffold's"
+        " <SPDX expression> placeholder — pick the licence (#214)\n"
+    )
+
+
+def test_a_malformed_file_is_red_by_name() -> None:
+    """A REUSE.toml that is not TOML is named, never read as empty."""
+    status, err = run({"REUSE.toml": "[[annotations]\n"})
+    assert status == 1
+    assert err.startswith("lint:licence: REUSE.toml does not parse: "), err
+
+
+@pytest.mark.parametrize(
+    ("reuse", "where"),
+    [
+        ("annotations = 1\n", "annotations is not a list"),
+        ("annotations = [1]\n", "annotations[0] is not an object"),
+        (
+            "[[annotations]]\nSPDX-License-Identifier = 1\n",
+            (
+                "annotations[0].SPDX-License-Identifier is not a string or"
+                " a list of strings"
+            ),
+        ),
+    ],
+)
+def test_a_wrong_shape_is_red_by_where(reuse: object, where: object) -> None:
+    """An annotation of the wrong shape is refused, naming where."""
+    status, err = run({"REUSE.toml": reuse})
+    assert status == 1
+    assert f"lint:licence: REUSE.toml: {where}\n" == err
+
+
+def test_no_reuse_toml_is_green() -> None:
+    """A repository that has not declared yet has nothing to check."""
+    assert run({"LICENSE": "0BSD\n"}) == (0, "")
+
+
+def test_the_canons_own_tree_is_green() -> None:
+    """The canon's REUSE.toml against the canon's LICENSES/."""
+    tracked = ["REUSE.toml"] + [
+        f"LICENSES/{path.name}" for path in (ROOT / "LICENSES").iterdir()
+    ]
+    clean: list[str] = []
+    assert clean == lt.findings(ROOT, tracked)
+    # The relabel is what makes this row mean something: the canon
+    # names licences other than its own, and drops either text red.
+    for name in ("MIT", "Apache-2.0"):
+        without = [p for p in tracked if p != f"LICENSES/{name}.txt"]
+        want: list[str] = [
+            f"REUSE.toml names {name}, and LICENSES/{name}.txt is not tracked"
+        ]
+        assert want == lt.findings(ROOT, without)
+
+
+def test_usage() -> None:
+    """An argument is a usage error, not a pass."""
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err):
+        assert lt.main(["extra"]) == 2
+    assert f"{TASK}: usage: org_tracked | belt licence-texts\n" == err.getvalue()

@@ -140,12 +140,10 @@ def report(*mutants: dict[str, object]) -> dict[str, object]:
 KILLED = (mutant("Killed", 1), mutant("Timeout", 2, mutator="BlockStatement"))
 
 
-@pytest.mark.usefixtures("_set_up_test_planted")
-class TestPlanted:
+class Planted:
     """A planted tree and a stub StrykerJS; the rows are in the classes below."""
 
-    @fixture
-    def _set_up_test_planted(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Plant a git tree, the stub and its answers."""
         self.tmp = tmp_path
         self.tree = self.tmp / "tree"
@@ -219,184 +217,189 @@ class TestPlanted:
         return (self.summary / "typescript.tsv").read_text(encoding="utf-8")
 
 
-class TestAdoption(TestPlanted):
-    """Adoption is the tool's own config file, tracked, in JSON."""
+@fixture
+def planted_state(tmp_path: Path) -> Planted:
+    """Give each row its own Planted."""
+    return Planted(tmp_path)
 
-    def test_no_config_skips_clean_by_name(self) -> None:
-        """No stryker.config.json: exit 0, named, nothing called, skipped counted."""
-        done, log = self.run_leg()
-        assert done.returncode == 0, done.stderr
-        want = [f"{LABEL}: no stryker.config.json tracked, skipped"]
-        assert done.stdout.splitlines() == want
-        assert done.stderr == ""
-        assert log == list[str]()
-        assert self.counts() == "0/1\tskipped\n"
 
-    def test_an_untracked_config_is_not_adoption(self) -> None:
-        """A config on disk that git does not track adopts nothing."""
-        (self.tree / "stryker.config.json").write_text(
-            json.dumps(CONFIG), encoding="utf-8"
+def test_no_config_skips_clean_by_name(planted_state: Planted) -> None:
+    """No stryker.config.json: exit 0, named, nothing called, skipped counted."""
+    done, log = planted_state.run_leg()
+    assert done.returncode == 0, done.stderr
+    want = [f"{LABEL}: no stryker.config.json tracked, skipped"]
+    assert done.stdout.splitlines() == want
+    assert done.stderr == ""
+    assert log == list[str]()
+    assert planted_state.counts() == "0/1\tskipped\n"
+
+
+def test_an_untracked_config_is_not_adoption(planted_state: Planted) -> None:
+    """A config on disk that git does not track adopts nothing."""
+    (planted_state.tree / "stryker.config.json").write_text(
+        json.dumps(CONFIG), encoding="utf-8"
+    )
+    done, log = planted_state.run_leg()
+    assert done.returncode == 0, done.stderr
+    assert "skipped" in done.stdout
+    assert log == list[str]()
+
+
+def test_a_config_in_another_form_is_red_never_skipped(planted_state: Planted) -> None:
+    """A tracked stryker.config.mjs is adoption the leg cannot read: red."""
+    planted_state.track("stryker.config.mjs", "export default {};\n")
+    done, log = planted_state.run_leg()
+    assert done.returncode == 1
+    want = [
+        f"{LABEL}: a StrykerJS config the leg cannot read: stryker.config.mjs",
+        "  the leg reads stryker.config.json only; move the config there",
+    ]
+    assert done.stderr.splitlines() == want
+    assert log == list[str]()
+
+
+def test_a_workstation_is_refused_by_name(planted_state: Planted) -> None:
+    """No CI: adopted, the leg refuses before anything runs."""
+    planted_state.plant(*KILLED)
+    env = dict(planted_state.env)
+    del env["CI"]
+    done = subprocess.run(
+        [BASH, str(SCRIPT)],
+        cwd=planted_state.tree,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert done.returncode == 1
+    want = [
+        (
+            f"{LABEL}: CI is unset — mutants run in place with the tree's own"
+            " environment,"
+        ),
+        ("  so this leg runs on a runner only (repo-mutants.yml), never a workstation"),
+    ]
+    assert done.stderr.splitlines() == want
+    assert planted_state.log.read_text(encoding="utf-8") == ""
+
+
+def test_stryker_missing_is_red_by_name(planted_state: Planted) -> None:
+    """Adopted with no StrykerJS installed: red, naming what to add."""
+    planted_state.track("stryker.config.json", json.dumps(CONFIG))
+    done, _log = planted_state.run_leg()
+    assert done.returncode == 1
+    want = [
+        (
+            f"{LABEL}: stryker.config.json is tracked but"
+            " node_modules/.bin/stryker"
+            " is missing — add"
+        ),
+        (
+            "  @stryker-mutator/core and its runner plugin to devDependencies,"
+            " and install"
+        ),
+    ]
+    assert done.stderr.splitlines() == want
+
+
+def test_a_shard_mutates_its_share_and_reports_its_shard(
+    planted_state: Planted,
+) -> None:
+    """Shard 1/2 of two files names the second to StrykerJS, and its row."""
+    planted_state.track("src/sub.ts", SOURCE)
+    planted_state.plant(*KILLED)
+    done, log = planted_state.run_leg(MUTANTS_SHARD="1/2")
+    assert done.returncode == 0, done.stderr
+    want = [
+        f"{LABEL}: shard 1/2: 1 of 2 files",
+        (
+            f"{LABEL}: 2 mutants, 2 killed, 0 survived, 0 not covered,"
+            " 0 not viable, 0 excluded"
+        ),
+    ]
+    assert done.stdout.splitlines() == want
+    want = [
+        (
+            "stryker run stryker.config.json --inPlace --mutate src/sub.ts"
+            " --reporters json,progress-append-only"
         )
-        done, log = self.run_leg()
-        assert done.returncode == 0, done.stderr
-        assert "skipped" in done.stdout
-        assert log == list[str]()
+    ]
+    assert log == want
+    assert planted_state.counts() == "1/2\t2\t2\t0\t0\tshard\n"
 
-    def test_a_config_in_another_form_is_red_never_skipped(self) -> None:
-        """A tracked stryker.config.mjs is adoption the leg cannot read: red."""
-        self.track("stryker.config.mjs", "export default {};\n")
-        done, log = self.run_leg()
-        assert done.returncode == 1
-        want = [
-            f"{LABEL}: a StrykerJS config the leg cannot read: stryker.config.mjs",
-            "  the leg reads stryker.config.json only; move the config there",
-        ]
-        assert done.stderr.splitlines() == want
-        assert log == list[str]()
 
-    def test_a_workstation_is_refused_by_name(self) -> None:
-        """No CI: adopted, the leg refuses before anything runs."""
-        self.plant(*KILLED)
-        env = dict(self.env)
-        del env["CI"]
-        done = subprocess.run(
-            [BASH, str(SCRIPT)],
-            cwd=self.tree,
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
+def test_an_empty_share_runs_nothing_and_counts_zero(planted_state: Planted) -> None:
+    """More shards than files: the spare shard is a zero row, green."""
+    planted_state.plant(*KILLED)
+    done, log = planted_state.run_leg(MUTANTS_SHARD="2/3")
+    assert done.returncode == 0, done.stderr
+    want = [
+        f"{LABEL}: shard 2/3: 0 of 1 files",
+        f"{LABEL}: shard 2/3: no file to mutate, nothing run",
+    ]
+    assert done.stdout.splitlines() == want
+    assert log == list[str]()
+    assert planted_state.counts() == "2/3\t0\t0\t0\t0\tshard\n"
+
+
+def test_a_shard_of_several_may_hold_no_mutant(planted_state: Planted) -> None:
+    """Files with nothing to mutate, in one shard of several: zero, green."""
+    planted_state.plant()
+    done, _ = planted_state.run_leg(MUTANTS_SHARD="0/2")
+    assert done.returncode == 0, done.stderr
+    assert planted_state.counts() == "0/2\t0\t0\t0\t0\tshard\n"
+
+
+def test_progress_reaches_the_job_log_as_it_runs(planted_state: Planted) -> None:
+    """StrykerJS's output is on stdout, not only in the scratch file."""
+    planted_state.plant(*KILLED)
+    done, _ = planted_state.run_leg(PLANT_OUTPUT="Mutation testing 50% (elapsed: ~1m)")
+    assert done.returncode == 0, done.stderr
+    assert "Mutation testing 50% (elapsed: ~1m)" in done.stdout.splitlines()
+
+
+def test_a_ranged_entry_is_red_before_the_run(planted_state: Planted) -> None:
+    """A mutation range cannot be shared out by file: red, by name."""
+    planted_state.plant(*KILLED, config=CONFIG | {"mutate": ["src/add.ts:1-5"]})
+    done, log = planted_state.run_leg()
+    assert done.returncode == 1
+    want = [
+        (
+            f"{LABEL}: `mutate` entry 'src/add.ts:1-5' carries a mutation"
+            " range; a range cannot be shared out by file"
         )
-        assert done.returncode == 1
-        want = [
-            (
-                f"{LABEL}: CI is unset — mutants run in place with the tree's own"
-                " environment,"
-            ),
-            (
-                "  so this leg runs on a runner only (repo-mutants.yml), never a"
-                " workstation"
-            ),
-        ]
-        assert done.stderr.splitlines() == want
-        assert self.log.read_text(encoding="utf-8") == ""
-
-    def test_stryker_missing_is_red_by_name(self) -> None:
-        """Adopted with no StrykerJS installed: red, naming what to add."""
-        self.track("stryker.config.json", json.dumps(CONFIG))
-        done, _log = self.run_leg()
-        assert done.returncode == 1
-        want = [
-            (
-                f"{LABEL}: stryker.config.json is tracked but"
-                " node_modules/.bin/stryker"
-                " is missing — add"
-            ),
-            (
-                "  @stryker-mutator/core and its runner plugin to devDependencies,"
-                " and install"
-            ),
-        ]
-        assert done.stderr.splitlines() == want
+    ]
+    assert done.stderr.splitlines() == want
+    assert log == list[str]()
 
 
-class TestShards(TestPlanted):
-    """MUTANTS_SHARD=k/n shares the files out; each shard reports its own."""
-
-    def test_a_shard_mutates_its_share_and_reports_its_shard(self) -> None:
-        """Shard 1/2 of two files names the second to StrykerJS, and its row."""
-        self.track("src/sub.ts", SOURCE)
-        self.plant(*KILLED)
-        done, log = self.run_leg(MUTANTS_SHARD="1/2")
-        assert done.returncode == 0, done.stderr
-        want = [
-            f"{LABEL}: shard 1/2: 1 of 2 files",
-            (
-                f"{LABEL}: 2 mutants, 2 killed, 0 survived, 0 not covered,"
-                " 0 not viable, 0 excluded"
-            ),
-        ]
-        assert done.stdout.splitlines() == want
-        want = [
-            (
-                "stryker run stryker.config.json --inPlace --mutate src/sub.ts"
-                " --reporters json,progress-append-only"
-            )
-        ]
-        assert log == want
-        assert self.counts() == "1/2\t2\t2\t0\t0\tshard\n"
-
-    def test_an_empty_share_runs_nothing_and_counts_zero(self) -> None:
-        """More shards than files: the spare shard is a zero row, green."""
-        self.plant(*KILLED)
-        done, log = self.run_leg(MUTANTS_SHARD="2/3")
-        assert done.returncode == 0, done.stderr
-        want = [
-            f"{LABEL}: shard 2/3: 0 of 1 files",
-            f"{LABEL}: shard 2/3: no file to mutate, nothing run",
-        ]
-        assert done.stdout.splitlines() == want
-        assert log == list[str]()
-        assert self.counts() == "2/3\t0\t0\t0\t0\tshard\n"
-
-    def test_a_shard_of_several_may_hold_no_mutant(self) -> None:
-        """Files with nothing to mutate, in one shard of several: zero, green."""
-        self.plant()
-        done, _ = self.run_leg(MUTANTS_SHARD="0/2")
-        assert done.returncode == 0, done.stderr
-        assert self.counts() == "0/2\t0\t0\t0\t0\tshard\n"
-
-    def test_progress_reaches_the_job_log_as_it_runs(self) -> None:
-        """StrykerJS's output is on stdout, not only in the scratch file."""
-        self.plant(*KILLED)
-        done, _ = self.run_leg(PLANT_OUTPUT="Mutation testing 50% (elapsed: ~1m)")
-        assert done.returncode == 0, done.stderr
-        assert "Mutation testing 50% (elapsed: ~1m)" in done.stdout.splitlines()
-
-    def test_a_ranged_entry_is_red_before_the_run(self) -> None:
-        """A mutation range cannot be shared out by file: red, by name."""
-        self.plant(*KILLED, config=CONFIG | {"mutate": ["src/add.ts:1-5"]})
-        done, log = self.run_leg()
-        assert done.returncode == 1
-        want = [
-            (
-                f"{LABEL}: `mutate` entry 'src/add.ts:1-5' carries a mutation"
-                " range; a range cannot be shared out by file"
-            )
-        ]
-        assert done.stderr.splitlines() == want
-        assert log == list[str]()
-
-    def test_a_malformed_shard_is_red(self) -> None:
-        """K must be below n: 2/2 is red before anything runs."""
-        self.plant(*KILLED)
-        done, log = self.run_leg(MUTANTS_SHARD="2/2")
-        assert done.returncode == 1
-        want = [f"{LABEL}: MUTANTS_SHARD='2/2' is not k/n with 0 <= k < n"]
-        assert done.stderr.splitlines() == want
-        assert log == list[str]()
+def test_a_malformed_shard_is_red(planted_state: Planted) -> None:
+    """K must be below n: 2/2 is red before anything runs."""
+    planted_state.plant(*KILLED)
+    done, log = planted_state.run_leg(MUTANTS_SHARD="2/2")
+    assert done.returncode == 1
+    want = [f"{LABEL}: MUTANTS_SHARD='2/2' is not k/n with 0 <= k < n"]
+    assert done.stderr.splitlines() == want
+    assert log == list[str]()
 
 
-@pytest.mark.usefixtures("_set_up_test_share_out")
-class TestShareOut:
+FILES = (
+    "src/a.ts",
+    "src/b.ts",
+    "src/c.tsx",
+    "src/deep/d.ts",
+    "src/deep/d.test.ts",
+    "src/.hidden/h.ts",
+    "src/[id]/page.ts",
+    "lib/l.ts",
+    "README.md",
+)
+
+
+class ShareOut:
     """`share`: the config's `mutate` list, expanded and cut round-robin."""
 
-    FILES = (
-        "src/a.ts",
-        "src/b.ts",
-        "src/c.tsx",
-        "src/deep/d.ts",
-        "src/deep/d.test.ts",
-        "src/.hidden/h.ts",
-        "src/[id]/page.ts",
-        "lib/l.ts",
-        "README.md",
-    )
-
-    @fixture
-    def _set_up_test_share_out(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def __init__(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Plant a git tree of tracked files, and work in it."""
         tmp = tmp_path
         self.tree = tmp / "tree"
@@ -404,11 +407,11 @@ class TestShareOut:
         self.out = tmp / "mutate"
         git = [GIT, "-C", str(self.tree)]
         subprocess.run([*git, "init", "-q"], env=support.env(), check=True)
-        for path in self.FILES:
+        for path in FILES:
             (self.tree / path).parent.mkdir(parents=True, exist_ok=True)
             (self.tree / path).write_text(SOURCE, encoding="utf-8")
         (self.tree / "untracked.ts").write_text(SOURCE, encoding="utf-8")
-        subprocess.run([*git, "add", "--", *self.FILES], env=support.env(), check=True)
+        subprocess.run([*git, "add", "--", *FILES], env=support.env(), check=True)
         monkeypatch.chdir(self.tree)
 
     def share(
@@ -441,514 +444,556 @@ class TestShareOut:
         text = self.out.read_text(encoding="utf-8")
         return [re.sub(r"\\(.)", r"\1", f) for f in text.split(",") if f]
 
-    def test_three_shards_hold_every_file_exactly_once(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A `!` entry subtracts; 0/3, 1/3 and 2/3 partition what is left."""
-        mutate = ["src/**/*.{ts,tsx}", "lib/*.ts", "!src/**/*.test.ts"]
-        every = [
-            "lib/l.ts",
-            "src/[id]/page.ts",
-            "src/a.ts",
-            "src/b.ts",
-            "src/c.tsx",
-            "src/deep/d.ts",
-        ]
-        shards = [self.shared(mutate, f"{k}/3", capfd=capfd) for k in range(3)]
-        want = [every[0::3], every[1::3], every[2::3]]
-        assert shards == want
-        held = sorted(f for s in shards for f in s)
-        assert held == every
 
-    def test_the_whole_share_prints_its_count(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """0/1 takes every file, and says how many of how many."""
-        status, out, err = self.share(["src/*.ts"], "0/1", capfd=capfd)
-        assert (status, out, err) == (0, f"{LABEL}: shard 0/1: 2 of 2 files\n", "")
-        assert self.out.read_text(encoding="utf-8") == "src/a.ts,src/b.ts"
+@fixture
+def share_out(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ShareOut:
+    """Give each row its own ShareOut."""
+    return ShareOut(tmp_path, monkeypatch)
 
-    def test_entries_apply_in_order(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """An entry after a `!` adds back what the `!` took, as StrykerJS reads it."""
-        mutate = ["src/*.ts", "!src/*.ts", "src/a.ts"]
-        want = ["src/a.ts"]
-        assert self.shared(mutate, "0/1", capfd=capfd) == want
 
-    def test_a_dotted_name_is_matched_only_by_a_dotted_part(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """Minimatch's `dot: false`: `**` never reaches `.hidden`; `.hidden` does."""
-        assert "src/.hidden/h.ts" not in self.shared(
-            ["src/**/*.ts"], "0/1", capfd=capfd
+def test_three_shards_hold_every_file_exactly_once(
+    share_out: ShareOut, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A `!` entry subtracts; 0/3, 1/3 and 2/3 partition what is left."""
+    mutate = ["src/**/*.{ts,tsx}", "lib/*.ts", "!src/**/*.test.ts"]
+    every = [
+        "lib/l.ts",
+        "src/[id]/page.ts",
+        "src/a.ts",
+        "src/b.ts",
+        "src/c.tsx",
+        "src/deep/d.ts",
+    ]
+    shards = [share_out.shared(mutate, f"{k}/3", capfd=capfd) for k in range(3)]
+    want = [every[0::3], every[1::3], every[2::3]]
+    assert shards == want
+    held = sorted(f for s in shards for f in s)
+    assert held == every
+
+
+def test_the_whole_share_prints_its_count(
+    share_out: ShareOut, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """0/1 takes every file, and says how many of how many."""
+    status, out, err = share_out.share(["src/*.ts"], "0/1", capfd=capfd)
+    assert (status, out, err) == (0, f"{LABEL}: shard 0/1: 2 of 2 files\n", "")
+    assert share_out.out.read_text(encoding="utf-8") == "src/a.ts,src/b.ts"
+
+
+def test_entries_apply_in_order(
+    share_out: ShareOut, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """An entry after a `!` adds back what the `!` took, as StrykerJS reads it."""
+    mutate = ["src/*.ts", "!src/*.ts", "src/a.ts"]
+    want = ["src/a.ts"]
+    assert share_out.shared(mutate, "0/1", capfd=capfd) == want
+
+
+def test_a_dotted_name_is_matched_only_by_a_dotted_part(
+    share_out: ShareOut, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Minimatch's `dot: false`: `**` never reaches `.hidden`; `.hidden` does."""
+    assert "src/.hidden/h.ts" not in share_out.shared(
+        ["src/**/*.ts"], "0/1", capfd=capfd
+    )
+    want = ["src/.hidden/h.ts"]
+    assert share_out.shared(["src/.hidden/*.ts"], "0/1", capfd=capfd) == want
+
+
+def test_a_file_name_with_glob_syntax_is_escaped(
+    share_out: ShareOut, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """`[id]` is named literally, so minimatch matches that file alone."""
+    share_out.share(["src/\\[id\\]/*.ts"], "0/1", capfd=capfd)
+    assert share_out.out.read_text(encoding="utf-8") == r"src/\[id\]/page.ts"
+
+
+def test_a_ranged_entry_is_red_by_name(
+    share_out: ShareOut, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A range, even under `!`, cannot be shared out by file."""
+    status, out, err = share_out.share(
+        ["src/*.ts", "!src/a.ts:1:2-3:4"], "0/1", capfd=capfd
+    )
+    want = (
+        f"{LABEL}: `mutate` entry '!src/a.ts:1:2-3:4' carries a mutation"
+        " range; a range cannot be shared out by file\n"
+    )
+    assert (status, out, err) == (1, "", want)
+
+
+def test_an_extglob_is_red_by_name(
+    share_out: ShareOut, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """`full_match` cannot spell an extglob, so it is refused, not misread."""
+    status, out, err = share_out.share(["src/+(a|b).ts"], "0/1", capfd=capfd)
+    want = (
+        f"{LABEL}: `mutate` entry 'src/+(a|b).ts' is an extglob, which the"
+        " leg cannot expand\n"
+    )
+    assert (status, out, err) == (1, "", want)
+
+
+def test_a_list_matching_nothing_is_red(
+    share_out: ShareOut, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """No tracked file matched: red, never an empty run."""
+    status, out, err = share_out.share(["untracked.ts"], "0/1", capfd=capfd)
+    want = f"{LABEL}: `mutate` matches no tracked file\n"
+    assert (status, out, err) == (1, "", want)
+
+
+def test_a_name_with_a_comma_is_red(
+    share_out: ShareOut, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """--mutate splits on commas, so such a file cannot be named."""
+    (share_out.tree / "src/x,y.ts").write_text(SOURCE, encoding="utf-8")
+    subprocess.run([GIT, "add", "--", "src/x,y.ts"], env=support.env(), check=True)
+    status, out, err = share_out.share(["src/x*.ts"], "0/1", capfd=capfd)
+    want = (
+        f"{LABEL}: src/x,y.ts: StrykerJS's --mutate cannot name this file"
+        " (a comma, or a trailing range)\n"
+    )
+    assert (status, out, err) == (1, "", want)
+
+
+def test_a_class_negated_with_a_caret_is_read_as_minimatch_reads_it(
+    share_out: ShareOut, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """`[^a]` is every one character but `a`, as `[!a]` is."""
+    want = ["src/b.ts"]
+    assert share_out.shared(["src/[^a].ts"], "0/1", capfd=capfd) == want
+
+
+def test_entries_resolve_against_the_tree(
+    share_out: ShareOut, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """`./`, a path back into the tree and an absolute one; outside is none."""
+    mutate = [
+        "./src/a.ts",
+        "../tree/src/b.ts",
+        f"{share_out.tree.resolve().as_posix()}/lib/*.ts",
+        "../elsewhere/*.ts",
+    ]
+    want = ["lib/l.ts", "src/a.ts", "src/b.ts"]
+    assert share_out.shared(mutate, "0/1", capfd=capfd) == want
+
+
+def test_a_shard_with_files_writes_no_counts(
+    share_out: ShareOut, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Only an empty share writes its row; a run's row is the verdict's."""
+    summary = share_out.out.parent / "summary"
+    config = share_out.tree / "stryker.config.json"
+    config.write_text(json.dumps(CONFIG), encoding="utf-8")
+    argv = ["share", str(config), "--out", str(share_out.out)]
+    status, _out, err = call([*argv, "--summary-dir", str(summary)], capfd=capfd)
+    assert status == 0, err
+    assert not summary.exists()
+
+
+def test_a_name_ending_in_a_range_is_red(
+    share_out: ShareOut, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """--mutate would read the name's tail as a range: red, by name."""
+    (share_out.tree / "src/x:1-2").write_text(SOURCE, encoding="utf-8")
+    subprocess.run([GIT, "add", "--", "src/x:1-2"], env=support.env(), check=True)
+    status, out, err = share_out.share(["src/x*"], "0/1", capfd=capfd)
+    want = (
+        f"{LABEL}: src/x:1-2: StrykerJS's --mutate cannot name this file"
+        " (a comma, or a trailing range)\n"
+    )
+    assert (status, out, err) == (1, "", want)
+
+
+@pytest.mark.parametrize("shard", ["x", "1/2/3", "2/2", "3/2", "-1/2"])
+def test_each_malformed_shard_is_red(
+    share_out: ShareOut, shard: object, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Not two whole numbers, or k not below n: red, by name."""
+    status, out, err = share_out.share(["src/*.ts"], shard, capfd=capfd)
+    want = f"{LABEL}: MUTANTS_SHARD='{shard}' is not k/n with 0 <= k < n\n"
+    assert (status, out, err) == (1, "", want)
+
+
+def test_a_config_with_no_mutate_list_is_red(
+    share_out: ShareOut, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """`share` reads the list itself; a missing one is named."""
+    config = share_out.tree / "stryker.config.json"
+    bare: dict[str, object] = {"testRunner": "vitest"}
+    config.write_text(json.dumps(bare), encoding="utf-8")
+    status, out, err = call(
+        ["share", str(config), "--out", str(share_out.out)], capfd=capfd
+    )
+    want = f"{LABEL}: {config} names no `mutate` list\n"
+    assert (status, out, err) == (1, "", want)
+
+
+def test_an_unreadable_config_is_red(
+    share_out: ShareOut, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """No file: red, never an empty share."""
+    status, _out, err = call(
+        ["share", str(share_out.tree / "none.json"), "--out", str(share_out.out)],
+        capfd=capfd,
+    )
+    assert status == 1
+    assert err.startswith(f"{LABEL}: "), err
+
+
+# minimatch's braces, expanded before `full_match` reads a pattern.
+ROWS: tuple[tuple[str, list[str]], ...] = (
+    ("a.{ts,tsx}", ["a.ts", "a.tsx"]),
+    ("{a,b{1,2}}.ts", ["a.ts", "b1.ts", "b2.ts"]),
+    ("{a{1,2},b}.ts", ["a1.ts", "a2.ts", "b.ts"]),
+    ("f{1..3}.ts", ["f1.ts", "f2.ts", "f3.ts"]),
+    ("f{3..1}.ts", ["f3.ts", "f2.ts", "f1.ts"]),
+    ("f{2..2}.ts", ["f2.ts"]),
+    ("{c..a}.ts", ["c.ts", "b.ts", "a.ts"]),
+    ("{x}.ts", ["{x}.ts"]),
+    ("{x}{a,b}", ["{x}a", "{x}b"]),
+    ("{x{a,b}}", ["{xa}", "{xb}"]),
+    ("\\{a,b}.ts", ["\\{a,b}.ts"]),
+    ("\\{{a,b}.ts", ["\\{a.ts", "\\{b.ts"]),
+    ("{a\\,,c}.ts", ["a\\,.ts", "c.ts"]),
+    ("{a,b.ts", ["{a,b.ts"]),
+    ("a,b}.ts", ["a,b}.ts"]),
+)
+
+
+@pytest.mark.parametrize(("pattern", "want"), ROWS)
+def test_each_form(pattern: object, want: object) -> None:
+    """Lists, nested lists, ranges, literal braces and escaped ones."""
+    assert mutants_typescript.braces(pattern) == want
+
+
+# minimatch's glob, spelled for `PurePosixPath.full_match`.
+SPELLING_ROWS: tuple[tuple[str, str], ...] = (
+    ("src/\\[id\\]/*.ts", "src/[[]id]/*.ts"),
+    ("a\\*b\\?c", "a[*]b[?]c"),
+    ("a\\!b", "a!b"),
+    ("[^a].ts", "[!a].ts"),
+    ("[a^].ts", "[a^].ts"),
+    ("a\\", "a\\"),
+)
+
+
+@pytest.mark.parametrize(("pattern", "want"), SPELLING_ROWS)
+def test_spelling_each_form(pattern: object, want: object) -> None:
+    """An escape names its character; a `[^` class negates."""
+    assert mutants_typescript.full_match_spelling(pattern) == want
+
+
+REFUSALS_ROWS: tuple[tuple[dict[str, object], str], ...] = (
+    (
+        {"mutator": {"excludedMutations": ["StringLiteral"]}},
+        (
+            "sets `mutator.excludedMutations` — it drops a mutator everywhere,"
+            " with no reason at any site"
+        ),
+    ),
+    (
+        {"ignoreStatic": True},
+        (
+            "sets `ignoreStatic` — it drops every static mutant, with no reason at"
+            " any site"
+        ),
+    ),
+    (
+        {"ignorers": ["angular"]},
+        "sets `ignorers` — they drop mutants by rule, with no reason at any site",
+    ),
+    (
+        {"thresholds": {"break": 80}},
+        (
+            "sets `thresholds.break` — the measure is no unexplained survivor,"
+            " never a score"
+        ),
+    ),
+    (
+        {"mutate": []},
+        ("names no `mutate` list — the paths to mutate are the repository's to state"),
+    ),
+)
+
+
+@pytest.mark.parametrize(("setting", "message"), REFUSALS_ROWS)
+def test_each_refused_setting_is_red_by_name(
+    planted_state: Planted, setting: object, message: object
+) -> None:
+    """Each row's setting is named, and StrykerJS never runs."""
+    planted_state.plant(*KILLED, config=CONFIG | setting)
+    done, log = planted_state.run_leg()
+    assert done.returncode == 1
+    want = [
+        f"{LABEL}: stryker.config.json {message}",
+        (f"{LABEL}: record each equivalent mutant at its site instead: {MARK}"),
+    ]
+    assert done.stderr.splitlines() == want
+    assert log == list[str]()
+
+
+def test_incremental_is_refused_as_deferred(planted_state: Planted) -> None:
+    """`incremental: true` is red by name, with the reason it is deferred."""
+    planted_state.plant(*KILLED, config=CONFIG | {"incremental": True})
+    done, log = planted_state.run_leg()
+    assert done.returncode == 1
+    want = [
+        (
+            f"{LABEL}: stryker.config.json sets `incremental` — a runner has no"
+            " earlier results, so it would read as on and do nothing; the leg"
+            " runs every mutant every week (deferred, #1358)"
         )
-        want = ["src/.hidden/h.ts"]
-        assert self.shared(["src/.hidden/*.ts"], "0/1", capfd=capfd) == want
-
-    def test_a_file_name_with_glob_syntax_is_escaped(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """`[id]` is named literally, so minimatch matches that file alone."""
-        self.share(["src/\\[id\\]/*.ts"], "0/1", capfd=capfd)
-        assert self.out.read_text(encoding="utf-8") == r"src/\[id\]/page.ts"
-
-    def test_a_ranged_entry_is_red_by_name(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A range, even under `!`, cannot be shared out by file."""
-        status, out, err = self.share(
-            ["src/*.ts", "!src/a.ts:1:2-3:4"], "0/1", capfd=capfd
-        )
-        want = (
-            f"{LABEL}: `mutate` entry '!src/a.ts:1:2-3:4' carries a mutation"
-            " range; a range cannot be shared out by file\n"
-        )
-        assert (status, out, err) == (1, "", want)
-
-    def test_an_extglob_is_red_by_name(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """`full_match` cannot spell an extglob, so it is refused, not misread."""
-        status, out, err = self.share(["src/+(a|b).ts"], "0/1", capfd=capfd)
-        want = (
-            f"{LABEL}: `mutate` entry 'src/+(a|b).ts' is an extglob, which the"
-            " leg cannot expand\n"
-        )
-        assert (status, out, err) == (1, "", want)
-
-    def test_a_list_matching_nothing_is_red(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """No tracked file matched: red, never an empty run."""
-        status, out, err = self.share(["untracked.ts"], "0/1", capfd=capfd)
-        want = f"{LABEL}: `mutate` matches no tracked file\n"
-        assert (status, out, err) == (1, "", want)
-
-    def test_a_name_with_a_comma_is_red(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """--mutate splits on commas, so such a file cannot be named."""
-        (self.tree / "src/x,y.ts").write_text(SOURCE, encoding="utf-8")
-        subprocess.run([GIT, "add", "--", "src/x,y.ts"], env=support.env(), check=True)
-        status, out, err = self.share(["src/x*.ts"], "0/1", capfd=capfd)
-        want = (
-            f"{LABEL}: src/x,y.ts: StrykerJS's --mutate cannot name this file"
-            " (a comma, or a trailing range)\n"
-        )
-        assert (status, out, err) == (1, "", want)
-
-    def test_a_class_negated_with_a_caret_is_read_as_minimatch_reads_it(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """`[^a]` is every one character but `a`, as `[!a]` is."""
-        want = ["src/b.ts"]
-        assert self.shared(["src/[^a].ts"], "0/1", capfd=capfd) == want
-
-    def test_entries_resolve_against_the_tree(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """`./`, a path back into the tree and an absolute one; outside is none."""
-        mutate = [
-            "./src/a.ts",
-            "../tree/src/b.ts",
-            f"{self.tree.resolve().as_posix()}/lib/*.ts",
-            "../elsewhere/*.ts",
-        ]
-        want = ["lib/l.ts", "src/a.ts", "src/b.ts"]
-        assert self.shared(mutate, "0/1", capfd=capfd) == want
-
-    def test_a_shard_with_files_writes_no_counts(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """Only an empty share writes its row; a run's row is the verdict's."""
-        summary = self.out.parent / "summary"
-        config = self.tree / "stryker.config.json"
-        config.write_text(json.dumps(CONFIG), encoding="utf-8")
-        argv = ["share", str(config), "--out", str(self.out)]
-        status, _out, err = call([*argv, "--summary-dir", str(summary)], capfd=capfd)
-        assert status == 0, err
-        assert not summary.exists()
-
-    def test_a_name_ending_in_a_range_is_red(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """--mutate would read the name's tail as a range: red, by name."""
-        (self.tree / "src/x:1-2").write_text(SOURCE, encoding="utf-8")
-        subprocess.run([GIT, "add", "--", "src/x:1-2"], env=support.env(), check=True)
-        status, out, err = self.share(["src/x*"], "0/1", capfd=capfd)
-        want = (
-            f"{LABEL}: src/x:1-2: StrykerJS's --mutate cannot name this file"
-            " (a comma, or a trailing range)\n"
-        )
-        assert (status, out, err) == (1, "", want)
-
-    @pytest.mark.parametrize("shard", ["x", "1/2/3", "2/2", "3/2", "-1/2"])
-    def test_each_malformed_shard_is_red(
-        self, shard: object, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """Not two whole numbers, or k not below n: red, by name."""
-        status, out, err = self.share(["src/*.ts"], shard, capfd=capfd)
-        want = f"{LABEL}: MUTANTS_SHARD='{shard}' is not k/n with 0 <= k < n\n"
-        assert (status, out, err) == (1, "", want)
-
-    def test_a_config_with_no_mutate_list_is_red(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """`share` reads the list itself; a missing one is named."""
-        config = self.tree / "stryker.config.json"
-        bare: dict[str, object] = {"testRunner": "vitest"}
-        config.write_text(json.dumps(bare), encoding="utf-8")
-        status, out, err = call(
-            ["share", str(config), "--out", str(self.out)], capfd=capfd
-        )
-        want = f"{LABEL}: {config} names no `mutate` list\n"
-        assert (status, out, err) == (1, "", want)
-
-    def test_an_unreadable_config_is_red(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """No file: red, never an empty share."""
-        status, _out, err = call(
-            ["share", str(self.tree / "none.json"), "--out", str(self.out)], capfd=capfd
-        )
-        assert status == 1
-        assert err.startswith(f"{LABEL}: "), err
+    ]
+    assert done.stderr.splitlines() == want
+    assert log == list[str]()
 
 
-class TestBraces:
-    """minimatch's braces, expanded before `full_match` reads a pattern."""
+def test_a_config_that_is_not_json_is_red(planted_state: Planted) -> None:
+    """An unreadable config is red, never a skip."""
+    planted_state.track("stryker.config.json", "{ mutate: [")
+    done, log = planted_state.run_leg()
+    assert done.returncode == 1
+    assert done.stderr.startswith(
+        f"{LABEL}: stryker.config.json is not readable JSON: "
+    ), done.stderr
+    assert log == list[str]()
 
-    ROWS: tuple[tuple[str, list[str]], ...] = (
-        ("a.{ts,tsx}", ["a.ts", "a.tsx"]),
-        ("{a,b{1,2}}.ts", ["a.ts", "b1.ts", "b2.ts"]),
-        ("{a{1,2},b}.ts", ["a1.ts", "a2.ts", "b.ts"]),
-        ("f{1..3}.ts", ["f1.ts", "f2.ts", "f3.ts"]),
-        ("f{3..1}.ts", ["f3.ts", "f2.ts", "f1.ts"]),
-        ("f{2..2}.ts", ["f2.ts"]),
-        ("{c..a}.ts", ["c.ts", "b.ts", "a.ts"]),
-        ("{x}.ts", ["{x}.ts"]),
-        ("{x}{a,b}", ["{x}a", "{x}b"]),
-        ("{x{a,b}}", ["{xa}", "{xb}"]),
-        ("\\{a,b}.ts", ["\\{a,b}.ts"]),
-        ("\\{{a,b}.ts", ["\\{a.ts", "\\{b.ts"]),
-        ("{a\\,,c}.ts", ["a\\,.ts", "c.ts"]),
-        ("{a,b.ts", ["{a,b.ts"]),
-        ("a,b}.ts", ["a,b}.ts"]),
+
+@pytest.mark.usefixtures("planted_state")
+def test_a_config_that_is_not_an_object_is_red() -> None:
+    """A JSON list is no config."""
+    want = ["is not a JSON object"]
+    assert mutants_typescript.refusals([]) == want
+
+
+def test_clean_run_is_green_with_the_summary(planted_state: Planted) -> None:
+    """Killed and timed out: exit 0, the summary line, the counts, the call."""
+    planted_state.plant(*KILLED)
+    done, log = planted_state.run_leg()
+    assert done.returncode == 0, done.stderr
+    want = [
+        SHARED,
+        (
+            f"{LABEL}: 2 mutants, 2 killed, 0 survived, 0 not covered,"
+            " 0 not viable, 0 excluded"
+        ),
+    ]
+    assert done.stdout.splitlines() == want
+    assert done.stderr == ""
+    want = [CALL]
+    assert log == want
+    assert planted_state.counts() == "0/1\t2\t2\t0\t0\tshard\n"
+    assert not (planted_state.tree / "reports/mutation/mutation.json").exists()
+
+
+def test_one_survivor_is_red_by_file_and_line(planted_state: Planted) -> None:
+    """A survivor is named file:line:column, mutator, change."""
+    planted_state.plant(*KILLED, mutant("Survived", 7))
+    done, _ = planted_state.run_leg()
+    assert done.returncode == 1
+    want = [
+        SHARED,
+        f"{LABEL}: survived: src/add.ts:7:54: ArithmeticOperator: a - b",
+        (
+            f"{LABEL}: 3 mutants, 2 killed, 1 survived, 0 not covered,"
+            " 0 not viable, 0 excluded"
+        ),
+    ]
+    assert done.stdout.splitlines() == want
+    want = [RED_TAIL]
+    assert done.stderr.splitlines() == want
+    assert planted_state.counts() == "0/1\t3\t2\t1\t0\tshard\n"
+
+
+def test_a_mutant_no_test_reaches_is_not_covered_and_red(
+    planted_state: Planted,
+) -> None:
+    """NoCoverage is a survivor of its own name, counted as survived."""
+    planted_state.plant(
+        *KILLED, mutant("NoCoverage", 9, mutator="BlockStatement", replacement="{}")
+    )
+    done, _ = planted_state.run_leg()
+    assert done.returncode == 1
+    want = [
+        SHARED,
+        f"{LABEL}: not covered: src/add.ts:9:54: BlockStatement: {{}}",
+        (
+            f"{LABEL}: 3 mutants, 2 killed, 0 survived, 1 not covered,"
+            " 0 not viable, 0 excluded"
+        ),
+    ]
+    assert done.stdout.splitlines() == want
+    assert planted_state.counts() == "0/1\t3\t2\t1\t0\tshard\n"
+
+
+def test_an_excluded_survivor_with_a_reason_is_green_and_counted(
+    planted_state: Planted,
+) -> None:
+    """A site comment with its reason: excluded, counted, green."""
+    planted_state.plant(
+        *KILLED, mutant("Ignored", 4, reason="zero is either sign here")
+    )
+    done, _ = planted_state.run_leg()
+    assert done.returncode == 0, done.stderr
+    want = [
+        SHARED,
+        (
+            f"{LABEL}: 3 mutants, 2 killed, 0 survived, 0 not covered,"
+            " 0 not viable, 1 excluded"
+        ),
+    ]
+    assert done.stdout.splitlines() == want
+    assert planted_state.counts() == "0/1\t3\t2\t0\t1\tshard\n"
+
+
+def test_an_exclusion_without_its_reason_is_red(planted_state: Planted) -> None:
+    """StrykerJS's default reason is no reason: red, by site."""
+    planted_state.plant(*KILLED, mutant("Ignored", 4, reason="Ignored using a comment"))
+    done, _ = planted_state.run_leg()
+    assert done.returncode == 1
+    want = [
+        (
+            f"{LABEL}: excluded without a reason: src/add.ts:4:54:"
+            " ArithmeticOperator: a - b"
+        ),
+        RED_TAIL,
+    ]
+    assert done.stderr.splitlines() == want
+
+
+def test_a_compile_error_is_not_viable_never_killed(planted_state: Planted) -> None:
+    """CompileError is counted on its own; green, killed unchanged."""
+    planted_state.plant(*KILLED, mutant("CompileError", 5))
+    done, _ = planted_state.run_leg()
+    assert done.returncode == 0, done.stderr
+    want = [
+        SHARED,
+        (
+            f"{LABEL}: 3 mutants, 2 killed, 0 survived, 0 not covered,"
+            " 1 not viable, 0 excluded"
+        ),
+    ]
+    assert done.stdout.splitlines() == want
+
+
+def test_a_runtime_error_is_not_judged_and_writes_no_counts(
+    planted_state: Planted,
+) -> None:
+    """RuntimeError was not judged: red, and the totals get nothing."""
+    planted_state.plant(*KILLED, mutant("RuntimeError", 6))
+    done, _ = planted_state.run_leg()
+    assert done.returncode == 1
+    want = [
+        (
+            f"{LABEL}: not judged: RuntimeError: src/add.ts:6:54:"
+            " ArithmeticOperator: a - b"
+        ),
+        RED_TAIL,
+    ]
+    assert done.stderr.splitlines() == want
+    assert not (planted_state.summary / "typescript.tsv").exists()
+
+
+def test_an_empty_report_is_not_judged(planted_state: Planted) -> None:
+    """A report of no mutant judged nothing."""
+    planted_state.plant()
+    done, _ = planted_state.run_leg()
+    assert done.returncode == 1
+    assert (
+        f"{LABEL}: not judged: the report holds no mutant — nothing was mutated"
+        in done.stderr.splitlines()
     )
 
-    @pytest.mark.parametrize(("pattern", "want"), ROWS)
-    def test_each_form(self, pattern: object, want: object) -> None:
-        """Lists, nested lists, ranges, literal braces and escaped ones."""
-        assert mutants_typescript.braces(pattern) == want
 
-
-class TestSpelling:
-    """minimatch's glob, spelled for `PurePosixPath.full_match`."""
-
-    ROWS: tuple[tuple[str, str], ...] = (
-        ("src/\\[id\\]/*.ts", "src/[[]id]/*.ts"),
-        ("a\\*b\\?c", "a[*]b[?]c"),
-        ("a\\!b", "a!b"),
-        ("[^a].ts", "[!a].ts"),
-        ("[a^].ts", "[a^].ts"),
-        ("a\\", "a\\"),
+def test_a_failing_stryker_is_red_with_its_output(planted_state: Planted) -> None:
+    """A non-zero exit judged nothing: red, with StrykerJS's own words."""
+    planted_state.plant(*KILLED)
+    done, _ = planted_state.run_leg(
+        PLANT_STATUS="3", PLANT_OUTPUT="no TestRunner plugins"
     )
+    assert done.returncode == 1
+    want = [
+        f"{LABEL}: StrykerJS exited 3 — nothing judged; its output:",
+        "    no TestRunner plugins",
+    ]
+    assert done.stderr.splitlines() == want
 
-    @pytest.mark.parametrize(("pattern", "want"), ROWS)
-    def test_each_form(self, pattern: object, want: object) -> None:
-        """An escape names its character; a `[^` class negates."""
-        assert mutants_typescript.full_match_spelling(pattern) == want
+
+def test_no_report_is_red(planted_state: Planted) -> None:
+    """A zero exit with no report is red; a stale report is not read."""
+    planted_state.plant(*KILLED)
+    stale = planted_state.tree / "reports/mutation/mutation.json"
+    stale.parent.mkdir(parents=True)
+    stale.write_text(json.dumps(report(*KILLED)), encoding="utf-8")
+    planted_state.planted.write_text("", encoding="utf-8")
+    done, log = planted_state.run_leg()
+    assert done.returncode == 1
+    want = [f"{LABEL}: StrykerJS wrote no reports/mutation/mutation.json"]
+    assert done.stderr.splitlines() == want
+    want = [CALL]
+    assert log == want
 
 
-class TestRefusals(TestPlanted):
-    """A config that excludes mutants with no reason at a site is red."""
+def test_a_dirty_tree_is_refused_before_the_run(planted_state: Planted) -> None:
+    """Uncommitted tracked changes: red, and StrykerJS never runs."""
+    planted_state.plant(*KILLED)
+    (planted_state.tree / "src/add.ts").write_text("// edited\n", encoding="utf-8")
+    done, log = planted_state.run_leg()
+    assert done.returncode == 1
+    want = [
+        f"{LABEL}: uncommitted:  M src/add.ts",
+        ("  the leg mutates tracked files in place; it runs on a clean tree only"),
+    ]
+    assert done.stderr.splitlines() == want
+    assert log == list[str]()
 
-    ROWS: tuple[tuple[dict[str, object], str], ...] = (
-        (
-            {"mutator": {"excludedMutations": ["StringLiteral"]}},
-            (
-                "sets `mutator.excludedMutations` — it drops a mutator everywhere,"
-                " with no reason at any site"
-            ),
-        ),
-        (
-            {"ignoreStatic": True},
-            (
-                "sets `ignoreStatic` — it drops every static mutant, with no reason at"
-                " any site"
-            ),
-        ),
-        (
-            {"ignorers": ["angular"]},
-            "sets `ignorers` — they drop mutants by rule, with no reason at any site",
-        ),
-        (
-            {"thresholds": {"break": 80}},
-            (
-                "sets `thresholds.break` — the measure is no unexplained survivor,"
-                " never a score"
-            ),
-        ),
-        (
-            {"mutate": []},
-            (
-                "names no `mutate` list — the paths to mutate are the repository's to"
-                " state"
-            ),
-        ),
+
+def test_a_tree_left_changed_is_red(planted_state: Planted) -> None:
+    """A run that leaves a tracked file changed is red, whatever it judged."""
+    planted_state.plant(*KILLED)
+    done, log = planted_state.run_leg(
+        PLANT_DIRTY=str(planted_state.tree / "src/add.ts")
     )
-
-    @pytest.mark.parametrize(("setting", "message"), ROWS)
-    def test_each_refused_setting_is_red_by_name(
-        self, setting: object, message: object
-    ) -> None:
-        """Each row's setting is named, and StrykerJS never runs."""
-        self.plant(*KILLED, config=CONFIG | setting)
-        done, log = self.run_leg()
-        assert done.returncode == 1
-        want = [
-            f"{LABEL}: stryker.config.json {message}",
-            (f"{LABEL}: record each equivalent mutant at its site instead: {MARK}"),
-        ]
-        assert done.stderr.splitlines() == want
-        assert log == list[str]()
-
-    def test_incremental_is_refused_as_deferred(self) -> None:
-        """`incremental: true` is red by name, with the reason it is deferred."""
-        self.plant(*KILLED, config=CONFIG | {"incremental": True})
-        done, log = self.run_leg()
-        assert done.returncode == 1
-        want = [
-            (
-                f"{LABEL}: stryker.config.json sets `incremental` — a runner has no"
-                " earlier results, so it would read as on and do nothing; the leg"
-                " runs every mutant every week (deferred, #1358)"
-            )
-        ]
-        assert done.stderr.splitlines() == want
-        assert log == list[str]()
-
-    def test_a_config_that_is_not_json_is_red(self) -> None:
-        """An unreadable config is red, never a skip."""
-        self.track("stryker.config.json", "{ mutate: [")
-        done, log = self.run_leg()
-        assert done.returncode == 1
-        assert done.stderr.startswith(
-            f"{LABEL}: stryker.config.json is not readable JSON: "
-        ), done.stderr
-        assert log == list[str]()
-
-    def test_a_config_that_is_not_an_object_is_red(self) -> None:
-        """A JSON list is no config."""
-        want = ["is not a JSON object"]
-        assert mutants_typescript.refusals([]) == want
+    assert done.returncode == 1
+    want = [
+        f"{LABEL}: left changed after the run:  M src/add.ts",
+        (
+            "  StrykerJS did not restore the tree it mutated in place; restore"
+            " it with git"
+        ),
+    ]
+    assert done.stderr.splitlines() == want
+    want = [CALL]
+    assert log == want
 
 
-class TestVerdict(TestPlanted):
-    """Statuses, survivors, exclusions and the summary line."""
+def test_untracked_files_do_not_block_the_run(planted_state: Planted) -> None:
+    """An untracked .env is not the tree's: the run goes ahead, in place."""
+    planted_state.plant(*KILLED)
+    (planted_state.tree / ".env").write_text("SECRET=1\n", encoding="utf-8")
+    done, log = planted_state.run_leg()
+    assert done.returncode == 0, done.stderr
+    want = [CALL]
+    assert log == want
 
-    def test_clean_run_is_green_with_the_summary(self) -> None:
-        """Killed and timed out: exit 0, the summary line, the counts, the call."""
-        self.plant(*KILLED)
-        done, log = self.run_leg()
-        assert done.returncode == 0, done.stderr
-        want = [
-            SHARED,
-            (
-                f"{LABEL}: 2 mutants, 2 killed, 0 survived, 0 not covered,"
-                " 0 not viable, 0 excluded"
-            ),
-        ]
-        assert done.stdout.splitlines() == want
-        assert done.stderr == ""
-        want = [CALL]
-        assert log == want
-        assert self.counts() == "0/1\t2\t2\t0\t0\tshard\n"
-        assert not (self.tree / "reports/mutation/mutation.json").exists()
 
-    def test_one_survivor_is_red_by_file_and_line(self) -> None:
-        """A survivor is named file:line:column, mutator, change."""
-        self.plant(*KILLED, mutant("Survived", 7))
-        done, _ = self.run_leg()
-        assert done.returncode == 1
-        want = [
-            SHARED,
-            f"{LABEL}: survived: src/add.ts:7:54: ArithmeticOperator: a - b",
-            (
-                f"{LABEL}: 3 mutants, 2 killed, 1 survived, 0 not covered,"
-                " 0 not viable, 0 excluded"
-            ),
-        ]
-        assert done.stdout.splitlines() == want
-        want = [RED_TAIL]
-        assert done.stderr.splitlines() == want
-        assert self.counts() == "0/1\t3\t2\t1\t0\tshard\n"
-
-    def test_a_mutant_no_test_reaches_is_not_covered_and_red(self) -> None:
-        """NoCoverage is a survivor of its own name, counted as survived."""
-        self.plant(
-            *KILLED, mutant("NoCoverage", 9, mutator="BlockStatement", replacement="{}")
+def test_a_tracked_report_is_refused(planted_state: Planted) -> None:
+    """The leg replaces StrykerJS's report; it never deletes a tracked file."""
+    planted_state.track("reports/mutation/mutation.json", "{}")
+    planted_state.plant(*KILLED)
+    done, log = planted_state.run_leg()
+    assert done.returncode == 1
+    want = [
+        (
+            f"{LABEL}: reports/mutation/mutation.json is tracked; it is"
+            " StrykerJS's"
+            " output, and the leg replaces it"
         )
-        done, _ = self.run_leg()
-        assert done.returncode == 1
-        want = [
-            SHARED,
-            f"{LABEL}: not covered: src/add.ts:9:54: BlockStatement: {{}}",
-            (
-                f"{LABEL}: 3 mutants, 2 killed, 0 survived, 1 not covered,"
-                " 0 not viable, 0 excluded"
-            ),
-        ]
-        assert done.stdout.splitlines() == want
-        assert self.counts() == "0/1\t3\t2\t1\t0\tshard\n"
-
-    def test_an_excluded_survivor_with_a_reason_is_green_and_counted(self) -> None:
-        """A site comment with its reason: excluded, counted, green."""
-        self.plant(*KILLED, mutant("Ignored", 4, reason="zero is either sign here"))
-        done, _ = self.run_leg()
-        assert done.returncode == 0, done.stderr
-        want = [
-            SHARED,
-            (
-                f"{LABEL}: 3 mutants, 2 killed, 0 survived, 0 not covered,"
-                " 0 not viable, 1 excluded"
-            ),
-        ]
-        assert done.stdout.splitlines() == want
-        assert self.counts() == "0/1\t3\t2\t0\t1\tshard\n"
-
-    def test_an_exclusion_without_its_reason_is_red(self) -> None:
-        """StrykerJS's default reason is no reason: red, by site."""
-        self.plant(*KILLED, mutant("Ignored", 4, reason="Ignored using a comment"))
-        done, _ = self.run_leg()
-        assert done.returncode == 1
-        want = [
-            (
-                f"{LABEL}: excluded without a reason: src/add.ts:4:54:"
-                " ArithmeticOperator: a - b"
-            ),
-            RED_TAIL,
-        ]
-        assert done.stderr.splitlines() == want
-
-    def test_a_compile_error_is_not_viable_never_killed(self) -> None:
-        """CompileError is counted on its own; green, killed unchanged."""
-        self.plant(*KILLED, mutant("CompileError", 5))
-        done, _ = self.run_leg()
-        assert done.returncode == 0, done.stderr
-        want = [
-            SHARED,
-            (
-                f"{LABEL}: 3 mutants, 2 killed, 0 survived, 0 not covered,"
-                " 1 not viable, 0 excluded"
-            ),
-        ]
-        assert done.stdout.splitlines() == want
-
-    def test_a_runtime_error_is_not_judged_and_writes_no_counts(self) -> None:
-        """RuntimeError was not judged: red, and the totals get nothing."""
-        self.plant(*KILLED, mutant("RuntimeError", 6))
-        done, _ = self.run_leg()
-        assert done.returncode == 1
-        want = [
-            (
-                f"{LABEL}: not judged: RuntimeError: src/add.ts:6:54:"
-                " ArithmeticOperator: a - b"
-            ),
-            RED_TAIL,
-        ]
-        assert done.stderr.splitlines() == want
-        assert not (self.summary / "typescript.tsv").exists()
-
-    def test_an_empty_report_is_not_judged(self) -> None:
-        """A report of no mutant judged nothing."""
-        self.plant()
-        done, _ = self.run_leg()
-        assert done.returncode == 1
-        assert (
-            f"{LABEL}: not judged: the report holds no mutant — nothing was mutated"
-            in done.stderr.splitlines()
-        )
-
-
-class TestRun(TestPlanted):
-    """In place, on a clean tree, from the repository's own StrykerJS."""
-
-    def test_a_failing_stryker_is_red_with_its_output(self) -> None:
-        """A non-zero exit judged nothing: red, with StrykerJS's own words."""
-        self.plant(*KILLED)
-        done, _ = self.run_leg(PLANT_STATUS="3", PLANT_OUTPUT="no TestRunner plugins")
-        assert done.returncode == 1
-        want = [
-            f"{LABEL}: StrykerJS exited 3 — nothing judged; its output:",
-            "    no TestRunner plugins",
-        ]
-        assert done.stderr.splitlines() == want
-
-    def test_no_report_is_red(self) -> None:
-        """A zero exit with no report is red; a stale report is not read."""
-        self.plant(*KILLED)
-        stale = self.tree / "reports/mutation/mutation.json"
-        stale.parent.mkdir(parents=True)
-        stale.write_text(json.dumps(report(*KILLED)), encoding="utf-8")
-        self.planted.write_text("", encoding="utf-8")
-        done, log = self.run_leg()
-        assert done.returncode == 1
-        want = [f"{LABEL}: StrykerJS wrote no reports/mutation/mutation.json"]
-        assert done.stderr.splitlines() == want
-        want = [CALL]
-        assert log == want
-
-    def test_a_dirty_tree_is_refused_before_the_run(self) -> None:
-        """Uncommitted tracked changes: red, and StrykerJS never runs."""
-        self.plant(*KILLED)
-        (self.tree / "src/add.ts").write_text("// edited\n", encoding="utf-8")
-        done, log = self.run_leg()
-        assert done.returncode == 1
-        want = [
-            f"{LABEL}: uncommitted:  M src/add.ts",
-            ("  the leg mutates tracked files in place; it runs on a clean tree only"),
-        ]
-        assert done.stderr.splitlines() == want
-        assert log == list[str]()
-
-    def test_a_tree_left_changed_is_red(self) -> None:
-        """A run that leaves a tracked file changed is red, whatever it judged."""
-        self.plant(*KILLED)
-        done, log = self.run_leg(PLANT_DIRTY=str(self.tree / "src/add.ts"))
-        assert done.returncode == 1
-        want = [
-            f"{LABEL}: left changed after the run:  M src/add.ts",
-            (
-                "  StrykerJS did not restore the tree it mutated in place; restore"
-                " it with git"
-            ),
-        ]
-        assert done.stderr.splitlines() == want
-        want = [CALL]
-        assert log == want
-
-    def test_untracked_files_do_not_block_the_run(self) -> None:
-        """An untracked .env is not the tree's: the run goes ahead, in place."""
-        self.plant(*KILLED)
-        (self.tree / ".env").write_text("SECRET=1\n", encoding="utf-8")
-        done, log = self.run_leg()
-        assert done.returncode == 0, done.stderr
-        want = [CALL]
-        assert log == want
-
-    def test_a_tracked_report_is_refused(self) -> None:
-        """The leg replaces StrykerJS's report; it never deletes a tracked file."""
-        self.track("reports/mutation/mutation.json", "{}")
-        self.plant(*KILLED)
-        done, log = self.run_leg()
-        assert done.returncode == 1
-        want = [
-            (
-                f"{LABEL}: reports/mutation/mutation.json is tracked; it is"
-                " StrykerJS's"
-                " output, and the leg replaces it"
-            )
-        ]
-        assert done.stderr.splitlines() == want
-        assert log == list[str]()
+    ]
+    assert done.stderr.splitlines() == want
+    assert log == list[str]()
 
 
 FILE = 'files["a.ts"]'
@@ -986,20 +1031,18 @@ EACH_FIELD_THE_VERDICT_READS_ROWS: tuple[tuple[object, str], ...] = (
 )
 
 
-class TestShapes:
-    """A report field of another shape is refused by name, never a crash."""
-
-    @pytest.mark.parametrize(("value", "why"), EACH_FIELD_THE_VERDICT_READS_ROWS)
-    def test_each_field_the_verdict_reads(self, value: object, why: str) -> None:
-        """The refusal names the field, where it is, in the report."""
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp, "mutation.json")
-            path.write_text(json.dumps(value), encoding="utf-8")
-            err = io.StringIO()
-            with contextlib.redirect_stderr(err):
-                status = mutants_typescript.judge(str(path), LABEL, "")
-            assert status == 1
-            assert err.getvalue() == f"{LABEL}: no readable report at {path}: {why}\n"
+# A report field of another shape is refused by name, never a crash.
+@pytest.mark.parametrize(("value", "why"), EACH_FIELD_THE_VERDICT_READS_ROWS)
+def test_each_field_the_verdict_reads(value: object, why: str) -> None:
+    """The refusal names the field, where it is, in the report."""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp, "mutation.json")
+        path.write_text(json.dumps(value), encoding="utf-8")
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            status = mutants_typescript.judge(str(path), LABEL, "")
+        assert status == 1
+        assert err.getvalue() == f"{LABEL}: no readable report at {path}: {why}\n"
 
 
 def call(argv: list[str], *, capfd: pytest.CaptureFixture[str]) -> tuple[int, str, str]:
@@ -1014,128 +1057,130 @@ def call(argv: list[str], *, capfd: pytest.CaptureFixture[str]) -> tuple[int, st
     return status, out, err
 
 
-class TestMain:
-    """`config` and `verdict` through main, in this process (#1696)."""
+# `config` and `verdict` through main, in this process (#1696).
+def write(name: str, value: object, *, tmp_path: Path) -> Path:
+    """Write one JSON document into the row's scratch directory.
 
-    def write(self, name: str, value: object, *, tmp_path: Path) -> Path:
-        """Write one JSON document into the row's scratch directory.
+    Returns:
+        Its path.
 
-        Returns:
-            Its path.
+    """
+    path = tmp_path / name
+    path.write_text(json.dumps(value), encoding="utf-8")
+    return path
 
-        """
-        path = tmp_path / name
-        path.write_text(json.dumps(value), encoding="utf-8")
-        return path
 
-    def test_a_sound_config_passes_silently(
-        self, capfd: pytest.CaptureFixture[str], tmp_path: Path
-    ) -> None:
-        """No refused setting: exit 0, nothing printed."""
-        status, out, err = call(
-            [
-                "config",
-                str(self.write("stryker.config.json", CONFIG, tmp_path=tmp_path)),
-            ],
-            capfd=capfd,
-        )
-        assert (status, out, err) == (0, "", "")
+def test_a_sound_config_passes_silently(
+    capfd: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """No refused setting: exit 0, nothing printed."""
+    status, out, err = call(
+        [
+            "config",
+            str(write("stryker.config.json", CONFIG, tmp_path=tmp_path)),
+        ],
+        capfd=capfd,
+    )
+    assert (status, out, err) == (0, "", "")
 
-    @pytest.mark.parametrize(("setting", "message"), TestRefusals.ROWS)
-    def test_each_refused_setting_is_red_by_name(
-        self,
-        setting: object,
-        message: object,
-        capfd: pytest.CaptureFixture[str],
-        tmp_path: Path,
-    ) -> None:
-        """Each Refusals row's setting, named with the site mark."""
-        path = self.write("stryker.config.json", CONFIG | setting, tmp_path=tmp_path)
-        status, _out, err = call(["config", str(path)], capfd=capfd)
-        assert status == 1
-        want = [
-            f"{LABEL}: {path} {message}",
-            (f"{LABEL}: record each equivalent mutant at its site instead: {MARK}"),
-        ]
-        assert err.splitlines() == want
 
-    def test_incremental_is_refused_as_deferred(
-        self, capfd: pytest.CaptureFixture[str], tmp_path: Path
-    ) -> None:
-        """`incremental: true`, with the reason it is deferred."""
-        path = self.write(
-            "stryker.config.json", CONFIG | {"incremental": True}, tmp_path=tmp_path
-        )
-        status, _out, err = call(["config", str(path)], capfd=capfd)
-        assert status == 1
-        assert err == (
-            f"{LABEL}: {path} sets `incremental` — a runner has no earlier results,"
-            " so it would read as on and do nothing; the leg runs every mutant every"
-            " week (deferred, #1358)\n"
-        )
+@pytest.mark.parametrize(("setting", "message"), REFUSALS_ROWS)
+def test_main_each_refused_setting_is_red_by_name(
+    setting: object,
+    message: object,
+    capfd: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """Each Refusals row's setting, named with the site mark."""
+    path = write("stryker.config.json", CONFIG | setting, tmp_path=tmp_path)
+    status, _out, err = call(["config", str(path)], capfd=capfd)
+    assert status == 1
+    want = [
+        f"{LABEL}: {path} {message}",
+        (f"{LABEL}: record each equivalent mutant at its site instead: {MARK}"),
+    ]
+    assert err.splitlines() == want
 
-    def test_an_unreadable_config_is_red(
-        self, capfd: pytest.CaptureFixture[str], tmp_path: Path
-    ) -> None:
-        """Not JSON: named, exit 1."""
-        path = self.write("stryker.config.json", 0, tmp_path=tmp_path)
-        path.write_text("{ mutate: [", encoding="utf-8")
-        status, _out, err = call(["config", str(path)], capfd=capfd)
-        assert status == 1
-        assert err.startswith(f"{LABEL}: {path} is not readable JSON: "), err
 
-    def test_a_clean_verdict_writes_its_counts(
-        self, capfd: pytest.CaptureFixture[str], tmp_path: Path
-    ) -> None:
-        """Killed and timed out: exit 0, the summary line, typescript.tsv."""
-        path = self.write("mutation.json", report(*KILLED), tmp_path=tmp_path)
-        summary = path.parent / "summary"
-        status, out, err = call(
-            ["verdict", str(path), "--summary-dir", str(summary)], capfd=capfd
-        )
-        assert (status, out, err) == (
-            0,
-            f"{LABEL}: 2 mutants, 2 killed, 0 survived, 0 not covered,"
-            " 0 not viable, 0 excluded\n",
-            "",
-        )
-        assert (summary / "typescript.tsv").read_text(
-            encoding="utf-8"
-        ) == "0/1\t2\t2\t0\t0\tshard\n"
+def test_main_incremental_is_refused_as_deferred(
+    capfd: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """`incremental: true`, with the reason it is deferred."""
+    path = write(
+        "stryker.config.json", CONFIG | {"incremental": True}, tmp_path=tmp_path
+    )
+    status, _out, err = call(["config", str(path)], capfd=capfd)
+    assert status == 1
+    assert err == (
+        f"{LABEL}: {path} sets `incremental` — a runner has no earlier results,"
+        " so it would read as on and do nothing; the leg runs every mutant every"
+        " week (deferred, #1358)\n"
+    )
 
-    def test_a_verdict_writes_the_shard_it_was_given(
-        self, capfd: pytest.CaptureFixture[str], tmp_path: Path
-    ) -> None:
-        """The row names `--shard`, never a fixed 0/1 (#2153)."""
-        path = self.write("mutation.json", report(*KILLED), tmp_path=tmp_path)
-        summary = path.parent / "summary"
-        status, _out, err = call(
-            [
-                "verdict",
-                str(path),
-                "--shard",
-                "3/8",
-                "--summary-dir",
-                str(summary),
-            ],
-            capfd=capfd,
-        )
-        assert status == 0, err
-        assert (summary / "typescript.tsv").read_text(
-            encoding="utf-8"
-        ) == "3/8\t2\t2\t0\t0\tshard\n"
 
-    def test_a_survivor_is_red_and_writes_its_counts(
-        self, capfd: pytest.CaptureFixture[str], tmp_path: Path
-    ) -> None:
-        """A survivor is printed by site, and the red tail follows."""
-        path = self.write(
-            "mutation.json", report(mutant("Survived", 3)), tmp_path=tmp_path
-        )
-        status, out, err = call(["verdict", str(path)], capfd=capfd)
-        assert status == 1
-        assert (
-            out.splitlines()[0]
-            == f"{LABEL}: survived: src/add.ts:3:54: ArithmeticOperator: a - b"
-        )
-        assert err == RED_TAIL + "\n"
+def test_main_an_unreadable_config_is_red(
+    capfd: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """Not JSON: named, exit 1."""
+    path = write("stryker.config.json", 0, tmp_path=tmp_path)
+    path.write_text("{ mutate: [", encoding="utf-8")
+    status, _out, err = call(["config", str(path)], capfd=capfd)
+    assert status == 1
+    assert err.startswith(f"{LABEL}: {path} is not readable JSON: "), err
+
+
+def test_a_clean_verdict_writes_its_counts(
+    capfd: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """Killed and timed out: exit 0, the summary line, typescript.tsv."""
+    path = write("mutation.json", report(*KILLED), tmp_path=tmp_path)
+    summary = path.parent / "summary"
+    status, out, err = call(
+        ["verdict", str(path), "--summary-dir", str(summary)], capfd=capfd
+    )
+    assert (status, out, err) == (
+        0,
+        f"{LABEL}: 2 mutants, 2 killed, 0 survived, 0 not covered,"
+        " 0 not viable, 0 excluded\n",
+        "",
+    )
+    assert (summary / "typescript.tsv").read_text(
+        encoding="utf-8"
+    ) == "0/1\t2\t2\t0\t0\tshard\n"
+
+
+def test_a_verdict_writes_the_shard_it_was_given(
+    capfd: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """The row names `--shard`, never a fixed 0/1 (#2153)."""
+    path = write("mutation.json", report(*KILLED), tmp_path=tmp_path)
+    summary = path.parent / "summary"
+    status, _out, err = call(
+        [
+            "verdict",
+            str(path),
+            "--shard",
+            "3/8",
+            "--summary-dir",
+            str(summary),
+        ],
+        capfd=capfd,
+    )
+    assert status == 0, err
+    assert (summary / "typescript.tsv").read_text(
+        encoding="utf-8"
+    ) == "3/8\t2\t2\t0\t0\tshard\n"
+
+
+def test_a_survivor_is_red_and_writes_its_counts(
+    capfd: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """A survivor is printed by site, and the red tail follows."""
+    path = write("mutation.json", report(mutant("Survived", 3)), tmp_path=tmp_path)
+    status, out, err = call(["verdict", str(path)], capfd=capfd)
+    assert status == 1
+    assert (
+        out.splitlines()[0]
+        == f"{LABEL}: survived: src/add.ts:3:54: ArithmeticOperator: a - b"
+    )
+    assert err == RED_TAIL + "\n"

@@ -292,163 +292,170 @@ def findings(root: Path) -> list[str]:
     return out
 
 
-class TestWriter:
-    """What the shell writer prints, one line each time."""
+# What the shell writer prints, one line each time.
+def test_a_newline_cannot_begin_a_second_command() -> None:
+    """#1660's row, in bash: a newline and a command are one line."""
+    assert bash("org_error $'a\\n::error::b'") == "::error::a%0A::error::b\n"
 
-    def test_a_newline_cannot_begin_a_second_command(self) -> None:
-        """#1660's row, in bash: a newline and a command are one line."""
-        assert bash("org_error $'a\\n::error::b'") == "::error::a%0A::error::b\n"
 
-    def test_percent_is_replaced_never_appended(self) -> None:
-        """The bash 3.2 trap: an unquoted `%` after `//` is the end anchor."""
-        assert bash("org_warning $'50% of 1%\\r'") == "::warning::50%25 of 1%25%0D\n"
+def test_percent_is_replaced_never_appended() -> None:
+    """The bash 3.2 trap: an unquoted `%` after `//` is the end anchor."""
+    assert bash("org_warning $'50% of 1%\\r'") == "::warning::50%25 of 1%25%0D\n"
 
-    def test_arguments_join_as_echo_joins_them(self) -> None:
-        """Several arguments are one message, one space apart."""
-        assert bash("org_notice a 'b c' d") == "::notice::a b c d\n"
 
-    def test_mask_group_and_endgroup(self) -> None:
-        """The mask and the group escape too; endgroup is bare."""
-        assert (
-            bash("org_mask $'s3cr\\net'; org_group $'log\\n::x::'; org_endgroup")
-            == "::add-mask::s3cr%0Aet\n::group::log%0A::x::\n::endgroup::\n"
+def test_arguments_join_as_echo_joins_them() -> None:
+    """Several arguments are one message, one space apart."""
+    assert bash("org_notice a 'b c' d") == "::notice::a b c d\n"
+
+
+def test_mask_group_and_endgroup() -> None:
+    """The mask and the group escape too; endgroup is bare."""
+    assert (
+        bash("org_mask $'s3cr\\net'; org_group $'log\\n::x::'; org_endgroup")
+        == "::add-mask::s3cr%0Aet\n::group::log%0A::x::\n::endgroup::\n"
+    )
+
+
+# org_say: the plain line, one line whatever the text holds.
+def test_a_newline_and_a_command_stay_on_one_line() -> None:
+    """LF and CR are written as the two characters backslash-n and backslash-r."""
+    out = bash("org_say $'a\\n::error::x\\r'")
+    assert out == "a\\n::error::x\\r\n"
+    assert len(out.splitlines()) == 1
+
+
+def test_a_leading_command_is_broken() -> None:
+    """`::` first on the line, after any blanks, gets a backslash."""
+    assert (
+        bash(
+            "org_say '::error::x'; org_say '  ::error::x';"
+            " org_say $'\\t::error::x'; org_say $'\\xc2\\xa0::error::x'"
         )
+        == "\\::error::x\n  \\::error::x\n\t\\::error::x\n\u00a0\\::error::x\n"
+    )
 
 
-class TestSay:
-    """org_say: the plain line, one line whatever the text holds."""
-
-    def test_a_newline_and_a_command_stay_on_one_line(self) -> None:
-        """LF and CR are written as the two characters backslash-n and backslash-r."""
-        out = bash("org_say $'a\\n::error::x\\r'")
-        assert out == "a\\n::error::x\\r\n"
-        assert len(out.splitlines()) == 1
-
-    def test_a_leading_command_is_broken(self) -> None:
-        """`::` first on the line, after any blanks, gets a backslash."""
-        assert (
-            bash(
-                "org_say '::error::x'; org_say '  ::error::x';"
-                " org_say $'\\t::error::x'; org_say $'\\xc2\\xa0::error::x'"
-            )
-            == "\\::error::x\n  \\::error::x\n\t\\::error::x\n\u00a0\\::error::x\n"
-        )
-
-    def test_the_legacy_form_is_broken_anywhere(self) -> None:
-        """Every `##[` is written with a backslash; a mid-line `::` is left alone."""
-        assert (
-            bash("org_say 'see ##[error]x'; org_say 'see ::error:: below'")
-            == "see ##\\[error]x\nsee ::error:: below\n"
-        )
-
-    def test_the_callers_locale_is_kept(self) -> None:
-        """The function's C locale is its own."""
-        assert (
-            bash('LC_ALL=en_US.UTF-8; org_say x > /dev/null; echo "${LC_ALL}"')
-            == "en_US.UTF-8\n"
-        )
-
-    def test_readable_text_is_unchanged(self) -> None:
-        """Spaces, brackets, commas and quotes print as they are."""
-        assert (
-            bash("org_say 'chore: release v1.1.0' '[16, 17]' \"it's 100%\"")
-            == "chore: release v1.1.0 [16, 17] it's 100%\n"
-        )
+def test_the_legacy_form_is_broken_anywhere() -> None:
+    """Every `##[` is written with a backslash; a mid-line `::` is left alone."""
+    assert (
+        bash("org_say 'see ##[error]x'; org_say 'see ::error:: below'")
+        == "see ##\\[error]x\nsee ::error:: below\n"
+    )
 
 
-class TestTheLaw:
-    """No shell line writes outside text into a command unescaped."""
+def test_the_callers_locale_is_kept() -> None:
+    """The function's C locale is its own."""
+    assert (
+        bash('LC_ALL=en_US.UTF-8; org_say x > /dev/null; echo "${LC_ALL}"')
+        == "en_US.UTF-8\n"
+    )
 
-    def test_the_tree_keeps_both_rules(self) -> None:
-        """Every finding is a site to route through the writer."""
-        assert findings(CANON) == list[str]()
 
-    def test_rule_one_sees_each_shape(self) -> None:
-        """Expanding commands are refused; literal ones are not."""
-        red = [
-            'echo "::error::${x}"',
-            'echo "::notice::$x resolves"',
-            'echo "::warning::`date`"',
-            "jq -r '.[] | \"::notice::\\(.doc)\"'",
-            "printf '::error::%s\\n' \"$x\"",
-            'print(f"::error::{path}")',
-            'echo "::add-mask::${token}"',
-            'echo "::set-output name=x::${v}"',
-        ]
-        green = [
-            'echo "::error::stele is not on the runner"',
-            '[[ -n ${ASSET} ]] || { echo "::error::no bundle" && exit 1; }',
-            'echo "std::vec::Vec ${x}"',
-            'org_error "${x}"',
-            'print("::error::a literal")',
-        ]
-        for line in red:
-            assert rule_one(line)
-        for line in green:
-            assert not rule_one(line)
+def test_readable_text_is_unchanged() -> None:
+    """Spaces, brackets, commas and quotes print as they are."""
+    assert (
+        bash("org_say 'chore: release v1.1.0' '[16, 17]' \"it's 100%\"")
+        == "chore: release v1.1.0 [16, 17] it's 100%\n"
+    )
 
-    def test_rule_two_allows_only_percent_q_for_outside_text(self) -> None:
-        """An expansion reaches the log as a `%q` argument, or not at all."""
-        red = [
-            'echo "  ref: ${REF}"',
-            'echo "${REF} resolves"',
-            "printf '  ref: %s\\n' \"${REF}\"",
-            'printf "  ref: ${REF}\\n"',
-            'printf \'  %q and %s\\n\' "${a}" "${b}"',
-            "printf '%q\\n' \"${x}\"",
-            "printf '  %q\\n' \"${x}\"",
-            "printf '::%q\\n' \"${x}\"",
-            "printf '::error::x %q\\n' \"${x}\"",
-            "printf '::error::ok\\n%q\\n' \"${x}\"",
-            "printf '::error::ok\\n  ref: %s\\n' \"${x}\"",
-            '[[ -n ${x} ]] || echo "${x}"',
-            'echo "${refusals}" >&2',
-        ]
-        green = [
-            "printf '  ref: %q\\n' \"${REF}\"",
-            "printf '::error::pgrx legs were skipped\\n  planned: %q\\n' \"${M}\"",
-            "[[ ${rc} -eq 0 ]] || printf '::error::red\\n  exit: %q\\n' \"${rc}\"",
-            'printf \'  job %q: %q\\n\' "${name}" "${result}" >&2',
-            'echo "  a literal"',
-            'echo "${x}" >> "${GITHUB_OUTPUT}"',
-            'echo "${x}" | jq .',
-            'flags=$(printf " -A %s" "${lint}")',
-            "printf '100%% done\\n'",
-        ]
-        for line in red:
-            assert rule_two(line)
-        for line in green:
-            assert not rule_two(line)
 
-    def test_a_group_written_to_a_file_is_not_the_log(self) -> None:
-        """`{ echo "X=${x}"; } >> "${GITHUB_ENV}"` writes a file."""
-        unit = [
-            (1, "{"),
-            (2, '  echo "SA_WORK=${work}"'),
-            (3, '} >> "${GITHUB_ENV}"'),
-            (4, 'echo "${x}"'),
-        ]
-        want: set[int] = {2}
-        assert grouped(unit) == want
+# No shell line writes outside text into a command unescaped.
+def test_the_tree_keeps_both_rules() -> None:
+    """Every finding is a site to route through the writer."""
+    assert findings(CANON) == list[str]()
 
-    def test_clippy_lint_names_are_no_command(self) -> None:
-        """`clippy::all` holds `::` and a name, but opens nothing."""
-        assert PRINTS.search('" -D clippy::all -D clippy::pedantic"') is None
-        assert PRINTS.search('echo "::error::x"') is not None
 
-    def test_percent_q_keeps_a_newline_and_a_command_on_one_line(self) -> None:
-        """End to end: a literal command, then a detail line, is two lines."""
-        out = bash(
-            "v=$'a\\n::error::x'\n"
-            'echo "::error::a literal command"\n'
-            "printf '  planned: %q\\n' \"${v}\""
-        )
-        want: list[str] = ["::error::a literal command", "  planned: $'a\\n::error::x'"]
-        assert out.splitlines() == want
+def test_rule_one_sees_each_shape() -> None:
+    """Expanding commands are refused; literal ones are not."""
+    red = [
+        'echo "::error::${x}"',
+        'echo "::notice::$x resolves"',
+        'echo "::warning::`date`"',
+        "jq -r '.[] | \"::notice::\\(.doc)\"'",
+        "printf '::error::%s\\n' \"$x\"",
+        'print(f"::error::{path}")',
+        'echo "::add-mask::${token}"',
+        'echo "::set-output name=x::${v}"',
+    ]
+    green = [
+        'echo "::error::stele is not on the runner"',
+        '[[ -n ${ASSET} ]] || { echo "::error::no bundle" && exit 1; }',
+        'echo "std::vec::Vec ${x}"',
+        'org_error "${x}"',
+        'print("::error::a literal")',
+    ]
+    for line in red:
+        assert rule_one(line)
+    for line in green:
+        assert not rule_one(line)
 
-    def test_rule_two_reads_only_units_that_print_a_command(self) -> None:
-        """A step that prints no command may echo its text as it likes."""
-        unit = [(1, 'echo "${x}"')]
-        assert not any(PRINTS.search(ln) for _, ln in unit)
-        unit = [(1, 'echo "${x}"'), (2, 'echo "::error::literal"')]
-        assert any(PRINTS.search(ln) for _, ln in unit)
+
+def test_rule_two_allows_only_percent_q_for_outside_text() -> None:
+    """An expansion reaches the log as a `%q` argument, or not at all."""
+    red = [
+        'echo "  ref: ${REF}"',
+        'echo "${REF} resolves"',
+        "printf '  ref: %s\\n' \"${REF}\"",
+        'printf "  ref: ${REF}\\n"',
+        'printf \'  %q and %s\\n\' "${a}" "${b}"',
+        "printf '%q\\n' \"${x}\"",
+        "printf '  %q\\n' \"${x}\"",
+        "printf '::%q\\n' \"${x}\"",
+        "printf '::error::x %q\\n' \"${x}\"",
+        "printf '::error::ok\\n%q\\n' \"${x}\"",
+        "printf '::error::ok\\n  ref: %s\\n' \"${x}\"",
+        '[[ -n ${x} ]] || echo "${x}"',
+        'echo "${refusals}" >&2',
+    ]
+    green = [
+        "printf '  ref: %q\\n' \"${REF}\"",
+        "printf '::error::pgrx legs were skipped\\n  planned: %q\\n' \"${M}\"",
+        "[[ ${rc} -eq 0 ]] || printf '::error::red\\n  exit: %q\\n' \"${rc}\"",
+        'printf \'  job %q: %q\\n\' "${name}" "${result}" >&2',
+        'echo "  a literal"',
+        'echo "${x}" >> "${GITHUB_OUTPUT}"',
+        'echo "${x}" | jq .',
+        'flags=$(printf " -A %s" "${lint}")',
+        "printf '100%% done\\n'",
+    ]
+    for line in red:
+        assert rule_two(line)
+    for line in green:
+        assert not rule_two(line)
+
+
+def test_a_group_written_to_a_file_is_not_the_log() -> None:
+    """`{ echo "X=${x}"; } >> "${GITHUB_ENV}"` writes a file."""
+    unit = [
+        (1, "{"),
+        (2, '  echo "SA_WORK=${work}"'),
+        (3, '} >> "${GITHUB_ENV}"'),
+        (4, 'echo "${x}"'),
+    ]
+    want: set[int] = {2}
+    assert grouped(unit) == want
+
+
+def test_clippy_lint_names_are_no_command() -> None:
+    """`clippy::all` holds `::` and a name, but opens nothing."""
+    assert PRINTS.search('" -D clippy::all -D clippy::pedantic"') is None
+    assert PRINTS.search('echo "::error::x"') is not None
+
+
+def test_percent_q_keeps_a_newline_and_a_command_on_one_line() -> None:
+    """End to end: a literal command, then a detail line, is two lines."""
+    out = bash(
+        "v=$'a\\n::error::x'\n"
+        'echo "::error::a literal command"\n'
+        "printf '  planned: %q\\n' \"${v}\""
+    )
+    want: list[str] = ["::error::a literal command", "  planned: $'a\\n::error::x'"]
+    assert out.splitlines() == want
+
+
+def test_rule_two_reads_only_units_that_print_a_command() -> None:
+    """A step that prints no command may echo its text as it likes."""
+    unit = [(1, 'echo "${x}"')]
+    assert not any(PRINTS.search(ln) for _, ln in unit)
+    unit = [(1, 'echo "${x}"'), (2, 'echo "::error::literal"')]
+    assert any(PRINTS.search(ln) for _, ln in unit)

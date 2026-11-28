@@ -44,30 +44,26 @@ TOOLCHAIN: st.SearchStrategy[ToolchainDoc] = st.builds(
 )
 
 
-class TestVersions:
-    """A bare version, written and read."""
-
-    @given(VERSION)
-    def test_show_then_parse(self, version: tuple[int, int, int]) -> None:
-        """Three parts back as written; two parts padded."""
-        assert mp.parse_version(mp.show(version)) == version
-        assert mp.parse_version(f"{version[0]}.{version[1]}") == (
-            version[0],
-            version[1],
-            0,
-        )
+# A bare version, written and read.
+@given(VERSION)
+def test_show_then_parse(version: tuple[int, int, int]) -> None:
+    """Three parts back as written; two parts padded."""
+    assert mp.parse_version(mp.show(version)) == version
+    assert mp.parse_version(f"{version[0]}.{version[1]}") == (
+        version[0],
+        version[1],
+        0,
+    )
 
 
-class TestRefusal:
-    """Any string: a version, or None."""
-
-    @given(st.text(max_size=20))
-    @example("1.2.²")
-    @example("nightly-2026-07-20")
-    def test_any_string_is_read_or_refused(self, raw: str) -> None:
-        """A version or None."""
-        got = mp.parse_version(raw)
-        assert got is None or len(got) == 3  # ruff: ignore[magic-value-comparison] - three parts
+# Any string: a version, or None.
+@given(st.text(max_size=20))
+@example("1.2.²")
+@example("nightly-2026-07-20")
+def test_any_string_is_read_or_refused(raw: str) -> None:
+    """A version or None."""
+    got = mp.parse_version(raw)
+    assert got is None or len(got) == 3  # ruff: ignore[magic-value-comparison] - three parts
 
 
 def draw_workspace(draw: st.DrawFn) -> list[Member]:
@@ -98,53 +94,49 @@ def typed(members: list[Member]) -> list[mp.Package]:
     return [mp.package(m, str(m["name"])) for m in members]
 
 
-class TestPromises:
-    """Grouping does not depend on order."""
+# Grouping does not depend on order.
+@given(st.data(), workspace(), st.sets(NAME, max_size=2))
+def test_member_order_does_not_matter(
+    data: st.DataObject, members: list[Member], exclude: set[str]
+) -> None:
+    """The same members per promise, in any order."""
+    shuffled = data.draw(st.permutations(members))
+    one, unreachable_one, _ = mp.promises(typed(members), exclude)
+    two, unreachable_two, _ = mp.promises(typed(shuffled), exclude)
+    groups_one = {k: sorted(v) for k, v in one.items()}
+    groups_two = {k: sorted(v) for k, v in two.items()}
+    assert groups_one == groups_two
+    lost_one, lost_two = sorted(unreachable_one), sorted(unreachable_two)
+    assert lost_one == lost_two
+    grouped = {s.split("@")[0] for specs in one.values() for s in specs}
+    promised = {
+        m["name"] for m in members if m["rust_version"] and m["name"] not in exclude
+    }
+    assert grouped == promised
 
-    @given(st.data(), workspace(), st.sets(NAME, max_size=2))
-    def test_member_order_does_not_matter(
-        self, data: st.DataObject, members: list[Member], exclude: set[str]
-    ) -> None:
-        """The same members per promise, in any order."""
-        shuffled = data.draw(st.permutations(members))
-        one, unreachable_one, _ = mp.promises(typed(members), exclude)
-        two, unreachable_two, _ = mp.promises(typed(shuffled), exclude)
-        groups_one = {k: sorted(v) for k, v in one.items()}
-        groups_two = {k: sorted(v) for k, v in two.items()}
-        assert groups_one == groups_two
-        lost_one, lost_two = sorted(unreachable_one), sorted(unreachable_two)
-        assert lost_one == lost_two
-        grouped = {s.split("@")[0] for specs in one.values() for s in specs}
-        promised = {
-            m["name"] for m in members if m["rust_version"] and m["name"] not in exclude
-        }
-        assert grouped == promised
 
-    @given(st.lists(TOOLCHAIN, max_size=6))
-    def test_only_active_installed_toolchains_pin(
-        self, listing: list[ToolchainDoc]
-    ) -> None:
-        """Pins are the active and installed; absent the active, uninstalled."""
-        pinned, absent = mp.pins(mp.toolchains(listing))
-        served = set(pinned)
-        installed = {
-            mp.parse_version(e["version"])
-            for e in listing
-            if e["active"] and e["installed"]
-        }
-        assert served == installed
-        absent_sorted = sorted(absent)
-        uninstalled = sorted(
-            e["version"] for e in listing if e["active"] and not e["installed"]
-        )
-        assert absent_sorted == uninstalled
+@given(st.lists(TOOLCHAIN, max_size=6))
+def test_only_active_installed_toolchains_pin(listing: list[ToolchainDoc]) -> None:
+    """Pins are the active and installed; absent the active, uninstalled."""
+    pinned, absent = mp.pins(mp.toolchains(listing))
+    served = set(pinned)
+    installed = {
+        mp.parse_version(e["version"])
+        for e in listing
+        if e["active"] and e["installed"]
+    }
+    assert served == installed
+    absent_sorted = sorted(absent)
+    uninstalled = sorted(
+        e["version"] for e in listing if e["active"] and not e["installed"]
+    )
+    assert absent_sorted == uninstalled
 
-    @given(st.data(), st.dictionaries(NAME, st.integers(10, 30), max_size=4))
-    def test_pgrx_pairs_in_any_order(
-        self, data: st.DataObject, pairs: dict[str, int]
-    ) -> None:
-        """Each member's flags name its major."""
-        items = data.draw(st.permutations(list(pairs.items())))
-        declared = ",".join(f" {n}:{m} " for n, m in items)
-        flags = {n: f"--no-default-features --features pg{m}" for n, m in pairs.items()}
-        assert mp.features(declared) == flags
+
+@given(st.data(), st.dictionaries(NAME, st.integers(10, 30), max_size=4))
+def test_pgrx_pairs_in_any_order(data: st.DataObject, pairs: dict[str, int]) -> None:
+    """Each member's flags name its major."""
+    items = data.draw(st.permutations(list(pairs.items())))
+    declared = ",".join(f" {n}:{m} " for n, m in items)
+    flags = {n: f"--no-default-features --features pg{m}" for n, m in pairs.items()}
+    assert mp.features(declared) == flags

@@ -305,176 +305,187 @@ def require_engine() -> None:
         pytest.skip("cargo refreshes the lockfiles the plan declares")
 
 
+# Decide, from a changelog's text, whether a version has a section.
+#
+# The four rows are the whole decision: the file is absent, the file
+# names the version in an h2 two different ways, or it names no
+# version at all.
+@fixture
+def _set_up_test_the_changelog_contract() -> None:
+    """Skip unless stele and cargo are installed."""
+    require_engine()
+
+
 @pytest.mark.usefixtures("_set_up_test_the_changelog_contract")
-class TestTheChangelogContract:
-    """Decide, from a changelog's text, whether a version has a section.
+def test_a_missing_changelog_refuses_and_names_the_file() -> None:
+    """#742's first data point: edtf carried no root CHANGELOG.md."""
+    with TemporaryDirectory() as d:
+        result, emitted = Tree(d, changelog=None).prepare()
+    assert result.returncode == 1, result.stdout
+    assert (
+        "reading CHANGELOG.md: open CHANGELOG.md: no such file or directory"
+        in result.stderr
+    )
+    assert "release" not in emitted
 
-    The four rows are the whole decision: the file is absent, the file
-    names the version in an h2 two different ways, or it names no
-    version at all.
+
+@pytest.mark.usefixtures("_set_up_test_the_changelog_contract")
+def test_a_version_inside_any_h2_is_that_versions_section() -> None:
+    """#742's second data point, and the deriver is RIGHT.
+
+    The heading was meant as prose. It carries 1.3.0, the version
+    being released, so it is 1.3.0's section — Keep a Changelog's own
+    convention. The message reads as the opposite of the truth only
+    because the author did not intend a section.
     """
+    with TemporaryDirectory() as d:
+        result, _ = Tree(d, changelog=PROSE_H2_CARRYING_A_VERSION).prepare()
+    assert result.returncode == 1, result.stdout
+    assert "CHANGELOG.md already carries a section for 1.3.0" in result.stderr
 
-    @fixture
-    def _set_up_test_the_changelog_contract(self) -> None:
-        """Skip unless stele and cargo are installed."""
-        require_engine()
 
-    def test_a_missing_changelog_refuses_and_names_the_file(self) -> None:
-        """#742's first data point: edtf carried no root CHANGELOG.md."""
-        with TemporaryDirectory() as d:
-            result, emitted = Tree(d, changelog=None).prepare()
-        assert result.returncode == 1, result.stdout
-        assert (
-            "reading CHANGELOG.md: open CHANGELOG.md: no such file or directory"
-            in result.stderr
-        )
-        assert "release" not in emitted
+@pytest.mark.usefixtures("_set_up_test_the_changelog_contract")
+def test_a_conventional_section_for_the_version_refuses_identically() -> None:
+    """One rule, not a quirk: `## [1.3.0]` gets the same refusal."""
+    with TemporaryDirectory() as d:
+        result, _ = Tree(d, changelog=REAL_SECTION).prepare()
+    assert result.returncode == 1, result.stdout
+    assert "CHANGELOG.md already carries a section for 1.3.0" in result.stderr
 
-    def test_a_version_inside_any_h2_is_that_versions_section(self) -> None:
-        """#742's second data point, and the deriver is RIGHT.
 
-        The heading was meant as prose. It carries 1.3.0, the version
-        being released, so it is 1.3.0's section — Keep a Changelog's own
-        convention. The message reads as the opposite of the truth only
-        because the author did not intend a section.
-        """
-        with TemporaryDirectory() as d:
-            result, _ = Tree(d, changelog=PROSE_H2_CARRYING_A_VERSION).prepare()
-        assert result.returncode == 1, result.stdout
-        assert "CHANGELOG.md already carries a section for 1.3.0" in result.stderr
+@pytest.mark.usefixtures("_set_up_test_the_changelog_contract")
+def test_the_scaffold_reports_no_section_for_any_version() -> None:
+    """Measure #742's own "done when" on the real scaffold file.
 
-    def test_a_conventional_section_for_the_version_refuses_identically(self) -> None:
-        """One rule, not a quirk: `## [1.3.0]` gets the same refusal."""
-        with TemporaryDirectory() as d:
-            result, _ = Tree(d, changelog=REAL_SECTION).prepare()
-        assert result.returncode == 1, result.stdout
-        assert "CHANGELOG.md already carries a section for 1.3.0" in result.stderr
+    The file the org hands every new repository must feed the
+    deriver cleanly: no heading in it may parse as a version's
+    section, or the first release of every repository that copies it
+    dies the way edtf's did. This is the row that makes the three
+    refusals above mean something, and it reds if the scaffold ever
+    grows a version-shaped heading.
+    """
+    with TemporaryDirectory() as d:
+        tree = Tree(d, changelog=SCAFFOLD)
+        result, emitted = tree.prepare()
+        written = (tree.root / "CHANGELOG.md").read_text()
+    assert result.returncode == 0, result.stderr
+    assert emitted["release"] == "true"
+    assert emitted["version"] == "1.3.0"
+    assert emitted["current"] == "1.2.3"
+    assert "1.3.0" in written
+    assert "add a helper" in written
 
-    def test_the_scaffold_reports_no_section_for_any_version(self) -> None:
-        """Measure #742's own "done when" on the real scaffold file.
 
-        The file the org hands every new repository must feed the
-        deriver cleanly: no heading in it may parse as a version's
-        section, or the first release of every repository that copies it
-        dies the way edtf's did. This is the row that makes the three
-        refusals above mean something, and it reds if the scaffold ever
-        grows a version-shaped heading.
-        """
-        with TemporaryDirectory() as d:
-            tree = Tree(d, changelog=SCAFFOLD)
-            result, emitted = tree.prepare()
-            written = (tree.root / "CHANGELOG.md").read_text()
-        assert result.returncode == 0, result.stderr
-        assert emitted["release"] == "true"
-        assert emitted["version"] == "1.3.0"
-        assert emitted["current"] == "1.2.3"
-        assert "1.3.0" in written
-        assert "add a helper" in written
+# The decisions phase 1 step 1 still owns after stele took the rest.
+@fixture
+def _set_up_test_the_tree_decisions() -> None:
+    """Skip unless stele and cargo are installed."""
+    require_engine()
 
 
 @pytest.mark.usefixtures("_set_up_test_the_tree_decisions")
-class TestTheTreeDecisions:
-    """The decisions phase 1 step 1 still owns after stele took the rest."""
+def test_the_lockfiles_are_declared_to_the_plan_not_appended_after() -> None:
+    """`--also` carries both cargo workspaces into the plan's file list.
 
-    @fixture
-    def _set_up_test_the_tree_decisions(self) -> None:
-        """Skip unless stele and cargo are installed."""
-        require_engine()
+    The commit's contents are one list with one author. A lockfile
+    refreshed after the plan was made would be a second author, which
+    is the shape #374 found four releases of drift in.
+    """
+    with TemporaryDirectory() as d:
+        tree = Tree(d)
+        tree.add_fuzz_workspace()
+        result, _ = tree.prepare()
+        commit = decoded.as_object(tree.plan()["commit"], "the plan's commit")
+        additions = sorted(
+            decoded.as_str(a, "an addition")
+            for a in decoded.as_array(commit["additions"], "commit.additions")
+        )
+    assert result.returncode == 0, result.stderr
+    want: list[str] = [
+        "CHANGELOG.md",
+        "Cargo.lock",
+        "Cargo.toml",
+        "fuzz/Cargo.lock",
+    ]
+    assert want == additions
 
-    def test_the_lockfiles_are_declared_to_the_plan_not_appended_after(self) -> None:
-        """`--also` carries both cargo workspaces into the plan's file list.
 
-        The commit's contents are one list with one author. A lockfile
-        refreshed after the plan was made would be a second author, which
-        is the shape #374 found four releases of drift in.
-        """
-        with TemporaryDirectory() as d:
-            tree = Tree(d)
-            tree.add_fuzz_workspace()
-            result, _ = tree.prepare()
-            commit = decoded.as_object(tree.plan()["commit"], "the plan's commit")
-            additions = sorted(
-                decoded.as_str(a, "an addition")
-                for a in decoded.as_array(commit["additions"], "commit.additions")
-            )
-        assert result.returncode == 0, result.stderr
-        want: list[str] = [
-            "CHANGELOG.md",
-            "Cargo.lock",
-            "Cargo.toml",
-            "fuzz/Cargo.lock",
-        ]
-        assert want == additions
+@pytest.mark.usefixtures("_set_up_test_the_tree_decisions")
+def test_a_silent_range_releases_nothing_and_says_so() -> None:
+    """chore/ci/docs/style/test release nothing; the step is not a failure."""
+    with TemporaryDirectory() as d:
+        tree = Tree(d)
+        tree.git("tag", "-a", "v1.3.0", "-m", "v1.3.0")
+        tree.write("docs/notes.md", "notes\n")
+        tree.commit("docs: write some notes")
+        result, emitted = tree.prepare()
+    assert result.returncode == 0, result.stderr
+    assert "nothing to release" in result.stdout
+    assert emitted["release"] == "false"
+    assert "version" not in emitted
 
-    def test_a_silent_range_releases_nothing_and_says_so(self) -> None:
-        """chore/ci/docs/style/test release nothing; the step is not a failure."""
-        with TemporaryDirectory() as d:
-            tree = Tree(d)
-            tree.git("tag", "-a", "v1.3.0", "-m", "v1.3.0")
-            tree.write("docs/notes.md", "notes\n")
-            tree.commit("docs: write some notes")
-            result, emitted = tree.prepare()
-        assert result.returncode == 0, result.stderr
-        assert "nothing to release" in result.stdout
-        assert emitted["release"] == "false"
-        assert "version" not in emitted
 
-    def test_the_release_branch_is_emitted_on_both_paths_and_agrees(self) -> None:
-        """One spelling of the release branch, on both paths (#1260).
+@pytest.mark.usefixtures("_set_up_test_the_tree_decisions")
+def test_the_release_branch_is_emitted_on_both_paths_and_agrees() -> None:
+    """One spelling of the release branch, on both paths (#1260).
 
-        A nothing plan names no branch, so the step that closes a stale
-        Release PR reads the prepare step's `branch` output. On a release
-        the plan's own `.branch.name` must be that same value, or the
-        open and close legs would maintain different branches.
-        """
-        with TemporaryDirectory() as d:
-            tree = Tree(d)
-            result, releasing = tree.prepare()
-            branch = decoded.as_object(tree.plan()["branch"], "the plan's branch")
-            planned = decoded.as_str(branch["name"], "branch.name")
-        assert result.returncode == 0, result.stderr
-        assert releasing["release"] == "true"
-        assert planned
-        assert planned == releasing["branch"]
-        with TemporaryDirectory() as d:
-            tree = Tree(d)
-            tree.git("tag", "-a", "v1.3.0", "-m", "v1.3.0")
-            tree.write("docs/notes.md", "notes\n")
-            tree.commit("docs: write some notes")
-            result, quiet = tree.prepare()
-        assert result.returncode == 0, result.stderr
-        assert quiet["release"] == "false"
-        assert releasing["branch"] == quiet["branch"]
+    A nothing plan names no branch, so the step that closes a stale
+    Release PR reads the prepare step's `branch` output. On a release
+    the plan's own `.branch.name` must be that same value, or the
+    open and close legs would maintain different branches.
+    """
+    with TemporaryDirectory() as d:
+        tree = Tree(d)
+        result, releasing = tree.prepare()
+        branch = decoded.as_object(tree.plan()["branch"], "the plan's branch")
+        planned = decoded.as_str(branch["name"], "branch.name")
+    assert result.returncode == 0, result.stderr
+    assert releasing["release"] == "true"
+    assert planned
+    assert planned == releasing["branch"]
+    with TemporaryDirectory() as d:
+        tree = Tree(d)
+        tree.git("tag", "-a", "v1.3.0", "-m", "v1.3.0")
+        tree.write("docs/notes.md", "notes\n")
+        tree.commit("docs: write some notes")
+        result, quiet = tree.prepare()
+    assert result.returncode == 0, result.stderr
+    assert quiet["release"] == "false"
+    assert releasing["branch"] == quiet["branch"]
 
-    def test_a_leftover_next_sql_stub_refuses_with_the_remedy(self) -> None:
-        """Derived state written by hand is a refusal, never a rename (#132).
 
-        The stub is checked AFTER the plan is derived, so this row also
-        pins that a refusal at this point spends no version: the step
-        fails before anything is emitted.
-        """
-        with TemporaryDirectory() as d:
-            tree = Tree(d)
-            tree.write("sql/demo--next.sql", "-- hand-authored\n")
-            tree.commit("feat: leave a stub behind")
-            result, emitted = tree.prepare()
-        assert result.returncode == 1, result.stdout
-        assert "--next.sql stubs are retired" in result.stderr
-        assert "sql/demo--next.sql" in result.stderr
-        assert "sql/next-data.sql" in result.stderr
-        assert "release" not in emitted
+@pytest.mark.usefixtures("_set_up_test_the_tree_decisions")
+def test_a_leftover_next_sql_stub_refuses_with_the_remedy() -> None:
+    """Derived state written by hand is a refusal, never a rename (#132).
 
-    def test_an_untracked_next_sql_stub_is_not_a_refusal(self) -> None:
-        """`git ls-files`, never a walker: an untracked file is not the tree.
+    The stub is checked AFTER the plan is derived, so this row also
+    pins that a refusal at this point spends no version: the step
+    fails before anything is emitted.
+    """
+    with TemporaryDirectory() as d:
+        tree = Tree(d)
+        tree.write("sql/demo--next.sql", "-- hand-authored\n")
+        tree.commit("feat: leave a stub behind")
+        result, emitted = tree.prepare()
+    assert result.returncode == 1, result.stdout
+    assert "--next.sql stubs are retired" in result.stderr
+    assert "sql/demo--next.sql" in result.stderr
+    assert "sql/next-data.sql" in result.stderr
+    assert "release" not in emitted
 
-        The belt's own convention, and the difference matters here — a
-        scratch file in a maintainer's working copy must not be able to
-        refuse a release.
-        """
-        with TemporaryDirectory() as d:
-            tree = Tree(d)
-            tree.write("sql/demo--next.sql", "-- never staged\n")
-            result, emitted = tree.prepare()
-        assert result.returncode == 0, result.stderr
-        assert "--next.sql stubs are retired" not in result.stderr
-        assert emitted["release"] == "true"
+
+@pytest.mark.usefixtures("_set_up_test_the_tree_decisions")
+def test_an_untracked_next_sql_stub_is_not_a_refusal() -> None:
+    """`git ls-files`, never a walker: an untracked file is not the tree.
+
+    The belt's own convention, and the difference matters here — a
+    scratch file in a maintainer's working copy must not be able to
+    refuse a release.
+    """
+    with TemporaryDirectory() as d:
+        tree = Tree(d)
+        tree.write("sql/demo--next.sql", "-- never staged\n")
+        result, emitted = tree.prepare()
+    assert result.returncode == 0, result.stderr
+    assert "--next.sql stubs are retired" not in result.stderr
+    assert emitted["release"] == "true"

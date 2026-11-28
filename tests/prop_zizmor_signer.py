@@ -75,26 +75,23 @@ def draw_finding(draw: st.DrawFn) -> Drawn:
 finding = st.composite(draw_finding)
 
 
-class TestExemption:
-    """Dropped exactly when every reference is the signer's."""
+# Dropped exactly when every reference is the signer's.
+@given(finding())
+def test_on_signer_exactly_when_every_reference_is(drawn: Drawn) -> None:
+    """Case of owner and repository does not matter."""
+    found, on = drawn
+    signer = zs.signer_repository(WORKFLOW)
+    assert zs.on_signer(zs.Finding.of(found), signer) == on, found
 
-    @given(finding())
-    def test_on_signer_exactly_when_every_reference_is(self, drawn: Drawn) -> None:
-        """Case of owner and repository does not matter."""
-        found, on = drawn
-        signer = zs.signer_repository(WORKFLOW)
-        assert zs.on_signer(zs.Finding.of(found), signer) == on, found
 
-    @given(st.data(), st.lists(finding(), max_size=6))
-    def test_order_does_not_matter(
-        self, data: st.DataObject, drawn: list[Drawn]
-    ) -> None:
-        """The same findings in any order: same status, same counts."""
-        findings = [f for f, _ in drawn]
-        shuffled = data.draw(st.permutations(findings))
-        assert run(json.dumps(findings)) == run(json.dumps(shuffled))
-        status, _ = run(json.dumps(findings))
-        assert status == (0 if all(on for _, on in drawn) else 1)
+@given(st.data(), st.lists(finding(), max_size=6))
+def test_order_does_not_matter(data: st.DataObject, drawn: list[Drawn]) -> None:
+    """The same findings in any order: same status, same counts."""
+    findings = [f for f, _ in drawn]
+    shuffled = data.draw(st.permutations(findings))
+    assert run(json.dumps(findings)) == run(json.dumps(shuffled))
+    status, _ = run(json.dumps(findings))
+    assert status == (0 if all(on for _, on in drawn) else 1)
 
 
 def run(stdout: str) -> tuple[int, str]:
@@ -168,13 +165,11 @@ SHAPED: st.SearchStrategy[list[dict[str, object]]] = st.lists(
 )
 
 
-class TestRefusal:
-    """Any output of zizmor is answered, never a traceback."""
-
-    @given(st.one_of(JSON.map(dumped), SHAPED.map(dumped), st.text(max_size=40)))
-    @example('[{"ident": "stale-action-refs", "locations": [{"symbolic": "x"}]}]')
-    @example('[{"ident": []}]')
-    def test_main_answers_any_output(self, stdout: str) -> None:
-        """0, 1 or 14."""
-        status, _ = run(stdout)
-        assert status in {0, 1, 14}
+# Any output of zizmor is answered, never a traceback.
+@given(st.one_of(JSON.map(dumped), SHAPED.map(dumped), st.text(max_size=40)))
+@example('[{"ident": "stale-action-refs", "locations": [{"symbolic": "x"}]}]')
+@example('[{"ident": []}]')
+def test_main_answers_any_output(stdout: str) -> None:
+    """0, 1 or 14."""
+    status, _ = run(stdout)
+    assert status in {0, 1, 14}

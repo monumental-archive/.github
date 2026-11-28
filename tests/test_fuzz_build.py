@@ -219,14 +219,10 @@ NESTED_SEEDED: list[tuple[str, str]] = [
 ]
 
 
-@pytest.mark.usefixtures("_set_up_test_fuzz_build")
-class TestFuzzBuild:
+class FuzzBuild:
     """lint:fuzz-build says "stale" only when cargo says the lock is."""
 
-    @fixture
-    def _set_up_test_fuzz_build(
-        self, tmp_path: Path, request: pytest.FixtureRequest
-    ) -> None:
+    def __init__(self, tmp_path: Path, request: pytest.FixtureRequest) -> None:
         """Plant a fuzz crate with a committed lock, and the stubs."""
         self.root = tmp_path
         (self.root / "fuzz").mkdir()
@@ -302,173 +298,192 @@ class TestFuzzBuild:
         )
         return done.returncode, done.stdout, done.stderr, calls
 
-    def replays(self, calls: list[str]) -> list[tuple[str, Path, str]]:
-        """Split the calls after the build into (target, directory, seeds).
 
-        Returns:
-            One triple per `fuzz run`, in order.
+@fixture
+def fuzz_build(tmp_path: Path, request: pytest.FixtureRequest) -> FuzzBuild:
+    """Give each row its own FuzzBuild."""
+    return FuzzBuild(tmp_path, request)
 
-        """
-        assert calls[: len(BUILT)] == BUILT
-        rest: list[str] = calls[len(BUILT) :]
-        assert len(rest) % 2 == 0, rest
-        runs: list[str] = rest[::2]
-        listed: list[str] = rest[1::2]
-        out: list[tuple[str, Path, str]] = []
-        for run, seeds in zip(runs, listed, strict=True):
-            words = run.split(" ")
-            assert words[:4] == RUN_HEAD, run
-            assert words[6:8] == RUN_TAIL, run
-            assert len(words) == 9, run
-            assert words[8].startswith(ARTIFACT_FLAG), run
-            assert seeds.startswith("seeds:"), seeds
-            out.append((words[4], Path(words[5]), seeds.removeprefix("seeds:")))
-        return out
 
-    def seeded(self, calls: list[str]) -> list[tuple[str, str]]:
-        """Return (target, seeds seen) per replay.
+def replays(calls: list[str]) -> list[tuple[str, Path, str]]:
+    """Split the calls after the build into (target, directory, seeds).
 
-        Returns:
-            The pairs, in replay order.
+    Returns:
+        One triple per `fuzz run`, in order.
 
-        """
-        return [(target, seeds) for target, _, seeds in self.replays(calls)]
+    """
+    assert calls[: len(BUILT)] == BUILT
+    rest: list[str] = calls[len(BUILT) :]
+    assert len(rest) % 2 == 0, rest
+    runs: list[str] = rest[::2]
+    listed: list[str] = rest[1::2]
+    out: list[tuple[str, Path, str]] = []
+    for run, seeds in zip(runs, listed, strict=True):
+        words = run.split(" ")
+        assert words[:4] == RUN_HEAD, run
+        assert words[6:8] == RUN_TAIL, run
+        assert len(words) == 9, run
+        assert words[8].startswith(ARTIFACT_FLAG), run
+        assert seeds.startswith("seeds:"), seeds
+        out.append((words[4], Path(words[5]), seeds.removeprefix("seeds:")))
+    return out
 
-    @pytest.mark.parametrize(
-        "table",
-        [
-            "[workspace]\n",
-            '[workspace]\nmembers = ["."]\n',
-            "[workspace.metadata]\nx = 1\n",
-        ],
+
+def seeded(calls: list[str]) -> list[tuple[str, str]]:
+    """Return (target, seeds seen) per replay.
+
+    Returns:
+        The pairs, in replay order.
+
+    """
+    return [(target, seeds) for target, _, seeds in replays(calls)]
+
+
+@pytest.mark.parametrize(
+    "table",
+    [
+        "[workspace]\n",
+        '[workspace]\nmembers = ["."]\n',
+        "[workspace.metadata]\nx = 1\n",
+    ],
+)
+def test_a_current_lock_builds(fuzz_build: FuzzBuild, table: object) -> None:
+    """The probe passes, the build runs, the corpus replays, all reported."""
+    fuzz_build.seed("parse", "a", "x")
+    fuzz_build.seed("round_trip", "b", "y")
+    fuzz_build.manifest(MANIFEST + "\n" + table)
+    status, out, err, calls = fuzz_build.run_lint()
+    assert (status, err) == (0, "")
+    assert out == (
+        "lint:fuzz-build: 2 target(s) build, lockfile current, "
+        "2 committed seed(s) replay clean\n"
     )
-    def test_a_current_lock_builds(self, table: object) -> None:
-        """The probe passes, the build runs, the corpus replays, all reported."""
-        self.seed("parse", "a", "x")
-        self.seed("round_trip", "b", "y")
-        self.manifest(MANIFEST + "\n" + table)
-        status, out, err, calls = self.run_lint()
-        assert (status, err) == (0, "")
-        assert out == (
-            "lint:fuzz-build: 2 target(s) build, lockfile current, "
-            "2 committed seed(s) replay clean\n"
-        )
-        assert self.seeded(calls) == BOTH_SEEDED
+    assert seeded(calls) == BOTH_SEEDED
 
-    def test_a_target_with_no_tracked_corpus_is_red(self) -> None:
-        """No tracked file under fuzz/corpus/<target>/ reds, naming it."""
-        self.manifest(MANIFEST + WORKSPACE)
-        self.seed("parse", "a", "x")
-        status, out, err, calls = self.run_lint()
-        assert (status, out) == (1, "")
-        assert err == NO_CORPUS.format(target="round_trip") + NO_CORPUS_REMEDY
-        assert calls == BUILT
 
-    def test_an_untracked_corpus_is_no_corpus(self) -> None:
-        """A corpus on disk that git does not track is red: tracked files only."""
-        self.manifest(MANIFEST + WORKSPACE)
-        self.seed("parse", "a", "x")
-        self.seed("round_trip", "b", "y", track=False)
-        status, out, err, calls = self.run_lint()
-        assert (status, out) == (1, "")
-        assert err == NO_CORPUS.format(target="round_trip") + NO_CORPUS_REMEDY
-        assert calls == BUILT
+def test_a_target_with_no_tracked_corpus_is_red(fuzz_build: FuzzBuild) -> None:
+    """No tracked file under fuzz/corpus/<target>/ reds, naming it."""
+    fuzz_build.manifest(MANIFEST + WORKSPACE)
+    fuzz_build.seed("parse", "a", "x")
+    status, out, err, calls = fuzz_build.run_lint()
+    assert (status, out) == (1, "")
+    assert err == NO_CORPUS.format(target="round_trip") + NO_CORPUS_REMEDY
+    assert calls == BUILT
 
-    def test_one_tracked_seed_per_target_passes(self) -> None:
-        """One seed is a corpus; an untracked sibling is never replayed."""
-        self.manifest(MANIFEST + WORKSPACE)
-        self.seed("parse", "a", "x")
-        self.seed("parse", "local-find", "CRASH", track=False)
-        self.seed("round_trip", "nested/b", "y")
-        status, out, err, calls = self.run_lint()
-        assert (status, err) == (0, "")
-        assert out == (
-            "lint:fuzz-build: 2 target(s) build, lockfile current, "
-            "2 committed seed(s) replay clean\n"
-        )
-        assert self.seeded(calls) == NESTED_SEEDED
 
-    def test_a_crashing_seed_is_red(self) -> None:
-        """A tracked seed the target fails on reds, naming the target."""
-        self.manifest(MANIFEST + WORKSPACE)
-        self.seed("parse", "a", "CRASH")
-        self.seed("round_trip", "b", "y")
-        status, out, err, calls = self.run_lint()
-        assert (status, out) == (1, "")
-        assert err == CRASHED.format(target="parse") + CRASHED_REMEDY + LIBFUZZER_SAYS
-        assert self.seeded(calls) == BOTH_SEEDED
+def test_an_untracked_corpus_is_no_corpus(fuzz_build: FuzzBuild) -> None:
+    """A corpus on disk that git does not track is red: tracked files only."""
+    fuzz_build.manifest(MANIFEST + WORKSPACE)
+    fuzz_build.seed("parse", "a", "x")
+    fuzz_build.seed("round_trip", "b", "y", track=False)
+    status, out, err, calls = fuzz_build.run_lint()
+    assert (status, out) == (1, "")
+    assert err == NO_CORPUS.format(target="round_trip") + NO_CORPUS_REMEDY
+    assert calls == BUILT
 
-    def test_the_replay_reads_a_directory_outside_the_tree(self) -> None:
-        """The replay never gets fuzz/corpus, and its scratch copy is removed."""
-        self.manifest(MANIFEST + WORKSPACE)
-        self.seed("parse", "a", "x")
-        self.seed("round_trip", "b", "y")
-        status, _, err, calls = self.run_lint()
-        assert (status, err) == (0, "")
-        replays = self.replays(calls)
-        assert len(replays) == 2
-        for line in calls:
-            assert "fuzz/corpus" not in line
-        for _, directory, _ in replays:
-            assert directory.is_absolute(), directory
-            assert not directory.resolve().is_relative_to(self.root), directory
-            assert not directory.exists(), directory
 
-    @pytest.mark.parametrize("dialect", [STALE_OLD, STALE_NEW])
-    def test_a_stale_lock_is_called_stale(self, dialect: object) -> None:
-        """Only cargo's lockfile refusal earns the stale message."""
-        lock = f"{self.root}/fuzz/Cargo.lock"
-        self.manifest(MANIFEST + WORKSPACE)
-        text = dialect.format(lock=lock)
-        self.refuse(text)
-        status, out, err, calls = self.run_lint()
-        assert (status, out) == (1, "")
-        assert err == STALE_HEAD + STALE_REMEDY + text
-        assert calls == ONE_PROBE
+def test_one_tracked_seed_per_target_passes(fuzz_build: FuzzBuild) -> None:
+    """One seed is a corpus; an untracked sibling is never replayed."""
+    fuzz_build.manifest(MANIFEST + WORKSPACE)
+    fuzz_build.seed("parse", "a", "x")
+    fuzz_build.seed("parse", "local-find", "CRASH", track=False)
+    fuzz_build.seed("round_trip", "nested/b", "y")
+    status, out, err, calls = fuzz_build.run_lint()
+    assert (status, err) == (0, "")
+    assert out == (
+        "lint:fuzz-build: 2 target(s) build, lockfile current, "
+        "2 committed seed(s) replay clean\n"
+    )
+    assert seeded(calls) == NESTED_SEEDED
 
-    def test_no_workspace_table_reds_before_the_probe(self) -> None:
-        """Resolution must not depend on where the checkout sits."""
-        self.manifest(MANIFEST)
-        status, out, err, calls = self.run_lint()
-        assert (status, out, err) == (1, "", NO_WORKSPACE)
-        assert calls == NO_CALLS
 
-    def test_another_probe_failure_passes_cargo_through(self) -> None:
-        """Cargo's own error, with no lockfile remedy that cannot help."""
-        self.manifest(MANIFEST + WORKSPACE)
-        text = NESTED.format(root=self.root)
-        self.refuse(text)
-        status, out, err, calls = self.run_lint()
-        assert (status, out) == (1, "")
-        assert err == UNRESOLVED_HEAD + text
-        assert "stale" not in err
-        assert "cargo update" not in err
-        assert calls == ONE_PROBE
+def test_a_crashing_seed_is_red(fuzz_build: FuzzBuild) -> None:
+    """A tracked seed the target fails on reds, naming the target."""
+    fuzz_build.manifest(MANIFEST + WORKSPACE)
+    fuzz_build.seed("parse", "a", "CRASH")
+    fuzz_build.seed("round_trip", "b", "y")
+    status, out, err, calls = fuzz_build.run_lint()
+    assert (status, out) == (1, "")
+    assert err == CRASHED.format(target="parse") + CRASHED_REMEDY + LIBFUZZER_SAYS
+    assert seeded(calls) == BOTH_SEEDED
 
-    def test_an_unparsable_manifest_is_left_to_cargo(self) -> None:
-        """The table check never claims a parse error as a missing table."""
-        self.manifest(MANIFEST + "[workspace\n")
-        text = "error: failed to parse manifest at `fuzz/Cargo.toml`\n"
-        self.refuse(text)
-        status, _, err, calls = self.run_lint()
-        assert status == 1
-        assert err == UNRESOLVED_HEAD + text
-        assert calls == ONE_PROBE
 
-    def test_a_crash_artifact_lands_in_the_scratch_directory(self) -> None:
-        """LibFuzzer's -artifact_prefix names the scratch copy, never the tree."""
-        self.manifest(MANIFEST + WORKSPACE)
-        self.seed("parse", "a", "CRASH")
-        self.seed("round_trip", "b", "y")
-        status, _, _, calls = self.run_lint()
-        assert status == 1
-        replays = self.replays(calls)
-        assert len(replays) == 2
-        for line, (_, directory, _) in zip(
-            [c for c in calls if c.startswith("fuzz run ")], replays, strict=True
-        ):
-            prefix = Path(line.split(" ")[8].removeprefix(ARTIFACT_FLAG))
-            assert line.endswith("/"), line
-            assert prefix == directory.parent
-            assert not prefix.resolve().is_relative_to(self.root), line
-            assert "fuzz/artifacts" not in line
+def test_the_replay_reads_a_directory_outside_the_tree(fuzz_build: FuzzBuild) -> None:
+    """The replay never gets fuzz/corpus, and its scratch copy is removed."""
+    fuzz_build.manifest(MANIFEST + WORKSPACE)
+    fuzz_build.seed("parse", "a", "x")
+    fuzz_build.seed("round_trip", "b", "y")
+    status, _, err, calls = fuzz_build.run_lint()
+    assert (status, err) == (0, "")
+    replayed = replays(calls)
+    assert len(replayed) == 2
+    for line in calls:
+        assert "fuzz/corpus" not in line
+    for _, directory, _ in replayed:
+        assert directory.is_absolute(), directory
+        assert not directory.resolve().is_relative_to(fuzz_build.root), directory
+        assert not directory.exists(), directory
+
+
+@pytest.mark.parametrize("dialect", [STALE_OLD, STALE_NEW])
+def test_a_stale_lock_is_called_stale(fuzz_build: FuzzBuild, dialect: object) -> None:
+    """Only cargo's lockfile refusal earns the stale message."""
+    lock = f"{fuzz_build.root}/fuzz/Cargo.lock"
+    fuzz_build.manifest(MANIFEST + WORKSPACE)
+    text = dialect.format(lock=lock)
+    fuzz_build.refuse(text)
+    status, out, err, calls = fuzz_build.run_lint()
+    assert (status, out) == (1, "")
+    assert err == STALE_HEAD + STALE_REMEDY + text
+    assert calls == ONE_PROBE
+
+
+def test_no_workspace_table_reds_before_the_probe(fuzz_build: FuzzBuild) -> None:
+    """Resolution must not depend on where the checkout sits."""
+    fuzz_build.manifest(MANIFEST)
+    status, out, err, calls = fuzz_build.run_lint()
+    assert (status, out, err) == (1, "", NO_WORKSPACE)
+    assert calls == NO_CALLS
+
+
+def test_another_probe_failure_passes_cargo_through(fuzz_build: FuzzBuild) -> None:
+    """Cargo's own error, with no lockfile remedy that cannot help."""
+    fuzz_build.manifest(MANIFEST + WORKSPACE)
+    text = NESTED.format(root=fuzz_build.root)
+    fuzz_build.refuse(text)
+    status, out, err, calls = fuzz_build.run_lint()
+    assert (status, out) == (1, "")
+    assert err == UNRESOLVED_HEAD + text
+    assert "stale" not in err
+    assert "cargo update" not in err
+    assert calls == ONE_PROBE
+
+
+def test_an_unparsable_manifest_is_left_to_cargo(fuzz_build: FuzzBuild) -> None:
+    """The table check never claims a parse error as a missing table."""
+    fuzz_build.manifest(MANIFEST + "[workspace\n")
+    text = "error: failed to parse manifest at `fuzz/Cargo.toml`\n"
+    fuzz_build.refuse(text)
+    status, _, err, calls = fuzz_build.run_lint()
+    assert status == 1
+    assert err == UNRESOLVED_HEAD + text
+    assert calls == ONE_PROBE
+
+
+def test_a_crash_artifact_lands_in_the_scratch_directory(fuzz_build: FuzzBuild) -> None:
+    """LibFuzzer's -artifact_prefix names the scratch copy, never the tree."""
+    fuzz_build.manifest(MANIFEST + WORKSPACE)
+    fuzz_build.seed("parse", "a", "CRASH")
+    fuzz_build.seed("round_trip", "b", "y")
+    status, _, _, calls = fuzz_build.run_lint()
+    assert status == 1
+    replayed = replays(calls)
+    assert len(replayed) == 2
+    for line, (_, directory, _) in zip(
+        [c for c in calls if c.startswith("fuzz run ")], replayed, strict=True
+    ):
+        prefix = Path(line.split(" ")[8].removeprefix(ARTIFACT_FLAG))
+        assert line.endswith("/"), line
+        assert prefix == directory.parent
+        assert not prefix.resolve().is_relative_to(fuzz_build.root), line
+        assert "fuzz/artifacts" not in line

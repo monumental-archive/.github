@@ -44,41 +44,38 @@ def bucket(lower: str) -> str:
     return f"{lower[0:2]}/{lower[2:4]}"
 
 
-class TestInvariance:
-    """The record follows the crate, not the spelling."""
-
-    @given(NAME)
-    @example("A")
-    @example("abc")
-    @example("Serde")
-    def test_record_is_the_lowercased_name_in_its_bucket(self, name: str) -> None:
-        """Bucket by length, then the lowercased name."""
-        lower = name.lower()
-        assert ci.index_path(name) == f"{bucket(lower)}/{lower}"
-        assert ci.index_path(name.swapcase()) == ci.index_path(name)
-        assert ci.index_url(name) == f"{ci.INDEX}/{ci.index_path(name)}"
-
-    @given(NAME, NAME)
-    def test_distinct_crates_distinct_records(self, one: str, two: str) -> None:
-        """Names that differ beyond case never share a record."""
-        if one.lower() == two.lower():
-            return
-        assert ci.index_path(one) != ci.index_path(two)
+# The record follows the crate, not the spelling.
+@given(NAME)
+@example("A")
+@example("abc")
+@example("Serde")
+def test_record_is_the_lowercased_name_in_its_bucket(name: str) -> None:
+    """Bucket by length, then the lowercased name."""
+    lower = name.lower()
+    assert ci.index_path(name) == f"{bucket(lower)}/{lower}"
+    assert ci.index_path(name.swapcase()) == ci.index_path(name)
+    assert ci.index_url(name) == f"{ci.INDEX}/{ci.index_path(name)}"
 
 
-class TestRefusal:
-    """Any argument list gets an answer by name."""
+@given(NAME, NAME)
+def test_distinct_crates_distinct_records(one: str, two: str) -> None:
+    """Names that differ beyond case never share a record."""
+    if one.lower() == two.lower():
+        return
+    assert ci.index_path(one) != ci.index_path(two)
 
-    @given(st.lists(st.text(max_size=20), max_size=3))
-    @example(URL_AND_EMPTY)
-    @example(URL_ONLY)
-    def test_main_answers_any_argv(self, argv: list[str]) -> None:
-        """A URL and 0, or a refusal on stderr and 2."""
-        out, err = io.StringIO(), io.StringIO()
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            status = ci.main(argv)
-        assert status in {0, 2}
-        if status == 0:
-            assert out.getvalue().startswith(ci.INDEX)
-        else:
-            assert err.getvalue().strip()
+
+# Any argument list gets an answer by name.
+@given(st.lists(st.text(max_size=20), max_size=3))
+@example(URL_AND_EMPTY)
+@example(URL_ONLY)
+def test_main_answers_any_argv(argv: list[str]) -> None:
+    """A URL and 0, or a refusal on stderr and 2."""
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        status = ci.main(argv)
+    assert status in {0, 2}
+    if status == 0:
+        assert out.getvalue().startswith(ci.INDEX)
+    else:
+        assert err.getvalue().strip()

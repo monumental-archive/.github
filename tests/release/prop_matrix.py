@@ -146,75 +146,67 @@ def expected(stdout: str) -> list[object]:
     )
 
 
-class TestLegsFollowTheFields:
-    """V: spaces, a tail and order move nothing but the order of legs."""
-
-    @given(CLASS, st.data())
-    def test_targets(self, cls: str, data: st.DataObject) -> None:
-        """Every requested target is a leg, in the order requested."""
-        runners = sorted(matrix.TARGETS[cls][0])
-        fields = data.draw(st.permutations(runners)).copy()
-        fields = fields[: data.draw(st.integers(1, len(fields)))]
-        request = spaced(data, fields)
-        code, out, err = run(["targets", cls, request])
-        assert code == 0, err
-        assert expected(out) == fields
-
-    @given(st.lists(MAJOR, min_size=1, max_size=5, unique=True), st.data())
-    def test_majors(self, majors: list[str], data: st.DataObject) -> None:
-        """Every requested major is a cell, in the order requested."""
-        code, out, err = run(["pgrx-images", spaced(data, majors)])
-        assert code == 0, err
-        assert expected(out) == majors
+# V: spaces, a tail and order move nothing but the order of legs.
+@given(CLASS, st.data())
+def test_targets(cls: str, data: st.DataObject) -> None:
+    """Every requested target is a leg, in the order requested."""
+    runners = sorted(matrix.TARGETS[cls][0])
+    fields = data.draw(st.permutations(runners)).copy()
+    fields = fields[: data.draw(st.integers(1, len(fields)))]
+    request = spaced(data, fields)
+    code, out, err = run(["targets", cls, request])
+    assert code == 0, err
+    assert expected(out) == fields
 
 
-class TestStrangerRefusedByName:
-    """V: the first field nobody tabled is the one the refusal names."""
-
-    @given(CLASS, STRANGER, st.data())
-    @example("go-binary", "linux-386", None)
-    def test_unknown_target(
-        self, cls: str, stranger: str, data: st.DataObject | None
-    ) -> None:
-        """Known fields around it do not hide it."""
-        runners, hint = matrix.TARGETS[cls]
-        known = sorted(runners)
-        before = data.draw(st.lists(st.sampled_from(known), max_size=2)) if data else []
-        after = data.draw(st.lists(st.sampled_from(known), max_size=2)) if data else []
-        request = ",".join([*before, stranger, *after])
-        code, out, err = run(["targets", cls, request])
-        assert (code, out, err) == (
-            1,
-            "",
-            f"::error::matrix.py: unknown target {escaped(stranger)}; {hint}\n",
-        )
-
-    @given(STRANGER.filter(not_digits), st.data())
-    def test_a_major_that_is_not_a_number(
-        self, stranger: str, data: st.DataObject
-    ) -> None:
-        """A field that is not ASCII digits is refused by name."""
-        before = data.draw(st.lists(MAJOR, max_size=2, unique=True))
-        request = ",".join([*before, stranger])
-        code, out, err = run(["pgrx-images", request])
-        assert (code, out, err) == (
-            1,
-            "",
-            f"::error::matrix.py: {escaped(stranger)} is not a PG major\n",
-        )
+@given(st.lists(MAJOR, min_size=1, max_size=5, unique=True), st.data())
+def test_majors(majors: list[str], data: st.DataObject) -> None:
+    """Every requested major is a cell, in the order requested."""
+    code, out, err = run(["pgrx-images", spaced(data, majors)])
+    assert code == 0, err
+    assert expected(out) == majors
 
 
-class TestAnyRequest:
-    """R: any request text is planned or refused by name."""
+# V: the first field nobody tabled is the one the refusal names.
+@given(CLASS, STRANGER, st.data())
+@example("go-binary", "linux-386", None)
+def test_unknown_target(cls: str, stranger: str, data: st.DataObject | None) -> None:
+    """Known fields around it do not hide it."""
+    runners, hint = matrix.TARGETS[cls]
+    known = sorted(runners)
+    before = data.draw(st.lists(st.sampled_from(known), max_size=2)) if data else []
+    after = data.draw(st.lists(st.sampled_from(known), max_size=2)) if data else []
+    request = ",".join([*before, stranger, *after])
+    code, out, err = run(["targets", cls, request])
+    assert (code, out, err) == (
+        1,
+        "",
+        f"::error::matrix.py: unknown target {escaped(stranger)}; {hint}\n",
+    )
 
-    @given(st.sampled_from(["go-binary", "rust-binary", None]), st.text())
-    def test_plans_or_refuses(self, cls: str | None, request: str) -> None:
-        """Exit 0 with outputs, or 1 with one error line and no output."""
-        argv = ["targets", cls, request] if cls else ["pgrx-images", request]
-        code, out, err = run(argv)
-        if code == 0:
-            assert out.startswith("matrix="), out
-        else:
-            assert (code, out) == (1, "")
-            assert err.startswith("::error::matrix.py: "), err
-            assert err.count("\n") == 1, err
+
+@given(STRANGER.filter(not_digits), st.data())
+def test_a_major_that_is_not_a_number(stranger: str, data: st.DataObject) -> None:
+    """A field that is not ASCII digits is refused by name."""
+    before = data.draw(st.lists(MAJOR, max_size=2, unique=True))
+    request = ",".join([*before, stranger])
+    code, out, err = run(["pgrx-images", request])
+    assert (code, out, err) == (
+        1,
+        "",
+        f"::error::matrix.py: {escaped(stranger)} is not a PG major\n",
+    )
+
+
+# R: any request text is planned or refused by name.
+@given(st.sampled_from(["go-binary", "rust-binary", None]), st.text())
+def test_plans_or_refuses(cls: str | None, request: str) -> None:
+    """Exit 0 with outputs, or 1 with one error line and no output."""
+    argv = ["targets", cls, request] if cls else ["pgrx-images", request]
+    code, out, err = run(argv)
+    if code == 0:
+        assert out.startswith("matrix="), out
+    else:
+        assert (code, out) == (1, "")
+        assert err.startswith("::error::matrix.py: "), err
+        assert err.count("\n") == 1, err

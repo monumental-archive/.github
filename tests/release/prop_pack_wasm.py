@@ -144,39 +144,35 @@ def verdict(manifest: dict[str, object], caller: str) -> str | None:
     return None
 
 
-class TestMatchingFormsExactly:
-    """V: the four matching forms pass; every near miss is refused."""
+# V: the four matching forms pass; every near miss is refused.
+@given(CALLER, st.sampled_from(["", "git+"]), st.sampled_from(["", ".git"]), SHAPE)
+def test_matching_forms_pass(caller: str, prefix: str, suffix: str, shape: str) -> None:
+    """`git+` and `.git`, either or both, string or table: accepted."""
+    url = f"{prefix}https://github.com/{caller}{suffix}"
+    assert verdict(placed(url, shape), caller) is None
 
-    @given(CALLER, st.sampled_from(["", "git+"]), st.sampled_from(["", ".git"]), SHAPE)
-    def test_matching_forms_pass(
-        self, caller: str, prefix: str, suffix: str, shape: str
-    ) -> None:
-        """`git+` and `.git`, either or both, string or table: accepted."""
-        url = f"{prefix}https://github.com/{caller}{suffix}"
-        assert verdict(placed(url, shape), caller) is None
 
-    @given(CALLER, NEAR_MISS, SHAPE)
-    @example("o/r", "https://github.com/{}.git.git", "string")
-    def test_near_misses_are_refused(self, caller: str, form: str, shape: str) -> None:
-        """A spelling npm would not match is refused, naming the remedy."""
-        url = form.format(caller)
-        refused = verdict(placed(url, shape), caller)
-        want = f"https://github.com/{caller}"
-        assert refused == (
-            f"package.json repository is '{url}', npm provenance requires"
-            f" '{want}' — set repository = \"{want}\" in the crate's Cargo.toml"
-            " (canon: [workspace.package] repository with repository.workspace ="
-            " true)"
-        )
+@given(CALLER, NEAR_MISS, SHAPE)
+@example("o/r", "https://github.com/{}.git.git", "string")
+def test_near_misses_are_refused(caller: str, form: str, shape: str) -> None:
+    """A spelling npm would not match is refused, naming the remedy."""
+    url = form.format(caller)
+    refused = verdict(placed(url, shape), caller)
+    want = f"https://github.com/{caller}"
+    assert refused == (
+        f"package.json repository is '{url}', npm provenance requires"
+        f" '{want}' — set repository = \"{want}\" in the crate's Cargo.toml"
+        " (canon: [workspace.package] repository with repository.workspace ="
+        " true)"
+    )
 
-    @given(CALLER, CALLER, SHAPE)
-    def test_another_repository_is_refused(
-        self, caller: str, other: str, shape: str
-    ) -> None:
-        """Another caller's URL is accepted only where it is the caller's."""
-        url = f"https://github.com/{other}"
-        refused = verdict(placed(url, shape), caller)
-        assert (refused is None) == (other == caller)
+
+@given(CALLER, CALLER, SHAPE)
+def test_another_repository_is_refused(caller: str, other: str, shape: str) -> None:
+    """Another caller's URL is accepted only where it is the caller's."""
+    url = f"https://github.com/{other}"
+    refused = verdict(placed(url, shape), caller)
+    assert (refused is None) == (other == caller)
 
 
 def run_step(package_json: str) -> tuple[int, str]:
@@ -232,17 +228,15 @@ PACKAGE_JSON: st.SearchStrategy[dict[str, object]] = st.fixed_dictionaries(
 )
 
 
-class TestAnyPackageJson:
-    """R: any package.json is packed or refused by name."""
-
-    @given(PACKAGE_JSON.map(dumped) | JSON.map(dumped) | st.text())
-    @example("[]")
-    @example("{")
-    @example('{"repository": "\\n"}')
-    def test_packs_or_refuses(self, package_json: str) -> None:
-        """Exit 0, or 1 with one error line; never a raise."""
-        code, out = run_step(package_json)
-        if code != 0:
-            assert code == 1
-            assert out.startswith("::error::pack_wasm.py: "), out
-            assert out.count("\n") == 1, out
+# R: any package.json is packed or refused by name.
+@given(PACKAGE_JSON.map(dumped) | JSON.map(dumped) | st.text())
+@example("[]")
+@example("{")
+@example('{"repository": "\\n"}')
+def test_packs_or_refuses(package_json: str) -> None:
+    """Exit 0, or 1 with one error line; never a raise."""
+    code, out = run_step(package_json)
+    if code != 0:
+        assert code == 1
+        assert out.startswith("::error::pack_wasm.py: "), out
+        assert out.count("\n") == 1, out

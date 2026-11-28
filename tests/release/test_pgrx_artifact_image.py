@@ -75,83 +75,74 @@ HEAD = "FROM scratch\nARG TARGETARCH\n"
 TAIL = "USER 65534:65534\n"
 
 
-class TestOneTree:
-    """Every branch of `one_tree()`, on the real file and on plants."""
+# Every branch of `one_tree()`, on the real file and on plants.
+def test_shipped_dockerfile_copies_one_tree() -> None:
+    """The Dockerfile the release builds passes."""
+    assert one_tree(DOCKERFILE.read_text(encoding="utf-8")) is None
 
-    def test_shipped_dockerfile_copies_one_tree(self) -> None:
-        """The Dockerfile the release builds passes."""
-        assert one_tree(DOCKERFILE.read_text(encoding="utf-8")) is None
 
-    def test_continuation_and_comments_still_pass(self) -> None:
-        """A continued instruction and comments do not change the count."""
-        text = HEAD + "# a comment\nCOPY \\\n  staged/${TARGETARCH}/image/ \\\n  /\n"
-        assert one_tree(text + TAIL) is None
+def test_continuation_and_comments_still_pass() -> None:
+    """A continued instruction and comments do not change the count."""
+    text = HEAD + "# a comment\nCOPY \\\n  staged/${TARGETARCH}/image/ \\\n  /\n"
+    assert one_tree(text + TAIL) is None
 
-    def test_refusals(self) -> None:
-        """Each planted Dockerfile is refused with its exact message."""
-        rows = [
+
+def test_refusals() -> None:
+    """Each planted Dockerfile is refused with its exact message."""
+    rows = [
+        (
+            "no tree",
+            HEAD + TAIL,
+            "copies no tree; the artifact image carries exactly one (#1298)",
+        ),
+        (
+            "the two-layout image #1298 retired",
+            HEAD
+            + "COPY staged/${TARGETARCH}/pkgroot/ /\n"
+            + "COPY staged/${TARGETARCH}/cnpgroot/ /\n"
+            + TAIL,
+            ("copies 2 trees; the artifact image carries exactly one layout (#1298)"),
+        ),
+        (
+            "the one tree plus an ADD",
+            HEAD + "COPY staged/${TARGETARCH}/image/ /\n" + "add extra.tar /\n" + TAIL,
+            ("copies 2 trees; the artifact image carries exactly one layout (#1298)"),
+        ),
+        (
+            "a distribution's path baked in",
+            HEAD
+            + "COPY staged/${TARGETARCH}/image/lib/ /usr/lib/postgresql/18/lib/\n"
+            + TAIL,
             (
-                "no tree",
-                HEAD + TAIL,
-                "copies no tree; the artifact image carries exactly one (#1298)",
+                "places COPY 'staged/${TARGETARCH}/image/lib/'"
+                " /usr/lib/postgresql/18/lib/; the one tree is"
+                " COPY staged/${TARGETARCH}/image/ / (#1298)"
             ),
+        ),
+        (
+            "the old tree alone",
+            HEAD + "COPY staged/${TARGETARCH}/pkgroot/ /\n" + TAIL,
             (
-                "the two-layout image #1298 retired",
-                HEAD
-                + "COPY staged/${TARGETARCH}/pkgroot/ /\n"
-                + "COPY staged/${TARGETARCH}/cnpgroot/ /\n"
-                + TAIL,
-                (
-                    "copies 2 trees; the artifact image carries exactly one"
-                    " layout (#1298)"
-                ),
+                "places COPY 'staged/${TARGETARCH}/pkgroot/' /; the one tree"
+                " is COPY staged/${TARGETARCH}/image/ / (#1298)"
             ),
+        ),
+        (
+            "the one tree by ADD",
+            HEAD + "ADD staged/${TARGETARCH}/image/ /\n" + TAIL,
             (
-                "the one tree plus an ADD",
-                HEAD
-                + "COPY staged/${TARGETARCH}/image/ /\n"
-                + "add extra.tar /\n"
-                + TAIL,
-                (
-                    "copies 2 trees; the artifact image carries exactly one"
-                    " layout (#1298)"
-                ),
+                "places ADD 'staged/${TARGETARCH}/image/' /; the one tree"
+                " is COPY staged/${TARGETARCH}/image/ / (#1298)"
             ),
+        ),
+        (
+            "a flag on the COPY",
+            HEAD + "COPY --chown=0:0 staged/${TARGETARCH}/image/ /\n" + TAIL,
             (
-                "a distribution's path baked in",
-                HEAD
-                + "COPY staged/${TARGETARCH}/image/lib/ /usr/lib/postgresql/18/lib/\n"
-                + TAIL,
-                (
-                    "places COPY 'staged/${TARGETARCH}/image/lib/'"
-                    " /usr/lib/postgresql/18/lib/; the one tree is"
-                    " COPY staged/${TARGETARCH}/image/ / (#1298)"
-                ),
+                "places COPY --chown=0:0 'staged/${TARGETARCH}/image/' /;"
+                " the one tree is COPY staged/${TARGETARCH}/image/ / (#1298)"
             ),
-            (
-                "the old tree alone",
-                HEAD + "COPY staged/${TARGETARCH}/pkgroot/ /\n" + TAIL,
-                (
-                    "places COPY 'staged/${TARGETARCH}/pkgroot/' /; the one tree"
-                    " is COPY staged/${TARGETARCH}/image/ / (#1298)"
-                ),
-            ),
-            (
-                "the one tree by ADD",
-                HEAD + "ADD staged/${TARGETARCH}/image/ /\n" + TAIL,
-                (
-                    "places ADD 'staged/${TARGETARCH}/image/' /; the one tree"
-                    " is COPY staged/${TARGETARCH}/image/ / (#1298)"
-                ),
-            ),
-            (
-                "a flag on the COPY",
-                HEAD + "COPY --chown=0:0 staged/${TARGETARCH}/image/ /\n" + TAIL,
-                (
-                    "places COPY --chown=0:0 'staged/${TARGETARCH}/image/' /;"
-                    " the one tree is COPY staged/${TARGETARCH}/image/ / (#1298)"
-                ),
-            ),
-        ]
-        for _name, text, want in rows:
-            assert one_tree(text) == want
+        ),
+    ]
+    for _name, text, want in rows:
+        assert one_tree(text) == want

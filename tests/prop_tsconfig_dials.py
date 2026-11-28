@@ -58,46 +58,43 @@ def draw_flags_file(draw: st.DrawFn, level: dict[str, bool]) -> str:
 flags_file = st.composite(draw_flags_file)
 
 
-class TestLevel:
-    """The flag file is the level."""
-
-    @given(st.data(), LEVEL)
-    def test_flags_read_back(self, data: st.DataObject, level: dict[str, bool]) -> None:
-        """Every dial, with its value, and nothing unreadable."""
-        with tempfile.TemporaryDirectory() as scratch:
-            path = Path(scratch) / "tsc-flags.txt"
-            path.write_text(data.draw(flags_file(level)), encoding="utf-8")
-            required, unreadable = td.dials(path)
-        assert required == level
-        assert unreadable == list[str]()
+# The flag file is the level.
+@given(st.data(), LEVEL)
+def test_flags_read_back(data: st.DataObject, level: dict[str, bool]) -> None:
+    """Every dial, with its value, and nothing unreadable."""
+    with tempfile.TemporaryDirectory() as scratch:
+        path = Path(scratch) / "tsc-flags.txt"
+        path.write_text(data.draw(flags_file(level)), encoding="utf-8")
+        required, unreadable = td.dials(path)
+    assert required == level
+    assert unreadable == list[str]()
 
 
-class TestJudge:
-    """A stated level passes; a weaker one is named."""
+# A stated level passes; a weaker one is named.
+@given(st.data(), LEVEL, OTHER)
+def test_stated_level_in_any_order_passes(
+    data: st.DataObject, level: dict[str, bool], other: dict[str, object]
+) -> None:
+    """Key order and other keys change nothing."""
+    pairs: list[tuple[str, object]] = [*level.items(), *other.items()]
+    items = data.draw(st.permutations(pairs))
+    assert td.judge(dict(items), level) == list[str]()
 
-    @given(st.data(), LEVEL, OTHER)
-    def test_stated_level_in_any_order_passes(
-        self, data: st.DataObject, level: dict[str, bool], other: dict[str, object]
-    ) -> None:
-        """Key order and other keys change nothing."""
-        pairs: list[tuple[str, object]] = [*level.items(), *other.items()]
-        items = data.draw(st.permutations(pairs))
-        assert td.judge(dict(items), level) == list[str]()
 
-    @given(st.data(), LEVEL, st.sampled_from(["drop", "flip"]))
-    def test_one_weaker_dial_is_one_finding(
-        self, data: st.DataObject, level: dict[str, bool], how: str
-    ) -> None:
-        """Absent or flipped, it is named, once."""
-        key = data.draw(st.sampled_from(sorted(level)))
-        stated: dict[str, object] = dict(level)
-        if how == "drop":
-            del stated[key]
-        else:
-            stated[key] = not stated[key]
-        found = td.judge(stated, level)
-        assert len(found) == 1
-        assert found[0].startswith(f'"{key}"')
+@given(st.data(), LEVEL, st.sampled_from(["drop", "flip"]))
+def test_one_weaker_dial_is_one_finding(
+    data: st.DataObject, level: dict[str, bool], how: str
+) -> None:
+    """Absent or flipped, it is named, once."""
+    key = data.draw(st.sampled_from(sorted(level)))
+    stated: dict[str, object] = dict(level)
+    if how == "drop":
+        del stated[key]
+    else:
+        stated[key] = not stated[key]
+    found = td.judge(stated, level)
+    assert len(found) == 1
+    assert found[0].startswith(f'"{key}"')
 
 
 SCALAR: st.SearchStrategy[object] = (
@@ -129,30 +126,28 @@ RESOLVED: st.SearchStrategy[object] = st.one_of(
 NO_CONFIG: list[object] = []
 
 
-class TestRefusal:
-    """Any resolved config is judged, never a traceback."""
-
-    @given(RESOLVED)
-    @example(NO_CONFIG)
-    def test_main_answers_any_config(self, resolved: object) -> None:
-        """0, or 1 with the reason on stderr."""
-        with tempfile.TemporaryDirectory() as scratch:
-            flags = Path(scratch) / "tsc-flags.txt"
-            flags.write_text("--strict\n--exactOptionalPropertyTypes false\n", "utf-8")
-            out, err = io.StringIO(), io.StringIO()
-            old = sys.stdin
-            sys.stdin = io.StringIO(json.dumps(resolved))
-            try:
-                with (
-                    pytest.MonkeyPatch.context() as patched,
-                    contextlib.redirect_stdout(out),
-                    contextlib.redirect_stderr(err),
-                ):
-                    patched.setenv("MISE_TASK_NAME", "lint:tsconfig-dials")
-                    patched.setenv("ORG_FINDINGS", "")
-                    status = td.main(["--flags", str(flags), "--name", "t"])
-            finally:
-                sys.stdin = old
-        assert status in {0, 1}
-        if status:
-            assert "lint:tsconfig-dials: " in err.getvalue()
+# Any resolved config is judged, never a traceback.
+@given(RESOLVED)
+@example(NO_CONFIG)
+def test_main_answers_any_config(resolved: object) -> None:
+    """0, or 1 with the reason on stderr."""
+    with tempfile.TemporaryDirectory() as scratch:
+        flags = Path(scratch) / "tsc-flags.txt"
+        flags.write_text("--strict\n--exactOptionalPropertyTypes false\n", "utf-8")
+        out, err = io.StringIO(), io.StringIO()
+        old = sys.stdin
+        sys.stdin = io.StringIO(json.dumps(resolved))
+        try:
+            with (
+                pytest.MonkeyPatch.context() as patched,
+                contextlib.redirect_stdout(out),
+                contextlib.redirect_stderr(err),
+            ):
+                patched.setenv("MISE_TASK_NAME", "lint:tsconfig-dials")
+                patched.setenv("ORG_FINDINGS", "")
+                status = td.main(["--flags", str(flags), "--name", "t"])
+        finally:
+            sys.stdin = old
+    assert status in {0, 1}
+    if status:
+        assert "lint:tsconfig-dials: " in err.getvalue()

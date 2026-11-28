@@ -276,29 +276,23 @@ class Tree:
         assert f"{TASK}: no origin/main, skipped" in out
 
 
-class TestNoneTracked:
-    """A tree that keeps no decisions has nothing to judge."""
-
-    def test_none_tracked_skips_by_name(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """Only a README under security/vex/ skips, by name."""
-        with tempfile.TemporaryDirectory() as tmp:
-            tree = Tree(Path(tmp))
-            tree.commit(README)
-            tree.mark_main()
-            tree.commit(README)
-            status, out, err = tree.run(capfd=capfd)
-            assert status == 0, err
-            assert f"{TASK}: no VEX decisions tracked, skipped" in out
+# A tree that keeps no decisions has nothing to judge.
+def test_none_tracked_skips_by_name(capfd: pytest.CaptureFixture[str]) -> None:
+    """Only a README under security/vex/ skips, by name."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = Tree(Path(tmp))
+        tree.commit(README)
+        tree.mark_main()
+        tree.commit(README)
+        status, out, err = tree.run(capfd=capfd)
+        assert status == 0, err
+        assert f"{TASK}: no VEX decisions tracked, skipped" in out
 
 
-@pytest.mark.usefixtures("_set_up_test_listing")
-class TestListing:
+class Listing:
     """vex-attest.yml's signing list is the lint's own reader (#1615)."""
 
-    @fixture
-    def _set_up_test_listing(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Plant a tree whose default branch holds two decisions."""
         self.tree = Tree(Path(str(tmp_path)))
         self.tree.commit(A, B, README)
@@ -315,75 +309,81 @@ class TestListing:
         assert status == 0, err
         return out.splitlines()
 
-    def test_a_rename_with_an_edit_is_listed_at_its_new_name(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """Moved and edited: new bytes at a new name, so it is signed."""
-        self.tree.git("mv", A, C)
-        self.tree.commit(C)
-        want: list[str] = [C]
-        assert self.listed(capfd=capfd) == want
 
-    def test_a_pure_rename_is_listed(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """Moved alone: listed, and the store decides if its bytes are held."""
-        self.tree.git("mv", A, C)
-        self.tree.commit()
-        want: list[str] = [C]
-        assert self.listed(capfd=capfd) == want
-
-    def test_a_deletion_is_not_listed(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """Removed: nothing to sign."""
-        self.tree.commit(remove=(A,))
-        none: list[str] = []
-        assert self.listed(capfd=capfd) == none
-
-    def test_the_count_and_the_listing_agree(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """Two changed: the gate reds on two, and the listing names the two."""
-        self.tree.commit(A, B)
-        want: list[str] = [A, B]
-        assert self.listed(capfd=capfd) == want
-        status, out, err = self.tree.run(capfd=capfd)
-        assert status == 1, out
-        assert f"  {A}\n  {B}\n" in err
+@fixture
+def listing_state(tmp_path: Path) -> Listing:
+    """Give each row its own Listing."""
+    return Listing(tmp_path)
 
 
-class TestWorkflow:
-    """The push branch asks the helper and holds no diff of its own."""
-
-    def test_the_step_calls_the_helper_and_holds_no_git_diff(self) -> None:
-        """The collect step lists through the helper; `git diff` is gone."""
-        workflow = (CANON / ".github/workflows/vex-attest.yml").read_text(
-            encoding="utf-8"
-        )
-        start = workflow.index("        id: collect\n")
-        step = workflow[start : workflow.index("\n  sign-vex:", start)]
-        # The listing moved into the step's script (#1660).
-        script = (CANON / "mise/vex-decisions.sh").read_text(encoding="utf-8")
-        assert ".org-canon/mise/vex-decisions.sh" in step
-        assert (
-            '"${ORG_PYTHON}" -I "${here}/../belt" vex-one-per-merge --list "${BEFORE}.."'
-            in script
-        )
-        assert "git diff" not in step
-        assert "git diff" not in script
+def test_a_rename_with_an_edit_is_listed_at_its_new_name(
+    listing_state: Listing, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Moved and edited: new bytes at a new name, so it is signed."""
+    listing_state.tree.git("mv", A, C)
+    listing_state.tree.commit(C)
+    want: list[str] = [C]
+    assert listing_state.listed(capfd=capfd) == want
 
 
-class TestOneWording:
-    """The lint and vex-attest.yml print one sentence, from one file."""
+def test_a_pure_rename_is_listed(
+    listing_state: Listing, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Moved alone: listed, and the store decides if its bytes are held."""
+    listing_state.tree.git("mv", A, C)
+    listing_state.tree.commit()
+    want: list[str] = [C]
+    assert listing_state.listed(capfd=capfd) == want
 
-    def test_the_workflow_reads_the_same_file(self) -> None:
-        """The workflow names the file; its script prints it (#1660).
 
-        Neither restates the sentence of its own.
-        """
-        workflow = (CANON / ".github/workflows/vex-attest.yml").read_text(
-            encoding="utf-8"
-        )
-        script = (CANON / "mise/vex-decisions.sh").read_text(encoding="utf-8")
-        assert "ONE_PER_MERGE: .org-canon/mise/vex-one-per-merge.txt" in workflow
-        assert ".org-canon/mise/vex-decisions.sh" in workflow
-        assert 'org_error "$(< "${ONE_PER_MERGE}")"' in script
-        assert SENTENCE not in workflow
-        assert SENTENCE not in script
+def test_a_deletion_is_not_listed(
+    listing_state: Listing, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Removed: nothing to sign."""
+    listing_state.tree.commit(remove=(A,))
+    none: list[str] = []
+    assert listing_state.listed(capfd=capfd) == none
+
+
+def test_the_count_and_the_listing_agree(
+    listing_state: Listing, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Two changed: the gate reds on two, and the listing names the two."""
+    listing_state.tree.commit(A, B)
+    want: list[str] = [A, B]
+    assert listing_state.listed(capfd=capfd) == want
+    status, out, err = listing_state.tree.run(capfd=capfd)
+    assert status == 1, out
+    assert f"  {A}\n  {B}\n" in err
+
+
+# The push branch asks the helper and holds no diff of its own.
+def test_the_step_calls_the_helper_and_holds_no_git_diff() -> None:
+    """The collect step lists through the helper; `git diff` is gone."""
+    workflow = (CANON / ".github/workflows/vex-attest.yml").read_text(encoding="utf-8")
+    start = workflow.index("        id: collect\n")
+    step = workflow[start : workflow.index("\n  sign-vex:", start)]
+    # The listing moved into the step's script (#1660).
+    script = (CANON / "mise/vex-decisions.sh").read_text(encoding="utf-8")
+    assert ".org-canon/mise/vex-decisions.sh" in step
+    assert (
+        '"${ORG_PYTHON}" -I "${here}/../belt" vex-one-per-merge --list "${BEFORE}.."'
+        in script
+    )
+    assert "git diff" not in step
+    assert "git diff" not in script
+
+
+# The lint and vex-attest.yml print one sentence, from one file.
+def test_the_workflow_reads_the_same_file() -> None:
+    """The workflow names the file; its script prints it (#1660).
+
+    Neither restates the sentence of its own.
+    """
+    workflow = (CANON / ".github/workflows/vex-attest.yml").read_text(encoding="utf-8")
+    script = (CANON / "mise/vex-decisions.sh").read_text(encoding="utf-8")
+    assert "ONE_PER_MERGE: .org-canon/mise/vex-one-per-merge.txt" in workflow
+    assert ".org-canon/mise/vex-decisions.sh" in workflow
+    assert 'org_error "$(< "${ONE_PER_MERGE}")"' in script
+    assert SENTENCE not in workflow
+    assert SENTENCE not in script

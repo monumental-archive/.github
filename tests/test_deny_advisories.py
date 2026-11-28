@@ -83,111 +83,113 @@ def lint(
         return status, out, err
 
 
-class TestDenyAdvisories:
-    """An advisory ignore is red by name; a crate ignore and none are green."""
+# An advisory ignore is red by name; a crate ignore and none are green.
+def assert_red(text: str, *advisories: str, capfd: pytest.CaptureFixture[str]) -> None:
+    """Assert exit 1 with exactly the message naming `advisories`."""
+    status, out, err = lint(text, capfd=capfd)
+    assert status == 1, out + err
+    assert err == refused(*advisories)
+    assert out == ""
 
-    def assert_red(
-        self, text: str, *advisories: str, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """Assert exit 1 with exactly the message naming `advisories`."""
-        status, out, err = lint(text, capfd=capfd)
-        assert status == 1, out + err
-        assert err == refused(*advisories)
-        assert out == ""
 
-    def assert_green(self, text: str, *, capfd: pytest.CaptureFixture[str]) -> None:
-        """Assert exit 0 with nothing said."""
-        status, out, err = lint(text, capfd=capfd)
-        assert status == 0, err
-        assert (out, err) == ("", "")
+def assert_green(text: str, *, capfd: pytest.CaptureFixture[str]) -> None:
+    """Assert exit 0 with nothing said."""
+    status, out, err = lint(text, capfd=capfd)
+    assert status == 0, err
+    assert (out, err) == ("", "")
 
-    def test_a_bare_id_is_red_by_name(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """`ignore = ["RUSTSEC-…"]`, edtf's and release-lab's shape."""
-        self.assert_red(
-            f'[advisories]\nignore = ["{ADVISORY}"]\n', ADVISORY, capfd=capfd
-        )
 
-    def test_a_table_with_an_id_is_red(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """The scaffold's old commented shape, written out."""
-        self.assert_red(
-            f'[advisories]\nignore = [{{ id = "{ADVISORY}", reason = "x" }}]\n',
-            ADVISORY,
-            capfd=capfd,
-        )
+def test_a_bare_id_is_red_by_name(capfd: pytest.CaptureFixture[str]) -> None:
+    """`ignore = ["RUSTSEC-…"]`, edtf's and release-lab's shape."""
+    assert_red(f'[advisories]\nignore = ["{ADVISORY}"]\n', ADVISORY, capfd=capfd)
 
-    def test_every_advisory_is_named(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """Two entries, both named, in the file's order; a crate between."""
-        self.assert_red(
-            "[advisories]\nignore = [\n"
-            '  "RUSTSEC-2026-0543",\n'
-            '  { crate = "a@1.0.0", reason = "x" },\n'
-            '  { id = "RUSTSEC-2026-0542", reason = "x" },\n'
-            "]\n",
-            "RUSTSEC-2026-0543",
-            "RUSTSEC-2026-0542",
-            capfd=capfd,
-        )
 
-    def test_a_crate_entry_is_green(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """A yanked version names no advisory, so no decision could stand for it."""
-        self.assert_green(
-            '[advisories]\nignore = [{ crate = "a@1.0.0", reason = "x" }]\n',
-            capfd=capfd,
-        )
+def test_a_table_with_an_id_is_red(capfd: pytest.CaptureFixture[str]) -> None:
+    """The scaffold's old commented shape, written out."""
+    assert_red(
+        f'[advisories]\nignore = [{{ id = "{ADVISORY}", reason = "x" }}]\n',
+        ADVISORY,
+        capfd=capfd,
+    )
 
-    def test_an_empty_array_is_green(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """`ignore = []` keeps nothing."""
-        self.assert_green("[advisories]\nignore = []\n", capfd=capfd)
 
-    def test_no_advisories_table_is_green(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A deny.toml with no `[advisories]` keeps nothing."""
-        self.assert_green('[bans]\nwildcards = "deny"\n', capfd=capfd)
+def test_every_advisory_is_named(capfd: pytest.CaptureFixture[str]) -> None:
+    """Two entries, both named, in the file's order; a crate between."""
+    assert_red(
+        "[advisories]\nignore = [\n"
+        '  "RUSTSEC-2026-0543",\n'
+        '  { crate = "a@1.0.0", reason = "x" },\n'
+        '  { id = "RUSTSEC-2026-0542", reason = "x" },\n'
+        "]\n",
+        "RUSTSEC-2026-0543",
+        "RUSTSEC-2026-0542",
+        capfd=capfd,
+    )
 
-    def test_the_scaffold_is_green(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """The stub every repository copies passes the rule it is held to."""
-        self.assert_green(
-            (BELT.parent / "scaffold" / "deny.toml").read_text(encoding="utf-8"),
-            capfd=capfd,
-        )
 
-    def test_an_ignore_that_is_not_an_array_is_refused_by_name(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """A shape cargo-deny would refuse is never read as no ignore."""
-        status, _out, err = lint('[advisories]\nignore = "x"\n', capfd=capfd)
-        assert status == 1
-        assert "advisories.ignore" in err
+def test_a_crate_entry_is_green(capfd: pytest.CaptureFixture[str]) -> None:
+    """A yanked version names no advisory, so no decision could stand for it."""
+    assert_green(
+        '[advisories]\nignore = [{ crate = "a@1.0.0", reason = "x" }]\n',
+        capfd=capfd,
+    )
 
-    def test_each_finding_is_recorded(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """ORG_FINDINGS set: one record per advisory, through findings.py."""
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "deny.toml"
-            text = f'[advisories]\nignore = ["{ADVISORY}"]\n'
-            path.write_text(text, encoding="utf-8")
-            records = Path(tmp) / "findings.jsonl"
-            env = support.env(MISE_TASK_NAME="lint:deny", ORG_FINDINGS=str(records))
-            with pytest.MonkeyPatch.context() as patched:
-                for name, value in env.items():
-                    patched.setenv(name, value)
-                patched.chdir(tmp)
-                status = da.main(["deny.toml"])
-            _out, _err = capfd.readouterr()
-            lines = records.read_text(encoding="utf-8").splitlines()
-        assert status == 1
-        detail = [line.strip() for line in refused(ADVISORY).splitlines()[1:]]
-        want: list[object] = [
-            {
-                "v": 1,
-                "task": "lint:deny",
-                "subject": ADVISORY,
-                "message": "an advisory ignore in deny.toml",
-                "detail": detail,
-            }
-        ]
-        got = [decoded.load_json(line) for line in lines]
-        assert got == want
+
+def test_an_empty_array_is_green(capfd: pytest.CaptureFixture[str]) -> None:
+    """`ignore = []` keeps nothing."""
+    assert_green("[advisories]\nignore = []\n", capfd=capfd)
+
+
+def test_no_advisories_table_is_green(capfd: pytest.CaptureFixture[str]) -> None:
+    """A deny.toml with no `[advisories]` keeps nothing."""
+    assert_green('[bans]\nwildcards = "deny"\n', capfd=capfd)
+
+
+def test_the_scaffold_is_green(capfd: pytest.CaptureFixture[str]) -> None:
+    """The stub every repository copies passes the rule it is held to."""
+    assert_green(
+        (BELT.parent / "scaffold" / "deny.toml").read_text(encoding="utf-8"),
+        capfd=capfd,
+    )
+
+
+def test_an_ignore_that_is_not_an_array_is_refused_by_name(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """A shape cargo-deny would refuse is never read as no ignore."""
+    status, _out, err = lint('[advisories]\nignore = "x"\n', capfd=capfd)
+    assert status == 1
+    assert "advisories.ignore" in err
+
+
+def test_each_finding_is_recorded(capfd: pytest.CaptureFixture[str]) -> None:
+    """ORG_FINDINGS set: one record per advisory, through findings.py."""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "deny.toml"
+        text = f'[advisories]\nignore = ["{ADVISORY}"]\n'
+        path.write_text(text, encoding="utf-8")
+        records = Path(tmp) / "findings.jsonl"
+        env = support.env(MISE_TASK_NAME="lint:deny", ORG_FINDINGS=str(records))
+        with pytest.MonkeyPatch.context() as patched:
+            for name, value in env.items():
+                patched.setenv(name, value)
+            patched.chdir(tmp)
+            status = da.main(["deny.toml"])
+        _out, _err = capfd.readouterr()
+        lines = records.read_text(encoding="utf-8").splitlines()
+    assert status == 1
+    detail = [line.strip() for line in refused(ADVISORY).splitlines()[1:]]
+    want: list[object] = [
+        {
+            "v": 1,
+            "task": "lint:deny",
+            "subject": ADVISORY,
+            "message": "an advisory ignore in deny.toml",
+            "detail": detail,
+        }
+    ]
+    got = [decoded.load_json(line) for line in lines]
+    assert got == want
 
 
 def task_body(name: str) -> str:
@@ -267,12 +269,10 @@ UNDECIDED = {
 }
 
 
-@pytest.mark.usefixtures("_set_up_test_audit_deny")
-class TestAuditDeny:
+class AuditDeny:
     """stele's status is the verdict; cargo-deny's is not read."""
 
-    @fixture
-    def _set_up_test_audit_deny(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Plant a checkout, a canon with security/vex/, the stubs and tools."""
         self.tmp = tmp_path
         self.root = self.tmp / "tree"
@@ -347,79 +347,93 @@ class TestAuditDeny:
         )
         return done, calls
 
-    def stele_call(self, calls: list[str]) -> str:
-        """Find the one stele call.
 
-        Returns:
-            Its arguments.
+@fixture
+def audit_deny(tmp_path: Path) -> AuditDeny:
+    """Give each row its own AuditDeny."""
+    return AuditDeny(tmp_path)
 
-        """
-        stele = [c.removeprefix("stele ") for c in calls if c.startswith("stele ")]
-        assert len(stele) == 1, calls
-        return stele[0]
 
-    def test_a_decided_finding_is_green_though_cargo_deny_exits_1(self) -> None:
-        """cargo-deny exits 1, stele exits 0: the task is green."""
-        self.plant()
-        done, calls = self.audit()
-        assert done.returncode == 0, done.stderr
-        assert done.stdout == f"{TASK}: stele: PASS\n"
-        scan = "--format json check advisories"
-        where = "--manifest-path Cargo.toml --config deny.toml"
-        want = [
-            "cargo fetch --locked --quiet --manifest-path Cargo.toml",
-            f"cargo deny {where} {scan}",
-            f"cargo-deny deny {where} {scan}",
-        ]
-        assert calls[:3] == want
+def stele_call(calls: list[str]) -> str:
+    """Find the one stele call.
 
-    def test_an_undecided_finding_is_red(self) -> None:
-        """A stele exit of 1: the task is red, the finding named."""
-        self.plant()
-        done, _ = self.audit(rc=1, verdict="FAIL", found=[UNDECIDED])
-        assert done.returncode == 1, done.stdout + done.stderr
-        assert done.stdout == f"{TASK}: stele: FAIL\n"
-        assert (
-            f"{TASK}: chrono@0.4.45: decided: RUSTSEC-2026-0543 is undecided\n"
-            in done.stderr
-        )
+    Returns:
+        Its arguments.
 
-    def test_stele_is_handed_the_scan_the_vex_and_the_lock(self) -> None:
-        """The call names cargo-deny, the scan, the canon's security/vex, Cargo.lock."""
-        self.plant()
-        done, calls = self.audit()
-        assert done.returncode == 0, done.stderr
-        args = self.stele_call(calls).split(" ")
-        head = ["assert", "advisories", "--json"]
-        assert args[:3] == head
-        assert args[args.index("--scanner") + 1] == "cargo-deny"
-        assert args[args.index("--vex") + 1] == str(self.canon / "security" / "vex")
-        assert args[args.index("--subject") + 1] == "Cargo.lock"
-        scan = args[args.index("--scan") + 1]
-        assert not Path(scan).exists(), "the scan outlived the task"
-        assert (
-            Path(f"{self.log}.scan").read_text(encoding="utf-8")
-            == '{"type":"diagnostic"}\n'
-        )
+    """
+    stele = [c.removeprefix("stele ") for c in calls if c.startswith("stele ")]
+    assert len(stele) == 1, calls
+    return stele[0]
 
-    def test_no_lock_prints_the_skip_line(self) -> None:
-        """No tracked Cargo.lock: skipped, and nothing is run."""
-        done, calls = self.audit()
-        assert done.returncode == 0, done.stderr
-        assert done.stdout == f"{TASK}: no Cargo.lock tracked, skipped\n"
-        assert len(calls) == 0, calls
 
-    def test_no_vex_directory_is_red_by_name(self) -> None:
-        """The canon's decisions did not arrive: red before any scan."""
-        self.plant()
-        (self.canon / "security" / "vex").rmdir()
-        done, calls = self.audit()
-        assert done.returncode == 1
-        vex = self.canon / "security" / "vex"
-        assert done.stderr == (
-            f"{TASK}: {vex} is not a directory,"
-            " so the org's triage decisions cannot be read\n"
-            "  the org belt did not arrive: CI sets MISE_GLOBAL_CONFIG_FILE,"
-            " locally run: lefthook run post-checkout\n"
-        )
-        assert len(calls) == 0, calls
+def test_a_decided_finding_is_green_though_cargo_deny_exits_1(
+    audit_deny: AuditDeny,
+) -> None:
+    """cargo-deny exits 1, stele exits 0: the task is green."""
+    audit_deny.plant()
+    done, calls = audit_deny.audit()
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == f"{TASK}: stele: PASS\n"
+    scan = "--format json check advisories"
+    where = "--manifest-path Cargo.toml --config deny.toml"
+    want = [
+        "cargo fetch --locked --quiet --manifest-path Cargo.toml",
+        f"cargo deny {where} {scan}",
+        f"cargo-deny deny {where} {scan}",
+    ]
+    assert calls[:3] == want
+
+
+def test_an_undecided_finding_is_red(audit_deny: AuditDeny) -> None:
+    """A stele exit of 1: the task is red, the finding named."""
+    audit_deny.plant()
+    done, _ = audit_deny.audit(rc=1, verdict="FAIL", found=[UNDECIDED])
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert done.stdout == f"{TASK}: stele: FAIL\n"
+    assert (
+        f"{TASK}: chrono@0.4.45: decided: RUSTSEC-2026-0543 is undecided\n"
+        in done.stderr
+    )
+
+
+def test_stele_is_handed_the_scan_the_vex_and_the_lock(audit_deny: AuditDeny) -> None:
+    """The call names cargo-deny, the scan, the canon's security/vex, Cargo.lock."""
+    audit_deny.plant()
+    done, calls = audit_deny.audit()
+    assert done.returncode == 0, done.stderr
+    args = stele_call(calls).split(" ")
+    head = ["assert", "advisories", "--json"]
+    assert args[:3] == head
+    assert args[args.index("--scanner") + 1] == "cargo-deny"
+    assert args[args.index("--vex") + 1] == str(audit_deny.canon / "security" / "vex")
+    assert args[args.index("--subject") + 1] == "Cargo.lock"
+    scan = args[args.index("--scan") + 1]
+    assert not Path(scan).exists(), "the scan outlived the task"
+    assert (
+        Path(f"{audit_deny.log}.scan").read_text(encoding="utf-8")
+        == '{"type":"diagnostic"}\n'
+    )
+
+
+def test_no_lock_prints_the_skip_line(audit_deny: AuditDeny) -> None:
+    """No tracked Cargo.lock: skipped, and nothing is run."""
+    done, calls = audit_deny.audit()
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == f"{TASK}: no Cargo.lock tracked, skipped\n"
+    assert len(calls) == 0, calls
+
+
+def test_no_vex_directory_is_red_by_name(audit_deny: AuditDeny) -> None:
+    """The canon's decisions did not arrive: red before any scan."""
+    audit_deny.plant()
+    (audit_deny.canon / "security" / "vex").rmdir()
+    done, calls = audit_deny.audit()
+    assert done.returncode == 1
+    vex = audit_deny.canon / "security" / "vex"
+    assert done.stderr == (
+        f"{TASK}: {vex} is not a directory,"
+        " so the org's triage decisions cannot be read\n"
+        "  the org belt did not arrive: CI sets MISE_GLOBAL_CONFIG_FILE,"
+        " locally run: lefthook run post-checkout\n"
+    )
+    assert len(calls) == 0, calls

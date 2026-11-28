@@ -113,42 +113,39 @@ spelling = st.composite(draw_spelling)
 stranger = st.composite(draw_stranger)
 
 
-class TestInvariance:
-    """The verdict follows the repository, not its spelling."""
-
-    @given(spelling())
-    @example(("https://github.com/Owner/repo", " https://GITHUB.com/owner/REPO.git/\n"))
-    def test_a_fold_of_the_wearer_belongs(self, drawn: tuple[str, str]) -> None:
-        """Case, whitespace, one slash and one `.git` change nothing."""
-        wearer, named = drawn
-        assert bo.finding(bo.Entry.of({"id": 1, "repo_url": named}), wearer) is None
-
-    @given(stranger())
-    def test_another_repository_does_not(self, drawn: tuple[str, str]) -> None:
-        """A different owner or name, however spelt, is a finding."""
-        wearer, named = drawn
-        found = bo.finding(bo.Entry.of({"id": 7, "repo_url": named}), wearer)
-        if found is None:
-            pytest.fail("another repository's URL was not a finding")
-        assert "project 7" in found
+# The verdict follows the repository, not its spelling.
+@given(spelling())
+@example(("https://github.com/Owner/repo", " https://GITHUB.com/owner/REPO.git/\n"))
+def test_a_fold_of_the_wearer_belongs(drawn: tuple[str, str]) -> None:
+    """Case, whitespace, one slash and one `.git` change nothing."""
+    wearer, named = drawn
+    assert bo.finding(bo.Entry.of({"id": 1, "repo_url": named}), wearer) is None
 
 
-class TestRefusal:
-    """Any answer from the issuer is judged, never a traceback."""
+@given(stranger())
+def test_another_repository_does_not(drawn: tuple[str, str]) -> None:
+    """A different owner or name, however spelt, is a finding."""
+    wearer, named = drawn
+    found = bo.finding(bo.Entry.of({"id": 7, "repo_url": named}), wearer)
+    if found is None:
+        pytest.fail("another repository's URL was not a finding")
+    assert "project 7" in found
 
-    @given(st.one_of(JSON.map(dumped), st.text(max_size=80)), PART)
-    @example('{"repo_url": 5}', "x")
-    @example("[]", "x")
-    def test_main_answers_any_stdin(self, stdin: str, repo: str) -> None:
-        """Exit 0 or 1, with its own message when 1."""
-        out = io.StringIO()
-        old = sys.stdin
-        sys.stdin = io.StringIO(stdin)
-        try:
-            with contextlib.redirect_stdout(out):
-                status = bo.main([url("o", repo)])
-        finally:
-            sys.stdin = old
-        assert status in {0, 1}
-        if status == 1:
-            assert out.getvalue().strip()
+
+# Any answer from the issuer is judged, never a traceback.
+@given(st.one_of(JSON.map(dumped), st.text(max_size=80)), PART)
+@example('{"repo_url": 5}', "x")
+@example("[]", "x")
+def test_main_answers_any_stdin(stdin: str, repo: str) -> None:
+    """Exit 0 or 1, with its own message when 1."""
+    out = io.StringIO()
+    old = sys.stdin
+    sys.stdin = io.StringIO(stdin)
+    try:
+        with contextlib.redirect_stdout(out):
+            status = bo.main([url("o", repo)])
+    finally:
+        sys.stdin = old
+    assert status in {0, 1}
+    if status == 1:
+        assert out.getvalue().strip()

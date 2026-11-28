@@ -143,34 +143,33 @@ def draw_workflow(draw: st.DrawFn) -> Drawn:
 workflow = st.composite(draw_workflow)
 
 
-class TestRuns:
-    """A workflow's values, as written."""
+# A workflow's values, as written.
+@given(workflow())
+def test_values_read_back(drawn: Drawn) -> None:
+    """Line, text, name and shell of every value, in every form."""
+    lines, expected = drawn
+    with tempfile.TemporaryDirectory() as scratch:
+        path = Path(scratch) / "ci.yml"
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        got = [(r.line, r.text, r.name, r.shell) for r in es.runs(path)]
+    assert got == expected, "\n".join(lines)
 
-    @given(workflow())
-    def test_values_read_back(self, drawn: Drawn) -> None:
-        """Line, text, name and shell of every value, in every form."""
-        lines, expected = drawn
-        with tempfile.TemporaryDirectory() as scratch:
-            path = Path(scratch) / "ci.yml"
-            path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-            got = [(r.line, r.text, r.name, r.shell) for r in es.runs(path)]
-        assert got == expected, "\n".join(lines)
 
-    @given(st.lists(st.text(max_size=30), max_size=12))
-    @example(BLANK_THEN_TEXT)
-    @example(RUN_TRUE)
-    def test_any_text_is_read_or_refused_by_name(self, lines: list[str]) -> None:
-        """Values or a refusal naming the file, never a traceback."""
-        with tempfile.TemporaryDirectory() as scratch:
-            path = Path(scratch) / "ci.yml"
-            path.write_text("\n".join(lines), encoding="utf-8")
-            try:
-                found = list(es.runs(path))
-            except ValueError as err:
-                assert str(err).startswith(f"{path}:"), err
-                return
-        for run in found:
-            assert run.source.endswith("\n")
+@given(st.lists(st.text(max_size=30), max_size=12))
+@example(BLANK_THEN_TEXT)
+@example(RUN_TRUE)
+def test_any_text_is_read_or_refused_by_name(lines: list[str]) -> None:
+    """Values or a refusal naming the file, never a traceback."""
+    with tempfile.TemporaryDirectory() as scratch:
+        path = Path(scratch) / "ci.yml"
+        path.write_text("\n".join(lines), encoding="utf-8")
+        try:
+            found = list(es.runs(path))
+        except ValueError as err:
+            assert str(err).startswith(f"{path}:"), err
+            return
+    for run in found:
+        assert run.source.endswith("\n")
 
 
 def formatter(*, change: bool) -> object:
@@ -187,90 +186,83 @@ def formatter(*, change: bool) -> object:
     return run
 
 
-class TestRewrite:
-    """The writer puts back exactly what the formatter gives, where it was."""
-
-    @given(workflow(), st.sampled_from(["same", "changed"]))
-    def test_rewrite_round_trip(self, drawn: Drawn, how: str) -> None:
-        """Unchanged scripts, an unchanged file; changed ones, read back."""
-        lines, expected = drawn
-        text = "\n".join(lines) + "\n"
-        with tempfile.TemporaryDirectory() as scratch:
-            path = Path(scratch) / "ci.yml"
-            path.write_text(text, encoding="utf-8")
-            with pytest.MonkeyPatch.context() as patched:
-                patched.setattr(es, "shfmt", formatter(change=how == "changed"))
-                count = es.rewrite(path)
-            after = path.read_text(encoding="utf-8")
-            reread = [r.text for r in es.runs(path)]
-        # A block's text ends in a line break; a single-line value's never.
-        blocks = [v[3] in {"bash", "sh"} and v[1].endswith("\n") for v in expected]
-        if how == "same":
-            assert (count, after) == (0, text)
-            return
-        assert count == sum(blocks)
-        want = [
-            v[1] + "echo formatted\n" if block else v[1]
-            for v, block in zip(expected, blocks, strict=True)
-        ]
-        assert reread == want
-        kept = [line for line in after.splitlines() if "echo formatted" not in line]
-        assert kept == lines
+# The writer puts back exactly what the formatter gives, where it was.
+@given(workflow(), st.sampled_from(["same", "changed"]))
+def test_rewrite_round_trip(drawn: Drawn, how: str) -> None:
+    """Unchanged scripts, an unchanged file; changed ones, read back."""
+    lines, expected = drawn
+    text = "\n".join(lines) + "\n"
+    with tempfile.TemporaryDirectory() as scratch:
+        path = Path(scratch) / "ci.yml"
+        path.write_text(text, encoding="utf-8")
+        with pytest.MonkeyPatch.context() as patched:
+            patched.setattr(es, "shfmt", formatter(change=how == "changed"))
+            count = es.rewrite(path)
+        after = path.read_text(encoding="utf-8")
+        reread = [r.text for r in es.runs(path)]
+    # A block's text ends in a line break; a single-line value's never.
+    blocks = [v[3] in {"bash", "sh"} and v[1].endswith("\n") for v in expected]
+    if how == "same":
+        assert (count, after) == (0, text)
+        return
+    assert count == sum(blocks)
+    want = [
+        v[1] + "echo formatted\n" if block else v[1]
+        for v, block in zip(expected, blocks, strict=True)
+    ]
+    assert reread == want
+    kept = [line for line in after.splitlines() if "echo formatted" not in line]
+    assert kept == lines
 
 
-class TestFolded:
-    """Plain lines fold to one line, and weigh as many as the file holds."""
-
-    @given(st.lists(TEXT.filter(bool), min_size=1, max_size=6))
-    def test_plain_lines_join_and_are_counted(self, body: list[str]) -> None:
-        """Single breaks become single spaces; the ceiling counts each line."""
-        lines = ["runs:", "  steps:", "    - run: >-"]
-        lines += [f"        {x}" for x in body]
-        lines.append("    - run: echo after")
-        with tempfile.TemporaryDirectory() as scratch:
-            path = Path(scratch) / "action.yml"
-            path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-            [run, after] = list(es.runs(path))
-        assert run.text == " ".join(body)
-        assert es.weight(run.source) == len(body)
-        assert after.text == "echo after"
+# Plain lines fold to one line, and weigh as many as the file holds.
+@given(st.lists(TEXT.filter(bool), min_size=1, max_size=6))
+def test_plain_lines_join_and_are_counted(body: list[str]) -> None:
+    """Single breaks become single spaces; the ceiling counts each line."""
+    lines = ["runs:", "  steps:", "    - run: >-"]
+    lines += [f"        {x}" for x in body]
+    lines.append("    - run: echo after")
+    with tempfile.TemporaryDirectory() as scratch:
+        path = Path(scratch) / "action.yml"
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        [run, after] = list(es.runs(path))
+    assert run.text == " ".join(body)
+    assert es.weight(run.source) == len(body)
+    assert after.text == "echo after"
 
 
-class TestDebtLine:
-    """A debt line is an entry or a sentence, never a traceback."""
-
-    @given(
-        st.one_of(
-            st.text(max_size=40),
-            st.lists(st.text(max_size=10), min_size=4, max_size=4).map("\t".join),
-        )
+# A debt line is an entry or a sentence, never a traceback.
+@given(
+    st.one_of(
+        st.text(max_size=40),
+        st.lists(st.text(max_size=10), min_size=4, max_size=4).map("\t".join),
     )
-    @example("ci.yml\tbuild\t²\t# #1")
-    def test_any_line_is_read(self, raw: str) -> None:
-        """An Entry over the ceiling, or a message."""
-        got = es.parse_entry(raw)
-        if isinstance(got, str):
-            assert got
-        else:
-            assert got.lines > es.CEILING
+)
+@example("ci.yml\tbuild\t²\t# #1")
+def test_any_line_is_read(raw: str) -> None:
+    """An Entry over the ceiling, or a message."""
+    got = es.parse_entry(raw)
+    if isinstance(got, str):
+        assert got
+    else:
+        assert got.lines > es.CEILING
 
-    @given(
-        st.from_regex(r"\.github/workflows/[a-z]{1,6}\.yml", fullmatch=True),
-        NAME.filter(bool),
-        st.integers(1, 200),
-        st.integers(1, 9999),
-    )
-    @example(".github/workflows/a.yml", "A", 16, 1352)
-    def test_an_entry_reads_back(
-        self, file: str, step: str, count: int, issue: int
-    ) -> None:
-        """Written as the file spells it, read back as written."""
-        note = f"# #{issue}"
-        got = es.parse_entry(f"{file}\t{step}\t{count}\t{note}")
-        # The ceiling's own issue is no remover: a note naming it must say
-        # `unassigned` (the rule's own refusal, not a parse failure).
-        umbrella = es.WORKFLOW.umbrella.search(note) is not None
-        if count <= es.CEILING or umbrella:
-            assert isinstance(got, str)
-        else:
-            assert got == es.Entry(file, step, count, 0)
+
+@given(
+    st.from_regex(r"\.github/workflows/[a-z]{1,6}\.yml", fullmatch=True),
+    NAME.filter(bool),
+    st.integers(1, 200),
+    st.integers(1, 9999),
+)
+@example(".github/workflows/a.yml", "A", 16, 1352)
+def test_an_entry_reads_back(file: str, step: str, count: int, issue: int) -> None:
+    """Written as the file spells it, read back as written."""
+    note = f"# #{issue}"
+    got = es.parse_entry(f"{file}\t{step}\t{count}\t{note}")
+    # The ceiling's own issue is no remover: a note naming it must say
+    # `unassigned` (the rule's own refusal, not a parse failure).
+    umbrella = es.WORKFLOW.umbrella.search(note) is not None
+    if count <= es.CEILING or umbrella:
+        assert isinstance(got, str)
+    else:
+        assert got == es.Entry(file, step, count, 0)

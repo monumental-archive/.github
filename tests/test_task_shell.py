@@ -42,75 +42,80 @@ BODIES = {
 REFUSED = "ignored for security reasons"
 
 
-class TestTasksFailOnError:
-    """The declared shell stops a body at its first failure (#401)."""
-
-    @pytest.mark.parametrize(("what", "body"), BODIES.items())
-    def test_the_declared_shell_stops_at_the_first_failure(
-        self, what: object, body: object
-    ) -> None:
-        """No body reaches its last line, and each run is red."""
-        done = subprocess.run(
-            [*shlex.split(SHELL), body],
-            env=support.env(),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        assert "reached" not in done.stdout
-        assert done.returncode != 0
+# The declared shell stops a body at its first failure (#401).
+@pytest.mark.parametrize(("what", "body"), BODIES.items())
+def test_the_declared_shell_stops_at_the_first_failure(
+    what: object, body: object
+) -> None:
+    """No body reaches its last line, and each run is red."""
+    done = subprocess.run(
+        [*shlex.split(SHELL), body],
+        env=support.env(),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert "reached" not in done.stdout
+    assert done.returncode != 0
 
 
-@pytest.mark.usefixtures("_tmp")
-class TestALinkedCloneThatPinsItsShell:
+class ALinkedCloneThatPinsItsShell:
     """A real mise, the belt as a clone's link, no global config (#1745)."""
 
-    @fixture
-    def _tmp(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
 
-    def test_the_pin_holds_and_the_belt_sets_nothing_refused(self) -> None:
-        """The failing pipeline reds the task, and mise warns of nothing."""
-        tmp = Path(tempfile.mkdtemp(dir=self.tmp)).resolve()
-        repo = tmp / "repo"
-        conf = repo / ".config" / "mise" / "conf.d"
-        conf.mkdir(parents=True)
-        belt = support.belt(tmp / "belt")
-        (conf / "belt.toml").symlink_to(belt / "config.toml")
-        (repo / "mise.toml").write_text(
-            f'[task_config]\nshell = "{SHELL}"\n\n'
-            '[tasks.t]\nrun = "false | cat; echo reached"\n',
-            encoding="utf-8",
-        )
-        (tmp / "config").mkdir()
-        subprocess.run(
-            [support.tool("git"), "init", "-q", "."],
-            cwd=repo,
-            env=support.env(),
-            check=True,
-        )
-        env = support.env(
-            MISE_CONFIG_DIR=str(tmp / "config"),
-            XDG_CONFIG_HOME=str(tmp / "config"),
-            MISE_CEILING_PATHS=str(tmp),
-            MISE_TRUSTED_CONFIG_PATHS=str(tmp),
-            MISE_OFFLINE="1",
-            MISE_YES="1",
-            MISE_AUTO_INSTALL="0",
-            MISE_TASK_RUN_AUTO_INSTALL="0",
-        )
-        done = subprocess.run(
-            [support.tool("mise"), "run", "t"],
-            cwd=repo,
-            env=env,
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=120,
-        )
-        out = done.stdout + done.stderr
-        assert done.returncode != 0, out
-        assert "reached" not in done.stdout, out
-        assert REFUSED not in out
+
+@fixture
+def a_linked_clone_that_pins_its_shell(tmp_path: Path) -> ALinkedCloneThatPinsItsShell:
+    """Give each row its own ALinkedCloneThatPinsItsShell."""
+    return ALinkedCloneThatPinsItsShell(tmp_path)
+
+
+def test_the_pin_holds_and_the_belt_sets_nothing_refused(
+    a_linked_clone_that_pins_its_shell: ALinkedCloneThatPinsItsShell,
+) -> None:
+    """The failing pipeline reds the task, and mise warns of nothing."""
+    tmp = Path(tempfile.mkdtemp(dir=a_linked_clone_that_pins_its_shell.tmp)).resolve()
+    repo = tmp / "repo"
+    conf = repo / ".config" / "mise" / "conf.d"
+    conf.mkdir(parents=True)
+    belt = support.belt(tmp / "belt")
+    (conf / "belt.toml").symlink_to(belt / "config.toml")
+    (repo / "mise.toml").write_text(
+        f'[task_config]\nshell = "{SHELL}"\n\n'
+        '[tasks.t]\nrun = "false | cat; echo reached"\n',
+        encoding="utf-8",
+    )
+    (tmp / "config").mkdir()
+    subprocess.run(
+        [support.tool("git"), "init", "-q", "."],
+        cwd=repo,
+        env=support.env(),
+        check=True,
+    )
+    env = support.env(
+        MISE_CONFIG_DIR=str(tmp / "config"),
+        XDG_CONFIG_HOME=str(tmp / "config"),
+        MISE_CEILING_PATHS=str(tmp),
+        MISE_TRUSTED_CONFIG_PATHS=str(tmp),
+        MISE_OFFLINE="1",
+        MISE_YES="1",
+        MISE_AUTO_INSTALL="0",
+        MISE_TASK_RUN_AUTO_INSTALL="0",
+    )
+    done = subprocess.run(
+        [support.tool("mise"), "run", "t"],
+        cwd=repo,
+        env=env,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+    )
+    out = done.stdout + done.stderr
+    assert done.returncode != 0, out
+    assert "reached" not in done.stdout, out
+    assert REFUSED not in out

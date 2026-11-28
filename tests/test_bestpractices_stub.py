@@ -141,94 +141,100 @@ def kept(criterion: str) -> str:
     )
 
 
-class TestGreen:
-    """The shapes the lint must pass."""
-
-    def assert_ok(self, text: str, path: str = STUB_PATH) -> None:
-        """Assert a clean pass with the ok line and nothing on stderr."""
-        done = lint(text, path)
-        assert done.stderr == ""
-        assert done.returncode == 0
-        assert done.stdout == CLEAN
-
-    def test_the_canons_stub_passes(self) -> None:
-        """The stub every repository copies is clean."""
-        self.assert_ok(STUB)
-
-    def test_a_question_mark_needs_no_justification(self) -> None:
-        """A `?` is ignored by the site, so it owes no citation."""
-        self.assert_ok(
-            planted({"dco_status": "?", "dco_justification": None}),
-        )
-
-    def test_a_copied_file_is_not_the_stub(self) -> None:
-        """A copied file answers for its own repository; no citation rule."""
-        self.assert_ok(
-            planted({"dco_justification": "Signed off. No URL."}),
-            path=".bestpractices.json",
-        )
+# The shapes the lint must pass.
+def assert_ok(text: str, path: str = STUB_PATH) -> None:
+    """Assert a clean pass with the ok line and nothing on stderr."""
+    done = lint(text, path)
+    assert done.stderr == ""
+    assert done.returncode == 0
+    assert done.stdout == CLEAN
 
 
-class TestRed:
-    """Each red row is red when planted, with the stated message."""
+def test_the_canons_stub_passes() -> None:
+    """The stub every repository copies is clean."""
+    assert_ok(STUB)
 
-    def assert_red(self, text: str, message: str) -> None:
-        """Assert exit 1 and exactly this message on stderr."""
-        done = lint(text)
-        assert done.returncode == 1, done.stdout
-        assert done.stderr == message
 
-    def test_an_answer_with_no_url_is_red(self) -> None:
-        """The defect itself: a pre-set answer that says whose fact it is nowhere."""
-        text = kept("dco").split(" https://")[0]
-        self.assert_red(planted({"dco_justification": text}), unsourced("dco"))
+def test_a_question_mark_needs_no_justification() -> None:
+    """A `?` is ignored by the site, so it owes no citation."""
+    assert_ok(
+        planted({"dco_status": "?", "dco_justification": None}),
+    )
 
-    def test_a_url_outside_the_canon_is_red(self) -> None:
-        """One repository's file is not an org-level control."""
-        text = kept("dco").replace(
-            CANON_URL, "https://github.com/monumental-archive/stele/"
-        )
-        self.assert_red(planted({"dco_justification": text}), unsourced("dco"))
 
-    def test_a_sibling_repository_sharing_the_prefix_is_red(self) -> None:
-        """The URL is matched to the canon's own path, trailing slash and all."""
-        text = kept("dco").replace(
-            CANON_URL, "https://github.com/monumental-archive/.github-lab/"
-        )
-        self.assert_red(planted({"dco_justification": text}), unsourced("dco"))
+def test_a_copied_file_is_not_the_stub() -> None:
+    """A copied file answers for its own repository; no citation rule."""
+    assert_ok(
+        planted({"dco_justification": "Signed off. No URL."}),
+        path=".bestpractices.json",
+    )
 
-    def test_an_answer_with_no_justification_is_red(self) -> None:
-        """A Met with nothing beside it cites nothing."""
-        self.assert_red(
-            planted({"dco_justification": None}),
-            unsourced("dco"),
-        )
 
-    def test_a_mixed_case_criterion_is_read(self) -> None:
-        """require_2FA is a real key; a lowercase-only reader skips it."""
-        self.assert_red(
-            planted({"require_2FA_justification": "Required org-wide."}),
-            unsourced("require_2FA"),
-        )
+# Each red row is red when planted, with the stated message.
+def assert_red(text: str, message: str) -> None:
+    """Assert exit 1 and exactly this message on stderr."""
+    done = lint(text)
+    assert done.returncode == 1, done.stdout
+    assert done.stderr == message
 
-    def test_every_offender_is_named(self) -> None:
-        """Two unsourced answers are both listed, in file order."""
-        self.assert_red(
-            planted({
-                "osps_le_01_01_justification": "Signed off.",
-                "dco_justification": "Signed off.",
-            }),
-            unsourced("osps_le_01_01", "dco"),
-        )
 
-    def test_a_file_not_one_key_per_line_is_red(self) -> None:
-        """The check reads lines; a layout it cannot read is red by name."""
-        text = json.dumps(decoded.load_json(STUB)) + "\n"
-        keys = STUB.count('_status": ')
-        self.assert_red(
-            text,
-            f"lint:bestpractices: {STUB_PATH}: {keys} status keys, 0 on lines"
-            " of their own;\n"
-            "  the stub is read one key per line, as json.dumps(indent=2)"
-            " writes it\n",
-        )
+def test_an_answer_with_no_url_is_red() -> None:
+    """The defect itself: a pre-set answer that says whose fact it is nowhere."""
+    text = kept("dco").split(" https://")[0]
+    assert_red(planted({"dco_justification": text}), unsourced("dco"))
+
+
+def test_a_url_outside_the_canon_is_red() -> None:
+    """One repository's file is not an org-level control."""
+    text = kept("dco").replace(
+        CANON_URL, "https://github.com/monumental-archive/stele/"
+    )
+    assert_red(planted({"dco_justification": text}), unsourced("dco"))
+
+
+def test_a_sibling_repository_sharing_the_prefix_is_red() -> None:
+    """The URL is matched to the canon's own path, trailing slash and all."""
+    text = kept("dco").replace(
+        CANON_URL, "https://github.com/monumental-archive/.github-lab/"
+    )
+    assert_red(planted({"dco_justification": text}), unsourced("dco"))
+
+
+def test_an_answer_with_no_justification_is_red() -> None:
+    """A Met with nothing beside it cites nothing."""
+    assert_red(
+        planted({"dco_justification": None}),
+        unsourced("dco"),
+    )
+
+
+def test_a_mixed_case_criterion_is_read() -> None:
+    """require_2FA is a real key; a lowercase-only reader skips it."""
+    assert_red(
+        planted({"require_2FA_justification": "Required org-wide."}),
+        unsourced("require_2FA"),
+    )
+
+
+def test_every_offender_is_named() -> None:
+    """Two unsourced answers are both listed, in file order."""
+    assert_red(
+        planted({
+            "osps_le_01_01_justification": "Signed off.",
+            "dco_justification": "Signed off.",
+        }),
+        unsourced("osps_le_01_01", "dco"),
+    )
+
+
+def test_a_file_not_one_key_per_line_is_red() -> None:
+    """The check reads lines; a layout it cannot read is red by name."""
+    text = json.dumps(decoded.load_json(STUB)) + "\n"
+    keys = STUB.count('_status": ')
+    assert_red(
+        text,
+        f"lint:bestpractices: {STUB_PATH}: {keys} status keys, 0 on lines"
+        " of their own;\n"
+        "  the stub is read one key per line, as json.dumps(indent=2)"
+        " writes it\n",
+    )

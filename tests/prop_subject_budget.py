@@ -98,83 +98,70 @@ CONFIG: st.SearchStrategy[dict[str, str]] = st.fixed_dictionaries({
 })
 
 
-class TestGlobMatches:
-    """Renovate's globs, as `glob_matches` models them."""
-
-    @given(globbed())
-    @example(("a.b/c", "a.b/*", False))
-    @example(("Cargo.toml", "**/Cargo.toml", True))
-    def test_a_path_matches_its_own_patterns(
-        self, drawn: tuple[str, str, bool]
-    ) -> None:
-        """Every pattern made from a path selects it."""
-        path, pattern, _ = drawn
-        assert sb.glob_matches(pattern, path), f"{pattern!r} vs {path!r}"
-
-    @given(globbed(), SEGMENT)
-    def test_a_star_never_crosses_a_slash(
-        self, drawn: tuple[str, str, bool], extra: str
-    ) -> None:
-        """Without `**`, a pattern does not select a deeper path."""
-        path, pattern, double = drawn
-        if double or pattern == "*":
-            return
-        assert not sb.glob_matches(pattern, f"{path}/{extra}")
-        assert not sb.glob_matches(pattern, f"{extra}/{path}")
+# Renovate's globs, as `glob_matches` models them.
+@given(globbed())
+@example(("a.b/c", "a.b/*", False))
+@example(("Cargo.toml", "**/Cargo.toml", True))
+def test_a_path_matches_its_own_patterns(drawn: tuple[str, str, bool]) -> None:
+    """Every pattern made from a path selects it."""
+    path, pattern, _ = drawn
+    assert sb.glob_matches(pattern, path), f"{pattern!r} vs {path!r}"
 
 
-class TestRender:
-    """The widest subject a commit template can mint."""
+@given(globbed(), SEGMENT)
+def test_a_star_never_crosses_a_slash(drawn: tuple[str, str, bool], extra: str) -> None:
+    """Without `**`, a pattern does not select a deeper path."""
+    path, pattern, double = drawn
+    if double or pattern == "*":
+        return
+    assert not sb.glob_matches(pattern, f"{path}/{extra}")
+    assert not sb.glob_matches(pattern, f"{extra}/{path}")
 
-    @given(CONFIG, DEP, st.integers(1, 40))
-    def test_width_name_and_unmodelled(
-        self, config: dict[str, str], dep: str, width: int
-    ) -> None:
-        """Growth per column, the name where asked, unmodelled when left."""
-        fields = [config[k] for k in sb.MESSAGE_FIELDS]
-        versions = sum(
-            f.count("{{newValue}}") + f.count("{{newVersion}}") for f in fields
-        )
-        names = sum(f.count("{{depName}}") for f in fields)
-        narrow, unmodelled = sb.render(config, dep, width)
-        wide, _ = sb.render(config, dep, width + 1)
-        assert len(wide) - len(narrow) == versions
-        if names:
-            assert dep in narrow
-        left = any("{{unknownField}}" in f for f in fields)
-        assert (unmodelled is not None) == left
-        assert narrow.endswith(sb.PR_TAIL)
+
+# The widest subject a commit template can mint.
+@given(CONFIG, DEP, st.integers(1, 40))
+def test_width_name_and_unmodelled(
+    config: dict[str, str], dep: str, width: int
+) -> None:
+    """Growth per column, the name where asked, unmodelled when left."""
+    fields = [config[k] for k in sb.MESSAGE_FIELDS]
+    versions = sum(f.count("{{newValue}}") + f.count("{{newVersion}}") for f in fields)
+    names = sum(f.count("{{depName}}") for f in fields)
+    narrow, unmodelled = sb.render(config, dep, width)
+    wide, _ = sb.render(config, dep, width + 1)
+    assert len(wide) - len(narrow) == versions
+    if names:
+        assert dep in narrow
+    left = any("{{unknownField}}" in f for f in fields)
+    assert (unmodelled is not None) == left
+    assert narrow.endswith(sb.PR_TAIL)
 
 
 BRANCH = st.text(alphabet="abc -_()[]:.", max_size=8)
 
 
-class TestLockfileBranch:
-    """The one conditional the model renders (#2145)."""
-
-    @given(BRANCH, BRANCH, DEP, st.integers(1, 20), st.integers(1, 20))
-    def test_each_branch_renders_its_own_width(
-        self, lock: str, other: str, dep: str, width: int, version: int
-    ) -> None:
-        """The lock-file branch carries newVersion, the other newValue."""
-        extra = (
-            f"to {{{{#if isLockfileUpdate}}}}{lock}{{{{newVersion}}}}"
-            f"{{{{else}}}}{other}{{{{newValue}}}}{{{{/if}}}}"
-        )
-        config = {
-            "semanticCommitType": "chore",
-            "semanticCommitScope": "deps",
-            **dict.fromkeys(sb.MESSAGE_FIELDS, ""),
-            "commitMessageExtra": extra,
-        }
-        locked, unmodelled = sb.render(
-            config, dep, width, version=version, lockfile=True
-        )
-        ordinary, left = sb.render(config, dep, width, version=version)
-        assert unmodelled is None
-        assert left is None
-        assert locked == f"chore(deps): to {lock}{'9' * version}{sb.PR_TAIL}"
-        assert ordinary == f"chore(deps): to {other}{'9' * width}{sb.PR_TAIL}"
+# The one conditional the model renders (#2145).
+@given(BRANCH, BRANCH, DEP, st.integers(1, 20), st.integers(1, 20))
+def test_each_branch_renders_its_own_width(
+    lock: str, other: str, dep: str, width: int, version: int
+) -> None:
+    """The lock-file branch carries newVersion, the other newValue."""
+    extra = (
+        f"to {{{{#if isLockfileUpdate}}}}{lock}{{{{newVersion}}}}"
+        f"{{{{else}}}}{other}{{{{newValue}}}}{{{{/if}}}}"
+    )
+    config = {
+        "semanticCommitType": "chore",
+        "semanticCommitScope": "deps",
+        **dict.fromkeys(sb.MESSAGE_FIELDS, ""),
+        "commitMessageExtra": extra,
+    }
+    locked, unmodelled = sb.render(config, dep, width, version=version, lockfile=True)
+    ordinary, left = sb.render(config, dep, width, version=version)
+    assert unmodelled is None
+    assert left is None
+    assert locked == f"chore(deps): to {lock}{'9' * version}{sb.PR_TAIL}"
+    assert ordinary == f"chore(deps): to {other}{'9' * width}{sb.PR_TAIL}"
 
 
 # A package name as the npm and cargo lockfiles write them, and a
@@ -233,18 +220,16 @@ LOCK_FORMATS: dict[str, Callable[[str, str], str]] = {
 }
 
 
-class TestLockReader:
-    """Every lock format reads back the version written into it."""
-
-    @given(st.sampled_from(sorted(LOCK_FORMATS)), PACKAGE, VERSION)
-    def test_the_locked_version_is_read_back(
-        self, lockfile: str, name: str, version: str
-    ) -> None:
-        """One entry, one version, whatever the name and the version."""
-        lock = LOCK_FORMATS[lockfile](name, version)
-        read = coverage_js_runner.locked(lockfile.removeprefix("berry."), lock, name)
-        want: set[str] = {version}
-        assert want == read
+# Every lock format reads back the version written into it.
+@given(st.sampled_from(sorted(LOCK_FORMATS)), PACKAGE, VERSION)
+def test_the_locked_version_is_read_back(
+    lockfile: str, name: str, version: str
+) -> None:
+    """One entry, one version, whatever the name and the version."""
+    lock = LOCK_FORMATS[lockfile](name, version)
+    read = coverage_js_runner.locked(lockfile.removeprefix("berry."), lock, name)
+    want: set[str] = {version}
+    assert want == read
 
 
 SCALAR: st.SearchStrategy[object] = st.one_of(
@@ -327,27 +312,25 @@ READERS: dict[str, Callable[[list[Path], list[str]], list[sb.Dep]]] = {
 }
 
 
-class TestReaders:
-    """Any manifest is read or recorded as unmodelled."""
-
-    @given(
-        st.sampled_from(sorted(READERS)),
-        st.one_of(
-            st.binary(max_size=80),
-            DOCUMENT.map(as_json),
-            DOCUMENT.map(as_toml).map(str.encode),
-            VALUE.map(as_json),
-        ),
-    )
-    @example("mise.toml", b'"tools"={""=false}')
-    def test_any_manifest_is_answered(self, name: str, data: bytes) -> None:
-        """Dependencies and report lines, never a traceback."""
-        with tempfile.TemporaryDirectory() as scratch:
-            path = Path(scratch) / name
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(data)
-            report: list[str] = []
-            deps = READERS[name]([path], report)
-        assert isinstance(deps, list)
-        for line in report:
-            assert line.startswith(str(path)), line
+# Any manifest is read or recorded as unmodelled.
+@given(
+    st.sampled_from(sorted(READERS)),
+    st.one_of(
+        st.binary(max_size=80),
+        DOCUMENT.map(as_json),
+        DOCUMENT.map(as_toml).map(str.encode),
+        VALUE.map(as_json),
+    ),
+)
+@example("mise.toml", b'"tools"={""=false}')
+def test_any_manifest_is_answered(name: str, data: bytes) -> None:
+    """Dependencies and report lines, never a traceback."""
+    with tempfile.TemporaryDirectory() as scratch:
+        path = Path(scratch) / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        report: list[str] = []
+        deps = READERS[name]([path], report)
+    assert isinstance(deps, list)
+    for line in report:
+        assert line.startswith(str(path)), line

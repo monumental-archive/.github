@@ -51,71 +51,65 @@ ANY_ENTRY: st.SearchStrategy[EntryDoc] = st.builds(
 SUPERSCRIPT: list[EntryDoc] = [{"version": "²", "active": True, "installed": True}]
 
 
-class TestPinned:
-    """Active pins, installed or not."""
-
-    @given(st.data(), st.lists(ENTRY, max_size=6))
-    def test_active_installed_serve_in_any_order(
-        self, data: st.DataObject, listing: list[EntryDoc]
-    ) -> None:
-        """Served majors and absent versions, whatever the order."""
-        shuffled = data.draw(st.permutations(listing))
-        found, absent = pp.pinned(pp.entries(listing))
-        found_two, absent_two = pp.pinned(pp.entries(shuffled))
-        majors = {
-            int(e["version"].split(".")[0])
-            for e in listing
-            if e["active"] and e["installed"]
-        }
-        served, served_two = set(found), set(found_two)
-        assert served == majors
-        assert served_two == majors
-        absent_sorted = sorted(absent)
-        uninstalled = sorted(
-            e["version"] for e in listing if e["active"] and not e["installed"]
-        )
-        assert absent_sorted == uninstalled
-        absent_two_sorted = sorted(absent_two)
-        assert absent_sorted == absent_two_sorted
+# Active pins, installed or not.
+@given(st.data(), st.lists(ENTRY, max_size=6))
+def test_active_installed_serve_in_any_order(
+    data: st.DataObject, listing: list[EntryDoc]
+) -> None:
+    """Served majors and absent versions, whatever the order."""
+    shuffled = data.draw(st.permutations(listing))
+    found, absent = pp.pinned(pp.entries(listing))
+    found_two, absent_two = pp.pinned(pp.entries(shuffled))
+    majors = {
+        int(e["version"].split(".")[0])
+        for e in listing
+        if e["active"] and e["installed"]
+    }
+    served, served_two = set(found), set(found_two)
+    assert served == majors
+    assert served_two == majors
+    absent_sorted = sorted(absent)
+    uninstalled = sorted(
+        e["version"] for e in listing if e["active"] and not e["installed"]
+    )
+    assert absent_sorted == uninstalled
+    absent_two_sorted = sorted(absent_two)
+    assert absent_sorted == absent_two_sorted
 
 
-class TestRefusal:
-    """Any listing is read."""
-
-    @given(st.lists(ANY_ENTRY, max_size=4))
-    @example(SUPERSCRIPT)
-    def test_any_versions(self, listing: list[EntryDoc]) -> None:
-        """Majors are ints; nothing raises."""
-        found, _ = pp.pinned(pp.entries(listing))
-        assert all(isinstance(m, int) for m in found)
+# Any listing is read.
+@given(st.lists(ANY_ENTRY, max_size=4))
+@example(SUPERSCRIPT)
+def test_any_versions(listing: list[EntryDoc]) -> None:
+    """Majors are ints; nothing raises."""
+    found, _ = pp.pinned(pp.entries(listing))
+    assert all(isinstance(m, int) for m in found)
 
 
-class TestPlan:
-    """Every major, or none."""
-
-    @given(st.sets(MAJOR, min_size=1, max_size=4), st.sets(MAJOR, max_size=6))
-    def test_all_or_nothing(self, declared: set[int], served: set[int]) -> None:
-        """Records for all declared majors, or findings and no record."""
-        with tempfile.TemporaryDirectory() as scratch:
-            listing: list[dict[str, object]] = []
-            for major in served:
-                root = Path(scratch) / str(major)
-                (root / "bin").mkdir(parents=True)
-                (root / "bin" / "pg_config").write_text("", encoding="utf-8")
-                listing.append({
-                    "version": f"{major}.1.0",
-                    "active": True,
-                    "installed": True,
-                    "install_path": str(root),
-                })
-            records, findings = pp.plan(sorted(declared), pp.entries(listing))
-        missing = declared - served
-        if missing:
-            assert records == list[str]()
-            for major in missing:
-                assert any(f.startswith(f"pg{major} ") for f in findings)
-        else:
-            assert findings == list[str]()
-            planned = [r.split("\t")[1] for r in records]
-            majors = [str(m) for m in sorted(declared)]
-            assert planned == majors
+# Every major, or none.
+@given(st.sets(MAJOR, min_size=1, max_size=4), st.sets(MAJOR, max_size=6))
+def test_all_or_nothing(declared: set[int], served: set[int]) -> None:
+    """Records for all declared majors, or findings and no record."""
+    with tempfile.TemporaryDirectory() as scratch:
+        listing: list[dict[str, object]] = []
+        for major in served:
+            root = Path(scratch) / str(major)
+            (root / "bin").mkdir(parents=True)
+            (root / "bin" / "pg_config").write_text("", encoding="utf-8")
+            listing.append({
+                "version": f"{major}.1.0",
+                "active": True,
+                "installed": True,
+                "install_path": str(root),
+            })
+        records, findings = pp.plan(sorted(declared), pp.entries(listing))
+    missing = declared - served
+    if missing:
+        assert records == list[str]()
+        for major in missing:
+            assert any(f.startswith(f"pg{major} ") for f in findings)
+    else:
+        assert findings == list[str]()
+        planned = [r.split("\t")[1] for r in records]
+        majors = [str(m) for m in sorted(declared)]
+        assert planned == majors

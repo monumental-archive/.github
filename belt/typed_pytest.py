@@ -9,7 +9,9 @@ and no flag comes off for it: as `given` is (#1604, belt/typed_hypothesis
 form the org's tests use:
 
 - bare, `@fixture`, over a function or a method;
-- `@fixture(scope="class")`, a fixture a test class's rows share.
+- `@fixture(scope="class")`, a fixture a test class's rows share;
+- `@fixture(scope="module")`, one value for a module's rows, for a
+  fixture as costly as a real run of the thing under test.
 
 Each overload takes the fixture function by its own parameters, so its
 body is checked as written, and the decorated name is an `object`: pytest
@@ -37,7 +39,7 @@ def fixture[**P](function: Callable[P, object], /) -> object: ...
 
 @overload
 def fixture[**P](
-    *, scope: Literal["class"]
+    *, scope: Literal["class", "module"]
 ) -> Callable[[Callable[P, object]], object]: ...
 
 
@@ -45,7 +47,7 @@ def fixture[**P](
     function: Callable[P, object] | None = None,
     /,
     *,
-    scope: Literal["function", "class"] = "function",
+    scope: Literal["function", "class", "module"] = "function",
 ) -> object:
     """Apply pytest's `fixture`; the overloads above are its type.
 

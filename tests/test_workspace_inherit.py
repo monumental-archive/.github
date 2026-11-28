@@ -139,168 +139,174 @@ def raw_member(name: str, **fields: object) -> dict[str, object]:
     }
 
 
-class TestInherits:
-    """The one question this check asks, per key and per member."""
-
-    def test_a_verbatim_value_is_taken(self) -> None:
-        """The ordinary shape: cargo reports the declaration unchanged."""
-        taker = member("taker", rust_version="1.82")
-        assert wi.inherits("rust-version", "1.82", taker, ROOT) == True
-
-    def test_a_member_with_its_own_value_takes_nothing(self) -> None:
-        """A different value is a different declaration, not inheritance."""
-        own = member("own", edition="2018")
-        assert wi.inherits("edition", "2021", own, ROOT) == False
-
-    def test_an_absent_field_takes_nothing(self) -> None:
-        """release-lab's live case: rust_version None on all four."""
-        bare = member("bare", rust_version=None)
-        assert wi.inherits("rust-version", "1.97", bare, ROOT) == False
-
-    def test_a_list_valued_key_reports_empty_not_null(self) -> None:
-        """Measured: a member taking no `keywords` reports `[]`.
-
-        So an inertness test written as "every member reports null"
-        would call this key taken and never fire.
-        """
-        rows = [member("bare", keywords=[]), member("taker", keywords=["k"])]
-        got: list[bool | None] = [
-            wi.inherits("keywords", ["k"], row, ROOT) for row in rows
-        ]
-        want: list[bool | None] = [False, True]
-        assert got == want
-
-    def test_a_path_key_is_rebased_by_cargo_and_still_counts(self) -> None:
-        """THE row that value equality gets wrong.
-
-        release-lab declares `readme = "README.md"` and all four members
-        take it; cargo reports `../../README.md` for each. Comparing the
-        two as strings reds a key nobody got wrong.
-        """
-        taker = member("taker", readme="../../README.md")
-        assert wi.inherits("readme", "README.md", taker, ROOT) == True
-
-    def test_a_rebased_path_naming_another_file_does_not_count(self) -> None:
-        """The other direction: rebasing is not a free pass."""
-        other = member("other", readme="../../OTHER.md")
-        assert wi.inherits("readme", "README.md", other, ROOT) == False
-
-    def test_a_bool_readme_resolves_to_whatever_cargo_found(self) -> None:
-        """A readme declared true asks cargo to discover the file.
-
-        The declared bool appears nowhere in the account, so the test is
-        whether the member reports a readme at all.
-        """
-        rows = [member("taker", readme="../../README.md"), member("bare", readme=None)]
-        got: list[bool | None] = [
-            wi.inherits("readme", DISCOVER, row, ROOT) for row in rows
-        ]
-        want: list[bool | None] = [True, False]
-        assert got == want
-
-    def test_a_false_readme_is_undecidable(self) -> None:
-        """A readme declared false and "no readme" are one account.
-
-        A member taking it reports None, and so does a member taking
-        nothing — so this returns None rather than a verdict that would
-        be right by luck.
-        """
-        bare = member("bare", readme=None)
-        assert wi.inherits("readme", NO_README, bare, ROOT) is None
+# The one question this check asks, per key and per member.
+def test_a_verbatim_value_is_taken() -> None:
+    """The ordinary shape: cargo reports the declaration unchanged."""
+    taker = member("taker", rust_version="1.82")
+    assert wi.inherits("rust-version", "1.82", taker, ROOT) == True
 
 
-class TestJudge:
-    """The rule: red only where NO member takes the key."""
-
-    def test_a_key_every_member_takes_is_not_reported(self) -> None:
-        """Every member inheriting, which is edtf's live shape."""
-        members = [member("a", rust_version="1.82"), member("b", rust_version="1.82")]
-        assert wi.judge({"rust-version": "1.82"}, members, ROOT, []) == NO_FINDINGS
-
-    def test_a_key_only_one_member_takes_is_not_reported(self) -> None:
-        """THE branch a stricter rule would get wrong.
-
-        A workspace legitimately declares a key only some members want.
-        One taker is a reader, and a key with a reader is not inert.
-        """
-        members = [member("a", rust_version="1.82"), member("b", rust_version=None)]
-        assert wi.judge({"rust-version": "1.82"}, members, ROOT, []) == NO_FINDINGS
-
-    def test_a_key_no_member_takes_is_reported_with_every_member(self) -> None:
-        """release-lab's live case: the remedy names who could take it."""
-        members = [member("a", rust_version=None), member("b", rust_version=None)]
-        findings = wi.judge({"rust-version": "1.97"}, members, ROOT, [])
-        assert len(findings) == 1
-        assert findings[0].key == "rust-version"
-        takers: list[str] = ["a", "b"]
-        assert findings[0].takers == takers
-
-    def test_publish_is_reported_unjudged_rather_than_guessed(self) -> None:
-        """Measured: an inherited and an own publish are one account.
-
-        A declared false comes back `[]` either way, so a verdict here
-        would be right by luck in both directions.
-        """
-        report: list[str] = []
-        members = [member("a", publish=[])]
-        assert wi.judge({"publish": False}, members, ROOT, report) == NO_FINDINGS
-        assert any("publish" in line for line in report)
-
-    def test_a_key_cargo_does_not_report_is_named_not_skipped(self) -> None:
-        """`exclude` and `include` have no per-package value at all."""
-        report: list[str] = []
-        members = [member("a")]
-        assert wi.judge({"exclude": ["x"]}, members, ROOT, report) == NO_FINDINGS
-        assert any("exclude" in line for line in report)
-
-    def test_an_unknown_key_is_named_not_skipped(self) -> None:
-        """A key this task cannot model is stated, never passed quietly."""
-        report: list[str] = []
-        assert wi.judge({"invented": 1}, [member("a")], ROOT, report) == NO_FINDINGS
-        assert any("invented" in line for line in report)
-
-    def test_an_undecidable_key_is_not_red(self) -> None:
-        """No taker plus no verdict is a note, not a finding."""
-        report: list[str] = []
-        members = [member("a", readme=None)]
-        assert wi.judge({"readme": False}, members, ROOT, report) == NO_FINDINGS
-        assert report
+def test_a_member_with_its_own_value_takes_nothing() -> None:
+    """A different value is a different declaration, not inheritance."""
+    own = member("own", edition="2018")
+    assert wi.inherits("edition", "2021", own, ROOT) == False
 
 
-class TestWorkspacePackage:
-    """Reading the declaration, which is the one thing read as TEXT.
+def test_an_absent_field_takes_nothing() -> None:
+    """release-lab's live case: rust_version None on all four."""
+    bare = member("bare", rust_version=None)
+    assert wi.inherits("rust-version", "1.97", bare, ROOT) == False
 
-    Only the declared KEYS come from the manifest; whether anyone takes
-    them is always cargo's account. Reading the members' text is what
-    made this class invisible, and is what the issue rejected.
+
+def test_a_list_valued_key_reports_empty_not_null() -> None:
+    """Measured: a member taking no `keywords` reports `[]`.
+
+    So an inertness test written as "every member reports null"
+    would call this key taken and never fire.
     """
+    rows = [member("bare", keywords=[]), member("taker", keywords=["k"])]
+    got: list[bool | None] = [wi.inherits("keywords", ["k"], row, ROOT) for row in rows]
+    want: list[bool | None] = [False, True]
+    assert got == want
 
-    def test_reads_the_declared_table(self) -> None:
-        """The table arrives as written."""
-        with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / "Cargo.toml").write_text(
-                '[workspace.package]\nrust-version = "1.82"\n',
-                encoding="utf-8",
-            )
-            want: dict[str, object] = {"rust-version": "1.82"}
-            assert wi.workspace_package(root) == want
 
-    def test_a_workspace_without_the_table_reads_empty(self) -> None:
-        """The skip-clean branch's input."""
-        with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / "Cargo.toml").write_text(
-                '[workspace]\nmembers = ["crates/*"]\n',
-                encoding="utf-8",
-            )
-            none: dict[str, object] = {}
-            assert wi.workspace_package(root) == none
+def test_a_path_key_is_rebased_by_cargo_and_still_counts() -> None:
+    """THE row that value equality gets wrong.
 
-    def test_an_unreadable_manifest_stops_the_task(self) -> None:
-        """A manifest missing where cargo named the root is broken."""
-        with TemporaryDirectory() as tmp, Stops():
-            wi.workspace_package(Path(tmp))
+    release-lab declares `readme = "README.md"` and all four members
+    take it; cargo reports `../../README.md` for each. Comparing the
+    two as strings reds a key nobody got wrong.
+    """
+    taker = member("taker", readme="../../README.md")
+    assert wi.inherits("readme", "README.md", taker, ROOT) == True
+
+
+def test_a_rebased_path_naming_another_file_does_not_count() -> None:
+    """The other direction: rebasing is not a free pass."""
+    other = member("other", readme="../../OTHER.md")
+    assert wi.inherits("readme", "README.md", other, ROOT) == False
+
+
+def test_a_bool_readme_resolves_to_whatever_cargo_found() -> None:
+    """A readme declared true asks cargo to discover the file.
+
+    The declared bool appears nowhere in the account, so the test is
+    whether the member reports a readme at all.
+    """
+    rows = [member("taker", readme="../../README.md"), member("bare", readme=None)]
+    got: list[bool | None] = [
+        wi.inherits("readme", DISCOVER, row, ROOT) for row in rows
+    ]
+    want: list[bool | None] = [True, False]
+    assert got == want
+
+
+def test_a_false_readme_is_undecidable() -> None:
+    """A readme declared false and "no readme" are one account.
+
+    A member taking it reports None, and so does a member taking
+    nothing — so this returns None rather than a verdict that would
+    be right by luck.
+    """
+    bare = member("bare", readme=None)
+    assert wi.inherits("readme", NO_README, bare, ROOT) is None
+
+
+# The rule: red only where NO member takes the key.
+def test_a_key_every_member_takes_is_not_reported() -> None:
+    """Every member inheriting, which is edtf's live shape."""
+    members = [member("a", rust_version="1.82"), member("b", rust_version="1.82")]
+    assert wi.judge({"rust-version": "1.82"}, members, ROOT, []) == NO_FINDINGS
+
+
+def test_a_key_only_one_member_takes_is_not_reported() -> None:
+    """THE branch a stricter rule would get wrong.
+
+    A workspace legitimately declares a key only some members want.
+    One taker is a reader, and a key with a reader is not inert.
+    """
+    members = [member("a", rust_version="1.82"), member("b", rust_version=None)]
+    assert wi.judge({"rust-version": "1.82"}, members, ROOT, []) == NO_FINDINGS
+
+
+def test_a_key_no_member_takes_is_reported_with_every_member() -> None:
+    """release-lab's live case: the remedy names who could take it."""
+    members = [member("a", rust_version=None), member("b", rust_version=None)]
+    findings = wi.judge({"rust-version": "1.97"}, members, ROOT, [])
+    assert len(findings) == 1
+    assert findings[0].key == "rust-version"
+    takers: list[str] = ["a", "b"]
+    assert findings[0].takers == takers
+
+
+def test_publish_is_reported_unjudged_rather_than_guessed() -> None:
+    """Measured: an inherited and an own publish are one account.
+
+    A declared false comes back `[]` either way, so a verdict here
+    would be right by luck in both directions.
+    """
+    report: list[str] = []
+    members = [member("a", publish=[])]
+    assert wi.judge({"publish": False}, members, ROOT, report) == NO_FINDINGS
+    assert any("publish" in line for line in report)
+
+
+def test_a_key_cargo_does_not_report_is_named_not_skipped() -> None:
+    """`exclude` and `include` have no per-package value at all."""
+    report: list[str] = []
+    members = [member("a")]
+    assert wi.judge({"exclude": ["x"]}, members, ROOT, report) == NO_FINDINGS
+    assert any("exclude" in line for line in report)
+
+
+def test_an_unknown_key_is_named_not_skipped() -> None:
+    """A key this task cannot model is stated, never passed quietly."""
+    report: list[str] = []
+    assert wi.judge({"invented": 1}, [member("a")], ROOT, report) == NO_FINDINGS
+    assert any("invented" in line for line in report)
+
+
+def test_an_undecidable_key_is_not_red() -> None:
+    """No taker plus no verdict is a note, not a finding."""
+    report: list[str] = []
+    members = [member("a", readme=None)]
+    assert wi.judge({"readme": False}, members, ROOT, report) == NO_FINDINGS
+    assert report
+
+
+# Reading the declaration, which is the one thing read as TEXT.
+#
+# Only the declared KEYS come from the manifest; whether anyone takes
+# them is always cargo's account. Reading the members' text is what
+# made this class invisible, and is what the issue rejected.
+def test_reads_the_declared_table() -> None:
+    """The table arrives as written."""
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "Cargo.toml").write_text(
+            '[workspace.package]\nrust-version = "1.82"\n',
+            encoding="utf-8",
+        )
+        want: dict[str, object] = {"rust-version": "1.82"}
+        assert wi.workspace_package(root) == want
+
+
+def test_a_workspace_without_the_table_reads_empty() -> None:
+    """The skip-clean branch's input."""
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "Cargo.toml").write_text(
+            '[workspace]\nmembers = ["crates/*"]\n',
+            encoding="utf-8",
+        )
+        none: dict[str, object] = {}
+        assert wi.workspace_package(root) == none
+
+
+def test_an_unreadable_manifest_stops_the_task() -> None:
+    """A manifest missing where cargo named the root is broken."""
+    with TemporaryDirectory() as tmp, Stops():
+        wi.workspace_package(Path(tmp))
 
 
 # Each wrong-shaped account, and where its refusal says it is wrong.
@@ -327,99 +333,103 @@ WRONG_SHAPES: tuple[tuple[object, str], ...] = (
 )
 
 
-class TestMain:
-    """The guards, driven end to end over a real metadata document."""
+# The guards, driven end to end over a real metadata document.
+def _run(manifest: str, packages: list[dict[str, object]]) -> tuple[int, str, str]:
+    """Lay out a workspace root, feed cargo's account, capture all.
 
-    @staticmethod
-    def _run(manifest: str, packages: list[dict[str, object]]) -> tuple[int, str, str]:
-        """Lay out a workspace root, feed cargo's account, capture all.
+    Returns:
+        The exit status, stdout and stderr.
 
-        Returns:
-            The exit status, stdout and stderr.
+    """
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "Cargo.toml").write_text(manifest, encoding="utf-8")
+        for package in packages:
+            crate = root / "crates" / decoded.as_str(package["name"], "name")
+            package["manifest_path"] = str(crate / "Cargo.toml")
+        document: dict[str, object] = {
+            "workspace_root": str(root),
+            "workspace_members": [p["id"] for p in packages],
+            "packages": packages,
+        }
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            status = wi.check(json.dumps(document), "Cargo.toml")
+        return status, out.getvalue(), err.getvalue()
 
-        """
-        with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / "Cargo.toml").write_text(manifest, encoding="utf-8")
-            for package in packages:
-                crate = root / "crates" / decoded.as_str(package["name"], "name")
-                package["manifest_path"] = str(crate / "Cargo.toml")
-            document: dict[str, object] = {
-                "workspace_root": str(root),
-                "workspace_members": [p["id"] for p in packages],
-                "packages": packages,
-            }
-            out, err = io.StringIO(), io.StringIO()
-            with redirect_stdout(out), redirect_stderr(err):
-                status = wi.check(json.dumps(document), "Cargo.toml")
-            return status, out.getvalue(), err.getvalue()
 
-    def test_no_workspace_package_table_skips_clean(self) -> None:
-        """Nothing is declared here, so nothing can be inert."""
-        status, out, _ = self._run(
-            '[workspace]\nmembers = ["crates/*"]\n',
-            [raw_member("a")],
-        )
-        assert status == 0
-        assert f"{TASK}: Cargo.toml: no [workspace.package] table, skipped\n" in out
+def test_no_workspace_package_table_skips_clean() -> None:
+    """Nothing is declared here, so nothing can be inert."""
+    status, out, _ = _run(
+        '[workspace]\nmembers = ["crates/*"]\n',
+        [raw_member("a")],
+    )
+    assert status == 0
+    assert f"{TASK}: Cargo.toml: no [workspace.package] table, skipped\n" in out
 
-    def test_an_inherited_key_passes_and_says_what_it_measured(self) -> None:
-        """The green path counts the keys and the members."""
-        status, out, _ = self._run(
-            '[workspace.package]\nrust-version = "1.82"\n',
-            [raw_member("a", rust_version="1.82")],
-        )
-        assert status == 0
-        assert f"{TASK}: Cargo.toml: 1 [workspace.package] key, every" in out
 
-    def test_an_inert_key_fails_with_the_one_line_remedy(self) -> None:
-        """The red path names the key, the members and the fix."""
-        status, _, err = self._run(
-            '[workspace.package]\nrust-version = "1.97"\n',
-            [raw_member("a", rust_version=None), raw_member("b", rust_version=None)],
-        )
-        assert status == 1
-        assert "reach no member" in err
-        assert "rust-version.workspace = true" in err
-        assert "a, b" in err
+def test_an_inherited_key_passes_and_says_what_it_measured() -> None:
+    """The green path counts the keys and the members."""
+    status, out, _ = _run(
+        '[workspace.package]\nrust-version = "1.82"\n',
+        [raw_member("a", rust_version="1.82")],
+    )
+    assert status == 0
+    assert f"{TASK}: Cargo.toml: 1 [workspace.package] key, every" in out
 
-    def test_a_declared_table_with_no_member_fails(self) -> None:
-        """A declaration with nobody to read it, in the limit.
 
-        Skipping here would be the vacuous success this whole class is
-        about: the keys are declared and reach nothing.
-        """
-        status, _, err = self._run('[workspace.package]\nversion = "0.1.0"\n', [])
-        assert status == 1
-        assert "names no workspace member" in err
+def test_an_inert_key_fails_with_the_one_line_remedy() -> None:
+    """The red path names the key, the members and the fix."""
+    status, _, err = _run(
+        '[workspace.package]\nrust-version = "1.97"\n',
+        [raw_member("a", rust_version=None), raw_member("b", rust_version=None)],
+    )
+    assert status == 1
+    assert "reach no member" in err
+    assert "rust-version.workspace = true" in err
+    assert "a, b" in err
 
-    @pytest.mark.parametrize(("document", "where"), WRONG_SHAPES)
-    def test_metadata_of_the_wrong_shape_stops_the_task_by_where(
-        self, document: object, where: str
-    ) -> None:
-        """A wrong-shaped account is refused naming where, never a crash."""
-        said = f"{TASK}: Cargo.toml: cargo metadata is unreadable"
-        err = io.StringIO()
-        with redirect_stderr(err):
-            assert wi.check(json.dumps(document), "Cargo.toml") == 1
-        assert f"{said} ({where})\n" == err.getvalue()
 
-    def test_a_manifest_of_the_wrong_shape_stops_the_task(self) -> None:
-        """`[workspace]` that is not a table is named, never a crash."""
-        with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / "Cargo.toml").write_text("workspace = 1\n", encoding="utf-8")
-            with Stops() as stopped:
-                wi.workspace_package(root)
-        assert (
-            f"{TASK}: {root}/Cargo.toml is unreadable (workspace is not an object)"
-            == stopped.said
-        )
+def test_a_declared_table_with_no_member_fails() -> None:
+    """A declaration with nobody to read it, in the limit.
 
-    def test_unreadable_metadata_stops_the_task(self) -> None:
-        """A broken account is refused, never read as an empty one."""
-        with redirect_stderr(io.StringIO()):
-            assert wi.check("not json", "Cargo.toml") == 1
+    Skipping here would be the vacuous success this whole class is
+    about: the keys are declared and reach nothing.
+    """
+    status, _, err = _run('[workspace.package]\nversion = "0.1.0"\n', [])
+    assert status == 1
+    assert "names no workspace member" in err
+
+
+@pytest.mark.parametrize(("document", "where"), WRONG_SHAPES)
+def test_metadata_of_the_wrong_shape_stops_the_task_by_where(
+    document: object, where: str
+) -> None:
+    """A wrong-shaped account is refused naming where, never a crash."""
+    said = f"{TASK}: Cargo.toml: cargo metadata is unreadable"
+    err = io.StringIO()
+    with redirect_stderr(err):
+        assert wi.check(json.dumps(document), "Cargo.toml") == 1
+    assert f"{said} ({where})\n" == err.getvalue()
+
+
+def test_a_manifest_of_the_wrong_shape_stops_the_task() -> None:
+    """`[workspace]` that is not a table is named, never a crash."""
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "Cargo.toml").write_text("workspace = 1\n", encoding="utf-8")
+        with Stops() as stopped:
+            wi.workspace_package(root)
+    assert (
+        f"{TASK}: {root}/Cargo.toml is unreadable (workspace is not an object)"
+        == stopped.said
+    )
+
+
+def test_unreadable_metadata_stops_the_task() -> None:
+    """A broken account is refused, never read as an empty one."""
+    with redirect_stderr(io.StringIO()):
+        assert wi.check("not json", "Cargo.toml") == 1
 
 
 # cargo for the two-root rows (#2004): locate-project names the fuzz
@@ -576,57 +586,59 @@ class TwoRoots:
         )
 
 
-class TestEveryRoot:
-    """Each workspace in the tree is judged, past a red one (#2004)."""
+# Each workspace in the tree is judged, past a red one (#2004).
+def test_a_key_no_member_of_the_second_root_takes_is_red(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """fuzz/Cargo.toml's `edition`: nonzero, naming the key and the root."""
+    planted = TwoRoots(tmp_path)
+    status, out, err = planted.main(capfd=capfd)
+    assert (status, out) == (1, TOP_GREEN)
+    assert err.startswith(INERT_IN_FUZZ), err
+    declared = f"  Declared in {planted.tree}/fuzz/Cargo.toml under"
+    assert declared in err
 
-    def test_a_key_no_member_of_the_second_root_takes_is_red(
-        self, tmp_path: Path, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """fuzz/Cargo.toml's `edition`: nonzero, naming the key and the root."""
-        planted = TwoRoots(tmp_path)
-        status, out, err = planted.main(capfd=capfd)
-        assert (status, out) == (1, TOP_GREEN)
-        assert err.startswith(INERT_IN_FUZZ), err
-        declared = f"  Declared in {planted.tree}/fuzz/Cargo.toml under"
-        assert declared in err
 
-    def test_a_failing_cargo_is_red_with_its_text_and_the_rest_judged(
-        self, tmp_path: Path, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """Fetch refused for the top root: cargo's words; fuzz still judged."""
-        done = TwoRoots(tmp_path, fetch_fails="Cargo.toml").main(capfd=capfd)
-        assert (done.returncode, done.stdout) == (1, "")
-        assert (
-            f"{TASK}: Cargo.toml: cargo fetch failed\n"
-            "  error: planted: failed to fetch for Cargo.toml\n"
-        ) in done.stderr
-        assert INERT_IN_FUZZ in done.stderr
+def test_a_failing_cargo_is_red_with_its_text_and_the_rest_judged(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Fetch refused for the top root: cargo's words; fuzz still judged."""
+    done = TwoRoots(tmp_path, fetch_fails="Cargo.toml").main(capfd=capfd)
+    assert (done.returncode, done.stdout) == (1, "")
+    assert (
+        f"{TASK}: Cargo.toml: cargo fetch failed\n"
+        "  error: planted: failed to fetch for Cargo.toml\n"
+    ) in done.stderr
+    assert INERT_IN_FUZZ in done.stderr
 
-    def test_no_root_is_a_usage_error(self, capfd: pytest.CaptureFixture[str]) -> None:
-        """The task always passes one; none at all is refused, exit 2."""
-        none: list[str] = []
-        status, out, err = wi.main(none)
-        out, err = capfd.readouterr()
-        assert (status, out, err) == (
-            2,
-            "",
-            "usage: belt workspace-inherit <root Cargo.toml>...\n",
-        )
 
-    def test_the_task_reads_the_roots_and_judges_both(self, tmp_path: Path) -> None:
-        """The body, end to end: the derivation's roots, the fuzz one red."""
-        done = TwoRoots(tmp_path).task()
-        assert done.returncode == 1, done.stdout + done.stderr
-        assert done.stdout == TOP_GREEN
-        assert INERT_IN_FUZZ in done.stderr
+def test_no_root_is_a_usage_error(capfd: pytest.CaptureFixture[str]) -> None:
+    """The task always passes one; none at all is refused, exit 2."""
+    none: list[str] = []
+    status, out, err = wi.main(none)
+    out, err = capfd.readouterr()
+    assert (status, out, err) == (
+        2,
+        "",
+        "usage: belt workspace-inherit <root Cargo.toml>...\n",
+    )
 
-    def test_the_task_stops_when_the_derivation_fails(self, tmp_path: Path) -> None:
-        """locate-project refused: its finding, exit 1, the helper never run."""
-        done = TwoRoots(tmp_path, locate_fails="fuzz/Cargo.toml").task()
-        assert (done.returncode, done.stdout) == (1, "")
-        assert (
-            f"{TASK}: cargo locate-project failed for fuzz/Cargo.toml\n"
-            "  error: planted: failed to locate fuzz/Cargo.toml\n"
-        ) in done.stderr
-        assert "usage:" not in done.stderr
-        assert "[workspace.package]" not in done.stderr
+
+def test_the_task_reads_the_roots_and_judges_both(tmp_path: Path) -> None:
+    """The body, end to end: the derivation's roots, the fuzz one red."""
+    done = TwoRoots(tmp_path).task()
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert done.stdout == TOP_GREEN
+    assert INERT_IN_FUZZ in done.stderr
+
+
+def test_the_task_stops_when_the_derivation_fails(tmp_path: Path) -> None:
+    """locate-project refused: its finding, exit 1, the helper never run."""
+    done = TwoRoots(tmp_path, locate_fails="fuzz/Cargo.toml").task()
+    assert (done.returncode, done.stdout) == (1, "")
+    assert (
+        f"{TASK}: cargo locate-project failed for fuzz/Cargo.toml\n"
+        "  error: planted: failed to locate fuzz/Cargo.toml\n"
+    ) in done.stderr
+    assert "usage:" not in done.stderr
+    assert "[workspace.package]" not in done.stderr

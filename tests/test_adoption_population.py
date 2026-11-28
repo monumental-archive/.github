@@ -99,132 +99,142 @@ def run_main(
     return status, out, err
 
 
-class TestObligations:
-    """What a declared membership makes applicable, and what it does not."""
+# What a declared membership makes applicable, and what it does not.
+def names(m: dict[str, object]) -> list[str]:
+    """Return just the artifact names a member owes.
 
-    @staticmethod
-    def names(m: dict[str, object]) -> list[str]:
-        """Return just the artifact names a member owes.
+    Returns:
+        The owed artifact names, in derivation order.
 
-        Returns:
-            The owed artifact names, in derivation order.
+    """
+    return [name for name, _ in ap.obligations(ap.Member.of(m, "m"), CANON)]
 
-        """
-        return [name for name, _ in ap.obligations(ap.Member.of(m, "m"), CANON)]
 
-    @staticmethod
-    def unmet(m: dict[str, object], present: set[str]) -> list[str]:
-        """Name each owed artifact no present workflow satisfies.
+def unmet(m: dict[str, object], present: set[str]) -> list[str]:
+    """Name each owed artifact no present workflow satisfies.
 
-        audit:adoption's own test: an artifact is met when any one of
-        its names is a file in the member's .github/workflows.
+    audit:adoption's own test: an artifact is met when any one of
+    its names is a file in the member's .github/workflows.
 
-        Returns:
-            The unmet artifact names, in derivation order.
+    Returns:
+        The unmet artifact names, in derivation order.
 
-        """
-        owed = ap.obligations(ap.Member.of(m, "m"), CANON)
-        return [name for name, names in owed if not present & set(names)]
+    """
+    owed = ap.obligations(ap.Member.of(m, "m"), CANON)
+    return [name for name, names in owed if not present & set(names)]
 
-    def test_public_full_member_owes_everything(self) -> None:
-        """A public, tagged member on every track owes the whole set."""
-        expected = [
-            "ci",
-            *SUBJECTS,
-            "scorecard",
-            "dependency-review",
-            "source-attest",
-            "release",
-            "publish",
-        ]
-        assert self.names(member("app", tagged=True)) == expected
 
-    def test_every_track_owes_source_attest_and_an_exclusion_does_not(self) -> None:
-        """Resolved tracks decide it: every track holds source, [] does not."""
-        assert "source-attest" in self.names(member())
-        assert "source-attest" not in self.names(member(tracks=[]))
+def test_public_full_member_owes_everything() -> None:
+    """A public, tagged member on every track owes the whole set."""
+    expected = [
+        "ci",
+        *SUBJECTS,
+        "scorecard",
+        "dependency-review",
+        "source-attest",
+        "release",
+        "publish",
+    ]
+    assert names(member("app", tagged=True)) == expected
 
-    def test_private_drops_only_the_impossible(self) -> None:
-        """Privacy removes what cannot run, and nothing else."""
-        owed = self.names(member(visibility="private"))
-        assert "ci" in owed
-        assert "records" in owed
-        assert "scorecard" not in owed
-        assert "dependency-review" not in owed
 
-    def test_exclusion_still_owes_the_hygiene_that_asks_no_track_question(self) -> None:
-        """An exclusion narrows EVIDENCE, and evidence only (stele#181)."""
-        expected = ["ci", *SUBJECTS, "scorecard", "dependency-review"]
-        assert self.names(member("app", tracks=[])) == expected
+def test_every_track_owes_source_attest_and_an_exclusion_does_not() -> None:
+    """Resolved tracks decide it: every track holds source, [] does not."""
+    assert "source-attest" in names(member())
+    assert "source-attest" not in names(member(tracks=[]))
 
-    def test_the_private_exclusion_owes_the_gate_and_the_subjects(self) -> None:
-        """monumental-archive's live shape: four opt-out rows before, none after."""
-        expected = ["ci", *SUBJECTS]
-        private = member("app", tracks=[], visibility="private")
-        assert self.names(private) == expected
 
-    def test_source_only_member_owes_source_attest(self) -> None:
-        """A member bearing SOURCE owes the source chain's evidence."""
-        assert "source-attest" in self.names(member(tracks=["source"]))
+def test_private_drops_only_the_impossible() -> None:
+    """Privacy removes what cannot run, and nothing else."""
+    owed = names(member(visibility="private"))
+    assert "ci" in owed
+    assert "records" in owed
+    assert "scorecard" not in owed
+    assert "dependency-review" not in owed
 
-    def test_build_only_member_does_not_owe_source_attest(self) -> None:
-        """A member off the SOURCE track owes no source evidence, and no row."""
-        assert "source-attest" not in self.names(member(tracks=["build"]))
 
-    def test_tags_add_the_release_machinery_whatever_the_tracks(self) -> None:
-        """A tag is an act, not a claim: a released repo owes it (#510)."""
-        owed = self.names(member(tracks=[], visibility="private", tagged=True))
-        assert "release" in owed
-        assert "publish" in owed
+def test_exclusion_still_owes_the_hygiene_that_asks_no_track_question() -> None:
+    """An exclusion narrows EVIDENCE, and evidence only (stele#181)."""
+    expected = ["ci", *SUBJECTS, "scorecard", "dependency-review"]
+    assert names(member("app", tracks=[])) == expected
 
-    def test_untagged_owes_neither(self) -> None:
-        """A repository that never released owes no release machinery."""
-        owed = self.names(member())
-        assert "release" not in owed
-        assert "publish" not in owed
 
-    def test_alternate_names_are_offered(self) -> None:
-        """The canon's self-* variants and gate.yml satisfy the same obligations."""
-        owed = dict(ap.obligations(ap.Member.of(member(tagged=True), "m"), CANON))
-        assert "gate.yml" in owed["ci"]
-        assert "self-release.yml" in owed["release"]
-        assert "self-dependency-review.yml" in owed["dependency-review"]
-        assert "self-dependencies.yml" in owed["dependencies"]
-        assert "self-deep-tests.yml" in owed["deep-tests"]
-        assert "self-records.yml" in owed["records"]
+def test_the_private_exclusion_owes_the_gate_and_the_subjects() -> None:
+    """monumental-archive's live shape: four opt-out rows before, none after."""
+    expected = ["ci", *SUBJECTS]
+    private = member("app", tracks=[], visibility="private")
+    assert names(private) == expected
 
-    def test_the_retired_stub_alone_names_the_five(self) -> None:
-        """A member still on the single audit stub owes all five (#1858)."""
-        app = member("app", tracks=[], visibility="private")
-        unmet = self.unmet(app, {"ci.yml", "audit.yml"})
-        assert unmet == SUBJECTS
 
-    def test_the_five_stubs_pass(self) -> None:
-        """A member carrying the five subject stubs owes nothing more."""
-        app = member("app", tracks=[], visibility="private")
-        none: list[str] = []
-        assert self.unmet(app, {"ci.yml", *STUBS}) == none
+def test_source_only_member_owes_source_attest() -> None:
+    """A member bearing SOURCE owes the source chain's evidence."""
+    assert "source-attest" in names(member(tracks=["source"]))
 
-    def test_a_set_missing_records_names_it(self) -> None:
-        """Four of the five: the one missing is named, and only it."""
-        app = member("app", tracks=[], visibility="private")
-        present = {"ci.yml", *STUBS} - {"records.yml"}
-        expected = ["records"]
-        assert self.unmet(app, present) == expected
 
-    def test_the_canon_passes_on_its_three_self_callers(self) -> None:
-        """The canon's identity owes three subjects, met by self-* (#1858)."""
-        canon = member(CANON, tracks=[], visibility="private")
-        present = {
-            "gate.yml",
-            "self-dependencies.yml",
-            "self-deep-tests.yml",
-            "self-records.yml",
-        }
-        none: list[str] = []
-        assert self.unmet(canon, present) == none
-        assert "public-api" not in self.names(canon)
-        assert "own-audits" not in self.names(canon)
+def test_build_only_member_does_not_owe_source_attest() -> None:
+    """A member off the SOURCE track owes no source evidence, and no row."""
+    assert "source-attest" not in names(member(tracks=["build"]))
+
+
+def test_tags_add_the_release_machinery_whatever_the_tracks() -> None:
+    """A tag is an act, not a claim: a released repo owes it (#510)."""
+    owed = names(member(tracks=[], visibility="private", tagged=True))
+    assert "release" in owed
+    assert "publish" in owed
+
+
+def test_untagged_owes_neither() -> None:
+    """A repository that never released owes no release machinery."""
+    owed = names(member())
+    assert "release" not in owed
+    assert "publish" not in owed
+
+
+def test_alternate_names_are_offered() -> None:
+    """The canon's self-* variants and gate.yml satisfy the same obligations."""
+    owed = dict(ap.obligations(ap.Member.of(member(tagged=True), "m"), CANON))
+    assert "gate.yml" in owed["ci"]
+    assert "self-release.yml" in owed["release"]
+    assert "self-dependency-review.yml" in owed["dependency-review"]
+    assert "self-dependencies.yml" in owed["dependencies"]
+    assert "self-deep-tests.yml" in owed["deep-tests"]
+    assert "self-records.yml" in owed["records"]
+
+
+def test_the_retired_stub_alone_names_the_five() -> None:
+    """A member still on the single audit stub owes all five (#1858)."""
+    app = member("app", tracks=[], visibility="private")
+    assert unmet(app, {"ci.yml", "audit.yml"}) == SUBJECTS
+
+
+def test_the_five_stubs_pass() -> None:
+    """A member carrying the five subject stubs owes nothing more."""
+    app = member("app", tracks=[], visibility="private")
+    none: list[str] = []
+    assert unmet(app, {"ci.yml", *STUBS}) == none
+
+
+def test_a_set_missing_records_names_it() -> None:
+    """Four of the five: the one missing is named, and only it."""
+    app = member("app", tracks=[], visibility="private")
+    present = {"ci.yml", *STUBS} - {"records.yml"}
+    expected = ["records"]
+    assert unmet(app, present) == expected
+
+
+def test_the_canon_passes_on_its_three_self_callers() -> None:
+    """The canon's identity owes three subjects, met by self-* (#1858)."""
+    canon = member(CANON, tracks=[], visibility="private")
+    present = {
+        "gate.yml",
+        "self-dependencies.yml",
+        "self-deep-tests.yml",
+        "self-records.yml",
+    }
+    none: list[str] = []
+    assert unmet(canon, present) == none
+    assert "public-api" not in names(canon)
+    assert "own-audits" not in names(canon)
 
 
 # Documents this reader refuses, each with the message it must print.
@@ -287,72 +297,67 @@ REFUSALS: tuple[tuple[str, object, str], ...] = (
 )
 
 
-class TestMain:
-    """The one mode, end to end, over the org's real shape."""
+# The one mode, end to end, over the org's real shape.
+def test_obligations_over_the_document(capfd: pytest.CaptureFixture[str]) -> None:
+    """The private exclusion owes two artifacts and no written row."""
+    doc = document(
+        member("canon", tagged=True),
+        member("signer", tracks=["source"]),
+        member("app", tracks=[], visibility="private"),
+    )
+    code, out, err = run_main(doc, capfd=capfd)
+    assert (code, err) == (0, "")
+    owed: dict[str, list[str]] = {}
+    for line in out.splitlines():
+        _, repo, artifact, _names = line.split("\t")
+        owed.setdefault(repo, []).append(artifact)
+    repos = ["app", "canon", "signer"]
+    listed = list(owed)
+    assert repos == listed
+    app = ["ci", *SUBJECTS]
+    assert owed["app"] == app
+    assert "public-api" not in owed["canon"]
+    assert "public-api" in owed["signer"]
+    assert "release" in owed["canon"]
+    assert "release" not in owed["signer"]
+    assert "source-attest" in owed["signer"]
+    assert "OWES\tcanon\tci\tci.yml|gate.yml" in out.splitlines()
 
-    def test_obligations_over_the_document(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """The private exclusion owes two artifacts and no written row."""
-        doc = document(
-            member("canon", tagged=True),
-            member("signer", tracks=["source"]),
-            member("app", tracks=[], visibility="private"),
-        )
-        code, out, err = run_main(doc, capfd=capfd)
-        assert (code, err) == (0, "")
-        owed: dict[str, list[str]] = {}
-        for line in out.splitlines():
-            _, repo, artifact, _names = line.split("\t")
-            owed.setdefault(repo, []).append(artifact)
-        repos = ["app", "canon", "signer"]
-        listed = list(owed)
-        assert repos == listed
-        app = ["ci", *SUBJECTS]
-        assert owed["app"] == app
-        assert "public-api" not in owed["canon"]
-        assert "public-api" in owed["signer"]
-        assert "release" in owed["canon"]
-        assert "release" not in owed["signer"]
-        assert "source-attest" in owed["signer"]
-        assert "OWES\tcanon\tci\tci.yml|gate.yml" in out.splitlines()
 
-    @pytest.mark.parametrize(("name", "doc", "message"), REFUSALS)
-    def test_each_refusal_exits_two_and_names_its_field(
-        self,
-        name: object,
-        doc: object,
-        message: object,
-        capfd: pytest.CaptureFixture[str],
-    ) -> None:
-        """A refused document exits 2, says so, and prints no obligation."""
-        code, out, err = run_main(doc, capfd=capfd)
-        assert code == 2
-        assert out == ""
-        assert err.startswith(f"{TASK}: {message}"), err
+@pytest.mark.parametrize(("name", "doc", "message"), REFUSALS)
+def test_each_refusal_exits_two_and_names_its_field(
+    name: object,
+    doc: object,
+    message: object,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """A refused document exits 2, says so, and prints no obligation."""
+    code, out, err = run_main(doc, capfd=capfd)
+    assert code == 2
+    assert out == ""
+    assert err.startswith(f"{TASK}: {message}"), err
 
-    def test_arguments_other_than_the_canon_are_refused(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """The roster is no input any more: a caller passing one is told."""
-        code, out, err = run_main(document(member()), "--roster", "x.json", capfd=capfd)
-        assert (code, out) == (2, "")
-        assert (
-            f"{TASK}: takes the canon's repository name and nothing"
-            " else, got ['--roster', 'x.json']\n"
-        ) == err
 
-    def test_an_empty_canon_name_is_refused(
-        self, capfd: pytest.CaptureFixture[str]
-    ) -> None:
-        """An identity read that failed leaves an empty name: refused."""
-        with pytest.MonkeyPatch.context() as patched:
-            for name, value in (support.env(MISE_TASK_NAME=TASK)).items():
-                patched.setenv(name, value)
-            status = ap.main([""])
-        out, err = capfd.readouterr()
-        assert (status, out) == (2, "")
-        assert (
-            f"{TASK}: takes the canon's repository name and nothing else, got ['']\n"
-            == err
-        )
+def test_arguments_other_than_the_canon_are_refused(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """The roster is no input any more: a caller passing one is told."""
+    code, out, err = run_main(document(member()), "--roster", "x.json", capfd=capfd)
+    assert (code, out) == (2, "")
+    assert (
+        f"{TASK}: takes the canon's repository name and nothing"
+        " else, got ['--roster', 'x.json']\n"
+    ) == err
+
+
+def test_an_empty_canon_name_is_refused(capfd: pytest.CaptureFixture[str]) -> None:
+    """An identity read that failed leaves an empty name: refused."""
+    with pytest.MonkeyPatch.context() as patched:
+        for name, value in (support.env(MISE_TASK_NAME=TASK)).items():
+            patched.setenv(name, value)
+        status = ap.main([""])
+    out, err = capfd.readouterr()
+    assert (status, out) == (2, "")
+    assert (
+        f"{TASK}: takes the canon's repository name and nothing else, got ['']\n" == err
+    )

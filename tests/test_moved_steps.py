@@ -17,8 +17,6 @@ import os
 import subprocess
 from pathlib import Path
 
-import pytest
-
 from belt.typed_pytest import fixture
 from tests import support
 
@@ -50,19 +48,22 @@ def run(
     )
 
 
-@pytest.mark.usefixtures("_tmp", "_set_up_test_vex_decisions")
-class TestVexDecisions:
+SCRIPT = HERE / "vex-decisions.sh"
+
+
+class VexDecisions:
     """mise/vex-decisions.sh, in a planted git tree."""
 
-    @fixture
-    def _tmp(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
+        """Set up the rows' state."""
+        self.set_up_tmp(tmp_path)
+        self.set_up_test_vex_decisions(tmp_path)
+
+    def set_up_tmp(self, tmp_path: Path) -> None:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
 
-    SCRIPT = HERE / "vex-decisions.sh"
-
-    @fixture
-    def _set_up_test_vex_decisions(self, tmp_path: Path) -> None:
+    def set_up_test_vex_decisions(self, tmp_path: Path) -> None:
         """Make a repository with no decisions yet."""
         self.tree = Path(str(tmp_path))
         self.git("init", "-q")
@@ -102,7 +103,7 @@ class TestVexDecisions:
         """
         self.out = self.tree.parent / f"{self.tree.name}-args"
         return run(
-            self.SCRIPT,
+            SCRIPT,
             self.tree,
             str(self.out),
             REPO="o/r",
@@ -110,31 +111,6 @@ class TestVexDecisions:
             ONE_PER_MERGE=str(HERE / "vex-one-per-merge.txt"),
             **env,
         )
-
-    def test_a_dispatch_signs_every_tracked_decision_unsigned_only(self) -> None:
-        """The state mode, then one --decision= per tracked file."""
-        self.decide("a", "b")
-        done = self.decisions()
-        assert (done.returncode, done.stdout) == (0, ""), done.stderr
-        argv: list[str] = [
-            "--unsigned-only",
-            "--store",
-            "o/r",
-            "--decision=security/vex/a.openvex.json",
-            "--decision=security/vex/b.openvex.json",
-            "",
-        ]
-        assert self.out.read_text("utf-8").split("\0") == argv
-
-    def test_nothing_to_sign_is_a_notice_and_no_arguments(self) -> None:
-        """No decisions: the notice, no arguments written, exit 0."""
-        self.git("commit", "-q", "--allow-empty", "-m", "empty")
-        done = self.decisions()
-        assert (done.returncode, done.stdout) == (
-            0,
-            "::notice::security/vex/ holds no decisions\n",
-        )
-        assert self.out.read_text("utf-8") == ""
 
     def fake_list(self, *paths: str) -> str:
         """Write a stand-in for ORG_PYTHON that lists the changed decisions.
@@ -149,30 +125,74 @@ class TestVexDecisions:
         path.chmod(0o755)
         return str(path)
 
-    def test_a_push_of_one_decision_signs_it(self) -> None:
-        """The range mode: no mode flags, the one changed decision."""
-        self.decide("a")
-        before = self.git("rev-parse", "HEAD").strip()
-        done = self.decisions(
-            BEFORE=before, ORG_PYTHON=self.fake_list("security/vex/a.openvex.json")
-        )
-        assert (done.returncode, done.stdout) == (0, ""), done.stderr
-        assert self.out.read_text("utf-8") == "--decision=security/vex/a.openvex.json\0"
 
-    def test_a_push_of_two_decisions_is_refused_by_name(self) -> None:
-        """The one sentence lint:vex-one-per-merge prints, as an error."""
-        self.decide("a")
-        before = self.git("rev-parse", "HEAD").strip()
-        done = self.decisions(
-            BEFORE=before,
-            ORG_PYTHON=self.fake_list(
-                "security/vex/a.openvex.json", "security/vex/b.openvex.json"
-            ),
-        )
-        assert done.returncode == 1, done.stderr
-        assert done.stdout.startswith("::error::"), done.stdout
-        assert ONE_PER_MERGE.split("\n", 1)[0][:40] in done.stdout
-        assert self.out.read_text("utf-8") == ""
+@fixture
+def vex_decisions(tmp_path: Path) -> VexDecisions:
+    """Give each row its own VexDecisions."""
+    return VexDecisions(tmp_path)
+
+
+def test_a_dispatch_signs_every_tracked_decision_unsigned_only(
+    vex_decisions: VexDecisions,
+) -> None:
+    """The state mode, then one --decision= per tracked file."""
+    vex_decisions.decide("a", "b")
+    done = vex_decisions.decisions()
+    assert (done.returncode, done.stdout) == (0, ""), done.stderr
+    argv: list[str] = [
+        "--unsigned-only",
+        "--store",
+        "o/r",
+        "--decision=security/vex/a.openvex.json",
+        "--decision=security/vex/b.openvex.json",
+        "",
+    ]
+    assert vex_decisions.out.read_text("utf-8").split("\0") == argv
+
+
+def test_nothing_to_sign_is_a_notice_and_no_arguments(
+    vex_decisions: VexDecisions,
+) -> None:
+    """No decisions: the notice, no arguments written, exit 0."""
+    vex_decisions.git("commit", "-q", "--allow-empty", "-m", "empty")
+    done = vex_decisions.decisions()
+    assert (done.returncode, done.stdout) == (
+        0,
+        "::notice::security/vex/ holds no decisions\n",
+    )
+    assert vex_decisions.out.read_text("utf-8") == ""
+
+
+def test_a_push_of_one_decision_signs_it(vex_decisions: VexDecisions) -> None:
+    """The range mode: no mode flags, the one changed decision."""
+    vex_decisions.decide("a")
+    before = vex_decisions.git("rev-parse", "HEAD").strip()
+    done = vex_decisions.decisions(
+        BEFORE=before, ORG_PYTHON=vex_decisions.fake_list("security/vex/a.openvex.json")
+    )
+    assert (done.returncode, done.stdout) == (0, ""), done.stderr
+    assert (
+        vex_decisions.out.read_text("utf-8")
+        == "--decision=security/vex/a.openvex.json\0"
+    )
+
+
+def test_a_push_of_two_decisions_is_refused_by_name(
+    vex_decisions: VexDecisions,
+) -> None:
+    """The one sentence lint:vex-one-per-merge prints, as an error."""
+    vex_decisions.decide("a")
+    before = vex_decisions.git("rev-parse", "HEAD").strip()
+    done = vex_decisions.decisions(
+        BEFORE=before,
+        ORG_PYTHON=vex_decisions.fake_list(
+            "security/vex/a.openvex.json", "security/vex/b.openvex.json"
+        ),
+    )
+    assert done.returncode == 1, done.stderr
+    assert done.stdout.startswith("::error::"), done.stdout
+    assert ONE_PER_MERGE.split("\n", 1)[0][:40] in done.stdout
+    assert vex_decisions.out.read_text("utf-8") == ""
 
 
 def plant(root: Path, *, policy: bool = True) -> Path:
@@ -188,12 +208,10 @@ def plant(root: Path, *, policy: bool = True) -> Path:
     return root / ".github" / "actions" / "source-attest" / "resolve.sh"
 
 
-@pytest.mark.usefixtures("_set_up_test_source_attest_resolve")
-class TestSourceAttestResolve:
+class SourceAttestResolve:
     """.github/actions/source-attest/resolve.sh, in a planted canon tree."""
 
-    @fixture
-    def _set_up_test_source_attest_resolve(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Make a scratch directory, a runner temp and a GITHUB_ENV."""
         self.tmp = Path(os.path.realpath(str(tmp_path)))
         self.runner = self.tmp / "runner"
@@ -220,56 +238,99 @@ class TestSourceAttestResolve:
             GITHUB_ENV=str(self.github_env),
         )
 
-    def test_an_actions_path_names_the_pinned_ref(self) -> None:
-        """The ref is the path segment the caller pinned; the env is written."""
-        root = self.tmp / "_actions" / "monumental-archive" / ".github" / "v1.2.3"
-        done = self.resolve(plant(root), "claims")
-        assert done.returncode == 0, done.stdout + done.stderr
-        assert self.github_env.read_text("utf-8") == (
-            f"SA_WORK={self.runner}/source-attest\n"
-            f"SA_CANON_ROOT={root}\n"
-            "SA_CANON_REF=v1.2.3\n"
-            "SA_ISSUER=https://token.actions.githubusercontent.com\n"
-        )
 
-    def test_another_stage_is_refused_by_name(self) -> None:
-        """Only claims and attest are stages."""
-        root = self.tmp / "_actions" / "monumental-archive" / ".github" / "v1.2.3"
-        done = self.resolve(plant(root), "sign")
-        assert (done.returncode, done.stderr) == (
-            1,
-            (
-                "::error::resolve.sh: source-attest stage must be 'claims' or"
-                " 'attest', got 'sign' (#240)\n"
-            ),
-        )
+@fixture
+def source_attest_resolve(tmp_path: Path) -> SourceAttestResolve:
+    """Give each row its own SourceAttestResolve."""
+    return SourceAttestResolve(tmp_path)
 
-    def test_off_an_actions_path_in_another_repository_is_refused(self) -> None:
-        """Not an _actions path and not the canon calling itself."""
-        root = self.tmp / "elsewhere"
-        done = self.resolve(plant(root), "attest")
-        assert done.returncode == 1
-        assert done.stderr == (
-            f"::error::resolve.sh: source-attest resolved to '{root}' in"
-            " someone/consumer — not an _actions path and not a canon self-call\n"
-        )
 
-    def test_the_canon_calling_itself_names_the_running_commit(self) -> None:
-        """Off an _actions path in the canon: the ref is GITHUB_SHA."""
-        root = self.tmp / "checkout"
-        done = self.resolve(plant(root), "claims", "monumental-archive/.github")
-        assert done.returncode == 0, done.stdout + done.stderr
-        assert f"SA_CANON_REF={'c' * 40}\n" in self.github_env.read_text("utf-8")
+def test_an_actions_path_names_the_pinned_ref(
+    source_attest_resolve: SourceAttestResolve,
+) -> None:
+    """The ref is the path segment the caller pinned; the env is written."""
+    root = (
+        source_attest_resolve.tmp
+        / "_actions"
+        / "monumental-archive"
+        / ".github"
+        / "v1.2.3"
+    )
+    done = source_attest_resolve.resolve(plant(root), "claims")
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert source_attest_resolve.github_env.read_text("utf-8") == (
+        f"SA_WORK={source_attest_resolve.runner}/source-attest\n"
+        f"SA_CANON_ROOT={root}\n"
+        "SA_CANON_REF=v1.2.3\n"
+        "SA_ISSUER=https://token.actions.githubusercontent.com\n"
+    )
 
-    def test_a_tree_without_the_policy_is_refused(self) -> None:
-        """No slsa/verify-policy.json: not a canon tree to attest with."""
-        root = self.tmp / "_actions" / "monumental-archive" / ".github" / "v1.2.3"
-        done = self.resolve(plant(root, policy=False), "claims")
-        assert done.returncode == 1
-        assert done.stderr == (
-            f"::error::resolve.sh: resolved canon tree at '{root}' has no"
-            " slsa/verify-policy.json\n"
-        )
+
+def test_another_stage_is_refused_by_name(
+    source_attest_resolve: SourceAttestResolve,
+) -> None:
+    """Only claims and attest are stages."""
+    root = (
+        source_attest_resolve.tmp
+        / "_actions"
+        / "monumental-archive"
+        / ".github"
+        / "v1.2.3"
+    )
+    done = source_attest_resolve.resolve(plant(root), "sign")
+    assert (done.returncode, done.stderr) == (
+        1,
+        (
+            "::error::resolve.sh: source-attest stage must be 'claims' or"
+            " 'attest', got 'sign' (#240)\n"
+        ),
+    )
+
+
+def test_off_an_actions_path_in_another_repository_is_refused(
+    source_attest_resolve: SourceAttestResolve,
+) -> None:
+    """Not an _actions path and not the canon calling itself."""
+    root = source_attest_resolve.tmp / "elsewhere"
+    done = source_attest_resolve.resolve(plant(root), "attest")
+    assert done.returncode == 1
+    assert done.stderr == (
+        f"::error::resolve.sh: source-attest resolved to '{root}' in"
+        " someone/consumer — not an _actions path and not a canon self-call\n"
+    )
+
+
+def test_the_canon_calling_itself_names_the_running_commit(
+    source_attest_resolve: SourceAttestResolve,
+) -> None:
+    """Off an _actions path in the canon: the ref is GITHUB_SHA."""
+    root = source_attest_resolve.tmp / "checkout"
+    done = source_attest_resolve.resolve(
+        plant(root), "claims", "monumental-archive/.github"
+    )
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert f"SA_CANON_REF={'c' * 40}\n" in source_attest_resolve.github_env.read_text(
+        "utf-8"
+    )
+
+
+def test_a_tree_without_the_policy_is_refused(
+    source_attest_resolve: SourceAttestResolve,
+) -> None:
+    """No slsa/verify-policy.json: not a canon tree to attest with."""
+    root = (
+        source_attest_resolve.tmp
+        / "_actions"
+        / "monumental-archive"
+        / ".github"
+        / "v1.2.3"
+    )
+    done = source_attest_resolve.resolve(plant(root, policy=False), "claims")
+    assert done.returncode == 1
+    assert done.stderr == (
+        f"::error::resolve.sh: resolved canon tree at '{root}' has no"
+        " slsa/verify-policy.json\n"
+    )
 
 
 # A stub that appends its argv, one argument per line and a blank line
@@ -280,12 +341,10 @@ RECORDER = """#!/usr/bin/env bash
 NO_STELE = "::error::{}: stele is not on the runner — it is a belt tool\n"
 
 
-@pytest.mark.usefixtures("_set_up_test_stubbed")
-class TestStubbed:
+class Stubbed:
     """A scratch work directory, a stub bin, and a script run in it."""
 
-    @fixture
-    def _set_up_test_stubbed(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Make the work directory, the stub bin and the log."""
         self.tmp = Path(os.path.realpath(str(tmp_path)))
         self.work = self.tmp / "work"
@@ -336,10 +395,17 @@ class TestStubbed:
         return [block.split("\n") for block in text.split("\n\n") if block.strip()]
 
 
-class TestLevelsPublish(TestStubbed):
-    """mise/levels-publish.sh: level.yml's publish step (#1934)."""
+@fixture
+def stubbed(tmp_path: Path) -> Stubbed:
+    """Give each row its own Stubbed."""
+    return Stubbed(tmp_path)
 
-    SCRIPT = HERE / "levels-publish.sh"
+
+LEVELS_PUBLISH_SCRIPT = HERE / "levels-publish.sh"
+
+
+class LevelsPublish(Stubbed):
+    """mise/levels-publish.sh: level.yml's publish step (#1934)."""
 
     def publish(self, investigate: str) -> subprocess.CompletedProcess[str]:
         """Publish the planted cells with a stub git.
@@ -351,7 +417,7 @@ class TestLevelsPublish(TestStubbed):
         self.stub("git")
         (self.work / "levels").mkdir()
         return self.run_in(
-            self.SCRIPT,
+            LEVELS_PUBLISH_SCRIPT,
             os.environ["PATH"],
             GH_TOKEN="planted",  # ruff: ignore[hardcoded-password-func-arg]
             GITHUB_REPOSITORY="org/repo",
@@ -367,28 +433,38 @@ class TestLevelsPublish(TestStubbed):
         """
         return [argv[1] for argv in self.calls()]
 
-    def test_the_cells_are_pushed_to_the_levels_branch(self) -> None:
-        """Nothing to investigate: committed, force-pushed, green."""
-        done = self.publish("0")
-        assert (done.returncode, done.stderr) == (0, ""), done.stdout
-        expected: list[str] = ["init", "config", "config", "add", "commit", "push"]
-        assert self.pushed() == expected
-        push = self.calls()[-1]
-        assert "https://x-access-token:planted@github.com/org/repo.git" in push
-        assert push[-1] == "levels:levels"
 
-    def test_a_regression_is_refused_after_the_push(self) -> None:
-        """Exit 4 before: the good cells still publish, then one finding."""
-        done = self.publish("4")
-        assert (done.returncode, done.stdout) == (1, ""), done.stderr
-        assert self.pushed()[-1] == "push"
-        assert done.stderr == (
-            "::error::levels-publish.sh: a cell that was judged before cannot be"
-            " judged now — investigate; good reports were not overwritten\n"
-        )
+@fixture
+def levels_publish(tmp_path: Path) -> LevelsPublish:
+    """Give each row its own LevelsPublish."""
+    return LevelsPublish(tmp_path)
 
 
-class TestSourceAttestChain(TestStubbed):
+def test_the_cells_are_pushed_to_the_levels_branch(
+    levels_publish: LevelsPublish,
+) -> None:
+    """Nothing to investigate: committed, force-pushed, green."""
+    done = levels_publish.publish("0")
+    assert (done.returncode, done.stderr) == (0, ""), done.stdout
+    expected: list[str] = ["init", "config", "config", "add", "commit", "push"]
+    assert levels_publish.pushed() == expected
+    push = levels_publish.calls()[-1]
+    assert "https://x-access-token:planted@github.com/org/repo.git" in push
+    assert push[-1] == "levels:levels"
+
+
+def test_a_regression_is_refused_after_the_push(levels_publish: LevelsPublish) -> None:
+    """Exit 4 before: the good cells still publish, then one finding."""
+    done = levels_publish.publish("4")
+    assert (done.returncode, done.stdout) == (1, ""), done.stderr
+    assert levels_publish.pushed()[-1] == "push"
+    assert done.stderr == (
+        "::error::levels-publish.sh: a cell that was judged before cannot be"
+        " judged now — investigate; good reports were not overwritten\n"
+    )
+
+
+class SourceAttestChain(Stubbed):
     """.github/actions/source-attest/chain.sh: the attest step (#1934)."""
 
     def chain(self, genesis: str, path: str) -> subprocess.CompletedProcess[str]:
@@ -414,29 +490,40 @@ class TestSourceAttestChain(TestStubbed):
             GITHUB_SHA="c" * 40,
         )
 
-    def test_the_chain_is_emitted_against_the_canon_policy(self) -> None:
-        """Stele emit chain, with the tree's policy and the seam's remote."""
-        self.stub("stele")
-        done = self.chain("false", "/usr/bin:/bin")
-        assert done.returncode == 0, done.stderr
-        argv = self.calls()[0]
-        expected: list[str] = ["stele", "emit", "chain"]
-        assert argv[:3] == expected
-        assert f"{self.tmp}/canon/slsa/verify-policy.json" in argv
-        assert "file:///remote" in argv
-        assert f"{self.tmp}/sa/claims.json" in argv
-        assert "--genesis" not in argv
 
-    def test_genesis_founds_a_chain(self) -> None:
-        """SA_GENESIS=true is the one flag that founds one."""
-        self.stub("stele")
-        done = self.chain("true", "/usr/bin:/bin")
-        assert done.returncode == 0, done.stderr
-        assert self.calls()[0][-1] == "--genesis"
+@fixture
+def source_attest_chain(tmp_path: Path) -> SourceAttestChain:
+    """Give each row its own SourceAttestChain."""
+    return SourceAttestChain(tmp_path)
 
-    def test_no_stele_is_refused_by_name(self) -> None:
-        """No stele on the runner: one finding, nothing emitted."""
-        done = self.chain("false", "/usr/bin:/bin")
-        assert (done.returncode, done.stdout) == (1, ""), done.stderr
-        assert done.stderr == NO_STELE.format("chain.sh")
-        assert not self.calls()
+
+def test_the_chain_is_emitted_against_the_canon_policy(
+    source_attest_chain: SourceAttestChain,
+) -> None:
+    """Stele emit chain, with the tree's policy and the seam's remote."""
+    source_attest_chain.stub("stele")
+    done = source_attest_chain.chain("false", "/usr/bin:/bin")
+    assert done.returncode == 0, done.stderr
+    argv = source_attest_chain.calls()[0]
+    expected: list[str] = ["stele", "emit", "chain"]
+    assert argv[:3] == expected
+    assert f"{source_attest_chain.tmp}/canon/slsa/verify-policy.json" in argv
+    assert "file:///remote" in argv
+    assert f"{source_attest_chain.tmp}/sa/claims.json" in argv
+    assert "--genesis" not in argv
+
+
+def test_genesis_founds_a_chain(source_attest_chain: SourceAttestChain) -> None:
+    """SA_GENESIS=true is the one flag that founds one."""
+    source_attest_chain.stub("stele")
+    done = source_attest_chain.chain("true", "/usr/bin:/bin")
+    assert done.returncode == 0, done.stderr
+    assert source_attest_chain.calls()[0][-1] == "--genesis"
+
+
+def test_no_stele_is_refused_by_name(source_attest_chain: SourceAttestChain) -> None:
+    """No stele on the runner: one finding, nothing emitted."""
+    done = source_attest_chain.chain("false", "/usr/bin:/bin")
+    assert (done.returncode, done.stdout) == (1, ""), done.stderr
+    assert done.stderr == NO_STELE.format("chain.sh")
+    assert not source_attest_chain.calls()

@@ -121,148 +121,148 @@ def findings(root: Path) -> list[str]:
     return out
 
 
-class TestEscapes:
-    """What the writer prints, one line each time."""
+# What the writer prints, one line each time.
+def test_a_newline_cannot_begin_a_second_command() -> None:
+    """#1660's row: a message with a newline and a command is one line."""
+    assert (
+        written(lambda: workflow_command.error("a\n::error::b"))
+        == "::error::a%0A::error::b\n"
+    )
 
-    def test_a_newline_cannot_begin_a_second_command(self) -> None:
-        """#1660's row: a message with a newline and a command is one line."""
-        assert (
-            written(lambda: workflow_command.error("a\n::error::b"))
-            == "::error::a%0A::error::b\n"
-        )
 
-    def test_cr_and_percent_are_escaped_percent_first(self) -> None:
-        """`%0A` written as text stays text: `%` is escaped before the rest."""
-        assert (
-            written(lambda: workflow_command.warning("50%\r%0A"))
-            == "::warning::50%25%0D%250A\n"
-        )
+def test_cr_and_percent_are_escaped_percent_first() -> None:
+    """`%0A` written as text stays text: `%` is escaped before the rest."""
+    assert (
+        written(lambda: workflow_command.warning("50%\r%0A"))
+        == "::warning::50%25%0D%250A\n"
+    )
 
-    def test_plain_text_is_unchanged(self) -> None:
-        """Text with no `%`, CR or LF goes out as it was."""
-        assert (
-            written(lambda: workflow_command.notice("published v1.2.3 — done"))
-            == "::notice::published v1.2.3 — done\n"
-        )
 
-    def test_properties_also_escape_colon_and_comma(self) -> None:
-        """file, line and title, in that order, each value escaped."""
-        assert (
-            written(
-                lambda: workflow_command.error("m", file="a:b,c", line=3, title="t\n%")
-            )
-            == "::error file=a%3Ab%2Cc,line=3,title=t%0A%25::m\n"
-        )
+def test_plain_text_is_unchanged() -> None:
+    """Text with no `%`, CR or LF goes out as it was."""
+    assert (
+        written(lambda: workflow_command.notice("published v1.2.3 — done"))
+        == "::notice::published v1.2.3 — done\n"
+    )
 
-    def test_a_masked_value_with_a_newline_is_one_line(self) -> None:
-        """The whole value is masked: one line, read back whole.
 
-        Unescaped, the runner masked only up to the newline.
-        """
-        out = written(lambda: workflow_command.mask("abc\ndef%"))
-        assert out == "::add-mask::abc%0Adef%25\n"
-        assert (
-            out
-            .removeprefix("::add-mask::")
-            .removesuffix("\n")
-            .replace("%0A", "\n")
-            .replace("%25", "%")
-        ) == "abc\ndef%"
+def test_properties_also_escape_colon_and_comma() -> None:
+    """file, line and title, in that order, each value escaped."""
+    assert (
+        written(lambda: workflow_command.error("m", file="a:b,c", line=3, title="t\n%"))
+        == "::error file=a%3Ab%2Cc,line=3,title=t%0A%25::m\n"
+    )
 
-    def test_a_group_title_is_escaped_and_closed(self) -> None:
-        """The group title is escaped, and endgroup is the bare command."""
-        assert (
-            written(lambda: workflow_command.group("log\n::error::x"))
-            == "::group::log%0A::error::x\n"
-        )
-        assert (
-            written(lambda: workflow_command.endgroup(stream=None)) == "::endgroup::\n"
-        )
 
-    def test_group_then_endgroup_in_process(self) -> None:
-        """Called directly, the two write the group's start and its end."""
-        out = io.StringIO()
-        with redirect_stdout(out):
-            workflow_command.group("npm debug log\n::error::x")
-            workflow_command.endgroup()
-        assert out.getvalue() == "::group::npm debug log%0A::error::x\n::endgroup::\n"
+def test_a_masked_value_with_a_newline_is_one_line() -> None:
+    """The whole value is masked: one line, read back whole.
 
-    def test_the_stream_is_the_callers(self) -> None:
-        """stream= takes the line, and stdout gets nothing."""
+    Unescaped, the runner masked only up to the newline.
+    """
+    out = written(lambda: workflow_command.mask("abc\ndef%"))
+    assert out == "::add-mask::abc%0Adef%25\n"
+    assert (
+        out
+        .removeprefix("::add-mask::")
+        .removesuffix("\n")
+        .replace("%0A", "\n")
+        .replace("%25", "%")
+    ) == "abc\ndef%"
+
+
+def test_a_group_title_is_escaped_and_closed() -> None:
+    """The group title is escaped, and endgroup is the bare command."""
+    assert (
+        written(lambda: workflow_command.group("log\n::error::x"))
+        == "::group::log%0A::error::x\n"
+    )
+    assert written(lambda: workflow_command.endgroup(stream=None)) == "::endgroup::\n"
+
+
+def test_group_then_endgroup_in_process() -> None:
+    """Called directly, the two write the group's start and its end."""
+    out = io.StringIO()
+    with redirect_stdout(out):
+        workflow_command.group("npm debug log\n::error::x")
+        workflow_command.endgroup()
+    assert out.getvalue() == "::group::npm debug log%0A::error::x\n::endgroup::\n"
+
+
+def test_the_stream_is_the_callers() -> None:
+    """stream= takes the line, and stdout gets nothing."""
+    err = io.StringIO()
+    assert written(lambda: workflow_command.notice("x", stream=err)) == ""
+    assert err.getvalue() == "::notice::x\n"
+
+
+# #1660's helper row: pgrx_images quotes the major it was given.
+def test_the_refusal_is_one_line() -> None:
+    """A major carrying a newline refuses on one line, the text escaped.
+
+    On main this printed two lines, the second `::error::b`.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        table = Path(tmp) / "pgrx-base-images.toml"
+        table.write_text("[build]\n", "utf-8")
         err = io.StringIO()
-        assert written(lambda: workflow_command.notice("x", stream=err)) == ""
-        assert err.getvalue() == "::notice::x\n"
+        with (
+            pytest.MonkeyPatch.context() as patched,
+            redirect_stdout(io.StringIO()),
+            redirect_stderr(err),
+        ):
+            patched.setenv("MISE_TASK_NAME", "")
+            patched.setenv("ORG_FINDINGS", "")
+            patched.setattr(sys, "argv", ["pgrx_images.py"])
+            code = pgrx_images.main([
+                "base-image",
+                "--pg",
+                "a\n::error::b",
+                "--table",
+                str(table),
+            ])
+    assert code == 1
+    assert err.getvalue() == (
+        f"::error::pgrx_images.py: pga%0A::error::b has no build image in {table}\n"
+    )
 
 
-class TestAHelperQuotingOutsideText:
-    """#1660's helper row: pgrx_images quotes the major it was given."""
-
-    def test_the_refusal_is_one_line(self) -> None:
-        """A major carrying a newline refuses on one line, the text escaped.
-
-        On main this printed two lines, the second `::error::b`.
-        """
-        with tempfile.TemporaryDirectory() as tmp:
-            table = Path(tmp) / "pgrx-base-images.toml"
-            table.write_text("[build]\n", "utf-8")
-            err = io.StringIO()
-            with (
-                pytest.MonkeyPatch.context() as patched,
-                redirect_stdout(io.StringIO()),
-                redirect_stderr(err),
-            ):
-                patched.setenv("MISE_TASK_NAME", "")
-                patched.setenv("ORG_FINDINGS", "")
-                patched.setattr(sys, "argv", ["pgrx_images.py"])
-                code = pgrx_images.main([
-                    "base-image",
-                    "--pg",
-                    "a\n::error::b",
-                    "--table",
-                    str(table),
-                ])
-        assert code == 1
-        assert err.getvalue() == (
-            f"::error::pgrx_images.py: pga%0A::error::b has no build image in {table}\n"
-        )
+# No Python file but the module writes a workflow command.
+def test_only_the_module_writes_one() -> None:
+    """Every finding is a file and line to route through the module."""
+    assert findings(CANON) == list[str]()
 
 
-class TestTheLaw:
-    """No Python file but the module writes a workflow command."""
+def test_the_law_sees_each_shape() -> None:
+    """A literal, an f-string head and a concatenation are each found."""
+    source = (
+        'print("::error::x")\n'
+        'say(f"::warning::{y}")\n'
+        'm = ("::notice::a" " b")\n'
+        'n = "a ::error:: in the middle"\n'
+        'o = f"{z}::error::"\n'
+    )
+    assert command_strings(source) == list[int]([1, 2, 3])
 
-    def test_only_the_module_writes_one(self) -> None:
-        """Every finding is a file and line to route through the module."""
-        assert findings(CANON) == list[str]()
 
-    def test_the_law_sees_each_shape(self) -> None:
-        """A literal, an f-string head and a concatenation are each found."""
-        source = (
-            'print("::error::x")\n'
-            'say(f"::warning::{y}")\n'
-            'm = ("::notice::a" " b")\n'
-            'n = "a ::error:: in the middle"\n'
-            'o = f"{z}::error::"\n'
-        )
-        assert command_strings(source) == list[int]([1, 2, 3])
+def test_any_command_name_is_refused_by_line() -> None:
+    """add-mask, group, debug and set-output, each on its own line."""
+    source = (
+        'say(f"::add-mask::{token}")\n'
+        'say("::group::log")\n'
+        'print("::debug::x")\n'
+        'print(f"::set-output name=x::{v}")\n'
+        'say("::endgroup::")\n'
+    )
+    assert command_strings(source) == list[int]([1, 2, 3, 4, 5])
 
-    def test_any_command_name_is_refused_by_line(self) -> None:
-        """add-mask, group, debug and set-output, each on its own line."""
-        source = (
-            'say(f"::add-mask::{token}")\n'
-            'say("::group::log")\n'
-            'print("::debug::x")\n'
-            'print(f"::set-output name=x::{v}")\n'
-            'say("::endgroup::")\n'
-        )
-        assert command_strings(source) == list[int]([1, 2, 3, 4, 5])
 
-    def test_double_colons_mid_text_are_allowed(self) -> None:
-        """`::` that does not begin a command name is no command."""
-        source = (
-            'a = "std::vec::Vec"\n'
-            'b = "a ::error:: x"\n'
-            'c = ":: spaced"\n'
-            'd = "::9digit::x"\n'
-            'e = f"{x}::group::"\n'
-        )
-        assert command_strings(source) == list[int]()
+def test_double_colons_mid_text_are_allowed() -> None:
+    """`::` that does not begin a command name is no command."""
+    source = (
+        'a = "std::vec::Vec"\n'
+        'b = "a ::error:: x"\n'
+        'c = ":: spaced"\n'
+        'd = "::9digit::x"\n'
+        'e = f"{x}::group::"\n'
+    )
+    assert command_strings(source) == list[int]()

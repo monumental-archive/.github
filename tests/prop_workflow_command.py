@@ -50,48 +50,45 @@ def unescape(text: str, table: dict[str, str]) -> str:
     return re.sub(pattern, back, text)
 
 
-class TestOneLineReadsBack:
-    """T: one line, and the runner reads back what was given."""
-
-    @given(
-        st.sampled_from(sorted(WRITERS)),
-        TEXT,
-        st.one_of(st.none(), TEXT),
-        st.one_of(st.none(), st.integers(1, 10**6)),
-        st.one_of(st.none(), TEXT),
-    )
-    @example("error", "a\n::error::b", None, None, None)
-    @example("notice", "%0A", "a:b,c", 7, "%")
-    def test_one_line_reads_back(
-        self,
-        command: str,
-        message: str,
-        file: str | None,
-        line: int | None,
-        title: str | None,
-    ) -> None:
-        """Exactly one line; message and properties read back whole."""
-        out = io.StringIO()
-        with redirect_stdout(out):
-            WRITERS[command](message, file=file, line=line, title=title)
-        text = out.getvalue()
-        assert text.endswith("\n"), text
-        body = text[:-1]
-        assert "\n" not in body
-        assert "\r" not in body
-        head, sep, data = body[2:].partition("::")
-        assert body.startswith("::") and sep, body
-        assert unescape(data, DATA) == message
-        name, _, props = head.partition(" ")
-        assert name == command
-        given_props = {
-            k: str(v)
-            for k, v in (("file", file), ("line", line), ("title", title))
-            if v is not None
-        }
-        read = {}
-        if props:
-            for pair in props.split(","):
-                key, _, value = pair.partition("=")
-                read[key] = unescape(value, PROPERTY)
-        assert read == given_props
+# T: one line, and the runner reads back what was given.
+@given(
+    st.sampled_from(sorted(WRITERS)),
+    TEXT,
+    st.one_of(st.none(), TEXT),
+    st.one_of(st.none(), st.integers(1, 10**6)),
+    st.one_of(st.none(), TEXT),
+)
+@example("error", "a\n::error::b", None, None, None)
+@example("notice", "%0A", "a:b,c", 7, "%")
+def test_one_line_reads_back(
+    command: str,
+    message: str,
+    file: str | None,
+    line: int | None,
+    title: str | None,
+) -> None:
+    """Exactly one line; message and properties read back whole."""
+    out = io.StringIO()
+    with redirect_stdout(out):
+        WRITERS[command](message, file=file, line=line, title=title)
+    text = out.getvalue()
+    assert text.endswith("\n"), text
+    body = text[:-1]
+    assert "\n" not in body
+    assert "\r" not in body
+    head, sep, data = body[2:].partition("::")
+    assert body.startswith("::") and sep, body
+    assert unescape(data, DATA) == message
+    name, _, props = head.partition(" ")
+    assert name == command
+    given_props = {
+        k: str(v)
+        for k, v in (("file", file), ("line", line), ("title", title))
+        if v is not None
+    }
+    read = {}
+    if props:
+        for pair in props.split(","):
+            key, _, value = pair.partition("=")
+            read[key] = unescape(value, PROPERTY)
+    assert read == given_props

@@ -24,8 +24,6 @@ import re
 import subprocess
 from typing import TYPE_CHECKING
 
-import pytest
-
 from belt import decoded
 from belt.typed_pytest import fixture
 from tests import support
@@ -82,12 +80,10 @@ def pin(key: str) -> str:
     return decoded.as_str(tools[key.strip('"')], f"the belt's {key} pin")
 
 
-@pytest.mark.usefixtures("_set_up_test_locked_from_the_linked_lock")
-class TestLockedFromTheLinkedLock:
+class LockedFromTheLinkedLock:
     """Each row: which locks hold which tool, and what a locked install says."""
 
-    @fixture
-    def _set_up_test_locked_from_the_linked_lock(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Plant the cache tree, the linked clone and its root lock.
 
         Raises:
@@ -173,20 +169,46 @@ class TestLockedFromTheLinkedLock:
         assert done.returncode != 0, done.stderr
         assert f"{name}@{pin(key)} is not in the lockfile" in done.stderr
 
-    def test_a_belt_tool_resolves_from_the_linked_lock(self) -> None:
-        """The linked lock holds jq: a locked install would install it."""
-        self.assert_resolves("jq", "jq")
 
-    def test_a_belt_tool_the_linked_lock_lacks_is_refused(self) -> None:
-        """The linked lock lacks jq: refused, though the root lock is there."""
-        self.locks(belt=block("jq").sub("", self.belt_lock), root=self.uv_entry)
-        self.assert_refused("jq", "jq")
+@fixture
+def locked_from_the_linked_lock(tmp_path: Path) -> LockedFromTheLinkedLock:
+    """Give each row its own LockedFromTheLinkedLock."""
+    return LockedFromTheLinkedLock(tmp_path)
 
-    def test_the_own_tool_resolves_from_the_root_lock(self) -> None:
-        """The repository pins uv, locked at its root, beside the link."""
-        self.assert_resolves(UV_KEY, "aqua:astral-sh/uv")
 
-    def test_a_repository_tool_its_root_lock_lacks_is_refused(self) -> None:
-        """Only the linked lock holds uv: the root lock is the repository's."""
-        self.locks(belt=self.belt_lock + "\n" + self.uv_entry, root="")
-        self.assert_refused(UV_KEY, "aqua:astral-sh/uv")
+def test_a_belt_tool_resolves_from_the_linked_lock(
+    locked_from_the_linked_lock: LockedFromTheLinkedLock,
+) -> None:
+    """The linked lock holds jq: a locked install would install it."""
+    locked_from_the_linked_lock.assert_resolves("jq", "jq")
+
+
+def test_a_belt_tool_the_linked_lock_lacks_is_refused(
+    locked_from_the_linked_lock: LockedFromTheLinkedLock,
+) -> None:
+    """The linked lock lacks jq: refused, though the root lock is there."""
+    locked_from_the_linked_lock.locks(
+        belt=block("jq").sub("", locked_from_the_linked_lock.belt_lock),
+        root=locked_from_the_linked_lock.uv_entry,
+    )
+    locked_from_the_linked_lock.assert_refused("jq", "jq")
+
+
+def test_the_own_tool_resolves_from_the_root_lock(
+    locked_from_the_linked_lock: LockedFromTheLinkedLock,
+) -> None:
+    """The repository pins uv, locked at its root, beside the link."""
+    locked_from_the_linked_lock.assert_resolves(UV_KEY, "aqua:astral-sh/uv")
+
+
+def test_a_repository_tool_its_root_lock_lacks_is_refused(
+    locked_from_the_linked_lock: LockedFromTheLinkedLock,
+) -> None:
+    """Only the linked lock holds uv: the root lock is the repository's."""
+    locked_from_the_linked_lock.locks(
+        belt=locked_from_the_linked_lock.belt_lock
+        + "\n"
+        + locked_from_the_linked_lock.uv_entry,
+        root="",
+    )
+    locked_from_the_linked_lock.assert_refused(UV_KEY, "aqua:astral-sh/uv")

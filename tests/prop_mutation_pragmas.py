@@ -57,43 +57,39 @@ PICK_SIX: list[int] = [6]
 PICK_SEVEN_ONE: list[int] = [7, 1]
 
 
-class TestInvariance:
-    """A comment is a pragma; a string never is."""
-
-    @given(st.lists(st.sampled_from(range(len(PIECES))), max_size=8))
-    @example(PICK_SIX)
-    @example(PICK_SEVEN_ONE)
-    def test_exactly_the_comment_lines(self, picks: list[int]) -> None:
-        """Every pragma comment, at its line, and nothing else."""
-        lines: list[str] = []
-        expected: list[int] = []
-        for pick in picks:
-            body, marks = PIECES[pick]
-            expected += [len(lines) + 1 + m for m in marks]
-            lines += body
-        with tempfile.TemporaryDirectory() as scratch:
-            path = written(Path(scratch) / "m.py", ("\n".join(lines) + "\n").encode())
-            found = mp.pragmas(path)
-        found_lines = [line for line, _ in found]
-        assert found_lines == expected, lines
-        for _, text in found:
-            assert text.startswith("#")
+# A comment is a pragma; a string never is.
+@given(st.lists(st.sampled_from(range(len(PIECES))), max_size=8))
+@example(PICK_SIX)
+@example(PICK_SEVEN_ONE)
+def test_exactly_the_comment_lines(picks: list[int]) -> None:
+    """Every pragma comment, at its line, and nothing else."""
+    lines: list[str] = []
+    expected: list[int] = []
+    for pick in picks:
+        body, marks = PIECES[pick]
+        expected += [len(lines) + 1 + m for m in marks]
+        lines += body
+    with tempfile.TemporaryDirectory() as scratch:
+        path = written(Path(scratch) / "m.py", ("\n".join(lines) + "\n").encode())
+        found = mp.pragmas(path)
+    found_lines = [line for line, _ in found]
+    assert found_lines == expected, lines
+    for _, text in found:
+        assert text.startswith("#")
 
 
-class TestRefusal:
-    """Any file is answered by name, never a traceback."""
-
-    @given(st.binary(max_size=200))
-    @example(b"x = '\xff'\n")
-    @example(b"\xef\xbb\xbf# coding: latin-1\n")
-    @example(b"s = '''\n")
-    def test_main_answers_any_bytes(self, data: bytes) -> None:
-        """0, or 1 and the file named on stderr."""
-        with tempfile.TemporaryDirectory() as scratch:
-            path = written(Path(scratch) / "m.py", data)
-            out, err = io.StringIO(), io.StringIO()
-            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-                status = mp.main([str(path)])
-        assert status in {0, 1}
-        if status == 1:
-            assert str(path) in err.getvalue()
+# Any file is answered by name, never a traceback.
+@given(st.binary(max_size=200))
+@example(b"x = '\xff'\n")
+@example(b"\xef\xbb\xbf# coding: latin-1\n")
+@example(b"s = '''\n")
+def test_main_answers_any_bytes(data: bytes) -> None:
+    """0, or 1 and the file named on stderr."""
+    with tempfile.TemporaryDirectory() as scratch:
+        path = written(Path(scratch) / "m.py", data)
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            status = mp.main([str(path)])
+    assert status in {0, 1}
+    if status == 1:
+        assert str(path) in err.getvalue()

@@ -16,6 +16,7 @@ import tempfile
 from pathlib import Path
 
 from belt import gate_cache_key
+from belt.typed_pytest import fixture
 from tests import support
 from tests.test_coverage_tasks import (
     BASH,
@@ -133,217 +134,217 @@ def plant_rust_run(tree: Path, run: Path) -> None:
     (profiles / "tree-1-1.profraw").write_text("", encoding="utf-8")
 
 
-class TestMeasureSelectors:
-    """Every selector the script accepts measures its leg."""
-
-    def test_the_rust_selector_measures_the_rust_leg(self) -> None:
-        """`rust` is accepted, so it must not measure nothing and pass."""
-        self.assert_rust_leg_measured(RUSTUP)
-
-    def test_llvm_tools_ahead_of_a_long_listing_is_found(self) -> None:
-        """`llvm-tools…` first, then 200 kB: the leg measures (#1637).
-
-        On main the probe stopped at the first line and the leg reported
-        the component missing.
-        """
-        self.assert_rust_leg_measured(RUSTUP_LONG)
-
-    def assert_rust_leg_measured(self, rustup: str) -> None:
-        """Run the `rust` selector with this rustup and require its number."""
-        with tempfile.TemporaryDirectory() as tmp:
-            tree = Path(tmp) / "tree"
-            stubs = Path(tmp) / "stubs"
-            tree.mkdir()
-            stubs.mkdir()
-            for name, text in (("rustup", rustup), ("cargo", CARGO)):
-                (stubs / name).write_text(text, encoding="utf-8")
-                (stubs / name).chmod(0o755)
-            support.rustc(stubs)
-            (tree / "Cargo.toml").write_text("[workspace]\n", encoding="utf-8")
-            plant_rust_run(tree, Path(tmp) / "run")
-            env = support.env()
-            env |= {
-                "ORG_BELT_DIR": str(BELT),
-                "ORG_COVERAGE_RUN": str(Path(tmp) / "run"),
-                "RUSTUP_TOOLCHAIN": "stable",
-                "PATH": f"{stubs}{os.pathsep}{env.get('PATH', '')}",
-                "STUB_DIR": tmp,
-                "STUB_FILES": "a.rs:13:8 b.rs:0:0",
-            }
-            init_tree(tree, env, ["Cargo.toml"], commit=False)
-            env["ORG_COVERAGE_REPORTS"] = str(Path(tmp) / "reports")
-            done = subprocess.run(
-                [BASH, str(BELT / "coverage-measure.sh"), "coverage:test", "rust"],
-                cwd=tree,
-                env=env,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            written = (Path(tmp) / "reports" / "lcov.info").is_file()
-        assert done.returncode == 0, done.stderr
-        # 8 of 13 lines, summed over every file: the report it wrote.
-        assert done.stdout == "rust 61.53846153846154\n"
-        assert written
-
-    def test_a_go_and_rust_tree_measures_both_legs(self) -> None:
-        """Every tracked language runs its leg, not the first one (#471).
-
-        A mixed repository once took the Rust leg alone and reported the
-        floor held over a Go module nothing had measured.
-        """
-        with tempfile.TemporaryDirectory() as tmp:
-            tree = Path(tmp) / "tree"
-            stubs = Path(tmp) / "stubs"
-            tree.mkdir()
-            stubs.mkdir()
-            for name, text in (("rustup", RUSTUP), ("cargo", CARGO), ("go", GO)):
-                (stubs / name).write_text(text, encoding="utf-8")
-                (stubs / name).chmod(0o755)
-            support.rustc(stubs)
-            (tree / "Cargo.toml").write_text("[workspace]\n", encoding="utf-8")
-            (tree / "go.mod").write_text("module example.com/x\n", encoding="utf-8")
-            plant_rust_run(tree, Path(tmp) / "run")
-            env = support.env()
-            env |= {
-                "ORG_BELT_DIR": str(BELT),
-                "ORG_COVERAGE_RUN": str(Path(tmp) / "run"),
-                "RUSTUP_TOOLCHAIN": "stable",
-                "PATH": f"{stubs}{os.pathsep}{env.get('PATH', '')}",
-                "STUB_DIR": tmp,
-                "STUB_FILES": "a.rs:200:123",
-                "STUB_GO": "93.0",
-            }
-            init_tree(tree, env, ["Cargo.toml", "go.mod"], commit=False)
-            done = subprocess.run(
-                [BASH, str(BELT / "coverage-measure.sh"), "coverage:test", "all"],
-                cwd=tree,
-                env=env,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-        assert done.returncode == 0, done.stderr
-        assert done.stdout == "go 93.0\nrust 61.5\n"
+# Every selector the script accepts measures its leg.
+def test_the_rust_selector_measures_the_rust_leg() -> None:
+    """`rust` is accepted, so it must not measure nothing and pass."""
+    assert_rust_leg_measured(RUSTUP)
 
 
-class TestRustLegGuards:
-    """The rust leg's own guards, each by its message (#1653)."""
+def test_llvm_tools_ahead_of_a_long_listing_is_found() -> None:
+    """`llvm-tools…` first, then 200 kB: the leg measures (#1637).
 
-    @staticmethod
-    def leg(
-        tmp: str,
-        *,
-        marker: bool = True,
-        profile: bool = True,
-        metadata: dict[str, object] | None = None,
-    ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
-        """Run the `rust` selector over a planted run and stand-in cargo.
+    On main the probe stopped at the first line and the leg reported
+    the component missing.
+    """
+    assert_rust_leg_measured(RUSTUP_LONG)
 
-        `marker` leaves this run's `measured` marker, `profile` one
-        profile in the measurement's directory; `metadata` the packages
-        `cargo metadata` reports.
 
-        Returns:
-            The finished process and the stand-in cargo's calls.
-
-        """
-        base = Path(tmp)
-        tree, stubs, run = base / "tree", base / "stubs", base / "run"
+def assert_rust_leg_measured(rustup: str) -> None:
+    """Run the `rust` selector with this rustup and require its number."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = Path(tmp) / "tree"
+        stubs = Path(tmp) / "stubs"
         tree.mkdir()
         stubs.mkdir()
-        for name, text in (("rustup", RUSTUP), ("cargo", CARGO)):
+        for name, text in (("rustup", rustup), ("cargo", CARGO)):
             (stubs / name).write_text(text, encoding="utf-8")
             (stubs / name).chmod(0o755)
         support.rustc(stubs)
         (tree / "Cargo.toml").write_text("[workspace]\n", encoding="utf-8")
-        plant_rust_run(tree, run)
-        if not marker:
-            (run / "rust").rmdir()
-        if not profile:
-            profiles = tree / "target" / f"llvm-cov-target-{STABLE}"
-            (profiles / "tree-1-1.profraw").unlink()
+        plant_rust_run(tree, Path(tmp) / "run")
         env = support.env()
         env |= {
             "ORG_BELT_DIR": str(BELT),
-            "ORG_COVERAGE_RUN": str(run),
-            "ORG_COVERAGE_REPORTS": str(base / "reports"),
+            "ORG_COVERAGE_RUN": str(Path(tmp) / "run"),
             "RUSTUP_TOOLCHAIN": "stable",
             "PATH": f"{stubs}{os.pathsep}{env.get('PATH', '')}",
             "STUB_DIR": tmp,
-            "STUB_FILES": "src/lib.rs:10:0 crates/core/src/lib.rs:10:9",
+            "STUB_FILES": "a.rs:13:8 b.rs:0:0",
         }
         init_tree(tree, env, ["Cargo.toml"], commit=False)
-        if metadata is not None:
-            (base / "metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
-            env["STUB_METADATA"] = str(base / "metadata.json")
+        env["ORG_COVERAGE_REPORTS"] = str(Path(tmp) / "reports")
         done = subprocess.run(
-            [BASH, str(BELT / "coverage-measure.sh"), "coverage:check", "rust"],
+            [BASH, str(BELT / "coverage-measure.sh"), "coverage:test", "rust"],
             cwd=tree,
             env=env,
             capture_output=True,
             text=True,
             check=False,
         )
-        log = base / "cargo.log"
-        return done, log.read_text("utf-8").splitlines() if log.exists() else []
+        written = (Path(tmp) / "reports" / "lcov.info").is_file()
+    assert done.returncode == 0, done.stderr
+    # 8 of 13 lines, summed over every file: the report it wrote.
+    assert done.stdout == "rust 61.53846153846154\n"
+    assert written
 
-    NO_RUN = (
-        "coverage:check: the test task ran no measured Rust — its test command"
-        ' runs\n  through "${ORG_BELT_DIR}/measured" (#1653), or no suite ran'
-        " under mise\n"
-    )
 
-    def test_an_earlier_runs_profiles_without_this_runs_marker_are_refused(
-        self,
-    ) -> None:
-        """Profiles on disk, but `measured` made no marker in this run."""
-        with tempfile.TemporaryDirectory() as tmp:
-            done, calls = self.leg(tmp, marker=False)
-            assert done.returncode == 1, done.stderr
-            assert done.stdout == ""
-            assert self.NO_RUN in done.stderr
-            reports = [c for c in calls if "report" in c]
-            assert reports == NO_CALLS
+def test_a_go_and_rust_tree_measures_both_legs() -> None:
+    """Every tracked language runs its leg, not the first one (#471).
 
-    def test_this_runs_marker_without_a_profile_is_refused(self) -> None:
-        """`measured` ran, the suite wrote nothing: the same refusal."""
-        with tempfile.TemporaryDirectory() as tmp:
-            done, calls = self.leg(tmp, profile=False)
-            assert done.returncode == 1, done.stderr
-            assert done.stdout == ""
-            assert self.NO_RUN in done.stderr
-            reports = [c for c in calls if "report" in c]
-            assert reports == NO_CALLS
-
-    def test_a_root_package_extension_leaves_its_own_targets(self) -> None:
-        """The extension at the workspace root: its targets go, a member stays."""
-        root_ext = {
-            "packages": [
-                {
-                    "id": "path+file://<root>#ext@1.0.0",
-                    "name": "ext",
-                    "version": "1.0.0",
-                    "publish": None,
-                    "dependencies": [{"name": "pgrx"}],
-                    "features": {"default": [], "pg18": ["pgrx/pg18"]},
-                    "targets": [{"kind": ["lib"], "crate_types": ["lib"]}],
-                    "manifest_path": "<root>/Cargo.toml",
-                },
-            ],
-            "workspace_members": ["path+file://<root>#ext@1.0.0"],
+    A mixed repository once took the Rust leg alone and reported the
+    floor held over a Go module nothing had measured.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = Path(tmp) / "tree"
+        stubs = Path(tmp) / "stubs"
+        tree.mkdir()
+        stubs.mkdir()
+        for name, text in (("rustup", RUSTUP), ("cargo", CARGO), ("go", GO)):
+            (stubs / name).write_text(text, encoding="utf-8")
+            (stubs / name).chmod(0o755)
+        support.rustc(stubs)
+        (tree / "Cargo.toml").write_text("[workspace]\n", encoding="utf-8")
+        (tree / "go.mod").write_text("module example.com/x\n", encoding="utf-8")
+        plant_rust_run(tree, Path(tmp) / "run")
+        env = support.env()
+        env |= {
+            "ORG_BELT_DIR": str(BELT),
+            "ORG_COVERAGE_RUN": str(Path(tmp) / "run"),
+            "RUSTUP_TOOLCHAIN": "stable",
+            "PATH": f"{stubs}{os.pathsep}{env.get('PATH', '')}",
+            "STUB_DIR": tmp,
+            "STUB_FILES": "a.rs:200:123",
+            "STUB_GO": "93.0",
         }
-        with tempfile.TemporaryDirectory() as tmp:
-            done, calls = self.leg(tmp, metadata=root_ext)
-            assert done.returncode == 0, done.stderr
-            # crates/core's 9 of 10; the root's src/lib.rs (none hit) left out.
-            assert done.stdout == "rust 90\n"
-            (report,) = [c for c in calls if "llvm-cov report" in c]
-            assert re.search(
-                r"^llvm-cov report --ignore-filename-regex"
-                r" \^/\S+/\(src\|tests\|benches\|examples\)/\|\^/\S+/build\\\.rs\$ ",
-                report,
-            )
+        init_tree(tree, env, ["Cargo.toml", "go.mod"], commit=False)
+        done = subprocess.run(
+            [BASH, str(BELT / "coverage-measure.sh"), "coverage:test", "all"],
+            cwd=tree,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == "go 93.0\nrust 61.5\n"
+
+
+# The rust leg's own guards, each by its message (#1653).
+NO_RUN = (
+    "coverage:check: the test task ran no measured Rust — its test command"
+    ' runs\n  through "${ORG_BELT_DIR}/measured" (#1653), or no suite ran'
+    " under mise\n"
+)
+
+
+def leg(
+    tmp: str,
+    *,
+    marker: bool = True,
+    profile: bool = True,
+    metadata: dict[str, object] | None = None,
+) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+    """Run the `rust` selector over a planted run and stand-in cargo.
+
+    `marker` leaves this run's `measured` marker, `profile` one
+    profile in the measurement's directory; `metadata` the packages
+    `cargo metadata` reports.
+
+    Returns:
+        The finished process and the stand-in cargo's calls.
+
+    """
+    base = Path(tmp)
+    tree, stubs, run = base / "tree", base / "stubs", base / "run"
+    tree.mkdir()
+    stubs.mkdir()
+    for name, text in (("rustup", RUSTUP), ("cargo", CARGO)):
+        (stubs / name).write_text(text, encoding="utf-8")
+        (stubs / name).chmod(0o755)
+    support.rustc(stubs)
+    (tree / "Cargo.toml").write_text("[workspace]\n", encoding="utf-8")
+    plant_rust_run(tree, run)
+    if not marker:
+        (run / "rust").rmdir()
+    if not profile:
+        profiles = tree / "target" / f"llvm-cov-target-{STABLE}"
+        (profiles / "tree-1-1.profraw").unlink()
+    env = support.env()
+    env |= {
+        "ORG_BELT_DIR": str(BELT),
+        "ORG_COVERAGE_RUN": str(run),
+        "ORG_COVERAGE_REPORTS": str(base / "reports"),
+        "RUSTUP_TOOLCHAIN": "stable",
+        "PATH": f"{stubs}{os.pathsep}{env.get('PATH', '')}",
+        "STUB_DIR": tmp,
+        "STUB_FILES": "src/lib.rs:10:0 crates/core/src/lib.rs:10:9",
+    }
+    init_tree(tree, env, ["Cargo.toml"], commit=False)
+    if metadata is not None:
+        (base / "metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
+        env["STUB_METADATA"] = str(base / "metadata.json")
+    done = subprocess.run(
+        [BASH, str(BELT / "coverage-measure.sh"), "coverage:check", "rust"],
+        cwd=tree,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    log = base / "cargo.log"
+    return done, log.read_text("utf-8").splitlines() if log.exists() else []
+
+
+def test_an_earlier_runs_profiles_without_this_runs_marker_are_refused() -> None:
+    """Profiles on disk, but `measured` made no marker in this run."""
+    with tempfile.TemporaryDirectory() as tmp:
+        done, calls = leg(tmp, marker=False)
+        assert done.returncode == 1, done.stderr
+        assert done.stdout == ""
+        assert NO_RUN in done.stderr
+        reports = [c for c in calls if "report" in c]
+        assert reports == NO_CALLS
+
+
+def test_this_runs_marker_without_a_profile_is_refused() -> None:
+    """`measured` ran, the suite wrote nothing: the same refusal."""
+    with tempfile.TemporaryDirectory() as tmp:
+        done, calls = leg(tmp, profile=False)
+        assert done.returncode == 1, done.stderr
+        assert done.stdout == ""
+        assert NO_RUN in done.stderr
+        reports = [c for c in calls if "report" in c]
+        assert reports == NO_CALLS
+
+
+def test_a_root_package_extension_leaves_its_own_targets() -> None:
+    """The extension at the workspace root: its targets go, a member stays."""
+    root_ext = {
+        "packages": [
+            {
+                "id": "path+file://<root>#ext@1.0.0",
+                "name": "ext",
+                "version": "1.0.0",
+                "publish": None,
+                "dependencies": [{"name": "pgrx"}],
+                "features": {"default": [], "pg18": ["pgrx/pg18"]},
+                "targets": [{"kind": ["lib"], "crate_types": ["lib"]}],
+                "manifest_path": "<root>/Cargo.toml",
+            },
+        ],
+        "workspace_members": ["path+file://<root>#ext@1.0.0"],
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        done, calls = leg(tmp, metadata=root_ext)
+        assert done.returncode == 0, done.stderr
+        # crates/core's 9 of 10; the root's src/lib.rs (none hit) left out.
+        assert done.stdout == "rust 90\n"
+        (report,) = [c for c in calls if "llvm-cov report" in c]
+        assert re.search(
+            r"^llvm-cov report --ignore-filename-regex"
+            r" \^/\S+/\(src\|tests\|benches\|examples\)/\|\^/\S+/build\\\.rs\$ ",
+            report,
+        )
 
 
 # A Go toolchain for the rows below, enough to follow the mechanism: `go
@@ -387,8 +388,10 @@ mkdir -p "${dir}"
 : > "${dir}/covmeta.stub"
 """
 
+MEASURED = '"${ORG_BELT_DIR}/measured" go test -race ./...'
 
-class TestGoOneRun:
+
+class GoOneRun:
     """coverage:check under a real mise reads the Go suite's one run (#1651)."""
 
     def plant(self, base: Path, *, command: str) -> Path:
@@ -456,63 +459,72 @@ class TestGoOneRun:
             timeout=600,
         )
 
-    MEASURED = '"${ORG_BELT_DIR}/measured" go test -race ./...'
 
-    def test_the_task_runs_once_measured_with_its_own_goflags(self) -> None:
-        """Counter 1, the go figure held, the task's GOFLAGS kept and extended."""
-        with tempfile.TemporaryDirectory() as tmp:
-            tree = self.plant(Path(tmp), command=self.MEASURED)
-            done = self.check(tree)
-            out = done.stdout + done.stderr
-            assert done.returncode == 0, out
-            assert (Path(tmp) / "counter").read_text("utf-8") == "ran\n"
-            assert "coverage:check: go leg holds its floor 80.0 (91.0%)" in out
-            assert (
-                "-trimpath -cover -coverpkg=./... -covermode=atomic"
-                f" -exec={BELT}/go-test-exec\n"
-            ) == (Path(tmp) / "goflags.log").read_text("utf-8")
-            counters = list((Path(tmp) / "tmp").glob("org-coverage-*/go/covcounters.*"))
-            assert len(counters) == 1, out
+@fixture
+def go_one_run() -> GoOneRun:
+    """Give each row its own GoOneRun."""
+    return GoOneRun()
 
-    def test_two_go_test_runs_in_one_command_both_land(self) -> None:
-        """Each `go test` writes counters of its own: nothing is overwritten."""
-        with tempfile.TemporaryDirectory() as tmp:
-            command = (
-                '"${ORG_BELT_DIR}/measured" bash -c'
-                " 'go test ./a/... && go test ./b/...'"
-            )
-            tree = self.plant(Path(tmp), command=command)
-            done = self.check(tree)
-            out = done.stdout + done.stderr
-            assert done.returncode == 0, out
-            counters = list((Path(tmp) / "tmp").glob("org-coverage-*/go/covcounters.*"))
-            assert len(counters) == 2, out
 
-    def test_a_failing_suite_holds_no_figure_though_counters_exist(self) -> None:
-        """The suite's status gates the figure: `test` red, nothing read."""
-        with tempfile.TemporaryDirectory() as tmp:
-            tree = self.plant(Path(tmp), command=self.MEASURED)
-            done = self.check(tree, STUB_GO_FAIL="1")
-            out = done.stdout + done.stderr
-            assert done.returncode != 0, out
-            assert "go leg holds" not in out
-            assert "[test] ERROR task failed" in out
-            counters = list((Path(tmp) / "tmp").glob("org-coverage-*/go/covcounters.*"))
-            assert len(counters) == 1, out
+def test_the_task_runs_once_measured_with_its_own_goflags(go_one_run: GoOneRun) -> None:
+    """Counter 1, the go figure held, the task's GOFLAGS kept and extended."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = go_one_run.plant(Path(tmp), command=MEASURED)
+        done = go_one_run.check(tree)
+        out = done.stdout + done.stderr
+        assert done.returncode == 0, out
+        assert (Path(tmp) / "counter").read_text("utf-8") == "ran\n"
+        assert "coverage:check: go leg holds its floor 80.0 (91.0%)" in out
+        assert (
+            "-trimpath -cover -coverpkg=./... -covermode=atomic"
+            f" -exec={BELT}/go-test-exec\n"
+        ) == (Path(tmp) / "goflags.log").read_text("utf-8")
+        counters = list((Path(tmp) / "tmp").glob("org-coverage-*/go/covcounters.*"))
+        assert len(counters) == 1, out
 
-    def test_the_tasks_own_coverprofile_is_refused_by_name(self) -> None:
-        """A -coverprofile of its own on `go test`: refused before it runs."""
-        with tempfile.TemporaryDirectory() as tmp:
-            command = self.MEASURED + " -coverprofile=own.out"
-            tree = self.plant(Path(tmp), command=command)
-            done = self.check(tree)
-            out = done.stdout + done.stderr
-            assert done.returncode != 0, out
-            assert (
-                "measured: -coverprofile=own.out on its go test, which would"
-                " measure Go a second way"
-            ) in out
-            assert not (Path(tmp) / "goflags.log").exists()
+
+def test_two_go_test_runs_in_one_command_both_land(go_one_run: GoOneRun) -> None:
+    """Each `go test` writes counters of its own: nothing is overwritten."""
+    with tempfile.TemporaryDirectory() as tmp:
+        command = (
+            "\"${ORG_BELT_DIR}/measured\" bash -c 'go test ./a/... && go test ./b/...'"
+        )
+        tree = go_one_run.plant(Path(tmp), command=command)
+        done = go_one_run.check(tree)
+        out = done.stdout + done.stderr
+        assert done.returncode == 0, out
+        counters = list((Path(tmp) / "tmp").glob("org-coverage-*/go/covcounters.*"))
+        assert len(counters) == 2, out
+
+
+def test_a_failing_suite_holds_no_figure_though_counters_exist(
+    go_one_run: GoOneRun,
+) -> None:
+    """The suite's status gates the figure: `test` red, nothing read."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = go_one_run.plant(Path(tmp), command=MEASURED)
+        done = go_one_run.check(tree, STUB_GO_FAIL="1")
+        out = done.stdout + done.stderr
+        assert done.returncode != 0, out
+        assert "go leg holds" not in out
+        assert "[test] ERROR task failed" in out
+        counters = list((Path(tmp) / "tmp").glob("org-coverage-*/go/covcounters.*"))
+        assert len(counters) == 1, out
+
+
+def test_the_tasks_own_coverprofile_is_refused_by_name(go_one_run: GoOneRun) -> None:
+    """A -coverprofile of its own on `go test`: refused before it runs."""
+    with tempfile.TemporaryDirectory() as tmp:
+        command = MEASURED + " -coverprofile=own.out"
+        tree = go_one_run.plant(Path(tmp), command=command)
+        done = go_one_run.check(tree)
+        out = done.stdout + done.stderr
+        assert done.returncode != 0, out
+        assert (
+            "measured: -coverprofile=own.out on its go test, which would"
+            " measure Go a second way"
+        ) in out
+        assert not (Path(tmp) / "goflags.log").exists()
 
 
 # A workspace with a pgrx extension, as `cargo metadata` reports it: a
@@ -546,11 +558,13 @@ echo ran >> ../counter
 '''
 """
 
+RUST_ONE_RUN_MEASURED = (
+    '"${ORG_BELT_DIR}/measured" cargo test --workspace --all-features'
+)
 
-class TestRustOneRun:
+
+class RustOneRun:
     """coverage:check under a real mise reads the Rust suite's one run (#1653)."""
-
-    MEASURED = '"${ORG_BELT_DIR}/measured" cargo test --workspace --all-features'
 
     def plant(self, base: Path, *, command: str) -> Path:
         """Plant a Rust-shaped tree whose test task counts its runs.
@@ -615,102 +629,115 @@ class TestRustOneRun:
             timeout=600,
         )
 
-    @staticmethod
-    def calls(base: Path) -> list[str]:
-        """Read the stand-in cargo's log.
 
-        Returns:
-            Each call's arguments, in order.
+@fixture
+def rust_one_run() -> RustOneRun:
+    """Give each row its own RustOneRun."""
+    return RustOneRun()
 
-        """
-        log = base / "cargo.log"
-        return log.read_text("utf-8").splitlines() if log.exists() else []
 
-    def test_the_task_runs_once_and_the_leg_only_reports(self) -> None:
-        """Counter 1, one `cargo test`, the leg's `report`, and no build."""
-        with tempfile.TemporaryDirectory() as tmp:
-            tree = self.plant(Path(tmp), command=self.MEASURED)
-            done = self.check(tree)
-            out = done.stdout + done.stderr
-            assert done.returncode == 0, out
-            assert (Path(tmp) / "counter").read_text("utf-8") == "ran\n"
-            assert "coverage:check: rust leg holds its floor 80.0 (90%)" in out
-            calls = self.calls(Path(tmp))
-            suites = [c for c in calls if c.startswith("test")]
-            once: list[str] = ["test --workspace --all-features"]
-            assert once == suites
-            (report,) = [c for c in calls if c.startswith("llvm-cov report")]
-            assert re.search(
-                r"^llvm-cov report --lcov --output-path /\S+/lcov\.info$", report
-            )
-            # Every llvm-cov call is the environment, the clean or the
-            # report: none builds or runs a suite of the leg's own.
-            builds = [
-                c
-                for c in calls
-                if c.startswith("llvm-cov")
-                and c.split()[1] not in {"show-env", "clean", "report"}
-            ]
-            assert builds == NO_CALLS
+def calls(base: Path) -> list[str]:
+    """Read the stand-in cargo's log.
 
-    def test_a_test_command_outside_measured_is_red_naming_the_prefix(self) -> None:
-        """No profile from this run: refused by name, no figure."""
-        with tempfile.TemporaryDirectory() as tmp:
-            tree = self.plant(Path(tmp), command="cargo test --workspace")
-            done = self.check(tree)
-            out = done.stdout + done.stderr
-            assert done.returncode != 0, out
-            assert (
-                "coverage:check: the test task ran no measured Rust — its test"
-                ' command runs\n  through "${ORG_BELT_DIR}/measured" (#1653), or'
-                " no suite ran under mise\n"
-            ) in done.stderr
-            assert "rust leg holds" not in out
-            reports = [c for c in self.calls(Path(tmp)) if "report" in c]
-            assert reports == NO_CALLS
+    Returns:
+        Each call's arguments, in order.
 
-    def test_a_failed_test_leaves_coverage_check_not_run(self) -> None:
-        """The suite's status gates the figure: `test` red, no report read."""
-        with tempfile.TemporaryDirectory() as tmp:
-            tree = self.plant(Path(tmp), command=self.MEASURED)
-            done = self.check(tree, STUB_CARGO_FAIL="1")
-            out = done.stdout + done.stderr
-            assert done.returncode != 0, out
-            assert "[test] ERROR task failed" in out
-            assert "rust leg holds" not in out
-            reports = [c for c in self.calls(Path(tmp)) if "report" in c]
-            assert reports == NO_CALLS
+    """
+    log = base / "cargo.log"
+    return log.read_text("utf-8").splitlines() if log.exists() else []
 
-    def test_a_pgrx_crate_the_command_built_is_absent_from_the_figure(
-        self,
-    ) -> None:
-        """The extension's file leaves the report by path; the figure is core's."""
-        with tempfile.TemporaryDirectory() as tmp:
-            tree = self.plant(Path(tmp), command=self.MEASURED)
-            metadata = Path(tmp) / "metadata.json"
-            metadata.write_text(json.dumps(PGRX_METADATA), encoding="utf-8")
-            done = self.check(
-                tree,
-                STUB_METADATA=str(metadata),
-                STUB_FILES="crates/core/src/lib.rs:20:18 crates/ext/src/lib.rs:80:0",
-            )
-            out = done.stdout + done.stderr
-            assert done.returncode == 0, out
-            # 18 of 20: the extension's 80 unhit lines are not counted.
-            assert "coverage:check: rust leg holds its floor 80.0 (90%)" in out
-            assert "coverage:check: pgrx-pg18: measured and held by test:pgrx" in out
-            (report,) = [c for c in self.calls(Path(tmp)) if "llvm-cov report" in c]
-            assert re.search(
-                r"^llvm-cov report --ignore-filename-regex \^/\S+/crates/ext/ --lcov ",
-                report,
-            )
 
-    def test_coverage_exclude_set_is_red_by_name(self) -> None:
-        """The removed variable, set: refused with its remedy, no figure."""
-        with tempfile.TemporaryDirectory() as tmp:
-            tree = self.plant(Path(tmp), command=self.MEASURED)
-            done = self.check(tree, COVERAGE_EXCLUDE="lab-wasm")
-            out = done.stdout + done.stderr
-            assert done.returncode != 0, out
-            assert COVERAGE_EXCLUDE_REFUSAL.format(named="lab-wasm") in done.stderr
-            assert "rust leg holds" not in out
+def test_the_task_runs_once_and_the_leg_only_reports(rust_one_run: RustOneRun) -> None:
+    """Counter 1, one `cargo test`, the leg's `report`, and no build."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = rust_one_run.plant(Path(tmp), command=RUST_ONE_RUN_MEASURED)
+        done = rust_one_run.check(tree)
+        out = done.stdout + done.stderr
+        assert done.returncode == 0, out
+        assert (Path(tmp) / "counter").read_text("utf-8") == "ran\n"
+        assert "coverage:check: rust leg holds its floor 80.0 (90%)" in out
+        made = calls(Path(tmp))
+        suites = [c for c in made if c.startswith("test")]
+        once: list[str] = ["test --workspace --all-features"]
+        assert once == suites
+        (report,) = [c for c in made if c.startswith("llvm-cov report")]
+        assert re.search(
+            r"^llvm-cov report --lcov --output-path /\S+/lcov\.info$", report
+        )
+        # Every llvm-cov call is the environment, the clean or the
+        # report: none builds or runs a suite of the leg's own.
+        builds = [
+            c
+            for c in made
+            if c.startswith("llvm-cov")
+            and c.split()[1] not in {"show-env", "clean", "report"}
+        ]
+        assert builds == NO_CALLS
+
+
+def test_a_test_command_outside_measured_is_red_naming_the_prefix(
+    rust_one_run: RustOneRun,
+) -> None:
+    """No profile from this run: refused by name, no figure."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = rust_one_run.plant(Path(tmp), command="cargo test --workspace")
+        done = rust_one_run.check(tree)
+        out = done.stdout + done.stderr
+        assert done.returncode != 0, out
+        assert (
+            "coverage:check: the test task ran no measured Rust — its test"
+            ' command runs\n  through "${ORG_BELT_DIR}/measured" (#1653), or'
+            " no suite ran under mise\n"
+        ) in done.stderr
+        assert "rust leg holds" not in out
+        reports = [c for c in calls(Path(tmp)) if "report" in c]
+        assert reports == NO_CALLS
+
+
+def test_a_failed_test_leaves_coverage_check_not_run(rust_one_run: RustOneRun) -> None:
+    """The suite's status gates the figure: `test` red, no report read."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = rust_one_run.plant(Path(tmp), command=RUST_ONE_RUN_MEASURED)
+        done = rust_one_run.check(tree, STUB_CARGO_FAIL="1")
+        out = done.stdout + done.stderr
+        assert done.returncode != 0, out
+        assert "[test] ERROR task failed" in out
+        assert "rust leg holds" not in out
+        reports = [c for c in calls(Path(tmp)) if "report" in c]
+        assert reports == NO_CALLS
+
+
+def test_a_pgrx_crate_the_command_built_is_absent_from_the_figure(
+    rust_one_run: RustOneRun,
+) -> None:
+    """The extension's file leaves the report by path; the figure is core's."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = rust_one_run.plant(Path(tmp), command=RUST_ONE_RUN_MEASURED)
+        metadata = Path(tmp) / "metadata.json"
+        metadata.write_text(json.dumps(PGRX_METADATA), encoding="utf-8")
+        done = rust_one_run.check(
+            tree,
+            STUB_METADATA=str(metadata),
+            STUB_FILES="crates/core/src/lib.rs:20:18 crates/ext/src/lib.rs:80:0",
+        )
+        out = done.stdout + done.stderr
+        assert done.returncode == 0, out
+        # 18 of 20: the extension's 80 unhit lines are not counted.
+        assert "coverage:check: rust leg holds its floor 80.0 (90%)" in out
+        assert "coverage:check: pgrx-pg18: measured and held by test:pgrx" in out
+        (report,) = [c for c in calls(Path(tmp)) if "llvm-cov report" in c]
+        assert re.search(
+            r"^llvm-cov report --ignore-filename-regex \^/\S+/crates/ext/ --lcov ",
+            report,
+        )
+
+
+def test_coverage_exclude_set_is_red_by_name(rust_one_run: RustOneRun) -> None:
+    """The removed variable, set: refused with its remedy, no figure."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = rust_one_run.plant(Path(tmp), command=RUST_ONE_RUN_MEASURED)
+        done = rust_one_run.check(tree, COVERAGE_EXCLUDE="lab-wasm")
+        out = done.stdout + done.stderr
+        assert done.returncode != 0, out
+        assert COVERAGE_EXCLUDE_REFUSAL.format(named="lab-wasm") in done.stderr
+        assert "rust leg holds" not in out

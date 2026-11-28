@@ -209,14 +209,10 @@ def refused(file: Path, stderr: str) -> None:
     assert f"{TASK}: {got[0]['message']}\n" in stderr
 
 
-@pytest.mark.usefixtures("_set_up_test_stubbed")
-class TestStubbed:
+class Stubbed:
     """A stub pinact on PATH, its log, the findings file."""
 
-    @fixture
-    def _set_up_test_stubbed(
-        self, tmp_path: Path, capfd: pytest.CaptureFixture[str]
-    ) -> None:
+    def __init__(self, tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:
         """Lay out the stub, its log, and the findings file."""
         self.capfd = capfd
         self.dir = tmp_path
@@ -272,7 +268,13 @@ class TestStubbed:
         )
 
 
-class TestAdapter(TestStubbed):
+@fixture
+def stubbed(tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> Stubbed:
+    """Give each row its own Stubbed."""
+    return Stubbed(tmp_path, capfd)
+
+
+class Adapter(Stubbed):
     """The adapter over a stub pinact."""
 
     def run_adapter(
@@ -288,163 +290,176 @@ class TestAdapter(TestStubbed):
             [*(args or (WORKFLOW,))], self.stub_env(document, status, path)
         )
 
-    def test_the_quoted_report_is_two_records(self) -> None:
-        """The real run's log: two records, the lines in the detail, its 3."""
-        done = self.run_adapter(QUOTED, 3)
-        same(done.returncode, 3, done.stderr)
-        same(records(self.file), QUOTED_RECORDS)
-        same(
-            done.stderr.splitlines(),
-            [
-                "-       - uses: actions/checkout@v4",
-                f"{TASK}: {WORKFLOW}: {LIED_LINE}",
-                f"  {MISMATCH}",
-                "  line 6",
-                f"{TASK}: {WORKFLOW}: {UNPINNED_LINE}",
-                f"  {UNPINNED}",
-                "  line 7",
-            ],
-        )
-        same(done.stdout, f"{TASK}: pinact: 2 finding(s)\n")
 
-    def test_a_clean_report_records_nothing(self) -> None:
-        """No results: no record, pinact's 0."""
-        done = self.run_adapter(sarif(), 0)
-        same(done.returncode, 0, done.stderr)
-        same(records(self.file), [])
-        same(done.stdout, f"{TASK}: pinact: 0 finding(s)\n")
-
-    def test_another_sarif_version_is_refused_by_name(self) -> None:
-        """SARIF 2.2: refused, both versions named, exit 1, its one record."""
-        done = self.run_adapter(sarif(version="2.2.0"), 0)
-        same(done.returncode, 1, done.stderr)
-        assert (
-            "the report is SARIF 2.2.0; this adapter reads SARIF 2.1.0" in done.stderr
-        )
-        refused(self.file, done.stderr)
-        same(done.stdout, "")
-
-    def test_an_unknown_shape_is_refused_by_name(self) -> None:
-        """A log with no `runs`: refused by name, exit 1, its one record."""
-        done = self.run_adapter('{"version": "2.1.0"}', 3)
-        same(done.returncode, 1, done.stderr)
-        assert (
-            f"{TASK}: pinact exited 3: the output is not pinact's report:"
-            " runs is not a list"
-        ) in done.stderr
-        refused(self.file, done.stderr)
-        same(done.stdout, "")
-
-    def test_output_that_is_not_json_is_refused_by_name(self) -> None:
-        """A human report: refused with pinact's status, exit 1."""
-        done = self.run_adapter("ERROR failed to handle a line\n", 3)
-        same(done.returncode, 1, done.stderr)
-        assert (
-            f"{TASK}: pinact exited 3: the output is not pinact's report" in done.stderr
-        )
-        refused(self.file, done.stderr)
-
-    def test_a_malformed_result_records_none(self) -> None:
-        """One result with no location: refused, none of the report's recorded."""
-        bad = result("parse-error", MISMATCH, 6) | {"locations": []}
-        done = self.run_adapter(sarif(result("parse-error", "x", 1), bad), 3)
-        same(done.returncode, 1, done.stderr)
-        assert "runs[0].results[1]: locations is empty" in done.stderr
-        refused(self.file, done.stderr)
-
-    def test_another_resolved_sha_leaves_the_message(self) -> None:
-        """A release moves the SHA in the text: the message is unchanged."""
-        later = UNPINNED.replace(FIXED, "f" * 40)
-        done = self.run_adapter(sarif(result("unpinned-action", later, 7)), 3)
-        same(done.returncode, 3, done.stderr)
-        got = [(r["message"], r["detail"]) for r in records(self.file)]
-        want: list[tuple[object, object]] = [(UNPINNED_LINE, [later, "line 7"])]
-        same(got, want)
-
-    def test_a_missing_file_is_refused_by_name(self) -> None:
-        """A result naming a file that is not there: refused, 1, its one record."""
-        (self.dir / WORKFLOW).unlink()
-        done = self.run_adapter(QUOTED, 3)
-        same(done.returncode, 1, done.stderr)
-        assert (
-            f"{TASK}: pinact exited 3: the output is not pinact's report:"
-            f" runs[0].results[0]: locations[0]: {WORKFLOW} cannot be read"
-        ) in done.stderr
-        refused(self.file, done.stderr)
-
-    def test_a_line_past_the_end_is_refused_by_name(self) -> None:
-        """A result past the file's last line: refused, 1, its one record."""
-        done = self.run_adapter(sarif(result("parse-error", MISMATCH, 8)), 3)
-        same(done.returncode, 1, done.stderr)
-        assert (
-            f"runs[0].results[0]: locations[0]: {WORKFLOW} has no line 8" in done.stderr
-        )
-        refused(self.file, done.stderr)
-
-    def test_pinact_s_status_is_the_exit(self) -> None:
-        """A 2 from pinact with a clean log exits 2."""
-        done = self.run_adapter(sarif(), 2)
-        same(done.returncode, 2, done.stderr)
-        same(records(self.file), [])
-
-    def test_arguments_pass_unchanged_after_the_format(self) -> None:
-        """The adapter calls `pinact run --format sarif` and the arguments."""
-        args = ["--config", "a b.yaml", "--fix=false", WORKFLOW, "x/action.yml"]
-        done = self.run_adapter(sarif(), 0, *args)
-        same(done.returncode, 0, done.stderr)
-        same(
-            self.log.read_text(encoding="utf-8").splitlines(),
-            ["\t".join(["run", "--format", "sarif", *args])],
-        )
-
-    def test_no_pinact_is_refused_by_name(self) -> None:
-        """No pinact on PATH: refused by name, exit 1, its one record."""
-        done = self.run_adapter(sarif(), 0, path=str(self.dir / "empty"))
-        same(done.returncode, 1, done.stderr)
-        assert f"{TASK}: pinact is not on PATH" in done.stderr
-        refused(self.file, done.stderr)
-
-    def test_the_pinned_pinact_offline_gives_two_messages(self) -> None:
-        """Two unpinned actions in one file, judged by pinact with `--no-api`.
-
-        One rule, one text, one file: two records with two messages.
-        """
-        if support.optional_tool("pinact") is None:
-            pytest.skip("the belt's pinact is not on PATH")
-        (self.dir / WORKFLOW).write_text(
-            "on: push\njobs:\n  a:\n    runs-on: ubuntu-24.04\n    steps:\n"
-            "      - uses: actions/checkout@v4\n"
-            "      - uses: actions/setup-go@v5\n",
-            encoding="utf-8",
-        )
-        done = self.adapt(
-            ["--fix=false", "--no-api", WORKFLOW],
-            support.env(
-                ORG_FINDINGS=str(self.file), MISE_TASK_NAME=TASK, PYTHONUTF8="1"
-            ),
-        )
-        assert done.returncode != 0, done.stderr
-        cannot = "failed to handle a line: action can't be pinned"
-        want: list[dict[str, object]] = [
-            {
-                "v": 1,
-                "task": TASK,
-                "subject": WORKFLOW,
-                "message": "parse-error: - uses: actions/checkout@v4",
-                "detail": [cannot, "line 6"],
-            },
-            {
-                "v": 1,
-                "task": TASK,
-                "subject": WORKFLOW,
-                "message": "parse-error: - uses: actions/setup-go@v5",
-                "detail": [cannot, "line 7"],
-            },
-        ]
-        same(records(self.file), want)
+@fixture
+def adapter(tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> Adapter:
+    """Give each row its own Adapter."""
+    return Adapter(tmp_path, capfd)
 
 
-class TestTask(TestStubbed):
+def test_the_quoted_report_is_two_records(adapter: Adapter) -> None:
+    """The real run's log: two records, the lines in the detail, its 3."""
+    done = adapter.run_adapter(QUOTED, 3)
+    same(done.returncode, 3, done.stderr)
+    same(records(adapter.file), QUOTED_RECORDS)
+    same(
+        done.stderr.splitlines(),
+        [
+            "-       - uses: actions/checkout@v4",
+            f"{TASK}: {WORKFLOW}: {LIED_LINE}",
+            f"  {MISMATCH}",
+            "  line 6",
+            f"{TASK}: {WORKFLOW}: {UNPINNED_LINE}",
+            f"  {UNPINNED}",
+            "  line 7",
+        ],
+    )
+    same(done.stdout, f"{TASK}: pinact: 2 finding(s)\n")
+
+
+def test_a_clean_report_records_nothing(adapter: Adapter) -> None:
+    """No results: no record, pinact's 0."""
+    done = adapter.run_adapter(sarif(), 0)
+    same(done.returncode, 0, done.stderr)
+    same(records(adapter.file), [])
+    same(done.stdout, f"{TASK}: pinact: 0 finding(s)\n")
+
+
+def test_another_sarif_version_is_refused_by_name(adapter: Adapter) -> None:
+    """SARIF 2.2: refused, both versions named, exit 1, its one record."""
+    done = adapter.run_adapter(sarif(version="2.2.0"), 0)
+    same(done.returncode, 1, done.stderr)
+    assert "the report is SARIF 2.2.0; this adapter reads SARIF 2.1.0" in done.stderr
+    refused(adapter.file, done.stderr)
+    same(done.stdout, "")
+
+
+def test_an_unknown_shape_is_refused_by_name(adapter: Adapter) -> None:
+    """A log with no `runs`: refused by name, exit 1, its one record."""
+    done = adapter.run_adapter('{"version": "2.1.0"}', 3)
+    same(done.returncode, 1, done.stderr)
+    assert (
+        f"{TASK}: pinact exited 3: the output is not pinact's report:"
+        " runs is not a list"
+    ) in done.stderr
+    refused(adapter.file, done.stderr)
+    same(done.stdout, "")
+
+
+def test_output_that_is_not_json_is_refused_by_name(adapter: Adapter) -> None:
+    """A human report: refused with pinact's status, exit 1."""
+    done = adapter.run_adapter("ERROR failed to handle a line\n", 3)
+    same(done.returncode, 1, done.stderr)
+    assert f"{TASK}: pinact exited 3: the output is not pinact's report" in done.stderr
+    refused(adapter.file, done.stderr)
+
+
+def test_a_malformed_result_records_none(adapter: Adapter) -> None:
+    """One result with no location: refused, none of the report's recorded."""
+    bad = result("parse-error", MISMATCH, 6) | {"locations": []}
+    done = adapter.run_adapter(sarif(result("parse-error", "x", 1), bad), 3)
+    same(done.returncode, 1, done.stderr)
+    assert "runs[0].results[1]: locations is empty" in done.stderr
+    refused(adapter.file, done.stderr)
+
+
+def test_another_resolved_sha_leaves_the_message(adapter: Adapter) -> None:
+    """A release moves the SHA in the text: the message is unchanged."""
+    later = UNPINNED.replace(FIXED, "f" * 40)
+    done = adapter.run_adapter(sarif(result("unpinned-action", later, 7)), 3)
+    same(done.returncode, 3, done.stderr)
+    got = [(r["message"], r["detail"]) for r in records(adapter.file)]
+    want: list[tuple[object, object]] = [(UNPINNED_LINE, [later, "line 7"])]
+    same(got, want)
+
+
+def test_a_missing_file_is_refused_by_name(adapter: Adapter) -> None:
+    """A result naming a file that is not there: refused, 1, its one record."""
+    (adapter.dir / WORKFLOW).unlink()
+    done = adapter.run_adapter(QUOTED, 3)
+    same(done.returncode, 1, done.stderr)
+    assert (
+        f"{TASK}: pinact exited 3: the output is not pinact's report:"
+        f" runs[0].results[0]: locations[0]: {WORKFLOW} cannot be read"
+    ) in done.stderr
+    refused(adapter.file, done.stderr)
+
+
+def test_a_line_past_the_end_is_refused_by_name(adapter: Adapter) -> None:
+    """A result past the file's last line: refused, 1, its one record."""
+    done = adapter.run_adapter(sarif(result("parse-error", MISMATCH, 8)), 3)
+    same(done.returncode, 1, done.stderr)
+    assert f"runs[0].results[0]: locations[0]: {WORKFLOW} has no line 8" in done.stderr
+    refused(adapter.file, done.stderr)
+
+
+def test_pinact_s_status_is_the_exit(adapter: Adapter) -> None:
+    """A 2 from pinact with a clean log exits 2."""
+    done = adapter.run_adapter(sarif(), 2)
+    same(done.returncode, 2, done.stderr)
+    same(records(adapter.file), [])
+
+
+def test_arguments_pass_unchanged_after_the_format(adapter: Adapter) -> None:
+    """The adapter calls `pinact run --format sarif` and the arguments."""
+    args = ["--config", "a b.yaml", "--fix=false", WORKFLOW, "x/action.yml"]
+    done = adapter.run_adapter(sarif(), 0, *args)
+    same(done.returncode, 0, done.stderr)
+    same(
+        adapter.log.read_text(encoding="utf-8").splitlines(),
+        ["\t".join(["run", "--format", "sarif", *args])],
+    )
+
+
+def test_no_pinact_is_refused_by_name(adapter: Adapter) -> None:
+    """No pinact on PATH: refused by name, exit 1, its one record."""
+    done = adapter.run_adapter(sarif(), 0, path=str(adapter.dir / "empty"))
+    same(done.returncode, 1, done.stderr)
+    assert f"{TASK}: pinact is not on PATH" in done.stderr
+    refused(adapter.file, done.stderr)
+
+
+def test_the_pinned_pinact_offline_gives_two_messages(adapter: Adapter) -> None:
+    """Two unpinned actions in one file, judged by pinact with `--no-api`.
+
+    One rule, one text, one file: two records with two messages.
+    """
+    if support.optional_tool("pinact") is None:
+        pytest.skip("the belt's pinact is not on PATH")
+    (adapter.dir / WORKFLOW).write_text(
+        "on: push\njobs:\n  a:\n    runs-on: ubuntu-24.04\n    steps:\n"
+        "      - uses: actions/checkout@v4\n"
+        "      - uses: actions/setup-go@v5\n",
+        encoding="utf-8",
+    )
+    done = adapter.adapt(
+        ["--fix=false", "--no-api", WORKFLOW],
+        support.env(
+            ORG_FINDINGS=str(adapter.file), MISE_TASK_NAME=TASK, PYTHONUTF8="1"
+        ),
+    )
+    assert done.returncode != 0, done.stderr
+    cannot = "failed to handle a line: action can't be pinned"
+    want: list[dict[str, object]] = [
+        {
+            "v": 1,
+            "task": TASK,
+            "subject": WORKFLOW,
+            "message": "parse-error: - uses: actions/checkout@v4",
+            "detail": [cannot, "line 6"],
+        },
+        {
+            "v": 1,
+            "task": TASK,
+            "subject": WORKFLOW,
+            "message": "parse-error: - uses: actions/setup-go@v5",
+            "detail": [cannot, "line 7"],
+        },
+    ]
+    same(records(adapter.file), want)
+
+
+class Task(Stubbed):
     """audit:action-pins' body over the stub, in a planted tracked tree."""
 
     def run_task(self, document: str, status: int) -> subprocess.CompletedProcess[str]:
@@ -476,16 +491,24 @@ class TestTask(TestStubbed):
             check=False,
         )
 
-    def test_the_quoted_report_is_the_records_and_pinact_s_red(self) -> None:
-        """The real run's log: its two records, pinact's 3, one call."""
-        done = self.run_task(QUOTED, 3)
-        same(done.returncode, 3, done.stderr)
-        same(records(self.file), QUOTED_RECORDS)
-        same(len(self.log.read_text(encoding="utf-8").splitlines()), 1)
 
-    def test_a_clean_report_is_no_record_and_pinact_s_green(self) -> None:
-        """No results: no record, pinact's 0, the adapter's line."""
-        done = self.run_task(sarif(), 0)
-        same(done.returncode, 0, done.stderr)
-        same(records(self.file), [])
-        same(done.stdout, f"{TASK}: pinact: 0 finding(s)\n")
+@fixture
+def task(tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> Task:
+    """Give each row its own Task."""
+    return Task(tmp_path, capfd)
+
+
+def test_the_quoted_report_is_the_records_and_pinact_s_red(task: Task) -> None:
+    """The real run's log: its two records, pinact's 3, one call."""
+    done = task.run_task(QUOTED, 3)
+    same(done.returncode, 3, done.stderr)
+    same(records(task.file), QUOTED_RECORDS)
+    same(len(task.log.read_text(encoding="utf-8").splitlines()), 1)
+
+
+def test_a_clean_report_is_no_record_and_pinact_s_green(task: Task) -> None:
+    """No results: no record, pinact's 0, the adapter's line."""
+    done = task.run_task(sarif(), 0)
+    same(done.returncode, 0, done.stderr)
+    same(records(task.file), [])
+    same(done.stdout, f"{TASK}: pinact: 0 finding(s)\n")

@@ -66,57 +66,52 @@ def judged(lines: list[str]) -> list[str]:
     return list(et.findings("s.sh", 0, "", source, bash=bash))
 
 
-class TestGuard:
-    """The guard and the mark, wherever they sit."""
-
-    @given(script())
-    def test_guarded_is_clean(self, drawn: tuple[list[str], int, int]) -> None:
-        """No finding."""
-        lines, _, _ = drawn
-        assert judged(lines) == list[str](), lines
-
-    @given(script())
-    def test_no_mark_is_one_finding(self, drawn: tuple[list[str], int, int]) -> None:
-        """Without the mark the last statement is named."""
-        lines, _, mark = drawn
-        lines[mark - 1] = "true"
-        found = judged(lines)
-        assert len(found) == 1, lines
-        assert f"s.sh:{mark}: has an EXIT trap" in found[0]
-
-    @given(script(), CLEANUP)
-    @example(
-        (["#!/bin/sh", "rc=0", "trap 'rm -f x' EXIT", "org_done=1"], 3, 4), "rm -f x"
-    )
-    def test_an_unguarded_trap_is_one_finding(
-        self, drawn: tuple[list[str], int, int], cleanup: str
-    ) -> None:
-        """A bare trap is named at its line."""
-        lines, trap, _ = drawn
-        lines[trap - 1] = f"trap '{cleanup}' EXIT"
-        found = judged(lines)
-        named = [f"s.sh:{trap}: EXIT trap without the completion guard"]
-        assert found == named
-
-    @given(script(), CLEANUP)
-    def test_bash_guard_needs_bash(
-        self, drawn: tuple[list[str], int, int], cleanup: str
-    ) -> None:
-        """The `[[ ]]` guard under a non-bash shebang is named at its line."""
-        lines, trap, _ = drawn
-        lines[0] = "#!/bin/sh"
-        lines[trap - 1] = et.BASH_GUARD.format(cleanup=cleanup)
-        found = judged(lines)
-        assert len(found) == 1, lines
-        assert f"s.sh:{trap}: EXIT trap guard uses [[ ]]" in found[0]
+# The guard and the mark, wherever they sit.
+@given(script())
+def test_guarded_is_clean(drawn: tuple[list[str], int, int]) -> None:
+    """No finding."""
+    lines, _, _ = drawn
+    assert judged(lines) == list[str](), lines
 
 
-class TestRefusal:
-    """Any text is judged."""
+@given(script())
+def test_no_mark_is_one_finding(drawn: tuple[list[str], int, int]) -> None:
+    """Without the mark the last statement is named."""
+    lines, _, mark = drawn
+    lines[mark - 1] = "true"
+    found = judged(lines)
+    assert len(found) == 1, lines
+    assert f"s.sh:{mark}: has an EXIT trap" in found[0]
 
-    @given(st.text(max_size=300), st.sampled_from(["bash", "sh"]))
-    @example("trap x EXIT", "sh")
-    def test_findings_judges_any_text(self, source: str, shell: str) -> None:
-        """A list of findings, each naming the path."""
-        for line in et.findings("s.sh", 0, "", source, bash=shell == "bash"):
-            assert line.startswith("s.sh:")
+
+@given(script(), CLEANUP)
+@example((["#!/bin/sh", "rc=0", "trap 'rm -f x' EXIT", "org_done=1"], 3, 4), "rm -f x")
+def test_an_unguarded_trap_is_one_finding(
+    drawn: tuple[list[str], int, int], cleanup: str
+) -> None:
+    """A bare trap is named at its line."""
+    lines, trap, _ = drawn
+    lines[trap - 1] = f"trap '{cleanup}' EXIT"
+    found = judged(lines)
+    named = [f"s.sh:{trap}: EXIT trap without the completion guard"]
+    assert found == named
+
+
+@given(script(), CLEANUP)
+def test_bash_guard_needs_bash(drawn: tuple[list[str], int, int], cleanup: str) -> None:
+    """The `[[ ]]` guard under a non-bash shebang is named at its line."""
+    lines, trap, _ = drawn
+    lines[0] = "#!/bin/sh"
+    lines[trap - 1] = et.BASH_GUARD.format(cleanup=cleanup)
+    found = judged(lines)
+    assert len(found) == 1, lines
+    assert f"s.sh:{trap}: EXIT trap guard uses [[ ]]" in found[0]
+
+
+# Any text is judged.
+@given(st.text(max_size=300), st.sampled_from(["bash", "sh"]))
+@example("trap x EXIT", "sh")
+def test_findings_judges_any_text(source: str, shell: str) -> None:
+    """A list of findings, each naming the path."""
+    for line in et.findings("s.sh", 0, "", source, bash=shell == "bash"):
+        assert line.startswith("s.sh:")

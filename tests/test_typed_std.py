@@ -35,65 +35,71 @@ HOME = "mise/typed_std.py"
 VERSION = re.compile(r"v(?P<major>\d+)\.(\d+)(-(?P<pre>\w+))?")
 
 
-@pytest.mark.usefixtures("_set_up_test_group")
-class TestGroup:
+class Group:
     """The group's text by its span, or None, never Any."""
 
-    @fixture
-    def _set_up_test_group(self) -> None:
+    def __init__(self) -> None:
         """Match one version with no pre-release part."""
         found = VERSION.fullmatch("v1.70")
         if found is None:
             pytest.fail("the row's pattern did not match its text")
         self.match = found
 
-    def test_a_matched_group(self) -> None:
-        """A numbered group that took part: its text."""
-        assert typed_std.group(self.match, 2) == "70"
 
-    def test_an_unmatched_optional_group(self) -> None:
-        """An optional group that did not take part: None."""
-        assert typed_std.group(self.match, 3) is None
-        assert typed_std.group(self.match, "pre") is None
-
-    def test_a_named_group(self) -> None:
-        """A group by its name."""
-        assert typed_std.group(self.match, "major") == "1"
-
-    def test_group_zero(self) -> None:
-        """The whole match, by default and by number."""
-        assert typed_std.group(self.match) == "v1.70"
-        assert typed_std.group(self.match, 0) == "v1.70"
-
-    def test_an_empty_group_is_text(self) -> None:
-        """A group that took part and matched nothing is "", not None."""
-        found = re.match(r"(a*)b", "b")
-        if found is None:
-            pytest.fail("the row's pattern did not match its text")
-        assert typed_std.group(found, 1) == ""
+@fixture
+def group_state() -> Group:
+    """Give each row its own Group."""
+    return Group()
 
 
-class TestStdinText:
-    """All of standard input, or the one refusal."""
+def test_a_matched_group(group_state: Group) -> None:
+    """A numbered group that took part: its text."""
+    assert typed_std.group(group_state.match, 2) == "70"
 
-    def test_text(self) -> None:
-        """Standard input's text, read to its end."""
-        with pytest.MonkeyPatch.context() as patched:
-            patched.setattr("sys.stdin", io.StringIO("one\ntwo\n"))
-            assert typed_std.stdin_text() == "one\ntwo\n"
 
-    def test_absent_in_process(self) -> None:
-        """No standard input (sys.stdin is None): refused by name."""
-        with (
-            pytest.MonkeyPatch.context() as patched,
-            pytest.raises(typed_std.NoStdinError) as caught,
-        ):
-            patched.setattr("sys.stdin", None)
-            typed_std.stdin_text()
-        assert (
-            str(caught.value)
-            == "no standard input: the process was started without one"
-        )
+def test_an_unmatched_optional_group(group_state: Group) -> None:
+    """An optional group that did not take part: None."""
+    assert typed_std.group(group_state.match, 3) is None
+    assert typed_std.group(group_state.match, "pre") is None
+
+
+def test_a_named_group(group_state: Group) -> None:
+    """A group by its name."""
+    assert typed_std.group(group_state.match, "major") == "1"
+
+
+def test_group_zero(group_state: Group) -> None:
+    """The whole match, by default and by number."""
+    assert typed_std.group(group_state.match) == "v1.70"
+    assert typed_std.group(group_state.match, 0) == "v1.70"
+
+
+@pytest.mark.usefixtures("group_state")
+def test_an_empty_group_is_text() -> None:
+    """A group that took part and matched nothing is "", not None."""
+    found = re.match(r"(a*)b", "b")
+    if found is None:
+        pytest.fail("the row's pattern did not match its text")
+    assert typed_std.group(found, 1) == ""
+
+
+# All of standard input, or the one refusal.
+def test_text() -> None:
+    """Standard input's text, read to its end."""
+    with pytest.MonkeyPatch.context() as patched:
+        patched.setattr("sys.stdin", io.StringIO("one\ntwo\n"))
+        assert typed_std.stdin_text() == "one\ntwo\n"
+
+
+def test_absent_in_process() -> None:
+    """No standard input (sys.stdin is None): refused by name."""
+    with (
+        pytest.MonkeyPatch.context() as patched,
+        pytest.raises(typed_std.NoStdinError) as caught,
+    ):
+        patched.setattr("sys.stdin", None)
+        typed_std.stdin_text()
+    assert str(caught.value) == "no standard input: the process was started without one"
 
 
 class Answer:
@@ -164,46 +170,44 @@ class Opener(urllib.request.OpenerDirector):
         return self.answer
 
 
-class TestUrlopen:
-    """One HTTP answer, typed; never `Any`."""
+# One HTTP answer, typed; never `Any`.
+def test_urllib_s_answer_is_returned_and_read() -> None:
+    """No opener: urllib's own urlopen answers, with the timeout."""
+    answer = Answer(200, b"body", "text/plain")
+    timeouts: list[float] = []
 
-    def test_urllib_s_answer_is_returned_and_read(self) -> None:
-        """No opener: urllib's own urlopen answers, with the timeout."""
-        answer = Answer(200, b"body", "text/plain")
-        timeouts: list[float] = []
+    def opened(request: urllib.request.Request, *, timeout: float) -> Answer:
+        del request
+        timeouts.append(timeout)
+        return answer
 
-        def opened(request: urllib.request.Request, *, timeout: float) -> Answer:
-            del request
-            timeouts.append(timeout)
-            return answer
+    # typed_std's urllib.request is this module: the one urlopen it calls.
+    with pytest.MonkeyPatch.context() as patched:
+        patched.setattr(urllib.request, "urlopen", opened)
+        got = typed_std.urlopen(urllib.request.Request(URL), timeout=7)
+        assert (got.status, got.read(), got.getheader("Content-Type")) == (
+            200,
+            b"body",
+            "text/plain",
+        )
+    want: list[float] = [7]
+    assert want == timeouts
 
-        # typed_std's urllib.request is this module: the one urlopen it calls.
-        with pytest.MonkeyPatch.context() as patched:
-            patched.setattr(urllib.request, "urlopen", opened)
-            got = typed_std.urlopen(urllib.request.Request(URL), timeout=7)
-            assert (got.status, got.read(), got.getheader("Content-Type")) == (
-                200,
-                b"body",
-                "text/plain",
-            )
-        want: list[float] = [7]
-        assert want == timeouts
 
-    def test_an_opener_s_answer_is_used(self) -> None:
-        """An opener handed in answers instead of urllib's default."""
-        opener = Opener(Answer(201, b"made", "application/json"))
-        got = typed_std.urlopen(urllib.request.Request(URL), timeout=3, opener=opener)
-        assert (got.status, got.read()) == (201, b"made")
-        want: list[tuple[str, float | None]] = [(URL, 3)]
-        assert want == opener.asked
+def test_an_opener_s_answer_is_used() -> None:
+    """An opener handed in answers instead of urllib's default."""
+    opener = Opener(Answer(201, b"made", "application/json"))
+    got = typed_std.urlopen(urllib.request.Request(URL), timeout=3, opener=opener)
+    assert (got.status, got.read()) == (201, b"made")
+    want: list[tuple[str, float | None]] = [(URL, 3)]
+    assert want == opener.asked
 
-    def test_an_answer_that_is_not_a_response_is_refused(self) -> None:
-        """Refused by name, the URL and what came back named."""
-        with pytest.raises(typed_std.NotAResponseError) as caught:
-            typed_std.urlopen(
-                urllib.request.Request(URL), timeout=1, opener=Opener(None)
-            )
-        assert f"{URL} answered NoneType, not an HTTP response" == str(caught.value)
+
+def test_an_answer_that_is_not_a_response_is_refused() -> None:
+    """Refused by name, the URL and what came back named."""
+    with pytest.raises(typed_std.NotAResponseError) as caught:
+        typed_std.urlopen(urllib.request.Request(URL), timeout=1, opener=Opener(None))
+    assert f"{URL} answered NoneType, not an HTTP response" == str(caught.value)
 
 
 def receivers(tree: ast.AST, qualify: Callable[[ast.expr], str | None]) -> set[str]:
@@ -276,51 +280,51 @@ def opens(text: str) -> list[int]:
     return sorted(found)
 
 
-class TestTheLaw:
-    """No tracked file but typed_std.py opens a URL itself (#1682)."""
+# No tracked file but typed_std.py opens a URL itself (#1682).
+def test_the_tree_holds_the_law() -> None:
+    """Every tracked Python file opens URLs through typed_std."""
+    root = CANON
+    listed = support.tracked(root, "*.py")
+    breaches = [
+        f"{path}:{line}: opens a URL outside {HOME}"
+        for path in listed
+        if path != HOME
+        for line in opens((root / path).read_text(encoding="utf-8"))
+    ]
+    none: list[str] = []
+    assert none == breaches
 
-    def test_the_tree_holds_the_law(self) -> None:
-        """Every tracked Python file opens URLs through typed_std."""
-        root = CANON
-        listed = support.tracked(root, "*.py")
-        breaches = [
-            f"{path}:{line}: opens a URL outside {HOME}"
-            for path in listed
-            if path != HOME
-            for line in opens((root / path).read_text(encoding="utf-8"))
-        ]
-        none: list[str] = []
-        assert none == breaches
 
-    @pytest.mark.parametrize(
-        "text",
-        [
-            "import urllib.request\nurllib.request.urlopen(r)\n",
-            "import urllib.request as u\nu.urlopen(r)\n",
-            "from urllib.request import urlopen as go\ngo(r)\n",
-            "import urllib.request\nurllib.request.OpenerDirector.open(o, r)\n",
-            "import urllib.request\nurllib.request.build_opener().open(r)\n",
-            "import urllib.request\no = urllib.request.build_opener()\no.open(r)\n",
-            (
-                "import urllib.request\n"
-                "class Z:\n"
-                "    a: urllib.request.OpenerDirector\n"
-                "    def f(self, r):\n"
-                "        opener = self.a if r else self.a\n"
-                "        opener.open(r)\n"
-            ),
-        ],
+@pytest.mark.parametrize(
+    "text",
+    [
+        "import urllib.request\nurllib.request.urlopen(r)\n",
+        "import urllib.request as u\nu.urlopen(r)\n",
+        "from urllib.request import urlopen as go\ngo(r)\n",
+        "import urllib.request\nurllib.request.OpenerDirector.open(o, r)\n",
+        "import urllib.request\nurllib.request.build_opener().open(r)\n",
+        "import urllib.request\no = urllib.request.build_opener()\no.open(r)\n",
+        (
+            "import urllib.request\n"
+            "class Z:\n"
+            "    a: urllib.request.OpenerDirector\n"
+            "    def f(self, r):\n"
+            "        opener = self.a if r else self.a\n"
+            "        opener.open(r)\n"
+        ),
+    ],
+)
+def test_each_spelling_is_an_open(text: object) -> None:
+    """Planted: every way a file can open a URL itself is found."""
+    assert opens(text), text
+
+
+def test_the_typed_opener_and_a_file_are_not_opens() -> None:
+    """Planted: typed_std's urlopen, a path's open, and open() pass."""
+    text = (
+        "import typed_std\nfrom pathlib import Path\n"
+        "typed_std.urlopen(r, timeout=1, opener=o)\n"
+        "Path('x').open()\nopen('x')\n"
     )
-    def test_each_spelling_is_an_open(self, text: object) -> None:
-        """Planted: every way a file can open a URL itself is found."""
-        assert opens(text), text
-
-    def test_the_typed_opener_and_a_file_are_not_opens(self) -> None:
-        """Planted: typed_std's urlopen, a path's open, and open() pass."""
-        text = (
-            "import typed_std\nfrom pathlib import Path\n"
-            "typed_std.urlopen(r, timeout=1, opener=o)\n"
-            "Path('x').open()\nopen('x')\n"
-        )
-        none: list[int] = []
-        assert none == opens(text)
+    none: list[int] = []
+    assert none == opens(text)

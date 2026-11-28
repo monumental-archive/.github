@@ -70,55 +70,50 @@ def answers(load: Loader, source: str | bytes) -> bool:
     return True
 
 
-class TestTotality:
-    """T: a value or UndecodableError, and nothing else, from any input."""
-
-    @given(st.binary())
-    @example(b"\xff")
-    @example(b'{"a": 1, "a": 2}')
-    @example(b"[NaN]")
-    @example(b"[1e999]")
-    @example(b"[" * 100_000)
-    def test_any_bytes(self, source: bytes) -> None:
-        """Both loaders answer any bytes."""
-        for load in LOADERS:
-            assert answers(load, source)
-
-    @given(st.text())
-    @example("a = " + "[" * 10_000 + "]" * 10_000)
-    @example("1" * 5_000)
-    def test_any_text(self, source: str) -> None:
-        """Both loaders answer any text."""
-        for load in LOADERS:
-            assert answers(load, source)
+# T: a value or UndecodableError, and nothing else, from any input.
+@given(st.binary())
+@example(b"\xff")
+@example(b'{"a": 1, "a": 2}')
+@example(b"[NaN]")
+@example(b"[1e999]")
+@example(b"[" * 100_000)
+def test_any_bytes(source: bytes) -> None:
+    """Both loaders answer any bytes."""
+    for load in LOADERS:
+        assert answers(load, source)
 
 
-class TestRoundTrip:
-    """R: what json.dumps writes, load_json reads back unchanged."""
-
-    @given(VALUE)
-    @example(SAMPLE)
-    def test_dumps_then_load(self, value: object) -> None:
-        """Every finite value with unique keys survives the trip."""
-        assert value == decoded.load_json(json.dumps(value))
-        assert value == decoded.load_json(json.dumps(value).encode())
+@given(st.text())
+@example("a = " + "[" * 10_000 + "]" * 10_000)
+@example("1" * 5_000)
+def test_any_text(source: str) -> None:
+    """Both loaders answer any text."""
+    for load in LOADERS:
+        assert answers(load, source)
 
 
-class TestDepth:
-    """D: the bound, not the stack, decides how deep a document may go."""
+# R: what json.dumps writes, load_json reads back unchanged.
+@given(VALUE)
+@example(SAMPLE)
+def test_dumps_then_load(value: object) -> None:
+    """Every finite value with unique keys survives the trip."""
+    assert value == decoded.load_json(json.dumps(value))
+    assert value == decoded.load_json(json.dumps(value).encode())
 
-    @given(st.integers(1, 2 * decoded.MAX_DEPTH), st.sampled_from(["[", "{"]))
-    @example(decoded.MAX_DEPTH, "[")
-    @example(decoded.MAX_DEPTH + 1, "{")
-    def test_either_side_of_the_bound(self, depth: int, opener: str) -> None:
-        """At or under the bound, a value; past it, the bound's refusal."""
-        if opener == "[":
-            text = "[" * depth + "]" * depth
-        else:
-            text = '{"k":' * depth + "0" + "}" * depth
-        if depth <= decoded.MAX_DEPTH:
-            assert decoded.load_json(text) is not None
-            return
-        with pytest.raises(decoded.UndecodableError) as caught:
-            decoded.load_json(text)
-        assert f"nested deeper than {decoded.MAX_DEPTH} levels" == str(caught.value)
+
+# D: the bound, not the stack, decides how deep a document may go.
+@given(st.integers(1, 2 * decoded.MAX_DEPTH), st.sampled_from(["[", "{"]))
+@example(decoded.MAX_DEPTH, "[")
+@example(decoded.MAX_DEPTH + 1, "{")
+def test_either_side_of_the_bound(depth: int, opener: str) -> None:
+    """At or under the bound, a value; past it, the bound's refusal."""
+    if opener == "[":
+        text = "[" * depth + "]" * depth
+    else:
+        text = '{"k":' * depth + "0" + "}" * depth
+    if depth <= decoded.MAX_DEPTH:
+        assert decoded.load_json(text) is not None
+        return
+    with pytest.raises(decoded.UndecodableError) as caught:
+        decoded.load_json(text)
+    assert f"nested deeper than {decoded.MAX_DEPTH} levels" == str(caught.value)

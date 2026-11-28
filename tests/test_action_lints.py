@@ -134,12 +134,10 @@ CEILING = (
 )
 
 
-@pytest.mark.usefixtures("_set_up_test_planted")
-class TestPlanted:
+class Planted:
     """A planted, tracked tree; a lint's verdict on it."""
 
-    @fixture
-    def _set_up_test_planted(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Make an empty git repository and a scrubbed environment."""
         tmp = tmp_path
         self.tree = tmp / "tree"
@@ -204,130 +202,140 @@ class TestPlanted:
         return [path for path in done.stdout.split("\0") if path]
 
 
-class TestActionsAllowed(TestPlanted):
-    """lint:actions-allowed."""
-
-    def test_a_top_level_actions_directory_does_not_forbid_github_actions(self) -> None:
-        """`actions/*` is a pattern for references, never a path to expand."""
-        self.plant({
-            "actions/x/action.yml": action(),
-            ".github/workflows/ci.yml": workflow(CHECKOUT),
-        })
-        done = self.run_task("lint:actions-allowed")
-        assert done.returncode == 0, done.stderr
-        assert (
-            done.stdout
-            == "lint:actions-allowed: 1 action reference(s), all permitted\n"
-        )
-
-    def test_a_disallowed_owner_in_a_top_level_action_is_red(self) -> None:
-        """An action outside .github/actions/ is read, and its owner judged."""
-        ref = f"evil/thing@{SHA} # v1.0.0"
-        self.plant({
-            "actions/x/action.yml": action(ref),
-            ".github/workflows/ci.yml": workflow(CHECKOUT),
-        })
-        done = self.run_task("lint:actions-allowed")
-        assert done.returncode == 1
-        forbids = (
-            "lint:actions-allowed: uses: an action the org allowlist forbids:"
-            f" actions/x/action.yml(evil/thing@{SHA})"
-        )
-        allowed = (
-            f"  allowed: GitHub-owned plus actions/* github/* {owner()}/*"
-            " jdx/mise-action@* codecov/codecov-action@* ossf/scorecard-action@*"
-        )
-        expected = [forbids, allowed]
-        assert done.stderr.splitlines()[:2] == expected
-
-    def test_no_workflow_and_no_action_skips_clean(self) -> None:
-        """Applicability unchanged: nothing to read is a clean skip."""
-        self.plant({"README.md": "x\n", "my-action.yml": action("evil/thing@v1")})
-        done = self.run_task("lint:actions-allowed")
-        assert (done.returncode, done.stdout) == (
-            0,
-            "lint:actions-allowed: no workflows or actions, skipped\n",
-        )
+@fixture
+def planted(tmp_path: Path) -> Planted:
+    """Give each row its own Planted."""
+    return Planted(tmp_path)
 
 
-class TestActionPins(TestPlanted):
-    """lint:action-pins."""
-
-    def test_an_unpinned_uses_in_a_top_level_action_is_red(self) -> None:
-        """Pinact is handed actions/x/action.yml and refuses its tag pin."""
-        self.plant({
-            "actions/x/action.yml": action("actions/setup-go@v5"),
-            ".github/workflows/ci.yml": workflow(CHECKOUT),
-        })
-        done = self.run_task("lint:action-pins")
-        assert done.returncode != 0
-        output = done.stdout + done.stderr
-        assert "action can't be pinned" in output
-        assert "actions/x/action.yml:6" in output
-        assert "- uses: actions/setup-go@v5" in output
-
-    def test_a_pinned_top_level_action_passes(self) -> None:
-        """The control row: the same tree pinned is green."""
-        self.plant({
-            "actions/x/action.yml": action(f"actions/setup-go@{SHA} # v5.0.0"),
-            ".github/workflows/ci.yml": workflow(CHECKOUT),
-        })
-        done = self.run_task("lint:action-pins")
-        assert done.returncode == 0, done.stderr
-        assert done.stdout.endswith("lint:action-pins: ok\n")
-
-    def test_no_workflow_and_no_action_skips_clean(self) -> None:
-        """Applicability unchanged."""
-        self.plant({"README.md": "x\n"})
-        done = self.run_task("lint:action-pins")
-        assert (done.returncode, done.stdout) == (
-            0,
-            "lint:action-pins: no workflows or actions, skipped\n",
-        )
+def test_a_top_level_actions_directory_does_not_forbid_github_actions(
+    planted: Planted,
+) -> None:
+    """`actions/*` is a pattern for references, never a path to expand."""
+    planted.plant({
+        "actions/x/action.yml": action(),
+        ".github/workflows/ci.yml": workflow(CHECKOUT),
+    })
+    done = planted.run_task("lint:actions-allowed")
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == "lint:actions-allowed: 1 action reference(s), all permitted\n"
 
 
-@pytest.mark.usefixtures("_set_up_test_zizmor")
-class TestZizmor(TestPlanted):
+def test_a_disallowed_owner_in_a_top_level_action_is_red(planted: Planted) -> None:
+    """An action outside .github/actions/ is read, and its owner judged."""
+    ref = f"evil/thing@{SHA} # v1.0.0"
+    planted.plant({
+        "actions/x/action.yml": action(ref),
+        ".github/workflows/ci.yml": workflow(CHECKOUT),
+    })
+    done = planted.run_task("lint:actions-allowed")
+    assert done.returncode == 1
+    forbids = (
+        "lint:actions-allowed: uses: an action the org allowlist forbids:"
+        f" actions/x/action.yml(evil/thing@{SHA})"
+    )
+    allowed = (
+        f"  allowed: GitHub-owned plus actions/* github/* {owner()}/*"
+        " jdx/mise-action@* codecov/codecov-action@* ossf/scorecard-action@*"
+    )
+    expected = [forbids, allowed]
+    assert done.stderr.splitlines()[:2] == expected
+
+
+def test_no_workflow_and_no_action_skips_clean(planted: Planted) -> None:
+    """Applicability unchanged: nothing to read is a clean skip."""
+    planted.plant({"README.md": "x\n", "my-action.yml": action("evil/thing@v1")})
+    done = planted.run_task("lint:actions-allowed")
+    assert (done.returncode, done.stdout) == (
+        0,
+        "lint:actions-allowed: no workflows or actions, skipped\n",
+    )
+
+
+def test_an_unpinned_uses_in_a_top_level_action_is_red(planted: Planted) -> None:
+    """Pinact is handed actions/x/action.yml and refuses its tag pin."""
+    planted.plant({
+        "actions/x/action.yml": action("actions/setup-go@v5"),
+        ".github/workflows/ci.yml": workflow(CHECKOUT),
+    })
+    done = planted.run_task("lint:action-pins")
+    assert done.returncode != 0
+    output = done.stdout + done.stderr
+    assert "action can't be pinned" in output
+    assert "actions/x/action.yml:6" in output
+    assert "- uses: actions/setup-go@v5" in output
+
+
+def test_a_pinned_top_level_action_passes(planted: Planted) -> None:
+    """The control row: the same tree pinned is green."""
+    planted.plant({
+        "actions/x/action.yml": action(f"actions/setup-go@{SHA} # v5.0.0"),
+        ".github/workflows/ci.yml": workflow(CHECKOUT),
+    })
+    done = planted.run_task("lint:action-pins")
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.endswith("lint:action-pins: ok\n")
+
+
+def test_action_pins_no_workflow_and_no_action_skips_clean(planted: Planted) -> None:
+    """Applicability unchanged."""
+    planted.plant({"README.md": "x\n"})
+    done = planted.run_task("lint:action-pins")
+    assert (done.returncode, done.stdout) == (
+        0,
+        "lint:action-pins: no workflows or actions, skipped\n",
+    )
+
+
+class Zizmor(Planted):
     """lint:zizmor, with zizmor stubbed to record its arguments."""
 
-    @fixture
-    def _set_up_test_zizmor(self) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Put a recording zizmor first on PATH."""
+        super().__init__(tmp_path)
         self.args = self.bin / "args"
         stub = self.bin / "zizmor"
         stub.write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" >> "{self.args}"\n', "utf-8")
         stub.chmod(0o755)
         self.env["PATH"] = f"{self.bin}{os.pathsep}{self.env['PATH']}"
 
-    def test_zizmor_is_given_every_action_file(self) -> None:
-        """Workflows and action definitions wherever they live, offline."""
-        self.plant({
-            "actions/x/action.yml": action(),
-            ".github/actions/y/action.yaml": action(),
-            ".github/workflows/ci.yml": workflow(CHECKOUT),
-            "action.yml": action(),
-        })
-        done = self.run_task("lint:zizmor")
-        assert done.returncode == 0, done.stderr
-        expected = [
-            "--offline",
-            "--persona=auditor",
-            ".github/actions/y/action.yaml",
-            ".github/workflows/ci.yml",
-            "action.yml",
-            "actions/x/action.yml",
-        ]
-        assert self.args.read_text("utf-8").splitlines() == expected
 
-    def test_no_workflow_and_no_action_skips_clean(self) -> None:
-        """Applicability unchanged, and zizmor is never run."""
-        self.plant({"README.md": "x\n"})
-        done = self.run_task("lint:zizmor")
-        assert (done.returncode, done.stdout) == (
-            0,
-            "lint:zizmor: no workflows or actions, skipped\n",
-        )
-        assert not self.args.exists()
+@fixture
+def zizmor(tmp_path: Path) -> Zizmor:
+    """Give each row its own Zizmor."""
+    return Zizmor(tmp_path)
+
+
+def test_zizmor_is_given_every_action_file(zizmor: Zizmor) -> None:
+    """Workflows and action definitions wherever they live, offline."""
+    zizmor.plant({
+        "actions/x/action.yml": action(),
+        ".github/actions/y/action.yaml": action(),
+        ".github/workflows/ci.yml": workflow(CHECKOUT),
+        "action.yml": action(),
+    })
+    done = zizmor.run_task("lint:zizmor")
+    assert done.returncode == 0, done.stderr
+    expected = [
+        "--offline",
+        "--persona=auditor",
+        ".github/actions/y/action.yaml",
+        ".github/workflows/ci.yml",
+        "action.yml",
+        "actions/x/action.yml",
+    ]
+    assert zizmor.args.read_text("utf-8").splitlines() == expected
+
+
+def test_zizmor_no_workflow_and_no_action_skips_clean(zizmor: Zizmor) -> None:
+    """Applicability unchanged, and zizmor is never run."""
+    zizmor.plant({"README.md": "x\n"})
+    done = zizmor.run_task("lint:zizmor")
+    assert (done.returncode, done.stdout) == (
+        0,
+        "lint:zizmor: no workflows or actions, skipped\n",
+    )
+    assert not zizmor.args.exists()
 
 
 def deploy(environment: str) -> str:
@@ -350,54 +358,45 @@ def deploy(environment: str) -> str:
     )
 
 
-class TestZizmorPersona(TestPlanted):
-    """lint:zizmor's verdict, from the real zizmor at the belt's pin (#1719).
-
-    Pedantic suppresses secrets-outside-env, so before #1719 the first
-    row was green: a job handed an environment's secret with no
-    `environment:` gets an empty string, and only Monday's audit said so.
-    """
-
-    def test_a_secret_read_outside_an_environment_is_red(self) -> None:
-        """The auditor persona names the audit and the line."""
-        self.plant({".github/workflows/deploy.yml": deploy("")})
-        done = self.run_task("lint:zizmor")
-        assert done.returncode != 0
-        assert (
-            "warning[secrets-outside-env]: secrets referenced without a"
-            " dedicated environment"
-        ) in done.stdout
-        assert ".github/workflows/deploy.yml:14:" in done.stdout
-
-    def test_the_same_job_in_an_environment_is_green(self) -> None:
-        """The control row: one `environment:` line, nothing else changed."""
-        self.plant({
-            ".github/workflows/deploy.yml": deploy("    environment: production\n")
-        })
-        done = self.run_task("lint:zizmor")
-        assert done.returncode == 0, done.stdout + done.stderr
-        assert "No findings to report." in done.stdout
+def test_a_secret_read_outside_an_environment_is_red(planted: Planted) -> None:
+    """The auditor persona names the audit and the line."""
+    planted.plant({".github/workflows/deploy.yml": deploy("")})
+    done = planted.run_task("lint:zizmor")
+    assert done.returncode != 0
+    assert (
+        "warning[secrets-outside-env]: secrets referenced without a"
+        " dedicated environment"
+    ) in done.stdout
+    assert ".github/workflows/deploy.yml:14:" in done.stdout
 
 
-class TestShellEmbedded(TestPlanted):
-    """lint:shell-embedded reads a top-level action's run: blocks."""
+def test_the_same_job_in_an_environment_is_green(planted: Planted) -> None:
+    """The control row: one `environment:` line, nothing else changed."""
+    planted.plant({
+        ".github/workflows/deploy.yml": deploy("    environment: production\n")
+    })
+    done = planted.run_task("lint:zizmor")
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "No findings to report." in done.stdout
 
-    def test_an_unquoted_expansion_in_a_top_level_action_is_red(self) -> None:
-        """Shellcheck refuses the block, at its line in actions/x/action.yml."""
-        self.plant({"actions/x/action.yml": run_step("Remove", ["rm $UNQUOTED"])})
-        done = self.run_task("lint:shell-embedded")
-        assert done.returncode == 1
-        assert (
-            "lint:shell-embedded: actions/x/action.yml:9:note: Double quote to"
-            " prevent globbing and"
-            " word splitting. [SC2086]"
-        ) in done.stderr.splitlines()
 
-    def test_a_clean_top_level_action_passes(self) -> None:
-        """The control row: the same file, quoted, is green."""
-        self.plant({"actions/x/action.yml": run_step("Remove", ['rm "${QUOTED}"'])})
-        done = self.run_task("lint:shell-embedded")
-        assert done.returncode == 0, done.stdout + done.stderr
+def test_an_unquoted_expansion_in_a_top_level_action_is_red(planted: Planted) -> None:
+    """Shellcheck refuses the block, at its line in actions/x/action.yml."""
+    planted.plant({"actions/x/action.yml": run_step("Remove", ["rm $UNQUOTED"])})
+    done = planted.run_task("lint:shell-embedded")
+    assert done.returncode == 1
+    assert (
+        "lint:shell-embedded: actions/x/action.yml:9:note: Double quote to"
+        " prevent globbing and"
+        " word splitting. [SC2086]"
+    ) in done.stderr.splitlines()
+
+
+def test_a_clean_top_level_action_passes(planted: Planted) -> None:
+    """The control row: the same file, quoted, is green."""
+    planted.plant({"actions/x/action.yml": run_step("Remove", ['rm "${QUOTED}"'])})
+    done = planted.run_task("lint:shell-embedded")
+    assert done.returncode == 0, done.stdout + done.stderr
 
 
 # A step sourcing the canon's writer and calling org_error with no
@@ -423,7 +422,7 @@ def task_env(task: str) -> dict[str, str]:
     return {name: decoded.as_str(value, name) for name, value in env.items()}
 
 
-class TestCanonSources(TestPlanted):
+class CanonSources(Planted):
     """Both shell lints follow `.org-canon` where there is none (#1715)."""
 
     def porcelain(self) -> str:
@@ -442,118 +441,128 @@ class TestCanonSources(TestPlanted):
             check=True,
         ).stdout
 
-    def test_lint_actions_follows_the_canon_source(self) -> None:
-        """SC2119 is named, with no `.org-canon` in the tree."""
-        self.plant({".github/workflows/w.yml": template("Refuse", SOURCED)})
-        before = self.porcelain()
-        assert not (self.tree / ".org-canon").exists()
-        self.env |= task_env("lint:actions")
-        done = self.run_task("lint:actions")
-        assert done.returncode == 1, done.stdout + done.stderr
-        assert "SC2119" in done.stdout + done.stderr
-        assert self.porcelain() == before
 
-    def test_lint_shell_embedded_follows_the_canon_source(self) -> None:
-        """The same step, the same finding, at its line in the workflow."""
-        self.plant({".github/workflows/w.yml": template("Refuse", SOURCED)})
-        before = self.porcelain()
-        done = self.run_task("lint:shell-embedded")
-        assert done.returncode == 1, done.stdout + done.stderr
-        assert ".github/workflows/w.yml:10:" in done.stderr
-        assert "[SC2119]" in done.stderr
-        assert self.porcelain() == before
-
-    def test_a_source_the_canon_does_not_hold_is_red_by_name(self) -> None:
-        """The workflow, the line and the path; SC1091 alone says nothing."""
-        lines = ["set -euo pipefail", ". .org-canon/mise/no-such-file.sh"]
-        self.plant({".github/workflows/w.yml": template("Missing", lines)})
-        before = self.porcelain()
-        done = self.run_task("lint:shell-embedded")
-        assert done.returncode == 1, done.stdout + done.stderr
-        assert (
-            ".github/workflows/w.yml:9: sources .org-canon/mise/no-such-file.sh,"
-            " which the canon tree"
-        ) in done.stderr
-        assert self.porcelain() == before
+@fixture
+def canon_sources(tmp_path: Path) -> CanonSources:
+    """Give each row its own CanonSources."""
+    return CanonSources(tmp_path)
 
 
-class TestWorkflowShell(TestPlanted):
-    """lint:workflow-shell and fix:workflow-shell read a top-level action."""
-
-    DEBT = "security/workflow-shell-debt.txt"
-
-    def test_an_oversized_block_in_a_top_level_action_is_red(self) -> None:
-        """Sixteen lines in actions/x/action.yml, unlisted, are over the ceiling."""
-        self.plant({"actions/x/action.yml": run_step("Big", SIXTEEN)})
-        done = self.run_task("lint:workflow-shell")
-        assert done.returncode == 1
-        finding = (
-            "lint:workflow-shell: actions/x/action.yml:9: step 'Big' holds a run:"
-            " block of 16 lines, over the 15-line ceiling, and"
-            " security/workflow-shell-debt.txt does not list it — move the"
-            " logic out (CONTRIBUTING.md)"
-        )
-        expected = [finding, CEILING]
-        assert done.stderr.splitlines() == expected
-
-    def test_the_workflow_templates_are_still_read(self) -> None:
-        """The selection is added to, never narrowed: templates stay."""
-        self.plant({"workflow-templates/t.yml": template("Big", SIXTEEN)})
-        done = self.run_task("lint:workflow-shell")
-        assert done.returncode == 1
-        assert done.stderr.splitlines()[0] == (
-            "lint:workflow-shell: workflow-templates/t.yml:8: step 'Big' holds"
-            " a run: block of 16"
-            " lines, over the 15-line ceiling, and"
-            " security/workflow-shell-debt.txt does not list it — move the"
-            " logic out (CONTRIBUTING.md)"
-        )
-
-    def test_the_fixer_lowers_a_top_level_action_entry(self) -> None:
-        """Read, the entry is lowered; unread, it would be removed as gone."""
-        self.plant({
-            "actions/x/action.yml": run_step("Big", SIXTEEN),
-            self.DEBT: "actions/x/action.yml\tBig\t30\t# canon helper: #1\n",
-        })
-        done = self.run_task("fix:workflow-shell")
-        assert done.returncode == 0, done.stdout + done.stderr
-        assert (
-            done.stdout
-            == "fix:workflow-shell: 1 entry(ies) lowered, 0 removed; it never adds one\n"
-        )
-        assert (self.tree / self.DEBT).read_text(
-            "utf-8"
-        ) == "actions/x/action.yml\tBig\t16\t# canon helper: #1\n"
+def test_lint_actions_follows_the_canon_source(canon_sources: CanonSources) -> None:
+    """SC2119 is named, with no `.org-canon` in the tree."""
+    canon_sources.plant({".github/workflows/w.yml": template("Refuse", SOURCED)})
+    before = canon_sources.porcelain()
+    assert not (canon_sources.tree / ".org-canon").exists()
+    canon_sources.env |= task_env("lint:actions")
+    done = canon_sources.run_task("lint:actions")
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert "SC2119" in done.stdout + done.stderr
+    assert canon_sources.porcelain() == before
 
 
-class TestSelection(TestPlanted):
-    """mise/action-files.sh: what an action file is."""
+def test_lint_shell_embedded_follows_the_canon_source(
+    canon_sources: CanonSources,
+) -> None:
+    """The same step, the same finding, at its line in the workflow."""
+    canon_sources.plant({".github/workflows/w.yml": template("Refuse", SOURCED)})
+    before = canon_sources.porcelain()
+    done = canon_sources.run_task("lint:shell-embedded")
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert ".github/workflows/w.yml:10:" in done.stderr
+    assert "[SC2119]" in done.stderr
+    assert canon_sources.porcelain() == before
 
-    def test_action_files_at_any_depth_and_nothing_else(self) -> None:
-        """By file name, tracked, outside vendor/."""
-        self.plant({
-            "action.yml": "",
-            "actions/x/action.yml": "",
-            "a/b/c/action.yaml": "",
-            ".github/actions/y/action.yml": "",
-            ".github/workflows/ci.yml": "",
-            ".github/workflows/release.yaml": "",
-            "vendor/v/action.yml": "",
-            "my-action.yml": "",
-            "actions/x/action.yml.bak": "",
-            ".github/dependabot.yml": "",
-        })
-        (self.tree / "untracked").mkdir()
-        (self.tree / "untracked" / "action.yml").write_text("", "utf-8")
-        expected = [
-            ".github/actions/y/action.yml",
-            ".github/workflows/ci.yml",
-            ".github/workflows/release.yaml",
-            "a/b/c/action.yaml",
-            "action.yml",
-            "actions/x/action.yml",
-        ]
-        assert self.selected() == expected
+
+def test_a_source_the_canon_does_not_hold_is_red_by_name(
+    canon_sources: CanonSources,
+) -> None:
+    """The workflow, the line and the path; SC1091 alone says nothing."""
+    lines = ["set -euo pipefail", ". .org-canon/mise/no-such-file.sh"]
+    canon_sources.plant({".github/workflows/w.yml": template("Missing", lines)})
+    before = canon_sources.porcelain()
+    done = canon_sources.run_task("lint:shell-embedded")
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert (
+        ".github/workflows/w.yml:9: sources .org-canon/mise/no-such-file.sh,"
+        " which the canon tree"
+    ) in done.stderr
+    assert canon_sources.porcelain() == before
+
+
+DEBT = "security/workflow-shell-debt.txt"
+
+
+def test_an_oversized_block_in_a_top_level_action_is_red(planted: Planted) -> None:
+    """Sixteen lines in actions/x/action.yml, unlisted, are over the ceiling."""
+    planted.plant({"actions/x/action.yml": run_step("Big", SIXTEEN)})
+    done = planted.run_task("lint:workflow-shell")
+    assert done.returncode == 1
+    finding = (
+        "lint:workflow-shell: actions/x/action.yml:9: step 'Big' holds a run:"
+        " block of 16 lines, over the 15-line ceiling, and"
+        " security/workflow-shell-debt.txt does not list it — move the"
+        " logic out (CONTRIBUTING.md)"
+    )
+    expected = [finding, CEILING]
+    assert done.stderr.splitlines() == expected
+
+
+def test_the_workflow_templates_are_still_read(planted: Planted) -> None:
+    """The selection is added to, never narrowed: templates stay."""
+    planted.plant({"workflow-templates/t.yml": template("Big", SIXTEEN)})
+    done = planted.run_task("lint:workflow-shell")
+    assert done.returncode == 1
+    assert done.stderr.splitlines()[0] == (
+        "lint:workflow-shell: workflow-templates/t.yml:8: step 'Big' holds"
+        " a run: block of 16"
+        " lines, over the 15-line ceiling, and"
+        " security/workflow-shell-debt.txt does not list it — move the"
+        " logic out (CONTRIBUTING.md)"
+    )
+
+
+def test_the_fixer_lowers_a_top_level_action_entry(planted: Planted) -> None:
+    """Read, the entry is lowered; unread, it would be removed as gone."""
+    planted.plant({
+        "actions/x/action.yml": run_step("Big", SIXTEEN),
+        DEBT: "actions/x/action.yml\tBig\t30\t# canon helper: #1\n",
+    })
+    done = planted.run_task("fix:workflow-shell")
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert (
+        done.stdout
+        == "fix:workflow-shell: 1 entry(ies) lowered, 0 removed; it never adds one\n"
+    )
+    assert (planted.tree / DEBT).read_text(
+        "utf-8"
+    ) == "actions/x/action.yml\tBig\t16\t# canon helper: #1\n"
+
+
+def test_action_files_at_any_depth_and_nothing_else(planted: Planted) -> None:
+    """By file name, tracked, outside vendor/."""
+    planted.plant({
+        "action.yml": "",
+        "actions/x/action.yml": "",
+        "a/b/c/action.yaml": "",
+        ".github/actions/y/action.yml": "",
+        ".github/workflows/ci.yml": "",
+        ".github/workflows/release.yaml": "",
+        "vendor/v/action.yml": "",
+        "my-action.yml": "",
+        "actions/x/action.yml.bak": "",
+        ".github/dependabot.yml": "",
+    })
+    (planted.tree / "untracked").mkdir()
+    (planted.tree / "untracked" / "action.yml").write_text("", "utf-8")
+    expected = [
+        ".github/actions/y/action.yml",
+        ".github/workflows/ci.yml",
+        ".github/workflows/release.yaml",
+        "a/b/c/action.yaml",
+        "action.yml",
+        "actions/x/action.yml",
+    ]
+    assert planted.selected() == expected
 
 
 def belt_patterns() -> list[str]:
@@ -571,7 +580,7 @@ def belt_patterns() -> list[str]:
     ]
 
 
-class TestAllowlistAudit(TestPlanted):
+class AllowlistAudit(Planted):
     """audit:actions-allowlist against a stub `gh` answering the live setting.
 
     The audit and the lint read one list, mise/actions-allowed.sh. The
@@ -604,41 +613,49 @@ class TestAllowlistAudit(TestPlanted):
         self.plant({"security/identity.toml": ""})
         return self.run_task("audit:actions-allowlist")
 
-    def test_the_live_setting_matching_the_belt_is_green(self) -> None:
-        """The org carrying the belt's list, in any order."""
-        done = self.audit(list(reversed(belt_patterns())))
-        assert (done.returncode, done.stdout, done.stderr) == (
-            0,
-            "audit:actions-allowlist: live org allowlist matches the belt\n",
-            "",
-        )
 
-    def test_a_widened_live_setting_is_drift_by_name(self) -> None:
-        """One pattern more in the org than in the belt."""
-        done = self.audit([*belt_patterns(), "docker/login-action@*"])
-        assert done.returncode == 1
-        assert done.stdout == ""
-        assert "audit:actions-allowlist: patterns differ" in done.stderr
-        assert "docker/login-action@*" in done.stderr
-        assert "reconcile mise/actions-allowed.sh and security/README.md" in done.stderr
+@fixture
+def allowlist_audit(tmp_path: Path) -> AllowlistAudit:
+    """Give each row its own AllowlistAudit."""
+    return AllowlistAudit(tmp_path)
 
-    @pytest.mark.parametrize(
-        "task", ["lint:actions-allowed", "audit:actions-allowlist"]
+
+def test_the_live_setting_matching_the_belt_is_green(
+    allowlist_audit: AllowlistAudit,
+) -> None:
+    """The org carrying the belt's list, in any order."""
+    done = allowlist_audit.audit(list(reversed(belt_patterns())))
+    assert (done.returncode, done.stdout, done.stderr) == (
+        0,
+        "audit:actions-allowlist: live org allowlist matches the belt\n",
+        "",
     )
-    def test_the_lint_and_the_audit_read_one_list(self, task: object) -> None:
-        """Neither task body spells a pattern of its own."""
-        text = body(task)
-        assert '. "${ORG_BELT_DIR}/actions-allowed.sh"' in text
-        assert "mise-action@" not in text
 
 
-class TestGateInstalls:
-    """mise/gate-tools.toml installs the tools wherever the selection reads."""
+def test_a_widened_live_setting_is_drift_by_name(
+    allowlist_audit: AllowlistAudit,
+) -> None:
+    """One pattern more in the org than in the belt."""
+    done = allowlist_audit.audit([*belt_patterns(), "docker/login-action@*"])
+    assert done.returncode == 1
+    assert done.stdout == ""
+    assert "audit:actions-allowlist: patterns differ" in done.stderr
+    assert "docker/login-action@*" in done.stderr
+    assert "reconcile mise/actions-allowed.sh and security/README.md" in done.stderr
 
-    @pytest.mark.parametrize("key", ["aqua:suzuki-shunsuke/pinact", "zizmor"])
-    def test_a_top_level_action_alone_installs_pinact_and_zizmor(
-        self, key: object
-    ) -> None:
-        """A tree whose only action file is actions/x/action.yml."""
-        reasons = gate_tools.needed(gate_tools.load_table(), ["actions/x/action.yml"])
-        assert reasons[key] == "needed: actions/x/action.yml is tracked"
+
+@pytest.mark.usefixtures("allowlist_audit")
+@pytest.mark.parametrize("task", ["lint:actions-allowed", "audit:actions-allowlist"])
+def test_the_lint_and_the_audit_read_one_list(task: object) -> None:
+    """Neither task body spells a pattern of its own."""
+    text = body(task)
+    assert '. "${ORG_BELT_DIR}/actions-allowed.sh"' in text
+    assert "mise-action@" not in text
+
+
+# mise/gate-tools.toml installs the tools wherever the selection reads.
+@pytest.mark.parametrize("key", ["aqua:suzuki-shunsuke/pinact", "zizmor"])
+def test_a_top_level_action_alone_installs_pinact_and_zizmor(key: object) -> None:
+    """A tree whose only action file is actions/x/action.yml."""
+    reasons = gate_tools.needed(gate_tools.load_table(), ["actions/x/action.yml"])
+    assert reasons[key] == "needed: actions/x/action.yml is tracked"

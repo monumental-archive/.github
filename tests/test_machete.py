@@ -22,8 +22,6 @@ GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom.
 import subprocess
 from typing import TYPE_CHECKING
 
-import pytest
-
 from belt import decoded
 from belt.typed_pytest import fixture
 from tests import support
@@ -52,12 +50,10 @@ def body() -> str:
     return decoded.as_str(table["run"], f"{TASK}.run")
 
 
-@pytest.mark.usefixtures("_set_up_test_machete")
-class TestMachete:
+class Machete:
     """A planted tree; lint:machete's verdict on it."""
 
-    @fixture
-    def _set_up_test_machete(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Make an empty git repository and a scrubbed environment."""
         support.tool("cargo-machete")
         tmp = tmp_path
@@ -97,28 +93,37 @@ class TestMachete:
             check=False,
         )
 
-    def test_an_untracked_crate_is_not_read(self) -> None:
-        """An unused dependency in an untracked crate: green."""
-        self.crate(".", CLEAN, track=True)
-        self.crate("scratch", UNUSED, track=False)
-        done = self.run_task()
-        assert done.returncode == 0, done.stdout + done.stderr
-        assert "scratch" not in done.stdout
-        assert "lint:machete: no unused dependencies" in done.stdout
 
-    def test_a_tracked_unused_dependency_reds(self) -> None:
-        """An unused dependency in a tracked member: red, naming it."""
-        self.crate(".", CLEAN, track=True)
-        self.crate("fuzz", UNUSED, track=True)
-        done = self.run_task()
-        assert done.returncode != 0, done.stdout + done.stderr
-        assert "fuzz/Cargo.toml" in done.stdout
-        assert "serde" in done.stdout
-        assert "lint:machete: no unused dependencies" not in done.stdout
+@fixture
+def machete(tmp_path: Path) -> Machete:
+    """Give each row its own Machete."""
+    return Machete(tmp_path)
 
-    def test_no_tracked_manifest_skips(self) -> None:
-        """No tracked Cargo.toml, an untracked one beside: skipped."""
-        self.crate("scratch", UNUSED, track=False)
-        done = self.run_task()
-        assert done.returncode == 0, done.stdout + done.stderr
-        assert done.stdout == "lint:machete: no Cargo.toml tracked, skipped\n"
+
+def test_an_untracked_crate_is_not_read(machete: Machete) -> None:
+    """An unused dependency in an untracked crate: green."""
+    machete.crate(".", CLEAN, track=True)
+    machete.crate("scratch", UNUSED, track=False)
+    done = machete.run_task()
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "scratch" not in done.stdout
+    assert "lint:machete: no unused dependencies" in done.stdout
+
+
+def test_a_tracked_unused_dependency_reds(machete: Machete) -> None:
+    """An unused dependency in a tracked member: red, naming it."""
+    machete.crate(".", CLEAN, track=True)
+    machete.crate("fuzz", UNUSED, track=True)
+    done = machete.run_task()
+    assert done.returncode != 0, done.stdout + done.stderr
+    assert "fuzz/Cargo.toml" in done.stdout
+    assert "serde" in done.stdout
+    assert "lint:machete: no unused dependencies" not in done.stdout
+
+
+def test_no_tracked_manifest_skips(machete: Machete) -> None:
+    """No tracked Cargo.toml, an untracked one beside: skipped."""
+    machete.crate("scratch", UNUSED, track=False)
+    done = machete.run_task()
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert done.stdout == "lint:machete: no Cargo.toml tracked, skipped\n"

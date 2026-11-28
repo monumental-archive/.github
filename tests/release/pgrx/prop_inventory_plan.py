@@ -140,47 +140,43 @@ def run_step(manifest: str, major: str, prefix: str) -> tuple[int, str, object]:
     return code, out.getvalue(), plan
 
 
-class TestNameKeptUnderAnyPrefix:
-    """V: the prefix names the document, never the package."""
-
-    @given(CRATE, MAJOR, PREFIX.filter(bool), PREFIX.filter(bool))
-    @example("edtf-pg", "16", "pgrx-extension:", "x-")
-    def test_prefix_moves_only_the_document(
-        self, crate: str, major: str, one: str, other: str
-    ) -> None:
-        """Package and artifact equal under both; doc is prefix + artifact."""
-        with tempfile.TemporaryDirectory() as tmp:
-            (Path(tmp) / "Cargo.toml").write_text(
-                f"[package]\nname = {toml_value(crate)}\n", "utf-8"
-            )
-            plans = [inventory.plan(Path(tmp), major, p) for p in (one, other)]
-        for prefix, (entry,) in zip((one, other), plans, strict=True):
-            params = decoded.as_object(entry["params"], "params")
-            assert params["cargoPackage"] == crate
-            assert entry["artifact"] == f"{crate}-pg{major}"
-            assert entry["doc"] == f"{prefix}{crate}-pg{major}"
-        undocumented: list[dict[str, object]] = [
-            {k: v for k, v in plan[0].items() if k != "doc"} for plan in plans
-        ]
-        assert undocumented[0] == undocumented[1]
+# V: the prefix names the document, never the package.
+@given(CRATE, MAJOR, PREFIX.filter(bool), PREFIX.filter(bool))
+@example("edtf-pg", "16", "pgrx-extension:", "x-")
+def test_prefix_moves_only_the_document(
+    crate: str, major: str, one: str, other: str
+) -> None:
+    """Package and artifact equal under both; doc is prefix + artifact."""
+    with tempfile.TemporaryDirectory() as tmp:
+        (Path(tmp) / "Cargo.toml").write_text(
+            f"[package]\nname = {toml_value(crate)}\n", "utf-8"
+        )
+        plans = [inventory.plan(Path(tmp), major, p) for p in (one, other)]
+    for prefix, (entry,) in zip((one, other), plans, strict=True):
+        params = decoded.as_object(entry["params"], "params")
+        assert params["cargoPackage"] == crate
+        assert entry["artifact"] == f"{crate}-pg{major}"
+        assert entry["doc"] == f"{prefix}{crate}-pg{major}"
+    undocumented: list[dict[str, object]] = [
+        {k: v for k, v in plan[0].items() if k != "doc"} for plan in plans
+    ]
+    assert undocumented[0] == undocumented[1]
 
 
-class TestAnyManifest:
-    """R: any TOML manifest is planned or refused by name."""
-
-    @given(
-        st.one_of(PACKAGE, VALUE),
-        MAJOR,
-    )
-    @example(1, "16")
-    @example("edtf", "16")
-    def test_plans_or_refuses(self, package: object, major: str) -> None:
-        """Exit 0 with a plan, or 1 with one error line and no plan."""
-        code, out, plan = run_step(f"package = {toml_value(package)}\n", major, "p:")
-        if code == 0:
-            assert isinstance(plan, list)
-        else:
-            assert code == 1
-            assert plan is None
-            assert out.startswith("::error::inventory_plan.py: "), out
-            assert out.count("\n") == 1, out
+# R: any TOML manifest is planned or refused by name.
+@given(
+    st.one_of(PACKAGE, VALUE),
+    MAJOR,
+)
+@example(1, "16")
+@example("edtf", "16")
+def test_plans_or_refuses(package: object, major: str) -> None:
+    """Exit 0 with a plan, or 1 with one error line and no plan."""
+    code, out, plan = run_step(f"package = {toml_value(package)}\n", major, "p:")
+    if code == 0:
+        assert isinstance(plan, list)
+    else:
+        assert code == 1
+        assert plan is None
+        assert out.startswith("::error::inventory_plan.py: "), out
+        assert out.count("\n") == 1, out
