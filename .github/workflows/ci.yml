@@ -805,10 +805,19 @@ jobs:
           version: 2026.11.11
           cache: false
 
-      # unattested-path: the write half of the restore above, on its
-      # standing (#1406).
       - name: Install cosmic-ray, by name
         run: bash .org-canon/mise/mutation-install.sh python
+
+      # unattested-path: the write half of the restore above, on its
+      # standing (#1406).
+      - name: Save the tool cache (default branch only)
+        if: >-
+          ${{ env.ORG_GATE_CACHE_SAVE == 'true'
+          && steps.tool-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.tool-key.outputs.dir }}
+          key: ${{ steps.tool-cache.outputs.cache-primary-key }}
 
       - name: Gather every test row's coverage data
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
