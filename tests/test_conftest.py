@@ -13,24 +13,34 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import pytest
 
+# What a hook in a linked worktree inherits, and any other job variable.
+PLANTED = ("GIT_DIR", "GIT_INDEX_FILE", "ORG_PLANTED_BY_THE_JOB")
 CONFTEST = "from tests.conftest import pytest_runtest_setup, pytest_runtest_teardown\n"
 
 
 def test_a_variable_the_job_sets_never_reaches_a_test(
     pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A job's variable outside INHERITED: the planted test does not see it."""
+    """A job's variables outside INHERITED: the planted test sees none of them.
+
+    `GIT_DIR` and `GIT_INDEX_FILE` are what git hands a hook standing in
+    a linked worktree (#857): a test that saw them would point its own
+    git at the caller's index. `ORG_PLANTED_BY_THE_JOB` stands for any
+    other variable a job sets.
+    """
     pytester.makepyfile(
         test_reads="""
         import os
 
 
         def test_reads():
-            assert "ORG_PLANTED_BY_THE_JOB" not in os.environ
+            planted = {"GIT_DIR", "GIT_INDEX_FILE", "ORG_PLANTED_BY_THE_JOB"}
+            assert not planted & set(os.environ)
         """
     )
     pytester.makeconftest(CONFTEST)
-    monkeypatch.setenv("ORG_PLANTED_BY_THE_JOB", "leaked")
+    for name in PLANTED:
+        monkeypatch.setenv(name, str(pytester.path / "leaked"))
     result = pytester.runpytest_inprocess()
     result.assert_outcomes(passed=1)
 
@@ -45,10 +55,12 @@ def test_without_the_hooks_the_variable_would_reach_it(
 
 
         def test_reads():
-            assert "ORG_PLANTED_BY_THE_JOB" not in os.environ
+            planted = {"GIT_DIR", "GIT_INDEX_FILE", "ORG_PLANTED_BY_THE_JOB"}
+            assert not planted & set(os.environ)
         """
     )
-    monkeypatch.setenv("ORG_PLANTED_BY_THE_JOB", "leaked")
+    for name in PLANTED:
+        monkeypatch.setenv(name, str(pytester.path / "leaked"))
     result = pytester.runpytest_inprocess()
     result.assert_outcomes(failed=1)
 

@@ -26,6 +26,7 @@ from pathlib import Path
 
 import pytest
 
+from belt import coverage_floor
 from belt.release import coverage_figures as figures
 from tests import support
 
@@ -36,6 +37,8 @@ GIT = support.tool("git")
 SHA = "977d99f0ee27ca9d8a3c9c4cf5911105c88241bf"
 OTHER = "2980f36dba6e88b75ecd97536850263c140a4103"
 LEGS = "python 95.23\npython-branches 91.45\n"
+# The launcher's command, which a finding names when no task does.
+COMMAND = "coverage-figures"
 
 
 def artifact(
@@ -299,6 +302,7 @@ class TestCommandLine:
                 contextlib.redirect_stderr(err),
             ):
                 patched.setattr(figures, "STDIN", piped.fileno())
+                patched.setattr(sys, "argv", [COMMAND])
                 status = figures.main(argv)
         return status, out.getvalue(), err.getvalue()
 
@@ -352,7 +356,7 @@ class TestCommandLine:
         """No sha, a short sha, an unknown command, a leg that is not pgrx."""
         status, out, err = self.main(argv, b"")
         assert (status, out) == (2, "")
-        assert "usage: coverage_figures.py" in err
+        assert f"{COMMAND}: usage: belt {COMMAND} " in err
 
 
 # The forge: answers from files the row planted beside it, keyed by the
@@ -441,7 +445,9 @@ class TestDerive:
     """derive-coverage-floor.sh, read or measured, in a planted tree."""
 
     @pytest.fixture
-    def _set_up_test_derive(self, tmp_path: Path) -> None:
+    def _set_up_test_derive(
+        self, tmp_path: Path, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Plant the canon's two scripts, the stubs, and a tree with a floor."""
         self.base = Path(str(tmp_path))
         # The canon whole, as the release job has it: a helper that comes
@@ -461,22 +467,13 @@ class TestDerive:
         self.tree.mkdir()
         (self.tree / "a.py").write_text("", encoding="utf-8")
         env = support.env(self.base / "home")
-        subprocess.run(
-            [
-                sys.executable,
-                str(canon / "mise" / "coverage_floor.py"),
-                "write",
-                "--adopt",
-                "--provenance",
-                "v1.0.0",
-            ],
-            cwd=self.tree,
-            input=LEGS,
-            text=True,
-            env=env,
-            check=True,
-            capture_output=True,
-        )
+        with pytest.MonkeyPatch.context() as patched:
+            patched.chdir(self.tree)
+            patched.setattr(sys, "stdin", io.StringIO(LEGS))
+            assert not coverage_floor.main(
+                ["write", "--adopt", "--provenance", "v1.0.0"]
+            )
+        capfd.readouterr()
         for argv in (
             [GIT, "init", "-q"],
             [GIT, "add", "-A"],

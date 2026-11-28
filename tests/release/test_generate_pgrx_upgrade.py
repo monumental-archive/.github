@@ -42,12 +42,10 @@ environment cost.
 Run through the gate as `mise run test`, which `ci` collects.
 """
 
-import hashlib
 import json
 import os
 import re
 import subprocess
-import sys
 import textwrap
 from collections.abc import Iterator
 from pathlib import Path
@@ -489,87 +487,6 @@ class TestAFailedControlListingIsNotAbsence:
             result = repo.derive("1.3.1", "1.3.0", "edtf-releases.json")
         assert result.returncode != 0, result.stdout + result.stderr
         assert "not applicable" not in result.stdout + result.stderr
-
-
-class TestLeavesTheCallersGitAlone(TestNeedsJq):
-    """#857, planted: the hazard itself, run for real on every gate."""
-
-    def test_a_linked_worktrees_index_is_byte_identical_afterwards(
-        self, request: pytest.FixtureRequest
-    ) -> None:
-        """Run the whole suite the way a `pre-push` hook in a worktree does.
-
-        A scratch repository, a linked worktree of it, and exactly the
-        environment git hands a hook standing there: `GIT_DIR`, plus the
-        `GIT_INDEX_FILE` that `pre-commit` adds and that on its own leaves
-        an index referencing objects the repository does not hold
-        (`fatal: unable to read <oid>`). Both are planted on the child
-        only; this row's own git calls take the scrub, which is what keeps
-        the plant from reaching the tree the batch is working in.
-
-        Green has to mean two things, because a green suite WAS the defect
-        (#857): the index is untouched, and the suite that left it
-        untouched actually ran.
-        """
-        with TemporaryDirectory() as d:
-            scratch = Path(d)
-            home = scratch / "home"
-            home.mkdir()
-            main = scratch / "main"
-            main.mkdir()
-            (main / "tracked.txt").write_text("a real file, in a real repo\n")
-            git(["init", "-q", "."], main, home)
-            git(["add", "-A"], main, home)
-            git(["commit", "-q", "-m", "seed"], main, home)
-            linked = scratch / "linked"
-            git(["worktree", "add", "-q", str(linked), "-b", "side"], main, home)
-            gitdir = Path(
-                git(["rev-parse", "--absolute-git-dir"], linked, home).strip()
-            )
-            index = gitdir / "index"
-
-            before_digest = hashlib.sha256(index.read_bytes()).hexdigest()
-            before_files = support.tracked(linked)
-
-            planted = support.env()
-            planted.update({
-                "GIT_DIR": str(gitdir),
-                "GIT_INDEX_FILE": str(index),
-            })
-            run = subprocess.run(
-                [
-                    *(sys.executable, "-m", "pytest", "-q"),
-                    *("-c", str(CANON / "mise" / "pytest.toml")),
-                    *("--rootdir", str(CANON), str(Path(__file__).resolve())),
-                    # The whole file but this row, which would spawn
-                    # another: deselected, by its own id. Naming a class
-                    # to run would quietly stop covering rows added to
-                    # any other one.
-                    *("--deselect", request.node.nodeid),
-                ],
-                cwd=linked,
-                env=planted,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-
-            after_digest = hashlib.sha256(index.read_bytes()).hexdigest()
-            after_files = support.tracked(linked)
-            status = git(["status", "--porcelain"], linked, home)
-
-        assert run.returncode == 0, run.stdout + run.stderr
-        # The only skips are the floor rows where this machine has no
-        # Postgres: they start a server and never touch git. Any other
-        # skip means the rows that shell out to git did not run, and an
-        # index nothing touched would then prove nothing at all.
-        skips = expected_inner_skips()
-        counted = f", {skips} skipped" if skips else ""
-        summary = run.stdout.rstrip().splitlines()[-1]
-        assert re.match(rf"^\d+ passed{counted}, 1 deselected in ", summary), run.stdout
-        assert before_files == after_files, "the shared index lost files"
-        assert status == "", f"the linked worktree is dirty:\n{status}"
-        assert before_digest == after_digest, "the shared index was rewritten"
 
 
 RECORD = ".pgrx-installable"
@@ -1645,16 +1562,3 @@ class TestProofReadsBeforeItCompares:
         for call in calls:
             assert call.startswith("-v ON_ERROR_STOP=1 "), call
 
-
-def expected_inner_skips() -> int:
-    """Count the skips a whole-suite run of this file owes (#857 row).
-
-    Returns:
-        Every floor row where this machine has no Postgres to start.
-
-    """
-    skips = 0
-    if not (PG_BIN or ON_RUNNER):
-        for live in (TestWarnsBelowTheFloor, TestSnapshotReadsTheCatalog):
-            skips += sum(name.startswith("test_") for name in dir(live))
-    return skips
