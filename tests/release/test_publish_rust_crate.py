@@ -50,27 +50,25 @@ genuine resume passes.
 """
 
 import hashlib
-import io
+import itertools
 import json
 import os
 import shutil
 import sys
 import urllib.request
-from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass, field
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 import pytest
 
-from belt import decoded, findings
+from belt import decoded
 from belt.release import publish_crates
 from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
 
 CANON = support.CANON
 TESTDATA = Path(__file__).resolve().parent / "testdata"
@@ -195,35 +193,69 @@ class Run:
         return [c for c in self.cargo if c.startswith("publish ")]
 
 
-def run_publish(
-    index: dict[str, str],
-    crate: bytes | None = None,
-    unpublished: tuple[str, ...] = (),
-    *,
-    env: support.Env,
-    **answers: int,
-) -> Run:
-    """Run the helper with the index serving `index`.
+@dataclass
+class Publishing:
+    """One job laid out: the fake index host and the stubs' logs."""
 
-    Args:
-        index: index paths to serve - a fixture file's name to serve it,
-            or a bare status code to answer that status.
-        crate: the bytes `cargo package` produces for edtf-core 1.3.3;
-            the real uploaded crate when None.
-        unpublished: members whose manifest says `publish = false`,
-            written into the captured metadata as cargo reports it.
-        answers: `oidc=` and `exchange=` statuses, and `publish_rc=`, the
-            stub cargo publish's exit.
+    fetch: Fetch
+    log: Path
+
+    def ran(self, status: int, said: tuple[str, str]) -> Run:
+        """Read what the helper's run did.
+
+        Returns:
+            The run's status, output and the stubs' logs.
+
+        """
+        out, err = said
+
+        def read(name: str) -> list[str]:
+            path = self.log / name
+            return path.read_text().splitlines() if path.exists() else []
+
+        return Run(
+            status, out, err, read("cargo"), self.fetch.requests, read("cargo-env")
+        )
+
+
+@fixture
+def publish(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, env: support.Env
+) -> Callable[..., Publishing]:
+    """Lay out the publish job: a stub cargo, a fake index host, its env.
 
     Returns:
-        The run's status, output and the stubs' logs.
+        A function that lays out one job and returns it.
 
     """
-    with TemporaryDirectory() as d:
-        tmp = Path(d)
+    made = itertools.count()
+
+    def lay_out(
+        index: dict[str, str],
+        crate: bytes | None = None,
+        unpublished: tuple[str, ...] = (),
+        **answers: int,
+    ) -> Publishing:
+        """Lay out the job with the index serving `index`.
+
+        Args:
+            index: index paths to serve - a fixture file's name to serve it,
+                or a bare status code to answer that status.
+            crate: the bytes `cargo package` produces for edtf-core 1.3.3;
+                the real uploaded crate when None.
+            unpublished: members whose manifest says `publish = false`,
+                written into the captured metadata as cargo reports it.
+            answers: `oidc=` and `exchange=` statuses, and `publish_rc=`, the
+                stub cargo publish's exit.
+
+        Returns:
+            The job, its fakes serving.
+
+        """
+        tmp = tmp_path / f"publish{next(made)}"
         stubs, log, served, crates = (tmp / n for n in ("bin", "log", "index", "c"))
         for p in (stubs, log, served, crates):
-            p.mkdir()
+            p.mkdir(parents=True)
         (stubs / "cargo").write_text(CARGO_STUB)
         (stubs / "cargo").chmod(0o755)
         for rel, answer in index.items():
@@ -259,26 +291,13 @@ def run_publish(
         fetch = Fetch(
             served, oidc=answers.get("oidc", 200), exchange=answers.get("exchange", 200)
         )
-        out, err = io.StringIO(), io.StringIO()
-        with redirect_stdout(out), redirect_stderr(err):
-            try:
-                code = publish_crates.run(environ, tmp, fetch)
-            except publish_crates.RefusalError as e:
-                findings.finding("", str(e), annotate=True)
-                code = 1
+        for name, value in environ.items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.chdir(tmp)
+        monkeypatch.setattr(publish_crates, "http", fetch)
+        return Publishing(fetch, log)
 
-        def read(name: str) -> list[str]:
-            path = log / name
-            return path.read_text().splitlines() if path.exists() else []
-
-        return Run(
-            code,
-            out.getvalue(),
-            err.getvalue(),
-            read("cargo"),
-            fetch.requests,
-            read("cargo-env"),
-        )
+    return lay_out
 
 
 def index_lines(rel: str) -> list[dict[str, object]]:
@@ -317,9 +336,13 @@ def test_wasm_has_a_file_but_no_1_3_3() -> None:
 
 
 # The step does what its comment says (#1218).
-def test_nothing_published_adds_no_exclusion(env: support.Env) -> None:
+def test_nothing_published_adds_no_exclusion(
+    capfd: pytest.CaptureFixture[str], publish: Callable[..., Publishing]
+) -> None:
     """404s and a file without the version leave cargo's flags alone."""
-    run = run_publish(WASM, env=env)
+    publishing = publish(WASM)
+    status = publish_crates.main([])
+    run = publishing.ran(status, capfd.readouterr())
     assert run.returncode == 0, run.stdout + run.stderr
     want: list[str] = [PUBLISH]
     assert want == run.publishes()
@@ -328,9 +351,13 @@ def test_nothing_published_adds_no_exclusion(env: support.Env) -> None:
     assert not packaged
 
 
-def test_some_published_excludes_exactly_those_and_names_them(env: support.Env) -> None:
+def test_some_published_excludes_exactly_those_and_names_them(
+    capfd: pytest.CaptureFixture[str], publish: Callable[..., Publishing]
+) -> None:
     """The v1.3.3 re-run: edtf-core is there, the rest are not."""
-    run = run_publish(CORE | WASM, env=env)
+    publishing = publish(CORE | WASM)
+    status = publish_crates.main([])
+    run = publishing.ran(status, capfd.readouterr())
     assert run.returncode == 0, run.stdout + run.stderr
     want: list[str] = [f"{PUBLISH} --exclude edtf-core"]
     assert want == run.publishes()
@@ -340,10 +367,14 @@ def test_some_published_excludes_exactly_those_and_names_them(env: support.Env) 
     assert "package --locked --no-verify -p edtf-core" in run.cargo
 
 
-def test_all_published_runs_no_cargo_publish_and_exits_0(env: support.Env) -> None:
+def test_all_published_runs_no_cargo_publish_and_exits_0(
+    capfd: pytest.CaptureFixture[str], publish: Callable[..., Publishing]
+) -> None:
     """A finished leg is success, and it mints no token."""
     others = ("calendars", "normalize", "wasm", "cli", "postgres")
-    run = run_publish(CORE, unpublished=tuple(f"edtf-{m}" for m in others), env=env)
+    publishing = publish(CORE, unpublished=tuple(f"edtf-{m}" for m in others))
+    status = publish_crates.main([])
+    run = publishing.ran(status, capfd.readouterr())
     assert run.returncode == 0, run.stdout + run.stderr
     assert list[str]() == run.publishes()
     assert run.stdout == (
@@ -356,10 +387,14 @@ def test_all_published_runs_no_cargo_publish_and_exits_0(env: support.Env) -> No
     assert want == urls
 
 
-def test_a_checksum_mismatch_fails_naming_both(env: support.Env) -> None:
+def test_a_checksum_mismatch_fails_naming_both(
+    capfd: pytest.CaptureFixture[str], publish: Callable[..., Publishing]
+) -> None:
     """A resume must be resuming the same bytes."""
     planted = b"not the bytes v1.3.3 uploaded\n"
-    run = run_publish(CORE | WASM, crate=planted, env=env)
+    publishing = publish(CORE | WASM, crate=planted)
+    status = publish_crates.main([])
+    run = publishing.ran(status, capfd.readouterr())
     assert run.returncode != 0
     assert (
         f"::error::publish-crates: edtf-core 1.3.3 is on crates.io with"
@@ -369,9 +404,13 @@ def test_a_checksum_mismatch_fails_naming_both(env: support.Env) -> None:
     assert list[str]() == run.publishes()
 
 
-def test_an_index_503_fails_naming_the_status(env: support.Env) -> None:
+def test_an_index_503_fails_naming_the_status(
+    capfd: pytest.CaptureFixture[str], publish: Callable[..., Publishing]
+) -> None:
     """An unread index is never read as "not published"."""
-    run = run_publish({"ed/tf/edtf-core": "503"} | WASM, env=env)
+    publishing = publish({"ed/tf/edtf-core": "503"} | WASM)
+    status = publish_crates.main([])
+    run = publishing.ran(status, capfd.readouterr())
     assert run.returncode != 0
     assert run.stderr == (
         "::error::publish-crates: the crates.io index answered 503 for edtf-core"
@@ -381,9 +420,13 @@ def test_an_index_503_fails_naming_the_status(env: support.Env) -> None:
     assert list[str]() == run.publishes()
 
 
-def test_every_index_read_names_the_org_and_the_layout(env: support.Env) -> None:
+def test_every_index_read_names_the_org_and_the_layout(
+    capfd: pytest.CaptureFixture[str], publish: Callable[..., Publishing]
+) -> None:
     """One read per member that publishes, each with the UA."""
-    run = run_publish(WASM, env=env)
+    publishing = publish(WASM)
+    status = publish_crates.main([])
+    run = publishing.ran(status, capfd.readouterr())
     reads = [(u, a) for u, a in run.curl if u.startswith("https://index.")]
     want = [
         (f"https://index.crates.io/ed/tf/edtf-{m}", USER_AGENT)
@@ -421,9 +464,13 @@ def test_each_shape_refuses_by_name(body: object) -> None:
 
 
 # Cargo's `publish` key decides, never the build's exclusion (#1273).
-def test_a_member_the_build_excluded_still_publishes(env: support.Env) -> None:
+def test_a_member_the_build_excluded_still_publishes(
+    capfd: pytest.CaptureFixture[str], publish: Callable[..., Publishing]
+) -> None:
     """edtf-postgres: in the old exclusion, `publish` unset - it ships."""
-    run = run_publish(WASM, env=env)
+    publishing = publish(WASM)
+    status = publish_crates.main([])
+    run = publishing.ran(status, capfd.readouterr())
     assert run.returncode == 0, run.stdout + run.stderr
     assert ("https://index.crates.io/ed/tf/edtf-postgres", USER_AGENT) in run.curl
     want: list[str] = [PUBLISH]
@@ -431,9 +478,13 @@ def test_a_member_the_build_excluded_still_publishes(env: support.Env) -> None:
     assert "--exclude" not in run.publishes()[0]
 
 
-def test_a_publish_false_member_is_not_in_the_set(env: support.Env) -> None:
+def test_a_publish_false_member_is_not_in_the_set(
+    capfd: pytest.CaptureFixture[str], publish: Callable[..., Publishing]
+) -> None:
     """`publish = false` is the one way out, and it is the manifest's."""
-    run = run_publish(CORE, unpublished=("edtf-postgres",), env=env)
+    publishing = publish(CORE, unpublished=("edtf-postgres",))
+    status = publish_crates.main([])
+    run = publishing.ran(status, capfd.readouterr())
     assert run.returncode == 0, run.stdout + run.stderr
     want = [
         f"https://index.crates.io/ed/tf/edtf-{m}"
@@ -446,9 +497,13 @@ def test_a_publish_false_member_is_not_in_the_set(env: support.Env) -> None:
 
 
 # Trusted publishing by hand: what the step's curl calls did (#907).
-def test_the_token_is_masked_and_handed_to_cargo(env: support.Env) -> None:
+def test_the_token_is_masked_and_handed_to_cargo(
+    capfd: pytest.CaptureFixture[str], publish: Callable[..., Publishing]
+) -> None:
     """OIDC, then the exchange with the org's UA, masked, into cargo's env."""
-    run = run_publish(WASM, env=env)
+    publishing = publish(WASM)
+    status = publish_crates.main([])
+    run = publishing.ran(status, capfd.readouterr())
     assert run.returncode == 0, run.stdout
     assert "::add-mask::stub\n" in run.stdout
     tokens: list[str] = ["token=stub"]
@@ -461,9 +516,13 @@ def test_the_token_is_masked_and_handed_to_cargo(env: support.Env) -> None:
     assert want == others
 
 
-def test_a_refused_exchange_names_the_status_and_the_header(env: support.Env) -> None:
+def test_a_refused_exchange_names_the_status_and_the_header(
+    capfd: pytest.CaptureFixture[str], publish: Callable[..., Publishing]
+) -> None:
     """The 403 a missing UA draws is named, with where to look first."""
-    run = run_publish(WASM, exchange=403, env=env)
+    publishing = publish(WASM, exchange=403)
+    status = publish_crates.main([])
+    run = publishing.ran(status, capfd.readouterr())
     assert run.returncode == 1
     assert run.stderr == (
         "::error::publish-crates: the crates.io token exchange answered 403 —"
@@ -473,9 +532,13 @@ def test_a_refused_exchange_names_the_status_and_the_header(env: support.Env) ->
     assert list[str]() == run.publishes()
 
 
-def test_a_refused_oidc_request_names_the_status(env: support.Env) -> None:
+def test_a_refused_oidc_request_names_the_status(
+    capfd: pytest.CaptureFixture[str], publish: Callable[..., Publishing]
+) -> None:
     """No OIDC token, no exchange, no publish."""
-    run = run_publish(WASM, oidc=500, env=env)
+    publishing = publish(WASM, oidc=500)
+    status = publish_crates.main([])
+    run = publishing.ran(status, capfd.readouterr())
     assert run.returncode == 1
     assert run.stderr == (
         "::error::publish-crates: the runner's OIDC token endpoint answered 500\n"
@@ -544,53 +607,65 @@ def test_an_answer_that_is_not_a_response_is_refused(
     assert f"{url} answered NoneType, not an HTTP response" == str(caught.value)
 
 
-def test_an_index_that_never_answered_is_named(env: support.Env) -> None:
+def test_an_index_that_never_answered_is_named(
+    capfd: pytest.CaptureFixture[str], publish: Callable[..., Publishing]
+) -> None:
     """No answer at all is "nothing", never "not published"."""
-    run = run_publish({"ed/tf/edtf-core": "000"} | WASM, env=env)
+    publishing = publish({"ed/tf/edtf-core": "000"} | WASM)
+    status = publish_crates.main([])
+    run = publishing.ran(status, capfd.readouterr())
     assert run.returncode == 1
     assert (
         "::error::publish-crates: the crates.io index answered nothing for edtf-core"
     ) in run.stderr
 
 
-def test_cargo_publish_s_own_exit_is_the_run_s(env: support.Env) -> None:
+def test_cargo_publish_s_own_exit_is_the_run_s(
+    capfd: pytest.CaptureFixture[str], publish: Callable[..., Publishing]
+) -> None:
     """A failed upload fails the run with cargo's own status."""
-    run = run_publish(WASM, publish_rc=101, env=env)
+    publishing = publish(WASM, publish_rc=101)
+    status = publish_crates.main([])
+    run = publishing.ran(status, capfd.readouterr())
     assert run.returncode == 101
 
 
 # The command: refusals and failed commands as job-log lines.
-def main(failure: BaseException, capfd: pytest.CaptureFixture[str]) -> tuple[int, str]:
-    """Run main with `run` raising failure.
+@fixture
+def failing(monkeypatch: pytest.MonkeyPatch) -> Callable[[BaseException], None]:
+    """Make the job's `run` raise a row's failure.
 
     Returns:
-        The exit code and stderr, where the finding writer prints.
+        A function that plants `failure` as what `run` raises.
 
     """
 
-    def refuse(*_args: object, **_kwargs: object) -> int:
-        raise failure
+    def plant(failure: BaseException) -> None:
+        def refuse(*_args: object, **_kwargs: object) -> int:
+            raise failure
 
-    with pytest.MonkeyPatch.context() as patched:
-        patched.setattr(publish_crates, "run", refuse)
-        code = publish_crates.main([])
-    return code, capfd.readouterr().err
+        monkeypatch.setattr(publish_crates, "run", refuse)
+
+    return plant
 
 
-def test_a_refusal_is_printed_and_exits_1(capfd: pytest.CaptureFixture[str]) -> None:
+def test_a_refusal_is_printed_and_exits_1(
+    capfd: pytest.CaptureFixture[str], failing: Callable[[BaseException], None]
+) -> None:
     """The refusal's own line, exit 1."""
-    assert main(publish_crates.RefusalError("stop"), capfd) == (
-        1,
-        "::error::publish-crates: stop\n",
-    )
+    failing(publish_crates.RefusalError("stop"))
+    status = publish_crates.main([])
+    assert (status, capfd.readouterr().err) == (1, "::error::publish-crates: stop\n")
 
 
 def test_a_failed_command_names_itself_and_its_status(
-    capfd: pytest.CaptureFixture[str],
+    capfd: pytest.CaptureFixture[str], failing: Callable[[BaseException], None]
 ) -> None:
     """A failed cargo or member helper is named, with its exit."""
     failed = publish_crates.CommandError(["cargo", "package", "-p", "x"], 101)
-    assert main(failed, capfd) == (
+    failing(failed)
+    status = publish_crates.main([])
+    assert (status, capfd.readouterr().err) == (
         101,
         "::error::publish-crates: cargo package -p x exited 101\n",
     )

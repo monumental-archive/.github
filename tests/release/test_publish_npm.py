@@ -12,19 +12,21 @@ token-shaped string and a credential header in the debug log, and assert
 neither reaches the job log while the lines naming the failing step do.
 """
 
-import io
+import itertools
 import os
 import re
 import sys
-from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass
 from pathlib import Path
-from tempfile import TemporaryDirectory
+from typing import TYPE_CHECKING
 
 import pytest
 
 from belt.release import publish_npm
 from belt.typed_pytest import fixture
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 PACKAGE = "@acme/widget@1.2.3"
 # ruff: ignore[hardcoded-password-string] - a planted fake, to prove it is redacted
@@ -88,34 +90,65 @@ class Run:
     stderr: str = ""
 
 
-# ruff: ignore[too-many-arguments] - one keyword per stub answer
-def run_publish(
-    *,
-    version: str = "11.17.0",
-    oidc: bool = True,
-    view_rc: int = 1,
-    tarballs: tuple[str, ...] = ("widget-1.2.3.tgz",),
-    publish_rc: int = 0,
-    logs: str = "config",
-) -> Run:
-    """Run the publisher with the stub answering as told.
+@dataclass
+class Npm:
+    """One job laid out: the publisher's env, its tree and the stub's log."""
 
-    Args:
-        version: what `npm --version` answers.
-        oidc: whether the runner offered the OIDC endpoint.
-        view_rc: `npm view`'s exit; 0 means the version is published.
-        tarballs: the files under dist/.
-        publish_rc: `npm publish`'s exit.
-        logs: where the debug log lands - "config" under the directory
-            `npm config get logs-dir` names, "home" under ~/.npm/_logs
-            with config answering nothing, "none" nowhere.
+    env: dict[str, str]
+    work: Path
+    npm_log: Path
+
+    def ran(self, status: int, said: tuple[str, str]) -> Run:
+        """Read what the publisher's run did.
+
+        Returns:
+            The exit code, the job log and the stub's invocations.
+
+        """
+        out, err = said
+        log = self.npm_log
+        return Run(
+            status, out, log.read_text().splitlines() if log.exists() else [], err
+        )
+
+
+@fixture
+def npm(tmp_path: Path) -> Callable[..., Npm]:
+    """Lay out the publish job's stub npm and dist/.
 
     Returns:
-        The exit code, the job log and the stub's invocations.
+        A function that lays out one job and returns it.
 
     """
-    with TemporaryDirectory() as d:
-        tmp = Path(d)
+    made = itertools.count()
+
+    # ruff: ignore[too-many-arguments] - one keyword per stub answer
+    def lay_out(
+        *,
+        version: str = "11.17.0",
+        oidc: bool = True,
+        view_rc: int = 1,
+        tarballs: tuple[str, ...] = ("widget-1.2.3.tgz",),
+        publish_rc: int = 0,
+        logs: str = "config",
+    ) -> Npm:
+        """Lay out a job with the stub answering as told.
+
+        Args:
+            version: what `npm --version` answers.
+            oidc: whether the runner offered the OIDC endpoint.
+            view_rc: `npm view`'s exit; 0 means the version is published.
+            tarballs: the files under dist/.
+            publish_rc: `npm publish`'s exit.
+            logs: where the debug log lands - "config" under the directory
+                `npm config get logs-dir` names, "home" under ~/.npm/_logs
+                with config answering nothing, "none" nowhere.
+
+        Returns:
+            The job: the publisher's env and working tree.
+
+        """
+        tmp = tmp_path / f"npm{next(made)}"
         stubs, work, home, configured = (
             tmp / n for n in ("bin", "work", "home", "logs")
         )
@@ -146,22 +179,19 @@ def run_publish(
             env["STUB_WRITE_LOG"] = str(configured)
         elif logs == "home":
             env["STUB_WRITE_LOG"] = str(home / ".npm" / "_logs")
-        out, err = io.StringIO(), io.StringIO()
-        with redirect_stdout(out), redirect_stderr(err):
-            code = publish_npm.run(PACKAGE, env, work)
-        log = tmp / "npm.log"
-        return Run(
-            code,
-            out.getvalue(),
-            log.read_text().splitlines() if log.exists() else [],
-            err.getvalue(),
-        )
+        return Npm(env, work, tmp / "npm.log")
+
+    return lay_out
 
 
 # Each refusal the step printed, word for word.
-def test_npm_below_the_required_version() -> None:
+def test_npm_below_the_required_version(
+    capfd: pytest.CaptureFixture[str], npm: Callable[..., Npm]
+) -> None:
     """An npm of 11.5.0 cannot do trusted publishing: bump the pin."""
-    run = run_publish(version="11.5.0")
+    job = npm(version="11.5.0")
+    status = publish_npm.run(PACKAGE, job.env, job.work)
+    run = job.ran(status, capfd.readouterr())
     assert run.returncode == 1
     assert run.stderr == (
         "::error::publish-npm: npm 11.5.0 < 11.5.1; trusted publishing needs"
@@ -172,15 +202,23 @@ def test_npm_below_the_required_version() -> None:
     assert want == run.npm
 
 
-def test_versions_compare_as_numbers() -> None:
+def test_versions_compare_as_numbers(
+    capfd: pytest.CaptureFixture[str], npm: Callable[..., Npm]
+) -> None:
     """11.10.0 is newer than 11.5.1, which a string compare gets wrong."""
-    run = run_publish(version="11.10.0")
+    job = npm(version="11.10.0")
+    status = publish_npm.run(PACKAGE, job.env, job.work)
+    run = job.ran(status, capfd.readouterr())
     assert run.returncode == 0, run.stdout
 
 
-def test_no_oidc_endpoint_in_the_environment() -> None:
+def test_no_oidc_endpoint_in_the_environment(
+    capfd: pytest.CaptureFixture[str], npm: Callable[..., Npm]
+) -> None:
     """#907's second half: npm can, but the runner did not offer it."""
-    run = run_publish(oidc=False)
+    job = npm(oidc=False)
+    status = publish_npm.run(PACKAGE, job.env, job.work)
+    run = job.ran(status, capfd.readouterr())
     assert run.returncode == 1
     assert run.stderr == (
         "::error::publish-npm: the OIDC token endpoint is absent from this"
@@ -193,9 +231,16 @@ def test_no_oidc_endpoint_in_the_environment() -> None:
 
 
 @pytest.mark.parametrize(("tarballs", "count"), [((), 0), (("a.tgz", "b.tgz"), 2)])
-def test_not_exactly_one_tarball(tarballs: object, count: object) -> None:
+def test_not_exactly_one_tarball(
+    tarballs: object,
+    count: object,
+    capfd: pytest.CaptureFixture[str],
+    npm: Callable[..., Npm],
+) -> None:
     """None, or two, is refused with the count."""
-    run = run_publish(tarballs=tarballs)
+    job = npm(tarballs=tarballs)
+    status = publish_npm.run(PACKAGE, job.env, job.work)
+    run = job.ran(status, capfd.readouterr())
     assert run.returncode == 1
     assert run.stderr.endswith(
         f"::error::publish-npm: expected exactly one tarball, found {count}\n"
@@ -204,16 +249,24 @@ def test_not_exactly_one_tarball(tarballs: object, count: object) -> None:
     assert not published
 
 
-def test_a_hidden_tarball_is_not_a_tarball() -> None:
+def test_a_hidden_tarball_is_not_a_tarball(
+    capfd: pytest.CaptureFixture[str], npm: Callable[..., Npm]
+) -> None:
     """The shell's `dist/*.tgz` matched no dotfile; neither does this."""
-    run = run_publish(tarballs=("widget-1.2.3.tgz", ".partial.tgz"))
+    job = npm(tarballs=("widget-1.2.3.tgz", ".partial.tgz"))
+    status = publish_npm.run(PACKAGE, job.env, job.work)
+    run = job.ran(status, capfd.readouterr())
     assert run.returncode == 0, run.stdout
 
 
 # The path that uploads, and the one that converges.
-def test_the_package_already_on_the_registry_converges() -> None:
+def test_the_package_already_on_the_registry_converges(
+    capfd: pytest.CaptureFixture[str], npm: Callable[..., Npm]
+) -> None:
     """A finished leg is success, and nothing is uploaded."""
-    run = run_publish(view_rc=0)
+    job = npm(view_rc=0)
+    status = publish_npm.run(PACKAGE, job.env, job.work)
+    run = job.ran(status, capfd.readouterr())
     assert run.returncode == 0
     assert (
         "trusted publishing: npm 11.17.0, OIDC endpoint present\n"
@@ -223,17 +276,25 @@ def test_the_package_already_on_the_registry_converges() -> None:
     assert want == run.npm
 
 
-def test_the_one_tarball_is_published_by_its_relative_path() -> None:
+def test_the_one_tarball_is_published_by_its_relative_path(
+    capfd: pytest.CaptureFixture[str], npm: Callable[..., Npm]
+) -> None:
     """`./dist/<name>.tgz`, never `dist/...`, which npm reads as owner/repo."""
-    run = run_publish()
+    job = npm()
+    status = publish_npm.run(PACKAGE, job.env, job.work)
+    run = job.ran(status, capfd.readouterr())
     assert run.returncode == 0, run.stdout
     assert run.npm[-1] == "publish ./dist/widget-1.2.3.tgz --provenance --access public"
 
 
 # #907: the failing step's own words reach the job log, masked.
-def test_the_log_is_printed_with_the_token_redacted() -> None:
+def test_the_log_is_printed_with_the_token_redacted(
+    capfd: pytest.CaptureFixture[str], npm: Callable[..., Npm]
+) -> None:
     """The credential line is dropped and the token-shaped run redacted."""
-    run = run_publish(publish_rc=1)
+    job = npm(publish_rc=1)
+    status = publish_npm.run(PACKAGE, job.env, job.work)
+    run = job.ran(status, capfd.readouterr())
     assert run.returncode == 1
     assert TOKEN not in run.stdout
     assert "authorization" not in run.stdout
@@ -245,20 +306,29 @@ def test_the_log_is_printed_with_the_token_redacted() -> None:
     )
 
 
-def test_npm_s_own_exit_is_the_run_s() -> None:
+def test_npm_s_own_exit_is_the_run_s(npm: Callable[..., Npm]) -> None:
     """A failed upload fails with npm's status, after the log."""
-    assert run_publish(publish_rc=7).returncode == 7
+    job = npm(publish_rc=7)
+    assert publish_npm.run(PACKAGE, job.env, job.work) == 7
 
 
-def test_the_default_log_directory_when_config_names_none() -> None:
+def test_the_default_log_directory_when_config_names_none(
+    capfd: pytest.CaptureFixture[str], npm: Callable[..., Npm]
+) -> None:
     """No logs-dir from npm config: ~/.npm/_logs, as npm defaults."""
-    run = run_publish(publish_rc=1, logs="home")
+    job = npm(publish_rc=1, logs="home")
+    status = publish_npm.run(PACKAGE, job.env, job.work)
+    run = job.ran(status, capfd.readouterr())
     assert "/.npm/_logs/2026-11-18T00_00_00_000Z-debug-0.log\n" in run.stdout
 
 
-def test_no_debug_log_is_said() -> None:
+def test_no_debug_log_is_said(
+    capfd: pytest.CaptureFixture[str], npm: Callable[..., Npm]
+) -> None:
     """A failure that left no log says where it looked."""
-    run = run_publish(publish_rc=1, logs="none")
+    job = npm(publish_rc=1, logs="none")
+    status = publish_npm.run(PACKAGE, job.env, job.work)
+    run = job.ran(status, capfd.readouterr())
     assert re.search(
         r"::warning::npm left no debug log under .*/\.npm/_logs\n$", run.stdout
     )

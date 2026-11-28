@@ -36,9 +36,7 @@ helper reads, `containerimage.digest`.
 from __future__ import annotations
 
 import base64
-import contextlib
 import hashlib
-import io
 import json
 import os
 import re
@@ -97,10 +95,12 @@ GH_TOKEN = "actions-token"  # ruff: ignore[hardcoded-password-string] - a stand-
 ACTOR = "release-bot"
 AMD = "sha256:" + "a" * 64
 ARM = "sha256:" + "b" * 64
-FACTS = dumps({
-    "org.opencontainers.image.version": "1.2.3",
-    "org.opencontainers.image.revision": "0123456789abcdef",
-})
+FACTS = dumps(
+    {
+        "org.opencontainers.image.version": "1.2.3",
+        "org.opencontainers.image.revision": "0123456789abcdef",
+    }
+)
 
 DOCKER_STUB = r'''#!{python} -IS
 """Stub `docker`: logs its argv, answers each subcommand the helper runs."""
@@ -206,11 +206,13 @@ class Fake(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         """Serve a token or a manifest."""
         if self.headers.get("X-Stub") != "inspect":
-            Fake.log.append({
-                "method": "GET",
-                "path": self.path,
-                "headers": dict(self.headers.items()),
-            })
+            Fake.log.append(
+                {
+                    "method": "GET",
+                    "path": self.path,
+                    "headers": dict(self.headers.items()),
+                }
+            )
         if self.path.startswith("/token?"):
             self.answer(200, Fake.token_body, "application/json")
             return
@@ -231,12 +233,14 @@ class Fake(BaseHTTPRequestHandler):
         """Store a manifest under its reference and its own digest."""
         body = self.rfile.read(int(self.headers["Content-Length"]))
         ctype = self.headers.get("Content-Type", "")
-        Fake.log.append({
-            "method": "PUT",
-            "path": self.path,
-            "headers": dict(self.headers.items()),
-            "body": body,
-        })
+        Fake.log.append(
+            {
+                "method": "PUT",
+                "path": self.path,
+                "headers": dict(self.headers.items()),
+                "body": body,
+            }
+        )
         route = self.route()
         if route is None:
             self.answer(418)
@@ -295,19 +299,6 @@ class Harness:
             "STUB_INSPECT": str(INSPECT),
         }
 
-    def run_helper(self, *argv: str) -> tuple[int, str]:
-        """Run the helper as a step does.
-
-        Returns:
-            Its exit status and what it printed, both streams as the job
-            log shows them: a refusal is a finding, on stderr (#1934).
-
-        """
-        out = io.StringIO()
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
-            code = registry.main(list(argv), self.env, origin=self.origin)
-        return code, out.getvalue()
-
     def docker_calls(self) -> list[Call]:
         """Read the stub's log.
 
@@ -323,10 +314,12 @@ class Harness:
             call = decoded.as_object(decoded.load_json(ln), "a docker call")
             argv = decoded.as_array(call["argv"], "argv")
             stdin = call["stdin"]
-            calls.append({
-                "argv": [decoded.as_str(a, "an argument") for a in argv],
-                "stdin": None if stdin is None else decoded.as_str(stdin, "stdin"),
-            })
+            calls.append(
+                {
+                    "argv": [decoded.as_str(a, "an argument") for a in argv],
+                    "stdin": None if stdin is None else decoded.as_str(stdin, "stdin"),
+                }
+            )
         return calls
 
     def argvs(self) -> list[list[str]]:
@@ -349,12 +342,6 @@ class Harness:
         path = self.tmp / "dry-run.out"
         path.write_bytes(data)
         self.env["STUB_DRY_RUN"] = str(path)
-
-    def refused(self, message: str, *argv: str) -> None:
-        """Assert the helper refuses with exactly `message`."""
-        code, out = self.run_helper(*argv)
-        assert code == 1, out
-        assert f"::error::registry: {message}\n" in out
 
 
 @fixture
@@ -399,28 +386,38 @@ def test_refusals() -> None:
         )
 
 
-def test_assemble_refuses_below_the_floor_before_any_push(harness: Harness) -> None:
+def test_assemble_refuses_below_the_floor_before_any_push(
+    harness: Harness, capfd: pytest.CaptureFixture[str]
+) -> None:
     """The assemble step asserts the floor first."""
     harness.version("github.com/docker/buildx v0.11.2 abc\n")
-    harness.refused(
-        "buildx 0.11 < 0.12: index annotations would be dropped silently",
-        "assemble",
-        "--digests",
-        str(harness.tmp),
-        "--tag",
-        "1.2.3",
+    code = registry.main(
+        ["assemble", "--digests", str(harness.tmp), "--tag", "1.2.3"],
+        harness.env,
+        origin=harness.origin,
+    )
+    out = "".join(capfd.readouterr())
+    assert code == 1, out
+    assert (
+        f"::error::registry: {'buildx 0.11 < 0.12: index annotations would be dropped silently'}\n"
+        in out
     )
     only: list[list[str]] = [["buildx", "version"]]
     assert harness.argvs() == only
     assert Fake.log == list[Logged]()
 
 
-def test_a_pgrx_push_refuses_below_the_floor(harness: Harness) -> None:
+def test_a_pgrx_push_refuses_below_the_floor(
+    harness: Harness, capfd: pytest.CaptureFixture[str]
+) -> None:
     """The pgrx index carries annotations, so its push asserts the floor."""
     harness.version("github.com/docker/buildx v0.11.2 abc\n")
-    harness.refused(
-        "buildx 0.11 < 0.12: index annotations would be dropped silently",
-        *pgrx_push(harness.tmp),
+    code = registry.main([*pgrx_push(harness.tmp)], harness.env, origin=harness.origin)
+    out = "".join(capfd.readouterr())
+    assert code == 1, out
+    assert (
+        f"::error::registry: {'buildx 0.11 < 0.12: index annotations would be dropped silently'}\n"
+        in out
     )
     only: list[list[str]] = [["buildx", "version"]]
     assert harness.argvs() == only
@@ -516,10 +513,13 @@ OUTSPEC = (
 )
 
 
-def test_a_per_architecture_push(harness: Harness) -> None:
+def test_a_per_architecture_push(
+    harness: Harness, capfd: pytest.CaptureFixture[str]
+) -> None:
     """Labels only, no floor, the raw digest in <digests>/<arch>."""
     harness.env["STUB_META"] = dumps({"containerimage.digest": AMD})
-    code, out = harness.run_helper(*oci_push(harness.tmp))
+    code = registry.main([*oci_push(harness.tmp)], harness.env, origin=harness.origin)
+    out = "".join(capfd.readouterr())
     assert code == 0, out
     calls = harness.docker_calls()
     login: Call = {
@@ -550,10 +550,11 @@ def test_a_per_architecture_push(harness: Harness) -> None:
     assert out == f"::notice::amd64 pushed as {AMD}\n"
 
 
-def test_a_pgrx_index_push(harness: Harness) -> None:
+def test_a_pgrx_index_push(harness: Harness, capfd: pytest.CaptureFixture[str]) -> None:
     """Both platforms, labels and index annotations, a JSON record."""
     harness.env["STUB_META"] = dumps({"containerimage.digest": AMD})
-    code, out = harness.run_helper(*pgrx_push(harness.tmp))
+    code = registry.main([*pgrx_push(harness.tmp)], harness.env, origin=harness.origin)
+    out = "".join(capfd.readouterr())
     assert code == 0, out
     argv = harness.argvs()
     version: list[str] = ["buildx", "version"]
@@ -595,7 +596,9 @@ def test_a_pgrx_index_push(harness: Harness) -> None:
     assert out == f"::notice::pg17 index {AMD}\n"
 
 
-def test_no_digest_from_the_push(harness: Harness) -> None:
+def test_no_digest_from_the_push(
+    harness: Harness, capfd: pytest.CaptureFixture[str]
+) -> None:
     """Absent, malformed or missing metadata: each message, no record."""
     rows = [
         dumps({"containerimage.digest": "sha256:abc"}),
@@ -613,16 +616,24 @@ def test_no_digest_from_the_push(harness: Harness) -> None:
             harness.env.pop("STUB_META", None)
             if meta is not None:
                 harness.env["STUB_META"] = meta
-            harness.refused(message, *argv)
+            code = registry.main([*argv], harness.env, origin=harness.origin)
+            out = "".join(capfd.readouterr())
+            assert code == 1, out
+            assert f"::error::registry: {message}\n" in out
             assert not (harness.tmp / "digests" / "amd64").exists()
             assert not (harness.tmp / "digests" / "pg17.json").exists()
 
 
-def test_a_failed_build_refuses_on_its_status(harness: Harness) -> None:
+def test_a_failed_build_refuses_on_its_status(
+    harness: Harness, capfd: pytest.CaptureFixture[str]
+) -> None:
     """The build's exit status is not masked by the metadata read."""
     harness.env["STUB_META"] = dumps({"containerimage.digest": AMD})
     harness.env["STUB_BUILD_RC"] = "1"
-    harness.refused("docker buildx build --file exited 1", *oci_push(harness.tmp))
+    code = registry.main([*oci_push(harness.tmp)], harness.env, origin=harness.origin)
+    out = "".join(capfd.readouterr())
+    assert code == 1, out
+    assert f"::error::registry: {'docker buildx build --file exited 1'}\n" in out
     assert not (harness.tmp / "digests" / "amd64").exists()
 
 
@@ -637,17 +648,6 @@ class Assemble(Harness):
         (self.digests / "amd64").write_text(AMD, "utf-8")
         (self.digests / "arm64").write_text(ARM, "utf-8")
 
-    def assemble(self) -> tuple[int, str]:
-        """Run the assemble step.
-
-        Returns:
-            Its exit status and output.
-
-        """
-        return self.run_helper(
-            "assemble", "--digests", str(self.digests), "--tag", "1.2.3"
-        )
-
 
 @fixture
 def assemble_state(request: pytest.FixtureRequest, tmp_path: Path) -> Assemble:
@@ -656,12 +656,17 @@ def assemble_state(request: pytest.FixtureRequest, tmp_path: Path) -> Assemble:
 
 
 def test_the_captured_index_goes_up_under_its_own_digest(
-    assemble_state: Assemble,
+    assemble_state: Assemble, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """The exact dry-run bytes less the newline, PUT by digest."""
     body = DRY_RUN.read_bytes()[:-1]
     index = "sha256:" + hashlib.sha256(body).hexdigest()
-    code, out = assemble_state.assemble()
+    code = registry.main(
+        ["assemble", "--digests", str(assemble_state.digests), "--tag", "1.2.3"],
+        assemble_state.env,
+        origin=assemble_state.origin,
+    )
+    out = "".join(capfd.readouterr())
     assert code == 0, out
     argv = assemble_state.argvs()
     version: list[str] = ["buildx", "version"]
@@ -701,7 +706,9 @@ def test_the_captured_index_goes_up_under_its_own_digest(
     assert out == f"::notice::index {index}\n"
 
 
-def test_a_missing_per_architecture_digest(assemble_state: Assemble) -> None:
+def test_a_missing_per_architecture_digest(
+    assemble_state: Assemble, capfd: pytest.CaptureFixture[str]
+) -> None:
     """Absent or malformed: refused before login, nothing pushed."""
     message = "a per-architecture digest is missing; refusing to tag a partial image"
     rows = [
@@ -720,30 +727,45 @@ def test_a_missing_per_architecture_digest(assemble_state: Assemble) -> None:
         else:
             (assemble_state.digests / arch).write_text(content, "utf-8")
         Path(assemble_state.env["STUB_LOG"]).unlink(missing_ok=True)
-        assemble_state.refused(
-            message, "assemble", "--digests", str(assemble_state.digests), "--tag", "1"
+        code = registry.main(
+            ["assemble", "--digests", str(assemble_state.digests), "--tag", "1"],
+            assemble_state.env,
+            origin=assemble_state.origin,
         )
+        out = "".join(capfd.readouterr())
+        assert code == 1, out
+        assert f"::error::registry: {message}\n" in out
         only: list[list[str]] = [["buildx", "version"]]
         assert assemble_state.argvs() == only
         assert Fake.log == list[Logged]()
 
 
 def test_a_trailing_newline_on_the_digest_file_is_read_as_cat_read_it(
-    assemble_state: Assemble,
+    assemble_state: Assemble, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """`$(cat f)` dropped trailing newlines; so does the helper."""
     (assemble_state.digests / "arm64").write_text(ARM + "\n", "utf-8")
-    code, out = assemble_state.assemble()
+    code = registry.main(
+        ["assemble", "--digests", str(assemble_state.digests), "--tag", "1.2.3"],
+        assemble_state.env,
+        origin=assemble_state.origin,
+    )
+    out = "".join(capfd.readouterr())
     assert code == 0, out
 
 
 @pytest.mark.parametrize("data", [DRY_RUN.read_bytes()[:-1], b""])
 def test_a_dry_run_not_ending_in_a_newline(
-    assemble_state: Assemble, data: object
+    assemble_state: Assemble, data: object, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """No guessing at the manifest bytes; nothing PUT."""
     assemble_state.dry_run(data)
-    code, out = assemble_state.assemble()
+    code = registry.main(
+        ["assemble", "--digests", str(assemble_state.digests), "--tag", "1.2.3"],
+        assemble_state.env,
+        origin=assemble_state.origin,
+    )
+    out = "".join(capfd.readouterr())
     assert code == 1, out
     assert (
         "::error::registry: imagetools --dry-run output does not end"
@@ -753,7 +775,9 @@ def test_a_dry_run_not_ending_in_a_newline(
     assert Fake.log == list[Logged]()
 
 
-def test_a_media_type_that_is_not_an_oci_index(assemble_state: Assemble) -> None:
+def test_a_media_type_that_is_not_an_oci_index(
+    assemble_state: Assemble, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A Docker list has no annotations field: refused, nothing PUT."""
     captured = DRY_RUN.read_bytes()
     rows = [
@@ -763,7 +787,12 @@ def test_a_media_type_that_is_not_an_oci_index(assemble_state: Assemble) -> None
     ]
     for data, shown in rows:
         assemble_state.dry_run(data)
-        code, out = assemble_state.assemble()
+        code = registry.main(
+            ["assemble", "--digests", str(assemble_state.digests), "--tag", "1.2.3"],
+            assemble_state.env,
+            origin=assemble_state.origin,
+        )
+        out = "".join(capfd.readouterr())
         assert code == 1, out
         assert (
             f"::error::registry: the assembled index is '{shown}',"
@@ -773,7 +802,7 @@ def test_a_media_type_that_is_not_an_oci_index(assemble_state: Assemble) -> None
 
 
 def test_a_registry_answering_another_digest_for_the_index(
-    assemble_state: Assemble,
+    assemble_state: Assemble, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """The registry stored other bytes: refused, no outputs written."""
     Fake.rewrite = True
@@ -782,7 +811,12 @@ def test_a_registry_answering_another_digest_for_the_index(
     stored = body.replace(b'"schemaVersion": 2', b'"schemaVersion":2')
     answered = "sha256:" + hashlib.sha256(stored).hexdigest()
     assert answered != index
-    code, out = assemble_state.assemble()
+    code = registry.main(
+        ["assemble", "--digests", str(assemble_state.digests), "--tag", "1.2.3"],
+        assemble_state.env,
+        origin=assemble_state.origin,
+    )
+    out = "".join(capfd.readouterr())
     assert code == 1, out
     assert (
         f"::error::registry: the registry answered {answered}"
@@ -791,11 +825,18 @@ def test_a_registry_answering_another_digest_for_the_index(
     assert assemble_state.output.read_text("utf-8") == ""
 
 
-def test_a_registry_answering_no_digest(assemble_state: Assemble) -> None:
+def test_a_registry_answering_no_digest(
+    assemble_state: Assemble, capfd: pytest.CaptureFixture[str]
+) -> None:
     """An inspect that names no digest reads as `no digest`."""
     assemble_state.env["STUB_NO_DIGEST"] = "1"
     index = "sha256:" + hashlib.sha256(DRY_RUN.read_bytes()[:-1]).hexdigest()
-    code, out = assemble_state.assemble()
+    code = registry.main(
+        ["assemble", "--digests", str(assemble_state.digests), "--tag", "1.2.3"],
+        assemble_state.env,
+        origin=assemble_state.origin,
+    )
+    out = "".join(capfd.readouterr())
     assert code == 1, out
     assert (
         "::error::registry: the registry answered no digest"
@@ -804,10 +845,17 @@ def test_a_registry_answering_no_digest(assemble_state: Assemble) -> None:
     assert assemble_state.output.read_text("utf-8") == ""
 
 
-def test_a_failed_put_names_the_request(assemble_state: Assemble) -> None:
+def test_a_failed_put_names_the_request(
+    assemble_state: Assemble, capfd: pytest.CaptureFixture[str]
+) -> None:
     """No token issued: the PUT answers 401, refused with the URL."""
     Fake.token_body = b'{"token": "wrong"}'
-    code, out = assemble_state.assemble()
+    code = registry.main(
+        ["assemble", "--digests", str(assemble_state.digests), "--tag", "1.2.3"],
+        assemble_state.env,
+        origin=assemble_state.origin,
+    )
+    out = "".join(capfd.readouterr())
     assert code == 1, out
     assert re.search(
         r"::error::registry: PUT http://127\.0\.0\.1:\d+/v2/some-owner/some-image"
@@ -817,17 +865,22 @@ def test_a_failed_put_names_the_request(assemble_state: Assemble) -> None:
 
 
 @pytest.mark.parametrize("body", [b"{}", b'{"token": ""}', b"[]", b"html"])
-def test_no_token_from_the_endpoint(assemble_state: Assemble, body: object) -> None:
+def test_no_token_from_the_endpoint(
+    assemble_state: Assemble, body: object, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A token endpoint answering no token refuses before the PUT."""
     Fake.log = []
     Fake.token_body = body
-    assemble_state.refused(
-        "the token endpoint answered no token for some-owner/some-image",
-        "assemble",
-        "--digests",
-        str(assemble_state.digests),
-        "--tag",
-        "1.2.3",
+    code = registry.main(
+        ["assemble", "--digests", str(assemble_state.digests), "--tag", "1.2.3"],
+        assemble_state.env,
+        origin=assemble_state.origin,
+    )
+    out = "".join(capfd.readouterr())
+    assert code == 1, out
+    assert (
+        f"::error::registry: {'the token endpoint answered no token for some-owner/some-image'}\n"
+        in out
     )
     methods = [e["method"] for e in Fake.log]
     want: list[str] = ["GET"]
@@ -844,14 +897,16 @@ def gated(tag: str = "1.2.3", digest: str | None = None) -> str:
     body = DRY_RUN.read_bytes()[:-1]
     real = "sha256:" + hashlib.sha256(body).hexdigest()
     Fake.manifests["some-owner/some-image", real] = (body, OCI_INDEX)
-    return dumps([
-        {
-            "image": "ghcr.io/some-owner/some-image",
-            "tag": tag,
-            "digest": digest or real,
-            "extra": "ignored",
-        }
-    ])
+    return dumps(
+        [
+            {
+                "image": "ghcr.io/some-owner/some-image",
+                "tag": tag,
+                "digest": digest or real,
+                "extra": "ignored",
+            }
+        ]
+    )
 
 
 def gated_entry(images: str) -> dict[str, object]:
@@ -868,16 +923,6 @@ def gated_entry(images: str) -> dict[str, object]:
 class Tag(Harness):
     """tag-images.yml: the gated bytes under each tag, proven by a read."""
 
-    def tag(self, images: str) -> tuple[int, str]:
-        """Run the tag step on `images`.
-
-        Returns:
-            Its exit status and output.
-
-        """
-        self.env["UNTRUSTED_IMAGES"] = images
-        return self.run_helper("tag")
-
 
 @fixture
 def tag_state(request: pytest.FixtureRequest, tmp_path: Path) -> Tag:
@@ -885,11 +930,15 @@ def tag_state(request: pytest.FixtureRequest, tmp_path: Path) -> Tag:
     return Tag(request, tmp_path)
 
 
-def test_the_gated_bytes_go_up_under_the_tag(tag_state: Tag) -> None:
+def test_the_gated_bytes_go_up_under_the_tag(
+    tag_state: Tag, capfd: pytest.CaptureFixture[str]
+) -> None:
     """GET by digest, PUT the same bytes and type to the tag."""
     images = gated()
     digest = decoded.as_str(gated_entry(images)["digest"], "digest")
-    code, out = tag_state.tag(images)
+    tag_state.env["UNTRUSTED_IMAGES"] = images
+    code = registry.main(["tag"], tag_state.env, origin=tag_state.origin)
+    out = "".join(capfd.readouterr())
     assert code == 0, out
     token, get, put = Fake.log
     assert token["path"].startswith("/token?")
@@ -901,7 +950,9 @@ def test_the_gated_bytes_go_up_under_the_tag(tag_state: Tag) -> None:
     assert out == f"::notice::ghcr.io/some-owner/some-image:1.2.3 -> {digest}\n"
 
 
-def test_input_that_is_not_an_array_of_triples(tag_state: Tag) -> None:
+def test_input_that_is_not_an_array_of_triples(
+    tag_state: Tag, capfd: pytest.CaptureFixture[str]
+) -> None:
     """The whole input is refused before any request."""
     message = "images is not a JSON array of {image, tag, digest}"
     entry = {"image": "ghcr.io/a/b", "tag": "1", "digest": AMD}
@@ -919,11 +970,14 @@ def test_input_that_is_not_an_array_of_triples(tag_state: Tag) -> None:
     ]
     for images in rows:
         tag_state.env["UNTRUSTED_IMAGES"] = images
-        tag_state.refused(message, "tag")
+        code = registry.main(["tag"], tag_state.env, origin=tag_state.origin)
+        out = "".join(capfd.readouterr())
+        assert code == 1, out
+        assert f"::error::registry: {message}\n" in out
         assert Fake.log == list[Logged]()
 
 
-def test_field_whitelists(tag_state: Tag) -> None:
+def test_field_whitelists(tag_state: Tag, capfd: pytest.CaptureFixture[str]) -> None:
     """Each field's whitelist, each message; nothing is requested."""
     ok = {"image": "ghcr.io/a/b", "tag": "1.2.3", "digest": AMD}
     rows = [
@@ -948,20 +1002,30 @@ def test_field_whitelists(tag_state: Tag) -> None:
     ]
     for change, message in rows:
         tag_state.env["UNTRUSTED_IMAGES"] = dumps([{**ok, **change}])
-        tag_state.refused(message, "tag")
+        code = registry.main(["tag"], tag_state.env, origin=tag_state.origin)
+        out = "".join(capfd.readouterr())
+        assert code == 1, out
+        assert f"::error::registry: {message}\n" in out
         assert Fake.log == list[Logged]()
 
 
-def test_a_bad_later_entry_refuses_before_the_first_is_tagged(tag_state: Tag) -> None:
+def test_a_bad_later_entry_refuses_before_the_first_is_tagged(
+    tag_state: Tag, capfd: pytest.CaptureFixture[str]
+) -> None:
     """Validation is whole-input: no tag lands from a refused input."""
     first = gated_entry(gated())
     bad = {**first, "tag": "1 2"}
     tag_state.env["UNTRUSTED_IMAGES"] = dumps([first, bad])
-    tag_state.refused("implausible tag", "tag")
+    code = registry.main(["tag"], tag_state.env, origin=tag_state.origin)
+    out = "".join(capfd.readouterr())
+    assert code == 1, out
+    assert f"::error::registry: {'implausible tag'}\n" in out
     assert Fake.log == list[Logged]()
 
 
-def test_a_tag_that_resolves_to_another_digest(tag_state: Tag) -> None:
+def test_a_tag_that_resolves_to_another_digest(
+    tag_state: Tag, capfd: pytest.CaptureFixture[str]
+) -> None:
     """The registry stored other bytes under the tag: refused."""
     images = gated()
     digest = decoded.as_str(gated_entry(images)["digest"], "digest")
@@ -970,7 +1034,9 @@ def test_a_tag_that_resolves_to_another_digest(tag_state: Tag) -> None:
         b'"schemaVersion": 2', b'"schemaVersion":2'
     )
     resolved = "sha256:" + hashlib.sha256(stored).hexdigest()
-    code, out = tag_state.tag(images)
+    tag_state.env["UNTRUSTED_IMAGES"] = images
+    code = registry.main(["tag"], tag_state.env, origin=tag_state.origin)
+    out = "".join(capfd.readouterr())
     assert code == 1, out
     assert (
         f"::error::registry: ghcr.io/some-owner/some-image:1.2.3 resolves to"
@@ -980,9 +1046,13 @@ def test_a_tag_that_resolves_to_another_digest(tag_state: Tag) -> None:
     assert "::notice::" not in out
 
 
-def test_a_digest_the_registry_does_not_hold(tag_state: Tag) -> None:
+def test_a_digest_the_registry_does_not_hold(
+    tag_state: Tag, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A 404 on the GET refuses with the request, nothing PUT."""
-    code, out = tag_state.tag(gated(digest=ARM))
+    tag_state.env["UNTRUSTED_IMAGES"] = gated(digest=ARM)
+    code = registry.main(["tag"], tag_state.env, origin=tag_state.origin)
+    out = "".join(capfd.readouterr())
     assert code == 1, out
     assert re.search(
         rf"::error::registry: GET http://\S+/manifests/{ARM} answered 404\n", out
@@ -1002,9 +1072,9 @@ def test_registry_url_in_the_environment_changes_nothing(
     machine, and the one request it is asked for goes to ghcr.io.
     """
     harness.env["REGISTRY_URL"] = "https://attacker.example"
-    harness.env["UNTRUSTED_IMAGES"] = dumps([
-        {"image": "ghcr.io/a/b", "tag": "1.2.3", "digest": AMD}
-    ])
+    harness.env["UNTRUSTED_IMAGES"] = dumps(
+        [{"image": "ghcr.io/a/b", "tag": "1.2.3", "digest": AMD}]
+    )
     opened: list[str] = []
 
     def refuse(req: urllib.request.Request, **_: object) -> None:
@@ -1035,6 +1105,11 @@ def test_an_answer_that_is_not_a_response_is_refused(
     assert f"{url} answered NoneType, not an HTTP response" == str(caught.value)
 
 
-def test_an_unset_input_is_named(harness: Harness) -> None:
+def test_an_unset_input_is_named(
+    harness: Harness, capfd: pytest.CaptureFixture[str]
+) -> None:
     """No UNTRUSTED_IMAGES: the variable is named, exit 1."""
-    harness.refused("UNTRUSTED_IMAGES is not set", "tag")
+    code = registry.main(["tag"], harness.env, origin=harness.origin)
+    out = "".join(capfd.readouterr())
+    assert code == 1, out
+    assert f"::error::registry: {'UNTRUSTED_IMAGES is not set'}\n" in out

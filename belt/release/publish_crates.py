@@ -416,7 +416,7 @@ def main(argv: list[str]) -> int:
         findings.finding("", f"takes no arguments, got {argv!r}")
         return 2
     try:
-        return run(os.environ, Path.cwd())
+        return run(os.environ, Path.cwd(), http)
     except RefusalError as e:
         findings.finding("", str(e), annotate=True)
         return 1
