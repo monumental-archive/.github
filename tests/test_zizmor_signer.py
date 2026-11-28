@@ -29,13 +29,12 @@ one run, the record, zizmor's 11; a clean run, 0. Against
 """
 
 import copy
-import io
 import json
 import os
 import subprocess
 import sys
 import tempfile
-from contextlib import redirect_stderr, redirect_stdout
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -102,35 +101,33 @@ ARGS = ["--persona=auditor", ".github/workflows/a.yml"]
 STANDIN = "a token"
 
 
-def run(
-    findings: object,
-    workflow: str = SIGNER_WORKFLOW,
-    *,
-    status: int | None = None,
-) -> tuple[int, str, str]:
-    """Run the CLI with zizmor answering a finding array.
+SIGNED = ["--signer-workflow", SIGNER_WORKFLOW, *ARGS]
+
+
+@fixture
+def answer(monkeypatch: pytest.MonkeyPatch) -> Callable[..., None]:
+    """Have zizmor answer a finding array, as the task runs the CLI.
 
     zizmor's status is 14 for any answer but an empty array, unless the
     row names one.
 
     Returns:
-        The exit status, what it printed, and what it printed to stderr.
+        A function taking the findings and, optionally, the status.
 
     """
-    out, err = io.StringIO(), io.StringIO()
-    code = status if status is not None else (14 if findings != [] else 0)
-    ran = signer.Ran(code, json.dumps(findings).encode(), b"")
-    env = {"GH_TOKEN": "a token", "MISE_TASK_NAME": TASK, "ORG_FINDINGS": ""}
-    with (
-        pytest.MonkeyPatch.context() as patched,
-        redirect_stdout(out),
-        redirect_stderr(err),
-    ):
-        patched.setattr(signer, "run_zizmor", lambda *_args, **_kwargs: ran)
-        for name, value in env.items():
-            patched.setenv(name, value)
-        code = signer.main(["--signer-workflow", workflow, *ARGS])
-    return code, out.getvalue(), err.getvalue()
+
+    def answering(findings: object, *, status: int | None = None) -> None:
+        code = status if status is not None else (14 if findings != [] else 0)
+        ran = signer.Ran(code, json.dumps(findings).encode(), b"")
+        monkeypatch.setattr(signer, "run_zizmor", lambda *_args, **_kwargs: ran)
+        for name, value in {
+            "GH_TOKEN": STANDIN,
+            "MISE_TASK_NAME": TASK,
+            "ORG_FINDINGS": "",
+        }.items():
+            monkeypatch.setenv(name, value)
+
+    return answering
 
 
 def repointed(finding: dict[str, object], reference: str) -> dict[str, object]:
@@ -180,9 +177,13 @@ def test_the_fixture_is_the_ten_signer_findings() -> None:
     assert want == refs
 
 
-def test_all_ten_are_dropped_and_counted() -> None:
+def test_all_ten_are_dropped_and_counted(
+    capfd: pytest.CaptureFixture[str], answer: Callable[..., None]
+) -> None:
     """The canon goes green, and says what it dropped."""
-    status, out, err = run(REAL)
+    answer(REAL)
+    status = signer.main(SIGNED)
+    out, err = capfd.readouterr()
     assert status == 0, err
     assert "10 stale-action-refs finding(s) on the signer dropped" in out
     assert err == ""
@@ -204,9 +205,13 @@ def test_the_fixture_is_one_signer_mismatch() -> None:
     assert want == signer.references(MISMATCH[0])
 
 
-def test_the_signer_mismatch_is_dropped_and_counted() -> None:
+def test_the_signer_mismatch_is_dropped_and_counted(
+    capfd: pytest.CaptureFixture[str], answer: Callable[..., None]
+) -> None:
     """The signer's `# main` behind its branch head goes green, said aloud."""
-    status, out, err = run(MISMATCH)
+    answer(MISMATCH)
+    status = signer.main(SIGNED)
+    out, err = capfd.readouterr()
     assert status == 0, err
     assert (
         "1 ref-version-mismatch finding(s) on the signer dropped"
@@ -215,15 +220,21 @@ def test_the_signer_mismatch_is_dropped_and_counted() -> None:
     assert err == ""
 
 
-def test_both_audits_together_are_dropped() -> None:
+def test_both_audits_together_are_dropped(
+    capfd: pytest.CaptureFixture[str], answer: Callable[..., None]
+) -> None:
     """The scheduled run carries both; each is counted on its own line."""
-    status, out, err = run([*REAL, *MISMATCH])
+    answer([*REAL, *MISMATCH])
+    status = signer.main(SIGNED)
+    out, err = capfd.readouterr()
     assert status == 0, err
     assert "10 stale-action-refs finding(s) on the signer dropped" in out
     assert "1 ref-version-mismatch finding(s) on the signer dropped" in out
 
 
-def test_another_owner_mismatch_is_kept() -> None:
+def test_another_owner_mismatch_is_kept(
+    capfd: pytest.CaptureFixture[str], answer: Callable[..., None]
+) -> None:
     """The same finding on another owner's repository still reds."""
     other = rewritten(
         MISMATCH[0],
@@ -231,34 +242,44 @@ def test_another_owner_mismatch_is_kept() -> None:
         "monumental-archive/signer/",
         "someone-else/signer/",
     )
-    status, out, _ = run([other])
+    answer([other])
+    status = signer.main(SIGNED)
+    out = capfd.readouterr().out
     assert status == 14
     assert "0 ref-version-mismatch finding(s) on the signer dropped" in out
     assert "1 finding(s) remain: ref-version-mismatch" in out
 
 
-def test_a_mismatch_with_no_readable_reference_is_kept() -> None:
+def test_a_mismatch_with_no_readable_reference_is_kept(
+    capfd: pytest.CaptureFixture[str], answer: Callable[..., None]
+) -> None:
     """A Hidden location with no `uses:` line names nothing; it is kept."""
     blind = rewritten(MISMATCH[0], "Hidden", "uses:", "calls:")
     none: list[str] = []
     assert none == signer.references(blind)
-    status, out, _ = run([blind])
+    answer([blind])
+    status = signer.main(SIGNED)
+    out = capfd.readouterr().out
     assert status == 14
     assert "1 finding(s) remain: ref-version-mismatch" in out
 
 
-def test_the_comment_alone_is_not_read_as_a_reference() -> None:
+def test_the_comment_alone_is_not_read_as_a_reference(
+    capfd: pytest.CaptureFixture[str], answer: Callable[..., None]
+) -> None:
     """Primary carries only `main`; dropping the Hidden location blinds it."""
     blind = copy.deepcopy(MISMATCH[0])
     blind["locations"] = [
         loc for loc in locations(blind) if symbolic(loc)["kind"] == "Primary"
     ]
-    status, out, _ = run([blind])
+    answer([blind])
+    status = signer.main(SIGNED)
+    out = capfd.readouterr().out
     assert status == 14
     assert "1 finding(s) remain: ref-version-mismatch" in out
 
 
-def test_a_uses_in_prose_is_not_a_reference() -> None:
+def test_a_uses_in_prose_is_not_a_reference(answer: Callable[..., None]) -> None:
     """A commented `uses:` beside the signer's is not read as a second ref."""
     prose = rewritten(
         MISMATCH[0],
@@ -268,10 +289,13 @@ def test_a_uses_in_prose_is_not_a_reference() -> None:
     )
     want: list[str] = [MISMATCH_REF]
     assert want == signer.references(prose)
-    assert run([prose])[0] == 0
+    answer([prose])
+    assert signer.main(SIGNED) == 0
 
 
-def test_a_second_reference_elsewhere_keeps_it() -> None:
+def test_a_second_reference_elsewhere_keeps_it(
+    capfd: pytest.CaptureFixture[str], answer: Callable[..., None]
+) -> None:
     """Every named reference must be the signer's, not just one of them."""
     two = rewritten(
         MISMATCH[0],
@@ -279,105 +303,143 @@ def test_a_second_reference_elsewhere_keeps_it() -> None:
         "    with:\n",
         "    with:\n      - uses: actions/checkout@v4\n",
     )
-    status, out, _ = run([two])
+    answer([two])
+    status = signer.main(SIGNED)
+    out = capfd.readouterr().out
     assert status == 14
     assert "1 finding(s) remain: ref-version-mismatch" in out
 
 
-def test_another_audit_on_the_signer_is_kept() -> None:
+def test_another_audit_on_the_signer_is_kept(
+    capfd: pytest.CaptureFixture[str], answer: Callable[..., None]
+) -> None:
     """An unrelated audit carrying the same locations still reds."""
     other_rule = copy.deepcopy(MISMATCH[0])
     other_rule["ident"] = "unpinned-uses"
-    status, out, _ = run([other_rule])
+    answer([other_rule])
+    status = signer.main(SIGNED)
+    out = capfd.readouterr().out
     assert status == 14
     assert "1 finding(s) remain: unpinned-uses" in out
 
 
 # Every finding the exemption does not name still reds.
-def test_another_repository_reusable_workflow_is_kept() -> None:
+def test_another_repository_reusable_workflow_is_kept(
+    capfd: pytest.CaptureFixture[str], answer: Callable[..., None]
+) -> None:
     """The same audit on someone else's reusable workflow is reported."""
     other = repointed(
         REAL[0],
         "monumental-archive/other/.github/workflows/sign.yml@" + "a" * 40,
     )
-    status, out, _ = run([other])
+    answer([other])
+    status = signer.main(SIGNED)
+    out = capfd.readouterr().out
     assert status == 14
     assert "0 stale-action-refs finding(s) on the signer dropped" in out
     assert "1 finding(s) remain: stale-action-refs" in out
 
 
-def test_a_third_party_action_is_kept() -> None:
+def test_a_third_party_action_is_kept(
+    capfd: pytest.CaptureFixture[str], answer: Callable[..., None]
+) -> None:
     """A stale third-party action pin is exactly what the audit is for."""
     third = repointed(REAL[0], "actions/checkout@" + "b" * 40)
-    status, out, _ = run([*REAL, third])
+    answer([*REAL, third])
+    status = signer.main(SIGNED)
+    out = capfd.readouterr().out
     assert status == 14
     assert "1 finding(s) remain" in out
 
 
-def test_a_repository_that_only_shares_the_prefix_is_kept() -> None:
+def test_a_repository_that_only_shares_the_prefix_is_kept(
+    answer: Callable[..., None],
+) -> None:
     """`signer-fork` is not `signer`: repositories match whole."""
     near = repointed(
         REAL[0],
         "monumental-archive/signer-fork/.github/workflows/sign.yml@" + "c" * 40,
     )
-    assert run([near])[0] == 14
+    answer([near])
+    assert signer.main(SIGNED) == 14
 
 
-def test_kept_another_audit_on_the_signer_is_kept() -> None:
+def test_kept_another_audit_on_the_signer_is_kept(
+    capfd: pytest.CaptureFixture[str], answer: Callable[..., None]
+) -> None:
     """The exemption is one rule wide, not the signer wide."""
     other_rule = copy.deepcopy(REAL[0])
     other_rule["ident"] = "impostor-commit"
-    status, out, _ = run([other_rule])
+    answer([other_rule])
+    status = signer.main(SIGNED)
+    out = capfd.readouterr().out
     assert status == 14
     assert "remain: impostor-commit" in out
 
 
-def test_a_finding_with_no_readable_reference_is_kept() -> None:
+def test_a_finding_with_no_readable_reference_is_kept(
+    capfd: pytest.CaptureFixture[str], answer: Callable[..., None]
+) -> None:
     """When zizmor's shape gives no reference, nothing is assumed."""
     blind = copy.deepcopy(REAL[0])
     for location in locations(blind):
         symbolic(location)["kind"] = "Related"
-    status, out, err = run([blind])
+    answer([blind])
+    status = signer.main(SIGNED)
+    out, err = capfd.readouterr()
     assert status == 1
     assert "findings[0]: no location is Primary" in err
     assert out == ""
 
 
-def test_a_reference_without_a_ref_is_kept() -> None:
+def test_a_reference_without_a_ref_is_kept(answer: Callable[..., None]) -> None:
     """A Primary feature with no `@` is not a reference."""
-    assert run([repointed(REAL[0], "monumental-archive/signer")])[0] == 14
+    answer([repointed(REAL[0], "monumental-archive/signer")])
+    assert signer.main(SIGNED) == 14
 
 
 # How the signer's repository is read and compared.
-def test_case_differences_do_not_matter() -> None:
+def test_case_differences_do_not_matter(answer: Callable[..., None]) -> None:
     """GitHub owner and repository names are case-insensitive."""
     upper = repointed(REAL[0], SIGNER_REF.replace("signer", "Signer", 1))
-    assert run([upper])[0] == 0
+    answer([upper])
+    assert signer.main(SIGNED) == 0
 
 
-def test_an_ignored_finding_is_not_reported() -> None:
+def test_an_ignored_finding_is_not_reported(answer: Callable[..., None]) -> None:
     """Per-site `zizmor: ignore` comments are zizmor's, not this filter's."""
     ignored = repointed(REAL[0], "actions/checkout@" + "d" * 40)
     ignored["ignored"] = True
-    assert run([*REAL, ignored])[0] == 0
+    answer([*REAL, ignored])
+    assert signer.main(SIGNED) == 0
 
 
-def test_no_findings_is_green_and_counts_zero() -> None:
+def test_no_findings_is_green_and_counts_zero(
+    capfd: pytest.CaptureFixture[str], answer: Callable[..., None]
+) -> None:
     """An empty run drops nothing and passes."""
-    status, out, _ = run([])
+    answer([])
+    status = signer.main(SIGNED)
+    out = capfd.readouterr().out
     assert status == 0
     assert "0 stale-action-refs finding(s) on the signer dropped" in out
 
 
 # Reports the filter will not guess about: exit 1, by name.
-def test_a_signer_declaration_with_no_repository_is_refused() -> None:
+def test_a_signer_declaration_with_no_repository_is_refused(
+    capfd: pytest.CaptureFixture[str], answer: Callable[..., None]
+) -> None:
     """A declaration that names no owner/repo cannot exempt anything."""
-    status, _, err = run(REAL, workflow="signer")
+    answer(REAL)
+    status = signer.main(["--signer-workflow", "signer", *ARGS])
+    err = capfd.readouterr().err
     assert status == 1
     assert "names no owner/repository" in err
 
 
-def test_a_finding_of_the_wrong_shape_is_refused_not_raised() -> None:
+def test_a_finding_of_the_wrong_shape_is_refused_not_raised(
+    capfd: pytest.CaptureFixture[str], answer: Callable[..., None]
+) -> None:
     """The shrunk examples (#1555): refused by name, never a traceback."""
     shapes: tuple[tuple[dict[str, object], str], ...] = (
         ({"ident": []}, "findings[0]: ident is not a string"),
@@ -400,19 +462,25 @@ def test_a_finding_of_the_wrong_shape_is_refused_not_raised() -> None:
         ),
     )
     for finding, said in shapes:
-        status, _, err = run([finding])
+        answer([finding])
+        status = signer.main(SIGNED)
+        err = capfd.readouterr().err
         assert status == 1
         assert (
             f"{TASK}: zizmor exited 14: the output is not zizmor's report: {said}"
         ) in err
 
 
-def test_a_finding_with_no_primary_location_is_refused() -> None:
+def test_a_finding_with_no_primary_location_is_refused(
+    capfd: pytest.CaptureFixture[str], answer: Callable[..., None]
+) -> None:
     """A remaining finding with no location at fault: refused by name."""
     third = repointed(REAL[0], "actions/checkout@" + "d" * 40)
     for location in locations(third):
         symbolic(location)["kind"] = "Hidden"
-    status, _, err = run([third])
+    answer([third])
+    status = signer.main(SIGNED)
+    err = capfd.readouterr().err
     assert status == 1
     assert (
         f"{TASK}: zizmor exited 14: the output is not zizmor's report:"
@@ -420,9 +488,13 @@ def test_a_finding_with_no_primary_location_is_refused() -> None:
     ) in err
 
 
-def test_input_that_is_not_the_finding_array_is_refused() -> None:
+def test_input_that_is_not_the_finding_array_is_refused(
+    capfd: pytest.CaptureFixture[str], answer: Callable[..., None]
+) -> None:
     """A SARIF document or an error object is not silently empty."""
-    status, out, err = run({"runs": []})
+    answer({"runs": []})
+    status = signer.main(SIGNED)
+    out, err = capfd.readouterr()
     assert status == 1
     assert "it is not zizmor's finding array" in err
     assert out == ""
@@ -440,11 +512,13 @@ class Records:
             "ORG_FINDINGS": str(self.file),
         }
 
-    def main(self, ran: signer.Ran) -> tuple[int, str, str, list[list[str]]]:
-        """Run the CLI with zizmor answering `ran`.
+    def enter(
+        self, monkeypatch: pytest.MonkeyPatch, ran: signer.Ran
+    ) -> list[list[str]]:
+        """Have zizmor answer `ran`, under the task's environment.
 
         Returns:
-            The status, stdout, stderr, and each argument list zizmor got.
+            Each argument list zizmor is given, as the CLI runs.
 
         """
         asked: list[list[str]] = []
@@ -453,17 +527,10 @@ class Records:
             asked.append(list(argv))
             return ran
 
-        out, err = io.StringIO(), io.StringIO()
-        with (
-            pytest.MonkeyPatch.context() as patched,
-            redirect_stdout(out),
-            redirect_stderr(err),
-        ):
-            patched.setattr(signer, "run_zizmor", zizmor)
-            for name, value in self.env.items():
-                patched.setenv(name, value)
-            status = signer.main(["--signer-workflow", SIGNER_WORKFLOW, *ARGS])
-        return status, out.getvalue(), err.getvalue(), asked
+        monkeypatch.setattr(signer, "run_zizmor", zizmor)
+        for name, value in self.env.items():
+            monkeypatch.setenv(name, value)
+        return asked
 
     def records(self) -> list[object]:
         """Read every record appended.
@@ -484,7 +551,11 @@ def records_state(tmp_path: Path) -> Records:
     return Records(tmp_path)
 
 
-def test_a_remaining_finding_is_one_record(records_state: Records) -> None:
+def test_a_remaining_finding_is_one_record(
+    records_state: Records,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """A third-party stale ref: one record, its lines, zizmor's 11.
 
     Its Hidden location (the job) comes first: the subject is that
@@ -493,7 +564,9 @@ def test_a_remaining_finding_is_one_record(records_state: Records) -> None:
     third = repointed(REAL[0], "actions/checkout@" + "d" * 40)
     both: list[dict[str, object]] = [*REAL, third]
     doc = json.dumps(both).encode()
-    status, out, err, asked = records_state.main(signer.Ran(11, doc, b" INFO zizmor\n"))
+    asked = records_state.enter(monkeypatch, signer.Ran(11, doc, b" INFO zizmor\n"))
+    status = signer.main(SIGNED)
+    out, err = capfd.readouterr()
     assert status == 11, err
     assert asked == [list(ARGS)]
     path = ".github/workflows/continuous.yml"
@@ -517,34 +590,53 @@ def test_a_remaining_finding_is_one_record(records_state: Records) -> None:
     assert "10 stale-action-refs finding(s) on the signer dropped" in out
 
 
-def test_all_dropped_is_no_record_and_green(records_state: Records) -> None:
+def test_all_dropped_is_no_record_and_green(
+    records_state: Records,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """Every finding the signer's: no record, 0, though zizmor said 11."""
-    status, _, err, _ = records_state.main(
-        signer.Ran(11, json.dumps(REAL).encode(), b"")
-    )
+    records_state.enter(monkeypatch, signer.Ran(11, json.dumps(REAL).encode(), b""))
+    status = signer.main(SIGNED)
+    err = capfd.readouterr().err
     assert status == 0, err
     assert not records_state.records()
 
 
-def test_a_clean_run_is_green(records_state: Records) -> None:
+def test_a_clean_run_is_green(
+    records_state: Records,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """No findings: no record, zizmor's 0."""
-    status, _, err, _ = records_state.main(signer.Ran(0, b"[]", b""))
+    records_state.enter(monkeypatch, signer.Ran(0, b"[]", b""))
+    status = signer.main(SIGNED)
+    err = capfd.readouterr().err
     assert status == 0, err
     assert not records_state.records()
 
 
-def test_zizmor_failing_is_its_status_and_its_stderr(records_state: Records) -> None:
+def test_zizmor_failing_is_its_status_and_its_stderr(
+    records_state: Records,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """A status outside 0 and 10-14: zizmor's, its stderr, no record."""
-    status, _, err, _ = records_state.main(signer.Ran(2, b"", b"error: bad input\n"))
+    records_state.enter(monkeypatch, signer.Ran(2, b"", b"error: bad input\n"))
+    status = signer.main(SIGNED)
+    err = capfd.readouterr().err
     assert status == 2
     assert err == "error: bad input\n"
     assert not records_state.records()
 
 
-def test_no_token_is_a_finding_before_zizmor_runs(records_state: Records) -> None:
+def test_no_token_is_a_finding_before_zizmor_runs(
+    records_state: Records, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """GH_TOKEN unset: the blindness finding, 1, zizmor never run."""
     records_state.env["GH_TOKEN"] = ""
-    status, _, _, asked = records_state.main(signer.Ran(0, b"[]", b""))
+    asked = records_state.enter(monkeypatch, signer.Ran(0, b"[]", b""))
+    status = signer.main(SIGNED)
     assert status == 1
     assert asked == []
     want: list[object] = [
@@ -559,10 +651,16 @@ def test_no_token_is_a_finding_before_zizmor_runs(records_state: Records) -> Non
     assert want == records_state.records()
 
 
-def test_an_offline_degradation_is_a_finding(records_state: Records) -> None:
+def test_an_offline_degradation_is_a_finding(
+    records_state: Records,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """Zizmor dropped to offline: its stderr, the finding, 1."""
     said = b" WARN zizmor: running in offline mode\n"
-    status, _, err, _ = records_state.main(signer.Ran(0, b"[]", said))
+    records_state.enter(monkeypatch, signer.Ran(0, b"[]", said))
+    status = signer.main(SIGNED)
+    err = capfd.readouterr().err
     assert status == 1
     assert err.startswith(said.decode()), err
     want: list[object] = [
@@ -626,13 +724,11 @@ class PinnedZizmor:
         self.make_env = env
         self.tmp = tmp_path
 
-    def judged(
-        self, workflow: str, *, capfd: pytest.CaptureFixture[str]
-    ) -> tuple[int, list[object], str]:
-        """Run the CLI over the belt's zizmor on one planted workflow.
+    def plant(self, monkeypatch: pytest.MonkeyPatch, workflow: str) -> Path:
+        """Stand in a tree holding one planted workflow, the belt's zizmor to judge it.
 
         Returns:
-            The status, the records read back, and stderr.
+            The findings file the CLI writes.
 
         """
         if support.optional_tool("zizmor") is None:
@@ -641,23 +737,26 @@ class PinnedZizmor:
         (tmp / ".github" / "workflows").mkdir(parents=True)
         (tmp / ".github" / "workflows" / "a.yml").write_text(workflow, encoding="utf-8")
         file = tmp / "findings.jsonl"
-        argv = ["--signer-workflow", SIGNER_WORKFLOW, "--offline", *ARGS]
-        with pytest.MonkeyPatch.context() as patched:
-            for name, value in (
-                self.make_env(
-                    GH_TOKEN=STANDIN,
-                    MISE_TASK_NAME=TASK,
-                    ORG_FINDINGS=str(file),
-                    PYTHONUTF8="1",
-                )
-            ).items():
-                patched.setenv(name, value)
-            patched.chdir(tmp)
-            status = signer.main(argv)
-        _out, err = capfd.readouterr()
-        lines = file.read_text(encoding="utf-8").splitlines() if file.exists() else []
-        got: list[object] = [decoded.load_json(line) for line in lines]
-        return status, got, err
+        for name, value in self.make_env(
+            GH_TOKEN=STANDIN,
+            MISE_TASK_NAME=TASK,
+            ORG_FINDINGS=str(file),
+            PYTHONUTF8="1",
+        ).items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.chdir(tmp)
+        return file
+
+
+def records(file: Path) -> list[object]:
+    """Read back what the CLI recorded.
+
+    Returns:
+        Each record, in order; none when the file was not written.
+
+    """
+    lines = file.read_text(encoding="utf-8").splitlines() if file.exists() else []
+    return [decoded.load_json(line) for line in lines]
 
 
 @fixture
@@ -667,10 +766,15 @@ def pinned_zizmor(tmp_path: Path, env: support.Env) -> PinnedZizmor:
 
 
 def test_an_unpinned_action_is_the_record(
-    pinned_zizmor: PinnedZizmor, capfd: pytest.CaptureFixture[str]
+    pinned_zizmor: PinnedZizmor,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """One unpinned `uses:`: the record read back, zizmor's 14."""
-    status, got, err = pinned_zizmor.judged(WORKFLOW, capfd=capfd)
+    file = pinned_zizmor.plant(monkeypatch, WORKFLOW)
+    status = signer.main(["--signer-workflow", SIGNER_WORKFLOW, "--offline", *ARGS])
+    err = capfd.readouterr().err
+    got = records(file)
     assert status == 14, err
     path = ".github/workflows/a.yml"
     want: list[object] = [
@@ -694,11 +798,16 @@ def test_an_unpinned_action_is_the_record(
 
 
 def test_two_of_one_audit_in_one_file_are_two_messages(
-    pinned_zizmor: PinnedZizmor, capfd: pytest.CaptureFixture[str]
+    pinned_zizmor: PinnedZizmor,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Two unpinned `uses:` in one file: two records, two messages."""
     two = WORKFLOW + "      - uses: actions/setup-node@v4\n"
-    status, got, err = pinned_zizmor.judged(two, capfd=capfd)
+    file = pinned_zizmor.plant(monkeypatch, two)
+    status = signer.main(["--signer-workflow", SIGNER_WORKFLOW, "--offline", *ARGS])
+    err = capfd.readouterr().err
+    got = records(file)
     assert status == 14, err
     messages = [decoded.as_object(r, "a record")["message"] for r in got]
     want: list[object] = [
