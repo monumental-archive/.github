@@ -57,7 +57,7 @@ FOLDED_NOTE = (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Iterator
+    from collections.abc import Callable, Generator, Iterator
 
 SHFMT = ["shfmt", "-i", "2", "-bn", "-ci", "-sr", "-s"]
 
@@ -236,6 +236,17 @@ def runs(path: Path) -> Iterator[Run]:
             raise
         msg = f"{path}: {err}"
         raise ValueError(msg) from None
+    yield from runs_from(lines, values)
+
+
+def runs_from(lines: list[str], values: list[workflow_yaml.Run]) -> Iterator[Run]:
+    """Read the values yq found in a file's lines into Runs.
+
+    Yields:
+        One Run per non-empty value: its source the lines the ceiling
+        counts, its shell lowercased, bash when none is named.
+
+    """
     for found in values:
         if not found.text.strip():
             continue
@@ -332,12 +343,31 @@ def rewrite(path: Path) -> int:
 
     """
     lines = path.read_text(encoding="utf-8").split("\n")
+    changed, lines = rewritten(lines, list(linted(path)), shfmt)
+    if changed:
+        path.write_text("\n".join(lines), encoding="utf-8")
+    return changed
+
+
+def rewritten(
+    lines: list[str], found: list[Run], formatter: Callable[[str], str | None]
+) -> tuple[int, list[str]]:
+    """Put each literal block's formatted script where the block is.
+
+    `found` are the values linted, as `linted()` yields them; `formatter`
+    answers a script's formatted text, or None when it cannot parse it.
+
+    Returns:
+        The number of blocks rewritten, and the file's lines after.
+
+    """
+    lines = list(lines)
     changed = 0
     # From the last block up, so a rewrite never moves a block not yet read.
-    for run in reversed(list(linted(path))):
+    for run in reversed(found):
         if run.style != LITERAL:
             continue
-        formatted = shfmt(run.source)
+        formatted = formatter(run.source)
         if formatted is None or formatted == run.source:
             continue
         text = run.source.split("\n")[:-1]
@@ -351,9 +381,7 @@ def rewrite(path: Path) -> int:
             (" " * pad + x) if x.strip() else "" for x in formatted.split("\n")[:-1]
         ]
         changed += 1
-    if changed:
-        path.write_text("\n".join(lines), encoding="utf-8")
-    return changed
+    return changed, lines
 
 
 def findings(gcc: str, path: Path, run: Run) -> list[str]:

@@ -148,18 +148,30 @@ def runs(path: Path | str) -> list[Run]:
         One record per value, in file order.
 
     """
+    return records(_yq(RUNS, path))
+
+
+def records(answer: object) -> list[Run]:
+    """Read yq's answer to RUNS, one record per value.
+
+    Returns:
+        One Run per record, in the answer's order. An answer not of
+        RUNS's shape is refused with the ValueError `decoded` raises,
+        naming where.
+
+    """
     out = []
-    for i, raw in enumerate(decoded.as_array(_yq(RUNS, path), "runs")):
+    for i, raw in enumerate(decoded.as_array(answer, "runs")):
         record = decoded.as_object(raw, f"runs[{i}]")
         out.append(
             Run(
-                line=decoded.as_int(record["line"], "line"),
-                style=decoded.as_str(record["style"], "style"),
-                text=decoded.as_str(record["run"], "run"),
-                name=_optional(record["name"], "name"),
-                shell=_optional(record["shell"], "shell"),
-                path=decoded.as_str(record["path"], "path"),
-                alias=record["kind"] == "alias",
+                line=decoded.as_int(record.get("line"), "line"),
+                style=decoded.as_str(record.get("style"), "style"),
+                text=decoded.as_str(record.get("run"), "run"),
+                name=_optional(record.get("name"), "name"),
+                shell=_optional(record.get("shell"), "shell"),
+                path=decoded.as_str(record.get("path"), "path"),
+                alias=record.get("kind") == "alias",
             )
         )
     return out
