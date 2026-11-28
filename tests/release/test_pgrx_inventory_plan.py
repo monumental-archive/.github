@@ -16,7 +16,7 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -24,6 +24,9 @@ from belt import decoded, plan_producers, workflow_yaml
 from belt.release.pgrx import inventory_plan
 from belt.typed_pytest import fixture
 from tests import support
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 CANON = support.CANON
 WORKFLOW = CANON / ".github" / "workflows" / "build-pgrx-extension.yml"
@@ -76,50 +79,49 @@ class Run:
     plan: str | None
 
 
-class Helper(Protocol):
-    """The `run_helper` fixture's caller."""
+@dataclass
+class Planted:
+    """One crate planted for the helper, in its own working tree."""
 
-    def __call__(
-        self,
-        manifest: str | None = CRATE,
-        args: tuple[str, ...] = ("crate", "16"),
-        prefix: str | None = "sbom-pgrx-",
-    ) -> Run:
-        """Run the helper over a planted crate (manifest None plants none)."""
-        ...
+    work: Path
+
+    def ran(self, status: int, said: tuple[str, str]) -> Run:
+        """Read what the helper's run did.
+
+        Returns:
+            Its status, output, and plan/plan.json when one was written.
+
+        """
+        out, err = said
+        plan = self.work / "plan" / "plan.json"
+        return Run(status, out, err, plan.read_text("utf-8") if plan.exists() else None)
 
 
 @fixture
-def run_helper(tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> Helper:
-    """Call the helper's `main` in process, over a crate it plants.
+def plant(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Callable[..., Planted]:
+    """Plant a crate for the helper and step into its tree.
 
     Returns:
-        The caller, giving its status, output, and plan/plan.json when
-        one was written.
+        A function that plants one crate (manifest None plants none)
+        under the plan step's PLAN_DOC_PREFIX (None unsets it).
 
     """
 
-    def call(
-        manifest: str | None = CRATE,
-        args: tuple[str, ...] = ("crate", "16"),
-        prefix: str | None = "sbom-pgrx-",
-    ) -> Run:
+    def lay_out(
+        manifest: str | None = CRATE, prefix: str | None = "sbom-pgrx-"
+    ) -> Planted:
         work = Path(tempfile.mkdtemp(dir=tmp_path))
         (work / "crate").mkdir()
         if manifest is not None:
             (work / "crate" / "Cargo.toml").write_text(manifest)
-        with pytest.MonkeyPatch.context() as patched:
-            if prefix is None:
-                patched.delenv("PLAN_DOC_PREFIX", raising=False)
-            else:
-                patched.setenv("PLAN_DOC_PREFIX", prefix)
-            patched.chdir(work)
-            status = inventory_plan.main(list(args))
-        out, err = capfd.readouterr()
-        plan = work / "plan" / "plan.json"
-        return Run(status, out, err, plan.read_text("utf-8") if plan.exists() else None)
+        if prefix is None:
+            monkeypatch.delenv("PLAN_DOC_PREFIX", raising=False)
+        else:
+            monkeypatch.setenv("PLAN_DOC_PREFIX", prefix)
+        monkeypatch.chdir(work)
+        return Planted(work)
 
-    return call
+    return lay_out
 
 
 def step() -> dict[str, object]:
@@ -157,9 +159,13 @@ def test_the_step_states_its_prefix_and_its_marker() -> None:
 
 
 # The plan the step's jq wrote, byte for byte.
-def test_the_cell_plan_is_the_shells_bytes(run_helper: Helper) -> None:
+def test_the_cell_plan_is_the_shells_bytes(
+    plant: Callable[..., Planted], capfd: pytest.CaptureFixture[str]
+) -> None:
     """Crate pg_edtf, major 16: the recorded golden."""
-    run = run_helper()
+    planted = plant()
+    status = inventory_plan.main(["crate", "16"])
+    run = planted.ran(status, capfd.readouterr())
     assert run.returncode == 0, run.stdout + run.stderr
     assert run.plan == GOLDEN
     assert (
@@ -168,9 +174,13 @@ def test_the_cell_plan_is_the_shells_bytes(run_helper: Helper) -> None:
     )
 
 
-def test_the_major_names_the_artifact_and_the_feature(run_helper: Helper) -> None:
+def test_the_major_names_the_artifact_and_the_feature(
+    plant: Callable[..., Planted], capfd: pytest.CaptureFixture[str]
+) -> None:
     """Another major is another artifact, built with its own feature."""
-    run = run_helper(args=("crate", "18"))
+    planted = plant()
+    status = inventory_plan.main(["crate", "18"])
+    run = planted.ran(status, capfd.readouterr())
     assert run.returncode == 0, run.stdout + run.stderr
     assert GOLDEN.replace("16", "18") == run.plan
 
@@ -183,63 +193,98 @@ def assert_refused(run: Run, want: str) -> None:
     assert run.plan is None
 
 
-def test_no_prefix_is_refused(run_helper: Helper) -> None:
+def test_no_prefix_is_refused(
+    plant: Callable[..., Planted], capfd: pytest.CaptureFixture[str]
+) -> None:
     """The class's prefix names the document; the leg never invents one."""
+    planted = plant(prefix=None)
+    status = inventory_plan.main(["crate", "16"])
+    run = planted.ran(status, capfd.readouterr())
     assert_refused(
-        run_helper(prefix=None),
+        run,
         "PLAN_DOC_PREFIX is unset — the class's planned prefix names the document",
     )
 
 
-def test_a_major_that_is_not_a_number_is_refused(run_helper: Helper) -> None:
+def test_a_major_that_is_not_a_number_is_refused(
+    plant: Callable[..., Planted], capfd: pytest.CaptureFixture[str]
+) -> None:
     """A matrix value that is not a Postgres major."""
-    assert_refused(
-        run_helper(args=("crate", "pg16")), "major 'pg16' is not a Postgres major"
-    )
+    planted = plant()
+    status = inventory_plan.main(["crate", "pg16"])
+    run = planted.ran(status, capfd.readouterr())
+    assert_refused(run, "major 'pg16' is not a Postgres major")
 
 
-def test_no_manifest_is_refused(run_helper: Helper) -> None:
+def test_no_manifest_is_refused(
+    plant: Callable[..., Planted], capfd: pytest.CaptureFixture[str]
+) -> None:
     """The crate directory holds no Cargo.toml."""
-    run = run_helper(manifest=None)
+    planted = plant(manifest=None)
+    status = inventory_plan.main(["crate", "16"])
+    run = planted.ran(status, capfd.readouterr())
     assert run.returncode == 1
     assert run.stderr.startswith(MANIFEST_REFUSAL), run.stderr
     assert run.plan is None
 
 
-def test_a_manifest_that_is_not_toml_is_refused(run_helper: Helper) -> None:
+def test_a_manifest_that_is_not_toml_is_refused(
+    plant: Callable[..., Planted], capfd: pytest.CaptureFixture[str]
+) -> None:
     """A manifest the reader cannot parse."""
-    run = run_helper(manifest="[package\n")
+    planted = plant(manifest="[package\n")
+    status = inventory_plan.main(["crate", "16"])
+    run = planted.ran(status, capfd.readouterr())
     assert run.returncode == 1
     assert run.stderr.startswith(MANIFEST_REFUSAL), run.stderr
     assert run.plan is None
 
 
-def test_a_workspace_manifest_is_refused(run_helper: Helper) -> None:
+def test_a_workspace_manifest_is_refused(
+    plant: Callable[..., Planted], capfd: pytest.CaptureFixture[str]
+) -> None:
     """A manifest with no [package] names no crate this cell built."""
+    planted = plant(manifest="[workspace]\n")
+    status = inventory_plan.main(["crate", "16"])
+    run = planted.ran(status, capfd.readouterr())
     assert_refused(
-        run_helper(manifest="[workspace]\n"),
+        run,
         "crate/Cargo.toml names no package — a cell plans the crate it built",
     )
 
 
-def test_a_nameless_package_is_refused(run_helper: Helper) -> None:
+def test_a_nameless_package_is_refused(
+    plant: Callable[..., Planted], capfd: pytest.CaptureFixture[str]
+) -> None:
     """A [package] table with no name."""
+    planted = plant(manifest='[package]\nversion = "1.0.0"\n')
+    status = inventory_plan.main(["crate", "16"])
+    run = planted.ran(status, capfd.readouterr())
     assert_refused(
-        run_helper(manifest='[package]\nversion = "1.0.0"\n'),
+        run,
         "crate/Cargo.toml names no package — a cell plans the crate it built",
     )
 
 
-def test_a_package_that_is_not_a_table_is_refused(run_helper: Helper) -> None:
+def test_a_package_that_is_not_a_table_is_refused(
+    plant: Callable[..., Planted], capfd: pytest.CaptureFixture[str]
+) -> None:
     """`package = false` (#1556's shrunk example): an AttributeError before."""
+    planted = plant(manifest="package = false\n")
+    status = inventory_plan.main(["crate", "16"])
+    run = planted.ran(status, capfd.readouterr())
     assert_refused(
-        run_helper(manifest="package = false\n"),
+        run,
         "crate/Cargo.toml names no package — a cell plans the crate it built",
     )
 
 
-def test_a_wrong_argument_count_is_usage(run_helper: Helper) -> None:
+def test_a_wrong_argument_count_is_usage(
+    plant: Callable[..., Planted], capfd: pytest.CaptureFixture[str]
+) -> None:
     """Two positional arguments, never fewer."""
-    run = run_helper(args=("crate",))
+    planted = plant()
+    status = inventory_plan.main(["crate"])
+    run = planted.ran(status, capfd.readouterr())
     assert run.returncode == 2
     assert run.stderr == "inventory-plan: usage: belt inventory-plan CRATE_DIR MAJOR\n"

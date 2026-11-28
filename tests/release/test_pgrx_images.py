@@ -20,7 +20,6 @@ import subprocess
 import sys
 import tarfile
 import tempfile
-from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -114,36 +113,12 @@ def run(
     )
 
 
-type Images = Callable[..., subprocess.CompletedProcess[str]]
-
-
-@fixture
-def images(capfd: pytest.CaptureFixture[str]) -> Images:
-    """Call pgrx_images.py's `main` in process, as the workflow step runs it.
-
-    Returns:
-        The caller: `images(*argv, cwd=...)`, giving the status and what
-        it wrote as a finished process's.
-
-    """
-
-    def call(*argv: str, cwd: Path = CANON) -> subprocess.CompletedProcess[str]:
-        with pytest.MonkeyPatch.context() as patched:
-            patched.chdir(cwd)
-            status = pgrx_images.main(list(argv))
-        out, err = capfd.readouterr()
-        return subprocess.CompletedProcess(list(argv), status, out, err)
-
-    return call
-
-
 class Stage:
     """`pgrx_images.py stage`: every branch, messages asserted."""
 
-    def __init__(self, tmp_path: Path, images: Images) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Make a workspace with a tarballs/ directory, removed after."""
         self.root = tmp_path
-        self.images = images
         (self.root / "tarballs").mkdir()
 
     def plant(self, pg: str, arch: str, **kw: bool) -> str:
@@ -160,31 +135,27 @@ class Stage:
         tarball(self.root / "tarballs" / name, cell(pg, **kw), links)
         return f"tarballs/{name}"
 
-    def stage(self, pg: str) -> subprocess.CompletedProcess[str]:
-        """Run the stage verb for one major.
-
-        Returns:
-            The finished process.
-
-        """
-        return self.images(
-            *("stage", "--pg", pg, "--version", VERSION, "--crate-dir", CRATE),
-            cwd=self.root,
-        )
-
 
 @fixture
-def stage_state(tmp_path: Path, images: Images) -> Stage:
+def stage_state(tmp_path: Path) -> Stage:
     """Give each row its own Stage."""
-    return Stage(tmp_path, images)
+    return Stage(tmp_path)
 
 
-def test_both_architectures_staged(stage_state: Stage) -> None:
+def test_both_architectures_staged(
+    stage_state: Stage,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """The one layout, for amd64 and arm64, from pkgroot only."""
     for arch in ("amd64", "arm64"):
         stage_state.plant("17", arch, link=True)
-    result = stage_state.stage("17")
-    assert result.returncode == 0, result.stderr
+    monkeypatch.chdir(stage_state.root)
+    status = pgrx_images.main(
+        ["stage", "--pg", "17", "--version", VERSION, "--crate-dir", CRATE]
+    )
+    out, err = capfd.readouterr()
+    assert status == 0, err
     for arch in ("amd64", "arm64"):
         image = stage_state.root / "staged" / arch / "image"
         found = sorted(
@@ -202,52 +173,84 @@ def test_both_architectures_staged(stage_state: Stage) -> None:
         assert (image / "lib" / "edtf.so").is_symlink()
 
 
-def test_a_missing_tarball(stage_state: Stage) -> None:
+def test_a_missing_tarball(
+    stage_state: Stage,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """No amd64 tarball: the build did not produce the cell."""
     stage_state.plant("18", "arm64")
-    result = stage_state.stage("18")
-    assert result.returncode == 1
-    assert result.stderr == (
+    monkeypatch.chdir(stage_state.root)
+    status = pgrx_images.main(
+        ["stage", "--pg", "18", "--version", VERSION, "--crate-dir", CRATE]
+    )
+    out, err = capfd.readouterr()
+    assert status == 1
+    assert err == (
         "::error::pgrx-images: missing"
         " tarballs/edtf_postgres-1.2.3-pg18-linux-amd64.tar.gz"
         " — the extension build did not produce this cell\n"
     )
 
 
-def test_a_missing_second_architecture(stage_state: Stage) -> None:
+def test_a_missing_second_architecture(
+    stage_state: Stage,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """amd64 stages, arm64 is missing and named."""
     stage_state.plant("18", "amd64")
-    result = stage_state.stage("18")
-    assert result.returncode == 1
-    assert result.stderr == (
+    monkeypatch.chdir(stage_state.root)
+    status = pgrx_images.main(
+        ["stage", "--pg", "18", "--version", VERSION, "--crate-dir", CRATE]
+    )
+    out, err = capfd.readouterr()
+    assert status == 1
+    assert err == (
         "::error::pgrx-images: missing"
         " tarballs/edtf_postgres-1.2.3-pg18-linux-arm64.tar.gz"
         " — the extension build did not produce this cell\n"
     )
 
 
-def test_a_tarball_without_lib(stage_state: Stage) -> None:
+def test_a_tarball_without_lib(
+    stage_state: Stage,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """Only the second copy's lib: refused, never read (#1274)."""
     shown = stage_state.plant("16", "amd64", lib=False)
     stage_state.plant("16", "arm64")
-    result = stage_state.stage("16")
-    assert result.returncode == 1
+    monkeypatch.chdir(stage_state.root)
+    status = pgrx_images.main(
+        ["stage", "--pg", "16", "--version", VERSION, "--crate-dir", CRATE]
+    )
+    out, err = capfd.readouterr()
+    assert status == 1
     assert (
         f"::error::pgrx-images: {shown} has no pkgroot/usr/lib/postgresql/16/lib\n"
-    ) == result.stderr
+    ) == err
     image_lib = stage_state.root / "staged" / "amd64" / "image" / "lib"
     assert not image_lib.exists()
 
 
-def test_a_tarball_without_extension(stage_state: Stage) -> None:
+def test_a_tarball_without_extension(
+    stage_state: Stage,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """No share/postgresql/<major>/extension: refused by path."""
     shown = stage_state.plant("15", "amd64", share=False)
-    result = stage_state.stage("15")
-    assert result.returncode == 1
+    monkeypatch.chdir(stage_state.root)
+    status = pgrx_images.main(
+        ["stage", "--pg", "15", "--version", VERSION, "--crate-dir", CRATE]
+    )
+    out, err = capfd.readouterr()
+    assert status == 1
     assert (
         f"::error::pgrx-images: {shown} has no"
         f" pkgroot/usr/share/postgresql/15/extension\n"
-    ) == result.stderr
+    ) == err
 
 
 def build_rows() -> dict[str, str]:
@@ -270,41 +273,29 @@ A_TABLE_THAT_IS_NOT_MAJORS_TO_REFERENCES_ROWS = [
 
 
 # `pgrx_images.py base-image`: the [build] row, or a refusal.
-def test_every_major_names_its_build_image(images: Images) -> None:
+def test_every_major_names_its_build_image(capfd: pytest.CaptureFixture[str]) -> None:
     """Each [build] row is what the verb prints."""
     rows = build_rows()
     for pg, ref in rows.items():
-        result = images(
-            "base-image",
-            "--pg",
-            pg,
-            "--table",
-            str(TABLE),
-        )
-        assert (0, f"{ref}\n") == (result.returncode, result.stdout)
+        status = pgrx_images.main(["base-image", "--pg", pg, "--table", str(TABLE)])
+        out, err = capfd.readouterr()
+        assert (0, f"{ref}\n") == (status, out)
         assert "@sha256:" in ref
 
 
-def test_a_major_with_no_row(images: Images) -> None:
+def test_a_major_with_no_row(capfd: pytest.CaptureFixture[str]) -> None:
     """A major the table does not pin is refused by name."""
-    result = images(
-        "base-image",
-        "--pg",
-        "13",
-        "--table",
-        str(TABLE),
-    )
-    assert result.returncode == 1
-    assert (
-        f"::error::pgrx-images: pg13 has no build image in {TABLE}\n" == result.stderr
-    )
+    status = pgrx_images.main(["base-image", "--pg", "13", "--table", str(TABLE)])
+    out, err = capfd.readouterr()
+    assert status == 1
+    assert f"::error::pgrx-images: pg13 has no build image in {TABLE}\n" == err
 
 
 @pytest.mark.parametrize(
     ("text", "want"), A_TABLE_THAT_IS_NOT_MAJORS_TO_REFERENCES_ROWS
 )
 def test_a_table_that_is_not_majors_to_references(
-    text: str, want: str, images: Images
+    text: str, want: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """#1556's shrunk examples are refused by name.
 
@@ -314,16 +305,11 @@ def test_a_table_that_is_not_majors_to_references(
     with tempfile.TemporaryDirectory() as tmp:
         table = Path(tmp) / "pgrx-base-images.toml"
         table.write_text(text, "utf-8")
-        result = images(
-            "base-image",
-            "--pg",
-            "16",
-            "--table",
-            str(table),
-        )
+        status = pgrx_images.main(["base-image", "--pg", "16", "--table", str(table)])
+        out, err = capfd.readouterr()
         assert (1, f"::error::pgrx-images: {want.format(t=table)}\n") == (
-            result.returncode,
-            result.stderr,
+            status,
+            err,
         )
 
 
@@ -341,85 +327,125 @@ IMAGE = "ghcr.io/example/edtf-postgres"
 PINNED = IMAGE + "@sha256:" + "a" * 64
 
 
-type Render = Callable[[str, str, str, str], subprocess.CompletedProcess[str]]
-
-
-@fixture
-def render(images: Images) -> Render:
-    """Run the consumer-dockerfile verb.
-
-    Returns:
-        The renderer: `render(recipe, image, base, pg)`.
-
-    """
-
-    def call(
-        recipe: str, image: str, base: str, pg: str
-    ) -> subprocess.CompletedProcess[str]:
-        return images(
-            *("consumer-dockerfile", "--recipe", recipe, "--image", image),
-            *("--base", base, "--pg", pg),
-        )
-
-    return call
-
-
 # `pgrx_images.py consumer-dockerfile`: the recipes, pinned or refused.
-def test_the_copy_recipe(render: Render) -> None:
+def test_the_copy_recipe(capfd: pytest.CaptureFixture[str]) -> None:
     """The text the workflow's first heredoc wrote, byte for byte."""
-    result = render("copy", PINNED, build_image("17"), "17")
-    assert result.returncode == 0, result.stderr
+    status = pgrx_images.main(
+        [
+            "consumer-dockerfile",
+            "--recipe",
+            "copy",
+            "--image",
+            PINNED,
+            "--base",
+            build_image("17"),
+            "--pg",
+            "17",
+        ]
+    )
+    out, err = capfd.readouterr()
+    assert status == 0, err
     assert (
         f"FROM {PINNED} AS ext\n"
         f"FROM {build_image('17')}\n"
         "COPY --from=ext /lib/ /usr/lib/postgresql/17/lib/\n"
         "COPY --from=ext /share/extension/ /usr/share/postgresql/17/extension/\n"
-    ) == result.stdout
+    ) == out
 
 
-def test_the_path_recipe(render: Render) -> None:
+def test_the_path_recipe(capfd: pytest.CaptureFixture[str]) -> None:
     """The text the workflow's second heredoc wrote, byte for byte."""
-    result = render("path", PINNED, build_image("18"), "18")
-    assert result.returncode == 0, result.stderr
+    status = pgrx_images.main(
+        [
+            "consumer-dockerfile",
+            "--recipe",
+            "path",
+            "--image",
+            PINNED,
+            "--base",
+            build_image("18"),
+            "--pg",
+            "18",
+        ]
+    )
+    out, err = capfd.readouterr()
+    assert status == 0, err
     assert (
         f"FROM {PINNED} AS ext\n"
         f"FROM {build_image('18')}\n"
         "COPY --from=ext / /extensions/ext/\n"
-    ) == result.stdout
+    ) == out
 
 
-def test_every_rendered_from_is_pinned(render: Render) -> None:
+def test_every_rendered_from_is_pinned(capfd: pytest.CaptureFixture[str]) -> None:
     """Every recipe on every [build] row: each FROM carries a digest."""
     rows = build_rows()
     for pg, base in rows.items():
         for recipe in ("copy", "path"):
-            result = render(recipe, PINNED, base, pg)
-            assert result.returncode == 0, result.stderr
-            from_lines = [
-                ln for ln in result.stdout.splitlines() if ln.startswith("FROM")
-            ]
+            status = pgrx_images.main(
+                [
+                    "consumer-dockerfile",
+                    "--recipe",
+                    recipe,
+                    "--image",
+                    PINNED,
+                    "--base",
+                    base,
+                    "--pg",
+                    pg,
+                ]
+            )
+            out, err = capfd.readouterr()
+            assert status == 0, err
+            from_lines = [ln for ln in out.splitlines() if ln.startswith("FROM")]
             assert len(from_lines) == 2
             for line in from_lines:
                 assert "@sha256:" in line.split()[1]
 
 
-def test_an_unpinned_extension_image(render: Render) -> None:
+def test_an_unpinned_extension_image(capfd: pytest.CaptureFixture[str]) -> None:
     """A tag, not a digest: refused, nothing rendered."""
-    result = render("copy", IMAGE + ":1.2.3-pg17-artifact", build_image("17"), "17")
-    assert (result.returncode, result.stdout) == (1, "")
+    status = pgrx_images.main(
+        [
+            "consumer-dockerfile",
+            "--recipe",
+            "copy",
+            "--image",
+            IMAGE + ":1.2.3-pg17-artifact",
+            "--base",
+            build_image("17"),
+            "--pg",
+            "17",
+        ]
+    )
+    out, err = capfd.readouterr()
+    assert (status, out) == (1, "")
     assert (
         f"::error::pgrx-images: the extension image"
         f" {IMAGE}:1.2.3-pg17-artifact is not"
         " pinned by digest (@sha256:); the consumer proof builds only from"
         " pinned references\n"
-    ) == result.stderr
+    ) == err
 
 
-def test_an_unpinned_base_image(render: Render) -> None:
+def test_an_unpinned_base_image(capfd: pytest.CaptureFixture[str]) -> None:
     """A stock postgres by tag: refused, nothing rendered."""
-    result = render("path", PINNED, "postgres:18-bookworm", "18")
-    assert (result.returncode, result.stdout) == (1, "")
-    assert result.stderr == (
+    status = pgrx_images.main(
+        [
+            "consumer-dockerfile",
+            "--recipe",
+            "path",
+            "--image",
+            PINNED,
+            "--base",
+            "postgres:18-bookworm",
+            "--pg",
+            "18",
+        ]
+    )
+    out, err = capfd.readouterr()
+    assert (status, out) == (1, "")
+    assert err == (
         "::error::pgrx-images: the base image postgres:18-bookworm is not"
         " pinned by digest"
         " (@sha256:); the consumer proof builds only from pinned references\n"
@@ -595,61 +621,64 @@ def test_a_staged_tree_without_one_extension_builds_nothing(proof: Proof) -> Non
 class ExtensionName:
     """`pgrx_images.py extension-name`: the one shipped extension (#1439)."""
 
-    def __init__(self, tmp_path: Path, images: Images) -> None:
+    def __init__(self, tmp_path: Path) -> None:
         """Make an empty staged share/extension tree, removed after."""
         self.tree = tmp_path
-        self.images = images
-
-    def extension_name(self) -> subprocess.CompletedProcess[str]:
-        """Run the extension-name verb on the tree.
-
-        Returns:
-            Its status and what it wrote, as a finished process's.
-
-        """
-        return self.images("extension-name", "--tree", str(self.tree))
 
 
 @fixture
-def extension_name_state(tmp_path: Path, images: Images) -> ExtensionName:
+def extension_name_state(tmp_path: Path) -> ExtensionName:
     """Give each row its own ExtensionName."""
-    return ExtensionName(tmp_path, images)
+    return ExtensionName(tmp_path)
 
 
 def test_one_control_file_names_the_extension(
-    extension_name_state: ExtensionName,
+    extension_name_state: ExtensionName, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """The stem of the one control file, SQL scripts beside it ignored."""
     (extension_name_state.tree / "edtf_postgres.control").write_text("")
     (extension_name_state.tree / "edtf_postgres--1.2.3.sql").write_text("")
-    result = extension_name_state.extension_name()
-    assert (result.returncode, result.stdout) == (0, "edtf_postgres\n")
+    status = pgrx_images.main(
+        ["extension-name", "--tree", str(extension_name_state.tree)]
+    )
+    out, err = capfd.readouterr()
+    assert (status, out) == (0, "edtf_postgres\n")
 
 
-def test_no_control_file(extension_name_state: ExtensionName) -> None:
+def test_no_control_file(
+    extension_name_state: ExtensionName, capfd: pytest.CaptureFixture[str]
+) -> None:
     """An artifact that ships no extension is refused by name."""
     (extension_name_state.tree / "edtf_postgres--1.2.3.sql").write_text("")
-    result = extension_name_state.extension_name()
-    assert (result.returncode, result.stdout) == (1, "")
+    status = pgrx_images.main(
+        ["extension-name", "--tree", str(extension_name_state.tree)]
+    )
+    out, err = capfd.readouterr()
+    assert (status, out) == (1, "")
     assert (
         f"::error::pgrx-images: {extension_name_state.tree} holds no extension control file;"
         f" the artifact"
         " image ships no extension for the consumer proof to create\n"
-    ) == result.stderr
+    ) == err
 
 
-def test_two_control_files(extension_name_state: ExtensionName) -> None:
+def test_two_control_files(
+    extension_name_state: ExtensionName, capfd: pytest.CaptureFixture[str]
+) -> None:
     """Two control files: the proof cannot tell which it is proving."""
     (extension_name_state.tree / "edtf_postgres.control").write_text("")
     (extension_name_state.tree / "amcheck.control").write_text("")
-    result = extension_name_state.extension_name()
-    assert (result.returncode, result.stdout) == (1, "")
+    status = pgrx_images.main(
+        ["extension-name", "--tree", str(extension_name_state.tree)]
+    )
+    out, err = capfd.readouterr()
+    assert (status, out) == (1, "")
     assert (
         f"::error::pgrx-images: {extension_name_state.tree} holds 2 extension control files"
         f" (amcheck,"
         " edtf_postgres); the consumer proof creates the one extension the"
         " artifact image ships and cannot tell which\n"
-    ) == result.stderr
+    ) == err
 
 
 COPY_PROOF = CANON / "docker" / "pgrx-copy-proof.sh"
