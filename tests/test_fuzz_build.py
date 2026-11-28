@@ -39,8 +39,7 @@ reds 2 and from the other branch 2, the table guard removed reds 1, the
 guard as a grep for a bare `[workspace]` line in place of the TOML read
 reds 2, a parse error read as a missing table reds 1, and the probe's
 stderr discarded again (the defect) reds 4.
-
-pytest, run by `mise run test`. Every git call"""
+"""
 
 import functools
 import os
@@ -52,11 +51,11 @@ from pathlib import Path
 import pytest
 
 from belt import decoded
-from tests import hermetic
+from tests import support
 
-BELT = hermetic.MISE
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
+BELT = support.MISE
+BASH = support.tool("bash")
+GIT = support.tool("git")
 
 # Stands in for cargo. `metadata` succeeds when no refusal is planted and
 # otherwise prints the planted text on stderr and exits 101, as cargo
@@ -249,7 +248,7 @@ class TestFuzzBuild:
         subprocess.run(
             [GIT, *args],
             cwd=self.root,
-            env=hermetic.env(),
+            env=support.env(),
             capture_output=True,
             check=True,
         )
@@ -280,13 +279,13 @@ class TestFuzzBuild:
         """
         if self.log.exists():
             self.log.unlink()
-        env = hermetic.env() | {
+        env = support.env() | {
             "PATH": f"{self.stubs}{os.pathsep}{os.environ['PATH']}",
             "PLANT_LOG": str(self.log),
             "PLANT_REFUSAL": str(self.refusal),
             "ORG_BELT_DIR": str(BELT),
         }
-        as_mise = hermetic.task_run("lint:fuzz-build", task_body("lint:fuzz-build"))
+        as_mise = support.task_run("lint:fuzz-build", task_body("lint:fuzz-build"))
         done = subprocess.run(
             as_mise.argv,
             cwd=self.root,

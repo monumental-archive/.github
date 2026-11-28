@@ -13,8 +13,7 @@ that fails (its own message and status); the rest call the helper's
 The sources are this repository's own REUSE.toml, .badge-states and
 CITATION.cff, so the agreeing row is the canon's real render.
 
-GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. pytest, run by
-`mise run test`.
+GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom.
 """
 
 import subprocess
@@ -25,7 +24,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import citation_check, decoded
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -43,9 +42,9 @@ def _task(as_task: Callable[[str], None]) -> None:
 pytestmark = pytest.mark.usefixtures("_task")
 
 
-BELT = hermetic.MISE
+BELT = support.MISE
 CANON = BELT.parent
-GIT = hermetic.tool("git")
+GIT = support.tool("git")
 MINT = "jobs:\n  r:\n    with:\n      mint-doi: true\n"
 SKIPPED = ["lint:citation: no CITATION.cff and no mint-doi request, skipped"]
 
@@ -86,7 +85,7 @@ class TestCitation:
     def _set_up_test_citation(self, tmp_path: Path) -> None:
         """Plant an empty repository: the helper asks git (#2013)."""
         self.tree = tmp_path
-        self.env = hermetic.env(
+        self.env = support.env(
             MISE_TASK_NAME=TASK,
             ORG_BELT_DIR=str(BELT),
             ORG_PYTHON=sys.executable,
@@ -118,7 +117,7 @@ class TestCitation:
         self.plant(".badge-states", source(".badge-states"))
         self.plant("CITATION.cff", citation)
 
-    def helper(self, *files: str, untracked: tuple[str, ...] = ()) -> hermetic.Called:
+    def helper(self, *files: str, untracked: tuple[str, ...] = ()) -> support.Called:
         """Call the helper's main in the planted tree, tracking what is in it.
 
         `untracked` are planted files git is not to track.
@@ -131,7 +130,7 @@ class TestCitation:
         if untracked:
             self.git("rm", "-q", "--cached", "--", *untracked)
         argv = list(files)
-        return hermetic.call(
+        return support.call(
             lambda: citation_check.main(argv), env=self.env, cwd=self.tree
         )
 
@@ -146,7 +145,7 @@ class TestCitation:
         if tracked:
             add = [GIT, "add", "--", *tracked]
             subprocess.run(add, cwd=self.tree, env=self.env, check=True)
-        as_mise = hermetic.task_run(TASK, body())
+        as_mise = support.task_run(TASK, body())
         return subprocess.run(
             as_mise.argv,
             cwd=self.tree,

@@ -7,8 +7,7 @@ runner are that file's, imported from it.
 TypeScriptRows: the run `measured` made of the tree's own vitest, read
 and never repeated (#2105), its coverage provider, and every leg
 printed beside Python's.
-
-pytest, run by `mise run test`."""
+"""
 
 from tests.test_coverage_tasks import (
     MEASURED_VITEST,

@@ -6,8 +6,6 @@ should run looks exactly like success. Proving a branch once by hand is
 not a table test and does not catch the next regression, so every guard
 in `subject_budget.py` is driven here — both directions where there are
 two, and the hard-error paths asserted as errors rather than fallbacks.
-
-pytest, run by `mise run test`. #364 refused a test framework on the
 grounds that adopting one is a fourth thing to port; that reasoning
 bites a new dependency, not the batteries already inside the pinned
 interpreter. Nothing is added to the belt to run this.
@@ -29,7 +27,7 @@ import pytest
 
 from belt import decoded, typed_std
 from belt import subject_budget as sb
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -1350,7 +1348,7 @@ class TestCeiling:
             )
             env: dict[str, str] = {"ORG_BELT_DIR": tmp}
             with pytest.MonkeyPatch.context() as patched:
-                hermetic.patch_env(patched, env)
+                support.patch_env(patched, env)
                 assert sb.ceiling() == 61
 
     def test_unset_belt_dir_is_a_hard_error(self) -> None:
@@ -1362,7 +1360,7 @@ class TestCeiling:
                 SystemExit,
             ),
         ):
-            hermetic.patch_env(patched, env)
+            support.patch_env(patched, env)
             sb.ceiling()
 
     def test_absent_committed_toml_is_a_hard_error(self) -> None:
@@ -1370,7 +1368,7 @@ class TestCeiling:
         with TemporaryDirectory() as tmp:
             env: dict[str, str] = {"ORG_BELT_DIR": tmp}
             with pytest.MonkeyPatch.context() as patched, pytest.raises(SystemExit):
-                hermetic.patch_env(patched, env)
+                support.patch_env(patched, env)
                 sb.ceiling()
 
     @pytest.mark.parametrize(
@@ -1394,7 +1392,7 @@ class TestCeiling:
 
     def test_the_canon_ceiling_is_what_the_org_ships(self) -> None:
         """The delivered file parses and carries a subject_length."""
-        shipped = hermetic.MISE / "committed.toml"
+        shipped = support.MISE / "committed.toml"
         parsed = decoded.load_toml(shipped.read_text(encoding="utf-8"))
         assert isinstance(parsed["subject_length"], int)
 
@@ -1577,9 +1575,9 @@ class TestMainGuards:
             out, err = io.StringIO(), io.StringIO()
             env = {"ORG_BELT_DIR": str(belt), "ORG_CANON_DIR": str(root)}
             with pytest.MonkeyPatch.context() as patched:
-                hermetic.patch_env(patched, env)
+                support.patch_env(patched, env)
                 patched.setattr(sys, "stdin", io.StringIO(listing))
-                patched.setattr(Path, "cwd", hermetic.returning(root))
+                patched.setattr(Path, "cwd", support.returning(root))
                 os.chdir(root)
                 try:
                     with redirect_stdout(out), redirect_stderr(err):
@@ -1808,7 +1806,7 @@ class TestMainGuards:
         assert "commitMessageAction" in err
 
 
-CANON = hermetic.CANON
+CANON = support.CANON
 
 # A `[tools]` entry in the scaffold, live or commented out as an example:
 # the key, then `=` (#1393).

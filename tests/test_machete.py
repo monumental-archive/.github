@@ -8,7 +8,7 @@ passes the tracked manifests, from the one tracked-file producer
 (#1986), as the tool's arguments.
 
 The task's own body, read from mise/config.toml, runs through
-`hermetic.task_run` in a planted git tree with the belt's real
+`support.task_run` in a planted git tree with the belt's real
 cargo-machete. Red rows assert the manifest the tool names, not just
 the exit status.
 
@@ -16,8 +16,7 @@ Mutation-checked: run against `main`'s mise/config.toml, the
 untracked-crate row fails (cargo-machete exits 1 naming
 scratch/Cargo.toml).
 
-GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. pytest, run by
-`mise run test`."""
+GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom."""
 
 import subprocess
 from pathlib import Path
@@ -25,10 +24,10 @@ from pathlib import Path
 import pytest
 
 from belt import decoded
-from tests import hermetic
+from tests import support
 
-BELT = hermetic.MISE
-GIT = hermetic.tool("git")
+BELT = support.MISE
+GIT = support.tool("git")
 TASK = "lint:machete"
 
 CLEAN = '[package]\nname = "{name}"\nversion = "0.1.0"\nedition = "2021"\n'
@@ -55,11 +54,11 @@ class TestMachete:
     @pytest.fixture
     def _set_up_test_machete(self, tmp_path: Path) -> None:
         """Make an empty git repository and a scrubbed environment."""
-        hermetic.tool("cargo-machete")
+        support.tool("cargo-machete")
         tmp = tmp_path
         self.tree = tmp / "tree"
         self.tree.mkdir()
-        self.env = hermetic.env()
+        self.env = support.env()
         self.git("init", "-q")
 
     def git(self, *args: str) -> None:
@@ -83,7 +82,7 @@ class TestMachete:
             The finished process.
 
         """
-        as_mise = hermetic.task_run(TASK, body())
+        as_mise = support.task_run(TASK, body())
         return subprocess.run(
             as_mise.argv,
             cwd=self.tree,

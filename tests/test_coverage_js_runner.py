@@ -2,8 +2,7 @@
 
 The runner line a tree's package.json and lockfile answer, and the
 vitest run `measured` reads off its own command line (`--measured-run`).
-
-pytest, run by `mise run test`.py;"""
+"""
 
 import contextlib
 import io
@@ -18,7 +17,7 @@ import pytest
 
 from belt import coverage_js_runner as cj
 from belt import decoded
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -36,7 +35,7 @@ def _task(as_task: Callable[[str], None]) -> None:
 pytestmark = pytest.mark.usefixtures("_task")
 
 
-HERE = hermetic.MISE
+HERE = support.MISE
 
 
 class TestReaders:
@@ -239,7 +238,7 @@ class TestMeasuredRun:
         for name, text in planted.items():
             (Path(tmp.name) / name).write_text(text, encoding="utf-8")
         argv = ["--measured-run", "/run/typescript", *planted, "--", *command]
-        done = hermetic.call(lambda: cj.main(argv), cwd=tmp.name)
+        done = support.call(lambda: cj.main(argv), cwd=tmp.name)
         return done.returncode, done.stdout, done.stderr
 
     def test_a_launched_run_gains_the_flags(self) -> None:
@@ -285,7 +284,7 @@ class TestMeasuredRun:
 
     def test_no_separator_is_a_usage_error(self) -> None:
         """The command follows `--`; without it nothing is read."""
-        done = hermetic.call(lambda: cj.main(["--measured-run", "/d"]))
+        done = support.call(lambda: cj.main(["--measured-run", "/d"]))
         assert done.returncode == 2
         assert "usage" in done.stderr
 

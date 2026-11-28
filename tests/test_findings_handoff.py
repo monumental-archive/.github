@@ -17,8 +17,7 @@ nothing unless the workflow hands it on, so in every workflow whose
 
 The set is computed from the files, never listed. A planted workflow
 missing either half is red by message, naming the workflow and the job.
-
-pytest, run by `mise run test`."""
+"""
 
 from __future__ import annotations
 
@@ -26,9 +25,9 @@ import tempfile
 from pathlib import Path
 
 from belt import decoded, workflow_yaml
-from tests import hermetic
+from tests import support
 
-CANON = hermetic.CANON
+CANON = support.CANON
 WORKFLOWS = Path(".github") / "workflows"
 HELPER = "mise/standing_issue.py"
 UPLOAD = "actions/upload-artifact@"

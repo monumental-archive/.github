@@ -15,8 +15,7 @@ docs/tooling-verdicts.md.
 
 Each row asserts the message, not just the exit status: a planted row
 scored on exit alone can pass for the wrong reason.
-
-pytest, run by `mise run test`.py."""
+"""
 
 import contextlib
 import io
@@ -32,13 +31,13 @@ import pytest
 
 from belt import decoded, shard, typed_std
 from belt import typescript_properties as tp
-from tests import hermetic
+from tests import support
 
-CANON = hermetic.CANON
+CANON = support.CANON
 BELT = CANON / "mise"
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
-PYTHON = hermetic.tool("python3")
+BASH = support.tool("bash")
+GIT = support.tool("git")
+PYTHON = support.tool("python3")
 
 CONFIG = decoded.load_toml((BELT / "config.toml").read_text(encoding="utf-8"))
 TASKS = decoded.as_object(CONFIG["tasks"], "tasks")
@@ -57,7 +56,7 @@ def run_body(name: str) -> str:
 GATE = run_body("test:typescript-properties")
 AUDIT = run_body("audit:typescript-properties")
 LINT = run_body("lint:typescript-properties")
-# Each body's task name, for the run that hands it to hermetic.task_run.
+# Each body's task name, for the run that hands it to support.task_run.
 NAMES = {
     GATE: "test:typescript-properties",
     AUDIT: "audit:typescript-properties",
@@ -135,7 +134,7 @@ exit "${STUB_EXIT:-0}"
 
 # Every inherited GIT_* goes (#857), as in test_python_properties.py.
 _GIT_ENV = {
-    **hermetic.env(),
+    **support.env(),
     "GIT_CONFIG_GLOBAL": os.devnull,
     "GIT_CONFIG_NOSYSTEM": "1",
 }
@@ -221,14 +220,14 @@ def run(
         out.mkdir()
         plant(root, files, runner=runner)
         path = [str(Path(PYTHON).parent), str(Path(GIT).parent), "/usr/bin", "/bin"]
-        environ = hermetic.env(
+        environ = support.env(
             PATH=os.pathsep.join(path),
             HOME=scratch,
             ORG_BELT_DIR=str(BELT),
             STUB_OUT=str(out),
             **env or {},
         )
-        as_mise = hermetic.task_run(NAMES[body], body)
+        as_mise = support.task_run(NAMES[body], body)
         done = subprocess.run(
             as_mise.argv,
             cwd=root,
@@ -872,12 +871,12 @@ class TestShares:
         """
         done = subprocess.run(
             [
-                hermetic.tool("python3"),
+                support.tool("python3"),
                 str(BELT / "typescript_properties.py"),
                 "share",
                 *self.FILES,
             ],
-            env=hermetic.env(
+            env=support.env(
                 ORG_SHARD=spec,
                 ORG_SHARD_TASK="test:typescript-properties",
                 ORG_SHARD_REPORTS=reports,

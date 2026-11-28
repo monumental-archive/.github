@@ -9,8 +9,7 @@ mypy cannot see. The REAL rows run the belt's pinned mypy over planted
 files, for what the delivered config makes mypy refuse; they run where
 that mypy is installed and skip where the gate disables it: a tree
 with no tracked `.py` or `.pyi`, by its gate-tools row.
-
-pytest, run by `mise run test`.py;"""
+"""
 
 import os
 import re
@@ -24,7 +23,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import decoded, python_roots, python_types_seams
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -42,9 +41,9 @@ def _task(as_task: Callable[[str], None]) -> None:
 pytestmark = pytest.mark.usefixtures("_task")
 
 
-BELT = hermetic.MISE
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
+BELT = support.MISE
+BASH = support.tool("bash")
+GIT = support.tool("git")
 LABEL = "lint:python-types"
 # What the seam guard says of every type-ignore comment, coded or bare.
 IGNORED = "`# type: ignore` hides a finding; type the code instead"
@@ -114,7 +113,7 @@ def real_mypy() -> str | None:
         Its path when `mypy --version` names the pin, else None.
 
     """
-    found = hermetic.optional_tool("mypy")
+    found = support.optional_tool("mypy")
     if found is None:
         return None
     done = subprocess.run(
@@ -125,7 +124,7 @@ def real_mypy() -> str | None:
 
 # Each looked up once, at import, as the skip decorators they replace did.
 MYPY = real_mypy()
-HYPOTHESIS = hermetic.optional_tool("pytest")
+HYPOTHESIS = support.optional_tool("pytest")
 
 
 @dataclass(frozen=True)
@@ -165,10 +164,10 @@ def run(
         for name, text in files.items():
             (tree / name).parent.mkdir(parents=True, exist_ok=True)
             (tree / name).write_text(text, encoding="utf-8")
-        belt = hermetic.belt(root / "belt")
+        belt = support.belt(root / "belt")
         for name in missing:
             (belt / name).unlink()
-        env = hermetic.env(ORG_BELT_DIR=str(belt), ORG_PYTHON=sys.executable)
+        env = support.env(ORG_BELT_DIR=str(belt), ORG_PYTHON=sys.executable)
         subprocess.run([GIT, "init", "-q"], cwd=tree, env=env, check=True)
         subprocess.run([GIT, "add", "-A"], cwd=tree, env=env, check=True)
         log = root / "stub.log"
@@ -182,7 +181,7 @@ def run(
                 (bindir / "pytest").chmod(0o755)
             env["PATH"] = f"{bindir}{os.pathsep}{env['PATH']}"
             env |= {"STUB_LOG": str(log), "STUB_VERSION": pinned(), **stub}
-        as_mise = hermetic.task_run("lint:python-types", body())
+        as_mise = support.task_run("lint:python-types", body())
         done = subprocess.run(
             as_mise.argv,
             cwd=tree,
@@ -317,7 +316,7 @@ class TestTheWiring:
         assert f"  a.py:1: {IGNORED}\n" in done.stderr
 
 
-def seams(text: str) -> hermetic.Called:
+def seams(text: str) -> support.Called:
     """Call python_types_seams in-process on one planted `a.py` (#1697).
 
     Returns:
@@ -326,10 +325,10 @@ def seams(text: str) -> hermetic.Called:
     """
     with tempfile.TemporaryDirectory() as tmp:
         (Path(tmp) / "a.py").write_text(text, encoding="utf-8")
-        return hermetic.call(lambda: python_types_seams.main(["a.py"]), cwd=tmp)
+        return support.call(lambda: python_types_seams.main(["a.py"]), cwd=tmp)
 
 
-def roots(*files: str) -> hermetic.Called:
+def roots(*files: str) -> support.Called:
     """Call python_roots in-process over planted files, as the script does.
 
     Returns:
@@ -340,7 +339,7 @@ def roots(*files: str) -> hermetic.Called:
         for name in files:
             (Path(tmp) / name).parent.mkdir(parents=True, exist_ok=True)
             (Path(tmp) / name).write_text("X = 1\n", encoding="utf-8")
-        return hermetic.call(lambda: python_roots.main([str(BELT), *files]), cwd=tmp)
+        return support.call(lambda: python_roots.main([str(BELT), *files]), cwd=tmp)
 
 
 class TestTheHelpers:
@@ -394,7 +393,7 @@ class TestTheHelpers:
 
     def test_too_few_arguments_is_a_usage_error(self) -> None:
         """No belt or no file: exit 2 with the usage."""
-        done = hermetic.call(lambda: python_roots.main([str(BELT)]))
+        done = support.call(lambda: python_roots.main([str(BELT)]))
         assert (2, f"{TASK}: usage: belt python-roots <belt-root> <file>...\n") == (
             done.returncode,
             done.stderr,
@@ -463,7 +462,7 @@ class TestTheConfig:
                 "import sys\n"
                 "from pathlib import Path\n\n"
                 "import helper\n\n"
-                "sys.path.append(str(hermetic.CANON"
+                "sys.path.append(str(support.CANON"
                 ' / "tools"))\n\n'
                 "import shared\n\n"
                 "A: int = helper.NAME\n"

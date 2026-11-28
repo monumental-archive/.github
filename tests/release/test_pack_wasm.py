@@ -9,8 +9,7 @@ THE STUB IS NPM PACK'S SHAPE: `npm pack <dir> --silent` writes
 <name>-<version>.tgz into its working directory and prints that name
 alone. A row can make it write an empty file, write nothing and print
 nothing, or fail.
-
-pytest, run by `mise run test`. Every git call"""
+"""
 
 import hashlib
 import json
@@ -24,9 +23,9 @@ from tempfile import TemporaryDirectory
 import pytest
 
 from belt import workflow_yaml
-from tests import hermetic
+from tests import support
 
-CANON = hermetic.CANON
+CANON = support.CANON
 WORKFLOW = CANON / ".github" / "workflows" / "build-wasm-npm.yml"
 HELPER = ".org-canon/release/pack_wasm.py"
 REPO = "monumental-archive/edtf"
@@ -103,11 +102,11 @@ def run_helper(manifest: object, mode: str = "ok") -> Run:
             p.mkdir(parents=True)
         (stubs / "npm").write_text(NPM_STUB)
         (stubs / "npm").chmod(0o755)
-        hermetic.canon(work / ".org-canon")
+        support.canon(work / ".org-canon")
         (pkg / "package.json").write_text(json.dumps(manifest))
         log, outputs = tmp / "npm.log", tmp / "github_output"
         outputs.touch()
-        env = hermetic.env(
+        env = support.env(
             PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}",
             UNTRUSTED_VERSION=VERSION,
             UNTRUSTED_CRATE_DIR="crates/edtf-wasm",

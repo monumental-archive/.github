@@ -6,7 +6,7 @@ or skipped on a file CI never sees. Every such task now takes its list
 from mise/action-files.sh (`workflow_files`, `workflow_template_files`).
 
 Each row runs a task's own body, read from mise/config.toml, through
-`hermetic.task_run` in a planted git repository, and was red on the
+`support.task_run` in a planted git repository, and was red on the
 glob: an untracked `stray.yml` that breaks the task's rule, beside one
 clean tracked workflow, is not read (exit 0, never named); the same
 file tracked is the task's finding, naming it. `fix:gate-stub` leaves an
@@ -18,8 +18,7 @@ is not satisfied by an untracked workflow.
 lint:actions runs the belt's real actionlint, so this file runs under
 the belt's tools (`mise run test`, or `mise x --`).
 
-GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. pytest, run by
-`mise run test`.
+GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom.
 """
 
 import subprocess
@@ -29,12 +28,12 @@ from pathlib import Path
 import pytest
 
 from belt import decoded
-from tests import hermetic
+from tests import support
 
-BELT = hermetic.MISE
+BELT = support.MISE
 CANON_DIR = BELT.parent
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
+BASH = support.tool("bash")
+GIT = support.tool("git")
 STRAY = ".github/workflows/stray.yml"
 CLEAN = (
     "name: clean\non: push\npermissions: {}\njobs:\n  a:\n"
@@ -129,7 +128,7 @@ class TestPlanted:
         self.tmp = tmp_path
         self.tree = self.tmp / "tree"
         self.tree.mkdir()
-        self.env = hermetic.env(
+        self.env = support.env(
             ORG_BELT_DIR=str(BELT),
             ORG_CANON_DIR=str(CANON_DIR),
             ORG_PYTHON=sys.executable,
@@ -175,7 +174,7 @@ class TestPlanted:
             The finished process.
 
         """
-        as_mise = hermetic.task_run(task, body(task))
+        as_mise = support.task_run(task, body(task))
         return subprocess.run(
             as_mise.argv,
             cwd=self.tree,
@@ -263,7 +262,7 @@ class TestOnlyUntracked(TestPlanted):
         runner = "jobs:\n  a:\n    steps:\n      - run: mise run audit:custom\n"
         self.plant(STRAY, runner, track=False)
         stubs = {"own-audits.sh": OWN_AUDIT_STUB}
-        belt = hermetic.belt(self.tmp / "belt", stubs=stubs)
+        belt = support.belt(self.tmp / "belt", stubs=stubs)
         done = self.task("lint:audit-scheduled", ORG_BELT_DIR=str(belt))
         assert done.returncode == 1, done.stdout + done.stderr
         expected = [

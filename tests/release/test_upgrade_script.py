@@ -46,8 +46,6 @@ three-line guard (#792, #801). Without a server, the rows below red on
 that shape too: planting the v1.58.2 guard in the generator fails five
 of them, the byte-for-byte reproduction among them (#1807).
 
-pytest, run by `mise run test`.py —
-
 Run through the gate as `mise run test`, which `ci` collects.
 """
 
@@ -57,12 +55,12 @@ from tempfile import TemporaryDirectory
 
 import pytest
 
-from tests import hermetic
+from tests import support
 
-CANON = hermetic.CANON
+CANON = support.CANON
 SCRIPT = CANON / "release" / "generate-pgrx-upgrade.sh"
 TESTDATA = Path(__file__).resolve().parent / "testdata"
-PYTHON = hermetic.optional_tool("python3")
+PYTHON = support.optional_tool("python3")
 
 # The real capture, and the real thing the release path derived from it.
 REAL_PREV = (TESTDATA / "lab_pg--0.27.0.sql").read_text()
@@ -139,7 +137,7 @@ class Derivation:
             (self.root / "next-data.sql").write_text(data)
             args.append(str(self.root / "next-data.sql"))
         prev_v, new_v = versions
-        env = hermetic.env(
+        env = support.env(
             EXT_NAME=ext,
             PREV_V=prev_v,
             NEW_V=new_v,
@@ -148,7 +146,7 @@ class Derivation:
             MISE_TASK_NAME="generate-pgrx-upgrade.sh",
         )
         result = subprocess.run(
-            [hermetic.tool("python3"), str(self.source), *args],
+            [support.tool("python3"), str(self.source), *args],
             env=env,
             capture_output=True,
             text=True,

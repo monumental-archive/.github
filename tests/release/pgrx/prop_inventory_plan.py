@@ -31,7 +31,7 @@ from hypothesis import strategies as st
 from belt import decoded
 from belt.release.pgrx import inventory_plan as inventory
 from belt.typed_hypothesis import given
-from tests import hermetic
+from tests import support
 
 CRATE = st.from_regex(r"[A-Za-z][A-Za-z0-9_-]{0,15}", fullmatch=True)
 MAJOR = st.integers(10, 99).map(str)
@@ -52,7 +52,7 @@ def as_helper() -> contextlib.ExitStack:
 
     """
     stack = contextlib.ExitStack()
-    hermetic.name_task(stack.enter_context(pytest.MonkeyPatch.context()), "")
+    support.name_task(stack.enter_context(pytest.MonkeyPatch.context()), "")
     stack.enter_context(pytest.MonkeyPatch.context()).setattr(
         sys, "argv", ["inventory_plan.py"]
     )

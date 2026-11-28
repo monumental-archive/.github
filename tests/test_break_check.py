@@ -13,8 +13,7 @@ The declaration's reading (mise/declared_break.py) is held to the
 reader: a class runs the belt's pinned stele over scratch commits and
 asserts it files a commit under "Breaking" exactly when the reading says
 the pull request declares a break.
-
-pytest, run by `mise run test`."""
+"""
 
 from __future__ import annotations
 
@@ -26,14 +25,14 @@ from pathlib import Path
 import pytest
 
 from belt import declared_break, workflow_yaml
-from tests import hermetic
+from tests import support
 
-BELT = hermetic.MISE
+BELT = support.MISE
 SCRIPT = BELT / "break-check.sh"
 CI = BELT.parent / ".github" / "workflows" / "ci.yml"
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
-STELE = hermetic.optional_tool("stele")
+BASH = support.tool("bash")
+GIT = support.tool("git")
+STELE = support.optional_tool("stele")
 LABEL = "break:check"
 DECLARED = f"{LABEL}: declared breaking, nothing to hold\n"
 REMEDY = (
@@ -153,9 +152,9 @@ class TestPlanted:
         self.log.touch()
         self.home = self.tmp / "home"
         self.home.mkdir()
-        self.env = hermetic.env(self.home) | {
+        self.env = support.env(self.home) | {
             "PATH": f"{bins}{os.pathsep}{os.environ['PATH']}",
-            "ORG_BELT_DIR": str(hermetic.belt(self.tmp / "belt")),
+            "ORG_BELT_DIR": str(support.belt(self.tmp / "belt")),
             "PLANT_LOG": str(self.log),
             "PLANT_EXITS": str(self.exits),
         }
@@ -166,7 +165,7 @@ class TestPlanted:
         subprocess.run(
             [GIT, "-c", "commit.gpgsign=false", *args],
             cwd=self.tree,
-            env=hermetic.env(self.home),
+            env=support.env(self.home),
             check=True,
             capture_output=True,
         )
@@ -564,7 +563,7 @@ class TestTheReaderAgrees:
         self.tmp = tmp_path
         self.repo = self.tmp / "repo"
         self.repo.mkdir()
-        self.env = hermetic.env(self.tmp)
+        self.env = support.env(self.tmp)
         self.git("init", "-q", "-b", "main")
         self.git("commit", "-q", "--allow-empty", "-m", "chore: start")
         self.git("tag", "v1.0.0")

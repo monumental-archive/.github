@@ -8,8 +8,7 @@ under the belt's test runner, at ORG_SHARD 1/2 and 2/2), merge them,
 and hold the figure to one runner's over the same suite; then the lcov
 merge (the TypeScript and Rust legs) to its union, its totals to
 istanbul's own rounding, and each refusal to its message.
-
-pytest, run by `mise run test`."""
+"""
 
 import contextlib
 import io
@@ -21,11 +20,11 @@ from pathlib import Path
 import pytest
 
 from belt import coverage_merge, decoded
-from tests import hermetic
+from tests import support
 
-HERE = hermetic.MISE
+HERE = support.MISE
 RUNNER = HERE / "unittest_guarded.py"
-COVERAGE = hermetic.tool("coverage")
+COVERAGE = support.tool("coverage")
 
 CODE = """\
 def f(x):
@@ -121,7 +120,7 @@ class TestMeasured:
                 "test_*.py",
             ],
             cwd=self.tree,
-            env=hermetic.env(
+            env=support.env(
                 ORG_SHARD=spec, ORG_TEST_WORKERS="1", PYTHONPATH=f"{self.tree}:{HERE}"
             ),
             capture_output=True,
@@ -145,7 +144,7 @@ class TestMeasured:
             done = subprocess.run(
                 [COVERAGE, *args, f"--rcfile={rc}"],
                 cwd=self.tree,
-                env=hermetic.env(),
+                env=support.env(),
                 capture_output=True,
                 text=True,
                 check=False,

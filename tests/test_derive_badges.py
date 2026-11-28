@@ -16,8 +16,7 @@ except in the row that plants one without the `continuous` block.
 Each red row is red-when-planted and asserts the message, not just the
 exit status: a planted row scored on exit alone can pass for the wrong
 reason.
-
-pytest, run by `mise run test`.py."""
+"""
 
 import json
 import re
@@ -26,13 +25,13 @@ import tempfile
 from pathlib import Path
 
 from belt import decoded, workflow_yaml
-from tests import hermetic
+from tests import support
 
-CANON = hermetic.CANON
+CANON = support.CANON
 BELT = CANON / "mise"
 SCRIPT = BELT / "derive-badges.sh"
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
+BASH = support.tool("bash")
+GIT = support.tool("git")
 
 POLICY = decoded.as_object(
     decoded.load_json((CANON / "slsa" / "assert-policy.json").read_text("utf-8")),
@@ -123,7 +122,7 @@ def render(
             path = root / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text, encoding="utf-8")
-        env = hermetic.env()
+        env = support.env()
         env |= {"ORG_BELT_DIR": str(BELT), "ORG_CANON_DIR": str(CANON)}
         if policy is not None:
             fake = Path(tmp) / "canon"

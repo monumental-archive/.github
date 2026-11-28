@@ -8,8 +8,7 @@ own tasks with no workflow (alone and beside a red belt half), own tasks
 each run by a workflow, collected by the canon itself (`./`), a
 scheduler in a file the selection does not name (through the body), own tasks with no
 canon, a file that is not UTF-8, and no `--own`.
-
-pytest, run by `mise run test`."""
+"""
 
 import subprocess
 import sys
@@ -19,7 +18,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import audit_scheduled, decoded
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -37,7 +36,7 @@ def _task(as_task: Callable[[str], None]) -> None:
 pytestmark = pytest.mark.usefixtures("_task")
 
 
-BELT = hermetic.MISE
+BELT = support.MISE
 CANON = "monumental-archive/.github"
 OWN_AUDITS_STUB = "own_audit_tasks() { :; }\n"
 CONFIG = '[tasks."audit:fuzz"]\nrun = "x"\n\n[tasks."audit:fuzz-long"]\nrun = "x"\n'
@@ -101,12 +100,12 @@ class TestHelper:
         self.tmp = tmp_path
         self.tree = self.tmp / "tree"
         (self.tree / ".github" / "workflows").mkdir(parents=True)
-        self.env = hermetic.env(MISE_TASK_NAME=TASK, ORG_FINDINGS="")
+        self.env = support.env(MISE_TASK_NAME=TASK, ORG_FINDINGS="")
         self.git("init", "-q")
 
     def git(self, *args: str) -> None:
         """Run git in the planted tree."""
-        git = hermetic.tool("git")
+        git = support.tool("git")
         subprocess.run([git, *args], cwd=self.tree, env=self.env, check=True)
 
     def config(self, text: str) -> None:
@@ -131,7 +130,7 @@ class TestHelper:
             path.write_text(text, encoding="utf-8")
         return rel
 
-    def helper(self, *argv: str) -> hermetic.Called:
+    def helper(self, *argv: str) -> support.Called:
         """Call the helper's main in the planted tree.
 
         Returns:
@@ -139,7 +138,7 @@ class TestHelper:
 
         """
         args = list(argv)
-        return hermetic.call(
+        return support.call(
             lambda: audit_scheduled.main(args), env=self.env, cwd=self.tree
         )
 
@@ -235,9 +234,9 @@ class TestHelper:
         self.plant("top.yml", "run: true\n")
         self.plant("notes.md", "run: mise run audit:fuzz\n")
         stubs = {"own-audits.sh": OWN_AUDITS_STUB}
-        belt = hermetic.belt(self.tmp / "belt", stubs=stubs)
-        hermetic.track(self.tree)
-        as_mise = hermetic.task_run(TASK, body())
+        belt = support.belt(self.tmp / "belt", stubs=stubs)
+        support.track(self.tree)
+        as_mise = support.task_run(TASK, body())
         env = self.env | {"ORG_BELT_DIR": str(belt), "ORG_PYTHON": sys.executable}
         done = subprocess.run(
             as_mise.argv,

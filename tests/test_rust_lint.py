@@ -18,8 +18,7 @@ The task's body after its guard is mise/rust_lint.py (#1911). The
 rows from `Planted` on call its `main` in this process, one row per
 branch of lint:rust and of fix:rust with its message asserted, against
 a planted belt whose ladder and pgrx provisioning are stubs.
-
-pytest, run by `mise run test`.py;"""
+"""
 
 import itertools
 import json
@@ -32,14 +31,14 @@ from pathlib import Path
 import pytest
 
 from belt import decoded, pgrx_postgres, rust_lint, rust_workspaces
-from tests import hermetic
+from tests import support
 
-BELT = hermetic.MISE
+BELT = support.MISE
 METADATA = (
-    hermetic.CANON / "tests" / "release" / "testdata"
+    support.CANON / "tests" / "release" / "testdata"
 ) / "edtf-cargo-metadata.json"
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
+BASH = support.tool("bash")
+GIT = support.tool("git")
 MEMBERS = [
     "edtf-core",
     "edtf-calendars",
@@ -172,7 +171,7 @@ class TestEveryMemberIsLinted:
                 (bindir / name).write_text(text, encoding="utf-8")
                 (bindir / name).chmod(0o755)
             log = root / "clippy.log"
-            env = hermetic.env(
+            env = support.env(
                 root / "home",
                 ORG_BELT_DIR=str(BELT),
             )
@@ -182,7 +181,7 @@ class TestEveryMemberIsLinted:
             env["STUB_METADATA"] = str(METADATA)
             env["CLIPPY_LOG"] = str(log)
             env |= stub
-            as_mise = hermetic.task_run("lint:rust", body())
+            as_mise = support.task_run("lint:rust", body())
             done = subprocess.run(
                 as_mise.argv,
                 cwd=tree,
@@ -368,7 +367,7 @@ class TestTheLadderNamesItsContradictions:
             [BASH, "-c", f'. "$1" && {call}', "ladder", str(BELT / "clippy-ladder.sh")],
             capture_output=True,
             text=True,
-            env=hermetic.env(),
+            env=support.env(),
             check=False,
         )
         assert done.returncode == 0, done.stdout + done.stderr
@@ -401,7 +400,7 @@ class TestTheStubOutlivesItsReader:
                 done = subprocess.run(
                     [BASH, str(stub), "component", "list", "--installed"],
                     stdout=write,
-                    env=hermetic.env(),
+                    env=support.env(),
                     check=False,
                 )
             finally:
@@ -606,7 +605,7 @@ class TestPlanted:
         # The stubs' own interpreter; the rest of PATH is the system's,
         # which holds no cargo, rustup or mise.
         (self.bins / "bash").symlink_to(BASH)
-        self.belt = hermetic.belt(
+        self.belt = support.belt(
             tmp / "belt",
             stubs={
                 "clippy-ladder.sh": STUB_LADDER,
@@ -618,7 +617,7 @@ class TestPlanted:
         self.metadata.write_text(FOUR, encoding="utf-8")
         self.fuzz_metadata = tmp / "fuzz-metadata.json"
         self.fuzz_metadata.write_text(FUZZ, encoding="utf-8")
-        self.env = hermetic.env(
+        self.env = support.env(
             tmp / "home",
             PATH=os.pathsep.join((str(self.bins), "/usr/bin", "/bin")),
             MISE_TASK_NAME=self.task,
@@ -641,7 +640,7 @@ class TestPlanted:
             subprocess.run([GIT, "init", "-q"], cwd=self.tree, env=self.env, check=True)
         subprocess.run([GIT, "add", "."], cwd=self.tree, env=self.env, check=True)
 
-    def call(self, *argv: str, **stub: str) -> hermetic.Called:
+    def call(self, *argv: str, **stub: str) -> support.Called:
         """Call rust_lint.py's main in the tree, from the planted belt.
 
         Returns:
@@ -652,7 +651,7 @@ class TestPlanted:
         # stub on the row's PATH is the cargo it asks.
         with pytest.MonkeyPatch.context() as patched:
             patched.setattr(rust_workspaces, "CARGO", str(self.bins / "cargo"))
-            return hermetic.call(
+            return support.call(
                 lambda: rust_lint.main(list(argv)),
                 env=self.env | {"ORG_BELT_DIR": str(self.belt)} | stub,
                 cwd=self.tree,
@@ -669,7 +668,7 @@ class TestPlanted:
             return []
         return self.log.read_text(encoding="utf-8").splitlines()
 
-    def assert_finding(self, done: hermetic.Called, status: int, *lines: str) -> None:
+    def assert_finding(self, done: support.Called, status: int, *lines: str) -> None:
         """Assert the status, and the finding's lines in order on stderr."""
         assert status == done.returncode, done.stdout + done.stderr
         head, *detail = lines

@@ -13,8 +13,7 @@ The forge's answers are shaped on real ones: the artifacts listing and
 a merge-group run read from monumental-archive/.github on 2026-11-20
 (`gh api .../actions/artifacts?name=coverage-reports`, `.../runs`), with
 the ids, commits and outcomes each row needs.
-
-pytest, run by `mise run test`.py;"""
+"""
 
 import contextlib
 import io
@@ -28,11 +27,11 @@ from pathlib import Path
 import pytest
 
 from belt.release import coverage_figures as figures
-from tests import hermetic
+from tests import support
 
-HERE = hermetic.RELEASE
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
+HERE = support.RELEASE
+BASH = support.tool("bash")
+GIT = support.tool("git")
 
 SHA = "977d99f0ee27ca9d8a3c9c4cf5911105c88241bf"
 OTHER = "2980f36dba6e88b75ecd97536850263c140a4103"
@@ -448,7 +447,7 @@ class TestDerive:
         # The canon whole, as the release job has it: a helper that comes
         # to import another belt module finds it, and only the
         # measurement is a stub.
-        canon = hermetic.canon(
+        canon = support.canon(
             self.base / "canon", stubs={"mise/coverage-measure.sh": MEASURE}
         )
         (canon / "mise" / "coverage-measure.sh").chmod(0o755)
@@ -461,7 +460,7 @@ class TestDerive:
         self.tree = self.base / "tree"
         self.tree.mkdir()
         (self.tree / "a.py").write_text("", encoding="utf-8")
-        env = hermetic.env(self.base / "home")
+        env = support.env(self.base / "home")
         subprocess.run(
             [
                 sys.executable,
@@ -537,7 +536,7 @@ class TestDerive:
             The finished step.
 
         """
-        env = hermetic.env(
+        env = support.env(
             self.base / "home",
             VERSION="1.1.0",
             GITHUB_REPOSITORY="monumental-archive/.github",

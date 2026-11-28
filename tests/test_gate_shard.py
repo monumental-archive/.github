@@ -8,8 +8,7 @@ where nothing is split), every refusal of the file to its message, the
 table to the belt (every row a lint the belt defines), the deal to its
 two properties (each lint on exactly one shard; the costliest on
 different shards), and a cost to the tree.
-
-pytest, run by `mise run test`."""
+"""
 
 from pathlib import Path
 
@@ -17,9 +16,9 @@ import pytest
 
 from belt import decoded, gate_shard
 from belt.tracked import tracked
-from tests import hermetic
+from tests import support
 
-HERE = hermetic.MISE
+HERE = support.MISE
 CI = HERE.parent / ".github" / "workflows" / "ci.yml"
 
 

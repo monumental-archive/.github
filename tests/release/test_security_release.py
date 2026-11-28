@@ -26,8 +26,7 @@ file hoped it would.
 The whole path was also run once against the live forge (stele's main,
 its real Release PR, the real audits) before these rows were written;
 that run is what found the missing-toolchain row below.
-
-pytest, run by `mise run test`. Every git call"""
+"""
 
 import json
 import os
@@ -39,7 +38,7 @@ from pathlib import Path
 import pytest
 
 from belt import decoded
-from tests import hermetic
+from tests import support
 
 
 def dumps(value: object) -> str:
@@ -62,10 +61,10 @@ def report_of(text: str) -> dict[str, object]:
     return decoded.as_object(decoded.load_json(text), "the report")
 
 
-CANON = hermetic.CANON
+CANON = support.CANON
 SCRIPT = CANON / "release" / "security-release.sh"
 DATA = Path(__file__).resolve().parent / "testdata" / "security-release"
-BASH = hermetic.tool("bash")
+BASH = support.tool("bash")
 
 AFFECTED = (DATA / "report-affected.json").read_text()
 CLEAN = (DATA / "report-clean.json").read_text()
@@ -178,7 +177,7 @@ class Repo:
         """Lay out the tree, the stand-ins and the passing case's inputs.
 
         A real tool the script calls and PATH lacks is red by name
-        (hermetic.tool). Loud, never a skip: a skipped table reads as a
+        (support.tool). Loud, never a skip: a skipped table reads as a
         passing one.
         """
         self.root = root
@@ -191,7 +190,7 @@ class Repo:
         for d in (self.tree, self.fake, self.bin, self.tools, self.canon / "slsa", vex):
             d.mkdir(parents=True)
         for tool in REAL_TOOLS:
-            (self.tools / tool).symlink_to(hermetic.tool(tool))
+            (self.tools / tool).symlink_to(support.tool(tool))
         for name, body in FAKES.items():
             path = self.bin / name
             path.write_text(textwrap.dedent(body))
@@ -242,7 +241,7 @@ class Repo:
         # The stand-ins, then the linked real tools, and nothing else:
         # whether `go` exists is a row's decision, never the machine's.
         path = os.pathsep.join([str(self.bin), str(self.tools)])
-        env = hermetic.env(
+        env = support.env(
             PATH=path,
             HOME=str(self.root),
             FAKE=str(self.fake),

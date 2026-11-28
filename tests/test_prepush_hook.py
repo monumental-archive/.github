@@ -24,8 +24,7 @@ absent the class skips by name.
 Mutation, recorded on #1281's pull request: with the job put back to a
 plain `run:` line, the delete-only, add-then-delete, HEAD-elsewhere and
 already-merged rows go red with no marker.
-
-pytest, run by `mise run test`.py."""
+"""
 
 import os
 import subprocess
@@ -33,10 +32,10 @@ from pathlib import Path
 
 import pytest
 
-from tests import hermetic
+from tests import support
 
-LEFTHOOK = hermetic.optional_tool("lefthook")
-GIT = hermetic.optional_tool("git")
+LEFTHOOK = support.optional_tool("lefthook")
+GIT = support.optional_tool("git")
 
 # What the stub records for one gate run: the job's `mise run ci`.
 GATE_RAN = "run ci\n"
@@ -75,7 +74,7 @@ def consumer_config(
 
 def plant_canon(tree: Path, *also: str) -> None:
     """Plant the canon in `tree`: its hook config, and what `also` names."""
-    hermetic.canon(tree, "lefthook/org-hooks.yml", *also)
+    support.canon(tree, "lefthook/org-hooks.yml", *also)
 
 
 def write(cwd: Path, name: str) -> None:
@@ -100,11 +99,11 @@ class TestPrePushGate:
         (stubs / "mise").write_text(STUB_MISE, encoding="utf-8")
         (stubs / "mise").chmod(0o755)
 
-        env = hermetic.env()
+        env = support.env()
         tools = [
             str(stubs),
-            str(Path(hermetic.tool("lefthook")).parent),
-            str(Path(hermetic.tool("git")).parent),
+            str(Path(support.tool("lefthook")).parent),
+            str(Path(support.tool("git")).parent),
         ]
         env |= {
             "PATH": os.pathsep.join([*tools, env.get("PATH", "")]),
@@ -150,7 +149,7 @@ class TestPrePushGate:
 
         """
         return subprocess.run(
-            [hermetic.tool("git"), *args],
+            [support.tool("git"), *args],
             cwd=cwd,
             env=self.env,
             capture_output=True,
@@ -192,7 +191,7 @@ class TestPrePushGate:
     def install(self, clone: Path) -> None:
         """Install the hooks; lefthook fetches the canon remote here."""
         done = subprocess.run(
-            [hermetic.tool("lefthook"), "install"],
+            [support.tool("lefthook"), "install"],
             cwd=clone,
             env=self.env,
             capture_output=True,

@@ -5,8 +5,7 @@ the helper's own branches: where text that reads `#![allow(` is not an
 attribute (a comment, a doc comment, a string, a raw string, a char),
 where an attribute's own literal holds `allow(`, and each manifest
 shape that is or is not a lint table.
-
-pytest, run by `mise run test`.py;"""
+"""
 
 import contextlib
 import io
@@ -20,7 +19,7 @@ import pytest
 
 from belt import decoded
 from belt import rust_suppressions as rsup
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -38,7 +37,7 @@ def _task(as_task: Callable[[str], None]) -> None:
 pytestmark = pytest.mark.usefixtures("_task")
 
 
-HELPER = hermetic.MISE / "rust_suppressions.py"
+HELPER = support.MISE / "rust_suppressions.py"
 
 
 Found = list[tuple[int, str]]
@@ -197,7 +196,7 @@ class TestMain:
             [sys.executable, str(HELPER)],
             cwd=root,
             input=names,
-            env=hermetic.env(MISE_TASK_NAME=TASK),
+            env=support.env(MISE_TASK_NAME=TASK),
             capture_output=True,
             text=True,
             check=False,

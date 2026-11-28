@@ -5,8 +5,7 @@ it) and a PATH holding a link to that entry point and, unless the row
 removes it, a `python3`, then calls `main` in this process. A refusal
 row asserts the whole line, so the wording the four sites share is
 pinned here once.
-
-pytest, run by `mise run test`.py;"""
+"""
 
 import os
 from pathlib import Path
@@ -14,12 +13,12 @@ from pathlib import Path
 import pytest
 
 from belt import tool_python
-from tests import hermetic
+from tests import support
 
 LABEL = "probe"
 
 # The suite's interpreter, resolved: the planted PATH holds no mise.
-PYTHON3 = os.path.realpath(hermetic.tool("python3"))
+PYTHON3 = os.path.realpath(support.tool("python3"))
 
 # A start whose interpreter is gone: execve fails before any code runs.
 GONE = "#!/nowhere/python\n"
@@ -67,7 +66,7 @@ class TestToolPython:
         path.write_text(text, encoding="utf-8")
         path.chmod(0o755)
 
-    def call(self, *argv: str, **env: str) -> hermetic.Called:
+    def call(self, *argv: str, **env: str) -> support.Called:
         """Call `main` with the planted PATH.
 
         Returns:
@@ -76,8 +75,8 @@ class TestToolPython:
         """
         # The caller's label is its task's own name, as the properties
         # scripts pass it: the refusal reads `<label>: …` (#1934).
-        environ = hermetic.env(PATH=str(self.bins), MISE_TASK_NAME=LABEL, **env)
-        return hermetic.call(
+        environ = support.env(PATH=str(self.bins), MISE_TASK_NAME=LABEL, **env)
+        return support.call(
             lambda: tool_python.main([LABEL, "coverage", *argv]), env=environ
         )
 

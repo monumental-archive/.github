@@ -14,8 +14,7 @@ shared library built here, so they need `cc`, `readelf`, `objcopy` and
 `strip` (GNU, ELF). Where those are absent (a Mac) the rows are skipped
 by name; on the gate's runner a missing tool is a failure, never a skip
 that reads like a pass (#364).
-
-pytest, run by `mise run test`."""
+"""
 
 import json
 import os
@@ -30,15 +29,15 @@ from tempfile import TemporaryDirectory
 import pytest
 
 from belt.release.pgrx import previous_release
-from tests import hermetic
+from tests import support
 
-CANON = hermetic.CANON
+CANON = support.CANON
 PGRX = CANON / "release" / "pgrx"
 PREVIOUS = PGRX / "previous_release.py"
-BASH = hermetic.tool("bash")
+BASH = support.tool("bash")
 ON_RUNNER = os.environ.get("GITHUB_ACTIONS") == "true"
 # What a helper's run answered: a child's, or an in-process call's.
-type Done = subprocess.CompletedProcess[str] | hermetic.Called
+type Done = subprocess.CompletedProcess[str] | support.Called
 
 
 @pytest.fixture
@@ -78,7 +77,7 @@ def run(
     """
     return subprocess.run(
         argv,
-        env=hermetic.env(**env),
+        env=support.env(**env),
         cwd=cwd,
         capture_output=True,
         text=True,
@@ -258,7 +257,7 @@ case "${verb}" in
 esac
 """
 
-JQ = hermetic.optional_tool("jq")
+JQ = support.optional_tool("jq")
 TESTDATA = Path(__file__).resolve().parent / "testdata"
 DEMO_CELL = "demo_ext-1.1.0-pg18-linux-arm64.tar.gz"
 
@@ -337,7 +336,7 @@ class TestPreviousRelease:
 
         with pytest.MonkeyPatch.context() as patched:
             patched.setattr(previous_release, "GH", str(self.gh))
-            return hermetic.call(call, env=hermetic.env(**env), cwd=self.root)
+            return support.call(call, env=support.env(**env), cwd=self.root)
 
     def previous(
         self,
@@ -736,7 +735,7 @@ class TestNoSiteAsksForTheLatestRelease:
     def test_no_untagged_release_view(self) -> None:
         """Every `gh release view` in release/ names the release it reads."""
         root = CANON
-        tracked = hermetic.tracked(root, "release")
+        tracked = support.tracked(root, "release")
         found = []
         for path in tracked:
             name = Path(path).name
@@ -911,7 +910,7 @@ class TestContainerScripts:
 # --------------------------------------------------------------------
 
 ELF_TOOLS = ("cc", "readelf", "objcopy", "strip")
-MISSING = [t for t in ELF_TOOLS if hermetic.optional_tool(t) is None]
+MISSING = [t for t in ELF_TOOLS if support.optional_tool(t) is None]
 
 
 def elf_tools_present() -> bool:
@@ -930,7 +929,7 @@ def elf_tools_present() -> bool:
     if MISSING:
         return False
     probe = subprocess.run(
-        [hermetic.tool("readelf"), "--version"], capture_output=True, check=False
+        [support.tool("readelf"), "--version"], capture_output=True, check=False
     )
     return probe.returncode == 0
 
@@ -958,14 +957,14 @@ def build_library(
     src = path.with_suffix(".c")
     src.write_text(source)
     flags = ["-g", "-O0", "-shared", "-fPIC"] + ([] if libc else ["-nostdlib"])
-    subprocess.run([hermetic.tool("cc"), *flags, "-o", str(path), str(src)], check=True)
+    subprocess.run([support.tool("cc"), *flags, "-o", str(path), str(src)], check=True)
     src.unlink()
     if dep:
         payload = path.with_suffix(".dep")
         payload.write_bytes(b"\x78\x9c\x03\x00\x00\x00\x00\x01")
         subprocess.run(
             [
-                hermetic.tool("objcopy"),
+                support.tool("objcopy"),
                 "--add-section",
                 f".dep-v0={payload}",
                 str(path),
@@ -1038,7 +1037,7 @@ class TestDebugSplit:
         """
         env = {"SEEN": str(self.root / "seen")}
         for tool in ("objcopy", "strip", "readelf"):
-            env[f"REAL_{tool}"] = hermetic.tool(tool)
+            env[f"REAL_{tool}"] = support.tool(tool)
         if shim:
             bindir = self.root / "bin"
             bindir.mkdir(exist_ok=True)
@@ -1056,7 +1055,7 @@ class TestDebugSplit:
 
         """
         return subprocess.run(
-            [hermetic.tool("readelf"), "-S", "--wide", str(path)],
+            [support.tool("readelf"), "-S", "--wide", str(path)],
             capture_output=True,
             text=True,
             check=True,

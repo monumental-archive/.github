@@ -10,8 +10,7 @@ directory holding a planted crate. The golden is the step's own jq
 output for crate `pg_edtf` and major 16, recorded byte for byte when the
 step was still shell (the same bytes stele#396 holds as its producer
 golden), so a passing row is the helper writing what the leg wrote.
-
-pytest, run by `mise run test`. Every git call"""
+"""
 
 import subprocess
 import sys
@@ -20,10 +19,10 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from belt import decoded, plan_producers, workflow_yaml
-from tests import hermetic
+from tests import support
 import pytest
 
-CANON = hermetic.CANON
+CANON = support.CANON
 WORKFLOW = CANON / ".github" / "workflows" / "build-pgrx-extension.yml"
 HELPER = CANON / "release" / "pgrx" / "inventory_plan.py"
 STEP = "Emit the inventory plan (what this cell built, from its own inputs)"
@@ -91,7 +90,7 @@ def run_helper(
         (work / "crate").mkdir()
         if manifest is not None:
             (work / "crate" / "Cargo.toml").write_text(manifest)
-        env = hermetic.env()
+        env = support.env()
         if prefix is not None:
             env["PLAN_DOC_PREFIX"] = prefix
         result = subprocess.run(

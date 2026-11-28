@@ -1,4 +1,4 @@
-"""Tests for hermetic.py and the law it holds the suite to (#1514).
+"""Tests for support.py and the law it holds the suite to (#1514).
 
 The helper: a variable the suite's process carries reaches a fixture
 only if INHERITED or a named tool extension names it; a row's override
@@ -6,9 +6,8 @@ always does. Its reader names the files a checkout tracks (#1618).
 The law: no
 test file in the four discovery roots builds a fixture's environment by
 copying the caller's, or asks git for a plain listing of what a tree
-tracks instead of calling hermetic.tracked (#1618).
-
-pytest, run by `mise run test`.py;"""
+tracks instead of calling support.tracked (#1618).
+"""
 
 import ast
 import os
@@ -23,17 +22,17 @@ from unittest import mock
 import pytest
 
 from belt import call_names, typed_std
-from tests import hermetic
+from tests import support
 import contextlib
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from contextlib import AbstractContextManager
 
-HERE = hermetic.MISE
+HERE = support.MISE
 
 CANON = HERE.parent
-GIT = hermetic.tool("git")
+GIT = support.tool("git")
 ROOTS = ("mise", "release", ".github/rekor-monitor", "settings")
 
 # The release job's step inputs, the runner's ambient, and the
@@ -311,7 +310,7 @@ class Environments:
             scope = self.scope(scope)
 
     def hermetic(self, node: ast.AST, seen: frozenset[str]) -> bool | None:
-        """Say whether an environment starts from hermetic.env.
+        """Say whether an environment starts from support.env.
 
         Returns:
             True when it does, False when it is built otherwise, None
@@ -358,15 +357,15 @@ class Environments:
         return None
 
     def called(self, call: ast.Call, seen: frozenset[str]) -> bool:
-        """Say whether a call returns an environment from hermetic.env.
+        """Say whether a call returns an environment from support.env.
 
         Returns:
-            True for `hermetic.env(...)`, an alias of it, `dict()` of
+            True for `support.env(...)`, an alias of it, `dict()` of
             one, or a function of this file whose every return is one.
 
         """
         name = dotted(call.func) or ""
-        if name == "hermetic.env":
+        if name == "support.env":
             return True
         if name == "dict":
             return bool(call.args) and bool(self.hermetic(call.args[0], seen))
@@ -379,10 +378,10 @@ class Environments:
         aliases = self.values(name, call) if name else None
         if not aliases:
             return False
-        return all(dotted(a) == "hermetic.env" for a in aliases)
+        return all(dotted(a) == "support.env" for a in aliases)
 
     def built_by_hand(self) -> list[int]:
-        """Find every child environment not taken from hermetic.env.
+        """Find every child environment not taken from support.env.
 
         Returns:
             The line of each, sorted.
@@ -458,7 +457,7 @@ def listed_test_files() -> list[str]:
         Their paths, relative to the canon.
 
     """
-    return hermetic.tracked(
+    return support.tracked(
         CANON,
         *(f"{r}/test_*.py" for r in ROOTS),
         *(f"{r}/prop_*.py" for r in ROOTS),
@@ -466,7 +465,7 @@ def listed_test_files() -> list[str]:
 
 
 # What `ls-files` may carry and still be a plain listing of what a tree
-# tracks (#1618): `hermetic.tracked`'s own question. Any other option
+# tracks (#1618): `support.tracked`'s own question. Any other option
 # asks git something else (`--others`, `--modified`, `--stage`, ...).
 PLAIN_LISTING = frozenset({"-z", "--full-name", "--"})
 
@@ -477,7 +476,7 @@ def plain_listings(source: str) -> list[int]:
     The law asks what the listing is, not whose tree it is (#1618's
     amendment): an argument list holding `ls-files` whose later words
     are all pathspecs, `-z`, `--full-name` or `--` is a plain listing,
-    and a test makes it through `hermetic.tracked(root, ...)` whatever
+    and a test makes it through `support.tracked(root, ...)` whatever
     the root: the canon, a parameter, a scratch repository. The list is
     read wherever it is written: a process start, a name, the argument
     of a file's own `git()` wrapper.
@@ -662,17 +661,17 @@ def plants_from_tree(source: str) -> list[int]:
 
 # Excepted by name: the helper itself, and this file, which plants and
 # names the spellings it looks for.
-EXCEPTED = frozenset({"mise/hermetic.py", "mise/test_hermetic.py"})
+EXCEPTED = frozenset({"mise/support.py", "mise/test_support.py"})
 
 
 class TestEnv:
-    """What hermetic.env lets through."""
+    """What support.env lets through."""
 
     def test_planted_variables_do_not_reach_a_fixture(self) -> None:
         """The job's inputs and git's own variables stay with the suite."""
         with pytest.MonkeyPatch.context() as patched:
-            hermetic.patch_env(patched, PLANTED)
-            env = hermetic.env("/fixture-home")
+            support.patch_env(patched, PLANTED)
+            env = support.env("/fixture-home")
         reached = sorted(set(PLANTED) & set(env))
         assert reached == NOTHING
 
@@ -687,48 +686,48 @@ class TestEnv:
             "GIT_COMMITTER_EMAIL",
         }
         with pytest.MonkeyPatch.context() as patched:
-            hermetic.patch_env(patched, PLANTED)
-            env = hermetic.env()
-        extra = set(env) - set(hermetic.INHERITED) - set_here
+            support.patch_env(patched, PLANTED)
+            env = support.env()
+        extra = set(env) - set(support.INHERITED) - set_here
         assert extra == NO_NAMES
 
     def test_a_rows_override_reaches_the_fixture(self) -> None:
         """A row states its own input, and that wins over the suite's."""
         with pytest.MonkeyPatch.context() as patched:
-            hermetic.patch_env(patched, PLANTED)
-            env = hermetic.env("/fixture-home", VERSION="2.0.0")
+            support.patch_env(patched, PLANTED)
+            env = support.env("/fixture-home", VERSION="2.0.0")
         assert env["VERSION"] == "2.0.0"
 
     def test_home_is_the_fixtures_or_the_suites(self) -> None:
         """A given home wins; without one the suite's HOME is kept."""
         suite: dict[str, str] = {"HOME": "/suite-home"}
         with pytest.MonkeyPatch.context() as patched:
-            hermetic.patch_env(patched, suite)
-            assert hermetic.env("/fixture-home")["HOME"] == "/fixture-home"
-            assert hermetic.env()["HOME"] == "/suite-home"
+            support.patch_env(patched, suite)
+            assert support.env("/fixture-home")["HOME"] == "/fixture-home"
+            assert support.env()["HOME"] == "/suite-home"
 
     def test_each_tool_adds_exactly_its_names(self) -> None:
         """A tool extension adds its variables and nothing else."""
-        every = {n for names in hermetic.TOOLS.values() for n in names}
-        planted = dict.fromkeys(every | set(hermetic.INHERITED), "x")
+        every = {n for names in support.TOOLS.values() for n in names}
+        planted = dict.fromkeys(every | set(support.INHERITED), "x")
         with pytest.MonkeyPatch.context() as patched:
-            hermetic.patch_env(patched, planted)
-            base = set(hermetic.env())
-            for tool, names in hermetic.TOOLS.items():
-                assert set(names) - base == set(hermetic.env(tools=(tool,))) - base
+            support.patch_env(patched, planted)
+            base = set(support.env())
+            for tool, names in support.TOOLS.items():
+                assert set(names) - base == set(support.env(tools=(tool,))) - base
 
     def test_an_unknown_tool_is_refused(self) -> None:
         """A tool nobody measured has no extension to borrow."""
         with pytest.raises(KeyError):
-            hermetic.env(tools=("no-such-tool",))
+            support.env(tools=("no-such-tool",))
 
     def test_a_task_body_runs_under_the_belt_shell_and_writer(self) -> None:
         """task_run: the [task_config] shell, the task's name, the writer."""
-        writer = hermetic.CANON / "mise" / "findings.sh"
-        run = hermetic.task_run("lint:demo", "true")
+        writer = support.CANON / "mise" / "findings.sh"
+        run = support.task_run("lint:demo", "true")
         want: dict[str, str] = {"MISE_TASK_NAME": "lint:demo", "BASH_ENV": str(writer)}
         assert want == run.env
-        bash: str = hermetic.tool("bash")
+        bash: str = support.tool("bash")
         argv: list[str] = [bash, "--norc", "-euo", "pipefail", "-c", "true"]
         assert argv == run.argv
         assert writer.is_file()
@@ -736,7 +735,7 @@ class TestEnv:
 
 @pytest.mark.usefixtures("_set_up_test_tracked")
 class TestTracked:
-    """hermetic.tracked, in a checkout (#1618)."""
+    """support.tracked, in a checkout (#1618)."""
 
     @pytest.fixture
     def _set_up_test_tracked(self, tmp_path: Path) -> None:
@@ -750,20 +749,20 @@ class TestTracked:
 
     def git(self, *args: str) -> None:
         """Run git in the planted repository."""
-        subprocess.run([GIT, *args], cwd=self.root, env=hermetic.env(), check=True)
+        subprocess.run([GIT, *args], cwd=self.root, env=support.env(), check=True)
 
     def test_a_checkout_lists_what_git_tracks(self) -> None:
         """The pathspecs select from the tracked files, excludes kept."""
         specs = (":!vendor/**", "*.py", "*.sh")
         selected: list[str] = ["a.py", "d.py", "pkg/b.py", "pkg/c.sh"]
-        assert hermetic.tracked(self.root, *specs) == selected
+        assert support.tracked(self.root, *specs) == selected
 
     def test_an_empty_listing_is_red_by_name(self) -> None:
         """Files asked for and none listed is never a pass."""
         with pytest.raises(RuntimeError) as raised:
-            hermetic.tracked(self.root, "*.rs")
+            support.tracked(self.root, "*.rs")
         assert str(raised.value) == (
-            f"hermetic.tracked: git lists no tracked file under {self.root}"
+            f"support.tracked: git lists no tracked file under {self.root}"
             " for ['*.rs']"
         )
 
@@ -781,7 +780,7 @@ def on_path(path: str) -> AbstractContextManager[object]:
 
 @pytest.mark.usefixtures("_stack", "_set_up_test_tool")
 class TestTool:
-    """hermetic.tool and hermetic.optional_tool (#1684)."""
+    """support.tool and support.optional_tool (#1684)."""
     
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
@@ -799,14 +798,14 @@ class TestTool:
     def test_a_present_tool_is_its_absolute_path(self) -> None:
         """Found on PATH, the path is absolute."""
         with on_path(str(self.bin)):
-            found = hermetic.tool("planted-tool")
+            found = support.tool("planted-tool")
         assert str(self.bin / "planted-tool") == found
         assert Path(found).is_absolute()
 
     def test_a_relative_path_entry_still_gives_an_absolute_path(self) -> None:
         """A relative PATH entry is made absolute and normal, never resolved."""
         with on_path(os.path.relpath(self.bin)):
-            found = hermetic.tool("planted-tool")
+            found = support.tool("planted-tool")
         assert str(self.bin / "planted-tool") == found
 
     def test_a_link_is_not_resolved(self) -> None:
@@ -814,17 +813,17 @@ class TestTool:
         shims = Path(tempfile.mkdtemp()).resolve()
         self.stack.callback(shutil.rmtree, shims)
         (shims / "shim").symlink_to(self.bin / "planted-tool")
-        assert str(shims / "shim") == hermetic.tool("shim", path=str(shims))
+        assert str(shims / "shim") == support.tool("shim", path=str(shims))
 
     def test_a_missing_tool_is_red_by_name(self) -> None:
         """The message names the tool, where it looked, and the remedy."""
         with (
             on_path(str(self.bin)),
-            pytest.raises(hermetic.MissingToolError) as raised,
+            pytest.raises(support.MissingToolError) as raised,
         ):
-            hermetic.tool("no-such-tool")
+            support.tool("no-such-tool")
         assert str(raised.value) == (
-            "hermetic.tool: no-such-tool is not on PATH;"
+            "support.tool: no-such-tool is not on PATH;"
             " the belt provides it: run mise install"
         )
 
@@ -833,27 +832,27 @@ class TestTool:
         empty = Path(tempfile.mkdtemp()).resolve()
         self.stack.callback(shutil.rmtree, empty)
         with on_path(str(empty)):
-            found = hermetic.tool("planted-tool", path=str(self.bin))
+            found = support.tool("planted-tool", path=str(self.bin))
         assert str(self.bin / "planted-tool") == found
         with (
             on_path(str(self.bin)),
-            pytest.raises(hermetic.MissingToolError) as raised,
+            pytest.raises(support.MissingToolError) as raised,
         ):
-            hermetic.tool("planted-tool", path=str(empty))
+            support.tool("planted-tool", path=str(empty))
         assert f"the search path {str(empty)!r}" in str(raised.value)
 
     def test_an_optional_tool_is_none_when_absent(self) -> None:
         """Absence is the row's decision: None, never a raise."""
         with on_path(str(self.bin)):
-            assert hermetic.optional_tool("no-such-tool") is None
-            assert str(self.bin / "planted-tool") == hermetic.optional_tool(
+            assert support.optional_tool("no-such-tool") is None
+            assert str(self.bin / "planted-tool") == support.optional_tool(
                 "planted-tool"
             )
 
 
 @pytest.mark.usefixtures("_stack")
 class TestRustc:
-    """hermetic.rustc prints hermetic.rustc_verbose (#1877)."""
+    """support.rustc prints support.rustc_verbose (#1877)."""
     
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
@@ -865,22 +864,22 @@ class TestRustc:
         """Unset is `stable`; RUSTUP_TOOLCHAIN names the release."""
         bin_dir = Path(tempfile.mkdtemp()).resolve()
         self.stack.callback(shutil.rmtree, bin_dir)
-        stub = str(hermetic.rustc(bin_dir))
+        stub = str(support.rustc(bin_dir))
         rows = (("", "stable"), ("nightly-2026-07-20", "nightly-2026-07-20"))
         for given, toolchain in rows:
-            env = hermetic.env()
+            env = support.env()
             env.pop("RUSTUP_TOOLCHAIN", None)
             if given:
                 env["RUSTUP_TOOLCHAIN"] = given
             done = subprocess.run(
                 [stub, "-vV"], env=env, capture_output=True, text=True, check=True
             )
-            assert hermetic.rustc_verbose(toolchain) == done.stdout
+            assert support.rustc_verbose(toolchain) == done.stdout
 
 
 @pytest.mark.usefixtures("_set_up_test_belt")
 class TestBelt:
-    """hermetic.belt and hermetic.canon (#1714)."""
+    """support.belt and support.canon (#1714)."""
 
     @pytest.fixture
     def _set_up_test_belt(self, tmp_path: Path) -> None:
@@ -889,8 +888,8 @@ class TestBelt:
 
     def test_every_tracked_belt_file_is_a_link_to_it(self) -> None:
         """The whole belt, nothing more, each file the real one by link."""
-        belt = hermetic.belt(self.tmp / "belt")
-        names = {n.removeprefix("mise/") for n in hermetic.tracked(CANON, "mise/")}
+        belt = support.belt(self.tmp / "belt")
+        names = {n.removeprefix("mise/") for n in support.tracked(CANON, "mise/")}
         planted = {str(p.relative_to(belt)) for p in belt.rglob("*") if not p.is_dir()}
         assert names == planted
         unlinked = [
@@ -907,7 +906,7 @@ class TestBelt:
         real = CANON / "mise" / name
         mode = real.stat().st_mode & 0o7777
         assert mode & 0o100, f"{name} is not executable in the belt"
-        belt = hermetic.belt(
+        belt = support.belt(
             self.tmp / "belt", stubs={name: "stub\n", "new.txt": "new\n"}
         )
         assert not (belt / name).is_symlink()
@@ -920,7 +919,7 @@ class TestBelt:
         """The stub is in the planted file; the canon's file is untouched (#1869)."""
         real = CANON / "mise" / "config.toml"
         before = real.read_bytes()
-        dest = hermetic.plant(
+        dest = support.plant(
             self.tmp / "belt", ["mise/config.toml"], "mise/", {"config.toml": "stub\n"}
         )
         assert dest != CANON
@@ -937,11 +936,11 @@ class TestBelt:
         self.git(scratch, "add", ".")
         with pytest.MonkeyPatch.context() as patched:
             patched.setattr(hermetic, "CANON", scratch)
-            before = hermetic.belt(self.tmp / "before")
+            before = support.belt(self.tmp / "before")
             (scratch / "mise" / "sub").mkdir()
             (scratch / "mise" / "sub" / "b.sh").write_text("x\n", encoding="utf-8")
             self.git(scratch, "add", ".")
-            after = hermetic.belt(self.tmp / "after")
+            after = support.belt(self.tmp / "after")
         found: list[str] = sorted(
             str(p.relative_to(before)) for p in before.rglob("*.*")
         )
@@ -954,13 +953,13 @@ class TestBelt:
 
     def test_a_canon_holds_mise_release_and_what_the_row_names(self) -> None:
         """`mise/` and `release/` always; anything else only when named."""
-        tree = hermetic.canon(
+        tree = support.canon(
             self.tmp / "canon",
             "security/identity.toml",
             stubs={"release/planted.py": "x\n"},
         )
         for name in (
-            "mise/hermetic.py",
+            "mise/support.py",
             "release/caller_pins.py",
             "security/identity.toml",
         ):
@@ -971,14 +970,14 @@ class TestBelt:
     @staticmethod
     def git(cwd: Path, *args: str) -> None:
         """Run git in a scratch canon."""
-        subprocess.run([GIT, *args], cwd=cwd, env=hermetic.env(), check=True)
+        subprocess.run([GIT, *args], cwd=cwd, env=support.env(), check=True)
 
 
 class TestTheLaw:
     """No test file copies the caller's environment (#1514 item 3)."""
 
     def test_no_test_file_copies_the_callers_environment(self) -> None:
-        """Every fixture environment is built through hermetic.env."""
+        """Every fixture environment is built through support.env."""
         offenders = [
             f"{path}:{line}"
             for path in listed_test_files()
@@ -988,7 +987,7 @@ class TestTheLaw:
         assert offenders == NOTHING
 
     def test_no_test_builds_a_child_environment_by_hand(self) -> None:
-        """Every child environment starts from hermetic.env (#1542)."""
+        """Every child environment starts from support.env (#1542)."""
         offenders = [
             f"{path}:{line}"
             for path in listed_test_files()
@@ -1025,21 +1024,21 @@ class TestTheLaw:
             assert lines[name] == Environments(source).built_by_hand()
 
         allowed = {
-            "the call": head + "subprocess.run(a, env=hermetic.env(A='1'))\n",
-            "extended": head + "subprocess.run(a, env=hermetic.env() | {'A': '1'})\n",
-            "spread": head + "subprocess.run(a, env={**hermetic.env(), 'A': '1'})\n",
+            "the call": head + "subprocess.run(a, env=support.env(A='1'))\n",
+            "extended": head + "subprocess.run(a, env=support.env() | {'A': '1'})\n",
+            "spread": head + "subprocess.run(a, env={**support.env(), 'A': '1'})\n",
             "a name, then edited": head
-            + "e = hermetic.env()\ne.pop('A', None)\nsubprocess.run(a, env=e)\n",
+            + "e = support.env()\ne.pop('A', None)\nsubprocess.run(a, env=e)\n",
             "a wrapper": head
-            + "def clean():\n    return hermetic.env(A='1')\n"
+            + "def clean():\n    return support.env(A='1')\n"
             + "subprocess.run(a, env=clean())\n",
-            "an alias": head + "h = hermetic.env\nsubprocess.run(a, env=h())\n",
+            "an alias": head + "h = support.env\nsubprocess.run(a, env=h())\n",
             "a filter": head
-            + "e = {k: v for k, v in hermetic.env().items() if k}\n"
+            + "e = {k: v for k, v in support.env().items() if k}\n"
             + "subprocess.run(a, env=e)\n",
             "a wrapper's parameter": head
             + "def run(env):\n    subprocess.run(a, env=env)\n"
-            + "run(hermetic.env())\n",
+            + "run(support.env())\n",
             "no env": head + "subprocess.run(a)\n",
             "not a process": "f(env={'A': '1'})\n",
         }
@@ -1068,14 +1067,14 @@ class TestTheLaw:
             ),
             "conditional": (
                 "import subprocess\n"
-                f"subprocess.run(a, env=hermetic.env() if c else {hand})\n"
+                f"subprocess.run(a, env=support.env() if c else {hand})\n"
             ),
         }
         for name, source in refused.items():
             assert Environments(source).built_by_hand() == LINE_TWO
         allowed = {
-            "import as": "import subprocess as sp\nsp.run(a, env=hermetic.env())\n",
-            "posix_spawn": "import os\nos.posix_spawn(p, a, hermetic.env())\n",
+            "import as": "import subprocess as sp\nsp.run(a, env=support.env())\n",
+            "posix_spawn": "import os\nos.posix_spawn(p, a, support.env())\n",
             "a local run": "def run(a, env):\n    pass\nrun(a, env={'A': '1'})\n",
         }
         for name, source in allowed.items():
@@ -1156,7 +1155,7 @@ class TestTheLaw:
             assert copies(source) == NOTHING
 
     def test_no_test_file_looks_a_tool_up_itself(self) -> None:
-        """Every lookup is hermetic.tool or hermetic.optional_tool (#1684)."""
+        """Every lookup is support.tool or support.optional_tool (#1684)."""
         offenders = [
             f"{path}:{line}"
             for path in listed_test_files()
@@ -1200,8 +1199,8 @@ class TestTheLaw:
     def test_the_fixture_lookup_is_allowed(self) -> None:
         """The fixture's lookups, a patched `which`, and another `which` pass."""
         allowed = {
-            "tool": "import hermetic\nX = hermetic.tool('git')\n",
-            "optional_tool": "import hermetic\nX = hermetic.optional_tool('dash')\n",
+            "tool": "import hermetic\nX = support.tool('git')\n",
+            "optional_tool": "import hermetic\nX = support.optional_tool('dash')\n",
             "patched, not called": (
                 "import shutil\nfrom unittest import mock\n"
                 "with mock.patch.object(shutil, 'which', return_value=None):\n"
@@ -1213,7 +1212,7 @@ class TestTheLaw:
             assert list[int]() == which_calls(source)
 
     def test_no_test_file_plants_the_belt_or_canon_itself(self) -> None:
-        """Every planted belt or canon is hermetic.belt or hermetic.canon (#1714)."""
+        """Every planted belt or canon is support.belt or support.canon (#1714)."""
         offenders = [
             f"{path}:{line}"
             for path in listed_test_files()
@@ -1224,7 +1223,7 @@ class TestTheLaw:
 
     def test_every_spelling_of_a_plant_is_found(self) -> None:
         """Planted: each way to link or copy the tree, at its line."""
-        head = "import shutil\nfrom pathlib import Path\nBELT = hermetic.MISE\n"
+        head = "import shutil\nfrom pathlib import Path\nBELT = support.MISE\n"
         planted = {
             "symlink_to": (head + "Path('x').symlink_to(BELT / 'a.py')\n", [4]),
             "hardlink_to": (head + "Path('x').hardlink_to(BELT / 'a.py')\n", [4]),
@@ -1237,13 +1236,13 @@ class TestTheLaw:
             "from shutil import copy as c": (
                 (
                     "from shutil import copy as c\nfrom pathlib import Path\n"
-                    "HERE = hermetic.MISE\nc(HERE / 'a', 'x')\n"
+                    "HERE = support.MISE\nc(HERE / 'a', 'x')\n"
                 ),
                 [4],
             ),
             "a constant": (head + "S = BELT / 'a.sh'\nshutil.copy2(S, 'x')\n", [5]),
             "a local in a row": (
-                head + "def f():\n    canon = hermetic.CANON\n"
+                head + "def f():\n    canon = support.CANON\n"
                 "    shutil.copyfile(canon / 'REUSE.toml', 'x')\n",
                 [6],
             ),
@@ -1258,7 +1257,7 @@ class TestTheLaw:
 
     def test_the_fixture_and_the_tests_own_files_are_allowed(self) -> None:
         """The fixture's planting, a file the row wrote, a fixture, a tool."""
-        head = "import shutil\nfrom pathlib import Path\nBELT = hermetic.MISE\n"
+        head = "import shutil\nfrom pathlib import Path\nBELT = support.MISE\n"
         allowed = {
             "belt": head + "import hermetic\nhermetic.belt('x', stubs={})\n",
             "a file the row wrote": (
@@ -1269,7 +1268,7 @@ class TestTheLaw:
                 head + "DATA = BELT / 'testdata' / 'x'\nshutil.copy(DATA / 'a', 'y')\n"
             ),
             "a tool": head
-            + "import hermetic\nPath('x').symlink_to(hermetic.tool('git'))\n",
+            + "import hermetic\nPath('x').symlink_to(support.tool('git'))\n",
             "a local of the same name": (
                 head + "def f(tmp):\n    BELT = tmp\n    shutil.copy(BELT / 'a', 'x')\n"
             ),
@@ -1308,7 +1307,7 @@ class TestTheLaw:
                 ' "--exclude-standard"])\n'
             ),
             "the index": 'run([GIT, "ls-files", "--stage", "a"])\n',
-            "tracked": 'hermetic.tracked(tree, "*.py")\n',
+            "tracked": 'support.tracked(tree, "*.py")\n',
             "text": 'X = "git ls-files"\n',
         }
         for name, source in allowed.items():
@@ -1344,20 +1343,20 @@ class TestCallMain:
             where = Path(tmp) / "tree"
             where.mkdir()
             before = (dict(os.environ), Path.cwd(), sys.stdin)
-            done = hermetic.call(
+            done = support.call(
                 lambda: _echo_main(["3"]),
                 env={"PLANTED": "yes"},
                 cwd=where,
                 stdin="data",
             )
             after = (dict(os.environ), Path.cwd(), sys.stdin)
-        assert hermetic.Called(3, "cwd=tree env=yes in=data\n", "to stderr\n") == done
+        assert support.Called(3, "cwd=tree env=yes in=data\n", "to stderr\n") == done
         assert before == after
 
     def test_a_system_exit_is_the_status(self) -> None:
         """An exit code, or a message, as a child's would be."""
-        assert hermetic.call(lambda: _echo_main(["exit", "4"])).returncode == 4
-        refused = hermetic.call(lambda: _echo_main(["refuse"]))
+        assert support.call(lambda: _echo_main(["exit", "4"])).returncode == 4
+        refused = support.call(lambda: _echo_main(["refuse"]))
         assert refused.returncode == 1
         assert refused.stderr.endswith("refused by name\n"), refused.stderr
 
@@ -1365,6 +1364,6 @@ class TestCallMain:
         """Without `env`, the call sees this process's own variables."""
         kept: dict[str, str] = {"PLANTED": "kept"}
         with pytest.MonkeyPatch.context() as patched:
-            hermetic.patch_env(patched, kept)
-            done = hermetic.call(lambda: _echo_main(["0"]))
+            support.patch_env(patched, kept)
+            done = support.call(lambda: _echo_main(["0"]))
         assert "env=kept" in done.stdout

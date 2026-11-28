@@ -13,8 +13,7 @@ replayed or measured.
 
 Each row asserts the message, not just the exit status: a planted row
 scored on exit alone can pass for the wrong reason.
-
-pytest, run by `mise run test`. Every git call"""
+"""
 
 import os
 import subprocess
@@ -25,18 +24,18 @@ import pytest
 
 from belt import coverage_floor as cf
 from belt import decoded
-from tests import hermetic
+from tests import support
 
-BELT = hermetic.MISE
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
+BELT = support.MISE
+BASH = support.tool("bash")
+GIT = support.tool("git")
 MEASURE = str(BELT / "coverage-measure.sh")
 
-# The host the stand-in rustc reports (hermetic.rustc_verbose).
+# The host the stand-in rustc reports (support.rustc_verbose).
 HOST = "x86_64-unknown-linux-gnu"
 
 # rustc: hermetic's stand-in, which also answers `--print sysroot`.
-RUSTC = hermetic.RUSTC_STUB.replace(
+RUSTC = support.RUSTC_STUB.replace(
     "#!/bin/sh\n",
     '#!/bin/sh\nif [ "$1" = --print ]; then echo "${STUB_SYSROOT}"; exit 0; fi\n',
     1,
@@ -207,7 +206,7 @@ class TestFuzzCase:
             where.mkdir(parents=True, exist_ok=True)
             (where / name).write_text(text, encoding="utf-8")
             (where / name).chmod(0o755)
-        env = hermetic.env()
+        env = support.env()
         self.env = env | {
             "ORG_BELT_DIR": str(BELT),
             "ORG_PYTHON": sys.executable,
@@ -279,7 +278,7 @@ class TestFuzzCase:
             The finished process.
 
         """
-        as_mise = hermetic.task_run("coverage:check", task_body("coverage:check"))
+        as_mise = support.task_run("coverage:check", task_body("coverage:check"))
         return subprocess.run(
             as_mise.argv,
             cwd=self.tree,

@@ -35,11 +35,11 @@ import re
 import pytest
 
 from belt import workflow_yaml
-from tests import hermetic
+from tests import support
 from tests.release import test_job_installs as job_installs
 from tests.release.test_job_installs import Job, Step, field, inputs, parsed, table
 
-CANON = hermetic.CANON
+CANON = support.CANON
 CI = CANON / ".github" / "workflows" / "ci.yml"
 
 

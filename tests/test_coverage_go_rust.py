@@ -6,8 +6,7 @@ runner are that file's, imported from it.
 
 MeasureSelectors, RustLegGuards, GoOneRun and RustOneRun: the legs
 measured from the one test run, and the guards on the Rust leg.
-
-pytest, run by `mise run test`."""
+"""
 
 import json
 import os
@@ -17,7 +16,7 @@ import tempfile
 from pathlib import Path
 
 from belt import gate_cache_key
-from tests import hermetic
+from tests import support
 from tests.test_coverage_tasks import (
     BASH,
     BELT,
@@ -123,7 +122,7 @@ COVERAGE_EXCLUDE_REFUSAL = (
 
 # The directory digest of the stand-in `rustc` the Rust rows run beside
 # (#1877), under the `stable` toolchain they set.
-STABLE = gate_cache_key.directory_digest(hermetic.rustc_verbose("stable"))
+STABLE = gate_cache_key.directory_digest(support.rustc_verbose("stable"))
 
 
 def plant_rust_run(tree: Path, run: Path) -> None:
@@ -159,10 +158,10 @@ class TestMeasureSelectors:
             for name, text in (("rustup", rustup), ("cargo", CARGO)):
                 (stubs / name).write_text(text, encoding="utf-8")
                 (stubs / name).chmod(0o755)
-            hermetic.rustc(stubs)
+            support.rustc(stubs)
             (tree / "Cargo.toml").write_text("[workspace]\n", encoding="utf-8")
             plant_rust_run(tree, Path(tmp) / "run")
-            env = hermetic.env()
+            env = support.env()
             env |= {
                 "ORG_BELT_DIR": str(BELT),
                 "ORG_COVERAGE_RUN": str(Path(tmp) / "run"),
@@ -201,11 +200,11 @@ class TestMeasureSelectors:
             for name, text in (("rustup", RUSTUP), ("cargo", CARGO), ("go", GO)):
                 (stubs / name).write_text(text, encoding="utf-8")
                 (stubs / name).chmod(0o755)
-            hermetic.rustc(stubs)
+            support.rustc(stubs)
             (tree / "Cargo.toml").write_text("[workspace]\n", encoding="utf-8")
             (tree / "go.mod").write_text("module example.com/x\n", encoding="utf-8")
             plant_rust_run(tree, Path(tmp) / "run")
-            env = hermetic.env()
+            env = support.env()
             env |= {
                 "ORG_BELT_DIR": str(BELT),
                 "ORG_COVERAGE_RUN": str(Path(tmp) / "run"),
@@ -256,7 +255,7 @@ class TestRustLegGuards:
         for name, text in (("rustup", RUSTUP), ("cargo", CARGO)):
             (stubs / name).write_text(text, encoding="utf-8")
             (stubs / name).chmod(0o755)
-        hermetic.rustc(stubs)
+        support.rustc(stubs)
         (tree / "Cargo.toml").write_text("[workspace]\n", encoding="utf-8")
         plant_rust_run(tree, run)
         if not marker:
@@ -264,7 +263,7 @@ class TestRustLegGuards:
         if not profile:
             profiles = tree / "target" / f"llvm-cov-target-{STABLE}"
             (profiles / "tree-1-1.profraw").unlink()
-        env = hermetic.env()
+        env = support.env()
         env |= {
             "ORG_BELT_DIR": str(BELT),
             "ORG_COVERAGE_RUN": str(run),
@@ -414,7 +413,7 @@ class TestGoOneRun:
             f"run = '''\necho ran >> ../counter\n{command}\n'''\n",
             encoding="utf-8",
         )
-        env = hermetic.env()
+        env = support.env()
         for argv in ([GIT, "init", "-q"], [GIT, "add", "-A"]):
             subprocess.run(argv, cwd=tree, env=env, check=True)
         self.stubs = stubs
@@ -431,7 +430,7 @@ class TestGoOneRun:
         config = base / "config"
         config.mkdir()
         (base / "tmp").mkdir()
-        env = hermetic.env(
+        env = support.env(
             MISE_CONFIG_DIR=str(config),
             XDG_CONFIG_HOME=str(config),
             MISE_GLOBAL_CONFIG_FILE=str(BELT / "config.toml"),
@@ -447,7 +446,7 @@ class TestGoOneRun:
         )
         env["PATH"] = f"{self.stubs}{os.pathsep}{env['PATH']}"
         return subprocess.run(
-            [hermetic.tool("mise"), "run", "coverage:check"],
+            [support.tool("mise"), "run", "coverage:check"],
             cwd=tree,
             env=env,
             stdin=subprocess.DEVNULL,
@@ -567,13 +566,13 @@ class TestRustOneRun:
         for name, text in (("cargo", CARGO), ("rustup", RUSTUP)):
             (stubs / name).write_text(text, encoding="utf-8")
             (stubs / name).chmod(0o755)
-        hermetic.rustc(stubs)
+        support.rustc(stubs)
         (tree / "Cargo.toml").write_text("[workspace]\n", encoding="utf-8")
         (tree / ".coverage-floor").write_text(floor_of("rust"), encoding="utf-8")
         (tree / "mise.toml").write_text(
             RUST_TASK.format(command=command), encoding="utf-8"
         )
-        env = hermetic.env()
+        env = support.env()
         for argv in ([GIT, "init", "-q"], [GIT, "add", "-A"]):
             subprocess.run(argv, cwd=tree, env=env, check=True)
         self.stubs = stubs
@@ -590,7 +589,7 @@ class TestRustOneRun:
         config = base / "config"
         config.mkdir()
         (base / "tmp").mkdir()
-        env = hermetic.env(
+        env = support.env(
             MISE_CONFIG_DIR=str(config),
             XDG_CONFIG_HOME=str(config),
             MISE_GLOBAL_CONFIG_FILE=str(BELT / "config.toml"),
@@ -606,7 +605,7 @@ class TestRustOneRun:
         )
         env["PATH"] = f"{self.stubs}{os.pathsep}{env['PATH']}"
         return subprocess.run(
-            [hermetic.tool("mise"), "run", "coverage:check"],
+            [support.tool("mise"), "run", "coverage:check"],
             cwd=tree,
             env=env,
             stdin=subprocess.DEVNULL,

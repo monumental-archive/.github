@@ -6,17 +6,16 @@ the gate was green. It stays shell in the workflow (it only prints what
 other jobs computed), so these rows lift its `run:` block out of the
 YAML by step name and run it under bash. Reading it out of the YAML is
 what keeps the test on the code that ships.
-
-pytest, run by `mise run test`."""
+"""
 
 from __future__ import annotations
 
 import os
 import subprocess
 
-from tests import hermetic
+from tests import support
 
-WORKFLOW = hermetic.CANON / ".github/workflows/ci.yml"
+WORKFLOW = support.CANON / ".github/workflows/ci.yml"
 STEP = "- name: Every part of the gate passed"
 
 
@@ -76,10 +75,10 @@ class TestEveryPartPassed:
             The run.
 
         """
-        bash = hermetic.tool("bash")
+        bash = support.tool("bash")
         return subprocess.run(
             [bash, "-c", step_script()],
-            env=hermetic.env(
+            env=support.env(
                 PATH=os.environ["PATH"],
                 PLAN=plan,
                 GATE=gate,

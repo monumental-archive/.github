@@ -5,8 +5,7 @@ counts as its own artifact, so that language's totals job sees one
 subdirectory per shard holding `<language>.tsv`, in the shape
 mise/mutants-rust.sh writes, and calls the helper with its language.
 Each row plants that tree and asserts the exact lines and exit status.
-
-pytest, run by `mise run test`. Every git call"""
+"""
 
 import shutil
 import subprocess
@@ -14,11 +13,11 @@ from pathlib import Path
 
 import pytest
 
-from tests import hermetic
+from tests import support
 
-BELT = hermetic.MISE
+BELT = support.MISE
 SCRIPT = BELT / "mutation-totals.sh"
-BASH = hermetic.tool("bash")
+BASH = support.tool("bash")
 LABEL = "audit:mutants: rust"
 
 
@@ -47,7 +46,7 @@ class TestTotals:
         return subprocess.run(
             [BASH, str(SCRIPT), str(self.dir), lang],
             cwd=self.dir.parent,
-            env=hermetic.env(),
+            env=support.env(),
             capture_output=True,
             text=True,
             check=False,
@@ -210,7 +209,7 @@ class TestTotals:
         done = subprocess.run(
             [BASH, str(SCRIPT), str(self.dir)],
             cwd=self.dir.parent,
-            env=hermetic.env(),
+            env=support.env(),
             capture_output=True,
             text=True,
             check=False,

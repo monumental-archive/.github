@@ -31,8 +31,7 @@ the public `docker.io/library/alpine` only, nothing pushed):
 NOT CAPTURED: the `--metadata-file` a push writes. The daemon was not
 running and a push needs a registry; the rows use the one key the
 helper reads, `containerimage.digest`.
-
-pytest, run by `mise run test`. Every git call"""
+"""
 
 from __future__ import annotations
 
@@ -55,7 +54,7 @@ import pytest
 
 from belt import decoded
 from belt.release import registry
-from tests import hermetic
+from tests import support
 
 
 @pytest.fixture
@@ -84,7 +83,7 @@ def dumps(value: object) -> str:
     return json.dumps(value)
 
 
-HERE = hermetic.RELEASE
+HERE = support.RELEASE
 TESTDATA = Path(__file__).resolve().parent / "testdata"
 VERSION = TESTDATA / "registry-buildx-version.txt"
 DRY_RUN = TESTDATA / "registry-index-dry-run.out"
@@ -1001,7 +1000,7 @@ class TestEnvironment(TestHarness):
             pytest.MonkeyPatch.context() as patched,
             pytest.raises(registry.RefusedError) as caught,
         ):
-            patched.setattr(urllib.request, "urlopen", hermetic.returning(None))
+            patched.setattr(urllib.request, "urlopen", support.returning(None))
             registry.Registry.request("GET", url, {})
         assert f"{url} answered NoneType, not an HTTP response" == str(caught.value)
 

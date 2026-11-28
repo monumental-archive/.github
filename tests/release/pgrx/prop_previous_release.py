@@ -45,7 +45,7 @@ from hypothesis import strategies as st
 
 from belt.release.pgrx import previous_release as previous
 from belt.typed_hypothesis import given
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -70,7 +70,7 @@ def as_helper() -> contextlib.ExitStack:
 
     """
     stack = contextlib.ExitStack()
-    hermetic.name_task(stack.enter_context(pytest.MonkeyPatch.context()), "")
+    support.name_task(stack.enter_context(pytest.MonkeyPatch.context()), "")
     stack.enter_context(pytest.MonkeyPatch.context()).setattr(
         sys, "argv", ["previous_release.py"]
     )

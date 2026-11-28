@@ -14,20 +14,20 @@ from pathlib import Path
 import pytest
 
 from belt import gate_cache_key
-from tests import hermetic
+from tests import support
 import contextlib
 
-BELT = hermetic.MISE
+BELT = support.MISE
 MEASURED = BELT / "measured"
-GIT = hermetic.tool("git")
-SH = hermetic.tool("sh")
+GIT = support.tool("git")
+SH = support.tool("sh")
 # What a process gains by being exec'd through a bash script rather than
 # directly: the shell's own bookkeeping, and macOS's text encoding,
 # which the system adds to every process. Nothing a caller passes.
 SHELL_ADDED = frozenset({"PWD", "OLDPWD", "SHLVL", "_", "__CF_USER_TEXT_ENCODING"})
 # What a row expects to differ: nothing.
 NOTHING: dict[str, str] = {}
-ENV = hermetic.tool("env")
+ENV = support.tool("env")
 # The child prints its environment NUL-separated, so a row compares it
 # whole, values with newlines included.
 DUMP = [ENV, "-0"]
@@ -53,7 +53,7 @@ def plant(root: Path, *, floor: bool) -> Path:
     """
     tree = root / "tree"
     tree.mkdir()
-    subprocess.run([GIT, "init", "-q", str(tree)], check=True, env=hermetic.env())
+    subprocess.run([GIT, "init", "-q", str(tree)], check=True, env=support.env())
     if floor:
         (tree / ".coverage-floor").write_text("python 50.0\n")
     return tree
@@ -61,7 +61,7 @@ def plant(root: Path, *, floor: bool) -> Path:
 
 def track(tree: Path, *names: str) -> None:
     """Add planted files to the tree's index: `measured` asks git (#2013)."""
-    subprocess.run([GIT, "add", *names], cwd=tree, check=True, env=hermetic.env())
+    subprocess.run([GIT, "add", *names], cwd=tree, check=True, env=support.env())
 
 
 def unchanged(given: dict[str, str], seen: dict[str, str]) -> dict[str, str]:
@@ -87,7 +87,7 @@ def run(tree: Path, argv: list[str], **env: str) -> subprocess.CompletedProcess[
     return subprocess.run(
         [str(MEASURED), *argv],
         cwd=tree,
-        env=hermetic.env(**env),
+        env=support.env(**env),
         capture_output=True,
         text=True,
         check=False,
@@ -106,7 +106,7 @@ class TestNoMeasurementIsExec:
             out = run(tree, DUMP, **given)
             assert out.returncode == 0, out.stderr
             seen = environment(out.stdout)
-            assert unchanged(hermetic.env(**given), seen) == NOTHING
+            assert unchanged(support.env(**given), seen) == NOTHING
 
     def test_no_run_directory_leaves_the_environment_unchanged(self) -> None:
         """A floor but no run directory (outside mise): nothing is added."""
@@ -115,7 +115,7 @@ class TestNoMeasurementIsExec:
             out = run(tree, DUMP, PYTHONPATH="src")
             assert out.returncode == 0, out.stderr
             seen = environment(out.stdout)
-            assert unchanged(hermetic.env(PYTHONPATH="src"), seen) == NOTHING
+            assert unchanged(support.env(PYTHONPATH="src"), seen) == NOTHING
 
     def test_the_exit_status_is_the_commands(self) -> None:
         """Exec, not a wrapper: the status comes back unchanged."""
@@ -206,7 +206,7 @@ class TestFloorMergesNeverReplaces:
             out = subprocess.run(
                 [SH, "-c", line],
                 cwd=tree,
-                env=hermetic.env(
+                env=support.env(
                     ORG_COVERAGE_RUN=str(Path(tmp) / "run"), PYTHONPATH="src"
                 ),
                 capture_output=True,
@@ -269,7 +269,7 @@ class TestCoverageIsAskedOncePerRun:
             tree = plant(Path(tmp), floor=True)
             bin_dir, counter = Path(tmp) / "bin", Path(tmp) / "calls"
             bin_dir.mkdir()
-            python = hermetic.tool("python3")
+            python = support.tool("python3")
             site = Path(tmp) / "site"
             (site / "coverage").mkdir(parents=True)
             (site / "coverage" / "__init__.py").write_text("")
@@ -457,7 +457,7 @@ esac
 """
 # The directory digest of the stand-in `rustc` the rows run beside
 # (#1877), under the `stable` toolchain they set.
-STABLE = gate_cache_key.directory_digest(hermetic.rustc_verbose("stable"))
+STABLE = gate_cache_key.directory_digest(support.rustc_verbose("stable"))
 
 # What a row expects when the stand-in cargo was never called.
 NO_CALLS: list[str] = []
@@ -491,7 +491,7 @@ class TestRustInstrumented:
             stubs.mkdir()
             (stubs / "cargo").write_text(CARGO, encoding="utf-8")
             (stubs / "cargo").chmod(0o755)
-            hermetic.rustc(stubs)
+            support.rustc(stubs)
         log = base / "cargo.log"
         path = f"{base / 'stubs'}{os.pathsep}{os.environ['PATH']}"
         out = run(
@@ -617,7 +617,7 @@ class TestRustInstrumented:
             shutil.rmtree(base / "plant")
             log = base / "cargo.log"
             log.unlink()
-            env = hermetic.env(
+            env = support.env(
                 ORG_COVERAGE_RUN=str(base / "run"),
                 PATH=f"{base / 'stubs'}{os.pathsep}{os.environ['PATH']}",
                 STUB_LOG=str(log),
@@ -657,7 +657,7 @@ class TestRustInstrumented:
             with tempfile.TemporaryDirectory() as tmp, self.subTest(release=release):
                 tree, out, _ = self.rust_run(tmp, DUMP, RUSTUP_TOOLCHAIN=release)
                 assert out.returncode == 0, out.stderr
-                verbose = hermetic.rustc_verbose(release)
+                verbose = support.rustc_verbose(release)
                 digest = gate_cache_key.directory_digest(verbose)
                 target = environment(out.stdout)["CARGO_TARGET_DIR"]
                 assert f"{tree}/target/llvm-cov-target-{digest}" == target

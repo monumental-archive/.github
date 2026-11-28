@@ -2,7 +2,7 @@
 
 The belt's `[env]` names `mise/findings.sh` in BASH_ENV, and no task
 body sources it. These rows run a body the way mise runs one, through
-`hermetic.task_run`: the belt's `[task_config]` shell (`bash --norc
+`support.task_run`: the belt's `[task_config]` shell (`bash --norc
 -euo pipefail -c`), MISE_TASK_NAME set, and BASH_ENV naming the belt's
 writer. They run under the belt's bash and under `/bin/bash` (3.2 on
 macOS).
@@ -21,8 +21,7 @@ loses it.
 A script run outside `mise run` states its task with `org_task`
 (#1979), and a Python child it starts records under that name, not
 its own file's: the export is the function's, so no site can forget it.
-
-pytest, run by `mise run test`."""
+"""
 
 import socket
 import subprocess
@@ -33,10 +32,10 @@ from pathlib import Path
 import pytest
 
 from belt import decoded
-from tests import hermetic
+from tests import support
 import contextlib
 
-MISE = hermetic.MISE
+MISE = support.MISE
 WRITER = MISE / "findings.sh"
 SYSTEM_BASH = Path("/bin/bash")
 TASK = "lint:demo"
@@ -97,7 +96,7 @@ def bashes() -> list[tuple[str, str]]:
         Each bash's label and path.
 
     """
-    out = [("belt bash", str(hermetic.tool("bash")))]
+    out = [("belt bash", str(support.tool("bash")))]
     if SYSTEM_BASH.exists():
         out.append(("/bin/bash", str(SYSTEM_BASH)))
     return out
@@ -128,7 +127,7 @@ class TestBashEnvRows:
             The finished process.
 
         """
-        as_mise = hermetic.task_run(TASK, BODY)
+        as_mise = support.task_run(TASK, BODY)
         given = dict(as_mise.env)
         if not writer:
             given.pop("BASH_ENV")
@@ -137,7 +136,7 @@ class TestBashEnvRows:
             capture_output=True,
             text=True,
             encoding="utf-8",
-            env=hermetic.env(PYTHONUTF8="1", **env) | given,
+            env=support.env(PYTHONUTF8="1", **env) | given,
             check=False,
             cwd=self.root,
         )
@@ -152,7 +151,7 @@ class TestBashEnvRows:
             `function` with the writer, `none` without.
 
         """
-        env = hermetic.env() | {"BASH_ENV": str(WRITER)}
+        env = support.env() | {"BASH_ENV": str(WRITER)}
         if ssh:
             env["SSH_CLIENT"] = "192.0.2.1 50000 22"
             done = subprocess.run(
@@ -175,7 +174,7 @@ class TestBashEnvRows:
 
     def test_socket_stdin_or_ssh_skips_bash_env_unless_norc(self) -> None:
         """A plain `bash -c` loses the writer there; the belt's shell keeps it."""
-        shell = hermetic.task_run(TASK, PROBE).argv
+        shell = support.task_run(TASK, PROBE).argv
         assert "--norc" in shell
         for label, bash in bashes():
             for ssh in (False, True):
@@ -231,12 +230,12 @@ class TestOrgTaskRows:
             root = Path(tmp)
             (root / "planted.sh").write_text(PLANTED, encoding="utf-8")
             (root / "child.py").write_text(CHILD, encoding="utf-8")
-            given = hermetic.env(PYTHONUTF8="1", ORG_FINDINGS="", **env)
+            given = support.env(PYTHONUTF8="1", ORG_FINDINGS="", **env)
             if "MISE_TASK_NAME" not in env:
                 assert "MISE_TASK_NAME" not in given
             return subprocess.run(
                 [
-                    str(hermetic.tool("bash")),
+                    str(support.tool("bash")),
                     str(root / "planted.sh"),
                     str(WRITER),
                     sys.executable,

@@ -5,7 +5,7 @@ writes for a message carrying a newline, a CR or a `%` (the escape bash
 3.2 gets wrong when the `%` is unquoted), and for several arguments.
 
 The law, read line by line from every tracked script, workflow step and
-task body in the canon (listed through hermetic.tracked, #1618), the
+task body in the canon (listed through support.tracked, #1618), the
 function file excepted:
 
 1. A quoted string that begins a workflow command (`::name::` or
@@ -22,19 +22,18 @@ function file excepted:
    newline would begin a line of its own, which the runner reads as a
    command if it looks like one. Text written to a file, a pipe, a
    command substitution or a `{ … } >> file` group is not the log.
-
-pytest, run by `mise run test`."""
+"""
 
 import re
 import subprocess
 from pathlib import Path
 
 from belt import typed_std, workflow_yaml
-from tests import hermetic
+from tests import support
 
-CANON = hermetic.CANON
+CANON = support.CANON
 WRITER = CANON / "mise" / "workflow-command.sh"
-BASH = hermetic.tool("bash")
+BASH = support.tool("bash")
 SKIP = {"vendor", "testdata"}
 
 # Where a command begins: a quote, `::`, a name, then `::` or a space.
@@ -259,7 +258,7 @@ def held_files(root: Path) -> list[Path]:
         test-data trees and the writer itself.
 
     """
-    names = hermetic.tracked(
+    names = support.tracked(
         root, "*.sh", "mise/config.toml", "mise.toml", ".github/*.yml", ".github/*.yaml"
     )
     return [

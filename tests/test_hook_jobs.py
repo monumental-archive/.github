@@ -13,20 +13,19 @@ mise/config.toml with tomllib and run by bash in a planted git tree, not
 a copy of it. Every red row plants into the canon's REAL hook file and
 asserts the exact message, line number included (#650): the delivered
 config is green, and the job as it shipped before #1426 is red.
-
-pytest, run by `mise run test`.py."""
+"""
 
 import subprocess
 import tempfile
 from pathlib import Path
 
 from belt import decoded
-from tests import hermetic
+from tests import support
 
-CANON = hermetic.CANON
+CANON = support.CANON
 BELT = CANON / "mise"
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
+BASH = support.tool("bash")
+GIT = support.tool("git")
 
 NAME = "lint:hook-jobs"
 HOOKS_PATH = "lefthook/org-hooks.yml"
@@ -67,7 +66,7 @@ def lint(files: dict[str, str]) -> subprocess.CompletedProcess[str]:
     """
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
-        env = hermetic.env()
+        env = support.env()
         env |= {"ORG_BELT_DIR": str(BELT), "ORG_CANON_DIR": str(CANON)}
         for rel, text in files.items():
             path = root / rel
@@ -76,7 +75,7 @@ def lint(files: dict[str, str]) -> subprocess.CompletedProcess[str]:
         subprocess.run([GIT, "init", "-q"], cwd=root, env=env, check=True)
         if files:
             subprocess.run([GIT, "add", "--", *files], cwd=root, env=env, check=True)
-        as_mise = hermetic.task_run("lint:hook-jobs", BODY)
+        as_mise = support.task_run("lint:hook-jobs", BODY)
         return subprocess.run(
             as_mise.argv,
             cwd=root,

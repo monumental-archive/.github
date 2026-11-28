@@ -6,8 +6,7 @@ on PATH that logs its arguments, says a line on stderr, prints the
 row's document and exits with the row's status. One row runs the
 belt's pinned stele itself on an SPDX document with one versionless
 PURL: the row that meets the real tool.
-
-pytest, run by `mise run test`."""
+"""
 
 import json
 import os
@@ -18,9 +17,9 @@ from pathlib import Path
 import pytest
 
 from belt import decoded
-from tests import hermetic
+from tests import support
 
-HERE = hermetic.MISE
+HERE = support.MISE
 ADAPTER = HERE / "stele_findings.py"
 TASK = "audit:inventory"
 
@@ -139,7 +138,7 @@ class TestAdapter:
 
         """
         self.doc.write_text(document, encoding="utf-8")
-        env = hermetic.env(
+        env = support.env(
             PATH=path or f"{self.bin}{os.pathsep}{os.environ['PATH']}",
             ORG_FINDINGS=str(self.file),
             MISE_TASK_NAME=TASK,
@@ -306,7 +305,7 @@ class TestAdapter:
 
     def test_the_pinned_stele_gives_the_one_record(self) -> None:
         """A versionless PURL, judged by stele itself: the quoted record."""
-        stele = hermetic.optional_tool("stele")
+        stele = support.optional_tool("stele")
         if stele is None:
             pytest.skip("the belt's stele is not on PATH")
         (self.dir / "a.spdx.json").write_text(json.dumps(SPDX), encoding="utf-8")
@@ -315,7 +314,7 @@ class TestAdapter:
             capture_output=True,
             text=True,
             encoding="utf-8",
-            env=hermetic.env(
+            env=support.env(
                 ORG_FINDINGS=str(self.file), MISE_TASK_NAME=TASK, PYTHONUTF8="1"
             ),
             cwd=self.dir,

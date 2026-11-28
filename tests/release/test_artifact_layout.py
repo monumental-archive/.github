@@ -15,8 +15,7 @@ uploads the parent, and each consumer downloads with
 `sbom-plan-*` upload and download in the canon's workflows to that, run
 each staging step's own body to see the layout it makes, and plant the
 two defects to see each named.
-
-pytest, run by `mise run test`."""
+"""
 
 import copy
 import re
@@ -28,7 +27,7 @@ from typing import TYPE_CHECKING, NamedTuple
 import pytest
 
 from belt import workflow_yaml
-from tests import hermetic
+from tests import support
 import contextlib
 
 if TYPE_CHECKING:
@@ -38,9 +37,9 @@ if TYPE_CHECKING:
 Doc = dict[str, object]
 Step = dict[str, object]
 
-CANON = hermetic.CANON
+CANON = support.CANON
 WORKFLOWS = CANON / ".github" / "workflows"
-BASH = hermetic.tool("bash")
+BASH = support.tool("bash")
 
 UPLOAD = "actions/upload-artifact@"
 DOWNLOAD = "actions/download-artifact@"
@@ -269,7 +268,7 @@ class TestStaged:
         assert isinstance(body, str), step
         done = subprocess.run(
             [BASH, "-e", "-c", str(body)],
-            env=hermetic.env(SOURCE=str(source), STAGE=str(stage), ARTIFACT=artifact),
+            env=support.env(SOURCE=str(source), STAGE=str(stage), ARTIFACT=artifact),
             capture_output=True,
             text=True,
             check=False,

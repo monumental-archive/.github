@@ -13,8 +13,7 @@ floor's own `legs:` record, and a report written by the suite's
 teardown is the plpgsql leg's answer. So the clause is written whole
 here, and the rows plant it where a search would have switched the leg
 on.
-
-pytest, run by `mise run test`.py."""
+"""
 
 import base64
 import contextlib
@@ -37,7 +36,7 @@ import pytest
 from belt import coverage_floor as cf
 from belt import plpgsql_coverage as pc
 from belt.decoded import as_array, as_object, as_str, load_json, load_toml
-from tests import hermetic, test_coverage_tasks
+from tests import support, test_coverage_tasks
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -55,11 +54,11 @@ def _task(as_task: Callable[[str], None]) -> None:
 pytestmark = pytest.mark.usefixtures("_task")
 
 
-CANON = hermetic.CANON
+CANON = support.CANON
 BELT = CANON / "mise"
 HELPER = BELT / "plpgsql_coverage.py"
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
+BASH = support.tool("bash")
+GIT = support.tool("git")
 CONFIG = load_toml((BELT / "config.toml").read_text(encoding="utf-8"))
 TASKS = as_object(CONFIG["tasks"], "the belt's [tasks]")
 
@@ -234,7 +233,7 @@ def stub_env(stubs: Path, answers: Path, **planted: str) -> dict[str, str]:
         The environment.
 
     """
-    env = hermetic.env(MISE_TASK_NAME=TASK)
+    env = support.env(MISE_TASK_NAME=TASK)
     return (
         env
         | {
@@ -296,7 +295,7 @@ def call(argv: list[str], env: dict[str, str], cwd: Path) -> Done:
         contextlib.redirect_stdout(out),
         contextlib.redirect_stderr(err),
     ):
-        hermetic.patch_env(patched, env, clear=True)
+        support.patch_env(patched, env, clear=True)
         status = pc.main(argv)
     return Done(status, out.getvalue(), err.getvalue())
 
@@ -505,7 +504,7 @@ class TestHelperRows(TestCollecting):
         self.stack.callback(shutil.rmtree, tmp, ignore_errors=True)
         read = call(
             ["totals", "leg", str(tmp / "none.json")],
-            hermetic.env(MISE_TASK_NAME=TASK),
+            support.env(MISE_TASK_NAME=TASK),
             tmp,
         )
         assert read.returncode == 1
@@ -533,7 +532,7 @@ class TestHelperRows(TestCollecting):
         planted.write_text(json.dumps(document), encoding="utf-8")
         read = call(
             ["totals", "leg", str(planted)],
-            hermetic.env(MISE_TASK_NAME=TASK),
+            support.env(MISE_TASK_NAME=TASK),
             tmp,
         )
         assert read.returncode == 1
@@ -702,7 +701,7 @@ class TestLintRows(TestCollecting):
         planted.write_text(json.dumps(document), encoding="utf-8")
         read = call(
             ["totals", "leg", str(planted)],
-            hermetic.env(MISE_TASK_NAME=TASK),
+            support.env(MISE_TASK_NAME=TASK),
             tmp,
         )
         assert read.returncode == 1
@@ -934,7 +933,7 @@ class TestRefusalRows(TestCollecting):
         planted.write_text(text, encoding="utf-8")
         return call(
             ["totals", "leg", str(planted)],
-            hermetic.env(MISE_TASK_NAME=TASK),
+            support.env(MISE_TASK_NAME=TASK),
             tmp,
         )
 
@@ -1046,7 +1045,7 @@ class TestRefusalRows(TestCollecting):
         """No subcommand, or an unknown one, is exit 2 with the usage."""
         done = run(
             [sys.executable, str(HELPER), *argv],
-            hermetic.env(MISE_TASK_NAME=TASK),
+            support.env(MISE_TASK_NAME=TASK),
             CANON,
         )
         assert done.returncode == 2
@@ -1149,7 +1148,7 @@ class TestLegRows:
         )
         check = as_object(TASKS["coverage:check"], "coverage:check")
         script = as_str(check["run"], "coverage:check's run")
-        as_mise = hermetic.task_run("coverage:check", script)
+        as_mise = support.task_run("coverage:check", script)
         return run(as_mise.argv, env | as_mise.env, tree)
 
     PYTHON_HELD = (
@@ -1712,9 +1711,9 @@ class TestRealDatabaseRows:
                 time; docker's own words are the message.
 
         """
-        cls.docker = hermetic.tool("docker")
+        cls.docker = support.tool("docker")
         cls.container = f"plpgsql-coverage-{os.getpid()}-{os.urandom(4).hex()}"
-        cls.env = hermetic.env(tools=("docker",), MISE_TASK_NAME=TASK)
+        cls.env = support.env(tools=("docker",), MISE_TASK_NAME=TASK)
         started = subprocess.run(
             [
                 cls.docker,

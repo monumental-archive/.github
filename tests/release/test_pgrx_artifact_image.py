@@ -11,14 +11,13 @@ tree and the root.
 
 The rows run `one_tree()` over the shipped Dockerfile and over planted
 fixtures, one per refusal branch, each asserting the exact message.
-
-pytest, run by `mise run test`. Every git call"""
+"""
 
 import shlex
 
-from tests import hermetic
+from tests import support
 
-ROOT = hermetic.CANON
+ROOT = support.CANON
 DOCKERFILE = ROOT / "docker" / "pgrx-artifact.Dockerfile"
 TREE = ("staged/${TARGETARCH}/image/", "/")
 PLACERS = {"COPY", "ADD"}

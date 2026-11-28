@@ -14,9 +14,9 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from tests import hermetic
+from tests import support
 
-BELT = hermetic.MISE
+BELT = support.MISE
 EXEC = BELT / "go-test-exec"
 # A binary that prints each argument it was given on a line of its own.
 ECHO = '#!/bin/sh\nfor a in "$@"; do printf "%s\\n" "$a"; done\n'
@@ -50,7 +50,7 @@ def run(argv: list[str], **env: str) -> subprocess.CompletedProcess[str]:
     """
     return subprocess.run(
         [str(EXEC), *argv],
-        env=hermetic.env(**env),
+        env=support.env(**env),
         capture_output=True,
         text=True,
         check=False,

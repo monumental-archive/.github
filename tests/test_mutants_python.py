@@ -15,13 +15,13 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import mutants_python
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from tests.hermetic import Called
+    from tests.support import Called
 
 TASK = "audit:mutants"
 RED, USAGE = 1, 2
@@ -85,7 +85,7 @@ def plant(root: Path, module: str, source: str, tests: str, setup: str = SETUP) 
     (root / "tests" / f"test_{module}.py").write_text(tests, encoding="utf-8")
     if setup:
         (root / "setup.cfg").write_text(setup, encoding="utf-8")
-    hermetic.track(root)
+    support.track(root)
     return root
 
 
@@ -100,7 +100,7 @@ def leg(
 
     """
     as_task(TASK)
-    hermetic.tool("pytest")
+    support.tool("pytest")
 
     def call(root: Path, *argv: str) -> Called:
         return call_main(lambda: mutants_python.main(list(argv)), cwd=root)

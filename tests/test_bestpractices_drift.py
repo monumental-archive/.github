@@ -14,8 +14,7 @@ The answers planted are the canon's real `.bestpractices.json`, so a
 row exercises every key shape the file carries, Baseline display names
 included, and the entry is the same answers under the names the site
 serves them by.
-
-pytest, run by `mise run test`.py."""
+"""
 
 import contextlib
 import io
@@ -29,12 +28,12 @@ import pytest
 
 from belt import bestpractices_drift as drift
 from belt import decoded
-from tests import hermetic
+from tests import support
 
-CANON = hermetic.CANON
+CANON = support.CANON
 BELT = CANON / "mise"
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
+BASH = support.tool("bash")
+GIT = support.tool("git")
 ANSWERS = decoded.as_object(
     decoded.load_json((CANON / ".bestpractices.json").read_text(encoding="utf-8")),
     ".bestpractices.json",
@@ -127,7 +126,7 @@ def run(
         )
         log = root / "log"
         log.touch()
-        env = hermetic.env()
+        env = support.env()
         env |= {
             "ORG_BELT_DIR": str(BELT),
             "GITHUB_REPOSITORY": REPO,
@@ -164,7 +163,7 @@ def run(
                 text=True,
                 check=True,
             )
-        as_mise = hermetic.task_run("audit:bestpractices", BODY)
+        as_mise = support.task_run("audit:bestpractices", BODY)
         done = subprocess.run(
             as_mise.argv,
             cwd=tree,
@@ -408,7 +407,7 @@ class TestHelper:
     @pytest.fixture
     def _set_up_test_helper(self) -> None:
         """Run as the task does, recording no finding (#1934)."""
-        self.stack.enter_context(hermetic.as_task("audit:bestpractices"))
+        self.stack.enter_context(support.as_task("audit:bestpractices"))
 
     def test_site_key_maps_baseline_and_keeps_the_rest(self) -> None:
         """Only Baseline input names are renamed."""
@@ -443,7 +442,7 @@ class TestHelper:
                 pytest.MonkeyPatch.context() as patched,
                 contextlib.redirect_stderr(io.StringIO()) as err,
             ):
-                patched.setattr(shutil, "which", hermetic.returning(None))
+                patched.setattr(shutil, "which", support.returning(None))
                 status = drift.main([".bestpractices.json", REPO, str(readme)])
         assert status == 1
         assert err.getvalue() == "audit:bestpractices: curl missing\n"

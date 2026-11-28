@@ -12,8 +12,7 @@ It is read from the syntax tree with import aliases resolved, so
 writes and is free. A parse anywhere else is red by file and line. The
 list of files not yet moved (#1544's shape) was emptied by #1604's
 slices and deleted by its last step, so no file is excused.
-
-pytest, run by `mise run test`.py;"""
+"""
 
 import ast
 import json
@@ -23,9 +22,9 @@ from pathlib import Path
 import pytest
 
 from belt import decoded
-from tests import hermetic
+from tests import support
 
-HERE = hermetic.MISE
+HERE = support.MISE
 CANON = HERE.parent
 DEEP = 100_000
 # A raising reader: a decoded value and where it came from.
@@ -116,7 +115,7 @@ def judge(root: Path) -> list[str]:
 
     """
     out: list[str] = []
-    for path in hermetic.tracked(root, "*.py"):
+    for path in support.tracked(root, "*.py"):
         if path == LOADER:
             continue
         lines = parses((root / path).read_text(encoding="utf-8"))
@@ -211,7 +210,7 @@ class TestLoadJson:
     def test_a_stack_too_small_for_the_bound_is_refused(self) -> None:
         """The backstop: RecursionError under the bound is still a refusal."""
         with pytest.MonkeyPatch.context() as patched:
-            patched.setattr("json.loads", hermetic.raising(RecursionError))
+            patched.setattr("json.loads", support.raising(RecursionError))
             assert self.refused("[]") == "nested too deep to decode"
 
     def test_bytes_that_are_not_utf8_are_refused(self) -> None:

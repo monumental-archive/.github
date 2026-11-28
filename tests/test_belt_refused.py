@@ -8,15 +8,14 @@ refuses in a tree whose link names another pin's belt, and in a nested
 worktree with no link of its own whose parent's belt answers.
 
 Each row plants a consumer and the cache trees of two shas, A and B,
-each a whole belt (hermetic.belt) whose config.toml is a stub holding
+each a whole belt (support.belt) whose config.toml is a stub holding
 the belt's REAL `ORG_BELT_DIR`, `ORG_BELT_REFUSED` and `BASH_ENV`
 lines and its `[task_config]` shell, read out of mise/config.toml, plus
 one task. A real mise renders the templates, as it does for every task
 (`{{ cwd }}` is mise's own, so nothing else renders it truly); the
 value it renders is then handed to the task body as mise hands it,
-under hermetic.task_run, and one row runs the task through mise itself.
-
-pytest, run by `mise run test`.py."""
+under support.task_run, and one row runs the task through mise itself.
+"""
 
 from __future__ import annotations
 
@@ -26,9 +25,9 @@ from pathlib import Path
 import pytest
 
 from belt import decoded
-from tests import hermetic
+from tests import support
 
-CANON = hermetic.CANON
+CANON = support.CANON
 A = "a" * 40
 B = "b" * 40
 TASK = "lint:probe"
@@ -133,7 +132,7 @@ class TestPlanted:
         self.trees = {}
         for sha in (A, B):
             tree = self.tmp / "cache" / "org-belt" / sha
-            hermetic.belt(tree / "mise", stubs={"config.toml": stub})
+            support.belt(tree / "mise", stubs={"config.toml": stub})
             self.trees[sha] = tree
         self.repo = self.tmp / "consumer"
         self.repo.mkdir()
@@ -146,7 +145,7 @@ class TestPlanted:
             The environment.
 
         """
-        return hermetic.env(
+        return support.env(
             self.home,
             MISE_CONFIG_DIR=str(self.tmp / "mise-config"),
             MISE_DATA_DIR=str(self.tmp / "mise-data"),
@@ -162,7 +161,7 @@ class TestPlanted:
 
     def git(self, cwd: Path, *args: str) -> None:
         """Run git in `cwd`, checked."""
-        run([hermetic.tool("git"), *args], cwd, self.env(), check=True)
+        run([support.tool("git"), *args], cwd, self.env(), check=True)
 
     def pin(self, tree: Path, sha: str) -> None:
         """Write `tree`'s gate stub pinning `sha`, and track it.
@@ -188,7 +187,7 @@ class TestPlanted:
             The run.
 
         """
-        return run([hermetic.tool("mise"), *args], where, self.env(**extra))
+        return run([support.tool("mise"), *args], where, self.env(**extra))
 
     def rendered(self, where: Path, **extra: str) -> dict[str, str]:
         """Ask mise for the environment it renders in `where`.
@@ -213,7 +212,7 @@ class TestPlanted:
 
         """
         rendered = self.rendered(where, **extra)
-        as_mise = hermetic.task_run(TASK, BODY)
+        as_mise = support.task_run(TASK, BODY)
         given = {k: rendered[k] for k in ("ORG_BELT_REFUSED", "BASH_ENV")}
         return run(as_mise.argv, where, self.env(**(extra | as_mise.env | given)))
 
@@ -293,7 +292,7 @@ class TestTheBeltAnswersOnlyForItsPin(TestPlanted):
 
     def test_the_canons_own_tree_runs(self) -> None:
         """Carrier 2: the tree is its own belt, whatever stub or link it holds."""
-        hermetic.belt(self.repo / "mise", stubs={"config.toml": belt_lines()})
+        support.belt(self.repo / "mise", stubs={"config.toml": belt_lines()})
         self.pin(self.repo, B)
         self.link(self.repo, A)
         self.assert_runs(self.repo)

@@ -5,8 +5,7 @@ canon's own 0BSD work. The relabel names `MIT OR Apache-2.0`, and a
 REUSE.toml naming a licence whose text is not tracked is the half of
 that defect a machine can hold. Every red row asserts its message, so
 a row cannot pass on a different failure.
-
-pytest, run by `mise run test`.py;"""
+"""
 
 import contextlib
 import io
@@ -18,7 +17,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import licence_texts as lt
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -36,7 +35,7 @@ def _task(as_task: Callable[[str], None]) -> None:
 pytestmark = pytest.mark.usefixtures("_task")
 
 
-HERE = hermetic.MISE
+HERE = support.MISE
 ROOT = HERE.parent
 
 FIXTURE_ENTRY = """\

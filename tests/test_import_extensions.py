@@ -20,11 +20,11 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from tests import hermetic
+from tests import support
 
-BELT = hermetic.MISE
+BELT = support.MISE
 SCAFFOLD = BELT.parent / "scaffold"
-GIT = hermetic.tool("git")
+GIT = support.tool("git")
 # biome colours its report whatever NO_COLOR says; the rows read words.
 STYLE = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -68,7 +68,7 @@ def plant(base: Path, ts: str, mts: str) -> Path:
         MAIN.replace("@TS@", ts).replace("@MTS@", mts),
         encoding="utf-8",
     )
-    env = hermetic.env()
+    env = support.env()
     for argv in ([GIT, "init", "-q"], [GIT, "add", "-A"]):
         subprocess.run(argv, cwd=tree, env=env, check=True)
     return tree
@@ -86,7 +86,7 @@ def run(tree: Path, task: str) -> subprocess.CompletedProcess[str]:
     config.mkdir(exist_ok=True)
     scratch = base / "tmp"
     scratch.mkdir(exist_ok=True)
-    env = hermetic.env(
+    env = support.env(
         MISE_CONFIG_DIR=str(config),
         XDG_CONFIG_HOME=str(config),
         MISE_GLOBAL_CONFIG_FILE=str(BELT / "config.toml"),
@@ -99,7 +99,7 @@ def run(tree: Path, task: str) -> subprocess.CompletedProcess[str]:
         TMPDIR=str(scratch),
     )
     return subprocess.run(
-        [hermetic.tool("mise"), "run", task],
+        [support.tool("mise"), "run", task],
         cwd=tree,
         env=env,
         stdin=subprocess.DEVNULL,

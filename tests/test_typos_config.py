@@ -15,8 +15,7 @@ red, so a row cannot pass because the input was never a finding. Red
 rows assert the exact message, not just the exit status (#650). The
 misspellings are assembled at runtime — written out here, they would
 red this repository's own `lint:typos`.
-
-pytest, run by `mise run test`.py."""
+"""
 
 import subprocess
 import tempfile
@@ -24,14 +23,14 @@ from pathlib import Path
 
 import pytest
 
-from tests import hermetic
+from tests import support
 
-BELT = hermetic.MISE
+BELT = support.MISE
 CONFIG = BELT / "typos.toml"
 CHANGELOG_LINE = (
     Path(__file__).resolve().parent / "testdata" / "typos" / "changelog-v1.67.1.txt"
 )
-TYPOS = hermetic.tool("typos")
+TYPOS = support.tool("typos")
 
 # The run typos found inside the SHA, and what it asked for.
 RUN = "e" + "de"

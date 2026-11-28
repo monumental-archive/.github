@@ -14,8 +14,7 @@ Each guard is planted both directions: the baseline tree is red with
 its exact message, and removing the guard's input turns that same tree
 into the guard's skip line. Red rows assert the message, not just the
 exit status (#650).
-
-pytest, run by `mise run test`.py."""
+"""
 
 import contextlib
 import io
@@ -28,15 +27,15 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import decoded, lock_platforms
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-CANON = hermetic.CANON
+CANON = support.CANON
 BELT = CANON / "mise"
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
+BASH = support.tool("bash")
+GIT = support.tool("git")
 PYTHON = sys.executable
 DEFAULTS = CANON / ".github" / "workflows" / "publish.yml"
 
@@ -144,7 +143,7 @@ def lint(
     """
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
-        env = hermetic.env()
+        env = support.env()
         env |= {"ORG_BELT_DIR": str(BELT), "ORG_CANON_DIR": str(CANON)}
         for rel, text in (files | (untracked or {})).items():
             path = root / rel
@@ -153,7 +152,7 @@ def lint(
         subprocess.run([GIT, "init", "-q"], cwd=root, env=env, check=True)
         if files:
             subprocess.run([GIT, "add", "--", *files], cwd=root, env=env, check=True)
-        as_mise = hermetic.task_run("lint:lock-platforms", BODY)
+        as_mise = support.task_run("lint:lock-platforms", BODY)
         return subprocess.run(
             as_mise.argv,
             cwd=root,
@@ -166,7 +165,7 @@ def lint(
 
 def plant(root: Path, files: dict[str, str], untracked: dict[str, str]) -> None:
     """Write a git tree holding `files` tracked and `untracked` beside them."""
-    env = hermetic.env()
+    env = support.env()
     for rel, text in (files | untracked).items():
         path = root / rel
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -178,7 +177,7 @@ def plant(root: Path, files: dict[str, str], untracked: dict[str, str]) -> None:
 
 def check(
     files: dict[str, str], untracked: dict[str, str] | None = None
-) -> hermetic.Called:
+) -> support.Called:
     """Call the helper in-process with what the task body hands it (#1697).
 
     The body finds the tree's config and lock and pipes its tracked
@@ -193,7 +192,7 @@ def check(
         root = Path(tmp)
         plant(root, files, untracked or {})
         try:
-            names = hermetic.tracked(
+            names = support.tracked(
                 root,
                 ":!vendor/**",
                 ".github/workflows/*.yml",
@@ -202,7 +201,7 @@ def check(
         except RuntimeError:
             names = []  # the body's listing is empty here too
         listing = "".join(f"{name}\0" for name in names)
-        return hermetic.call(
+        return support.call(
             lambda: lock_platforms.main([
                 "--defaults",
                 str(DEFAULTS),
@@ -541,7 +540,7 @@ class TestReadDocuments:
         ) == err
 
 
-def located(files: dict[str, str]) -> hermetic.Called:
+def located(files: dict[str, str]) -> support.Called:
     """Call the helper as the task body does: no --config, it finds them.
 
     Returns:
@@ -551,7 +550,7 @@ def located(files: dict[str, str]) -> hermetic.Called:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         plant(root, files, {})
-        return hermetic.call(
+        return support.call(
             lambda: lock_platforms.main(["--defaults", str(DEFAULTS)]),
             cwd=root,
             stdin=f"{STUB_PATH}\0",
@@ -634,7 +633,7 @@ class TestScript:
                     *("--lock", "mise.lock"),
                 ],
                 cwd=root,
-                env=hermetic.env(MISE_TASK_NAME=NAME),
+                env=support.env(MISE_TASK_NAME=NAME),
                 input=f"{STUB_PATH}\0",
                 capture_output=True,
                 text=True,

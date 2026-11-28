@@ -24,8 +24,7 @@ the exact output, so a row cannot pass by stopping somewhere else.
 GIT ENVIRONMENT IS SCRUBBED (#857): git exports GIT_DIR to hooks run in
 a linked worktree, and a fixture that inherited it would write into the
 caller's index when this suite runs from the pre-push hook.
-
-pytest, run by `mise run test`. Every git call"""
+"""
 
 import json
 import os
@@ -37,7 +36,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import decoded, mutants_go
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -55,11 +54,11 @@ def _task(as_task: Callable[[str], None]) -> None:
 pytestmark = pytest.mark.usefixtures("_task")
 
 
-BELT = hermetic.MISE
+BELT = support.MISE
 SCRIPT = BELT / "mutants-go.sh"
-BASH = hermetic.tool("bash")
+BASH = support.tool("bash")
 
-GIT = hermetic.tool("git")
+GIT = support.tool("git")
 LABEL = "audit:mutants: go"
 MODULE = "example.com/p"
 RED_TAIL = (
@@ -162,7 +161,7 @@ def clean_env() -> dict[str, str]:
         os.environ minus every GIT_* key.
 
     """
-    return hermetic.env(MISE_TASK_NAME=TASK)
+    return support.env(MISE_TASK_NAME=TASK)
 
 
 def summary_line(counts: tuple[int, int, int, int, int, int]) -> str:
@@ -845,14 +844,14 @@ class TestBuildGo:
         assert mutants_go.older("devel +abc123", "go1.27.4")
 
 
-def call(argv: list[str]) -> hermetic.Called:
+def call(argv: list[str]) -> support.Called:
     """Call the helper's `main` in this process (#1696).
 
     Returns:
         The status `main` returned and what it wrote to each stream.
 
     """
-    return hermetic.call(lambda: mutants_go.main(argv))
+    return support.call(lambda: mutants_go.main(argv))
 
 
 @pytest.mark.usefixtures("_set_up_test_main")
@@ -901,7 +900,7 @@ class TestMain:
         }
         self.write("reports/1.json", json.dumps(body))
 
-    def judge(self) -> hermetic.Called:
+    def judge(self) -> support.Called:
         """Call main as the shell half does, its summary directory planted.
 
         Returns:
@@ -940,7 +939,7 @@ class TestMain:
     def test_a_clean_shard_is_green_and_writes_its_counts(self) -> None:
         """Every mutant killed: exit 0, the summary, go.tsv."""
         self.results(("KILLED", 4, "arithmetic"), ("TIMED_OUT", 5, "branch"))
-        assert self.judge() == hermetic.Called(0, self.line(2, 2, 0, 0, 0, 0), "")
+        assert self.judge() == support.Called(0, self.line(2, 2, 0, 0, 0, 0), "")
         assert (self.summary / "go.tsv").read_text(
             encoding="utf-8"
         ) == "whole\t2\t2\t0\t0\twhole\n"
@@ -963,7 +962,7 @@ class TestMain:
             "records.txt",
             "a/a.go:4:\treturn x + y //mutants:equivalent arithmetic same value\n",
         )
-        assert self.judge() == hermetic.Called(0, self.line(2, 1, 0, 0, 0, 1), "")
+        assert self.judge() == support.Called(0, self.line(2, 1, 0, 0, 0, 1), "")
 
     def test_a_malformed_and_a_stale_record_are_red_by_name(self) -> None:
         """No reason is malformed; a sound record over nothing is stale."""
@@ -1019,7 +1018,7 @@ class TestMain:
     def test_build_go_passes_an_equal_gomu_silently(self) -> None:
         """The same release: exit 0, nothing printed."""
         argv = ["build-go", "--label", LABEL, "--gomu", "g", "--built", "go1.27"]
-        assert call([*argv, "--running", "go1.27.0"]) == hermetic.Called(0, "", "")
+        assert call([*argv, "--running", "go1.27.0"]) == support.Called(0, "", "")
 
 
 class TestScript:

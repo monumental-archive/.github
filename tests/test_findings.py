@@ -21,8 +21,7 @@ workflow step's own (directly under `RUNNER_TEMP`); the script's file
 name otherwise. A character UTF-8 cannot carry, a lone surrogate in the
 message or the subject, is printed and recorded as its backslash
 escape, and the status is 0 (#1984).
-
-pytest, run by `mise run test`."""
+"""
 
 import re
 import subprocess
@@ -33,9 +32,9 @@ from pathlib import Path
 import pytest
 
 from belt import decoded
-from tests import hermetic
+from tests import support
 
-MISE = hermetic.MISE
+MISE = support.MISE
 SHELL_WRITER = MISE / "findings.sh"
 SYSTEM_BASH = Path("/bin/bash")
 
@@ -96,7 +95,7 @@ class Writer:
         reporter = root / f"reporter{self.suffix}"
         reporter.write_text(self.script, encoding="utf-8")
         overrides = {"PYTHONUTF8": "1", **env}
-        child = hermetic.env(**overrides)
+        child = support.env(**overrides)
         for name in ("MISE_TASK_NAME", "ORG_FINDINGS"):
             if name not in env:
                 child.pop(name, None)
@@ -120,7 +119,7 @@ def writers() -> list[Writer]:
     """
     out = [
         Writer("python", [sys.executable], PYTHON_REPORTER, ".py"),
-        Writer("belt bash", [hermetic.tool("bash")], SHELL_REPORTER, ".sh"),
+        Writer("belt bash", [support.tool("bash")], SHELL_REPORTER, ".sh"),
     ]
     if SYSTEM_BASH.exists():
         out.append(Writer("/bin/bash", [str(SYSTEM_BASH)], SHELL_REPORTER, ".sh"))
@@ -405,7 +404,7 @@ def bashes() -> list[tuple[str, str]]:
         Each bash's label and path.
 
     """
-    out = [("belt bash", hermetic.tool("bash"))]
+    out = [("belt bash", support.tool("bash"))]
     if SYSTEM_BASH.exists():
         out.append(("/bin/bash", str(SYSTEM_BASH)))
     return out
@@ -525,7 +524,7 @@ class TestLoadingRows:
                     ],
                     capture_output=True,
                     text=True,
-                    env=hermetic.env(PATH=""),
+                    env=support.env(PATH=""),
                     cwd=cwd,
                     check=False,
                 )
@@ -562,7 +561,7 @@ class TestLinesRows:
             capture_output=True,
             text=True,
             encoding="utf-8",
-            env=hermetic.env(
+            env=support.env(
                 MISE_TASK_NAME="lint:demo", ORG_FINDINGS=str(self.file), PYTHONUTF8="1"
             ),
             check=False,
@@ -661,7 +660,7 @@ class TestUnencodableRows:
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
-                env=hermetic.env(
+                env=support.env(
                     MISE_TASK_NAME="t", ORG_FINDINGS=str(file), PYTHONUTF8="1"
                 ),
                 check=False,

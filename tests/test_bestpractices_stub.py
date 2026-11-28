@@ -15,8 +15,7 @@ tree, not a copy of it, so a change to the lint has to face these rows.
 Each red row asserts the message, not just the exit status: a planted
 row scored on exit alone can pass for the wrong reason. The green rows
 plant the canon's real stub, so the stub and the lint cannot drift.
-
-pytest, run by `mise run test`.py."""
+"""
 
 import json
 import re
@@ -25,12 +24,12 @@ import tempfile
 from pathlib import Path
 
 from belt import decoded
-from tests import hermetic
+from tests import support
 
-CANON = hermetic.CANON
+CANON = support.CANON
 BELT = CANON / "mise"
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
+BASH = support.tool("bash")
+GIT = support.tool("git")
 STUB_PATH = "scaffold/.bestpractices.json"
 STUB = (CANON / STUB_PATH).read_text(encoding="utf-8")
 CANON_URL = "https://github.com/monumental-archive/.github/"
@@ -80,11 +79,11 @@ def lint(text: str, path: str = STUB_PATH) -> subprocess.CompletedProcess[str]:
         target = Path(tmp) / path
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(text, encoding="utf-8")
-        env = hermetic.env()
+        env = support.env()
         env |= {"ORG_BELT_DIR": str(BELT), "ORG_CANON_DIR": str(CANON)}
         subprocess.run([GIT, "init", "-q"], cwd=tmp, env=env, check=True)
         subprocess.run([GIT, "add", path], cwd=tmp, env=env, check=True)
-        as_mise = hermetic.task_run("lint:bestpractices", BODY)
+        as_mise = support.task_run("lint:bestpractices", BODY)
         done = subprocess.run(
             as_mise.argv,
             cwd=tmp,

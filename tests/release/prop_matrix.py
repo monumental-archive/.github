@@ -32,7 +32,7 @@ from belt import decoded
 from belt.release import matrix
 from belt.typed_hypothesis import given
 from belt.workflow_command import escape_data
-from tests import hermetic
+from tests import support
 
 
 def escaped(text: str) -> str:
@@ -65,7 +65,7 @@ def as_helper() -> contextlib.ExitStack:
 
     """
     stack = contextlib.ExitStack()
-    hermetic.name_task(stack.enter_context(pytest.MonkeyPatch.context()), "")
+    support.name_task(stack.enter_context(pytest.MonkeyPatch.context()), "")
     stack.enter_context(pytest.MonkeyPatch.context()).setattr(
         sys, "argv", ["matrix.py"]
     )

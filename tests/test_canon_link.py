@@ -5,8 +5,7 @@ the tree `$/.github/actions/canon` resolved from to `.org-canon` and
 names the resolved ref. It finds that tree from its own location, so
 each row plants a tree, copies the shipped script into the tree's
 `.github/actions/canon/`, and runs it there under bash.
-
-pytest, run by `mise run test`."""
+"""
 
 from __future__ import annotations
 
@@ -18,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from tests import hermetic
+from tests import support
 
 CANON = "example-org/.github"
 SHA = "0123456789abcdef0123456789abcdef01234567"
@@ -31,7 +30,7 @@ def plant(root: pathlib.Path, *, config: bool = True) -> pathlib.Path:
         The script's path inside the planted tree.
 
     """
-    hermetic.canon(
+    support.canon(
         root, ".github/actions/canon", stubs={"mise/config.toml": "[tools]\n"}
     )
     if not config:
@@ -72,10 +71,10 @@ class TestLinkTheCanonTree:
             The run.
 
         """
-        bash = hermetic.tool("bash")
+        bash = support.tool("bash")
         return subprocess.run(
             [bash, str(script)],
-            env=hermetic.env(
+            env=support.env(
                 PATH=os.environ["PATH"],
                 **{"CANON_REPOSITORY": canon} if canon is not None else {},
                 GITHUB_REPOSITORY=repository,
@@ -125,9 +124,9 @@ class TestLinkTheCanonTree:
 
         """
         return subprocess.run(
-            [hermetic.tool("git"), "-c", "commit.gpgsign=false", *args],
+            [support.tool("git"), "-c", "commit.gpgsign=false", *args],
             cwd=cwd or self.workspace,
-            env=hermetic.env(self.tmp / "home", PATH=os.environ["PATH"]),
+            env=support.env(self.tmp / "home", PATH=os.environ["PATH"]),
             capture_output=True,
             text=True,
             check=True,

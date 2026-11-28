@@ -10,8 +10,7 @@ GIT ENVIRONMENT IS SCRUBBED, deliberately — see #857. `git` reads
 `GIT_DIR` and `GIT_INDEX_FILE` from the environment regardless of `cwd`,
 and git exports `GIT_DIR` to hooks run in a linked worktree, so a harness
 that inherits it writes its fixture into the caller's real index.
-
-pytest, run by `mise run test`.py."""
+"""
 
 import hashlib
 import subprocess
@@ -20,13 +19,13 @@ from tempfile import TemporaryDirectory
 
 import pytest
 
-from tests import hermetic
+from tests import support
 
-CANON = hermetic.CANON
+CANON = support.CANON
 SCRIPT = CANON / "mise" / "vendored.sh"
 
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
+BASH = support.tool("bash")
+GIT = support.tool("git")
 
 COMMIT = "90dacfc6c25f151fc3d48fdba150c677e9dddf1d"
 SKILL = b"# upstream skill\n"
@@ -40,7 +39,7 @@ def clean_env() -> dict[str, str]:
         A copy of os.environ carrying no GIT_* variable (#857).
 
     """
-    return hermetic.env()
+    return support.env()
 
 
 def sha(data: bytes) -> str:

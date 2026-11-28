@@ -10,19 +10,18 @@ location Codecov reads: four names, at the root or under dev/ or
 The body under test is the task's own `run` string, read out of
 mise/config.toml with decoded.load_toml and run by bash in a planted git
 tree, not a copy of it. Every red row asserts the exact message (#650).
-
-pytest, run by `mise run test`.py."""
+"""
 
 import subprocess
 import tempfile
 from pathlib import Path
 
 from belt import decoded
-from tests import hermetic
+from tests import support
 
-BELT = hermetic.MISE
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
+BELT = support.MISE
+BASH = support.tool("bash")
+GIT = support.tool("git")
 
 NAME = "lint:codecov-yml"
 GREEN = f"{NAME}: no Codecov config tracked; the org's Global YAML applies\n"
@@ -58,7 +57,7 @@ def lint(files: dict[str, str]) -> subprocess.CompletedProcess[str]:
     """
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
-        env = hermetic.env()
+        env = support.env()
         for rel, text in files.items():
             path = root / rel
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -66,7 +65,7 @@ def lint(files: dict[str, str]) -> subprocess.CompletedProcess[str]:
         subprocess.run([GIT, "init", "-q"], cwd=root, env=env, check=True)
         if files:
             subprocess.run([GIT, "add", "--", *files], cwd=root, env=env, check=True)
-        as_mise = hermetic.task_run(NAME, BODY)
+        as_mise = support.task_run(NAME, BODY)
         return subprocess.run(
             as_mise.argv,
             cwd=root,
@@ -136,10 +135,10 @@ class TestCodecovYml:
         """Tracked files only: an untracked config is not the tree's."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            env = hermetic.env()
+            env = support.env()
             subprocess.run([GIT, "init", "-q"], cwd=root, env=env, check=True)
             (root / "codecov.yml").write_text(EDTF, encoding="utf-8")
-            as_mise = hermetic.task_run(NAME, BODY)
+            as_mise = support.task_run(NAME, BODY)
             done = subprocess.run(
                 as_mise.argv,
                 cwd=root,

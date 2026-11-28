@@ -14,8 +14,7 @@ The table is held to the legs: each mutation leg's guard
 (`org_tracked_has "${var}"`, #2013, and the `var=` it reads) names the
 file that adopts it, and the table must name the same one. A planted copy of the
 legs' texts, in memory, with one name changed is red by name.
-
-pytest, run by `mise run test`.py;"""
+"""
 
 import re
 import subprocess
@@ -25,12 +24,12 @@ from pathlib import Path
 import pytest
 
 from belt import decoded, testing_adoption
-from tests import hermetic
+from tests import support
 
-BELT = hermetic.MISE
+BELT = support.MISE
 CANON = BELT.parent
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
+BASH = support.tool("bash")
+GIT = support.tool("git")
 TASK = "lint:test-adoption"
 FLOOR = ".coverage-floor"
 MUTATION = "tracking it adopts the leg; docs/tooling-verdicts.md says what it holds"
@@ -61,11 +60,11 @@ def run(tree: Path, home: Path) -> subprocess.CompletedProcess[str]:
         The finished run.
 
     """
-    as_mise = hermetic.task_run("lint:test-adoption", body())
+    as_mise = support.task_run("lint:test-adoption", body())
     return subprocess.run(
         as_mise.argv,
         cwd=tree,
-        env=hermetic.env(home, ORG_BELT_DIR=str(BELT)) | as_mise.env,
+        env=support.env(home, ORG_BELT_DIR=str(BELT)) | as_mise.env,
         capture_output=True,
         text=True,
         check=False,
@@ -83,7 +82,7 @@ def lint(files: list[str]) -> subprocess.CompletedProcess[str]:
         root = Path(tmp)
         tree = root / "repo"
         tree.mkdir()
-        env = hermetic.env(root / "home")
+        env = support.env(root / "home")
         (tree / "README.md").write_text("x\n", encoding="utf-8")
         for name in files:
             path = tree / name
@@ -121,7 +120,7 @@ def legs() -> dict[str, str]:
     """
     return {
         language.leg: (
-            (hermetic.PACKAGE if language.leg.endswith(".py") else BELT) / language.leg
+            (support.PACKAGE if language.leg.endswith(".py") else BELT) / language.leg
         ).read_text(encoding="utf-8")
         for language in testing_adoption.LANGUAGES
     }

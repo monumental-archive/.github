@@ -10,8 +10,7 @@ Each row plants a canon tree pinning CI's mise and a stub `mise` that
 answers the row's version, then runs the shipped script with
 ORG_CANON_DIR at the planted tree. The red row asserts the whole
 message.
-
-pytest, run by `mise run test`.py."""
+"""
 
 from __future__ import annotations
 
@@ -21,9 +20,9 @@ from pathlib import Path
 
 import pytest
 
-from tests import hermetic
+from tests import support
 
-CANON = hermetic.CANON
+CANON = support.CANON
 SCRIPT = CANON / "mise" / "belt-current.sh"
 MISE_VERSION = "2026.11.7"
 
@@ -81,7 +80,7 @@ class TestTheMiseIsCurrent:
         self.repo = self.tmp / "repo"
         self.repo.mkdir()
         run(
-            [hermetic.tool("git"), "init", "-q", "."], self.repo, self.env(), check=True
+            [support.tool("git"), "init", "-q", "."], self.repo, self.env(), check=True
         )
 
     def env(self, **extra: str) -> dict[str, str]:
@@ -91,7 +90,7 @@ class TestTheMiseIsCurrent:
             The environment, with its own HOME.
 
         """
-        return hermetic.env(self.home, **extra)
+        return support.env(self.home, **extra)
 
     def check(self, version: str) -> subprocess.CompletedProcess[str]:
         """Run the shipped script with a stub mise answering `version`.
@@ -109,7 +108,7 @@ class TestTheMiseIsCurrent:
         (stubs / "mise").chmod(0o755)
         path = f"{stubs}{os.pathsep}{os.environ['PATH']}"
         return run(
-            [hermetic.tool("bash"), str(SCRIPT)],
+            [support.tool("bash"), str(SCRIPT)],
             self.repo,
             self.env(ORG_CANON_DIR=str(self.canon), PATH=path),
         )

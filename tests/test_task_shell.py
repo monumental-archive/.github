@@ -13,8 +13,7 @@ split as mise splits it: a failing command, a failing pipeline and an
 unset name must each stop the body before its last line. The second
 runs mise for real, in a planted repository that pins its own shell
 and loads the belt through a clone's `conf.d` link.
-
-pytest, run by `mise run test`.py;"""
+"""
 
 import shlex
 import shutil
@@ -25,10 +24,10 @@ from pathlib import Path
 import pytest
 
 from belt import decoded
-from tests import hermetic
+from tests import support
 import contextlib
 
-BELT = hermetic.MISE
+BELT = support.MISE
 CONFIG = decoded.load_toml((BELT / "config.toml").read_text(encoding="utf-8"))
 SHELL = decoded.as_str(
     decoded.as_object(CONFIG["task_config"], "task_config")["shell"],
@@ -54,7 +53,7 @@ class TestTasksFailOnError:
         """No body reaches its last line, and each run is red."""
         done = subprocess.run(
             [*shlex.split(SHELL), body],
-            env=hermetic.env(),
+            env=support.env(),
             capture_output=True,
             text=True,
             check=False,
@@ -80,7 +79,7 @@ class TestALinkedCloneThatPinsItsShell:
         repo = tmp / "repo"
         conf = repo / ".config" / "mise" / "conf.d"
         conf.mkdir(parents=True)
-        belt = hermetic.belt(tmp / "belt")
+        belt = support.belt(tmp / "belt")
         (conf / "belt.toml").symlink_to(belt / "config.toml")
         (repo / "mise.toml").write_text(
             f'[task_config]\nshell = "{SHELL}"\n\n'
@@ -89,12 +88,12 @@ class TestALinkedCloneThatPinsItsShell:
         )
         (tmp / "config").mkdir()
         subprocess.run(
-            [hermetic.tool("git"), "init", "-q", "."],
+            [support.tool("git"), "init", "-q", "."],
             cwd=repo,
-            env=hermetic.env(),
+            env=support.env(),
             check=True,
         )
-        env = hermetic.env(
+        env = support.env(
             MISE_CONFIG_DIR=str(tmp / "config"),
             XDG_CONFIG_HOME=str(tmp / "config"),
             MISE_CEILING_PATHS=str(tmp),
@@ -105,7 +104,7 @@ class TestALinkedCloneThatPinsItsShell:
             MISE_TASK_RUN_AUTO_INSTALL="0",
         )
         done = subprocess.run(
-            [hermetic.tool("mise"), "run", "t"],
+            [support.tool("mise"), "run", "t"],
             cwd=repo,
             env=env,
             stdin=subprocess.DEVNULL,

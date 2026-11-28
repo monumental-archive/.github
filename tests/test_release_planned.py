@@ -10,8 +10,7 @@ parent is not that sha, so the queue removes it before it lands.
 The body under test is the task's own `run` string, read out of
 mise/config.toml with tomllib and run by bash in a real git history.
 Every row asserts the exact output (#650).
-
-pytest, run by `mise run test`.py."""
+"""
 
 import os
 import subprocess
@@ -20,12 +19,12 @@ from pathlib import Path
 import pytest
 
 from belt import decoded
-from tests import hermetic
+from tests import support
 
-CANON = hermetic.CANON
+CANON = support.CANON
 BELT = CANON / "mise"
-BASH = hermetic.optional_tool("bash")
-GIT = hermetic.optional_tool("git")
+BASH = support.optional_tool("bash")
+GIT = support.optional_tool("git")
 
 NAME = "lint:release-planned"
 
@@ -61,7 +60,7 @@ class History:
     def __init__(self, root: Path) -> None:
         """Initialise an empty repository at `root`."""
         self.root = root
-        self.env = hermetic.env()
+        self.env = support.env()
         self.env |= {
             "HOME": str(root),
             "GIT_CONFIG_GLOBAL": os.devnull,
@@ -81,7 +80,7 @@ class History:
 
         """
         return subprocess.run(
-            [hermetic.tool("git"), *args],
+            [support.tool("git"), *args],
             cwd=self.root,
             env=self.env,
             check=True,
@@ -106,7 +105,7 @@ class History:
             The finished process, stdout and stderr captured as text.
 
         """
-        as_mise = hermetic.task_run("lint:release-planned", BODY)
+        as_mise = support.task_run("lint:release-planned", BODY)
         return subprocess.run(
             as_mise.argv,
             cwd=self.root,

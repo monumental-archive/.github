@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, ClassVar
 import pytest
 
 from belt import regression_count as rc
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -51,7 +51,7 @@ _GIT_ENV = {
 }
 
 
-GIT = hermetic.tool("git")
+GIT = support.tool("git")
 
 
 def run_git(cwd: pathlib.Path | str, *args: str) -> str:
@@ -132,9 +132,9 @@ class TestRepoCase:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Isolate git's config, then build the repository."""
-        clean = hermetic.env(MISE_TASK_NAME=TASK)
+        clean = support.env(MISE_TASK_NAME=TASK)
         isolated: dict[str, str] = {**clean, **_GIT_ENV}
-        hermetic.patch_env(monkeypatch, isolated, clear=True)
+        support.patch_env(monkeypatch, isolated, clear=True)
         self.repo = Repo(pathlib.Path(str(tmp_path)))
 
     def assert_class(self, subject: str, want: str) -> None:
@@ -422,7 +422,7 @@ class TestReport(TestRepoCase):
         """The summary carries the window's ratio and the recent fixes only."""
         env = {"GIT_COMMITTER_DATE": "2020-01-01T00:00:00Z"}
         with pytest.MonkeyPatch.context() as patched:
-            hermetic.patch_env(patched, env)
+            support.patch_env(patched, env)
             self.repo.commit("fix: old", {"old.py": "1\n"})
         self.repo.commit("fix: new", {"new.py": "1\n"})
         self.repo.commit("fix: tested", {"t.py": "1\n", "test_t.py": "1\n"})

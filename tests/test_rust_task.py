@@ -7,8 +7,7 @@ call was given and what it returned without a Mac or a Postgres.
 `mise` is a stub on PATH and ORG_PYTHON a stub interpreter; both log
 what they were asked.
 
-GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. pytest, run by
-`mise run test`.
+GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom.
 """
 
 from __future__ import annotations
@@ -21,7 +20,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import gate_surface, pgrx_postgres, rust_task
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -129,8 +128,8 @@ class TestPlanted:
             stub.write_text(text, encoding="utf-8")
             stub.chmod(0o755)
         (self.tmp / "log").touch()
-        env = hermetic.env()
-        hermetic.patch_env(
+        env = support.env()
+        support.patch_env(
             monkeypatch,
             env
             | {
@@ -160,9 +159,9 @@ class TestBasics(TestPlanted):
         """ORG_BELT_DIR when set; the package's tree's mise/ unset or empty."""
         assert self.belt == rust_task.belt()
         os.environ["ORG_BELT_DIR"] = ""
-        assert hermetic.MISE == rust_task.belt()
+        assert support.MISE == rust_task.belt()
         del os.environ["ORG_BELT_DIR"]
-        assert hermetic.MISE == rust_task.belt()
+        assert support.MISE == rust_task.belt()
 
     def test_a_specs_name_is_before_its_last_at(self) -> None:
         """`${spec%@*}`: the last `@` only, and a spec with none is whole."""
@@ -181,14 +180,14 @@ class TestBasics(TestPlanted):
 
     def test_run_returns_the_status_and_passes_the_environment(self) -> None:
         """The command's own status, under the environment it was given."""
-        bash = hermetic.tool("bash")
+        bash = support.tool("bash")
         assert rust_task.run([bash, "-c", "exit 3"]) == 3
         script = "[[ $PLANT_X == y ]] && [[ -z ${PLANT_DIR-} ]]"
         assert rust_task.run([bash, "-c", script], {"PLANT_X": "y"}) == 0
 
     def test_output_reads_stdout_and_feeds_stdin(self) -> None:
         """The status and what it printed, the input on its stdin."""
-        bash = hermetic.tool("bash")
+        bash = support.tool("bash")
         assert rust_task.output([bash, "-c", 'echo "got:$(cat)"; exit 4'], "in") == (
             4,
             "got:in\n",
@@ -330,7 +329,7 @@ class TestPgrx(TestPlanted):
 
     def test_a_compile_runs_at_its_major_with_what_was_prepared(self) -> None:
         """org_pgrx_major given the major; the prepared variables reach it."""
-        bash = hermetic.tool("bash")
+        bash = support.tool("bash")
         out = self.tmp / "out"
         argv = [bash, "-c", f'{{ {SHOW}; }} > "{out}"', "show", "7"]
         assert rust_task.at_major("17", argv, {"PLANT_SDK": "sdk"}) == 7

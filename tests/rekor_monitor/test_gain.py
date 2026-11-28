@@ -26,7 +26,7 @@ import pytest
 
 from belt import decoded
 from belt.rekor_monitor import gain
-from tests import hermetic
+from tests import support
 
 DATA = Path(__file__).resolve().parent / "testdata"
 
@@ -122,7 +122,7 @@ class TestRows:
         self.write(self.start, checkpoint())
         self.write(self.end, checkpoint())
         self.legs([BUDGET] * LEGS)
-        self.env = hermetic.env(ORG_FINDINGS=str(self.findings))
+        self.env = support.env(ORG_FINDINGS=str(self.findings))
 
     @staticmethod
     def write(path: Path, doc: dict[str, object]) -> None:
@@ -152,7 +152,7 @@ class TestRows:
             "--legs", str(legs),
         ]  # fmt: skip
 
-    def run_helper(self, kept: str = "true", legs: int = LEGS) -> hermetic.Called:
+    def run_helper(self, kept: str = "true", legs: int = LEGS) -> support.Called:
         """Call the helper's main in this process, as the gaining job runs it.
 
         Returns:
@@ -164,7 +164,7 @@ class TestRows:
         # around it, so the finding writer names the script (#1934).
         with pytest.MonkeyPatch.context() as patched:
             patched.setattr(sys, "argv", [str(HELPER), *argv])
-            return hermetic.call(lambda: gain.main(argv), env=self.env)
+            return support.call(lambda: gain.main(argv), env=self.env)
 
     def recorded(self) -> list[dict[str, object]]:
         """Read back every record the helper appended.

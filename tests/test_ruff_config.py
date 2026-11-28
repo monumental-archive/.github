@@ -15,10 +15,10 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from tests import hermetic
+from tests import support
 
-CONFIG = hermetic.MISE / "ruff.toml"
-RUFF = hermetic.tool("ruff")
+CONFIG = support.MISE / "ruff.toml"
+RUFF = support.tool("ruff")
 
 # A helper the config must leave alone: it imports subprocess and
 # passes a module constant and an argument it was given, the shape
@@ -71,7 +71,7 @@ def check(source: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [RUFF, "check", "--config", str(CONFIG), "--no-cache", str(planted)],
             cwd=tmp,
-            env=hermetic.env(),
+            env=support.env(),
             capture_output=True,
             text=True,
             check=False,

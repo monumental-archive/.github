@@ -1,6 +1,6 @@
-"""hermetic.py's fixture environment, under environments nobody wrote down.
+"""support.py's fixture environment, under environments nobody wrote down.
 
-The properties of `test_hermetic.py`'s fixed rows (#1548), over
+The properties of `test_support.py`'s fixed rows (#1548), over
 generated suite environments and overrides:
 
 - Invariance (V): whatever the suite's environment holds, the fixture
@@ -17,7 +17,7 @@ from hypothesis import example
 from hypothesis import strategies as st
 
 from belt.typed_hypothesis import given
-from tests import hermetic as he
+from tests import support as he
 
 IDENTITY = {
     "GIT_EDITOR": "true",
@@ -54,7 +54,7 @@ class TestEnv:
     ) -> None:
         """Allow-list, HOME and identity; overrides last."""
         with pytest.MonkeyPatch.context() as patched:
-            hermetic.patch_env(patched, environ, clear=True)
+            support.patch_env(patched, environ, clear=True)
             got = he.env(home, **overrides)
         allowed = set(he.INHERITED) | {"HOME"} | set(IDENTITY) | set(overrides)
         assert set(got) <= allowed

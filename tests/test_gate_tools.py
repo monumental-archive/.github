@@ -33,8 +33,7 @@ GIT ENVIRONMENT IS SCRUBBED (#857): git exports `GIT_DIR` and
 `GIT_INDEX_FILE` to hooks in a linked worktree, and a planted tree that
 inherits them is staged into the caller's real index when the suite runs
 from pre-push. Every git here runs without any `GIT_*` variable.
-
-pytest, run by `mise run test`.py."""
+"""
 
 import contextlib
 import dataclasses
@@ -49,17 +48,17 @@ from pathlib import Path
 import pytest
 
 from belt import decoded, gate_tools, python_runs, typed_std
-from tests import hermetic
+from tests import support
 
-CANON = hermetic.CANON
+CANON = support.CANON
 # A workflow step runs the command outside mise, so its findings carry
 # the command's own name, which the launcher sets (findings.task_name,
 # #1934).
 STEP = "gate-tools"
 BELT = CANON / "mise"
 # The package a belt command's module is found in (#2177).
-PACKAGE = hermetic.PACKAGE
-GIT = hermetic.tool("git")
+PACKAGE = support.PACKAGE
+GIT = support.tool("git")
 
 
 # What `ci` runs besides the `lint:*` wildcard (its `depends`), and the
@@ -223,8 +222,8 @@ def expand(text: str, seen: set[str]) -> list[tuple[str, str]]:
             for name in found(SCRIPT, gate_tools.strip_literals(line) + " " + line)
             if name.endswith(".sh") and (BELT / name).is_file()
         ]
-        for command in hermetic.launched(line):
-            module = hermetic.command_module(command, PACKAGE)
+        for command in support.launched(line):
+            module = support.command_module(command, PACKAGE)
             if module is not None:
                 names.append(module.relative_to(PACKAGE).as_posix())
         for name in names:
@@ -300,7 +299,7 @@ def belt_imports(name: str) -> list[str]:
     out = [name]
     todo = [name]
     while todo:
-        for path in hermetic.belt_modules(_source(todo.pop()), PACKAGE):
+        for path in support.belt_modules(_source(todo.pop()), PACKAGE):
             imported = path.relative_to(PACKAGE).as_posix()
             if imported not in out:
                 out.append(imported)
@@ -741,7 +740,7 @@ class TestTable:
                 "import subprocess\n"
                 "from pathlib import Path\n"
                 "from belt.belt_scripts import script\n"
-                'HERE = script(hermetic.MISE, "planted.sh")\n'
+                'HERE = script(support.MISE, "planted.sh")\n'
                 'NAMED = "named.sh"\n'
                 'subprocess.run(["bash", "-c", f". {HERE}; f"], check=True)\n',
                 "utf-8",
@@ -750,8 +749,8 @@ class TestTable:
             with pytest.MonkeyPatch.context() as patched:
                 patched.setattr(here, "BELT", belt_dir)
                 patched.setattr(here, "PACKAGE", belt_dir / "belt")
-                hermetic.patch_dict(patched, _SOURCES, clear=True)
-                hermetic.patch_dict(patched, _CODE, clear=True)
+                support.patch_dict(patched, _SOURCES, clear=True)
+                support.patch_dict(patched, _CODE, clear=True)
                 planted: list[str] = ["planted.sh"]
                 assert planted == python_code("runs.py").scripts
                 runs = expand('"${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt" runs', set())
@@ -777,8 +776,8 @@ class TestTable:
             with pytest.MonkeyPatch.context() as patched:
                 patched.setattr(here, "BELT", belt_dir)
                 patched.setattr(here, "PACKAGE", belt_dir / "belt")
-                hermetic.patch_dict(patched, _SOURCES, clear=True)
-                hermetic.patch_dict(patched, _CODE, clear=True)
+                support.patch_dict(patched, _SOURCES, clear=True)
+                support.patch_dict(patched, _CODE, clear=True)
                 says = expand('"${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt" says', set())
                 assert first_call(says, ["hadolint"]) is None
                 assert first_call(says, ["git"]) == 1
@@ -798,8 +797,8 @@ class TestTable:
             with pytest.MonkeyPatch.context() as patched:
                 patched.setattr(here, "BELT", belt_dir)
                 patched.setattr(here, "PACKAGE", belt_dir / "belt")
-                hermetic.patch_dict(patched, _SOURCES, clear=True)
-                hermetic.patch_dict(patched, _CODE, clear=True)
+                support.patch_dict(patched, _SOURCES, clear=True)
+                support.patch_dict(patched, _CODE, clear=True)
                 wraps = expand('"${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt" wraps', set())
                 assert first_call(wraps, ["hadolint"]) == 1
 
@@ -879,7 +878,7 @@ def clean_env() -> dict[str, str]:
         os.environ minus every `GIT_*` name (#857).
 
     """
-    return hermetic.env()
+    return support.env()
 
 
 def git_tree(files: dict[str, str]) -> Path:
@@ -1037,7 +1036,7 @@ class TestHelper:
         root = git_tree({**WORKFLOW, "go.mod": "module x\n"}) if tree == "go" else CANON
         env_file = tmp_path / "env"
         env_file.write_text("")
-        done = hermetic.call(
+        done = support.call(
             lambda: gate_tools.main(["--root", str(root), "disable"]),
             env=clean_env() | {"GITHUB_ENV": str(env_file)},
             command=STEP,
@@ -1055,10 +1054,10 @@ class TestHelper:
         """A belt key with no row is refused by name, not left out."""
         text = (BELT / "gate-tools.toml").read_text("utf-8")
         stub = text.replace('[tools."aqua:hadolint/hadolint"]', "[x]")
-        table = hermetic.belt(tmp_path, stubs={"gate-tools.toml": stub}) / "gate-tools.toml"
-        done = hermetic.call(
+        table = support.belt(tmp_path, stubs={"gate-tools.toml": stub}) / "gate-tools.toml"
+        done = support.call(
             lambda: gate_tools.main(["--table", str(table), "list"]),
-            env=hermetic.env(),
+            env=support.env(),
             cwd=CANON,
             command=STEP,
         )
@@ -1094,7 +1093,7 @@ class TestRefusals:
             contextlib.redirect_stderr(err),
             contextlib.redirect_stdout(io.StringIO()),
         ):
-            hermetic.name_task(patched, "")
+            support.name_task(patched, "")
             patched.setattr(sys, "argv", [STEP])
             status = gate_tools.main(["--table", str(table), "list"])
         return status, err.getvalue(), table

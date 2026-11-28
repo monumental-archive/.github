@@ -10,8 +10,7 @@ crate. cargo is a stub that records every manifest it is asked about and
 answers by path through a symlink to the tree, so a root is compared
 physically. A refusing row asserts its message, not only its status
 (#650).
-
-pytest, run by `mise run test`.py;"""
+"""
 
 import functools
 import os
@@ -23,15 +22,15 @@ from pathlib import Path
 import pytest
 
 from belt import rust_workspaces
-from tests import hermetic
+from tests import support
 import contextlib
 
-BELT = hermetic.MISE
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
+BELT = support.MISE
+BASH = support.tool("bash")
+GIT = support.tool("git")
 # The machine's own bash as well: on a Mac it is 3.2, and the reader
 # fills its array by name, as org_tracked_read does.
-SYSTEM_BASH = hermetic.optional_tool("bash", path="/bin")
+SYSTEM_BASH = support.optional_tool("bash", path="/bin")
 SHELLS = (BASH,) if SYSTEM_BASH in {None, BASH} else (BASH, str(SYSTEM_BASH))
 
 # The planted tree: a root workspace with one member, a fuzz crate that
@@ -96,7 +95,7 @@ class Planted:
         for name, text in FILES.items():
             (self.tree / name).parent.mkdir(parents=True, exist_ok=True)
             (self.tree / name).write_text(text, encoding="utf-8")
-        self.env = hermetic.env(
+        self.env = support.env(
             self.base / "home",
             MISE_TASK_NAME="lint:rust",
             ORG_FINDINGS="",
@@ -122,7 +121,7 @@ class Planted:
             return []
         return self.log.read_text(encoding="utf-8").splitlines()
 
-    def main(self) -> hermetic.Called:
+    def main(self) -> support.Called:
         """Run the `roots` subcommand in this process, in the tree.
 
         Returns:
@@ -131,7 +130,7 @@ class Planted:
         """
         with pytest.MonkeyPatch.context() as patched:
             patched.setattr(rust_workspaces, "CARGO", str(self.cargo))
-            return hermetic.call(
+            return support.call(
                 lambda: rust_workspaces.main(["roots"]), env=self.env, cwd=self.tree
             )
 
@@ -204,7 +203,7 @@ class TestRoots:
         planted = Planted(self)
         outside = planted.base / "plain"
         outside.mkdir()
-        done = hermetic.call(
+        done = support.call(
             lambda: rust_workspaces.main(["roots"]), env=planted.env, cwd=outside
         )
         assert (done.returncode, done.stdout) == (1, "")
@@ -217,7 +216,7 @@ class TestRoots:
         roots: list[str] = ["Cargo.toml", "fuzz/Cargo.toml"]
         with pytest.MonkeyPatch.context() as patched:
             patched.setattr(rust_workspaces, "CARGO", str(planted.cargo))
-            done = hermetic.call(
+            done = support.call(
                 lambda: 0 if rust_workspaces.resolved() == roots else 3,
                 env=planted.env,
                 cwd=planted.tree,
@@ -226,7 +225,7 @@ class TestRoots:
         refused = Planted(self, "outside")
         with pytest.MonkeyPatch.context() as patched:
             patched.setattr(rust_workspaces, "CARGO", str(refused.cargo))
-            done = hermetic.call(
+            done = support.call(
                 lambda: 0 if rust_workspaces.resolved() is None else 3,
                 env=refused.env,
                 cwd=refused.tree,
@@ -235,7 +234,7 @@ class TestRoots:
         assert "belongs to a workspace outside this tree" in done.stderr
         outside = planted.base / "plain"
         outside.mkdir()
-        done = hermetic.call(
+        done = support.call(
             lambda: 0 if rust_workspaces.resolved() is None else 3,
             env=planted.env,
             cwd=outside,
@@ -247,7 +246,7 @@ class TestRoots:
         """No subcommand, or another: exit 2 and the usage line."""
         argvs: list[list[str]] = [[], ["root"], ["roots", "x"]]
         for argv in argvs:
-            done = hermetic.call(functools.partial(rust_workspaces.main, argv))
+            done = support.call(functools.partial(rust_workspaces.main, argv))
             assert (done.returncode, done.stdout, done.stderr) == (
                 2,
                 "",
@@ -357,7 +356,7 @@ class TestFuzzing:
         ]
         for before, inside in rows:
             with pytest.MonkeyPatch.context() as patched, self.subTest(before=before):
-                hermetic.patch_env(patched, before, clear=True)
+                support.patch_env(patched, before, clear=True)
                 with rust_workspaces.built_as(marked):
                     assert inside == os.environ["RUSTFLAGS"]
                 assert before.get("RUSTFLAGS") == os.environ.get("RUSTFLAGS")
@@ -367,7 +366,7 @@ class TestFuzzing:
         marked = self.manifest("[package]\nmetadata = { cargo-fuzz = true }\n")
         empty: dict[str, str] = {}
         with pytest.MonkeyPatch.context() as patched:
-            hermetic.patch_env(patched, empty, clear=True)
+            support.patch_env(patched, empty, clear=True)
             with pytest.raises(KeyError), rust_workspaces.built_as(marked):
                 _ = os.environ["PLANTED_ABSENT"]
             assert "RUSTFLAGS" not in os.environ

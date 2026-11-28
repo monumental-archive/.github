@@ -5,7 +5,7 @@ fixtures: ruff's `pytest-fixture-autouse` reds an autouse fixture and
 has no code, so a fixture would need a suppression.
 
 - THE ENVIRONMENT (#1508, #857). Before a test runs, `os.environ` is
-  cleared to `hermetic.env()`: the variables INHERITED names, HOME and
+  cleared to `support.env()`: the variables INHERITED names, HOME and
   a git identity. In-process code sees nothing from the job the suite
   runs in (a release job's `VERSION`, a hook's `GIT_DIR`, the gate's
   `MISE_TASK_NAME` and `ORG_FINDINGS`), and a process the test starts
@@ -18,7 +18,7 @@ has no code, so a fixture would need a suppression.
 
 And these are asked for by name:
 
-- `env`: `hermetic.env`, the one environment a process a test starts
+- `env`: `support.env`, the one environment a process a test starts
   is given, for the processes that remain (git, stele, a shell body);
 - `call_main`: a belt command's `main` called in this process, its
   environment, directory and standard input the row's for the call,
@@ -34,8 +34,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from tests import hermetic
-from tests.hermetic import Called
+from tests import support
+from tests.support import Called
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -58,7 +58,7 @@ def _setup(item: pytest.Item) -> None:
     """
     item.stash[DIRECTORY] = os.getcwd()
     item.stash[ENVIRON] = dict(os.environ)
-    wanted = hermetic.env()
+    wanted = support.env()
     os.environ.clear()
     os.environ.update(wanted)
 
@@ -100,17 +100,17 @@ def env() -> Callable[..., dict[str, str]]:
     """Give a row the environment a process it starts is given.
 
     Returns:
-        `hermetic.env`.
+        `support.env`.
 
     """
-    return hermetic.env
+    return support.env
 
 
 @pytest.fixture
 def call_main() -> Callable[..., Called]:
     """Call a command's `main` in this process, as a script row ran it.
 
-    `hermetic.call`: `run` makes the call, written out in the test
+    `support.call`: `run` makes the call, written out in the test
     (`lambda: helper.main([...])`); `env`, `cwd`, `stdin` and `command`
     are the child's it stands for, each restored afterwards; a
     `SystemExit` (argparse's usage error) is the status.
@@ -119,7 +119,7 @@ def call_main() -> Callable[..., Called]:
         The caller.
 
     """
-    return hermetic.call
+    return support.call
 
 
 @pytest.fixture

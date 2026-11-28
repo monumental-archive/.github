@@ -39,8 +39,6 @@ because this harness shells out to `git` and the thing it drives shells
 out to `git` again. #857 records what inheriting the caller's git
 environment cost.
 
-pytest, run by `mise run test`.py -
-
 Run through the gate as `mise run test`, which `ci` collects.
 """
 
@@ -58,16 +56,16 @@ from typing import ClassVar, NamedTuple, override
 import pytest
 
 from belt import decoded
-from tests import hermetic
+from tests import support
 
-CANON = hermetic.CANON
+CANON = support.CANON
 SCRIPT = CANON / "release" / "generate-pgrx-upgrade.sh"
 TESTDATA = Path(__file__).resolve().parent / "testdata"
 # Absolute, resolved once: a partial path lets PATH decide which binary a
 # test ran, and the stub `gh` this file installs is proof PATH is in play.
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
-JQ = hermetic.optional_tool("jq")
+BASH = support.tool("bash")
+GIT = support.tool("git")
+JQ = support.optional_tool("jq")
 
 GH_STUB = """#!/usr/bin/env bash
 # Stub `gh` for the derivation tests: answers the release listing from a
@@ -172,10 +170,10 @@ IDENTITY_EMAIL = "harness@example.invalid"
 
 
 def hermetic_env(home: Path, **overrides: str) -> dict[str, str]:
-    """Build a fixture's environment through mise/hermetic.py (#1508, #1514).
+    """Build a fixture's environment through mise/support.py (#1508, #1514).
 
     Returns:
-        hermetic.env for `home`, with this harness's git identity, and
+        support.env for `home`, with this harness's git identity, and
         any overrides applied last.
 
     """
@@ -185,7 +183,7 @@ def hermetic_env(home: Path, **overrides: str) -> dict[str, str]:
         "GIT_COMMITTER_NAME": IDENTITY_NAME,
         "GIT_COMMITTER_EMAIL": IDENTITY_EMAIL,
     }
-    return hermetic.env(home, **(stated | overrides))
+    return support.env(home, **(stated | overrides))
 
 
 def mise_data_dir() -> str:
@@ -545,9 +543,9 @@ class TestLeavesTheCallersGitAlone(TestNeedsJq):
             index = gitdir / "index"
 
             before_digest = hashlib.sha256(index.read_bytes()).hexdigest()
-            before_files = hermetic.tracked(linked)
+            before_files = support.tracked(linked)
 
-            planted = hermetic.env()
+            planted = support.env()
             planted.update({
                 INNER_RUN: "1",
                 "GIT_DIR": str(gitdir),
@@ -563,7 +561,7 @@ class TestLeavesTheCallersGitAlone(TestNeedsJq):
             )
 
             after_digest = hashlib.sha256(index.read_bytes()).hexdigest()
-            after_files = hermetic.tracked(linked)
+            after_files = support.tracked(linked)
             status = git(["status", "--porcelain"], linked, home)
 
         assert run.returncode == 0, run.stderr
@@ -581,7 +579,7 @@ class TestLeavesTheCallersGitAlone(TestNeedsJq):
 
 RECORD = ".pgrx-installable"
 LINT = CANON / "mise" / "pg-upgrade-path.sh"
-CARGO = hermetic.optional_tool("cargo")
+CARGO = support.optional_tool("cargo")
 ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
@@ -735,7 +733,7 @@ class TestWritesTheInstallableSet(TestNeedsJq):
             )
             subprocess.run(
                 [
-                    hermetic.tool("cargo"),
+                    support.tool("cargo"),
                     "generate-lockfile",
                     "--offline",
                     "--manifest-path",
@@ -926,7 +924,7 @@ def previous_archive(dest: Path, top: str, files: list[str]) -> Path:
         path.write_text("")
     archive = dest / "prev.tar.gz"
     subprocess.run(
-        [hermetic.tool("tar"), "-czf", str(archive), "-C", str(stage), top],
+        [support.tool("tar"), "-czf", str(archive), "-C", str(stage), top],
         check=True,
     )
     return archive
@@ -1068,7 +1066,7 @@ def run_header_install(
         (tmp / "state").write_text("18.6-1.pgdg120+1")
         (tmp / "served").write_text("".join(f"{s}\n" for s in served))
         (tmp / "args").write_text("")
-        env = hermetic.env(
+        env = support.env(
             PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}",
             PG="18",
             BUILD_IMAGE="postgres:18-bookworm@sha256:planted",

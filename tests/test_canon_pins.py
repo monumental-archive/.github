@@ -12,8 +12,7 @@ the helper's `main` in this process: the order of the offenders, a
 file that is not UTF-8 (read as bytes), a missing file, and the usage
 error.
 
-GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. pytest, run by
-`mise run test`.
+GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom.
 """
 
 import subprocess
@@ -24,7 +23,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import canon_pins, decoded
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -42,9 +41,9 @@ def _task(as_task: Callable[[str], None]) -> None:
 pytestmark = pytest.mark.usefixtures("_task")
 
 
-BELT = hermetic.MISE
+BELT = support.MISE
 CANON_DIR = BELT.parent
-GIT = hermetic.tool("git")
+GIT = support.tool("git")
 CANON = "monumental-archive/.github"
 SHA = "0123456789abcdef0123456789abcdef01234567"
 PIN = f"      - uses: {CANON}/.github/actions/canon@{SHA} # v1.2.3\n"
@@ -140,7 +139,7 @@ class TestPlanted:
     def _set_up_test_planted(self, tmp_path: Path) -> None:
         """Plant an empty tree."""
         self.tree = tmp_path
-        self.env = hermetic.env(
+        self.env = support.env(
             MISE_TASK_NAME=TASK,
             ORG_BELT_DIR=str(BELT),
             ORG_CANON_DIR=str(CANON_DIR),
@@ -167,7 +166,7 @@ class TestPlanted:
             )
         return rel
 
-    def helper(self, *argv: str) -> hermetic.Called:
+    def helper(self, *argv: str) -> support.Called:
         """Call the helper's main in the planted tree.
 
         Returns:
@@ -175,7 +174,7 @@ class TestPlanted:
 
         """
         args = list(argv)
-        return hermetic.call(lambda: canon_pins.main(args), env=self.env, cwd=self.tree)
+        return support.call(lambda: canon_pins.main(args), env=self.env, cwd=self.tree)
 
     def surfaces(
         self,
@@ -183,7 +182,7 @@ class TestPlanted:
         hooks: tuple[str, ...] = (),
         presets: tuple[str, ...] = (),
         flows: tuple[str, ...] = (),
-    ) -> hermetic.Called:
+    ) -> support.Called:
         """Call the helper with the four lists.
 
         Returns:
@@ -199,7 +198,7 @@ class TestPlanted:
             The finished process.
 
         """
-        as_mise = hermetic.task_run(TASK, body())
+        as_mise = support.task_run(TASK, body())
         return subprocess.run(
             as_mise.argv,
             cwd=self.tree,

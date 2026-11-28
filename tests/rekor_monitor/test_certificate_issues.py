@@ -26,7 +26,7 @@ import pytest
 
 from belt import decoded
 from belt.rekor_monitor import certificate_issues
-from tests import hermetic
+from tests import support
 
 DATA = Path(__file__).resolve().parent / "testdata"
 
@@ -95,14 +95,14 @@ class TestHarness:
         self.doc = decoded.as_object(decoded.load_json(text), "the report")
         # False: the row writes the report file itself (or none at all).
         self.write_report = True
-        self.env = hermetic.env(
+        self.env = support.env(
             PATH=f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
             GITHUB_REPOSITORY=REPO,
             STUB_CALLS=str(self.calls),
             STUB_LIST="[]",
         )
 
-    def run_helper(self, **env: str) -> hermetic.Called:
+    def run_helper(self, **env: str) -> support.Called:
         """Write the report and call the helper's main in this process.
 
         The process's environment is the row's for the call (the stub gh
@@ -120,7 +120,7 @@ class TestHarness:
         # the finding writer names the script (#1934).
         with pytest.MonkeyPatch.context() as patched:
             patched.setattr(sys, "argv", [str(HELPER), *argv])
-            return hermetic.call(
+            return support.call(
                 lambda: certificate_issues.main(argv), env={**self.env, **env}
             )
 

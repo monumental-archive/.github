@@ -16,8 +16,7 @@ asserts what the gate does with it.
 
 Each row asserts the message, not just the exit status: a planted row
 scored on exit alone can pass for the wrong reason.
-
-pytest, run by `mise run test`.py."""
+"""
 
 import json
 import os
@@ -30,14 +29,14 @@ from pathlib import Path
 from typing import TypedDict, Unpack, override
 
 from belt import coverage_floor, decoded, workflow_yaml
-from tests import hermetic
+from tests import support
 import contextlib
 import pytest
 
-CANON = hermetic.CANON
+CANON = support.CANON
 BELT = CANON / "mise"
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
+BASH = support.tool("bash")
+GIT = support.tool("git")
 
 CONFIG = decoded.load_toml((BELT / "config.toml").read_text(encoding="utf-8"))
 
@@ -367,7 +366,7 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
         (tree / ".coverage-floor").write_text(floor_of(*named), encoding="utf-8")
         tracked.append(".coverage-floor")
 
-    env = hermetic.env()
+    env = support.env()
     env |= {
         "ORG_BELT_DIR": str(BELT),
         "PATH": f"{stubs}{os.pathsep}{env.get('PATH', '')}",
@@ -393,13 +392,13 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
     # The test runs without the measuring stubs: they answer the coverage
     # task's reads, and `measured` would start the stub `coverage` as
     # coverage.py.
-    as_test = hermetic.task_run("test", test_run or "true")
+    as_test = support.task_run("test", test_run or "true")
     test_path = env["PATH"].removeprefix(f"{stubs}{os.pathsep}")
     test_env = env | as_test.env | {"PATH": test_path}
     tested = run_test_step(tree, test_env, as_test.argv) if run_test else None
     if tested is not None and tested.returncode != 0:
         return tested, tmp
-    as_mise = hermetic.task_run(task, measuring_step(task))
+    as_mise = support.task_run(task, measuring_step(task))
     done = subprocess.run(
         as_mise.argv,
         cwd=tree,
@@ -609,7 +608,7 @@ def run_upload_step(
         for name in reports:
             (Path(tmp) / name).write_text("report\n", encoding="utf-8")
         out = Path(tmp) / "outputs"
-        env = hermetic.env(
+        env = support.env(
             PATH=os.environ.get("PATH", ""),
             HAS_TOKEN="true" if has_token else "false",
             GITHUB_OUTPUT=str(out),
@@ -729,7 +728,7 @@ class TestCheckLeavesTheTree(TestCoverageTaskCase):
         return subprocess.run(
             [GIT, "status", "--porcelain"],
             cwd=tree,
-            env=hermetic.env(),
+            env=support.env(),
             capture_output=True,
             text=True,
             check=True,
@@ -826,7 +825,7 @@ class TestReportsSelector(TestCoverageTaskCase):
             The finished process.
 
         """
-        env = hermetic.env()
+        env = support.env()
         env |= {
             "ORG_BELT_DIR": str(BELT),
             "ORG_COVERAGE_REPORTS": str(tree.parent / "reports"),
@@ -869,7 +868,7 @@ class TestReportsSelector(TestCoverageTaskCase):
             (Path(tmp) / "reports").mkdir()
             (Path(tmp) / "reports" / "coverage.xml").write_text("x\n", "utf-8")
             subprocess.run(
-                [GIT, "init", "-q"], cwd=tree, env=hermetic.env(), check=True
+                [GIT, "init", "-q"], cwd=tree, env=support.env(), check=True
             )
             done = self.reports(tree)
         assert done.returncode == 1
@@ -915,7 +914,7 @@ def run_python_leg(test_run: str) -> tuple[subprocess.CompletedProcess[str], boo
         answer: dict[str, object] = {"dir": str(tree), "run": [test_run]}
         task.write_text(json.dumps(answer), encoding="utf-8")
         (tree / ".coverage-floor").write_text("", encoding="utf-8")
-        env = hermetic.env()
+        env = support.env()
         env |= {
             "ORG_BELT_DIR": str(BELT),
             "PATH": f"{stubs}{os.pathsep}{env.get('PATH', '')}",
@@ -961,7 +960,7 @@ class TestChildFromAnotherDirectory:
         pins, not a stub: what they hold is coverage's own reading of a
         child started from another directory (#1528).
         """
-        hermetic.tool("coverage")
+        support.tool("coverage")
 
     def test_a_child_run_from_a_subdirectory_is_red_by_name(self) -> None:
         """The belt's words, the recorded file, and the remedy."""

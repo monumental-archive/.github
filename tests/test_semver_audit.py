@@ -24,8 +24,7 @@ cargo reports both as `"publish": []`, which is what the helper reads.
 GIT ENVIRONMENT IS SCRUBBED (#857): git exports GIT_DIR to hooks run in
 a linked worktree, and a fixture that inherited it would write into the
 caller's index when this suite runs from the pre-push hook.
-
-pytest, run by `mise run test`. Every git call"""
+"""
 
 import json
 import os
@@ -35,12 +34,12 @@ from pathlib import Path
 
 import pytest
 
-from tests import hermetic
+from tests import support
 
-BELT = hermetic.MISE
+BELT = support.MISE
 SCRIPT = BELT / "semver-audit.sh"
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
+BASH = support.tool("bash")
+GIT = support.tool("git")
 LABEL = "audit:semver"
 INDEX = "https://index.crates.io"
 
@@ -114,7 +113,7 @@ def clean_env() -> dict[str, str]:
         os.environ minus every GIT_* key.
 
     """
-    return hermetic.env()
+    return support.env()
 
 
 def package(
@@ -196,7 +195,7 @@ class TestPlanted:
             stub = bins / name
             stub.write_text(body, encoding="utf-8")
             stub.chmod(0o755)
-        belt = hermetic.belt(self.tmp / "belt", stubs={"pgrx-env.sh": PGRX_ENV_STUB})
+        belt = support.belt(self.tmp / "belt", stubs={"pgrx-env.sh": PGRX_ENV_STUB})
         self.index = self.tmp / "index"
         self.index.mkdir()
         self.log = self.tmp / "log"

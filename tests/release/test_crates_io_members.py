@@ -11,8 +11,7 @@ helper must not name.
 WHAT RUNS. The helper as shipped, under bash, with a stub `cargo` first
 on PATH answering `metadata` with a document shaped like cargo's. `jq`
 is the real one.
-
-pytest, run by `mise run test`. Every git call"""
+"""
 
 import json
 import os
@@ -20,11 +19,11 @@ import subprocess
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from tests import hermetic
+from tests import support
 
-CANON = hermetic.CANON
+CANON = support.CANON
 HELPER = CANON / "release" / "crates-io-members.sh"
-BASH = hermetic.tool("bash")
+BASH = support.tool("bash")
 
 CARGO_STUB = """#!/usr/bin/env bash
 # Stub `cargo`: logs its arguments, answers `metadata` from STUB_METADATA.
@@ -65,7 +64,7 @@ def run_helper(
         (tmp / "metadata.json").write_text(json.dumps(metadata))
         result = subprocess.run(
             [BASH, str(HELPER)],
-            env=hermetic.env(
+            env=support.env(
                 PATH=f"{tmp / 'bin'}{os.pathsep}{os.environ['PATH']}",
                 STUB_LOG=str(tmp / "cargo.log"),
                 STUB_METADATA=str(tmp / "metadata.json"),
@@ -129,7 +128,7 @@ class TestTheWholeWorkspace:
             stub.chmod(0o755)
             result = subprocess.run(
                 [BASH, str(HELPER)],
-                env=hermetic.env(PATH=f"{d}{os.pathsep}{os.environ['PATH']}"),
+                env=support.env(PATH=f"{d}{os.pathsep}{os.environ['PATH']}"),
                 capture_output=True,
                 text=True,
                 check=False,

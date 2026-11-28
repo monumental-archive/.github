@@ -36,8 +36,7 @@ skipped them. The first-party age rows hold that both rules wait
 zero days: Renovate names an image with its registry, so the
 repositories' glob never reached one, and every first-party image
 bump sat seven days under Pending Status Checks.
-
-pytest, run by `mise run test`.py."""
+"""
 
 import re
 
@@ -45,9 +44,9 @@ import pytest
 
 from belt import decoded, typed_std
 from belt.subject_budget import JS_GROUP
-from tests import hermetic
+from tests import support
 
-PRESET = hermetic.CANON / "default.json"
+PRESET = support.CANON / "default.json"
 MISE_FILES = "/(^|/)mise\\.toml$/"
 POSTGRES = "theseus-rs/postgresql-binaries"
 ICU = "unicode-org/icu"
@@ -315,7 +314,7 @@ class TestPgrx:
             pgrx_groups(kept)
 
 
-BELT = hermetic.MISE / "config.toml"
+BELT = support.MISE / "config.toml"
 AGE = re.compile(r"^([0-9]+) ?(h|days)$")
 
 

@@ -28,8 +28,7 @@ The scheduled workflows that run a repository's own code
 (#1927): every secret that step exports, they declare and export under
 the same name on every step that runs `mise run`. A secret added to the
 gate and not to them is named here.
-
-pytest, run by `mise run test`.py."""
+"""
 
 import contextlib
 import copy
@@ -45,12 +44,12 @@ from pathlib import Path
 import pytest
 
 from belt import audit_legs, coverage_floor, decoded, gate_tools, workflow_yaml
-from tests import hermetic
+from tests import support
 from tests import test_gate_tools as reading
 
-CANON = hermetic.CANON
+CANON = support.CANON
 WORKFLOWS = CANON / ".github" / "workflows"
-GIT = hermetic.tool("git")
+GIT = support.tool("git")
 
 # The jobs that are the shape, not a subject: the decision itself, and
 # the red-check report every scheduled workflow ends with (#1887).
@@ -580,7 +579,7 @@ def as_step() -> contextlib.ExitStack:
 
     """
     stack = contextlib.ExitStack()
-    hermetic.name_task(stack.enter_context(pytest.MonkeyPatch.context()), "")
+    support.name_task(stack.enter_context(pytest.MonkeyPatch.context()), "")
     stack.enter_context(pytest.MonkeyPatch.context()).setattr(sys, "argv", [STEP])
     return stack
 
@@ -596,7 +595,7 @@ def git_tree(files: dict[str, str]) -> Path:
     for path, text in files.items():
         (root / path).parent.mkdir(parents=True, exist_ok=True)
         (root / path).write_text(text, "utf-8")
-    env = hermetic.env()
+    env = support.env()
     subprocess.run([GIT, "-C", str(root), "init", "-q"], check=True, env=env)
     subprocess.run([GIT, "-C", str(root), "add", "-A"], check=True, env=env)
     return root

@@ -10,8 +10,7 @@ answer, which is how canon v1.24.0 burned.
 
 The normalisation rows build on 14058's real URL, varying one thing at a
 time, so each ignored difference and each kept one is planted alone.
-
-pytest, run by `mise run test`.py."""
+"""
 
 import io
 import json
@@ -22,9 +21,9 @@ import pytest
 
 from belt import bestpractices_owner as owner
 from belt import decoded
-from tests import hermetic
+from tests import support
 
-HERE = hermetic.MISE
+HERE = support.MISE
 
 DB = decoded.as_object(
     decoded.load_json(

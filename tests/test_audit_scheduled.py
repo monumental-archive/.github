@@ -17,8 +17,7 @@ collected by repo-own-audits.yml and by nothing else. A tree whose only
 caller is that workflow passes; a tree whose only caller is the retired
 single audit workflow is red, by name.
 
-GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. pytest, run by
-`mise run test`."""
+GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom."""
 
 import subprocess
 import sys
@@ -27,11 +26,11 @@ from pathlib import Path
 import pytest
 
 from belt import decoded
-from tests import hermetic
+from tests import support
 
-BELT = hermetic.MISE
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
+BELT = support.MISE
+BASH = support.tool("bash")
+GIT = support.tool("git")
 OWN_AUDITS_STUB = "own_audit_tasks() { :; }\n"
 OWN_AUDIT_STUB = "own_audit_tasks() { echo audit:custom; }\n"
 CANON = "monumental-archive/.github/.github/workflows"
@@ -68,8 +67,8 @@ class TestScheduled:
         (self.tree / "mise" / "config.toml").write_text(CONFIG, encoding="utf-8")
         (self.tree / ".github" / "workflows").mkdir(parents=True)
         stubs = {"own-audits.sh": OWN_AUDITS_STUB}
-        belt = hermetic.belt(self.tmp / "belt", stubs=stubs)
-        self.env = hermetic.env() | {
+        belt = support.belt(self.tmp / "belt", stubs=stubs)
+        self.env = support.env() | {
             "ORG_BELT_DIR": str(belt),
             "ORG_PYTHON": sys.executable,
         }
@@ -90,11 +89,11 @@ class TestScheduled:
             The finished process.
 
         """
-        hermetic.track(self.tree)
+        support.track(self.tree)
         if untracked:
             rm = [GIT, "rm", "-q", "--cached", "--", *untracked]
             subprocess.run(rm, cwd=self.tree, env=self.env, check=True)
-        as_mise = hermetic.task_run("lint:audit-scheduled", body())
+        as_mise = support.task_run("lint:audit-scheduled", body())
         return subprocess.run(
             as_mise.argv,
             cwd=self.tree,
@@ -159,9 +158,9 @@ class TestOwnTasks:
         self.tmp = tmp_path
         self.tree = self.tmp / "tree"
         (self.tree / ".github" / "workflows").mkdir(parents=True)
-        belt = hermetic.belt(self.tmp / "belt", stubs={"own-audits.sh": OWN_AUDIT_STUB})
-        canon = hermetic.canon(self.tmp / "canon", "security/identity.toml")
-        self.env = hermetic.env() | {
+        belt = support.belt(self.tmp / "belt", stubs={"own-audits.sh": OWN_AUDIT_STUB})
+        canon = support.canon(self.tmp / "canon", "security/identity.toml")
+        self.env = support.env() | {
             "ORG_BELT_DIR": str(belt),
             "ORG_CANON_DIR": str(canon),
             "ORG_PYTHON": sys.executable,
@@ -182,8 +181,8 @@ class TestOwnTasks:
             The finished process.
 
         """
-        hermetic.track(self.tree)
-        as_mise = hermetic.task_run("lint:audit-scheduled", body())
+        support.track(self.tree)
+        as_mise = support.task_run("lint:audit-scheduled", body())
         return subprocess.run(
             as_mise.argv,
             cwd=self.tree,

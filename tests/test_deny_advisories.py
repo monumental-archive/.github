@@ -19,8 +19,7 @@ cargo-deny writes its JSON to stderr and exits 1, as the real one does
 for a finding; stele prints the row's report and exits the row's
 status. The real mise/stele_findings.py reads it. So a row asserts
 that cargo-deny's status is not the verdict and stele's is.
-
-pytest, run by `mise run test`. Every git call"""
+"""
 
 import json
 import subprocess
@@ -32,11 +31,11 @@ import pytest
 
 from belt import decoded
 from belt import deny_advisories as da
-from tests import hermetic
+from tests import support
 
-BELT = hermetic.MISE
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
+BELT = support.MISE
+BASH = support.tool("bash")
+GIT = support.tool("git")
 TASK = "audit:deny"
 ADVISORY = "RUSTSEC-2021-0127"
 
@@ -61,7 +60,7 @@ def refused(*advisories: str) -> str:
     )
 
 
-def lint(text: str | None) -> hermetic.Called:
+def lint(text: str | None) -> support.Called:
     """Run the helper over a deny.toml holding `text`.
 
     Returns:
@@ -71,8 +70,8 @@ def lint(text: str | None) -> hermetic.Called:
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "deny.toml"
         path.write_text(text or "", encoding="utf-8")
-        env = hermetic.env(MISE_TASK_NAME="lint:deny", ORG_FINDINGS="")
-        return hermetic.call(
+        env = support.env(MISE_TASK_NAME="lint:deny", ORG_FINDINGS="")
+        return support.call(
             lambda: da.main(["deny.toml"]), env=env, cwd=tmp
         )
 
@@ -149,8 +148,8 @@ class TestDenyAdvisories:
             text = f'[advisories]\nignore = ["{ADVISORY}"]\n'
             path.write_text(text, encoding="utf-8")
             records = Path(tmp) / "findings.jsonl"
-            env = hermetic.env(MISE_TASK_NAME="lint:deny", ORG_FINDINGS=str(records))
-            done = hermetic.call(
+            env = support.env(MISE_TASK_NAME="lint:deny", ORG_FINDINGS=str(records))
+            done = support.call(
                 lambda: da.main(["deny.toml"]), env=env, cwd=tmp
             )
             lines = records.read_text(encoding="utf-8").splitlines()
@@ -269,13 +268,13 @@ class TestAuditDeny:
             stub.write_text(body.replace("{bash}", BASH), encoding="utf-8")
             stub.chmod(0o755)
         for tool in TOOLS:
-            (self.bin / tool).symlink_to(hermetic.tool(tool))
+            (self.bin / tool).symlink_to(support.tool(tool))
         self.log = self.tmp / "calls.log"
         self.git("init", "-q")
 
     def git(self, *args: str) -> None:
         """Run git in the planted checkout."""
-        subprocess.run([GIT, *args], cwd=self.root, env=hermetic.env(), check=True)
+        subprocess.run([GIT, *args], cwd=self.root, env=support.env(), check=True)
 
     def plant(self) -> None:
         """Track a Cargo.toml, a Cargo.lock and a deny.toml."""
@@ -296,7 +295,7 @@ class TestAuditDeny:
             The finished process and the stubs' logged calls.
 
         """
-        env = hermetic.env(
+        env = support.env(
             PATH=str(self.bin),
             PLANT_LOG=str(self.log),
             PLANT_REPORT=report(verdict, found or []),
@@ -308,7 +307,7 @@ class TestAuditDeny:
             ORG_FINDINGS="",
             MISE_TASK_NAME=TASK,
         )
-        as_mise = hermetic.task_run(TASK, task_body(TASK))
+        as_mise = support.task_run(TASK, task_body(TASK))
         done = subprocess.run(
             as_mise.argv,
             cwd=self.root,

@@ -87,8 +87,7 @@ to `GET /api/records/24249135/draft` with the InvenioRDM media type,
 captured 2026-11-15 in run 43729983384 (#1246: a draft, read back and
 deleted, never published). It is the read-back AFTER a legacy metadata
 PUT, so its `rights` holds one id - the state the helper must repair.
-
-pytest, run by `mise run test`. Every git call"""
+"""
 
 from __future__ import annotations
 
@@ -114,12 +113,12 @@ import pytest
 
 from belt import decoded
 from belt.release import mint_doi
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-CANON = hermetic.CANON
+CANON = support.CANON
 # A JSON object as the fake and the helper exchange it.
 Doc = dict[str, object]
 # An empty list, whatever it would hold: requests, writes, entries.
@@ -654,7 +653,7 @@ def run_helper(  # ruff: ignore[too-many-arguments] - one knob per row family
         text = cff if cff is not None else citation(licence, concept)
         b64.write_text(base64.b64encode(text.encode()).decode())
         summary = tmp / "summary"
-        env = hermetic.env(
+        env = support.env(
             PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}",
             ZENODO_TOKEN="stub-token",  # ruff: ignore[hardcoded-password-func-arg]
             BASE_URL=z.base,
@@ -1736,7 +1735,7 @@ class TestAnswerShapes:
             pytest.MonkeyPatch.context() as patched,
             pytest.raises(mint_doi.RefusedError) as caught,
         ):
-            patched.setattr(z._public, "open", hermetic.returning(None))
+            patched.setattr(z._public, "open", support.returning(None))
             z.public(url)
         assert f"{url} answered NoneType, not an HTTP response" == str(caught.value)
 

@@ -9,8 +9,7 @@ three unmet at once across two callers, what is not a gate caller (no
 `ci.yml` call, another repository's, no `pull_request`), a caller in the
 canon itself (`./`), a file that is not UTF-8, a missing file, a call
 with no canon or no workflow, and the skip through the task's body.
-
-pytest, run by `mise run test`."""
+"""
 
 import subprocess
 import sys
@@ -20,7 +19,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import decoded, gate_stub, gate_stub_fix
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -38,7 +37,7 @@ def _task(as_task: Callable[[str], None]) -> None:
 pytestmark = pytest.mark.usefixtures("_task")
 
 
-BELT = hermetic.MISE
+BELT = support.MISE
 CANON_DIR = BELT.parent
 CANON = "monumental-archive/.github"
 OK = ["lint:gate-stub: ok"]
@@ -130,7 +129,7 @@ class TestLint:
         """Plant an empty workflows directory."""
         self.tree = tmp_path
         (self.tree / ".github" / "workflows").mkdir(parents=True)
-        self.env = hermetic.env(
+        self.env = support.env(
             MISE_TASK_NAME=TASK,
             ORG_BELT_DIR=str(BELT),
             ORG_CANON_DIR=str(CANON_DIR),
@@ -152,7 +151,7 @@ class TestLint:
             path.write_text(text, encoding="utf-8")
         return rel
 
-    def helper(self, *argv: str) -> hermetic.Called:
+    def helper(self, *argv: str) -> support.Called:
         """Call the helper's main in the planted tree.
 
         Returns:
@@ -160,12 +159,12 @@ class TestLint:
 
         """
         args = list(argv)
-        return hermetic.call(lambda: gate_stub.main(args), env=self.env, cwd=self.tree)
+        return support.call(lambda: gate_stub.main(args), env=self.env, cwd=self.tree)
 
     def test_no_workflows_is_skipped_by_name(self) -> None:
         """No workflow file: the task says it skipped."""
-        hermetic.track(self.tree)
-        as_mise = hermetic.task_run(TASK, body())
+        support.track(self.tree)
+        as_mise = support.task_run(TASK, body())
         done = subprocess.run(
             as_mise.argv,
             cwd=self.tree,

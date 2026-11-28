@@ -13,8 +13,7 @@ exactly what was measured.
 
 Each red row asserts its message, not just the exit status: a planted
 row scored on exit alone can pass for the wrong reason.
-
-pytest, run by `mise run test`.py."""
+"""
 
 import os
 import re
@@ -27,13 +26,13 @@ import pytest
 
 from belt import decoded, workflow_yaml
 from belt import rust_properties as rp
-from tests import hermetic
+from tests import support
 
-CANON = hermetic.CANON
+CANON = support.CANON
 BELT = CANON / "mise"
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
-PYTHON = hermetic.tool("python3")
+BASH = support.tool("bash")
+GIT = support.tool("git")
+PYTHON = support.tool("python3")
 
 CONFIG = decoded.load_toml((BELT / "config.toml").read_text(encoding="utf-8"))
 TASKS = decoded.as_object(CONFIG["tasks"], "tasks")
@@ -51,7 +50,7 @@ def run_body(name: str) -> str:
 
 LINT = run_body("lint:rust-properties")
 AUDIT = run_body("audit:rust-properties")
-# Each body's task name, for the run that hands it to hermetic.task_run.
+# Each body's task name, for the run that hands it to support.task_run.
 NAMES = {LINT: "lint:rust-properties", AUDIT: "audit:rust-properties"}
 SKIP_LINT = "lint:rust-properties: no tracked Cargo.lock locks proptest, skipped\n"
 # The stub's calls where it must never have been called.
@@ -94,7 +93,7 @@ exit "${STUB_EXIT:-0}"
 
 # Every inherited GIT_* goes (#857), as in test_typescript_properties.py.
 _GIT_ENV = {
-    **hermetic.env(),
+    **support.env(),
     "GIT_CONFIG_GLOBAL": os.devnull,
     "GIT_CONFIG_NOSYSTEM": "1",
 }
@@ -138,7 +137,7 @@ def run(body: str, files: dict[str, str], env: dict[str, str] | None = None) -> 
                 [GIT, "-C", str(root), "add", "-A"], check=True, env=_GIT_ENV
             )
         search = [str(stubs), str(Path(GIT).parent), "/usr/bin", "/bin"]
-        environ = hermetic.env(
+        environ = support.env(
             PATH=os.pathsep.join(search),
             HOME=scratch,
             ORG_BELT_DIR=str(BELT),
@@ -149,7 +148,7 @@ def run(body: str, files: dict[str, str], env: dict[str, str] | None = None) -> 
         if "ORG_PROPERTY_SEED" not in (env or {}):
             environ.pop("ORG_PROPERTY_SEED", None)
         environ.pop("PROPTEST_CASES", None)
-        as_mise = hermetic.task_run(NAMES[body], body)
+        as_mise = support.task_run(NAMES[body], body)
         done = subprocess.run(
             as_mise.argv,
             cwd=root,

@@ -9,8 +9,7 @@ task's own body, read from mise/config.toml: the skip when there are no
 tracked workflows, and a shortfall end to end; the rest call the
 helper's `main` in this process, in the planted tree.
 
-GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. pytest, run by
-`mise run test`.
+GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom.
 """
 
 import subprocess
@@ -21,7 +20,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import decoded, installer_pinned
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -39,8 +38,8 @@ def _task(as_task: Callable[[str], None]) -> None:
 pytestmark = pytest.mark.usefixtures("_task")
 
 
-BELT = hermetic.MISE
-GIT = hermetic.tool("git")
+BELT = support.MISE
+GIT = support.tool("git")
 OK = ["lint:installer-pinned: ok"]
 STEP = "      - uses: jdx/mise-action@0123456789abcdef0123456789abcdef01234567\n"
 PIN = "        with:\n          version: 2026.11.3\n"
@@ -88,7 +87,7 @@ class TestPinned:
         """Plant an empty workflows directory."""
         self.tree = tmp_path
         (self.tree / ".github" / "workflows").mkdir(parents=True)
-        self.env = hermetic.env(
+        self.env = support.env(
             MISE_TASK_NAME=TASK,
             ORG_BELT_DIR=str(BELT),
             ORG_PYTHON=sys.executable,
@@ -109,7 +108,7 @@ class TestPinned:
             path.write_text(text, encoding="utf-8")
         return rel
 
-    def helper(self, *files: str) -> hermetic.Called:
+    def helper(self, *files: str) -> support.Called:
         """Call the helper's main in the planted tree.
 
         Returns:
@@ -117,7 +116,7 @@ class TestPinned:
 
         """
         argv = list(files)
-        return hermetic.call(
+        return support.call(
             lambda: installer_pinned.main(argv), env=self.env, cwd=self.tree
         )
 
@@ -132,7 +131,7 @@ class TestPinned:
         if tracked:
             add = [GIT, "add", "--", *tracked]
             subprocess.run(add, cwd=self.tree, env=self.env, check=True)
-        as_mise = hermetic.task_run(TASK, body())
+        as_mise = support.task_run(TASK, body())
         return subprocess.run(
             as_mise.argv,
             cwd=self.tree,

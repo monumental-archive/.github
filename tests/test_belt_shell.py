@@ -17,8 +17,7 @@ The one that matters most is the list `run`. mise documents it, the
 canon uses none, so nothing in a live sweep would ever have exercised
 it — and the writer would have spliced a `'''` block over the `run = [`
 line and eaten the array in the first adopter that had one.
-
-pytest, run by `mise run test`. Every git call"""
+"""
 
 import io
 from contextlib import redirect_stderr, redirect_stdout
@@ -30,7 +29,7 @@ import pytest
 
 from belt import belt_shell as bs
 from belt import decoded
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -448,7 +447,7 @@ class TestMain:
                     redirect_stdout(io.StringIO()),
                     redirect_stderr(err),
                 ):
-                    hermetic.name_task(patched, task)
+                    support.name_task(patched, task)
                     assert bs.main([str(path), *extra]) == 1
                 assert err.getvalue() == f"{task}: {path}: not TOML: {why}\n"
 
@@ -689,7 +688,7 @@ class TestNestedBadges:
     mise/config.toml, as it is and with #394's old line put back.
     """
 
-    CONFIG = hermetic.MISE / "config.toml"
+    CONFIG = support.MISE / "config.toml"
     NOW = 'BADGES_OUT="${tmp}" "${ORG_BELT_DIR}/derive-badges.sh" > /dev/null\n'
     OLD = 'BADGES_OUT="${tmp}" mise run fix:badges > /dev/null\n'
 

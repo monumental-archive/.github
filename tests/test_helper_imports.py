@@ -13,8 +13,7 @@ that loads a file by path: `spec_from_file_location`, `run_path`,
 tree, so a fixture's text naming one is not a load.
 
 One file is excepted, with why. Nothing else is.
-
-pytest, run by `mise run test`.py;"""
+"""
 
 import ast
 import subprocess
@@ -22,9 +21,9 @@ import sys
 import tempfile
 from pathlib import Path
 
-from tests import hermetic
+from tests import support
 
-HERE = hermetic.MISE
+HERE = support.MISE
 CANON = HERE.parent
 
 LOADERS = frozenset({
@@ -70,7 +69,7 @@ def offenders(root: Path) -> list[str]:
         `path:line` for each load outside the excepted file.
 
     """
-    listed = hermetic.tracked(root, "*.py")
+    listed = support.tracked(root, "*.py")
     out: list[str] = []
     for path in listed:
         if path in EXCEPTED:
@@ -155,7 +154,7 @@ def run_user(*, own: bool) -> str:
             capture_output=True,
             text=True,
             check=True,
-            env=hermetic.env(),
+            env=support.env(),
         )
         return done.stdout
 

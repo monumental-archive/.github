@@ -62,7 +62,7 @@ class TestOneRecordReadsBack:
                 pytest.MonkeyPatch.context() as patched,
                 redirect_stderr(io.StringIO()),
             ):
-                hermetic.patch_env(patched, env)
+                support.patch_env(patched, env)
                 findings.finding(subject, message, detail)
             text = file.read_text(encoding="utf-8")
         assert text.endswith("\n"), text

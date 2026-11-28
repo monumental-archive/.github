@@ -34,8 +34,7 @@ the same red, and what `write` produces is what `check` then passes.
 GIT ENVIRONMENT IS SCRUBBED (#857): git exports `GIT_DIR` to hooks in a
 linked worktree, and a harness that inherits it writes its fixture into
 the caller's real index when the suite runs from pre-push.
-
-pytest, run by `mise run test`.py."""
+"""
 
 import functools
 import io
@@ -53,15 +52,15 @@ from pathlib import Path
 import pytest
 
 from belt import decoded, pg_schema
-from tests import hermetic
+from tests import support
 import contextlib
 
 normalise = pg_schema.normalise
 
-GIT = hermetic.tool("git")
+GIT = support.tool("git")
 SNAPSHOT = "crates/ext/schema.snapshot.sql"
-BELT = hermetic.MISE
-BASH = hermetic.tool("bash")
+BELT = support.MISE
+BASH = support.tool("bash")
 # The belt's real sqlfluff, or None. Never a bare-name fallback (#1528):
 # the rows below put a shim NAMED sqlfluff first on PATH and exec this
 # from it, so with no real one installed a bare name resolved to the
@@ -69,7 +68,7 @@ BASH = hermetic.tool("bash")
 # canon's own suite with only the badge job's five tools installed:
 # 8,364 self-execs in 1m33s on the first lint:sql row, and on main the
 # coverage upload job sat in it for its whole 30 minutes on every push.
-SQLFLUFF = hermetic.optional_tool("sqlfluff")
+SQLFLUFF = support.optional_tool("sqlfluff")
 SQLFLUFF_MISSING = (
     "sqlfluff is not on PATH: these rows run the belt's real sqlfluff behind"
     " a shim named sqlfluff, and cannot run without it — run: mise install"
@@ -246,7 +245,7 @@ def run_main(argv: list[str]) -> tuple[int, str, str]:
         redirect_stdout(out),
         redirect_stderr(err),
     ):
-        hermetic.name_task(patched, task)
+        support.name_task(patched, task)
         status = pg_schema.main(argv)
     return status, out.getvalue(), err.getvalue()
 
@@ -270,7 +269,7 @@ def scrubbed() -> dict[str, str]:
         A copy of the environment safe to run git in a fixture with.
 
     """
-    return hermetic.env()
+    return support.env()
 
 
 def git(root: Path, *args: str) -> None:
@@ -296,7 +295,7 @@ class TestInRepo:
         self.root = tmp_path
         git(self.root, "init", "-q")
         (self.root / "crates" / "ext").mkdir(parents=True)
-        hermetic.patch_env(monkeypatch, scrubbed(), clear=True)
+        support.patch_env(monkeypatch, scrubbed(), clear=True)
         monkeypatch.chdir(self.root)
 
     def track(self, text: str) -> None:
@@ -604,10 +603,10 @@ class TestSqlSkipsOwnedSnapshots:
             "ORG_BELT_DIR": str(BELT),
             "PATH": f"{self.shims}{os.pathsep}{os.environ['PATH']}",
             "PLANT_METADATA": str(self.metadata),
-            "PLANT_SQLFLUFF": hermetic.tool("sqlfluff"),
+            "PLANT_SQLFLUFF": support.tool("sqlfluff"),
             "PLANT_SQLFLUFF_LOG": str(self.log),
         }
-        as_mise = hermetic.task_run(task, task_body(task))
+        as_mise = support.task_run(task, task_body(task))
         done = subprocess.run(
             as_mise.argv,
             cwd=self.root,
@@ -629,7 +628,7 @@ class TestSqlSkipsOwnedSnapshots:
         path.write_text(LAB_SNAPSHOT, encoding="utf-8")
         done = subprocess.run(
             [
-                hermetic.tool("sqlfluff"),
+                support.tool("sqlfluff"),
                 "lint",
                 "--config",
                 str(BELT / "sqlfluff.cfg"),
@@ -798,12 +797,12 @@ class TestAbsentSqlfluffFailsByName:
         row = "SqlSkipsOwnedSnapshots.test_extension_at_the_workspace_root_is_left_out"
         # From the repository root, the directory the suite runs in: under
         # the python coverage leg a child records its files relative to
-        # its own directory, and one run from mise/ left `hermetic.py`
+        # its own directory, and one run from mise/ left `support.py`
         # where `coverage xml` could not find it (#1528).
         child = subprocess.Popen(
             [sys.executable, str(Path(__file__).resolve()), row],
             cwd=BELT.parent,
-            env=hermetic.env(PATH=without_sqlfluff()),
+            env=support.env(PATH=without_sqlfluff()),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,

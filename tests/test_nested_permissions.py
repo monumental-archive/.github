@@ -10,8 +10,7 @@ rows run the task's own body, read from mise/config.toml: the skip when
 there are no workflows, and an offender end to end; the rest call the
 helper's `main` in this process, in the planted tree.
 
-GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. pytest, run by
-`mise run test`.
+GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom.
 """
 
 import subprocess
@@ -22,7 +21,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import decoded, nested_permissions
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -40,7 +39,7 @@ def _task(as_task: Callable[[str], None]) -> None:
 pytestmark = pytest.mark.usefixtures("_task")
 
 
-BELT = hermetic.MISE
+BELT = support.MISE
 CALL = "    uses: ./.github/workflows/ci.yml\n"
 GRANT = "    permissions:\n      contents: read\n"
 STEP = "    runs-on: ubuntu-26.04\n    steps:\n      - run: true\n"
@@ -99,7 +98,7 @@ class TestNested:
         """Plant an empty workflows directory."""
         self.tree = tmp_path
         (self.tree / ".github" / "workflows").mkdir(parents=True)
-        self.env = hermetic.env(
+        self.env = support.env(
             MISE_TASK_NAME=TASK,
             ORG_BELT_DIR=str(BELT),
             ORG_PYTHON=sys.executable,
@@ -120,7 +119,7 @@ class TestNested:
             path.write_text(text, encoding="utf-8")
         return rel
 
-    def helper(self, *files: str) -> hermetic.Called:
+    def helper(self, *files: str) -> support.Called:
         """Call the helper's main in the planted tree.
 
         Returns:
@@ -128,7 +127,7 @@ class TestNested:
 
         """
         argv = list(files)
-        return hermetic.call(
+        return support.call(
             lambda: nested_permissions.main(argv), env=self.env, cwd=self.tree
         )
 
@@ -139,8 +138,8 @@ class TestNested:
             The finished process.
 
         """
-        hermetic.track(self.tree)
-        as_mise = hermetic.task_run(TASK, body())
+        support.track(self.tree)
+        as_mise = support.task_run(TASK, body())
         return subprocess.run(
             as_mise.argv,
             cwd=self.tree,

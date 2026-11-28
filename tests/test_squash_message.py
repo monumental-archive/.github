@@ -9,8 +9,7 @@ The breaking-change footer rule (#1924) is held to its reader: one class
 runs the belt's pinned `stele` over a scratch repository, one commit per
 body, and asserts the rule refuses exactly the bodies whose rendered
 "Breaking" entry carries text from after a blank line.
-
-pytest, run by `mise run test`."""
+"""
 
 from __future__ import annotations
 
@@ -22,7 +21,7 @@ from pathlib import Path
 import pytest
 
 from belt import squash_message
-from tests import hermetic
+from tests import support
 
 # A workflow step runs the command outside mise, so its findings carry
 # the command's own name, which the launcher sets (findings.task_name,
@@ -45,8 +44,8 @@ FAILS_CANON = (
     " BODY, not a commit\n"
 )
 PASSES = "squash-message: title and body mint a conforming commit\n"
-STELE = hermetic.optional_tool("stele")
-GIT = hermetic.optional_tool("git")
+STELE = support.optional_tool("stele")
+GIT = support.optional_tool("git")
 # The release notes, the breaking changes lifted into their own group.
 NOTES = ("derive", "notes", "-git-dir", ".", "-breaking-group", "Breaking")
 
@@ -156,7 +155,7 @@ class TestStepHarness:
             The environment, the stub `mise` leading PATH.
 
         """
-        env = hermetic.env(
+        env = support.env(
             PATH=f"{self.bindir}{os.pathsep}{os.environ['PATH']}",
             HOME=str(self.tmp),
             STUB_DIR=str(self.tmp),
@@ -171,14 +170,14 @@ class TestStepHarness:
 
     def squash(
         self, title: str, body: str | None, *, verdict: int = 0
-    ) -> hermetic.Called:
+    ) -> support.Called:
         """Call the helper in-process on one pull request (#1697).
 
         Returns:
             The status and both streams.
 
         """
-        return hermetic.call(
+        return support.call(
             lambda: squash_message.main([]),
             env=self.step_env(title, body, verdict),
             command=STEP,
@@ -394,7 +393,7 @@ class TestTheReaderAgrees:
         self.tmp = tmp_path
         self.repo = self.tmp / "repo"
         self.repo.mkdir()
-        self.env = hermetic.env(self.tmp)
+        self.env = support.env(self.tmp)
         self.git("init", "-q", "-b", "main")
         self.git("commit", "-q", "--allow-empty", "-m", "chore: start")
         self.git("tag", "v1.0.0")

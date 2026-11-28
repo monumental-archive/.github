@@ -6,8 +6,7 @@ process started with none, in process and as a real process whose
 descriptor 0 is closed. `urlopen` (#1682): urllib's answer and an
 opener's, read through `Response`; an answer that is not one, refused
 by name; and the law that no other tracked file opens a URL itself.
-
-pytest, run by `mise run test`.py;"""
+"""
 
 import ast
 import io
@@ -20,14 +19,14 @@ from typing import TYPE_CHECKING, Self, override
 import pytest
 
 from belt import call_names, typed_std
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-HERE = hermetic.MISE
+HERE = support.MISE
 CANON = HERE.parent
-BASH = hermetic.tool("bash")
+BASH = support.tool("bash")
 URL = "https://example.invalid/x"
 # The calls typeshed answers as `Any`, made only in typed_std.py.
 OPENS = frozenset({"urllib.request.urlopen", "urllib.request.OpenerDirector.open"})
@@ -113,7 +112,7 @@ class TestStdinText:
             capture_output=True,
             text=True,
             check=True,
-            env=hermetic.env(),
+            env=support.env(),
         )
         assert done.stdout == "no standard input: the process was started without one\n"
 
@@ -306,7 +305,7 @@ class TestTheLaw:
     def test_the_tree_holds_the_law(self) -> None:
         """Every tracked Python file opens URLs through typed_std."""
         root = CANON
-        listed = hermetic.tracked(root, "*.py")
+        listed = support.tracked(root, "*.py")
         breaches = [
             f"{path}:{line}: opens a URL outside {HOME}"
             for path in listed

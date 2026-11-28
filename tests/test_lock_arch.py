@@ -11,7 +11,7 @@ import tempfile
 import pytest
 
 from belt import lock_arch
-from tests import hermetic
+from tests import support
 
 # A lock with nothing to name, as a typed list.
 NO_CANDIDATES: list[str] = []
@@ -221,7 +221,7 @@ class TestMain:
         """An empty entry and a missing file are passed over; exit is 0."""
         path = planted_lock(DEFECT)
         listing = f"\0{path}\0{path.parent / 'absent.lock'}\0"
-        done = hermetic.call(lambda: lock_arch.main([]), stdin=listing)
+        done = support.call(lambda: lock_arch.main([]), stdin=listing)
         assert done.returncode == 0
         assert lock_arch.candidates(path) == done.stdout.splitlines()
         assert len(done.stdout.splitlines()) == 1
@@ -231,7 +231,7 @@ class TestMain:
         path = planted_lock(DEFECT)
         done = subprocess.run(
             [sys.executable, str(pathlib.Path(lock_arch.__file__))],
-            env=hermetic.env(),
+            env=support.env(),
             input=f"{path}\0",
             capture_output=True,
             text=True,

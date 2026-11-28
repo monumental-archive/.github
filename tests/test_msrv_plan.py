@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import decoded, msrv_plan
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -876,7 +876,7 @@ class TestFloorTest:
 
     def test_the_canon_floor_file_reads(self) -> None:
         """The tracked file itself, so a Renovate bump cannot break it."""
-        text = (hermetic.MISE / "rust-floor.toml").read_text(encoding="utf-8")
+        text = (support.MISE / "rust-floor.toml").read_text(encoding="utf-8")
         assert msrv_plan.read_floor(text).version >= (1, 85, 0)
 
 

@@ -15,8 +15,7 @@ response moved the block into a canon script the step runs:
 
 Each row runs the script itself, by its path, with stub tools first on
 PATH that record what they were given.
-
-pytest, run by `mise run test`. Every git call"""
+"""
 
 import json
 import os
@@ -27,14 +26,14 @@ from pathlib import Path
 import pytest
 
 from belt import decoded
-from tests import hermetic
+from tests import support
 
-HERE = hermetic.RELEASE
+HERE = support.RELEASE
 CANON = HERE.parent
 PGRX = (CANON / "release" / "pgrx").resolve()
 WRITERS = (CANON / "mise").resolve()
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
+BASH = support.tool("bash")
+GIT = support.tool("git")
 
 # A stub that appends its argv, one argument per line and a blank line
 # after, to $STUB_LOG, reads and drops its stdin, and exits 0.
@@ -82,7 +81,7 @@ class TestScript:
             The finished process.
 
         """
-        full = hermetic.env(
+        full = support.env(
             self.root / "home",
             PATH=f"{self.bin}:{os.environ['PATH']}",
             STUB_LOG=str(self.log),
@@ -168,13 +167,13 @@ class TestContainers(TestScript):
         """One docker run, build-root.sh in the build image."""
         self.stub("docker")
         subprocess.run(
-            [GIT, "init", "-q"], cwd=self.work, check=True, env=hermetic.env()
+            [GIT, "init", "-q"], cwd=self.work, check=True, env=support.env()
         )
         subprocess.run(
             [GIT, "commit", "-q", "--allow-empty", "-m", "c"],
             cwd=self.work,
             check=True,
-            env=hermetic.env(),
+            env=support.env(),
         )
         done = self.run_script(
             PGRX / "build-in-container.sh",
@@ -367,7 +366,7 @@ class TestHelper(TestScript):
             The finished process.
 
         """
-        full = hermetic.env(
+        full = support.env(
             self.root / "home",
             PATH=f"{self.bin}:{SYSTEM_PATH}",
             STUB_LOG=str(self.log),

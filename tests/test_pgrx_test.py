@@ -20,8 +20,7 @@ LLVM_PROFILE_FILE points, unless the row plants none, and the stub
 
 Each row asserts the message, not just the exit status: a planted row
 scored on exit alone can pass for the wrong reason.
-
-pytest, run by `mise run test`. Every git call"""
+"""
 
 import json
 import os
@@ -35,11 +34,11 @@ from typing import ClassVar
 import pytest
 
 from belt import coverage_floor, gate_cache_key
-from tests import hermetic
+from tests import support
 
-BELT = hermetic.MISE
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
+BELT = support.MISE
+BASH = support.tool("bash")
+GIT = support.tool("git")
 
 
 def task_body(name: str) -> str:
@@ -142,7 +141,7 @@ MAJORS = [17, 18]
 
 # The directory digest of the stand-in `rustc` the rows run beside
 # (#1877), under the `stable` toolchain they set.
-STABLE = gate_cache_key.directory_digest(hermetic.rustc_verbose("stable"))
+STABLE = gate_cache_key.directory_digest(support.rustc_verbose("stable"))
 
 # What a row expects when a stub was never called, typed so the
 # comparison carries no Any.
@@ -202,8 +201,8 @@ class TestPlanted:
         }.items():
             (bins / name).write_text(body, encoding="utf-8")
             (bins / name).chmod(0o755)
-        hermetic.rustc(bins)
-        self.belt = hermetic.belt(
+        support.rustc(bins)
+        self.belt = support.belt(
             self.tmp / "belt",
             stubs={
                 "pgrx-env.sh": PGRX_ENV_STUB,
@@ -227,7 +226,7 @@ class TestPlanted:
             "target_directory": str(self.tree / "target"),
         }
         metadata.write_text(json.dumps(document), encoding="utf-8")
-        self.env = hermetic.env() | {
+        self.env = support.env() | {
             "PATH": f"{bins}{os.pathsep}{os.environ['PATH']}",
             "ORG_BELT_DIR": str(self.belt),
             "ORG_PYTHON": sys.executable,
@@ -254,7 +253,7 @@ class TestPlanted:
 
     def git(self, *args: str) -> None:
         """Run git in the planted tree, scrubbed of the caller's git state."""
-        subprocess.run([GIT, *args], cwd=self.tree, env=hermetic.env(), check=True)
+        subprocess.run([GIT, *args], cwd=self.tree, env=support.env(), check=True)
 
     def floor(self) -> None:
         """Commit a derived floor of 80.0 to the planted tree."""
@@ -366,7 +365,7 @@ class TestMeasuredRun(TestPlanted):
             status = subprocess.run(
                 [GIT, "status", "--porcelain"],
                 cwd=self.tree,
-                env=hermetic.env(),
+                env=support.env(),
                 capture_output=True,
                 text=True,
                 check=True,

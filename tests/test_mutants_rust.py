@@ -18,8 +18,7 @@ provisioning is pgrx-env.sh's to prove and needs a Postgres.
 GIT ENVIRONMENT IS SCRUBBED (#857): git exports GIT_DIR to hooks run in
 a linked worktree, and a fixture that inherited it would write into the
 caller's index when this suite runs from the pre-push hook.
-
-pytest, run by `mise run test`. Every git call"""
+"""
 
 import contextlib
 import io
@@ -35,7 +34,7 @@ import pytest
 
 from belt import decoded
 from belt import mutants_rust as helper
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -53,10 +52,10 @@ def _task(as_task: Callable[[str], None]) -> None:
 pytestmark = pytest.mark.usefixtures("_task")
 
 
-BELT = hermetic.MISE
+BELT = support.MISE
 SCRIPT = BELT / "mutants-rust.sh"
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
+BASH = support.tool("bash")
+GIT = support.tool("git")
 LABEL = "audit:mutants: rust"
 CONFIG = ".cargo/mutants.toml"
 
@@ -161,7 +160,7 @@ def clean_env() -> dict[str, str]:
         os.environ minus every GIT_* key.
 
     """
-    return hermetic.env(MISE_TASK_NAME=TASK)
+    return support.env(MISE_TASK_NAME=TASK)
 
 
 def package(
@@ -239,7 +238,7 @@ class TestPlanted:
             stub = bins / name
             stub.write_text(body, encoding="utf-8")
             stub.chmod(0o755)
-        belt = hermetic.belt(self.tmp / "belt", stubs={"pgrx-env.sh": PGRX_ENV_STUB})
+        belt = support.belt(self.tmp / "belt", stubs={"pgrx-env.sh": PGRX_ENV_STUB})
         self.log = self.tmp / "log"
         self.log.touch()
         self.files = {

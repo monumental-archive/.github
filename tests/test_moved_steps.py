@@ -11,8 +11,7 @@ response moved the block into a canon script the step runs:
   tree and its ref, and the environment the later steps read.
 
 Each row runs the script itself, by its path, in a scratch tree.
-
-pytest, run by `mise run test`. Every git call"""
+"""
 
 import os
 import subprocess
@@ -20,13 +19,13 @@ from pathlib import Path
 
 import pytest
 
-from tests import hermetic
+from tests import support
 import contextlib
 
-HERE = hermetic.MISE
+HERE = support.MISE
 CANON = HERE.parent
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
+BASH = support.tool("bash")
+GIT = support.tool("git")
 ONE_PER_MERGE = (HERE / "vex-one-per-merge.txt").read_text("utf-8").strip()
 
 
@@ -42,7 +41,7 @@ def run(
     return subprocess.run(
         [BASH, str(script), *args],
         cwd=cwd,
-        env=hermetic.env(**env),
+        env=support.env(**env),
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
@@ -80,7 +79,7 @@ class TestVexDecisions:
         return subprocess.run(
             [GIT, *args],
             cwd=self.tree,
-            env=hermetic.env(),
+            env=support.env(),
             capture_output=True,
             text=True,
             check=True,
@@ -186,7 +185,7 @@ def plant(root: Path, *, policy: bool = True) -> Path:
         The script's path in the tree.
 
     """
-    hermetic.canon(root, ".github/actions/source-attest", "slsa/verify-policy.json")
+    support.canon(root, ".github/actions/source-attest", "slsa/verify-policy.json")
     if not policy:
         (root / "slsa" / "verify-policy.json").unlink()
     return root / ".github" / "actions" / "source-attest" / "resolve.sh"
@@ -316,7 +315,7 @@ class TestStubbed:
         return subprocess.run(
             [BASH, str(script)],
             cwd=self.work,
-            env=hermetic.env(
+            env=support.env(
                 self.tmp / "home",
                 PATH=f"{self.bin}:{path}",
                 STUB_LOG=str(self.log),
@@ -403,7 +402,7 @@ class TestSourceAttestChain(TestStubbed):
 
         """
         root = self.tmp / "canon"
-        hermetic.canon(root, ".github/actions/source-attest")
+        support.canon(root, ".github/actions/source-attest")
         return self.run_in(
             root / ".github" / "actions" / "source-attest" / "chain.sh",
             path,

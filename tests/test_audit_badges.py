@@ -22,8 +22,7 @@ Since #1633 the walk is the delivered `audit-badges.sh` and the task is
 its guard and call, so the behaviour rows run the task body as before
 and the class row reads the script, through belt-shell's scrub.
 
-GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. pytest, run by
-`mise run test`."""
+GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom."""
 
 import json
 import os
@@ -39,12 +38,12 @@ if TYPE_CHECKING:
 import pytest
 
 from belt import belt_shell as bs
-from tests import hermetic
+from tests import support
 
-BELT = hermetic.MISE
+BELT = support.MISE
 SCRIPT = BELT / "audit-badges.sh"
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
+BASH = support.tool("bash")
+GIT = support.tool("git")
 OWNER = "monumental-archive"
 PROJECT = f"https://api.scorecard.dev/projects/github.com/{OWNER}"
 UA = f"User-Agent: {OWNER}/.github audit:badges"
@@ -151,12 +150,12 @@ class TestPlanted:
     def _set_up_test_planted(self, tmp_path: Path) -> None:
         """Plant the canon tree, the floors and the stub tools."""
         tmp = tmp_path
-        self.tree = hermetic.canon(
+        self.tree = support.canon(
             tmp / "tree",
             "security/identity.toml",
             stubs={"security/scorecard-floors.txt": "alpha 5.0\nbeta 5.0\n"},
         )
-        self.env = hermetic.env(
+        self.env = support.env(
             tmp,
             ORG_BELT_DIR=str(BELT),
             ORG_CANON_DIR=str(self.tree),
@@ -194,7 +193,7 @@ class TestPlanted:
             The finished process.
 
         """
-        as_mise = hermetic.task_run("audit:badges", body())
+        as_mise = support.task_run("audit:badges", body())
         return subprocess.run(
             as_mise.argv,
             cwd=self.tree,

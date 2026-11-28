@@ -48,8 +48,6 @@ this harness shells out to `git`, and the script it drives shells out to
 `git` and `stele` again under whatever it is handed. #857 records what
 inheriting the caller's git environment cost three lanes in one batch.
 
-pytest, run by `mise run test`.py —
-
 Run through the gate as `mise run test`, which `ci` collects.
 """
 
@@ -62,16 +60,16 @@ from tempfile import TemporaryDirectory
 import pytest
 
 from belt import decoded
-from tests import hermetic
+from tests import support
 
-CANON = hermetic.CANON
+CANON = support.CANON
 SCRIPT = CANON / "release" / "prepare-release.sh"
 # Absolute, resolved once: a partial path lets PATH decide which binary a
 # test ran, which is not a thing a test should leave open.
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
-CARGO = hermetic.optional_tool("cargo")
-STELE = hermetic.optional_tool("stele")
+BASH = support.tool("bash")
+GIT = support.tool("git")
+CARGO = support.optional_tool("cargo")
+STELE = support.optional_tool("stele")
 
 # The real stub every new repository is told to copy (#742, shipped by
 # #847). Read from the tree rather than transcribed: a copy here would
@@ -127,15 +125,15 @@ IDENTITY_EMAIL = "harness@example.invalid"
 # supplies several of them ambiently — `GITHUB_REPOSITORY`, `GITHUB_SHA`,
 # `RUNNER_TEMP` — as the release job supplies its step inputs
 # (`VERSION`, `PLAN`, `APP_SLUG`). So nothing reaches a fixture by
-# inheritance except what mise/hermetic.py names; every input a row wants is
+# inheritance except what mise/support.py names; every input a row wants is
 # supplied explicitly through `overrides`.
 
 
 def hermetic_env(home: Path, **overrides: str) -> dict[str, str]:
-    """Build a fixture's environment through mise/hermetic.py (#1508, #1514).
+    """Build a fixture's environment through mise/support.py (#1508, #1514).
 
     Returns:
-        hermetic.env for `home`, with this harness's git identity, and
+        support.env for `home`, with this harness's git identity, and
         any overrides applied last.
 
     """
@@ -152,7 +150,7 @@ def hermetic_env(home: Path, **overrides: str) -> dict[str, str]:
         "CARGO_HOME": os.environ.get("CARGO_HOME", str(real_home / ".cargo")),
         "RUSTUP_HOME": os.environ.get("RUSTUP_HOME", str(real_home / ".rustup")),
     }
-    return hermetic.env(home, **(stated | overrides))
+    return support.env(home, **(stated | overrides))
 
 
 class Tree:
@@ -208,7 +206,7 @@ class Tree:
     def cargo(self, *args: str) -> None:
         """Run one cargo command in the fixture."""
         subprocess.run(
-            [hermetic.tool("cargo"), *args],
+            [support.tool("cargo"), *args],
             cwd=self.root,
             env=hermetic_env(self.home),
             check=True,
@@ -246,7 +244,7 @@ class Tree:
                 """),
         )
         subprocess.run(
-            [hermetic.tool("cargo"), "generate-lockfile", "--offline"],
+            [support.tool("cargo"), "generate-lockfile", "--offline"],
             cwd=self.root / "fuzz",
             env=hermetic_env(self.home),
             check=True,

@@ -11,8 +11,7 @@ planted git tree holding one tracked file and an untracked checkout
 beside it. trivy is a stub that records every file in the tree it was
 given: the row is about what reaches the scanner, and trivy's verdict on
 a file is trivy's to prove.
-
-pytest, run by `mise run test`.py;"""
+"""
 
 import os
 import subprocess
@@ -20,11 +19,11 @@ import tempfile
 from pathlib import Path
 
 from belt import decoded
-from tests import hermetic
+from tests import support
 
-BELT = hermetic.MISE
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
+BELT = support.MISE
+BASH = support.tool("bash")
+GIT = support.tool("git")
 
 # Records the files under the directory trivy was asked to scan.
 TRIVY = """\
@@ -57,7 +56,7 @@ class TestTrivyScansTrackedFilesOnly:
             root = Path(tmp)
             tree = root / "repo"
             tree.mkdir()
-            env = hermetic.env(root / "home")
+            env = support.env(root / "home")
             subprocess.run([GIT, "init", "-q"], cwd=tree, env=env, check=True)
             (tree / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
             subprocess.run([GIT, "add", "Dockerfile"], cwd=tree, env=env, check=True)
@@ -71,7 +70,7 @@ class TestTrivyScansTrackedFilesOnly:
             log = root / "trivy.log"
             env["PATH"] = f"{bindir}{os.pathsep}{env['PATH']}"
             env["TRIVY_LOG"] = str(log)
-            as_mise = hermetic.task_run("lint:trivy", body())
+            as_mise = support.task_run("lint:trivy", body())
             done = subprocess.run(
                 as_mise.argv,
                 cwd=tree,

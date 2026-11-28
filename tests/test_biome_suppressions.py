@@ -10,8 +10,7 @@ one-line ignore, a string, a template literal, a regex, prose).
 a one-line ignore that suppresses a finding, or the form inside a
 string, is clean. Those rows are the before/after test: before the
 helper, `lint:biome` was green on both red plants.
-
-pytest, run by `mise run test`.py;"""
+"""
 
 import contextlib
 import io
@@ -25,17 +24,17 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import biome_suppressions as bsup
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
 # The task that runs the helper, whose name its findings carry (#1934).
 TASK = "lint:biome"
-HELPER = hermetic.MISE / "biome_suppressions.py"
-BELT = hermetic.MISE
+HELPER = support.MISE / "biome_suppressions.py"
+BELT = support.MISE
 SCAFFOLD = BELT.parent / "scaffold"
-GIT = hermetic.tool("git")
+GIT = support.tool("git")
 # biome colours its report whatever NO_COLOR says; the rows read words.
 STYLE = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -224,7 +223,7 @@ class TestMain:
             [sys.executable, str(HELPER)],
             cwd=root,
             input=names,
-            env=hermetic.env(MISE_TASK_NAME=TASK),
+            env=support.env(MISE_TASK_NAME=TASK),
             capture_output=True,
             text=True,
             check=False,
@@ -317,7 +316,7 @@ def lint_biome(base: Path, source: str) -> subprocess.CompletedProcess[str]:
         (tree / dest).write_text(text, encoding="utf-8")
     (tree / "package.json").write_text(PACKAGE, encoding="utf-8")
     (tree / "src" / "plant.ts").write_text(source, encoding="utf-8")
-    env = hermetic.env()
+    env = support.env()
     for argv in ([GIT, "init", "-q"], [GIT, "add", "-A"]):
         subprocess.run(argv, cwd=tree, env=env, check=True)
     config = base / "config"
@@ -325,9 +324,9 @@ def lint_biome(base: Path, source: str) -> subprocess.CompletedProcess[str]:
     scratch = base / "tmp"
     scratch.mkdir()
     done = subprocess.run(
-        [hermetic.tool("mise"), "run", TASK],
+        [support.tool("mise"), "run", TASK],
         cwd=tree,
-        env=hermetic.env(
+        env=support.env(
             MISE_CONFIG_DIR=str(config),
             XDG_CONFIG_HOME=str(config),
             MISE_GLOBAL_CONFIG_FILE=str(BELT / "config.toml"),

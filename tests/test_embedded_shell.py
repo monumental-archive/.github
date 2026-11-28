@@ -10,8 +10,7 @@ The last rows run the task bodies themselves, decoded from the belt's
 config, in a scratch repository: the skip on a tree with no workflows
 is a branch of the TASK, not the helper, and a guard that skips when it
 should run looks like success.
-
-pytest, run by `mise run test`. Every git call"""
+"""
 
 import io
 import os
@@ -26,7 +25,7 @@ import pytest
 
 from belt import decoded
 from belt import embedded_shell as es
-from tests import hermetic
+from tests import support
 import contextlib
 
 if TYPE_CHECKING:
@@ -45,18 +44,18 @@ def _task(as_task: Callable[[str], None]) -> None:
 pytestmark = pytest.mark.usefixtures("_task")
 
 
-_HERE = hermetic.MISE
+_HERE = support.MISE
 # An empty result, named so the expected list carries its type.
 NOTHING: list[object] = []
 
 ISSUE = "\t# canon helper: #1386"
-GIT = hermetic.tool("git")
-BASH = hermetic.tool("bash")
+GIT = support.tool("git")
+BASH = support.tool("bash")
 # A scratch repository must not inherit the caller's git: under a hook,
 # GIT_DIR and GIT_INDEX_FILE point every `git` at the repository being
 # pushed, and `git ls-files` would list the canon's own workflows.
 CLEAN_ENV = {
-    **hermetic.env(),
+    **support.env(),
     "GIT_CONFIG_GLOBAL": os.devnull,
     "GIT_CONFIG_NOSYSTEM": "1",
 }
@@ -575,11 +574,11 @@ class TestParser:
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "w.yml"
             path.write_text("on: [push\n", encoding="utf-8")
-            done = hermetic.call(lambda: es.main([str(path)]))
+            done = support.call(lambda: es.main([str(path)]))
             debt = Path(tmp) / "debt.txt"
-            ceiling = hermetic.call(
+            ceiling = support.call(
                 lambda: es.main(["--ceiling", str(debt), str(path)]),
-                env=hermetic.env(MISE_TASK_NAME="lint:workflow-shell"),
+                env=support.env(MISE_TASK_NAME="lint:workflow-shell"),
             )
         assert done.returncode == 1
         assert done.stderr.startswith(f"{TASK}: {path}: ")
@@ -658,7 +657,7 @@ class TestOrgConfig:
             encoding="utf-8",
         )
         with pytest.MonkeyPatch.context() as patched:
-            hermetic.patch_env(patched, hermetic.env(home), clear=True)
+            support.patch_env(patched, support.env(home), clear=True)
             found = es.check(path, fmt=False, lint=True)
         assert any("[SC2250]" in f for f in found), found
 
@@ -964,7 +963,7 @@ def run_task(root: Path, name: str) -> subprocess.CompletedProcess[str]:
 
     """
     env = {**CLEAN_ENV, "ORG_BELT_DIR": str(_HERE)}
-    as_mise = hermetic.task_run(name, task_body(name))
+    as_mise = support.task_run(name, task_body(name))
     return subprocess.run(
         as_mise.argv,
         cwd=root,
@@ -1090,7 +1089,7 @@ class TestTasks:
             redirect_stdout(out),
             redirect_stderr(err),
         ):
-            hermetic.name_task(patched, task)
+            support.name_task(patched, task)
             rc = es.task_ceiling([str(self.cfg)], self.debt, write=write)
         return rc, out.getvalue(), err.getvalue()
 
@@ -1354,9 +1353,9 @@ class TestCli:
         with TemporaryDirectory() as tmp:
             t = Tree(Path(tmp), workflow(step("Big", 16)), None)
             argv = ["--ceiling", str(t.debt), str(t.wf)]
-            red = hermetic.call(lambda: es.main(argv))
+            red = support.call(lambda: es.main(argv))
             t.debt.write_text(t.entry("Big", 16), encoding="utf-8")
-            green = hermetic.call(lambda: es.main(argv))
+            green = support.call(lambda: es.main(argv))
         assert red.returncode == 1
         assert "step 'Big' holds a run: block of 16 lines" in red.stderr
         assert green.returncode == 0, green.stderr

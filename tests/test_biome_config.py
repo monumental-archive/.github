@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, ClassVar
 import pytest
 
 from belt import biome_config, decoded
-from tests import hermetic
+from tests import support
 import contextlib
 
 if TYPE_CHECKING:
@@ -45,7 +45,7 @@ def _task(as_task: Callable[[str], None]) -> None:
 pytestmark = pytest.mark.usefixtures("_task")
 
 
-BELT = hermetic.MISE
+BELT = support.MISE
 DOMAINS_FILE = BELT / "biome-domains.tsv"
 NURSERY_FILE = BELT / "biome-nursery-domains.tsv"
 ORG_FILE = BELT / "biome-org.json"
@@ -594,7 +594,7 @@ class TestAwaitInLoopsUnderBiomeTest:
             The paths the rule fired on, sorted.
 
         """
-        biome = hermetic.tool("biome")
+        biome = support.tool("biome")
         config, _silenced = biome_config.generate(
             org_config(),
             set(),
@@ -618,7 +618,7 @@ class TestAwaitInLoopsUnderBiomeTest:
                     "x.test.ts",
                 ],
                 cwd=root,
-                env=hermetic.env(),
+                env=support.env(),
                 capture_output=True,
                 text=True,
                 check=False,
@@ -834,7 +834,7 @@ class TestRunTest:
             path.write_text(json.dumps(content), encoding="utf-8")
             paths.append(path)
         out = tree / "generated.json"
-        done = hermetic.call(
+        done = support.call(
             lambda: biome_config.main([
                 *("--org", str(ORG_FILE), "--domains", str(DOMAINS_FILE)),
                 *("--nursery", str(NURSERY_FILE), "--out", str(out)),
@@ -855,7 +855,7 @@ class TestRunTest:
                 *("--nursery", str(NURSERY_FILE), "--out", str(out)),
                 *("--declaration", str(tree / "biome.json")),
             ],
-            env=hermetic.env(),
+            env=support.env(),
             input="",
             capture_output=True,
             text=True,
@@ -968,14 +968,14 @@ NO_ENTRIES: list[dict[str, object]] = []
 NODE_OFF = {"rules": {"correctness": {"noNodejsModules": "off"}}}
 
 
-def generate_main(tree: Path, out: Path, *extra: str) -> hermetic.Called:
+def generate_main(tree: Path, out: Path, *extra: str) -> support.Called:
     """Run the generator's entry point with a tree's declaration.
 
     Returns:
         The finished call.
 
     """
-    return hermetic.call(
+    return support.call(
         lambda: biome_config.main([
             *("--org", str(ORG_FILE), "--domains", str(DOMAINS_FILE)),
             *("--nursery", str(NURSERY_FILE), "--out", str(out)),
@@ -1152,7 +1152,7 @@ def show_configs(
         The generator's `--tsconfig` arguments, one triple per project.
 
     """
-    tsc = hermetic.tool("tsc")
+    tsc = support.tool("tsc")
     pairs: list[str] = []
     for project in projects:
         cfg = f"apps/{project}/tsconfig.json"
@@ -1181,8 +1181,8 @@ class TestNodeFixtureTest:
 
     def test_the_node_project_is_clean_and_the_other_is_a_finding(self) -> None:
         """apps/a declares node and passes; apps/b does not and is reported."""
-        biome = hermetic.tool("biome")
-        git = hermetic.tool("git")
+        biome = support.tool("biome")
+        git = support.tool("git")
         with tempfile.TemporaryDirectory() as tmp:
             # Resolved: biome anchors `includes` at the config's real
             # directory, and macOS's /var is a link to /private/var.
@@ -1195,7 +1195,7 @@ class TestNodeFixtureTest:
                 (tree / "apps" / project / "src" / "probe.ts").write_text(
                     NODE_IMPORT, encoding="utf-8"
                 )
-            env = hermetic.env()
+            env = support.env()
             subprocess.run([git, "init", "-q"], cwd=tree, env=env, check=True)
             pairs = show_configs(tree, env, ("a", "b"))
             generated = tree / "biome-org.generated.json"
@@ -1245,8 +1245,8 @@ class TestNodeTaskBodyTest:
         )
         table_ = decoded.as_object(tasks[task], task)
         body = decoded.as_str(table_["run"], f"{task}.run")
-        git = hermetic.tool("git")
-        tsc = Path(hermetic.tool("tsc")).parent
+        git = support.tool("git")
+        tsc = Path(support.tool("tsc")).parent
         with tempfile.TemporaryDirectory() as tmp:
             tree = Path(tmp)
             (tree / "apps" / "a" / "src").mkdir(parents=True)
@@ -1255,15 +1255,15 @@ class TestNodeTaskBodyTest:
             )
             probe = tree / "apps" / "a" / "src" / "probe.ts"
             probe.write_text(NODE_IMPORT, encoding="utf-8")
-            env = hermetic.env(
-                PATH=f"{tsc}:{hermetic.env().get('PATH', '')}",
+            env = support.env(
+                PATH=f"{tsc}:{support.env().get('PATH', '')}",
                 ORG_PYTHON=sys.executable,
                 ORG_BELT_DIR=str(BELT),
             )
             subprocess.run([git, "init", "-q"], cwd=tree, env=env, check=True)
             subprocess.run([git, "add", "."], cwd=tree, env=env, check=True)
             (tree / "apps" / "a" / "tsconfig.json").unlink()
-            as_mise = hermetic.task_run(task, body)
+            as_mise = support.task_run(task, body)
             done = subprocess.run(
                 as_mise.argv,
                 cwd=tree,
@@ -1328,12 +1328,12 @@ class TestBiomeDomainsDriftTest:
             }
             for name, text in planted.items():
                 (tree / name).write_text(text, encoding="utf-8")
-            jq = Path(hermetic.tool("jq")).parent
-            env = hermetic.env(PATH=f"{stubs}:{jq}:{hermetic.env().get('PATH', '')}")
-            git = hermetic.tool("git")
+            jq = Path(support.tool("jq")).parent
+            env = support.env(PATH=f"{stubs}:{jq}:{support.env().get('PATH', '')}")
+            git = support.tool("git")
             subprocess.run([git, "init", "-q"], cwd=tree, env=env, check=True)
             subprocess.run([git, "add", "."], cwd=tree, env=env, check=True)
-            as_mise = hermetic.task_run("lint:biome-domains", body)
+            as_mise = support.task_run("lint:biome-domains", body)
             done = subprocess.run(
                 as_mise.argv,
                 cwd=tree,

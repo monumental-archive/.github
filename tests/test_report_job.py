@@ -16,8 +16,7 @@ it runs `if: ${{ always() }}` and holds the two grants. Each scheduled
 stub grants the same two at its calling job: in a reusable workflow
 the caller's grant is the ceiling. A planted workflow with no `report`
 job, and one whose `needs:` misses a job, are each red by message.
-
-pytest, run by `mise run test`."""
+"""
 
 from __future__ import annotations
 
@@ -26,9 +25,9 @@ import tempfile
 from pathlib import Path
 
 from belt import decoded, workflow_yaml
-from tests import hermetic
+from tests import support
 
-CANON = hermetic.CANON
+CANON = support.CANON
 WORKFLOWS = Path(".github") / "workflows"
 TEMPLATES = Path("workflow-templates")
 LOCAL = re.compile(r"^\./\.github/workflows/([^/@]+)$")

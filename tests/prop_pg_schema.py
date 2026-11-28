@@ -25,7 +25,7 @@ from hypothesis import strategies as st
 
 from belt import pg_schema as ps
 from belt.typed_hypothesis import given
-from tests import hermetic
+from tests import support
 
 WORD = st.from_regex(r"[A-Za-z0-9_(),'\"]{1,8}", fullmatch=True)
 STATEMENT = st.lists(WORD, min_size=1, max_size=5)
@@ -109,7 +109,7 @@ class TestRefusal:
                 pytest.MonkeyPatch.context() as patched,
                 contextlib.redirect_stderr(err),
             ):
-                hermetic.name_task(patched, "lint:pg-schema")
+                support.name_task(patched, "lint:pg-schema")
                 got = ps.surface(str(path))
         if got is None:
             assert "lint:pg-schema:" in err.getvalue()

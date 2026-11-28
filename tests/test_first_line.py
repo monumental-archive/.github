@@ -11,19 +11,18 @@ reads its input to the end.
 The row runs lint:licence's own `run` body, read from mise/config.toml,
 under the belt's task shell, in a planted git tree whose `git ls-files`
 listing is several times a pipe buffer.
-
-pytest, run by `mise run test`.py;"""
+"""
 
 import subprocess
 import tempfile
 from pathlib import Path
 
 from belt import decoded
-from tests import hermetic
+from tests import support
 
-BELT = hermetic.MISE
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
+BELT = support.MISE
+BASH = support.tool("bash")
+GIT = support.tool("git")
 # Tracked files, each named long enough that the listing passes 600 KB.
 FILES = 3000
 NAME = "f" * 200
@@ -51,15 +50,15 @@ class TestFirstLineOfALongListing:
             root = Path(tmp)
             tree = root / "repo"
             tree.mkdir()
-            env = hermetic.env(root / "home", ORG_BELT_DIR=str(BELT))
+            env = support.env(root / "home", ORG_BELT_DIR=str(BELT))
             (tree / "LICENSE").write_text("0BSD\n", encoding="utf-8")
             for i in range(FILES):
                 (tree / f"{NAME}{i:05}").touch()
             subprocess.run([GIT, "init", "-q"], cwd=tree, env=env, check=True)
             subprocess.run([GIT, "add", "."], cwd=tree, env=env, check=True)
-            listing = "".join(f"{name}\n" for name in hermetic.tracked(tree))
+            listing = "".join(f"{name}\n" for name in support.tracked(tree))
             assert len(listing.encode()) > 8 * 65536
-            as_mise = hermetic.task_run("lint:licence", body())
+            as_mise = support.task_run("lint:licence", body())
             done = subprocess.run(
                 as_mise.argv,
                 cwd=tree,

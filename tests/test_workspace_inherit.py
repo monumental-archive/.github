@@ -39,13 +39,13 @@ import pytest
 
 from belt import decoded
 from belt import workspace_inherit as wi
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from types import TracebackType
 
-BELT = hermetic.MISE
+BELT = support.MISE
 
 # The task that runs the helper, whose name its findings carry (#1934).
 TASK = "lint:workspace-inherit"
@@ -520,7 +520,7 @@ class TwoRoots:
         }
         for name, document in planted.items():
             (accounts / f"{name}.json").write_text(json.dumps(document), "utf-8")
-        self.env = hermetic.env(
+        self.env = support.env(
             base / "home",
             MISE_TASK_NAME=TASK,
             ORG_FINDINGS="",
@@ -530,7 +530,7 @@ class TwoRoots:
         )
         self.env["PATH"] = f"{bindir}:{self.env.get('PATH', '')}"
 
-    def main(self) -> hermetic.Called:
+    def main(self) -> support.Called:
         """Run the helper over both roots, in this process.
 
         Returns:
@@ -540,7 +540,7 @@ class TwoRoots:
         roots = ["Cargo.toml", "fuzz/Cargo.toml"]
         with pytest.MonkeyPatch.context() as patched:
             patched.setattr(wi, "CARGO", str(self.cargo))
-            return hermetic.call(
+            return support.call(
                 functools.partial(wi.main, roots), env=self.env, cwd=self.tree
             )
 
@@ -551,7 +551,7 @@ class TwoRoots:
             The finished run, both streams captured.
 
         """
-        git = hermetic.tool("git")
+        git = support.tool("git")
         subprocess.run([git, "init", "-q"], cwd=self.tree, env=self.env, check=True)
         subprocess.run(
             [git, "add", "--", *TWO_ROOTS], cwd=self.tree, env=self.env, check=True
@@ -559,7 +559,7 @@ class TwoRoots:
         config = decoded.load_toml((BELT / "config.toml").read_bytes())
         tasks = decoded.as_object(config["tasks"], "the belt's [tasks]")
         entry = decoded.as_object(tasks[TASK], TASK)
-        as_mise = hermetic.task_run(TASK, decoded.as_str(entry["run"], "run"))
+        as_mise = support.task_run(TASK, decoded.as_str(entry["run"], "run"))
         return subprocess.run(
             as_mise.argv,
             cwd=self.tree,
@@ -597,7 +597,7 @@ class TestEveryRoot:
     def test_no_root_is_a_usage_error(self) -> None:
         """The task always passes one; none at all is refused, exit 2."""
         none: list[str] = []
-        done = hermetic.call(functools.partial(wi.main, none))
+        done = support.call(functools.partial(wi.main, none))
         assert (done.returncode, done.stdout, done.stderr) == (
             2,
             "",

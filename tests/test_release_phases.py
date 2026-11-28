@@ -20,8 +20,7 @@ planted row scored on exit alone can pass for the wrong reason (another
 rule tripping instead). The green rows plant the canon's real
 publish.yml and continuous.yml, so the orchestrators and the lint
 cannot drift apart.
-
-pytest, run by `mise run test`.py."""
+"""
 
 import re
 import subprocess
@@ -29,12 +28,12 @@ import tempfile
 from pathlib import Path
 
 from belt import decoded
-from tests import hermetic
+from tests import support
 
-CANON = hermetic.CANON
+CANON = support.CANON
 BELT = CANON / "mise"
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
+BASH = support.tool("bash")
+GIT = support.tool("git")
 
 FLOWS = CANON / ".github" / "workflows"
 PUBLISH = (FLOWS / "publish.yml").read_text(encoding="utf-8")
@@ -172,12 +171,12 @@ def lint(workflow: str, name: str = "publish.yml") -> subprocess.CompletedProces
         flows = Path(tmp) / ".github" / "workflows"
         flows.mkdir(parents=True)
         (flows / name).write_text(workflow, encoding="utf-8")
-        env = hermetic.env()
+        env = support.env()
         env |= {"ORG_BELT_DIR": str(BELT), "ORG_CANON_DIR": str(CANON)}
         # The lint reads a tracked orchestrator only (#2013).
         for step in (["init", "-q"], ["add", "-A"]):
             subprocess.run([GIT, *step], cwd=tmp, env=env, check=True)
-        as_mise = hermetic.task_run("lint:release-phases", BODY)
+        as_mise = support.task_run("lint:release-phases", BODY)
         return subprocess.run(
             as_mise.argv,
             cwd=tmp,

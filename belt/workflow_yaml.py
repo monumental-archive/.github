@@ -15,8 +15,7 @@ never read as empty.
 - `runs(path)` is one record per `run:` value: where it is, how it was
   written, and the text bash receives after folding and chomping.
 
-stdlib plus the yq binary on PATH; a sibling root reaches it by
-appending the `mise` root to `sys.path`, as it reaches `hermetic`.
+stdlib plus the yq binary on PATH.
 """
 
 import shutil

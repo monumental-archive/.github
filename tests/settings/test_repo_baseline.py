@@ -15,8 +15,7 @@ the script's own words about it.
 
 Each row carries the issue or pull request of the fix it holds, and
 fails on its assertion with that fix's code reverted (#1360).
-
-pytest, run by `mise run test`.py."""
+"""
 
 import base64
 import json
@@ -30,12 +29,12 @@ from typing import ClassVar, override
 import pytest
 
 from belt import decoded
-from tests import hermetic
+from tests import support
 
-HERE = hermetic.CANON / "settings"
+HERE = support.CANON / "settings"
 CANON = HERE.parent
 SCRIPT = HERE / "repo-baseline.sh"
-BASH = hermetic.tool("bash")
+BASH = support.tool("bash")
 ORG = "monumental-archive"
 
 
@@ -235,7 +234,7 @@ class Forge:
             The completed process; drift is the thing under test.
 
         """
-        env = hermetic.env()
+        env = support.env()
         env |= {
             "PATH": f"{self.bindir}{os.pathsep}{os.environ['PATH']}",
             "STUB": str(self.root),

@@ -8,8 +8,7 @@ with a stub `git` first on PATH. The stub answers `archive` by copying the row's
 call in turn (the first build, then the check build) to the `-o` path,
 and `ls-files` with the row's count of tracked paths. The archives are
 real gzip tarballs, so the helper counts real entries.
-
-pytest, run by `mise run test`. Every git call"""
+"""
 
 import gzip
 import hashlib
@@ -26,9 +25,9 @@ import pytest
 
 from belt import workflow_yaml
 from belt.release import source_archive
-from tests import hermetic
+from tests import support
 
-CANON = hermetic.CANON
+CANON = support.CANON
 WORKFLOW = CANON / ".github" / "workflows" / "build-source-archive.yml"
 # The job runs the command from its `.org-canon` link to this tree.
 STEP = '"${ORG_PYTHON}" -I .org-canon/belt source-archive'
@@ -122,11 +121,11 @@ def run_helper(
             p.mkdir()
         (stubs / "git").write_text(GIT_STUB)
         (stubs / "git").chmod(0o755)
-        hermetic.canon(work / ".org-canon")
+        support.canon(work / ".org-canon")
         for i, data in enumerate(archives):
             (planted / f"{i}.tar.gz").write_bytes(data)
         log = tmp / "git.log"
-        env = hermetic.env(
+        env = support.env(
             PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}",
             VERSION=VERSION,
             GITHUB_REPOSITORY=repo,
@@ -136,7 +135,7 @@ def run_helper(
             STUB_TRACKED=str(tracked),
             STUB_FAIL="1" if fail else "",
         )
-        result = hermetic.call(
+        result = support.call(
             lambda: source_archive.main([]), env=env, cwd=work, command=COMMAND
         )
         dist = work / "dist"

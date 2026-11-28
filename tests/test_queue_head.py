@@ -12,8 +12,6 @@ fetched from the real repository, not written by hand: a hand-made
 fixture would prove only what its author believed. It is kept gzipped,
 as release/testdata keeps its .crate: a bundle opens with a text
 header, so the text linters would read it as text.
-
-pytest, run by `mise run test`. passes its own scrubbed environment
 (#1463)."""
 
 from __future__ import annotations
@@ -30,9 +28,9 @@ from pathlib import Path
 import pytest
 
 from belt import decoded, queue_head, workflow_yaml
-from tests import hermetic
+from tests import support
 
-HERE = hermetic.MISE
+HERE = support.MISE
 HELPER = HERE / "queue_head.py"
 # A workflow step runs the helper outside mise, so its findings carry the
 # script's own name (findings.task_name, #1934).
@@ -41,7 +39,7 @@ BUNDLE = (
     Path(__file__).resolve().parent / "testdata" / "queue-head" / "edtf-265.bundle.gz"
 )
 CI = HERE.parent / ".github" / "workflows" / "ci.yml"
-GIT = hermetic.tool("git")
+GIT = support.tool("git")
 # An empty HOME for every fixture, made once for the module.
 HOME_DIR = tempfile.mkdtemp()
 
@@ -72,7 +70,7 @@ def scrubbed() -> dict[str, str]:
         The environment.
 
     """
-    return hermetic.env(HOME_DIR, GIT_CONFIG_NOSYSTEM="1")
+    return support.env(HOME_DIR, GIT_CONFIG_NOSYSTEM="1")
 
 
 def git(repo: pathlib.Path, *args: str) -> str:
@@ -184,7 +182,7 @@ def step_env(ref: str, base: str, group: str) -> dict[str, str]:
     return env
 
 
-def run_helper(cwd: pathlib.Path, ref: str, base: str, group: str) -> hermetic.Called:
+def run_helper(cwd: pathlib.Path, ref: str, base: str, group: str) -> support.Called:
     """Call the helper in-process in a checkout, as the step runs it (#1697).
 
     Returns:
@@ -193,7 +191,7 @@ def run_helper(cwd: pathlib.Path, ref: str, base: str, group: str) -> hermetic.C
     """
     with pytest.MonkeyPatch.context() as patched:
         patched.setattr(sys, "argv", [STEP])
-        return hermetic.call(
+        return support.call(
             lambda: queue_head.main([]), env=step_env(ref, base, group), cwd=cwd
         )
 
@@ -234,7 +232,7 @@ class TestQueueHead:
         self.tmp = tmp_path
 
     def refused(
-        self, done: hermetic.Called | subprocess.CompletedProcess[str], message: str
+        self, done: support.Called | subprocess.CompletedProcess[str], message: str
     ) -> None:
         """Assert the step is red with exactly this message."""
         assert done.returncode == 1, done.stdout + done.stderr
@@ -242,7 +240,7 @@ class TestQueueHead:
 
     def passed(
         self,
-        done: hermetic.Called | subprocess.CompletedProcess[str],
+        done: support.Called | subprocess.CompletedProcess[str],
         group: str,
         head: str,
         base: str,

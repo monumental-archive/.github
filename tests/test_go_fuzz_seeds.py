@@ -19,8 +19,7 @@ build it. Timings are kept as measured: they are not parsed.
 
 Fails before #1413 (the run was `./...`, whatever the listing said)
 and passes after: `test_runs_only_the_packages_that_declare_a_target`.
-
-pytest, run by `mise run test`. Every git call"""
+"""
 
 import functools
 import os
@@ -32,16 +31,16 @@ from pathlib import Path
 import pytest
 
 from belt import decoded
-from tests import hermetic
+from tests import support
 
-BELT = hermetic.MISE
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
+BELT = support.MISE
+BASH = support.tool("bash")
+GIT = support.tool("git")
 # A scratch repository must not inherit the caller's git: under a hook,
 # GIT_DIR and GIT_INDEX_FILE point every `git` at the repository being
 # pushed, and the planted go.mod would be staged into the canon's index.
 CLEAN_ENV = {
-    **hermetic.env(),
+    **support.env(),
     "GIT_CONFIG_GLOBAL": os.devnull,
     "GIT_CONFIG_NOSYSTEM": "1",
 }
@@ -139,7 +138,7 @@ class TestGoFuzzSeeds:
             functools.partial(shutil.rmtree, self.tools, ignore_errors=True)
         )
         for tool in TOOLS:
-            (self.tools / tool).symlink_to(hermetic.tool(tool))
+            (self.tools / tool).symlink_to(support.tool(tool))
         self.stubs = Path(tempfile.mkdtemp()).resolve()
         request.addfinalizer(
             functools.partial(shutil.rmtree, self.stubs, ignore_errors=True)
@@ -184,7 +183,7 @@ class TestGoFuzzSeeds:
             "PATH": os.pathsep.join(path),
             "PLANT_LOG": str(self.log),
         }
-        as_mise = hermetic.task_run(
+        as_mise = support.task_run(
             "lint:go-fuzz-seeds", task_body("lint:go-fuzz-seeds")
         )
         done = subprocess.run(

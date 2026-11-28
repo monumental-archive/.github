@@ -45,7 +45,7 @@ import pytest
 from belt import decoded, python_runs, workflow_yaml
 from belt.python_runs import python_code
 from belt.release import caller_pins
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -54,7 +54,7 @@ if TYPE_CHECKING:
 Job = dict[str, object]
 Step = dict[str, object]
 
-CANON = hermetic.CANON
+CANON = support.CANON
 WORKFLOWS = CANON / ".github" / "workflows"
 
 
@@ -480,11 +480,11 @@ def code(text: str) -> str:
         return REDUCED[text]
     source = text.encode("utf-8")
     parsed = subprocess.run(
-        [hermetic.tool("shfmt"), "--to-json"],
+        [support.tool("shfmt"), "--to-json"],
         input=source,
         capture_output=True,
         check=False,
-        env=hermetic.env(),
+        env=support.env(),
     )
     if parsed.returncode:
         why = parsed.stderr.decode("utf-8", "replace").strip()
@@ -1391,7 +1391,7 @@ class TestPythonCode:
         nxt = 'import subprocess\nsubprocess.run(["ruff", "check"], check=True)\n'
         located = (
             "from pathlib import Path\nfrom belt_scripts import script\n"
-            'NEXT = script(hermetic.RELEASE, "planted-next.py")\n'
+            'NEXT = script(support.RELEASE, "planted-next.py")\n'
         )
         for helper, red in (
             (located, PLANTED_RED),
@@ -1433,7 +1433,7 @@ def planted_uninstalled(helper: str, also: dict[str, str] | None = None) -> list
     """
     with tempfile.TemporaryDirectory() as tmp:
         stubs = {"release/planted-call.py": helper, **(also or {})}
-        root = hermetic.canon(tmp, stubs=stubs)
+        root = support.canon(tmp, stubs=stubs)
         job = appended(
             load("attach-release.yml")["attach"],
             {
@@ -1457,7 +1457,7 @@ def planted_shell(helper: str) -> list[str]:
 
     """
     with tempfile.TemporaryDirectory() as tmp:
-        root = hermetic.canon(tmp, stubs={"release/planted-call.sh": helper})
+        root = support.canon(tmp, stubs={"release/planted-call.sh": helper})
         job = appended(
             load("attach-release.yml")["attach"],
             {
@@ -1722,7 +1722,7 @@ def tracked_helpers() -> set[str]:
         The names of the canon's tracked `*.py`.
 
     """
-    return {Path(p).name for p in hermetic.tracked(CANON, "*.py")}
+    return {Path(p).name for p in support.tracked(CANON, "*.py")}
 
 
 def helper_starts(rel: str, job_id: str, job: Job, tracked: set[str]) -> list[str]:
@@ -2189,7 +2189,7 @@ class TestEnvironmentSecrets:
         root = CANON
         texts = {
             rel: (root / rel).read_text("utf-8")
-            for rel in hermetic.tracked(root, ".github/workflows/*.yml")
+            for rel in support.tracked(root, ".github/workflows/*.yml")
         }
         assert strings() == secrets_outside_environment(texts)
 
@@ -2203,7 +2203,7 @@ class TestEnvironmentSecrets:
                 (root / rel).read_text("utf-8"),
                 flags=re.MULTILINE,
             )
-            for rel in hermetic.tracked(root, ".github/workflows/*.yml")
+            for rel in support.tracked(root, ".github/workflows/*.yml")
         }
         found = secrets_outside_environment(texts)
         assert (

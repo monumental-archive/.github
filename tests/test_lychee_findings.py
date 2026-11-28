@@ -11,8 +11,7 @@ one link is relative, so lychee needs no network: a broken link is the
 quoted record and lychee's 2, a sound one no record and 0. Run against
 `origin/main`'s config, the record row fails: that body ran lychee in
 its human mode and recorded nothing.
-
-pytest, run by `mise run test`."""
+"""
 
 import json
 import os
@@ -23,12 +22,12 @@ from pathlib import Path
 import pytest
 
 from belt import decoded
-from tests import hermetic
+from tests import support
 
-HERE = hermetic.MISE
+HERE = support.MISE
 ADAPTER = HERE / "lychee_findings.py"
 TASK = "audit:links"
-GIT = hermetic.tool("git")
+GIT = support.tool("git")
 NOT_FOUND = "File not found. Check if file exists and path is correct"
 
 STUB = """\
@@ -134,7 +133,7 @@ class TestAdapter:
 
         """
         self.doc.write_text(document, encoding="utf-8")
-        env = hermetic.env(
+        env = support.env(
             PATH=path or f"{self.bin}{os.pathsep}{os.environ['PATH']}",
             ORG_FINDINGS=str(self.file),
             MISE_TASK_NAME=TASK,
@@ -265,7 +264,7 @@ class TestTask:
     @pytest.fixture
     def _set_up_test_task(self, tmp_path: Path) -> None:
         """Plant a tracked tree with one markdown file linking `other.md`."""
-        if hermetic.optional_tool("lychee") is None:
+        if support.optional_tool("lychee") is None:
             pytest.skip("the belt's lychee is not on PATH")
         self.tmp = tmp_path
         self.root = self.tmp / "tree"
@@ -273,7 +272,7 @@ class TestTask:
         self.file = self.tmp / "findings" / "job.jsonl"
         (self.root / "a.md").write_text("# a\n\nsee [o](other.md)\n", encoding="utf-8")
         git = [GIT, "-C", str(self.root)]
-        subprocess.run([*git, "init", "-q"], env=hermetic.env(), check=True)
+        subprocess.run([*git, "init", "-q"], env=support.env(), check=True)
 
     def run_task(self) -> subprocess.CompletedProcess[str]:
         """Track the tree and run audit:links' body in it.
@@ -283,17 +282,17 @@ class TestTask:
 
         """
         git = [GIT, "-C", str(self.root)]
-        subprocess.run([*git, "add", "-A"], env=hermetic.env(), check=True)
+        subprocess.run([*git, "add", "-A"], env=support.env(), check=True)
         config = decoded.load_toml((HERE / "config.toml").read_bytes())
         tasks = decoded.as_object(config["tasks"], "tasks")
         body = decoded.as_str(decoded.as_object(tasks[TASK], TASK)["run"], "run")
-        run = hermetic.task_run(TASK, body)
+        run = support.task_run(TASK, body)
         return subprocess.run(
             run.argv,
             capture_output=True,
             text=True,
             encoding="utf-8",
-            env=hermetic.env(
+            env=support.env(
                 **run.env,
                 ORG_BELT_DIR=str(HERE),
                 ORG_PYTHON=sys.executable,

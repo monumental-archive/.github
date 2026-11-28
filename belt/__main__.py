@@ -17,8 +17,9 @@ tree its own links name. The dispatch is belt/launcher.py's.
 import sys
 from pathlib import Path
 
-sys.path[0] = str(Path(__file__).absolute().parent.parent)
+sys.path.pop(0)
+sys.path.insert(0, str(Path(__file__).absolute().parent.parent))
 
-from belt.launcher import launch  # ruff: ignore[module-import-not-at-top-of-file] - the path is set first
+from belt.launcher import launch
 
 sys.exit(launch(sys.argv[1:]))

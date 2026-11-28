@@ -12,11 +12,10 @@ the list by hand, one way per task, and both are planted here:
   `é.md` as its octal escapes), and the linter blamed a missing file.
 
 Each row plants one repository, runs the task body as mise does
-(`hermetic.task_run`), and asserts its message, not only its status
+(`support.task_run`), and asserts its message, not only its status
 (#650). The misspellings are assembled at runtime: written out here,
 they would red this repository's own `lint:typos`.
-
-pytest, run by `mise run test`.py."""
+"""
 
 import contextlib
 import subprocess
@@ -26,17 +25,17 @@ from pathlib import Path
 import pytest
 
 from belt import decoded, tracked
-from tests import hermetic
+from tests import support
 from tests import test_derive_badges as derive
 
-BELT = hermetic.MISE
-BASH = hermetic.tool("bash")
+BELT = support.MISE
+BASH = support.tool("bash")
 # The machine's own bash as well (#1986): on a Mac it is 3.2, which has
 # no `declare -n` and no `printf -v` into an array element, and the
 # helper fills its array by name.
-SYSTEM_BASH = hermetic.optional_tool("bash", path="/bin")
+SYSTEM_BASH = support.optional_tool("bash", path="/bin")
 SHELLS = (BASH,) if SYSTEM_BASH in {None, BASH} else (BASH, str(SYSTEM_BASH))
-GIT = hermetic.tool("git")
+GIT = support.tool("git")
 
 # The three tracked names, and the untracked tool output beside them.
 SPACED = "a b.md"
@@ -80,7 +79,7 @@ def read_into(
     return subprocess.run(
         [shell, "--norc", "-euo", "pipefail", "-c", script],
         cwd=cwd,
-        env=hermetic.env(cwd.parent / "home", TMPDIR=str(tmpdir))
+        env=support.env(cwd.parent / "home", TMPDIR=str(tmpdir))
         | {"BASH_ENV": str(BELT / "findings.sh")},
         capture_output=True,
         check=False,
@@ -102,7 +101,7 @@ def body(task: str) -> str:
 
 def plant(tree: Path, files: dict[str, str], untracked: dict[str, str]) -> None:
     """Make `tree` a repository tracking `files`, with `untracked` beside them."""
-    env = hermetic.env(tree.parent / "home")
+    env = support.env(tree.parent / "home")
     for name, text in {**files, **untracked}.items():
         path = tree / name
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -134,7 +133,7 @@ def run_task(
         tree = Path(tmp) / "repo"
         tree.mkdir()
         plant(tree, files, untracked or {})
-        env = hermetic.env(Path(tmp) / "home", ORG_BELT_DIR=str(BELT))
+        env = support.env(Path(tmp) / "home", ORG_BELT_DIR=str(BELT))
         commands = dict(stubs or {})
         if commands:
             where = Path(tmp) / "stubs"
@@ -143,7 +142,7 @@ def run_task(
                 (where / name).write_text(text, encoding="utf-8")
                 (where / name).chmod(0o755)
             env["PATH"] = f"{where}:{env.get('PATH', '')}"
-        as_mise = hermetic.task_run(task, body(task))
+        as_mise = support.task_run(task, body(task))
         return subprocess.run(
             [shell, *as_mise.argv[1:]],
             cwd=tree,
@@ -184,7 +183,7 @@ class TestProducers:
         done = subprocess.run(
             [BASH, "--norc", "-euo", "pipefail", "-c", "org_tracked"],
             cwd=tree,
-            env=hermetic.env(tree.parent / "home")
+            env=support.env(tree.parent / "home")
             | {"BASH_ENV": str(BELT / "findings.sh")},
             capture_output=True,
             check=False,
@@ -249,7 +248,7 @@ class TestProducers:
         """
         tree = self.planted()
         with pytest.MonkeyPatch.context() as patched, contextlib.chdir(tree):
-            hermetic.patch_env(patched, hermetic.env(tree.parent / "home"), clear=True)
+            support.patch_env(patched, support.env(tree.parent / "home"), clear=True)
             narrowed: list[str] = tracked.tracked("é*")
             every: list[str] = sorted(tracked.tracked())
         assert list[str]([ACCENTED]) == narrowed
@@ -257,7 +256,7 @@ class TestProducers:
 
     def test_stdin_paths_reads_a_nul_separated_list(self) -> None:
         """A name with a space or a newline is one path; empties dropped."""
-        done = hermetic.call(
+        done = support.call(
             lambda: len(tracked.stdin_paths()) - 3,
             stdin=f"{SPACED}\0\0a\nb.md\0{ACCENTED}\0",
         )
@@ -405,7 +404,7 @@ def has_status(
         The finished run, both streams captured.
 
     """
-    env = hermetic.env(tree.parent / "home") | {
+    env = support.env(tree.parent / "home") | {
         "BASH_ENV": str(BELT / "findings.sh"),
         "MISE_TASK_NAME": "fix:test",
     }
@@ -539,7 +538,7 @@ class TestUntrackedIsAbsent:
             done = subprocess.run(
                 [BASH, str(BELT / "pgrx-plan.sh"), str(BELT.parent)],
                 cwd=tree,
-                env=hermetic.env(Path(tmp) / "home"),
+                env=support.env(Path(tmp) / "home"),
                 capture_output=True,
                 text=True,
                 check=False,

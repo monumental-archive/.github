@@ -26,8 +26,7 @@ workers measured, the figures printed; the same tree with no
 floor measures nothing; coverage:check alone runs `test` once; a suite
 not run through `measured` is red by the floor's own record (#1666);
 and `measured` reaches a file task.
-
-pytest, run by `mise run test`. Every git call"""
+"""
 
 import re
 import subprocess
@@ -38,11 +37,11 @@ from pathlib import Path
 import pytest
 
 from belt import decoded, typed_std
-from tests import hermetic
+from tests import support
 
-BELT = hermetic.MISE
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
+BELT = support.MISE
+BASH = support.tool("bash")
+GIT = support.tool("git")
 CONFIG = BELT / "config.toml"
 
 
@@ -345,7 +344,7 @@ def leg_files() -> list[str]:
     shell = {path.stem.removeprefix("mutants-") for path in BELT.glob("mutants-*.sh")}
     package = {
         path.stem.removeprefix("mutants_")
-        for path in hermetic.PACKAGE.glob("mutants_*.py")
+        for path in support.PACKAGE.glob("mutants_*.py")
     }
     return sorted(shell | package)
 
@@ -436,7 +435,7 @@ class TestSelection:
     def _set_up_test_selection(self, tmp_path: Path) -> None:
         """Plant a belt of the real body and stub legs that only say they ran."""
         tmp = tmp_path
-        self.belt = hermetic.belt(
+        self.belt = support.belt(
             tmp / "belt",
             stubs=dict(leg_stub(lang) for lang in leg_files()),
         )
@@ -448,11 +447,11 @@ class TestSelection:
             The finished process.
 
         """
-        as_mise = hermetic.task_run("audit:mutants", run_of("audit:mutants"))
+        as_mise = support.task_run("audit:mutants", run_of("audit:mutants"))
         return subprocess.run(
             as_mise.argv,
             cwd=self.belt,
-            env=hermetic.env(ORG_BELT_DIR=str(self.belt), **env) | as_mise.env,
+            env=support.env(ORG_BELT_DIR=str(self.belt), **env) | as_mise.env,
             capture_output=True,
             text=True,
             check=False,
@@ -562,7 +561,7 @@ def plant(base: Path, name: str, *, floor: bool = True, measured: bool = True) -
     )
     if floor:
         (tree / ".coverage-floor").write_text(FLOOR, encoding="utf-8")
-    env = hermetic.env()
+    env = support.env()
     for argv in ([GIT, "init", "-q"], [GIT, "add", "-A"]):
         subprocess.run(argv, cwd=tree, env=env, check=True)
     return tree
@@ -590,10 +589,10 @@ class TestOneRun:
             The finished run, its output in `stdout` and `stderr`.
 
         """
-        found = hermetic.tool("mise")
+        found = support.tool("mise")
         config = tree.parent / f"{tree.name}-config"
         config.mkdir()
-        env = hermetic.env(
+        env = support.env(
             MISE_CONFIG_DIR=str(config),
             XDG_CONFIG_HOME=str(config),
             MISE_GLOBAL_CONFIG_FILE=str(CONFIG),

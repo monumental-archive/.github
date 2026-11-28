@@ -14,15 +14,13 @@ interrupted in-place run would leave it), copies the planted report to
 `reports/mutation/mutation.json` and exits with the planted status.
 Every row asserts the exact output, so a row cannot pass by stopping
 somewhere else.
-
-pytest, run by `mise run test`. Every git call"""
+"""
 
 import contextlib
 import io
 import json
 import re
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -30,7 +28,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import mutants_typescript
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -48,10 +46,10 @@ def _task(as_task: Callable[[str], None]) -> None:
 pytestmark = pytest.mark.usefixtures("_task")
 
 
-BELT = hermetic.MISE
+BELT = support.MISE
 SCRIPT = BELT / "mutants-typescript.sh"
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
+BASH = support.tool("bash")
+GIT = support.tool("git")
 LABEL = "audit:mutants: typescript"
 MARK = "// Stryker disable next-line <Mutator>: <reason>"
 RED_TAIL = (
@@ -156,7 +154,7 @@ class TestPlanted:
         self.planted = self.tmp / "report.json"
         self.planted.touch()
         self.summary = self.tmp / "summary"
-        self.env = hermetic.env(
+        self.env = support.env(
             MISE_TASK_NAME=TASK,
             PLANT_LOG=str(self.log),
             PLANT_REPORT=str(self.planted),
@@ -170,7 +168,7 @@ class TestPlanted:
 
     def git(self, *args: str) -> None:
         """Run git in the planted tree, scrubbed of the caller's git state."""
-        subprocess.run([GIT, *args], cwd=self.tree, env=hermetic.env(), check=True)
+        subprocess.run([GIT, *args], cwd=self.tree, env=support.env(), check=True)
 
     def track(self, path: str, text: str) -> None:
         """Write a file into the planted tree and track it."""
@@ -378,15 +376,9 @@ class TestShards(TestPlanted):
         assert log == list[str]()
 
 
-@pytest.mark.usefixtures("_stack", "_set_up_test_share_out")
+@pytest.mark.usefixtures("_set_up_test_share_out")
 class TestShareOut:
     """`share`: the config's `mutate` list, expanded and cut round-robin."""
-    
-    @pytest.fixture
-    def _stack(self, request: pytest.FixtureRequest) -> None:
-        """Hold the row's cleanups, undone last first after it ends."""
-        self.stack = contextlib.ExitStack()
-        request.addfinalizer(self.stack.close)
 
     FILES = (
         "src/a.ts",
@@ -401,22 +393,26 @@ class TestShareOut:
     )
 
     @pytest.fixture
-    def _set_up_test_share_out(self, tmp_path: Path) -> None:
+    def _set_up_test_share_out(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Plant a git tree of tracked files, and work in it."""
         tmp = tmp_path
         self.tree = tmp / "tree"
         self.tree.mkdir()
         self.out = tmp / "mutate"
         git = [GIT, "-C", str(self.tree)]
-        subprocess.run([*git, "init", "-q"], env=hermetic.env(), check=True)
+        subprocess.run([*git, "init", "-q"], env=support.env(), check=True)
         for path in self.FILES:
             (self.tree / path).parent.mkdir(parents=True, exist_ok=True)
             (self.tree / path).write_text(SOURCE, encoding="utf-8")
         (self.tree / "untracked.ts").write_text(SOURCE, encoding="utf-8")
-        subprocess.run([*git, "add", "--", *self.FILES], env=hermetic.env(), check=True)
-        self.stack.enter_context(contextlib.chdir(self.tree))
+        subprocess.run([*git, "add", "--", *self.FILES], env=support.env(), check=True)
+        monkeypatch.chdir(self.tree)
 
-    def share(self, mutate: list[str], shard: str) -> hermetic.Called:
+    def share(
+        self, mutate: list[str], shard: str, *, capfd: pytest.CaptureFixture[str]
+    ) -> tuple[int, str, str]:
         """Write a config naming `mutate` and share it out.
 
         Returns:
@@ -425,21 +421,28 @@ class TestShareOut:
         """
         config = self.tree / "stryker.config.json"
         config.write_text(json.dumps(CONFIG | {"mutate": mutate}), encoding="utf-8")
-        return call(["share", str(config), "--shard", shard, "--out", str(self.out)])
+        return call(
+            ["share", str(config), "--shard", shard, "--out", str(self.out)],
+            capfd=capfd,
+        )
 
-    def shared(self, mutate: list[str], shard: str) -> list[str]:
+    def shared(
+        self, mutate: list[str], shard: str, *, capfd: pytest.CaptureFixture[str]
+    ) -> list[str]:
         """Share out and read the files back from the argument.
 
         Returns:
             The shard's files, unescaped, in order.
 
         """
-        done = self.share(mutate, shard)
-        assert done.returncode == 0, done.stderr
+        status, out, err = self.share(mutate, shard, capfd=capfd)
+        assert status == 0, err
         text = self.out.read_text(encoding="utf-8")
         return [re.sub(r"\\(.)", r"\1", f) for f in text.split(",") if f]
 
-    def test_three_shards_hold_every_file_exactly_once(self) -> None:
+    def test_three_shards_hold_every_file_exactly_once(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A `!` entry subtracts; 0/3, 1/3 and 2/3 partition what is left."""
         mutate = ["src/**/*.{ts,tsx}", "lib/*.ts", "!src/**/*.test.ts"]
         every = [
@@ -450,76 +453,96 @@ class TestShareOut:
             "src/c.tsx",
             "src/deep/d.ts",
         ]
-        shards = [self.shared(mutate, f"{k}/3") for k in range(3)]
+        shards = [self.shared(mutate, f"{k}/3", capfd=capfd) for k in range(3)]
         want = [every[0::3], every[1::3], every[2::3]]
         assert shards == want
         held = sorted(f for s in shards for f in s)
         assert held == every
 
-    def test_the_whole_share_prints_its_count(self) -> None:
+    def test_the_whole_share_prints_its_count(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """0/1 takes every file, and says how many of how many."""
-        done = self.share(["src/*.ts"], "0/1")
-        assert done == hermetic.Called(0, f"{LABEL}: shard 0/1: 2 of 2 files\n", "")
+        status, out, err = self.share(["src/*.ts"], "0/1", capfd=capfd)
+        assert (status, out, err) == (0, f"{LABEL}: shard 0/1: 2 of 2 files\n", "")
         assert self.out.read_text(encoding="utf-8") == "src/a.ts,src/b.ts"
 
-    def test_entries_apply_in_order(self) -> None:
+    def test_entries_apply_in_order(self, capfd: pytest.CaptureFixture[str]) -> None:
         """An entry after a `!` adds back what the `!` took, as StrykerJS reads it."""
         mutate = ["src/*.ts", "!src/*.ts", "src/a.ts"]
         want = ["src/a.ts"]
-        assert self.shared(mutate, "0/1") == want
+        assert self.shared(mutate, "0/1", capfd=capfd) == want
 
-    def test_a_dotted_name_is_matched_only_by_a_dotted_part(self) -> None:
+    def test_a_dotted_name_is_matched_only_by_a_dotted_part(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Minimatch's `dot: false`: `**` never reaches `.hidden`; `.hidden` does."""
-        assert "src/.hidden/h.ts" not in self.shared(["src/**/*.ts"], "0/1")
+        assert "src/.hidden/h.ts" not in self.shared(
+            ["src/**/*.ts"], "0/1", capfd=capfd
+        )
         want = ["src/.hidden/h.ts"]
-        assert self.shared(["src/.hidden/*.ts"], "0/1") == want
+        assert self.shared(["src/.hidden/*.ts"], "0/1", capfd=capfd) == want
 
-    def test_a_file_name_with_glob_syntax_is_escaped(self) -> None:
+    def test_a_file_name_with_glob_syntax_is_escaped(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """`[id]` is named literally, so minimatch matches that file alone."""
-        self.share(["src/\\[id\\]/*.ts"], "0/1")
+        self.share(["src/\\[id\\]/*.ts"], "0/1", capfd=capfd)
         assert self.out.read_text(encoding="utf-8") == r"src/\[id\]/page.ts"
 
-    def test_a_ranged_entry_is_red_by_name(self) -> None:
+    def test_a_ranged_entry_is_red_by_name(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """A range, even under `!`, cannot be shared out by file."""
-        done = self.share(["src/*.ts", "!src/a.ts:1:2-3:4"], "0/1")
+        status, out, err = self.share(
+            ["src/*.ts", "!src/a.ts:1:2-3:4"], "0/1", capfd=capfd
+        )
         want = (
             f"{LABEL}: `mutate` entry '!src/a.ts:1:2-3:4' carries a mutation"
             " range; a range cannot be shared out by file\n"
         )
-        assert done == hermetic.Called(1, "", want)
+        assert (status, out, err) == (1, "", want)
 
-    def test_an_extglob_is_red_by_name(self) -> None:
+    def test_an_extglob_is_red_by_name(self, capfd: pytest.CaptureFixture[str]) -> None:
         """`full_match` cannot spell an extglob, so it is refused, not misread."""
-        done = self.share(["src/+(a|b).ts"], "0/1")
+        status, out, err = self.share(["src/+(a|b).ts"], "0/1", capfd=capfd)
         want = (
             f"{LABEL}: `mutate` entry 'src/+(a|b).ts' is an extglob, which the"
             " leg cannot expand\n"
         )
-        assert done == hermetic.Called(1, "", want)
+        assert (status, out, err) == (1, "", want)
 
-    def test_a_list_matching_nothing_is_red(self) -> None:
+    def test_a_list_matching_nothing_is_red(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """No tracked file matched: red, never an empty run."""
-        done = self.share(["untracked.ts"], "0/1")
+        status, out, err = self.share(["untracked.ts"], "0/1", capfd=capfd)
         want = f"{LABEL}: `mutate` matches no tracked file\n"
-        assert done == hermetic.Called(1, "", want)
+        assert (status, out, err) == (1, "", want)
 
-    def test_a_name_with_a_comma_is_red(self) -> None:
+    def test_a_name_with_a_comma_is_red(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """--mutate splits on commas, so such a file cannot be named."""
         (self.tree / "src/x,y.ts").write_text(SOURCE, encoding="utf-8")
-        subprocess.run([GIT, "add", "--", "src/x,y.ts"], env=hermetic.env(), check=True)
-        done = self.share(["src/x*.ts"], "0/1")
+        subprocess.run([GIT, "add", "--", "src/x,y.ts"], env=support.env(), check=True)
+        status, out, err = self.share(["src/x*.ts"], "0/1", capfd=capfd)
         want = (
             f"{LABEL}: src/x,y.ts: StrykerJS's --mutate cannot name this file"
             " (a comma, or a trailing range)\n"
         )
-        assert done == hermetic.Called(1, "", want)
+        assert (status, out, err) == (1, "", want)
 
-    def test_a_class_negated_with_a_caret_is_read_as_minimatch_reads_it(self) -> None:
+    def test_a_class_negated_with_a_caret_is_read_as_minimatch_reads_it(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """`[^a]` is every one character but `a`, as `[!a]` is."""
         want = ["src/b.ts"]
-        assert self.shared(["src/[^a].ts"], "0/1") == want
+        assert self.shared(["src/[^a].ts"], "0/1", capfd=capfd) == want
 
-    def test_entries_resolve_against_the_tree(self) -> None:
+    def test_entries_resolve_against_the_tree(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """`./`, a path back into the tree and an absolute one; outside is none."""
         mutate = [
             "./src/a.ts",
@@ -528,50 +551,64 @@ class TestShareOut:
             "../elsewhere/*.ts",
         ]
         want = ["lib/l.ts", "src/a.ts", "src/b.ts"]
-        assert self.shared(mutate, "0/1") == want
+        assert self.shared(mutate, "0/1", capfd=capfd) == want
 
-    def test_a_shard_with_files_writes_no_counts(self) -> None:
+    def test_a_shard_with_files_writes_no_counts(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Only an empty share writes its row; a run's row is the verdict's."""
         summary = self.out.parent / "summary"
         config = self.tree / "stryker.config.json"
         config.write_text(json.dumps(CONFIG), encoding="utf-8")
         argv = ["share", str(config), "--out", str(self.out)]
-        done = call([*argv, "--summary-dir", str(summary)])
-        assert done.returncode == 0, done.stderr
+        status, out, err = call([*argv, "--summary-dir", str(summary)], capfd=capfd)
+        assert status == 0, err
         assert not summary.exists()
 
-    def test_a_name_ending_in_a_range_is_red(self) -> None:
+    def test_a_name_ending_in_a_range_is_red(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """--mutate would read the name's tail as a range: red, by name."""
         (self.tree / "src/x:1-2").write_text(SOURCE, encoding="utf-8")
-        subprocess.run([GIT, "add", "--", "src/x:1-2"], env=hermetic.env(), check=True)
-        done = self.share(["src/x*"], "0/1")
+        subprocess.run([GIT, "add", "--", "src/x:1-2"], env=support.env(), check=True)
+        status, out, err = self.share(["src/x*"], "0/1", capfd=capfd)
         want = (
             f"{LABEL}: src/x:1-2: StrykerJS's --mutate cannot name this file"
             " (a comma, or a trailing range)\n"
         )
-        assert done == hermetic.Called(1, "", want)
+        assert (status, out, err) == (1, "", want)
 
     @pytest.mark.parametrize("shard", ("x", "1/2/3", "2/2", "3/2", "-1/2"))
-    def test_each_malformed_shard_is_red(self, shard: object) -> None:
+    def test_each_malformed_shard_is_red(
+        self, shard: object, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """Not two whole numbers, or k not below n: red, by name."""
-        done = self.share(["src/*.ts"], shard)
+        status, out, err = self.share(["src/*.ts"], shard, capfd=capfd)
         want = f"{LABEL}: MUTANTS_SHARD='{shard}' is not k/n with 0 <= k < n\n"
-        assert done == hermetic.Called(1, "", want)
+        assert (status, out, err) == (1, "", want)
 
-    def test_a_config_with_no_mutate_list_is_red(self) -> None:
+    def test_a_config_with_no_mutate_list_is_red(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """`share` reads the list itself; a missing one is named."""
         config = self.tree / "stryker.config.json"
         bare: dict[str, object] = {"testRunner": "vitest"}
         config.write_text(json.dumps(bare), encoding="utf-8")
-        done = call(["share", str(config), "--out", str(self.out)])
+        status, out, err = call(
+            ["share", str(config), "--out", str(self.out)], capfd=capfd
+        )
         want = f"{LABEL}: {config} names no `mutate` list\n"
-        assert done == hermetic.Called(1, "", want)
+        assert (status, out, err) == (1, "", want)
 
-    def test_an_unreadable_config_is_red(self) -> None:
+    def test_an_unreadable_config_is_red(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
         """No file: red, never an empty share."""
-        done = call(["share", str(self.tree / "none.json"), "--out", str(self.out)])
-        assert done.returncode == 1
-        assert done.stderr.startswith(f"{LABEL}: "), done.stderr
+        status, out, err = call(
+            ["share", str(self.tree / "none.json"), "--out", str(self.out)], capfd=capfd
+        )
+        assert status == 1
+        assert err.startswith(f"{LABEL}: "), err
 
 
 class TestBraces:
@@ -662,7 +699,6 @@ class TestRefusals(TestPlanted):
         self, setting: object, message: object
     ) -> None:
         """Each row's setting is named, and StrykerJS never runs."""
-        self.setUp()
         self.plant(*KILLED, config=CONFIG | setting)
         done, log = self.run_leg()
         assert done.returncode == 1
@@ -914,144 +950,149 @@ class TestRun(TestPlanted):
         assert log == list[str]()
 
 
+FILE = 'files["a.ts"]'
+EACH_FIELD_THE_VERDICT_READS_ROWS: tuple[tuple[object, str], ...] = (
+    ({"files": {"a.ts": 3}}, f"{FILE} is not an object"),
+    ({"files": {"a.ts": {"mutants": {}}}}, f"{FILE}.mutants is not a list"),
+    (
+        {"files": {"a.ts": {"mutants": [1]}}},
+        f"{FILE}.mutants[0] is not an object",
+    ),
+    (
+        {"files": {"a.ts": {"mutants": [{}]}}},
+        f"{FILE}.mutants[0].status is not a string",
+    ),
+    (
+        {"files": {"a.ts": {"mutants": [{"status": "Killed", "location": 1}]}}},
+        f"{FILE}.mutants[0].location is not an object",
+    ),
+    (
+        {"files": {"a.ts": {"mutants": [{"location": {"start": {"line": "1"}}}]}}},
+        f"{FILE}.mutants[0].line is not an integer",
+    ),
+    (
+        {"files": {"a.ts": {"mutants": [{"replacement": 1}]}}},
+        f"{FILE}.mutants[0].replacement is not a string",
+    ),
+    (
+        {"files": {"a.ts": {"mutants": [{"mutatorName": 1}]}}},
+        f"{FILE}.mutants[0].mutatorName is not a string",
+    ),
+    (
+        {"files": {"a.ts": {"mutants": [{"status": "Ignored", "statusReason": 1}]}}},
+        f"{FILE}.mutants[0].statusReason is not a string",
+    ),
+)
+
+
 class TestShapes:
     """A report field of another shape is refused by name, never a crash."""
 
-    def test_each_field_the_verdict_reads(self) -> None:
+    @pytest.mark.parametrize(("value", "why"), EACH_FIELD_THE_VERDICT_READS_ROWS)
+    def test_each_field_the_verdict_reads(self, value: object, why: str) -> None:
         """The refusal names the field, where it is, in the report."""
-        file = 'files["a.ts"]'
-        rows: tuple[tuple[object, str], ...] = (
-            ({"files": {"a.ts": 3}}, f"{file} is not an object"),
-            ({"files": {"a.ts": {"mutants": {}}}}, f"{file}.mutants is not a list"),
-            (
-                {"files": {"a.ts": {"mutants": [1]}}},
-                f"{file}.mutants[0] is not an object",
-            ),
-            (
-                {"files": {"a.ts": {"mutants": [{}]}}},
-                f"{file}.mutants[0].status is not a string",
-            ),
-            (
-                {"files": {"a.ts": {"mutants": [{"status": "Killed", "location": 1}]}}},
-                f"{file}.mutants[0].location is not an object",
-            ),
-            (
-                {
-                    "files": {
-                        "a.ts": {"mutants": [{"location": {"start": {"line": "1"}}}]}
-                    }
-                },
-                f"{file}.mutants[0].line is not an integer",
-            ),
-            (
-                {"files": {"a.ts": {"mutants": [{"replacement": 1}]}}},
-                f"{file}.mutants[0].replacement is not a string",
-            ),
-            (
-                {"files": {"a.ts": {"mutants": [{"mutatorName": 1}]}}},
-                f"{file}.mutants[0].mutatorName is not a string",
-            ),
-            (
-                {
-                    "files": {
-                        "a.ts": {"mutants": [{"status": "Ignored", "statusReason": 1}]}
-                    }
-                },
-                f"{file}.mutants[0].statusReason is not a string",
-            ),
-        )
-        for value, why in rows:
-            with self.subTest(value=value), tempfile.TemporaryDirectory() as tmp:
-                path = Path(tmp, "mutation.json")
-                path.write_text(json.dumps(value), encoding="utf-8")
-                err = io.StringIO()
-                with contextlib.redirect_stderr(err):
-                    status = mutants_typescript.judge(str(path), LABEL, "")
-                assert status == 1
-                assert (
-                    err.getvalue() == f"{LABEL}: no readable report at {path}: {why}\n"
-                )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp, "mutation.json")
+            path.write_text(json.dumps(value), encoding="utf-8")
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                status = mutants_typescript.judge(str(path), LABEL, "")
+            assert status == 1
+            assert err.getvalue() == f"{LABEL}: no readable report at {path}: {why}\n"
 
 
-def call(argv: list[str]) -> hermetic.Called:
+def call(argv: list[str], *, capfd: pytest.CaptureFixture[str]) -> tuple[int, str, str]:
     """Call the helper's `main` in this process (#1696).
 
     Returns:
         The status `main` returned and what it wrote to each stream.
 
     """
-    return hermetic.call(lambda: mutants_typescript.main(["--label", LABEL, *argv]))
+    status = mutants_typescript.main(["--label", LABEL, *argv])
+    out, err = capfd.readouterr()
+    return status, out, err
 
 
-@pytest.mark.usefixtures("_stack")
 class TestMain:
     """`config` and `verdict` through main, in this process (#1696)."""
-    
-    @pytest.fixture
-    def _stack(self, request: pytest.FixtureRequest) -> None:
-        """Hold the row's cleanups, undone last first after it ends."""
-        self.stack = contextlib.ExitStack()
-        request.addfinalizer(self.stack.close)
 
-    def write(self, name: str, value: object) -> Path:
-        """Write one JSON document into a scratch directory.
+    def write(self, name: str, value: object, *, tmp_path: Path) -> Path:
+        """Write one JSON document into the row's scratch directory.
 
         Returns:
             Its path.
 
         """
-        tmp = tempfile.TemporaryDirectory()
-        self.stack.callback(tmp.cleanup)
-        path = Path(tmp.name, name)
+        path = tmp_path / name
         path.write_text(json.dumps(value), encoding="utf-8")
         return path
 
-    def test_a_sound_config_passes_silently(self) -> None:
+    def test_a_sound_config_passes_silently(
+        self, capfd: pytest.CaptureFixture[str], tmp_path: Path
+    ) -> None:
         """No refused setting: exit 0, nothing printed."""
-        done = call(["config", str(self.write("stryker.config.json", CONFIG))])
-        assert done == hermetic.Called(0, "", "")
+        status, out, err = call(
+            [
+                "config",
+                str(self.write("stryker.config.json", CONFIG, tmp_path=tmp_path)),
+            ],
+            capfd=capfd,
+        )
+        assert (status, out, err) == (0, "", "")
 
     @pytest.mark.parametrize("setting,message", TestRefusals.ROWS)
     def test_each_refused_setting_is_red_by_name(
-        self, setting: object, message: object
+        self,
+        setting: object,
+        message: object,
+        capfd: pytest.CaptureFixture[str],
+        tmp_path: Path,
     ) -> None:
         """Each Refusals row's setting, named with the site mark."""
-        path = self.write("stryker.config.json", CONFIG | setting)
-        done = call(["config", str(path)])
-        assert done.returncode == 1
+        path = self.write("stryker.config.json", CONFIG | setting, tmp_path=tmp_path)
+        status, out, err = call(["config", str(path)], capfd=capfd)
+        assert status == 1
         want = [
             f"{LABEL}: {path} {message}",
             (f"{LABEL}: record each equivalent mutant at its site instead: {MARK}"),
         ]
-        assert done.stderr.splitlines() == want
+        assert err.splitlines() == want
 
-    def test_incremental_is_refused_as_deferred(self) -> None:
+    def test_incremental_is_refused_as_deferred(
+        self, capfd: pytest.CaptureFixture[str], tmp_path: Path
+    ) -> None:
         """`incremental: true`, with the reason it is deferred."""
-        path = self.write("stryker.config.json", CONFIG | {"incremental": True})
-        done = call(["config", str(path)])
-        assert done.returncode == 1
-        assert done.stderr == (
+        path = self.write(
+            "stryker.config.json", CONFIG | {"incremental": True}, tmp_path=tmp_path
+        )
+        status, out, err = call(["config", str(path)], capfd=capfd)
+        assert status == 1
+        assert err == (
             f"{LABEL}: {path} sets `incremental` — a runner has no earlier results,"
             " so it would read as on and do nothing; the leg runs every mutant every"
             " week (deferred, #1358)\n"
         )
 
-    def test_an_unreadable_config_is_red(self) -> None:
+    def test_an_unreadable_config_is_red(
+        self, capfd: pytest.CaptureFixture[str], tmp_path: Path
+    ) -> None:
         """Not JSON: named, exit 1."""
-        path = self.write("stryker.config.json", 0)
+        path = self.write("stryker.config.json", 0, tmp_path=tmp_path)
         path.write_text("{ mutate: [", encoding="utf-8")
-        done = call(["config", str(path)])
-        assert done.returncode == 1
-        assert done.stderr.startswith(f"{LABEL}: {path} is not readable JSON: "), (
-            done.stderr
-        )
+        status, out, err = call(["config", str(path)], capfd=capfd)
+        assert status == 1
+        assert err.startswith(f"{LABEL}: {path} is not readable JSON: "), err
 
-    def test_a_clean_verdict_writes_its_counts(self) -> None:
+    def test_a_clean_verdict_writes_its_counts(
+        self, capfd: pytest.CaptureFixture[str], tmp_path: Path
+    ) -> None:
         """Killed and timed out: exit 0, the summary line, typescript.tsv."""
-        path = self.write("mutation.json", report(*KILLED))
+        path = self.write("mutation.json", report(*KILLED), tmp_path=tmp_path)
         summary = path.parent / "summary"
-        done = call(["verdict", str(path), "--summary-dir", str(summary)])
-        assert done == hermetic.Called(
+        status, out, err = call(
+            ["verdict", str(path), "--summary-dir", str(summary)], capfd=capfd
+        )
+        assert (status, out, err) == (
             0,
             f"{LABEL}: 2 mutants, 2 killed, 0 survived, 0 not covered,"
             " 0 not viable, 0 excluded\n",
@@ -1061,52 +1102,39 @@ class TestMain:
             encoding="utf-8"
         ) == "0/1\t2\t2\t0\t0\tshard\n"
 
-    def test_a_verdict_writes_the_shard_it_was_given(self) -> None:
+    def test_a_verdict_writes_the_shard_it_was_given(
+        self, capfd: pytest.CaptureFixture[str], tmp_path: Path
+    ) -> None:
         """The row names `--shard`, never a fixed 0/1 (#2153)."""
-        path = self.write("mutation.json", report(*KILLED))
+        path = self.write("mutation.json", report(*KILLED), tmp_path=tmp_path)
         summary = path.parent / "summary"
-        done = call([
-            "verdict",
-            str(path),
-            "--shard",
-            "3/8",
-            "--summary-dir",
-            str(summary),
-        ])
-        assert done.returncode == 0, done.stderr
+        status, out, err = call(
+            [
+                "verdict",
+                str(path),
+                "--shard",
+                "3/8",
+                "--summary-dir",
+                str(summary),
+            ],
+            capfd=capfd,
+        )
+        assert status == 0, err
         assert (summary / "typescript.tsv").read_text(
             encoding="utf-8"
         ) == "3/8\t2\t2\t0\t0\tshard\n"
 
-    def test_a_survivor_is_red_and_writes_its_counts(self) -> None:
+    def test_a_survivor_is_red_and_writes_its_counts(
+        self, capfd: pytest.CaptureFixture[str], tmp_path: Path
+    ) -> None:
         """A survivor is printed by site, and the red tail follows."""
-        path = self.write("mutation.json", report(mutant("Survived", 3)))
-        done = call(["verdict", str(path)])
-        assert done.returncode == 1
+        path = self.write(
+            "mutation.json", report(mutant("Survived", 3)), tmp_path=tmp_path
+        )
+        status, out, err = call(["verdict", str(path)], capfd=capfd)
+        assert status == 1
         assert (
-            done.stdout.splitlines()[0]
+            out.splitlines()[0]
             == f"{LABEL}: survived: src/add.ts:3:54: ArithmeticOperator: a - b"
         )
-        assert done.stderr == RED_TAIL + "\n"
-
-
-class TestScript:
-    """The one row that starts the helper as a process: the script contract."""
-
-    def test_the_helper_runs_as_a_script(self) -> None:
-        """It reads its arguments, judges a sound config and exits 0."""
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp, "stryker.config.json")
-            path.write_text(json.dumps(CONFIG), encoding="utf-8")
-            done = subprocess.run(
-                [
-                    sys.executable,
-                    str(BELT / "mutants_typescript.py"),
-                    "config",
-                    str(path),
-                ],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-        assert (done.returncode, done.stdout, done.stderr) == (0, "", "")
+        assert err == RED_TAIL + "\n"

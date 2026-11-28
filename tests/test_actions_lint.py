@@ -11,8 +11,7 @@ mise/test_workflow_files.py.
 
 The rows that run actionlint use the belt's, so this file runs under the
 belt's tools (`mise run test`, or `mise x --`).
-
-pytest, run by `mise run test`."""
+"""
 
 import subprocess
 import sys
@@ -22,7 +21,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import actions_lint
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -40,7 +39,7 @@ def _task(as_task: Callable[[str], None]) -> None:
 pytestmark = pytest.mark.usefixtures("_task")
 
 
-BELT = hermetic.MISE
+BELT = support.MISE
 CANON_DIR = BELT.parent
 CLEAN = (
     "name: clean\non: push\npermissions: {}\njobs:\n  a:\n"
@@ -92,7 +91,7 @@ class TestActionsLint:
             The finished process.
 
         """
-        base = hermetic.env(
+        base = support.env(
             MISE_TASK_NAME=TASK, ORG_FINDINGS="", ORG_CANON_DIR=str(CANON_DIR)
         )
         return subprocess.run(
@@ -130,7 +129,7 @@ class TestActionsLint:
 
     def test_no_workflow_is_a_usage_error(self) -> None:
         """No file named: exit 2, never a walk of the directory."""
-        done = hermetic.call(lambda: actions_lint.main([]), cwd=self.tree)
+        done = support.call(lambda: actions_lint.main([]), cwd=self.tree)
         assert done.returncode == actions_lint.EXIT_ERROR
         usage: list[str] = ["lint:actions: usage: belt actions-lint WORKFLOW..."]
         assert done.stderr.splitlines() == usage
@@ -152,12 +151,12 @@ class TestActionsLint:
         """Actionlint not found: exit 2, named, never a pass."""
         rel = self.plant(CLEAN)
         missing = str(self.tree / "no-such-actionlint")
-        env = hermetic.env(
+        env = support.env(
             MISE_TASK_NAME=TASK, ORG_FINDINGS="", ORG_CANON_DIR=str(CANON_DIR)
         )
         with pytest.MonkeyPatch.context() as patched:
             patched.setattr(actions_lint, "ACTIONLINT", missing)
-            done = hermetic.call(
+            done = support.call(
                 lambda: actions_lint.main([rel]), env=env, cwd=self.tree
             )
         assert done.returncode == actions_lint.EXIT_ERROR

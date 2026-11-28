@@ -22,8 +22,6 @@ Each stand-in's `run` runs its own share by that contract and records
 it, so a row holds the adapter's report to what the runner ran, and the
 shards' union to the whole suite with nothing twice. The real runners
 are proven in the first consumer's own gate (monumental-archive#523).
-
-pytest, run by `mise run test`.
 """
 
 from __future__ import annotations
@@ -37,12 +35,12 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import decoded, shard, shard_runner
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from tests.hermetic import Called
+    from tests.support import Called
 
 # The stand-ins, one Python script per runner. Each reads its fixture
 # from the environment and writes what its `run` ran to STUB_RAN.
@@ -201,7 +199,7 @@ class TestRunner:
             NUL-separated.
 
         """
-        env = hermetic.env(
+        env = support.env(
             PATH=f"{self.bin}:/usr/bin:/bin",
             ORG_SHARD=spec,
             ORG_SHARD_TASK="test:suite",
@@ -232,7 +230,7 @@ class TestRunner:
                 ran = subprocess.run(
                     argv,
                     cwd=self.base,
-                    env=hermetic.env(
+                    env=support.env(
                         PATH=f"{self.bin}:/usr/bin:/bin",
                         STUB_RAN=str(self.ran),
                         **fixture,

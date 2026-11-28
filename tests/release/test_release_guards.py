@@ -31,8 +31,6 @@ the contract `test_generate_pgrx_upgrade.py` states for #857: every
 `cwd=` is no defence, because `GIT_DIR` is an absolute override git
 obeys wherever it is standing.
 
-pytest, run by `mise run test`.py —
-
 Run through the gate as `mise run test`, which `ci` collects.
 """
 
@@ -45,13 +43,13 @@ from tempfile import TemporaryDirectory
 import pytest
 
 from belt import decoded
-from tests import hermetic
+from tests import support
 import contextlib
 
-CANON = hermetic.CANON
+CANON = support.CANON
 RELEASE = CANON / "release"
 TESTDATA = Path(__file__).resolve().parent / "testdata"
-BASH = hermetic.tool("bash")
+BASH = support.tool("bash")
 
 
 def dumps(value: object) -> str:
@@ -77,9 +75,9 @@ def commit_input(request: Path) -> dict[str, object]:
     return decoded.as_object(variables["input"], "variables.input")
 
 
-GIT = hermetic.optional_tool("git")
-JQ = hermetic.optional_tool("jq")
-STELE = hermetic.optional_tool("stele")
+GIT = support.optional_tool("git")
+JQ = support.optional_tool("jq")
+STELE = support.optional_tool("stele")
 
 
 def _parses(script: str) -> bool:
@@ -144,15 +142,15 @@ IDENTITY_EMAIL = "harness@example.invalid"
 # supplies several of them ambiently — `GITHUB_REPOSITORY`, `GITHUB_SHA`,
 # `RUNNER_TEMP` — as the release job supplies its step inputs
 # (`VERSION`, `PLAN`, `APP_SLUG`). So nothing reaches a fixture by
-# inheritance except what mise/hermetic.py names; every input a row wants is
+# inheritance except what mise/support.py names; every input a row wants is
 # supplied explicitly through `overrides`.
 
 
 def hermetic_env(home: Path, **overrides: str) -> dict[str, str]:
-    """Build a fixture's environment through mise/hermetic.py (#1508, #1514).
+    """Build a fixture's environment through mise/support.py (#1508, #1514).
 
     Returns:
-        hermetic.env for `home`, with this harness's git identity, and
+        support.env for `home`, with this harness's git identity, and
         any overrides applied last.
 
     """
@@ -162,7 +160,7 @@ def hermetic_env(home: Path, **overrides: str) -> dict[str, str]:
         "GIT_COMMITTER_NAME": IDENTITY_NAME,
         "GIT_COMMITTER_EMAIL": IDENTITY_EMAIL,
     }
-    return hermetic.env(home, **(stated | overrides))
+    return support.env(home, **(stated | overrides))
 
 
 def run_script(name: str, root: Path, **env: str) -> subprocess.CompletedProcess[str]:
@@ -543,7 +541,7 @@ class TestHermeticEnvironment:
         """The release job exports its step inputs; no fixture sees them."""
         planted = {"VERSION": "1.69.4", "PLAN": "{}", "APP_SLUG": "canon-release"}
         with pytest.MonkeyPatch.context() as patched, TemporaryDirectory() as d:
-            hermetic.patch_env(patched, planted)
+            support.patch_env(patched, planted)
             env = hermetic_env(Path(d))
         leaked = sorted(set(planted) & set(env))
         assert list[str]() == leaked
@@ -552,7 +550,7 @@ class TestHermeticEnvironment:
         """Overrides are how a row gives a fixture an input."""
         planted = {"VERSION": "1.69.4"}
         with pytest.MonkeyPatch.context() as patched, TemporaryDirectory() as d:
-            hermetic.patch_env(patched, planted)
+            support.patch_env(patched, planted)
             env = hermetic_env(Path(d), VERSION="2.0.0")
         assert env["VERSION"] == "2.0.0"
 
@@ -1289,7 +1287,7 @@ class TestOpenReleasePrHead(
 
         def git(*args: str) -> str:
             return subprocess.run(
-                [hermetic.tool("git"), *args],
+                [support.tool("git"), *args],
                 cwd=repo,
                 env=hermetic_env(home),
                 check=True,
@@ -1471,7 +1469,7 @@ class TestTagReleaseRefusals:
 
         def git(*args: str) -> None:
             subprocess.run(
-                [hermetic.tool("git"), *args],
+                [support.tool("git"), *args],
                 cwd=repo,
                 env=hermetic_env(home),
                 check=True,
@@ -1553,7 +1551,7 @@ class TestTagReleaseRefusals:
                     tag = "v" + line.rsplit("release v", 1)[1].strip()
             assert tag, first.stderr
             subprocess.run(
-                [hermetic.tool("git"), "tag", "-a", tag, "-m", tag],
+                [support.tool("git"), "tag", "-a", tag, "-m", tag],
                 cwd=repo,
                 env=hermetic_env(repo.parent / "home"),
                 check=True,
@@ -1633,7 +1631,7 @@ class TestTagReleasePush:
 
         def git(cwd: Path, *args: str) -> str:
             return subprocess.run(
-                [hermetic.tool("git"), *args],
+                [support.tool("git"), *args],
                 cwd=cwd,
                 env=env,
                 check=True,
@@ -1802,7 +1800,7 @@ class TestTagReleaseUpgradePath:
 
         def git(cwd: Path, *args: str) -> str:
             return subprocess.run(
-                [hermetic.tool("git"), *args],
+                [support.tool("git"), *args],
                 cwd=cwd,
                 env=env,
                 check=True,

@@ -1,6 +1,11 @@
-"""The one environment a test fixture is given (#1508, #1514, #2177).
+"""The suite's utilities, one module (#1508, #1514, #1684, #1714, #2177).
 
-A fixture's process inherits from the suite's only what INHERITED names,
+The rule that holds every test, its process environment cleared and its
+directory held, is tests/conftest.py's hooks. What is here is what a
+test asks for: the environment a process it starts is given, the tools
+it runs, the trees it plants, and a task body run as mise runs it.
+
+THE ENVIRONMENT A STARTED PROCESS IS GIVEN. A fixture's process inherits from the suite's only what INHERITED names,
 plus what a named tool extension in TOOLS adds, then HOME, a git
 identity and the row's own overrides. Nothing else reaches it, so no
 script input arrives from the job the suite happens to run in: the
@@ -9,21 +14,22 @@ inherited it and the canon could not tag (#1508). git's own variables
 are never inherited either (#857): under a hook git exports `GIT_DIR`,
 and a fixture that inherits it writes into the real repository.
 
-    env = hermetic.env(home)                       # a fixture HOME
-    env = hermetic.env(tools=("mise",), FOO="1")   # the caller's HOME
+    env = support.env(home)                       # a fixture HOME
+    env = support.env(tools=("mise",), FOO="1")   # the caller's HOME
 
 An ALLOW-list on purpose. The deny-lists it replaced (drop `GIT_*`,
 drop the forge's and the runner's) kept everything else, and missed
 the next variable a job exported. A row that needs a variable states
 it in its overrides; a tool that needs one gets it in its extension,
-with why. tests/conftest.py clears every test's own process to this
-same environment, unasked; `env()` is for the processes a test starts.
+with why. tests/conftest.py's hooks clear every test's own process to
+this same environment, unasked; `env()` (and the `env` fixture) is for
+the processes a test starts: git, stele, a shell body, a tool.
 
 The files a tree tracks are read here too, through the same
 environment (#1618):
 
-    names = hermetic.tracked(CANON, "*.py")        # relative to CANON
-    hermetic.track(tree)                           # plant, then track it all
+    names = support.tracked(CANON, "*.py")        # relative to CANON
+    support.track(tree)                           # plant, then track it all
 
 A test that lists the canon's own tree calls `tracked`, never `git
 ls-files` itself, so every listing runs under the same environment and
@@ -31,25 +37,25 @@ an empty one is red by name.
 
 A row that runs a belt task's body runs it as mise does (#1934):
 
-    run = hermetic.task_run("lint:dco", body)
-    subprocess.run(run.argv, env=hermetic.env(home) | run.env, ...)
+    run = support.task_run("lint:dco", body)
+    subprocess.run(run.argv, env=support.env(home) | run.env, ...)
 
 A test finds the tools it runs here too (#1684):
 
-    BASH = hermetic.tool("bash")                  # absolute, or raises
-    DASH = hermetic.optional_tool("dash")         # None when absent
+    BASH = support.tool("bash")                  # absolute, or raises
+    DASH = support.optional_tool("dash")         # None when absent
 
 `tool` is for a tool the row needs: a missing one is red by name at the
 lookup, never a `TypeError` in `subprocess` three frames later, and
 never a bare name the child's own PATH resolves to something else.
 `optional_tool` is for a lookup whose absence is a decision the row
 makes: a skip, or a planted "tool missing". No test calls
-`shutil.which` itself; `test_hermetic.py` holds them to that.
+`shutil.which` itself; `test_support.py` holds them to that.
 
 A test calls a helper's `main` in its own process here too (#1673,
 #2177), as a script row once ran it as a child:
 
-    done = hermetic.call(lambda: helper.main(["--flag"]), env=env, cwd=tree)
+    done = support.call(lambda: helper.main(["--flag"]), env=env, cwd=tree)
 
 The environment, working directory, standard input and `sys.argv` a
 child would have had are this process's for the call, then restored, so
@@ -61,8 +67,8 @@ a helper runs under (tests/conftest.py, #1934).
 A test that needs a belt or a canon tree of its own gets the whole one
 (#1714), every tracked file a link, with only what it stubs replaced:
 
-    belt = hermetic.belt(tmp / "tree", stubs={"pgrx-env.sh": STUB})
-    hermetic.canon(work / ".org-canon")
+    belt = support.belt(tmp / "tree", stubs={"pgrx-env.sh": STUB})
+    support.canon(work / ".org-canon")
 
 A belt is planted as the tree it is delivered in: `mise/` and the
 `belt/` package beside it (#2177), so a script that finds the package
@@ -72,12 +78,12 @@ named `belt/<module>.py` replaces a module of the planted package.
 
 A hand-kept list of the files a helper reads goes stale the day it
 gains an import or starts a sibling. No test links or copies a path
-from the belt or the canon itself; `test_hermetic.py` holds them to it.
+from the belt or the canon itself; `test_support.py` holds them to it.
 
 A row that runs a coverage script gets a stand-in compiler (#1877):
 
-    hermetic.rustc(stubs)                          # stubs/rustc
-    hermetic.rustc_verbose("nightly-2026-07-20")   # what it prints
+    support.rustc(stubs)                          # stubs/rustc
+    support.rustc_verbose("nightly-2026-07-20")   # what it prints
 
 Every coverage directory ends in a digest of `rustc -vV`, so the name is
 the row's own fact only if the compiler is: the suite's own, or none on
@@ -247,7 +253,7 @@ def tool(name: str, *, path: str | None = None) -> str:
     if found is None:
         where = "PATH" if path is None else f"the search path {path!r}"
         msg = (
-            f"hermetic.tool: {name} is not on {where};"
+            f"support.tool: {name} is not on {where};"
             " the belt provides it: run mise install"
         )
         raise MissingToolError(msg)
@@ -353,7 +359,7 @@ def tracked(root: Path | str, *pathspecs: str, **overrides: str) -> list[str]:
     """
     git = shutil.which("git")
     if git is None:
-        msg = "hermetic.tracked: git is not on PATH"
+        msg = "support.tracked: git is not on PATH"
         raise RuntimeError(msg)
     listed = subprocess.run(
         [
@@ -373,7 +379,7 @@ def tracked(root: Path | str, *pathspecs: str, **overrides: str) -> list[str]:
     names = [n for n in listed.split("\0") if n]
     if not names:
         msg = (
-            f"hermetic.tracked: git lists no tracked file under {root}"
+            f"support.tracked: git lists no tracked file under {root}"
             f" for {list(pathspecs) or ['(every file)']}"
         )
         raise RuntimeError(msg)
@@ -393,7 +399,7 @@ def track(tree: Path | str) -> None:
     """
     git = shutil.which("git")
     if git is None:
-        msg = "hermetic.track: git is not on PATH"
+        msg = "support.track: git is not on PATH"
         raise RuntimeError(msg)
     for args in (("init", "-q"), ("add", "-A")):
         subprocess.run(
@@ -640,7 +646,7 @@ def belt(dest: Path | str, *, stubs: Mapping[str, str] | None = None) -> Path:
     for the package, to its text) are what the row means to replace; a
     row whose point is a file MISSING removes it after planting.
 
-        belt = hermetic.belt(tmp / "tree", stubs={"pgrx-env.sh": STUB})
+        belt = support.belt(tmp / "tree", stubs={"pgrx-env.sh": STUB})
 
     Returns:
         `dest/mise`, the planted belt directory (ORG_BELT_DIR); `dest`

@@ -24,8 +24,7 @@ exit status: a planted row scored on exit alone can pass for the wrong
 reason (one of the other two requirements tripping instead). The green
 rows plant the canon's real stub and its real gate.yml, so the template
 and the lint cannot drift apart.
-
-pytest, run by `mise run test`.py."""
+"""
 
 import subprocess
 import sys
@@ -36,7 +35,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import decoded, gate_stub_fix
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -54,9 +53,9 @@ def _task(as_task: Callable[[str], None]) -> None:
 pytestmark = pytest.mark.usefixtures("_task")
 
 
-CANON = hermetic.CANON
+CANON = support.CANON
 BELT = CANON / "mise"
-BASH = hermetic.tool("bash")
+BASH = support.tool("bash")
 
 STUB = (CANON / "workflow-templates" / "ci.yml").read_text(encoding="utf-8")
 GATE = (CANON / ".github" / "workflows" / "gate.yml").read_text(encoding="utf-8")
@@ -115,15 +114,15 @@ def run(
         The finished process, stdout and stderr captured as text.
 
     """
-    env = hermetic.env()
+    env = support.env()
     env |= {
         "ORG_BELT_DIR": str(BELT),
         "ORG_CANON_DIR": str(CANON),
         "ORG_PYTHON": sys.executable,
         "ORG_PYTHON_UNSET": "unset",
     }
-    hermetic.track(tree)
-    as_mise = hermetic.task_run(task, script)
+    support.track(tree)
+    as_mise = support.task_run(task, script)
     return subprocess.run(
         as_mise.argv,
         cwd=tree,
@@ -160,7 +159,7 @@ def canon_name() -> str:
     )
     return subprocess.run(
         [BASH, "-euo", "pipefail", "-c", script],
-        env=hermetic.env(ORG_CANON_DIR=str(CANON)),
+        env=support.env(ORG_CANON_DIR=str(CANON)),
         capture_output=True,
         text=True,
         check=True,
@@ -170,7 +169,7 @@ def canon_name() -> str:
 CANON_NAME = canon_name()
 
 
-def fixed(workflow: str) -> tuple[hermetic.Called, str]:
+def fixed(workflow: str) -> tuple[support.Called, str]:
     """Call the fixer in-process on one planted gate caller (#1697).
 
     fix:gate-stub's body hands the helper the canon's name and the
@@ -185,7 +184,7 @@ def fixed(workflow: str) -> tuple[hermetic.Called, str]:
         flows.mkdir(parents=True)
         caller = flows / "gate.yml"
         caller.write_text(workflow, encoding="utf-8")
-        done = hermetic.call(
+        done = support.call(
             lambda: gate_stub_fix.main([CANON_NAME, ".github/workflows/gate.yml"]),
             cwd=tmp,
         )
@@ -210,7 +209,7 @@ def started(workflow: str) -> tuple[subprocess.CompletedProcess[str], str]:
                 *(CANON_NAME, ".github/workflows/gate.yml"),
             ],
             cwd=tmp,
-            env=hermetic.env(),
+            env=support.env(),
             capture_output=True,
             text=True,
             check=False,

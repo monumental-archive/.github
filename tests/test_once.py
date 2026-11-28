@@ -3,8 +3,7 @@
 Each row runs the helper as `measured` does, as a process, with a
 command that appends a line to the row's log, and asserts what the log
 and the marker hold afterwards.
-
-pytest, run by `mise run test`.py;"""
+"""
 
 import subprocess
 import sys
@@ -14,13 +13,13 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import once
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-ONCE = hermetic.MISE / "once.py"
-SH = hermetic.tool("sh")
+ONCE = support.MISE / "once.py"
+SH = support.tool("sh")
 # The task whose call the rows stand in for (#1934).
 TASK = "test"
 
@@ -64,7 +63,7 @@ class TestOnce:
         """
         return subprocess.Popen(
             [sys.executable, str(ONCE), str(self.marker), "--", SH, "-c", line],
-            env=hermetic.env(LOG=str(self.log)),
+            env=support.env(LOG=str(self.log)),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,

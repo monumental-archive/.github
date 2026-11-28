@@ -27,8 +27,7 @@ config, over the stub in a planted, tracked tree: the quoted report is
 its two records and pinact's 3, an empty one no record and 0. Run
 against `origin/main`'s config, the record row fails: that body ran
 pinact in its human mode and recorded nothing.
-
-pytest, run by `mise run test`."""
+"""
 
 import json
 import os
@@ -39,12 +38,12 @@ from pathlib import Path
 import pytest
 
 from belt import decoded
-from tests import hermetic
+from tests import support
 
-HERE = hermetic.MISE
+HERE = support.MISE
 ADAPTER = HERE / "pinact_findings.py"
 TASK = "audit:action-pins"
-GIT = hermetic.tool("git")
+GIT = support.tool("git")
 WORKFLOW = ".github/workflows/a.yml"
 LIED = "8ade135a41bc03ea155e62e844d188df1ea18608"
 FIXED = "11d5960a326750d5838078e36cf38b85af677262"
@@ -234,7 +233,7 @@ class TestStubbed:
 
         """
         self.doc.write_text(document, encoding="utf-8")
-        return hermetic.env(
+        return support.env(
             PATH=path or f"{self.bin}{os.pathsep}{os.environ['PATH']}",
             ORG_FINDINGS=str(self.file),
             MISE_TASK_NAME=TASK,
@@ -388,7 +387,7 @@ class TestAdapter(TestStubbed):
 
         One rule, one text, one file: two records with two messages.
         """
-        if hermetic.optional_tool("pinact") is None:
+        if support.optional_tool("pinact") is None:
             pytest.skip("the belt's pinact is not on PATH")
         (self.dir / WORKFLOW).write_text(
             "on: push\njobs:\n  a:\n    runs-on: ubuntu-24.04\n    steps:\n"
@@ -401,7 +400,7 @@ class TestAdapter(TestStubbed):
             capture_output=True,
             text=True,
             encoding="utf-8",
-            env=hermetic.env(
+            env=support.env(
                 ORG_FINDINGS=str(self.file), MISE_TASK_NAME=TASK, PYTHONUTF8="1"
             ),
             cwd=self.dir,
@@ -442,12 +441,12 @@ class TestTask(TestStubbed):
         (root / ".github" / "workflows").mkdir(parents=True)
         (root / WORKFLOW).write_text(SOURCE, encoding="utf-8")
         git = [GIT, "-C", str(root)]
-        subprocess.run([*git, "init", "-q"], env=hermetic.env(), check=True)
-        subprocess.run([*git, "add", "-A"], env=hermetic.env(), check=True)
+        subprocess.run([*git, "init", "-q"], env=support.env(), check=True)
+        subprocess.run([*git, "add", "-A"], env=support.env(), check=True)
         config = decoded.load_toml((HERE / "config.toml").read_bytes())
         tasks = decoded.as_object(config["tasks"], "tasks")
         body = decoded.as_str(decoded.as_object(tasks[TASK], TASK)["run"], "run")
-        run = hermetic.task_run(TASK, body)
+        run = support.task_run(TASK, body)
         return subprocess.run(
             run.argv,
             capture_output=True,

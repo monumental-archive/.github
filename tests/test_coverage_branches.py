@@ -14,8 +14,7 @@ toolchain it ran under, so a row can assert which flags reached it.
 
 Each row asserts the message, not just the exit status: a planted row
 scored on exit alone can pass for the wrong reason.
-
-pytest, run by `mise run test`.py."""
+"""
 
 import os
 import shutil
@@ -29,20 +28,20 @@ import pytest
 
 from belt import coverage_floor as cf
 from belt import decoded, gate_cache_key
-from tests import hermetic
+from tests import support
 import contextlib
 
-CANON = hermetic.CANON
+CANON = support.CANON
 BELT = CANON / "mise"
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
+BASH = support.tool("bash")
+GIT = support.tool("git")
 
 NIGHTLY = "nightly-2026-07-20"
 
 # The directory digests of the stand-in `rustc` (#1877): the stable
 # leg's, with no RUSTUP_TOOLCHAIN, and the declared nightly's.
-STABLE = gate_cache_key.directory_digest(hermetic.rustc_verbose("stable"))
-NIGHTLY_DIR = gate_cache_key.directory_digest(hermetic.rustc_verbose(NIGHTLY))
+STABLE = gate_cache_key.directory_digest(support.rustc_verbose("stable"))
+NIGHTLY_DIR = gate_cache_key.directory_digest(support.rustc_verbose(NIGHTLY))
 
 BRANCH_RUN = f"{NIGHTLY} llvm-cov --workspace --locked --branch --json --summary-only"
 SKIP = "audit:coverage-branches: no rust-branches line in .coverage-floor, skipped\n"
@@ -170,7 +169,7 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
     for name, text in (("cargo", CARGO), ("rustup", RUSTUP)):
         (stubs / name).write_text(text, encoding="utf-8")
         (stubs / name).chmod(0o755)
-    hermetic.rustc(stubs)
+    support.rustc(stubs)
     log = tmp / "llvm-cov.log"
     log.touch()
     (tmp / "llvm-cov.log.target").touch()
@@ -197,7 +196,7 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
 
     # The stubs stand in for the Rust toolchain, so rustup's own selection
     # is left out of the fixture as well (#1514: the rest is hermetic).
-    env = {k: v for k, v in hermetic.env().items() if not k.startswith("RUSTUP_")}
+    env = {k: v for k, v in support.env().items() if not k.startswith("RUSTUP_")}
     env |= {
         "ORG_BELT_DIR": str(BELT),
         "PATH": f"{stubs}{os.pathsep}{env.get('PATH', '')}",
@@ -216,7 +215,7 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
     subprocess.run([GIT, "init", "-q"], cwd=tree, env=env, check=True)
     if tracked:
         subprocess.run([GIT, "add", *tracked], cwd=tree, env=env, check=True)
-    as_mise = hermetic.task_run(task, measuring_step(task))
+    as_mise = support.task_run(task, measuring_step(task))
     done = subprocess.run(
         as_mise.argv,
         cwd=tree,
@@ -472,7 +471,7 @@ class TestDirectories(TestBranchCase):
         On main the nightly leg measured into `target/llvm-cov-target`,
         the directory planted full here.
         """
-        other = gate_cache_key.directory_digest(hermetic.rustc_verbose("1.97.1"))
+        other = gate_cache_key.directory_digest(support.rustc_verbose("1.97.1"))
         done, tree, _ = self.run_task("audit:coverage-branches", plant_old=other)
         assert done.returncode == 0, done.stderr
         target = tree.resolve() / "target"

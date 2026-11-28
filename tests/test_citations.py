@@ -5,8 +5,7 @@ message it printed is asserted here, word for word. The live org is a
 stand-in (`Org`): the rows read no network. Each row plants a canon-
 shaped repository whose docs/ git tracks, because the helper reads
 docs/ from git (#2013): an untracked docs/ is a missing one.
-
-pytest, run by `mise run test`.py;"""
+"""
 
 import contextlib
 import io
@@ -19,15 +18,15 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import citations, decoded
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
 TASK = "audit:citations"
 OWNER = "monumental-archive"
-BELT = hermetic.MISE
-GIT = hermetic.tool("git")
+BELT = support.MISE
+GIT = support.tool("git")
 TAIL = (
     "  a citation is a claim about the record — correct the document\n"
     "  or the record, never leave them disagreeing (#349 finding 2)\n"
@@ -85,7 +84,7 @@ class Org:
 
 def plant(tree: Path, files: dict[str, str]) -> None:
     """Make `tree` a repository tracking `files`."""
-    env = hermetic.env(tree.parent / "home")
+    env = support.env(tree.parent / "home")
     for name, text in files.items():
         path = tree / name
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -115,7 +114,7 @@ def audit(
             contextlib.redirect_stdout(out),
             contextlib.redirect_stderr(err),
         ):
-            hermetic.patch_env(patched, named)
+            support.patch_env(patched, named)
             status = citations.main(org, tree)
         return status, out.getvalue(), err.getvalue()
 
@@ -156,7 +155,7 @@ class TestInputs:
     def test_no_gh_is_red(self) -> None:
         """With no network stand-in and no gh on PATH: `gh missing`."""
         with pytest.MonkeyPatch.context() as patched:
-            patched.setattr("shutil.which", hermetic.returning(None))
+            patched.setattr("shutil.which", support.returning(None))
             status, _, err = audit(DOC, None)
         assert (1, f"{TASK}: gh missing\n") == (status, err)
 
@@ -263,8 +262,8 @@ def run_body(files: dict[str, str]) -> subprocess.CompletedProcess[str]:
         tree = Path(tmp) / "repo"
         tree.mkdir()
         plant(tree, files)
-        as_mise = hermetic.task_run(TASK, body)
-        env = hermetic.env(Path(tmp) / "home", ORG_BELT_DIR=str(BELT))
+        as_mise = support.task_run(TASK, body)
+        env = support.env(Path(tmp) / "home", ORG_BELT_DIR=str(BELT))
         return subprocess.run(
             as_mise.argv,
             cwd=tree,

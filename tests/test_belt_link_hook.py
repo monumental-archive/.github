@@ -15,8 +15,7 @@ Rows run the real lefthook, where it is installed: the command
 survives lefthook's own templating, and pre-commit, commit-msg and
 pre-push each relink a nested worktree to its own pin before mise runs,
 and stop when the link fails (#1988).
-
-pytest, run by `mise run test`.py."""
+"""
 
 from __future__ import annotations
 
@@ -28,11 +27,11 @@ from pathlib import Path
 
 import pytest
 
-from tests import hermetic
+from tests import support
 
-CANON = hermetic.CANON
+CANON = support.CANON
 HOOKS = CANON / "lefthook" / "org-hooks.yml"
-LEFTHOOK = hermetic.optional_tool("lefthook")
+LEFTHOOK = support.optional_tool("lefthook")
 # What the hook adds to .git/info/exclude, and the names it leaves there.
 EXCLUDED = [".config/mise/"]
 LINK_NAMES = ["belt.toml", "conf.d", "mise.lock"]
@@ -141,7 +140,7 @@ class TestHookFixture:
             The environment.
 
         """
-        return hermetic.env(
+        return support.env(
             self.home,
             XDG_CACHE_HOME=str(self.cache),
             MISE_CONFIG_DIR=str(self.tmp / "mise-config"),
@@ -161,7 +160,7 @@ class TestHookFixture:
             The run.
 
         """
-        return run([hermetic.tool("git"), *args], cwd, self.env(), check=True)
+        return run([support.tool("git"), *args], cwd, self.env(), check=True)
 
     def pin(
         self, sha: str, tree: Path | None = None, *, name: str = "gate.yml"
@@ -190,7 +189,7 @@ class TestHookFixture:
 
         """
         return run(
-            [hermetic.tool("sh"), "-c", hook_command()],
+            [support.tool("sh"), "-c", hook_command()],
             self.consumer,
             self.env(**extra),
         )
@@ -364,7 +363,7 @@ class TestTheCacheAndTheLinks(TestHookFixture):
         """A `<link>.<pid>` whose hook is gone is removed by the next run."""
         assert self.hook().returncode == 0
         conf = self.consumer / ".config" / "mise"
-        sh = hermetic.tool("sh")
+        sh = support.tool("sh")
         gone = run([sh, "-c", "echo $$"], self.tmp, self.env()).stdout.strip()
         for rel in ("conf.d/belt.toml", "mise.lock"):
             (conf / f"{rel}.{gone}").symlink_to(conf / rel)
@@ -406,7 +405,7 @@ class TestTheCacheAndTheLinks(TestHookFixture):
         stubs = self.tmp / "stubs"
         stubs.mkdir()
         (stubs / "git").write_text(
-            WRONG_FETCH.replace("{git}", hermetic.tool("git")), encoding="utf-8"
+            WRONG_FETCH.replace("{git}", support.tool("git")), encoding="utf-8"
         )
         (stubs / "git").chmod(0o755)
         done = self.hook(PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}")
@@ -437,7 +436,7 @@ class TestTheCloneStaysItsOwn(TestHookFixture):
         assert self.hook().returncode == 0
         worktree = self.tmp / "worktree"
         self.git(self.consumer, "worktree", "add", "-q", "-b", "side", str(worktree))
-        done = run([hermetic.tool("sh"), "-c", hook_command()], worktree, self.env())
+        done = run([support.tool("sh"), "-c", hook_command()], worktree, self.env())
         assert done.returncode == 0, done.stderr
         assert (worktree / ".config/mise/conf.d/belt.toml").is_symlink()
         assert self.git(worktree, "status", "--porcelain").stdout == ""
@@ -476,7 +475,7 @@ class TestTheCloneStaysItsOwn(TestHookFixture):
         (self.consumer / "lefthook.yml").write_text(
             HOOKS.read_text(encoding="utf-8"), encoding="utf-8"
         )
-        argv = [hermetic.tool("lefthook"), "run", "post-checkout"]
+        argv = [support.tool("lefthook"), "run", "post-checkout"]
         done = run(argv, self.consumer, self.env())
         assert done.returncode == 0, done.stdout + done.stderr
         assert (
@@ -546,7 +545,7 @@ class TestEveryHookLinksFirst(TestHookFixture):
             The run.
 
         """
-        argv = [hermetic.tool("lefthook"), "run", "--no-auto-install", *args]
+        argv = [support.tool("lefthook"), "run", "--no-auto-install", *args]
         return run(argv, self.tree, self.env(ORG_MARK=str(self.mark)))
 
     def marks(self) -> list[str]:
@@ -567,7 +566,7 @@ class TestEveryHookLinksFirst(TestHookFixture):
             The task names.
 
         """
-        argv = [hermetic.tool("mise"), "tasks", "ls", "--name-only"]
+        argv = [support.tool("mise"), "tasks", "ls", "--name-only"]
         ceiling = str(self.tree.parent)
         done = run(argv, self.tree, self.env(MISE_CEILING_PATHS=ceiling))
         assert done.returncode == 0, done.stderr

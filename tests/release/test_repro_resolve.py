@@ -6,8 +6,7 @@ stub `gh` first on PATH answering from the row's fixtures, and read
 back what it wrote to `GITHUB_OUTPUT`. Every refusal row asserts the
 step's message. One row starts the helper as the step does instead:
 the script contract (it starts, and exits with gh's message).
-
-pytest, run by `mise run test`."""
+"""
 
 from __future__ import annotations
 
@@ -20,7 +19,7 @@ from pathlib import Path
 import pytest
 
 from belt.release import repro_resolve
-from tests import hermetic
+from tests import support
 
 
 @pytest.fixture
@@ -49,7 +48,7 @@ def dumps(value: object) -> str:
     return json.dumps(value)
 
 
-HELPER = hermetic.RELEASE / "repro_resolve.py"
+HELPER = support.RELEASE / "repro_resolve.py"
 STUB_GH = """#!/usr/bin/env bash
 case "$1 $2" in
   "release view") echo "${STUB_TAG}" ;;
@@ -102,7 +101,7 @@ class TestReadTheLatestRelease:
         checksums: str | None = CHECKSUMS,
         manifest: str | None = None,
         script: bool = False,
-    ) -> tuple[subprocess.CompletedProcess[str] | hermetic.Called, str]:
+    ) -> tuple[subprocess.CompletedProcess[str] | support.Called, str]:
         """Run the helper against a latest release in the given state.
 
         In this process unless `script`, which starts it as the step does.
@@ -119,7 +118,7 @@ class TestReadTheLatestRelease:
             )
         output = self.tmp / "github-output"
         output.write_text("", encoding="utf-8")
-        env = hermetic.env(
+        env = support.env(
             PATH=f"{self.bindir}{os.pathsep}{os.environ['PATH']}",
             HOME=str(self.tmp),
             STUB_TAG=tag,
@@ -127,7 +126,7 @@ class TestReadTheLatestRelease:
             GITHUB_REPOSITORY="example/project",
             GITHUB_OUTPUT=str(output),
         )
-        done: subprocess.CompletedProcess[str] | hermetic.Called
+        done: subprocess.CompletedProcess[str] | support.Called
         if script:
             done = subprocess.run(
                 [sys.executable, str(HELPER)],
@@ -143,7 +142,7 @@ class TestReadTheLatestRelease:
             def call() -> int:
                 return repro_resolve.main([])
 
-            done = hermetic.call(call, env=env, cwd=self.work)
+            done = support.call(call, env=env, cwd=self.work)
         return done, output.read_text(encoding="utf-8")
 
     def test_typed_release_hands_its_manifest_on(self) -> None:

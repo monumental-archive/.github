@@ -13,8 +13,7 @@ in a planted git tree, with the belt as ORG_BELT_DIR and this
 repository as ORG_CANON_DIR, so the identity it reads is the real one.
 The `Branches` rows call mise/signer_pin.py's `main` in this process,
 one per branch, each message asserted whole (#1911).
-
-pytest, run by `mise run test`.py;"""
+"""
 
 import subprocess
 import sys
@@ -25,15 +24,15 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import decoded, signer_pin
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-BELT = hermetic.MISE
+BELT = support.MISE
 CANON = BELT.parent
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
+BASH = support.tool("bash")
+GIT = support.tool("git")
 SHA = "0123456789abcdef0123456789abcdef01234567"
 OTHER = "fedcba9876543210fedcba9876543210fedcba98"
 TASK = "lint:signer-pin"
@@ -94,7 +93,7 @@ def lint(files: dict[str, str]) -> subprocess.CompletedProcess[str]:
         root = Path(tmp)
         tree = root / "repo"
         tree.mkdir()
-        env = hermetic.env(
+        env = support.env(
             root / "home",
             ORG_BELT_DIR=str(BELT),
             ORG_CANON_DIR=str(CANON),
@@ -106,7 +105,7 @@ def lint(files: dict[str, str]) -> subprocess.CompletedProcess[str]:
             path.write_text(text, encoding="utf-8")
         subprocess.run([GIT, "init", "-q"], cwd=tree, env=env, check=True)
         subprocess.run([GIT, "add", "--", *files], cwd=tree, env=env, check=True)
-        as_mise = hermetic.task_run("lint:signer-pin", body())
+        as_mise = support.task_run("lint:signer-pin", body())
         return subprocess.run(
             as_mise.argv,
             cwd=tree,
@@ -183,7 +182,7 @@ class TestBranches:
     def _set_up_test_branches(self, tmp_path: Path) -> None:
         """Plant an empty repository: the pin is asked of git (#2013)."""
         self.tree = tmp_path
-        self.env = hermetic.env(MISE_TASK_NAME=TASK)
+        self.env = support.env(MISE_TASK_NAME=TASK)
         self.git("init", "-q")
 
     def git(self, *args: str) -> None:
@@ -207,7 +206,7 @@ class TestBranches:
             self.git("add", "--", name)
         return name
 
-    def helper(self, *argv: str) -> hermetic.Called:
+    def helper(self, *argv: str) -> support.Called:
         """Call the helper's main in the planted tree.
 
         Returns:
@@ -215,9 +214,9 @@ class TestBranches:
 
         """
         args = list(argv)
-        return hermetic.call(lambda: signer_pin.main(args), env=self.env, cwd=self.tree)
+        return support.call(lambda: signer_pin.main(args), env=self.env, cwd=self.tree)
 
-    def check(self, *files: str) -> hermetic.Called:
+    def check(self, *files: str) -> support.Called:
         """Call the helper on these workflows with the real signer.
 
         Returns:

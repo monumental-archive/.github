@@ -13,8 +13,7 @@ stub `go` first on PATH. The stub answers `list` with the row's main
 packages, one per line, and `build -o OUT PKG` by writing OUT. One row
 starts the helper by its path in this tree instead: the script
 contract (it starts, and exits with go's own status and message).
-
-pytest, run by `mise run test`. Every git call"""
+"""
 
 import os
 import subprocess
@@ -27,9 +26,9 @@ import pytest
 
 from belt import workflow_yaml
 from belt.release import build_go_commands
-from tests import hermetic
+from tests import support
 
-CANON = hermetic.CANON
+CANON = support.CANON
 WORKFLOW = CANON / ".github" / "workflows" / "build-go-binary.yml"
 HELPER = CANON / "release" / "build_go_commands.py"
 TEMPLATE = '{{if eq .Name "main"}}{{.ImportPath}}{{end}}'
@@ -96,13 +95,13 @@ def run_helper(mains: str, broken: str = "", *, script: bool = False) -> Run:
         (stubs / "go").write_text(GO_STUB)
         (stubs / "go").chmod(0o755)
         log = tmp / "go.log"
-        env = hermetic.env(
+        env = support.env(
             PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}",
             STUB_LOG=str(log),
             STUB_MAINS=mains,
             STUB_BROKEN=broken,
         )
-        result: subprocess.CompletedProcess[str] | hermetic.Called
+        result: subprocess.CompletedProcess[str] | support.Called
         if script:
             result = subprocess.run(
                 [str(HELPER)],
@@ -117,7 +116,7 @@ def run_helper(mains: str, broken: str = "", *, script: bool = False) -> Run:
             def call() -> int:
                 return build_go_commands.main([])
 
-            result = hermetic.call(call, env=env, cwd=work)
+            result = support.call(call, env=env, cwd=work)
         staged = work / "staged"
         return Run(
             result.returncode,

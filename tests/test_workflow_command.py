@@ -11,9 +11,8 @@ other than the module holds a string that begins any workflow command:
 literal head of an f-string). No list of names: the next one is
 refused too. Test and property files are exempt: they hold the commands
 they expect to read. The files are the tree's tracked ones, listed
-through hermetic.tracked (#1618).
-
-pytest, run by `mise run test`."""
+through support.tracked (#1618).
+"""
 
 import ast
 import io
@@ -27,7 +26,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import workflow_command
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -35,7 +34,7 @@ if TYPE_CHECKING:
 
 from belt.release import pgrx_images
 
-CANON = hermetic.CANON
+CANON = support.CANON
 # Any workflow command: `::` and a command name, then `::` or the space
 # before properties. A name not yet used is refused without a list.
 COMMAND = re.compile(r"::[A-Za-z][A-Za-z0-9_-]*(::| )")
@@ -100,7 +99,7 @@ def python_files(root: Path) -> list[Path]:
     """
     return [
         Path(name)
-        for name in hermetic.tracked(root, "*.py")
+        for name in support.tracked(root, "*.py")
         if not Path(name).name.startswith(("test_", "prop_"))
         and not SKIP.intersection(Path(name).parts)
     ]
@@ -212,7 +211,7 @@ class TestAHelperQuotingOutsideText:
                 redirect_stdout(io.StringIO()),
                 redirect_stderr(err),
             ):
-                hermetic.name_task(patched, "")
+                support.name_task(patched, "")
                 patched.setattr(sys, "argv", ["pgrx_images.py"])
                 code = pgrx_images.main([
                     "base-image",

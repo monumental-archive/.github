@@ -11,8 +11,7 @@ task's own body, read from mise/config.toml: the skip when there are no
 templates, and a clean pin end to end; the rest call the helper's
 `main` in this process, in the planted tree, at a `now` of the row's.
 
-GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. pytest, run by
-`mise run test`.
+GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom.
 """
 
 import shutil
@@ -24,7 +23,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import decoded, template_drift
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -42,9 +41,9 @@ def _task(as_task: Callable[[str], None]) -> None:
 pytestmark = pytest.mark.usefixtures("_task")
 
 
-BELT = hermetic.MISE
+BELT = support.MISE
 CANON_DIR = BELT.parent
-GIT = hermetic.tool("git")
+GIT = support.tool("git")
 CANON = "monumental-archive/.github"
 REUSABLE = f"{CANON}/.github/workflows/ci.yml"
 STUB = "workflow-templates/ci.yml"
@@ -112,7 +111,7 @@ class TestPlanted:
     def _set_up_test_planted(self, tmp_path: Path) -> None:
         """Plant a tree whose first commit, day 0, touches mise/."""
         self.tree = tmp_path
-        self.env = hermetic.env(
+        self.env = support.env(
             MISE_TASK_NAME=TASK,
             ORG_BELT_DIR=str(BELT),
             ORG_CANON_DIR=str(CANON_DIR),
@@ -174,7 +173,7 @@ class TestPlanted:
         self.git("add", "--", STUB)
         return STUB
 
-    def helper(self, *argv: str, now: int = T0) -> hermetic.Called:
+    def helper(self, *argv: str, now: int = T0) -> support.Called:
         """Call the helper's main in the planted tree at a given time.
 
         Returns:
@@ -182,7 +181,7 @@ class TestPlanted:
 
         """
         args = list(argv)
-        return hermetic.call(
+        return support.call(
             lambda: template_drift.main(args, now), env=self.env, cwd=self.tree
         )
 
@@ -193,7 +192,7 @@ class TestPlanted:
             The finished process.
 
         """
-        as_mise = hermetic.task_run(TASK, body())
+        as_mise = support.task_run(TASK, body())
         return subprocess.run(
             as_mise.argv,
             cwd=self.tree,

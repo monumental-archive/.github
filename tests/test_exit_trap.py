@@ -12,8 +12,7 @@ name; bash 5 never had the defect, so there is nothing for them to show
 there. The POSIX rows run the printed guard in a `#!/bin/sh` script
 under `/bin/sh` and under `dash`, each against its own measured table,
 and skip by name where that shell is absent or is neither.
-
-pytest, run by `mise run test`. Every git call"""
+"""
 
 import io
 import re
@@ -26,7 +25,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import exit_trap as et
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -46,7 +45,7 @@ pytestmark = pytest.mark.usefixtures("_task")
 
 BASH = Path("/bin/bash")
 SH = Path("/bin/sh")
-DASH = hermetic.optional_tool("dash")
+DASH = support.optional_tool("dash")
 GUARDED = et.GUARD.format(cleanup='rm -f "${tmp}"')
 BASH_GUARDED = et.BASH_GUARD.format(cleanup='rm -f "${tmp}"')
 BARE = "trap 'rm -f \"${tmp}\"' EXIT"
@@ -410,7 +409,7 @@ class TestPosix:
         """Under dash the guard runs: a clean run exits 0, no `[[: not found`."""
         if not DASH:
             pytest.skip("dash is not installed")
-        assert run_sh(hermetic.tool("dash"), body) == as_dash
+        assert run_sh(support.tool("dash"), body) == as_dash
 
 
 class TestShape:

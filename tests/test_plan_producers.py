@@ -14,8 +14,7 @@ the gate.
 Mutation-checked: each planted row was run against a helper with the
 corresponding check removed and observed to pass, which is the failure it
 is written to catch.
-
-pytest, run by `mise run test`."""
+"""
 
 import io
 import json
@@ -28,7 +27,7 @@ import pytest
 
 from belt import decoded
 from belt import plan_producers as pp
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -46,7 +45,7 @@ def _task(as_task: Callable[[str], None]) -> None:
 pytestmark = pytest.mark.usefixtures("_task")
 
 
-REPO = hermetic.CANON
+REPO = support.CANON
 POLICY = REPO / "slsa" / "assert-policy.json"
 WORKFLOWS = REPO / ".github" / "workflows"
 

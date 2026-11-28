@@ -11,8 +11,7 @@ as ORG_BELT_DIR, on a one-line commit message, and committed runs for
 real. The types are read from the `groups` convention in
 release/prepare-release.sh, the one statement of what the notes map, so
 a type added there and not here goes red by name.
-
-pytest, run by `mise run test`.py;"""
+"""
 
 import re
 import subprocess
@@ -21,11 +20,11 @@ from pathlib import Path
 
 import pytest
 
-from tests import hermetic
+from tests import support
 
-BELT = hermetic.MISE
+BELT = support.MISE
 PREPARE = BELT.parent / "release" / "prepare-release.sh"
-BASH = hermetic.tool("bash")
+BASH = support.tool("bash")
 
 
 def mapped_types() -> list[str]:
@@ -62,7 +61,7 @@ def check(subject: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [BASH, str(BELT / "committed.sh"), "--commit-file", str(message)],
             cwd=tmp,
-            env=hermetic.env(ORG_BELT_DIR=str(BELT)),
+            env=support.env(ORG_BELT_DIR=str(BELT)),
             capture_output=True,
             text=True,
             check=False,

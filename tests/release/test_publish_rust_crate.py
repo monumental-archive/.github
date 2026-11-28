@@ -47,8 +47,7 @@ nothing else is edited. `cargo package --no-verify --locked -p
 edtf-core` on a fresh checkout of the v1.3.3 tag reproduced the
 index's checksum exactly - the comparison the step makes is one a
 genuine resume passes.
-
-pytest, run by `mise run test`. Every git call"""
+"""
 
 import hashlib
 import io
@@ -67,12 +66,12 @@ import pytest
 
 from belt import decoded, findings
 from belt.release import publish_crates
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-CANON = hermetic.CANON
+CANON = support.CANON
 TESTDATA = Path(__file__).resolve().parent / "testdata"
 INDEX = TESTDATA / "crates-index"
 CRATE = TESTDATA / "edtf-core-1.3.3.crate"
@@ -242,7 +241,7 @@ def run_publish(
         (crates / "edtf-core-1.3.3.crate").write_bytes(
             CRATE.read_bytes() if crate is None else crate
         )
-        env = hermetic.env(
+        env = support.env(
             PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}",
             EXCLUDE_FLAGS=OLD_CALLER_EXCLUDES,
             ORG_USER_AGENT=USER_AGENT,
@@ -536,7 +535,7 @@ class TestPublishMintsItsOwnToken:
             pytest.MonkeyPatch.context() as patched,
             pytest.raises(publish_crates.RefusalError) as caught,
         ):
-            patched.setattr(urllib.request, "urlopen", hermetic.returning(None))
+            patched.setattr(urllib.request, "urlopen", support.returning(None))
             publish_crates.http("GET", url, {})
         assert f"{url} answered NoneType, not an HTTP response" == str(caught.value)
 
@@ -591,6 +590,6 @@ class TestMain:
     def test_success_is_run_s_exit(self) -> None:
         """Without a failure, main returns what run returned."""
         with pytest.MonkeyPatch.context() as patched:
-            patched.setattr(publish_crates, "run", hermetic.returning(0))
+            patched.setattr(publish_crates, "run", support.returning(0))
             patched.setattr(sys, "stdout", io.StringIO())
             assert publish_crates.main([]) == 0

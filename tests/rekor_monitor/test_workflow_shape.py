@@ -22,9 +22,9 @@ from pathlib import Path
 import pytest
 
 from belt import decoded, workflow_yaml
-from tests import hermetic
+from tests import support
 
-WORKFLOW = hermetic.CANON / ".github" / "workflows" / "rekor-monitor.yml"
+WORKFLOW = support.CANON / ".github" / "workflows" / "rekor-monitor.yml"
 
 RUN = "${{ github.run_id }}-${{ github.run_attempt }}"
 LEG_KEY = f"ct-watch-{RUN}-${{{{ matrix.leg }}}}"

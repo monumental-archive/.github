@@ -58,7 +58,7 @@ class TestScrubbed:
     def test_every_git_name_and_nothing_else(self, environ: dict[str, str]) -> None:
         """GIT_* gone; the rest kept as they were."""
         with pytest.MonkeyPatch.context() as patched:
-            hermetic.patch_env(patched, environ, clear=True)
+            support.patch_env(patched, environ, clear=True)
             got = gd.scrubbed()
         kept = {k: v for k, v in environ.items() if not k.startswith("GIT_")}
         assert got == kept

@@ -112,8 +112,8 @@ def run(stdout: str) -> tuple[int, str]:
         contextlib.redirect_stdout(out),
         contextlib.redirect_stderr(io.StringIO()),
     ):
-        patched.setattr(zs, "run_zizmor", hermetic.returning(ran))
-        hermetic.patch_env(patched, env)
+        patched.setattr(zs, "run_zizmor", support.returning(ran))
+        support.patch_env(patched, env)
         status = zs.main(["--signer-workflow", WORKFLOW])
     return status, out.getvalue()
 

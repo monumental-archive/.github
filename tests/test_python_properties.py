@@ -16,8 +16,6 @@ an interpreter with nothing installed.
 
 Each row asserts the message, not just the exit status: a planted row
 scored on exit alone can pass for the wrong reason.
-
-pytest, run by `mise run test`, which `ci` collects.
 """
 
 import os
@@ -29,14 +27,14 @@ from pathlib import Path
 import pytest
 
 from belt import decoded, shard, workflow_yaml
-from tests import hermetic
+from tests import support
 import contextlib
 
-CANON = hermetic.CANON
+CANON = support.CANON
 BELT = CANON / "mise"
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
-PYTHON = hermetic.tool("python3")
+BASH = support.tool("bash")
+GIT = support.tool("git")
+PYTHON = support.tool("python3")
 
 CONFIG = decoded.load_toml((BELT / "config.toml").read_text(encoding="utf-8"))
 TASKS = decoded.as_object(CONFIG["tasks"], "the belt's [tasks]")
@@ -55,7 +53,7 @@ def task_run(name: str) -> str:
 
 GATE = task_run("test:python-properties")
 AUDIT = task_run("audit:python-properties")
-# Each body's task name, for the run that hands it to hermetic.task_run.
+# Each body's task name, for the run that hands it to support.task_run.
 NAMES = {GATE: "test:python-properties", AUDIT: "audit:python-properties"}
 
 HOLDS = """\
@@ -118,7 +116,7 @@ echo "3.0.0 (stub interpreter)"
 # REAL repository's index instead of the planted one. Measured here:
 # the first push of this file staged the deletion of every tracked file.
 _GIT_ENV = {
-    **hermetic.env(),
+    **support.env(),
     "GIT_CONFIG_GLOBAL": os.devnull,
     "GIT_CONFIG_NOSYSTEM": "1",
 }
@@ -154,14 +152,14 @@ def run(
         path = [str(Path(PYTHON).parent), str(Path(GIT).parent), "/usr/bin", "/bin"]
         if tool_dir:
             path.insert(0, tool_dir)
-        environ = hermetic.env(
+        environ = support.env(
             PATH=os.pathsep.join(path),
             HOME=scratch,
             ORG_BELT_DIR=str(BELT),
             ORG_PYTHON=str(PYTHON),
             **env or {},
         )
-        as_mise = hermetic.task_run(NAMES[body], body)
+        as_mise = support.task_run(NAMES[body], body)
         return subprocess.run(
             as_mise.argv,
             cwd=root,
@@ -179,7 +177,7 @@ def real_tool_dir() -> str:
         The directory, which the row puts on PATH.
 
     """
-    return str(Path(hermetic.tool("hypothesis")).parent)
+    return str(Path(support.tool("hypothesis")).parent)
 
 
 class TestRefusals:
@@ -328,10 +326,10 @@ class TestScript:
 
     def test_the_runner_runs_as_a_script(self) -> None:
         """No file named: the usage line on stderr, exit 2."""
-        venv = Path(os.path.realpath(hermetic.tool("hypothesis"))).parent
+        venv = Path(os.path.realpath(support.tool("hypothesis"))).parent
         done = subprocess.run(
             [str(venv / "python"), str(BELT / "python_properties.py"), "gate"],
-            env=hermetic.env(),
+            env=support.env(),
             capture_output=True,
             text=True,
             check=False,

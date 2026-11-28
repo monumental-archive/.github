@@ -12,12 +12,12 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-CONFIG = hermetic.MISE / "pytest.toml"
+CONFIG = support.MISE / "pytest.toml"
 # pytest's exit statuses (pytest.ExitCode).
 FAILED, INTERRUPTED, USAGE, NO_TESTS = 1, 2, 4, 5
 

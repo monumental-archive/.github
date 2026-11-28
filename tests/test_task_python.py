@@ -13,8 +13,7 @@ different Python (stub interpreters, each printing its own name) runs a
 belt task's helper under the belt's and its own task under its own; and
 with the belt's interpreter absent, the task refuses with the one
 command that installs it.
-
-pytest, run by `mise run test`."""
+"""
 
 from __future__ import annotations
 
@@ -27,9 +26,9 @@ from pathlib import Path
 import pytest
 
 from belt import decoded, typed_std
-from tests import hermetic
+from tests import support
 
-CANON = hermetic.CANON
+CANON = support.CANON
 BELT = CANON / "mise" / "config.toml"
 
 # The one start: the interpreter, refusing an empty one by the belt's
@@ -49,10 +48,10 @@ def git() -> str:
     """Find git.
 
     Returns:
-        Its path; a missing git is red by name (hermetic.tool).
+        Its path; a missing git is red by name (support.tool).
 
     """
-    return hermetic.tool("git")
+    return support.tool("git")
 
 
 def tracked_helpers() -> set[str]:
@@ -62,7 +61,7 @@ def tracked_helpers() -> set[str]:
         The names of the canon's tracked `*.py`.
 
     """
-    return {pathlib.Path(p).name for p in hermetic.tracked(CANON, "*.py")}
+    return {pathlib.Path(p).name for p in support.tracked(CANON, "*.py")}
 
 
 def bodies(text: str) -> dict[str, str]:
@@ -253,10 +252,10 @@ def mise() -> str:
     """Find mise.
 
     Returns:
-        Its path; a missing mise is red by name (hermetic.tool).
+        Its path; a missing mise is red by name (support.tool).
 
     """
-    return hermetic.tool("mise")
+    return support.tool("mise")
 
 
 def belt_version() -> str:
@@ -301,7 +300,7 @@ class TestAScratchRepositoryPinningItsOwnPython:
             bindir.mkdir(parents=True)
             (bindir / "python3").write_text(STUB.format(who=who), encoding="utf-8")
             (bindir / "python3").chmod(0o755)
-        env = hermetic.env(self.tmp)
+        env = support.env(self.tmp)
         subprocess.run([git(), "init", "-q", "."], cwd=self.repo, env=env, check=True)
 
     def run_task(self, task: str) -> subprocess.CompletedProcess[str]:
@@ -311,7 +310,7 @@ class TestAScratchRepositoryPinningItsOwnPython:
             The run.
 
         """
-        env = hermetic.env(
+        env = support.env(
             self.tmp,
             ORG_PYTHON="",
             MISE_GLOBAL_CONFIG_FILE=str(BELT),

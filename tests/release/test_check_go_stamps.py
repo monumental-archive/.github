@@ -12,8 +12,7 @@ contents, so a row plants the build info each binary reports by
 writing it as the binary; STUB_FAIL makes go fail instead. One row
 starts the helper by its path in this tree instead: the script
 contract (it starts, and exits with go's own status and message).
-
-pytest, run by `mise run test`. Every git call"""
+"""
 
 import os
 import subprocess
@@ -26,9 +25,9 @@ import pytest
 
 from belt import workflow_yaml
 from belt.release import check_go_stamps
-from tests import hermetic
+from tests import support
 
-CANON = hermetic.CANON
+CANON = support.CANON
 WORKFLOW = CANON / ".github" / "workflows" / "build-go-binary.yml"
 HELPER = CANON / "release" / "check_go_stamps.py"
 
@@ -90,7 +89,7 @@ def clean_env() -> dict[str, str]:
         config read.
 
     """
-    env = hermetic.env()
+    env = support.env()
     return {**env, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
 
 
@@ -161,7 +160,7 @@ def run_helper(
             "STUB_FAIL": "1" if fail else "",
             "GIT_CEILING_DIRECTORIES": str(tmp),
         }
-        result: subprocess.CompletedProcess[str] | hermetic.Called
+        result: subprocess.CompletedProcess[str] | support.Called
         if script:
             result = subprocess.run(
                 [str(HELPER)],
@@ -176,7 +175,7 @@ def run_helper(
             def call() -> int:
                 return check_go_stamps.main([])
 
-            result = hermetic.call(call, env=env, cwd=work)
+            result = support.call(call, env=env, cwd=work)
         return Run(result.returncode, result.stdout, result.stderr, head)
 
 

@@ -14,8 +14,7 @@ its arguments. The three rows below were written against the step's
 `run:` block cut out of the YAML; they are carried over row for row and
 now call the helper's `main` in this process (#1698). One row starts
 the helper as the step does instead: the script contract.
-
-pytest, run by `mise run test`. Every git call"""
+"""
 
 import os
 import subprocess
@@ -25,9 +24,9 @@ from pathlib import Path
 import pytest
 
 from belt.release import repro_issue
-from tests import hermetic
+from tests import support
 
-HELPER = hermetic.RELEASE / "repro_issue.py"
+HELPER = support.RELEASE / "repro_issue.py"
 RUN_URL = "https://github.com/monumental-archive/lab/actions/runs/42044978939"
 NO_VERDICT_BODY = (
     "The reproducibility audit set out to rebuild v0.28.1 with the"
@@ -85,7 +84,7 @@ class TestFileAnIssue:
 
         """
         args_file = self.tmp / "gh-args"
-        env = hermetic.env(
+        env = support.env(
             PATH=f"{self.bindir}{os.pathsep}{os.environ['PATH']}",
             HOME=str(self.tmp),
             GH_ARGS=str(args_file),
@@ -98,7 +97,7 @@ class TestFileAnIssue:
             GITHUB_REPOSITORY="monumental-archive/lab",
             GITHUB_RUN_ID="42044978939",
         )
-        proc: subprocess.CompletedProcess[str] | hermetic.Called
+        proc: subprocess.CompletedProcess[str] | support.Called
         if script:
             proc = subprocess.run(
                 [sys.executable, str(HELPER)],
@@ -113,7 +112,7 @@ class TestFileAnIssue:
             def call() -> int:
                 return repro_issue.main([])
 
-            proc = hermetic.call(call, env=env)
+            proc = support.call(call, env=env)
         assert proc.returncode == 0, proc.stdout + proc.stderr
         args = args_file.read_text(encoding="utf-8").split("\0")[:-1]
         create: list[str] = ["issue", "create", "--repo", "monumental-archive/lab"]

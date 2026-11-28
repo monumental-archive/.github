@@ -6,8 +6,7 @@ claimants racing for one empty directory. The claim's cache directory
 tag (#2070): a new directory, a restored untagged one, a valid tag
 kept. And `clean`: a cargo-llvm-cov that reports a refused `cargo
 clean` as a warning is red, one that cleaned is not.
-
-pytest, run by `mise run test`. Every git call"""
+"""
 
 import os
 import subprocess
@@ -18,10 +17,10 @@ from pathlib import Path
 import pytest
 
 from belt import coverage_owner
-from tests import hermetic
+from tests import support
 
-OWNER = hermetic.MISE / "coverage_owner.py"
-SH = hermetic.tool("sh")
+OWNER = support.MISE / "coverage_owner.py"
+SH = support.tool("sh")
 # What cargo 1.97.1 wrote into a target directory it created, read off
 # a real build (#2070); the claim must leave the same bytes.
 CARGO_TAG = (
@@ -71,7 +70,7 @@ def claim(target: Path, run: Path) -> subprocess.CompletedProcess[str]:
     """
     return subprocess.run(
         [sys.executable, str(OWNER), "claim", str(target), str(run)],
-        env=hermetic.env(MISE_TASK_NAME="test"),
+        env=support.env(MISE_TASK_NAME="test"),
         capture_output=True,
         text=True,
         check=False,
@@ -166,7 +165,7 @@ class TestClaim:
         procs = [
             subprocess.Popen(
                 [sys.executable, str(OWNER), "claim", str(self.target), str(run)],
-                env=hermetic.env(MISE_TASK_NAME="test"),
+                env=support.env(MISE_TASK_NAME="test"),
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 text=True,
@@ -265,7 +264,7 @@ class TestClean:
             log = base / "cargo.log"
             out = subprocess.run(
                 [sys.executable, str(OWNER), "clean"],
-                env=hermetic.env(
+                env=support.env(
                     MISE_TASK_NAME="test",
                     PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}",
                     STUB_LOG=str(log),

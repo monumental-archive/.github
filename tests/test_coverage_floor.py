@@ -16,8 +16,6 @@ through the writer's own bookkeeping: a render that only the renderer can
 read is not a file the gate can enforce (the share-the-definition check
 law, #650).
 
-pytest, run by `mise run test`.
-
 Run through the gate as `mise run test`, which `ci` collects.
 """
 
@@ -38,7 +36,7 @@ from typing import TYPE_CHECKING, ClassVar, Self
 import pytest
 
 from belt import coverage_floor as cf
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -1562,8 +1560,8 @@ class TestOwners:
 
 
 # The canon tree this suite belongs to: its `mise/` and its workflows.
-CANON = hermetic.CANON
-BASH = hermetic.tool("bash")
+CANON = support.CANON
+BASH = support.tool("bash")
 # The `plan` job's step, exactly as ci.yml runs it.
 PLAN_STEP = re.compile(r"^ {8}id: plan\n {8}run: \|\n((?: {10}.*\n)*)", re.MULTILINE)
 # A cargo that answers `metadata` with the planted workspace, and nothing else.
@@ -1629,7 +1627,7 @@ class TestThePlanFeedsTheHelper:
         self.tree = self.tmp / "tree"
         self.tree.mkdir()
         (self.tree / "Cargo.toml").write_text("[workspace]\n", encoding="utf-8")
-        self.canon = hermetic.canon(self.tree / ".org-canon")
+        self.canon = support.canon(self.tree / ".org-canon")
         bins = self.tmp / "bin"
         bins.mkdir()
         (bins / "cargo").write_text(CARGO_STUB, encoding="utf-8")
@@ -1659,14 +1657,14 @@ class TestThePlanFeedsTheHelper:
         metadata.write_text(json.dumps(document), encoding="utf-8")
         self.output = self.tmp / "github-output"
         self.output.touch()
-        self.env = hermetic.env() | {
+        self.env = support.env() | {
             "PATH": f"{bins}{os.pathsep}{os.environ['PATH']}",
             "ORG_PYTHON": sys.executable,
             "PLANT_METADATA": str(metadata),
             "GITHUB_OUTPUT": str(self.output),
         }
         # pgrx-plan.sh plans a tracked workspace only (#2013).
-        git = hermetic.tool("git")
+        git = support.tool("git")
         for step in (["init", "-q"], ["add", "Cargo.toml"]):
             subprocess.run([git, *step], cwd=self.tree, env=self.env, check=True)
 

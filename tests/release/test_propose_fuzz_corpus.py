@@ -13,8 +13,7 @@ open-release-pr.sh (whose own rows are test_release_guards.py's): one
 row each for a signed and an unsigned answer.
 
 Each row asserts the message, not just the exit status.
-
-pytest, run by `mise run test`."""
+"""
 
 import base64
 import os
@@ -25,14 +24,14 @@ from pathlib import Path
 import pytest
 
 from belt import decoded
-from tests import hermetic
+from tests import support
 
-RELEASE = hermetic.RELEASE
+RELEASE = support.RELEASE
 PROPOSE = RELEASE / "propose-fuzz-corpus.sh"
 SIGNED = RELEASE / "signed-commit.sh"
 # The finding writer every caller of signed-commit.sh sources (#1934).
 WRITER = RELEASE.parent / "mise" / "findings.sh"
-BASH = hermetic.tool("bash")
+BASH = support.tool("bash")
 REPO = "monumental-archive/under-test"
 OID = "c" * 40
 MAIN = "a" * 40
@@ -131,7 +130,7 @@ class TestForge:
         (stubs / "gh").write_text(GH, encoding="utf-8")
         (stubs / "gh").chmod(0o755)
         (self.state / "refs").write_text(f"main {MAIN}\n", encoding="utf-8")
-        env = hermetic.env(self.tmp / "home")
+        env = support.env(self.tmp / "home")
         self.env = env | {
             "PATH": f"{stubs}{os.pathsep}{env.get('PATH', '')}",
             "STATE": str(self.state),

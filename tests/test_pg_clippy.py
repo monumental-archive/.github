@@ -9,8 +9,7 @@ PATH that log what they were asked; the workspace's cargo metadata is
 read by the belt's real gate_surface.py, and its extension's major
 derived by the real pgrx-env.sh. Every row asserts the whole log, so a
 row cannot pass by stopping early.
-
-pytest, run by `mise run test`.py;"""
+"""
 
 import os
 import subprocess
@@ -20,11 +19,11 @@ from pathlib import Path
 import pytest
 
 from belt import pg_clippy, pgrx_postgres, rust_workspaces
-from tests import hermetic
+from tests import support
 from tests import test_rust_lint as planted
 
-BELT = hermetic.MISE
-GIT = hermetic.tool("git")
+BELT = support.MISE
+GIT = support.tool("git")
 TASK = "lint:pg-clippy"
 # The stub cargo answers the workspace derivation as test_rust_lint.py's
 # stubs do (#2004), then logs each call with the marks the prepare and
@@ -110,7 +109,7 @@ class TestPlanted:
             (self.bins / name).write_text(text, encoding="utf-8")
             (self.bins / name).chmod(0o755)
         (self.bins / "bash").symlink_to(planted.BASH)
-        self.belt = hermetic.belt(
+        self.belt = support.belt(
             tmp / "belt",
             stubs={
                 "clippy-ladder.sh": planted.STUB_LADDER,
@@ -122,7 +121,7 @@ class TestPlanted:
         self.metadata.write_text(TWO, encoding="utf-8")
         self.fuzz_metadata = tmp / "fuzz-metadata.json"
         self.fuzz_metadata.write_text(planted.FUZZ, encoding="utf-8")
-        self.env = hermetic.env(
+        self.env = support.env(
             tmp / "home",
             PATH=os.pathsep.join((str(self.bins), "/usr/bin", "/bin")),
             MISE_TASK_NAME=TASK,
@@ -143,7 +142,7 @@ class TestPlanted:
         """Track every file the tree holds, as the derivation reads them."""
         subprocess.run([GIT, "add", "."], cwd=self.tree, env=self.env, check=True)
 
-    def call(self, *argv: str, **stub: str) -> hermetic.Called:
+    def call(self, *argv: str, **stub: str) -> support.Called:
         """Call pg_clippy.py's main in the tree, from the planted belt.
 
         Returns:
@@ -154,7 +153,7 @@ class TestPlanted:
         # stub on the row's PATH is the cargo it asks.
         with pytest.MonkeyPatch.context() as patched:
             patched.setattr(rust_workspaces, "CARGO", str(self.bins / "cargo"))
-            return hermetic.call(
+            return support.call(
                 lambda: pg_clippy.main(list(argv)),
                 env=self.env | {"ORG_BELT_DIR": str(self.belt)} | stub,
                 cwd=self.tree,
@@ -176,7 +175,7 @@ class TestPlanted:
         want = list(lines)
         assert want == self.logged()
 
-    def assert_finding(self, done: hermetic.Called, status: int, *lines: str) -> None:
+    def assert_finding(self, done: support.Called, status: int, *lines: str) -> None:
         """Assert the status, and the finding's lines in order on stderr."""
         assert status == done.returncode, done.stdout + done.stderr
         head, *detail = lines
@@ -305,7 +304,7 @@ class TestWorkspace(TestPlanted):
 
     def test_the_manifest_path_reaches_every_cargo_command(self) -> None:
         """Fetch, metadata and clippy each name the workspace they read."""
-        done = hermetic.call(
+        done = support.call(
             lambda: (
                 pg_clippy.workspace(
                     str(self.bins / "cargo"), "crates/Cargo.toml"

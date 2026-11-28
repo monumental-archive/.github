@@ -26,12 +26,12 @@ from pathlib import Path
 import pytest
 
 from belt.release import matrix
-from tests import hermetic
+from tests import support
 import contextlib
 
 TESTDATA = Path(__file__).resolve().parent / "testdata" / "matrix"
 MAPPING = str(TESTDATA / "pgrx-base-images.toml")
-TRACKED = hermetic.CANON / "docker" / "pgrx-base-images.toml"
+TRACKED = support.CANON / "docker" / "pgrx-base-images.toml"
 
 NOTHING = "a release that builds nothing is not a release"
 NO_IMAGE = "has no digest-pinned base image in docker/pgrx-base-images.toml"

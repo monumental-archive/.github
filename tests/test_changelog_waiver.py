@@ -14,19 +14,18 @@ does, with the delivered mise/rumdl.toml. The section is v1.23.1's,
 because rumdl already passes a long line whose overflow is the pull
 request link: its entry for #353 runs 148 columns with the subject
 alone past 80, which is the shape the waiver exists for.
-
-pytest, run by `mise run test`.py;"""
+"""
 
 import re
 import subprocess
 import tempfile
 from pathlib import Path
 
-from tests import hermetic
+from tests import support
 
-BELT = hermetic.MISE
+BELT = support.MISE
 CANON = BELT.parent
-RUMDL = hermetic.tool("rumdl")
+RUMDL = support.tool("rumdl")
 
 
 SECTION = "1.23.1"
@@ -67,7 +66,7 @@ class TestScaffoldedChangelogLints:
             done = subprocess.run(
                 [RUMDL, "check", "--config", str(BELT / "rumdl.toml"), "CHANGELOG.md"],
                 cwd=tmp,
-                env=hermetic.env(),
+                env=support.env(),
                 capture_output=True,
                 text=True,
                 check=False,

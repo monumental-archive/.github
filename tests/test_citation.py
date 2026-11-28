@@ -9,17 +9,17 @@ so a maintainer filling in a stub got a mute exit 1 from
 asserts the guard's own sentence, not only the exit status.
 
 The script under test is the belt's own, run by bash in a temporary
-directory. pytest, run by `mise run test`.py;"""
+directory."""
 
 import subprocess
 import tempfile
 from pathlib import Path
 
-from tests import hermetic
+from tests import support
 
-SCRIPT = hermetic.MISE / "citation.sh"
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
+SCRIPT = support.MISE / "citation.sh"
+BASH = support.tool("bash")
+GIT = support.tool("git")
 
 LICENCE = '[[annotations]]\npath = "**"\nSPDX-License-Identifier = "0BSD"\n'
 SUPPLIER = 'SPDX-PackageSupplier = "A Maintainer <a@example.invalid>"\n'
@@ -51,7 +51,7 @@ def run(
         (root / "REUSE.toml").write_text("version = 1\n" + reuse, encoding="utf-8")
         if states is not None:
             (root / ".badge-states").write_text(states, encoding="utf-8")
-        env = hermetic.env()
+        env = support.env()
         track(root, env)
         env["CITATION_OUT"] = str(root / "out.cff")
         done = subprocess.run(
@@ -168,15 +168,15 @@ class TestTheRenderMatchesTheStamp:
         render that quoted it reddened lint:citation on every release
         pull request (measured on canon v1.20.0's).
         """
-        canon = hermetic.CANON
+        canon = support.CANON
         stamped = (canon / "CITATION.cff").read_text(encoding="utf-8")
         with tempfile.TemporaryDirectory() as tmp:
             # The canon's REUSE.toml names two expressions (#1589), so
             # its licence is the `licence` line beside it.
-            root = hermetic.canon(
+            root = support.canon(
                 tmp, "REUSE.toml", ".badge-states", stubs={"CITATION.cff": stamped}
             )
-            env = hermetic.env()
+            env = support.env()
             track(root, env)
             env["CITATION_OUT"] = str(root / "out.cff")
             done = subprocess.run(

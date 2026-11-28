@@ -8,20 +8,19 @@ NAME through this one helper, so a row here covers both guards.
 Every row asserts the exact message, not only the exit status (a red
 scored on status alone can pass for the wrong reason), and no message
 may tell the reader to edit a number.
-
-pytest, run by `mise run test`.py."""
+"""
 
 import json
 import subprocess
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from tests import hermetic
+from tests import support
 
-CANON = hermetic.CANON
+CANON = support.CANON
 SCRIPT = CANON / "mise" / "roster-reconcile.sh"
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
+BASH = support.tool("bash")
+GIT = support.tool("git")
 
 ROSTER = ["alpha", "beta", "gamma"]
 CALLER = "probe"
@@ -51,7 +50,7 @@ def run(roster: list[str] | None, listing: str) -> tuple[int, str]:
         # A tracked roster, named from the tree's top as the caller names
         # slsa/assert-policy.json (#2013).
         tree = Path(tmp)
-        env = hermetic.env(tree / ".home")
+        env = support.env(tree / ".home")
         subprocess.run([GIT, "init", "-q"], cwd=tree, env=env, check=True)
         path = "assert-policy.json"
         if roster is not None:

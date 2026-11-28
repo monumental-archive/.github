@@ -12,8 +12,7 @@ output, which only a child's stdout carries.
 
 The rehearsal row runs the real `release/record-draft.sh`, so the
 record it writes is the one a kept draft carries.
-
-pytest, run by `mise run test`."""
+"""
 
 from __future__ import annotations
 
@@ -26,9 +25,9 @@ from pathlib import Path
 import pytest
 
 from belt.release import attach_publish
-from tests import hermetic
+from tests import support
 
-HERE = hermetic.RELEASE
+HERE = support.RELEASE
 HELPER = HERE / "attach_publish.py"
 TAG = "v1.2.3"
 REPO = "example/project"
@@ -118,7 +117,7 @@ class TestAttachAndPublish:
         manifest: dict[str, object] | None = None,
         dry_run: str = "false",
         script: bool = False,
-    ) -> tuple[subprocess.CompletedProcess[str] | hermetic.Called, list[list[str]]]:
+    ) -> tuple[subprocess.CompletedProcess[str] | support.Called, list[list[str]]]:
         """Run the helper against a release in the given state.
 
         In this process unless `script`, which starts it as the step does.
@@ -133,7 +132,7 @@ class TestAttachAndPublish:
                 json.dumps(manifest), encoding="utf-8"
             )
         log = self.tmp / "gh-log"
-        env = hermetic.env(
+        env = support.env(
             PATH=f"{self.bindir}{os.pathsep}{os.environ['PATH']}",
             HOME=str(self.tmp),
             GH_LOG=str(log),
@@ -147,7 +146,7 @@ class TestAttachAndPublish:
             # The name a run outside mise gives the writer (#1934).
             MISE_TASK_NAME=HELPER.name,
         )
-        done: subprocess.CompletedProcess[str] | hermetic.Called
+        done: subprocess.CompletedProcess[str] | support.Called
         if script:
             done = subprocess.run(
                 [sys.executable, str(HELPER)],
@@ -163,7 +162,7 @@ class TestAttachAndPublish:
             def call() -> int:
                 return attach_publish.main([])
 
-            done = hermetic.call(call, env=env, cwd=self.work)
+            done = support.call(call, env=env, cwd=self.work)
         lines = log.read_text(encoding="utf-8").splitlines() if log.is_file() else []
         return done, [line.split("\0")[:-1] for line in lines]
 

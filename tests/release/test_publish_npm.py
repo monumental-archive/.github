@@ -10,8 +10,7 @@ STUB_PUBLISH_RC.
 Every refusal's message is asserted whole. The masking rows plant a
 token-shaped string and a credential header in the debug log, and assert
 neither reaches the job log while the lines naming the failing step do.
-
-pytest, run by `mise run test`. Every git call"""
+"""
 
 import io
 import os

@@ -26,8 +26,7 @@ workflow, and two unpinned `uses:` in one file are two records with
 two messages. `Task` runs `audit:actions`' own body over a stub zizmor:
 one run, the record, zizmor's 11; a clean run, 0. Against
 `origin/main` the `Records` and `Task` record rows fail.
-
-pytest, run by `mise run test`.py."""
+"""
 
 import copy
 import io
@@ -44,10 +43,10 @@ import pytest
 
 from belt import decoded
 from belt import zizmor_signer as signer
-from tests import hermetic
+from tests import support
 import contextlib
 
-HERE = hermetic.MISE
+HERE = support.MISE
 
 
 def fixture(name: str) -> list[dict[str, object]]:
@@ -128,8 +127,8 @@ def run(
         redirect_stdout(out),
         redirect_stderr(err),
     ):
-        patched.setattr(signer, "run_zizmor", hermetic.returning(ran))
-        hermetic.patch_env(patched, env)
+        patched.setattr(signer, "run_zizmor", support.returning(ran))
+        support.patch_env(patched, env)
         code = signer.main(["--signer-workflow", workflow, *ARGS])
     return code, out.getvalue(), err.getvalue()
 
@@ -454,7 +453,7 @@ class TestRecords:
             redirect_stderr(err),
         ):
             patched.setattr(signer, "run_zizmor", zizmor)
-            hermetic.patch_env(patched, self.env)
+            support.patch_env(patched, self.env)
             status = signer.main(["--signer-workflow", SIGNER_WORKFLOW, *ARGS])
         return status, out.getvalue(), err.getvalue(), asked
 
@@ -569,7 +568,7 @@ class TestRecords:
                 redirect_stdout(out),
                 redirect_stderr(err),
             ):
-                hermetic.patch_env(patched, self.env)
+                support.patch_env(patched, self.env)
                 status = signer.main(["--signer-workflow", SIGNER_WORKFLOW])
         assert status == 1
         assert f"{TASK}: zizmor is not on PATH" in err.getvalue()
@@ -618,7 +617,7 @@ class TestPinnedZizmor:
             The status, the records read back, and stderr.
 
         """
-        if hermetic.optional_tool("zizmor") is None:
+        if support.optional_tool("zizmor") is None:
             pytest.skip("the belt's zizmor is not on PATH")
         tmp = Path(tempfile.mkdtemp()).resolve()
         self.stack.callback(shutil.rmtree, tmp, ignore_errors=True)
@@ -626,9 +625,9 @@ class TestPinnedZizmor:
         (tmp / ".github" / "workflows" / "a.yml").write_text(workflow, encoding="utf-8")
         file = tmp / "findings.jsonl"
         argv = ["--signer-workflow", SIGNER_WORKFLOW, "--offline", *ARGS]
-        done = hermetic.call(
+        done = support.call(
             lambda: signer.main(argv),
-            env=hermetic.env(
+            env=support.env(
                 GH_TOKEN=STANDIN,
                 MISE_TASK_NAME=TASK,
                 ORG_FINDINGS=str(file),
@@ -713,7 +712,7 @@ class TestTask:
         (root / ".github" / "workflows" / "a.yml").write_text("on: push\n")
         (root / "security").mkdir()
         # The task runs the command from the tree it names the canon.
-        (root / "belt").symlink_to(hermetic.PACKAGE)
+        (root / "belt").symlink_to(support.PACKAGE)
         (root / "security" / "identity.toml").write_text(
             f'signer-workflow = "{SIGNER_WORKFLOW}"\n', encoding="utf-8"
         )
@@ -729,14 +728,14 @@ class TestTask:
         config = decoded.load_toml((HERE / "config.toml").read_bytes())
         tasks = decoded.as_object(config["tasks"], "tasks")
         body = decoded.as_str(decoded.as_object(tasks[TASK], TASK)["run"], "run")
-        hermetic.track(root)
-        run = hermetic.task_run(TASK, body)
+        support.track(root)
+        run = support.task_run(TASK, body)
         return subprocess.run(
             run.argv,
             capture_output=True,
             text=True,
             encoding="utf-8",
-            env=hermetic.env(
+            env=support.env(
                 **run.env,
                 PATH=f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
                 ORG_BELT_DIR=str(HERE),

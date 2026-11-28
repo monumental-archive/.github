@@ -31,7 +31,7 @@ from hypothesis import strategies as st
 
 from belt import python_properties as pp
 from belt.typed_hypothesis import given
-from tests import hermetic
+from tests import support
 
 HOLDS = """\
 import unittest
@@ -85,10 +85,10 @@ class Bounded(unittest.TestCase):
 
 def call(
     argv: list[str], files: dict[str, str], env: dict[str, str]
-) -> hermetic.Called:
+) -> support.Called:
     """Plant `files` in a scratch directory and call main from it.
 
-    `env` adds to the environment a child would have had (`hermetic.env`);
+    `env` adds to the environment a child would have had (`support.env`);
     the profile in force before the call is loaded again after it, and
     the planted modules leave `sys.modules`.
 
@@ -103,8 +103,8 @@ def call(
         try:
             # The profile's label is the task that runs it (#1934).
             task = {"MISE_TASK_NAME": pp.LABELS.get(argv[0], "")} if argv else {}
-            return hermetic.call(
-                lambda: pp.main(argv), env=hermetic.env(**(task | env)), cwd=scratch
+            return support.call(
+                lambda: pp.main(argv), env=support.env(**(task | env)), cwd=scratch
             )
         finally:
             settings.load_profile(before)
@@ -118,7 +118,7 @@ class TestGate:
     def test_a_passing_file_holds(self) -> None:
         """One property that holds: exit 0, the test and the count."""
         done = call(["gate", "prop_ok.py"], {"prop_ok.py": HOLDS}, {})
-        assert done == hermetic.Called(
+        assert done == support.Called(
             0,
             "prop_ok.py: prop_0_prop_ok.Holds.test_double_is_even ... ok\n"
             "test:python-properties: 1 test(s) in 1 file(s) held\n",
@@ -211,9 +211,9 @@ class TestUsage:
     def test_a_usage_error_is_two(self, argv: list[str]) -> None:
         """R: exit 2 with the usage line, and nothing run."""
         with pytest.MonkeyPatch.context() as patched:
-            hermetic.name_task(patched, GATE)
-            done = hermetic.call(lambda: pp.main(argv))
-        assert done == hermetic.Called(2, "", USAGE)
+            support.name_task(patched, GATE)
+            done = support.call(lambda: pp.main(argv))
+        assert done == support.Called(2, "", USAGE)
 
 
 NAME = st.from_regex(

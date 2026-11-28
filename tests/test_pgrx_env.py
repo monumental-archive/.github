@@ -19,7 +19,7 @@ headers its own build names, in a subshell with its one cargo call, so
 pinned Postgres builds that name two ICU majors are a supported state.
 
 The function under test is the belt's own, sourced by bash exactly as a
-task sources it. pytest, run by `mise run test`.py;"""
+task sources it."""
 
 import hashlib
 import json
@@ -32,10 +32,10 @@ from typing import override
 
 import pytest
 
-from tests import hermetic
+from tests import support
 
-ENV_SH = hermetic.MISE / "pgrx-env.sh"
-BASH = hermetic.tool("bash")
+ENV_SH = support.MISE / "pgrx-env.sh"
+BASH = support.tool("bash")
 # The task a sourced pgrx-env.sh reports for: its findings name the
 # task that sourced it (#1934), here test:pgrx.
 TASK = "test:pgrx"
@@ -115,7 +115,7 @@ class TestPostgresCase:
         self.install(self.root / "pg" / "16.16.0", INSTALL)
         self.cache = self.root / "cache"
         self.target = self.root / "work" / "target"
-        self.env = hermetic.env(MISE_TASK_NAME=TASK) | {
+        self.env = support.env(MISE_TASK_NAME=TASK) | {
             "PATH": f"{bindir}{os.pathsep}{os.environ['PATH']}",
             "PLANT_ROOT": str(self.root),
             "PLANT_TARGET": str(self.target),
@@ -349,7 +349,7 @@ class TestClang(TestPostgresCase):
         for name, body in (("cargo", CARGO_STUB), ("xcrun", NO_XCRUN_STUB)):
             (bare / name).write_text(body, encoding="utf-8")
             (bare / name).chmod(0o755)
-        (bare / "uname").symlink_to(hermetic.tool("uname"))
+        (bare / "uname").symlink_to(support.tool("uname"))
         code, _, err = self.bash("org_pgrx_major 16 cargo build", PATH=str(bare))
         assert code == 1, err
         assert f"{TASK}: {NO_CLANG}" == err.splitlines()[0]
@@ -481,7 +481,7 @@ class TestMajors:
         return subprocess.run(
             [BASH, "-euo", "pipefail", "-c", script],
             input=surface,
-            env=hermetic.env(MISE_TASK_NAME=TASK),
+            env=support.env(MISE_TASK_NAME=TASK),
             capture_output=True,
             text=True,
             check=False,
@@ -524,7 +524,7 @@ class TestMajors:
         done = subprocess.run(
             [BASH, "-euo", "pipefail", "-c", script],
             input="first@0.1.0\t17\nsecond@0.1.0\tpg16\n",
-            env=hermetic.env(MISE_TASK_NAME=TASK),
+            env=support.env(MISE_TASK_NAME=TASK),
             capture_output=True,
             text=True,
             check=False,
@@ -639,7 +639,7 @@ class TestIcuCase:
         ):
             (bindir / name).write_text(body, encoding="utf-8")
             (bindir / name).chmod(0o755)
-        self.env = hermetic.env(MISE_TASK_NAME=TASK) | {
+        self.env = support.env(MISE_TASK_NAME=TASK) | {
             "PATH": f"{bindir}{os.pathsep}{os.environ['PATH']}",
             "PLANT_ROOT": str(self.root),
         }

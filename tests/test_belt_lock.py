@@ -16,8 +16,7 @@ so each lock owns one tool. The runs are `mise install --dry-run`,
 offline: the registry is the tree's own aqua-registry.yaml by `file://`,
 so the gate stays deterministic. A resolved tool reads
 `would install`; a refused one names the lockfile.
-
-pytest, run by `mise run test`.py."""
+"""
 
 from __future__ import annotations
 
@@ -28,9 +27,9 @@ from pathlib import Path
 import pytest
 
 from belt import decoded
-from tests import hermetic
+from tests import support
 
-CANON = hermetic.CANON
+CANON = support.CANON
 BELT = CANON / "mise"
 UV_KEY = '"aqua:astral-sh/uv"'
 
@@ -99,7 +98,7 @@ class TestLockedFromTheLinkedLock:
         lock = (BELT / "mise.lock").read_text("utf-8")
         # The whole belt; the config and the lock are the row's own, and
         # locks() rewrites the lock in place.
-        hermetic.belt(
+        support.belt(
             tree, stubs={"config.toml": config.replace(line, ""), "mise.lock": lock}
         )
         uv = block(UV_KEY).search(lock)
@@ -113,7 +112,7 @@ class TestLockedFromTheLinkedLock:
         conf = self.repo / ".config" / "mise" / "conf.d"
         conf.mkdir(parents=True)
         run(
-            [hermetic.tool("git"), "init", "-q", "."], self.repo, self.env(), check=True
+            [support.tool("git"), "init", "-q", "."], self.repo, self.env(), check=True
         )
         (self.repo / "mise.toml").write_text(f"[tools]\n{line}", "utf-8")
         (conf / "belt.toml").symlink_to(tree / "config.toml")
@@ -127,7 +126,7 @@ class TestLockedFromTheLinkedLock:
             The environment.
 
         """
-        return hermetic.env(
+        return support.env(
             self.tmp / "home",
             MISE_CONFIG_DIR=str(self.tmp / "config"),
             MISE_DATA_DIR=str(self.tmp / "data"),
@@ -155,7 +154,7 @@ class TestLockedFromTheLinkedLock:
             The run.
 
         """
-        argv = [hermetic.tool("mise"), "install", "--dry-run", key.strip('"')]
+        argv = [support.tool("mise"), "install", "--dry-run", key.strip('"')]
         return run(argv, self.repo, self.env())
 
     def assert_resolves(self, key: str, name: str) -> None:

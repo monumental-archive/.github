@@ -17,15 +17,14 @@ cannot derive from.
 Every refusal is checked for the FIELD NAME in its message, not merely
 for a nonzero exit: a refusal nobody can act on sends the reader to the
 wrong file.
-
-pytest, run by `mise run test`. Every git call"""
+"""
 
 import json
 
 import pytest
 
 from belt import adoption_population as ap
-from tests import hermetic
+from tests import support
 
 EVERY = ["build", "source", "dependency"]
 # The canon's own repository name, as main() is handed it from
@@ -85,9 +84,9 @@ def run_main(doc: object, *argv: str) -> tuple[int, str, str]:
         The exit code, stdout and stderr.
 
     """
-    done = hermetic.call(
+    done = support.call(
         lambda: ap.main(list(argv) or [CANON]),
-        env=hermetic.env(MISE_TASK_NAME=TASK),
+        env=support.env(MISE_TASK_NAME=TASK),
         stdin=doc if isinstance(doc, str) else json.dumps(doc),
     )
     return done.returncode, done.stdout, done.stderr
@@ -330,8 +329,8 @@ class TestMain:
 
     def test_an_empty_canon_name_is_refused(self) -> None:
         """An identity read that failed leaves an empty name: refused."""
-        done = hermetic.call(
-            lambda: ap.main([""]), env=hermetic.env(MISE_TASK_NAME=TASK)
+        done = support.call(
+            lambda: ap.main([""]), env=support.env(MISE_TASK_NAME=TASK)
         )
         assert (done.returncode, done.stdout) == (2, "")
         assert (

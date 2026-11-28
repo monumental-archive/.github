@@ -9,15 +9,14 @@ cache-by-default shapes with and without `cache: false`, a step closed
 by a dedent or by the next file, a nested list item that is not a step,
 a commented-out cache, and an empty file. Two rows run the task's own
 body, read from mise/config.toml, as mise runs it
-(`hermetic.task_run`): the skip when there are no workflows, a clean
+(`support.task_run`): the skip when there are no workflows, a clean
 tree, an unmarked cache, and two findings in one file, each its own
 line in the order found. CASES call the helper's `main` in this
 process, in the planted tree. Two more call it with no workflow and
 with a missing one. Every row asserts the whole of each stream: a red
 row scored on exit alone can pass for the wrong reason.
 
-GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. pytest, run by
-`mise run test`.
+GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom.
 """
 
 import subprocess
@@ -28,7 +27,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import cold_attested, decoded
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -46,7 +45,7 @@ def _task(as_task: Callable[[str], None]) -> None:
 pytestmark = pytest.mark.usefixtures("_task")
 
 
-BELT = hermetic.MISE
+BELT = support.MISE
 HEAD = "on: push\njobs:\n  a:\n    runs-on: ubuntu-26.04\n    steps:\n"
 MARK = "      # unattested-path: a dev cache, nothing here is signed\n"
 CACHE = "      - uses: actions/cache@v5\n        with:\n          path: x\n"
@@ -227,7 +226,7 @@ class TestColdAttested:
         """Plant an empty workflows directory."""
         self.tree = tmp_path
         (self.tree / WF).mkdir(parents=True)
-        self.env = hermetic.env(
+        self.env = support.env(
             MISE_TASK_NAME=TASK,
             ORG_BELT_DIR=str(BELT),
             ORG_PYTHON=sys.executable,
@@ -247,7 +246,7 @@ class TestColdAttested:
             names.append(rel)
         return names
 
-    def helper(self, *files: str) -> hermetic.Called:
+    def helper(self, *files: str) -> support.Called:
         """Call the helper's main in the planted tree.
 
         Returns:
@@ -255,7 +254,7 @@ class TestColdAttested:
 
         """
         argv = list(files)
-        return hermetic.call(
+        return support.call(
             lambda: cold_attested.main(argv), env=self.env, cwd=self.tree
         )
 
@@ -266,8 +265,8 @@ class TestColdAttested:
             The finished process.
 
         """
-        hermetic.track(self.tree)
-        as_mise = hermetic.task_run(TASK, body())
+        support.track(self.tree)
+        as_mise = support.task_run(TASK, body())
         return subprocess.run(
             as_mise.argv,
             cwd=self.tree,

@@ -9,8 +9,7 @@ job's id, or 410 when there is none; it records each request's
 Authorization header. Each row calls `main` in this process with the
 report job's arguments and asserts the exact calls gh received and the
 message.
-
-pytest, run by `mise run test`."""
+"""
 
 from __future__ import annotations
 
@@ -28,7 +27,7 @@ import pytest
 from belt import decoded, typed_std
 from belt import findings as writer
 from belt import standing_issue as standing
-from tests import hermetic
+from tests import support
 
 REPO = "example-owner/example-repo"
 WORKFLOW = "slsa"
@@ -213,7 +212,7 @@ class TestStubbed:
         request.addfinalizer(server.server_close)
         request.addfinalizer(server.shutdown)
         self.calls = self.dir / "calls.jsonl"
-        self.env = hermetic.env(
+        self.env = support.env(
             PATH=f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
             GITHUB_REPOSITORY=REPO,
             GITHUB_SERVER_URL="https://github.com",
@@ -251,7 +250,7 @@ class TestStubbed:
         default: str = "main",
         findings: Path | None = None,
         workflow: str = WORKFLOW,
-    ) -> hermetic.Called:
+    ) -> support.Called:
         """Run the report as the job runs it.
 
         Returns:
@@ -270,7 +269,7 @@ class TestStubbed:
         ]
         if findings is not None:
             argv += ["--findings", str(findings)]
-        return hermetic.call(lambda: standing.main(argv), env=self.env)
+        return support.call(lambda: standing.main(argv), env=self.env)
 
     def gh_calls(self) -> list[list[str]]:
         """Read every argv the stub gh received.

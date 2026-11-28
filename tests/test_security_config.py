@@ -24,8 +24,7 @@ ENABLED on the day the fixtures were fetched, against a record that
 says disabled. The agreement case states that record's value for the
 field explicitly, so it proves agreement; the live disagreement is its
 own case, because it is a real finding and not a fixture artefact.
-
-pytest, run by `mise run test`."""
+"""
 
 import copy
 import io
@@ -39,7 +38,7 @@ import pytest
 
 from belt import decoded
 from belt import security_config as sc
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -57,7 +56,7 @@ def _task(as_task: Callable[[str], None]) -> None:
 pytestmark = pytest.mark.usefixtures("_task")
 
 
-HERE = hermetic.MISE
+HERE = support.MISE
 DATA = Path(__file__).resolve().parent / "testdata" / "security-config"
 TREE = HERE.parent
 OWNER = "monumental-archive"
@@ -465,12 +464,12 @@ class TestShapeTest:
             pytest.MonkeyPatch.context() as patched,
             pytest.raises(decoded.UndecodableError) as cm,
         ):
-            patched.setattr(subprocess, "run", hermetic.returning(done))
+            patched.setattr(subprocess, "run", support.returning(done))
             sc.gh_fetch("x/y")
         assert str(cm.value) == 'x/y: duplicate key "a"'
         pages = subprocess.CompletedProcess([], 0, stdout="[[1], [2]]", stderr="")
         with pytest.MonkeyPatch.context() as patched:
-            patched.setattr(subprocess, "run", hermetic.returning(pages))
+            patched.setattr(subprocess, "run", support.returning(pages))
             assert sc.gh_fetch("x/y", paginate=True) == (200, [1, 2])
 
     def test_main_reports_a_refusal_as_an_unreadable_input(self) -> None:

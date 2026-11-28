@@ -22,7 +22,7 @@ import pytest
 
 from belt import decoded
 from belt.rekor_monitor import verdict
-from tests import hermetic
+from tests import support
 
 DATA = Path(__file__).resolve().parent / "testdata"
 
@@ -73,7 +73,7 @@ def finding(index: int, condition: str) -> dict[str, object]:
     return {"subject": f"CT index {index}", "assertion": condition, "detail": "x"}
 
 
-def call(argv: list[str]) -> hermetic.Called:
+def call(argv: list[str]) -> support.Called:
     """Call the helper's main in this process, as the leg starts it.
 
     The leg runs the script by path with no mise task around it, so the
@@ -87,7 +87,7 @@ def call(argv: list[str]) -> hermetic.Called:
     """
     with pytest.MonkeyPatch.context() as patched:
         patched.setattr(sys, "argv", [str(HELPER), *argv])
-        return hermetic.call(lambda: verdict.main(argv), env=hermetic.env())
+        return support.call(lambda: verdict.main(argv), env=support.env())
 
 
 @pytest.mark.usefixtures("_set_up_test_verdict")
@@ -101,7 +101,7 @@ class TestVerdict:
 
     def run_helper(
         self, code: str, doc: dict[str, object] | None, saved: str = "true"
-    ) -> hermetic.Called:
+    ) -> support.Called:
         """Write the report (None: stele wrote none) and call the helper.
 
         Returns:
@@ -226,7 +226,7 @@ class TestVerdict:
             "--report", str(self.report), "--saved", "true",
         ]  # fmt: skip
         proc = subprocess.run(
-            argv, env=hermetic.env(), capture_output=True, text=True, check=False
+            argv, env=support.env(), capture_output=True, text=True, check=False
         )
         assert proc.returncode == 1, proc.stderr
         assert proc.stdout == ""

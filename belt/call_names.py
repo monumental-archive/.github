@@ -10,10 +10,10 @@ as its module's own dotted name:
     qualify(call.func)    # "subprocess.run" for sp.run(...) and go(...)
 
 A name the file never imported is spelled as written, so a bare `run`
-stays `run` and is no one's `subprocess.run`. Read by the hermetic law
-(mise/test_hermetic.py) and the job-installs law
-(release/test_job_installs.py), so the two cannot disagree about what a
-call is.
+stays `run` and is no one's `subprocess.run`. Read by the support module's law
+(tests/test_support.py) and the job-installs law
+(tests/release/test_job_installs.py), so the two cannot disagree about
+what a call is.
 
 Stdlib only.
 """

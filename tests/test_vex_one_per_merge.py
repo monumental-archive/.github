@@ -10,8 +10,7 @@ every row fails on the lookup.
 
 Each row asserts the message, not just the exit status: a planted row
 scored on exit alone can pass for the wrong reason.
-
-pytest, run by `mise run test`.py;"""
+"""
 
 import subprocess
 import sys
@@ -22,7 +21,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import decoded, vex_one_per_merge
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -37,10 +36,10 @@ def _task(as_task: Callable[[str], None]) -> None:
 pytestmark = pytest.mark.usefixtures("_task")
 
 
-BELT = hermetic.MISE
+BELT = support.MISE
 CANON = BELT.parent
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
+BASH = support.tool("bash")
+GIT = support.tool("git")
 TASK = "lint:vex-one-per-merge"
 SENTENCE = (BELT / "vex-one-per-merge.txt").read_text(encoding="utf-8").strip()
 A = "security/vex/RUSTSEC-0000-0001.openvex.json"
@@ -69,7 +68,7 @@ class Tree:
         """Make the repository under `root`."""
         self.dir = root / "repo"
         self.dir.mkdir()
-        self.env = hermetic.env(root / "home", MISE_TASK_NAME=TASK)
+        self.env = support.env(root / "home", MISE_TASK_NAME=TASK)
         self.git("init", "-q", "-b", "feature")
 
     def git(self, *args: str) -> str:
@@ -104,14 +103,14 @@ class Tree:
         """Point origin/main at HEAD: everything so far is the default branch."""
         self.git("update-ref", "refs/remotes/origin/main", "HEAD")
 
-    def listing(self) -> hermetic.Called:
+    def listing(self) -> support.Called:
         """List the decisions ahead of origin/main, as vex-attest.yml asks.
 
         Returns:
             The status and both streams, from an in-process call (#1697).
 
         """
-        return hermetic.call(
+        return support.call(
             lambda: vex_one_per_merge.main(["--list", "origin/main.."]),
             env=self.env,
             cwd=self.dir,
@@ -130,7 +129,7 @@ class Tree:
             **({"GITHUB_EVENT_NAME": event} if event else {}),
         }
 
-    def run(self, event: str = "") -> hermetic.Called:
+    def run(self, event: str = "") -> support.Called:
         """Call the task's helper in the tree, as the CI event `event`.
 
         The task's body is the one line that starts the helper with no
@@ -141,7 +140,7 @@ class Tree:
             The status and both streams.
 
         """
-        return hermetic.call(
+        return support.call(
             lambda: vex_one_per_merge.main([]), env=self.task_env(event), cwd=self.dir
         )
 

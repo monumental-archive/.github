@@ -19,8 +19,7 @@ JSON to stderr and exits 1, as the real one does for a finding); stele
 prints a PASS report. The real rust_workspaces.py, deny_advisories.py,
 deny_skips.py and stele_findings.py run. Each refusing row asserts its
 message (#650).
-
-pytest, run by `mise run test`. Every git call"""
+"""
 
 import json
 import subprocess
@@ -30,11 +29,11 @@ from pathlib import Path
 import pytest
 
 from belt import decoded
-from tests import hermetic
+from tests import support
 
-BELT = hermetic.MISE
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
+BELT = support.MISE
+BASH = support.tool("bash")
+GIT = support.tool("git")
 ADVISORY = "RUSTSEC-2021-0127"
 
 # What the bodies reach for besides the stubs, linked into a PATH of
@@ -181,12 +180,12 @@ class TestPlanted:
             stub.write_text(body.replace("{bash}", BASH), encoding="utf-8")
             stub.chmod(0o755)
         for tool in TOOLS:
-            (self.bin / tool).symlink_to(hermetic.tool(tool))
+            (self.bin / tool).symlink_to(support.tool(tool))
         self.log = self.tmp / "calls.log"
 
     def plant(self, files: dict[str, str]) -> None:
         """Track `files` in the planted checkout."""
-        env = hermetic.env()
+        env = support.env()
         for name, text in files.items():
             (self.root / name).parent.mkdir(parents=True, exist_ok=True)
             (self.root / name).write_text(text, encoding="utf-8")
@@ -203,7 +202,7 @@ class TestPlanted:
 
         """
         self.plant(files)
-        env = hermetic.env(
+        env = support.env(
             PATH=str(self.bin),
             PLANT_LOG=str(self.log),
             PLANT_REPORT=REPORT,
@@ -215,7 +214,7 @@ class TestPlanted:
             ORG_FINDINGS="",
             MISE_TASK_NAME=task,
         )
-        as_mise = hermetic.task_run(task, task_body(task))
+        as_mise = support.task_run(task, task_body(task))
         done = subprocess.run(
             as_mise.argv,
             cwd=self.root,

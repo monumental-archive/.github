@@ -13,8 +13,7 @@ refuses a reusable workflow. Its `report` job needs the canon action
 for the belt's Python, so that one pin is allowed (owner's ruling,
 2026-11-21) and held to the same released SHA as every other.
 
-GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. pytest, run by
-`mise run test`.
+GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom.
 """
 
 import shutil
@@ -26,7 +25,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import decoded, template_pins
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -44,10 +43,10 @@ def _task(as_task: Callable[[str], None]) -> None:
 pytestmark = pytest.mark.usefixtures("_task")
 
 
-BELT = hermetic.MISE
+BELT = support.MISE
 CANON_DIR = BELT.parent
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
+BASH = support.tool("bash")
+GIT = support.tool("git")
 CANON = "monumental-archive/.github"
 ACTION = f"{CANON}/.github/actions/canon"
 REUSABLE = f"{CANON}/.github/workflows/ci.yml"
@@ -110,7 +109,7 @@ class TestPins:
     def _set_up_test_pins(self, tmp_path: Path) -> None:
         """Plant a tree whose first commit is released as v1.0.0."""
         self.tree = tmp_path
-        self.env = hermetic.env(
+        self.env = support.env(
             MISE_TASK_NAME=TASK,
             ORG_BELT_DIR=str(BELT),
             ORG_CANON_DIR=str(CANON_DIR),
@@ -158,7 +157,7 @@ class TestPins:
             path.write_text(text, encoding="utf-8")
         self.git("add", "--", name)
 
-    def helper(self, *files: str) -> hermetic.Called:
+    def helper(self, *files: str) -> support.Called:
         """Call the helper's main in the planted tree.
 
         Returns:
@@ -166,7 +165,7 @@ class TestPins:
 
         """
         argv = [CANON, *files]
-        return hermetic.call(
+        return support.call(
             lambda: template_pins.main(argv), env=self.env, cwd=self.tree
         )
 
@@ -177,7 +176,7 @@ class TestPins:
             The finished process.
 
         """
-        as_mise = hermetic.task_run("lint:template-pins", body())
+        as_mise = support.task_run("lint:template-pins", body())
         return subprocess.run(
             as_mise.argv,
             cwd=self.tree,
@@ -287,11 +286,11 @@ class TestPins:
             same(done.returncode, template_pins.EXIT_ERROR)
             same(done.stderr.splitlines(), [usage])
 
-    def refused(self, argv: list[str]) -> hermetic.Called:
+    def refused(self, argv: list[str]) -> support.Called:
         """Call the helper's main with a command line of the row's.
 
         Returns:
             The status and what it printed.
 
         """
-        return hermetic.call(lambda: template_pins.main(argv), env=self.env)
+        return support.call(lambda: template_pins.main(argv), env=self.env)

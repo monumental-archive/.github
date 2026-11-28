@@ -3,8 +3,7 @@
 The script rows live beside their scripts (`test_citation.py`,
 `test_derive_badges.py`), which run each derivation whole. These run
 the reader in process for the branches neither script row reaches.
-
-pytest, run by `mise run test`.py;"""
+"""
 
 import contextlib
 import io
@@ -16,7 +15,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import project_licence as pl
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -34,8 +33,8 @@ def _task(as_task: Callable[[str], None]) -> None:
 pytestmark = pytest.mark.usefixtures("_task")
 
 
-HERE = hermetic.MISE
-GIT = hermetic.tool("git")
+HERE = support.MISE
+GIT = support.tool("git")
 
 
 def run(files: dict[str, str], argv: list[str] | None = None) -> tuple[int, str, str]:
@@ -50,7 +49,7 @@ def run(files: dict[str, str], argv: list[str] | None = None) -> tuple[int, str,
         for name, text in files.items():
             (root / name).write_text(text, encoding="utf-8")
         # The reader asks git whether `.badge-states` is tracked (#2013).
-        env = hermetic.env(root / ".home")
+        env = support.env(root / ".home")
         for step in (["init", "-q"], ["add", "-A"]):
             subprocess.run([GIT, *step], cwd=root, env=env, check=True)
         out, err = io.StringIO(), io.StringIO()

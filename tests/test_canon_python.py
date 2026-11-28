@@ -10,8 +10,7 @@ on PATH that records how it was called.
 Then the other half of the contract: every tracked shell script that
 starts a helper as `"${ORG_PYTHON}"` refuses an unset or empty one by
 name, never falling back to the runner's python3.
-
-pytest, run by `mise run test`."""
+"""
 
 from __future__ import annotations
 
@@ -23,9 +22,9 @@ from pathlib import Path
 
 import pytest
 
-from tests import hermetic
+from tests import support
 
-CANON = hermetic.CANON
+CANON = support.CANON
 VERSION = "3.15.2"
 # No apostrophe in it: bash removes one inside `${VAR:?...}`, even
 # within double quotes (measured: "belt's" printed as "belts").
@@ -56,10 +55,10 @@ def bash() -> str:
     """Find bash.
 
     Returns:
-        Its path; a missing bash is red by name (hermetic.tool).
+        Its path; a missing bash is red by name (support.tool).
 
     """
-    return hermetic.tool("bash")
+    return support.tool("bash")
 
 
 @pytest.mark.usefixtures("_set_up_test_install_the_belts_python")
@@ -72,7 +71,7 @@ class TestInstallTheBeltsPython:
         self.tmp = tmp_path
         self.root = self.tmp / "_actions" / "example-org" / ".github" / "v1.0.0"
         # The belt config and lock are the row's own: plant() rewrites them.
-        hermetic.canon(
+        support.canon(
             self.root,
             ".github/actions/canon",
             stubs={"mise/config.toml": "", "mise/mise.lock": ""},
@@ -116,7 +115,7 @@ class TestInstallTheBeltsPython:
         """
         return subprocess.run(
             [bash(), str(self.script)],
-            env=hermetic.env(
+            env=support.env(
                 PATH=self.path,
                 HOME=str(self.tmp),
                 GITHUB_ENV=str(self.env_file),
@@ -223,7 +222,7 @@ def starters() -> list[pathlib.Path]:
         Their paths, sorted.
 
     """
-    paths = [CANON / p for p in hermetic.tracked(CANON, "*.sh")]
+    paths = [CANON / p for p in support.tracked(CANON, "*.sh")]
     return sorted(p for p in paths if starts_helpers(p.read_text("utf-8")))
 
 
@@ -249,7 +248,7 @@ def run_without(argv: list[str], value: str | None) -> subprocess.CompletedProce
 
     """
     with tempfile.TemporaryDirectory() as tmp:
-        env = hermetic.env(tmp)
+        env = support.env(tmp)
         # The row decides ORG_PYTHON: unset, or the value it names.
         env.pop("ORG_PYTHON", None)
         if value is not None:

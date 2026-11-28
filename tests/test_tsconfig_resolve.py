@@ -23,12 +23,12 @@ import tempfile
 from pathlib import Path
 
 from belt import decoded
-from tests import hermetic
+from tests import support
 
 # The task the rows report under, as a caller's name reaches the script.
 TASK = "lint:tsconfig-dials"
 
-BELT = hermetic.MISE
+BELT = support.MISE
 SCRIPT = BELT / "tsconfig-resolve.sh"
 GENERATE = BELT / "biome-generate.sh"
 SCAFFOLD = BELT.parent / "scaffold" / "tsconfig.json"
@@ -96,9 +96,9 @@ def environment() -> dict[str, str]:
         The suite's allow-list with the belt's tsc and jq first on PATH.
 
     """
-    dirs = [str(Path(hermetic.tool(name)).parent) for name in ("tsc", "jq")]
-    path = ":".join([*dirs, hermetic.env().get("PATH", "")])
-    return hermetic.env(
+    dirs = [str(Path(support.tool(name)).parent) for name in ("tsc", "jq")]
+    path = ":".join([*dirs, support.env().get("PATH", "")])
+    return support.env(
         PATH=path,
         MISE_TASK_NAME=TASK,
         ORG_PYTHON=sys.executable,
@@ -123,7 +123,7 @@ def resolve(
 
     """
     return subprocess.run(
-        [hermetic.tool("bash"), str(SCRIPT), config, str(tree / "resolved.json")],
+        [support.tool("bash"), str(SCRIPT), config, str(tree / "resolved.json")],
         cwd=tree,
         env=environment(),
         capture_output=True,
@@ -240,7 +240,7 @@ def with_one_unknown_option() -> str:
 def tracked_tree(tree: Path, config: str, env: dict[str, str]) -> None:
     """Plant one project and track it, as a repository holds it."""
     plant(tree, config)
-    git = hermetic.tool("git")
+    git = support.tool("git")
     subprocess.run([git, "init", "-q"], cwd=tree, env=env, check=True)
     subprocess.run([git, "add", "."], cwd=tree, env=env, check=True)
 
@@ -252,7 +252,7 @@ def run_body(name: str, body: str, tree: Path) -> subprocess.CompletedProcess[st
         The finished process.
 
     """
-    as_mise = hermetic.task_run(name, body)
+    as_mise = support.task_run(name, body)
     return subprocess.run(
         as_mise.argv,
         cwd=tree,
@@ -301,7 +301,7 @@ class TestSelectionTest:
     def test_a_project_is_a_tracked_tsconfig_at_any_depth(self) -> None:
         """Named exactly, outside vendor/, and tracked."""
         env = environment()
-        git = hermetic.tool("git")
+        git = support.tool("git")
         with tempfile.TemporaryDirectory() as tmp:
             tree = Path(tmp)
             for name, _ in PROJECTS:
@@ -323,7 +323,7 @@ class TestSelectionTest:
         with tempfile.TemporaryDirectory() as tmp:
             tree = Path(tmp)
             (tree / "README").write_text("x", encoding="utf-8")
-            git = hermetic.tool("git")
+            git = support.tool("git")
             subprocess.run([git, "init", "-q"], cwd=tree, env=env, check=True)
             subprocess.run([git, "add", "."], cwd=tree, env=env, check=True)
             done = run_body("select", SELECT, tree)
@@ -415,7 +415,7 @@ class TestCallersTest:
             tracked_tree(tree, config, env)
             out = tree / "generated.json"
             done = subprocess.run(
-                [hermetic.tool("bash"), str(GENERATE), str(out)],
+                [support.tool("bash"), str(GENERATE), str(out)],
                 cwd=tree,
                 env=env,
                 capture_output=True,

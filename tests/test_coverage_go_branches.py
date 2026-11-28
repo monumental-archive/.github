@@ -19,8 +19,7 @@ package.
 
 Each row asserts the message, not just the exit status: a planted row
 scored on exit alone can pass for the wrong reason.
-
-pytest, run by `mise run test`.py."""
+"""
 
 import os
 import shutil
@@ -34,13 +33,13 @@ import pytest
 
 from belt import coverage_floor as cf
 from belt import decoded
-from tests import hermetic
+from tests import support
 import contextlib
 
-CANON = hermetic.CANON
+CANON = support.CANON
 BELT = CANON / "mise"
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
+BASH = support.tool("bash")
+GIT = support.tool("git")
 
 # What a row expects of the call log (or of the parse's problems),
 # named so the expected list carries its element type.
@@ -242,7 +241,7 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
     stubs = tmp / "stubs"
     plant_tools(tmp, gobco)
     tracked = plant_tree(tree, pkgs, go_mod=go_mod, floor=floor)
-    env = hermetic.env()
+    env = support.env()
     inherited = path_without_gobco(env.get("PATH", ""), tmp)
     env |= {
         "ORG_BELT_DIR": str(BELT),
@@ -264,7 +263,7 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
     subprocess.run([GIT, "init", "-q"], cwd=tree, env=env, check=True)
     if tracked:
         subprocess.run([GIT, "add", *tracked], cwd=tree, env=env, check=True)
-    as_mise = hermetic.task_run(task, measuring_step(task))
+    as_mise = support.task_run(task, measuring_step(task))
     done = subprocess.run(
         as_mise.argv,
         cwd=tree,
@@ -455,7 +454,7 @@ class TestAuditRows(TestGoBranchCase):
         status = subprocess.run(
             [GIT, "ls-files", "--others", "--modified", "--exclude-standard"],
             cwd=tmp / "tree",
-            env=hermetic.env(),
+            env=support.env(),
             capture_output=True,
             text=True,
             check=True,

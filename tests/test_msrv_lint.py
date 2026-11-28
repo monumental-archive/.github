@@ -13,8 +13,7 @@ read from mise/config.toml, for the guard and the script contract.
 `PLANT_FAIL` names the one step that fails: `cargo-<subcommand>`,
 `mise-<what>`, a helper's file name, or `prepare`.
 
-GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. pytest, run by
-`mise run test`.
+GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom.
 """
 
 from __future__ import annotations
@@ -32,14 +31,14 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import decoded, msrv_lint, rust_task, rust_workspaces
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-BELT = hermetic.MISE
+BELT = support.MISE
 TASK = "lint:msrv"
-GIT = hermetic.tool("git")
+GIT = support.tool("git")
 
 CARGO_STUB = r"""#!/usr/bin/env bash
 line="cargo $*"
@@ -170,7 +169,7 @@ class TestPlanted:
             stub = self.bins / name
             stub.write_text(text, encoding="utf-8")
             stub.chmod(0o755)
-        self.belt = hermetic.belt(
+        self.belt = support.belt(
             self.tmp / "belt", stubs={"pgrx-env.sh": PGRX_ENV_STUB}
         )
         self.log = self.tmp / "log"
@@ -182,7 +181,7 @@ class TestPlanted:
         self.surface = self.tmp / "surface"
         self.plan = self.tmp / "plan"
         self.plant(PLAIN, CHECK)
-        env = hermetic.env()
+        env = support.env()
         self.env = env | {
             "PATH": f"{self.bins}:{env['PATH']}",
             "ORG_BELT_DIR": str(self.belt),
@@ -229,11 +228,11 @@ class TestPlanted:
             contextlib.chdir(self.tree),
             captured(out, err),
         ):
-            hermetic.patch_env(patched, self.env, clear=True)
+            support.patch_env(patched, self.env, clear=True)
             patched.setattr(
                 rust_workspaces,
                 "resolved",
-                hermetic.returning(None if roots is None else list(roots)),
+                support.returning(None if roots is None else list(roots)),
             )
             if manifest is None:
                 status = msrv_lint.main([])
@@ -589,11 +588,11 @@ class TestTask:
             The finished process.
 
         """
-        as_mise = hermetic.task_run(TASK, body())
+        as_mise = support.task_run(TASK, body())
         return subprocess.run(
             as_mise.argv,
             cwd=tree,
-            env=hermetic.env() | overrides | as_mise.env,
+            env=support.env() | overrides | as_mise.env,
             capture_output=True,
             text=True,
             check=False,
@@ -603,7 +602,7 @@ class TestTask:
         """No tracked Cargo.toml: the skip line, green, and no helper."""
         with tempfile.TemporaryDirectory() as tmp:
             tree = Path(tmp)
-            subprocess.run([GIT, "init", "-q", tmp], check=True, env=hermetic.env())
+            subprocess.run([GIT, "init", "-q", tmp], check=True, env=support.env())
             overrides = {"ORG_BELT_DIR": str(BELT), "ORG_PYTHON": "/nonexistent"}
             done = TestTask.run_body(tree, overrides)
         assert (done.returncode, done.stdout) == (
@@ -615,16 +614,16 @@ class TestTask:
         """A tracked Cargo.toml and no cargo: the helper's finding and its 1."""
         with tempfile.TemporaryDirectory() as tmp:
             tree = Path(tmp)
-            subprocess.run([GIT, "init", "-q", tmp], check=True, env=hermetic.env())
+            subprocess.run([GIT, "init", "-q", tmp], check=True, env=support.env())
             (tree / "Cargo.toml").write_text("", encoding="utf-8")
             subprocess.run(
-                [GIT, "-C", tmp, "add", "Cargo.toml"], check=True, env=hermetic.env()
+                [GIT, "-C", tmp, "add", "Cargo.toml"], check=True, env=support.env()
             )
             bins = tree.parent / f"{tree.name}-bin"
             bins.mkdir()
             self.stack.callback(shutil.rmtree, bins)
             for tool in ("git", "bash", "dirname", "cat", "mktemp", "rm"):
-                (bins / tool).symlink_to(hermetic.tool(tool))
+                (bins / tool).symlink_to(support.tool(tool))
             overrides = {
                 "PATH": str(bins),
                 "ORG_BELT_DIR": str(BELT),

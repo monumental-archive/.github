@@ -30,7 +30,7 @@ from hypothesis import strategies as st
 
 from belt import tsconfig_dials as td
 from belt.typed_hypothesis import given
-from tests import hermetic
+from tests import support
 
 KEY = st.from_regex(r"[a-z][A-Za-z]{0,15}", fullmatch=True)
 LEVEL = st.dictionaries(KEY, st.booleans(), min_size=1, max_size=8)
@@ -149,7 +149,7 @@ class TestRefusal:
                     contextlib.redirect_stdout(out),
                     contextlib.redirect_stderr(err),
                 ):
-                    hermetic.name_task(patched, "lint:tsconfig-dials")
+                    support.name_task(patched, "lint:tsconfig-dials")
                     status = td.main(["--flags", str(flags), "--name", "t"])
             finally:
                 sys.stdin = old

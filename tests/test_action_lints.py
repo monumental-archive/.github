@@ -21,8 +21,7 @@ pins, owner and zizmor rows fail because actions/x/action.yml is never
 read, and the gate-install row fails because mise/gate-tools.toml never
 installed pinact or zizmor for it.
 
-GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. pytest, run by
-`mise run test`."""
+GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom."""
 
 import json
 import os
@@ -32,10 +31,10 @@ from pathlib import Path
 import pytest
 
 from belt import decoded, gate_tools
-from tests import hermetic
+from tests import support
 
-BELT = hermetic.MISE
-GIT = hermetic.tool("git")
+BELT = support.MISE
+GIT = support.tool("git")
 SHA = "0123456789abcdef0123456789abcdef01234567"
 CHECKOUT = f"actions/checkout@{SHA} # v6.0.0"
 
@@ -142,7 +141,7 @@ class TestPlanted:
         self.tree.mkdir()
         self.bin = tmp / "bin"
         self.bin.mkdir()
-        self.env = hermetic.env() | {
+        self.env = support.env() | {
             "ORG_BELT_DIR": str(BELT),
             "ORG_CANON_DIR": str(BELT.parent),
         }
@@ -167,7 +166,7 @@ class TestPlanted:
             The finished process.
 
         """
-        as_mise = hermetic.task_run(task, body(task))
+        as_mise = support.task_run(task, body(task))
         return subprocess.run(
             as_mise.argv,
             cwd=self.tree,
@@ -184,7 +183,7 @@ class TestPlanted:
             The paths it prints, NUL-separated (#1986).
 
         """
-        as_mise = hermetic.task_run(
+        as_mise = support.task_run(
             "lint:zizmor",
             '. "${ORG_BELT_DIR}/action-files.sh"; files=() && action_files files;'
             ' printf "%s\\0" "${files[@]}"',

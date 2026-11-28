@@ -5,8 +5,7 @@ variant dropped every line naming the crate, not the one skip entry.
 Two skips of one crate at two versions each lost both, so a needless
 one of the pair was never caught; and a `deny` entry for the crate was
 dropped beside its skip.
-
-pytest, run by `mise run test`.py;"""
+"""
 
 import contextlib
 import io
@@ -18,7 +17,7 @@ import pytest
 
 from belt import decoded
 from belt import deny_skips as ds
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -36,7 +35,7 @@ def _task(as_task: Callable[[str], None]) -> None:
 pytestmark = pytest.mark.usefixtures("_task")
 
 
-HERE = hermetic.MISE
+HERE = support.MISE
 
 TWO_VERSIONS = """\
 [bans]

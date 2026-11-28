@@ -6,8 +6,7 @@ chose from. These rows plant the union's two failures (a shard that
 drops an item, one that repeats one) and each of its other refusals, by
 message, then run the belt's test runner for real on a fixture tree at
 1/2 and 2/2 and hold what the two shards reported to the whole suite.
-
-pytest, run by `mise run test`."""
+"""
 
 import subprocess
 import sys
@@ -17,9 +16,9 @@ from pathlib import Path
 import pytest
 
 from belt import decoded, shard
-from tests import hermetic
+from tests import support
 
-HERE = hermetic.MISE
+HERE = support.MISE
 RUNNER = HERE / "unittest_guarded.py"
 
 
@@ -164,7 +163,7 @@ class TestGuarded:
             The finished run.
 
         """
-        env = hermetic.env(
+        env = support.env(
             ORG_SHARD=spec,
             ORG_SHARD_TASK="test:py",
             ORG_SHARD_REPORTS=str(self.reports),

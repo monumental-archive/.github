@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from tests.hermetic import Called
+    from tests.support import Called
 
 # The task that runs the helper, whose name its findings carry (#1934).
 TASK = "audit:mutants"

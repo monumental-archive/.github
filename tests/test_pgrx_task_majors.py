@@ -21,8 +21,7 @@ Postgres replaced: the prepare and the init log, and a major's ICU
 headers are a mark the stub cargo prints. Every row asserts the whole
 log and the whole output, so a row cannot pass by stopping early.
 
-GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom. pytest, run by
-`mise run test`.
+GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom.
 """
 
 import re
@@ -33,10 +32,10 @@ from pathlib import Path
 import pytest
 
 from belt import decoded
-from tests import hermetic
+from tests import support
 
-BELT = hermetic.MISE
-BASH = hermetic.tool("bash")
+BELT = support.MISE
+BASH = support.tool("bash")
 
 # The workspace derivation's question (#2004) is answered and not
 # logged: every manifest's root is the tree's Cargo.toml.
@@ -149,7 +148,7 @@ class TestTwoExtensions:
             stub = bins / name
             stub.write_text(text, encoding="utf-8")
             stub.chmod(0o755)
-        self.belt = hermetic.belt(
+        self.belt = support.belt(
             self.tmp / "belt",
             stubs={
                 "pgrx-env.sh": PGRX_ENV_STUB,
@@ -167,7 +166,7 @@ class TestTwoExtensions:
         surface.write_text(SURFACE, encoding="utf-8")
         plan = self.tmp / "plan"
         plan.write_text(PLAN, encoding="utf-8")
-        env = hermetic.env()
+        env = support.env()
         self.env = env | {
             "PATH": f"{bins}:{env['PATH']}",
             "ORG_BELT_DIR": str(self.belt),
@@ -188,8 +187,8 @@ class TestTwoExtensions:
         # BASH_ENV, as the belt's [env] sets it, so the body has the
         # writer and org_tracked_read (#1986); `--norc`, as the belt's
         # shell has it, is what lets BASH_ENV through whatever stdin is
-        # (hermetic.task_run).
-        as_mise = hermetic.task_run(task, body(task))
+        # (support.task_run).
+        as_mise = support.task_run(task, body(task))
         return subprocess.run(
             [BASH, "--norc", "-c", body(task)],
             cwd=self.tree,

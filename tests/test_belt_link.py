@@ -7,8 +7,7 @@ directory: a tracked file there is red by name.
 The body under test is the task's own `run` string, read out of
 mise/config.toml through decoded.py and run by bash in a planted git tree, not
 a copy of it. Red rows assert the whole message.
-
-pytest, run by `mise run test`.py."""
+"""
 
 from __future__ import annotations
 
@@ -18,9 +17,9 @@ from pathlib import Path
 import pytest
 
 from belt import decoded
-from tests import hermetic
+from tests import support
 
-CANON = hermetic.CANON
+CANON = support.CANON
 NAME = "lint:belt-link"
 CLAIM = (
     "lint:belt-link: the belt's link and lock live in .config/mise/; a repository's\n"
@@ -69,7 +68,7 @@ class TestTheBeltClaimsItsDirectory:
     def _set_up_test_the_belt_claims_its_directory(self, tmp_path: Path) -> None:
         """Plant an empty repository."""
         self.tmp = tmp_path
-        self.env = hermetic.env(self.tmp)
+        self.env = support.env(self.tmp)
         self.repo = self.tmp / "repo"
         self.repo.mkdir()
         self.git("init", "-q", ".")
@@ -77,7 +76,7 @@ class TestTheBeltClaimsItsDirectory:
 
     def git(self, *args: str) -> None:
         """Run git in the repository, checked."""
-        run([hermetic.tool("git"), *args], self.repo, self.env, check=True)
+        run([support.tool("git"), *args], self.repo, self.env, check=True)
 
     def track(self, rel: str) -> None:
         """Write and stage a file at `rel`."""
@@ -93,7 +92,7 @@ class TestTheBeltClaimsItsDirectory:
             The run.
 
         """
-        as_mise = hermetic.task_run("lint:belt-link", body())
+        as_mise = support.task_run("lint:belt-link", body())
         return run(as_mise.argv, self.repo, self.env | as_mise.env)
 
     def test_a_tracked_config_toml_is_red(self) -> None:

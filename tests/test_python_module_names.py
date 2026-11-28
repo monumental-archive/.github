@@ -8,8 +8,6 @@ planted git tree with the belt as ORG_BELT_DIR, and asserts its
 message: each planted defect is red by name, a tree of module names is
 green, a tree with no Python skips. The canon's own tree is the last
 row.
-
-pytest, run by `mise run test`.py; Every git call passes a scrubbed
 environment."""
 
 import subprocess
@@ -17,11 +15,11 @@ import tempfile
 from pathlib import Path
 
 from belt import decoded
-from tests import hermetic
+from tests import support
 
-BELT = hermetic.MISE
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
+BELT = support.MISE
+BASH = support.tool("bash")
+GIT = support.tool("git")
 TASK = "lint:python-module-names"
 
 
@@ -45,11 +43,11 @@ def run(tree: Path, home: Path) -> subprocess.CompletedProcess[str]:
         The finished run.
 
     """
-    as_mise = hermetic.task_run(TASK, body())
+    as_mise = support.task_run(TASK, body())
     return subprocess.run(
         as_mise.argv,
         cwd=tree,
-        env=hermetic.env(
+        env=support.env(
             home,
             ORG_BELT_DIR=str(BELT),
         )
@@ -71,7 +69,7 @@ def lint(files: list[str]) -> subprocess.CompletedProcess[str]:
         root = Path(tmp)
         tree = root / "repo"
         tree.mkdir()
-        env = hermetic.env(root / "home")
+        env = support.env(root / "home")
         (tree / "README.md").write_text("x\n", encoding="utf-8")
         for name in files:
             path = tree / name

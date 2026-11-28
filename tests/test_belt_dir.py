@@ -17,8 +17,7 @@ mise/config.toml through decoded.py and run by `sh -o errexit` as mise runs
 it, in a planted git tree. It must stay total: a template that exits
 nonzero aborts every mise invocation of the belt (#569), so the rows
 with no carrier, and with no git, assert exit 0 and no output.
-
-pytest, run by `mise run test`.py."""
+"""
 
 from __future__ import annotations
 
@@ -30,9 +29,9 @@ from pathlib import Path
 import pytest
 
 from belt import decoded
-from tests import hermetic
+from tests import support
 
-CANON = hermetic.CANON
+CANON = support.CANON
 
 
 def template_command() -> str:
@@ -103,9 +102,9 @@ class TestPlanted:
         self.repo = self.tmp / "repo"
         self.repo.mkdir()
         run(
-            [hermetic.tool("git"), "init", "-q", "."],
+            [support.tool("git"), "init", "-q", "."],
             self.repo,
-            hermetic.env(self.home),
+            support.env(self.home),
             check=True,
         )
         self.ci = plant_belt(self.tmp / "ci")
@@ -154,8 +153,8 @@ class TestPlanted:
             extra["MISE_GLOBAL_CONFIG_FILE"] = self.global_file
         if path is not None:
             extra["PATH"] = path
-        argv = [hermetic.tool("sh"), "-o", "errexit", "-c", template_command()]
-        return run(argv, where, hermetic.env(self.home, **extra))
+        argv = [support.tool("sh"), "-o", "errexit", "-c", template_command()]
+        return run(argv, where, support.env(self.home, **extra))
 
     def link_dir(self) -> Path:
         """Name the directory mise runs the linked belt's exec in.
@@ -234,7 +233,7 @@ class TestWhereTheBeltIs(TestPlanted):
         bare = self.tmp / "bin"
         bare.mkdir()
         for name in ("dirname", "readlink", "cat"):
-            found = hermetic.optional_tool(name)
+            found = support.optional_tool(name)
             if found is not None:
                 (bare / name).symlink_to(found)
         done = self.resolve(self.link_dir(), path=str(bare))
@@ -256,8 +255,8 @@ class TestUnderAHook(TestPlanted):
             The worktree's `.config/mise/conf.d`, where mise runs the exec.
 
         """
-        env = hermetic.env(self.home)
-        git = hermetic.tool("git")
+        env = support.env(self.home)
+        git = support.tool("git")
         run(
             [git, "commit", "-q", "--allow-empty", "-m", "c"],
             self.repo,
@@ -279,9 +278,9 @@ class TestUnderAHook(TestPlanted):
 
         """
         done = run(
-            [hermetic.tool("git"), "rev-parse", "--absolute-git-dir"],
+            [support.tool("git"), "rev-parse", "--absolute-git-dir"],
             conf,
-            hermetic.env(self.home),
+            support.env(self.home),
             check=True,
         )
         return done.stdout.strip()

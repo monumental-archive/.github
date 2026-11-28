@@ -49,8 +49,7 @@ the uncompilable member, writes every member not `--exclude`d, and on
 `--no-verify` writes every member - from STUB_SECOND when a row plants
 different bytes there, which is the one way the equality check can be
 reached at all.
-
-pytest, run by `mise run test`. Every git call"""
+"""
 
 import hashlib
 import json
@@ -65,11 +64,11 @@ import pytest
 
 from belt import decoded, workflow_yaml
 from belt.release import package_crates
-from tests import hermetic
+from tests import support
 
-CANON = hermetic.CANON
+CANON = support.CANON
 WORKFLOW = CANON / ".github" / "workflows" / "build-rust-crate.yml"
-BASH = hermetic.tool("bash")
+BASH = support.tool("bash")
 VERSION = "1.3.4"
 MEMBERS = ("edtf-core", "edtf-cli", "edtf-postgres")
 UNCOMPILABLE = "edtf-postgres"
@@ -270,7 +269,7 @@ def steps(job: Job, *, script: bool) -> Run:
         (stubs / "cargo").write_text(CARGO_STUB)
         (stubs / "cargo").chmod(0o755)
         # The inventory step reads the policy the release asserts.
-        hermetic.canon(work / ".org-canon", "slsa/assert-policy.json")
+        support.canon(work / ".org-canon", "slsa/assert-policy.json")
         keys = {m: (job.publish or {}).get(m) for m in job.members}
         (tmp / "metadata.json").write_text(json.dumps(metadata(keys)))
         for m in job.members:
@@ -279,7 +278,7 @@ def steps(job: Job, *, script: bool) -> Run:
             (planted / f"{m}-{VERSION}.crate").write_bytes(b)
         log, outputs = tmp / "cargo.log", tmp / "github_output"
         outputs.touch()
-        env = hermetic.env(
+        env = support.env(
             PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}",
             EXCLUDE_FLAGS=job.excludes,
             UNTRUSTED_VERSION=VERSION,
@@ -294,14 +293,14 @@ def steps(job: Job, *, script: bool) -> Run:
             STUB_UNWRITTEN=" ".join(job.unwritten),
         )
         out, err, rc = "", "", 0
-        result: subprocess.CompletedProcess[str] | hermetic.Called
+        result: subprocess.CompletedProcess[str] | support.Called
         for argv in [[HELPER], *([BASH, "-c", step_body(n)] for n in STEPS)]:
             if argv == [HELPER] and not script:
 
                 def call() -> int:
                     return package_crates.main([])
 
-                result = hermetic.call(call, env=env, cwd=work)
+                result = support.call(call, env=env, cwd=work)
             else:
                 result = subprocess.run(
                     argv,

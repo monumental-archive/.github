@@ -16,8 +16,7 @@ Before #2011 the body read `cargo metadata` at the root alone, so the
 fuzz crate was held to nothing: each row fails there.
 
 GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom; every child
-environment is built from hermetic.env (#1542). pytest, run by `mise run
-test`."""
+environment is built from support.env (#1542)."""
 
 from __future__ import annotations
 
@@ -29,11 +28,11 @@ from pathlib import Path
 import pytest
 
 from belt import decoded
-from tests import hermetic
+from tests import support
 
-BELT = hermetic.MISE
+BELT = support.MISE
 TASK = "lint:msrv"
-GIT = hermetic.tool("git")
+GIT = support.tool("git")
 FUZZ = "fuzz/Cargo.toml"
 
 CARGO_STUB = r"""#!/usr/bin/env bash
@@ -116,7 +115,7 @@ class TestTwoRoots:
         (self.tree / "fuzz").mkdir(parents=True)
         for manifest in ("Cargo.toml", FUZZ):
             (self.tree / manifest).write_text("", encoding="utf-8")
-        env = hermetic.env()
+        env = support.env()
         subprocess.run([GIT, "init", "-q"], cwd=self.tree, env=env, check=True)
         subprocess.run([GIT, "add", "."], cwd=self.tree, env=env, check=True)
         self.plants = tmp / "plants"
@@ -161,11 +160,11 @@ class TestTwoRoots:
             The finished process.
 
         """
-        as_mise = hermetic.task_run(TASK, body())
+        as_mise = support.task_run(TASK, body())
         return subprocess.run(
             as_mise.argv,
             cwd=self.tree,
-            env=hermetic.env() | self.overrides | plant | as_mise.env,
+            env=support.env() | self.overrides | plant | as_mise.env,
             capture_output=True,
             text=True,
             check=False,

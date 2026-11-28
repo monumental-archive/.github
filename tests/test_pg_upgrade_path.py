@@ -42,8 +42,6 @@ a pre-push hook, which is how three lanes lost their indexes on
 2026-08-24. Every subprocess below is handed an environment with the
 `GIT_*` family removed.
 
-pytest, run by `mise run test`.py —
-
 Run through the gate as `mise run test`, which `ci` collects.
 """
 
@@ -54,17 +52,17 @@ from tempfile import TemporaryDirectory
 
 import pytest
 
-from tests import hermetic
+from tests import support
 
-CANON = hermetic.CANON
+CANON = support.CANON
 SCRIPT = CANON / "mise" / "pg-upgrade-path.sh"
 RECORD = ".pgrx-installable"
 
 # Absolute, resolved once: a partial path lets PATH decide which binary a
 # test ran.
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
-CARGO = hermetic.optional_tool("cargo")
+BASH = support.tool("bash")
+GIT = support.tool("git")
+CARGO = support.optional_tool("cargo")
 
 # The graph the defect was measured on. 1.3.1 is the target nothing was
 # derived from; 1.2.2 and 1.2.3 are `from` halves and always owe a path.
@@ -80,7 +78,7 @@ def clean_env() -> dict[str, str]:
         below cannot be redirected at the caller's repository (#857).
 
     """
-    return hermetic.env()
+    return support.env()
 
 
 def record_file(
@@ -166,7 +164,7 @@ class Tree:
         env = clean_env()
         subprocess.run(
             [
-                hermetic.tool("cargo"),
+                support.tool("cargo"),
                 "generate-lockfile",
                 "--offline",
                 "--manifest-path",

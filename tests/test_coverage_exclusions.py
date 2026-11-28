@@ -21,7 +21,7 @@ import pytest
 
 from belt import coverage_exclusions as ce
 from belt import decoded
-from tests import hermetic
+from tests import support
 import contextlib
 
 if TYPE_CHECKING:
@@ -40,10 +40,10 @@ def _task(as_task: Callable[[str], None]) -> None:
 pytestmark = pytest.mark.usefixtures("_task")
 
 
-_HERE = hermetic.MISE
+_HERE = support.MISE
 HELPER = _HERE / "coverage_exclusions.py"
-GIT = hermetic.tool("git")
-BASH = hermetic.tool("bash")
+GIT = support.tool("git")
+BASH = support.tool("bash")
 # No user or system git config reaches a fixture repository.
 GIT_CONFIG = {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
 
@@ -81,14 +81,14 @@ QUOTED = [
 ]
 
 
-def helper(root: Path, *paths: str) -> hermetic.Called:
+def helper(root: Path, *paths: str) -> support.Called:
     """Call the helper's `main` in this process over `paths`, from `root` (#1696).
 
     Returns:
         The status `main` returned and what it wrote to each stream.
 
     """
-    return hermetic.call(
+    return support.call(
         lambda: ce.main([]), cwd=root, stdin="".join(f"{path}\0" for path in paths)
     )
 
@@ -202,7 +202,7 @@ class TestTask:
             (root / name).write_text(body, encoding="utf-8")
         for args in (["init", "-q"], ["add", "."]):
             subprocess.run(
-                [GIT, *args], cwd=root, env=hermetic.env(**GIT_CONFIG), check=True
+                [GIT, *args], cwd=root, env=support.env(**GIT_CONFIG), check=True
             )
         return root
 
@@ -214,11 +214,11 @@ class TestTask:
             The finished process.
 
         """
-        as_mise = hermetic.task_run("lint:coverage-exclusions", task_body())
+        as_mise = support.task_run("lint:coverage-exclusions", task_body())
         return subprocess.run(
             as_mise.argv,
             cwd=root,
-            env=hermetic.env(ORG_BELT_DIR=str(_HERE), **GIT_CONFIG) | as_mise.env,
+            env=support.env(ORG_BELT_DIR=str(_HERE), **GIT_CONFIG) | as_mise.env,
             capture_output=True,
             text=True,
             check=False,
@@ -289,7 +289,7 @@ class TestMissingSibling:
             capture_output=True,
             text=True,
             check=False,
-            env=hermetic.env(MISE_TASK_NAME="lint:bash-portability"),
+            env=support.env(MISE_TASK_NAME="lint:bash-portability"),
         )
 
     def test_exit_trap_without_belt_shell(self) -> None:
@@ -313,7 +313,7 @@ class TestMissingSibling:
         helper = "release/publish_crates.py"
         # A stub of its own text, so the helper resolves its siblings in
         # this tree; the writer beside it, the missing sibling removed.
-        root = hermetic.canon(
+        root = support.canon(
             tmp.name, stubs={helper: (_HERE.parent / helper).read_text()}
         )
         (root / "mise" / "crates_index.py").unlink()
@@ -322,7 +322,7 @@ class TestMissingSibling:
             capture_output=True,
             text=True,
             check=False,
-            env=hermetic.env(MISE_TASK_NAME="lint:bash-portability"),
+            env=support.env(MISE_TASK_NAME="lint:bash-portability"),
         )
         assert r.returncode != 0
         assert r.stderr == (
@@ -341,7 +341,7 @@ class TestCanon:
         carried a coverage pragma.
         """
         root = _HERE.parent
-        listing = hermetic.tracked(
+        listing = support.tracked(
             root, ":!vendor/**", "*.py", "*.rs", "*.go", "*.ts", "*.js", **GIT_CONFIG
         )
         r = helper(root, *listing)

@@ -26,7 +26,7 @@ from pathlib import Path
 import pytest
 
 from belt import gate_cache_key
-from tests import hermetic
+from tests import support
 
 LOGGED = (
     "mise-v2-linux-x64-ubuntu26-2026.11.6-p692-"
@@ -153,7 +153,7 @@ class TestInputs:
 
     def test_the_gate_pins_one_version(self) -> None:
         """The real ci.yml reads clean."""
-        ci = hermetic.CANON / ".github" / "workflows" / "ci.yml"
+        ci = support.CANON / ".github" / "workflows" / "ci.yml"
         assert re.search(
             r"^\d{4}\.", gate_cache_key.mise_version(ci.read_text("utf-8"))
         )
@@ -192,9 +192,9 @@ def run(canon: Path) -> dict[str, str]:
         out = Path(tmp) / "out"
         env = {**RUNNER, "GITHUB_OUTPUT": str(out)}
         with pytest.MonkeyPatch.context() as patched, redirect_stdout(io.StringIO()):
-            hermetic.patch_env(patched, env, clear=True)
-            patched.setattr(platform, "system", hermetic.returning("Linux"))
-            patched.setattr(platform, "machine", hermetic.returning("x86_64"))
+            support.patch_env(patched, env, clear=True)
+            patched.setattr(platform, "system", support.returning("Linux"))
+            patched.setattr(platform, "machine", support.returning("x86_64"))
             code = gate_cache_key.main(["tool", "mise-v2", str(canon)], now=WHEN)
         if code != 0:
             msg = f"gate-cache-key exited {code}"
@@ -237,7 +237,7 @@ class TestMain:
         """A canon tree without its files is a red step, not a key."""
         err = io.StringIO()
         with pytest.MonkeyPatch.context() as patched, redirect_stderr(err):
-            hermetic.name_task(patched, "")
+            support.name_task(patched, "")
             patched.setattr(sys, "argv", ["gate_cache_key.py"])
             code = gate_cache_key.main(["tool", "mise-v2", "/nonexistent"])
             assert code == 1
@@ -274,7 +274,7 @@ class TestBelt:
 
     def test_the_real_belt_lockfile_is_read(self) -> None:
         """The tree's own mise/mise.lock is what the key digests."""
-        tree = hermetic.CANON
+        tree = support.CANON
         got = run(tree)
         lock = (tree / "mise" / "mise.lock").read_bytes()
         assert got["key"].endswith("-b" + hashlib.sha256(lock).hexdigest())
@@ -348,9 +348,9 @@ class TestInstallList:
                 pytest.MonkeyPatch.context() as patched,
                 redirect_stdout(io.StringIO()),
             ):
-                hermetic.patch_env(patched, env, clear=True)
-                patched.setattr(platform, "system", hermetic.returning("Linux"))
-                patched.setattr(platform, "machine", hermetic.returning("x86_64"))
+                support.patch_env(patched, env, clear=True)
+                patched.setattr(platform, "system", support.returning("Linux"))
+                patched.setattr(platform, "machine", support.returning("x86_64"))
                 argv = ["tool", "mise-pgrx-v1-pg18", str(tree)]
                 argv += ["--install", "jq rust@1"]
                 assert gate_cache_key.main(argv, now=WHEN) == 0
@@ -389,7 +389,7 @@ def rustc_on_path(tmp: Path, script: str) -> str:
 
 # The workflow's ORG_MISE_CONFIG_GLOBS, read from the real gate, so the
 # rows hash exactly the configs the tool key does.
-CI = hermetic.CANON / ".github" / "workflows" / "ci.yml"
+CI = support.CANON / ".github" / "workflows" / "ci.yml"
 GLOBS = "\n".join(
     line.strip()
     for line in CI
@@ -414,8 +414,8 @@ def git_tree(root: Path, files: dict[str, str]) -> Path:
         `root`.
 
     """
-    git = hermetic.tool("git")
-    env = hermetic.env()
+    git = support.tool("git")
+    env = support.env()
     subprocess.run([git, "init", "-q", str(root)], env=env, check=True)
     for name, text in files.items():
         (root / name).parent.mkdir(parents=True, exist_ok=True)
@@ -455,7 +455,7 @@ def cargo_main(
             redirect_stdout(io.StringIO()),
             redirect_stderr(err),
         ):
-            hermetic.patch_env(patched, env, clear=True)
+            support.patch_env(patched, env, clear=True)
             code = gate_cache_key.main(["cargo", "--canon-ref", canon_ref])
         return code, out.read_text("utf-8"), err.getvalue()
 
@@ -794,7 +794,7 @@ def digest_main(path: str) -> tuple[int, str, str]:
         redirect_stdout(out),
         redirect_stderr(err),
     ):
-        hermetic.patch_env(patched, env, clear=True)
+        support.patch_env(patched, env, clear=True)
         code = gate_cache_key.main(["digest"])
     return code, out.getvalue(), err.getvalue()
 

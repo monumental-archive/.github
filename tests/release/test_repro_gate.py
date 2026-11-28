@@ -14,8 +14,7 @@ The verdicts themselves were measured against the real stele v0.25.0
 and real artifacts (release-lab v0.28.5, edtf v1.3.5, the canon's
 v1.69.3), and the pull request quotes them; these rows need no network
 and no binary.
-
-pytest, run by `mise run test`. Every git call"""
+"""
 
 import os
 import subprocess
@@ -24,12 +23,12 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from belt import decoded, workflow_yaml
-from tests import hermetic
+from tests import support
 
-CANON = hermetic.CANON
+CANON = support.CANON
 WORKFLOW = CANON / ".github" / "workflows" / "publish.yml"
 STEP = "Compare the two builds (stele verify repro)"
-BASH = hermetic.tool("bash")
+BASH = support.tool("bash")
 CRATES = "aa  edtf-core-1.3.5.crate\nbb  edtf-cli-1.3.5.crate"
 WASM = "cc  lab-wasm-0.28.5.tgz"
 
@@ -116,7 +115,7 @@ def run_step(classes: str, *, dry_run: bool = False, **outputs: str) -> Run:
         (stubs / "stele").write_text(STELE_STUB)
         (stubs / "stele").chmod(0o755)
         argv, files = tmp / "argv", tmp / "files"
-        inherited = hermetic.env()
+        inherited = support.env()
         env = {
             **inherited,
             "PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}",

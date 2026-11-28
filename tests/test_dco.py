@@ -9,8 +9,7 @@ against the captured text.
 
 The rows run the task's own `run` body, read from mise/config.toml, in
 a planted git tree whose `origin/main` is its first commit.
-
-pytest, run by `mise run test`.py;"""
+"""
 
 import re
 import subprocess
@@ -18,12 +17,12 @@ import tempfile
 from pathlib import Path
 
 from belt import decoded
-from tests import hermetic
+from tests import support
 
-BELT = hermetic.MISE
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
-SIGN_OFF = f"Signed-off-by: {hermetic.IDENTITY_NAME} <{hermetic.IDENTITY_EMAIL}>"
+BELT = support.MISE
+BASH = support.tool("bash")
+GIT = support.tool("git")
+SIGN_OFF = f"Signed-off-by: {support.IDENTITY_NAME} <{support.IDENTITY_EMAIL}>"
 
 
 def body() -> str:
@@ -48,7 +47,7 @@ def run(message: str) -> subprocess.CompletedProcess[str]:
     """
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
-        env = hermetic.env(root / "home")
+        env = support.env(root / "home")
 
         def git(*args: str, stdin: str | None = None) -> None:
             subprocess.run(
@@ -59,7 +58,7 @@ def run(message: str) -> subprocess.CompletedProcess[str]:
         git("commit", "-q", "--allow-empty", "-m", "base")
         git("update-ref", "refs/remotes/origin/main", "HEAD")
         git("commit", "-q", "--allow-empty", "-F", "-", stdin=message)
-        as_mise = hermetic.task_run("lint:dco", body())
+        as_mise = support.task_run("lint:dco", body())
         return subprocess.run(
             as_mise.argv,
             cwd=root,

@@ -10,8 +10,7 @@ workflow does, asserting each refusal's exact `::error::` line (the
 wording the inline shell had). The proof rows put a recording `docker`
 first on PATH and run the real script: what it builds, with which
 arguments, and the Postgres-major branch (below 18, no path proof).
-
-pytest, run by `mise run test`.py."""
+"""
 
 import io
 import os
@@ -26,9 +25,9 @@ from pathlib import Path
 import pytest
 
 from belt import decoded
-from tests import hermetic
+from tests import support
 
-RELEASE = hermetic.RELEASE
+RELEASE = support.RELEASE
 CANON = RELEASE.parent
 # The writer of workflow commands each proof container is given (#1660).
 WRITER_MOUNT = (
@@ -40,7 +39,7 @@ WRITER_MOUNT = (
 STAGE = RELEASE / "pgrx_images.py"
 PROOF = RELEASE / "pgrx-image-proof.sh"
 TABLE = CANON / "docker" / "pgrx-base-images.toml"
-BASH = hermetic.tool("bash")
+BASH = support.tool("bash")
 
 VERSION = "1.2.3"
 CRATE = "crates/edtf-postgres"
@@ -446,7 +445,7 @@ class TestProof:
         self.staged.mkdir(parents=True)
         (self.staged / "edtf_postgres.control").write_text("control\n")
         (self.staged / "edtf_postgres--1.2.3.sql").write_text("sql\n")
-        self.env = hermetic.env(
+        self.env = support.env(
             PATH=f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
             DOCKER_LOG=str(self.log),
         )
@@ -660,7 +659,7 @@ class TestCopyProof:
             path.write_text(text)
             path.chmod(0o755)
         self.log = self.root / "psql.log"
-        self.env = hermetic.env(
+        self.env = support.env(
             PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}",
             PGRX_PROOF_ROOT=str(self.root),
             PSQL_LOG=str(self.log),

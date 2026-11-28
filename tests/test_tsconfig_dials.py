@@ -21,9 +21,9 @@ from pathlib import Path
 import pytest
 
 from belt import decoded, tsconfig_dials
-from tests import hermetic
+from tests import support
 
-FLAGS_FILE = hermetic.MISE / "tsc-flags.txt"
+FLAGS_FILE = support.MISE / "tsc-flags.txt"
 REQUIRED, UNREADABLE = tsconfig_dials.dials(FLAGS_FILE)
 # What a row expects when nothing is unreadable or nothing is found.
 NONE: list[str] = []
@@ -222,7 +222,7 @@ class TestMainTest:
     def test_the_scaffold_stub_passes_its_own_check(self) -> None:
         """A scaffold that fails the org's gate is worse than none."""
         stub = decoded.load_json(
-            (hermetic.CANON / "scaffold" / "tsconfig.json").read_text(
+            (support.CANON / "scaffold" / "tsconfig.json").read_text(
                 encoding="utf-8",
             ),
         )

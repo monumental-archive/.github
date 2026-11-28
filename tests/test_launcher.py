@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from belt import launcher
-from tests import hermetic
+from tests import support
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -35,8 +35,8 @@ def run(*argv: str, **env: str) -> subprocess.CompletedProcess[str]:
 
     """
     return subprocess.run(
-        [PYTHON, "-I", str(hermetic.PACKAGE), *argv],
-        env=hermetic.env(**env),
+        [PYTHON, "-I", str(support.PACKAGE), *argv],
+        env=support.env(**env),
         capture_output=True,
         text=True,
         check=False,
@@ -71,11 +71,11 @@ def test_a_commands_status_reaches_the_shell() -> None:
     """`python-roots` with no file is its own usage error, 2, through the shell."""
     done = subprocess.run(
         [
-            hermetic.tool("bash"),
+            support.tool("bash"),
             "-c",
-            f'"{PYTHON}" -I "{hermetic.PACKAGE}" python-roots; echo "status $?"',
+            f'"{PYTHON}" -I "{support.PACKAGE}" python-roots; echo "status $?"',
         ],
-        env=hermetic.env(),
+        env=support.env(),
         capture_output=True,
         text=True,
         check=False,

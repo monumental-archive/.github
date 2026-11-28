@@ -27,14 +27,14 @@ import pytest
 
 from belt import decoded, typed_std
 from belt import git_decoy as gd
-from tests import hermetic
+from tests import support
 import contextlib
 
-_HERE = hermetic.MISE
+_HERE = support.MISE
 
-GIT = hermetic.tool("git")
-BASH = hermetic.tool("bash")
-CLEAN = hermetic.env()
+GIT = support.tool("git")
+BASH = support.tool("bash")
+CLEAN = support.env()
 IDENTITY = {
     "GIT_CONFIG_GLOBAL": os.devnull,
     "GIT_CONFIG_NOSYSTEM": "1",
@@ -82,7 +82,7 @@ class T(unittest.TestCase):
 """
 
 # The careful harness's environment, planted as code into a module that
-# cannot import hermetic.py: what git needs and nothing of git's own.
+# cannot import support.py: what git needs and nothing of git's own.
 SCRUB = '{"PATH": os.environ["PATH"], "HOME": os.environ["HOME"]}'
 
 
@@ -173,7 +173,7 @@ class TestTask:
         # The runner and all it reads, as the tree's mise/: the whole
         # belt, its own tests taken out, since the tree's tests are the
         # ones planted here.
-        for test in hermetic.belt(tree / "mise").glob("test_*.py"):
+        for test in support.belt(tree / "mise").glob("test_*.py"):
             test.unlink()
         for root in roots():
             (tree / root).mkdir(parents=True, exist_ok=True)
@@ -254,7 +254,7 @@ class TestHelper:
             The helper's exit status and its standard error.
 
         """
-        done = hermetic.call(
+        done = support.call(
             lambda: gd.main(["run", str(self.decoy), "--", BASH, "-c", script]),
             env=self.leak_env(),
             cwd=self.work,
@@ -280,7 +280,7 @@ class TestHelper:
         """`plant DIR` makes a repository there: the task's first call."""
         fresh = self.work / "fresh"
         fresh.mkdir()
-        done = hermetic.call(
+        done = support.call(
             lambda: gd.main(["plant", str(fresh)]), env=self.leak_env(), cwd=self.work
         )
         assert (done.returncode, done.stderr) == (0, "")
@@ -288,7 +288,7 @@ class TestHelper:
 
     def test_run_with_no_command_is_a_usage_error(self) -> None:
         """`run DIR` and nothing to run is argparse's exit 2, by name."""
-        done = hermetic.call(
+        done = support.call(
             lambda: gd.main(["run", str(self.decoy)]),
             env=self.leak_env(),
             cwd=self.work,

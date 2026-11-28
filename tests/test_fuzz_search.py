@@ -24,8 +24,7 @@ steps and jobs the rows hold to.
 
 Each row asserts the message, not just the exit status: a planted row
 scored on exit alone can pass for the wrong reason.
-
-pytest, run by `mise run test`. Every git call"""
+"""
 
 import os
 import re
@@ -38,13 +37,13 @@ from pathlib import Path
 import pytest
 
 from belt import decoded, workflow_yaml
-from tests import hermetic
+from tests import support
 import contextlib
 
-BELT = hermetic.MISE
+BELT = support.MISE
 CANON = BELT.parent
-BASH = hermetic.tool("bash")
-GIT = hermetic.tool("git")
+BASH = support.tool("bash")
+GIT = support.tool("git")
 SEARCH_LIB = BELT / "fuzz-search-lib.sh"
 WORKFLOW = CANON / ".github" / "workflows" / "repo-deep-tests.yml"
 STUBS = (
@@ -54,7 +53,7 @@ STUBS = (
 HOST = "x86_64-unknown-linux-gnu"
 NIGHTLY = "nightly-2026-11-01"
 
-RUSTC = hermetic.RUSTC_STUB.replace(
+RUSTC = support.RUSTC_STUB.replace(
     "#!/bin/sh\n",
     '#!/bin/sh\nif [ "$1" = --print ]; then echo "${STUB_SYSROOT}"; exit 0; fi\n',
     1,
@@ -303,7 +302,7 @@ class TestSearchCase:
             where.mkdir(parents=True, exist_ok=True)
             (where / name).write_text(text, encoding="utf-8")
             (where / name).chmod(0o755)
-        env = hermetic.env()
+        env = support.env()
         self.env = env | {
             "ORG_BELT_DIR": str(BELT),
             "ORG_PYTHON": sys.executable,
@@ -389,7 +388,7 @@ class TestSearchCase:
             The finished process.
 
         """
-        as_mise = hermetic.task_run(name, task_body(name))
+        as_mise = support.task_run(name, task_body(name))
         return subprocess.run(
             as_mise.argv,
             cwd=self.tree,
@@ -828,7 +827,7 @@ class TestFailureLines:
             capture_output=True,
             text=True,
             check=True,
-            env=hermetic.env() | {"ORG_FINDINGS": "", "MISE_TASK_NAME": "audit:fuzz"},
+            env=support.env() | {"ORG_FINDINGS": "", "MISE_TASK_NAME": "audit:fuzz"},
         ).stderr
         assert err == (
             "audit:fuzz: s: m\n  the run's log holds no line saying what crashed"
@@ -1103,7 +1102,7 @@ class TestHandover:
         assert command.strip() == ".org-canon/release/propose-fuzz-corpus.sh handover"
         run = subprocess.run(
             [BASH, str(CANON / "release" / "propose-fuzz-corpus.sh"), "handover"],
-            env=hermetic.env()
+            env=support.env()
             | {
                 "CANDIDATES": str(stage),
                 "SUMMARY": str(tmp / "summary.md"),
