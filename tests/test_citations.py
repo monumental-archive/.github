@@ -7,8 +7,7 @@ shaped repository whose docs/ git tracks, because the helper reads
 docs/ from git (#2013): an untracked docs/ is a missing one.
 """
 
-import contextlib
-import io
+import itertools
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
@@ -95,30 +94,26 @@ def plant(tree: Path, files: dict[str, str], *, env: support.Env) -> None:
         subprocess.run([GIT, "add", "--", *files], cwd=tree, env=environ, check=True)
 
 
-def audit(
-    files: dict[str, str], org: Org | None, *, owner: str = OWNER, env: support.Env
-) -> tuple[int, str, str]:
-    """Plant `files` and run the helper's main against `org`.
+@fixture
+def repo(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, env: support.Env
+) -> Callable[..., Path]:
+    """Plant a repository tracking a row's files, under its owner.
 
     Returns:
-        The exit status, stdout and stderr.
+        A function that plants `files` and returns the repository's top.
 
     """
-    with tempfile.TemporaryDirectory() as tmp:
-        tree = Path(tmp) / "repo"
-        tree.mkdir()
+    made = itertools.count()
+
+    def lay_out(files: dict[str, str], *, owner: str = OWNER) -> Path:
+        tree = tmp_path / f"run{next(made)}" / "repo"
+        tree.mkdir(parents=True)
         plant(tree, files, env=env)
-        out, err = io.StringIO(), io.StringIO()
-        named: dict[str, str] = {"GITHUB_REPOSITORY_OWNER": owner}
-        with (
-            pytest.MonkeyPatch.context() as patched,
-            contextlib.redirect_stdout(out),
-            contextlib.redirect_stderr(err),
-        ):
-            for name, value in named.items():
-                patched.setenv(name, value)
-            status = citations.main([], net=org, top=tree)
-        return status, out.getvalue(), err.getvalue()
+        monkeypatch.setenv("GITHUB_REPOSITORY_OWNER", owner)
+        return tree
+
+    return lay_out
 
 
 DOC = {"docs/a.md": "# A\n\nNothing cited.\n"}
@@ -144,9 +139,13 @@ def test_an_untracked_docs_is_missing(
     ) == err
 
 
-def test_docs_without_markdown_is_red(env: support.Env) -> None:
+def test_docs_without_markdown_is_red(
+    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
+) -> None:
     """A tracked docs/ holding no markdown resolves nothing: red."""
-    status, out, err = audit({"docs/a.txt": "x\n"}, Org(), env=env)
+    tree = repo({"docs/a.txt": "x\n"})
+    status = citations.main([], net=Org(), top=tree)
+    out, err = capfd.readouterr()
     assert (status, out) == (1, "")
     assert (
         f"{TASK}: on the canon, and docs/ holds no tracked markdown —\n"
@@ -155,32 +154,50 @@ def test_docs_without_markdown_is_red(env: support.Env) -> None:
     ) == err
 
 
-def test_no_gh_is_red(env: support.Env, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_no_gh_is_red(
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+    repo: Callable[..., Path],
+) -> None:
     """With no network stand-in and no gh on PATH: `gh missing`."""
     monkeypatch.setattr("shutil.which", lambda *_args, **_kwargs: None)
-    status, _, err = audit(DOC, None, env=env)
+    tree = repo(DOC)
+    status = citations.main([], net=None, top=tree)
+    err = capfd.readouterr().err
     assert (1, f"{TASK}: gh missing\n") == (status, err)
 
 
-def test_no_owner_is_red(env: support.Env) -> None:
+def test_no_owner_is_red(
+    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
+) -> None:
     """The org is the environment's to name (#579)."""
-    status, _, err = audit(DOC, Org(), owner="", env=env)
+    tree = repo(DOC, owner="")
+    status = citations.main([], net=Org(), top=tree)
+    err = capfd.readouterr().err
     assert (1, f"{TASK}: {citations.OWNER_UNSET}\n") == (status, err)
 
 
 # The org listing is the population; a broken one resolves nothing.
-def test_a_failed_listing_is_red(env: support.Env) -> None:
+def test_a_failed_listing_is_red(
+    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
+) -> None:
     """Gh could not list: nothing was resolved."""
-    status, _, err = audit(DOC, Org(repos=None), env=env)
+    tree = repo(DOC)
+    status = citations.main([], net=Org(repos=None), top=tree)
+    err = capfd.readouterr().err
     assert (
         1,
         f"{TASK}: could not enumerate org repos — nothing was resolved\n",
     ) == (status, err)
 
 
-def test_an_empty_listing_is_red(env: support.Env) -> None:
+def test_an_empty_listing_is_red(
+    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
+) -> None:
     """Zero repositories is a broken walk, not clean docs."""
-    status, _, err = audit(DOC, Org(repos=[]), env=env)
+    tree = repo(DOC)
+    status = citations.main([], net=Org(repos=[]), top=tree)
+    err = capfd.readouterr().err
     assert (
         1,
         (
@@ -200,13 +217,17 @@ CITING = (
 )
 
 
-def test_every_citation_resolving_passes_with_counts(env: support.Env) -> None:
+def test_every_citation_resolving_passes_with_counts(
+    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
+) -> None:
     """Four release citations and one run, all live: the pass line."""
     org = Org(
         tags={".github": {"v1.24.1"}, "stele": {"v0.2.2", "v0.16.0", "v0.3.0"}},
         runs={"stele/42"},
     )
-    status, out, err = audit({"docs/b.md": CITING, **DOC}, org, env=env)
+    tree = repo({"docs/b.md": CITING, **DOC})
+    status = citations.main([], net=org, top=tree)
+    out, err = capfd.readouterr()
     assert (status, err) == (0, "")
     assert (
         f"{TASK}: 2 doc(s) walked, 4 org release citation(s) and 1 run URL(s)"
@@ -217,10 +238,14 @@ def test_every_citation_resolving_passes_with_counts(env: support.Env) -> None:
     assert want == asked
 
 
-def test_a_missing_tag_and_a_dead_run_are_named(env: support.Env) -> None:
+def test_a_missing_tag_and_a_dead_run_are_named(
+    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
+) -> None:
     """Each citation that resolves to nothing is a line of its own."""
     org = Org(tags={".github": {"v1.24.1"}, "stele": {"v0.2.2", "v0.3.0"}})
-    status, out, err = audit({"docs/a.md": CITING}, org, env=env)
+    tree = repo({"docs/a.md": CITING})
+    status = citations.main([], net=org, top=tree)
+    out, err = capfd.readouterr()
     assert (status, out) == (1, "")
     assert (
         f"{TASK}: citations that resolve to nothing:\n"
@@ -230,25 +255,37 @@ def test_a_missing_tag_and_a_dead_run_are_named(env: support.Env) -> None:
     ) == err
 
 
-def test_a_version_resolves_against_its_own_repository(env: support.Env) -> None:
+def test_a_version_resolves_against_its_own_repository(
+    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
+) -> None:
     """`.github@v0.2.2` is not satisfied by stele's v0.2.2."""
     org = Org(tags={".github": set(), "stele": {"v0.2.2"}})
-    status, _, err = audit({"docs/a.md": "At `.github@v0.2.2`.\n"}, org, env=env)
+    tree = repo({"docs/a.md": "At `.github@v0.2.2`.\n"})
+    status = citations.main([], net=org, top=tree)
+    err = capfd.readouterr().err
     assert status == 1
     assert "no such tag in .github: v0.2.2" in err
 
 
-def test_the_longer_name_wins_a_shared_prefix(env: support.Env) -> None:
+def test_the_longer_name_wins_a_shared_prefix(
+    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
+) -> None:
     """`stele-lab@v1.0.0` is stele-lab's, never stele's."""
     org = Org(repos=["stele", "stele-lab"], tags={"stele-lab": {"v1.0.0"}})
-    status, out, _ = audit({"docs/a.md": "At stele-lab@v1.0.0.\n"}, org, env=env)
+    tree = repo({"docs/a.md": "At stele-lab@v1.0.0.\n"})
+    status = citations.main([], net=org, top=tree)
+    out = capfd.readouterr().out
     assert status == 0
     assert "1 org release citation(s)" in out
 
 
-def test_a_dot_in_a_name_is_literal(env: support.Env) -> None:
+def test_a_dot_in_a_name_is_literal(
+    capfd: pytest.CaptureFixture[str], repo: Callable[..., Path]
+) -> None:
     """`.github` does not match `xgithub`."""
-    status, out, _ = audit({"docs/a.md": "At xgithub@v1.0.0.\n"}, Org(), env=env)
+    tree = repo({"docs/a.md": "At xgithub@v1.0.0.\n"})
+    status = citations.main([], net=Org(), top=tree)
+    out = capfd.readouterr().out
     assert status == 0
     assert "0 org release citation(s)" in out
 
