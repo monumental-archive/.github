@@ -208,11 +208,21 @@ jobs:
           name: release-crates
           path: target/package/*.crate
           if-no-files-found: error
+      - name: Stage the plan under its artifact's name
+        # The artifact carries its own name (#2178): publish.yml merges
+        # every sbom-plan-* flat and reads sbom-plan-*/plan.json, so the
+        # layout is the same for one leg's plan or many.
+        if: ${{ !inputs.repro }}
+        env:
+          SOURCE: plan/plan.json
+          STAGE: ${{ runner.temp }}/sbom-plan-up
+          ARTIFACT: sbom-plan-crate
+        run: mkdir -p "${STAGE}/${ARTIFACT}" && cp "${SOURCE}" "${STAGE}/${ARTIFACT}/"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !inputs.repro }}
         with:
           name: sbom-plan-crate
-          path: plan/plan.json
+          path: ${{ runner.temp }}/sbom-plan-up
           if-no-files-found: error
           retention-days: 1
 ...
