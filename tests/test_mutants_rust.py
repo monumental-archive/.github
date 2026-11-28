@@ -20,13 +20,11 @@ a linked worktree, and a fixture that inherited it would write into the
 caller's index when this suite runs from the pre-push hook.
 """
 
-import contextlib
 import io
 import json
 import os
 import re
 import subprocess
-import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -614,64 +612,84 @@ def test_the_leg_end_to_end_derives_counts_and_holds_its_records(
 
 
 # Each record and config rule, through mutants_rust.py's own steps.
-def records_step(grep: str) -> tuple[int, str, str]:
-    """Run the `records` step on a planted `git grep -n`.
+@fixture
+def grepped(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], None]:
+    """Pipe a planted `git grep -n` to the `records` step.
 
     Returns:
-        Its exit status, stdout and stderr.
+        A function that puts `grep` on stdin.
 
     """
-    out, err = io.StringIO(), io.StringIO()
-    with (
-        pytest.MonkeyPatch.context() as patched,
-        contextlib.redirect_stdout(out),
-        contextlib.redirect_stderr(err),
-    ):
-        patched.setattr("sys.stdin", io.StringIO(grep))
-        status = helper.main(["records"])
-    return status, out.getvalue(), err.getvalue()
+
+    def feed(grep: str) -> None:
+        monkeypatch.setattr("sys.stdin", io.StringIO(grep))
+
+    return feed
 
 
-def reasons_step(config: str) -> tuple[int, str]:
-    """Run the `reasons` step on a planted config, from its tree.
+@fixture
+def configured(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> Callable[[str], None]:
+    """Plant a config for the `reasons` step and step into its tree.
 
     Returns:
-        Its exit status and stderr.
+        A function that writes `config` as the tree's CONFIG.
 
     """
-    err = io.StringIO()
-    with tempfile.TemporaryDirectory() as tmp:
-        (Path(tmp) / ".cargo").mkdir()
-        (Path(tmp) / CONFIG).write_text(config, encoding="utf-8")
-        with contextlib.chdir(tmp), contextlib.redirect_stderr(err):
-            status = helper.main(["reasons", CONFIG])
-    return status, err.getvalue()
+
+    def plant(config: str) -> None:
+        (tmp_path / ".cargo").mkdir(exist_ok=True)
+        (tmp_path / CONFIG).write_text(config, encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+    return plant
 
 
-def test_a_trailing_record_derives_its_lines_pattern() -> None:
+def test_a_trailing_record_derives_its_lines_pattern(
+    capfd: pytest.CaptureFixture[str], grepped: Callable[[str], None]
+) -> None:
     """Code before the comment: the site is the comment's own line."""
     grep = f"src/lib.rs:20:if a == b {{ {MARK} {EQUAL}: one value\n"
-    assert records_step(grep) == (0, f"{DERIVED}\n", "")
+    grepped(grep)
+    status = helper.main(["records"])
+    out, err = capfd.readouterr()
+    assert (status, out, err) == (0, f"{DERIVED}\n", "")
 
 
-def test_a_record_on_the_line_above_derives_the_next_lines_pattern() -> None:
+def test_a_record_on_the_line_above_derives_the_next_lines_pattern(
+    capfd: pytest.CaptureFixture[str], grepped: Callable[[str], None]
+) -> None:
     """A comment alone on its line: the site is the line below it."""
     grep = f"src/lib.rs:19:    {MARK} {EQUAL}: one value\n"
-    assert records_step(grep) == (0, f"{DERIVED}\n", "")
+    grepped(grep)
+    status = helper.main(["records"])
+    out, err = capfd.readouterr()
+    assert (status, out, err) == (0, f"{DERIVED}\n", "")
 
 
-def test_a_record_with_no_mutation_text_is_red_by_file_and_line() -> None:
+def test_a_record_with_no_mutation_text_is_red_by_file_and_line(
+    capfd: pytest.CaptureFixture[str], grepped: Callable[[str], None]
+) -> None:
     """A reason with nothing before it: nothing to match, no pattern."""
     grep = f"src/lib.rs:19:    {MARK} : one value\n"
     want = f"{LABEL}: src/lib.rs:19: {MARK} names no mutation\n{FORM}\n"
-    assert records_step(grep) == (1, "", want)
+    grepped(grep)
+    status = helper.main(["records"])
+    out, err = capfd.readouterr()
+    assert (status, out, err) == (1, "", want)
 
 
-def test_a_record_with_no_reason_is_red_by_file_and_line() -> None:
+def test_a_record_with_no_reason_is_red_by_file_and_line(
+    capfd: pytest.CaptureFixture[str], grepped: Callable[[str], None]
+) -> None:
     """Mutation text and no reason: nothing says why it cannot be killed."""
     grep = f"src/lib.rs:19:    {MARK} {EQUAL}:\n"
     want = f"{LABEL}: src/lib.rs:19: {MARK} {EQUAL} gives no reason\n{FORM}\n"
-    assert records_step(grep) == (1, "", want)
+    grepped(grep)
+    status = helper.main(["records"])
+    out, err = capfd.readouterr()
+    assert (status, out, err) == (1, "", want)
 
 
 def test_a_record_in_a_file_the_run_does_not_mutate_is_red() -> None:
@@ -696,7 +714,9 @@ def test_a_stale_record_is_red_by_file_and_line() -> None:
     assert helper.unmatched(found, NAMES) == want
 
 
-def test_a_pinned_exclude_re_entry_is_red_by_name() -> None:
+def test_a_pinned_exclude_re_entry_is_red_by_name(
+    capfd: pytest.CaptureFixture[str], configured: Callable[[str], None]
+) -> None:
     """`:line:col:` in an entry: record it at its site instead."""
     config = (
         "exclude_re = [\n"
@@ -710,10 +730,15 @@ def test_a_pinned_exclude_re_entry_is_red_by_name() -> None:
         "  record the mutant at its site instead, on its line or"
         f" the line above: {SPELLING}\n"
     )
-    assert reasons_step(config) == (1, want)
+    configured(config)
+    status = helper.main(["reasons", CONFIG])
+    out, err = capfd.readouterr()
+    assert (status, err) == (1, want)
 
 
-def test_an_unpinned_exclude_re_entry_with_its_reason_is_accepted() -> None:
+def test_an_unpinned_exclude_re_entry_with_its_reason_is_accepted(
+    capfd: pytest.CaptureFixture[str], configured: Callable[[str], None]
+) -> None:
     """A rule that is not a site stays in the config; [0-9]+ is no position."""
     config = (
         "exclude_re = [\n"
@@ -723,7 +748,10 @@ def test_an_unpinned_exclude_re_entry_with_its_reason_is_accepted() -> None:
         '  "src/lib\\\\.rs:[0-9]+:[0-9]+: replace banner",\n'
         "]\n"
     )
-    assert reasons_step(config) == (0, "")
+    configured(config)
+    status = helper.main(["reasons", CONFIG])
+    out, err = capfd.readouterr()
+    assert (status, err) == (0, "")
 
 
 def test_pgrx_crate_runs_under_its_default_major(planted: Planted) -> None:
