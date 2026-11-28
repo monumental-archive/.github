@@ -88,7 +88,12 @@ class Rows:
 
 @fixture
 def rows_state(tmp_path: Path) -> Rows:
-    """Give each row its own Rows."""
+    """Give each row its own Rows.
+
+    Returns:
+        The row's Rows.
+
+    """
     return Rows(tmp_path)
 
 
@@ -620,7 +625,10 @@ def test_a_cell_names_the_repository_without_its_tag(
         ),
         pytest.param(
             ["targets", "oci-image", "x"],
-            "belt matrix targets: error: argument CLASS: invalid choice: 'oci-image' (choose from 'go-binary', 'rust-binary')",
+            (
+                "belt matrix targets: error: argument CLASS: invalid choice: "
+                "'oci-image' (choose from 'go-binary', 'rust-binary')"
+            ),
             id='["targets", "oci-image", "x"]',
         ),
         pytest.param(
@@ -630,17 +638,26 @@ def test_a_cell_names_the_repository_without_its_tag(
         ),
         pytest.param(
             ["pgrx-images"],
-            "belt matrix pgrx-images: error: the following arguments are required: REQUEST",
+            (
+                "belt matrix pgrx-images: error: the following arguments are "
+                "required: REQUEST"
+            ),
             id='["pgrx-images"]',
         ),
         pytest.param(
             ["base-images"],
-            "belt matrix base-images: error: the following arguments are required: MAPPING",
+            (
+                "belt matrix base-images: error: the following arguments are "
+                "required: MAPPING"
+            ),
             id='["base-images"]',
         ),
         pytest.param(
             ["pgrx-extension", MAPPING],
-            "belt matrix pgrx-extension: error: the following arguments are required: REQUEST",
+            (
+                "belt matrix pgrx-extension: error: the following arguments are "
+                "required: REQUEST"
+            ),
             id='["pgrx-extension", MAPPING]',
         ),
     ],
@@ -648,7 +665,10 @@ def test_a_cell_names_the_repository_without_its_tag(
 def test_malformed_command_lines(
     argv: list[str], error: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    """A missing argument or an unknown class prints the usage: argparse's exit 2, its usage and its error."""
+    """A usage error: argparse's exit 2 and its error.
+
+    A missing argument or an unknown class prints the usage.
+    """
     with pytest.raises(SystemExit) as ended:
         matrix.main(argv)
     out, err = capfd.readouterr()

@@ -29,6 +29,9 @@ from belt import decoded, typed_std
 from belt.typed_pytest import fixture
 from tests import support
 
+# A lower bound that keeps the law from passing vacuously.
+MANY_BODIES = 30
+
 CANON = support.CANON
 BELT = CANON / "mise" / "config.toml"
 
@@ -190,7 +193,7 @@ def test_the_scan_reaches_the_helper_starts() -> None:
         "coverage_floor.py",
     } <= tracked_helpers()
     guarded = [b for b in bodies(text).values() if LAUNCHER in b]
-    assert len(guarded) >= 30
+    assert len(guarded) >= MANY_BODIES
 
 
 def test_a_python3_start_is_named() -> None:
@@ -374,7 +377,12 @@ class AScratchRepositoryPinningItsOwnPython:
 def a_scratch_repository_pinning_its_own_python(
     tmp_path: Path, env: support.Env
 ) -> AScratchRepositoryPinningItsOwnPython:
-    """Give each row its own AScratchRepositoryPinningItsOwnPython."""
+    """Give each row its own AScratchRepositoryPinningItsOwnPython.
+
+    Returns:
+        The row's AScratchRepositoryPinningItsOwnPython.
+
+    """
     return AScratchRepositoryPinningItsOwnPython(tmp_path, env=env)
 
 

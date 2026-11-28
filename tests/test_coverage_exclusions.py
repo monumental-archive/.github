@@ -114,20 +114,26 @@ class Markers:
 
 @fixture
 def markers(tmp_path: Path) -> Markers:
-    """Give each row its own Markers."""
+    """Give each row its own Markers.
+
+    Returns:
+        The row's Markers.
+
+    """
     return Markers(tmp_path)
 
 
-@pytest.mark.parametrize(("name", "body", "rule"), MARKERS)
+@pytest.mark.parametrize(
+    "row", [pytest.param(row, id=f"{row[0]}: {row[1].strip()}") for row in MARKERS]
+)
 def test_each_marker_is_red_by_file_line_and_rule(
+    row: tuple[str, str, str],
     markers: Markers,
-    name: str,
-    body: str,
-    rule: str,
     capfd: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Every marker of every measured language is a finding, located."""
+    name, body, rule = row
     listed(monkeypatch, markers.plant(name, body), name)
     status = ce.main([])
     err = capfd.readouterr().err
@@ -155,7 +161,7 @@ def test_a_quoted_marker_is_text_not_an_exclusion(
     status = ce.main([])
     err = capfd.readouterr().err
     assert status == 0, err
-    assert err == ""
+    assert not err
 
 
 def test_other_languages_are_not_read(
@@ -211,7 +217,12 @@ class Task:
 
 @fixture
 def task(tmp_path: Path, env: support.Env) -> Task:
-    """Give each row its own Task."""
+    """Give each row its own Task.
+
+    Returns:
+        The row's Task.
+
+    """
     return Task(tmp_path, env=env)
 
 

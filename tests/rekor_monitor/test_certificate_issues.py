@@ -19,13 +19,16 @@ import json
 import os
 import sys
 from pathlib import Path
-
-import pytest
+from typing import TYPE_CHECKING
 
 from belt import decoded
 from belt.rekor_monitor import certificate_issues
 from belt.typed_pytest import fixture
-from tests import support
+
+if TYPE_CHECKING:
+    import pytest
+
+    from tests import support
 
 COMMAND = "certificate-issues"
 
@@ -72,9 +75,19 @@ def search(index: int) -> list[str]:
 
     """
     return [
-        "issue", "list", "--repo", REPO, "--state", "all", "--limit", "100",
-        "--search", f'"CT index {index}" in:title', "--json", "number,title",
-    ]  # fmt: skip
+        "issue",
+        "list",
+        "--repo",
+        REPO,
+        "--state",
+        "all",
+        "--limit",
+        "100",
+        "--search",
+        f'"CT index {index}" in:title',
+        "--json",
+        "number,title",
+    ]
 
 
 class Harness:
@@ -140,7 +153,12 @@ class Harness:
 
 @fixture
 def harness(tmp_path: Path, env: support.Env) -> Harness:
-    """Give each row its own Harness."""
+    """Give each row its own Harness.
+
+    Returns:
+        The row's Harness.
+
+    """
     return Harness(tmp_path, env=env)
 
 
@@ -176,9 +194,13 @@ def test_one_issue_per_certificate(
     assert calls[0] == search(448199999)
     assert calls[2] == search(448200001)
     create: list[str] = [
-        "issue", "create", "--repo", REPO, "--title",
+        "issue",
+        "create",
+        "--repo",
+        REPO,
+        "--title",
         f"{PREFIX} 448199999 did not reconcile (run)",
-    ]  # fmt: skip
+    ]
     assert calls[1][:6] == create
     assert calls[3][5] == f"{PREFIX} 448200001 did not reconcile (foreign, chain)"
     text = calls[3][7]
@@ -261,7 +283,7 @@ def test_search_failure_saves_nothing(
     argv = harness.enter(monkeypatch, STUB_LIST_FAIL="1")
     status = certificate_issues.main(argv)
     err = capfd.readouterr().err
-    assert status == 2
+    assert status == certificate_issues.EXIT_ERROR
     searched: list[list[str]] = [search(448200001)]
     assert harness.gh_calls() == searched
     assert err.strip() == (
@@ -279,7 +301,7 @@ def test_create_failure_saves_nothing(
     argv = harness.enter(monkeypatch, STUB_CREATE_FAIL="1")
     status = certificate_issues.main(argv)
     err = capfd.readouterr().err
-    assert status == 2
+    assert status == certificate_issues.EXIT_ERROR
     assert err.strip() == (
         "certificate-issues:"
         " gh issue create failed (exit 1): HTTP 403: Resource not"
@@ -296,7 +318,7 @@ def test_no_report(
     argv = harness.enter(monkeypatch)
     status = certificate_issues.main(argv)
     err = capfd.readouterr().err
-    assert status == 2
+    assert status == certificate_issues.EXIT_ERROR
     assert harness.gh_calls() == list[list[str]]()
     assert err.strip() == (
         "certificate-issues:"
@@ -315,7 +337,7 @@ def test_report_not_json(
     argv = harness.enter(monkeypatch)
     status = certificate_issues.main(argv)
     err = capfd.readouterr().err
-    assert status == 2
+    assert status == certificate_issues.EXIT_ERROR
     prefix = "certificate-issues: stele's report is not JSON: "
     assert err.startswith(prefix)
 
@@ -332,7 +354,7 @@ def test_report_not_utf8(
     argv = harness.enter(monkeypatch)
     status = certificate_issues.main(argv)
     err = capfd.readouterr().err
-    assert status == 2, err
+    assert status == certificate_issues.EXIT_ERROR, err
     assert err.startswith("certificate-issues: stele's report is not JSON: ")
 
 
@@ -345,7 +367,7 @@ def test_report_nested_past_the_parser(
     argv = harness.enter(monkeypatch)
     status = certificate_issues.main(argv)
     err = capfd.readouterr().err
-    assert status == 2, err
+    assert status == certificate_issues.EXIT_ERROR, err
     assert err.startswith("certificate-issues: stele's report is not JSON: ")
 
 
@@ -357,7 +379,7 @@ def test_report_from_another_target(
     argv = harness.enter(monkeypatch)
     status = certificate_issues.main(argv)
     err = capfd.readouterr().err
-    assert status == 2
+    assert status == certificate_issues.EXIT_ERROR
     assert err.strip() == (
         "certificate-issues:"
         " the report is not stele's assert signer-certificates report;"
@@ -375,7 +397,7 @@ def test_subject_not_a_ct_index(
     argv = harness.enter(monkeypatch)
     status = certificate_issues.main(argv)
     err = capfd.readouterr().err
-    assert status == 2
+    assert status == certificate_issues.EXIT_ERROR
     assert harness.gh_calls() == list[list[str]]()
     assert err.strip() == (
         "certificate-issues:"
@@ -391,7 +413,7 @@ def test_no_repository(
     argv = harness.enter(monkeypatch, GITHUB_REPOSITORY="")
     status = certificate_issues.main(argv)
     err = capfd.readouterr().err
-    assert status == 2
+    assert status == certificate_issues.EXIT_ERROR
     assert harness.gh_calls() == list[list[str]]()
     assert err.strip() == f"{COMMAND}: GITHUB_REPOSITORY is not set"
 
@@ -412,7 +434,7 @@ def test_a_search_answer_that_is_not_a_list_of_issues(
         argv = harness.enter(monkeypatch, STUB_LIST=answer)
         status = certificate_issues.main(argv)
         err = capfd.readouterr().err
-        assert status == 2
+        assert status == certificate_issues.EXIT_ERROR
         assert err.strip() == (
             "certificate-issues:"
             " gh issue list answered something that is not a list"
@@ -428,7 +450,7 @@ def test_a_search_answer_that_is_not_json(
     argv = harness.enter(monkeypatch, STUB_LIST='{"a": 1, "a": 2}')
     status = certificate_issues.main(argv)
     err = capfd.readouterr().err
-    assert status == 2
+    assert status == certificate_issues.EXIT_ERROR
     assert err.strip() == (
         "certificate-issues: gh issue list answered something that is not JSON:"
         ' duplicate key "a"; the checkpoint is not saved'
@@ -445,7 +467,7 @@ def test_findings_that_are_not_a_list(
         argv = harness.enter(monkeypatch)
         status = certificate_issues.main(argv)
         err = capfd.readouterr().err
-        assert status == 2
+        assert status == certificate_issues.EXIT_ERROR
         assert err.strip() == (
             "certificate-issues:"
             f" the report's findings are not a list: {value!r};"
@@ -462,7 +484,7 @@ def test_report_with_a_key_twice(
     argv = harness.enter(monkeypatch)
     status = certificate_issues.main(argv)
     err = capfd.readouterr().err
-    assert status == 2
+    assert status == certificate_issues.EXIT_ERROR
     assert err.strip() == (
         "certificate-issues:"
         ' stele\'s report is not JSON: duplicate key "target";'

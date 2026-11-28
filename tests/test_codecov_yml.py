@@ -102,7 +102,7 @@ def assert_red(files: dict[str, str], paths: list[str], *, env: support.Env) -> 
     done = lint(files, env=env)
     assert done.returncode == 1, done.stdout + done.stderr
     assert done.stderr == red(paths)
-    assert done.stdout == ""
+    assert not done.stdout
 
 
 def assert_green(files: dict[str, str], *, env: support.Env) -> None:
@@ -110,7 +110,7 @@ def assert_green(files: dict[str, str], *, env: support.Env) -> None:
     done = lint(files, env=env)
     assert done.returncode == 0, done.stderr
     assert done.stdout == GREEN
-    assert done.stderr == ""
+    assert not done.stderr
 
 
 def test_a_tree_tracking_none_is_green(env: support.Env) -> None:

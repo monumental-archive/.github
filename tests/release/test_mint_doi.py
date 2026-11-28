@@ -106,7 +106,7 @@ import urllib.request
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import TYPE_CHECKING, Self, override
+from typing import TYPE_CHECKING, NamedTuple, Self, TypedDict, Unpack, override
 
 import pytest
 
@@ -117,6 +117,19 @@ from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
+
+# The requests a row counts: the licence lookups of a two-licence
+# expression; the latest-version reads after one pause and after two;
+# a first mint's two POSTs (the concept, then its draft); the title
+# search's pages, read to the end and at the cap; and the tries at one
+# licence that answers 500 every time.
+LICENCE_LOOKUPS = 2
+READS_AFTER_ONE_PAUSE = 2
+READS_AFTER_TWO_PAUSES = 3
+FIRST_MINT_POSTS = 2
+TITLE_PAGES = 2
+TITLE_PAGES_CAPPED = 3
+LICENCE_TRIES = 6
 
 CANON = support.CANON
 # A JSON object as the fake and the helper exchange it.
@@ -269,6 +282,29 @@ def body_of(sent: str | bytes) -> Doc:
     return decoded.as_object(decoded.load_json(sent), "the request body")
 
 
+# One answer of the fake: status, JSON body and headers; None drops it.
+Answer = tuple[int, object, dict[str, str]] | None
+
+
+class Asked(NamedTuple):
+    """One request the fake was asked, read once."""
+
+    method: str
+    path: str
+    base: str
+    query: str
+    accept: str
+    body: bytes
+
+
+class Route(NamedTuple):
+    """One route: its method, what it matches, and how it answers."""
+
+    method: str
+    matches: Callable[[Asked], bool]
+    answer: Callable[[Asked], Answer]
+
+
 @dataclass
 class Zenodo:
     """What the fake answers. Defaults are #1246's stub, route for route.
@@ -364,95 +400,204 @@ class Zenodo:
         text = json.dumps(body).replace("@BASE@", self.base)
         return decoded.load_json(text.replace(ORIGIN, self.base))
 
-    def route(  # ruff: ignore[complex-structure, too-many-return-statements, too-many-branches] - one table of routes
-        self, method: str, path: str, accept: str, body: bytes
-    ) -> tuple[int, object, dict[str, str]] | None:
-        """Answer one request.
+    def routes(self) -> list[Route]:
+        """Name each route the fake answers, in the order it is tried.
+
+        Returns:
+            Each route's method, its match, and its answer.
+
+        """
+        dep = f"/api/deposit/depositions/{self.deposition}"
+        draft = f"/api/records/{self.deposition}/draft"
+        return [
+            Route(
+                "GET",
+                lambda a: a.base.startswith("/api/vocabularies/licenses/"),
+                self.licence,
+            ),
+            Route("GET", lambda a: a.base == "/api/deposit/depositions", self.listing),
+            Route("POST", lambda a: a.path == "/api/deposit/depositions", self.created),
+            Route(
+                "DELETE",
+                lambda a: a.base.startswith("/api/deposit/depositions/"),
+                lambda _a: (204, None, {}),
+            ),
+            Route("POST", lambda a: a.base.endswith("/actions/newversion"), self.grown),
+            Route("GET", lambda a: a.path == dep, self.draft_read),
+            Route(
+                "PUT",
+                lambda a: a.base.startswith("/api/files/") or a.path == dep,
+                lambda _a: (200, {}, {}),
+            ),
+            Route("GET", lambda a: a.path == draft and a.accept == RDM, self.rdm_read),
+            Route("PUT", lambda a: a.path == draft and a.accept == RDM, self.rdm_put),
+            Route(
+                "POST", lambda a: a.path == f"{dep}/actions/publish", self.publishing
+            ),
+            Route(
+                "GET", lambda a: a.base.endswith("/versions/latest"), self.latest_read
+            ),
+            Route(
+                "GET", lambda a: a.base.startswith("/api/records/"), self.record_read
+            ),
+        ]
+
+    def route(self, method: str, path: str, accept: str, body: bytes) -> Answer:
+        """Answer one request by the first route that matches it.
 
         Returns:
             (status, JSON body, headers), or None to drop the connection.
 
         """
-        dep = f"/api/deposit/depositions/{self.deposition}"
         base, _, query = path.partition("?")
-        if method == "GET" and base.startswith("/api/vocabularies/licenses/"):
-            if self.vocab_status is not None:
-                return self.vocab_status, {}, {}
-            ok = base.rsplit("/", 1)[1] in self.vocab
-            return (200, {"id": base.rsplit("/", 1)[1]}, {}) if ok else (404, {}, {})
-        if method == "GET" and base == "/api/deposit/depositions":
-            if "status=draft" not in query:
-                return self.title_page(query)
-            return 200, self.live(self.drafts), {}
-        if method == "POST" and path == "/api/deposit/depositions":
-            if self.create_body is not None:
-                return 201, self.live(self.create_body), {}
-            return 200, self.deposit(self.deposition), {}
-        if method == "DELETE" and base.startswith("/api/deposit/depositions/"):
-            return 204, None, {}
-        if method == "POST" and base.endswith("/actions/newversion"):
-            if self.newversion_body is not None:
-                return 201, self.live(self.newversion_body), {}
-            draft = f"{self.base}{dep}"
-            return 200, {"links": {"latest_draft": draft}}, {}
-        if method == "GET" and path == dep:
-            if self.draft_body is not None:
-                return 200, self.live(self.draft_body), {}
-            return 200, self.deposit(self.deposition), {}
-        if method == "PUT" and (base.startswith("/api/files/") or path == dep):
-            return 200, {}, {}
-        if path == f"/api/records/{self.deposition}/draft":
-            if method == "GET" and accept == RDM:
-                return 200, recorded_object(DRAFT), {}
-            if method == "PUT" and accept == RDM:
-                sent = body_of(body)
-                if self.collapse:
-                    meta = decoded.as_object(sent["metadata"], "metadata")
-                    meta["rights"] = decoded.as_array(meta["rights"], "rights")[:1]
-                return 200, sent, {}
-        if method == "POST" and path == f"{dep}/actions/publish":
-            if self.publish == "fail":
-                return 500, {"message": "publish failed"}, {}
-            self.land()
-            if self.publish == "drop":
-                return None
-            if self.publish_body is not None:
-                # NOT CAPTURED: a publish cannot be taken without minting.
-                # The one shape the helper reads; the canon's next release
-                # is its proof (#1365).
-                return 202, self.publish_body, {}
-            return (
-                200,
-                {
-                    "doi": f"10.5281/zenodo.{self.deposition}",
-                    "conceptdoi": "10.5281/zenodo.100",
-                },
-                {},
-            )
-        if method == "GET" and base.endswith("/versions/latest"):
-            concept = base.split("/")[3]
-            if concept not in self.latest:
-                return 404, {"status": 404}, {}
-            if self.appear_after and self.stale:
-                self.appear_after -= 1
-                rec = self.stale
-            else:
-                rec = self.latest[concept]
-            if self.redirect:
-                loc = f"{self.base}/api/records/{rec['id']}"
-                return 301, {}, {"Location": loc}
-            self.records.setdefault(f"plain/{rec['id']}", rec)
-            return 200, rec, {}
-        if method == "GET" and base.startswith("/api/records/"):
-            rid = base.rsplit("/", 1)[1]
-            if accept != RDM:
-                plain = self.records.get(f"plain/{rid}")
-                return (200, plain, {}) if plain else (404, {}, {})
-            if rid not in self.records:
-                return 404, {"status": 404}, {}
-            rdm = self.records[rid]
-            return (200, rdm, {}) if rdm is not None else (503, {}, {})
+        asked = Asked(method, path, base, query, accept, body)
+        for route in self.routes():
+            if route.method == method and route.matches(asked):
+                return route.answer(asked)
         return 418, {"refused": f"{method} {path}"}, {}
+
+    def licence(self, asked: Asked) -> Answer:
+        """Answer the licence vocabulary: the id, or its 404.
+
+        Returns:
+            The answer.
+
+        """
+        if self.vocab_status is not None:
+            return self.vocab_status, {}, {}
+        key = asked.base.rsplit("/", 1)[1]
+        return (200, {"id": key}, {}) if key in self.vocab else (404, {}, {})
+
+    def listing(self, asked: Asked) -> Answer:
+        """List depositions: a title search's page, or the drafts.
+
+        Returns:
+            The answer.
+
+        """
+        if "status=draft" not in asked.query:
+            return self.title_page(asked.query)
+        return 200, self.live(self.drafts), {}
+
+    def created(self, _asked: Asked) -> Answer:
+        """Create a deposition: the row's body, or the planted one.
+
+        Returns:
+            The answer.
+
+        """
+        if self.create_body is not None:
+            return 201, self.live(self.create_body), {}
+        return 200, self.deposit(self.deposition), {}
+
+    def grown(self, _asked: Asked) -> Answer:
+        """Grow a new version: the row's body, or the latest draft's link.
+
+        Returns:
+            The answer.
+
+        """
+        if self.newversion_body is not None:
+            return 201, self.live(self.newversion_body), {}
+        draft = f"{self.base}/api/deposit/depositions/{self.deposition}"
+        return 200, {"links": {"latest_draft": draft}}, {}
+
+    def draft_read(self, _asked: Asked) -> Answer:
+        """Read the draft deposition: the row's body, or the planted one.
+
+        Returns:
+            The answer.
+
+        """
+        if self.draft_body is not None:
+            return 200, self.live(self.draft_body), {}
+        return 200, self.deposit(self.deposition), {}
+
+    @staticmethod
+    def rdm_read(_asked: Asked) -> Answer:
+        """Read the draft record, in its RDM form.
+
+        Returns:
+            The answer.
+
+        """
+        return 200, recorded_object(DRAFT), {}
+
+    def rdm_put(self, asked: Asked) -> Answer:
+        """Take the draft record's rights, collapsed to one when the row says.
+
+        Returns:
+            The answer: what was sent, as stored.
+
+        """
+        sent = body_of(asked.body)
+        if self.collapse:
+            meta = decoded.as_object(sent["metadata"], "metadata")
+            meta["rights"] = decoded.as_array(meta["rights"], "rights")[:1]
+        return 200, sent, {}
+
+    def publishing(self, _asked: Asked) -> Answer:
+        """Publish: fail, drop the response, or answer the DOIs.
+
+        Returns:
+            The answer, or None to drop the connection.
+
+        """
+        if self.publish == "fail":
+            return 500, {"message": "publish failed"}, {}
+        self.land()
+        if self.publish == "drop":
+            return None
+        if self.publish_body is not None:
+            # NOT CAPTURED: a publish cannot be taken without minting.
+            # The one shape the helper reads; the canon's next release
+            # is its proof (#1365).
+            return 202, self.publish_body, {}
+        return (
+            200,
+            {
+                "doi": f"10.5281/zenodo.{self.deposition}",
+                "conceptdoi": "10.5281/zenodo.100",
+            },
+            {},
+        )
+
+    def latest_read(self, asked: Asked) -> Answer:
+        """Read a concept's latest version, stale or redirected as planted.
+
+        Returns:
+            The answer.
+
+        """
+        concept = asked.base.split("/")[3]
+        if concept not in self.latest:
+            return 404, {"status": 404}, {}
+        if self.appear_after and self.stale:
+            self.appear_after -= 1
+            rec = self.stale
+        else:
+            rec = self.latest[concept]
+        if self.redirect:
+            loc = f"{self.base}/api/records/{rec['id']}"
+            return 301, {}, {"Location": loc}
+        self.records.setdefault(f"plain/{rec['id']}", rec)
+        return 200, rec, {}
+
+    def record_read(self, asked: Asked) -> Answer:
+        """Read a record, plain or in its RDM form.
+
+        Returns:
+            The answer.
+
+        """
+        rid = asked.base.rsplit("/", 1)[1]
+        if asked.accept != RDM:
+            plain = self.records.get(f"plain/{rid}")
+            return (200, plain, {}) if plain else (404, {}, {})
+        if rid not in self.records:
+            return 404, {"status": 404}, {}
+        rdm = self.records[rid]
+        return (200, rdm, {}) if rdm is not None else (503, {}, {})
 
     def land(self) -> None:
         """Make the publish true in the archive: the new record is latest."""
@@ -499,7 +644,9 @@ class Fake:
                 self.end_headers()
                 self.wfile.write(data)
 
-            do_GET = do_PUT = do_POST = do_DELETE = answer  # ruff: ignore[mixed-case-variable-in-class-scope] - http.server's names
+        # http.server answers a verb through the handler's do_<VERB>.
+        for verb in ("GET", "PUT", "POST", "DELETE"):
+            setattr(Handler, f"do_{verb}", Handler.answer)
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         z.base = f"http://127.0.0.1:{self.server.server_address[1]}"
@@ -633,6 +780,32 @@ class Minting:
         )
 
 
+class Layout(TypedDict, total=False):
+    """What a minting row lays out beside its licence, each with its default."""
+
+    collapse: bool
+    published: str
+    concept: str | None
+    zenodo: Zenodo | None
+    version: str
+    repo: str
+    cff: str | None
+    cff_status: int
+
+
+# What a row that names none of them plants.
+LAYOUT_DEFAULTS: Layout = {
+    "collapse": False,
+    "published": "both",
+    "concept": None,
+    "zenodo": None,
+    "version": "1.3.5",
+    "repo": "monumental-archive/edtf",
+    "cff": None,
+    "cff_status": 0,
+}
+
+
 @fixture
 def mint(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, env: support.Env
@@ -646,17 +819,9 @@ def mint(
     served = contextlib.ExitStack()
     made = itertools.count()
 
-    def lay_out(  # ruff: ignore[too-many-arguments] - one knob per row family
+    def lay_out(
         licence: str,
-        *,
-        collapse: bool = False,
-        published: str = "both",
-        concept: str | None = None,
-        zenodo: Zenodo | None = None,
-        version: str = "1.3.5",
-        repo: str = "monumental-archive/edtf",
-        cff: str | None = None,
-        cff_status: int = 0,
+        **options: Unpack[Layout],
     ) -> Minting:
         """Lay out one mint with CITATION.cff stating `licence`.
 
@@ -677,8 +842,9 @@ def mint(
             The mint, its fake serving.
 
         """
-        z = zenodo or stub_zenodo(published, concept)
-        z.collapse = z.collapse or collapse
+        facts: Layout = {**LAYOUT_DEFAULTS, **options}
+        z = facts["zenodo"] or stub_zenodo(facts["published"], facts["concept"])
+        z.collapse = z.collapse or facts["collapse"]
         served.enter_context(Fake(z))
         tmp = tmp_path / f"mint{next(made)}"
         stubs = tmp / "bin"
@@ -686,21 +852,25 @@ def mint(
         (stubs / "gh").write_text(GH_STUB)
         (stubs / "gh").chmod(0o755)
         b64 = tmp / "cff.b64"
-        text = cff if cff is not None else citation(licence, concept)
+        text = (
+            facts["cff"]
+            if facts["cff"] is not None
+            else citation(licence, facts["concept"])
+        )
         b64.write_text(base64.b64encode(text.encode()).decode())
         summary = tmp / "summary"
         environ = env(
             PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}",
-            ZENODO_TOKEN="stub-token",  # ruff: ignore[hardcoded-password-func-arg]
+            ZENODO_TOKEN=support.FAKE_CREDENTIAL,
             BASE_URL=z.base,
-            UNTRUSTED_VERSION=version,
-            GH_TOKEN="stub",  # ruff: ignore[hardcoded-password-func-arg]
-            TAG=f"v{version}",
+            UNTRUSTED_VERSION=facts["version"],
+            GH_TOKEN=support.FAKE_CREDENTIAL,
+            TAG=f"v{facts['version']}",
             ORG_USER_AGENT="monumental-archive-publish (stub)",
-            GITHUB_REPOSITORY=repo,
+            GITHUB_REPOSITORY=facts["repo"],
             GITHUB_STEP_SUMMARY=str(summary),
             STUB_CFF_B64=str(b64),
-            STUB_CFF_STATUS=str(cff_status),
+            STUB_CFF_STATUS=str(facts["cff_status"]),
         )
         pauses: list[float] = []
         monkeypatch.setattr(sys, "argv", [COMMAND])
@@ -745,7 +915,12 @@ class OneId:
 
 @fixture
 def one_id(mint: Callable[..., Minting]) -> OneId:
-    """Give each row its own OneId."""
+    """Give each row its own OneId.
+
+    Returns:
+        The row's OneId.
+
+    """
     return OneId(mint)
 
 
@@ -800,7 +975,12 @@ class TwoIds:
 
 @fixture
 def two_ids(mint: Callable[..., Minting]) -> TwoIds:
-    """Give each row its own TwoIds."""
+    """Give each row its own TwoIds.
+
+    Returns:
+        The row's TwoIds.
+
+    """
     return TwoIds(mint)
 
 
@@ -1036,7 +1216,7 @@ def test_an_id_absent_from_the_vocabulary_is_refused_naming_it(
         "::error::mint-doi: licence id 'not-a-licence' (from CITATION.cff"
         " 'MIT OR Not-A-Licence') is not in Zenodo's licence vocabulary",
     )
-    assert len(run.made("GET", "/api/vocabularies/licenses/")) == 2
+    assert len(run.made("GET", "/api/vocabularies/licenses/")) == LICENCE_LOOKUPS
 
 
 def test_a_read_back_missing_an_id_never_publishes(
@@ -1195,7 +1375,7 @@ def test_the_handler_makes_no_new_request() -> None:
     """
     old = urllib.request.Request(
         "https://zenodo.org/api/records/1/versions/latest",
-        headers={"Authorization": "Bearer stub-token"},
+        headers={"Authorization": f"Bearer {support.FAKE_CREDENTIAL}"},
     )
     new = no_redirect_handler()().redirect_request(
         old,
@@ -1212,7 +1392,7 @@ def test_an_authenticated_read_is_not_followed() -> None:
     """The 301 is the answer, though its target would answer 200."""
     z = edtf_zenodo()
     with Fake(z):
-        client = mint_doi.Zenodo(z.base, "stub-token", "stub-agent")
+        client = mint_doi.Zenodo(z.base, support.FAKE_CREDENTIAL, "stub-agent")
         url = f"{z.base}/api/records/{EDTF_CONCEPT}/versions/latest"
         with pytest.raises(mint_doi.HttpError) as caught:
             client.idem("GET", url)
@@ -1318,7 +1498,7 @@ def test_the_canon_converges_on_its_recorded_record(
     assert run.writes() == NOTHING
     last: list[tuple[str, str, str]] = [run.requests[-1]]
     assert run.published_reads(CANON_PREV) == last
-    assert run.requests[-1][2] == ""
+    assert not run.requests[-1][2]
 
 
 def test_edtf_converges_after_verifying_both_licences(
@@ -1352,7 +1532,12 @@ class ALaterMint:
 
 @fixture
 def a_later_mint(mint: Callable[..., Minting]) -> ALaterMint:
-    """Give each row its own ALaterMint."""
+    """Give each row its own ALaterMint.
+
+    Returns:
+        The row's ALaterMint.
+
+    """
     return ALaterMint(mint)
 
 
@@ -1510,10 +1695,7 @@ def test_a_stale_draft_is_deleted_before_newversion(
         " left by an interrupted run"
     ) in run.stdout
     target: tuple[str, str] = ("DELETE", f"{ORIGIN}{DEP}/{CANON_DRAFT}")
-    (stale,) = [
-        i for i, r in enumerate(run.requests)
-        if (r[0], r[1]) == target
-    ]  # fmt: skip
+    (stale,) = [i for i, r in enumerate(run.requests) if (r[0], r[1]) == target]
     (newv,) = run.made("POST", f"{DEP}/{CANON_PREV}/actions/newversion")
     assert stale < newv
 
@@ -1553,7 +1735,7 @@ def test_a_lost_response_over_a_landed_publish_is_recovered(
     assert run.pauses == one_pause
     (publish,) = run.made("POST", f"{DEP}/{CANON_DRAFT}/actions/publish")
     latest = run.made("GET", f"/api/records/{CANON_CONCEPT}/versions/latest")
-    assert len([i for i in latest if i > publish]) == 2
+    assert len([i for i in latest if i > publish]) == READS_AFTER_ONE_PAUSE
 
 
 def test_a_failed_publish_that_never_lands_is_red(
@@ -1574,7 +1756,7 @@ def test_a_failed_publish_that_never_lands_is_red(
     assert run.pauses == two_pauses
     (publish,) = run.made("POST", f"{DEP}/{CANON_DRAFT}/actions/publish")
     latest = run.made("GET", f"/api/records/{CANON_CONCEPT}/versions/latest")
-    assert len([i for i in latest if i > publish]) == 3
+    assert len([i for i in latest if i > publish]) == READS_AFTER_TWO_PAUSES
 
 
 def measured(name: str) -> object:
@@ -1686,7 +1868,7 @@ def test_the_old_query_answer_could_never_refuse(
     run = minting.ran(status, capfd.readouterr())
     assert run.returncode == 0, run.stdout
     assert "**First mint**" in run.summary
-    assert len(run.made("POST", DEP)) == 2
+    assert len(run.made("POST", DEP)) == FIRST_MINT_POSTS
 
 
 def test_an_unsubmitted_title_alone_does_not_refuse(
@@ -1720,7 +1902,7 @@ def test_a_title_on_a_later_page_refuses(
         "::error::mint-doi: a submitted deposition already bears this title"
         in run.stdout
     )
-    assert len(run.made("GET", f"{DEP}?q=title")) == 2
+    assert len(run.made("GET", f"{DEP}?q=title")) == TITLE_PAGES
     assert run.writes() == NOTHING
 
 
@@ -1762,7 +1944,7 @@ def test_a_listing_still_full_at_the_page_bound_refuses(
         f"could not be read to its end ({3 * mint_doi.LISTING_PAGE} entries read)"
         in run.stdout
     )
-    assert len(run.made("GET", f"{DEP}?q=title")) == 3
+    assert len(run.made("GET", f"{DEP}?q=title")) == TITLE_PAGES_CAPPED
     assert run.writes() == NOTHING
 
 
@@ -1781,7 +1963,7 @@ def test_a_vocabulary_answering_500_refuses_as_unchecked(
         " '0bsd'"
         " — not minting on an unchecked licence"
     ) in run.stdout
-    assert len(run.made("GET", "/api/vocabularies/licenses/0bsd")) == 6
+    assert len(run.made("GET", "/api/vocabularies/licenses/0bsd")) == LICENCE_TRIES
     assert run.writes() == NOTHING
 
 
@@ -1898,26 +2080,41 @@ def test_the_canons_own_citation() -> None:
 def test_rows() -> None:
     """Each row: text in, (creators, licence, concept) out."""
     rows = [
-        ("quoted names unquote", AUTHORS,
-         (["Allen, Carl", "van Rossum, Guido"], "", "")),
+        (
+            "quoted names unquote",
+            AUTHORS,
+            (["Allen, Carl", "van Rossum, Guido"], "", ""),
+        ),
         ("no authors", "license: MIT\n", ([], "MIT", "")),
-        ("family without given is no author",
-         "  - family-names: Allen\n  orcid: x\n", ([], "", "")),
-        ("first license line wins, verbatim",
-         "license: MIT OR 0BSD \nlicense: Apache-2.0\n",
-         ([], "MIT OR 0BSD ", "")),
-        ("an indented license is not the top-level key",
-         "  license: MIT\n", ([], "", "")),
-        ("value before identifiers is ignored",
-         "  value: 10.1/a\nidentifiers:\n  - type: doi\n    value: 10.1/b\n",
-         ([], "", "10.1/b")),
-        ("first value after identifiers wins",
-         "identifiers:\n  - value: 10.1/c\n  - value: 10.1/d\n",
-         ([], "", "10.1/c")),
+        (
+            "family without given is no author",
+            "  - family-names: Allen\n  orcid: x\n",
+            ([], "", ""),
+        ),
+        (
+            "first license line wins, verbatim",
+            "license: MIT OR 0BSD \nlicense: Apache-2.0\n",
+            ([], "MIT OR 0BSD ", ""),
+        ),
+        (
+            "an indented license is not the top-level key",
+            "  license: MIT\n",
+            ([], "", ""),
+        ),
+        (
+            "value before identifiers is ignored",
+            "  value: 10.1/a\nidentifiers:\n  - type: doi\n    value: 10.1/b\n",
+            ([], "", "10.1/b"),
+        ),
+        (
+            "first value after identifiers wins",
+            "identifiers:\n  - value: 10.1/c\n  - value: 10.1/d\n",
+            ([], "", "10.1/c"),
+        ),
         ("no identifiers is a first mint", "title: x\n", ([], "", "")),
         # #1556's shrunk example: zip(strict=True) raised on it.
         ("an empty file reads as nothing", "", ([], "", "")),
-    ]  # fmt: skip
+    ]
     for _name, text, want in rows:
         got = mint_doi.read_citation(text)
         assert (got.creators, got.licence, got.concept_doi) == want
@@ -1970,8 +2167,10 @@ def test_an_answer_that_is_not_a_response_is_refused(
     """What the opener answered is not an HTTP response: refused by name."""
     url = "https://zenodo.invalid/api/records/1"
     z = mint_doi.Zenodo("https://zenodo.invalid", "t", "a")
+    monkeypatch.setattr(
+        urllib.request.OpenerDirector, "open", lambda *_args, **_kwargs: None
+    )
     with pytest.raises(mint_doi.RefusedError) as caught:
-        monkeypatch.setattr(z._public, "open", lambda *_args, **_kwargs: None)
         z.public(url)
     assert f"{url} answered NoneType, not an HTTP response" == str(caught.value)
 

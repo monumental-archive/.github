@@ -11,15 +11,21 @@ clean` as a warning is red, one that cleaned is not.
 import os
 import subprocess
 import tempfile
-from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from belt import coverage_owner
 from belt.typed_pytest import fixture
 from tests import support
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+# The status the stub cargo-llvm-cov's `failed` mode exits with.
+LLVM_COV_FAILED = 3
 
 SH = support.tool("sh")
 # What cargo 1.97.1 wrote into a target directory it created, read off
@@ -96,7 +102,12 @@ class ClaimState:
 
 @fixture
 def claim_state(tmp_path: Path) -> ClaimState:
-    """Give each row its own ClaimState."""
+    """Give each row its own ClaimState.
+
+    Returns:
+        The row's ClaimState.
+
+    """
     return ClaimState(tmp_path)
 
 
@@ -110,9 +121,9 @@ def test_no_file_writes_this_run(
         str(claim_state.target),
         str(claim_state.run_dir),
     ])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     assert status == 0, err
-    assert err == ""
+    assert not err
     assert f"{claim_state.run_dir}\n" == owner(claim_state.target)
 
 
@@ -127,7 +138,7 @@ def test_this_runs_own_claim_is_kept(
         str(claim_state.target),
         str(claim_state.run_dir),
     ])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     assert status == 0, err
     assert f"{claim_state.run_dir}\n" == owner(claim_state.target)
 
@@ -145,7 +156,7 @@ def test_a_dead_pids_run_is_taken_over(
         str(claim_state.target),
         str(claim_state.run_dir),
     ])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     assert status == 0, err
     assert f"{claim_state.run_dir}\n" == owner(claim_state.target)
 
@@ -161,7 +172,7 @@ def test_a_missing_gate_named_run_is_taken_over(
         str(claim_state.target),
         str(claim_state.run_dir),
     ])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     assert status == 0, err
     assert f"{claim_state.run_dir}\n" == owner(claim_state.target)
 
@@ -179,7 +190,7 @@ def test_a_live_other_run_is_refused_by_name(
         str(claim_state.target),
         str(claim_state.run_dir),
     ])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     assert status == 1
     assert (
         f"test: {claim_state.target} is being measured by another run ({other});"
@@ -201,7 +212,7 @@ def test_a_present_gate_named_run_is_live(
         str(claim_state.target),
         str(claim_state.run_dir),
     ])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     assert status == 1
     assert f"another run ({other})" in err
 
@@ -245,7 +256,12 @@ class Tag:
 
 @fixture
 def tag_state(tmp_path: Path) -> Tag:
-    """Give each row its own Tag."""
+    """Give each row its own Tag.
+
+    Returns:
+        The row's Tag.
+
+    """
     return Tag(tmp_path)
 
 
@@ -259,7 +275,7 @@ def test_a_new_directory_carries_cargos_tag(
         str(tag_state.target),
         str(tag_state.run_dir),
     ])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     assert status == 0, err
     assert tag_state.tag() == CARGO_TAG
 
@@ -276,7 +292,7 @@ def test_a_restored_untagged_directory_is_tagged(
         str(tag_state.target),
         str(tag_state.run_dir),
     ])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     assert status == 0, err
     assert tag_state.tag() == CARGO_TAG
     assert (tag_state.target / "stale").exists()
@@ -294,7 +310,7 @@ def test_an_invalid_tag_is_replaced(
         str(tag_state.target),
         str(tag_state.run_dir),
     ])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     assert status == 0, err
     assert tag_state.tag() == CARGO_TAG
 
@@ -310,7 +326,7 @@ def test_a_valid_tag_is_kept(tag_state: Tag, capfd: pytest.CaptureFixture[str]) 
         str(tag_state.target),
         str(tag_state.run_dir),
     ])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     assert status == 0, err
     assert mine == tag_state.tag()
 
@@ -329,7 +345,7 @@ def test_a_refusal_writes_no_tag(
         str(tag_state.target),
         str(tag_state.run_dir),
     ])
-    out, err = capfd.readouterr()
+    _out, _err = capfd.readouterr()
     assert status == 1
     assert not (tag_state.target / coverage_owner.TAG).exists()
 
@@ -370,7 +386,7 @@ def logged(log: Path) -> list[str]:
         One argument line per call, in order.
 
     """
-    return log.read_text().splitlines() if log.exists() else []
+    return log.read_text(encoding="utf-8").splitlines() if log.exists() else []
 
 
 # `clean` is red when cargo-llvm-cov did not clean (#2070).
@@ -380,10 +396,10 @@ def test_a_clean_that_ran_is_green(
     """Nothing reported: 0, and the workspace clean was the call."""
     log = cargo("ok")
     status = coverage_owner.main(["clean"])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     calls = logged(log)
     assert status == 0, err
-    assert err == ""
+    assert not err
     expected: list[str] = ["llvm-cov clean --workspace"]
     assert expected == calls
 
@@ -394,7 +410,7 @@ def test_a_refused_clean_is_red_by_name(
     """The planted row: cargo-llvm-cov exits 0 over a refused clean."""
     cargo("refused")
     status = coverage_owner.main(["clean"])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     assert status == 1
     assert "missing or invalid `CACHEDIR.TAG` file\n" in err
     assert (
@@ -411,8 +427,8 @@ def test_a_failed_cargo_llvm_cov_is_its_status(
     """cargo-llvm-cov's own failure is passed through unchanged."""
     cargo("failed")
     status = coverage_owner.main(["clean"])
-    out, err = capfd.readouterr()
-    assert status == 3
+    _out, _err = capfd.readouterr()
+    assert status == LLVM_COV_FAILED
 
 
 # The sweep's liveness rule, read directly.

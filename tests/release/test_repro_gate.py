@@ -102,6 +102,7 @@ def run_step(
     Args:
         classes: the guard's expanded `classes` output.
         dry_run: the caller's dry-run input.
+        env: the `env` fixture, which builds the step's environment.
         **outputs: FIRST_/REBUILD_<class> values as the step's env, and
             STUB_EXIT for the stub's status.
 
@@ -209,7 +210,7 @@ def test_a_digest_directory_is_passed_as_it_is(env: support.Env) -> None:
         "--rebuild oci-image-crate=oci-b",
     ]
     assert want == run.inputs()
-    assert run.files == ""
+    assert not run.files
 
 
 def test_only_the_declared_classes_reach_the_call(env: support.Env) -> None:

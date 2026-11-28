@@ -138,7 +138,12 @@ class Pinned:
 
 @fixture
 def pinned(tmp_path: Path, env: support.Env) -> Pinned:
-    """Give each row its own Pinned."""
+    """Give each row its own Pinned.
+
+    Returns:
+        The row's Pinned.
+
+    """
     return Pinned(tmp_path, env=env)
 
 
@@ -221,7 +226,7 @@ def test_not_utf8_is_an_error(
 def test_no_workflows_is_a_usage_error(
     pinned: Pinned, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """No workflow named: argparse's exit 2, its usage and its error."""
+    """No workflow named: argparse's exit 2 and its error."""
     pinned.enter(monkeypatch)
     with pytest.raises(SystemExit) as ended:
         installer_pinned.main([])

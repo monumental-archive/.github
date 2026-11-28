@@ -19,10 +19,11 @@ import pytest
 
 from belt.release import repro_resolve
 from belt.typed_pytest import fixture
-from tests import support
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from tests import support
 
 
 @fixture
@@ -138,7 +139,12 @@ class ReadTheLatestRelease:
 
 @fixture
 def read_the_latest_release(tmp_path: Path, env: support.Env) -> ReadTheLatestRelease:
-    """Give each row its own ReadTheLatestRelease."""
+    """Give each row its own ReadTheLatestRelease.
+
+    Returns:
+        The row's ReadTheLatestRelease.
+
+    """
     return ReadTheLatestRelease(tmp_path, env=env)
 
 
@@ -228,7 +234,7 @@ def test_latest_release_that_is_not_a_v_release(
     assert err == (
         "::error::repro-resolve: latest release tag nightly is not a v* release\n"
     )
-    assert written == ""
+    assert not written
 
 
 def test_empty_checksums(
@@ -246,7 +252,7 @@ def test_empty_checksums(
         "::error::repro-resolve: release v1.2.3 has no checksums.txt — nothing"
         " to prove against\n"
     )
-    assert written == ""
+    assert not written
 
 
 def test_absent_checksums_fails_with_gh(
@@ -260,7 +266,7 @@ def test_absent_checksums_fails_with_gh(
         repro_resolve.main([])
     assert stopped.value.code == 1
     assert "release asset not found" in capfd.readouterr().err
-    assert read_the_latest_release.written() == ""
+    assert not read_the_latest_release.written()
 
 
 def test_manifest_that_is_not_json(
@@ -277,7 +283,7 @@ def test_manifest_that_is_not_json(
     assert err.startswith(
         "::error::repro-resolve: evidence-manifest.json is not JSON:"
     ), err
-    assert written == ""
+    assert not written
 
 
 @pytest.mark.parametrize("entries", [True, {"": None}, "abc"])
@@ -301,4 +307,4 @@ def test_manifest_whose_entries_are_not_a_list(
         " evidence manifest:"
         " its entries are not a list\n"
     )
-    assert written == ""
+    assert not written

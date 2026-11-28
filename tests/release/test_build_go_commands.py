@@ -17,7 +17,6 @@ import itertools
 import os
 import sys
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -29,6 +28,7 @@ from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
 CANON = support.CANON
 WORKFLOW = CANON / ".github" / "workflows" / "build-go-binary.yml"
@@ -179,7 +179,7 @@ def test_two_commands_build_two_binaries(
         "build -o staged/probe example.com/m/cmd/probe",
     ]
     assert go == run.go
-    assert run.stdout == ""
+    assert not run.stdout
 
 
 def test_the_blank_lines_of_go_list_are_no_package(
@@ -240,5 +240,5 @@ def test_a_failing_build_fails_the_step_with_its_status(
     run = building.ran(status, capfd.readouterr())
     assert run.returncode == 1
     assert run.stderr == "example.com/m/cmd/a: undefined: x\n"
-    assert run.stdout == ""
+    assert not run.stdout
     assert run.staged == NOTHING

@@ -20,6 +20,9 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+# The status the planted command fails with.
+FAILED = 3
+
 SH = support.tool("sh")
 # The task whose call the rows stand in for (#1934).
 TASK = "test"
@@ -75,7 +78,12 @@ class Once:
 
 @fixture
 def once_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Once:
-    """Give each row its own Once."""
+    """Give each row its own Once.
+
+    Returns:
+        The row's Once.
+
+    """
     return Once(tmp_path, monkeypatch)
 
 
@@ -97,7 +105,10 @@ def test_a_second_call_skips_the_command(once_state: Once) -> None:
 
 def test_a_failure_is_the_status_and_the_next_call_runs_again(once_state: Once) -> None:
     """Exit 3: the helper's status is 3, no marker, and the next call runs."""
-    assert once.main(once_state.argv('echo failed >> "${LOG}"; exit 3')) == 3
+    assert (
+        once.main(once_state.argv(f'echo failed >> "${{LOG}}"; exit {FAILED}'))
+        == FAILED
+    )
     assert not once_state.marker.exists()
     assert once.main(once_state.argv('echo ran >> "${LOG}"')) == 0
     assert lines("failed", "ran") == once_state.ran()

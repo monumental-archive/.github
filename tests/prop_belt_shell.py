@@ -191,7 +191,7 @@ def quoted(text: str) -> str:
     for char in text:
         if char in {'"', "\\"}:
             out.append("\\" + char)
-        elif ord(char) < 0x20 or ord(char) == 0x7F:  # ruff: ignore[magic-value-comparison] - TOML refuses DEL
+        elif char < " " or char == "\x7f":
             out.append(f"\\u{ord(char):04x}")
         else:
             out.append(char)

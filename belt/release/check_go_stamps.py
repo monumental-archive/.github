@@ -74,8 +74,7 @@ def go(*args: str) -> str:
     """
     return finished(
         subprocess.run(
-            # ruff: ignore[start-process-with-partial-path] - the caller's pinned go, on PATH
-            ["go", *args],
+            [typed_std.on_path("go"), *args],
             stdout=subprocess.PIPE,
             text=True,
             check=False,
@@ -92,8 +91,7 @@ def git(*args: str) -> str:
     """
     return finished(
         subprocess.run(
-            # ruff: ignore[start-process-with-partial-path] - the runner's git
-            ["git", *args],
+            [typed_std.on_path("git"), *args],
             stdout=subprocess.PIPE,
             text=True,
             check=False,

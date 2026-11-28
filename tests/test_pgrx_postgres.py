@@ -25,6 +25,9 @@ from belt.typed_pytest import fixture
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+# The majors the planted listing holds, 14 to 18.
+MAJORS = 5
+
 # The task that runs the helper, whose name its findings carry (#1934).
 TASK = "lint:pg-clippy"
 
@@ -174,7 +177,7 @@ def test_every_declared_major_resolves() -> None:
         [14, 15, 16, 17, 18], pgrx_postgres.entries(listing)
     )
     assert findings == list[str]()
-    assert len(records) == 5
+    assert len(records) == MAJORS
     assert records[0].startswith("pg\t14\t")
 
 
@@ -255,7 +258,7 @@ def test_a_non_ascii_major_names_no_major(
     status = pgrx_postgres.main(["--majors", "\u00b2"])
     out, err = capfd.readouterr()
     assert status == 1
-    assert out == ""
+    assert not out
     assert "--majors named no Postgres major" in err
 
 
@@ -267,7 +270,7 @@ def test_a_missing_pin_is_red_with_no_records(
     status = pgrx_postgres.main(["--majors", "17,18"])
     out, err = capfd.readouterr()
     assert status == 1
-    assert out == ""
+    assert not out
     assert "pg17" in err
 
 

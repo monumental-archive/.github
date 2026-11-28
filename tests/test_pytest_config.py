@@ -44,7 +44,10 @@ def run(pytester: pytest.Pytester, config: Path = CONFIG) -> pytest.RunResult:
             id="an unregistered marker",
         ),
         pytest.param(
-            "import pytest\n\n@pytest.mark.xfail(reason='r')\ndef test_a():\n    pass\n",
+            (
+                "import pytest\n\n@pytest.mark.xfail(reason='r')\ndef test_a():\n    "
+                "pass\n"
+            ),
             FAILED,
             "*[[]XPASS(strict)[]] r*",
             id="an xpass",

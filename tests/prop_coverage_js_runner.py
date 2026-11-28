@@ -24,6 +24,10 @@ from hypothesis import strategies as st
 from belt import coverage_js_runner as cj
 from belt.typed_hypothesis import given
 
+# The arguments the leg appends to a vitest run: the provider, the two
+# reporters and the reports directory, as coverage_js_runner writes them.
+APPENDED = 5
+
 VERSION = st.from_regex(r"[0-9]{1,2}\.[0-9]{1,2}\.[0-9]{1,2}", fullmatch=True)
 # One entry per lockfile dialect, for a package at a version.
 DIALECTS = (
@@ -111,7 +115,7 @@ def test_a_known_launcher_keeps_its_words(
     assert got[: len(head)] == head
     assert got[len(head) : len(head) + len(rest)] == rest
     tail = got[len(head) + len(rest) :]
-    assert len(tail) == 5
+    assert len(tail) == APPENDED
     assert all(w.startswith("--coverage.") for w in tail), tail
 
 

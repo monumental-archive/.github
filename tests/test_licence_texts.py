@@ -9,7 +9,6 @@ a row cannot pass on a different failure.
 
 import io
 import sys
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -20,6 +19,7 @@ from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
 # The task that runs the helper, whose name its findings carry (#1934).
 TASK = "lint:licence"
@@ -277,7 +277,7 @@ def test_no_reuse_toml_is_green(
     """A repository that has not declared yet has nothing to check."""
     listed({"LICENSE": "0BSD\n"})
     status = lt.main([])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     assert (status, err) == (0, "")
 
 
@@ -309,7 +309,7 @@ def test_the_canons_own_tree_is_green() -> None:
     ],
 )
 def test_usage(argv: list[str], error: str, capfd: pytest.CaptureFixture[str]) -> None:
-    """An argument is a usage error, not a pass: argparse's exit 2, its usage and its error."""
+    """An argument is a usage error, not a pass: argparse's exit 2 and its error."""
     with pytest.raises(SystemExit) as ended:
         lt.main(argv)
     out, err = capfd.readouterr()

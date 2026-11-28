@@ -94,8 +94,9 @@ def assert_answered(got: tuple[int, str, str]) -> None:
     """Hold a run to one printed line, or one refusal line."""
     code, out, err = got
     if code == 0:
-        assert err == ""
-        assert out.endswith("\n") and out.count("\n") == 1, out
+        assert not err
+        assert out.endswith("\n"), out
+        assert out.count("\n") == 1, out
     else:
         assert (code, out) == (1, "")
         assert err.startswith("::error::"), err

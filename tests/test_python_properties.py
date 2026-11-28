@@ -26,9 +26,12 @@ from pathlib import Path
 
 import pytest
 
-from belt import decoded, shard, workflow_yaml
+from belt import decoded, python_properties, shard, workflow_yaml
 from belt.typed_pytest import fixture
 from tests import support
+
+# The processes the run fans out over when it is handed four files.
+WORKERS = 4
 
 CANON = support.CANON
 BELT = CANON / "mise"
@@ -313,7 +316,7 @@ def test_a_failing_property_is_red_with_its_example(env: support.Env) -> None:
     assert "FAILED prop_bad.py::test_small - assert 10 < 10\n" in done.stdout
     assert "Failing test case: test_small(" in done.stdout
     assert "    n=10,\n" in done.stdout
-    assert ("test:python-properties: pytest exited 1; failures above\n") == done.stderr
+    assert done.stderr == ("test:python-properties: pytest exited 1; failures above\n")
 
 
 def test_a_file_with_no_property_is_refused(env: support.Env) -> None:
@@ -389,7 +392,7 @@ def test_a_malformed_shard_is_refused_by_name(spec: str, env: support.Env) -> No
         env={"ORG_SHARD": spec},
         make_env=env,
     )
-    assert done.returncode == 2
+    assert done.returncode == python_properties.EXIT_USAGE
     assert (
         f"test:python-properties: ORG_SHARD={spec!r} is not a shard (k/n, 1 <= k <= n)"
     ) in done.stderr
@@ -539,16 +542,21 @@ class FanOut:
 
 @fixture
 def fan_out(tmp_path: Path) -> FanOut:
-    """Give each row its own FanOut."""
+    """Give each row its own FanOut.
+
+    Returns:
+        The row's FanOut.
+
+    """
     return FanOut(tmp_path)
 
 
 def test_four_files_run_side_by_side(fan_out: FanOut, env: support.Env) -> None:
     """Four files that wait for each other all finish, in four workers."""
-    meet = fan_out.meet(4, ORG_TEST_WORKERS="8")
+    meet = fan_out.meet(WORKERS, ORG_TEST_WORKERS="8")
     done = run(GATE, FOUR, tool_dir=real_tool_dir(), env=meet, make_env=env)
     assert done.returncode == 0, done.stdout + done.stderr
-    assert len(pids(meet)) == 4, done.stdout
+    assert len(pids(meet)) == WORKERS, done.stdout
     assert "4 passed" in done.stdout
     assert done.stdout.endswith("test:python-properties: 4 file(s) held\n")
 
@@ -587,10 +595,10 @@ def test_a_named_shard_starts_no_worker(fan_out: FanOut, env: support.Env) -> No
 
 def test_one_of_one_is_the_whole_run(fan_out: FanOut, env: support.Env) -> None:
     """ORG_SHARD=1/1, a split row's unsharded task: it fans out as unset."""
-    meet = fan_out.meet(4, ORG_TEST_WORKERS="8", ORG_SHARD="1/1")
+    meet = fan_out.meet(WORKERS, ORG_TEST_WORKERS="8", ORG_SHARD="1/1")
     done = run(GATE, FOUR, tool_dir=real_tool_dir(), env=meet, make_env=env)
     assert done.returncode == 0, done.stdout + done.stderr
-    assert len(pids(meet)) == 4, done.stdout
+    assert len(pids(meet)) == WORKERS, done.stdout
 
 
 # Both property jobs are bounded, sharded and share one seed (#1631).

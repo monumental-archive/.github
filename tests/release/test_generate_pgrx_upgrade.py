@@ -47,17 +47,24 @@ import os
 import re
 import subprocess
 import textwrap
-from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 import pytest
 
 from belt import decoded
 from belt.typed_pytest import fixture
 from tests import support
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+# The stub psql's status on an SQL error under ON_ERROR_STOP, psql's
+# own, and the psql calls one proof makes over the two rows.
+PSQL_STOPPED = 3
+PROOF_CALLS = 7
 
 CANON = support.CANON
 SCRIPT = CANON / "release" / "generate-pgrx-upgrade.sh"
@@ -223,20 +230,32 @@ def git(args: list[str], cwd: Path, home: Path, *, env: support.Env) -> str:
     ).stdout
 
 
+class Extension(NamedTuple):
+    """A pgrx extension's name and the crate that builds it."""
+
+    name: str
+    crate: str
+
+
+EDTF = Extension("edtf_postgres", "edtf-postgres")
+DEMO = Extension("demo_pg", "demo-pg")
+LAB = Extension("lab_pg", "lab-pg")
+
+
 class Repo:
     """A throwaway pgrx repository with a chosen upgrade graph."""
 
     def __init__(
         self,
         root: str,
-        name: str,
-        crate: str,
+        extension: Extension,
         version: str,
         edges: list[tuple[str, str]],
         *,
         env: support.Env,
     ) -> None:
         """Lay out a control file, an upgrade graph and the tool pins."""
+        name, crate = extension
         self.make_env = env
         # The repository and the HOME its git runs under are siblings in
         # the caller's temp directory, never nested: anything git writes
@@ -309,7 +328,7 @@ class Repo:
             PREV_MANIFEST=prev_manifest,
             # Not a credential: the script only asserts GH_TOKEN is set, and
             # every call that would use one is answered by the stub.
-            GH_TOKEN="stub",  # ruff: ignore[hardcoded-password-func-arg]
+            GH_TOKEN=support.FAKE_CREDENTIAL,
             GITHUB_REPOSITORY="monumental-archive/under-test",
             GH_FIXTURE=str(TESTDATA / fixture),
             GH_PREV_TARBALL=str(prev_tarball or ""),
@@ -392,7 +411,7 @@ EDTF_EDGES = [
 def test_burned_head_falls_back_to_the_newest_installable(env: support.Env) -> None:
     """Select 1.2.3: #816 itself, where only the graph head is burned."""
     with TemporaryDirectory() as d:
-        repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.1", EDTF_EDGES, env=env)
+        repo = Repo(d, EDTF, "1.3.1", EDTF_EDGES, env=env)
         out = repo.derive("1.3.1", "1.3.0", "edtf-releases.json").stdout
     assert "1.3.0 is in the upgrade graph but no non-draft release" in out
     assert "deriving edtf_postgres from 1.2.3" in out
@@ -421,7 +440,7 @@ def test_the_fixture_really_carries_the_shape_that_caused_it() -> None:
 def test_mid_life_adoption_has_no_predecessor(env: support.Env) -> None:
     """Real releases, no extension tarballs: first publish is correct."""
     with TemporaryDirectory() as d:
-        repo = Repo(d, "demo_pg", "demo-pg", "1.1.0", [("1.0.0", "1.0.1")], env=env)
+        repo = Repo(d, DEMO, "1.1.0", [("1.0.0", "1.0.1")], env=env)
         result = repo.derive("1.1.0", "1.0.1", "stele-releases.json")
     assert "no non-draft release carries any demo_pg tarball" in result.stdout
     assert "first publish" in result.stdout
@@ -432,7 +451,7 @@ def test_mid_life_adoption_has_no_predecessor(env: support.Env) -> None:
 def test_true_first_publish_never_asks_the_forge(env: support.Env) -> None:
     """An empty graph is decided before any release call is made."""
     with TemporaryDirectory() as d:
-        repo = Repo(d, "demo_pg", "demo-pg", "1.0.0", [], env=env)
+        repo = Repo(d, DEMO, "1.0.0", [], env=env)
         result = repo.derive("1.0.0", "", "stele-releases.json")
     assert "no upgrade graph" in result.stdout
     assert result.returncode == 0, result.stderr
@@ -445,7 +464,7 @@ def test_a_graph_that_already_reaches_the_version_derives_nothing(
 ) -> None:
     """A re-run over an unchanged graph is a no-op, not a re-derivation."""
     with TemporaryDirectory() as d:
-        repo = Repo(d, "demo_pg", "demo-pg", "1.0.1", [("1.0.0", "1.0.1")], env=env)
+        repo = Repo(d, DEMO, "1.0.1", [("1.0.0", "1.0.1")], env=env)
         result = repo.derive("1.0.1", "1.0.0", "stele-releases.json")
     assert "already reaches 1.0.1" in result.stdout
     assert result.returncode == 0, result.stderr
@@ -455,7 +474,7 @@ def test_a_graph_that_already_reaches_the_version_derives_nothing(
 def test_an_unpinned_cargo_pgrx_is_refused_with_its_remedy(env: support.Env) -> None:
     """The reader names the tool, the script keeps its own finding."""
     with TemporaryDirectory() as d:
-        repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.1", EDTF_EDGES, env=env)
+        repo = Repo(d, EDTF, "1.3.1", EDTF_EDGES, env=env)
         (repo.root / "mise.toml").write_text('[tools]\nrust = "1.97.1"\n')
         result = repo.derive("1.3.1", "1.3.0", "edtf-releases.json")
     assert result.returncode == 1
@@ -487,7 +506,7 @@ def test_a_failed_listing_is_not_read_as_not_applicable(env: support.Env) -> Non
     A failed git read as no rows: "not applicable", `files=`, exit 0.
     """
     with TemporaryDirectory() as d:
-        repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.1", EDTF_EDGES, env=env)
+        repo = Repo(d, EDTF, "1.3.1", EDTF_EDGES, env=env)
         bindir = repo.root / "stubbin"
         bindir.mkdir()
         (bindir / "git").write_text(GIT_LS_FILES_FAILS)
@@ -534,7 +553,7 @@ def entries(written: str) -> list[str]:
 def test_it_names_the_versions_the_forge_carries_newest_first(env: support.Env) -> None:
     """The real edtf listing carries three of its eleven graph versions."""
     with TemporaryDirectory() as d:
-        repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.1", EDTF_EDGES, env=env)
+        repo = Repo(d, EDTF, "1.3.1", EDTF_EDGES, env=env)
         repo.derive("1.3.1", "1.3.0", "edtf-releases.json")
         written = written_record(repo.root)
     want: list[str] = ["edtf_postgres 1.2.3 1.1.2 1.1.0"]
@@ -551,7 +570,7 @@ def test_the_burned_head_is_absent_and_that_is_the_whole_point(
     directly rather than trusting the line above to imply it.
     """
     with TemporaryDirectory() as d:
-        repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.1", EDTF_EDGES, env=env)
+        repo = Repo(d, EDTF, "1.3.1", EDTF_EDGES, env=env)
         repo.derive("1.3.1", "1.3.0", "edtf-releases.json")
         written = written_record(repo.root)
     assert "1.3.0" not in written
@@ -561,7 +580,7 @@ def test_the_burned_head_is_absent_and_that_is_the_whole_point(
 def test_it_carries_its_own_derivation(env: support.Env) -> None:
     """Derived state states how it was derived, like `.coverage-floor`."""
     with TemporaryDirectory() as d:
-        repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.1", EDTF_EDGES, env=env)
+        repo = Repo(d, EDTF, "1.3.1", EDTF_EDGES, env=env)
         repo.derive("1.3.1", "1.3.0", "edtf-releases.json")
         written = written_record(repo.root)
     assert "# derived: v1.3.1" in written
@@ -579,7 +598,7 @@ def test_an_extension_the_forge_carries_nothing_for_is_recorded_empty(
 ) -> None:
     """Mid-life adoption: asked, and the answer was none. Not silence."""
     with TemporaryDirectory() as d:
-        repo = Repo(d, "demo_pg", "demo-pg", "1.1.0", [("1.0.0", "1.0.1")], env=env)
+        repo = Repo(d, DEMO, "1.1.0", [("1.0.0", "1.0.1")], env=env)
         repo.derive("1.1.0", "1.0.1", "stele-releases.json")
         written = written_record(repo.root)
     want: list[str] = ["demo_pg"]
@@ -596,7 +615,7 @@ def test_it_rides_the_release_commit(env: support.Env) -> None:
     the record and exits without wanting a container.
     """
     with TemporaryDirectory() as d:
-        repo = Repo(d, "demo_pg", "demo-pg", "1.0.1", [("1.0.0", "1.0.1")], env=env)
+        repo = Repo(d, DEMO, "1.0.1", [("1.0.0", "1.0.1")], env=env)
         repo.derive("1.0.1", "1.0.0", "stele-releases.json")
         out = repo.root / "gh-output"
         environ = hermetic_env(
@@ -604,7 +623,7 @@ def test_it_rides_the_release_commit(env: support.Env) -> None:
             PATH=f"{repo.root / 'stubbin'}:{os.environ['PATH']}",
             VERSION="1.0.1",
             PREV_MANIFEST="1.0.0",
-            GH_TOKEN="stub",  # ruff: ignore[hardcoded-password-func-arg]
+            GH_TOKEN=support.FAKE_CREDENTIAL,
             GITHUB_REPOSITORY="monumental-archive/under-test",
             GH_FIXTURE=str(TESTDATA / "stele-releases.json"),
             GITHUB_OUTPUT=str(out),
@@ -636,7 +655,7 @@ def test_the_lint_reads_exactly_what_this_wrote(env: support.Env) -> None:
         pytest.skip("the lint resolves the crate version with cargo")
     edges = [("1.1.0", "1.1.2"), ("1.1.2", "1.2.3")]
     with TemporaryDirectory() as d:
-        repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.2.3", edges, env=env)
+        repo = Repo(d, EDTF, "1.2.3", edges, env=env)
         written = repo.derive("1.2.3", "1.1.2", "edtf-releases.json")
         assert "already reaches 1.2.3" in written.stdout
 
@@ -699,7 +718,7 @@ def test_the_lint_reads_exactly_what_this_wrote(env: support.Env) -> None:
 def test_always_released_as_v_star(env: support.Env) -> None:
     """release-lab: predecessor tarballs live on a plain `v*` tag."""
     with TemporaryDirectory() as d:
-        repo = Repo(d, "lab_pg", "lab-pg", "0.29.0", [("0.27.0", "0.28.1")], env=env)
+        repo = Repo(d, LAB, "0.29.0", [("0.27.0", "0.28.1")], env=env)
         result = repo.derive("0.29.0", "0.28.1", "release-lab-releases.json")
     assert "release download v0.28.1" in result.stderr
     assert "deriving lab_pg: 0.28.1 -> 0.29.0" in result.stdout
@@ -715,7 +734,7 @@ def test_imported_previous_release_under_another_scheme(env: support.Env) -> Non
     for an extension with eleven published versions.
     """
     with TemporaryDirectory() as d:
-        repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.1", EDTF_EDGES, env=env)
+        repo = Repo(d, EDTF, "1.3.1", EDTF_EDGES, env=env)
         result = repo.derive("1.3.1", "1.3.0", "edtf-releases.json")
     assert "release download edtf-postgres-v1.2.3" in result.stderr
     assert "deriving edtf_postgres: 1.2.3 -> 1.3.1" in result.stdout
@@ -732,7 +751,7 @@ def test_no_releases_at_all(env: support.Env) -> None:
     first publish. It must not attempt a download.
     """
     with TemporaryDirectory() as d:
-        repo = Repo(d, "demo_pg", "demo-pg", "1.1.0", [("1.0.0", "1.0.1")], env=env)
+        repo = Repo(d, DEMO, "1.1.0", [("1.0.0", "1.0.1")], env=env)
         result = repo.derive("1.1.0", "1.0.1", "signer-releases.json")
     assert "no non-draft release carries any demo_pg tarball" in result.stdout
     assert "first publish" in result.stdout
@@ -795,7 +814,7 @@ def test_the_next_release_derives_from_the_newest_installable(env: support.Env) 
     """Release 1.3.6 derives from 1.3.5 on `v1.3.5`, and records it."""
     with TemporaryDirectory() as d:
         edges = captured_edges("v1.3.5")
-        repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.6", edges, env=env)
+        repo = Repo(d, EDTF, "1.3.6", edges, env=env)
         result = repo.derive("1.3.6", "1.3.5", "edtf-releases-v1.3.5.json")
         written = written_record(repo.root)
     assert "deriving edtf_postgres: 1.3.5 -> 1.3.6" in result.stdout
@@ -835,7 +854,7 @@ def test_the_derivation_starts_below_the_version(env: support.Env) -> None:
         fixture = Path(d) / "listing.json"
         fixture.write_text(json.dumps(listing))
         edges = [("1.2.3", "1.2.4"), ("1.2.4", "1.3.0")]
-        repo = Repo(d, "lab_pg", "lab-pg", "1.2.5", edges, env=env)
+        repo = Repo(d, LAB, "1.2.5", edges, env=env)
         result = repo.derive("1.2.5", "1.2.4", str(fixture))
     assert "deriving lab_pg: 1.2.4 -> 1.2.5" in result.stdout
     assert "release download v1.2.4" in result.stderr
@@ -893,7 +912,7 @@ def run_with(
     """
     with TemporaryDirectory() as d:
         archive = previous_archive(Path(d), top, files)
-        repo = Repo(d, "lab_pg", "lab-pg", "0.29.0", [("0.27.0", "0.28.1")], env=env)
+        repo = Repo(d, LAB, "0.29.0", [("0.27.0", "0.28.1")], env=env)
         return repo.derive("0.29.0", "0.28.1", "release-lab-releases.json", archive)
 
 
@@ -1473,18 +1492,11 @@ def run_proof(
         # root is itself under /tmp/, so a later replace() rewrote the
         # paths an earlier one produced (/tmp/x/tmp/x/usr/...) and no
         # stand-in was found. The Mac's /var/folders root hid it.
+        # The container's prefixes: Postgres's own, the proof's scratch
+        # (moved OFF the host's tmp: the opposite of the rule's concern),
+        # and the work directory.
         container = re.compile(
-            "|".join(
-                re.escape(prefix)
-                for prefix in (
-                    "/usr/lib/postgresql/",
-                    "/usr/share/postgresql/",
-                    # The proof's own container path, moved OFF the
-                    # host's /tmp: the opposite of the rule's concern.
-                    "/tmp/",
-                    "/work/",
-                )
-            )
+            r"/(?:usr/lib/postgresql|usr/share/postgresql|tmp|work)/"
         )
 
         def rooted(m: re.Match[str]) -> str:
@@ -1519,7 +1531,7 @@ def run_proof(
 def test_an_sql_error_stops_the_step_with_psqls_message(env: support.Env) -> None:
     """The step stops with psql's own status and message."""
     result, _ = run_proof("error", ROW_A + ROW_B, env=env)
-    assert result.returncode == 3
+    assert result.returncode == PSQL_STOPPED
     assert result.stderr == PSQL_ERROR
     assert "proof:" not in result.stdout
     assert "::error::" not in result.stdout
@@ -1569,6 +1581,6 @@ def test_different_snapshots_fail_with_the_diff(env: support.Env) -> None:
 def test_every_psql_call_stops_on_error(env: support.Env) -> None:
     """No psql in the proof can fail and exit 0."""
     _, calls = run_proof(ROW_A + ROW_B, ROW_A + ROW_B, env=env)
-    assert len(calls) == 7, calls
+    assert len(calls) == PROOF_CALLS, calls
     for call in calls:
         assert call.startswith("-v ON_ERROR_STOP=1 "), call

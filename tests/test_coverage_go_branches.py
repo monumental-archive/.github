@@ -35,6 +35,9 @@ from belt import decoded
 from belt.typed_pytest import fixture
 from tests import support
 
+# The go calls a measured run makes: the version, then gobco's.
+GO_CALLS = 2
+
 CANON = support.CANON
 BELT = CANON / "mise"
 BASH = support.tool("bash")
@@ -214,19 +217,25 @@ def measuring_step(task: str) -> str:
     return decoded.as_str(steps[-1], f"{task}'s last step")
 
 
-def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fact
+# What a row that names none of them plants.
+PLANT_DEFAULTS: Plant = {
+    "floor": MAIN + BRANCH,
+    "go_mod": True,
+    "counts": COUNTS,
+    "pkgs": "a b",
+    "built": "go1.27.4",
+    "running": "go1.27.4",
+    "gobco": "binary",
+    "fail": "",
+    "silent": False,
+}
+
+
+def run_task(
     task: str,
     *,
-    floor: str | None = MAIN + BRANCH,
-    go_mod: bool = True,
-    counts: str = COUNTS,
-    pkgs: str = "a b",
-    built: str = "go1.27.4",
-    running: str = "go1.27.4",
-    gobco: str = "binary",
-    fail: str = "",
-    silent: bool = False,
     env: support.Env,
+    **options: Unpack[Plant],
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
     """Run one task's body in a planted Go tree with stub tools.
 
@@ -236,11 +245,14 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
         (`go.log`) and the planted GOROOT (`goroot/`).
 
     """
+    facts: Plant = {**PLANT_DEFAULTS, **options}
     tmp = Path(tempfile.mkdtemp())
     tree = tmp / "tree"
     stubs = tmp / "stubs"
-    plant_tools(tmp, gobco)
-    tracked = plant_tree(tree, pkgs, go_mod=go_mod, floor=floor)
+    plant_tools(tmp, facts["gobco"])
+    tracked = plant_tree(
+        tree, facts["pkgs"], go_mod=facts["go_mod"], floor=facts["floor"]
+    )
     environ = env()
     inherited = path_without_gobco(environ.get("PATH", ""), tmp)
     environ |= {
@@ -249,16 +261,16 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
         "STUB_LOG": str(tmp / "gobco.log"),
         "STUB_GO_LOG": str(tmp / "go.log"),
         "STUB_GOROOT": str(tmp / "goroot"),
-        "STUB_RUNNING": running,
-        "STUB_BUILT": built,
-        "STUB_PKGS": pkgs,
-        "STUB_COUNTS": counts,
-        "STUB_FAIL": fail,
+        "STUB_RUNNING": facts["running"],
+        "STUB_BUILT": facts["built"],
+        "STUB_PKGS": facts["pkgs"],
+        "STUB_COUNTS": facts["counts"],
+        "STUB_FAIL": facts["fail"],
         "STUB_LINES": "95.0",
         "STUB_REAL_GOBCO": str(tmp / "real" / "gobco"),
         "ORG_COVERAGE_REPORTS": str(tmp / "reports"),
     }
-    if silent:
+    if facts["silent"]:
         environ["STUB_SILENT"] = "1"
     subprocess.run([GIT, "init", "-q"], cwd=tree, env=environ, check=True)
     if tracked:
@@ -299,7 +311,12 @@ class GoBranchCase:
 
 @fixture
 def go_branch_case(tmp_path: Path) -> GoBranchCase:
-    """Give each row its own GoBranchCase."""
+    """Give each row its own GoBranchCase.
+
+    Returns:
+        The row's GoBranchCase.
+
+    """
     return GoBranchCase(tmp_path)
 
 
@@ -331,7 +348,7 @@ def test_below_the_floor_reds_by_name(env: support.Env) -> None:
     """39 of 50 is 78%, under the 80.0 line: red, naming both numbers."""
     done, _, _ = go_branch_case_run_task(counts="a=5/8 b=34/42", env=env)
     assert done.returncode == 1
-    assert done.stdout == ""
+    assert not done.stdout
     assert f"{TASK}: go-branches: 78% is below its derived floor 80.0%\n" in done.stderr
 
 
@@ -387,7 +404,7 @@ def test_a_build_go_older_than_the_running_go_is_refused(env: support.Env) -> No
     """A gobco built with Go 1.24.13 under Go 1.27.4 is red, unrun."""
     done, tmp, calls = go_branch_case_run_task(built="go1.24.13", env=env)
     assert done.returncode == 1
-    assert done.stdout == ""
+    assert not done.stdout
     assert (
         f"{TASK}: {tmp}/stubs/gobco was built with go1.24.13, older than the"
         " go1.27.4 it runs under —\n"
@@ -419,7 +436,7 @@ def test_a_newer_build_go_runs(env: support.Env) -> None:
     """A build Go later than the running one reads its syntax."""
     done, _, calls = go_branch_case_run_task(built="go1.28.0", env=env)
     assert done.returncode == 0, done.stderr
-    assert len(calls) == 2
+    assert len(calls) == GO_CALLS
 
 
 @pytest.mark.usefixtures("go_branch_case")
@@ -437,7 +454,7 @@ def test_a_failing_package_reds_by_name(env: support.Env) -> None:
     """A suite that fails under gobco is refused, naming the package."""
     done, _, calls = go_branch_case_run_task(fail="a", env=env)
     assert done.returncode == 1
-    assert done.stdout == ""
+    assert not done.stdout
     assert f"{TASK}: gobco failed in a — a suite that does not pass\n" in done.stderr
     assert len(calls) == 1
 
@@ -484,7 +501,7 @@ def test_the_tree_is_left_untouched(env: support.Env) -> None:
         text=True,
         check=True,
     )
-    assert status.stdout == ""
+    assert not status.stdout
 
 
 @pytest.mark.usefixtures("go_branch_case")
@@ -517,7 +534,7 @@ def test_adopt_writes_a_derived_go_branches_line(env: support.Env) -> None:
     assert (
         cf.Held(Decimal("82.0"), Decimal("84.0"), None) == parsed.floors["go-branches"]
     )
-    assert len(calls) == 2
+    assert len(calls) == GO_CALLS
 
 
 @pytest.mark.usefixtures("go_branch_case")

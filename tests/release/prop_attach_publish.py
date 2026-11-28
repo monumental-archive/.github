@@ -125,10 +125,12 @@ def read_manifest(text: str) -> None:
     try:
         names = attach.build_subjects(path)
     except attach.StepError as refused:
-        assert str(refused).startswith(f"{path} is not "), refused
+        said = str(refused)
     else:
         assert isinstance(names, list)
         for name in names:
             assert isinstance(name, str)
+        return
     finally:
         path.unlink()
+    assert said.startswith(f"{path} is not "), said

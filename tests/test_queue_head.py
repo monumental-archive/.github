@@ -25,12 +25,14 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-
-import pytest
+from typing import TYPE_CHECKING, NamedTuple
 
 from belt import decoded, queue_head, workflow_yaml
 from belt.typed_pytest import fixture
 from tests import support
+
+if TYPE_CHECKING:
+    import pytest
 
 HERE = support.MISE
 # A workflow step runs the command outside mise, so its findings carry
@@ -204,18 +206,24 @@ def step_env(ref: str, base: str, group: str, *, env: support.Env) -> dict[str, 
     return environ
 
 
+class Queued(NamedTuple):
+    """A merge group's ref, the base it merges into, and its squash."""
+
+    ref: str
+    base: str
+    group: str
+
+
 def as_the_step(
     monkeypatch: pytest.MonkeyPatch,
     cwd: pathlib.Path,
-    ref: str,
-    base: str,
-    group: str,
+    queued: Queued,
     *,
     env: support.Env,
 ) -> None:
     """Set the step's world in a checkout, as the step runs it (#1697)."""
     monkeypatch.setattr(sys, "argv", [STEP])
-    for name, value in step_env(ref, base, group, env=env).items():
+    for name, value in step_env(*queued, env=env).items():
         monkeypatch.setenv(name, value)
     monkeypatch.chdir(cwd)
 
@@ -248,7 +256,12 @@ class QueueHead:
 
 @fixture
 def queue_head_state(tmp_path: Path, env: support.Env) -> QueueHead:
-    """Give each row its own QueueHead."""
+    """Give each row its own QueueHead.
+
+    Returns:
+        The row's QueueHead.
+
+    """
     return QueueHead(tmp_path, env=env)
 
 
@@ -283,9 +296,7 @@ def test_a_group_built_from_an_older_head_is_refused(
     as_the_step(
         monkeypatch,
         repos.checkout,
-        queue_ref(NUMBER, repos.base),
-        repos.base,
-        group,
+        Queued(queue_ref(NUMBER, repos.base), repos.base, group),
         env=env,
     )
     status = queue_head.main([])
@@ -317,9 +328,7 @@ def test_a_group_built_from_the_current_head_passes(
     as_the_step(
         monkeypatch,
         repos.checkout,
-        queue_ref(NUMBER, repos.base),
-        repos.base,
-        group,
+        Queued(queue_ref(NUMBER, repos.base), repos.base, group),
         env=env,
     )
     status = queue_head.main([])
@@ -375,9 +384,7 @@ def test_edtf_265_is_refused(
     as_the_step(
         monkeypatch,
         checkout,
-        queue_ref("265", EDTF_BASE),
-        EDTF_BASE,
-        EDTF_GROUP,
+        Queued(queue_ref("265", EDTF_BASE), EDTF_BASE, EDTF_GROUP),
         env=env,
     )
     status = queue_head.main([])
@@ -403,7 +410,10 @@ def test_a_ref_that_is_not_a_queue_ref_is_refused(
     repos.clone()
     group = repos.squash(repos.base, current)
     as_the_step(
-        monkeypatch, repos.checkout, "refs/heads/main", repos.base, group, env=env
+        monkeypatch,
+        repos.checkout,
+        Queued("refs/heads/main", repos.base, group),
+        env=env,
     )
     status = queue_head.main([])
     out, err = capfd.readouterr()
@@ -427,7 +437,10 @@ def test_a_missing_base_is_refused(
     group = repos.squash(repos.base, current)
     absent = "0" * 40
     as_the_step(
-        monkeypatch, repos.checkout, queue_ref(NUMBER, absent), absent, group, env=env
+        monkeypatch,
+        repos.checkout,
+        Queued(queue_ref(NUMBER, absent), absent, group),
+        env=env,
     )
     status = queue_head.main([])
     out, err = capfd.readouterr()
@@ -451,9 +464,7 @@ def test_a_missing_group_is_refused(
     as_the_step(
         monkeypatch,
         repos.checkout,
-        queue_ref(NUMBER, repos.base),
-        repos.base,
-        absent,
+        Queued(queue_ref(NUMBER, repos.base), repos.base, absent),
         env=env,
     )
     status = queue_head.main([])
@@ -479,9 +490,7 @@ def test_a_fetch_that_fails_is_refused(
     as_the_step(
         monkeypatch,
         repos.checkout,
-        queue_ref(NUMBER, repos.base),
-        repos.base,
-        group,
+        Queued(queue_ref(NUMBER, repos.base), repos.base, group),
         env=env,
     )
     status = queue_head.main([])
@@ -510,9 +519,7 @@ def test_a_merge_that_conflicts_is_refused(
     as_the_step(
         monkeypatch,
         repos.checkout,
-        queue_ref(NUMBER, moved_base),
-        moved_base,
-        moved_base,
+        Queued(queue_ref(NUMBER, moved_base), moved_base, moved_base),
         env=env,
     )
     status = queue_head.main([])
@@ -545,9 +552,7 @@ def test_the_second_entry_of_a_batch_passes(
     as_the_step(
         monkeypatch,
         repos.checkout,
-        queue_ref(NUMBER, group_one),
-        group_one,
-        group_two,
+        Queued(queue_ref(NUMBER, group_one), group_one, group_two),
         env=env,
     )
     status = queue_head.main([])
@@ -585,9 +590,7 @@ def test_a_merge_commit_group_passes(
     as_the_step(
         monkeypatch,
         repos.checkout,
-        queue_ref(NUMBER, moved_base),
-        moved_base,
-        group,
+        Queued(queue_ref(NUMBER, moved_base), moved_base, group),
         env=env,
     )
     status = queue_head.main([])
@@ -614,9 +617,7 @@ def test_a_rebased_group_passes(
     as_the_step(
         monkeypatch,
         repos.checkout,
-        queue_ref(NUMBER, moved_base),
-        moved_base,
-        group,
+        Queued(queue_ref(NUMBER, moved_base), moved_base, group),
         env=env,
     )
     status = queue_head.main([])

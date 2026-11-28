@@ -151,7 +151,7 @@ def test_rust_without_its_mutation_file_is_red(env: support.Env) -> None:
     """`Cargo.toml` with no `.cargo/mutants.toml`: red, naming all three."""
     done = lint(["Cargo.toml", "src/lib.rs", FLOOR], env=env)
     assert done.returncode == 1, done.stdout
-    assert done.stdout == ""
+    assert not done.stdout
     assert (
         f"{TASK}: ships Rust (Cargo.toml) but tracks no"
         f" .cargo/mutants.toml — {MUTATION}\n"

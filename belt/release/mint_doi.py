@@ -36,7 +36,9 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, override
+from http import HTTPStatus
+from pathlib import Path
+from typing import TYPE_CHECKING, NamedTuple, override
 from urllib.parse import quote
 
 from belt import decoded, findings, typed_std, workflow_command
@@ -339,7 +341,7 @@ def licence_ids(licence: str) -> list[str]:
     return ids
 
 
-def _licence_fault(licence: str, ids: list[str]) -> str:  # ruff: ignore[too-many-return-statements] - one per guard
+def _licence_fault(licence: str, ids: list[str]) -> str:
     """Walk the expression, collecting ids, in the order the guards run.
 
     Returns:
@@ -352,18 +354,40 @@ def _licence_fault(licence: str, ids: list[str]) -> str:  # ruff: ignore[too-man
         return "uses parentheses"
     words = licence.split()
     for i, word in enumerate(words):
-        if i % 2 == 1:
-            if word not in {"OR", "AND"}:
-                return f"joins ids with '{word}'"
-        elif word in {"WITH", "OR", "AND"}:
-            return f"has '{word}' where an id belongs"
-        elif not SPDX_ID.fullmatch(word):
-            return f"has '{word}', which is not an SPDX id"
-        else:
+        fault = _word_fault(word, joins=i % 2 == 1)
+        if fault:
+            return fault
+        if i % 2 == 0:
             ids.append(word.lower())
     if not ids or len(words) % 2 == 0:
         return "is not a complete expression"
     return ""
+
+
+def _word_fault(word: str, *, joins: bool) -> str:
+    """Judge one word of the expression, a join or an id by its place.
+
+    Returns:
+        Why the word refuses, or "" when it is what its place holds.
+
+    """
+    if joins:
+        return "" if word in {"OR", "AND"} else f"joins ids with '{word}'"
+    if word in {"WITH", "OR", "AND"}:
+        return f"has '{word}' where an id belongs"
+    if not SPDX_ID.fullmatch(word):
+        return f"has '{word}', which is not an SPDX id"
+    return ""
+
+
+class Ask(NamedTuple):
+    """One request: method, URL, whether it carries the token, and its payload."""
+
+    method: str
+    url: str
+    auth: bool
+    body: bytes | None = None
+    headers: Mapping[str, str] | None = None
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -390,15 +414,7 @@ class Zenodo:
         self._authed = urllib.request.build_opener(_NoRedirect())
         self._public = urllib.request.build_opener()
 
-    def _once(
-        self,
-        method: str,
-        url: str,
-        *,
-        auth: bool,
-        body: bytes | None = None,
-        headers: Mapping[str, str] | None = None,
-    ) -> tuple[int, bytes]:
+    def _once(self, ask: Ask) -> tuple[int, bytes]:
         """Make one request.
 
         Returns:
@@ -409,12 +425,13 @@ class Zenodo:
             RefusedError: what answered is not an HTTP response.
 
         """
+        method, url, auth, body, headers = ask
         h = {"User-Agent": self.agent, **(headers or {})}
         if auth:
             h["Authorization"] = f"Bearer {self.token}"
-        req = urllib.request.Request(url, data=body, headers=h, method=method)  # ruff: ignore[suspicious-url-open-usage] - BASE_URL is the step's input
         opener = self._authed if auth else self._public
         try:
+            req = typed_std.request(url, data=body, headers=h, method=method)
             with typed_std.urlopen(req, timeout=TIMEOUT, opener=opener) as resp:
                 return resp.status, resp.read()
         except typed_std.NotAResponseError as e:
@@ -428,16 +445,7 @@ class Zenodo:
             reason = e.reason if isinstance(e, urllib.error.URLError) else e
             raise HttpError(method, url, str(reason)) from e
 
-    def _retrying(  # ruff: ignore[too-many-arguments] - curl's two retry modes
-        self,
-        method: str,
-        url: str,
-        *,
-        auth: bool,
-        all_errors: bool,
-        body: bytes | None = None,
-        headers: Mapping[str, str] | None = None,
-    ) -> tuple[int, bytes]:
+    def _retrying(self, ask: Ask, *, all_errors: bool) -> tuple[int, bytes]:
         """Make a request, retrying as curl `--retry 5` does.
 
         Returns:
@@ -454,24 +462,28 @@ class Zenodo:
             last = attempt == RETRIES or time.monotonic() - start >= RETRY_MAX_TIME
             attempt += 1
             try:
-                status, data = self._once(
-                    method, url, auth=auth, body=body, headers=headers
-                )
+                status, data = self._once(ask)
             except HttpError as e:
                 if last:
                     raise
                 print(f"retrying after {e}", file=sys.stderr)
             else:
-                retry = status >= 400 if all_errors else status in TRANSIENT  # ruff: ignore[magic-value-comparison] - an HTTP status class
+                retry = (
+                    status >= HTTPStatus.BAD_REQUEST
+                    if all_errors
+                    else status in TRANSIENT
+                )
                 if last or not retry:
                     return status, data
-                print(f"retrying {method} {url}: HTTP {status}", file=sys.stderr)
+                print(
+                    f"retrying {ask.method} {ask.url}: HTTP {status}", file=sys.stderr
+                )
             pause(delay)
             delay *= 2
 
     @staticmethod
     def _ok(method: str, url: str, status: int, data: bytes) -> bytes:
-        if not 200 <= status < 300:  # ruff: ignore[magic-value-comparison] - the 2xx class
+        if not HTTPStatus.OK <= status < HTTPStatus.MULTIPLE_CHOICES:
             raise HttpError(method, url, f"HTTP {status}")
         return data
 
@@ -489,7 +501,9 @@ class Zenodo:
             The body of a 2xx answer.
 
         """
-        status, data = self._once(method, url, auth=True, body=body, headers=headers)
+        status, data = self._once(
+            Ask(method, url, auth=True, body=body, headers=headers)
+        )
         return self._ok(method, url, status, data)
 
     def idem(
@@ -507,7 +521,7 @@ class Zenodo:
 
         """
         status, data = self._retrying(
-            method, url, auth=True, all_errors=True, body=body, headers=headers
+            Ask(method, url, auth=True, body=body, headers=headers), all_errors=True
         )
         return self._ok(method, url, status, data)
 
@@ -526,7 +540,7 @@ class Zenodo:
         """
         headers = {"Accept": accept} if accept else None
         status, data = self._retrying(
-            "GET", url, auth=False, all_errors=True, headers=headers
+            Ask("GET", url, auth=False, headers=headers), all_errors=True
         )
         return self._ok("GET", url, status, data)
 
@@ -537,7 +551,7 @@ class Zenodo:
             The final HTTP status.
 
         """
-        status, _ = self._retrying("GET", url, auth=False, all_errors=False)
+        status, _ = self._retrying(Ask("GET", url, auth=False), all_errors=False)
         return status
 
 
@@ -549,7 +563,7 @@ def gh(env: Mapping[str, str], *args: str) -> subprocess.CompletedProcess[bytes]
 
     """
     return subprocess.run(
-        ["gh", *args],  # ruff: ignore[start-process-with-partial-path] - gh is the runner's, resolved on PATH
+        [typed_std.on_path("gh", env), *args],
         env=dict(env),
         capture_output=True,
         check=False,
@@ -612,7 +626,7 @@ class Mint:
         lines = ["### DOI minted", "", f"- version: `{doi}`", f"- concept: `{concept}`"]
         if extra:
             lines += ["", extra]
-        with open(self.summary, "a", encoding="utf-8") as f:  # ruff: ignore[builtin-open] - a path from the runner
+        with Path(self.summary).open("a", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")
         workflow_command.notice(f"DOI {doi} (concept {concept})")
         return 0
@@ -632,7 +646,7 @@ class Mint:
             RefusedError: unreadable, or states other licences.
 
         """
-        if len(self.ids) < 2:  # ruff: ignore[magic-value-comparison] - one id needs no list check
+        if len(self.ids) <= 1:
             return
         want = compact(self.ids)
         try:
@@ -714,13 +728,13 @@ class Mint:
             code = self.zenodo.status(
                 f"{self.zenodo.base}/api/vocabularies/licenses/{i}"
             )
-            if code == 404:  # ruff: ignore[magic-value-comparison] - the vocabulary's no
+            if code == HTTPStatus.NOT_FOUND:
                 msg = (
                     f"licence id '{i}' (from CITATION.cff '{licence}') is not in"
                     " Zenodo's licence vocabulary"
                 )
                 raise RefusedError(msg)
-            if code != 200:  # ruff: ignore[magic-value-comparison] - the vocabulary's yes
+            if code != HTTPStatus.OK:
                 msg = (
                     f"Zenodo's licence vocabulary answered HTTP {code} for '{i}'"
                     " — not minting on an unchecked licence"
@@ -907,7 +921,121 @@ class Mint:
             )
             raise RefusedError(msg)
 
-    def run(self, pipeline: str) -> int:  # ruff: ignore[complex-structure, too-many-branches, too-many-locals, too-many-statements] - the step, in order
+    def metadata(self, cff: Citation, pipeline: str) -> str:
+        """Write the legacy deposit's metadata document.
+
+        Returns:
+            The document, as compact JSON.
+
+        """
+        desc = f"Release {self.tag} of {self.repo}. {pipeline}"
+        # A list of licences cannot say OR from AND, so the expression
+        # itself is quoted, exactly as CITATION.cff has it.
+        if len(self.ids) > 1:
+            desc += (
+                f" Licensed under the SPDX expression {cff.licence},"
+                " as CITATION.cff states it."
+            )
+        # The legacy deposit's `license` is ONE string (measured, #1246:
+        # a list answers 400). It carries the first id.
+        return compact({
+            "metadata": {
+                "title": self.repo,
+                "upload_type": "software",
+                "description": desc,
+                "version": self.version,
+                "creators": [{"name": n} for n in cff.creators],
+                "access_right": "open",
+                "license": self.ids[0],
+            }
+        })
+
+    @staticmethod
+    def concept_record(concept_doi: str) -> str:
+        """Read the concept's Zenodo record id off its DOI.
+
+        Returns:
+            The record id.
+
+        Raises:
+            RefusedError: the DOI does not end in one.
+
+        """
+        recid = concept_doi.rsplit(".", 1)[-1]
+        if not recid.isascii() or not recid.isdigit():
+            msg = (
+                f"CITATION.cff concept DOI '{concept_doi}' does not end"
+                " in a Zenodo record id"
+            )
+            raise RefusedError(msg)
+        return recid
+
+    def upload(self, dep: Deposition, tarball: bytes, metadata: str) -> None:
+        """Put the tarball and the metadata on the draft, then its rights."""
+        name = self.repo.rsplit("/", 1)[-1]
+        self.zenodo.idem(
+            "PUT",
+            f"{dep.bucket}/{name}-{self.version}.tar.gz",
+            body=tarball,
+            headers={"Content-Type": "application/octet-stream"},
+        )
+        self.zenodo.idem(
+            "PUT",
+            dep.self_url,
+            body=metadata.encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        if len(self.ids) > 1:
+            self.set_rights(dep.id)
+
+    def publish(self, dep: Deposition) -> tuple[str, str]:
+        """Make the one POST that publishes, reading its DOIs.
+
+        The commitment point. One POST — then the truth is the archive's
+        state (#484, measured on v1.34.1: the publish landed and the
+        response was lost). A failure to get a DOI out of the response
+        is said and answers no DOI, for the caller to re-read the oracle.
+
+        Returns:
+            The version DOI and the concept DOI; "" for the version DOI
+            when the response did not carry one.
+
+        """
+        try:
+            published = an_object(
+                loaded(self.zenodo.call("POST", dep.publish), "the publish answer"),
+                "the publish answer",
+            )
+        except (HttpError, RefusedError) as e:
+            print(e, file=sys.stderr)
+            return "", ""
+        said_doi, said_concept = published.get("doi"), published.get("conceptdoi")
+        doi = (said_doi if isinstance(said_doi, str) else "") or ""
+        concept = (
+            said_concept if isinstance(said_concept, str) else ""
+        ) or FIRST_CONCEPT
+        return doi, concept
+
+    def recovered(self, concept_recid: str) -> int | None:
+        """Re-read the oracle after a lost publish response, spaced.
+
+        A publish that landed as the response was lost may take a moment
+        to appear as the latest version.
+
+        Returns:
+            The green exit when this version appeared; None when it never did.
+
+        """
+        for attempt in range(1, RECOVERY_READS + 1):
+            now = self.oracle(concept_recid)
+            if now is not None and now[3] == self.version:
+                self.verify_published(now[2], now[0])
+                return self.done(now[0], now[1], RECOVERED)
+            if attempt < RECOVERY_READS:
+                pause(RECOVERY_SPACING)
+        return None
+
+    def run(self, pipeline: str) -> int:
         """Deposit, then publish — the DOI names the released bytes.
 
         Returns:
@@ -926,39 +1054,12 @@ class Mint:
             raise RefusedError(msg)
         self.ids = licence_ids(cff.licence)
         self.check_vocabulary(cff.licence)
-        desc = f"Release {self.tag} of {self.repo}. {pipeline}"
-        # A list of licences cannot say OR from AND, so the expression
-        # itself is quoted, exactly as CITATION.cff has it.
-        if len(self.ids) > 1:
-            desc += (
-                f" Licensed under the SPDX expression {cff.licence},"
-                " as CITATION.cff states it."
-            )
-        # The legacy deposit's `license` is ONE string (measured, #1246:
-        # a list answers 400). It carries the first id.
-        metadata = compact({
-            "metadata": {
-                "title": self.repo,
-                "upload_type": "software",
-                "description": desc,
-                "version": self.version,
-                "creators": [{"name": n} for n in cff.creators],
-                "access_right": "open",
-                "license": self.ids[0],
-            }
-        })
-        z = self.zenodo
+        metadata = self.metadata(cff, pipeline)
         concept_recid = ""
         if not cff.concept_doi:
             dep = self.first_deposit()
         else:
-            concept_recid = cff.concept_doi.rsplit(".", 1)[-1]
-            if not concept_recid.isascii() or not concept_recid.isdigit():
-                msg = (
-                    f"CITATION.cff concept DOI '{cff.concept_doi}' does not end"
-                    " in a Zenodo record id"
-                )
-                raise RefusedError(msg)
+            concept_recid = self.concept_record(cff.concept_doi)
             # One read answers two questions: is the goal state already
             # true (a rerun after a lost publish response), and if not,
             # which record does newversion grow from?
@@ -973,59 +1074,23 @@ class Mint:
                 self.verify_published(latest[2], latest[0])
                 return self.done(latest[0], latest[1], ALREADY)
             dep = self.new_version(concept_recid, latest[2])
-        name = self.repo.rsplit("/", 1)[-1]
-        z.idem(
-            "PUT",
-            f"{dep.bucket}/{name}-{self.version}.tar.gz",
-            body=tarball,
-            headers={"Content-Type": "application/octet-stream"},
-        )
-        z.idem(
-            "PUT",
-            dep.self_url,
-            body=metadata.encode(),
-            headers={"Content-Type": "application/json"},
-        )
-        recid = dep.id
-        if len(self.ids) > 1:
-            self.set_rights(recid)
-        # The commitment point. One POST — then the truth is the
-        # archive's state (#484, measured on v1.34.1: the publish landed
-        # and the response was lost). On any failure to get a DOI out of
-        # the response, re-read the oracle: present means this run's
-        # publish landed — green; absent means it failed — red. First
-        # mints have no concept to re-read; there a lost response stays
-        # red, and the rerun fails closed on the title guard.
-        doi, concept = "", ""
-        try:
-            published = an_object(
-                loaded(z.call("POST", dep.publish), "the publish answer"),
-                "the publish answer",
-            )
-            said_doi, said_concept = published.get("doi"), published.get("conceptdoi")
-            doi = (said_doi if isinstance(said_doi, str) else "") or ""
-            concept = (
-                said_concept if isinstance(said_concept, str) else ""
-            ) or FIRST_CONCEPT
-        except (HttpError, RefusedError) as e:
-            print(e, file=sys.stderr)
+        self.upload(dep, tarball, metadata)
+        # Present on a re-read means this run's publish landed — green;
+        # absent means it failed — red. First mints have no concept to
+        # re-read; there a lost response stays red, and the rerun fails
+        # closed on the title guard.
+        doi, concept = self.publish(dep)
         if not doi and concept_recid:
-            # Spaced reads: a publish that landed as the response was
-            # lost may take a moment to appear as the latest version.
-            for attempt in range(1, RECOVERY_READS + 1):
-                now = self.oracle(concept_recid)
-                if now is not None and now[3] == self.version:
-                    self.verify_published(now[2], now[0])
-                    return self.done(now[0], now[1], RECOVERED)
-                if attempt < RECOVERY_READS:
-                    pause(RECOVERY_SPACING)
+            status = self.recovered(concept_recid)
+            if status is not None:
+                return status
         if not doi:
             msg = (
                 "publish failed and the concept's latest published version is"
                 f" not {self.version}"
             )
             raise RefusedError(msg)
-        self.verify_published(recid, doi)
+        self.verify_published(dep.id, doi)
         return self.done(doi, concept, "" if concept_recid else FIRST)
 
 

@@ -264,7 +264,12 @@ class HookFixture:
 
 @fixture
 def hook_fixture(tmp_path: Path, env: support.Env) -> HookFixture:
-    """Give each row its own HookFixture."""
+    """Give each row its own HookFixture.
+
+    Returns:
+        The row's HookFixture.
+
+    """
     return HookFixture(tmp_path, env=env)
 
 
@@ -273,8 +278,8 @@ def test_the_first_run_makes_the_tree_and_both_links(hook_fixture: HookFixture) 
     done = hook_fixture.hook()
     assert done.returncode == 0, done.stderr
     assert (
-        done.stdout
-        == f"org-belt: .config/mise links the belt of {OWNER_REPO}@{hook_fixture.shas[0]}\n"
+        done.stdout == "org-belt: .config/mise links the belt of"
+        f" {OWNER_REPO}@{hook_fixture.shas[0]}\n"
     )
     first = [hook_fixture.shas[0]]
     assert hook_fixture.cached() == first
@@ -317,8 +322,8 @@ def test_a_changed_pin_relinks(hook_fixture: HookFixture) -> None:
     done = hook_fixture.hook()
     assert done.returncode == 0, done.stderr
     assert (
-        done.stdout
-        == f"org-belt: .config/mise links the belt of {OWNER_REPO}@{hook_fixture.shas[1]}\n"
+        done.stdout == "org-belt: .config/mise links the belt of"
+        f" {OWNER_REPO}@{hook_fixture.shas[1]}\n"
     )
     both = sorted(hook_fixture.shas)
     assert hook_fixture.cached() == both
@@ -340,7 +345,7 @@ def test_two_runs_at_once_leave_one_whole_tree(hook_fixture: HookFixture) -> Non
     names = sorted(p.name for p in tree.iterdir())
     checkout = [".git", "mise"]
     assert names == checkout
-    assert hook_fixture.git(tree, "status", "--porcelain").stdout == ""
+    assert not hook_fixture.git(tree, "status", "--porcelain").stdout
     assert hook_fixture.links() == hook_fixture.linked(hook_fixture.shas[0])
 
 
@@ -429,7 +434,8 @@ def test_a_fetch_that_is_not_the_pin_is_refused(hook_fixture: HookFixture) -> No
     done = hook_fixture.hook(PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}")
     assert done.returncode == 1, done.stdout
     assert done.stderr == (
-        f"org-belt: fetched {hook_fixture.shas[1]}, not the pinned {hook_fixture.shas[0]};"
+        f"org-belt: fetched {hook_fixture.shas[1]}, not the pinned "
+        f"{hook_fixture.shas[0]};"
         " nothing linked\n"
     )
     assert (hook_fixture.cached(), hook_fixture.trees()) == ([], [])
@@ -444,7 +450,7 @@ def test_a_fresh_clone_stays_clean(hook_fixture: HookFixture) -> None:
     hook_fixture.commit_all()
     assert hook_fixture.hook().returncode == 0
     status = hook_fixture.git(hook_fixture.consumer, "status", "--porcelain").stdout
-    assert status == ""
+    assert not status
     assert not (hook_fixture.consumer / ".gitignore").exists()
 
 
@@ -459,7 +465,7 @@ def test_a_new_worktree_stays_clean(hook_fixture: HookFixture) -> None:
     done = run([support.tool("sh"), "-c", hook_command()], worktree, hook_fixture.env())
     assert done.returncode == 0, done.stderr
     assert (worktree / ".config/mise/conf.d/belt.toml").is_symlink()
-    assert hook_fixture.git(worktree, "status", "--porcelain").stdout == ""
+    assert not hook_fixture.git(worktree, "status", "--porcelain").stdout
     assert hook_fixture.excluded() == EXCLUDED
 
 
@@ -610,7 +616,12 @@ class EveryHookLinksFirst(HookFixture):
 
 @fixture
 def every_hook_links_first(tmp_path: Path, env: support.Env) -> EveryHookLinksFirst:
-    """Give each row its own EveryHookLinksFirst."""
+    """Give each row its own EveryHookLinksFirst.
+
+    Returns:
+        The row's EveryHookLinksFirst.
+
+    """
     return EveryHookLinksFirst(tmp_path, env=env)
 
 

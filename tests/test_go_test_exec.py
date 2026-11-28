@@ -98,7 +98,7 @@ def test_no_run_directory_is_refused(env: support.Env) -> None:
             "ORG_COVERAGE_RUN: unset — the belt names the run directory (#1667)"
             in done.stderr
         )
-        assert done.stdout == ""
+        assert not done.stdout
 
 
 # `go run` goes through -exec too: anything else runs unchanged.
@@ -117,5 +117,5 @@ def test_a_program_is_handed_no_test_flag(env: support.Env) -> None:
 def test_no_binary_is_a_usage_error(env: support.Env) -> None:
     """Called with nothing, it says how go calls it."""
     done = run([], make_env=env)
-    assert done.returncode == 2
+    assert done.returncode == support.USAGE
     assert "go-test-exec: no binary" in done.stderr

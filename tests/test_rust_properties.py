@@ -28,6 +28,9 @@ from belt import decoded, workflow_yaml
 from belt import rust_properties as rp
 from tests import support
 
+# Two unset runs, each drawing its own seed.
+DRAWS = 2
+
 CANON = support.CANON
 BELT = CANON / "mise"
 BASH = support.tool("bash")
@@ -278,8 +281,8 @@ def test_an_unset_seed_is_drawn_printed_and_handed_on(env: support.Env) -> None:
 
 def test_two_unset_runs_draw_two_seeds(env: support.Env) -> None:
     """64 random bits: two draws that agree would be a fixed seed."""
-    seeds = {run(AUDIT, LOCKED, make_env=env).seed for _ in range(2)}
-    assert len(seeds) == 2, seeds
+    seeds = {run(AUDIT, LOCKED, make_env=env).seed for _ in range(DRAWS)}
+    assert len(seeds) == DRAWS, seeds
 
 
 def test_a_given_seed_is_the_one_handed_on(env: support.Env) -> None:
@@ -299,7 +302,7 @@ def test_a_seed_proptest_would_not_read_is_a_usage_error(
 ) -> None:
     """Proptest ignores a non-number without a word (measured)."""
     got = run(AUDIT, LOCKED, {"ORG_PROPERTY_SEED": given}, make_env=env)
-    assert got.returncode == 2, got.stderr
+    assert got.returncode == rp.EXIT_USAGE, got.stderr
     assert (
         f"ORG_PROPERTY_SEED must be an integer from 0 to 2^64-1, got '{given}'"
     ) in got.stderr

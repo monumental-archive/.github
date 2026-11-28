@@ -43,9 +43,11 @@ REFUSED = "ignored for security reasons"
 
 
 # The declared shell stops a body at its first failure (#401).
-@pytest.mark.parametrize(("what", "body"), BODIES.items())
+@pytest.mark.parametrize(
+    "body", [pytest.param(body, id=what) for what, body in BODIES.items()]
+)
 def test_the_declared_shell_stops_at_the_first_failure(
-    what: object, body: object, env: support.Env
+    body: object, env: support.Env
 ) -> None:
     """No body reaches its last line, and each run is red."""
     done = subprocess.run(
@@ -69,7 +71,12 @@ class ALinkedCloneThatPinsItsShell:
 
 @fixture
 def a_linked_clone_that_pins_its_shell(tmp_path: Path) -> ALinkedCloneThatPinsItsShell:
-    """Give each row its own ALinkedCloneThatPinsItsShell."""
+    """Give each row its own ALinkedCloneThatPinsItsShell.
+
+    Returns:
+        The row's ALinkedCloneThatPinsItsShell.
+
+    """
     return ALinkedCloneThatPinsItsShell(tmp_path)
 
 

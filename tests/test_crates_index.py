@@ -86,8 +86,10 @@ def test_url(capfd: pytest.CaptureFixture[str]) -> None:
         ),
         (
             ["path", "alpha"],
-            "belt crates-index: error: argument mode: invalid choice: 'path'"
-            " (choose from 'url')",
+            (
+                "belt crates-index: error: argument mode: invalid choice: 'path'"
+                " (choose from 'url')"
+            ),
         ),
         (["url", "a", "b"], "belt crates-index: error: unrecognized arguments: b"),
     ],

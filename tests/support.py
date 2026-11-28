@@ -5,14 +5,15 @@ directory held, is tests/conftest.py's hooks. What is here is what a
 test asks for: the environment a process it starts is given, the tools
 it runs, the trees it plants, and a task body run as mise runs it.
 
-THE ENVIRONMENT A STARTED PROCESS IS GIVEN. A fixture's process inherits from the suite's only what INHERITED names,
-plus what a named tool extension in TOOLS adds, then HOME, a git
-identity and the row's own overrides. Nothing else reaches it, so no
-script input arrives from the job the suite happens to run in: the
-release job exports `VERSION`, and a row asserting "VERSION must be set"
-inherited it and the canon could not tag (#1508). git's own variables
-are never inherited either (#857): under a hook git exports `GIT_DIR`,
-and a fixture that inherits it writes into the real repository.
+THE ENVIRONMENT A STARTED PROCESS IS GIVEN. A fixture's process inherits
+from the suite's only what INHERITED names, plus what a named tool
+extension in TOOLS adds, then HOME, a git identity and the row's own
+overrides. Nothing else reaches it, so no script input arrives from the
+job the suite happens to run in: the release job exports `VERSION`, and
+a row asserting "VERSION must be set" inherited it and the canon could
+not tag (#1508). git's own variables are never inherited either (#857):
+under a hook git exports `GIT_DIR`, and a fixture that inherits it
+writes into the real repository.
 
     def test_x(env: support.Env) -> None:
         environ = env(home)                       # a fixture HOME
@@ -109,6 +110,16 @@ CANON = Path(__file__).resolve().parent.parent
 MISE = CANON / "mise"
 RELEASE = CANON / "release"
 PACKAGE = CANON / "belt"
+
+# The one stand-in a row hands a step for a credential: no service is
+# ever asked with it, and nothing real is in the tree to leak.
+FAKE_CREDENTIAL = "planted-stand-in"
+
+# The exit statuses rows read that are a tool's, named by whose they are.
+USAGE = 2  # a usage error's: argparse's, and the belt's shell scripts'
+CARGO_FAILED = 101  # cargo's, for a build, check or lint that failed
+NOT_FOUND = 127  # the shell's, for a command it could not find
+GIT_FATAL = 128  # git's, for a fatal error
 
 # A belt command as a call site names it (#2177): the launcher's
 # directory, then the command, `"${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt"
@@ -310,7 +321,7 @@ def environment(
     out |= overrides
     belt_dir = overrides.get("ORG_BELT_DIR")
     if belt_dir and "ORG_CANON_DIR" not in overrides:
-        out["ORG_CANON_DIR"] = os.path.dirname(belt_dir.rstrip("/"))
+        out["ORG_CANON_DIR"] = str(Path(belt_dir).parent)
     return out
 
 

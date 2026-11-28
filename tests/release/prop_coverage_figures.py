@@ -112,9 +112,11 @@ def test_any_listing_and_run(doc: object) -> None:
         try:
             got = decide(doc, SHA)
         except figures.RefusedError as refused:
-            assert str(refused), "a refusal says why"
+            said = str(refused)
         else:
             assert got is not None
+            continue
+        assert said, "a refusal says why"
 
 
 @given(st.binary(max_size=64) | st.text(max_size=64).map(str.encode))
@@ -124,9 +126,11 @@ def test_any_bytes(data: bytes) -> None:
         try:
             said = figures.answer(command, SHA, data)
         except figures.RefusedError as refused:
-            assert str(refused), "a refusal says why"
+            why = str(refused)
         else:
             assert said.endswith("\n"), said
+            continue
+        assert why, "a refusal says why"
 
 
 @given(st.text(max_size=80))

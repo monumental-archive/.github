@@ -262,7 +262,12 @@ class Staged:
 
 @fixture
 def staged(tmp_path: Path) -> Staged:
-    """Give each row its own Staged."""
+    """Give each row its own Staged.
+
+    Returns:
+        The row's Staged.
+
+    """
     return Staged(tmp_path)
 
 

@@ -19,6 +19,9 @@ from belt import decoded, shard, shard_runner
 from belt.typed_pytest import fixture
 from tests import support
 
+# The shards the rows run, each writing its report.
+SHARDS = 2
+
 
 def doc(
     k: int, n: int, ran: list[str], population: list[str] | None = None
@@ -138,13 +141,17 @@ def test_the_command_line() -> None:
     [
         (
             ["union", ".", "t=0"],
-            "belt shard union: error: argument TASK=SHARDS: 't=0' is not"
-            " <task>=<shards>",
+            (
+                "belt shard union: error: argument TASK=SHARDS: 't=0' is not"
+                " <task>=<shards>"
+            ),
         ),
         (
             ["union"],
-            "belt shard union: error: the following arguments are required:"
-            " REPORTS_DIR",
+            (
+                "belt shard union: error: the following arguments are required:"
+                " REPORTS_DIR"
+            ),
         ),
     ],
 )
@@ -207,7 +214,12 @@ class Guarded:
 
 @fixture
 def guarded(tmp_path: Path, env: support.Env) -> Guarded:
-    """Give each row its own Guarded."""
+    """Give each row its own Guarded.
+
+    Returns:
+        The row's Guarded.
+
+    """
     return Guarded(tmp_path, env=env)
 
 
@@ -228,7 +240,7 @@ def test_two_shards_run_the_whole_suite_once(
         done = guarded.share(out)
         assert done.returncode == 0, done.stderr
     reports = shard.load(guarded.reports)
-    assert len(reports) == 2
+    assert len(reports) == SHARDS
     ran = sorted(
         decoded.as_str(r, "ran")
         for d in reports
@@ -250,7 +262,7 @@ def test_one_shard_alone_is_red(
     assert status == 0, err
     assert guarded.share(out).returncode == 0
     got = shard.union(shard.load(guarded.reports), {"test:py": 2})
-    assert len(got) == 2, got
+    assert len(got) == SHARDS, got
     assert "shard(s) 2 of 2 reported nothing" in got[0]
     assert "ran on no shard: " in got[1]
 

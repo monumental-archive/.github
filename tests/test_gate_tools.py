@@ -49,6 +49,9 @@ from belt import decoded, gate_tools, python_runs, typed_std
 from belt.typed_pytest import fixture
 from tests import support
 
+# Where the planted runs body first calls hadolint, after its setup.
+HADOLINT_AT = 3
+
 CANON = support.CANON
 # A workflow step runs the command outside mise, so its findings carry
 # the command's own name, which the launcher sets (findings.task_name,
@@ -763,7 +766,7 @@ def test_a_helper_calls_what_a_belt_script_it_runs_calls(
         planted: list[str] = ["planted.sh"]
         assert planted == python_code("runs.py").scripts
         runs = expand('"${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt" runs', set())
-        assert first_call(runs, ["hadolint"]) == 3
+        assert first_call(runs, ["hadolint"]) == HADOLINT_AT
         assert first_call(runs, ["shfmt"]) is None
 
 
@@ -1058,7 +1061,7 @@ def test_the_canon_pins_no_tool_of_its_own() -> None:
 
 def test_the_disable_env() -> None:
     """The left-out keys, sorted, and their digest; nothing for none."""
-    assert gate_tools.disable_env([]) == ""
+    assert not gate_tools.disable_env([])
     out = gate_tools.disable_env(["zizmor", "aqua:hadolint/hadolint"])
     lines = out.splitlines()
     assert lines[0] == "MISE_DISABLE_TOOLS=aqua:hadolint/hadolint,zizmor"
@@ -1094,7 +1097,7 @@ def test_the_disable_mode(
         assert "aqua:hadolint/hadolint" in written
         assert "golangci" not in written
     else:
-        assert written == ""
+        assert not written
 
 
 def test_the_helper_refuses_a_table_out_of_step(
@@ -1146,7 +1149,12 @@ class Refusals:
 
 @fixture
 def refusals(tmp_path: Path) -> Refusals:
-    """Give each row its own Refusals."""
+    """Give each row its own Refusals.
+
+    Returns:
+        The row's Refusals.
+
+    """
     return Refusals(tmp_path)
 
 

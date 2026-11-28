@@ -147,9 +147,12 @@ def options(tree: Path) -> dict[str, object]:
 
 
 # A tsconfig tsc cannot parse is a finding with the compiler's message.
-@pytest.mark.parametrize(("name", "config", "said"), REFUSED)
+@pytest.mark.parametrize(
+    ("config", "said"),
+    [pytest.param(config, said, id=name) for name, config, said in REFUSED],
+)
 def test_each_malformed_config_is_refused_by_its_diagnostic(
-    name: object, config: object, said: object, env: support.Env
+    config: object, said: object, env: support.Env
 ) -> None:
     """One row per way `--showConfig` reads a bad config as a good one."""
     with tempfile.TemporaryDirectory() as tmp:
@@ -190,9 +193,12 @@ def test_a_tsconfig_that_is_not_there_carries_the_reason(env: support.Env) -> No
 
 
 # What `lint:types` owns is not the resolver's to refuse.
-@pytest.mark.parametrize(("name", "config", "source"), ACCEPTED)
+@pytest.mark.parametrize(
+    ("config", "source"),
+    [pytest.param(config, source, id=name) for name, config, source in ACCEPTED],
+)
 def test_each_parsed_config_resolves_whatever_its_tree(
-    name: object, config: object, source: object, env: support.Env
+    config: object, source: object, env: support.Env
 ) -> None:
     """The document is written and nothing is said."""
     with tempfile.TemporaryDirectory() as tmp:
@@ -200,7 +206,7 @@ def test_each_parsed_config_resolves_whatever_its_tree(
         plant(tree, config, source)
         done = resolve(tree, env=env)
         assert done.returncode == 0, done.stderr + done.stdout
-        assert done.stderr == ""
+        assert not done.stderr
         assert options(tree)["strict"] == STRICT
         leftovers = sorted(p.name for p in tree.iterdir())
         expected: list[str] = ["resolved.json", "src", "tsconfig.json"]

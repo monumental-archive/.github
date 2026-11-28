@@ -16,6 +16,7 @@ import pytest
 
 from belt.release import caller_pins
 from belt.typed_pytest import fixture
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -485,14 +486,14 @@ def test_install_with_no_tools_is_a_usage_error() -> None:
     """An empty install_args is `mise install`, the whole config."""
     with pytest.raises(SystemExit) as raised:
         caller_pins.main(["install", "--input-of", INPUT_OF], root=Path())
-    assert raised.value.code == 2
+    assert raised.value.code == support.USAGE
 
 
 def test_env_with_a_malformed_pair_is_a_usage_error() -> None:
     """A pair without `=` names no variable."""
     with pytest.raises(SystemExit) as raised:
         caller_pins.main(["env", "--input-of", INPUT_OF, "rust"], root=Path())
-    assert raised.value.code == 2
+    assert raised.value.code == support.USAGE
 
 
 PG = '"aqua:theseus-rs/postgresql-binaries"'
@@ -688,4 +689,4 @@ def test_a_malformed_major_is_a_usage_error(
     root = repo(PG_LIST)
     with pytest.raises(SystemExit) as exit_:
         caller_pins.main(by_major(spec), root=root)
-    assert exit_.value.code == 2
+    assert exit_.value.code == support.USAGE

@@ -21,8 +21,6 @@ import subprocess
 import sys
 from typing import TYPE_CHECKING
 
-import pytest
-
 from belt import coverage_floor as cf
 from belt import decoded
 from belt.typed_pytest import fixture
@@ -30,6 +28,8 @@ from tests import support
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    import pytest
 
 BELT = support.MISE
 BASH = support.tool("bash")
@@ -324,7 +324,12 @@ class FuzzCase:
 
 @fixture
 def fuzz_case(tmp_path: Path, env: support.Env) -> FuzzCase:
-    """Give each row its own FuzzCase."""
+    """Give each row its own FuzzCase.
+
+    Returns:
+        The row's FuzzCase.
+
+    """
     return FuzzCase(tmp_path, env=env)
 
 

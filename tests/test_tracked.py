@@ -23,6 +23,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import TypedDict, Unpack
 
 import pytest
 
@@ -115,14 +116,20 @@ def plant(
     subprocess.run([GIT, "add", "--", *files], cwd=tree, env=environ, check=True)
 
 
+class Tasking(TypedDict, total=False):
+    """What a row plants beside its files, each with its default."""
+
+    untracked: dict[str, str] | None
+    shell: str
+    stubs: dict[str, str] | None
+
+
 def run_task(
     task: str,
     files: dict[str, str],
-    untracked: dict[str, str] | None = None,
     *,
-    shell: str = BASH,
-    stubs: dict[str, str] | None = None,
     env: support.Env,
+    **options: Unpack[Tasking],
 ) -> subprocess.CompletedProcess[str]:
     """Plant a repository and run one task's body in it.
 
@@ -135,6 +142,9 @@ def run_task(
         The finished run, both streams captured.
 
     """
+    untracked = options.get("untracked")
+    shell = options.get("shell", BASH)
+    stubs = options.get("stubs")
     with tempfile.TemporaryDirectory() as tmp:
         tree = Path(tmp) / "repo"
         tree.mkdir()
@@ -183,7 +193,12 @@ class Producers:
 
 @fixture
 def producers(tmp_path: Path, env: support.Env) -> Producers:
-    """Give each row its own Producers."""
+    """Give each row its own Producers.
+
+    Returns:
+        The row's Producers.
+
+    """
     return Producers(tmp_path, env=env)
 
 
@@ -311,7 +326,7 @@ def test_a_misspelling_in_untracked_tool_output_is_not_read(env: support.Env) ->
     done = run_task(
         "lint:typos",
         dict.fromkeys(NAMES, CLEAN_MARKDOWN),
-        {UNTRACKED: f"rustc: {TYPO} value\n"},
+        untracked={UNTRACKED: f"rustc: {TYPO} value\n"},
         env=env,
     )
     assert done.returncode == 0, done.stdout + done.stderr
@@ -481,7 +496,12 @@ class Has:
 
 @fixture
 def has_state(tmp_path: Path, env: support.Env) -> Has:
-    """Give each row its own Has."""
+    """Give each row its own Has.
+
+    Returns:
+        The row's Has.
+
+    """
     return Has(tmp_path, env=env)
 
 
@@ -510,7 +530,7 @@ def test_the_shell_ends_on_a_git_that_cannot_answer(
     tree = has_state.planted()
     done = has_status(tree, "kept", failing_git=True, env=env)
     assert done.returncode == 1
-    assert done.stdout == ""
+    assert not done.stdout
     assert (
         done.stderr
         == "fix:test: git could not say whether kept is tracked (exit 128)\n"
@@ -525,11 +545,11 @@ def test_python_raises_on_a_git_that_cannot_answer(
     stub = tree.parent / "git"
     stub.write_text(FAILING_GIT, encoding="utf-8")
     stub.chmod(0o755)
+    monkeypatch.setattr(tracked, "GIT", str(stub))
     with pytest.raises(
         tracked.GitUnanswerableError,
         match=r"^git could not say whether kept is tracked \(exit 128\)$",
     ):
-        monkeypatch.setattr(tracked, "GIT", str(stub))
         tracked.has("kept", root=tree)
 
 
@@ -554,7 +574,10 @@ def test_a_task_whose_git_fails_is_red_not_skipped(env: support.Env) -> None:
 def test_fuzz_build_skips_an_untracked_fuzz_crate(env: support.Env) -> None:
     """Red at 50c77201: "fuzz/Cargo.lock is not committed"."""
     done = run_task(
-        "lint:fuzz-build", {PLAIN: "x\n"}, {"fuzz/Cargo.toml": "[package]\n"}, env=env
+        "lint:fuzz-build",
+        {PLAIN: "x\n"},
+        untracked={"fuzz/Cargo.toml": "[package]\n"},
+        env=env,
     )
     assert (done.returncode, done.stdout) == (
         0,
@@ -567,7 +590,7 @@ def test_deny_finds_no_deny_toml_where_it_is_untracked(env: support.Env) -> None
     done = run_task(
         "lint:deny",
         {"Cargo.toml": "[workspace]\n", "Cargo.lock": "version = 4\n"},
-        {"deny.toml": "[graph]\n"},
+        untracked={"deny.toml": "[graph]\n"},
         # cargo names the root workspace, and does nothing else.
         stubs={"cargo": LOCATING_CARGO},
         env=env,

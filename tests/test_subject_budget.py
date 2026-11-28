@@ -31,6 +31,15 @@ from tests import support
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
+# Widths rows read: the 72-column subject ceiling; a Go pseudo-version's
+# 34; and the ceiling the planted belt's config sets. Counts: the configs
+# one repository and its preset make, and the unreadable lockfiles.
+SUBJECT_CEILING = 72
+PSEUDO_WIDTH = 34
+PLANTED_CEILING = 61
+CONFIGS = 2
+UNREADABLE = 2
+
 # What Renovate appends to an advisory subject, and what default.json
 # writes out explicitly since #667. Eleven columns.
 # The task that runs the helper, whose name its findings carry (#1934).
@@ -286,7 +295,7 @@ def test_an_unmodellable_matcher_is_unresolved_not_dropped() -> None:
 def test_a_modelled_matcher_that_refuses_settles_the_whole_rule() -> None:
     """Renovate ANDs, so one refusal is a decision, not a maybe."""
     rule = {"matchManagers": ["gomod"], "matchUpdateTypes": ["major"]}
-    assert sb.selects(rule_of(rule), dep("x", manager="mise")) == False
+    assert sb.selects(rule_of(rule), dep("x", manager="mise")) is False
     assert sb.selects(rule_of(rule), dep("x", manager="gomod")) is None
 
 
@@ -549,7 +558,7 @@ def test_it_reaches_every_forked_resolution() -> None:
         owned(preset(), repo, repo_top={"semanticCommitType": "refactor"}),
         dep("ruff"),
     )
-    assert len(configs) == 2
+    assert len(configs) == CONFIGS
     types: set[str] = {c["semanticCommitType"] for c in configs}
     want: set[str] = {"refactor"}
     assert types == want
@@ -989,7 +998,7 @@ def test_an_unreadable_lock_file_is_a_finding() -> None:
         f"{tmp}/web/pnpm-lock.yaml is unreadable",
     ]
     assert said == want
-    assert len(locks.report) == 2
+    assert len(locks.report) == UNREADABLE
 
 
 def test_a_missing_lock_file_for_a_range_is_a_finding(
@@ -1216,7 +1225,7 @@ def test_a_pseudo_versioned_module_fits_and_could_not_otherwise() -> None:
     this must stay green.
     """
     pseudo = "v0.0.0-20241213102144-19d51d7fe467"
-    assert len(pseudo) == 34
+    assert len(pseudo) == PSEUDO_WIDTH
     name = "github.com/cyberphone/json-canonicalization"
     config = preset(
         packageRules=[
@@ -1225,9 +1234,11 @@ def test_a_pseudo_versioned_module_fits_and_could_not_otherwise() -> None:
         ],
     )
     row = [dep(name, pseudo, manager="gomod")]
-    assert sb.judge(row, owned(config, suffix=SUFFIX), 72, []) == NO_FINDINGS
+    assert (
+        sb.judge(row, owned(config, suffix=SUFFIX), SUBJECT_CEILING, []) == NO_FINDINGS
+    )
     charged = sb.judge(row, owned(config, suffix=SUFFIX), 0, [])[0]
-    assert charged.width + len(sb.PR_TAIL) > 72
+    assert charged.width + len(sb.PR_TAIL) > SUBJECT_CEILING
 
 
 def test_a_dependency_that_fits_ordinarily_and_not_with_the_suffix() -> None:
@@ -1235,8 +1246,8 @@ def test_a_dependency_that_fits_ordinarily_and_not_with_the_suffix() -> None:
     name = "n" * 30
     row = [dep(name, "1.0.0")]
     ordinary, _ = sb.render(template(), name, len("1.0.0") + sb.VERSION_GROWTH)
-    assert len(ordinary) <= 72
-    assert sb.judge(row, owned(PRESET), 72, []) == NO_FINDINGS
+    assert len(ordinary) <= SUBJECT_CEILING
+    assert sb.judge(row, owned(PRESET), SUBJECT_CEILING, []) == NO_FINDINGS
     findings = sb.judge(row, owned(PRESET, suffix=SUFFIX), 72, [])
     assert len(findings) == 1
     assert SUFFIX in findings[0].subject
@@ -1340,17 +1351,17 @@ def test_reads_subject_length_from_the_delivered_config(
         env: dict[str, str] = {"ORG_BELT_DIR": tmp}
         for name, value in env.items():
             monkeypatch.setenv(name, value)
-        assert sb.ceiling() == 61
+        assert sb.ceiling() == PLANTED_CEILING
 
 
 def test_unset_belt_dir_is_a_hard_error(monkeypatch: pytest.MonkeyPatch) -> None:
     """No belt means no ceiling; the task must not invent one."""
     env: dict[str, str] = {"ORG_BELT_DIR": ""}
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
     with pytest.raises(
         SystemExit,
     ):
-        for name, value in env.items():
-            monkeypatch.setenv(name, value)
         sb.ceiling()
 
 
@@ -1358,9 +1369,9 @@ def test_absent_committed_toml_is_a_hard_error(monkeypatch: pytest.MonkeyPatch) 
     """A belt without the delivered config fails rather than defaults."""
     with TemporaryDirectory() as tmp:
         env: dict[str, str] = {"ORG_BELT_DIR": tmp}
+        for name, value in env.items():
+            monkeypatch.setenv(name, value)
         with pytest.raises(SystemExit):
-            for name, value in env.items():
-                monkeypatch.setenv(name, value)
             sb.ceiling()
 
 
@@ -1562,7 +1573,6 @@ def lay_out(
         on stdin, and steps into the tree.
 
     """
-
     trees = iter(range(1_000))
 
     def tree(files: dict[str, str]) -> None:

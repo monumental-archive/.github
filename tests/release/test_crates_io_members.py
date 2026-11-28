@@ -42,6 +42,7 @@ def run_helper(
     Args:
         packages: each package's `publish` key, as cargo metadata has it.
         members: which of them are workspace members.
+        env: the `env` fixture, which builds the run's environment.
 
     Returns:
         The completed run and the stub's argument log.
@@ -131,6 +132,6 @@ def test_a_cargo_failure_fails_the_helper(env: support.Env) -> None:
             check=False,
             cwd=d,
         )
-    assert result.returncode == 101
-    assert result.stdout == ""
+    assert result.returncode == support.CARGO_FAILED
+    assert not result.stdout
     assert result.stderr == "error: lock file needs updating\n"

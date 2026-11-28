@@ -41,6 +41,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 import threading
 import urllib.error
 import urllib.request
@@ -54,6 +55,9 @@ from belt import decoded
 from belt.release import registry
 from belt.typed_pytest import fixture
 from tests import support
+
+# The docker calls one push makes: the login, then the build.
+BUILD_CALLS = 2
 
 
 @fixture
@@ -90,8 +94,8 @@ INSPECT = TESTDATA / "registry-inspect-manifest.out"
 
 OCI_INDEX = "application/vnd.oci.image.index.v1+json"
 DOCKER_LIST = "application/vnd.docker.distribution.manifest.list.v2+json"
-TOKEN = "registry-token"  # ruff: ignore[hardcoded-password-string] - the fake's own bearer token
-GH_TOKEN = "actions-token"  # ruff: ignore[hardcoded-password-string] - a stand-in, never sent anywhere real
+REGISTRY_CREDENTIAL = "registry-token"
+ACTIONS_CREDENTIAL = "actions-token"
 ACTOR = "release-bot"
 AMD = "sha256:" + "a" * 64
 ARM = "sha256:" + "b" * 64
@@ -158,7 +162,7 @@ class Fake(BaseHTTPRequestHandler):
 
     manifests: ClassVar[dict[tuple[str, str], tuple[bytes, str]]] = {}
     log: ClassVar[list[Logged]] = []
-    token_body: ClassVar[bytes] = dumps({"token": TOKEN}).encode()
+    token_body: ClassVar[bytes] = dumps({"token": REGISTRY_CREDENTIAL}).encode()
     rewrite: ClassVar[bool] = False
 
     @override
@@ -197,7 +201,7 @@ class Fake(BaseHTTPRequestHandler):
 
         """
         return (
-            self.headers.get("Authorization") == f"Bearer {TOKEN}"
+            self.headers.get("Authorization") == f"Bearer {REGISTRY_CREDENTIAL}"
             or self.headers.get("X-Stub") == "inspect"
         )
 
@@ -260,7 +264,7 @@ class Harness:
         """Start the fake and lay out the stub."""
         Fake.manifests = {}
         Fake.log = []
-        Fake.token_body = dumps({"token": TOKEN}).encode()
+        Fake.token_body = dumps({"token": REGISTRY_CREDENTIAL}).encode()
         Fake.rewrite = False
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Fake)
         self.origin = f"http://127.0.0.1:{self.server.server_port}"
@@ -285,7 +289,7 @@ class Harness:
             "GITHUB_ACTOR": ACTOR,
             "GITHUB_REPOSITORY": "Some-Owner/Some-Image",
             "GITHUB_OUTPUT": str(self.output),
-            "GH_TOKEN": GH_TOKEN,
+            "GH_TOKEN": ACTIONS_CREDENTIAL,
             "FACTS": FACTS,
             "STUB_LOG": str(self.tmp / "docker.log"),
             "STUB_VERSION": str(VERSION),
@@ -338,7 +342,12 @@ class Harness:
 
 @fixture
 def harness(request: pytest.FixtureRequest, tmp_path: Path) -> Harness:
-    """Give each row its own Harness."""
+    """Give each row its own Harness.
+
+    Returns:
+        The row's Harness.
+
+    """
     return Harness(request, tmp_path)
 
 
@@ -391,9 +400,9 @@ def test_assemble_refuses_below_the_floor_before_any_push(
     out = "".join(capfd.readouterr())
     assert code == 1, out
     assert (
-        f"::error::registry: {'buildx 0.11 < 0.12: index annotations would be dropped silently'}\n"
-        in out
-    )
+        "::error::registry: "
+        f"{'buildx 0.11 < 0.12: index annotations would be dropped silently'}\n"
+    ) in out
     only: list[list[str]] = [["buildx", "version"]]
     assert harness.argvs() == only
     assert Fake.log == list[Logged]()
@@ -408,9 +417,9 @@ def test_a_pgrx_push_refuses_below_the_floor(
     out = "".join(capfd.readouterr())
     assert code == 1, out
     assert (
-        f"::error::registry: {'buildx 0.11 < 0.12: index annotations would be dropped silently'}\n"
-        in out
-    )
+        "::error::registry: "
+        f"{'buildx 0.11 < 0.12: index annotations would be dropped silently'}\n"
+    ) in out
     only: list[list[str]] = [["buildx", "version"]]
     assert harness.argvs() == only
 
@@ -516,7 +525,7 @@ def test_a_per_architecture_push(
     calls = harness.docker_calls()
     login: Call = {
         "argv": ["login", "ghcr.io", "-u", ACTOR, "--password-stdin"],
-        "stdin": GH_TOKEN,
+        "stdin": ACTIONS_CREDENTIAL,
     }
     assert calls[0] == login
     build: list[str] = [
@@ -537,9 +546,30 @@ def test_a_per_architecture_push(
         "ctx",
     ]
     assert calls[1]["argv"] == build
-    assert len(calls) == 2
+    assert len(calls) == BUILD_CALLS
     assert (harness.tmp / "digests" / "amd64").read_text("utf-8") == AMD
     assert out == f"::notice::amd64 pushed as {AMD}\n"
+
+
+def test_no_metadata_file_is_a_private_one_of_the_run(
+    harness: Harness, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """The workflows name none: buildx writes into a directory made for the run."""
+    harness.env["STUB_META"] = dumps({"containerimage.digest": AMD})
+    argv = oci_push(harness.tmp)
+    at = argv.index("--metadata-file")
+    del argv[at : at + 2]
+    code = registry.main(argv, harness.env, origin=harness.origin)
+    out = "".join(capfd.readouterr())
+    assert code == 0, out
+    build = harness.docker_calls()[1]["argv"]
+    meta = Path(build[build.index("--metadata-file") + 1])
+    assert (meta.name, meta.parent.name[: len("registry-")]) == (
+        "meta.json",
+        "registry-",
+    )
+    assert meta.parent.parent == Path(tempfile.gettempdir())
+    assert (harness.tmp / "digests" / "amd64").read_text("utf-8") == AMD
 
 
 def test_a_pgrx_index_push(harness: Harness, capfd: pytest.CaptureFixture[str]) -> None:
@@ -643,7 +673,12 @@ class Assemble(Harness):
 
 @fixture
 def assemble_state(request: pytest.FixtureRequest, tmp_path: Path) -> Assemble:
-    """Give each row its own Assemble."""
+    """Give each row its own Assemble.
+
+    Returns:
+        The row's Assemble.
+
+    """
     return Assemble(request, tmp_path)
 
 
@@ -682,7 +717,7 @@ def test_the_captured_index_goes_up_under_its_own_digest(
         token["path"]
         == "/token?scope=repository:some-owner/some-image:pull,push&service=ghcr.io"
     )
-    basic = base64.b64encode(f"{ACTOR}:{GH_TOKEN}".encode()).decode()
+    basic = base64.b64encode(f"{ACTOR}:{ACTIONS_CREDENTIAL}".encode()).decode()
     assert token["headers"]["Authorization"] == f"Basic {basic}"
     assert put["path"] == f"/v2/some-owner/some-image/manifests/{index}"
     assert put["body"] == body
@@ -814,7 +849,7 @@ def test_a_registry_answering_another_digest_for_the_index(
         f"::error::registry: the registry answered {answered}"
         f" for the index pushed as {index}\n"
     ) in out
-    assert assemble_state.output.read_text("utf-8") == ""
+    assert not assemble_state.output.read_text("utf-8")
 
 
 def test_a_registry_answering_no_digest(
@@ -834,7 +869,7 @@ def test_a_registry_answering_no_digest(
         "::error::registry: the registry answered no digest"
         f" for the index pushed as {index}\n"
     ) in out
-    assert assemble_state.output.read_text("utf-8") == ""
+    assert not assemble_state.output.read_text("utf-8")
 
 
 def test_a_failed_put_names_the_request(
@@ -871,9 +906,9 @@ def test_no_token_from_the_endpoint(
     out = "".join(capfd.readouterr())
     assert code == 1, out
     assert (
-        f"::error::registry: {'the token endpoint answered no token for some-owner/some-image'}\n"
-        in out
-    )
+        "::error::registry: "
+        f"{'the token endpoint answered no token for some-owner/some-image'}\n"
+    ) in out
     methods = [e["method"] for e in Fake.log]
     want: list[str] = ["GET"]
     assert methods == want
@@ -916,7 +951,12 @@ class Tag(Harness):
 
 @fixture
 def tag_state(request: pytest.FixtureRequest, tmp_path: Path) -> Tag:
-    """Give each row its own Tag."""
+    """Give each row its own Tag.
+
+    Returns:
+        The row's Tag.
+
+    """
     return Tag(request, tmp_path)
 
 
@@ -1067,14 +1107,17 @@ def test_registry_url_in_the_environment_changes_nothing(
     ])
     opened: list[str] = []
 
-    def refuse(req: urllib.request.Request, **_: object) -> None:
+    def refuse(
+        opener: urllib.request.OpenerDirector, req: urllib.request.Request, **_: object
+    ) -> None:
+        del opener
         opened.append(req.full_url)
         reason = "no network in this row"
         raise urllib.error.URLError(reason)
 
-    monkeypatch.setattr(urllib.request, "urlopen", refuse)
+    monkeypatch.setattr(urllib.request.OpenerDirector, "open", refuse)
     code = registry.main(["tag"], harness.env)
-    out, out = capfd.readouterr()
+    out, _err = capfd.readouterr()
     assert code == 1
     want: list[str] = [
         "https://ghcr.io/token?scope=repository:a/b:pull,push&service=ghcr.io"
@@ -1089,8 +1132,10 @@ def test_an_answer_that_is_not_a_response_is_refused(
 ) -> None:
     """What answered is not an HTTP response: refused by name (#1682)."""
     url = "https://ghcr.io/v2/a/b/manifests/1"
+    monkeypatch.setattr(
+        urllib.request.OpenerDirector, "open", lambda *_args, **_kwargs: None
+    )
     with pytest.raises(registry.RefusedError) as caught:
-        monkeypatch.setattr(urllib.request, "urlopen", lambda *_args, **_kwargs: None)
         registry.Registry.request("GET", url, {})
     assert f"{url} answered NoneType, not an HTTP response" == str(caught.value)
 

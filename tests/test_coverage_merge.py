@@ -22,6 +22,14 @@ from belt import coverage_merge, decoded
 from belt.typed_pytest import fixture
 from tests import support
 
+# Percentages as coverage_merge.percent writes them: two of three
+# truncated to two places, none of none counted whole; three of four
+# lines; and the data files the run's two Python processes write.
+WHOLE = 100.0
+TWO_OF_THREE = 66.66
+THREE_OF_FOUR = 75.0
+PYTHON_PROCESSES = 2
+
 # coverage.py from the pytest tool venv, as `measured` runs it (#2177).
 VENV_PYTHON = str(Path(os.path.realpath(support.tool("pytest"))).parent / "python")
 COVERAGE = [VENV_PYTHON, "-m", "coverage"]
@@ -158,7 +166,12 @@ class Measured:
 
 @fixture
 def measured(tmp_path: Path, env: support.Env) -> Measured:
-    """Give each row its own Measured."""
+    """Give each row its own Measured.
+
+    Returns:
+        The row's Measured.
+
+    """
     return Measured(tmp_path, env=env)
 
 
@@ -181,7 +194,7 @@ def test_four_rows_merge_to_one_runners_figure(measured: Measured) -> None:
         measured.measure(task, "")
     whole = measured.figure(measured.run_dir)
     assert whole == split
-    assert split[1] < 100.0  # `h(0)` is never run: a branch is missed
+    assert split[1] < WHOLE  # `h(0)` is never run: a branch is missed
 
 
 def test_one_row_merges_as_one_row(
@@ -260,8 +273,8 @@ def test_the_summary_is_istanbuls() -> None:
         }
     }
     assert want == got
-    assert coverage_merge.percent(2, 3) == 66.66
-    assert coverage_merge.percent(0, 0) == 100.0
+    assert coverage_merge.percent(2, 3) == TWO_OF_THREE
+    assert coverage_merge.percent(0, 0) == WHOLE
 
 
 def test_rows_are_merged_by_leg() -> None:
@@ -286,13 +299,13 @@ def test_rows_are_merged_by_leg() -> None:
         )
         total = decoded.as_object(decoded.as_object(summary, "s").get("total"), "t")
         lines = decoded.as_object(total.get("lines"), "lines")
-        assert lines.get("pct") == 75.0
+        assert lines.get("pct") == THREE_OF_FOUR
         assert "LH:3" in (run / "rust-lcov.info").read_text("utf-8")
         assert (run / "rust").is_dir()
         got = sorted(p.name for p in (run / "go").iterdir())
         want: list[str] = ["covcounters.x.0", "covcounters.x.1", "covmeta.x"]
         assert want == got
-        assert len(list((run / "python").iterdir())) == 2
+        assert len(list((run / "python").iterdir())) == PYTHON_PROCESSES
 
 
 def test_a_clash_is_red() -> None:
@@ -347,6 +360,6 @@ def test_the_command_line() -> None:
     """Two directories, or argparse's usage exit."""
     with pytest.raises(SystemExit) as ended:
         coverage_merge.main([])
-    assert ended.value.code == 2
+    assert ended.value.code == support.USAGE
     with tempfile.TemporaryDirectory() as scratch:
         assert coverage_merge.main([scratch, f"{scratch}/run"]) == 0

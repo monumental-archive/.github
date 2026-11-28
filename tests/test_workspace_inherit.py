@@ -97,19 +97,19 @@ def raw_member(name: str, **fields: object) -> dict[str, object]:
 def test_a_verbatim_value_is_taken() -> None:
     """The ordinary shape: cargo reports the declaration unchanged."""
     taker = member("taker", rust_version="1.82")
-    assert wi.inherits("rust-version", "1.82", taker, ROOT) == True
+    assert wi.inherits("rust-version", "1.82", taker, ROOT) is True
 
 
 def test_a_member_with_its_own_value_takes_nothing() -> None:
     """A different value is a different declaration, not inheritance."""
     own = member("own", edition="2018")
-    assert wi.inherits("edition", "2021", own, ROOT) == False
+    assert wi.inherits("edition", "2021", own, ROOT) is False
 
 
 def test_an_absent_field_takes_nothing() -> None:
     """release-lab's live case: rust_version None on all four."""
     bare = member("bare", rust_version=None)
-    assert wi.inherits("rust-version", "1.97", bare, ROOT) == False
+    assert wi.inherits("rust-version", "1.97", bare, ROOT) is False
 
 
 def test_a_list_valued_key_reports_empty_not_null() -> None:
@@ -132,13 +132,13 @@ def test_a_path_key_is_rebased_by_cargo_and_still_counts() -> None:
     two as strings reds a key nobody got wrong.
     """
     taker = member("taker", readme="../../README.md")
-    assert wi.inherits("readme", "README.md", taker, ROOT) == True
+    assert wi.inherits("readme", "README.md", taker, ROOT) is True
 
 
 def test_a_rebased_path_naming_another_file_does_not_count() -> None:
     """The other direction: rebasing is not a free pass."""
     other = member("other", readme="../../OTHER.md")
-    assert wi.inherits("readme", "README.md", other, ROOT) == False
+    assert wi.inherits("readme", "README.md", other, ROOT) is False
 
 
 def test_a_bool_readme_resolves_to_whatever_cargo_found() -> None:
@@ -589,7 +589,10 @@ def test_a_failing_cargo_is_red_with_its_text_and_the_rest_judged(
     [
         pytest.param(
             [],
-            "belt workspace-inherit: error: the following arguments are required: CARGO_TOML",
+            (
+                "belt workspace-inherit: error: the following arguments are required: "
+                "CARGO_TOML"
+            ),
             id="nothing",
         ),
     ],
@@ -597,7 +600,10 @@ def test_a_failing_cargo_is_red_with_its_text_and_the_rest_judged(
 def test_no_root_is_a_usage_error(
     argv: list[str], error: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    """The task always passes one; none at all is refused, exit 2: argparse's exit 2, its usage and its error."""
+    """A usage error: argparse's exit 2 and its error.
+
+    The task always passes one; none at all is refused, exit 2.
+    """
     with pytest.raises(SystemExit) as ended:
         wi.main(argv)
     out, err = capfd.readouterr()

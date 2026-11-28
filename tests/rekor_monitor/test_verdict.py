@@ -15,13 +15,16 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-
-import pytest
+from typing import TYPE_CHECKING
 
 from belt import decoded
 from belt.rekor_monitor import verdict
 from belt.typed_pytest import fixture
-from tests import support
+
+if TYPE_CHECKING:
+    import pytest
+
+    from tests import support
 
 COMMAND = "verdict"
 
@@ -119,7 +122,12 @@ class Verdict:
 
 @fixture
 def verdict_state(tmp_path: Path, env: support.Env) -> Verdict:
-    """Give each row its own Verdict."""
+    """Give each row its own Verdict.
+
+    Returns:
+        The row's Verdict.
+
+    """
     return Verdict(tmp_path, env=env)
 
 
@@ -203,7 +211,7 @@ def test_judged_nothing_is_green(
     status = verdict.main(argv)
     out, err = capfd.readouterr()
     assert status == 0, err
-    assert err == ""
+    assert not err
     assert out.strip() == f"verdict: green: stele judged nothing ({STOPPED})"
 
 
@@ -314,7 +322,7 @@ def test_report_nested_past_the_parser(
     status = verdict.main(argv)
     out, err = capfd.readouterr()
     assert status == 1, err
-    assert out == ""
+    assert not out
     assert err.strip() == (
         "::error::verdict: stele exited 0 and its report could not be judged:"
         " the report could not be read"
@@ -356,7 +364,7 @@ def test_a_report_not_of_stele_s_shape_is_unreadable(
         status = verdict.main(argv)
         out, err = capfd.readouterr()
         assert status == 1, err
-        assert out == ""
+        assert not out
         assert err.strip() == (
             "::error::verdict: stele exited 0 and its report could not"
             " be judged: the report could not be read"

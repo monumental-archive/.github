@@ -141,23 +141,26 @@ def test_the_newest_of_two_is_chosen() -> None:
 
 
 @pytest.mark.parametrize(
-    ("case", "given", "said"),
+    ("given", "said"),
     [
-        ("none", listing(), f"no unexpired gate artifact coverage-figures-{SHA}"),
-        ("expired", listing(artifact(SHA, SHA, expired=True)), "no unexpired"),
-        (
-            "another commit",
-            listing(artifact(SHA, OTHER)),
-            f"was kept by a run of {OTHER}, not {SHA}",
-        ),
-        (
-            "not a listing",
-            ["artifacts"],
-            "the artifacts listing is not one GitHub writes",
-        ),
+        pytest.param(given, said, id=case)
+        for case, given, said in [
+            ("none", listing(), f"no unexpired gate artifact coverage-figures-{SHA}"),
+            ("expired", listing(artifact(SHA, SHA, expired=True)), "no unexpired"),
+            (
+                "another commit",
+                listing(artifact(SHA, OTHER)),
+                f"was kept by a run of {OTHER}, not {SHA}",
+            ),
+            (
+                "not a listing",
+                ["artifacts"],
+                "the artifacts listing is not one GitHub writes",
+            ),
+        ]
     ],
 )
-def test_refusals_say_why(case: object, given: object, said: object) -> None:
+def test_refusals_say_why(given: object, said: object) -> None:
     """No artifact, an expired one, another commit's, a strange listing."""
     with pytest.raises(figures.RefusedError) as raised:
         figures.choose(given, SHA)
@@ -175,23 +178,26 @@ def test_a_green_merge_group_or_push_run_is_named(event: object) -> None:
 
 
 @pytest.mark.parametrize(
-    ("case", "given", "said"),
+    ("given", "said"),
     [
-        ("another commit", run_record(OTHER), f"is for {OTHER}, not {SHA}"),
-        (
-            "pull request",
-            run_record(SHA, event="pull_request"),
-            "is a pull_request run, not merge_group or push",
-        ),
-        (
-            "in progress",
-            run_record(SHA, status="in_progress", conclusion=None),
-            "is in_progress/None, not completed/success",
-        ),
-        ("failed", run_record(SHA, conclusion="failure"), "completed/failure"),
+        pytest.param(given, said, id=case)
+        for case, given, said in [
+            ("another commit", run_record(OTHER), f"is for {OTHER}, not {SHA}"),
+            (
+                "pull request",
+                run_record(SHA, event="pull_request"),
+                "is a pull_request run, not merge_group or push",
+            ),
+            (
+                "in progress",
+                run_record(SHA, status="in_progress", conclusion=None),
+                "is in_progress/None, not completed/success",
+            ),
+            ("failed", run_record(SHA, conclusion="failure"), "completed/failure"),
+        ]
     ],
 )
-def test_judge_refusals_say_why(case: object, given: object, said: object) -> None:
+def test_judge_refusals_say_why(given: object, said: object) -> None:
     """Another commit, a pull request's run, a run not green."""
     with pytest.raises(figures.RefusedError) as raised:
         figures.judge(given, SHA)
@@ -213,27 +219,30 @@ def test_a_leg_not_held_is_a_leg_line() -> None:
 
 
 @pytest.mark.parametrize(
-    ("case", "data", "said"),
+    ("data", "said"),
     [
-        ("empty", zipped(""), "coverage-figures.txt holds no leg"),
-        (
-            "stray line",
-            zipped("python 95.23\nupload lcov.info\n"),
-            "holds a line that is not a leg: 'upload lcov.info'",
-        ),
-        (
-            "no member",
-            zipped(None),
-            "the artifact holds no readable coverage-figures.txt",
-        ),
-        (
-            "not a zip",
-            b"not a zip",
-            "the artifact holds no readable coverage-figures.txt",
-        ),
+        pytest.param(data, said, id=case)
+        for case, data, said in [
+            ("empty", zipped(""), "coverage-figures.txt holds no leg"),
+            (
+                "stray line",
+                zipped("python 95.23\nupload lcov.info\n"),
+                "holds a line that is not a leg: 'upload lcov.info'",
+            ),
+            (
+                "no member",
+                zipped(None),
+                "the artifact holds no readable coverage-figures.txt",
+            ),
+            (
+                "not a zip",
+                b"not a zip",
+                "the artifact holds no readable coverage-figures.txt",
+            ),
+        ]
     ],
 )
-def test_figures_refusals_say_why(case: object, data: object, said: object) -> None:
+def test_figures_refusals_say_why(data: object, said: object) -> None:
     """Empty, a stray line, no file in the zip, not a zip."""
     with pytest.raises(figures.RefusedError) as raised:
         figures.figures(figures.unpack(data))
@@ -357,22 +366,34 @@ def test_a_forge_answer_that_is_not_json_is_refused(
     [
         pytest.param(
             ["choose"],
-            "belt coverage-figures choose: error: the following arguments are required: SHA",
+            (
+                "belt coverage-figures choose: error: the following arguments are "
+                "required: SHA"
+            ),
             id='["choose"]',
         ),
         pytest.param(
             ["choose", "abc"],
-            "belt coverage-figures choose: error: argument SHA: 'abc' is not a 40-hex sha",
+            (
+                "belt coverage-figures choose: error: argument SHA: 'abc' is not a "
+                "40-hex sha"
+            ),
             id='["choose", "abc"]',
         ),
         pytest.param(
             ["measure", SHA],
-            "belt coverage-figures: error: argument mode: invalid choice: 'measure' (choose from 'choose', 'judge', 'figures')",
+            (
+                "belt coverage-figures: error: argument mode: invalid choice: "
+                "'measure' (choose from 'choose', 'judge', 'figures')"
+            ),
             id='["measure", SHA]',
         ),
         pytest.param(
             ["figures", SHA, "python"],
-            "belt coverage-figures figures: error: argument pgrx-pg<major>: 'python' is not pgrx-pg<major>",
+            (
+                "belt coverage-figures figures: error: argument pgrx-pg<major>: "
+                "'python' is not pgrx-pg<major>"
+            ),
             id='["figures", SHA, "python"]',
         ),
     ],
@@ -380,7 +401,10 @@ def test_a_forge_answer_that_is_not_json_is_refused(
 def test_usage_errors_are_status_two(
     argv: list[str], error: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    """No sha, a short sha, an unknown command, a leg that is not pgrx: argparse's exit 2, its usage and its error."""
+    """A usage error: argparse's exit 2 and its error.
+
+    No sha, a short sha, an unknown command, a leg that is not pgrx.
+    """
     with pytest.raises(SystemExit) as ended:
         figures.main(argv)
     out, err = capfd.readouterr()
@@ -611,7 +635,12 @@ def derive_state(
     canon: support.Canon,
     env: support.Env,
 ) -> Derive:
-    """Give each row its own Derive."""
+    """Give each row its own Derive.
+
+    Returns:
+        The row's Derive.
+
+    """
     return Derive(tmp_path, capfd, monkeypatch, canon=canon, env=env)
 
 

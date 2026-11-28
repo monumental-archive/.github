@@ -26,6 +26,12 @@ from tests import support
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+# Statuses the planted commands exit with, each its own: a command's,
+# the contradiction count's, and a compile under at_major's.
+FAILED = 3
+COUNT_FAILED = 4
+FAILED_AT_MAJOR = 7
+
 ALL: list[str] = ["--all-features"]
 PREPARED: list[str] = ["prepare 17"]
 NOTHING: list[str] = []
@@ -157,7 +163,12 @@ class Planted:
 def planted(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, env: support.Env
 ) -> Planted:
-    """Give each row its own Planted."""
+    """Give each row its own Planted.
+
+    Returns:
+        The row's Planted.
+
+    """
     return Planted(tmp_path, monkeypatch, env=env)
 
 
@@ -193,7 +204,7 @@ def test_features_are_clippy_features_else_all() -> None:
 def test_run_returns_the_status_and_passes_the_environment() -> None:
     """The command's own status, under the environment it was given."""
     bash = support.tool("bash")
-    assert rust_task.run([bash, "-c", "exit 3"]) == 3
+    assert rust_task.run([bash, "-c", f"exit {FAILED}"]) == FAILED
     script = "[[ $PLANT_X == y ]] && [[ -z ${PLANT_DIR-} ]]"
     assert rust_task.run([bash, "-c", script], {"PLANT_X": "y"}) == 0
 
@@ -265,9 +276,9 @@ def test_a_failed_ladder_stops_before_the_count() -> None:
     """The ladder's status, no flags; a failed count is its status."""
     os.environ["PLANT_LADDER_STATUS"] = "3"
     assert rust_task.ladder() == (3, NOTHING, "")
-    os.environ |= {"PLANT_LADDER_STATUS": "0", "PLANT_COUNT_STATUS": "4"}
+    os.environ |= {"PLANT_LADDER_STATUS": "0", "PLANT_COUNT_STATUS": str(COUNT_FAILED)}
     status, _, _ = rust_task.ladder()
-    assert status == 4
+    assert status == COUNT_FAILED
 
 
 def test_the_surface_is_gate_surfaces_reading_of_cargos_metadata(
@@ -361,8 +372,8 @@ def test_a_compile_runs_at_its_major_with_what_was_prepared(planted: Planted) ->
     """org_pgrx_major given the major; the prepared variables reach it."""
     bash = support.tool("bash")
     out = planted.tmp / "out"
-    argv = [bash, "-c", f'{{ {SHOW}; }} > "{out}"', "show", "7"]
-    assert rust_task.at_major("17", argv, {"PLANT_SDK": "sdk"}) == 7
+    argv = [bash, "-c", f'{{ {SHOW}; }} > "{out}"', "show", str(FAILED_AT_MAJOR)]
+    assert rust_task.at_major("17", argv, {"PLANT_SDK": "sdk"}) == FAILED_AT_MAJOR
     assert out.read_text(encoding="utf-8") == "major=17 sdk=sdk\n"
     assert rust_task.at_major("", argv[:-1], {}) == 0
     assert out.read_text(encoding="utf-8") == "major= sdk=unset\n"

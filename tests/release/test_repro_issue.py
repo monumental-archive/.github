@@ -19,14 +19,18 @@ import os
 import sys
 from typing import TYPE_CHECKING
 
-import pytest
-
 from belt.release import repro_issue
 from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    import pytest
+
+
+# `gh issue create --repo <repo> --title <title> --body <body>`.
+CREATE_ARGS = 8
 
 COMMAND = "repro-issue"
 RUN_URL = "https://github.com/monumental-archive/lab/actions/runs/42044978939"
@@ -85,7 +89,7 @@ class FileAnIssue:
             PATH=f"{self.bindir}{os.pathsep}{os.environ['PATH']}",
             HOME=str(self.tmp),
             GH_ARGS=str(args_file),
-            GH_TOKEN="test",  # ruff: ignore[hardcoded-password-func-arg]
+            GH_TOKEN=support.FAKE_CREDENTIAL,
             TAG="v0.28.1",
             MANIFEST=manifest,
             CLASS="pgrx-extension",
@@ -113,13 +117,18 @@ class FileAnIssue:
         assert args[:4] == create
         assert args[4] == "--title"
         assert args[6] == "--body"
-        assert len(args) == 8, args
+        assert len(args) == CREATE_ARGS, args
         return args[5], args[7]
 
 
 @fixture
 def file_an_issue(tmp_path: Path, env: support.Env) -> FileAnIssue:
-    """Give each row its own FileAnIssue."""
+    """Give each row its own FileAnIssue.
+
+    Returns:
+        The row's FileAnIssue.
+
+    """
     return FileAnIssue(tmp_path, env=env)
 
 

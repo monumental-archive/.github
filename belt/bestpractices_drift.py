@@ -35,7 +35,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from belt import decoded, findings
+from belt import decoded, findings, typed_std
 from belt.typed_std import group
 
 # A live shield on the entry: the metal badge or the Baseline one.
@@ -223,9 +223,8 @@ def fetch(url: str, repo: str) -> tuple[str, str]:
         message = "curl missing"
         raise FileNotFoundError(message)
     done = subprocess.run(
-        # ruff: ignore[start-process-with-partial-path] - curl is resolved on PATH, as audit:badges runs it
         [
-            "curl",
+            typed_std.on_path("curl"),
             "-s",
             "--retry",
             "3",

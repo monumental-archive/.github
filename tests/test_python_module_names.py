@@ -96,7 +96,7 @@ def test_a_planted_hyphenated_file_is_red_by_name(env: support.Env) -> None:
         env=env,
     )
     assert done.returncode == 1
-    assert done.stdout == ""
+    assert not done.stdout
     assert (
         f"{TASK}: not a module name, so nothing can import it (#1634):\n"
         "  release/caller-pins.py\n"
@@ -109,7 +109,7 @@ def test_two_files_that_are_one_module_are_red_by_name(env: support.Env) -> None
     """One basename in two roots is one module: both are named (#1737)."""
     done = lint(["mise/test_steps.py", "release/test_steps.py"], env=env)
     assert done.returncode == 1
-    assert done.stdout == ""
+    assert not done.stdout
     assert (
         f"lint:python-module-names: these tracked files would be one module,"
         " so an import of that name reaches only one of them:\n"

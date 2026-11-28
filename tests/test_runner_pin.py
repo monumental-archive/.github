@@ -171,7 +171,12 @@ class Planted:
 
 @fixture
 def planted(tmp_path: Path, env: support.Env) -> Planted:
-    """Give each row its own Planted."""
+    """Give each row its own Planted.
+
+    Returns:
+        The row's Planted.
+
+    """
     return Planted(tmp_path, env=env)
 
 
@@ -396,7 +401,7 @@ def test_a_missing_file_is_an_error(
 def test_a_file_no_option_names_is_a_usage_error(
     planted: Planted, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A file no option names: argparse's exit 2, its usage and its error."""
+    """A file no option names: argparse's exit 2 and its error."""
     planted.enter(monkeypatch)
     with pytest.raises(SystemExit) as ended:
         runner_pin.main([".github/workflows/ci.yml"])

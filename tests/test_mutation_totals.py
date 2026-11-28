@@ -56,7 +56,12 @@ class Totals:
 
 @fixture
 def totals(tmp_path: Path, env: support.Env) -> Totals:
-    """Give each row its own Totals."""
+    """Give each row its own Totals.
+
+    Returns:
+        The row's Totals.
+
+    """
     return Totals(tmp_path, env=env)
 
 
@@ -164,7 +169,7 @@ def test_no_mutant_in_any_shard_is_red(totals: Totals) -> None:
             " — across 2 shards, 0 mutants"
         )
     ]
-    assert done.stdout == ""
+    assert not done.stdout
     assert done.stderr.splitlines() == want
 
 

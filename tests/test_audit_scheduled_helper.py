@@ -139,7 +139,12 @@ class Helper:
 
 @fixture
 def helper_state(tmp_path: Path, env: support.Env) -> Helper:
-    """Give each row its own Helper."""
+    """Give each row its own Helper.
+
+    Returns:
+        The row's Helper.
+
+    """
     return Helper(tmp_path, env=env)
 
 

@@ -143,7 +143,12 @@ class BashEnvRows:
 
 @fixture
 def bash_env_rows(tmp_path: Path, env: support.Env) -> BashEnvRows:
-    """Give each row its own BashEnvRows."""
+    """Give each row its own BashEnvRows.
+
+    Returns:
+        The row's BashEnvRows.
+
+    """
     return BashEnvRows(tmp_path, env=env)
 
 
@@ -189,9 +194,11 @@ def test_socket_stdin_or_ssh_skips_bash_env_unless_norc(env: support.Env) -> Non
             assert probe([bash, *shell[1:]], ssh=ssh, env=env) == "function"
 
 
-@pytest.mark.parametrize(("label", "bash"), bashes())
+@pytest.mark.parametrize(
+    "bash", [pytest.param(bash, id=label) for label, bash in bashes()]
+)
 def test_a_body_and_its_child_bash_have_the_writer(
-    bash_env_rows: BashEnvRows, label: object, bash: object
+    bash_env_rows: BashEnvRows, bash: object
 ) -> None:
     """BASH_ENV gives the body and a bash it starts org_finding."""
     bash_env_rows.file.unlink(missing_ok=True)
@@ -205,13 +212,15 @@ def test_a_body_and_its_child_bash_have_the_writer(
     assert records == EXPECTED
 
 
-@pytest.mark.parametrize(("label", "bash"), bashes())
+@pytest.mark.parametrize(
+    "bash", [pytest.param(bash, id=label) for label, bash in bashes()]
+)
 def test_without_bash_env_a_body_has_no_writer(
-    bash_env_rows: BashEnvRows, label: object, bash: object
+    bash_env_rows: BashEnvRows, bash: object
 ) -> None:
     """The same body with no BASH_ENV dies on the missing name."""
     done = bash_env_rows.run_body(bash, writer=False)
-    assert done.returncode == 127
+    assert done.returncode == support.NOT_FOUND
     assert "org_finding: command not found" in done.stderr
 
 

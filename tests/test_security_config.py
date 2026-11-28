@@ -165,7 +165,7 @@ def test_agreement_passes_with_a_line_per_repository(
     rc = sc.report(sc.Audit(OWNER, records(), Live()).run())
     out, err = capfd.readouterr()
     assert rc == 0, err
-    assert err == ""
+    assert not err
     assert (
         "org-default.json: 22 fields equal configuration 265775 "
         "(the default for new public repositories), nothing unstated"

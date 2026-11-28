@@ -186,7 +186,12 @@ class Adapter:
 
 @fixture
 def adapter(tmp_path: Path, env: support.Env) -> Adapter:
-    """Give each row its own Adapter."""
+    """Give each row its own Adapter.
+
+    Returns:
+        The row's Adapter.
+
+    """
     return Adapter(tmp_path, env=env)
 
 
@@ -256,7 +261,7 @@ def test_three_findings_are_three_records_in_order(
     ]
     adapter.answer(monkeypatch, report("FAIL", *entries), 1)
     status = stele_findings.main(["assert", "inventory", "a.spdx.json"])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     same(status, 1, err)
     got = [(r["subject"], r["message"], r["detail"]) for r in adapter.records()]
     want: list[tuple[object, object, object]] = [
@@ -288,7 +293,7 @@ def test_output_that_is_not_json_is_refused_by_name(
     """Not one JSON document: refused with stele's status, exit 1."""
     adapter.answer(monkeypatch, "assert: FAIL\n", 3)
     status = stele_findings.main(["assert", "inventory", "a.spdx.json"])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     same(status, 1, err)
     assert (
         f"{TASK}: stele assert inventory exited 3: the output is not stele's report"
@@ -308,7 +313,7 @@ def test_a_malformed_finding_records_none(
     ]
     adapter.answer(monkeypatch, report("FAIL", *entries), 1)
     status = stele_findings.main(["assert", "inventory", "a.spdx.json"])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     same(status, 1, err)
     assert "findings[1]: assertion" in err
     _, message = adapter.refusal()
@@ -321,7 +326,7 @@ def test_stele_s_status_is_the_exit(
     """A status of 2 from stele with a PASS document exits 2."""
     adapter.answer(monkeypatch, report("PASS"), 2)
     status = stele_findings.main(["assert", "inventory", "a.spdx.json"])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     same(status, 2, err)
     same(adapter.records(), [])
 
@@ -333,7 +338,7 @@ def test_arguments_pass_unchanged_after_json(
     args = ["--org", "an org", "--policy", "p.json", "--depth", "full", "--"]
     adapter.answer(monkeypatch, report("PASS"), 0)
     status = stele_findings.main(["assert", "evidence", "--", *args])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     same(status, 0, err)
     same(
         adapter.log.read_text(encoding="utf-8").splitlines(),
@@ -346,7 +351,10 @@ def test_arguments_pass_unchanged_after_json(
     [
         pytest.param(
             ["inventory"],
-            "belt stele-findings: error: argument mode: invalid choice: 'inventory' (choose from 'assert')",
+            (
+                "belt stele-findings: error: argument mode: invalid choice: "
+                "'inventory' (choose from 'assert')"
+            ),
             id='["inventory"]',
         ),
     ],
@@ -354,7 +362,7 @@ def test_arguments_pass_unchanged_after_json(
 def test_no_assertion_is_a_usage_refusal(
     argv: list[str], error: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    """Arguments that name no assertion: usage, exit 1, stele not run: argparse's exit 2, its usage and its error."""
+    """Arguments that name no assertion: argparse's exit 2 and its error."""
     with pytest.raises(SystemExit) as ended:
         stele_findings.main(argv)
     out, err = capfd.readouterr()
@@ -369,7 +377,7 @@ def test_no_stele_is_refused_by_name(
     """No stele on PATH: refused by name, exit 1, only that recorded."""
     adapter.answer(monkeypatch, report("PASS"), 0, path=str(adapter.dir / "empty"))
     status = stele_findings.main(["assert", "inventory", "a.spdx.json"])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     same(status, 1, err)
     assert "stele is not on PATH" in err
     same(adapter.refusal(), ("stele assert inventory", "stele is not on PATH"))

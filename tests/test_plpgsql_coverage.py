@@ -41,6 +41,12 @@ from tests import support, test_coverage_tasks
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
+# More client calls than the collect's setup alone makes; the reports two
+# collects write; and the databases the real-server row tears down.
+SETUP_CALLS = 3
+COLLECTS = 2
+DATABASES = 2
+
 # The task that runs the helper, whose name its findings carry (#1934).
 TASK = "leg"
 
@@ -285,30 +291,41 @@ def as_the_child(
     monkeypatch.chdir(cwd)
 
 
-def measured_run(  # ruff: ignore[too-many-arguments] -- one keyword per part of a run
-    run_dir: Path,
+class Teardown(NamedTuple):
+    """Whether the suite's teardown collects, and over how many databases."""
+
+    collects: bool = True
+    databases: int = 1
+
+
+# The suite every row has unless it names another: it collects once.
+COLLECTS_ONCE = Teardown()
+
+
+def measured_run(
+    tmp: Path,
     env: dict[str, str],
-    tree: Path,
     *,
     python: bool,
-    collects: bool,
-    databases: int = 1,
+    teardown: Teardown,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Leave a run's directory as a suite run through `measured` does (#1667).
+    """Leave `tmp`'s run directory as a suite run through `measured` does (#1667).
 
     `python` plants the rc file and coverage.py's data the stub
-    `coverage` reads; `collects` runs the suite's teardown, the helper
-    called in-process (#1711), with the ORG_PLPGSQL_COVERAGE `measured`
-    names in the run, once for each of `databases` (#2163).
+    `coverage` reads; `teardown.collects` runs the suite's teardown in
+    `tmp`'s tree, the helper called in-process (#1711), with the
+    ORG_PLPGSQL_COVERAGE `measured` names in the run, once for each of
+    `teardown.databases` (#2163).
 
     """
+    run_dir, tree = tmp / "run", tmp / "tree"
     run_dir.mkdir(parents=True)
     if python:
         (run_dir / "python").mkdir()
         (run_dir / "coverage.rc").write_text("[run]\n", encoding="utf-8")
         (run_dir / "python" / ".coverage.stub").write_text("", encoding="utf-8")
-    for _ in range(databases if collects else 0):
+    for _ in range(teardown.databases if teardown.collects else 0):
         report = {"ORG_PLPGSQL_COVERAGE": str(run_dir / "plpgsql-coverage")}
         as_the_child(monkeypatch, env | report, tree)
         assert pc.main(COLLECT) == 0
@@ -845,7 +862,7 @@ def test_a_named_client_is_run_with_its_words_first(
     assert (collected, *capfd.readouterr()) == (0, "", "")
     assert planted.report().is_file()
     calls = (planted.answers / "client").read_text(encoding="utf-8").splitlines()
-    assert len(calls) > 3
+    assert len(calls) > SETUP_CALLS
     every: list[str] = ["[a b][c][-X]"] * len(calls)
     assert every == calls
 
@@ -1053,7 +1070,7 @@ def test_a_missing_report_names_the_teardown(
 def test_a_usage_error_names_both_subcommands(
     argv: list[str], error: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    """No subcommand, or an unknown one: argparse's exit 2, its usage and its error."""
+    """No subcommand, or an unknown one: argparse's exit 2 and its error."""
     with pytest.raises(SystemExit) as ended:
         pc.main(argv)
     out, err = capfd.readouterr()
@@ -1095,15 +1112,14 @@ class Leg:
 class RunsLeg(Protocol):
     """Lay out and run one `coverage:check`; `run_leg` says how."""
 
-    def __call__(  # ruff: ignore[too-many-arguments] -- one keyword per part of a run
+    def __call__(
         self,
         functions: dict[str, tuple[str, str]],
         *,
         legs: str,
         files: dict[str, str],
-        collects: bool = True,
         measured: dict[str, str] | None = None,
-        databases: int = 1,
+        teardown: Teardown = COLLECTS_ONCE,
     ) -> Leg:
         """Plant the tree, the floor and the run the suite left, then check."""
         ...
@@ -1120,22 +1136,21 @@ def run_leg(
 
     """
 
-    def laying_out(  # ruff: ignore[too-many-arguments] -- one keyword per part of a run
+    def laying_out(
         functions: dict[str, tuple[str, str]],
         *,
         legs: str,
         files: dict[str, str],
-        collects: bool = True,
         measured: dict[str, str] | None = None,
-        databases: int = 1,
+        teardown: Teardown = COLLECTS_ONCE,
     ) -> Leg:
         """Plant the tree, the floor and the run the suite left.
 
         `legs` is the floor's `legs:` record, each leg at 80.0 unless
         `measured` names the figure its floor was derived from (#2143),
-        `files` the tracked files beside it, and `collects` whether the
-        suite's teardown calls the helper, once per database of
-        `databases` (#2163). A tracked `*.py` brings the python leg in,
+        `files` the tracked files beside it, and `teardown` whether the
+        suite's teardown calls the helper, and over how many databases
+        (#2163). A tracked `*.py` brings the python leg in,
         measured by the stub coverage.py.
 
         Returns:
@@ -1176,12 +1191,10 @@ def run_leg(
         run([GIT, "init", "-q"], environ, tree)
         run([GIT, "add", *files, ".coverage-floor"], environ, tree)
         measured_run(
-            tmp / "run",
+            tmp,
             environ,
-            tree,
             python=any(name.endswith(".py") for name in files),
-            collects=collects,
-            databases=databases,
+            teardown=teardown,
             monkeypatch=monkeypatch,
         )
         check = as_object(TASKS["coverage:check"], "coverage:check")
@@ -1191,6 +1204,37 @@ def run_leg(
         return Leg(done, tree / ".coverage-floor", floor)
 
     return laying_out
+
+
+def python_remedy(leg: str) -> str:
+    """Name the remedy coverage:check prints for a Python leg it lost.
+
+    Returns:
+        The remedy's line.
+
+    """
+    return (
+        "  the python leg needs tracked *.py and a `test` task whose test"
+        ' command runs through "${ORG_BELT_DIR}/measured"; or record'
+        f" the leg's removal on purpose: `# dropped: {leg} <reason>` in"
+        " .coverage-floor\n"
+    )
+
+
+def plpgsql_remedy(leg: str) -> str:
+    """Name the remedy coverage:check prints for a PL/pgSQL leg it lost.
+
+    Returns:
+        The remedy's line.
+
+    """
+    return (
+        "  the plpgsql leg needs a test command run through"
+        ' "${ORG_BELT_DIR}/measured" and its teardown to call'
+        " belt plpgsql-coverage collect while ORG_PLPGSQL_COVERAGE is set;"
+        " or record the leg's removal on purpose:"
+        f" `# dropped: {leg} <reason>` in .coverage-floor\n"
+    )
 
 
 def assert_held(held: str, stdout: str) -> None:
@@ -1212,7 +1256,7 @@ def test_the_clause_in_files_switches_nothing_on(
         TWO,
         legs="python python-branches",
         files=MENTIONS,
-        collects=False,
+        teardown=Teardown(collects=False),
     )
     done = leg.done
     assert done.returncode == 0, done.stderr
@@ -1286,25 +1330,19 @@ def test_a_record_whose_every_leg_reports_nothing_names_them(
         TWO,
         legs="python python-branches",
         files={"README.md": "no python left\n"},
-        collects=False,
+        teardown=Teardown(collects=False),
     )
     done = leg.done
     assert done.returncode == 1
-    remedy = (
-        "  the python leg needs tracked *.py and a `test` task whose test"
-        ' command runs through "${{ORG_BELT_DIR}}/measured"; or record'
-        " the leg's removal on purpose: `# dropped: {leg} <reason>` in"
-        " .coverage-floor\n"
-    )
     assert (
         "coverage:check: the floor was derived with python and this run"
         " measured none\n"
-        + remedy.format(leg="python")
+        + python_remedy("python")
         + "coverage:check: the floor was derived with python-branches and"
-        " this run measured none\n" + remedy.format(leg="python-branches")
+        " this run measured none\n" + python_remedy("python-branches")
     ) == done.stderr.removeprefix("suite ran\n")
     assert "no leg was measured" not in done.stderr
-    assert done.stdout == ""
+    assert not done.stdout
 
 
 def test_a_recorded_leg_that_reports_nothing_is_red_by_name(
@@ -1315,24 +1353,17 @@ def test_a_recorded_leg_that_reports_nothing_is_red_by_name(
         TWO,
         legs="python python-branches plpgsql plpgsql-branches",
         files={"helper.py": "print('hi')\n"},
-        collects=False,
+        teardown=Teardown(collects=False),
     )
     done = leg.done
     assert done.returncode == 1
-    remedy = (
-        "  the plpgsql leg needs a test command run through"
-        ' "${{ORG_BELT_DIR}}/measured" and its teardown to call'
-        " belt plpgsql-coverage collect while ORG_PLPGSQL_COVERAGE is set;"
-        " or record the leg's removal on purpose:"
-        " `# dropped: {leg} <reason>` in .coverage-floor\n"
-    )
     assert (
         "coverage:check: the floor was derived with plpgsql and this run"
-        " measured none\n" + remedy.format(leg="plpgsql")
+        " measured none\n" + plpgsql_remedy("plpgsql")
     ) in done.stderr
     assert (
         "coverage:check: the floor was derived with plpgsql-branches and"
-        " this run measured none\n" + remedy.format(leg="plpgsql-branches")
+        " this run measured none\n" + plpgsql_remedy("plpgsql-branches")
     ) in done.stderr
 
 
@@ -1344,7 +1375,7 @@ def test_two_databases_leave_the_branch_floor_as_it_stands(
         HELD,
         legs="python python-branches plpgsql plpgsql-branches",
         files={"helper.py": "print('hi')\n"},
-        databases=2,
+        teardown=Teardown(databases=2),
     )
     done = leg.done
     assert done.returncode == 0, done.stderr
@@ -1458,11 +1489,10 @@ def run_measure(
         run([GIT, "init", "-q"], environ, tree)
         run([GIT, "add", *tracked], environ, tree)
         measured_run(
-            tmp / "run",
+            tmp,
             environ,
-            tree,
             python=python,
-            collects=True,
+            teardown=COLLECTS_ONCE,
             monkeypatch=monkeypatch,
         )
         script = str(BELT / "coverage-measure.sh")
@@ -1515,7 +1545,7 @@ def test_a_leg_with_a_format_that_wrote_nothing_is_refused(
     """A formatless leg beside it does not excuse the missing report."""
     done = run_measure("reports", no_xml=True)
     assert done.returncode == 1
-    assert done.stdout == ""
+    assert not done.stdout
     assert (
         "leg: the legs measured wrote no report — nothing for the badge to upload\n"
     ) in done.stderr
@@ -1566,7 +1596,7 @@ def test_each_collect_writes_a_report_of_its_own(merging: Planted) -> None:
     assert pc.main(COLLECT) == 0
     assert pc.main(COLLECT) == 0
     written = sorted(p.name for p in merging.reports.iterdir())
-    assert len(written) == 2, written
+    assert len(written) == COLLECTS, written
     for name in written:
         assert re.search(r"^database-.+\.json$", name)
 
@@ -2101,7 +2131,7 @@ def test_two_concurrent_collects_leave_two_reports(
             )
         )
     assert statuses == [0, 0]
-    assert len(list(reports.glob("database-*.json"))) == 2
+    assert len(list(reports.glob("database-*.json"))) == DATABASES
 
 
 def test_a_function_no_database_runs_is_red_by_name(

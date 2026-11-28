@@ -11,24 +11,31 @@ with no cast, so no helper writes its own reader.
   iterates `finditer` and calls `group`.
 - `stdin_text()`: all of standard input, refusing by name a process
   started without one.
+- `request(url, data=, headers=, method=)`: the one place the canon
+  builds a request, for an http or https URL only; any other scheme
+  (`file:`, a custom one) is refused by name, never opened (#2177).
 - `urlopen(request, timeout=, opener=)`: one HTTP answer, typed as a
-  `Response` (#1682). typeshed types what `urllib.request.urlopen` and
-  `OpenerDirector.open` return as `Any`; this is the one place the
-  canon calls either. Redirects, proxies and `HTTPError` stay urllib's,
-  and a caller that needs its own opener (one that never redirects)
-  hands it in.
+  `Response` (#1682). typeshed types what `OpenerDirector.open` returns
+  as `Any`; this is the one place the canon calls it, through urllib's
+  default opener or the one a caller hands in (one that never
+  redirects). Redirects, proxies and `HTTPError` stay urllib's.
+- `on_path(name, env)`: a tool's absolute path on the PATH the process
+  is given, asked as it starts, so no process starts a bare name.
 
 stdlib only; a sibling root reaches it the way #1634 settled, by
 appending the `mise` root to `sys.path` from its own `__file__`.
 """
 
 import io
+import os
+import shutil
 import sys
 import urllib.request
 from typing import TYPE_CHECKING, Protocol, Self, runtime_checkable
 
 if TYPE_CHECKING:
     import re
+    from collections.abc import Mapping
 
 
 class NoStdinError(RuntimeError):
@@ -37,6 +44,10 @@ class NoStdinError(RuntimeError):
 
 class NotAResponseError(TypeError):
     """An opener answered something that is not an HTTP response."""
+
+
+class NotHttpError(NotAResponseError):
+    """A URL that is not http or https: nothing could answer it as HTTP."""
 
 
 @runtime_checkable
@@ -62,6 +73,51 @@ class Response(Protocol):
         ...
 
 
+def request(
+    url: str,
+    *,
+    data: bytes | None = None,
+    headers: Mapping[str, str] | None = None,
+    method: str | None = None,
+) -> urllib.request.Request:
+    """Build one request to an http or https URL.
+
+    Returns:
+        The request, its scheme one of the two.
+
+    Raises:
+        NotHttpError: the URL names any other scheme.
+
+    """
+    scheme, _, rest = url.partition("://")
+    given = dict(headers or {})
+    if scheme == "https":
+        return urllib.request.Request(
+            f"https://{rest}", data=data, headers=given, method=method
+        )
+    if scheme == "http":
+        return urllib.request.Request(
+            f"http://{rest}", data=data, headers=given, method=method
+        )
+    msg = f"{url} is not an http or https URL"
+    raise NotHttpError(msg)
+
+
+def on_path(name: str, env: Mapping[str, str] | None = None) -> str:
+    """Find a tool on PATH as the process starts, never at import.
+
+    The PATH is the one the process will be given, `env`'s when the
+    caller hands one in, as `subprocess` itself resolves a bare name.
+
+    Returns:
+        Its absolute path, or `name` itself when that PATH holds none, so
+        the start fails by the tool's own name.
+
+    """
+    path = (os.environ if env is None else env).get("PATH")
+    return shutil.which(name, path=path) or name
+
+
 def urlopen(
     request: urllib.request.Request,
     *,
@@ -77,12 +133,8 @@ def urlopen(
         NotAResponseError: what came back is not an HTTP response.
 
     """
-    answer: object = (
-        # ruff: ignore[suspicious-url-open-usage] - each caller builds its Request from a URL it names
-        urllib.request.urlopen(request, timeout=timeout)
-        if opener is None
-        else opener.open(request, timeout=timeout)
-    )
+    chosen = urllib.request.build_opener() if opener is None else opener
+    answer: object = chosen.open(request, timeout=timeout)
     if not isinstance(answer, Response):
         msg = (
             f"{request.full_url} answered {type(answer).__name__}, not an HTTP response"

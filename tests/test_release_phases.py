@@ -221,7 +221,7 @@ def test_the_canons_publish_graph_passes(env: support.Env) -> None:
     """The real orchestrator, both tag jobs after attach, is clean."""
     done = lint(PUBLISH, env=env)
     assert done.returncode == 0, done.stderr
-    assert done.stderr == ""
+    assert not done.stderr
     assert re.search(
         r"^lint:release-phases: \.github/workflows/publish\.yml:"
         r" \d+ jobs, barrier intact\n$",
@@ -233,7 +233,7 @@ def test_a_tag_job_needing_attach_passes(env: support.Env) -> None:
     """The fixture with the edge in place is clean."""
     done = lint(fixture("commit-point", "attach"), env=env)
     assert done.returncode == 0, done.stderr
-    assert done.stderr == ""
+    assert not done.stderr
     assert done.stdout == (
         "lint:release-phases: .github/workflows/publish.yml: 6 jobs, barrier intact\n"
     )
@@ -243,7 +243,7 @@ def test_the_canons_continuous_graph_passes(env: support.Env) -> None:
     """The real stream orchestrator, its tag job after sign, is clean."""
     done = lint(CONTINUOUS, "continuous.yml", env=env)
     assert done.returncode == 0, done.stderr
-    assert done.stderr == ""
+    assert not done.stderr
     assert re.search(
         r"^lint:release-phases: \.github/workflows/continuous\.yml:"
         r" \d+ jobs, barrier intact\n$",
@@ -257,7 +257,7 @@ def test_a_stream_tag_job_needing_its_signer_passes(env: support.Env) -> None:
         fixture("commit-point", "sign", graph=STREAM), "continuous.yml", env=env
     )
     assert done.returncode == 0, done.stderr
-    assert done.stderr == ""
+    assert not done.stderr
     assert done.stdout == (
         "lint:release-phases: .github/workflows/continuous.yml: 6 jobs,"
         " barrier intact\n"
@@ -269,7 +269,7 @@ def assert_red(workflow: str, job: str, *, env: support.Env) -> None:
     """Assert the run is red with exactly the tag-order message."""
     done = lint(workflow, env=env)
     assert done.returncode == 1
-    assert done.stdout == ""
+    assert not done.stdout
     assert done.stderr == message(job)
 
 
@@ -307,7 +307,7 @@ def red_stream_assert_red(workflow: str, job: str, *, env: support.Env) -> None:
     """Assert the run is red with exactly the stream tag-order message."""
     done = lint(workflow, "continuous.yml", env=env)
     assert done.returncode == 1
-    assert done.stdout == ""
+    assert not done.stdout
     assert done.stderr == stream_message(job)
 
 

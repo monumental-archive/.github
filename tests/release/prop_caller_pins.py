@@ -289,10 +289,10 @@ def test_answers_or_refuses(
     out, err = stdout.getvalue(), stderr.getvalue()
     if code == 0:
         assert out.startswith("install="), out
-        assert err == ""
+        assert not err
     else:
         assert code == 1
-        assert out == ""
+        assert not out
         assert err
         for line in err.splitlines():
             assert line.startswith("::error::"), line

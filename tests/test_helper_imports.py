@@ -13,9 +13,12 @@ excepted.
 """
 
 import ast
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from tests import support
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 HERE = support.MISE
 CANON = HERE.parent

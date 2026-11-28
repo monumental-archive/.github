@@ -39,11 +39,13 @@ def bucket(lower: str) -> str:
         The directory part of the record's path.
 
     """
-    if len(lower) <= 2:  # ruff: ignore[magic-value-comparison] - cargo's buckets
-        return str(len(lower))
-    if len(lower) == 3:  # ruff: ignore[magic-value-comparison] - cargo's buckets
-        return f"3/{lower[0]}"
-    return f"{lower[0:2]}/{lower[2:4]}"
+    match len(lower):
+        case 1 | 2:
+            return str(len(lower))
+        case 3:
+            return f"3/{lower[0]}"
+        case _:
+            return f"{lower[0:2]}/{lower[2:4]}"
 
 
 # The record follows the crate, not the spelling.

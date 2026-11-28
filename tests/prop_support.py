@@ -46,6 +46,20 @@ LEAKING: dict[str, str] = {"GIT_DIR": "/real/.git", "VERSION": "1.0"}
 NO_OVERRIDE: dict[str, str] = {}
 
 
+def assert_each_from_its_source(
+    got: dict[str, str], environ: dict[str, str], overrides: dict[str, str]
+) -> None:
+    """Assert each variable came from its source: override, identity, caller."""
+    for name, value in overrides.items():
+        assert got[name] == value
+    for name, value in IDENTITY.items():
+        if name not in overrides:
+            assert got[name] == value
+    for name in support.INHERITED:
+        if name not in overrides:
+            assert got.get(name) == environ.get(name)
+
+
 # Nothing reaches a fixture that the allow-list does not name.
 @given(ENVIRON, OVERRIDES, st.one_of(st.none(), st.just("/fixture/home")))
 @example(LEAKING, NO_OVERRIDE, None)
@@ -67,14 +81,7 @@ def test_only_the_allow_list_reaches_it(
         | set(overrides)
     )
     assert set(got) <= allowed
-    for name, value in overrides.items():
-        assert got[name] == value
-    for name, value in IDENTITY.items():
-        if name not in overrides:
-            assert got[name] == value
-    for name in support.INHERITED:
-        if name not in overrides:
-            assert got.get(name) == environ.get(name)
+    assert_each_from_its_source(got, environ, overrides)
     if "HOME" not in overrides:
         assert got.get("HOME") == (home if home is not None else environ.get("HOME"))
     for name in got:

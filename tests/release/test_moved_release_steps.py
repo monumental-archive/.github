@@ -109,7 +109,12 @@ class Script:
 
 @fixture
 def script_state(tmp_path: Path, env: support.Env) -> Script:
-    """Give each row its own Script."""
+    """Give each row its own Script.
+
+    Returns:
+        The row's Script.
+
+    """
     return Script(tmp_path, env=env)
 
 
@@ -129,7 +134,12 @@ class TagVersion(Script):
 
 @fixture
 def tag_version(tmp_path: Path, env: support.Env) -> TagVersion:
-    """Give each row its own TagVersion."""
+    """Give each row its own TagVersion.
+
+    Returns:
+        The row's TagVersion.
+
+    """
     return TagVersion(tmp_path, env=env)
 
 
@@ -205,7 +215,12 @@ class Containers(Script):
 
 @fixture
 def containers(tmp_path: Path, env: support.Env) -> Containers:
-    """Give each row its own Containers."""
+    """Give each row its own Containers.
+
+    Returns:
+        The row's Containers.
+
+    """
     return Containers(tmp_path, env=env)
 
 
@@ -344,14 +359,19 @@ class Inventory(Script):
             CANON / "release" / "inventory-digests.sh",
             GITHUB_REPOSITORY="Org/Repo",
             GITHUB_ACTOR="bot",
-            GH_TOKEN="planted",  # ruff: ignore[hardcoded-password-func-arg]
+            GH_TOKEN=support.FAKE_CREDENTIAL,
             GITHUB_OUTPUT=str(output),
         )
 
 
 @fixture
 def inventory(tmp_path: Path, env: support.Env) -> Inventory:
-    """Give each row its own Inventory."""
+    """Give each row its own Inventory.
+
+    Returns:
+        The row's Inventory.
+
+    """
     return Inventory(tmp_path, env=env)
 
 
@@ -417,7 +437,12 @@ class Helper(Script):
 
 @fixture
 def helper(tmp_path: Path, env: support.Env) -> Helper:
-    """Give each row its own Helper."""
+    """Give each row its own Helper.
+
+    Returns:
+        The row's Helper.
+
+    """
     return Helper(tmp_path, env=env)
 
 
@@ -453,7 +478,12 @@ class DeriveFacts(Helper):
 
 @fixture
 def derive_facts(tmp_path: Path, env: support.Env) -> DeriveFacts:
-    """Give each row its own DeriveFacts."""
+    """Give each row its own DeriveFacts.
+
+    Returns:
+        The row's DeriveFacts.
+
+    """
     return DeriveFacts(tmp_path, env=env)
 
 
@@ -493,7 +523,7 @@ def test_no_stele_is_refused_by_name(derive_facts: DeriveFacts) -> None:
     done = derive_facts.run_bare(DERIVE_FACTS_SCRIPT, **derive_facts.env())
     assert (done.returncode, done.stdout) == (1, ""), done.stderr
     assert done.stderr == NO_STELE.format("derive-facts.sh")
-    assert derive_facts.output.read_text("utf-8") == ""
+    assert not derive_facts.output.read_text("utf-8")
 
 
 UNPACK_GO_LEGS_SCRIPT = CANON / "release" / "unpack-go-legs.sh"
@@ -527,7 +557,12 @@ class UnpackGoLegs(Helper):
 
 @fixture
 def unpack_go_legs(tmp_path: Path, env: support.Env) -> UnpackGoLegs:
-    """Give each row its own UnpackGoLegs."""
+    """Give each row its own UnpackGoLegs.
+
+    Returns:
+        The row's UnpackGoLegs.
+
+    """
     return UnpackGoLegs(tmp_path, env=env)
 
 
@@ -553,7 +588,7 @@ def test_no_archive_is_refused_by_name(unpack_go_legs: UnpackGoLegs) -> None:
     assert done.stderr == (
         "::error::unpack-go-legs.sh: the go-binary build artifact holds no archives\n"
     )
-    assert unpack_go_legs.github_env.read_text("utf-8") == ""
+    assert not unpack_go_legs.github_env.read_text("utf-8")
 
 
 DERIVE_VEX_SCRIPT = CANON / "release" / "derive-vex.sh"

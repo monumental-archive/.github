@@ -20,8 +20,8 @@ import json
 import shutil
 import subprocess
 import tempfile
-from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING, TypedDict, Unpack
 
 import pytest
 
@@ -29,6 +29,9 @@ from belt import bestpractices_drift as drift
 from belt import decoded
 from belt.typed_pytest import fixture
 from tests import support
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 CANON = support.CANON
 BELT = CANON / "mise"
@@ -90,14 +93,43 @@ def published(edit: dict[str, object] | None = None) -> dict[str, object]:
     return entry
 
 
+class Planted(TypedDict, total=False):
+    """What a row plants, each with its default."""
+
+    entry: dict[str, object] | str | None
+    code: str
+    readme: str | None
+    answers: bool
+    bulk: int
+
+
+def track_bulk(tree: Path, bulk: int, environ: dict[str, str]) -> None:
+    """Track `bulk` empty files after the README, then an empty readme.md."""
+    blob = subprocess.run(
+        [GIT, "hash-object", "-w", "--stdin"],
+        cwd=tree,
+        env=environ,
+        input="",
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    names = [*(f"p/{n:0>72}.txt" for n in range(bulk)), "readme.md"]
+    index = "".join(f"100644 {blob}\t{name}\n" for name in names)
+    subprocess.run(
+        [GIT, "update-index", "--index-info"],
+        cwd=tree,
+        env=environ,
+        input=index,
+        text=True,
+        check=True,
+    )
+
+
 def run(
     *,
-    entry: dict[str, object] | str | None = None,
-    code: str = "200",
-    readme: str | None = README,
-    answers: bool = True,
-    bulk: int = 0,
     env: support.Env,
+    **options: Unpack[Planted],
 ) -> tuple[subprocess.CompletedProcess[str], str]:
     """Run the leg in a planted tree.
 
@@ -109,6 +141,11 @@ def run(
         The finished process and the stub's log of URLs asked.
 
     """
+    entry = options.get("entry")
+    code = options.get("code", "200")
+    readme = options.get("readme", README)
+    answers = options.get("answers", True)
+    bulk = options.get("bulk", 0)
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         tree = root / "tree"
@@ -145,25 +182,7 @@ def run(
             (tree / "README.md").write_text(readme, encoding="utf-8")
         subprocess.run([GIT, "add", "-A"], cwd=tree, env=environ, check=True)
         if bulk:
-            blob = subprocess.run(
-                [GIT, "hash-object", "-w", "--stdin"],
-                cwd=tree,
-                env=environ,
-                input="",
-                capture_output=True,
-                text=True,
-                check=True,
-            ).stdout.strip()
-            names = [*(f"p/{n:0>72}.txt" for n in range(bulk)), "readme.md"]
-            index = "".join(f"100644 {blob}\t{name}\n" for name in names)
-            subprocess.run(
-                [GIT, "update-index", "--index-info"],
-                cwd=tree,
-                env=environ,
-                input=index,
-                text=True,
-                check=True,
-            )
+            track_bulk(tree, bulk, environ)
         as_mise = support.task_run("audit:bestpractices", BODY)
         done = subprocess.run(
             as_mise.argv,
@@ -180,7 +199,7 @@ def run(
 def test_a_matching_entry_passes(env: support.Env) -> None:
     """The published entry says what the file says."""
     done, log = run(env=env)
-    assert done.stderr == ""
+    assert not done.stderr
     assert done.returncode == 0
     assert done.stdout == f"{LABEL}: the published entry matches .bestpractices.json\n"
     assert log == f"curl {URL}\n"
@@ -196,7 +215,7 @@ def test_a_readme_ahead_of_a_long_listing_is_found(env: support.Env) -> None:
     read, `README.md`, which wears the shield.
     """
     done, log = run(bulk=3000, env=env)
-    assert done.stderr == ""
+    assert not done.stderr
     assert done.returncode == 0
     assert done.stdout == f"{LABEL}: the published entry matches .bestpractices.json\n"
     assert log == f"curl {URL}\n"
@@ -237,13 +256,13 @@ def test_a_null_justification_equals_an_empty_one() -> None:
 def test_a_repository_with_no_badge_is_skipped_by_name(env: support.Env) -> None:
     """No shield names an entry, so there is nothing to compare."""
     done, log = run(readme="# example\n", env=env)
-    assert done.stderr == ""
+    assert not done.stderr
     assert done.returncode == 0
     assert done.stdout == (
         f"audit:bestpractices: {REPO}: README carries no bestpractices.dev"
         " shield, skipped\n"
     )
-    assert log == ""
+    assert not log
 
 
 def test_a_commented_out_badge_is_not_a_badge(env: support.Env) -> None:
@@ -252,7 +271,7 @@ def test_a_commented_out_badge_is_not_a_badge(env: support.Env) -> None:
     done, log = run(readme=README.replace(shield, f"<!-- {shield} -->"), env=env)
     assert done.returncode == 0
     assert SKIPPED in done.stdout
-    assert log == ""
+    assert not log
 
 
 def test_a_repository_with_no_readme_is_skipped_by_name(env: support.Env) -> None:
@@ -269,7 +288,7 @@ def test_a_repository_with_no_file_is_skipped(env: support.Env) -> None:
     assert (
         done.stdout == "audit:bestpractices: no tracked .bestpractices.json, skipped\n"
     )
-    assert log == ""
+    assert not log
 
 
 # Each red row is red when planted, with the stated message.

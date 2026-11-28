@@ -119,7 +119,12 @@ class Scheduled:
 def scheduled(
     tmp_path: Path, belt: support.Belt, env: support.Env, track: support.Track
 ) -> Scheduled:
-    """Give each row its own Scheduled."""
+    """Give each row its own Scheduled.
+
+    Returns:
+        The row's Scheduled.
+
+    """
     return Scheduled(tmp_path, belt=belt, env=env, track=track)
 
 
@@ -237,7 +242,12 @@ def own_tasks(
     env: support.Env,
     track: support.Track,
 ) -> OwnTasks:
-    """Give each row its own OwnTasks."""
+    """Give each row its own OwnTasks.
+
+    Returns:
+        The row's OwnTasks.
+
+    """
     return OwnTasks(tmp_path, belt=belt, canon=canon, env=env, track=track)
 
 

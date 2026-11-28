@@ -239,7 +239,12 @@ class Planted:
 
 @fixture
 def planted(tmp_path: Path, canon: support.Canon, env: support.Env) -> Planted:
-    """Give each row its own Planted."""
+    """Give each row its own Planted.
+
+    Returns:
+        The row's Planted.
+
+    """
     return Planted(tmp_path, canon=canon, env=env)
 
 

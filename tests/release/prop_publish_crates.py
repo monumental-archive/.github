@@ -107,6 +107,8 @@ def test_answers_or_refuses(body: bytes, version: str) -> None:
     try:
         got = read(body, version)
     except publish.RefusalError as refused:
-        assert NAME in str(refused)
+        said = str(refused)
     else:
         assert got is None or isinstance(got, str)
+        return
+    assert NAME in said

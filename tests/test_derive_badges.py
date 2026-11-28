@@ -23,6 +23,7 @@ import re
 import subprocess
 import tempfile
 from pathlib import Path
+from typing import TypedDict, Unpack
 
 from belt import decoded, workflow_yaml
 from tests import support
@@ -92,14 +93,20 @@ def publish(classes: str) -> str:
     return PUBLISH_STUB.replace(old, f"      classes: {classes}\n")
 
 
+class Rendering(TypedDict, total=False):
+    """What a row plants beside its files, each with its default."""
+
+    repo: str
+    untracked: tuple[str, ...]
+    policy: dict[str, object] | None
+    canon: bool
+
+
 def render(
     files: dict[str, str],
-    repo: str = DB,
-    untracked: tuple[str, ...] = (),
-    policy: dict[str, object] | None = None,
     *,
-    canon: bool = True,
     env: support.Env,
+    **options: Unpack[Rendering],
 ) -> tuple[subprocess.CompletedProcess[str], str]:
     """Render the badge block for one planted tree.
 
@@ -107,6 +114,10 @@ def render(
         The finished process and the rendered block ("" if none).
 
     """
+    repo = options.get("repo", DB)
+    untracked = options.get("untracked", ())
+    policy = options.get("policy")
+    canon = options.get("canon", True)
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp) / "tree"
         root.mkdir()
@@ -180,9 +191,9 @@ def assert_block(
         The rendered block.
 
     """
-    done, block = render(files, repo, untracked, env=env)
+    done, block = render(files, repo=repo, untracked=untracked, env=env)
     assert done.returncode == 0, done.stderr
-    assert done.stderr == ""
+    assert not done.stderr
     return block
 
 
@@ -445,7 +456,7 @@ def test_a_declaration_reuse_does_not_name_is_red(env: support.Env) -> None:
         " and REUSE.toml names no such expression:\n"
         "  0BSD\n  MIT OR Apache-2.0\n"
     )
-    assert block == ""
+    assert not block
 
 
 # The coverage shield is derived from the floor, never declared (#362).
@@ -457,7 +468,7 @@ def test_a_declared_state_without_a_floor_renders_no_shield(env: support.Env) ->
     """
     done, block = render({".badge-states": "coverage exemplary\n"}, env=env)
     assert done.returncode == 0, done.stderr
-    assert done.stderr == ""
+    assert not done.stderr
     assert "codecov.io" not in block
 
 
@@ -481,7 +492,7 @@ def test_a_floor_no_workflow_feeds_is_refused_with_a_remedy_that_parses(
         "    secrets:\n"
         "      codecov-token: ${{ secrets.CODECOV_TOKEN }}\n"
     )
-    assert block == ""
+    assert not block
     lines = done.stderr.splitlines()
     remedy = lines[lines.index("  add under the gate stub's ci job:") + 1 :]
     template = workflow_yaml.jobs(

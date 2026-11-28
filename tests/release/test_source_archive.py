@@ -4,10 +4,11 @@
 out of build-source-archive.yml into the helper, refusals unchanged.
 
 WHAT RUNS. The command's `main`, called in this process (#1698, #2177),
-with a stub `git` first on PATH. The stub answers `archive` by copying the row's planted .tar.gz for each
-call in turn (the first build, then the check build) to the `-o` path,
-and `ls-files` with the row's count of tracked paths. The archives are
-real gzip tarballs, so the helper counts real entries.
+with a stub `git` first on PATH. The stub answers `archive` by copying
+the row's planted .tar.gz for each call in turn (the first build, then
+the check build) to the `-o` path, and `ls-files` with the row's count
+of tracked paths. The archives are real gzip tarballs, so the helper
+counts real entries.
 """
 
 import gzip
@@ -18,7 +19,6 @@ import os
 import sys
 import tarfile
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -30,6 +30,10 @@ from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
+
+# The builds of the tagged tree a release makes and compares.
+BUILDS = 2
 
 CANON = support.CANON
 WORKFLOW = CANON / ".github" / "workflows" / "build-source-archive.yml"
@@ -222,7 +226,7 @@ def test_two_equal_builds_ship_one_archive(
     shipped: list[str] = [f"{base}.tar.gz"]
     assert shipped == run.shipped
     archives = [x for x in run.git if x.startswith("archive")]
-    assert len(archives) == 2
+    assert len(archives) == BUILDS
     assert (
         f"archive --format=tar.gz --prefix={base}/ -o dist/{base}.tar.gz v{VERSION}"
     ) == archives[0]
@@ -311,6 +315,6 @@ def test_a_failing_git_fails_the_step_with_its_status(
     archiving = archive((data, data), tracked=1, fail=True)
     status = source_archive.main([])
     run = archiving.ran(status, capfd.readouterr())
-    assert run.returncode == 128
+    assert run.returncode == support.GIT_FATAL
     assert run.stderr == "fatal: not a valid object\n"
-    assert run.stdout == ""
+    assert not run.stdout

@@ -27,12 +27,14 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-
-import pytest
+from typing import TYPE_CHECKING
 
 from belt import decoded
 from belt.typed_pytest import fixture
 from tests import support
+
+if TYPE_CHECKING:
+    import pytest
 
 BELT = support.MISE
 BASH = support.tool("bash")
@@ -210,7 +212,12 @@ class GoFuzzSeeds:
 def go_fuzz_seeds(
     tmp_path: Path, request: pytest.FixtureRequest, env: support.Env
 ) -> GoFuzzSeeds:
-    """Give each row its own GoFuzzSeeds."""
+    """Give each row its own GoFuzzSeeds.
+
+    Returns:
+        The row's GoFuzzSeeds.
+
+    """
     return GoFuzzSeeds(tmp_path, request, env=env)
 
 

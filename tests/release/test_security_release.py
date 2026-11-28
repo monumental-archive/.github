@@ -39,6 +39,9 @@ from belt import decoded
 from belt.typed_pytest import fixture
 from tests import support
 
+# The findings of the real report the real main remedies.
+REMEDIED = 20
+
 
 def dumps(value: object) -> str:
     """Encode a planted document as JSON.
@@ -248,7 +251,7 @@ class Repo:
             PLAN=str(self.root / "plan.json"),
             GITHUB_REPOSITORY="monumental-archive/stele",
             GITHUB_OUTPUT=str(out),
-            GH_TOKEN="not-a-token",  # ruff: ignore[hardcoded-password-func-arg]
+            GH_TOKEN=support.FAKE_CREDENTIAL,
             ORG_CANON_DIR=str(self.canon),
         )
         env.update(overrides)
@@ -309,7 +312,12 @@ class DecisionCase:
 
 @fixture
 def decision_case(tmp_path: Path, env: support.Env) -> DecisionCase:
-    """Give each row its own DecisionCase."""
+    """Give each row its own DecisionCase.
+
+    Returns:
+        The row's DecisionCase.
+
+    """
     return DecisionCase(tmp_path, env=env)
 
 
@@ -328,7 +336,7 @@ def test_an_affected_release_that_main_remedies_releases(
     # All twenty findings of the real report are remedied by the real
     # main, and the report says which.
     assert "GO-2026-6603:golang.org/x/net@v0.57.0" in done.stdout
-    assert done.stdout.count("\n  G") == 20, done.stdout
+    assert done.stdout.count("\n  G") == REMEDIED, done.stdout
     # Both publish-path checks ran, on this tree, before the yes.
     assert "mise run audit:deny" in decision_case.repo.calls()
     assert "mise run audit:go-vulns" in decision_case.repo.calls()

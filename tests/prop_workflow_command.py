@@ -77,7 +77,8 @@ def test_one_line_reads_back(
     assert "\n" not in body
     assert "\r" not in body
     head, sep, data = body[2:].partition("::")
-    assert body.startswith("::") and sep, body
+    assert body.startswith("::"), body
+    assert sep, body
     assert unescape(data, DATA) == message
     name, _, props = head.partition(" ")
     assert name == command

@@ -280,7 +280,7 @@ def publish(
             PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}",
             EXCLUDE_FLAGS=OLD_CALLER_EXCLUDES,
             ORG_USER_AGENT=USER_AGENT,
-            ACTIONS_ID_TOKEN_REQUEST_TOKEN="stub-request-token",  # ruff: ignore[hardcoded-password-func-arg]
+            ACTIONS_ID_TOKEN_REQUEST_TOKEN=support.FAKE_CREDENTIAL,
             ACTIONS_ID_TOKEN_REQUEST_URL=OIDC_URL,
             STUB_LOG=str(log),
             STUB_CRATES=str(crates),
@@ -601,8 +601,10 @@ def test_an_answer_that_is_not_a_response_is_refused(
 ) -> None:
     """What answered is not an HTTP response: refused by name (#1682)."""
     url = "https://index.crates.io/ed/tf/edtf-core"
+    monkeypatch.setattr(
+        urllib.request.OpenerDirector, "open", lambda *_args, **_kwargs: None
+    )
     with pytest.raises(publish_crates.RefusalError) as caught:
-        monkeypatch.setattr(urllib.request, "urlopen", lambda *_args, **_kwargs: None)
         publish_crates.http("GET", url, {})
     assert f"{url} answered NoneType, not an HTTP response" == str(caught.value)
 
@@ -627,7 +629,7 @@ def test_cargo_publish_s_own_exit_is_the_run_s(
     publishing = publish(WASM, publish_rc=101)
     status = publish_crates.main([])
     run = publishing.ran(status, capfd.readouterr())
-    assert run.returncode == 101
+    assert run.returncode == support.CARGO_FAILED
 
 
 # The command: refusals and failed commands as job-log lines.

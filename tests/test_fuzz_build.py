@@ -54,6 +54,11 @@ from belt import decoded
 from belt.typed_pytest import fixture
 from tests import support
 
+# The words of one replay line, RUN_HEAD's, two of its own and
+# RUN_TAIL's, then the seed; and the seeds a row plants, each replayed.
+RUN_WORDS = 9
+SEEDS = 2
+
 BELT = support.MISE
 BASH = support.tool("bash")
 GIT = support.tool("git")
@@ -306,7 +311,12 @@ class FuzzBuild:
 def fuzz_build(
     tmp_path: Path, request: pytest.FixtureRequest, env: support.Env
 ) -> FuzzBuild:
-    """Give each row its own FuzzBuild."""
+    """Give each row its own FuzzBuild.
+
+    Returns:
+        The row's FuzzBuild.
+
+    """
     return FuzzBuild(tmp_path, request, env=env)
 
 
@@ -327,7 +337,7 @@ def replays(calls: list[str]) -> list[tuple[str, Path, str]]:
         words = run.split(" ")
         assert words[:4] == RUN_HEAD, run
         assert words[6:8] == RUN_TAIL, run
-        assert len(words) == 9, run
+        assert len(words) == RUN_WORDS, run
         assert words[8].startswith(ARTIFACT_FLAG), run
         assert seeds.startswith("seeds:"), seeds
         out.append((words[4], Path(words[5]), seeds.removeprefix("seeds:")))
@@ -421,7 +431,7 @@ def test_the_replay_reads_a_directory_outside_the_tree(fuzz_build: FuzzBuild) ->
     status, _, err, calls = fuzz_build.run_lint()
     assert (status, err) == (0, "")
     replayed = replays(calls)
-    assert len(replayed) == 2
+    assert len(replayed) == SEEDS
     for line in calls:
         assert "fuzz/corpus" not in line
     for _, directory, _ in replayed:
@@ -483,7 +493,7 @@ def test_a_crash_artifact_lands_in_the_scratch_directory(fuzz_build: FuzzBuild) 
     status, _, _, calls = fuzz_build.run_lint()
     assert status == 1
     replayed = replays(calls)
-    assert len(replayed) == 2
+    assert len(replayed) == SEEDS
     for line, (_, directory, _) in zip(
         [c for c in calls if c.startswith("fuzz run ")], replayed, strict=True
     ):

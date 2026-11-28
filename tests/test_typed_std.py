@@ -22,6 +22,7 @@ from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
 HERE = support.MISE
 CANON = HERE.parent
@@ -48,7 +49,12 @@ class Group:
 
 @fixture
 def group_state() -> Group:
-    """Give each row its own Group."""
+    """Give each row its own Group.
+
+    Returns:
+        The row's Group.
+
+    """
     return Group()
 
 
@@ -80,7 +86,9 @@ def test_an_empty_group_is_text() -> None:
     found = re.match(r"(a*)b", "b")
     if found is None:
         pytest.fail("the row's pattern did not match its text")
-    assert typed_std.group(found, 1) == ""
+    group = typed_std.group(found, 1)
+    assert group is not None
+    assert not group
 
 
 # All of standard input, or the one refusal.
@@ -92,8 +100,8 @@ def test_text(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_absent_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
     """No standard input (sys.stdin is None): refused by name."""
+    monkeypatch.setattr("sys.stdin", None)
     with pytest.raises(typed_std.NoStdinError) as caught:
-        monkeypatch.setattr("sys.stdin", None)
         typed_std.stdin_text()
     assert str(caught.value) == "no standard input: the process was started without one"
 
@@ -168,16 +176,21 @@ class Opener(urllib.request.OpenerDirector):
 
 # One HTTP answer, typed; never `Any`.
 def test_urllib_s_answer_is_returned_and_read(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No opener: urllib's own urlopen answers, with the timeout."""
+    """No opener: urllib's default opener answers, with the timeout."""
     answer = Answer(200, b"body", "text/plain")
     timeouts: list[float] = []
 
-    def opened(request: urllib.request.Request, *, timeout: float) -> Answer:
-        del request
+    def opened(
+        opener: urllib.request.OpenerDirector,
+        request: urllib.request.Request,
+        *,
+        timeout: float,
+    ) -> Answer:
+        del opener, request
         timeouts.append(timeout)
         return answer
 
-    monkeypatch.setattr(urllib.request, "urlopen", opened)
+    monkeypatch.setattr(urllib.request.OpenerDirector, "open", opened)
     got = typed_std.urlopen(urllib.request.Request(URL), timeout=7)
     assert (got.status, got.read(), got.getheader("Content-Type")) == (
         200,
@@ -322,3 +335,91 @@ def test_the_typed_opener_and_a_file_are_not_opens() -> None:
     )
     none: list[int] = []
     assert none == opens(text)
+
+
+# The one place a request is built, for http and https only (#2177).
+def builds(text: str) -> list[int]:
+    """Find the lines that build a urllib request themselves.
+
+    Returns:
+        The line of each call to urllib.request.Request, in order.
+
+    """
+    tree = ast.parse(text)
+    qualify = call_names.qualifier(tree)
+    return sorted(
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and qualify(node.func) == "urllib.request.Request"
+    )
+
+
+def test_no_belt_module_builds_a_request_itself() -> None:
+    """Every belt module builds its requests through typed_std.request."""
+    listed = support.tracked(CANON, "belt/*.py", "belt/**/*.py")
+    breaches = [
+        f"{path}:{line}: builds a request outside {HOME}"
+        for path in listed
+        if path != HOME
+        for line in builds((CANON / path).read_text(encoding="utf-8"))
+    ]
+    none: list[str] = []
+    assert none == breaches
+
+
+def test_each_spelling_is_a_build() -> None:
+    """Planted: the attribute and the imported name are both found."""
+    lines: list[int] = [2, 4]
+    text = (
+        "import urllib.request\nurllib.request.Request(u)\n"
+        "from urllib.request import Request as R\nR(u)\n"
+    )
+    assert builds(text) == lines
+
+
+@pytest.mark.parametrize("url", ["https://a.invalid/x?y=1", "http://127.0.0.1:9/x"])
+def test_an_http_url_is_built_as_it_was_given(url: str) -> None:
+    """An https or http URL: built with its data, headers and method."""
+    built = typed_std.request(url, data=b"d", headers={"X-A": "1"}, method="PUT")
+    assert (built.full_url, built.data, built.get_method()) == (url, b"d", "PUT")
+    assert built.get_header("X-a") == "1"
+
+
+@pytest.mark.parametrize(
+    "url", ["file:///etc/passwd", "ftp://a.invalid/x", "a.invalid/x", ""]
+)
+def test_any_other_url_is_refused_by_name(url: str) -> None:
+    """Another scheme, or none: refused, naming the URL, never opened."""
+    with pytest.raises(typed_std.NotHttpError) as refused:
+        typed_std.request(url)
+    assert str(refused.value) == f"{url} is not an http or https URL"
+
+
+def test_a_tool_on_path_is_its_absolute_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Asked as the process starts: the PATH of the moment, absolute."""
+    tool = tmp_path / "planted-tool"
+    tool.write_text("#!/bin/sh\n", encoding="utf-8")
+    tool.chmod(0o755)
+    monkeypatch.setenv("PATH", str(tmp_path))
+    assert typed_std.on_path("planted-tool") == str(tool)
+
+
+def test_a_tool_off_path_is_its_bare_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Not found: the bare name, so the start fails by the tool's own name."""
+    monkeypatch.setenv("PATH", str(tmp_path))
+    assert typed_std.on_path("no-such-tool") == "no-such-tool"
+
+
+def test_a_handed_environment_s_path_is_the_one_searched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The PATH the process is given, not this process's, as subprocess reads it."""
+    tool = tmp_path / "planted-tool"
+    tool.write_text("#!/bin/sh\n", encoding="utf-8")
+    tool.chmod(0o755)
+    monkeypatch.setenv("PATH", "/nonexistent")
+    assert typed_std.on_path("planted-tool", {"PATH": str(tmp_path)}) == str(tool)

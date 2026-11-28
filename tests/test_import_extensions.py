@@ -22,6 +22,9 @@ from pathlib import Path
 
 from tests import support
 
+# The imports the row plants without their extension, one finding each.
+PLANTED_IMPORTS = 2
+
 BELT = support.MISE
 SCAFFOLD = BELT.parent / "scaffold"
 GIT = support.tool("git")
@@ -138,6 +141,6 @@ def test_lint_biome_names_the_rule(env: support.Env) -> None:
         done = run(tree, "lint:biome", env=env)
     out = STYLE.sub("", done.stdout + done.stderr)
     assert done.returncode != 0, out
-    assert out.count("lint/correctness/useImportExtensions") == 2, out
+    assert out.count("lint/correctness/useImportExtensions") == PLANTED_IMPORTS, out
     assert "Safe fix: Add import extension .ts." in out
     assert "Safe fix: Add import extension .mts." in out

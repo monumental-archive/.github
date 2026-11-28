@@ -175,7 +175,12 @@ class Planted:
 
 @fixture
 def planted(tmp_path: Path, env: support.Env) -> Planted:
-    """Give each row its own Planted."""
+    """Give each row its own Planted.
+
+    Returns:
+        The row's Planted.
+
+    """
     return Planted(tmp_path, env=env)
 
 
@@ -250,7 +255,7 @@ def test_no_git_is_still_total(planted: Planted) -> None:
             (bare / name).symlink_to(found)
     done = planted.resolve(planted.link_dir(), path=str(bare))
     assert done.returncode == 0, done.stderr
-    assert done.stdout == ""
+    assert not done.stdout
 
 
 class UnderAHook(Planted):
@@ -300,7 +305,12 @@ class UnderAHook(Planted):
 
 @fixture
 def under_a_hook(tmp_path: Path, env: support.Env) -> UnderAHook:
-    """Give each row its own UnderAHook."""
+    """Give each row its own UnderAHook.
+
+    Returns:
+        The row's UnderAHook.
+
+    """
     return UnderAHook(tmp_path, env=env)
 
 

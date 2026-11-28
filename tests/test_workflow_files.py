@@ -190,7 +190,12 @@ class Planted:
 
 @fixture
 def planted(tmp_path: Path, env: support.Env) -> Planted:
-    """Give each row its own Planted."""
+    """Give each row its own Planted.
+
+    Returns:
+        The row's Planted.
+
+    """
     return Planted(tmp_path, env=env)
 
 
@@ -212,7 +217,12 @@ class Untracked(Planted):
 
 @fixture
 def untracked(tmp_path: Path, env: support.Env) -> Untracked:
-    """Give each row its own Untracked."""
+    """Give each row its own Untracked.
+
+    Returns:
+        The row's Untracked.
+
+    """
     return Untracked(tmp_path, env=env)
 
 

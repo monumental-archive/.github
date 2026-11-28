@@ -16,6 +16,12 @@ from belt import gate_cache_key
 from belt.typed_pytest import fixture
 from tests import support
 
+# The calls a run of two makes, each asking for the venv.
+CALLS = 2
+
+# A status the command exits with, for measured to pass back.
+CHILD_STATUS = 7
+
 BELT = support.MISE
 MEASURED = BELT / "measured"
 GIT = support.tool("git")
@@ -122,8 +128,8 @@ def test_the_exit_status_is_the_commands(env: support.Env) -> None:
     """Exec, not a wrapper: the status comes back unchanged."""
     with tempfile.TemporaryDirectory() as tmp:
         tree = plant(Path(tmp), floor=False, env=env)
-        out = run(tree, [SH, "-c", "exit 7"], make_env=env)
-        assert out.returncode == 7
+        out = run(tree, [SH, "-c", f"exit {CHILD_STATUS}"], make_env=env)
+        assert out.returncode == CHILD_STATUS
 
 
 def test_a_signal_is_the_commands(env: support.Env) -> None:
@@ -139,7 +145,7 @@ def test_no_command_is_refused(env: support.Env) -> None:
     with tempfile.TemporaryDirectory() as tmp:
         tree = plant(Path(tmp), floor=False, env=env)
         out = run(tree, [], make_env=env)
-        assert out.returncode == 2
+        assert out.returncode == support.USAGE
         assert "measured: no command" in out.stderr
 
 
@@ -269,7 +275,7 @@ def test_the_rc_file_is_written_once_per_run(env: support.Env) -> None:
         second, _venv, log = pytest_run(tmp, ["pytest"], env=env)
         assert second.returncode == 0, second.stderr
         assert rc.read_text().endswith("# the first call's\n")
-        assert len(log.read_text(encoding="utf-8").splitlines()) == 2
+        assert len(log.read_text(encoding="utf-8").splitlines()) == CALLS
 
 
 def test_a_refused_venv_runs_nothing(env: support.Env) -> None:
@@ -768,7 +774,7 @@ def test_a_metadata_with_no_target_directory_is_refused(
             "measured: cargo metadata named no target_directory — nowhere to"
             " measure Rust into\n"
         )
-        assert out.stdout == ""
+        assert not out.stdout
         assert "show-env" not in "\n".join(calls)
 
 
@@ -884,7 +890,12 @@ class VitestMeasured:
 
 @fixture
 def vitest_measured(tmp_path: Path, env: support.Env) -> VitestMeasured:
-    """Give each row its own VitestMeasured."""
+    """Give each row its own VitestMeasured.
+
+    Returns:
+        The row's VitestMeasured.
+
+    """
     return VitestMeasured(tmp_path, env=env)
 
 
@@ -950,7 +961,7 @@ def test_a_coverage_flag_of_its_own_is_refused(vitest_measured: VitestMeasured) 
         "--coverage.enabled",
     ])
     assert out.returncode == 1
-    assert out.stdout == ""
+    assert not out.stdout
     assert (
         "measured: --coverage.enabled is on the vitest run, which would"
         " measure TypeScript a second way"
@@ -963,7 +974,7 @@ def test_a_second_run_in_one_test_run_is_refused(
     """The leg measures one suite: the second call is refused by name."""
     _, out = vitest_measured.vitest_run(["pnpm", "exec", "vitest", "run"], calls=2)
     assert out.returncode == 1
-    assert out.stdout == ""
+    assert not out.stdout
     assert (
         "  the leg measures one suite; a repository with several uses vitest projects\n"
     ) in out.stderr

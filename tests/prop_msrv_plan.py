@@ -24,6 +24,8 @@ from hypothesis import strategies as st
 from belt import msrv_plan as mp
 from belt.typed_hypothesis import given
 
+# A version's parts: major, minor and patch.
+VERSION_PARTS = 3
 PART = st.integers(0, 999)
 VERSION = st.tuples(PART, PART, PART)
 NAME = st.from_regex(r"[a-z][a-z0-9_-]{0,8}", fullmatch=True)
@@ -63,7 +65,7 @@ def test_show_then_parse(version: tuple[int, int, int]) -> None:
 def test_any_string_is_read_or_refused(raw: str) -> None:
     """A version or None."""
     got = mp.parse_version(raw)
-    assert got is None or len(got) == 3  # ruff: ignore[magic-value-comparison] - three parts
+    assert got is None or len(got) == VERSION_PARTS
 
 
 def draw_workspace(draw: st.DrawFn) -> list[Member]:

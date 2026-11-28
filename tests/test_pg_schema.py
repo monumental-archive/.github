@@ -55,6 +55,10 @@ from tests import support
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+# A file size past what one read of the file takes, so a skip that read
+# only its head would miss the rest.
+PAST_THE_READ = 20000
+
 normalise = pg_schema.normalise
 
 GIT = support.tool("git")
@@ -293,7 +297,12 @@ class InRepo:
 def in_repo(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, env: support.Env
 ) -> InRepo:
-    """Give each row its own InRepo."""
+    """Give each row its own InRepo.
+
+    Returns:
+        The row's InRepo.
+
+    """
     return InRepo(tmp_path, monkeypatch, env=env)
 
 
@@ -690,7 +699,12 @@ class SqlSkipsOwnedSnapshots:
 def sql_skips_owned_snapshots(
     tmp_path: Path, request: pytest.FixtureRequest, env: support.Env
 ) -> SqlSkipsOwnedSnapshots:
-    """Give each row its own SqlSkipsOwnedSnapshots."""
+    """Give each row its own SqlSkipsOwnedSnapshots.
+
+    Returns:
+        The row's SqlSkipsOwnedSnapshots.
+
+    """
     return SqlSkipsOwnedSnapshots(tmp_path, request, env=env)
 
 
@@ -800,7 +814,9 @@ def test_sql_over_the_size_default_is_linted(
     sql_skips_owned_snapshots.sql(
         "db/big.sql", CLEAN_SQL.upper() * 2100 + "select 1;\n"
     )
-    assert (sql_skips_owned_snapshots.root / "db/big.sql").stat().st_size > 20000
+    assert (
+        sql_skips_owned_snapshots.root / "db/big.sql"
+    ).stat().st_size > PAST_THE_READ
     status, out, err, handed = sql_skips_owned_snapshots.run_task("lint:sql")
     assert status == 1
     want = ["db/big.sql"]
@@ -830,7 +846,8 @@ def test_a_red_derivation_reds_the_lint_before_sqlfluff(
     sql_skips_owned_snapshots.member("crates/ext", pgrx=True)
     sql_skips_owned_snapshots.sql(SNAPSHOT, LAB_SNAPSHOT)
     sql_skips_owned_snapshots.sql("db/up.sql", CLEAN_SQL)
-    sql_skips_owned_snapshots.packages.clear()  # no metadata document: the shim exits 101
+    # No metadata document: the shim exits 101.
+    sql_skips_owned_snapshots.packages.clear()
     status, _, _, handed = sql_skips_owned_snapshots.run_task("lint:sql")
     assert (status, handed) == (101, [])
 
@@ -863,14 +880,18 @@ def test_fix_leaves_the_snapshot_byte_for_byte(
         ([], "belt pg-schema: error: the following arguments are required: mode"),
         (
             ["check", "a"],
-            "belt pg-schema check: error: the following arguments are required:"
-            " SNAPSHOT",
+            (
+                "belt pg-schema check: error: the following arguments are required:"
+                " SNAPSHOT"
+            ),
         ),
         (["check", "a", "b", "c"], "belt pg-schema: error: unrecognized arguments: c"),
         (
             ["diff", "a", "b"],
-            "belt pg-schema: error: argument mode: invalid choice: 'diff'"
-            " (choose from 'check', 'write')",
+            (
+                "belt pg-schema: error: argument mode: invalid choice: 'diff'"
+                " (choose from 'check', 'write')"
+            ),
         ),
     ],
 )

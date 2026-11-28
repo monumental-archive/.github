@@ -19,7 +19,7 @@ import argparse
 import subprocess
 from pathlib import Path
 
-from belt import findings
+from belt import findings, typed_std
 
 MAINS = '{{if eq .Name "main"}}{{.ImportPath}}{{end}}'
 
@@ -48,8 +48,7 @@ def go(*args: str) -> str:
 
     """
     done = subprocess.run(
-        # ruff: ignore[start-process-with-partial-path] - the caller's pinned go, on PATH
-        ["go", *args],
+        [typed_std.on_path("go"), *args],
         stdout=subprocess.PIPE,
         text=True,
         check=False,

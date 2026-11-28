@@ -35,6 +35,9 @@ if TYPE_CHECKING:
 
     import pytest
 
+# The planted tree's roots, each checked.
+ROOTS = 2
+
 BELT = support.MISE
 TASK = "lint:msrv"
 GIT = support.tool("git")
@@ -185,7 +188,12 @@ class TwoRoots:
 
 @fixture
 def two_roots(tmp_path: Path, env: support.Env) -> TwoRoots:
-    """Give each row its own TwoRoots."""
+    """Give each row its own TwoRoots.
+
+    Returns:
+        The row's TwoRoots.
+
+    """
     return TwoRoots(tmp_path, env=env)
 
 
@@ -196,7 +204,7 @@ def test_the_second_roots_undeclared_crate_is_red_by_name(
 ) -> None:
     """The fuzz crate declares nothing: the undeclared finding, its root."""
     two_roots.plant("1.85", None)
-    status, out, err = two_roots.run_task(monkeypatch, capfd)
+    status, _out, err = two_roots.run_task(monkeypatch, capfd)
     assert status != 0
     head = (
         f"{TASK}: {FUZZ}: a minimum is undeclared or differs from the one"
@@ -240,13 +248,13 @@ def test_a_red_second_root_leaves_the_first_roots_check_run(
 ) -> None:
     """Only the fuzz check is refused: red, and the root's check ran."""
     two_roots.plant("1.85", "1.85")
-    status, out, err = two_roots.run_task(monkeypatch, capfd, PLANT_REFUSE=FUZZ)
-    assert status == 101, err
+    status, _out, err = two_roots.run_task(monkeypatch, capfd, PLANT_REFUSE=FUZZ)
+    assert status == support.CARGO_FAILED, err
     first = (
         "cargo check --locked --manifest-path Cargo.toml --all-features"
         " -p app@0.1.0 {1.85.0}"
     )
     assert first == two_roots.checks()[0]
-    assert len(two_roots.checks()) == 2
+    assert len(two_roots.checks()) == ROOTS
     failed = f"{TASK}: {FUZZ}: app-fuzz@0.1.0 failed to compile at 1.85.0,"
     assert failed in err.splitlines()

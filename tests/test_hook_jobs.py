@@ -146,7 +146,7 @@ def assert_red(files: dict[str, str], message: str, *, env: support.Env) -> None
     done = lint(files, env=env)
     assert done.returncode == 1, done.stdout + done.stderr
     assert done.stderr == message
-    assert done.stdout == ""
+    assert not done.stdout
 
 
 def assert_out(files: dict[str, str], line: str, *, env: support.Env) -> None:
@@ -154,7 +154,7 @@ def assert_out(files: dict[str, str], line: str, *, env: support.Env) -> None:
     done = lint(files, env=env)
     assert done.returncode == 0, done.stderr
     assert done.stdout == f"{NAME}: {line}\n"
-    assert done.stderr == ""
+    assert not done.stderr
 
 
 def test_the_delivered_config_is_green(env: support.Env) -> None:

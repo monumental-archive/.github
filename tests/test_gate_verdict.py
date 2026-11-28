@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+from typing import TypedDict, Unpack
 
 from tests import support
 
@@ -57,15 +58,21 @@ def step_script() -> str:
 
 
 # Each row: the jobs' results, and the verdict printed.
-def verdict(  # ruff: ignore[too-many-arguments] -- one keyword per job result
+class Verdict(TypedDict, total=False):
+    """The jobs a row may plant past the three every row names."""
+
+    majors: str
+    coverage: str
+    split: str
+
+
+def verdict(
     plan: str,
     gate: str,
     pgrx: str,
     *,
-    majors: str = "[16, 17]",
-    coverage: str = "skipped",
-    split: str = "false",
     env: support.Env,
+    **options: Unpack[Verdict],
 ) -> subprocess.CompletedProcess[str]:
     """Run the lifted step on one set of job results.
 
@@ -73,6 +80,9 @@ def verdict(  # ruff: ignore[too-many-arguments] -- one keyword per job result
         The run.
 
     """
+    majors = options.get("majors", "[16, 17]")
+    coverage = options.get("coverage", "skipped")
+    split = options.get("split", "false")
     bash = support.tool("bash")
     return subprocess.run(
         [bash, "-c", step_script()],

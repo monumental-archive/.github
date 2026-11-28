@@ -62,7 +62,7 @@ def _setup(item: pytest.Item) -> None:
     environment it is given: the variables INHERITED names, HOME and a
     git identity.
     """
-    item.stash[DIRECTORY] = os.getcwd()
+    item.stash[DIRECTORY] = str(Path.cwd())
     item.stash[ENVIRON] = dict(os.environ)
     wanted = support.environment()
     os.environ.clear()
@@ -74,16 +74,14 @@ def _teardown(item: pytest.Item) -> None:
 
     Runs last, after the test's fixtures are torn down, so a
     `monkeypatch.chdir` has been undone before the directory is read.
-
-    Raises:
-        pytest.fail.Exception: the directory moved, named with the test.
+    A test that moved it fails through `pytest.fail`, named.
 
     """
     os.environ.clear()
     os.environ.update(item.stash[ENVIRON])
     start = item.stash[DIRECTORY]
     try:
-        now = os.getcwd()
+        now = str(Path.cwd())
     except OSError:
         now = "a directory that no longer exists"
     if now != start:

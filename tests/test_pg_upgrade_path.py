@@ -49,6 +49,7 @@ import subprocess
 import textwrap
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import TypedDict, Unpack
 
 import pytest
 
@@ -101,20 +102,30 @@ def record_file(
     return "\n".join([*head, *lines]) + "\n"
 
 
+class Layout(TypedDict, total=False):
+    """What a row lays out, each with its default."""
+
+    version: str
+    edges: list[tuple[str, str]] | None
+    record: str | None
+    name: str
+
+
 class Tree:
     """A throwaway pgrx repository with a chosen graph and record."""
 
     def __init__(
         self,
         root: str,
-        version: str = CURRENT,
-        edges: list[tuple[str, str]] | None = None,
-        record: str | None = None,
-        name: str = "demo_pg",
         *,
         env: support.Env,
+        **options: Unpack[Layout],
     ) -> None:
         """Lay out the control file, the crate, the graph and the record."""
+        version = options.get("version", CURRENT)
+        edges = options.get("edges")
+        record = options.get("record")
+        name = options.get("name", "demo_pg")
         self.make_env = env
         self.root = Path(root)
         self.name = name

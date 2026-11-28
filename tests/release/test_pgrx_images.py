@@ -29,6 +29,14 @@ from belt.release import pgrx_images
 from belt.typed_pytest import fixture
 from tests import support
 
+# A shipped library's mode; the FROM lines of a two-stage consumer
+# Dockerfile; and the proof's calls below 18 (one build, one run) and
+# at 18 (both recipes).
+EXECUTABLE = 0o755
+STAGES = 2
+COPY_CALLS = 2
+BOTH_CALLS = 4
+
 RELEASE = support.RELEASE
 CANON = RELEASE.parent
 # The writer of workflow commands each proof container is given (#1660).
@@ -138,7 +146,12 @@ class Stage:
 
 @fixture
 def stage_state(tmp_path: Path) -> Stage:
-    """Give each row its own Stage."""
+    """Give each row its own Stage.
+
+    Returns:
+        The row's Stage.
+
+    """
     return Stage(tmp_path)
 
 
@@ -160,7 +173,7 @@ def test_both_architectures_staged(
         "--crate-dir",
         CRATE,
     ])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     assert status == 0, err
     for arch in ("amd64", "arm64"):
         image = stage_state.root / "staged" / arch / "image"
@@ -175,7 +188,7 @@ def test_both_architectures_staged(
         ]
         assert want == found
         so = image / "lib" / "edtf_postgres.so"
-        assert stat.S_IMODE(so.stat().st_mode) == 0o755
+        assert stat.S_IMODE(so.stat().st_mode) == EXECUTABLE
         assert (image / "lib" / "edtf.so").is_symlink()
 
 
@@ -196,7 +209,7 @@ def test_a_missing_tarball(
         "--crate-dir",
         CRATE,
     ])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     assert status == 1
     assert err == (
         "::error::pgrx-images: missing"
@@ -222,7 +235,7 @@ def test_a_missing_second_architecture(
         "--crate-dir",
         CRATE,
     ])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     assert status == 1
     assert err == (
         "::error::pgrx-images: missing"
@@ -249,7 +262,7 @@ def test_a_tarball_without_lib(
         "--crate-dir",
         CRATE,
     ])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     assert status == 1
     assert (
         f"::error::pgrx-images: {shown} has no pkgroot/usr/lib/postgresql/16/lib\n"
@@ -275,7 +288,7 @@ def test_a_tarball_without_extension(
         "--crate-dir",
         CRATE,
     ])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     assert status == 1
     assert (
         f"::error::pgrx-images: {shown} has no"
@@ -308,7 +321,7 @@ def test_every_major_names_its_build_image(capfd: pytest.CaptureFixture[str]) ->
     rows = build_rows()
     for pg, ref in rows.items():
         status = pgrx_images.main(["base-image", "--pg", pg, "--table", str(TABLE)])
-        out, err = capfd.readouterr()
+        out, _err = capfd.readouterr()
         assert (0, f"{ref}\n") == (status, out)
         assert "@sha256:" in ref
 
@@ -316,7 +329,7 @@ def test_every_major_names_its_build_image(capfd: pytest.CaptureFixture[str]) ->
 def test_a_major_with_no_row(capfd: pytest.CaptureFixture[str]) -> None:
     """A major the table does not pin is refused by name."""
     status = pgrx_images.main(["base-image", "--pg", "13", "--table", str(TABLE)])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     assert status == 1
     assert f"::error::pgrx-images: pg13 has no build image in {TABLE}\n" == err
 
@@ -336,7 +349,7 @@ def test_a_table_that_is_not_majors_to_references(
         table = Path(tmp) / "pgrx-base-images.toml"
         table.write_text(text, "utf-8")
         status = pgrx_images.main(["base-image", "--pg", "16", "--table", str(table)])
-        out, err = capfd.readouterr()
+        _out, err = capfd.readouterr()
         assert (1, f"::error::pgrx-images: {want.format(t=table)}\n") == (
             status,
             err,
@@ -422,7 +435,7 @@ def test_every_rendered_from_is_pinned(capfd: pytest.CaptureFixture[str]) -> Non
             out, err = capfd.readouterr()
             assert status == 0, err
             from_lines = [ln for ln in out.splitlines() if ln.startswith("FROM")]
-            assert len(from_lines) == 2
+            assert len(from_lines) == STAGES
             for line in from_lines:
                 assert "@sha256:" in line.split()[1]
 
@@ -538,7 +551,12 @@ class Proof:
 
 @fixture
 def proof(tmp_path: Path, env: support.Env) -> Proof:
-    """Give each row its own Proof."""
+    """Give each row its own Proof.
+
+    Returns:
+        The row's Proof.
+
+    """
     return Proof(tmp_path, env=env)
 
 
@@ -552,7 +570,7 @@ def test_below_18_runs_the_copy_recipe_only(proof: Proof) -> None:
     )
     calls = [ln for ln in lines if not ln.startswith("  | ")]
     built = [ln[4:] for ln in lines if ln.startswith("  | ")]
-    assert len(calls) == 2, lines
+    assert len(calls) == COPY_CALLS, lines
     assert re.search(
         r"^buildx build --file \S+/copy\.Dockerfile --load"
         r" --tag consumer-proof:pg17 \S+$",
@@ -576,10 +594,10 @@ def test_18_adds_the_path_recipe(proof: Proof) -> None:
     """pg18: the copy recipe, then the image mounted whole, as postgres."""
     result, lines = proof.prove("18")
     assert result.returncode == 0, result.stderr
-    assert result.stdout == ""
+    assert not result.stdout
     calls = [ln for ln in lines if not ln.startswith("  | ")]
     built = [ln[4:] for ln in lines if ln.startswith("  | ")]
-    assert len(calls) == 4, lines
+    assert len(calls) == BOTH_CALLS, lines
     assert re.search(
         r"^buildx build --file \S+/path\.Dockerfile --load"
         r" --tag consumer-path-proof:pg18 \S+$",
@@ -648,7 +666,12 @@ class ExtensionName:
 
 @fixture
 def extension_name_state(tmp_path: Path) -> ExtensionName:
-    """Give each row its own ExtensionName."""
+    """Give each row its own ExtensionName.
+
+    Returns:
+        The row's ExtensionName.
+
+    """
     return ExtensionName(tmp_path)
 
 
@@ -663,7 +686,7 @@ def test_one_control_file_names_the_extension(
         "--tree",
         str(extension_name_state.tree),
     ])
-    out, err = capfd.readouterr()
+    out, _err = capfd.readouterr()
     assert (status, out) == (0, "edtf_postgres\n")
 
 
@@ -680,7 +703,8 @@ def test_no_control_file(
     out, err = capfd.readouterr()
     assert (status, out) == (1, "")
     assert (
-        f"::error::pgrx-images: {extension_name_state.tree} holds no extension control file;"
+        f"::error::pgrx-images: {extension_name_state.tree} holds no extension "
+        "control file;"
         f" the artifact"
         " image ships no extension for the consumer proof to create\n"
     ) == err
@@ -700,7 +724,8 @@ def test_two_control_files(
     out, err = capfd.readouterr()
     assert (status, out) == (1, "")
     assert (
-        f"::error::pgrx-images: {extension_name_state.tree} holds 2 extension control files"
+        f"::error::pgrx-images: {extension_name_state.tree} holds 2 extension "
+        "control files"
         f" (amcheck,"
         " edtf_postgres); the consumer proof creates the one extension the"
         " artifact image ships and cannot tell which\n"
@@ -753,7 +778,12 @@ class CopyProof:
 
 @fixture
 def copy_proof(tmp_path: Path, env: support.Env) -> CopyProof:
-    """Give each row its own CopyProof."""
+    """Give each row its own CopyProof.
+
+    Returns:
+        The row's CopyProof.
+
+    """
     return CopyProof(tmp_path, env=env)
 
 

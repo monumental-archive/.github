@@ -206,7 +206,7 @@ def test_findings_name_each_file_and_the_remedy(
         status = rsup.main([])
         out, err = capfd.readouterr()
     assert status == 1
-    assert out == ""
+    assert not out
     assert (
         "lint:rust: suppression clippy's allow_attributes cannot see:\n"
         '  Cargo.toml: [lints.rust] x = "allow"\n'
@@ -241,7 +241,7 @@ def test_undecodable_files_are_refused_by_name(
         (Path(tmp) / name).write_bytes(raw)
         listed(Path(tmp), f"{name}\0")
         status = rsup.main([])
-        out, err = capfd.readouterr()
+        _out, err = capfd.readouterr()
         assert status == 1
         assert err.startswith(f"lint:rust: {name}: ")
 

@@ -183,7 +183,12 @@ class Pins:
 
 @fixture
 def pins(tmp_path: Path, env: support.Env) -> Pins:
-    """Give each row its own Pins."""
+    """Give each row its own Pins.
+
+    Returns:
+        The row's Pins.
+
+    """
     return Pins(tmp_path, env=env)
 
 
@@ -318,7 +323,10 @@ def test_not_utf8_is_an_error(
     [
         pytest.param(
             [],
-            "belt template-pins: error: the following arguments are required: OWNER/REPO",
+            (
+                "belt template-pins: error: the following arguments are required: "
+                "OWNER/REPO"
+            ),
             id="nothing",
         ),
         pytest.param(
@@ -328,7 +336,10 @@ def test_not_utf8_is_an_error(
         ),
         pytest.param(
             ["owner/", STUB],
-            "belt template-pins: error: argument OWNER/REPO: 'owner/' is not OWNER/REPO",
+            (
+                "belt template-pins: error: argument OWNER/REPO: 'owner/' is not "
+                "OWNER/REPO"
+            ),
             id='["owner/", STUB]',
         ),
     ],
@@ -336,7 +347,10 @@ def test_not_utf8_is_an_error(
 def test_no_canon_is_a_usage_error(
     argv: list[str], error: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    """No canon, or one missing its owner or repository: exit 2: argparse's exit 2, its usage and its error."""
+    """A usage error: argparse's exit 2 and its error.
+
+    No canon, or one missing its owner or repository.
+    """
     with pytest.raises(SystemExit) as ended:
         template_pins.main(argv)
     out, err = capfd.readouterr()

@@ -28,6 +28,9 @@ from belt import git_decoy as gd
 from belt.typed_pytest import fixture
 from tests import support
 
+# A status the child exits with, for the run to pass back.
+CHILD_STATUS = 3
+
 _HERE = support.MISE
 
 GIT = support.tool("git")
@@ -146,7 +149,12 @@ class Task:
 
 @fixture
 def task(tmp_path: Path, belt: support.Belt, env: support.Env) -> Task:
-    """Give each row its own Task."""
+    """Give each row its own Task.
+
+    Returns:
+        The row's Task.
+
+    """
     return Task(tmp_path, belt=belt, env=env)
 
 
@@ -230,7 +238,12 @@ class Helper:
 
 @fixture
 def helper(tmp_path: Path, env: support.Env) -> Helper:
-    """Give each row its own Helper."""
+    """Give each row its own Helper.
+
+    Returns:
+        The row's Helper.
+
+    """
     return Helper(tmp_path, env=env)
 
 
@@ -253,13 +266,13 @@ def test_run_with_no_command_is_a_usage_error(
     helper: Helper, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`run DIR` and nothing to run is argparse's exit 2, by name."""
+    for name, value in (helper.leak_env()).items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.chdir(helper.work)
     with pytest.raises(SystemExit) as ended:
-        for name, value in (helper.leak_env()).items():
-            monkeypatch.setenv(name, value)
-        monkeypatch.chdir(helper.work)
         gd.main(["run", str(helper.decoy)])
     _out, err = capfd.readouterr()
-    assert ended.value.code == 2
+    assert ended.value.code == support.USAGE
     assert "run: no command after the decoy" in err
 
 
@@ -308,12 +321,19 @@ def test_no_git_passes_the_status_through(
     """A run that leaves the decoy alone answers with its own status."""
     helper.enter(monkeypatch)
     status = gd.main(["run", str(helper.decoy), "--", BASH, "-c", "exit 0"])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     assert (status, err) == (0, "")
     helper.enter(monkeypatch)
-    status = gd.main(["run", str(helper.decoy), "--", BASH, "-c", "exit 3"])
+    status = gd.main([
+        "run",
+        str(helper.decoy),
+        "--",
+        BASH,
+        "-c",
+        f"exit {CHILD_STATUS}",
+    ])
     err = capfd.readouterr().err
-    assert status == 3
+    assert status == CHILD_STATUS
     assert gd.MESSAGE not in err
 
 

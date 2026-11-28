@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
 
-from belt import findings, workflow_command
+from belt import findings, typed_std, workflow_command
 
 
 class RefusedError(Exception):
@@ -58,8 +58,7 @@ def git(*args: str) -> str:
 
     """
     done = subprocess.run(
-        # ruff: ignore[start-process-with-partial-path] - the runner's git, on PATH
-        ["git", *args],
+        [typed_std.on_path("git"), *args],
         stdout=subprocess.PIPE,
         text=True,
         check=False,

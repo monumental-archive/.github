@@ -97,45 +97,6 @@ class Reported(TypedDict):
     facts: list[object]
 
 
-def leg(  # ruff: ignore[too-many-arguments, too-many-positional-arguments] - one per drawn field
-    code: str,
-    saved: bool,  # ruff: ignore[boolean-type-hint-positional-argument] - one field of the drawn leg
-    found: int,
-    judged: str | None,
-    stopped: str,
-    missing: str | None,
-) -> Leg:
-    """Assemble one drawn leg.
-
-    Returns:
-        The leg.
-
-    """
-    return {
-        "code": code,
-        "saved": saved,
-        "found": found,
-        "judged": judged,
-        "stopped": stopped,
-        "missing": missing,
-    }
-
-
-def reported(
-    code: str,
-    saved: bool,  # ruff: ignore[boolean-type-hint-positional-argument] - one field of the drawn leg
-    findings: list[object],
-    facts: list[object],
-) -> Reported:
-    """Assemble one drawn leg with findings.
-
-    Returns:
-        The leg.
-
-    """
-    return {"code": code, "saved": saved, "findings": findings, "facts": facts}
-
-
 JSON: st.SearchStrategy[object] = st.recursive(SCALAR, nested, max_leaves=12)
 NAME: st.SearchStrategy[object] = (
     st.sampled_from(["judged", "outstanding", "stopped"]) | JSON
@@ -173,12 +134,18 @@ FOUND: st.SearchStrategy[int] = st.integers(0, 5)
 STOPPED: st.SearchStrategy[str] = st.text(max_size=8)
 MISSING: st.SearchStrategy[str | None] = st.none() | st.text(min_size=1, max_size=8)
 LEG: st.SearchStrategy[Leg] = st.builds(
-    leg, CODE, SAVED, FOUND, JUDGED, STOPPED, MISSING
+    Leg,
+    code=CODE,
+    saved=SAVED,
+    found=FOUND,
+    judged=JUDGED,
+    stopped=STOPPED,
+    missing=MISSING,
 )
 FINDINGS: st.SearchStrategy[list[object]] = st.lists(JSON, min_size=1, max_size=4)
 FACTS: st.SearchStrategy[list[object]] = st.lists(FACT, max_size=4)
 REPORTED: st.SearchStrategy[Reported] = st.builds(
-    reported, CODE, SAVED, FINDINGS, FACTS
+    Reported, code=CODE, saved=SAVED, findings=FINDINGS, facts=FACTS
 )
 # A leg every row starts from: saved, no finding, read, one range judged.
 ROW: Leg = {

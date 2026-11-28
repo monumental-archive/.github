@@ -152,7 +152,12 @@ class Citation:
 
 @fixture
 def citation_state(tmp_path: Path, env: support.Env) -> Citation:
-    """Give each row its own Citation."""
+    """Give each row its own Citation.
+
+    Returns:
+        The row's Citation.
+
+    """
     return Citation(tmp_path, env=env)
 
 

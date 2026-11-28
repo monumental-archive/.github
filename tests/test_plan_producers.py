@@ -31,6 +31,10 @@ from tests import support
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+# The findings of a leg whose prefix no producer claims: the prefix,
+# and the plan it names.
+UNCLAIMED = 2
+
 # The task that runs the helper, whose name its findings carry (#1934).
 TASK = "lint:plan-producers"
 
@@ -226,7 +230,7 @@ def test_the_emission_alone_does_not_satisfy_the_class() -> None:
     """A leg that emits the prefix but claims it for nobody."""
     leg = CRATE_LEG.replace("# plan-producer: rust-crate sbom-cargo-\n", "")
     findings = pp.judge(POLICY_UNDER_TEST, crate(leg))
-    assert len(findings) == 2
+    assert len(findings) == UNCLAIMED
     assert any("declares itself its producer" in f for f in findings)
     assert any("marker claims it for a class" in f for f in findings)
 

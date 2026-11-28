@@ -84,8 +84,7 @@ def npm(
 
     """
     return subprocess.run(
-        # ruff: ignore[start-process-with-partial-path] - npm is the caller's pin, on PATH
-        ["npm", *args],
+        [typed_std.on_path("npm", env), *args],
         env=dict(env),
         cwd=cwd,
         capture_output=args[0] in {"--version", "view", "config"},

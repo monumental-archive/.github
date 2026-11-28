@@ -304,27 +304,68 @@ def run_test_step(
     )
 
 
-def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fact
+def plant_tree(tree: Path, facts: Plant) -> list[str]:
+    """Plant the languages and the floor a row names in the tree.
+
+    Returns:
+        The planted paths, for git to track.
+
+    """
+    tracked: list[str] = []
+    if facts["python"]:
+        (tree / "helper.py").write_text("print('hi')\n", encoding="utf-8")
+        tracked.append("helper.py")
+    if facts["go"] is not None:
+        (tree / "go.mod").write_text("module example.com/x\n", encoding="utf-8")
+        tracked.append("go.mod")
+    if facts["typescript"] is not None:
+        tracked += plant_typescript(tree, facts["typescript"])
+    if facts["floor"]:
+        named = (
+            facts["legs"].split()
+            if facts["legs"] is not None
+            else [
+                *(["python", "python-branches"] if facts["python"] else []),
+                *(["go"] if facts["go"] is not None else []),
+                *(
+                    ["typescript", "typescript-branches"]
+                    if facts["typescript"] is not None
+                    else []
+                ),
+            ]
+        )
+        (tree / ".coverage-floor").write_text(floor_of(*named), encoding="utf-8")
+        tracked.append(".coverage-floor")
+    return tracked
+
+
+# What a row that names none of them plants.
+PLANT_DEFAULTS: Plant = {
+    "py": "90.0",
+    "branches": "85.0",
+    "go": None,
+    "floor": True,
+    "test_task": True,
+    "python": True,
+    "typescript": None,
+    "ts": "88.0",
+    "ts_branches": "81.0",
+    "go_profile": True,
+    "reports_dir": True,
+    "commit": False,
+    "measured": True,
+    "python_measured": True,
+    "legs": None,
+    "run_test": False,
+    "test_run": None,
+}
+
+
+def run_task(
     task: str,
     *,
-    py: str = "90.0",
-    branches: str = "85.0",
-    go: str | None = None,
-    floor: bool = True,
-    test_task: bool = True,
-    python: bool = True,
-    typescript: str | None = None,
-    ts: str = "88.0",
-    ts_branches: str = "81.0",
-    test_run: str | None = None,
-    go_profile: bool = True,
-    reports_dir: bool | str = True,
-    commit: bool = False,
-    measured: bool = True,
-    python_measured: bool = True,
-    legs: str | None = None,
-    run_test: bool = False,
     env: support.Env,
+    **options: Unpack[Plant],
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
     """Run one coverage task's body in a planted tree with stub tools.
 
@@ -346,6 +387,8 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
         tree's files as the task left them.
 
     """
+    facts: Plant = {**PLANT_DEFAULTS, **options}
+    test_run = facts["test_run"]
     tmp = Path(tempfile.mkdtemp())
     tree = tmp / "tree"
     stubs = tmp / "stubs"
@@ -357,73 +400,51 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
     (stubs / "python3").symlink_to(sys.executable)
     plant_pytest_venv(stubs)
     task_json = tmp / "task.json"
-    if test_run is None and typescript is not None:
+    if test_run is None and facts["typescript"] is not None:
         # A vitest tree's test task runs vitest through `measured` (#2105);
         # the stub binary, not pnpm.
         test_run = MEASURED_VITEST
-    if test_task:
+    if facts["test_task"]:
         test_answer: dict[str, object] = {
             "dir": str(tree),
             "run": [test_run or "echo suite ran"],
         }
         task_json.write_text(json.dumps(test_answer), encoding="utf-8")
 
-    tracked = []
-    if python:
-        (tree / "helper.py").write_text("print('hi')\n", encoding="utf-8")
-        tracked.append("helper.py")
-    if go is not None:
-        (tree / "go.mod").write_text("module example.com/x\n", encoding="utf-8")
-        tracked.append("go.mod")
-    if typescript is not None:
-        tracked += plant_typescript(tree, typescript)
-    if floor:
-        named = (
-            legs.split()
-            if legs is not None
-            else [
-                *(["python", "python-branches"] if python else []),
-                *(["go"] if go is not None else []),
-                *(
-                    ["typescript", "typescript-branches"]
-                    if typescript is not None
-                    else []
-                ),
-            ]
-        )
-        (tree / ".coverage-floor").write_text(floor_of(*named), encoding="utf-8")
-        tracked.append(".coverage-floor")
+    tracked = plant_tree(tree, facts)
 
     environ = env()
     environ |= {
         "ORG_BELT_DIR": str(BELT),
         "PATH": f"{stubs}{os.pathsep}{environ.get('PATH', '')}",
         "STUB_PYTHON": sys.executable,
-        "STUB_PY": py,
-        "STUB_BR": branches,
-        "STUB_GO": go or "",
-        "STUB_GO_NO_PROFILE": "" if go_profile else "1",
+        "STUB_PY": facts["py"],
+        "STUB_BR": facts["branches"],
+        "STUB_GO": facts["go"] or "",
+        "STUB_GO_NO_PROFILE": "" if facts["go_profile"] else "1",
         "STUB_TASK": str(task_json),
-        "STUB_TS": ts,
-        "STUB_TS_BR": ts_branches,
+        "STUB_TS": facts["ts"],
+        "STUB_TS_BR": facts["ts_branches"],
         "STUB_VITEST_LOG": str(tmp / "vitest.log"),
     }
-    environ |= reports_env(tmp, reports_dir=reports_dir)
+    environ |= reports_env(tmp, reports_dir=facts["reports_dir"])
     environ["ORG_COVERAGE_RUN"] = str(tmp / "run")
-    if measured:
+    if facts["measured"]:
         plant_run(
             tmp / "run",
-            python=python_measured,
-            typescript=(ts, ts_branches) if typescript == "vitest" else None,
+            python=facts["python_measured"],
+            typescript=(facts["ts"], facts["ts_branches"])
+            if facts["typescript"] == "vitest"
+            else None,
         )
-    init_tree(tree, environ, tracked, commit=commit)
+    init_tree(tree, environ, tracked, commit=facts["commit"])
     # The test runs without the measuring stubs: they answer the coverage
     # task's reads, and `measured` would start the stub `coverage` as
     # coverage.py.
     as_test = support.task_run("test", test_run or "true")
     test_path = environ["PATH"].removeprefix(f"{stubs}{os.pathsep}")
     test_env = environ | as_test.env | {"PATH": test_path}
-    tested = run_test_step(tree, test_env, as_test.argv) if run_test else None
+    tested = run_test_step(tree, test_env, as_test.argv) if facts["run_test"] else None
     if tested is not None and tested.returncode != 0:
         return tested, tmp
     as_mise = support.task_run(task, measuring_step(task))
@@ -756,7 +777,7 @@ def test_a_named_directory_holds_every_report_and_the_tree_is_clean(
     """The gate's shape: the files the line names exist, outside it."""
     done, tree = run_in_tree("coverage:check", go="93.0", commit=True, env=env)
     assert done.returncode == 0, done.stderr
-    assert status(tree, env=env) == ""
+    assert not status(tree, env=env)
     listed = named(done.stdout)
     reports = [tree.parent / "reports" / n for n in ("coverage.txt", "coverage.xml")]
     assert reports == listed
@@ -782,7 +803,7 @@ def test_unset_writes_a_scratch_directory_and_removes_it(env: support.Env) -> No
         "coverage:check", go="93.0", reports_dir=False, commit=True, env=env
     )
     assert done.returncode == 0, done.stderr
-    assert status(tree, env=env) == ""
+    assert not status(tree, env=env)
     listed = named(done.stdout)
     files: list[str] = ["coverage.txt", "coverage.xml"]
     names = [p.name for p in listed]
@@ -877,7 +898,7 @@ def test_a_run_that_measured_nothing_is_refused(env: support.Env) -> None:
         subprocess.run([GIT, "init", "-q"], cwd=tree, env=env(), check=True)
         done = reports(tree, env=env)
     assert done.returncode == 1
-    assert done.stdout == ""
+    assert not done.stdout
     assert (
         "coverage:test: no leg was measured — a check that reads nothing must not pass"
     ) in done.stderr
@@ -994,7 +1015,7 @@ def test_a_child_run_from_a_subdirectory_is_red_by_name(env: support.Env) -> Non
     done, wrote = run_python_leg("sub", env=env)
     assert done.returncode == 1, done.stderr
     assert NO_SOURCE_MSG in done.stderr
-    assert done.stdout == ""
+    assert not done.stdout
     assert not wrote
 
 

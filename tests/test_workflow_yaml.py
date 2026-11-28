@@ -106,7 +106,12 @@ class Fixture:
 
 @fixture
 def fixture_state(tmp_path: Path) -> Fixture:
-    """Give each row its own Fixture."""
+    """Give each row its own Fixture.
+
+    Returns:
+        The row's Fixture.
+
+    """
     return Fixture(tmp_path)
 
 
@@ -227,7 +232,12 @@ class Headers(Fixture):
 
 @fixture
 def headers(tmp_path: Path) -> Headers:
-    """Give each row its own Headers."""
+    """Give each row its own Headers.
+
+    Returns:
+        The row's Headers.
+
+    """
     return Headers(tmp_path)
 
 
@@ -326,7 +336,12 @@ class Runs(Fixture):
 
 @fixture
 def runs_state(tmp_path: Path) -> Runs:
-    """Give each row its own Runs."""
+    """Give each row its own Runs.
+
+    Returns:
+        The row's Runs.
+
+    """
     return Runs(tmp_path)
 
 
@@ -335,25 +350,50 @@ def test_every_run_value_is_one_record(runs_state: Runs) -> None:
     run = workflow_yaml.Run
     steps = "jobs/first/steps"
     want = [
-        run(15, "literal", "echo one\necho two\n", "commented header", None,
-            f"{steps}/0", alias=False),
-        run(19, "single", 'echo "single"', "single", None, f"{steps}/1",
-            alias=False),
-        run(22, "double", "echo double", "double", "sh", f"{steps}/2",
-            alias=False),
+        run(
+            15,
+            "literal",
+            "echo one\necho two\n",
+            "commented header",
+            None,
+            f"{steps}/0",
+            alias=False,
+        ),
+        run(19, "single", 'echo "single"', "single", None, f"{steps}/1", alias=False),
+        run(22, "double", "echo double", "double", "sh", f"{steps}/2", alias=False),
         run(23, "", "echo flow", "flow", None, f"{steps}/3", alias=False),
         run(24, "", "echo quoted key", None, None, f"{steps}/4", alias=False),
-        run(26, "folded", "echo folded across lines", "folded", None,
-            f"{steps}/5", alias=False),
-        run(30, "literal", "echo anchored\n", "anchored", None, f"{steps}/6",
-            alias=False),
-        run(33, "", "echo anchored\n", "alias", None, f"{steps}/7",
-            alias=True),
+        run(
+            26,
+            "folded",
+            "echo folded across lines",
+            "folded",
+            None,
+            f"{steps}/5",
+            alias=False,
+        ),
+        run(
+            30,
+            "literal",
+            "echo anchored\n",
+            "anchored",
+            None,
+            f"{steps}/6",
+            alias=False,
+        ),
+        run(33, "", "echo anchored\n", "alias", None, f"{steps}/7", alias=True),
         run(41, "", "true", "boolean", None, f"{steps}/9", alias=False),
         run(43, "", "1.10", "number", None, f"{steps}/10", alias=False),
-        run(47, "", "echo flush", "at its key's indent", None,
-            "jobs/flush/steps/0", alias=False),
-    ]  # fmt: skip
+        run(
+            47,
+            "",
+            "echo flush",
+            "at its key's indent",
+            None,
+            "jobs/flush/steps/0",
+            alias=False,
+        ),
+    ]
     assert want == workflow_yaml.runs(runs_state.workflow)
 
 

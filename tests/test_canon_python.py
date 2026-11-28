@@ -28,6 +28,10 @@ if TYPE_CHECKING:
     import pathlib
     from pathlib import Path
 
+# A lower bound that keeps the law from passing vacuously: the release
+# scripts it reads.
+LISTED = 14
+
 CANON = support.CANON
 VERSION = "3.15.2"
 # No apostrophe in it: bash removes one inside `${VAR:?...}`, even
@@ -150,7 +154,12 @@ class InstallTheBeltsPython:
 def install_the_belts_python(
     tmp_path: Path, canon: support.Canon, env: support.Env
 ) -> InstallTheBeltsPython:
-    """Give each row its own InstallTheBeltsPython."""
+    """Give each row its own InstallTheBeltsPython.
+
+    Returns:
+        The row's InstallTheBeltsPython.
+
+    """
     return InstallTheBeltsPython(tmp_path, canon=canon, env=env)
 
 
@@ -172,7 +181,8 @@ def test_the_interpreters_path_is_exported(
     call = (
         f"cwd: {work / 'cwd'}\n"
         "MISE_LOCKED=1\n"
-        f"MISE_GLOBAL_CONFIG_FILE={install_the_belts_python.root / 'mise' / 'config.toml'}\n"
+        "MISE_GLOBAL_CONFIG_FILE="
+        f"{install_the_belts_python.root / 'mise' / 'config.toml'}\n"
         f"MISE_TRUSTED_CONFIG_PATHS={install_the_belts_python.root}\n"
         f"MISE_DATA_DIR={work / 'data'}\n"
     )
@@ -192,7 +202,7 @@ def test_a_failed_install_is_red_by_name(
         f"::error::python.sh: mise could not install python {VERSION}"
         f" from {install_the_belts_python.root / 'mise' / 'mise.lock'}\n"
     )
-    assert install_the_belts_python.env_file.read_text(encoding="utf-8") == ""
+    assert not install_the_belts_python.env_file.read_text(encoding="utf-8")
 
 
 def test_a_lock_without_the_version_is_red_by_name(
@@ -203,12 +213,13 @@ def test_a_lock_without_the_version_is_red_by_name(
     done = install_the_belts_python.install()
     assert done.returncode == 1, done.stdout + done.stderr
     assert done.stderr == (
-        f"::error::python.sh: {install_the_belts_python.root / 'mise' / 'mise.lock'} does"
+        "::error::python.sh: "
+        f"{install_the_belts_python.root / 'mise' / 'mise.lock'} does"
         f" not hold python {VERSION} (it holds '3.15.1'), so the install"
         " cannot be checked\n"
     )
-    assert install_the_belts_python.calls() == ""
-    assert install_the_belts_python.env_file.read_text(encoding="utf-8") == ""
+    assert not install_the_belts_python.calls()
+    assert not install_the_belts_python.env_file.read_text(encoding="utf-8")
 
 
 def test_a_config_without_a_python_pin_is_red_by_name(
@@ -222,7 +233,7 @@ def test_a_config_without_a_python_pin_is_red_by_name(
         f"::error::python.sh: {install_the_belts_python.root / 'mise' / 'config.toml'}"
         " does not pin exactly one python version\n"
     )
-    assert install_the_belts_python.calls() == ""
+    assert not install_the_belts_python.calls()
 
 
 def test_an_install_with_no_interpreter_is_red_by_name(
@@ -233,10 +244,10 @@ def test_an_install_with_no_interpreter_is_red_by_name(
     done = install_the_belts_python.install()
     assert done.returncode == 1, done.stdout + done.stderr
     assert (
-        done.stderr
-        == f"::error::python.sh: {install_the_belts_python.python} is not an executable interpreter\n"
+        done.stderr == f"::error::python.sh: {install_the_belts_python.python}"
+        " is not an executable interpreter\n"
     )
-    assert install_the_belts_python.env_file.read_text(encoding="utf-8") == ""
+    assert not install_the_belts_python.env_file.read_text(encoding="utf-8")
 
 
 @pytest.mark.usefixtures("install_the_belts_python")
@@ -315,7 +326,7 @@ def test_the_scripts_are_found() -> None:
         "pgrx-image-proof.sh",
         "pgrx-plan.sh",
     } <= names
-    assert len(names) >= 14
+    assert len(names) >= LISTED
 
 
 def test_every_script_refuses_an_unset_or_empty_org_python(env: support.Env) -> None:
@@ -327,7 +338,7 @@ def test_every_script_refuses_an_unset_or_empty_org_python(env: support.Env) -> 
             done = run_without([bash(), str(script)], value, env=env)
             assert done.returncode != 0, done.stdout
             assert REFUSAL in done.stderr
-            assert done.stdout == ""
+            assert not done.stdout
 
 
 @pytest.mark.parametrize("value", [None, ""])

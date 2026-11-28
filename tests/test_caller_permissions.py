@@ -201,7 +201,12 @@ class Planted:
 def planted(
     tmp_path: Path, request: pytest.FixtureRequest, env: support.Env
 ) -> Planted:
-    """Give each row its own Planted."""
+    """Give each row its own Planted.
+
+    Returns:
+        The row's Planted.
+
+    """
     return Planted(tmp_path, request, env=env)
 
 

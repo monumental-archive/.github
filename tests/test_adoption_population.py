@@ -28,10 +28,14 @@ import pytest
 
 from belt import adoption_population as ap
 from belt.typed_pytest import fixture
-from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from tests import support
+
+# The helper's status for a document it refuses.
+REFUSED = 2
 
 EVERY = ["build", "source", "dependency"]
 # The canon's own repository name, as main() is handed it from
@@ -331,9 +335,11 @@ def test_obligations_over_the_document(
     assert "OWES\tcanon\tci\tci.yml|gate.yml" in out.splitlines()
 
 
-@pytest.mark.parametrize(("name", "doc", "message"), REFUSALS)
+@pytest.mark.parametrize(
+    ("doc", "message"),
+    [pytest.param(doc, message, id=name) for name, doc, message in REFUSALS],
+)
 def test_each_refusal_exits_two_and_names_its_field(
-    name: object,
     doc: object,
     message: object,
     capfd: pytest.CaptureFixture[str],
@@ -343,8 +349,8 @@ def test_each_refusal_exits_two_and_names_its_field(
     fed(doc)
     code = ap.main([CANON])
     out, err = capfd.readouterr()
-    assert code == 2
-    assert out == ""
+    assert code == REFUSED
+    assert not out
     assert err.startswith(f"{TASK}: {message}"), err
 
 
@@ -366,7 +372,7 @@ def test_each_refusal_exits_two_and_names_its_field(
 def test_arguments_other_than_the_canon_are_refused(
     argv: list[str], error: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    """A roster or an empty name: argparse's exit 2, its usage and its error."""
+    """A roster or an empty name: argparse's exit 2 and its error."""
     with pytest.raises(SystemExit) as ended:
         ap.main(argv)
     out, err = capfd.readouterr()

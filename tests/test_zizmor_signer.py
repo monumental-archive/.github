@@ -34,8 +34,8 @@ import os
 import subprocess
 import sys
 import tempfile
-from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -43,6 +43,19 @@ from belt import decoded
 from belt import zizmor_signer as signer
 from belt.typed_pytest import fixture
 from tests import support
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+# The findings of the canon's own run, all the signer's.
+SIGNER_FINDINGS = 10
+
+# zizmor's exit statuses: 10-14 by the highest remaining finding's
+# severity, 14 for a high one; one of them a stub answers; and one
+# outside them, zizmor failing.
+HIGH = 14
+PLANTED_SEVERITY = 11
+NOT_A_SEVERITY = 2
 
 HERE = support.MISE
 
@@ -168,7 +181,7 @@ def rewritten(
 # The canon's own zizmor run, as it came.
 def test_the_fixture_is_the_ten_signer_findings() -> None:
     """The fixture is what the issue measured: ten, one rule, one ref."""
-    assert len(REAL) == 10
+    assert len(REAL) == SIGNER_FINDINGS
     idents: set[object] = {f["ident"] for f in REAL}
     rules: set[object] = {"stale-action-refs"}
     assert rules == idents
@@ -186,7 +199,7 @@ def test_all_ten_are_dropped_and_counted(
     out, err = capfd.readouterr()
     assert status == 0, err
     assert "10 stale-action-refs finding(s) on the signer dropped" in out
-    assert err == ""
+    assert not err
 
 
 # The signer's `# main` pin behind `main` (#1340), as zizmor wrote it.
@@ -217,7 +230,7 @@ def test_the_signer_mismatch_is_dropped_and_counted(
         "1 ref-version-mismatch finding(s) on the signer dropped"
         " (monumental-archive/signer is pinned on `# main`"
     ) in out
-    assert err == ""
+    assert not err
 
 
 def test_both_audits_together_are_dropped(
@@ -245,7 +258,7 @@ def test_another_owner_mismatch_is_kept(
     answer([other])
     status = signer.main(SIGNED)
     out = capfd.readouterr().out
-    assert status == 14
+    assert status == HIGH
     assert "0 ref-version-mismatch finding(s) on the signer dropped" in out
     assert "1 finding(s) remain: ref-version-mismatch" in out
 
@@ -260,7 +273,7 @@ def test_a_mismatch_with_no_readable_reference_is_kept(
     answer([blind])
     status = signer.main(SIGNED)
     out = capfd.readouterr().out
-    assert status == 14
+    assert status == HIGH
     assert "1 finding(s) remain: ref-version-mismatch" in out
 
 
@@ -275,7 +288,7 @@ def test_the_comment_alone_is_not_read_as_a_reference(
     answer([blind])
     status = signer.main(SIGNED)
     out = capfd.readouterr().out
-    assert status == 14
+    assert status == HIGH
     assert "1 finding(s) remain: ref-version-mismatch" in out
 
 
@@ -306,7 +319,7 @@ def test_a_second_reference_elsewhere_keeps_it(
     answer([two])
     status = signer.main(SIGNED)
     out = capfd.readouterr().out
-    assert status == 14
+    assert status == HIGH
     assert "1 finding(s) remain: ref-version-mismatch" in out
 
 
@@ -319,7 +332,7 @@ def test_another_audit_on_the_signer_is_kept(
     answer([other_rule])
     status = signer.main(SIGNED)
     out = capfd.readouterr().out
-    assert status == 14
+    assert status == HIGH
     assert "1 finding(s) remain: unpinned-uses" in out
 
 
@@ -335,7 +348,7 @@ def test_another_repository_reusable_workflow_is_kept(
     answer([other])
     status = signer.main(SIGNED)
     out = capfd.readouterr().out
-    assert status == 14
+    assert status == HIGH
     assert "0 stale-action-refs finding(s) on the signer dropped" in out
     assert "1 finding(s) remain: stale-action-refs" in out
 
@@ -348,7 +361,7 @@ def test_a_third_party_action_is_kept(
     answer([*REAL, third])
     status = signer.main(SIGNED)
     out = capfd.readouterr().out
-    assert status == 14
+    assert status == HIGH
     assert "1 finding(s) remain" in out
 
 
@@ -361,7 +374,7 @@ def test_a_repository_that_only_shares_the_prefix_is_kept(
         "monumental-archive/signer-fork/.github/workflows/sign.yml@" + "c" * 40,
     )
     answer([near])
-    assert signer.main(SIGNED) == 14
+    assert signer.main(SIGNED) == HIGH
 
 
 def test_kept_another_audit_on_the_signer_is_kept(
@@ -373,7 +386,7 @@ def test_kept_another_audit_on_the_signer_is_kept(
     answer([other_rule])
     status = signer.main(SIGNED)
     out = capfd.readouterr().out
-    assert status == 14
+    assert status == HIGH
     assert "remain: impostor-commit" in out
 
 
@@ -389,13 +402,13 @@ def test_a_finding_with_no_readable_reference_is_kept(
     out, err = capfd.readouterr()
     assert status == 1
     assert "findings[0]: no location is Primary" in err
-    assert out == ""
+    assert not out
 
 
 def test_a_reference_without_a_ref_is_kept(answer: Callable[..., None]) -> None:
     """A Primary feature with no `@` is not a reference."""
     answer([repointed(REAL[0], "monumental-archive/signer")])
-    assert signer.main(SIGNED) == 14
+    assert signer.main(SIGNED) == HIGH
 
 
 # How the signer's repository is read and compared.
@@ -497,7 +510,7 @@ def test_input_that_is_not_the_finding_array_is_refused(
     out, err = capfd.readouterr()
     assert status == 1
     assert "it is not zizmor's finding array" in err
-    assert out == ""
+    assert not out
 
 
 class Records:
@@ -547,7 +560,12 @@ class Records:
 
 @fixture
 def records_state(tmp_path: Path) -> Records:
-    """Give each row its own Records."""
+    """Give each row its own Records.
+
+    Returns:
+        The row's Records.
+
+    """
     return Records(tmp_path)
 
 
@@ -564,10 +582,12 @@ def test_a_remaining_finding_is_one_record(
     third = repointed(REAL[0], "actions/checkout@" + "d" * 40)
     both: list[dict[str, object]] = [*REAL, third]
     doc = json.dumps(both).encode()
-    asked = records_state.enter(monkeypatch, signer.Ran(11, doc, b" INFO zizmor\n"))
+    asked = records_state.enter(
+        monkeypatch, signer.Ran(PLANTED_SEVERITY, doc, b" INFO zizmor\n")
+    )
     status = signer.main(SIGNED)
     out, err = capfd.readouterr()
-    assert status == 11, err
+    assert status == PLANTED_SEVERITY, err
     assert asked == [list(ARGS)]
     path = ".github/workflows/continuous.yml"
     want: list[object] = [
@@ -596,7 +616,9 @@ def test_all_dropped_is_no_record_and_green(
     capfd: pytest.CaptureFixture[str],
 ) -> None:
     """Every finding the signer's: no record, 0, though zizmor said 11."""
-    records_state.enter(monkeypatch, signer.Ran(11, json.dumps(REAL).encode(), b""))
+    records_state.enter(
+        monkeypatch, signer.Ran(PLANTED_SEVERITY, json.dumps(REAL).encode(), b"")
+    )
     status = signer.main(SIGNED)
     err = capfd.readouterr().err
     assert status == 0, err
@@ -622,10 +644,12 @@ def test_zizmor_failing_is_its_status_and_its_stderr(
     capfd: pytest.CaptureFixture[str],
 ) -> None:
     """A status outside 0 and 10-14: zizmor's, its stderr, no record."""
-    records_state.enter(monkeypatch, signer.Ran(2, b"", b"error: bad input\n"))
+    records_state.enter(
+        monkeypatch, signer.Ran(NOT_A_SEVERITY, b"", b"error: bad input\n")
+    )
     status = signer.main(SIGNED)
     err = capfd.readouterr().err
-    assert status == 2
+    assert status == NOT_A_SEVERITY
     assert err == "error: bad input\n"
     assert not records_state.records()
 
@@ -685,7 +709,7 @@ def test_no_zizmor_is_refused_by_name(
     for name, value in records_state.env.items():
         monkeypatch.setenv(name, value)
     status = signer.main(["--signer-workflow", SIGNER_WORKFLOW])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     assert status == 1
     assert f"{TASK}: zizmor is not on PATH" in err
     want: list[object] = [
@@ -761,7 +785,12 @@ def records(file: Path) -> list[object]:
 
 @fixture
 def pinned_zizmor(tmp_path: Path, env: support.Env) -> PinnedZizmor:
-    """Give each row its own PinnedZizmor."""
+    """Give each row its own PinnedZizmor.
+
+    Returns:
+        The row's PinnedZizmor.
+
+    """
     return PinnedZizmor(tmp_path, env=env)
 
 
@@ -775,7 +804,7 @@ def test_an_unpinned_action_is_the_record(
     status = signer.main(["--signer-workflow", SIGNER_WORKFLOW, "--offline", *ARGS])
     err = capfd.readouterr().err
     got = records(file)
-    assert status == 14, err
+    assert status == HIGH, err
     path = ".github/workflows/a.yml"
     want: list[object] = [
         {
@@ -808,7 +837,7 @@ def test_two_of_one_audit_in_one_file_are_two_messages(
     status = signer.main(["--signer-workflow", SIGNER_WORKFLOW, "--offline", *ARGS])
     err = capfd.readouterr().err
     got = records(file)
-    assert status == 14, err
+    assert status == HIGH, err
     messages = [decoded.as_object(r, "a record")["message"] for r in got]
     want: list[object] = [
         "unpinned-uses: actions/setup-go@v5",
@@ -904,15 +933,20 @@ class Task:
 def task(
     tmp_path: Path, canon: support.Canon, env: support.Env, track: support.Track
 ) -> Task:
-    """Give each row its own Task."""
+    """Give each row its own Task.
+
+    Returns:
+        The row's Task.
+
+    """
     return Task(tmp_path, canon=canon, env=env, track=track)
 
 
 def test_a_remaining_finding_is_recorded_and_zizmor_s_red(task: Task) -> None:
     """A third-party stale ref: one record, zizmor's 11, one run."""
     third = repointed(REAL[0], "actions/checkout@" + "d" * 40)
-    done = task.run_task([third], 11)
-    assert done.returncode == 11, done.stderr
+    done = task.run_task([third], PLANTED_SEVERITY)
+    assert done.returncode == PLANTED_SEVERITY, done.stderr
     logged: list[str] = task.log.read_text(encoding="utf-8").splitlines()
     once: list[str] = ["--format=json\t--persona=auditor\t.github/workflows/a.yml"]
     assert logged == once

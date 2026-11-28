@@ -331,7 +331,12 @@ class Shape:
 
 @fixture
 def shape() -> Shape:
-    """Give each row its own Shape."""
+    """Give each row its own Shape.
+
+    Returns:
+        The row's Shape.
+
+    """
     return Shape()
 
 

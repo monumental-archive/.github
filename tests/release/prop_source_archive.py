@@ -31,6 +31,9 @@ from belt.typed_hypothesis import given
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+# The git calls one build makes.
+BUILD_CALLS = 2
+
 # GitHub's own alphabets: an owner is letters, digits and hyphens; a
 # repository name adds dots and underscores, and is never `.` or `..`.
 OWNER = st.from_regex(r"[A-Za-z0-9][A-Za-z0-9-]{0,10}", fullmatch=True)
@@ -97,7 +100,7 @@ def fake_git() -> tuple[Callable[..., str], list[list[str]]]:
 @example("o", "x.", "1.0.0")
 def test_one_leading_dot_stripped(owner: str, name: str, version: str) -> None:
     """The asset, its prefix and the tag follow the stripped name."""
-    shipped = name[1:] if name.startswith(".") else name
+    shipped = name.removeprefix(".")
     base = f"{shipped}-{version}"
     git, calls = fake_git()
     with (
@@ -112,7 +115,7 @@ def test_one_leading_dot_stripped(owner: str, name: str, version: str) -> None:
     want: list[str] = [f"{base}.tar.gz"]
     assert dist == want
     assert notice.startswith(f"{base}.tar.gz: "), notice
-    assert len(calls) == 2
+    assert len(calls) == BUILD_CALLS
     for call in calls:
         assert f"--prefix={base}/" in call
         assert call[-1] == f"v{version}"

@@ -25,6 +25,9 @@ import pytest
 
 from tests import support
 
+# typos' exit status when it found a typo.
+TYPOS_FOUND = 2
+
 BELT = support.MISE
 CONFIG = BELT / "typos.toml"
 CHANGELOG_LINE = (
@@ -124,7 +127,7 @@ def typos(text: str, *, belt: bool = True) -> subprocess.CompletedProcess[str]:
 def assert_green(text: str) -> None:
     """Red under typos' defaults, green under the belt config."""
     control = typos(text, belt=False)
-    assert control.returncode == 2, control.stdout
+    assert control.returncode == TYPOS_FOUND, control.stdout
     result = typos(text)
     assert result.returncode == 0, result.stdout
 
@@ -137,7 +140,7 @@ def assert_red(text: str, message: str) -> str:
 
     """
     result = typos(text)
-    assert result.returncode == 2, result.stdout
+    assert result.returncode == TYPOS_FOUND, result.stdout
     assert message in result.stdout
     return result.stdout
 
@@ -178,7 +181,7 @@ def test_a_short_hex_token_is_still_checked() -> None:
 def assert_red_at(path: str) -> None:
     """Red under the belt config at `path`, with the exact message."""
     result = typos_at(path, CORPUS_INPUT)
-    assert result.returncode == 2, result.stdout
+    assert result.returncode == TYPOS_FOUND, result.stdout
     assert CORPUS_MESSAGE in result.stdout
     assert path in result.stdout
 
@@ -186,7 +189,7 @@ def assert_red_at(path: str) -> None:
 def test_a_corpus_input_passes() -> None:
     """The edtf input, at its own path: green, and red without the belt."""
     control = typos_at(CORPUS_FILE, CORPUS_INPUT, belt=False)
-    assert control.returncode == 2, control.stdout
+    assert control.returncode == TYPOS_FOUND, control.stdout
     assert CORPUS_MESSAGE in control.stdout
     result = typos_at(CORPUS_FILE, CORPUS_INPUT)
     assert result.returncode == 0, result.stdout

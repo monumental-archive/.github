@@ -101,7 +101,12 @@ class TheBeltClaimsItsDirectory:
 def the_belt_claims_its_directory(
     tmp_path: Path, env: support.Env
 ) -> TheBeltClaimsItsDirectory:
-    """Give each row its own TheBeltClaimsItsDirectory."""
+    """Give each row its own TheBeltClaimsItsDirectory.
+
+    Returns:
+        The row's TheBeltClaimsItsDirectory.
+
+    """
     return TheBeltClaimsItsDirectory(tmp_path, env=env)
 
 

@@ -141,35 +141,36 @@ def scripts(name: str, edges: list[tuple[str, str]]) -> list[str]:
 
 
 # V: the predecessor is the definition's, in any order.
-@given(rows("demo"), EDGES, VERSION, st.booleans())
-@example(listing=STRING_SORTED, edges=TO_1_0_10, version="1.2.3", backwards=False)
-@example(listing=NEWER_FIRST, edges=TO_1_3_0, version="1.2.3", backwards=False)
+@given(rows("demo"), EDGES, VERSION, st.sampled_from(["listed", "reversed"]))
+@example(listing=STRING_SORTED, edges=TO_1_0_10, version="1.2.3", order="listed")
+@example(listing=NEWER_FIRST, edges=TO_1_3_0, version="1.2.3", order="listed")
 def test_the_greatest_carried_target(
     listing: list[tuple[str, str]],
     edges: list[tuple[str, str]],
     version: str,
-    backwards: bool,  # ruff: ignore[boolean-type-hint-positional-argument] - drawn
+    order: str,
 ) -> None:
     """The newest installable target below `version`, its first carrier."""
     want = model(listing, edges, "demo", version)
     names = scripts("demo", edges)
-    graph = previous.graph_of(names[::-1] if backwards else names, "demo")
+    graph = previous.graph_of(names[::-1] if order == "reversed" else names, "demo")
     got = previous.predecessor(listing, graph, "demo", version)
     assert want == (None if got is None else (got.version, got.tag))
 
 
 # V: a stranded installation, and only that, is refused.
-@given(st.data(), CRATE, EDGES, VERSION, st.booleans())
+@given(st.data(), CRATE, EDGES, VERSION)
 def test_refused_exactly_when_stranded(
     data: st.DataObject,
     crate: str,
     edges: list[tuple[str, str]],
     version: str,
-    scripted: bool,  # ruff: ignore[boolean-type-hint-positional-argument] - drawn
 ) -> None:
     """The model's verdict is the guard's, and the refusal names the path."""
     name = posixpath.basename(crate).replace("-", "_")
     listing = data.draw(rows(name))
+    # Whether the tree carries the direct script to `version` itself.
+    scripted = data.draw(st.booleans())
     rerun = any(a.startswith(f"{name}-{version}-pg") for _, a in listing)
     prev = model(listing, edges, name, version)
     names = scripts(name, edges)

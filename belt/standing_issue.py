@@ -112,7 +112,6 @@ import os
 import re
 import subprocess
 import urllib.error
-import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -273,7 +272,7 @@ def gh(*args: str) -> str:
 
     """
     proc = subprocess.run(
-        ["gh", *args],  # ruff: ignore[start-process-with-partial-path] - gh is resolved on PATH, as in the workflow
+        [typed_std.on_path("gh"), *args],
         capture_output=True,
         text=True,
         check=False,
@@ -298,9 +297,17 @@ def open_issues(repo: str, title: str) -> list[Issue]:
 
     """
     out = gh(
-        "issue", "list", "--repo", repo, "--state", "open",
-        "--limit", "1000", "--json", "number,title,body",
-    )  # fmt: skip
+        "issue",
+        "list",
+        "--repo",
+        repo,
+        "--state",
+        "open",
+        "--limit",
+        "1000",
+        "--json",
+        "number,title,body",
+    )
     try:
         answer = decoded.load_json(out)
     except decoded.UndecodableError as err:
@@ -344,9 +351,17 @@ def every_open(repo: str) -> list[Issue]:
 
     """
     out = gh(
-        "issue", "list", "--repo", repo, "--state", "open",
-        "--limit", "1000", "--json", "number,title,body,labels",
-    )  # fmt: skip
+        "issue",
+        "list",
+        "--repo",
+        repo,
+        "--state",
+        "open",
+        "--limit",
+        "1000",
+        "--json",
+        "number,title,body,labels",
+    )
     try:
         return [
             labelled(item, at)
@@ -490,9 +505,12 @@ def jobs(repo: str, run_id: str) -> list[Job]:
 
     """
     out = gh(
-        "api", "--paginate", "--jq", ".jobs[]",
+        "api",
+        "--paginate",
+        "--jq",
+        ".jobs[]",
         f"repos/{repo}/actions/runs/{run_id}/jobs?filter=latest&per_page=100",
-    )  # fmt: skip
+    )
     found: list[Job] = []
     try:
         for at, line in enumerate(out.splitlines()):
@@ -679,13 +697,16 @@ def job_log(repo: str, job_id: int) -> str:
     if not token:
         msg = f"GET {path}: GH_TOKEN is not set"
         raise StandingIssueError(msg)
-    # ruff: ignore[suspicious-url-open-usage] - the API base is the runner's own GITHUB_API_URL
-    request = urllib.request.Request(f"{api}/{path}")
-    request.add_header("Accept", "application/vnd.github+json")
-    request.add_header("X-GitHub-Api-Version", "2022-11-28")
-    # Unredirected: the token goes to the API, never to the blob host.
-    request.add_unredirected_header("Authorization", f"Bearer {token}")
     try:
+        request = typed_std.request(
+            f"{api}/{path}",
+            headers={
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+        )
+        # Unredirected: the token goes to the API, never to the blob host.
+        request.add_unredirected_header("Authorization", f"Bearer {token}")
         with typed_std.urlopen(request, timeout=LOG_TIMEOUT) as answer:
             return answer.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as err:

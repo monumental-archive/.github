@@ -45,7 +45,7 @@ import os
 import pathlib
 import subprocess
 
-from belt import decoded, findings, workflow_command
+from belt import decoded, findings, typed_std, workflow_command
 from belt.belt_scripts import script
 from belt.tree import RELEASE
 
@@ -74,8 +74,7 @@ def gh(*args: str, capture: bool = False, quiet: bool = False) -> str:
 
     """
     done = subprocess.run(
-        # ruff: ignore[start-process-with-partial-path]
-        ["gh", *args],
+        [typed_std.on_path("gh"), *args],
         check=False,
         stdout=subprocess.PIPE if capture else None,
         stderr=subprocess.DEVNULL if quiet else None,
@@ -141,8 +140,7 @@ def digests(path: pathlib.Path, name: str) -> str:
     found = []
     for line in path.read_text(encoding="utf-8").splitlines():
         fields = line.split()
-        # ruff: ignore[magic-value-comparison]
-        if len(fields) >= 2 and fields[1] == name:
+        if fields[1:2] == [name]:
             found.append(fields[0])
     return "\n".join(found)
 
@@ -155,24 +153,37 @@ def converge(tag: str, repo: str) -> None:
 
     """
     gh(
-        "release", "download", tag, "--repo", repo,
-        "--pattern", "checksums.txt", "--output", PUBLISHED_CHECKSUMS,
-    )  # fmt: skip
+        "release",
+        "download",
+        tag,
+        "--repo",
+        repo,
+        "--pattern",
+        "checksums.txt",
+        "--output",
+        PUBLISHED_CHECKSUMS,
+    )
     # Best-effort: a release older than the manifest has none.
     with contextlib.suppress(SystemExit):
         gh(
-            "release", "download", tag, "--repo", repo,
-            "--pattern", "evidence-manifest.json", "--output", PUBLISHED_MANIFEST,
+            "release",
+            "download",
+            tag,
+            "--repo",
+            repo,
+            "--pattern",
+            "evidence-manifest.json",
+            "--output",
+            PUBLISHED_MANIFEST,
             quiet=True,
-        )  # fmt: skip
+        )
     published = pathlib.Path(PUBLISHED_CHECKSUMS)
     rebuilt = DIST / "checksums.txt"
     typed = build_subjects(pathlib.Path(PUBLISHED_MANIFEST))
     subjects = [name for name in typed if name]
     if not subjects:
         same = subprocess.run(
-            # ruff: ignore[start-process-with-partial-path]
-            ["diff", "-u", str(published), str(rebuilt)],
+            [typed_std.on_path("diff"), "-u", str(published), str(rebuilt)],
             check=False,
         )
         if same.returncode != 0:
@@ -243,9 +254,17 @@ def main(argv: list[str]) -> int:
     ).parse_args(argv)
     tag, repo = os.environ["TAG"], os.environ["GITHUB_REPOSITORY"]
     draft = gh(
-        "release", "view", tag, "--repo", repo, "--json", "isDraft", "--jq", ".isDraft",
+        "release",
+        "view",
+        tag,
+        "--repo",
+        repo,
+        "--json",
+        "isDraft",
+        "--jq",
+        ".isDraft",
         capture=True,
-    ).strip()  # fmt: skip
+    ).strip()
     try:
         if draft == "false":
             converge(tag, repo)

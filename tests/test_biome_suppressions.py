@@ -246,7 +246,7 @@ def test_findings_name_each_file_line_and_the_remedy(
         status = bsup.main([])
         out, err = capfd.readouterr()
     assert status == 1
-    assert out == ""
+    assert not out
     assert (
         f"lint:biome: {bsup.HEAD}\n"
         "  a.ts:2: biome-ignore-all\n"
@@ -277,7 +277,7 @@ def test_a_file_that_is_not_utf8_is_refused_by_name(
         (Path(tmp) / "a.ts").write_bytes(b"\xff\n")
         listed(Path(tmp), "a.ts\0")
         status = bsup.main([])
-        out, err = capfd.readouterr()
+        _out, err = capfd.readouterr()
     assert status == 1
     assert err == "lint:biome: a.ts: not UTF-8\n"
 

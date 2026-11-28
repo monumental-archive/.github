@@ -142,7 +142,12 @@ class Main:
 
 @fixture
 def main_state(tmp_path: Path) -> Main:
-    """Give each row its own Main."""
+    """Give each row its own Main.
+
+    Returns:
+        The row's Main.
+
+    """
     return Main(tmp_path)
 
 
@@ -258,7 +263,12 @@ class MeasuredRun:
 
 @fixture
 def measured_run_state(tmp_path: Path) -> MeasuredRun:
-    """Give each row its own MeasuredRun."""
+    """Give each row its own MeasuredRun.
+
+    Returns:
+        The row's MeasuredRun.
+
+    """
     return MeasuredRun(tmp_path)
 
 

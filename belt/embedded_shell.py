@@ -36,7 +36,7 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
-from belt import decoded, workflow_yaml
+from belt import decoded, typed_std, workflow_yaml
 from belt import findings as writer
 from belt.tree import MISE, ROOT
 from belt.typed_std import group
@@ -466,10 +466,9 @@ def check(
             tmp.write("#!/usr/bin/env bash\n" + src)
             name = tmp.name
         try:
-            # ruff: ignore[start-process-with-partial-path]
             r = subprocess.run(
                 [
-                    "shellcheck",
+                    typed_std.on_path("shellcheck"),
                     f"--rcfile={ORG_RCFILE}",
                     *([f"--source-path={source_path}"] if source_path else []),
                     "--exclude",

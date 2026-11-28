@@ -34,7 +34,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from belt import decoded, findings
+from belt import decoded, findings, typed_std
 
 TARGET = "assert signer-certificates"
 EXIT_ERROR = 2
@@ -248,7 +248,7 @@ def gh(*args: str) -> str:
 
     """
     proc = subprocess.run(
-        ["gh", *args],  # ruff: ignore[start-process-with-partial-path] - gh is resolved on PATH, as in the workflow
+        [typed_std.on_path("gh"), *args],
         capture_output=True,
         text=True,
         check=False,
@@ -273,9 +273,19 @@ def already_filed(repo: str, index: int) -> int | None:
 
     """
     out = gh(
-        "issue", "list", "--repo", repo, "--state", "all", "--limit", "100",
-        "--search", f'"CT index {index}" in:title', "--json", "number,title",
-    )  # fmt: skip
+        "issue",
+        "list",
+        "--repo",
+        repo,
+        "--state",
+        "all",
+        "--limit",
+        "100",
+        "--search",
+        f'"CT index {index}" in:title',
+        "--json",
+        "number,title",
+    )
     try:
         answer = decoded.load_json(out)
     except decoded.UndecodableError as err:
@@ -311,9 +321,15 @@ def file_all(repo: str, report: Report, run_url: str) -> list[str]:
             if f.assertion not in conditions:
                 conditions.append(f.assertion)
         gh(
-            "issue", "create", "--repo", repo, "--title", title(index, conditions),
-            "--body", body(index, found, report.log, run_url),
-        )  # fmt: skip
+            "issue",
+            "create",
+            "--repo",
+            repo,
+            "--title",
+            title(index, conditions),
+            "--body",
+            body(index, found, report.log, run_url),
+        )
         done.append(f"CT index {index}: filed ({', '.join(conditions)})")
     return done
 

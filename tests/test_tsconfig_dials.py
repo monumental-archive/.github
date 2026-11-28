@@ -55,23 +55,25 @@ def test_the_level_is_not_empty() -> None:
     assert REQUIRED
 
 
-@pytest.mark.parametrize(("key", "want"), REQUIRED.items())
-def test_every_dial_is_a_boolean(key: object, want: object) -> None:
+@pytest.mark.parametrize(
+    "want", [pytest.param(want, id=key) for key, want in REQUIRED.items()]
+)
+def test_every_dial_is_a_boolean(want: object) -> None:
     """The comparison is boolean; a non-boolean would need new law."""
     assert isinstance(want, bool)
 
 
 def test_the_inverted_dials_are_required_false() -> None:
     """`--allowUnreachableCode false` must demand false, not true."""
-    assert REQUIRED["allowUnreachableCode"] == False
-    assert REQUIRED["allowUnusedLabels"] == False
-    assert REQUIRED["skipLibCheck"] == False
+    assert REQUIRED["allowUnreachableCode"] is False
+    assert REQUIRED["allowUnusedLabels"] is False
+    assert REQUIRED["skipLibCheck"] is False
 
 
 def test_a_bare_flag_is_required_true() -> None:
     """The ordinary shape."""
-    assert REQUIRED["strict"] == True
-    assert REQUIRED["noUncheckedIndexedAccess"] == True
+    assert REQUIRED["strict"] is True
+    assert REQUIRED["noUncheckedIndexedAccess"] is True
 
 
 def test_declaration_is_required() -> None:

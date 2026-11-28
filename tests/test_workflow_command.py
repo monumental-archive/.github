@@ -22,16 +22,12 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import pytest
-
 from belt import workflow_command
+from belt.release import pgrx_images
 from tests import support
 
 if TYPE_CHECKING:
-    pass
-
-
-from belt.release import pgrx_images
+    import pytest
 
 CANON = support.CANON
 # Any workflow command: `::` and a command name, then `::` or the space
@@ -177,7 +173,7 @@ def test_the_stream_is_the_callers(capfd: pytest.CaptureFixture[str]) -> None:
     """stream= takes the line, and stdout gets nothing."""
     err = io.StringIO()
     workflow_command.notice("x", stream=err)
-    assert capfd.readouterr().out == ""
+    assert not capfd.readouterr().out
     assert err.getvalue() == "::notice::x\n"
 
 

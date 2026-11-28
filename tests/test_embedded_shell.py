@@ -29,6 +29,13 @@ from tests import support
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+# The weights rows read: the folded block's three lines, and the five
+# lines of a block with a heredoc and comments, which weight counts as
+# shell; and the two findings one folded block holds.
+FOLDED_LINES = 3
+COUNTED_LINES = 5
+FINDINGS = 2
+
 # The task that runs the helper, whose name its findings carry (#1934).
 TASK = "lint:shell-embedded"
 
@@ -125,7 +132,12 @@ class Ceiling:
 
 @fixture
 def ceiling_state(tmp_path: Path) -> Ceiling:
-    """Give each row its own Ceiling."""
+    """Give each row its own Ceiling.
+
+    Returns:
+        The row's Ceiling.
+
+    """
     return Ceiling(tmp_path)
 
 
@@ -345,7 +357,12 @@ class Headers:
 
 @fixture
 def headers(tmp_path: Path) -> Headers:
-    """Give each row its own Headers."""
+    """Give each row its own Headers.
+
+    Returns:
+        The row's Headers.
+
+    """
     return Headers(tmp_path)
 
 
@@ -396,7 +413,7 @@ def test_what_shellcheck_reads_and_how(header: str, folds: list[object]) -> None
         p.write_text(workflow(folded("H", 3, header)), encoding="utf-8")
         read = [r.style == es.FOLDED for r in es.linted(p)]
         assert read == folds
-        assert es.weight(next(es.runs(p)).source) == 3
+        assert es.weight(next(es.runs(p)).source) == FOLDED_LINES
 
 
 @pytest.mark.usefixtures("headers")
@@ -455,7 +472,12 @@ class Folded:
 
 @fixture
 def folded_state(tmp_path: Path) -> Folded:
-    """Give each row its own Folded."""
+    """Give each row its own Folded.
+
+    Returns:
+        The row's Folded.
+
+    """
     return Folded(tmp_path)
 
 
@@ -475,7 +497,7 @@ def test_planted_finding_in_a_folded_composite_block(folded_state: Folded) -> No
 def test_the_note_is_said_once_per_block(folded_state: Folded) -> None:
     """Two findings in one folded block: the note rides on the first."""
     _, found = folded_state.check(action(">", "echo ${A}\n\necho ${B}"))
-    assert len(found) == 2, found
+    assert len(found) == FINDINGS, found
     noted = [es.FOLDED_NOTE in f for f in found]
     first_only: list[bool] = [True, False]
     assert noted == first_only
@@ -566,7 +588,12 @@ class Parser:
 
 @fixture
 def parser(tmp_path: Path) -> Parser:
-    """Give each row its own Parser."""
+    """Give each row its own Parser.
+
+    Returns:
+        The row's Parser.
+
+    """
     return Parser(tmp_path)
 
 
@@ -721,7 +748,12 @@ class OrgConfig:
 
 @fixture
 def org_config(tmp_path: Path) -> OrgConfig:
-    """Give each row its own OrgConfig."""
+    """Give each row its own OrgConfig.
+
+    Returns:
+        The row's OrgConfig.
+
+    """
     return OrgConfig(tmp_path)
 
 
@@ -859,7 +891,12 @@ class TrailingBlank:
 
 @fixture
 def trailing_blank(tmp_path: Path) -> TrailingBlank:
-    """Give each row its own TrailingBlank."""
+    """Give each row its own TrailingBlank.
+
+    Returns:
+        The row's TrailingBlank.
+
+    """
     return TrailingBlank(tmp_path)
 
 
@@ -987,7 +1024,7 @@ def test_blank_and_comment_lines_do_not_count_heredocs_do() -> None:
         "    a: 1\n    b: 2\n    EOF\n      # indented comment\n    echo done\n",
     )
     [run] = read_runs(text)
-    assert es.weight(run.source) == 5
+    assert es.weight(run.source) == COUNTED_LINES
 
 
 def test_step_names() -> None:
@@ -1110,7 +1147,12 @@ class Task:
 
 @fixture
 def task_state(tmp_path: Path, env: support.Env) -> Task:
-    """Give each row its own Task."""
+    """Give each row its own Task.
+
+    Returns:
+        The row's Task.
+
+    """
     return Task(tmp_path, env=env)
 
 
@@ -1215,7 +1257,12 @@ class Tasks:
 
 @fixture
 def tasks_state(tmp_path: Path) -> Tasks:
-    """Give each row its own Tasks."""
+    """Give each row its own Tasks.
+
+    Returns:
+        The row's Tasks.
+
+    """
     return Tasks(tmp_path)
 
 
@@ -1356,11 +1403,13 @@ def test_stale_entries_are_red(
     err = capfd.readouterr().err
     assert rc == 1
     assert (
-        f"{tasks_state.debt}:1: task 'lint:a' in {tasks_state.cfg} now fits the ceiling "
+        f"{tasks_state.debt}:1: task 'lint:a' in {tasks_state.cfg} now fits the "
+        "ceiling "
         "(15 lines) — remove the entry (mise run fix:task-shell)"
     ) in err
     assert (
-        f"{tasks_state.debt}:2: task 'lint:gone' in {tasks_state.cfg} names no task body "
+        f"{tasks_state.debt}:2: task 'lint:gone' in {tasks_state.cfg} names no "
+        "task body "
         "— remove the entry (mise run fix:task-shell)"
     ) in err
 
@@ -1527,7 +1576,12 @@ class TaskShellTask:
 
 @fixture
 def task_shell_task(tmp_path: Path, env: support.Env) -> TaskShellTask:
-    """Give each row its own TaskShellTask."""
+    """Give each row its own TaskShellTask.
+
+    Returns:
+        The row's TaskShellTask.
+
+    """
     return TaskShellTask(tmp_path, env=env)
 
 

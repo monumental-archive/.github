@@ -172,8 +172,8 @@ class Planted:
             monkeypatch.setenv(name, value)
         monkeypatch.chdir(self.tree)
 
+    @staticmethod
     def surfaces(
-        self,
         yml: tuple[str, ...] = (),
         hooks: tuple[str, ...] = (),
         presets: tuple[str, ...] = (),
@@ -217,7 +217,12 @@ class Planted:
 
 @fixture
 def planted(tmp_path: Path, env: support.Env) -> Planted:
-    """Give each row its own Planted."""
+    """Give each row its own Planted.
+
+    Returns:
+        The row's Planted.
+
+    """
     return Planted(tmp_path, env=env)
 
 

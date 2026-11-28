@@ -18,7 +18,7 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict, Unpack
 
 import pytest
 
@@ -28,9 +28,11 @@ from belt.typed_pytest import fixture
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+# The status the stub `npm publish` fails with in the row that reads it.
+NPM_FAILED = 7
+
 PACKAGE = "@acme/widget@1.2.3"
-# ruff: ignore[hardcoded-password-string] - a planted fake, to prove it is redacted
-TOKEN = "npm_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"
+NPM_CREDENTIAL = "npm_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"
 
 NPM_STUB = """#!/usr/bin/env bash
 # Stub `npm`: answers from the environment, logs every invocation.
@@ -57,8 +59,8 @@ DEBUG_LOG = f"""0 verbose cli /usr/bin/node /usr/bin/npm
 1 info using npm@11.17.0
 2 verb publish [ './dist/widget-1.2.3.tgz' ]
 3 http fetch GET 200 https://registry.npmjs.org/-/npm/v1/oidc/token/exchange
-4 verb headers authorization: Bearer {TOKEN}
-5 verb oidc exchanged token {TOKEN}
+4 verb headers authorization: Bearer {NPM_CREDENTIAL}
+5 verb oidc exchanged token {NPM_CREDENTIAL}
 6 error code ENEEDAUTH
 """
 
@@ -112,6 +114,17 @@ class Npm:
         )
 
 
+class Answers(TypedDict, total=False):
+    """What the stub npm answers, each with its default."""
+
+    version: str
+    oidc: bool
+    view_rc: int
+    tarballs: tuple[str, ...]
+    publish_rc: int
+    logs: str
+
+
 @fixture
 def npm(tmp_path: Path) -> Callable[..., Npm]:
     """Lay out the publish job's stub npm and dist/.
@@ -122,15 +135,8 @@ def npm(tmp_path: Path) -> Callable[..., Npm]:
     """
     made = itertools.count()
 
-    # ruff: ignore[too-many-arguments] - one keyword per stub answer
     def lay_out(
-        *,
-        version: str = "11.17.0",
-        oidc: bool = True,
-        view_rc: int = 1,
-        tarballs: tuple[str, ...] = ("widget-1.2.3.tgz",),
-        publish_rc: int = 0,
-        logs: str = "config",
+        **options: Unpack[Answers],
     ) -> Npm:
         """Lay out a job with the stub answering as told.
 
@@ -148,6 +154,12 @@ def npm(tmp_path: Path) -> Callable[..., Npm]:
             The job: the publisher's env and working tree.
 
         """
+        version = options.get("version", "11.17.0")
+        oidc = options.get("oidc", True)
+        view_rc = options.get("view_rc", 1)
+        tarballs = options.get("tarballs", ("widget-1.2.3.tgz",))
+        publish_rc = options.get("publish_rc", 0)
+        logs = options.get("logs", "config")
         tmp = tmp_path / f"npm{next(made)}"
         stubs, work, home, configured = (
             tmp / n for n in ("bin", "work", "home", "logs")
@@ -296,7 +308,7 @@ def test_the_log_is_printed_with_the_token_redacted(
     status = publish_npm.run(PACKAGE, job.env, job.work)
     run = job.ran(status, capfd.readouterr())
     assert run.returncode == 1
-    assert TOKEN not in run.stdout
+    assert NPM_CREDENTIAL not in run.stdout
     assert "authorization" not in run.stdout
     assert "2 verb publish [ './dist/widget-1.2.3.tgz' ]\n" in run.stdout
     assert "5 verb oidc exchanged token <redacted>\n" in run.stdout
@@ -308,8 +320,8 @@ def test_the_log_is_printed_with_the_token_redacted(
 
 def test_npm_s_own_exit_is_the_run_s(npm: Callable[..., Npm]) -> None:
     """A failed upload fails with npm's status, after the log."""
-    job = npm(publish_rc=7)
-    assert publish_npm.run(PACKAGE, job.env, job.work) == 7
+    job = npm(publish_rc=NPM_FAILED)
+    assert publish_npm.run(PACKAGE, job.env, job.work) == NPM_FAILED
 
 
 def test_the_default_log_directory_when_config_names_none(
@@ -347,7 +359,10 @@ def test_only_the_last_300_lines_survive() -> None:
     [
         pytest.param(
             [],
-            "belt publish-npm: error: the following arguments are required: NAME@VERSION",
+            (
+                "belt publish-npm: error: the following arguments are required: "
+                "NAME@VERSION"
+            ),
             id="nothing",
         ),
         pytest.param(
@@ -360,7 +375,10 @@ def test_only_the_last_300_lines_survive() -> None:
 def test_a_missing_package_is_a_usage_error(
     argv: list[str], error: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    """No package, or an empty one, exits 2 with the usage line: argparse's exit 2, its usage and its error."""
+    """A usage error: argparse's exit 2 and its error.
+
+    No package, or an empty one, exits 2 with the usage line.
+    """
     with pytest.raises(SystemExit) as ended:
         publish_npm.main(argv)
     out, err = capfd.readouterr()

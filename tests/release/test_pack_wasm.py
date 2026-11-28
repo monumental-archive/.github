@@ -17,7 +17,6 @@ import json
 import os
 import sys
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -29,6 +28,10 @@ from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
+
+# The status the stub npm's `fail` mode exits with.
+NPM_FAILED = 7
 
 CANON = support.CANON
 WORKFLOW = CANON / ".github" / "workflows" / "build-wasm-npm.yml"
@@ -260,7 +263,7 @@ def assert_refused(run: Run, message: str) -> None:
     assert run.returncode == 1
     assert message == run.stderr
     assert strings() == run.npm
-    assert run.outputs == ""
+    assert not run.outputs
 
 
 def test_another_repository_is_refused_with_the_remedy(
@@ -366,7 +369,7 @@ def test_an_empty_tarball_is_refused(
     run = packing.ran(status, capfd.readouterr())
     assert run.returncode == 1
     assert run.stderr == "::error::pack-wasm: npm pack produced nothing\n"
-    assert run.outputs == ""
+    assert not run.outputs
 
 
 def test_no_tarball_named_is_refused(
@@ -378,7 +381,7 @@ def test_no_tarball_named_is_refused(
     run = packing.ran(status, capfd.readouterr())
     assert run.returncode == 1
     assert run.stderr == "::error::pack-wasm: npm pack produced nothing\n"
-    assert run.outputs == ""
+    assert not run.outputs
 
 
 def test_a_failing_npm_fails_the_step_with_its_status(
@@ -388,7 +391,7 @@ def test_a_failing_npm_fails_the_step_with_its_status(
     packing = pack(package(), mode="fail")
     status = pack_wasm.main([])
     run = packing.ran(status, capfd.readouterr())
-    assert run.returncode == 7
+    assert run.returncode == NPM_FAILED
     assert run.stderr == "npm error code E404\n"
-    assert run.stdout == ""
-    assert run.outputs == ""
+    assert not run.stdout
+    assert not run.outputs

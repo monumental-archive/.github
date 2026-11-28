@@ -39,6 +39,12 @@ from belt import decoded, workflow_yaml
 from belt.typed_pytest import fixture
 from tests import support
 
+# The lines a failure is cut at with no SUMMARY in reach; the -fuzz
+# passes the planted go tree's two targets make; and the job's ceiling.
+QUOTED_LINES = 40
+GO_PASSES = 2
+TIMEOUT_MINUTES = 60
+
 BELT = support.MISE
 CANON = BELT.parent
 BASH = support.tool("bash")
@@ -448,7 +454,12 @@ class SearchCase:
 
 @fixture
 def search_case(tmp_path: Path, env: support.Env) -> SearchCase:
-    """Give each row its own SearchCase."""
+    """Give each row its own SearchCase.
+
+    Returns:
+        The row's SearchCase.
+
+    """
     return SearchCase(tmp_path, env=env)
 
 
@@ -585,7 +596,7 @@ def test_an_unset_log_is_refused_before_any_tool_runs(search_case: SearchCase) -
             "fuzz-x: org_fuzz_measure_log is unset — the search sets it to"
             " the replay's log file before it measures"
         ) in done.stderr
-        assert done.stdout == ""
+        assert not done.stdout
         assert search_case.log("cargo") + search_case.log("go") == NO_CALLS
 
 
@@ -741,7 +752,12 @@ class QuietSteps(SearchCase):
 
 @fixture
 def quiet_steps(tmp_path: Path, env: support.Env) -> QuietSteps:
-    """Give each row its own QuietSteps."""
+    """Give each row its own QuietSteps.
+
+    Returns:
+        The row's QuietSteps.
+
+    """
     return QuietSteps(tmp_path, env=env)
 
 
@@ -831,7 +847,12 @@ class FailureLines:
 
 @fixture
 def failure_lines(tmp_path: Path) -> FailureLines:
-    """Give each row its own FailureLines."""
+    """Give each row its own FailureLines.
+
+    Returns:
+        The row's FailureLines.
+
+    """
     return FailureLines(tmp_path)
 
 
@@ -840,14 +861,14 @@ def test_at_most_40_lines_are_quoted(failure_lines: FailureLines) -> None:
     log = "1 #2 NEW\n2 thread 'x' panicked at a.rs:1:1:\n"
     log += "".join(f"3 frame {i}\n" for i in range(100))
     quoted = failure_lines.lines("rust", log).splitlines()
-    assert len(quoted) == 40
+    assert len(quoted) == QUOTED_LINES
     assert quoted[0] == "thread 'x' panicked at a.rs:1:1:"
 
 
 def test_a_log_with_no_crash_line_quotes_nothing(failure_lines: FailureLines) -> None:
     """No `panicked at`, `ERROR: ` or `--- FAIL: `: nothing."""
-    assert failure_lines.lines("rust", "1 #2 NEW cov: 1\n2 Done\n") == ""
-    assert failure_lines.lines("go", "fuzz: elapsed: 3s\nok\n") == ""
+    assert not failure_lines.lines("rust", "1 #2 NEW cov: 1\n2 Done\n")
+    assert not failure_lines.lines("go", "fuzz: elapsed: 3s\nok\n")
 
 
 def test_a_crash_with_no_crash_line_says_so(
@@ -978,7 +999,7 @@ def test_the_go_task_passes_half_the_budget_to_each_pass(
     result = search_case.run_task("audit:go-fuzz")
     assert result.returncode == 0, result.stderr
     passes = [c for c in search_case.log("go") if " -fuzz " in f" {c} "]
-    assert len(passes) == 2, passes
+    assert len(passes) == GO_PASSES, passes
     for call in passes:
         assert "-fuzztime 150s" in call
     assert passes[1].startswith("test -race"), passes
@@ -1032,7 +1053,12 @@ class RunLength:
 
 @fixture
 def run_length(tmp_path: Path) -> RunLength:
-    """Give each row its own RunLength."""
+    """Give each row its own RunLength.
+
+    Returns:
+        The row's RunLength.
+
+    """
     return RunLength(tmp_path)
 
 
@@ -1149,7 +1175,12 @@ class Handover:
 
 @fixture
 def handover_state(tmp_path: Path, env: support.Env) -> Handover:
-    """Give each row its own Handover."""
+    """Give each row its own Handover.
+
+    Returns:
+        The row's Handover.
+
+    """
     return Handover(tmp_path, env=env)
 
 
@@ -1212,7 +1243,7 @@ def test_the_fuzz_matrix_is_the_applies_output() -> None:
     keys: list[str] = list(matrix)
     same(["include"], keys)
     assert matrix["include"] == "${{ fromJSON(needs.applies.outputs.fuzz-targets) }}"
-    assert fuzz["timeout-minutes"] == 60
+    assert fuzz["timeout-minutes"] == TIMEOUT_MINUTES
     outputs = decoded.as_object(jobs["applies"]["outputs"], "outputs")
     assert outputs["fuzz-targets"] == "${{ steps.applies.outputs.fuzz-targets }}"
     env = decoded.as_object(fuzz["env"], "env")

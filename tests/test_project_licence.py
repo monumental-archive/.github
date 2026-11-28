@@ -6,7 +6,6 @@ the reader in process for the branches neither script row reaches.
 """
 
 import subprocess
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -17,6 +16,7 @@ from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
 # The task that runs the helper, whose name its findings carry (#1934).
 TASK = "fix:test"
@@ -100,7 +100,7 @@ def test_comments_and_other_keys_are_not_the_licence_line() -> None:
     """Only a line whose first field is `licence` declares."""
     states = "# licence MIT\nlicences MIT\n\nlicence  0BSD \n"
     assert pl.declared(states) == "0BSD"
-    assert pl.declared("reuse registered\n") == ""
+    assert not pl.declared("reuse registered\n")
 
 
 def test_an_unparsable_file_is_red_by_name(
@@ -152,7 +152,7 @@ def test_a_wrong_shape_is_red_by_where(
     ],
 )
 def test_usage(argv: list[str], error: str, capfd: pytest.CaptureFixture[str]) -> None:
-    """No caller is a usage error, not a pass: argparse's exit 2, its usage and its error."""
+    """No caller is a usage error, not a pass: argparse's exit 2 and its error."""
     with pytest.raises(SystemExit) as ended:
         pl.main(argv)
     out, err = capfd.readouterr()

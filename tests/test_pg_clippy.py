@@ -69,6 +69,11 @@ TWO = planted.workspace(
     planted.member("other", pgrx=True),
 )
 AT = "--manifest-path Cargo.toml"
+# The statuses this file's rows plant, each its own; the ladder's and the
+# prepare's are test_rust_lint.py's stubs'.
+FETCH_FAILED = 7
+METADATA_FAILED = 4
+PIN_MISSING = 6
 FETCH = f"cargo fetch --locked {AT} [  ]"
 METADATA = f"cargo metadata --no-deps --format-version 1 --locked {AT} [  ]"
 REGISTER = ["prepare 17", "mise ls aqua:theseus-rs/postgresql-binaries --json"]
@@ -186,7 +191,12 @@ def planted_state(
     belt: support.Belt,
     env: support.Env,
 ) -> Planted:
-    """Give each row its own Planted."""
+    """Give each row its own Planted.
+
+    Returns:
+        The row's Planted.
+
+    """
     return Planted(tmp_path, monkeypatch, belt=belt, env=env)
 
 
@@ -214,7 +224,10 @@ def finding(*lines: str) -> str:
 def test_an_argument_is_a_usage_error(
     argv: list[str], error: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    """The task passes none; anything else is a caller's mistake: argparse's exit 2, its usage and its error."""
+    """A usage error: argparse's exit 2 and its error.
+
+    The task passes none; anything else is a caller's mistake.
+    """
     with pytest.raises(SystemExit) as ended:
         pg_clippy.main(argv)
     out, err = capfd.readouterr()
@@ -246,12 +259,12 @@ def test_a_red_fetch_keeps_its_status(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """`cargo fetch --locked` fails: nothing is derived after it."""
-    planted_state.enter(monkeypatch, STUB_FETCH_STATUS="7")
+    planted_state.enter(monkeypatch, STUB_FETCH_STATUS=str(FETCH_FAILED))
     status = pg_clippy.main([])
     out = capfd.readouterr().out
-    assert status == 7
+    assert status == FETCH_FAILED
     planted_state.assert_logged(FETCH)
-    assert out == ""
+    assert not out
 
 
 def test_a_red_metadata_is_never_a_workspace_with_no_extension(
@@ -260,10 +273,10 @@ def test_a_red_metadata_is_never_a_workspace_with_no_extension(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A failing cargo metadata gives its status, not the skip."""
-    planted_state.enter(monkeypatch, STUB_METADATA_STATUS="4")
+    planted_state.enter(monkeypatch, STUB_METADATA_STATUS=str(METADATA_FAILED))
     status = pg_clippy.main([])
     out = capfd.readouterr().out
-    assert status == 4
+    assert status == METADATA_FAILED
     planted_state.assert_logged(FETCH, METADATA)
     assert "skipped" not in out
 
@@ -281,7 +294,7 @@ def test_a_red_surface_is_never_a_workspace_with_no_extension(
     assert status == 1
     assert err.startswith("lint:pg-clippy: cargo metadata did not give JSON\n"), err
     planted_state.assert_logged(FETCH, METADATA)
-    assert out == ""
+    assert not out
 
 
 def test_a_major_that_is_not_a_number_is_red(
@@ -296,7 +309,7 @@ def test_a_major_that_is_not_a_number_is_red(
     assert status == 1
     assert err == "lint:pg-clippy: ext@0.1.0 names no Postgres major: 'pg17'\n"
     planted_state.assert_logged(FETCH, METADATA)
-    assert out == ""
+    assert not out
 
 
 def test_no_extension_skips_clean(
@@ -342,7 +355,7 @@ def test_a_red_ladder_keeps_its_status(
     """clippy-ladder.sh fails: nothing is registered or linted."""
     planted_state.enter(monkeypatch, STUB_LADDER_FAILS="1")
     status = pg_clippy.main([])
-    assert status == 3
+    assert status == planted.LADDER_FAILED
     planted_state.assert_logged(FETCH, METADATA)
 
 
@@ -352,7 +365,7 @@ def test_a_red_prepare_keeps_its_status(
     """The SDK or an ICU check fails: nothing is linted (#1774)."""
     planted_state.enter(monkeypatch, STUB_PREPARE_FAILS="1")
     status = pg_clippy.main([])
-    assert status == 5
+    assert status == planted.PREPARE_FAILED
     planted_state.assert_logged(FETCH, METADATA, "prepare 17")
 
 
@@ -360,9 +373,9 @@ def test_a_missing_postgres_pin_keeps_its_status(
     planted_state: Planted, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """pgrx_postgres.py reds a declared major with no pin (#1940)."""
-    planted_state.enter(monkeypatch, STUB_PIN_STATUS="6")
+    planted_state.enter(monkeypatch, STUB_PIN_STATUS=str(PIN_MISSING))
     status = pg_clippy.main([])
-    assert status == 6
+    assert status == PIN_MISSING
     planted_state.assert_logged(FETCH, METADATA, *REGISTER)
 
 
@@ -375,11 +388,11 @@ def test_a_red_extension_keeps_clippys_status(
     planted_state.enter(monkeypatch, STUB_RED="ext")
     status = pg_clippy.main([])
     out = capfd.readouterr().out
-    assert status == 101
+    assert status == support.CARGO_FAILED
     planted_state.assert_logged(
         FETCH, METADATA, *REGISTER, clippy("ext@0.1.0", planted_state.belt)
     )
-    assert out == ""
+    assert not out
 
 
 def test_a_clean_extension_says_what_was_linted(
@@ -430,7 +443,10 @@ def test_the_manifest_path_reaches_every_cargo_command(
         f"cargo fetch --locked {tail} [  ]",
         f"cargo metadata --no-deps --format-version 1 --locked {tail} [  ]",
         *REGISTER,
-        f"cargo clippy -p ext@0.1.0 {tail} {OWN} {LADDER} [yes pg17 {planted_state.belt}]",
+        (
+            f"cargo clippy -p ext@0.1.0 {tail} {OWN} {LADDER} [yes pg17 "
+            f"{planted_state.belt}]"
+        ),
     )
 
 

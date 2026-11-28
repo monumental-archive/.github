@@ -218,7 +218,8 @@ class Branches:
             monkeypatch.setenv(name, value)
         monkeypatch.chdir(self.tree)
 
-    def signed(self, *files: str) -> list[str]:
+    @staticmethod
+    def signed(*files: str) -> list[str]:
         """Name these workflows with the real signer.
 
         Returns:
@@ -230,7 +231,12 @@ class Branches:
 
 @fixture
 def branches(tmp_path: Path, env: support.Env) -> Branches:
-    """Give each row its own Branches."""
+    """Give each row its own Branches.
+
+    Returns:
+        The row's Branches.
+
+    """
     return Branches(tmp_path, env=env)
 
 
@@ -248,7 +254,7 @@ def test_agreeing_references_pass(
     assert status == 0, err
     want = [f"lint:signer-pin: all signer references agree on {SHA}"]
     assert want == out.splitlines()
-    assert err == ""
+    assert not err
 
 
 def test_no_reference_is_skipped_by_name(
@@ -417,7 +423,10 @@ def test_not_utf8_is_an_error(
     [
         pytest.param(
             [],
-            "belt signer-pin: error: the following arguments are required: OWNER/REPO, SIGNER-WORKFLOW, WORKFLOW",
+            (
+                "belt signer-pin: error: the following arguments are required: "
+                "OWNER/REPO, SIGNER-WORKFLOW, WORKFLOW"
+            ),
             id="nothing",
         ),
         pytest.param(
@@ -445,7 +454,7 @@ def test_not_utf8_is_an_error(
 def test_usage_errors(
     argv: list[str], error: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    """No workflow, an empty owner, repo or signer: the usage line: argparse's exit 2, its usage and its error."""
+    """No workflow, an empty owner, repo or signer: argparse's exit 2 and its error."""
     with pytest.raises(SystemExit) as ended:
         signer_pin.main(argv)
     out, err = capfd.readouterr()

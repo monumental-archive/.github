@@ -30,6 +30,9 @@ from hypothesis import strategies as st
 from belt.rekor_monitor import gain, verdict
 from belt.typed_hypothesis import given
 
+# The lines gain.detail writes for any run, read or not.
+DETAIL_LINES = 5
+
 # Past the JSON parser's depth: a RecursionError, not a ValueError.
 DEEP = b"[" * 100_000
 
@@ -165,7 +168,7 @@ def test_never_raises(start: bytes, end: bytes, kept: str) -> None:
     if last.missing is not None:
         assert outcome.red
     lines = gain.detail(gain.start_count(first, kept), last, outcome.why, [])
-    assert len(lines) == 5
+    assert len(lines) == DETAIL_LINES
 
 
 @given(POINT, POINT)

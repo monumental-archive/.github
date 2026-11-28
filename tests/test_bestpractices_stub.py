@@ -147,7 +147,7 @@ def kept(criterion: str) -> str:
 def assert_ok(text: str, path: str = STUB_PATH, *, env: support.Env) -> None:
     """Assert a clean pass with the ok line and nothing on stderr."""
     done = lint(text, path, env=env)
-    assert done.stderr == ""
+    assert not done.stderr
     assert done.returncode == 0
     assert done.stdout == CLEAN
 

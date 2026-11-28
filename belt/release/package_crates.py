@@ -35,7 +35,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from belt import findings
+from belt import findings, typed_std
 from belt.belt_scripts import script
 from belt.tree import RELEASE
 
@@ -59,8 +59,7 @@ def cargo(*args: str) -> None:
 
     """
     done = subprocess.run(
-        # ruff: ignore[start-process-with-partial-path] - the job's pinned cargo, on PATH
-        ["cargo", *args],
+        [typed_std.on_path("cargo"), *args],
         check=False,
     )
     if done.returncode != 0:

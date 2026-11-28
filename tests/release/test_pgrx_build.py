@@ -1,12 +1,13 @@
 """The pgrx-extension build's tracked scripts, driven from Python (#1380).
 
 build-pgrx-extension.yml carried this logic as shell three quotes deep
-inside `docker run … bash -c '… su postgres -c "…"'`, with no tests.
-It now lives in belt/release/pgrx/ and release/pgrx/ as plain scripts the containers run from
-the pinned canon tree, and in release/pgrx/previous_release.py on the
-runner. Each guard branch is a row here, and every refusal row asserts
-its message, word for word, against the wording the workflow carried.
-previous_release.py's rows call its `main` in this process (#1698).
+inside `docker run … bash -c '… su postgres -c "…"'`, with no tests. It
+now lives in belt/release/pgrx/ and release/pgrx/ as plain scripts the
+containers run from the pinned canon tree, and in
+release/pgrx/previous_release.py on the runner. Each guard branch is a
+row here, and every refusal row asserts its message, word for word,
+against the wording the workflow carried. previous_release.py's rows
+call its `main` in this process (#1698).
 
 The debug-split and glibc rows run the real binutils over a small real
 shared library built here, so they need `cc`, `readelf`, `objcopy` and
@@ -154,7 +155,12 @@ class FloorBlock:
 
 @fixture
 def floor_block(tmp_path: Path, env: support.Env) -> FloorBlock:
-    """Give each row its own FloorBlock."""
+    """Give each row its own FloorBlock.
+
+    Returns:
+        The row's FloorBlock.
+
+    """
     return FloorBlock(tmp_path, env=env)
 
 
@@ -366,7 +372,12 @@ class PreviousRelease:
 
 @fixture
 def previous_release_state(tmp_path: Path, env: support.Env) -> PreviousRelease:
-    """Give each row its own PreviousRelease."""
+    """Give each row its own PreviousRelease.
+
+    Returns:
+        The row's PreviousRelease.
+
+    """
     return PreviousRelease(tmp_path, env=env)
 
 
@@ -482,7 +493,7 @@ def test_a_failed_listing_read_is_red(
     status = previous_release.main([*args, "--crate-dir", previous_release_state.CRATE])
     out, err = capfd.readouterr()
     assert status == 1
-    assert out == ""
+    assert not out
     assert err == "HTTP 502\n"
 
 
@@ -526,7 +537,12 @@ class PreviousTarball(PreviousRelease):
 
 @fixture
 def previous_tarball(tmp_path: Path, env: support.Env) -> PreviousTarball:
-    """Give each row its own PreviousTarball."""
+    """Give each row its own PreviousTarball.
+
+    Returns:
+        The row's PreviousTarball.
+
+    """
     return PreviousTarball(tmp_path, env=env)
 
 
@@ -544,7 +560,7 @@ def test_no_previous_release_or_a_rerun_skips(
         status = previous_release.main(previous_tarball.fetch())
         out, err = capfd.readouterr()
         assert status == 0
-        assert out == ""
+        assert not out
         assert err == "::notice::no previous release; upgrade execution skipped\n"
 
 
@@ -562,14 +578,15 @@ def test_no_tarball_for_this_cell_skips(
     status = previous_release.main(previous_tarball.fetch())
     out, err = capfd.readouterr()
     assert status == 0
-    assert out == ""
+    assert not out
     assert err == (
         "::notice::v1.1.0 shipped no demo_ext-1.1.0-pg18-linux-arm64.tar.gz;"
         " upgrade execution skipped\n"
     )
     assert (
-        f"release download v1.1.0 --repo acme/demo --pattern"
-        f" demo_ext-1.1.0-pg18-linux-arm64.tar.gz --output {previous_tarball.root}/prev.tar.gz"
+        "release download v1.1.0 --repo acme/demo --pattern"
+        " demo_ext-1.1.0-pg18-linux-arm64.tar.gz --output "
+        f"{previous_tarball.root}/prev.tar.gz"
     ) == previous_tarball.gh_calls()[1]
 
 
@@ -606,7 +623,7 @@ def test_a_corrupt_tarball_is_red(
     status = previous_release.main(previous_tarball.fetch())
     out = capfd.readouterr().out
     assert status != 0
-    assert out == ""
+    assert not out
 
 
 class OnePredecessor(PreviousRelease):
@@ -635,7 +652,12 @@ class OnePredecessor(PreviousRelease):
 
 @fixture
 def one_predecessor(tmp_path: Path, env: support.Env) -> OnePredecessor:
-    """Give each row its own OnePredecessor."""
+    """Give each row its own OnePredecessor.
+
+    Returns:
+        The row's OnePredecessor.
+
+    """
     return OnePredecessor(tmp_path, env=env)
 
 
@@ -693,7 +715,7 @@ def test_an_empty_graph_yields_nothing(
     status = previous_release.main(one_predecessor.predecessor("1.3.6"))
     out, err = capfd.readouterr()
     assert status == 0, err
-    assert out == ""
+    assert not out
 
 
 def test_the_guard_refuses_from_the_imported_predecessor(
@@ -809,7 +831,12 @@ class OlderLine(PreviousRelease):
 
 @fixture
 def older_line(tmp_path: Path, env: support.Env) -> OlderLine:
-    """Give each row its own OlderLine."""
+    """Give each row its own OlderLine.
+
+    Returns:
+        The row's OlderLine.
+
+    """
     return OlderLine(tmp_path, env=env)
 
 
@@ -969,7 +996,12 @@ class ContainerScripts:
 
 @fixture
 def container_scripts(tmp_path: Path, env: support.Env) -> ContainerScripts:
-    """Give each row its own ContainerScripts."""
+    """Give each row its own ContainerScripts.
+
+    Returns:
+        The row's ContainerScripts.
+
+    """
     return ContainerScripts(tmp_path, env=env)
 
 
@@ -1003,7 +1035,7 @@ def test_smoke_refuses_a_script_that_is_not_executable(
         == "::error::smoke.sh: smoke-test ci/no-such-smoke.sh is not executable\n"
     )
     # Stopped at the refusal, never tried: nothing else was said.
-    assert result.stdout == ""
+    assert not result.stdout
 
 
 @pytest.mark.usefixtures("container_scripts")
@@ -1064,7 +1096,7 @@ def test_update_refuses_any_other_version(container_scripts: ContainerScripts) -
 def test_an_unknown_phase_is_refused(container_scripts: ContainerScripts) -> None:
     """Only create and update exist."""
     result = container_scripts.script("upgrade-cluster.sh", "drop")
-    assert result.returncode == 2
+    assert result.returncode == support.USAGE
     assert (
         result.stderr
         == "::error::upgrade-cluster.sh: unknown phase 'drop' (create or update)\n"
@@ -1219,7 +1251,12 @@ class DebugSplit:
 
 @fixture
 def debug_split(tmp_path: Path, env: support.Env) -> DebugSplit:
-    """Give each row its own DebugSplit."""
+    """Give each row its own DebugSplit.
+
+    Returns:
+        The row's DebugSplit.
+
+    """
     return DebugSplit(tmp_path, env=env)
 
 
@@ -1324,7 +1361,12 @@ class GlibcFloor:
 
 @fixture
 def glibc_floor(tmp_path: Path, env: support.Env) -> GlibcFloor:
-    """Give each row its own GlibcFloor."""
+    """Give each row its own GlibcFloor.
+
+    Returns:
+        The row's GlibcFloor.
+
+    """
     return GlibcFloor(tmp_path, env=env)
 
 

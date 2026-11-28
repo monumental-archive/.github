@@ -28,6 +28,9 @@ from belt.typed_pytest import fixture
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+# The fields of a surface record: kind, spec, class, majors, name.
+FIELDS = 5
+
 # The task that runs the helper, whose name its findings carry (#1934).
 TASK = "lint:gate-surface"
 
@@ -223,7 +226,7 @@ def test_a_member_outside_the_root_resolves_to_nothing() -> None:
     """A path dependency elsewhere on disk is not a stub's crate-dir."""
     odd = member("ext")
     odd["manifest_path"] = "/somewhere/else/Cargo.toml"
-    assert directory_of(odd, ROOT) == ""
+    assert not directory_of(odd, ROOT)
 
 
 # Reading the stub. Mutation: accept an empty value as a scalar.
@@ -259,7 +262,7 @@ def test_keys_after_the_block_are_not_inputs() -> None:
     found, _unreadable = gate_surface.stub_inputs(
         "    with:\n      classes: rust-crate\npermissions:\n  exclude: not-an-input\n",
     )
-    assert found.get("exclude") == None
+    assert found.get("exclude") is None
 
 
 def test_an_empty_value_is_refused() -> None:
@@ -364,7 +367,12 @@ class InvariantTest:
 
 @fixture
 def invariant_test() -> InvariantTest:
-    """Give each row its own InvariantTest."""
+    """Give each row its own InvariantTest.
+
+    Returns:
+        The row's InvariantTest.
+
+    """
     return InvariantTest()
 
 
@@ -556,7 +564,7 @@ def test_the_invariant_reds_and_emits_no_plan(
     status = gate_surface.main(["--exclude", "b", "--publish", str(published)])
     out, err = capfd.readouterr()
     assert status == 1
-    assert out == ""
+    assert not out
     assert "b@1.3.1" in err
 
 
@@ -580,9 +588,9 @@ def test_no_record_field_is_ever_empty(
     out = capfd.readouterr().out
     for line in out.splitlines():
         fields = line.split("\t")
-        assert len(fields) == 5, line
+        assert len(fields) == FIELDS, line
         for field in fields:
-            assert field != "", line
+            assert field, line
 
 
 def test_metadata_that_is_not_an_object_is_red(
@@ -594,7 +602,7 @@ def test_metadata_that_is_not_an_object_is_red(
     status = gate_surface.main(["--exclude", ""])
     out, err = capfd.readouterr()
     assert status == 1
-    assert out == ""
+    assert not out
     assert "is not a JSON object" in err
 
 

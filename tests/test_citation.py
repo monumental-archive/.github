@@ -137,7 +137,7 @@ def test_several_without_a_declaration_are_refused(env: support.Env) -> None:
         "  say which is the project's in .badge-states:"
         " 'licence <SPDX expression>'\n"
     )
-    assert cff == ""
+    assert not cff
 
 
 def test_a_declaration_reuse_does_not_name_is_red(env: support.Env) -> None:
@@ -149,7 +149,7 @@ def test_a_declaration_reuse_does_not_name_is_red(env: support.Env) -> None:
         " and REUSE.toml names no such expression:\n"
         "  0BSD\n  MIT OR Apache-2.0\n"
     )
-    assert cff == ""
+    assert not cff
 
 
 def test_a_declaration_is_held_with_one_expression_too(env: support.Env) -> None:

@@ -33,6 +33,9 @@ from tests import support
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+# A raw block's two markers, each a comment and back.
+MARKERS = 2
+
 # The tasks that run the helper, whose names its findings carry (#1934).
 LINT = "lint:belt-shell"
 FIX = "fix:belt-shell"
@@ -236,7 +239,7 @@ def test_markers_become_comments_and_come_back() -> None:
     """The `fix:input-forwarding` shape, which #624 read as a defect."""
     source = "{% raw %}\nval='${{ inputs.x }}'\n{% endraw %}\n"
     shell, count = bs.shellify(source)
-    assert count == 2
+    assert count == MARKERS
     assert "\n{%" not in "\n" + shell
     assert bs.unshellify(shell, count) == source
 

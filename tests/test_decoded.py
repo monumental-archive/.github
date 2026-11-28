@@ -27,6 +27,11 @@ from tests import support
 if TYPE_CHECKING:
     from pathlib import Path
 
+# The depth decoded pins, the same on every machine, and an integer the
+# reader hands back as it went in.
+PINNED_DEPTH = 512
+AN_INT = 3
+
 HERE = support.MISE
 CANON = HERE.parent
 DEEP = 100_000
@@ -167,7 +172,7 @@ def test_a_number_past_a_finite_float_is_refused() -> None:
 def test_nesting_past_the_bound_is_refused() -> None:
     """MAX_DEPTH decodes and one more is refused, on every machine."""
     bound = decoded.MAX_DEPTH
-    assert bound == 512
+    assert bound == PINNED_DEPTH
     deepest = "[" * bound + "]" * bound
     assert decoded.load_json(deepest) is not None
     message = f"nested deeper than {bound} levels"
@@ -314,7 +319,7 @@ def test_each_raising_reader_returns_its_kind() -> None:
     assert table == decoded.as_object(table, "w")
     assert items == decoded.as_array(items, "w")
     assert decoded.as_str("a", "w") == "a"
-    assert decoded.as_int(3, "w") == 3
+    assert decoded.as_int(AN_INT, "w") == AN_INT
 
 
 # Only decoded.py parses, and no file is excused.

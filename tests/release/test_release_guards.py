@@ -302,7 +302,7 @@ def test_a_read_that_fails_is_never_read_as_no_record_yet(env: support.Env) -> N
         posted = recorder.posted()
     assert result.returncode == 1
     assert "no release at o/r@v1.0.0, or it could not be read" in result.stderr
-    assert posted == ""
+    assert not posted
 
 
 # The two states that are already correct, and must not be rewritten.
@@ -315,7 +315,7 @@ def test_a_published_release_is_its_own_record(env: support.Env) -> None:
         posted = recorder.posted()
     assert result.returncode == 0, result.stderr
     assert "a published release is its own record" in result.stdout
-    assert posted == ""
+    assert not posted
 
 
 def test_an_existing_record_is_left_alone(env: support.Env) -> None:
@@ -329,7 +329,7 @@ def test_an_existing_record_is_left_alone(env: support.Env) -> None:
         posted = recorder.posted()
     assert result.returncode == 0, result.stderr
     assert "already carries a record, leaving it" in result.stdout
-    assert posted == ""
+    assert not posted
 
 
 # What the record SAYS, which is the whole point of writing one.
@@ -495,7 +495,7 @@ def refused(message: str, *, make_env: support.Env, **env: str) -> None:
         posted = recorder.posted()
     assert result.returncode == 1
     assert f"record-draft: {message}\n" == result.stderr
-    assert posted == ""
+    assert not posted
 
 
 def test_a_registry_list_without_a_run_is_refused(env: support.Env) -> None:
@@ -602,7 +602,7 @@ def test_no_floor_file_is_an_adoption_decision_not_a_failure(env: support.Env) -
         files = emitted(out)
     assert result.returncode == 0, result.stderr
     assert "no .coverage-floor, skipped" in result.stdout
-    assert files["files"] == ""
+    assert not files["files"]
 
 
 # `rust-build.sh` validates its scope before it compiles anything.
@@ -709,7 +709,7 @@ def _full_env(plan: Path) -> dict[str, str]:
     return {
         "PLAN": str(plan),
         # Not a credential: no call that would use one is reachable
-        # in these rows. ruff: ignore[hardcoded-password-func-arg]
+        # in these rows.
         "GH_TOKEN": "stub",
         "GITHUB_REPOSITORY": "monumental-archive/under-test",
         "GITHUB_SHA": "0" * 40,
@@ -972,7 +972,12 @@ class ReleaseForge:
 
 @fixture
 def release_forge(tmp_path: Path, env: support.Env) -> ReleaseForge:
-    """Give each row its own ReleaseForge."""
+    """Give each row its own ReleaseForge.
+
+    Returns:
+        The row's ReleaseForge.
+
+    """
     return ReleaseForge(tmp_path, env=env)
 
 
@@ -1067,7 +1072,12 @@ class OpenReleasePrHead(ReleaseForge):
 
 @fixture
 def open_release_pr_head(tmp_path: Path, env: support.Env) -> OpenReleasePrHead:
-    """Give each row its own OpenReleasePrHead."""
+    """Give each row its own OpenReleasePrHead.
+
+    Returns:
+        The row's OpenReleasePrHead.
+
+    """
     return OpenReleasePrHead(tmp_path, env=env)
 
 
@@ -1132,7 +1142,7 @@ def test_a_refused_call_names_itself_and_what_the_forge_said(
             "  X-Github-Request-Id: STUB:633\n"
             "  X-Accepted-Github-Permissions: contents=write\n"
         ) == result.stderr
-        assert result.stdout == ""
+        assert not result.stdout
         assert calls == open_release_pr_head.calls()
 
 
@@ -1300,7 +1310,7 @@ def test_a_dequeue_that_fails_otherwise_is_red(
     open_release_pr_head.forge(PLANNED)
     result = open_release_pr_head.run_executor()
     assert result.returncode == 1, result.stdout
-    assert result.stdout == ""
+    assert not result.stdout
     assert (
         "open-release-pr.sh: could not take #77 out of the merge queue\n"
         "  HTTP/2.0 502 Bad Gateway\n"
@@ -1316,7 +1326,7 @@ def test_any_other_refusal_to_move_the_branch_still_fails(
     open_release_pr_head.forge(PLANNED)
     result = open_release_pr_head.run_executor()
     assert result.returncode == 1, result.stdout
-    assert result.stdout == ""
+    assert not result.stdout
     assert (
         f"open-release-pr.sh: could not move release/next to the release commit"
         f" {OID}\n"
@@ -1325,10 +1335,14 @@ def test_any_other_refusal_to_move_the_branch_still_fails(
 
 
 @pytest.mark.parametrize(
-    ("label", "head"), [("refused", None), ("null", "null"), ("empty", "")]
+    "head",
+    [
+        pytest.param(head, id=label)
+        for label, head in [("refused", None), ("null", "null"), ("empty", "")]
+    ],
 )
 def test_a_head_read_that_fails_is_never_read_as_unchanged(
-    open_release_pr_head: OpenReleasePrHead, label: object, head: object
+    open_release_pr_head: OpenReleasePrHead, head: object
 ) -> None:
     """No answer, or an answer that is not a commit, fails by name."""
     (open_release_pr_head.state / "calls").unlink(missing_ok=True)
@@ -1338,7 +1352,7 @@ def test_a_head_read_that_fails_is_never_read_as_unchanged(
     assert (
         f"open-release-pr.sh: could not read the default branch head of {REPO}"
     ) in result.stderr
-    assert result.stdout == ""
+    assert not result.stdout
     want: list[str] = ["graphql head"]
     assert want == open_release_pr_head.calls()
 
@@ -1428,7 +1442,12 @@ class CloseReleasePr(ReleaseForge):
 
 @fixture
 def close_release_pr(tmp_path: Path, env: support.Env) -> CloseReleasePr:
-    """Give each row its own CloseReleasePr."""
+    """Give each row its own CloseReleasePr.
+
+    Returns:
+        The row's CloseReleasePr.
+
+    """
     return CloseReleasePr(tmp_path, env=env)
 
 
@@ -1470,7 +1489,7 @@ def test_head_moved_closes_nothing(close_release_pr: CloseReleasePr) -> None:
     ) == result.stdout
     want: list[str] = ["graphql head"]
     assert want == close_release_pr.calls()
-    assert close_release_pr.comment(246) == ""
+    assert not close_release_pr.comment(246)
 
 
 def test_a_head_read_that_fails_closes_nothing_and_fails(
@@ -1691,19 +1710,11 @@ class TagReleasePush:
     def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Set up the rows' state."""
         self.make_env = env
-        self.set_up_tmp(tmp_path)
-        self.set_up_test_tag_release_push()
-
-    def set_up_tmp(self, tmp_path: Path) -> None:
-        """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
-
-    def set_up_test_tag_release_push(self) -> None:
-        """Skip unless stele is installed."""
         if not STELE:
             pytest.skip("stele derives the plan tag-release.sh reads")
 
-    def _run(self, hook: str) -> tuple[subprocess.CompletedProcess[str], str, str]:
+    def run(self, hook: str) -> tuple[subprocess.CompletedProcess[str], str, str]:
         """Run the tag step against a remote whose hook prints `hook`.
 
         Returns:
@@ -1771,7 +1782,12 @@ class TagReleasePush:
 
 @fixture
 def tag_release_push(tmp_path: Path, env: support.Env) -> TagReleasePush:
-    """Give each row its own TagReleasePush."""
+    """Give each row its own TagReleasePush.
+
+    Returns:
+        The row's TagReleasePush.
+
+    """
     return TagReleasePush(tmp_path, env=env)
 
 
@@ -1779,7 +1795,7 @@ def test_the_workflow_refusal_is_named_and_mints_nothing(
     tag_release_push: TagReleasePush,
 ) -> None:
     """GitHub's workflows-permission refusal becomes one ::error and a remedy."""
-    result, local, pushed = tag_release_push._run(WORKFLOW_REFUSAL)
+    result, local, pushed = tag_release_push.run(WORKFLOW_REFUSAL)
     assert result.returncode == 1, result.stderr
     errors = [ln for ln in result.stderr.splitlines() if ln.startswith("::")]
     want: list[str] = [TAG_REFUSED.rstrip("\n")]
@@ -1787,22 +1803,22 @@ def test_the_workflow_refusal_is_named_and_mints_nothing(
     assert result.stderr.endswith(TAG_REFUSED), result.stderr
     assert "pushed v1.1.0" not in result.stdout
     assert "GH013" not in result.stderr
-    assert local == ""
-    assert pushed == ""
+    assert not local
+    assert not pushed
 
 
 def test_an_unrelated_push_failure_keeps_gits_own_output(
     tag_release_push: TagReleasePush,
 ) -> None:
     """Any other refusal passes through as before: git's text, git's status."""
-    result, local, pushed = tag_release_push._run("error: some other rule said no\n")
+    result, local, pushed = tag_release_push.run("error: some other rule said no\n")
     assert result.returncode == 1, result.stderr
     assert "remote: error: some other rule said no" in result.stderr
     assert "[remote rejected] v1.1.0 -> v1.1.0" in result.stderr
     assert "::error::" not in result.stderr
     assert "pushed v1.1.0" not in result.stdout
     assert local == "v1.1.0\n"
-    assert pushed == ""
+    assert not pushed
 
 
 def test_an_accepted_push_says_so(tag_release_push: TagReleasePush) -> None:
@@ -1811,7 +1827,7 @@ def test_an_accepted_push_says_so(tag_release_push: TagReleasePush) -> None:
     It stops at the draft release, which needs the forge; the row is
     about the push.
     """
-    result, _, pushed = tag_release_push._run("")
+    result, _, pushed = tag_release_push.run("")
     assert "pushed v1.1.0 (signed)" in result.stdout
     assert pushed == "v1.1.0\n"
 
@@ -1825,7 +1841,7 @@ def test_the_pushed_tag_carries_the_signers_signature(
     hand at break-glass were indistinguishable by inspection; the
     x509 signature in the tag object is what tells them apart.
     """
-    result, _, pushed = tag_release_push._run("")
+    result, _, pushed = tag_release_push.run("")
     assert pushed == "v1.1.0\n", result.stderr
     assert "-----BEGIN SIGNED MESSAGE-----" in tag_release_push.pushed_tag, (
         tag_release_push.pushed_tag
@@ -1877,21 +1893,13 @@ class TagReleaseUpgradePath:
     def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Set up the rows' state."""
         self.make_env = env
-        self.set_up_tmp(tmp_path)
-        self.set_up_test_tag_release_upgrade_path()
-
-    def set_up_tmp(self, tmp_path: Path) -> None:
-        """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
-
-    def set_up_test_tag_release_upgrade_path(self) -> None:
-        """Skip unless stele and jq is installed."""
         if not STELE:
             pytest.skip("stele derives the plan tag-release.sh reads")
         if not JQ:
             pytest.skip("jq drives the forge stub")
 
-    def _run(
+    def run(
         self, listing: str, sql_at: str, latest: str, subject: str, *extra: str
     ) -> tuple[subprocess.CompletedProcess[str], str]:
         """Mint over edtf's `sql/` at `sql_at`: a feature, then `subject`.
@@ -1957,7 +1965,12 @@ class TagReleaseUpgradePath:
 
 @fixture
 def tag_release_upgrade_path(tmp_path: Path, env: support.Env) -> TagReleaseUpgradePath:
-    """Give each row its own TagReleaseUpgradePath."""
+    """Give each row its own TagReleaseUpgradePath.
+
+    Returns:
+        The row's TagReleaseUpgradePath.
+
+    """
     return TagReleaseUpgradePath(tmp_path, env=env)
 
 
@@ -1965,7 +1978,7 @@ def test_an_imported_predecessor_without_a_path_refuses_the_mint(
     tag_release_upgrade_path: TagReleaseUpgradePath,
 ) -> None:
     """No 1.2.3--1.3.0 path: refused, naming `edtf-postgres-v1.2.3`."""
-    result, pushed = tag_release_upgrade_path._run(
+    result, pushed = tag_release_upgrade_path.run(
         "edtf-releases.json",
         "v1.2.3",
         "edtf-postgres-v1.2.3",
@@ -1979,14 +1992,14 @@ def test_an_imported_predecessor_without_a_path_refuses_the_mint(
         "  The Release PR derived its path before edtf-postgres-v1.2.3"
         " finished publishing\n"
     ) in result.stderr
-    assert pushed == ""
+    assert not pushed
 
 
 def test_the_path_from_the_newest_mints_past_an_older_latest(
     tag_release_upgrade_path: TagReleaseUpgradePath,
 ) -> None:
     """Latest is v1.3.4; the path from 1.3.5 is the one owed, and is there."""
-    result, pushed = tag_release_upgrade_path._run(
+    result, pushed = tag_release_upgrade_path.run(
         "edtf-releases-v1.3.5.json",
         "v1.3.5",
         "v1.3.4",
@@ -2001,7 +2014,7 @@ def test_an_unreadable_listing_refuses_the_mint(
     tag_release_upgrade_path: TagReleaseUpgradePath,
 ) -> None:
     """A failed listing read is a refusal by name, never a pass."""
-    result, pushed = tag_release_upgrade_path._run(
+    result, pushed = tag_release_upgrade_path.run(
         "", "v1.2.3", "", "chore: release v1.3.0"
     )
     assert result.returncode == 1, result.stdout
@@ -2011,7 +2024,7 @@ def test_an_unreadable_listing_refuses_the_mint(
         " read\n  to find edtf_postgres's predecessor; nothing was minted,"
         " re-run this job.\n"
     ) in result.stderr
-    assert pushed == ""
+    assert not pushed
 
 
 STEP = "Derive the per-artifact inventories and the release view"
@@ -2035,9 +2048,15 @@ class InventoryStepWiring:
         self.make_env = env
         self.tmp = tmp_path
 
-    def _run(
+    def run(
         self, *, binaries: bool, plans: int, variants: str, refuse: bool = False
     ) -> tuple[subprocess.CompletedProcess[str], list[str], Path]:
+        """Run the inventory step over planted binaries, plans and variants.
+
+        Returns:
+            The finished step, the stub stele's argv and the planted root.
+
+        """
         root = Path(tempfile.mkdtemp(dir=self.tmp))
         stubs = root / ".stubs"
         stubs.mkdir()
@@ -2098,7 +2117,12 @@ class InventoryStepWiring:
 
 @fixture
 def inventory_step_wiring(tmp_path: Path, env: support.Env) -> InventoryStepWiring:
-    """Give each row its own InventoryStepWiring."""
+    """Give each row its own InventoryStepWiring.
+
+    Returns:
+        The row's InventoryStepWiring.
+
+    """
     return InventoryStepWiring(tmp_path, env=env)
 
 
@@ -2127,7 +2151,7 @@ def test_a_binaries_release_hands_stele_the_binaries(
     inventory_step_wiring: InventoryStepWiring,
 ) -> None:
     """The binaries directory goes in; the list comes out unchanged."""
-    result, argv, root = inventory_step_wiring._run(binaries=True, plans=0, variants="")
+    result, argv, root = inventory_step_wiring.run(binaries=True, plans=0, variants="")
     assert result.returncode == 0, result.stdout + result.stderr
     want: list[str] = ["derive", "inventories"]
     assert want == argv[:2]
@@ -2142,7 +2166,7 @@ def test_a_binaries_release_hands_stele_the_binaries(
 
 def test_plans_follow_every_flag(inventory_step_wiring: InventoryStepWiring) -> None:
     """Go's flag parser stops at the first operand: plans go last."""
-    result, argv, _ = inventory_step_wiring._run(
+    result, argv, _ = inventory_step_wiring.run(
         binaries=False, plans=2, variants="16,17"
     )
     assert result.returncode == 0, result.stdout + result.stderr
@@ -2159,7 +2183,7 @@ def test_no_plans_hands_stele_no_operand(
     inventory_step_wiring: InventoryStepWiring,
 ) -> None:
     """An unmatched glob is no plan, never a literal path."""
-    result, argv, _ = inventory_step_wiring._run(binaries=False, plans=0, variants="")
+    result, argv, _ = inventory_step_wiring.run(binaries=False, plans=0, variants="")
     assert result.returncode == 0, result.stdout + result.stderr
     assert not any("sbom-plan-" in a for a in argv), argv
     assert argv[argv.index("--tree") + 1] == "."
@@ -2170,7 +2194,7 @@ def test_a_stele_refusal_fails_the_step(
     inventory_step_wiring: InventoryStepWiring,
 ) -> None:
     """Nothing is written for a refused derivation."""
-    result, _, root = inventory_step_wiring._run(
+    result, _, root = inventory_step_wiring.run(
         binaries=True, plans=0, variants="", refuse=True
     )
     assert result.returncode != 0

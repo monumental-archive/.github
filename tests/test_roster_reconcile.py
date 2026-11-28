@@ -17,6 +17,9 @@ from tempfile import TemporaryDirectory
 
 from tests import support
 
+# The helper's status when it has no roster to read.
+REFUSED = 2
+
 CANON = support.CANON
 SCRIPT = CANON / "mise" / "roster-reconcile.sh"
 BASH = support.tool("bash")
@@ -41,6 +44,7 @@ def run(roster: list[str] | None, listing: str, *, env: support.Env) -> tuple[in
         roster: repository names for the planted assert-policy.json, or
             None to plant no file at all.
         listing: the token's listing, newline-separated, on stdin.
+        env: the `env` fixture, which builds the run's environment.
 
     Returns:
         The helper's exit status and its stderr.
@@ -105,7 +109,7 @@ def test_empty_listing_names_every_member(env: support.Env) -> None:
 def test_no_roster_refuses(env: support.Env) -> None:
     """A tree with no roster refuses by name, never trusts the listing."""
     status, err = run(None, "alpha\n", env=env)
-    assert status == 2
+    assert status == REFUSED
     assert "probe: no roster at " in err
 
 

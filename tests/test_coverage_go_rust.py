@@ -14,6 +14,7 @@ import re
 import subprocess
 import tempfile
 from pathlib import Path
+from typing import TypedDict, Unpack
 
 from belt import gate_cache_key
 from belt.typed_pytest import fixture
@@ -26,6 +27,9 @@ from tests.test_coverage_tasks import (
     floor_of,
     init_tree,
 )
+
+# The counter files one go run writes: one per test binary.
+TEST_BINARIES = 2
 
 # The Rust leg's tools: rustup asserting llvm-tools, and cargo answering
 # the workspace read (no pgrx crate) and the measurement.
@@ -245,14 +249,20 @@ NO_RUN = (
 )
 
 
+class Leg(TypedDict, total=False):
+    """What a row plants for the rust selector, each with its default."""
+
+    marker: bool
+    profile: bool
+    metadata: dict[str, object] | None
+
+
 def leg(
     tmp: str,
     *,
-    marker: bool = True,
-    profile: bool = True,
-    metadata: dict[str, object] | None = None,
     env: support.Env,
     rustc: support.Rustc,
+    **options: Unpack[Leg],
 ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     """Run the `rust` selector over a planted run and stand-in cargo.
 
@@ -264,6 +274,9 @@ def leg(
         The finished process and the stand-in cargo's calls.
 
     """
+    marker = options.get("marker", True)
+    profile = options.get("profile", True)
+    metadata = options.get("metadata")
     base = Path(tmp)
     tree, stubs, run = base / "tree", base / "stubs", base / "run"
     tree.mkdir()
@@ -312,7 +325,7 @@ def test_an_earlier_runs_profiles_without_this_runs_marker_are_refused(
     with tempfile.TemporaryDirectory() as tmp:
         done, calls = leg(tmp, marker=False, env=env, rustc=rustc)
         assert done.returncode == 1, done.stderr
-        assert done.stdout == ""
+        assert not done.stdout
         assert NO_RUN in done.stderr
         reports = [c for c in calls if "report" in c]
         assert reports == NO_CALLS
@@ -325,7 +338,7 @@ def test_this_runs_marker_without_a_profile_is_refused(
     with tempfile.TemporaryDirectory() as tmp:
         done, calls = leg(tmp, profile=False, env=env, rustc=rustc)
         assert done.returncode == 1, done.stderr
-        assert done.stdout == ""
+        assert not done.stdout
         assert NO_RUN in done.stderr
         reports = [c for c in calls if "report" in c]
         assert reports == NO_CALLS
@@ -482,7 +495,12 @@ class GoOneRun:
 
 @fixture
 def go_one_run(env: support.Env) -> GoOneRun:
-    """Give each row its own GoOneRun."""
+    """Give each row its own GoOneRun.
+
+    Returns:
+        The row's GoOneRun.
+
+    """
     return GoOneRun(env=env)
 
 
@@ -514,7 +532,7 @@ def test_two_go_test_runs_in_one_command_both_land(go_one_run: GoOneRun) -> None
         out = done.stdout + done.stderr
         assert done.returncode == 0, out
         counters = list((Path(tmp) / "tmp").glob("org-coverage-*/go/covcounters.*"))
-        assert len(counters) == 2, out
+        assert len(counters) == TEST_BINARIES, out
 
 
 def test_a_failing_suite_holds_no_figure_though_counters_exist(
@@ -657,7 +675,12 @@ class RustOneRun:
 
 @fixture
 def rust_one_run(env: support.Env, rustc: support.Rustc) -> RustOneRun:
-    """Give each row its own RustOneRun."""
+    """Give each row its own RustOneRun.
+
+    Returns:
+        The row's RustOneRun.
+
+    """
     return RustOneRun(env=env, rustc=rustc)
 
 

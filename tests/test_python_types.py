@@ -18,7 +18,7 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict, Unpack
 
 import pytest
 
@@ -138,14 +138,20 @@ class Run:
     args: list[str]
 
 
+class Running(TypedDict, total=False):
+    """What a row plants around its files, each with its default."""
+
+    missing: tuple[str, ...]
+    stub: dict[str, str] | None
+    stale_venv: bool
+
+
 def run(
     files: dict[str, str],
     *,
-    missing: tuple[str, ...] = (),
-    stub: dict[str, str] | None = None,
-    stale_venv: bool = False,
     belt: support.Belt,
     env: support.Env,
+    **options: Unpack[Running],
 ) -> Run:
     """Run the task in a planted tree.
 
@@ -160,6 +166,9 @@ def run(
         The run's exit status, output and the stub's arguments.
 
     """
+    missing = options.get("missing", ())
+    stub = options.get("stub")
+    stale_venv = options.get("stale_venv", False)
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         tree = root / "repo"
@@ -506,7 +515,7 @@ def test_two_files_that_are_one_module_are_named(
 
 
 def test_too_few_arguments_is_a_usage_error(capfd: pytest.CaptureFixture[str]) -> None:
-    """No file: argparse's exit 2, its usage and its error."""
+    """No file: argparse's exit 2 and its error."""
     with pytest.raises(SystemExit) as ended:
         python_roots.main([str(BELT)])
     out, err = capfd.readouterr()

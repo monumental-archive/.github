@@ -260,7 +260,12 @@ class Stubbed:
 
 @fixture
 def stubbed(tmp_path: Path, env: support.Env) -> Stubbed:
-    """Give each row its own Stubbed."""
+    """Give each row its own Stubbed.
+
+    Returns:
+        The row's Stubbed.
+
+    """
     return Stubbed(tmp_path, env=env)
 
 
@@ -280,7 +285,12 @@ class Adapter(Stubbed):
 
 @fixture
 def adapter(tmp_path: Path, env: support.Env) -> Adapter:
-    """Give each row its own Adapter."""
+    """Give each row its own Adapter.
+
+    Returns:
+        The row's Adapter.
+
+    """
     return Adapter(tmp_path, env=env)
 
 
@@ -355,7 +365,7 @@ def test_output_that_is_not_json_is_refused_by_name(
     """A human report: refused with pinact's status, exit 1."""
     adapter.answer(monkeypatch, "ERROR failed to handle a line\n", 3)
     status = pinact_findings.main([WORKFLOW])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     same(status, 1, err)
     assert f"{TASK}: pinact exited 3: the output is not pinact's report" in err
     refused(adapter.file, err)
@@ -368,7 +378,7 @@ def test_a_malformed_result_records_none(
     bad = result("parse-error", MISMATCH, 6) | {"locations": []}
     adapter.answer(monkeypatch, sarif(result("parse-error", "x", 1), bad), 3)
     status = pinact_findings.main([WORKFLOW])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     same(status, 1, err)
     assert "runs[0].results[1]: locations is empty" in err
     refused(adapter.file, err)
@@ -381,7 +391,7 @@ def test_another_resolved_sha_leaves_the_message(
     later = UNPINNED.replace(FIXED, "f" * 40)
     adapter.answer(monkeypatch, sarif(result("unpinned-action", later, 7)), 3)
     status = pinact_findings.main([WORKFLOW])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     same(status, 3, err)
     got = [(r["message"], r["detail"]) for r in records(adapter.file)]
     want: list[tuple[object, object]] = [(UNPINNED_LINE, [later, "line 7"])]
@@ -395,7 +405,7 @@ def test_a_missing_file_is_refused_by_name(
     (adapter.dir / WORKFLOW).unlink()
     adapter.answer(monkeypatch, QUOTED, 3)
     status = pinact_findings.main([WORKFLOW])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     same(status, 1, err)
     assert (
         f"{TASK}: pinact exited 3: the output is not pinact's report:"
@@ -410,7 +420,7 @@ def test_a_line_past_the_end_is_refused_by_name(
     """A result past the file's last line: refused, 1, its one record."""
     adapter.answer(monkeypatch, sarif(result("parse-error", MISMATCH, 8)), 3)
     status = pinact_findings.main([WORKFLOW])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     same(status, 1, err)
     assert f"runs[0].results[0]: locations[0]: {WORKFLOW} has no line 8" in err
     refused(adapter.file, err)
@@ -422,7 +432,7 @@ def test_pinact_s_status_is_the_exit(
     """A 2 from pinact with a clean log exits 2."""
     adapter.answer(monkeypatch, sarif(), 2)
     status = pinact_findings.main([WORKFLOW])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     same(status, 2, err)
     same(records(adapter.file), [])
 
@@ -434,7 +444,7 @@ def test_arguments_pass_unchanged_after_the_format(
     args = ["--config", "a b.yaml", "--fix=false", WORKFLOW, "x/action.yml"]
     adapter.answer(monkeypatch, sarif(), 0)
     status = pinact_findings.main(["--", *args])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     same(status, 0, err)
     same(
         adapter.log.read_text(encoding="utf-8").splitlines(),
@@ -448,7 +458,7 @@ def test_no_pinact_is_refused_by_name(
     """No pinact on PATH: refused by name, exit 1, its one record."""
     adapter.answer(monkeypatch, sarif(), 0, path=str(adapter.dir / "empty"))
     status = pinact_findings.main([WORKFLOW])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     same(status, 1, err)
     assert f"{TASK}: pinact is not on PATH" in err
     refused(adapter.file, err)
@@ -477,7 +487,7 @@ def test_the_pinned_pinact_offline_gives_two_messages(
         env(ORG_FINDINGS=str(adapter.file), MISE_TASK_NAME=TASK, PYTHONUTF8="1"),
     )
     status = pinact_findings.main(["--", "--fix=false", "--no-api", WORKFLOW])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     assert status != 0, err
     cannot = "failed to handle a line: action can't be pinned"
     want: list[dict[str, object]] = [
@@ -534,7 +544,12 @@ class Task(Stubbed):
 
 @fixture
 def task(tmp_path: Path, env: support.Env) -> Task:
-    """Give each row its own Task."""
+    """Give each row its own Task.
+
+    Returns:
+        The row's Task.
+
+    """
     return Task(tmp_path, env=env)
 
 

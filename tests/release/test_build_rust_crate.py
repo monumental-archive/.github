@@ -58,7 +58,6 @@ import os
 import subprocess
 import sys
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -70,6 +69,7 @@ from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
 CANON = support.CANON
 WORKFLOW = CANON / ".github" / "workflows" / "build-rust-crate.yml"
@@ -428,7 +428,7 @@ def test_a_crate_rewritten_differently_fails_naming_both(
         f" without verifying: {digest('edtf-core')} verified,"
         f" {hashlib.sha256(planted).hexdigest()} now\n"
     ) == run.stderr
-    assert run.outputs == ""
+    assert not run.outputs
 
 
 def test_a_changed_excluded_crate_alone_is_not_a_mismatch(
@@ -457,7 +457,7 @@ def test_a_verified_run_that_wrote_nothing_is_refused(
     )
     cargo: list[str] = [f"package --workspace --locked{flags}"]
     assert cargo == run.cargo
-    assert run.outputs == ""
+    assert not run.outputs
 
 
 def test_a_failing_cargo_fails_the_step_with_its_status(
@@ -467,10 +467,10 @@ def test_a_failing_cargo_fails_the_step_with_its_status(
     packaging = package("")
     status = package_crates.main([])
     run = packaging.ran(status, capfd.readouterr())
-    assert run.returncode == 101
+    assert run.returncode == support.CARGO_FAILED
     assert "failed to compile pgrx-pg-sys" in run.stderr
     assert run.cargo == ONE_RUN
-    assert run.outputs == ""
+    assert not run.outputs
 
 
 # A workspace the job compiles entirely packages once.
@@ -586,4 +586,4 @@ def test_a_named_crate_cargo_did_not_write_fails_by_name(
         f"::error::package-crates: edtf-cli {VERSION} publishes to crates.io,"
         f" but cargo package wrote no edtf-cli-{VERSION}.crate\n"
     ) == run.stderr
-    assert run.outputs == ""
+    assert not run.outputs

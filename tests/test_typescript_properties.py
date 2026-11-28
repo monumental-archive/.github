@@ -36,6 +36,10 @@ from tests import support
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+# The restated settings the rows plant: every kind, then one file's.
+RESTATED_IN_ALL = 7
+RESTATED_IN_ONE = 3
+
 CANON = support.CANON
 BELT = CANON / "mise"
 BASH = support.tool("bash")
@@ -352,7 +356,7 @@ def test_a_bad_audit_seed_is_a_usage_error(env: support.Env) -> None:
         env={"ORG_PROPERTY_SEED": "seven"},
         make_env=env,
     )
-    assert done.returncode == 2
+    assert done.returncode == tp.EXIT_USAGE
     assert (
         "ORG_PROPERTY_SEED must be a non-negative integer, got 'seven'" in done.stderr
     )
@@ -746,7 +750,7 @@ def test_a_property_setting_its_own_time_is_red_by_name(env: support.Env) -> Non
         ("f.prop.test.ts:4", "skipAllAfterTimeLimit"),
     ):
         assert f"  {site}: restates {what}{tail}" in done.stderr
-    assert done.stderr.count(": restates ") == 7, done.stderr
+    assert done.stderr.count(": restates ") == RESTATED_IN_ALL, done.stderr
 
 
 def test_a_quote_in_a_regex_hides_no_bound(env: support.Env) -> None:
@@ -767,7 +771,7 @@ def test_a_quote_in_a_regex_hides_no_bound(env: support.Env) -> None:
         ("a.prop.test.ts:3", "numRuns"),
     ):
         assert f"  {site}: restates {what}{tail}" in done.stderr
-    assert done.stderr.count(": restates ") == 3, done.stderr
+    assert done.stderr.count(": restates ") == RESTATED_IN_ONE, done.stderr
 
 
 @pytest.mark.parametrize(

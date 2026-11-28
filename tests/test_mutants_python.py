@@ -10,7 +10,7 @@ form red.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict, Unpack
 
 import pytest
 
@@ -70,14 +70,20 @@ def test_spin() -> None:
 """
 
 
+class Planting(TypedDict, total=False):
+    """What a row plants beside its module, each with its default."""
+
+    setup: str
+
+
 def plant(
     root: Path,
     module: str,
     source: str,
     tests: str,
-    setup: str = SETUP,
     *,
     track: support.Track,
+    **options: Unpack[Planting],
 ) -> Path:
     """Plant a repository: a package, its tests and its mutmut section.
 
@@ -85,6 +91,7 @@ def plant(
         The repository's root.
 
     """
+    setup = options.get("setup", SETUP)
     (root / "pkg").mkdir(parents=True)
     (root / "tests").mkdir()
     (root / "pkg" / "__init__.py").write_text('"""A package."""\n', encoding="utf-8")
@@ -156,48 +163,66 @@ def test_a_timeout_is_red(
 
 
 @pytest.mark.parametrize(
-    ("comment", "message"),
+    "row",
     [
         pytest.param(
-            "# pragma: no mutate",
-            "# pragma: no mutate with no reason — write it after ' -- '",
+            (
+                "# pragma: no mutate",
+                "# pragma: no mutate with no reason — write it after ' -- '",
+            ),
             id="no reason",
         ),
         pytest.param(
-            "# pragma: no mutate block -- a reason",
-            "# pragma: no mutate block — only the line form exists;"
-            " mark each line, with its reason",
+            (
+                "# pragma: no mutate block -- a reason",
+                (
+                    "# pragma: no mutate block — only the line form exists;"
+                    " mark each line, with its reason"
+                ),
+            ),
             id="block",
         ),
         pytest.param(
-            "# pragma: no mutate start",
-            "# pragma: no mutate start — only the line form exists;"
-            " mark each line, with its reason",
+            (
+                "# pragma: no mutate start",
+                (
+                    "# pragma: no mutate start — only the line form exists;"
+                    " mark each line, with its reason"
+                ),
+            ),
             id="start",
         ),
         pytest.param(
-            "# pragma: no mutate end",
-            "# pragma: no mutate end — only the line form exists;"
-            " mark each line, with its reason",
+            (
+                "# pragma: no mutate end",
+                (
+                    "# pragma: no mutate end — only the line form exists;"
+                    " mark each line, with its reason"
+                ),
+            ),
             id="end",
         ),
         pytest.param(
-            "# pragma: no mutate: start, a context",
-            "# pragma: no mutate start — only the line form exists;"
-            " mark each line, with its reason",
+            (
+                "# pragma: no mutate: start, a context",
+                (
+                    "# pragma: no mutate start — only the line form exists;"
+                    " mark each line, with its reason"
+                ),
+            ),
             id="a context",
         ),
     ],
 )
 def test_a_pragma_that_is_not_the_reasoned_line_form_is_red(
+    row: tuple[str, str],
     tmp_path: Path,
     leg: Callable[[Path], None],
-    comment: str,
-    message: str,
     track: support.Track,
     capfd: pytest.CaptureFixture[str],
 ) -> None:
     """Before anything runs: the site, and why."""
+    comment, message = row
     source = CALC.replace("    return a + b\n", f"    return a + b  {comment}\n")
     leg(plant(tmp_path, "calc", source, CALC_TESTS, track=track))
     status = mutants_python.main([])
@@ -231,22 +256,22 @@ def test_no_configuration_skips_clean_by_name(
 
 
 @pytest.mark.parametrize(
-    ("setup", "said"),
+    "row",
     [
-        pytest.param(SETUP, "adopted=true\n", id="a mutmut section"),
-        pytest.param("[metadata]\nname = x\n", "adopted=false\n", id="none"),
+        pytest.param((SETUP, "adopted=true\n"), id="a mutmut section"),
+        pytest.param(("[metadata]\nname = x\n", "adopted=false\n"), id="none"),
     ],
 )
 def test_adopted_says_whether_the_section_is_tracked(
+    row: tuple[str, str],
     tmp_path: Path,
     leg: Callable[[Path], None],
-    setup: str,
-    said: str,
     track: support.Track,
     capfd: pytest.CaptureFixture[str],
 ) -> None:
     """The adoption job's output: true only for a tracked [mutmut]."""
-    leg(plant(tmp_path, "calc", CALC, CALC_TESTS, setup, track=track))
+    setup, said = row
+    leg(plant(tmp_path, "calc", CALC, CALC_TESTS, setup=setup, track=track))
     status = mutants_python.main(["adopted"])
     out = capfd.readouterr().out
     assert status == 0
@@ -258,7 +283,10 @@ def test_adopted_says_whether_the_section_is_tracked(
     [
         pytest.param(
             ["plan"],
-            "belt mutants-python: error: argument mode: invalid choice: 'plan' (choose from 'adopted')",
+            (
+                "belt mutants-python: error: argument mode: invalid choice: 'plan' "
+                "(choose from 'adopted')"
+            ),
             id='["plan"]',
         ),
     ],
@@ -266,7 +294,7 @@ def test_adopted_says_whether_the_section_is_tracked(
 def test_an_unknown_argument_is_a_usage_error(
     argv: list[str], error: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    """Only `adopted` is a verb: argparse's exit 2, its usage and its error."""
+    """Only `adopted` is a verb: argparse's exit 2 and its error."""
     with pytest.raises(SystemExit) as ended:
         mutants_python.main(argv)
     out, err = capfd.readouterr()

@@ -177,7 +177,12 @@ class LockedFromTheLinkedLock:
 def locked_from_the_linked_lock(
     tmp_path: Path, belt: support.Belt, env: support.Env
 ) -> LockedFromTheLinkedLock:
-    """Give each row its own LockedFromTheLinkedLock."""
+    """Give each row its own LockedFromTheLinkedLock.
+
+    Returns:
+        The row's LockedFromTheLinkedLock.
+
+    """
     return LockedFromTheLinkedLock(tmp_path, belt=belt, env=env)
 
 

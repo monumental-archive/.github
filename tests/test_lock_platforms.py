@@ -33,6 +33,9 @@ from tests import support
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+# The helper's status for a lockfile it refuses.
+REFUSED = 2
+
 CANON = support.CANON
 BELT = CANON / "mise"
 BASH = support.tool("bash")
@@ -251,7 +254,7 @@ def assert_red(
     out, err = capfd.readouterr()
     assert status == 1, out + err
     assert err == message
-    assert out == ""
+    assert not out
 
 
 def assert_out(
@@ -268,7 +271,7 @@ def assert_out(
     out, err = capfd.readouterr()
     assert status == 0, err
     assert out == f"{NAME}: {line}\n"
-    assert err == ""
+    assert not err
 
 
 def assert_body_out(files: dict[str, str], line: str, *, env: support.Env) -> None:
@@ -276,7 +279,7 @@ def assert_body_out(files: dict[str, str], line: str, *, env: support.Env) -> No
     done = lint(files, env=env)
     assert done.returncode == 0, done.stderr
     assert done.stdout == f"{NAME}: {line}\n"
-    assert done.stderr == ""
+    assert not done.stderr
 
 
 def assert_ok(
@@ -502,8 +505,8 @@ def assert_refused(
     checked(files)
     status = lock_platforms.main(CHECK)
     out, err = capfd.readouterr()
-    assert status == 2, out
-    assert out == ""
+    assert status == REFUSED, out
+    assert not out
     first = err.splitlines()[0]
     assert first.startswith(f"{NAME}: cannot read the declared release targets"), first
     assert detail in first
@@ -616,7 +619,7 @@ def test_both_files_read(tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> N
     """The baseline tree: node and cargo-fuzz configured, node locked."""
     got = lock_platforms.read_documents(*documents(tmp_path, CONFIG, LOCK))
     err = capfd.readouterr().err
-    assert err == ""
+    assert not err
     assert (
         {
             "node": [("26.5.1", None)],
@@ -627,21 +630,21 @@ def test_both_files_read(tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> N
 
 
 @pytest.mark.parametrize(
-    ("config", "lock", "which", "said"),
+    "row",
     [
-        ("tools = 1\n", LOCK, "config", "tools is not an object"),
-        (CONFIG, "tools = 1\n", "lock", "tools is not an object"),
+        pytest.param(
+            ("tools = 1\n", LOCK, "config", "tools is not an object"), id="tools = 1\n"
+        ),
+        pytest.param((CONFIG, "tools = 1\n", "lock", "tools is not an object"), id="1"),
     ],
 )
 def test_each_unreadable_file_is_named_and_none_returned(
-    config: str,
-    lock: str,
-    which: object,
-    said: object,
+    row: tuple[str, str, object, object],
     tmp_path: Path,
     capfd: pytest.CaptureFixture[str],
 ) -> None:
     """The refused file, and only that one, is named."""
+    config, lock, which, said = row
     config_path, lock_path = documents(tmp_path, config, lock)
     got = lock_platforms.read_documents(config_path, lock_path)
     err = capfd.readouterr().err
@@ -663,7 +666,6 @@ def located(
         A function that plants `files` and steps in, no --config given.
 
     """
-
     made = itertools.count()
 
     def lay_out(files: dict[str, str]) -> None:
@@ -693,7 +695,7 @@ def assert_skip(
     out, err = capfd.readouterr()
     assert status == 0, err
     assert out == f"{NAME}: {line}\n"
-    assert err == ""
+    assert not err
 
 
 def test_no_config_skips(
@@ -764,4 +766,4 @@ def test_a_found_lock_is_named_in_the_red(
     out, err = capfd.readouterr()
     assert status == 1, out + err
     assert err == RED.replace("mise.lock", "mise/mise.lock", 1)
-    assert out == ""
+    assert not out

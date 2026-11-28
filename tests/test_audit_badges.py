@@ -43,6 +43,9 @@ import pytest
 from belt import belt_shell as bs
 from tests import support
 
+# The two legs that ask: the project's JSON, then its shield.
+ASKS = 2
+
 BELT = support.MISE
 SCRIPT = BELT / "audit-badges.sh"
 BASH = support.tool("bash")
@@ -233,7 +236,12 @@ class Planted:
 
 @fixture
 def planted_state(tmp_path: Path, canon: support.Canon, env: support.Env) -> Planted:
-    """Give each row its own Planted."""
+    """Give each row its own Planted.
+
+    Returns:
+        The row's Planted.
+
+    """
     return Planted(tmp_path, canon=canon, env=env)
 
 
@@ -254,7 +262,12 @@ class ScorecardRead(Planted):
 def scorecard_read(
     tmp_path: Path, canon: support.Canon, env: support.Env
 ) -> ScorecardRead:
-    """Give each row its own ScorecardRead."""
+    """Give each row its own ScorecardRead.
+
+    Returns:
+        The row's ScorecardRead.
+
+    """
     return ScorecardRead(tmp_path, canon=canon, env=env)
 
 
@@ -343,7 +356,12 @@ class BestPracticesRead(Planted):
 def best_practices_read(
     tmp_path: Path, canon: support.Canon, env: support.Env
 ) -> BestPracticesRead:
-    """Give each row its own BestPracticesRead."""
+    """Give each row its own BestPracticesRead.
+
+    Returns:
+        The row's BestPracticesRead.
+
+    """
     return BestPracticesRead(tmp_path, canon=canon, env=env)
 
 
@@ -401,7 +419,7 @@ def test_the_entry_is_asked_past_the_shared_cache(
     best_practices_read.run_audit()
     log = (best_practices_read.stubs / "curl.log").read_text(encoding="utf-8")
     asked = [line.split(" ", 1)[0] for line in log.splitlines()]
-    assert len(asked) == 2
+    assert len(asked) == ASKS
     for url in asked:
         assert re.search(
             r"^https://www\.bestpractices\.dev/projects/(alpha|beta)"
@@ -426,7 +444,12 @@ class BaselineRead(Planted):
 def baseline_read(
     tmp_path: Path, canon: support.Canon, env: support.Env
 ) -> BaselineRead:
-    """Give each row its own BaselineRead."""
+    """Give each row its own BaselineRead.
+
+    Returns:
+        The row's BaselineRead.
+
+    """
     return BaselineRead(tmp_path, canon=canon, env=env)
 
 
@@ -488,7 +511,12 @@ class LevelShieldRead(Planted):
 def level_shield_read(
     tmp_path: Path, canon: support.Canon, env: support.Env
 ) -> LevelShieldRead:
-    """Give each row its own LevelShieldRead."""
+    """Give each row its own LevelShieldRead.
+
+    Returns:
+        The row's LevelShieldRead.
+
+    """
     return LevelShieldRead(tmp_path, canon=canon, env=env)
 
 
@@ -645,7 +673,12 @@ class StaleAnswer(Planted):
 
 @fixture
 def stale_answer(tmp_path: Path, canon: support.Canon, env: support.Env) -> StaleAnswer:
-    """Give each row its own StaleAnswer."""
+    """Give each row its own StaleAnswer.
+
+    Returns:
+        The row's StaleAnswer.
+
+    """
     return StaleAnswer(tmp_path, canon=canon, env=env)
 
 
@@ -737,13 +770,17 @@ def test_fresh_or_headerless_answers_read_as_today(
     stale_answer.verdict(1, [beta], absent)
 
 
-@pytest.mark.parametrize(("leg", "shield", "suffix", "_who", "body", "note"), LEGS)
+@pytest.mark.parametrize(
+    ("shield", "suffix", "body", "note"),
+    [
+        pytest.param(shield, suffix, body, note, id=leg)
+        for leg, shield, suffix, _who, body, note in LEGS
+    ],
+)
 def test_every_leg_judges_a_stale_presence(
     stale_answer: StaleAnswer,
-    leg: object,
     shield: object,
     suffix: object,
-    _who: object,
     body: object,
     note: object,
 ) -> None:
@@ -755,17 +792,13 @@ def test_every_leg_judges_a_stale_presence(
     stale_answer.verdict(0, [note("alpha"), note("beta")], asks=asks)
 
 
-@pytest.mark.parametrize(("leg", "shield", "suffix", "who", "body", "_note"), LEGS)
+@pytest.mark.parametrize("row", [pytest.param(row, id=str(row[0])) for row in LEGS])
 def test_every_leg_reads_the_week_bound(
+    row: tuple[object, object, object, object, object, object],
     stale_answer: StaleAnswer,
-    leg: object,
-    shield: object,
-    suffix: object,
-    who: object,
-    body: object,
-    _note: object,
 ) -> None:
     """Each leg sends an answer older than the week to `unanswered`."""
+    leg, shield, suffix, who, body, _note = row
     (stale_answer.stubs / "curl.log").unlink(missing_ok=True)
     stale_answer.env["SHIELD"] = shield
     stale_answer.plant(suffix, body, OLD)
@@ -830,7 +863,12 @@ class CodecovRead(Planted):
 
 @fixture
 def codecov_read(tmp_path: Path, canon: support.Canon, env: support.Env) -> CodecovRead:
-    """Give each row its own CodecovRead."""
+    """Give each row its own CodecovRead.
+
+    Returns:
+        The row's CodecovRead.
+
+    """
     return CodecovRead(tmp_path, canon=canon, env=env)
 
 

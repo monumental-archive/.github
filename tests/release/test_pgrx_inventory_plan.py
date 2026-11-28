@@ -292,7 +292,7 @@ def test_a_package_that_is_not_a_table_is_refused(
 def test_a_wrong_argument_count_is_usage(
     argv: list[str], error: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    """Two positional arguments, never fewer: argparse's exit 2, its usage and its error."""
+    """Two positional arguments, never fewer: argparse's exit 2 and its error."""
     with pytest.raises(SystemExit) as ended:
         inventory_plan.main(argv)
     out, err = capfd.readouterr()

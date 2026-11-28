@@ -17,6 +17,7 @@ exactly like a check that works.
 import io
 import itertools
 import json
+import re
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -466,7 +467,7 @@ def test_a_promise_no_pin_covers_is_red(
     )
     out, err = capfd.readouterr()
     assert status == 1
-    assert out == ""
+    assert not out
     assert "Cargo.toml" in err
     assert "mise.toml" in err
     assert "1.82.0" in err
@@ -481,7 +482,7 @@ def test_a_pin_moved_off_the_promise_is_red(
     )
     out, err = capfd.readouterr()
     assert status == 1
-    assert out == ""
+    assert not out
     assert "1.85.0" in err
     assert "the same toolchain" in err
 
@@ -559,7 +560,7 @@ def test_one_uncovered_minimum_reds_the_whole_plan(
     status = msrv_plan.main(plan(two_minimums(), [pin("1.82.0")]))
     out = capfd.readouterr().out
     assert status == 1
-    assert out == ""
+    assert not out
 
 
 def test_a_pgrx_member_is_checked_with_its_own_features(
@@ -890,7 +891,7 @@ def test_a_reached_declaration_that_is_not_a_version_is_refused() -> None:
     """Cargo would not have accepted it; guessing would move the number."""
     odd = dependency("odd", "1.x")
     doc = metadata(APP, foreign=odd, nodes=[node(APP, edge(odd)), node(odd)])
-    with pytest.raises(decoded.UndecodableError, match="odd 1.0.0 declares"):
+    with pytest.raises(decoded.UndecodableError, match=re.escape("odd 1.0.0 declares")):
         derived(doc, "app")
 
 

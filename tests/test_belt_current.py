@@ -115,7 +115,12 @@ class TheMiseIsCurrent:
 
 @fixture
 def the_mise_is_current(tmp_path: Path, env: support.Env) -> TheMiseIsCurrent:
-    """Give each row its own TheMiseIsCurrent."""
+    """Give each row its own TheMiseIsCurrent.
+
+    Returns:
+        The row's TheMiseIsCurrent.
+
+    """
     return TheMiseIsCurrent(tmp_path, env=env)
 
 

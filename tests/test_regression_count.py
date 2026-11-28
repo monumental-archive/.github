@@ -22,6 +22,9 @@ from tests import support
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+# The helper's status when it cannot count.
+REFUSED = 2
+
 # A git with no user or system config: no signing hook, no template,
 # no default branch preference leaks in from the machine running this.
 # Every inherited GIT_* goes too (#857): under the pre-push hook git
@@ -148,7 +151,12 @@ class RepoCase:
 def repo_case(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, env: support.Env
 ) -> RepoCase:
-    """Give each row its own RepoCase."""
+    """Give each row its own RepoCase.
+
+    Returns:
+        The row's RepoCase.
+
+    """
     return RepoCase(tmp_path, monkeypatch, env=env)
 
 
@@ -397,7 +405,12 @@ class Report(RepoCase):
 
 @fixture
 def report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, env: support.Env) -> Report:
-    """Give each row its own Report."""
+    """Give each row its own Report.
+
+    Returns:
+        The row's Report.
+
+    """
     return Report(tmp_path, monkeypatch, env=env)
 
 
@@ -478,7 +491,7 @@ def test_shallow_clone_is_refused(
         run_git(tmp, "clone", "--quiet", "--depth=1", f"file://{report.repo.root}", ".")
         status = rc.main(["--repo", tmp])
         err = capfd.readouterr().err
-    assert status == 2
+    assert status == REFUSED
     assert "the clone is shallow" in err
 
 
@@ -488,5 +501,5 @@ def test_not_a_repository(capfd: pytest.CaptureFixture[str]) -> None:
     with tempfile.TemporaryDirectory() as tmp:
         status = rc.main(["--repo", tmp])
         err = capfd.readouterr().err
-    assert status == 2
+    assert status == REFUSED
     assert f"{TASK}: git" in err

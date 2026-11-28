@@ -278,7 +278,12 @@ class ColdAttested:
 def cold_attested_state(
     tmp_path: Path, env: support.Env, track: support.Track
 ) -> ColdAttested:
-    """Give each row its own ColdAttested."""
+    """Give each row its own ColdAttested.
+
+    Returns:
+        The row's ColdAttested.
+
+    """
     return ColdAttested(tmp_path, env=env, track=track)
 
 

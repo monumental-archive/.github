@@ -20,7 +20,7 @@ import re
 import sys
 import threading
 from pathlib import Path
-from typing import override
+from typing import TYPE_CHECKING, override
 
 import pytest
 
@@ -28,7 +28,9 @@ from belt import decoded, typed_std
 from belt import findings as writer
 from belt import standing_issue as standing
 from belt.typed_pytest import fixture
-from tests import support
+
+if TYPE_CHECKING:
+    from tests import support
 
 REPO = "example-owner/example-repo"
 WORKFLOW = "slsa"
@@ -58,9 +60,17 @@ elif args[:2] == ["api", "--paginate"]:
 BEARER = "stub-bearer"
 
 LIST: list[str] = [
-    "issue", "list", "--repo", REPO, "--state", "open",
-    "--limit", "1000", "--json", "number,title,body,labels",
-]  # fmt: skip
+    "issue",
+    "list",
+    "--repo",
+    REPO,
+    "--state",
+    "open",
+    "--limit",
+    "1000",
+    "--json",
+    "number,title,body,labels",
+]
 JOBS: list[str] = ["api", "--paginate", "--jq", ".jobs[]", JOBS_API]
 LABELS: list[str] = [
     "label",
@@ -297,7 +307,12 @@ class Stubbed:
 def stubbed(
     tmp_path: Path, request: pytest.FixtureRequest, env: support.Env
 ) -> Stubbed:
-    """Give each row its own Stubbed."""
+    """Give each row its own Stubbed.
+
+    Returns:
+        The row's Stubbed.
+
+    """
     return Stubbed(tmp_path, request, env=env)
 
 
@@ -466,9 +481,16 @@ def test_missing_label_is_created_from_the_baseline(
     same(status, 0, err)
     label = standing.label_definition()
     made = [
-        "label", "create", "red-check", "--repo", REPO,
-        "--color", str(label["color"]), "--description", str(label["description"]),
-    ]  # fmt: skip
+        "label",
+        "create",
+        "red-check",
+        "--repo",
+        REPO,
+        "--color",
+        str(label["color"]),
+        "--description",
+        str(label["description"]),
+    ]
     calls = stubbed.gh_calls()
     same(calls[3], made)
     same(calls[4][:2], ["issue", "create"])
@@ -558,7 +580,12 @@ class PerJob(Stubbed):
 
 @fixture
 def per_job(tmp_path: Path, request: pytest.FixtureRequest, env: support.Env) -> PerJob:
-    """Give each row its own PerJob."""
+    """Give each row its own PerJob.
+
+    Returns:
+        The row's PerJob.
+
+    """
     return PerJob(tmp_path, request, env=env)
 
 
@@ -943,9 +970,13 @@ def test_recorded_log_shows_the_failing_step() -> None:
 def test_error_line_is_kept_unmarked() -> None:
     """A step's own error line and the two after it are all shown."""
     log = logged(
-        "##[group]Run check", "check", "##[endgroup]",
-        "##[error]x", "y", "z",
-    )  # fmt: skip
+        "##[group]Run check",
+        "check",
+        "##[endgroup]",
+        "##[error]x",
+        "y",
+        "z",
+    )
     cut = standing.tail(log)
     same(cut.text.splitlines(), ["x", "y", "z"])
     same(cut.step, "check")
@@ -954,11 +985,21 @@ def test_error_line_is_kept_unmarked() -> None:
 def test_step_own_group_keeps_what_follows() -> None:
     """A failing step's own group does not end its output."""
     log = logged(
-        "##[group]Run build", "build", "  CI: true", "##[endgroup]",
-        "before", "##[group]Inner", "inside", "##[endgroup]", "after",
+        "##[group]Run build",
+        "build",
+        "  CI: true",
+        "##[endgroup]",
+        "before",
+        "##[group]Inner",
+        "inside",
+        "##[endgroup]",
+        "after",
         "##[error]Process completed with exit code 2.",
-        "##[group]Run next", "next", "##[endgroup]", "Post job cleanup.",
-    )  # fmt: skip
+        "##[group]Run next",
+        "next",
+        "##[endgroup]",
+        "Post job cleanup.",
+    )
     same(
         standing.tail(log).text.splitlines(),
         ["before", "##[group]Inner", "inside", "##[endgroup]", "after"],
@@ -969,9 +1010,12 @@ def test_long_step_shows_its_last_two_hundred() -> None:
     """A 300-line step shows its last 200 under the count of the rest."""
     out = [f"out {n}" for n in range(300)]
     log = logged(
-        "##[group]Run long", "long", "##[endgroup]", *out,
+        "##[group]Run long",
+        "long",
+        "##[endgroup]",
+        *out,
         "##[error]Process completed with exit code 1.",
-    )  # fmt: skip
+    )
     cut = standing.tail(log).text.splitlines()
     same(cut[0], "(100 earlier lines not shown)")
     same(cut[1:], out[100:])
@@ -981,9 +1025,12 @@ def test_long_lines_keep_twelve_thousand() -> None:
     """Output past 12,000 characters keeps its last whole lines."""
     out = ["w" * 199 for _ in range(100)]
     log = logged(
-        "##[group]Run wide", "wide", "##[endgroup]", *out,
+        "##[group]Run wide",
+        "wide",
+        "##[endgroup]",
+        *out,
         "##[error]Process completed with exit code 1.",
-    )  # fmt: skip
+    )
     cut = standing.tail(log).text.splitlines()
     same(cut[0], "(40 earlier lines not shown)")
     same(cut[1:], out[40:])
@@ -1086,7 +1133,12 @@ class FindingsBody:
 
 @fixture
 def findings_body(tmp_path: Path) -> FindingsBody:
-    """Give each row its own FindingsBody."""
+    """Give each row its own FindingsBody.
+
+    Returns:
+        The row's FindingsBody.
+
+    """
     return FindingsBody(tmp_path)
 
 

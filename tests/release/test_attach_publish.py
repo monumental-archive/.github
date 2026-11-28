@@ -30,6 +30,9 @@ from tests import support
 if TYPE_CHECKING:
     from pathlib import Path
 
+# The status the failing gh stub exits with.
+GH_FAILED = 4
+
 HERE = support.RELEASE
 COMMAND = "attach-publish"
 TAG = "v1.2.3"
@@ -160,7 +163,12 @@ class AttachAndPublish:
 
 @fixture
 def attach_and_publish(tmp_path: Path, env: support.Env) -> AttachAndPublish:
-    """Give each row its own AttachAndPublish."""
+    """Give each row its own AttachAndPublish.
+
+    Returns:
+        The row's AttachAndPublish.
+
+    """
     return AttachAndPublish(tmp_path, env=env)
 
 
@@ -313,11 +321,17 @@ def test_draft_uploads_and_publishes(
     want: list[str] = ["release view", "release upload", "release edit"]
     assert subcommands(calls) == want
     upload: list[str] = [
-        "release", "upload", TAG,
-        "dist/attestations.intoto.jsonl", "dist/checksums.txt",
-        "dist/sbom.spdx.json", "dist/tool-1.2.3-linux.tar.gz",
-        "--clobber", "--repo", REPO,
-    ]  # fmt: skip
+        "release",
+        "upload",
+        TAG,
+        "dist/attestations.intoto.jsonl",
+        "dist/checksums.txt",
+        "dist/sbom.spdx.json",
+        "dist/tool-1.2.3-linux.tar.gz",
+        "--clobber",
+        "--repo",
+        REPO,
+    ]
     assert calls[1] == upload
     edit: list[str] = ["release", "edit", TAG, "--draft=false", "--repo", REPO]
     assert calls[2] == edit
@@ -353,10 +367,10 @@ def test_a_failing_gh_fails_the_step(
 ) -> None:
     """A release that cannot be read stops the step with gh's status."""
     (attach_and_publish.bindir / "gh").write_text(
-        "#!/usr/bin/env bash\nexit 4\n", "utf-8"
+        f"#!/usr/bin/env bash\nexit {GH_FAILED}\n", "utf-8"
     )
     attach_and_publish.enter(monkeypatch, "true")
     with pytest.raises(SystemExit) as stopped:
         attach_publish.main([])
-    assert stopped.value.code == 4
-    assert capfd.readouterr().out == ""
+    assert stopped.value.code == GH_FAILED
+    assert not capfd.readouterr().out

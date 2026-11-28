@@ -30,6 +30,9 @@ from tests import support
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+# A non-zero status a body exits with on purpose.
+EXPLICIT = 3
+
 # The task that runs the helper, whose name its findings carry (#1934).
 TASK = "lint:bash-portability"
 
@@ -404,7 +407,7 @@ def test_guard_passes_the_finished_run(guard: object) -> None:
 @pytest.mark.parametrize("guard", [GUARDED, BASH_GUARDED])
 def test_guard_keeps_an_explicit_code(guard: object) -> None:
     """A non-zero exit, explicit or from errexit, keeps its code."""
-    assert run_bash(guard, "exit 3", "org_done=1") == 3
+    assert run_bash(guard, f"exit {EXPLICIT}", "org_done=1") == EXPLICIT
     assert run_bash(guard, "false", "org_done=1") == 1
 
 

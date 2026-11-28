@@ -197,7 +197,12 @@ class Forge:
 
 @fixture
 def forge(tmp_path: Path, env: support.Env) -> Forge:
-    """Give each row its own Forge."""
+    """Give each row its own Forge.
+
+    Returns:
+        The row's Forge.
+
+    """
     return Forge(tmp_path, env=env)
 
 
@@ -381,7 +386,12 @@ class Runners(Forge):
 
 @fixture
 def runners(tmp_path: Path, env: support.Env) -> Runners:
-    """Give each row its own Runners."""
+    """Give each row its own Runners.
+
+    Returns:
+        The row's Runners.
+
+    """
     return Runners(tmp_path, env=env)
 
 
@@ -434,7 +444,7 @@ def test_a_downloaded_candidate_lets_the_proposal_run(runners: Runners) -> None:
     result = runners.run_script("staged")
     assert result.returncode == 0, result.stderr
     assert output.read_text(encoding="utf-8") == "staged=true\n"
-    assert result.stdout == ""
+    assert not result.stdout
 
 
 def test_a_pr_call_without_the_repository_is_refused_by_the_stub(forge: Forge) -> None:
@@ -496,7 +506,12 @@ class SignedCommit(Forge):
 
 @fixture
 def signed_commit(tmp_path: Path, env: support.Env) -> SignedCommit:
-    """Give each row its own SignedCommit."""
+    """Give each row its own SignedCommit.
+
+    Returns:
+        The row's SignedCommit.
+
+    """
     return SignedCommit(tmp_path, env=env)
 
 
@@ -513,7 +528,7 @@ def test_an_unsigned_answer_is_refused_by_name(signed_commit: SignedCommit) -> N
     (signed_commit.state / "verified").write_text("false\n", encoding="utf-8")
     result = signed_commit.helper()
     assert result.returncode == 1, result.stdout
-    assert result.stdout == ""
+    assert not result.stdout
     assert (
         f"propose-fuzz-corpus.sh: fuzz corpus commit {OID} is unsigned;"
         " the PR would be unmergeable\n"

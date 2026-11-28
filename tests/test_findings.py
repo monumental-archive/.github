@@ -159,8 +159,8 @@ def records(file: Path) -> list[dict[str, object]]:
 
 
 @fixture
-def recording(writer: Writer, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Name the task `lint:demo` and the records file, for `writer`.
+def recording(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Name the task `lint:demo` and the records file a writer writes.
 
     Returns:
         The records file, not yet written.
@@ -541,12 +541,19 @@ class LinesRows:
 
 @fixture
 def lines_rows(tmp_path: Path, env: support.Env) -> LinesRows:
-    """Give each row its own LinesRows."""
+    """Give each row its own LinesRows.
+
+    Returns:
+        The row's LinesRows.
+
+    """
     return LinesRows(tmp_path, env=env)
 
 
-@pytest.mark.parametrize(("label", "bash"), bashes())
-def test_each_line_is_one_finding(lines_rows: LinesRows, label: str, bash: str) -> None:
+@pytest.mark.parametrize(
+    "bash", [pytest.param(bash, id=label) for label, bash in bashes()]
+)
+def test_each_line_is_one_finding(lines_rows: LinesRows, bash: str) -> None:
     """Empty subject, detail, a tab in the message: printed and recorded."""
     text = f"{US}no subject\nf.yml{US}is wrong{US}first{US}second\ns{US}a\tb\n"
     printed = (
@@ -584,9 +591,11 @@ def test_each_line_is_one_finding(lines_rows: LinesRows, label: str, bash: str) 
     assert lines_rows.records() == expected
 
 
-@pytest.mark.parametrize(("label", "bash"), bashes())
+@pytest.mark.parametrize(
+    "bash", [pytest.param(bash, id=label) for label, bash in bashes()]
+)
 def test_a_line_with_no_separator_is_passed_through(
-    lines_rows: LinesRows, label: str, bash: str
+    lines_rows: LinesRows, bash: str
 ) -> None:
     """A program's own summary goes to stdout and records nothing."""
     done = lines_rows.feed(bash, "all clean\n")
@@ -594,9 +603,11 @@ def test_a_line_with_no_separator_is_passed_through(
     assert lines_rows.records() == NO_RECORDS
 
 
-@pytest.mark.parametrize(("label", "bash"), bashes())
+@pytest.mark.parametrize(
+    "bash", [pytest.param(bash, id=label) for label, bash in bashes()]
+)
 def test_a_last_line_without_a_newline_is_read(
-    lines_rows: LinesRows, label: str, bash: str
+    lines_rows: LinesRows, bash: str
 ) -> None:
     """The final finding is not lost for want of a newline."""
     done = lines_rows.feed(bash, f"{US}last")

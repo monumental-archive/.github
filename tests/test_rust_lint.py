@@ -138,7 +138,7 @@ class Lint(Protocol):
 
 def assert_every_member_linted(done: Linted, asked: list[str]) -> None:
     """Assert clippy reached every member and named the red one."""
-    assert done.returncode == 101, done.stdout + done.stderr
+    assert done.returncode == support.CARGO_FAILED, done.stdout + done.stderr
     want = [f"{m}@1.3.3" for m in MEMBERS]
     assert want == asked
     linted = f"lint:rust: Cargo.toml: 6 crate(s) linted: {' '.join(MEMBERS)}\n"
@@ -483,18 +483,33 @@ echo '[]'
 # of one flag and no contradiction, a prepare that exports a mark the
 # stub cargo logs (or fails), a major's headers as a second mark, and a
 # pin check that reads its input and exits as the row says.
-STUB_LADDER = """
-org_clippy_ladder() { [[ -z ${STUB_LADDER_FAILS:-} ]] || return 3; echo "-D warnings"; }
-org_clippy_contradiction_count() { echo 0; }
+#
+# Each stub that fails fails with a status of its own, so a row reads
+# whose status the run kept.
+LADDER_FAILED = 3
+PREPARE_FAILED = 5
+FETCH_FAILED = 7
+FORMAT_FAILED = 4
+FIX_PASS_FAILED = 6
+PIN_MISSING = 8
+EXTENSION_FAILED = 9
+UNION_FAILED = 4
+HIGHEST_FAILED = 2
+STUB_LADDER = f"""
+org_clippy_ladder() {{
+  [[ -z ${{STUB_LADDER_FAILS:-}} ]] || return {LADDER_FAILED}
+  echo "-D warnings"
+}}
+org_clippy_contradiction_count() {{ echo 0; }}
 """
-STUB_PGRX_ENV = """
-. "${STUB_REAL_BELT}/pgrx-env.sh"
-org_pgrx_darwin_prepare() {
-  printf 'prepare %s\\n' "$*" >> "${STUB_LOG}"
-  [[ -z ${STUB_PREPARE_FAILS:-} ]] || return 5
+STUB_PGRX_ENV = f"""
+. "${{STUB_REAL_BELT}}/pgrx-env.sh"
+org_pgrx_darwin_prepare() {{
+  printf 'prepare %s\\n' "$*" >> "${{STUB_LOG}}"
+  [[ -z ${{STUB_PREPARE_FAILS:-}} ]] || return {PREPARE_FAILED}
   export STUB_PREPARED=yes
-}
-org_pgrx_major_env() { export STUB_MAJOR="pg$1"; }
+}}
+org_pgrx_major_env() {{ export STUB_MAJOR="pg$1"; }}
 """
 
 
@@ -565,11 +580,15 @@ def workspace(*packages: dict[str, object]) -> str:
 
 FOUR = workspace(member("a"), member("b"), member("ext", pgrx=True), member("held"))
 PLAIN = workspace(member("a"), member("b"), member("held"))
+# The members of PLAIN clippy is asked to lint, one call each.
+LINTED = ("a", "b")
 # The second root of a two-root tree: a cargo-fuzz crate, its own
 # workspace (#2004).
 FUZZ = workspace(member("parse"))
 EVERY_CRATE: list[str] = ["a@0.1.0", "b@0.1.0", "parse@0.1.0"]
 TWO_ROOTS = {"fuzz/Cargo.toml": "[workspace]\n", "fuzz/fuzz_targets/parse.rs": "\n"}
+# The tree's roots with TWO_ROOTS planted: each formatted and linted.
+ROOTS = ("Cargo.toml", "fuzz/Cargo.toml")
 # The same root carrying the marker `cargo fuzz init` writes, which
 # cargo-fuzz requires: built with `--cfg fuzzing`, as cargo-fuzz builds
 # it (#2093).
@@ -706,7 +725,12 @@ def planted_state(
     belt: support.Belt,
     env: support.Env,
 ) -> Planted:
-    """Give each row its own Planted."""
+    """Give each row its own Planted.
+
+    Returns:
+        The row's Planted.
+
+    """
     return Planted(tmp_path, monkeypatch, belt=belt, env=env)
 
 
@@ -990,7 +1014,7 @@ def test_a_failing_ladder_keeps_its_status(
     """The ladder cannot be read: nothing is linted."""
     planted_state.enter(monkeypatch, STUB_LADDER_FAILS="1")
     status = rust_lint.main(["lint"])
-    assert status == 3
+    assert status == LADDER_FAILED
     assert "cargo fetch" not in "\n".join(planted_state.logged())
 
 
@@ -998,9 +1022,9 @@ def test_a_failing_fetch_keeps_its_status(
     planted_state: Planted, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A failing `cargo fetch`: its status, and no metadata read."""
-    planted_state.enter(monkeypatch, STUB_FETCH_STATUS="7")
+    planted_state.enter(monkeypatch, STUB_FETCH_STATUS=str(FETCH_FAILED))
     status = rust_lint.main(["lint"])
-    assert status == 7
+    assert status == FETCH_FAILED
     assert (
         planted_state.logged()[-1] == "cargo fetch --locked --manifest-path Cargo.toml"
     )
@@ -1105,10 +1129,10 @@ def test_a_red_member_is_named_with_clippys_status(
     planted_state.enter(monkeypatch, STUB_RED="a")
     status = rust_lint.main(["lint"])
     out, err = capfd.readouterr()
-    assert status == 101, out + err
+    assert status == support.CARGO_FAILED, out + err
     assert planted_state.finding("red: a (Cargo.toml)") in err
     assert "lint:rust: Cargo.toml: 2 crate(s) linted: a b\n" in out
-    assert sum("cargo clippy" in line for line in planted_state.logged()) == 2
+    assert sum("cargo clippy" in line for line in planted_state.logged()) == len(LINTED)
 
 
 def test_clippy_output_is_shown(
@@ -1121,7 +1145,7 @@ def test_clippy_output_is_shown(
     status = rust_lint.main(["lint"])
     out, err = capfd.readouterr()
     assert status == 0, err
-    assert out.count("warning: a note\n") == 2
+    assert out.count("warning: a note\n") == len(LINTED)
 
 
 def test_a_feature_some_crate_lacks_is_red(
@@ -1142,7 +1166,8 @@ def test_a_feature_some_crate_lacks_is_red(
                 " workspace lacks"
             ),
             (
-                "every crate is linted as its own package (#726), so the value has to be one"
+                "every crate is linted as its own package (#726), so the value "
+                "has to be one"
             ),
             (
                 "each member accepts — --all-features, or --no-default-features"
@@ -1221,7 +1246,7 @@ def test_no_extension_and_no_exclusion_print_neither_line(
 def test_no_subcommand_is_a_usage_error(
     argv: list[str], error: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    """No task named: status 2, the usage: argparse's exit 2, its usage and its error."""
+    """No task named: argparse's exit 2 and its error."""
     with pytest.raises(SystemExit) as ended:
         rust_lint.main(argv)
     out, err = capfd.readouterr()
@@ -1244,7 +1269,12 @@ def fix_branches(
     belt: support.Belt,
     env: support.Env,
 ) -> FixBranches:
-    """Give each row its own FixBranches."""
+    """Give each row its own FixBranches.
+
+    Returns:
+        The row's FixBranches.
+
+    """
     return FixBranches(tmp_path, monkeypatch, belt=belt, env=env)
 
 
@@ -1300,11 +1330,13 @@ def test_a_failing_format_keeps_its_status(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A failing `cargo fmt`: its status, and nothing fixed."""
-    (fix_branches.bins / "cargo").write_text(LOCATE + "exit 4\n", encoding="utf-8")
+    (fix_branches.bins / "cargo").write_text(
+        LOCATE + f"exit {FORMAT_FAILED}\n", encoding="utf-8"
+    )
     fix_branches.enter(monkeypatch)
     status = rust_lint.main(["fix"])
     out = capfd.readouterr().out
-    assert status == 4
+    assert status == FORMAT_FAILED
     assert "formatted" not in out
 
 
@@ -1317,8 +1349,8 @@ def test_fix_branches_a_failing_ladder_keeps_its_status(
     fix_branches.enter(monkeypatch, STUB_LADDER_FAILS="1")
     status = rust_lint.main(["fix"])
     out = capfd.readouterr().out
-    assert status == 3
-    assert out == ""
+    assert status == LADDER_FAILED
+    assert not out
     assert fix_branches.logged() == NOT_ASKED
 
 
@@ -1373,13 +1405,13 @@ def test_a_failing_fix_pass_keeps_its_status(
     """The workspace pass fails: its status, no extension pass."""
     fix_branches.plant({})
     (fix_branches.bins / "cargo").write_text(
-        LOCATE + "[[ $1 != clippy ]] || exit 6\n"
+        LOCATE + f"[[ $1 != clippy ]] || exit {FIX_PASS_FAILED}\n"
         '[[ $1 != metadata ]] || cat "${STUB_METADATA}"\n',
         encoding="utf-8",
     )
     fix_branches.enter(monkeypatch)
     status = rust_lint.main(["fix"])
-    assert status == 6
+    assert status == FIX_PASS_FAILED
     assert "prepare 16,17" not in fix_branches.logged()
 
 
@@ -1429,7 +1461,7 @@ def test_a_failing_prepare_keeps_its_status(
     """The prepare fails: its status, and the extension never compiled."""
     fix_branches.enter(monkeypatch, STUB_PREPARE_FAILS="1")
     status = rust_lint.main(["fix"])
-    assert status == 5
+    assert status == PREPARE_FAILED
     assert fix_branches.logged()[-1] == "prepare 17"
 
 
@@ -1439,10 +1471,10 @@ def test_a_failing_pin_check_keeps_its_status(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A major with no Postgres pinned: the check's status."""
-    fix_branches.enter(monkeypatch, STUB_PIN_STATUS="8")
+    fix_branches.enter(monkeypatch, STUB_PIN_STATUS=str(PIN_MISSING))
     status = rust_lint.main(["fix"])
     out = capfd.readouterr().out
-    assert status == 8
+    assert status == PIN_MISSING
     assert "ext(pg17)" not in out
 
 
@@ -1452,10 +1484,10 @@ def test_a_failing_extension_fix_keeps_its_status(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The extension's own pass fails: its status."""
-    fix_branches.enter(monkeypatch, STUB_EXT_STATUS="9")
+    fix_branches.enter(monkeypatch, STUB_EXT_STATUS=str(EXTENSION_FAILED))
     status = rust_lint.main(["fix"])
     out = capfd.readouterr().out
-    assert status == 9
+    assert status == EXTENSION_FAILED
     assert "ext(pg17)" not in out
 
 
@@ -1464,11 +1496,12 @@ def test_a_failing_union_keeps_its_status(
 ) -> None:
     """The majors cannot be derived: no pass runs."""
     fix_branches.belt.joinpath("pgrx-env.sh").write_text(
-        STUB_PGRX_ENV + "org_pgrx_union() { return 4; }\n", encoding="utf-8"
+        STUB_PGRX_ENV + f"org_pgrx_union() {{ return {UNION_FAILED}; }}\n",
+        encoding="utf-8",
     )
     fix_branches.enter(monkeypatch)
     status = rust_lint.main(["fix"])
-    assert status == 4
+    assert status == UNION_FAILED
     assert "--fix" not in "\n".join(fix_branches.logged())
 
 
@@ -1477,11 +1510,12 @@ def test_a_failing_highest_keeps_its_status(
 ) -> None:
     """Each extension's major cannot be derived: no pass runs."""
     fix_branches.belt.joinpath("pgrx-env.sh").write_text(
-        STUB_PGRX_ENV + "org_pgrx_highest() { return 2; }\n", encoding="utf-8"
+        STUB_PGRX_ENV + f"org_pgrx_highest() {{ return {HIGHEST_FAILED}; }}\n",
+        encoding="utf-8",
     )
     fix_branches.enter(monkeypatch)
     status = rust_lint.main(["fix"])
-    assert status == 2
+    assert status == HIGHEST_FAILED
     assert "--fix" not in "\n".join(fix_branches.logged())
 
 
@@ -1533,7 +1567,12 @@ def every_workspace(
     belt: support.Belt,
     env: support.Env,
 ) -> EveryWorkspace:
-    """Give each row its own EveryWorkspace."""
+    """Give each row its own EveryWorkspace.
+
+    Returns:
+        The row's EveryWorkspace.
+
+    """
     return EveryWorkspace(tmp_path, monkeypatch, belt=belt, env=env)
 
 
@@ -1548,7 +1587,7 @@ def test_each_root_is_formatted_and_linted(
     out, err = capfd.readouterr()
     assert status == 0, err
     fmt = every_workspace.asked("fmt")
-    assert len(fmt) == 2
+    assert len(fmt) == len(ROOTS)
     assert "--manifest-path Cargo.toml --" in fmt[0]
     assert "--manifest-path fuzz/Cargo.toml --" in fmt[1]
     clippy = [line.split()[3] for line in every_workspace.asked("clippy")]
@@ -1570,7 +1609,8 @@ def test_an_unformatted_fuzz_root_is_red(
     assert status == 1, out + err
     assert (
         every_workspace.finding(
-            "fuzz/Cargo.toml: formatting differs from the org's — run 'mise run fix:rust'"
+            "fuzz/Cargo.toml: formatting differs from the org's — run 'mise run "
+            "fix:rust'"
         )
         in err
     )
@@ -1586,7 +1626,7 @@ def test_a_red_fuzz_crate_leaves_the_root_linted(
     every_workspace.enter(monkeypatch, STUB_RED="parse")
     status = rust_lint.main(["lint"])
     out, err = capfd.readouterr()
-    assert status == 101, out + err
+    assert status == support.CARGO_FAILED, out + err
     assert every_workspace.finding("red: parse (fuzz/Cargo.toml)") in err
     clippy = [line.split()[3] for line in every_workspace.asked("clippy")]
     assert clippy == EVERY_CRATE
@@ -1721,14 +1761,14 @@ def test_fix_rust_formats_and_fixes_each_root(
     out, err = capfd.readouterr()
     assert status == 0, err
     fmt = every_workspace.asked("fmt")
-    assert len(fmt) == 2
+    assert len(fmt) == len(ROOTS)
     assert "--manifest-path fuzz/Cargo.toml --" in fmt[1]
     fixed = [
         line
         for line in every_workspace.asked("clippy")
         if "--workspace" in line.split()
     ]
-    assert len(fixed) == 2
+    assert len(fixed) == len(ROOTS)
     assert "--manifest-path Cargo.toml --" in fixed[0]
     assert "--manifest-path fuzz/Cargo.toml --" in fixed[1]
     assert "fix:rust: fuzz/Cargo.toml: parse rewritten where clippy could\n" in out

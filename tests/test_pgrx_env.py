@@ -204,7 +204,12 @@ class PostgresCase:
 
 @fixture
 def postgres_case(tmp_path: Path, env: support.Env) -> PostgresCase:
-    """Give each row its own PostgresCase."""
+    """Give each row its own PostgresCase.
+
+    Returns:
+        The row's PostgresCase.
+
+    """
     return PostgresCase(tmp_path, env=env)
 
 
@@ -451,7 +456,12 @@ class Provision(PostgresCase):
 
 @fixture
 def provision_state(tmp_path: Path, env: support.Env) -> Provision:
-    """Give each row its own Provision."""
+    """Give each row its own Provision.
+
+    Returns:
+        The row's Provision.
+
+    """
     return Provision(tmp_path, env=env)
 
 
@@ -521,7 +531,7 @@ def test_two_extensions_each_at_its_own_highest(env: support.Env) -> None:
     assert done.returncode == 0, done.stderr
     want = ["first@0.1.0\t17", "second@0.1.0\t16", "union=16,17"]
     assert want == done.stdout.splitlines()
-    assert done.stderr == ""
+    assert not done.stderr
 
 
 def test_a_shared_highest_is_registered_once(env: support.Env) -> None:
@@ -542,7 +552,7 @@ def test_no_extension_yields_nothing(env: support.Env) -> None:
     assert done.returncode == 0, done.stderr
     want = ["", "union="]
     assert want == done.stdout.splitlines()
-    assert done.stderr == ""
+    assert not done.stderr
 
 
 def test_a_major_that_is_no_number_is_red_by_name(env: support.Env) -> None:
@@ -557,7 +567,7 @@ def test_a_major_that_is_no_number_is_red_by_name(env: support.Env) -> None:
         check=False,
     )
     assert done.returncode == 1
-    assert done.stdout == ""
+    assert not done.stdout
     want = [f"{TASK}: second@0.1.0 names no Postgres major: 'pg16'"]
     assert want == done.stderr.splitlines()
 
@@ -783,7 +793,12 @@ class IcuCase:
 
 @fixture
 def icu_case(tmp_path: Path, env: support.Env) -> IcuCase:
-    """Give each row its own IcuCase."""
+    """Give each row its own IcuCase.
+
+    Returns:
+        The row's IcuCase.
+
+    """
     return IcuCase(tmp_path, env=env)
 
 
@@ -798,7 +813,12 @@ class MixedIcuSet(IcuCase):
 
 @fixture
 def mixed_icu_set(tmp_path: Path, env: support.Env) -> MixedIcuSet:
-    """Give each row its own MixedIcuSet."""
+    """Give each row its own MixedIcuSet.
+
+    Returns:
+        The row's MixedIcuSet.
+
+    """
     return MixedIcuSet(tmp_path, env=env)
 
 
@@ -819,7 +839,7 @@ def test_both_pinned_each_major_exports_its_own_include_path(
         "parent|parent-b|parent-c",
     ]
     assert want == done.stdout.splitlines()
-    assert done.stderr == ""
+    assert not done.stderr
     checked = mixed_icu_set.check("17,18")
     assert (checked.returncode, checked.stderr) == (0, "")
 
@@ -880,7 +900,12 @@ class OneIcuMajor(IcuCase):
 
 @fixture
 def one_icu_major(tmp_path: Path, env: support.Env) -> OneIcuMajor:
-    """Give each row its own OneIcuMajor."""
+    """Give each row its own OneIcuMajor.
+
+    Returns:
+        The row's OneIcuMajor.
+
+    """
     return OneIcuMajor(tmp_path, env=env)
 
 
@@ -958,7 +983,7 @@ def test_not_macos_adds_nothing_and_reads_nothing(one_icu_major: OneIcuMajor) ->
     assert done.returncode == 0, done.stderr
     want = ["pg18|parent-b|parent-c", "check 0"]
     assert want == done.stdout.splitlines()
-    assert done.stderr == ""
+    assert not done.stderr
     assert not (one_icu_major.root / "mise.log").exists()
 
 
@@ -1006,7 +1031,12 @@ class WithIcu(IcuCase):
 
 @fixture
 def with_icu(tmp_path: Path, env: support.Env) -> WithIcu:
-    """Give each row its own WithIcu."""
+    """Give each row its own WithIcu.
+
+    Returns:
+        The row's WithIcu.
+
+    """
     return WithIcu(tmp_path, env=env)
 
 
@@ -1036,7 +1066,7 @@ def test_missing_headers_run_nothing(with_icu: WithIcu) -> None:
     with_icu.icu({"78.3": True})
     done = with_icu.bash("org_pgrx_major 18 echo ran")
     assert done.returncode == 1
-    assert done.stdout == ""
+    assert not done.stdout
     assert other_pinned(18, 79, "78.3") == done.stderr.splitlines()[0]
 
 

@@ -140,20 +140,26 @@ def measuring_step(task: str) -> str:
     return decoded.as_str(steps[-1], f"{task}'s last step")
 
 
-def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fact
+# What a row that names none of them plants.
+PLANT_DEFAULTS: Plant = {
+    "floor": MAIN + BRANCH,
+    "cargo_toml": True,
+    "branches": "75.5",
+    "count": "40",
+    "lines": "90.0",
+    "toolchain": NIGHTLY,
+    "installed": NIGHTLY,
+    "exclude": "",
+    "plant_old": "",
+}
+
+
+def run_task(
     task: str,
     *,
-    floor: str | None = MAIN + BRANCH,
-    cargo_toml: bool = True,
-    branches: str = "75.5",
-    count: str = "40",
-    lines: str = "90.0",
-    toolchain: str | None = NIGHTLY,
-    installed: str | None = NIGHTLY,
-    exclude: str = "",
-    plant_old: str = "",
     env: support.Env,
     rustc: support.Rustc,
+    **options: Unpack[Plant],
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
     """Run one task's body in a planted Rust tree with stub tools.
 
@@ -162,6 +168,7 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
         tree (`tree/`) and the cargo log (`llvm-cov.log`).
 
     """
+    facts: Plant = {**PLANT_DEFAULTS, **options}
     tmp = Path(tempfile.mkdtemp())
     tree = tmp / "tree"
     stubs = tmp / "stubs"
@@ -176,7 +183,7 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
     (tmp / "llvm-cov.log.target").touch()
 
     tracked = []
-    if cargo_toml:
+    if facts["cargo_toml"]:
         (tree / "Cargo.toml").write_text("[workspace]\n", encoding="utf-8")
         tracked.append("Cargo.toml")
         # What the test task's measured `cargo test` left (#1653): this
@@ -185,14 +192,14 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
         profiles = tree / "target" / f"llvm-cov-target-{STABLE}"
         profiles.mkdir(parents=True)
         (profiles / "tree-1-1.profraw").write_text("", encoding="utf-8")
-    if plant_old:
+    if facts["plant_old"]:
         # Another compiler's directories, full (#1877): cargo-llvm-cov's
         # own default and one named for the digest `plant_old`.
-        for name in ("llvm-cov-target", f"llvm-cov-target-{plant_old}"):
+        for name in ("llvm-cov-target", f"llvm-cov-target-{facts['plant_old']}"):
             (tree / "target" / name).mkdir(parents=True)
             (tree / "target" / name / "old-compiler-test").write_text("", "utf-8")
-    if floor is not None:
-        (tree / ".coverage-floor").write_text(floor, encoding="utf-8")
+    if facts["floor"] is not None:
+        (tree / ".coverage-floor").write_text(facts["floor"], encoding="utf-8")
         tracked.append(".coverage-floor")
 
     # The stubs stand in for the Rust toolchain, so rustup's own selection
@@ -202,17 +209,17 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
         "ORG_BELT_DIR": str(BELT),
         "PATH": f"{stubs}{os.pathsep}{environ.get('PATH', '')}",
         "STUB_LOG": str(log),
-        "STUB_BR": branches,
-        "STUB_BR_COUNT": count,
-        "STUB_LINES": lines,
-        "STUB_INSTALLED": installed or "",
-        "COVERAGE_EXCLUDE": exclude,
+        "STUB_BR": facts["branches"],
+        "STUB_BR_COUNT": facts["count"],
+        "STUB_LINES": facts["lines"],
+        "STUB_INSTALLED": facts["installed"] or "",
+        "COVERAGE_EXCLUDE": facts["exclude"],
         "ORG_COVERAGE_RUN": str(tmp / "run"),
         # Outside the tree, as the gate job names it (#1628).
         "ORG_COVERAGE_REPORTS": str(tmp / "reports"),
     }
-    if toolchain is not None:
-        environ["FUZZ_TOOLCHAIN"] = toolchain
+    if facts["toolchain"] is not None:
+        environ["FUZZ_TOOLCHAIN"] = facts["toolchain"]
     subprocess.run([GIT, "init", "-q"], cwd=tree, env=environ, check=True)
     if tracked:
         subprocess.run([GIT, "add", *tracked], cwd=tree, env=environ, check=True)
@@ -264,7 +271,12 @@ class BranchCase:
 
 @fixture
 def branch_case(tmp_path: Path) -> BranchCase:
-    """Give each row its own BranchCase."""
+    """Give each row its own BranchCase.
+
+    Returns:
+        The row's BranchCase.
+
+    """
     return BranchCase(tmp_path)
 
 
@@ -305,7 +317,7 @@ def test_below_the_floor_reds_by_name(env: support.Env, rustc: support.Rustc) ->
     """One tenth below the line is red, naming the leg and both numbers."""
     done, _, _ = branch_case_run_task(TASK, branches="69.9", env=env, rustc=rustc)
     assert done.returncode == 1
-    assert done.stdout == ""
+    assert not done.stdout
     assert (
         "audit:coverage-branches: rust-branches: 69.9% is below"
         " its derived floor 70.0%\n"

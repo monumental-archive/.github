@@ -31,6 +31,11 @@ from tests import support
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+# The counts the delivered tables silence, as measured: for a repo
+# claiming no domain, and for one claiming react.
+SILENCED_FOR_NONE = 34
+SILENCED_FOR_REACT = 28
+
 # The task that runs the helper, whose name its findings carry (#1934).
 TASK = "lint:biome"
 
@@ -120,10 +125,14 @@ def test_org_domains_are_the_three_with_no_dependency_trigger() -> None:
     assert delivered == org
 
 
-@pytest.mark.parametrize(("domain", "triggers"), DELIVERED.identity.items())
-def test_every_identity_domain_names_at_least_one_trigger(
-    domain: object, triggers: object
-) -> None:
+@pytest.mark.parametrize(
+    "triggers",
+    [
+        pytest.param(triggers, id=domain)
+        for domain, triggers in DELIVERED.identity.items()
+    ],
+)
+def test_every_identity_domain_names_at_least_one_trigger(triggers: object) -> None:
     """An identity domain with no trigger could never be checked for."""
     assert triggers
 
@@ -293,7 +302,12 @@ class DeclaredPackagesTest:
 
 @fixture
 def declared_packages_test(tmp_path: Path) -> DeclaredPackagesTest:
-    """Give each row its own DeclaredPackagesTest."""
+    """Give each row its own DeclaredPackagesTest.
+
+    Returns:
+        The row's DeclaredPackagesTest.
+
+    """
     return DeclaredPackagesTest(tmp_path)
 
 
@@ -342,7 +356,12 @@ class GenerateTest:
 
 @fixture
 def generate_test() -> GenerateTest:
-    """Give each row its own GenerateTest."""
+    """Give each row its own GenerateTest.
+
+    Returns:
+        The row's GenerateTest.
+
+    """
     return GenerateTest()
 
 
@@ -506,7 +525,12 @@ class FileOverrideTest:
 
 @fixture
 def file_override_test() -> FileOverrideTest:
-    """Give each row its own FileOverrideTest."""
+    """Give each row its own FileOverrideTest.
+
+    Returns:
+        The row's FileOverrideTest.
+
+    """
     return FileOverrideTest()
 
 
@@ -724,7 +748,12 @@ class ConditionalExpectTest:
 
 @fixture
 def conditional_expect_test() -> ConditionalExpectTest:
-    """Give each row its own ConditionalExpectTest."""
+    """Give each row its own ConditionalExpectTest.
+
+    Returns:
+        The row's ConditionalExpectTest.
+
+    """
     return ConditionalExpectTest()
 
 
@@ -804,10 +833,10 @@ def test_no_domain_is_stated_rather_than_left_blank() -> None:
     assert "-" in NURSERY.values()
 
 
-@pytest.mark.parametrize(("rule", "domain"), NURSERY.items())
-def test_every_stated_domain_is_a_domain_the_org_knows(
-    rule: object, domain: object
-) -> None:
+@pytest.mark.parametrize(
+    "domain", [pytest.param(domain, id=rule) for rule, domain in NURSERY.items()]
+)
+def test_every_stated_domain_is_a_domain_the_org_knows(domain: object) -> None:
     """A row naming a domain outside the table could never be claimed."""
     known = {*DELIVERED.identity, *DELIVERED.org, biome_config.NO_DOMAIN}
     assert domain in known
@@ -889,8 +918,8 @@ def test_the_delivered_tables_silence_the_measured_counts() -> None:
     org = org_config()
     _config, none = biome_config.generate(org, set(), DELIVERED, NURSERY)
     _config, react = biome_config.generate(org, {"react"}, DELIVERED, NURSERY)
-    assert none == 34
-    assert react == 28
+    assert none == SILENCED_FOR_NONE
+    assert react == SILENCED_FOR_REACT
     # The difference is exactly react's own nursery rules, which is
     # what claiming a domain buys back.
     react_rules = sum(1 for d in NURSERY.values() if d == "react")
@@ -1228,7 +1257,7 @@ def test_a_repository_stating_the_rule_is_still_refused(
                 tree, generated, "--tsconfig", "apps/a/tsconfig.json", str(shown)
             )
         )
-        out, err = capfd.readouterr()
+        _out, err = capfd.readouterr()
         assert status == 1
         assert "says more than a repository may say" in err
         assert not generated.exists()
@@ -1246,7 +1275,7 @@ def test_a_resolved_file_that_is_not_json_is_refused_by_its_tsconfig(
     status = biome_config.main(
         generating(tree, generated, "--tsconfig", "apps/a/tsconfig.json", str(resolved))
     )
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     assert status == 1
     lines = err.splitlines()
     assert (

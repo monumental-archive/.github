@@ -223,7 +223,7 @@ def assert_ok(workflow: str, *, env: support.Env, track: support.Track) -> None:
     done = lint(workflow, env=env, track=track)
     assert done.returncode == 0, done.stderr
     assert done.stdout == "lint:gate-stub: ok\n"
-    assert done.stderr == ""
+    assert not done.stderr
 
 
 def test_the_canons_stub_passes(env: support.Env, track: support.Track) -> None:
@@ -276,7 +276,7 @@ def assert_red(workflow: str, *, env: support.Env, track: support.Track) -> None
     done = lint(workflow, env=env, track=track)
     assert done.returncode == 1, done.stdout
     assert done.stderr == MESSAGE
-    assert done.stdout == ""
+    assert not done.stdout
 
 
 def test_the_pre_1195_stub_is_red(env: support.Env, track: support.Track) -> None:
@@ -421,7 +421,7 @@ def test_a_trailing_comment_is_kept(
     """The rewrite keeps a comment on the line it rewrites."""
     gate = caller(planted(GROUP, PRE_1617_GROUP.rstrip("\n") + " # x\n"))
     status = gate_stub_fix.main([CANON_NAME, ".github/workflows/gate.yml"])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     after = gate.read_text(encoding="utf-8")
     assert status == 0, err
     assert after == STUB.replace(GROUP, GROUP.rstrip("\n") + " # x\n")
@@ -452,7 +452,7 @@ def test_a_stub_with_no_concurrency_block_is_refused_by_name(
     after = gate.read_text(encoding="utf-8")
     assert status == 1, out
     assert after == workflow
-    assert out == ""
+    assert not out
     assert err.startswith(
         "fix:gate-stub: no top-level concurrency block to rewrite",
     ), err
@@ -469,7 +469,7 @@ def test_a_workflow_that_is_not_a_gate_caller_is_not_touched(
     ).replace(GROUP, OLD_GROUP)
     gate = caller(other)
     status = gate_stub_fix.main([CANON_NAME, ".github/workflows/gate.yml"])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     after = gate.read_text(encoding="utf-8")
     assert status == 0, err
     assert after == other

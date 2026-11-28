@@ -138,7 +138,12 @@ class Boundary:
 
 @fixture
 def boundary(tmp_path: Path, env: support.Env, track: support.Track) -> Boundary:
-    """Give each row its own Boundary."""
+    """Give each row its own Boundary.
+
+    Returns:
+        The row's Boundary.
+
+    """
     return Boundary(tmp_path, env=env, track=track)
 
 
@@ -255,7 +260,10 @@ def test_missing_file_is_an_error(
     [
         pytest.param(
             [],
-            "belt capability-boundary: error: the following arguments are required: WORKFLOW",
+            (
+                "belt capability-boundary: error: the following arguments are "
+                "required: WORKFLOW"
+            ),
             id="nothing",
         ),
     ],
@@ -263,7 +271,7 @@ def test_missing_file_is_an_error(
 def test_no_workflows_is_a_usage_error(
     argv: list[str], error: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    """No workflow named: exit 2 with the usage line: argparse's exit 2, its usage and its error."""
+    """No workflow named: argparse's exit 2 and its error."""
     with pytest.raises(SystemExit) as ended:
         capability_boundary.main(argv)
     out, err = capfd.readouterr()

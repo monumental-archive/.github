@@ -1,4 +1,4 @@
-"""python_properties.py and its plugin, called in the process that runs them (#1696, #2177).
+"""belt.python_properties and its plugin, called in this process (#1696, #2177).
 
 The plugin imports Hypothesis, which the ordinary suite's interpreter
 does not carry, so these rows live here and run under
@@ -44,22 +44,22 @@ GATE = "test:python-properties"
 AUDIT = "audit:python-properties"
 
 
-class Shapes:
-    """The three tests a property file can hold, as the plugin is handed them."""
+# The three tests a property file can hold, as the plugin is handed them.
+@given(st.integers())
+def holds(n: int) -> None:
+    """Hold for any integer, as a property file's Hypothesis test does."""
+    assert 2 * n % 2 == 0
 
-    @given(st.integers())
-    def holds(self, n: int) -> None:
-        """A Hypothesis test, as a property file holds one."""
-        assert 2 * n % 2 == 0
 
-    def plain(self) -> None:
-        """A test that is no Hypothesis test."""
+def plain() -> None:
+    """Draw nothing: the test that is no Hypothesis test."""
 
-    @settings(max_examples=3)
-    @given(st.integers())
-    def bounded(self, n: int) -> None:
-        """A Hypothesis test restating one of the profile's bounds."""
-        assert isinstance(n, int)
+
+@settings(max_examples=3)
+@given(st.integers())
+def bounded(n: int) -> None:
+    """Restate one of the profile's bounds, as a file may not."""
+    assert isinstance(n, int)
 
 
 def said(monkeypatch: pytest.MonkeyPatch) -> list[str]:
@@ -77,6 +77,24 @@ def said(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
     monkeypatch.setattr(findings, "finding", record)
     return lines
+
+
+def recorder(
+    seen: list[tuple[list[Path], dict[str, str]]],
+) -> Callable[[str, list[Path], dict[str, str]], int]:
+    """Stand in for the run itself, recording what each call was handed.
+
+    Returns:
+        The stand-in: it appends its files and environment to `seen`.
+
+    """
+
+    def record(profile: str, files: list[Path], environ: dict[str, str]) -> int:
+        del profile
+        seen.append((files, environ))
+        return 0
+
+    return record
 
 
 def nothing_run(profile: str, files: list[Path], environ: dict[str, str]) -> int:
@@ -181,7 +199,7 @@ def test_each_refusal_is_named_and_nothing_runs(
 def test_a_collection_that_failed_is_red_by_its_status(
     labelled: Callable[[str], None], capfd: pytest.CaptureFixture[str]
 ) -> None:
-    """pytest could not collect (an import error): exit 1, its status named."""
+    """Pytest could not collect (an import error): exit 1, its status named."""
     stub = Pytest((2, []))
     labelled("gate")
     status = python_properties.run("gate", [Path("prop_x.py")], {}, pytest_main=stub)
@@ -223,9 +241,9 @@ def test_the_audit_prints_its_seed_and_honours_a_given_one(
         " @example row with its fix\n"
     )
     assert "--hypothesis-seed=7" not in stub.calls[0]
-    assert ["--hypothesis-seed=7", "--durations=10"] == [
+    assert [
         word for word in stub.calls[1] if word.startswith("--d") or "seed" in word
-    ]
+    ] == ["--hypothesis-seed=7", "--durations=10"]
 
 
 # The command line every run takes.
@@ -287,7 +305,7 @@ def test_a_usage_error_is_two(argv: list[str]) -> None:
         patched.setattr(python_properties, "run", nothing_run)
         with pytest.raises(SystemExit) as ended:
             python_properties.main(argv)
-    assert ended.value.code == 2
+    assert ended.value.code == support.USAGE
     assert err.getvalue().startswith("usage: belt python-properties ")
 
 
@@ -305,14 +323,8 @@ def test_the_shards_partition_the_files(files: list[str], n: int) -> None:
     chosen: list[str] = []
     for k in range(1, n + 1):
         seen: list[tuple[list[Path], dict[str, str]]] = []
-
-        def record(profile: str, files: list[Path], environ: dict[str, str]) -> int:
-            del profile
-            seen.append((files, environ))
-            return 0
-
         with pytest.MonkeyPatch.context() as patched:
-            patched.setattr(python_properties, "run", record)
+            patched.setattr(python_properties, "run", recorder(seen))
             patched.setenv("ORG_SHARD", f"{k}/{n}")
             patched.setenv("ORG_SHARD_REPORTS", "")
             patched.setenv("ORG_FINDINGS", "")
@@ -341,13 +353,13 @@ def test_a_malformed_shard_is_refused_by_name(spec: str) -> None:
         patched.setenv("ORG_FINDINGS", "")
         lines = said(patched)
         status = python_properties.main(["gate", "prop_x.py"])
-    if status == 2:
+    if status == python_properties.EXIT_USAGE:
         assert lines == [f"ORG_SHARD={spec!r} is not a shard (k/n, 1 <= k <= n)"]
     else:
         assert (status, lines) == (0, [])
 
 
-SHAPES = {"holds": Shapes.holds, "plain": Shapes.plain, "bounded": Shapes.bounded}
+SHAPES = {"holds": holds, "plain": plain, "bounded": bounded}
 
 
 # The plugin's judgment of what was collected.

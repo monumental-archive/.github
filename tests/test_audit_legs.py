@@ -1053,7 +1053,12 @@ class Refusals:
 
 @fixture
 def refusals(tmp_path: Path) -> Refusals:
-    """Give each row its own Refusals."""
+    """Give each row its own Refusals.
+
+    Returns:
+        The row's Refusals.
+
+    """
     return Refusals(tmp_path)
 
 

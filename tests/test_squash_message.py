@@ -198,7 +198,12 @@ class StepHarness:
 
 @fixture
 def step_harness(tmp_path: Path, env: support.Env) -> StepHarness:
-    """Give each row its own StepHarness."""
+    """Give each row its own StepHarness.
+
+    Returns:
+        The row's StepHarness.
+
+    """
     return StepHarness(tmp_path, env=env)
 
 
@@ -375,7 +380,12 @@ class BreakingFooter(StepHarness):
 
 @fixture
 def breaking_footer_state(tmp_path: Path, env: support.Env) -> BreakingFooter:
-    """Give each row its own BreakingFooter."""
+    """Give each row its own BreakingFooter.
+
+    Returns:
+        The row's BreakingFooter.
+
+    """
     return BreakingFooter(tmp_path, env=env)
 
 
@@ -631,7 +641,12 @@ class TheReaderAgrees:
 
 @fixture
 def the_reader_agrees(tmp_path: Path, env: support.Env) -> TheReaderAgrees:
-    """Give each row its own TheReaderAgrees."""
+    """Give each row its own TheReaderAgrees.
+
+    Returns:
+        The row's TheReaderAgrees.
+
+    """
     return TheReaderAgrees(tmp_path, env=env)
 
 

@@ -35,7 +35,7 @@ import pathlib
 import re
 import subprocess
 
-from belt import decoded, findings, workflow_command
+from belt import decoded, findings, typed_std, workflow_command
 
 CHECKSUMS = pathlib.Path("checksums.txt")
 MANIFEST = pathlib.Path("evidence-manifest.json")
@@ -62,8 +62,7 @@ def gh(*args: str, capture: bool = False, quiet: bool = False) -> str:
 
     """
     done = subprocess.run(
-        # ruff: ignore[start-process-with-partial-path]
-        ["gh", *args],
+        [typed_std.on_path("gh"), *args],
         check=False,
         stdout=subprocess.PIPE if capture else None,
         stderr=subprocess.DEVNULL if quiet else None,
@@ -122,25 +121,46 @@ def resolve(repo: str) -> tuple[str, str]:
 
     """
     tag = gh(
-        "release", "view", "--repo", repo, "--json", "tagName", "--jq", ".tagName",
+        "release",
+        "view",
+        "--repo",
+        repo,
+        "--json",
+        "tagName",
+        "--jq",
+        ".tagName",
         capture=True,
-    ).strip()  # fmt: skip
+    ).strip()
     if not RELEASE_TAG.match(tag):
         msg = f"latest release tag {tag} is not a v* release"
         raise StepError(msg)
     gh(
-        "release", "download", tag, "--repo", repo,
-        "--pattern", "checksums.txt", "--output", str(CHECKSUMS),
-    )  # fmt: skip
+        "release",
+        "download",
+        tag,
+        "--repo",
+        repo,
+        "--pattern",
+        "checksums.txt",
+        "--output",
+        str(CHECKSUMS),
+    )
     if not CHECKSUMS.is_file() or CHECKSUMS.stat().st_size == 0:
         msg = f"release {tag} has no checksums.txt — nothing to prove against"
         raise StepError(msg)
     with contextlib.suppress(SystemExit):
         gh(
-            "release", "download", tag, "--repo", repo,
-            "--pattern", "evidence-manifest.json", "--output", str(MANIFEST),
+            "release",
+            "download",
+            tag,
+            "--repo",
+            repo,
+            "--pattern",
+            "evidence-manifest.json",
+            "--output",
+            str(MANIFEST),
             quiet=True,
-        )  # fmt: skip
+        )
     manifest = ""
     if first_entry_name(MANIFEST):
         manifest = MANIFEST.read_text(encoding="utf-8").rstrip("\n")

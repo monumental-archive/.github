@@ -130,7 +130,12 @@ class VexDecisions:
 
 @fixture
 def vex_decisions(tmp_path: Path, env: support.Env) -> VexDecisions:
-    """Give each row its own VexDecisions."""
+    """Give each row its own VexDecisions.
+
+    Returns:
+        The row's VexDecisions.
+
+    """
     return VexDecisions(tmp_path, env=env)
 
 
@@ -162,7 +167,7 @@ def test_nothing_to_sign_is_a_notice_and_no_arguments(
         0,
         "::notice::security/vex/ holds no decisions\n",
     )
-    assert vex_decisions.out.read_text("utf-8") == ""
+    assert not vex_decisions.out.read_text("utf-8")
 
 
 def test_a_push_of_one_decision_signs_it(vex_decisions: VexDecisions) -> None:
@@ -194,7 +199,7 @@ def test_a_push_of_two_decisions_is_refused_by_name(
     assert done.returncode == 1, done.stderr
     assert done.stdout.startswith("::error::"), done.stdout
     assert ONE_PER_MERGE.split("\n", 1)[0][:40] in done.stdout
-    assert vex_decisions.out.read_text("utf-8") == ""
+    assert not vex_decisions.out.read_text("utf-8")
 
 
 def plant(root: Path, *, policy: bool = True, canon: support.Canon) -> Path:
@@ -245,7 +250,12 @@ class SourceAttestResolve:
 
 @fixture
 def source_attest_resolve(tmp_path: Path, env: support.Env) -> SourceAttestResolve:
-    """Give each row its own SourceAttestResolve."""
+    """Give each row its own SourceAttestResolve.
+
+    Returns:
+        The row's SourceAttestResolve.
+
+    """
     return SourceAttestResolve(tmp_path, env=env)
 
 
@@ -407,7 +417,12 @@ class Stubbed:
 
 @fixture
 def stubbed(tmp_path: Path, canon: support.Canon, env: support.Env) -> Stubbed:
-    """Give each row its own Stubbed."""
+    """Give each row its own Stubbed.
+
+    Returns:
+        The row's Stubbed.
+
+    """
     return Stubbed(tmp_path, canon=canon, env=env)
 
 
@@ -429,7 +444,7 @@ class LevelsPublish(Stubbed):
         return self.run_in(
             LEVELS_PUBLISH_SCRIPT,
             os.environ["PATH"],
-            GH_TOKEN="planted",  # ruff: ignore[hardcoded-password-func-arg]
+            GH_TOKEN=support.FAKE_CREDENTIAL,
             GITHUB_REPOSITORY="org/repo",
             investigate=investigate,
         )
@@ -448,7 +463,12 @@ class LevelsPublish(Stubbed):
 def levels_publish(
     tmp_path: Path, canon: support.Canon, env: support.Env
 ) -> LevelsPublish:
-    """Give each row its own LevelsPublish."""
+    """Give each row its own LevelsPublish.
+
+    Returns:
+        The row's LevelsPublish.
+
+    """
     return LevelsPublish(tmp_path, canon=canon, env=env)
 
 
@@ -507,7 +527,12 @@ class SourceAttestChain(Stubbed):
 def source_attest_chain(
     tmp_path: Path, canon: support.Canon, env: support.Env
 ) -> SourceAttestChain:
-    """Give each row its own SourceAttestChain."""
+    """Give each row its own SourceAttestChain.
+
+    Returns:
+        The row's SourceAttestChain.
+
+    """
     return SourceAttestChain(tmp_path, canon=canon, env=env)
 
 

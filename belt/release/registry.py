@@ -40,8 +40,8 @@ import json
 import os
 import re
 import subprocess
+import tempfile
 import urllib.error
-import urllib.request
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -107,7 +107,7 @@ class Args(argparse.Namespace):
     file: str
     context: str
     digests: str
-    metadata_file: str
+    metadata_file: str | None
     arch: str | None
     pg: str | None
     platform: str | None
@@ -154,8 +154,7 @@ class Registry:
 
         """
         done = subprocess.run(
-            # ruff: ignore[start-process-with-partial-path] - docker from the runner's PATH
-            ["docker", *args],
+            [typed_std.on_path("docker", self.env), *args],
             input=stdin,
             stdout=subprocess.PIPE if capture else None,
             env=dict(self.env),
@@ -194,9 +193,8 @@ class Registry:
                 is not an HTTP response.
 
         """
-        # ruff: ignore[suspicious-url-open-usage] - https, or the tests' fake
-        req = urllib.request.Request(url, data=body, headers=headers, method=method)
         try:
+            req = typed_std.request(url, data=body, headers=headers, method=method)
             with typed_std.urlopen(req, timeout=60) as resp:
                 return resp.read(), resp.getheader("Content-Type", "") or ""
         except typed_std.NotAResponseError as e:
@@ -398,7 +396,11 @@ def push(reg: Registry, args: Args) -> int:
     if index:
         buildx_floor(reg.docker("buildx", "version").decode())
     reg.login()
-    meta = Path(args.metadata_file)
+    meta = (
+        Path(args.metadata_file)
+        if args.metadata_file
+        else Path(tempfile.mkdtemp(prefix="registry-")) / "meta.json"
+    )
     platform = ["--platform", args.platform] if args.platform else []
     # Build as its own statement, then read the metadata: a failed build
     # refuses on its exit status, with its log already in the step's.
@@ -661,8 +663,11 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--file", required=True, help="the Dockerfile")
     s.add_argument("--context", required=True, help="the build context")
     s.add_argument("--digests", required=True, help="directory for the record")
-    # ruff: ignore[hardcoded-temp-file]
-    s.add_argument("--metadata-file", default="/tmp/meta.json")
+    s.add_argument(
+        "--metadata-file",
+        help="where buildx writes its metadata; by default a private"
+        " temporary directory's, made for the run",
+    )
     mode = s.add_mutually_exclusive_group(required=True)
     mode.add_argument("--arch", help="one native per-architecture image")
     mode.add_argument("--pg", help="a pgrx artifact index for this major")

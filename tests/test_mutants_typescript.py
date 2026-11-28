@@ -218,7 +218,12 @@ class Planted:
 
 @fixture
 def planted_state(tmp_path: Path, env: support.Env) -> Planted:
-    """Give each row its own Planted."""
+    """Give each row its own Planted.
+
+    Returns:
+        The row's Planted.
+
+    """
     return Planted(tmp_path, env=env)
 
 
@@ -228,7 +233,7 @@ def test_no_config_skips_clean_by_name(planted_state: Planted) -> None:
     assert done.returncode == 0, done.stderr
     want = [f"{LABEL}: no stryker.config.json tracked, skipped"]
     assert done.stdout.splitlines() == want
-    assert done.stderr == ""
+    assert not done.stderr
     assert log == list[str]()
     assert planted_state.counts() == "0/1\tskipped\n"
 
@@ -279,7 +284,7 @@ def test_a_workstation_is_refused_by_name(planted_state: Planted) -> None:
         ("  so this leg runs on a runner only (repo-mutants.yml), never a workstation"),
     ]
     assert done.stderr.splitlines() == want
-    assert planted_state.log.read_text(encoding="utf-8") == ""
+    assert not planted_state.log.read_text(encoding="utf-8")
 
 
 def test_stryker_missing_is_red_by_name(planted_state: Planted) -> None:
@@ -445,7 +450,12 @@ class ShareOut:
 def share_out(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, env: support.Env
 ) -> ShareOut:
-    """Give each row its own ShareOut."""
+    """Give each row its own ShareOut.
+
+    Returns:
+        The row's ShareOut.
+
+    """
     return ShareOut(tmp_path, monkeypatch, env=env)
 
 
@@ -809,7 +819,7 @@ def test_clean_run_is_green_with_the_summary(planted_state: Planted) -> None:
         ),
     ]
     assert done.stdout.splitlines() == want
-    assert done.stderr == ""
+    assert not done.stderr
     want = [CALL]
     assert log == want
     assert planted_state.counts() == "0/1\t2\t2\t0\t0\tshard\n"
@@ -1162,8 +1172,10 @@ def test_a_clean_verdict_writes_its_counts(
     out, err = capfd.readouterr()
     assert (status, out, err) == (
         0,
-        f"{LABEL}: 2 mutants, 2 killed, 0 survived, 0 not covered,"
-        " 0 not viable, 0 excluded\n",
+        (
+            f"{LABEL}: 2 mutants, 2 killed, 0 survived, 0 not covered,"
+            " 0 not viable, 0 excluded\n"
+        ),
         "",
     )
     assert (summary / "typescript.tsv").read_text(

@@ -113,7 +113,7 @@ def test_relative_strips_the_root(path: str, root: list[str], slash: str) -> Non
     """root/path is path; the root itself is empty."""
     top = "/" + "/".join(root)
     assert mg.relative(f"{top}/{path}", top + slash) == path
-    assert mg.relative(top, top) == ""
+    assert not mg.relative(top, top)
 
 
 # Not covered, explained, or a survivor.

@@ -17,7 +17,6 @@ import os
 import subprocess
 import sys
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -29,6 +28,7 @@ from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
 CANON = support.CANON
 WORKFLOW = CANON / ".github" / "workflows" / "build-go-binary.yml"
@@ -114,7 +114,7 @@ def git(cwd: Path, *args: str, env: support.Env) -> str:
 
     """
     return subprocess.run(
-        ["git", *args],
+        [support.tool("git"), *args],
         cwd=cwd,
         capture_output=True,
         text=True,
@@ -221,7 +221,7 @@ def test_every_binary_stamped_with_the_released_commit(
     status = check_go_stamps.main([])
     run = stamping.ran(status, capfd.readouterr())
     assert run.returncode == 0, run.stdout + run.stderr
-    assert run.stdout == ""
+    assert not run.stdout
 
 
 # One row per refusal, each message asserted.
@@ -354,7 +354,7 @@ def test_a_file_go_cannot_read_fails_the_step(
     run = stamping.ran(status, capfd.readouterr())
     assert run.returncode == 1
     assert run.stderr == "go: not a Go binary\n"
-    assert run.stdout == ""
+    assert not run.stdout
 
 
 def test_outside_a_repository_git_fails_the_step(
@@ -364,5 +364,5 @@ def test_outside_a_repository_git_fails_the_step(
     stamping = stamp({"tool": info("f" * 40)}, repo=False)
     status = check_go_stamps.main([])
     run = stamping.ran(status, capfd.readouterr())
-    assert run.returncode == 128
-    assert run.stdout == ""
+    assert run.returncode == support.GIT_FATAL
+    assert not run.stdout

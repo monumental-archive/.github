@@ -36,6 +36,8 @@ import os
 import subprocess
 from dataclasses import dataclass
 
+from belt import typed_std
+
 
 @dataclass(frozen=True)
 class Run:
@@ -57,8 +59,12 @@ def issue(run: Run) -> tuple[str, str]:
 
     """
     tag, cls, compare, run_id, run_url = (
-        run.tag, run.cls, run.compare, run.run_id, run.run_url,
-    )  # fmt: skip
+        run.tag,
+        run.cls,
+        run.compare,
+        run.run_id,
+        run.run_url,
+    )
     if compare != "failure":
         body = (
             f"The reproducibility audit set out to rebuild {tag} with the {cls}"
@@ -116,7 +122,16 @@ def main(argv: list[str]) -> int:
         )
     )
     return subprocess.run(
-        # ruff: ignore[start-process-with-partial-path]
-        ["gh", "issue", "create", "--repo", repo, "--title", title, "--body", body],
+        [
+            typed_std.on_path("gh"),
+            "issue",
+            "create",
+            "--repo",
+            repo,
+            "--title",
+            title,
+            "--body",
+            body,
+        ],
         check=False,
     ).returncode

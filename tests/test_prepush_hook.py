@@ -225,7 +225,12 @@ class PrePushGate:
 def pre_push_gate(
     tmp_path: Path, canon: support.Canon, env: support.Env
 ) -> PrePushGate:
-    """Give each row its own PrePushGate."""
+    """Give each row its own PrePushGate.
+
+    Returns:
+        The row's PrePushGate.
+
+    """
     return PrePushGate(tmp_path, canon=canon, env=env)
 
 

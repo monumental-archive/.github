@@ -97,7 +97,12 @@ class Machete:
 
 @fixture
 def machete(tmp_path: Path, env: support.Env) -> Machete:
-    """Give each row its own Machete."""
+    """Give each row its own Machete.
+
+    Returns:
+        The row's Machete.
+
+    """
     return Machete(tmp_path, env=env)
 
 

@@ -24,12 +24,14 @@ import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-
-import pytest
+from typing import TYPE_CHECKING
 
 from belt import decoded
 from belt.typed_pytest import fixture
 from tests import support
+
+if TYPE_CHECKING:
+    import pytest
 
 HERE = support.CANON / "settings"
 CANON = HERE.parent
@@ -279,7 +281,12 @@ class ForgeCase:
 
 @fixture
 def forge_case(tmp_path: Path, env: support.Env) -> ForgeCase:
-    """Give each row its own ForgeCase."""
+    """Give each row its own ForgeCase.
+
+    Returns:
+        The row's ForgeCase.
+
+    """
     return ForgeCase(tmp_path, env=env)
 
 
@@ -293,7 +300,12 @@ class CleanOrg:
 
 @fixture(scope="module")
 def clean_org(tmp_path_factory: pytest.TempPathFactory, env: support.Env) -> CleanOrg:
-    """Check the clean org once; every row reads the same run."""
+    """Check the clean org once; every row reads the same run.
+
+    Returns:
+        The run, shared by the module's rows.
+
+    """
     forge = Forge(tmp_path_factory.mktemp("clean-org"), env=env)
     return CleanOrg(forge, forge.check())
 
@@ -431,7 +443,7 @@ def test_a_refused_listing_says_which_call_and_what_it_needs(
         f"  gh said:  {said}\n"
         "repo-baseline: nothing was checked — the population is unreadable.\n"
     ) == done.stderr
-    assert done.stdout == ""
+    assert not done.stdout
 
 
 def assert_not_clean(done: subprocess.CompletedProcess[str]) -> None:

@@ -208,7 +208,9 @@ PLAIN = """\
 
 HELPER_STEP = """\
       - if: ${{ !cancelled() }}
-        run: $ORG_PYTHON -I .org-canon/belt standing-issue --findings "${RUNNER_TEMP}/findings"
+        run: >-
+          $ORG_PYTHON -I .org-canon/belt standing-issue
+          --findings "${RUNNER_TEMP}/findings"
 """
 
 BARE_HELPER_STEP = """\

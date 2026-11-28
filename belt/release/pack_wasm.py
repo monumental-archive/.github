@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from belt import decoded, findings
+from belt import decoded, findings, typed_std
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -60,8 +60,7 @@ def npm(cwd: Path, *args: str) -> str:
 
     """
     done = subprocess.run(
-        # ruff: ignore[start-process-with-partial-path] - the caller's pinned node, on PATH
-        ["npm", *args],
+        [typed_std.on_path("npm"), *args],
         cwd=cwd,
         stdout=subprocess.PIPE,
         text=True,

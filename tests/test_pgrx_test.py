@@ -37,6 +37,9 @@ from belt import coverage_floor, gate_cache_key
 from belt.typed_pytest import fixture
 from tests import support
 
+# The suites run, one per major, pg17 and pg18.
+SUITES = 2
+
 BELT = support.MISE
 BASH = support.tool("bash")
 GIT = support.tool("git")
@@ -308,7 +311,12 @@ class Planted:
 def planted(
     tmp_path: Path, belt: support.Belt, env: support.Env, rustc: support.Rustc
 ) -> Planted:
-    """Give each row its own Planted."""
+    """Give each row its own Planted.
+
+    Returns:
+        The row's Planted.
+
+    """
     return Planted(tmp_path, belt=belt, env=env, rustc=rustc)
 
 
@@ -391,7 +399,7 @@ def test_a_measured_run_leaves_the_tree_clean(
             text=True,
             check=True,
         )
-        assert status.stdout == ""
+        assert not status.stdout
 
 
 def test_a_major_below_the_floor_is_red_by_name(planted: Planted) -> None:
@@ -504,7 +512,12 @@ class IcuPerMajor(Planted):
 def icu_per_major(
     tmp_path: Path, belt: support.Belt, env: support.Env, rustc: support.Rustc
 ) -> IcuPerMajor:
-    """Give each row its own IcuPerMajor."""
+    """Give each row its own IcuPerMajor.
+
+    Returns:
+        The row's IcuPerMajor.
+
+    """
     return IcuPerMajor(tmp_path, belt=belt, env=env, rustc=rustc)
 
 
@@ -658,7 +671,12 @@ class CoverageTasks(Planted):
 def coverage_tasks(
     tmp_path: Path, belt: support.Belt, env: support.Env, rustc: support.Rustc
 ) -> CoverageTasks:
-    """Give each row its own CoverageTasks."""
+    """Give each row its own CoverageTasks.
+
+    Returns:
+        The row's CoverageTasks.
+
+    """
     return CoverageTasks(tmp_path, belt=belt, env=env, rustc=rustc)
 
 
@@ -724,7 +742,7 @@ def test_the_pgrx_selector_prints_one_line_per_declared_major(
     want = ["pgrx-pg17 77.77777777777777", "pgrx-pg18 77.77777777777777"]
     got = sorted(done.stdout.splitlines())
     assert want == got
-    assert len(suites(log)) == 2
+    assert len(suites(log)) == SUITES
 
 
 def test_the_majors_selector_lists_what_the_pgrx_selector_measures(
@@ -768,7 +786,12 @@ class FannedPlan(Planted):
 def fanned_plan(
     tmp_path: Path, belt: support.Belt, env: support.Env, rustc: support.Rustc
 ) -> FannedPlan:
-    """Give each row its own FannedPlan."""
+    """Give each row its own FannedPlan.
+
+    Returns:
+        The row's FannedPlan.
+
+    """
     return FannedPlan(tmp_path, belt=belt, env=env, rustc=rustc)
 
 

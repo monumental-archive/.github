@@ -226,7 +226,7 @@ class Planted:
 
     def assert_runs(self, where: Path, **extra: str) -> None:
         """Assert the task runs in `where`, with nothing refused."""
-        assert self.rendered(where, **extra)["ORG_BELT_REFUSED"] == ""
+        assert not self.rendered(where, **extra)["ORG_BELT_REFUSED"]
         done = self.task(where, **extra)
         assert (done.returncode, done.stderr) == (0, "")
         assert done.stdout == "ran\n"
@@ -234,7 +234,12 @@ class Planted:
 
 @fixture
 def planted(tmp_path: Path, belt: support.Belt, env: support.Env) -> Planted:
-    """Give each row its own Planted."""
+    """Give each row its own Planted.
+
+    Returns:
+        The row's Planted.
+
+    """
     return Planted(tmp_path, belt=belt, env=env)
 
 
@@ -350,7 +355,12 @@ class OnlyTasksRefuse(Planted):
 def only_tasks_refuse(
     tmp_path: Path, belt: support.Belt, env: support.Env
 ) -> OnlyTasksRefuse:
-    """Give each row its own OnlyTasksRefuse."""
+    """Give each row its own OnlyTasksRefuse.
+
+    Returns:
+        The row's OnlyTasksRefuse.
+
+    """
     return OnlyTasksRefuse(tmp_path, belt=belt, env=env)
 
 

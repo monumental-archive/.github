@@ -126,12 +126,17 @@ class LinkTheCanonTree:
 
     def assert_clean(self, root: pathlib.Path) -> None:
         """Git reports nothing changed: go would stamp vcs.modified=false."""
-        assert self.git("status", "--porcelain", cwd=root) == ""
+        assert not self.git("status", "--porcelain", cwd=root)
 
 
 @fixture
 def link_the_canon_tree(tmp_path: Path, env: support.Env) -> LinkTheCanonTree:
-    """Give each row its own LinkTheCanonTree."""
+    """Give each row its own LinkTheCanonTree.
+
+    Returns:
+        The row's LinkTheCanonTree.
+
+    """
     return LinkTheCanonTree(tmp_path, env=env)
 
 
@@ -245,7 +250,7 @@ def test_another_repository_off_an_actions_path_is_refused(
         f"::error::link.sh: canon action resolved to '{root}' in"
         " someone/consumer — not an _actions path and not a canon self-call\n"
     )
-    assert link_the_canon_tree.output.read_text(encoding="utf-8") == ""
+    assert not link_the_canon_tree.output.read_text(encoding="utf-8")
     assert link_the_canon_tree.linked() is None
 
 
@@ -274,7 +279,7 @@ def test_a_tree_with_no_belt_config_is_refused(
         " mise/findings.sh — not a canon tree\n"
         f"  resolved: {root}\n"
     )
-    assert link_the_canon_tree.output.read_text(encoding="utf-8") == ""
+    assert not link_the_canon_tree.output.read_text(encoding="utf-8")
     assert link_the_canon_tree.linked() is None
 
 

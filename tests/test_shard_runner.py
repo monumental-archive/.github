@@ -35,11 +35,11 @@ import pytest
 
 from belt import decoded, shard, shard_runner
 from belt.typed_pytest import fixture
-from tests import support
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
     from pathlib import Path
+
+    from tests import support
 
 
 # The stand-ins, one Python script per runner. Each reads its fixture
@@ -247,7 +247,12 @@ class Runner:
 
 @fixture
 def runner(tmp_path: Path, env: support.Env) -> Runner:
-    """Give each row its own Runner."""
+    """Give each row its own Runner.
+
+    Returns:
+        The row's Runner.
+
+    """
     return Runner(tmp_path, env=env)
 
 
@@ -438,9 +443,15 @@ def test_options_stay_and_paths_become_files(
     out, err = capfd.readouterr()
     assert status == 0, err
     want: list[str] = [
-        "python3", "-m", "pytest", "-c", "cfg.toml", "--durations=10",
-        "tests/sub/test_c.py", "tests/test_b.py",
-    ]  # fmt: skip
+        "python3",
+        "-m",
+        "pytest",
+        "-c",
+        "cfg.toml",
+        "--durations=10",
+        "tests/sub/test_c.py",
+        "tests/test_b.py",
+    ]
     assert want == words(out)
 
 
@@ -495,9 +506,16 @@ def test_flags_stay_and_patterns_become_packages(
     out, err = capfd.readouterr()
     assert status == 0, err
     want: list[str] = [
-        "go", "test", "-run", "X", "-v",
-        "example.com/m/a", "example.com/m/c", "-args", "-x",
-    ]  # fmt: skip
+        "go",
+        "test",
+        "-run",
+        "X",
+        "-v",
+        "example.com/m/a",
+        "example.com/m/c",
+        "-args",
+        "-x",
+    ]
     assert want == words(out)
 
 
@@ -546,7 +564,7 @@ def test_no_shard_passes_through(
     ],
 )
 def test_usage(argv: list[str], error: str, capfd: pytest.CaptureFixture[str]) -> None:
-    """No `--`: the usage exit: argparse's exit 2, its usage and its error."""
+    """No `--`: argparse's exit 2 and its error."""
     with pytest.raises(SystemExit) as ended:
         shard_runner.main(argv)
     out, err = capfd.readouterr()
@@ -566,5 +584,5 @@ def test_usage(argv: list[str], error: str, capfd: pytest.CaptureFixture[str]) -
     ],
 )
 def test_each_listing_line_names_its_file(line: str, file: str) -> None:
-    """pytest's listing names a file per test, or per file under `-qq`."""
+    """Pytest's listing names a file per test, or per file under `-qq`."""
     assert shard_runner.listed(line) == file

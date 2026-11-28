@@ -19,13 +19,16 @@ import json
 import shutil
 import sys
 from pathlib import Path
-
-import pytest
+from typing import TYPE_CHECKING
 
 from belt import decoded
 from belt.rekor_monitor import gain
 from belt.typed_pytest import fixture
-from tests import support
+
+if TYPE_CHECKING:
+    import pytest
+
+    from tests import support
 
 COMMAND = "gain"
 
@@ -139,10 +142,17 @@ class Rows:
 
         """
         return [
-            "--start", str(self.start), "--start-kept", kept,
-            "--checkpoint", str(self.end), "--reports", str(self.reports),
-            "--legs", str(legs),
-        ]  # fmt: skip
+            "--start",
+            str(self.start),
+            "--start-kept",
+            kept,
+            "--checkpoint",
+            str(self.end),
+            "--reports",
+            str(self.reports),
+            "--legs",
+            str(legs),
+        ]
 
     def enter(
         self,
@@ -206,7 +216,12 @@ class Rows:
 
 @fixture
 def rows_state(tmp_path: Path, env: support.Env) -> Rows:
-    """Give each row its own Rows."""
+    """Give each row its own Rows.
+
+    Returns:
+        The row's Rows.
+
+    """
     return Rows(tmp_path, env=env)
 
 

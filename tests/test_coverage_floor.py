@@ -41,6 +41,9 @@ from tests import support
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+# The legs the drift row plants out of step, one problem each.
+DRIFTED = 2
+
 
 def leg_names(text: str) -> list[str]:
     """Name each leg a file states a line for, in order.
@@ -300,14 +303,17 @@ def test_a_leg_measured_at_100_is_written_at_90(
 
 
 @pytest.mark.parametrize(
-    ("name", "text", "line"),
+    ("text", "line"),
     [
-        ("with its record", RECORDED_BARE_FLOOR, "90"),
-        ("hand-typed", "83.4\n", "83.4"),
+        pytest.param(text, line, id=name)
+        for name, text, line in [
+            ("with its record", RECORDED_BARE_FLOOR, "90"),
+            ("hand-typed", "83.4\n", "83.4"),
+        ]
     ],
 )
 def test_the_old_shape_is_refused_by_name(
-    name: object, text: object, line: object, capfd: pytest.CaptureFixture[str]
+    text: object, line: object, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """A bare floor line, recorded or not, is refused, naming adopt."""
     with Tree(text) as tree:
@@ -493,7 +499,7 @@ def test_every_leg_is_judged() -> None:
     _, problems = cf.parse(
         record(planted("python", "85", "85.4"), planted("go", "1", "82.0"))
     )
-    assert len(problems) == 2, problems
+    assert len(problems) == DRIFTED, problems
     assert problems[0].startswith("python floor 85 disagrees")
     assert problems[1].startswith("go floor 1 disagrees")
 
@@ -1390,65 +1396,67 @@ PLANNED_REFUSAL = (
 
 # One owner per leg, and each job judges only its own (#1875).
 @pytest.mark.parametrize(
-    ("name", "legs", "source", "jobs", "want"),
+    ("legs", "source", "jobs", "want"),
     [
-        (
-            "gate scope: a recorded pgrx leg is the pgrx job's",
-            "rust pgrx-pg15",
-            "rust 99\n",
-            GATE,
-            (0, "lbl: rust leg holds its floor 90 (99%)\n", ""),
-        ),
-        (
-            "gate scope: a recorded gate leg not measured is red",
-            "rust python",
-            "rust 99\n",
-            GATE,
+        pytest.param(legs, source, jobs, want, id=name)
+        for name, legs, source, jobs, want in [
             (
-                1,
-                "lbl: rust leg holds its floor 90 (99%)\n",
-                f"{TASK}: the floor was derived with python and this run"
-                " measured none\n"
-                + REMEDY.format(needs=cf.NEEDS["python"], leg="python"),
+                "gate scope: a recorded pgrx leg is the pgrx job's",
+                "rust pgrx-pg15",
+                "rust 99\n",
+                GATE,
+                (0, "lbl: rust leg holds its floor 90 (99%)\n", ""),
             ),
-        ),
-        (
-            "pgrx scope: its recorded major not measured is red",
-            "rust pgrx-pg15",
-            "",
-            PGRX15,
             (
-                1,
+                "gate scope: a recorded gate leg not measured is red",
+                "rust python",
+                "rust 99\n",
+                GATE,
+                (
+                    1,
+                    "lbl: rust leg holds its floor 90 (99%)\n",
+                    f"{TASK}: the floor was derived with python and this run"
+                    " measured none\n"
+                    + REMEDY.format(needs=cf.NEEDS["python"], leg="python"),
+                ),
+            ),
+            (
+                "pgrx scope: its recorded major not measured is red",
+                "rust pgrx-pg15",
                 "",
-                f"{TASK}: the floor was derived with pgrx-pg15 and this run"
-                " measured none\n" + NO_OWNER.format(leg="pgrx-pg15"),
+                PGRX15,
+                (
+                    1,
+                    "",
+                    f"{TASK}: the floor was derived with pgrx-pg15 and this run"
+                    " measured none\n" + NO_OWNER.format(leg="pgrx-pg15"),
+                ),
             ),
-        ),
-        (
-            "pgrx scope: its major above the floor holds",
-            "rust pgrx-pg15",
-            "pgrx-pg15 95\n",
-            PGRX15,
-            (0, "lbl: pgrx-pg15 leg holds its floor 90 (95%)\n", ""),
-        ),
-        (
-            "pgrx scope: its major below the floor is red",
-            "rust pgrx-pg15",
-            "pgrx-pg15 80\n",
-            PGRX15,
-            (1, "", f"{TASK}: pgrx-pg15: 80% is below its derived floor 90%\n"),
-        ),
-        (
-            "pgrx scope: another major, and the gate's legs, are not its own",
-            "rust pgrx-pg15 pgrx-pg16",
-            "pgrx-pg15 95\n",
-            PGRX15,
-            (0, "lbl: pgrx-pg15 leg holds its floor 90 (95%)\n", ""),
-        ),
+            (
+                "pgrx scope: its major above the floor holds",
+                "rust pgrx-pg15",
+                "pgrx-pg15 95\n",
+                PGRX15,
+                (0, "lbl: pgrx-pg15 leg holds its floor 90 (95%)\n", ""),
+            ),
+            (
+                "pgrx scope: its major below the floor is red",
+                "rust pgrx-pg15",
+                "pgrx-pg15 80\n",
+                PGRX15,
+                (1, "", f"{TASK}: pgrx-pg15: 80% is below its derived floor 90%\n"),
+            ),
+            (
+                "pgrx scope: another major, and the gate's legs, are not its own",
+                "rust pgrx-pg15 pgrx-pg16",
+                "pgrx-pg15 95\n",
+                PGRX15,
+                (0, "lbl: pgrx-pg15 leg holds its floor 90 (95%)\n", ""),
+            ),
+        ]
     ],
 )
 def test_hold_judges_only_the_calling_jobs_legs(
-    name: object,
     legs: object,
     source: object,
     jobs: object,
@@ -1462,42 +1470,44 @@ def test_hold_judges_only_the_calling_jobs_legs(
 
 
 @pytest.mark.parametrize(
-    ("name", "legs", "majors", "want"),
+    ("legs", "majors", "want"),
     [
-        (
-            "a recorded major the plan dropped",
-            "rust pgrx-pg14 pgrx-pg15",
-            '["15","16","17","18"]',
+        pytest.param(legs, majors, want, id=name)
+        for name, legs, majors, want in [
             (
-                1,
-                "",
-                f"{TASK}: the floor records pgrx-pg14, measured by the pgrx:14"
-                " job, and this run plans none (planned majors:"
-                " 15,16,17,18)\n" + NO_OWNER.format(leg="pgrx-pg14"),
+                "a recorded major the plan dropped",
+                "rust pgrx-pg14 pgrx-pg15",
+                '["15","16","17","18"]',
+                (
+                    1,
+                    "",
+                    f"{TASK}: the floor records pgrx-pg14, measured by the pgrx:14"
+                    " job, and this run plans none (planned majors:"
+                    " 15,16,17,18)\n" + NO_OWNER.format(leg="pgrx-pg14"),
+                ),
             ),
-        ),
-        (
-            "no major planned at all",
-            "rust pgrx-pg15",
-            "[]",
             (
-                1,
-                "",
-                f"{TASK}: the floor records pgrx-pg15, measured by the pgrx:15"
-                " job, and this run plans none (planned majors: none)\n"
-                + NO_OWNER.format(leg="pgrx-pg15"),
+                "no major planned at all",
+                "rust pgrx-pg15",
+                "[]",
+                (
+                    1,
+                    "",
+                    f"{TASK}: the floor records pgrx-pg15, measured by the pgrx:15"
+                    " job, and this run plans none (planned majors: none)\n"
+                    + NO_OWNER.format(leg="pgrx-pg15"),
+                ),
             ),
-        ),
-        (
-            "every recorded leg owned",
-            "rust python pgrx-pg15 pgrx-pg18",
-            '["15","16","17","18"]',
-            (0, "", ""),
-        ),
+            (
+                "every recorded leg owned",
+                "rust python pgrx-pg15 pgrx-pg18",
+                '["15","16","17","18"]',
+                (0, "", ""),
+            ),
+        ]
     ],
 )
 def test_the_plan_holds_the_record_to_its_planned_jobs(
-    name: object,
     legs: object,
     majors: object,
     want: object,
@@ -1510,10 +1520,14 @@ def test_the_plan_holds_the_record_to_its_planned_jobs(
 
 
 @pytest.mark.parametrize(
-    ("name", "text"), [("dropped", DROPPED_LEG), ("no floor", None)]
+    "text",
+    [
+        pytest.param(text, id=name)
+        for name, text in [("dropped", DROPPED_LEG), ("no floor", None)]
+    ],
 )
 def test_the_plan_accepts_a_dropped_leg_and_no_floor(
-    name: object, text: object, capfd: pytest.CaptureFixture[str]
+    text: object, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """A dropped leg needs no owner; no floor needs none."""
     with Tree(text) as tree:
@@ -1534,60 +1548,62 @@ def test_the_plan_refuses_a_floor_off_its_record(
 
 
 @pytest.mark.parametrize(
-    ("name", "legs", "majors", "want"),
+    ("legs", "majors", "want"),
     [
-        ("no major", "rust", "[]", (0, "", "")),
-        ("one major", "rust pgrx-pg15", '["15"]', (0, "", "")),
-        (
-            "two majors",
-            "rust pgrx-pg15 pgrx-pg16",
-            '["15","16"]',
-            (0, "", ""),
-        ),
-        (
-            "a number, not a string",
-            "rust",
-            "[15]",
-            (1, "", PLANNED_REFUSAL.format(value="[15]", why="15 is not a string")),
-        ),
-        (
-            "a leading zero",
-            "rust",
-            '["015"]',
+        pytest.param(legs, majors, want, id=name)
+        for name, legs, majors, want in [
+            ("no major", "rust", "[]", (0, "", "")),
+            ("one major", "rust pgrx-pg15", '["15"]', (0, "", "")),
             (
-                1,
-                "",
-                PLANNED_REFUSAL.format(
-                    value='["015"]', why='"015" is not a canonical major'
+                "two majors",
+                "rust pgrx-pg15 pgrx-pg16",
+                '["15","16"]',
+                (0, "", ""),
+            ),
+            (
+                "a number, not a string",
+                "rust",
+                "[15]",
+                (1, "", PLANNED_REFUSAL.format(value="[15]", why="15 is not a string")),
+            ),
+            (
+                "a leading zero",
+                "rust",
+                '["015"]',
+                (
+                    1,
+                    "",
+                    PLANNED_REFUSAL.format(
+                        value='["015"]', why='"015" is not a canonical major'
+                    ),
                 ),
             ),
-        ),
-        (
-            "a string, not an array",
-            "rust",
-            '"15"',
             (
-                1,
-                "",
-                PLANNED_REFUSAL.format(value='"15"', why="the value is not a list"),
-            ),
-        ),
-        (
-            "not JSON at all",
-            "rust",
-            "15,16",
-            (
-                1,
-                "",
-                PLANNED_REFUSAL.format(
-                    value="15,16", why="Extra data: line 1 column 3 (char 2)"
+                "a string, not an array",
+                "rust",
+                '"15"',
+                (
+                    1,
+                    "",
+                    PLANNED_REFUSAL.format(value='"15"', why="the value is not a list"),
                 ),
             ),
-        ),
+            (
+                "not JSON at all",
+                "rust",
+                "15,16",
+                (
+                    1,
+                    "",
+                    PLANNED_REFUSAL.format(
+                        value="15,16", why="Extra data: line 1 column 3 (char 2)"
+                    ),
+                ),
+            ),
+        ]
     ],
 )
 def test_the_plan_decodes_its_majors_as_json(
-    name: object,
     legs: object,
     majors: object,
     want: object,
@@ -1807,21 +1823,30 @@ class ThePlanFeedsTheHelper:
 def the_plan_feeds_the_helper(
     tmp_path: Path, canon: support.Canon, env: support.Env
 ) -> ThePlanFeedsTheHelper:
-    """Give each row its own ThePlanFeedsTheHelper."""
+    """Give each row its own ThePlanFeedsTheHelper.
+
+    Returns:
+        The row's ThePlanFeedsTheHelper.
+
+    """
     return ThePlanFeedsTheHelper(tmp_path, canon=canon, env=env)
 
 
-@pytest.mark.parametrize(("name", "legs", "status", "err"), PLAN_ROWS)
+@pytest.mark.parametrize(
+    "row",
+    [
+        pytest.param((legs, status, err), id=name)
+        for name, legs, status, err in PLAN_ROWS
+    ],
+)
 def test_the_producers_stdout_is_the_helpers_input(
+    row: tuple[str, int, str],
     the_plan_feeds_the_helper: ThePlanFeedsTheHelper,
-    name: str,
-    legs: str,
-    status: int,
-    err: str,
     capfd: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """pgrx-plan.sh's literal stdout, given to `planned --majors-json`."""
+    legs, status, err = row
     plan = the_plan_feeds_the_helper.run_in_tree([
         BASH,
         str(the_plan_feeds_the_helper.canon / "mise" / "pgrx-plan.sh"),
@@ -1842,10 +1867,12 @@ def test_the_producers_stdout_is_the_helpers_input(
     assert (status, "", err) == (said, out, wrote)
 
 
-@pytest.mark.parametrize(("name", "legs", "status", "err"), PLAN_ROWS)
+@pytest.mark.parametrize(
+    ("legs", "status", "err"),
+    [pytest.param(legs, status, err, id=name) for name, legs, status, err in PLAN_ROWS],
+)
 def test_the_plan_step_hands_the_producer_to_the_helper(
     the_plan_feeds_the_helper: ThePlanFeedsTheHelper,
-    name: object,
     legs: object,
     status: object,
     err: object,

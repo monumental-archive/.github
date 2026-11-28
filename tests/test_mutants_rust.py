@@ -25,7 +25,6 @@ import json
 import os
 import re
 import subprocess
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -37,6 +36,14 @@ from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
+
+# The mutants a listing with two named lines holds; the seven of every
+# configuration minus the five listed; and the site the planted hit's
+# record names.
+LISTED = 2
+EXCLUDED = 2
+SITE = 7
 
 # The task that runs the helper, whose name its findings carry (#1934).
 TASK = "audit:mutants"
@@ -328,7 +335,12 @@ class Planted:
 
 @fixture
 def planted(tmp_path: Path, belt: support.Belt, env: support.Env) -> Planted:
-    """Give each row its own Planted."""
+    """Give each row its own Planted.
+
+    Returns:
+        The row's Planted.
+
+    """
     return Planted(tmp_path, belt=belt, env=env)
 
 
@@ -380,7 +392,7 @@ def test_clean(planted: Planted) -> None:
         f"{LABEL}: 3 mutants, 3 killed, 0 survived, 0 excluded",
     ]
     assert done.stdout.splitlines() == want
-    assert done.stderr == ""
+    assert not done.stderr
     want = [
         METADATA,
         "cargo mutants --list --no-config --package alpha",
@@ -732,7 +744,7 @@ def test_a_pinned_exclude_re_entry_is_red_by_name(
     )
     configured(config)
     status = helper.main(["reasons", CONFIG])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     assert (status, err) == (1, want)
 
 
@@ -750,7 +762,7 @@ def test_an_unpinned_exclude_re_entry_with_its_reason_is_accepted(
     )
     configured(config)
     status = helper.main(["reasons", CONFIG])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     assert (status, err) == (0, "")
 
 
@@ -853,7 +865,12 @@ class Shards(Planted):
 
 @fixture
 def shards(tmp_path: Path, belt: support.Belt, env: support.Env) -> Shards:
-    """Give each row its own Shards."""
+    """Give each row its own Shards.
+
+    Returns:
+        The row's Shards.
+
+    """
     return Shards(tmp_path, belt=belt, env=env)
 
 
@@ -1003,10 +1020,10 @@ def test_default_major_is_the_one_pg_feature() -> None:
     }
     packages = helper.read_metadata(meta)
     assert helper.default_major(packages, "one") == "pg17"
-    assert helper.default_major(packages, "two") == ""
-    assert helper.default_major(packages, "none") == ""
-    assert helper.default_major(packages, "bare") == ""
-    assert helper.default_major(packages, "absent") == ""
+    assert not helper.default_major(packages, "two")
+    assert not helper.default_major(packages, "none")
+    assert not helper.default_major(packages, "bare")
+    assert not helper.default_major(packages, "absent")
 
 
 def test_metadata_of_the_wrong_shape_is_refused_by_name() -> None:
@@ -1048,13 +1065,13 @@ def test_default_major_refuses_metadata_it_cannot_read(
 
 def test_a_listing_counts_lines_with_anything_on_them() -> None:
     """Blank and whitespace-only lines are not mutants."""
-    assert helper.count_listed("a\n\n  \t\nb\n") == 2
+    assert helper.count_listed("a\n\n  \t\nb\n") == LISTED
     assert helper.count_listed("") == 0
 
 
 def test_excluded_is_the_unconfigured_minus_the_configured() -> None:
     """Never the shard's figure."""
-    assert helper.Plan(every=7, listed=5, here=1).excluded == 2
+    assert helper.Plan(every=7, listed=5, here=1).excluded == EXCLUDED
 
 
 def test_a_timeout_is_killed() -> None:
@@ -1096,7 +1113,7 @@ def test_a_record_reads_its_mutation_up_to_the_first_colon_and_space() -> None:
         " with String::new(): the caller trims: always empty here\n"
     )
     (record,) = helper.read_records(hit + "\n")
-    assert record.site == 7
+    assert record.site == SITE
     assert record.mutation == "replace f -> String with String::new()"
     assert record.reason == "the caller trims: always empty here"
     assert record.pattern == (

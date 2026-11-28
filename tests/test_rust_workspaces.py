@@ -16,7 +16,6 @@ import os
 import subprocess
 import sys
 import tempfile
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -26,7 +25,10 @@ from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
-    pass
+    from pathlib import Path
+
+# The manifests the planted tree tracks, each asked for its root.
+ASKED = 3
 
 BELT = support.MISE
 BASH = support.tool("bash")
@@ -215,7 +217,7 @@ def test_a_failing_locate_project_carries_cargos_text(
     out, err = capfd.readouterr()
     assert (status, out) == (1, "")
     assert err == FAILED_MESSAGE
-    assert len(planted.asked()) == 3
+    assert len(planted.asked()) == ASKED
 
 
 def test_git_failing_is_red_with_gits_words(
@@ -271,7 +273,10 @@ def test_resolved_is_the_roots_or_none_having_said_why(
         ),
         pytest.param(
             ["root"],
-            "belt rust-workspaces: error: argument mode: invalid choice: 'root', maybe you meant 'roots'? (choose from 'roots')",
+            (
+                "belt rust-workspaces: error: argument mode: invalid choice: 'root', "
+                "maybe you meant 'roots'? (choose from 'roots')"
+            ),
             id='["root"]',
         ),
         pytest.param(
@@ -284,7 +289,7 @@ def test_resolved_is_the_roots_or_none_having_said_why(
 def test_anything_but_roots_is_a_usage_error(
     argv: list[str], error: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    """No subcommand, or another: exit 2 and the usage line: argparse's exit 2, its usage and its error."""
+    """No subcommand, or another: argparse's exit 2 and its error."""
     with pytest.raises(SystemExit) as ended:
         rust_workspaces.main(argv)
     out, err = capfd.readouterr()
@@ -352,7 +357,12 @@ class Fuzzing:
 
 @fixture
 def fuzzing_state(tmp_path: Path) -> Fuzzing:
-    """Give each row its own Fuzzing."""
+    """Give each row its own Fuzzing.
+
+    Returns:
+        The row's Fuzzing.
+
+    """
     return Fuzzing(tmp_path)
 
 

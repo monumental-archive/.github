@@ -160,7 +160,12 @@ class Lint:
 
 @fixture
 def lint(tmp_path: Path, env: support.Env) -> Lint:
-    """Give each row its own Lint."""
+    """Give each row its own Lint.
+
+    Returns:
+        The row's Lint.
+
+    """
     return Lint(tmp_path, env=env)
 
 
@@ -305,7 +310,10 @@ def test_missing_file_is_an_error(
     [
         pytest.param(
             [],
-            "belt gate-stub: error: the following arguments are required: OWNER/REPO, WORKFLOW",
+            (
+                "belt gate-stub: error: the following arguments are required: "
+                "OWNER/REPO, WORKFLOW"
+            ),
             id="nothing",
         ),
         pytest.param(
@@ -328,7 +336,7 @@ def test_missing_file_is_an_error(
 def test_a_bad_call_is_a_usage_error(
     argv: list[str], error: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    """No canon, half a canon, or no workflow: exit 2 with the usage line: argparse's exit 2, its usage and its error."""
+    """No canon, half a canon, or no workflow: argparse's exit 2 and its error."""
     with pytest.raises(SystemExit) as ended:
         gate_stub.main(argv)
     out, err = capfd.readouterr()

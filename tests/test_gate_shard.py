@@ -19,6 +19,11 @@ from belt.tracked import tracked
 from belt.typed_pytest import fixture
 from tests import support
 
+# The canon's lint shards (mise/gate-shards.toml), and the test rows of
+# THREE with the own run added: its run, test:py, test:rs and test:ts.
+CANON_LINT_SHARDS = 4
+TEST_ROWS = 4
+
 HERE = support.MISE
 CI = HERE.parent / ".github" / "workflows" / "ci.yml"
 
@@ -36,7 +41,7 @@ def test_every_row_is_a_belt_lint() -> None:
 def test_the_canon_defaults() -> None:
     """The table's counts are defaults within the ceiling (#2160)."""
     costs = gate_shard.load()
-    assert costs.lint_shards == 4
+    assert costs.lint_shards == CANON_LINT_SHARDS
     mutants: dict[str, int] = {"rust": 4, "go": 4, "python": 4, "typescript": 8}
     deep: dict[str, int] = {"python": 8, "typescript": 1, "rust": 1}
     assert mutants == costs.languages["mutants"]
@@ -102,22 +107,25 @@ def test_more_shards_than_lints() -> None:
 # A lint weighs its row only where it does not skip.
 def test_when_names_a_tracked_file() -> None:
     """Cargo.toml tracked: the Rust lint weighs its seconds."""
-    assert gate_shard.cost("lint:rust", COSTS, ["Cargo.toml"]) == 300
+    assert (
+        gate_shard.cost("lint:rust", COSTS, ["Cargo.toml"])
+        == COSTS.rows["lint:rust"][0]
+    )
 
 
 def test_when_names_nothing_tracked() -> None:
     """No Cargo.toml: the Rust lint skips, so it weighs the default."""
-    assert gate_shard.cost("lint:rust", COSTS, ["go.mod"]) == 2
+    assert gate_shard.cost("lint:rust", COSTS, ["go.mod"]) == COSTS.default
 
 
 def test_no_when_is_every_tree() -> None:
     """A row without `when` weighs its seconds everywhere."""
-    assert gate_shard.cost("lint:shell", COSTS, []) == 40
+    assert gate_shard.cost("lint:shell", COSTS, []) == COSTS.rows["lint:shell"][0]
 
 
 def test_an_unlisted_lint() -> None:
     """A repository's own lint weighs the default."""
-    assert gate_shard.cost("lint:docs", COSTS, ["Cargo.toml"]) == 2
+    assert gate_shard.cost("lint:docs", COSTS, ["Cargo.toml"]) == COSTS.default
 
 
 def planted(tree: Path, config: str, run: str) -> list[str]:
@@ -198,7 +206,12 @@ class Planted:
 
 @fixture
 def planted_state(tmp_path: Path) -> Planted:
-    """Give each row its own Planted."""
+    """Give each row its own Planted.
+
+    Returns:
+        The row's Planted.
+
+    """
     return Planted(tmp_path)
 
 
@@ -218,7 +231,12 @@ class Plan(Planted):
 
 @fixture
 def plan_state(tmp_path: Path) -> Plan:
-    """Give each row its own Plan."""
+    """Give each row its own Plan.
+
+    Returns:
+        The row's Plan.
+
+    """
     return Plan(tmp_path)
 
 
@@ -271,7 +289,7 @@ def test_tests_own_run_is_a_row_too(plan_state: Plan) -> None:
     )
     rows = legs(gate_shard.plan(COSTS, plan_state.plant(config), plan_state.tree))
     assert ("test", "test", 1, 1) in rows
-    assert sum(r[0] == "test" for r in rows) == 4
+    assert sum(r[0] == "test" for r in rows) == TEST_ROWS
 
 
 def test_the_file_sets_the_lint_count(plan_state: Plan) -> None:
@@ -513,24 +531,32 @@ def test_each_runner(line: object, want: object) -> None:
         ),
         (
             ["run", "lint", "ci:lint", "0", "4"],
-            "belt gate-shard run: error: argument SHARD: '0' is not a positive"
-            " whole number",
+            (
+                "belt gate-shard run: error: argument SHARD: '0' is not a positive"
+                " whole number"
+            ),
         ),
         (
             ["run", "docs", "ci:docs", "1", "1"],
-            "belt gate-shard run: error: argument leg: invalid choice: 'docs'"
-            " (choose from 'lint', 'test', 'properties')",
+            (
+                "belt gate-shard run: error: argument leg: invalid choice: 'docs'"
+                " (choose from 'lint', 'test', 'properties')"
+            ),
         ),
         (["run", "test", "", "1", "1"], "belt gate-shard: error: the task is empty"),
         (
             ["plan", "gate"],
-            "belt gate-shard plan: error: argument LEG: invalid choice: 'gate'"
-            " (choose from '', 'mutants', 'deep-tests')",
+            (
+                "belt gate-shard plan: error: argument LEG: invalid choice: 'gate'"
+                " (choose from '', 'mutants', 'deep-tests')"
+            ),
         ),
         (
             ["deal", "x"],
-            "belt gate-shard deal: error: argument OF: 'x' is not a positive"
-            " whole number",
+            (
+                "belt gate-shard deal: error: argument OF: 'x' is not a positive"
+                " whole number"
+            ),
         ),
     ],
 )

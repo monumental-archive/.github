@@ -1,13 +1,13 @@
 """Table tests for the majors pgrx is built at by three tasks (#1795).
 
 Each task's helper, `main` of belt.rust_lint, belt.pg_clippy or
-belt.msrv_lint, runs in this process against a stub surface of two extensions, `first` (majors 15,16,17) and `second`
-(14,15,16), and one plain crate. Both tasks once derived the majors by
-hand and kept the last extension's, so `fix:rust` registered `14,15,16`
-and fixed both extensions at pg16, and `lint:msrv` registered pg16
-alone. Now both take the derivation from pgrx-env.sh: each extension
-is built at its own highest major, and the union, `16,17`, is what is
-registered.
+belt.msrv_lint, runs in this process against a stub surface of two
+extensions, `first` (majors 15,16,17) and `second` (14,15,16), and one
+plain crate. Both tasks once derived the majors by hand and kept the
+last extension's, so `fix:rust` registered `14,15,16` and fixed both
+extensions at pg16, and `lint:msrv` registered pg16 alone. Now both take
+the derivation from pgrx-env.sh: each extension is built at its own
+highest major, and the union, `16,17`, is what is registered.
 
 `cargo`, `git`, `mise` and `rustup` are stubs on PATH that log what
 they were asked, and the belt commands the helpers call in process
@@ -238,7 +238,12 @@ HELPERS: dict[str, Callable[[], int]] = {
 def two_extensions(
     tmp_path: Path, belt: support.Belt, env: support.Env
 ) -> TwoExtensions:
-    """Give each row its own TwoExtensions."""
+    """Give each row its own TwoExtensions.
+
+    Returns:
+        The row's TwoExtensions.
+
+    """
     return TwoExtensions(tmp_path, belt=belt, env=env)
 
 
@@ -368,7 +373,7 @@ def test_lint_msrv_red_compile_says_the_rule_and_keeps_its_status(
     """
     two_extensions.env["PLANT_CHECK_FAILS"] = "1"
     status, out, err = two_extensions.run_task("lint:msrv", monkeypatch, capfd)
-    assert status == 101, err
+    assert status == support.CARGO_FAILED, err
     failed = [line for line in two_extensions.logged() if "--failed" in line]
     want: list[str] = ["belt msrv-plan --failed 1.82.0 first@0.1.0 --root Cargo.toml"]
     assert want == failed

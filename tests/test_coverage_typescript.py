@@ -9,13 +9,17 @@ and never repeated (#2105), its coverage provider, and every leg
 printed beside Python's.
 """
 
-from tests import support
+from typing import TYPE_CHECKING
+
 from tests.test_coverage_tasks import (
     MEASURED_VITEST,
     run_in_tree,
     upload_line,
     vitest_runs,
 )
+
+if TYPE_CHECKING:
+    from tests import support
 
 # The stub vitest's count when the suite never ran.
 NO_RUNS: list[str] = []

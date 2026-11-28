@@ -211,7 +211,12 @@ class Planted:
 
 @fixture
 def planted(tmp_path: Path, env: support.Env) -> Planted:
-    """Give each row its own Planted."""
+    """Give each row its own Planted.
+
+    Returns:
+        The row's Planted.
+
+    """
     return Planted(tmp_path, env=env)
 
 
@@ -410,22 +415,34 @@ def test_not_utf8_is_an_error(
     [
         pytest.param(
             [],
-            "belt template-drift: error: the following arguments are required: OWNER/REPO, TEMPLATE",
+            (
+                "belt template-drift: error: the following arguments are required: "
+                "OWNER/REPO, TEMPLATE"
+            ),
             id="nothing",
         ),
         pytest.param(
             [CANON],
-            "belt template-drift: error: the following arguments are required: TEMPLATE",
+            (
+                "belt template-drift: error: the following arguments are required: "
+                "TEMPLATE"
+            ),
             id="[CANON]",
         ),
         pytest.param(
             ["/repo", STUB],
-            "belt template-drift: error: argument OWNER/REPO: '/repo' is not OWNER/REPO",
+            (
+                "belt template-drift: error: argument OWNER/REPO: '/repo' is not "
+                "OWNER/REPO"
+            ),
             id='["/repo", STUB]',
         ),
         pytest.param(
             ["owner/", STUB],
-            "belt template-drift: error: argument OWNER/REPO: 'owner/' is not OWNER/REPO",
+            (
+                "belt template-drift: error: argument OWNER/REPO: 'owner/' is not "
+                "OWNER/REPO"
+            ),
             id='["owner/", STUB]',
         ),
     ],
@@ -433,7 +450,7 @@ def test_not_utf8_is_an_error(
 def test_a_bad_call_is_a_usage_error(
     argv: list[str], error: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    """No canon, half a canon, or no template: exit 2 with the usage line: argparse's exit 2, its usage and its error."""
+    """No canon, half a canon, or no template: argparse's exit 2 and its error."""
     with pytest.raises(SystemExit) as ended:
         template_drift.main(argv)
     out, err = capfd.readouterr()

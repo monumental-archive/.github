@@ -392,11 +392,7 @@ class Environments:
 
         """
         name = dotted(call.func) or ""
-        if name == "support.environment":
-            return True
-        if isinstance(call.func, ast.Attribute) and call.func.attr == "make_env":
-            return True
-        if isinstance(call.func, ast.Name) and self.builds(call.func.id, call):
+        if self.builder(call, name):
             return True
         if name == "dict":
             return bool(call.args) and bool(self.hermetic(call.args[0], seen))
@@ -407,9 +403,23 @@ class Environments:
                 self.hermetic(r, seen | {function}) for r in found
             )
         aliases = self.values(name, call) if name else None
-        if not aliases:
-            return False
-        return all(dotted(a) == "support.environment" for a in aliases)
+        return bool(aliases) and all(
+            dotted(a) == "support.environment" for a in aliases or []
+        )
+
+    def builder(self, call: ast.Call, name: str) -> bool:
+        """Say whether a call is itself one of the environment's builders.
+
+        Returns:
+            True for `support.environment(...)`, a state's `make_env`, and
+            the `env` fixture where an enclosing function takes it.
+
+        """
+        if name == "support.environment":
+            return True
+        if isinstance(call.func, ast.Attribute):
+            return call.func.attr == "make_env"
+        return isinstance(call.func, ast.Name) and self.builds(call.func.id, call)
 
     def builds(self, name: str, node: ast.AST) -> bool:
         """Say whether a name is the `env` fixture where a node stands.
@@ -828,7 +838,12 @@ class Tracked:
 
 @fixture
 def tracked_state(tmp_path: Path, env: support.Env) -> Tracked:
-    """Give each row its own Tracked."""
+    """Give each row its own Tracked.
+
+    Returns:
+        The row's Tracked.
+
+    """
     return Tracked(tmp_path, env=env)
 
 
@@ -844,7 +859,8 @@ def test_an_empty_listing_is_red_by_name(tracked_state: Tracked) -> None:
     with pytest.raises(RuntimeError) as raised:
         support.tracked(tracked_state.root, "*.rs")
     assert str(raised.value) == (
-        f"support.tracked: git lists no tracked file under {tracked_state.root} for ['*.rs']"
+        f"support.tracked: git lists no tracked file under {tracked_state.root} "
+        "for ['*.rs']"
     )
 
 
@@ -880,7 +896,12 @@ class Tool:
 
 @fixture
 def tool_state(tmp_path: Path) -> Tool:
-    """Give each row its own Tool."""
+    """Give each row its own Tool.
+
+    Returns:
+        The row's Tool.
+
+    """
     return Tool(tmp_path)
 
 
@@ -952,7 +973,12 @@ class Rustc:
 
 @fixture
 def rustc_state(tmp_path: Path) -> Rustc:
-    """Give each row its own Rustc."""
+    """Give each row its own Rustc.
+
+    Returns:
+        The row's Rustc.
+
+    """
     return Rustc(tmp_path)
 
 
@@ -984,7 +1010,12 @@ class Belt:
 
 @fixture
 def belt_state(tmp_path: Path) -> Belt:
-    """Give each row its own Belt."""
+    """Give each row its own Belt.
+
+    Returns:
+        The row's Belt.
+
+    """
     return Belt(tmp_path)
 
 
@@ -1169,7 +1200,7 @@ def test_each_way_to_build_an_environment_is_judged() -> None:
         + "def run(env):\n    subprocess.run(a, env=env)\n"
         + "run(support.environment())\n",
     }
-    for name, source in allowed.items():
+    for source in allowed.values():
         assert Environments(source).built_by_hand() == NOTHING
 
 
@@ -1445,5 +1476,5 @@ def test_each_plain_listing_is_refused_whatever_the_root() -> None:
         "tracked": 'support.tracked(tree, "*.py")\n',
         "text": 'X = "git ls-files"\n',
     }
-    for name, source in allowed.items():
+    for source in allowed.values():
         assert list[int]() == plain_listings(source)

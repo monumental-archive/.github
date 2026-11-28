@@ -90,7 +90,12 @@ class ActionsLint:
 
 @fixture
 def actions_lint_state(tmp_path: Path) -> ActionsLint:
-    """Give each row its own ActionsLint."""
+    """Give each row its own ActionsLint.
+
+    Returns:
+        The row's ActionsLint.
+
+    """
     return ActionsLint(tmp_path)
 
 
@@ -147,7 +152,7 @@ def test_the_two_ignores_are_anchored() -> None:
 def test_no_workflow_is_a_usage_error(
     argv: list[str], error: str, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    """No file named: exit 2, never a walk of the directory: argparse's exit 2, its usage and its error."""
+    """No file named: argparse's exit 2 and its error."""
     with pytest.raises(SystemExit) as ended:
         actions_lint.main(argv)
     out, err = capfd.readouterr()
@@ -165,7 +170,7 @@ def test_no_canon_tree_is_refused(
     rel = actions_lint_state.plant(CLEAN)
     actions_lint_state.enter(monkeypatch, ORG_CANON_DIR="")
     status = actions_lint.main([rel])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     assert status == actions_lint.EXIT_ERROR
     refused: list[str] = [
         (

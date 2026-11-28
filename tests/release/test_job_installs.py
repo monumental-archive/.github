@@ -50,6 +50,17 @@ from tests import support
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+# The credentials a step's GH_TOKEN names: the job's own, and the one the
+# token step mints.
+JOBS_OWN = "${{ github.token }}"
+MINTED = "${{ steps.token.outputs.token }}"
+
+# Lower bounds that keep a law from passing vacuously: the tree's helper
+# starts, its population reads on the job token, and its claims.
+MANY_STARTS = 40
+JOB_TOKEN_READS = 4
+CLAIMS_FOUND = 10
+
 # A job and a step, as workflow_yaml reads them.
 Job = dict[str, object]
 Step = dict[str, object]
@@ -669,9 +680,6 @@ def scripts(text: str, seen: set[str], *, env: support.Env) -> str:
         The code of every canon script, belt command and belt task the
         text reaches, transitively, each once.
 
-    Raises:
-        UndecodableError: a reached task whose run is not text.
-
     """
     out = []
     tasks = belt_table("tasks")
@@ -694,16 +702,28 @@ def scripts(text: str, seen: set[str], *, env: support.Env) -> str:
         if task in seen:
             continue
         seen.add(task)
-        run = decoded.as_object(tasks[task], f"[tasks.{task}]")["run"]
-        if isinstance(run, str):
-            body = code(run, env=env)
-        elif decoded.is_strings(run):
-            body = code("\n".join(run), env=env)
-        else:
-            msg = f"[tasks.{task}] run is neither a string nor strings"
-            raise decoded.UndecodableError(msg)
+        body = code(task_run(tasks, task), env=env)
         out += [body, scripts(body, seen, env=env)]
     return "\n".join(out)
+
+
+def task_run(tasks: dict[str, object], task: str) -> str:
+    """Read one belt task's run, a list of lines joined.
+
+    Returns:
+        The task's run as one text.
+
+    Raises:
+        UndecodableError: a run that is not text.
+
+    """
+    run = decoded.as_object(tasks[task], f"[tasks.{task}]")["run"]
+    if isinstance(run, str):
+        return run
+    if decoded.is_strings(run):
+        return "\n".join(run)
+    msg = f"[tasks.{task}] run is neither a string nor strings"
+    raise decoded.UndecodableError(msg)
 
 
 def word(name: str, text: str) -> bool:
@@ -1192,7 +1212,7 @@ def test_the_release_job_reads_with_a_token_that_can() -> None:
     job = load("release.yml")["release-pr"]
     floor = step(job, "Re-derive the coverage floor")
     assert floor["run"] == ".org-canon/release/derive-coverage-floor.sh"
-    assert table(floor, "env")["GH_TOKEN"] == "${{ github.token }}"
+    assert table(floor, "env")["GH_TOKEN"] == JOBS_OWN
     assert table(job, "permissions").get("actions") == "read"
 
 
@@ -1244,7 +1264,7 @@ def test_the_figures_step_follows_the_gate() -> None:
 # The coverage upload installs no measurement tool (#1528).
 def test_the_upload_installs_and_runs_nothing(env: support.Env) -> None:
     """The real job: download, list, hand to Codecov."""
-    for workflow, job_id in GATE_NONE.keys():
+    for workflow, job_id in GATE_NONE:
         assert strings() == measures(workflow, job_id, load(workflow)[job_id], env=env)
 
 
@@ -2036,7 +2056,7 @@ def test_the_scan_reaches_the_helper_starts() -> None:
     starts = sum(
         text.count('"${ORG_PYTHON}" ') for text in workflow_and_action_texts().values()
     )
-    assert starts > 40
+    assert starts > MANY_STARTS
 
 
 def test_the_runners_python3_is_named(env: support.Env) -> None:
@@ -2231,7 +2251,7 @@ def test_the_scan_reaches_the_population_reads() -> None:
         ".github/workflows/vex-attest.yml: plan / "
         "Resolve subjects from the products the statements name"
     ) in reads
-    assert len(reads) >= 4
+    assert len(reads) >= JOB_TOKEN_READS
 
 
 def test_the_job_token_is_named_at_every_level() -> None:
@@ -2306,9 +2326,7 @@ def test_the_plan_mints_before_the_step_that_reads() -> None:
     assert len(reads) == 1
     assert field(mint, "id") == "token"
     assert at < reads[0]
-    assert (
-        table(plan[reads[0]], "env")["GH_TOKEN"] == "${{ steps.token.outputs.token }}"
-    )
+    assert table(plan[reads[0]], "env")["GH_TOKEN"] == MINTED
 
 
 def test_the_mint_mirrors_the_audit_walks() -> None:
@@ -2409,7 +2427,7 @@ def test_the_scan_reaches_the_environment_jobs() -> None:
         ".github/workflows/source-attest.yml: claims reads"
         " SOURCE_RULES_TOKEN outside environment source-attest"
     ) in found
-    assert len(found) >= 10
+    assert len(found) >= CLAIMS_FOUND
 
 
 def test_each_form_and_a_wrong_environment_are_read() -> None:

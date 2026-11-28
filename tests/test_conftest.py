@@ -84,6 +84,8 @@ def test_a_test_that_leaves_the_directory_moved_fails_by_name(
     result = pytester.runpytest_inprocess()
     result.assert_outcomes(passed=1, errors=1)
     result.stdout.fnmatch_lines([
-        "*test_moves.py::test_moves left the working directory at *"
-        f" (the suite runs from {start}); take monkeypatch.chdir*",
+        (
+            "*test_moves.py::test_moves left the working directory at *"
+            f" (the suite runs from {start}); take monkeypatch.chdir*"
+        ),
     ])

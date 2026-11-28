@@ -29,7 +29,7 @@ import re
 import string
 import subprocess
 
-from belt import findings
+from belt import findings, typed_std
 
 # What bash's [[:space:]] matches: a body of only these is empty.
 SPACE = frozenset(string.whitespace)
@@ -202,8 +202,7 @@ def check(path: pathlib.Path, number: str) -> None:
 
     """
     done = subprocess.run(
-        # ruff: ignore[start-process-with-partial-path]
-        ["mise", "run", "commits:check"],
+        [typed_std.on_path("mise"), "run", "commits:check"],
         env={**os.environ, "ORG_COMMIT_MSG_FILE": str(path)},
         check=False,
     )

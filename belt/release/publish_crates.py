@@ -63,7 +63,6 @@ import json
 import os
 import subprocess
 import urllib.error
-import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
@@ -101,9 +100,8 @@ def http(
         RefusalError: what answered is not an HTTP response.
 
     """
-    # ruff: ignore[suspicious-url-open-usage] - https URLs this file names
-    req = urllib.request.Request(url, data=data, headers=dict(headers), method=method)
     try:
+        req = typed_std.request(url, data=data, headers=headers, method=method)
         with typed_std.urlopen(req, timeout=TIMEOUT) as resp:
             return Response(resp.status, resp.read())
     except typed_std.NotAResponseError as e:

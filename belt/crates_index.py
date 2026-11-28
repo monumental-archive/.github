@@ -37,14 +37,16 @@ def index_path(name: str) -> str:
 
     """
     lower = name.lower()
-    if not lower:
-        msg = "a crate with no name has no index record"
-        raise ValueError(msg)
-    if len(lower) <= 2:  # ruff: ignore[magic-value-comparison] - cargo's own buckets
-        return f"{len(lower)}/{lower}"
-    if len(lower) == 3:  # ruff: ignore[magic-value-comparison] - cargo's own buckets
-        return f"3/{lower[0]}/{lower}"
-    return f"{lower[0:2]}/{lower[2:4]}/{lower}"
+    match len(lower):
+        case 0:
+            msg = "a crate with no name has no index record"
+            raise ValueError(msg)
+        case 1 | 2:
+            return f"{len(lower)}/{lower}"
+        case 3:
+            return f"3/{lower[0]}/{lower}"
+        case _:
+            return f"{lower[0:2]}/{lower[2:4]}/{lower}"
 
 
 def index_url(name: str) -> str:

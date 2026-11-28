@@ -10,14 +10,14 @@ pinned here once.
 import os
 from typing import TYPE_CHECKING
 
-import pytest
-
 from belt import tool_python
 from belt.typed_pytest import fixture
 from tests import support
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    import pytest
 
 LABEL = "probe"
 
@@ -76,7 +76,12 @@ class ToolPython:
 
 @fixture
 def tool_python_state(tmp_path: Path, env: support.Env) -> ToolPython:
-    """Give each row its own ToolPython."""
+    """Give each row its own ToolPython.
+
+    Returns:
+        The row's ToolPython.
+
+    """
     return ToolPython(tmp_path, env=env)
 
 

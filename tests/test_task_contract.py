@@ -464,7 +464,12 @@ class Selection:
 
 @fixture
 def selection(tmp_path: Path, belt: support.Belt, env: support.Env) -> Selection:
-    """Give each row its own Selection."""
+    """Give each row its own Selection.
+
+    Returns:
+        The row's Selection.
+
+    """
     return Selection(tmp_path, belt=belt, env=env)
 
 
@@ -496,7 +501,7 @@ def test_unknown_leg_is_red_by_name(selection: Selection) -> None:
     """A typo never runs nothing and passes."""
     done = selection.run_task(MUTANTS_LEG="cobol")
     assert done.returncode == 1
-    assert done.stdout == ""
+    assert not done.stdout
     want: list[str] = [
         (
             "audit:mutants: MUTANTS_LEG='cobol' names no leg"

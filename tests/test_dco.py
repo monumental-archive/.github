@@ -82,7 +82,7 @@ def test_a_sign_off_ahead_of_many_trailers_is_found(env: support.Env) -> None:
         f"Signed-off-by: Co {n} <co{n}@example.invalid>\n" for n in range(4000)
     )
     done = run(f"fix: planted\n\n{SIGN_OFF}\n{others}", env=env)
-    assert done.stderr == ""
+    assert not done.stderr
     assert done.returncode == 0
 
 

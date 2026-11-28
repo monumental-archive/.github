@@ -205,7 +205,12 @@ class Planted:
 
 @fixture
 def planted(tmp_path: Path, env: support.Env) -> Planted:
-    """Give each row its own Planted."""
+    """Give each row its own Planted.
+
+    Returns:
+        The row's Planted.
+
+    """
     return Planted(tmp_path, env=env)
 
 
@@ -303,7 +308,12 @@ class Zizmor(Planted):
 
 @fixture
 def zizmor(tmp_path: Path, env: support.Env) -> Zizmor:
-    """Give each row its own Zizmor."""
+    """Give each row its own Zizmor.
+
+    Returns:
+        The row's Zizmor.
+
+    """
     return Zizmor(tmp_path, env=env)
 
 
@@ -445,7 +455,12 @@ class CanonSources(Planted):
 
 @fixture
 def canon_sources(tmp_path: Path, env: support.Env) -> CanonSources:
-    """Give each row its own CanonSources."""
+    """Give each row its own CanonSources.
+
+    Returns:
+        The row's CanonSources.
+
+    """
     return CanonSources(tmp_path, env=env)
 
 
@@ -617,7 +632,12 @@ class AllowlistAudit(Planted):
 
 @fixture
 def allowlist_audit(tmp_path: Path, env: support.Env) -> AllowlistAudit:
-    """Give each row its own AllowlistAudit."""
+    """Give each row its own AllowlistAudit.
+
+    Returns:
+        The row's AllowlistAudit.
+
+    """
     return AllowlistAudit(tmp_path, env=env)
 
 
@@ -639,7 +659,7 @@ def test_a_widened_live_setting_is_drift_by_name(
     """One pattern more in the org than in the belt."""
     done = allowlist_audit.audit([*belt_patterns(), "docker/login-action@*"])
     assert done.returncode == 1
-    assert done.stdout == ""
+    assert not done.stdout
     assert "audit:actions-allowlist: patterns differ" in done.stderr
     assert "docker/login-action@*" in done.stderr
     assert "reconcile mise/actions-allowed.sh and security/README.md" in done.stderr

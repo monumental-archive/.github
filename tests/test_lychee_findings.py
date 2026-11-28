@@ -157,7 +157,12 @@ class Adapter:
 
 @fixture
 def adapter(tmp_path: Path, env: support.Env) -> Adapter:
-    """Give each row its own Adapter."""
+    """Give each row its own Adapter.
+
+    Returns:
+        The row's Adapter.
+
+    """
     return Adapter(tmp_path, env=env)
 
 
@@ -216,7 +221,7 @@ def test_every_entry_is_a_record_in_order(
     })
     adapter.answer(monkeypatch, doc, 2)
     status = lychee_findings.main(["a.md"])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     same(status, 2, err)
     got = [(r["subject"], r["message"], r["detail"]) for r in records(adapter.file)]
     want: list[tuple[object, object, object]] = [
@@ -249,7 +254,7 @@ def test_output_that_is_not_json_is_refused_by_name(
     """A human report: refused with lychee's status, exit 1."""
     adapter.answer(monkeypatch, "[a.md]:\n  [ERROR] missing.md\n", 2)
     status = lychee_findings.main(["a.md"])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     same(status, 1, err)
     assert f"{TASK}: lychee exited 2: the output is not lychee's report" in err
     refused(adapter.file, err)
@@ -264,7 +269,7 @@ def test_a_malformed_entry_records_none(
     doc = report({"a.md": [entry("file:///t/y.md", NOT_FOUND, 1), bad]})
     adapter.answer(monkeypatch, doc, 2)
     status = lychee_findings.main(["a.md"])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     same(status, 1, err)
     assert "error_map[a.md][1]: span is not an object" in err
     refused(adapter.file, err)
@@ -276,7 +281,7 @@ def test_lychee_s_status_is_the_exit(
     """A 3 from lychee with an empty report exits 3."""
     adapter.answer(monkeypatch, report({}), 3)
     status = lychee_findings.main(["a.md"])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     same(status, 3, err)
     same(records(adapter.file), [])
 
@@ -288,7 +293,7 @@ def test_arguments_pass_unchanged_after_the_format(
     args = ["--no-progress", "--config", "a b.toml", "a.md", "b.md"]
     adapter.answer(monkeypatch, report({}), 0)
     status = lychee_findings.main(["--", *args])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     same(status, 0, err)
     same(
         adapter.log.read_text(encoding="utf-8").splitlines(),
@@ -302,7 +307,7 @@ def test_no_lychee_is_refused_by_name(
     """No lychee on PATH: refused by name, exit 1, its one record."""
     adapter.answer(monkeypatch, report({}), 0, path=str(adapter.dir / "empty"))
     status = lychee_findings.main(["a.md"])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     same(status, 1, err)
     assert f"{TASK}: lychee is not on PATH" in err
     refused(adapter.file, err)
@@ -356,7 +361,12 @@ class Task:
 
 @fixture
 def task(tmp_path: Path, env: support.Env) -> Task:
-    """Give each row its own Task."""
+    """Give each row its own Task.
+
+    Returns:
+        The row's Task.
+
+    """
     return Task(tmp_path, env=env)
 
 

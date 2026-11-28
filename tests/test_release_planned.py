@@ -134,19 +134,24 @@ class ReleasePlanned:
         done = self.repo.lint()
         assert done.returncode == 0, done.stderr
         assert done.stdout == f"{NAME}: {line}\n"
-        assert done.stderr == ""
+        assert not done.stderr
 
     def assert_red(self, message: str) -> None:
         """Assert exit 1 with exactly `message` on stderr."""
         done = self.repo.lint()
         assert done.returncode == 1, done.stdout + done.stderr
         assert done.stderr == message
-        assert done.stdout == ""
+        assert not done.stdout
 
 
 @fixture
 def release_planned(tmp_path: Path, env: support.Env) -> ReleasePlanned:
-    """Give each row its own ReleasePlanned."""
+    """Give each row its own ReleasePlanned.
+
+    Returns:
+        The row's ReleasePlanned.
+
+    """
     return ReleasePlanned(tmp_path, env=env)
 
 

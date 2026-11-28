@@ -17,8 +17,6 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import pytest
-
 from belt import bestpractices_owner as owner
 from belt import decoded
 from belt.typed_pytest import fixture
@@ -26,6 +24,8 @@ from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    import pytest
 
 HERE = support.MISE
 

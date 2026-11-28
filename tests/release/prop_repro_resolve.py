@@ -146,8 +146,10 @@ def read_text(text: str) -> None:
     try:
         name = resolve.first_entry_name(path)
     except resolve.StepError as refused:
-        assert str(refused).startswith(f"{path} is not "), refused
+        said = str(refused)
     else:
         assert isinstance(name, str)
+        return
     finally:
         path.unlink()
+    assert said.startswith(f"{path} is not "), said

@@ -12,18 +12,14 @@ import importlib.util
 import os
 import subprocess
 import sys
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import pytest
 
 from belt import launcher
 from tests import support
 
-if TYPE_CHECKING:
-    from pathlib import Path
-
 PYTHON = os.environ.get("ORG_PYTHON") or sys.executable
-EXIT_USAGE = 2
 USAGE = "usage: belt [-h] command\n"
 ROOTS_USAGE = "usage: belt python-roots [-h] BELT_ROOT FILE [FILE ...]\n"
 ROOTS_REFUSED = (
@@ -68,13 +64,13 @@ def test_a_planted_belt_on_pythonpath_never_answers(
         "usage: belt subject-budget [-h]\n"
         "belt subject-budget: error: unrecognized arguments: --no-such-flag\n"
     )
-    assert done.returncode == EXIT_USAGE
+    assert done.returncode == support.USAGE
 
 
 def test_an_unknown_command_exits_2_with_its_message(env: support.Env) -> None:
     """A name no module has: 2, the usage line."""
     done = run("no-such-command", make_env=env)
-    assert done.returncode == EXIT_USAGE
+    assert done.returncode == support.USAGE
     assert done.stderr == (f"{USAGE}belt: error: unknown command 'no-such-command'\n")
     assert not done.stdout
 
@@ -132,7 +128,7 @@ def test_a_call_that_names_no_command_is_a_usage_error(
     """Each way of naming no command: 2 and the usage line, nothing run."""
     with pytest.raises(SystemExit) as ended:
         launcher.launch(argv)
-    assert ended.value.code == EXIT_USAGE
+    assert ended.value.code == support.USAGE
     written = capsys.readouterr()
     assert written.err == message
     assert not written.out
@@ -145,7 +141,7 @@ def test_a_command_gets_its_arguments_and_its_name(
     monkeypatch.setattr(sys, "argv", ["belt"])
     with pytest.raises(SystemExit) as ended:
         launcher.launch(["python-roots"])
-    assert ended.value.code == EXIT_USAGE
+    assert ended.value.code == support.USAGE
     assert sys.argv == ["python-roots"]
     assert capsys.readouterr().err == ROOTS_REFUSED
 
@@ -156,7 +152,7 @@ def test_a_release_command_is_found_in_its_package(
     """The packages are searched in order: belt.release's matrix answers."""
     with pytest.raises(SystemExit) as ended:
         launcher.launch(["matrix"])
-    assert ended.value.code == EXIT_USAGE
+    assert ended.value.code == support.USAGE
     assert capsys.readouterr().err == (
         "usage: belt matrix [-h] {targets,pgrx-extension,pgrx-images,base-images}"
         " ...\nbelt matrix: error: the following arguments are required: mode\n"
@@ -171,7 +167,7 @@ def test_every_command_name_is_one_modules() -> None:
         assert spec is not None
         assert spec.submodule_search_locations is not None
         for where in spec.submodule_search_locations:
-            for name in sorted(os.listdir(where)):
+            for name in sorted(p.name for p in Path(where).iterdir()):
                 if name.endswith(".py") and not name.startswith("__"):
                     owners.setdefault(name[:-3], []).append(package)
     shared = {name: found for name, found in owners.items() if len(found) > 1}

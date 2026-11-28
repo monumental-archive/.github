@@ -28,8 +28,6 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import pytest
-
 from belt import decoded
 from belt import deny_advisories as da
 from belt.typed_pytest import fixture
@@ -37,6 +35,8 @@ from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    import pytest
 
 BELT = support.MISE
 BASH = support.tool("bash")
@@ -99,7 +99,7 @@ def assert_red(
     out, err = capfd.readouterr()
     assert status == 1, out + err
     assert err == refused(*advisories)
-    assert out == ""
+    assert not out
 
 
 def assert_green(
@@ -391,7 +391,12 @@ class AuditDeny:
 
 @fixture
 def audit_deny(tmp_path: Path, canon: support.Canon, env: support.Env) -> AuditDeny:
-    """Give each row its own AuditDeny."""
+    """Give each row its own AuditDeny.
+
+    Returns:
+        The row's AuditDeny.
+
+    """
     return AuditDeny(tmp_path, canon=canon, env=env)
 
 

@@ -43,6 +43,15 @@ from tests import support
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+# The calls and lines rows count: a run that registers nothing, and one
+# that ends in the remedy; what a plan with a blank line says, what a red
+# root leaves said, and what two roots compiled say.
+UNREGISTERED_CALLS = 6
+REMEDY_CALLS = 7
+SAID_FOR_A_BLANK = 2
+SAID_FOR_A_RED_ROOT = 2
+SAID_FOR_TWO_ROOTS = 3
+
 BELT = support.MISE
 TASK = "lint:msrv"
 GIT = support.tool("git")
@@ -382,7 +391,7 @@ def test_an_extension_the_plan_never_compiles_registers_nothing(
     status = msrv_lint.main([])
     assert status == 0
     assert "prepare 17" not in planted.logged()
-    assert len(planted.logged()) == 6
+    assert len(planted.logged()) == UNREGISTERED_CALLS
 
 
 def test_a_red_compile_says_the_rule_and_keeps_cargos_status(
@@ -395,12 +404,12 @@ def test_a_red_compile_says_the_rule_and_keeps_cargos_status(
     status = msrv_lint.main([])
     captured = capfd.readouterr()
     said, err = captured.out.splitlines(), captured.err.splitlines()
-    assert status == 101
+    assert status == support.CARGO_FAILED
     failed = (
         "belt msrv-plan --failed 1.85.0 plain@0.1.0 other@0.1.0 --root Cargo.toml <>"
     )
     assert failed == planted.logged()[-1]
-    assert len(planted.logged()) == 7
+    assert len(planted.logged()) == REMEDY_CALLS
     compiling = lines("lint:msrv: compiling at 1.85.0: plain@0.1.0 other@0.1.0")
     assert compiling == said
     assert lines("lint:msrv: remedy for 1.85.0") == err
@@ -432,7 +441,7 @@ def test_a_blank_plan_line_is_skipped(
     status = msrv_lint.main([])
     said = capfd.readouterr().out.splitlines()
     assert status == 0
-    assert len(said) == 2
+    assert len(said) == SAID_FOR_A_BLANK
 
 
 def test_no_cargo_is_red(
@@ -489,26 +498,31 @@ def test_each_step_that_fails_stops_the_run_with_its_status(
 
 
 @pytest.mark.parametrize(
-    ("step", "code", "last"),
+    "row",
     [
-        ("prepare", 4, "prepare 17"),
-        ("pgrx-postgres", 5, "belt pgrx-postgres --majors 17 <[]>"),
-        (
-            "mise-aqua:theseus-rs/postgresql-binaries",
-            3,
-            "belt pgrx-postgres --majors 17 <>",
+        pytest.param(("prepare", 4, "prepare 17"), id="prepare"),
+        pytest.param(
+            ("pgrx-postgres", 5, "belt pgrx-postgres --majors 17 <[]>"),
+            id="pgrx-postgres",
+        ),
+        pytest.param(
+            (
+                "mise-aqua:theseus-rs/postgresql-binaries",
+                3,
+                "belt pgrx-postgres --majors 17 <>",
+            ),
+            id="mise-aqua:theseus-rs/postgresql-binaries",
         ),
     ],
 )
 def test_a_failed_registration_stops_before_any_compile(
+    row: tuple[str, int, str],
     planted: Planted,
-    step: str,
-    code: int,
-    last: str,
     monkeypatch: pytest.MonkeyPatch,
     capfd: pytest.CaptureFixture[str],
 ) -> None:
     """The prepare's status, or the Postgres check's, and nothing compiled."""
+    step, code, last = row
     planted.plant(PLAIN + EXTENSION, PG_CHECK)
     planted.log.write_text("", encoding="utf-8")
     planted.env["PLANT_FAIL"] = step
@@ -560,11 +574,11 @@ def test_every_root_runs_past_a_red_one(
     planted.enter(monkeypatch, roots=("Cargo.toml", "fuzz/Cargo.toml"))
     status = msrv_lint.main([])
     said = capfd.readouterr().out.splitlines()
-    assert status == 101
+    assert status == support.CARGO_FAILED
     fetched = [line for line in planted.logged() if line.startswith("cargo fetch")]
     want = [FETCH, "cargo fetch --locked --manifest-path fuzz/Cargo.toml"]
     assert want == fetched
-    assert len(said) == 2
+    assert len(said) == SAID_FOR_A_RED_ROOT
 
 
 def test_the_count_covers_every_root(
@@ -577,7 +591,7 @@ def test_the_count_covers_every_root(
     assert status == 0
     count = "lint:msrv: 2 declared minimum(s) compiled at the toolchain they name"
     assert count == said[-1]
-    assert len(said) == 3
+    assert len(said) == SAID_FOR_TWO_ROOTS
 
 
 def test_a_tree_whose_roots_cannot_be_named_is_red(
@@ -698,7 +712,12 @@ class Task:
 
 @fixture
 def task(tmp_path: Path) -> Task:
-    """Give each row its own Task."""
+    """Give each row its own Task.
+
+    Returns:
+        The row's Task.
+
+    """
     return Task(tmp_path)
 
 

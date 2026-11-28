@@ -41,6 +41,9 @@ from tests import support
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+# The gomu runs a leg over the planted module makes.
+GOMU_RUNS = 2
+
 # The task that runs the helper, whose name its findings carry (#1934).
 TASK = "audit:mutants"
 
@@ -337,7 +340,12 @@ class Planted:
 
 @fixture
 def planted(tmp_path: Path, env: support.Env) -> Planted:
-    """Give each row its own Planted."""
+    """Give each row its own Planted.
+
+    Returns:
+        The row's Planted.
+
+    """
     return Planted(tmp_path, env=env)
 
 
@@ -347,8 +355,8 @@ def test_no_gomuignore_skips_clean_by_name(planted: Planted) -> None:
     got = planted.run_leg()
     assert got.returncode == 0, got.stderr
     assert got.stdout == f"{LABEL}: no .gomuignore tracked, skipped\n"
-    assert got.stderr == ""
-    assert planted.log.read_text(encoding="utf-8") == ""
+    assert not got.stderr
+    assert not planted.log.read_text(encoding="utf-8")
     assert (planted.summary / "go.tsv").read_text(
         encoding="utf-8"
     ) == "whole\tskipped\n"
@@ -359,7 +367,7 @@ def test_a_pattern_in_the_root_gomuignore_is_red_by_name(planted: Planted) -> No
     planted.adopt("# reason\nb/\n")
     got = planted.run_leg()
     assert got.returncode == 1
-    assert got.stdout == ""
+    assert not got.stdout
     assert got.stderr == (
         f"{LABEL}: pattern in .gomuignore:2: b/\n"
         "  a .gomuignore pattern drops whole files from the run and the count;\n"
@@ -395,7 +403,7 @@ def test_clean_run_is_green_with_the_summary(planted: Planted) -> None:
     got = planted.run_leg()
     assert got.returncode == 0, got.stderr
     assert got.stdout == measuring() + summary_line((4, 3, 0, 0, 1, 0))
-    assert got.stderr == ""
+    assert not got.stderr
 
 
 def test_one_survivor_is_red_with_file_and_line(planted: Planted) -> None:
@@ -590,7 +598,12 @@ class Records(Planted):
 
 @fixture
 def records(tmp_path: Path, env: support.Env) -> Records:
-    """Give each row its own Records."""
+    """Give each row its own Records.
+
+    Returns:
+        The row's Records.
+
+    """
     return Records(tmp_path, env=env)
 
 
@@ -748,7 +761,7 @@ def test_a_mise_shim_is_resolved_to_the_binary(planted: Planted) -> None:
     planted.env["PLANT_REAL_GOMU"] = f"{planted.shims}/gomu"
     got = planted.run_leg()
     assert got.returncode == 0, got.stderr
-    assert len(planted.calls("gomu run")) == 2
+    assert len(planted.calls("gomu run")) == GOMU_RUNS
 
 
 def test_a_gomu_built_with_an_older_go_is_refused(planted: Planted) -> None:
@@ -758,7 +771,7 @@ def test_a_gomu_built_with_an_older_go_is_refused(planted: Planted) -> None:
     planted.env["PLANT_GOMU_GO"] = "go1.24.13"
     got = planted.run_leg()
     assert got.returncode == 1
-    assert got.stdout == ""
+    assert not got.stdout
     assert got.stderr == (
         f"{LABEL}: {planted.shims}/gomu was built with go1.24.13, older than the"
         " go1.27.4 it runs under —\n"
@@ -791,8 +804,8 @@ def test_a_long_build_report_is_read_to_the_end(planted: Planted) -> None:
     planted.env["PLANT_GOMU_TAIL"] = "200000"
     got = planted.run_leg()
     assert got.returncode == 0, got.stderr
-    assert got.stderr == ""
-    assert len(planted.calls("gomu run")) == 2
+    assert not got.stderr
+    assert len(planted.calls("gomu run")) == GOMU_RUNS
 
 
 def test_nothing_gomu_writes_lands_in_the_tree(planted: Planted) -> None:
@@ -944,7 +957,12 @@ class Main:
 
 @fixture
 def main_state(tmp_path: Path) -> Main:
-    """Give each row its own Main."""
+    """Give each row its own Main.
+
+    Returns:
+        The row's Main.
+
+    """
     return Main(tmp_path)
 
 

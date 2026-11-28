@@ -237,7 +237,12 @@ class Planted:
 
 @fixture
 def planted(tmp_path: Path, belt: support.Belt, env: support.Env) -> Planted:
-    """Give each row its own Planted."""
+    """Give each row its own Planted.
+
+    Returns:
+        The row's Planted.
+
+    """
     return Planted(tmp_path, belt=belt, env=env)
 
 
@@ -272,7 +277,12 @@ class TheDeclaration(Planted):
 def the_declaration(
     tmp_path: Path, belt: support.Belt, env: support.Env
 ) -> TheDeclaration:
-    """Give each row its own TheDeclaration."""
+    """Give each row its own TheDeclaration.
+
+    Returns:
+        The row's TheDeclaration.
+
+    """
     return TheDeclaration(tmp_path, belt=belt, env=env)
 
 
@@ -622,7 +632,12 @@ class TheReaderAgrees:
 
 @fixture
 def the_reader_agrees(tmp_path: Path, env: support.Env) -> TheReaderAgrees:
-    """Give each row its own TheReaderAgrees."""
+    """Give each row its own TheReaderAgrees.
+
+    Returns:
+        The row's TheReaderAgrees.
+
+    """
     return TheReaderAgrees(tmp_path, env=env)
 
 

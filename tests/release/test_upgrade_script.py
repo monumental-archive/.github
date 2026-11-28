@@ -139,7 +139,7 @@ def emitted(args: list[str]) -> str:
 
     """
     out = Path(args[2])
-    return out.read_text() if out.exists() else ""
+    return out.read_text(encoding="utf-8") if out.exists() else ""
 
 
 # The DDL deltas, named once. Kept out of the concatenations below
@@ -254,7 +254,7 @@ def test_one_character_more_refuses_with_the_arithmetic(
     assert result.returncode == 1
     assert "the psql guard would exceed 80 columns" in result.stderr
     assert f"= {GUARD_COLUMNS + 1} > {GUARD_COLUMNS}" in result.stderr
-    assert script == ""
+    assert not script
 
 
 # What the diff of two generated schemas is allowed to become.
@@ -377,7 +377,7 @@ def test_a_changed_named_object_refuses_and_names_the_remedy(
     assert result.returncode == 1
     assert "TYPE lab_pair changed since 0.27.0" in result.stderr
     assert "sql/next-data.sql" in result.stderr
-    assert script == ""
+    assert not script
 
 
 def test_a_new_opaque_statement_refuses(
@@ -575,10 +575,13 @@ def test_without_the_block_nothing_changes(
 
 
 @pytest.mark.parametrize(
-    ("name", "prev", "new"), THE_TAG_ANYWHERE_ELSE_IS_REFUSED_BY_NAME_ROWS
+    ("prev", "new"),
+    [
+        pytest.param(prev, new, id=name)
+        for name, prev, new in THE_TAG_ANYWHERE_ELSE_IS_REFUSED_BY_NAME_ROWS
+    ],
 )
 def test_the_tag_anywhere_else_is_refused_by_name(
-    name: str,
     prev: object,
     new: object,
     capfd: pytest.CaptureFixture[str],
@@ -593,11 +596,13 @@ def test_the_tag_anywhere_else_is_refused_by_name(
 
 
 @pytest.mark.parametrize(
-    ("name", "prev", "new"),
-    A_CANDIDATE_CARRYING_THE_BLOCK_IS_REFUSED_NOT_DIFFED_ROWS,
+    ("prev", "new"),
+    [
+        pytest.param(prev, new, id=name)
+        for name, prev, new in A_CANDIDATE_CARRYING_THE_BLOCK_IS_REFUSED_NOT_DIFFED_ROWS
+    ],
 )
 def test_a_candidate_carrying_the_block_is_refused_not_diffed(
-    name: str,
     prev: object,
     new: object,
     capfd: pytest.CaptureFixture[str],
