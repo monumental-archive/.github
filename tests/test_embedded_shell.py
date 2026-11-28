@@ -12,11 +12,9 @@ is a branch of the TASK, not the helper, and a guard that skips when it
 should run looks like success.
 """
 
-import io
 import os
 import subprocess
 import tempfile
-from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
@@ -106,18 +104,6 @@ class Tree:
         """
         return f"{self.wf}\t{name}\t{lines}{ISSUE}\n"
 
-    def run(self, *, write: bool = False) -> tuple[int, str, str]:
-        """Run the ceiling over the workflow.
-
-        Returns:
-            (exit status, stdout, stderr).
-
-        """
-        out, err = io.StringIO(), io.StringIO()
-        with redirect_stdout(out), redirect_stderr(err):
-            rc = es.ceiling([str(self.wf)], self.debt, write=write)
-        return rc, out.getvalue(), err.getvalue()
-
 
 class Ceiling:
     """The Done-when rows of #1352, one guard branch each."""
@@ -143,17 +129,24 @@ def ceiling_state(tmp_path: Path) -> Ceiling:
     return Ceiling(tmp_path)
 
 
-def test_at_the_ceiling_passes(ceiling_state: Ceiling) -> None:
+def test_at_the_ceiling_passes(
+    ceiling_state: Ceiling, capfd: pytest.CaptureFixture[str]
+) -> None:
     """Fifteen counted lines is allowed with no entry."""
-    rc, out, err = ceiling_state.tree(workflow(step("Fits", 15))).run()
+    t = ceiling_state.tree(workflow(step("Fits", 15)))
+    rc = es.ceiling([str(t.wf)], t.debt, write=False)
+    out, err = capfd.readouterr()
     assert (rc, err) == (0, "")
     assert "every run: block fits 15 lines or its debt entry" in out
 
 
-def test_over_and_unlisted_is_red_by_file_and_step(ceiling_state: Ceiling) -> None:
+def test_over_and_unlisted_is_red_by_file_and_step(
+    ceiling_state: Ceiling, capfd: pytest.CaptureFixture[str]
+) -> None:
     """Sixteen lines with no entry names the file, the step and the count."""
     t = ceiling_state.tree(workflow(step("Big", 16)))
-    rc, _, err = t.run()
+    rc = es.ceiling([str(t.wf)], t.debt, write=False)
+    err = capfd.readouterr().err
     assert rc == 1
     assert (
         f"{t.wf}:8: step 'Big' holds a run: block of 16 lines, over the "
@@ -161,20 +154,26 @@ def test_over_and_unlisted_is_red_by_file_and_step(ceiling_state: Ceiling) -> No
     ) in err
 
 
-def test_listed_and_equal_passes(ceiling_state: Ceiling) -> None:
+def test_listed_and_equal_passes(
+    ceiling_state: Ceiling, capfd: pytest.CaptureFixture[str]
+) -> None:
     """An entry naming the block at its count covers it."""
     t = ceiling_state.tree(workflow(step("Big", 16)))
     t.debt.write_text(t.entry("Big", 16), encoding="utf-8")
-    rc, out, err = t.run()
+    rc = es.ceiling([str(t.wf)], t.debt, write=False)
+    out, err = capfd.readouterr()
     assert (rc, err) == (0, "")
     assert "lowers the entry" not in out
 
 
-def test_listed_and_grown_is_red(ceiling_state: Ceiling) -> None:
+def test_listed_and_grown_is_red(
+    ceiling_state: Ceiling, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A block past its entry's number is red, naming both numbers."""
     t = ceiling_state.tree(workflow(step("Big", 17)))
     t.debt.write_text("# header\n" + t.entry("Big", 16), encoding="utf-8")
-    rc, _, err = t.run()
+    rc = es.ceiling([str(t.wf)], t.debt, write=False)
+    err = capfd.readouterr().err
     assert rc == 1
     assert (
         f"step 'Big' holds 17 lines, more than its debt entry's 16 "
@@ -182,18 +181,22 @@ def test_listed_and_grown_is_red(ceiling_state: Ceiling) -> None:
     ) in err
 
 
-def test_shrunk_but_over_passes_and_fix_lowers_it(ceiling_state: Ceiling) -> None:
+def test_shrunk_but_over_passes_and_fix_lowers_it(
+    ceiling_state: Ceiling, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A shrunk block passes; fix writes the new number, nothing else."""
     t = ceiling_state.tree(workflow(step("Big", 17), step("Other", 20)))
     before = "# keep me\n" + t.entry("Big", 30) + t.entry("Other", 20)
     t.debt.write_text(before, encoding="utf-8")
-    rc, out, err = t.run()
+    rc = es.ceiling([str(t.wf)], t.debt, write=False)
+    out, err = capfd.readouterr()
     assert (rc, err) == (0, "")
     assert (
         f"{t.debt}:2: the block now holds 17 lines — "
         "mise run fix:workflow-shell lowers the entry"
     ) in out
-    rc, out, _ = t.run(write=True)
+    rc = es.ceiling([str(t.wf)], t.debt, write=True)
+    out = capfd.readouterr().out
     assert rc == 0
     assert "1 entry(ies) lowered, 0 removed" in out
     assert t.debt.read_text(encoding="utf-8") == "# keep me\n" + t.entry(
@@ -202,43 +205,49 @@ def test_shrunk_but_over_passes_and_fix_lowers_it(ceiling_state: Ceiling) -> Non
 
 
 def test_entry_whose_block_fits_is_stale_and_fix_removes_it(
-    ceiling_state: Ceiling,
+    ceiling_state: Ceiling, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """An entry for a block now at the ceiling is red; fix drops it."""
     t = ceiling_state.tree(workflow(step("Big", 15)))
     t.debt.write_text(t.entry("Big", 16), encoding="utf-8")
-    rc, _, err = t.run()
+    rc = es.ceiling([str(t.wf)], t.debt, write=False)
+    err = capfd.readouterr().err
     assert rc == 1
     assert (
         f"{t.debt}:1: step 'Big' in {t.wf} now fits the ceiling (15 lines) "
         "— remove the entry (mise run fix:workflow-shell)"
     ) in err
-    _, out, _ = t.run(write=True)
+    es.ceiling([str(t.wf)], t.debt, write=True)
+    out = capfd.readouterr().out
     assert "0 entry(ies) lowered, 1 removed" in out
     assert t.debt.read_text(encoding="utf-8") == "\n"
-    assert t.run()[0] == 0
+    assert es.ceiling([str(t.wf)], t.debt, write=False) == 0
 
 
 def test_entry_naming_nothing_is_stale_and_fix_removes_it(
-    ceiling_state: Ceiling,
+    ceiling_state: Ceiling, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """An entry for a step that does not exist is red; fix drops it."""
     t = ceiling_state.tree(workflow(step("Big", 16)))
     t.debt.write_text(t.entry("Big", 16) + t.entry("Gone", 40), encoding="utf-8")
-    rc, _, err = t.run()
+    rc = es.ceiling([str(t.wf)], t.debt, write=False)
+    err = capfd.readouterr().err
     assert rc == 1
     assert (
         f"{t.debt}:2: step 'Gone' in {t.wf} names no run: block "
         "— remove the entry (mise run fix:workflow-shell)"
     ) in err
-    t.run(write=True)
+    es.ceiling([str(t.wf)], t.debt, write=True)
     assert t.debt.read_text(encoding="utf-8") == t.entry("Big", 16)
 
 
-def test_unnamed_oversized_step_is_red(ceiling_state: Ceiling) -> None:
+def test_unnamed_oversized_step_is_red(
+    ceiling_state: Ceiling, capfd: pytest.CaptureFixture[str]
+) -> None:
     """An oversized block in a step with no name cannot be keyed."""
     t = ceiling_state.tree(workflow(step(None, 16)))
-    rc, _, err = t.run()
+    rc = es.ceiling([str(t.wf)], t.debt, write=False)
+    err = capfd.readouterr().err
     assert rc == 1
     assert (
         f"{t.wf}:7: a run: block of 16 lines, over the 15-line ceiling, in a "
@@ -246,11 +255,14 @@ def test_unnamed_oversized_step_is_red(ceiling_state: Ceiling) -> None:
     ) in err
 
 
-def test_duplicated_step_name_is_red_even_when_listed(ceiling_state: Ceiling) -> None:
+def test_duplicated_step_name_is_red_even_when_listed(
+    ceiling_state: Ceiling, capfd: pytest.CaptureFixture[str]
+) -> None:
     """Two blocks sharing a name make the key ambiguous."""
     t = ceiling_state.tree(workflow(step("Twin", 16), step("Twin", 3)))
     t.debt.write_text(t.entry("Twin", 16), encoding="utf-8")
-    rc, _, err = t.run()
+    rc = es.ceiling([str(t.wf)], t.debt, write=False)
+    err = capfd.readouterr().err
     assert rc == 1
     assert (
         "step 'Twin' holds a run: block of 16 lines, over the 15-line "
@@ -259,25 +271,31 @@ def test_duplicated_step_name_is_red_even_when_listed(ceiling_state: Ceiling) ->
     ) in err
 
 
-def test_fix_never_adds_an_entry(ceiling_state: Ceiling) -> None:
+def test_fix_never_adds_an_entry(
+    ceiling_state: Ceiling, capfd: pytest.CaptureFixture[str]
+) -> None:
     """An unlisted block stays red after fix, the file untouched."""
     t = ceiling_state.tree(workflow(step("Big", 16)))
     t.debt.write_text("# only a header\n", encoding="utf-8")
-    rc, out, _ = t.run(write=True)
+    rc = es.ceiling([str(t.wf)], t.debt, write=True)
+    out = capfd.readouterr().out
     assert rc == 0
     assert "0 entry(ies) lowered, 0 removed; it never adds one" in out
     assert t.debt.read_text(encoding="utf-8") == "# only a header\n"
-    assert t.run()[0] == 1
+    assert es.ceiling([str(t.wf)], t.debt, write=False) == 1
 
 
-def test_no_debt_file_is_an_empty_debt(ceiling_state: Ceiling) -> None:
+def test_no_debt_file_is_an_empty_debt(
+    ceiling_state: Ceiling, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A repository without the file is held to the bare ceiling."""
     t = ceiling_state.tree(workflow(step("Big", 16)))
-    rc, _, err = t.run()
+    rc = es.ceiling([str(t.wf)], t.debt, write=False)
+    err = capfd.readouterr().err
     assert rc == 1
     assert "does not list it" in err
     assert not t.debt.exists()
-    assert t.run(write=True)[0] == 0
+    assert es.ceiling([str(t.wf)], t.debt, write=True) == 0
     assert not t.debt.exists()
 
 
@@ -331,10 +349,13 @@ def headers(tmp_path: Path) -> Headers:
     return Headers(tmp_path)
 
 
-def test_folded_over_the_ceiling_and_unlisted_is_red(headers: Headers) -> None:
+def test_folded_over_the_ceiling_and_unlisted_is_red(
+    headers: Headers, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A `>-` block is no opt-out: sixteen lines is red by step."""
     t = headers.tree(workflow(folded("Fold", 16)))
-    rc, _, err = t.run()
+    rc = es.ceiling([str(t.wf)], t.debt, write=False)
+    err = capfd.readouterr().err
     assert rc == 1
     assert (
         f"{t.wf}:8: step 'Fold' holds a run: block of 16 lines, over the "
@@ -342,9 +363,13 @@ def test_folded_over_the_ceiling_and_unlisted_is_red(headers: Headers) -> None:
     ) in err
 
 
-def test_folded_within_the_ceiling_passes(headers: Headers) -> None:
+def test_folded_within_the_ceiling_passes(
+    headers: Headers, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A folded block at fifteen lines passes like a literal one."""
-    rc, out, err = headers.tree(workflow(folded("Fold", 15))).run()
+    t = headers.tree(workflow(folded("Fold", 15)))
+    rc = es.ceiling([str(t.wf)], t.debt, write=False)
+    out, err = capfd.readouterr()
     assert (rc, err) == (0, "")
     assert "every run: block fits 15 lines or its debt entry" in out
 
@@ -593,14 +618,17 @@ def test_an_alias_adds_no_second_finding(parser: Parser) -> None:
     assert alias.text == anchor.text
 
 
-def test_an_alias_is_not_weighed_again(parser: Parser) -> None:
+def test_an_alias_is_not_weighed_again(
+    parser: Parser, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A 16-line anchor, listed, aliased in an unlisted step: one entry."""
     tmp = tempfile.mkdtemp(dir=parser.tmp)
     t = Tree(Path(tmp), workflow(step("Big", 16)), None)
     text = t.wf.read_text(encoding="utf-8").replace("run: |", "run: &x |")
     t.wf.write_text(text + "      - name: Again\n        run: *x\n", "utf-8")
     t.debt.write_text(t.entry("Big", 16), encoding="utf-8")
-    rc, _, err = t.run()
+    rc = es.ceiling([str(t.wf)], t.debt, write=False)
+    err = capfd.readouterr().err
     assert (rc, err) == (0, "")
 
 
@@ -928,11 +956,12 @@ def test_listed_twice() -> None:
     assert errors == want
 
 
-def test_malformed_line_reds_the_lint() -> None:
+def test_malformed_line_reds_the_lint(capfd: pytest.CaptureFixture[str]) -> None:
     """A bad line reaches the verdict, not just the parser."""
     with TemporaryDirectory() as tmp:
         t = Tree(Path(tmp), workflow(step("Small", 2)), "w.yml\tBig\n")
-        rc, _, err = t.run()
+        rc = es.ceiling([str(t.wf)], t.debt, write=False)
+        err = capfd.readouterr().err
     assert rc == 1
     assert "this line has 2 field(s)" in err
 
@@ -1166,25 +1195,13 @@ class Tasks:
         self.cfg = self.root / "mise.toml"
         self.debt = self.root / "debt.txt"
 
-    def run_ceiling(self, text: str, *, write: bool = False) -> tuple[int, str, str]:
-        """Write the config and run the task ceiling over it.
-
-        Returns:
-            (exit status, stdout, stderr).
-
-        """
+    def enter(self, monkeypatch: pytest.MonkeyPatch, text: str, *, write: bool) -> None:
+        """Write the config, and run as the task that weighs it in this mode."""
         self.cfg.write_text(text, encoding="utf-8")
-        out, err = io.StringIO(), io.StringIO()
-        task = "fix:task-shell" if write else "lint:task-shell"
-        with (
-            pytest.MonkeyPatch.context() as patched,
-            redirect_stdout(out),
-            redirect_stderr(err),
-        ):
-            patched.setenv("MISE_TASK_NAME", task)
-            patched.setenv("ORG_FINDINGS", "")
-            rc = es.task_ceiling([str(self.cfg)], self.debt, write=write)
-        return rc, out.getvalue(), err.getvalue()
+        monkeypatch.setenv(
+            "MISE_TASK_NAME", "fix:task-shell" if write else "lint:task-shell"
+        )
+        monkeypatch.setenv("ORG_FINDINGS", "")
 
     def entry(self, name: str, lines: int, note: str = "# #1544 unassigned") -> str:
         """Return one debt line naming this row's config.
@@ -1202,42 +1219,72 @@ def tasks_state(tmp_path: Path) -> Tasks:
     return Tasks(tmp_path)
 
 
-def test_tasks_at_the_ceiling_passes(tasks_state: Tasks) -> None:
+def test_tasks_at_the_ceiling_passes(
+    tasks_state: Tasks,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """Fifteen counted lines, comments and blanks free, needs no entry."""
-    rc, out, err = tasks_state.run_ceiling(config(lint_a=15))
+    tasks_state.enter(monkeypatch, config(lint_a=15), write=False)
+    rc = es.task_ceiling([str(tasks_state.cfg)], tasks_state.debt, write=False)
+    out, err = capfd.readouterr()
     assert (rc, err) == (0, "")
     assert "every task body fits 15 lines or its debt entry (0 over" in out
 
 
-def test_a_config_that_is_not_toml_is_refused_by_name(tasks_state: Tasks) -> None:
+def test_a_config_that_is_not_toml_is_refused_by_name(
+    tasks_state: Tasks,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """An undecodable config is a refusal naming it, in each mode (#1681)."""
     with pytest.raises(decoded.UndecodableError) as refused:
         decoded.load_toml("lint")
     why = str(refused.value)
     for write, label in ((False, "lint:task-shell"), (True, "fix:task-shell")):
-        rc, out, err = tasks_state.run_ceiling("lint", write=write)
+        tasks_state.enter(monkeypatch, "lint", write=write)
+        rc = es.task_ceiling([str(tasks_state.cfg)], tasks_state.debt, write=write)
+        out, err = capfd.readouterr()
         assert (rc, out) == (1, "")
         assert err == f"{label}: {tasks_state.cfg}: not TOML: {why}\n"
 
 
-def test_tasks_that_is_not_a_table_is_refused_by_name(tasks_state: Tasks) -> None:
+def test_tasks_that_is_not_a_table_is_refused_by_name(
+    tasks_state: Tasks,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """`tasks = 1` has no bodies to weigh; it is named, not a crash."""
-    rc, out, err = tasks_state.run_ceiling("tasks = 1\n")
+    tasks_state.enter(monkeypatch, "tasks = 1\n", write=False)
+    rc = es.task_ceiling([str(tasks_state.cfg)], tasks_state.debt, write=False)
+    out, err = capfd.readouterr()
     assert (rc, out) == (1, "")
     assert err == f"lint:task-shell: {tasks_state.cfg}: tasks is not a table\n"
 
 
-def test_no_debt_file_and_no_long_body_passes(tasks_state: Tasks) -> None:
+def test_no_debt_file_and_no_long_body_passes(
+    tasks_state: Tasks,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """A repository with nothing over the ceiling carries no file."""
-    rc, out, _ = tasks_state.run_ceiling(config(lint_a=3, fix_a=[2, 2]))
+    tasks_state.enter(monkeypatch, config(lint_a=3, fix_a=[2, 2]), write=False)
+    rc = es.task_ceiling([str(tasks_state.cfg)], tasks_state.debt, write=False)
+    out = capfd.readouterr().out
     assert rc == 0
     assert "task-shell: every task body fits" in out
     assert not tasks_state.debt.exists()
 
 
-def test_over_the_ceiling_and_unlisted_is_red_by_name(tasks_state: Tasks) -> None:
+def test_over_the_ceiling_and_unlisted_is_red_by_name(
+    tasks_state: Tasks,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """Sixteen lines with no entry is red, naming the task."""
-    rc, _, err = tasks_state.run_ceiling(config(lint_a=16))
+    tasks_state.enter(monkeypatch, config(lint_a=16), write=False)
+    rc = es.task_ceiling([str(tasks_state.cfg)], tasks_state.debt, write=False)
+    err = capfd.readouterr().err
     assert rc == 1
     assert (
         f"{tasks_state.cfg}: task 'lint:a' holds a body of 16 lines, over the 15-line "
@@ -1246,29 +1293,47 @@ def test_over_the_ceiling_and_unlisted_is_red_by_name(tasks_state: Tasks) -> Non
     assert "lint:task-shell: 1 finding(s)" in err
 
 
-def test_list_run_is_one_body(tasks_state: Tasks) -> None:
+def test_list_run_is_one_body(
+    tasks_state: Tasks,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """A `run` list of 8 + 8 commands is a 16-line body, not two."""
     tasks_state.cfg.write_text(config(lint_a=[8, 8]), encoding="utf-8")
     bodies = list(es.task_bodies(tasks_state.cfg))
     one_body: list[tuple[str, int]] = [("lint:a", 16)]
     assert bodies == one_body
-    rc, _, err = tasks_state.run_ceiling(config(lint_a=[8, 8]))
+    tasks_state.enter(monkeypatch, config(lint_a=[8, 8]), write=False)
+    rc = es.task_ceiling([str(tasks_state.cfg)], tasks_state.debt, write=False)
+    err = capfd.readouterr().err
     assert rc == 1
     assert "task 'lint:a' holds a body of 16 lines" in err
 
 
-def test_listed_passes(tasks_state: Tasks) -> None:
+def test_listed_passes(
+    tasks_state: Tasks,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """A body at or under its entry is green."""
     tasks_state.debt.write_text(tasks_state.entry("lint:a", 20), encoding="utf-8")
-    rc, out, err = tasks_state.run_ceiling(config(lint_a=20))
+    tasks_state.enter(monkeypatch, config(lint_a=20), write=False)
+    rc = es.task_ceiling([str(tasks_state.cfg)], tasks_state.debt, write=False)
+    out, err = capfd.readouterr()
     assert (rc, err) == (0, "")
     assert "(1 over the ceiling, all listed)" in out
 
 
-def test_listed_body_that_grew_is_red(tasks_state: Tasks) -> None:
+def test_listed_body_that_grew_is_red(
+    tasks_state: Tasks,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """A body past its entry's number is red; the debt only shrinks."""
     tasks_state.debt.write_text(tasks_state.entry("lint:a", 20), encoding="utf-8")
-    rc, _, err = tasks_state.run_ceiling(config(lint_a=21))
+    tasks_state.enter(monkeypatch, config(lint_a=21), write=False)
+    rc = es.task_ceiling([str(tasks_state.cfg)], tasks_state.debt, write=False)
+    err = capfd.readouterr().err
     assert rc == 1
     assert (
         f"{tasks_state.cfg}: task 'lint:a' holds 21 lines, more than its debt "
@@ -1276,13 +1341,19 @@ def test_listed_body_that_grew_is_red(tasks_state: Tasks) -> None:
     ) in err
 
 
-def test_stale_entries_are_red(tasks_state: Tasks) -> None:
+def test_stale_entries_are_red(
+    tasks_state: Tasks,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """An entry whose body fits, or is gone, is red by its line."""
     tasks_state.debt.write_text(
         tasks_state.entry("lint:a", 20) + tasks_state.entry("lint:gone", 30),
         encoding="utf-8",
     )
-    rc, _, err = tasks_state.run_ceiling(config(lint_a=15))
+    tasks_state.enter(monkeypatch, config(lint_a=15), write=False)
+    rc = es.task_ceiling([str(tasks_state.cfg)], tasks_state.debt, write=False)
+    err = capfd.readouterr().err
     assert rc == 1
     assert (
         f"{tasks_state.debt}:1: task 'lint:a' in {tasks_state.cfg} now fits the ceiling "
@@ -1294,15 +1365,23 @@ def test_stale_entries_are_red(tasks_state: Tasks) -> None:
     ) in err
 
 
-def test_shrunk_entry_is_noted_and_lowered(tasks_state: Tasks) -> None:
+def test_shrunk_entry_is_noted_and_lowered(
+    tasks_state: Tasks,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """A body that shrank is green; fix writes its new number."""
     tasks_state.debt.write_text(
         "# head\n" + tasks_state.entry("lint:a", 20), encoding="utf-8"
     )
-    rc, out, _ = tasks_state.run_ceiling(config(lint_a=18))
+    tasks_state.enter(monkeypatch, config(lint_a=18), write=False)
+    rc = es.task_ceiling([str(tasks_state.cfg)], tasks_state.debt, write=False)
+    out = capfd.readouterr().out
     assert rc == 0
     assert f"{tasks_state.debt}:2: the body now holds 18 lines" in out
-    rc, out, _ = tasks_state.run_ceiling(config(lint_a=18), write=True)
+    tasks_state.enter(monkeypatch, config(lint_a=18), write=True)
+    rc = es.task_ceiling([str(tasks_state.cfg)], tasks_state.debt, write=True)
+    out = capfd.readouterr().out
     assert rc == 0
     assert "1 entry(ies) lowered, 0 removed" in out
     assert tasks_state.debt.read_text(
@@ -1310,28 +1389,40 @@ def test_shrunk_entry_is_noted_and_lowered(tasks_state: Tasks) -> None:
     ) == "# head\n" + tasks_state.entry("lint:a", 18)
 
 
-def test_fix_removes_stale_and_never_adds_to_a_file(tasks_state: Tasks) -> None:
+def test_fix_removes_stale_and_never_adds_to_a_file(
+    tasks_state: Tasks,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """With a debt file, fix settles it down and leaves new bodies red."""
     tasks_state.debt.write_text(
         tasks_state.entry("lint:a", 20) + tasks_state.entry("lint:gone", 30),
         encoding="utf-8",
     )
-    rc, out, _ = tasks_state.run_ceiling(config(lint_a=20, lint_b=17), write=True)
+    tasks_state.enter(monkeypatch, config(lint_a=20, lint_b=17), write=True)
+    rc = es.task_ceiling([str(tasks_state.cfg)], tasks_state.debt, write=True)
+    out = capfd.readouterr().out
     assert rc == 0
     assert "0 entry(ies) lowered, 1 removed" in out
     assert tasks_state.debt.read_text(encoding="utf-8") == tasks_state.entry(
         "lint:a", 20
     )
-    rc, _, err = tasks_state.run_ceiling(config(lint_a=20, lint_b=17))
+    tasks_state.enter(monkeypatch, config(lint_a=20, lint_b=17), write=False)
+    rc = es.task_ceiling([str(tasks_state.cfg)], tasks_state.debt, write=False)
+    err = capfd.readouterr().err
     assert rc == 1
     assert "task 'lint:b' holds a body of 17 lines" in err
 
 
-def test_fix_generates_an_absent_file(tasks_state: Tasks) -> None:
+def test_fix_generates_an_absent_file(
+    tasks_state: Tasks,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """With no debt file, fix writes every body over the ceiling."""
-    rc, out, _ = tasks_state.run_ceiling(
-        config(lint_a=16, lint_b=3, fix_c=40), write=True
-    )
+    tasks_state.enter(monkeypatch, config(lint_a=16, lint_b=3, fix_c=40), write=True)
+    rc = es.task_ceiling([str(tasks_state.cfg)], tasks_state.debt, write=True)
+    out = capfd.readouterr().out
     assert rc == 0
     assert f"generated {tasks_state.debt} with 2 entry(ies)" in out
     text = tasks_state.debt.read_text(encoding="utf-8")
@@ -1339,27 +1430,41 @@ def test_fix_generates_an_absent_file(tasks_state: Tasks) -> None:
     assert text.removeprefix(es.TASK_HEADER) == tasks_state.entry(
         "lint:a", 16
     ) + tasks_state.entry("fix:c", 40)
-    rc, out, err = tasks_state.run_ceiling(config(lint_a=16, lint_b=3, fix_c=40))
+    tasks_state.enter(monkeypatch, config(lint_a=16, lint_b=3, fix_c=40), write=False)
+    rc = es.task_ceiling([str(tasks_state.cfg)], tasks_state.debt, write=False)
+    out, err = capfd.readouterr()
     assert (rc, err) == (0, "")
     assert "(2 over the ceiling, all listed)" in out
 
 
-def test_fix_with_nothing_over_writes_no_file(tasks_state: Tasks) -> None:
+def test_fix_with_nothing_over_writes_no_file(
+    tasks_state: Tasks,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """A repository with nothing over the ceiling gets no debt file."""
-    rc, out, _ = tasks_state.run_ceiling(config(lint_a=3), write=True)
+    tasks_state.enter(monkeypatch, config(lint_a=3), write=True)
+    rc = es.task_ceiling([str(tasks_state.cfg)], tasks_state.debt, write=True)
+    out = capfd.readouterr().out
     assert rc == 0
     assert "every task body fits; no debt file needed" in out
     assert not tasks_state.debt.exists()
 
 
-def test_umbrella_is_1544(tasks_state: Tasks) -> None:
+def test_umbrella_is_1544(
+    tasks_state: Tasks,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """A task note naming #1544 must say `unassigned`; #1352 is any issue."""
     tasks_state.debt.write_text(
         tasks_state.entry("lint:a", 20, "# canon helper: #1544")
         + tasks_state.entry("lint:b", 20, "# #1352"),
         encoding="utf-8",
     )
-    rc, _, err = tasks_state.run_ceiling(config(lint_a=20, lint_b=20))
+    tasks_state.enter(monkeypatch, config(lint_a=20, lint_b=20), write=False)
+    rc = es.task_ceiling([str(tasks_state.cfg)], tasks_state.debt, write=False)
+    err = capfd.readouterr().err
     assert rc == 1
     assert (
         f"{tasks_state.debt}:1: a note naming #1544 says `unassigned`: name the issue "
