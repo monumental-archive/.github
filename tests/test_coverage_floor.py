@@ -27,7 +27,6 @@ import re
 import subprocess
 import sys
 import textwrap
-from contextlib import redirect_stderr, redirect_stdout
 from decimal import Decimal
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -223,21 +222,6 @@ def clean(text: str) -> cf.Record:
     return parsed
 
 
-def run[**P](
-    call: Callable[P, int], *args: P.args, **kwargs: P.kwargs
-) -> tuple[int, str, str]:
-    """Call one of the script's entry points with its streams captured.
-
-    Returns:
-        The exit status, stdout and stderr.
-
-    """
-    out, err = io.StringIO(), io.StringIO()
-    with redirect_stdout(out), redirect_stderr(err):
-        status = call(*args, **kwargs)
-    return status, out.getvalue(), err.getvalue()
-
-
 # The gate job, as coverage:check names itself to the hold (#1875).
 GATE = frozenset({cf.GATE_JOB})
 
@@ -255,16 +239,13 @@ TWO = record(
 )
 
 
-def test_a_leg_below_its_own_floor_above_the_others_is_red() -> None:
+def test_a_leg_below_its_own_floor_above_the_others_is_red(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """Python at 85.0: above python-branches' 80.0, below its own 90."""
     with Tree(TWO) as tree:
-        got = run(
-            cf.hold,
-            tree.path,
-            TASK,
-            "python 85.0\npython-branches 83.0\n",
-            GATE,
-        )
+        status = cf.hold(tree.path, TASK, "python 85.0\npython-branches 83.0\n", GATE)
+        got = (status, *capfd.readouterr())
     assert (
         1,
         f"{TASK}: python-branches leg holds its floor 80.0 (83.0%)\n",
@@ -272,10 +253,11 @@ def test_a_leg_below_its_own_floor_above_the_others_is_red() -> None:
     ) == got
 
 
-def test_both_at_or_above_their_floors_hold() -> None:
+def test_both_at_or_above_their_floors_hold(capfd: pytest.CaptureFixture[str]) -> None:
     """Each leg at its own floor or above is held, and named."""
     with Tree(TWO) as tree:
-        got = run(cf.hold, tree.path, TASK, "python 90\npython-branches 81.0\n", GATE)
+        status = cf.hold(tree.path, TASK, "python 90\npython-branches 81.0\n", GATE)
+        got = (status, *capfd.readouterr())
     assert (
         0,
         (
@@ -286,16 +268,18 @@ def test_both_at_or_above_their_floors_hold() -> None:
     ) == got
 
 
-def test_a_leg_measured_at_100_is_written_at_90() -> None:
+def test_a_leg_measured_at_100_is_written_at_90(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """The cap is every leg's (#1786): 100 measured, 90 held."""
     with Tree(None) as tree:
-        got = run(
-            cf.derive,
+        status = cf.derive(
             tree.path,
             "plpgsql 100\nplpgsql-branches 87.5\n",
             "coverage:adopt",
             adopt=True,
         )
+        got = (status, *capfd.readouterr())
         text = tree.written()
     assert (
         0,
@@ -307,10 +291,12 @@ def test_a_leg_measured_at_100_is_written_at_90() -> None:
     ) == got
     assert "\n# plpgsql measured: 100.0\nplpgsql 90\n" in text
     assert (
-        floors({
-            "plpgsql": held("90", "100.0"),
-            "plpgsql-branches": held("85.5", "87.5"),
-        })
+        floors(
+            {
+                "plpgsql": held("90", "100.0"),
+                "plpgsql-branches": held("85.5", "87.5"),
+            }
+        )
         == clean(text).floors
     )
 
@@ -323,33 +309,51 @@ def test_a_leg_measured_at_100_is_written_at_90() -> None:
     ],
 )
 def test_the_old_shape_is_refused_by_name(
-    name: object, text: object, line: object
+    name: object, text: object, line: object, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """A bare floor line, recorded or not, is refused, naming adopt."""
     with Tree(text) as tree:
         refused = f"{TASK}: {tree.path} states a bare floor line {line!r}: {SHARED}\n"
-        assert (1, "", refused) == run(cf.read, tree.path)
-        assert (1, "", refused) == run(cf.hold, tree.path, TASK, "python 95\n", GATE)
+        status = cf.read(tree.path)
+        assert (status, *capfd.readouterr()) == (1, "", refused)
+        status = cf.hold(tree.path, TASK, "python 95\n", GATE)
+        assert (status, *capfd.readouterr()) == (1, "", refused)
 
 
-def test_no_floor_file_exits_0() -> None:
+def test_no_floor_file_exits_0(capfd: pytest.CaptureFixture[str]) -> None:
     """No `.coverage-floor`: every entry point owes nothing."""
     with Tree(None) as tree:
-        assert run(cf.read, tree.path) == (0, "", "")
-        assert run(cf.read, tree.path, "rust-branches") == (0, "", "")
-        assert run(cf.hold, tree.path, TASK, "go 1\n", GATE) == (0, "", "")
-        assert run(cf.recorded_legs, tree.path) == (0, "", "")
-        assert run(cf.planned, tree.path, '["15"]') == (0, "", "")
-        assert (0, f"coverage-floor: no {tree.path}, skipped\n", "") == run(
-            cf.derive, tree.path, "go 85.4\n", "v1.0.0", adopt=False
+        status = cf.read(tree.path)
+        out, err = capfd.readouterr()
+        assert (status, out, err) == (0, "", "")
+        status = cf.read(tree.path, "rust-branches")
+        out, err = capfd.readouterr()
+        assert (status, out, err) == (0, "", "")
+        status = cf.hold(tree.path, TASK, "go 1\n", GATE)
+        out, err = capfd.readouterr()
+        assert (status, out, err) == (0, "", "")
+        status = cf.recorded_legs(tree.path)
+        out, err = capfd.readouterr()
+        assert (status, out, err) == (0, "", "")
+        status = cf.planned(tree.path, '["15"]')
+        out, err = capfd.readouterr()
+        assert (status, out, err) == (0, "", "")
+        status = cf.derive(tree.path, "go 85.4\n", "v1.0.0", adopt=False)
+        assert (status, *capfd.readouterr()) == (
+            0,
+            f"coverage-floor: no {tree.path}, skipped\n",
+            "",
         )
         assert tree.text() is None
 
 
-def test_a_measured_leg_with_no_floor_is_red_by_name() -> None:
+def test_a_measured_leg_with_no_floor_is_red_by_name(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """A leg the file holds no line for has nothing to be held to."""
     with Tree(record(PY)) as tree:
-        got = run(cf.hold, tree.path, TASK, "python 86.0\nplpgsql 87.5\n", GATE)
+        status = cf.hold(tree.path, TASK, "python 86.0\nplpgsql 87.5\n", GATE)
+        got = (status, *capfd.readouterr())
     assert (
         1,
         f"{TASK}: python leg holds its floor 83.4 (86.0%)\n",
@@ -361,10 +365,13 @@ def test_a_measured_leg_with_no_floor_is_red_by_name() -> None:
     ) == got
 
 
-def test_each_leg_is_derived_from_its_own_figure() -> None:
+def test_each_leg_is_derived_from_its_own_figure(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """A weaker leg no longer sets a stronger leg's floor."""
     with Tree(None) as tree:
-        run(cf.derive, tree.path, "go 85.4\nrust 61.5\n", "v0.21.0", adopt=True)
+        cf.derive(tree.path, "go 85.4\nrust 61.5\n", "v0.21.0", adopt=True)
+        capfd.readouterr()
         parsed = clean(tree.written())
     assert (
         floors({"go": held("83.4", "85.4"), "rust": held("59.5", "61.5")})
@@ -643,11 +650,13 @@ def test_render_round_trips() -> None:
     assert parsed.derived == "v1.52.0"
     assert parsed.legs == ("python", "go")
     assert (
-        floors({
-            "python": held("83.4", "85.4"),
-            "go": held("88", None, "workspace split"),
-            "rust-branches": held("70.4", "72.4"),
-        })
+        floors(
+            {
+                "python": held("83.4", "85.4"),
+                "go": held("88", None, "workspace split"),
+                "rust-branches": held("70.4", "72.4"),
+            }
+        )
         == parsed.floors
     )
 
@@ -677,42 +686,49 @@ def test_the_legs_read_off_the_gate_come_last() -> None:
 
 
 # `coverage:check`'s half: each leg's number, or a named refusal.
-def test_a_valid_floor_prints_each_gate_leg() -> None:
+def test_a_valid_floor_prints_each_gate_leg(capfd: pytest.CaptureFixture[str]) -> None:
     """One `<leg> <floor>` line per leg the gate measures, in order."""
     text = record(
         PY, planted("go", "80.0", "82.0"), planted("rust-branches", "70.0", "72.0")
     )
     with Tree(text) as tree:
-        assert run(cf.read, tree.path) == (0, "python 83.4\ngo 80.0\n", "")
+        status = cf.read(tree.path)
+        out, err = capfd.readouterr()
+        assert (status, out, err) == (0, "python 83.4\ngo 80.0\n", "")
 
 
-def test_hand_edited_floor_is_refused_as_drift() -> None:
+def test_hand_edited_floor_is_refused_as_drift(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """A number typed over the derivation reds the gate by name."""
     with Tree(record(planted("python", "85", "85.4"))) as tree:
-        status, out, err = run(cf.read, tree.path)
+        status = cf.read(tree.path)
+        out, err = capfd.readouterr()
     assert (status, out) == (1, "")
     assert "python floor 85 disagrees with its own record" in err
     assert "never repaired" in err
 
 
 # The release path's half, planted in both directions, leg by leg.
-def test_healthy_release_raises_the_floor() -> None:
+def test_healthy_release_raises_the_floor(capfd: pytest.CaptureFixture[str]) -> None:
     """A ceiling that held rewrites the leg's floor upwards."""
     with Tree(record(PY)) as tree:
-        got = run(cf.derive, tree.path, "python 86.8\n", "v0.21.0", adopt=False)
+        status = cf.derive(tree.path, "python 86.8\n", "v0.21.0", adopt=False)
+        got = (status, *capfd.readouterr())
         parsed = clean(tree.written())
     assert got == (0, "coverage-floor: python 83.4 -> 84.8 (measured 86.8)\n", "")
     assert floors({"python": held("84.8", "86.8")}) == parsed.floors
     assert parsed.derived == "v0.21.0"
 
 
-def test_below_a_legs_floor_fails_the_release() -> None:
+def test_below_a_legs_floor_fails_the_release(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """A drop under one leg's floor refuses by name and changes nothing."""
     before = record(PY, planted("go", "80.0", "82.0"))
     with Tree(before) as tree:
-        got = run(
-            cf.derive, tree.path, "python 82.0\ngo 90.0\n", "v0.21.0", adopt=False
-        )
+        status = cf.derive(tree.path, "python 82.0\ngo 90.0\n", "v0.21.0", adopt=False)
+        got = (status, *capfd.readouterr())
         after = tree.text()
     assert (
         1,
@@ -728,19 +744,20 @@ def test_below_a_legs_floor_fails_the_release() -> None:
     assert before == after
 
 
-def test_every_leg_below_is_named() -> None:
+def test_every_leg_below_is_named(capfd: pytest.CaptureFixture[str]) -> None:
     """Two legs below their floors: two refusals, one run."""
     with Tree(record(PY, planted("go", "80.0", "82.0"))) as tree:
-        status, _, err = run(
-            cf.derive, tree.path, "python 82.0\ngo 79.0\n", "v1", adopt=False
-        )
+        status = cf.derive(tree.path, "python 82.0\ngo 79.0\n", "v1", adopt=False)
+        err = capfd.readouterr().err
     assert status == 1
     assert "python: measured 82.0% is below its floor 83.4%" in err
     assert "go: measured 79.0% is below its floor 80.0%" in err
 
 
 @pytest.mark.parametrize("figure", ["85.3", "84.9", "83.4"])
-def test_within_the_band_passes_and_keeps_the_record(figure: object) -> None:
+def test_within_the_band_passes_and_keeps_the_record(
+    figure: object, capfd: pytest.CaptureFixture[str]
+) -> None:
     """The gate's line is the release's line (#1786).
 
     A measurement the gate passed — at or above the floor, below the
@@ -749,13 +766,8 @@ def test_within_the_band_passes_and_keeps_the_record(figure: object) -> None:
     """
     before = cf.render({"python": cf.fresh(Decimal("85.4"))}, "v0.20.0")
     with Tree(before) as tree:
-        got = run(
-            cf.derive,
-            tree.path,
-            f"python {figure}\n",
-            "v0.21.0",
-            adopt=False,
-        )
+        status = cf.derive(tree.path, f"python {figure}\n", "v0.21.0", adopt=False)
+        got = (status, *capfd.readouterr())
         after = tree.written()
     assert (
         0,
@@ -768,10 +780,11 @@ def test_within_the_band_passes_and_keeps_the_record(figure: object) -> None:
     assert before == after
 
 
-def test_one_leg_rises_while_another_holds() -> None:
+def test_one_leg_rises_while_another_holds(capfd: pytest.CaptureFixture[str]) -> None:
     """Each leg is ratcheted alone; the provenance is the new one."""
     with Tree(record(PY, planted("go", "80.0", "82.0"))) as tree:
-        got = run(cf.derive, tree.path, "python 85.0\ngo 90.0\n", "v1", adopt=False)
+        status = cf.derive(tree.path, "python 85.0\ngo 90.0\n", "v1", adopt=False)
+        got = (status, *capfd.readouterr())
         parsed = clean(tree.written())
     assert got == (
         0,
@@ -788,51 +801,56 @@ def test_one_leg_rises_while_another_holds() -> None:
     assert parsed.derived == "v1"
 
 
-def test_exactly_at_the_band_holds_the_floor() -> None:
+def test_exactly_at_the_band_holds_the_floor(capfd: pytest.CaptureFixture[str]) -> None:
     """The boundary rewrites the record, and the floor stays put."""
     with Tree(record(PY)) as tree:
-        status, _, err = run(
-            cf.derive, tree.path, "python 85.4\n", "v0.21.0", adopt=False
-        )
+        status = cf.derive(tree.path, "python 85.4\n", "v0.21.0", adopt=False)
+        err = capfd.readouterr().err
         parsed = clean(tree.written())
     assert (status, err) == (0, "")
     assert held("83.4", "85.4") == parsed.floors["python"]
     assert parsed.derived == "v0.21.0"
 
 
-def test_one_tenth_below_the_floor_fails() -> None:
+def test_one_tenth_below_the_floor_fails(capfd: pytest.CaptureFixture[str]) -> None:
     """The refusal is on the boundary, not near it."""
     with Tree(record(PY)) as tree:
-        status, _, err = run(
-            cf.derive, tree.path, "python 83.3\n", "v0.21.0", adopt=False
-        )
+        status = cf.derive(tree.path, "python 83.3\n", "v0.21.0", adopt=False)
+        err = capfd.readouterr().err
     assert status == 1
     assert "python: measured 83.3% is below its floor 83.4%" in err
 
 
-def test_measurement_is_rounded_down_before_the_ratchet() -> None:
+def test_measurement_is_rounded_down_before_the_ratchet(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """The compared number is the recorded one, not a wider float."""
     with Tree(record(PY)) as tree:
-        status, _, err = run(
-            cf.derive, tree.path, "python 83.39999\n", "v0.21.0", adopt=False
-        )
+        status = cf.derive(tree.path, "python 83.39999\n", "v0.21.0", adopt=False)
+        err = capfd.readouterr().err
     assert status == 1
     assert "measured 83.3%" in err
 
 
-def test_a_reset_floor_ratchets_from_where_the_human_put_it() -> None:
+def test_a_reset_floor_ratchets_from_where_the_human_put_it(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """A conscious reset is the floor the next release measures against."""
     with Tree(record(planted("python", "88", reset="workspace split"))) as tree:
-        got = run(cf.derive, tree.path, "python 90.0\n", "v0.21.0", adopt=False)
+        status = cf.derive(tree.path, "python 90.0\n", "v0.21.0", adopt=False)
+        got = (status, *capfd.readouterr())
         parsed = clean(tree.written())
     assert got == (0, "coverage-floor: python 88 -> 88.0 (measured 90.0)\n", "")
     assert floors({"python": held("88.0", "90.0")}) == parsed.floors
 
 
-def test_a_reset_within_the_band_stays_a_reset() -> None:
+def test_a_reset_within_the_band_stays_a_reset(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """A release that does not raise a reset floor keeps its reason."""
     with Tree(record(planted("python", "88", reset="workspace split"))) as tree:
-        got = run(cf.derive, tree.path, "python 89.0\n", "v0.21.0", adopt=False)
+        status = cf.derive(tree.path, "python 89.0\n", "v0.21.0", adopt=False)
+        got = (status, *capfd.readouterr())
         parsed = clean(tree.written())
     assert got == (
         0,
@@ -843,10 +861,13 @@ def test_a_reset_within_the_band_stays_a_reset() -> None:
     assert parsed.derived == "v0.20.0"
 
 
-def test_a_record_under_another_band_is_rewritten_under_the_orgs() -> None:
+def test_a_record_under_another_band_is_rewritten_under_the_orgs(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """A leg held within the band is written agreeing with the file's band."""
     with Tree(record(planted("python", "82.4", "85.4"), band="3")) as tree:
-        status, _, err = run(cf.derive, tree.path, "python 83.0\n", "v1", adopt=False)
+        status = cf.derive(tree.path, "python 83.0\n", "v1", adopt=False)
+        err = capfd.readouterr().err
         parsed = clean(tree.written())
     assert (status, err) == (0, "")
     assert (cf.BAND, held("83.4", "85.4")) == (parsed.band, parsed.floors["python"])
@@ -866,41 +887,46 @@ def test_a_floor_above_the_cap_is_drift(floor: object) -> None:
     assert "derives 90" in problems[0]
 
 
-def test_a_capped_floor_still_fails_below_it() -> None:
+def test_a_capped_floor_still_fails_below_it(capfd: pytest.CaptureFixture[str]) -> None:
     """Under 90 is under the floor."""
     with Tree(record(planted("python", "90", "94.3"))) as tree:
-        status, _, err = run(
-            cf.derive, tree.path, "python 89.9\n", "v1.71.0", adopt=False
-        )
+        status = cf.derive(tree.path, "python 89.9\n", "v1.71.0", adopt=False)
+        err = capfd.readouterr().err
     assert status == 1
     assert "python: measured 89.9% is below its floor 90%" in err
 
 
-def test_the_incident_releases() -> None:
+def test_the_incident_releases(capfd: pytest.CaptureFixture[str]) -> None:
     """v1.70.5's floor, 94.2 measured: the release passes at 90.
 
     The defect #1786 records: main red three pushes running because
     the release demanded 94.3 of a tree the gate had passed.
     """
     with Tree(record(planted("python", "90", "94.3"))) as tree:
-        got = run(cf.derive, tree.path, "python 94.2\n", "v1.71.0", adopt=False)
+        status = cf.derive(tree.path, "python 94.2\n", "v1.71.0", adopt=False)
+        got = (status, *capfd.readouterr())
         parsed = clean(tree.written())
     assert got == (0, "coverage-floor: python 90 -> 90 (measured 94.2)\n", "")
     assert held("90", "94.2") == parsed.floors["python"]
 
 
-def test_a_leg_read_off_the_gate_is_capped_too() -> None:
+def test_a_leg_read_off_the_gate_is_capped_too(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """The legs the audit reads live under the same cap."""
     text = record(PY, planted("rust-branches", "90", "97.0"))
     with Tree(text) as tree:
-        assert run(cf.read, tree.path, "rust-branches") == (0, "90\n", "")
+        status = cf.read(tree.path, "rust-branches")
+        out, err = capfd.readouterr()
+        assert (status, out, err) == (0, "90\n", "")
 
 
 # Who may write a floor, and who may not.
-def test_adopt_writes_the_first_floor() -> None:
+def test_adopt_writes_the_first_floor(capfd: pytest.CaptureFixture[str]) -> None:
     """coverage:adopt turns a measurement into the repository's floor."""
     with Tree(None) as tree:
-        got = run(cf.derive, tree.path, "python 85.44\n", "coverage:adopt", adopt=True)
+        status = cf.derive(tree.path, "python 85.44\n", "coverage:adopt", adopt=True)
+        got = (status, *capfd.readouterr())
         parsed = clean(tree.written())
     assert (
         0,
@@ -910,10 +936,13 @@ def test_adopt_writes_the_first_floor() -> None:
     assert floors({"python": held("83.4", "85.4")}) == parsed.floors
 
 
-def test_release_refuses_to_repair_the_old_shape() -> None:
+def test_release_refuses_to_repair_the_old_shape(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """The machinery does not silently migrate a floor it did not write."""
     with Tree("90\n") as tree:
-        got = run(cf.derive, tree.path, "python 85.4\n", "v0.21.0", adopt=False)
+        status = cf.derive(tree.path, "python 85.4\n", "v0.21.0", adopt=False)
+        got = (status, *capfd.readouterr())
         after = tree.text()
     assert (
         1,
@@ -927,17 +956,14 @@ def test_release_refuses_to_repair_the_old_shape() -> None:
     assert after == "90\n"
 
 
-def test_adopt_migrates_the_old_shape() -> None:
+def test_adopt_migrates_the_old_shape(capfd: pytest.CaptureFixture[str]) -> None:
     """The other direction: `coverage:adopt` is the named rewrite."""
     legacy = "# band: 2\n# measured: 82.0\n# derived: v1\n# legs: go rust\n80.0\n"
     with Tree(legacy) as tree:
-        got = run(
-            cf.derive,
-            tree.path,
-            "go 95.0\nrust 82.0\n",
-            "coverage:adopt",
-            adopt=True,
+        status = cf.derive(
+            tree.path, "go 95.0\nrust 82.0\n", "coverage:adopt", adopt=True
         )
+        got = (status, *capfd.readouterr())
         parsed = clean(tree.written())
     assert (
         0,
@@ -953,29 +979,27 @@ def test_adopt_migrates_the_old_shape() -> None:
     )
 
 
-def test_adopt_cannot_lower_a_floor_that_parses() -> None:
+def test_adopt_cannot_lower_a_floor_that_parses(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """`fix`-shaped is not an escape hatch from the ratchet."""
     before = record(PY)
     with Tree(before) as tree:
-        status, _, err = run(
-            cf.derive, tree.path, "python 81.0\n", "coverage:adopt", adopt=True
-        )
+        status = cf.derive(tree.path, "python 81.0\n", "coverage:adopt", adopt=True)
+        err = capfd.readouterr().err
         after = tree.text()
     assert status == 1
     assert "is below its floor" in err
     assert before == after
 
 
-def test_adopt_adds_a_new_leg() -> None:
+def test_adopt_adds_a_new_leg(capfd: pytest.CaptureFixture[str]) -> None:
     """A leg the file has no floor for joins at its own figure."""
     with Tree(record(PY)) as tree:
-        got = run(
-            cf.derive,
-            tree.path,
-            "python 85.4\nplpgsql 92.5\n",
-            "coverage:adopt",
-            adopt=True,
+        status = cf.derive(
+            tree.path, "python 85.4\nplpgsql 92.5\n", "coverage:adopt", adopt=True
         )
+        got = (status, *capfd.readouterr())
         parsed = clean(tree.written())
     assert got == (
         0,
@@ -990,10 +1014,13 @@ def test_adopt_adds_a_new_leg() -> None:
 
 # The stdin half: what a derivation will read.
 @pytest.mark.parametrize("source", ["\n", "rust-branches 80.0\n"])
-def test_no_measurement_refuses(source: object) -> None:
+def test_no_measurement_refuses(
+    source: object, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A derivation that reads nothing must not write a floor."""
     with Tree(record(PY)) as tree:
-        got = run(cf.derive, tree.path, source, "v0.21.0", adopt=False)
+        status = cf.derive(tree.path, source, "v0.21.0", adopt=False)
+        got = (status, *capfd.readouterr())
         after = tree.text()
     assert (
         1,
@@ -1006,12 +1033,11 @@ def test_no_measurement_refuses(source: object) -> None:
     assert record(PY) == after
 
 
-def test_a_malformed_leg_refuses() -> None:
+def test_a_malformed_leg_refuses(capfd: pytest.CaptureFixture[str]) -> None:
     """One unreadable line refuses rather than deriving from the rest."""
     with Tree(record(PY)) as tree:
-        status, _, err = run(
-            cf.derive, tree.path, "python 85.4\nrust ???\n", "v0.21.0", adopt=False
-        )
+        status = cf.derive(tree.path, "python 85.4\nrust ???\n", "v0.21.0", adopt=False)
+        err = capfd.readouterr().err
     assert status == 1
     assert "is not `<leg> <percent>`" in err
 
@@ -1020,38 +1046,42 @@ BRANCH = planted("rust-branches", "70.4", "72.4")
 
 
 # `rust-branches` and `go-branches` (#1359, #1546): the audit's legs.
-def test_read_leg_prints_the_line() -> None:
+def test_read_leg_prints_the_line(capfd: pytest.CaptureFixture[str]) -> None:
     """The audit's read: the branch floor, from the record."""
     with Tree(record(PY, BRANCH)) as tree:
-        assert run(cf.read, tree.path, "rust-branches") == (0, "70.4\n", "")
-        assert run(cf.read, tree.path) == (0, "python 83.4\n", "")
+        status = cf.read(tree.path, "rust-branches")
+        out, err = capfd.readouterr()
+        assert (status, out, err) == (0, "70.4\n", "")
+        status = cf.read(tree.path)
+        out, err = capfd.readouterr()
+        assert (status, out, err) == (0, "python 83.4\n", "")
 
 
-def test_read_leg_without_a_line_is_empty() -> None:
+def test_read_leg_without_a_line_is_empty(capfd: pytest.CaptureFixture[str]) -> None:
     """No line: an empty answer, which the audit reads as a skip."""
     with Tree(record(PY)) as tree:
-        assert run(cf.read, tree.path, "go-branches") == (0, "", "")
+        status = cf.read(tree.path, "go-branches")
+        out, err = capfd.readouterr()
+        assert (status, out, err) == (0, "", "")
 
 
-def test_the_line_is_not_in_the_legs_record() -> None:
+def test_the_line_is_not_in_the_legs_record(capfd: pytest.CaptureFixture[str]) -> None:
     """The gate never measures it, so the gate never demands it."""
     with Tree(None) as tree:
-        run(
-            cf.derive,
-            tree.path,
-            "rust 86.0\nrust-branches 61.0\n",
-            "coverage:adopt",
-            adopt=True,
+        cf.derive(
+            tree.path, "rust 86.0\nrust-branches 61.0\n", "coverage:adopt", adopt=True
         )
+        capfd.readouterr()
         parsed = clean(tree.written())
     assert parsed.legs == ("rust",)
     assert held("59.0", "61.0") == parsed.floors["rust-branches"]
 
 
-def test_a_release_carries_the_line_through() -> None:
+def test_a_release_carries_the_line_through(capfd: pytest.CaptureFixture[str]) -> None:
     """Stable measures no branches, so the release keeps what it found."""
     with Tree(record(planted("rust", "83.4", "85.4"), BRANCH)) as tree:
-        got = run(cf.derive, tree.path, "rust 86.0\n", "v1.2.0", adopt=False)
+        status = cf.derive(tree.path, "rust 86.0\n", "v1.2.0", adopt=False)
+        got = (status, *capfd.readouterr())
         parsed = clean(tree.written())
     assert got == (
         0,
@@ -1064,33 +1094,27 @@ def test_a_release_carries_the_line_through() -> None:
     assert held("70.4", "72.4") == parsed.floors["rust-branches"]
 
 
-def test_the_line_never_falls() -> None:
+def test_the_line_never_falls(capfd: pytest.CaptureFixture[str]) -> None:
     """Below its floor, neither line is rewritten."""
     before = record(planted("rust", "83.4", "85.4"), BRANCH)
     with Tree(before) as tree:
-        status, _, err = run(
-            cf.derive,
-            tree.path,
-            "rust 86.0\nrust-branches 70.3\n",
-            "coverage:adopt",
-            adopt=True,
+        status = cf.derive(
+            tree.path, "rust 86.0\nrust-branches 70.3\n", "coverage:adopt", adopt=True
         )
+        err = capfd.readouterr().err
         after = tree.text()
     assert status == 1
     assert "rust-branches: measured 70.3% is below its floor 70.4%" in err
     assert before == after
 
 
-def test_the_line_rises() -> None:
+def test_the_line_rises(capfd: pytest.CaptureFixture[str]) -> None:
     """A higher branch figure raises the line."""
     with Tree(record(planted("rust", "83.4", "85.4"), BRANCH)) as tree:
-        status, out, _ = run(
-            cf.derive,
-            tree.path,
-            "rust 86.0\nrust-branches 80.0\n",
-            "coverage:adopt",
-            adopt=True,
+        status = cf.derive(
+            tree.path, "rust 86.0\nrust-branches 80.0\n", "coverage:adopt", adopt=True
         )
+        out = capfd.readouterr().out
         parsed = clean(tree.written())
     assert status == 0
     assert "rust-branches 70.4 -> 78.0 (measured 80.0)" in out
@@ -1098,23 +1122,24 @@ def test_the_line_rises() -> None:
 
 
 # The command line both callers actually invoke.
-def test_read_dispatches() -> None:
+def test_read_dispatches(capfd: pytest.CaptureFixture[str]) -> None:
     """`read` prints the floors for coverage:check to enforce."""
     with Tree(record(PY)) as tree:
-        got = run(cf.main, ["--path", str(tree.path), "read"])
+        status = cf.main(["--path", str(tree.path), "read"])
+        got = (status, *capfd.readouterr())
     assert got == (0, "python 83.4\n", "")
 
 
-def test_write_reads_the_legs_from_stdin() -> None:
+def test_write_reads_the_legs_from_stdin(capfd: pytest.CaptureFixture[str]) -> None:
     """The belt convention: the task enumerates, the helper consumes."""
     with Tree(record(planted("go", "83.4", "85.4"))) as tree:
         stdin = sys.stdin
         sys.stdin = io.StringIO("go 86.8\n")
         try:
-            got = run(
-                cf.main,
-                ["--path", str(tree.path), "write", "--provenance", "v0.21.0"],
+            status = cf.main(
+                ["--path", str(tree.path), "write", "--provenance", "v0.21.0"]
             )
+            got = (status, *capfd.readouterr())
         finally:
             sys.stdin = stdin
         parsed = clean(tree.written())
@@ -1142,11 +1167,12 @@ PG_NEEDS = (
     ("name", "needs"), [("plpgsql", PG_NEEDS), ("typescript", TS_NEEDS)]
 )
 def test_a_recorded_leg_that_reports_none_is_red_by_name(
-    name: object, needs: object
+    name: object, needs: object, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """Each of plpgsql and typescript is named, with what it needs."""
     with Tree(record(PY, planted(name, "80.0", "82.0"))) as tree:
-        got = run(cf.hold, tree.path, TASK, "python 86.0\n", GATE)
+        status = cf.hold(tree.path, TASK, "python 86.0\n", GATE)
+        got = (status, *capfd.readouterr())
     assert (
         1,
         f"{TASK}: python leg holds its floor 83.4 (86.0%)\n",
@@ -1155,7 +1181,7 @@ def test_a_recorded_leg_that_reports_none_is_red_by_name(
     ) == got
 
 
-def test_a_dropped_leg_is_not_demanded() -> None:
+def test_a_dropped_leg_is_not_demanded(capfd: pytest.CaptureFixture[str]) -> None:
     """A recorded leg consciously dropped is not red when it is gone."""
     text = record(
         PY,
@@ -1163,15 +1189,19 @@ def test_a_dropped_leg_is_not_demanded() -> None:
         extra=("# dropped: plpgsql moved out",),
     )
     with Tree(text) as tree:
-        got = run(cf.hold, tree.path, "lbl", "python 86.0\n", GATE)
+        status = cf.hold(tree.path, "lbl", "python 86.0\n", GATE)
+        got = (status, *capfd.readouterr())
     assert got == (0, "lbl: python leg holds its floor 83.4 (86.0%)\n", "")
 
 
-def test_a_derivation_that_drops_a_leg_fails_without_dropped() -> None:
+def test_a_derivation_that_drops_a_leg_fails_without_dropped(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """A recorded leg the run did not measure refuses the derivation."""
     text = record(PY, planted("plpgsql", "80.0", "82.0"))
     with Tree(text) as tree:
-        got = run(cf.derive, tree.path, "python 86.0\n", "v1.2.0", adopt=False)
+        status = cf.derive(tree.path, "python 86.0\n", "v1.2.0", adopt=False)
+        got = (status, *capfd.readouterr())
         after = tree.text()
     assert (
         1,
@@ -1186,7 +1216,9 @@ def test_a_derivation_that_drops_a_leg_fails_without_dropped() -> None:
     assert text == after
 
 
-def test_a_derivation_that_drops_a_leg_passes_with_dropped() -> None:
+def test_a_derivation_that_drops_a_leg_passes_with_dropped(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """With its reason recorded, the leg and its line leave the file."""
     text = record(
         PY,
@@ -1194,9 +1226,8 @@ def test_a_derivation_that_drops_a_leg_passes_with_dropped() -> None:
         extra=("# dropped: plpgsql moved out",),
     )
     with Tree(text) as tree:
-        status, _, err = run(
-            cf.derive, tree.path, "python 86.0\n", "v1.2.0", adopt=False
-        )
+        status = cf.derive(tree.path, "python 86.0\n", "v1.2.0", adopt=False)
+        err = capfd.readouterr().err
         parsed = clean(tree.written())
     assert (status, err) == (0, "")
     assert parsed.legs == ("python",)
@@ -1205,29 +1236,34 @@ def test_a_derivation_that_drops_a_leg_passes_with_dropped() -> None:
     assert only == kept
 
 
-def test_legs_prints_the_record() -> None:
+def test_legs_prints_the_record(capfd: pytest.CaptureFixture[str]) -> None:
     """One leg a line; nothing for no file."""
     with Tree(record(PY, planted("plpgsql", "80.0", "82.0"))) as tree:
-        assert run(cf.recorded_legs, tree.path) == (0, "python\nplpgsql\n", "")
+        status = cf.recorded_legs(tree.path)
+        out, err = capfd.readouterr()
+        assert (status, out, err) == (0, "python\nplpgsql\n", "")
 
 
-def test_legs_refuses_a_file_off_its_record() -> None:
+def test_legs_refuses_a_file_off_its_record(capfd: pytest.CaptureFixture[str]) -> None:
     """The record's legs are read through the same law."""
     with Tree("90\n") as tree:
-        status, out, _ = run(cf.recorded_legs, tree.path)
+        status = cf.recorded_legs(tree.path)
+        out = capfd.readouterr().out
     assert (status, out) == (1, "")
 
 
-def test_a_recorded_leg_not_held_is_named_and_not_red() -> None:
+def test_a_recorded_leg_not_held_is_named_and_not_red(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """Reported but unmeasurable (#2163): not missing, nothing held."""
     with Tree(PG_HELD) as tree:
-        status, out, err = run(
-            cf.hold,
+        status = cf.hold(
             tree.path,
             "coverage:check",
             "plpgsql 86.0\nplpgsql-branches not-held\n",
             GATE,
         )
+        out, err = capfd.readouterr()
         after = tree.text()
     assert (status, err) == (0, "")
     assert out == (
@@ -1239,17 +1275,19 @@ def test_a_recorded_leg_not_held_is_named_and_not_red() -> None:
     assert after == PG_HELD
 
 
-def test_a_leg_not_held_with_no_floor_yet_is_named() -> None:
+def test_a_leg_not_held_with_no_floor_yet_is_named(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """Nothing to stand and nothing derived from it: named, not red."""
     text = record(planted("plpgsql", "83.4", "85.4"))
     with Tree(text) as tree:
-        status, out, err = run(
-            cf.hold,
+        status = cf.hold(
             tree.path,
             "coverage:check",
             "plpgsql 86.0\nplpgsql-branches not-held\n",
             GATE,
         )
+        out, err = capfd.readouterr()
     assert (status, err) == (0, "")
     assert (
         "coverage:check: plpgsql-branches leg not held: this run cannot"
@@ -1258,16 +1296,18 @@ def test_a_leg_not_held_with_no_floor_yet_is_named() -> None:
     ) in out
 
 
-def test_a_derivation_carries_a_leg_not_held_as_it_stands() -> None:
+def test_a_derivation_carries_a_leg_not_held_as_it_stands(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """Its line is cut from nothing, and the record keeps demanding it."""
     with Tree(PG_HELD) as tree:
-        status, out, err = run(
-            cf.derive,
+        status = cf.derive(
             tree.path,
             "plpgsql 88.0\nplpgsql-branches not-held\n",
             "v1.2.0",
             adopt=False,
         )
+        out, err = capfd.readouterr()
         parsed = clean(tree.written())
     assert (status, err) == (0, "")
     assert parsed.legs == ("plpgsql", "plpgsql-branches")
@@ -1276,31 +1316,29 @@ def test_a_derivation_carries_a_leg_not_held_as_it_stands() -> None:
     assert "coverage-floor: plpgsql-branches 70.0 carried (not held this run)\n" in out
 
 
-def test_a_leg_not_ruled_not_held_is_refused_by_hold() -> None:
+def test_a_leg_not_ruled_not_held_is_refused_by_hold(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """coverage:check refuses the line by name and holds nothing."""
     with Tree(PY_HELD) as tree:
-        status, out, err = run(
-            cf.hold,
-            tree.path,
-            "coverage:check",
-            "python 86.0\npython-branches not-held\n",
-            GATE,
+        status = cf.hold(
+            tree.path, "coverage:check", "python 86.0\npython-branches not-held\n", GATE
         )
+        out, err = capfd.readouterr()
         path = tree.path
     assert (status, out) == (1, "")
     assert f"{TASK}: {path} {OPT_OUT}\n" == err
 
 
-def test_a_leg_not_ruled_not_held_is_refused_by_derive() -> None:
+def test_a_leg_not_ruled_not_held_is_refused_by_derive(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """The derivation refuses the line by name and writes nothing."""
     with Tree(PY_HELD) as tree:
-        status, _, err = run(
-            cf.derive,
-            tree.path,
-            "python 86.0\npython-branches not-held\n",
-            "v1.2.0",
-            adopt=False,
+        status = cf.derive(
+            tree.path, "python 86.0\npython-branches not-held\n", "v1.2.0", adopt=False
         )
+        err = capfd.readouterr().err
         after, path = tree.text(), tree.path
     assert status == 1
     assert after == PY_HELD
@@ -1410,11 +1448,17 @@ PLANNED_REFUSAL = (
     ],
 )
 def test_hold_judges_only_the_calling_jobs_legs(
-    name: object, legs: object, source: object, jobs: object, want: object
+    name: object,
+    legs: object,
+    source: object,
+    jobs: object,
+    want: object,
+    capfd: pytest.CaptureFixture[str],
 ) -> None:
     """One row per branch of the scoped hold, each red row's message."""
     with Tree(owned_record(legs)) as tree:
-        assert want == run(cf.hold, tree.path, "lbl", source, jobs)
+        status = cf.hold(tree.path, "lbl", source, jobs)
+        assert (status, *capfd.readouterr()) == want
 
 
 @pytest.mark.parametrize(
@@ -1453,28 +1497,38 @@ def test_hold_judges_only_the_calling_jobs_legs(
     ],
 )
 def test_the_plan_holds_the_record_to_its_planned_jobs(
-    name: object, legs: object, majors: object, want: object
+    name: object,
+    legs: object,
+    majors: object,
+    want: object,
+    capfd: pytest.CaptureFixture[str],
 ) -> None:
     """Every recorded leg needs its owner planned; red by name if not."""
     with Tree(owned_record(legs)) as tree:
-        assert want == run(cf.planned, tree.path, majors)
+        status = cf.planned(tree.path, majors)
+        assert (status, *capfd.readouterr()) == want
 
 
 @pytest.mark.parametrize(
     ("name", "text"), [("dropped", DROPPED_LEG), ("no floor", None)]
 )
 def test_the_plan_accepts_a_dropped_leg_and_no_floor(
-    name: object, text: object
+    name: object, text: object, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """A dropped leg needs no owner; no floor needs none."""
     with Tree(text) as tree:
-        assert run(cf.planned, tree.path, '["15"]') == (0, "", "")
+        status = cf.planned(tree.path, '["15"]')
+        out, err = capfd.readouterr()
+        assert (status, out, err) == (0, "", "")
 
 
-def test_the_plan_refuses_a_floor_off_its_record() -> None:
+def test_the_plan_refuses_a_floor_off_its_record(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """Drift is the same refusal in the plan as everywhere else."""
     with Tree(record(planted("rust", "88.0", "85.4"))) as tree:
-        status, _, err = run(cf.planned, tree.path, '["15"]')
+        status = cf.planned(tree.path, '["15"]')
+        err = capfd.readouterr().err
     assert status == 1
     assert f"{TASK}:" in err
 
@@ -1533,7 +1587,11 @@ def test_the_plan_refuses_a_floor_off_its_record() -> None:
     ],
 )
 def test_the_plan_decodes_its_majors_as_json(
-    name: object, legs: object, majors: object, want: object
+    name: object,
+    legs: object,
+    majors: object,
+    want: object,
+    capfd: pytest.CaptureFixture[str],
 ) -> None:
     """`--majors-json` is the plan's array of major strings, or red (#1880).
 
@@ -1545,7 +1603,8 @@ def test_the_plan_decodes_its_majors_as_json(
         " canonical major strings: {why}\n"
     )
     with Tree(owned_record(legs)) as tree:
-        assert want == run(cf.planned, tree.path, majors)
+        status = cf.planned(tree.path, majors)
+        assert (status, *capfd.readouterr()) == want
 
 
 @pytest.mark.parametrize(
@@ -1580,14 +1639,15 @@ def test_a_job_is_named_strictly(text: object) -> None:
         cf.job_of(text)
 
 
-def test_the_command_line_reaches_both_checks() -> None:
+def test_the_command_line_reaches_both_checks(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """`hold --job` and `planned --majors-json`, as the callers invoke them."""
     with Tree(owned_record("rust pgrx-pg15")) as tree:
         stdin = sys.stdin
         sys.stdin = io.StringIO("pgrx-pg15 95\n")
         try:
-            got = run(
-                cf.main,
+            status = cf.main(
                 [
                     "--path",
                     str(tree.path),
@@ -1596,20 +1656,21 @@ def test_the_command_line_reaches_both_checks() -> None:
                     "lbl",
                     "--job",
                     "pgrx:15",
-                ],
+                ]
             )
+            got = (status, *capfd.readouterr())
         finally:
             sys.stdin = stdin
-        plan = run(
-            cf.main,
+        status = cf.main(
             [
                 "--path",
                 str(tree.path),
                 "planned",
                 "--majors-json",
                 '["16"]',
-            ],
+            ]
         )
+        plan = (status, *capfd.readouterr())
     assert got == (0, "lbl: pgrx-pg15 leg holds its floor 90 (95%)\n", "")
     assert plan[0] == 1
 
@@ -1765,11 +1826,13 @@ def test_the_producers_stdout_is_the_helpers_input(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """pgrx-plan.sh's literal stdout, given to `planned --majors-json`."""
-    plan = the_plan_feeds_the_helper.run_in_tree([
-        BASH,
-        str(the_plan_feeds_the_helper.canon / "mise" / "pgrx-plan.sh"),
-        str(the_plan_feeds_the_helper.canon),
-    ])
+    plan = the_plan_feeds_the_helper.run_in_tree(
+        [
+            BASH,
+            str(the_plan_feeds_the_helper.canon / "mise" / "pgrx-plan.sh"),
+            str(the_plan_feeds_the_helper.canon),
+        ]
+    )
     assert plan.returncode == 0, plan.stderr
     assert plan.stdout == '["15","16","17","18"]\n'
     the_plan_feeds_the_helper.floor(legs)
@@ -1818,10 +1881,13 @@ LEFT = (
 
 
 # No fuzz target is a leg; a fuzz line left in a floor is refused (#2090).
-def test_a_fuzz_line_and_its_record_are_red_by_name() -> None:
+def test_a_fuzz_line_and_its_record_are_red_by_name(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """`fuzz-x 50` and its record: one refusal, item 3's message."""
     with Tree(record(PY) + planted("fuzz-x", "50", "52.0")) as tree:
-        got = run(cf.read, tree.path)
+        status = cf.read(tree.path)
+        got = (status, *capfd.readouterr())
     assert (1, "", f"{TASK}: {tree.path} states fuzz-x: {LEFT}\n") == got
 
 
@@ -1855,13 +1921,17 @@ def test_two_fuzz_legs_are_each_named_once() -> None:
     assert want == problems
 
 
-def test_the_gate_and_the_release_refuse_it_too() -> None:
+def test_the_gate_and_the_release_refuse_it_too(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
     """`hold` and a release's `write` read the same file the same way."""
     text = record(PY) + planted(MARKER, "88", "90.0")
     refused = f"{TASK}: {{path}} states {MARKER}: {LEFT}\n"
     with Tree(text) as tree:
-        gate = run(cf.hold, tree.path, "lbl", "python 86.0\n", GATE)
-        release = run(cf.derive, tree.path, "python 86.0\n", "v1", adopt=False)
+        status = cf.hold(tree.path, "lbl", "python 86.0\n", GATE)
+        gate = (status, *capfd.readouterr())
+        status = cf.derive(tree.path, "python 86.0\n", "v1", adopt=False)
+        release = (status, *capfd.readouterr())
         assert (1, "", refused.format(path=tree.path)) == gate
         assert release[0] == 1
         assert release[2].startswith(refused.format(path=tree.path)), release[2]
