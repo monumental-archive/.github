@@ -17,15 +17,18 @@ the ordinary suite (`mise run test`) never imports this file.
 """
 
 import hashlib
-import os
 import tempfile
-from pathlib import Path
+from typing import TYPE_CHECKING
 
+import pytest
 from hypothesis import example
 from hypothesis import strategies as st
 
 from belt.release import package_crates as crates
 from belt.typed_hypothesis import given
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 MEMBER = st.from_regex(r"[a-z][a-z0-9_-]{0,8}", fullmatch=True)
 # Each member's version, the verified run's crates, the unverified
@@ -84,30 +87,21 @@ def workspaces(draws: st.DataObject) -> Workspace:
     return versions, first, second, moved
 
 
-def run_package(drawn: Workspace) -> list[str]:
-    """Run the step on one drawn workspace, an exclusion in force.
+def fake_cargo(drawn: Workspace) -> Callable[..., None]:
+    """Stand a `cargo package` in: each run writes the next drawn crates.
 
     Returns:
-        The refusal lines.
+        The stand-in.
 
     """
-    versions, first, second, _ = drawn
+    _, first, second, _ = drawn
     runs = iter([first, second])
 
     def cargo(*_: str) -> None:
         for name, data in next(runs).items():
             (crates.PACKAGE / name).write_bytes(data)
 
-    crates.cargo = cargo
-    crates.published = lambda: list(versions.items())
-    here = Path.cwd()
-    with tempfile.TemporaryDirectory() as tmp:
-        os.chdir(tmp)
-        try:
-            crates.PACKAGE.mkdir(parents=True)
-            return crates.package(" --exclude x")
-        finally:
-            os.chdir(here)
+    return cargo
 
 
 def digest(data: bytes) -> str:
@@ -136,7 +130,15 @@ def test_refused_exactly_on_moved_bytes(data: st.DataObject | None) -> None:
     """Each moved crate is named with both digests; no other is."""
     drawn = workspaces(data) if data else ONE_BIT
     _, first, second, moved = drawn
-    refused = run_package(drawn)
+    with (
+        tempfile.TemporaryDirectory() as tmp,
+        pytest.MonkeyPatch.context() as patched,
+    ):
+        patched.setattr(crates, "cargo", fake_cargo(drawn))
+        patched.setattr(crates, "published", lambda: list(drawn[0].items()))
+        patched.chdir(tmp)
+        crates.PACKAGE.mkdir(parents=True)
+        refused = crates.package(" --exclude x")
     want = [
         f"{name} changed when packaged again without verifying:"
         f" {digest(first[name])} verified, {digest(second[name])} now"

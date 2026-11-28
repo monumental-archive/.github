@@ -16,16 +16,20 @@ the ordinary suite (`mise run test`) never imports this file.
 """
 
 import io
-import os
 import tarfile
 import tempfile
 from pathlib import Path
+from typing import TYPE_CHECKING
 
+import pytest
 from hypothesis import example
 from hypothesis import strategies as st
 
 from belt.release import source_archive as source
 from belt.typed_hypothesis import given
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 # GitHub's own alphabets: an owner is letters, digits and hyphens; a
 # repository name adds dots and underscores, and is never `.` or `..`.
@@ -67,12 +71,11 @@ def tarball() -> bytes:
 ARCHIVE = tarball()
 
 
-def run_build(repository: str, version: str) -> tuple[str, list[list[str]], list[str]]:
-    """Run the build for one repository and version.
+def fake_git() -> tuple[Callable[..., str], list[list[str]]]:
+    """Stand a `git` in: `ls-files` lists two files, `archive` writes one.
 
     Returns:
-        The notice line, every `git archive` call's arguments, and the
-        names dist/ holds.
+        The stand-in, and every `git archive` call's arguments.
 
     """
     calls: list[list[str]] = []
@@ -84,16 +87,7 @@ def run_build(repository: str, version: str) -> tuple[str, list[list[str]], list
         Path(args[args.index("-o") + 1]).write_bytes(ARCHIVE)
         return ""
 
-    source.git = git
-    here = Path.cwd()
-    with tempfile.TemporaryDirectory() as tmp:
-        os.chdir(tmp)
-        try:
-            notice = source.build({"VERSION": version, "GITHUB_REPOSITORY": repository})
-        finally:
-            os.chdir(here)
-        dist = sorted(p.name for p in (Path(tmp) / "dist").iterdir())
-    return notice, calls, dist
+    return git, calls
 
 
 # V: the name after the owner, one leading dot stripped.
@@ -105,7 +99,16 @@ def test_one_leading_dot_stripped(owner: str, name: str, version: str) -> None:
     """The asset, its prefix and the tag follow the stripped name."""
     shipped = name[1:] if name.startswith(".") else name
     base = f"{shipped}-{version}"
-    notice, calls, dist = run_build(f"{owner}/{name}", version)
+    git, calls = fake_git()
+    with (
+        tempfile.TemporaryDirectory() as tmp,
+        pytest.MonkeyPatch.context() as patched,
+    ):
+        patched.setattr(source, "git", git)
+        patched.chdir(tmp)
+        env = {"VERSION": version, "GITHUB_REPOSITORY": f"{owner}/{name}"}
+        notice = source.build(env)
+        dist = sorted(p.name for p in (Path(tmp) / "dist").iterdir())
     want: list[str] = [f"{base}.tar.gz"]
     assert dist == want
     assert notice.startswith(f"{base}.tar.gz: "), notice
