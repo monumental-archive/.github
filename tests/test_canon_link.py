@@ -25,16 +25,16 @@ CANON = "example-org/.github"
 SHA = "0123456789abcdef0123456789abcdef01234567"
 
 
-def plant(root: pathlib.Path, *, config: bool = True) -> pathlib.Path:
+def plant(
+    root: pathlib.Path, *, config: bool = True, canon: support.Canon
+) -> pathlib.Path:
     """Plant a tree with the shipped script where the action keeps it.
 
     Returns:
         The script's path inside the planted tree.
 
     """
-    support.canon(
-        root, ".github/actions/canon", stubs={"mise/config.toml": "[tools]\n"}
-    )
+    canon(root, ".github/actions/canon", stubs={"mise/config.toml": "[tools]\n"})
     if not config:
         shutil.rmtree(root / "mise")
     return root / ".github" / "actions" / "canon" / "link.sh"
@@ -54,8 +54,9 @@ def excluded(gitdir: pathlib.Path) -> str:
 class LinkTheCanonTree:
     """Each row: where the tree resolved, and what the step did."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Give each row a scratch root and a workspace."""
+        self.make_env = env
         self.tmp = tmp_path
         self.workspace = self.tmp / "workspace"
         self.workspace.mkdir()
@@ -74,7 +75,7 @@ class LinkTheCanonTree:
         bash = support.tool("bash")
         return subprocess.run(
             [bash, str(script)],
-            env=support.env(
+            env=self.make_env(
                 PATH=os.environ["PATH"],
                 **{"CANON_REPOSITORY": canon} if canon is not None else {},
                 GITHUB_REPOSITORY=repository,
@@ -108,7 +109,7 @@ class LinkTheCanonTree:
         return subprocess.run(
             [support.tool("git"), "-c", "commit.gpgsign=false", *args],
             cwd=cwd or self.workspace,
-            env=support.env(self.tmp / "home", PATH=os.environ["PATH"]),
+            env=self.make_env(self.tmp / "home", PATH=os.environ["PATH"]),
             capture_output=True,
             text=True,
             check=True,
@@ -129,17 +130,17 @@ class LinkTheCanonTree:
 
 
 @fixture
-def link_the_canon_tree(tmp_path: Path) -> LinkTheCanonTree:
+def link_the_canon_tree(tmp_path: Path, env: support.Env) -> LinkTheCanonTree:
     """Give each row its own LinkTheCanonTree."""
-    return LinkTheCanonTree(tmp_path)
+    return LinkTheCanonTree(tmp_path, env=env)
 
 
 def test_an_actions_path_names_the_pinned_ref(
-    link_the_canon_tree: LinkTheCanonTree,
+    link_the_canon_tree: LinkTheCanonTree, canon: support.Canon
 ) -> None:
     """A caller's pin: the ref is the path segment under _actions."""
     root = link_the_canon_tree.tmp / "_actions" / "example-org" / ".github" / "v1.69.0"
-    done = link_the_canon_tree.link(plant(root), "someone/consumer")
+    done = link_the_canon_tree.link(plant(root, canon=canon), "someone/consumer")
     assert done.returncode == 0, done.stdout + done.stderr
     assert done.stdout == f"canon resolved: v1.69.0 at {root}\n"
     assert link_the_canon_tree.output.read_text(encoding="utf-8") == "ref=v1.69.0\n"
@@ -147,11 +148,11 @@ def test_an_actions_path_names_the_pinned_ref(
 
 
 def test_the_canon_calling_itself_names_the_running_commit(
-    link_the_canon_tree: LinkTheCanonTree,
+    link_the_canon_tree: LinkTheCanonTree, canon: support.Canon
 ) -> None:
     """A local `$/` resolution in the canon is the running commit."""
     root = link_the_canon_tree.tmp / "work" / ".github"
-    done = link_the_canon_tree.link(plant(root), CANON)
+    done = link_the_canon_tree.link(plant(root, canon=canon), CANON)
     assert done.returncode == 0, done.stdout + done.stderr
     assert done.stdout == f"canon resolved: {SHA} at {root}\n"
     assert link_the_canon_tree.output.read_text(encoding="utf-8") == f"ref={SHA}\n"
@@ -159,7 +160,7 @@ def test_the_canon_calling_itself_names_the_running_commit(
 
 
 def test_a_checkout_does_not_see_the_link_as_a_change(
-    link_the_canon_tree: LinkTheCanonTree,
+    link_the_canon_tree: LinkTheCanonTree, canon: support.Canon
 ) -> None:
     """The link is in the clone's info/exclude, so the tree is clean.
 
@@ -169,7 +170,7 @@ def test_a_checkout_does_not_see_the_link_as_a_change(
     """
     link_the_canon_tree.checkout(link_the_canon_tree.workspace)
     root = link_the_canon_tree.tmp / "_actions" / "example-org" / ".github" / "v1.69.0"
-    done = link_the_canon_tree.link(plant(root), "someone/consumer")
+    done = link_the_canon_tree.link(plant(root, canon=canon), "someone/consumer")
     assert done.returncode == 0, done.stdout + done.stderr
     assert link_the_canon_tree.linked() == root
     assert excluded(link_the_canon_tree.workspace / ".git") == "/.org-canon"
@@ -177,12 +178,12 @@ def test_a_checkout_does_not_see_the_link_as_a_change(
 
 
 def test_a_second_link_writes_no_second_line(
-    link_the_canon_tree: LinkTheCanonTree,
+    link_the_canon_tree: LinkTheCanonTree, canon: support.Canon
 ) -> None:
     """The action can run twice in a job; the exclude holds one line."""
     link_the_canon_tree.checkout(link_the_canon_tree.workspace)
     root = link_the_canon_tree.tmp / "_actions" / "example-org" / ".github" / "v1.69.0"
-    script = plant(root)
+    script = plant(root, canon=canon)
     for _ in range(2):
         done = link_the_canon_tree.link(script, "someone/consumer")
         assert done.returncode == 0, done.stdout + done.stderr
@@ -191,7 +192,7 @@ def test_a_second_link_writes_no_second_line(
 
 
 def test_a_workspace_inside_a_repository_is_anchored_where_it_sits(
-    link_the_canon_tree: LinkTheCanonTree,
+    link_the_canon_tree: LinkTheCanonTree, canon: support.Canon
 ) -> None:
     """A checkout one level up: the entry names the workspace's path."""
     clone = link_the_canon_tree.tmp / "clone"
@@ -199,14 +200,14 @@ def test_a_workspace_inside_a_repository_is_anchored_where_it_sits(
     link_the_canon_tree.workspace = clone / "sub"
     link_the_canon_tree.workspace.mkdir()
     root = link_the_canon_tree.tmp / "_actions" / "example-org" / ".github" / "v1.69.0"
-    done = link_the_canon_tree.link(plant(root), "someone/consumer")
+    done = link_the_canon_tree.link(plant(root, canon=canon), "someone/consumer")
     assert done.returncode == 0, done.stdout + done.stderr
     assert excluded(clone / ".git") == "/sub/.org-canon"
     link_the_canon_tree.assert_clean(clone)
 
 
 def test_a_worktree_is_excluded_through_the_common_dir(
-    link_the_canon_tree: LinkTheCanonTree,
+    link_the_canon_tree: LinkTheCanonTree, canon: support.Canon
 ) -> None:
     """Git reads info/exclude from the common dir, not the worktree's."""
     clone = link_the_canon_tree.tmp / "clone"
@@ -216,29 +217,29 @@ def test_a_worktree_is_excluded_through_the_common_dir(
     )
     link_the_canon_tree.workspace /= "wt"
     root = link_the_canon_tree.tmp / "_actions" / "example-org" / ".github" / "v1.69.0"
-    done = link_the_canon_tree.link(plant(root), "someone/consumer")
+    done = link_the_canon_tree.link(plant(root, canon=canon), "someone/consumer")
     assert done.returncode == 0, done.stdout + done.stderr
     assert excluded(clone / ".git") == "/.org-canon"
     link_the_canon_tree.assert_clean(link_the_canon_tree.workspace)
 
 
 def test_a_workspace_in_no_repository_is_linked_and_nothing_written(
-    link_the_canon_tree: LinkTheCanonTree,
+    link_the_canon_tree: LinkTheCanonTree, canon: support.Canon
 ) -> None:
     """No clone: the link is made and there is no exclude to write."""
     root = link_the_canon_tree.tmp / "_actions" / "example-org" / ".github" / "v1.69.0"
-    done = link_the_canon_tree.link(plant(root), "someone/consumer")
+    done = link_the_canon_tree.link(plant(root, canon=canon), "someone/consumer")
     assert done.returncode == 0, done.stdout + done.stderr
     assert link_the_canon_tree.linked() == root
     assert not (link_the_canon_tree.workspace / ".git").exists()
 
 
 def test_another_repository_off_an_actions_path_is_refused(
-    link_the_canon_tree: LinkTheCanonTree,
+    link_the_canon_tree: LinkTheCanonTree, canon: support.Canon
 ) -> None:
     """A shape the action does not understand is refused, not guessed."""
     root = link_the_canon_tree.tmp / "work" / "consumer"
-    done = link_the_canon_tree.link(plant(root), "someone/consumer")
+    done = link_the_canon_tree.link(plant(root, canon=canon), "someone/consumer")
     assert done.returncode == 1, done.stdout + done.stderr
     assert done.stderr == (
         f"::error::link.sh: canon action resolved to '{root}' in"
@@ -249,22 +250,24 @@ def test_another_repository_off_an_actions_path_is_refused(
 
 
 def test_an_actions_path_of_another_repository_is_refused(
-    link_the_canon_tree: LinkTheCanonTree,
+    link_the_canon_tree: LinkTheCanonTree, canon: support.Canon
 ) -> None:
     """Only the canon's own _actions segment names a pinned ref."""
     root = link_the_canon_tree.tmp / "_actions" / "someone" / "fork" / "v1.0.0"
-    done = link_the_canon_tree.link(plant(root), "someone/consumer")
+    done = link_the_canon_tree.link(plant(root, canon=canon), "someone/consumer")
     assert done.returncode == 1, done.stdout + done.stderr
     assert "not an _actions path and not a canon self-call" in done.stderr
     assert link_the_canon_tree.linked() is None
 
 
 def test_a_tree_with_no_belt_config_is_refused(
-    link_the_canon_tree: LinkTheCanonTree,
+    link_the_canon_tree: LinkTheCanonTree, canon: support.Canon
 ) -> None:
     """A tree with no mise/config.toml is not a canon tree."""
     root = link_the_canon_tree.tmp / "_actions" / "example-org" / ".github" / "v1.69.0"
-    done = link_the_canon_tree.link(plant(root, config=False), "someone/consumer")
+    done = link_the_canon_tree.link(
+        plant(root, config=False, canon=canon), "someone/consumer"
+    )
     assert done.returncode == 1, done.stdout + done.stderr
     assert done.stdout == (
         "::error::the resolved canon tree has no mise/config.toml or"
@@ -275,10 +278,14 @@ def test_a_tree_with_no_belt_config_is_refused(
     assert link_the_canon_tree.linked() is None
 
 
-def test_no_canon_repository_is_refused(link_the_canon_tree: LinkTheCanonTree) -> None:
+def test_no_canon_repository_is_refused(
+    link_the_canon_tree: LinkTheCanonTree, canon: support.Canon
+) -> None:
     """The canon's name is an input: absent, nothing is guessed."""
     root = link_the_canon_tree.tmp / "_actions" / "example-org" / ".github" / "v1.69.0"
-    done = link_the_canon_tree.link(plant(root), "someone/consumer", canon=None)
+    done = link_the_canon_tree.link(
+        plant(root, canon=canon), "someone/consumer", canon=None
+    )
     assert done.returncode != 0
     assert (
         "CANON_REPOSITORY must be set (action.yml passes the canon repository)"

@@ -135,21 +135,27 @@ def plant_rust_run(tree: Path, run: Path) -> None:
 
 
 # Every selector the script accepts measures its leg.
-def test_the_rust_selector_measures_the_rust_leg() -> None:
+def test_the_rust_selector_measures_the_rust_leg(
+    env: support.Env, rustc: support.Rustc
+) -> None:
     """`rust` is accepted, so it must not measure nothing and pass."""
-    assert_rust_leg_measured(RUSTUP)
+    assert_rust_leg_measured(RUSTUP, env=env, rustc=rustc)
 
 
-def test_llvm_tools_ahead_of_a_long_listing_is_found() -> None:
+def test_llvm_tools_ahead_of_a_long_listing_is_found(
+    env: support.Env, rustc: support.Rustc
+) -> None:
     """`llvm-tools…` first, then 200 kB: the leg measures (#1637).
 
     On main the probe stopped at the first line and the leg reported
     the component missing.
     """
-    assert_rust_leg_measured(RUSTUP_LONG)
+    assert_rust_leg_measured(RUSTUP_LONG, env=env, rustc=rustc)
 
 
-def assert_rust_leg_measured(rustup: str) -> None:
+def assert_rust_leg_measured(
+    rustup: str, *, env: support.Env, rustc: support.Rustc
+) -> None:
     """Run the `rust` selector with this rustup and require its number."""
     with tempfile.TemporaryDirectory() as tmp:
         tree = Path(tmp) / "tree"
@@ -159,24 +165,24 @@ def assert_rust_leg_measured(rustup: str) -> None:
         for name, text in (("rustup", rustup), ("cargo", CARGO)):
             (stubs / name).write_text(text, encoding="utf-8")
             (stubs / name).chmod(0o755)
-        support.rustc(stubs)
+        rustc(stubs)
         (tree / "Cargo.toml").write_text("[workspace]\n", encoding="utf-8")
         plant_rust_run(tree, Path(tmp) / "run")
-        env = support.env()
-        env |= {
+        environ = env()
+        environ |= {
             "ORG_BELT_DIR": str(BELT),
             "ORG_COVERAGE_RUN": str(Path(tmp) / "run"),
             "RUSTUP_TOOLCHAIN": "stable",
-            "PATH": f"{stubs}{os.pathsep}{env.get('PATH', '')}",
+            "PATH": f"{stubs}{os.pathsep}{environ.get('PATH', '')}",
             "STUB_DIR": tmp,
             "STUB_FILES": "a.rs:13:8 b.rs:0:0",
         }
-        init_tree(tree, env, ["Cargo.toml"], commit=False)
-        env["ORG_COVERAGE_REPORTS"] = str(Path(tmp) / "reports")
+        init_tree(tree, environ, ["Cargo.toml"], commit=False)
+        environ["ORG_COVERAGE_REPORTS"] = str(Path(tmp) / "reports")
         done = subprocess.run(
             [BASH, str(BELT / "coverage-measure.sh"), "coverage:test", "rust"],
             cwd=tree,
-            env=env,
+            env=environ,
             capture_output=True,
             text=True,
             check=False,
@@ -188,7 +194,9 @@ def assert_rust_leg_measured(rustup: str) -> None:
     assert written
 
 
-def test_a_go_and_rust_tree_measures_both_legs() -> None:
+def test_a_go_and_rust_tree_measures_both_legs(
+    env: support.Env, rustc: support.Rustc
+) -> None:
     """Every tracked language runs its leg, not the first one (#471).
 
     A mixed repository once took the Rust leg alone and reported the
@@ -202,25 +210,25 @@ def test_a_go_and_rust_tree_measures_both_legs() -> None:
         for name, text in (("rustup", RUSTUP), ("cargo", CARGO), ("go", GO)):
             (stubs / name).write_text(text, encoding="utf-8")
             (stubs / name).chmod(0o755)
-        support.rustc(stubs)
+        rustc(stubs)
         (tree / "Cargo.toml").write_text("[workspace]\n", encoding="utf-8")
         (tree / "go.mod").write_text("module example.com/x\n", encoding="utf-8")
         plant_rust_run(tree, Path(tmp) / "run")
-        env = support.env()
-        env |= {
+        environ = env()
+        environ |= {
             "ORG_BELT_DIR": str(BELT),
             "ORG_COVERAGE_RUN": str(Path(tmp) / "run"),
             "RUSTUP_TOOLCHAIN": "stable",
-            "PATH": f"{stubs}{os.pathsep}{env.get('PATH', '')}",
+            "PATH": f"{stubs}{os.pathsep}{environ.get('PATH', '')}",
             "STUB_DIR": tmp,
             "STUB_FILES": "a.rs:200:123",
             "STUB_GO": "93.0",
         }
-        init_tree(tree, env, ["Cargo.toml", "go.mod"], commit=False)
+        init_tree(tree, environ, ["Cargo.toml", "go.mod"], commit=False)
         done = subprocess.run(
             [BASH, str(BELT / "coverage-measure.sh"), "coverage:test", "all"],
             cwd=tree,
-            env=env,
+            env=environ,
             capture_output=True,
             text=True,
             check=False,
@@ -243,6 +251,8 @@ def leg(
     marker: bool = True,
     profile: bool = True,
     metadata: dict[str, object] | None = None,
+    env: support.Env,
+    rustc: support.Rustc,
 ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     """Run the `rust` selector over a planted run and stand-in cargo.
 
@@ -261,7 +271,7 @@ def leg(
     for name, text in (("rustup", RUSTUP), ("cargo", CARGO)):
         (stubs / name).write_text(text, encoding="utf-8")
         (stubs / name).chmod(0o755)
-    support.rustc(stubs)
+    rustc(stubs)
     (tree / "Cargo.toml").write_text("[workspace]\n", encoding="utf-8")
     plant_rust_run(tree, run)
     if not marker:
@@ -269,24 +279,24 @@ def leg(
     if not profile:
         profiles = tree / "target" / f"llvm-cov-target-{STABLE}"
         (profiles / "tree-1-1.profraw").unlink()
-    env = support.env()
-    env |= {
+    environ = env()
+    environ |= {
         "ORG_BELT_DIR": str(BELT),
         "ORG_COVERAGE_RUN": str(run),
         "ORG_COVERAGE_REPORTS": str(base / "reports"),
         "RUSTUP_TOOLCHAIN": "stable",
-        "PATH": f"{stubs}{os.pathsep}{env.get('PATH', '')}",
+        "PATH": f"{stubs}{os.pathsep}{environ.get('PATH', '')}",
         "STUB_DIR": tmp,
         "STUB_FILES": "src/lib.rs:10:0 crates/core/src/lib.rs:10:9",
     }
-    init_tree(tree, env, ["Cargo.toml"], commit=False)
+    init_tree(tree, environ, ["Cargo.toml"], commit=False)
     if metadata is not None:
         (base / "metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
-        env["STUB_METADATA"] = str(base / "metadata.json")
+        environ["STUB_METADATA"] = str(base / "metadata.json")
     done = subprocess.run(
         [BASH, str(BELT / "coverage-measure.sh"), "coverage:check", "rust"],
         cwd=tree,
-        env=env,
+        env=environ,
         capture_output=True,
         text=True,
         check=False,
@@ -295,10 +305,12 @@ def leg(
     return done, log.read_text("utf-8").splitlines() if log.exists() else []
 
 
-def test_an_earlier_runs_profiles_without_this_runs_marker_are_refused() -> None:
+def test_an_earlier_runs_profiles_without_this_runs_marker_are_refused(
+    env: support.Env, rustc: support.Rustc
+) -> None:
     """Profiles on disk, but `measured` made no marker in this run."""
     with tempfile.TemporaryDirectory() as tmp:
-        done, calls = leg(tmp, marker=False)
+        done, calls = leg(tmp, marker=False, env=env, rustc=rustc)
         assert done.returncode == 1, done.stderr
         assert done.stdout == ""
         assert NO_RUN in done.stderr
@@ -306,10 +318,12 @@ def test_an_earlier_runs_profiles_without_this_runs_marker_are_refused() -> None
         assert reports == NO_CALLS
 
 
-def test_this_runs_marker_without_a_profile_is_refused() -> None:
+def test_this_runs_marker_without_a_profile_is_refused(
+    env: support.Env, rustc: support.Rustc
+) -> None:
     """`measured` ran, the suite wrote nothing: the same refusal."""
     with tempfile.TemporaryDirectory() as tmp:
-        done, calls = leg(tmp, profile=False)
+        done, calls = leg(tmp, profile=False, env=env, rustc=rustc)
         assert done.returncode == 1, done.stderr
         assert done.stdout == ""
         assert NO_RUN in done.stderr
@@ -317,7 +331,9 @@ def test_this_runs_marker_without_a_profile_is_refused() -> None:
         assert reports == NO_CALLS
 
 
-def test_a_root_package_extension_leaves_its_own_targets() -> None:
+def test_a_root_package_extension_leaves_its_own_targets(
+    env: support.Env, rustc: support.Rustc
+) -> None:
     """The extension at the workspace root: its targets go, a member stays."""
     root_ext = {
         "packages": [
@@ -335,7 +351,7 @@ def test_a_root_package_extension_leaves_its_own_targets() -> None:
         "workspace_members": ["path+file://<root>#ext@1.0.0"],
     }
     with tempfile.TemporaryDirectory() as tmp:
-        done, calls = leg(tmp, metadata=root_ext)
+        done, calls = leg(tmp, metadata=root_ext, env=env, rustc=rustc)
         assert done.returncode == 0, done.stderr
         # crates/core's 9 of 10; the root's src/lib.rs (none hit) left out.
         assert done.stdout == "rust 90\n"
@@ -394,6 +410,10 @@ MEASURED = '"${ORG_BELT_DIR}/measured" go test -race ./...'
 class GoOneRun:
     """coverage:check under a real mise reads the Go suite's one run (#1651)."""
 
+    def __init__(self, *, env: support.Env) -> None:
+        """Hold the conftest factories the rows' state uses."""
+        self.make_env = env
+
     def plant(self, base: Path, *, command: str) -> Path:
         """Plant a Go-shaped tree whose test task sets GOFLAGS and counts runs.
 
@@ -416,7 +436,7 @@ class GoOneRun:
             f"run = '''\necho ran >> ../counter\n{command}\n'''\n",
             encoding="utf-8",
         )
-        env = support.env()
+        env = self.make_env()
         for argv in ([GIT, "init", "-q"], [GIT, "add", "-A"]):
             subprocess.run(argv, cwd=tree, env=env, check=True)
         self.stubs = stubs
@@ -433,7 +453,7 @@ class GoOneRun:
         config = base / "config"
         config.mkdir()
         (base / "tmp").mkdir()
-        env = support.env(
+        env = self.make_env(
             MISE_CONFIG_DIR=str(config),
             XDG_CONFIG_HOME=str(config),
             MISE_GLOBAL_CONFIG_FILE=str(BELT / "config.toml"),
@@ -461,9 +481,9 @@ class GoOneRun:
 
 
 @fixture
-def go_one_run() -> GoOneRun:
+def go_one_run(env: support.Env) -> GoOneRun:
     """Give each row its own GoOneRun."""
-    return GoOneRun()
+    return GoOneRun(env=env)
 
 
 def test_the_task_runs_once_measured_with_its_own_goflags(go_one_run: GoOneRun) -> None:
@@ -566,6 +586,11 @@ RUST_ONE_RUN_MEASURED = (
 class RustOneRun:
     """coverage:check under a real mise reads the Rust suite's one run (#1653)."""
 
+    def __init__(self, *, env: support.Env, rustc: support.Rustc) -> None:
+        """Hold the conftest factories the rows' state uses."""
+        self.make_env = env
+        self.plant_rustc = rustc
+
     def plant(self, base: Path, *, command: str) -> Path:
         """Plant a Rust-shaped tree whose test task counts its runs.
 
@@ -580,13 +605,13 @@ class RustOneRun:
         for name, text in (("cargo", CARGO), ("rustup", RUSTUP)):
             (stubs / name).write_text(text, encoding="utf-8")
             (stubs / name).chmod(0o755)
-        support.rustc(stubs)
+        self.plant_rustc(stubs)
         (tree / "Cargo.toml").write_text("[workspace]\n", encoding="utf-8")
         (tree / ".coverage-floor").write_text(floor_of("rust"), encoding="utf-8")
         (tree / "mise.toml").write_text(
             RUST_TASK.format(command=command), encoding="utf-8"
         )
-        env = support.env()
+        env = self.make_env()
         for argv in ([GIT, "init", "-q"], [GIT, "add", "-A"]):
             subprocess.run(argv, cwd=tree, env=env, check=True)
         self.stubs = stubs
@@ -603,7 +628,7 @@ class RustOneRun:
         config = base / "config"
         config.mkdir()
         (base / "tmp").mkdir()
-        env = support.env(
+        env = self.make_env(
             MISE_CONFIG_DIR=str(config),
             XDG_CONFIG_HOME=str(config),
             MISE_GLOBAL_CONFIG_FILE=str(BELT / "config.toml"),
@@ -631,9 +656,9 @@ class RustOneRun:
 
 
 @fixture
-def rust_one_run() -> RustOneRun:
+def rust_one_run(env: support.Env, rustc: support.Rustc) -> RustOneRun:
     """Give each row its own RustOneRun."""
-    return RustOneRun()
+    return RustOneRun(env=env, rustc=rustc)
 
 
 def calls(base: Path) -> list[str]:

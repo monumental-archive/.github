@@ -125,12 +125,13 @@ def task_env(task: str) -> dict[str, str]:
 class Planted:
     """A planted git repository and the belt's tasks run in it."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Plant an empty repository."""
+        self.make_env = env
         self.tmp = tmp_path
         self.tree = self.tmp / "tree"
         self.tree.mkdir()
-        self.env = support.env(
+        self.env = self.make_env(
             ORG_BELT_DIR=str(BELT),
             ORG_CANON_DIR=str(CANON_DIR),
             ORG_PYTHON=sys.executable,
@@ -188,9 +189,9 @@ class Planted:
 
 
 @fixture
-def planted(tmp_path: Path) -> Planted:
+def planted(tmp_path: Path, env: support.Env) -> Planted:
     """Give each row its own Planted."""
-    return Planted(tmp_path)
+    return Planted(tmp_path, env=env)
 
 
 class Untracked(Planted):
@@ -210,9 +211,9 @@ class Untracked(Planted):
 
 
 @fixture
-def untracked(tmp_path: Path) -> Untracked:
+def untracked(tmp_path: Path, env: support.Env) -> Untracked:
     """Give each row its own Untracked."""
-    return Untracked(tmp_path)
+    return Untracked(tmp_path, env=env)
 
 
 def test_lint_actions(untracked: Untracked) -> None:
@@ -276,13 +277,13 @@ def test_audit_template_pins_skips(planted: Planted) -> None:
     assert done.stdout.splitlines() == skipped
 
 
-def test_audit_scheduled_has_no_workflows(planted: Planted) -> None:
+def test_audit_scheduled_has_no_workflows(planted: Planted, belt: support.Belt) -> None:
     """Own audit tasks and only an untracked runner: the no-workflows branch."""
     runner = "jobs:\n  a:\n    steps:\n      - run: mise run audit:custom\n"
     planted.plant(STRAY, runner, track=False)
     stubs = {"own-audits.sh": OWN_AUDIT_STUB}
-    belt = support.belt(planted.tmp / "belt", stubs=stubs)
-    done = planted.task("lint:audit-scheduled", ORG_BELT_DIR=str(belt))
+    belt_dir = belt(planted.tmp / "belt", stubs=stubs)
+    done = planted.task("lint:audit-scheduled", ORG_BELT_DIR=str(belt_dir))
     assert done.returncode == 1, done.stdout + done.stderr
     expected = [
         "lint:audit-scheduled: repo-defined audit task(s) and NO workflows at all:",

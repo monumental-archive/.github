@@ -35,7 +35,7 @@ cat "${STUB_METADATA}"
 
 
 def run_helper(
-    packages: dict[str, list[str] | None], members: tuple[str, ...]
+    packages: dict[str, list[str] | None], members: tuple[str, ...], *, env: support.Env
 ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     """Run the helper over a workspace with these `publish` keys.
 
@@ -64,7 +64,7 @@ def run_helper(
         (tmp / "metadata.json").write_text(json.dumps(metadata))
         result = subprocess.run(
             [BASH, str(HELPER)],
-            env=support.env(
+            env=env(
                 PATH=f"{tmp / 'bin'}{os.pathsep}{os.environ['PATH']}",
                 STUB_LOG=str(tmp / "cargo.log"),
                 STUB_METADATA=str(tmp / "metadata.json"),
@@ -78,7 +78,7 @@ def run_helper(
 
 
 # Each shape of the key, alone in a workspace.
-def test_the_key_decides() -> None:
+def test_the_key_decides(env: support.Env) -> None:
     """Unset and a list naming crates-io ship; false and elsewhere do not."""
     rows: tuple[tuple[str, list[str] | None, str], ...] = (
         ("unset", None, "fx-unset\t0.1.0\n"),
@@ -89,13 +89,13 @@ def test_the_key_decides() -> None:
     )
     for label, key, expected in rows:
         name = "fx-" + label.replace(" ", "-")
-        result, _ = run_helper({name: key}, (name,))
+        result, _ = run_helper({name: key}, (name,), env=env)
         assert result.returncode == 0, result.stderr
         assert expected == result.stdout
 
 
 # Every shape at once, plus a package outside the workspace.
-def test_members_that_publish_to_crates_io_in_metadata_order() -> None:
+def test_members_that_publish_to_crates_io_in_metadata_order(env: support.Env) -> None:
     """Only workspace members, only crates.io's, name TAB version."""
     packages: dict[str, list[str] | None] = {
         "fx-unset": None,
@@ -105,7 +105,7 @@ def test_members_that_publish_to_crates_io_in_metadata_order() -> None:
         "fx-outside": None,
     }
     result, calls = run_helper(
-        packages, ("fx-unset", "fx-false", "fx-crates-io", "fx-elsewhere")
+        packages, ("fx-unset", "fx-false", "fx-crates-io", "fx-elsewhere"), env=env
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout == "fx-unset\t0.1.0\nfx-crates-io\t0.1.0\n"
@@ -113,7 +113,7 @@ def test_members_that_publish_to_crates_io_in_metadata_order() -> None:
     assert want == calls
 
 
-def test_a_cargo_failure_fails_the_helper() -> None:
+def test_a_cargo_failure_fails_the_helper(env: support.Env) -> None:
     """An unread workspace is never an empty one."""
     with TemporaryDirectory() as d:
         stub = Path(d) / "cargo"
@@ -125,7 +125,7 @@ def test_a_cargo_failure_fails_the_helper() -> None:
         stub.chmod(0o755)
         result = subprocess.run(
             [BASH, str(HELPER)],
-            env=support.env(PATH=f"{d}{os.pathsep}{os.environ['PATH']}"),
+            env=env(PATH=f"{d}{os.pathsep}{os.environ['PATH']}"),
             capture_output=True,
             text=True,
             check=False,

@@ -48,16 +48,16 @@ def body() -> str:
 
 
 # The checked-out toolbelt never reaches the scanner (#86).
-def test_an_untracked_checkout_is_not_scanned() -> None:
+def test_an_untracked_checkout_is_not_scanned(env: support.Env) -> None:
     """Only the tracked Dockerfile is handed to trivy."""
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         tree = root / "repo"
         tree.mkdir()
-        env = support.env(root / "home")
-        subprocess.run([GIT, "init", "-q"], cwd=tree, env=env, check=True)
+        environ = env(root / "home")
+        subprocess.run([GIT, "init", "-q"], cwd=tree, env=environ, check=True)
         (tree / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
-        subprocess.run([GIT, "add", "Dockerfile"], cwd=tree, env=env, check=True)
+        subprocess.run([GIT, "add", "Dockerfile"], cwd=tree, env=environ, check=True)
         toolbelt = tree / ".org-toolbelt"
         toolbelt.mkdir()
         (toolbelt / "Dockerfile").write_text("FROM ubuntu\n", encoding="utf-8")
@@ -66,13 +66,13 @@ def test_an_untracked_checkout_is_not_scanned() -> None:
         (bindir / "trivy").write_text(TRIVY, encoding="utf-8")
         (bindir / "trivy").chmod(0o755)
         log = root / "trivy.log"
-        env["PATH"] = f"{bindir}{os.pathsep}{env['PATH']}"
-        env["TRIVY_LOG"] = str(log)
+        environ["PATH"] = f"{bindir}{os.pathsep}{environ['PATH']}"
+        environ["TRIVY_LOG"] = str(log)
         as_mise = support.task_run("lint:trivy", body())
         done = subprocess.run(
             as_mise.argv,
             cwd=tree,
-            env=env | as_mise.env,
+            env=environ | as_mise.env,
             capture_output=True,
             text=True,
             check=False,

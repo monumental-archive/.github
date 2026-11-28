@@ -115,25 +115,26 @@ echo "3.0.0 (stub interpreter)"
 # GIT_DIR and friends, and `git init` / `git add` would then write the
 # REAL repository's index instead of the planted one. Measured here:
 # the first push of this file staged the deletion of every tracked file.
-_GIT_ENV = {
-    **support.env(),
+GIT_ISOLATED = {
     "GIT_CONFIG_GLOBAL": os.devnull,
     "GIT_CONFIG_NOSYSTEM": "1",
 }
 
 
-def plant(root: Path, files: dict[str, str]) -> None:
+def plant(root: Path, files: dict[str, str], *, env: support.Env) -> None:
     """Make `root` a git tree tracking `files`."""
-    subprocess.run([GIT, "init", "-q", str(root)], check=True, env=_GIT_ENV)
+    subprocess.run([GIT, "init", "-q", str(root)], check=True, env=env(**GIT_ISOLATED))
     for name, text in files.items():
         path = root / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
     if files:
-        subprocess.run([GIT, "-C", str(root), "add", "-A"], check=True, env=_GIT_ENV)
+        subprocess.run(
+            [GIT, "-C", str(root), "add", "-A"], check=True, env=env(**GIT_ISOLATED)
+        )
 
 
-def porcelain(root: Path) -> str:
+def porcelain(root: Path, *, env: support.Env) -> str:
     """Read a planted tree's status, ignored files included.
 
     Returns:
@@ -142,7 +143,7 @@ def porcelain(root: Path) -> str:
     """
     return subprocess.run(
         [GIT, "-C", str(root), "status", "--porcelain", "--ignored"],
-        env=_GIT_ENV,
+        env=env(**GIT_ISOLATED),
         capture_output=True,
         text=True,
         check=True,
@@ -155,6 +156,7 @@ def run(
     *,
     tool_dir: str | None,
     env: dict[str, str] | None = None,
+    make_env: support.Env,
 ) -> subprocess.CompletedProcess[str]:
     """Run a task body in a planted tree.
 
@@ -164,11 +166,11 @@ def run(
     """
     with tempfile.TemporaryDirectory() as scratch:
         root = Path(scratch) / "repo"
-        plant(root, files)
+        plant(root, files, env=make_env)
         path = [str(Path(PYTHON).parent), str(Path(GIT).parent), "/usr/bin", "/bin"]
         if tool_dir:
             path.insert(0, tool_dir)
-        environ = support.env(
+        environ = make_env(
             PATH=os.pathsep.join(path),
             HOME=scratch,
             ORG_BELT_DIR=str(BELT),
@@ -176,7 +178,7 @@ def run(
             **env or {},
         )
         as_mise = support.task_run(NAMES[body], body)
-        planted = porcelain(root)
+        planted = porcelain(root, env=make_env)
         done = subprocess.run(
             as_mise.argv,
             cwd=root,
@@ -188,7 +190,7 @@ def run(
         # The tree as planted, whatever the run decided: nothing written
         # into it, ignored or not (Hypothesis's `.hypothesis`, pytest's
         # cache).
-        left = porcelain(root)
+        left = porcelain(root, env=make_env)
         assert left == planted, f"the task wrote into the tree:\n{left}"
         return done
 
@@ -204,23 +206,23 @@ def real_tool_dir() -> str:
 
 
 # What the shell decides before any property runs.
-def test_no_prop_file_skips_clean_by_name() -> None:
+def test_no_prop_file_skips_clean_by_name(env: support.Env) -> None:
     """Nothing tracked: exit 0, skipped, named."""
-    done = run(GATE, {"test_x.py": NO_PROPERTY}, tool_dir=None)
+    done = run(GATE, {"test_x.py": NO_PROPERTY}, tool_dir=None, make_env=env)
     assert done.returncode == 0, done.stderr
     assert done.stdout == "test:python-properties: no prop_*.py tracked, skipped\n"
 
 
-def test_audit_skips_clean_by_name() -> None:
+def test_audit_skips_clean_by_name(env: support.Env) -> None:
     """The audit half skips the same way, under its own name."""
-    done = run(AUDIT, {}, tool_dir=None)
+    done = run(AUDIT, {}, tool_dir=None, make_env=env)
     assert done.returncode == 0, done.stderr
     assert done.stdout == "audit:python-properties: no prop_*.py tracked, skipped\n"
 
 
-def test_a_prop_file_without_hypothesis_is_red() -> None:
+def test_a_prop_file_without_hypothesis_is_red(env: support.Env) -> None:
     """A property file and no tool: red, with the remedy."""
-    done = run(GATE, {"prop_x.py": HOLDS}, tool_dir=None)
+    done = run(GATE, {"prop_x.py": HOLDS}, tool_dir=None, make_env=env)
     assert (done.returncode, done.stderr) == (
         1,
         (
@@ -230,12 +232,13 @@ def test_a_prop_file_without_hypothesis_is_red() -> None:
     )
 
 
-def test_an_ordinary_test_importing_hypothesis_is_red() -> None:
+def test_an_ordinary_test_importing_hypothesis_is_red(env: support.Env) -> None:
     """A test_*.py that imports Hypothesis: red, the file named."""
     done = run(
         GATE,
         {"prop_x.py": HOLDS, "pkg/test_leak.py": HOLDS},
         tool_dir=None,
+        make_env=env,
     )
     assert done.returncode == 1
     assert (
@@ -245,9 +248,14 @@ def test_an_ordinary_test_importing_hypothesis_is_red() -> None:
     assert "  pkg/test_leak.py\n" in done.stderr
 
 
-def test_given_from_hypothesis_is_red() -> None:
+def test_given_from_hypothesis_is_red(env: support.Env) -> None:
     """A property taking Hypothesis's own `given`: red, file and remedy named."""
-    done = run(GATE, {"prop_x.py": HOLDS, "pkg/prop_y.py": UNTYPED}, tool_dir=None)
+    done = run(
+        GATE,
+        {"prop_x.py": HOLDS, "pkg/prop_y.py": UNTYPED},
+        tool_dir=None,
+        make_env=env,
+    )
     assert done.returncode == 1
     assert (
         "test:python-properties: these take given from hypothesis,"
@@ -256,10 +264,12 @@ def test_given_from_hypothesis_is_red() -> None:
     ) in done.stderr
 
 
-def test_hypothesis_source_in_a_string_is_not_an_import() -> None:
+def test_hypothesis_source_in_a_string_is_not_an_import(env: support.Env) -> None:
     """A fixture carrying Hypothesis source as text: not a leak."""
     fixture = f"HOLDS = {HOLDS!r}\n"
-    done = run(GATE, {"prop_x.py": HOLDS, "test_x.py": fixture}, tool_dir=None)
+    done = run(
+        GATE, {"prop_x.py": HOLDS, "test_x.py": fixture}, tool_dir=None, make_env=env
+    )
     assert done.returncode == 1
     assert "import Hypothesis" not in done.stderr
     assert (
@@ -268,7 +278,7 @@ def test_hypothesis_source_in_a_string_is_not_an_import() -> None:
     ) in done.stderr
 
 
-def test_a_venv_on_another_interpreter_is_red() -> None:
+def test_a_venv_on_another_interpreter_is_red(env: support.Env) -> None:
     """The tool venv's python is not the belt's: red, both named."""
     with tempfile.TemporaryDirectory() as venv:
         bin_dir = Path(venv) / "bin"
@@ -276,7 +286,7 @@ def test_a_venv_on_another_interpreter_is_red() -> None:
         for name in ("pytest", "python"):
             (bin_dir / name).write_text(STUB_PYTHON, encoding="utf-8")
             (bin_dir / name).chmod(0o755)
-        done = run(GATE, {"prop_x.py": HOLDS}, tool_dir=str(bin_dir))
+        done = run(GATE, {"prop_x.py": HOLDS}, tool_dir=str(bin_dir), make_env=env)
     assert done.returncode == 1
     assert re.search(
         r"\Atest:python-properties: pytest runs on '3\.0\.0 \(stub"
@@ -288,17 +298,17 @@ def test_a_venv_on_another_interpreter_is_red() -> None:
 
 
 # Rows that run a property on the belt's Hypothesis.
-def test_a_passing_file_holds() -> None:
+def test_a_passing_file_holds(env: support.Env) -> None:
     """One property that holds: exit 0, the test and the count."""
-    done = run(GATE, {"pkg/prop_ok.py": HOLDS}, tool_dir=real_tool_dir())
+    done = run(GATE, {"pkg/prop_ok.py": HOLDS}, tool_dir=real_tool_dir(), make_env=env)
     assert done.returncode == 0, done.stderr
     assert "1 passed" in done.stdout
     assert done.stdout.endswith("test:python-properties: 1 file(s) held\n")
 
 
-def test_a_failing_property_is_red_with_its_example() -> None:
+def test_a_failing_property_is_red_with_its_example(env: support.Env) -> None:
     """A property that fails: red, the shrunk example printed."""
-    done = run(GATE, {"prop_bad.py": FAILS}, tool_dir=real_tool_dir())
+    done = run(GATE, {"prop_bad.py": FAILS}, tool_dir=real_tool_dir(), make_env=env)
     assert done.returncode == 1
     assert "FAILED prop_bad.py::test_small - assert 10 < 10\n" in done.stdout
     assert "Failing test case: test_small(" in done.stdout
@@ -306,18 +316,22 @@ def test_a_failing_property_is_red_with_its_example() -> None:
     assert ("test:python-properties: pytest exited 1; failures above\n") == done.stderr
 
 
-def test_a_file_with_no_property_is_refused() -> None:
+def test_a_file_with_no_property_is_refused(env: support.Env) -> None:
     """A prop_*.py holding no @given test: red, named."""
-    done = run(GATE, {"prop_none.py": NO_PROPERTY}, tool_dir=real_tool_dir())
+    done = run(
+        GATE, {"prop_none.py": NO_PROPERTY}, tool_dir=real_tool_dir(), make_env=env
+    )
     assert done.returncode == 1
     assert (
         "test:python-properties: prop_none.py: holds no Hypothesis test (no @given)"
     ) in done.stderr
 
 
-def test_a_test_restating_a_bound_is_refused() -> None:
+def test_a_test_restating_a_bound_is_refused(env: support.Env) -> None:
     """@settings(max_examples=…) on a test: red, the bound named."""
-    done = run(GATE, {"prop_own.py": OWN_BOUNDS}, tool_dir=real_tool_dir())
+    done = run(
+        GATE, {"prop_own.py": OWN_BOUNDS}, tool_dir=real_tool_dir(), make_env=env
+    )
     assert done.returncode == 1
     assert (
         "test:python-properties: prop_own.py::test_few sets its own bounds"
@@ -325,13 +339,14 @@ def test_a_test_restating_a_bound_is_refused() -> None:
     ) in done.stderr
 
 
-def test_the_audit_prints_its_seed_and_honours_a_given_one() -> None:
+def test_the_audit_prints_its_seed_and_honours_a_given_one(env: support.Env) -> None:
     """ORG_PROPERTY_SEED reproduces a run; the seed comes first."""
     done = run(
         AUDIT,
         {"prop_bad.py": FAILS},
         tool_dir=real_tool_dir(),
         env={"ORG_PROPERTY_SEED": "7"},
+        make_env=env,
     )
     assert done.returncode == 1
     assert done.stdout.startswith(
@@ -348,13 +363,14 @@ SHARD_FILES = {"a/prop_one.py": HOLDS, "b/prop_two.py": HOLDS, "prop_three.py": 
 
 
 # ORG_SHARD=k/n runs one shard of the files (#1631, #2160).
-def test_a_shard_runs_every_nth_sorted_file() -> None:
+def test_a_shard_runs_every_nth_sorted_file(env: support.Env) -> None:
     """2/2 of three sorted files is the second: named, then run."""
     done = run(
         GATE,
         SHARD_FILES,
         tool_dir=real_tool_dir(),
         env={"ORG_SHARD": "2/2"},
+        make_env=env,
     )
     assert done.returncode == 0, done.stderr
     assert done.stdout.startswith("test:python-properties: shard 2/2, 1 of 3 file(s)\n")
@@ -364,13 +380,14 @@ def test_a_shard_runs_every_nth_sorted_file() -> None:
 
 
 @pytest.mark.parametrize("spec", ["3/2", "0/8", "x/8", "1/0", "\u00b2/8"])
-def test_a_malformed_shard_is_refused_by_name(spec: str) -> None:
+def test_a_malformed_shard_is_refused_by_name(spec: str, env: support.Env) -> None:
     """A k above n, a zero, or not digits: exit 2, the value named."""
     done = run(
         GATE,
         SHARD_FILES,
         tool_dir=real_tool_dir(),
         env={"ORG_SHARD": spec},
+        make_env=env,
     )
     assert done.returncode == 2
     assert (
@@ -378,7 +395,7 @@ def test_a_malformed_shard_is_refused_by_name(spec: str) -> None:
     ) in done.stderr
 
 
-def test_two_shards_run_every_file_once() -> None:
+def test_two_shards_run_every_file_once(env: support.Env) -> None:
     """1/2 and 2/2, run for real, report every file once between them."""
     with tempfile.TemporaryDirectory() as reports:
         for spec in ("1/2", "2/2"):
@@ -391,6 +408,7 @@ def test_two_shards_run_every_file_once() -> None:
                     "ORG_SHARD_TASK": "test:python-properties",
                     "ORG_SHARD_REPORTS": reports,
                 },
+                make_env=env,
             )
             assert done.returncode == 0, done.stderr
         got = shard.load(Path(reports))
@@ -405,13 +423,14 @@ def test_two_shards_run_every_file_once() -> None:
         assert none == shard.union(got, {"test:python-properties": 2})
 
 
-def test_an_empty_shard_says_so_and_passes() -> None:
+def test_an_empty_shard_says_so_and_passes(env: support.Env) -> None:
     """More shards than files: the empty one is named and exits 0."""
     done = run(
         GATE,
         SHARD_FILES,
         tool_dir=real_tool_dir(),
         env={"ORG_SHARD": "8/8"},
+        make_env=env,
     )
     assert done.returncode == 0, done.stderr
     assert (
@@ -420,13 +439,14 @@ def test_an_empty_shard_says_so_and_passes() -> None:
     )
 
 
-def test_the_audit_times_its_slowest_tests() -> None:
+def test_the_audit_times_its_slowest_tests(env: support.Env) -> None:
     """The audit prints pytest's ten slowest, so its bound is measured (#1631)."""
     done = run(
         AUDIT,
         {"prop_ok.py": HOLDS},
         tool_dir=real_tool_dir(),
         env={"ORG_PROPERTY_SEED": "7"},
+        make_env=env,
     )
     assert done.returncode == 0, done.stderr
     assert "slowest 10 durations" in done.stdout
@@ -523,39 +543,41 @@ def fan_out(tmp_path: Path) -> FanOut:
     return FanOut(tmp_path)
 
 
-def test_four_files_run_side_by_side(fan_out: FanOut) -> None:
+def test_four_files_run_side_by_side(fan_out: FanOut, env: support.Env) -> None:
     """Four files that wait for each other all finish, in four workers."""
     meet = fan_out.meet(4, ORG_TEST_WORKERS="8")
-    done = run(GATE, FOUR, tool_dir=real_tool_dir(), env=meet)
+    done = run(GATE, FOUR, tool_dir=real_tool_dir(), env=meet, make_env=env)
     assert done.returncode == 0, done.stdout + done.stderr
     assert len(pids(meet)) == 4, done.stdout
     assert "4 passed" in done.stdout
     assert done.stdout.endswith("test:python-properties: 4 file(s) held\n")
 
 
-def test_files_run_in_turn_never_meet(fan_out: FanOut) -> None:
+def test_files_run_in_turn_never_meet(fan_out: FanOut, env: support.Env) -> None:
     """ORG_TEST_WORKERS=1 over files that wait for four: the ceiling fails it."""
     meet = fan_out.meet(4, ORG_TEST_WORKERS="1", PLANT_CEILING="2")
-    done = run(GATE, FOUR, tool_dir=real_tool_dir(), env=meet)
+    done = run(GATE, FOUR, tool_dir=real_tool_dir(), env=meet, make_env=env)
     assert done.returncode == 1, done.stdout + done.stderr
     assert "RuntimeError: rendezvous timed out: 1 of 4 after 2 s" in done.stdout
     assert "4 failed" in done.stdout
     assert len(pids(meet)) == 1, done.stdout
 
 
-def test_one_worker_runs_every_file_in_one_process(fan_out: FanOut) -> None:
+def test_one_worker_runs_every_file_in_one_process(
+    fan_out: FanOut, env: support.Env
+) -> None:
     """ORG_TEST_WORKERS=1: one pid, every file held."""
     meet = fan_out.meet(1, ORG_TEST_WORKERS="1")
-    done = run(GATE, FOUR, tool_dir=real_tool_dir(), env=meet)
+    done = run(GATE, FOUR, tool_dir=real_tool_dir(), env=meet, make_env=env)
     assert done.returncode == 0, done.stdout + done.stderr
     assert len(pids(meet)) == 1, done.stdout
     assert done.stdout.endswith("test:python-properties: 4 file(s) held\n")
 
 
-def test_a_named_shard_starts_no_worker(fan_out: FanOut) -> None:
+def test_a_named_shard_starts_no_worker(fan_out: FanOut, env: support.Env) -> None:
     """ORG_SHARD=1/2 with workers to spare: one process, its two files."""
     meet = fan_out.meet(1, ORG_TEST_WORKERS="8", ORG_SHARD="1/2")
-    done = run(GATE, FOUR, tool_dir=real_tool_dir(), env=meet)
+    done = run(GATE, FOUR, tool_dir=real_tool_dir(), env=meet, make_env=env)
     assert done.returncode == 0, done.stdout + done.stderr
     assert len(pids(meet)) == 1, done.stdout
     assert done.stdout.startswith("test:python-properties: shard 1/2, 2 of 4 file(s)\n")
@@ -563,10 +585,10 @@ def test_a_named_shard_starts_no_worker(fan_out: FanOut) -> None:
     assert done.stdout.endswith("test:python-properties: 2 file(s) held\n")
 
 
-def test_one_of_one_is_the_whole_run(fan_out: FanOut) -> None:
+def test_one_of_one_is_the_whole_run(fan_out: FanOut, env: support.Env) -> None:
     """ORG_SHARD=1/1, a split row's unsharded task: it fans out as unset."""
     meet = fan_out.meet(4, ORG_TEST_WORKERS="8", ORG_SHARD="1/1")
-    done = run(GATE, FOUR, tool_dir=real_tool_dir(), env=meet)
+    done = run(GATE, FOUR, tool_dir=real_tool_dir(), env=meet, make_env=env)
     assert done.returncode == 0, done.stdout + done.stderr
     assert len(pids(meet)) == 4, done.stdout
 

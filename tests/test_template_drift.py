@@ -107,10 +107,11 @@ def window(pin_tag: str, age_hours: int, since: str) -> list[str]:
 class Planted:
     """Planted templates in a tree of dated commits."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Plant a tree whose first commit, day 0, touches mise/."""
+        self.make_env = env
         self.tree = tmp_path
-        self.env = support.env(
+        self.env = self.make_env(
             MISE_TASK_NAME=TASK,
             ORG_BELT_DIR=str(BELT),
             ORG_CANON_DIR=str(CANON_DIR),
@@ -221,9 +222,9 @@ class Planted:
 
 
 @fixture
-def planted(tmp_path: Path) -> Planted:
+def planted(tmp_path: Path, env: support.Env) -> Planted:
     """Give each row its own Planted."""
-    return Planted(tmp_path)
+    return Planted(tmp_path, env=env)
 
 
 def test_no_templates_is_skipped_by_name(planted: Planted) -> None:

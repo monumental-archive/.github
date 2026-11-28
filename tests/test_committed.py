@@ -48,7 +48,7 @@ def mapped_types() -> list[str]:
     return types
 
 
-def check(subject: str) -> subprocess.CompletedProcess[str]:
+def check(subject: str, *, env: support.Env) -> subprocess.CompletedProcess[str]:
     """Run committed.sh on a one-line commit message.
 
     Returns:
@@ -61,7 +61,7 @@ def check(subject: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [BASH, str(BELT / "committed.sh"), "--commit-file", str(message)],
             cwd=tmp,
-            env=support.env(ORG_BELT_DIR=str(BELT)),
+            env=env(ORG_BELT_DIR=str(BELT)),
             capture_output=True,
             text=True,
             check=False,
@@ -75,15 +75,15 @@ def test_the_convention_maps_the_three_the_default_omits() -> None:
 
 
 @pytest.mark.parametrize("kind", mapped_types())
-def test_every_mapped_type_passes_the_gate(kind: object) -> None:
+def test_every_mapped_type_passes_the_gate(kind: object, env: support.Env) -> None:
     """Each mapped type, as a whole subject, is accepted by committed."""
-    done = check(f"{kind}: carry the thing")
+    done = check(f"{kind}: carry the thing", env=env)
     assert f"Disallowed type `{kind}`" not in done.stdout + done.stderr
     assert done.returncode == 0, done.stdout + done.stderr
 
 
-def test_an_unmapped_type_is_still_refused() -> None:
+def test_an_unmapped_type_is_still_refused(env: support.Env) -> None:
     """The list is a list: a type nobody maps stays red, by name."""
-    done = check("bogus: carry the thing")
+    done = check("bogus: carry the thing", env=env)
     assert done.returncode == 1
     assert "error Disallowed type `bogus` used" in done.stdout + done.stderr

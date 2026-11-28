@@ -140,8 +140,9 @@ def refusal(number: int, line: str) -> str:
 class StepHarness:
     """Run the helper as the step does, with a stub `mise`."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Give each row its own runner temp and stub `mise`."""
+        self.make_env = env
         self.tmp = tmp_path
         bindir = self.tmp / "bin"
         bindir.mkdir()
@@ -157,7 +158,7 @@ class StepHarness:
             The environment, the stub `mise` leading PATH.
 
         """
-        env = support.env(
+        env = self.make_env(
             PATH=f"{self.bindir}{os.pathsep}{os.environ['PATH']}",
             HOME=str(self.tmp),
             STUB_DIR=str(self.tmp),
@@ -205,9 +206,9 @@ class StepHarness:
 
 
 @fixture
-def step_harness(tmp_path: Path) -> StepHarness:
+def step_harness(tmp_path: Path, env: support.Env) -> StepHarness:
     """Give each row its own StepHarness."""
-    return StepHarness(tmp_path)
+    return StepHarness(tmp_path, env=env)
 
 
 def test_title_ending_in_its_own_reference(
@@ -354,9 +355,9 @@ class BreakingFooter(StepHarness):
 
 
 @fixture
-def breaking_footer_state(tmp_path: Path) -> BreakingFooter:
+def breaking_footer_state(tmp_path: Path, env: support.Env) -> BreakingFooter:
     """Give each row its own BreakingFooter."""
-    return BreakingFooter(tmp_path)
+    return BreakingFooter(tmp_path, env=env)
 
 
 def test_edtf_316_as_it_was_names_the_attribution(
@@ -480,15 +481,16 @@ def entry_after_blank(body: str, entry: list[str]) -> bool:
 class TheReaderAgrees:
     """#1924: the rule refuses exactly what stele would publish in the break."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Skip unless the belt's stele is installed; make the scratch repo."""
+        self.make_env = env
         if not STELE or not GIT:
             pytest.skip("stele is the belt's release engine and renders the notes")
         self.stele, self.git_tool = STELE, GIT
         self.tmp = tmp_path
         self.repo = self.tmp / "repo"
         self.repo.mkdir()
-        self.env = support.env(self.tmp)
+        self.env = self.make_env(self.tmp)
         self.git("init", "-q", "-b", "main")
         self.git("commit", "-q", "--allow-empty", "-m", "chore: start")
         self.git("tag", "v1.0.0")
@@ -547,9 +549,9 @@ class TheReaderAgrees:
 
 
 @fixture
-def the_reader_agrees(tmp_path: Path) -> TheReaderAgrees:
+def the_reader_agrees(tmp_path: Path, env: support.Env) -> TheReaderAgrees:
     """Give each row its own TheReaderAgrees."""
-    return TheReaderAgrees(tmp_path)
+    return TheReaderAgrees(tmp_path, env=env)
 
 
 def test_every_row(the_reader_agrees: TheReaderAgrees) -> None:

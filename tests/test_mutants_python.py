@@ -70,7 +70,15 @@ def test_spin() -> None:
 """
 
 
-def plant(root: Path, module: str, source: str, tests: str, setup: str = SETUP) -> Path:
+def plant(
+    root: Path,
+    module: str,
+    source: str,
+    tests: str,
+    setup: str = SETUP,
+    *,
+    track: support.Track,
+) -> Path:
     """Plant a repository: a package, its tests and its mutmut section.
 
     Returns:
@@ -84,7 +92,7 @@ def plant(root: Path, module: str, source: str, tests: str, setup: str = SETUP) 
     (root / "tests" / f"test_{module}.py").write_text(tests, encoding="utf-8")
     if setup:
         (root / "setup.cfg").write_text(setup, encoding="utf-8")
-    support.track(root)
+    track(root)
     return root
 
 
@@ -113,11 +121,10 @@ def leg(
 
 
 def test_a_survivor_is_red_by_module_and_function_and_no_tests_by_name(
-    tmp_path: Path,
-    leg: Callable[..., tuple[int, str, str]],
+    tmp_path: Path, leg: Callable[..., tuple[int, str, str]], track: support.Track
 ) -> None:
     """The real mutmut: `weak`'s survivors and `untested`'s mutants, named."""
-    status, out, err = leg(plant(tmp_path, "calc", CALC, CALC_TESTS))
+    status, out, err = leg(plant(tmp_path, "calc", CALC, CALC_TESTS, track=track))
     assert status == RED
     assert (
         "audit:mutants: pkg.calc.weak: 2 mutant(s) survived\n"
@@ -131,11 +138,10 @@ def test_a_survivor_is_red_by_module_and_function_and_no_tests_by_name(
 
 
 def test_a_timeout_is_red(
-    tmp_path: Path,
-    leg: Callable[..., tuple[int, str, str]],
+    tmp_path: Path, leg: Callable[..., tuple[int, str, str]], track: support.Track
 ) -> None:
     """`i += 1` made `i -= 1` or `i = 1` never ends: red, as a timeout, by name."""
-    status, _out, err = leg(plant(tmp_path, "spin", SPIN, SPIN_TESTS))
+    status, _out, err = leg(plant(tmp_path, "spin", SPIN, SPIN_TESTS, track=track))
     assert status == RED
     assert (
         "audit:mutants: 2 mutant(s) timeout: their tests ran past the time limit\n"
@@ -183,10 +189,11 @@ def test_a_pragma_that_is_not_the_reasoned_line_form_is_red(
     leg: Callable[..., tuple[int, str, str]],
     comment: str,
     message: str,
+    track: support.Track,
 ) -> None:
     """Before anything runs: the site, and why."""
     source = CALC.replace("    return a + b\n", f"    return a + b  {comment}\n")
-    status, _out, err = leg(plant(tmp_path, "calc", source, CALC_TESTS))
+    status, _out, err = leg(plant(tmp_path, "calc", source, CALC_TESTS, track=track))
     assert status == RED
     assert err == (
         f"audit:mutants: pkg/calc.py:6: {message}\n"
@@ -196,12 +203,11 @@ def test_a_pragma_that_is_not_the_reasoned_line_form_is_red(
 
 
 def test_no_configuration_skips_clean_by_name(
-    tmp_path: Path,
-    leg: Callable[..., tuple[int, str, str]],
+    tmp_path: Path, leg: Callable[..., tuple[int, str, str]], track: support.Track
 ) -> None:
     """No [mutmut] tracked: 0, the skip named, and a skipped row for the totals."""
     summary = tmp_path / "summary"
-    root = plant(tmp_path / "repo", "calc", CALC, CALC_TESTS, setup="")
+    root = plant(tmp_path / "repo", "calc", CALC, CALC_TESTS, setup="", track=track)
     status, out, _err = leg(root)
     assert status == 0
     assert out == (
@@ -223,9 +229,12 @@ def test_adopted_says_whether_the_section_is_tracked(
     leg: Callable[..., tuple[int, str, str]],
     setup: str,
     said: str,
+    track: support.Track,
 ) -> None:
     """The adoption job's output: true only for a tracked [mutmut]."""
-    status, out, _err = leg(plant(tmp_path, "calc", CALC, CALC_TESTS, setup), "adopted")
+    status, out, _err = leg(
+        plant(tmp_path, "calc", CALC, CALC_TESTS, setup, track=track), "adopted"
+    )
     assert status == 0
     assert out == said
 

@@ -93,11 +93,15 @@ def red(*offenders: str) -> list[str]:
 class Nested:
     """Planted workflows; the lint's verdict on them."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(
+        self, tmp_path: Path, *, env: support.Env, track: support.Track
+    ) -> None:
         """Plant an empty workflows directory."""
+        self.make_env = env
+        self.track_tree = track
         self.tree = tmp_path
         (self.tree / ".github" / "workflows").mkdir(parents=True)
-        self.env = support.env(
+        self.env = self.make_env(
             MISE_TASK_NAME=TASK,
             ORG_BELT_DIR=str(BELT),
             ORG_PYTHON=sys.executable,
@@ -143,7 +147,7 @@ class Nested:
             The finished process.
 
         """
-        support.track(self.tree)
+        self.track_tree(self.tree)
         as_mise = support.task_run(TASK, body())
         return subprocess.run(
             as_mise.argv,
@@ -156,9 +160,9 @@ class Nested:
 
 
 @fixture
-def nested(tmp_path: Path) -> Nested:
+def nested(tmp_path: Path, env: support.Env, track: support.Track) -> Nested:
     """Give each row its own Nested."""
-    return Nested(tmp_path)
+    return Nested(tmp_path, env=env, track=track)
 
 
 def test_no_workflows_is_skipped_by_name(nested: Nested) -> None:

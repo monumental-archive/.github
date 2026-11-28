@@ -240,6 +240,8 @@ def run_steps(
     unwritten: tuple[str, ...] = (),
     *,
     capfd: pytest.CaptureFixture[str],
+    canon: support.Canon,
+    env: support.Env,
 ) -> Run:
     """Run the shipped step bodies in order, the helper in this process.
 
@@ -249,10 +251,21 @@ def run_steps(
         The run's status, output, cargo log and what it left behind.
 
     """
-    return steps(Job(excludes, second, members, publish, unwritten), capfd=capfd)
+    return steps(
+        Job(excludes, second, members, publish, unwritten),
+        capfd=capfd,
+        canon=canon,
+        env=env,
+    )
 
 
-def steps(job: Job, *, capfd: pytest.CaptureFixture[str]) -> Run:
+def steps(
+    job: Job,
+    *,
+    capfd: pytest.CaptureFixture[str],
+    canon: support.Canon,
+    env: support.Env,
+) -> Run:
     """Run the shipped step bodies in order, as the job does.
 
     Returns:
@@ -269,7 +282,7 @@ def steps(job: Job, *, capfd: pytest.CaptureFixture[str]) -> Run:
         (stubs / "cargo").write_text(CARGO_STUB)
         (stubs / "cargo").chmod(0o755)
         # The inventory step reads the policy the release asserts.
-        support.canon(work / ".org-canon", "slsa/assert-policy.json")
+        canon(work / ".org-canon", "slsa/assert-policy.json")
         keys = {m: (job.publish or {}).get(m) for m in job.members}
         (tmp / "metadata.json").write_text(json.dumps(metadata(keys)))
         for m in job.members:
@@ -278,7 +291,7 @@ def steps(job: Job, *, capfd: pytest.CaptureFixture[str]) -> Run:
             (planted / f"{m}-{VERSION}.crate").write_bytes(b)
         log, outputs = tmp / "cargo.log", tmp / "github_output"
         outputs.touch()
-        env = support.env(
+        environ = env(
             PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}",
             EXCLUDE_FLAGS=job.excludes,
             UNTRUSTED_VERSION=VERSION,
@@ -293,7 +306,7 @@ def steps(job: Job, *, capfd: pytest.CaptureFixture[str]) -> Run:
             STUB_UNWRITTEN=" ".join(job.unwritten),
         )
         with pytest.MonkeyPatch.context() as patched:
-            for name, value in env.items():
+            for name, value in environ.items():
                 patched.setenv(name, value)
             patched.chdir(work)
             patched.setattr(sys, "argv", [COMMAND])
@@ -304,7 +317,7 @@ def steps(job: Job, *, capfd: pytest.CaptureFixture[str]) -> Run:
                 break
             result = subprocess.run(
                 [BASH, "-c", step_body(name)],
-                env=env,
+                env=environ,
                 capture_output=True,
                 text=True,
                 check=False,
@@ -364,10 +377,10 @@ def test_the_shipped_step_calls_the_helper() -> None:
 
 # One row per branch of the Package step (#1273).
 def test_an_excluded_member_is_packaged_hashed_and_planned(
-    capfd: pytest.CaptureFixture[str],
+    capfd: pytest.CaptureFixture[str], canon: support.Canon, env: support.Env
 ) -> None:
     """Ship the extension edtf excludes, uncompiled."""
-    run = run_steps(EXCLUDE, capfd=capfd)
+    run = run_steps(EXCLUDE, capfd=capfd, canon=canon, env=env)
     assert run.returncode == 0, run.stdout + run.stderr
     cargo: list[str] = [
         f"package --workspace --locked --exclude {UNCOMPILABLE}",
@@ -390,11 +403,13 @@ def test_an_excluded_member_is_packaged_hashed_and_planned(
 
 
 def test_a_crate_rewritten_differently_fails_naming_both(
-    capfd: pytest.CaptureFixture[str],
+    capfd: pytest.CaptureFixture[str], canon: support.Canon, env: support.Env
 ) -> None:
     """The verified bytes must be the bytes hashed and published."""
     planted = b"not the bytes that were verified\n"
-    run = run_steps(EXCLUDE, second={"edtf-core": planted}, capfd=capfd)
+    run = run_steps(
+        EXCLUDE, second={"edtf-core": planted}, capfd=capfd, canon=canon, env=env
+    )
     assert run.returncode != 0
     assert (
         f"::error::package-crates: edtf-core-{VERSION}.crate changed when"
@@ -406,22 +421,26 @@ def test_a_crate_rewritten_differently_fails_naming_both(
 
 
 def test_a_changed_excluded_crate_alone_is_not_a_mismatch(
-    capfd: pytest.CaptureFixture[str],
+    capfd: pytest.CaptureFixture[str], canon: support.Canon, env: support.Env
 ) -> None:
     """Only crates the verified run wrote are compared."""
     run = run_steps(
-        EXCLUDE, second={UNCOMPILABLE: b"first written here\n"}, capfd=capfd
+        EXCLUDE,
+        second={UNCOMPILABLE: b"first written here\n"},
+        capfd=capfd,
+        canon=canon,
+        env=env,
     )
     assert run.returncode == 0, run.stdout + run.stderr
     assert "::error::package-crates: " not in run.stderr
 
 
 def test_a_verified_run_that_wrote_nothing_is_refused(
-    capfd: pytest.CaptureFixture[str],
+    capfd: pytest.CaptureFixture[str], canon: support.Canon, env: support.Env
 ) -> None:
     """Every member excluded leaves nothing to compare (#1384)."""
     flags = "".join(f" --exclude {m}" for m in MEMBERS)
-    run = run_steps(flags, capfd=capfd)
+    run = run_steps(flags, capfd=capfd, canon=canon, env=env)
     assert run.returncode == 1
     assert (
         run.stderr
@@ -433,10 +452,10 @@ def test_a_verified_run_that_wrote_nothing_is_refused(
 
 
 def test_a_failing_cargo_fails_the_step_with_its_status(
-    capfd: pytest.CaptureFixture[str],
+    capfd: pytest.CaptureFixture[str], canon: support.Canon, env: support.Env
 ) -> None:
     """The uncompilable member, not excluded: cargo's 101 is the step's."""
-    run = steps(Job(""), capfd=capfd)
+    run = steps(Job(""), capfd=capfd, canon=canon, env=env)
     assert run.returncode == 101
     assert "failed to compile pgrx-pg-sys" in run.stderr
     assert run.cargo == ONE_RUN
@@ -445,11 +464,11 @@ def test_a_failing_cargo_fails_the_step_with_its_status(
 
 # A workspace the job compiles entirely packages once.
 def test_one_verified_run_and_every_crate_hashed(
-    capfd: pytest.CaptureFixture[str],
+    capfd: pytest.CaptureFixture[str], canon: support.Canon, env: support.Env
 ) -> None:
     """No --no-verify run when nothing is excluded."""
     compiles = ("edtf-core", "edtf-cli")
-    run = run_steps("", members=compiles, capfd=capfd)
+    run = run_steps("", members=compiles, capfd=capfd, canon=canon, env=env)
     assert run.returncode == 0, run.stdout + run.stderr
     assert run.cargo == ONE_RUN
     packaged: list[str] = sorted(f"{m}-{VERSION}.crate" for m in compiles)
@@ -460,16 +479,18 @@ def test_one_verified_run_and_every_crate_hashed(
     )
 
 
-def test_a_blank_exclusion_is_no_exclusion(capfd: pytest.CaptureFixture[str]) -> None:
+def test_a_blank_exclusion_is_no_exclusion(
+    capfd: pytest.CaptureFixture[str], canon: support.Canon, env: support.Env
+) -> None:
     """Whitespace-only flags take the one-run branch too."""
-    run = run_steps("  ", members=("edtf-core",), capfd=capfd)
+    run = run_steps("  ", members=("edtf-core",), capfd=capfd, canon=canon, env=env)
     assert run.returncode == 0, run.stdout + run.stderr
     assert run.cargo == ONE_RUN
 
 
 # The Package step keeps exactly the helper's set (#1310).
 def test_a_publish_false_member_leaves_every_subject_list(
-    capfd: pytest.CaptureFixture[str],
+    capfd: pytest.CaptureFixture[str], canon: support.Canon, env: support.Env
 ) -> None:
     """Packaged and verified, then removed before anything hashes it."""
     run = run_steps(
@@ -477,6 +498,8 @@ def test_a_publish_false_member_leaves_every_subject_list(
         members=("edtf-core", "edtf-cli", "edtf-internal"),
         publish={"edtf-cli": ["crates-io"], "edtf-internal": []},
         capfd=capfd,
+        canon=canon,
+        env=env,
     )
     assert run.returncode == 0, run.stdout + run.stderr
     assert run.cargo == ONE_RUN
@@ -501,7 +524,7 @@ def test_a_publish_false_member_leaves_every_subject_list(
 
 
 def test_another_registry_only_is_not_a_subject(
-    capfd: pytest.CaptureFixture[str],
+    capfd: pytest.CaptureFixture[str], canon: support.Canon, env: support.Env
 ) -> None:
     """A member publishing elsewhere is not crates.io's to serve."""
     run = run_steps(
@@ -509,6 +532,8 @@ def test_another_registry_only_is_not_a_subject(
         members=("edtf-core", "edtf-mirror"),
         publish={"edtf-mirror": ["x"]},
         capfd=capfd,
+        canon=canon,
+        env=env,
     )
     assert run.returncode == 0, run.stdout + run.stderr
     packaged: list[str] = [f"edtf-core-{VERSION}.crate"]
@@ -523,10 +548,12 @@ def test_another_registry_only_is_not_a_subject(
 
 
 def test_an_excluded_publish_false_member_is_removed_too(
-    capfd: pytest.CaptureFixture[str],
+    capfd: pytest.CaptureFixture[str], canon: support.Canon, env: support.Env
 ) -> None:
     """Packaged by the --no-verify run, then cut like any other."""
-    run = run_steps(EXCLUDE, publish={UNCOMPILABLE: []}, capfd=capfd)
+    run = run_steps(
+        EXCLUDE, publish={UNCOMPILABLE: []}, capfd=capfd, canon=canon, env=env
+    )
     assert run.returncode == 0, run.stdout + run.stderr
     packaged: list[str] = [
         f"edtf-cli-{VERSION}.crate",
@@ -537,11 +564,16 @@ def test_an_excluded_publish_false_member_is_removed_too(
 
 
 def test_a_named_crate_cargo_did_not_write_fails_by_name(
-    capfd: pytest.CaptureFixture[str],
+    capfd: pytest.CaptureFixture[str], canon: support.Canon, env: support.Env
 ) -> None:
     """Nothing the publisher will upload goes unhashed."""
     run = run_steps(
-        "", members=("edtf-core", "edtf-cli"), unwritten=("edtf-cli",), capfd=capfd
+        "",
+        members=("edtf-core", "edtf-cli"),
+        unwritten=("edtf-cli",),
+        capfd=capfd,
+        canon=canon,
+        env=env,
     )
     assert run.returncode != 0
     assert (

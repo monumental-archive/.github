@@ -135,10 +135,11 @@ def checkout(tail: str = "") -> str:
 class Planted:
     """A planted git tree."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Plant an empty tree."""
+        self.make_env = env
         self.tree = tmp_path
-        self.env = support.env(
+        self.env = self.make_env(
             MISE_TASK_NAME=TASK,
             ORG_BELT_DIR=str(BELT),
             ORG_CANON_DIR=str(CANON_DIR),
@@ -221,9 +222,9 @@ class Planted:
 
 
 @fixture
-def planted(tmp_path: Path) -> Planted:
+def planted(tmp_path: Path, env: support.Env) -> Planted:
     """Give each row its own Planted."""
-    return Planted(tmp_path)
+    return Planted(tmp_path, env=env)
 
 
 def test_nothing_names_the_canon_is_skipped(planted: Planted) -> None:

@@ -82,11 +82,15 @@ def red(*files: str) -> list[str]:
 class Boundary:
     """Planted workflows; the boundary's verdict on them."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(
+        self, tmp_path: Path, *, env: support.Env, track: support.Track
+    ) -> None:
         """Plant an empty workflows directory."""
+        self.make_env = env
+        self.track_tree = track
         self.tree = tmp_path
         (self.tree / ".github" / "workflows").mkdir(parents=True)
-        self.env = support.env(
+        self.env = self.make_env(
             MISE_TASK_NAME=TASK,
             ORG_BELT_DIR=str(BELT),
             ORG_PYTHON=sys.executable,
@@ -132,7 +136,7 @@ class Boundary:
             The finished process.
 
         """
-        support.track(self.tree)
+        self.track_tree(self.tree)
         as_mise = support.task_run(TASK, body())
         return subprocess.run(
             as_mise.argv,
@@ -145,9 +149,9 @@ class Boundary:
 
 
 @fixture
-def boundary(tmp_path: Path) -> Boundary:
+def boundary(tmp_path: Path, env: support.Env, track: support.Track) -> Boundary:
     """Give each row its own Boundary."""
-    return Boundary(tmp_path)
+    return Boundary(tmp_path, env=env, track=track)
 
 
 def test_no_workflows_is_skipped_by_name(boundary: Boundary) -> None:

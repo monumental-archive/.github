@@ -94,7 +94,9 @@ class Run:
         ]
 
 
-def run_step(classes: str, *, dry_run: bool = False, **outputs: str) -> Run:
+def run_step(
+    classes: str, *, dry_run: bool = False, env: support.Env, **outputs: str
+) -> Run:
     """Run the body with the guard's class list and each class's outputs.
 
     Args:
@@ -115,8 +117,8 @@ def run_step(classes: str, *, dry_run: bool = False, **outputs: str) -> Run:
         (stubs / "stele").write_text(STELE_STUB)
         (stubs / "stele").chmod(0o755)
         argv, files = tmp / "argv", tmp / "files"
-        inherited = support.env()
-        env = {
+        inherited = env()
+        environ = {
             **inherited,
             "PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}",
             "CLASSES": classes,
@@ -129,7 +131,7 @@ def run_step(classes: str, *, dry_run: bool = False, **outputs: str) -> Run:
         }
         result = subprocess.run(
             [BASH, "-c", step_body()],
-            env=env,
+            env=environ,
             capture_output=True,
             text=True,
             check=False,
@@ -144,9 +146,11 @@ def run_step(classes: str, *, dry_run: bool = False, **outputs: str) -> Run:
 
 
 # The pre-release form, the release's identity, the policy.
-def test_the_call_is_the_pre_release_form() -> None:
+def test_the_call_is_the_pre_release_form(env: support.Env) -> None:
     """--classes is the guard's list; repo, tag and policy are named."""
-    run = run_step("rust-crate", FIRST_rust_crate=CRATES, REBUILD_rust_crate=CRATES)
+    run = run_step(
+        "rust-crate", FIRST_rust_crate=CRATES, REBUILD_rust_crate=CRATES, env=env
+    )
     assert run.returncode == 0, run.stderr
     want: list[str] = [
         "verify",
@@ -168,33 +172,37 @@ def test_the_call_is_the_pre_release_form() -> None:
     assert want == run.argv
 
 
-def test_a_failing_verdict_fails_the_step() -> None:
+def test_a_failing_verdict_fails_the_step(env: support.Env) -> None:
     """Stele's status is the step's."""
     run = run_step(
         "rust-crate",
         FIRST_rust_crate=CRATES,
         REBUILD_rust_crate=CRATES,
         STUB_EXIT="1",
+        env=env,
     )
     assert run.returncode == 1
 
 
 # Each declared class's outputs, in the shape stele reads.
-def test_a_manifest_is_written_to_a_file_whole() -> None:
+def test_a_manifest_is_written_to_a_file_whole(env: support.Env) -> None:
     """Every line of a file class's manifest reaches stele."""
-    run = run_step("rust-crate", FIRST_rust_crate=CRATES, REBUILD_rust_crate=CRATES)
+    run = run_step(
+        "rust-crate", FIRST_rust_crate=CRATES, REBUILD_rust_crate=CRATES, env=env
+    )
     assert (
         f"== rust-crate=first-rust-crate\n{CRATES}\n"
         f"== rust-crate=rebuild-rust-crate\n{CRATES}\n"
     ) == run.files
 
 
-def test_a_digest_directory_is_passed_as_it_is() -> None:
+def test_a_digest_directory_is_passed_as_it_is(env: support.Env) -> None:
     """A registry class's downloads are named, never rewritten."""
     run = run_step(
         "oci-image-crate",
         FIRST_oci_image_crate="oci-a",
         REBUILD_oci_image_crate="oci-b",
+        env=env,
     )
     want: list[str] = [
         "--first oci-image-crate=oci-a",
@@ -204,7 +212,7 @@ def test_a_digest_directory_is_passed_as_it_is() -> None:
     assert run.files == ""
 
 
-def test_only_the_declared_classes_reach_the_call() -> None:
+def test_only_the_declared_classes_reach_the_call(env: support.Env) -> None:
     """A job's output for a class the evidence did not declare stays out."""
     run = run_step(
         "wasm-npm",
@@ -212,6 +220,7 @@ def test_only_the_declared_classes_reach_the_call() -> None:
         REBUILD_wasm_npm=WASM,
         FIRST_rust_crate=CRATES,
         REBUILD_rust_crate=CRATES,
+        env=env,
     )
     want: list[str] = [
         "--first wasm-npm=first-wasm-npm",
@@ -220,14 +229,16 @@ def test_only_the_declared_classes_reach_the_call() -> None:
     assert want == run.inputs()
 
 
-def test_an_empty_side_is_not_named() -> None:
+def test_an_empty_side_is_not_named(env: support.Env) -> None:
     """Stele refuses the class by name; no empty file stands in."""
-    run = run_step("rust-crate", FIRST_rust_crate=CRATES, REBUILD_rust_crate="")
+    run = run_step(
+        "rust-crate", FIRST_rust_crate=CRATES, REBUILD_rust_crate="", env=env
+    )
     want: list[str] = ["--first rust-crate=first-rust-crate"]
     assert want == run.inputs()
 
 
-def test_every_class_in_the_expanded_list_is_wired() -> None:
+def test_every_class_in_the_expanded_list_is_wired(env: support.Env) -> None:
     """The lab's real expansion: five classes, ten inputs, in order."""
     classes = "rust-binary,oci-image-crate,wasm-npm,pgrx-extension,pgrx-extension-image"
     outputs = {
@@ -242,7 +253,7 @@ def test_every_class_in_the_expanded_list_is_wired() -> None:
         "FIRST_pgrx_extension_image": "pgrx-a",
         "REBUILD_pgrx_extension_image": "pgrx-b",
     }
-    run = run_step(classes, dry_run=False, **outputs)
+    run = run_step(classes, dry_run=False, **outputs, env=env)
     want: list[str] = [
         "--first rust-binary=first-rust-binary",
         "--rebuild rust-binary=rebuild-rust-binary",
@@ -259,7 +270,7 @@ def test_every_class_in_the_expanded_list_is_wired() -> None:
 
 
 # A dry run pushed no image.
-def test_a_rehearsal_names_no_digest_directory() -> None:
+def test_a_rehearsal_names_no_digest_directory(env: support.Env) -> None:
     """The workflow leaves the registry values empty; stele says so."""
     run = run_step(
         "rust-crate,oci-image",
@@ -268,6 +279,7 @@ def test_a_rehearsal_names_no_digest_directory() -> None:
         REBUILD_rust_crate=CRATES,
         FIRST_oci_image="",
         REBUILD_oci_image="",
+        env=env,
     )
     assert "--rehearsal=true" in run.argv
     want: list[str] = [
@@ -277,9 +289,9 @@ def test_a_rehearsal_names_no_digest_directory() -> None:
     assert want == run.inputs()
 
 
-def test_a_rehearsal_of_images_alone_still_calls_stele() -> None:
+def test_a_rehearsal_of_images_alone_still_calls_stele(env: support.Env) -> None:
     """No inputs at all: the call is made, and stele refuses it."""
-    run = run_step("oci-image", dry_run=True)
+    run = run_step("oci-image", dry_run=True, env=env)
     assert run.returncode == 0, run.stderr
     assert list[str]() == run.inputs()
     assert "--rehearsal=true" in run.argv

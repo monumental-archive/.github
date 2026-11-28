@@ -103,8 +103,11 @@ def body() -> str:
 class Planted:
     """A planted git tree, and a stub stele first on PATH."""
 
-    def __init__(self, tmp_path: Path, request: pytest.FixtureRequest) -> None:
+    def __init__(
+        self, tmp_path: Path, request: pytest.FixtureRequest, *, env: support.Env
+    ) -> None:
         """Plant an empty tree and the stub, which answers PASS."""
+        self.make_env = env
         self.tree = tmp_path
         self.bin = Path(tempfile.mkdtemp())
         request.addfinalizer(functools.partial(shutil.rmtree, self.bin))
@@ -113,7 +116,7 @@ class Planted:
         stele.chmod(0o755)
         self.log = self.bin / "log"
         self.doc = self.bin / "doc.json"
-        base = support.env(
+        base = self.make_env(
             MISE_TASK_NAME=TASK,
             ORG_BELT_DIR=str(BELT),
             ORG_CANON_DIR=CANON,
@@ -203,9 +206,11 @@ class Planted:
 
 
 @fixture
-def planted(tmp_path: Path, request: pytest.FixtureRequest) -> Planted:
+def planted(
+    tmp_path: Path, request: pytest.FixtureRequest, env: support.Env
+) -> Planted:
     """Give each row its own Planted."""
-    return Planted(tmp_path, request)
+    return Planted(tmp_path, request, env=env)
 
 
 CALL = "\t".join([

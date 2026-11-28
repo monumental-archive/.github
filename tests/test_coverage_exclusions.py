@@ -183,8 +183,9 @@ def task_body() -> str:
 class Task:
     """The task body, in a scratch repository."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Give the row's scratch directories one home, removed after it."""
+        self.make_env = env
         self.tmp = tmp_path
 
     def repo(self, files: dict[str, str]) -> Path:
@@ -201,18 +202,18 @@ class Task:
             (root / name).write_text(body, encoding="utf-8")
         for args in (["init", "-q"], ["add", "."]):
             subprocess.run(
-                [GIT, *args], cwd=root, env=support.env(**GIT_CONFIG), check=True
+                [GIT, *args], cwd=root, env=self.make_env(**GIT_CONFIG), check=True
             )
         return root
 
 
 @fixture
-def task(tmp_path: Path) -> Task:
+def task(tmp_path: Path, env: support.Env) -> Task:
     """Give each row its own Task."""
-    return Task(tmp_path)
+    return Task(tmp_path, env=env)
 
 
-def run_task(root: Path) -> subprocess.CompletedProcess[str]:
+def run_task(root: Path, *, env: support.Env) -> subprocess.CompletedProcess[str]:
     """Run the body under the interpreter mise uses.
 
     Returns:
@@ -223,16 +224,16 @@ def run_task(root: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         as_mise.argv,
         cwd=root,
-        env=support.env(ORG_BELT_DIR=str(_HERE), **GIT_CONFIG) | as_mise.env,
+        env=env(ORG_BELT_DIR=str(_HERE), **GIT_CONFIG) | as_mise.env,
         capture_output=True,
         text=True,
         check=False,
     )
 
 
-def test_no_measured_language_skips_clean_by_name(task: Task) -> None:
+def test_no_measured_language_skips_clean_by_name(task: Task, env: support.Env) -> None:
     """A tree with none of the languages says so and exits 0."""
-    r = run_task(task.repo({"README.md": f"{PRAGMA} cover\n"}))
+    r = run_task(task.repo({"README.md": f"{PRAGMA} cover\n"}), env=env)
     assert r.returncode == 0, r.stderr
     assert (
         "lint:coverage-exclusions: no Python, Rust, Go, TypeScript or "
@@ -240,20 +241,21 @@ def test_no_measured_language_skips_clean_by_name(task: Task) -> None:
     ) in r.stdout
 
 
-def test_a_tracked_marker_is_red(task: Task) -> None:
+def test_a_tracked_marker_is_red(task: Task, env: support.Env) -> None:
     """The body hands tracked source to the helper."""
-    r = run_task(task.repo({"src/a.py": f"x = 1  {PRAGMA} cover\n"}))
+    r = run_task(task.repo({"src/a.py": f"x = 1  {PRAGMA} cover\n"}), env=env)
     assert r.returncode == 1, r.stderr
     assert "src/a.py:1: python: pragma no cover" in r.stderr
 
 
-def test_vendor_is_not_read(task: Task) -> None:
+def test_vendor_is_not_read(task: Task, env: support.Env) -> None:
     """A marker under vendor/ is outside the lint; the rest is read."""
     r = run_task(
         task.repo({
             "vendor/x/a.py": f"x = 1  {PRAGMA} cover\n",
             "src/b.py": "y = 2\n",
-        })
+        }),
+        env=env,
     )
     assert r.returncode == 0, r.stderr
     assert "1 file(s), no coverage exclusions" in r.stdout

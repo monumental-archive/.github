@@ -93,8 +93,17 @@ def clippy(spec: str, belt: Path, root: str = "Cargo.toml") -> str:
 class Planted:
     """A planted tree, a planted belt and the stubs."""
 
-    def __init__(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def __init__(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        belt: support.Belt,
+        env: support.Env,
+    ) -> None:
         """Plant the tree, the belt and the stubs."""
+        self.plant_belt = belt
+        self.make_env = env
         # `belt pgrx-postgres`, which the registration calls in process.
         monkeypatch.setattr(pgrx_postgres, "main", planted.stub_pin)
         tmp = tmp_path
@@ -109,7 +118,7 @@ class Planted:
             (self.bins / name).write_text(text, encoding="utf-8")
             (self.bins / name).chmod(0o755)
         (self.bins / "bash").symlink_to(planted.BASH)
-        self.belt = support.belt(
+        self.belt = self.plant_belt(
             tmp / "belt",
             stubs={
                 "clippy-ladder.sh": planted.STUB_LADDER,
@@ -121,7 +130,7 @@ class Planted:
         self.metadata.write_text(TWO, encoding="utf-8")
         self.fuzz_metadata = tmp / "fuzz-metadata.json"
         self.fuzz_metadata.write_text(planted.FUZZ, encoding="utf-8")
-        self.env = support.env(
+        self.env = self.make_env(
             tmp / "home",
             PATH=os.pathsep.join((str(self.bins), "/usr/bin", "/bin")),
             MISE_TASK_NAME=TASK,
@@ -183,9 +192,14 @@ class Planted:
 
 
 @fixture
-def planted_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Planted:
+def planted_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    belt: support.Belt,
+    env: support.Env,
+) -> Planted:
     """Give each row its own Planted."""
-    return Planted(tmp_path, monkeypatch)
+    return Planted(tmp_path, monkeypatch, belt=belt, env=env)
 
 
 def assert_finding(called: tuple[int, str, str], status: int, *lines: str) -> None:

@@ -76,10 +76,7 @@ class Run:
 
 
 def run_helper(
-    mains: str,
-    broken: str = "",
-    *,
-    capfd: pytest.CaptureFixture[str],
+    mains: str, broken: str = "", *, capfd: pytest.CaptureFixture[str], env: support.Env
 ) -> Run:
     """Run the helper on a module whose `go list` prints `mains`.
 
@@ -97,14 +94,14 @@ def run_helper(
         (stubs / "go").write_text(GO_STUB)
         (stubs / "go").chmod(0o755)
         log = tmp / "go.log"
-        env = support.env(
+        environ = env(
             PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}",
             STUB_LOG=str(log),
             STUB_MAINS=mains,
             STUB_BROKEN=broken,
         )
         with pytest.MonkeyPatch.context() as patched:
-            for name, value in env.items():
+            for name, value in environ.items():
                 patched.setenv(name, value)
             patched.chdir(work)
             status = build_go_commands.main([])
@@ -144,9 +141,13 @@ def test_the_shipped_step_calls_the_helper() -> None:
 
 
 # Every main package becomes one staged binary.
-def test_two_commands_build_two_binaries(capfd: pytest.CaptureFixture[str]) -> None:
+def test_two_commands_build_two_binaries(
+    capfd: pytest.CaptureFixture[str], env: support.Env
+) -> None:
     """Each named by its import path's last element."""
-    run = run_helper("example.com/m/cmd/stele\nexample.com/m/cmd/probe\n", capfd=capfd)
+    run = run_helper(
+        "example.com/m/cmd/stele\nexample.com/m/cmd/probe\n", capfd=capfd, env=env
+    )
     assert run.returncode == 0, run.stdout + run.stderr
     staged: list[str] = ["probe", "stele"]
     assert staged == run.staged
@@ -160,10 +161,10 @@ def test_two_commands_build_two_binaries(capfd: pytest.CaptureFixture[str]) -> N
 
 
 def test_the_blank_lines_of_go_list_are_no_package(
-    capfd: pytest.CaptureFixture[str],
+    capfd: pytest.CaptureFixture[str], env: support.Env
 ) -> None:
     """Non-main packages print an empty line each."""
-    run = run_helper("\n\nexample.com/m\n\n", capfd=capfd)
+    run = run_helper("\n\nexample.com/m\n\n", capfd=capfd, env=env)
     assert run.returncode == 0, run.stdout + run.stderr
     staged: list[str] = ["m"]
     assert staged == run.staged
@@ -171,10 +172,10 @@ def test_the_blank_lines_of_go_list_are_no_package(
 
 # One row per refusal, each message asserted.
 def test_a_module_with_no_main_package_is_refused(
-    capfd: pytest.CaptureFixture[str],
+    capfd: pytest.CaptureFixture[str], env: support.Env
 ) -> None:
     """A library is the wrong class."""
-    run = run_helper("\n\n", capfd=capfd)
+    run = run_helper("\n\n", capfd=capfd, env=env)
     assert run.returncode == 1
     assert run.stderr == (
         "::error::build-go-commands: no main packages in this module —"
@@ -184,11 +185,11 @@ def test_a_module_with_no_main_package_is_refused(
 
 
 def test_two_commands_with_one_binary_name_are_refused(
-    capfd: pytest.CaptureFixture[str],
+    capfd: pytest.CaptureFixture[str], env: support.Env
 ) -> None:
     """The second would overwrite the first; it is never built."""
     run = run_helper(
-        "example.com/m/cmd/tool\nexample.com/m/internal/tool\n", capfd=capfd
+        "example.com/m/cmd/tool\nexample.com/m/internal/tool\n", capfd=capfd, env=env
     )
     assert run.returncode == 1
     assert run.stderr == (
@@ -200,7 +201,7 @@ def test_two_commands_with_one_binary_name_are_refused(
 
 
 def test_a_failing_build_fails_the_step_with_its_status(
-    capfd: pytest.CaptureFixture[str],
+    capfd: pytest.CaptureFixture[str], env: support.Env
 ) -> None:
     """The failing build's run.returncode and message; none after it is built.
 
@@ -210,6 +211,7 @@ def test_a_failing_build_fails_the_step_with_its_status(
         "example.com/m/cmd/a\nexample.com/m/cmd/b\n",
         broken="example.com/m/cmd/a",
         capfd=capfd,
+        env=env,
     )
     assert run.returncode == 1
     assert run.stderr == "example.com/m/cmd/a: undefined: x\n"

@@ -93,8 +93,9 @@ def plant_belt(tree: Path) -> Path:
 class Planted:
     """A repository and one tree for each carrier; the rows are below."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Plant a repository and one tree for each carrier."""
+        self.make_env = env
         self.tmp = tmp_path
         self.home = self.tmp / "home"
         self.home.mkdir()
@@ -104,7 +105,7 @@ class Planted:
         run(
             [support.tool("git"), "init", "-q", "."],
             self.repo,
-            support.env(self.home),
+            self.make_env(self.home),
             check=True,
         )
         self.ci = plant_belt(self.tmp / "ci")
@@ -154,7 +155,7 @@ class Planted:
         if path is not None:
             extra["PATH"] = path
         argv = [support.tool("sh"), "-o", "errexit", "-c", template_command()]
-        return run(argv, where, support.env(self.home, **extra))
+        return run(argv, where, self.make_env(self.home, **extra))
 
     def link_dir(self) -> Path:
         """Name the directory mise runs the linked belt's exec in.
@@ -173,9 +174,9 @@ class Planted:
 
 
 @fixture
-def planted(tmp_path: Path) -> Planted:
+def planted(tmp_path: Path, env: support.Env) -> Planted:
     """Give each row its own Planted."""
-    return Planted(tmp_path)
+    return Planted(tmp_path, env=env)
 
 
 def test_ci_carrier_wins_over_all_three(planted: Planted) -> None:
@@ -266,7 +267,7 @@ class UnderAHook(Planted):
             The worktree's `.config/mise/conf.d`, where mise runs the exec.
 
         """
-        env = support.env(self.home)
+        env = self.make_env(self.home)
         git = support.tool("git")
         run(
             [git, "commit", "-q", "--allow-empty", "-m", "c"],
@@ -291,16 +292,16 @@ class UnderAHook(Planted):
         done = run(
             [support.tool("git"), "rev-parse", "--absolute-git-dir"],
             conf,
-            support.env(self.home),
+            self.make_env(self.home),
             check=True,
         )
         return done.stdout.strip()
 
 
 @fixture
-def under_a_hook(tmp_path: Path) -> UnderAHook:
+def under_a_hook(tmp_path: Path, env: support.Env) -> UnderAHook:
     """Give each row its own UnderAHook."""
-    return UnderAHook(tmp_path)
+    return UnderAHook(tmp_path, env=env)
 
 
 def test_a_hook_in_a_linked_worktree_reads_its_link(under_a_hook: UnderAHook) -> None:

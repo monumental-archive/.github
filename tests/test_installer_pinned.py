@@ -82,11 +82,12 @@ def red(*short: str) -> list[str]:
 class Pinned:
     """Planted workflows; the installer pin's verdict on them."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Plant an empty workflows directory."""
+        self.make_env = env
         self.tree = tmp_path
         (self.tree / ".github" / "workflows").mkdir(parents=True)
-        self.env = support.env(
+        self.env = self.make_env(
             MISE_TASK_NAME=TASK,
             ORG_BELT_DIR=str(BELT),
             ORG_PYTHON=sys.executable,
@@ -148,9 +149,9 @@ class Pinned:
 
 
 @fixture
-def pinned(tmp_path: Path) -> Pinned:
+def pinned(tmp_path: Path, env: support.Env) -> Pinned:
     """Give each row its own Pinned."""
-    return Pinned(tmp_path)
+    return Pinned(tmp_path, env=env)
 
 
 def test_no_tracked_workflows_is_skipped_by_name(pinned: Pinned) -> None:

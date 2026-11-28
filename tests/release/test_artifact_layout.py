@@ -266,13 +266,15 @@ def staged(tmp_path: Path) -> Staged:
     return Staged(tmp_path)
 
 
-def stage(step: Step, source: Path, stage: Path, artifact: str) -> None:
+def stage(
+    step: Step, source: Path, stage: Path, artifact: str, *, env: support.Env
+) -> None:
     """Run one staging step's body against planted paths."""
     body = step.get("run")
     assert isinstance(body, str), step
     done = subprocess.run(
         [BASH, "-e", "-c", str(body)],
-        env=support.env(SOURCE=str(source), STAGE=str(stage), ARTIFACT=artifact),
+        env=env(SOURCE=str(source), STAGE=str(stage), ARTIFACT=artifact),
         capture_output=True,
         text=True,
         check=False,
@@ -280,19 +282,21 @@ def stage(step: Step, source: Path, stage: Path, artifact: str) -> None:
     assert done.returncode == 0, done.stderr
 
 
-def test_each_stage_holds_the_artifacts_own_directory(staged: Staged) -> None:
+def test_each_stage_holds_the_artifacts_own_directory(
+    staged: Staged, env: support.Env
+) -> None:
     """The staged root holds `<artifact>/` and the row's files inside it."""
     steps = stagings(canon())
     assert steps
     for step in steps:
-        env = _env(step)
-        family = _family(env.get("ARTIFACT"))
+        environ = _env(step)
+        family = _family(environ.get("ARTIFACT"))
         scratch = tempfile.mkdtemp(dir=staged.tmp)
         base = Path(scratch)
         staging = base / "up"
         artifact = f"{family}7"
         source, inside = plant(base, directory=family == "coverage-run-")
-        stage(step, source, staging, artifact)
+        stage(step, source, staging, artifact, env=env)
         want: list[str] = [artifact]
         names = [p.name for p in staging.iterdir()]
         assert want == names
@@ -304,7 +308,9 @@ def test_each_stage_holds_the_artifacts_own_directory(staged: Staged) -> None:
         assert inside == found
 
 
-def test_a_row_that_measured_nothing_stages_nothing(staged: Staged) -> None:
+def test_a_row_that_measured_nothing_stages_nothing(
+    staged: Staged, env: support.Env
+) -> None:
     """No run directory, no stage: the upload then finds no files."""
     steps = [
         s
@@ -315,5 +321,5 @@ def test_a_row_that_measured_nothing_stages_nothing(staged: Staged) -> None:
     for step in steps:
         scratch = tempfile.mkdtemp(dir=staged.tmp)
         base = Path(scratch)
-        stage(step, base / "coverage-run", base / "up", "coverage-run-1")
+        stage(step, base / "coverage-run", base / "up", "coverage-run-1", env=env)
         assert not (base / "up").exists()

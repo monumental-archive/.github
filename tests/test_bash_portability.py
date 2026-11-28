@@ -99,10 +99,11 @@ def clean(count: int) -> str:
 class Planted:
     """A planted git tree."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Plant an empty tree."""
+        self.make_env = env
         self.tree = tmp_path
-        self.env = support.env(
+        self.env = self.make_env(
             MISE_TASK_NAME=TASK,
             ORG_BELT_DIR=str(BELT),
             ORG_PYTHON=sys.executable,
@@ -177,9 +178,9 @@ class Planted:
 
 
 @fixture
-def planted(tmp_path: Path) -> Planted:
+def planted(tmp_path: Path, env: support.Env) -> Planted:
     """Give each row its own Planted."""
-    return Planted(tmp_path)
+    return Planted(tmp_path, env=env)
 
 
 def test_nothing_to_check_is_skipped(planted: Planted) -> None:

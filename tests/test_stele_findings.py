@@ -114,8 +114,11 @@ def same[T](got: T, want: T, msg: str = "") -> None:
 class Adapter:
     """The adapter over a stub stele."""
 
-    def __init__(self, tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:
+    def __init__(
+        self, tmp_path: Path, capfd: pytest.CaptureFixture[str], *, env: support.Env
+    ) -> None:
         """Lay out a stub stele, its log, and the findings file."""
+        self.make_env = env
         self.capfd = capfd
         self.dir = Path(str(tmp_path))
         self.bin = self.dir / "bin"
@@ -159,7 +162,7 @@ class Adapter:
 
         """
         self.doc.write_text(document, encoding="utf-8")
-        env = support.env(
+        env = self.make_env(
             PATH=path or f"{self.bin}{os.pathsep}{os.environ['PATH']}",
             ORG_FINDINGS=str(self.file),
             MISE_TASK_NAME=TASK,
@@ -198,9 +201,11 @@ class Adapter:
 
 
 @fixture
-def adapter(tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> Adapter:
+def adapter(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str], env: support.Env
+) -> Adapter:
     """Give each row its own Adapter."""
-    return Adapter(tmp_path, capfd)
+    return Adapter(tmp_path, capfd, env=env)
 
 
 def test_the_quoted_document_is_one_record(adapter: Adapter) -> None:
@@ -334,7 +339,9 @@ def test_no_stele_is_refused_by_name(adapter: Adapter) -> None:
     same(adapter.refusal(), ("stele assert inventory", "stele is not on PATH"))
 
 
-def test_the_pinned_stele_gives_the_one_record(adapter: Adapter) -> None:
+def test_the_pinned_stele_gives_the_one_record(
+    adapter: Adapter, env: support.Env
+) -> None:
     """A versionless PURL, judged by stele itself: the quoted record."""
     stele = support.optional_tool("stele")
     if stele is None:
@@ -342,9 +349,7 @@ def test_the_pinned_stele_gives_the_one_record(adapter: Adapter) -> None:
     (adapter.dir / "a.spdx.json").write_text(json.dumps(SPDX), encoding="utf-8")
     done = adapter.adapt(
         ["assert", "inventory", "a.spdx.json"],
-        support.env(
-            ORG_FINDINGS=str(adapter.file), MISE_TASK_NAME=TASK, PYTHONUTF8="1"
-        ),
+        env(ORG_FINDINGS=str(adapter.file), MISE_TASK_NAME=TASK, PYTHONUTF8="1"),
     )
     same(done.returncode, 1, done.stderr)
     want: list[dict[str, object]] = [QUOTED_RECORD]

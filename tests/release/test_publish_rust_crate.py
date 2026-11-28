@@ -199,6 +199,8 @@ def run_publish(
     index: dict[str, str],
     crate: bytes | None = None,
     unpublished: tuple[str, ...] = (),
+    *,
+    env: support.Env,
     **answers: int,
 ) -> Run:
     """Run the helper with the index serving `index`.
@@ -242,7 +244,7 @@ def run_publish(
         (crates / "edtf-core-1.3.3.crate").write_bytes(
             CRATE.read_bytes() if crate is None else crate
         )
-        env = support.env(
+        environ = env(
             PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}",
             EXCLUDE_FLAGS=OLD_CALLER_EXCLUDES,
             ORG_USER_AGENT=USER_AGENT,
@@ -260,7 +262,7 @@ def run_publish(
         out, err = io.StringIO(), io.StringIO()
         with redirect_stdout(out), redirect_stderr(err):
             try:
-                code = publish_crates.run(env, tmp, fetch)
+                code = publish_crates.run(environ, tmp, fetch)
             except publish_crates.RefusalError as e:
                 findings.finding("", str(e), annotate=True)
                 code = 1
@@ -315,9 +317,9 @@ def test_wasm_has_a_file_but_no_1_3_3() -> None:
 
 
 # The step does what its comment says (#1218).
-def test_nothing_published_adds_no_exclusion() -> None:
+def test_nothing_published_adds_no_exclusion(env: support.Env) -> None:
     """404s and a file without the version leave cargo's flags alone."""
-    run = run_publish(WASM)
+    run = run_publish(WASM, env=env)
     assert run.returncode == 0, run.stdout + run.stderr
     want: list[str] = [PUBLISH]
     assert want == run.publishes()
@@ -326,9 +328,9 @@ def test_nothing_published_adds_no_exclusion() -> None:
     assert not packaged
 
 
-def test_some_published_excludes_exactly_those_and_names_them() -> None:
+def test_some_published_excludes_exactly_those_and_names_them(env: support.Env) -> None:
     """The v1.3.3 re-run: edtf-core is there, the rest are not."""
-    run = run_publish(CORE | WASM)
+    run = run_publish(CORE | WASM, env=env)
     assert run.returncode == 0, run.stdout + run.stderr
     want: list[str] = [f"{PUBLISH} --exclude edtf-core"]
     assert want == run.publishes()
@@ -338,10 +340,10 @@ def test_some_published_excludes_exactly_those_and_names_them() -> None:
     assert "package --locked --no-verify -p edtf-core" in run.cargo
 
 
-def test_all_published_runs_no_cargo_publish_and_exits_0() -> None:
+def test_all_published_runs_no_cargo_publish_and_exits_0(env: support.Env) -> None:
     """A finished leg is success, and it mints no token."""
     others = ("calendars", "normalize", "wasm", "cli", "postgres")
-    run = run_publish(CORE, unpublished=tuple(f"edtf-{m}" for m in others))
+    run = run_publish(CORE, unpublished=tuple(f"edtf-{m}" for m in others), env=env)
     assert run.returncode == 0, run.stdout + run.stderr
     assert list[str]() == run.publishes()
     assert run.stdout == (
@@ -354,10 +356,10 @@ def test_all_published_runs_no_cargo_publish_and_exits_0() -> None:
     assert want == urls
 
 
-def test_a_checksum_mismatch_fails_naming_both() -> None:
+def test_a_checksum_mismatch_fails_naming_both(env: support.Env) -> None:
     """A resume must be resuming the same bytes."""
     planted = b"not the bytes v1.3.3 uploaded\n"
-    run = run_publish(CORE | WASM, crate=planted)
+    run = run_publish(CORE | WASM, crate=planted, env=env)
     assert run.returncode != 0
     assert (
         f"::error::publish-crates: edtf-core 1.3.3 is on crates.io with"
@@ -367,9 +369,9 @@ def test_a_checksum_mismatch_fails_naming_both() -> None:
     assert list[str]() == run.publishes()
 
 
-def test_an_index_503_fails_naming_the_status() -> None:
+def test_an_index_503_fails_naming_the_status(env: support.Env) -> None:
     """An unread index is never read as "not published"."""
-    run = run_publish({"ed/tf/edtf-core": "503"} | WASM)
+    run = run_publish({"ed/tf/edtf-core": "503"} | WASM, env=env)
     assert run.returncode != 0
     assert run.stderr == (
         "::error::publish-crates: the crates.io index answered 503 for edtf-core"
@@ -379,9 +381,9 @@ def test_an_index_503_fails_naming_the_status() -> None:
     assert list[str]() == run.publishes()
 
 
-def test_every_index_read_names_the_org_and_the_layout() -> None:
+def test_every_index_read_names_the_org_and_the_layout(env: support.Env) -> None:
     """One read per member that publishes, each with the UA."""
-    run = run_publish(WASM)
+    run = run_publish(WASM, env=env)
     reads = [(u, a) for u, a in run.curl if u.startswith("https://index.")]
     want = [
         (f"https://index.crates.io/ed/tf/edtf-{m}", USER_AGENT)
@@ -419,9 +421,9 @@ def test_each_shape_refuses_by_name(body: object) -> None:
 
 
 # Cargo's `publish` key decides, never the build's exclusion (#1273).
-def test_a_member_the_build_excluded_still_publishes() -> None:
+def test_a_member_the_build_excluded_still_publishes(env: support.Env) -> None:
     """edtf-postgres: in the old exclusion, `publish` unset - it ships."""
-    run = run_publish(WASM)
+    run = run_publish(WASM, env=env)
     assert run.returncode == 0, run.stdout + run.stderr
     assert ("https://index.crates.io/ed/tf/edtf-postgres", USER_AGENT) in run.curl
     want: list[str] = [PUBLISH]
@@ -429,9 +431,9 @@ def test_a_member_the_build_excluded_still_publishes() -> None:
     assert "--exclude" not in run.publishes()[0]
 
 
-def test_a_publish_false_member_is_not_in_the_set() -> None:
+def test_a_publish_false_member_is_not_in_the_set(env: support.Env) -> None:
     """`publish = false` is the one way out, and it is the manifest's."""
-    run = run_publish(CORE, unpublished=("edtf-postgres",))
+    run = run_publish(CORE, unpublished=("edtf-postgres",), env=env)
     assert run.returncode == 0, run.stdout + run.stderr
     want = [
         f"https://index.crates.io/ed/tf/edtf-{m}"
@@ -444,9 +446,9 @@ def test_a_publish_false_member_is_not_in_the_set() -> None:
 
 
 # Trusted publishing by hand: what the step's curl calls did (#907).
-def test_the_token_is_masked_and_handed_to_cargo() -> None:
+def test_the_token_is_masked_and_handed_to_cargo(env: support.Env) -> None:
     """OIDC, then the exchange with the org's UA, masked, into cargo's env."""
-    run = run_publish(WASM)
+    run = run_publish(WASM, env=env)
     assert run.returncode == 0, run.stdout
     assert "::add-mask::stub\n" in run.stdout
     tokens: list[str] = ["token=stub"]
@@ -459,9 +461,9 @@ def test_the_token_is_masked_and_handed_to_cargo() -> None:
     assert want == others
 
 
-def test_a_refused_exchange_names_the_status_and_the_header() -> None:
+def test_a_refused_exchange_names_the_status_and_the_header(env: support.Env) -> None:
     """The 403 a missing UA draws is named, with where to look first."""
-    run = run_publish(WASM, exchange=403)
+    run = run_publish(WASM, exchange=403, env=env)
     assert run.returncode == 1
     assert run.stderr == (
         "::error::publish-crates: the crates.io token exchange answered 403 —"
@@ -471,9 +473,9 @@ def test_a_refused_exchange_names_the_status_and_the_header() -> None:
     assert list[str]() == run.publishes()
 
 
-def test_a_refused_oidc_request_names_the_status() -> None:
+def test_a_refused_oidc_request_names_the_status(env: support.Env) -> None:
     """No OIDC token, no exchange, no publish."""
-    run = run_publish(WASM, oidc=500)
+    run = run_publish(WASM, oidc=500, env=env)
     assert run.returncode == 1
     assert run.stderr == (
         "::error::publish-crates: the runner's OIDC token endpoint answered 500\n"
@@ -543,18 +545,18 @@ def test_an_answer_that_is_not_a_response_is_refused() -> None:
     assert f"{url} answered NoneType, not an HTTP response" == str(caught.value)
 
 
-def test_an_index_that_never_answered_is_named() -> None:
+def test_an_index_that_never_answered_is_named(env: support.Env) -> None:
     """No answer at all is "nothing", never "not published"."""
-    run = run_publish({"ed/tf/edtf-core": "000"} | WASM)
+    run = run_publish({"ed/tf/edtf-core": "000"} | WASM, env=env)
     assert run.returncode == 1
     assert (
         "::error::publish-crates: the crates.io index answered nothing for edtf-core"
     ) in run.stderr
 
 
-def test_cargo_publish_s_own_exit_is_the_run_s() -> None:
+def test_cargo_publish_s_own_exit_is_the_run_s(env: support.Env) -> None:
     """A failed upload fails the run with cargo's own status."""
-    run = run_publish(WASM, publish_rc=101)
+    run = run_publish(WASM, publish_rc=101, env=env)
     assert run.returncode == 101
 
 

@@ -32,7 +32,6 @@ _HERE = support.MISE
 
 GIT = support.tool("git")
 BASH = support.tool("bash")
-CLEAN = support.env()
 IDENTITY = {
     "GIT_CONFIG_GLOBAL": os.devnull,
     "GIT_CONFIG_NOSYSTEM": "1",
@@ -85,7 +84,7 @@ def body() -> str:
     return decoded.as_str(decoded.as_object(tasks["test"], "test")["run"], "the run")
 
 
-def throwaway(root: pathlib.Path) -> pathlib.Path:
+def throwaway(root: pathlib.Path, *, env: support.Env) -> pathlib.Path:
     """Make a repository standing in for the real one.
 
     Returns:
@@ -93,13 +92,13 @@ def throwaway(root: pathlib.Path) -> pathlib.Path:
 
     """
     root.mkdir()
-    env = {**CLEAN, **IDENTITY}
+    environ = {**env(), **IDENTITY}
     for args in (["init", "-q"], ["commit", "-q", "--allow-empty", "-m", "real"]):
-        subprocess.run([GIT, "-C", str(root), *args], env=env, check=True)
+        subprocess.run([GIT, "-C", str(root), *args], env=environ, check=True)
     return root
 
 
-def snapshot(repo: pathlib.Path) -> tuple[bytes, str]:
+def snapshot(repo: pathlib.Path, *, env: support.Env) -> tuple[bytes, str]:
     """Read what a leak would change in a repository.
 
     Returns:
@@ -108,7 +107,7 @@ def snapshot(repo: pathlib.Path) -> tuple[bytes, str]:
     """
     refs = subprocess.run(
         [GIT, "-C", str(repo), "for-each-ref"],
-        env={**CLEAN, **IDENTITY},
+        env={**env(), **IDENTITY},
         capture_output=True,
         text=True,
         check=True,
@@ -119,8 +118,10 @@ def snapshot(repo: pathlib.Path) -> tuple[bytes, str]:
 class Task:
     """The `test` task's body, run over a planted tree."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, belt: support.Belt, env: support.Env) -> None:
         """Give the row's scratch directories one home, removed after it."""
+        self.plant_belt = belt
+        self.make_env = env
         self.tmp = tmp_path
 
     def plant(self, *, scrubbed: bool) -> tuple[pathlib.Path, pathlib.Path]:
@@ -135,22 +136,22 @@ class Task:
         tree = base / "tree"
         # The runner and all it reads, as the tree's own: the whole belt,
         # and in `tests/`, the one root the body names, the planted tests.
-        support.belt(tree)
+        self.plant_belt(tree)
         (tree / "tests").mkdir()
         (tree / "tests" / "test_ok.py").write_text(PASSING, encoding="utf-8")
         leaky = LEAKY.replace("{ENV}", SCRUB if scrubbed else "None")
         (tree / "tests" / "test_leaky.py").write_text(leaky, encoding="utf-8")
-        return tree, throwaway(base / "real")
+        return tree, throwaway(base / "real", env=self.make_env)
 
 
 @fixture
-def task(tmp_path: Path) -> Task:
+def task(tmp_path: Path, belt: support.Belt, env: support.Env) -> Task:
     """Give each row its own Task."""
-    return Task(tmp_path)
+    return Task(tmp_path, belt=belt, env=env)
 
 
 def run_body(
-    tree: pathlib.Path, real: pathlib.Path
+    tree: pathlib.Path, real: pathlib.Path, *, env: support.Env
 ) -> subprocess.CompletedProcess[str]:
     """Run the body as a pre-push hook in a linked worktree would.
 
@@ -161,43 +162,46 @@ def run_body(
     return subprocess.run(
         [BASH, "-euo", "pipefail", "-c", body()],
         cwd=tree,
-        env={**CLEAN, "GIT_DIR": str(real / ".git")},
+        env={**env(), "GIT_DIR": str(real / ".git")},
         capture_output=True,
         text=True,
         check=False,
     )
 
 
-def test_a_leaking_test_is_red_and_never_reaches_the_repository(task: Task) -> None:
+def test_a_leaking_test_is_red_and_never_reaches_the_repository(
+    task: Task, env: support.Env
+) -> None:
     """A bare `git add` reds the task by path, and the real index holds.
 
     The row that fails before #1463: the body exited 0 and the
     throwaway repository's index gained `leak.txt`.
     """
     tree, real = task.plant(scrubbed=False)
-    before = snapshot(real)
-    r = run_body(tree, real)
-    assert snapshot(real) == before, "the leak reached the repository"
+    before = snapshot(real, env=env)
+    r = run_body(tree, real, env=env)
+    assert snapshot(real, env=env) == before, "the leak reached the repository"
     assert r.returncode == 1, r.stderr
     assert gd.MESSAGE in r.stderr
     assert "staged: A\tleak.txt" in r.stderr
 
 
-def test_a_scrubbed_test_is_green(task: Task) -> None:
+def test_a_scrubbed_test_is_green(task: Task, env: support.Env) -> None:
     """The same tree, with the scrub its neighbours carry, passes."""
     tree, real = task.plant(scrubbed=True)
-    before = snapshot(real)
-    r = run_body(tree, real)
+    before = snapshot(real, env=env)
+    r = run_body(tree, real, env=env)
     assert r.returncode == 0, r.stderr
     assert gd.MESSAGE not in r.stderr
-    assert snapshot(real) == before
+    assert snapshot(real, env=env) == before
 
 
 class Helper:
     """`run` names each kind of change a leak can make."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Plant a decoy in a scratch directory."""
+        self.make_env = env
         self.decoy = pathlib.Path(str(tmp_path)) / "decoy"
         self.decoy.mkdir()
         gd.plant(self.decoy)
@@ -211,7 +215,11 @@ class Helper:
             The environment.
 
         """
-        return {**CLEAN, "HOME": str(self.work), "XDG_CONFIG_HOME": str(self.work)}
+        return {
+            **self.make_env(),
+            "HOME": str(self.work),
+            "XDG_CONFIG_HOME": str(self.work),
+        }
 
     def leak(
         self, script: str, *, capfd: pytest.CaptureFixture[str]
@@ -232,9 +240,9 @@ class Helper:
 
 
 @fixture
-def helper(tmp_path: Path) -> Helper:
+def helper(tmp_path: Path, env: support.Env) -> Helper:
     """Give each row its own Helper."""
-    return Helper(tmp_path)
+    return Helper(tmp_path, env=env)
 
 
 def test_plant_makes_the_decoy_and_exits_0(

@@ -314,7 +314,9 @@ IN_STRING = (
 )
 
 
-def lint_biome(base: Path, source: str) -> subprocess.CompletedProcess[str]:
+def lint_biome(
+    base: Path, source: str, *, env: support.Env
+) -> subprocess.CompletedProcess[str]:
     """Plant `source` as `src/plant.ts` in a scaffolded tree; run the task.
 
     Returns:
@@ -330,9 +332,9 @@ def lint_biome(base: Path, source: str) -> subprocess.CompletedProcess[str]:
         (tree / dest).write_text(text, encoding="utf-8")
     (tree / "package.json").write_text(PACKAGE, encoding="utf-8")
     (tree / "src" / "plant.ts").write_text(source, encoding="utf-8")
-    env = support.env()
+    environ = env()
     for argv in ([GIT, "init", "-q"], [GIT, "add", "-A"]):
-        subprocess.run(argv, cwd=tree, env=env, check=True)
+        subprocess.run(argv, cwd=tree, env=environ, check=True)
     config = base / "config"
     config.mkdir()
     scratch = base / "tmp"
@@ -340,7 +342,7 @@ def lint_biome(base: Path, source: str) -> subprocess.CompletedProcess[str]:
     done = subprocess.run(
         [support.tool("mise"), "run", TASK],
         cwd=tree,
-        env=support.env(
+        env=env(
             MISE_CONFIG_DIR=str(config),
             XDG_CONFIG_HOME=str(config),
             MISE_GLOBAL_CONFIG_FILE=str(BELT / "config.toml"),
@@ -364,10 +366,10 @@ def lint_biome(base: Path, source: str) -> subprocess.CompletedProcess[str]:
 
 
 # The belt's real task: the before/after rows of #2137.
-def assert_red(source: str, *where: str) -> None:
+def assert_red(source: str, *where: str, env: support.Env) -> None:
     """Assert the plant reds the task by file:line and remedy."""
     with tempfile.TemporaryDirectory() as tmp:
-        done = lint_biome(Path(tmp), source)
+        done = lint_biome(Path(tmp), source, env=env)
     out = done.stdout + done.stderr
     assert done.returncode == 1, out
     assert bsup.HEAD in out
@@ -378,34 +380,35 @@ def assert_red(source: str, *where: str) -> None:
     assert "lint:biome: clean across" not in out
 
 
-def assert_clean(source: str) -> None:
+def assert_clean(source: str, *, env: support.Env) -> None:
     """Assert the plant leaves the task green."""
     with tempfile.TemporaryDirectory() as tmp:
-        done = lint_biome(Path(tmp), source)
+        done = lint_biome(Path(tmp), source, env=env)
     out = done.stdout + done.stderr
     assert done.returncode == 0, out
     assert "lint:biome: clean across" in out
 
 
-def test_a_file_wide_ignore_is_red() -> None:
+def test_a_file_wide_ignore_is_red(env: support.Env) -> None:
     """`biome-ignore-all`, which biome never reports unused."""
-    assert_red(ALL, "src/plant.ts:1: biome-ignore-all")
+    assert_red(ALL, "src/plant.ts:1: biome-ignore-all", env=env)
 
 
-def test_a_range_ignore_is_red() -> None:
+def test_a_range_ignore_is_red(env: support.Env) -> None:
     """`biome-ignore-start` and `-end`, both named."""
     assert_red(
         RANGE,
         "src/plant.ts:1: biome-ignore-start",
         "src/plant.ts:3: biome-ignore-end",
+        env=env,
     )
 
 
-def test_a_one_line_ignore_is_clean() -> None:
+def test_a_one_line_ignore_is_clean(env: support.Env) -> None:
     """The form that expires, suppressing the finding it names."""
-    assert_clean(ONE_LINE)
+    assert_clean(ONE_LINE, env=env)
 
 
-def test_the_form_in_a_string_is_clean() -> None:
+def test_the_form_in_a_string_is_clean(env: support.Env) -> None:
     """Text in a literal is not a suppression."""
-    assert_clean(IN_STRING)
+    assert_clean(IN_STRING, env=env)

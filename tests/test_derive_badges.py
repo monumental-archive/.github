@@ -99,6 +99,7 @@ def render(
     policy: dict[str, object] | None = None,
     *,
     canon: bool = True,
+    env: support.Env,
 ) -> tuple[subprocess.CompletedProcess[str], str]:
     """Render the badge block for one planted tree.
 
@@ -122,27 +123,27 @@ def render(
             path = root / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text, encoding="utf-8")
-        env = support.env()
-        env |= {"ORG_BELT_DIR": str(BELT), "ORG_CANON_DIR": str(CANON)}
+        environ = env()
+        environ |= {"ORG_BELT_DIR": str(BELT), "ORG_CANON_DIR": str(CANON)}
         if policy is not None:
             fake = Path(tmp) / "canon"
             (fake / "slsa").mkdir(parents=True)
             (fake / "slsa" / "assert-policy.json").write_text(
                 json.dumps(policy), encoding="utf-8"
             )
-            env["ORG_CANON_DIR"] = str(fake)
+            environ["ORG_CANON_DIR"] = str(fake)
         if not canon:
-            env.pop("ORG_CANON_DIR")
+            environ.pop("ORG_CANON_DIR")
         git = [GIT, "-C", str(root)]
-        subprocess.run([*git, "init", "-q"], check=True, env=env)
+        subprocess.run([*git, "init", "-q"], check=True, env=environ)
         tracked = [n for n in planted if n not in untracked]
-        subprocess.run([*git, "add", "--", *tracked], check=True, env=env)
+        subprocess.run([*git, "add", "--", *tracked], check=True, env=environ)
         out = Path(tmp) / "block.md"
-        env["BADGES_OUT"] = str(out)
+        environ["BADGES_OUT"] = str(out)
         done = subprocess.run(
             [BASH, str(SCRIPT)],
             cwd=root,
-            env=env,
+            env=environ,
             capture_output=True,
             text=True,
             check=False,
@@ -171,6 +172,7 @@ def assert_block(
     *,
     repo: str = DB,
     untracked: tuple[str, ...] = (),
+    env: support.Env,
 ) -> str:
     """Assert a clean render and hand back the block.
 
@@ -178,15 +180,15 @@ def assert_block(
         The rendered block.
 
     """
-    done, block = render(files, repo, untracked)
+    done, block = render(files, repo, untracked, env=env)
     assert done.returncode == 0, done.stderr
     assert done.stderr == ""
     return block
 
 
-def test_continuous_stub_alone_renders_the_image_once() -> None:
+def test_continuous_stub_alone_renders_the_image_once(env: support.Env) -> None:
     """A continuous publisher with no publish stub wears its image."""
-    block = assert_block({CONT_PATH: CONT_STUB})
+    block = assert_block({CONT_PATH: CONT_STUB}, env=env)
     want: list[str] = [shield(DB)]
     lines = ghcr_lines(block)
     assert lines == want
@@ -195,37 +197,45 @@ def test_continuous_stub_alone_renders_the_image_once() -> None:
     assert "fair--software.eu-%E2%97%8F%20%E2%97%8F%20%E2%97%8F%20" in block
 
 
-def test_continuous_and_oci_image_render_the_image_once() -> None:
+def test_continuous_and_oci_image_render_the_image_once(env: support.Env) -> None:
     """Both sources naming the repository's image render it once."""
-    block = assert_block({
-        CONT_PATH: CONT_STUB,
-        ".github/workflows/publish.yml": publish("oci-image"),
-    })
+    block = assert_block(
+        {
+            CONT_PATH: CONT_STUB,
+            ".github/workflows/publish.yml": publish("oci-image"),
+        },
+        env=env,
+    )
     want: list[str] = [shield(DB)]
     lines = ghcr_lines(block)
     assert lines == want
 
 
-def test_continuous_image_is_the_repository_lowercased() -> None:
+def test_continuous_image_is_the_repository_lowercased(env: support.Env) -> None:
     """continuous.yml lowercases GITHUB_REPOSITORY; so does the shield."""
-    block = assert_block({CONT_PATH: CONT_STUB}, repo="Mixed-Case")
+    block = assert_block({CONT_PATH: CONT_STUB}, repo="Mixed-Case", env=env)
     want: list[str] = [shield("mixed-case")]
     lines = ghcr_lines(block)
     assert lines == want
 
 
-def test_continuous_and_a_ghcr_state_render_both() -> None:
+def test_continuous_and_a_ghcr_state_render_both(env: support.Env) -> None:
     """A `ghcr <name>` state still adds an image; the derived one once."""
-    block = assert_block({
-        CONT_PATH: CONT_STUB,
-        ".badge-states": f"ghcr {DB}\nghcr other-image\n",
-    })
+    block = assert_block(
+        {
+            CONT_PATH: CONT_STUB,
+            ".badge-states": f"ghcr {DB}\nghcr other-image\n",
+        },
+        env=env,
+    )
     want: list[str] = [shield(DB), shield("other-image")]
     lines = ghcr_lines(block)
     assert lines == want
 
 
-def test_an_extension_alone_renders_its_crate_image_not_the_repo() -> None:
+def test_an_extension_alone_renders_its_crate_image_not_the_repo(
+    env: support.Env,
+) -> None:
     """A pgrx extension's image is named for its crate dir (#1172).
 
     edtf ships the extension alone and wore a ghcr shield for an
@@ -237,54 +247,57 @@ def test_an_extension_alone_renders_its_crate_image_not_the_repo() -> None:
         "      classes: pgrx-extension\n"
         "      extension-crate-dir: crates/edtf-postgres\n",
     )
-    block = assert_block({".github/workflows/publish.yml": stub}, repo="edtf")
+    block = assert_block({".github/workflows/publish.yml": stub}, repo="edtf", env=env)
     want: list[str] = [shield("edtf-postgres")]
     lines = ghcr_lines(block)
     assert want == lines
 
 
-def test_no_stub_renders_no_image() -> None:
+def test_no_stub_renders_no_image(env: support.Env) -> None:
     """A tree with neither stub wears no ghcr shield and no registry dot."""
-    block = assert_block({})
+    block = assert_block({}, env=env)
     assert ghcr_lines(block) == NO_LINES
     assert "fair--software.eu-%E2%97%8F%20%E2%97%8F%20%E2%97%8B%20" in block
 
 
-def test_stub_path_calling_another_workflow_renders_no_image() -> None:
+def test_stub_path_calling_another_workflow_renders_no_image(env: support.Env) -> None:
     """The file at stubPath counts only when it calls continuous.yml."""
     other = CONT_STUB.replace("workflows/continuous.yml@", "workflows/ci.yml@")
     assert other != CONT_STUB
-    block = assert_block({CONT_PATH: other})
+    block = assert_block({CONT_PATH: other}, env=env)
     assert ghcr_lines(block) == NO_LINES
 
 
-def test_commented_call_renders_no_image() -> None:
+def test_commented_call_renders_no_image(env: support.Env) -> None:
     """A `uses:` behind a comment is prose, not a call."""
     commented = CONT_STUB.replace("    uses: ", "    # uses: ")
     assert commented != CONT_STUB
-    block = assert_block({CONT_PATH: commented})
+    block = assert_block({CONT_PATH: commented}, env=env)
     assert ghcr_lines(block) == NO_LINES
 
 
-def test_untracked_stub_renders_no_image() -> None:
+def test_untracked_stub_renders_no_image(env: support.Env) -> None:
     """An untracked continuous stub publishes nothing and wears nothing."""
-    block = assert_block({CONT_PATH: CONT_STUB}, untracked=(CONT_PATH,))
+    block = assert_block({CONT_PATH: CONT_STUB}, untracked=(CONT_PATH,), env=env)
     assert ghcr_lines(block) == NO_LINES
 
 
-def test_stub_elsewhere_renders_no_image() -> None:
+def test_stub_elsewhere_renders_no_image(env: support.Env) -> None:
     """The stub is located by the policy's path, not by any filename."""
-    block = assert_block({".github/workflows/deploy.yml": CONT_STUB})
+    block = assert_block({".github/workflows/deploy.yml": CONT_STUB}, env=env)
     assert ghcr_lines(block) == NO_LINES
 
 
 # The guards, each red-when-planted with its exact message.
-def test_pgrx_guard_is_not_satisfied_by_the_continuous_image() -> None:
+def test_pgrx_guard_is_not_satisfied_by_the_continuous_image(env: support.Env) -> None:
     """A continuous image cannot stand in for extension-crate-dir."""
-    done, _ = render({
-        CONT_PATH: CONT_STUB,
-        ".github/workflows/publish.yml": publish("pgrx-extension"),
-    })
+    done, _ = render(
+        {
+            CONT_PATH: CONT_STUB,
+            ".github/workflows/publish.yml": publish("pgrx-extension"),
+        },
+        env=env,
+    )
     assert done.returncode == 1
     assert done.stderr == (
         "fix:badges: classes include pgrx-extension but the publish stub "
@@ -292,28 +305,28 @@ def test_pgrx_guard_is_not_satisfied_by_the_continuous_image() -> None:
     )
 
 
-def test_policy_without_continuous_block_refuses() -> None:
+def test_policy_without_continuous_block_refuses(env: support.Env) -> None:
     """A policy that no longer declares the predicate is refused by name."""
     policy = decoded.as_object(decoded.load_json(json.dumps(POLICY)), "the copy")
     del decoded.as_object(policy["evidence"], "evidence")["continuous"]
-    done, _ = render({CONT_PATH: CONT_STUB}, policy=policy)
+    done, _ = render({CONT_PATH: CONT_STUB}, policy=policy, env=env)
     assert done.returncode == 1
     assert re.search(POLICY_REFUSAL, done.stderr)
 
 
-def test_policy_missing_stub_uses_refuses() -> None:
+def test_policy_missing_stub_uses_refuses(env: support.Env) -> None:
     """Half a predicate is no predicate."""
     policy = decoded.as_object(decoded.load_json(json.dumps(POLICY)), "the copy")
     evidence = decoded.as_object(policy["evidence"], "evidence")
     del decoded.as_object(evidence["continuous"], "evidence.continuous")["stubUses"]
-    done, _ = render({CONT_PATH: CONT_STUB}, policy=policy)
+    done, _ = render({CONT_PATH: CONT_STUB}, policy=policy, env=env)
     assert done.returncode == 1
     assert re.search(POLICY_REFUSAL, done.stderr)
 
 
-def test_no_canon_dir_refuses() -> None:
+def test_no_canon_dir_refuses(env: support.Env) -> None:
     """No ORG_CANON_DIR means no belt, said by name."""
-    done, _ = render({CONT_PATH: CONT_STUB}, canon=False)
+    done, _ = render({CONT_PATH: CONT_STUB}, canon=False, env=env)
     assert done.returncode == 1
     assert re.search(
         r"ORG_CANON_DIR: unset — no belt \(CI: MISE_GLOBAL_CONFIG_FILE; "
@@ -323,7 +336,7 @@ def test_no_canon_dir_refuses() -> None:
 
 
 # A first-line read survives a long input under pipefail (#747, #682).
-def test_a_long_level_stub_still_renders_its_tracks() -> None:
+def test_a_long_level_stub_still_renders_its_tracks(env: support.Env) -> None:
     """`| head -1` broke the pipe and killed the script without a word.
 
     Under `set -o pipefail` the writer `head` hangs up on dies of
@@ -336,20 +349,20 @@ def test_a_long_level_stub_still_renders_its_tracks() -> None:
         "    uses: monumental-archive/.github/.github/workflows/level.yml@v1\n"
         "    with:\n" + "      tracks: build source dependency\n" * 4000
     )
-    done, block = render({".github/workflows/levels.yml": stub})
+    done, block = render({".github/workflows/levels.yml": stub}, env=env)
     assert done.returncode == 0, f"exit {done.returncode}: {done.stderr}"
     assert "[![SLSA build]" in block
 
 
 # A read whose answer may be "none" reaches its guard (#905).
-def test_no_download_location_says_so() -> None:
+def test_no_download_location_says_so(env: support.Env) -> None:
     """`grep` finding nothing used to kill the script before its sentence.
 
     Under `set -euo pipefail` grep's exit 1 left the pipeline and
     errexit fired, so fix:badges exited 1 with nothing on stderr.
     """
     reuse = 'version = 1\n[[annotations]]\npath = "**"\n'
-    done, _ = render({"REUSE.toml": reuse})
+    done, _ = render({"REUSE.toml": reuse}, env=env)
     assert done.returncode == 1
     assert (
         done.stderr
@@ -379,9 +392,9 @@ def reuse_with(*expressions: str) -> str:
 # A shield written by hand below the block was read only by the
 # Monday audit, so it could state a licence the repository does not
 # carry for a week. The block now derives it.
-def test_the_shield_states_the_expression_reuse_declares() -> None:
+def test_the_shield_states_the_expression_reuse_declares(env: support.Env) -> None:
     """One expression across the annotations is the shield's message."""
-    done, block = render({"REUSE.toml": reuse_with("Apache-2.0 OR MIT")})
+    done, block = render({"REUSE.toml": reuse_with("Apache-2.0 OR MIT")}, env=env)
     assert done.returncode == 0, done.stderr
     assert (
         "[![license](https://img.shields.io/badge/license-"
@@ -389,9 +402,9 @@ def test_the_shield_states_the_expression_reuse_declares() -> None:
     ) in block
 
 
-def test_two_expressions_are_refused_by_name() -> None:
+def test_two_expressions_are_refused_by_name(env: support.Env) -> None:
     """Annotations that disagree leave the shield nothing true to say."""
-    done, _ = render({"REUSE.toml": reuse_with("0BSD", "MIT")})
+    done, _ = render({"REUSE.toml": reuse_with("0BSD", "MIT")}, env=env)
     assert done.returncode == 1, done.stderr
     assert done.stderr == (
         "fix:badges: REUSE.toml names several licence expressions:\n"
@@ -401,12 +414,15 @@ def test_two_expressions_are_refused_by_name() -> None:
     )
 
 
-def test_the_declared_expression_is_the_shields() -> None:
+def test_the_declared_expression_is_the_shields(env: support.Env) -> None:
     """Several expressions and a `licence` line: the line decides (#1589)."""
-    done, block = render({
-        "REUSE.toml": reuse_with("0BSD", "MIT OR Apache-2.0"),
-        ".badge-states": "licence 0BSD\n",
-    })
+    done, block = render(
+        {
+            "REUSE.toml": reuse_with("0BSD", "MIT OR Apache-2.0"),
+            ".badge-states": "licence 0BSD\n",
+        },
+        env=env,
+    )
     assert done.returncode == 0, done.stderr
     assert (
         "[![license](https://img.shields.io/badge/license-0BSD-blue)](LICENSES/)"
@@ -414,12 +430,15 @@ def test_the_declared_expression_is_the_shields() -> None:
     )
 
 
-def test_a_declaration_reuse_does_not_name_is_red() -> None:
+def test_a_declaration_reuse_does_not_name_is_red(env: support.Env) -> None:
     """A licence no file is under never reaches the shield (#1589)."""
-    done, block = render({
-        "REUSE.toml": reuse_with("0BSD", "MIT OR Apache-2.0"),
-        ".badge-states": "licence MIT\n",
-    })
+    done, block = render(
+        {
+            "REUSE.toml": reuse_with("0BSD", "MIT OR Apache-2.0"),
+            ".badge-states": "licence MIT\n",
+        },
+        env=env,
+    )
     assert done.returncode == 1
     assert done.stderr == (
         "fix:badges: .badge-states declares licence MIT,"
@@ -430,19 +449,21 @@ def test_a_declaration_reuse_does_not_name_is_red() -> None:
 
 
 # The coverage shield is derived from the floor, never declared (#362).
-def test_a_declared_state_without_a_floor_renders_no_shield() -> None:
+def test_a_declared_state_without_a_floor_renders_no_shield(env: support.Env) -> None:
     """`coverage exemplary` once wore a shield over no data at all.
 
     The shield renders iff `.coverage-floor` exists, so a state line
     saying otherwise renders nothing and is not refused.
     """
-    done, block = render({".badge-states": "coverage exemplary\n"})
+    done, block = render({".badge-states": "coverage exemplary\n"}, env=env)
     assert done.returncode == 0, done.stderr
     assert done.stderr == ""
     assert "codecov.io" not in block
 
 
-def test_a_floor_no_workflow_feeds_is_refused_with_a_remedy_that_parses() -> None:
+def test_a_floor_no_workflow_feeds_is_refused_with_a_remedy_that_parses(
+    env: support.Env,
+) -> None:
     """The printed remedy is the template's `secrets:`, as YAML (#1923).
 
     It was a flow mapping holding `${{`, which opens a second
@@ -451,7 +472,7 @@ def test_a_floor_no_workflow_feeds_is_refused_with_a_remedy_that_parses() -> Non
     equal the `ci` job's `secrets` in the template a new repository
     copies, so they cannot drift from it.
     """
-    done, block = render({".coverage-floor": "80\n"})
+    done, block = render({".coverage-floor": "80\n"}, env=env)
     assert done.returncode == 1
     assert done.stderr == (
         "fix:badges: .coverage-floor is tracked and no workflow passes "

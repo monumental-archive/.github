@@ -148,15 +148,19 @@ def bare_curls(source: str) -> list[str]:
 class Planted:
     """A planted canon and org, alpha then beta, each wearing one shield."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(
+        self, tmp_path: Path, *, canon: support.Canon, env: support.Env
+    ) -> None:
         """Plant the canon tree, the floors and the stub tools."""
+        self.plant_canon = canon
+        self.make_env = env
         tmp = tmp_path
-        self.tree = support.canon(
+        self.tree = self.plant_canon(
             tmp / "tree",
             "security/identity.toml",
             stubs={"security/scorecard-floors.txt": "alpha 5.0\nbeta 5.0\n"},
         )
-        self.env = support.env(
+        self.env = self.make_env(
             tmp,
             ORG_BELT_DIR=str(BELT),
             ORG_CANON_DIR=str(self.tree),
@@ -228,9 +232,9 @@ class Planted:
 
 
 @fixture
-def planted_state(tmp_path: Path) -> Planted:
+def planted_state(tmp_path: Path, canon: support.Canon, env: support.Env) -> Planted:
     """Give each row its own Planted."""
-    return Planted(tmp_path)
+    return Planted(tmp_path, canon=canon, env=env)
 
 
 class ScorecardRead(Planted):
@@ -247,9 +251,11 @@ class ScorecardRead(Planted):
 
 
 @fixture
-def scorecard_read(tmp_path: Path) -> ScorecardRead:
+def scorecard_read(
+    tmp_path: Path, canon: support.Canon, env: support.Env
+) -> ScorecardRead:
     """Give each row its own ScorecardRead."""
-    return ScorecardRead(tmp_path)
+    return ScorecardRead(tmp_path, canon=canon, env=env)
 
 
 def test_404_is_a_shield_over_nothing_and_the_walk_goes_on(
@@ -324,17 +330,21 @@ def entry(repo: str, **fields: object) -> str:
 class BestPracticesRead(Planted):
     """The Best Practices badge leg, asked through `ask` (#1633)."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(
+        self, tmp_path: Path, *, canon: support.Canon, env: support.Env
+    ) -> None:
         """Wear the passing badge, whose id the stub reads as the repo."""
-        super().__init__(tmp_path)
+        super().__init__(tmp_path, canon=canon, env=env)
         self.env["SHIELD"] = "https://www.bestpractices.dev/projects/@REPO@/badge"
         self.ok = (200, entry("beta", badge_percentage_0=100))
 
 
 @fixture
-def best_practices_read(tmp_path: Path) -> BestPracticesRead:
+def best_practices_read(
+    tmp_path: Path, canon: support.Canon, env: support.Env
+) -> BestPracticesRead:
     """Give each row its own BestPracticesRead."""
-    return BestPracticesRead(tmp_path)
+    return BestPracticesRead(tmp_path, canon=canon, env=env)
 
 
 def test_404_names_the_missing_project(best_practices_read: BestPracticesRead) -> None:
@@ -403,17 +413,21 @@ def test_the_entry_is_asked_past_the_shared_cache(
 class BaselineRead(Planted):
     """The OSPS Baseline leg, asked through `ask` (#1633)."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(
+        self, tmp_path: Path, *, canon: support.Canon, env: support.Env
+    ) -> None:
         """Wear the Baseline shield on the same entry."""
-        super().__init__(tmp_path)
+        super().__init__(tmp_path, canon=canon, env=env)
         self.env["SHIELD"] = "https://www.bestpractices.dev/projects/@REPO@/baseline"
         self.ok = (200, entry("beta", achieved_baseline_1_at="2026-01-01"))
 
 
 @fixture
-def baseline_read(tmp_path: Path) -> BaselineRead:
+def baseline_read(
+    tmp_path: Path, canon: support.Canon, env: support.Env
+) -> BaselineRead:
     """Give each row its own BaselineRead."""
-    return BaselineRead(tmp_path)
+    return BaselineRead(tmp_path, canon=canon, env=env)
 
 
 def test_baseline_read_404_names_the_missing_project(
@@ -459,9 +473,11 @@ def test_200_is_read_for_its_level(baseline_read: BaselineRead) -> None:
 class LevelShieldRead(Planted):
     """The level shield's published document, asked through `ask` (#1633)."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(
+        self, tmp_path: Path, *, canon: support.Canon, env: support.Env
+    ) -> None:
         """Wear a shields endpoint over a document named for the repo."""
-        super().__init__(tmp_path)
+        super().__init__(tmp_path, canon=canon, env=env)
         self.env["SHIELD"] = (
             "https://img.shields.io/endpoint?url=https%3A%2F%2Fpages.example%2F@REPO@.json"
         )
@@ -469,9 +485,11 @@ class LevelShieldRead(Planted):
 
 
 @fixture
-def level_shield_read(tmp_path: Path) -> LevelShieldRead:
+def level_shield_read(
+    tmp_path: Path, canon: support.Canon, env: support.Env
+) -> LevelShieldRead:
     """Give each row its own LevelShieldRead."""
-    return LevelShieldRead(tmp_path)
+    return LevelShieldRead(tmp_path, canon=canon, env=env)
 
 
 def test_404_is_a_shield_over_nothing(level_shield_read: LevelShieldRead) -> None:
@@ -626,9 +644,9 @@ class StaleAnswer(Planted):
 
 
 @fixture
-def stale_answer(tmp_path: Path) -> StaleAnswer:
+def stale_answer(tmp_path: Path, canon: support.Canon, env: support.Env) -> StaleAnswer:
     """Give each row its own StaleAnswer."""
-    return StaleAnswer(tmp_path)
+    return StaleAnswer(tmp_path, canon=canon, env=env)
 
 
 def test_a_stale_404_is_a_question_unanswered(stale_answer: StaleAnswer) -> None:
@@ -787,9 +805,11 @@ class CodecovRead(Planted):
     at `abc1234`, committed at HEAD_AT (now, unless a row says).
     """
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(
+        self, tmp_path: Path, *, canon: support.Canon, env: support.Env
+    ) -> None:
         """Wear the Codecov shield."""
-        super().__init__(tmp_path)
+        super().__init__(tmp_path, canon=canon, env=env)
         self.env["SHIELD"] = CODECOV
 
     def branch(self, code: int, text: str) -> None:
@@ -809,9 +829,9 @@ class CodecovRead(Planted):
 
 
 @fixture
-def codecov_read(tmp_path: Path) -> CodecovRead:
+def codecov_read(tmp_path: Path, canon: support.Canon, env: support.Env) -> CodecovRead:
     """Give each row its own CodecovRead."""
-    return CodecovRead(tmp_path)
+    return CodecovRead(tmp_path, canon=canon, env=env)
 
 
 def test_the_detail_route_is_never_asked(codecov_read: CodecovRead) -> None:

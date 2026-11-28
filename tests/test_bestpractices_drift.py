@@ -99,6 +99,7 @@ def run(
     readme: str | None = README,
     answers: bool = True,
     bulk: int = 0,
+    env: support.Env,
 ) -> tuple[subprocess.CompletedProcess[str], str]:
     """Run the leg in a planted tree.
 
@@ -128,28 +129,28 @@ def run(
         )
         log = root / "log"
         log.touch()
-        env = support.env()
-        env |= {
+        environ = env()
+        environ |= {
             "ORG_BELT_DIR": str(BELT),
             "GITHUB_REPOSITORY": REPO,
-            "PATH": f"{bin_dir}:{env['PATH']}",
+            "PATH": f"{bin_dir}:{environ['PATH']}",
             "PLANT_ENTRY": str(planted),
             "PLANT_CODE": code,
             "PLANT_LOG": str(log),
         }
-        subprocess.run([GIT, "init", "-q"], cwd=tree, env=env, check=True)
+        subprocess.run([GIT, "init", "-q"], cwd=tree, env=environ, check=True)
         if answers:
             (tree / ".bestpractices.json").write_text(
                 json.dumps(ANSWERS, indent=2) + "\n", encoding="utf-8"
             )
         if readme is not None:
             (tree / "README.md").write_text(readme, encoding="utf-8")
-        subprocess.run([GIT, "add", "-A"], cwd=tree, env=env, check=True)
+        subprocess.run([GIT, "add", "-A"], cwd=tree, env=environ, check=True)
         if bulk:
             blob = subprocess.run(
                 [GIT, "hash-object", "-w", "--stdin"],
                 cwd=tree,
-                env=env,
+                env=environ,
                 input="",
                 capture_output=True,
                 text=True,
@@ -160,7 +161,7 @@ def run(
             subprocess.run(
                 [GIT, "update-index", "--index-info"],
                 cwd=tree,
-                env=env,
+                env=environ,
                 input=index,
                 text=True,
                 check=True,
@@ -169,7 +170,7 @@ def run(
         done = subprocess.run(
             as_mise.argv,
             cwd=tree,
-            env=env | as_mise.env,
+            env=environ | as_mise.env,
             capture_output=True,
             text=True,
             check=False,
@@ -178,16 +179,16 @@ def run(
 
 
 # The shapes the leg passes or skips clean, by name.
-def test_a_matching_entry_passes() -> None:
+def test_a_matching_entry_passes(env: support.Env) -> None:
     """The published entry says what the file says."""
-    done, log = run()
+    done, log = run(env=env)
     assert done.stderr == ""
     assert done.returncode == 0
     assert done.stdout == f"{LABEL}: the published entry matches .bestpractices.json\n"
     assert log == f"curl {URL}\n"
 
 
-def test_a_readme_ahead_of_a_long_listing_is_found() -> None:
+def test_a_readme_ahead_of_a_long_listing_is_found(env: support.Env) -> None:
     """A second README a pipe buffer later cannot unname the first (#1637).
 
     A probe that stopped at its first match closed the pipe; the
@@ -196,7 +197,7 @@ def test_a_readme_ahead_of_a_long_listing_is_found() -> None:
     a skip where a comparison was owed. The first match is the one
     read, `README.md`, which wears the shield.
     """
-    done, log = run(bulk=3000)
+    done, log = run(bulk=3000, env=env)
     assert done.stderr == ""
     assert done.returncode == 0
     assert done.stdout == f"{LABEL}: the published entry matches .bestpractices.json\n"
@@ -235,9 +236,9 @@ def test_a_null_justification_equals_an_empty_one() -> None:
     assert drift.drift(words, site) == expected
 
 
-def test_a_repository_with_no_badge_is_skipped_by_name() -> None:
+def test_a_repository_with_no_badge_is_skipped_by_name(env: support.Env) -> None:
     """No shield names an entry, so there is nothing to compare."""
-    done, log = run(readme="# example\n")
+    done, log = run(readme="# example\n", env=env)
     assert done.stderr == ""
     assert done.returncode == 0
     assert done.stdout == (
@@ -247,25 +248,25 @@ def test_a_repository_with_no_badge_is_skipped_by_name() -> None:
     assert log == ""
 
 
-def test_a_commented_out_badge_is_not_a_badge() -> None:
+def test_a_commented_out_badge_is_not_a_badge(env: support.Env) -> None:
     """A shield inside a comment is not worn."""
     shield = README.splitlines()[3]
-    done, log = run(readme=README.replace(shield, f"<!-- {shield} -->"))
+    done, log = run(readme=README.replace(shield, f"<!-- {shield} -->"), env=env)
     assert done.returncode == 0
     assert SKIPPED in done.stdout
     assert log == ""
 
 
-def test_a_repository_with_no_readme_is_skipped_by_name() -> None:
+def test_a_repository_with_no_readme_is_skipped_by_name(env: support.Env) -> None:
     """No README, so no shield."""
-    done, _ = run(readme=None)
+    done, _ = run(readme=None, env=env)
     assert done.returncode == 0
     assert SKIPPED in done.stdout
 
 
-def test_a_repository_with_no_file_is_skipped() -> None:
+def test_a_repository_with_no_file_is_skipped(env: support.Env) -> None:
     """Nothing tracks the answers, so nothing is compared."""
-    done, log = run(answers=False)
+    done, log = run(answers=False, env=env)
     assert done.returncode == 0
     assert (
         done.stdout == "audit:bestpractices: no tracked .bestpractices.json, skipped\n"
@@ -280,41 +281,45 @@ def assert_red(
     entry: dict[str, object] | str | None = None,
     code: str = "200",
     readme: str | None = README,
+    env: support.Env,
 ) -> None:
     """Assert exit 1 and exactly this message on stderr."""
-    done, _ = run(entry=entry, code=code, readme=readme)
+    done, _ = run(entry=entry, code=code, readme=readme, env=env)
     assert done.returncode == 1, done.stdout
     assert done.stderr == message
 
 
-def test_a_status_that_differs_is_red_by_criterion() -> None:
+def test_a_status_that_differs_is_red_by_criterion(env: support.Env) -> None:
     """The defect measured on 14058: Unmet on the site, Met in the file."""
     assert_red(
         f"{LABEL}: the published entry differs from .bestpractices.json:\n"
         '  test_most: status "Unmet" on the site, "Met" in the file\n' + STEP,
         entry=published({"test_most_status": "Unmet"}),
+        env=env,
     )
 
 
-def test_a_baseline_status_is_read_under_its_display_name() -> None:
+def test_a_baseline_status_is_read_under_its_display_name(env: support.Env) -> None:
     """`osps_ac_01_01` in the file is `OSPS-AC-01.01` on the site."""
     assert_red(
         f"{LABEL}: the published entry differs from .bestpractices.json:\n"
         '  osps_ac_01_01: status "?" on the site, "Met" in the file\n' + STEP,
         entry=published({"osps_ac_01_01_status": "?"}),
+        env=env,
     )
 
 
-def test_a_justification_that_differs_is_red() -> None:
+def test_a_justification_that_differs_is_red(env: support.Env) -> None:
     """Same status, older words: the 16735 shape."""
     assert_red(
         f"{LABEL}: the published entry differs from .bestpractices.json:\n"
         "  regression_tests_added50: justification differs\n" + STEP,
         entry=published({"regression_tests_added50_justification": "Not measured."}),
+        env=env,
     )
 
 
-def test_both_fields_of_one_criterion_are_one_line() -> None:
+def test_both_fields_of_one_criterion_are_one_line(env: support.Env) -> None:
     """A criterion is named once, with every field that differs."""
     assert_red(
         f"{LABEL}: the published entry differs from .bestpractices.json:\n"
@@ -324,10 +329,11 @@ def test_both_fields_of_one_criterion_are_one_line() -> None:
             "dynamic_analysis_status": "Unmet",
             "dynamic_analysis_justification": "Not met.",
         }),
+        env=env,
     )
 
 
-def test_a_criterion_the_site_lacks_is_red() -> None:
+def test_a_criterion_the_site_lacks_is_red(env: support.Env) -> None:
     """An answer the entry does not carry at all has not reached it."""
     entry = published()
     del entry["test_most_status"]
@@ -335,67 +341,75 @@ def test_a_criterion_the_site_lacks_is_red() -> None:
         f"{LABEL}: the published entry differs from .bestpractices.json:\n"
         '  test_most: status absent on the site, "Met" in the file\n' + STEP,
         entry=entry,
+        env=env,
     )
 
 
-def test_an_issuer_that_does_not_answer_is_red_not_drift() -> None:
+def test_an_issuer_that_does_not_answer_is_red_not_drift(env: support.Env) -> None:
     """A 503 is a question unanswered, never a finding about answers."""
     assert_red(
         f"audit:bestpractices: {REPO}: {URL} did not answer — HTTP 503,"
         " a question unanswered, not a drift\n",
         code="503",
         entry="busy",
+        env=env,
     )
 
 
-def test_curl_answering_nothing_is_red_not_drift() -> None:
+def test_curl_answering_nothing_is_red_not_drift(env: support.Env) -> None:
     """No status at all is named as none, never as a finding."""
     assert_red(
         f"audit:bestpractices: {REPO}: {URL} did not answer — HTTP none,"
         " a question unanswered, not a drift\n",
         code="",
         entry="",
+        env=env,
     )
 
 
-def test_an_answer_that_is_not_json_is_red() -> None:
+def test_an_answer_that_is_not_json_is_red(env: support.Env) -> None:
     """A 200 over HTML is not an entry."""
-    done, _ = run(entry="<html>")
+    done, _ = run(entry="<html>", env=env)
     assert done.returncode == 1
     assert done.stderr.startswith(f"{LABEL}: the site's answer is not JSON: "), (
         done.stderr
     )
 
 
-def test_an_answer_that_is_not_an_object_is_red() -> None:
+def test_an_answer_that_is_not_an_object_is_red(env: support.Env) -> None:
     """A JSON list is not a project."""
-    assert_red(f"{LABEL}: the site's answer is not a JSON object\n", entry="[]")
+    assert_red(
+        f"{LABEL}: the site's answer is not a JSON object\n", entry="[]", env=env
+    )
 
 
-def test_a_site_answer_that_is_not_a_string_is_refused() -> None:
+def test_a_site_answer_that_is_not_a_string_is_refused(env: support.Env) -> None:
     """A number where a status belongs is no answer to compare (#1681)."""
     assert_red(
         f"{LABEL}: the site's answer: test_most_status is not a string or null\n",
         entry=published({"test_most_status": 3}),
+        env=env,
     )
 
 
-def test_a_baseline_answer_is_refused_under_its_display_name() -> None:
+def test_a_baseline_answer_is_refused_under_its_display_name(env: support.Env) -> None:
     """The refusal names the key the site carries (#1681)."""
     assert_red(
         f"{LABEL}: the site's answer: OSPS-AC-01.01_justification is not"
         " a string or null\n",
         entry=published({"osps_ac_01_01_justification": ["x"]}),
+        env=env,
     )
 
 
-def test_two_entries_on_one_readme_are_red() -> None:
+def test_two_entries_on_one_readme_are_red(env: support.Env) -> None:
     """Which entry the file answers for cannot be guessed."""
     other = README.replace(ID, "16735")
     assert_red(
         f"audit:bestpractices: {REPO}: cannot tell which entry to compare\n"
         f"  README shields name more than one entry: {ID}, 16735\n",
         readme=README + other,
+        env=env,
     )
 
 

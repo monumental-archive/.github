@@ -136,8 +136,9 @@ def key(endpoint: str, method: str = "GET") -> str:
 class Forge:
     """A clean org on disk, and the stub that serves it."""
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, *, env: support.Env) -> None:
         """Lay out the stub and a fixture for every read a clean check makes."""
+        self.make_env = env
         self.root = root
         self.answers = root / "r"
         self.answers.mkdir(parents=True)
@@ -234,7 +235,7 @@ class Forge:
             The completed process; drift is the thing under test.
 
         """
-        env = support.env()
+        env = self.make_env()
         env |= {
             "PATH": f"{self.bindir}{os.pathsep}{os.environ['PATH']}",
             "STUB": str(self.root),
@@ -270,15 +271,16 @@ class Forge:
 class ForgeCase:
     """A row with a fresh clean org."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Build the clean org in a temporary directory."""
-        self.forge = Forge(Path(str(tmp_path)))
+        self.make_env = env
+        self.forge = Forge(Path(str(tmp_path)), env=self.make_env)
 
 
 @fixture
-def forge_case(tmp_path: Path) -> ForgeCase:
+def forge_case(tmp_path: Path, env: support.Env) -> ForgeCase:
     """Give each row its own ForgeCase."""
-    return ForgeCase(tmp_path)
+    return ForgeCase(tmp_path, env=env)
 
 
 @dataclass(frozen=True)
@@ -290,9 +292,9 @@ class CleanOrg:
 
 
 @fixture(scope="module")
-def clean_org(tmp_path_factory: pytest.TempPathFactory) -> CleanOrg:
+def clean_org(tmp_path_factory: pytest.TempPathFactory, env: support.Env) -> CleanOrg:
     """Check the clean org once; every row reads the same run."""
-    forge = Forge(tmp_path_factory.mktemp("clean-org"))
+    forge = Forge(tmp_path_factory.mktemp("clean-org"), env=env)
     return CleanOrg(forge, forge.check())
 
 

@@ -65,6 +65,7 @@ def verdict(  # ruff: ignore[too-many-arguments] -- one keyword per job result
     majors: str = "[16, 17]",
     coverage: str = "skipped",
     split: str = "false",
+    env: support.Env,
 ) -> subprocess.CompletedProcess[str]:
     """Run the lifted step on one set of job results.
 
@@ -75,7 +76,7 @@ def verdict(  # ruff: ignore[too-many-arguments] -- one keyword per job result
     bash = support.tool("bash")
     return subprocess.run(
         [bash, "-c", step_script()],
-        env=support.env(
+        env=env(
             PATH=os.environ["PATH"],
             PLAN=plan,
             GATE=gate,
@@ -91,25 +92,25 @@ def verdict(  # ruff: ignore[too-many-arguments] -- one keyword per job result
     )
 
 
-def test_every_part_green() -> None:
+def test_every_part_green(env: support.Env) -> None:
     """Plan, gate and every planned leg passed."""
-    done = verdict("success", "success", "success")
+    done = verdict("success", "success", "success", env=env)
     assert done.returncode == 0, done.stderr
     assert (
         done.stdout == "ci: plan, gate and every pgrx leg (\\[16\\,\\ 17\\]) passed\n"
     )
 
 
-def test_no_legs_planned_and_none_ran() -> None:
+def test_no_legs_planned_and_none_ran(env: support.Env) -> None:
     """A tree with no extension skips the legs, and that is green."""
-    done = verdict("success", "success", "skipped", majors="[]")
+    done = verdict("success", "success", "skipped", majors="[]", env=env)
     assert done.returncode == 0, done.stderr
     assert done.stdout == "ci: plan, gate and every pgrx leg (\\[\\]) passed\n"
 
 
-def test_planned_legs_that_were_skipped() -> None:
+def test_planned_legs_that_were_skipped(env: support.Env) -> None:
     """A skipped required leg must not count as passing."""
-    done = verdict("success", "success", "skipped")
+    done = verdict("success", "success", "skipped", env=env)
     assert done.returncode == 1, done.stderr
     assert done.stdout == (
         "::error::pgrx legs were skipped although majors were planned\n"
@@ -117,9 +118,9 @@ def test_planned_legs_that_were_skipped() -> None:
     )
 
 
-def test_a_failed_plan() -> None:
+def test_a_failed_plan(env: support.Env) -> None:
     """The plan's result is named."""
-    done = verdict("failure", "skipped", "skipped", majors="")
+    done = verdict("failure", "skipped", "skipped", majors="", env=env)
     assert done.returncode == 1, done.stderr
     assert done.stdout == (
         "::error::a job the gate needs did not succeed\n  job plan: failure\n"
@@ -129,9 +130,9 @@ def test_a_failed_plan() -> None:
     )
 
 
-def test_a_cancelled_gate() -> None:
+def test_a_cancelled_gate(env: support.Env) -> None:
     """The gate's result is named."""
-    done = verdict("success", "cancelled", "success")
+    done = verdict("success", "cancelled", "success", env=env)
     assert done.returncode == 1, done.stderr
     assert (
         done.stdout
@@ -139,24 +140,26 @@ def test_a_cancelled_gate() -> None:
     )
 
 
-def test_a_failed_leg() -> None:
+def test_a_failed_leg(env: support.Env) -> None:
     """A leg's failure is named."""
-    done = verdict("success", "success", "failure")
+    done = verdict("success", "success", "failure", env=env)
     assert done.returncode == 1, done.stderr
     assert done.stdout == (
         "::error::a job the gate needs did not succeed\n  job pgrx\\ legs: failure\n"
     )
 
 
-def test_sharded_tests_judged() -> None:
+def test_sharded_tests_judged(env: support.Env) -> None:
     """A split leg's coverage job passed: green (#2049, #2160)."""
-    done = verdict("success", "success", "success", coverage="success", split="true")
+    done = verdict(
+        "success", "success", "success", coverage="success", split="true", env=env
+    )
     assert done.returncode == 0, done.stderr
 
 
-def test_sharded_tests_never_judged() -> None:
+def test_sharded_tests_never_judged(env: support.Env) -> None:
     """A split leg whose coverage job was skipped is red, by name."""
-    done = verdict("success", "success", "success", split="true")
+    done = verdict("success", "success", "success", split="true", env=env)
     assert done.returncode == 1, done.stderr
     assert (
         done.stdout
@@ -164,9 +167,11 @@ def test_sharded_tests_never_judged() -> None:
     )
 
 
-def test_a_failed_coverage_job() -> None:
+def test_a_failed_coverage_job(env: support.Env) -> None:
     """The coverage job's failure is named."""
-    done = verdict("success", "success", "success", coverage="failure", split="true")
+    done = verdict(
+        "success", "success", "success", coverage="failure", split="true", env=env
+    )
     assert done.returncode == 1, done.stderr
     assert (
         done.stdout

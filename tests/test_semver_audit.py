@@ -105,14 +105,14 @@ MAJORS = [14, 15, 16, 17, 18]
 RED_MAJOR = 16
 
 
-def clean_env() -> dict[str, str]:
+def clean_env(*, env: support.Env) -> dict[str, str]:
     """Copy the environment without git's own variables.
 
     Returns:
         os.environ minus every GIT_* key.
 
     """
-    return support.env()
+    return env()
 
 
 def package(
@@ -177,8 +177,10 @@ def at(crate: str, major: int) -> str:
 class Planted:
     """A planted tree, stub PATH and belt; the rows are in the classes below."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, belt: support.Belt, env: support.Env) -> None:
         """Plant a tracked tree, a stub PATH and a belt with stub provisioning."""
+        self.plant_belt = belt
+        self.make_env = env
         self.tmp = tmp_path
         self.tree = self.tmp / "tree"
         self.tree.mkdir()
@@ -192,13 +194,13 @@ class Planted:
             stub = bins / name
             stub.write_text(body, encoding="utf-8")
             stub.chmod(0o755)
-        belt = support.belt(self.tmp / "belt", stubs={"pgrx-env.sh": PGRX_ENV_STUB})
+        belt = self.plant_belt(self.tmp / "belt", stubs={"pgrx-env.sh": PGRX_ENV_STUB})
         self.index = self.tmp / "index"
         self.index.mkdir()
         self.log = self.tmp / "log"
         self.log.touch()
         self.metadata = self.tmp / "metadata.json"
-        self.env = clean_env() | {
+        self.env = clean_env(env=self.make_env) | {
             "PATH": f"{bins}{os.pathsep}{os.environ['PATH']}",
             "ORG_BELT_DIR": str(belt),
             "PLANT_LOG": str(self.log),
@@ -209,7 +211,9 @@ class Planted:
 
     def git(self, *args: str) -> None:
         """Run git in the planted tree, scrubbed of the caller's git state."""
-        subprocess.run([GIT, *args], cwd=self.tree, env=clean_env(), check=True)
+        subprocess.run(
+            [GIT, *args], cwd=self.tree, env=clean_env(env=self.make_env), check=True
+        )
 
     def plant(
         self, *packages: dict[str, object], index: dict[str, str] | None = None
@@ -249,9 +253,9 @@ class Planted:
 
 
 @fixture
-def planted(tmp_path: Path) -> Planted:
+def planted(tmp_path: Path, belt: support.Belt, env: support.Env) -> Planted:
     """Give each row its own Planted."""
-    return Planted(tmp_path)
+    return Planted(tmp_path, belt=belt, env=env)
 
 
 def semver_calls(log: list[str]) -> list[str]:

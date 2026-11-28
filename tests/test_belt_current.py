@@ -71,8 +71,9 @@ def plant_canon(tree: Path, version: str) -> Path:
 class TheMiseIsCurrent:
     """Each row: this machine's mise version, and the verdict."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Plant a canon tree pinning CI's mise and an empty repository."""
+        self.make_env = env
         self.tmp = tmp_path
         self.home = self.tmp / "home"
         self.home.mkdir()
@@ -88,7 +89,7 @@ class TheMiseIsCurrent:
             The environment, with its own HOME.
 
         """
-        return support.env(self.home, **extra)
+        return self.make_env(self.home, **extra)
 
     def check(self, version: str) -> subprocess.CompletedProcess[str]:
         """Run the shipped script with a stub mise answering `version`.
@@ -113,9 +114,9 @@ class TheMiseIsCurrent:
 
 
 @fixture
-def the_mise_is_current(tmp_path: Path) -> TheMiseIsCurrent:
+def the_mise_is_current(tmp_path: Path, env: support.Env) -> TheMiseIsCurrent:
     """Give each row its own TheMiseIsCurrent."""
-    return TheMiseIsCurrent(tmp_path)
+    return TheMiseIsCurrent(tmp_path, env=env)
 
 
 def test_the_same_mise_is_one_line(the_mise_is_current: TheMiseIsCurrent) -> None:

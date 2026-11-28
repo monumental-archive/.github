@@ -187,8 +187,11 @@ def logged(*lines: str) -> str:
 class Stubbed:
     """A stub gh, a stub forge for logs, the run's job list, the report run."""
 
-    def __init__(self, tmp_path: Path, request: pytest.FixtureRequest) -> None:
+    def __init__(
+        self, tmp_path: Path, request: pytest.FixtureRequest, *, env: support.Env
+    ) -> None:
         """Lay out a stub gh and a run with one red job."""
+        self.make_env = env
         self.dir = Path(str(tmp_path))
         bin_dir = self.dir / "bin"
         bin_dir.mkdir()
@@ -209,7 +212,7 @@ class Stubbed:
         request.addfinalizer(server.server_close)
         request.addfinalizer(server.shutdown)
         self.calls = self.dir / "calls.jsonl"
-        self.env = support.env(
+        self.env = self.make_env(
             PATH=f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
             GITHUB_REPOSITORY=REPO,
             GITHUB_SERVER_URL="https://github.com",
@@ -294,9 +297,11 @@ class Stubbed:
 
 
 @fixture
-def stubbed(tmp_path: Path, request: pytest.FixtureRequest) -> Stubbed:
+def stubbed(
+    tmp_path: Path, request: pytest.FixtureRequest, env: support.Env
+) -> Stubbed:
     """Give each row its own Stubbed."""
-    return Stubbed(tmp_path, request)
+    return Stubbed(tmp_path, request, env=env)
 
 
 def body_of(call: list[str]) -> str:
@@ -527,9 +532,9 @@ class PerJob(Stubbed):
 
 
 @fixture
-def per_job(tmp_path: Path, request: pytest.FixtureRequest) -> PerJob:
+def per_job(tmp_path: Path, request: pytest.FixtureRequest, env: support.Env) -> PerJob:
     """Give each row its own PerJob."""
-    return PerJob(tmp_path, request)
+    return PerJob(tmp_path, request, env=env)
 
 
 def test_two_red_jobs_open_two_issues(

@@ -73,9 +73,9 @@ def consumer_config(
     )
 
 
-def plant_canon(tree: Path, *also: str) -> None:
+def plant_canon(tree: Path, *also: str, canon: support.Canon) -> None:
     """Plant the canon in `tree`: its hook config, and what `also` names."""
-    support.canon(tree, "lefthook/org-hooks.yml", *also)
+    canon(tree, "lefthook/org-hooks.yml", *also)
 
 
 def write(cwd: Path, name: str) -> None:
@@ -86,8 +86,12 @@ def write(cwd: Path, name: str) -> None:
 class PrePushGate:
     """Every push runs the gate exactly once; none is skipped."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(
+        self, tmp_path: Path, *, canon: support.Canon, env: support.Env
+    ) -> None:
         """Build the canon remote, a seeded consumer remote and a clone."""
+        self.plant_canon = canon
+        self.make_env = env
         if LEFTHOOK is None or GIT is None:
             pytest.skip("lefthook (or git) not on PATH")
         self.root = Path(str(tmp_path)).resolve()
@@ -98,7 +102,7 @@ class PrePushGate:
         (stubs / "mise").write_text(STUB_MISE, encoding="utf-8")
         (stubs / "mise").chmod(0o755)
 
-        env = support.env()
+        env = self.make_env()
         tools = [
             str(stubs),
             str(Path(support.tool("lefthook")).parent),
@@ -122,7 +126,7 @@ class PrePushGate:
         work = self.root / "canon-work"
         self.git(self.root, "init", "-q", "--bare", "-b", "main", str(self.canon))
         self.git(self.root, "init", "-q", "-b", "main", str(work))
-        plant_canon(work)
+        plant_canon(work, canon=self.plant_canon)
         self.commit(work, "canon")
         self.git(work, "tag", "v1")
         self.commit(work, "the next canon release")
@@ -218,9 +222,11 @@ class PrePushGate:
 
 
 @fixture
-def pre_push_gate(tmp_path: Path) -> PrePushGate:
+def pre_push_gate(
+    tmp_path: Path, canon: support.Canon, env: support.Env
+) -> PrePushGate:
     """Give each row its own PrePushGate."""
-    return PrePushGate(tmp_path)
+    return PrePushGate(tmp_path, canon=canon, env=env)
 
 
 def test_a_new_branch_that_adds_a_file_is_gated(pre_push_gate: PrePushGate) -> None:
@@ -295,11 +301,13 @@ def test_another_source_dir_still_gets_the_gate(pre_push_gate: PrePushGate) -> N
     pre_push_gate.assert_gated(pre_push_gate.push(clone, "origin", "elsewhere-dir"))
 
 
-def test_the_canon_tree_gates_once(pre_push_gate: PrePushGate) -> None:
+def test_the_canon_tree_gates_once(
+    pre_push_gate: PrePushGate, canon: support.Canon
+) -> None:
     """The canon consumes its own hooks and runs the gate once."""
     clone = pre_push_gate.consumer()
     pre_push_gate.git(clone, "switch", "-q", "-c", "canon")
-    plant_canon(clone, "security/identity.toml")
+    plant_canon(clone, "security/identity.toml", canon=canon)
     pre_push_gate.commit(clone, "be the canon")
     pre_push_gate.assert_gated(pre_push_gate.push(clone, "origin", "canon"))
 

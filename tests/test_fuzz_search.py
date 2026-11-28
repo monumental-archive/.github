@@ -276,8 +276,9 @@ NO_CALLS: list[str] = []
 class SearchCase:
     """A planted repository, the stand-in tools and a stage, per row."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Plant an empty repository and the stubs beside it."""
+        self.make_env = env
         self.tmp = tmp_path
         self.tree = self.tmp / "tree"
         self.tree.mkdir()
@@ -299,7 +300,7 @@ class SearchCase:
             where.mkdir(parents=True, exist_ok=True)
             (where / name).write_text(text, encoding="utf-8")
             (where / name).chmod(0o755)
-        env = support.env()
+        env = self.make_env()
         self.env = env | {
             "ORG_BELT_DIR": str(BELT),
             "ORG_PYTHON": sys.executable,
@@ -446,9 +447,9 @@ class SearchCase:
 
 
 @fixture
-def search_case(tmp_path: Path) -> SearchCase:
+def search_case(tmp_path: Path, env: support.Env) -> SearchCase:
     """Give each row its own SearchCase."""
-    return SearchCase(tmp_path)
+    return SearchCase(tmp_path, env=env)
 
 
 def test_only_the_find_that_raises_the_figure_is_staged(
@@ -739,9 +740,9 @@ class QuietSteps(SearchCase):
 
 
 @fixture
-def quiet_steps(tmp_path: Path) -> QuietSteps:
+def quiet_steps(tmp_path: Path, env: support.Env) -> QuietSteps:
     """Give each row its own QuietSteps."""
-    return QuietSteps(tmp_path)
+    return QuietSteps(tmp_path, env=env)
 
 
 def test_a_rust_merge_that_succeeds_prints_nothing(quiet_steps: QuietSteps) -> None:
@@ -849,7 +850,9 @@ def test_a_log_with_no_crash_line_quotes_nothing(failure_lines: FailureLines) ->
     assert failure_lines.lines("go", "fuzz: elapsed: 3s\nok\n") == ""
 
 
-def test_a_crash_with_no_crash_line_says_so(failure_lines: FailureLines) -> None:
+def test_a_crash_with_no_crash_line_says_so(
+    failure_lines: FailureLines, env: support.Env
+) -> None:
     """The finding's detail names what the log lacked."""
     with tempfile.NamedTemporaryFile(
         "w", dir=failure_lines.tmp, encoding="utf-8", suffix=".log", delete=False
@@ -861,7 +864,7 @@ def test_a_crash_with_no_crash_line_says_so(failure_lines: FailureLines) -> None
         capture_output=True,
         text=True,
         check=True,
-        env=support.env() | {"ORG_FINDINGS": "", "MISE_TASK_NAME": "audit:fuzz"},
+        env=env() | {"ORG_FINDINGS": "", "MISE_TASK_NAME": "audit:fuzz"},
     ).stderr
     assert err == (
         "audit:fuzz: s: m\n  the run's log holds no line saying what crashed"
@@ -1100,8 +1103,9 @@ UPLOAD_SUMMARY = "Upload what the search says it kept"
 class Handover:
     """What a fuzz runner hands the propose job, and when (items 3, 4; #1899)."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Give the row's scratch directories one home, removed after it."""
+        self.make_env = env
         self.tmp = tmp_path
 
     def handover(self, files: dict[str, str]) -> tuple[str, str, str]:
@@ -1125,7 +1129,7 @@ class Handover:
         assert command.strip() == ".org-canon/release/propose-fuzz-corpus.sh handover"
         run = subprocess.run(
             [BASH, str(CANON / "release" / "propose-fuzz-corpus.sh"), "handover"],
-            env=support.env()
+            env=self.make_env()
             | {
                 "CANDIDATES": str(stage),
                 "SUMMARY": str(tmp / "summary.md"),
@@ -1144,9 +1148,9 @@ class Handover:
 
 
 @fixture
-def handover_state(tmp_path: Path) -> Handover:
+def handover_state(tmp_path: Path, env: support.Env) -> Handover:
     """Give each row its own Handover."""
-    return Handover(tmp_path)
+    return Handover(tmp_path, env=env)
 
 
 @pytest.mark.usefixtures("handover_state")

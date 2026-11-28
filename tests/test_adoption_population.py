@@ -80,7 +80,7 @@ def document(*members: object, schema: object = 9) -> dict[str, object]:
 
 
 def run_main(
-    doc: object, *argv: str, capfd: pytest.CaptureFixture[str]
+    doc: object, *argv: str, capfd: pytest.CaptureFixture[str], env: support.Env
 ) -> tuple[int, str, str]:
     """Run main() with `doc` on stdin.
 
@@ -89,7 +89,7 @@ def run_main(
 
     """
     with pytest.MonkeyPatch.context() as patched:
-        for name, value in (support.env(MISE_TASK_NAME=TASK)).items():
+        for name, value in (env(MISE_TASK_NAME=TASK)).items():
             patched.setenv(name, value)
         patched.setattr(
             sys, "stdin", io.StringIO(doc if isinstance(doc, str) else json.dumps(doc))
@@ -298,14 +298,16 @@ REFUSALS: tuple[tuple[str, object, str], ...] = (
 
 
 # The one mode, end to end, over the org's real shape.
-def test_obligations_over_the_document(capfd: pytest.CaptureFixture[str]) -> None:
+def test_obligations_over_the_document(
+    capfd: pytest.CaptureFixture[str], env: support.Env
+) -> None:
     """The private exclusion owes two artifacts and no written row."""
     doc = document(
         member("canon", tagged=True),
         member("signer", tracks=["source"]),
         member("app", tracks=[], visibility="private"),
     )
-    code, out, err = run_main(doc, capfd=capfd)
+    code, out, err = run_main(doc, capfd=capfd, env=env)
     assert (code, err) == (0, "")
     owed: dict[str, list[str]] = {}
     for line in out.splitlines():
@@ -330,19 +332,22 @@ def test_each_refusal_exits_two_and_names_its_field(
     doc: object,
     message: object,
     capfd: pytest.CaptureFixture[str],
+    env: support.Env,
 ) -> None:
     """A refused document exits 2, says so, and prints no obligation."""
-    code, out, err = run_main(doc, capfd=capfd)
+    code, out, err = run_main(doc, capfd=capfd, env=env)
     assert code == 2
     assert out == ""
     assert err.startswith(f"{TASK}: {message}"), err
 
 
 def test_arguments_other_than_the_canon_are_refused(
-    capfd: pytest.CaptureFixture[str],
+    capfd: pytest.CaptureFixture[str], env: support.Env
 ) -> None:
     """The roster is no input any more: a caller passing one is told."""
-    code, out, err = run_main(document(member()), "--roster", "x.json", capfd=capfd)
+    code, out, err = run_main(
+        document(member()), "--roster", "x.json", capfd=capfd, env=env
+    )
     assert (code, out) == (2, "")
     assert (
         f"{TASK}: takes the canon's repository name and nothing"
@@ -350,10 +355,12 @@ def test_arguments_other_than_the_canon_are_refused(
     ) == err
 
 
-def test_an_empty_canon_name_is_refused(capfd: pytest.CaptureFixture[str]) -> None:
+def test_an_empty_canon_name_is_refused(
+    capfd: pytest.CaptureFixture[str], env: support.Env
+) -> None:
     """An identity read that failed leaves an empty name: refused."""
     with pytest.MonkeyPatch.context() as patched:
-        for name, value in (support.env(MISE_TASK_NAME=TASK)).items():
+        for name, value in (env(MISE_TASK_NAME=TASK)).items():
             patched.setenv(name, value)
         status = ap.main([""])
     out, err = capfd.readouterr()

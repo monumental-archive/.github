@@ -154,14 +154,14 @@ FORM = (
 )
 
 
-def clean_env() -> dict[str, str]:
+def clean_env(*, env: support.Env) -> dict[str, str]:
     """Copy the environment without git's own variables.
 
     Returns:
         os.environ minus every GIT_* key.
 
     """
-    return support.env(MISE_TASK_NAME=TASK)
+    return env(MISE_TASK_NAME=TASK)
 
 
 def package(
@@ -223,8 +223,10 @@ def outcomes(
 class Planted:
     """A planted tree, a stub PATH and a belt with stub provisioning."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, belt: support.Belt, env: support.Env) -> None:
         """Plant a git tree, the stubs and the belt the leg reads."""
+        self.plant_belt = belt
+        self.make_env = env
         self.tmp = tmp_path
         self.tree = self.tmp / "tree"
         self.tree.mkdir()
@@ -237,7 +239,7 @@ class Planted:
             stub = bins / name
             stub.write_text(body, encoding="utf-8")
             stub.chmod(0o755)
-        belt = support.belt(self.tmp / "belt", stubs={"pgrx-env.sh": PGRX_ENV_STUB})
+        belt = self.plant_belt(self.tmp / "belt", stubs={"pgrx-env.sh": PGRX_ENV_STUB})
         self.log = self.tmp / "log"
         self.log.touch()
         self.files = {
@@ -251,7 +253,7 @@ class Planted:
                 "shard",
             )
         }
-        self.env = clean_env() | {
+        self.env = clean_env(env=self.make_env) | {
             "PATH": f"{bins}{os.pathsep}{os.environ['PATH']}",
             "ORG_BELT_DIR": str(belt),
             "PLANT_LOG": str(self.log),
@@ -266,7 +268,9 @@ class Planted:
 
     def git(self, *args: str) -> None:
         """Run git in the planted tree, scrubbed of the caller's git state."""
-        subprocess.run([GIT, *args], cwd=self.tree, env=clean_env(), check=True)
+        subprocess.run(
+            [GIT, *args], cwd=self.tree, env=clean_env(env=self.make_env), check=True
+        )
 
     def track(self, path: str, text: str) -> None:
         """Write a file into the planted tree and track it."""
@@ -325,9 +329,9 @@ class Planted:
 
 
 @fixture
-def planted(tmp_path: Path) -> Planted:
+def planted(tmp_path: Path, belt: support.Belt, env: support.Env) -> Planted:
     """Give each row its own Planted."""
-    return Planted(tmp_path)
+    return Planted(tmp_path, belt=belt, env=env)
 
 
 def calls(log: list[str]) -> list[str]:
@@ -820,9 +824,9 @@ class Shards(Planted):
 
 
 @fixture
-def shards(tmp_path: Path) -> Shards:
+def shards(tmp_path: Path, belt: support.Belt, env: support.Env) -> Shards:
     """Give each row its own Shards."""
-    return Shards(tmp_path)
+    return Shards(tmp_path, belt=belt, env=env)
 
 
 def test_shard_runs_its_round_robin_share_and_reports_its_counts(

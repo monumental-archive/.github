@@ -38,7 +38,9 @@ HERE = support.MISE
 GIT = support.tool("git")
 
 
-def run(files: dict[str, str], argv: list[str] | None = None) -> tuple[int, str, str]:
+def run(
+    files: dict[str, str], argv: list[str] | None = None, *, env: support.Env
+) -> tuple[int, str, str]:
     """Plant files and run the reader's main in that directory.
 
     Returns:
@@ -50,9 +52,9 @@ def run(files: dict[str, str], argv: list[str] | None = None) -> tuple[int, str,
         for name, text in files.items():
             (root / name).write_text(text, encoding="utf-8")
         # The reader asks git whether `.badge-states` is tracked (#2013).
-        env = support.env(root / ".home")
+        environ = env(root / ".home")
         for step in (["init", "-q"], ["add", "-A"]):
-            subprocess.run([GIT, *step], cwd=root, env=env, check=True)
+            subprocess.run([GIT, *step], cwd=root, env=environ, check=True)
         out, err = io.StringIO(), io.StringIO()
         with (
             contextlib.chdir(root),
@@ -64,16 +66,16 @@ def run(files: dict[str, str], argv: list[str] | None = None) -> tuple[int, str,
 
 
 # The reader's own branches.
-def test_one_expression_is_printed() -> None:
+def test_one_expression_is_printed(env: support.Env) -> None:
     """No declaration needed where the tree says one thing."""
     reuse = '[[annotations]]\nSPDX-License-Identifier = "0BSD"\n'
-    assert run({"REUSE.toml": reuse}) == (0, "0BSD\n", "")
+    assert run({"REUSE.toml": reuse}, env=env) == (0, "0BSD\n", "")
 
 
-def test_a_list_value_is_read_whole() -> None:
+def test_a_list_value_is_read_whole(env: support.Env) -> None:
     """SPDX-License-Identifier may be a list; each entry counts."""
     reuse = '[[annotations]]\nSPDX-License-Identifier = ["0BSD", "MIT"]\n'
-    status, out, err = run({"REUSE.toml": reuse})
+    status, out, err = run({"REUSE.toml": reuse}, env=env)
     assert (status, out) == (1, "")
     assert err == (
         "fix:test: REUSE.toml names several licence expressions:\n"
@@ -81,9 +83,9 @@ def test_a_list_value_is_read_whole() -> None:
     )
 
 
-def test_no_expression_prints_nothing() -> None:
+def test_no_expression_prints_nothing(env: support.Env) -> None:
     """The caller words its own refusal; the reader stays silent."""
-    assert run({"REUSE.toml": "version = 1\n"}) == (0, "", "")
+    assert run({"REUSE.toml": "version = 1\n"}, env=env) == (0, "", "")
 
 
 def test_comments_and_other_keys_are_not_the_licence_line() -> None:
@@ -93,9 +95,9 @@ def test_comments_and_other_keys_are_not_the_licence_line() -> None:
     assert pl.declared("reuse registered\n") == ""
 
 
-def test_an_unparsable_file_is_red_by_name() -> None:
+def test_an_unparsable_file_is_red_by_name(env: support.Env) -> None:
     """A REUSE.toml that is not TOML is named, never read as empty."""
-    status, out, err = run({"REUSE.toml": "[[annotations]\n"})
+    status, out, err = run({"REUSE.toml": "[[annotations]\n"}, env=env)
     assert (status, out) == (1, "")
     assert err.startswith("fix:test: REUSE.toml does not parse: "), err
 
@@ -114,14 +116,16 @@ def test_an_unparsable_file_is_red_by_name() -> None:
         ),
     ],
 )
-def test_a_wrong_shape_is_red_by_where(reuse: object, where: object) -> None:
+def test_a_wrong_shape_is_red_by_where(
+    reuse: object, where: object, env: support.Env
+) -> None:
     """An annotation of the wrong shape is refused, naming where."""
-    status, out, err = run({"REUSE.toml": reuse})
+    status, out, err = run({"REUSE.toml": reuse}, env=env)
     assert (1, "", f"fix:test: REUSE.toml: {where}\n") == (status, out, err)
 
 
-def test_usage() -> None:
+def test_usage(env: support.Env) -> None:
     """No caller is a usage error, not a pass."""
-    status, out, err = run({}, [])
+    status, out, err = run({}, [], env=env)
     usage = f"{TASK}: usage: belt project-licence <caller>\n"
     assert (2, "", usage) == (status, out, err)

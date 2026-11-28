@@ -212,8 +212,11 @@ def refused(file: Path, stderr: str) -> None:
 class Stubbed:
     """A stub pinact on PATH, its log, the findings file."""
 
-    def __init__(self, tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:
+    def __init__(
+        self, tmp_path: Path, capfd: pytest.CaptureFixture[str], *, env: support.Env
+    ) -> None:
         """Lay out the stub, its log, and the findings file."""
+        self.make_env = env
         self.capfd = capfd
         self.dir = tmp_path
         self.bin = self.dir / "bin"
@@ -257,7 +260,7 @@ class Stubbed:
 
         """
         self.doc.write_text(document, encoding="utf-8")
-        return support.env(
+        return self.make_env(
             PATH=path or f"{self.bin}{os.pathsep}{os.environ['PATH']}",
             ORG_FINDINGS=str(self.file),
             MISE_TASK_NAME=TASK,
@@ -269,9 +272,11 @@ class Stubbed:
 
 
 @fixture
-def stubbed(tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> Stubbed:
+def stubbed(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str], env: support.Env
+) -> Stubbed:
     """Give each row its own Stubbed."""
-    return Stubbed(tmp_path, capfd)
+    return Stubbed(tmp_path, capfd, env=env)
 
 
 class Adapter(Stubbed):
@@ -292,9 +297,11 @@ class Adapter(Stubbed):
 
 
 @fixture
-def adapter(tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> Adapter:
+def adapter(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str], env: support.Env
+) -> Adapter:
     """Give each row its own Adapter."""
-    return Adapter(tmp_path, capfd)
+    return Adapter(tmp_path, capfd, env=env)
 
 
 def test_the_quoted_report_is_two_records(adapter: Adapter) -> None:
@@ -419,7 +426,9 @@ def test_no_pinact_is_refused_by_name(adapter: Adapter) -> None:
     refused(adapter.file, done.stderr)
 
 
-def test_the_pinned_pinact_offline_gives_two_messages(adapter: Adapter) -> None:
+def test_the_pinned_pinact_offline_gives_two_messages(
+    adapter: Adapter, env: support.Env
+) -> None:
     """Two unpinned actions in one file, judged by pinact with `--no-api`.
 
     One rule, one text, one file: two records with two messages.
@@ -434,9 +443,7 @@ def test_the_pinned_pinact_offline_gives_two_messages(adapter: Adapter) -> None:
     )
     done = adapter.adapt(
         ["--fix=false", "--no-api", WORKFLOW],
-        support.env(
-            ORG_FINDINGS=str(adapter.file), MISE_TASK_NAME=TASK, PYTHONUTF8="1"
-        ),
+        env(ORG_FINDINGS=str(adapter.file), MISE_TASK_NAME=TASK, PYTHONUTF8="1"),
     )
     assert done.returncode != 0, done.stderr
     cannot = "failed to handle a line: action can't be pinned"
@@ -473,8 +480,8 @@ class Task(Stubbed):
         (root / ".github" / "workflows").mkdir(parents=True)
         (root / WORKFLOW).write_text(SOURCE, encoding="utf-8")
         git = [GIT, "-C", str(root)]
-        subprocess.run([*git, "init", "-q"], env=support.env(), check=True)
-        subprocess.run([*git, "add", "-A"], env=support.env(), check=True)
+        subprocess.run([*git, "init", "-q"], env=self.make_env(), check=True)
+        subprocess.run([*git, "add", "-A"], env=self.make_env(), check=True)
         config = decoded.load_toml((HERE / "config.toml").read_bytes())
         tasks = decoded.as_object(config["tasks"], "tasks")
         body = decoded.as_str(decoded.as_object(tasks[TASK], TASK)["run"], "run")
@@ -493,9 +500,9 @@ class Task(Stubbed):
 
 
 @fixture
-def task(tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> Task:
+def task(tmp_path: Path, capfd: pytest.CaptureFixture[str], env: support.Env) -> Task:
     """Give each row its own Task."""
-    return Task(tmp_path, capfd)
+    return Task(tmp_path, capfd, env=env)
 
 
 def test_the_quoted_report_is_the_records_and_pinact_s_red(task: Task) -> None:

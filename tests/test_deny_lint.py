@@ -165,14 +165,18 @@ def top_only() -> list[str]:
 class Planted:
     """A two-root tree, the stubs and the tools, per row."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(
+        self, tmp_path: Path, *, canon: support.Canon, env: support.Env
+    ) -> None:
         """Plant the stubs and the tools; the tree is planted per row."""
+        self.plant_canon = canon
+        self.make_env = env
         self.tmp = tmp_path
         self.root = self.tmp / "tree"
         self.root.mkdir()
         # The canon the tasks read: the belt package the launcher runs,
         # and an empty security/vex/ of the row's own.
-        self.canon = support.canon(self.tmp / "canon")
+        self.canon = self.plant_canon(self.tmp / "canon")
         (self.canon / "security" / "vex").mkdir(parents=True)
         self.bin = self.tmp / "bin"
         self.bin.mkdir()
@@ -187,7 +191,7 @@ class Planted:
 
     def plant(self, files: dict[str, str]) -> None:
         """Track `files` in the planted checkout."""
-        env = support.env()
+        env = self.make_env()
         for name, text in files.items():
             (self.root / name).parent.mkdir(parents=True, exist_ok=True)
             (self.root / name).write_text(text, encoding="utf-8")
@@ -204,7 +208,7 @@ class Planted:
 
         """
         self.plant(files)
-        env = support.env(
+        env = self.make_env(
             PATH=str(self.bin),
             PLANT_LOG=str(self.log),
             PLANT_REPORT=REPORT,
@@ -234,9 +238,9 @@ class Planted:
 
 
 @fixture
-def planted(tmp_path: Path) -> Planted:
+def planted(tmp_path: Path, canon: support.Canon, env: support.Env) -> Planted:
     """Give each row its own Planted."""
-    return Planted(tmp_path)
+    return Planted(tmp_path, canon=canon, env=env)
 
 
 def test_both_roots_are_checked_each_with_its_own_policy(planted: Planted) -> None:

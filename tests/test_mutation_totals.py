@@ -26,8 +26,9 @@ LABEL = "audit:mutants: rust"
 class Totals:
     """Plant per-shard summaries and total them."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Make an empty download directory."""
+        self.make_env = env
         self.dir = tmp_path
 
     def shard(self, k: int, row: str, lang: str = "rust") -> None:
@@ -46,7 +47,7 @@ class Totals:
         return subprocess.run(
             [BASH, str(SCRIPT), str(self.dir), lang],
             cwd=self.dir.parent,
-            env=support.env(),
+            env=self.make_env(),
             capture_output=True,
             text=True,
             check=False,
@@ -54,9 +55,9 @@ class Totals:
 
 
 @fixture
-def totals(tmp_path: Path) -> Totals:
+def totals(tmp_path: Path, env: support.Env) -> Totals:
     """Give each row its own Totals."""
-    return Totals(tmp_path)
+    return Totals(tmp_path, env=env)
 
 
 def test_four_clean_shards_one_empty(totals: Totals) -> None:
@@ -216,12 +217,12 @@ def test_only_the_named_language_is_totalled(totals: Totals) -> None:
     assert other.stdout.splitlines() == want
 
 
-def test_language_is_required(totals: Totals) -> None:
+def test_language_is_required(totals: Totals, env: support.Env) -> None:
     """No language named: refused, never a total of everything."""
     done = subprocess.run(
         [BASH, str(SCRIPT), str(totals.dir)],
         cwd=totals.dir.parent,
-        env=support.env(),
+        env=env(),
         capture_output=True,
         text=True,
         check=False,

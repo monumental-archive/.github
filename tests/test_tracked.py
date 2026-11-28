@@ -64,7 +64,7 @@ LOCATING_CARGO = (
 
 
 def read_into(
-    shell: str, cwd: Path, pathspecs: str, tmpdir: Path
+    shell: str, cwd: Path, pathspecs: str, tmpdir: Path, *, env: support.Env
 ) -> subprocess.CompletedProcess[bytes]:
     """Run `org_tracked_read` in `cwd` and print what it filled, NUL-separated.
 
@@ -82,7 +82,7 @@ def read_into(
     return subprocess.run(
         [shell, "--norc", "-euo", "pipefail", "-c", script],
         cwd=cwd,
-        env=support.env(cwd.parent / "home", TMPDIR=str(tmpdir))
+        env=env(cwd.parent / "home", TMPDIR=str(tmpdir))
         | {"BASH_ENV": str(BELT / "findings.sh")},
         capture_output=True,
         check=False,
@@ -102,15 +102,17 @@ def body(task: str) -> str:
     return decoded.as_str(entry["run"], f"{task}'s run")
 
 
-def plant(tree: Path, files: dict[str, str], untracked: dict[str, str]) -> None:
+def plant(
+    tree: Path, files: dict[str, str], untracked: dict[str, str], *, env: support.Env
+) -> None:
     """Make `tree` a repository tracking `files`, with `untracked` beside them."""
-    env = support.env(tree.parent / "home")
+    environ = env(tree.parent / "home")
     for name, text in {**files, **untracked}.items():
         path = tree / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
-    subprocess.run([GIT, "init", "-q"], cwd=tree, env=env, check=True)
-    subprocess.run([GIT, "add", "--", *files], cwd=tree, env=env, check=True)
+    subprocess.run([GIT, "init", "-q"], cwd=tree, env=environ, check=True)
+    subprocess.run([GIT, "add", "--", *files], cwd=tree, env=environ, check=True)
 
 
 def run_task(
@@ -120,6 +122,7 @@ def run_task(
     *,
     shell: str = BASH,
     stubs: dict[str, str] | None = None,
+    env: support.Env,
 ) -> subprocess.CompletedProcess[str]:
     """Plant a repository and run one task's body in it.
 
@@ -135,8 +138,8 @@ def run_task(
     with tempfile.TemporaryDirectory() as tmp:
         tree = Path(tmp) / "repo"
         tree.mkdir()
-        plant(tree, files, untracked or {})
-        env = support.env(Path(tmp) / "home", ORG_BELT_DIR=str(BELT))
+        plant(tree, files, untracked or {}, env=env)
+        environ = env(Path(tmp) / "home", ORG_BELT_DIR=str(BELT))
         commands = dict(stubs or {})
         if commands:
             where = Path(tmp) / "stubs"
@@ -144,12 +147,12 @@ def run_task(
             for name, text in commands.items():
                 (where / name).write_text(text, encoding="utf-8")
                 (where / name).chmod(0o755)
-            env["PATH"] = f"{where}:{env.get('PATH', '')}"
+            environ["PATH"] = f"{where}:{environ.get('PATH', '')}"
         as_mise = support.task_run(task, body(task))
         return subprocess.run(
             [shell, *as_mise.argv[1:]],
             cwd=tree,
-            env=env | as_mise.env,
+            env=environ | as_mise.env,
             capture_output=True,
             text=True,
             check=False,
@@ -159,8 +162,9 @@ def run_task(
 class Producers:
     """org_tracked and tracked.tracked list exactly what git tracks."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Give the row's scratch directories one home, removed after it."""
+        self.make_env = env
         self.tmp = tmp_path
 
     def planted(self) -> Path:
@@ -173,23 +177,25 @@ class Producers:
         scratch = tempfile.mkdtemp(dir=self.tmp)
         tree = Path(scratch) / "repo"
         tree.mkdir()
-        plant(tree, dict.fromkeys(NAMES, "x\n"), {UNTRACKED: "x\n"})
+        plant(tree, dict.fromkeys(NAMES, "x\n"), {UNTRACKED: "x\n"}, env=self.make_env)
         return tree
 
 
 @fixture
-def producers(tmp_path: Path) -> Producers:
+def producers(tmp_path: Path, env: support.Env) -> Producers:
     """Give each row its own Producers."""
-    return Producers(tmp_path)
+    return Producers(tmp_path, env=env)
 
 
-def test_org_tracked_prints_the_three_names_unquoted(producers: Producers) -> None:
+def test_org_tracked_prints_the_three_names_unquoted(
+    producers: Producers, env: support.Env
+) -> None:
     """NUL-separated, a space and a non-ASCII letter kept as on disk."""
     tree = producers.planted()
     done = subprocess.run(
         [BASH, "--norc", "-euo", "pipefail", "-c", "org_tracked"],
         cwd=tree,
-        env=support.env(tree.parent / "home") | {"BASH_ENV": str(BELT / "findings.sh")},
+        env=env(tree.parent / "home") | {"BASH_ENV": str(BELT / "findings.sh")},
         capture_output=True,
         check=False,
     )
@@ -202,12 +208,12 @@ def test_org_tracked_prints_the_three_names_unquoted(producers: Producers) -> No
 
 @pytest.mark.parametrize("shell", SHELLS)
 def test_org_tracked_read_fills_the_array_with_the_three_names(
-    producers: Producers, shell: object
+    producers: Producers, shell: object, env: support.Env
 ) -> None:
     """One element per name, unquoted; no empty last element; no file left."""
     tree = producers.planted()
     with tempfile.TemporaryDirectory() as tmp:
-        done = read_into(shell, tree, "", Path(tmp))
+        done = read_into(shell, tree, "", Path(tmp), env=env)
         left: list[Path] = list(Path(tmp).iterdir())
     assert (done.returncode, done.stderr) == (0, b"")
     got: list[str] = sorted(n.decode() for n in done.stdout.split(b"\0")[:-1])
@@ -217,19 +223,19 @@ def test_org_tracked_read_fills_the_array_with_the_three_names(
 
 @pytest.mark.parametrize("shell", SHELLS)
 def test_org_tracked_read_of_nothing_is_an_empty_array(
-    producers: Producers, shell: object
+    producers: Producers, shell: object, env: support.Env
 ) -> None:
     """A pathspec matching nothing: exit 0 and no element at all."""
     tree = producers.planted()
     with tempfile.TemporaryDirectory() as tmp:
-        done = read_into(shell, tree, "'*.zz'", Path(tmp))
+        done = read_into(shell, tree, "'*.zz'", Path(tmp), env=env)
     assert (done.returncode, done.stdout, done.stderr) == (0, b"", b"")
 
 
 @pytest.mark.usefixtures("producers")
 @pytest.mark.parametrize("shell", SHELLS)
 def test_org_tracked_read_fails_when_git_fails_and_leaves_no_file(
-    shell: object,
+    shell: object, env: support.Env
 ) -> None:
     """Outside a repository: git's error, exit 1 under errexit, no file."""
     with tempfile.TemporaryDirectory() as tmp:
@@ -237,7 +243,7 @@ def test_org_tracked_read_fails_when_git_fails_and_leaves_no_file(
         outside.mkdir()
         scratch = Path(tmp) / "tmp"
         scratch.mkdir()
-        done = read_into(shell, outside, "", scratch)
+        done = read_into(shell, outside, "", scratch, env=env)
         left: list[Path] = list(scratch.iterdir())
     assert done.returncode == 1
     assert done.stdout == b""
@@ -252,7 +258,9 @@ def test_tracked_lists_the_three_names_from_a_root(producers: Producers) -> None
     assert got == WANT
 
 
-def test_tracked_lists_the_working_directory_by_pathspec(producers: Producers) -> None:
+def test_tracked_lists_the_working_directory_by_pathspec(
+    producers: Producers, env: support.Env
+) -> None:
     """No root: the working directory's tree; a pathspec narrows it.
 
     The call inherits the environment, so it gets the fixture's: the
@@ -265,7 +273,7 @@ def test_tracked_lists_the_working_directory_by_pathspec(producers: Producers) -
     """
     tree = producers.planted()
     # Built before the old environment is cleared: it reads from it.
-    planted = support.env(tree.parent / "home")
+    planted = env(tree.parent / "home")
     with pytest.MonkeyPatch.context() as patched:
         patched.chdir(tree)
         for name in list(os.environ):
@@ -300,33 +308,34 @@ def test_split_decodes_each_entry_as_a_file_name() -> None:
 
 
 # lint:typos reads the tracked list, never the directory.
-def test_a_misspelling_in_untracked_tool_output_is_not_read() -> None:
+def test_a_misspelling_in_untracked_tool_output_is_not_read(env: support.Env) -> None:
     """mutants.out/log.txt is untracked: green, and typos never names it."""
     done = run_task(
         "lint:typos",
         dict.fromkeys(NAMES, CLEAN_MARKDOWN),
         {UNTRACKED: f"rustc: {TYPO} value\n"},
+        env=env,
     )
     assert done.returncode == 0, done.stdout + done.stderr
     assert "mutants.out" not in done.stdout + done.stderr
     assert TYPO_MESSAGE not in done.stdout
 
 
-def test_a_misspelling_in_a_spaced_name_is_red_by_name() -> None:
+def test_a_misspelling_in_a_spaced_name_is_red_by_name(env: support.Env) -> None:
     """`a b.md` is one file to typos, named whole in the finding."""
     files = dict.fromkeys(NAMES, CLEAN_MARKDOWN)
     files[SPACED] = f"# Title\n\nSome {TYPO} text.\n"
-    done = run_task("lint:typos", files)
+    done = run_task("lint:typos", files, env=env)
     assert done.returncode != 0
     assert TYPO_MESSAGE in done.stdout
     assert f"╭▸ {SPACED}:3:6" in done.stdout
 
 
-def test_a_misspelt_file_name_is_red() -> None:
+def test_a_misspelt_file_name_is_red(env: support.Env) -> None:
     """A named file's NAME is still checked."""
     files = dict.fromkeys(NAMES, CLEAN_MARKDOWN)
     files[f"{TYPO}.md"] = CLEAN_MARKDOWN
-    done = run_task("lint:typos", files)
+    done = run_task("lint:typos", files, env=env)
     assert done.returncode != 0
     assert TYPO_MESSAGE in done.stdout
     assert f"{TYPO}.md" in done.stdout
@@ -334,18 +343,20 @@ def test_a_misspelt_file_name_is_red() -> None:
 
 # lint:markdown hands rumdl one argument per tracked name.
 @pytest.mark.parametrize("shell", SHELLS)
-def test_spaced_and_accented_names_pass_clean(shell: object) -> None:
+def test_spaced_and_accented_names_pass_clean(shell: object, env: support.Env) -> None:
     """Red at 1c4fbe22 with `File not found: a`; green now, both shells."""
-    done = run_task("lint:markdown", dict.fromkeys(NAMES, CLEAN_MARKDOWN), shell=shell)
+    done = run_task(
+        "lint:markdown", dict.fromkeys(NAMES, CLEAN_MARKDOWN), shell=shell, env=env
+    )
     assert done.returncode == 0, done.stdout + done.stderr
     assert "Success: No issues found in 3 files" in done.stdout
 
 
-def test_a_violation_in_the_accented_name_is_red_by_name() -> None:
+def test_a_violation_in_the_accented_name_is_red_by_name(env: support.Env) -> None:
     """The finding names `é.md` as written, never git's octal escapes."""
     files = dict.fromkeys(NAMES, CLEAN_MARKDOWN)
     files[ACCENTED] = "# Title\n\nSome text. \n"
-    done = run_task("lint:markdown", files)
+    done = run_task("lint:markdown", files, env=env)
     assert done.returncode == 1, done.stdout + done.stderr
     assert f"{ACCENTED}:3:11: [MD009] Trailing space found" in done.stdout
     assert (
@@ -356,13 +367,14 @@ def test_a_violation_in_the_accented_name_is_red_by_name() -> None:
 
 # A listing that fails is red, never "no files, skipped".
 @pytest.mark.parametrize("shell", SHELLS)
-def test_a_listing_task_fails_when_git_fails(shell: object) -> None:
+def test_a_listing_task_fails_when_git_fails(shell: object, env: support.Env) -> None:
     """lint:markdown, with git exiting 128: nonzero, git's words, no skip."""
     done = run_task(
         "lint:markdown",
         dict.fromkeys(NAMES, CLEAN_MARKDOWN),
         stubs=FAILING_STUBS,
         shell=shell,
+        env=env,
     )
     assert done.returncode != 0
     assert "git: planted failure" in done.stderr
@@ -374,18 +386,18 @@ CLEAN = '#!/usr/bin/env bash\necho "ok"\n'
 SCRIPTS = ("a b.sh", "é.sh")
 
 
-def test_spaced_and_accented_scripts_pass_clean() -> None:
+def test_spaced_and_accented_scripts_pass_clean(env: support.Env) -> None:
     """Both found, both linted, the count says two."""
-    done = run_task("lint:shell", dict.fromkeys(SCRIPTS, CLEAN))
+    done = run_task("lint:shell", dict.fromkeys(SCRIPTS, CLEAN), env=env)
     assert done.returncode == 0, done.stdout + done.stderr
     assert "lint:shell: 2 script(s) formatted and linted" in done.stdout
 
 
-def test_a_finding_in_the_accented_script_is_red_by_name() -> None:
+def test_a_finding_in_the_accented_script_is_red_by_name(env: support.Env) -> None:
     """An unbraced variable: shellcheck names `é.sh`."""
     files = dict.fromkeys(SCRIPTS, CLEAN)
     files["é.sh"] = '#!/usr/bin/env bash\nx=1\necho "$x"\n'
-    done = run_task("lint:shell", files)
+    done = run_task("lint:shell", files, env=env)
     assert done.returncode != 0
     assert "In é.sh line 3:" in done.stdout
     assert "SC2250" in done.stdout
@@ -396,18 +408,18 @@ PYTHON_CLEAN = '"""A module."""\n'
 MODULES = ("a b.py", "é.py")
 
 
-def test_spaced_and_accented_modules_pass_clean() -> None:
+def test_spaced_and_accented_modules_pass_clean(env: support.Env) -> None:
     """Both checked and formatted; ruff finds neither missing."""
-    done = run_task("lint:python", dict.fromkeys(MODULES, PYTHON_CLEAN))
+    done = run_task("lint:python", dict.fromkeys(MODULES, PYTHON_CLEAN), env=env)
     assert done.returncode == 0, done.stdout + done.stderr
     assert "2 files already formatted" in done.stdout
 
 
-def test_a_finding_in_the_spaced_module_is_red_by_name() -> None:
+def test_a_finding_in_the_spaced_module_is_red_by_name(env: support.Env) -> None:
     """An unused import (F401): ruff names `a b.py` whole."""
     files = dict.fromkeys(MODULES, PYTHON_CLEAN)
     files["a b.py"] = '"""A module."""\n\nimport os\n'
-    done = run_task("lint:python", files)
+    done = run_task("lint:python", files, env=env)
     assert done.returncode == 1, done.stdout + done.stderr
     assert "unused-import: [*] `os` imported but unused\n --> a b.py:3:8" in done.stdout
     assert (
@@ -417,7 +429,7 @@ def test_a_finding_in_the_spaced_module_is_red_by_name() -> None:
 
 
 def has_status(
-    tree: Path, path: str, *, failing_git: bool = False
+    tree: Path, path: str, *, failing_git: bool = False, env: support.Env
 ) -> subprocess.CompletedProcess[str]:
     """Run `org_tracked_has <path>; echo "status $?"` in `tree`.
 
@@ -425,7 +437,7 @@ def has_status(
         The finished run, both streams captured.
 
     """
-    env = support.env(tree.parent / "home") | {
+    environ = env(tree.parent / "home") | {
         "BASH_ENV": str(BELT / "findings.sh"),
         "MISE_TASK_NAME": "fix:test",
     }
@@ -434,12 +446,12 @@ def has_status(
         stubs.mkdir(exist_ok=True)
         (stubs / "git").write_text(FAILING_GIT, encoding="utf-8")
         (stubs / "git").chmod(0o755)
-        env["PATH"] = f"{stubs}:{env.get('PATH', '')}"
+        environ["PATH"] = f"{stubs}:{environ.get('PATH', '')}"
     script = f'org_tracked_has {path} && s=0 || s=$?\necho "status ${{s}}"\n'
     return subprocess.run(
         [BASH, "--norc", "-euo", "pipefail", "-c", script],
         cwd=tree,
-        env=env,
+        env=environ,
         capture_output=True,
         text=True,
         check=False,
@@ -449,8 +461,9 @@ def has_status(
 class Has:
     """org_tracked_has and tracked.has answer from the index (#2013)."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Give the row's scratch directories one home, removed after it."""
+        self.make_env = env
         self.tmp = tmp_path
 
     def planted(self) -> Path:
@@ -463,24 +476,24 @@ class Has:
         scratch = tempfile.mkdtemp(dir=self.tmp)
         tree = Path(scratch) / "repo"
         tree.mkdir()
-        plant(tree, {"kept": "x\n", "gone": "x\n"}, {"loose": "x\n"})
+        plant(tree, {"kept": "x\n", "gone": "x\n"}, {"loose": "x\n"}, env=self.make_env)
         (tree / "gone").unlink()
         return tree
 
 
 @fixture
-def has_state(tmp_path: Path) -> Has:
+def has_state(tmp_path: Path, env: support.Env) -> Has:
     """Give each row its own Has."""
-    return Has(tmp_path)
+    return Has(tmp_path, env=env)
 
 
 @pytest.mark.parametrize(("path", "want"), [("kept", 0), ("loose", 1), ("gone", 0)])
 def test_the_shell_answers_from_the_index(
-    has_state: Has, path: object, want: object
+    has_state: Has, path: object, want: object, env: support.Env
 ) -> None:
     """Tracked 0, untracked on disk 1, tracked and deleted 0."""
     tree = has_state.planted()
-    done = has_status(tree, path)
+    done = has_status(tree, path, env=env)
     assert (f"status {want}\n", "") == (done.stdout, done.stderr)
 
 
@@ -492,10 +505,12 @@ def test_python_answers_from_the_index(has_state: Has) -> None:
     assert want == got
 
 
-def test_the_shell_ends_on_a_git_that_cannot_answer(has_state: Has) -> None:
+def test_the_shell_ends_on_a_git_that_cannot_answer(
+    has_state: Has, env: support.Env
+) -> None:
     """Exit 128: the finding, the shell gone, no status line."""
     tree = has_state.planted()
-    done = has_status(tree, "kept", failing_git=True)
+    done = has_status(tree, "kept", failing_git=True, env=env)
     assert done.returncode == 1
     assert done.stdout == ""
     assert (
@@ -522,10 +537,13 @@ def test_python_raises_on_a_git_that_cannot_answer(has_state: Has) -> None:
 
 
 @pytest.mark.usefixtures("has_state")
-def test_a_task_whose_git_fails_is_red_not_skipped() -> None:
+def test_a_task_whose_git_fails_is_red_not_skipped(env: support.Env) -> None:
     """lint:fuzz-build, git exiting 128: the finding, nonzero, no skip."""
     done = run_task(
-        "lint:fuzz-build", {"fuzz/Cargo.toml": "[package]\n"}, stubs=FAILING_STUBS
+        "lint:fuzz-build",
+        {"fuzz/Cargo.toml": "[package]\n"},
+        stubs=FAILING_STUBS,
+        env=env,
     )
     assert done.returncode == 1
     assert (
@@ -536,10 +554,10 @@ def test_a_task_whose_git_fails_is_red_not_skipped() -> None:
 
 
 # A file on disk that git does not track turns nothing on (#2013).
-def test_fuzz_build_skips_an_untracked_fuzz_crate() -> None:
+def test_fuzz_build_skips_an_untracked_fuzz_crate(env: support.Env) -> None:
     """Red at 50c77201: "fuzz/Cargo.lock is not committed"."""
     done = run_task(
-        "lint:fuzz-build", {PLAIN: "x\n"}, {"fuzz/Cargo.toml": "[package]\n"}
+        "lint:fuzz-build", {PLAIN: "x\n"}, {"fuzz/Cargo.toml": "[package]\n"}, env=env
     )
     assert (done.returncode, done.stdout) == (
         0,
@@ -547,7 +565,7 @@ def test_fuzz_build_skips_an_untracked_fuzz_crate() -> None:
     )
 
 
-def test_deny_finds_no_deny_toml_where_it_is_untracked() -> None:
+def test_deny_finds_no_deny_toml_where_it_is_untracked(env: support.Env) -> None:
     """Cargo.lock tracked, deny.toml beside it untracked: refused."""
     done = run_task(
         "lint:deny",
@@ -555,21 +573,22 @@ def test_deny_finds_no_deny_toml_where_it_is_untracked() -> None:
         {"deny.toml": "[graph]\n"},
         # cargo names the root workspace, and does nothing else.
         stubs={"cargo": LOCATING_CARGO},
+        env=env,
     )
     assert done.returncode == 1, done.stdout + done.stderr
     assert "lint:deny: Cargo.lock present but no deny.toml" in done.stderr
 
 
-def test_pgrx_plan_plans_nothing_for_an_untracked_manifest() -> None:
+def test_pgrx_plan_plans_nothing_for_an_untracked_manifest(env: support.Env) -> None:
     """An untracked Cargo.toml is no crate: `[]`."""
     with tempfile.TemporaryDirectory() as tmp:
         tree = Path(tmp) / "repo"
         tree.mkdir()
-        plant(tree, {PLAIN: "x\n"}, {"Cargo.toml": "[workspace]\n"})
+        plant(tree, {PLAIN: "x\n"}, {"Cargo.toml": "[workspace]\n"}, env=env)
         done = subprocess.run(
             [BASH, str(BELT / "pgrx-plan.sh"), str(BELT.parent)],
             cwd=tree,
-            env=support.env(Path(tmp) / "home"),
+            env=env(Path(tmp) / "home"),
             capture_output=True,
             text=True,
             check=False,

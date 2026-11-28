@@ -54,8 +54,7 @@ BASH = support.tool("bash")
 # A scratch repository must not inherit the caller's git: under a hook,
 # GIT_DIR and GIT_INDEX_FILE point every `git` at the repository being
 # pushed, and `git ls-files` would list the canon's own workflows.
-CLEAN_ENV = {
-    **support.env(),
+GIT_ISOLATED = {
     "GIT_CONFIG_GLOBAL": os.devnull,
     "GIT_CONFIG_NOSYSTEM": "1",
 }
@@ -699,7 +698,9 @@ def org_config(tmp_path: Path) -> OrgConfig:
     return OrgConfig(tmp_path)
 
 
-def test_a_home_shellcheckrc_cannot_lower_the_org_checks(org_config: OrgConfig) -> None:
+def test_a_home_shellcheckrc_cannot_lower_the_org_checks(
+    org_config: OrgConfig, env: support.Env
+) -> None:
     """A machine's own rc file does not switch a belt check off.
 
     Without `--rcfile`, shellcheck reads `~/.shellcheckrc`, so a
@@ -718,7 +719,7 @@ def test_a_home_shellcheckrc_cannot_lower_the_org_checks(org_config: OrgConfig) 
     )
     # The environment is built before the old one is cleared: it
     # reads the variables it keeps from this one.
-    planted = support.env(home)
+    planted = env(home)
     with pytest.MonkeyPatch.context() as patched:
         for name in list(os.environ):
             patched.delenv(name)
@@ -1034,19 +1035,21 @@ def task_body(name: str) -> str:
     return decoded.as_str(decoded.as_object(tasks[name], name)["run"], f"{name}'s run")
 
 
-def run_task(root: Path, name: str) -> subprocess.CompletedProcess[str]:
+def run_task(
+    root: Path, name: str, *, env: support.Env
+) -> subprocess.CompletedProcess[str]:
     """Run one task body under the interpreter mise uses.
 
     Returns:
         The finished process.
 
     """
-    env = {**CLEAN_ENV, "ORG_BELT_DIR": str(_HERE)}
+    environ = {**env(**GIT_ISOLATED), "ORG_BELT_DIR": str(_HERE)}
     as_mise = support.task_run(name, task_body(name))
     return subprocess.run(
         as_mise.argv,
         cwd=root,
-        env=env | as_mise.env,
+        env=environ | as_mise.env,
         capture_output=True,
         text=True,
         check=False,
@@ -1056,8 +1059,9 @@ def run_task(root: Path, name: str) -> subprocess.CompletedProcess[str]:
 class Task:
     """The task bodies, run as mise runs them, in a scratch repository."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Give the row's scratch directories one home, removed after it."""
+        self.make_env = env
         self.tmp = tmp_path
 
     def repo(self) -> Path:
@@ -1069,14 +1073,18 @@ class Task:
         """
         tmp = tempfile.mkdtemp(dir=self.tmp)
         root = Path(tmp)
-        subprocess.run([GIT, "init", "-q", str(root)], check=True, env=CLEAN_ENV)
+        subprocess.run(
+            [GIT, "init", "-q", str(root)],
+            check=True,
+            env=self.make_env(**GIT_ISOLATED),
+        )
         return root
 
 
 @fixture
-def task_state(tmp_path: Path) -> Task:
+def task_state(tmp_path: Path, env: support.Env) -> Task:
     """Give each row its own Task."""
-    return Task(tmp_path)
+    return Task(tmp_path, env=env)
 
 
 @pytest.mark.parametrize(
@@ -1090,23 +1098,25 @@ def task_state(tmp_path: Path) -> Task:
     ],
 )
 def test_no_workflows_skips_clean(
-    task_state: Task, name: object, message: object
+    task_state: Task, name: object, message: object, env: support.Env
 ) -> None:
     """A tree tracking no workflow skips both tasks by name."""
     root = task_state.repo()
-    r = run_task(root, name)
+    r = run_task(root, name, env=env)
     assert r.returncode == 0, r.stderr
     assert f"{name}: {message}" in r.stdout
 
 
-def test_tracked_workflow_is_held(task_state: Task) -> None:
+def test_tracked_workflow_is_held(task_state: Task, env: support.Env) -> None:
     """The task reaches the helper: an oversized tracked block is red."""
     root = task_state.repo()
     wf = root / ".github" / "workflows" / "w.yml"
     wf.parent.mkdir(parents=True)
     wf.write_text(workflow(step("Big", 16)), encoding="utf-8")
-    subprocess.run([GIT, "-C", str(root), "add", "."], check=True, env=CLEAN_ENV)
-    r = run_task(root, "lint:workflow-shell")
+    subprocess.run(
+        [GIT, "-C", str(root), "add", "."], check=True, env=env(**GIT_ISOLATED)
+    )
+    r = run_task(root, "lint:workflow-shell", env=env)
     assert r.returncode == 1
     assert (
         ".github/workflows/w.yml:8: step 'Big' holds a run: block of 16 lines, "
@@ -1115,13 +1125,13 @@ def test_tracked_workflow_is_held(task_state: Task) -> None:
     ) in r.stderr
 
 
-def test_untracked_workflow_is_not_read(task_state: Task) -> None:
+def test_untracked_workflow_is_not_read(task_state: Task, env: support.Env) -> None:
     """Tracked files only: an untracked workflow leaves the tree skipped."""
     root = task_state.repo()
     wf = root / ".github" / "workflows" / "w.yml"
     wf.parent.mkdir(parents=True)
     wf.write_text(workflow(step("Big", 16)), encoding="utf-8")
-    r = run_task(root, "lint:workflow-shell")
+    r = run_task(root, "lint:workflow-shell", env=env)
     assert r.returncode == 0, r.stderr
     assert "skipped" in r.stdout
 
@@ -1390,8 +1400,9 @@ class TaskShellTask:
     task, so decoding the body raises KeyError.
     """
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Give the row's scratch directories one home, removed after it."""
+        self.make_env = env
         self.tmp = tmp_path
 
     def repo(self) -> Path:
@@ -1403,38 +1414,44 @@ class TaskShellTask:
         """
         tmp = tempfile.mkdtemp(dir=self.tmp)
         root = Path(tmp)
-        subprocess.run([GIT, "init", "-q", str(root)], check=True, env=CLEAN_ENV)
+        subprocess.run(
+            [GIT, "init", "-q", str(root)],
+            check=True,
+            env=self.make_env(**GIT_ISOLATED),
+        )
         return root
 
 
 @fixture
-def task_shell_task(tmp_path: Path) -> TaskShellTask:
+def task_shell_task(tmp_path: Path, env: support.Env) -> TaskShellTask:
     """Give each row its own TaskShellTask."""
-    return TaskShellTask(tmp_path)
+    return TaskShellTask(tmp_path, env=env)
 
 
-def track(root: Path, text: str) -> None:
+def track(root: Path, text: str, *, env: support.Env) -> None:
     """Write and stage a root mise.toml."""
     (root / "mise.toml").write_text(text, encoding="utf-8")
-    subprocess.run([GIT, "-C", str(root), "add", "."], check=True, env=CLEAN_ENV)
+    subprocess.run(
+        [GIT, "-C", str(root), "add", "."], check=True, env=env(**GIT_ISOLATED)
+    )
 
 
 def test_tracked_long_body_is_red_then_generated(
-    task_shell_task: TaskShellTask,
+    task_shell_task: TaskShellTask, env: support.Env
 ) -> None:
     """The lint reaches the helper; fix generates; the lint goes green."""
     root = task_shell_task.repo()
-    track(root, config(lint_a=16))
-    r = run_task(root, "lint:task-shell")
+    track(root, config(lint_a=16), env=env)
+    r = run_task(root, "lint:task-shell", env=env)
     assert r.returncode == 1
     assert (
         "mise.toml: task 'lint:a' holds a body of 16 lines, over the 15-line "
         "ceiling, and security/task-shell-debt.txt does not list it"
     ) in r.stderr
-    r = run_task(root, "fix:task-shell")
+    r = run_task(root, "fix:task-shell", env=env)
     assert r.returncode == 0, r.stderr
     assert "generated security/task-shell-debt.txt with 1 entry(ies)" in r.stdout
-    r = run_task(root, "lint:task-shell")
+    r = run_task(root, "lint:task-shell", env=env)
     assert r.returncode == 0, r.stderr
     assert "(1 over the ceiling, all listed)" in r.stdout
 
@@ -1447,20 +1464,22 @@ def test_tracked_long_body_is_red_then_generated(
     ],
 )
 def test_no_mise_config_skips_clean(
-    task_shell_task: TaskShellTask, name: object, message: object
+    task_shell_task: TaskShellTask, name: object, message: object, env: support.Env
 ) -> None:
     """A tree tracking no mise config skips both tasks by name."""
     root = task_shell_task.repo()
-    r = run_task(root, name)
+    r = run_task(root, name, env=env)
     assert r.returncode == 0, r.stderr
     assert f"{name}: {message}" in r.stdout
 
 
-def test_untracked_config_is_not_read(task_shell_task: TaskShellTask) -> None:
+def test_untracked_config_is_not_read(
+    task_shell_task: TaskShellTask, env: support.Env
+) -> None:
     """Tracked files only: an untracked long body leaves the tree skipped."""
     root = task_shell_task.repo()
     (root / "mise.toml").write_text(config(lint_a=16), encoding="utf-8")
-    r = run_task(root, "lint:task-shell")
+    r = run_task(root, "lint:task-shell", env=env)
     assert r.returncode == 0, r.stderr
     assert "skipped" in r.stdout
 

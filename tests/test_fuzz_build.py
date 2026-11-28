@@ -222,8 +222,11 @@ NESTED_SEEDED: list[tuple[str, str]] = [
 class FuzzBuild:
     """lint:fuzz-build says "stale" only when cargo says the lock is."""
 
-    def __init__(self, tmp_path: Path, request: pytest.FixtureRequest) -> None:
+    def __init__(
+        self, tmp_path: Path, request: pytest.FixtureRequest, *, env: support.Env
+    ) -> None:
         """Plant a fuzz crate with a committed lock, and the stubs."""
+        self.make_env = env
         self.root = tmp_path
         (self.root / "fuzz").mkdir()
         (self.root / "fuzz" / "Cargo.lock").write_text("", encoding="utf-8")
@@ -245,7 +248,7 @@ class FuzzBuild:
         subprocess.run(
             [GIT, *args],
             cwd=self.root,
-            env=support.env(),
+            env=self.make_env(),
             capture_output=True,
             check=True,
         )
@@ -276,7 +279,7 @@ class FuzzBuild:
         """
         if self.log.exists():
             self.log.unlink()
-        env = support.env() | {
+        env = self.make_env() | {
             "PATH": f"{self.stubs}{os.pathsep}{os.environ['PATH']}",
             "PLANT_LOG": str(self.log),
             "PLANT_REFUSAL": str(self.refusal),
@@ -300,9 +303,11 @@ class FuzzBuild:
 
 
 @fixture
-def fuzz_build(tmp_path: Path, request: pytest.FixtureRequest) -> FuzzBuild:
+def fuzz_build(
+    tmp_path: Path, request: pytest.FixtureRequest, env: support.Env
+) -> FuzzBuild:
     """Give each row its own FuzzBuild."""
-    return FuzzBuild(tmp_path, request)
+    return FuzzBuild(tmp_path, request, env=env)
 
 
 def replays(calls: list[str]) -> list[tuple[str, Path, str]]:

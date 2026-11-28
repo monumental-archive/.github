@@ -144,7 +144,11 @@ def assert_every_member_linted(
 
 # One red crate does not hide the rest (#726).
 def lint(
-    rustup: str = RUSTUP, planted: dict[str, str] | None = None, **stub: str
+    rustup: str = RUSTUP,
+    planted: dict[str, str] | None = None,
+    *,
+    env: support.Env,
+    **stub: str,
 ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     """Run lint:rust over the planted workspace.
 
@@ -169,21 +173,21 @@ def lint(
             (bindir / name).write_text(text, encoding="utf-8")
             (bindir / name).chmod(0o755)
         log = root / "clippy.log"
-        env = support.env(
+        environ = env(
             root / "home",
             ORG_BELT_DIR=str(BELT),
         )
-        subprocess.run([GIT, "init", "-q"], cwd=tree, env=env, check=True)
-        subprocess.run([GIT, "add", "."], cwd=tree, env=env, check=True)
-        env["PATH"] = f"{bindir}{os.pathsep}{env['PATH']}"
-        env["STUB_METADATA"] = str(METADATA)
-        env["CLIPPY_LOG"] = str(log)
-        env |= stub
+        subprocess.run([GIT, "init", "-q"], cwd=tree, env=environ, check=True)
+        subprocess.run([GIT, "add", "."], cwd=tree, env=environ, check=True)
+        environ["PATH"] = f"{bindir}{os.pathsep}{environ['PATH']}"
+        environ["STUB_METADATA"] = str(METADATA)
+        environ["CLIPPY_LOG"] = str(log)
+        environ |= stub
         as_mise = support.task_run("lint:rust", body())
         done = subprocess.run(
             as_mise.argv,
             cwd=tree,
-            env=env | as_mise.env,
+            env=environ | as_mise.env,
             capture_output=True,
             text=True,
             check=False,
@@ -192,12 +196,12 @@ def lint(
     return done, asked
 
 
-def test_a_red_first_member_leaves_the_rest_linted() -> None:
+def test_a_red_first_member_leaves_the_rest_linted(env: support.Env) -> None:
     """All six members are asked; the red one is named; cargo's 101 is kept."""
-    assert_every_member_linted(*lint())
+    assert_every_member_linted(*lint(env=env))
 
 
-def test_clippy_ahead_of_a_long_listing_is_found() -> None:
+def test_clippy_ahead_of_a_long_listing_is_found(env: support.Env) -> None:
     """`clippy…` first, then 200 kB: the component is there (#1637).
 
     On main the clippy probe stopped at the first line and
@@ -207,12 +211,13 @@ def test_clippy_ahead_of_a_long_listing_is_found() -> None:
         RUSTUP_LONG,
         STUB_FIRST="clippy-x86_64-unknown-linux-gnu",
         STUB_LAST="rustfmt-x86_64-unknown-linux-gnu",
+        env=env,
     )
     assert "component missing" not in done.stderr
     assert_every_member_linted(done, asked)
 
 
-def test_rustfmt_ahead_of_a_long_listing_is_found() -> None:
+def test_rustfmt_ahead_of_a_long_listing_is_found(env: support.Env) -> None:
     """`rustfmt…` first, then 200 kB, then clippy: both are there (#1637).
 
     On main the rustfmt probe stopped at the first line and
@@ -222,6 +227,7 @@ def test_rustfmt_ahead_of_a_long_listing_is_found() -> None:
         RUSTUP_LONG,
         STUB_FIRST="rustfmt-x86_64-unknown-linux-gnu",
         STUB_LAST="clippy-x86_64-unknown-linux-gnu",
+        env=env,
     )
     assert "component missing" not in done.stderr
     assert_every_member_linted(done, asked)
@@ -361,7 +367,7 @@ def test_a_lint_named_after_a_group_passes_the_group_grep() -> None:
 # that gates nothing in the `tests/` targets where it fires. The row
 # sources the real mise/clippy-ladder.sh, so a name dropped from the
 # list, or a pgrx-only list reintroduced beside it, goes red here.
-def ladder(call: str) -> str:
+def ladder(call: str, *, env: support.Env) -> str:
     """Source the belt's ladder and run one of its functions.
 
     Returns:
@@ -372,28 +378,28 @@ def ladder(call: str) -> str:
         [BASH, "-c", f'. "$1" && {call}', "ladder", str(BELT / "clippy-ladder.sh")],
         capture_output=True,
         text=True,
-        env=support.env(),
+        env=env(),
         check=False,
     )
     assert done.returncode == 0, done.stdout + done.stderr
     return done.stdout
 
 
-def test_the_ladder_allows_both_lints() -> None:
+def test_the_ladder_allows_both_lints(env: support.Env) -> None:
     """org_clippy_ladder prints an `-A` for each of the two."""
-    words = ladder("org_clippy_ladder").split()
+    words = ladder("org_clippy_ladder", env=env).split()
     allowed = [b for a, b in itertools.pairwise(words) if a == "-A"]
     assert "clippy::single_call_fn" in allowed
     assert "clippy::tests_outside_test_module" in allowed
 
 
-def test_the_count_is_thirteen() -> None:
+def test_the_count_is_thirteen(env: support.Env) -> None:
     """org_clippy_contradiction_count prints 13."""
-    assert ladder("org_clippy_contradiction_count") == "13\n"
+    assert ladder("org_clippy_contradiction_count", env=env) == "13\n"
 
 
 # The rustup stub answers 0 even when nobody reads it (#1623).
-def test_a_reader_that_has_gone_does_not_kill_the_stub() -> None:
+def test_a_reader_that_has_gone_does_not_kill_the_stub(env: support.Env) -> None:
     """Written into a pipe whose reader is closed, the stub still exits 0."""
     with tempfile.TemporaryDirectory() as tmp:
         stub = Path(tmp) / "rustup"
@@ -405,7 +411,7 @@ def test_a_reader_that_has_gone_does_not_kill_the_stub() -> None:
             done = subprocess.run(
                 [BASH, str(stub), "component", "list", "--installed"],
                 stdout=write,
-                env=support.env(),
+                env=env(),
                 check=False,
             )
         finally:
@@ -588,8 +594,17 @@ class Planted:
     task = "lint:rust"
     cargo = STUB_CARGO
 
-    def __init__(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def __init__(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        belt: support.Belt,
+        env: support.Env,
+    ) -> None:
         """Plant the tree, the belt and the stubs."""
+        self.plant_belt = belt
+        self.make_env = env
         # `belt pgrx-postgres`, which the registration calls in process.
         monkeypatch.setattr(pgrx_postgres, "main", stub_pin)
         tmp = tmp_path
@@ -606,7 +621,7 @@ class Planted:
         # The stubs' own interpreter; the rest of PATH is the system's,
         # which holds no cargo, rustup or mise.
         (self.bins / "bash").symlink_to(BASH)
-        self.belt = support.belt(
+        self.belt = self.plant_belt(
             tmp / "belt",
             stubs={
                 "clippy-ladder.sh": STUB_LADDER,
@@ -618,7 +633,7 @@ class Planted:
         self.metadata.write_text(FOUR, encoding="utf-8")
         self.fuzz_metadata = tmp / "fuzz-metadata.json"
         self.fuzz_metadata.write_text(FUZZ, encoding="utf-8")
-        self.env = support.env(
+        self.env = self.make_env(
             tmp / "home",
             PATH=os.pathsep.join((str(self.bins), "/usr/bin", "/bin")),
             MISE_TASK_NAME=self.task,
@@ -687,9 +702,14 @@ class Planted:
 
 
 @fixture
-def planted_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Planted:
+def planted_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    belt: support.Belt,
+    env: support.Env,
+) -> Planted:
     """Give each row its own Planted."""
-    return Planted(tmp_path, monkeypatch)
+    return Planted(tmp_path, monkeypatch, belt=belt, env=env)
 
 
 def test_cargo_missing_is_red(
@@ -1089,9 +1109,14 @@ class FixBranches(Planted):
 
 
 @fixture
-def fix_branches(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FixBranches:
+def fix_branches(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    belt: support.Belt,
+    env: support.Env,
+) -> FixBranches:
     """Give each row its own FixBranches."""
-    return FixBranches(tmp_path, monkeypatch)
+    return FixBranches(tmp_path, monkeypatch, belt=belt, env=env)
 
 
 def test_fix_branches_cargo_missing_is_red(
@@ -1295,9 +1320,16 @@ class EveryWorkspace(Planted):
     formatted or linted.
     """
 
-    def __init__(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def __init__(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        belt: support.Belt,
+        env: support.Env,
+    ) -> None:
         """Plant the fuzz crate as the tree's second root."""
-        super().__init__(tmp_path, monkeypatch)
+        super().__init__(tmp_path, monkeypatch, belt=belt, env=env)
         self.plant(TWO_ROOTS)
 
     def asked(self, verb: str) -> list[str]:
@@ -1321,9 +1353,14 @@ class EveryWorkspace(Planted):
 
 
 @fixture
-def every_workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> EveryWorkspace:
+def every_workspace(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    belt: support.Belt,
+    env: support.Env,
+) -> EveryWorkspace:
     """Give each row its own EveryWorkspace."""
-    return EveryWorkspace(tmp_path, monkeypatch)
+    return EveryWorkspace(tmp_path, monkeypatch, belt=belt, env=env)
 
 
 def test_each_root_is_formatted_and_linted(

@@ -53,7 +53,9 @@ def test_the_section_is_long_enough_to_need_the_waiver() -> None:
     assert any(len(subject) > WIDTH for subject in subjects)
 
 
-def test_a_release_section_under_the_scaffold_header_lints_clean() -> None:
+def test_a_release_section_under_the_scaffold_header_lints_clean(
+    env: support.Env,
+) -> None:
     """No MD013 for a verbatim subject under the scaffold's preamble."""
     preamble = (CANON / "scaffold" / "CHANGELOG.md").read_text(encoding="utf-8")
     with tempfile.TemporaryDirectory() as tmp:
@@ -65,7 +67,7 @@ def test_a_release_section_under_the_scaffold_header_lints_clean() -> None:
         done = subprocess.run(
             [RUMDL, "check", "--config", str(BELT / "rumdl.toml"), "CHANGELOG.md"],
             cwd=tmp,
-            env=support.env(),
+            env=env(),
             capture_output=True,
             text=True,
             check=False,

@@ -154,14 +154,14 @@ func Twice(x int) int {
 """
 
 
-def clean_env() -> dict[str, str]:
+def clean_env(*, env: support.Env) -> dict[str, str]:
     """Copy the environment without git's own variables.
 
     Returns:
         os.environ minus every GIT_* key.
 
     """
-    return support.env(MISE_TASK_NAME=TASK)
+    return env(MISE_TASK_NAME=TASK)
 
 
 def summary_line(counts: tuple[int, int, int, int, int, int]) -> str:
@@ -194,8 +194,9 @@ def measuring(count: int = 2) -> str:
 class Planted:
     """A planted module, a real GOROOT, a shim first on PATH, stub gomu."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Plant the module, the stubs and the default answers."""
+        self.make_env = env
         self.tmp = tmp_path
         self.tree = self.tmp / "tree"
         (self.tree / "a").mkdir(parents=True)
@@ -223,7 +224,7 @@ class Planted:
         self.listing = self.tmp / "list"
         self.cover = self.tmp / "cover.out"
         self.baseline = self.tmp / "baseline"
-        self.env = clean_env() | {
+        self.env = clean_env(env=self.make_env) | {
             "PATH": f"{shims}{os.pathsep}{os.environ['PATH']}",
             "ORG_BELT_DIR": str(BELT),
             "PLANT_GOROOT": str(self.goroot),
@@ -252,7 +253,9 @@ class Planted:
 
     def git(self, *args: str) -> None:
         """Run git in the planted tree, scrubbed of the caller's git state."""
-        subprocess.run([GIT, *args], cwd=self.tree, env=clean_env(), check=True)
+        subprocess.run(
+            [GIT, *args], cwd=self.tree, env=clean_env(env=self.make_env), check=True
+        )
 
     def write(self, name: str, text: str) -> None:
         """Write and track one file in the planted tree."""
@@ -333,9 +336,9 @@ class Planted:
 
 
 @fixture
-def planted(tmp_path: Path) -> Planted:
+def planted(tmp_path: Path, env: support.Env) -> Planted:
     """Give each row its own Planted."""
-    return Planted(tmp_path)
+    return Planted(tmp_path, env=env)
 
 
 def test_no_gomuignore_skips_clean_by_name(planted: Planted) -> None:
@@ -586,9 +589,9 @@ class Records(Planted):
 
 
 @fixture
-def records(tmp_path: Path) -> Records:
+def records(tmp_path: Path, env: support.Env) -> Records:
     """Give each row its own Records."""
-    return Records(tmp_path)
+    return Records(tmp_path, env=env)
 
 
 def test_a_record_above_the_line_explains_it_and_is_counted(records: Records) -> None:

@@ -65,10 +65,11 @@ def body() -> str:
 class TheBeltClaimsItsDirectory:
     """Each row: what the repository tracks under .config/mise/."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Plant an empty repository."""
+        self.make_env = env
         self.tmp = tmp_path
-        self.env = support.env(self.tmp)
+        self.env = self.make_env(self.tmp)
         self.repo = self.tmp / "repo"
         self.repo.mkdir()
         self.git("init", "-q", ".")
@@ -97,9 +98,11 @@ class TheBeltClaimsItsDirectory:
 
 
 @fixture
-def the_belt_claims_its_directory(tmp_path: Path) -> TheBeltClaimsItsDirectory:
+def the_belt_claims_its_directory(
+    tmp_path: Path, env: support.Env
+) -> TheBeltClaimsItsDirectory:
     """Give each row its own TheBeltClaimsItsDirectory."""
-    return TheBeltClaimsItsDirectory(tmp_path)
+    return TheBeltClaimsItsDirectory(tmp_path, env=env)
 
 
 def test_a_tracked_config_toml_is_red(

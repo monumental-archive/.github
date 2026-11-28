@@ -44,7 +44,7 @@ def environment(dump: str) -> dict[str, str]:
     return {name: value for name, _, value in pairs}
 
 
-def plant(root: Path, *, floor: bool) -> Path:
+def plant(root: Path, *, floor: bool, env: support.Env) -> Path:
     """Make a git tree, with or without a `.coverage-floor`.
 
     Returns:
@@ -53,15 +53,15 @@ def plant(root: Path, *, floor: bool) -> Path:
     """
     tree = root / "tree"
     tree.mkdir()
-    subprocess.run([GIT, "init", "-q", str(tree)], check=True, env=support.env())
+    subprocess.run([GIT, "init", "-q", str(tree)], check=True, env=env())
     if floor:
         (tree / ".coverage-floor").write_text("python 50.0\n")
     return tree
 
 
-def track(tree: Path, *names: str) -> None:
+def track(tree: Path, *names: str, env: support.Env) -> None:
     """Add planted files to the tree's index: `measured` asks git (#2013)."""
-    subprocess.run([GIT, "add", *names], cwd=tree, check=True, env=support.env())
+    subprocess.run([GIT, "add", *names], cwd=tree, check=True, env=env())
 
 
 def unchanged(given: dict[str, str], seen: dict[str, str]) -> dict[str, str]:
@@ -77,7 +77,9 @@ def unchanged(given: dict[str, str], seen: dict[str, str]) -> dict[str, str]:
     return {n: seen.get(n, "<dropped>") for n in names if given.get(n) != seen.get(n)}
 
 
-def run(tree: Path, argv: list[str], **env: str) -> subprocess.CompletedProcess[str]:
+def run(
+    tree: Path, argv: list[str], *, make_env: support.Env, **env: str
+) -> subprocess.CompletedProcess[str]:
     """Run `measured` with argv in the tree.
 
     Returns:
@@ -87,7 +89,7 @@ def run(tree: Path, argv: list[str], **env: str) -> subprocess.CompletedProcess[
     return subprocess.run(
         [str(MEASURED), *argv],
         cwd=tree,
-        env=support.env(**env),
+        env=make_env(**env),
         capture_output=True,
         text=True,
         check=False,
@@ -96,79 +98,81 @@ def run(tree: Path, argv: list[str], **env: str) -> subprocess.CompletedProcess[
 
 
 # Without a floor, or outside a measured run, `measured` is `exec "$@"`.
-def test_no_floor_leaves_the_environment_unchanged() -> None:
+def test_no_floor_leaves_the_environment_unchanged(env: support.Env) -> None:
     """A run directory but no floor: the child sees exactly what was passed."""
     with tempfile.TemporaryDirectory() as tmp:
-        tree = plant(Path(tmp), floor=False)
+        tree = plant(Path(tmp), floor=False, env=env)
         given = {"ORG_COVERAGE_RUN": str(Path(tmp) / "run"), "PYTHONPATH": "src"}
-        out = run(tree, DUMP, **given)
+        out = run(tree, DUMP, **given, make_env=env)
         assert out.returncode == 0, out.stderr
         seen = environment(out.stdout)
-        assert unchanged(support.env(**given), seen) == NOTHING
+        assert unchanged(env(**given), seen) == NOTHING
 
 
-def test_no_run_directory_leaves_the_environment_unchanged() -> None:
+def test_no_run_directory_leaves_the_environment_unchanged(env: support.Env) -> None:
     """A floor but no run directory (outside mise): nothing is added."""
     with tempfile.TemporaryDirectory() as tmp:
-        tree = plant(Path(tmp), floor=True)
-        out = run(tree, DUMP, PYTHONPATH="src")
+        tree = plant(Path(tmp), floor=True, env=env)
+        out = run(tree, DUMP, PYTHONPATH="src", make_env=env)
         assert out.returncode == 0, out.stderr
         seen = environment(out.stdout)
-        assert unchanged(support.env(PYTHONPATH="src"), seen) == NOTHING
+        assert unchanged(env(PYTHONPATH="src"), seen) == NOTHING
 
 
-def test_the_exit_status_is_the_commands() -> None:
+def test_the_exit_status_is_the_commands(env: support.Env) -> None:
     """Exec, not a wrapper: the status comes back unchanged."""
     with tempfile.TemporaryDirectory() as tmp:
-        tree = plant(Path(tmp), floor=False)
-        out = run(tree, [SH, "-c", "exit 7"])
+        tree = plant(Path(tmp), floor=False, env=env)
+        out = run(tree, [SH, "-c", "exit 7"], make_env=env)
         assert out.returncode == 7
 
 
-def test_a_signal_is_the_commands() -> None:
+def test_a_signal_is_the_commands(env: support.Env) -> None:
     """A command killed by a signal is reported killed by that signal."""
     with tempfile.TemporaryDirectory() as tmp:
-        tree = plant(Path(tmp), floor=False)
-        out = run(tree, [SH, "-c", "kill -TERM $$"])
+        tree = plant(Path(tmp), floor=False, env=env)
+        out = run(tree, [SH, "-c", "kill -TERM $$"], make_env=env)
         assert out.returncode == -signal.SIGTERM
 
 
-def test_no_command_is_refused() -> None:
+def test_no_command_is_refused(env: support.Env) -> None:
     """`measured` with nothing to run says how it is used."""
     with tempfile.TemporaryDirectory() as tmp:
-        tree = plant(Path(tmp), floor=False)
-        out = run(tree, [])
+        tree = plant(Path(tmp), floor=False, env=env)
+        out = run(tree, [], make_env=env)
         assert out.returncode == 2
         assert "measured: no command" in out.stderr
 
 
 # With a floor and a run directory the measurement is merged in.
-def measured_env(tmp: str, **given: str) -> dict[str, str]:
+def measured_env(tmp: str, *, env: support.Env, **given: str) -> dict[str, str]:
     """Run the dump through `measured` in a floored tree.
 
     Returns:
         The child's environment.
 
     """
-    tree = plant(Path(tmp), floor=True)
-    out = run(tree, DUMP, ORG_COVERAGE_RUN=str(Path(tmp) / "run"), **given)
+    tree = plant(Path(tmp), floor=True, env=env)
+    out = run(
+        tree, DUMP, ORG_COVERAGE_RUN=str(Path(tmp) / "run"), **given, make_env=env
+    )
     assert out.returncode == 0, out.stderr
     return environment(out.stdout)
 
 
-def test_the_task_pythonpath_is_kept_behind_the_hook() -> None:
+def test_the_task_pythonpath_is_kept_behind_the_hook(env: support.Env) -> None:
     """The task's own PYTHONPATH stays, with the hook in front of it."""
     with tempfile.TemporaryDirectory() as tmp:
-        seen = measured_env(tmp, PYTHONPATH="src:lib")
+        seen = measured_env(tmp, PYTHONPATH="src:lib", env=env)
         run_dir = Path(tmp) / "run"
         assert f"{run_dir}/hook:src:lib" == seen["PYTHONPATH"]
         assert str(run_dir / "coverage.rc") == seen["COVERAGE_PROCESS_START"]
 
 
-def test_the_rc_file_names_the_run_and_the_root() -> None:
+def test_the_rc_file_names_the_run_and_the_root(env: support.Env) -> None:
     """The run's rc file: its data file in the run, the tree as source."""
     with tempfile.TemporaryDirectory() as tmp:
-        measured_env(tmp)
+        measured_env(tmp, env=env)
         rc = (Path(tmp) / "run" / "coverage.rc").read_text()
         tree = (Path(tmp) / "tree").resolve()
         assert f"source = {tree}\n" in rc
@@ -176,25 +180,25 @@ def test_the_rc_file_names_the_run_and_the_root() -> None:
         assert "branch = true\n" in rc
 
 
-def test_the_hook_is_added_once() -> None:
+def test_the_hook_is_added_once(env: support.Env) -> None:
     """A measured command run inside another adds nothing twice."""
     with tempfile.TemporaryDirectory() as tmp:
         hook = Path(tmp) / "run" / "hook"
-        seen = measured_env(tmp, PYTHONPATH=f"{hook}:src")
+        seen = measured_env(tmp, PYTHONPATH=f"{hook}:src", env=env)
         assert f"{hook}:src" == seen["PYTHONPATH"]
 
 
-def test_a_task_plpgsql_report_is_kept() -> None:
+def test_a_task_plpgsql_report_is_kept(env: support.Env) -> None:
     """An ORG_PLPGSQL_COVERAGE the task set is not replaced."""
     with tempfile.TemporaryDirectory() as tmp:
-        seen = measured_env(tmp, ORG_PLPGSQL_COVERAGE="/own/reports")
+        seen = measured_env(tmp, ORG_PLPGSQL_COVERAGE="/own/reports", env=env)
         assert seen["ORG_PLPGSQL_COVERAGE"] == "/own/reports"
 
 
-def test_the_plpgsql_reports_land_in_the_run_directory() -> None:
+def test_the_plpgsql_reports_land_in_the_run_directory(env: support.Env) -> None:
     """Unset by the task, the reports directory is the run's (#2163)."""
     with tempfile.TemporaryDirectory() as tmp:
-        seen = measured_env(tmp)
+        seen = measured_env(tmp, env=env)
         assert (
             str(Path(tmp) / "run" / "plpgsql-coverage") == seen["ORG_PLPGSQL_COVERAGE"]
         )
@@ -203,15 +207,15 @@ def test_the_plpgsql_reports_land_in_the_run_directory() -> None:
         assert not (Path(tmp) / "run" / "plpgsql-coverage").exists()
 
 
-def test_it_runs_under_sh() -> None:
+def test_it_runs_under_sh(env: support.Env) -> None:
     """Named from an `sh -c` line, as a task with `shell = "sh -c"` does."""
     with tempfile.TemporaryDirectory() as tmp:
-        tree = plant(Path(tmp), floor=True)
+        tree = plant(Path(tmp), floor=True, env=env)
         line = f'"{MEASURED}" sh -c \'printf %s "$PYTHONPATH"\''
         out = subprocess.run(
             [SH, "-c", line],
             cwd=tree,
-            env=support.env(ORG_COVERAGE_RUN=str(Path(tmp) / "run"), PYTHONPATH="src"),
+            env=env(ORG_COVERAGE_RUN=str(Path(tmp) / "run"), PYTHONPATH="src"),
             capture_output=True,
             text=True,
             check=False,
@@ -235,16 +239,16 @@ def dead_pid() -> int:
 
 
 # The first call in a run removes run directories whose mise is gone.
-def test_a_dead_run_is_removed_and_a_live_one_kept() -> None:
+def test_a_dead_run_is_removed_and_a_live_one_kept(env: support.Env) -> None:
     """A sibling for a dead pid goes; one for a live pid stays."""
     with tempfile.TemporaryDirectory() as tmp:
-        tree = plant(Path(tmp), floor=True)
+        tree = plant(Path(tmp), floor=True, env=env)
         dead = Path(tmp) / f"org-coverage-{dead_pid()}"
         live = Path(tmp) / f"org-coverage-{os.getpid()}"
         for old in (dead, live):
             (old / "python").mkdir(parents=True)
         this = Path(tmp) / f"org-coverage-{dead_pid()}"
-        out = run(tree, [SH, "-c", "true"], ORG_COVERAGE_RUN=str(this))
+        out = run(tree, [SH, "-c", "true"], ORG_COVERAGE_RUN=str(this), make_env=env)
         assert out.returncode == 0, out.stderr
         assert not dead.exists(), "a dead run's directory was left"
         assert live.exists(), "a live run's directory was removed"
@@ -262,10 +266,10 @@ PYTHONPATH="{site}" exec "{python}" "$@"
 
 
 # Where coverage lives is asked once per run, then read from the run.
-def test_two_calls_in_one_run_start_coverage_once() -> None:
+def test_two_calls_in_one_run_start_coverage_once(env: support.Env) -> None:
     """A counting venv interpreter is started by the first call only."""
     with tempfile.TemporaryDirectory() as tmp:
-        tree = plant(Path(tmp), floor=True)
+        tree = plant(Path(tmp), floor=True, env=env)
         bin_dir, counter = Path(tmp) / "bin", Path(tmp) / "calls"
         bin_dir.mkdir()
         python = support.tool("python3")
@@ -280,8 +284,8 @@ def test_two_calls_in_one_run_start_coverage_once() -> None:
         stub.chmod(0o755)
         path = f"{bin_dir}{os.pathsep}{os.environ['PATH']}"
         given = {"ORG_COVERAGE_RUN": str(Path(tmp) / "run"), "PATH": path}
-        first = run(tree, DUMP, **given)
-        second = run(tree, DUMP, **given)
+        first = run(tree, DUMP, **given, make_env=env)
+        second = run(tree, DUMP, **given, make_env=env)
         assert first.returncode == 0, first.stderr
         assert second.returncode == 0, second.stderr
         assert counter.read_text() == "call\n"
@@ -299,10 +303,10 @@ def test_two_calls_in_one_run_start_coverage_once() -> None:
 
 
 # A coverage venv with no interpreter: refused in the one wording (#1788).
-def test_a_venv_with_no_interpreter_is_refused() -> None:
+def test_a_venv_with_no_interpreter_is_refused(env: support.Env) -> None:
     """No `python` beside the entry point: red, the remedy named."""
     with tempfile.TemporaryDirectory() as tmp:
-        tree = plant(Path(tmp), floor=True)
+        tree = plant(Path(tmp), floor=True, env=env)
         bin_dir = Path(tmp) / "bin"
         bin_dir.mkdir()
         entry = bin_dir / "coverage"
@@ -315,6 +319,7 @@ def test_a_venv_with_no_interpreter_is_refused() -> None:
             ORG_COVERAGE_RUN=str(Path(tmp) / "run"),
             PATH=path,
             MISE_TASK_NAME="test",
+            make_env=env,
         )
         assert done.returncode == 1
         assert re.search(
@@ -334,25 +339,27 @@ GO_REFUSAL = (
 
 
 # In a tree with go.mod, the cover flags join the command's GOFLAGS (#1651).
-def go_run(tmp: str, argv: list[str], **given: str) -> tuple[Path, str, int]:
+def go_run(
+    tmp: str, argv: list[str], *, env: support.Env, **given: str
+) -> tuple[Path, str, int]:
     """Run `measured` in a floored Go tree.
 
     Returns:
         The run's directory, and what the command printed or refused.
 
     """
-    tree = plant(Path(tmp), floor=True)
+    tree = plant(Path(tmp), floor=True, env=env)
     (tree / "go.mod").write_text("module example.com/x\n", encoding="utf-8")
-    track(tree, "go.mod")
+    track(tree, "go.mod", env=env)
     run_dir = Path(tmp) / "run"
-    out = run(tree, argv, ORG_COVERAGE_RUN=str(run_dir), **given)
+    out = run(tree, argv, ORG_COVERAGE_RUN=str(run_dir), **given, make_env=env)
     return run_dir, out.stdout + out.stderr, out.returncode
 
 
-def test_the_tasks_own_goflags_are_kept_in_front() -> None:
+def test_the_tasks_own_goflags_are_kept_in_front(env: support.Env) -> None:
     """The task's -trimpath stays; the cover flags and the program follow."""
     with tempfile.TemporaryDirectory() as tmp:
-        run_dir, out, status = go_run(tmp, DUMP, GOFLAGS="-trimpath")
+        run_dir, out, status = go_run(tmp, DUMP, GOFLAGS="-trimpath", env=env)
         assert status == 0, out
         seen = environment(out)
         assert "-trimpath " + GO_COVER.format(belt=BELT) == seen["GOFLAGS"]
@@ -360,11 +367,17 @@ def test_the_tasks_own_goflags_are_kept_in_front() -> None:
         assert (run_dir / "go").is_dir()
 
 
-def test_no_go_mod_leaves_goflags_alone() -> None:
+def test_no_go_mod_leaves_goflags_alone(env: support.Env) -> None:
     """A tree that is not Go is handed no Go flag."""
     with tempfile.TemporaryDirectory() as tmp:
-        tree = plant(Path(tmp), floor=True)
-        out = run(tree, DUMP, ORG_COVERAGE_RUN=str(Path(tmp) / "run"), GOFLAGS="-x")
+        tree = plant(Path(tmp), floor=True, env=env)
+        out = run(
+            tree,
+            DUMP,
+            ORG_COVERAGE_RUN=str(Path(tmp) / "run"),
+            GOFLAGS="-x",
+            make_env=env,
+        )
         assert out.returncode == 0, out.stderr
         seen = environment(out.stdout)
         assert seen["GOFLAGS"] == "-x"
@@ -398,11 +411,11 @@ def test_no_go_mod_leaves_goflags_alone() -> None:
     ],
 )
 def test_a_measuring_flag_of_the_tasks_own_is_refused(
-    argv: object, given: object, named: object
+    argv: object, given: object, named: object, env: support.Env
 ) -> None:
     """On its `go test`, in either spelling, or already in GOFLAGS."""
     with tempfile.TemporaryDirectory() as tmp:
-        _, out, status = go_run(tmp, argv, **given)
+        _, out, status = go_run(tmp, argv, **given, env=env)
         assert status == 1, out
         assert f"measured: {named}, {GO_REFUSAL}" == out
 
@@ -414,10 +427,12 @@ def test_a_measuring_flag_of_the_tasks_own_is_refused(
         "printf ok; exit 0; go test ./... -args -cover",
     ],
 )
-def test_words_outside_a_go_test_are_not_go_flags(line: object) -> None:
+def test_words_outside_a_go_test_are_not_go_flags(
+    line: object, env: support.Env
+) -> None:
     """`find -exec` and an `-args` tail are the command's, not go's."""
     with tempfile.TemporaryDirectory() as tmp:
-        _, out, status = go_run(tmp, [SH, "-c", line])
+        _, out, status = go_run(tmp, [SH, "-c", line], env=env)
         assert status == 0, out
         assert out == "ok"
 
@@ -480,7 +495,13 @@ CARGO_THEN_LLVM_COV = [SH, "-c", "cargo test && cargo llvm-cov --lcov"]
 
 # In a tree with Cargo.toml the command's own cargo is instrumented (#1653).
 def rust_run(
-    tmp: str, argv: list[str], *, run_name: str = "run", **given: str
+    tmp: str,
+    argv: list[str],
+    *,
+    run_name: str = "run",
+    env: support.Env,
+    rustc: support.Rustc,
+    **given: str,
 ) -> tuple[Path, subprocess.CompletedProcess[str], list[str]]:
     """Run `measured` in a floored Rust tree, beside a stand-in cargo.
 
@@ -491,14 +512,14 @@ def rust_run(
     base = Path(tmp)
     tree = base / "tree"
     if not tree.exists():
-        tree = plant(base, floor=True)
+        tree = plant(base, floor=True, env=env)
         (tree / "Cargo.toml").write_text("[workspace]\n", encoding="utf-8")
-        track(tree, "Cargo.toml")
+        track(tree, "Cargo.toml", env=env)
         stubs = base / "stubs"
         stubs.mkdir()
         (stubs / "cargo").write_text(CARGO, encoding="utf-8")
         (stubs / "cargo").chmod(0o755)
-        support.rustc(stubs)
+        rustc(stubs)
     log = base / "cargo.log"
     path = f"{base / 'stubs'}{os.pathsep}{os.environ['PATH']}"
     out = run(
@@ -508,15 +529,18 @@ def rust_run(
         PATH=path,
         STUB_LOG=str(log),
         **({"RUSTUP_TOOLCHAIN": "stable"} | given),
+        make_env=env,
     )
     calls = log.read_text().splitlines() if log.exists() else []
     return tree.resolve(), out, calls
 
 
-def test_the_target_directory_is_set_before_show_env_is_asked() -> None:
+def test_the_target_directory_is_set_before_show_env_is_asked(
+    env: support.Env, rustc: support.Rustc
+) -> None:
     """`<target>/llvm-cov-target-<digest>`, exported, then show-env under it."""
     with tempfile.TemporaryDirectory() as tmp:
-        tree, out, calls = rust_run(tmp, DUMP)
+        tree, out, calls = rust_run(tmp, DUMP, env=env, rustc=rustc)
         assert out.returncode == 0, out.stderr
         seen = environment(out.stdout)
         target = f"{tree}/target/llvm-cov-target-{STABLE}"
@@ -526,7 +550,9 @@ def test_the_target_directory_is_set_before_show_env_is_asked() -> None:
         assert f"llvm-cov show-env --sh | CARGO_TARGET_DIR={target}" in calls
 
 
-def test_old_profiles_are_cleaned_once_per_run() -> None:
+def test_old_profiles_are_cleaned_once_per_run(
+    env: support.Env, rustc: support.Rustc
+) -> None:
     """Two calls in one run clean once; the next run cleans again.
 
     The first run has ended before the next starts: its directory is
@@ -537,7 +563,7 @@ def test_old_profiles_are_cleaned_once_per_run() -> None:
         for run_name in ("run", "run", "next"):
             if run_name == "next":
                 shutil.rmtree(Path(tmp) / "run")
-            _, out, calls = rust_run(tmp, DUMP, run_name=run_name)
+            _, out, calls = rust_run(tmp, DUMP, run_name=run_name, env=env, rustc=rustc)
             assert out.returncode == 0, out.stderr
         target = f"{Path(tmp).resolve()}/tree/target/llvm-cov-target-{STABLE}"
         cleaned = [c for c in calls if c.startswith("llvm-cov clean")]
@@ -547,21 +573,25 @@ def test_old_profiles_are_cleaned_once_per_run() -> None:
         assert twice == cleaned
 
 
-def test_a_directory_another_live_run_holds_is_refused() -> None:
+def test_a_directory_another_live_run_holds_is_refused(
+    env: support.Env, rustc: support.Rustc
+) -> None:
     """The planted row (#2062): another live run's claim ends the call.
 
     On main the second run cleaned the first one's profiles and ran
     its suite into the same directory.
     """
     with tempfile.TemporaryDirectory() as tmp:
-        tree, out, _ = rust_run(tmp, DUMP)
+        tree, out, _ = rust_run(tmp, DUMP, env=env, rustc=rustc)
         assert out.returncode == 0, out.stderr
         target = tree / "target" / f"llvm-cov-target-{STABLE}"
         other = Path(tmp).resolve() / f"org-coverage-{os.getpid()}"
         other.mkdir()
         (target / ".org-coverage-owner").write_text(f"{other}\n")
         (Path(tmp) / "cargo.log").unlink()
-        _, out, calls = rust_run(tmp, ["cargo", "test"], run_name="next")
+        _, out, calls = rust_run(
+            tmp, ["cargo", "test"], run_name="next", env=env, rustc=rustc
+        )
         assert out.returncode == 1, out.stderr
         assert (
             f"{target} is being measured by another run ({other});"
@@ -572,7 +602,9 @@ def test_a_directory_another_live_run_holds_is_refused() -> None:
         assert f"{other}\n" == (target / ".org-coverage-owner").read_text()
 
 
-def test_the_build_directory_is_tagged_before_its_clean() -> None:
+def test_the_build_directory_is_tagged_before_its_clean(
+    env: support.Env, rustc: support.Rustc
+) -> None:
     """The planted row (#2070): cargo cleans only a tagged directory.
 
     On main the claim made the directory untagged, cargo refused the
@@ -580,7 +612,9 @@ def test_the_build_directory_is_tagged_before_its_clean() -> None:
     measuring beside the previous build's executables.
     """
     with tempfile.TemporaryDirectory() as tmp:
-        tree, out, calls = rust_run(tmp, ["cargo", "test"], STUB_REFUSE_UNTAGGED="1")
+        tree, out, calls = rust_run(
+            tmp, ["cargo", "test"], STUB_REFUSE_UNTAGGED="1", env=env, rustc=rustc
+        )
         assert out.returncode == 0, out.stderr
         assert "didn't exit successfully" not in out.stderr
         target = tree / "target" / f"llvm-cov-target-{STABLE}"
@@ -588,11 +622,16 @@ def test_the_build_directory_is_tagged_before_its_clean() -> None:
         assert f"test | CARGO_TARGET_DIR={target}" in calls
 
 
-def test_a_refused_clean_ends_the_call() -> None:
+def test_a_refused_clean_ends_the_call(env: support.Env, rustc: support.Rustc) -> None:
     """A clean cargo refused is red by name, and nothing is built."""
     with tempfile.TemporaryDirectory() as tmp:
         tree, out, calls = rust_run(
-            tmp, ["cargo", "test"], STUB_REFUSE_UNTAGGED="1", run_name="plant"
+            tmp,
+            ["cargo", "test"],
+            STUB_REFUSE_UNTAGGED="1",
+            run_name="plant",
+            env=env,
+            rustc=rustc,
         )
         target = tree / "target" / f"llvm-cov-target-{STABLE}"
         (target / "CACHEDIR.TAG").unlink()
@@ -605,7 +644,12 @@ def test_a_refused_clean_ends_the_call() -> None:
         )
         (Path(tmp) / "cargo.log").unlink()
         _, out, calls = rust_run(
-            tmp, ["cargo", "test"], STUB_REFUSE_UNTAGGED="1", run_name="next"
+            tmp,
+            ["cargo", "test"],
+            STUB_REFUSE_UNTAGGED="1",
+            run_name="next",
+            env=env,
+            rustc=rustc,
         )
         assert out.returncode == 1, out.stderr
         assert f"the workspace clean of {target} did not happen" in out.stderr
@@ -613,7 +657,9 @@ def test_a_refused_clean_ends_the_call() -> None:
         assert built == NO_CALLS
 
 
-def test_a_call_beside_the_first_waits_for_its_clean() -> None:
+def test_a_call_beside_the_first_waits_for_its_clean(
+    env: support.Env, rustc: support.Rustc
+) -> None:
     """Two calls in one run, side by side: both build after the clean (#2061).
 
     On main the second call found the marker the first had just made
@@ -622,13 +668,13 @@ def test_a_call_beside_the_first_waits_for_its_clean() -> None:
     """
     with tempfile.TemporaryDirectory() as tmp:
         # Plant the tree and its stubs; this call measures nothing.
-        rust_run(tmp, [SH, "-c", "true"], run_name="plant")
+        rust_run(tmp, [SH, "-c", "true"], run_name="plant", env=env, rustc=rustc)
         base = Path(tmp)
         # The planting run has ended: its claim lapses (#2062).
         shutil.rmtree(base / "plant")
         log = base / "cargo.log"
         log.unlink()
-        env = support.env(
+        environ = env(
             ORG_COVERAGE_RUN=str(base / "run"),
             PATH=f"{base / 'stubs'}{os.pathsep}{os.environ['PATH']}",
             STUB_LOG=str(log),
@@ -639,7 +685,7 @@ def test_a_call_beside_the_first_waits_for_its_clean() -> None:
             subprocess.Popen(
                 [str(MEASURED), SH, "-c", f"cargo test --{name}"],
                 cwd=base / "tree",
-                env=env,
+                env=environ,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -657,7 +703,9 @@ def test_a_call_beside_the_first_waits_for_its_clean() -> None:
             assert lines.index(f"test --{name}") > ended, lines
 
 
-def test_two_compilers_measure_into_two_directories() -> None:
+def test_two_compilers_measure_into_two_directories(
+    env: support.Env, rustc: support.Rustc
+) -> None:
     """Two `rustc` differing only in `release:`: two directories (#1877).
 
     On main both exported `<target>/llvm-cov-target`, so a bump's
@@ -667,7 +715,9 @@ def test_two_compilers_measure_into_two_directories() -> None:
     seen = []
     for release in ("1.97.1", "1.100.0"):
         with tempfile.TemporaryDirectory() as tmp:
-            tree, out, _ = rust_run(tmp, DUMP, RUSTUP_TOOLCHAIN=release)
+            tree, out, _ = rust_run(
+                tmp, DUMP, RUSTUP_TOOLCHAIN=release, env=env, rustc=rustc
+            )
             assert out.returncode == 0, out.stderr
             verbose = support.rustc_verbose(release)
             digest = gate_cache_key.directory_digest(verbose)
@@ -677,21 +727,25 @@ def test_two_compilers_measure_into_two_directories() -> None:
     assert seen[0] != seen[1]
 
 
-def test_no_cargo_toml_is_handed_no_rust_environment() -> None:
+def test_no_cargo_toml_is_handed_no_rust_environment(env: support.Env) -> None:
     """A floored tree that is not Rust: no cargo is asked anything."""
     with tempfile.TemporaryDirectory() as tmp:
-        tree = plant(Path(tmp), floor=True)
-        out = run(tree, DUMP, ORG_COVERAGE_RUN=str(Path(tmp) / "run"))
+        tree = plant(Path(tmp), floor=True, env=env)
+        out = run(tree, DUMP, ORG_COVERAGE_RUN=str(Path(tmp) / "run"), make_env=env)
         assert out.returncode == 0, out.stderr
         seen = environment(out.stdout)
         assert "CARGO_TARGET_DIR" not in seen
         assert "LLVM_PROFILE_FILE" not in seen
 
 
-def test_a_metadata_with_no_target_directory_is_refused() -> None:
+def test_a_metadata_with_no_target_directory_is_refused(
+    env: support.Env, rustc: support.Rustc
+) -> None:
     """Nowhere to measure into: refused by name, and nothing runs."""
     with tempfile.TemporaryDirectory() as tmp:
-        _, out, calls = rust_run(tmp, [SH, "-c", "echo ran"], STUB_NO_TARGET="1")
+        _, out, calls = rust_run(
+            tmp, [SH, "-c", "echo ran"], STUB_NO_TARGET="1", env=env, rustc=rustc
+        )
         assert out.returncode == 1
         assert out.stderr == (
             "measured: cargo metadata named no target_directory — nowhere to"
@@ -736,20 +790,22 @@ def test_a_metadata_with_no_target_directory_is_refused() -> None:
     ],
 )
 def test_a_task_that_measures_itself_is_refused(
-    argv: object, given: object, named: object
+    argv: object, given: object, named: object, env: support.Env, rustc: support.Rustc
 ) -> None:
     """Item 10's four, by message, before cargo is asked anything."""
     with tempfile.TemporaryDirectory() as tmp:
-        _, out, calls = rust_run(tmp, argv, **given)
+        _, out, calls = rust_run(tmp, argv, **given, env=env, rustc=rustc)
         assert out.returncode == 1, out.stderr
         assert f"measured: {named}, {RUST_REFUSAL}" == out.stderr
         assert calls == NO_CALLS
 
 
-def test_llvm_cov_outside_a_cargo_is_not_refused() -> None:
+def test_llvm_cov_outside_a_cargo_is_not_refused(
+    env: support.Env, rustc: support.Rustc
+) -> None:
     """A word `llvm-cov` no cargo starts is the command's own."""
     with tempfile.TemporaryDirectory() as tmp:
-        _, out, _ = rust_run(tmp, [SH, "-c", "echo llvm-cov"])
+        _, out, _ = rust_run(tmp, [SH, "-c", "echo llvm-cov"], env=env, rustc=rustc)
         assert out.returncode == 0, out.stderr
         assert out.stdout == "llvm-cov\n"
 
@@ -769,8 +825,9 @@ LOCK = (
 class VitestMeasured:
     """In a vitest tree the run itself carries the coverage flags (#2105)."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Give the row's scratch directories one home, removed after it."""
+        self.make_env = env
         self.tmp = tmp_path
 
     def vitest_run(
@@ -784,26 +841,34 @@ class VitestMeasured:
         """
         tmp = tempfile.mkdtemp(dir=self.tmp)
         base = Path(tmp)
-        tree = plant(base, floor=floor)
+        tree = plant(base, floor=floor, env=self.make_env)
         (tree / "package.json").write_text("{}", encoding="utf-8")
         (tree / "pnpm-lock.yaml").write_text(LOCK, encoding="utf-8")
-        track(tree, "package.json", "pnpm-lock.yaml")
+        track(tree, "package.json", "pnpm-lock.yaml", env=self.make_env)
         stubs = base / "stubs"
         stubs.mkdir()
         (stubs / "pnpm").write_text(PNPM, encoding="utf-8")
         (stubs / "pnpm").chmod(0o755)
         run_dir = base / "run"
         path = f"{stubs}{os.pathsep}{os.environ['PATH']}"
-        out = run(tree, argv, ORG_COVERAGE_RUN=str(run_dir), PATH=path)
+        out = run(
+            tree, argv, ORG_COVERAGE_RUN=str(run_dir), PATH=path, make_env=self.make_env
+        )
         for _ in range(calls - 1):
-            out = run(tree, argv, ORG_COVERAGE_RUN=str(run_dir), PATH=path)
+            out = run(
+                tree,
+                argv,
+                ORG_COVERAGE_RUN=str(run_dir),
+                PATH=path,
+                make_env=self.make_env,
+            )
         return run_dir, out
 
 
 @fixture
-def vitest_measured(tmp_path: Path) -> VitestMeasured:
+def vitest_measured(tmp_path: Path, env: support.Env) -> VitestMeasured:
     """Give each row its own VitestMeasured."""
-    return VitestMeasured(tmp_path)
+    return VitestMeasured(tmp_path, env=env)
 
 
 def execd(out: subprocess.CompletedProcess[str]) -> list[str]:

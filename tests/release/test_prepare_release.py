@@ -130,7 +130,7 @@ IDENTITY_EMAIL = "harness@example.invalid"
 # supplied explicitly through `overrides`.
 
 
-def hermetic_env(home: Path, **overrides: str) -> dict[str, str]:
+def hermetic_env(home: Path, *, env: support.Env, **overrides: str) -> dict[str, str]:
     """Build a fixture's environment through mise/support.py (#1508, #1514).
 
     Returns:
@@ -151,14 +151,17 @@ def hermetic_env(home: Path, **overrides: str) -> dict[str, str]:
         "CARGO_HOME": os.environ.get("CARGO_HOME", str(real_home / ".cargo")),
         "RUSTUP_HOME": os.environ.get("RUSTUP_HOME", str(real_home / ".rustup")),
     }
-    return support.env(home, **(stated | overrides))
+    return env(home, **(stated | overrides))
 
 
 class Tree:
     """A throwaway releasable repository with a chosen shape."""
 
-    def __init__(self, root: str, changelog: str | None = SCAFFOLD) -> None:
+    def __init__(
+        self, root: str, changelog: str | None = SCAFFOLD, *, env: support.Env
+    ) -> None:
         """Lay out a crate at 1.2.3, tag it, and add one releasable commit."""
+        self.make_env = env
         # The repository and the HOME its git runs under are siblings,
         # never nested: anything git writes for this fixture would
         # otherwise land inside the very tree it is about to stage.
@@ -199,7 +202,7 @@ class Tree:
         subprocess.run(
             [GIT, *args],
             cwd=self.root,
-            env=hermetic_env(self.home),
+            env=hermetic_env(self.home, env=self.make_env),
             check=True,
             capture_output=True,
         )
@@ -209,7 +212,7 @@ class Tree:
         subprocess.run(
             [support.tool("cargo"), *args],
             cwd=self.root,
-            env=hermetic_env(self.home),
+            env=hermetic_env(self.home, env=self.make_env),
             check=True,
             capture_output=True,
         )
@@ -247,7 +250,7 @@ class Tree:
         subprocess.run(
             [support.tool("cargo"), "generate-lockfile", "--offline"],
             cwd=self.root / "fuzz",
-            env=hermetic_env(self.home),
+            env=hermetic_env(self.home, env=self.make_env),
             check=True,
             capture_output=True,
         )
@@ -274,6 +277,7 @@ class Tree:
                 GITHUB_REPOSITORY="monumental-archive/under-test",
                 RUNNER_TEMP=str(runner_temp),
                 GITHUB_OUTPUT=str(outputs),
+                env=self.make_env,
             ),
             capture_output=True,
             text=True,
@@ -317,10 +321,10 @@ def _set_up_test_the_changelog_contract() -> None:
 
 
 @pytest.mark.usefixtures("_set_up_test_the_changelog_contract")
-def test_a_missing_changelog_refuses_and_names_the_file() -> None:
+def test_a_missing_changelog_refuses_and_names_the_file(env: support.Env) -> None:
     """#742's first data point: edtf carried no root CHANGELOG.md."""
     with TemporaryDirectory() as d:
-        result, emitted = Tree(d, changelog=None).prepare()
+        result, emitted = Tree(d, changelog=None, env=env).prepare()
     assert result.returncode == 1, result.stdout
     assert (
         "reading CHANGELOG.md: open CHANGELOG.md: no such file or directory"
@@ -330,7 +334,7 @@ def test_a_missing_changelog_refuses_and_names_the_file() -> None:
 
 
 @pytest.mark.usefixtures("_set_up_test_the_changelog_contract")
-def test_a_version_inside_any_h2_is_that_versions_section() -> None:
+def test_a_version_inside_any_h2_is_that_versions_section(env: support.Env) -> None:
     """#742's second data point, and the deriver is RIGHT.
 
     The heading was meant as prose. It carries 1.3.0, the version
@@ -339,22 +343,24 @@ def test_a_version_inside_any_h2_is_that_versions_section() -> None:
     because the author did not intend a section.
     """
     with TemporaryDirectory() as d:
-        result, _ = Tree(d, changelog=PROSE_H2_CARRYING_A_VERSION).prepare()
+        result, _ = Tree(d, changelog=PROSE_H2_CARRYING_A_VERSION, env=env).prepare()
     assert result.returncode == 1, result.stdout
     assert "CHANGELOG.md already carries a section for 1.3.0" in result.stderr
 
 
 @pytest.mark.usefixtures("_set_up_test_the_changelog_contract")
-def test_a_conventional_section_for_the_version_refuses_identically() -> None:
+def test_a_conventional_section_for_the_version_refuses_identically(
+    env: support.Env,
+) -> None:
     """One rule, not a quirk: `## [1.3.0]` gets the same refusal."""
     with TemporaryDirectory() as d:
-        result, _ = Tree(d, changelog=REAL_SECTION).prepare()
+        result, _ = Tree(d, changelog=REAL_SECTION, env=env).prepare()
     assert result.returncode == 1, result.stdout
     assert "CHANGELOG.md already carries a section for 1.3.0" in result.stderr
 
 
 @pytest.mark.usefixtures("_set_up_test_the_changelog_contract")
-def test_the_scaffold_reports_no_section_for_any_version() -> None:
+def test_the_scaffold_reports_no_section_for_any_version(env: support.Env) -> None:
     """Measure #742's own "done when" on the real scaffold file.
 
     The file the org hands every new repository must feed the
@@ -365,7 +371,7 @@ def test_the_scaffold_reports_no_section_for_any_version() -> None:
     grows a version-shaped heading.
     """
     with TemporaryDirectory() as d:
-        tree = Tree(d, changelog=SCAFFOLD)
+        tree = Tree(d, changelog=SCAFFOLD, env=env)
         result, emitted = tree.prepare()
         written = (tree.root / "CHANGELOG.md").read_text()
     assert result.returncode == 0, result.stderr
@@ -384,7 +390,9 @@ def _set_up_test_the_tree_decisions() -> None:
 
 
 @pytest.mark.usefixtures("_set_up_test_the_tree_decisions")
-def test_the_lockfiles_are_declared_to_the_plan_not_appended_after() -> None:
+def test_the_lockfiles_are_declared_to_the_plan_not_appended_after(
+    env: support.Env,
+) -> None:
     """`--also` carries both cargo workspaces into the plan's file list.
 
     The commit's contents are one list with one author. A lockfile
@@ -392,7 +400,7 @@ def test_the_lockfiles_are_declared_to_the_plan_not_appended_after() -> None:
     is the shape #374 found four releases of drift in.
     """
     with TemporaryDirectory() as d:
-        tree = Tree(d)
+        tree = Tree(d, env=env)
         tree.add_fuzz_workspace()
         result, _ = tree.prepare()
         commit = decoded.as_object(tree.plan()["commit"], "the plan's commit")
@@ -411,10 +419,10 @@ def test_the_lockfiles_are_declared_to_the_plan_not_appended_after() -> None:
 
 
 @pytest.mark.usefixtures("_set_up_test_the_tree_decisions")
-def test_a_silent_range_releases_nothing_and_says_so() -> None:
+def test_a_silent_range_releases_nothing_and_says_so(env: support.Env) -> None:
     """chore/ci/docs/style/test release nothing; the step is not a failure."""
     with TemporaryDirectory() as d:
-        tree = Tree(d)
+        tree = Tree(d, env=env)
         tree.git("tag", "-a", "v1.3.0", "-m", "v1.3.0")
         tree.write("docs/notes.md", "notes\n")
         tree.commit("docs: write some notes")
@@ -426,7 +434,9 @@ def test_a_silent_range_releases_nothing_and_says_so() -> None:
 
 
 @pytest.mark.usefixtures("_set_up_test_the_tree_decisions")
-def test_the_release_branch_is_emitted_on_both_paths_and_agrees() -> None:
+def test_the_release_branch_is_emitted_on_both_paths_and_agrees(
+    env: support.Env,
+) -> None:
     """One spelling of the release branch, on both paths (#1260).
 
     A nothing plan names no branch, so the step that closes a stale
@@ -435,7 +445,7 @@ def test_the_release_branch_is_emitted_on_both_paths_and_agrees() -> None:
     open and close legs would maintain different branches.
     """
     with TemporaryDirectory() as d:
-        tree = Tree(d)
+        tree = Tree(d, env=env)
         result, releasing = tree.prepare()
         branch = decoded.as_object(tree.plan()["branch"], "the plan's branch")
         planned = decoded.as_str(branch["name"], "branch.name")
@@ -444,7 +454,7 @@ def test_the_release_branch_is_emitted_on_both_paths_and_agrees() -> None:
     assert planned
     assert planned == releasing["branch"]
     with TemporaryDirectory() as d:
-        tree = Tree(d)
+        tree = Tree(d, env=env)
         tree.git("tag", "-a", "v1.3.0", "-m", "v1.3.0")
         tree.write("docs/notes.md", "notes\n")
         tree.commit("docs: write some notes")
@@ -455,7 +465,7 @@ def test_the_release_branch_is_emitted_on_both_paths_and_agrees() -> None:
 
 
 @pytest.mark.usefixtures("_set_up_test_the_tree_decisions")
-def test_a_leftover_next_sql_stub_refuses_with_the_remedy() -> None:
+def test_a_leftover_next_sql_stub_refuses_with_the_remedy(env: support.Env) -> None:
     """Derived state written by hand is a refusal, never a rename (#132).
 
     The stub is checked AFTER the plan is derived, so this row also
@@ -463,7 +473,7 @@ def test_a_leftover_next_sql_stub_refuses_with_the_remedy() -> None:
     fails before anything is emitted.
     """
     with TemporaryDirectory() as d:
-        tree = Tree(d)
+        tree = Tree(d, env=env)
         tree.write("sql/demo--next.sql", "-- hand-authored\n")
         tree.commit("feat: leave a stub behind")
         result, emitted = tree.prepare()
@@ -475,7 +485,7 @@ def test_a_leftover_next_sql_stub_refuses_with_the_remedy() -> None:
 
 
 @pytest.mark.usefixtures("_set_up_test_the_tree_decisions")
-def test_an_untracked_next_sql_stub_is_not_a_refusal() -> None:
+def test_an_untracked_next_sql_stub_is_not_a_refusal(env: support.Env) -> None:
     """`git ls-files`, never a walker: an untracked file is not the tree.
 
     The belt's own convention, and the difference matters here — a
@@ -483,7 +493,7 @@ def test_an_untracked_next_sql_stub_is_not_a_refusal() -> None:
     refuse a release.
     """
     with TemporaryDirectory() as d:
-        tree = Tree(d)
+        tree = Tree(d, env=env)
         tree.write("sql/demo--next.sql", "-- never staged\n")
         result, emitted = tree.prepare()
     assert result.returncode == 0, result.stderr

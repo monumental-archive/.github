@@ -443,13 +443,22 @@ MEASURED_PGRX: list[str] = ["pgrx"]
 class Derive:
     """derive-coverage-floor.sh, read or measured, in a planted tree."""
 
-    def __init__(self, tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:
+    def __init__(
+        self,
+        tmp_path: Path,
+        capfd: pytest.CaptureFixture[str],
+        *,
+        canon: support.Canon,
+        env: support.Env,
+    ) -> None:
         """Plant the canon's two scripts, the stubs, and a tree with a floor."""
+        self.plant_canon = canon
+        self.make_env = env
         self.base = Path(str(tmp_path))
         # The canon whole, as the release job has it: a helper that comes
         # to import another belt module finds it, and only the
         # measurement is a stub.
-        canon = support.canon(
+        canon = self.plant_canon(
             self.base / "canon", stubs={"mise/coverage-measure.sh": MEASURE}
         )
         (canon / "mise" / "coverage-measure.sh").chmod(0o755)
@@ -462,7 +471,7 @@ class Derive:
         self.tree = self.base / "tree"
         self.tree.mkdir()
         (self.tree / "a.py").write_text("", encoding="utf-8")
-        env = support.env(self.base / "home")
+        env = self.make_env(self.base / "home")
         with pytest.MonkeyPatch.context() as patched:
             patched.chdir(self.tree)
             patched.setattr(sys, "stdin", io.StringIO(LEGS))
@@ -532,7 +541,7 @@ class Derive:
             The finished step.
 
         """
-        env = support.env(
+        env = self.make_env(
             self.base / "home",
             VERSION="1.1.0",
             GITHUB_REPOSITORY="monumental-archive/.github",
@@ -568,9 +577,14 @@ class Derive:
 
 
 @fixture
-def derive_state(tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> Derive:
+def derive_state(
+    tmp_path: Path,
+    capfd: pytest.CaptureFixture[str],
+    canon: support.Canon,
+    env: support.Env,
+) -> Derive:
     """Give each row its own Derive."""
-    return Derive(tmp_path, capfd)
+    return Derive(tmp_path, capfd, canon=canon, env=env)
 
 
 def test_the_commits_artifact_is_read_and_nothing_measured(

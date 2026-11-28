@@ -83,7 +83,9 @@ def workflow(extra: str = "") -> str:
     return f"on: push\njobs:\n  sign:\n    uses: {signer()}@{SHA} # main\n" + extra
 
 
-def lint(files: dict[str, str]) -> subprocess.CompletedProcess[str]:
+def lint(
+    files: dict[str, str], *, env: support.Env
+) -> subprocess.CompletedProcess[str]:
     """Run the task's body in a git tree tracking these files.
 
     Returns:
@@ -94,7 +96,7 @@ def lint(files: dict[str, str]) -> subprocess.CompletedProcess[str]:
         root = Path(tmp)
         tree = root / "repo"
         tree.mkdir()
-        env = support.env(
+        environ = env(
             root / "home",
             ORG_BELT_DIR=str(BELT),
             ORG_CANON_DIR=str(CANON),
@@ -104,13 +106,13 @@ def lint(files: dict[str, str]) -> subprocess.CompletedProcess[str]:
             path = tree / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text, encoding="utf-8")
-        subprocess.run([GIT, "init", "-q"], cwd=tree, env=env, check=True)
-        subprocess.run([GIT, "add", "--", *files], cwd=tree, env=env, check=True)
+        subprocess.run([GIT, "init", "-q"], cwd=tree, env=environ, check=True)
+        subprocess.run([GIT, "add", "--", *files], cwd=tree, env=environ, check=True)
         as_mise = support.task_run("lint:signer-pin", body())
         return subprocess.run(
             as_mise.argv,
             cwd=tree,
-            env=env | as_mise.env,
+            env=environ | as_mise.env,
             capture_output=True,
             text=True,
             check=False,
@@ -118,26 +120,29 @@ def lint(files: dict[str, str]) -> subprocess.CompletedProcess[str]:
 
 
 # The `uses:` lines are the signer identity, and nothing else is (#317).
-def test_the_uses_lines_alone_pass() -> None:
+def test_the_uses_lines_alone_pass(env: support.Env) -> None:
     """The baseline: one digest, no pin file."""
-    done = lint({".github/workflows/sign.yml": workflow()})
+    done = lint({".github/workflows/sign.yml": workflow()}, env=env)
     assert done.returncode == 0, done.stderr
     assert f"lint:signer-pin: all signer references agree on {SHA}\n" == done.stdout
 
 
-def test_no_workflows_is_skipped_by_name() -> None:
+def test_no_workflows_is_skipped_by_name(env: support.Env) -> None:
     """No tracked workflow, an untracked one beside: the task skips."""
-    done = lint({"README": "x\n"})
+    done = lint({"README": "x\n"}, env=env)
     assert done.returncode == 0, done.stderr
     assert done.stdout == "lint:signer-pin: no workflows, skipped\n"
 
 
-def test_a_pin_file_beside_them_is_refused() -> None:
+def test_a_pin_file_beside_them_is_refused(env: support.Env) -> None:
     """security/signer.pin back, even agreeing, is the second copy."""
-    done = lint({
-        ".github/workflows/sign.yml": workflow(),
-        "security/signer.pin": f"{SHA}\n",
-    })
+    done = lint(
+        {
+            ".github/workflows/sign.yml": workflow(),
+            "security/signer.pin": f"{SHA}\n",
+        },
+        env=env,
+    )
     assert done.returncode == 1
     assert (
         "lint:signer-pin: security/signer.pin exists — the second copy of the"
@@ -145,11 +150,11 @@ def test_a_pin_file_beside_them_is_refused() -> None:
     ) in done.stderr
 
 
-def test_a_workflow_reading_the_pin_is_refused() -> None:
+def test_a_workflow_reading_the_pin_is_refused(env: support.Env) -> None:
     """A step still reading the deleted file is named."""
     step = "      - run: cat security/signer.pin\n"
     reader = workflow("  verify:\n    steps:\n" + step)
-    done = lint({".github/workflows/sign.yml": reader})
+    done = lint({".github/workflows/sign.yml": reader}, env=env)
     assert done.returncode == 1
     assert (
         "lint:signer-pin: workflows read security/signer.pin (on a non-comment"
@@ -179,10 +184,11 @@ def literal_message(*found: str) -> list[str]:
 class Branches:
     """Each branch of the helper, its whole message asserted."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Plant an empty repository: the pin is asked of git (#2013)."""
+        self.make_env = env
         self.tree = tmp_path
-        self.env = support.env(MISE_TASK_NAME=TASK)
+        self.env = self.make_env(MISE_TASK_NAME=TASK)
         self.git("init", "-q")
 
     def git(self, *args: str) -> None:
@@ -237,9 +243,9 @@ class Branches:
 
 
 @fixture
-def branches(tmp_path: Path) -> Branches:
+def branches(tmp_path: Path, env: support.Env) -> Branches:
     """Give each row its own Branches."""
-    return Branches(tmp_path)
+    return Branches(tmp_path, env=env)
 
 
 def test_agreeing_references_pass(

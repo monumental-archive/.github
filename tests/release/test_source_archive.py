@@ -108,6 +108,8 @@ def run_helper(
     *,
     fail: bool = False,
     capfd: pytest.CaptureFixture[str],
+    canon: support.Canon,
+    env: support.Env,
 ) -> Run:
     """Call the command with two planted builds and a tracked count.
 
@@ -122,11 +124,11 @@ def run_helper(
             p.mkdir()
         (stubs / "git").write_text(GIT_STUB)
         (stubs / "git").chmod(0o755)
-        support.canon(work / ".org-canon")
+        canon(work / ".org-canon")
         for i, data in enumerate(archives):
             (planted / f"{i}.tar.gz").write_bytes(data)
         log = tmp / "git.log"
-        env = support.env(
+        environ = env(
             PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}",
             VERSION=VERSION,
             GITHUB_REPOSITORY=repo,
@@ -137,7 +139,7 @@ def run_helper(
             STUB_FAIL="1" if fail else "",
         )
         with pytest.MonkeyPatch.context() as patched:
-            for name, value in env.items():
+            for name, value in environ.items():
                 patched.setenv(name, value)
             patched.chdir(work)
             patched.setattr(sys, "argv", [COMMAND])
@@ -180,10 +182,12 @@ def test_the_shipped_step_calls_the_helper() -> None:
 
 
 # Two equal builds of the tagged tree pass.
-def test_two_equal_builds_ship_one_archive(capfd: pytest.CaptureFixture[str]) -> None:
+def test_two_equal_builds_ship_one_archive(
+    capfd: pytest.CaptureFixture[str], canon: support.Canon, env: support.Env
+) -> None:
     """Both builds archive the tag under the release's prefix."""
     data = tarball(5)
-    run = run_helper((data, data), tracked=5, capfd=capfd)
+    run = run_helper((data, data), tracked=5, capfd=capfd, canon=canon, env=env)
     assert run.returncode == 0, run.stdout + run.stderr
     base = f"edtf-{VERSION}"
     assert f"::notice::{base}.tar.gz: 5 entries, digest {sha(data)}\n" == run.stdout
@@ -198,12 +202,17 @@ def test_two_equal_builds_ship_one_archive(capfd: pytest.CaptureFixture[str]) ->
 
 
 def test_a_dot_repository_gets_a_visible_name(
-    capfd: pytest.CaptureFixture[str],
+    capfd: pytest.CaptureFixture[str], canon: support.Canon, env: support.Env
 ) -> None:
     """The .github repository's asset is github-<version>.tar.gz."""
     data = tarball(2)
     run = run_helper(
-        (data, data), tracked=2, repo="monumental-archive/.github", capfd=capfd
+        (data, data),
+        tracked=2,
+        repo="monumental-archive/.github",
+        capfd=capfd,
+        canon=canon,
+        env=env,
     )
     assert run.returncode == 0, run.stdout + run.stderr
     shipped: list[str] = [f"github-{VERSION}.tar.gz"]
@@ -211,19 +220,21 @@ def test_a_dot_repository_gets_a_visible_name(
 
 
 def test_more_than_half_the_tracked_files_is_enough(
-    capfd: pytest.CaptureFixture[str],
+    capfd: pytest.CaptureFixture[str], canon: support.Canon, env: support.Env
 ) -> None:
     """Four entries for seven tracked files: 4 > 7 // 2."""
     data = tarball(4)
-    run = run_helper((data, data), tracked=7, capfd=capfd)
+    run = run_helper((data, data), tracked=7, capfd=capfd, canon=canon, env=env)
     assert run.returncode == 0, run.stdout + run.stderr
 
 
 # One row per refusal, each message asserted.
-def test_two_builds_that_differ_are_refused(capfd: pytest.CaptureFixture[str]) -> None:
+def test_two_builds_that_differ_are_refused(
+    capfd: pytest.CaptureFixture[str], canon: support.Canon, env: support.Env
+) -> None:
     """The archive is not reproducible, so nothing can check it."""
     a, b = tarball(5), tarball(5, salt="x")
-    run = run_helper((a, b), tracked=5, capfd=capfd)
+    run = run_helper((a, b), tracked=5, capfd=capfd, canon=canon, env=env)
     assert run.returncode == 1
     assert (
         f"::error::source-archive: source archive is not deterministic"
@@ -232,10 +243,12 @@ def test_two_builds_that_differ_are_refused(capfd: pytest.CaptureFixture[str]) -
     assert "ls-files" not in run.git
 
 
-def test_half_the_tracked_files_is_refused(capfd: pytest.CaptureFixture[str]) -> None:
+def test_half_the_tracked_files_is_refused(
+    capfd: pytest.CaptureFixture[str], canon: support.Canon, env: support.Env
+) -> None:
     """Three entries for seven tracked files: 3 <= 7 // 2."""
     data = tarball(3)
-    run = run_helper((data, data), tracked=7, capfd=capfd)
+    run = run_helper((data, data), tracked=7, capfd=capfd, canon=canon, env=env)
     assert run.returncode == 1
     assert (
         run.stderr
@@ -243,10 +256,12 @@ def test_half_the_tracked_files_is_refused(capfd: pytest.CaptureFixture[str]) ->
     )
 
 
-def test_an_empty_archive_is_refused(capfd: pytest.CaptureFixture[str]) -> None:
+def test_an_empty_archive_is_refused(
+    capfd: pytest.CaptureFixture[str], canon: support.Canon, env: support.Env
+) -> None:
     """No entries at all is a truncated stream."""
     data = tarball(0)
-    run = run_helper((data, data), tracked=4, capfd=capfd)
+    run = run_helper((data, data), tracked=4, capfd=capfd, canon=canon, env=env)
     assert run.returncode == 1
     assert (
         run.stderr
@@ -255,14 +270,16 @@ def test_an_empty_archive_is_refused(capfd: pytest.CaptureFixture[str]) -> None:
 
 
 def test_a_failing_git_fails_the_step_with_its_status(
-    capfd: pytest.CaptureFixture[str],
+    capfd: pytest.CaptureFixture[str], canon: support.Canon, env: support.Env
 ) -> None:
     """A tag git cannot archive: git's run.returncode and message.
 
     git's message is its own stderr, which the call reads.
     """
     data = tarball(1)
-    run = run_helper((data, data), tracked=1, fail=True, capfd=capfd)
+    run = run_helper(
+        (data, data), tracked=1, fail=True, capfd=capfd, canon=canon, env=env
+    )
     assert run.returncode == 128
     assert run.stderr == "fatal: not a valid object\n"
     assert run.stdout == ""

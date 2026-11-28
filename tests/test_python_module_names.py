@@ -37,7 +37,9 @@ def body() -> str:
     return decoded.as_str(task["run"], "the task's run")
 
 
-def run(tree: Path, home: Path) -> subprocess.CompletedProcess[str]:
+def run(
+    tree: Path, home: Path, *, env: support.Env
+) -> subprocess.CompletedProcess[str]:
     """Run the lint's body in a tree, with the belt as ORG_BELT_DIR.
 
     Returns:
@@ -48,7 +50,7 @@ def run(tree: Path, home: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         as_mise.argv,
         cwd=tree,
-        env=support.env(
+        env=env(
             home,
             ORG_BELT_DIR=str(BELT),
         )
@@ -59,7 +61,7 @@ def run(tree: Path, home: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
-def lint(files: list[str]) -> subprocess.CompletedProcess[str]:
+def lint(files: list[str], *, env: support.Env) -> subprocess.CompletedProcess[str]:
     """Plant a tree tracking files and run the lint in it.
 
     Returns:
@@ -70,26 +72,29 @@ def lint(files: list[str]) -> subprocess.CompletedProcess[str]:
         root = Path(tmp)
         tree = root / "repo"
         tree.mkdir()
-        env = support.env(root / "home")
+        environ = env(root / "home")
         (tree / "README.md").write_text("x\n", encoding="utf-8")
         for name in files:
             path = tree / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("x = 1\n", encoding="utf-8")
-        subprocess.run([GIT, "init", "-q"], cwd=tree, env=env, check=True)
-        subprocess.run([GIT, "add", "."], cwd=tree, env=env, check=True)
-        return run(tree, root / "home")
+        subprocess.run([GIT, "init", "-q"], cwd=tree, env=environ, check=True)
+        subprocess.run([GIT, "add", "."], cwd=tree, env=environ, check=True)
+        return run(tree, root / "home", env=env)
 
 
 # A Python file is named as a module, or the lint names it.
-def test_a_planted_hyphenated_file_is_red_by_name() -> None:
+def test_a_planted_hyphenated_file_is_red_by_name(env: support.Env) -> None:
     """Each hyphenated file is named; a hyphenated directory is not."""
-    done = lint([
-        "release/caller-pins.py",
-        "stubs/old-name.pyi",
-        "my-tools/fine_name.py",
-        "mise/module_name.py",
-    ])
+    done = lint(
+        [
+            "release/caller-pins.py",
+            "stubs/old-name.pyi",
+            "my-tools/fine_name.py",
+            "mise/module_name.py",
+        ],
+        env=env,
+    )
     assert done.returncode == 1
     assert done.stdout == ""
     assert (
@@ -100,9 +105,9 @@ def test_a_planted_hyphenated_file_is_red_by_name() -> None:
     ) == done.stderr
 
 
-def test_two_files_that_are_one_module_are_red_by_name() -> None:
+def test_two_files_that_are_one_module_are_red_by_name(env: support.Env) -> None:
     """One basename in two roots is one module: both are named (#1737)."""
-    done = lint(["mise/test_steps.py", "release/test_steps.py"])
+    done = lint(["mise/test_steps.py", "release/test_steps.py"], env=env)
     assert done.returncode == 1
     assert done.stdout == ""
     assert (
@@ -114,37 +119,37 @@ def test_two_files_that_are_one_module_are_red_by_name() -> None:
     ) == done.stderr
 
 
-def test_a_stub_beside_its_module_is_one_module() -> None:
+def test_a_stub_beside_its_module_is_one_module(env: support.Env) -> None:
     """A `.pyi` beside its own `.py` is that module's stub."""
-    done = lint(["mise/helper.py", "mise/helper.pyi"])
+    done = lint(["mise/helper.py", "mise/helper.pyi"], env=env)
     assert done.returncode == 0, done.stderr
     assert f"{TASK}: ok\n" == done.stdout
 
 
-def test_module_names_are_green() -> None:
+def test_module_names_are_green(env: support.Env) -> None:
     """A tree of module names passes."""
-    done = lint(["mise/module_name.py", "my-tools/fine_name.py"])
+    done = lint(["mise/module_name.py", "my-tools/fine_name.py"], env=env)
     assert done.returncode == 0, done.stderr
     assert f"{TASK}: ok\n" == done.stdout
 
 
-def test_a_vendored_file_is_not_ours() -> None:
+def test_a_vendored_file_is_not_ours(env: support.Env) -> None:
     """vendor/ is someone else's naming, as in every belt lint."""
-    done = lint(["vendor/their-tool.py"])
+    done = lint(["vendor/their-tool.py"], env=env)
     assert done.returncode == 0, done.stderr
     assert f"{TASK}: no Python tracked, skipped\n" == done.stdout
 
 
-def test_no_python_skips() -> None:
+def test_no_python_skips(env: support.Env) -> None:
     """A tree with no Python skips clean."""
-    done = lint([])
+    done = lint([], env=env)
     assert done.returncode == 0, done.stderr
     assert f"{TASK}: no Python tracked, skipped\n" == done.stdout
 
 
-def test_the_canon_tree_is_green() -> None:
+def test_the_canon_tree_is_green(env: support.Env) -> None:
     """The canon's own tracked Python passes both halves."""
     with tempfile.TemporaryDirectory() as tmp:
-        done = run(BELT.parent, Path(tmp) / "home")
+        done = run(BELT.parent, Path(tmp) / "home", env=env)
     assert done.returncode == 0, done.stderr
     assert f"{TASK}: ok\n" == done.stdout

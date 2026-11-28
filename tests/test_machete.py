@@ -53,13 +53,14 @@ def body() -> str:
 class Machete:
     """A planted tree; lint:machete's verdict on it."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Make an empty git repository and a scrubbed environment."""
+        self.make_env = env
         support.tool("cargo-machete")
         tmp = tmp_path
         self.tree = tmp / "tree"
         self.tree.mkdir()
-        self.env = support.env()
+        self.env = self.make_env()
         self.git("init", "-q")
 
     def git(self, *args: str) -> None:
@@ -95,9 +96,9 @@ class Machete:
 
 
 @fixture
-def machete(tmp_path: Path) -> Machete:
+def machete(tmp_path: Path, env: support.Env) -> Machete:
     """Give each row its own Machete."""
-    return Machete(tmp_path)
+    return Machete(tmp_path, env=env)
 
 
 def test_an_untracked_crate_is_not_read(machete: Machete) -> None:

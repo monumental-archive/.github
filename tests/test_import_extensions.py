@@ -41,7 +41,7 @@ if (`${helped()} ${moduled()}` !== "helper hm") {
 """
 
 
-def plant(base: Path, ts: str, mts: str) -> Path:
+def plant(base: Path, ts: str, mts: str, *, env: support.Env) -> Path:
     """Assemble and commit the fixture with the two specifier suffixes.
 
     Returns:
@@ -68,13 +68,13 @@ def plant(base: Path, ts: str, mts: str) -> Path:
         MAIN.replace("@TS@", ts).replace("@MTS@", mts),
         encoding="utf-8",
     )
-    env = support.env()
+    environ = env()
     for argv in ([GIT, "init", "-q"], [GIT, "add", "-A"]):
-        subprocess.run(argv, cwd=tree, env=env, check=True)
+        subprocess.run(argv, cwd=tree, env=environ, check=True)
     return tree
 
 
-def run(tree: Path, task: str) -> subprocess.CompletedProcess[str]:
+def run(tree: Path, task: str, *, env: support.Env) -> subprocess.CompletedProcess[str]:
     """Run one belt task in the tree, the belt global.
 
     Returns:
@@ -86,7 +86,7 @@ def run(tree: Path, task: str) -> subprocess.CompletedProcess[str]:
     config.mkdir(exist_ok=True)
     scratch = base / "tmp"
     scratch.mkdir(exist_ok=True)
-    env = support.env(
+    environ = env(
         MISE_CONFIG_DIR=str(config),
         XDG_CONFIG_HOME=str(config),
         MISE_GLOBAL_CONFIG_FILE=str(BELT / "config.toml"),
@@ -101,7 +101,7 @@ def run(tree: Path, task: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [support.tool("mise"), "run", task],
         cwd=tree,
-        env=env,
+        env=environ,
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
@@ -111,19 +111,19 @@ def run(tree: Path, task: str) -> subprocess.CompletedProcess[str]:
 
 
 # `./helper.ts` and `./hm.mts`: the form Node loads.
-def test_lint_biome_is_clean() -> None:
+def test_lint_biome_is_clean(env: support.Env) -> None:
     """The rule with no options accepts the source extension."""
     with tempfile.TemporaryDirectory() as tmp:
-        done = run(plant(Path(tmp), ".ts", ".mts"), "lint:biome")
+        done = run(plant(Path(tmp), ".ts", ".mts", env=env), "lint:biome", env=env)
     out = done.stdout + done.stderr
     assert done.returncode == 0, out
     assert "lint:biome: clean across" in out
 
 
-def test_lint_types_is_clean() -> None:
+def test_lint_types_is_clean(env: support.Env) -> None:
     """The flag the belt forces makes the form legal (no TS5097)."""
     with tempfile.TemporaryDirectory() as tmp:
-        done = run(plant(Path(tmp), ".ts", ".mts"), "lint:types")
+        done = run(plant(Path(tmp), ".ts", ".mts", env=env), "lint:types", env=env)
     out = done.stdout + done.stderr
     assert done.returncode == 0, out
     assert "TS5097" not in out
@@ -131,11 +131,11 @@ def test_lint_types_is_clean() -> None:
 
 
 # `./helper.js` and `./hm.mjs`: the withdrawn mapping's form.
-def test_lint_biome_names_the_rule() -> None:
+def test_lint_biome_names_the_rule(env: support.Env) -> None:
     """Red by name, for each of the two specifiers."""
     with tempfile.TemporaryDirectory() as tmp:
-        tree = plant(Path(tmp), ".js", ".mjs")
-        done = run(tree, "lint:biome")
+        tree = plant(Path(tmp), ".js", ".mjs", env=env)
+        done = run(tree, "lint:biome", env=env)
     out = STYLE.sub("", done.stdout + done.stderr)
     assert done.returncode != 0, out
     assert out.count("lint/correctness/useImportExtensions") == 2, out

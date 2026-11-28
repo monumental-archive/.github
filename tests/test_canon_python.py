@@ -68,12 +68,16 @@ def bash() -> str:
 class InstallTheBeltsPython:
     """Each row: the planted tree and stub, and what the step did."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(
+        self, tmp_path: Path, *, canon: support.Canon, env: support.Env
+    ) -> None:
         """Give each row a canon tree, a stub mise and a runner's files."""
+        self.plant_canon = canon
+        self.make_env = env
         self.tmp = tmp_path
         self.root = self.tmp / "_actions" / "example-org" / ".github" / "v1.0.0"
         # The belt config and lock are the row's own: plant() rewrites them.
-        support.canon(
+        self.plant_canon(
             self.root,
             ".github/actions/canon",
             stubs={"mise/config.toml": "", "mise/mise.lock": ""},
@@ -117,7 +121,7 @@ class InstallTheBeltsPython:
         """
         return subprocess.run(
             [bash(), str(self.script)],
-            env=support.env(
+            env=self.make_env(
                 PATH=self.path,
                 HOME=str(self.tmp),
                 GITHUB_ENV=str(self.env_file),
@@ -143,9 +147,11 @@ class InstallTheBeltsPython:
 
 
 @fixture
-def install_the_belts_python(tmp_path: Path) -> InstallTheBeltsPython:
+def install_the_belts_python(
+    tmp_path: Path, canon: support.Canon, env: support.Env
+) -> InstallTheBeltsPython:
     """Give each row its own InstallTheBeltsPython."""
-    return InstallTheBeltsPython(tmp_path)
+    return InstallTheBeltsPython(tmp_path, canon=canon, env=env)
 
 
 def test_the_interpreters_path_is_exported(
@@ -269,7 +275,9 @@ def starts_helpers(text: str) -> bool:
     )
 
 
-def run_without(argv: list[str], value: str | None) -> subprocess.CompletedProcess[str]:
+def run_without(
+    argv: list[str], value: str | None, *, env: support.Env
+) -> subprocess.CompletedProcess[str]:
     """Run `argv` in an empty directory, ORG_PYTHON absent or `value`.
 
     Returns:
@@ -277,15 +285,15 @@ def run_without(argv: list[str], value: str | None) -> subprocess.CompletedProce
 
     """
     with tempfile.TemporaryDirectory() as tmp:
-        env = support.env(tmp)
+        environ = env(tmp)
         # The row decides ORG_PYTHON: unset, or the value it names.
-        env.pop("ORG_PYTHON", None)
+        environ.pop("ORG_PYTHON", None)
         if value is not None:
-            env["ORG_PYTHON"] = value
+            environ["ORG_PYTHON"] = value
         return subprocess.run(
             argv,
             cwd=tmp,
-            env=env,
+            env=environ,
             capture_output=True,
             text=True,
             check=False,
@@ -310,34 +318,38 @@ def test_the_scripts_are_found() -> None:
     assert len(names) >= 14
 
 
-def test_every_script_refuses_an_unset_or_empty_org_python() -> None:
+def test_every_script_refuses_an_unset_or_empty_org_python(env: support.Env) -> None:
     """Run each one: red, with ORG_PYTHON named, before anything else."""
     for script in starters():
         if script.name in SOURCED:
             continue
         for value in (None, ""):
-            done = run_without([bash(), str(script)], value)
+            done = run_without([bash(), str(script)], value, env=env)
             assert done.returncode != 0, done.stdout
             assert REFUSAL in done.stderr
             assert done.stdout == ""
 
 
 @pytest.mark.parametrize("value", [None, ""])
-def test_the_sourced_provisioner_refuses_an_unset_org_python(value: object) -> None:
+def test_the_sourced_provisioner_refuses_an_unset_org_python(
+    value: object, env: support.Env
+) -> None:
     """pgrx-env.sh is sourced: its helper call refuses at the call."""
     env_sh = CANON / "mise" / "pgrx-env.sh"
     # A major's Postgres is found through pgrx_postgres.py (#1940).
     postgres = f'. "{env_sh}"; org_pgrx_postgres 17'
-    done = run_without([bash(), "-c", postgres], value)
+    done = run_without([bash(), "-c", postgres], value, env=env)
     assert done.returncode != 0, done.stdout
     assert REFUSAL in done.stderr
 
 
 @pytest.mark.parametrize("value", [None, ""])
-def test_the_sourced_coverage_env_refuses_an_unset_org_python(value: object) -> None:
+def test_the_sourced_coverage_env_refuses_an_unset_org_python(
+    value: object, env: support.Env
+) -> None:
     """rust-coverage-env.sh is sourced: its function refuses (#1877)."""
     env_sh = CANON / "mise" / "rust-coverage-env.sh"
     call = f'. "{env_sh}"; org_rust_coverage_env measured'
-    done = run_without([bash(), "-c", call], value)
+    done = run_without([bash(), "-c", call], value, env=env)
     assert done.returncode != 0, done.stdout
     assert REFUSAL in done.stderr

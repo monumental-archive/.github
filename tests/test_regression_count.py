@@ -127,9 +127,12 @@ class Repo:
 class RepoCase:
     """A row with a fresh repository and an isolated git."""
 
-    def __init__(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def __init__(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, env: support.Env
+    ) -> None:
         """Isolate git's config, then build the repository."""
-        clean = support.env(MISE_TASK_NAME=TASK)
+        self.make_env = env
+        clean = self.make_env(MISE_TASK_NAME=TASK)
         isolated: dict[str, str] = {**clean, **_GIT_ENV}
         for name in list(os.environ):
             monkeypatch.delenv(name)
@@ -144,9 +147,11 @@ class RepoCase:
 
 
 @fixture
-def repo_case(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> RepoCase:
+def repo_case(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, env: support.Env
+) -> RepoCase:
     """Give each row its own RepoCase."""
-    return RepoCase(tmp_path, monkeypatch)
+    return RepoCase(tmp_path, monkeypatch, env=env)
 
 
 LANGUAGES: ClassVar[dict[str, tuple[str, str, str, str, dict[str, str]]]] = {
@@ -405,9 +410,9 @@ class Report(RepoCase):
 
 
 @fixture
-def report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Report:
+def report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, env: support.Env) -> Report:
     """Give each row its own Report."""
-    return Report(tmp_path, monkeypatch)
+    return Report(tmp_path, monkeypatch, env=env)
 
 
 def test_empty_range_prints_no_fixes(report: Report) -> None:

@@ -81,10 +81,11 @@ def source(name: str) -> str:
 class Citation:
     """Planted trees; the citation's verdict on them."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Plant an empty repository: the helper asks git (#2013)."""
+        self.make_env = env
         self.tree = tmp_path
-        self.env = support.env(
+        self.env = self.make_env(
             MISE_TASK_NAME=TASK,
             ORG_BELT_DIR=str(BELT),
             ORG_PYTHON=sys.executable,
@@ -165,9 +166,9 @@ class Citation:
 
 
 @fixture
-def citation_state(tmp_path: Path) -> Citation:
+def citation_state(tmp_path: Path, env: support.Env) -> Citation:
     """Give each row its own Citation."""
-    return Citation(tmp_path)
+    return Citation(tmp_path, env=env)
 
 
 def test_no_tracked_workflow_is_skipped_by_name(citation_state: Citation) -> None:

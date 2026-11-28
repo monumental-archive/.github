@@ -104,8 +104,9 @@ class HookFixture:
     # is the commit's number. Empty: the rows read the file's text.
     belt_tasks = ""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Plant the canon with two commits, a consumer, HOME and cache."""
+        self.make_env = env
         self.tmp = tmp_path
         self.home = self.tmp / "home"
         self.home.mkdir()
@@ -142,7 +143,7 @@ class HookFixture:
             The environment.
 
         """
-        return support.env(
+        return self.make_env(
             self.home,
             XDG_CACHE_HOME=str(self.cache),
             MISE_CONFIG_DIR=str(self.tmp / "mise-config"),
@@ -262,9 +263,9 @@ class HookFixture:
 
 
 @fixture
-def hook_fixture(tmp_path: Path) -> HookFixture:
+def hook_fixture(tmp_path: Path, env: support.Env) -> HookFixture:
     """Give each row its own HookFixture."""
-    return HookFixture(tmp_path)
+    return HookFixture(tmp_path, env=env)
 
 
 def test_the_first_run_makes_the_tree_and_both_links(hook_fixture: HookFixture) -> None:
@@ -528,9 +529,9 @@ class EveryHookLinksFirst(HookFixture):
 
     belt_tasks = HOOK_TASKS
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Plant the cache of A and B, the consumer on A, and the worktree."""
-        super().__init__(tmp_path)
+        super().__init__(tmp_path, env=env)
         if LEFTHOOK is None:
             pytest.skip("lefthook is not installed")
         self.commit_all()
@@ -608,9 +609,9 @@ class EveryHookLinksFirst(HookFixture):
 
 
 @fixture
-def every_hook_links_first(tmp_path: Path) -> EveryHookLinksFirst:
+def every_hook_links_first(tmp_path: Path, env: support.Env) -> EveryHookLinksFirst:
     """Give each row its own EveryHookLinksFirst."""
-    return EveryHookLinksFirst(tmp_path)
+    return EveryHookLinksFirst(tmp_path, env=env)
 
 
 def test_pre_commit_links_a_worktree_with_none(

@@ -40,8 +40,7 @@ GIT = support.tool("git")
 # A scratch repository must not inherit the caller's git: under a hook,
 # GIT_DIR and GIT_INDEX_FILE point every `git` at the repository being
 # pushed, and the planted go.mod would be staged into the canon's index.
-CLEAN_ENV = {
-    **support.env(),
+GIT_ISOLATED = {
     "GIT_CONFIG_GLOBAL": os.devnull,
     "GIT_CONFIG_NOSYSTEM": "1",
 }
@@ -126,8 +125,11 @@ def task_body(name: str) -> str:
 class GoFuzzSeeds:
     """lint:go-fuzz-seeds runs exactly the packages the listing names."""
 
-    def __init__(self, tmp_path: Path, request: pytest.FixtureRequest) -> None:
+    def __init__(
+        self, tmp_path: Path, request: pytest.FixtureRequest, *, env: support.Env
+    ) -> None:
         """Plant an empty git checkout, the go stub, and the tool links."""
+        self.make_env = env
         self.root = tmp_path
         self.git("init", "-q")
         self.tools = Path(tempfile.mkdtemp()).resolve()
@@ -147,7 +149,9 @@ class GoFuzzSeeds:
 
     def git(self, *args: str) -> None:
         """Run git in the planted checkout."""
-        subprocess.run([GIT, *args], cwd=self.root, env=CLEAN_ENV, check=True)
+        subprocess.run(
+            [GIT, *args], cwd=self.root, env=self.make_env(**GIT_ISOLATED), check=True
+        )
 
     def module(self, rel: str, listing: str, *, status: int = 0) -> Path:
         """Track a go.mod at `rel` and plant what go lists there.
@@ -176,7 +180,7 @@ class GoFuzzSeeds:
         path = [str(self.tools)]
         if with_go:
             path.insert(0, str(self.stubs))
-        env = CLEAN_ENV | {
+        env = self.make_env(**GIT_ISOLATED) | {
             "PATH": os.pathsep.join(path),
             "PLANT_LOG": str(self.log),
         }
@@ -203,9 +207,11 @@ class GoFuzzSeeds:
 
 
 @fixture
-def go_fuzz_seeds(tmp_path: Path, request: pytest.FixtureRequest) -> GoFuzzSeeds:
+def go_fuzz_seeds(
+    tmp_path: Path, request: pytest.FixtureRequest, env: support.Env
+) -> GoFuzzSeeds:
     """Give each row its own GoFuzzSeeds."""
-    return GoFuzzSeeds(tmp_path, request)
+    return GoFuzzSeeds(tmp_path, request, env=env)
 
 
 def test_runs_only_the_packages_that_declare_a_target(

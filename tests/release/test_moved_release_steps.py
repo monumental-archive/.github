@@ -55,8 +55,9 @@ def strings(*items: str) -> list[str]:
 class Script:
     """A scratch directory, stub tools, and the script run in it."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Make the scratch directory and its stub bin."""
+        self.make_env = env
         self.root = Path(str(tmp_path))
         self.work = self.root / "work"
         self.work.mkdir()
@@ -78,7 +79,7 @@ class Script:
             The finished process.
 
         """
-        full = support.env(
+        full = self.make_env(
             self.root / "home",
             PATH=f"{self.bin}:{os.environ['PATH']}",
             STUB_LOG=str(self.log),
@@ -107,9 +108,9 @@ class Script:
 
 
 @fixture
-def script_state(tmp_path: Path) -> Script:
+def script_state(tmp_path: Path, env: support.Env) -> Script:
     """Give each row its own Script."""
-    return Script(tmp_path)
+    return Script(tmp_path, env=env)
 
 
 SCRIPT = PGRX / "tag-version.sh"
@@ -127,9 +128,9 @@ class TagVersion(Script):
 
 
 @fixture
-def tag_version(tmp_path: Path) -> TagVersion:
+def tag_version(tmp_path: Path, env: support.Env) -> TagVersion:
     """Give each row its own TagVersion."""
-    return TagVersion(tmp_path)
+    return TagVersion(tmp_path, env=env)
 
 
 def test_the_manifests_version_passes(tag_version: TagVersion) -> None:
@@ -203,9 +204,9 @@ class Containers(Script):
 
 
 @fixture
-def containers(tmp_path: Path) -> Containers:
+def containers(tmp_path: Path, env: support.Env) -> Containers:
     """Give each row its own Containers."""
-    return Containers(tmp_path)
+    return Containers(tmp_path, env=env)
 
 
 def mounts(argv: list[str]) -> None:
@@ -217,17 +218,17 @@ def mounts(argv: list[str]) -> None:
     assert "ORG_FINDINGS_WRITER=/opt/org/findings.sh" in argv
 
 
-def test_the_build_mounts_the_canon_and_the_writer(containers: Containers) -> None:
+def test_the_build_mounts_the_canon_and_the_writer(
+    containers: Containers, env: support.Env
+) -> None:
     """One docker run, build-root.sh in the build image."""
     containers.stub("docker")
-    subprocess.run(
-        [GIT, "init", "-q"], cwd=containers.work, check=True, env=support.env()
-    )
+    subprocess.run([GIT, "init", "-q"], cwd=containers.work, check=True, env=env())
     subprocess.run(
         [GIT, "commit", "-q", "--allow-empty", "-m", "c"],
         cwd=containers.work,
         check=True,
-        env=support.env(),
+        env=env(),
     )
     done = containers.run_script(
         PGRX / "build-in-container.sh",
@@ -349,9 +350,9 @@ class Inventory(Script):
 
 
 @fixture
-def inventory(tmp_path: Path) -> Inventory:
+def inventory(tmp_path: Path, env: support.Env) -> Inventory:
     """Give each row its own Inventory."""
-    return Inventory(tmp_path)
+    return Inventory(tmp_path, env=env)
 
 
 def test_both_arches_are_inventoried_and_judged(inventory: Inventory) -> None:
@@ -396,7 +397,7 @@ class Helper(Script):
             The finished process.
 
         """
-        full = support.env(
+        full = self.make_env(
             self.root / "home",
             PATH=f"{self.bin}:{SYSTEM_PATH}",
             STUB_LOG=str(self.log),
@@ -415,9 +416,9 @@ class Helper(Script):
 
 
 @fixture
-def helper(tmp_path: Path) -> Helper:
+def helper(tmp_path: Path, env: support.Env) -> Helper:
     """Give each row its own Helper."""
-    return Helper(tmp_path)
+    return Helper(tmp_path, env=env)
 
 
 FACTS = """#!/usr/bin/env bash
@@ -451,9 +452,9 @@ class DeriveFacts(Helper):
 
 
 @fixture
-def derive_facts(tmp_path: Path) -> DeriveFacts:
+def derive_facts(tmp_path: Path, env: support.Env) -> DeriveFacts:
     """Give each row its own DeriveFacts."""
-    return DeriveFacts(tmp_path)
+    return DeriveFacts(tmp_path, env=env)
 
 
 def test_the_facts_are_derived_and_split(derive_facts: DeriveFacts) -> None:
@@ -525,9 +526,9 @@ class UnpackGoLegs(Helper):
 
 
 @fixture
-def unpack_go_legs(tmp_path: Path) -> UnpackGoLegs:
+def unpack_go_legs(tmp_path: Path, env: support.Env) -> UnpackGoLegs:
     """Give each row its own UnpackGoLegs."""
-    return UnpackGoLegs(tmp_path)
+    return UnpackGoLegs(tmp_path, env=env)
 
 
 def test_each_leg_gets_its_own_directory(unpack_go_legs: UnpackGoLegs) -> None:

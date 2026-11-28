@@ -442,8 +442,9 @@ done
 class Proof:
     """`pgrx-image-proof.sh`: the recipes it runs, per Postgres major."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Put a recording docker first on PATH, beside a digest record."""
+        self.make_env = env
         self.root = tmp_path
         bin_dir = self.root / "bin"
         bin_dir.mkdir()
@@ -456,7 +457,7 @@ class Proof:
         self.staged.mkdir(parents=True)
         (self.staged / "edtf_postgres.control").write_text("control\n")
         (self.staged / "edtf_postgres--1.2.3.sql").write_text("sql\n")
-        self.env = support.env(
+        self.env = self.make_env(
             PATH=f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
             DOCKER_LOG=str(self.log),
         )
@@ -490,9 +491,9 @@ class Proof:
 
 
 @fixture
-def proof(tmp_path: Path) -> Proof:
+def proof(tmp_path: Path, env: support.Env) -> Proof:
     """Give each row its own Proof."""
-    return Proof(tmp_path)
+    return Proof(tmp_path, env=env)
 
 
 def test_below_18_runs_the_copy_recipe_only(proof: Proof) -> None:
@@ -664,8 +665,9 @@ printf '%s\\n' "$*" >> "${PSQL_LOG}"
 class CopyProof:
     """docker/pgrx-copy-proof.sh, run for real against a planted root."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Plant a stock postgres's directories and stub su and psql."""
+        self.make_env = env
         self.root = tmp_path
         share = self.root / "usr" / "share" / "postgresql" / "17" / "extension"
         share.mkdir(parents=True)
@@ -687,7 +689,7 @@ class CopyProof:
             path.write_text(text)
             path.chmod(0o755)
         self.log = self.root / "psql.log"
-        self.env = support.env(
+        self.env = self.make_env(
             PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}",
             PGRX_PROOF_ROOT=str(self.root),
             PSQL_LOG=str(self.log),
@@ -695,9 +697,9 @@ class CopyProof:
 
 
 @fixture
-def copy_proof(tmp_path: Path) -> CopyProof:
+def copy_proof(tmp_path: Path, env: support.Env) -> CopyProof:
     """Give each row its own CopyProof."""
-    return CopyProof(tmp_path)
+    return CopyProof(tmp_path, env=env)
 
 
 def test_copy_proof_creates_the_shipped_extension(copy_proof: CopyProof) -> None:

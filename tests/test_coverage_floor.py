@@ -1674,13 +1674,17 @@ class ThePlanFeedsTheHelper:
     canon's own gate cannot reach it: the canon has no pgrx crate.
     """
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(
+        self, tmp_path: Path, *, canon: support.Canon, env: support.Env
+    ) -> None:
         """Plant a workspace with one extension declaring pg15 to pg18."""
+        self.plant_canon = canon
+        self.make_env = env
         self.tmp = Path(str(tmp_path)).resolve()
         self.tree = self.tmp / "tree"
         self.tree.mkdir()
         (self.tree / "Cargo.toml").write_text("[workspace]\n", encoding="utf-8")
-        self.canon = support.canon(self.tree / ".org-canon")
+        self.canon = self.plant_canon(self.tree / ".org-canon")
         bins = self.tmp / "bin"
         bins.mkdir()
         (bins / "cargo").write_text(CARGO_STUB, encoding="utf-8")
@@ -1710,7 +1714,7 @@ class ThePlanFeedsTheHelper:
         metadata.write_text(json.dumps(document), encoding="utf-8")
         self.output = self.tmp / "github-output"
         self.output.touch()
-        self.env = support.env() | {
+        self.env = self.make_env() | {
             "PATH": f"{bins}{os.pathsep}{os.environ['PATH']}",
             "ORG_PYTHON": sys.executable,
             "PLANT_METADATA": str(metadata),
@@ -1743,9 +1747,11 @@ class ThePlanFeedsTheHelper:
 
 
 @fixture
-def the_plan_feeds_the_helper(tmp_path: Path) -> ThePlanFeedsTheHelper:
+def the_plan_feeds_the_helper(
+    tmp_path: Path, canon: support.Canon, env: support.Env
+) -> ThePlanFeedsTheHelper:
     """Give each row its own ThePlanFeedsTheHelper."""
-    return ThePlanFeedsTheHelper(tmp_path)
+    return ThePlanFeedsTheHelper(tmp_path, canon=canon, env=env)
 
 
 @pytest.mark.parametrize(("name", "legs", "status", "err"), PLAN_ROWS)

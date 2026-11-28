@@ -110,8 +110,9 @@ def expect(*text: str) -> list[str]:
 class Rows:
     """The run's two checkpoints, the legs' reports, and the helper run."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Lay out a run that did not advance, every leg stopped by its budget."""
+        self.make_env = env
         self.dir = Path(str(tmp_path))
         self.start = self.dir / "run-start.json"
         self.end = self.dir / "checkpoint.json"
@@ -121,7 +122,7 @@ class Rows:
         write(self.start, checkpoint())
         write(self.end, checkpoint())
         self.legs([BUDGET] * LEGS)
-        self.env = support.env(ORG_FINDINGS=str(self.findings))
+        self.env = self.make_env(ORG_FINDINGS=str(self.findings))
 
     def legs(self, stops: list[str | None]) -> None:
         """Lay out one downloaded report per leg, as download-artifact does."""
@@ -204,9 +205,9 @@ class Rows:
 
 
 @fixture
-def rows_state(tmp_path: Path) -> Rows:
+def rows_state(tmp_path: Path, env: support.Env) -> Rows:
     """Give each row its own Rows."""
-    return Rows(tmp_path)
+    return Rows(tmp_path, env=env)
 
 
 def write(path: Path, doc: dict[str, object]) -> None:

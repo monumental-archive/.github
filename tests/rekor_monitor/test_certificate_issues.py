@@ -80,8 +80,9 @@ def search(index: int) -> list[str]:
 class Harness:
     """A stub gh, its call log and the real report, for each row."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Lay out a stub gh, its call log, and the real report."""
+        self.make_env = env
         self.dir = Path(str(tmp_path))
         bin_dir = self.dir / "bin"
         bin_dir.mkdir()
@@ -94,7 +95,7 @@ class Harness:
         self.doc = decoded.as_object(decoded.load_json(text), "the report")
         # False: the row writes the report file itself (or none at all).
         self.write_report = True
-        self.env = support.env(
+        self.env = self.make_env(
             PATH=f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
             GITHUB_REPOSITORY=REPO,
             STUB_CALLS=str(self.calls),
@@ -147,9 +148,9 @@ class Harness:
 
 
 @fixture
-def harness(tmp_path: Path) -> Harness:
+def harness(tmp_path: Path, env: support.Env) -> Harness:
     """Give each row its own Harness."""
-    return Harness(tmp_path)
+    return Harness(tmp_path, env=env)
 
 
 def test_no_findings_files_nothing(

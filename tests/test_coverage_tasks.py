@@ -324,6 +324,7 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
     python_measured: bool = True,
     legs: str | None = None,
     run_test: bool = False,
+    env: support.Env,
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
     """Run one coverage task's body in a planted tree with stub tools.
 
@@ -393,10 +394,10 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
         (tree / ".coverage-floor").write_text(floor_of(*named), encoding="utf-8")
         tracked.append(".coverage-floor")
 
-    env = support.env()
-    env |= {
+    environ = env()
+    environ |= {
         "ORG_BELT_DIR": str(BELT),
-        "PATH": f"{stubs}{os.pathsep}{env.get('PATH', '')}",
+        "PATH": f"{stubs}{os.pathsep}{environ.get('PATH', '')}",
         "STUB_PYTHON": sys.executable,
         "STUB_PY": py,
         "STUB_BR": branches,
@@ -407,21 +408,21 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
         "STUB_TS_BR": ts_branches,
         "STUB_VITEST_LOG": str(tmp / "vitest.log"),
     }
-    env |= reports_env(tmp, reports_dir=reports_dir)
-    env["ORG_COVERAGE_RUN"] = str(tmp / "run")
+    environ |= reports_env(tmp, reports_dir=reports_dir)
+    environ["ORG_COVERAGE_RUN"] = str(tmp / "run")
     if measured:
         plant_run(
             tmp / "run",
             python=python_measured,
             typescript=(ts, ts_branches) if typescript == "vitest" else None,
         )
-    init_tree(tree, env, tracked, commit=commit)
+    init_tree(tree, environ, tracked, commit=commit)
     # The test runs without the measuring stubs: they answer the coverage
     # task's reads, and `measured` would start the stub `coverage` as
     # coverage.py.
     as_test = support.task_run("test", test_run or "true")
-    test_path = env["PATH"].removeprefix(f"{stubs}{os.pathsep}")
-    test_env = env | as_test.env | {"PATH": test_path}
+    test_path = environ["PATH"].removeprefix(f"{stubs}{os.pathsep}")
+    test_env = environ | as_test.env | {"PATH": test_path}
     tested = run_test_step(tree, test_env, as_test.argv) if run_test else None
     if tested is not None and tested.returncode != 0:
         return tested, tmp
@@ -429,7 +430,7 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
     done = subprocess.run(
         as_mise.argv,
         cwd=tree,
-        env=env | as_mise.env,
+        env=environ | as_mise.env,
         capture_output=True,
         text=True,
         check=False,
@@ -487,7 +488,7 @@ class Plant(TypedDict, total=False):
 
 
 def run_in_tree(
-    task: str, **plant: Unpack[Plant]
+    task: str, *, env: support.Env, **plant: Unpack[Plant]
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
     """Run a task in a planted tree.
 
@@ -495,13 +496,13 @@ def run_in_tree(
         The finished process and the planted tree.
 
     """
-    done, tmp = run_task(task, **plant)
+    done, tmp = run_task(task, **plant, env=env)
     return done, tmp / "tree"
 
 
-def test_python_only_tree_measures_and_holds() -> None:
+def test_python_only_tree_measures_and_holds(env: support.Env) -> None:
     """Both Python legs print, and each holds its floor by name."""
-    done, tree = run_in_tree("coverage:check")
+    done, tree = run_in_tree("coverage:check", env=env)
     assert done.returncode == 0, done.stderr
     assert (
         "coverage:check: python leg holds its floor 80.0 (90.0%)\n"
@@ -512,9 +513,11 @@ def test_python_only_tree_measures_and_holds() -> None:
     assert "suite ran" not in done.stderr
 
 
-def test_python_run_outside_measured_reports_no_figure() -> None:
+def test_python_run_outside_measured_reports_no_figure(env: support.Env) -> None:
     """A suite that ran outside `measured`: no python figure, by name."""
-    done, _ = run_in_tree("coverage:check", go="91.0", python_measured=False, legs="go")
+    done, _ = run_in_tree(
+        "coverage:check", go="91.0", python_measured=False, legs="go", env=env
+    )
     assert done.returncode == 0, done.stderr
     assert (
         "coverage:check: python: the test run measured no Python — its test"
@@ -526,9 +529,9 @@ def test_python_run_outside_measured_reports_no_figure() -> None:
     assert "python" not in done.stdout
 
 
-def test_branches_below_the_floor_red_by_name() -> None:
+def test_branches_below_the_floor_red_by_name(env: support.Env) -> None:
     """Statements holding does not carry the branch leg."""
-    done, _ = run_in_tree("coverage:check", branches="79.9")
+    done, _ = run_in_tree("coverage:check", branches="79.9", env=env)
     assert done.returncode == 1
     assert (
         "coverage:check: python-branches: 79.9% is below its derived floor 80.0%\n"
@@ -536,9 +539,9 @@ def test_branches_below_the_floor_red_by_name() -> None:
     )
 
 
-def test_statements_below_the_floor_red_by_name() -> None:
+def test_statements_below_the_floor_red_by_name(env: support.Env) -> None:
     """The line leg reds before the branch leg is read."""
-    done, _ = run_in_tree("coverage:check", py="70.0")
+    done, _ = run_in_tree("coverage:check", py="70.0", env=env)
     assert done.returncode == 1
     assert (
         "coverage:check: python: 70.0% is below its derived floor 80.0%\n"
@@ -546,21 +549,21 @@ def test_statements_below_the_floor_red_by_name() -> None:
     )
 
 
-def test_no_floor_skips_clean() -> None:
+def test_no_floor_skips_clean(env: support.Env) -> None:
     """A repository that tracks Python but adopted no floor owes nothing."""
-    done, _ = run_in_tree("coverage:check", floor=False)
+    done, _ = run_in_tree("coverage:check", floor=False, env=env)
     assert done.returncode == 0, done.stderr
     assert done.stdout == "coverage:check: no .coverage-floor, skipped\n"
     assert "suite ran" not in done.stderr
 
 
-def test_python_without_a_test_task_is_red_by_name() -> None:
+def test_python_without_a_test_task_is_red_by_name(env: support.Env) -> None:
     """A floor recording the Python legs and no suite: each leg named.
 
     Every floor records its legs (#2143), so a tracked *.py with no
     suite is a recorded leg that measured nothing, never a skip.
     """
-    done, _ = run_in_tree("coverage:check", test_task=False)
+    done, _ = run_in_tree("coverage:check", test_task=False, env=env)
     needs = (
         "  the python leg needs tracked *.py and a `test` task whose test"
         ' command runs through "${ORG_BELT_DIR}/measured"; or record the'
@@ -577,9 +580,9 @@ def test_python_without_a_test_task_is_red_by_name() -> None:
     ) == (done.returncode, done.stderr)
 
 
-def test_mixed_go_and_python_prints_every_leg() -> None:
+def test_mixed_go_and_python_prints_every_leg(env: support.Env) -> None:
     """A mixed tree measures each language it tracks."""
-    done, tree = run_in_tree("coverage:check", go="93.0")
+    done, tree = run_in_tree("coverage:check", go="93.0", env=env)
     assert done.returncode == 0, done.stderr
     assert (
         "coverage:check: go leg holds its floor 80.0 (93.0%)\n"
@@ -589,9 +592,9 @@ def test_mixed_go_and_python_prints_every_leg() -> None:
     ) == done.stdout
 
 
-def test_mixed_tree_every_leg_must_hold() -> None:
+def test_mixed_tree_every_leg_must_hold(env: support.Env) -> None:
     """Python holding does not carry a Go leg below the floor."""
-    done, _ = run_in_tree("coverage:check", go="75.0")
+    done, _ = run_in_tree("coverage:check", go="75.0", env=env)
     assert done.returncode == 1
     assert "coverage:check: go: 75.0% is below its derived floor 80.0%\n" in done.stderr
 
@@ -613,7 +616,7 @@ def upload_step() -> str:
 
 
 def run_upload_step(
-    reports: list[str], *, has_token: bool = True
+    reports: list[str], *, has_token: bool = True, env: support.Env
 ) -> subprocess.CompletedProcess[str]:
     """Run the lifted step beside the planted reports.
 
@@ -625,7 +628,7 @@ def run_upload_step(
         for name in reports:
             (Path(tmp) / name).write_text("report\n", encoding="utf-8")
         out = Path(tmp) / "outputs"
-        env = support.env(
+        environ = env(
             PATH=os.environ.get("PATH", ""),
             HAS_TOKEN="true" if has_token else "false",
             GITHUB_OUTPUT=str(out),
@@ -633,7 +636,7 @@ def run_upload_step(
         done = subprocess.run(
             [BASH, "-e", "-c", upload_step()],
             cwd=tmp,
-            env=env,
+            env=environ,
             capture_output=True,
             text=True,
             check=False,
@@ -647,9 +650,9 @@ def run_upload_step(
 # The job measures nothing (#1528): it downloads the reports the gate's
 # coverage:check wrote and lists them, in coverage:check's order. These
 # rows run the lifted step in a directory holding the planted reports.
-def test_every_report_the_gate_wrote_is_named_and_uploaded() -> None:
+def test_every_report_the_gate_wrote_is_named_and_uploaded(env: support.Env) -> None:
     """A mixed tree uploads each report, in coverage:check's order."""
-    done = run_upload_step(["coverage.xml", "lcov.info", "coverage.txt"])
+    done = run_upload_step(["coverage.xml", "lcov.info", "coverage.txt"], env=env)
     assert done.returncode == 0, done.stderr
     assert done.stdout == (
         "upload lcov.info\\,coverage.txt\\,coverage.xml\n"
@@ -657,27 +660,27 @@ def test_every_report_the_gate_wrote_is_named_and_uploaded() -> None:
     )
 
 
-def test_a_python_only_tree_uploads() -> None:
+def test_a_python_only_tree_uploads(env: support.Env) -> None:
     """The step once skipped any tree without Cargo.toml or go.mod."""
-    done = run_upload_step(["coverage.xml"])
+    done = run_upload_step(["coverage.xml"], env=env)
     assert done.returncode == 0, done.stderr
     assert done.stdout == "upload coverage.xml\nfiles=coverage.xml\n"
 
 
-def test_no_token_skips_and_says_why() -> None:
+def test_no_token_skips_and_says_why(env: support.Env) -> None:
     """No token: nothing is uploaded, and the step says why."""
-    done = run_upload_step(["coverage.xml"], has_token=False)
+    done = run_upload_step(["coverage.xml"], has_token=False, env=env)
     assert done.returncode == 0, done.stderr
     assert done.stdout == "::notice::no token; badge upload skipped\nfiles=\n"
 
 
-def test_no_report_skips_by_name() -> None:
+def test_no_report_skips_by_name(env: support.Env) -> None:
     """Nothing came down: skipped by name, never an upload of nothing.
 
     The job reads no gate output (#1740), so a tree without a floor,
     whose gate wrote no report, reaches this step with none.
     """
-    done = run_upload_step(["unrelated.txt"])
+    done = run_upload_step(["unrelated.txt"], env=env)
     assert done.returncode == 0, done.stderr
     assert done.stdout == (
         "::notice::no coverage report came down from the gate;"
@@ -685,9 +688,9 @@ def test_no_report_skips_by_name() -> None:
     )
 
 
-def test_adopt_derives_each_python_leg_from_its_own_figure() -> None:
+def test_adopt_derives_each_python_leg_from_its_own_figure(env: support.Env) -> None:
     """Branches below statements set the branch floor alone (#2143)."""
-    done, tree = run_in_tree("coverage:adopt", floor=False, branches="83.47")
+    done, tree = run_in_tree("coverage:adopt", floor=False, branches="83.47", env=env)
     assert done.returncode == 0, done.stderr
     assert done.stdout == (
         "coverage-floor: adopted .coverage-floor: python 88.0 (measured"
@@ -696,9 +699,9 @@ def test_adopt_derives_each_python_leg_from_its_own_figure() -> None:
     assert (tree / ".coverage-floor").is_file()
 
 
-def test_adopt_without_a_measurable_language_measures_nothing() -> None:
+def test_adopt_without_a_measurable_language_measures_nothing(env: support.Env) -> None:
     """No suite, nothing to adopt."""
-    done, _ = run_in_tree("coverage:adopt", floor=False, test_task=False)
+    done, _ = run_in_tree("coverage:adopt", floor=False, test_task=False, env=env)
     assert done.returncode == 0, done.stderr
     assert done.stdout == (
         "coverage:adopt: no measurable language (go.mod, Cargo.toml,"
@@ -708,9 +711,9 @@ def test_adopt_without_a_measurable_language_measures_nothing() -> None:
     )
 
 
-def test_the_line_lists_the_report_the_run_wrote() -> None:
+def test_the_line_lists_the_report_the_run_wrote(env: support.Env) -> None:
     """The Cobertura report is rendered from the leg's own run."""
-    done, tree = run_in_tree("coverage:check")
+    done, tree = run_in_tree("coverage:check", env=env)
     assert done.returncode == 0, done.stderr
     assert done.stdout.endswith(upload_line(tree, "coverage.xml")), done.stdout
     assert (tree.parent / "reports" / "coverage.xml").read_text(
@@ -718,7 +721,7 @@ def test_the_line_lists_the_report_the_run_wrote() -> None:
     ) == "<coverage/>\n"
 
 
-def status(tree: Path) -> str:
+def status(tree: Path, *, env: support.Env) -> str:
     """Read the planted tree's `git status --porcelain`.
 
     Returns:
@@ -728,7 +731,7 @@ def status(tree: Path) -> str:
     return subprocess.run(
         [GIT, "status", "--porcelain"],
         cwd=tree,
-        env=support.env(),
+        env=env(),
         capture_output=True,
         text=True,
         check=True,
@@ -747,11 +750,13 @@ def named(stdout: str) -> list[Path]:
     return [Path(p) for p in line.split(" upload ", 1)[1].split(",")]
 
 
-def test_a_named_directory_holds_every_report_and_the_tree_is_clean() -> None:
+def test_a_named_directory_holds_every_report_and_the_tree_is_clean(
+    env: support.Env,
+) -> None:
     """The gate's shape: the files the line names exist, outside it."""
-    done, tree = run_in_tree("coverage:check", go="93.0", commit=True)
+    done, tree = run_in_tree("coverage:check", go="93.0", commit=True, env=env)
     assert done.returncode == 0, done.stderr
-    assert status(tree) == ""
+    assert status(tree, env=env) == ""
     listed = named(done.stdout)
     reports = [tree.parent / "reports" / n for n in ("coverage.txt", "coverage.xml")]
     assert reports == listed
@@ -759,9 +764,11 @@ def test_a_named_directory_holds_every_report_and_the_tree_is_clean() -> None:
         assert path.is_file(), path
 
 
-def test_the_figures_the_check_judged_are_kept_beside_the_reports() -> None:
+def test_the_figures_the_check_judged_are_kept_beside_the_reports(
+    env: support.Env,
+) -> None:
     """coverage-figures.txt: the leg lines, for the release job (#1622)."""
-    done, tree = run_in_tree("coverage:check", go="93.0", commit=True)
+    done, tree = run_in_tree("coverage:check", go="93.0", commit=True, env=env)
     assert done.returncode == 0, done.stderr
     assert (tree.parent / "reports" / "coverage-figures.txt").read_text(
         encoding="utf-8"
@@ -769,13 +776,13 @@ def test_the_figures_the_check_judged_are_kept_beside_the_reports() -> None:
     assert "coverage-figures.txt" not in done.stdout
 
 
-def test_unset_writes_a_scratch_directory_and_removes_it() -> None:
+def test_unset_writes_a_scratch_directory_and_removes_it(env: support.Env) -> None:
     """A developer's run: the tree is clean and the scratch is gone."""
     done, tree = run_in_tree(
-        "coverage:check", go="93.0", reports_dir=False, commit=True
+        "coverage:check", go="93.0", reports_dir=False, commit=True, env=env
     )
     assert done.returncode == 0, done.stderr
-    assert status(tree) == ""
+    assert status(tree, env=env) == ""
     listed = named(done.stdout)
     files: list[str] = ["coverage.txt", "coverage.xml"]
     names = [p.name for p in listed]
@@ -786,11 +793,13 @@ def test_unset_writes_a_scratch_directory_and_removes_it() -> None:
     assert not scratch.exists(), scratch
 
 
-def test_a_run_that_wrote_no_report_is_refused() -> None:
+def test_a_run_that_wrote_no_report_is_refused(env: support.Env) -> None:
     """A leg that ran and left no report is refused by the task."""
     # The Go stub measures but writes no profile, so the Go leg ran
     # and nothing exists to upload.
-    done, _ = run_in_tree("coverage:check", go="90.0", python=False, go_profile=False)
+    done, _ = run_in_tree(
+        "coverage:check", go="90.0", python=False, go_profile=False, env=env
+    )
     assert done.returncode == 1, done.stdout
     assert (
         "coverage:check: the legs measured wrote no report — nothing for"
@@ -799,9 +808,9 @@ def test_a_run_that_wrote_no_report_is_refused() -> None:
     assert "upload " not in done.stdout
 
 
-def test_no_floor_lists_nothing() -> None:
+def test_no_floor_lists_nothing(env: support.Env) -> None:
     """No floor: skipped, and no upload line for the badge to read."""
-    done, _ = run_in_tree("coverage:check", floor=False)
+    done, _ = run_in_tree("coverage:check", floor=False, env=env)
     assert done.returncode == 0, done.stderr
     assert "upload" not in done.stdout
 
@@ -813,31 +822,31 @@ def test_report_task_is_gone() -> None:
     )
 
 
-def reports(tree: Path) -> subprocess.CompletedProcess[str]:
+def reports(tree: Path, *, env: support.Env) -> subprocess.CompletedProcess[str]:
     """Run the `reports` selector in a planted tree.
 
     Returns:
         The finished process.
 
     """
-    env = support.env()
-    env |= {
+    environ = env()
+    environ |= {
         "ORG_BELT_DIR": str(BELT),
         "ORG_COVERAGE_REPORTS": str(tree.parent / "reports"),
     }
     return subprocess.run(
         [BASH, str(BELT / "coverage-measure.sh"), "coverage:test", "reports"],
         cwd=tree,
-        env=env,
+        env=environ,
         capture_output=True,
         text=True,
         check=False,
     )
 
 
-def test_the_legs_print_then_the_line_names_each_report() -> None:
+def test_the_legs_print_then_the_line_names_each_report(env: support.Env) -> None:
     """The legs' lines, then the reports in the badge job's order."""
-    done, tree = run_in_tree("coverage:check", go="93.0")
+    done, tree = run_in_tree("coverage:check", go="93.0", env=env)
     assert done.returncode == 0, done.stderr
     assert done.stdout.endswith(
         "python-branches leg holds its floor 80.0 (85.0%)\n"
@@ -845,12 +854,12 @@ def test_the_legs_print_then_the_line_names_each_report() -> None:
     ), done.stdout
 
 
-def test_a_stale_report_in_a_named_directory_is_not_listed() -> None:
+def test_a_stale_report_in_a_named_directory_is_not_listed(env: support.Env) -> None:
     """An earlier run's report is cleared: the list is this run's."""
     with tempfile.TemporaryDirectory() as tmp:
         stale = Path(tmp) / "lcov.info"
         stale.write_text("stale\n", encoding="utf-8")
-        done, _ = run_in_tree("coverage:check", reports_dir=tmp)
+        done, _ = run_in_tree("coverage:check", reports_dir=tmp, env=env)
         assert done.returncode == 0, done.stderr
         assert done.stdout.endswith(
             f"coverage:check: upload {Path(tmp) / 'coverage.xml'}\n"
@@ -858,15 +867,15 @@ def test_a_stale_report_in_a_named_directory_is_not_listed() -> None:
         assert not stale.exists()
 
 
-def test_a_run_that_measured_nothing_is_refused() -> None:
+def test_a_run_that_measured_nothing_is_refused(env: support.Env) -> None:
     """No leg lines: refused before any report is read."""
     with tempfile.TemporaryDirectory() as tmp:
         tree = Path(tmp) / "tree"
         tree.mkdir()
         (Path(tmp) / "reports").mkdir()
         (Path(tmp) / "reports" / "coverage.xml").write_text("x\n", "utf-8")
-        subprocess.run([GIT, "init", "-q"], cwd=tree, env=support.env(), check=True)
-        done = reports(tree)
+        subprocess.run([GIT, "init", "-q"], cwd=tree, env=env(), check=True)
+        done = reports(tree, env=env)
     assert done.returncode == 1
     assert done.stdout == ""
     assert (
@@ -899,7 +908,9 @@ def test_child():
 """
 
 
-def run_python_leg(cwd: str) -> tuple[subprocess.CompletedProcess[str], bool]:
+def run_python_leg(
+    cwd: str, *, env: support.Env
+) -> tuple[subprocess.CompletedProcess[str], bool]:
     """Measure a planted tree's python leg with the real coverage.py.
 
     The tree tracks `sub/helper.py` and an empty floor. The suite, one
@@ -928,28 +939,28 @@ def run_python_leg(cwd: str) -> tuple[subprocess.CompletedProcess[str], bool]:
         answer: dict[str, object] = {"dir": str(tree), "run": [test_run]}
         task.write_text(json.dumps(answer), encoding="utf-8")
         (tree / ".coverage-floor").write_text("", encoding="utf-8")
-        env = support.env()
-        env |= {
+        environ = env()
+        environ |= {
             "ORG_BELT_DIR": str(BELT),
             "ORG_PYTHON": os.environ.get("ORG_PYTHON") or sys.executable,
-            "PATH": f"{stubs}{os.pathsep}{env.get('PATH', '')}",
+            "PATH": f"{stubs}{os.pathsep}{environ.get('PATH', '')}",
             "STUB_TASK": str(task),
             "ORG_COVERAGE_REPORTS": str(Path(tmp) / "reports"),
             "ORG_COVERAGE_RUN": str(Path(tmp) / "run"),
         }
         for args in (["init", "-q"], ["add", "sub/helper.py"]):
-            subprocess.run([GIT, *args], cwd=tree, env=env, check=True)
+            subprocess.run([GIT, *args], cwd=tree, env=environ, check=True)
         subprocess.run(
             [str(BELT / "measured"), *test_run.split()],
             cwd=tree,
-            env=env,
+            env=environ,
             capture_output=True,
             check=True,
         )
         done = subprocess.run(
             [BASH, str(BELT / "coverage-measure.sh"), "coverage:test", "python"],
             cwd=tree,
-            env=env,
+            env=environ,
             capture_output=True,
             text=True,
             check=False,
@@ -978,9 +989,9 @@ def _pytest_tool() -> None:
 
 
 @pytest.mark.usefixtures("_pytest_tool")
-def test_a_child_run_from_a_subdirectory_is_red_by_name() -> None:
+def test_a_child_run_from_a_subdirectory_is_red_by_name(env: support.Env) -> None:
     """The belt's words, the recorded file, and the remedy."""
-    done, wrote = run_python_leg("sub")
+    done, wrote = run_python_leg("sub", env=env)
     assert done.returncode == 1, done.stderr
     assert NO_SOURCE_MSG in done.stderr
     assert done.stdout == ""
@@ -988,25 +999,29 @@ def test_a_child_run_from_a_subdirectory_is_red_by_name() -> None:
 
 
 @pytest.mark.usefixtures("_pytest_tool")
-def test_the_same_child_from_the_root_renders_the_report() -> None:
+def test_the_same_child_from_the_root_renders_the_report(env: support.Env) -> None:
     """Control: started from the root, it measures and renders."""
-    done, wrote = run_python_leg(".")
+    done, wrote = run_python_leg(".", env=env)
     assert done.returncode == 0, done.stderr
     assert done.stdout == "python 100.0\npython-branches 100.0\n"
     assert wrote
 
 
-def test_no_test_task_measures_go_test_itself_by_name() -> None:
+def test_no_test_task_measures_go_test_itself_by_name(env: support.Env) -> None:
     """go.mod and no test task: today's command, named."""
-    done, _ = run_in_tree("coverage:check", go="93.0", python=False, test_task=False)
+    done, _ = run_in_tree(
+        "coverage:check", go="93.0", python=False, test_task=False, env=env
+    )
     assert done.returncode == 0, done.stderr
     assert "coverage:check: go: no test task: measuring `go test ./...`" in done.stderr
     assert "coverage:check: go leg holds its floor 80.0 (93.0%)" in done.stdout
 
 
-def test_a_run_with_no_counters_is_refused_by_name() -> None:
+def test_a_run_with_no_counters_is_refused_by_name(env: support.Env) -> None:
     """A test task whose run measured no Go: refused, no figure."""
-    done, _ = run_in_tree("coverage:check", go="93.0", python=False, measured=False)
+    done, _ = run_in_tree(
+        "coverage:check", go="93.0", python=False, measured=False, env=env
+    )
     assert done.returncode == 1
     assert (
         "coverage:check: the test task ran no measured Go — its test command"

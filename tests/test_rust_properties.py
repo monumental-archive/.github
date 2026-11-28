@@ -92,8 +92,7 @@ exit "${STUB_EXIT:-0}"
 """
 
 # Every inherited GIT_* goes (#857), as in test_typescript_properties.py.
-_GIT_ENV = {
-    **support.env(),
+GIT_ISOLATED = {
     "GIT_CONFIG_GLOBAL": os.devnull,
     "GIT_CONFIG_NOSYSTEM": "1",
 }
@@ -111,7 +110,13 @@ class Ran:
     cases: str | None
 
 
-def run(body: str, files: dict[str, str], env: dict[str, str] | None = None) -> Ran:
+def run(
+    body: str,
+    files: dict[str, str],
+    env: dict[str, str] | None = None,
+    *,
+    make_env: support.Env,
+) -> Ran:
     """Run a task body in a planted tree, with the stub mise on PATH.
 
     Returns:
@@ -127,17 +132,21 @@ def run(body: str, files: dict[str, str], env: dict[str, str] | None = None) -> 
         stub = stubs / "mise"
         stub.write_text(STUB, encoding="utf-8")
         stub.chmod(0o755)
-        subprocess.run([GIT, "init", "-q", str(root)], check=True, env=_GIT_ENV)
+        subprocess.run(
+            [GIT, "init", "-q", str(root)], check=True, env=make_env(**GIT_ISOLATED)
+        )
         for name, text in files.items():
             path = root / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text, encoding="utf-8")
         if files:
             subprocess.run(
-                [GIT, "-C", str(root), "add", "-A"], check=True, env=_GIT_ENV
+                [GIT, "-C", str(root), "add", "-A"],
+                check=True,
+                env=make_env(**GIT_ISOLATED),
             )
         search = [str(stubs), str(Path(GIT).parent), "/usr/bin", "/bin"]
-        environ = support.env(
+        environ = make_env(
             PATH=os.pathsep.join(search),
             HOME=scratch,
             ORG_BELT_DIR=str(BELT),
@@ -171,35 +180,36 @@ def run(body: str, files: dict[str, str], env: dict[str, str] | None = None) -> 
 
 
 # lint:rust-properties: a proptest that ignores the seed is red.
-def test_proptest_below_1_7_is_red_by_file_and_version() -> None:
+def test_proptest_below_1_7_is_red_by_file_and_version(env: support.Env) -> None:
     """1.6.0 predates PROPTEST_RNG_SEED."""
     got = run(
         LINT,
         {"crates/a/Cargo.lock": lock(("proptest", "1.6.0"), ("rand", "0.9.0"))},
+        make_env=env,
     )
     assert got.returncode == 1, got.stderr
     assert "crates/a/Cargo.lock: proptest 1.6.0 is below 1.7.0" in got.stderr
     assert "ignores PROPTEST_RNG_SEED" in got.stderr
 
 
-def test_a_pre_release_of_1_7_is_red() -> None:
+def test_a_pre_release_of_1_7_is_red(env: support.Env) -> None:
     """A pre-release sorts below its release."""
-    got = run(LINT, {"Cargo.lock": lock(("proptest", "1.7.0-alpha.1"))})
+    got = run(LINT, {"Cargo.lock": lock(("proptest", "1.7.0-alpha.1"))}, make_env=env)
     assert got.returncode == 1, got.stderr
     assert "Cargo.lock: proptest 1.7.0-alpha.1 is below 1.7.0" in got.stderr
 
 
 @pytest.mark.parametrize("version", ["1.7.0", "1.12.0"])
-def test_1_7_and_1_12_are_green(version: object) -> None:
+def test_1_7_and_1_12_are_green(version: object, env: support.Env) -> None:
     """The first release that reads the seed, and what edtf locks."""
-    got = run(LINT, {"Cargo.lock": lock(("proptest", version))})
+    got = run(LINT, {"Cargo.lock": lock(("proptest", version))}, make_env=env)
     assert got.returncode == 0, got.stderr
     assert (
         f"lint:rust-properties: Cargo.lock: proptest {version}, reads the belt's seed\n"
     ) == got.stdout
 
 
-def test_one_old_lock_among_good_ones_is_red() -> None:
+def test_one_old_lock_among_good_ones_is_red(env: support.Env) -> None:
     """Every lock is read, not the first."""
     got = run(
         LINT,
@@ -207,6 +217,7 @@ def test_one_old_lock_among_good_ones_is_red() -> None:
             "Cargo.lock": lock(("proptest", "1.12.0")),
             "fuzz/Cargo.lock": lock(("proptest", "1.4.0")),
         },
+        make_env=env,
     )
     assert got.returncode == 1, got.stderr
     assert "fuzz/Cargo.lock: proptest 1.4.0 is below 1.7.0" in got.stderr
@@ -214,14 +225,14 @@ def test_one_old_lock_among_good_ones_is_red() -> None:
 
 
 @pytest.mark.parametrize("name", ["vendor/x/Cargo.lock", "crates/vendor/y/Cargo.lock"])
-def test_a_vendored_lock_is_not_read(name: object) -> None:
+def test_a_vendored_lock_is_not_read(name: object, env: support.Env) -> None:
     """vendor/ is not the repository's, at the root or nested."""
-    got = run(LINT, {name: lock(("proptest", "1.6.0"))})
+    got = run(LINT, {name: lock(("proptest", "1.6.0"))}, make_env=env)
     assert got.returncode == 0, got.stderr
     assert got.stdout == SKIP_LINT
 
 
-def test_no_proptest_locked_skips_clean_by_name() -> None:
+def test_no_proptest_locked_skips_clean_by_name(env: support.Env) -> None:
     """A lock without proptest, and no lock at all."""
     rows: list[dict[str, str]] = [
         {"Cargo.lock": lock(("rand", "0.9.0"))},
@@ -229,15 +240,15 @@ def test_no_proptest_locked_skips_clean_by_name() -> None:
         {},
     ]
     for files in rows:
-        got = run(LINT, files)
+        got = run(LINT, files, make_env=env)
         assert got.returncode == 0, got.stderr
         assert got.stdout == SKIP_LINT
         assert got.calls == NONE
 
 
-def test_an_unreadable_lock_is_red_by_name() -> None:
+def test_an_unreadable_lock_is_red_by_name(env: support.Env) -> None:
     """A lock that is not TOML is named, never read as empty."""
-    got = run(LINT, {"Cargo.lock": "[[package\n"})
+    got = run(LINT, {"Cargo.lock": "[[package\n"}, make_env=env)
     assert got.returncode == 1, got.stderr
     assert "Cargo.lock: " in got.stderr
     assert "lint:rust-properties: a tracked Cargo.lock could not be read" in got.stderr
@@ -250,9 +261,9 @@ SEED_LINE = re.compile(
 
 
 # audit:rust-properties: the repository's test task at a drawn seed.
-def test_an_unset_seed_is_drawn_printed_and_handed_on() -> None:
+def test_an_unset_seed_is_drawn_printed_and_handed_on(env: support.Env) -> None:
     """The printed seed is the one `mise run test` receives."""
-    got = run(AUDIT, LOCKED)
+    got = run(AUDIT, LOCKED, make_env=env)
     assert got.returncode == 0, got.stderr
     found = SEED_LINE.search(got.stdout)
     if found is None:
@@ -265,15 +276,15 @@ def test_an_unset_seed_is_drawn_printed_and_handed_on() -> None:
     assert got.cases == "unset"
 
 
-def test_two_unset_runs_draw_two_seeds() -> None:
+def test_two_unset_runs_draw_two_seeds(env: support.Env) -> None:
     """64 random bits: two draws that agree would be a fixed seed."""
-    seeds = {run(AUDIT, LOCKED).seed for _ in range(2)}
+    seeds = {run(AUDIT, LOCKED, make_env=env).seed for _ in range(2)}
     assert len(seeds) == 2, seeds
 
 
-def test_a_given_seed_is_the_one_handed_on() -> None:
+def test_a_given_seed_is_the_one_handed_on(env: support.Env) -> None:
     """ORG_PROPERTY_SEED=7 reruns seed 7."""
-    got = run(AUDIT, LOCKED, {"ORG_PROPERTY_SEED": "7"})
+    got = run(AUDIT, LOCKED, {"ORG_PROPERTY_SEED": "7"}, make_env=env)
     assert got.returncode == 0, got.stderr
     assert (
         "audit:rust-properties: seed 7 (reproduce: ORG_PROPERTY_SEED=7)\n" in got.stdout
@@ -283,9 +294,11 @@ def test_a_given_seed_is_the_one_handed_on() -> None:
 
 
 @pytest.mark.parametrize("given", ["notanumber", "-1", str(1 << 64)])
-def test_a_seed_proptest_would_not_read_is_a_usage_error(given: object) -> None:
+def test_a_seed_proptest_would_not_read_is_a_usage_error(
+    given: object, env: support.Env
+) -> None:
     """Proptest ignores a non-number without a word (measured)."""
-    got = run(AUDIT, LOCKED, {"ORG_PROPERTY_SEED": given})
+    got = run(AUDIT, LOCKED, {"ORG_PROPERTY_SEED": given}, make_env=env)
     assert got.returncode == 2, got.stderr
     assert (
         f"ORG_PROPERTY_SEED must be an integer from 0 to 2^64-1, got '{given}'"
@@ -294,9 +307,11 @@ def test_a_seed_proptest_would_not_read_is_a_usage_error(given: object) -> None:
 
 
 @pytest.mark.parametrize("status", ["0", "1", "101"])
-def test_the_test_task_status_is_the_task_status(status: object) -> None:
+def test_the_test_task_status_is_the_task_status(
+    status: object, env: support.Env
+) -> None:
     """A failing test task fails the audit and says where it lands."""
-    got = run(AUDIT, LOCKED, {"STUB_EXIT": status})
+    got = run(AUDIT, LOCKED, {"STUB_EXIT": status}, make_env=env)
     assert int(status) == got.returncode, got.stderr
     if status != "0":
         assert "*.proptest-regressions" in got.stderr
@@ -304,20 +319,20 @@ def test_the_test_task_status_is_the_task_status(status: object) -> None:
         assert rerun in got.stderr
 
 
-def test_no_proptest_locked_skips_and_calls_no_mise() -> None:
+def test_no_proptest_locked_skips_and_calls_no_mise(env: support.Env) -> None:
     """Nothing to run: the skip line, and the stub never called."""
     rows: list[dict[str, str]] = [{"Cargo.lock": lock(("rand", "0.9.0"))}, {}]
     for files in rows:
-        got = run(AUDIT, files)
+        got = run(AUDIT, files, make_env=env)
         assert got.returncode == 0, got.stderr
         assert got.stdout == SKIP_AUDIT
         assert got.calls == NONE
 
 
-def test_no_test_task_is_red_by_lock_file() -> None:
+def test_no_test_task_is_red_by_lock_file(env: support.Env) -> None:
     """Proptest locked and nothing to run it: red, naming the lock."""
     files = {"crates/a/Cargo.lock": lock(("proptest", "1.12.0"))}
-    got = run(AUDIT, files, {"STUB_HAS_TEST": "0"})
+    got = run(AUDIT, files, {"STUB_HAS_TEST": "0"}, make_env=env)
     assert got.returncode == 1, got.stderr
     assert (
         "audit:rust-properties: crates/a/Cargo.lock locks proptest, but the"

@@ -172,13 +172,14 @@ FAKES = {
 class Repo:
     """A throwaway tree, the stand-ins, and the inputs a row may vary."""
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, *, env: support.Env) -> None:
         """Lay out the tree, the stand-ins and the passing case's inputs.
 
         A real tool the script calls and PATH lacks is red by name
         (support.tool). Loud, never a skip: a skipped table reads as a
         passing one.
         """
+        self.make_env = env
         self.root = root
         self.tree = root / "tree"
         self.fake = root / "fake"
@@ -240,7 +241,7 @@ class Repo:
         # The stand-ins, then the linked real tools, and nothing else:
         # whether `go` exists is a row's decision, never the machine's.
         path = os.pathsep.join([str(self.bin), str(self.tools)])
-        env = support.env(
+        env = self.make_env(
             PATH=path,
             HOME=str(self.root),
             FAKE=str(self.fake),
@@ -291,9 +292,10 @@ ISSUE_TITLE = "the supported release carries an advisory and main does not remed
 class DecisionCase:
     """A fresh passing case per row; each row breaks exactly one input."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Build the passing case."""
-        self.repo = Repo(Path(str(tmp_path)))
+        self.make_env = env
+        self.repo = Repo(Path(str(tmp_path)), env=self.make_env)
 
     def declines(self, reason: str) -> None:
         """Run, and require a clean 'no' carrying exactly this sentence."""
@@ -306,9 +308,9 @@ class DecisionCase:
 
 
 @fixture
-def decision_case(tmp_path: Path) -> DecisionCase:
+def decision_case(tmp_path: Path, env: support.Env) -> DecisionCase:
     """Give each row its own DecisionCase."""
-    return DecisionCase(tmp_path)
+    return DecisionCase(tmp_path, env=env)
 
 
 def test_an_affected_release_that_main_remedies_releases(

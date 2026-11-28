@@ -590,7 +590,7 @@ def as_step() -> contextlib.ExitStack:
     return stack
 
 
-def git_tree(files: dict[str, str]) -> Path:
+def git_tree(files: dict[str, str], *, env: support.Env) -> Path:
     """Plant a git tree with the files tracked.
 
     Returns:
@@ -601,9 +601,9 @@ def git_tree(files: dict[str, str]) -> Path:
     for path, text in files.items():
         (root / path).parent.mkdir(parents=True, exist_ok=True)
         (root / path).write_text(text, "utf-8")
-    env = support.env()
-    subprocess.run([GIT, "-C", str(root), "init", "-q"], check=True, env=env)
-    subprocess.run([GIT, "-C", str(root), "add", "-A"], check=True, env=env)
+    environ = env()
+    subprocess.run([GIT, "-C", str(root), "init", "-q"], check=True, env=environ)
+    subprocess.run([GIT, "-C", str(root), "add", "-A"], check=True, env=environ)
     return root
 
 
@@ -732,17 +732,17 @@ NOT_EDTF = (
 
 
 # The helper's outputs for the trees the scheduled runs meet.
-def test_an_empty_tree_runs_the_unconditional_jobs_only() -> None:
+def test_an_empty_tree_runs_the_unconditional_jobs_only(env: support.Env) -> None:
     """Nothing tracked: every conditional job is skipped."""
-    got = every(git_tree({}))
+    got = every(git_tree({}, env=env))
     for rows in audit_legs.load_table().values():
         for job, row in rows.items():
             assert (row.when is None) == got[job]
 
 
-def test_a_rust_only_tree_shaped_like_edtf() -> None:
+def test_a_rust_only_tree_shaped_like_edtf(env: support.Env) -> None:
     """The jobs edtf ran for languages it lacks come out false."""
-    got = every(git_tree(EDTF))
+    got = every(git_tree(EDTF, env=env))
     for job in NOT_EDTF:
         assert not got[job]
     for job in (
@@ -770,9 +770,9 @@ def test_a_rust_only_tree_shaped_like_edtf() -> None:
         ("python-properties", False),
     ],
 )
-def test_a_go_tree(job: object, want: object) -> None:
+def test_a_go_tree(job: object, want: object, env: support.Env) -> None:
     """go.mod brings the Go jobs and fuzz, and nothing Rust."""
-    got = every(git_tree(GO))
+    got = every(git_tree(GO, env=env))
     assert want == got[job]
 
 
@@ -797,7 +797,7 @@ def test_the_canon_tree(job: object, want: object) -> None:
     assert want == got[job]
 
 
-def test_a_floor_leg_must_be_recorded() -> None:
+def test_a_floor_leg_must_be_recorded(env: support.Env) -> None:
     """A floor job applies only where .coverage-floor records its leg."""
     for files, want in (
         (
@@ -811,7 +811,7 @@ def test_a_floor_leg_must_be_recorded() -> None:
         ({**GO, ".coverage-floor": "not a floor\n"}, "applies: go.mod is tracked"),
         (GO, "applies: go.mod is tracked"),
     ):
-        root = git_tree(files)
+        root = git_tree(files, env=env)
         rows = audit_legs.load_table()["repo-deep-tests"]
         reasons = audit_legs.applies(rows, root, gate_tools.tracked_files(root))
         assert want == reasons["coverage-go-branches"]
@@ -823,9 +823,9 @@ RAND_LOCK = 'version = 4\n\n[[package]]\nname = "rand"\nversion = "0.9.0"\n'
 
 # The rust-properties job runs where a lock holds proptest (#1930).
 @pytest.mark.parametrize("name", ["Cargo.lock", "crates/a/Cargo.lock"])
-def test_a_lock_holding_proptest_runs_the_job(name: object) -> None:
+def test_a_lock_holding_proptest_runs_the_job(name: object, env: support.Env) -> None:
     """At the root, or a workspace member's own lock."""
-    got = outputs(git_tree({name: PROPTEST_LOCK}), "repo-deep-tests")
+    got = outputs(git_tree({name: PROPTEST_LOCK}, env=env), "repo-deep-tests")
     assert got["rust-properties"]
 
 
@@ -837,15 +837,15 @@ def test_a_lock_holding_proptest_runs_the_job(name: object) -> None:
         {},
     ],
 )
-def test_a_lock_without_proptest_skips_the_job(files: object) -> None:
+def test_a_lock_without_proptest_skips_the_job(files: object, env: support.Env) -> None:
     """A Cargo.lock alone is not a property, nor a vendored proptest."""
-    got = outputs(git_tree(files), "repo-deep-tests")
+    got = outputs(git_tree(files, env=env), "repo-deep-tests")
     assert not got["rust-properties"]
 
 
-def test_the_skip_names_what_was_read() -> None:
+def test_the_skip_names_what_was_read(env: support.Env) -> None:
     """The reason says the lock was read and held no proptest."""
-    root = git_tree({"Cargo.lock": RAND_LOCK})
+    root = git_tree({"Cargo.lock": RAND_LOCK}, env=env)
     tracked = gate_tools.tracked_files(root)
     rows = audit_legs.load_table()["repo-deep-tests"]
     reasons = audit_legs.refine(
@@ -891,18 +891,21 @@ Record = tuple[str, str, str, str, str]
 
 
 # The fuzz job runs one runner per fuzz target (#1899).
-def test_two_bins_and_one_go_target_emit_three_entries() -> None:
+def test_two_bins_and_one_go_target_emit_three_entries(env: support.Env) -> None:
     """Two [[bin]]s and FuzzLoad in internal/policy: three entries, fuzz on.
 
     Against the helper before #1899 there is no `fuzz-targets`
     output, so this row fails there.
     """
     got = raw_outputs(
-        git_tree({
-            "fuzz/Cargo.toml": fuzz_manifest("parse", "roundtrip"),
-            "go.mod": "module example.com/x\n",
-            "internal/policy/x_test.go": GO_FUZZ_TEST,
-        }),
+        git_tree(
+            {
+                "fuzz/Cargo.toml": fuzz_manifest("parse", "roundtrip"),
+                "go.mod": "module example.com/x\n",
+                "internal/policy/x_test.go": GO_FUZZ_TEST,
+            },
+            env=env,
+        ),
         "repo-deep-tests",
     )
     want: list[audit_legs.Target] = [
@@ -924,21 +927,21 @@ def test_two_bins_and_one_go_target_emit_three_entries() -> None:
     assert got["fuzz"] == "true"
 
 
-def test_a_tree_with_neither_emits_an_empty_list() -> None:
+def test_a_tree_with_neither_emits_an_empty_list(env: support.Env) -> None:
     """No fuzz crate and no Go fuzz target: `[]`, and fuzz is off."""
     trees: list[dict[str, str]] = [
         {},
         {**GO, "internal/policy/x_test.go": "package policy\n"},
     ]
     for files in trees:
-        got = raw_outputs(git_tree(files), "repo-deep-tests")
+        got = raw_outputs(git_tree(files, env=env), "repo-deep-tests")
         assert got["fuzz-targets"] == "[]"
         assert got["fuzz"] == "false"
 
 
-def test_a_fuzz_crate_with_no_bin_is_skipped_by_name() -> None:
+def test_a_fuzz_crate_with_no_bin_is_skipped_by_name(env: support.Env) -> None:
     """fuzz/ applies by the table, but no [[bin]] means no runner."""
-    root = git_tree({"fuzz/Cargo.toml": fuzz_manifest()})
+    root = git_tree({"fuzz/Cargo.toml": fuzz_manifest()}, env=env)
     rows = audit_legs.load_table()["repo-deep-tests"]
     tracked = gate_tools.tracked_files(root)
     reasons, lists = audit_legs.matrices(
@@ -951,13 +954,13 @@ def test_a_fuzz_crate_with_no_bin_is_skipped_by_name() -> None:
     assert len(lists["fuzz-targets"]) == 0
 
 
-def test_an_unreadable_fuzz_manifest_is_red_naming_it() -> None:
+def test_an_unreadable_fuzz_manifest_is_red_naming_it(env: support.Env) -> None:
     """A fuzz/Cargo.toml that will not parse fails the applies job by name."""
     for text, message in (
         ("[[bin]\n", "fuzz/Cargo.toml: "),
         ("[[bin]]\npath = 'x.rs'\n", "fuzz/Cargo.toml: [[bin]] 1.name is not"),
     ):
-        root = git_tree({"fuzz/Cargo.toml": text})
+        root = git_tree({"fuzz/Cargo.toml": text}, env=env)
         err = io.StringIO()
         with (
             as_step(),
@@ -969,9 +972,9 @@ def test_an_unreadable_fuzz_manifest_is_red_naming_it() -> None:
         assert err.getvalue().startswith(f"::error::{STEP}: {message}"), err.getvalue()
 
 
-def test_the_list_names_every_target_and_its_leg() -> None:
+def test_the_list_names_every_target_and_its_leg(env: support.Env) -> None:
     """Every Rust and Go target of one tree, each with its leg name."""
-    root = git_tree(PLANTED_TARGETS)
+    root = git_tree(PLANTED_TARGETS, env=env)
     (root / "internal" / "policy" / "y_test.go").write_text(
         "package policy\n\nfunc FuzzUntracked(f *testing.F) {}\n", "utf-8"
     )
@@ -996,13 +999,16 @@ def test_the_list_names_every_target_and_its_leg() -> None:
     assert want == listed
 
 
-def test_two_packages_sharing_a_fuzz_name_get_two_legs() -> None:
+def test_two_packages_sharing_a_fuzz_name_get_two_legs(env: support.Env) -> None:
     """a/FuzzLoad and b/FuzzLoad: two entries, two legs, two artifacts."""
-    root = git_tree({
-        "go.mod": "module example.com/x\n",
-        "a/a_test.go": GO_FUZZ_TEST,
-        "b/b_test.go": GO_FUZZ_TEST,
-    })
+    root = git_tree(
+        {
+            "go.mod": "module example.com/x\n",
+            "a/a_test.go": GO_FUZZ_TEST,
+            "b/b_test.go": GO_FUZZ_TEST,
+        },
+        env=env,
+    )
     entries = audit_legs.fuzz_targets(root, gate_tools.tracked_files(root))
     legs: list[str] = [t["leg"] for t in entries]
     targets: list[str] = [t["target"] for t in entries]

@@ -892,17 +892,17 @@ def test_jq_the_gate_calls_is_a_pinned_belt_tool() -> None:
     assert jq == providers, f"gate tasks call jq: {callers}"
 
 
-def clean_env() -> dict[str, str]:
+def clean_env(*, env: support.Env) -> dict[str, str]:
     """Copy the environment without git's repository variables.
 
     Returns:
         os.environ minus every `GIT_*` name (#857).
 
     """
-    return support.env()
+    return env()
 
 
-def git_tree(files: dict[str, str]) -> Path:
+def git_tree(files: dict[str, str], *, env: support.Env) -> Path:
     """Plant a git tree with the files tracked.
 
     Returns:
@@ -913,8 +913,12 @@ def git_tree(files: dict[str, str]) -> Path:
     for path, text in files.items():
         (root / path).parent.mkdir(parents=True, exist_ok=True)
         (root / path).write_text(text, "utf-8")
-    subprocess.run([GIT, "-C", str(root), "init", "-q"], check=True, env=clean_env())
-    subprocess.run([GIT, "-C", str(root), "add", "-A"], check=True, env=clean_env())
+    subprocess.run(
+        [GIT, "-C", str(root), "init", "-q"], check=True, env=clean_env(env=env)
+    )
+    subprocess.run(
+        [GIT, "-C", str(root), "add", "-A"], check=True, env=clean_env(env=env)
+    )
     return root
 
 
@@ -935,63 +939,68 @@ def install(root: Path) -> set[str]:
     return {k for k, why in reasons.items() if why.startswith("needed")}
 
 
-def always() -> set[str]:
+def always(*, env: support.Env) -> set[str]:
     """Name the tools every tree gets.
 
     Returns:
         Each key whose row carries no `when`, and what they install.
 
     """
-    return install(git_tree({}))
+    return install(git_tree({}, env=env))
 
 
 WORKFLOW = {".github/workflows/ci.yml": "on: push\n", "README.md": "# x\n"}
 
 
 # The helper's list for the trees the gate meets.
-def test_an_empty_tree_gets_the_unconditional_tools_only() -> None:
+def test_an_empty_tree_gets_the_unconditional_tools_only(env: support.Env) -> None:
     """Nothing tracked: no conditional row fires."""
     table = gate_tools.load_table()
     unconditional = {k for k, r in table.items() if r.when is None}
-    assert unconditional <= always()
-    assert "aqua:hadolint/hadolint" not in always()
-    assert "aqua:golangci/golangci-lint" not in always()
+    assert unconditional <= always(env=env)
+    assert "aqua:hadolint/hadolint" not in always(env=env)
+    assert "aqua:golangci/golangci-lint" not in always(env=env)
 
 
-def test_a_go_tree() -> None:
+def test_a_go_tree(env: support.Env) -> None:
     """go.mod brings golangci-lint and nothing Rust."""
-    got = install(git_tree({**WORKFLOW, "go.mod": "module x\n"}))
+    got = install(git_tree({**WORKFLOW, "go.mod": "module x\n"}, env=env))
     assert "aqua:golangci/golangci-lint" in got
     assert "github:bnjbvr/cargo-machete" not in got
     assert "aqua:EmbarkStudios/cargo-deny" not in got
 
 
-def test_a_rust_tree() -> None:
+def test_a_rust_tree(env: support.Env) -> None:
     """Cargo.toml and Cargo.lock bring the Rust lints' tools."""
-    got = install(git_tree({**WORKFLOW, "Cargo.toml": "[package]\n", "Cargo.lock": ""}))
+    got = install(
+        git_tree({**WORKFLOW, "Cargo.toml": "[package]\n", "Cargo.lock": ""}, env=env)
+    )
     assert "github:bnjbvr/cargo-machete" in got
     assert "aqua:EmbarkStudios/cargo-deny" in got
     assert "aqua:golangci/golangci-lint" not in got
 
 
-def test_a_pgrx_tree() -> None:
+def test_a_pgrx_tree(env: support.Env) -> None:
     """A pgrx crate with SQL brings the SQL linter."""
     got = install(
-        git_tree({
-            **WORKFLOW,
-            "Cargo.toml": "[workspace]\n",
-            "crates/x-pg/Cargo.toml": "[package]\n",
-            "crates/x-pg/sql/x--1.0.sql": "select 1;\n",
-        })
+        git_tree(
+            {
+                **WORKFLOW,
+                "Cargo.toml": "[workspace]\n",
+                "crates/x-pg/Cargo.toml": "[package]\n",
+                "crates/x-pg/sql/x--1.0.sql": "select 1;\n",
+            },
+            env=env,
+        )
     )
     assert "pipx:sqlfluff" in got
     assert "aqua:astral-sh/uv" in got
     assert "github:bnjbvr/cargo-machete" in got
 
 
-def test_a_json_only_tree_needs_biome() -> None:
+def test_a_json_only_tree_needs_biome(env: support.Env) -> None:
     """lint:biome lints JSON: renovate.json alone brings biome (#1410)."""
-    assert "aqua:biomejs/biome" in install(git_tree({"renovate.json": "{}\n"}))
+    assert "aqua:biomejs/biome" in install(git_tree({"renovate.json": "{}\n"}, env=env))
 
 
 @pytest.mark.parametrize(
@@ -1003,9 +1012,9 @@ def test_a_json_only_tree_needs_biome() -> None:
         "Dockerfile.ci",
     ],
 )
-def test_a_dockerfile_tree(name: object) -> None:
+def test_a_dockerfile_tree(name: object, env: support.Env) -> None:
     """Each Dockerfile form brings hadolint."""
-    got = install(git_tree({**WORKFLOW, name: "FROM x\n"}))
+    got = install(git_tree({**WORKFLOW, name: "FROM x\n"}, env=env))
     assert "aqua:hadolint/hadolint" in got
 
 
@@ -1016,24 +1025,24 @@ def test_the_canon_tree() -> None:
     assert reached == install(CANON) & reached
 
 
-def test_a_caller_task_brings_a_belt_tool() -> None:
+def test_a_caller_task_brings_a_belt_tool(env: support.Env) -> None:
     """A repository's own task calling hadolint gets it installed."""
     tree = {
         **WORKFLOW,
         "mise.toml": '[tasks.test]\nrun = "scripts/t.sh"\n',
         "scripts/t.sh": "#!/bin/sh\nhadolint --version\n",
     }
-    assert "aqua:hadolint/hadolint" in install(git_tree(tree))
+    assert "aqua:hadolint/hadolint" in install(git_tree(tree, env=env))
     tree["scripts/t.sh"] = "#!/bin/sh\necho hadolint\n"
-    assert "aqua:hadolint/hadolint" not in install(git_tree(tree))
+    assert "aqua:hadolint/hadolint" not in install(git_tree(tree, env=env))
 
 
-def test_a_caller_pin_is_never_disabled() -> None:
+def test_a_caller_pin_is_never_disabled(env: support.Env) -> None:
     """Mise disables by name: the repository's own pin would go too."""
     tree = {**WORKFLOW, "mise.toml": '[tools]\n"github:hadolint/hadolint" = "1"\n'}
-    assert "aqua:hadolint/hadolint" in install(git_tree(tree))
+    assert "aqua:hadolint/hadolint" in install(git_tree(tree, env=env))
     tree["mise.toml"] = '[tools]\ngo = "1.27.4"\n'
-    assert "aqua:hadolint/hadolint" not in install(git_tree(tree))
+    assert "aqua:hadolint/hadolint" not in install(git_tree(tree, env=env))
 
 
 def test_the_canon_pins_no_tool_of_its_own() -> None:
@@ -1060,14 +1069,18 @@ def test_the_disable_env() -> None:
 
 @pytest.mark.parametrize("tree", ["go", "canon"])
 def test_the_disable_mode(
-    tree: str, tmp_path: Path, capfd: pytest.CaptureFixture[str]
+    tree: str, tmp_path: Path, capfd: pytest.CaptureFixture[str], env: support.Env
 ) -> None:
     """A Go tree leaves hadolint out; the canon leaves nothing out."""
-    root = git_tree({**WORKFLOW, "go.mod": "module x\n"}) if tree == "go" else CANON
+    root = (
+        git_tree({**WORKFLOW, "go.mod": "module x\n"}, env=env)
+        if tree == "go"
+        else CANON
+    )
     env_file = tmp_path / "env"
     env_file.write_text("")
     with pytest.MonkeyPatch.context() as patched:
-        for name, value in (clean_env() | {"GITHUB_ENV": str(env_file)}).items():
+        for name, value in (clean_env(env=env) | {"GITHUB_ENV": str(env_file)}).items():
             patched.setenv(name, value)
         patched.setattr(sys, "argv", [STEP])
         status = gate_tools.main(["--root", str(root), "disable"])
@@ -1083,14 +1096,17 @@ def test_the_disable_mode(
 
 
 def test_the_helper_refuses_a_table_out_of_step(
-    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    capfd: pytest.CaptureFixture[str],
+    belt: support.Belt,
+    env: support.Env,
 ) -> None:
     """A belt key with no row is refused by name, not left out."""
     text = (BELT / "gate-tools.toml").read_text("utf-8")
     stub = text.replace('[tools."aqua:hadolint/hadolint"]', "[x]")
-    table = support.belt(tmp_path, stubs={"gate-tools.toml": stub}) / "gate-tools.toml"
+    table = belt(tmp_path, stubs={"gate-tools.toml": stub}) / "gate-tools.toml"
     with pytest.MonkeyPatch.context() as patched:
-        for name, value in (support.env()).items():
+        for name, value in (env()).items():
             patched.setenv(name, value)
         patched.chdir(CANON)
         patched.setattr(sys, "argv", [STEP])

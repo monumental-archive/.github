@@ -128,8 +128,10 @@ def body(task: str) -> str:
 class TwoExtensions:
     """A workspace of two extensions at different highest majors."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, belt: support.Belt, env: support.Env) -> None:
         """Plant the stubs, the surface, the plan and the belt."""
+        self.plant_belt = belt
+        self.make_env = env
         self.tmp = tmp_path
         self.tree = self.tmp / "tree"
         self.tree.mkdir()
@@ -148,7 +150,7 @@ class TwoExtensions:
             stub = bins / name
             stub.write_text(text, encoding="utf-8")
             stub.chmod(0o755)
-        self.belt = support.belt(
+        self.belt = self.plant_belt(
             self.tmp / "belt",
             stubs={
                 "pgrx-env.sh": PGRX_ENV_STUB,
@@ -166,7 +168,7 @@ class TwoExtensions:
         surface.write_text(SURFACE, encoding="utf-8")
         plan = self.tmp / "plan"
         plan.write_text(PLAN, encoding="utf-8")
-        env = support.env()
+        env = self.make_env()
         self.env = env | {
             "PATH": f"{bins}:{env['PATH']}",
             "ORG_BELT_DIR": str(self.belt),
@@ -211,9 +213,11 @@ class TwoExtensions:
 
 
 @fixture
-def two_extensions(tmp_path: Path) -> TwoExtensions:
+def two_extensions(
+    tmp_path: Path, belt: support.Belt, env: support.Env
+) -> TwoExtensions:
     """Give each row its own TwoExtensions."""
-    return TwoExtensions(tmp_path)
+    return TwoExtensions(tmp_path, belt=belt, env=env)
 
 
 def test_fix_rust_fixes_each_extension_at_its_own_major(

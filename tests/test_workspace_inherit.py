@@ -509,9 +509,15 @@ class TwoRoots:
     """A planted tree with two workspaces, cargo stubbed."""
 
     def __init__(
-        self, scratch: Path, fetch_fails: str = "", locate_fails: str = ""
+        self,
+        scratch: Path,
+        fetch_fails: str = "",
+        locate_fails: str = "",
+        *,
+        env: support.Env,
     ) -> None:
         """Plant the tree, the stub and each root's account in `scratch`."""
+        self.make_env = env
         base = scratch.resolve()
         self.tree = base / "repo"
         accounts = base / "accounts"
@@ -530,7 +536,7 @@ class TwoRoots:
         }
         for name, document in planted.items():
             (accounts / f"{name}.json").write_text(json.dumps(document), "utf-8")
-        self.env = support.env(
+        self.env = self.make_env(
             base / "home",
             MISE_TASK_NAME=TASK,
             ORG_FINDINGS="",
@@ -588,10 +594,10 @@ class TwoRoots:
 
 # Each workspace in the tree is judged, past a red one (#2004).
 def test_a_key_no_member_of_the_second_root_takes_is_red(
-    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+    tmp_path: Path, capfd: pytest.CaptureFixture[str], env: support.Env
 ) -> None:
     """fuzz/Cargo.toml's `edition`: nonzero, naming the key and the root."""
-    planted = TwoRoots(tmp_path)
+    planted = TwoRoots(tmp_path, env=env)
     status, out, err = planted.main(capfd=capfd)
     assert (status, out) == (1, TOP_GREEN)
     assert err.startswith(INERT_IN_FUZZ), err
@@ -600,10 +606,10 @@ def test_a_key_no_member_of_the_second_root_takes_is_red(
 
 
 def test_a_failing_cargo_is_red_with_its_text_and_the_rest_judged(
-    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+    tmp_path: Path, capfd: pytest.CaptureFixture[str], env: support.Env
 ) -> None:
     """Fetch refused for the top root: cargo's words; fuzz still judged."""
-    done = TwoRoots(tmp_path, fetch_fails="Cargo.toml").main(capfd=capfd)
+    done = TwoRoots(tmp_path, fetch_fails="Cargo.toml", env=env).main(capfd=capfd)
     assert (done.returncode, done.stdout) == (1, "")
     assert (
         f"{TASK}: Cargo.toml: cargo fetch failed\n"
@@ -624,17 +630,21 @@ def test_no_root_is_a_usage_error(capfd: pytest.CaptureFixture[str]) -> None:
     )
 
 
-def test_the_task_reads_the_roots_and_judges_both(tmp_path: Path) -> None:
+def test_the_task_reads_the_roots_and_judges_both(
+    tmp_path: Path, env: support.Env
+) -> None:
     """The body, end to end: the derivation's roots, the fuzz one red."""
-    done = TwoRoots(tmp_path).task()
+    done = TwoRoots(tmp_path, env=env).task()
     assert done.returncode == 1, done.stdout + done.stderr
     assert done.stdout == TOP_GREEN
     assert INERT_IN_FUZZ in done.stderr
 
 
-def test_the_task_stops_when_the_derivation_fails(tmp_path: Path) -> None:
+def test_the_task_stops_when_the_derivation_fails(
+    tmp_path: Path, env: support.Env
+) -> None:
     """locate-project refused: its finding, exit 1, the helper never run."""
-    done = TwoRoots(tmp_path, locate_fails="fuzz/Cargo.toml").task()
+    done = TwoRoots(tmp_path, locate_fails="fuzz/Cargo.toml", env=env).task()
     assert (done.returncode, done.stdout) == (1, "")
     assert (
         f"{TASK}: cargo locate-project failed for fuzz/Cargo.toml\n"

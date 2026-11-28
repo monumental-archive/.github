@@ -123,8 +123,10 @@ def stub(tree: Path, sha: str, name: str = "gate.yml") -> None:
 class Planted:
     """The cache trees of A and B, and a consumer with no pin yet."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, belt: support.Belt, env: support.Env) -> None:
         """Plant both cache trees and an empty consumer repository."""
+        self.plant_belt = belt
+        self.make_env = env
         self.tmp = tmp_path
         self.home = self.tmp / "home"
         self.home.mkdir()
@@ -132,7 +134,7 @@ class Planted:
         self.trees = {}
         for sha in (A, B):
             tree = self.tmp / "cache" / "org-belt" / sha
-            support.belt(tree, stubs={"config.toml": stub})
+            self.plant_belt(tree, stubs={"config.toml": stub})
             self.trees[sha] = tree
         self.repo = self.tmp / "consumer"
         self.repo.mkdir()
@@ -145,7 +147,7 @@ class Planted:
             The environment.
 
         """
-        return support.env(
+        return self.make_env(
             self.home,
             MISE_CONFIG_DIR=str(self.tmp / "mise-config"),
             MISE_DATA_DIR=str(self.tmp / "mise-data"),
@@ -231,9 +233,9 @@ class Planted:
 
 
 @fixture
-def planted(tmp_path: Path) -> Planted:
+def planted(tmp_path: Path, belt: support.Belt, env: support.Env) -> Planted:
     """Give each row its own Planted."""
-    return Planted(tmp_path)
+    return Planted(tmp_path, belt=belt, env=env)
 
 
 def test_a_link_to_another_pin_refuses(planted: Planted) -> None:
@@ -300,9 +302,9 @@ def test_a_belt_named_by_the_global_carrier_runs(planted: Planted) -> None:
     planted.assert_runs(planted.repo, MISE_GLOBAL_CONFIG_FILE=named)
 
 
-def test_the_canons_own_tree_runs(planted: Planted) -> None:
+def test_the_canons_own_tree_runs(planted: Planted, belt: support.Belt) -> None:
     """Carrier 2: the tree is its own belt, whatever stub or link it holds."""
-    support.belt(planted.repo, stubs={"config.toml": belt_lines()})
+    belt(planted.repo, stubs={"config.toml": belt_lines()})
     planted.pin(planted.repo, B)
     planted.link(planted.repo, A)
     planted.assert_runs(planted.repo)
@@ -337,17 +339,19 @@ def test_a_tree_with_no_pin_runs(planted: Planted) -> None:
 class OnlyTasksRefuse(Planted):
     """A refused tree: mise's own commands still work, so the remedy can run."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, belt: support.Belt, env: support.Env) -> None:
         """Plant the refused tree: pin B, link A."""
-        super().__init__(tmp_path)
+        super().__init__(tmp_path, belt=belt, env=env)
         self.pin(self.repo, B)
         self.link(self.repo, A)
 
 
 @fixture
-def only_tasks_refuse(tmp_path: Path) -> OnlyTasksRefuse:
+def only_tasks_refuse(
+    tmp_path: Path, belt: support.Belt, env: support.Env
+) -> OnlyTasksRefuse:
     """Give each row its own OnlyTasksRefuse."""
-    return OnlyTasksRefuse(tmp_path)
+    return OnlyTasksRefuse(tmp_path, belt=belt, env=env)
 
 
 def test_mise_env_exits_0(only_tasks_refuse: OnlyTasksRefuse) -> None:

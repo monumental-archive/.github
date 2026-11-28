@@ -147,7 +147,7 @@ IDENTITY_EMAIL = "harness@example.invalid"
 # supplied explicitly through `overrides`.
 
 
-def hermetic_env(home: Path, **overrides: str) -> dict[str, str]:
+def hermetic_env(home: Path, *, env: support.Env, **overrides: str) -> dict[str, str]:
     """Build a fixture's environment through mise/support.py (#1508, #1514).
 
     Returns:
@@ -161,10 +161,12 @@ def hermetic_env(home: Path, **overrides: str) -> dict[str, str]:
         "GIT_COMMITTER_NAME": IDENTITY_NAME,
         "GIT_COMMITTER_EMAIL": IDENTITY_EMAIL,
     }
-    return support.env(home, **(stated | overrides))
+    return env(home, **(stated | overrides))
 
 
-def run_script(name: str, root: Path, **env: str) -> subprocess.CompletedProcess[str]:
+def run_script(
+    name: str, root: Path, *, make_env: support.Env, **env: str
+) -> subprocess.CompletedProcess[str]:
     """Run one release script in a fixture directory.
 
     Returns:
@@ -181,7 +183,7 @@ def run_script(name: str, root: Path, **env: str) -> subprocess.CompletedProcess
     return subprocess.run(
         [BASH, str(RELEASE / name)],
         cwd=root,
-        env=hermetic_env(home, **env),
+        env=hermetic_env(home, **env, env=make_env),
         capture_output=True,
         text=True,
         check=False,
@@ -207,8 +209,9 @@ def emitted(path: Path) -> dict[str, str]:
 class DraftRecorder:
     """`record-draft.sh` driven against a stubbed forge."""
 
-    def __init__(self, root: str) -> None:
+    def __init__(self, root: str, *, env: support.Env) -> None:
         """Install the stub and default the forge to an unannotated draft."""
+        self.make_env = env
         self.root = Path(root)
         self.state = self.root / "state"
         self.state.mkdir()
@@ -243,6 +246,7 @@ class DraftRecorder:
             PATH=f"{self.bindir}:{os.environ['PATH']}",
             STATE=str(self.state),
             **env,
+            make_env=self.make_env,
         )
 
     def posted(self) -> str:
@@ -258,31 +262,33 @@ class DraftRecorder:
 
 
 # The inputs `record-draft.sh` will not act on.
-def test_a_missing_repo_is_refused() -> None:
+def test_a_missing_repo_is_refused(env: support.Env) -> None:
     """REPO defaults to GITHUB_REPOSITORY, and neither being set is fatal."""
     with TemporaryDirectory() as d:
-        result = DraftRecorder(d).record(TAG="v1.0.0", KIND="burn")
+        result = DraftRecorder(d, env=env).record(TAG="v1.0.0", KIND="burn")
     assert result.returncode == 1
     assert "REPO is unset" in result.stderr
 
 
-def test_a_missing_tag_is_refused() -> None:
+def test_a_missing_tag_is_refused(env: support.Env) -> None:
     """There is no default tag: a record is about one version number."""
     with TemporaryDirectory() as d:
-        result = DraftRecorder(d).record(REPO="o/r", KIND="burn")
+        result = DraftRecorder(d, env=env).record(REPO="o/r", KIND="burn")
     assert result.returncode == 1
     assert "TAG is unset" in result.stderr
 
 
-def test_a_kind_outside_the_two_is_refused_by_name() -> None:
+def test_a_kind_outside_the_two_is_refused_by_name(env: support.Env) -> None:
     """Burn and rehearsal are different claims; a third is neither."""
     with TemporaryDirectory() as d:
-        result = DraftRecorder(d).record(REPO="o/r", TAG="v1.0.0", KIND="cleanup")
+        result = DraftRecorder(d, env=env).record(
+            REPO="o/r", TAG="v1.0.0", KIND="cleanup"
+        )
     assert result.returncode == 1
     assert "KIND must be burn or rehearsal, got 'cleanup'" in result.stderr
 
 
-def test_a_read_that_fails_is_never_read_as_no_record_yet() -> None:
+def test_a_read_that_fails_is_never_read_as_no_record_yet(env: support.Env) -> None:
     """Degraded-forge discipline: an unreadable release stops the script.
 
     Treating a failed read as "nothing there" would annotate a
@@ -290,7 +296,7 @@ def test_a_read_that_fails_is_never_read_as_no_record_yet() -> None:
     onto an annotated draft.
     """
     with TemporaryDirectory() as d:
-        recorder = DraftRecorder(d)
+        recorder = DraftRecorder(d, env=env)
         recorder.forge(exists=False)
         result = recorder.record(REPO="o/r", TAG="v1.0.0", KIND="burn")
         posted = recorder.posted()
@@ -300,10 +306,10 @@ def test_a_read_that_fails_is_never_read_as_no_record_yet() -> None:
 
 
 # The two states that are already correct, and must not be rewritten.
-def test_a_published_release_is_its_own_record() -> None:
+def test_a_published_release_is_its_own_record(env: support.Env) -> None:
     """Not a failure: exit 0, and nothing posted."""
     with TemporaryDirectory() as d:
-        recorder = DraftRecorder(d)
+        recorder = DraftRecorder(d, env=env)
         recorder.forge(exists=True, is_draft=False)
         result = recorder.record(REPO="o/r", TAG="v1.0.0", KIND="burn")
         posted = recorder.posted()
@@ -312,10 +318,10 @@ def test_a_published_release_is_its_own_record() -> None:
     assert posted == ""
 
 
-def test_an_existing_record_is_left_alone() -> None:
+def test_an_existing_record_is_left_alone(env: support.Env) -> None:
     """Idempotent: the marker is the check, so re-running is safe."""
     with TemporaryDirectory() as d:
-        recorder = DraftRecorder(d)
+        recorder = DraftRecorder(d, env=env)
         recorder.forge(
             exists=True, body="<!-- draft-record: burn -->\nalready written\n"
         )
@@ -327,10 +333,10 @@ def test_an_existing_record_is_left_alone() -> None:
 
 
 # What the record SAYS, which is the whole point of writing one.
-def test_a_burn_with_a_run_cites_it() -> None:
+def test_a_burn_with_a_run_cites_it(env: support.Env) -> None:
     """The evidence outlives the logs, which expire at 90 days."""
     with TemporaryDirectory() as d:
-        recorder = DraftRecorder(d)
+        recorder = DraftRecorder(d, env=env)
         result = recorder.record(
             REPO="o/r", TAG="v1.0.0", KIND="burn", RUN_URL="https://example/run/1"
         )
@@ -343,14 +349,14 @@ def test_a_burn_with_a_run_cites_it() -> None:
     assert "the release notes" in posted
 
 
-def test_a_burn_with_no_run_does_not_fabricate_one() -> None:
+def test_a_burn_with_no_run_does_not_fabricate_one(env: support.Env) -> None:
     """A citation for a run that never existed is the shape audits catch.
 
     The sentence follows the evidence rather than the other way
     round, so the two burns are not the same claim.
     """
     with TemporaryDirectory() as d:
-        recorder = DraftRecorder(d)
+        recorder = DraftRecorder(d, env=env)
         recorder.record(REPO="o/r", TAG="v1.0.0", KIND="burn")
         posted = recorder.posted()
     assert "no publish run for it" in posted
@@ -358,24 +364,24 @@ def test_a_burn_with_no_run_does_not_fabricate_one() -> None:
     assert "its publish run failed" not in posted
 
 
-def test_a_burn_leaves_the_fix_pending_until_one_is_cut() -> None:
+def test_a_burn_leaves_the_fix_pending_until_one_is_cut(env: support.Env) -> None:
     """The fix does not exist at burn time, and the record says so."""
     with TemporaryDirectory() as d:
-        recorder = DraftRecorder(d)
+        recorder = DraftRecorder(d, env=env)
         recorder.record(REPO="o/r", TAG="v1.0.0", KIND="burn")
         pending = recorder.posted()
     with TemporaryDirectory() as d:
-        recorder = DraftRecorder(d)
+        recorder = DraftRecorder(d, env=env)
         recorder.record(REPO="o/r", TAG="v1.0.0", KIND="burn", FIXED_FORWARD="v1.0.1")
         completed = recorder.posted()
     assert "- Fixed forward in: pending" in pending
     assert "- Fixed forward in: v1.0.1" in completed
 
 
-def test_a_rehearsal_is_not_described_as_a_burn() -> None:
+def test_a_rehearsal_is_not_described_as_a_burn(env: support.Env) -> None:
     """A dry run leaves a draft ON PURPOSE and is otherwise identical."""
     with TemporaryDirectory() as d:
-        recorder = DraftRecorder(d)
+        recorder = DraftRecorder(d, env=env)
         recorder.record(
             REPO="o/r", TAG="v1.0.0", KIND="rehearsal", RUN_URL="https://e/r/2"
         )
@@ -410,7 +416,7 @@ SOME_PUBLIC_TAIL = (
 # The uploads run beside each other after the commit point, so a run
 # that dies at one may already have shipped another, and "nothing
 # became public" is then false.
-def burn(registries: str) -> str:
+def burn(registries: str, *, env: support.Env) -> str:
     """Record a burn with these job results and return the body.
 
     Returns:
@@ -418,7 +424,7 @@ def burn(registries: str) -> str:
 
     """
     with TemporaryDirectory() as d:
-        recorder = DraftRecorder(d)
+        recorder = DraftRecorder(d, env=env)
         result = recorder.record(
             REPO="o/r",
             TAG="v1.0.0",
@@ -431,27 +437,29 @@ def burn(registries: str) -> str:
     return posted
 
 
-def test_nothing_public_when_every_registry_job_skipped() -> None:
+def test_nothing_public_when_every_registry_job_skipped(env: support.Env) -> None:
     """A run that died before its commit point keeps the old sentence."""
     posted = burn(
         "crates.io=skipped\nnpm=skipped\n"
-        "ghcr.io (extension images)=skipped\nghcr.io (image)=\n"
+        "ghcr.io (extension images)=skipped\nghcr.io (image)=\n",
+        env=env,
     )
     assert NOTHING_PUBLIC in posted
     assert "remain" not in posted
 
 
-def test_nothing_public_when_no_registry_list_is_given() -> None:
+def test_nothing_public_when_no_registry_list_is_given(env: support.Env) -> None:
     """The backfill and older callers pass no list: the sentence is unchanged."""
-    posted = burn("")
+    posted = burn("", env=env)
     assert NOTHING_PUBLIC in posted
 
 
-def test_some_public_names_each_registry_that_succeeded() -> None:
+def test_some_public_names_each_registry_that_succeeded(env: support.Env) -> None:
     """The shape edtf v1.3.3 burned in: npm and image tags out, crates.io red."""
     posted = burn(
         "crates.io=failure\nnpm=success\n"
-        "ghcr.io (extension images)=success\nghcr.io (image)=skipped\n"
+        "ghcr.io (extension images)=success\nghcr.io (image)=skipped\n",
+        env=env,
     )
     assert (
         SOME_PUBLIC_HEAD
@@ -464,25 +472,25 @@ def test_some_public_names_each_registry_that_succeeded() -> None:
     assert "ghcr.io (image)" not in posted
 
 
-def test_one_partly_published_is_listed_alone() -> None:
+def test_one_partly_published_is_listed_alone(env: support.Env) -> None:
     """A failed upload is neither public nor nothing: it may be partial."""
-    posted = burn("crates.io=failure\nnpm=skipped\n")
+    posted = burn("crates.io=failure\nnpm=skipped\n", env=env)
     assert (
         SOME_PUBLIC_HEAD + "- crates.io: may be partly published\n" + SOME_PUBLIC_TAIL
     ) in posted
     assert "before anything" not in posted
 
 
-def test_a_cancelled_upload_may_be_partly_published() -> None:
+def test_a_cancelled_upload_may_be_partly_published(env: support.Env) -> None:
     """Cancelled mid-upload is the same claim as failed mid-upload."""
-    posted = burn("npm=cancelled\n")
+    posted = burn("npm=cancelled\n", env=env)
     assert "- npm: may be partly published\n" in posted
 
 
-def refused(message: str, **env: str) -> None:
+def refused(message: str, *, make_env: support.Env, **env: str) -> None:
     """Assert the run refuses with this message and posts nothing."""
     with TemporaryDirectory() as d:
-        recorder = DraftRecorder(d)
+        recorder = DraftRecorder(d, env=make_env)
         result = recorder.record(REPO="o/r", TAG="v1.0.0", **env)
         posted = recorder.posted()
     assert result.returncode == 1
@@ -490,46 +498,50 @@ def refused(message: str, **env: str) -> None:
     assert posted == ""
 
 
-def test_a_registry_list_without_a_run_is_refused() -> None:
+def test_a_registry_list_without_a_run_is_refused(env: support.Env) -> None:
     """Job results are evidence of a run; with no run they cite nothing."""
     refused(
         "REGISTRIES is evidence of a publish run: it needs KIND=burn and RUN_URL",
         KIND="burn",
         REGISTRIES="npm=success",
+        make_env=env,
     )
 
 
-def test_a_registry_list_on_a_rehearsal_is_refused() -> None:
+def test_a_registry_list_on_a_rehearsal_is_refused(env: support.Env) -> None:
     """A dry run publishes to no registry, so a list there is a wrong call."""
     refused(
         "REGISTRIES is evidence of a publish run: it needs KIND=burn and RUN_URL",
         KIND="rehearsal",
         RUN_URL=RUN,
         REGISTRIES="npm=success",
+        make_env=env,
     )
 
 
-def test_a_line_without_a_result_is_refused() -> None:
+def test_a_line_without_a_result_is_refused(env: support.Env) -> None:
     """A line is <registry>=<job result>, never a bare name."""
     refused(
         "REGISTRIES line 'npm' is not <registry>=<job result>",
         KIND="burn",
         RUN_URL=RUN,
         REGISTRIES="npm",
+        make_env=env,
     )
 
 
-def test_a_line_without_a_registry_is_refused() -> None:
+def test_a_line_without_a_registry_is_refused(env: support.Env) -> None:
     """An unnamed result could not say what became public."""
     refused(
         "REGISTRIES line '=success' is not <registry>=<job result>",
         KIND="burn",
         RUN_URL=RUN,
         REGISTRIES="=success",
+        make_env=env,
     )
 
 
-def test_an_unknown_result_is_refused_by_name() -> None:
+def test_an_unknown_result_is_refused_by_name(env: support.Env) -> None:
     """A result outside GitHub's set is never guessed public or not."""
     refused(
         "REGISTRIES: npm has job result 'neutral', not success, failure,"
@@ -537,41 +549,42 @@ def test_an_unknown_result_is_refused_by_name() -> None:
         KIND="burn",
         RUN_URL=RUN,
         REGISTRIES="npm=neutral",
+        make_env=env,
     )
 
 
 # A fixture's environment is what the row gives it (#1508).
-def test_the_release_job_inputs_do_not_reach_a_fixture() -> None:
+def test_the_release_job_inputs_do_not_reach_a_fixture(env: support.Env) -> None:
     """The release job exports its step inputs; no fixture sees them."""
     planted = {"VERSION": "1.69.4", "PLAN": "{}", "APP_SLUG": "canon-release"}
     with pytest.MonkeyPatch.context() as patched, TemporaryDirectory() as d:
         for name, value in planted.items():
             patched.setenv(name, value)
-        env = hermetic_env(Path(d))
-    leaked = sorted(set(planted) & set(env))
+        environ = hermetic_env(Path(d), env=env)
+    leaked = sorted(set(planted) & set(environ))
     assert list[str]() == leaked
 
 
-def test_a_row_still_states_its_own_input() -> None:
+def test_a_row_still_states_its_own_input(env: support.Env) -> None:
     """Overrides are how a row gives a fixture an input."""
     planted = {"VERSION": "1.69.4"}
     with pytest.MonkeyPatch.context() as patched, TemporaryDirectory() as d:
         for name, value in planted.items():
             patched.setenv(name, value)
-        env = hermetic_env(Path(d), VERSION="2.0.0")
-    assert env["VERSION"] == "2.0.0"
+        environ = hermetic_env(Path(d), VERSION="2.0.0", env=env)
+    assert environ["VERSION"] == "2.0.0"
 
 
 # `derive-coverage-floor.sh` decides whether it applies at all (#652).
-def test_the_version_is_required() -> None:
+def test_the_version_is_required(env: support.Env) -> None:
     """The floor records the release it was measured for."""
     with TemporaryDirectory() as d:
-        result = run_script("derive-coverage-floor.sh", Path(d))
+        result = run_script("derive-coverage-floor.sh", Path(d), make_env=env)
     assert result.returncode == 1
     assert "VERSION must be set" in result.stderr
 
 
-def test_no_floor_file_is_an_adoption_decision_not_a_failure() -> None:
+def test_no_floor_file_is_an_adoption_decision_not_a_failure(env: support.Env) -> None:
     """The belt offers the mechanism; the committed file is the adoption."""
     with TemporaryDirectory() as d:
         out = Path(d) / "outputs"
@@ -580,6 +593,7 @@ def test_no_floor_file_is_an_adoption_decision_not_a_failure() -> None:
             Path(d),
             VERSION="1.0.0",
             GITHUB_OUTPUT=str(out),
+            make_env=env,
         )
         files = emitted(out)
     assert result.returncode == 0, result.stderr
@@ -588,25 +602,25 @@ def test_no_floor_file_is_an_adoption_decision_not_a_failure() -> None:
 
 
 # `rust-build.sh` validates its scope before it compiles anything.
-def test_the_target_is_required() -> None:
+def test_the_target_is_required(env: support.Env) -> None:
     """There is no default triple: the artifact's platform is the caller's."""
     with TemporaryDirectory() as d:
-        result = run_script("rust-build.sh", Path(d), STAGE_DIR="stage")
+        result = run_script("rust-build.sh", Path(d), STAGE_DIR="stage", make_env=env)
     assert result.returncode == 1
     assert "rust-build: TARGET is unset" in result.stderr
 
 
-def test_the_stage_directory_is_required() -> None:
+def test_the_stage_directory_is_required(env: support.Env) -> None:
     """Two callers stage differently; neither inherits a default."""
     with TemporaryDirectory() as d:
         result = run_script(
-            "rust-build.sh", Path(d), TARGET="x86_64-unknown-linux-musl"
+            "rust-build.sh", Path(d), TARGET="x86_64-unknown-linux-musl", make_env=env
         )
     assert result.returncode == 1
     assert "rust-build: STAGE_DIR is unset" in result.stderr
 
 
-def test_a_plan_class_without_a_document_prefix_is_refused() -> None:
+def test_a_plan_class_without_a_document_prefix_is_refused(env: support.Env) -> None:
     """A plan names a document; the prefix says what the artifact IS.
 
     The prefix and the params disagreeing silently is #544, so the
@@ -619,12 +633,13 @@ def test_a_plan_class_without_a_document_prefix_is_refused() -> None:
             TARGET="x86_64-unknown-linux-musl",
             STAGE_DIR="stage",
             PLAN_CLASS="oci-image",
+            make_env=env,
         )
     assert result.returncode == 1
     assert "PLAN_CLASS is set but PLAN_DOC_PREFIX is not" in result.stderr
 
 
-def test_the_build_is_handed_fat_lto() -> None:
+def test_the_build_is_handed_fat_lto(env: support.Env) -> None:
     """Release builds link with fat LTO, the fourth determinism input (#778).
 
     Cargo's `lto = false` default still runs thin LOCAL LTO, whose
@@ -663,6 +678,7 @@ def test_the_build_is_handed_fat_lto() -> None:
             SOURCE_DATE_EPOCH="1700000000",
             PACKAGE="demo",
             PATH=f"{stubs}:{os.environ['PATH']}",
+            make_env=env,
         )
         assert seen.exists(), result.stdout + result.stderr
         assert seen.read_text() == "fat"
@@ -698,21 +714,21 @@ def _full_env(plan: Path) -> dict[str, str]:
 
 
 @pytest.mark.usefixtures("_set_up_test_open_release_pr_inputs")
-def test_each_required_input_is_named_when_it_is_missing() -> None:
+def test_each_required_input_is_named_when_it_is_missing(env: support.Env) -> None:
     """Five inputs, five rows: a default here would plumb the wrong repo."""
     with TemporaryDirectory() as d:
         plan = Path(d) / "plan.json"
         plan.write_text('{"version": "1.0.0"}')
         for missing in REQUIRED:
-            env = _full_env(plan)
-            del env[missing]
-            result = run_script("open-release-pr.sh", Path(d), **env)
+            environ = _full_env(plan)
+            del environ[missing]
+            result = run_script("open-release-pr.sh", Path(d), **environ, make_env=env)
             assert result.returncode == 1
             assert missing in result.stderr
 
 
 @pytest.mark.usefixtures("_set_up_test_open_release_pr_inputs")
-def test_a_plan_that_states_no_branch_is_refused_by_field() -> None:
+def test_a_plan_that_states_no_branch_is_refused_by_field(env: support.Env) -> None:
     """The branch, staging ref, version and subject are all the plan's.
 
     A plan missing any of them is not a plan this script may
@@ -723,7 +739,9 @@ def test_a_plan_that_states_no_branch_is_refused_by_field() -> None:
         plan.write_text(
             '{"version": "1.0.0", "commit": {"subject": "chore: release v1.0.0"}}'
         )
-        result = run_script("open-release-pr.sh", Path(d), **_full_env(plan))
+        result = run_script(
+            "open-release-pr.sh", Path(d), **_full_env(plan), make_env=env
+        )
     assert result.returncode == 1
     assert "open-release-pr.sh: the plan states no branch" in result.stderr
 
@@ -899,8 +917,9 @@ MOVED = "b" * 40
 class ReleaseForge:
     """A fixture directory with the stubbed forge first on PATH."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Lay out a fixture with a stub on PATH and an empty call log."""
+        self.make_env = env
         self.root = tmp_path
         self.state = self.root / "state"
         self.state.mkdir()
@@ -948,9 +967,9 @@ class ReleaseForge:
 
 
 @fixture
-def release_forge(tmp_path: Path) -> ReleaseForge:
+def release_forge(tmp_path: Path, env: support.Env) -> ReleaseForge:
     """Give each row its own ReleaseForge."""
-    return ReleaseForge(tmp_path)
+    return ReleaseForge(tmp_path, env=env)
 
 
 OID = "c" * 40
@@ -980,9 +999,9 @@ class OpenReleasePrHead(ReleaseForge):
     runs the real script against a stubbed forge.
     """
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Lay out the stubbed forge and a plan with something to release."""
-        super().__init__(tmp_path)
+        super().__init__(tmp_path, env=env)
         if not JQ:
             pytest.skip("jq reads the plan document")
         self.plan = self.root / "plan.json"
@@ -1006,7 +1025,9 @@ class OpenReleasePrHead(ReleaseForge):
         inputs = self.stubbed()
         inputs.update(OID=OID, PLAN=str(self.plan), APP_SLUG="org-tag-mint")
         inputs.update(env)
-        return run_script("open-release-pr.sh", cwd or self.root, **inputs)
+        return run_script(
+            "open-release-pr.sh", cwd or self.root, **inputs, make_env=self.make_env
+        )
 
     def queue_release_branch(self) -> str:
         """Make release/next exist, so the run moves it rather than creating it.
@@ -1041,9 +1062,9 @@ class OpenReleasePrHead(ReleaseForge):
 
 
 @fixture
-def open_release_pr_head(tmp_path: Path) -> OpenReleasePrHead:
+def open_release_pr_head(tmp_path: Path, env: support.Env) -> OpenReleasePrHead:
     """Give each row its own OpenReleasePrHead."""
-    return OpenReleasePrHead(tmp_path)
+    return OpenReleasePrHead(tmp_path, env=env)
 
 
 @pytest.mark.usefixtures("_forge")
@@ -1331,7 +1352,7 @@ def test_a_head_read_that_fails_is_never_read_as_unchanged(
 
 @pytest.mark.usefixtures("_forge")
 def test_a_release_refresh_compares_the_checked_out_commit(
-    open_release_pr_head: OpenReleasePrHead,
+    open_release_pr_head: OpenReleasePrHead, env: support.Env
 ) -> None:
     """On release: published, GITHUB_SHA is the tag; HEAD is the plan's."""
     if not OPEN_PR_PARSES:
@@ -1347,7 +1368,7 @@ def test_a_release_refresh_compares_the_checked_out_commit(
         return subprocess.run(
             [support.tool("git"), *args],
             cwd=repo,
-            env=hermetic_env(home),
+            env=hermetic_env(home, env=env),
             check=True,
             capture_output=True,
             text=True,
@@ -1398,7 +1419,9 @@ class CloseReleasePr(ReleaseForge):
         inputs = self.stubbed()
         inputs.update(RELEASE_BRANCH=BRANCH)
         inputs.update(env)
-        return run_script("close-release-pr.sh", self.root, **inputs)
+        return run_script(
+            "close-release-pr.sh", self.root, **inputs, make_env=self.make_env
+        )
 
     def comment(self, number: int) -> str:
         """Read back the comment a close carried.
@@ -1412,9 +1435,9 @@ class CloseReleasePr(ReleaseForge):
 
 
 @fixture
-def close_release_pr(tmp_path: Path) -> CloseReleasePr:
+def close_release_pr(tmp_path: Path, env: support.Env) -> CloseReleasePr:
     """Give each row its own CloseReleasePr."""
-    return CloseReleasePr(tmp_path)
+    return CloseReleasePr(tmp_path, env=env)
 
 
 @pytest.mark.usefixtures("_forge")
@@ -1505,7 +1528,7 @@ def test_a_list_that_fails_is_never_read_as_none_open(
     ],
 )
 def test_close_release_pr_each_required_input_is_named_when_it_is_missing(
-    close_release_pr: CloseReleasePr, missing: object
+    close_release_pr: CloseReleasePr, missing: object, env: support.Env
 ) -> None:
     """No default branch name, repository or commit: each is named."""
     close_release_pr.forge(PLANNED)
@@ -1513,7 +1536,9 @@ def test_close_release_pr_each_required_input_is_named_when_it_is_missing(
     inputs = close_release_pr.stubbed()
     inputs.update(RELEASE_BRANCH=BRANCH)
     del inputs[missing]
-    result = run_script("close-release-pr.sh", close_release_pr.root, **inputs)
+    result = run_script(
+        "close-release-pr.sh", close_release_pr.root, **inputs, make_env=env
+    )
     assert result.returncode == 1, result.stdout
     assert missing in result.stderr
     assert list[str]() == close_release_pr.calls()
@@ -1532,7 +1557,7 @@ def _set_up_test_tag_release_refusals() -> None:
         pytest.skip("the fixture is a git repository")
 
 
-def _repo(root: str, *, subject: str) -> Path:
+def _repo(root: str, *, subject: str, env: support.Env) -> Path:
     """Lay out a repository whose HEAD carries `subject`.
 
     Returns:
@@ -1551,7 +1576,7 @@ def _repo(root: str, *, subject: str) -> Path:
         subprocess.run(
             [support.tool("git"), *args],
             cwd=repo,
-            env=hermetic_env(home),
+            env=hermetic_env(home, env=env),
             check=True,
             capture_output=True,
         )
@@ -1571,7 +1596,7 @@ def _repo(root: str, *, subject: str) -> Path:
     return repo
 
 
-def _run(repo: Path) -> subprocess.CompletedProcess[str]:
+def _run(repo: Path, *, env: support.Env) -> subprocess.CompletedProcess[str]:
     """Run the tag step against a fixture repository.
 
     Returns:
@@ -1583,27 +1608,28 @@ def _run(repo: Path) -> subprocess.CompletedProcess[str]:
         repo,
         GITHUB_REPOSITORY="monumental-archive/under-test",
         RUNNER_TEMP=str(repo / ".rt"),
+        make_env=env,
     )
 
 
 @pytest.mark.usefixtures("_set_up_test_tag_release_refusals")
-def test_an_ordinary_commit_is_not_a_release_commit() -> None:
+def test_an_ordinary_commit_is_not_a_release_commit(env: support.Env) -> None:
     """A workflow_dispatch on main must not mint a tag for an unprepared tree.
 
     The manifests and changelog were never bumped, so the version
     the plan derives has nothing behind it.
     """
     with TemporaryDirectory() as d:
-        repo = _repo(d, subject="feat: an ordinary change")
+        repo = _repo(d, subject="feat: an ordinary change", env=env)
         (repo / ".rt").mkdir()
-        result = _run(repo)
+        result = _run(repo, env=env)
     assert result.returncode == 1, result.stdout
     assert "HEAD is not the release commit" in result.stderr
     assert "expected: chore: release v" in result.stderr
 
 
 @pytest.mark.usefixtures("_set_up_test_tag_release_refusals")
-def test_a_commit_already_tagged_is_a_resume_not_a_failure() -> None:
+def test_a_commit_already_tagged_is_a_resume_not_a_failure(env: support.Env) -> None:
     """A re-dispatch onto a tagged commit is a resume, not a failure.
 
     The work is already done — the tag is minted and the version
@@ -1618,9 +1644,9 @@ def test_a_commit_already_tagged_is_a_resume_not_a_failure() -> None:
     an unexpected success, and the decorator went with it.
     """
     with TemporaryDirectory() as d:
-        repo = _repo(d, subject="feat: an ordinary change")
+        repo = _repo(d, subject="feat: an ordinary change", env=env)
         (repo / ".rt").mkdir()
-        first = _run(repo)
+        first = _run(repo, env=env)
         tag = ""
         for line in first.stderr.splitlines():
             if "expected: chore: release v" in line:
@@ -1629,11 +1655,11 @@ def test_a_commit_already_tagged_is_a_resume_not_a_failure() -> None:
         subprocess.run(
             [support.tool("git"), "tag", "-a", tag, "-m", tag],
             cwd=repo,
-            env=hermetic_env(repo.parent / "home"),
+            env=hermetic_env(repo.parent / "home", env=env),
             check=True,
             capture_output=True,
         )
-        result = _run(repo)
+        result = _run(repo, env=env)
     assert result.returncode == 0, result.stderr
     assert f"already minted, nothing to do: {tag}" in result.stdout
 
@@ -1676,8 +1702,9 @@ class TagReleasePush:
     the way GitHub answered edtf's v1.3.5 push.
     """
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Set up the rows' state."""
+        self.make_env = env
         self.set_up_tmp(tmp_path)
         self.set_up_test_tag_release_push()
 
@@ -1701,7 +1728,7 @@ class TagReleasePush:
         root = Path(tempfile.mkdtemp(dir=self.tmp))
         home = root / "home"
         home.mkdir()
-        env = hermetic_env(home)
+        env = hermetic_env(home, env=self.make_env)
         remote = root / "remote.git"
         repo = root / "repo"
         repo.mkdir()
@@ -1748,6 +1775,7 @@ class TagReleasePush:
             GITHUB_REPOSITORY="monumental-archive/under-test",
             RUNNER_TEMP=str(repo / ".rt"),
             PATH=f"{stubs}:{os.environ['PATH']}",
+            make_env=self.make_env,
         )
         local = git(repo, "tag", "--list", "v1.1.0")
         pushed = git(remote, "tag", "--list", "v1.1.0")
@@ -1756,9 +1784,9 @@ class TagReleasePush:
 
 
 @fixture
-def tag_release_push(tmp_path: Path) -> TagReleasePush:
+def tag_release_push(tmp_path: Path, env: support.Env) -> TagReleasePush:
     """Give each row its own TagReleasePush."""
-    return TagReleasePush(tmp_path)
+    return TagReleasePush(tmp_path, env=env)
 
 
 def test_the_workflow_refusal_is_named_and_mints_nothing(
@@ -1860,8 +1888,9 @@ class TagReleaseUpgradePath:
     newest. Each row reaches the push or stops before signing.
     """
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Set up the rows' state."""
+        self.make_env = env
         self.set_up_tmp(tmp_path)
         self.set_up_test_tag_release_upgrade_path()
 
@@ -1888,7 +1917,7 @@ class TagReleaseUpgradePath:
         root = Path(tempfile.mkdtemp(dir=self.tmp))
         home = root / "home"
         home.mkdir()
-        env = hermetic_env(home)
+        env = hermetic_env(home, env=self.make_env)
         remote = root / "remote.git"
         repo = root / "repo"
         sql = repo / "crates" / "edtf-postgres" / "sql"
@@ -1935,14 +1964,15 @@ class TagReleaseUpgradePath:
             PATH=f"{stubs}:{os.environ['PATH']}",
             STUB_LISTING=str(TESTDATA / listing) if listing else "",
             STUB_LATEST=latest,
+            make_env=self.make_env,
         )
         return result, git(remote, "tag", "--list")
 
 
 @fixture
-def tag_release_upgrade_path(tmp_path: Path) -> TagReleaseUpgradePath:
+def tag_release_upgrade_path(tmp_path: Path, env: support.Env) -> TagReleaseUpgradePath:
     """Give each row its own TagReleaseUpgradePath."""
-    return TagReleaseUpgradePath(tmp_path)
+    return TagReleaseUpgradePath(tmp_path, env=env)
 
 
 def test_an_imported_predecessor_without_a_path_refuses_the_mint(
@@ -2014,8 +2044,9 @@ class InventoryStepWiring:
     prints a list, and GNU `date -d` is not the Mac's.
     """
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Give the row's scratch directories one home, removed after it."""
+        self.make_env = env
         self.tmp = tmp_path
 
     def _run(
@@ -2065,6 +2096,7 @@ class InventoryStepWiring:
             GITHUB_ENV=str(root / ".env"),
             GITHUB_OUTPUT=str(root / ".output"),
             **extra,
+            env=self.make_env,
         )
         result = subprocess.run(
             [BASH, str(script)],
@@ -2079,9 +2111,9 @@ class InventoryStepWiring:
 
 
 @fixture
-def inventory_step_wiring(tmp_path: Path) -> InventoryStepWiring:
+def inventory_step_wiring(tmp_path: Path, env: support.Env) -> InventoryStepWiring:
     """Give each row its own InventoryStepWiring."""
-    return InventoryStepWiring(tmp_path)
+    return InventoryStepWiring(tmp_path, env=env)
 
 
 def _block() -> str:

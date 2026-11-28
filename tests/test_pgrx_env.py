@@ -90,8 +90,9 @@ class PostgresCase:
     and `cp` are the machine's own, so the clone is the one a task makes.
     """
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Plant the install, its listing and the stand-ins."""
+        self.make_env = env
         self.root = Path(str(tmp_path)).resolve()
         bindir = self.root / "bin"
         bindir.mkdir()
@@ -115,7 +116,7 @@ class PostgresCase:
         self.install(self.root / "pg" / "16.16.0", INSTALL)
         self.cache = self.root / "cache"
         self.target = self.root / "work" / "target"
-        self.env = support.env(MISE_TASK_NAME=TASK) | {
+        self.env = self.make_env(MISE_TASK_NAME=TASK) | {
             "PATH": f"{bindir}{os.pathsep}{os.environ['PATH']}",
             "PLANT_ROOT": str(self.root),
             "PLANT_TARGET": str(self.target),
@@ -202,9 +203,9 @@ class PostgresCase:
 
 
 @fixture
-def postgres_case(tmp_path: Path) -> PostgresCase:
+def postgres_case(tmp_path: Path, env: support.Env) -> PostgresCase:
     """Give each row its own PostgresCase."""
-    return PostgresCase(tmp_path)
+    return PostgresCase(tmp_path, env=env)
 
 
 def test_the_build_sees_its_clone_and_an_empty_home(
@@ -449,9 +450,9 @@ class Provision(PostgresCase):
 
 
 @fixture
-def provision_state(tmp_path: Path) -> Provision:
+def provision_state(tmp_path: Path, env: support.Env) -> Provision:
     """Give each row its own Provision."""
-    return Provision(tmp_path)
+    return Provision(tmp_path, env=env)
 
 
 def test_one_extension_names_its_default(provision_state: Provision) -> None:
@@ -488,7 +489,7 @@ TWO_EXTENSIONS = (
 
 
 # Each extension's major and their union, derived once (#1795).
-def derive(surface: str) -> subprocess.CompletedProcess[str]:
+def derive(surface: str, *, env: support.Env) -> subprocess.CompletedProcess[str]:
     """Run both functions as a task does, over `surface` on stdin.
 
     Returns:
@@ -504,53 +505,53 @@ def derive(surface: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [BASH, "-euo", "pipefail", "-c", script],
         input=surface,
-        env=support.env(MISE_TASK_NAME=TASK),
+        env=env(MISE_TASK_NAME=TASK),
         capture_output=True,
         text=True,
         check=False,
     )
 
 
-def test_two_extensions_each_at_its_own_highest() -> None:
+def test_two_extensions_each_at_its_own_highest(env: support.Env) -> None:
     """Two extensions: a line each at its highest, and the union of both.
 
     The excluded extension and the plain crate print nothing.
     """
-    done = derive(TWO_EXTENSIONS)
+    done = derive(TWO_EXTENSIONS, env=env)
     assert done.returncode == 0, done.stderr
     want = ["first@0.1.0\t17", "second@0.1.0\t16", "union=16,17"]
     assert want == done.stdout.splitlines()
     assert done.stderr == ""
 
 
-def test_a_shared_highest_is_registered_once() -> None:
+def test_a_shared_highest_is_registered_once(env: support.Env) -> None:
     """Two extensions at the same highest major name it once."""
     surface = "crate\ta@1.0.0\tpgrx\t15,16,17\ta\ncrate\tb@1.0.0\tpgrx\t17\tb\n"
-    done = derive(surface)
+    done = derive(surface, env=env)
     assert done.returncode == 0, done.stderr
     want = ["a@1.0.0\t17", "b@1.0.0\t17", "union=17"]
     assert want == done.stdout.splitlines()
 
 
-def test_no_extension_yields_nothing() -> None:
+def test_no_extension_yields_nothing(env: support.Env) -> None:
     """Plain crates and an excluded extension: no pairs, no majors."""
     surface = (
         "crate\tplain@0.1.0\tplain\t-\tplain\nexcluded\theld@0.1.0\tpgrx\t18\theld\n"
     )
-    done = derive(surface)
+    done = derive(surface, env=env)
     assert done.returncode == 0, done.stderr
     want = ["", "union="]
     assert want == done.stdout.splitlines()
     assert done.stderr == ""
 
 
-def test_a_major_that_is_no_number_is_red_by_name() -> None:
+def test_a_major_that_is_no_number_is_red_by_name(env: support.Env) -> None:
     """A line whose major is not a number stops the union, named."""
     script = f'. "{ENV_SH}"\norg_pgrx_union'
     done = subprocess.run(
         [BASH, "-euo", "pipefail", "-c", script],
         input="first@0.1.0\t17\nsecond@0.1.0\tpg16\n",
-        env=support.env(MISE_TASK_NAME=TASK),
+        env=env(MISE_TASK_NAME=TASK),
         capture_output=True,
         text=True,
         check=False,
@@ -651,8 +652,9 @@ def entry(version: str, where: Path) -> dict[str, object]:
 class IcuCase:
     """A Mac with planted Postgres and ICU pins, and nothing else."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Lay out the stand-ins; each row plants its own pins."""
+        self.make_env = env
         self.root = Path(str(tmp_path)).resolve()
         bindir = self.root / "bin"
         bindir.mkdir()
@@ -663,7 +665,7 @@ class IcuCase:
         ):
             (bindir / name).write_text(body, encoding="utf-8")
             (bindir / name).chmod(0o755)
-        self.env = support.env(MISE_TASK_NAME=TASK) | {
+        self.env = self.make_env(MISE_TASK_NAME=TASK) | {
             "PATH": f"{bindir}{os.pathsep}{os.environ['PATH']}",
             "PLANT_ROOT": str(self.root),
         }
@@ -780,24 +782,24 @@ class IcuCase:
 
 
 @fixture
-def icu_case(tmp_path: Path) -> IcuCase:
+def icu_case(tmp_path: Path, env: support.Env) -> IcuCase:
     """Give each row its own IcuCase."""
-    return IcuCase(tmp_path)
+    return IcuCase(tmp_path, env=env)
 
 
 class MixedIcuSet(IcuCase):
     """Two Postgres majors built against two ICU majors (#1774)."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Pin pg17 built against ICU 78 and pg18 built against ICU 79."""
-        super().__init__(tmp_path)
+        super().__init__(tmp_path, env=env)
         self.postgres({"17.6.0": homebrew(78), "18.1.0": homebrew(79)})
 
 
 @fixture
-def mixed_icu_set(tmp_path: Path) -> MixedIcuSet:
+def mixed_icu_set(tmp_path: Path, env: support.Env) -> MixedIcuSet:
     """Give each row its own MixedIcuSet."""
-    return MixedIcuSet(tmp_path)
+    return MixedIcuSet(tmp_path, env=env)
 
 
 def test_both_pinned_each_major_exports_its_own_include_path(
@@ -870,16 +872,16 @@ def test_neither_pinned_names_both_at_once(mixed_icu_set: MixedIcuSet) -> None:
 class OneIcuMajor(IcuCase):
     """One Postgres major, one ICU pin: the case before #1774, unchanged."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Pin pg18 built against ICU 78."""
-        super().__init__(tmp_path)
+        super().__init__(tmp_path, env=env)
         self.postgres({"18.1.0": homebrew(78)})
 
 
 @fixture
-def one_icu_major(tmp_path: Path) -> OneIcuMajor:
+def one_icu_major(tmp_path: Path, env: support.Env) -> OneIcuMajor:
     """Give each row its own OneIcuMajor."""
-    return OneIcuMajor(tmp_path)
+    return OneIcuMajor(tmp_path, env=env)
 
 
 def test_one_major_one_pin(one_icu_major: OneIcuMajor) -> None:
@@ -985,9 +987,9 @@ def test_exports_nothing_and_checks_clean(icu_case: IcuCase) -> None:
 class WithIcu(IcuCase):
     """org_pgrx_major: one command, its major's headers, then gone."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Pin pg17 and pg18 against ICU 78 and 79, both pinned."""
-        super().__init__(tmp_path)
+        super().__init__(tmp_path, env=env)
         self.postgres({"17.6.0": homebrew(78), "18.1.0": homebrew(79)})
         self.icu({"78.3": True, "79.1": True})
 
@@ -1003,9 +1005,9 @@ class WithIcu(IcuCase):
 
 
 @fixture
-def with_icu(tmp_path: Path) -> WithIcu:
+def with_icu(tmp_path: Path, env: support.Env) -> WithIcu:
     """Give each row its own WithIcu."""
-    return WithIcu(tmp_path)
+    return WithIcu(tmp_path, env=env)
 
 
 def test_each_command_sees_its_own_and_the_parent_keeps_its_flags(

@@ -42,25 +42,25 @@ def body() -> str:
 
 
 # The probe reads the first tracked file, however many follow (#679).
-def test_a_listing_past_the_pipe_buffer_is_read_whole() -> None:
+def test_a_listing_past_the_pipe_buffer_is_read_whole(env: support.Env) -> None:
     """lint:licence passes a licensed tree, never dying at 141."""
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         tree = root / "repo"
         tree.mkdir()
-        env = support.env(root / "home", ORG_BELT_DIR=str(BELT))
+        environ = env(root / "home", ORG_BELT_DIR=str(BELT))
         (tree / "LICENSE").write_text("0BSD\n", encoding="utf-8")
         for i in range(FILES):
             (tree / f"{NAME}{i:05}").touch()
-        subprocess.run([GIT, "init", "-q"], cwd=tree, env=env, check=True)
-        subprocess.run([GIT, "add", "."], cwd=tree, env=env, check=True)
+        subprocess.run([GIT, "init", "-q"], cwd=tree, env=environ, check=True)
+        subprocess.run([GIT, "add", "."], cwd=tree, env=environ, check=True)
         listing = "".join(f"{name}\n" for name in support.tracked(tree))
         assert len(listing.encode()) > 8 * 65536
         as_mise = support.task_run("lint:licence", body())
         done = subprocess.run(
             as_mise.argv,
             cwd=tree,
-            env=env | as_mise.env,
+            env=environ | as_mise.env,
             capture_output=True,
             text=True,
             check=False,

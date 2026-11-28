@@ -63,11 +63,12 @@ def body() -> str:
 class Tree:
     """A planted repository with a default branch to diverge from."""
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, *, env: support.Env) -> None:
         """Make the repository under `root`."""
+        self.make_env = env
         self.dir = root / "repo"
         self.dir.mkdir()
-        self.env = support.env(root / "home", MISE_TASK_NAME=TASK)
+        self.env = self.make_env(root / "home", MISE_TASK_NAME=TASK)
         self.git("init", "-q", "-b", "feature")
 
     def git(self, *args: str) -> str:
@@ -153,7 +154,7 @@ class Tree:
 
     def _set_up_test_one_per_merge(self, tmp_path: Path) -> None:
         """Plant a tree whose default branch holds one decision."""
-        self.tree = Tree(Path(str(tmp_path)))
+        self.tree = Tree(Path(str(tmp_path)), env=self.make_env)
         self.tree.commit(A, README)
         self.tree.mark_main()
 
@@ -277,10 +278,12 @@ class Tree:
 
 
 # A tree that keeps no decisions has nothing to judge.
-def test_none_tracked_skips_by_name(capfd: pytest.CaptureFixture[str]) -> None:
+def test_none_tracked_skips_by_name(
+    capfd: pytest.CaptureFixture[str], env: support.Env
+) -> None:
     """Only a README under security/vex/ skips, by name."""
     with tempfile.TemporaryDirectory() as tmp:
-        tree = Tree(Path(tmp))
+        tree = Tree(Path(tmp), env=env)
         tree.commit(README)
         tree.mark_main()
         tree.commit(README)
@@ -292,9 +295,10 @@ def test_none_tracked_skips_by_name(capfd: pytest.CaptureFixture[str]) -> None:
 class Listing:
     """vex-attest.yml's signing list is the lint's own reader (#1615)."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Plant a tree whose default branch holds two decisions."""
-        self.tree = Tree(Path(str(tmp_path)))
+        self.make_env = env
+        self.tree = Tree(Path(str(tmp_path)), env=self.make_env)
         self.tree.commit(A, B, README)
         self.tree.mark_main()
 
@@ -311,9 +315,9 @@ class Listing:
 
 
 @fixture
-def listing_state(tmp_path: Path) -> Listing:
+def listing_state(tmp_path: Path, env: support.Env) -> Listing:
     """Give each row its own Listing."""
-    return Listing(tmp_path)
+    return Listing(tmp_path, env=env)
 
 
 def test_a_rename_with_an_edit_is_listed_at_its_new_name(

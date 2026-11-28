@@ -142,8 +142,11 @@ PYTEST = support.tool("pytest")
 class Guarded:
     """A pytest run takes a share, run for real at 1/2 and 2/2."""
 
-    def __init__(self, tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:
+    def __init__(
+        self, tmp_path: Path, capfd: pytest.CaptureFixture[str], *, env: support.Env
+    ) -> None:
         """Plant five test files and a reports directory."""
+        self.make_env = env
         self.root = Path(str(tmp_path))
         (self.root / "suite").mkdir()
         for name, body in SUITE.items():
@@ -181,7 +184,7 @@ class Guarded:
         return subprocess.run(
             [word for word in out.split("\0") if word],
             cwd=self.root,
-            env=support.env(),
+            env=self.make_env(),
             capture_output=True,
             text=True,
             check=False,
@@ -189,9 +192,11 @@ class Guarded:
 
 
 @fixture
-def guarded(tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> Guarded:
+def guarded(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str], env: support.Env
+) -> Guarded:
     """Give each row its own Guarded."""
-    return Guarded(tmp_path, capfd)
+    return Guarded(tmp_path, capfd, env=env)
 
 
 def test_two_shards_run_the_whole_suite_once(guarded: Guarded) -> None:

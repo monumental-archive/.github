@@ -649,7 +649,7 @@ export async function run(steps: readonly (() => Promise<void>)[]): Promise<void
 RULE = "lint/performance/noAwaitInLoops"
 
 
-def reported() -> list[str]:
+def reported(*, env: support.Env) -> list[str]:
     """Lint the two planted files and name each that reports the rule.
 
     Returns:
@@ -680,7 +680,7 @@ def reported() -> list[str]:
                 "x.test.ts",
             ],
             cwd=root,
-            env=support.env(),
+            env=env(),
             capture_output=True,
             text=True,
             check=False,
@@ -697,10 +697,12 @@ def reported() -> list[str]:
     return sorted(fired)
 
 
-def test_a_test_file_is_clean_and_the_same_source_still_reports() -> None:
+def test_a_test_file_is_clean_and_the_same_source_still_reports(
+    env: support.Env,
+) -> None:
     """The override silences `x.test.ts` only; `x.ts` keeps the finding."""
     source: list[str] = ["x.ts"]
-    assert reported() == source
+    assert reported(env=env) == source
 
 
 CONDITIONAL_EXPECT_TEST_RULE = "noConditionalExpect"
@@ -1285,7 +1287,7 @@ def show_configs(
 # two files. Measured without `--only`, which turns a rule on whatever
 # the config says.
 def test_the_node_project_is_clean_and_the_other_is_a_finding(
-    capfd: pytest.CaptureFixture[str],
+    capfd: pytest.CaptureFixture[str], env: support.Env
 ) -> None:
     """apps/a declares node and passes; apps/b does not and is reported."""
     biome = support.tool("biome")
@@ -1302,9 +1304,9 @@ def test_the_node_project_is_clean_and_the_other_is_a_finding(
             (tree / "apps" / project / "src" / "probe.ts").write_text(
                 NODE_IMPORT, encoding="utf-8"
             )
-        env = support.env()
-        subprocess.run([git, "init", "-q"], cwd=tree, env=env, check=True)
-        pairs = show_configs(tree, env, ("a", "b"))
+        environ = env()
+        subprocess.run([git, "init", "-q"], cwd=tree, env=environ, check=True)
+        pairs = show_configs(tree, environ, ("a", "b"))
         generated = tree / "biome-org.generated.json"
         status, out, err = generate_main(tree, generated, *pairs, capfd=capfd)
         assert status == 0, err
@@ -1317,7 +1319,7 @@ def test_the_node_project_is_clean_and_the_other_is_a_finding(
                 *("apps/a/src/probe.ts", "apps/b/src/probe.ts"),
             ],
             cwd=tree,
-            env=env,
+            env=environ,
             capture_output=True,
             text=True,
             check=False,
@@ -1334,7 +1336,7 @@ def test_the_node_project_is_clean_and_the_other_is_a_finding(
 
 
 # The task resolves each tracked tsconfig; one tsc refuses ends it by name.
-def run_body(task: str) -> subprocess.CompletedProcess[str]:
+def run_body(task: str, *, env: support.Env) -> subprocess.CompletedProcess[str]:
     """Run one belt task body over a tree whose tracked tsconfig is gone.
 
     tsc 7.0.2's `--showConfig` exits 0 on a tsconfig it cannot parse;
@@ -1360,19 +1362,19 @@ def run_body(task: str) -> subprocess.CompletedProcess[str]:
         )
         probe = tree / "apps" / "a" / "src" / "probe.ts"
         probe.write_text(NODE_IMPORT, encoding="utf-8")
-        env = support.env(
-            PATH=f"{tsc}:{support.env().get('PATH', '')}",
+        environ = env(
+            PATH=f"{tsc}:{env().get('PATH', '')}",
             ORG_PYTHON=sys.executable,
             ORG_BELT_DIR=str(BELT),
         )
-        subprocess.run([git, "init", "-q"], cwd=tree, env=env, check=True)
-        subprocess.run([git, "add", "."], cwd=tree, env=env, check=True)
+        subprocess.run([git, "init", "-q"], cwd=tree, env=environ, check=True)
+        subprocess.run([git, "add", "."], cwd=tree, env=environ, check=True)
         (tree / "apps" / "a" / "tsconfig.json").unlink()
         as_mise = support.task_run(task, body)
         done = subprocess.run(
             as_mise.argv,
             cwd=tree,
-            env=env | as_mise.env,
+            env=environ | as_mise.env,
             capture_output=True,
             text=True,
             check=False,
@@ -1384,9 +1386,11 @@ def run_body(task: str) -> subprocess.CompletedProcess[str]:
 
 
 @pytest.mark.parametrize("task", ["lint:biome", "fix:biome"])
-def test_a_tsconfig_tsc_refuses_ends_both_tasks_by_name(task: object) -> None:
+def test_a_tsconfig_tsc_refuses_ends_both_tasks_by_name(
+    task: object, env: support.Env
+) -> None:
     """The compiler's own message is printed under the tsconfig's name."""
-    done = run_body(task)
+    done = run_body(task, env=env)
     assert done.returncode == 1, done.stderr
     lines = done.stderr.splitlines()
     said = f"{task}: apps/a/tsconfig.json does not resolve"
@@ -1406,7 +1410,7 @@ ORG_NAMES_NO_Z = '{"linter": {"rules": {"nursery": {"noZ": "error"}}}}\n'
 
 
 # lint:biome-domains, the nursery table against the org config.
-def test_both_directions_of_drift_are_named_grouped() -> None:
+def test_both_directions_of_drift_are_named_grouped(env: support.Env) -> None:
     """Each side's rule is named, every enforced one before every mapped one.
 
     `noA` sorts before `noZ`, so `comm -3` lists the table's rule
@@ -1433,15 +1437,15 @@ def test_both_directions_of_drift_are_named_grouped() -> None:
         for name, text in planted.items():
             (tree / name).write_text(text, encoding="utf-8")
         jq = Path(support.tool("jq")).parent
-        env = support.env(PATH=f"{stubs}:{jq}:{support.env().get('PATH', '')}")
+        environ = env(PATH=f"{stubs}:{jq}:{env().get('PATH', '')}")
         git = support.tool("git")
-        subprocess.run([git, "init", "-q"], cwd=tree, env=env, check=True)
-        subprocess.run([git, "add", "."], cwd=tree, env=env, check=True)
+        subprocess.run([git, "init", "-q"], cwd=tree, env=environ, check=True)
+        subprocess.run([git, "add", "."], cwd=tree, env=environ, check=True)
         as_mise = support.task_run("lint:biome-domains", body)
         done = subprocess.run(
             as_mise.argv,
             cwd=tree,
-            env=env | as_mise.env,
+            env=environ | as_mise.env,
             capture_output=True,
             text=True,
             check=False,

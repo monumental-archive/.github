@@ -62,8 +62,9 @@ for arg in "$@"; do printf '%s\\0' "${arg}"; done > "${GH_ARGS}"
 class FileAnIssue:
     """Each row: the compare outcome, and the exact issue filed."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Give each row its own directory and stub `gh`."""
+        self.make_env = env
         self.tmp = tmp_path
         bindir = self.tmp / "bin"
         bindir.mkdir()
@@ -88,7 +89,7 @@ class FileAnIssue:
 
         """
         args_file = self.tmp / "gh-args"
-        env = support.env(
+        env = self.make_env(
             PATH=f"{self.bindir}{os.pathsep}{os.environ['PATH']}",
             HOME=str(self.tmp),
             GH_ARGS=str(args_file),
@@ -118,9 +119,9 @@ class FileAnIssue:
 
 
 @fixture
-def file_an_issue(tmp_path: Path) -> FileAnIssue:
+def file_an_issue(tmp_path: Path, env: support.Env) -> FileAnIssue:
     """Give each row its own FileAnIssue."""
-    return FileAnIssue(tmp_path)
+    return FileAnIssue(tmp_path, env=env)
 
 
 def test_failure_is_a_verdict_and_files_as_before(

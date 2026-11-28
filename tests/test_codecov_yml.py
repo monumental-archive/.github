@@ -48,7 +48,9 @@ def body() -> str:
 BODY = body()
 
 
-def lint(files: dict[str, str]) -> subprocess.CompletedProcess[str]:
+def lint(
+    files: dict[str, str], *, env: support.Env
+) -> subprocess.CompletedProcess[str]:
     """Run the lint in a git tree holding `files` tracked.
 
     Returns:
@@ -57,19 +59,21 @@ def lint(files: dict[str, str]) -> subprocess.CompletedProcess[str]:
     """
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
-        env = support.env()
+        environ = env()
         for rel, text in files.items():
             path = root / rel
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text, encoding="utf-8")
-        subprocess.run([GIT, "init", "-q"], cwd=root, env=env, check=True)
+        subprocess.run([GIT, "init", "-q"], cwd=root, env=environ, check=True)
         if files:
-            subprocess.run([GIT, "add", "--", *files], cwd=root, env=env, check=True)
+            subprocess.run(
+                [GIT, "add", "--", *files], cwd=root, env=environ, check=True
+            )
         as_mise = support.task_run(NAME, BODY)
         return subprocess.run(
             as_mise.argv,
             cwd=root,
-            env=env | as_mise.env,
+            env=environ | as_mise.env,
             capture_output=True,
             text=True,
             check=False,
@@ -93,60 +97,61 @@ def red(paths: list[str]) -> str:
 
 
 # No tracked Codecov config is green; every location Codecov reads is red.
-def assert_red(files: dict[str, str], paths: list[str]) -> None:
+def assert_red(files: dict[str, str], paths: list[str], *, env: support.Env) -> None:
     """Assert exit 1 with exactly the message naming `paths`."""
-    done = lint(files)
+    done = lint(files, env=env)
     assert done.returncode == 1, done.stdout + done.stderr
     assert done.stderr == red(paths)
     assert done.stdout == ""
 
 
-def assert_green(files: dict[str, str]) -> None:
+def assert_green(files: dict[str, str], *, env: support.Env) -> None:
     """Assert exit 0 with exactly the green line and no stderr."""
-    done = lint(files)
+    done = lint(files, env=env)
     assert done.returncode == 0, done.stderr
     assert done.stdout == GREEN
     assert done.stderr == ""
 
 
-def test_a_tree_tracking_none_is_green() -> None:
+def test_a_tree_tracking_none_is_green(env: support.Env) -> None:
     """No Codecov config anywhere: the org default applies."""
-    assert_green({"README.md": "x\n"})
+    assert_green({"README.md": "x\n"}, env=env)
 
 
-def test_edtfs_file_is_red_by_name() -> None:
+def test_edtfs_file_is_red_by_name(env: support.Env) -> None:
     """The file edtf tracked, .github/codecov.yml, reds by name."""
-    assert_red({".github/codecov.yml": EDTF}, [".github/codecov.yml"])
+    assert_red({".github/codecov.yml": EDTF}, [".github/codecov.yml"], env=env)
 
 
-def test_every_location_codecov_reads_is_red() -> None:
+def test_every_location_codecov_reads_is_red(env: support.Env) -> None:
     """Each of the twelve locations reds alone, named."""
     for folder in DIRS:
         for name in NAMES:
             path = f"{folder}{name}"
-            assert_red({path: EDTF}, [path])
+            assert_red({path: EDTF}, [path], env=env)
 
 
-def test_every_hit_is_named() -> None:
+def test_every_hit_is_named(env: support.Env) -> None:
     """Several files are all listed, root first."""
     assert_red(
         {"dev/.codecov.yaml": EDTF, "codecov.yml": EDTF},
         ["codecov.yml", "dev/.codecov.yaml"],
+        env=env,
     )
 
 
-def test_an_untracked_file_is_green() -> None:
+def test_an_untracked_file_is_green(env: support.Env) -> None:
     """Tracked files only: an untracked config is not the tree's."""
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
-        env = support.env()
-        subprocess.run([GIT, "init", "-q"], cwd=root, env=env, check=True)
+        environ = env()
+        subprocess.run([GIT, "init", "-q"], cwd=root, env=environ, check=True)
         (root / "codecov.yml").write_text(EDTF, encoding="utf-8")
         as_mise = support.task_run(NAME, BODY)
         done = subprocess.run(
             as_mise.argv,
             cwd=root,
-            env=env | as_mise.env,
+            env=environ | as_mise.env,
             capture_output=True,
             text=True,
             check=False,
@@ -155,10 +160,13 @@ def test_an_untracked_file_is_green() -> None:
     assert done.stdout == GREEN
 
 
-def test_other_locations_are_green() -> None:
+def test_other_locations_are_green(env: support.Env) -> None:
     """Codecov reads no deeper folder and no other name."""
-    assert_green({
-        "docs/codecov.yml": EDTF,
-        ".github/workflows/codecov.yml": EDTF,
-        "codecov.json": EDTF,
-    })
+    assert_green(
+        {
+            "docs/codecov.yml": EDTF,
+            ".github/workflows/codecov.yml": EDTF,
+            "codecov.json": EDTF,
+        },
+        env=env,
+    )

@@ -167,8 +167,11 @@ def vitest_key(path: str) -> str:
 class Runner:
     """A stand-in on PATH, the adapter run against it shard by shard."""
 
-    def __init__(self, tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:
+    def __init__(
+        self, tmp_path: Path, capfd: pytest.CaptureFixture[str], *, env: support.Env
+    ) -> None:
         """Make the stand-ins' directory and the reports directory."""
+        self.make_env = env
         self.capfd = capfd
         self.base = tmp_path
         self.bin = self.base / "bin"
@@ -197,7 +200,7 @@ class Runner:
             NUL-separated.
 
         """
-        env = support.env(
+        env = self.make_env(
             PATH=f"{self.bin}:/usr/bin:/bin",
             ORG_SHARD=spec,
             ORG_SHARD_TASK="test:suite",
@@ -232,7 +235,7 @@ class Runner:
                 ran = subprocess.run(
                     argv,
                     cwd=self.base,
-                    env=support.env(
+                    env=self.make_env(
                         PATH=f"{self.bin}:/usr/bin:/bin",
                         STUB_RAN=str(self.ran),
                         **fixture,
@@ -264,9 +267,11 @@ class Runner:
 
 
 @fixture
-def runner(tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> Runner:
+def runner(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str], env: support.Env
+) -> Runner:
     """Give each row its own Runner."""
-    return Runner(tmp_path, capfd)
+    return Runner(tmp_path, capfd, env=env)
 
 
 FILES = [

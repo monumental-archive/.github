@@ -160,7 +160,9 @@ def body() -> str:
 BODY = body()
 
 
-def lint(workflow: str, name: str = "publish.yml") -> subprocess.CompletedProcess[str]:
+def lint(
+    workflow: str, name: str = "publish.yml", *, env: support.Env
+) -> subprocess.CompletedProcess[str]:
     """Run the lint against one planted orchestrator.
 
     Returns:
@@ -171,16 +173,16 @@ def lint(workflow: str, name: str = "publish.yml") -> subprocess.CompletedProces
         flows = Path(tmp) / ".github" / "workflows"
         flows.mkdir(parents=True)
         (flows / name).write_text(workflow, encoding="utf-8")
-        env = support.env()
-        env |= {"ORG_BELT_DIR": str(BELT), "ORG_CANON_DIR": str(CANON)}
+        environ = env()
+        environ |= {"ORG_BELT_DIR": str(BELT), "ORG_CANON_DIR": str(CANON)}
         # The lint reads a tracked orchestrator only (#2013).
         for step in (["init", "-q"], ["add", "-A"]):
-            subprocess.run([GIT, *step], cwd=tmp, env=env, check=True)
+            subprocess.run([GIT, *step], cwd=tmp, env=environ, check=True)
         as_mise = support.task_run("lint:release-phases", BODY)
         return subprocess.run(
             as_mise.argv,
             cwd=tmp,
-            env=env | as_mise.env,
+            env=environ | as_mise.env,
             capture_output=True,
             text=True,
             check=False,
@@ -215,9 +217,9 @@ def planted(old: str, new: str, text: str = PUBLISH) -> str:
 
 
 # The shapes the rule must pass.
-def test_the_canons_publish_graph_passes() -> None:
+def test_the_canons_publish_graph_passes(env: support.Env) -> None:
     """The real orchestrator, both tag jobs after attach, is clean."""
-    done = lint(PUBLISH)
+    done = lint(PUBLISH, env=env)
     assert done.returncode == 0, done.stderr
     assert done.stderr == ""
     assert re.search(
@@ -227,9 +229,9 @@ def test_the_canons_publish_graph_passes() -> None:
     )
 
 
-def test_a_tag_job_needing_attach_passes() -> None:
+def test_a_tag_job_needing_attach_passes(env: support.Env) -> None:
     """The fixture with the edge in place is clean."""
-    done = lint(fixture("commit-point", "attach"))
+    done = lint(fixture("commit-point", "attach"), env=env)
     assert done.returncode == 0, done.stderr
     assert done.stderr == ""
     assert done.stdout == (
@@ -237,9 +239,9 @@ def test_a_tag_job_needing_attach_passes() -> None:
     )
 
 
-def test_the_canons_continuous_graph_passes() -> None:
+def test_the_canons_continuous_graph_passes(env: support.Env) -> None:
     """The real stream orchestrator, its tag job after sign, is clean."""
-    done = lint(CONTINUOUS, "continuous.yml")
+    done = lint(CONTINUOUS, "continuous.yml", env=env)
     assert done.returncode == 0, done.stderr
     assert done.stderr == ""
     assert re.search(
@@ -249,9 +251,11 @@ def test_the_canons_continuous_graph_passes() -> None:
     )
 
 
-def test_a_stream_tag_job_needing_its_signer_passes() -> None:
+def test_a_stream_tag_job_needing_its_signer_passes(env: support.Env) -> None:
     """With no attach, the edge to the signing job is the rule."""
-    done = lint(fixture("commit-point", "sign", graph=STREAM), "continuous.yml")
+    done = lint(
+        fixture("commit-point", "sign", graph=STREAM), "continuous.yml", env=env
+    )
     assert done.returncode == 0, done.stderr
     assert done.stderr == ""
     assert done.stdout == (
@@ -261,20 +265,20 @@ def test_a_stream_tag_job_needing_its_signer_passes() -> None:
 
 
 # A tag job that does not wait for attach, named in the message.
-def assert_red(workflow: str, job: str) -> None:
+def assert_red(workflow: str, job: str, *, env: support.Env) -> None:
     """Assert the run is red with exactly the tag-order message."""
-    done = lint(workflow)
+    done = lint(workflow, env=env)
     assert done.returncode == 1
     assert done.stdout == ""
     assert done.stderr == message(job)
 
 
-def test_a_tag_job_needing_only_commit_point_is_red() -> None:
+def test_a_tag_job_needing_only_commit_point_is_red(env: support.Env) -> None:
     """The shape that burned edtf v1.3.2 and v1.3.3."""
-    assert_red(fixture("commit-point"), "tag-extension-images")
+    assert_red(fixture("commit-point"), "tag-extension-images", env=env)
 
 
-def test_the_extension_tag_job_without_attach_is_red() -> None:
+def test_the_extension_tag_job_without_attach_is_red(env: support.Env) -> None:
     """The real pgrx tag job, its attach edge dropped."""
     assert_red(
         planted(
@@ -282,10 +286,11 @@ def test_the_extension_tag_job_without_attach_is_red() -> None:
             "      - build-extension-images\n      - commit-point\n",
         ),
         "tag-extension-images",
+        env=env,
     )
 
 
-def test_the_image_tag_job_without_attach_is_red() -> None:
+def test_the_image_tag_job_without_attach_is_red(env: support.Env) -> None:
     """The real oci-image tag job, its attach edge dropped."""
     assert_red(
         planted(
@@ -293,29 +298,32 @@ def test_the_image_tag_job_without_attach_is_red() -> None:
             "      - assemble-oci\n      - commit-point\n",
         ),
         "tag-image",
+        env=env,
     )
 
 
 # A stream's tag job that does not wait for its signature.
-def red_stream_assert_red(workflow: str, job: str) -> None:
+def red_stream_assert_red(workflow: str, job: str, *, env: support.Env) -> None:
     """Assert the run is red with exactly the stream tag-order message."""
-    done = lint(workflow, "continuous.yml")
+    done = lint(workflow, "continuous.yml", env=env)
     assert done.returncode == 1
     assert done.stdout == ""
     assert done.stderr == stream_message(job)
 
 
-def test_a_stream_tag_job_needing_only_commit_point_is_red() -> None:
+def test_a_stream_tag_job_needing_only_commit_point_is_red(env: support.Env) -> None:
     """The name would land before the signature does."""
-    red_stream_assert_red(fixture("commit-point", graph=STREAM), "tag")
+    red_stream_assert_red(fixture("commit-point", graph=STREAM), "tag", env=env)
 
 
-def test_a_stream_tag_job_needing_a_non_signer_is_red() -> None:
+def test_a_stream_tag_job_needing_a_non_signer_is_red(env: support.Env) -> None:
     """Needing the job that pushed the index is not needing its signer."""
-    red_stream_assert_red(fixture("commit-point", "assemble", graph=STREAM), "tag")
+    red_stream_assert_red(
+        fixture("commit-point", "assemble", graph=STREAM), "tag", env=env
+    )
 
 
-def test_the_continuous_tag_job_without_sign_is_red() -> None:
+def test_the_continuous_tag_job_without_sign_is_red(env: support.Env) -> None:
     """The real stream tag job, its sign edge dropped."""
     red_stream_assert_red(
         planted(
@@ -324,4 +332,5 @@ def test_the_continuous_tag_job_without_sign_is_red() -> None:
             CONTINUOUS,
         ),
         "tag",
+        env=env,
     )

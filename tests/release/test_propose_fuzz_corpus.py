@@ -113,8 +113,9 @@ def same(want: list[str], got: list[str]) -> None:
 class Forge:
     """A scratch directory with the stubbed gh first on PATH."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Lay out the stub, its state and an empty artifact."""
+        self.make_env = env
         self.tmp = tmp_path
         self.state = self.tmp / "state"
         self.state.mkdir()
@@ -130,7 +131,7 @@ class Forge:
         (stubs / "gh").write_text(GH, encoding="utf-8")
         (stubs / "gh").chmod(0o755)
         (self.state / "refs").write_text(f"main {MAIN}\n", encoding="utf-8")
-        env = support.env(self.tmp / "home")
+        env = self.make_env(self.tmp / "home")
         self.env = env | {
             "PATH": f"{stubs}{os.pathsep}{env.get('PATH', '')}",
             "STATE": str(self.state),
@@ -195,9 +196,9 @@ class Forge:
 
 
 @fixture
-def forge(tmp_path: Path) -> Forge:
+def forge(tmp_path: Path, env: support.Env) -> Forge:
     """Give each row its own Forge."""
-    return Forge(tmp_path)
+    return Forge(tmp_path, env=env)
 
 
 def test_a_path_outside_the_corpus_shapes_is_refused_by_name(forge: Forge) -> None:
@@ -379,9 +380,9 @@ class Runners(Forge):
 
 
 @fixture
-def runners(tmp_path: Path) -> Runners:
+def runners(tmp_path: Path, env: support.Env) -> Runners:
     """Give each row its own Runners."""
-    return Runners(tmp_path)
+    return Runners(tmp_path, env=env)
 
 
 def test_two_staging_runners_and_one_quiet_one_make_one_proposal(
@@ -494,9 +495,9 @@ class SignedCommit(Forge):
 
 
 @fixture
-def signed_commit(tmp_path: Path) -> SignedCommit:
+def signed_commit(tmp_path: Path, env: support.Env) -> SignedCommit:
     """Give each row its own SignedCommit."""
-    return SignedCommit(tmp_path)
+    return SignedCommit(tmp_path, env=env)
 
 
 def test_a_signed_answer_prints_the_commit(signed_commit: SignedCommit) -> None:

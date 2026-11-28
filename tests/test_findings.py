@@ -78,9 +78,16 @@ class Writer:
     """
 
     def __init__(
-        self, name: str, interpreter: list[str] | None, script: str, suffix: str
+        self,
+        name: str,
+        interpreter: list[str] | None,
+        script: str,
+        suffix: str,
+        *,
+        env: support.Env,
     ) -> None:
         """Hold the writer's interpreter and its reporter script."""
+        self.make_env = env
         self.name = name
         self.interpreter = interpreter
         self.script = script
@@ -105,7 +112,7 @@ class Writer:
             return self.called(reporter, entry, args, env, capfd)
         reporter.write_text(self.script, encoding="utf-8")
         overrides = {"PYTHONUTF8": "1", **env}
-        child = support.env(**overrides)
+        child = self.make_env(**overrides)
         for name in ("MISE_TASK_NAME", "ORG_FINDINGS"):
             if name not in env:
                 child.pop(name, None)
@@ -161,11 +168,25 @@ def writers() -> list[Writer]:
 
     """
     out = [
-        Writer("python", None, "", ".py"),
-        Writer("belt bash", [support.tool("bash")], SHELL_REPORTER, ".sh"),
+        Writer("python", None, "", ".py", env=support.environment),
+        Writer(
+            "belt bash",
+            [support.tool("bash")],
+            SHELL_REPORTER,
+            ".sh",
+            env=support.environment,
+        ),
     ]
     if SYSTEM_BASH.exists():
-        out.append(Writer("/bin/bash", [str(SYSTEM_BASH)], SHELL_REPORTER, ".sh"))
+        out.append(
+            Writer(
+                "/bin/bash",
+                [str(SYSTEM_BASH)],
+                SHELL_REPORTER,
+                ".sh",
+                env=support.environment,
+            )
+        )
     return out
 
 
@@ -463,7 +484,7 @@ def test_a_step_script_s_finding_names_the_job(
 
 
 def test_a_script_elsewhere_keeps_its_name_in_a_job(
-    finding_rows: FindingRows, capfd: pytest.CaptureFixture[str]
+    finding_rows: FindingRows, capfd: pytest.CaptureFixture[str], env: support.Env
 ) -> None:
     """Not directly under RUNNER_TEMP, or no job: the script's name."""
     cases = {
@@ -471,11 +492,11 @@ def test_a_script_elsewhere_keeps_its_name_in_a_job(
         "below it": {"RUNNER_TEMP": "/", "GITHUB_JOB": "attach"},
         "no job": {"RUNNER_TEMP": "", "GITHUB_JOB": ""},
     }
-    for writer in writers():
+    for writer in writers(env=env):
         name = f"reporter{writer.suffix}"
-        for case, env in cases.items():
+        for case, environ in cases.items():
             finding_rows.file.unlink(missing_ok=True)
-            planted = dict(env)
+            planted = dict(environ)
             if case == "no job":
                 planted["RUNNER_TEMP"] = str(finding_rows.root)
             done = writer.run(
@@ -636,7 +657,7 @@ def test_two_processes_write_two_files(
 
 
 # Sourcing the shell writer runs no command (#1934).
-def test_an_empty_path_still_loads_the_writer() -> None:
+def test_an_empty_path_still_loads_the_writer(env: support.Env) -> None:
     """PATH empty: no output, status 0, org_finding defined."""
     for _label, bash in bashes():
         for _how, source, cwd in (
@@ -654,7 +675,7 @@ def test_an_empty_path_still_loads_the_writer() -> None:
                 ],
                 capture_output=True,
                 text=True,
-                env=support.env(PATH=""),
+                env=env(PATH=""),
                 cwd=cwd,
                 check=False,
             )
@@ -671,8 +692,9 @@ NO_RECORDS: list[dict[str, object]] = []
 class LinesRows:
     """org_finding_lines: one finding per stdin line, unit-separated (#1934)."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Give each row a directory of its own."""
+        self.make_env = env
         self.file = Path(str(tmp_path)) / "out" / "job.jsonl"
 
     def feed(self, bash: str, text: str) -> subprocess.CompletedProcess[str]:
@@ -689,7 +711,7 @@ class LinesRows:
             capture_output=True,
             text=True,
             encoding="utf-8",
-            env=support.env(
+            env=self.make_env(
                 MISE_TASK_NAME="lint:demo", ORG_FINDINGS=str(self.file), PYTHONUTF8="1"
             ),
             check=False,
@@ -711,9 +733,9 @@ class LinesRows:
 
 
 @fixture
-def lines_rows(tmp_path: Path) -> LinesRows:
+def lines_rows(tmp_path: Path, env: support.Env) -> LinesRows:
     """Give each row its own LinesRows."""
-    return LinesRows(tmp_path)
+    return LinesRows(tmp_path, env=env)
 
 
 @pytest.mark.parametrize(("label", "bash"), bashes())

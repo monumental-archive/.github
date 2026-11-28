@@ -170,7 +170,7 @@ IDENTITY_NAME = "pgrx upgrade harness"
 IDENTITY_EMAIL = "harness@example.invalid"
 
 
-def hermetic_env(home: Path, **overrides: str) -> dict[str, str]:
+def hermetic_env(home: Path, *, env: support.Env, **overrides: str) -> dict[str, str]:
     """Build a fixture's environment through mise/support.py (#1508, #1514).
 
     Returns:
@@ -184,7 +184,7 @@ def hermetic_env(home: Path, **overrides: str) -> dict[str, str]:
         "GIT_COMMITTER_NAME": IDENTITY_NAME,
         "GIT_COMMITTER_EMAIL": IDENTITY_EMAIL,
     }
-    return support.env(home, **(stated | overrides))
+    return env(home, **(stated | overrides))
 
 
 def mise_data_dir() -> str:
@@ -204,7 +204,7 @@ def mise_data_dir() -> str:
     return str(Path.home() / ".local" / "share" / "mise")
 
 
-def git(args: list[str], cwd: Path, home: Path) -> str:
+def git(args: list[str], cwd: Path, home: Path, *, env: support.Env) -> str:
     """Run one `git`, blind to the caller's git environment.
 
     Returns:
@@ -216,7 +216,7 @@ def git(args: list[str], cwd: Path, home: Path) -> str:
     return subprocess.run(
         [GIT, *args],
         cwd=cwd,
-        env=hermetic_env(home),
+        env=hermetic_env(home, env=env),
         check=True,
         capture_output=True,
         text=True,
@@ -233,8 +233,11 @@ class Repo:
         crate: str,
         version: str,
         edges: list[tuple[str, str]],
+        *,
+        env: support.Env,
     ) -> None:
         """Lay out a control file, an upgrade graph and the tool pins."""
+        self.make_env = env
         # The repository and the HOME its git runs under are siblings in
         # the caller's temp directory, never nested: anything git writes
         # for this fixture would otherwise land inside the very tree it is
@@ -266,8 +269,8 @@ class Repo:
                 "cargo:cargo-pgrx" = "0.19.2"
                 """)
         )
-        git(["init", "-q", "."], self.root, self.home)
-        git(["add", "-A"], self.root, self.home)
+        git(["init", "-q", "."], self.root, self.home, env=self.make_env)
+        git(["add", "-A"], self.root, self.home, env=self.make_env)
 
     def derive(
         self,
@@ -310,6 +313,7 @@ class Repo:
             GITHUB_REPOSITORY="monumental-archive/under-test",
             GH_FIXTURE=str(TESTDATA / fixture),
             GH_PREV_TARBALL=str(prev_tarball or ""),
+            env=self.make_env,
         )
         env.pop("GITHUB_OUTPUT", None)
         return subprocess.run(
@@ -385,10 +389,10 @@ EDTF_EDGES = [
 
 # The three cases the old code collapsed into one.
 @pytest.mark.usefixtures("_set_up_test_needs_jq")
-def test_burned_head_falls_back_to_the_newest_installable() -> None:
+def test_burned_head_falls_back_to_the_newest_installable(env: support.Env) -> None:
     """Select 1.2.3: #816 itself, where only the graph head is burned."""
     with TemporaryDirectory() as d:
-        repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.1", EDTF_EDGES)
+        repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.1", EDTF_EDGES, env=env)
         out = repo.derive("1.3.1", "1.3.0", "edtf-releases.json").stdout
     assert "1.3.0 is in the upgrade graph but no non-draft release" in out
     assert "deriving edtf_postgres from 1.2.3" in out
@@ -414,10 +418,10 @@ def test_the_fixture_really_carries_the_shape_that_caused_it() -> None:
 
 
 @pytest.mark.usefixtures("_set_up_test_needs_jq")
-def test_mid_life_adoption_has_no_predecessor() -> None:
+def test_mid_life_adoption_has_no_predecessor(env: support.Env) -> None:
     """Real releases, no extension tarballs: first publish is correct."""
     with TemporaryDirectory() as d:
-        repo = Repo(d, "demo_pg", "demo-pg", "1.1.0", [("1.0.0", "1.0.1")])
+        repo = Repo(d, "demo_pg", "demo-pg", "1.1.0", [("1.0.0", "1.0.1")], env=env)
         result = repo.derive("1.1.0", "1.0.1", "stele-releases.json")
     assert "no non-draft release carries any demo_pg tarball" in result.stdout
     assert "first publish" in result.stdout
@@ -425,10 +429,10 @@ def test_mid_life_adoption_has_no_predecessor() -> None:
 
 
 @pytest.mark.usefixtures("_set_up_test_needs_jq")
-def test_true_first_publish_never_asks_the_forge() -> None:
+def test_true_first_publish_never_asks_the_forge(env: support.Env) -> None:
     """An empty graph is decided before any release call is made."""
     with TemporaryDirectory() as d:
-        repo = Repo(d, "demo_pg", "demo-pg", "1.0.0", [])
+        repo = Repo(d, "demo_pg", "demo-pg", "1.0.0", [], env=env)
         result = repo.derive("1.0.0", "", "stele-releases.json")
     assert "no upgrade graph" in result.stdout
     assert result.returncode == 0, result.stderr
@@ -436,20 +440,22 @@ def test_true_first_publish_never_asks_the_forge() -> None:
 
 
 @pytest.mark.usefixtures("_set_up_test_needs_jq")
-def test_a_graph_that_already_reaches_the_version_derives_nothing() -> None:
+def test_a_graph_that_already_reaches_the_version_derives_nothing(
+    env: support.Env,
+) -> None:
     """A re-run over an unchanged graph is a no-op, not a re-derivation."""
     with TemporaryDirectory() as d:
-        repo = Repo(d, "demo_pg", "demo-pg", "1.0.1", [("1.0.0", "1.0.1")])
+        repo = Repo(d, "demo_pg", "demo-pg", "1.0.1", [("1.0.0", "1.0.1")], env=env)
         result = repo.derive("1.0.1", "1.0.0", "stele-releases.json")
     assert "already reaches 1.0.1" in result.stdout
     assert result.returncode == 0, result.stderr
 
 
 # The pins come from `belt caller-pins`, as the build leg's do (#1333).
-def test_an_unpinned_cargo_pgrx_is_refused_with_its_remedy() -> None:
+def test_an_unpinned_cargo_pgrx_is_refused_with_its_remedy(env: support.Env) -> None:
     """The reader names the tool, the script keeps its own finding."""
     with TemporaryDirectory() as d:
-        repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.1", EDTF_EDGES)
+        repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.1", EDTF_EDGES, env=env)
         (repo.root / "mise.toml").write_text('[tools]\nrust = "1.97.1"\n')
         result = repo.derive("1.3.1", "1.3.0", "edtf-releases.json")
     assert result.returncode == 1
@@ -475,13 +481,13 @@ exec {GIT} "$@"
 
 
 # A `git ls-files` that failed is not "no control files" (#2001).
-def test_a_failed_listing_is_not_read_as_not_applicable() -> None:
+def test_a_failed_listing_is_not_read_as_not_applicable(env: support.Env) -> None:
     """The listing was read through process substitution.
 
     A failed git read as no rows: "not applicable", `files=`, exit 0.
     """
     with TemporaryDirectory() as d:
-        repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.1", EDTF_EDGES)
+        repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.1", EDTF_EDGES, env=env)
         bindir = repo.root / "stubbin"
         bindir.mkdir()
         (bindir / "git").write_text(GIT_LS_FILES_FAILS)
@@ -525,10 +531,10 @@ def entries(written: str) -> list[str]:
 # and offline. So the answer for EVERY version in the graph is written
 # down here, as derived state, and rides the release commit.
 @pytest.mark.usefixtures("_set_up_test_needs_jq")
-def test_it_names_the_versions_the_forge_carries_newest_first() -> None:
+def test_it_names_the_versions_the_forge_carries_newest_first(env: support.Env) -> None:
     """The real edtf listing carries three of its eleven graph versions."""
     with TemporaryDirectory() as d:
-        repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.1", EDTF_EDGES)
+        repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.1", EDTF_EDGES, env=env)
         repo.derive("1.3.1", "1.3.0", "edtf-releases.json")
         written = written_record(repo.root)
     want: list[str] = ["edtf_postgres 1.2.3 1.1.2 1.1.0"]
@@ -536,24 +542,26 @@ def test_it_names_the_versions_the_forge_carries_newest_first() -> None:
 
 
 @pytest.mark.usefixtures("_set_up_test_needs_jq")
-def test_the_burned_head_is_absent_and_that_is_the_whole_point() -> None:
+def test_the_burned_head_is_absent_and_that_is_the_whole_point(
+    env: support.Env,
+) -> None:
     """1.3.0 is in the graph, carried by nothing, and must not appear.
 
     This is the fact the lint could not otherwise have. Assert it
     directly rather than trusting the line above to imply it.
     """
     with TemporaryDirectory() as d:
-        repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.1", EDTF_EDGES)
+        repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.1", EDTF_EDGES, env=env)
         repo.derive("1.3.1", "1.3.0", "edtf-releases.json")
         written = written_record(repo.root)
     assert "1.3.0" not in written
 
 
 @pytest.mark.usefixtures("_set_up_test_needs_jq")
-def test_it_carries_its_own_derivation() -> None:
+def test_it_carries_its_own_derivation(env: support.Env) -> None:
     """Derived state states how it was derived, like `.coverage-floor`."""
     with TemporaryDirectory() as d:
-        repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.1", EDTF_EDGES)
+        repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.1", EDTF_EDGES, env=env)
         repo.derive("1.3.1", "1.3.0", "edtf-releases.json")
         written = written_record(repo.root)
     assert "# derived: v1.3.1" in written
@@ -566,10 +574,12 @@ def test_it_carries_its_own_derivation() -> None:
 
 
 @pytest.mark.usefixtures("_set_up_test_needs_jq")
-def test_an_extension_the_forge_carries_nothing_for_is_recorded_empty() -> None:
+def test_an_extension_the_forge_carries_nothing_for_is_recorded_empty(
+    env: support.Env,
+) -> None:
     """Mid-life adoption: asked, and the answer was none. Not silence."""
     with TemporaryDirectory() as d:
-        repo = Repo(d, "demo_pg", "demo-pg", "1.1.0", [("1.0.0", "1.0.1")])
+        repo = Repo(d, "demo_pg", "demo-pg", "1.1.0", [("1.0.0", "1.0.1")], env=env)
         repo.derive("1.1.0", "1.0.1", "stele-releases.json")
         written = written_record(repo.root)
     want: list[str] = ["demo_pg"]
@@ -577,7 +587,7 @@ def test_an_extension_the_forge_carries_nothing_for_is_recorded_empty() -> None:
 
 
 @pytest.mark.usefixtures("_set_up_test_needs_jq")
-def test_it_rides_the_release_commit() -> None:
+def test_it_rides_the_release_commit(env: support.Env) -> None:
     """A record the Release PR does not carry never reaches the gate.
 
     `files=` feeds EXTRA_FILES in release.yml, so this is the whole
@@ -586,10 +596,10 @@ def test_it_rides_the_release_commit() -> None:
     the record and exits without wanting a container.
     """
     with TemporaryDirectory() as d:
-        repo = Repo(d, "demo_pg", "demo-pg", "1.0.1", [("1.0.0", "1.0.1")])
+        repo = Repo(d, "demo_pg", "demo-pg", "1.0.1", [("1.0.0", "1.0.1")], env=env)
         repo.derive("1.0.1", "1.0.0", "stele-releases.json")
         out = repo.root / "gh-output"
-        env = hermetic_env(
+        environ = hermetic_env(
             repo.home,
             PATH=f"{repo.root / 'stubbin'}:{os.environ['PATH']}",
             VERSION="1.0.1",
@@ -598,11 +608,12 @@ def test_it_rides_the_release_commit() -> None:
             GITHUB_REPOSITORY="monumental-archive/under-test",
             GH_FIXTURE=str(TESTDATA / "stele-releases.json"),
             GITHUB_OUTPUT=str(out),
+            env=env,
         )
         result = subprocess.run(
             [BASH, str(SCRIPT)],
             cwd=repo.root,
-            env=env,
+            env=environ,
             capture_output=True,
             text=True,
             check=False,
@@ -613,7 +624,7 @@ def test_it_rides_the_release_commit() -> None:
 
 
 @pytest.mark.usefixtures("_set_up_test_needs_jq")
-def test_the_lint_reads_exactly_what_this_wrote() -> None:
+def test_the_lint_reads_exactly_what_this_wrote(env: support.Env) -> None:
     """End to end, across the two scripts that must agree on the name.
 
     The record's filename is written in `generate-pgrx-upgrade.sh`
@@ -625,7 +636,7 @@ def test_the_lint_reads_exactly_what_this_wrote() -> None:
         pytest.skip("the lint resolves the crate version with cargo")
     edges = [("1.1.0", "1.1.2"), ("1.1.2", "1.2.3")]
     with TemporaryDirectory() as d:
-        repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.2.3", edges)
+        repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.2.3", edges, env=env)
         written = repo.derive("1.2.3", "1.1.2", "edtf-releases.json")
         assert "already reaches 1.2.3" in written.stdout
 
@@ -645,11 +656,12 @@ def test_the_lint_reads_exactly_what_this_wrote() -> None:
         # MISE_GLOBAL_CONFIG_FILE (a linked worktree must) sends the
         # shim looking for the belt's Rust pin in an empty data
         # directory: it starts an install and exits 1 (#1201).
-        env = hermetic_env(
+        environ = hermetic_env(
             repo.home,
             CARGO_HOME=os.environ.get("CARGO_HOME", str(Path.home() / ".cargo")),
             RUSTUP_HOME=os.environ.get("RUSTUP_HOME", str(Path.home() / ".rustup")),
             MISE_DATA_DIR=mise_data_dir(),
+            env=env,
         )
         subprocess.run(
             [
@@ -660,14 +672,14 @@ def test_the_lint_reads_exactly_what_this_wrote() -> None:
                 str(crate / "Cargo.toml"),
             ],
             cwd=repo.root,
-            env=env,
+            env=environ,
             check=True,
             capture_output=True,
         )
         linted = subprocess.run(
             [BASH, str(LINT)],
             cwd=repo.root,
-            env=env,
+            env=environ,
             capture_output=True,
             text=True,
             check=False,
@@ -684,10 +696,10 @@ def test_the_lint_reads_exactly_what_this_wrote() -> None:
 # stub refuses by name on stderr. That is the decision itself rather
 # than a proxy for it: a wrong tag would be a wrong download.
 @pytest.mark.usefixtures("_set_up_test_needs_jq")
-def test_always_released_as_v_star() -> None:
+def test_always_released_as_v_star(env: support.Env) -> None:
     """release-lab: predecessor tarballs live on a plain `v*` tag."""
     with TemporaryDirectory() as d:
-        repo = Repo(d, "lab_pg", "lab-pg", "0.29.0", [("0.27.0", "0.28.1")])
+        repo = Repo(d, "lab_pg", "lab-pg", "0.29.0", [("0.27.0", "0.28.1")], env=env)
         result = repo.derive("0.29.0", "0.28.1", "release-lab-releases.json")
     assert "release download v0.28.1" in result.stderr
     assert "deriving lab_pg: 0.28.1 -> 0.29.0" in result.stdout
@@ -695,7 +707,7 @@ def test_always_released_as_v_star() -> None:
 
 
 @pytest.mark.usefixtures("_set_up_test_needs_jq")
-def test_imported_previous_release_under_another_scheme() -> None:
+def test_imported_previous_release_under_another_scheme(env: support.Env) -> None:
     """edtf: the same bytes sit on `edtf-postgres-v1.2.3` (#762).
 
     `v1.2.3` exists in edtf as a tag with no release object, so the
@@ -703,7 +715,7 @@ def test_imported_previous_release_under_another_scheme() -> None:
     for an extension with eleven published versions.
     """
     with TemporaryDirectory() as d:
-        repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.1", EDTF_EDGES)
+        repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.1", EDTF_EDGES, env=env)
         result = repo.derive("1.3.1", "1.3.0", "edtf-releases.json")
     assert "release download edtf-postgres-v1.2.3" in result.stderr
     assert "deriving edtf_postgres: 1.2.3 -> 1.3.1" in result.stdout
@@ -711,7 +723,7 @@ def test_imported_previous_release_under_another_scheme() -> None:
 
 
 @pytest.mark.usefixtures("_set_up_test_needs_jq")
-def test_no_releases_at_all() -> None:
+def test_no_releases_at_all(env: support.Env) -> None:
     """signer: the listing is empty, so nothing is installable.
 
     A non-empty graph with an empty listing is NOT the same input as
@@ -720,7 +732,7 @@ def test_no_releases_at_all() -> None:
     first publish. It must not attempt a download.
     """
     with TemporaryDirectory() as d:
-        repo = Repo(d, "demo_pg", "demo-pg", "1.1.0", [("1.0.0", "1.0.1")])
+        repo = Repo(d, "demo_pg", "demo-pg", "1.1.0", [("1.0.0", "1.0.1")], env=env)
         result = repo.derive("1.1.0", "1.0.1", "signer-releases.json")
     assert "no non-draft release carries any demo_pg tarball" in result.stdout
     assert "first publish" in result.stdout
@@ -779,11 +791,11 @@ def captured_edges(tag: str) -> list[tuple[str, str]]:
 # its record and the guards' rows in test_pgrx_build.py now read one
 # function over the same captures.
 @pytest.mark.usefixtures("_set_up_test_needs_jq")
-def test_the_next_release_derives_from_the_newest_installable() -> None:
+def test_the_next_release_derives_from_the_newest_installable(env: support.Env) -> None:
     """Release 1.3.6 derives from 1.3.5 on `v1.3.5`, and records it."""
     with TemporaryDirectory() as d:
         edges = captured_edges("v1.3.5")
-        repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.6", edges)
+        repo = Repo(d, "edtf_postgres", "edtf-postgres", "1.3.6", edges, env=env)
         result = repo.derive("1.3.6", "1.3.5", "edtf-releases-v1.3.5.json")
         written = written_record(repo.root)
     assert "deriving edtf_postgres: 1.3.5 -> 1.3.6" in result.stdout
@@ -812,7 +824,7 @@ def test_the_captures_carry_the_shapes_they_are_named_for() -> None:
 # real repository has released on an older line yet, and the row is
 # about the rule, not a history.
 @pytest.mark.usefixtures("_set_up_test_needs_jq")
-def test_the_derivation_starts_below_the_version() -> None:
+def test_the_derivation_starts_below_the_version(env: support.Env) -> None:
     """1.2.4 on v1.2.4, and no NOTE calls 1.3.0 uninstallable."""
     tarball = "lab_pg-{}-pg18-linux-amd64.tar.gz"
     listing: list[dict[str, object]] = [
@@ -823,7 +835,7 @@ def test_the_derivation_starts_below_the_version() -> None:
         fixture = Path(d) / "listing.json"
         fixture.write_text(json.dumps(listing))
         edges = [("1.2.3", "1.2.4"), ("1.2.4", "1.3.0")]
-        repo = Repo(d, "lab_pg", "lab-pg", "1.2.5", edges)
+        repo = Repo(d, "lab_pg", "lab-pg", "1.2.5", edges, env=env)
         result = repo.derive("1.2.5", "1.2.4", str(fixture))
     assert "deriving lab_pg: 1.2.4 -> 1.2.5" in result.stdout
     assert "release download v1.2.4" in result.stderr
@@ -870,7 +882,9 @@ NO_ROOT = (
 # package root and the previous schema, and reach the candidate
 # build, which the stub `docker` refuses by name. A layout it cannot
 # read stops before that with its own message.
-def run_with(top: str, files: list[str]) -> subprocess.CompletedProcess[str]:
+def run_with(
+    top: str, files: list[str], *, env: support.Env
+) -> subprocess.CompletedProcess[str]:
     """Derive lab_pg 0.29.0 from a 0.28.1 archive of this shape.
 
     Returns:
@@ -879,40 +893,40 @@ def run_with(top: str, files: list[str]) -> subprocess.CompletedProcess[str]:
     """
     with TemporaryDirectory() as d:
         archive = previous_archive(Path(d), top, files)
-        repo = Repo(d, "lab_pg", "lab-pg", "0.29.0", [("0.27.0", "0.28.1")])
+        repo = Repo(d, "lab_pg", "lab-pg", "0.29.0", [("0.27.0", "0.28.1")], env=env)
         return repo.derive("0.29.0", "0.28.1", "release-lab-releases.json", archive)
 
 
 @pytest.mark.usefixtures("_set_up_test_needs_jq")
-def test_pkgroot_and_nothing_else() -> None:
+def test_pkgroot_and_nothing_else(env: support.Env) -> None:
     """The #1274 tarball: `pkgroot/` is the archive's only top level."""
-    result = run_with("pkgroot", PREV_FILES)
+    result = run_with("pkgroot", PREV_FILES, env=env)
     assert "deriving lab_pg: 0.28.1 -> 0.29.0 (pg18)" in result.stdout
     assert "docker stub: refusing 'run --rm" in result.stderr
     assert "generate-pgrx-upgrade.sh: " not in result.stderr
 
 
 @pytest.mark.usefixtures("_set_up_test_needs_jq")
-def test_an_imported_archive_packed_from_root() -> None:
+def test_an_imported_archive_packed_from_root(env: support.Env) -> None:
     """An imported repository's tarball carries `./usr/...` directly."""
-    result = run_with(".", PREV_FILES)
+    result = run_with(".", PREV_FILES, env=env)
     assert "docker stub: refusing 'run --rm" in result.stderr
     assert "generate-pgrx-upgrade.sh: " not in result.stderr
 
 
 @pytest.mark.usefixtures("_set_up_test_needs_jq")
-def test_neither_layout_is_refused_by_name() -> None:
+def test_neither_layout_is_refused_by_name(env: support.Env) -> None:
     """A root holding neither shape stops before any container."""
-    result = run_with("cnpgroot", ["lib/lab_pg.so"])
+    result = run_with("cnpgroot", ["lib/lab_pg.so"], env=env)
     assert NO_ROOT in result.stderr
     assert "docker stub" not in result.stderr
     assert result.returncode == 1
 
 
 @pytest.mark.usefixtures("_set_up_test_needs_jq")
-def test_no_previous_schema_is_refused_by_name() -> None:
+def test_no_previous_schema_is_refused_by_name(env: support.Env) -> None:
     """A package root without the previous schema stops before a build."""
-    result = run_with("pkgroot", PREV_FILES[:2])
+    result = run_with("pkgroot", PREV_FILES[:2], env=env)
     assert (
         "generate-pgrx-upgrade.sh: v0.28.1 tarball carries no generated schema"
         " lab_pg--0.28.1.sql"
@@ -965,7 +979,7 @@ def header_install(text: str) -> list[str]:
 
 
 def run_header_install(
-    served: list[str], move_to: str = ""
+    served: list[str], move_to: str = "", *, env: support.Env
 ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     """Run the shipped block against stub dpkg-query, apt-cache, apt-get.
 
@@ -992,7 +1006,7 @@ def run_header_install(
         (tmp / "state").write_text("18.6-1.pgdg120+1")
         (tmp / "served").write_text("".join(f"{s}\n" for s in served))
         (tmp / "args").write_text("")
-        env = support.env(
+        environ = env(
             PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}",
             PG="18",
             BUILD_IMAGE="postgres:18-bookworm@sha256:planted",
@@ -1005,7 +1019,7 @@ def run_header_install(
         )
         result = subprocess.run(
             [BASH, "-euo", "pipefail", "-c", block],
-            env=env,
+            env=environ,
             capture_output=True,
             text=True,
             check=False,
@@ -1056,21 +1070,26 @@ def test_install_line_carries_the_clang_driver_and_llvm(site: object) -> None:
         assert package in words
 
 
-def test_installs_the_headers_at_the_server_version() -> None:
+def test_installs_the_headers_at_the_server_version(env: support.Env) -> None:
     """Every minor served, the image's own is the one installed."""
-    result, args = run_header_install([
-        "postgresql-server-dev-18=18.4-1.pgdg120+1",
-        "postgresql-server-dev-18=18.6-1.pgdg120+1",
-        "postgresql-server-dev-18=18.7-1.pgdg120+1",
-    ])
+    result, args = run_header_install(
+        [
+            "postgresql-server-dev-18=18.4-1.pgdg120+1",
+            "postgresql-server-dev-18=18.6-1.pgdg120+1",
+            "postgresql-server-dev-18=18.7-1.pgdg120+1",
+        ],
+        env=env,
+    )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "postgresql-server-dev-18=18.6-1.pgdg120+1" in args
     assert "postgresql-server-dev-18" not in args
 
 
-def test_refuses_with_the_remedy_when_apt_dropped_the_headers() -> None:
+def test_refuses_with_the_remedy_when_apt_dropped_the_headers(env: support.Env) -> None:
     """The skew is a red with its cause and its fix in it."""
-    result, args = run_header_install(["postgresql-server-dev-18=18.7-1.pgdg120+1"])
+    result, args = run_header_install(
+        ["postgresql-server-dev-18=18.7-1.pgdg120+1"], env=env
+    )
     assert result.returncode == 1
     assert result.stderr == (
         "::error::generate-pgrx-upgrade.sh: image"
@@ -1081,11 +1100,12 @@ def test_refuses_with_the_remedy_when_apt_dropped_the_headers() -> None:
     assert args == NOTHING
 
 
-def test_refuses_a_build_that_moved_the_server() -> None:
+def test_refuses_a_build_that_moved_the_server(env: support.Env) -> None:
     """An install that upgrades the server is caught after the fact."""
     result, _ = run_header_install(
         ["postgresql-server-dev-18=18.6-1.pgdg120+1"],
         move_to="18.7-1.pgdg120+1",
+        env=env,
     )
     assert result.returncode == 1
     assert result.stderr == (
@@ -1415,7 +1435,7 @@ def proof_sh(text: str) -> str:
 # host. `su`, `cp`, `createdb` and the server binaries stand in as
 # no-ops; psql answers from the row's files.
 def run_proof(
-    upgraded: str, fresh: str
+    upgraded: str, fresh: str, *, env: support.Env
 ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     """Run the shipped proof.sh against the given snapshot answers.
 
@@ -1472,7 +1492,7 @@ def run_proof(
 
         script = container.sub(rooted, script)
         log = root / "psql.log"
-        env = hermetic_env(
+        environ = hermetic_env(
             root,
             PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}",
             PG="18",
@@ -1483,10 +1503,11 @@ def run_proof(
             STUB_ROWS=str(rows),
             STUB_ERROR=PSQL_ERROR,
             STUB_COUNT="2",
+            env=env,
         )
         result = subprocess.run(
             [BASH, "-c", script],
-            env=env,
+            env=environ,
             capture_output=True,
             text=True,
             check=False,
@@ -1495,9 +1516,9 @@ def run_proof(
     return result, calls
 
 
-def test_an_sql_error_stops_the_step_with_psqls_message() -> None:
+def test_an_sql_error_stops_the_step_with_psqls_message(env: support.Env) -> None:
     """The step stops with psql's own status and message."""
-    result, _ = run_proof("error", ROW_A + ROW_B)
+    result, _ = run_proof("error", ROW_A + ROW_B, env=env)
     assert result.returncode == 3
     assert result.stderr == PSQL_ERROR
     assert "proof:" not in result.stdout
@@ -1512,10 +1533,10 @@ def test_an_sql_error_stops_the_step_with_psqls_message() -> None:
     ],
 )
 def test_an_empty_snapshot_is_refused_by_name(
-    empty: object, upgraded: object, fresh: object
+    empty: object, upgraded: object, fresh: object, env: support.Env
 ) -> None:
     """Either database's empty read fails with the exact message."""
-    result, _ = run_proof(upgraded, fresh)
+    result, _ = run_proof(upgraded, fresh, env=env)
     assert result.returncode == 1
     assert (
         f"::error::generate-pgrx-upgrade.sh: {empty} catalog snapshot"
@@ -1523,9 +1544,9 @@ def test_an_empty_snapshot_is_refused_by_name(
     ) == result.stderr
 
 
-def test_equal_snapshots_pass_with_the_object_count() -> None:
+def test_equal_snapshots_pass_with_the_object_count(env: support.Env) -> None:
     """The success line says how many objects it compared."""
-    result, _ = run_proof(ROW_A + ROW_B, ROW_A + ROW_B)
+    result, _ = run_proof(ROW_A + ROW_B, ROW_A + ROW_B, env=env)
     assert (result.returncode, result.stderr) == (0, "")
     assert result.stdout == (
         "proof: demo_ext 1.0.0 -> 1.1.0 upgraded catalog identical"
@@ -1533,9 +1554,9 @@ def test_equal_snapshots_pass_with_the_object_count() -> None:
     )
 
 
-def test_different_snapshots_fail_with_the_diff() -> None:
+def test_different_snapshots_fail_with_the_diff(env: support.Env) -> None:
     """A differing catalog keeps the existing message."""
-    result, _ = run_proof(ROW_A, ROW_A + ROW_B)
+    result, _ = run_proof(ROW_A, ROW_A + ROW_B, env=env)
     assert result.returncode == 1
     assert "+" + ROW_B in result.stdout
     assert result.stderr == (
@@ -1545,9 +1566,9 @@ def test_different_snapshots_fail_with_the_diff() -> None:
     )
 
 
-def test_every_psql_call_stops_on_error() -> None:
+def test_every_psql_call_stops_on_error(env: support.Env) -> None:
     """No psql in the proof can fail and exit 0."""
-    _, calls = run_proof(ROW_A + ROW_B, ROW_A + ROW_B)
+    _, calls = run_proof(ROW_A + ROW_B, ROW_A + ROW_B, env=env)
     assert len(calls) == 7, calls
     for call in calls:
         assert call.startswith("-v ON_ERROR_STOP=1 "), call

@@ -81,8 +81,9 @@ FAILED_MESSAGE = (
 class Planted:
     """A planted two-root tree, the cargo stub, and their environment."""
 
-    def __init__(self, base: Path, mode: str = "") -> None:
+    def __init__(self, base: Path, mode: str = "", *, env: support.Env) -> None:
         """Plant the tree under `base`, a directory of the row's own."""
+        self.make_env = env
         base.mkdir(parents=True, exist_ok=True)
         self.base = base
         self.tree = self.base / "repo"
@@ -97,7 +98,7 @@ class Planted:
         for name, text in FILES.items():
             (self.tree / name).parent.mkdir(parents=True, exist_ok=True)
             (self.tree / name).write_text(text, encoding="utf-8")
-        self.env = support.env(
+        self.env = self.make_env(
             self.base / "home",
             MISE_TASK_NAME="lint:rust",
             ORG_FINDINGS="",
@@ -183,10 +184,10 @@ class Planted:
 
 # roots(): the distinct workspaces, the top one first.
 def test_two_roots_top_first_vendor_never_asked(
-    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+    tmp_path: Path, capfd: pytest.CaptureFixture[str], env: support.Env
 ) -> None:
     """Cargo.toml, then fuzz/Cargo.toml; the member folds into the top."""
-    planted = Planted(tmp_path)
+    planted = Planted(tmp_path, env=env)
     status, out, err = planted.main(capfd)
     assert (status, err) == (0, "")
     assert out == "Cargo.toml\0fuzz/Cargo.toml\0"
@@ -204,10 +205,10 @@ def test_a_tree_with_no_top_manifest_lists_the_rest_sorted() -> None:
 
 
 def test_a_root_outside_the_tree_is_red_by_name(
-    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+    tmp_path: Path, capfd: pytest.CaptureFixture[str], env: support.Env
 ) -> None:
     """fuzz/Cargo.toml resolved outside: the message and remedy, exact."""
-    planted = Planted(tmp_path / "outside", "outside")
+    planted = Planted(tmp_path / "outside", "outside", env=env)
     status, out, err = planted.main(capfd)
     assert (status, out) == (1, "")
     want = OUTSIDE_MESSAGE.format(root=planted.outside / "Cargo.toml")
@@ -215,10 +216,10 @@ def test_a_root_outside_the_tree_is_red_by_name(
 
 
 def test_a_failing_locate_project_carries_cargos_text(
-    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+    tmp_path: Path, capfd: pytest.CaptureFixture[str], env: support.Env
 ) -> None:
     """Cargo exits 101: its own words, and every other manifest still asked."""
-    planted = Planted(tmp_path, "fail")
+    planted = Planted(tmp_path, "fail", env=env)
     status, out, err = planted.main(capfd)
     assert (status, out) == (1, "")
     assert err == FAILED_MESSAGE
@@ -226,10 +227,10 @@ def test_a_failing_locate_project_carries_cargos_text(
 
 
 def test_git_failing_is_red_with_gits_words(
-    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+    tmp_path: Path, capfd: pytest.CaptureFixture[str], env: support.Env
 ) -> None:
     """Outside a repository: git's error, never an empty list."""
-    planted = Planted(tmp_path)
+    planted = Planted(tmp_path, env=env)
     outside = planted.base / "plain"
     outside.mkdir()
     status, out, err = planted.call(
@@ -241,16 +242,16 @@ def test_git_failing_is_red_with_gits_words(
 
 
 def test_resolved_is_the_roots_or_none_having_said_why(
-    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+    tmp_path: Path, capfd: pytest.CaptureFixture[str], env: support.Env
 ) -> None:
     """The roots; None on an unresolved manifest; None on git, said."""
-    planted = Planted(tmp_path)
+    planted = Planted(tmp_path, env=env)
     roots: list[str] = ["Cargo.toml", "fuzz/Cargo.toml"]
     status, out, err = planted.call(
         lambda: 0 if rust_workspaces.resolved() == roots else 3, capfd
     )
     assert (status, err) == (0, "")
-    refused = Planted(tmp_path / "outside", "outside")
+    refused = Planted(tmp_path / "outside", "outside", env=env)
     status, out, err = refused.call(
         lambda: 0 if rust_workspaces.resolved() is None else 3, capfd
     )
@@ -276,9 +277,11 @@ def test_anything_but_roots_is_a_usage_error(
 
 # org_rust_workspace_roots fills the array, or fails.
 @pytest.mark.parametrize("shell", SHELLS)
-def test_the_reader_fills_one_element_per_root(shell: object, tmp_path: Path) -> None:
+def test_the_reader_fills_one_element_per_root(
+    shell: object, tmp_path: Path, env: support.Env
+) -> None:
     """Both roots in order, no empty last element, no file left."""
-    planted = Planted(tmp_path)
+    planted = Planted(tmp_path, env=env)
     done = planted.read(shell)
     left: list[str] = sorted(p.name for p in planted.base.iterdir())
     assert (done.returncode, done.stdout, done.stderr) == (
@@ -290,9 +293,11 @@ def test_the_reader_fills_one_element_per_root(shell: object, tmp_path: Path) ->
 
 
 @pytest.mark.parametrize("shell", SHELLS)
-def test_the_reader_fails_when_the_helper_fails(shell: object, tmp_path: Path) -> None:
+def test_the_reader_fails_when_the_helper_fails(
+    shell: object, tmp_path: Path, env: support.Env
+) -> None:
     """A finding: exit 1 under errexit, the message, nothing filled."""
-    planted = Planted(tmp_path, "fail")
+    planted = Planted(tmp_path, "fail", env=env)
     done = planted.read(shell)
     left: list[str] = sorted(p.name for p in planted.base.iterdir())
     assert (done.returncode, done.stdout) == (1, "")

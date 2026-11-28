@@ -623,8 +623,9 @@ jobs:
 class PinnedZizmor:
     """The belt's pinned zizmor, `--offline`, on a planted workflow."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Give the row's scratch directories one home, removed after it."""
+        self.make_env = env
         self.tmp = tmp_path
 
     def judged(
@@ -645,7 +646,7 @@ class PinnedZizmor:
         argv = ["--signer-workflow", SIGNER_WORKFLOW, "--offline", *ARGS]
         with pytest.MonkeyPatch.context() as patched:
             for name, value in (
-                support.env(
+                self.make_env(
                     GH_TOKEN=STANDIN,
                     MISE_TASK_NAME=TASK,
                     ORG_FINDINGS=str(file),
@@ -662,9 +663,9 @@ class PinnedZizmor:
 
 
 @fixture
-def pinned_zizmor(tmp_path: Path) -> PinnedZizmor:
+def pinned_zizmor(tmp_path: Path, env: support.Env) -> PinnedZizmor:
     """Give each row its own PinnedZizmor."""
-    return PinnedZizmor(tmp_path)
+    return PinnedZizmor(tmp_path, env=env)
 
 
 def test_an_unpinned_action_is_the_record(
@@ -722,8 +723,18 @@ sys.exit(int(os.environ["STUB_RC"]))
 class Task:
     """audit:actions' own body over a stub zizmor, in a planted tree."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(
+        self,
+        tmp_path: Path,
+        *,
+        canon: support.Canon,
+        env: support.Env,
+        track: support.Track,
+    ) -> None:
         """Give the row's scratch directories one home, removed after it."""
+        self.plant_canon = canon
+        self.make_env = env
+        self.track_tree = track
         self.tmp = tmp_path
 
     def run_task(
@@ -740,7 +751,7 @@ class Task:
         (root / ".github" / "workflows").mkdir(parents=True)
         (root / ".github" / "workflows" / "a.yml").write_text("on: push\n")
         # The task runs the command from the tree it names the canon.
-        support.canon(root)
+        self.plant_canon(root)
         (root / "security").mkdir()
         (root / "security" / "identity.toml").write_text(
             f'signer-workflow = "{SIGNER_WORKFLOW}"\n', encoding="utf-8"
@@ -757,14 +768,14 @@ class Task:
         config = decoded.load_toml((HERE / "config.toml").read_bytes())
         tasks = decoded.as_object(config["tasks"], "tasks")
         body = decoded.as_str(decoded.as_object(tasks[TASK], TASK)["run"], "run")
-        support.track(root)
+        self.track_tree(root)
         run = support.task_run(TASK, body)
         return subprocess.run(
             run.argv,
             capture_output=True,
             text=True,
             encoding="utf-8",
-            env=support.env(
+            env=self.make_env(
                 **run.env,
                 PATH=f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
                 ORG_BELT_DIR=str(HERE),
@@ -783,9 +794,11 @@ class Task:
 
 
 @fixture
-def task(tmp_path: Path) -> Task:
+def task(
+    tmp_path: Path, canon: support.Canon, env: support.Env, track: support.Track
+) -> Task:
     """Give each row its own Task."""
-    return Task(tmp_path)
+    return Task(tmp_path, canon=canon, env=env, track=track)
 
 
 def test_a_remaining_finding_is_recorded_and_zizmor_s_red(task: Task) -> None:

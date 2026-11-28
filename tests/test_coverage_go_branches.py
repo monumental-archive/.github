@@ -226,6 +226,7 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
     gobco: str = "binary",
     fail: str = "",
     silent: bool = False,
+    env: support.Env,
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
     """Run one task's body in a planted Go tree with stub tools.
 
@@ -240,9 +241,9 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
     stubs = tmp / "stubs"
     plant_tools(tmp, gobco)
     tracked = plant_tree(tree, pkgs, go_mod=go_mod, floor=floor)
-    env = support.env()
-    inherited = path_without_gobco(env.get("PATH", ""), tmp)
-    env |= {
+    environ = env()
+    inherited = path_without_gobco(environ.get("PATH", ""), tmp)
+    environ |= {
         "ORG_BELT_DIR": str(BELT),
         "PATH": os.pathsep.join([str(stubs), *inherited]),
         "STUB_LOG": str(tmp / "gobco.log"),
@@ -258,15 +259,15 @@ def run_task(  # ruff: ignore[too-many-arguments] -- one keyword per planted fac
         "ORG_COVERAGE_REPORTS": str(tmp / "reports"),
     }
     if silent:
-        env["STUB_SILENT"] = "1"
-    subprocess.run([GIT, "init", "-q"], cwd=tree, env=env, check=True)
+        environ["STUB_SILENT"] = "1"
+    subprocess.run([GIT, "init", "-q"], cwd=tree, env=environ, check=True)
     if tracked:
-        subprocess.run([GIT, "add", *tracked], cwd=tree, env=env, check=True)
+        subprocess.run([GIT, "add", *tracked], cwd=tree, env=environ, check=True)
     as_mise = support.task_run(task, measuring_step(task))
     done = subprocess.run(
         as_mise.argv,
         cwd=tree,
-        env=env | as_mise.env,
+        env=environ | as_mise.env,
         capture_output=True,
         text=True,
         check=False,
@@ -303,7 +304,7 @@ def go_branch_case(tmp_path: Path) -> GoBranchCase:
 
 
 def go_branch_case_run_task(
-    task: str = TASK, **plant: Unpack[Plant]
+    task: str = TASK, *, env: support.Env, **plant: Unpack[Plant]
 ) -> tuple[subprocess.CompletedProcess[str], Path, list[str]]:
     """Run a task and schedule its tree for removal.
 
@@ -312,32 +313,32 @@ def go_branch_case_run_task(
         per gobco call: the package, its arguments, and its `go`.
 
     """
-    done, tmp = run_task(task, **plant)
+    done, tmp = run_task(task, **plant, env=env)
     calls = (tmp / "gobco.log").read_text(encoding="utf-8").splitlines()
     return done, tmp, calls
 
 
 @pytest.mark.usefixtures("go_branch_case")
-def test_a_floor_held() -> None:
+def test_a_floor_held(env: support.Env) -> None:
     """A measurement at or above the line holds it, by name."""
-    done, _, _ = go_branch_case_run_task()
+    done, _, _ = go_branch_case_run_task(env=env)
     assert done.returncode == 0, done.stderr
     assert f"{TASK}: go-branches holds its floor 80.0 (84%)\n" == done.stdout
 
 
 @pytest.mark.usefixtures("go_branch_case")
-def test_below_the_floor_reds_by_name() -> None:
+def test_below_the_floor_reds_by_name(env: support.Env) -> None:
     """39 of 50 is 78%, under the 80.0 line: red, naming both numbers."""
-    done, _, _ = go_branch_case_run_task(counts="a=5/8 b=34/42")
+    done, _, _ = go_branch_case_run_task(counts="a=5/8 b=34/42", env=env)
     assert done.returncode == 1
     assert done.stdout == ""
     assert f"{TASK}: go-branches: 78% is below its derived floor 80.0%\n" in done.stderr
 
 
 @pytest.mark.usefixtures("go_branch_case")
-def test_one_package_per_call_with_the_real_go_first() -> None:
+def test_one_package_per_call_with_the_real_go_first(env: support.Env) -> None:
     """Each package is its own gobco call, default mode, real go first."""
-    done, tmp, calls = go_branch_case_run_task()
+    done, tmp, calls = go_branch_case_run_task(env=env)
     assert done.returncode == 0, done.stderr
     go = tmp / "goroot" / "bin" / "go"
     both: list[str] = [f"a [] go={go}", f"b [] go={go}"]
@@ -345,9 +346,9 @@ def test_one_package_per_call_with_the_real_go_first() -> None:
 
 
 @pytest.mark.usefixtures("go_branch_case")
-def test_a_shim_is_resolved_to_the_binary() -> None:
+def test_a_shim_is_resolved_to_the_binary(env: support.Env) -> None:
     """A gobco found as a mise shim runs as the binary `mise which` names."""
-    done, tmp, calls = go_branch_case_run_task(gobco="shim")
+    done, tmp, calls = go_branch_case_run_task(gobco="shim", env=env)
     assert done.returncode == 0, done.stderr
     go = tmp / "goroot" / "bin" / "go"
     both: list[str] = [f"a [] go={go}", f"b [] go={go}"]
@@ -355,36 +356,36 @@ def test_a_shim_is_resolved_to_the_binary() -> None:
 
 
 @pytest.mark.usefixtures("go_branch_case")
-def test_no_go_module_skips_clean() -> None:
+def test_no_go_module_skips_clean(env: support.Env) -> None:
     """A tree with no go.mod has no Go condition to measure."""
-    done, _, calls = go_branch_case_run_task(go_mod=False)
+    done, _, calls = go_branch_case_run_task(go_mod=False, env=env)
     assert done.returncode == 0, done.stderr
     assert f"{TASK}: no go.mod, skipped\n" == done.stdout
     assert calls == EMPTY
 
 
 @pytest.mark.usefixtures("go_branch_case")
-def test_no_such_line_skips_clean() -> None:
+def test_no_such_line_skips_clean(env: support.Env) -> None:
     """A floor with no go-branches line measures nothing at all."""
-    done, _, calls = go_branch_case_run_task(floor=MAIN)
+    done, _, calls = go_branch_case_run_task(floor=MAIN, env=env)
     assert done.returncode == 0, done.stderr
     assert done.stdout == SKIP
     assert calls == EMPTY
 
 
 @pytest.mark.usefixtures("go_branch_case")
-def test_no_floor_file_skips_clean() -> None:
+def test_no_floor_file_skips_clean(env: support.Env) -> None:
     """A repository that adopted no floor owes no condition figure either."""
-    done, _, calls = go_branch_case_run_task(floor=None)
+    done, _, calls = go_branch_case_run_task(floor=None, env=env)
     assert done.returncode == 0, done.stderr
     assert done.stdout == SKIP
     assert calls == EMPTY
 
 
 @pytest.mark.usefixtures("go_branch_case")
-def test_a_build_go_older_than_the_running_go_is_refused() -> None:
+def test_a_build_go_older_than_the_running_go_is_refused(env: support.Env) -> None:
     """A gobco built with Go 1.24.13 under Go 1.27.4 is red, unrun."""
-    done, tmp, calls = go_branch_case_run_task(built="go1.24.13")
+    done, tmp, calls = go_branch_case_run_task(built="go1.24.13", env=env)
     assert done.returncode == 1
     assert done.stdout == ""
     assert (
@@ -396,35 +397,35 @@ def test_a_build_go_older_than_the_running_go_is_refused() -> None:
 
 
 @pytest.mark.usefixtures("go_branch_case")
-def test_an_older_patch_release_is_refused() -> None:
+def test_an_older_patch_release_is_refused(env: support.Env) -> None:
     """go1.27.3 under go1.27.4 is older too."""
-    done, _, calls = go_branch_case_run_task(built="go1.27.3")
+    done, _, calls = go_branch_case_run_task(built="go1.27.3", env=env)
     assert done.returncode == 1
     assert "was built with go1.27.3, older than the go1.27.4" in done.stderr
     assert calls == EMPTY
 
 
 @pytest.mark.usefixtures("go_branch_case")
-def test_an_unreadable_build_go_is_refused() -> None:
+def test_an_unreadable_build_go_is_refused(env: support.Env) -> None:
     """No build version reads as older, never as fine."""
-    done, _, calls = go_branch_case_run_task(built="")
+    done, _, calls = go_branch_case_run_task(built="", env=env)
     assert done.returncode == 1
     assert "was built with an unreadable Go, older than the go1.27.4" in done.stderr
     assert calls == EMPTY
 
 
 @pytest.mark.usefixtures("go_branch_case")
-def test_a_newer_build_go_runs() -> None:
+def test_a_newer_build_go_runs(env: support.Env) -> None:
     """A build Go later than the running one reads its syntax."""
-    done, _, calls = go_branch_case_run_task(built="go1.28.0")
+    done, _, calls = go_branch_case_run_task(built="go1.28.0", env=env)
     assert done.returncode == 0, done.stderr
     assert len(calls) == 2
 
 
 @pytest.mark.usefixtures("go_branch_case")
-def test_gobco_missing_reds_with_the_install_line() -> None:
+def test_gobco_missing_reds_with_the_install_line(env: support.Env) -> None:
     """The belt pins it lazy; a missing gobco is named, never skipped."""
-    done, _, _ = go_branch_case_run_task(gobco="missing")
+    done, _, _ = go_branch_case_run_task(gobco="missing", env=env)
     assert done.returncode == 1
     assert (
         f"{TASK}: gobco missing — the belt pins it lazy; install it by name:\n" + REMEDY
@@ -432,9 +433,9 @@ def test_gobco_missing_reds_with_the_install_line() -> None:
 
 
 @pytest.mark.usefixtures("go_branch_case")
-def test_a_failing_package_reds_by_name() -> None:
+def test_a_failing_package_reds_by_name(env: support.Env) -> None:
     """A suite that fails under gobco is refused, naming the package."""
-    done, _, calls = go_branch_case_run_task(fail="a")
+    done, _, calls = go_branch_case_run_task(fail="a", env=env)
     assert done.returncode == 1
     assert done.stdout == ""
     assert f"{TASK}: gobco failed in a — a suite that does not pass\n" in done.stderr
@@ -442,26 +443,26 @@ def test_a_failing_package_reds_by_name() -> None:
 
 
 @pytest.mark.usefixtures("go_branch_case")
-def test_no_count_printed_is_refused() -> None:
+def test_no_count_printed_is_refused(env: support.Env) -> None:
     """A gobco run that prints no count is refused, never read as 0."""
-    done, _, _ = go_branch_case_run_task(silent=True)
+    done, _, _ = go_branch_case_run_task(silent=True, env=env)
     assert done.returncode == 1
     assert f"{TASK}: gobco printed no condition count in a — a\n" in done.stderr
 
 
 @pytest.mark.usefixtures("go_branch_case")
-def test_no_conditions_counted_is_refused() -> None:
+def test_no_conditions_counted_is_refused(env: support.Env) -> None:
     """0 of 0 is a run that measured nothing, never a 0% to compare."""
-    done, _, _ = go_branch_case_run_task(counts="a=0/0 b=0/0")
+    done, _, _ = go_branch_case_run_task(counts="a=0/0 b=0/0", env=env)
     assert done.returncode == 1
     assert f"{TASK}: gobco counted no conditions in any package — a\n" in done.stderr
 
 
 @pytest.mark.usefixtures("go_branch_case")
-def test_a_typed_line_is_refused_as_drift() -> None:
+def test_a_typed_line_is_refused_as_drift(env: support.Env) -> None:
     """A go-branches number typed over its record reds before measuring."""
     typed = MAIN + "# go-branches measured: 82.0\ngo-branches 60.0\n"
-    done, _, calls = go_branch_case_run_task(floor=typed)
+    done, _, calls = go_branch_case_run_task(floor=typed, env=env)
     assert done.returncode == 1
     assert (
         "go-branches floor 60.0 disagrees with its own record: measured"
@@ -471,14 +472,14 @@ def test_a_typed_line_is_refused_as_drift() -> None:
 
 
 @pytest.mark.usefixtures("go_branch_case")
-def test_the_tree_is_left_untouched() -> None:
+def test_the_tree_is_left_untouched(env: support.Env) -> None:
     """The leg writes nothing into the tree it measures."""
-    done, tmp, _ = go_branch_case_run_task()
+    done, tmp, _ = go_branch_case_run_task(env=env)
     assert done.returncode == 0, done.stderr
     status = subprocess.run(
         [GIT, "ls-files", "--others", "--modified", "--exclude-standard"],
         cwd=tmp / "tree",
-        env=support.env(),
+        env=env(),
         capture_output=True,
         text=True,
         check=True,
@@ -487,9 +488,9 @@ def test_the_tree_is_left_untouched() -> None:
 
 
 @pytest.mark.usefixtures("go_branch_case")
-def test_check_measures_statements_beside_a_go_branches_line() -> None:
+def test_check_measures_statements_beside_a_go_branches_line(env: support.Env) -> None:
     """A committed go-branches line changes nothing the gate runs."""
-    done, tmp, calls = go_branch_case_run_task("coverage:check")
+    done, tmp, calls = go_branch_case_run_task("coverage:check", env=env)
     assert done.returncode == 0, done.stderr
     assert (
         "coverage:check: go leg holds its floor 90.0 (95.0%)\n"
@@ -499,9 +500,9 @@ def test_check_measures_statements_beside_a_go_branches_line() -> None:
 
 
 @pytest.mark.usefixtures("go_branch_case")
-def test_adopt_writes_a_derived_go_branches_line() -> None:
+def test_adopt_writes_a_derived_go_branches_line(env: support.Env) -> None:
     """Both legs measured; the file parses with the line derived."""
-    done, tmp, calls = go_branch_case_run_task("coverage:adopt", floor=None)
+    done, tmp, calls = go_branch_case_run_task("coverage:adopt", floor=None, env=env)
     assert done.returncode == 0, done.stderr
     assert (
         "coverage-floor: adopted .coverage-floor: go 90 (measured 95.0),"
@@ -520,9 +521,11 @@ def test_adopt_writes_a_derived_go_branches_line() -> None:
 
 
 @pytest.mark.usefixtures("go_branch_case")
-def test_adopt_cannot_lower_the_go_branches_line() -> None:
+def test_adopt_cannot_lower_the_go_branches_line(env: support.Env) -> None:
     """Below its floor, nothing is written."""
-    done, tmp, _ = go_branch_case_run_task("coverage:adopt", counts="a=5/8 b=34/42")
+    done, tmp, _ = go_branch_case_run_task(
+        "coverage:adopt", counts="a=5/8 b=34/42", env=env
+    )
     assert done.returncode == 1
     assert (
         "coverage:adopt: go-branches: measured 78.0% is below its floor 80.0%."
@@ -534,10 +537,10 @@ def test_adopt_cannot_lower_the_go_branches_line() -> None:
 
 
 @pytest.mark.usefixtures("go_branch_case")
-def test_adopt_with_gobco_missing_writes_nothing() -> None:
+def test_adopt_with_gobco_missing_writes_nothing(env: support.Env) -> None:
     """A Go tree's adoption owes the line; a missing gobco is red."""
     done, tmp, _ = go_branch_case_run_task(
-        "coverage:adopt", floor=None, gobco="missing"
+        "coverage:adopt", floor=None, gobco="missing", env=env
     )
     assert done.returncode == 1
     assert "coverage:adopt: gobco missing — the belt pins it lazy" in done.stderr

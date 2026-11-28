@@ -11,7 +11,9 @@ form the org's tests use:
 - bare, `@fixture`, over a function or a method;
 - `@fixture(scope="class")`, a fixture a test class's rows share;
 - `@fixture(scope="module")`, one value for a module's rows, for a
-  fixture as costly as a real run of the thing under test.
+  fixture as costly as a real run of the thing under test;
+- `@fixture(scope="session")`, a factory with nothing to set up or tear
+  down, which a Hypothesis property may take as well.
 
 Each overload takes the fixture function by its own parameters, so its
 body is checked as written, and the decorated name is an `object`: pytest
@@ -39,7 +41,7 @@ def fixture[**P](function: Callable[P, object], /) -> object: ...
 
 @overload
 def fixture[**P](
-    *, scope: Literal["class", "module"]
+    *, scope: Literal["class", "module", "session"]
 ) -> Callable[[Callable[P, object]], object]: ...
 
 
@@ -47,7 +49,7 @@ def fixture[**P](
     function: Callable[P, object] | None = None,
     /,
     *,
-    scope: Literal["function", "class", "module"] = "function",
+    scope: Literal["function", "class", "module", "session"] = "function",
 ) -> object:
     """Apply pytest's `fixture`; the overloads above are its type.
 

@@ -74,7 +74,9 @@ def finding(index: int, condition: str) -> dict[str, object]:
     return {"subject": f"CT index {index}", "assertion": condition, "detail": "x"}
 
 
-def call(argv: list[str], *, capfd: pytest.CaptureFixture[str]) -> tuple[int, str, str]:
+def call(
+    argv: list[str], *, capfd: pytest.CaptureFixture[str], env: support.Env
+) -> tuple[int, str, str]:
     """Call the helper's main in this process, as the leg starts it.
 
     The leg runs `belt verdict` with no mise task around it, so the
@@ -88,7 +90,7 @@ def call(argv: list[str], *, capfd: pytest.CaptureFixture[str]) -> tuple[int, st
     """
     with pytest.MonkeyPatch.context() as patched:
         patched.setattr(sys, "argv", [COMMAND, *argv])
-        for name, value in support.env().items():
+        for name, value in env().items():
             patched.setenv(name, value)
         status = verdict.main(argv)
     out, err = capfd.readouterr()
@@ -98,8 +100,9 @@ def call(argv: list[str], *, capfd: pytest.CaptureFixture[str]) -> tuple[int, st
 class Verdict:
     """One row per branch of verdict.judge()."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Lay out a report file."""
+        self.make_env = env
         self.report = Path(str(tmp_path)) / "report.json"
 
     def run_helper(
@@ -119,13 +122,13 @@ class Verdict:
         text = json.dumps(doc) if doc is not None else ""
         self.report.write_text(text, encoding="utf-8")
         argv = ["--exit-code", code, "--report", str(self.report), "--saved", saved]
-        return call(argv, capfd=capfd)
+        return call(argv, capfd=capfd, env=self.make_env)
 
 
 @fixture
-def verdict_state(tmp_path: Path) -> Verdict:
+def verdict_state(tmp_path: Path, env: support.Env) -> Verdict:
     """Give each row its own Verdict."""
-    return Verdict(tmp_path)
+    return Verdict(tmp_path, env=env)
 
 
 def test_judged_to_the_head(
@@ -264,7 +267,7 @@ def test_facts_not_stele_shape_is_red(
 
 
 def test_report_nested_past_the_parser(
-    verdict_state: Verdict, capfd: pytest.CaptureFixture[str]
+    verdict_state: Verdict, capfd: pytest.CaptureFixture[str], env: support.Env
 ) -> None:
     """JSON nested past the parser's depth: red by name, no traceback."""
     verdict_state.report.write_bytes(b"[" * 100_000)
@@ -276,7 +279,7 @@ def test_report_nested_past_the_parser(
         "--saved",
         "true",
     ]
-    status, out, err = call(argv, capfd=capfd)
+    status, out, err = call(argv, capfd=capfd, env=env)
     assert status == 1, err
     assert out == ""
     assert err.strip() == (
@@ -286,7 +289,7 @@ def test_report_nested_past_the_parser(
 
 
 def test_a_report_not_of_stele_s_shape_is_unreadable(
-    verdict_state: Verdict, capfd: pytest.CaptureFixture[str]
+    verdict_state: Verdict, capfd: pytest.CaptureFixture[str], env: support.Env
 ) -> None:
     """Each wrong shape, read where the report is decoded: one refusal (#1683)."""
     target = json.dumps("assert signer-certificates")
@@ -313,7 +316,7 @@ def test_a_report_not_of_stele_s_shape_is_unreadable(
     ]
     for text in rows.values():
         verdict_state.report.write_text(text, encoding="utf-8")
-        status, out, err = call(argv, capfd=capfd)
+        status, out, err = call(argv, capfd=capfd, env=env)
         assert status == 1, err
         assert out == ""
         assert err.strip() == (

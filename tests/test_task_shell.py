@@ -45,12 +45,12 @@ REFUSED = "ignored for security reasons"
 # The declared shell stops a body at its first failure (#401).
 @pytest.mark.parametrize(("what", "body"), BODIES.items())
 def test_the_declared_shell_stops_at_the_first_failure(
-    what: object, body: object
+    what: object, body: object, env: support.Env
 ) -> None:
     """No body reaches its last line, and each run is red."""
     done = subprocess.run(
         [*shlex.split(SHELL), body],
-        env=support.env(),
+        env=env(),
         capture_output=True,
         text=True,
         check=False,
@@ -75,14 +75,16 @@ def a_linked_clone_that_pins_its_shell(tmp_path: Path) -> ALinkedCloneThatPinsIt
 
 def test_the_pin_holds_and_the_belt_sets_nothing_refused(
     a_linked_clone_that_pins_its_shell: ALinkedCloneThatPinsItsShell,
+    belt: support.Belt,
+    env: support.Env,
 ) -> None:
     """The failing pipeline reds the task, and mise warns of nothing."""
     tmp = Path(tempfile.mkdtemp(dir=a_linked_clone_that_pins_its_shell.tmp)).resolve()
     repo = tmp / "repo"
     conf = repo / ".config" / "mise" / "conf.d"
     conf.mkdir(parents=True)
-    belt = support.belt(tmp / "belt")
-    (conf / "belt.toml").symlink_to(belt / "config.toml")
+    belt_dir = belt(tmp / "belt")
+    (conf / "belt.toml").symlink_to(belt_dir / "config.toml")
     (repo / "mise.toml").write_text(
         f'[task_config]\nshell = "{SHELL}"\n\n'
         '[tasks.t]\nrun = "false | cat; echo reached"\n',
@@ -92,10 +94,10 @@ def test_the_pin_holds_and_the_belt_sets_nothing_refused(
     subprocess.run(
         [support.tool("git"), "init", "-q", "."],
         cwd=repo,
-        env=support.env(),
+        env=env(),
         check=True,
     )
-    env = support.env(
+    environ = env(
         MISE_CONFIG_DIR=str(tmp / "config"),
         XDG_CONFIG_HOME=str(tmp / "config"),
         MISE_CEILING_PATHS=str(tmp),
@@ -108,7 +110,7 @@ def test_the_pin_holds_and_the_belt_sets_nothing_refused(
     done = subprocess.run(
         [support.tool("mise"), "run", "t"],
         cwd=repo,
-        env=env,
+        env=environ,
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,

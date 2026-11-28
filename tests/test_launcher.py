@@ -27,7 +27,9 @@ USAGE = launcher.USAGE
 EXIT_USAGE = 2
 
 
-def run(*argv: str, **env: str) -> subprocess.CompletedProcess[str]:
+def run(
+    *argv: str, make_env: support.Env, **env: str
+) -> subprocess.CompletedProcess[str]:
     """Run the launcher as the call sites do.
 
     Returns:
@@ -36,14 +38,16 @@ def run(*argv: str, **env: str) -> subprocess.CompletedProcess[str]:
     """
     return subprocess.run(
         [PYTHON, "-I", str(support.PACKAGE), *argv],
-        env=support.env(**env),
+        env=make_env(**env),
         capture_output=True,
         text=True,
         check=False,
     )
 
 
-def test_a_planted_belt_on_pythonpath_never_answers(tmp_path: Path) -> None:
+def test_a_planted_belt_on_pythonpath_never_answers(
+    tmp_path: Path, env: support.Env
+) -> None:
     """-I: a `belt` package on PYTHONPATH is not the one that runs."""
     planted = tmp_path / "belt"
     planted.mkdir()
@@ -51,7 +55,9 @@ def test_a_planted_belt_on_pythonpath_never_answers(tmp_path: Path) -> None:
     (planted / "subject_budget.py").write_text(
         "def main(argv):\n    print('planted')\n    return 0\n", encoding="utf-8"
     )
-    done = run("subject-budget", "--no-such-flag", PYTHONPATH=str(tmp_path))
+    done = run(
+        "subject-budget", "--no-such-flag", PYTHONPATH=str(tmp_path), make_env=env
+    )
     assert "planted" not in done.stdout
     assert done.stderr == (
         "subject-budget: takes no arguments, got ['--no-such-flag']\n"
@@ -59,15 +65,15 @@ def test_a_planted_belt_on_pythonpath_never_answers(tmp_path: Path) -> None:
     assert done.returncode == EXIT_USAGE
 
 
-def test_an_unknown_command_exits_2_with_its_message() -> None:
+def test_an_unknown_command_exits_2_with_its_message(env: support.Env) -> None:
     """A name no module has: 2, the usage line."""
-    done = run("no-such-command")
+    done = run("no-such-command", make_env=env)
     assert done.returncode == EXIT_USAGE
     assert done.stderr == f"belt: unknown command 'no-such-command' — {USAGE}\n"
     assert not done.stdout
 
 
-def test_a_commands_status_reaches_the_shell() -> None:
+def test_a_commands_status_reaches_the_shell(env: support.Env) -> None:
     """`python-roots` with no file is its own usage error, 2, through the shell."""
     done = subprocess.run(
         [
@@ -75,7 +81,7 @@ def test_a_commands_status_reaches_the_shell() -> None:
             "-c",
             f'"{PYTHON}" -I "{support.PACKAGE}" python-roots; echo "status $?"',
         ],
-        env=support.env(),
+        env=env(),
         capture_output=True,
         text=True,
         check=False,

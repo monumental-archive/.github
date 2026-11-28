@@ -109,14 +109,15 @@ def body() -> str:
 class TwoRoots:
     """A tree of two workspaces: the root's and a fuzz crate's."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Plant the tree, its metadata, the stubs and the log."""
+        self.make_env = env
         tmp = tmp_path
         self.tree = tmp / "tree"
         (self.tree / "fuzz").mkdir(parents=True)
         for manifest in ("Cargo.toml", FUZZ):
             (self.tree / manifest).write_text("", encoding="utf-8")
-        env = support.env()
+        env = self.make_env()
         subprocess.run([GIT, "init", "-q"], cwd=self.tree, env=env, check=True)
         subprocess.run([GIT, "add", "."], cwd=self.tree, env=env, check=True)
         self.plants = tmp / "plants"
@@ -165,7 +166,7 @@ class TwoRoots:
         return subprocess.run(
             as_mise.argv,
             cwd=self.tree,
-            env=support.env() | self.overrides | plant | as_mise.env,
+            env=self.make_env() | self.overrides | plant | as_mise.env,
             capture_output=True,
             text=True,
             check=False,
@@ -183,9 +184,9 @@ class TwoRoots:
 
 
 @fixture
-def two_roots(tmp_path: Path) -> TwoRoots:
+def two_roots(tmp_path: Path, env: support.Env) -> TwoRoots:
     """Give each row its own TwoRoots."""
-    return TwoRoots(tmp_path)
+    return TwoRoots(tmp_path, env=env)
 
 
 def test_the_second_roots_undeclared_crate_is_red_by_name(two_roots: TwoRoots) -> None:

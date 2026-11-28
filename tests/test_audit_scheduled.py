@@ -60,16 +60,26 @@ def body() -> str:
 class Scheduled:
     """A planted belt config and workflows; the lint's verdict on them."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(
+        self,
+        tmp_path: Path,
+        *,
+        belt: support.Belt,
+        env: support.Env,
+        track: support.Track,
+    ) -> None:
         """Plant a tree with two belt audit tasks and a stub belt."""
+        self.plant_belt = belt
+        self.make_env = env
+        self.track_tree = track
         self.tmp = tmp_path
         self.tree = self.tmp / "tree"
         (self.tree / "mise").mkdir(parents=True)
         (self.tree / "mise" / "config.toml").write_text(CONFIG, encoding="utf-8")
         (self.tree / ".github" / "workflows").mkdir(parents=True)
         stubs = {"own-audits.sh": OWN_AUDITS_STUB}
-        belt = support.belt(self.tmp / "belt", stubs=stubs)
-        self.env = support.env() | {
+        belt = self.plant_belt(self.tmp / "belt", stubs=stubs)
+        self.env = self.make_env() | {
             "ORG_BELT_DIR": str(belt),
             "ORG_PYTHON": sys.executable,
         }
@@ -90,7 +100,7 @@ class Scheduled:
             The finished process.
 
         """
-        support.track(self.tree)
+        self.track_tree(self.tree)
         if untracked:
             rm = [GIT, "rm", "-q", "--cached", "--", *untracked]
             subprocess.run(rm, cwd=self.tree, env=self.env, check=True)
@@ -106,9 +116,11 @@ class Scheduled:
 
 
 @fixture
-def scheduled(tmp_path: Path) -> Scheduled:
+def scheduled(
+    tmp_path: Path, belt: support.Belt, env: support.Env, track: support.Track
+) -> Scheduled:
     """Give each row its own Scheduled."""
-    return Scheduled(tmp_path)
+    return Scheduled(tmp_path, belt=belt, env=env, track=track)
 
 
 def test_mutants_scheduled_by_its_own_workflow(scheduled: Scheduled) -> None:
@@ -163,14 +175,28 @@ def test_unscheduled_task_is_red_and_names_the_schedulers(scheduled: Scheduled) 
 class OwnTasks:
     """The repository half: its own audit tasks need a collecting caller."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(
+        self,
+        tmp_path: Path,
+        *,
+        belt: support.Belt,
+        canon: support.Canon,
+        env: support.Env,
+        track: support.Track,
+    ) -> None:
         """Plant a consumer tree (no belt config) defining one audit task."""
+        self.plant_belt = belt
+        self.plant_canon = canon
+        self.make_env = env
+        self.track_tree = track
         self.tmp = tmp_path
         self.tree = self.tmp / "tree"
         (self.tree / ".github" / "workflows").mkdir(parents=True)
-        belt = support.belt(self.tmp / "belt", stubs={"own-audits.sh": OWN_AUDIT_STUB})
-        canon = support.canon(self.tmp / "canon", "security/identity.toml")
-        self.env = support.env() | {
+        belt = self.plant_belt(
+            self.tmp / "belt", stubs={"own-audits.sh": OWN_AUDIT_STUB}
+        )
+        canon = self.plant_canon(self.tmp / "canon", "security/identity.toml")
+        self.env = self.make_env() | {
             "ORG_BELT_DIR": str(belt),
             "ORG_CANON_DIR": str(canon),
             "ORG_PYTHON": sys.executable,
@@ -191,7 +217,7 @@ class OwnTasks:
             The finished process.
 
         """
-        support.track(self.tree)
+        self.track_tree(self.tree)
         as_mise = support.task_run("lint:audit-scheduled", body())
         return subprocess.run(
             as_mise.argv,
@@ -204,9 +230,15 @@ class OwnTasks:
 
 
 @fixture
-def own_tasks(tmp_path: Path) -> OwnTasks:
+def own_tasks(
+    tmp_path: Path,
+    belt: support.Belt,
+    canon: support.Canon,
+    env: support.Env,
+    track: support.Track,
+) -> OwnTasks:
     """Give each row its own OwnTasks."""
-    return OwnTasks(tmp_path)
+    return OwnTasks(tmp_path, belt=belt, canon=canon, env=env, track=track)
 
 
 def test_the_own_audits_caller_collects_them(own_tasks: OwnTasks) -> None:

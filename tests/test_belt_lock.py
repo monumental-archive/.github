@@ -83,13 +83,15 @@ def pin(key: str) -> str:
 class LockedFromTheLinkedLock:
     """Each row: which locks hold which tool, and what a locked install says."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, belt: support.Belt, env: support.Env) -> None:
         """Plant the cache tree, the linked clone and its root lock.
 
         Raises:
             AssertionError: the belt's lock holds no uv entry to move.
 
         """
+        self.plant_belt = belt
+        self.make_env = env
         self.tmp = tmp_path
         tree = self.tmp / "cache" / "org-belt" / ("a" * 40) / "mise"
         config = (BELT / "config.toml").read_text("utf-8")
@@ -98,7 +100,7 @@ class LockedFromTheLinkedLock:
         lock = (BELT / "mise.lock").read_text("utf-8")
         # The whole belt; the config and the lock are the row's own, and
         # locks() rewrites the lock in place.
-        support.belt(
+        self.plant_belt(
             tree, stubs={"config.toml": config.replace(line, ""), "mise.lock": lock}
         )
         uv = block(UV_KEY).search(lock)
@@ -124,7 +126,7 @@ class LockedFromTheLinkedLock:
             The environment.
 
         """
-        return support.env(
+        return self.make_env(
             self.tmp / "home",
             MISE_CONFIG_DIR=str(self.tmp / "config"),
             MISE_DATA_DIR=str(self.tmp / "data"),
@@ -171,9 +173,11 @@ class LockedFromTheLinkedLock:
 
 
 @fixture
-def locked_from_the_linked_lock(tmp_path: Path) -> LockedFromTheLinkedLock:
+def locked_from_the_linked_lock(
+    tmp_path: Path, belt: support.Belt, env: support.Env
+) -> LockedFromTheLinkedLock:
     """Give each row its own LockedFromTheLinkedLock."""
-    return LockedFromTheLinkedLock(tmp_path)
+    return LockedFromTheLinkedLock(tmp_path, belt=belt, env=env)
 
 
 def test_a_belt_tool_resolves_from_the_linked_lock(

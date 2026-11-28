@@ -83,20 +83,20 @@ class Org:
         return f"{repo}/{run_id}" in self.runs
 
 
-def plant(tree: Path, files: dict[str, str]) -> None:
+def plant(tree: Path, files: dict[str, str], *, env: support.Env) -> None:
     """Make `tree` a repository tracking `files`."""
-    env = support.env(tree.parent / "home")
+    environ = env(tree.parent / "home")
     for name, text in files.items():
         path = tree / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
-    subprocess.run([GIT, "init", "-q"], cwd=tree, env=env, check=True)
+    subprocess.run([GIT, "init", "-q"], cwd=tree, env=environ, check=True)
     if files:
-        subprocess.run([GIT, "add", "--", *files], cwd=tree, env=env, check=True)
+        subprocess.run([GIT, "add", "--", *files], cwd=tree, env=environ, check=True)
 
 
 def audit(
-    files: dict[str, str], org: Org | None, *, owner: str = OWNER
+    files: dict[str, str], org: Org | None, *, owner: str = OWNER, env: support.Env
 ) -> tuple[int, str, str]:
     """Plant `files` and run the helper's main against `org`.
 
@@ -107,7 +107,7 @@ def audit(
     with tempfile.TemporaryDirectory() as tmp:
         tree = Path(tmp) / "repo"
         tree.mkdir()
-        plant(tree, files)
+        plant(tree, files, env=env)
         out, err = io.StringIO(), io.StringIO()
         named: dict[str, str] = {"GITHUB_REPOSITORY_OWNER": owner}
         with (
@@ -125,12 +125,12 @@ DOC = {"docs/a.md": "# A\n\nNothing cited.\n"}
 
 
 # docs/ is read from git, and a missing one is red by name.
-def test_an_untracked_docs_is_missing() -> None:
+def test_an_untracked_docs_is_missing(env: support.Env) -> None:
     """docs/ on disk, nothing tracked under it: the missing-input red."""
     with tempfile.TemporaryDirectory() as tmp:
         tree = Path(tmp) / "repo"
         tree.mkdir()
-        plant(tree, {"README.md": "x\n"})
+        plant(tree, {"README.md": "x\n"}, env=env)
         (tree / "docs").mkdir()
         (tree / "docs" / "a.md").write_text("x\n", encoding="utf-8")
         err = io.StringIO()
@@ -143,9 +143,9 @@ def test_an_untracked_docs_is_missing() -> None:
     ) == err.getvalue()
 
 
-def test_docs_without_markdown_is_red() -> None:
+def test_docs_without_markdown_is_red(env: support.Env) -> None:
     """A tracked docs/ holding no markdown resolves nothing: red."""
-    status, out, err = audit({"docs/a.txt": "x\n"}, Org())
+    status, out, err = audit({"docs/a.txt": "x\n"}, Org(), env=env)
     assert (status, out) == (1, "")
     assert (
         f"{TASK}: on the canon, and docs/ holds no tracked markdown —\n"
@@ -154,33 +154,33 @@ def test_docs_without_markdown_is_red() -> None:
     ) == err
 
 
-def test_no_gh_is_red() -> None:
+def test_no_gh_is_red(env: support.Env) -> None:
     """With no network stand-in and no gh on PATH: `gh missing`."""
     with pytest.MonkeyPatch.context() as patched:
         patched.setattr("shutil.which", lambda *_args, **_kwargs: None)
-        status, _, err = audit(DOC, None)
+        status, _, err = audit(DOC, None, env=env)
     assert (1, f"{TASK}: gh missing\n") == (status, err)
 
 
-def test_no_owner_is_red() -> None:
+def test_no_owner_is_red(env: support.Env) -> None:
     """The org is the environment's to name (#579)."""
-    status, _, err = audit(DOC, Org(), owner="")
+    status, _, err = audit(DOC, Org(), owner="", env=env)
     assert (1, f"{TASK}: {citations.OWNER_UNSET}\n") == (status, err)
 
 
 # The org listing is the population; a broken one resolves nothing.
-def test_a_failed_listing_is_red() -> None:
+def test_a_failed_listing_is_red(env: support.Env) -> None:
     """Gh could not list: nothing was resolved."""
-    status, _, err = audit(DOC, Org(repos=None))
+    status, _, err = audit(DOC, Org(repos=None), env=env)
     assert (
         1,
         f"{TASK}: could not enumerate org repos — nothing was resolved\n",
     ) == (status, err)
 
 
-def test_an_empty_listing_is_red() -> None:
+def test_an_empty_listing_is_red(env: support.Env) -> None:
     """Zero repositories is a broken walk, not clean docs."""
-    status, _, err = audit(DOC, Org(repos=[]))
+    status, _, err = audit(DOC, Org(repos=[]), env=env)
     assert (
         1,
         (
@@ -200,13 +200,13 @@ CITING = (
 )
 
 
-def test_every_citation_resolving_passes_with_counts() -> None:
+def test_every_citation_resolving_passes_with_counts(env: support.Env) -> None:
     """Four release citations and one run, all live: the pass line."""
     org = Org(
         tags={".github": {"v1.24.1"}, "stele": {"v0.2.2", "v0.16.0", "v0.3.0"}},
         runs={"stele/42"},
     )
-    status, out, err = audit({"docs/b.md": CITING, **DOC}, org)
+    status, out, err = audit({"docs/b.md": CITING, **DOC}, org, env=env)
     assert (status, err) == (0, "")
     assert (
         f"{TASK}: 2 doc(s) walked, 4 org release citation(s) and 1 run URL(s)"
@@ -217,10 +217,10 @@ def test_every_citation_resolving_passes_with_counts() -> None:
     assert want == asked
 
 
-def test_a_missing_tag_and_a_dead_run_are_named() -> None:
+def test_a_missing_tag_and_a_dead_run_are_named(env: support.Env) -> None:
     """Each citation that resolves to nothing is a line of its own."""
     org = Org(tags={".github": {"v1.24.1"}, "stele": {"v0.2.2", "v0.3.0"}})
-    status, out, err = audit({"docs/a.md": CITING}, org)
+    status, out, err = audit({"docs/a.md": CITING}, org, env=env)
     assert (status, out) == (1, "")
     assert (
         f"{TASK}: citations that resolve to nothing:\n"
@@ -230,30 +230,32 @@ def test_a_missing_tag_and_a_dead_run_are_named() -> None:
     ) == err
 
 
-def test_a_version_resolves_against_its_own_repository() -> None:
+def test_a_version_resolves_against_its_own_repository(env: support.Env) -> None:
     """`.github@v0.2.2` is not satisfied by stele's v0.2.2."""
     org = Org(tags={".github": set(), "stele": {"v0.2.2"}})
-    status, _, err = audit({"docs/a.md": "At `.github@v0.2.2`.\n"}, org)
+    status, _, err = audit({"docs/a.md": "At `.github@v0.2.2`.\n"}, org, env=env)
     assert status == 1
     assert "no such tag in .github: v0.2.2" in err
 
 
-def test_the_longer_name_wins_a_shared_prefix() -> None:
+def test_the_longer_name_wins_a_shared_prefix(env: support.Env) -> None:
     """`stele-lab@v1.0.0` is stele-lab's, never stele's."""
     org = Org(repos=["stele", "stele-lab"], tags={"stele-lab": {"v1.0.0"}})
-    status, out, _ = audit({"docs/a.md": "At stele-lab@v1.0.0.\n"}, org)
+    status, out, _ = audit({"docs/a.md": "At stele-lab@v1.0.0.\n"}, org, env=env)
     assert status == 0
     assert "1 org release citation(s)" in out
 
 
-def test_a_dot_in_a_name_is_literal() -> None:
+def test_a_dot_in_a_name_is_literal(env: support.Env) -> None:
     """`.github` does not match `xgithub`."""
-    status, out, _ = audit({"docs/a.md": "At xgithub@v1.0.0.\n"}, Org())
+    status, out, _ = audit({"docs/a.md": "At xgithub@v1.0.0.\n"}, Org(), env=env)
     assert status == 0
     assert "0 org release citation(s)" in out
 
 
-def run_body(files: dict[str, str]) -> subprocess.CompletedProcess[str]:
+def run_body(
+    files: dict[str, str], *, env: support.Env
+) -> subprocess.CompletedProcess[str]:
     """Run the task's body in a tree tracking `files`.
 
     Returns:
@@ -266,13 +268,13 @@ def run_body(files: dict[str, str]) -> subprocess.CompletedProcess[str]:
     with tempfile.TemporaryDirectory() as tmp:
         tree = Path(tmp) / "repo"
         tree.mkdir()
-        plant(tree, files)
+        plant(tree, files, env=env)
         as_mise = support.task_run(TASK, body)
-        env = support.env(Path(tmp) / "home", ORG_BELT_DIR=str(BELT))
+        environ = env(Path(tmp) / "home", ORG_BELT_DIR=str(BELT))
         return subprocess.run(
             as_mise.argv,
             cwd=tree,
-            env=env | as_mise.env,
+            env=environ | as_mise.env,
             capture_output=True,
             text=True,
             check=False,
@@ -280,18 +282,18 @@ def run_body(files: dict[str, str]) -> subprocess.CompletedProcess[str]:
 
 
 # The task's body: the canon guard, then the helper.
-def test_not_the_canon_skips() -> None:
+def test_not_the_canon_skips(env: support.Env) -> None:
     """No tracked security/identity.toml: skipped, exit 0."""
-    done = run_body({"README.md": "x\n"})
+    done = run_body({"README.md": "x\n"}, env=env)
     assert (
         0,
         f"{TASK}: no tracked security/identity.toml, not the canon, skipped\n",
     ) == (done.returncode, done.stdout)
 
 
-def test_the_canon_reaches_the_helper() -> None:
+def test_the_canon_reaches_the_helper(env: support.Env) -> None:
     """The canon with no docs/: the helper's missing-input red."""
-    done = run_body({"security/identity.toml": "x\n"})
+    done = run_body({"security/identity.toml": "x\n"}, env=env)
     assert done.returncode == 1
     assert (
         f"{TASK}: on the canon, and the input this leg walks is missing: docs/"

@@ -107,7 +107,12 @@ FIX_BODY = body("fix:gate-stub")
 
 
 def run(
-    script: str, tree: Path, task: str = "lint:gate-stub"
+    script: str,
+    tree: Path,
+    task: str = "lint:gate-stub",
+    *,
+    env: support.Env,
+    track: support.Track,
 ) -> subprocess.CompletedProcess[str]:
     """Run one task body in a planted tree.
 
@@ -115,26 +120,28 @@ def run(
         The finished process, stdout and stderr captured as text.
 
     """
-    env = support.env()
-    env |= {
+    environ = env()
+    environ |= {
         "ORG_BELT_DIR": str(BELT),
         "ORG_CANON_DIR": str(CANON),
         "ORG_PYTHON": sys.executable,
         "ORG_PYTHON_UNSET": "unset",
     }
-    support.track(tree)
+    track(tree)
     as_mise = support.task_run(task, script)
     return subprocess.run(
         as_mise.argv,
         cwd=tree,
-        env=env | as_mise.env,
+        env=environ | as_mise.env,
         capture_output=True,
         text=True,
         check=False,
     )
 
 
-def lint(workflow: str) -> subprocess.CompletedProcess[str]:
+def lint(
+    workflow: str, *, env: support.Env, track: support.Track
+) -> subprocess.CompletedProcess[str]:
     """Run the lint against one planted gate caller.
 
     Returns:
@@ -145,7 +152,7 @@ def lint(workflow: str) -> subprocess.CompletedProcess[str]:
         flows = Path(tmp) / ".github" / "workflows"
         flows.mkdir(parents=True)
         (flows / "gate.yml").write_text(workflow, encoding="utf-8")
-        return run(BODY, Path(tmp))
+        return run(BODY, Path(tmp), env=env, track=track)
 
 
 def canon_name() -> str:
@@ -160,7 +167,7 @@ def canon_name() -> str:
     )
     return subprocess.run(
         [BASH, "-euo", "pipefail", "-c", script],
-        env=support.env(ORG_CANON_DIR=str(CANON)),
+        env=support.environment(ORG_CANON_DIR=str(CANON)),
         capture_output=True,
         text=True,
         check=True,
@@ -212,22 +219,22 @@ def planted(old: str, new: str) -> str:
 
 
 # The shapes the lint must pass.
-def assert_ok(workflow: str) -> None:
+def assert_ok(workflow: str, *, env: support.Env, track: support.Track) -> None:
     """Assert a clean pass with the ok line and nothing on stderr."""
-    done = lint(workflow)
+    done = lint(workflow, env=env, track=track)
     assert done.returncode == 0, done.stderr
     assert done.stdout == "lint:gate-stub: ok\n"
     assert done.stderr == ""
 
 
-def test_the_canons_stub_passes() -> None:
+def test_the_canons_stub_passes(env: support.Env, track: support.Track) -> None:
     """The template every repository copies is clean."""
-    assert_ok(STUB)
+    assert_ok(STUB, env=env, track=track)
 
 
-def test_the_canons_own_gate_passes() -> None:
+def test_the_canons_own_gate_passes(env: support.Env, track: support.Track) -> None:
     """The canon's self-applied gate is clean."""
-    assert_ok(GATE)
+    assert_ok(GATE, env=env, track=track)
 
 
 def test_the_canons_own_gate_groups_a_push_by_its_commit() -> None:
@@ -240,67 +247,83 @@ def test_the_canons_own_gate_groups_a_push_by_its_commit() -> None:
     assert "github.sha" in GROUP
 
 
-def test_a_trailing_comment_on_cancel_passes() -> None:
+def test_a_trailing_comment_on_cancel_passes(
+    env: support.Env, track: support.Track
+) -> None:
     """A comment after the wanted line does not change it."""
-    assert_ok(planted(CANCEL, CANCEL.rstrip("\n") + " # see #1195\n"))
+    assert_ok(
+        planted(CANCEL, CANCEL.rstrip("\n") + " # see #1195\n"), env=env, track=track
+    )
 
 
-def test_a_workflow_that_is_not_a_gate_caller_is_not_held() -> None:
+def test_a_workflow_that_is_not_a_gate_caller_is_not_held(
+    env: support.Env, track: support.Track
+) -> None:
     """Only a caller of ci.yml owes the group."""
     other = planted(
         "uses: monumental-archive/.github/.github/workflows/ci.yml@",
         "uses: monumental-archive/.github/.github/workflows/slsa.yml@",
     )
-    assert_ok(other.replace(GROUP, OLD_GROUP).replace(CANCEL, OLD_CANCEL))
+    assert_ok(
+        other.replace(GROUP, OLD_GROUP).replace(CANCEL, OLD_CANCEL),
+        env=env,
+        track=track,
+    )
 
 
 # Each planted defect reds with the stated message.
-def assert_red(workflow: str) -> None:
+def assert_red(workflow: str, *, env: support.Env, track: support.Track) -> None:
     """Assert exit 1 and exactly the concurrency message on stderr."""
-    done = lint(workflow)
+    done = lint(workflow, env=env, track=track)
     assert done.returncode == 1, done.stdout
     assert done.stderr == MESSAGE
     assert done.stdout == ""
 
 
-def test_the_pre_1195_stub_is_red() -> None:
+def test_the_pre_1195_stub_is_red(env: support.Env, track: support.Track) -> None:
     """The stub every repository carried before #1195."""
-    assert_red(planted(GROUP, OLD_GROUP).replace(CANCEL, OLD_CANCEL))
-
-
-def test_the_pre_1617_group_is_red() -> None:
-    """Every push to the default branch shares the ref's one group."""
-    assert_red(planted(GROUP, PRE_1617_GROUP))
-
-
-def test_a_group_on_the_ref_alone_is_red() -> None:
-    """The shared group alone, cancel already right."""
-    assert_red(planted(GROUP, OLD_GROUP))
-
-
-def test_cancel_true_is_red() -> None:
-    """A push to main may still be cancelled."""
-    assert_red(planted(CANCEL, OLD_CANCEL))
-
-
-def test_cancel_false_is_red() -> None:
-    """Five pushes to a pull request would run five gates."""
-    assert_red(planted(CANCEL, "  cancel-in-progress: false\n"))
-
-
-def test_a_missing_cancel_line_is_red() -> None:
-    """Absent is not the expression."""
-    assert_red(planted(CANCEL, ""))
-
-
-def test_a_missing_concurrency_block_is_red() -> None:
-    """No group at all is not the group."""
     assert_red(
-        planted("concurrency:\n" + GROUP + CANCEL, ""),
+        planted(GROUP, OLD_GROUP).replace(CANCEL, OLD_CANCEL), env=env, track=track
     )
 
 
-def test_a_second_cancel_line_that_disagrees_is_red() -> None:
+def test_the_pre_1617_group_is_red(env: support.Env, track: support.Track) -> None:
+    """Every push to the default branch shares the ref's one group."""
+    assert_red(planted(GROUP, PRE_1617_GROUP), env=env, track=track)
+
+
+def test_a_group_on_the_ref_alone_is_red(
+    env: support.Env, track: support.Track
+) -> None:
+    """The shared group alone, cancel already right."""
+    assert_red(planted(GROUP, OLD_GROUP), env=env, track=track)
+
+
+def test_cancel_true_is_red(env: support.Env, track: support.Track) -> None:
+    """A push to main may still be cancelled."""
+    assert_red(planted(CANCEL, OLD_CANCEL), env=env, track=track)
+
+
+def test_cancel_false_is_red(env: support.Env, track: support.Track) -> None:
+    """Five pushes to a pull request would run five gates."""
+    assert_red(planted(CANCEL, "  cancel-in-progress: false\n"), env=env, track=track)
+
+
+def test_a_missing_cancel_line_is_red(env: support.Env, track: support.Track) -> None:
+    """Absent is not the expression."""
+    assert_red(planted(CANCEL, ""), env=env, track=track)
+
+
+def test_a_missing_concurrency_block_is_red(
+    env: support.Env, track: support.Track
+) -> None:
+    """No group at all is not the group."""
+    assert_red(planted("concurrency:\n" + GROUP + CANCEL, ""), env=env, track=track)
+
+
+def test_a_second_cancel_line_that_disagrees_is_red(
+    env: support.Env, track: support.Track
+) -> None:
     """One right line does not excuse a wrong one."""
     assert_red(
         STUB.replace(
@@ -310,11 +333,19 @@ def test_a_second_cancel_line_that_disagrees_is_red() -> None:
             "      cancel-in-progress: true\n"
             "    uses: monumental-archive",
         ),
+        env=env,
+        track=track,
     )
 
 
 # fix:gate-stub, the lint's write-mode sibling (#1617).
-def assert_rewritten(workflow: str, *, capfd: pytest.CaptureFixture[str]) -> None:
+def assert_rewritten(
+    workflow: str,
+    *,
+    capfd: pytest.CaptureFixture[str],
+    env: support.Env,
+    track: support.Track,
+) -> None:
     """Assert the fixer makes the stub the canon's, which the lint passes."""
     status, out, err, after = fixed(workflow, capfd=capfd)
     assert status == 0, err
@@ -323,39 +354,48 @@ def assert_rewritten(workflow: str, *, capfd: pytest.CaptureFixture[str]) -> Non
         " .github/workflows/gate.yml\nfix:gate-stub: ok\n"
     )
     assert after == STUB
-    assert lint(after).returncode == 0
+    assert lint(after, env=env, track=track).returncode == 0
 
 
-def test_the_task_body_hands_the_helper_the_canon() -> None:
+def test_the_task_body_hands_the_helper_the_canon(
+    env: support.Env, track: support.Track
+) -> None:
     """fix:gate-stub's body names the canon from identity.sh and fixes."""
     with tempfile.TemporaryDirectory() as tmp:
         flows = Path(tmp) / ".github" / "workflows"
         flows.mkdir(parents=True)
         caller = flows / "gate.yml"
         caller.write_text(planted(GROUP, PRE_1617_GROUP), encoding="utf-8")
-        done = run(FIX_BODY, Path(tmp), "fix:gate-stub")
+        done = run(FIX_BODY, Path(tmp), "fix:gate-stub", env=env, track=track)
         after = caller.read_text(encoding="utf-8")
     assert done.returncode == 0, done.stderr
     assert after == STUB
 
 
 def test_the_pre_1617_stub_is_rewritten_and_then_passes(
-    capfd: pytest.CaptureFixture[str],
+    capfd: pytest.CaptureFixture[str], env: support.Env, track: support.Track
 ) -> None:
     """The stub every repository carries today becomes the canon's."""
-    assert_rewritten(planted(GROUP, PRE_1617_GROUP), capfd=capfd)
+    assert_rewritten(planted(GROUP, PRE_1617_GROUP), capfd=capfd, env=env, track=track)
 
 
 def test_the_pre_1195_stub_is_rewritten_and_then_passes(
-    capfd: pytest.CaptureFixture[str],
+    capfd: pytest.CaptureFixture[str], env: support.Env, track: support.Track
 ) -> None:
     """Both lines wrong: both rewritten, nothing else touched."""
-    assert_rewritten(planted(GROUP, OLD_GROUP).replace(CANCEL, OLD_CANCEL), capfd=capfd)
+    assert_rewritten(
+        planted(GROUP, OLD_GROUP).replace(CANCEL, OLD_CANCEL),
+        capfd=capfd,
+        env=env,
+        track=track,
+    )
 
 
-def test_a_missing_cancel_line_is_written(capfd: pytest.CaptureFixture[str]) -> None:
+def test_a_missing_cancel_line_is_written(
+    capfd: pytest.CaptureFixture[str], env: support.Env, track: support.Track
+) -> None:
     """A block without the cancel line gets it at the block's end."""
-    assert_rewritten(planted(CANCEL, ""), capfd=capfd)
+    assert_rewritten(planted(CANCEL, ""), capfd=capfd, env=env, track=track)
 
 
 def test_a_trailing_comment_is_kept(capfd: pytest.CaptureFixture[str]) -> None:

@@ -53,7 +53,9 @@ def body() -> str:
     return decoded.as_str(task["run"], "the task's run")
 
 
-def run(tree: Path, home: Path) -> subprocess.CompletedProcess[str]:
+def run(
+    tree: Path, home: Path, *, env: support.Env
+) -> subprocess.CompletedProcess[str]:
     """Run the lint's body in a tree, with the belt as ORG_BELT_DIR.
 
     Returns:
@@ -64,14 +66,14 @@ def run(tree: Path, home: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         as_mise.argv,
         cwd=tree,
-        env=support.env(home, ORG_BELT_DIR=str(BELT)) | as_mise.env,
+        env=env(home, ORG_BELT_DIR=str(BELT)) | as_mise.env,
         capture_output=True,
         text=True,
         check=False,
     )
 
 
-def lint(files: list[str]) -> subprocess.CompletedProcess[str]:
+def lint(files: list[str], *, env: support.Env) -> subprocess.CompletedProcess[str]:
     """Plant a tree tracking files and run the lint in it.
 
     Returns:
@@ -82,15 +84,15 @@ def lint(files: list[str]) -> subprocess.CompletedProcess[str]:
         root = Path(tmp)
         tree = root / "repo"
         tree.mkdir()
-        env = support.env(root / "home")
+        environ = env(root / "home")
         (tree / "README.md").write_text("x\n", encoding="utf-8")
         for name in files:
             path = tree / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("x\n", encoding="utf-8")
-        subprocess.run([GIT, "init", "-q"], cwd=tree, env=env, check=True)
-        subprocess.run([GIT, "add", "."], cwd=tree, env=env, check=True)
-        return run(tree, root / "home")
+        subprocess.run([GIT, "init", "-q"], cwd=tree, env=environ, check=True)
+        subprocess.run([GIT, "add", "."], cwd=tree, env=environ, check=True)
+        return run(tree, root / "home", env=env)
 
 
 def guarded(text: str) -> str | None:
@@ -145,9 +147,9 @@ def drift(texts: dict[str, str]) -> list[str]:
 
 
 # A shipped language tracks its mutation file and a floor.
-def test_rust_without_its_mutation_file_is_red() -> None:
+def test_rust_without_its_mutation_file_is_red(env: support.Env) -> None:
     """`Cargo.toml` with no `.cargo/mutants.toml`: red, naming all three."""
-    done = lint(["Cargo.toml", "src/lib.rs", FLOOR])
+    done = lint(["Cargo.toml", "src/lib.rs", FLOOR], env=env)
     assert done.returncode == 1, done.stdout
     assert done.stdout == ""
     assert (
@@ -156,16 +158,16 @@ def test_rust_without_its_mutation_file_is_red() -> None:
     ) == done.stderr
 
 
-def test_go_without_a_floor_is_red() -> None:
+def test_go_without_a_floor_is_red(env: support.Env) -> None:
     """`go.mod` and `.gomuignore` with no floor: red, naming `coverage:adopt`."""
-    done = lint(["go.mod", ".gomuignore", "main.go"])
+    done = lint(["go.mod", ".gomuignore", "main.go"], env=env)
     assert done.returncode == 1, done.stdout
     assert f"{TASK}: ships Go (go.mod) but tracks no {FLOOR} — {ADOPT}\n" == done.stderr
 
 
-def test_each_missing_file_is_its_own_line() -> None:
+def test_each_missing_file_is_its_own_line(env: support.Env) -> None:
     """Two languages, nothing adopted: a line per mutation file, one floor line."""
-    done = lint(["crates/b/Cargo.toml", "Cargo.toml", "tools/x.py"])
+    done = lint(["crates/b/Cargo.toml", "Cargo.toml", "tools/x.py"], env=env)
     assert done.returncode == 1, done.stdout
     assert (
         f"{TASK}: ships Rust (Cargo.toml) but tracks no"
@@ -177,25 +179,25 @@ def test_each_missing_file_is_its_own_line() -> None:
     ) == done.stderr
 
 
-def test_python_tests_alone_ship_no_python() -> None:
+def test_python_tests_alone_ship_no_python(env: support.Env) -> None:
     """A tree whose only `.py` is a test, property or conftest is green."""
-    done = lint(["tests/test_x.py", "tests/prop_x.py", "tests/conftest.py"])
+    done = lint(["tests/test_x.py", "tests/prop_x.py", "tests/conftest.py"], env=env)
     assert done.returncode == 0, done.stderr
     assert done.stdout == SKIPPED
 
 
-def test_python_without_a_mutmut_section_is_red() -> None:
+def test_python_without_a_mutmut_section_is_red(env: support.Env) -> None:
     """One non-test `.py` is shipped Python: red without `setup.cfg`."""
-    done = lint(["tools/x.py", FLOOR])
+    done = lint(["tools/x.py", FLOOR], env=env)
     assert done.returncode == 1, done.stdout
     assert (
         f"{TASK}: ships Python (tools/x.py) but tracks no setup.cfg — {MUTATION}\n"
     ) == done.stderr
 
 
-def test_typescript_without_stryker_is_red() -> None:
+def test_typescript_without_stryker_is_red(env: support.Env) -> None:
     """A TypeScript source with no `stryker.config.json`: red."""
-    done = lint(["src/a.ts", FLOOR])
+    done = lint(["src/a.ts", FLOOR], env=env)
     assert done.returncode == 1, done.stdout
     assert (
         f"{TASK}: ships TypeScript (src/a.ts) but tracks no"
@@ -203,24 +205,26 @@ def test_typescript_without_stryker_is_red() -> None:
     ) == done.stderr
 
 
-def test_typescript_declarations_and_tests_ship_nothing() -> None:
+def test_typescript_declarations_and_tests_ship_nothing(env: support.Env) -> None:
     """Declarations, tests and specs alone are green."""
-    done = lint(["src/a.d.ts", "src/a.test.ts", "src/b.spec.tsx", "src/c.d.mts"])
+    done = lint(
+        ["src/a.d.ts", "src/a.test.ts", "src/b.spec.tsx", "src/c.d.mts"], env=env
+    )
     assert done.returncode == 0, done.stderr
     assert done.stdout == SKIPPED
 
 
 @pytest.mark.parametrize("files", [["fuzz/Cargo.toml"], ["vendor/dep/Cargo.toml"]])
-def test_fuzz_and_vendored_crates_ship_nothing(files: object) -> None:
+def test_fuzz_and_vendored_crates_ship_nothing(files: object, env: support.Env) -> None:
     """A `Cargo.toml` only under `fuzz/` or `vendor/` is green."""
-    done = lint(files)
+    done = lint(files, env=env)
     assert done.returncode == 0, done.stderr
     assert done.stdout == SKIPPED
 
 
-def test_vendored_python_and_typescript_ship_nothing() -> None:
+def test_vendored_python_and_typescript_ship_nothing(env: support.Env) -> None:
     """vendor/ is someone else's code, as in every belt lint."""
-    done = lint(["vendor/lib/x.py", "vendor/lib/a.ts"])
+    done = lint(["vendor/lib/x.py", "vendor/lib/a.ts"], env=env)
     assert done.returncode == 0, done.stderr
     assert done.stdout == SKIPPED
 
@@ -234,24 +238,26 @@ def test_vendored_python_and_typescript_ship_nothing() -> None:
         ("TypeScript", ["src/a.ts", "stryker.config.json"]),
     ],
 )
-def test_an_adopted_tree_is_green_in_each_language(name: object, files: object) -> None:
+def test_an_adopted_tree_is_green_in_each_language(
+    name: object, files: object, env: support.Env
+) -> None:
     """Each language with its mutation file and a floor is green."""
-    done = lint([*files, FLOOR])
+    done = lint([*files, FLOOR], env=env)
     assert done.returncode == 0, done.stderr
     assert f"{TASK}: ok ({name} adopted)\n" == done.stdout
 
 
-def test_a_nested_go_mod_is_not_shipped_go() -> None:
+def test_a_nested_go_mod_is_not_shipped_go(env: support.Env) -> None:
     """Go ships from the root `go.mod`, as the Go leg reads it."""
-    done = lint(["tools/go.mod"])
+    done = lint(["tools/go.mod"], env=env)
     assert done.returncode == 0, done.stderr
     assert done.stdout == SKIPPED
 
 
-def test_the_canon_tree_is_green() -> None:
+def test_the_canon_tree_is_green(env: support.Env) -> None:
     """The canon's own tracked tree passes."""
     with tempfile.TemporaryDirectory() as tmp:
-        done = run(CANON, Path(tmp) / "home")
+        done = run(CANON, Path(tmp) / "home", env=env)
     assert done.returncode == 0, done.stderr
     assert f"{TASK}: ok (Python adopted)\n" == done.stdout
 

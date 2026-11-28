@@ -458,7 +458,7 @@ READ: dict[str, dict[str, object]] = {}
 PARSED: dict[str, dict[str, object]] = {}
 
 
-def code(text: str) -> str:
+def code(text: str, *, env: support.Env) -> str:
     """Reduce shell to the text that can call a tool (#1785).
 
     What is prose is read from shfmt's syntax tree, never guessed by
@@ -484,7 +484,7 @@ def code(text: str) -> str:
         input=source,
         capture_output=True,
         check=False,
-        env=support.env(),
+        env=env(),
     )
     if parsed.returncode:
         why = parsed.stderr.decode("utf-8", "replace").strip()
@@ -632,7 +632,7 @@ def prose(node: object) -> Iterator[tuple[int, int]]:
         yield from prose(value)
 
 
-def followed(module: Path, seen: set[str]) -> str:
+def followed(module: Path, seen: set[str], *, env: support.Env) -> str:
     """Follow a belt module: what it runs, and the belt modules it imports.
 
     A helper's own text is never scanned (#1903): each command, as one
@@ -654,15 +654,15 @@ def followed(module: Path, seen: set[str]) -> str:
     source = module.read_text("utf-8")
     runs = python_code(source, rel)
     out = [f"{c};" for c in sorted(runs.commands)]
-    out.append(scripts("\n".join(runs.scripts + runs.tasks), seen))
+    out.append(scripts("\n".join(runs.scripts + runs.tasks), seen, env=env))
     out += [
-        followed(imported, seen)
+        followed(imported, seen, env=env)
         for imported in support.belt_modules(source, CANON / "belt")
     ]
     return "\n".join(out)
 
 
-def scripts(text: str, seen: set[str]) -> str:
+def scripts(text: str, seen: set[str], *, env: support.Env) -> str:
     """Follow the canon scripts, belt commands and belt tasks a body runs.
 
     Returns:
@@ -678,7 +678,7 @@ def scripts(text: str, seen: set[str]) -> str:
     for command in support.launched(text):
         module = support.command_module(command, CANON / "belt")
         if module is not None:
-            out.append(followed(module, seen))
+            out.append(followed(module, seen, env=env))
     for name in [m.group() for m in re.finditer(r"[\w-]+\.sh\b", text)]:
         if name in seen or name in PRE_INSTALL:
             continue
@@ -686,8 +686,8 @@ def scripts(text: str, seen: set[str]) -> str:
             path = CANON / home / name
             if path.is_file():
                 seen.add(name)
-                body = code(path.read_text("utf-8"))
-                out += [body, scripts(body, seen)]
+                body = code(path.read_text("utf-8"), env=env)
+                out += [body, scripts(body, seen, env=env)]
     # A task is reached by name, however it is run: `mise run audit:deny`
     # and `for task in audit:deny audit:go-vulns; do mise run "${task}"`.
     for task in [t for t in tasks if ":" in t and word(t, text)]:
@@ -696,13 +696,13 @@ def scripts(text: str, seen: set[str]) -> str:
         seen.add(task)
         run = decoded.as_object(tasks[task], f"[tasks.{task}]")["run"]
         if isinstance(run, str):
-            body = code(run)
+            body = code(run, env=env)
         elif decoded.is_strings(run):
-            body = code("\n".join(run))
+            body = code("\n".join(run), env=env)
         else:
             msg = f"[tasks.{task}] run is neither a string nor strings"
             raise decoded.UndecodableError(msg)
-        out += [body, scripts(body, seen)]
+        out += [body, scripts(body, seen, env=env)]
     return "\n".join(out)
 
 
@@ -757,7 +757,7 @@ def carries_belt(workflow: str, job: Job) -> bool:
     return "MISE_GLOBAL_CONFIG_FILE" in envs(job) or not called
 
 
-def calls(job: Job, *, carries: bool) -> tuple[set[str], set[str]]:
+def calls(job: Job, *, carries: bool, env: support.Env) -> tuple[set[str], set[str]]:
     """Name every tool a job's run steps call.
 
     Returns:
@@ -765,8 +765,8 @@ def calls(job: Job, *, carries: bool) -> tuple[set[str], set[str]]:
         tool's name is then the runner's copy) and the caller tools.
 
     """
-    body = "\n".join(code(field(s, "run")) for s in workflow_yaml.steps(job))
-    body += "\n" + scripts(body, set())
+    body = "\n".join(code(field(s, "run"), env=env) for s in workflow_yaml.steps(job))
+    body += "\n" + scripts(body, set(), env=env)
     commands = {m.group(1) for m in CARGO_SUB.finditer(body)}
     commands = {f"cargo-{c}" for c in commands}
     for pattern, execs in [*STELE_EXECS.items(), *PROVISIONS.items()]:
@@ -780,7 +780,7 @@ def calls(job: Job, *, carries: bool) -> tuple[set[str], set[str]]:
     return keys, caller
 
 
-def uninstalled(workflow: str, job_id: str, job: Job) -> list[str]:
+def uninstalled(workflow: str, job_id: str, job: Job, *, env: support.Env) -> list[str]:
     """Name each tool a job calls and does not install.
 
     Returns:
@@ -788,7 +788,9 @@ def uninstalled(workflow: str, job_id: str, job: Job) -> list[str]:
 
     """
     keys, needed, optional = installs(job)
-    called_keys, called_caller = calls(job, carries=carries_belt(workflow, job))
+    called_keys, called_caller = calls(
+        job, carries=carries_belt(workflow, job), env=env
+    )
     missing = sorted(called_keys - set(keys)) + sorted(
         called_caller - set(needed) - set(optional)
     )
@@ -962,9 +964,11 @@ def test_every_belt_key_is_a_belt_key() -> None:
 @pytest.mark.parametrize(
     ("workflow", "job_id"), [j for j in IN_SCOPE if j not in WHOLE_CONFIG]
 )
-def test_every_job_installs_what_it_calls(workflow: object, job_id: object) -> None:
+def test_every_job_installs_what_it_calls(
+    workflow: object, job_id: object, env: support.Env
+) -> None:
     """The real jobs against their real steps and scripts."""
-    assert strings() == uninstalled(workflow, job_id, load(workflow)[job_id])
+    assert strings() == uninstalled(workflow, job_id, load(workflow)[job_id], env=env)
 
 
 def test_the_tag_job_installs_three_belt_tools() -> None:
@@ -976,25 +980,25 @@ def test_the_tag_job_installs_three_belt_tools() -> None:
     )
 
 
-def test_a_dropped_install_is_named() -> None:
+def test_a_dropped_install_is_named(env: support.Env) -> None:
     """Planted: the tag job without gitsign, which signs the tag."""
     job = planted_job("release.yml", "tag", " aqua:sigstore/gitsign")
     assert strings(
         "release.yml tag: calls aqua:sigstore/gitsign and does not install it"
-    ) == uninstalled("release.yml", "tag", job)
+    ) == uninstalled("release.yml", "tag", job, env=env)
 
 
-def test_a_dropped_caller_input_is_named() -> None:
+def test_a_dropped_caller_input_is_named(env: support.Env) -> None:
     """Planted: the binary build without cargo-auditable."""
     job = planted_job(
         "build-rust-binary.yml", "build", "rust cargo-auditable >>", "rust >>"
     )
     assert strings(
         "build-rust-binary.yml build: calls cargo-auditable and does not install it"
-    ) == uninstalled("build-rust-binary.yml", "build", job)
+    ) == uninstalled("build-rust-binary.yml", "build", job, env=env)
 
 
-def test_a_new_call_is_named() -> None:
+def test_a_new_call_is_named(env: support.Env) -> None:
     """Planted: a step starts calling a belt tool the job lacks."""
     job = appended(
         load("attach-release.yml")["attach"],
@@ -1002,10 +1006,10 @@ def test_a_new_call_is_named() -> None:
     )
     assert strings(
         "attach-release.yml attach: calls aqua:sigstore/cosign and does not install it"
-    ) == uninstalled("attach-release.yml", "attach", job)
+    ) == uninstalled("attach-release.yml", "attach", job, env=env)
 
 
-def test_a_new_indirect_call_is_named() -> None:
+def test_a_new_indirect_call_is_named(env: support.Env) -> None:
     """Planted: stele's VEX derivation execs osv-scanner."""
     job = appended(
         load("attach-release.yml")["attach"],
@@ -1014,25 +1018,25 @@ def test_a_new_indirect_call_is_named() -> None:
     assert strings(
         "attach-release.yml attach: calls aqua:google/osv-scanner and does"
         " not install it"
-    ) == uninstalled("attach-release.yml", "attach", job)
+    ) == uninstalled("attach-release.yml", "attach", job, env=env)
 
 
-def test_a_tool_named_only_in_a_comment_is_not_a_call() -> None:
+def test_a_tool_named_only_in_a_comment_is_not_a_call(env: support.Env) -> None:
     """Prose about a tool installs nothing and needs nothing."""
     job = appended(
         load("attach-release.yml")["attach"],
         {"name": "Planted", "run": "# cosign could verify this one day\ntrue\n"},
     )
-    assert strings() == uninstalled("attach-release.yml", "attach", job)
+    assert strings() == uninstalled("attach-release.yml", "attach", job, env=env)
 
 
 # The gate's pgrx legs install what they call (#1408).
 @pytest.mark.parametrize(("workflow", "job_id"), GATE_LISTS)
 def test_every_gate_list_installs_what_it_calls(
-    workflow: object, job_id: object
+    workflow: object, job_id: object, env: support.Env
 ) -> None:
     """The real jobs against pgrx-test.sh and pgrx-env.sh."""
-    assert strings() == uninstalled(workflow, job_id, load(workflow)[job_id])
+    assert strings() == uninstalled(workflow, job_id, load(workflow)[job_id], env=env)
 
 
 @pytest.mark.parametrize(("workflow", "job_id"), GATE_LISTS)
@@ -1051,7 +1055,9 @@ def test_a_leg_that_lets_mise_run_install_is_named() -> None:
     ) == auto_installs("ci.yml", "pgrx", job)
 
 
-def test_a_task_named_in_a_followed_scripts_comment_is_not_reached() -> None:
+def test_a_task_named_in_a_followed_scripts_comment_is_not_reached(
+    env: support.Env,
+) -> None:
     """The reader follows a script's code, never its comments (#1408).
 
     pgrx-env.sh's comments name `coverage:check` and its siblings.
@@ -1063,7 +1069,9 @@ def test_a_task_named_in_a_followed_scripts_comment_is_not_reached() -> None:
     job: Job = {
         "steps": [{"name": "Planted", "run": '. "${ORG_BELT_DIR}/pgrx-env.sh"'}]
     }
-    assert ({"jq"}, {"rust", "postgresql-binaries"}) == calls(job, carries=True)
+    assert ({"jq"}, {"rust", "postgresql-binaries"}) == calls(
+        job, carries=True, env=env
+    )
 
 
 def test_a_leg_installs_rust_cargo_pgrx_and_its_postgres() -> None:
@@ -1075,15 +1083,15 @@ def test_a_leg_installs_rust_cargo_pgrx_and_its_postgres() -> None:
     )
 
 
-def test_a_leg_that_drops_cargo_pgrx_is_named() -> None:
+def test_a_leg_that_drops_cargo_pgrx_is_named(env: support.Env) -> None:
     """Planted: cargo-pgrx gone from the leg, which runs `cargo pgrx`."""
     job = planted_job("ci.yml", "pgrx", "rust cargo-pgrx >>", "rust >>")
     assert strings(
         "ci.yml pgrx: calls cargo-pgrx and does not install it"
-    ) == uninstalled("ci.yml", "pgrx", job)
+    ) == uninstalled("ci.yml", "pgrx", job, env=env)
 
 
-def test_a_leg_that_drops_its_postgres_is_named() -> None:
+def test_a_leg_that_drops_its_postgres_is_named(env: support.Env) -> None:
     """Planted: no `--major`, so no Postgres for pgrx_postgres.py."""
     job = planted_job(
         "ci.yml",
@@ -1092,10 +1100,10 @@ def test_a_leg_that_drops_its_postgres_is_named() -> None:
     )
     assert strings(
         "ci.yml pgrx: calls postgresql-binaries and does not install it"
-    ) == uninstalled("ci.yml", "pgrx", job)
+    ) == uninstalled("ci.yml", "pgrx", job, env=env)
 
 
-def test_a_new_call_in_a_leg_is_named() -> None:
+def test_a_new_call_in_a_leg_is_named(env: support.Env) -> None:
     """Planted: a leg starts building the fuzz targets."""
     job = appended(
         load("ci.yml")["pgrx"],
@@ -1103,20 +1111,20 @@ def test_a_new_call_in_a_leg_is_named() -> None:
     )
     assert strings(
         "ci.yml pgrx: calls cargo-fuzz and does not install it"
-    ) == uninstalled("ci.yml", "pgrx", job)
+    ) == uninstalled("ci.yml", "pgrx", job, env=env)
 
 
-def test_a_new_belt_call_in_a_leg_is_named() -> None:
+def test_a_new_belt_call_in_a_leg_is_named(env: support.Env) -> None:
     """Planted: a leg starts running a belt linter."""
     job = appended(
         load("ci.yml")["pgrx"], {"name": "Planted", "run": "typos --format brief"}
     )
     assert strings("ci.yml pgrx: calls typos and does not install it") == uninstalled(
-        "ci.yml", "pgrx", job
+        "ci.yml", "pgrx", job, env=env
     )
 
 
-def measures(workflow: str, job_id: str, job: Job) -> list[str]:
+def measures(workflow: str, job_id: str, job: Job, *, env: support.Env) -> list[str]:
     """Name every way a job that must measure nothing installs or runs a tool.
 
     Returns:
@@ -1134,7 +1142,7 @@ def measures(workflow: str, job_id: str, job: Job) -> list[str]:
         found.append(f"{workflow} {job_id}: installs the caller's build inputs")
     if re.search(r"(?<![\w-])mise\s+run\b", body):
         found.append(f"{workflow} {job_id}: runs a mise task")
-    keys, caller = calls(job, carries=True)
+    keys, caller = calls(job, carries=True, env=env)
     found += [f"{workflow} {job_id}: calls {t}" for t in sorted(keys | caller)]
     return found
 
@@ -1234,13 +1242,13 @@ def test_the_figures_step_follows_the_gate() -> None:
 
 
 # The coverage upload installs no measurement tool (#1528).
-def test_the_upload_installs_and_runs_nothing() -> None:
+def test_the_upload_installs_and_runs_nothing(env: support.Env) -> None:
     """The real job: download, list, hand to Codecov."""
     for workflow, job_id in GATE_NONE.keys():
-        assert strings() == measures(workflow, job_id, load(workflow)[job_id])
+        assert strings() == measures(workflow, job_id, load(workflow)[job_id], env=env)
 
 
-def test_the_upload_that_hung_on_main_is_named() -> None:
+def test_the_upload_that_hung_on_main_is_named(env: support.Env) -> None:
     """Planted: the job as it was, re-measuring with five tools."""
     job = appended(
         load("ci.yml")["coverage-upload"],
@@ -1255,7 +1263,7 @@ def test_the_upload_that_hung_on_main_is_named() -> None:
         },
         {"name": "Generate the report", "run": "report=$(mise run coverage:check)"},
     )
-    found = measures("ci.yml", "coverage-upload", job)
+    found = measures("ci.yml", "coverage-upload", job, env=env)
     assert (
         strings(
             "ci.yml coverage-upload: installs tools with jdx/mise-action",
@@ -1268,7 +1276,7 @@ def test_the_upload_that_hung_on_main_is_named() -> None:
         assert f"ci.yml coverage-upload: calls {tool}" in found
 
 
-def test_a_measuring_call_in_the_upload_is_named() -> None:
+def test_a_measuring_call_in_the_upload_is_named(env: support.Env) -> None:
     """Planted: the upload starts rendering a report itself."""
     job = appended(
         load("ci.yml")["coverage-upload"],
@@ -1280,7 +1288,7 @@ def test_a_measuring_call_in_the_upload_is_named() -> None:
     assert strings(
         "ci.yml coverage-upload: calls aqua:taiki-e/cargo-llvm-cov",
         "ci.yml coverage-upload: calls rust",
-    ) == measures("ci.yml", "coverage-upload", job)
+    ) == measures("ci.yml", "coverage-upload", job, env=env)
 
 
 def test_no_gate_job_is_both_listed_and_measureless() -> None:
@@ -1339,12 +1347,12 @@ def test_a_job_without_the_setting_is_named() -> None:
     ) == task_auto_install("publish.yml", "sbom", job)
 
 
-def test_a_tool_only_a_task_calls_must_be_listed() -> None:
+def test_a_tool_only_a_task_calls_must_be_listed(env: support.Env) -> None:
     """Planted: cargo-deny is reached only through `mise run audit:deny`."""
     job = planted_job("publish.yml", "sbom", " aqua:EmbarkStudios/cargo-deny")
     assert strings(
         "publish.yml sbom: calls aqua:EmbarkStudios/cargo-deny and does not install it"
-    ) == uninstalled("publish.yml", "sbom", job)
+    ) == uninstalled("publish.yml", "sbom", job, env=env)
 
 
 # A Python helper is read through its syntax tree alone (#1903).
@@ -1382,17 +1390,21 @@ def test_an_unreadable_helper_fails_by_name() -> None:
         python_code('import subprocess\nx = """unterminated\n', "release/broken.py")
 
 
-def test_a_tool_in_a_string_is_not_a_call() -> None:
+def test_a_tool_in_a_string_is_not_a_call(
+    canon: support.Canon, env: support.Env
+) -> None:
     """Measured on #1895: a message naming a belt tool. Red on main."""
     helper = (
         "import subprocess\n"
         'print("a ruff check must name it")\n'
         'subprocess.run(["git", "status"], check=True)\n'
     )
-    assert strings() == planted_uninstalled(helper)
+    assert strings() == planted_uninstalled(helper, canon=canon, env=env)
 
 
-def test_a_function_or_variable_name_is_not_a_call() -> None:
+def test_a_function_or_variable_name_is_not_a_call(
+    canon: support.Canon, env: support.Env
+) -> None:
     """`def ruff()` and `coverage = 1` read code. Red on main."""
     helper = (
         "import subprocess\n\n\n"
@@ -1400,16 +1412,20 @@ def test_a_function_or_variable_name_is_not_a_call() -> None:
         "coverage = 1\n"
         'subprocess.run(["git", "status"], check=True)\n'
     )
-    assert strings() == planted_uninstalled(helper)
+    assert strings() == planted_uninstalled(helper, canon=canon, env=env)
 
 
 @pytest.mark.parametrize("line", ["import ruff.api", "from ruff import api"])
-def test_an_imported_tool_module_is_a_call(line: object) -> None:
+def test_an_imported_tool_module_is_a_call(
+    line: object, canon: support.Canon, env: support.Env
+) -> None:
     """A helper that imports a belt tool's module needs it installed."""
-    assert planted_uninstalled(f"{line}\n") == PLANTED_RED
+    assert planted_uninstalled(f"{line}\n", canon=canon, env=env) == PLANTED_RED
 
 
-def test_a_script_handed_to_script_is_followed() -> None:
+def test_a_script_handed_to_script_is_followed(
+    canon: support.Canon, env: support.Env
+) -> None:
     """`script()` reaches a script; a string or a docstring does not (#2037).
 
     A file name in a constant, a message or a table runs nothing:
@@ -1425,17 +1441,21 @@ def test_a_script_handed_to_script_is_followed() -> None:
         ('import sys\nNEXT = "planted-next.sh"\n', strings()),
         ('"""Runs planted-next.sh, once."""\n', strings()),
     ):
-        assert red == planted_uninstalled(helper, {"release/planted-next.sh": nxt})
+        assert red == planted_uninstalled(
+            helper, {"release/planted-next.sh": nxt}, canon=canon, env=env
+        )
 
 
-def test_a_task_in_an_argv_is_followed() -> None:
+def test_a_task_in_an_argv_is_followed(canon: support.Canon, env: support.Env) -> None:
     """A task a subprocess call runs is reached; one a message names is not."""
     git = 'subprocess.run(["git", "status"], check=True)\n'
     for helper, red in (
         ('subprocess.run(["mise", "run", "audit:deny"], check=True)\n', DENY_RED),
         (f'print("run mise run audit:deny by hand")\n{git}', strings()),
     ):
-        assert red == planted_uninstalled(f"import subprocess\n{helper}")
+        assert red == planted_uninstalled(
+            f"import subprocess\n{helper}", canon=canon, env=env
+        )
 
 
 DENY_RED = [
@@ -1450,7 +1470,13 @@ DENY_RED = [
 PLANTED_RED = ["attach-release.yml attach: calls ruff and does not install it"]
 
 
-def planted_uninstalled(helper: str, also: dict[str, str] | None = None) -> list[str]:
+def planted_uninstalled(
+    helper: str,
+    also: dict[str, str] | None = None,
+    *,
+    canon: support.Canon,
+    env: support.Env,
+) -> list[str]:
     """Plant `helper` as `belt planted-call` and read the attach job (#1499).
 
     `also` plants further helpers beside it (#1903).
@@ -1461,7 +1487,7 @@ def planted_uninstalled(helper: str, also: dict[str, str] | None = None) -> list
     """
     with tempfile.TemporaryDirectory() as tmp:
         stubs = {"belt/release/planted_call.py": helper, **(also or {})}
-        root = support.canon(tmp, stubs=stubs)
+        root = canon(tmp, stubs=stubs)
         job = appended(
             load("attach-release.yml")["attach"],
             {
@@ -1471,13 +1497,13 @@ def planted_uninstalled(helper: str, also: dict[str, str] | None = None) -> list
         )
         with pytest.MonkeyPatch.context() as patched:
             patched.setattr(f"{__name__}.CANON", root)
-            return uninstalled("attach-release.yml", "attach", job)
+            return uninstalled("attach-release.yml", "attach", job, env=env)
 
 
 UNSET_RED = ["attach-release.yml attach: calls lefthook and does not install it"]
 
 
-def planted_shell(helper: str) -> list[str]:
+def planted_shell(helper: str, *, canon: support.Canon, env: support.Env) -> list[str]:
     """Plant `helper` as release/planted-call.sh and read the attach job (#1782).
 
     Returns:
@@ -1485,7 +1511,7 @@ def planted_shell(helper: str) -> list[str]:
 
     """
     with tempfile.TemporaryDirectory() as tmp:
-        root = support.canon(tmp, stubs={"release/planted-call.sh": helper})
+        root = canon(tmp, stubs={"release/planted-call.sh": helper})
         job = appended(
             load("attach-release.yml")["attach"],
             {
@@ -1495,7 +1521,7 @@ def planted_shell(helper: str) -> list[str]:
         )
         with pytest.MonkeyPatch.context() as patched:
             patched.setattr(f"{__name__}.CANON", root)
-            return uninstalled("attach-release.yml", "attach", job)
+            return uninstalled("attach-release.yml", "attach", job, env=env)
 
 
 # A `${NAME:?message}` message is prose, not a call (#1782).
@@ -1503,30 +1529,38 @@ def planted_shell(helper: str) -> list[str]:
 # Each planted shell helper names lefthook, which the attach job does
 # not install, in the message of an unset expansion. The shell prints
 # that message and exits; it runs nothing in it.
-def test_a_local_assignment_message_is_not_a_call() -> None:
+def test_a_local_assignment_message_is_not_a_call(
+    canon: support.Canon, env: support.Env
+) -> None:
     """`local x="${V:?…}"`, the pgrx-env.sh shape."""
     helper = 'f() {\n  local x="${V:?run: lefthook run post-checkout}"\n}\n'
-    assert strings() == planted_shell(helper)
+    assert strings() == planted_shell(helper, canon=canon, env=env)
 
 
-def test_a_colon_command_message_is_not_a_call() -> None:
+def test_a_colon_command_message_is_not_a_call(
+    canon: support.Canon, env: support.Env
+) -> None:
     """`: "${V:?…}"`, the identity.sh shape."""
     helper = ': "${V:?run: lefthook run post-checkout}"\n'
-    assert strings() == planted_shell(helper)
+    assert strings() == planted_shell(helper, canon=canon, env=env)
 
 
 @pytest.mark.parametrize("op", [":?", "?"])
-def test_a_sourced_path_message_is_not_a_call(op: object) -> None:
+def test_a_sourced_path_message_is_not_a_call(
+    op: object, canon: support.Canon, env: support.Env
+) -> None:
     """`. "${V:?…}/f.sh"`, the audit-badges.sh shape; `?` alone too."""
     helper = f'. "${{V{op}run: lefthook run post-checkout}}/f.sh"\n'
-    assert strings() == planted_shell(helper)
+    assert strings() == planted_shell(helper, canon=canon, env=env)
 
 
 @pytest.mark.parametrize("sub", ["$(lefthook version)", "`lefthook version`"])
-def test_a_substitution_in_a_message_is_a_call(sub: object) -> None:
+def test_a_substitution_in_a_message_is_a_call(
+    sub: object, canon: support.Canon, env: support.Env
+) -> None:
     """`${V:?$(lefthook …)}`: the shell runs it, so it stays code."""
     helper = f': "${{V:?{sub}}}"\n'
-    assert planted_shell(helper) == UNSET_RED
+    assert planted_shell(helper, canon=canon, env=env) == UNSET_RED
 
 
 # What is prose in shell is read from shfmt's tree (#1785).
@@ -1542,9 +1576,11 @@ def test_a_substitution_in_a_message_is_a_call(sub: object) -> None:
         "echo ok | lefthook version\n",
     ],
 )
-def test_a_call_beside_prose_is_named(helper: object) -> None:
+def test_a_call_beside_prose_is_named(
+    helper: object, canon: support.Canon, env: support.Env
+) -> None:
     """A quoted substitution and a pipe out of a print are calls."""
-    assert planted_shell(helper) == UNSET_RED
+    assert planted_shell(helper, canon=canon, env=env) == UNSET_RED
 
 
 @pytest.mark.parametrize(
@@ -1554,21 +1590,25 @@ def test_a_call_beside_prose_is_named(helper: object) -> None:
         'echo "run lefthook install"\n',
     ],
 )
-def test_a_remedy_line_names_nothing(helper: object) -> None:
+def test_a_remedy_line_names_nothing(
+    helper: object, canon: support.Canon, env: support.Env
+) -> None:
     """A quoted literal assigned or printed is prose."""
-    assert strings() == planted_shell(helper)
+    assert strings() == planted_shell(helper, canon=canon, env=env)
 
 
 @pytest.mark.parametrize(
     "rel", ["mise/roster-reconcile.sh", "release/inventory-digests.sh"]
 )
-def test_the_jq_calls_on_assignment_lines_are_read(rel: object) -> None:
+def test_the_jq_calls_on_assignment_lines_are_read(
+    rel: object, env: support.Env
+) -> None:
     """The two `jq` calls the line regex dropped are seen."""
     text = (CANON / rel).read_text("utf-8")
-    assert word("jq", code(text)), rel
+    assert word("jq", code(text, env=env)), rel
 
 
-def test_each_span_is_blanked_or_kept() -> None:
+def test_each_span_is_blanked_or_kept(env: support.Env) -> None:
     """One row per branch: what goes to spaces, what stays."""
     rows = [
         # A print's arguments go; its command word stays.
@@ -1605,16 +1645,16 @@ def test_each_span_is_blanked_or_kept() -> None:
         ('echo "a\nb" x', "echo   \n    "),
     ]
     for text, want in rows:
-        assert want == code(text)
+        assert want == code(text, env=env)
 
 
-def test_text_shfmt_refuses_is_named() -> None:
+def test_text_shfmt_refuses_is_named(env: support.Env) -> None:
     """No fallback: a parse error is a ValueError naming shfmt's message."""
     with pytest.raises(
         ValueError,
         match=r"^shfmt cannot parse the text: 1:1: `if` must be followed",
     ):
-        code("if then\n")
+        code("if then\n", env=env)
 
 
 def test_a_job_is_only_uncommented() -> None:
@@ -1628,37 +1668,41 @@ def test_a_job_is_only_uncommented() -> None:
 # Each planted helper sits beside the real release scripts in a scratch
 # canon root whose mise/ is the real belt, and the attach job gains a
 # step that runs it. The job installs no ruff.
-def test_a_list_argv_is_a_call() -> None:
+def test_a_list_argv_is_a_call(canon: support.Canon, env: support.Env) -> None:
     """`subprocess.run(["ruff", "check"])`: red on main, which saw nothing."""
     helper = 'import subprocess\nsubprocess.run(["ruff", "check"], check=True)\n'
-    assert planted_uninstalled(helper) == PLANTED_RED
+    assert planted_uninstalled(helper, canon=canon, env=env) == PLANTED_RED
 
 
-def test_a_string_command_is_a_call() -> None:
+def test_a_string_command_is_a_call(canon: support.Canon, env: support.Env) -> None:
     """The first word of a string argv is the command."""
     helper = 'import subprocess\nsubprocess.run("ruff check .", shell=True)\n'
-    assert planted_uninstalled(helper) == PLANTED_RED
+    assert planted_uninstalled(helper, canon=canon, env=env) == PLANTED_RED
 
 
 @pytest.mark.parametrize("binding", ['"ruff"', 'shutil.which("ruff") or "ruff"'])
-def test_a_module_constant_argv_is_a_call(binding: object) -> None:
+def test_a_module_constant_argv_is_a_call(
+    binding: object, canon: support.Canon, env: support.Env
+) -> None:
     """A module name bound to the command, plain or through which()."""
     helper = (
         "import shutil\nimport subprocess\n"
         f"RUFF = {binding}\n"
         'subprocess.check_output([RUFF, "check"])\n'
     )
-    assert planted_uninstalled(helper) == PLANTED_RED
+    assert planted_uninstalled(helper, canon=canon, env=env) == PLANTED_RED
 
 
-def test_a_name_in_a_message_is_not_a_call() -> None:
+def test_a_name_in_a_message_is_not_a_call(
+    canon: support.Canon, env: support.Env
+) -> None:
     """A tool named in a message string runs nothing (#1903)."""
     helper = (
         "import subprocess\n"
         'print("ruff: not run here")\n'
         'subprocess.run(["git", "status"], check=True)\n'
     )
-    assert strings() == planted_uninstalled(helper)
+    assert strings() == planted_uninstalled(helper, canon=canon, env=env)
 
 
 @pytest.mark.parametrize(
@@ -1672,13 +1716,15 @@ def test_a_name_in_a_message_is_not_a_call() -> None:
         'import shutil\nRUFF = shutil.which("ruff")\n',
     ],
 )
-def test_a_tool_headed_list_is_a_call_wherever_it_stands(helper: object) -> None:
+def test_a_tool_headed_list_is_a_call_wherever_it_stands(
+    helper: object, canon: support.Canon, env: support.Env
+) -> None:
     """An argv literal is a call in a constant or a wrapper's list (#2037).
 
     belt_shell.py splats `SHFMT`, and rust_lint.py hands its argvs
     to rust_task.run: the list is the call, not the subprocess line.
     """
-    assert planted_uninstalled(helper) == PLANTED_RED
+    assert planted_uninstalled(helper, canon=canon, env=env) == PLANTED_RED
 
 
 def test_every_import_form_is_read() -> None:
@@ -1819,7 +1865,9 @@ def line_starts(line: str, tracked: set[str]) -> list[tuple[str, str]]:
     return found
 
 
-def helper_starts(rel: str, job_id: str, job: Job, tracked: set[str]) -> list[str]:
+def helper_starts(
+    rel: str, job_id: str, job: Job, tracked: set[str], *, env: support.Env
+) -> list[str]:
     """Name each step that starts a tracked helper but not under ORG_PYTHON.
 
     Returns:
@@ -1829,7 +1877,7 @@ def helper_starts(rel: str, job_id: str, job: Job, tracked: set[str]) -> list[st
     out = []
     for step in workflow_yaml.steps(job):
         body = re.sub(r"\$\{\{.*?\}\}", "${{expr}}", field(step, "run"))
-        body = code(body.replace("\\\n", " "))
+        body = code(body.replace("\\\n", " "), env=env)
         for line in body.splitlines():
             for name, how in line_starts(line, tracked):
                 out.append(
@@ -1862,7 +1910,9 @@ def uncanoned(rel: str, job_id: str, job: Job) -> list[str]:
     return []
 
 
-def interpreter_findings(texts: dict[str, str], tracked: set[str]) -> list[str]:
+def interpreter_findings(
+    texts: dict[str, str], tracked: set[str], *, env: support.Env
+) -> list[str]:
     """Hold every workflow and action file to the one way to start a helper.
 
     Returns:
@@ -1874,10 +1924,10 @@ def interpreter_findings(texts: dict[str, str], tracked: set[str]) -> list[str]:
         document = parsed(source)
         if rel.startswith(".github/actions/"):
             runs = decoded.as_object(document["runs"], f"{rel} runs")
-            out += helper_starts(rel, "runs", runs, tracked)
+            out += helper_starts(rel, "runs", runs, tracked, env=env)
             continue
         for job_id, job in workflow_yaml.jobs(document).items():
-            out += helper_starts(rel, job_id, job, tracked)
+            out += helper_starts(rel, job_id, job, tracked, env=env)
             out += uncanoned(rel, job_id, job)
     return out
 
@@ -1905,10 +1955,10 @@ PLANTED_JOB = """jobs:
 
 
 # Every helper a workflow or action starts runs under ORG_PYTHON (#1543).
-def test_every_helper_start_names_org_python() -> None:
+def test_every_helper_start_names_org_python(env: support.Env) -> None:
     """The tree: no step starts a tracked helper any other way."""
     assert strings() == interpreter_findings(
-        workflow_and_action_texts(), tracked_helpers()
+        workflow_and_action_texts(), tracked_helpers(), env=env
     )
 
 
@@ -1921,7 +1971,7 @@ def test_the_scan_reaches_the_helper_starts() -> None:
     assert starts > 40
 
 
-def test_the_runners_python3_is_named() -> None:
+def test_the_runners_python3_is_named(env: support.Env) -> None:
     """Planted: the image publish's call before #1543."""
     text = PLANTED_JOB + (
         "      - name: Push the image\n"
@@ -1932,10 +1982,12 @@ def test_the_runners_python3_is_named() -> None:
         ".github/workflows/x.yml build: step 'Push the image' starts"
         " belt registry with the runner's python3; run it as"
         ' "${ORG_PYTHON}" belt registry (#1543)'
-    ) == interpreter_findings({".github/workflows/x.yml": text}, {"registry.py"})
+    ) == interpreter_findings(
+        {".github/workflows/x.yml": text}, {"registry.py"}, env=env
+    )
 
 
-def test_a_start_by_first_line_is_named() -> None:
+def test_a_start_by_first_line_is_named(env: support.Env) -> None:
     """Planted: a helper executed by its own `#!` line, in both shapes."""
     text = PLANTED_JOB + (
         "      - name: Attach\n"
@@ -1959,10 +2011,11 @@ def test_a_start_by_first_line_is_named() -> None:
     ) == interpreter_findings(
         {".github/workflows/x.yml": text},
         {"attach_publish.py", "previous_release.py"},
+        env=env,
     )
 
 
-def test_a_start_in_an_action_is_named() -> None:
+def test_a_start_in_an_action_is_named(env: support.Env) -> None:
     """Planted: an action file is held as a workflow is."""
     text = (
         "name: x\nruns:\n  using: composite\n  steps:\n"
@@ -1973,10 +2026,12 @@ def test_a_start_in_an_action_is_named() -> None:
         ".github/actions/x/action.yml runs: step 'Derive' starts"
         " derive.py with the runner's python3; run it as"
         ' "${ORG_PYTHON}" derive.py (#1543)'
-    ) == interpreter_findings({".github/actions/x/action.yml": text}, {"derive.py"})
+    ) == interpreter_findings(
+        {".github/actions/x/action.yml": text}, {"derive.py"}, env=env
+    )
 
 
-def test_org_python_before_the_canon_action_is_named() -> None:
+def test_org_python_before_the_canon_action_is_named(env: support.Env) -> None:
     """Planted: the name used where nothing has exported it yet."""
     text = (
         "jobs:\n  plan:\n    runs-on: ubuntu-26.04\n    steps:\n"
@@ -1989,10 +2044,12 @@ def test_org_python_before_the_canon_action_is_named() -> None:
         ".github/workflows/x.yml plan: step 'Plan' uses ORG_PYTHON and no"
         " step before it runs $/.github/actions/canon, which exports it"
         " (#1543)"
-    ) == interpreter_findings({".github/workflows/x.yml": text}, {"matrix.py"})
+    ) == interpreter_findings({".github/workflows/x.yml": text}, {"matrix.py"}, env=env)
 
 
-def test_an_argument_an_untracked_file_and_inline_code_are_not_starts() -> None:
+def test_an_argument_an_untracked_file_and_inline_code_are_not_starts(
+    env: support.Env,
+) -> None:
     """Only a tracked helper in a command's place is a start."""
     text = PLANTED_JOB + (
         "      - name: Others\n"
@@ -2005,7 +2062,7 @@ def test_an_argument_an_untracked_file_and_inline_code_are_not_starts() -> None:
         "          # python3 -I .org-canon/belt registry tag\n"
     )
     assert strings() == interpreter_findings(
-        {".github/workflows/x.yml": text}, {"registry.py", "gate_tools.py"}
+        {".github/workflows/x.yml": text}, {"registry.py", "gate_tools.py"}, env=env
     )
 
 
@@ -2031,7 +2088,7 @@ def test_the_commented_header_in_the_tree_is_read() -> None:
     assert "set -euo pipefail" in field(found[0], "run")
 
 
-def test_a_start_under_a_commented_header_is_named() -> None:
+def test_a_start_under_a_commented_header_is_named(env: support.Env) -> None:
     """Planted: a helper started in a commented-header body is red."""
     text = (
         "name: x\nruns:\n  using: composite\n  steps:\n"
@@ -2043,7 +2100,9 @@ def test_a_start_under_a_commented_header_is_named() -> None:
         ".github/actions/x/action.yml runs: step 'Derive' starts"
         " derive.py with the runner's python3; run it as"
         ' "${ORG_PYTHON}" derive.py (#1543)'
-    ) == interpreter_findings({".github/actions/x/action.yml": text}, {"derive.py"})
+    ) == interpreter_findings(
+        {".github/actions/x/action.yml": text}, {"derive.py"}, env=env
+    )
 
 
 def population_reads_on_job_token(texts: dict[str, str]) -> list[str]:

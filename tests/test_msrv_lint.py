@@ -160,8 +160,17 @@ def body() -> str:
 class Planted:
     """The planted belt, stubs and log every in-process row runs in."""
 
-    def __init__(self, tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:
+    def __init__(
+        self,
+        tmp_path: Path,
+        capfd: pytest.CaptureFixture[str],
+        *,
+        belt: support.Belt,
+        env: support.Env,
+    ) -> None:
         """Plant the stubs, the surface, the plan and the belt."""
+        self.plant_belt = belt
+        self.make_env = env
         self.tmp = tmp_path
         self.capfd = capfd
         self.bins = self.tmp / "bin"
@@ -173,7 +182,7 @@ class Planted:
             stub = self.bins / name
             stub.write_text(text, encoding="utf-8")
             stub.chmod(0o755)
-        self.belt = support.belt(
+        self.belt = self.plant_belt(
             self.tmp / "belt", stubs={"pgrx-env.sh": PGRX_ENV_STUB}
         )
         self.log = self.tmp / "log"
@@ -185,7 +194,7 @@ class Planted:
         self.surface = self.tmp / "surface"
         self.plan = self.tmp / "plan"
         self.plant(PLAIN, CHECK)
-        env = support.env()
+        env = self.make_env()
         self.env = env | {
             "PATH": f"{self.bins}:{env['PATH']}",
             "ORG_BELT_DIR": str(self.belt),
@@ -261,9 +270,14 @@ class Planted:
 
 
 @fixture
-def planted(tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> Planted:
+def planted(
+    tmp_path: Path,
+    capfd: pytest.CaptureFixture[str],
+    belt: support.Belt,
+    env: support.Env,
+) -> Planted:
     """Give each row its own Planted."""
-    return Planted(tmp_path, capfd)
+    return Planted(tmp_path, capfd, belt=belt, env=env)
 
 
 def planned(pgrx: str = "") -> list[str]:
@@ -528,9 +542,14 @@ class Fuzzing(Planted):
 
 
 @fixture
-def fuzzing(tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> Fuzzing:
+def fuzzing(
+    tmp_path: Path,
+    capfd: pytest.CaptureFixture[str],
+    belt: support.Belt,
+    env: support.Env,
+) -> Fuzzing:
     """Give each row its own Fuzzing."""
-    return Fuzzing(tmp_path, capfd)
+    return Fuzzing(tmp_path, capfd, belt=belt, env=env)
 
 
 def compile_at(root: str, flags: str | None) -> str:
@@ -604,7 +623,9 @@ def task(tmp_path: Path) -> Task:
     return Task(tmp_path)
 
 
-def run_body(tree: Path, overrides: dict[str, str]) -> subprocess.CompletedProcess[str]:
+def run_body(
+    tree: Path, overrides: dict[str, str], *, env: support.Env
+) -> subprocess.CompletedProcess[str]:
     """Run lint:msrv's body in a tree, as mise runs it.
 
     Returns:
@@ -615,7 +636,7 @@ def run_body(tree: Path, overrides: dict[str, str]) -> subprocess.CompletedProce
     return subprocess.run(
         as_mise.argv,
         cwd=tree,
-        env=support.env() | overrides | as_mise.env,
+        env=env() | overrides | as_mise.env,
         capture_output=True,
         text=True,
         check=False,
@@ -623,13 +644,13 @@ def run_body(tree: Path, overrides: dict[str, str]) -> subprocess.CompletedProce
 
 
 @pytest.mark.usefixtures("task")
-def test_no_cargo_toml_tracked_is_skipped() -> None:
+def test_no_cargo_toml_tracked_is_skipped(env: support.Env) -> None:
     """No tracked Cargo.toml: the skip line, green, and no helper."""
     with tempfile.TemporaryDirectory() as tmp:
         tree = Path(tmp)
-        subprocess.run([GIT, "init", "-q", tmp], check=True, env=support.env())
+        subprocess.run([GIT, "init", "-q", tmp], check=True, env=env())
         overrides = {"ORG_BELT_DIR": str(BELT), "ORG_PYTHON": "/nonexistent"}
-        done = run_body(tree, overrides)
+        done = run_body(tree, overrides, env=env)
     assert (done.returncode, done.stdout) == (
         0,
         "lint:msrv: no Cargo.toml tracked, skipped\n",
@@ -637,15 +658,15 @@ def test_no_cargo_toml_tracked_is_skipped() -> None:
 
 
 @pytest.mark.usefixtures("task")
-def test_the_body_starts_the_helper_which_exits_with_its_status() -> None:
+def test_the_body_starts_the_helper_which_exits_with_its_status(
+    env: support.Env,
+) -> None:
     """A tracked Cargo.toml and no cargo: the helper's finding and its 1."""
     with tempfile.TemporaryDirectory() as tmp:
         tree = Path(tmp)
-        subprocess.run([GIT, "init", "-q", tmp], check=True, env=support.env())
+        subprocess.run([GIT, "init", "-q", tmp], check=True, env=env())
         (tree / "Cargo.toml").write_text("", encoding="utf-8")
-        subprocess.run(
-            [GIT, "-C", tmp, "add", "Cargo.toml"], check=True, env=support.env()
-        )
+        subprocess.run([GIT, "-C", tmp, "add", "Cargo.toml"], check=True, env=env())
         bins = tree.parent / f"{tree.name}-bin"
         bins.mkdir()
         for tool in ("git", "bash", "dirname", "cat", "mktemp", "rm"):
@@ -656,6 +677,6 @@ def test_the_body_starts_the_helper_which_exits_with_its_status() -> None:
             "ORG_PYTHON": sys.executable,
             "ORG_FINDINGS": "",
         }
-        done = run_body(tree, overrides)
+        done = run_body(tree, overrides, env=env)
     want = f"lint:msrv: {rust_task.NO_CARGO}\n"
     assert (1, "", want) == (done.returncode, done.stdout, done.stderr)

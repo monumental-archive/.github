@@ -188,8 +188,9 @@ def task_body(name: str) -> str:
 class FuzzCase:
     """A planted repository and the stand-in tools, one per row."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Plant an empty repository and the stubs beside it."""
+        self.make_env = env
         self.tmp = tmp_path
         self.tree = self.tmp / "tree"
         self.tree.mkdir()
@@ -209,7 +210,7 @@ class FuzzCase:
             where.mkdir(parents=True, exist_ok=True)
             (where / name).write_text(text, encoding="utf-8")
             (where / name).chmod(0o755)
-        env = support.env()
+        env = self.make_env()
         self.env = env | {
             "ORG_BELT_DIR": str(BELT),
             "ORG_PYTHON": sys.executable,
@@ -322,9 +323,9 @@ class FuzzCase:
 
 
 @fixture
-def fuzz_case(tmp_path: Path) -> FuzzCase:
+def fuzz_case(tmp_path: Path, env: support.Env) -> FuzzCase:
     """Give each row its own FuzzCase."""
-    return FuzzCase(tmp_path)
+    return FuzzCase(tmp_path, env=env)
 
 
 def test_a_floor_with_no_fuzz_line_passes_and_no_target_is_measured(

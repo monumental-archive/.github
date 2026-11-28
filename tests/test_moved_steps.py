@@ -28,7 +28,7 @@ ONE_PER_MERGE = (HERE / "vex-one-per-merge.txt").read_text("utf-8").strip()
 
 
 def run(
-    script: Path, cwd: Path, *args: str, **env: str
+    script: Path, cwd: Path, *args: str, make_env: support.Env, **env: str
 ) -> subprocess.CompletedProcess[str]:
     """Run a script by its path, with its arguments.
 
@@ -39,7 +39,7 @@ def run(
     return subprocess.run(
         [BASH, str(script), *args],
         cwd=cwd,
-        env=support.env(**env),
+        env=make_env(**env),
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
@@ -54,8 +54,9 @@ SCRIPT = HERE / "vex-decisions.sh"
 class VexDecisions:
     """mise/vex-decisions.sh, in a planted git tree."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Set up the rows' state."""
+        self.make_env = env
         self.set_up_tmp(tmp_path)
         self.set_up_test_vex_decisions(tmp_path)
 
@@ -79,7 +80,7 @@ class VexDecisions:
         return subprocess.run(
             [GIT, *args],
             cwd=self.tree,
-            env=support.env(),
+            env=self.make_env(),
             capture_output=True,
             text=True,
             check=True,
@@ -110,6 +111,7 @@ class VexDecisions:
             DECISIONS="security/vex/*.openvex.json",
             ONE_PER_MERGE=str(HERE / "vex-one-per-merge.txt"),
             **env,
+            make_env=self.make_env,
         )
 
     def fake_list(self, *paths: str) -> str:
@@ -127,9 +129,9 @@ class VexDecisions:
 
 
 @fixture
-def vex_decisions(tmp_path: Path) -> VexDecisions:
+def vex_decisions(tmp_path: Path, env: support.Env) -> VexDecisions:
     """Give each row its own VexDecisions."""
-    return VexDecisions(tmp_path)
+    return VexDecisions(tmp_path, env=env)
 
 
 def test_a_dispatch_signs_every_tracked_decision_unsigned_only(
@@ -195,14 +197,14 @@ def test_a_push_of_two_decisions_is_refused_by_name(
     assert vex_decisions.out.read_text("utf-8") == ""
 
 
-def plant(root: Path, *, policy: bool = True) -> Path:
+def plant(root: Path, *, policy: bool = True, canon: support.Canon) -> Path:
     """Plant a canon tree with the action, the writer and the policy.
 
     Returns:
         The script's path in the tree.
 
     """
-    support.canon(root, ".github/actions/source-attest", "slsa/verify-policy.json")
+    canon(root, ".github/actions/source-attest", "slsa/verify-policy.json")
     if not policy:
         (root / "slsa" / "verify-policy.json").unlink()
     return root / ".github" / "actions" / "source-attest" / "resolve.sh"
@@ -211,8 +213,9 @@ def plant(root: Path, *, policy: bool = True) -> Path:
 class SourceAttestResolve:
     """.github/actions/source-attest/resolve.sh, in a planted canon tree."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Make a scratch directory, a runner temp and a GITHUB_ENV."""
+        self.make_env = env
         self.tmp = Path(os.path.realpath(str(tmp_path)))
         self.runner = self.tmp / "runner"
         self.runner.mkdir()
@@ -236,17 +239,18 @@ class SourceAttestResolve:
             GITHUB_SHA="c" * 40,
             RUNNER_TEMP=str(self.runner),
             GITHUB_ENV=str(self.github_env),
+            make_env=self.make_env,
         )
 
 
 @fixture
-def source_attest_resolve(tmp_path: Path) -> SourceAttestResolve:
+def source_attest_resolve(tmp_path: Path, env: support.Env) -> SourceAttestResolve:
     """Give each row its own SourceAttestResolve."""
-    return SourceAttestResolve(tmp_path)
+    return SourceAttestResolve(tmp_path, env=env)
 
 
 def test_an_actions_path_names_the_pinned_ref(
-    source_attest_resolve: SourceAttestResolve,
+    source_attest_resolve: SourceAttestResolve, canon: support.Canon
 ) -> None:
     """The ref is the path segment the caller pinned; the env is written."""
     root = (
@@ -256,7 +260,7 @@ def test_an_actions_path_names_the_pinned_ref(
         / ".github"
         / "v1.2.3"
     )
-    done = source_attest_resolve.resolve(plant(root), "claims")
+    done = source_attest_resolve.resolve(plant(root, canon=canon), "claims")
     assert done.returncode == 0, done.stdout + done.stderr
     assert source_attest_resolve.github_env.read_text("utf-8") == (
         f"SA_WORK={source_attest_resolve.runner}/source-attest\n"
@@ -267,7 +271,7 @@ def test_an_actions_path_names_the_pinned_ref(
 
 
 def test_another_stage_is_refused_by_name(
-    source_attest_resolve: SourceAttestResolve,
+    source_attest_resolve: SourceAttestResolve, canon: support.Canon
 ) -> None:
     """Only claims and attest are stages."""
     root = (
@@ -277,7 +281,7 @@ def test_another_stage_is_refused_by_name(
         / ".github"
         / "v1.2.3"
     )
-    done = source_attest_resolve.resolve(plant(root), "sign")
+    done = source_attest_resolve.resolve(plant(root, canon=canon), "sign")
     assert (done.returncode, done.stderr) == (
         1,
         (
@@ -288,11 +292,11 @@ def test_another_stage_is_refused_by_name(
 
 
 def test_off_an_actions_path_in_another_repository_is_refused(
-    source_attest_resolve: SourceAttestResolve,
+    source_attest_resolve: SourceAttestResolve, canon: support.Canon
 ) -> None:
     """Not an _actions path and not the canon calling itself."""
     root = source_attest_resolve.tmp / "elsewhere"
-    done = source_attest_resolve.resolve(plant(root), "attest")
+    done = source_attest_resolve.resolve(plant(root, canon=canon), "attest")
     assert done.returncode == 1
     assert done.stderr == (
         f"::error::resolve.sh: source-attest resolved to '{root}' in"
@@ -301,12 +305,12 @@ def test_off_an_actions_path_in_another_repository_is_refused(
 
 
 def test_the_canon_calling_itself_names_the_running_commit(
-    source_attest_resolve: SourceAttestResolve,
+    source_attest_resolve: SourceAttestResolve, canon: support.Canon
 ) -> None:
     """Off an _actions path in the canon: the ref is GITHUB_SHA."""
     root = source_attest_resolve.tmp / "checkout"
     done = source_attest_resolve.resolve(
-        plant(root), "claims", "monumental-archive/.github"
+        plant(root, canon=canon), "claims", "monumental-archive/.github"
     )
     assert done.returncode == 0, done.stdout + done.stderr
     assert f"SA_CANON_REF={'c' * 40}\n" in source_attest_resolve.github_env.read_text(
@@ -315,7 +319,7 @@ def test_the_canon_calling_itself_names_the_running_commit(
 
 
 def test_a_tree_without_the_policy_is_refused(
-    source_attest_resolve: SourceAttestResolve,
+    source_attest_resolve: SourceAttestResolve, canon: support.Canon
 ) -> None:
     """No slsa/verify-policy.json: not a canon tree to attest with."""
     root = (
@@ -325,7 +329,9 @@ def test_a_tree_without_the_policy_is_refused(
         / ".github"
         / "v1.2.3"
     )
-    done = source_attest_resolve.resolve(plant(root, policy=False), "claims")
+    done = source_attest_resolve.resolve(
+        plant(root, policy=False, canon=canon), "claims"
+    )
     assert done.returncode == 1
     assert done.stderr == (
         f"::error::resolve.sh: resolved canon tree at '{root}' has no"
@@ -344,8 +350,12 @@ NO_STELE = "::error::{}: stele is not on the runner — it is a belt tool\n"
 class Stubbed:
     """A scratch work directory, a stub bin, and a script run in it."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(
+        self, tmp_path: Path, *, canon: support.Canon, env: support.Env
+    ) -> None:
         """Make the work directory, the stub bin and the log."""
+        self.plant_canon = canon
+        self.make_env = env
         self.tmp = Path(os.path.realpath(str(tmp_path)))
         self.work = self.tmp / "work"
         self.work.mkdir()
@@ -371,7 +381,7 @@ class Stubbed:
         return subprocess.run(
             [BASH, str(script)],
             cwd=self.work,
-            env=support.env(
+            env=self.make_env(
                 self.tmp / "home",
                 PATH=f"{self.bin}:{path}",
                 STUB_LOG=str(self.log),
@@ -396,9 +406,9 @@ class Stubbed:
 
 
 @fixture
-def stubbed(tmp_path: Path) -> Stubbed:
+def stubbed(tmp_path: Path, canon: support.Canon, env: support.Env) -> Stubbed:
     """Give each row its own Stubbed."""
-    return Stubbed(tmp_path)
+    return Stubbed(tmp_path, canon=canon, env=env)
 
 
 LEVELS_PUBLISH_SCRIPT = HERE / "levels-publish.sh"
@@ -435,9 +445,11 @@ class LevelsPublish(Stubbed):
 
 
 @fixture
-def levels_publish(tmp_path: Path) -> LevelsPublish:
+def levels_publish(
+    tmp_path: Path, canon: support.Canon, env: support.Env
+) -> LevelsPublish:
     """Give each row its own LevelsPublish."""
-    return LevelsPublish(tmp_path)
+    return LevelsPublish(tmp_path, canon=canon, env=env)
 
 
 def test_the_cells_are_pushed_to_the_levels_branch(
@@ -475,7 +487,7 @@ class SourceAttestChain(Stubbed):
 
         """
         root = self.tmp / "canon"
-        support.canon(root, ".github/actions/source-attest")
+        self.plant_canon(root, ".github/actions/source-attest")
         return self.run_in(
             root / ".github" / "actions" / "source-attest" / "chain.sh",
             path,
@@ -492,9 +504,11 @@ class SourceAttestChain(Stubbed):
 
 
 @fixture
-def source_attest_chain(tmp_path: Path) -> SourceAttestChain:
+def source_attest_chain(
+    tmp_path: Path, canon: support.Canon, env: support.Env
+) -> SourceAttestChain:
     """Give each row its own SourceAttestChain."""
-    return SourceAttestChain(tmp_path)
+    return SourceAttestChain(tmp_path, canon=canon, env=env)
 
 
 def test_the_chain_is_emitted_against_the_canon_policy(

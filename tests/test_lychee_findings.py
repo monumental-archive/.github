@@ -109,8 +109,11 @@ def refused(file: Path, stderr: str) -> None:
 class Adapter:
     """The adapter over a stub lychee."""
 
-    def __init__(self, tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:
+    def __init__(
+        self, tmp_path: Path, capfd: pytest.CaptureFixture[str], *, env: support.Env
+    ) -> None:
         """Lay out a stub lychee, its log, and the findings file."""
+        self.make_env = env
         self.capfd = capfd
         self.dir = Path(str(tmp_path))
         self.bin = self.dir / "bin"
@@ -154,7 +157,7 @@ class Adapter:
 
         """
         self.doc.write_text(document, encoding="utf-8")
-        env = support.env(
+        env = self.make_env(
             PATH=path or f"{self.bin}{os.pathsep}{os.environ['PATH']}",
             ORG_FINDINGS=str(self.file),
             MISE_TASK_NAME=TASK,
@@ -167,9 +170,11 @@ class Adapter:
 
 
 @fixture
-def adapter(tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> Adapter:
+def adapter(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str], env: support.Env
+) -> Adapter:
     """Give each row its own Adapter."""
-    return Adapter(tmp_path, capfd)
+    return Adapter(tmp_path, capfd, env=env)
 
 
 def test_one_broken_link_is_one_record(adapter: Adapter) -> None:
@@ -286,8 +291,9 @@ def test_no_lychee_is_refused_by_name(adapter: Adapter) -> None:
 class Task:
     """audit:links' body under the belt's pinned lychee, offline by planting."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Plant a tracked tree with one markdown file linking `other.md`."""
+        self.make_env = env
         if support.optional_tool("lychee") is None:
             pytest.skip("the belt's lychee is not on PATH")
         self.tmp = tmp_path
@@ -296,7 +302,7 @@ class Task:
         self.file = self.tmp / "findings" / "job.jsonl"
         (self.root / "a.md").write_text("# a\n\nsee [o](other.md)\n", encoding="utf-8")
         git = [GIT, "-C", str(self.root)]
-        subprocess.run([*git, "init", "-q"], env=support.env(), check=True)
+        subprocess.run([*git, "init", "-q"], env=self.make_env(), check=True)
 
     def run_task(self) -> subprocess.CompletedProcess[str]:
         """Track the tree and run audit:links' body in it.
@@ -306,7 +312,7 @@ class Task:
 
         """
         git = [GIT, "-C", str(self.root)]
-        subprocess.run([*git, "add", "-A"], env=support.env(), check=True)
+        subprocess.run([*git, "add", "-A"], env=self.make_env(), check=True)
         config = decoded.load_toml((HERE / "config.toml").read_bytes())
         tasks = decoded.as_object(config["tasks"], "tasks")
         body = decoded.as_str(decoded.as_object(tasks[TASK], TASK)["run"], "run")
@@ -316,7 +322,7 @@ class Task:
             capture_output=True,
             text=True,
             encoding="utf-8",
-            env=support.env(
+            env=self.make_env(
                 **run.env,
                 ORG_BELT_DIR=str(HERE),
                 ORG_PYTHON=sys.executable,
@@ -329,9 +335,9 @@ class Task:
 
 
 @fixture
-def task(tmp_path: Path) -> Task:
+def task(tmp_path: Path, env: support.Env) -> Task:
     """Give each row its own Task."""
-    return Task(tmp_path)
+    return Task(tmp_path, env=env)
 
 
 def test_a_broken_link_is_the_record_and_lychee_s_red(task: Task) -> None:

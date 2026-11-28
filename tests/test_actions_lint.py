@@ -165,18 +165,16 @@ def test_no_canon_tree_is_refused(actions_lint_state: ActionsLint) -> None:
 
 
 def test_no_actionlint_is_refused(
-    actions_lint_state: ActionsLint, capfd: pytest.CaptureFixture[str]
+    actions_lint_state: ActionsLint, capfd: pytest.CaptureFixture[str], env: support.Env
 ) -> None:
     """Actionlint not found: exit 2, named, never a pass."""
     rel = actions_lint_state.plant(CLEAN)
     missing = str(actions_lint_state.tree / "no-such-actionlint")
-    env = support.env(
-        MISE_TASK_NAME=TASK, ORG_FINDINGS="", ORG_CANON_DIR=str(CANON_DIR)
-    )
+    environ = env(MISE_TASK_NAME=TASK, ORG_FINDINGS="", ORG_CANON_DIR=str(CANON_DIR))
     with pytest.MonkeyPatch.context() as patched:
         patched.setattr(actions_lint, "ACTIONLINT", missing)
         with pytest.MonkeyPatch.context() as patched:
-            for name, value in env.items():
+            for name, value in environ.items():
                 patched.setenv(name, value)
             patched.chdir(actions_lint_state.tree)
             status = actions_lint.main([rel])

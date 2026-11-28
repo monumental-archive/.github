@@ -104,8 +104,11 @@ SHOW = 'echo "major=${PLANT_MAJOR-unset} sdk=${PLANT_SDK-unset}"; exit "${1:-0}"
 class Planted:
     """A planted belt, the stubs, and the row's environment."""
 
-    def __init__(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def __init__(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, env: support.Env
+    ) -> None:
         """Plant the belt, the stubs and the row's environment."""
+        self.make_env = env
         monkeypatch.setattr(gate_surface, "main", stand_in("gate-surface"))
         monkeypatch.setattr(pgrx_postgres, "main", stand_in("pgrx-postgres"))
         self.tmp = tmp_path
@@ -125,7 +128,7 @@ class Planted:
             stub.write_text(text, encoding="utf-8")
             stub.chmod(0o755)
         (self.tmp / "log").touch()
-        env = support.env()
+        env = self.make_env()
         for name in list(os.environ):
             monkeypatch.delenv(name)
         for name, value in (
@@ -151,9 +154,11 @@ class Planted:
 
 
 @fixture
-def planted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Planted:
+def planted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, env: support.Env
+) -> Planted:
     """Give each row its own Planted."""
-    return Planted(tmp_path, monkeypatch)
+    return Planted(tmp_path, monkeypatch, env=env)
 
 
 def test_the_belt_is_org_belt_dir_else_the_trees_own(planted: Planted) -> None:

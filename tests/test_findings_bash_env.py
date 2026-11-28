@@ -102,8 +102,9 @@ def bashes() -> list[tuple[str, str]]:
 class BashEnvRows:
     """A body under the belt's shell and BASH_ENV has the writer."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Set up the rows' state."""
+        self.make_env = env
         self.set_up_tmp(tmp_path)
         self.set_up_test_bash_env_rows(tmp_path)
 
@@ -134,19 +135,19 @@ class BashEnvRows:
             capture_output=True,
             text=True,
             encoding="utf-8",
-            env=support.env(PYTHONUTF8="1", **env) | given,
+            env=self.make_env(PYTHONUTF8="1", **env) | given,
             check=False,
             cwd=self.root,
         )
 
 
 @fixture
-def bash_env_rows(tmp_path: Path) -> BashEnvRows:
+def bash_env_rows(tmp_path: Path, env: support.Env) -> BashEnvRows:
     """Give each row its own BashEnvRows."""
-    return BashEnvRows(tmp_path)
+    return BashEnvRows(tmp_path, env=env)
 
 
-def probe(argv: list[str], *, ssh: bool) -> str:
+def probe(argv: list[str], *, ssh: bool, env: support.Env) -> str:
     """Ask a bash whether it has the writer, its stdin a socket or not.
 
     With `ssh`, stdin is a pipe and SSH_CLIENT is set; without, stdin
@@ -156,36 +157,36 @@ def probe(argv: list[str], *, ssh: bool) -> str:
         `function` with the writer, `none` without.
 
     """
-    env = support.env() | {"BASH_ENV": str(WRITER)}
+    environ = env() | {"BASH_ENV": str(WRITER)}
     if ssh:
-        env["SSH_CLIENT"] = "192.0.2.1 50000 22"
+        environ["SSH_CLIENT"] = "192.0.2.1 50000 22"
         done = subprocess.run(
-            argv, env=env, input="", capture_output=True, text=True, check=False
+            argv, env=environ, input="", capture_output=True, text=True, check=False
         )
     else:
         near, far = socket.socketpair()
         with near, far:
             done = subprocess.run(
                 argv,
-                env=env,
+                env=environ,
                 stdin=far.fileno(),
                 capture_output=True,
                 text=True,
                 check=False,
             )
-    assert "SHLVL" not in env
+    assert "SHLVL" not in environ
     return done.stdout.strip()
 
 
 @pytest.mark.usefixtures("bash_env_rows")
-def test_socket_stdin_or_ssh_skips_bash_env_unless_norc() -> None:
+def test_socket_stdin_or_ssh_skips_bash_env_unless_norc(env: support.Env) -> None:
     """A plain `bash -c` loses the writer there; the belt's shell keeps it."""
     shell = support.task_run(TASK, PROBE).argv
     assert "--norc" in shell
     for _label, bash in bashes():
         for ssh in (False, True):
-            assert probe([bash, "-c", PROBE], ssh=ssh) == "none"
-            assert probe([bash, *shell[1:]], ssh=ssh) == "function"
+            assert probe([bash, "-c", PROBE], ssh=ssh, env=env) == "none"
+            assert probe([bash, *shell[1:]], ssh=ssh, env=env) == "function"
 
 
 @pytest.mark.parametrize(("label", "bash"), bashes())
@@ -226,7 +227,9 @@ def test_the_belt_names_its_writer_in_bash_env() -> None:
 
 
 # `org_task` names a bare script's task for every child (#1979).
-def run_planted(**env: str) -> subprocess.CompletedProcess[str]:
+def run_planted(
+    *, make_env: support.Env, **env: str
+) -> subprocess.CompletedProcess[str]:
     """Run a script that sources the writer, then starts a child.
 
     Returns:
@@ -237,7 +240,7 @@ def run_planted(**env: str) -> subprocess.CompletedProcess[str]:
         root = Path(tmp)
         (root / "planted.sh").write_text(PLANTED, encoding="utf-8")
         (root / "child.sh").write_text(CHILD, encoding="utf-8")
-        given = support.env(PYTHONUTF8="1", ORG_FINDINGS="", **env)
+        given = make_env(PYTHONUTF8="1", ORG_FINDINGS="", **env)
         if "MISE_TASK_NAME" not in env:
             assert "MISE_TASK_NAME" not in given
         return subprocess.run(
@@ -257,15 +260,15 @@ def run_planted(**env: str) -> subprocess.CompletedProcess[str]:
         )
 
 
-def test_a_bare_script_names_its_task_to_a_child() -> None:
+def test_a_bare_script_names_its_task_to_a_child(env: support.Env) -> None:
     """With no MISE_TASK_NAME, the child is handed the script's task."""
-    done = run_planted()
+    done = run_planted(make_env=env)
     assert done.returncode == 0, done.stderr
     assert done.stderr == "test:planted: m\n"
 
 
-def test_a_name_mise_gave_wins() -> None:
+def test_a_name_mise_gave_wins(env: support.Env) -> None:
     """Under mise run, mise's own name reaches the child unchanged."""
-    done = run_planted(MISE_TASK_NAME="lint:demo")
+    done = run_planted(MISE_TASK_NAME="lint:demo", make_env=env)
     assert done.returncode == 0, done.stderr
     assert done.stderr == "lint:demo: m\n"

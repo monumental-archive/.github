@@ -143,8 +143,9 @@ KILLED = (mutant("Killed", 1), mutant("Timeout", 2, mutator="BlockStatement"))
 class Planted:
     """A planted tree and a stub StrykerJS; the rows are in the classes below."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Plant a git tree, the stub and its answers."""
+        self.make_env = env
         self.tmp = tmp_path
         self.tree = self.tmp / "tree"
         self.tree.mkdir()
@@ -153,7 +154,7 @@ class Planted:
         self.planted = self.tmp / "report.json"
         self.planted.touch()
         self.summary = self.tmp / "summary"
-        self.env = support.env(
+        self.env = self.make_env(
             MISE_TASK_NAME=TASK,
             PLANT_LOG=str(self.log),
             PLANT_REPORT=str(self.planted),
@@ -167,7 +168,7 @@ class Planted:
 
     def git(self, *args: str) -> None:
         """Run git in the planted tree, scrubbed of the caller's git state."""
-        subprocess.run([GIT, *args], cwd=self.tree, env=support.env(), check=True)
+        subprocess.run([GIT, *args], cwd=self.tree, env=self.make_env(), check=True)
 
     def track(self, path: str, text: str) -> None:
         """Write a file into the planted tree and track it."""
@@ -218,9 +219,9 @@ class Planted:
 
 
 @fixture
-def planted_state(tmp_path: Path) -> Planted:
+def planted_state(tmp_path: Path, env: support.Env) -> Planted:
     """Give each row its own Planted."""
-    return Planted(tmp_path)
+    return Planted(tmp_path, env=env)
 
 
 def test_no_config_skips_clean_by_name(planted_state: Planted) -> None:
@@ -399,19 +400,22 @@ FILES = (
 class ShareOut:
     """`share`: the config's `mutate` list, expanded and cut round-robin."""
 
-    def __init__(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def __init__(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, env: support.Env
+    ) -> None:
         """Plant a git tree of tracked files, and work in it."""
+        self.make_env = env
         tmp = tmp_path
         self.tree = tmp / "tree"
         self.tree.mkdir()
         self.out = tmp / "mutate"
         git = [GIT, "-C", str(self.tree)]
-        subprocess.run([*git, "init", "-q"], env=support.env(), check=True)
+        subprocess.run([*git, "init", "-q"], env=self.make_env(), check=True)
         for path in FILES:
             (self.tree / path).parent.mkdir(parents=True, exist_ok=True)
             (self.tree / path).write_text(SOURCE, encoding="utf-8")
         (self.tree / "untracked.ts").write_text(SOURCE, encoding="utf-8")
-        subprocess.run([*git, "add", "--", *FILES], env=support.env(), check=True)
+        subprocess.run([*git, "add", "--", *FILES], env=self.make_env(), check=True)
         monkeypatch.chdir(self.tree)
 
     def share(
@@ -446,9 +450,11 @@ class ShareOut:
 
 
 @fixture
-def share_out(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ShareOut:
+def share_out(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, env: support.Env
+) -> ShareOut:
     """Give each row its own ShareOut."""
-    return ShareOut(tmp_path, monkeypatch)
+    return ShareOut(tmp_path, monkeypatch, env=env)
 
 
 def test_three_shards_hold_every_file_exactly_once(
@@ -544,11 +550,11 @@ def test_a_list_matching_nothing_is_red(
 
 
 def test_a_name_with_a_comma_is_red(
-    share_out: ShareOut, capfd: pytest.CaptureFixture[str]
+    share_out: ShareOut, capfd: pytest.CaptureFixture[str], env: support.Env
 ) -> None:
     """--mutate splits on commas, so such a file cannot be named."""
     (share_out.tree / "src/x,y.ts").write_text(SOURCE, encoding="utf-8")
-    subprocess.run([GIT, "add", "--", "src/x,y.ts"], env=support.env(), check=True)
+    subprocess.run([GIT, "add", "--", "src/x,y.ts"], env=env(), check=True)
     status, out, err = share_out.share(["src/x*.ts"], "0/1", capfd=capfd)
     want = (
         f"{LABEL}: src/x,y.ts: StrykerJS's --mutate cannot name this file"
@@ -593,11 +599,11 @@ def test_a_shard_with_files_writes_no_counts(
 
 
 def test_a_name_ending_in_a_range_is_red(
-    share_out: ShareOut, capfd: pytest.CaptureFixture[str]
+    share_out: ShareOut, capfd: pytest.CaptureFixture[str], env: support.Env
 ) -> None:
     """--mutate would read the name's tail as a range: red, by name."""
     (share_out.tree / "src/x:1-2").write_text(SOURCE, encoding="utf-8")
-    subprocess.run([GIT, "add", "--", "src/x:1-2"], env=support.env(), check=True)
+    subprocess.run([GIT, "add", "--", "src/x:1-2"], env=env(), check=True)
     status, out, err = share_out.share(["src/x*"], "0/1", capfd=capfd)
     want = (
         f"{LABEL}: src/x:1-2: StrykerJS's --mutate cannot name this file"

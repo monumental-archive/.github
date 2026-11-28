@@ -280,8 +280,9 @@ STUB = '#!/bin/sh\ncat > /dev/null\necho "{who} $*"\n'
 class AScratchRepositoryPinningItsOwnPython:
     """The real belt under a real mise, in a repository that pins Python."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Plant the repository, an empty config dir and the two stubs."""
+        self.make_env = env
         self.tmp = tmp_path
         self.repo = self.tmp / "repo"
         self.repo.mkdir()
@@ -298,7 +299,7 @@ class AScratchRepositoryPinningItsOwnPython:
             bindir.mkdir(parents=True)
             (bindir / "python3").write_text(STUB.format(who=who), encoding="utf-8")
             (bindir / "python3").chmod(0o755)
-        env = support.env(self.tmp)
+        env = self.make_env(self.tmp)
         subprocess.run([git(), "init", "-q", "."], cwd=self.repo, env=env, check=True)
 
     def run_task(self, task: str) -> subprocess.CompletedProcess[str]:
@@ -308,7 +309,7 @@ class AScratchRepositoryPinningItsOwnPython:
             The run.
 
         """
-        env = support.env(
+        env = self.make_env(
             self.tmp,
             ORG_PYTHON="",
             MISE_GLOBAL_CONFIG_FILE=str(BELT),
@@ -336,10 +337,10 @@ class AScratchRepositoryPinningItsOwnPython:
 
 @fixture
 def a_scratch_repository_pinning_its_own_python(
-    tmp_path: Path,
+    tmp_path: Path, env: support.Env
 ) -> AScratchRepositoryPinningItsOwnPython:
     """Give each row its own AScratchRepositoryPinningItsOwnPython."""
-    return AScratchRepositoryPinningItsOwnPython(tmp_path)
+    return AScratchRepositoryPinningItsOwnPython(tmp_path, env=env)
 
 
 def test_a_belt_task_runs_its_helper_under_the_belts_python(

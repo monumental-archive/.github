@@ -131,8 +131,10 @@ def measured(crate: str) -> str:
 class Planted:
     """A planted repository, stub PATH and belt; the rows are below."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, belt: support.Belt, env: support.Env) -> None:
         """Plant an empty repository, the stubs and a belt."""
+        self.plant_belt = belt
+        self.make_env = env
         self.tmp = tmp_path
         self.tree = self.tmp / "tree"
         self.tree.mkdir()
@@ -151,9 +153,9 @@ class Planted:
         self.log.touch()
         self.home = self.tmp / "home"
         self.home.mkdir()
-        self.env = support.env(self.home) | {
+        self.env = self.make_env(self.home) | {
             "PATH": f"{bins}{os.pathsep}{os.environ['PATH']}",
-            "ORG_BELT_DIR": str(support.belt(self.tmp / "belt")),
+            "ORG_BELT_DIR": str(self.plant_belt(self.tmp / "belt")),
             "PLANT_LOG": str(self.log),
             "PLANT_EXITS": str(self.exits),
         }
@@ -164,7 +166,7 @@ class Planted:
         subprocess.run(
             [GIT, "-c", "commit.gpgsign=false", *args],
             cwd=self.tree,
-            env=support.env(self.home),
+            env=self.make_env(self.home),
             check=True,
             capture_output=True,
         )
@@ -234,9 +236,9 @@ class Planted:
 
 
 @fixture
-def planted(tmp_path: Path) -> Planted:
+def planted(tmp_path: Path, belt: support.Belt, env: support.Env) -> Planted:
     """Give each row its own Planted."""
-    return Planted(tmp_path)
+    return Planted(tmp_path, belt=belt, env=env)
 
 
 def assert_lines(actual: list[str], expected: list[str]) -> None:
@@ -267,9 +269,11 @@ class TheDeclaration(Planted):
 
 
 @fixture
-def the_declaration(tmp_path: Path) -> TheDeclaration:
+def the_declaration(
+    tmp_path: Path, belt: support.Belt, env: support.Env
+) -> TheDeclaration:
     """Give each row its own TheDeclaration."""
-    return TheDeclaration(tmp_path)
+    return TheDeclaration(tmp_path, belt=belt, env=env)
 
 
 def test_an_undeclared_break_is_red(the_declaration: TheDeclaration) -> None:
@@ -564,15 +568,16 @@ DECLARATIONS: dict[str, tuple[str, str, bool]] = {
 class TheReaderAgrees:
     """#1906: "declared breaking" is what stele files under "Breaking"."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Skip unless the belt's stele is installed; plant a repository."""
+        self.make_env = env
         if not STELE:
             pytest.skip("stele is the belt's release engine and renders the notes")
         self.stele = STELE
         self.tmp = tmp_path
         self.repo = self.tmp / "repo"
         self.repo.mkdir()
-        self.env = support.env(self.tmp)
+        self.env = self.make_env(self.tmp)
         self.git("init", "-q", "-b", "main")
         self.git("commit", "-q", "--allow-empty", "-m", "chore: start")
         self.git("tag", "v1.0.0")
@@ -616,9 +621,9 @@ class TheReaderAgrees:
 
 
 @fixture
-def the_reader_agrees(tmp_path: Path) -> TheReaderAgrees:
+def the_reader_agrees(tmp_path: Path, env: support.Env) -> TheReaderAgrees:
     """Give each row its own TheReaderAgrees."""
-    return TheReaderAgrees(tmp_path)
+    return TheReaderAgrees(tmp_path, env=env)
 
 
 def test_every_declaration(the_reader_agrees: TheReaderAgrees) -> None:

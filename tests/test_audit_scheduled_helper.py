@@ -91,15 +91,16 @@ def unscheduled(names: str) -> list[str]:
 class Helper:
     """A planted tree; the helper's verdict on it."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Plant an empty repository with a workflows directory.
 
         The helper asks git whether the belt config is tracked (#2013).
         """
+        self.make_env = env
         self.tmp = tmp_path
         self.tree = self.tmp / "tree"
         (self.tree / ".github" / "workflows").mkdir(parents=True)
-        self.env = support.env(MISE_TASK_NAME=TASK, ORG_FINDINGS="")
+        self.env = self.make_env(MISE_TASK_NAME=TASK, ORG_FINDINGS="")
         self.git("init", "-q")
 
     def git(self, *args: str) -> None:
@@ -149,9 +150,9 @@ class Helper:
 
 
 @fixture
-def helper_state(tmp_path: Path) -> Helper:
+def helper_state(tmp_path: Path, env: support.Env) -> Helper:
     """Give each row its own Helper."""
-    return Helper(tmp_path)
+    return Helper(tmp_path, env=env)
 
 
 def test_zero_belt_audits_is_red(
@@ -271,16 +272,21 @@ def test_the_canon_collects_its_own_by_path(
     same(out.splitlines(), [collected])
 
 
-def test_a_file_outside_the_workflows_schedules_nothing(helper_state: Helper) -> None:
+def test_a_file_outside_the_workflows_schedules_nothing(
+    helper_state: Helper, belt: support.Belt, track: support.Track
+) -> None:
     """Through the body: a file the selection does not name schedules nothing."""
     helper_state.config('[tasks."audit:fuzz"]\nrun = "x"\n')
     helper_state.plant("top.yml", "run: true\n")
     helper_state.plant("notes.md", "run: mise run audit:fuzz\n")
     stubs = {"own-audits.sh": OWN_AUDITS_STUB}
-    belt = support.belt(helper_state.tmp / "belt", stubs=stubs)
-    support.track(helper_state.tree)
+    belt_dir = belt(helper_state.tmp / "belt", stubs=stubs)
+    track(helper_state.tree)
     as_mise = support.task_run(TASK, body())
-    env = helper_state.env | {"ORG_BELT_DIR": str(belt), "ORG_PYTHON": sys.executable}
+    env = helper_state.env | {
+        "ORG_BELT_DIR": str(belt_dir),
+        "ORG_PYTHON": sys.executable,
+    }
     done = subprocess.run(
         as_mise.argv,
         cwd=helper_state.tree,

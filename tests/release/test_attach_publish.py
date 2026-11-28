@@ -93,8 +93,9 @@ def subcommands(calls: list[list[str]]) -> list[str]:
 class AttachAndPublish:
     """Each row: the release as published, and what the step did."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Give each row a working directory, fixtures and a stub `gh`."""
+        self.make_env = env
         self.tmp = tmp_path
         self.bindir = self.tmp / "bin"
         self.bindir.mkdir()
@@ -133,7 +134,7 @@ class AttachAndPublish:
                 json.dumps(manifest), encoding="utf-8"
             )
         log = self.tmp / "gh-log"
-        env = support.env(
+        env = self.make_env(
             PATH=f"{self.bindir}{os.pathsep}{os.environ['PATH']}",
             HOME=str(self.tmp),
             GH_LOG=str(log),
@@ -159,9 +160,9 @@ class AttachAndPublish:
 
 
 @fixture
-def attach_and_publish(tmp_path: Path) -> AttachAndPublish:
+def attach_and_publish(tmp_path: Path, env: support.Env) -> AttachAndPublish:
     """Give each row its own AttachAndPublish."""
-    return AttachAndPublish(tmp_path)
+    return AttachAndPublish(tmp_path, env=env)
 
 
 def test_identical_published_release_converges(

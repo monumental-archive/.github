@@ -71,7 +71,7 @@ PLANTED = [("1.2.2", "1.2.3"), ("1.2.3", "1.3.1"), ("1.2.3", "1.3.2")]
 CURRENT = "1.3.2"
 
 
-def clean_env() -> dict[str, str]:
+def clean_env(*, env: support.Env) -> dict[str, str]:
     """Build the caller's environment with git's own variables removed.
 
     Returns:
@@ -79,7 +79,7 @@ def clean_env() -> dict[str, str]:
         below cannot be redirected at the caller's repository (#857).
 
     """
-    return support.env()
+    return env()
 
 
 def record_file(
@@ -111,8 +111,11 @@ class Tree:
         edges: list[tuple[str, str]] | None = None,
         record: str | None = None,
         name: str = "demo_pg",
+        *,
+        env: support.Env,
     ) -> None:
         """Lay out the control file, the crate, the graph and the record."""
+        self.make_env = env
         self.root = Path(root)
         self.name = name
         # pgrx extensions are named with underscores and their crates with
@@ -145,7 +148,7 @@ class Tree:
         subprocess.run(
             [GIT, *args],
             cwd=self.root,
-            env=clean_env(),
+            env=clean_env(env=self.make_env),
             check=True,
             capture_output=True,
         )
@@ -162,7 +165,7 @@ class Tree:
             The completed process; rows assert on stdout and the status.
 
         """
-        env = clean_env()
+        env = clean_env(env=self.make_env)
         subprocess.run(
             [
                 support.tool("cargo"),
@@ -196,13 +199,14 @@ def _set_up_test_needs_cargo() -> None:
 
 # A target-only version: burned dead end, or stranded installation.
 @pytest.mark.usefixtures("_set_up_test_needs_cargo")
-def test_a_recorded_installable_target_only_version_reds() -> None:
+def test_a_recorded_installable_target_only_version_reds(env: support.Env) -> None:
     """1.3.1 published: installations exist on it and nothing reaches."""
     with TemporaryDirectory() as d:
         result = Tree(
             d,
             edges=PLANTED,
             record=record_file("demo_pg 1.3.2 1.3.1 1.2.3 1.2.2"),
+            env=env,
         ).lint()
     assert result.returncode == 1, result.stdout
     assert "demo_pg 1.3.1 is a target nothing was derived from," in result.stdout
@@ -212,13 +216,11 @@ def test_a_recorded_installable_target_only_version_reds() -> None:
 
 
 @pytest.mark.usefixtures("_set_up_test_needs_cargo")
-def test_a_target_only_version_absent_from_the_record_passes() -> None:
+def test_a_target_only_version_absent_from_the_record_passes(env: support.Env) -> None:
     """1.3.1 burned: no release carries it, so nothing can be on it."""
     with TemporaryDirectory() as d:
         result = Tree(
-            d,
-            edges=PLANTED,
-            record=record_file("demo_pg 1.3.2 1.2.3 1.2.2"),
+            d, edges=PLANTED, record=record_file("demo_pg 1.3.2 1.2.3 1.2.2"), env=env
         ).lint()
     assert result.returncode == 0, result.stdout + result.stderr
     assert "nothing can be installed on it" in result.stdout
@@ -226,19 +228,20 @@ def test_a_target_only_version_absent_from_the_record_passes() -> None:
 
 
 @pytest.mark.usefixtures("_set_up_test_needs_cargo")
-def test_neither_outcome_asserts_what_the_record_does_not_hold() -> None:
+def test_neither_outcome_asserts_what_the_record_does_not_hold(
+    env: support.Env,
+) -> None:
     """The word the defect was filed about is gone from both branches."""
     with TemporaryDirectory() as d:
         passing = Tree(
-            d,
-            edges=PLANTED,
-            record=record_file("demo_pg 1.3.2 1.2.3 1.2.2"),
+            d, edges=PLANTED, record=record_file("demo_pg 1.3.2 1.2.3 1.2.2"), env=env
         ).lint()
     with TemporaryDirectory() as d:
         failing = Tree(
             d,
             edges=PLANTED,
             record=record_file("demo_pg 1.3.2 1.3.1 1.2.3 1.2.2"),
+            env=env,
         ).lint()
     for result in (passing, failing):
         assert "burned" not in result.stdout
@@ -248,7 +251,7 @@ def test_neither_outcome_asserts_what_the_record_does_not_hold() -> None:
 
 
 @pytest.mark.usefixtures("_set_up_test_needs_cargo")
-def test_the_record_may_accuse_but_never_excuse() -> None:
+def test_the_record_may_accuse_but_never_excuse(env: support.Env) -> None:
     """A `from` the record omits still owes a path to the current one."""
     with TemporaryDirectory() as d:
         result = Tree(
@@ -256,6 +259,7 @@ def test_the_record_may_accuse_but_never_excuse() -> None:
             edges=[("1.0.0", "1.1.0"), *PLANTED],
             # 1.0.0 is a `from`, and deliberately absent here.
             record=record_file("demo_pg 1.3.2 1.2.3 1.2.2"),
+            env=env,
         ).lint()
     assert result.returncode == 1, result.stdout
     assert "1.0.0" in result.stdout
@@ -263,51 +267,60 @@ def test_the_record_may_accuse_but_never_excuse() -> None:
 
 # No record: the question is open and the guard has to say so.
 @pytest.mark.usefixtures("_set_up_test_needs_cargo")
-def test_no_record_states_the_question_instead_of_closing_it() -> None:
+def test_no_record_states_the_question_instead_of_closing_it(env: support.Env) -> None:
     """Green, but it does not pretend to know that 1.3.1 burned."""
     with TemporaryDirectory() as d:
-        result = Tree(d, edges=PLANTED).lint()
+        result = Tree(d, edges=PLANTED, env=env).lint()
     assert result.returncode == 0, result.stdout + result.stderr
     assert "if it did, installations on it are stranded" in result.stdout
     assert "burned" not in result.stdout
 
 
 @pytest.mark.usefixtures("_set_up_test_needs_cargo")
-def test_no_record_does_not_claim_every_published_version_reaches() -> None:
+def test_no_record_does_not_claim_every_published_version_reaches(
+    env: support.Env,
+) -> None:
     """The success line is the one #825 was filed about. Bound it."""
     with TemporaryDirectory() as d:
-        result = Tree(d, edges=PLANTED).lint()
+        result = Tree(d, edges=PLANTED, env=env).lint()
     assert "every published demo_pg version" not in result.stdout
     assert "was not checked" in result.stdout
 
 
 @pytest.mark.usefixtures("_set_up_test_needs_cargo")
-def test_a_record_naming_another_extension_is_the_interim_path() -> None:
+def test_a_record_naming_another_extension_is_the_interim_path(
+    env: support.Env,
+) -> None:
     """A crate added since the last release was never asked about."""
     with TemporaryDirectory() as d:
-        result = Tree(d, edges=PLANTED, record=record_file("other_ext 9.9.9")).lint()
+        result = Tree(
+            d, edges=PLANTED, record=record_file("other_ext 9.9.9"), env=env
+        ).lint()
     assert result.returncode == 0, result.stdout + result.stderr
     assert "if it did, installations on it are stranded" in result.stdout
 
 
 # A record that cannot be trusted reds; it is never quietly repaired.
 @pytest.mark.usefixtures("_set_up_test_needs_cargo")
-def test_a_record_without_provenance_is_refused() -> None:
+def test_a_record_without_provenance_is_refused(env: support.Env) -> None:
     """Same law as .coverage-floor: derived state carries its derivation."""
     with TemporaryDirectory() as d:
-        result = Tree(d, edges=PLANTED, record="demo_pg 1.3.2 1.2.3 1.2.2\n").lint()
+        result = Tree(
+            d, edges=PLANTED, record="demo_pg 1.3.2 1.2.3 1.2.2\n", env=env
+        ).lint()
     assert result.returncode == 1, result.stdout
     assert "carries no" in result.stdout
 
 
 @pytest.mark.usefixtures("_set_up_test_needs_cargo")
-def test_a_record_naming_an_extension_twice_is_refused() -> None:
+def test_a_record_naming_an_extension_twice_is_refused(env: support.Env) -> None:
     """Two answers to one question is drift, not a merge to guess at."""
     with TemporaryDirectory() as d:
         result = Tree(
             d,
             edges=PLANTED,
             record=record_file("demo_pg 1.2.3", "demo_pg 1.2.2"),
+            env=env,
         ).lint()
     assert result.returncode == 1, result.stdout
     assert "is named twice" in result.stdout
@@ -315,10 +328,10 @@ def test_a_record_naming_an_extension_twice_is_refused() -> None:
 
 # The behaviour #825 must not have cost, in both directions.
 @pytest.mark.usefixtures("_set_up_test_needs_cargo")
-def test_a_repo_with_no_control_file_skips_clean() -> None:
+def test_a_repo_with_no_control_file_skips_clean(env: support.Env) -> None:
     """A linter that cannot skip cannot be universal."""
     with TemporaryDirectory() as d:
-        tree = Tree(d, edges=PLANTED)
+        tree = Tree(d, edges=PLANTED, env=env)
         tree.drop_control()
         result = tree.lint()
     assert result.returncode == 0, result.stdout + result.stderr
@@ -326,16 +339,16 @@ def test_a_repo_with_no_control_file_skips_clean() -> None:
 
 
 @pytest.mark.usefixtures("_set_up_test_needs_cargo")
-def test_an_empty_graph_is_a_first_publish_and_skips_clean() -> None:
+def test_an_empty_graph_is_a_first_publish_and_skips_clean(env: support.Env) -> None:
     """No upgrade scripts means no published predecessor to strand."""
     with TemporaryDirectory() as d:
-        result = Tree(d, version="1.0.0", edges=[]).lint()
+        result = Tree(d, version="1.0.0", edges=[], env=env).lint()
     assert result.returncode == 0, result.stdout + result.stderr
     assert "first publish has no predecessor" in result.stdout
 
 
 @pytest.mark.usefixtures("_set_up_test_needs_cargo")
-def test_a_release_that_derived_no_script_still_reds() -> None:
+def test_a_release_that_derived_no_script_still_reds(env: support.Env) -> None:
     """#816's own catch, kept: a bump with no new script strands all.
 
     The graph stops at 1.3.2 while the crate says 1.4.0, which is
@@ -350,13 +363,14 @@ def test_a_release_that_derived_no_script_still_reds() -> None:
             version="1.4.0",
             edges=PLANTED,
             record=record_file("demo_pg 1.3.2 1.2.3 1.2.2"),
+            env=env,
         ).lint()
     assert result.returncode == 1, result.stdout
     assert "no ALTER EXTENSION UPDATE path to 1.4.0" in result.stdout
 
 
 @pytest.mark.usefixtures("_set_up_test_needs_cargo")
-def test_only_the_record_sourced_accusation_is_explained() -> None:
+def test_only_the_record_sourced_accusation_is_explained(env: support.Env) -> None:
     """A `from` is on the hook by the graph, and needs no record line.
 
     The explanation exists to carry information the reader cannot get
@@ -369,6 +383,7 @@ def test_only_the_record_sourced_accusation_is_explained() -> None:
             version="1.4.0",
             edges=PLANTED,
             record=record_file("demo_pg 1.3.2 1.2.3 1.2.2"),
+            env=env,
         ).lint()
     # 1.3.2 is a target-only version the record accuses; 1.2.2 and
     # 1.2.3 are `from` halves and get no such line.

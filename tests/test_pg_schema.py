@@ -260,22 +260,22 @@ def write(text: str) -> str:
     return str(path)
 
 
-def scrubbed() -> dict[str, str]:
+def scrubbed(*, env: support.Env) -> dict[str, str]:
     """Build the environment with the `GIT_*` family removed (#857).
 
     Returns:
         A copy of the environment safe to run git in a fixture with.
 
     """
-    return support.env()
+    return env()
 
 
-def git(root: Path, *args: str) -> None:
+def git(root: Path, *args: str, env: support.Env) -> None:
     """Run git in a fixture repository, never the caller's."""
     subprocess.run(
         [GIT, *args],
         cwd=root,
-        env=scrubbed(),
+        env=scrubbed(env=env),
         check=True,
         capture_output=True,
     )
@@ -284,27 +284,32 @@ def git(root: Path, *args: str) -> None:
 class InRepo:
     """A fresh git repository as the working directory for each row."""
 
-    def __init__(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def __init__(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, env: support.Env
+    ) -> None:
         """Make the repository and the extension directory, and enter it."""
+        self.make_env = env
         self.root = tmp_path
-        git(self.root, "init", "-q")
+        git(self.root, "init", "-q", env=self.make_env)
         (self.root / "crates" / "ext").mkdir(parents=True)
         for name in list(os.environ):
             monkeypatch.delenv(name)
-        for name, value in scrubbed().items():
+        for name, value in scrubbed(env=self.make_env).items():
             monkeypatch.setenv(name, value)
         monkeypatch.chdir(self.root)
 
     def track(self, text: str) -> None:
         """Commit-stage a snapshot with the given content."""
         (self.root / SNAPSHOT).write_text(text, encoding="utf-8")
-        git(self.root, "add", SNAPSHOT)
+        git(self.root, "add", SNAPSHOT, env=self.make_env)
 
 
 @fixture
-def in_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> InRepo:
+def in_repo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, env: support.Env
+) -> InRepo:
     """Give each row its own InRepo."""
-    return InRepo(tmp_path, monkeypatch)
+    return InRepo(tmp_path, monkeypatch, env=env)
 
 
 # What must NOT diff: everything that is not the surface.
@@ -452,14 +457,16 @@ def test_missing_generation_is_red(in_repo: InRepo) -> None:
     assert "cannot read the generated schema" in err
 
 
-def test_written_snapshot_is_what_check_passes(in_repo: InRepo) -> None:
+def test_written_snapshot_is_what_check_passes(
+    in_repo: InRepo, env: support.Env
+) -> None:
     """Absent, written, tracked, green: the fixer's whole contract."""
     raw = write(RAW)
     assert run_main(["check", raw, SNAPSHOT])[0] == 1
     status, out, err = run_main(["write", raw, SNAPSHOT])
     assert (status, out, err) == (0, f"fix:pg-schema: wrote {SNAPSHOT}\n", "")
     assert (in_repo.root / SNAPSHOT).read_text(encoding="utf-8") == EDTF_SNAPSHOT
-    git(in_repo.root, "add", SNAPSHOT)
+    git(in_repo.root, "add", SNAPSHOT, env=env)
     assert run_main(["check", raw, SNAPSHOT]) == (0, "", "")
 
 
@@ -553,16 +560,19 @@ class SqlSkipsOwnedSnapshots:
     reds 1; a root crate's path left as `./schema.snapshot.sql` reds 1.
     """
 
-    def __init__(self, tmp_path: Path, request: pytest.FixtureRequest) -> None:
+    def __init__(
+        self, tmp_path: Path, request: pytest.FixtureRequest, *, env: support.Env
+    ) -> None:
         """Make a repository, the shims, and an empty member list.
 
         The tool is asserted first, as the belt's tasks assert theirs: a
         row that needs sqlfluff fails by name without it (#1528), which
         TestAbsentSqlfluffFailsByName plants.
         """
+        self.make_env = env
         need_sqlfluff()
         self.root = tmp_path
-        git(self.root, "init", "-q")
+        git(self.root, "init", "-q", env=self.make_env)
         self.shims = Path(tempfile.mkdtemp()).resolve()
         request.addfinalizer(
             functools.partial(shutil.rmtree, self.shims, ignore_errors=True)
@@ -580,7 +590,7 @@ class SqlSkipsOwnedSnapshots:
         crate = self.root / where
         crate.mkdir(parents=True, exist_ok=True)
         (crate / "Cargo.toml").write_text("[package]\n", encoding="utf-8")
-        git(self.root, "add", str(Path(where) / "Cargo.toml"))
+        git(self.root, "add", str(Path(where) / "Cargo.toml"), env=self.make_env)
         name = Path(where).name if where != "." else "rootext"
         features: dict[str, list[str]] = (
             {"pg17": [], "pg18": [], "pg_test": []} if pgrx else {}
@@ -598,7 +608,7 @@ class SqlSkipsOwnedSnapshots:
         """Plant and track one SQL file."""
         (self.root / path).parent.mkdir(parents=True, exist_ok=True)
         (self.root / path).write_text(text, encoding="utf-8")
-        git(self.root, "add", path)
+        git(self.root, "add", path, env=self.make_env)
 
     def run_task(self, task: str) -> tuple[int, str, str, list[str]]:
         """Run one task body in the planted repository.
@@ -615,7 +625,7 @@ class SqlSkipsOwnedSnapshots:
         }
         if self.packages:
             self.metadata.write_text(json.dumps(doc), encoding="utf-8")
-        env = scrubbed() | {
+        env = scrubbed(env=self.make_env) | {
             "ORG_BELT_DIR": str(BELT),
             "PATH": f"{self.shims}{os.pathsep}{os.environ['PATH']}",
             "PLANT_METADATA": str(self.metadata),
@@ -641,10 +651,10 @@ class SqlSkipsOwnedSnapshots:
 
 @fixture
 def sql_skips_owned_snapshots(
-    tmp_path: Path, request: pytest.FixtureRequest
+    tmp_path: Path, request: pytest.FixtureRequest, env: support.Env
 ) -> SqlSkipsOwnedSnapshots:
     """Give each row its own SqlSkipsOwnedSnapshots."""
-    return SqlSkipsOwnedSnapshots(tmp_path, request)
+    return SqlSkipsOwnedSnapshots(tmp_path, request, env=env)
 
 
 def test_the_planted_snapshot_is_one_sqlfluff_reds(

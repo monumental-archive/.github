@@ -48,8 +48,9 @@ def refusal(have: str, want: str) -> str:
 class ToolPython:
     """One row per branch of the check."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Plant a venv with its entry point, and a PATH linking to it."""
+        self.make_env = env
         self.tmp = tmp_path
         self.venv = self.tmp / "venv" / "bin"
         self.venv.mkdir(parents=True)
@@ -73,7 +74,7 @@ class ToolPython:
         """
         # The caller's label is its task's own name, as the properties
         # scripts pass it: the refusal reads `<label>: …` (#1934).
-        environ = support.env(PATH=str(self.bins), MISE_TASK_NAME=LABEL, **env)
+        environ = self.make_env(PATH=str(self.bins), MISE_TASK_NAME=LABEL, **env)
         with pytest.MonkeyPatch.context() as patched:
             for name, value in environ.items():
                 patched.setenv(name, value)
@@ -83,9 +84,9 @@ class ToolPython:
 
 
 @fixture
-def tool_python_state(tmp_path: Path) -> ToolPython:
+def tool_python_state(tmp_path: Path, env: support.Env) -> ToolPython:
     """Give each row its own ToolPython."""
-    return ToolPython(tmp_path)
+    return ToolPython(tmp_path, env=env)
 
 
 def write(path: Path, text: str) -> None:

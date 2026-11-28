@@ -124,11 +124,12 @@ def ungrouped(files: str) -> list[str]:
 class Lint:
     """Planted callers; the helper's verdict on them."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Plant an empty workflows directory."""
+        self.make_env = env
         self.tree = tmp_path
         (self.tree / ".github" / "workflows").mkdir(parents=True)
-        self.env = support.env(
+        self.env = self.make_env(
             MISE_TASK_NAME=TASK,
             ORG_BELT_DIR=str(BELT),
             ORG_CANON_DIR=str(CANON_DIR),
@@ -170,14 +171,14 @@ class Lint:
 
 
 @fixture
-def lint(tmp_path: Path) -> Lint:
+def lint(tmp_path: Path, env: support.Env) -> Lint:
     """Give each row its own Lint."""
-    return Lint(tmp_path)
+    return Lint(tmp_path, env=env)
 
 
-def test_no_workflows_is_skipped_by_name(lint: Lint) -> None:
+def test_no_workflows_is_skipped_by_name(lint: Lint, track: support.Track) -> None:
     """No workflow file: the task says it skipped."""
-    support.track(lint.tree)
+    track(lint.tree)
     as_mise = support.task_run(TASK, body())
     done = subprocess.run(
         as_mise.argv,

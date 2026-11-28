@@ -58,10 +58,11 @@ BODY = body()
 class History:
     """A scratch repository whose commits a row builds one at a time."""
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, *, env: support.Env) -> None:
         """Initialise an empty repository at `root`."""
+        self.make_env = env
         self.root = root
-        self.env = support.env()
+        self.env = self.make_env()
         self.env |= {
             "HOME": str(root),
             "GIT_CONFIG_GLOBAL": os.devnull,
@@ -120,11 +121,12 @@ class History:
 class ReleasePlanned:
     """Green where planned, red with both commits and the count, else skip."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Build a history with one commit on the default branch."""
+        self.make_env = env
         if GIT is None or BASH is None:
             pytest.skip("git (or bash) not on PATH")
-        self.repo = History(Path(str(tmp_path)).resolve())
+        self.repo = History(Path(str(tmp_path)).resolve(), env=self.make_env)
         self.planned = self.repo.commit("fix: the commit the release was planned at")
 
     def assert_out(self, line: str) -> None:
@@ -143,9 +145,9 @@ class ReleasePlanned:
 
 
 @fixture
-def release_planned(tmp_path: Path) -> ReleasePlanned:
+def release_planned(tmp_path: Path, env: support.Env) -> ReleasePlanned:
     """Give each row its own ReleasePlanned."""
-    return ReleasePlanned(tmp_path)
+    return ReleasePlanned(tmp_path, env=env)
 
 
 def test_a_release_on_its_planned_commit_is_green(

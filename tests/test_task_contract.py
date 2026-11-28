@@ -434,10 +434,12 @@ def test_every_leg_is_one_line_of_the_task() -> None:
 class Selection:
     """MUTANTS_LEG selects one leg; unset, every leg runs."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, belt: support.Belt, env: support.Env) -> None:
         """Plant a belt of the real body and stub legs that only say they ran."""
+        self.plant_belt = belt
+        self.make_env = env
         tmp = tmp_path
-        self.belt = support.belt(
+        self.belt = self.plant_belt(
             tmp / "belt",
             stubs=dict(leg_stub(lang) for lang in leg_files()),
         )
@@ -453,7 +455,7 @@ class Selection:
         return subprocess.run(
             as_mise.argv,
             cwd=self.belt,
-            env=support.env(ORG_BELT_DIR=str(self.belt), **env) | as_mise.env,
+            env=self.make_env(ORG_BELT_DIR=str(self.belt), **env) | as_mise.env,
             capture_output=True,
             text=True,
             check=False,
@@ -461,9 +463,9 @@ class Selection:
 
 
 @fixture
-def selection(tmp_path: Path) -> Selection:
+def selection(tmp_path: Path, belt: support.Belt, env: support.Env) -> Selection:
     """Give each row its own Selection."""
-    return Selection(tmp_path)
+    return Selection(tmp_path, belt=belt, env=env)
 
 
 def test_unset_runs_every_leg(selection: Selection) -> None:
@@ -535,7 +537,14 @@ FLOOR = (
 SUITE_COMMAND = "pytest -q -p no:cacheprovider -n 2 tests"
 
 
-def plant(base: Path, name: str, *, floor: bool = True, measured: bool = True) -> Path:
+def plant(
+    base: Path,
+    name: str,
+    *,
+    floor: bool = True,
+    measured: bool = True,
+    env: support.Env,
+) -> Path:
     """Plant a python repository whose suite runs from a `depends`.
 
     `test` depends on `test:unit`, which sets PYTHONPATH=src of its own,
@@ -573,9 +582,9 @@ def plant(base: Path, name: str, *, floor: bool = True, measured: bool = True) -
     )
     if floor:
         (tree / ".coverage-floor").write_text(FLOOR, encoding="utf-8")
-    env = support.env()
+    environ = env()
     for argv in ([GIT, "init", "-q"], [GIT, "add", "-A"]):
-        subprocess.run(argv, cwd=tree, env=env, check=True)
+        subprocess.run(argv, cwd=tree, env=environ, check=True)
     return tree
 
 
@@ -597,7 +606,9 @@ HELD = (
 )
 
 
-def run_mise(tree: Path, task: str) -> subprocess.CompletedProcess[str]:
+def run_mise(
+    tree: Path, task: str, *, env: support.Env
+) -> subprocess.CompletedProcess[str]:
     """Run `task` in `tree` with the belt as the global config.
 
     Returns:
@@ -607,7 +618,7 @@ def run_mise(tree: Path, task: str) -> subprocess.CompletedProcess[str]:
     found = support.tool("mise")
     config = tree.parent / f"{tree.name}-config"
     config.mkdir()
-    env = support.env(
+    environ = env(
         MISE_CONFIG_DIR=str(config),
         XDG_CONFIG_HOME=str(config),
         MISE_GLOBAL_CONFIG_FILE=str(CONFIG),
@@ -620,7 +631,7 @@ def run_mise(tree: Path, task: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [str(found), "run", task],
         cwd=tree,
-        env=env,
+        env=environ,
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
@@ -629,11 +640,11 @@ def run_mise(tree: Path, task: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def test_ci_runs_the_suite_once_and_measures_every_worker() -> None:
+def test_ci_runs_the_suite_once_and_measures_every_worker(env: support.Env) -> None:
     """One run: the depend's own path kept, both workers measured, the figures."""
     with tempfile.TemporaryDirectory() as tmp:
-        tree = plant(Path(tmp), "py")
-        done = run_mise(tree, "ci")
+        tree = plant(Path(tmp), "py", env=env)
+        done = run_mise(tree, "ci", env=env)
         out = done.stdout + done.stderr
         assert done.returncode == 0, out
         assert runs(tree) == 1, out
@@ -642,11 +653,11 @@ def test_ci_runs_the_suite_once_and_measures_every_worker() -> None:
         assert "ci: all gates green" in out
 
 
-def test_no_floor_runs_test_once_and_measures_nothing() -> None:
+def test_no_floor_runs_test_once_and_measures_nothing(env: support.Env) -> None:
     """Without a floor `measured` is plain exec and coverage:check skips."""
     with tempfile.TemporaryDirectory() as tmp:
-        tree = plant(Path(tmp), "py", floor=False)
-        done = run_mise(tree, "ci")
+        tree = plant(Path(tmp), "py", floor=False, env=env)
+        done = run_mise(tree, "ci", env=env)
         out = done.stdout + done.stderr
         assert done.returncode == 0, out
         assert runs(tree) == 1, out
@@ -654,11 +665,11 @@ def test_no_floor_runs_test_once_and_measures_nothing() -> None:
         assert "leg holds its floor" not in out
 
 
-def test_coverage_check_alone_runs_test_once() -> None:
+def test_coverage_check_alone_runs_test_once(env: support.Env) -> None:
     """Run on its own, coverage:check runs `test` and holds its floor."""
     with tempfile.TemporaryDirectory() as tmp:
-        tree = plant(Path(tmp), "py")
-        done = run_mise(tree, "coverage:check")
+        tree = plant(Path(tmp), "py", env=env)
+        done = run_mise(tree, "coverage:check", env=env)
         out = done.stdout + done.stderr
         assert done.returncode == 0, out
         assert runs(tree) == 1, out
@@ -666,11 +677,11 @@ def test_coverage_check_alone_runs_test_once() -> None:
             assert line in out
 
 
-def test_a_suite_outside_measured_is_red_by_the_record() -> None:
+def test_a_suite_outside_measured_is_red_by_the_record(env: support.Env) -> None:
     """Not through `measured`: the recorded legs are named, with the remedy."""
     with tempfile.TemporaryDirectory() as tmp:
-        tree = plant(Path(tmp), "py", measured=False)
-        done = run_mise(tree, "coverage:check")
+        tree = plant(Path(tmp), "py", measured=False, env=env)
+        done = run_mise(tree, "coverage:check", env=env)
         out = done.stdout + done.stderr
         assert done.returncode == 1, out
         assert runs(tree) == 1, out
@@ -685,10 +696,10 @@ def test_a_suite_outside_measured_is_red_by_the_record() -> None:
             ) in done.stderr
 
 
-def test_measured_reaches_a_file_task() -> None:
+def test_measured_reaches_a_file_task(env: support.Env) -> None:
     """A file task with a `#!/bin/sh` shebang runs through `measured` too."""
     with tempfile.TemporaryDirectory() as tmp:
-        tree = plant(Path(tmp), "py")
+        tree = plant(Path(tmp), "py", env=env)
         tasks_dir = tree / "mise-tasks"
         tasks_dir.mkdir()
         probe = tasks_dir / "probe"
@@ -698,7 +709,7 @@ def test_measured_reaches_a_file_task() -> None:
             encoding="utf-8",
         )
         probe.chmod(0o755)
-        done = run_mise(tree, "probe")
+        done = run_mise(tree, "probe", env=env)
         out = done.stdout + done.stderr
         assert done.returncode == 0, out
         assert "2 passed" in done.stdout, out

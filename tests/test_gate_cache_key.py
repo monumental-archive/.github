@@ -425,7 +425,7 @@ TREE = {
 }
 
 
-def git_tree(root: Path, files: dict[str, str]) -> Path:
+def git_tree(root: Path, files: dict[str, str], *, env: support.Env) -> Path:
     """Write `files` into a fresh repository at `root` and track them.
 
     Returns:
@@ -433,12 +433,12 @@ def git_tree(root: Path, files: dict[str, str]) -> Path:
 
     """
     git = support.tool("git")
-    env = support.env()
-    subprocess.run([git, "init", "-q", str(root)], env=env, check=True)
+    environ = env()
+    subprocess.run([git, "init", "-q", str(root)], env=environ, check=True)
     for name, text in files.items():
         (root / name).parent.mkdir(parents=True, exist_ok=True)
         (root / name).write_text(text, "utf-8")
-    subprocess.run([git, "-C", str(root), "add", "--", *files], env=env, check=True)
+    subprocess.run([git, "-C", str(root), "add", "--", *files], env=environ, check=True)
     return root
 
 
@@ -446,6 +446,8 @@ def cargo_main(
     path: str,
     tree: Path | None = None,
     canon_ref: str = CANON_REF,
+    *,
+    env: support.Env,
     **runner: str,
 ) -> tuple[int, str, str]:
     """Run `cargo` in `tree` with PATH set to `path`, as the workflow does.
@@ -457,8 +459,8 @@ def cargo_main(
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / "out"
         out.touch()
-        where = tree or git_tree(Path(tmp) / "tree", TREE)
-        env = {
+        where = tree or git_tree(Path(tmp) / "tree", TREE, env=env)
+        environ = {
             **RUNNER,
             "ImageVersion": "20261116.1.0",
             "ORG_MISE_CONFIG_GLOBS": GLOBS,
@@ -475,7 +477,7 @@ def cargo_main(
         ):
             for name in list(os.environ):
                 patched.delenv(name)
-            for name, value in env.items():
+            for name, value in environ.items():
                 patched.setenv(name, value)
             code = gate_cache_key.main(["cargo", "--canon-ref", canon_ref])
         return code, out.read_text("utf-8"), err.getvalue()
@@ -523,11 +525,11 @@ def test_text_naming_no_compiler_is_red(text: object) -> None:
         gate_cache_key.rustc_digest(text)
 
 
-def test_main_writes_the_digest_of_the_rustc_on_path() -> None:
+def test_main_writes_the_digest_of_the_rustc_on_path(env: support.Env) -> None:
     """`cargo` asks PATH's rustc and writes `digest` for the key."""
     with tempfile.TemporaryDirectory() as tmp:
         path = rustc_on_path(Path(tmp), f"printf '%s' '{RUSTC}'")
-        code, written, _ = cargo_main(path)
+        code, written, _ = cargo_main(path, env=env)
     assert code == 0
     assert gate_cache_key.rustc_digest(RUSTC) == outputs(written)["digest"]
     want: set[str] = {"digest", "inputs"}
@@ -535,31 +537,31 @@ def test_main_writes_the_digest_of_the_rustc_on_path() -> None:
     assert want == got
 
 
-def test_two_releases_on_path_give_two_keys() -> None:
+def test_two_releases_on_path_give_two_keys(env: support.Env) -> None:
     """Two toolchains differing only in release write two digests."""
     bumped = RUSTC.replace("release: 1.97.1", "release: 1.100.0")
     written: list[str] = []
     for text in (RUSTC, bumped):
         with tempfile.TemporaryDirectory() as tmp:
             path = rustc_on_path(Path(tmp), f"printf '%s' '{text}'")
-            written.append(outputs(cargo_main(path)[1])["digest"])
+            written.append(outputs(cargo_main(path, env=env)[1])["digest"])
     assert written[0] != written[1]
 
 
-def test_no_rustc_is_red() -> None:
+def test_no_rustc_is_red(env: support.Env) -> None:
     """A job with a cargo cache and no compiler fails by name."""
     with tempfile.TemporaryDirectory() as tmp:
-        code, written, err = cargo_main(tmp)
+        code, written, err = cargo_main(tmp, env=env)
     assert code == 1
     assert written == ""
     assert "no rustc on PATH" in err
 
 
-def test_a_failing_rustc_is_red() -> None:
+def test_a_failing_rustc_is_red(env: support.Env) -> None:
     """A rustup proxy with no toolchain installed fails by its message."""
     with tempfile.TemporaryDirectory() as tmp:
         script = "echo 'toolchain 1.100.0 is not installed' >&2; exit 1"
-        code, written, err = cargo_main(rustc_on_path(Path(tmp), script))
+        code, written, err = cargo_main(rustc_on_path(Path(tmp), script), env=env)
     assert code == 1
     assert written == ""
     assert "-vV exited 1: toolchain 1.100.0 is not installed" in err
@@ -568,8 +570,9 @@ def test_a_failing_rustc_is_red() -> None:
 class CargoInputs:
     """The cargo key names every declared input of its builds (#2045)."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Put a `rustc` on PATH for every row."""
+        self.make_env = env
         self.tmp = tmp_path
         self.path = rustc_on_path(tmp_path, f"printf '%s' '{RUSTC}'")
         self.trees = 0
@@ -587,19 +590,19 @@ class CargoInputs:
 
         """
         self.trees += 1
-        tree = git_tree(self.tmp / f"tree{self.trees}", files)
+        tree = git_tree(self.tmp / f"tree{self.trees}", files, env=self.make_env)
         for name, text in (untracked or {}).items():
             (tree / name).parent.mkdir(parents=True, exist_ok=True)
             (tree / name).write_text(text, "utf-8")
-        code, written, err = cargo_main(self.path, tree, **kw)
+        code, written, err = cargo_main(self.path, tree, **kw, env=self.make_env)
         assert code == 0, err
         return outputs(written)
 
 
 @fixture
-def cargo_inputs(tmp_path: Path) -> CargoInputs:
+def cargo_inputs(tmp_path: Path, env: support.Env) -> CargoInputs:
     """Give each row its own CargoInputs."""
-    return CargoInputs(tmp_path)
+    return CargoInputs(tmp_path, env=env)
 
 
 def assert_moves_inputs_only(before: dict[str, str], after: dict[str, str]) -> None:
@@ -659,19 +662,21 @@ def test_an_untracked_manifest_changes_nothing(cargo_inputs: CargoInputs) -> Non
     )
 
 
-def test_no_canon_ref_is_red(cargo_inputs: CargoInputs) -> None:
+def test_no_canon_ref_is_red(cargo_inputs: CargoInputs, env: support.Env) -> None:
     """An empty ref is refused, never hashed into a key."""
-    tree = git_tree(cargo_inputs.tmp / "tree", TREE)
-    code, written, err = cargo_main(cargo_inputs.path, tree, canon_ref="")
+    tree = git_tree(cargo_inputs.tmp / "tree", TREE, env=env)
+    code, written, err = cargo_main(cargo_inputs.path, tree, canon_ref="", env=env)
     assert code == 1
     assert written == ""
     assert "no --canon-ref" in err
 
 
-def test_no_globs_is_red(cargo_inputs: CargoInputs) -> None:
+def test_no_globs_is_red(cargo_inputs: CargoInputs, env: support.Env) -> None:
     """A workflow that sets no mise globs would omit the tool pins."""
-    tree = git_tree(cargo_inputs.tmp / "tree", TREE)
-    code, written, err = cargo_main(cargo_inputs.path, tree, ORG_MISE_CONFIG_GLOBS="")
+    tree = git_tree(cargo_inputs.tmp / "tree", TREE, env=env)
+    code, written, err = cargo_main(
+        cargo_inputs.path, tree, ORG_MISE_CONFIG_GLOBS="", env=env
+    )
     assert code == 1
     assert written == ""
     assert "ORG_MISE_CONFIG_GLOBS is unset" in err
@@ -693,12 +698,13 @@ LDD = "ldd (Ubuntu GLIBC 2.43-2ubuntu2.7) 2.43"
 class Toolchain:
     """The cargo key names the toolchain the build takes from the image."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Put `rustc`, the toolchain and an `xcrun` on PATH for every row.
 
         The `xcrun` finds the row's `clang` on PATH, so the rows read the
         same stub on Darwin as `clang` on PATH does elsewhere.
         """
+        self.make_env = env
         self.tmp = tmp_path
         self.path = rustc_on_path(tmp_path, f"printf '%s' '{RUSTC}'")
         self.trees = 0
@@ -726,8 +732,8 @@ class Toolchain:
 
         """
         self.trees += 1
-        tree = git_tree(self.tmp / f"tree{self.trees}", TREE)
-        return cargo_main(self.path, tree, **kw)
+        tree = git_tree(self.tmp / f"tree{self.trees}", TREE, env=self.make_env)
+        return cargo_main(self.path, tree, **kw, env=self.make_env)
 
     def run_in(self, **kw: str) -> dict[str, str]:
         """Run `cargo` as `run_with` does, and require it to pass.
@@ -756,9 +762,9 @@ class Toolchain:
 
 
 @fixture
-def toolchain(tmp_path: Path) -> Toolchain:
+def toolchain(tmp_path: Path, env: support.Env) -> Toolchain:
     """Give each row its own Toolchain."""
-    return Toolchain(tmp_path)
+    return Toolchain(tmp_path, env=env)
 
 
 def test_a_cc_change_moves_inputs(toolchain: Toolchain) -> None:

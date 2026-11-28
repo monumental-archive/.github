@@ -82,8 +82,9 @@ TYPED = {"schema": 5, "entries": [{"name": "tool-1.2.3-linux.tar.gz"}]}
 class ReadTheLatestRelease:
     """Each row: the latest release, and what the step handed on."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Give each row a working directory, fixtures and a stub `gh`."""
+        self.make_env = env
         self.tmp = tmp_path
         self.bindir = self.tmp / "bin"
         self.bindir.mkdir()
@@ -119,7 +120,7 @@ class ReadTheLatestRelease:
             )
         output = self.tmp / "github-output"
         output.write_text("", encoding="utf-8")
-        env = support.env(
+        env = self.make_env(
             PATH=f"{self.bindir}{os.pathsep}{os.environ['PATH']}",
             HOME=str(self.tmp),
             STUB_TAG=tag,
@@ -138,9 +139,9 @@ class ReadTheLatestRelease:
 
 
 @fixture
-def read_the_latest_release(tmp_path: Path) -> ReadTheLatestRelease:
+def read_the_latest_release(tmp_path: Path, env: support.Env) -> ReadTheLatestRelease:
     """Give each row its own ReadTheLatestRelease."""
-    return ReadTheLatestRelease(tmp_path)
+    return ReadTheLatestRelease(tmp_path, env=env)
 
 
 def test_typed_release_hands_its_manifest_on(

@@ -56,7 +56,7 @@ def run() -> None:
 '''
 
 
-def check(source: str) -> subprocess.CompletedProcess[str]:
+def check(source: str, *, env: support.Env) -> subprocess.CompletedProcess[str]:
     """Run ruff with the delivered config on one planted file.
 
     Returns:
@@ -71,7 +71,7 @@ def check(source: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [RUFF, "check", "--config", str(CONFIG), "--no-cache", str(planted)],
             cwd=tmp,
-            env=support.env(),
+            env=env(),
             capture_output=True,
             text=True,
             check=False,
@@ -79,23 +79,23 @@ def check(source: str) -> subprocess.CompletedProcess[str]:
 
 
 # The rules code can pass stay on; the two it cannot are off.
-def test_shell_true_is_red_by_name() -> None:
+def test_shell_true_is_red_by_name(env: support.Env) -> None:
     """S602: a command line through a shell is a finding."""
-    done = check(SHELL)
+    done = check(SHELL, env=env)
     assert done.returncode == 1, done.stdout + done.stderr
     assert "subprocess-popen-with-shell-equals-true" in done.stdout
 
 
-def test_a_partial_path_is_red_by_name() -> None:
+def test_a_partial_path_is_red_by_name(env: support.Env) -> None:
     """S607: an executable found by name on PATH is a finding."""
-    done = check(PARTIAL)
+    done = check(PARTIAL, env=env)
     assert done.returncode == 1, done.stdout + done.stderr
     assert "start-process-with-partial-path" in done.stdout
 
 
-def test_a_given_argument_needs_no_comment() -> None:
+def test_a_given_argument_needs_no_comment(env: support.Env) -> None:
     """S404 and S603 are off: the import and the call are clean."""
-    done = check(CLEAN)
+    done = check(CLEAN, env=env)
     assert done.returncode == 0, done.stdout + done.stderr
     assert "suspicious-subprocess-import" not in done.stdout
     assert "subprocess-without-shell-equals-true" not in done.stdout

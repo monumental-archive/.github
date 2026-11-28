@@ -66,7 +66,11 @@ def strings(*items: str) -> list[str]:
 
 
 def run(
-    argv: list[str], env: dict[str, str], cwd: Path | None = None
+    argv: list[str],
+    env: dict[str, str],
+    cwd: Path | None = None,
+    *,
+    make_env: support.Env,
 ) -> subprocess.CompletedProcess[str]:
     """Run one script with `env` laid over the process environment.
 
@@ -76,7 +80,7 @@ def run(
     """
     return subprocess.run(
         argv,
-        env=support.env(**env),
+        env=make_env(**env),
         cwd=cwd,
         capture_output=True,
         text=True,
@@ -120,8 +124,9 @@ def filled(ext: str, version: str, xy: str, num: str) -> str:
 class FloorBlock:
     """floor.sh against an extension directory as the package lays it out."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Lay out a control, the install script and the upgrade scripts."""
+        self.make_env = env
         self.extdir = Path(str(tmp_path))
         (self.extdir / "demo_ext.control").write_text("default_version = '1.2.0'\n")
         for script in (
@@ -143,13 +148,14 @@ class FloorBlock:
         return run(
             [BASH, str(PGRX / "floor.sh"), str(self.extdir), "1.2.0", "18.7", "180007"],
             {},
+            make_env=self.make_env,
         )
 
 
 @fixture
-def floor_block(tmp_path: Path) -> FloorBlock:
+def floor_block(tmp_path: Path, env: support.Env) -> FloorBlock:
     """Give each row its own FloorBlock."""
-    return FloorBlock(tmp_path)
+    return FloorBlock(tmp_path, env=env)
 
 
 def test_install_and_upgrade_scripts_to_the_release_carry_it(
@@ -291,8 +297,9 @@ class PreviousRelease:
 
     CRATE = "crates/demo-ext"
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Put a stub gh first on PATH and a crate at CRATE."""
+        self.make_env = env
         if not JQ:
             pytest.skip("jq is a belt tool and drives the gh stub")
         self.root = Path(str(tmp_path))
@@ -341,7 +348,7 @@ class PreviousRelease:
         """
         with pytest.MonkeyPatch.context() as patched:
             patched.setattr(previous_release, "GH", str(self.gh))
-            for name, value in support.env(**env).items():
+            for name, value in self.make_env(**env).items():
                 patched.setenv(name, value)
             patched.chdir(self.root)
             status = previous_release.main(args)
@@ -377,9 +384,9 @@ class PreviousRelease:
 
 
 @fixture
-def previous_release_state(tmp_path: Path) -> PreviousRelease:
+def previous_release_state(tmp_path: Path, env: support.Env) -> PreviousRelease:
     """Give each row its own PreviousRelease."""
-    return PreviousRelease(tmp_path)
+    return PreviousRelease(tmp_path, env=env)
 
 
 @pytest.mark.parametrize(
@@ -518,9 +525,9 @@ class PreviousTarball(PreviousRelease):
 
 
 @fixture
-def previous_tarball(tmp_path: Path) -> PreviousTarball:
+def previous_tarball(tmp_path: Path, env: support.Env) -> PreviousTarball:
     """Give each row its own PreviousTarball."""
-    return PreviousTarball(tmp_path)
+    return PreviousTarball(tmp_path, env=env)
 
 
 def test_no_previous_release_or_a_rerun_skips(
@@ -613,9 +620,9 @@ class OnePredecessor(PreviousRelease):
 
 
 @fixture
-def one_predecessor(tmp_path: Path) -> OnePredecessor:
+def one_predecessor(tmp_path: Path, env: support.Env) -> OnePredecessor:
     """Give each row its own OnePredecessor."""
-    return OnePredecessor(tmp_path)
+    return OnePredecessor(tmp_path, env=env)
 
 
 def test_an_imported_tag_scheme_yields_the_published_predecessor(
@@ -730,9 +737,9 @@ class OlderLine(PreviousRelease):
     A release on the newer line, 1.3.1, upgrades from 1.3.0.
     """
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Publish 1.2.4 and 1.3.0, each on its own `v` release."""
-        super().__init__(tmp_path)
+        super().__init__(tmp_path, env=env)
         self.forge(
             [
                 release("v1.3.0", "demo_ext-1.3.0-pg18-linux-arm64.tar.gz"),
@@ -755,9 +762,9 @@ class OlderLine(PreviousRelease):
 
 
 @fixture
-def older_line(tmp_path: Path) -> OlderLine:
+def older_line(tmp_path: Path, env: support.Env) -> OlderLine:
     """Give each row its own OlderLine."""
-    return OlderLine(tmp_path)
+    return OlderLine(tmp_path, env=env)
 
 
 @pytest.mark.parametrize(
@@ -864,8 +871,9 @@ CONTAINER_STUBS = {
 class ContainerScripts:
     """The rows share the stub functions and a call log."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Stub functions; PG 18, demo_ext, 1.1.0 to 1.2.0."""
+        self.make_env = env
         self.calls = Path(str(tmp_path)) / "calls"
         self.env = {
             **{
@@ -890,7 +898,9 @@ class ContainerScripts:
             The completed process.
 
         """
-        return run([BASH, str(PGRX / name), *args], {**self.env, **env})
+        return run(
+            [BASH, str(PGRX / name), *args], {**self.env, **env}, make_env=self.make_env
+        )
 
     def logged(self) -> list[str]:
         """Read back the stubbed calls, in order.
@@ -903,9 +913,9 @@ class ContainerScripts:
 
 
 @fixture
-def container_scripts(tmp_path: Path) -> ContainerScripts:
+def container_scripts(tmp_path: Path, env: support.Env) -> ContainerScripts:
     """Give each row its own ContainerScripts."""
-    return ContainerScripts(tmp_path)
+    return ContainerScripts(tmp_path, env=env)
 
 
 def test_smoke_without_a_script_creates_the_extension_only(
@@ -1116,8 +1126,9 @@ REL = "usr/lib/postgresql/18/lib/demo_ext.so"
 class DebugSplit:
     """debug-split.sh over pkgroot/usr/lib/postgresql/18/lib/demo_ext.so."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Build a package root holding one real library with .dep-v0."""
+        self.make_env = env
         if not elf_tools_present():
             pytest.skip(SKIP_ELF)
         self.root = Path(str(tmp_path))
@@ -1144,13 +1155,17 @@ class DebugSplit:
             stub(bindir, *shim)
             env["PATH"] = f"{bindir}{os.pathsep}{os.environ['PATH']}"
         script = str(PGRX / "debug-split.sh")
-        return run([BASH, script, str(self.pkgroot), str(self.root / "debugroot")], env)
+        return run(
+            [BASH, script, str(self.pkgroot), str(self.root / "debugroot")],
+            env,
+            make_env=self.make_env,
+        )
 
 
 @fixture
-def debug_split(tmp_path: Path) -> DebugSplit:
+def debug_split(tmp_path: Path, env: support.Env) -> DebugSplit:
     """Give each row its own DebugSplit."""
-    return DebugSplit(tmp_path)
+    return DebugSplit(tmp_path, env=env)
 
 
 def sections(path: Path) -> str:
@@ -1231,8 +1246,9 @@ def test_no_library_is_refused(debug_split: DebugSplit) -> None:
 class GlibcFloor:
     """glibc-floor.sh over a real library, against floors either side."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Make an empty package root."""
+        self.make_env = env
         if not elf_tools_present():
             pytest.skip(SKIP_ELF)
         self.pkgroot = Path(str(tmp_path)) / "pkgroot"
@@ -1246,13 +1262,17 @@ class GlibcFloor:
             The completed process.
 
         """
-        return run([BASH, str(PGRX / "glibc-floor.sh"), str(self.pkgroot), floor], {})
+        return run(
+            [BASH, str(PGRX / "glibc-floor.sh"), str(self.pkgroot), floor],
+            {},
+            make_env=self.make_env,
+        )
 
 
 @fixture
-def glibc_floor(tmp_path: Path) -> GlibcFloor:
+def glibc_floor(tmp_path: Path, env: support.Env) -> GlibcFloor:
     """Give each row its own GlibcFloor."""
-    return GlibcFloor(tmp_path)
+    return GlibcFloor(tmp_path, env=env)
 
 
 def test_within_the_floor(glibc_floor: GlibcFloor) -> None:
@@ -1291,9 +1311,9 @@ def test_no_versioned_symbols(glibc_floor: GlibcFloor) -> None:
 
 
 # The one glibc row that needs no binutils.
-def test_glibc_floor_no_library_no_library_is_refused() -> None:
+def test_glibc_floor_no_library_no_library_is_refused(env: support.Env) -> None:
     """A package with no library has no floor to prove: a red."""
     with TemporaryDirectory() as d:
-        result = run([BASH, str(PGRX / "glibc-floor.sh"), d, "2.36"], {})
+        result = run([BASH, str(PGRX / "glibc-floor.sh"), d, "2.36"], {}, make_env=env)
     assert result.returncode == 1
     assert result.stderr == "::error::glibc-floor.sh: no shared library packaged\n"

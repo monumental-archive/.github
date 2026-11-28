@@ -137,14 +137,15 @@ CEILING = (
 class Planted:
     """A planted, tracked tree; a lint's verdict on it."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Make an empty git repository and a scrubbed environment."""
+        self.make_env = env
         tmp = tmp_path
         self.tree = tmp / "tree"
         self.tree.mkdir()
         self.bin = tmp / "bin"
         self.bin.mkdir()
-        self.env = support.env() | {
+        self.env = self.make_env() | {
             "ORG_BELT_DIR": str(BELT),
             "ORG_CANON_DIR": str(BELT.parent),
         }
@@ -203,9 +204,9 @@ class Planted:
 
 
 @fixture
-def planted(tmp_path: Path) -> Planted:
+def planted(tmp_path: Path, env: support.Env) -> Planted:
     """Give each row its own Planted."""
-    return Planted(tmp_path)
+    return Planted(tmp_path, env=env)
 
 
 def test_a_top_level_actions_directory_does_not_forbid_github_actions(
@@ -290,9 +291,9 @@ def test_action_pins_no_workflow_and_no_action_skips_clean(planted: Planted) -> 
 class Zizmor(Planted):
     """lint:zizmor, with zizmor stubbed to record its arguments."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Put a recording zizmor first on PATH."""
-        super().__init__(tmp_path)
+        super().__init__(tmp_path, env=env)
         self.args = self.bin / "args"
         stub = self.bin / "zizmor"
         stub.write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" >> "{self.args}"\n', "utf-8")
@@ -301,9 +302,9 @@ class Zizmor(Planted):
 
 
 @fixture
-def zizmor(tmp_path: Path) -> Zizmor:
+def zizmor(tmp_path: Path, env: support.Env) -> Zizmor:
     """Give each row its own Zizmor."""
-    return Zizmor(tmp_path)
+    return Zizmor(tmp_path, env=env)
 
 
 def test_zizmor_is_given_every_action_file(zizmor: Zizmor) -> None:
@@ -443,9 +444,9 @@ class CanonSources(Planted):
 
 
 @fixture
-def canon_sources(tmp_path: Path) -> CanonSources:
+def canon_sources(tmp_path: Path, env: support.Env) -> CanonSources:
     """Give each row its own CanonSources."""
-    return CanonSources(tmp_path)
+    return CanonSources(tmp_path, env=env)
 
 
 def test_lint_actions_follows_the_canon_source(canon_sources: CanonSources) -> None:
@@ -615,9 +616,9 @@ class AllowlistAudit(Planted):
 
 
 @fixture
-def allowlist_audit(tmp_path: Path) -> AllowlistAudit:
+def allowlist_audit(tmp_path: Path, env: support.Env) -> AllowlistAudit:
     """Give each row its own AllowlistAudit."""
-    return AllowlistAudit(tmp_path)
+    return AllowlistAudit(tmp_path, env=env)
 
 
 def test_the_live_setting_matching_the_belt_is_green(

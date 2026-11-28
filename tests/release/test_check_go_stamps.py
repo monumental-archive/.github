@@ -77,7 +77,7 @@ def info(
     return "\n".join(lines) + "\n"
 
 
-def clean_env() -> dict[str, str]:
+def clean_env(*, env: support.Env) -> dict[str, str]:
     """Strip every inherited `GIT_*` from the environment.
 
     The suite runs under a decoy GIT_DIR (#1463); a scratch repository
@@ -88,8 +88,8 @@ def clean_env() -> dict[str, str]:
         config read.
 
     """
-    env = support.env()
-    return {**env, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+    environ = env()
+    return {**environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
 
 
 @dataclass
@@ -102,7 +102,7 @@ class Run:
     head: str
 
 
-def git(cwd: Path, *args: str) -> str:
+def git(cwd: Path, *args: str, env: support.Env) -> str:
     """Run git in a scratch repository.
 
     Returns:
@@ -115,7 +115,7 @@ def git(cwd: Path, *args: str) -> str:
         capture_output=True,
         text=True,
         check=True,
-        env=clean_env(),
+        env=clean_env(env=env),
     ).stdout
 
 
@@ -125,6 +125,7 @@ def run_helper(
     fail: bool = False,
     repo: bool = True,
     capfd: pytest.CaptureFixture[str],
+    env: support.Env,
 ) -> Run:
     """Run the helper over staged/ holding `binaries` (name → build info).
 
@@ -143,22 +144,22 @@ def run_helper(
         (stubs / "go").chmod(0o755)
         head = ""
         if repo:
-            git(work, "init", "-q")
+            git(work, "init", "-q", env=env)
             who = ("-c", "user.name=t", "-c", "user.email=t@t")
-            git(work, *who, "commit", "-q", "--allow-empty", "-m", "c")
-            head = git(work, "rev-parse", "HEAD").strip()
+            git(work, *who, "commit", "-q", "--allow-empty", "-m", "c", env=env)
+            head = git(work, "rev-parse", "HEAD", env=env).strip()
         if binaries is not None:
             (work / "staged").mkdir()
             for name, text in binaries.items():
                 (work / "staged" / name).write_text(text.replace("{head}", head))
-        env = {
-            **clean_env(),
+        environ = {
+            **clean_env(env=env),
             "PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}",
             "STUB_FAIL": "1" if fail else "",
             "GIT_CEILING_DIRECTORIES": str(tmp),
         }
         with pytest.MonkeyPatch.context() as patched:
-            for name, value in env.items():
+            for name, value in environ.items():
                 patched.setenv(name, value)
             patched.chdir(work)
             patched.setattr(sys, "argv", [COMMAND])
@@ -193,10 +194,12 @@ def test_the_shipped_step_calls_the_helper() -> None:
 
 # A clean build of the released commit passes, every binary.
 def test_every_binary_stamped_with_the_released_commit(
-    capfd: pytest.CaptureFixture[str],
+    capfd: pytest.CaptureFixture[str], env: support.Env
 ) -> None:
     """Two binaries, both clean, both carrying their modules."""
-    run = run_helper({"tool": info("{head}"), "probe": info("{head}")}, capfd=capfd)
+    run = run_helper(
+        {"tool": info("{head}"), "probe": info("{head}")}, capfd=capfd, env=env
+    )
     assert run.returncode == 0, run.stdout + run.stderr
     assert run.stdout == ""
 
@@ -208,49 +211,59 @@ def assert_refused(run: Run, want: str) -> None:
     assert f"::error::check-go-stamps: {want}\n" == run.stderr.replace(run.head, "HEAD")
 
 
-def test_another_revision_is_refused(capfd: pytest.CaptureFixture[str]) -> None:
+def test_another_revision_is_refused(
+    capfd: pytest.CaptureFixture[str], env: support.Env
+) -> None:
     """Bytes built from some other commit."""
     rev = "f" * 40
     assert_refused(
-        run_helper({"tool": info(rev)}, capfd=capfd),
+        run_helper({"tool": info(rev)}, capfd=capfd, env=env),
         f"tool: stamped revision {rev} is not the released commit HEAD",
     )
 
 
-def test_no_revision_is_refused(capfd: pytest.CaptureFixture[str]) -> None:
+def test_no_revision_is_refused(
+    capfd: pytest.CaptureFixture[str], env: support.Env
+) -> None:
     """Bytes built outside a checkout or with -buildvcs=false."""
     assert_refused(
-        run_helper({"tool": info(None)}, capfd=capfd),
+        run_helper({"tool": info(None)}, capfd=capfd, env=env),
         "tool: stamped revision <none> is not the released commit HEAD",
     )
 
 
-def test_a_modified_tree_is_refused(capfd: pytest.CaptureFixture[str]) -> None:
+def test_a_modified_tree_is_refused(
+    capfd: pytest.CaptureFixture[str], env: support.Env
+) -> None:
     """Bytes that match no commit."""
     assert_refused(
-        run_helper({"tool": info("{head}", "true")}, capfd=capfd),
+        run_helper({"tool": info("{head}", "true")}, capfd=capfd, env=env),
         "tool: vcs.modified=true — a release builds a clean tree",
     )
 
 
-def test_no_modified_stamp_is_refused(capfd: pytest.CaptureFixture[str]) -> None:
+def test_no_modified_stamp_is_refused(
+    capfd: pytest.CaptureFixture[str], env: support.Env
+) -> None:
     """A tree whose cleanliness the stamp does not state."""
     assert_refused(
-        run_helper({"tool": info("{head}", None)}, capfd=capfd),
+        run_helper({"tool": info("{head}", None)}, capfd=capfd, env=env),
         "tool: vcs.modified=<none> — a release builds a clean tree",
     )
 
 
-def test_no_module_stamp_is_refused(capfd: pytest.CaptureFixture[str]) -> None:
+def test_no_module_stamp_is_refused(
+    capfd: pytest.CaptureFixture[str], env: support.Env
+) -> None:
     """Bytes that carry no inventory at all."""
     assert_refused(
-        run_helper({"tool": info("{head}", module=False)}, capfd=capfd),
+        run_helper({"tool": info("{head}", module=False)}, capfd=capfd, env=env),
         "tool: no module stamp — the shipped bytes must carry their inventory",
     )
 
 
 def test_a_setting_value_that_spells_the_stamp_is_not_the_stamp(
-    capfd: pytest.CaptureFixture[str],
+    capfd: pytest.CaptureFixture[str], env: support.Env
 ) -> None:
     """An -ldflags value naming HEAD is not a stamp (#1556's shrunk example).
 
@@ -265,44 +278,46 @@ def test_a_setting_value_that_spells_the_stamp_is_not_the_stamp(
         "\tbuild\t-ldflags=-X=main.m=vcs.modified=false\n"
     )
     assert_refused(
-        run_helper({"tool": spelled}, capfd=capfd),
+        run_helper({"tool": spelled}, capfd=capfd, env=env),
         "tool: stamped revision <none> is not the released commit HEAD",
     )
 
 
 def test_the_first_bad_binary_in_name_order_is_named(
-    capfd: pytest.CaptureFixture[str],
+    capfd: pytest.CaptureFixture[str], env: support.Env
 ) -> None:
     """staged/ is read in name order, as the shell's glob read it."""
-    run = run_helper({"b": info("{head}", "true"), "a": info("f" * 40)}, capfd=capfd)
+    run = run_helper(
+        {"b": info("{head}", "true"), "a": info("f" * 40)}, capfd=capfd, env=env
+    )
     assert "::error::check-go-stamps: a: stamped revision" in run.stderr
 
 
 def test_an_empty_staged_directory_is_refused(
-    capfd: pytest.CaptureFixture[str],
+    capfd: pytest.CaptureFixture[str], env: support.Env
 ) -> None:
     """Nothing built is nothing checked, and never a pass."""
     assert_refused(
-        run_helper({}, capfd=capfd),
+        run_helper({}, capfd=capfd, env=env),
         "staged/ holds no binary — nothing was built to check",
     )
 
 
 # go's or git's own failure fails the step with its status.
 def test_a_file_go_cannot_read_fails_the_step(
-    capfd: pytest.CaptureFixture[str],
+    capfd: pytest.CaptureFixture[str], env: support.Env
 ) -> None:
     """Not a Go binary: go's run.returncode and message."""
-    run = run_helper({"tool": info("{head}")}, fail=True, capfd=capfd)
+    run = run_helper({"tool": info("{head}")}, fail=True, capfd=capfd, env=env)
     assert run.returncode == 1
     assert run.stderr == "go: not a Go binary\n"
     assert run.stdout == ""
 
 
 def test_outside_a_repository_git_fails_the_step(
-    capfd: pytest.CaptureFixture[str],
+    capfd: pytest.CaptureFixture[str], env: support.Env
 ) -> None:
     """No released commit to hold the stamp to."""
-    run = run_helper({"tool": info("f" * 40)}, repo=False, capfd=capfd)
+    run = run_helper({"tool": info("f" * 40)}, repo=False, capfd=capfd, env=env)
     assert run.returncode == 128
     assert run.stdout == ""

@@ -187,8 +187,18 @@ class Planted:
     # The majors the planted extension declares.
     declares: ClassVar[tuple[int, ...]] = tuple(MAJORS)
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(
+        self,
+        tmp_path: Path,
+        *,
+        belt: support.Belt,
+        env: support.Env,
+        rustc: support.Rustc,
+    ) -> None:
         """Plant a tracked workspace with one extension and one plain crate."""
+        self.plant_belt = belt
+        self.make_env = env
+        self.plant_rustc = rustc
         self.tmp = Path(str(tmp_path)).resolve()
         self.tree = self.tmp / "tree"
         (self.tree / "crates" / "lab-pg").mkdir(parents=True)
@@ -202,8 +212,8 @@ class Planted:
         }.items():
             (bins / name).write_text(body, encoding="utf-8")
             (bins / name).chmod(0o755)
-        support.rustc(bins)
-        self.belt = support.belt(
+        self.plant_rustc(bins)
+        self.belt = self.plant_belt(
             self.tmp / "belt",
             stubs={
                 "pgrx-env.sh": PGRX_ENV_STUB,
@@ -227,7 +237,7 @@ class Planted:
             "target_directory": str(self.tree / "target"),
         }
         metadata.write_text(json.dumps(document), encoding="utf-8")
-        self.env = support.env() | {
+        self.env = self.make_env() | {
             "PATH": f"{bins}{os.pathsep}{os.environ['PATH']}",
             "ORG_BELT_DIR": str(self.belt),
             "ORG_PYTHON": sys.executable,
@@ -254,7 +264,7 @@ class Planted:
 
     def git(self, *args: str) -> None:
         """Run git in the planted tree, scrubbed of the caller's git state."""
-        subprocess.run([GIT, *args], cwd=self.tree, env=support.env(), check=True)
+        subprocess.run([GIT, *args], cwd=self.tree, env=self.make_env(), check=True)
 
     def floor(self) -> None:
         """Commit a derived floor of 80.0 to the planted tree."""
@@ -295,9 +305,11 @@ class Planted:
 
 
 @fixture
-def planted(tmp_path: Path) -> Planted:
+def planted(
+    tmp_path: Path, belt: support.Belt, env: support.Env, rustc: support.Rustc
+) -> Planted:
     """Give each row its own Planted."""
-    return Planted(tmp_path)
+    return Planted(tmp_path, belt=belt, env=env, rustc=rustc)
 
 
 def suites(log: list[str]) -> list[str]:
@@ -354,7 +366,9 @@ def test_a_major_below_the_floor_keeps_no_figure(planted: Planted) -> None:
     assert not (reports / "coverage-figures.txt").exists()
 
 
-def test_a_measured_run_leaves_the_tree_clean(planted: Planted) -> None:
+def test_a_measured_run_leaves_the_tree_clean(
+    planted: Planted, env: support.Env
+) -> None:
     """No report in the tree, named directory or not (#1628).
 
     A report in the working tree is one `git add -A` from a commit.
@@ -372,7 +386,7 @@ def test_a_measured_run_leaves_the_tree_clean(planted: Planted) -> None:
         status = subprocess.run(
             [GIT, "status", "--porcelain"],
             cwd=planted.tree,
-            env=support.env(),
+            env=env(),
             capture_output=True,
             text=True,
             check=True,
@@ -487,9 +501,11 @@ class IcuPerMajor(Planted):
 
 
 @fixture
-def icu_per_major(tmp_path: Path) -> IcuPerMajor:
+def icu_per_major(
+    tmp_path: Path, belt: support.Belt, env: support.Env, rustc: support.Rustc
+) -> IcuPerMajor:
     """Give each row its own IcuPerMajor."""
-    return IcuPerMajor(tmp_path)
+    return IcuPerMajor(tmp_path, belt=belt, env=env, rustc=rustc)
 
 
 def flags(*majors: int) -> list[str]:
@@ -639,9 +655,11 @@ class CoverageTasks(Planted):
 
 
 @fixture
-def coverage_tasks(tmp_path: Path) -> CoverageTasks:
+def coverage_tasks(
+    tmp_path: Path, belt: support.Belt, env: support.Env, rustc: support.Rustc
+) -> CoverageTasks:
     """Give each row its own CoverageTasks."""
-    return CoverageTasks(tmp_path)
+    return CoverageTasks(tmp_path, belt=belt, env=env, rustc=rustc)
 
 
 def test_check_runs_no_suite_names_the_legs_and_excludes_the_crate(
@@ -747,9 +765,11 @@ class FannedPlan(Planted):
 
 
 @fixture
-def fanned_plan(tmp_path: Path) -> FannedPlan:
+def fanned_plan(
+    tmp_path: Path, belt: support.Belt, env: support.Env, rustc: support.Rustc
+) -> FannedPlan:
     """Give each row its own FannedPlan."""
-    return FannedPlan(tmp_path)
+    return FannedPlan(tmp_path, belt=belt, env=env, rustc=rustc)
 
 
 def test_the_producers_stdout_holds_against_the_declaration(

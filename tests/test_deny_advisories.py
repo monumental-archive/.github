@@ -62,7 +62,7 @@ def refused(*advisories: str) -> str:
 
 
 def lint(
-    text: str | None, *, capfd: pytest.CaptureFixture[str]
+    text: str | None, *, capfd: pytest.CaptureFixture[str], env: support.Env
 ) -> tuple[int, str, str]:
     """Run the helper over a deny.toml holding `text`.
 
@@ -73,9 +73,9 @@ def lint(
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "deny.toml"
         path.write_text(text or "", encoding="utf-8")
-        env = support.env(MISE_TASK_NAME="lint:deny", ORG_FINDINGS="")
+        environ = env(MISE_TASK_NAME="lint:deny", ORG_FINDINGS="")
         with pytest.MonkeyPatch.context() as patched:
-            for name, value in env.items():
+            for name, value in environ.items():
                 patched.setenv(name, value)
             patched.chdir(tmp)
             status = da.main(["deny.toml"])
@@ -84,36 +84,49 @@ def lint(
 
 
 # An advisory ignore is red by name; a crate ignore and none are green.
-def assert_red(text: str, *advisories: str, capfd: pytest.CaptureFixture[str]) -> None:
+def assert_red(
+    text: str, *advisories: str, capfd: pytest.CaptureFixture[str], env: support.Env
+) -> None:
     """Assert exit 1 with exactly the message naming `advisories`."""
-    status, out, err = lint(text, capfd=capfd)
+    status, out, err = lint(text, capfd=capfd, env=env)
     assert status == 1, out + err
     assert err == refused(*advisories)
     assert out == ""
 
 
-def assert_green(text: str, *, capfd: pytest.CaptureFixture[str]) -> None:
+def assert_green(
+    text: str, *, capfd: pytest.CaptureFixture[str], env: support.Env
+) -> None:
     """Assert exit 0 with nothing said."""
-    status, out, err = lint(text, capfd=capfd)
+    status, out, err = lint(text, capfd=capfd, env=env)
     assert status == 0, err
     assert (out, err) == ("", "")
 
 
-def test_a_bare_id_is_red_by_name(capfd: pytest.CaptureFixture[str]) -> None:
+def test_a_bare_id_is_red_by_name(
+    capfd: pytest.CaptureFixture[str], env: support.Env
+) -> None:
     """`ignore = ["RUSTSEC-…"]`, edtf's and release-lab's shape."""
-    assert_red(f'[advisories]\nignore = ["{ADVISORY}"]\n', ADVISORY, capfd=capfd)
+    assert_red(
+        f'[advisories]\nignore = ["{ADVISORY}"]\n', ADVISORY, capfd=capfd, env=env
+    )
 
 
-def test_a_table_with_an_id_is_red(capfd: pytest.CaptureFixture[str]) -> None:
+def test_a_table_with_an_id_is_red(
+    capfd: pytest.CaptureFixture[str], env: support.Env
+) -> None:
     """The scaffold's old commented shape, written out."""
     assert_red(
         f'[advisories]\nignore = [{{ id = "{ADVISORY}", reason = "x" }}]\n',
         ADVISORY,
         capfd=capfd,
+        env=env,
     )
 
 
-def test_every_advisory_is_named(capfd: pytest.CaptureFixture[str]) -> None:
+def test_every_advisory_is_named(
+    capfd: pytest.CaptureFixture[str], env: support.Env
+) -> None:
     """Two entries, both named, in the file's order; a crate between."""
     assert_red(
         "[advisories]\nignore = [\n"
@@ -124,54 +137,67 @@ def test_every_advisory_is_named(capfd: pytest.CaptureFixture[str]) -> None:
         "RUSTSEC-2026-0543",
         "RUSTSEC-2026-0542",
         capfd=capfd,
+        env=env,
     )
 
 
-def test_a_crate_entry_is_green(capfd: pytest.CaptureFixture[str]) -> None:
+def test_a_crate_entry_is_green(
+    capfd: pytest.CaptureFixture[str], env: support.Env
+) -> None:
     """A yanked version names no advisory, so no decision could stand for it."""
     assert_green(
         '[advisories]\nignore = [{ crate = "a@1.0.0", reason = "x" }]\n',
         capfd=capfd,
+        env=env,
     )
 
 
-def test_an_empty_array_is_green(capfd: pytest.CaptureFixture[str]) -> None:
+def test_an_empty_array_is_green(
+    capfd: pytest.CaptureFixture[str], env: support.Env
+) -> None:
     """`ignore = []` keeps nothing."""
-    assert_green("[advisories]\nignore = []\n", capfd=capfd)
+    assert_green("[advisories]\nignore = []\n", capfd=capfd, env=env)
 
 
-def test_no_advisories_table_is_green(capfd: pytest.CaptureFixture[str]) -> None:
+def test_no_advisories_table_is_green(
+    capfd: pytest.CaptureFixture[str], env: support.Env
+) -> None:
     """A deny.toml with no `[advisories]` keeps nothing."""
-    assert_green('[bans]\nwildcards = "deny"\n', capfd=capfd)
+    assert_green('[bans]\nwildcards = "deny"\n', capfd=capfd, env=env)
 
 
-def test_the_scaffold_is_green(capfd: pytest.CaptureFixture[str]) -> None:
+def test_the_scaffold_is_green(
+    capfd: pytest.CaptureFixture[str], env: support.Env
+) -> None:
     """The stub every repository copies passes the rule it is held to."""
     assert_green(
         (BELT.parent / "scaffold" / "deny.toml").read_text(encoding="utf-8"),
         capfd=capfd,
+        env=env,
     )
 
 
 def test_an_ignore_that_is_not_an_array_is_refused_by_name(
-    capfd: pytest.CaptureFixture[str],
+    capfd: pytest.CaptureFixture[str], env: support.Env
 ) -> None:
     """A shape cargo-deny would refuse is never read as no ignore."""
-    status, _out, err = lint('[advisories]\nignore = "x"\n', capfd=capfd)
+    status, _out, err = lint('[advisories]\nignore = "x"\n', capfd=capfd, env=env)
     assert status == 1
     assert "advisories.ignore" in err
 
 
-def test_each_finding_is_recorded(capfd: pytest.CaptureFixture[str]) -> None:
+def test_each_finding_is_recorded(
+    capfd: pytest.CaptureFixture[str], env: support.Env
+) -> None:
     """ORG_FINDINGS set: one record per advisory, through findings.py."""
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "deny.toml"
         text = f'[advisories]\nignore = ["{ADVISORY}"]\n'
         path.write_text(text, encoding="utf-8")
         records = Path(tmp) / "findings.jsonl"
-        env = support.env(MISE_TASK_NAME="lint:deny", ORG_FINDINGS=str(records))
+        environ = env(MISE_TASK_NAME="lint:deny", ORG_FINDINGS=str(records))
         with pytest.MonkeyPatch.context() as patched:
-            for name, value in env.items():
+            for name, value in environ.items():
                 patched.setenv(name, value)
             patched.chdir(tmp)
             status = da.main(["deny.toml"])
@@ -272,14 +298,18 @@ UNDECIDED = {
 class AuditDeny:
     """stele's status is the verdict; cargo-deny's is not read."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(
+        self, tmp_path: Path, *, canon: support.Canon, env: support.Env
+    ) -> None:
         """Plant a checkout, a canon with security/vex/, the stubs and tools."""
+        self.plant_canon = canon
+        self.make_env = env
         self.tmp = tmp_path
         self.root = self.tmp / "tree"
         self.root.mkdir()
         # The canon the task reads: the belt package the launcher runs,
         # and an empty security/vex/ of the row's own.
-        self.canon = support.canon(self.tmp / "canon")
+        self.canon = self.plant_canon(self.tmp / "canon")
         (self.canon / "security" / "vex").mkdir(parents=True)
         self.bin = self.tmp / "bin"
         self.bin.mkdir()
@@ -298,7 +328,7 @@ class AuditDeny:
 
     def git(self, *args: str) -> None:
         """Run git in the planted checkout."""
-        subprocess.run([GIT, *args], cwd=self.root, env=support.env(), check=True)
+        subprocess.run([GIT, *args], cwd=self.root, env=self.make_env(), check=True)
 
     def plant(self) -> None:
         """Track a Cargo.toml, a Cargo.lock and a deny.toml."""
@@ -319,7 +349,7 @@ class AuditDeny:
             The finished process and the stubs' logged calls.
 
         """
-        env = support.env(
+        env = self.make_env(
             PATH=str(self.bin),
             PLANT_LOG=str(self.log),
             PLANT_REPORT=report(verdict, found or []),
@@ -349,9 +379,9 @@ class AuditDeny:
 
 
 @fixture
-def audit_deny(tmp_path: Path) -> AuditDeny:
+def audit_deny(tmp_path: Path, canon: support.Canon, env: support.Env) -> AuditDeny:
     """Give each row its own AuditDeny."""
-    return AuditDeny(tmp_path)
+    return AuditDeny(tmp_path, canon=canon, env=env)
 
 
 def stele_call(calls: list[str]) -> str:

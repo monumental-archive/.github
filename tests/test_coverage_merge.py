@@ -72,8 +72,9 @@ TASKS = {
 class Measured:
     """Two tasks on two shards each merge to one runner's figure."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Plant the code, the two tasks' suites, and the run's rc file."""
+        self.make_env = env
         self.base = Path(str(tmp_path))
         self.tree = self.base / "tree"
         self.tree.mkdir()
@@ -120,7 +121,7 @@ class Measured:
                 *(f"{task}/{name}" for name in files),
             ],
             cwd=self.tree,
-            env=support.env(PYTHONPATH=str(self.tree), PYTHONDONTWRITEBYTECODE="1"),
+            env=self.make_env(PYTHONPATH=str(self.tree), PYTHONDONTWRITEBYTECODE="1"),
             capture_output=True,
             text=True,
             check=False,
@@ -142,7 +143,7 @@ class Measured:
             done = subprocess.run(
                 [*COVERAGE, *args, f"--rcfile={rc}"],
                 cwd=self.tree,
-                env=support.env(),
+                env=self.make_env(),
                 capture_output=True,
                 text=True,
                 check=False,
@@ -158,9 +159,9 @@ class Measured:
 
 
 @fixture
-def measured(tmp_path: Path) -> Measured:
+def measured(tmp_path: Path, env: support.Env) -> Measured:
     """Give each row its own Measured."""
-    return Measured(tmp_path)
+    return Measured(tmp_path, env=env)
 
 
 def test_four_rows_merge_to_one_runners_figure(measured: Measured) -> None:

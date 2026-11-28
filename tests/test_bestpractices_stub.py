@@ -68,7 +68,9 @@ def body() -> str:
 BODY = body()
 
 
-def lint(text: str, path: str = STUB_PATH) -> subprocess.CompletedProcess[str]:
+def lint(
+    text: str, path: str = STUB_PATH, *, env: support.Env
+) -> subprocess.CompletedProcess[str]:
     """Run the lint against one planted, tracked file.
 
     Returns:
@@ -79,15 +81,15 @@ def lint(text: str, path: str = STUB_PATH) -> subprocess.CompletedProcess[str]:
         target = Path(tmp) / path
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(text, encoding="utf-8")
-        env = support.env()
-        env |= {"ORG_BELT_DIR": str(BELT), "ORG_CANON_DIR": str(CANON)}
-        subprocess.run([GIT, "init", "-q"], cwd=tmp, env=env, check=True)
-        subprocess.run([GIT, "add", path], cwd=tmp, env=env, check=True)
+        environ = env()
+        environ |= {"ORG_BELT_DIR": str(BELT), "ORG_CANON_DIR": str(CANON)}
+        subprocess.run([GIT, "init", "-q"], cwd=tmp, env=environ, check=True)
+        subprocess.run([GIT, "add", path], cwd=tmp, env=environ, check=True)
         as_mise = support.task_run("lint:bestpractices", BODY)
         done = subprocess.run(
             as_mise.argv,
             cwd=tmp,
-            env=env | as_mise.env,
+            env=environ | as_mise.env,
             capture_output=True,
             text=True,
             check=False,
@@ -142,81 +144,78 @@ def kept(criterion: str) -> str:
 
 
 # The shapes the lint must pass.
-def assert_ok(text: str, path: str = STUB_PATH) -> None:
+def assert_ok(text: str, path: str = STUB_PATH, *, env: support.Env) -> None:
     """Assert a clean pass with the ok line and nothing on stderr."""
-    done = lint(text, path)
+    done = lint(text, path, env=env)
     assert done.stderr == ""
     assert done.returncode == 0
     assert done.stdout == CLEAN
 
 
-def test_the_canons_stub_passes() -> None:
+def test_the_canons_stub_passes(env: support.Env) -> None:
     """The stub every repository copies is clean."""
-    assert_ok(STUB)
+    assert_ok(STUB, env=env)
 
 
-def test_a_question_mark_needs_no_justification() -> None:
+def test_a_question_mark_needs_no_justification(env: support.Env) -> None:
     """A `?` is ignored by the site, so it owes no citation."""
-    assert_ok(
-        planted({"dco_status": "?", "dco_justification": None}),
-    )
+    assert_ok(planted({"dco_status": "?", "dco_justification": None}), env=env)
 
 
-def test_a_copied_file_is_not_the_stub() -> None:
+def test_a_copied_file_is_not_the_stub(env: support.Env) -> None:
     """A copied file answers for its own repository; no citation rule."""
     assert_ok(
         planted({"dco_justification": "Signed off. No URL."}),
         path=".bestpractices.json",
+        env=env,
     )
 
 
 # Each red row is red when planted, with the stated message.
-def assert_red(text: str, message: str) -> None:
+def assert_red(text: str, message: str, *, env: support.Env) -> None:
     """Assert exit 1 and exactly this message on stderr."""
-    done = lint(text)
+    done = lint(text, env=env)
     assert done.returncode == 1, done.stdout
     assert done.stderr == message
 
 
-def test_an_answer_with_no_url_is_red() -> None:
+def test_an_answer_with_no_url_is_red(env: support.Env) -> None:
     """The defect itself: a pre-set answer that says whose fact it is nowhere."""
     text = kept("dco").split(" https://")[0]
-    assert_red(planted({"dco_justification": text}), unsourced("dco"))
+    assert_red(planted({"dco_justification": text}), unsourced("dco"), env=env)
 
 
-def test_a_url_outside_the_canon_is_red() -> None:
+def test_a_url_outside_the_canon_is_red(env: support.Env) -> None:
     """One repository's file is not an org-level control."""
     text = kept("dco").replace(
         CANON_URL, "https://github.com/monumental-archive/stele/"
     )
-    assert_red(planted({"dco_justification": text}), unsourced("dco"))
+    assert_red(planted({"dco_justification": text}), unsourced("dco"), env=env)
 
 
-def test_a_sibling_repository_sharing_the_prefix_is_red() -> None:
+def test_a_sibling_repository_sharing_the_prefix_is_red(env: support.Env) -> None:
     """The URL is matched to the canon's own path, trailing slash and all."""
     text = kept("dco").replace(
         CANON_URL, "https://github.com/monumental-archive/.github-lab/"
     )
-    assert_red(planted({"dco_justification": text}), unsourced("dco"))
+    assert_red(planted({"dco_justification": text}), unsourced("dco"), env=env)
 
 
-def test_an_answer_with_no_justification_is_red() -> None:
+def test_an_answer_with_no_justification_is_red(env: support.Env) -> None:
     """A Met with nothing beside it cites nothing."""
-    assert_red(
-        planted({"dco_justification": None}),
-        unsourced("dco"),
-    )
+    assert_red(planted({"dco_justification": None}), unsourced("dco"), env=env)
 
 
-def test_a_mixed_case_criterion_is_read() -> None:
+def test_a_mixed_case_criterion_is_read(env: support.Env) -> None:
     """require_2FA is a real key; a lowercase-only reader skips it."""
     assert_red(
         planted({"require_2FA_justification": "Required org-wide."}),
         unsourced("require_2FA"),
+        env=env,
     )
 
 
-def test_every_offender_is_named() -> None:
+def test_every_offender_is_named(env: support.Env) -> None:
     """Two unsourced answers are both listed, in file order."""
     assert_red(
         planted({
@@ -224,10 +223,11 @@ def test_every_offender_is_named() -> None:
             "dco_justification": "Signed off.",
         }),
         unsourced("osps_le_01_01", "dco"),
+        env=env,
     )
 
 
-def test_a_file_not_one_key_per_line_is_red() -> None:
+def test_a_file_not_one_key_per_line_is_red(env: support.Env) -> None:
     """The check reads lines; a layout it cannot read is red by name."""
     text = json.dumps(decoded.load_json(STUB)) + "\n"
     keys = STUB.count('_status": ')
@@ -237,4 +237,5 @@ def test_a_file_not_one_key_per_line_is_red() -> None:
         " of their own;\n"
         "  the stub is read one key per line, as json.dumps(indent=2)"
         " writes it\n",
+        env=env,
     )

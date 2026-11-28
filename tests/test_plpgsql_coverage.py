@@ -226,18 +226,20 @@ def plant_stubs(
     return stubs, answers
 
 
-def stub_env(stubs: Path, answers: Path, **planted: str) -> dict[str, str]:
+def stub_env(
+    stubs: Path, answers: Path, *, env: support.Env, **planted: str
+) -> dict[str, str]:
     """Build a row's environment: the stubs first on PATH.
 
     Returns:
         The environment.
 
     """
-    env = support.env(MISE_TASK_NAME=TASK)
+    environ = env(MISE_TASK_NAME=TASK)
     return (
-        env
+        environ
         | {
-            "PATH": f"{stubs}{os.pathsep}{env.get('PATH', '')}",
+            "PATH": f"{stubs}{os.pathsep}{environ.get('PATH', '')}",
             "ORG_PYTHON": sys.executable,
             "ORG_BELT_DIR": str(BELT),
             "STUB_DIR": str(answers),
@@ -341,8 +343,9 @@ class Collecting:
     # The words the call names after `--`; None names none (#2114).
     client: list[str] | None = None
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Give the row's scratch directories one home, removed after it."""
+        self.make_env = env
         self.tmp = tmp_path
 
     def measure(
@@ -375,7 +378,13 @@ class Collecting:
         for oid, source in (sources or {}).items():
             (answers / f"source.{oid}").write_text(source, encoding="utf-8")
         reports = tmp / "reports"
-        env = stub_env(stubs, answers, ORG_PLPGSQL_COVERAGE=str(reports), **planted)
+        env = stub_env(
+            stubs,
+            answers,
+            ORG_PLPGSQL_COVERAGE=str(reports),
+            **planted,
+            env=self.make_env,
+        )
         named = [] if self.client is None else ["--", *self.client]
         collected = call(["collect", "postgres://stub", *named], env, tmp)
         read = call(["totals", "leg", str(reports)], env, tmp)
@@ -387,24 +396,24 @@ class Collecting:
 
 
 @fixture
-def collecting(tmp_path: Path) -> Collecting:
+def collecting(tmp_path: Path, env: support.Env) -> Collecting:
     """Give each row its own Collecting."""
-    return Collecting(tmp_path)
+    return Collecting(tmp_path, env=env)
 
 
 class HelperRows(Collecting):
     """`collect` against a stub psql, then `totals` over its report."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Give the row's scratch directories one home, removed after it."""
-        super().__init__(tmp_path)
+        super().__init__(tmp_path, env=env)
         self.tmp = tmp_path
 
 
 @fixture
-def helper_rows(tmp_path: Path) -> HelperRows:
+def helper_rows(tmp_path: Path, env: support.Env) -> HelperRows:
     """Give each row its own HelperRows."""
-    return HelperRows(tmp_path)
+    return HelperRows(tmp_path, env=env)
 
 
 def test_two_functions_weighted_into_the_totals(helper_rows: HelperRows) -> None:
@@ -521,12 +530,14 @@ def test_a_profiler_not_preloaded_is_red_by_name(helper_rows: HelperRows) -> Non
     )
 
 
-def test_a_missing_report_names_the_teardown(helper_rows: HelperRows) -> None:
+def test_a_missing_report_names_the_teardown(
+    helper_rows: HelperRows, env: support.Env
+) -> None:
     """A suite whose teardown never called collect is refused."""
     tmp = Path(tempfile.mkdtemp(dir=helper_rows.tmp))
     read = call(
         ["totals", "leg", str(tmp / "none.json")],
-        support.env(MISE_TASK_NAME=TASK),
+        env(MISE_TASK_NAME=TASK),
         tmp,
     )
     assert read.returncode == 1
@@ -537,7 +548,7 @@ def test_a_missing_report_names_the_teardown(helper_rows: HelperRows) -> None:
 
 
 def test_a_file_that_is_not_a_report_is_refused_by_what(
-    helper_rows: HelperRows,
+    helper_rows: HelperRows, env: support.Env
 ) -> None:
     """The one decoder names what about the file is wrong."""
     tmp = Path(tempfile.mkdtemp(dir=helper_rows.tmp))
@@ -556,7 +567,7 @@ def test_a_file_that_is_not_a_report_is_refused_by_what(
     planted.write_text(json.dumps(document), encoding="utf-8")
     read = call(
         ["totals", "leg", str(planted)],
-        support.env(MISE_TASK_NAME=TASK),
+        env(MISE_TASK_NAME=TASK),
         tmp,
     )
     assert read.returncode == 1
@@ -567,13 +578,15 @@ def test_a_file_that_is_not_a_report_is_refused_by_what(
     )
 
 
-def test_collect_without_a_report_path_is_refused(helper_rows: HelperRows) -> None:
+def test_collect_without_a_report_path_is_refused(
+    helper_rows: HelperRows, env: support.Env
+) -> None:
     """The teardown calls collect only when the leg set the path."""
     tmp = Path(tempfile.mkdtemp(dir=helper_rows.tmp))
     stubs, answers = plant_stubs(tmp, TWO)
     done = call(
         ["collect", "postgres://stub"],
-        stub_env(stubs, answers),
+        stub_env(stubs, answers, env=env),
         tmp,
     )
     assert done.returncode == 1
@@ -604,16 +617,16 @@ LINT_RED = (
 class LintRows(Collecting):
     """plpgsql_check's static check, in the same report (#1605)."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Give the row's scratch directories one home, removed after it."""
-        super().__init__(tmp_path)
+        super().__init__(tmp_path, env=env)
         self.tmp = tmp_path
 
 
 @fixture
-def lint_rows(tmp_path: Path) -> LintRows:
+def lint_rows(tmp_path: Path, env: support.Env) -> LintRows:
     """Give each row its own LintRows."""
-    return LintRows(tmp_path)
+    return LintRows(tmp_path, env=env)
 
 
 def test_a_report_with_no_findings_is_green(lint_rows: LintRows) -> None:
@@ -722,7 +735,9 @@ def test_the_extension_absent_is_refused_by_name(lint_rows: LintRows) -> None:
     assert f"leg: plpgsql: the teardown's collection failed: {why}\n" == read.stderr
 
 
-def test_a_reading_without_its_lint_answer_is_refused(lint_rows: LintRows) -> None:
+def test_a_reading_without_its_lint_answer_is_refused(
+    lint_rows: LintRows, env: support.Env
+) -> None:
     """A report from a helper that did not ask is not a clean result."""
     tmp = Path(tempfile.mkdtemp(dir=lint_rows.tmp))
     entry = {
@@ -738,7 +753,7 @@ def test_a_reading_without_its_lint_answer_is_refused(lint_rows: LintRows) -> No
     planted.write_text(json.dumps(document), encoding="utf-8")
     read = call(
         ["totals", "leg", str(planted)],
-        support.env(MISE_TASK_NAME=TASK),
+        env(MISE_TASK_NAME=TASK),
         tmp,
     )
     assert read.returncode == 1
@@ -832,9 +847,9 @@ REMEDY = (
 class ClientRows(Collecting):
     """The client is psql on PATH unless the call names another."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Give the row's scratch directories one home, removed after it."""
-        super().__init__(tmp_path)
+        super().__init__(tmp_path, env=env)
         self.tmp = tmp_path
 
     def named_client(self) -> list[str]:
@@ -856,9 +871,9 @@ class ClientRows(Collecting):
 
 
 @fixture
-def client_rows(tmp_path: Path) -> ClientRows:
+def client_rows(tmp_path: Path, env: support.Env) -> ClientRows:
     """Give each row its own ClientRows."""
-    return ClientRows(tmp_path)
+    return ClientRows(tmp_path, env=env)
 
 
 def test_no_client_named_runs_psql_on_path(client_rows: ClientRows) -> None:
@@ -906,9 +921,9 @@ def test_a_client_that_cannot_start_names_the_remedy(client_rows: ClientRows) ->
 class RefusalRows(Collecting):
     """Every way a collection or a report file is refused, by name."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Give the row's scratch directories one home, removed after it."""
-        super().__init__(tmp_path)
+        super().__init__(tmp_path, env=env)
         self.tmp = tmp_path
 
     def read_planted(self, document: object) -> Done:
@@ -924,15 +939,15 @@ class RefusalRows(Collecting):
         planted.write_text(text, encoding="utf-8")
         return call(
             ["totals", "leg", str(planted)],
-            support.env(MISE_TASK_NAME=TASK),
+            self.make_env(MISE_TASK_NAME=TASK),
             tmp,
         )
 
 
 @fixture
-def refusal_rows(tmp_path: Path) -> RefusalRows:
+def refusal_rows(tmp_path: Path, env: support.Env) -> RefusalRows:
     """Give each row its own RefusalRows."""
-    return RefusalRows(tmp_path)
+    return RefusalRows(tmp_path, env=env)
 
 
 def collection_failed(read: Done, why: str) -> None:
@@ -1103,9 +1118,11 @@ def test_the_decoder_names_what_is_not_a_report(refusal_rows: RefusalRows) -> No
 
 @pytest.mark.usefixtures("refusal_rows")
 @pytest.mark.parametrize("argv", [[], ["measure", "leg"]])
-def test_a_usage_error_names_both_subcommands(argv: list[str]) -> None:
+def test_a_usage_error_names_both_subcommands(
+    argv: list[str], env: support.Env
+) -> None:
     """No subcommand, or an unknown one, is exit 2 with the usage."""
-    done = call(list(argv), support.env(MISE_TASK_NAME=TASK), CANON)
+    done = call(list(argv), env(MISE_TASK_NAME=TASK), CANON)
     assert done.returncode == 2
     assert (
         f"{TASK}: usage: plpgsql-coverage collect <conninfo>"
@@ -1137,8 +1154,9 @@ PYTHON_HELD = (
 class LegRows:
     """`coverage:check` over the plpgsql leg, decided by the floor's record."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Give the row's scratch directories one home, removed after it."""
+        self.make_env = env
         self.tmp = tmp_path
 
     def check(  # ruff: ignore[too-many-arguments] -- one keyword per part of a run
@@ -1195,6 +1213,7 @@ class LegRows:
             STUB_PY="90.0",
             STUB_BR="85.0",
             ORG_COVERAGE_RUN=str(tmp / "run"),
+            env=self.make_env,
         )
         run([GIT, "init", "-q"], env, tree)
         run([GIT, "add", *files, ".coverage-floor"], env, tree)
@@ -1213,9 +1232,9 @@ class LegRows:
 
 
 @fixture
-def leg_rows(tmp_path: Path) -> LegRows:
+def leg_rows(tmp_path: Path, env: support.Env) -> LegRows:
     """Give each row its own LegRows."""
-    return LegRows(tmp_path)
+    return LegRows(tmp_path, env=env)
 
 
 def assert_held(held: str, stdout: str) -> None:
@@ -1396,8 +1415,9 @@ def counter(tree: Path) -> int:
 class ReadsTheRunRows:
     """Both legs read the one run `measured` left, and run no suite (#1667)."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Give the row's scratch directories one home, removed after it."""
+        self.make_env = env
         self.tmp = tmp_path
 
     def measure(
@@ -1445,6 +1465,7 @@ class ReadsTheRunRows:
             STUB_NO_XML="1" if no_xml else "",
             ORG_COVERAGE_REPORTS=str(tmp / "reports"),
             ORG_COVERAGE_RUN=str(tmp / "run"),
+            env=self.make_env,
         )
         run([GIT, "init", "-q"], env, tree)
         run([GIT, "add", *tracked], env, tree)
@@ -1454,9 +1475,9 @@ class ReadsTheRunRows:
 
 
 @fixture
-def reads_the_run_rows(tmp_path: Path) -> ReadsTheRunRows:
+def reads_the_run_rows(tmp_path: Path, env: support.Env) -> ReadsTheRunRows:
     """Give each row its own ReadsTheRunRows."""
-    return ReadsTheRunRows(tmp_path)
+    return ReadsTheRunRows(tmp_path, env=env)
 
 
 def test_both_legs_read_one_run_under_all(reads_the_run_rows: ReadsTheRunRows) -> None:
@@ -1529,13 +1550,17 @@ NOT_HELD_LINE = (
 class MergeRows:
     """Several databases' reports, merged by signature (#2163), on the stub."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
         """Plant the stub database and an empty reports directory."""
+        self.make_env = env
         self.tmp = tmp_path
         self.stubs, self.answers = plant_stubs(self.tmp, TWO)
         self.reports = self.tmp / "reports"
         self.env = stub_env(
-            self.stubs, self.answers, ORG_PLPGSQL_COVERAGE=str(self.reports)
+            self.stubs,
+            self.answers,
+            ORG_PLPGSQL_COVERAGE=str(self.reports),
+            env=self.make_env,
         )
 
     def collect(self, ran: dict[str, str] | None = None) -> None:
@@ -1558,9 +1583,9 @@ class MergeRows:
 
 
 @fixture
-def merge_rows(tmp_path: Path) -> MergeRows:
+def merge_rows(tmp_path: Path, env: support.Env) -> MergeRows:
     """Give each row its own MergeRows."""
-    return MergeRows(tmp_path)
+    return MergeRows(tmp_path, env=env)
 
 
 def test_each_collect_writes_a_report_of_its_own(merge_rows: MergeRows) -> None:
@@ -1886,7 +1911,7 @@ class Server:
 
 
 @fixture(scope="module")
-def server() -> Iterator[Server]:
+def server(env: support.Env) -> Iterator[Server]:
     """Start the database, wait until it takes connections, remove it after.
 
     Yields:
@@ -1899,7 +1924,7 @@ def server() -> Iterator[Server]:
     """
     docker = support.tool("docker")
     container = f"plpgsql-coverage-{os.getpid()}-{os.urandom(4).hex()}"
-    env = support.env(tools=("docker",), MISE_TASK_NAME=TASK)
+    environ = env(tools=("docker",), MISE_TASK_NAME=TASK)
     started = subprocess.run(
         [
             docker,
@@ -1913,7 +1938,7 @@ def server() -> Iterator[Server]:
             pinned_image(),
             *POSTGRES,
         ],
-        env=env,
+        env=environ,
         capture_output=True,
         text=True,
         check=False,
@@ -1921,7 +1946,7 @@ def server() -> Iterator[Server]:
     if started.returncode != 0:
         msg = f"the database did not start: {started.stderr}"
         raise AssertionError(msg)
-    up = Server(docker, container, env)
+    up = Server(docker, container, environ)
     try:
         up.ready()
         yield up

@@ -38,7 +38,7 @@ def body() -> str:
     return decoded.as_str(task["run"], "lint:dco's run")
 
 
-def run(message: str) -> subprocess.CompletedProcess[str]:
+def run(message: str, *, env: support.Env) -> subprocess.CompletedProcess[str]:
     """Run the task over one planted commit carrying this message.
 
     Returns:
@@ -47,11 +47,11 @@ def run(message: str) -> subprocess.CompletedProcess[str]:
     """
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
-        env = support.env(root / "home")
+        environ = env(root / "home")
 
         def git(*args: str, stdin: str | None = None) -> None:
             subprocess.run(
-                [GIT, *args], cwd=root, env=env, input=stdin, text=True, check=True
+                [GIT, *args], cwd=root, env=environ, input=stdin, text=True, check=True
             )
 
         git("init", "-q")
@@ -62,7 +62,7 @@ def run(message: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             as_mise.argv,
             cwd=root,
-            env=env | as_mise.env,
+            env=environ | as_mise.env,
             capture_output=True,
             text=True,
             check=False,
@@ -70,7 +70,7 @@ def run(message: str) -> subprocess.CompletedProcess[str]:
 
 
 # The author's own sign-off is found wherever the trailers run on.
-def test_a_sign_off_ahead_of_many_trailers_is_found() -> None:
+def test_a_sign_off_ahead_of_many_trailers_is_found(env: support.Env) -> None:
     """The author's sign-off, then 4,000 more: the commit is signed.
 
     Measured on main before the fix: the trailer grep, killed
@@ -81,14 +81,16 @@ def test_a_sign_off_ahead_of_many_trailers_is_found() -> None:
     others = "".join(
         f"Signed-off-by: Co {n} <co{n}@example.invalid>\n" for n in range(4000)
     )
-    done = run(f"fix: planted\n\n{SIGN_OFF}\n{others}")
+    done = run(f"fix: planted\n\n{SIGN_OFF}\n{others}", env=env)
     assert done.stderr == ""
     assert done.returncode == 0
 
 
-def test_a_commit_without_the_authors_sign_off_is_red() -> None:
+def test_a_commit_without_the_authors_sign_off_is_red(env: support.Env) -> None:
     """Another person's sign-off is not the author's."""
-    done = run("fix: planted\n\nSigned-off-by: Other <other@example.invalid>\n")
+    done = run(
+        "fix: planted\n\nSigned-off-by: Other <other@example.invalid>\n", env=env
+    )
     assert done.returncode == 1
     assert re.search(
         r"^lint:dco: commits missing a sign-off matching their author:"

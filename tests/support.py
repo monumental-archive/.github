@@ -14,16 +14,18 @@ inherited it and the canon could not tag (#1508). git's own variables
 are never inherited either (#857): under a hook git exports `GIT_DIR`,
 and a fixture that inherits it writes into the real repository.
 
-    env = support.env(home)                       # a fixture HOME
-    env = support.env(tools=("mise",), FOO="1")   # the caller's HOME
+    def test_x(env: support.Env) -> None:
+        environ = env(home)                       # a fixture HOME
+        environ = env(tools=("mise",), FOO="1")   # the caller's HOME
 
 An ALLOW-list on purpose. The deny-lists it replaced (drop `GIT_*`,
 drop the forge's and the runner's) kept everything else, and missed
 the next variable a job exported. A row that needs a variable states
 it in its overrides; a tool that needs one gets it in its extension,
 with why. tests/conftest.py's hooks clear every test's own process to
-this same environment, unasked; `env()` (and the `env` fixture) is for
-the processes a test starts: git, stele, a shell body, a tool.
+this same environment, unasked; the `env` fixture (conftest.py, built
+by `environment` here) is for the processes a test starts: git, stele,
+a shell body, a tool.
 
 The files a tree tracks are read here too, through the same
 environment (#1618):
@@ -38,7 +40,7 @@ an empty one is red by name.
 A row that runs a belt task's body runs it as mise does (#1934):
 
     run = support.task_run("lint:dco", body)
-    subprocess.run(run.argv, env=support.env(home) | run.env, ...)
+    subprocess.run(run.argv, env=env(home) | run.env, ...)
 
 A test finds the tools it runs here too (#1684):
 
@@ -53,10 +55,13 @@ makes: a skip, or a planted "tool missing". No test calls
 `shutil.which` itself; `test_support.py` holds them to that.
 
 A test that needs a belt or a canon tree of its own gets the whole one
-(#1714), every tracked file a link, with only what it stubs replaced:
+(#1714) from the conftest fixtures `belt` and `canon`, every tracked file
+a link, with only what it stubs replaced (`track` makes a planted tree a
+repository, `plant` links any tracked names, `rustc` writes the stand-in
+compiler; each typed here):
 
-    belt = support.belt(tmp / "tree", stubs={"pgrx-env.sh": STUB})
-    support.canon(work / ".org-canon")
+    belt_dir = belt(tmp / "tree", stubs={"pgrx-env.sh": STUB})
+    canon(work / ".org-canon")
 
 A belt is planted as the tree it is delivered in: `mise/` and the
 `belt/` package beside it (#2177), so a script that finds the package
@@ -70,7 +75,7 @@ from the belt or the canon itself; `test_support.py` holds them to it.
 
 A row that runs a coverage script gets a stand-in compiler (#1877):
 
-    support.rustc(stubs)                          # stubs/rustc
+    rustc(stubs)                                  # stubs/rustc
     support.rustc_verbose("nightly-2026-07-20")   # what it prints
 
 Every coverage directory ends in a digest of `rustc -vV`, so the name is
@@ -88,7 +93,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from belt import decoded, launcher
 from belt.belt_scripts import script
@@ -245,7 +250,7 @@ def tool(name: str, *, path: str | None = None) -> str:
     return found
 
 
-def env(
+def environment(
     home: Path | str | None = None,
     *,
     tools: Iterable[str] = (),
@@ -356,7 +361,7 @@ def tracked(root: Path | str, *pathspecs: str, **overrides: str) -> list[str]:
             "--",
             *pathspecs,
         ],
-        env=env(**overrides),
+        env=environment(**overrides),
         capture_output=True,
         text=True,
         check=True,
@@ -369,27 +374,6 @@ def tracked(root: Path | str, *pathspecs: str, **overrides: str) -> list[str]:
         )
         raise RuntimeError(msg)
     return names
-
-
-def track(tree: Path | str) -> None:
-    """Make `tree` a git repository tracking every file in it (#2007).
-
-    A belt task reads the files git tracks, never a directory's walk, so
-    a row that plants files for a task body to read tracks them, under
-    `env`. Idempotent: a tree already a repository is added to.
-
-    Raises:
-        RuntimeError: git is not on PATH.
-
-    """
-    git = shutil.which("git")
-    if git is None:
-        msg = "support.track: git is not on PATH"
-        raise RuntimeError(msg)
-    for args in (("init", "-q"), ("add", "-A")):
-        subprocess.run(
-            [git, "-C", str(tree), *args], env=env(), capture_output=True, check=True
-        )
 
 
 def rustc_verbose(toolchain: str = "stable") -> str:
@@ -413,82 +397,59 @@ printf 'release: %s\\nLLVM version: 21.1.2\\n' "$t"
 """
 
 
-def rustc(bin_dir: Path) -> Path:
-    """Write the stand-in `rustc` into a row's stub directory (#1877).
+class Env(Protocol):
+    """The `env` fixture: `environment`, the one a started process gets."""
 
-    Returns:
-        Its path.
-
-    """
-    stub = bin_dir / "rustc"
-    stub.write_text(RUSTC_STUB, encoding="utf-8")
-    stub.chmod(0o755)
-    return stub
-
-
-def plant(dest: Path, names: list[str], stubs: Mapping[str, str]) -> Path:
-    """Link each tracked name into `dest`, then write each stub over its link.
-
-    Names are paths from the canon's top, and so are the stubs'. A stub
-    replaces its link with a file of its own, so a row that edits it
-    never writes through to the canon; it keeps the real file's mode,
-    and a stub with no real file has the default mode.
-
-    Returns:
-        `dest`.
-
-    """
-    dest.mkdir(parents=True, exist_ok=True)
-    for name in names:
-        link = dest / name
-        link.parent.mkdir(parents=True, exist_ok=True)
-        link.symlink_to(CANON / name)
-    for name, text in stubs.items():
-        path = dest / name
-        real = CANON / name
-        path.unlink(missing_ok=True)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
-        if real.exists():
-            path.chmod(real.stat().st_mode & 0o7777)
-    return dest
+    def __call__(
+        self,
+        home: Path | str | None = None,
+        *,
+        tools: Iterable[str] = (),
+        **overrides: str,
+    ) -> dict[str, str]:
+        """Build an environment; see `environment`."""
+        ...
 
 
-def belt(dest: Path | str, *, stubs: Mapping[str, str] | None = None) -> Path:
-    """Make `dest` a whole belt tree: the canon's `mise/` and `belt/` (#1714, #2177).
+class Belt(Protocol):
+    """The `belt` fixture: plant a whole belt tree, return its `mise/`."""
 
-    Each file is a symbolic link to the real one, so a helper that gains
-    an import, or a script that starts a new sibling, finds it with no
-    change to the row. `stubs` (a name under `mise/`, or `belt/<path>`
-    for the package, to its text) are what the row means to replace; a
-    row whose point is a file MISSING removes it after planting.
-
-        belt = support.belt(tmp / "tree", stubs={"pgrx-env.sh": STUB})
-
-    Returns:
-        `dest/mise`, the planted belt directory (ORG_BELT_DIR); `dest`
-        is its ORG_CANON_DIR.
-
-    """
-    names = tracked(CANON, "mise/", "belt/")
-    named = {
-        (name if name.startswith("belt/") else f"mise/{name}"): text
-        for name, text in (stubs or {}).items()
-    }
-    return plant(Path(dest), names, named) / "mise"
+    def __call__(
+        self, dest: Path | str, *, stubs: Mapping[str, str] | None = None
+    ) -> Path:
+        """Plant the belt at `dest`."""
+        ...
 
 
-def canon(dest: Path | str, *also: str, stubs: Mapping[str, str] | None = None) -> Path:
-    """Make `dest` a canon tree: `mise/`, `belt/`, `release/`, and what `also` names (#1714).
+class Canon(Protocol):
+    """The `canon` fixture: plant a canon tree and what `also` names."""
 
-    `also` are pathspecs from the canon's top (an action directory,
-    `security/identity.toml`), for a row that plants `.org-canon` or a
-    canon checkout. Every file is a link, and `stubs` (a path from the
-    canon's top to its text) replace theirs, as `belt` does.
+    def __call__(
+        self, dest: Path | str, *also: str, stubs: Mapping[str, str] | None = None
+    ) -> Path:
+        """Plant the canon at `dest`."""
+        ...
 
-    Returns:
-        `dest`, as a Path.
 
-    """
-    names = tracked(CANON, "mise/", "belt/", "release/", *also)
-    return plant(Path(dest), names, stubs or {})
+class Track(Protocol):
+    """The `track` fixture: make a tree a repository tracking its files."""
+
+    def __call__(self, tree: Path | str) -> None:
+        """Track every file under `tree`."""
+        ...
+
+
+class Rustc(Protocol):
+    """The `rustc` fixture: write the stand-in compiler into a directory."""
+
+    def __call__(self, bin_dir: Path) -> Path:
+        """Write `bin_dir/rustc`."""
+        ...
+
+
+class Plant(Protocol):
+    """The `plant` fixture: link tracked names into a tree, then the stubs."""
+
+    def __call__(self, dest: Path, names: list[str], stubs: Mapping[str, str]) -> Path:
+        """Plant `names` and `stubs` at `dest`."""
+        ...
