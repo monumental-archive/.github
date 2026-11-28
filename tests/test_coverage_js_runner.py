@@ -4,8 +4,6 @@ The runner line a tree's package.json and lockfile answer, and the
 vitest run `measured` reads off its own command line (`--measured-run`).
 """
 
-import contextlib
-import io
 import json
 import tempfile
 from pathlib import Path
@@ -134,24 +132,12 @@ class Main:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
 
-    def main(self, tracked: list[str], files: dict[str, str]) -> tuple[int, str, str]:
-        """Run main from a scratch tree holding `files`.
-
-        Returns:
-            The status, stdout and stderr.
-
-        """
+    def enter(self, monkeypatch: pytest.MonkeyPatch, files: dict[str, str]) -> None:
+        """Plant a scratch tree holding `files` and step into it."""
         tmp = tempfile.mkdtemp(dir=self.tmp)
         for name, text in files.items():
             (Path(tmp) / name).write_text(text, encoding="utf-8")
-        out, err = io.StringIO(), io.StringIO()
-        with (
-            contextlib.chdir(tmp),
-            contextlib.redirect_stdout(out),
-            contextlib.redirect_stderr(err),
-        ):
-            status = cj.main(tracked)
-        return status, out.getvalue(), err.getvalue()
+        monkeypatch.chdir(tmp)
 
 
 @fixture
@@ -160,39 +146,63 @@ def main_state(tmp_path: Path) -> Main:
     return Main(tmp_path)
 
 
-def test_no_tracked_package_json_prints_nothing(main_state: Main) -> None:
+def test_no_tracked_package_json_prints_nothing(
+    main_state: Main, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """An untracked package.json is never read."""
-    assert main_state.main([], {"package.json": "{"}) == (0, "", "")
+    main_state.enter(monkeypatch, {"package.json": "{"})
+    status = cj.main([])
+    out, err = capfd.readouterr()
+    assert (status, out, err) == (0, "", "")
 
 
-def test_an_unreadable_package_json_is_refused(main_state: Main) -> None:
+def test_an_unreadable_package_json_is_refused(
+    main_state: Main, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """Broken JSON is exit 1, named, never read as no runner."""
-    status, out, err = main_state.main(["package.json"], {"package.json": "{"})
+    main_state.enter(monkeypatch, {"package.json": "{"})
+    status = cj.main(["package.json"])
+    out, err = capfd.readouterr()
     assert (status, out) == (1, "")
     assert err.startswith(f"{TASK}: package.json: "), err
 
 
-def test_a_package_json_that_is_not_an_object_names_no_runner(main_state: Main) -> None:
+def test_a_package_json_that_is_not_an_object_names_no_runner(
+    main_state: Main, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A JSON array declares nothing."""
-    assert main_state.main(["package.json"], {"package.json": "[]"}) == (0, "", "")
+    main_state.enter(monkeypatch, {"package.json": "[]"})
+    status = cj.main(["package.json"])
+    out, err = capfd.readouterr()
+    assert (status, out, err) == (0, "", "")
 
 
-def test_vitest_declared_without_a_lockfile_entry_is_named(main_state: Main) -> None:
+def test_vitest_declared_without_a_lockfile_entry_is_named(
+    main_state: Main, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """Declared but not pinned: nothing the leg may run."""
     declared: dict[str, object] = {"devDependencies": {"vitest": "4.1.12"}}
     manifest = json.dumps(declared)
-    assert main_state.main(["package.json"], {"package.json": manifest}) == (
+    main_state.enter(monkeypatch, {"package.json": manifest})
+    status = cj.main(["package.json"])
+    out, err = capfd.readouterr()
+    assert (status, out, err) == (
         0,
         "unsupported vitest-without-a-lockfile-entry\n",
         "",
     )
 
 
-def test_another_runner_is_named(main_state: Main) -> None:
+def test_another_runner_is_named(
+    main_state: Main, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     """A jest tree is named so the skip says what it skipped."""
     declared: dict[str, object] = {"devDependencies": {"jest": "29"}}
     manifest = json.dumps(declared)
-    assert main_state.main(["package.json"], {"package.json": manifest}) == (
+    main_state.enter(monkeypatch, {"package.json": manifest})
+    status = cj.main(["package.json"])
+    out, err = capfd.readouterr()
+    assert (status, out, err) == (
         0,
         "unsupported jest\n",
         "",
@@ -215,16 +225,16 @@ class MeasuredRun:
         """Give the row's scratch directories one home, removed after it."""
         self.tmp = tmp_path
 
-    def call(
+    def enter(
         self,
+        monkeypatch: pytest.MonkeyPatch,
         *command: str,
         files: dict[str, str] | None = None,
-        capfd: pytest.CaptureFixture[str],
-    ) -> tuple[int, str, str]:
-        """Call main in a scratch tree of a pnpm vitest tree with v8.
+    ) -> list[str]:
+        """Plant a scratch pnpm vitest tree with v8 and step into it.
 
         Returns:
-            The status, stdout and stderr.
+            The argv that runs `command` on `measured`'s line.
 
         """
         lock = (
@@ -235,12 +245,8 @@ class MeasuredRun:
         tmp = tempfile.mkdtemp(dir=self.tmp)
         for name, text in planted.items():
             (Path(tmp) / name).write_text(text, encoding="utf-8")
-        argv = ["--measured-run", "/run/typescript", *planted, "--", *command]
-        with pytest.MonkeyPatch.context() as patched:
-            patched.chdir(tmp)
-            status = cj.main(argv)
-        out, err = capfd.readouterr()
-        return status, out, err
+        monkeypatch.chdir(tmp)
+        return ["--measured-run", "/run/typescript", *planted, "--", *command]
 
 
 @fixture
@@ -250,12 +256,14 @@ def measured_run_state(tmp_path: Path) -> MeasuredRun:
 
 
 def test_a_launched_run_gains_the_flags(
-    measured_run_state: MeasuredRun, capfd: pytest.CaptureFixture[str]
+    measured_run_state: MeasuredRun,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """`pnpm exec vitest run x`: the five flags, NUL-separated."""
-    status, out, err = measured_run_state.call(
-        "pnpm", "exec", "vitest", "run", "x", capfd=capfd
-    )
+    argv = measured_run_state.enter(monkeypatch, "pnpm", "exec", "vitest", "run", "x")
+    status = cj.main(argv)
+    out, err = capfd.readouterr()
     assert (status, err) == (0, "")
     want = ["pnpm", "exec", "vitest", "run", "x", *FLAGS]
     assert "".join(f"{w}\0" for w in want) == out
@@ -281,29 +289,44 @@ def test_no_subcommand_is_run() -> None:
     ],
 )
 def test_what_is_not_a_run_is_unchanged(
-    measured_run_state: MeasuredRun, command: object, capfd: pytest.CaptureFixture[str]
+    measured_run_state: MeasuredRun,
+    command: object,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Another subcommand, another launcher, or no vitest: nothing."""
-    assert measured_run_state.call(*command, capfd=capfd) == (0, "", "")
+    argv = measured_run_state.enter(monkeypatch, *command)
+    status = cj.main(argv)
+    out, err = capfd.readouterr()
+    assert (status, out, err) == (0, "", "")
 
 
 def test_a_tree_the_leg_reports_on_is_unchanged(
-    measured_run_state: MeasuredRun, capfd: pytest.CaptureFixture[str]
+    measured_run_state: MeasuredRun,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """No provider pinned: the leg names it; measured adds nothing."""
     lock = "lockfileVersion: '9.0'\npackages:\n  vitest@4.1.12:\n"
-    assert measured_run_state.call(
-        "vitest", "run", files={"pnpm-lock.yaml": lock}, capfd=capfd
-    ) == (0, "", "")
+    argv = measured_run_state.enter(
+        monkeypatch, "vitest", "run", files={"pnpm-lock.yaml": lock}
+    )
+    status = cj.main(argv)
+    out, err = capfd.readouterr()
+    assert (status, out, err) == (0, "", "")
 
 
 def test_a_coverage_flag_of_its_own_is_refused(
-    measured_run_state: MeasuredRun, capfd: pytest.CaptureFixture[str]
+    measured_run_state: MeasuredRun,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The leg owns the coverage flags: exit 1, named."""
-    status, out, err = measured_run_state.call(
-        "vitest", "run", "--coverage.enabled=false", capfd=capfd
+    argv = measured_run_state.enter(
+        monkeypatch, "vitest", "run", "--coverage.enabled=false"
     )
+    status = cj.main(argv)
+    out, err = capfd.readouterr()
     assert (status, out) == (1, "")
     assert err.startswith("measured: --coverage.enabled=false is on the vitest run"), (
         err
