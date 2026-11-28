@@ -10,6 +10,34 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 over the surface named in [MAINTENANCE.md](MAINTENANCE.md).
 
+## [1.79.0](https://github.com/monumental-archive/.github/compare/v1.78.6...v1.79.0) - 2026-11-27
+
+### Added
+
+- carry the kind: labels in the repo baseline ([#2155](https://github.com/monumental-archive/.github/pull/2155))
+- split and shard each repository's suites itself ([#2175](https://github.com/monumental-archive/.github/pull/2175))
+
+### Fixed
+
+- update pipx:hypothesis to 6.170.16 ([#2147](https://github.com/monumental-archive/.github/pull/2147))
+- update monumental-archive/signer to fa0f874 ([#2149](https://github.com/monumental-archive/.github/pull/2149))
+- update monumental-archive/signer to 44a462f ([#2150](https://github.com/monumental-archive/.github/pull/2150))
+- update github/codeql-action to v4.39.4 ([#2151](https://github.com/monumental-archive/.github/pull/2151))
+- update pipx:hypothesis to 6.170.17 ([#2152](https://github.com/monumental-archive/.github/pull/2152))
+- offer the merge queue by plan, not visibility ([#2156](https://github.com/monumental-archive/.github/pull/2156))
+- update aqua:taiki-e/cargo-llvm-cov to 0.9.2 ([#2157](https://github.com/monumental-archive/.github/pull/2157))
+- update jdx/mise to 2026.11.11 ([#2158](https://github.com/monumental-archive/.github/pull/2158))
+- update pipx:coverage to 7.17.4 ([#2159](https://github.com/monumental-archive/.github/pull/2159))
+- never limit lock maintenance or the canon bump ([#2164](https://github.com/monumental-archive/.github/pull/2164))
+- name the installed version in a lock-file bump ([#2167](https://github.com/monumental-archive/.github/pull/2167))
+- give typescript properties no per-test time limit ([#2166](https://github.com/monumental-archive/.github/pull/2166))
+- lint sql files of every size ([#2165](https://github.com/monumental-archive/.github/pull/2165))
+- shard the typescript leg by file ([#2168](https://github.com/monumental-archive/.github/pull/2168))
+- ask best practices entries past the shared cache ([#2170](https://github.com/monumental-archive/.github/pull/2170))
+- give first-party images the zero age ([#2173](https://github.com/monumental-archive/.github/pull/2173))
+- hold each coverage leg to a floor of its own ([#2171](https://github.com/monumental-archive/.github/pull/2171))
+- merge the PL/pgSQL leg over every test database ([#2174](https://github.com/monumental-archive/.github/pull/2174))
+
 ## [1.78.6](https://github.com/monumental-archive/.github/compare/v1.78.5...v1.78.6) - 2026-11-26
 
 ### Fixed

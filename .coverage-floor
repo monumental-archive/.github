@@ -12,11 +12,11 @@
 # leg leaves it only through a line `dropped: <leg> <why>`.
 #
 # band: 2
-# derived: gate figures of 3ac3691 (#2143)
+# derived: v1.79.0
 # legs: python python-branches
 #
-# python measured: 96.8
+# python measured: 96.4
 python 90
 #
-# python-branches measured: 94.4
+# python-branches measured: 93.8
 python-branches 90
