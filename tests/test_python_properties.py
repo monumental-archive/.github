@@ -18,7 +18,6 @@ Each row asserts the message, not just the exit status: a planted row
 scored on exit alone can pass for the wrong reason.
 """
 
-import contextlib
 import os
 import re
 import subprocess
@@ -505,15 +504,14 @@ def pids(stderr: str) -> set[str]:
     return {line for line in stderr.splitlines() if line.startswith("pid ")}
 
 
-@pytest.mark.usefixtures("_stack")
+@pytest.mark.usefixtures("_tmp")
 class TestFanOut:
     """No shard named: the runner fans out over its own shards (#1741)."""
 
     @pytest.fixture
-    def _stack(self, request: pytest.FixtureRequest) -> None:
-        """Hold the row's cleanups, undone last first after it ends."""
-        self.stack = contextlib.ExitStack()
-        request.addfinalizer(self.stack.close)
+    def _tmp(self, tmp_path: Path) -> None:
+        """Give the row's scratch directories one home, removed after it."""
+        self.tmp = tmp_path
 
     def meet(self, parties: int, **env: str) -> dict[str, str]:
         """Name a fresh rendezvous for `parties` files.
@@ -522,9 +520,8 @@ class TestFanOut:
             The environment the MEETS files read, plus `env`.
 
         """
-        scratch = tempfile.TemporaryDirectory()
-        self.stack.callback(scratch.cleanup)
-        return {"PLANT_MEET": scratch.name, "PLANT_PARTIES": str(parties)} | env
+        scratch = tempfile.mkdtemp(dir=self.tmp)
+        return {"PLANT_MEET": scratch, "PLANT_PARTIES": str(parties)} | env
 
     def test_four_files_run_side_by_side_in_shard_order(self) -> None:
         """Four files that wait for each other all finish, in shard order."""

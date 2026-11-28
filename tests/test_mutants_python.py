@@ -21,8 +21,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from tests.support import Called
-
 TASK = "audit:mutants"
 RED, USAGE = 1, 2
 SETUP = "[mutmut]\nsource_paths = pkg/\npytest_add_cli_args_test_selection = tests/\n"
@@ -91,10 +89,9 @@ def plant(root: Path, module: str, source: str, tests: str, setup: str = SETUP) 
 
 @pytest.fixture
 def leg(
-    call_main: Callable[..., Called],
     as_task: Callable[[str], None],
     capfd: pytest.CaptureFixture[str],
-) -> Callable[..., Called]:
+) -> Callable[..., tuple[int, str, str]]:
     """Call the leg in a planted repository, as audit:mutants runs it.
 
     Returns:
@@ -104,7 +101,7 @@ def leg(
     as_task(TASK)
     support.tool("pytest")
 
-    def call(root: Path, *argv: str) -> Called:
+    def call(root: Path, *argv: str) -> tuple[int, str, str]:
         with pytest.MonkeyPatch.context() as patched:
             patched.chdir(root)
             status = mutants_python.main(list(argv))
@@ -115,11 +112,12 @@ def leg(
 
 
 def test_a_survivor_is_red_by_module_and_function_and_no_tests_by_name(
-    tmp_path: Path, leg: Callable[..., Called], capfd: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    leg: Callable[..., tuple[int, str, str]],
 ) -> None:
     """The real mutmut: `weak`'s survivors and `untested`'s mutants, named."""
-    done = leg(plant(tmp_path, "calc", CALC, CALC_TESTS), capfd=capfd)
-    assert done.returncode == RED
+    status, out, err = leg(plant(tmp_path, "calc", CALC, CALC_TESTS))
+    assert status == RED
     assert (
         "audit:mutants: pkg.calc.weak: 2 mutant(s) survived\n"
         "  pkg.calc.x_weak__mutmut_1\n"
@@ -127,17 +125,16 @@ def test_a_survivor_is_red_by_module_and_function_and_no_tests_by_name(
         "audit:mutants: 2 mutant(s) no tests: no test reaches them in process\n"
         "  pkg.calc.x_untested__mutmut_1\n"
         "  pkg.calc.x_untested__mutmut_2\n"
-    ) in done.stderr
-    assert done.stdout.endswith(
-        "audit:mutants: python: 5 mutant(s), 1 killed, shard 1/1\n"
-    )
+    ) in err
+    assert out.endswith("audit:mutants: python: 5 mutant(s), 1 killed, shard 1/1\n")
 
 
 def test_a_timeout_is_red(
-    tmp_path: Path, leg: Callable[..., Called], capfd: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    leg: Callable[..., tuple[int, str, str]],
 ) -> None:
     """`i += 1` made `i -= 1` or `i = 1` never ends: red, as a timeout, by name."""
-    status, _out, err = leg(plant(tmp_path, "spin", SPIN, SPIN_TESTS), capfd=capfd)
+    status, _out, err = leg(plant(tmp_path, "spin", SPIN, SPIN_TESTS))
     assert status == RED
     assert (
         "audit:mutants: 2 mutant(s) timeout: their tests ran past the time limit\n"
@@ -182,16 +179,15 @@ def test_a_timeout_is_red(
 )
 def test_a_pragma_that_is_not_the_reasoned_line_form_is_red(
     tmp_path: Path,
-    leg: Callable[..., Called],
+    leg: Callable[..., tuple[int, str, str]],
     comment: str,
     message: str,
-    capfd: pytest.CaptureFixture[str],
 ) -> None:
     """Before anything runs: the site, and why."""
     source = CALC.replace("    return a + b\n", f"    return a + b  {comment}\n")
-    done = leg(plant(tmp_path, "calc", source, CALC_TESTS), capfd=capfd)
-    assert done.returncode == RED
-    assert done.stderr == (
+    status, _out, err = leg(plant(tmp_path, "calc", source, CALC_TESTS))
+    assert status == RED
+    assert err == (
         f"audit:mutants: pkg/calc.py:6: {message}\n"
         "  an exclusion records a mutant the suite cannot kill; say why at the site\n"
         "audit:mutants: python: a pragma above is refused; nothing was mutated\n"
@@ -199,14 +195,15 @@ def test_a_pragma_that_is_not_the_reasoned_line_form_is_red(
 
 
 def test_no_configuration_skips_clean_by_name(
-    tmp_path: Path, leg: Callable[..., Called], capfd: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    leg: Callable[..., tuple[int, str, str]],
 ) -> None:
     """No [mutmut] tracked: 0, the skip named, and a skipped row for the totals."""
     summary = tmp_path / "summary"
     root = plant(tmp_path / "repo", "calc", CALC, CALC_TESTS, setup="")
-    done = leg(root, capfd=capfd)
-    assert done.returncode == 0
-    assert done.stdout == (
+    status, out, _err = leg(root)
+    assert status == 0
+    assert out == (
         "audit:mutants: python: no mutmut configuration tracked"
         " (setup.cfg [mutmut]), skipped\n"
     )
@@ -222,24 +219,24 @@ def test_no_configuration_skips_clean_by_name(
 )
 def test_adopted_says_whether_the_section_is_tracked(
     tmp_path: Path,
-    leg: Callable[..., Called],
+    leg: Callable[..., tuple[int, str, str]],
     setup: str,
     said: str,
-    capfd: pytest.CaptureFixture[str],
 ) -> None:
     """The adoption job's output: true only for a tracked [mutmut]."""
-    done = leg(plant(tmp_path, "calc", CALC, CALC_TESTS, setup), "adopted", capfd=capfd)
-    assert done.returncode == 0
-    assert done.stdout == said
+    status, out, _err = leg(plant(tmp_path, "calc", CALC, CALC_TESTS, setup), "adopted")
+    assert status == 0
+    assert out == said
 
 
 def test_an_unknown_argument_is_a_usage_error(
-    tmp_path: Path, leg: Callable[..., Called], capfd: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    leg: Callable[..., tuple[int, str, str]],
 ) -> None:
     """Only `adopted` is a verb."""
-    done = leg(tmp_path, "plan", capfd=capfd)
-    assert done.returncode == USAGE
-    assert done.stderr == "audit:mutants: usage: belt mutants-python [adopted]\n"
+    status, _out, err = leg(tmp_path, "plan")
+    assert status == USAGE
+    assert err == "audit:mutants: usage: belt mutants-python [adopted]\n"
 
 
 @pytest.mark.parametrize(

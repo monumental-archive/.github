@@ -26,10 +26,8 @@ Each row asserts the message, not just the exit status: a planted row
 scored on exit alone can pass for the wrong reason.
 """
 
-import contextlib
 import os
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -777,15 +775,14 @@ class TestQuietSteps(TestSearchCase):
         ) in err
 
 
-@pytest.mark.usefixtures("_stack")
+@pytest.mark.usefixtures("_tmp")
 class TestFailureLines:
     """What a crash's finding quotes from the log (#2120)."""
 
     @pytest.fixture
-    def _stack(self, request: pytest.FixtureRequest) -> None:
-        """Hold the row's cleanups, undone last first after it ends."""
-        self.stack = contextlib.ExitStack()
-        request.addfinalizer(self.stack.close)
+    def _tmp(self, tmp_path: Path) -> None:
+        """Give the row's scratch directories one home, removed after it."""
+        self.tmp = tmp_path
 
     def lines(self, kind: str, log: str) -> str:
         """Run org_fuzz_failure_lines over a planted log.
@@ -795,10 +792,9 @@ class TestFailureLines:
 
         """
         with tempfile.NamedTemporaryFile(
-            "w", encoding="utf-8", suffix=".log", delete=False
+            "w", dir=self.tmp, encoding="utf-8", suffix=".log", delete=False
         ) as f:
             f.write(log)
-        self.stack.callback(os.unlink, f.name)
         return lib('org_fuzz_failure_lines "$1" "$2"', kind, f.name)
 
     def test_at_most_40_lines_are_quoted(self) -> None:
@@ -817,10 +813,9 @@ class TestFailureLines:
     def test_a_crash_with_no_crash_line_says_so(self) -> None:
         """The finding's detail names what the log lacked."""
         with tempfile.NamedTemporaryFile(
-            "w", encoding="utf-8", suffix=".log", delete=False
+            "w", dir=self.tmp, encoding="utf-8", suffix=".log", delete=False
         ) as f:
             f.write("1 #2 NEW cov: 1\n")
-        self.stack.callback(os.unlink, f.name)
         script = f'. "{SEARCH_LIB}"; org_fuzz_crash rust "$1" s m'
         err = subprocess.run(
             [BASH, "-c", script, "lib", f.name],
@@ -955,15 +950,14 @@ class TestSelection(TestSearchCase):
             assert "-fuzztime 900s" in call
 
 
-@pytest.mark.usefixtures("_stack")
+@pytest.mark.usefixtures("_tmp")
 class TestRunLength:
     """The summary says when a run was still finding new code (item 5)."""
 
     @pytest.fixture
-    def _stack(self, request: pytest.FixtureRequest) -> None:
-        """Hold the row's cleanups, undone last first after it ends."""
-        self.stack = contextlib.ExitStack()
-        request.addfinalizer(self.stack.close)
+    def _tmp(self, tmp_path: Path) -> None:
+        """Give the row's scratch directories one home, removed after it."""
+        self.tmp = tmp_path
 
     def timing(self, kind: str, log: str, budget: int) -> str:
         """Read a planted log through the library's reader and timing line.
@@ -973,10 +967,9 @@ class TestRunLength:
 
         """
         with tempfile.NamedTemporaryFile(
-            "w", encoding="utf-8", suffix=".log", delete=False
+            "w", dir=self.tmp, encoding="utf-8", suffix=".log", delete=False
         ) as handle:
             handle.write(log)
-        self.stack.callback(Path(handle.name).unlink)
         return lib(
             'org_fuzz_timing "$(org_fuzz_last_new "$1" "$2")" "$3"',
             kind,
@@ -1040,15 +1033,14 @@ def step(name: str) -> dict[str, object]:
     return next(s for s in fuzz_steps() if s.get("name") == name)
 
 
-@pytest.mark.usefixtures("_stack")
+@pytest.mark.usefixtures("_tmp")
 class TestHandover:
     """What a fuzz runner hands the propose job, and when (items 3, 4; #1899)."""
 
     @pytest.fixture
-    def _stack(self, request: pytest.FixtureRequest) -> None:
-        """Hold the row's cleanups, undone last first after it ends."""
-        self.stack = contextlib.ExitStack()
-        request.addfinalizer(self.stack.close)
+    def _tmp(self, tmp_path: Path) -> None:
+        """Give the row's scratch directories one home, removed after it."""
+        self.tmp = tmp_path
 
     KEPT = "Hand what the search kept to the propose job"
     UPLOAD = "Upload what the search kept"
@@ -1088,8 +1080,7 @@ class TestHandover:
             its standard output.
 
         """
-        tmp = Path(tempfile.mkdtemp())
-        self.stack.callback(shutil.rmtree, tmp, ignore_errors=True)
+        tmp = Path(tempfile.mkdtemp(dir=self.tmp))
         stage = tmp / "stage"
         stage.mkdir()
         for name, text in files.items():

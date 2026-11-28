@@ -12,7 +12,6 @@ physically. A refusing row asserts its message, not only its status
 (#650).
 """
 
-import contextlib
 import os
 import subprocess
 import sys
@@ -307,15 +306,14 @@ BUILT_AS_HOLDS_THE_FLAGS_AND_PUTS_THEM_BACK_ROWS: list[tuple[dict[str, str], str
 ]
 
 
-@pytest.mark.usefixtures("_stack")
+@pytest.mark.usefixtures("_tmp")
 class TestFuzzing:
     """A cargo-fuzz root is built with `--cfg fuzzing`, by its marker (#2093)."""
 
     @pytest.fixture
-    def _stack(self, request: pytest.FixtureRequest) -> None:
-        """Hold the row's cleanups, undone last first after it ends."""
-        self.stack = contextlib.ExitStack()
-        request.addfinalizer(self.stack.close)
+    def _tmp(self, tmp_path: Path) -> None:
+        """Give the row's scratch directories one home, removed after it."""
+        self.tmp = tmp_path
 
     def manifest(self, text: str) -> str:
         """Write a root manifest in a scratch directory.
@@ -325,10 +323,9 @@ class TestFuzzing:
 
         """
         with tempfile.NamedTemporaryFile(
-            "w", suffix=".toml", delete=False, encoding="utf-8"
+            "w", dir=self.tmp, suffix=".toml", delete=False, encoding="utf-8"
         ) as written:
             written.write(text)
-        self.stack.callback(Path(written.name).unlink)
         return written.name
 
     @pytest.mark.parametrize(

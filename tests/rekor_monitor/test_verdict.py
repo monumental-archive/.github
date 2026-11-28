@@ -1,9 +1,8 @@
-"""verdict.py, one row per outcome of a leg (#1339).
+"""`belt verdict`, one row per outcome of a leg (#1339).
 
-Each row calls the helper's `main` in this process with the leg's last
+Each row calls the command's `main` in this process with the leg's last
 step's arguments (#1673, #1699): mutation, coverage and the type checker
-see the call. One row, the script row, starts it as the workflow does,
-as a process, and holds the script contract. Each asserts the colour
+see the call. Each asserts the colour
 and the message. The reports are stele v0.24.0's own
 (testdata/SOURCE.md): a run that judged to the head (PASS, exit 0) and a
 run whose budget ended before its first chunk was done (CANNOT_JUDGE,
@@ -14,7 +13,6 @@ edits a copy in code and says which field.
 from __future__ import annotations
 
 import json
-import subprocess
 import sys
 from pathlib import Path
 
@@ -23,6 +21,8 @@ import pytest
 from belt import decoded
 from belt.rekor_monitor import verdict
 from tests import support
+
+COMMAND = "verdict"
 
 DATA = Path(__file__).resolve().parent / "testdata"
 
@@ -76,8 +76,8 @@ def finding(index: int, condition: str) -> dict[str, object]:
 def call(argv: list[str], *, capfd: pytest.CaptureFixture[str]) -> tuple[int, str, str]:
     """Call the helper's main in this process, as the leg starts it.
 
-    The leg runs the script by path with no mise task around it, so the
-    finding writer names the script (#1934): argv[0] is its path, and
+    The leg runs `belt verdict` with no mise task around it, so the
+    finding writer names the command (#1934): argv[0] is its name, and
     the environment is the allow-list's, never the running suite's
     MISE_TASK_NAME or ORG_FINDINGS.
 
@@ -86,13 +86,12 @@ def call(argv: list[str], *, capfd: pytest.CaptureFixture[str]) -> tuple[int, st
 
     """
     with pytest.MonkeyPatch.context() as patched:
-        patched.setattr(sys, "argv", [str(HELPER), *argv])
-        with pytest.MonkeyPatch.context() as patched:
-            for name, value in (support.env()).items():
-                patched.setenv(name, value)
-            status = verdict.main(argv)
-        out, err = capfd.readouterr()
-        return status, out, err
+        patched.setattr(sys, "argv", [COMMAND, *argv])
+        for name, value in support.env().items():
+            patched.setenv(name, value)
+        status = verdict.main(argv)
+    out, err = capfd.readouterr()
+    return status, out, err
 
 
 @pytest.mark.usefixtures("_set_up_test_verdict")
@@ -137,7 +136,7 @@ class TestVerdict:
         status, _out, err = self.run_helper("1", doc, capfd=capfd)
         assert status == 1
         assert err.strip() == (
-            "::error::verdict.py: 2 finding(s): a certificate did not reconcile;"
+            "::error::verdict: 2 finding(s): a certificate did not reconcile;"
             " each has its issue"
         )
 
@@ -159,7 +158,7 @@ class TestVerdict:
         status, _out, err = self.run_helper("4", doc, capfd=capfd)
         assert status == 1
         assert err.strip() == (
-            "::error::verdict.py: 1 finding(s): a certificate did not reconcile;"
+            "::error::verdict: 1 finding(s): a certificate did not reconcile;"
             " each has its issue"
         )
 
@@ -179,7 +178,7 @@ class TestVerdict:
         status, _out, err = self.run_helper("", None, saved="false", capfd=capfd)
         assert status == 1
         assert err.strip() == (
-            "::error::verdict.py: stele did not finish: no exit status was"
+            "::error::verdict: stele did not finish: no exit status was"
             " recorded (a step before it failed, or the leg was cancelled or"
             " timed out)"
         )
@@ -189,7 +188,7 @@ class TestVerdict:
         status, _out, err = self.run_helper("2", None, saved="false", capfd=capfd)
         assert status == 1
         assert err.strip() == (
-            "::error::verdict.py: stele exited 2 and the checkpoint was not saved:"
+            "::error::verdict: stele exited 2 and the checkpoint was not saved:"
             " stele wrote no report"
         )
 
@@ -200,7 +199,7 @@ class TestVerdict:
         )
         assert status == 1
         assert err.strip() == (
-            "::error::verdict.py: stele exited 0 and the checkpoint was not saved:"
+            "::error::verdict: stele exited 0 and the checkpoint was not saved:"
             " a finding could not be filed"
         )
 
@@ -210,7 +209,7 @@ class TestVerdict:
             "3", load("report-budget.json"), capfd=capfd
         )
         assert status == 1
-        assert err.strip() == "::error::verdict.py: stele exited 3"
+        assert err.strip() == "::error::verdict: stele exited 3"
 
     def test_facts_not_stele_shape_is_red(
         self, capfd: pytest.CaptureFixture[str]
@@ -226,28 +225,21 @@ class TestVerdict:
         status, _out, err = self.run_helper("0", doc, capfd=capfd)
         assert status == 1
         assert err.strip() == (
-            "::error::verdict.py: stele exited 0 and its report could not be judged:"
+            "::error::verdict: stele exited 0 and its report could not be judged:"
             " the report could not be read"
         )
 
-    def test_report_nested_past_the_parser(self) -> None:
-        """JSON nested past the parser's depth: red by name, no traceback.
-
-        The script row (#1673): the helper started as the leg starts it,
-        reading its arguments and exiting with the documented status.
-        """
+    def test_report_nested_past_the_parser(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
+        """JSON nested past the parser's depth: red by name, no traceback."""
         self.report.write_bytes(b"[" * 100_000)
-        argv = [
-            sys.executable, str(HELPER), "--exit-code", "0",
-            "--report", str(self.report), "--saved", "true",
-        ]  # fmt: skip
-        proc = subprocess.run(
-            argv, env=support.env(), capture_output=True, text=True, check=False
-        )
-        assert proc.returncode == 1, proc.stderr
-        assert proc.stdout == ""
-        assert proc.stderr.strip() == (
-            "::error::verdict.py: stele exited 0 and its report could not be judged:"
+        argv = ["--exit-code", "0", "--report", str(self.report), "--saved", "true"]
+        status, out, err = call(argv, capfd=capfd)
+        assert status == 1, err
+        assert out == ""
+        assert err.strip() == (
+            "::error::verdict: stele exited 0 and its report could not be judged:"
             " the report could not be read"
         )
 
@@ -276,7 +268,7 @@ class TestVerdict:
             assert status == 1, err
             assert out == ""
             assert err.strip() == (
-                "::error::verdict.py: stele exited 0 and its report could not"
+                "::error::verdict: stele exited 0 and its report could not"
                 " be judged: the report could not be read"
             )
 
@@ -289,6 +281,6 @@ class TestVerdict:
         status, _out, err = self.run_helper("4", doc, saved="false", capfd=capfd)
         assert status == 1
         assert err.strip() == (
-            "::error::verdict.py: stele exited 4 and the checkpoint was not saved:"
+            "::error::verdict: stele exited 4 and the checkpoint was not saved:"
             " the report is not stele's assert signer-certificates report"
         )

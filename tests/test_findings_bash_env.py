@@ -23,7 +23,6 @@ A script run outside `mise run` states its task with `org_task`
 its own file's: the export is the function's, so no site can forget it.
 """
 
-import contextlib
 import socket
 import subprocess
 import sys
@@ -102,15 +101,14 @@ def bashes() -> list[tuple[str, str]]:
     return out
 
 
-@pytest.mark.usefixtures("_stack", "_set_up_test_bash_env_rows")
+@pytest.mark.usefixtures("_tmp", "_set_up_test_bash_env_rows")
 class TestBashEnvRows:
     """A body under the belt's shell and BASH_ENV has the writer."""
 
     @pytest.fixture
-    def _stack(self, request: pytest.FixtureRequest) -> None:
-        """Hold the row's cleanups, undone last first after it ends."""
-        self.stack = contextlib.ExitStack()
-        request.addfinalizer(self.stack.close)
+    def _tmp(self, tmp_path: Path) -> None:
+        """Give the row's scratch directories one home, removed after it."""
+        self.tmp = tmp_path
 
     @pytest.fixture
     def _set_up_test_bash_env_rows(self, tmp_path: Path) -> None:
@@ -159,16 +157,15 @@ class TestBashEnvRows:
             )
         else:
             near, far = socket.socketpair()
-            self.stack.callback(near.close)
-            self.stack.callback(far.close)
-            done = subprocess.run(
-                argv,
-                env=env,
-                stdin=far.fileno(),
-                capture_output=True,
-                text=True,
-                check=False,
-            )
+            with near, far:
+                done = subprocess.run(
+                    argv,
+                    env=env,
+                    stdin=far.fileno(),
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
         assert "SHLVL" not in env
         return done.stdout.strip()
 
@@ -178,7 +175,6 @@ class TestBashEnvRows:
         assert "--norc" in shell
         for _label, bash in bashes():
             for ssh in (False, True):
-                where = "SSH_CLIENT" if ssh else "socket stdin"
                 assert self.probe([bash, "-c", PROBE], ssh=ssh) == "none"
                 assert self.probe([bash, *shell[1:]], ssh=ssh) == "function"
 

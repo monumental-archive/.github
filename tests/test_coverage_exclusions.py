@@ -9,7 +9,6 @@ decoded from the belt's config in a scratch repository, every git call
 with a scrubbed environment (#857). The last row is the canon itself.
 """
 
-import contextlib
 import io
 import os
 import shutil
@@ -101,15 +100,14 @@ def helper(
     return status, out, err
 
 
-@pytest.mark.usefixtures("_stack")
+@pytest.mark.usefixtures("_tmp")
 class TestMarkers:
     """The helper over one planted file at a time."""
 
     @pytest.fixture
-    def _stack(self, request: pytest.FixtureRequest) -> None:
-        """Hold the row's cleanups, undone last first after it ends."""
-        self.stack = contextlib.ExitStack()
-        request.addfinalizer(self.stack.close)
+    def _tmp(self, tmp_path: Path) -> None:
+        """Give the row's scratch directories one home, removed after it."""
+        self.tmp = tmp_path
 
     def plant(self, name: str, body: str) -> Path:
         """Write one file into a scratch directory.
@@ -118,9 +116,8 @@ class TestMarkers:
             The directory.
 
         """
-        tmp = tempfile.TemporaryDirectory()
-        self.stack.callback(tmp.cleanup)
-        root = Path(tmp.name)
+        tmp = tempfile.mkdtemp(dir=self.tmp)
+        root = Path(tmp)
         (root / name).write_text(body, encoding="utf-8")
         return root
 
@@ -191,15 +188,14 @@ def task_body() -> str:
     return decoded.as_str(decoded.as_object(tasks[name], name)["run"], f"{name}'s run")
 
 
-@pytest.mark.usefixtures("_stack")
+@pytest.mark.usefixtures("_tmp")
 class TestTask:
     """The task body, in a scratch repository."""
 
     @pytest.fixture
-    def _stack(self, request: pytest.FixtureRequest) -> None:
-        """Hold the row's cleanups, undone last first after it ends."""
-        self.stack = contextlib.ExitStack()
-        request.addfinalizer(self.stack.close)
+    def _tmp(self, tmp_path: Path) -> None:
+        """Give the row's scratch directories one home, removed after it."""
+        self.tmp = tmp_path
 
     def repo(self, files: dict[str, str]) -> Path:
         """Make a repository tracking `files`.
@@ -208,9 +204,8 @@ class TestTask:
             Its path.
 
         """
-        tmp = tempfile.TemporaryDirectory()
-        self.stack.callback(tmp.cleanup)
-        root = Path(tmp.name)
+        tmp = tempfile.mkdtemp(dir=self.tmp)
+        root = Path(tmp)
         for name, body in files.items():
             (root / name).parent.mkdir(parents=True, exist_ok=True)
             (root / name).write_text(body, encoding="utf-8")
@@ -265,7 +260,7 @@ class TestTask:
         assert "1 file(s), no coverage exclusions" in r.stdout
 
 
-@pytest.mark.usefixtures("_stack")
+@pytest.mark.usefixtures("_tmp")
 class TestMissingSibling:
     """The two helpers' own message, where their dead guard used to be.
 
@@ -274,10 +269,9 @@ class TestMissingSibling:
     """
 
     @pytest.fixture
-    def _stack(self, request: pytest.FixtureRequest) -> None:
-        """Hold the row's cleanups, undone last first after it ends."""
-        self.stack = contextlib.ExitStack()
-        request.addfinalizer(self.stack.close)
+    def _tmp(self, tmp_path: Path) -> None:
+        """Give the row's scratch directories one home, removed after it."""
+        self.tmp = tmp_path
 
     def alone(
         self, source: Path, relative: str, *beside: str
@@ -291,9 +285,8 @@ class TestMissingSibling:
             The finished process.
 
         """
-        tmp = tempfile.TemporaryDirectory()
-        self.stack.callback(tmp.cleanup)
-        target = Path(tmp.name) / relative
+        tmp = tempfile.mkdtemp(dir=self.tmp)
+        target = Path(tmp) / relative
         target.parent.mkdir(parents=True)
         shutil.copy(source, target)
         for name in beside:
@@ -322,14 +315,11 @@ class TestMissingSibling:
 
     def test_publish_crates_without_crates_index(self) -> None:
         """publish_crates.py names mise/crates_index.py and exits non-zero."""
-        tmp = tempfile.TemporaryDirectory()
-        self.stack.callback(tmp.cleanup)
+        tmp = tempfile.mkdtemp(dir=self.tmp)
         helper = "release/publish_crates.py"
         # A stub of its own text, so the helper resolves its siblings in
         # this tree; the writer beside it, the missing sibling removed.
-        root = support.canon(
-            tmp.name, stubs={helper: (_HERE.parent / helper).read_text()}
-        )
+        root = support.canon(tmp, stubs={helper: (_HERE.parent / helper).read_text()})
         (root / "mise" / "crates_index.py").unlink()
         r = subprocess.run(
             [sys.executable, str(root / helper), "--help"],

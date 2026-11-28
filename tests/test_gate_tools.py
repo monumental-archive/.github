@@ -1083,15 +1083,14 @@ class TestHelper:
         assert f"::error::{STEP}: aqua:hadolint/hadolint is in one of" in err
 
 
-@pytest.mark.usefixtures("_stack")
+@pytest.mark.usefixtures("_tmp")
 class TestRefusals:
     """A table or belt config of the wrong shape is refused by name."""
 
     @pytest.fixture
-    def _stack(self, request: pytest.FixtureRequest) -> None:
-        """Hold the row's cleanups, undone last first after it ends."""
-        self.stack = contextlib.ExitStack()
-        request.addfinalizer(self.stack.close)
+    def _tmp(self, tmp_path: Path) -> None:
+        """Give the row's scratch directories one home, removed after it."""
+        self.tmp = tmp_path
 
     def run_main(self, table_text: str, config_text: str) -> tuple[int, str, Path]:
         """Run the helper in-process over a table and config written here.
@@ -1100,11 +1099,10 @@ class TestRefusals:
             Exit status, stderr and the table's path.
 
         """
-        tmp = tempfile.TemporaryDirectory()
-        self.stack.callback(tmp.cleanup)
-        table = Path(tmp.name) / "gate-tools.toml"
+        tmp = tempfile.mkdtemp(dir=self.tmp)
+        table = Path(tmp) / "gate-tools.toml"
         table.write_text(table_text, encoding="utf-8")
-        (Path(tmp.name) / "config.toml").write_text(config_text, encoding="utf-8")
+        (Path(tmp) / "config.toml").write_text(config_text, encoding="utf-8")
         err = io.StringIO()
         with (
             pytest.MonkeyPatch.context() as patched,

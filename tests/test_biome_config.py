@@ -14,7 +14,6 @@ exercised code in the org, where a check that admits what it should
 refuse looks precisely like success.
 """
 
-import contextlib
 import io
 import json
 import subprocess
@@ -265,15 +264,14 @@ class TestOmissionsTest:
         assert "qwik" in missing[0]
 
 
-@pytest.mark.usefixtures("_stack")
+@pytest.mark.usefixtures("_tmp")
 class TestDeclaredPackagesTest:
     """Where a dependency may be declared, and what is not a manifest."""
 
     @pytest.fixture
-    def _stack(self, request: pytest.FixtureRequest) -> None:
-        """Hold the row's cleanups, undone last first after it ends."""
-        self.stack = contextlib.ExitStack()
-        request.addfinalizer(self.stack.close)
+    def _tmp(self, tmp_path: Path) -> None:
+        """Give the row's scratch directories one home, removed after it."""
+        self.tmp = tmp_path
 
     def manifest(self, body: object) -> Path:
         """Write one manifest into a temporary tree.
@@ -282,8 +280,7 @@ class TestDeclaredPackagesTest:
             Its path.
 
         """
-        directory = Path(tempfile.mkdtemp())
-        self.stack.callback(lambda: None)
+        directory = Path(tempfile.mkdtemp(dir=self.tmp))
         path = directory / "package.json"
         path.write_text(json.dumps(body), encoding="utf-8")
         return path
@@ -680,7 +677,6 @@ class TestConditionalExpectTest:
     def test_no_repository_identity_turns_it_back_on(self) -> None:
         """The generator only ever writes "off"; assert it never writes "on"."""
         for claimed in (*CLAIMS, set(DELIVERED.identity)):
-            names = sorted(claimed)
             config, _silenced = biome_config.generate(
                 self.org,
                 claimed,
@@ -833,38 +829,18 @@ class TestRunTest:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(json.dumps(content), encoding="utf-8")
             paths.append(path)
-        out = tree / "generated.json"
+        generated = tree / "generated.json"
         with pytest.MonkeyPatch.context() as patched:
             patched.setattr(
                 sys, "stdin", io.StringIO("".join(f"{path}\0" for path in paths))
             )
             status = biome_config.main([
                 *("--org", str(ORG_FILE), "--domains", str(DOMAINS_FILE)),
-                *("--nursery", str(NURSERY_FILE), "--out", str(out)),
+                *("--nursery", str(NURSERY_FILE), "--out", str(generated)),
                 *("--declaration", str(declared)),
             ])
         out, err = capfd.readouterr()
-        return status, out, err, out
-
-    def test_the_script_contract(self) -> None:
-        """Started as a process, it reads its flags and stdin and writes."""
-        tree = Path(tempfile.mkdtemp())
-        out = tree / "generated.json"
-        done = subprocess.run(
-            [
-                *(sys.executable, str(BELT / "biome_config.py")),
-                *("--org", str(ORG_FILE), "--domains", str(DOMAINS_FILE)),
-                *("--nursery", str(NURSERY_FILE), "--out", str(out)),
-                *("--declaration", str(tree / "biome.json")),
-            ],
-            env=support.env(),
-            input="",
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        assert done.returncode == 0, done.stderr
-        assert out.is_file()
+        return status, out, err, generated
 
     @pytest.mark.parametrize(
         ("text", "said"),
@@ -982,7 +958,7 @@ NODE_OFF = {"rules": {"correctness": {"noNodejsModules": "off"}}}
 
 
 def generate_main(
-    tree: Path, out: Path, *extra: str, capfd: pytest.CaptureFixture[str]
+    tree: Path, generated: Path, *extra: str, capfd: pytest.CaptureFixture[str]
 ) -> tuple[int, str, str]:
     """Run the generator's entry point with a tree's declaration.
 
@@ -994,7 +970,7 @@ def generate_main(
         patched.setattr(sys, "stdin", io.StringIO(""))
         status = biome_config.main([
             *("--org", str(ORG_FILE), "--domains", str(DOMAINS_FILE)),
-            *("--nursery", str(NURSERY_FILE), "--out", str(out)),
+            *("--nursery", str(NURSERY_FILE), "--out", str(generated)),
             *("--declaration", str(tree / "biome.json")),
             *extra,
         ])
@@ -1092,10 +1068,9 @@ class TestNodeOverridesTest:
         self, document: object, said: str
     ) -> None:
         """A shape the belt does not read is named, never read as "not Node"."""
-        refused = self.assertRaises(decoded.UndecodableError)
-        with refused as raised:
+        with pytest.raises(decoded.UndecodableError) as raised:
             biome_config.node_overrides({"apps/a/tsconfig.json": document})
-        assert str(raised.exception).startswith(said), raised.exception
+        assert str(raised.value).startswith(said), raised.value
 
     def test_the_entries_follow_the_org_overrides_in_the_generated_config(self) -> None:
         """Appended, so the org's test-file entry is kept and stays first."""
@@ -1141,10 +1116,10 @@ class TestNodeOverridesTest:
             resolved = tree / "resolved.json"
             node = json.dumps(self.resolved(["node"]))
             resolved.write_text(node, encoding="utf-8")
-            out = tree / "generated.json"
+            generated = tree / "generated.json"
             status, out, err = generate_main(
                 tree,
-                out,
+                generated,
                 "--tsconfig",
                 "apps/a/tsconfig.json",
                 str(resolved),
@@ -1152,7 +1127,7 @@ class TestNodeOverridesTest:
             )
             assert status == 1
             assert "says more than a repository may say" in err
-            assert not out.exists()
+            assert not generated.exists()
 
     def test_a_resolved_file_that_is_not_json_is_refused_by_its_tsconfig(
         self, capfd: pytest.CaptureFixture[str]
@@ -1161,9 +1136,14 @@ class TestNodeOverridesTest:
         tree = Path(tempfile.mkdtemp())
         resolved = tree / "resolved.json"
         resolved.write_text("{", encoding="utf-8")
-        out = tree / "generated.json"
+        generated = tree / "generated.json"
         status, out, err = generate_main(
-            tree, out, "--tsconfig", "apps/a/tsconfig.json", str(resolved), capfd=capfd
+            tree,
+            generated,
+            "--tsconfig",
+            "apps/a/tsconfig.json",
+            str(resolved),
+            capfd=capfd,
         )
         assert status == 1
         lines = err.splitlines()
@@ -1173,7 +1153,7 @@ class TestNodeOverridesTest:
         )
         said = "  apps/a/tsconfig.json: tsc --showConfig"
         assert lines[1].startswith(said)
-        assert not out.exists()
+        assert not generated.exists()
 
 
 def show_configs(

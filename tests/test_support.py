@@ -10,9 +10,7 @@ tracks instead of calling support.tracked (#1618).
 """
 
 import ast
-import contextlib
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -777,15 +775,14 @@ def on_path(path: str) -> AbstractContextManager[object]:
     return mock.patch.dict(os.environ, values)
 
 
-@pytest.mark.usefixtures("_stack", "_set_up_test_tool")
+@pytest.mark.usefixtures("_tmp", "_set_up_test_tool")
 class TestTool:
     """support.tool and support.optional_tool (#1684)."""
 
     @pytest.fixture
-    def _stack(self, request: pytest.FixtureRequest) -> None:
-        """Hold the row's cleanups, undone last first after it ends."""
-        self.stack = contextlib.ExitStack()
-        request.addfinalizer(self.stack.close)
+    def _tmp(self, tmp_path: Path) -> None:
+        """Give the row's scratch directories one home, removed after it."""
+        self.tmp = tmp_path
 
     @pytest.fixture
     def _set_up_test_tool(self, tmp_path: Path) -> None:
@@ -809,8 +806,7 @@ class TestTool:
 
     def test_a_link_is_not_resolved(self) -> None:
         """A mise shim is a link that dispatches on its own name."""
-        shims = Path(tempfile.mkdtemp()).resolve()
-        self.stack.callback(shutil.rmtree, shims)
+        shims = Path(tempfile.mkdtemp(dir=self.tmp)).resolve()
         (shims / "shim").symlink_to(self.bin / "planted-tool")
         assert str(shims / "shim") == support.tool("shim", path=str(shims))
 
@@ -828,8 +824,7 @@ class TestTool:
 
     def test_the_search_path_is_honoured(self) -> None:
         """`path=` is searched instead of the suite's PATH, both ways."""
-        empty = Path(tempfile.mkdtemp()).resolve()
-        self.stack.callback(shutil.rmtree, empty)
+        empty = Path(tempfile.mkdtemp(dir=self.tmp)).resolve()
         with on_path(str(empty)):
             found = support.tool("planted-tool", path=str(self.bin))
         assert str(self.bin / "planted-tool") == found
@@ -849,20 +844,18 @@ class TestTool:
             )
 
 
-@pytest.mark.usefixtures("_stack")
+@pytest.mark.usefixtures("_tmp")
 class TestRustc:
     """support.rustc prints support.rustc_verbose (#1877)."""
 
     @pytest.fixture
-    def _stack(self, request: pytest.FixtureRequest) -> None:
-        """Hold the row's cleanups, undone last first after it ends."""
-        self.stack = contextlib.ExitStack()
-        request.addfinalizer(self.stack.close)
+    def _tmp(self, tmp_path: Path) -> None:
+        """Give the row's scratch directories one home, removed after it."""
+        self.tmp = tmp_path
 
     def test_the_stand_in_prints_the_text_for_its_toolchain(self) -> None:
         """Unset is `stable`; RUSTUP_TOOLCHAIN names the release."""
-        bin_dir = Path(tempfile.mkdtemp()).resolve()
-        self.stack.callback(shutil.rmtree, bin_dir)
+        bin_dir = Path(tempfile.mkdtemp(dir=self.tmp)).resolve()
         stub = str(support.rustc(bin_dir))
         rows = (("", "stable"), ("nightly-2026-07-20", "nightly-2026-07-20"))
         for given, toolchain in rows:
@@ -934,7 +927,7 @@ class TestBelt:
         self.git(scratch, "init", "-q")
         self.git(scratch, "add", ".")
         with pytest.MonkeyPatch.context() as patched:
-            patched.setattr(hermetic, "CANON", scratch)
+            patched.setattr(support, "CANON", scratch)
             before = support.belt(self.tmp / "before")
             (scratch / "mise" / "sub").mkdir()
             (scratch / "mise" / "sub" / "b.sh").write_text("x\n", encoding="utf-8")

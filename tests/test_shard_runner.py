@@ -40,7 +40,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from tests.support import Called
 
 # The stand-ins, one Python script per runner. Each reads its fixture
 # from the environment and writes what its `run` ran to STUB_RAN.
@@ -134,14 +133,14 @@ TRUE: list[str] = ["true"]
 USAGE = 2
 
 
-def words(done: Called) -> list[str]:
+def words(out: str) -> list[str]:
     """Read the adapter's command, NUL-separated on its stdout.
 
     Returns:
         Its words.
 
     """
-    return [w for w in done.stdout.split("\0") if w]
+    return [w for w in out.split("\0") if w]
 
 
 def argv_of(*text: str) -> list[str]:
@@ -170,16 +169,16 @@ class TestRunner:
 
     @pytest.fixture
     def _set_up_test_runner(
-        self, tmp_path: Path, call_main: Callable[..., Called]
+        self, tmp_path: Path, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """Make the stand-ins' directory and the reports directory."""
-        self.call = call_main
+        self.capfd = capfd
         self.base = tmp_path
         self.bin = self.base / "bin"
         self.bin.mkdir()
         self.reports = self.base / "reports"
         self.ran = self.base / "ran"
-        status, out, err = (
+        stubs = (
             ("vitest", VITEST),
             ("cargo", NEXTEST),
             ("pytest", PYTEST),
@@ -191,11 +190,13 @@ class TestRunner:
             stub.write_text(f"#!{sys.executable}\n{body}", encoding="utf-8")
             stub.chmod(0o755)
 
-    def adapt(self, spec: str, command: list[str], fixture: dict[str, str]) -> Called:
+    def adapt(
+        self, spec: str, command: list[str], fixture: dict[str, str]
+    ) -> tuple[int, str, str]:
         """Call the adapter for one shard of a command.
 
         Returns:
-            What it returned and wrote: its stdout is the command,
+            Its status and both streams: stdout is the command,
             NUL-separated.
 
         """
@@ -207,9 +208,13 @@ class TestRunner:
             STUB_RAN=str(self.ran),
             **fixture,
         )
-        return self.call(
-            lambda: shard_runner.main(["--", *command]), env=env, cwd=self.base
-        )
+        with pytest.MonkeyPatch.context() as patched:
+            for name, value in env.items():
+                patched.setenv(name, value)
+            patched.chdir(self.base)
+            status = shard_runner.main(["--", *command])
+        out, err = self.capfd.readouterr()
+        return status, out, err
 
     def shards(
         self, n: int, command: list[str], fixture: dict[str, str]
@@ -220,11 +225,11 @@ class TestRunner:
             What the runner ran on each shard, shard 1 first.
 
         """
-        out: list[list[str]] = []
+        shares: list[list[str]] = []
         for k in range(1, n + 1):
-            done = self.adapt(f"{k}/{n}", command, fixture)
-            assert done.returncode == 0, done.stderr
-            argv = words(done)
+            status, out, err = self.adapt(f"{k}/{n}", command, fixture)
+            assert status == 0, err
+            argv = words(out)
             self.ran.write_text("", encoding="utf-8")
             if argv != ["true"]:
                 ran = subprocess.run(
@@ -241,8 +246,8 @@ class TestRunner:
                 )
                 assert ran.returncode == 0, ran.stderr
             lines = self.ran.read_text("utf-8").splitlines()
-            out.append([line for line in lines if not line.startswith("argv ")])
-        return out
+            shares.append([line for line in lines if not line.startswith("argv ")])
+        return shares
 
     def whole(self, n: int, shares: list[list[str]], population: list[str]) -> None:
         """Hold the shards to the population and the reports to the shares."""
@@ -292,21 +297,21 @@ class TestVitest(TestRunner):
 
     def test_the_command_gains_the_flag(self) -> None:
         """`run` and the repository's own arguments kept, `--shard` appended."""
-        done = self.adapt(
+        status, out, err = self.adapt(
             "2/2", ["vitest", "--project", "unit"], {"STUB_FILES": " ".join(FILES)}
         )
-        assert done.returncode == 0, done.stderr
+        assert status == 0, err
         want: list[str] = ["vitest", "run", "--project", "unit", "--shard=2/2"]
-        assert want == words(done)
+        assert want == words(out)
 
     def test_more_shards_than_files_is_red(self) -> None:
         """More shards than files: vitest refuses, so the adapter is red, by name."""
-        done = self.adapt("1/9", ["vitest", "run"], {"STUB_FILES": " ".join(FILES)})
-        assert done.returncode == 1
-        assert (
-            "--shard <count> must be a smaller than count of test files" in done.stderr
+        status, _out, err = self.adapt(
+            "1/9", ["vitest", "run"], {"STUB_FILES": " ".join(FILES)}
         )
-        assert "so the share cannot be listed" in done.stderr
+        assert status == 1
+        assert "--shard <count> must be a smaller than count of test files" in err
+        assert "so the share cannot be listed" in err
 
 
 TESTS = [
@@ -332,12 +337,12 @@ class TestNextest(TestRunner):
 
     def test_the_command_gains_the_partition(self) -> None:
         """`--partition slice:k/n`, after the repository's own arguments."""
-        done = self.adapt(
+        status, out, err = self.adapt(
             "1/2",
             ["cargo", "nextest", "run", "-p", "x"],
             {"STUB_TESTS": "\n".join(TESTS)},
         )
-        assert done.returncode == 0, done.stderr
+        assert status == 0, err
         want: list[str] = [
             "cargo",
             "nextest",
@@ -347,15 +352,15 @@ class TestNextest(TestRunner):
             "--partition",
             "slice:1/2",
         ]
-        assert want == words(done)
+        assert want == words(out)
 
     def test_a_shard_dealt_nothing_runs_true(self) -> None:
         """Two tests on three shards: the third runs `true`, never exit 4."""
-        done = self.adapt(
+        status, out, err = self.adapt(
             "3/3", ["cargo", "nextest", "run"], {"STUB_TESTS": "\n".join(TESTS[:2])}
         )
-        assert done.returncode == 0, done.stderr
-        assert words(done) == TRUE
+        assert status == 0, err
+        assert words(out) == TRUE
 
 
 PACKAGES = [
@@ -390,23 +395,25 @@ class TestPytest(TestRunner):
 
     def test_options_stay_and_paths_become_files(self) -> None:
         """A valued option's value is not a path; the paths become the share."""
-        done = self.adapt(
+        status, out, err = self.adapt(
             "1/2",
             ["python3", "-m", "pytest", "-c", "cfg.toml", "--durations=10", "tests"],
             {"STUB_FILES": " ".join(TEST_FILES)},
         )
-        assert done.returncode == 0, done.stderr
+        assert status == 0, err
         want: list[str] = [
             "python3", "-m", "pytest", "-c", "cfg.toml", "--durations=10",
             "tests/sub/test_c.py", "tests/test_b.py",
         ]  # fmt: skip
-        assert want == words(done)
+        assert want == words(out)
 
     def test_a_shard_dealt_nothing_runs_true(self) -> None:
         """One file on two shards: the second runs `true`, not every test."""
-        done = self.adapt("2/2", ["pytest", "tests"], {"STUB_FILES": TEST_FILES[0]})
-        assert done.returncode == 0, done.stderr
-        assert words(done) == TRUE
+        status, out, err = self.adapt(
+            "2/2", ["pytest", "tests"], {"STUB_FILES": TEST_FILES[0]}
+        )
+        assert status == 0, err
+        assert words(out) == TRUE
 
 
 class TestGoTest(TestRunner):
@@ -423,25 +430,25 @@ class TestGoTest(TestRunner):
 
     def test_flags_stay_and_patterns_become_packages(self) -> None:
         """A valued flag's value is not a package; `-args` and after stay."""
-        done = self.adapt(
+        status, out, err = self.adapt(
             "1/2",
             ["go", "test", "-run", "X", "-v", "./...", "-args", "-x"],
             {"STUB_PACKAGES": " ".join(PACKAGES)},
         )
-        assert done.returncode == 0, done.stderr
+        assert status == 0, err
         want: list[str] = [
             "go", "test", "-run", "X", "-v",
             "example.com/m/a", "example.com/m/c", "-args", "-x",
         ]  # fmt: skip
-        assert want == words(done)
+        assert want == words(out)
 
     def test_a_shard_dealt_nothing_runs_true(self) -> None:
         """One package on two shards: the second runs `true`, not `go test .`."""
-        done = self.adapt(
+        status, out, err = self.adapt(
             "2/2", ["go", "test", "./..."], {"STUB_PACKAGES": "example.com/m/a"}
         )
-        assert done.returncode == 0, done.stderr
-        assert words(done) == TRUE
+        assert status == 0, err
+        assert words(out) == TRUE
 
 
 class TestUnchanged(TestRunner):
@@ -449,21 +456,21 @@ class TestUnchanged(TestRunner):
 
     def test_no_adapter_passes_through(self) -> None:
         """A setup line under a shard: unchanged, no report."""
-        done = self.adapt("1/2", ["python3", "setup.py"], {})
-        assert done.returncode == 0, done.stderr
-        assert argv_of("python3", "setup.py") == words(done)
+        status, out, err = self.adapt("1/2", ["python3", "setup.py"], {})
+        assert status == 0, err
+        assert argv_of("python3", "setup.py") == words(out)
         assert not self.reports.exists()
 
     def test_no_shard_passes_through(self) -> None:
         """ORG_SHARD empty: the vitest run as given."""
-        done = self.adapt("", ["vitest", "run"], {"STUB_FILES": "a"})
-        assert argv_of("vitest", "run") == words(done)
+        _status, out, _err = self.adapt("", ["vitest", "run"], {"STUB_FILES": "a"})
+        assert argv_of("vitest", "run") == words(out)
 
     def test_usage(self, as_task: Callable[[str], None]) -> None:
         """No `--`: the usage exit."""
         as_task("test")
-        done = self.call(lambda: shard_runner.main(["vitest"]))
-        assert done.returncode == USAGE
-        assert done.stderr == (
+        status = shard_runner.main(["vitest"])
+        assert status == USAGE
+        assert self.capfd.readouterr().err == (
             "test: usage: belt shard-runner -- <command> [<argument>…]\n"
         )

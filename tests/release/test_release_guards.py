@@ -34,10 +34,10 @@ obeys wherever it is standing.
 Run through the gate as `mise run test`, which `ci` collects.
 """
 
-import contextlib
 import json
 import os
 import subprocess
+import tempfile
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -892,10 +892,10 @@ class ReleaseForge:
     PLANNED = "a" * 40
     MOVED = "b" * 40
 
-    def setUp(self) -> None:
+    @pytest.fixture
+    def _forge(self, tmp_path: Path) -> None:
         """Lay out a fixture with a stub on PATH and an empty call log."""
-        self._dir = TemporaryDirectory()
-        self.root = Path(self._dir.name)
+        self.root = tmp_path
         self.state = self.root / "state"
         self.state.mkdir()
         bindir = self.root / "stubbin"
@@ -904,10 +904,6 @@ class ReleaseForge:
         gh.write_text(RELEASE_FORGE_STUB)
         gh.chmod(0o755)
         self.bindir = bindir
-
-    def tearDown(self) -> None:
-        """Remove the fixture."""
-        self._dir.cleanup()
 
     def forge(self, head: str | None) -> None:
         """Set the default branch head the forge reports; None fails the read."""
@@ -945,7 +941,7 @@ class ReleaseForge:
         }
 
 
-@pytest.mark.usefixtures("_set_up_test_open_release_pr_head")
+@pytest.mark.usefixtures("_forge", "_set_up_test_open_release_pr_head")
 class TestOpenReleasePrHead(
     ReleaseForge,
 ):
@@ -1320,6 +1316,7 @@ class TestOpenReleasePrHead(
             assert expected == self.calls()
 
 
+@pytest.mark.usefixtures("_forge")
 class TestCloseReleasePr(
     ReleaseForge,
 ):
@@ -1594,7 +1591,7 @@ TAG_REFUSED = (
 )
 
 
-@pytest.mark.usefixtures("_stack", "_set_up_test_tag_release_push")
+@pytest.mark.usefixtures("_tmp", "_set_up_test_tag_release_push")
 class TestTagReleasePush:
     """What `tag-release.sh` says when the tag push itself fails (#1322).
 
@@ -1604,10 +1601,9 @@ class TestTagReleasePush:
     """
 
     @pytest.fixture
-    def _stack(self, request: pytest.FixtureRequest) -> None:
-        """Hold the row's cleanups, undone last first after it ends."""
-        self.stack = contextlib.ExitStack()
-        request.addfinalizer(self.stack.close)
+    def _tmp(self, tmp_path: Path) -> None:
+        """Give the row's scratch directories one home, removed after it."""
+        self.tmp = tmp_path
 
     @pytest.fixture
     def _set_up_test_tag_release_push(self) -> None:
@@ -1623,7 +1619,7 @@ class TestTagReleasePush:
             and the remote's tags after it.
 
         """
-        root = Path(self.stack.enter_context(TemporaryDirectory()))
+        root = Path(tempfile.mkdtemp(dir=self.tmp))
         home = root / "home"
         home.mkdir()
         env = hermetic_env(home)
@@ -1757,7 +1753,7 @@ esac
 """
 
 
-@pytest.mark.usefixtures("_stack", "_set_up_test_tag_release_upgrade_path")
+@pytest.mark.usefixtures("_tmp", "_set_up_test_tag_release_upgrade_path")
 class TestTagReleaseUpgradePath:
     """The mint guard acts on previous_release.py's predecessor (#1592).
 
@@ -1769,10 +1765,9 @@ class TestTagReleaseUpgradePath:
     """
 
     @pytest.fixture
-    def _stack(self, request: pytest.FixtureRequest) -> None:
-        """Hold the row's cleanups, undone last first after it ends."""
-        self.stack = contextlib.ExitStack()
-        request.addfinalizer(self.stack.close)
+    def _tmp(self, tmp_path: Path) -> None:
+        """Give the row's scratch directories one home, removed after it."""
+        self.tmp = tmp_path
 
     @pytest.fixture
     def _set_up_test_tag_release_upgrade_path(self) -> None:
@@ -1791,7 +1786,7 @@ class TestTagReleaseUpgradePath:
             The completed process, and the remote's tags after it.
 
         """
-        root = Path(self.stack.enter_context(TemporaryDirectory()))
+        root = Path(tempfile.mkdtemp(dir=self.tmp))
         home = root / "home"
         home.mkdir()
         env = hermetic_env(home)
@@ -1887,7 +1882,7 @@ class TestTagReleaseUpgradePath:
         assert pushed == ""
 
 
-@pytest.mark.usefixtures("_stack")
+@pytest.mark.usefixtures("_tmp")
 class TestInventoryStepWiring:
     """publish.yml's inventory step: what it hands its one stele call.
 
@@ -1902,10 +1897,9 @@ class TestInventoryStepWiring:
     """
 
     @pytest.fixture
-    def _stack(self, request: pytest.FixtureRequest) -> None:
-        """Hold the row's cleanups, undone last first after it ends."""
-        self.stack = contextlib.ExitStack()
-        request.addfinalizer(self.stack.close)
+    def _tmp(self, tmp_path: Path) -> None:
+        """Give the row's scratch directories one home, removed after it."""
+        self.tmp = tmp_path
 
     STEP = "Derive the per-artifact inventories and the release view"
 
@@ -1933,7 +1927,7 @@ class TestInventoryStepWiring:
     def _run(
         self, *, binaries: bool, plans: int, variants: str, refuse: bool = False
     ) -> tuple[subprocess.CompletedProcess[str], list[str], Path]:
-        root = Path(self.stack.enter_context(TemporaryDirectory()))
+        root = Path(tempfile.mkdtemp(dir=self.tmp))
         stubs = root / ".stubs"
         stubs.mkdir()
         calls = root / ".stele-argv"

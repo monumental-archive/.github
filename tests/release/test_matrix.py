@@ -17,7 +17,6 @@ as those runs read it, so a Renovate roll of the live file moves nothing
 here.
 """
 
-import contextlib
 import io
 import sys
 import tempfile
@@ -81,15 +80,14 @@ def recorded(name: str) -> tuple[str, str]:
     )
 
 
-@pytest.mark.usefixtures("_stack")
+@pytest.mark.usefixtures("_tmp")
 class TestRows:
     """Shared assertions and fixtures."""
 
     @pytest.fixture
-    def _stack(self, request: pytest.FixtureRequest) -> None:
-        """Hold the row's cleanups, undone last first after it ends."""
-        self.stack = contextlib.ExitStack()
-        request.addfinalizer(self.stack.close)
+    def _tmp(self, tmp_path: Path) -> None:
+        """Give the row's scratch directories one home, removed after it."""
+        self.tmp = tmp_path
 
     def refused(self, argv: tuple[str, ...], message: str) -> None:
         """Assert a run refuses with exactly `message` and no outputs."""
@@ -102,9 +100,8 @@ class TestRows:
             Its path.
 
         """
-        tmp = tempfile.TemporaryDirectory()
-        self.stack.callback(tmp.cleanup)
-        path = Path(tmp.name) / "pgrx-base-images.toml"
+        tmp = tempfile.mkdtemp(dir=self.tmp)
+        path = Path(tmp) / "pgrx-base-images.toml"
         path.write_text(text, "utf-8")
         return str(path)
 

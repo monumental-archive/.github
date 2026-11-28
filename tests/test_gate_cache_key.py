@@ -812,15 +812,14 @@ def digest_main(path: str) -> tuple[int, str, str]:
     return code, out.getvalue(), err.getvalue()
 
 
-@pytest.mark.usefixtures("_stack")
+@pytest.mark.usefixtures("_tmp")
 class TestDirectory:
     """Every coverage directory names its compiler (#1877)."""
 
     @pytest.fixture
-    def _stack(self, request: pytest.FixtureRequest) -> None:
-        """Hold the row's cleanups, undone last first after it ends."""
-        self.stack = contextlib.ExitStack()
-        request.addfinalizer(self.stack.close)
+    def _tmp(self, tmp_path: Path) -> None:
+        """Give the row's scratch directories one home, removed after it."""
+        self.tmp = tmp_path
 
     def digest_of(self, script: str) -> tuple[int, str, str]:
         """Run `digest` beside a `rustc` that runs `script`.
@@ -829,9 +828,8 @@ class TestDirectory:
             The exit code, its stdout and its stderr.
 
         """
-        tmp = tempfile.TemporaryDirectory()
-        self.stack.callback(tmp.cleanup)
-        return digest_main(rustc_on_path(Path(tmp.name), script))
+        tmp = tempfile.mkdtemp(dir=self.tmp)
+        return digest_main(rustc_on_path(Path(tmp), script))
 
     def test_the_same_rustc_gives_the_same_sixteen_hex(self) -> None:
         """One `rustc -vV`, one directory: the cache key's digest, cut to 16."""

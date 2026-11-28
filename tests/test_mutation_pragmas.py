@@ -19,8 +19,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from tests.support import Called
-
 # The task that runs the helper, whose name its findings carry (#1934).
 TASK = "audit:mutants"
 LINE_ONLY = "only the line form exists; mark each line, with its reason"
@@ -73,7 +71,6 @@ def test_each_pragma_is_judged(comment: str, refused: str | None) -> None:
 
 def test_a_pragma_in_a_string_is_not_a_site(
     tmp_path: Path,
-    call_main: Callable[..., Called],
     as_task: Callable[[str], None],
     capfd: pytest.CaptureFixture[str],
 ) -> None:
@@ -88,7 +85,6 @@ def test_a_pragma_in_a_string_is_not_a_site(
 
 def test_invalid_utf8_is_named_and_the_rest_read(
     tmp_path: Path,
-    call_main: Callable[..., Called],
     as_task: Callable[[str], None],
     capfd: pytest.CaptureFixture[str],
 ) -> None:

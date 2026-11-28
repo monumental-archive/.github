@@ -1,11 +1,10 @@
-"""gain.py, one row per outcome of a run (#1967, #1339).
+"""`belt gain`, one row per outcome of a run (#1967, #1339).
 
 Each row calls the helper's `main` in this process with the gaining
 job's arguments, the row's environment in place for the call (#1673,
 #1699), and asserts the exit status and what was recorded: a behind
 outcome appends one finding to ORG_FINDINGS, read back by the belt's
-strict reader over `json.loads`; a green one appends nothing. One row,
-the script row, starts it as the gaining job does.
+strict reader over `json.loads`; a green one appends nothing.
 
 The checkpoints are stele v0.24.0's own files, captured from
 ctfe.sigstore.dev/2022 on 2026-11-17 (testdata/SOURCE.md): one at the
@@ -18,7 +17,6 @@ from __future__ import annotations
 
 import json
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 
@@ -27,6 +25,8 @@ import pytest
 from belt import decoded
 from belt.rekor_monitor import gain
 from tests import support
+
+COMMAND = "gain"
 
 DATA = Path(__file__).resolve().parent / "testdata"
 
@@ -162,16 +162,15 @@ class TestRows:
 
         """
         argv = self.arguments(kept, legs)
-        # The gaining job runs the script by path with no mise task
-        # around it, so the finding writer names the script (#1934).
+        # The gaining job runs `belt gain` with no mise task around it,
+        # so the finding writer names the command (#1934).
         with pytest.MonkeyPatch.context() as patched:
-            patched.setattr(sys, "argv", [str(HELPER), *argv])
-            with pytest.MonkeyPatch.context() as patched:
-                for name, value in self.env.items():
-                    patched.setenv(name, value)
-                status = gain.main(argv)
-            out, err = capfd.readouterr()
-            return status, out, err
+            patched.setattr(sys, "argv", [COMMAND, *argv])
+            for name, value in self.env.items():
+                patched.setenv(name, value)
+            status = gain.main(argv)
+        out, err = capfd.readouterr()
+        return status, out, err
 
     def recorded(self) -> list[dict[str, object]]:
         """Read back every record the helper appended.
@@ -202,7 +201,7 @@ class TestRows:
         }
         expected: dict[str, object] = {
             "v": 1,
-            "task": "gain.py",
+            "task": COMMAND,
             "subject": "",
             "message": MESSAGE,
         }
@@ -229,7 +228,7 @@ class TestBehind(TestRows):
             f"{THIS_RUN}{why}",
             f"14 legs: {BUDGET}",
         )
-        assert f"::error::gain.py: {MESSAGE}\n" in err
+        assert f"::error::gain: {MESSAGE}\n" in err
         assert f"  {THIS_RUN}{why}\n" in err
 
     def test_advanced_not_gaining(self, capfd: pytest.CaptureFixture[str]) -> None:
@@ -459,21 +458,15 @@ class TestDecoded(TestRows):
             " (the checkpoint file could not be read)"
         )
 
-    def test_nested_past_the_parser_is_unreadable(self) -> None:
-        """JSON nested past the parser's depth: named, never a traceback.
-
-        The script row (#1673): the helper started as the gaining job
-        starts it, reading its arguments and exiting with the
-        documented status.
-        """
+    def test_nested_past_the_parser_is_unreadable(
+        self, capfd: pytest.CaptureFixture[str]
+    ) -> None:
+        """JSON nested past the parser's depth: named, never a traceback."""
         self.end.write_bytes(b"[" * 100_000)
-        argv = [sys.executable, str(HELPER), *self.arguments("true")]
-        proc = subprocess.run(
-            argv, env=self.env, capture_output=True, text=True, check=False
-        )
-        assert proc.returncode == 1, proc.stderr
+        status, _out, err = self.run_helper(capfd=capfd)
+        assert status == 1, err
         assert (
             self.detail()[4]
             == f"{THIS_RUN}the newest checkpoint: the checkpoint file could not be read"
         )
-        assert f"::error::gain.py: {MESSAGE}\n" in proc.stderr
+        assert f"::error::gain: {MESSAGE}\n" in err

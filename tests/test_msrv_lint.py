@@ -21,7 +21,6 @@ from __future__ import annotations
 import contextlib
 import os
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -571,15 +570,14 @@ class TestHelpers:
         assert want == got
 
 
-@pytest.mark.usefixtures("_stack")
+@pytest.mark.usefixtures("_tmp")
 class TestTask:
     """The task's own body: its guard, and the call that starts the helper."""
 
     @pytest.fixture
-    def _stack(self, request: pytest.FixtureRequest) -> None:
-        """Hold the row's cleanups, undone last first after it ends."""
-        self.stack = contextlib.ExitStack()
-        request.addfinalizer(self.stack.close)
+    def _tmp(self, tmp_path: Path) -> None:
+        """Give the row's scratch directories one home, removed after it."""
+        self.tmp = tmp_path
 
     @staticmethod
     def run_body(
@@ -624,7 +622,6 @@ class TestTask:
             )
             bins = tree.parent / f"{tree.name}-bin"
             bins.mkdir()
-            self.stack.callback(shutil.rmtree, bins)
             for tool in ("git", "bash", "dirname", "cat", "mktemp", "rm"):
                 (bins / tool).symlink_to(support.tool(tool))
             overrides = {

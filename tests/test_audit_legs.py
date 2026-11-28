@@ -1008,15 +1008,14 @@ class TestFuzzTargets:
         assert want_targets == targets
 
 
-@pytest.mark.usefixtures("_stack")
+@pytest.mark.usefixtures("_tmp")
 class TestRefusals:
     """A table of the wrong shape, or a workflow it lacks, is refused by name."""
 
     @pytest.fixture
-    def _stack(self, request: pytest.FixtureRequest) -> None:
-        """Hold the row's cleanups, undone last first after it ends."""
-        self.stack = contextlib.ExitStack()
-        request.addfinalizer(self.stack.close)
+    def _tmp(self, tmp_path: Path) -> None:
+        """Give the row's scratch directories one home, removed after it."""
+        self.tmp = tmp_path
 
     def run_main(self, table_text: str, workflow: str = "w") -> tuple[int, str, Path]:
         """Run the helper in-process over a table written here.
@@ -1025,9 +1024,8 @@ class TestRefusals:
             Exit status, stderr and the table's path.
 
         """
-        tmp = tempfile.TemporaryDirectory()
-        self.stack.callback(tmp.cleanup)
-        table = Path(tmp.name) / "audit-legs.toml"
+        tmp = tempfile.mkdtemp(dir=self.tmp)
+        table = Path(tmp) / "audit-legs.toml"
         table.write_text(table_text, encoding="utf-8")
         err = io.StringIO()
         with (

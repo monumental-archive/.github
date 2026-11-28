@@ -16,9 +16,7 @@ Each row asserts the message, not just the exit status: a planted row
 scored on exit alone can pass for the wrong reason.
 """
 
-import contextlib
 import os
-import shutil
 import subprocess
 import tempfile
 from decimal import Decimal
@@ -253,15 +251,14 @@ class Plant(TypedDict, total=False):
     plant_old: str
 
 
-@pytest.mark.usefixtures("_stack")
+@pytest.mark.usefixtures("_tmp")
 class TestBranchCase:
     """Runs a task and removes the planted tree afterwards."""
 
     @pytest.fixture
-    def _stack(self, request: pytest.FixtureRequest) -> None:
-        """Hold the row's cleanups, undone last first after it ends."""
-        self.stack = contextlib.ExitStack()
-        request.addfinalizer(self.stack.close)
+    def _tmp(self, tmp_path: Path) -> None:
+        """Give the row's scratch directories one home, removed after it."""
+        self.tmp = tmp_path
 
     def run_task(
         self, task: str, **plant: Unpack[Plant]
@@ -275,7 +272,6 @@ class TestBranchCase:
 
         """
         done, tmp = run_task(task, **plant)
-        self.stack.callback(shutil.rmtree, tmp, ignore_errors=True)
         log = (tmp / "llvm-cov.log").read_text(encoding="utf-8")
         calls = log.replace(str(tmp / "reports"), "<reports>").splitlines()
         return done, tmp / "tree", calls

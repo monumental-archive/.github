@@ -3,7 +3,6 @@
 Draft, unpushed: the rows #1667's Done-when names for `measured` itself.
 """
 
-import contextlib
 import os
 import re
 import shutil
@@ -764,15 +763,14 @@ LOCK = (
 )
 
 
-@pytest.mark.usefixtures("_stack")
+@pytest.mark.usefixtures("_tmp")
 class TestVitestMeasured:
     """In a vitest tree the run itself carries the coverage flags (#2105)."""
 
     @pytest.fixture
-    def _stack(self, request: pytest.FixtureRequest) -> None:
-        """Hold the row's cleanups, undone last first after it ends."""
-        self.stack = contextlib.ExitStack()
-        request.addfinalizer(self.stack.close)
+    def _tmp(self, tmp_path: Path) -> None:
+        """Give the row's scratch directories one home, removed after it."""
+        self.tmp = tmp_path
 
     def vitest_run(
         self, argv: list[str], *, floor: bool = True, calls: int = 1
@@ -783,9 +781,8 @@ class TestVitestMeasured:
             The run's directory and the last call's process.
 
         """
-        tmp = tempfile.TemporaryDirectory()
-        self.stack.callback(tmp.cleanup)
-        base = Path(tmp.name)
+        tmp = tempfile.mkdtemp(dir=self.tmp)
+        base = Path(tmp)
         tree = plant(base, floor=floor)
         (tree / "package.json").write_text("{}", encoding="utf-8")
         (tree / "pnpm-lock.yaml").write_text(LOCK, encoding="utf-8")

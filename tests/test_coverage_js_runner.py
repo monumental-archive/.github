@@ -134,15 +134,14 @@ class TestLocked:
             cj.locked("Cargo.lock", lock, "a")
 
 
-@pytest.mark.usefixtures("_stack")
+@pytest.mark.usefixtures("_tmp")
 class TestMain:
     """The runner line for a planted tree's package.json (#1659)."""
 
     @pytest.fixture
-    def _stack(self, request: pytest.FixtureRequest) -> None:
-        """Hold the row's cleanups, undone last first after it ends."""
-        self.stack = contextlib.ExitStack()
-        request.addfinalizer(self.stack.close)
+    def _tmp(self, tmp_path: Path) -> None:
+        """Give the row's scratch directories one home, removed after it."""
+        self.tmp = tmp_path
 
     def main(self, tracked: list[str], files: dict[str, str]) -> tuple[int, str, str]:
         """Run main from a scratch tree holding `files`.
@@ -151,13 +150,12 @@ class TestMain:
             The status, stdout and stderr.
 
         """
-        tmp = tempfile.TemporaryDirectory()
-        self.stack.callback(tmp.cleanup)
+        tmp = tempfile.mkdtemp(dir=self.tmp)
         for name, text in files.items():
-            (Path(tmp.name) / name).write_text(text, encoding="utf-8")
+            (Path(tmp) / name).write_text(text, encoding="utf-8")
         out, err = io.StringIO(), io.StringIO()
         with (
-            contextlib.chdir(tmp.name),
+            contextlib.chdir(tmp),
             contextlib.redirect_stdout(out),
             contextlib.redirect_stderr(err),
         ):
@@ -208,15 +206,14 @@ FLAGS = [
 ]
 
 
-@pytest.mark.usefixtures("_stack")
+@pytest.mark.usefixtures("_tmp")
 class TestMeasuredRun:
     """`--measured-run`: the vitest run on `measured`'s line (#2105)."""
 
     @pytest.fixture
-    def _stack(self, request: pytest.FixtureRequest) -> None:
-        """Hold the row's cleanups, undone last first after it ends."""
-        self.stack = contextlib.ExitStack()
-        request.addfinalizer(self.stack.close)
+    def _tmp(self, tmp_path: Path) -> None:
+        """Give the row's scratch directories one home, removed after it."""
+        self.tmp = tmp_path
 
     def call(
         self,
@@ -235,13 +232,12 @@ class TestMeasuredRun:
             "  vitest@4.1.12:\n  '@vitest/coverage-v8@4.1.12':\n"
         )
         planted = {"package.json": "{}", "pnpm-lock.yaml": lock} | (files or {})
-        tmp = tempfile.TemporaryDirectory()
-        self.stack.callback(tmp.cleanup)
+        tmp = tempfile.mkdtemp(dir=self.tmp)
         for name, text in planted.items():
-            (Path(tmp.name) / name).write_text(text, encoding="utf-8")
+            (Path(tmp) / name).write_text(text, encoding="utf-8")
         argv = ["--measured-run", "/run/typescript", *planted, "--", *command]
         with pytest.MonkeyPatch.context() as patched:
-            patched.chdir(tmp.name)
+            patched.chdir(tmp)
             status = cj.main(argv)
         out, err = capfd.readouterr()
         return status, out, err

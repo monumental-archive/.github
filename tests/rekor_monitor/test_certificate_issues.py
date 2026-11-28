@@ -1,10 +1,9 @@
-"""certificate_issues.py against a stub `gh` on PATH (#1250, #1339).
+"""`belt certificate-issues` against a stub `gh` on PATH (#1250, #1339).
 
 The stub records every argv and answers `issue list` from the row's
 canned search result (or fails). Each row calls the helper's `main` in
 this process, the row's environment in place for the call (#1673,
-#1699), and asserts what gh received and the message printed; one row,
-the script row, starts it as the workflow does.
+#1699), and asserts what gh received and the message printed.
 
 The reports start from stele v0.24.0's own output (testdata/SOURCE.md).
 No live run produced a finding, so the finding rows add `findings` to a
@@ -18,7 +17,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 from pathlib import Path
 
@@ -27,6 +25,8 @@ import pytest
 from belt import decoded
 from belt.rekor_monitor import certificate_issues
 from tests import support
+
+COMMAND = "certificate-issues"
 
 DATA = Path(__file__).resolve().parent / "testdata"
 
@@ -118,32 +118,15 @@ class TestHarness:
         if self.write_report:
             self.report.write_text(json.dumps(self.doc), encoding="utf-8")
         argv = ["--report", str(self.report), "--run-url", RUN]
-        # The leg runs the script by path with no mise task around it, so
-        # the finding writer names the script (#1934).
+        # The leg runs `belt certificate-issues` with no mise task around
+        # it, so the finding writer names the command (#1934).
         with pytest.MonkeyPatch.context() as patched:
-            patched.setattr(sys, "argv", [str(HELPER), *argv])
-            with pytest.MonkeyPatch.context() as patched:
-                for name, value in ({**self.env, **env}).items():
-                    patched.setenv(name, value)
-                status = certificate_issues.main(argv)
-            out, err = capfd.readouterr()
-            return status, out, err
-
-    def run_script(self, **env: str) -> subprocess.CompletedProcess[str]:
-        """Write the report and start the helper as the workflow does.
-
-        Returns:
-            The finished process.
-
-        """
-        if self.write_report:
-            self.report.write_text(json.dumps(self.doc), encoding="utf-8")
-        argv = [
-            sys.executable, str(HELPER), "--report", str(self.report), "--run-url", RUN,
-        ]  # fmt: skip
-        return subprocess.run(
-            argv, env={**self.env, **env}, capture_output=True, text=True, check=False
-        )
+            patched.setattr(sys, "argv", [COMMAND, *argv])
+            for name, value in {**self.env, **env}.items():
+                patched.setenv(name, value)
+            status = certificate_issues.main(argv)
+        out, err = capfd.readouterr()
+        return status, out, err
 
     def gh_calls(self) -> list[list[str]]:
         """Read what the stub gh was called with.
@@ -267,7 +250,7 @@ class TestFindings(TestHarness):
         searched: list[list[str]] = [search(448200001)]
         assert self.gh_calls() == searched
         assert err.strip() == (
-            "certificate_issues.py:"
+            "certificate-issues:"
             " gh issue list failed (exit 1): HTTP 502: Bad Gateway;"
             " the checkpoint is not saved"
         )
@@ -280,7 +263,7 @@ class TestFindings(TestHarness):
         status, _out, err = self.run_helper(STUB_CREATE_FAIL="1", capfd=capfd)
         assert status == 2
         assert err.strip() == (
-            "certificate_issues.py:"
+            "certificate-issues:"
             " gh issue create failed (exit 1): HTTP 403: Resource not"
             " accessible by integration; the checkpoint is not saved"
         )
@@ -293,7 +276,7 @@ class TestFindings(TestHarness):
         assert status == 2
         assert self.gh_calls() == list[list[str]]()
         assert err.strip() == (
-            "certificate_issues.py:"
+            "certificate-issues:"
             " stele wrote no report: it refused before judging (its reason"
             " is in its own step); the checkpoint is not saved"
         )
@@ -305,7 +288,7 @@ class TestFindings(TestHarness):
         self.report.write_text(text, encoding="utf-8")
         status, _out, err = self.run_helper(capfd=capfd)
         assert status == 2
-        prefix = "certificate_issues.py: stele's report is not JSON: "
+        prefix = "certificate-issues: stele's report is not JSON: "
         assert err.startswith(prefix)
 
     def test_report_not_utf8(self, capfd: pytest.CaptureFixture[str]) -> None:
@@ -317,7 +300,7 @@ class TestFindings(TestHarness):
         self.report.write_bytes(b"\x80")
         status, _out, err = self.run_helper(capfd=capfd)
         assert status == 2, err
-        assert err.startswith("certificate_issues.py: stele's report is not JSON: ")
+        assert err.startswith("certificate-issues: stele's report is not JSON: ")
 
     def test_report_nested_past_the_parser(
         self, capfd: pytest.CaptureFixture[str]
@@ -327,7 +310,7 @@ class TestFindings(TestHarness):
         self.report.write_bytes(b"[" * 100_000)
         status, _out, err = self.run_helper(capfd=capfd)
         assert status == 2, err
-        assert err.startswith("certificate_issues.py: stele's report is not JSON: ")
+        assert err.startswith("certificate-issues: stele's report is not JSON: ")
 
     def test_report_from_another_target(
         self, capfd: pytest.CaptureFixture[str]
@@ -337,7 +320,7 @@ class TestFindings(TestHarness):
         status, _out, err = self.run_helper(capfd=capfd)
         assert status == 2
         assert err.strip() == (
-            "certificate_issues.py:"
+            "certificate-issues:"
             " the report is not stele's assert signer-certificates report;"
             " the checkpoint is not saved"
         )
@@ -351,23 +334,17 @@ class TestFindings(TestHarness):
         assert status == 2
         assert self.gh_calls() == list[list[str]]()
         assert err.strip() == (
-            "certificate_issues.py:"
+            "certificate-issues:"
             " a finding's subject is not a CT index: 'population';"
             " the checkpoint is not saved"
         )
 
-    def test_no_repository(self) -> None:
-        """GITHUB_REPOSITORY unset: exit 2 by name, gh never called.
-
-        The script row (#1673): the helper started as the workflow starts
-        it, reading its arguments and exiting with the documented status.
-        """
-        proc = self.run_script(GITHUB_REPOSITORY="")
-        assert proc.returncode == 2
+    def test_no_repository(self, capfd: pytest.CaptureFixture[str]) -> None:
+        """GITHUB_REPOSITORY unset: exit 2 by name, gh never called."""
+        status, _out, err = self.run_helper(GITHUB_REPOSITORY="", capfd=capfd)
+        assert status == 2
         assert self.gh_calls() == list[list[str]]()
-        assert (
-            proc.stderr.strip() == "certificate_issues.py: GITHUB_REPOSITORY is not set"
-        )
+        assert err.strip() == f"{COMMAND}: GITHUB_REPOSITORY is not set"
 
 
 class TestDecoded(TestHarness):
@@ -391,7 +368,7 @@ class TestDecoded(TestHarness):
             status, _out, err = self.run_helper(STUB_LIST=answer, capfd=capfd)
             assert status == 2
             assert err.strip() == (
-                "certificate_issues.py:"
+                "certificate-issues:"
                 " gh issue list answered something that is not a list"
                 f" of issues: {why}; the checkpoint is not saved"
             )
@@ -404,7 +381,7 @@ class TestDecoded(TestHarness):
         status, _out, err = self.run_helper(STUB_LIST='{"a": 1, "a": 2}', capfd=capfd)
         assert status == 2
         assert err.strip() == (
-            "certificate_issues.py: gh issue list answered something that is not JSON:"
+            "certificate-issues: gh issue list answered something that is not JSON:"
             ' duplicate key "a"; the checkpoint is not saved'
         )
 
@@ -418,7 +395,7 @@ class TestDecoded(TestHarness):
             status, _out, err = self.run_helper(capfd=capfd)
             assert status == 2
             assert err.strip() == (
-                "certificate_issues.py:"
+                "certificate-issues:"
                 f" the report's findings are not a list: {value!r};"
                 " the checkpoint is not saved"
             )
@@ -430,7 +407,7 @@ class TestDecoded(TestHarness):
         status, _out, err = self.run_helper(capfd=capfd)
         assert status == 2
         assert err.strip() == (
-            "certificate_issues.py:"
+            "certificate-issues:"
             ' stele\'s report is not JSON: duplicate key "target";'
             " the checkpoint is not saved"
         )

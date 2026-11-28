@@ -15,7 +15,6 @@ Every git call in this file passes a scrubbed `env=`: the rows run under
 the very hook they are about.
 """
 
-import contextlib
 import os
 import pathlib
 import re
@@ -149,15 +148,14 @@ def snapshot(repo: pathlib.Path) -> tuple[bytes, str]:
     return (repo / ".git" / "index").read_bytes(), refs
 
 
-@pytest.mark.usefixtures("_stack")
+@pytest.mark.usefixtures("_tmp")
 class TestTask:
     """The `test` task's body, run over a planted tree."""
 
     @pytest.fixture
-    def _stack(self, request: pytest.FixtureRequest) -> None:
-        """Hold the row's cleanups, undone last first after it ends."""
-        self.stack = contextlib.ExitStack()
-        request.addfinalizer(self.stack.close)
+    def _tmp(self, tmp_path: Path) -> None:
+        """Give the row's scratch directories one home, removed after it."""
+        self.tmp = tmp_path
 
     def plant(self, *, scrubbed: bool) -> tuple[pathlib.Path, pathlib.Path]:
         """Build a tree holding one test per root and the git-running one.
@@ -166,9 +164,8 @@ class TestTask:
             The tree, and the throwaway repository GIT_DIR names.
 
         """
-        tmp = tempfile.TemporaryDirectory()
-        self.stack.callback(tmp.cleanup)
-        base = pathlib.Path(tmp.name)
+        tmp = tempfile.mkdtemp(dir=self.tmp)
+        base = pathlib.Path(tmp)
         tree = base / "tree"
         # The runner and all it reads, as the tree's mise/: the whole
         # belt, its own tests taken out, since the tree's tests are the

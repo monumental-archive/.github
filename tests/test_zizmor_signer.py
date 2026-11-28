@@ -28,12 +28,10 @@ one run, the record, zizmor's 11; a clean run, 0. Against
 `origin/main` the `Records` and `Task` record rows fail.
 """
 
-import contextlib
 import copy
 import io
 import json
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -603,15 +601,14 @@ jobs:
 """
 
 
-@pytest.mark.usefixtures("_stack")
+@pytest.mark.usefixtures("_tmp")
 class TestPinnedZizmor:
     """The belt's pinned zizmor, `--offline`, on a planted workflow."""
 
     @pytest.fixture
-    def _stack(self, request: pytest.FixtureRequest) -> None:
-        """Hold the row's cleanups, undone last first after it ends."""
-        self.stack = contextlib.ExitStack()
-        request.addfinalizer(self.stack.close)
+    def _tmp(self, tmp_path: Path) -> None:
+        """Give the row's scratch directories one home, removed after it."""
+        self.tmp = tmp_path
 
     def judged(
         self, workflow: str, *, capfd: pytest.CaptureFixture[str]
@@ -624,8 +621,7 @@ class TestPinnedZizmor:
         """
         if support.optional_tool("zizmor") is None:
             pytest.skip("the belt's zizmor is not on PATH")
-        tmp = Path(tempfile.mkdtemp()).resolve()
-        self.stack.callback(shutil.rmtree, tmp, ignore_errors=True)
+        tmp = Path(tempfile.mkdtemp(dir=self.tmp)).resolve()
         (tmp / ".github" / "workflows").mkdir(parents=True)
         (tmp / ".github" / "workflows" / "a.yml").write_text(workflow, encoding="utf-8")
         file = tmp / "findings.jsonl"
@@ -698,15 +694,14 @@ sys.exit(int(os.environ["STUB_RC"]))
 """
 
 
-@pytest.mark.usefixtures("_stack")
+@pytest.mark.usefixtures("_tmp")
 class TestTask:
     """audit:actions' own body over a stub zizmor, in a planted tree."""
 
     @pytest.fixture
-    def _stack(self, request: pytest.FixtureRequest) -> None:
-        """Hold the row's cleanups, undone last first after it ends."""
-        self.stack = contextlib.ExitStack()
-        request.addfinalizer(self.stack.close)
+    def _tmp(self, tmp_path: Path) -> None:
+        """Give the row's scratch directories one home, removed after it."""
+        self.tmp = tmp_path
 
     def run_task(
         self, document: object, status: int
@@ -717,8 +712,7 @@ class TestTask:
             The finished process.
 
         """
-        tmp = Path(tempfile.mkdtemp()).resolve()
-        self.stack.callback(shutil.rmtree, tmp, ignore_errors=True)
+        tmp = Path(tempfile.mkdtemp(dir=self.tmp)).resolve()
         root = tmp / "tree"
         (root / ".github" / "workflows").mkdir(parents=True)
         (root / ".github" / "workflows" / "a.yml").write_text("on: push\n")

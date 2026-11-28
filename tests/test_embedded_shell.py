@@ -12,11 +12,11 @@ is a branch of the TASK, not the helper, and a guard that skips when it
 should run looks like success.
 """
 
-import contextlib
 import io
 import os
 import subprocess
 import sys
+import tempfile
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -120,15 +120,14 @@ class Tree:
         return rc, out.getvalue(), err.getvalue()
 
 
-@pytest.mark.usefixtures("_stack")
+@pytest.mark.usefixtures("_tmp")
 class TestCeiling:
     """The Done-when rows of #1352, one guard branch each."""
 
     @pytest.fixture
-    def _stack(self, request: pytest.FixtureRequest) -> None:
-        """Hold the row's cleanups, undone last first after it ends."""
-        self.stack = contextlib.ExitStack()
-        request.addfinalizer(self.stack.close)
+    def _tmp(self, tmp_path: Path) -> None:
+        """Give the row's scratch directories one home, removed after it."""
+        self.tmp = tmp_path
 
     def tree(self, text: str, debt: str | None = None) -> Tree:
         """Build a scratch tree that lives as long as the test.
@@ -137,9 +136,8 @@ class TestCeiling:
             The tree.
 
         """
-        tmp = TemporaryDirectory()
-        self.stack.callback(tmp.cleanup)
-        return Tree(Path(tmp.name), text, debt)
+        tmp = tempfile.mkdtemp(dir=self.tmp)
+        return Tree(Path(tmp), text, debt)
 
     def test_at_the_ceiling_passes(self) -> None:
         """Fifteen counted lines is allowed with no entry."""
@@ -291,15 +289,14 @@ WHAT_SHELLCHECK_READS_AND_HOW_ROWS = [
 ]
 
 
-@pytest.mark.usefixtures("_stack")
+@pytest.mark.usefixtures("_tmp")
 class TestHeaders:
     """Every block-scalar header is counted; shellcheck reads `|` and `|-`."""
 
     @pytest.fixture
-    def _stack(self, request: pytest.FixtureRequest) -> None:
-        """Hold the row's cleanups, undone last first after it ends."""
-        self.stack = contextlib.ExitStack()
-        request.addfinalizer(self.stack.close)
+    def _tmp(self, tmp_path: Path) -> None:
+        """Give the row's scratch directories one home, removed after it."""
+        self.tmp = tmp_path
 
     def tree(self, text: str) -> Tree:
         """Build a scratch tree that lives as long as the test.
@@ -308,9 +305,8 @@ class TestHeaders:
             The tree.
 
         """
-        tmp = TemporaryDirectory()
-        self.stack.callback(tmp.cleanup)
-        return Tree(Path(tmp.name), text, None)
+        tmp = tempfile.mkdtemp(dir=self.tmp)
+        return Tree(Path(tmp), text, None)
 
     def test_folded_over_the_ceiling_and_unlisted_is_red(self) -> None:
         """A `>-` block is no opt-out: sixteen lines is red by step."""
@@ -384,15 +380,14 @@ A_FOLDED_BLOCK_IS_WEIGHED_BY_ITS_LINES_ROWS = [
 ]
 
 
-@pytest.mark.usefixtures("_stack")
+@pytest.mark.usefixtures("_tmp")
 class TestFolded:
     """#1396: shellcheck reads a folded block as bash receives it."""
 
     @pytest.fixture
-    def _stack(self, request: pytest.FixtureRequest) -> None:
-        """Hold the row's cleanups, undone last first after it ends."""
-        self.stack = contextlib.ExitStack()
-        request.addfinalizer(self.stack.close)
+    def _tmp(self, tmp_path: Path) -> None:
+        """Give the row's scratch directories one home, removed after it."""
+        self.tmp = tmp_path
 
     def check(self, text: str, *, fmt: bool = True) -> tuple[Path, list[str]]:
         """Run shfmt and shellcheck over one action text.
@@ -401,9 +396,8 @@ class TestFolded:
             The file's path and the findings.
 
         """
-        tmp = TemporaryDirectory()
-        self.stack.callback(tmp.cleanup)
-        path = Path(tmp.name) / "action.yml"
+        tmp = tempfile.mkdtemp(dir=self.tmp)
+        path = Path(tmp) / "action.yml"
         path.write_text(text, encoding="utf-8")
         return path, es.check(path, fmt=fmt, lint=True)
 
@@ -480,7 +474,7 @@ class TestFolded:
             assert found[1].source == "echo b\n"
 
 
-@pytest.mark.usefixtures("_stack")
+@pytest.mark.usefixtures("_tmp")
 class TestParser:
     """#1846: every `run:` value is read, however the YAML spells it.
 
@@ -490,10 +484,9 @@ class TestParser:
     """
 
     @pytest.fixture
-    def _stack(self, request: pytest.FixtureRequest) -> None:
-        """Hold the row's cleanups, undone last first after it ends."""
-        self.stack = contextlib.ExitStack()
-        request.addfinalizer(self.stack.close)
+    def _tmp(self, tmp_path: Path) -> None:
+        """Give the row's scratch directories one home, removed after it."""
+        self.tmp = tmp_path
 
     def check(self, name: str, text: str) -> tuple[Path, list[str]]:
         """Run shfmt and shellcheck over one file's text.
@@ -502,9 +495,8 @@ class TestParser:
             The file's path and the findings.
 
         """
-        tmp = TemporaryDirectory()
-        self.stack.callback(tmp.cleanup)
-        path = Path(tmp.name) / name
+        tmp = tempfile.mkdtemp(dir=self.tmp)
+        path = Path(tmp) / name
         path.write_text(text, encoding="utf-8")
         return path, es.check(path, fmt=True, lint=True)
 
@@ -556,9 +548,8 @@ class TestParser:
 
     def test_an_alias_is_not_weighed_again(self) -> None:
         """A 16-line anchor, listed, aliased in an unlisted step: one entry."""
-        tmp = TemporaryDirectory()
-        self.stack.callback(tmp.cleanup)
-        t = Tree(Path(tmp.name), workflow(step("Big", 16)), None)
+        tmp = tempfile.mkdtemp(dir=self.tmp)
+        t = Tree(Path(tmp), workflow(step("Big", 16)), None)
         text = t.wf.read_text(encoding="utf-8").replace("run: |", "run: &x |")
         t.wf.write_text(text + "      - name: Again\n        run: *x\n", "utf-8")
         t.debt.write_text(t.entry("Big", 16), encoding="utf-8")
@@ -644,15 +635,14 @@ class TestParser:
         assert rewrite_text(after) == (0, after)
 
 
-@pytest.mark.usefixtures("_stack")
+@pytest.mark.usefixtures("_tmp")
 class TestOrgConfig:
     """The org's shellcheck settings are the ones applied (#696, #733)."""
 
     @pytest.fixture
-    def _stack(self, request: pytest.FixtureRequest) -> None:
-        """Hold the row's cleanups, undone last first after it ends."""
-        self.stack = contextlib.ExitStack()
-        request.addfinalizer(self.stack.close)
+    def _tmp(self, tmp_path: Path) -> None:
+        """Give the row's scratch directories one home, removed after it."""
+        self.tmp = tmp_path
 
     def test_a_home_shellcheckrc_cannot_lower_the_org_checks(self) -> None:
         """A machine's own rc file does not switch a belt check off.
@@ -662,12 +652,11 @@ class TestOrgConfig:
         delivered `mise/shellcheckrc` is passed instead and nothing else
         is read.
         """
-        tmp = TemporaryDirectory()
-        self.stack.callback(tmp.cleanup)
-        home = Path(tmp.name) / "home"
+        tmp = tempfile.mkdtemp(dir=self.tmp)
+        home = Path(tmp) / "home"
         home.mkdir()
         (home / ".shellcheckrc").write_text("disable=SC2250\n", encoding="utf-8")
-        path = Path(tmp.name) / "wf.yml"
+        path = Path(tmp) / "wf.yml"
         path.write_text(
             workflow('- name: s\n  run: |\n    x=1\n    echo "$x"'),
             encoding="utf-8",
@@ -762,15 +751,14 @@ def blank_after(first: str) -> str:
     )
 
 
-@pytest.mark.usefixtures("_stack")
+@pytest.mark.usefixtures("_tmp")
 class TestTrailingBlank:
     """#1431: blank lines after a block are YAML layout, not shell."""
 
     @pytest.fixture
-    def _stack(self, request: pytest.FixtureRequest) -> None:
-        """Hold the row's cleanups, undone last first after it ends."""
-        self.stack = contextlib.ExitStack()
-        request.addfinalizer(self.stack.close)
+    def _tmp(self, tmp_path: Path) -> None:
+        """Give the row's scratch directories one home, removed after it."""
+        self.tmp = tmp_path
 
     def write(self, text: str) -> Path:
         """Write one workflow text to a scratch file.
@@ -779,9 +767,8 @@ class TestTrailingBlank:
             The file's path.
 
         """
-        tmp = TemporaryDirectory()
-        self.stack.callback(tmp.cleanup)
-        path = Path(tmp.name) / "w.yml"
+        tmp = tempfile.mkdtemp(dir=self.tmp)
+        path = Path(tmp) / "w.yml"
         path.write_text(text, encoding="utf-8")
         return path
 
@@ -995,15 +982,14 @@ def run_task(root: Path, name: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-@pytest.mark.usefixtures("_stack")
+@pytest.mark.usefixtures("_tmp")
 class TestTask:
     """The task bodies, run as mise runs them, in a scratch repository."""
 
     @pytest.fixture
-    def _stack(self, request: pytest.FixtureRequest) -> None:
-        """Hold the row's cleanups, undone last first after it ends."""
-        self.stack = contextlib.ExitStack()
-        request.addfinalizer(self.stack.close)
+    def _tmp(self, tmp_path: Path) -> None:
+        """Give the row's scratch directories one home, removed after it."""
+        self.tmp = tmp_path
 
     def repo(self) -> Path:
         """Initialise an empty git repository.
@@ -1012,9 +998,8 @@ class TestTask:
             Its root.
 
         """
-        tmp = TemporaryDirectory()
-        self.stack.callback(tmp.cleanup)
-        root = Path(tmp.name)
+        tmp = tempfile.mkdtemp(dir=self.tmp)
+        root = Path(tmp)
         subprocess.run([GIT, "init", "-q", str(root)], check=True, env=CLEAN_ENV)
         return root
 
@@ -1290,7 +1275,7 @@ class TestTasks:
         assert bodies == one_body
 
 
-@pytest.mark.usefixtures("_stack")
+@pytest.mark.usefixtures("_tmp")
 class TestTaskShellTask:
     """lint:task-shell and fix:task-shell, run as mise runs them.
 
@@ -1299,10 +1284,9 @@ class TestTaskShellTask:
     """
 
     @pytest.fixture
-    def _stack(self, request: pytest.FixtureRequest) -> None:
-        """Hold the row's cleanups, undone last first after it ends."""
-        self.stack = contextlib.ExitStack()
-        request.addfinalizer(self.stack.close)
+    def _tmp(self, tmp_path: Path) -> None:
+        """Give the row's scratch directories one home, removed after it."""
+        self.tmp = tmp_path
 
     def repo(self) -> Path:
         """Initialise an empty git repository.
@@ -1311,9 +1295,8 @@ class TestTaskShellTask:
             Its root.
 
         """
-        tmp = TemporaryDirectory()
-        self.stack.callback(tmp.cleanup)
-        root = Path(tmp.name)
+        tmp = tempfile.mkdtemp(dir=self.tmp)
+        root = Path(tmp)
         subprocess.run([GIT, "init", "-q", str(root)], check=True, env=CLEAN_ENV)
         return root
 
