@@ -80,23 +80,16 @@ QUOTED = [
 ]
 
 
-def helper(
-    root: Path, *paths: str, capfd: pytest.CaptureFixture[str]
-) -> tuple[int, str, str]:
-    """Call the helper's `main` in this process over `paths`, from `root` (#1696).
-
-    Returns:
-        The status `main` returned and what it wrote to each stream.
-
-    """
-    with pytest.MonkeyPatch.context() as patched:
-        patched.chdir(root)
-        patched.setattr(
-            sys, "stdin", io.StringIO("".join(f"{path}\0" for path in paths))
-        )
-        status = ce.main([])
-    out, err = capfd.readouterr()
-    return status, out, err
+def listed(
+    monkeypatch: pytest.MonkeyPatch,
+    root: Path,
+    *paths: str,
+) -> None:
+    """List `paths` on the helper's stdin, from `root` (#1696)."""
+    monkeypatch.chdir(root)
+    monkeypatch.setattr(
+        sys, "stdin", io.StringIO("".join(f"{path}\0" for path in paths))
+    )
 
 
 class Markers:
@@ -132,9 +125,12 @@ def test_each_marker_is_red_by_file_line_and_rule(
     body: str,
     rule: str,
     capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Every marker of every measured language is a finding, located."""
-    status, _out, err = helper(markers.plant(name, body), name, capfd=capfd)
+    listed(monkeypatch, markers.plant(name, body), name)
+    status = ce.main([])
+    err = capfd.readouterr().err
     assert status == 1, err
     line = next(
         i
@@ -148,21 +144,27 @@ def test_each_marker_is_red_by_file_line_and_rule(
 
 @pytest.mark.parametrize(("name", "body"), QUOTED)
 def test_a_quoted_marker_is_text_not_an_exclusion(
-    markers: Markers, name: str, body: str, capfd: pytest.CaptureFixture[str]
+    markers: Markers,
+    name: str,
+    body: str,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A marker inside a string literal is not a finding, in any language."""
-    status, _out, err = helper(markers.plant(name, body), name, capfd=capfd)
+    listed(monkeypatch, markers.plant(name, body), name)
+    status = ce.main([])
+    err = capfd.readouterr().err
     assert status == 0, err
     assert err == ""
 
 
 def test_other_languages_are_not_read(
-    markers: Markers, capfd: pytest.CaptureFixture[str]
+    markers: Markers, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A marker in a file of a language the belt does not measure passes."""
-    status, out, err = helper(
-        markers.plant("notes.md", f"{PRAGMA} cover\n"), "notes.md", capfd=capfd
-    )
+    listed(monkeypatch, markers.plant("notes.md", f"{PRAGMA} cover\n"), "notes.md")
+    status = ce.main([])
+    out, err = capfd.readouterr()
     assert status == 0, err
     assert out == "lint:coverage-exclusions: 1 file(s), no coverage exclusions\n"
 
@@ -251,10 +253,12 @@ def test_a_tracked_marker_is_red(task: Task, env: support.Env) -> None:
 def test_vendor_is_not_read(task: Task, env: support.Env) -> None:
     """A marker under vendor/ is outside the lint; the rest is read."""
     r = run_task(
-        task.repo({
-            "vendor/x/a.py": f"x = 1  {PRAGMA} cover\n",
-            "src/b.py": "y = 2\n",
-        }),
+        task.repo(
+            {
+                "vendor/x/a.py": f"x = 1  {PRAGMA} cover\n",
+                "src/b.py": "y = 2\n",
+            }
+        ),
         env=env,
     )
     assert r.returncode == 0, r.stderr
@@ -263,7 +267,7 @@ def test_vendor_is_not_read(task: Task, env: support.Env) -> None:
 
 # The canon holds its own rule.
 def test_the_canon_carries_no_coverage_exclusion(
-    capfd: pytest.CaptureFixture[str],
+    capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Every tracked source file in this repository is clean.
 
@@ -274,5 +278,7 @@ def test_the_canon_carries_no_coverage_exclusion(
     listing = support.tracked(
         root, ":!vendor/**", "*.py", "*.rs", "*.go", "*.ts", "*.js", **GIT_CONFIG
     )
-    status, _out, err = helper(root, *listing, capfd=capfd)
+    listed(monkeypatch, root, *listing)
+    status = ce.main([])
+    err = capfd.readouterr().err
     assert status == 0, err

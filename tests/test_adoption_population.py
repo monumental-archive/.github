@@ -22,11 +22,16 @@ wrong file.
 import io
 import json
 import sys
+from typing import TYPE_CHECKING
 
 import pytest
 
 from belt import adoption_population as ap
+from belt.typed_pytest import fixture
 from tests import support
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 EVERY = ["build", "source", "dependency"]
 # The canon's own repository name, as main() is handed it from
@@ -79,24 +84,22 @@ def document(*members: object, schema: object = 9) -> dict[str, object]:
     }
 
 
-def run_main(
-    doc: object, *argv: str, capfd: pytest.CaptureFixture[str], env: support.Env
-) -> tuple[int, str, str]:
-    """Run main() with `doc` on stdin.
+@fixture
+def fed(monkeypatch: pytest.MonkeyPatch, env: support.Env) -> Callable[[object], None]:
+    """Put a row's document on the helper's stdin, under its task.
 
     Returns:
-        The exit code, stdout and stderr.
+        A function that feeds `doc`, as written when it is text.
 
     """
-    with pytest.MonkeyPatch.context() as patched:
+
+    def feed(doc: object) -> None:
         for name, value in (env(MISE_TASK_NAME=TASK)).items():
-            patched.setenv(name, value)
-        patched.setattr(
-            sys, "stdin", io.StringIO(doc if isinstance(doc, str) else json.dumps(doc))
-        )
-        status = ap.main(list(argv) or [CANON])
-    out, err = capfd.readouterr()
-    return status, out, err
+            monkeypatch.setenv(name, value)
+        text = doc if isinstance(doc, str) else json.dumps(doc)
+        monkeypatch.setattr(sys, "stdin", io.StringIO(text))
+
+    return feed
 
 
 # What a declared membership makes applicable, and what it does not.
@@ -299,7 +302,7 @@ REFUSALS: tuple[tuple[str, object, str], ...] = (
 
 # The one mode, end to end, over the org's real shape.
 def test_obligations_over_the_document(
-    capfd: pytest.CaptureFixture[str], env: support.Env
+    capfd: pytest.CaptureFixture[str], fed: Callable[[object], None]
 ) -> None:
     """The private exclusion owes two artifacts and no written row."""
     doc = document(
@@ -307,7 +310,9 @@ def test_obligations_over_the_document(
         member("signer", tracks=["source"]),
         member("app", tracks=[], visibility="private"),
     )
-    code, out, err = run_main(doc, capfd=capfd, env=env)
+    fed(doc)
+    code = ap.main([CANON])
+    out, err = capfd.readouterr()
     assert (code, err) == (0, "")
     owed: dict[str, list[str]] = {}
     for line in out.splitlines():
@@ -332,22 +337,24 @@ def test_each_refusal_exits_two_and_names_its_field(
     doc: object,
     message: object,
     capfd: pytest.CaptureFixture[str],
-    env: support.Env,
+    fed: Callable[[object], None],
 ) -> None:
     """A refused document exits 2, says so, and prints no obligation."""
-    code, out, err = run_main(doc, capfd=capfd, env=env)
+    fed(doc)
+    code = ap.main([CANON])
+    out, err = capfd.readouterr()
     assert code == 2
     assert out == ""
     assert err.startswith(f"{TASK}: {message}"), err
 
 
 def test_arguments_other_than_the_canon_are_refused(
-    capfd: pytest.CaptureFixture[str], env: support.Env
+    capfd: pytest.CaptureFixture[str], fed: Callable[[object], None]
 ) -> None:
     """The roster is no input any more: a caller passing one is told."""
-    code, out, err = run_main(
-        document(member()), "--roster", "x.json", capfd=capfd, env=env
-    )
+    fed(document(member()))
+    code = ap.main(["--roster", "x.json"])
+    out, err = capfd.readouterr()
     assert (code, out) == (2, "")
     assert (
         f"{TASK}: takes the canon's repository name and nothing"
