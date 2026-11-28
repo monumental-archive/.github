@@ -394,7 +394,7 @@ class TestAnUnreadableIndexIsUnread:
     KeyError), never naming the crate or the index.
     """
 
-    @pytest.mark.parametrize("body", (b"0", b"\x80", b'{"vers": "1.3.3"}\n'))
+    @pytest.mark.parametrize("body", [b"0", b"\x80", b'{"vers": "1.3.3"}\n'])
     def test_each_shape_refuses_by_name(self, body: object) -> None:
         """Not an object, not UTF-8, our record with no cksum."""
 
@@ -535,7 +535,7 @@ class TestPublishMintsItsOwnToken:
             pytest.MonkeyPatch.context() as patched,
             pytest.raises(publish_crates.RefusalError) as caught,
         ):
-            patched.setattr(urllib.request, "urlopen", support.returning(None))
+            patched.setattr(urllib.request, "urlopen", lambda *_args, **_kwargs: None)
             publish_crates.http("GET", url, {})
         assert f"{url} answered NoneType, not an HTTP response" == str(caught.value)
 
@@ -590,6 +590,6 @@ class TestMain:
     def test_success_is_run_s_exit(self) -> None:
         """Without a failure, main returns what run returned."""
         with pytest.MonkeyPatch.context() as patched:
-            patched.setattr(publish_crates, "run", support.returning(0))
+            patched.setattr(publish_crates, "run", lambda *_args, **_kwargs: 0)
             patched.setattr(sys, "stdout", io.StringIO())
             assert publish_crates.main([]) == 0

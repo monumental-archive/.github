@@ -3,6 +3,7 @@
 Draft, unpushed: the rows #1667's Done-when names for `measured` itself.
 """
 
+import contextlib
 import os
 import re
 import shutil
@@ -15,7 +16,6 @@ import pytest
 
 from belt import gate_cache_key
 from tests import support
-import contextlib
 
 BELT = support.MISE
 MEASURED = BELT / "measured"
@@ -374,9 +374,9 @@ class TestGoMerged:
             assert seen["GOFLAGS"] == "-x"
             assert "GOCOVERDIR" not in seen
 
-    def test_a_measuring_flag_of_the_tasks_own_is_refused(self) -> None:
-        """On its `go test`, in either spelling, or already in GOFLAGS."""
-        for argv, given, named in (
+    @pytest.mark.parametrize(
+        ("argv", "given", "named"),
+        [
             (
                 ["go", "test", "./...", "-coverprofile=x.out"],
                 {},
@@ -398,22 +398,30 @@ class TestGoMerged:
                 {"GOCOVERDIR": "/elsewhere"},
                 "the environment's GOCOVERDIR is set (GOCOVERDIR=/elsewhere)",
             ),
-        ):
-            with self.subTest(named=named), tempfile.TemporaryDirectory() as tmp:
-                _, out, status = self.go_run(tmp, argv, **given)
-                assert status == 1, out
-                assert f"measured: {named}, {GO_REFUSAL}" == out
+        ],
+    )
+    def test_a_measuring_flag_of_the_tasks_own_is_refused(
+        self, argv: object, given: object, named: object
+    ) -> None:
+        """On its `go test`, in either spelling, or already in GOFLAGS."""
+        with tempfile.TemporaryDirectory() as tmp:
+            _, out, status = self.go_run(tmp, argv, **given)
+            assert status == 1, out
+            assert f"measured: {named}, {GO_REFUSAL}" == out
 
-    def test_words_outside_a_go_test_are_not_go_flags(self) -> None:
-        """`find -exec` and an `-args` tail are the command's, not go's."""
-        for line in (
+    @pytest.mark.parametrize(
+        "line",
+        [
             "find . -name go.mod -exec true \\; ; printf ok",
             "printf ok; exit 0; go test ./... -args -cover",
-        ):
-            with self.subTest(line=line), tempfile.TemporaryDirectory() as tmp:
-                _, out, status = self.go_run(tmp, [SH, "-c", line])
-                assert status == 0, out
-                assert out == "ok"
+        ],
+    )
+    def test_words_outside_a_go_test_are_not_go_flags(self, line: object) -> None:
+        """`find -exec` and an `-args` tail are the command's, not go's."""
+        with tempfile.TemporaryDirectory() as tmp:
+            _, out, status = self.go_run(tmp, [SH, "-c", line])
+            assert status == 0, out
+            assert out == "ok"
 
 
 # A stand-in cargo, enough to follow the Rust mechanism (#1653): it logs
@@ -466,6 +474,10 @@ RUST_REFUSAL = (
     "  replace the measurement's own (#1653); drop it: the rust leg measures every\n"
     "  cargo the test command starts, instrumented into a target directory of its own\n"
 )
+
+
+# A test command that runs cargo llvm-cov itself, after a plain test.
+CARGO_THEN_LLVM_COV = [SH, "-c", "cargo test && cargo llvm-cov --lcov"]
 
 
 class TestRustInstrumented:
@@ -654,7 +666,7 @@ class TestRustInstrumented:
         """
         seen = []
         for release in ("1.97.1", "1.100.0"):
-            with tempfile.TemporaryDirectory() as tmp, self.subTest(release=release):
+            with tempfile.TemporaryDirectory() as tmp:
                 tree, out, _ = self.rust_run(tmp, DUMP, RUSTUP_TOOLCHAIN=release)
                 assert out.returncode == 0, out.stderr
                 verbose = support.rustc_verbose(release)
@@ -688,10 +700,9 @@ class TestRustInstrumented:
             assert out.stdout == ""
             assert "show-env" not in "\n".join(calls)
 
-    def test_a_task_that_measures_itself_is_refused(self) -> None:
-        """Item 10's four, by message, before cargo is asked anything."""
-        cargo_cmd = [SH, "-c", "cargo test && cargo llvm-cov --lcov"]
-        for argv, given, named in (
+    @pytest.mark.parametrize(
+        ("argv", "given", "named"),
+        [
             (
                 DUMP,
                 {"CARGO_TARGET_DIR": "/own"},
@@ -710,7 +721,7 @@ class TestRustInstrumented:
                     " (LLVM_PROFILE_FILE=/own/%p.profraw)"
                 ),
             ),
-            (cargo_cmd, {}, "cargo llvm-cov is in the test command"),
+            (CARGO_THEN_LLVM_COV, {}, "cargo llvm-cov is in the test command"),
             (
                 ["/usr/bin/cargo", "+nightly", "llvm-cov", "test"],
                 {},
@@ -721,12 +732,17 @@ class TestRustInstrumented:
                 {},
                 "/opt/bin/cargo-llvm-cov is in the test command",
             ),
-        ):
-            with self.subTest(named=named), tempfile.TemporaryDirectory() as tmp:
-                _, out, calls = self.rust_run(tmp, argv, **given)
-                assert out.returncode == 1, out.stderr
-                assert f"measured: {named}, {RUST_REFUSAL}" == out.stderr
-                assert calls == NO_CALLS
+        ],
+    )
+    def test_a_task_that_measures_itself_is_refused(
+        self, argv: object, given: object, named: object
+    ) -> None:
+        """Item 10's four, by message, before cargo is asked anything."""
+        with tempfile.TemporaryDirectory() as tmp:
+            _, out, calls = self.rust_run(tmp, argv, **given)
+            assert out.returncode == 1, out.stderr
+            assert f"measured: {named}, {RUST_REFUSAL}" == out.stderr
+            assert calls == NO_CALLS
 
     def test_llvm_cov_outside_a_cargo_is_not_refused(self) -> None:
         """A word `llvm-cov` no cargo starts is the command's own."""
@@ -751,7 +767,7 @@ LOCK = (
 @pytest.mark.usefixtures("_stack")
 class TestVitestMeasured:
     """In a vitest tree the run itself carries the coverage flags (#2105)."""
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""
@@ -821,7 +837,7 @@ class TestVitestMeasured:
         assert want == self.execd(out)
 
     @pytest.mark.parametrize(
-        "argv", (["pnpm", "exec", "vitest", "list"], ["pnpm", "run", "lint"])
+        "argv", [["pnpm", "exec", "vitest", "list"], ["pnpm", "run", "lint"]]
     )
     def test_what_is_not_a_run_is_unchanged(self, argv: object) -> None:
         """`vitest list`, or a command with no vitest argument."""

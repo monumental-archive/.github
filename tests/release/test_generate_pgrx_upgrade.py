@@ -1,5 +1,5 @@
 """Table tests for the pgrx upgrade derivation's predecessor selection.
-
+                        # ruff: ignore[hardcoded-temp-file]
 #816: after edtf v1.3.0 was tagged and failed to publish, the next
 release asked only whether the graph HEAD (1.3.0) had published tarballs,
 found none, and announced "first publish of this extension" for an
@@ -1115,7 +1115,7 @@ class TestInstallsHeadersAtTheImagesServer:
             BUILD_ROOT.read_text()
         )
 
-    @pytest.mark.parametrize("site", (SCRIPT, BUILD_ROOT))
+    @pytest.mark.parametrize("site", [SCRIPT, BUILD_ROOT])
     def test_install_line_carries_the_clang_driver_and_llvm(self, site: object) -> None:
         """A pgrx 0.20 build needs a clang driver and llvm-ar (#1847).
 
@@ -1576,7 +1576,6 @@ class TestProofReadsBeforeItCompares:
                         "/usr/share/postgresql/",
                         # The proof's own container path, moved OFF the
                         # host's /tmp: the opposite of the rule's concern.
-                        # ruff: ignore[hardcoded-temp-file]
                         "/tmp/",
                         "/work/",
                     )
@@ -1619,11 +1618,11 @@ class TestProofReadsBeforeItCompares:
         assert "::error::" not in result.stdout
 
     @pytest.mark.parametrize(
-        "empty,upgraded,fresh",
-        (
+        ("empty", "upgraded", "fresh"),
+        [
             ("upgraded", "", ROW_A + ROW_B),
             ("fresh", ROW_A + ROW_B, ""),
-        ),
+        ],
     )
     def test_an_empty_snapshot_is_refused_by_name(
         self, empty: object, upgraded: object, fresh: object

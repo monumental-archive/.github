@@ -151,7 +151,7 @@ class TestGate:
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """A prop_*.py holding no @given test: red, named."""
-        status, out, err = call(
+        status, _out, err = call(
             ["gate", "prop_none.py"], {"prop_none.py": NO_PROPERTY}, {}, capfd=capfd
         )
         assert status == 1
@@ -164,7 +164,7 @@ class TestGate:
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """@settings(max_examples=…) on a test: red, the bound named."""
-        status, out, err = call(
+        status, _out, err = call(
             ["gate", "prop_own.py"], {"prop_own.py": OWN_BOUNDS}, {}, capfd=capfd
         )
         assert status == 1
@@ -177,7 +177,7 @@ class TestGate:
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """An import error is the file's own report, by name."""
-        status, out, err = call(
+        status, _out, err = call(
             ["gate", "prop_broken.py"],
             {"prop_broken.py": "import nowhere\n"},
             {},
@@ -245,7 +245,8 @@ class TestUsage:
     ) -> None:
         """R: exit 2 with the usage line, and nothing run."""
         with pytest.MonkeyPatch.context() as patched:
-            support.name_task(patched, GATE)
+            patched.setenv("MISE_TASK_NAME", GATE)
+            patched.setenv("ORG_FINDINGS", "")
             status = pp.main(argv)
             out, err = capfd.readouterr()
         assert (status, out, err) == (2, "", USAGE)

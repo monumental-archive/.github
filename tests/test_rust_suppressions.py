@@ -119,7 +119,7 @@ class TestInnerAttributes:
         assert want == allows(text)
 
     @pytest.mark.parametrize(
-        "text", ("/* open", '"open', "'\\", 'r#"open', "#![allow(x")
+        "text", ["/* open", '"open', "'\\", 'r#"open', "#![allow(x"]
     )
     def test_unterminated_input_ends_the_scan(self, text: object) -> None:
         """An unclosed comment, string, char or attribute ends cleanly."""
@@ -147,11 +147,11 @@ class TestManifests:
 
     @pytest.mark.parametrize(
         "text",
-        (
+        [
             "[lints]\nworkspace = true\n",
             'workspace = "x"\nlints = 1\n',
             '[package]\nname = "a"\n',
-        ),
+        ],
     )
     def test_shapes_that_are_no_lint_table_are_passed_over(self, text: object) -> None:
         """`workspace = true`, a scalar workspace, no lints at all."""
@@ -225,14 +225,18 @@ class TestMain:
             done = self.run_helper(root, "lib.rs\0")
         assert (done.returncode, done.stdout, done.stderr) == (0, "", "")
 
-    def test_undecodable_files_are_refused_by_name(self) -> None:
+    @pytest.mark.parametrize(
+        ("name", "raw"), [("Cargo.toml", b"[lints\n"), ("lib.rs", b"\xff\n")]
+    )
+    def test_undecodable_files_are_refused_by_name(
+        self, name: object, raw: object
+    ) -> None:
         """A manifest that is not TOML, a source that is not UTF-8."""
-        for name, raw in (("Cargo.toml", b"[lints\n"), ("lib.rs", b"\xff\n")):
-            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
-                (Path(tmp) / name).write_bytes(raw)
-                done = self.run_helper(Path(tmp), f"{name}\0")
-                assert done.returncode == 1
-                assert done.stderr.startswith(f"lint:rust: {name}: ")
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / name).write_bytes(raw)
+            done = self.run_helper(Path(tmp), f"{name}\0")
+            assert done.returncode == 1
+            assert done.stderr.startswith(f"lint:rust: {name}: ")
 
     def test_main_in_process(self) -> None:
         """`main` read in-process, so its own lines are measured."""

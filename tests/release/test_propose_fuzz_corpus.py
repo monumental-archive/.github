@@ -19,12 +19,15 @@ import base64
 import os
 import shutil
 import subprocess
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from belt import decoded
 from tests import support
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 RELEASE = support.RELEASE
 PROPOSE = RELEASE / "propose-fuzz-corpus.sh"

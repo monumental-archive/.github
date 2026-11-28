@@ -189,7 +189,7 @@ class TestLint:
         assert got.returncode == 1, got.stderr
         assert "Cargo.lock: proptest 1.7.0-alpha.1 is below 1.7.0" in got.stderr
 
-    @pytest.mark.parametrize("version", ("1.7.0", "1.12.0"))
+    @pytest.mark.parametrize("version", ["1.7.0", "1.12.0"])
     def test_1_7_and_1_12_are_green(self, version: object) -> None:
         """The first release that reads the seed, and what edtf locks."""
         got = run(LINT, {"Cargo.lock": lock(("proptest", version))})
@@ -213,7 +213,7 @@ class TestLint:
         assert "Cargo.lock: proptest 1.12.0" not in got.stderr
 
     @pytest.mark.parametrize(
-        "name", ("vendor/x/Cargo.lock", "crates/vendor/y/Cargo.lock")
+        "name", ["vendor/x/Cargo.lock", "crates/vendor/y/Cargo.lock"]
     )
     def test_a_vendored_lock_is_not_read(self, name: object) -> None:
         """vendor/ is not the repository's, at the root or nested."""
@@ -283,7 +283,7 @@ class TestAudit:
         assert got.seed == "7"
         assert got.cases == "unset"
 
-    @pytest.mark.parametrize("given", ("notanumber", "-1", str(1 << 64)))
+    @pytest.mark.parametrize("given", ["notanumber", "-1", str(1 << 64)])
     def test_a_seed_proptest_would_not_read_is_a_usage_error(
         self, given: object
     ) -> None:
@@ -295,7 +295,7 @@ class TestAudit:
         ) in got.stderr
         assert "run test" not in got.calls
 
-    @pytest.mark.parametrize("status", ("0", "1", "101"))
+    @pytest.mark.parametrize("status", ["0", "1", "101"])
     def test_the_test_task_status_is_the_task_status(self, status: object) -> None:
         """A failing test task fails the audit and says where it lands."""
         got = run(AUDIT, LOCKED, {"STUB_EXIT": status})

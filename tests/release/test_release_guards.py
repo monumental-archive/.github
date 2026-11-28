@@ -34,6 +34,7 @@ obeys wherever it is standing.
 Run through the gate as `mise run test`, which `ci` collects.
 """
 
+import contextlib
 import json
 import os
 import subprocess
@@ -44,7 +45,6 @@ import pytest
 
 from belt import decoded
 from tests import support
-import contextlib
 
 CANON = support.CANON
 RELEASE = CANON / "release"
@@ -541,7 +541,8 @@ class TestHermeticEnvironment:
         """The release job exports its step inputs; no fixture sees them."""
         planted = {"VERSION": "1.69.4", "PLAN": "{}", "APP_SLUG": "canon-release"}
         with pytest.MonkeyPatch.context() as patched, TemporaryDirectory() as d:
-            support.patch_env(patched, planted)
+            for name, value in planted.items():
+                patched.setenv(name, value)
             env = hermetic_env(Path(d))
         leaked = sorted(set(planted) & set(env))
         assert list[str]() == leaked
@@ -550,7 +551,8 @@ class TestHermeticEnvironment:
         """Overrides are how a row gives a fixture an input."""
         planted = {"VERSION": "1.69.4"}
         with pytest.MonkeyPatch.context() as patched, TemporaryDirectory() as d:
-            support.patch_env(patched, planted)
+            for name, value in planted.items():
+                patched.setenv(name, value)
             env = hermetic_env(Path(d), VERSION="2.0.0")
         assert env["VERSION"] == "2.0.0"
 
@@ -1257,7 +1259,7 @@ class TestOpenReleasePrHead(
         ) in result.stderr
 
     @pytest.mark.parametrize(
-        "label,head", (("refused", None), ("null", "null"), ("empty", ""))
+        ("label", "head"), [("refused", None), ("null", "null"), ("empty", "")]
     )
     def test_a_head_read_that_fails_is_never_read_as_unchanged(
         self, label: object, head: object
@@ -1306,7 +1308,7 @@ class TestOpenReleasePrHead(
             ("head is the checkout", checked_out, 0, "opened the release PR"),
             ("head is the tag", tagged, 0, f"main moved to {tagged}"),
         )
-        for label, head, status, said in cases:
+        for _label, head, status, said in cases:
             (self.state / "calls").unlink(missing_ok=True)
             self.forge(head)
             result = self.run_executor(
@@ -1421,12 +1423,12 @@ class TestCloseReleasePr(
 
     @pytest.mark.parametrize(
         "missing",
-        (
+        [
             "RELEASE_BRANCH",
             "GH_TOKEN",
             "GITHUB_REPOSITORY",
             "GITHUB_SHA",
-        ),
+        ],
     )
     def test_each_required_input_is_named_when_it_is_missing(
         self, missing: object
@@ -1600,7 +1602,7 @@ class TestTagReleasePush:
     a stand-in signer, and an `origin` whose pre-receive hook answers
     the way GitHub answered edtf's v1.3.5 push.
     """
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""
@@ -1765,7 +1767,7 @@ class TestTagReleaseUpgradePath:
     a maintenance release marked latest was checked in place of the
     newest. Each row reaches the push or stops before signing.
     """
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""
@@ -1898,7 +1900,7 @@ class TestInventoryStepWiring:
     with `stele`, `git` and `date` stubbed — stele records its argv and
     prints a list, and GNU `date -d` is not the Mac's.
     """
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""

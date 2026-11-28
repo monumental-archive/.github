@@ -295,7 +295,10 @@ def call(argv: list[str], env: dict[str, str], cwd: Path) -> Done:
         contextlib.redirect_stdout(out),
         contextlib.redirect_stderr(err),
     ):
-        support.patch_env(patched, env, clear=True)
+        for name in list(os.environ):
+            patched.delenv(name)
+        for name, value in env.items():
+            patched.setenv(name, value)
         status = pc.main(argv)
     return Done(status, out.getvalue(), err.getvalue())
 
@@ -335,7 +338,7 @@ def measured_run(  # ruff: ignore[too-many-arguments] -- one keyword per part of
 @pytest.mark.usefixtures("_stack")
 class TestCollecting:
     """Collects from a planted database and reads the report."""
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""
@@ -390,7 +393,7 @@ class TestCollecting:
 @pytest.mark.usefixtures("_stack")
 class TestHelperRows(TestCollecting):
     """`collect` against a stub psql, then `totals` over its report."""
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""
@@ -580,7 +583,7 @@ LINT_RED = (
 @pytest.mark.usefixtures("_stack")
 class TestLintRows(TestCollecting):
     """plpgsql_check's static check, in the same report (#1605)."""
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""
@@ -732,8 +735,8 @@ class TestSuppressionRows(TestCollecting):
         assert read.stdout == "plpgsql 60.00\nplpgsql-branches 66.66\n"
 
     @pytest.mark.parametrize(
-        "name,above,line",
-        (
+        ("name", "above", "line"),
+        [
             ("nothing above", "", 1),
             ("an empty comment", "--", 2),
             (
@@ -741,7 +744,7 @@ class TestSuppressionRows(TestCollecting):
                 "-- @plpgsql_check_options: fatal_errors = true",
                 2,
             ),
-        ),
+        ],
     )
     def test_a_suppression_without_a_reason_is_red(
         self, name: object, above: object, line: object
@@ -793,7 +796,7 @@ REMEDY = (
 @pytest.mark.usefixtures("_stack")
 class TestClientRows(TestCollecting):
     """The client is psql on PATH unless the call names another."""
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""
@@ -862,7 +865,7 @@ class TestClientRows(TestCollecting):
 @pytest.mark.usefixtures("_stack")
 class TestRefusalRows(TestCollecting):
     """Every way a collection or a report file is refused, by name."""
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""
@@ -1040,7 +1043,7 @@ class TestRefusalRows(TestCollecting):
                 == read.stderr
             )
 
-    @pytest.mark.parametrize("argv", ([], ["measure", "leg"]))
+    @pytest.mark.parametrize("argv", [[], ["measure", "leg"]])
     def test_a_usage_error_names_both_subcommands(self, argv: object) -> None:
         """No subcommand, or an unknown one, is exit 2 with the usage."""
         done = run(
@@ -1074,7 +1077,7 @@ STRONG = {"101": ("public.guard()", "0.95\t0.88\t20\t19\t1")}
 @pytest.mark.usefixtures("_stack")
 class TestLegRows:
     """`coverage:check` over the plpgsql leg, decided by the floor's record."""
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""
@@ -1330,7 +1333,7 @@ def counter(tree: Path) -> int:
 @pytest.mark.usefixtures("_stack")
 class TestReadsTheRunRows:
     """Both legs read the one run `measured` left, and run no suite (#1667)."""
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""
@@ -1690,7 +1693,7 @@ class TestRealDatabaseRows:
     each row makes databases of its own, so no row reads another's
     profile (plpgsql_check keys its profile by database).
     """
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""

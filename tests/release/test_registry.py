@@ -1000,7 +1000,7 @@ class TestEnvironment(TestHarness):
             pytest.MonkeyPatch.context() as patched,
             pytest.raises(registry.RefusedError) as caught,
         ):
-            patched.setattr(urllib.request, "urlopen", support.returning(None))
+            patched.setattr(urllib.request, "urlopen", lambda *_args, **_kwargs: None)
             registry.Registry.request("GET", url, {})
         assert f"{url} answered NoneType, not an HTTP response" == str(caught.value)
 

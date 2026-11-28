@@ -8,7 +8,10 @@ directory held.
 
 from __future__ import annotations
 
-import pytest
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import pytest
 
 CONFTEST = "from tests.conftest import pytest_runtest_setup, pytest_runtest_teardown\n"
 

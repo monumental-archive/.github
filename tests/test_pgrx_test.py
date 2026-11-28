@@ -499,7 +499,7 @@ class TestIcuPerMajor(TestPlanted):
             ("plain, side by side", {"ORG_PGRX_MAJOR": ""}, "17,18", (17, 18)),
             ("one major", {}, "18", (18,)),
         )
-        for name, env, checked, majors in shapes:
+        for _name, env, checked, majors in shapes:
             for floor in (False, True):
                 if floor:
                     self.floor()
@@ -732,7 +732,7 @@ class TestFannedPlan(TestPlanted):
         )
         assert self.suites(log) == NOTHING
 
-    @pytest.mark.parametrize("value", ("[15]", '"15"', "15,16"))
+    @pytest.mark.parametrize("value", ["[15]", '"15"', "15,16"])
     def test_a_value_that_is_not_the_plans_shape_is_refused(
         self, value: object
     ) -> None:

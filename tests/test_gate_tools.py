@@ -648,8 +648,8 @@ class TestTable:
         assert selected == guard_paths(lines[: skip + 1])
 
     @pytest.mark.parametrize(
-        "call,want",
-        (
+        ("call", "want"),
+        [
             ("workflow_files", {".github/workflows/*.y*ml"}),
             ("workflow_template_files", {"workflow-templates/*.y*ml"}),
             (
@@ -662,7 +662,7 @@ class TestTable:
                     "*/action.yaml",
                 },
             ),
-        ),
+        ],
     )
     def test_a_sourced_selector_guards_with_its_own_pathspec(
         self, call: object, want: object
@@ -696,13 +696,13 @@ class TestTable:
         )
 
     @pytest.mark.parametrize(
-        "text,cmd",
-        (
+        ("text", "cmd"),
+        [
             ('xargs -0 hadolint "$f"', "hadolint"),
             ("cargo deny check bans", "cargo-deny"),
             ("out=$(jq -r .x f)", "jq"),
             ("FOO=1 stele verify", "stele"),
-        ),
+        ],
     )
     def test_xargs_and_cargo_subcommands_are_calls(
         self, text: object, cmd: object
@@ -749,8 +749,10 @@ class TestTable:
             with pytest.MonkeyPatch.context() as patched:
                 patched.setattr(here, "BELT", belt_dir)
                 patched.setattr(here, "PACKAGE", belt_dir / "belt")
-                support.patch_dict(patched, _SOURCES, clear=True)
-                support.patch_dict(patched, _CODE, clear=True)
+                for key in list(_SOURCES):
+                    patched.delitem(_SOURCES, key)
+                for key in list(_CODE):
+                    patched.delitem(_CODE, key)
                 planted: list[str] = ["planted.sh"]
                 assert planted == python_code("runs.py").scripts
                 runs = expand('"${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt" runs', set())
@@ -776,8 +778,10 @@ class TestTable:
             with pytest.MonkeyPatch.context() as patched:
                 patched.setattr(here, "BELT", belt_dir)
                 patched.setattr(here, "PACKAGE", belt_dir / "belt")
-                support.patch_dict(patched, _SOURCES, clear=True)
-                support.patch_dict(patched, _CODE, clear=True)
+                for key in list(_SOURCES):
+                    patched.delitem(_SOURCES, key)
+                for key in list(_CODE):
+                    patched.delitem(_CODE, key)
                 says = expand('"${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt" says', set())
                 assert first_call(says, ["hadolint"]) is None
                 assert first_call(says, ["git"]) == 1
@@ -797,8 +801,10 @@ class TestTable:
             with pytest.MonkeyPatch.context() as patched:
                 patched.setattr(here, "BELT", belt_dir)
                 patched.setattr(here, "PACKAGE", belt_dir / "belt")
-                support.patch_dict(patched, _SOURCES, clear=True)
-                support.patch_dict(patched, _CODE, clear=True)
+                for key in list(_SOURCES):
+                    patched.delitem(_SOURCES, key)
+                for key in list(_CODE):
+                    patched.delitem(_CODE, key)
                 wraps = expand(
                     '"${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt" wraps', set()
                 )
@@ -978,12 +984,12 @@ class TestHelper:
 
     @pytest.mark.parametrize(
         "name",
-        (
+        [
             "Dockerfile",
             "docker/Dockerfile",
             "x.Dockerfile",
             "Dockerfile.ci",
-        ),
+        ],
     )
     def test_a_dockerfile_tree(self, name: object) -> None:
         """Each Dockerfile form brings hadolint."""
@@ -1072,7 +1078,7 @@ class TestHelper:
             patched.chdir(CANON)
             patched.setattr(sys, "argv", [STEP])
             status = gate_tools.main(["--table", str(table), "list"])
-        out, err = capfd.readouterr()
+        _out, err = capfd.readouterr()
         assert status == 1
         assert f"::error::{STEP}: aqua:hadolint/hadolint is in one of" in err
 
@@ -1105,7 +1111,8 @@ class TestRefusals:
             contextlib.redirect_stderr(err),
             contextlib.redirect_stdout(io.StringIO()),
         ):
-            support.name_task(patched, "")
+            patched.setenv("MISE_TASK_NAME", "")
+            patched.setenv("ORG_FINDINGS", "")
             patched.setattr(sys, "argv", [STEP])
             status = gate_tools.main(["--table", str(table), "list"])
         return status, err.getvalue(), table

@@ -190,8 +190,7 @@ class TestAdoption:
         done = lint(["tools/x.py", FLOOR])
         assert done.returncode == 1, done.stdout
         assert (
-            f"{TASK}: ships Python (tools/x.py) but tracks no"
-            f" setup.cfg — {MUTATION}\n"
+            f"{TASK}: ships Python (tools/x.py) but tracks no setup.cfg — {MUTATION}\n"
         ) == done.stderr
 
     def test_typescript_without_stryker_is_red(self) -> None:
@@ -209,7 +208,7 @@ class TestAdoption:
         assert done.returncode == 0, done.stderr
         assert done.stdout == SKIPPED
 
-    @pytest.mark.parametrize("files", (["fuzz/Cargo.toml"], ["vendor/dep/Cargo.toml"]))
+    @pytest.mark.parametrize("files", [["fuzz/Cargo.toml"], ["vendor/dep/Cargo.toml"]])
     def test_fuzz_and_vendored_crates_ship_nothing(self, files: object) -> None:
         """A `Cargo.toml` only under `fuzz/` or `vendor/` is green."""
         done = lint(files)
@@ -223,13 +222,13 @@ class TestAdoption:
         assert done.stdout == SKIPPED
 
     @pytest.mark.parametrize(
-        "name,files",
-        (
+        ("name", "files"),
+        [
             ("Rust", ["Cargo.toml", ".cargo/mutants.toml"]),
             ("Go", ["go.mod", ".gomuignore"]),
             ("Python", ["tools/x.py", "setup.cfg"]),
             ("TypeScript", ["src/a.ts", "stryker.config.json"]),
-        ),
+        ],
     )
     def test_an_adopted_tree_is_green_in_each_language(
         self, name: object, files: object
@@ -280,6 +279,8 @@ class TestTableAgainstLegs:
         unguarded = text.replace("org_tracked_has", "org_tracked")
         assert text != unguarded
         texts["mutants-rust.sh"] = unguarded
-        line = "Rust: the table names .cargo/mutants.toml, mutants-rust.sh guards on None"
+        line = (
+            "Rust: the table names .cargo/mutants.toml, mutants-rust.sh guards on None"
+        )
         expected: list[str] = [line]
         assert expected == drift(texts)

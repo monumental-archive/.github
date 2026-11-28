@@ -386,35 +386,33 @@ class TestMainTest:
 
 # Every field the check reads, wrongly shaped, and its refusal.
 WRONG_SHAPES: list[tuple[object, str]] = [
-        ([], "the policy is not an object"),
-        ({"evidence": []}, "evidence is not an object"),
-        ({"evidence": {"classes": 1}}, "evidence.classes is not an object"),
-        (
-            {"evidence": {"classes": {"x": []}}},
-            "evidence.classes.x is not an object",
-        ),
-        (
-            {"evidence": {"classes": {"x": {"assetPrefixes": {}}}}},
-            "evidence.classes.x.assetPrefixes is not a list",
-        ),
-        (
-            {"evidence": {"classes": {"x": {"assetPrefixes": ["p"]}}}},
-            "evidence.classes.x.assetPrefixes[0] is not an object",
-        ),
-        (
-            {"evidence": {"classes": {"x": {"assetPrefixes": [{"prefix": 1}]}}}},
-            "evidence.classes.x.assetPrefixes[0].prefix is not a string",
-        ),
-        (
-            {
-                "evidence": {
-                    "classes": {
-                        "x": {"assetPrefixes": [{"prefix": "p", "planned": 1}]}
-                    }
-                }
-            },
-            "evidence.classes.x.assetPrefixes[0].planned is not a boolean",
-        ),
+    ([], "the policy is not an object"),
+    ({"evidence": []}, "evidence is not an object"),
+    ({"evidence": {"classes": 1}}, "evidence.classes is not an object"),
+    (
+        {"evidence": {"classes": {"x": []}}},
+        "evidence.classes.x is not an object",
+    ),
+    (
+        {"evidence": {"classes": {"x": {"assetPrefixes": {}}}}},
+        "evidence.classes.x.assetPrefixes is not a list",
+    ),
+    (
+        {"evidence": {"classes": {"x": {"assetPrefixes": ["p"]}}}},
+        "evidence.classes.x.assetPrefixes[0] is not an object",
+    ),
+    (
+        {"evidence": {"classes": {"x": {"assetPrefixes": [{"prefix": 1}]}}}},
+        "evidence.classes.x.assetPrefixes[0].prefix is not a string",
+    ),
+    (
+        {
+            "evidence": {
+                "classes": {"x": {"assetPrefixes": [{"prefix": "p", "planned": 1}]}}
+            }
+        },
+        "evidence.classes.x.assetPrefixes[0].planned is not a boolean",
+    ),
 ]
 
 

@@ -18,6 +18,7 @@ Each row asserts the message, not just the exit status: a planted row
 scored on exit alone can pass for the wrong reason.
 """
 
+import contextlib
 import os
 import re
 import subprocess
@@ -28,7 +29,6 @@ import pytest
 
 from belt import decoded, shard, workflow_yaml
 from tests import support
-import contextlib
 
 CANON = support.CANON
 BELT = CANON / "mise"
@@ -364,7 +364,7 @@ class TestShards:
             "test:python-properties: 1 test(s) in 1 file(s) held\n"
         )
 
-    @pytest.mark.parametrize("spec", ("3/2", "0/8", "x/8", "1/0", "\u00b2/8"))
+    @pytest.mark.parametrize("spec", ["3/2", "0/8", "x/8", "1/0", "\u00b2/8"])
     def test_a_malformed_shard_is_refused_by_name(self, spec: object) -> None:
         """A k above n, a zero, or not digits: exit 2, the value named."""
         done = run(
@@ -508,7 +508,7 @@ def pids(stderr: str) -> set[str]:
 @pytest.mark.usefixtures("_stack")
 class TestFanOut:
     """No shard named: the runner fans out over its own shards (#1741)."""
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""

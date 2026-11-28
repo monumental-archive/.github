@@ -218,7 +218,7 @@ class TestBehind(TestRows):
 
     def test_did_not_advance(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Not advanced: red, the detail lines in order, the reason counted."""
-        status, out, err = self.run_helper(capfd=capfd)
+        status, _out, err = self.run_helper(capfd=capfd)
         assert status == 1, err
         why = "the checkpoint did not advance in this run (next 448196522)"
         assert self.detail() == expect(
@@ -236,7 +236,7 @@ class TestBehind(TestRows):
         """Advanced, but the log grew faster: red, both counts (green before #1967)."""
         grown = checkpoint(next=BEHIND_NEXT + 1000, size=BEHIND_SIZE + 5000)
         self.write(self.end, grown)
-        status, out, err = self.run_helper(capfd=capfd)
+        status, _out, err = self.run_helper(capfd=capfd)
         assert status == 1, err
         lines = self.detail()
         assert lines[2:4] == expect(f"{STARTED}25,905", f"{NOW}29,905")
@@ -251,7 +251,7 @@ class TestBehind(TestRows):
         """Advanced, outstanding exactly as at the start: not smaller, red."""
         level = checkpoint(next=BEHIND_NEXT + 1000, size=BEHIND_SIZE + 1000)
         self.write(self.end, level)
-        status, out, err = self.run_helper(capfd=capfd)
+        status, _out, err = self.run_helper(capfd=capfd)
         assert status == 1, err
         assert self.detail()[3] == f"{NOW}25,905"
 
@@ -259,7 +259,7 @@ class TestBehind(TestRows):
         """No checkpoint at all (before the founding run): red, named."""
         self.start.unlink()
         self.end.unlink()
-        status, out, err = self.run_helper(kept="false", capfd=capfd)
+        status, _out, err = self.run_helper(kept="false", capfd=capfd)
         assert status == 1, err
         missing = "unknown: no checkpoint file"
         assert self.detail()[:5] == expect(
@@ -272,7 +272,7 @@ class TestBehind(TestRows):
 
     def test_start_not_kept(self, capfd: pytest.CaptureFixture[str]) -> None:
         """The start job did not finish: red, the count named unknown."""
-        status, out, err = self.run_helper(kept="", capfd=capfd)
+        status, _out, err = self.run_helper(kept="", capfd=capfd)
         assert status == 1, err
         lines = self.detail()
         assert lines[2] == f"{STARTED}unknown: the start job did not finish"
@@ -284,7 +284,7 @@ class TestBehind(TestRows):
     def test_kept_but_not_restored(self, capfd: pytest.CaptureFixture[str]) -> None:
         """The start was kept but its copy is gone: red, named."""
         self.start.unlink()
-        status, out, err = self.run_helper(capfd=capfd)
+        status, _out, err = self.run_helper(capfd=capfd)
         assert status == 1, err
         assert self.detail()[4] == (
             f"{THIS_RUN}the checkpoint the run started from was not kept"
@@ -298,14 +298,14 @@ class TestReasons(TestRows):
     def test_two_reasons_counted(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Three stopped for one reason, two for another: counts 3 and 2."""
         self.legs([THROTTLED, BUDGET, THROTTLED, BUDGET, THROTTLED])
-        status, out, err = self.run_helper(legs=5, capfd=capfd)
+        status, _out, err = self.run_helper(legs=5, capfd=capfd)
         assert status == 1, err
         assert self.detail()[5:] == expect(f"3 legs: {THROTTLED}", f"2 legs: {BUDGET}")
 
     def test_missing_report_is_counted(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Twelve reports for fourteen legs: two counted as "no report"."""
         self.legs([THROTTLED] * 12)
-        status, out, err = self.run_helper(capfd=capfd)
+        status, _out, err = self.run_helper(capfd=capfd)
         assert status == 1, err
         assert self.detail()[5:] == expect(f"12 legs: {THROTTLED}", "2 legs: no report")
 
@@ -315,7 +315,7 @@ class TestReasons(TestRows):
         empty = self.reports / "watch-report-14" / "report.json"
         empty.parent.mkdir()
         empty.write_text("", encoding="utf-8")
-        status, out, err = self.run_helper(capfd=capfd)
+        status, _out, err = self.run_helper(capfd=capfd)
         assert status == 1, err
         assert self.detail()[5:] == expect(f"13 legs: {THROTTLED}", "1 leg: no report")
 
@@ -324,7 +324,7 @@ class TestReasons(TestRows):
     ) -> None:
         """A report with no `stopped` fact: named, never dropped."""
         self.legs([None] * LEGS)
-        status, out, err = self.run_helper(capfd=capfd)
+        status, _out, err = self.run_helper(capfd=capfd)
         assert status == 1, err
         assert self.detail()[5:] == expect("14 legs: no reason given")
 
@@ -338,7 +338,7 @@ class TestReasons(TestRows):
                 decoded.load_json((DATA / "report-pass.json").read_bytes()), "pass"
             ),
         )
-        status, out, err = self.run_helper(capfd=capfd)
+        status, _out, err = self.run_helper(capfd=capfd)
         assert status == 1, err
         assert self.detail()[5:] == expect(
             "13 legs: no report", "1 leg: judged to the head of the log"
@@ -350,7 +350,7 @@ class TestReasons(TestRows):
         bad = self.reports / "watch-report-14" / "report.json"
         bad.parent.mkdir()
         bad.write_text("[", encoding="utf-8")
-        status, out, err = self.run_helper(capfd=capfd)
+        status, _out, err = self.run_helper(capfd=capfd)
         assert status == 1, err
         assert self.detail()[5:] == expect(
             f"13 legs: {BUDGET}", "1 leg: the report could not be read"
@@ -359,7 +359,7 @@ class TestReasons(TestRows):
     def test_no_reports_directory(self, capfd: pytest.CaptureFixture[str]) -> None:
         """No report reached the job at all: every leg counted."""
         shutil.rmtree(self.reports)
-        status, out, err = self.run_helper(capfd=capfd)
+        status, _out, err = self.run_helper(capfd=capfd)
         assert status == 1, err
         assert self.detail()[5:] == expect("14 legs: no report")
 
@@ -411,7 +411,7 @@ class TestDecoded(TestRows):
             "a tree size with a fraction": ("treeSize", 448222427.5),
             "a timestamp as text": ("timestamp", "1794940328655"),
         }
-        for why, (field, value) in rows.items():
+        for field, value in rows.values():
             self.findings.unlink(missing_ok=True)
             doc = checkpoint()
             if field == "next":
@@ -419,7 +419,7 @@ class TestDecoded(TestRows):
             else:
                 tree_head(doc)[field] = value
             self.write(self.end, doc)
-            status, out, err = self.run_helper(capfd=capfd)
+            status, _out, err = self.run_helper(capfd=capfd)
             assert status == 1, err
             assert self.detail()[4] == (
                 f"{THIS_RUN}the newest checkpoint:"
@@ -435,7 +435,7 @@ class TestDecoded(TestRows):
             text.replace(f'"next": {BEHIND_NEXT}', '"next": Infinity'),
             encoding="utf-8",
         )
-        status, out, err = self.run_helper(capfd=capfd)
+        status, _out, err = self.run_helper(capfd=capfd)
         assert status == 1, err
         assert (
             self.detail()[0] == f"{NEXT}unknown: the checkpoint file could not be read"
@@ -452,7 +452,7 @@ class TestDecoded(TestRows):
         doc = checkpoint()
         tree_head(doc)["timestamp"] = 9.223372036854776e21
         self.write(self.start, doc)
-        status, out, err = self.run_helper(capfd=capfd)
+        status, _out, err = self.run_helper(capfd=capfd)
         assert status == 1, err
         assert self.detail()[4] == (
             f"{THIS_RUN}the checkpoint the run started from was not kept"

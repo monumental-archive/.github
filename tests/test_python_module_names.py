@@ -8,7 +8,8 @@ planted git tree with the belt as ORG_BELT_DIR, and asserts its
 message: each planted defect is red by name, a tree of module names is
 green, a tree with no Python skips. The canon's own tree is the last
 row.
-environment."""
+environment.
+"""
 
 import subprocess
 import tempfile

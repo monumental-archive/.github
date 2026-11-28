@@ -155,7 +155,7 @@ class TestDenyAdvisories:
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """A shape cargo-deny would refuse is never read as no ignore."""
-        status, out, err = lint('[advisories]\nignore = "x"\n', capfd=capfd)
+        status, _out, err = lint('[advisories]\nignore = "x"\n', capfd=capfd)
         assert status == 1
         assert "advisories.ignore" in err
 
@@ -172,7 +172,7 @@ class TestDenyAdvisories:
                     patched.setenv(name, value)
                 patched.chdir(tmp)
                 status = da.main(["deny.toml"])
-            out, err = capfd.readouterr()
+            _out, _err = capfd.readouterr()
             lines = records.read_text(encoding="utf-8").splitlines()
         assert status == 1
         detail = [line.strip() for line in refused(ADVISORY).splitlines()[1:]]

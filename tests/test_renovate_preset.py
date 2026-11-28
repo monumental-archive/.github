@@ -199,7 +199,7 @@ class TestManagers:
         """A one-table pin, as edtf tracks it, is the native manager's alone."""
         assert versions(ICU, ICU_ONE) == NONE
 
-    @pytest.mark.parametrize("dep", (POSTGRES, ICU))
+    @pytest.mark.parametrize("dep", [POSTGRES, ICU])
     def test_shape(self, dep: object) -> None:
         """Recursive, github-releases, and the file pattern hits mise.toml."""
         m = manager(dep)
@@ -246,14 +246,14 @@ class TestRules:
             if name in decoded.as_array(r.get("matchPackageNames", []), "names")
         ]
 
-    @pytest.mark.parametrize("name", (POSTGRES, f"aqua:{POSTGRES}"))
+    @pytest.mark.parametrize("name", [POSTGRES, f"aqua:{POSTGRES}"])
     def test_postgres_grouped(self, name: object) -> None:
         """Every entry's update lands in one pull request."""
         groups = [r["groupName"] for r in self.rules(name) if "groupName" in r]
         group: list[str] = ["postgresql-binaries"]
         assert groups == group
 
-    @pytest.mark.parametrize("name", (POSTGRES, f"aqua:{POSTGRES}"))
+    @pytest.mark.parametrize("name", [POSTGRES, f"aqua:{POSTGRES}"])
     def test_postgres_major_disabled(self, name: object) -> None:
         """A new major is a new entry, added by hand with its crate feature."""
         off = [

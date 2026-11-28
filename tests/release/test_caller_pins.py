@@ -218,7 +218,7 @@ class TestRefusals:
         )
 
     @pytest.mark.parametrize(
-        "config", ("tools = 0\n", "tools = [0]\n", 'tools = ["rust"]\n')
+        "config", ["tools = 0\n", "tools = [0]\n", 'tools = ["rust"]\n']
     )
     def test_tools_that_is_not_a_table(self, config: object) -> None:
         """`tools = 0` and `tools = [0]` refuse by name (#1556's shrunk examples).
@@ -242,7 +242,7 @@ class TestRefusals:
             none: set[str] = set()
             assert none == caller_pins.pinned_names(Path(tmp))
 
-    @pytest.mark.parametrize("name", (".mise.toml", "mise/config.toml"))
+    @pytest.mark.parametrize("name", [".mise.toml", "mise/config.toml"])
     def test_the_other_config_names_are_read(self, name: object) -> None:
         """`.mise.toml` and `mise/config.toml` are configs too."""
         assert install('[tools]\nrust = "1.97.1"\n', "rust", name=name) == (
@@ -514,13 +514,11 @@ class TestMajors:
             "",
         )
 
-    def test_a_malformed_major_is_a_usage_error(self) -> None:
+    @pytest.mark.parametrize(
+        "spec", ["pg18", '[18, "pg17"]', "[18.5]", '["-18"]', "true", ""]
+    )
+    def test_a_malformed_major_is_a_usage_error(self, spec: object) -> None:
         """Not a whole number or a list of them: refused before reading."""
-        for spec in ("pg18", '[18, "pg17"]', "[18.5]", '["-18"]', "true", ""):
-            with (
-                self.subTest(spec=spec),
-                pytest.raises(SystemExit) as exit_,
-                redirect_stderr(io.StringIO()),
-            ):
-                by_major(PG_LIST, spec)
-            assert exit_.value.code == 2
+        with pytest.raises(SystemExit) as exit_, redirect_stderr(io.StringIO()):
+            by_major(PG_LIST, spec)
+        assert exit_.value.code == 2

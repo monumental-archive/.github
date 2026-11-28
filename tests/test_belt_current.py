@@ -16,11 +16,14 @@ from __future__ import annotations
 
 import os
 import subprocess
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from tests import support
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 CANON = support.CANON
 SCRIPT = CANON / "mise" / "belt-current.sh"
@@ -79,9 +82,7 @@ class TestTheMiseIsCurrent:
         self.canon = plant_canon(self.tmp / "canon", "1.2.0")
         self.repo = self.tmp / "repo"
         self.repo.mkdir()
-        run(
-            [support.tool("git"), "init", "-q", "."], self.repo, self.env(), check=True
-        )
+        run([support.tool("git"), "init", "-q", "."], self.repo, self.env(), check=True)
 
     def env(self, **extra: str) -> dict[str, str]:
         """Build the row's environment.

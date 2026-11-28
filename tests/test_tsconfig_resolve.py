@@ -22,6 +22,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+import pytest
+
 from belt import decoded
 from tests import support
 
@@ -147,18 +149,20 @@ def options(tree: Path) -> dict[str, object]:
 class TestRefusedTest:
     """A tsconfig tsc cannot parse is a finding with the compiler's message."""
 
-    def test_each_malformed_config_is_refused_by_its_diagnostic(self) -> None:
+    @pytest.mark.parametrize(("name", "config", "said"), REFUSED)
+    def test_each_malformed_config_is_refused_by_its_diagnostic(
+        self, name: object, config: object, said: object
+    ) -> None:
         """One row per way `--showConfig` reads a bad config as a good one."""
-        for name, config, said in REFUSED:
-            with self.subTest(name), tempfile.TemporaryDirectory() as tmp:
-                tree = Path(tmp)
-                plant(tree, config)
-                done = resolve(tree)
-                assert done.returncode == 1, done.stderr
-                lines = done.stderr.splitlines()
-                assert lines[0] == f"{TASK}: tsconfig.json does not resolve"
-                assert lines[1].startswith(f"  {said}"), done.stderr
-                assert LIB not in done.stderr, "the file list was printed"
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = Path(tmp)
+            plant(tree, config)
+            done = resolve(tree)
+            assert done.returncode == 1, done.stderr
+            lines = done.stderr.splitlines()
+            assert lines[0] == f"{TASK}: tsconfig.json does not resolve"
+            assert lines[1].startswith(f"  {said}"), done.stderr
+            assert LIB not in done.stderr, "the file list was printed"
 
     def test_a_malformed_parent_is_named_through_extends(self) -> None:
         """The diagnostic points at the config that is wrong, not the child."""
@@ -188,19 +192,21 @@ class TestRefusedTest:
 class TestAcceptedTest:
     """What `lint:types` owns is not the resolver's to refuse."""
 
-    def test_each_parsed_config_resolves_whatever_its_tree(self) -> None:
+    @pytest.mark.parametrize(("name", "config", "source"), ACCEPTED)
+    def test_each_parsed_config_resolves_whatever_its_tree(
+        self, name: object, config: object, source: object
+    ) -> None:
         """The document is written and nothing is said."""
-        for name, config, source in ACCEPTED:
-            with self.subTest(name), tempfile.TemporaryDirectory() as tmp:
-                tree = Path(tmp)
-                plant(tree, config, source)
-                done = resolve(tree)
-                assert done.returncode == 0, done.stderr + done.stdout
-                assert done.stderr == ""
-                assert options(tree)["strict"] == STRICT
-                leftovers = sorted(p.name for p in tree.iterdir())
-                expected: list[str] = ["resolved.json", "src", "tsconfig.json"]
-                assert leftovers == expected, "the run left residue"
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = Path(tmp)
+            plant(tree, config, source)
+            done = resolve(tree)
+            assert done.returncode == 0, done.stderr + done.stdout
+            assert done.stderr == ""
+            assert options(tree)["strict"] == STRICT
+            leftovers = sorted(p.name for p in tree.iterdir())
+            expected: list[str] = ["resolved.json", "src", "tsconfig.json"]
+            assert leftovers == expected, "the run left residue"
 
     def test_a_value_inherited_through_extends_is_resolved(self) -> None:
         """The reason the document is tsc's and not the file's text."""

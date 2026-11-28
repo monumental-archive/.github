@@ -18,9 +18,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+import pytest
+
 from belt import decoded, plan_producers, workflow_yaml
 from tests import support
-import pytest
 
 CANON = support.CANON
 WORKFLOW = CANON / ".github" / "workflows" / "build-pgrx-extension.yml"

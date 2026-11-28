@@ -108,7 +108,7 @@ class Stops:
         self.said = self._err.getvalue().rstrip("\n")
         if not isinstance(exc, SystemExit):
             pytest.fail(f"the task did not stop: {exc!r}")
-        assert 1 == exc.code, self.said
+        assert exc.code == 1, self.said
         return True
 
 

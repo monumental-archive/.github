@@ -8,12 +8,15 @@ pinned here once.
 """
 
 import os
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from belt import tool_python
 from tests import support
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 LABEL = "probe"
 

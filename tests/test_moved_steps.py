@@ -13,6 +13,7 @@ response moved the block into a canon script the step runs:
 Each row runs the script itself, by its path, in a scratch tree.
 """
 
+import contextlib
 import os
 import subprocess
 from pathlib import Path
@@ -20,7 +21,6 @@ from pathlib import Path
 import pytest
 
 from tests import support
-import contextlib
 
 HERE = support.MISE
 CANON = HERE.parent
@@ -53,7 +53,7 @@ def run(
 @pytest.mark.usefixtures("_stack", "_set_up_test_vex_decisions")
 class TestVexDecisions:
     """mise/vex-decisions.sh, in a planted git tree."""
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""

@@ -22,12 +22,15 @@ from __future__ import annotations
 
 import re
 import subprocess
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from belt import decoded
 from tests import support
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 CANON = support.CANON
 BELT = CANON / "mise"
@@ -111,9 +114,7 @@ class TestLockedFromTheLinkedLock:
         self.repo = self.tmp / "repo"
         conf = self.repo / ".config" / "mise" / "conf.d"
         conf.mkdir(parents=True)
-        run(
-            [support.tool("git"), "init", "-q", "."], self.repo, self.env(), check=True
-        )
+        run([support.tool("git"), "init", "-q", "."], self.repo, self.env(), check=True)
         (self.repo / "mise.toml").write_text(f"[tools]\n{line}", "utf-8")
         (conf / "belt.toml").symlink_to(tree / "config.toml")
         (conf.parent / "mise.lock").symlink_to(tree / "mise.lock")

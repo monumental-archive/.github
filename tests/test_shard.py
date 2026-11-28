@@ -62,7 +62,7 @@ class TestParse:
         assert shard.parse("4/4") == (4, 4)
         assert shard.parse("") is None
 
-    @pytest.mark.parametrize("raw", ("0/2", "3/2", "1/0", "x/2", "1", "1/2/3", "-1/2"))
+    @pytest.mark.parametrize("raw", ["0/2", "3/2", "1/0", "x/2", "1", "1/2/3", "-1/2"])
     def test_bad(self, raw: object) -> None:
         """Zero, k above n, and anything not two numbers: refused by name."""
         with pytest.raises(shard.ShardError) as caught:

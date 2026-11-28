@@ -31,7 +31,6 @@ from hypothesis import strategies as st
 
 from belt.release import pack_wasm as pack
 from belt.typed_hypothesis import given
-from tests import support
 
 # A GitHub owner and repository name (GitHub drops a `.git` ending
 # from a repository's name, so none is drawn).
@@ -48,7 +47,9 @@ def as_helper() -> contextlib.ExitStack:
 
     """
     stack = contextlib.ExitStack()
-    support.name_task(stack.enter_context(pytest.MonkeyPatch.context()), "")
+    named = stack.enter_context(pytest.MonkeyPatch.context())
+    named.setenv("MISE_TASK_NAME", "")
+    named.setenv("ORG_FINDINGS", "")
     stack.enter_context(pytest.MonkeyPatch.context()).setattr(
         sys, "argv", ["pack_wasm.py"]
     )

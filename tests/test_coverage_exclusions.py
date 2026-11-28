@@ -10,6 +10,7 @@ with a scrubbed environment (#857). The last row is the canon itself.
 """
 
 import contextlib
+import io
 import os
 import shutil
 import subprocess
@@ -123,7 +124,7 @@ class TestMarkers:
         (root / name).write_text(body, encoding="utf-8")
         return root
 
-    @pytest.mark.parametrize("name,body,rule", MARKERS)
+    @pytest.mark.parametrize(("name", "body", "rule"), MARKERS)
     def test_each_marker_is_red_by_file_line_and_rule(
         self,
         name: object,
@@ -143,7 +144,7 @@ class TestMarkers:
         assert "lint:coverage-exclusions: 1 coverage exclusion(s)" in r.stderr
         assert "There is no allow-list." in r.stderr
 
-    @pytest.mark.parametrize("name,body", QUOTED)
+    @pytest.mark.parametrize(("name", "body"), QUOTED)
     def test_a_quoted_marker_is_text_not_an_exclusion(
         self, name: object, body: object, capfd: pytest.CaptureFixture[str]
     ) -> None:
@@ -359,5 +360,5 @@ class TestCanon:
         listing = support.tracked(
             root, ":!vendor/**", "*.py", "*.rs", "*.go", "*.ts", "*.js", **GIT_CONFIG
         )
-        status, out, err = helper(root, *listing, capfd=capfd)
+        status, _out, err = helper(root, *listing, capfd=capfd)
         assert status == 0, err

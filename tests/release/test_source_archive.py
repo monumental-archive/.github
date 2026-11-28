@@ -188,10 +188,10 @@ class TestBuilds:
     ) -> None:
         """Both builds archive the tag under the release's prefix."""
         data = tarball(5)
-        status, out, err = run_helper((data, data), tracked=5, capfd=capfd)
-        assert status == 0, out + err
+        run = run_helper((data, data), tracked=5, capfd=capfd)
+        assert run.returncode == 0, run.stdout + run.stderr
         base = f"edtf-{VERSION}"
-        assert f"::notice::{base}.tar.gz: 5 entries, digest {sha(data)}\n" == out
+        assert f"::notice::{base}.tar.gz: 5 entries, digest {sha(data)}\n" == run.stdout
         shipped: list[str] = [f"{base}.tar.gz"]
         assert shipped == run.shipped
         archives = [x for x in run.git if x.startswith("archive")]
@@ -206,10 +206,10 @@ class TestBuilds:
     ) -> None:
         """The .github repository's asset is github-<version>.tar.gz."""
         data = tarball(2)
-        status, out, err = run_helper(
+        run = run_helper(
             (data, data), tracked=2, repo="monumental-archive/.github", capfd=capfd
         )
-        assert status == 0, out + err
+        assert run.returncode == 0, run.stdout + run.stderr
         shipped: list[str] = [f"github-{VERSION}.tar.gz"]
         assert shipped == run.shipped
 
@@ -218,8 +218,8 @@ class TestBuilds:
     ) -> None:
         """Four entries for seven tracked files: 4 > 7 // 2."""
         data = tarball(4)
-        status, out, err = run_helper((data, data), tracked=7, capfd=capfd)
-        assert status == 0, out + err
+        run = run_helper((data, data), tracked=7, capfd=capfd)
+        assert run.returncode == 0, run.stdout + run.stderr
 
 
 class TestRefuses:
@@ -230,12 +230,12 @@ class TestRefuses:
     ) -> None:
         """The archive is not reproducible, so nothing can check it."""
         a, b = tarball(5), tarball(5, salt="x")
-        status, out, err = run_helper((a, b), tracked=5, capfd=capfd)
-        assert status == 1
+        run = run_helper((a, b), tracked=5, capfd=capfd)
+        assert run.returncode == 1
         assert (
             f"::error::source-archive: source archive is not deterministic"
             f" ({sha(a)} vs {sha(b)})\n"
-        ) == err
+        ) == run.stderr
         assert "ls-files" not in run.git
 
     def test_half_the_tracked_files_is_refused(
@@ -243,10 +243,10 @@ class TestRefuses:
     ) -> None:
         """Three entries for seven tracked files: 3 <= 7 // 2."""
         data = tarball(3)
-        status, out, err = run_helper((data, data), tracked=7, capfd=capfd)
-        assert status == 1
+        run = run_helper((data, data), tracked=7, capfd=capfd)
+        assert run.returncode == 1
         assert (
-            err
+            run.stderr
             == "::error::source-archive: archive lists 3 entries for 7 tracked files\n"
         )
 
@@ -255,22 +255,22 @@ class TestRefuses:
     ) -> None:
         """No entries at all is a truncated stream."""
         data = tarball(0)
-        status, out, err = run_helper((data, data), tracked=4, capfd=capfd)
-        assert status == 1
+        run = run_helper((data, data), tracked=4, capfd=capfd)
+        assert run.returncode == 1
         assert (
-            err
+            run.stderr
             == "::error::source-archive: archive lists 0 entries for 4 tracked files\n"
         )
 
     def test_a_failing_git_fails_the_step_with_its_status(
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
-        """A tag git cannot archive: git's status and message.
+        """A tag git cannot archive: git's run.returncode and message.
 
         git's message is its own stderr, which the call reads.
         """
         data = tarball(1)
-        status, out, err = run_helper((data, data), tracked=1, fail=True, capfd=capfd)
-        assert status == 128
-        assert err == "fatal: not a valid object\n"
-        assert out == ""
+        run = run_helper((data, data), tracked=1, fail=True, capfd=capfd)
+        assert run.returncode == 128
+        assert run.stderr == "fatal: not a valid object\n"
+        assert run.stdout == ""

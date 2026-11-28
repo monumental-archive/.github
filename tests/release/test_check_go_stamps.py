@@ -1,5 +1,5 @@
 """Run release/check_go_stamps.py, the go-binary stamp check, on a stub go.
-
+        # ruff: ignore[start-process-with-partial-path] - the runner's git
 #1371 moved the step "Refuse a binary whose stamp is not the released
 commit" out of build-go-binary.yml into the helper, refusals unchanged.
 A build leg carries no belt, so the step runs the helper from the canon
@@ -9,9 +9,7 @@ WHAT RUNS. The helper's `main`, called in this process (#1698), in a
 real git repository (its HEAD is the released commit), with a stub
 `go` first on PATH. The stub answers `version -m FILE` with FILE's own
 contents, so a row plants the build info each binary reports by
-writing it as the binary; STUB_FAIL makes go fail instead. One row
-starts the helper by its path in this tree instead: the script
-contract (it starts, and exits with go's own status and message).
+writing it as the binary; STUB_FAIL makes go fail instead.
 """
 
 import os
@@ -29,7 +27,7 @@ from tests import support
 
 CANON = support.CANON
 WORKFLOW = CANON / ".github" / "workflows" / "build-go-binary.yml"
-HELPER = CANON / "release" / "check_go_stamps.py"
+COMMAND = "check-go-stamps"
 
 GO_STUB = """#!/usr/bin/env bash
 # Stub `go`: `version -m FILE` prints FILE; STUB_FAIL fails it.
@@ -111,7 +109,6 @@ def git(cwd: Path, *args: str) -> str:
 
     """
     return subprocess.run(
-        # ruff: ignore[start-process-with-partial-path] - the runner's git
         ["git", *args],
         cwd=cwd,
         capture_output=True,
@@ -126,13 +123,11 @@ def run_helper(
     *,
     fail: bool = False,
     repo: bool = True,
-    script: bool = False,
     capfd: pytest.CaptureFixture[str],
 ) -> Run:
     """Run the helper over staged/ holding `binaries` (name → build info).
 
-    `{head}` in a build info is replaced by the repository's HEAD. In
-    this process unless `script`, which starts it by its path.
+    `{head}` in a build info is replaced by the repository's HEAD.
 
     Returns:
         Its status, output and the released commit.
@@ -161,27 +156,13 @@ def run_helper(
             "STUB_FAIL": "1" if fail else "",
             "GIT_CEILING_DIRECTORIES": str(tmp),
         }
-        result: subprocess.CompletedProcess[str] | support.Called
-        if script:
-            result = subprocess.run(
-                [str(HELPER)],
-                env=env,
-                capture_output=True,
-                text=True,
-                check=False,
-                cwd=work,
-            )
-        else:
-
-            def call() -> int:
-                return check_go_stamps.main([])
-
-            with pytest.MonkeyPatch.context() as patched:
-                for name, value in env.items():
-                    patched.setenv(name, value)
-                patched.chdir(work)
-                status = call()
-            out, err = capfd.readouterr()
+        with pytest.MonkeyPatch.context() as patched:
+            for name, value in env.items():
+                patched.setenv(name, value)
+            patched.chdir(work)
+            patched.setattr(sys, "argv", [COMMAND])
+            status = check_go_stamps.main([])
+        out, err = capfd.readouterr()
         return Run(status, out, err, head)
 
 
@@ -218,11 +199,9 @@ class TestPasses:
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """Two binaries, both clean, both carrying their modules."""
-        status, out, err = run_helper(
-            {"tool": info("{head}"), "probe": info("{head}")}, capfd=capfd
-        )
-        assert status == 0, out + err
-        assert out == ""
+        run = run_helper({"tool": info("{head}"), "probe": info("{head}")}, capfd=capfd)
+        assert run.returncode == 0, run.stdout + run.stderr
+        assert run.stdout == ""
 
 
 class TestRefuses:
@@ -303,10 +282,10 @@ class TestRefuses:
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """staged/ is read in name order, as the shell's glob read it."""
-        status, out, err = run_helper(
+        run = run_helper(
             {"b": info("{head}", "true"), "a": info("f" * 40)}, capfd=capfd
         )
-        assert "::error::check-go-stamps: a: stamped revision" in err
+        assert "::error::check-go-stamps: a: stamped revision" in run.stderr
 
     def test_an_empty_staged_directory_is_refused(
         self, capfd: pytest.CaptureFixture[str]
@@ -324,21 +303,16 @@ class TestToolFailures:
     def test_a_file_go_cannot_read_fails_the_step(
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
-        """Not a Go binary: go's status and message.
-
-        The script row: go's message is on the child's own stderr.
-        """
-        status, out, err = run_helper(
-            {"tool": info("{head}")}, fail=True, script=True, capfd=capfd
-        )
-        assert status == 1
-        assert err == "go: not a Go binary\n"
-        assert out == ""
+        """Not a Go binary: go's run.returncode and message."""
+        run = run_helper({"tool": info("{head}")}, fail=True, capfd=capfd)
+        assert run.returncode == 1
+        assert run.stderr == "go: not a Go binary\n"
+        assert run.stdout == ""
 
     def test_outside_a_repository_git_fails_the_step(
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """No released commit to hold the stamp to."""
-        status, out, err = run_helper({"tool": info("f" * 40)}, repo=False, capfd=capfd)
-        assert status == 128
-        assert out == ""
+        run = run_helper({"tool": info("f" * 40)}, repo=False, capfd=capfd)
+        assert run.returncode == 128
+        assert run.stdout == ""

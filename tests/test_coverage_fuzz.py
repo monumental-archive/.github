@@ -18,13 +18,16 @@ scored on exit alone can pass for the wrong reason.
 import os
 import subprocess
 import sys
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from belt import coverage_floor as cf
 from belt import decoded
 from tests import support
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 BELT = support.MISE
 BASH = support.tool("bash")

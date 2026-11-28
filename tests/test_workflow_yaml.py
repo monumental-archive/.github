@@ -8,7 +8,8 @@ an anchored block and its alias, a step list at its key's own indent,
 a reusable-workflow caller with no steps, and `defaults: run:`, which
 holds a mapping and is no command. Each row reads one of them; the
 refusals are asserted by message.
-test`, with the belt's yq on PATH."""
+test`, with the belt's yq on PATH.
+"""
 
 from pathlib import Path
 
@@ -212,7 +213,7 @@ class TestHeaders(TestFixture):
         (job,) = workflow_yaml.jobs(workflow_yaml.document(path)).values()
         return workflow_yaml.steps(job)
 
-    @pytest.mark.parametrize("header,want", HEADERS.items())
+    @pytest.mark.parametrize(("header", "want"), HEADERS.items())
     def test_each_header_form_opens_a_block(self, header: object, want: object) -> None:
         """Each chomping and indentation form, commented or not."""
         found = self.read(

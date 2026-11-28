@@ -472,8 +472,8 @@ class TestUnreadable(TestCase):
         assert detail in first
 
     @pytest.mark.parametrize(
-        "files,said",
-        (
+        ("files", "said"),
+        [
             (tree(config="[tools\n"), "cannot read mise.toml — "),
             (
                 tree(config="tools = 1\n"),
@@ -487,7 +487,7 @@ class TestUnreadable(TestCase):
                 tree(lock='[tools]\nnode = ["26.5.1"]\n'),
                 "cannot read mise.lock — tools.node[0] is not an object",
             ),
-        ),
+        ],
     )
     def test_a_config_or_lock_it_cannot_read_is_refused_by_name(
         self, files: object, said: object
@@ -538,7 +538,7 @@ class TestDefaults:
         """Each canon default target has a platform key — all four, both classes."""
         lock = entry("node", "26.5.1", ("windows-x64",))
         both = stub("      classes: rust-binary,go-binary\n")
-        status, out, err = check(tree(lock=lock, stub=both), capfd=capfd)
+        status, _out, err = check(tree(lock=lock, stub=both), capfd=capfd)
         assert status == 1, err
         for key in ALL.split(","):
             assert f"  {key}: node@26.5.1\n" in err
@@ -577,11 +577,11 @@ class TestReadDocuments:
         ) == got
 
     @pytest.mark.parametrize(
-        "config,lock,which,said",
-        (
+        ("config", "lock", "which", "said"),
+        [
             ("tools = 1\n", LOCK, "config", "tools is not an object"),
             (CONFIG, "tools = 1\n", "lock", "tools is not an object"),
-        ),
+        ],
     )
     def test_each_unreadable_file_is_named_and_none_returned(
         self, config: object, lock: object, which: object, said: object
@@ -669,7 +669,7 @@ class TestLocated:
                 ok.format("mise.lock"),
             ),
         }
-        for row, (found, beside, line) in rows.items():
+        for found, beside, line in rows.values():
             self.assert_skip(
                 {STUB_PATH: RUST_BINARY} | found | beside, line, capfd=capfd
             )

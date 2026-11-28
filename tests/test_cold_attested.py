@@ -21,7 +21,6 @@ GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom.
 
 import subprocess
 import sys
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -31,6 +30,7 @@ from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
 # The task that runs the helper, whose name its findings carry (#1934).
 TASK = "lint:cold-attested"
@@ -322,7 +322,7 @@ class TestColdAttested:
 
     def test_cases(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Every row of CASES, through the helper's main."""
-        for name, (files, status, out, err) in CASES.items():
+        for files, status, out, err in CASES.values():
             for old in (self.tree / WF).iterdir():
                 old.unlink()
             status, out, err = self.helper(*self.plant(files), capfd=capfd)
@@ -334,7 +334,7 @@ class TestColdAttested:
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """Called with nothing to read: exit 2, saying how to call it."""
-        status, out, err = self.helper(capfd=capfd)
+        status, _out, err = self.helper(capfd=capfd)
         same(status, cold_attested.EXIT_ERROR)
         same(
             err.splitlines(),

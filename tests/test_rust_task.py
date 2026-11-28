@@ -103,7 +103,7 @@ SHOW = 'echo "major=${PLANT_MAJOR-unset} sdk=${PLANT_SDK-unset}"; exit "${1:-0}"
 @pytest.mark.usefixtures("_set_up_test_planted")
 class TestPlanted:
     """A planted belt, the stubs, and the row's environment."""
-    
+
     @pytest.fixture
     def _set_up_test_planted(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -129,17 +129,18 @@ class TestPlanted:
             stub.chmod(0o755)
         (self.tmp / "log").touch()
         env = support.env()
-        support.patch_env(
-            monkeypatch,
+        for name in list(os.environ):
+            monkeypatch.delenv(name)
+        for name, value in (
             env
             | {
                 "PATH": f"{bins}:{env['PATH']}",
                 "ORG_BELT_DIR": str(self.belt),
                 "PLANT_DIR": str(self.tmp),
                 "PLANT_KEPT": "same",
-            },
-            clear=True,
-        )
+            }
+        ).items():
+            monkeypatch.setenv(name, value)
 
     def logged(self) -> list[str]:
         """Read the stubs' log, the belt masked.
@@ -159,9 +160,9 @@ class TestBasics(TestPlanted):
         """ORG_BELT_DIR when set; the package's tree's mise/ unset or empty."""
         assert self.belt == rust_task.belt()
         os.environ["ORG_BELT_DIR"] = ""
-        assert support.MISE == rust_task.belt()
+        assert rust_task.belt() == support.MISE
         del os.environ["ORG_BELT_DIR"]
-        assert support.MISE == rust_task.belt()
+        assert rust_task.belt() == support.MISE
 
     def test_a_specs_name_is_before_its_last_at(self) -> None:
         """`${spec%@*}`: the last `@` only, and a spec with none is whole."""

@@ -241,6 +241,13 @@ def run[**P](
 GATE = frozenset({cf.GATE_JOB})
 
 
+# A bare floor line under the record a release before legs wrote.
+RECORDED_BARE_FLOOR = (
+    "# band: 2\n# measured: 94.4\n# derived: v1.78.6\n"
+    "# legs: python python-branches\n90\n"
+)
+
+
 class TestEachLegItsOwnFloor:
     """#2143's Done when: every leg is held to a floor of its own."""
 
@@ -308,24 +315,25 @@ class TestEachLegItsOwnFloor:
             == clean(text).floors
         )
 
-    def test_the_old_shape_is_refused_by_name(self) -> None:
-        """A bare floor line, recorded or not, is refused, naming adopt."""
-        legacy = (
-            "# band: 2\n# measured: 94.4\n# derived: v1.78.6\n"
-            "# legs: python python-branches\n90\n"
-        )
-        for name, text, line in (
-            ("with its record", legacy, "90"),
+    @pytest.mark.parametrize(
+        ("name", "text", "line"),
+        [
+            ("with its record", RECORDED_BARE_FLOOR, "90"),
             ("hand-typed", "83.4\n", "83.4"),
-        ):
-            with self.subTest(name), Tree(text) as tree:
-                refused = (
-                    f"{TASK}: {tree.path} states a bare floor line {line!r}: {SHARED}\n"
-                )
-                assert (1, "", refused) == run(cf.read, tree.path)
-                assert (1, "", refused) == run(
-                    cf.hold, tree.path, TASK, "python 95\n", GATE
-                )
+        ],
+    )
+    def test_the_old_shape_is_refused_by_name(
+        self, name: object, text: object, line: object
+    ) -> None:
+        """A bare floor line, recorded or not, is refused, naming adopt."""
+        with Tree(text) as tree:
+            refused = (
+                f"{TASK}: {tree.path} states a bare floor line {line!r}: {SHARED}\n"
+            )
+            assert (1, "", refused) == run(cf.read, tree.path)
+            assert (1, "", refused) == run(
+                cf.hold, tree.path, TASK, "python 95\n", GATE
+            )
 
     def test_no_floor_file_exits_0(self) -> None:
         """No `.coverage-floor`: every entry point owes nothing."""
@@ -465,7 +473,7 @@ class TestParseRefusals:
                 "is not `dropped: <leg> <reason>`",
             ),
         ]
-        for name, text, expected in rows:
+        for _name, text, expected in rows:
             parsed, problems = cf.parse(text)
             assert parsed is None
             assert len(problems) == 1, problems
@@ -546,7 +554,7 @@ class TestNumber:
         assert cf.number("85.4") == Decimal("85.4")
 
     @pytest.mark.parametrize(
-        "text", ("", "ninety", "NaN", "Infinity", "-Infinity", "9 5")
+        "text", ["", "ninety", "NaN", "Infinity", "-Infinity", "9 5"]
     )
     def test_refuses_words_and_infinities(self, text: object) -> None:
         """Words, NaN and Infinity are not measurements."""
@@ -583,7 +591,7 @@ class TestLegs:
         go: list[tuple[str, Decimal]] = [("go", Decimal("85.4"))]
         assert measured == go
 
-    @pytest.mark.parametrize("line", ("go", "go 85.4 extra", "go high", "go 140"))
+    @pytest.mark.parametrize("line", ["go", "go 85.4 extra", "go high", "go 140"])
     def test_malformed_lines_are_reported_not_skipped(self, line: object) -> None:
         """A line that is not a measurement refuses the whole derivation.
 
@@ -732,7 +740,7 @@ class TestWriteRatchet:
         assert "python: measured 82.0% is below its floor 83.4%" in err
         assert "go: measured 79.0% is below its floor 80.0%" in err
 
-    @pytest.mark.parametrize("figure", ("85.3", "84.9", "83.4"))
+    @pytest.mark.parametrize("figure", ["85.3", "84.9", "83.4"])
     def test_within_the_band_passes_and_keeps_the_record(self, figure: object) -> None:
         """The gate's line is the release's line (#1786).
 
@@ -850,7 +858,7 @@ class TestCap:
         """A measurement of 95.4 writes a floor of 90, not 93.4."""
         assert held("90", "95.4") == cf.fresh(Decimal("95.4"))
 
-    @pytest.mark.parametrize("floor", ("92.3", "99"))
+    @pytest.mark.parametrize("floor", ["92.3", "99"])
     def test_a_floor_above_the_cap_is_drift(self, floor: object) -> None:
         """The cap is the derivation: 92.3 over 94.3 is refused, and 99."""
         parsed, problems = cf.parse(record(planted("python", floor, "94.3")))
@@ -980,21 +988,21 @@ class TestWriteAdoption:
 class TestDerive:
     """The stdin half: what a derivation will read."""
 
-    def test_no_measurement_refuses(self) -> None:
+    @pytest.mark.parametrize("source", ["\n", "rust-branches 80.0\n"])
+    def test_no_measurement_refuses(self, source: object) -> None:
         """A derivation that reads nothing must not write a floor."""
-        for source in ("\n", "rust-branches 80.0\n"):
-            with self.subTest(source), Tree(record(PY)) as tree:
-                got = run(cf.derive, tree.path, source, "v0.21.0", adopt=False)
-                after = tree.text()
-            assert (
-                1,
-                "",
-                (
-                    f"{TASK}: no leg was measured — a derivation that reads"
-                    " nothing must not write a floor\n"
-                ),
-            ) == got
-            assert record(PY) == after
+        with Tree(record(PY)) as tree:
+            got = run(cf.derive, tree.path, source, "v0.21.0", adopt=False)
+            after = tree.text()
+        assert (
+            1,
+            "",
+            (
+                f"{TASK}: no leg was measured — a derivation that reads"
+                " nothing must not write a floor\n"
+            ),
+        ) == got
+        assert record(PY) == after
 
     def test_a_malformed_leg_refuses(self) -> None:
         """One unreadable line refuses rather than deriving from the rest."""
@@ -1128,20 +1136,21 @@ PG_NEEDS = (
 class TestLegsRecord:
     """The floor names the legs it holds, and holds them (#1666)."""
 
-    def test_a_recorded_leg_that_reports_none_is_red_by_name(self) -> None:
+    @pytest.mark.parametrize(
+        ("name", "needs"), [("plpgsql", PG_NEEDS), ("typescript", TS_NEEDS)]
+    )
+    def test_a_recorded_leg_that_reports_none_is_red_by_name(
+        self, name: object, needs: object
+    ) -> None:
         """Each of plpgsql and typescript is named, with what it needs."""
-        for name, needs in (("plpgsql", PG_NEEDS), ("typescript", TS_NEEDS)):
-            with (
-                self.subTest(leg=name),
-                Tree(record(PY, planted(name, "80.0", "82.0"))) as tree,
-            ):
-                got = run(cf.hold, tree.path, TASK, "python 86.0\n", GATE)
-            assert (
-                1,
-                f"{TASK}: python leg holds its floor 83.4 (86.0%)\n",
-                f"{TASK}: the floor was derived with {name} and this"
-                " run measured none\n" + REMEDY.format(needs=needs, leg=name),
-            ) == got
+        with Tree(record(PY, planted(name, "80.0", "82.0"))) as tree:
+            got = run(cf.hold, tree.path, TASK, "python 86.0\n", GATE)
+        assert (
+            1,
+            f"{TASK}: python leg holds its floor 83.4 (86.0%)\n",
+            f"{TASK}: the floor was derived with {name} and this"
+            " run measured none\n" + REMEDY.format(needs=needs, leg=name),
+        ) == got
 
     def test_a_dropped_leg_is_not_demanded(self) -> None:
         """A recorded leg consciously dropped is not red when it is gone."""
@@ -1318,12 +1327,25 @@ PGRX15 = frozenset({"pgrx:15"})
 NO_OWNER = REMEDY.replace("{needs}", "restore what the leg measures")
 
 
+# A record whose pgrx-pg14 leg was dropped with its major.
+DROPPED_LEG = record(
+    planted("rust", "90", "92.0"),
+    planted("pgrx-pg14", "90", "92.0"),
+    extra=("# dropped: pgrx-pg14 postgres 14 dropped",),
+)
+# The refusal of a planned-majors value, by value and why.
+PLANNED_REFUSAL = (
+    TASK + ": the planned majors '{value}' are not a JSON array of"
+    " canonical major strings: {why}\n"
+)
+
+
 class TestOwners:
     """One owner per leg, and each job judges only its own (#1875)."""
 
-    def test_hold_judges_only_the_calling_jobs_legs(self) -> None:
-        """One row per branch of the scoped hold, each red row's message."""
-        for name, legs, source, jobs, want in (
+    @pytest.mark.parametrize(
+        ("name", "legs", "source", "jobs", "want"),
+        [
             (
                 "gate scope: a recorded pgrx leg is the pgrx job's",
                 "rust pgrx-pg15",
@@ -1377,13 +1399,18 @@ class TestOwners:
                 PGRX15,
                 (0, "lbl: pgrx-pg15 leg holds its floor 90 (95%)\n", ""),
             ),
-        ):
-            with self.subTest(name), Tree(owned_record(legs)) as tree:
-                assert want == run(cf.hold, tree.path, "lbl", source, jobs)
+        ],
+    )
+    def test_hold_judges_only_the_calling_jobs_legs(
+        self, name: object, legs: object, source: object, jobs: object, want: object
+    ) -> None:
+        """One row per branch of the scoped hold, each red row's message."""
+        with Tree(owned_record(legs)) as tree:
+            assert want == run(cf.hold, tree.path, "lbl", source, jobs)
 
-    def test_the_plan_holds_the_record_to_its_planned_jobs(self) -> None:
-        """Every recorded leg needs its owner planned; red by name if not."""
-        for name, legs, majors, want in (
+    @pytest.mark.parametrize(
+        ("name", "legs", "majors", "want"),
+        [
             (
                 "a recorded major the plan dropped",
                 "rust pgrx-pg14 pgrx-pg15",
@@ -1414,20 +1441,24 @@ class TestOwners:
                 '["15","16","17","18"]',
                 (0, "", ""),
             ),
-        ):
-            with self.subTest(name), Tree(owned_record(legs)) as tree:
-                assert want == run(cf.planned, tree.path, majors)
+        ],
+    )
+    def test_the_plan_holds_the_record_to_its_planned_jobs(
+        self, name: object, legs: object, majors: object, want: object
+    ) -> None:
+        """Every recorded leg needs its owner planned; red by name if not."""
+        with Tree(owned_record(legs)) as tree:
+            assert want == run(cf.planned, tree.path, majors)
 
-    def test_the_plan_accepts_a_dropped_leg_and_no_floor(self) -> None:
+    @pytest.mark.parametrize(
+        ("name", "text"), [("dropped", DROPPED_LEG), ("no floor", None)]
+    )
+    def test_the_plan_accepts_a_dropped_leg_and_no_floor(
+        self, name: object, text: object
+    ) -> None:
         """A dropped leg needs no owner; no floor needs none."""
-        dropped = record(
-            planted("rust", "90", "92.0"),
-            planted("pgrx-pg14", "90", "92.0"),
-            extra=("# dropped: pgrx-pg14 postgres 14 dropped",),
-        )
-        for name, text in (("dropped", dropped), ("no floor", None)):
-            with self.subTest(name), Tree(text) as tree:
-                assert run(cf.planned, tree.path, '["15"]') == (0, "", "")
+        with Tree(text) as tree:
+            assert run(cf.planned, tree.path, '["15"]') == (0, "", "")
 
     def test_the_plan_refuses_a_floor_off_its_record(self) -> None:
         """Drift is the same refusal in the plan as everywhere else."""
@@ -1436,17 +1467,9 @@ class TestOwners:
         assert status == 1
         assert f"{TASK}:" in err
 
-    def test_the_plan_decodes_its_majors_as_json(self) -> None:
-        """`--majors-json` is the plan's array of major strings, or red (#1880).
-
-        Every refusal names the value as given, and none reaches the
-        floor: a value the helper cannot read plans nothing.
-        """
-        refused = (
-            TASK + ": the planned majors '{value}' are not a JSON array of"
-            " canonical major strings: {why}\n"
-        )
-        for name, legs, majors, want in (
+    @pytest.mark.parametrize(
+        ("name", "legs", "majors", "want"),
+        [
             ("no major", "rust", "[]", (0, "", "")),
             ("one major", "rust pgrx-pg15", '["15"]', (0, "", "")),
             (
@@ -1459,7 +1482,7 @@ class TestOwners:
                 "a number, not a string",
                 "rust",
                 "[15]",
-                (1, "", refused.format(value="[15]", why="15 is not a string")),
+                (1, "", PLANNED_REFUSAL.format(value="[15]", why="15 is not a string")),
             ),
             (
                 "a leading zero",
@@ -1468,7 +1491,7 @@ class TestOwners:
                 (
                     1,
                     "",
-                    refused.format(
+                    PLANNED_REFUSAL.format(
                         value='["015"]', why='"015" is not a canonical major'
                     ),
                 ),
@@ -1477,7 +1500,11 @@ class TestOwners:
                 "a string, not an array",
                 "rust",
                 '"15"',
-                (1, "", refused.format(value='"15"', why="the value is not a list")),
+                (
+                    1,
+                    "",
+                    PLANNED_REFUSAL.format(value='"15"', why="the value is not a list"),
+                ),
             ),
             (
                 "not JSON at all",
@@ -1486,18 +1513,31 @@ class TestOwners:
                 (
                     1,
                     "",
-                    refused.format(
+                    PLANNED_REFUSAL.format(
                         value="15,16", why="Extra data: line 1 column 3 (char 2)"
                     ),
                 ),
             ),
-        ):
-            with self.subTest(name), Tree(owned_record(legs)) as tree:
-                assert want == run(cf.planned, tree.path, majors)
+        ],
+    )
+    def test_the_plan_decodes_its_majors_as_json(
+        self, name: object, legs: object, majors: object, want: object
+    ) -> None:
+        """`--majors-json` is the plan's array of major strings, or red (#1880).
+
+        Every refusal names the value as given, and none reaches the
+        floor: a value the helper cannot read plans nothing.
+        """
+        (
+            TASK + ": the planned majors '{value}' are not a JSON array of"
+            " canonical major strings: {why}\n"
+        )
+        with Tree(owned_record(legs)) as tree:
+            assert want == run(cf.planned, tree.path, majors)
 
     @pytest.mark.parametrize(
-        "name,job",
-        (
+        ("name", "job"),
+        [
             ("rust", "gate"),
             ("go", "gate"),
             ("python", "gate"),
@@ -1511,19 +1551,19 @@ class TestOwners:
             ("pgrx-15", "gate"),
             ("pgrx-pg15-branches", "gate"),
             ("xpgrx-pg15", "gate"),
-        ),
+        ],
     )
     def test_one_owner_per_leg_family(self, name: object, job: object) -> None:
         """`pgrx-pgNN` strictly is the pgrx job; every other leg the gate's."""
         assert job == cf.owner(name)
 
-    def test_a_job_is_named_strictly(self) -> None:
+    @pytest.mark.parametrize("text", ["pgrx", "pgrx:", "pgrx:015", "pgrx-pg15", "Gate"])
+    def test_a_job_is_named_strictly(self, text: object) -> None:
         """`hold --job` takes `gate` or `pgrx:<major>` and nothing else."""
         assert cf.job_of("gate") == "gate"
         assert cf.job_of("pgrx:15") == "pgrx:15"
-        for text in ("pgrx", "pgrx:", "pgrx:015", "pgrx-pg15", "Gate"):
-            with self.subTest(text), pytest.raises(argparse.ArgumentTypeError):
-                cf.job_of(text)
+        with pytest.raises(argparse.ArgumentTypeError):
+            cf.job_of(text)
 
     def test_the_command_line_reaches_both_checks(self) -> None:
         """`hold --job` and `planned --majors-json`, as the callers invoke them."""
@@ -1688,7 +1728,7 @@ class TestThePlanFeedsTheHelper:
         """Commit a floor recording `legs` to the planted tree."""
         (self.tree / ".coverage-floor").write_text(owned_record(legs), encoding="utf-8")
 
-    @pytest.mark.parametrize("name,legs,status,err", PLAN_ROWS)
+    @pytest.mark.parametrize(("name", "legs", "status", "err"), PLAN_ROWS)
     def test_the_producers_stdout_is_the_helpers_input(
         self, name: object, legs: object, status: object, err: object
     ) -> None:
@@ -1710,7 +1750,7 @@ class TestThePlanFeedsTheHelper:
         ])
         assert (status, "", err) == (done.returncode, done.stdout, done.stderr)
 
-    @pytest.mark.parametrize("name,legs,status,err", PLAN_ROWS)
+    @pytest.mark.parametrize(("name", "legs", "status", "err"), PLAN_ROWS)
     def test_the_plan_step_hands_the_producer_to_the_helper(
         self, name: object, legs: object, status: object, err: object
     ) -> None:

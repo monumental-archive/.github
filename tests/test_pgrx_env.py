@@ -19,7 +19,8 @@ headers its own build names, in a subshell with its one cargo call, so
 pinned Postgres builds that name two ICU majors are a supported state.
 
 The function under test is the belt's own, sourced by bash exactly as a
-task sources it."""
+task sources it.
+"""
 
 import hashlib
 import json
@@ -1102,7 +1103,7 @@ class TestNoLeak:
     that compiles after it. And the check runs first.
     """
 
-    @pytest.mark.parametrize("site,calls", SITES.items())
+    @pytest.mark.parametrize(("site", "calls"), SITES.items())
     def test_every_compile_carries_its_major_in_a_subshell(
         self, site: object, calls: object
     ) -> None:

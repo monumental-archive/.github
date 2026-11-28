@@ -330,18 +330,18 @@ class TestPattern:
             for death in ('echo "${nope}"', ': "${nope:?unset}"'):
                 assert run_bash(guard, death, "org_done=1") == 1
 
-    @pytest.mark.parametrize("guard", (GUARDED, BASH_GUARDED))
+    @pytest.mark.parametrize("guard", [GUARDED, BASH_GUARDED])
     def test_guard_passes_the_finished_run(self, guard: object) -> None:
         """A run that reaches the mark exits 0."""
         assert run_bash(guard, "echo ok", "org_done=1") == 0
 
-    @pytest.mark.parametrize("guard", (GUARDED, BASH_GUARDED))
+    @pytest.mark.parametrize("guard", [GUARDED, BASH_GUARDED])
     def test_guard_keeps_an_explicit_code(self, guard: object) -> None:
         """A non-zero exit, explicit or from errexit, keeps its code."""
         assert run_bash(guard, "exit 3", "org_done=1") == 3
         assert run_bash(guard, "false", "org_done=1") == 1
 
-    @pytest.mark.parametrize("guard", (GUARDED, BASH_GUARDED))
+    @pytest.mark.parametrize("guard", [GUARDED, BASH_GUARDED])
     def test_early_exit_zero_needs_the_mark(self, guard: object) -> None:
         """`exit 0` reads as a death unless the mark is set first."""
         assert run_bash(guard, "exit 0", "org_done=1") == 1
@@ -396,7 +396,7 @@ def run_sh(shell: str, body: str) -> int:
 class TestPosix:
     """The printed guard under the shells a `#!/bin/sh` script meets."""
 
-    @pytest.mark.parametrize("body,as_32,as_dash", POSIX_ROWS)
+    @pytest.mark.parametrize(("body", "as_32", "as_dash"), POSIX_ROWS)
     def test_under_bin_sh(self, body: object, as_32: object, as_dash: object) -> None:
         """`/bin/sh` gives the row for the shell it is."""
         if not (SH_IS_32 or SH_IS_DASH):
@@ -404,7 +404,7 @@ class TestPosix:
         want = as_32 if SH_IS_32 else as_dash
         assert run_sh(str(SH), body) == want
 
-    @pytest.mark.parametrize("body,_,as_dash", POSIX_ROWS)
+    @pytest.mark.parametrize(("body", "_", "as_dash"), POSIX_ROWS)
     def test_under_dash(self, body: object, _: object, as_dash: object) -> None:
         """Under dash the guard runs: a clean run exits 0, no `[[: not found`."""
         if not DASH:

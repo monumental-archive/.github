@@ -23,6 +23,7 @@ A script run outside `mise run` states its task with `org_task`
 its own file's: the export is the function's, so no site can forget it.
 """
 
+import contextlib
 import socket
 import subprocess
 import sys
@@ -33,7 +34,6 @@ import pytest
 
 from belt import decoded
 from tests import support
-import contextlib
 
 MISE = support.MISE
 WRITER = MISE / "findings.sh"
@@ -105,7 +105,7 @@ def bashes() -> list[tuple[str, str]]:
 @pytest.mark.usefixtures("_stack", "_set_up_test_bash_env_rows")
 class TestBashEnvRows:
     """A body under the belt's shell and BASH_ENV has the writer."""
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""
@@ -176,13 +176,13 @@ class TestBashEnvRows:
         """A plain `bash -c` loses the writer there; the belt's shell keeps it."""
         shell = support.task_run(TASK, PROBE).argv
         assert "--norc" in shell
-        for label, bash in bashes():
+        for _label, bash in bashes():
             for ssh in (False, True):
                 where = "SSH_CLIENT" if ssh else "socket stdin"
                 assert self.probe([bash, "-c", PROBE], ssh=ssh) == "none"
                 assert self.probe([bash, *shell[1:]], ssh=ssh) == "function"
 
-    @pytest.mark.parametrize("label,bash", bashes())
+    @pytest.mark.parametrize(("label", "bash"), bashes())
     def test_a_body_and_its_child_bash_have_the_writer(
         self, label: object, bash: object
     ) -> None:
@@ -197,7 +197,7 @@ class TestBashEnvRows:
         ]
         assert records == EXPECTED
 
-    @pytest.mark.parametrize("label,bash", bashes())
+    @pytest.mark.parametrize(("label", "bash"), bashes())
     def test_without_bash_env_a_body_has_no_writer(
         self, label: object, bash: object
     ) -> None:

@@ -261,7 +261,7 @@ class TestHelper:
                 patched.setenv(name, value)
             patched.chdir(self.work)
             status = gd.main(["run", str(self.decoy), "--", BASH, "-c", script])
-        out, err = capfd.readouterr()
+        _out, err = capfd.readouterr()
         return status, err
 
     def test_the_script_contract(self) -> None:
@@ -290,7 +290,7 @@ class TestHelper:
                 patched.setenv(name, value)
             patched.chdir(self.work)
             status = gd.main(["plant", str(fresh)])
-        out, err = capfd.readouterr()
+        _out, err = capfd.readouterr()
         assert (status, err) == (0, "")
         assert (fresh / ".git").is_dir()
 
@@ -303,7 +303,7 @@ class TestHelper:
                 patched.setenv(name, value)
             patched.chdir(self.work)
             status = gd.main(["run", str(self.decoy)])
-        out, err = capfd.readouterr()
+        _out, err = capfd.readouterr()
         assert status == 2
         assert "run: no command after the decoy" in err
 

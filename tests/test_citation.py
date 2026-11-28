@@ -9,7 +9,8 @@ so a maintainer filling in a stub got a mute exit 1 from
 asserts the guard's own sentence, not only the exit status.
 
 The script under test is the belt's own, run by bash in a temporary
-directory."""
+directory.
+"""
 
 import subprocess
 import tempfile

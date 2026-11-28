@@ -35,10 +35,11 @@ from typing import TYPE_CHECKING
 import pytest
 
 from tests import support
-from tests.support import Called
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from tests.support import Called
 
 # The fixture tests run pytest on planted trees (tests/test_conftest.py,
 # tests/test_pytest_config.py).

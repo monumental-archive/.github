@@ -17,16 +17,20 @@ collected by repo-own-audits.yml and by nothing else. A tree whose only
 caller is that workflow passes; a tree whose only caller is the retired
 single audit workflow is red, by name.
 
-GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom."""
+GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom.
+"""
 
 import subprocess
 import sys
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from belt import decoded
 from tests import support
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 BELT = support.MISE
 BASH = support.tool("bash")

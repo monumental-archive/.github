@@ -17,6 +17,7 @@ each staging step's own body to see the layout it makes, and plant the
 two defects to see each named.
 """
 
+import contextlib
 import copy
 import re
 import subprocess
@@ -28,7 +29,6 @@ import pytest
 
 from belt import workflow_yaml
 from tests import support
-import contextlib
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -255,7 +255,7 @@ def plant(base: Path, *, directory: bool) -> tuple[Path, list[str]]:
 @pytest.mark.usefixtures("_stack")
 class TestStaged:
     """Each staging step's own body makes the layout the consumer reads."""
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""

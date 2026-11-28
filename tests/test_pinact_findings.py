@@ -33,12 +33,15 @@ import json
 import os
 import subprocess
 import sys
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from belt import decoded
 from tests import support
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 HERE = support.MISE
 ADAPTER = HERE / "pinact_findings.py"

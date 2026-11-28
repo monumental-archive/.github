@@ -17,7 +17,6 @@ GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom.
 
 import subprocess
 import sys
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -27,6 +26,7 @@ from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
 # The task that runs the helper, whose name its findings carry (#1934).
 TASK = "lint:runner-pin"
@@ -226,7 +226,7 @@ class TestLabels(TestPlanted):
 
     @pytest.mark.parametrize(
         "value",
-        (
+        [
             "ubuntu-24.04",
             "ubuntu-24.04-arm",
             "macos-15-intel",
@@ -237,7 +237,7 @@ class TestLabels(TestPlanted):
             "${{ matrix.os }}",
             "${{matrix.runner}}",
             "${{ fromJSON(matrix.runner) }}",
-        ),
+        ],
     )
     def test_pinned_values_are_clean(
         self, value: object, capfd: pytest.CaptureFixture[str]
@@ -248,8 +248,8 @@ class TestLabels(TestPlanted):
         same(out.splitlines(), OK)
 
     @pytest.mark.parametrize(
-        "value,shown",
-        (
+        ("value", "shown"),
+        [
             ("self-hosted", "self-hosted"),
             ("Ubuntu-24.04", "Ubuntu-24.04"),
             ("ubuntu-24.04 extra", "ubuntu-24.04 extra"),
@@ -258,14 +258,14 @@ class TestLabels(TestPlanted):
             ("[ubuntu-24.04]", "[ubuntu-24.04]"),
             ("", ""),
             ("# just a comment", ""),
-        ),
+        ],
     )
     def test_unpinned_values_are_red(
         self, value: object, shown: object, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """A literal with no version, or an expression that is no matrix one."""
         rel = ".github/workflows/ci.yml"
-        status, out, err = self.check(job(value), capfd=capfd)
+        status, _out, err = self.check(job(value), capfd=capfd)
         same(status, runner_pin.EXIT_RED)
         same(err.splitlines(), red(f"{rel}(runs-on: {shown})"))
 
@@ -276,7 +276,7 @@ class TestLabels(TestPlanted):
 
         The finding writer prints the CR as its escape, as the shell's did.
         """
-        status, out, err = self.check(
+        status, _out, err = self.check(
             "jobs:\n  a:\n    runs-on: ubuntu-24.04\r\n", capfd=capfd
         )
         same(status, runner_pin.EXIT_RED)
@@ -295,7 +295,7 @@ class TestFloating(TestPlanted):
             "        also: macos-latest\n"
             "    runs-on: ${{ matrix.os }}\n"
         )
-        status, out, err = self.check(text, capfd=capfd)
+        status, _out, err = self.check(text, capfd=capfd)
         same(status, runner_pin.EXIT_RED)
         named = "        os: [ubuntu-latest, windows-latest]"
         expected = red(f".github/workflows/ci.yml(floating label: 5:{named})")
@@ -313,7 +313,7 @@ class TestFloating(TestPlanted):
     ) -> None:
         """A label before a comment on the same line is a float."""
         text = job("ubuntu-24.04") + "      - run: echo ubuntu-latest # no\n"
-        status, out, err = self.check(text, capfd=capfd)
+        status, _out, err = self.check(text, capfd=capfd)
         same(status, runner_pin.EXIT_RED)
         line = "      - run: echo ubuntu-latest # no"
         expected = red(f".github/workflows/ci.yml(floating label: 6:{line})")
@@ -330,7 +330,7 @@ class TestCalls(TestPlanted):
         one = self.flow("b.yml", job("ubuntu-latest"))
         two = self.flow("a.yml", job("x"))
         three = self.plant("workflow-templates/c.yml", job("y"))
-        status, out, err = self.helper(one, two, "--", three, capfd=capfd)
+        status, _out, err = self.helper(one, two, "--", three, capfd=capfd)
         same(status, runner_pin.EXIT_RED)
         expected = red(
             f"{one}(runs-on: ubuntu-latest)",
@@ -349,7 +349,7 @@ class TestCalls(TestPlanted):
     def test_not_utf8_is_an_error(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A workflow that is not UTF-8 is refused by name, exit 2."""
         rel = self.flow("ci.yml", b"jobs: \xff\n")
-        status, out, err = self.helper(rel, "--", capfd=capfd)
+        status, _out, err = self.helper(rel, "--", capfd=capfd)
         same(status, runner_pin.EXIT_ERROR)
         assert err.startswith(f"{TASK}: {rel}: cannot be read as UTF-8:"), err
 
@@ -357,7 +357,9 @@ class TestCalls(TestPlanted):
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """A named file that is not there is refused by name, exit 2."""
-        status, out, err = self.helper("--", "workflow-templates/gone.yml", capfd=capfd)
+        status, _out, err = self.helper(
+            "--", "workflow-templates/gone.yml", capfd=capfd
+        )
         same(status, runner_pin.EXIT_ERROR)
         assert err.startswith(
             f"{TASK}: workflow-templates/gone.yml: cannot be read as UTF-8:"
@@ -367,6 +369,6 @@ class TestCalls(TestPlanted):
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """No `--` between the lists: exit 2 with the usage line."""
-        status, out, err = self.helper(".github/workflows/ci.yml", capfd=capfd)
+        status, _out, err = self.helper(".github/workflows/ci.yml", capfd=capfd)
         same(status, runner_pin.EXIT_ERROR)
         same(err.splitlines(), [f"{TASK}: {runner_pin.USAGE}"])

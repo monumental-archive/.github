@@ -132,9 +132,9 @@ class TestChoose:
         )
         assert figures.Choice(2, 20) == got
 
-    def test_refusals_say_why(self) -> None:
-        """No artifact, an expired one, another commit's, a strange listing."""
-        for case, given, said in (
+    @pytest.mark.parametrize(
+        ("case", "given", "said"),
+        [
             ("none", listing(), f"no unexpired gate artifact coverage-figures-{SHA}"),
             ("expired", listing(artifact(SHA, SHA, expired=True)), "no unexpired"),
             (
@@ -147,19 +147,19 @@ class TestChoose:
                 ["artifacts"],
                 "the artifacts listing is not one GitHub writes",
             ),
-        ):
-            with (
-                self.subTest(case=case),
-                pytest.raises(figures.RefusedError) as raised,
-            ):
-                figures.choose(given, SHA)
-            assert said in str(raised.value)
+        ],
+    )
+    def test_refusals_say_why(self, case: object, given: object, said: object) -> None:
+        """No artifact, an expired one, another commit's, a strange listing."""
+        with pytest.raises(figures.RefusedError) as raised:
+            figures.choose(given, SHA)
+        assert said in str(raised.value)
 
 
 class TestJudge:
     """The run that kept the artifact judged the tree that lands."""
 
-    @pytest.mark.parametrize("event", ("merge_group", "push"))
+    @pytest.mark.parametrize("event", ["merge_group", "push"])
     def test_a_green_merge_group_or_push_run_is_named(self, event: object) -> None:
         """Its address is what the step's log names."""
         assert (
@@ -167,9 +167,9 @@ class TestJudge:
             == "https://github.com/monumental-archive/.github/actions/runs/44631546473"
         )
 
-    def test_refusals_say_why(self) -> None:
-        """Another commit, a pull request's run, a run not green."""
-        for case, given, said in (
+    @pytest.mark.parametrize(
+        ("case", "given", "said"),
+        [
             ("another commit", run_record(OTHER), f"is for {OTHER}, not {SHA}"),
             (
                 "pull request",
@@ -182,13 +182,13 @@ class TestJudge:
                 "is in_progress/None, not completed/success",
             ),
             ("failed", run_record(SHA, conclusion="failure"), "completed/failure"),
-        ):
-            with (
-                self.subTest(case=case),
-                pytest.raises(figures.RefusedError) as raised,
-            ):
-                figures.judge(given, SHA)
-            assert said in str(raised.value)
+        ],
+    )
+    def test_refusals_say_why(self, case: object, given: object, said: object) -> None:
+        """Another commit, a pull request's run, a run not green."""
+        with pytest.raises(figures.RefusedError) as raised:
+            figures.judge(given, SHA)
+        assert said in str(raised.value)
 
 
 class TestFigures:
@@ -205,9 +205,9 @@ class TestFigures:
         with pytest.raises(figures.RefusedError):
             figures.figures("plpgsql-branches held\n")
 
-    def test_refusals_say_why(self) -> None:
-        """Empty, a stray line, no file in the zip, not a zip."""
-        for case, data, said in (
+    @pytest.mark.parametrize(
+        ("case", "data", "said"),
+        [
             ("empty", zipped(""), "coverage-figures.txt holds no leg"),
             (
                 "stray line",
@@ -224,13 +224,13 @@ class TestFigures:
                 b"not a zip",
                 "the artifact holds no readable coverage-figures.txt",
             ),
-        ):
-            with (
-                self.subTest(case=case),
-                pytest.raises(figures.RefusedError) as raised,
-            ):
-                figures.figures(figures.unpack(data))
-            assert said in str(raised.value)
+        ],
+    )
+    def test_refusals_say_why(self, case: object, data: object, said: object) -> None:
+        """Empty, a stray line, no file in the zip, not a zip."""
+        with pytest.raises(figures.RefusedError) as raised:
+            figures.figures(figures.unpack(data))
+        assert said in str(raised.value)
 
 
 class TestOneLeg:
@@ -256,22 +256,22 @@ class TestOneLeg:
             raised.value
         )
 
-    def test_exactly_the_leg(self) -> None:
-        """Its line alone; another major's, or a second line, is refused."""
-        assert figures.figures("pgrx-pg17 96.5\n", "pgrx-pg17") == "pgrx-pg17 96.5\n"
-        for text, said in (
+    @pytest.mark.parametrize(
+        ("text", "said"),
+        [
             ("pgrx-pg18 96.5\n", "holds pgrx-pg18, not exactly pgrx-pg17"),
             (
                 "pgrx-pg17 96.5\npython 90.0\n",
                 "holds pgrx-pg17 python, not exactly pgrx-pg17",
             ),
-        ):
-            with (
-                self.subTest(text=text),
-                pytest.raises(figures.RefusedError) as raised,
-            ):
-                figures.figures(text, "pgrx-pg17")
-            assert said in str(raised.value)
+        ],
+    )
+    def test_exactly_the_leg(self, text: object, said: object) -> None:
+        """Its line alone; another major's, or a second line, is refused."""
+        assert figures.figures("pgrx-pg17 96.5\n", "pgrx-pg17") == "pgrx-pg17 96.5\n"
+        with pytest.raises(figures.RefusedError) as raised:
+            figures.figures(text, "pgrx-pg17")
+        assert said in str(raised.value)
 
     def test_the_command_line_takes_only_a_pgrx_leg(self) -> None:
         """A third argument is `pgrx-pg<major>` or a usage error."""
@@ -341,12 +341,12 @@ class TestCommandLine:
 
     @pytest.mark.parametrize(
         "argv",
-        (
+        [
             ["choose"],
             ["choose", "abc"],
             ["measure", SHA],
             ["figures", SHA, "python"],
-        ),
+        ],
     )
     def test_usage_errors_are_status_two(self, argv: object) -> None:
         """No sha, a short sha, an unknown command, a leg that is not pgrx."""

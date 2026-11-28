@@ -367,7 +367,7 @@ class TestTheHelpers:
         capfd: pytest.CaptureFixture[str],
     ) -> None:
         """`# type: ignore` with no code is named, even at the module's top."""
-        status, out, err = seams(
+        status, out, _err = seams(
             "# type: ignore\nX: int = 1\n",
             tmp_path=tmp_path,
             monkeypatch=monkeypatch,
@@ -382,7 +382,7 @@ class TestTheHelpers:
         capfd: pytest.CaptureFixture[str],
     ) -> None:
         """A `# mypy:` comment lowering its file's level is named."""
-        status, out, err = seams(
+        status, out, _err = seams(
             "# mypy: ignore-errors\nX: int = 1\n",
             tmp_path=tmp_path,
             monkeypatch=monkeypatch,
@@ -401,7 +401,7 @@ class TestTheHelpers:
     ) -> None:
         """`typing.no_type_check`, by attribute, is named."""
         text = "import typing\n\n\n@typing.no_type_check\ndef f(x):\n    return x\n"
-        status, out, err = seams(
+        status, out, _err = seams(
             text, tmp_path=tmp_path, monkeypatch=monkeypatch, capfd=capfd
         )
         assert (status, out) == (
@@ -416,7 +416,7 @@ class TestTheHelpers:
         capfd: pytest.CaptureFixture[str],
     ) -> None:
         """The same text inside a string is not a finding."""
-        status, out, err = seams(
+        status, out, _err = seams(
             'S = "# type: ignore  # mypy: ignore-errors  no_type_check"\n',
             tmp_path=tmp_path,
             monkeypatch=monkeypatch,
@@ -431,7 +431,7 @@ class TestTheHelpers:
         capfd: pytest.CaptureFixture[str],
     ) -> None:
         """`# type: ignore[arg-type]` is named: it hides its finding."""
-        status, out, err = seams(
+        status, out, _err = seams(
             "f(1)  # type: ignore[arg-type]\n",
             tmp_path=tmp_path,
             monkeypatch=monkeypatch,
@@ -462,7 +462,7 @@ class TestTheHelpers:
         capfd: pytest.CaptureFixture[str],
     ) -> None:
         """Two roots each holding helper.py: a clash, by module name."""
-        status, out, err = roots(
+        status, _out, err = roots(
             "a/helper.py",
             "b/helper.py",
             tmp_path=tmp_path,

@@ -381,7 +381,7 @@ class TestRefused(TestPlanted):
         assert want == got
 
     @pytest.mark.parametrize(
-        "value,shown", (("2.5", "2.5"), ('"4"', "'4'"), ("true", "True"))
+        ("value", "shown"), [("2.5", "2.5"), ('"4"', "'4'"), ("true", "True")]
     )
     def test_a_count_that_is_not_an_integer(self, value: object, shown: object) -> None:
         """2.5, "4" and true are not whole numbers of shards: each red, by name."""
@@ -452,8 +452,8 @@ class TestAdapter:
     """A task's command names the runner it takes a share through."""
 
     @pytest.mark.parametrize(
-        "line,want",
-        (
+        ("line", "want"),
+        [
             ('"${ORG_BELT_DIR}/measured" pytest -c mise/pytest.toml tests', "pytest"),
             ("pytest tests", None),
             ('"${ORG_BELT_DIR}/python-properties.sh" gate', "python-properties"),
@@ -466,7 +466,7 @@ class TestAdapter:
             ('"${ORG_BELT_DIR}/measured" go test ./...', "go test"),
             ("pnpm exec vitest run", None),
             ('"${ORG_BELT_DIR}/measured" cargo test', None),
-        ),
+        ],
     )
     def test_each_runner(self, line: object, want: object) -> None:
         """Each adapter, read off the line that runs it."""
@@ -478,7 +478,7 @@ class TestUsage:
 
     @pytest.mark.parametrize(
         "argv",
-        (
+        [
             [],
             ["run", "lint", "ci:lint", "5", "4"],
             ["run", "lint", "ci:lint", "0", "4"],
@@ -486,7 +486,7 @@ class TestUsage:
             ["run", "test", "", "1", "1"],
             ["plan", "gate"],
             ["deal", "x"],
-        ),
+        ],
     )
     def test_bad_arguments(self, argv: object) -> None:
         """Each malformed form exits 2 before running anything."""

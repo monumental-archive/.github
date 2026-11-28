@@ -15,7 +15,6 @@ GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom.
 
 import subprocess
 import sys
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -25,6 +24,7 @@ from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
 # The task that runs the helper, whose name its findings carry (#1934).
 TASK = "lint:nested-permissions"
@@ -232,7 +232,7 @@ class TestNested:
         """
         blanks = self.plant("blanks.yml", "jobs: \t\n  ci:  \n" + CALL)
         crlf = self.plant("crlf.yml", "jobs:\r\n  ci:\r\n" + CALL)
-        status, out, err = self.helper(blanks, crlf, capfd=capfd)
+        status, _out, err = self.helper(blanks, crlf, capfd=capfd)
         same(status, nested_permissions.EXIT_RED)
         same(err.splitlines(), red(f"{blanks}:ci", f"{crlf}:ci:\\r"))
 
@@ -247,7 +247,7 @@ class TestNested:
     def test_not_utf8_is_an_error(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A workflow that is not UTF-8 is refused by name, exit 2."""
         rel = self.plant("bad.yml", b"jobs: \xff\n")
-        status, out, err = self.helper(rel, capfd=capfd)
+        status, _out, err = self.helper(rel, capfd=capfd)
         same(status, nested_permissions.EXIT_ERROR)
         assert err.startswith(
             f"lint:nested-permissions: {rel}: cannot be read as UTF-8:"
@@ -255,7 +255,7 @@ class TestNested:
 
     def test_missing_file_is_an_error(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A named workflow that does not exist is refused by name, exit 2."""
-        status, out, err = self.helper(".github/workflows/gone.yml", capfd=capfd)
+        status, _out, err = self.helper(".github/workflows/gone.yml", capfd=capfd)
         same(status, nested_permissions.EXIT_ERROR)
         assert err.startswith(
             "lint:nested-permissions: .github/workflows/gone.yml:"
@@ -266,7 +266,7 @@ class TestNested:
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """No workflow named: exit 2 with the usage line."""
-        status, out, err = self.helper(capfd=capfd)
+        status, _out, err = self.helper(capfd=capfd)
         same(status, nested_permissions.EXIT_ERROR)
         usage = "lint:nested-permissions: usage: belt nested-permissions WORKFLOW..."
         same(err.splitlines(), [usage])

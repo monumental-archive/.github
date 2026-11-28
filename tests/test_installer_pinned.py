@@ -14,7 +14,6 @@ GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom.
 
 import subprocess
 import sys
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -24,6 +23,7 @@ from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
 # The task that runs the helper, whose name its findings carry (#1934).
 TASK = "lint:installer-pinned"
@@ -174,7 +174,7 @@ class TestPinned:
             "step in a comment": "# uses: jdx/mise-action@v3\n",
             "step after a hash": "x: 1 # uses: jdx/mise-action@v3\n",
         }
-        for row, text in rows.items():
+        for text in rows.values():
             rel = self.plant("wf.yml", text)
             status, out, err = self.helper(rel, capfd=capfd)
             same(status, 0, err)
@@ -204,7 +204,7 @@ class TestPinned:
     def test_not_utf8_is_an_error(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A workflow that is not UTF-8 is refused by name, exit 2."""
         rel = self.plant("bad.yml", b"on: \xff\n")
-        status, out, err = self.helper(rel, capfd=capfd)
+        status, _out, err = self.helper(rel, capfd=capfd)
         same(status, installer_pinned.EXIT_ERROR)
         assert err.startswith(f"{TASK}: {rel}: cannot be read as UTF-8:"), err
 
@@ -212,7 +212,7 @@ class TestPinned:
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """No workflow named: exit 2 with the usage line."""
-        status, out, err = self.helper(capfd=capfd)
+        status, _out, err = self.helper(capfd=capfd)
         same(status, installer_pinned.EXIT_ERROR)
         usage = f"{TASK}: usage: installer_pinned.py WORKFLOW..."
         same(err.splitlines(), [usage])

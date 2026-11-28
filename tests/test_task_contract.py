@@ -155,7 +155,7 @@ class TestGate:
         assert hits == none
 
     @pytest.mark.parametrize(
-        "leg", ("test:python-properties", "test:typescript-properties")
+        "leg", ["test:python-properties", "test:typescript-properties"]
     )
     def test_ci_names_each_property_leg(self, leg: object) -> None:
         """A belt test leg is named in the gate, never collected (#1332, #1549).

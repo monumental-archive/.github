@@ -52,7 +52,7 @@ class TestDeliveredFlagsTest:
         """An empty level would pass every config in the org."""
         assert REQUIRED
 
-    @pytest.mark.parametrize("key,want", REQUIRED.items())
+    @pytest.mark.parametrize(("key", "want"), REQUIRED.items())
     def test_every_dial_is_a_boolean(self, key: object, want: object) -> None:
         """The comparison is boolean; a non-boolean would need new law."""
         assert isinstance(want, bool)

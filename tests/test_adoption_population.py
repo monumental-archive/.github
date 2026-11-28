@@ -19,7 +19,9 @@ for a nonzero exit: a refusal nobody can act on sends the reader to the
 wrong file.
 """
 
+import io
 import json
+import sys
 
 import pytest
 
@@ -315,7 +317,7 @@ class TestMain:
         assert "source-attest" in owed["signer"]
         assert "OWES\tcanon\tci\tci.yml|gate.yml" in out.splitlines()
 
-    @pytest.mark.parametrize("name,doc,message", REFUSALS)
+    @pytest.mark.parametrize(("name", "doc", "message"), REFUSALS)
     def test_each_refusal_exits_two_and_names_its_field(
         self,
         name: object,

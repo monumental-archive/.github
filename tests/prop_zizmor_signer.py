@@ -112,8 +112,9 @@ def run(stdout: str) -> tuple[int, str]:
         contextlib.redirect_stdout(out),
         contextlib.redirect_stderr(io.StringIO()),
     ):
-        patched.setattr(zs, "run_zizmor", support.returning(ran))
-        support.patch_env(patched, env)
+        patched.setattr(zs, "run_zizmor", lambda *_args, **_kwargs: ran)
+        for name, value in env.items():
+            patched.setenv(name, value)
         status = zs.main(["--signer-workflow", WORKFLOW])
     return status, out.getvalue()
 
@@ -176,4 +177,4 @@ class TestRefusal:
     def test_main_answers_any_output(self, stdout: str) -> None:
         """0, 1 or 14."""
         status, _ = run(stdout)
-        assert status in (0, 1, 14)
+        assert status in {0, 1, 14}

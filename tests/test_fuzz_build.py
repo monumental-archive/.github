@@ -335,11 +335,11 @@ class TestFuzzBuild:
 
     @pytest.mark.parametrize(
         "table",
-        (
+        [
             "[workspace]\n",
             '[workspace]\nmembers = ["."]\n',
             "[workspace.metadata]\nx = 1\n",
-        ),
+        ],
     )
     def test_a_current_lock_builds(self, table: object) -> None:
         """The probe passes, the build runs, the corpus replays, all reported."""
@@ -413,7 +413,7 @@ class TestFuzzBuild:
             assert not directory.resolve().is_relative_to(self.root), directory
             assert not directory.exists(), directory
 
-    @pytest.mark.parametrize("dialect", (STALE_OLD, STALE_NEW))
+    @pytest.mark.parametrize("dialect", [STALE_OLD, STALE_NEW])
     def test_a_stale_lock_is_called_stale(self, dialect: object) -> None:
         """Only cargo's lockfile refusal earns the stale message."""
         lock = f"{self.root}/fuzz/Cargo.lock"

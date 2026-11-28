@@ -18,11 +18,15 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from belt import rust_workspaces
 from tests import support
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 BELT = support.MISE
 BASH = support.tool("bash")
@@ -251,7 +255,7 @@ class TestRoots:
         assert "belongs to a workspace outside this tree" in err
         outside = planted.base / "plain"
         outside.mkdir()
-        status, out, err = planted.call(
+        status, _out, err = planted.call(
             lambda: 0 if rust_workspaces.resolved() is None else 3, capfd, outside
         )
         assert status == 0
@@ -328,8 +332,8 @@ class TestFuzzing:
         return written.name
 
     @pytest.mark.parametrize(
-        "text,want",
-        (
+        ("text", "want"),
+        [
             ("[package]\nmetadata = { cargo-fuzz = true }\n", True),
             ('[package]\nmetadata = { cargo-fuzz = "true" }\n', False),
             ("[package]\nmetadata = { cargo-fuzz = false }\n", False),
@@ -338,7 +342,7 @@ class TestFuzzing:
             ('[package]\nname = "fuzz"\n', False),
             ("package = 1\n", False),
             ("[workspace]\nmetadata = { cargo-fuzz = true }\n", False),
-        ),
+        ],
     )
     def test_only_a_true_cargo_fuzz_in_package_metadata_is_the_marker(
         self, text: object, want: object
@@ -378,7 +382,10 @@ class TestFuzzing:
         """Set inside, restored after: a value kept, an absent one removed."""
         marked = self.manifest("[package]\nmetadata = { cargo-fuzz = true }\n")
         with pytest.MonkeyPatch.context() as patched:
-            support.patch_env(patched, before, clear=True)
+            for name in list(os.environ):
+                patched.delenv(name)
+            for name, value in before.items():
+                patched.setenv(name, value)
             with rust_workspaces.built_as(marked):
                 assert inside == os.environ["RUSTFLAGS"]
             assert before.get("RUSTFLAGS") == os.environ.get("RUSTFLAGS")
@@ -388,7 +395,10 @@ class TestFuzzing:
         marked = self.manifest("[package]\nmetadata = { cargo-fuzz = true }\n")
         empty: dict[str, str] = {}
         with pytest.MonkeyPatch.context() as patched:
-            support.patch_env(patched, empty, clear=True)
+            for name in list(os.environ):
+                patched.delenv(name)
+            for name, value in empty.items():
+                patched.setenv(name, value)
             with pytest.raises(KeyError), rust_workspaces.built_as(marked):
                 _ = os.environ["PLANTED_ABSENT"]
             assert "RUSTFLAGS" not in os.environ

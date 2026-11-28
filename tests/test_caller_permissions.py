@@ -293,7 +293,7 @@ class TestHelper(TestPlanted):
         usage = f"{TASK}: {caller_permissions.USAGE}"
         calls: list[list[str]] = [[], [CANON], ["", "ci.yml"]]
         for argv in calls:
-            status, out, err = self.helper(*argv, capfd=capfd)
+            status, _out, err = self.helper(*argv, capfd=capfd)
             same(status, caller_permissions.EXIT_ERROR)
             same(err.splitlines(), [usage])
         same(self.logged(), [])

@@ -7,7 +7,6 @@ and the marker hold afterwards.
 
 import subprocess
 import sys
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -17,6 +16,7 @@ from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
 ONCE = support.MISE / "once.py"
 SH = support.tool("sh")

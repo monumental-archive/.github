@@ -15,6 +15,7 @@ runs mise for real, in a planted repository that pins its own shell
 and loads the belt through a clone's `conf.d` link.
 """
 
+import contextlib
 import shlex
 import shutil
 import subprocess
@@ -25,7 +26,6 @@ import pytest
 
 from belt import decoded
 from tests import support
-import contextlib
 
 BELT = support.MISE
 CONFIG = decoded.load_toml((BELT / "config.toml").read_text(encoding="utf-8"))
@@ -46,7 +46,7 @@ REFUSED = "ignored for security reasons"
 class TestTasksFailOnError:
     """The declared shell stops a body at its first failure (#401)."""
 
-    @pytest.mark.parametrize("what,body", BODIES.items())
+    @pytest.mark.parametrize(("what", "body"), BODIES.items())
     def test_the_declared_shell_stops_at_the_first_failure(
         self, what: object, body: object
     ) -> None:
@@ -65,7 +65,7 @@ class TestTasksFailOnError:
 @pytest.mark.usefixtures("_stack")
 class TestALinkedCloneThatPinsItsShell:
     """A real mise, the belt as a clone's link, no global config (#1745)."""
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""

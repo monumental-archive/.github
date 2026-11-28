@@ -595,7 +595,7 @@ class TestParser:
                 ).items():
                     patched.setenv(name, value)
                 status = es.main(["--ceiling", str(debt), str(path)])
-            out, err = capfd.readouterr()
+            _out, err = capfd.readouterr()
         assert status == 1
         assert err.startswith(f"{TASK}: {path}: ")
         assert status == 1
@@ -673,7 +673,10 @@ class TestOrgConfig:
             encoding="utf-8",
         )
         with pytest.MonkeyPatch.context() as patched:
-            support.patch_env(patched, support.env(home), clear=True)
+            for name in list(os.environ):
+                patched.delenv(name)
+            for name, value in (support.env(home)).items():
+                patched.setenv(name, value)
             found = es.check(path, fmt=False, lint=True)
         assert any("[SC2250]" in f for f in found), found
 
@@ -1016,7 +1019,7 @@ class TestTask:
         return root
 
     @pytest.mark.parametrize(
-        "name,message",
+        ("name", "message"),
         [
             ("lint:workflow-shell", "no workflows, actions or templates, skipped"),
             (
@@ -1107,7 +1110,8 @@ class TestTasks:
             redirect_stdout(out),
             redirect_stderr(err),
         ):
-            support.name_task(patched, task)
+            patched.setenv("MISE_TASK_NAME", task)
+            patched.setenv("ORG_FINDINGS", "")
             rc = es.task_ceiling([str(self.cfg)], self.debt, write=write)
         return rc, out.getvalue(), err.getvalue()
 
@@ -1337,7 +1341,7 @@ class TestTaskShellTask:
         assert "(1 over the ceiling, all listed)" in r.stdout
 
     @pytest.mark.parametrize(
-        "name,message",
+        ("name", "message"),
         [
             ("lint:task-shell", "no mise config tracked, skipped"),
             ("fix:task-shell", "no mise config tracked, nothing to fix"),
@@ -1375,7 +1379,7 @@ class TestCli:
             out, err = capfd.readouterr()
             t.debt.write_text(t.entry("Big", 16), encoding="utf-8")
             status = es.main(argv)
-            out, err = capfd.readouterr()
+            _out, err = capfd.readouterr()
         assert status == 1
         assert "step 'Big' holds a run: block of 16 lines" in err
         assert status == 0, err

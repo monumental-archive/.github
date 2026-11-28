@@ -16,12 +16,15 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from belt import squash_message
 from tests import support
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # A workflow step runs the command outside mise, so its findings carry
 # the command's own name, which the launcher sets (findings.task_name,
@@ -508,7 +511,7 @@ class TestTheReaderAgrees:
 
     def test_every_row(self) -> None:
         """Refused exactly when the rendered break carries a later paragraph."""
-        for row, (body, refused) in BREAKING_ROWS.items():
+        for body, refused in BREAKING_ROWS.values():
             entry = self.breaking_entry(body)
             published = bool(entry) and entry_after_blank(body, entry)
             try:

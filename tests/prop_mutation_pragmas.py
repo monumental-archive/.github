@@ -94,6 +94,6 @@ class TestRefusal:
             out, err = io.StringIO(), io.StringIO()
             with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
                 status = mp.main([str(path)])
-        assert status in (0, 1)
+        assert status in {0, 1}
         if status == 1:
             assert str(path) in err.getvalue()

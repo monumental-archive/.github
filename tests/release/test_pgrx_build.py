@@ -2,12 +2,11 @@
 
 build-pgrx-extension.yml carried this logic as shell three quotes deep
 inside `docker run … bash -c '… su postgres -c "…"'`, with no tests.
-It now lives in release/pgrx/ as plain scripts the containers run from
+It now lives in belt/release/pgrx/ and release/pgrx/ as plain scripts the containers run from
 the pinned canon tree, and in release/pgrx/previous_release.py on the
 runner. Each guard branch is a row here, and every refusal row asserts
 its message, word for word, against the wording the workflow carried.
-previous_release.py's rows call its `main` in this process (#1698);
-one starts it as the workflow does instead, the script contract.
+previous_release.py's rows call its `main` in this process (#1698).
 
 The debug-split and glibc rows run the real binutils over a small real
 shared library built here, so they need `cc`, `readelf`, `objcopy` and
@@ -33,11 +32,10 @@ from tests import support
 
 CANON = support.CANON
 PGRX = CANON / "release" / "pgrx"
-PREVIOUS = PGRX / "previous_release.py"
 BASH = support.tool("bash")
 ON_RUNNER = os.environ.get("GITHUB_ACTIONS") == "true"
-# What a helper's run answered: a child's, or an in-process call's.
-type Done = subprocess.CompletedProcess[str] | support.Called
+# What a helper's call answered: its status, stdout and stderr.
+type Done = tuple[int, str, str]
 
 
 @pytest.fixture
@@ -175,20 +173,20 @@ class TestFloorBlock:
         assert "< 180007 THEN" in text
         assert "'demo_ext 1.2.0 was built against PostgreSQL 18.7;" in text
 
-    def test_a_script_already_using_the_tag_is_refused(self) -> None:
+    @pytest.mark.parametrize(
+        "script", ["demo_ext--1.2.0.sql", "demo_ext--1.1.0--1.2.0.sql"]
+    )
+    def test_a_script_already_using_the_tag_is_refused(self, script: str) -> None:
         """The dollar-quote tag must be one no generated script uses."""
-        rows = ("demo_ext--1.2.0.sql", "demo_ext--1.1.0--1.2.0.sql")
-        for script in rows:
-            self.setUp()
-            planted = "SELECT $pgrx_floor$ x $pgrx_floor$;\n"
-            (self.extdir / script).write_text(planted)
-            result = self.floor()
-            assert result.returncode == 1
-            assert (
-                f"::error::floor.sh: {script} already uses the pgrx_floor tag\n"
-                == result.stderr
-            )
-            assert planted == (self.extdir / script).read_text()
+        planted = "SELECT $pgrx_floor$ x $pgrx_floor$;\n"
+        (self.extdir / script).write_text(planted)
+        result = self.floor()
+        assert result.returncode == 1
+        assert (
+            f"::error::floor.sh: {script} already uses the pgrx_floor tag\n"
+            == result.stderr
+        )
+        assert planted == (self.extdir / script).read_text()
 
     def test_no_script_for_the_version_is_not_an_error(self) -> None:
         """A control whose version has no script yet leaves the tree alone."""
@@ -320,34 +318,25 @@ class TestPreviousRelease:
         args: list[str],
         env: dict[str, str],
         *,
-        script: bool = False,
         capfd: pytest.CaptureFixture[str],
     ) -> Done:
-        """Run the helper on `args` in the row's directory.
+        """Call the helper on `args` in the row's directory.
 
-        In this process unless `script`, which starts it by its path. The
-        helper resolves `gh` on PATH once, at import, so the call is
-        given the stub the child would have found first on its PATH.
+        The helper resolves `gh` on PATH once, at import, so the call is
+        given the stub a step would have found first on its PATH.
 
         Returns:
-            What the run answered.
+            The status and both streams.
 
         """
-        if script:
-            return run([str(PREVIOUS), *args], env, cwd=self.root)
-
-        def call() -> int:
-            return previous_release.main(args)
-
         with pytest.MonkeyPatch.context() as patched:
             patched.setattr(previous_release, "GH", str(self.gh))
-            with pytest.MonkeyPatch.context() as patched:
-                for name, value in (support.env(**env)).items():
-                    patched.setenv(name, value)
-                patched.chdir(self.root)
-                status = call()
-            out, err = capfd.readouterr()
-            return status, out, err
+            for name, value in support.env(**env).items():
+                patched.setenv(name, value)
+            patched.chdir(self.root)
+            status = previous_release.main(args)
+        out, err = capfd.readouterr()
+        return status, out, err
 
     def previous(
         self,
@@ -381,7 +370,7 @@ class TestControlFileRefusal(TestPreviousRelease):
     """`guard`: the backstop for a tag minted around the upgrade path."""
 
     @pytest.mark.parametrize(
-        "releases,latest", (([], ""), ([release("release-1")], "release-1"))
+        ("releases", "latest"), [([], ""), ([release("release-1")], "release-1")]
     )
     def test_no_previous_release(
         self, releases: object, latest: object, capfd: pytest.CaptureFixture[str]
@@ -432,7 +421,7 @@ class TestControlFileRefusal(TestPreviousRelease):
         """Shipped before, no sql/<ext>--prev--new.sql: stranded, refused."""
         self.forge([release("v1.1.0", DEMO_CELL)], "v1.1.0")
         self.graph("demo_ext--1.0.0--1.1.0.sql")
-        status, out, err = self.previous("guard", capfd=capfd)
+        status, _out, err = self.previous("guard", capfd=capfd)
         assert status == 1
         assert err == (
             "::error::previous-release: no upgrade path"
@@ -454,13 +443,10 @@ class TestControlFileRefusal(TestPreviousRelease):
     def test_a_failed_listing_read_is_red(
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
-        """Gh failing on the listing is a red with gh's own words, never a pass.
-
-        The script row: gh's words are on the child's own stderr.
-        """
+        """Gh failing on the listing is a red with gh's own words, never a pass."""
         args = ["guard", "--repo", "acme/demo", "--version", "1.2.0"]
         status, out, err = self.helper(
-            [*args, "--crate-dir", self.CRATE], self.env, script=True, capfd=capfd
+            [*args, "--crate-dir", self.CRATE], self.env, capfd=capfd
         )
         assert status == 1
         assert out == ""
@@ -552,7 +538,7 @@ class TestPreviousTarball(TestPreviousRelease):
         self.graph("demo_ext--1.0.0--1.1.0.sql")
         tarball = self.root / "asset.tar.gz"
         tarball.write_bytes(b"not a tarball")
-        status, out, err = self.fetch(tarball=str(tarball), capfd=capfd)
+        status, out, _err = self.fetch(tarball=str(tarball), capfd=capfd)
         assert status != 0
         assert out == ""
 
@@ -636,7 +622,7 @@ class TestOnePredecessor(TestPreviousRelease):
     ) -> None:
         """No 1.2.3--1.3.0 path: refused, naming the release that carries 1.2.3."""
         self.edtf("edtf-releases.json", "v1.2.3", "edtf-postgres-v1.2.3")
-        status, out, err = self.previous("guard", version="1.3.0", capfd=capfd)
+        status, _out, err = self.previous("guard", version="1.3.0", capfd=capfd)
         assert status == 1, err
         assert err == (
             "::error::previous-release: no upgrade path"
@@ -724,19 +710,19 @@ class TestOlderLine(TestPreviousRelease):
         return self.helper([*args, "--control", control], self.env, capfd=capfd)
 
     @pytest.mark.parametrize(
-        "version,want",
-        (
+        ("version", "want"),
+        [
             ("1.2.5", "1.2.4\tv1.2.4\n"),
             ("1.3.1", "1.3.0\tv1.3.0\n"),
-        ),
+        ],
     )
     def test_each_line_yields_its_own_predecessor(
         self, version: object, want: object, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """1.2.5 comes from 1.2.4 on v1.2.4; 1.3.1 from 1.3.0 on v1.3.0."""
-        result = self.predecessor(version, capfd=capfd)
-        assert result.returncode == 0, result.stderr
-        assert want == result.stdout
+        status, out, err = self.predecessor(version, capfd=capfd)
+        assert status == 0, err
+        assert want == out
 
     def test_the_record_names_what_the_forge_carries(
         self, capfd: pytest.CaptureFixture[str]
@@ -746,15 +732,15 @@ class TestOlderLine(TestPreviousRelease):
         1.2.3 is in the graph but on no release, so it is not recorded;
         releasing 1.3.1, the predecessor is 1.3.0 on v1.3.0 (#825, #1592).
         """
-        out = self.root / ".pgrx-installable"
+        record = self.root / ".pgrx-installable"
         control = f"{self.CRATE}/demo_ext.control"
         args = ["record", "--repo", "acme/demo", "--version", "1.3.1"]
         status, out, err = self.helper(
-            [*args, "--out", str(out), control], self.env, capfd=capfd
+            [*args, "--out", str(record), control], self.env, capfd=capfd
         )
         assert status == 0, err
         assert out == "demo_ext\t1.3.0\tv1.3.0\n"
-        written = out.read_text(encoding="utf-8")
+        written = record.read_text(encoding="utf-8")
         assert written.startswith("# pgrx installable versions"), written
         assert written.endswith("# derived: v1.3.1\ndemo_ext 1.3.0 1.2.4\n"), written
 
@@ -763,7 +749,7 @@ class TestOlderLine(TestPreviousRelease):
     ) -> None:
         """Releasing 1.2.5 with 1.2.4--1.2.5 present passes; 1.3.0 is not asked."""
         self.graph("demo_ext--1.2.4--1.2.5.sql")
-        status, out, err = self.previous("guard", version="1.2.5", capfd=capfd)
+        status, out, _err = self.previous("guard", version="1.2.5", capfd=capfd)
         assert status == 0, out
         assert out == "::notice::upgrade path 1.2.4 -> 1.2.5 present\n"
 
@@ -1137,7 +1123,7 @@ class TestDebugSplit:
             == result.stderr
         )
 
-    @pytest.mark.parametrize("name,shim", SHIMS.items())
+    @pytest.mark.parametrize(("name", "shim"), SHIMS.items())
     def test_each_wrong_step_is_refused_by_name(
         self, name: object, shim: object
     ) -> None:

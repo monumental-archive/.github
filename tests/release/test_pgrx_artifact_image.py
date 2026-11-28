@@ -153,5 +153,5 @@ class TestOneTree:
                 ),
             ),
         ]
-        for name, text, want in rows:
+        for _name, text, want in rows:
             assert one_tree(text) == want

@@ -228,11 +228,14 @@ class TestPlanted:
             contextlib.chdir(self.tree),
             captured(out, err),
         ):
-            support.patch_env(patched, self.env, clear=True)
+            for name in list(os.environ):
+                patched.delenv(name)
+            for name, value in self.env.items():
+                patched.setenv(name, value)
             patched.setattr(
                 rust_workspaces,
                 "resolved",
-                support.returning(None if roots is None else list(roots)),
+                lambda *_args, **_kwargs: None if roots is None else list(roots),
             )
             if manifest is None:
                 status = msrv_lint.main([])
@@ -421,8 +424,8 @@ class TestBody(TestPlanted):
             assert self.planned()[:calls] == self.logged()
 
     @pytest.mark.parametrize(
-        "step,code,last",
-        (
+        ("step", "code", "last"),
+        [
             ("prepare", 4, "prepare 17"),
             ("pgrx_postgres.py", 5, "belt pgrx-postgres --majors 17 <[]>"),
             (
@@ -430,7 +433,7 @@ class TestBody(TestPlanted):
                 3,
                 "belt pgrx-postgres --majors 17 <>",
             ),
-        ),
+        ],
     )
     def test_a_failed_registration_stops_before_any_compile(
         self, step: object, code: object, last: object
@@ -571,7 +574,7 @@ class TestHelpers:
 @pytest.mark.usefixtures("_stack")
 class TestTask:
     """The task's own body: its guard, and the call that starts the helper."""
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""

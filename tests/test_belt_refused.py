@@ -20,12 +20,15 @@ under support.task_run, and one row runs the task through mise itself.
 from __future__ import annotations
 
 import subprocess
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from belt import decoded
 from tests import support
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 CANON = support.CANON
 A = "a" * 40

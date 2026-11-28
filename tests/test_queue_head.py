@@ -12,7 +12,8 @@ fetched from the real repository, not written by hand: a hand-made
 fixture would prove only what its author believed. It is kept gzipped,
 as release/testdata keeps its .crate: a bundle opens with a text
 header, so the text linters would read it as text.
-(#1463)."""
+(#1463).
+"""
 
 from __future__ import annotations
 

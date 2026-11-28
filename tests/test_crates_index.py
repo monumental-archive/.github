@@ -33,15 +33,15 @@ class TestIndexPath:
     """cargo's index layout, bucket by bucket."""
 
     @pytest.mark.parametrize(
-        "name,want",
-        (
+        ("name", "want"),
+        [
             ("a", "1/a"),
             ("cc", "2/cc"),
             ("syn", "3/s/syn"),
             ("serde", "se/rd/serde"),
             ("edtf-core", "ed/tf/edtf-core"),
             ("lab-core", "la/b-/lab-core"),
-        ),
+        ],
     )
     def test_each_bucket(self, name: object, want: object) -> None:
         """One, two, three, and four or more characters."""
@@ -92,7 +92,7 @@ class TestCommand:
         )
 
     @pytest.mark.parametrize(
-        "argv", ((), ("url",), ("path", "alpha"), ("url", "a", "b"))
+        "argv", [(), ("url",), ("path", "alpha"), ("url", "a", "b")]
     )
     def test_usage(self, argv: object) -> None:
         """Anything but `url <crate>` is a usage error."""

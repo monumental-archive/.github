@@ -18,7 +18,6 @@ GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom.
 
 import subprocess
 import sys
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -28,6 +27,7 @@ from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
 # The task that runs the helper, whose name its findings carry (#1934).
 TASK = "lint:citation"
@@ -215,7 +215,7 @@ class TestCitation:
     def test_no_reuse_is_red(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A citation with no source: red, by name."""
         self.plant("CITATION.cff", source("CITATION.cff"))
-        status, out, err = self.helper(capfd=capfd)
+        status, _out, err = self.helper(capfd=capfd)
         same(status, citation_check.EXIT_RED)
         want = [
             (
@@ -240,7 +240,7 @@ class TestCitation:
     ) -> None:
         """REUSE.toml on disk and not in git: the citation has no source."""
         self.sources(source("CITATION.cff"))
-        status, out, err = self.helper(untracked=("REUSE.toml",), capfd=capfd)
+        status, _out, err = self.helper(untracked=("REUSE.toml",), capfd=capfd)
         same(status, citation_check.EXIT_RED)
         want = [
             (
@@ -259,7 +259,7 @@ class TestCitation:
             "a comment": "# mint-doi: true\n",
             "after a hash": "x: 1 # mint-doi: true\n",
         }
-        for row, text in rows.items():
+        for text in rows.values():
             rel = self.plant(".github/workflows/wf.yml", text)
             status, out, err = self.helper(rel, capfd=capfd)
             same(status, 0, err)
@@ -290,6 +290,6 @@ class TestCitation:
     def test_not_utf8_is_an_error(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A workflow that is not UTF-8 is refused by name, exit 2."""
         rel = self.plant(".github/workflows/bad.yml", b"on: \xff\n")
-        status, out, err = self.helper(rel, capfd=capfd)
+        status, _out, err = self.helper(rel, capfd=capfd)
         same(status, citation_check.EXIT_ERROR)
         assert err.startswith(f"{TASK}: {rel}: cannot be read as UTF-8:"), err

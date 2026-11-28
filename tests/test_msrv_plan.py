@@ -845,12 +845,12 @@ class TestFloorTest:
         assert got == msrv_plan.Floor((1, 85, 0), TRIXIE)
 
     @pytest.mark.parametrize(
-        "debian,want",
-        (
+        ("debian", "want"),
+        [
             ("1:1.85.1+dfsg1-1", (1, 85, 0)),
             ("1.90.0~beta.1-1", (1, 90, 0)),
             ("1.85.1", (1, 85, 0)),
-        ),
+        ],
     )
     def test_the_forms_debian_writes_are_read(
         self, debian: object, want: object
@@ -859,20 +859,22 @@ class TestFloorTest:
         text = f'debian_stable_rustc = "{debian}"'
         assert msrv_plan.read_floor(text).version == want
 
-    def test_what_is_not_a_rustc_package_version_is_refused(self) -> None:
-        """A floor this cannot read must not become a floor of zero."""
-        for text, said in (
+    @pytest.mark.parametrize(
+        ("text", "said"),
+        [
             ('debian_stable_rustc = "1.85"', "not a Debian rustc"),
             ('debian_stable_rustc = "rustc-1.85.1"', "not a Debian rustc"),
             ('debian_stable_rustc = "1.85.1 trixie"', "not a Debian rustc"),
             ("rustc = 1", "debian_stable_rustc is not a string"),
             ("debian_stable_rustc = ", ""),
-        ):
-            with (
-                self.subTest(text=text),
-                pytest.raises(decoded.UndecodableError, match=said),
-            ):
-                msrv_plan.read_floor(text)
+        ],
+    )
+    def test_what_is_not_a_rustc_package_version_is_refused(
+        self, text: object, said: object
+    ) -> None:
+        """A floor this cannot read must not become a floor of zero."""
+        with pytest.raises(decoded.UndecodableError, match=said):
+            msrv_plan.read_floor(text)
 
     def test_the_canon_floor_file_reads(self) -> None:
         """The tracked file itself, so a Renovate bump cannot break it."""

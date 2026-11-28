@@ -97,8 +97,8 @@ class TestReader:
         assert err.startswith("fix:test: REUSE.toml does not parse: "), err
 
     @pytest.mark.parametrize(
-        "reuse,where",
-        (
+        ("reuse", "where"),
+        [
             ("annotations = 1\n", "annotations is not a list"),
             ("annotations = [1]\n", "annotations[0] is not an object"),
             (
@@ -108,7 +108,7 @@ class TestReader:
                     " a list of strings"
                 ),
             ),
-        ),
+        ],
     )
     def test_a_wrong_shape_is_red_by_where(self, reuse: object, where: object) -> None:
         """An annotation of the wrong shape is refused, naming where."""

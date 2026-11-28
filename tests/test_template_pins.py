@@ -19,7 +19,6 @@ GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom.
 import shutil
 import subprocess
 import sys
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -29,6 +28,7 @@ from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
 # The task that runs the helper, whose name its findings carry (#1934).
 TASK = "lint:template-pins"
@@ -216,7 +216,7 @@ class TestPins:
     ) -> None:
         """A reusable workflow pinned in scorecard.yml is red by message."""
         self.plant(SCORECARD, template(REUSABLE, self.sha))
-        status, out, err = self.helper(SCORECARD, capfd=capfd)
+        status, _out, err = self.helper(SCORECARD, capfd=capfd)
         same(status, 1)
         violation = f"{SCORECARD}(pins a reusable workflow: self-contained by design)"
         same(err.splitlines(), red(violation))
@@ -224,7 +224,7 @@ class TestPins:
     def test_short_sha_is_red(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A pin that is not 40 hex is red by message."""
         self.plant(STUB, template(REUSABLE, self.sha[:12]))
-        status, out, err = self.helper(STUB, capfd=capfd)
+        status, _out, err = self.helper(STUB, capfd=capfd)
         same(status, 1)
         violation = f"{STUB}(pin is not a full 40-hex SHA)"
         same(err.splitlines(), red(violation))
@@ -236,7 +236,7 @@ class TestPins:
         foreign = self.commit("v9.0.0")
         self.git("checkout", "-q", home)
         self.plant(STUB, template(REUSABLE, foreign))
-        status, out, err = self.helper(STUB, capfd=capfd)
+        status, _out, err = self.helper(STUB, capfd=capfd)
         same(status, 1)
         violation = f"{STUB}({foreign[:8]} not an ancestor of HEAD)"
         same(err.splitlines(), red(violation))
@@ -246,7 +246,7 @@ class TestPins:
         newer = self.commit("v1.1.0")
         self.plant(STUB, template(REUSABLE, self.sha))
         self.plant(SCORECARD, template(ACTION, newer))
-        status, out, err = self.helper(STUB, SCORECARD, capfd=capfd)
+        status, _out, err = self.helper(STUB, SCORECARD, capfd=capfd)
         same(status, 1)
         violation = f"(templates disagree, 2 distinct SHAs: {self.sha} {newer})"
         same(err.splitlines(), red(violation))
@@ -255,7 +255,7 @@ class TestPins:
         """An ancestor no tag names is red: a pin names a release."""
         untagged = self.commit()
         self.plant(STUB, template(REUSABLE, untagged))
-        status, out, err = self.helper(STUB, capfd=capfd)
+        status, _out, err = self.helper(STUB, capfd=capfd)
         same(status, 1)
         violation = (
             f"({untagged[:8]} names no released tag — pins must name a release,"
@@ -281,7 +281,7 @@ class TestPins:
     def test_not_utf8_is_an_error(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A template that is not UTF-8 is refused by name, exit 2."""
         self.plant(STUB, b"jobs: \xff\n")
-        status, out, err = self.helper(STUB, capfd=capfd)
+        status, _out, err = self.helper(STUB, capfd=capfd)
         same(status, template_pins.EXIT_ERROR)
         assert err.startswith(
             f"lint:template-pins: {STUB}: cannot be read as UTF-8:"
@@ -292,7 +292,7 @@ class TestPins:
         usage = "lint:template-pins: usage: belt template-pins OWNER/REPO TEMPLATE..."
         calls: list[list[str]] = [[], ["/repo", STUB], ["owner/", STUB]]
         for argv in calls:
-            status, out, err = self.refused(argv, capfd=capfd)
+            status, _out, err = self.refused(argv, capfd=capfd)
             same(status, template_pins.EXIT_ERROR)
             same(err.splitlines(), [usage])
 

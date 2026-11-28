@@ -14,13 +14,16 @@ row cannot pass by stopping early.
 import os
 import subprocess
 import sys
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from belt import pg_clippy, pgrx_postgres, rust_workspaces
 from tests import support
 from tests import test_rust_lint as planted
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 BELT = support.MISE
 GIT = support.tool("git")
@@ -181,12 +184,15 @@ class TestPlanted:
         want = list(lines)
         assert want == self.logged()
 
-    def assert_finding(self, done: support.Called, status: int, *lines: str) -> None:
+    def assert_finding(
+        self, called: tuple[int, str, str], status: int, *lines: str
+    ) -> None:
         """Assert the status, and the finding's lines in order on stderr."""
-        assert status == done.returncode, done.stdout + done.stderr
+        code, out, err = called
+        assert status == code, out + err
         head, *detail = lines
         want = f"{TASK}: {head}\n" + "".join(f"  {line}\n" for line in detail)
-        assert want in done.stderr
+        assert want in err
 
 
 class TestBranches(TestPlanted):
@@ -196,14 +202,14 @@ class TestBranches(TestPlanted):
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """The task passes none; anything else is a caller's mistake."""
-        status, out, err = self.call("lint", capfd=capfd)
+        done = self.call("lint", capfd=capfd)
         self.assert_finding(done, 2, "usage: belt pg-clippy")
         self.assert_logged()
 
     def test_cargo_missing_is_red(self, capfd: pytest.CaptureFixture[str]) -> None:
         """No cargo on PATH: the toolchain is broken, never a skip."""
         (self.bins / "cargo").unlink()
-        status, out, err = self.call(capfd=capfd)
+        done = self.call(capfd=capfd)
         self.assert_finding(
             done, 1, "Cargo.toml present but cargo missing — pin rust in mise.toml"
         )
@@ -213,7 +219,7 @@ class TestBranches(TestPlanted):
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """`cargo fetch --locked` fails: nothing is derived after it."""
-        status, out, err = self.call(STUB_FETCH_STATUS="7", capfd=capfd)
+        status, out, _err = self.call(STUB_FETCH_STATUS="7", capfd=capfd)
         assert status == 7
         self.assert_logged(FETCH)
         assert out == ""
@@ -222,7 +228,7 @@ class TestBranches(TestPlanted):
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """A failing cargo metadata gives its status, not the skip."""
-        status, out, err = self.call(STUB_METADATA_STATUS="4", capfd=capfd)
+        status, out, _err = self.call(STUB_METADATA_STATUS="4", capfd=capfd)
         assert status == 4
         self.assert_logged(FETCH, METADATA)
         assert "skipped" not in out
@@ -260,7 +266,7 @@ class TestBranches(TestPlanted):
 
     def test_clippy_missing_is_red(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A rustup that lists no clippy: the remedy names the pin."""
-        status, out, err = self.call(STUB_COMPONENTS="rustfmt-host\\n", capfd=capfd)
+        done = self.call(STUB_COMPONENTS="rustfmt-host\\n", capfd=capfd)
         self.assert_finding(
             done,
             1,
@@ -273,7 +279,7 @@ class TestBranches(TestPlanted):
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """clippy-ladder.sh fails: nothing is registered or linted."""
-        status, out, err = self.call(STUB_LADDER_FAILS="1", capfd=capfd)
+        status, _out, _err = self.call(STUB_LADDER_FAILS="1", capfd=capfd)
         assert status == 3
         self.assert_logged(FETCH, METADATA)
 
@@ -281,7 +287,7 @@ class TestBranches(TestPlanted):
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """The SDK or an ICU check fails: nothing is linted (#1774)."""
-        status, out, err = self.call(STUB_PREPARE_FAILS="1", capfd=capfd)
+        status, _out, _err = self.call(STUB_PREPARE_FAILS="1", capfd=capfd)
         assert status == 5
         self.assert_logged(FETCH, METADATA, "prepare 17")
 
@@ -289,7 +295,7 @@ class TestBranches(TestPlanted):
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """pgrx_postgres.py reds a declared major with no pin (#1940)."""
-        status, out, err = self.call(STUB_PIN_STATUS="6", capfd=capfd)
+        status, _out, _err = self.call(STUB_PIN_STATUS="6", capfd=capfd)
         assert status == 6
         self.assert_logged(FETCH, METADATA, *REGISTER)
 
@@ -297,7 +303,7 @@ class TestBranches(TestPlanted):
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """A refused extension gives cargo's 101, and no summary."""
-        status, out, err = self.call(STUB_RED="ext", capfd=capfd)
+        status, out, _err = self.call(STUB_RED="ext", capfd=capfd)
         assert status == 101
         self.assert_logged(FETCH, METADATA, *REGISTER, clippy("ext@0.1.0", self.belt))
         assert out == ""
@@ -337,7 +343,7 @@ class TestWorkspace(TestPlanted):
             status = pg_clippy.workspace(
                 str(self.bins / "cargo"), "crates/Cargo.toml"
             ).status
-        out, err = capfd.readouterr()
+        _out, err = capfd.readouterr()
         assert status == 0, err
         tail = "--manifest-path crates/Cargo.toml"
         self.assert_logged(

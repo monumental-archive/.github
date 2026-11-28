@@ -397,7 +397,7 @@ class TestRed:
 @pytest.mark.usefixtures("_stack", "_set_up_test_helper")
 class TestHelper:
     """The helper's pieces, in process."""
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""
@@ -442,7 +442,7 @@ class TestHelper:
                 pytest.MonkeyPatch.context() as patched,
                 contextlib.redirect_stderr(io.StringIO()) as err,
             ):
-                patched.setattr(shutil, "which", support.returning(None))
+                patched.setattr(shutil, "which", lambda *_args, **_kwargs: None)
                 status = drift.main([".bestpractices.json", REPO, str(readme)])
         assert status == 1
         assert err.getvalue() == "audit:bestpractices: curl missing\n"

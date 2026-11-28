@@ -364,52 +364,81 @@ class TestSecurityConfigTest:
         assert "signer: in the roster and not in the org listing" in err
 
 
+ROSTER = load(TREE / "slsa" / "assert-policy.json")
+NAMES = sc.roster_names
+REPOS = "population.repositories"
+RECORDS_AND_ROSTER_ROWS: list[tuple[Callable[[], object], str]] = [
+    (
+        lambda: sc.read_records([], {}, ROSTER),
+        "org-default.json is not an object",
+    ),
+    (
+        lambda: sc.read_records({}, 1, ROSTER),
+        "org-private.json is not an object",
+    ),
+    (lambda: NAMES([]), "the roster is not an object"),
+    (lambda: NAMES({"population": []}), "population is not an object"),
+    pytest.param(
+        lambda: NAMES({"population": {}}),
+        f"{REPOS} is absent or empty",
+        id="repositories absent",
+    ),
+    pytest.param(
+        lambda: NAMES({"population": {"repositories": []}}),
+        f"{REPOS} is absent or empty",
+        id="repositories empty",
+    ),
+    (
+        lambda: NAMES({"population": {"repositories": ["x"]}}),
+        f"{REPOS}[0] is not an object",
+    ),
+    (
+        lambda: NAMES({"population": {"repositories": [{"r": 1}]}}),
+        f"{REPOS}[0].repo is not a string",
+    ),
+    (
+        lambda: sc.repo_status({"k": {"status": 1}}, "k"),
+        "security_and_analysis.k.status is not a string",
+    ),
+    (lambda: sc.pages("e", {}), "e: the pages is not a list"),
+    (lambda: sc.pages("e", [[1], 2]), "e: a page is not a list"),
+]
+LIVE_ANSWERS_ROWS: list[tuple[str, object, str]] = [
+    (LISTING, [1], f"{LISTING}: [0] is not an object"),
+    (
+        LISTING,
+        [{"name": "x", "private": "no"}],
+        f"{LISTING}: [0].private is not a boolean",
+    ),
+    (LISTING, [{"private": True}], f"{LISTING}: [0].name is not a string"),
+    (DEFAULTS, ["x"], f"{DEFAULTS}: [0] is not an object"),
+    (
+        ATTACHED,
+        [{"status": "enforced"}],
+        f"{ATTACHED}: [0].repository is not an object",
+    ),
+    (
+        ATTACHED,
+        [{"repository": {"name": 1}}],
+        f"{ATTACHED}: [0].repository.name is not a string",
+    ),
+    (
+        ATTACHED,
+        [{"repository": {"name": "x"}, "status": 2}],
+        f"{ATTACHED}: [0].status is not a string",
+    ),
+]
+
+
 class TestShapeTest:
     """An input or a live answer of the wrong shape is refused by name."""
 
-    def test_records_and_roster(self) -> None:
+    @pytest.mark.parametrize(("call", "message"), RECORDS_AND_ROSTER_ROWS)
+    def test_records_and_roster(self, call: Callable[[], object], message: str) -> None:
         """Each input field the audit reads, wrongly shaped in turn."""
-        roster = load(TREE / "slsa" / "assert-policy.json")
-        names = sc.roster_names
-        repos = "population.repositories"
-        rows: list[tuple[Callable[[], object], str]] = [
-            (
-                lambda: sc.read_records([], {}, roster),
-                "org-default.json is not an object",
-            ),
-            (
-                lambda: sc.read_records({}, 1, roster),
-                "org-private.json is not an object",
-            ),
-            (lambda: names([]), "the roster is not an object"),
-            (lambda: names({"population": []}), "population is not an object"),
-            (lambda: names({"population": {}}), f"{repos} is absent or empty"),
-            (
-                lambda: names({"population": {"repositories": []}}),
-                f"{repos} is absent or empty",
-            ),
-            (
-                lambda: names({"population": {"repositories": ["x"]}}),
-                f"{repos}[0] is not an object",
-            ),
-            (
-                lambda: names({"population": {"repositories": [{"r": 1}]}}),
-                f"{repos}[0].repo is not a string",
-            ),
-            (
-                lambda: sc.repo_status({"k": {"status": 1}}, "k"),
-                "security_and_analysis.k.status is not a string",
-            ),
-            (lambda: sc.pages("e", {}), "e: the pages is not a list"),
-            (lambda: sc.pages("e", [[1], 2]), "e: a page is not a list"),
-        ]
-        for call, message in rows:
-            with (
-                self.subTest(message=message),
-                pytest.raises(decoded.UndecodableError) as cm,
-            ):
-                call()
-            assert str(cm.value) == message
+        with pytest.raises(decoded.UndecodableError) as cm:
+            call()
+        assert str(cm.value) == message
 
     def test_status_readings(self) -> None:
         """A status is read; an absent block or status is no reading."""
@@ -419,43 +448,15 @@ class TestShapeTest:
         flat: list[object] = [1, 2, 3]
         assert sc.pages("e", [[1], [], [2, 3]]) == flat
 
-    def test_live_answers(self) -> None:
+    @pytest.mark.parametrize(("endpoint", "body", "message"), LIVE_ANSWERS_ROWS)
+    def test_live_answers(self, endpoint: str, body: object, message: str) -> None:
         """Each live field the audit reads, wrongly shaped in turn."""
-        cases: list[tuple[str, object, str]] = [
-            (LISTING, [1], f"{LISTING}: [0] is not an object"),
-            (
-                LISTING,
-                [{"name": "x", "private": "no"}],
-                f"{LISTING}: [0].private is not a boolean",
-            ),
-            (LISTING, [{"private": True}], f"{LISTING}: [0].name is not a string"),
-            (DEFAULTS, ["x"], f"{DEFAULTS}: [0] is not an object"),
-            (
-                ATTACHED,
-                [{"status": "enforced"}],
-                f"{ATTACHED}: [0].repository is not an object",
-            ),
-            (
-                ATTACHED,
-                [{"repository": {"name": 1}}],
-                f"{ATTACHED}: [0].repository.name is not a string",
-            ),
-            (
-                ATTACHED,
-                [{"repository": {"name": "x"}, "status": 2}],
-                f"{ATTACHED}: [0].status is not a string",
-            ),
-        ]
-        for endpoint, body, message in cases:
-            live = Live()
-            live.answers[endpoint] = (200, body)
-            audit = sc.Audit(OWNER, records(), live)
-            with (
-                self.subTest(message=message),
-                pytest.raises(decoded.UndecodableError) as cm,
-            ):
-                audit.run()
-            assert str(cm.value) == message
+        live = Live()
+        live.answers[endpoint] = (200, body)
+        audit = sc.Audit(OWNER, records(), live)
+        with pytest.raises(decoded.UndecodableError) as cm:
+            audit.run()
+        assert str(cm.value) == message
 
     def test_gh_reads_strictly_and_names_the_endpoint(self) -> None:
         """A duplicate key in gh's output is refused with the endpoint."""
@@ -464,12 +465,12 @@ class TestShapeTest:
             pytest.MonkeyPatch.context() as patched,
             pytest.raises(decoded.UndecodableError) as cm,
         ):
-            patched.setattr(subprocess, "run", support.returning(done))
+            patched.setattr(subprocess, "run", lambda *_args, **_kwargs: done)
             sc.gh_fetch("x/y")
         assert str(cm.value) == 'x/y: duplicate key "a"'
         pages = subprocess.CompletedProcess([], 0, stdout="[[1], [2]]", stderr="")
         with pytest.MonkeyPatch.context() as patched:
-            patched.setattr(subprocess, "run", support.returning(pages))
+            patched.setattr(subprocess, "run", lambda *_args, **_kwargs: pages)
             assert sc.gh_fetch("x/y", paginate=True) == (200, [1, 2])
 
     def test_main_reports_a_refusal_as_an_unreadable_input(self) -> None:

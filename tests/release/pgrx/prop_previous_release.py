@@ -45,7 +45,6 @@ from hypothesis import strategies as st
 
 from belt.release.pgrx import previous_release as previous
 from belt.typed_hypothesis import given
-from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -70,7 +69,9 @@ def as_helper() -> contextlib.ExitStack:
 
     """
     stack = contextlib.ExitStack()
-    support.name_task(stack.enter_context(pytest.MonkeyPatch.context()), "")
+    named = stack.enter_context(pytest.MonkeyPatch.context())
+    named.setenv("MISE_TASK_NAME", "")
+    named.setenv("ORG_FINDINGS", "")
     stack.enter_context(pytest.MonkeyPatch.context()).setattr(
         sys, "argv", ["previous_release.py"]
     )

@@ -10,6 +10,7 @@ tracks instead of calling support.tracked (#1618).
 """
 
 import ast
+import contextlib
 import os
 import shutil
 import subprocess
@@ -23,7 +24,6 @@ import pytest
 
 from belt import call_names, typed_std
 from tests import support
-import contextlib
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -762,8 +762,7 @@ class TestTracked:
         with pytest.raises(RuntimeError) as raised:
             support.tracked(self.root, "*.rs")
         assert str(raised.value) == (
-            f"support.tracked: git lists no tracked file under {self.root}"
-            " for ['*.rs']"
+            f"support.tracked: git lists no tracked file under {self.root} for ['*.rs']"
         )
 
 
@@ -781,7 +780,7 @@ def on_path(path: str) -> AbstractContextManager[object]:
 @pytest.mark.usefixtures("_stack", "_set_up_test_tool")
 class TestTool:
     """support.tool and support.optional_tool (#1684)."""
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""
@@ -853,7 +852,7 @@ class TestTool:
 @pytest.mark.usefixtures("_stack")
 class TestRustc:
     """support.rustc prints support.rustc_verbose (#1877)."""
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""
@@ -1070,14 +1069,14 @@ class TestTheLaw:
                 f"subprocess.run(a, env=support.env() if c else {hand})\n"
             ),
         }
-        for name, source in refused.items():
+        for source in refused.values():
             assert Environments(source).built_by_hand() == LINE_TWO
         allowed = {
             "import as": "import subprocess as sp\nsp.run(a, env=support.env())\n",
             "posix_spawn": "import os\nos.posix_spawn(p, a, support.env())\n",
             "a local run": "def run(a, env):\n    pass\nrun(a, env={'A': '1'})\n",
         }
-        for name, source in allowed.items():
+        for source in allowed.values():
             assert Environments(source).built_by_hand() == NOTHING
 
     def test_every_spelling_of_a_copy_is_found(self) -> None:
@@ -1151,7 +1150,7 @@ class TestTheLaw:
             ),
             "set one": "import os\nos.environ['A'] = '1'\n",
         }
-        for name, source in allowed.items():
+        for source in allowed.values():
             assert copies(source) == NOTHING
 
     def test_no_test_file_looks_a_tool_up_itself(self) -> None:
@@ -1208,7 +1207,7 @@ class TestTheLaw:
             ),
             "a local which": "def which(x):\n    return x\nX = which('git')\n",
         }
-        for name, source in allowed.items():
+        for source in allowed.values():
             assert list[int]() == which_calls(source)
 
     def test_no_test_file_plants_the_belt_or_canon_itself(self) -> None:
@@ -1252,7 +1251,7 @@ class TestTheLaw:
                 [6],
             ),
         }
-        for name, (source, lines) in planted.items():
+        for source, lines in planted.values():
             assert lines == plants_from_tree(source)
 
     def test_the_fixture_and_the_tests_own_files_are_allowed(self) -> None:
@@ -1273,7 +1272,7 @@ class TestTheLaw:
                 head + "def f(tmp):\n    BELT = tmp\n    shutil.copy(BELT / 'a', 'x')\n"
             ),
         }
-        for name, source in allowed.items():
+        for source in allowed.values():
             assert list[int]() == plants_from_tree(source)
 
     def test_no_test_file_asks_git_for_a_plain_listing(self) -> None:

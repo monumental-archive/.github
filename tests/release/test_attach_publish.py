@@ -1,4 +1,4 @@
-"""Run `release/attach_publish.py` against a stub `gh` (#1386).
+"""Run `belt/release/attach_publish.py` against a stub `gh` (#1386).
 
 `attach-release.yml`'s "Attach and publish" step is now one call to the
 helper. These rows call its `main` in this process (#1698), from a
@@ -18,17 +18,19 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from belt.release import attach_publish
 from tests import support
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 HERE = support.RELEASE
-HELPER = HERE / "attach_publish.py"
+COMMAND = "attach-publish"
 TAG = "v1.2.3"
 REPO = "example/project"
 # Answers by subcommand; every call is logged one per line, its
@@ -116,15 +118,14 @@ class TestAttachAndPublish:
         published: str = REBUILT,
         manifest: dict[str, object] | None = None,
         dry_run: str = "false",
-        script: bool = False,
         capfd: pytest.CaptureFixture[str],
-    ) -> tuple[subprocess.CompletedProcess[str] | support.Called, list[list[str]]]:
+    ) -> tuple[int, str, str, list[list[str]]]:
         """Run the helper against a release in the given state.
 
-        In this process unless `script`, which starts it as the step does.
+        In this process, as the step's command.
 
         Returns:
-            The run, and every `gh` call's arguments.
+            The status, both streams, and every `gh` call's arguments.
 
         """
         (self.fixtures / "checksums.txt").write_text(published, encoding="utf-8")
@@ -144,44 +145,29 @@ class TestAttachAndPublish:
             GITHUB_REPOSITORY=REPO,
             GITHUB_SERVER_URL="https://github.com",
             GITHUB_RUN_ID="42",
-            # The name a run outside mise gives the writer (#1934).
-            MISE_TASK_NAME=HELPER.name,
+            # A workflow step's: the writer names the command (#1934).
+            MISE_TASK_NAME="",
         )
-        done: subprocess.CompletedProcess[str] | support.Called
-        if script:
-            done = subprocess.run(
-                [sys.executable, str(HELPER)],
-                cwd=self.work,
-                env=env,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=60,
-            )
-        else:
-
-            def call() -> int:
-                return attach_publish.main([])
-
-            with pytest.MonkeyPatch.context() as patched:
-                for name, value in env.items():
-                    patched.setenv(name, value)
-                patched.chdir(self.work)
-                status = call()
-            out, err = capfd.readouterr()
+        with pytest.MonkeyPatch.context() as patched:
+            for name, value in env.items():
+                patched.setenv(name, value)
+            patched.chdir(self.work)
+            patched.setattr(sys, "argv", [COMMAND])
+            status = attach_publish.main([])
+        out, err = capfd.readouterr()
         lines = log.read_text(encoding="utf-8").splitlines() if log.is_file() else []
-        return done, [line.split("\0")[:-1] for line in lines]
+        return status, out, err, [line.split("\0")[:-1] for line in lines]
 
     def test_identical_published_release_converges(
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """#316, #586: a resume converges on the build subjects alone."""
         resigned = REBUILT.replace("cccc", "dddd")  # a fresh signature
-        done, calls = self.publish(
+        status, out, err, calls = self.publish(
             "false", published=resigned, manifest=TYPED, capfd=capfd
         )
-        assert done.returncode == 0, done.stdout + done.stderr
-        assert done.stdout == (
+        assert status == 0, out + err
+        assert out == (
             f"::notice::{TAG} already published; build subjects verified"
             " identical, converging\n"
         )
@@ -192,30 +178,27 @@ class TestAttachAndPublish:
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """A schema-1 release converges on its whole set, uploading nothing (#330)."""
-        done, calls = self.publish("false", manifest={"schema": 1}, capfd=capfd)
-        assert done.returncode == 0, done.stdout + done.stderr
-        assert "converging" in done.stdout
+        status, out, err, calls = self.publish(
+            "false", manifest={"schema": 1}, capfd=capfd
+        )
+        assert status == 0, out + err
+        assert "converging" in out
         assert "release upload" not in subcommands(calls)
 
     def test_checksums_differ_without_typing(
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
-        """No manifest: any differing asset refuses the resume.
-
-        The script row: `diff`'s lines are on the child's own stdout.
-        """
+        """No manifest: any differing asset refuses the resume."""
         resigned = REBUILT.replace("cccc", "dddd")
-        done, calls = self.publish(
-            "false", published=resigned, script=True, capfd=capfd
-        )
-        assert done.returncode == 1, done.stdout + done.stderr
-        assert "-dddd  attestations.intoto.jsonl" in done.stdout
-        assert "+cccc  attestations.intoto.jsonl" in done.stdout
-        assert done.stderr.endswith(
-            f"::error::attach_publish.py: {TAG} is published and immutable but"
+        status, out, err, calls = self.publish("false", published=resigned, capfd=capfd)
+        assert status == 1, out + err
+        assert "-dddd  attestations.intoto.jsonl" in out
+        assert "+cccc  attestations.intoto.jsonl" in out
+        assert err.endswith(
+            f"::error::attach-publish: {TAG} is published and immutable but"
             f" the rebuilt assets"
             " differ from the published set — this is not a resume\n"
-        ), done.stderr
+        ), err
         assert "release upload" not in subcommands(calls)
 
     def test_typed_build_subjects_differ(
@@ -223,12 +206,12 @@ class TestAttachAndPublish:
     ) -> None:
         """stele#156: a differing build subject refuses, by name."""
         rebuilt_other = REBUILT.replace("aaaa", "ffff")
-        done, _ = self.publish(
+        status, out, err, _ = self.publish(
             "false", published=rebuilt_other, manifest=TYPED, capfd=capfd
         )
-        assert done.returncode == 1, done.stdout + done.stderr
-        assert done.stderr == (
-            f"::error::attach_publish.py: {TAG} is published and immutable but these"
+        assert status == 1, out + err
+        assert err == (
+            f"::error::attach-publish: {TAG} is published and immutable but these"
             f" build subjects"
             " differ from the published bytes: tool-1.2.3-linux.tar.gz — this is"
             " not a resume\n"
@@ -239,18 +222,20 @@ class TestAttachAndPublish:
     ) -> None:
         """A build subject the published list lacks is a difference."""
         partial = "bbbb  sbom.spdx.json\ncccc  attestations.intoto.jsonl\n"
-        done, _ = self.publish("false", published=partial, manifest=TYPED, capfd=capfd)
-        assert done.returncode == 1, done.stdout + done.stderr
-        assert "differ from the published bytes: tool-1.2.3" in done.stderr
+        status, out, err, _ = self.publish(
+            "false", published=partial, manifest=TYPED, capfd=capfd
+        )
+        assert status == 1, out + err
+        assert "differ from the published bytes: tool-1.2.3" in err
 
     def test_manifest_that_is_not_json(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A manifest that cannot be read refuses rather than guessing."""
         (self.fixtures / "evidence-manifest.json").write_text("{", encoding="utf-8")
-        done, _ = self.publish("false", capfd=capfd)
-        assert done.returncode == 1, done.stdout + done.stderr
-        assert done.stderr.startswith(
-            "::error::attach_publish.py: published-manifest.json is not JSON:"
-        ), done.stderr
+        status, out, err, _ = self.publish("false", capfd=capfd)
+        assert status == 1, out + err
+        assert err.startswith(
+            "::error::attach-publish: published-manifest.json is not JSON:"
+        ), err
 
     def test_manifest_whose_entries_are_not_a_list(
         self, capfd: pytest.CaptureFixture[str]
@@ -263,10 +248,10 @@ class TestAttachAndPublish:
         (self.fixtures / "evidence-manifest.json").write_text(
             '{"entries": true}', encoding="utf-8"
         )
-        done, _ = self.publish("false", capfd=capfd)
-        assert done.returncode == 1, done.stdout + done.stderr
-        assert done.stderr == (
-            "::error::attach_publish.py: published-manifest.json is not an evidence"
+        status, out, err, _ = self.publish("false", capfd=capfd)
+        assert status == 1, out + err
+        assert err == (
+            "::error::attach-publish: published-manifest.json is not an evidence"
             " manifest:"
             " its entries are not a list\n"
         )
@@ -275,9 +260,9 @@ class TestAttachAndPublish:
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """A draft takes every asset, then is published."""
-        done, calls = self.publish("true", capfd=capfd)
-        assert done.returncode == 0, done.stdout + done.stderr
-        assert done.stdout == f"::notice::published {TAG}\n"
+        status, out, err, calls = self.publish("true", capfd=capfd)
+        assert status == 0, out + err
+        assert out == f"::notice::published {TAG}\n"
         want: list[str] = ["release view", "release upload", "release edit"]
         assert subcommands(calls) == want
         upload: list[str] = [
@@ -294,11 +279,11 @@ class TestAttachAndPublish:
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """#597: a rehearsal uploads, keeps the draft, and says why."""
-        done, calls = self.publish("true", dry_run="true", capfd=capfd)
-        assert done.returncode == 0, done.stdout + done.stderr
-        assert done.stdout.endswith(
+        status, out, err, calls = self.publish("true", dry_run="true", capfd=capfd)
+        assert status == 0, out + err
+        assert out.endswith(
             f"::warning::rehearsal: {TAG} left as a draft, nothing published\n"
-        ), done.stdout
+        ), out
         edits = [call for call in calls if call[:2] == ["release", "edit"]]
         assert len(edits) == 1, calls
         assert "--draft=false" not in edits[0]
@@ -312,6 +297,7 @@ class TestAttachAndPublish:
     ) -> None:
         """A release that cannot be read stops the step with gh's status."""
         (self.bindir / "gh").write_text("#!/usr/bin/env bash\nexit 4\n", "utf-8")
-        done, _ = self.publish("true", capfd=capfd)
-        assert done.returncode == 4, done.stdout + done.stderr
-        assert done.stdout == ""
+        with pytest.raises(SystemExit) as stopped:
+            self.publish("true", capfd=capfd)
+        assert stopped.value.code == 4
+        assert capfd.readouterr().out == ""

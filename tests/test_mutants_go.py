@@ -984,7 +984,7 @@ class TestMain:
             "a/a.go:3://mutants:equivalent arithmetic\n"
             "a/a.go:5:\tx++ //mutants:equivalent branch why\n",
         )
-        status, out, err = self.judge(capfd=capfd)
+        status, _out, err = self.judge(capfd=capfd)
         assert status == 1
         assert err == (
             f"{LABEL}: a/a.go:3: //mutants:equivalent arithmetic gives no reason\n"
@@ -999,7 +999,7 @@ class TestMain:
         self.results(("KILLED", 4, "arithmetic"))
         self.write("gomu.log", "  a.go (error: no package)\n")
         self.write("runs.log", "a/a.go: gomu exited 2\n")
-        status, out, err = self.judge(capfd=capfd)
+        status, _out, err = self.judge(capfd=capfd)
         assert status == 1
         assert err == (
             f"{LABEL}: not judged: a.go (error: no package)\n"
@@ -1011,7 +1011,7 @@ class TestMain:
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """`build-go` names the gomu, both Go releases and the rebuild."""
-        status, out, err = call(
+        status, _out, err = call(
             [
                 "build-go",
                 "--label",

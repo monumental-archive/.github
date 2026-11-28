@@ -23,12 +23,15 @@ GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom.
 
 import subprocess
 import sys
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from belt import decoded
 from tests import support
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 BELT = support.MISE
 CANON_DIR = BELT.parent
@@ -236,7 +239,7 @@ class TestUntracked(TestPlanted):
 class TestOnlyUntracked(TestPlanted):
     """A tree whose only workflow or template is untracked has none."""
 
-    @pytest.mark.parametrize("task,line", SKIPPED.items())
+    @pytest.mark.parametrize(("task", "line"), SKIPPED.items())
     def test_each_task_skips(self, task: object, line: object) -> None:
         """Seven tasks print their skip line and pass."""
         self.plant(STRAY, CLEAN, track=False)

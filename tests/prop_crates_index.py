@@ -77,7 +77,7 @@ class TestRefusal:
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             status = ci.main(argv)
-        assert status in (0, 2)
+        assert status in {0, 2}
         if status == 0:
             assert out.getvalue().startswith(ci.INDEX)
         else:

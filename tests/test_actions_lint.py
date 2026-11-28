@@ -15,7 +15,6 @@ belt's tools (`mise run test`, or `mise x --`).
 
 import subprocess
 import sys
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -25,6 +24,7 @@ from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
 # The task that runs the helper, whose name its findings carry (#1934).
 TASK = "lint:actions"
@@ -134,7 +134,7 @@ class TestActionsLint:
         with pytest.MonkeyPatch.context() as patched:
             patched.chdir(self.tree)
             status = actions_lint.main([])
-        out, err = capfd.readouterr()
+        _out, err = capfd.readouterr()
         assert status == actions_lint.EXIT_ERROR
         usage: list[str] = ["lint:actions: usage: belt actions-lint WORKFLOW..."]
         assert err.splitlines() == usage
@@ -166,7 +166,7 @@ class TestActionsLint:
                     patched.setenv(name, value)
                 patched.chdir(self.tree)
                 status = actions_lint.main([rel])
-            out, err = capfd.readouterr()
+            _out, err = capfd.readouterr()
         assert status == actions_lint.EXIT_ERROR
         missing_tool: list[str] = ["lint:actions: actionlint is not on PATH"]
         assert err.splitlines() == missing_tool

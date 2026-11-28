@@ -17,12 +17,15 @@ slices and deleted by its last step, so no file is excused.
 import ast
 import json
 from collections.abc import Callable, Iterator
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from belt import decoded
 from tests import support
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 HERE = support.MISE
 CANON = HERE.parent
@@ -149,7 +152,7 @@ class TestLoadJson:
         assert self.refused('{"a": 1, "a": 2}') == 'duplicate key "a"'
         assert self.refused('[{"b": 1, "b": 1}]') == 'duplicate key "b"'
 
-    @pytest.mark.parametrize("name", ("NaN", "Infinity", "-Infinity"))
+    @pytest.mark.parametrize("name", ["NaN", "Infinity", "-Infinity"])
     def test_nan_and_the_infinities_are_refused(self, name: object) -> None:
         """JSON has no NaN, Infinity or -Infinity."""
         assert f"{name} is not a JSON number" == self.refused(f"[{name}]")
@@ -290,7 +293,7 @@ class TestReaders:
             ("as_int", decoded.as_int, "1", "the doc is not an integer"),
             ("as_int", decoded.as_int, True, "the doc is not an integer"),
         ]
-        for name, reader, value, message in rows:
+        for _name, reader, value, message in rows:
             with pytest.raises(decoded.UndecodableError) as caught:
                 reader(value, "the doc")
             assert message == str(caught.value)

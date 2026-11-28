@@ -14,7 +14,6 @@ GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom.
 
 import subprocess
 import sys
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -24,6 +23,7 @@ from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
 # The task that runs the helper, whose name its findings carry (#1934).
 TASK = "lint:capability-boundary"
@@ -169,7 +169,7 @@ class TestBoundary:
             "marked": CALLED + GRANT + MARKER + JOBS,
             "marked, indented": CALLED + GRANT + JOBS + "  #  " + MARKER[2:],
         }
-        for row, text in rows.items():
+        for text in rows.values():
             rel = self.plant("wf.yml", text)
             status, out, err = self.helper(rel, capfd=capfd)
             same(status, 0, err)
@@ -205,7 +205,7 @@ class TestBoundary:
     def test_not_utf8_is_an_error(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A workflow that is not UTF-8 is refused by name, exit 2."""
         rel = self.plant("bad.yml", b"on: \xff\n")
-        status, out, err = self.helper(rel, capfd=capfd)
+        status, _out, err = self.helper(rel, capfd=capfd)
         same(status, capability_boundary.EXIT_ERROR)
         assert err.startswith(
             f"lint:capability-boundary: {rel}: cannot be read as UTF-8:"
@@ -213,7 +213,7 @@ class TestBoundary:
 
     def test_missing_file_is_an_error(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A named workflow that does not exist is refused by name, exit 2."""
-        status, out, err = self.helper(".github/workflows/gone.yml", capfd=capfd)
+        status, _out, err = self.helper(".github/workflows/gone.yml", capfd=capfd)
         same(status, capability_boundary.EXIT_ERROR)
         assert err.startswith(
             "lint:capability-boundary: .github/workflows/gone.yml:"
@@ -224,7 +224,7 @@ class TestBoundary:
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """No workflow named: exit 2 with the usage line."""
-        status, out, err = self.helper(capfd=capfd)
+        status, _out, err = self.helper(capfd=capfd)
         same(status, capability_boundary.EXIT_ERROR)
         usage = "lint:capability-boundary: usage: belt capability-boundary WORKFLOW..."
         same(err.splitlines(), [usage])

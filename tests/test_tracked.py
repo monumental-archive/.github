@@ -18,7 +18,10 @@ they would red this repository's own `lint:typos`.
 """
 
 import contextlib
+import io
+import os
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -252,7 +255,10 @@ class TestProducers:
         """
         tree = self.planted()
         with pytest.MonkeyPatch.context() as patched, contextlib.chdir(tree):
-            support.patch_env(patched, support.env(tree.parent / "home"), clear=True)
+            for name in list(os.environ):
+                patched.delenv(name)
+            for name, value in (support.env(tree.parent / "home")).items():
+                patched.setenv(name, value)
             narrowed: list[str] = tracked.tracked("é*")
             every: list[str] = sorted(tracked.tracked())
         assert list[str]([ACCENTED]) == narrowed
@@ -267,7 +273,7 @@ class TestProducers:
                 sys, "stdin", io.StringIO(f"{SPACED}\0\0a\nb.md\0{ACCENTED}\0")
             )
             status = len(tracked.stdin_paths()) - 3
-        out, err = capfd.readouterr()
+        _out, _err = capfd.readouterr()
         assert status == 0
 
     def test_split_decodes_each_entry_as_a_file_name(self) -> None:
@@ -458,7 +464,7 @@ class TestHas:
         (tree / "gone").unlink()
         return tree
 
-    @pytest.mark.parametrize("path,want", (("kept", 0), ("loose", 1), ("gone", 0)))
+    @pytest.mark.parametrize(("path", "want"), [("kept", 0), ("loose", 1), ("gone", 0)])
     def test_the_shell_answers_from_the_index(self, path: object, want: object) -> None:
         """Tracked 0, untracked on disk 1, tracked and deleted 0."""
         tree = self.planted()

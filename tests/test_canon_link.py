@@ -10,14 +10,17 @@ each row plants a tree, copies the shipped script into the tree's
 from __future__ import annotations
 
 import os
-import pathlib
 import shutil
 import subprocess
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from tests import support
+
+if TYPE_CHECKING:
+    import pathlib
+    from pathlib import Path
 
 CANON = "example-org/.github"
 SHA = "0123456789abcdef0123456789abcdef01234567"

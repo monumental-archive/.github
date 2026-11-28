@@ -23,11 +23,14 @@ import os
 import shutil
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from tests import support
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 CANON = support.CANON
 HOOKS = CANON / "lefthook" / "org-hooks.yml"

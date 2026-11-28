@@ -260,7 +260,7 @@ class TestBranches:
         """Two digests, even on one line: each named once, sorted."""
         line = f"x: {signer()}@{SHA} {signer()}@{OTHER} {signer()}@{SHA}\n"
         rel = self.plant("a.yml", line)
-        status, out, err = self.check(rel, capfd=capfd)
+        status, _out, err = self.check(rel, capfd=capfd)
         assert status == signer_pin.EXIT_RED
         want = [
             (
@@ -281,7 +281,7 @@ class TestBranches:
     ) -> None:
         """One file searched: grep -n's `line:text`, no file name."""
         rel = self.plant("a.yml", f"a\n  run: v --signer-digest  {SHA}")
-        status, out, err = self.check(rel, capfd=capfd)
+        status, _out, err = self.check(rel, capfd=capfd)
         assert status == signer_pin.EXIT_RED
         found = f"2:  run: v --signer-digest  {SHA}"
         assert literal_message(found) == err.splitlines()
@@ -293,7 +293,7 @@ class TestBranches:
         one = self.plant("a.yml", workflow())
         two = self.plant("b.yml", f"x: --signer-digest\t{OTHER}\n")
         self.plant(signer_pin.PIN_FILE, f"{SHA}\n")
-        status, out, err = self.check(one, two, capfd=capfd)
+        status, _out, err = self.check(one, two, capfd=capfd)
         assert status == signer_pin.EXIT_RED
         found = f"{two}:1:x: --signer-digest\t{OTHER}"
         assert literal_message(found) == err.splitlines()
@@ -302,7 +302,7 @@ class TestBranches:
         """The pin file back, agreeing or not: red, the split explained."""
         rel = self.plant("a.yml", workflow())
         self.plant(signer_pin.PIN_FILE, f"{SHA}\n")
-        status, out, err = self.check(rel, capfd=capfd)
+        status, _out, err = self.check(rel, capfd=capfd)
         assert status == signer_pin.EXIT_RED
         want = [
             (
@@ -340,7 +340,7 @@ class TestBranches:
         one = self.plant("a.yml", workflow("      - run: cat security/signer.pin\n"))
         prose = self.plant("b.yml", workflow("# security/signer.pin is gone\n"))
         two = self.plant("c.yml", "x: security/signer.pin\n")
-        status, out, err = self.check(one, prose, two, capfd=capfd)
+        status, _out, err = self.check(one, prose, two, capfd=capfd)
         assert status == signer_pin.EXIT_RED
         want = [
             (
@@ -354,7 +354,7 @@ class TestBranches:
     def test_not_utf8_is_an_error(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A workflow that is not UTF-8 is refused by name, exit 2."""
         rel = self.plant("bad.yml", b"on: \xff\n")
-        status, out, err = self.check(rel, capfd=capfd)
+        status, _out, err = self.check(rel, capfd=capfd)
         assert status == signer_pin.EXIT_ERROR
         assert err.startswith(f"lint:signer-pin: {rel}: cannot be read as UTF-8:"), err
 
@@ -373,7 +373,7 @@ class TestBranches:
             "no repo": ["x/", signer(), "a.yml"],
             "no signer": [CANON_NAME, "", "a.yml"],
         }
-        for row, argv in rows.items():
-            status, out, err = self.helper(*argv, capfd=capfd)
+        for argv in rows.values():
+            status, _out, err = self.helper(*argv, capfd=capfd)
             assert status == signer_pin.EXIT_ERROR
             assert usage == err.splitlines()

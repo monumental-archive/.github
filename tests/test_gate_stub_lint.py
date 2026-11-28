@@ -13,7 +13,6 @@ with no canon or no workflow, and the skip through the task's body.
 
 import subprocess
 import sys
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -23,6 +22,7 @@ from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
 # The task that runs the helper, whose name its findings carry (#1934).
 TASK = "lint:gate-stub"
@@ -229,7 +229,7 @@ class TestLint:
     ) -> None:
         """`merge_group:` at column 0 is not a trigger under `on:`."""
         rel = self.plant("gate.yml", GOOD.replace("  merge_group:", "merge_group:"))
-        status, out, err = self.helper(CANON, rel, capfd=capfd)
+        status, _out, err = self.helper(CANON, rel, capfd=capfd)
         same(status, gate_stub.EXIT_RED)
         same(err.splitlines(), unqueued(f" {rel}"))
 
@@ -241,7 +241,7 @@ class TestLint:
         local = self.plant("self.yml", "on:\n  pull_request:\n" + own)
         bare = self.plant("bare.yml", "on:\n  pull_request:\n" + JOB)
         clean = self.plant("clean.yml", GOOD)
-        status, out, err = self.helper(CANON, local, clean, bare, capfd=capfd)
+        status, _out, err = self.helper(CANON, local, clean, bare, capfd=capfd)
         same(status, gate_stub.EXIT_RED)
         files = f" {local} {bare}"
         expected = [*unedited(files), *unqueued(files), *ungrouped(files)]
@@ -263,14 +263,14 @@ class TestLint:
     def test_not_utf8_is_an_error(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A workflow that is not UTF-8 is refused by name, exit 2."""
         rel = self.plant("bad.yml", b"on: \xff\n")
-        status, out, err = self.helper(CANON, rel, capfd=capfd)
+        status, _out, err = self.helper(CANON, rel, capfd=capfd)
         same(status, gate_stub.EXIT_ERROR)
         assert err.startswith(f"lint:gate-stub: {rel}: cannot be read as UTF-8:"), err
 
     def test_missing_file_is_an_error(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A named workflow that does not exist is refused by name, exit 2."""
         rel = ".github/workflows/gone.yml"
-        status, out, err = self.helper(CANON, rel, capfd=capfd)
+        status, _out, err = self.helper(CANON, rel, capfd=capfd)
         same(status, gate_stub.EXIT_ERROR)
         assert err.startswith(f"lint:gate-stub: {rel}: cannot be read as UTF-8:"), err
 
@@ -281,6 +281,6 @@ class TestLint:
         usage = "lint:gate-stub: usage: belt gate-stub OWNER/REPO WORKFLOW..."
         calls: list[list[str]] = [[], [CANON], ["/repo", "x"], ["owner/", "x"]]
         for argv in calls:
-            status, out, err = self.helper(*argv, capfd=capfd)
+            status, _out, err = self.helper(*argv, capfd=capfd)
             same(status, gate_stub.EXIT_ERROR)
             same(err.splitlines(), [usage])

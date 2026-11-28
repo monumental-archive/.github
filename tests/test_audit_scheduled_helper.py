@@ -12,7 +12,6 @@ canon, a file that is not UTF-8, and no `--own`.
 
 import subprocess
 import sys
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -22,6 +21,7 @@ from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
 # The task that runs the helper, whose name its findings carry (#1934).
 TASK = "lint:audit-scheduled"
@@ -166,7 +166,7 @@ class TestHelper:
         """Running audit:fuzz-long does not schedule audit:fuzz."""
         self.config(CONFIG)
         rel = self.plant("x.yml", "      - run: mise run audit:fuzz-long\n")
-        status, out, err = self.helper("--own", "", rel, capfd=capfd)
+        status, _out, err = self.helper("--own", "", rel, capfd=capfd)
         same(status, audit_scheduled.EXIT_RED)
         same(err.splitlines(), unscheduled(" audit:fuzz"))
 
@@ -273,7 +273,7 @@ class TestHelper:
         same(done.returncode, audit_scheduled.EXIT_RED)
         same(done.stderr.splitlines(), unscheduled(" audit:fuzz"))
 
-    @pytest.mark.parametrize("canon", ("", "/", "owner/", "/repo"))
+    @pytest.mark.parametrize("canon", ["", "/", "owner/", "/repo"])
     def test_own_tasks_need_a_canon(
         self, canon: object, capfd: pytest.CaptureFixture[str]
     ) -> None:
@@ -283,7 +283,7 @@ class TestHelper:
             "lint:audit-scheduled: usage: --canon OWNER/REPO is needed to judge"
             " own tasks"
         )
-        status, out, err = self.helper(
+        status, _out, err = self.helper(
             "--own", "audit:custom", "--canon", canon, rel, capfd=capfd
         )
         same(status, audit_scheduled.EXIT_ERROR)
@@ -292,7 +292,7 @@ class TestHelper:
     def test_not_utf8_is_an_error(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A workflow that is not UTF-8 is refused by name, exit 2."""
         rel = self.plant("bad.yml", b"run: \xff\n")
-        status, out, err = self.helper("--own", "", rel, capfd=capfd)
+        status, _out, err = self.helper("--own", "", rel, capfd=capfd)
         same(status, audit_scheduled.EXIT_ERROR)
         assert err.startswith(
             f"lint:audit-scheduled: {rel}: cannot be read as UTF-8:"
@@ -302,6 +302,6 @@ class TestHelper:
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """No `--own`: argparse refuses, exit 2."""
-        status, out, err = self.helper(capfd=capfd)
+        status, _out, err = self.helper(capfd=capfd)
         same(status, audit_scheduled.EXIT_ERROR)
         assert "--own" in err

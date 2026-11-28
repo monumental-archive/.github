@@ -137,7 +137,7 @@ def test_a_timeout_is_red(
     tmp_path: Path, leg: Callable[..., Called], capfd: pytest.CaptureFixture[str]
 ) -> None:
     """`i += 1` made `i -= 1` or `i = 1` never ends: red, as a timeout, by name."""
-    status, out, err = leg(plant(tmp_path, "spin", SPIN, SPIN_TESTS), capfd=capfd)
+    status, _out, err = leg(plant(tmp_path, "spin", SPIN, SPIN_TESTS), capfd=capfd)
     assert status == RED
     assert (
         "audit:mutants: 2 mutant(s) timeout: their tests ran past the time limit\n"
@@ -253,7 +253,7 @@ def test_an_unknown_argument_is_a_usage_error(
 def test_a_mutants_name_reads_as_its_module_and_function(
     name: str, where: tuple[str, str]
 ) -> None:
-    """mutmut's mangled names, read back."""
+    """Mutmut's mangled names, read back."""
     assert mutants_python.function_of(name) == where
 
 

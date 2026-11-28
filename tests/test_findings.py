@@ -508,8 +508,8 @@ class TestLoadingRows:
 
     def test_an_empty_path_still_loads_the_writer(self) -> None:
         """PATH empty: no output, status 0, org_finding defined."""
-        for label, bash in bashes():
-            for how, source, cwd in (
+        for _label, bash in bashes():
+            for _how, source, cwd in (
                 ("absolute", str(SHELL_WRITER), None),
                 ("no slash", SHELL_WRITER.name, SHELL_WRITER.parent),
             ):
@@ -581,7 +581,7 @@ class TestLinesRows:
             for line in self.file.read_text(encoding="utf-8").splitlines()
         ]
 
-    @pytest.mark.parametrize("label,bash", bashes())
+    @pytest.mark.parametrize(("label", "bash"), bashes())
     def test_each_line_is_one_finding(self, label: object, bash: object) -> None:
         """Empty subject, detail, a tab in the message: printed and recorded."""
         text = f"{US}no subject\nf.yml{US}is wrong{US}first{US}second\ns{US}a\tb\n"
@@ -619,7 +619,7 @@ class TestLinesRows:
         assert done.stderr == printed
         assert self.records() == expected
 
-    @pytest.mark.parametrize("label,bash", bashes())
+    @pytest.mark.parametrize(("label", "bash"), bashes())
     def test_a_line_with_no_separator_is_passed_through(
         self, label: object, bash: object
     ) -> None:
@@ -628,7 +628,7 @@ class TestLinesRows:
         assert (done.returncode, done.stdout, done.stderr) == (0, "all clean\n", "")
         assert self.records() == NO_RECORDS
 
-    @pytest.mark.parametrize("label,bash", bashes())
+    @pytest.mark.parametrize(("label", "bash"), bashes())
     def test_a_last_line_without_a_newline_is_read(
         self, label: object, bash: object
     ) -> None:

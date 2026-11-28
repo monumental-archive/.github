@@ -8,25 +8,26 @@ matched. The step now reads the compare step's outcome: `failure` is a
 verdict and keeps its title and body exactly; anything else is no
 verdict, and says so without the words of one.
 
-The code under test is `release/repro_issue.py`, which the step runs as
+The code under test is `belt/release/repro_issue.py`, which the step runs as
 its one command (#1386), with a stub `gh` first on PATH that records
 its arguments. The three rows below were written against the step's
 `run:` block cut out of the YAML; they are carried over row for row and
-now call the helper's `main` in this process (#1698). One row starts
-the helper as the step does instead: the script contract.
+now call the helper's `main` in this process (#1698).
 """
 
 import os
-import subprocess
 import sys
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from belt.release import repro_issue
 from tests import support
 
-HELPER = support.RELEASE / "repro_issue.py"
+if TYPE_CHECKING:
+    from pathlib import Path
+
+COMMAND = "repro-issue"
 RUN_URL = "https://github.com/monumental-archive/lab/actions/runs/42044978939"
 NO_VERDICT_BODY = (
     "The reproducibility audit set out to rebuild v0.28.1 with the"
@@ -77,12 +78,11 @@ class TestFileAnIssue:
         outcome: str,
         manifest: str = "{}",
         *,
-        script: bool = False,
         capfd: pytest.CaptureFixture[str],
     ) -> tuple[str, str]:
         """Run the helper with the compare step's `outcome`.
 
-        In this process unless `script`, which starts it as the step does.
+        In this process, as the step's command.
 
         Returns:
             The title and body the step handed to `gh issue create`.
@@ -102,26 +102,12 @@ class TestFileAnIssue:
             GITHUB_REPOSITORY="monumental-archive/lab",
             GITHUB_RUN_ID="42044978939",
         )
-        proc: subprocess.CompletedProcess[str] | support.Called
-        if script:
-            proc = subprocess.run(
-                [sys.executable, str(HELPER)],
-                env=env,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=60,
-            )
-        else:
-
-            def call() -> int:
-                return repro_issue.main([])
-
-            with pytest.MonkeyPatch.context() as patched:
-                for name, value in env.items():
-                    patched.setenv(name, value)
-                status = call()
-            out, err = capfd.readouterr()
+        with pytest.MonkeyPatch.context() as patched:
+            for name, value in env.items():
+                patched.setenv(name, value)
+            patched.setattr(sys, "argv", [COMMAND])
+            status = repro_issue.main([])
+        out, err = capfd.readouterr()
         assert status == 0, out + err
         args = args_file.read_text(encoding="utf-8").split("\0")[:-1]
         create: list[str] = ["issue", "create", "--repo", "monumental-archive/lab"]
@@ -134,11 +120,8 @@ class TestFileAnIssue:
     def test_failure_is_a_verdict_and_files_as_before(
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
-        """A comparison that ran and failed keeps its title and body.
-
-        The script row: the helper started as the step starts it.
-        """
-        title, body = self.file("failure", script=True, capfd=capfd)
+        """A comparison that ran and failed keeps its title and body."""
+        title, body = self.file("failure", capfd=capfd)
         assert title == VERDICT_TITLE
         assert body == VERDICT_BODY
 

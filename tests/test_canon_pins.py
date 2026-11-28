@@ -17,7 +17,6 @@ GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom.
 
 import subprocess
 import sys
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -27,6 +26,7 @@ from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
 # The task that runs the helper, whose name its findings carry (#1934).
 TASK = "lint:canon-pins"
@@ -284,7 +284,7 @@ class TestPins(TestPlanted):
             f"  - uses: {CANON}/x@{SHA}  # v1.2.3\n",
         )
         rel = self.plant("a.yml", steps(*lines))
-        status, out, err = self.surfaces(yml=(rel,), capfd=capfd)
+        status, _out, err = self.surfaces(yml=(rel,), capfd=capfd)
         same(status, canon_pins.EXIT_RED)
         same(err.splitlines(), red(*[f"{rel}{UNPINNED}"] * len(lines)))
 
@@ -322,7 +322,7 @@ class TestRemotes(TestPlanted):
         """A remote at a branch, or with no ref at all: named."""
         one = self.plant("lefthook.yml", hook("main"))
         two = self.plant("sub/lefthook.yml", f"# github.com/{CANON}\n")
-        status, out, err = self.surfaces(hooks=(one, two), capfd=capfd)
+        status, _out, err = self.surfaces(hooks=(one, two), capfd=capfd)
         same(status, canon_pins.EXIT_RED)
         same(err.splitlines(), red(f"{one}{BRANCH}", f"{two}{BRANCH}"))
 
@@ -356,7 +356,7 @@ class TestCheckouts(TestPlanted):
     ) -> None:
         """Two checkouts, one with trailing blanks: counted twice, named once."""
         rel = self.plant(".github/workflows/a.yml", steps(checkout(), checkout(" \t")))
-        status, out, err = self.surfaces(flows=(rel,), capfd=capfd)
+        status, _out, err = self.surfaces(flows=(rel,), capfd=capfd)
         same(status, canon_pins.EXIT_RED)
         named = f"{rel}(2 canon checkout(s) — use $/.github/actions/canon)"
         same(err.splitlines(), red(named))
@@ -386,7 +386,7 @@ class TestCalls(TestPlanted):
         one = self.plant("b.yml", bad)
         two = self.plant("a.yml", bad)
         hooks = self.plant("lefthook.yml", hook("main"))
-        status, out, err = self.surfaces(yml=(one, two), hooks=(hooks,), capfd=capfd)
+        status, _out, err = self.surfaces(yml=(one, two), hooks=(hooks,), capfd=capfd)
         same(status, canon_pins.EXIT_RED)
         expected = red(f"{one}{UNPINNED}", f"{two}{UNPINNED}", f"{hooks}{BRANCH}")
         same(err.splitlines(), expected)
@@ -397,7 +397,7 @@ class TestCalls(TestPlanted):
         """A file that is not UTF-8 is read as grep reads it: its pin is named."""
         text = f"x: \xff\n  - uses: {CANON}/x@main\n"
         rel = self.plant("a.yml", text.encode("latin-1"))
-        status, out, err = self.surfaces(yml=(rel,), capfd=capfd)
+        status, _out, err = self.surfaces(yml=(rel,), capfd=capfd)
         same(status, canon_pins.EXIT_RED)
         same(err.splitlines(), red(f"{rel}{UNPINNED}"))
 
@@ -405,7 +405,7 @@ class TestCalls(TestPlanted):
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """A named file that is not there is refused by name, exit 2."""
-        status, out, err = self.surfaces(presets=("renovate.json",), capfd=capfd)
+        status, _out, err = self.surfaces(presets=("renovate.json",), capfd=capfd)
         same(status, canon_pins.EXIT_ERROR)
         assert err.startswith(f"{TASK}: renovate.json: cannot be read:"), err
 
@@ -422,6 +422,6 @@ class TestCalls(TestPlanted):
             [CANON, "--", "--", "--", "--"],
         ]
         for argv in calls:
-            status, out, err = self.helper(*argv, capfd=capfd)
+            status, _out, err = self.helper(*argv, capfd=capfd)
             same(status, canon_pins.EXIT_ERROR)
             same(err.splitlines(), [usage])

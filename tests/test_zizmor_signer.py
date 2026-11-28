@@ -127,8 +127,9 @@ def run(
         redirect_stdout(out),
         redirect_stderr(err),
     ):
-        patched.setattr(signer, "run_zizmor", support.returning(ran))
-        support.patch_env(patched, env)
+        patched.setattr(signer, "run_zizmor", lambda *_args, **_kwargs: ran)
+        for name, value in env.items():
+            patched.setenv(name, value)
         code = signer.main(["--signer-workflow", workflow, *ARGS])
     return code, out.getvalue(), err.getvalue()
 
@@ -453,7 +454,8 @@ class TestRecords:
             redirect_stderr(err),
         ):
             patched.setattr(signer, "run_zizmor", zizmor)
-            support.patch_env(patched, self.env)
+            for name, value in self.env.items():
+                patched.setenv(name, value)
             status = signer.main(["--signer-workflow", SIGNER_WORKFLOW, *ARGS])
         return status, out.getvalue(), err.getvalue(), asked
 
@@ -568,7 +570,8 @@ class TestRecords:
                 redirect_stdout(out),
                 redirect_stderr(err),
             ):
-                support.patch_env(patched, self.env)
+                for name, value in self.env.items():
+                    patched.setenv(name, value)
                 status = signer.main(["--signer-workflow", SIGNER_WORKFLOW])
         assert status == 1
         assert f"{TASK}: zizmor is not on PATH" in err.getvalue()
@@ -639,7 +642,7 @@ class TestPinnedZizmor:
                 patched.setenv(name, value)
             patched.chdir(tmp)
             status = signer.main(argv)
-        out, err = capfd.readouterr()
+        _out, err = capfd.readouterr()
         lines = file.read_text(encoding="utf-8").splitlines() if file.exists() else []
         got: list[object] = [decoded.load_json(line) for line in lines]
         return status, got, err

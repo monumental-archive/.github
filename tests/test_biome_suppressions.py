@@ -153,12 +153,12 @@ class TestScriptLiterals:
         assert want == wide("a.tsx", text)
 
     @pytest.mark.parametrize(
-        "text,want",
-        (
+        ("text", "want"),
+        [
             ("/* biome-ignore-all x", [(1, "biome-ignore-all")]),
             ("const a = `abc", []),
             ("const a = /abc", []),
-        ),
+        ],
     )
     def test_unterminated_input_ends_the_scan(self, text: object, want: object) -> None:
         """An open comment, template or regex at the end is no crash."""

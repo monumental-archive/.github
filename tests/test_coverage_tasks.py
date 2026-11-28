@@ -18,6 +18,7 @@ Each row asserts the message, not just the exit status: a planted row
 scored on exit alone can pass for the wrong reason.
 """
 
+import contextlib
 import json
 import os
 import shutil
@@ -28,10 +29,10 @@ from decimal import Decimal
 from pathlib import Path
 from typing import TypedDict, Unpack, override
 
+import pytest
+
 from belt import coverage_floor, decoded, workflow_yaml
 from tests import support
-import contextlib
-import pytest
 
 CANON = support.CANON
 BELT = CANON / "mise"
@@ -462,7 +463,7 @@ class Plant(TypedDict, total=False):
 @pytest.mark.usefixtures("_stack")
 class TestCoverageTaskCase:
     """Runs a task and removes the planted tree afterwards."""
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""
@@ -867,9 +868,7 @@ class TestReportsSelector(TestCoverageTaskCase):
             tree.mkdir()
             (Path(tmp) / "reports").mkdir()
             (Path(tmp) / "reports" / "coverage.xml").write_text("x\n", "utf-8")
-            subprocess.run(
-                [GIT, "init", "-q"], cwd=tree, env=support.env(), check=True
-            )
+            subprocess.run([GIT, "init", "-q"], cwd=tree, env=support.env(), check=True)
             done = self.reports(tree)
         assert done.returncode == 1
         assert done.stdout == ""

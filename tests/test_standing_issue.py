@@ -356,7 +356,7 @@ class TestRows(TestStubbed):
     def test_same_run_is_counted_once(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A second report in one run does not count the run twice."""
         self.env["STUB_LIST"] = issues((42, TITLE, previous(FIRST, 3, RUN)))
-        status, out, err = self.run_report(capfd=capfd)
+        status, _out, err = self.run_report(capfd=capfd)
         same(status, 0, err)
         assert "- Red runs: 3\n" in self.body_of(self.gh_calls()[2])
 
@@ -396,7 +396,7 @@ class TestRows(TestStubbed):
     ) -> None:
         """A listing that fails exits 2 by name and files nothing."""
         self.env["STUB_LIST_FAIL"] = "1"
-        status, out, err = self.run_report(capfd=capfd)
+        status, _out, err = self.run_report(capfd=capfd)
         same(status, 2)
         same(self.gh_calls(), [JOBS, LIST])
         assert (
@@ -409,7 +409,7 @@ class TestRows(TestStubbed):
         self.jobs([job(1, "plan", "failure"), job(2, "caller permissions", "failure")])
         both = [(n, TITLE, previous(FIRST, 1)) for n in (41, 42)]
         self.env["STUB_LIST"] = issues(*both)
-        status, out, err = self.run_report(capfd=capfd)
+        status, _out, err = self.run_report(capfd=capfd)
         same(status, 2)
         same(self.gh_calls(), [JOBS, LIST])
         assert f"2 open issues are titled exactly '{TITLE}' (#41, #42)" in err
@@ -419,7 +419,7 @@ class TestRows(TestStubbed):
     ) -> None:
         """A title that only resembles is never edited."""
         self.env["STUB_LIST"] = issues((7, f"{TITLE} again", ""))
-        status, out, err = self.run_report(capfd=capfd)
+        status, _out, err = self.run_report(capfd=capfd)
         same(status, 0, err)
         same(self.gh_calls()[-1][:2], ["issue", "create"])
 
@@ -464,7 +464,7 @@ class TestRows(TestStubbed):
             job(3, "citations", None, "in_progress"),
         ])
         self.env["STUB_LIST"] = issues((41, "red: plan (slsa)", previous(FIRST, 3)))
-        status, out, err = self.run_report(capfd=capfd)
+        status, _out, err = self.run_report(capfd=capfd)
         same(status, 0, err)
         calls = self.gh_calls()
         same([c[:2] for c in calls[2:]], [["label", "list"], ["issue", "create"]])
@@ -473,7 +473,7 @@ class TestRows(TestStubbed):
         """A job that timed out is red."""
         self.jobs([job(4, "watch (leg 1)", "timed_out")])
         self.log(4, logged("reading"))
-        status, out, err = self.run_report(capfd=capfd)
+        status, _out, err = self.run_report(capfd=capfd)
         same(status, 0, err)
         create = self.gh_calls()[-1]
         same(create[5], "red: watch (slsa)")
@@ -522,7 +522,7 @@ class TestPerJob(TestStubbed):
         ])
         self.log(1, failing("mise run coverage", "below the floor"))
         self.log(2, failing("mise run chain", "link 3 does not verify"))
-        status, out, err = self.run_report(capfd=capfd)
+        status, _out, err = self.run_report(capfd=capfd)
         same(status, 0, err)
         calls = self.gh_calls()
         same(calls[:3], [JOBS, LIST, LABELS])
@@ -551,7 +551,7 @@ class TestPerJob(TestStubbed):
             job(2, "deep-tests / x (4/8)", "success"),
         ])
         self.log(1, failing("mise run x", "boom"))
-        status, out, err = self.run_report(workflow="deep-tests", capfd=capfd)
+        status, _out, err = self.run_report(workflow="deep-tests", capfd=capfd)
         same(status, 0, err)
         create = self.gh_calls()[-1]
         same(create[5], "red: x (deep-tests)")
@@ -568,7 +568,7 @@ class TestPerJob(TestStubbed):
         self.jobs([job(n, f"{name} (leg {n})", "failure") for n in range(1, 15)])
         for n in range(1, 15):
             self.log(n, failing("mise run fuzz", "llvm-tools is not installed"))
-        status, out, err = self.run_report(capfd=capfd)
+        status, _out, err = self.run_report(capfd=capfd)
         same(status, 0, err)
         creates = [c for c in self.gh_calls() if c[:2] == ["issue", "create"]]
         same(len(creates), 1)
@@ -587,7 +587,7 @@ class TestPerJob(TestStubbed):
         legs += [job(n, f"shard ({n})", "success") for n in range(2, 15)]
         self.jobs(legs)
         self.log(1, failing("mise run shard", "one shard failed"))
-        status, out, err = self.run_report(capfd=capfd)
+        status, _out, err = self.run_report(capfd=capfd)
         same(status, 0, err)
         create = self.gh_calls()[-1]
         same(create[:2], ["issue", "create"])
@@ -601,7 +601,7 @@ class TestPerJob(TestStubbed):
         legs = [job(n, f"shard ({n})", "success") for n in range(1, 14)]
         self.jobs([*legs, job(14, "shard (14)", "skipped")])
         self.env["STUB_LIST"] = issues((42, "red: shard (slsa)", previous(FIRST, 2)))
-        status, out, err = self.run_report(capfd=capfd)
+        status, _out, err = self.run_report(capfd=capfd)
         same(status, 0, err)
         comment = f"Green: {RUN} ran every leg of this job green or skipped."
         closed = ["issue", "close", "42", "--repo", REPO, "--comment", comment]
@@ -628,7 +628,7 @@ class TestPerJob(TestStubbed):
             (41, "red: a (slsa)", previous(FIRST, 1)),
             (42, "red: b (slsa)", previous(FIRST, 1)),
         )
-        status, out, err = self.run_report(capfd=capfd)
+        status, _out, err = self.run_report(capfd=capfd)
         same(status, 0, err)
         calls = self.gh_calls()
         same(len(calls), 4)
@@ -650,7 +650,7 @@ class TestPerJob(TestStubbed):
             *decoded.as_array(decoded.load_json(unlabelled), "unlabelled"),
         ]
         self.env["STUB_LIST"] = json.dumps(listing)
-        status, out, err = self.run_report(capfd=capfd)
+        status, _out, err = self.run_report(capfd=capfd)
         same(status, 0, err)
         comment = (
             f"Not in the run: {RUN} lists no job named `gone`;"
@@ -659,7 +659,7 @@ class TestPerJob(TestStubbed):
         closed = ["issue", "close", "50", "--repo", REPO, "--comment", comment]
         same(self.gh_calls(), [JOBS, LIST, closed])
 
-    @pytest.mark.parametrize("red", (True, False))
+    @pytest.mark.parametrize("red", [True, False])
     def test_the_old_issue_is_closed_red_or_green(
         self, red: object, capfd: pytest.CaptureFixture[str]
     ) -> None:
@@ -675,7 +675,7 @@ class TestPerJob(TestStubbed):
             self.jobs([job(1, "plan", "success")])
         old = (30, OLD, previous(FIRST, 5))
         self.env["STUB_LIST"] = issues(old, label=False)
-        status, out, err = self.run_report(capfd=capfd)
+        status, _out, err = self.run_report(capfd=capfd)
         same(status, 0, err)
         calls = self.gh_calls()
         same(calls[-1], closed)
@@ -690,7 +690,7 @@ class TestPerJob(TestStubbed):
         self.log(1, failing("mise run a", "a broke"))
         self.log(2, failing("mise run b", "b broke"))
         self.env["STUB_LIST"] = issues((41, "red: a (slsa)", previous(FIRST, 3)))
-        status, out, err = self.run_report(capfd=capfd)
+        status, _out, err = self.run_report(capfd=capfd)
         same(status, 0, err)
         calls = self.gh_calls()
         edit = next(c for c in calls if c[:3] == ["issue", "edit", "41"])
@@ -707,7 +707,7 @@ class TestLogs(TestStubbed):
     def test_unreadable_log_is_named(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A log the forge will not serve is named in the entry, not fatal."""
         self.jobs([job(5, "drafts", "failure")])
-        status, out, err = self.run_report(capfd=capfd)
+        status, _out, err = self.run_report(capfd=capfd)
         same(status, 0, err)
         assert (
             "_Log tail unknown: the log could not be read: GET"
@@ -717,14 +717,14 @@ class TestLogs(TestStubbed):
     def test_no_token_is_named(self, capfd: pytest.CaptureFixture[str]) -> None:
         """No GH_TOKEN: named in the entry, not fatal, nothing requested."""
         del self.env["GH_TOKEN"]
-        status, out, err = self.run_report(capfd=capfd)
+        status, _out, err = self.run_report(capfd=capfd)
         same(status, 0, err)
         assert "GH_TOKEN is not set_" in self.body_of(self.gh_calls()[-1])
         same(self.seen, [])
 
     def test_log_is_read_without_gh(self, capfd: pytest.CaptureFixture[str]) -> None:
         """The log comes from the endpoint; gh never reads one."""
-        status, out, err = self.run_report(capfd=capfd)
+        status, _out, err = self.run_report(capfd=capfd)
         same(status, 0, err)
         reads = [
             call
@@ -739,7 +739,7 @@ class TestLogs(TestStubbed):
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """The API read carries the token; the redirected read does not."""
-        status, out, err = self.run_report(capfd=capfd)
+        status, _out, err = self.run_report(capfd=capfd)
         same(status, 0, err)
         same(
             self.seen,
@@ -1058,7 +1058,7 @@ class TestFindingsBody:
         assert "```text\ncaller grant missing\n```" in second
 
     @pytest.mark.parametrize(
-        "found", (SPELL, standing.Finding("lint:shell", "a.sh", "unformatted"))
+        "found", [SPELL, standing.Finding("lint:shell", "a.sh", "unformatted")]
     )
     def test_a_step_of_two_tasks_is_matched_by_either(self, found: object) -> None:
         """A step that ran two tasks, seen by their `[task] ` prefixes."""
@@ -1153,7 +1153,7 @@ class TestFindingsReport(TestStubbed):
         records(
             found, "job.jsonl", standing.Finding("lint:caller", "edtf", "caller-grant")
         )
-        status, out, err = self.run_report(findings=found, capfd=capfd)
+        status, _out, err = self.run_report(findings=found, capfd=capfd)
         same(status, 0, err)
         text = self.body_of(self.gh_calls()[3])
         assert "### lint:caller (1)\n" in text
@@ -1183,7 +1183,7 @@ class TestFindingsReport(TestStubbed):
             standing.Finding("verdict.py", "leg 1", "finding of the watch"),
             standing.Finding("audit:loose", "", "finding of no failing step"),
         )
-        status, out, err = self.run_report(findings=found, capfd=capfd)
+        status, _out, err = self.run_report(findings=found, capfd=capfd)
         same(status, 0, err)
         made = {
             c[5]: self.body_of(c)
@@ -1208,6 +1208,6 @@ class TestFindingsReport(TestStubbed):
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """No `--findings`: the body has no findings section."""
-        status, out, err = self.run_report(capfd=capfd)
+        status, _out, err = self.run_report(capfd=capfd)
         same(status, 0, err)
         assert "## Findings" not in self.body_of(self.gh_calls()[3])

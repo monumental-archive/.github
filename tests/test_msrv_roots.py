@@ -16,19 +16,23 @@ Before #2011 the body read `cargo metadata` at the root alone, so the
 fuzz crate was held to nothing: each row fails there.
 
 GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom; every child
-environment is built from support.env (#1542)."""
+environment is built from support.env (#1542).
+"""
 
 from __future__ import annotations
 
 import json
 import subprocess
 import sys
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from belt import decoded
 from tests import support
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 BELT = support.MISE
 TASK = "lint:msrv"

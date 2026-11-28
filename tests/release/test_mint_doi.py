@@ -1174,11 +1174,11 @@ class TestTheRecordedResponses:
         assert captured_object("draft-after-file-delete")["files"] == NOTHING
 
     @pytest.mark.parametrize(
-        "name,rid,title",
-        (
+        ("name", "rid", "title"),
+        [
             ("full-github", CANON_PREV, CANON_REPO),
             ("full-edtf", EDTF_PREV, "monumental-archive/edtf"),
-        ),
+        ],
     )
     def test_only_the_full_title_finds_the_record(
         self, name: object, rid: object, title: object
@@ -1679,7 +1679,7 @@ class TestReadCitation:
             # #1556's shrunk example: zip(strict=True) raised on it.
             ("an empty file reads as nothing", "", ([], "", "")),
         ]  # fmt: skip
-        for name, text, want in rows:
+        for _name, text, want in rows:
             got = mint_doi.read_citation(text)
             assert (got.creators, got.licence, got.concept_doi) == want
 
@@ -1735,7 +1735,7 @@ class TestAnswerShapes:
             pytest.MonkeyPatch.context() as patched,
             pytest.raises(mint_doi.RefusedError) as caught,
         ):
-            patched.setattr(z._public, "open", support.returning(None))
+            patched.setattr(z._public, "open", lambda *_args, **_kwargs: None)
             z.public(url)
         assert f"{url} answered NoneType, not an HTTP response" == str(caught.value)
 

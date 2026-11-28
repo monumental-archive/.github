@@ -13,6 +13,7 @@ Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
 """
 
+import os
 from pathlib import Path
 
 import pytest
@@ -58,7 +59,10 @@ class TestScrubbed:
     def test_every_git_name_and_nothing_else(self, environ: dict[str, str]) -> None:
         """GIT_* gone; the rest kept as they were."""
         with pytest.MonkeyPatch.context() as patched:
-            support.patch_env(patched, environ, clear=True)
+            for name in list(os.environ):
+                patched.delenv(name)
+            for name, value in environ.items():
+                patched.setenv(name, value)
             got = gd.scrubbed()
         kept = {k: v for k, v in environ.items() if not k.startswith("GIT_")}
         assert got == kept

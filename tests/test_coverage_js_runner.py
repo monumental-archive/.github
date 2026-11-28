@@ -84,15 +84,15 @@ class TestLocked:
     """The version each lockfile resolves an entry to (#2145)."""
 
     @pytest.mark.parametrize(
-        "lockfile,lock,name,want",
-        (
+        ("lockfile", "lock", "name", "want"),
+        [
             ("pnpm-lock.yaml", PNPM_LOCK, "vitest", TWO),
             ("package-lock.json", NPM_LOCK, "vitest", ONE),
             ("yarn.lock", YARN_LOCK, "vitest", ONE),
             ("yarn.lock", BERRY_LOCK, "vitest", ONE),
             ("bun.lock", BUN_LOCK, "vitest", ONE),
             ("Cargo.lock", CARGO_LOCK, "serde", CRATE),
-        ),
+        ],
     )
     def test_every_format_reads_the_installed_version(
         self, lockfile: object, lock: object, name: object, want: object
@@ -113,11 +113,11 @@ class TestLocked:
         assert cj.locked("pnpm-lock.yaml", lock, "@vitest/expect") == ONE
 
     @pytest.mark.parametrize(
-        "lockfile,lock",
-        (
+        ("lockfile", "lock"),
+        [
             ("package-lock.json", '{"packages": {"node_modules/vitest": {}}}'),
             ("yarn.lock", 'vitest@^4:\n  resolved "x"\n'),
-        ),
+        ],
     )
     def test_an_entry_without_a_version_reads_none(
         self, lockfile: object, lock: object
@@ -125,14 +125,13 @@ class TestLocked:
         """An entry whose version is not where its format writes one."""
         assert cj.locked(lockfile, lock, "vitest") == NONE
 
-    def test_a_cargo_lock_of_the_wrong_shape_is_refused(self) -> None:
+    @pytest.mark.parametrize(
+        "lock", ["[[package]\n", "package = 1\n", '[[package]]\nname = "a"\n']
+    )
+    def test_a_cargo_lock_of_the_wrong_shape_is_refused(self, lock: object) -> None:
         """Not TOML, or a package table of another shape, raises by where."""
-        for lock in ("[[package]\n", "package = 1\n", '[[package]]\nname = "a"\n'):
-            with (
-                self.subTest(lock=lock),
-                pytest.raises(decoded.UndecodableError),
-            ):
-                cj.locked("Cargo.lock", lock, "a")
+        with pytest.raises(decoded.UndecodableError):
+            cj.locked("Cargo.lock", lock, "a")
 
 
 @pytest.mark.usefixtures("_stack")
@@ -266,12 +265,12 @@ class TestMeasuredRun:
 
     @pytest.mark.parametrize(
         "command",
-        (
+        [
             ["vitest", "list"],
             ["bunx", "vitest", "run"],
             ["python3", "-m", "unittest"],
             [],
-        ),
+        ],
     )
     def test_what_is_not_a_run_is_unchanged(
         self, command: object, capfd: pytest.CaptureFixture[str]
@@ -305,7 +304,7 @@ class TestMeasuredRun:
     ) -> None:
         """The command follows `--`; without it nothing is read."""
         status = cj.main(["--measured-run", "/d"])
-        out, err = capfd.readouterr()
+        _out, err = capfd.readouterr()
         assert status == 2
         assert "usage" in err
 

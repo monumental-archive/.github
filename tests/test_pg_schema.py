@@ -53,7 +53,6 @@ import pytest
 
 from belt import decoded, pg_schema
 from tests import support
-import contextlib
 
 normalise = pg_schema.normalise
 
@@ -245,7 +244,8 @@ def run_main(argv: list[str]) -> tuple[int, str, str]:
         redirect_stdout(out),
         redirect_stderr(err),
     ):
-        support.name_task(patched, task)
+        patched.setenv("MISE_TASK_NAME", task)
+        patched.setenv("ORG_FINDINGS", "")
         status = pg_schema.main(argv)
     return status, out.getvalue(), err.getvalue()
 
@@ -286,7 +286,7 @@ def git(root: Path, *args: str) -> None:
 @pytest.mark.usefixtures("_set_up_test_in_repo")
 class TestInRepo:
     """A fresh git repository as the working directory for each row."""
-    
+
     @pytest.fixture
     def _set_up_test_in_repo(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -295,7 +295,10 @@ class TestInRepo:
         self.root = tmp_path
         git(self.root, "init", "-q")
         (self.root / "crates" / "ext").mkdir(parents=True)
-        support.patch_env(monkeypatch, scrubbed(), clear=True)
+        for name in list(os.environ):
+            monkeypatch.delenv(name)
+        for name, value in scrubbed().items():
+            monkeypatch.setenv(name, value)
         monkeypatch.chdir(self.root)
 
     def track(self, text: str) -> None:
@@ -756,7 +759,7 @@ class TestUsage:
     """The entry point's argument guard."""
 
     @pytest.mark.parametrize(
-        "argv", ([], ["check", "a"], ["check", "a", "b", "c"], ["diff", "a", "b"])
+        "argv", [[], ["check", "a"], ["check", "a", "b", "c"], ["diff", "a", "b"]]
     )
     def test_wrong_arguments_are_red(self, argv: object) -> None:
         """The task passes a mode and exactly two paths."""

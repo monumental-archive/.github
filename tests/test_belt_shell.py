@@ -174,19 +174,22 @@ class TestRead:
             expected = {"A", "B"}
             assert bs.read(path).env == expected
 
-    def test_wrong_shaped_tables_read_as_nothing(self) -> None:
-        """A non-table env, tasks or task_config sets nothing, no traceback."""
-        for text in (
+    @pytest.mark.parametrize(
+        "text",
+        [
             "env = 1\n",
             "env = [1]\n",
             "tasks = 1\n",
             "task_config = 1\n",
             '[tasks.t]\nenv = 1\nrun = "x"\n',
-        ):
-            with self.subTest(text=text), TemporaryDirectory() as tmp:
-                config = bs.read(write(tmp, text))
-                assert config.env == set[str]()
-                assert config.shell is None
+        ],
+    )
+    def test_wrong_shaped_tables_read_as_nothing(self, text: object) -> None:
+        """A non-table env, tasks or task_config sets nothing, no traceback."""
+        with TemporaryDirectory() as tmp:
+            config = bs.read(write(tmp, text))
+            assert config.env == set[str]()
+            assert config.shell is None
 
     def test_no_tasks_is_an_empty_contribution(self) -> None:
         """A TOML file that is not a mise config reads as nothing."""
@@ -447,7 +450,8 @@ class TestMain:
                     redirect_stdout(io.StringIO()),
                     redirect_stderr(err),
                 ):
-                    support.name_task(patched, task)
+                    patched.setenv("MISE_TASK_NAME", task)
+                    patched.setenv("ORG_FINDINGS", "")
                     assert bs.main([str(path), *extra]) == 1
                 assert err.getvalue() == f"{task}: {path}: not TOML: {why}\n"
 

@@ -24,12 +24,15 @@ message (#650).
 import json
 import subprocess
 import sys
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from belt import decoded
 from tests import support
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 BELT = support.MISE
 BASH = support.tool("bash")

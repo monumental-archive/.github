@@ -138,8 +138,8 @@ class TestRefusals:
             return status, out.getvalue(), err.getvalue().replace(str(path), "PATH")
 
     @pytest.mark.parametrize(
-        "text,said",
-        (
+        ("text", "said"),
+        [
             ("[bans\n", "lint:deny: PATH: Expected ']' at the end of a table"),
             ("bans = 1\n", "lint:deny: PATH: bans is not an object\n"),
             ("[bans]\nskip = 1\n", "lint:deny: PATH: bans.skip is not a list\n"),
@@ -147,7 +147,7 @@ class TestRefusals:
                 "[bans]\nskip-tree = {}\n",
                 "lint:deny: PATH: bans.skip-tree is not a list\n",
             ),
-        ),
+        ],
     )
     def test_each_wrong_document_is_named(self, text: object, said: object) -> None:
         """Not TOML, `bans` not a table, a skip key not an array."""

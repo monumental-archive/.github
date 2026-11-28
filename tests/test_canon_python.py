@@ -15,14 +15,17 @@ name, never falling back to the runner's python3.
 from __future__ import annotations
 
 import os
-import pathlib
 import subprocess
 import tempfile
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from tests import support
+
+if TYPE_CHECKING:
+    import pathlib
+    from pathlib import Path
 
 CANON = support.CANON
 VERSION = "3.15.2"
@@ -293,7 +296,7 @@ class TestAnUnsetOrgPythonIsRefused:
                 assert REFUSAL in done.stderr
                 assert done.stdout == ""
 
-    @pytest.mark.parametrize("value", (None, ""))
+    @pytest.mark.parametrize("value", [None, ""])
     def test_the_sourced_provisioner_refuses_an_unset_org_python(
         self, value: object
     ) -> None:
@@ -305,7 +308,7 @@ class TestAnUnsetOrgPythonIsRefused:
         assert done.returncode != 0, done.stdout
         assert REFUSAL in done.stderr
 
-    @pytest.mark.parametrize("value", (None, ""))
+    @pytest.mark.parametrize("value", [None, ""])
     def test_the_sourced_coverage_env_refuses_an_unset_org_python(
         self, value: object
     ) -> None:

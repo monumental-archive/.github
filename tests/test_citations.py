@@ -114,7 +114,8 @@ def audit(
             contextlib.redirect_stdout(out),
             contextlib.redirect_stderr(err),
         ):
-            support.patch_env(patched, named)
+            for name, value in named.items():
+                patched.setenv(name, value)
             status = citations.main(org, tree)
         return status, out.getvalue(), err.getvalue()
 
@@ -155,7 +156,7 @@ class TestInputs:
     def test_no_gh_is_red(self) -> None:
         """With no network stand-in and no gh on PATH: `gh missing`."""
         with pytest.MonkeyPatch.context() as patched:
-            patched.setattr("shutil.which", support.returning(None))
+            patched.setattr("shutil.which", lambda *_args, **_kwargs: None)
             status, _, err = audit(DOC, None)
         assert (1, f"{TASK}: gh missing\n") == (status, err)
 

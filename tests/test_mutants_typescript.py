@@ -435,7 +435,7 @@ class TestShareOut:
             The shard's files, unescaped, in order.
 
         """
-        status, out, err = self.share(mutate, shard, capfd=capfd)
+        status, _out, err = self.share(mutate, shard, capfd=capfd)
         assert status == 0, err
         text = self.out.read_text(encoding="utf-8")
         return [re.sub(r"\\(.)", r"\1", f) for f in text.split(",") if f]
@@ -561,7 +561,7 @@ class TestShareOut:
         config = self.tree / "stryker.config.json"
         config.write_text(json.dumps(CONFIG), encoding="utf-8")
         argv = ["share", str(config), "--out", str(self.out)]
-        status, out, err = call([*argv, "--summary-dir", str(summary)], capfd=capfd)
+        status, _out, err = call([*argv, "--summary-dir", str(summary)], capfd=capfd)
         assert status == 0, err
         assert not summary.exists()
 
@@ -578,7 +578,7 @@ class TestShareOut:
         )
         assert (status, out, err) == (1, "", want)
 
-    @pytest.mark.parametrize("shard", ("x", "1/2/3", "2/2", "3/2", "-1/2"))
+    @pytest.mark.parametrize("shard", ["x", "1/2/3", "2/2", "3/2", "-1/2"])
     def test_each_malformed_shard_is_red(
         self, shard: object, capfd: pytest.CaptureFixture[str]
     ) -> None:
@@ -604,7 +604,7 @@ class TestShareOut:
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """No file: red, never an empty share."""
-        status, out, err = call(
+        status, _out, err = call(
             ["share", str(self.tree / "none.json"), "--out", str(self.out)], capfd=capfd
         )
         assert status == 1
@@ -632,7 +632,7 @@ class TestBraces:
         ("a,b}.ts", ["a,b}.ts"]),
     )
 
-    @pytest.mark.parametrize("pattern,want", ROWS)
+    @pytest.mark.parametrize(("pattern", "want"), ROWS)
     def test_each_form(self, pattern: object, want: object) -> None:
         """Lists, nested lists, ranges, literal braces and escaped ones."""
         assert mutants_typescript.braces(pattern) == want
@@ -650,7 +650,7 @@ class TestSpelling:
         ("a\\", "a\\"),
     )
 
-    @pytest.mark.parametrize("pattern,want", ROWS)
+    @pytest.mark.parametrize(("pattern", "want"), ROWS)
     def test_each_form(self, pattern: object, want: object) -> None:
         """An escape names its character; a `[^` class negates."""
         assert mutants_typescript.full_match_spelling(pattern) == want
@@ -694,7 +694,7 @@ class TestRefusals(TestPlanted):
         ),
     )
 
-    @pytest.mark.parametrize("setting,message", ROWS)
+    @pytest.mark.parametrize(("setting", "message"), ROWS)
     def test_each_refused_setting_is_red_by_name(
         self, setting: object, message: object
     ) -> None:
@@ -1040,7 +1040,7 @@ class TestMain:
         )
         assert (status, out, err) == (0, "", "")
 
-    @pytest.mark.parametrize("setting,message", TestRefusals.ROWS)
+    @pytest.mark.parametrize(("setting", "message"), TestRefusals.ROWS)
     def test_each_refused_setting_is_red_by_name(
         self,
         setting: object,
@@ -1050,7 +1050,7 @@ class TestMain:
     ) -> None:
         """Each Refusals row's setting, named with the site mark."""
         path = self.write("stryker.config.json", CONFIG | setting, tmp_path=tmp_path)
-        status, out, err = call(["config", str(path)], capfd=capfd)
+        status, _out, err = call(["config", str(path)], capfd=capfd)
         assert status == 1
         want = [
             f"{LABEL}: {path} {message}",
@@ -1065,7 +1065,7 @@ class TestMain:
         path = self.write(
             "stryker.config.json", CONFIG | {"incremental": True}, tmp_path=tmp_path
         )
-        status, out, err = call(["config", str(path)], capfd=capfd)
+        status, _out, err = call(["config", str(path)], capfd=capfd)
         assert status == 1
         assert err == (
             f"{LABEL}: {path} sets `incremental` — a runner has no earlier results,"
@@ -1079,7 +1079,7 @@ class TestMain:
         """Not JSON: named, exit 1."""
         path = self.write("stryker.config.json", 0, tmp_path=tmp_path)
         path.write_text("{ mutate: [", encoding="utf-8")
-        status, out, err = call(["config", str(path)], capfd=capfd)
+        status, _out, err = call(["config", str(path)], capfd=capfd)
         assert status == 1
         assert err.startswith(f"{LABEL}: {path} is not readable JSON: "), err
 
@@ -1108,7 +1108,7 @@ class TestMain:
         """The row names `--shard`, never a fixed 0/1 (#2153)."""
         path = self.write("mutation.json", report(*KILLED), tmp_path=tmp_path)
         summary = path.parent / "summary"
-        status, out, err = call(
+        status, _out, err = call(
             [
                 "verdict",
                 str(path),

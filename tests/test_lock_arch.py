@@ -169,11 +169,11 @@ class TestCandidates:
         assert lock_arch.candidates(path) == NO_CANDIDATES
 
     @pytest.mark.parametrize(
-        "body,said",
-        (
+        ("body", "said"),
+        [
             ("[tools\n", "Expected ']' at the end of a table"),
             ("tools = 1\n", "tools is not an object"),
-        ),
+        ],
     )
     def test_an_unreadable_lock_is_named_and_skipped(
         self, body: object, said: object
@@ -226,7 +226,7 @@ class TestMain:
         with pytest.MonkeyPatch.context() as patched:
             patched.setattr(sys, "stdin", io.StringIO(listing))
             status = lock_arch.main([])
-        out, err = capfd.readouterr()
+        out, _err = capfd.readouterr()
         assert status == 0
         assert lock_arch.candidates(path) == out.splitlines()
         assert len(out.splitlines()) == 1

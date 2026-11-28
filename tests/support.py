@@ -179,6 +179,7 @@ def belt_modules(source: str, package: Path = PACKAGE) -> list[Path]:
                 out.append(path)
     return out
 
+
 # What every fixture inherits, by name, and why.
 INHERITED: dict[str, str] = {
     # Finding bash, git, jq and the belt's tools at all.

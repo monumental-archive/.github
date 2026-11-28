@@ -30,7 +30,6 @@ from hypothesis import strategies as st
 
 from belt import gate_surface as gs
 from belt.typed_hypothesis import given
-from tests import support
 
 # The task that runs the helper, whose name its findings carry (#1934).
 TASK = "lint:gate-surface"
@@ -225,10 +224,11 @@ class TestRefusal:
                 contextlib.redirect_stdout(out),
                 contextlib.redirect_stderr(err),
             ):
-                support.name_task(patched, TASK)
+                patched.setenv("MISE_TASK_NAME", TASK)
+                patched.setenv("ORG_FINDINGS", "")
                 status = gs.main([])
         finally:
             sys.stdin = old
-        assert status in (0, 1)
+        assert status in {0, 1}
         if status:
             assert f"{TASK}: " in err.getvalue()

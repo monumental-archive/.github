@@ -452,6 +452,25 @@ NEW_REFUSED = (
     "generate-pgrx-upgrade.sh: candidate schema lab_pg--0.28.1.sql carries the reserved"
     " $pgrx_floor$ tag; the floor block is packaging, never schema\n"
 )
+BLOCK = floor_block()
+THE_TAG_ANYWHERE_ELSE_IS_REFUSED_BY_NAME_ROWS = [
+    ("after the generated schema", REAL_PREV + "\n" + BLOCK, REAL_NEW),
+    ("two leading blocks", BLOCK + BLOCK + REAL_PREV, REAL_NEW),
+    (
+        "after a leading comment",
+        "-- a comment\n" + BLOCK + REAL_PREV,
+        REAL_NEW,
+    ),
+    (
+        "a function body quoted with the tag",
+        REAL_PREV + "SELECT $pgrx_floor$ x $pgrx_floor$;\n",
+        REAL_NEW,
+    ),
+]
+A_CANDIDATE_CARRYING_THE_BLOCK_IS_REFUSED_NOT_DIFFED_ROWS = [
+    ("leading", REAL_PREV, floor_block("0.28.1") + REAL_NEW),
+    ("both sides", floor_block() + REAL_PREV, floor_block("0.28.1") + REAL_NEW),
+]
 
 
 class TestTheFloorBlock:
@@ -466,7 +485,7 @@ class TestTheFloorBlock:
         """The block changes nothing: the real oracle pair, and a delta."""
         news = (REAL_NEW, REAL_NEW + a_function("lab_extra"))
         for new in news:
-            with self.subTest(delta=new is not REAL_NEW), TemporaryDirectory() as d:
+            with TemporaryDirectory() as d:
                 bare, bare_script = Derivation(d).run(REAL_PREV, new)
                 floored, floored_script = Derivation(d).run(
                     floor_block() + REAL_PREV, new
@@ -488,35 +507,25 @@ class TestTheFloorBlock:
         assert (result.returncode, result.stderr) == (0, "")
         assert script == REAL_DERIVED
 
-    def test_the_tag_anywhere_else_is_refused_by_name(self) -> None:
+    @pytest.mark.parametrize(
+        ("name", "prev", "new"), THE_TAG_ANYWHERE_ELSE_IS_REFUSED_BY_NAME_ROWS
+    )
+    def test_the_tag_anywhere_else_is_refused_by_name(
+        self, name: str, prev: object, new: object
+    ) -> None:
         """A block that is not the one leading statement is never stripped."""
-        block = floor_block()
-        rows = [
-            ("after the generated schema", REAL_PREV + "\n" + block, REAL_NEW),
-            ("two leading blocks", block + block + REAL_PREV, REAL_NEW),
-            (
-                "after a leading comment",
-                "-- a comment\n" + block + REAL_PREV,
-                REAL_NEW,
-            ),
-            (
-                "a function body quoted with the tag",
-                REAL_PREV + "SELECT $pgrx_floor$ x $pgrx_floor$;\n",
-                REAL_NEW,
-            ),
-        ]
-        for name, prev, new in rows:
-            with self.subTest(name), TemporaryDirectory() as d:
-                result, script = Derivation(d).run(prev, new)
-            assert (result.returncode, result.stderr, script) == (1, PREV_REFUSED, "")
+        with TemporaryDirectory() as d:
+            result, script = Derivation(d).run(prev, new)
+        assert (result.returncode, result.stderr, script) == (1, PREV_REFUSED, "")
 
-    def test_a_candidate_carrying_the_block_is_refused_not_diffed(self) -> None:
+    @pytest.mark.parametrize(
+        ("name", "prev", "new"),
+        A_CANDIDATE_CARRYING_THE_BLOCK_IS_REFUSED_NOT_DIFFED_ROWS,
+    )
+    def test_a_candidate_carrying_the_block_is_refused_not_diffed(
+        self, name: str, prev: object, new: object
+    ) -> None:
         """The candidate is a package build; the block there is a defect."""
-        rows = [
-            ("leading", REAL_PREV, floor_block("0.28.1") + REAL_NEW),
-            ("both sides", floor_block() + REAL_PREV, floor_block("0.28.1") + REAL_NEW),
-        ]
-        for name, prev, new in rows:
-            with self.subTest(name), TemporaryDirectory() as d:
-                result, script = Derivation(d).run(prev, new)
-            assert (result.returncode, result.stderr, script) == (1, NEW_REFUSED, "")
+        with TemporaryDirectory() as d:
+            result, script = Derivation(d).run(prev, new)
+        assert (result.returncode, result.stderr, script) == (1, NEW_REFUSED, "")

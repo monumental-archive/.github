@@ -125,7 +125,7 @@ class TestVerdict:
 
     def test_judged_to_the_head(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Exit 0, saved: green."""
-        status, out, err = self.run_helper("0", load("report-pass.json"), capfd=capfd)
+        status, out, _err = self.run_helper("0", load("report-pass.json"), capfd=capfd)
         assert status == 0, out
         assert out.strip() == "verdict: green: judged to the head of the log"
 
@@ -134,7 +134,7 @@ class TestVerdict:
         doc = load("report-pass.json")
         doc["verdict"] = "FAIL"
         doc["findings"] = [finding(448221200, "foreign"), finding(448221200, "chain")]
-        status, out, err = self.run_helper("1", doc, capfd=capfd)
+        status, _out, err = self.run_helper("1", doc, capfd=capfd)
         assert status == 1
         assert err.strip() == (
             "::error::verdict.py: 2 finding(s): a certificate did not reconcile;"
@@ -143,7 +143,7 @@ class TestVerdict:
 
     def test_advanced_is_green(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Exit 4, advanced, no finding: green, the outstanding range named."""
-        status, out, err = self.run_helper("4", advanced(), capfd=capfd)
+        status, out, _err = self.run_helper("4", advanced(), capfd=capfd)
         assert status == 0, out
         assert (
             out.strip()
@@ -156,7 +156,7 @@ class TestVerdict:
         """Exit 4, advanced, a finding: red whatever the exit code."""
         doc = advanced()
         doc["findings"] = [finding(448200000, "run")]
-        status, out, err = self.run_helper("4", doc, capfd=capfd)
+        status, _out, err = self.run_helper("4", doc, capfd=capfd)
         assert status == 1
         assert err.strip() == (
             "::error::verdict.py: 1 finding(s): a certificate did not reconcile;"
@@ -176,7 +176,7 @@ class TestVerdict:
 
     def test_killed_is_red(self, capfd: pytest.CaptureFixture[str]) -> None:
         """No exit status (cancelled or timed out): red."""
-        status, out, err = self.run_helper("", None, saved="false", capfd=capfd)
+        status, _out, err = self.run_helper("", None, saved="false", capfd=capfd)
         assert status == 1
         assert err.strip() == (
             "::error::verdict.py: stele did not finish: no exit status was"
@@ -186,7 +186,7 @@ class TestVerdict:
 
     def test_no_report_is_red(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Stele refused (exit 2, empty stdout), nothing saved: red, named."""
-        status, out, err = self.run_helper("2", None, saved="false", capfd=capfd)
+        status, _out, err = self.run_helper("2", None, saved="false", capfd=capfd)
         assert status == 1
         assert err.strip() == (
             "::error::verdict.py: stele exited 2 and the checkpoint was not saved:"
@@ -195,7 +195,7 @@ class TestVerdict:
 
     def test_filing_failed_is_red(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A report, but the checkpoint not saved: a finding was not filed."""
-        status, out, err = self.run_helper(
+        status, _out, err = self.run_helper(
             "0", load("report-pass.json"), saved="false", capfd=capfd
         )
         assert status == 1
@@ -206,7 +206,9 @@ class TestVerdict:
 
     def test_other_exit_is_red(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A saved leg that exited 3: red, named."""
-        status, out, err = self.run_helper("3", load("report-budget.json"), capfd=capfd)
+        status, _out, err = self.run_helper(
+            "3", load("report-budget.json"), capfd=capfd
+        )
         assert status == 1
         assert err.strip() == "::error::verdict.py: stele exited 3"
 
@@ -221,7 +223,7 @@ class TestVerdict:
         doc = load("report-pass.json")
         doc["findings"] = [finding(448221200, "chain")]
         doc["facts"] = [1]
-        status, out, err = self.run_helper("0", doc, capfd=capfd)
+        status, _out, err = self.run_helper("0", doc, capfd=capfd)
         assert status == 1
         assert err.strip() == (
             "::error::verdict.py: stele exited 0 and its report could not be judged:"
@@ -268,7 +270,7 @@ class TestVerdict:
             "a number JSON does not have": f'{{"target": {target}, "findings": [NaN]}}',
         }
         argv = ["--exit-code", "0", "--report", str(self.report), "--saved", "true"]
-        for why, text in rows.items():
+        for text in rows.values():
             self.report.write_text(text, encoding="utf-8")
             status, out, err = call(argv, capfd=capfd)
             assert status == 1, err
@@ -284,7 +286,7 @@ class TestVerdict:
         """Another verb's report: named, never read on."""
         doc = load("report-budget.json")
         doc["target"] = "assert tags"
-        status, out, err = self.run_helper("4", doc, saved="false", capfd=capfd)
+        status, _out, err = self.run_helper("4", doc, saved="false", capfd=capfd)
         assert status == 1
         assert err.strip() == (
             "::error::verdict.py: stele exited 4 and the checkpoint was not saved:"

@@ -198,7 +198,7 @@ class TestPacks:
             f"registry-subjects=package {line}\n"
         ) == run.outputs
 
-    @pytest.mark.parametrize("url", (f"git+{WANT}.git", f"git+{WANT}", f"{WANT}.git"))
+    @pytest.mark.parametrize("url", [f"git+{WANT}.git", f"git+{WANT}", f"{WANT}.git"])
     def test_the_git_url_forms_are_the_repository(self, url: object) -> None:
         """`git+` and `.git` are the same repository."""
         run = run_helper(package(repository={"type": "git", "url": url}))

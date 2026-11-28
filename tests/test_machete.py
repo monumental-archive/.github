@@ -16,15 +16,19 @@ Mutation-checked: run against `main`'s mise/config.toml, the
 untracked-crate row fails (cargo-machete exits 1 naming
 scratch/Cargo.toml).
 
-GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom."""
+GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom.
+"""
 
 import subprocess
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from belt import decoded
 from tests import support
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 BELT = support.MISE
 GIT = support.tool("git")

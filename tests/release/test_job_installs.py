@@ -887,7 +887,7 @@ class TestCoverage:
                 keys, needed, _ = installs(job)
                 assert keys or needed, "an empty list installs all"
 
-    @pytest.mark.parametrize("workflow,job_id", WHOLE_CONFIG)
+    @pytest.mark.parametrize(("workflow", "job_id"), WHOLE_CONFIG)
     def test_the_exemption_is_still_true(
         self, workflow: object, job_id: object
     ) -> None:
@@ -941,7 +941,7 @@ class TestJobInstalls:
     """Each job installs what it calls."""
 
     @pytest.mark.parametrize(
-        "workflow,job_id", [j for j in IN_SCOPE if j not in WHOLE_CONFIG]
+        ("workflow", "job_id"), [j for j in IN_SCOPE if j not in WHOLE_CONFIG]
     )
     def test_every_job_installs_what_it_calls(
         self, workflow: object, job_id: object
@@ -1007,14 +1007,14 @@ class TestJobInstalls:
 class TestGateInstalls:
     """The gate's pgrx legs install what they call (#1408)."""
 
-    @pytest.mark.parametrize("workflow,job_id", GATE_LISTS)
+    @pytest.mark.parametrize(("workflow", "job_id"), GATE_LISTS)
     def test_every_gate_list_installs_what_it_calls(
         self, workflow: object, job_id: object
     ) -> None:
         """The real jobs against pgrx-test.sh and pgrx-env.sh."""
         assert strings() == uninstalled(workflow, job_id, load(workflow)[job_id])
 
-    @pytest.mark.parametrize("workflow,job_id", GATE_LISTS)
+    @pytest.mark.parametrize(("workflow", "job_id"), GATE_LISTS)
     def test_no_gate_list_is_undone_by_mise_run(
         self, workflow: object, job_id: object
     ) -> None:
@@ -1167,10 +1167,10 @@ class TestCoverageFigures:
 
     @pytest.mark.parametrize(
         "path",
-        (
+        [
             CANON / "workflow-templates" / "release.yml",
             WORKFLOWS / "self-release.yml",
-        ),
+        ],
     )
     def test_every_caller_grants_the_read(self, path: object) -> None:
         """The template and the canon's own caller grant `actions: read`."""
@@ -1214,7 +1214,7 @@ class TestGateUploadMeasuresNothing:
 
     def test_the_upload_installs_and_runs_nothing(self) -> None:
         """The real job: download, list, hand to Codecov."""
-        for (workflow, job_id), why in GATE_NONE.items():
+        for workflow, job_id in GATE_NONE.keys():
             assert strings() == measures(workflow, job_id, load(workflow)[job_id])
 
     def test_the_upload_that_hung_on_main_is_named(self) -> None:
@@ -1296,7 +1296,7 @@ def task_auto_install(workflow: str, job_id: str, job: Job) -> list[str]:
 class TestTaskAutoInstall:
     """A named list stays the whole install when a task runs (#1412)."""
 
-    @pytest.mark.parametrize("workflow,job_id", IN_SCOPE)
+    @pytest.mark.parametrize(("workflow", "job_id"), IN_SCOPE)
     def test_every_named_list_job_turns_task_auto_install_off(
         self, workflow: object, job_id: object
     ) -> None:
@@ -1377,7 +1377,7 @@ class TestPythonCode:
         )
         assert strings() == planted_uninstalled(helper)
 
-    @pytest.mark.parametrize("line", ("import ruff.api", "from ruff import api"))
+    @pytest.mark.parametrize("line", ["import ruff.api", "from ruff import api"])
     def test_an_imported_tool_module_is_a_call(self, line: object) -> None:
         """A helper that imports a belt tool's module needs it installed."""
         assert planted_uninstalled(f"{line}\n") == PLANTED_RED
@@ -1488,13 +1488,13 @@ class TestUnsetMessages:
         helper = ': "${V:?run: lefthook run post-checkout}"\n'
         assert strings() == planted_shell(helper)
 
-    @pytest.mark.parametrize("op", (":?", "?"))
+    @pytest.mark.parametrize("op", [":?", "?"])
     def test_a_sourced_path_message_is_not_a_call(self, op: object) -> None:
         """`. "${V:?…}/f.sh"`, the audit-badges.sh shape; `?` alone too."""
         helper = f'. "${{V{op}run: lefthook run post-checkout}}/f.sh"\n'
         assert strings() == planted_shell(helper)
 
-    @pytest.mark.parametrize("sub", ("$(lefthook version)", "`lefthook version`"))
+    @pytest.mark.parametrize("sub", ["$(lefthook version)", "`lefthook version`"])
     def test_a_substitution_in_a_message_is_a_call(self, sub: object) -> None:
         """`${V:?$(lefthook …)}`: the shell runs it, so it stays code."""
         helper = f': "${{V:?{sub}}}"\n'
@@ -1510,12 +1510,12 @@ class TestProseFromTheParser:
 
     @pytest.mark.parametrize(
         "helper",
-        (
+        [
             'x="$(lefthook version)"\n',
             'x="`lefthook version`"\n',
             'echo "$(lefthook version)"\n',
             "echo ok | lefthook version\n",
-        ),
+        ],
     )
     def test_a_call_beside_prose_is_named(self, helper: object) -> None:
         """A quoted substitution and a pipe out of a print are calls."""
@@ -1523,17 +1523,17 @@ class TestProseFromTheParser:
 
     @pytest.mark.parametrize(
         "helper",
-        (
+        [
             'emsg+="run lefthook install"\n',
             'echo "run lefthook install"\n',
-        ),
+        ],
     )
     def test_a_remedy_line_names_nothing(self, helper: object) -> None:
         """A quoted literal assigned or printed is prose."""
         assert strings() == planted_shell(helper)
 
     @pytest.mark.parametrize(
-        "rel", ("mise/roster-reconcile.sh", "release/inventory-digests.sh")
+        "rel", ["mise/roster-reconcile.sh", "release/inventory-digests.sh"]
     )
     def test_the_jq_calls_on_assignment_lines_are_read(self, rel: object) -> None:
         """The two `jq` calls the line regex dropped are seen."""
@@ -1611,7 +1611,7 @@ class TestArgvCalls:
         helper = 'import subprocess\nsubprocess.run("ruff check .", shell=True)\n'
         assert planted_uninstalled(helper) == PLANTED_RED
 
-    @pytest.mark.parametrize("binding", ('"ruff"', 'shutil.which("ruff") or "ruff"'))
+    @pytest.mark.parametrize("binding", ['"ruff"', 'shutil.which("ruff") or "ruff"'])
     def test_a_module_constant_argv_is_a_call(self, binding: object) -> None:
         """A module name bound to the command, plain or through which()."""
         helper = (
@@ -1632,14 +1632,14 @@ class TestArgvCalls:
 
     @pytest.mark.parametrize(
         "helper",
-        (
+        [
             (
                 'import subprocess\nRUFF = ["ruff", "check"]\n'
                 'subprocess.run([*RUFF, "."], check=True)\n'
             ),
             'import rust_task\nrust_task.run(["ruff", "check"])\n',
             'import shutil\nRUFF = shutil.which("ruff")\n',
-        ),
+        ],
     )
     def test_a_tool_headed_list_is_a_call_wherever_it_stands(
         self, helper: object
@@ -1692,10 +1692,10 @@ class TestOneReader:
 
     @pytest.mark.parametrize(
         "path",
-        (
+        [
             WORKFLOWS / "build-pgrx-extension.yml",
             CANON / "release" / "generate-pgrx-upgrade.sh",
-        ),
+        ],
     )
     def test_the_pgrx_build_calls_the_reader(self, path: object) -> None:
         """Both pgrx readers moved onto the helper, not merely deleted."""
@@ -2537,7 +2537,7 @@ class TestGateLegs:
                 "coverage-upload: reads a gate output, which a matrix cannot keep",
             ),
         ]
-        for label, (old, new), message in rows:
+        for _label, (old, new), message in rows:
             assert strings(message) == leg_findings(planted(old, new))
 
 

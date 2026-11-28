@@ -337,7 +337,7 @@ class TestShape:
         """
         assert problems(self.text) == list[str]()
 
-    @pytest.mark.parametrize("old,new,message", ROWS)
+    @pytest.mark.parametrize(("old", "new", "message"), ROWS)
     def test_rows(self, old: object, new: object, message: object) -> None:
         """Each planted change is named by its own message, and only it."""
         assert self.text.count(old) == 1

@@ -236,7 +236,7 @@ class TestTheTable:
         result = run_tree(skill_tree({MANIFEST: manifest(PINNED, commit="master")}))
         self.assert_red(result, "pins commit 'master' — a full 40-character")
 
-    @pytest.mark.parametrize("key", ("repo", "commit", "upstream_path"))
+    @pytest.mark.parametrize("key", ["repo", "commit", "upstream_path"])
     def test_a_missing_key_reds(self, key: object) -> None:
         """repo, commit and upstream_path are each required."""
         result = run_tree(skill_tree({MANIFEST: manifest(PINNED, drop=key)}))

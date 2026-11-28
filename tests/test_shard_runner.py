@@ -29,7 +29,6 @@ from __future__ import annotations
 import hashlib
 import subprocess
 import sys
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -39,6 +38,7 @@ from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
     from tests.support import Called
 
@@ -273,7 +273,7 @@ FILES = [
 class TestVitest(TestRunner):
     """The vitest `--shard=k/n`: contiguous slices of the hash order."""
 
-    @pytest.mark.parametrize("n", (2, 3))
+    @pytest.mark.parametrize("n", [2, 3])
     def test_two_and_three_shards_run_the_suite_once(self, n: object) -> None:
         """1/2 and 2/2, then 1/3 to 3/3: every file once, as reported."""
         for old in self.reports.glob("*") if self.reports.is_dir() else []:
@@ -321,7 +321,7 @@ TESTS = [
 class TestNextest(TestRunner):
     """nextest `--partition slice:k/n`: round-robin over every binary."""
 
-    @pytest.mark.parametrize("n", (2, 3))
+    @pytest.mark.parametrize("n", [2, 3])
     def test_two_and_three_shards_run_the_suite_once(self, n: object) -> None:
         """Every test once, across binaries, as reported."""
         for old in self.reports.glob("*") if self.reports.is_dir() else []:
@@ -412,7 +412,7 @@ class TestPytest(TestRunner):
 class TestGoTest(TestRunner):
     """`go test`: every n-th of the sorted packages, from the k-th."""
 
-    @pytest.mark.parametrize("n", (2, 3))
+    @pytest.mark.parametrize("n", [2, 3])
     def test_two_and_three_shards_run_the_suite_once(self, n: object) -> None:
         """Every package once, as reported."""
         for old in self.reports.glob("*") if self.reports.is_dir() else []:

@@ -126,7 +126,7 @@ class Repo:
 @pytest.mark.usefixtures("_set_up_test_repo_case")
 class TestRepoCase:
     """A row with a fresh repository and an isolated git."""
-    
+
     @pytest.fixture
     def _set_up_test_repo_case(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -134,7 +134,10 @@ class TestRepoCase:
         """Isolate git's config, then build the repository."""
         clean = support.env(MISE_TASK_NAME=TASK)
         isolated: dict[str, str] = {**clean, **_GIT_ENV}
-        support.patch_env(monkeypatch, isolated, clear=True)
+        for name in list(os.environ):
+            monkeypatch.delenv(name)
+        for name, value in isolated.items():
+            monkeypatch.setenv(name, value)
         self.repo = Repo(pathlib.Path(str(tmp_path)))
 
     def assert_class(self, subject: str, want: str) -> None:
@@ -203,7 +206,7 @@ class TestEachLanguage(TestRepoCase):
             assert got[f"fix: {lang} without test"] == rc.NO_TEST
             assert got[f"fix: {lang} lockfile"] == rc.NOT_CODE
 
-    @pytest.mark.parametrize("directory", ("tests", "testdata", "tests/fixtures"))
+    @pytest.mark.parametrize("directory", ["tests", "testdata", "tests/fixtures"])
     def test_test_directories(self, directory: object) -> None:
         """Any path under tests/ or testdata/ is a test, fixtures included."""
         self.repo.commit("feat: tool", {"tool/run.sh": "echo 1\n"})
@@ -227,7 +230,7 @@ class TestEachLanguage(TestRepoCase):
         self.repo.commit("fix: tool config", {"tools/fixtures/x.toml": "a = 2\n"})
         self.assert_class("fix: tool config", rc.NO_TEST)
 
-    @pytest.mark.parametrize("attr", ("#[test]", "#[pg_test]", "#[tokio::test]"))
+    @pytest.mark.parametrize("attr", ["#[test]", "#[pg_test]", "#[tokio::test]"])
     def test_rust_test_attribute_in_source(self, attr: object) -> None:
         """An added `#[test]`-family line makes a `.rs` file a test."""
         self.repo.commit("feat: lib", {"src/lib.rs": "pub fn f() -> u8 { 1 }\n"})
@@ -422,7 +425,8 @@ class TestReport(TestRepoCase):
         """The summary carries the window's ratio and the recent fixes only."""
         env = {"GIT_COMMITTER_DATE": "2020-01-01T00:00:00Z"}
         with pytest.MonkeyPatch.context() as patched:
-            support.patch_env(patched, env)
+            for name, value in env.items():
+                patched.setenv(name, value)
             self.repo.commit("fix: old", {"old.py": "1\n"})
         self.repo.commit("fix: new", {"new.py": "1\n"})
         self.repo.commit("fix: tested", {"t.py": "1\n", "test_t.py": "1\n"})

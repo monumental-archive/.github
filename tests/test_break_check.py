@@ -607,7 +607,7 @@ class TestTheReaderAgrees:
 
     def test_every_declaration(self) -> None:
         """The reading and the reader agree, row by row."""
-        for row, (title, body, breaking) in DECLARATIONS.items():
+        for title, body, breaking in DECLARATIONS.values():
             reading = declared_break.declared(title, body)
             filed = self.filed_breaking(title, body)
             assert (reading, filed) == (breaking, breaking)

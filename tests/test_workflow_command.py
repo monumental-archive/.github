@@ -211,7 +211,8 @@ class TestAHelperQuotingOutsideText:
                 redirect_stdout(io.StringIO()),
                 redirect_stderr(err),
             ):
-                support.name_task(patched, "")
+                patched.setenv("MISE_TASK_NAME", "")
+                patched.setenv("ORG_FINDINGS", "")
                 patched.setattr(sys, "argv", ["pgrx_images.py"])
                 code = pgrx_images.main([
                     "base-image",

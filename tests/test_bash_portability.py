@@ -17,7 +17,6 @@ GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom.
 
 import subprocess
 import sys
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -27,6 +26,7 @@ from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
 # The task that runs the helper, whose name its findings carry (#1934).
 TASK = "lint:bash-portability"
@@ -226,7 +226,7 @@ class TestSyntax(TestPlanted):
 
     @pytest.mark.parametrize(
         "line",
-        (
+        [
             "echo ${v,,}",
             "echo ${v^^}",
             "echo ${v,}",
@@ -238,13 +238,13 @@ class TestSyntax(TestPlanted):
             "local x; mapfile -t x < f",
             "readarray\tx",
             "cmd &>> log",
-        ),
+        ],
     )
     def test_each_form_is_named(
         self, line: object, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """Every bash 4 form, on its own line."""
-        status, out, err = self.script(SCRIPT + line + "\n", capfd=capfd)
+        status, _out, err = self.script(SCRIPT + line + "\n", capfd=capfd)
         same(status, bash_portability.EXIT_RED)
         same(err.splitlines(), red(f"  a.sh: 2:{line}"))
 
@@ -272,7 +272,7 @@ class TestSyntax(TestPlanted):
     ) -> None:
         """A comment naming a form is no hit, and numbers skip it."""
         text = SCRIPT + "# never ${v,,}\n  # nor mapfile x\n\necho ${v^}\n"
-        status, out, err = self.script(text, capfd=capfd)
+        status, _out, err = self.script(text, capfd=capfd)
         same(status, bash_portability.EXIT_RED)
         same(err.splitlines(), red("  a.sh: 3:echo ${v^}"))
 
@@ -282,7 +282,7 @@ class TestSyntax(TestPlanted):
         """A file's first hit carries its name; its others do not."""
         one = self.plant(".github/workflows/a.yml", "a: ${x,}\nb: ok\nc: ${y^}\n")
         two = self.plant("b.sh", SCRIPT + "mapfile x\n")
-        status, out, err = self.helper(one, "--", two, "--", capfd=capfd)
+        status, _out, err = self.helper(one, "--", two, "--", capfd=capfd)
         same(status, bash_portability.EXIT_RED)
         expected = red(f"  {one}: 1:a: ${{x,}}", "3:c: ${y^}", f"  {two}: 2:mapfile x")
         same(err.splitlines(), expected)
@@ -303,8 +303,8 @@ class TestExpansion(TestPlanted):
     """The message went through `printf %b`, and a newline-split read."""
 
     @pytest.mark.parametrize(
-        "line,shown",
-        (
+        ("line", "shown"),
+        [
             ("echo ${v,,} '\\t'", ["  a.sh: 2:echo ${v,,} '\t'"]),
             ("printf '\\101\\x42\\0103' ${v,,}", ["  a.sh: 2:printf 'ABC' ${v,,}"]),
             ("echo ${v,,} \\q \\\\", ["  a.sh: 2:echo ${v,,} \\q \\"]),
@@ -312,24 +312,24 @@ class TestExpansion(TestPlanted):
             ("echo ${v,,} \\n\\n x", ["  a.sh: 2:echo ${v,,} ", " x"]),
             ("echo ${v,,} \\u00e9 \\x4g", ["  a.sh: 2:echo ${v,,} é \x04g"]),
             ("echo ${v,,} \\", ["  a.sh: 2:echo ${v,,} \\"]),
-        ),
+        ],
     )
     def test_escapes_are_expanded(
         self, line: object, shown: object, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """Bash's escapes in a hit line expand; an unknown one stays."""
-        status, out, err = self.script(SCRIPT + line + "\n", capfd=capfd)
+        status, _out, err = self.script(SCRIPT + line + "\n", capfd=capfd)
         same(status, bash_portability.EXIT_RED)
         same(err.splitlines(), red(*shown))
 
-    @pytest.mark.parametrize("stop", ("\\c", "\\0"))
+    @pytest.mark.parametrize("stop", ["\\c", "\\0"])
     def test_backslash_c_and_nul_end_the_text(
         self, stop: object, capfd: pytest.CaptureFixture[str]
     ) -> None:
         r"""`\c` stops printf, a NUL stops the read: later hits are dropped."""
         one = self.plant("a.sh", SCRIPT + f"echo ${{v,,}} x{stop}y\n")
         two = self.plant("b.sh", SCRIPT + "mapfile x\n")
-        status, out, err = self.helper("--", one, two, "--", capfd=capfd)
+        status, _out, err = self.helper("--", one, two, "--", capfd=capfd)
         same(status, bash_portability.EXIT_RED)
         expected = red("  a.sh: 2:echo ${v,,} x")
         same(err.splitlines(), expected)
@@ -357,7 +357,7 @@ class TestTraps(TestPlanted):
 
     def test_both_halves_red(self, capfd: pytest.CaptureFixture[str]) -> None:
         """An unguarded trap and bash 4 syntax: both findings, the trap's first."""
-        status, out, err = self.script(SCRIPT + TRAP + "mapfile x\n", capfd=capfd)
+        status, _out, err = self.script(SCRIPT + TRAP + "mapfile x\n", capfd=capfd)
         same(status, bash_portability.EXIT_RED)
         head, _, rest = err.partition(HEAD + "\n")
         assert f"{TASK}: a.sh" in head
@@ -372,7 +372,7 @@ class TestCalls(TestPlanted):
     ) -> None:
         """A workflow that is not UTF-8 is read as grep reads it."""
         rel = self.plant("a.yml", b"x: \xff\nmapfile x\n")
-        status, out, err = self.helper(rel, "--", "--", capfd=capfd)
+        status, _out, err = self.helper(rel, "--", "--", capfd=capfd)
         same(status, bash_portability.EXIT_RED)
         same(err.splitlines(), red(f"  {rel}: 2:mapfile x"))
 
@@ -389,16 +389,16 @@ class TestCalls(TestPlanted):
             ("d.sh", f"{TASK}: mise/exit_trap.py cannot read a file:"),
         ):
             lists = ("--", name, "--") if name != conf else ("--", "--", name)
-            status, out, err = self.helper(*lists, capfd=capfd)
+            status, _out, err = self.helper(*lists, capfd=capfd)
             same(status, bash_portability.EXIT_ERROR)
             assert err.startswith(said), err
 
-    @pytest.mark.parametrize("argv", ([], ["a.sh"], ["--"], ["--", "--", "--"]))
+    @pytest.mark.parametrize("argv", [[], ["a.sh"], ["--"], ["--", "--", "--"]])
     def test_a_bad_call_is_a_usage_error(
         self, argv: object, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """Not two separators: exit 2 with the usage line."""
         usage = f"{TASK}: {bash_portability.USAGE}"
-        status, out, err = self.helper(*argv, capfd=capfd)
+        status, _out, err = self.helper(*argv, capfd=capfd)
         same(status, bash_portability.EXIT_ERROR)
         same(err.splitlines(), [usage])

@@ -579,7 +579,9 @@ def as_step() -> contextlib.ExitStack:
 
     """
     stack = contextlib.ExitStack()
-    support.name_task(stack.enter_context(pytest.MonkeyPatch.context()), "")
+    named = stack.enter_context(pytest.MonkeyPatch.context())
+    named.setenv("MISE_TASK_NAME", "")
+    named.setenv("ORG_FINDINGS", "")
     stack.enter_context(pytest.MonkeyPatch.context()).setattr(sys, "argv", [STEP])
     return stack
 
@@ -731,7 +733,7 @@ class TestHelper:
     def test_an_empty_tree_runs_the_unconditional_jobs_only(self) -> None:
         """Nothing tracked: every conditional job is skipped."""
         got = every(git_tree({}))
-        for workflow, rows in audit_legs.load_table().items():
+        for rows in audit_legs.load_table().values():
             for job, row in rows.items():
                 assert (row.when is None) == got[job]
 
@@ -753,8 +755,8 @@ class TestHelper:
             assert got[job]
 
     @pytest.mark.parametrize(
-        "job,want",
-        (
+        ("job", "want"),
+        [
             ("go-vulns", True),
             ("coverage-go-branches", True),
             ("fuzz", True),
@@ -762,7 +764,7 @@ class TestHelper:
             ("semver", False),
             ("coverage-branches", False),
             ("python-properties", False),
-        ),
+        ],
     )
     def test_a_go_tree(self, job: object, want: object) -> None:
         """go.mod brings the Go jobs and fuzz, and nothing Rust."""
@@ -770,8 +772,8 @@ class TestHelper:
         assert want == got[job]
 
     @pytest.mark.parametrize(
-        "job,want",
-        (
+        ("job", "want"),
+        [
             ("python-properties-seed", True),
             ("python-properties", True),
             ("lock-idempotent", True),
@@ -782,7 +784,7 @@ class TestHelper:
             ("coverage-branches", False),
             ("coverage-go-branches", False),
             ("typescript-properties", False),
-        ),
+        ],
     )
     def test_the_canon_tree(self, job: object, want: object) -> None:
         """The canon has Python properties, workflows and a lock; no Rust or Go."""
@@ -816,7 +818,7 @@ RAND_LOCK = 'version = 4\n\n[[package]]\nname = "rand"\nversion = "0.9.0"\n'
 class TestRustProperties:
     """The rust-properties job runs where a lock holds proptest (#1930)."""
 
-    @pytest.mark.parametrize("name", ("Cargo.lock", "crates/a/Cargo.lock"))
+    @pytest.mark.parametrize("name", ["Cargo.lock", "crates/a/Cargo.lock"])
     def test_a_lock_holding_proptest_runs_the_job(self, name: object) -> None:
         """At the root, or a workspace member's own lock."""
         got = outputs(git_tree({name: PROPTEST_LOCK}), "repo-deep-tests")
@@ -824,11 +826,11 @@ class TestRustProperties:
 
     @pytest.mark.parametrize(
         "files",
-        (
+        [
             {"Cargo.lock": RAND_LOCK},
             {"Cargo.lock": RAND_LOCK, "vendor/x/Cargo.lock": PROPTEST_LOCK},
             {},
-        ),
+        ],
     )
     def test_a_lock_without_proptest_skips_the_job(self, files: object) -> None:
         """A Cargo.lock alone is not a property, nor a vendored proptest."""
@@ -1009,7 +1011,7 @@ class TestFuzzTargets:
 @pytest.mark.usefixtures("_stack")
 class TestRefusals:
     """A table of the wrong shape, or a workflow it lacks, is refused by name."""
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""

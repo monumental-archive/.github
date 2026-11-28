@@ -24,12 +24,15 @@ from __future__ import annotations
 import os
 import re
 import subprocess
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from belt import decoded
 from tests import support
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 CANON = support.CANON
 

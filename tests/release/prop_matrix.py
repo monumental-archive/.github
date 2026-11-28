@@ -32,7 +32,6 @@ from belt import decoded
 from belt.release import matrix
 from belt.typed_hypothesis import given
 from belt.workflow_command import escape_data
-from tests import support
 
 
 def escaped(text: str) -> str:
@@ -65,7 +64,9 @@ def as_helper() -> contextlib.ExitStack:
 
     """
     stack = contextlib.ExitStack()
-    support.name_task(stack.enter_context(pytest.MonkeyPatch.context()), "")
+    named = stack.enter_context(pytest.MonkeyPatch.context())
+    named.setenv("MISE_TASK_NAME", "")
+    named.setenv("ORG_FINDINGS", "")
     stack.enter_context(pytest.MonkeyPatch.context()).setattr(
         sys, "argv", ["matrix.py"]
     )

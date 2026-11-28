@@ -190,7 +190,7 @@ class TestRefusals:
         )
         assert "publish" not in " ".join(run.npm)
 
-    @pytest.mark.parametrize("tarballs,count", (((), 0), (("a.tgz", "b.tgz"), 2)))
+    @pytest.mark.parametrize(("tarballs", "count"), [((), 0), (("a.tgz", "b.tgz"), 2)])
     def test_not_exactly_one_tarball(self, tarballs: object, count: object) -> None:
         """None, or two, is refused with the count."""
         run = run_publish(tarballs=tarballs)
@@ -273,7 +273,7 @@ class TestAFailedPublishShowsItsLog:
 class TestMain:
     """The command's one argument."""
 
-    @pytest.mark.parametrize("argv", ([], [""], ["a", "b"]))
+    @pytest.mark.parametrize("argv", [[], [""], ["a", "b"]])
     def test_a_missing_package_is_a_usage_error(self, argv: object) -> None:
         """No package, or an empty one, exits 2 with the usage line."""
         out = io.StringIO()

@@ -17,6 +17,7 @@ as those runs read it, so a Renovate roll of the live file moves nothing
 here.
 """
 
+import contextlib
 import io
 import sys
 import tempfile
@@ -27,7 +28,6 @@ import pytest
 
 from belt.release import matrix
 from tests import support
-import contextlib
 
 TESTDATA = Path(__file__).resolve().parent / "testdata" / "matrix"
 MAPPING = str(TESTDATA / "pgrx-base-images.toml")
@@ -84,7 +84,7 @@ def recorded(name: str) -> tuple[str, str]:
 @pytest.mark.usefixtures("_stack")
 class TestRows:
     """Shared assertions and fixtures."""
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""
@@ -165,7 +165,7 @@ class TestTargets(TestRows):
         ("rust-binary", "aarch64-apple-darwin", "macos-15"),
     )
 
-    @pytest.mark.parametrize("cls,target,runner", RUNNERS)
+    @pytest.mark.parametrize(("cls", "target", "runner"), RUNNERS)
     def test_each_known_target_runs_on_its_runner(
         self, cls: object, target: object, runner: object
     ) -> None:
@@ -217,7 +217,7 @@ class TestTargets(TestRows):
         )
 
     @pytest.mark.parametrize(
-        "asked", (",linux-amd64", "linux-amd64,,darwin-arm64", ",")
+        "asked", [",linux-amd64", "linux-amd64,,darwin-arm64", ","]
     )
     def test_an_empty_field_is_an_unknown_target(self, asked: object) -> None:
         """A leading or inner empty field is kept, and refused."""
@@ -227,7 +227,7 @@ class TestTargets(TestRows):
         )
 
     @pytest.mark.parametrize(
-        "asked", ("linux-amd64,linux-amd64", "linux-amd64, linux-amd64,")
+        "asked", ["linux-amd64,linux-amd64", "linux-amd64, linux-amd64,"]
     )
     def test_a_duplicate_is_refused(self, asked: object) -> None:
         """The same target twice, spaced or not."""
@@ -244,7 +244,7 @@ class TestTargets(TestRows):
         )
 
     @pytest.mark.parametrize(
-        "asked", (" linux-amd64 ", "linux-amd64,", "linux-amd64\ndarwin-arm64")
+        "asked", [" linux-amd64 ", "linux-amd64,", "linux-amd64\ndarwin-arm64"]
     )
     def test_the_request_splits_as_the_shell_split_it(self, asked: object) -> None:
         """Spaces removed, one trailing comma dropped, the first line only."""
@@ -261,7 +261,7 @@ class TestTargets(TestRows):
 class TestPgrxExtension(TestRows):
     """pgrx-extension: the build-pgrx-extension.yml plan step."""
 
-    @pytest.mark.parametrize("asked", ("", " "))
+    @pytest.mark.parametrize("asked", ["", " "])
     def test_an_empty_request_is_refused(self, asked: object) -> None:
         """Nothing requested."""
         self.refused(
@@ -269,7 +269,7 @@ class TestPgrxExtension(TestRows):
             f"::error::matrix: no PG majors requested — {NOTHING}",
         )
 
-    @pytest.mark.parametrize("major", ("13", "19"))
+    @pytest.mark.parametrize("major", ["13", "19"])
     def test_a_major_with_no_pinned_base_image_is_refused(self, major: object) -> None:
         """A major the mapping does not carry, numeric or not."""
         self.refused(
@@ -277,7 +277,7 @@ class TestPgrxExtension(TestRows):
             f"::error::matrix: pg{major} {NO_IMAGE}",
         )
 
-    @pytest.mark.parametrize("major", ("x", "pg14", ""))
+    @pytest.mark.parametrize("major", ["x", "pg14", ""])
     def test_a_non_numeric_major_is_refused(self, major: object) -> None:
         """A field that is not a number is named as such, not as unpinned."""
         self.refused(
@@ -287,12 +287,12 @@ class TestPgrxExtension(TestRows):
 
     @pytest.mark.parametrize(
         "text",
-        (
+        [
             '[build]\n"14" = "a@sha256:1"\n[smoke]\n',
             '[build]\n[smoke]\n"14" = "a@sha256:1"\n',
             '[build]\n"14" = ""\n[smoke]\n"14" = "a@sha256:1"\n',
             '[smoke]\n"14" = "a@sha256:1"\n',
-        ),
+        ],
     )
     def test_a_major_pinned_for_one_role_only_is_refused(self, text: object) -> None:
         """Both a build and a smoke image, or no plan."""
@@ -397,7 +397,7 @@ class TestMappingShape(TestRows):
 class TestPgrxImages(TestRows):
     """pgrx-images: the build-pgrx-images.yml plan step."""
 
-    @pytest.mark.parametrize("asked", ("", "  "))
+    @pytest.mark.parametrize("asked", ["", "  "])
     def test_an_empty_request_is_refused(self, asked: object) -> None:
         """Nothing requested."""
         self.refused(
@@ -405,7 +405,7 @@ class TestPgrxImages(TestRows):
             f"::error::matrix: no PG majors requested — {NOTHING}",
         )
 
-    @pytest.mark.parametrize("major", ("x", "1a", "pg14", "-1", "1.5", "٣"))
+    @pytest.mark.parametrize("major", ["x", "1a", "pg14", "-1", "1.5", "٣"])
     def test_a_non_numeric_major_is_refused(self, major: object) -> None:
         """ASCII digits only, as `^[0-9]+$` held it."""
         self.refused(
@@ -456,7 +456,7 @@ class TestBaseImages(TestRows):
     """base-images: base-attest.yml's enumeration of the pinned set."""
 
     @pytest.mark.parametrize(
-        "ref", ("postgres:14-bookworm", "postgres:14@sha512:ab", "postgres@")
+        "ref", ["postgres:14-bookworm", "postgres:14@sha512:ab", "postgres@"]
     )
     def test_a_reference_with_no_digest_is_refused_bare(self, ref: object) -> None:
         """The heredoc's SystemExit wording, unprefixed as it always was."""
@@ -466,7 +466,7 @@ class TestBaseImages(TestRows):
         )
 
     @pytest.mark.parametrize(
-        "text", ("", '[floor]\nglibc = "2.36"\n', "[build]\n[smoke]\n")
+        "text", ["", '[floor]\nglibc = "2.36"\n', "[build]\n[smoke]\n"]
     )
     def test_an_empty_file_is_refused(self, text: object) -> None:
         """A mapping that pins nothing approves nothing."""
@@ -506,14 +506,14 @@ class TestCommandLine:
 
     @pytest.mark.parametrize(
         "argv",
-        (
+        [
             (),
             ("targets", "oci-image", "x"),
             ("targets", "go-binary"),
             ("pgrx-images",),
             ("base-images",),
             ("pgrx-extension", MAPPING),
-        ),
+        ],
     )
     def test_malformed_command_lines(self, argv: object) -> None:
         """A missing argument or an unknown class prints the usage."""

@@ -9,11 +9,14 @@ Each row plants that tree and asserts the exact lines and exit status.
 
 import shutil
 import subprocess
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from tests import support
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 BELT = support.MISE
 SCRIPT = BELT / "mutation-totals.sh"

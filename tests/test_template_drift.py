@@ -17,7 +17,6 @@ GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom.
 import shutil
 import subprocess
 import sys
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -27,6 +26,7 @@ from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
 # The task that runs the helper, whose name its findings carry (#1934).
 TASK = "audit:template-pins"
@@ -266,7 +266,7 @@ class TestPins(TestPlanted):
         """Two distinct pinned SHAs: red, naming the lint that missed it."""
         other = self.commit("mise/b.sh")
         rel = self.plant(template(self.pin, other, self.pin))
-        status, out, err = self.helper(CANON, rel, capfd=capfd)
+        status, _out, err = self.helper(CANON, rel, capfd=capfd)
         same(status, template_drift.EXIT_RED)
         expected = [
             (
@@ -282,7 +282,7 @@ class TestPins(TestPlanted):
         """A pin the clone lacks: red, naming a shallow clone."""
         absent = "b" * 40
         rel = self.plant(template(absent))
-        status, out, err = self.helper(CANON, rel, capfd=capfd)
+        status, _out, err = self.helper(CANON, rel, capfd=capfd)
         same(status, template_drift.EXIT_RED)
         expected = [
             (
@@ -304,7 +304,7 @@ class TestDrift(TestPlanted):
         self.commit(".github/workflows/ci.yml")
         self.commit("mise/b.sh")
         rel = self.plant(template(self.pin))
-        status, out, err = self.helper(CANON, rel, capfd=capfd)
+        status, _out, err = self.helper(CANON, rel, capfd=capfd)
         same(status, template_drift.EXIT_RED)
         head = f"audit:template-pins: pin {self.pin[:8]} misses shipped canon changes:"
         same(err.splitlines(), [head, *self.log(self.pin), *TAIL])
@@ -328,7 +328,7 @@ class TestDrift(TestPlanted):
         self.git("tag", "v1.0.0", self.pin)
         self.commit("mise/b.sh", tag="v1.1.0")
         rel = self.plant(template(self.pin))
-        status, out, err = self.helper(CANON, rel, now=T0 + 2 * DAY, capfd=capfd)
+        status, _out, err = self.helper(CANON, rel, now=T0 + 2 * DAY, capfd=capfd)
         same(status, template_drift.EXIT_RED)
         head = f"audit:template-pins: pin {self.pin[:8]} misses shipped canon changes:"
         same(err.splitlines(), [head, *self.log(self.pin), *TAIL])
@@ -361,7 +361,7 @@ class TestDrift(TestPlanted):
         """HEAD unborn: the diff fails, and that is no empty drift."""
         rel = self.plant(template(self.pin))
         self.git("checkout", "-q", "--orphan", "unborn")
-        status, out, err = self.helper(CANON, rel, capfd=capfd)
+        status, _out, err = self.helper(CANON, rel, capfd=capfd)
         same(status, template_drift.EXIT_ERROR)
         assert err.startswith(
             f"audit:template-pins: git diff --name-only {self.pin}..HEAD --"
@@ -371,7 +371,7 @@ class TestDrift(TestPlanted):
     def test_not_utf8_is_an_error(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A template that is not UTF-8 is refused by name, exit 2."""
         rel = self.plant(b"jobs: \xff\n")
-        status, out, err = self.helper(CANON, rel, capfd=capfd)
+        status, _out, err = self.helper(CANON, rel, capfd=capfd)
         same(status, template_drift.EXIT_ERROR)
         assert err.startswith(
             f"audit:template-pins: {rel}: cannot be read as UTF-8:"
@@ -384,7 +384,7 @@ class TestDrift(TestPlanted):
         usage = "audit:template-pins: usage: belt template-drift OWNER/REPO TEMPLATE..."
         calls: list[list[str]] = [[], [CANON], ["/repo", STUB], ["owner/", STUB]]
         for argv in calls:
-            status, out, err = self.helper(*argv, capfd=capfd)
+            status, _out, err = self.helper(*argv, capfd=capfd)
             same(status, template_drift.EXIT_ERROR)
             same(err.splitlines(), [usage])
 

@@ -82,7 +82,7 @@ def test_a_pragma_in_a_string_is_not_a_site(
     path = tmp_path / "f.py"
     path.write_text('X = "# pragma: no mutate block"\n', encoding="utf-8")
     status = mp.main([str(path)])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     assert (status, err) == (0, "")
 
 
@@ -99,7 +99,7 @@ def test_invalid_utf8_is_named_and_the_rest_read(
     good = tmp_path / "good.py"
     good.write_text("x = 1  # pragma: no mutate\n", encoding="utf-8")
     status = mp.main([str(bad), str(good)])
-    out, err = capfd.readouterr()
+    _out, err = capfd.readouterr()
     assert status == 1
     assert err.startswith(f"{TASK}: {bad}: could not tokenize:")
     assert err.endswith(f"{TASK}: {good}:1: {NO_REASON}\n{WHY}")

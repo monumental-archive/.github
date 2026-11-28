@@ -317,7 +317,7 @@ class TestTheLaw:
 
     @pytest.mark.parametrize(
         "text",
-        (
+        [
             "import urllib.request\nurllib.request.urlopen(r)\n",
             "import urllib.request as u\nu.urlopen(r)\n",
             "from urllib.request import urlopen as go\ngo(r)\n",
@@ -332,7 +332,7 @@ class TestTheLaw:
                 "        opener = self.a if r else self.a\n"
                 "        opener.open(r)\n"
             ),
-        ),
+        ],
     )
     def test_each_spelling_is_an_open(self, text: object) -> None:
         """Planted: every way a file can open a URL itself is found."""

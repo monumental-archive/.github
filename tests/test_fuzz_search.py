@@ -26,6 +26,7 @@ Each row asserts the message, not just the exit status: a planted row
 scored on exit alone can pass for the wrong reason.
 """
 
+import contextlib
 import os
 import re
 import shutil
@@ -38,7 +39,6 @@ import pytest
 
 from belt import decoded, workflow_yaml
 from tests import support
-import contextlib
 
 BELT = support.MISE
 CANON = BELT.parent
@@ -780,7 +780,7 @@ class TestQuietSteps(TestSearchCase):
 @pytest.mark.usefixtures("_stack")
 class TestFailureLines:
     """What a crash's finding quotes from the log (#2120)."""
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""
@@ -958,7 +958,7 @@ class TestSelection(TestSearchCase):
 @pytest.mark.usefixtures("_stack")
 class TestRunLength:
     """The summary says when a run was still finding new code (item 5)."""
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""
@@ -1043,7 +1043,7 @@ def step(name: str) -> dict[str, object]:
 @pytest.mark.usefixtures("_stack")
 class TestHandover:
     """What a fuzz runner hands the propose job, and when (items 3, 4; #1899)."""
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""

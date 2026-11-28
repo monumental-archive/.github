@@ -149,6 +149,6 @@ class TestRefusal:
                 status = bo.main([url("o", repo)])
         finally:
             sys.stdin = old
-        assert status in (0, 1)
+        assert status in {0, 1}
         if status == 1:
             assert out.getvalue().strip()

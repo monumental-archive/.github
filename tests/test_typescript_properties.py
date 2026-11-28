@@ -266,12 +266,12 @@ class TestSkips:
     """Nothing to run: exit 0, skipped, named."""
 
     @pytest.mark.parametrize(
-        "body,label",
-        (
+        ("body", "label"),
+        [
             (GATE, "test:typescript-properties"),
             (AUDIT, "audit:typescript-properties"),
             (LINT, "lint:typescript-properties"),
-        ),
+        ],
     )
     def test_no_fast_check_skips_clean_by_name(
         self, body: object, label: object
@@ -409,7 +409,9 @@ class TestGate:
         )
         assert 'reporters: ["default", "json", seeder],' in done.written()
 
-    @pytest.mark.parametrize("body,files", ((GATE, GATE_FILES), (AUDIT, AUDIT_FILES)))
+    @pytest.mark.parametrize(
+        ("body", "files"), [(GATE, GATE_FILES), (AUDIT, AUDIT_FILES)]
+    )
     def test_every_project_has_no_per_test_limit(
         self, body: object, files: object
     ) -> None:
@@ -649,13 +651,13 @@ class TestLint:
         assert "a.prop.test.ts" not in done.stderr
 
     @pytest.mark.parametrize(
-        "site,what",
-        (
+        ("site", "what"),
+        [
             ("g.prop.test.cts:4", "configureGlobal()"),
             ("h.prop.test.mts:4", "seed"),
             ("n.prop.test.tsx:4", "numRuns"),
             ("s.prop.test.ts:4", "seed"),
-        ),
+        ],
     )
     def test_a_property_restating_the_seed_is_red_by_name(
         self, site: object, what: object
@@ -719,11 +721,11 @@ class TestLint:
         assert done.stderr.count(": restates ") == 3, done.stderr
 
     @pytest.mark.parametrize(
-        "site,what",
-        (
+        ("site", "what"),
+        [
             ("a.prop.test.ts:4", "fast-check's timeout"),
             ("a.prop.test.ts:5", "vi.setConfig()"),
-        ),
+        ],
     )
     def test_a_bound_named_in_text_is_red(self, site: object, what: object) -> None:
         """A comment or string naming a bound reds: loud, never silent."""

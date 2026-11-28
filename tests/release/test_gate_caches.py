@@ -492,7 +492,7 @@ class TestLegCaches:
                 f"gate: {TOOL_RESTORE} is not restored by every leg",
             ),
         ]
-        for label, (old, new), message in rows:
+        for _label, (old, new), message in rows:
             want: list[str] = [message]
             assert want == leg_cache_findings(plant(old, new))
 
@@ -716,7 +716,7 @@ class TestCompiler:
                 "ci.yml: gate: no `belt gate-cache-key cargo` step with id rustc",
             ),
         ]
-        for label, (old, new), message in rows:
+        for _label, (old, new), message in rows:
             want: list[str] = [message]
             assert want == compiler_findings(plant(old, new))
 

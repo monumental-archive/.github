@@ -12,6 +12,8 @@ Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
 """
 
+import os
+
 import pytest
 from hypothesis import example
 from hypothesis import strategies as st
@@ -54,7 +56,10 @@ class TestEnv:
     ) -> None:
         """Allow-list, HOME and identity; overrides last."""
         with pytest.MonkeyPatch.context() as patched:
-            support.patch_env(patched, environ, clear=True)
+            for name in list(os.environ):
+                patched.delenv(name)
+            for name, value in environ.items():
+                patched.setenv(name, value)
             got = he.env(home, **overrides)
         allowed = set(he.INHERITED) | {"HOME"} | set(IDENTITY) | set(overrides)
         assert set(got) <= allowed

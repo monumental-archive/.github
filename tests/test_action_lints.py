@@ -21,17 +21,21 @@ pins, owner and zizmor rows fail because actions/x/action.yml is never
 read, and the gate-install row fails because mise/gate-tools.toml never
 installed pinact or zizmor for it.
 
-GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom."""
+GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom.
+"""
 
 import json
 import os
 import subprocess
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from belt import decoded, gate_tools
 from tests import support
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 BELT = support.MISE
 GIT = support.tool("git")
@@ -618,7 +622,7 @@ class TestAllowlistAudit(TestPlanted):
         assert "reconcile mise/actions-allowed.sh and security/README.md" in done.stderr
 
     @pytest.mark.parametrize(
-        "task", ("lint:actions-allowed", "audit:actions-allowlist")
+        "task", ["lint:actions-allowed", "audit:actions-allowlist"]
     )
     def test_the_lint_and_the_audit_read_one_list(self, task: object) -> None:
         """Neither task body spells a pattern of its own."""
@@ -630,7 +634,7 @@ class TestAllowlistAudit(TestPlanted):
 class TestGateInstalls:
     """mise/gate-tools.toml installs the tools wherever the selection reads."""
 
-    @pytest.mark.parametrize("key", ("aqua:suzuki-shunsuke/pinact", "zizmor"))
+    @pytest.mark.parametrize("key", ["aqua:suzuki-shunsuke/pinact", "zizmor"])
     def test_a_top_level_action_alone_installs_pinact_and_zizmor(
         self, key: object
     ) -> None:

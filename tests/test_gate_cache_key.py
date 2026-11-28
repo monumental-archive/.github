@@ -14,6 +14,7 @@ of every other input that decides what the cargo caches hold.
 import contextlib
 import hashlib
 import io
+import os
 import platform
 import re
 import stat
@@ -192,9 +193,12 @@ def run(canon: Path) -> dict[str, str]:
         out = Path(tmp) / "out"
         env = {**RUNNER, "GITHUB_OUTPUT": str(out)}
         with pytest.MonkeyPatch.context() as patched, redirect_stdout(io.StringIO()):
-            support.patch_env(patched, env, clear=True)
-            patched.setattr(platform, "system", support.returning("Linux"))
-            patched.setattr(platform, "machine", support.returning("x86_64"))
+            for name in list(os.environ):
+                patched.delenv(name)
+            for name, value in env.items():
+                patched.setenv(name, value)
+            patched.setattr(platform, "system", lambda *_args, **_kwargs: "Linux")
+            patched.setattr(platform, "machine", lambda *_args, **_kwargs: "x86_64")
             code = gate_cache_key.main(["tool", "mise-v2", str(canon)], now=WHEN)
         if code != 0:
             msg = f"gate-cache-key exited {code}"
@@ -237,7 +241,8 @@ class TestMain:
         """A canon tree without its files is a red step, not a key."""
         err = io.StringIO()
         with pytest.MonkeyPatch.context() as patched, redirect_stderr(err):
-            support.name_task(patched, "")
+            patched.setenv("MISE_TASK_NAME", "")
+            patched.setenv("ORG_FINDINGS", "")
             patched.setattr(sys, "argv", ["gate_cache_key.py"])
             code = gate_cache_key.main(["tool", "mise-v2", "/nonexistent"])
             assert code == 1
@@ -330,7 +335,7 @@ class TestInstallList:
             == "c8687a08aa5d6ed2044328fa6a697ab8e96dc34291e8c2034ae8c38e6fcc6d65"
         )
 
-    @pytest.mark.parametrize("install", ("", "  ", "--locked"))
+    @pytest.mark.parametrize("install", ["", "  ", "--locked"])
     def test_no_list_is_todays_key(self, install: object) -> None:
         """The gate passes no list, and its key does not move by a byte."""
         facts = gate_cache_key.Facts("2026.11.6", "linux-x64", WHEN, BELT)
@@ -348,9 +353,12 @@ class TestInstallList:
                 pytest.MonkeyPatch.context() as patched,
                 redirect_stdout(io.StringIO()),
             ):
-                support.patch_env(patched, env, clear=True)
-                patched.setattr(platform, "system", support.returning("Linux"))
-                patched.setattr(platform, "machine", support.returning("x86_64"))
+                for name in list(os.environ):
+                    patched.delenv(name)
+                for name, value in env.items():
+                    patched.setenv(name, value)
+                patched.setattr(platform, "system", lambda *_args, **_kwargs: "Linux")
+                patched.setattr(platform, "machine", lambda *_args, **_kwargs: "x86_64")
                 argv = ["tool", "mise-pgrx-v1-pg18", str(tree)]
                 argv += ["--install", "jq rust@1"]
                 assert gate_cache_key.main(argv, now=WHEN) == 0
@@ -455,7 +463,10 @@ def cargo_main(
             redirect_stdout(io.StringIO()),
             redirect_stderr(err),
         ):
-            support.patch_env(patched, env, clear=True)
+            for name in list(os.environ):
+                patched.delenv(name)
+            for name, value in env.items():
+                patched.setenv(name, value)
             code = gate_cache_key.main(["cargo", "--canon-ref", canon_ref])
         return code, out.read_text("utf-8"), err.getvalue()
 
@@ -490,19 +501,16 @@ class TestCompiler:
             ("host", "x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"),
         ]
         before = gate_cache_key.rustc_digest(RUSTC)
-        for label, old, new in rows:
+        for _label, old, new in rows:
             assert old in RUSTC
             after = gate_cache_key.rustc_digest(RUSTC.replace(old, new))
             assert before != after
 
-    def test_text_naming_no_compiler_is_red(self) -> None:
+    @pytest.mark.parametrize("text", ["", "binary: rustc\n"])
+    def test_text_naming_no_compiler_is_red(self, text: object) -> None:
         """Empty output is refused, never digested into a key."""
-        for text in ("", "binary: rustc\n"):
-            with (
-                self.subTest(text=text),
-                pytest.raises(ValueError, match="printed no release line"),
-            ):
-                gate_cache_key.rustc_digest(text)
+        with pytest.raises(ValueError, match="printed no release line"):
+            gate_cache_key.rustc_digest(text)
 
     def test_main_writes_the_digest_of_the_rustc_on_path(self) -> None:
         """`cargo` asks PATH's rustc and writes `digest` for the key."""
@@ -550,7 +558,8 @@ class TestCargoInputs:
     @pytest.fixture
     def _set_up_test_cargo_inputs(self, tmp_path: Path) -> None:
         """Put a `rustc` on PATH for every row."""
-        self.path = rustc_on_path(Path(str(tmp_path)), f"printf '%s' '{RUSTC}'")
+        self.tmp = tmp_path
+        self.path = rustc_on_path(tmp_path, f"printf '%s' '{RUSTC}'")
         self.trees = 0
 
     def run_in(
@@ -566,7 +575,7 @@ class TestCargoInputs:
 
         """
         self.trees += 1
-        tree = git_tree(Path(str(tmp_path)) / f"tree{self.trees}", files)
+        tree = git_tree(self.tmp / f"tree{self.trees}", files)
         for name, text in (untracked or {}).items():
             (tree / name).parent.mkdir(parents=True, exist_ok=True)
             (tree / name).write_text(text, "utf-8")
@@ -627,7 +636,7 @@ class TestCargoInputs:
 
     def test_no_canon_ref_is_red(self) -> None:
         """An empty ref is refused, never hashed into a key."""
-        tree = git_tree(Path(str(tmp_path)) / "tree", TREE)
+        tree = git_tree(self.tmp / "tree", TREE)
         code, written, err = cargo_main(self.path, tree, canon_ref="")
         assert code == 1
         assert written == ""
@@ -635,7 +644,7 @@ class TestCargoInputs:
 
     def test_no_globs_is_red(self) -> None:
         """A workflow that sets no mise globs would omit the tool pins."""
-        tree = git_tree(Path(str(tmp_path)) / "tree", TREE)
+        tree = git_tree(self.tmp / "tree", TREE)
         code, written, err = cargo_main(self.path, tree, ORG_MISE_CONFIG_GLOBS="")
         assert code == 1
         assert written == ""
@@ -664,7 +673,8 @@ class TestToolchain:
         The `xcrun` finds the row's `clang` on PATH, so the rows read the
         same stub on Darwin as `clang` on PATH does elsewhere.
         """
-        self.path = rustc_on_path(Path(str(tmp_path)), f"printf '%s' '{RUSTC}'")
+        self.tmp = tmp_path
+        self.path = rustc_on_path(tmp_path, f"printf '%s' '{RUSTC}'")
         self.trees = 0
         self.stub("xcrun", "command -v clang || exit 1")
         for name, text in (("cc", CC), ("c++", CC), ("clang", CLANG), ("ldd", LDD)):
@@ -690,7 +700,7 @@ class TestToolchain:
 
         """
         self.trees += 1
-        tree = git_tree(Path(str(tmp_path)) / f"tree{self.trees}", TREE)
+        tree = git_tree(self.tmp / f"tree{self.trees}", TREE)
         return cargo_main(self.path, tree, **kw)
 
     def run_in(self, **kw: str) -> dict[str, str]:
@@ -794,7 +804,10 @@ def digest_main(path: str) -> tuple[int, str, str]:
         redirect_stdout(out),
         redirect_stderr(err),
     ):
-        support.patch_env(patched, env, clear=True)
+        for name in list(os.environ):
+            patched.delenv(name)
+        for name, value in env.items():
+            patched.setenv(name, value)
         code = gate_cache_key.main(["digest"])
     return code, out.getvalue(), err.getvalue()
 
@@ -802,7 +815,7 @@ def digest_main(path: str) -> tuple[int, str, str]:
 @pytest.mark.usefixtures("_stack")
 class TestDirectory:
     """Every coverage directory names its compiler (#1877)."""
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""

@@ -22,18 +22,19 @@ Since #1633 the walk is the delivered `audit-badges.sh` and the task is
 its guard and call, so the behaviour rows run the task body as before
 and the class row reads the script, through belt-shell's scrub.
 
-GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom."""
+GIT ENVIRONMENT IS SCRUBBED (#857), the belt's idiom.
+"""
 
 import json
 import os
 import re
 import subprocess
 import sys
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
 import pytest
 
@@ -342,7 +343,7 @@ class TestBestPracticesRead(TestPlanted):
             ],
         )
 
-    @pytest.mark.parametrize("shield", ("badge", "baseline"))
+    @pytest.mark.parametrize("shield", ["badge", "baseline"])
     def test_the_entry_is_asked_past_the_shared_cache(self, shield: object) -> None:
         """Each entry is asked at a key the cache never held (#2084).
 
@@ -578,11 +579,11 @@ class TestStaleAnswer(TestPlanted):
         )
 
     @pytest.mark.parametrize(
-        "alpha,code,said",
-        (
+        ("alpha", "code", "said"),
+        [
             ("5.0", 0, ""),
             ("4.2", 1, f"{DEFECTS}alpha(scorecard: 4.2 below floor 5.0 — regression)"),
-        ),
+        ],
     )
     def test_a_stale_200_is_judged_on_its_score(
         self, alpha: object, code: object, said: object
@@ -596,7 +597,7 @@ class TestStaleAnswer(TestPlanted):
         self.verdict(code, [beta], said)
 
     @pytest.mark.parametrize(
-        "lines", (OLD, ("age: 700000", "cache-control: max-age=31536000"))
+        "lines", [OLD, ("age: 700000", "cache-control: max-age=31536000")]
     )
     def test_an_answer_older_than_the_week_is_unanswered(self, lines: object) -> None:
         """Past the audit's own period, whatever `max-age` says."""
@@ -624,14 +625,14 @@ class TestStaleAnswer(TestPlanted):
 
     @pytest.mark.parametrize(
         "lines",
-        (
+        [
             ("age: 100", "cache-control: max-age=600"),
             # s-maxage is the shared cache's lifetime and wins over max-age.
             ("age: 700", "cache-control: max-age=600, s-maxage=1000"),
             ("age: 43302",),
             ("cache-control: max-age=600",),
             (),
-        ),
+        ],
     )
     def test_fresh_or_headerless_answers_read_as_today(self, lines: object) -> None:
         """Within its lifetime, or with no claim either way: read as today."""
@@ -646,7 +647,7 @@ class TestStaleAnswer(TestPlanted):
         self.headers("beta", *lines)
         self.verdict(1, [beta], absent)
 
-    @pytest.mark.parametrize("leg,shield,suffix,_who,body,note", LEGS)
+    @pytest.mark.parametrize(("leg", "shield", "suffix", "_who", "body", "note"), LEGS)
     def test_every_leg_judges_a_stale_presence(
         self,
         leg: object,
@@ -663,7 +664,7 @@ class TestStaleAnswer(TestPlanted):
         asks = 2
         self.verdict(0, [note("alpha"), note("beta")], asks=asks)
 
-    @pytest.mark.parametrize("leg,shield,suffix,who,body,_note", LEGS)
+    @pytest.mark.parametrize(("leg", "shield", "suffix", "who", "body", "_note"), LEGS)
     def test_every_leg_reads_the_week_bound(
         self,
         leg: object,

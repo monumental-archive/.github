@@ -112,7 +112,7 @@ class Stops:
         self.said = self._err.getvalue().rstrip("\n")
         if not isinstance(exc, SystemExit):
             pytest.fail(f"the task did not stop: {exc!r}")
-        assert 1 == exc.code, self.said
+        assert exc.code == 1, self.said
         return True
 
 
@@ -1080,11 +1080,11 @@ class TestLockfileBranch:
 
     @pytest.mark.parametrize(
         "extra",
-        (
+        [
             "to {{#if isMajor}}{{newMajor}}{{else}}{{newValue}}{{/if}}",
             "to {{#unless isLockfileUpdate}}{{newValue}}{{/unless}}",
             "to {{#if isLockfileUpdate}}{{#if x}}y{{/if}}{{else}}{{newValue}}{{/if}}",
-        ),
+        ],
     )
     def test_an_unrecognised_helper_is_still_unmodelled(self, extra: object) -> None:
         """Only the one conditional is rendered; any other block is reported."""
@@ -1348,7 +1348,8 @@ class TestCeiling:
             )
             env: dict[str, str] = {"ORG_BELT_DIR": tmp}
             with pytest.MonkeyPatch.context() as patched:
-                support.patch_env(patched, env)
+                for name, value in env.items():
+                    patched.setenv(name, value)
                 assert sb.ceiling() == 61
 
     def test_unset_belt_dir_is_a_hard_error(self) -> None:
@@ -1360,7 +1361,8 @@ class TestCeiling:
                 SystemExit,
             ),
         ):
-            support.patch_env(patched, env)
+            for name, value in env.items():
+                patched.setenv(name, value)
             sb.ceiling()
 
     def test_absent_committed_toml_is_a_hard_error(self) -> None:
@@ -1368,7 +1370,8 @@ class TestCeiling:
         with TemporaryDirectory() as tmp:
             env: dict[str, str] = {"ORG_BELT_DIR": tmp}
             with pytest.MonkeyPatch.context() as patched, pytest.raises(SystemExit):
-                support.patch_env(patched, env)
+                for name, value in env.items():
+                    patched.setenv(name, value)
                 sb.ceiling()
 
     @pytest.mark.parametrize(
@@ -1575,9 +1578,10 @@ class TestMainGuards:
             out, err = io.StringIO(), io.StringIO()
             env = {"ORG_BELT_DIR": str(belt), "ORG_CANON_DIR": str(root)}
             with pytest.MonkeyPatch.context() as patched:
-                support.patch_env(patched, env)
+                for name, value in env.items():
+                    patched.setenv(name, value)
                 patched.setattr(sys, "stdin", io.StringIO(listing))
-                patched.setattr(Path, "cwd", support.returning(root))
+                patched.setattr(Path, "cwd", lambda *_args, **_kwargs: root)
                 os.chdir(root)
                 try:
                     with redirect_stdout(out), redirect_stderr(err):

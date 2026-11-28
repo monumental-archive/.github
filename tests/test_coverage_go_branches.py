@@ -21,6 +21,7 @@ Each row asserts the message, not just the exit status: a planted row
 scored on exit alone can pass for the wrong reason.
 """
 
+import contextlib
 import os
 import shutil
 import subprocess
@@ -34,7 +35,6 @@ import pytest
 from belt import coverage_floor as cf
 from belt import decoded
 from tests import support
-import contextlib
 
 CANON = support.CANON
 BELT = CANON / "mise"
@@ -292,7 +292,7 @@ class Plant(TypedDict, total=False):
 @pytest.mark.usefixtures("_stack")
 class TestGoBranchCase:
     """Runs a task and removes the planted tree afterwards."""
-    
+
     @pytest.fixture
     def _stack(self, request: pytest.FixtureRequest) -> None:
         """Hold the row's cleanups, undone last first after it ends."""

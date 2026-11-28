@@ -889,7 +889,7 @@ class TestShards(TestPlanted):
         assert done.returncode == 1
         assert not (self.tmp / "summary" / "rust.tsv").exists()
 
-    @pytest.mark.parametrize("bad", ("4/4", "1", "a/4", "1/0"))
+    @pytest.mark.parametrize("bad", ["4/4", "1", "a/4", "1/0"])
     def test_malformed_shard_is_red(self, bad: object) -> None:
         """Shard k must be below n: a typo never quietly runs everything n times."""
         self.plant(package("alpha", str(self.tree)))

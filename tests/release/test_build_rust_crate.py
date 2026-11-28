@@ -72,7 +72,7 @@ BASH = support.tool("bash")
 VERSION = "1.3.4"
 MEMBERS = ("edtf-core", "edtf-cli", "edtf-postgres")
 UNCOMPILABLE = "edtf-postgres"
-HELPER = ".org-canon/release/package_crates.py"
+COMMAND = "package-crates"
 STEPS = (
     "Compute the subject manifest",
     "Emit the inventory plan (which packages these crates ship)",
@@ -248,16 +248,11 @@ def run_steps(
         The run's status, output, cargo log and what it left behind.
 
     """
-    return steps(
-        Job(excludes, second, members, publish, unwritten), script=False, capfd=capfd
-    )
+    return steps(Job(excludes, second, members, publish, unwritten), capfd=capfd)
 
 
-def steps(job: Job, *, script: bool, capfd: pytest.CaptureFixture[str]) -> Run:
+def steps(job: Job, *, capfd: pytest.CaptureFixture[str]) -> Run:
     """Run the shipped step bodies in order, as the job does.
-
-    `script` starts the helper as the job does, rather than call its
-    `main` in this process.
 
     Returns:
         The run's status, output, cargo log and what it left behind.
@@ -296,32 +291,25 @@ def steps(job: Job, *, script: bool, capfd: pytest.CaptureFixture[str]) -> Run:
             STUB_METADATA=str(tmp / "metadata.json"),
             STUB_UNWRITTEN=" ".join(job.unwritten),
         )
-        out, err, rc = "", "", 0
-        result: subprocess.CompletedProcess[str] | support.Called
-        for argv in [[HELPER], *([BASH, "-c", step_body(n)] for n in STEPS)]:
-            if argv == [HELPER] and not script:
-
-                def call() -> int:
-                    return package_crates.main([])
-
-                with pytest.MonkeyPatch.context() as patched:
-                    for name, value in env.items():
-                        patched.setenv(name, value)
-                    patched.chdir(work)
-                    status = call()
-                out, err = capfd.readouterr()
-            else:
-                result = subprocess.run(
-                    argv,
-                    env=env,
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                    cwd=work,
-                )
-            out, err, rc = out + out, err + err, status
+        with pytest.MonkeyPatch.context() as patched:
+            for name, value in env.items():
+                patched.setenv(name, value)
+            patched.chdir(work)
+            patched.setattr(sys, "argv", [COMMAND])
+            rc = package_crates.main([])
+        out, err = capfd.readouterr()
+        for name in STEPS:
             if rc != 0:
                 break
+            result = subprocess.run(
+                [BASH, "-c", step_body(name)],
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+                cwd=work,
+            )
+            out, err, rc = out + result.stdout, err + result.stderr, result.returncode
         package = work / "target" / "package"
         plan = work / "plan" / "plan.json"
         return Run(
@@ -372,7 +360,7 @@ class TestPackageStepIsTheHelper:
     def test_the_shipped_step_calls_the_helper(self) -> None:
         """Nothing but the call is left in the workflow."""
         # Under the belt's Python (#1543).
-        assert f'"${{ORG_PYTHON}}" {HELPER}' == step_body("Package")
+        assert f'"${{ORG_PYTHON}}" -I .org-canon/belt {COMMAND}' == step_body("Package")
 
 
 class TestPackageAnExcludedMember:
@@ -382,8 +370,8 @@ class TestPackageAnExcludedMember:
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """Ship the extension edtf excludes, uncompiled."""
-        status, out, err = run_steps(EXCLUDE, capfd=capfd)
-        assert status == 0, out + err
+        run = run_steps(EXCLUDE, capfd=capfd)
+        assert run.returncode == 0, run.stdout + run.stderr
         cargo: list[str] = [
             f"package --workspace --locked --exclude {UNCOMPILABLE}",
             "package --workspace --locked --no-verify",
@@ -408,37 +396,36 @@ class TestPackageAnExcludedMember:
     ) -> None:
         """The verified bytes must be the bytes hashed and published."""
         planted = b"not the bytes that were verified\n"
-        status, out, err = run_steps(
-            EXCLUDE, second={"edtf-core": planted}, capfd=capfd
-        )
-        assert status != 0
+        run = run_steps(EXCLUDE, second={"edtf-core": planted}, capfd=capfd)
+        assert run.returncode != 0
         assert (
             f"::error::package-crates: edtf-core-{VERSION}.crate changed when"
             f" packaged again"
             f" without verifying: {digest('edtf-core')} verified,"
             f" {hashlib.sha256(planted).hexdigest()} now\n"
-        ) == err
+        ) == run.stderr
         assert run.outputs == ""
 
     def test_a_changed_excluded_crate_alone_is_not_a_mismatch(
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """Only crates the verified run wrote are compared."""
-        status, out, err = run_steps(
+        run = run_steps(
             EXCLUDE, second={UNCOMPILABLE: b"first written here\n"}, capfd=capfd
         )
-        assert status == 0, out + err
-        assert "::error::package-crates: " not in err
+        assert run.returncode == 0, run.stdout + run.stderr
+        assert "::error::package-crates: " not in run.stderr
 
     def test_a_verified_run_that_wrote_nothing_is_refused(
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """Every member excluded leaves nothing to compare (#1384)."""
         flags = "".join(f" --exclude {m}" for m in MEMBERS)
-        status, out, err = run_steps(flags, capfd=capfd)
-        assert status == 1
+        run = run_steps(flags, capfd=capfd)
+        assert run.returncode == 1
         assert (
-            err == "::error::package-crates: cargo package wrote no crate to verify\n"
+            run.stderr
+            == "::error::package-crates: cargo package wrote no crate to verify\n"
         )
         cargo: list[str] = [f"package --workspace --locked{flags}"]
         assert cargo == run.cargo
@@ -447,13 +434,10 @@ class TestPackageAnExcludedMember:
     def test_a_failing_cargo_fails_the_step_with_its_status(
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
-        """The uncompilable member, not excluded: cargo's 101 is the step's.
-
-        The script row: cargo's message is on the child's own stderr.
-        """
-        status, out, err = steps(Job(""), script=True, capfd=capfd)
-        assert status == 101
-        assert "failed to compile pgrx-pg-sys" in err
+        """The uncompilable member, not excluded: cargo's 101 is the step's."""
+        run = steps(Job(""), capfd=capfd)
+        assert run.returncode == 101
+        assert "failed to compile pgrx-pg-sys" in run.stderr
         assert run.cargo == ONE_RUN
         assert run.outputs == ""
 
@@ -466,8 +450,8 @@ class TestPackageWithoutExclusion:
     ) -> None:
         """No --no-verify run when nothing is excluded."""
         compiles = ("edtf-core", "edtf-cli")
-        status, out, err = run_steps("", members=compiles, capfd=capfd)
-        assert status == 0, out + err
+        run = run_steps("", members=compiles, capfd=capfd)
+        assert run.returncode == 0, run.stdout + run.stderr
         assert run.cargo == ONE_RUN
         packaged: list[str] = sorted(f"{m}-{VERSION}.crate" for m in compiles)
         assert packaged == run.packaged
@@ -480,8 +464,8 @@ class TestPackageWithoutExclusion:
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """Whitespace-only flags take the one-run branch too."""
-        status, out, err = run_steps("  ", members=("edtf-core",), capfd=capfd)
-        assert status == 0, out + err
+        run = run_steps("  ", members=("edtf-core",), capfd=capfd)
+        assert run.returncode == 0, run.stdout + run.stderr
         assert run.cargo == ONE_RUN
 
 
@@ -492,13 +476,13 @@ class TestSubjectsAreWhatCratesIoReceives:
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """Packaged and verified, then removed before anything hashes it."""
-        status, out, err = run_steps(
+        run = run_steps(
             "",
             members=("edtf-core", "edtf-cli", "edtf-internal"),
             publish={"edtf-cli": ["crates-io"], "edtf-internal": []},
             capfd=capfd,
         )
-        assert status == 0, out + err
+        assert run.returncode == 0, run.stdout + run.stderr
         assert run.cargo == ONE_RUN
         said: list[str] = [
             (
@@ -506,7 +490,7 @@ class TestSubjectsAreWhatCratesIoReceives:
                 " (publish key); not a release subject"
             )
         ]
-        assert said == subject_lines(out)
+        assert said == subject_lines(run.stdout)
         ships = ("edtf-cli", "edtf-core")
         packaged: list[str] = [f"{m}-{VERSION}.crate" for m in ships]
         assert packaged == run.packaged
@@ -524,13 +508,13 @@ class TestSubjectsAreWhatCratesIoReceives:
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """A member publishing elsewhere is not crates.io's to serve."""
-        status, out, err = run_steps(
+        run = run_steps(
             "",
             members=("edtf-core", "edtf-mirror"),
             publish={"edtf-mirror": ["x"]},
             capfd=capfd,
         )
-        assert status == 0, out + err
+        assert run.returncode == 0, run.stdout + run.stderr
         packaged: list[str] = [f"edtf-core-{VERSION}.crate"]
         assert packaged == run.packaged
         said: list[str] = [
@@ -539,14 +523,14 @@ class TestSubjectsAreWhatCratesIoReceives:
                 " (publish key); not a release subject"
             )
         ]
-        assert said == subject_lines(out)
+        assert said == subject_lines(run.stdout)
 
     def test_an_excluded_publish_false_member_is_removed_too(
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """Packaged by the --no-verify run, then cut like any other."""
-        status, out, err = run_steps(EXCLUDE, publish={UNCOMPILABLE: []}, capfd=capfd)
-        assert status == 0, out + err
+        run = run_steps(EXCLUDE, publish={UNCOMPILABLE: []}, capfd=capfd)
+        assert run.returncode == 0, run.stdout + run.stderr
         packaged: list[str] = [
             f"edtf-cli-{VERSION}.crate",
             f"edtf-core-{VERSION}.crate",
@@ -558,12 +542,12 @@ class TestSubjectsAreWhatCratesIoReceives:
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """Nothing the publisher will upload goes unhashed."""
-        status, out, err = run_steps(
+        run = run_steps(
             "", members=("edtf-core", "edtf-cli"), unwritten=("edtf-cli",), capfd=capfd
         )
-        assert status != 0
+        assert run.returncode != 0
         assert (
             f"::error::package-crates: edtf-cli {VERSION} publishes to crates.io,"
             f" but cargo package wrote no edtf-cli-{VERSION}.crate\n"
-        ) == err
+        ) == run.stderr
         assert run.outputs == ""

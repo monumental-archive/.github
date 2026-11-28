@@ -220,7 +220,7 @@ class TestFindings(TestHarness):
             finding(448200001, "chain", "no candidate pins the signer"),
             finding(448200001, "chain", "the digest is\nnot the release's"),
         ]
-        status, out, err = self.run_helper(capfd=capfd)
+        status, _out, err = self.run_helper(capfd=capfd)
         assert status == 0, err
         calls = self.gh_calls()
         assert calls[1][5] == f"{PREFIX} 448200001 did not reconcile (chain)"
@@ -252,7 +252,7 @@ class TestFindings(TestHarness):
         listing = [
             {"number": 5, "title": f"{PREFIX} 4482000010 did not reconcile (run)"},
         ]
-        status, out, err = self.run_helper(STUB_LIST=json.dumps(listing), capfd=capfd)
+        status, _out, err = self.run_helper(STUB_LIST=json.dumps(listing), capfd=capfd)
         assert status == 0, err
         create: list[str] = ["issue", "create"]
         assert self.gh_calls()[1][:2] == create
@@ -262,7 +262,7 @@ class TestFindings(TestHarness):
     ) -> None:
         """The dedupe search failing: exit 2 by name, nothing created."""
         self.doc["findings"] = [finding(448200001, "run", "gone")]
-        status, out, err = self.run_helper(STUB_LIST_FAIL="1", capfd=capfd)
+        status, _out, err = self.run_helper(STUB_LIST_FAIL="1", capfd=capfd)
         assert status == 2
         searched: list[list[str]] = [search(448200001)]
         assert self.gh_calls() == searched
@@ -277,7 +277,7 @@ class TestFindings(TestHarness):
     ) -> None:
         """An issue that cannot be created: exit 2 by name."""
         self.doc["findings"] = [finding(448200001, "run", "gone")]
-        status, out, err = self.run_helper(STUB_CREATE_FAIL="1", capfd=capfd)
+        status, _out, err = self.run_helper(STUB_CREATE_FAIL="1", capfd=capfd)
         assert status == 2
         assert err.strip() == (
             "certificate_issues.py:"
@@ -289,7 +289,7 @@ class TestFindings(TestHarness):
         """Stele refused before judging (empty stdout): exit 2 by name."""
         self.write_report = False
         self.report.write_text("", encoding="utf-8")
-        status, out, err = self.run_helper(capfd=capfd)
+        status, _out, err = self.run_helper(capfd=capfd)
         assert status == 2
         assert self.gh_calls() == list[list[str]]()
         assert err.strip() == (
@@ -303,7 +303,7 @@ class TestFindings(TestHarness):
         self.write_report = False
         text = "stele assert: the run could not see enough\n"
         self.report.write_text(text, encoding="utf-8")
-        status, out, err = self.run_helper(capfd=capfd)
+        status, _out, err = self.run_helper(capfd=capfd)
         assert status == 2
         prefix = "certificate_issues.py: stele's report is not JSON: "
         assert err.startswith(prefix)
@@ -315,7 +315,7 @@ class TestFindings(TestHarness):
         """
         self.write_report = False
         self.report.write_bytes(b"\x80")
-        status, out, err = self.run_helper(capfd=capfd)
+        status, _out, err = self.run_helper(capfd=capfd)
         assert status == 2, err
         assert err.startswith("certificate_issues.py: stele's report is not JSON: ")
 
@@ -325,7 +325,7 @@ class TestFindings(TestHarness):
         """JSON nested past the parser's depth: exit 2 by name (#1557)."""
         self.write_report = False
         self.report.write_bytes(b"[" * 100_000)
-        status, out, err = self.run_helper(capfd=capfd)
+        status, _out, err = self.run_helper(capfd=capfd)
         assert status == 2, err
         assert err.startswith("certificate_issues.py: stele's report is not JSON: ")
 
@@ -334,7 +334,7 @@ class TestFindings(TestHarness):
     ) -> None:
         """Another verb's report: exit 2 by name, nothing filed."""
         self.doc["target"] = "assert tags"
-        status, out, err = self.run_helper(capfd=capfd)
+        status, _out, err = self.run_helper(capfd=capfd)
         assert status == 2
         assert err.strip() == (
             "certificate_issues.py:"
@@ -347,7 +347,7 @@ class TestFindings(TestHarness):
         self.doc["findings"] = [
             {"subject": "population", "assertion": "run", "detail": "x"}
         ]
-        status, out, err = self.run_helper(capfd=capfd)
+        status, _out, err = self.run_helper(capfd=capfd)
         assert status == 2
         assert self.gh_calls() == list[list[str]]()
         assert err.strip() == (
@@ -388,7 +388,7 @@ class TestDecoded(TestHarness):
             ),
         }
         for answer, why in rows.items():
-            status, out, err = self.run_helper(STUB_LIST=answer, capfd=capfd)
+            status, _out, err = self.run_helper(STUB_LIST=answer, capfd=capfd)
             assert status == 2
             assert err.strip() == (
                 "certificate_issues.py:"
@@ -401,7 +401,7 @@ class TestDecoded(TestHarness):
     ) -> None:
         """A search answer that is not strict JSON: exit 2 by name."""
         self.doc["findings"] = [finding(448200001, "run", "gone")]
-        status, out, err = self.run_helper(STUB_LIST='{"a": 1, "a": 2}', capfd=capfd)
+        status, _out, err = self.run_helper(STUB_LIST='{"a": 1, "a": 2}', capfd=capfd)
         assert status == 2
         assert err.strip() == (
             "certificate_issues.py: gh issue list answered something that is not JSON:"
@@ -415,7 +415,7 @@ class TestDecoded(TestHarness):
         values: tuple[object, ...] = ("", 0, dict[str, object](), "ab")
         for value in values:
             self.doc["findings"] = value
-            status, out, err = self.run_helper(capfd=capfd)
+            status, _out, err = self.run_helper(capfd=capfd)
             assert status == 2
             assert err.strip() == (
                 "certificate_issues.py:"
@@ -427,7 +427,7 @@ class TestDecoded(TestHarness):
         """A report that is not strict JSON is not JSON here: exit 2 by name."""
         self.write_report = False
         self.report.write_text('{"target": "x", "target": "y"}', encoding="utf-8")
-        status, out, err = self.run_helper(capfd=capfd)
+        status, _out, err = self.run_helper(capfd=capfd)
         assert status == 2
         assert err.strip() == (
             "certificate_issues.py:"

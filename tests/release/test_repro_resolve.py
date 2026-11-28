@@ -12,14 +12,16 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from belt.release import repro_resolve
 from tests import support
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 @pytest.fixture
@@ -48,7 +50,7 @@ def dumps(value: object) -> str:
     return json.dumps(value)
 
 
-HELPER = support.RELEASE / "repro_resolve.py"
+COMMAND = "repro-resolve"
 STUB_GH = """#!/usr/bin/env bash
 case "$1 $2" in
   "release view") echo "${STUB_TAG}" ;;
@@ -100,12 +102,11 @@ class TestReadTheLatestRelease:
         *,
         checksums: str | None = CHECKSUMS,
         manifest: str | None = None,
-        script: bool = False,
         capfd: pytest.CaptureFixture[str],
-    ) -> tuple[subprocess.CompletedProcess[str] | support.Called, str]:
+    ) -> tuple[int, str, str, str]:
         """Run the helper against a latest release in the given state.
 
-        In this process unless `script`, which starts it as the step does.
+        In this process, as the step's command.
 
         Returns:
             The run, and what it appended to `GITHUB_OUTPUT`.
@@ -127,43 +128,28 @@ class TestReadTheLatestRelease:
             GITHUB_REPOSITORY="example/project",
             GITHUB_OUTPUT=str(output),
         )
-        done: subprocess.CompletedProcess[str] | support.Called
-        if script:
-            done = subprocess.run(
-                [sys.executable, str(HELPER)],
-                cwd=self.work,
-                env=env,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=60,
-            )
-        else:
-
-            def call() -> int:
-                return repro_resolve.main([])
-
-            with pytest.MonkeyPatch.context() as patched:
-                for name, value in env.items():
-                    patched.setenv(name, value)
-                patched.chdir(self.work)
-                status = call()
-            out, err = capfd.readouterr()
-        return done, output.read_text(encoding="utf-8")
+        with pytest.MonkeyPatch.context() as patched:
+            for name, value in env.items():
+                patched.setenv(name, value)
+            patched.chdir(self.work)
+            patched.setattr(sys, "argv", [COMMAND])
+            status = repro_resolve.main([])
+        out, err = capfd.readouterr()
+        return status, out, err, output.read_text(encoding="utf-8")
 
     def test_typed_release_hands_its_manifest_on(
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """stele#185: a typed manifest scopes the population."""
         manifest = json.dumps(TYPED, indent=2) + "\n\n"
-        done, out = self.resolve(manifest=manifest, capfd=capfd)
-        assert done.returncode == 0, done.stdout + done.stderr
-        assert out == (
+        status, out, err, written = self.resolve(manifest=manifest, capfd=capfd)
+        assert status == 0, out + err
+        assert written == (
             f"checksums<<CHECKSUMS_EOF\n{CHECKSUMS}CHECKSUMS_EOF\n"
             f"manifest<<MANIFEST_EOF\n{json.dumps(TYPED, indent=2)}\nMANIFEST_EOF\n"
             "tag=v1.2.3\nversion=1.2.3\n"
         )
-        assert done.stdout == (
+        assert out == (
             "::notice::v1.2.3 types its entries — the rebuilt class scopes the"
             " population\n::notice::proving v1.2.3 reproduces\n"
         )
@@ -172,76 +158,76 @@ class TestReadTheLatestRelease:
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """An untyped manifest would seal CANNOT_JUDGE (exit 4): withheld."""
-        done, out = self.resolve(manifest=dumps({"schema": 1}), capfd=capfd)
-        assert done.returncode == 0, done.stdout + done.stderr
-        assert "manifest<<MANIFEST_EOF\n\nMANIFEST_EOF\n" in out
+        status, out, err, written = self.resolve(
+            manifest=dumps({"schema": 1}), capfd=capfd
+        )
+        assert status == 0, out + err
+        assert "manifest<<MANIFEST_EOF\n\nMANIFEST_EOF\n" in written
         assert (
             "::notice::v1.2.3 carries no per-class typing — judging every build"
             " subject it published\n"
-        ) in done.stdout
+        ) in out
 
     def test_entries_with_no_name_are_not_typing(
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """A first entry with no name answers nothing either."""
-        done, out = self.resolve(
+        status, out, err, written = self.resolve(
             manifest=dumps({"entries": [{"type": "x"}]}), capfd=capfd
         )
-        assert done.returncode == 0, done.stdout + done.stderr
-        assert "manifest<<MANIFEST_EOF\n\nMANIFEST_EOF\n" in out
+        assert status == 0, out + err
+        assert "manifest<<MANIFEST_EOF\n\nMANIFEST_EOF\n" in written
 
     def test_no_manifest_judges_the_whole_release(
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """A release older than the manifest keeps the whole-set comparison."""
-        done, out = self.resolve(capfd=capfd)
-        assert done.returncode == 0, done.stdout + done.stderr
-        assert "manifest<<MANIFEST_EOF\n\nMANIFEST_EOF\n" in out
-        assert "carries no per-class typing" in done.stdout
+        status, out, err, written = self.resolve(capfd=capfd)
+        assert status == 0, out + err
+        assert "manifest<<MANIFEST_EOF\n\nMANIFEST_EOF\n" in written
+        assert "carries no per-class typing" in out
 
     def test_latest_release_that_is_not_a_v_release(
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """Refused by name, nothing written."""
-        done, out = self.resolve("nightly", capfd=capfd)
-        assert done.returncode == 1, done.stdout + done.stderr
-        assert done.stderr == (
+        status, out, err, written = self.resolve("nightly", capfd=capfd)
+        assert status == 1, out + err
+        assert err == (
             "::error::repro-resolve: latest release tag nightly is not a v* release\n"
         )
-        assert out == ""
+        assert written == ""
 
     def test_empty_checksums(self, capfd: pytest.CaptureFixture[str]) -> None:
         """Nothing to prove against is refused."""
-        done, out = self.resolve(checksums="", capfd=capfd)
-        assert done.returncode == 1, done.stdout + done.stderr
-        assert done.stderr == (
+        status, out, err, written = self.resolve(checksums="", capfd=capfd)
+        assert status == 1, out + err
+        assert err == (
             "::error::repro-resolve: release v1.2.3 has no checksums.txt — nothing"
             " to prove against\n"
         )
-        assert out == ""
+        assert written == ""
 
     def test_absent_checksums_fails_with_gh(
         self, capfd: pytest.CaptureFixture[str]
     ) -> None:
-        """A release with no checksums asset fails the download, as gh does.
-
-        The script row: gh's message is on the child's own stderr.
-        """
-        done, out = self.resolve(checksums=None, script=True, capfd=capfd)
-        assert done.returncode == 1, done.stdout + done.stderr
-        assert "release asset not found" in done.stderr
-        assert out == ""
+        """A release with no checksums asset fails the download, as gh does."""
+        with pytest.raises(SystemExit) as stopped:
+            self.resolve(checksums=None, capfd=capfd)
+        assert stopped.value.code == 1
+        assert "release asset not found" in capfd.readouterr().err
+        assert (self.tmp / "github-output").read_text(encoding="utf-8") == ""
 
     def test_manifest_that_is_not_json(self, capfd: pytest.CaptureFixture[str]) -> None:
         """A manifest that cannot be read refuses rather than guessing."""
-        done, out = self.resolve(manifest="{", capfd=capfd)
-        assert done.returncode == 1, done.stdout + done.stderr
-        assert done.stderr.startswith(
+        status, out, err, written = self.resolve(manifest="{", capfd=capfd)
+        assert status == 1, out + err
+        assert err.startswith(
             "::error::repro-resolve: evidence-manifest.json is not JSON:"
-        ), done.stderr
-        assert out == ""
+        ), err
+        assert written == ""
 
-    @pytest.mark.parametrize("entries", (True, {"": None}, "abc"))
+    @pytest.mark.parametrize("entries", [True, {"": None}, "abc"])
     def test_manifest_whose_entries_are_not_a_list(
         self, entries: object, capfd: pytest.CaptureFixture[str]
     ) -> None:
@@ -249,11 +235,13 @@ class TestReadTheLatestRelease:
 
         `true` died with a TypeError and `{"": null}` with a KeyError.
         """
-        done, out = self.resolve(manifest=dumps({"entries": entries}), capfd=capfd)
-        assert done.returncode == 1, done.stdout + done.stderr
-        assert done.stderr == (
+        status, out, err, written = self.resolve(
+            manifest=dumps({"entries": entries}), capfd=capfd
+        )
+        assert status == 1, out + err
+        assert err == (
             "::error::repro-resolve: evidence-manifest.json is not an"
             " evidence manifest:"
             " its entries are not a list\n"
         )
-        assert out == ""
+        assert written == ""

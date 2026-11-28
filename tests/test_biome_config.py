@@ -121,7 +121,7 @@ class TestReadDomainsTest:
         delivered = sorted(DELIVERED.org)
         assert delivered == org
 
-    @pytest.mark.parametrize("domain,triggers", DELIVERED.identity.items())
+    @pytest.mark.parametrize(("domain", "triggers"), DELIVERED.identity.items())
     def test_every_identity_domain_names_at_least_one_trigger(
         self, domain: object, triggers: object
     ) -> None:
@@ -201,7 +201,7 @@ class TestDeclarationProblemsTest:
         assert "linter.rules" in problems[0]
 
     @pytest.mark.parametrize(
-        "key", ("overrides", "formatter", "assist", "files", "extends")
+        "key", ["overrides", "formatter", "assist", "files", "extends"]
     )
     def test_other_biome_sections_are_refused(self, key: object) -> None:
         """An overrides block is a per-path weakening surface; so is formatter."""
@@ -479,7 +479,7 @@ class TestFileOverrideTest:
         """Widening the list is an edit to this test as well as the config."""
         assert self.entry()["includes"] == self.GLOBS
 
-    @pytest.mark.parametrize("absent", ("spec", "__tests__", "tsx", ".js"))
+    @pytest.mark.parametrize("absent", ["spec", "__tests__", "tsx", ".js"])
     def test_the_shapes_the_org_does_not_have_are_absent(self, absent: object) -> None:
         """`*.spec.*` and `__tests__/**` exist in no org repo, so are unnamed."""
         includes = decoded.as_array(self.entry()["includes"], "includes")
@@ -721,7 +721,7 @@ class TestNurseryTableTest:
         assert "" not in NURSERY.values()
         assert "-" in NURSERY.values()
 
-    @pytest.mark.parametrize("rule,domain", NURSERY.items())
+    @pytest.mark.parametrize(("rule", "domain"), NURSERY.items())
     def test_every_stated_domain_is_a_domain_the_org_knows(
         self, rule: object, domain: object
     ) -> None:
@@ -867,13 +867,13 @@ class TestRunTest:
         assert out.is_file()
 
     @pytest.mark.parametrize(
-        "text,said",
-        (
+        ("text", "said"),
+        [
             ("{", "Expecting property name enclosed in double quotes"),
             ("[]", "the document is not an object"),
             ('{"linter": []}', "linter is not an object"),
             ('{"linter": {"rules": {"nursery": 1}}}', "linter.rules.nursery is not"),
-        ),
+        ],
     )
     def test_an_org_config_it_cannot_read_is_refused_by_name(
         self, text: object, said: object
@@ -1312,7 +1312,7 @@ class TestNodeTaskBodyTest:
         assert leftovers == expected, "the run left residue"
         return done
 
-    @pytest.mark.parametrize("task", ("lint:biome", "fix:biome"))
+    @pytest.mark.parametrize("task", ["lint:biome", "fix:biome"])
     def test_a_tsconfig_tsc_refuses_ends_both_tasks_by_name(self, task: object) -> None:
         """The compiler's own message is printed under the tsconfig's name."""
         done = self.run_body(task)
