@@ -898,37 +898,39 @@ def test_the_delivered_tables_silence_the_measured_counts() -> None:
 
 
 # End to end, through the same entry point the belt task calls.
-def invoke(
-    body: object, manifests: dict[str, object], *, capfd: pytest.CaptureFixture[str]
-) -> tuple[int, str, str, Path]:
-    """Run the generator in a temporary tree.
+@fixture
+def piped(monkeypatch: pytest.MonkeyPatch) -> Callable[[list[Path]], None]:
+    """Pipe manifest paths to the generator's stdin, as the task does.
 
     Returns:
-        Exit status, stdout, stderr and the generated config path.
+        A function that lists `paths`, NUL-separated, on stdin.
+
+    """
+
+    def pipe(paths: list[Path]) -> None:
+        listing = "".join(f"{path}\0" for path in paths)
+        monkeypatch.setattr(sys, "stdin", io.StringIO(listing))
+
+    return pipe
+
+
+def declared(body: object, manifests: dict[str, object]) -> tuple[Path, list[Path]]:
+    """Lay out a temporary tree: a declaration and the manifests.
+
+    Returns:
+        The tree and its manifests' paths, for the generator's stdin.
 
     """
     tree = Path(tempfile.mkdtemp())
-    declared = tree / "biome.json"
     if body is not None:
-        declared.write_text(declaration(body), encoding="utf-8")
+        (tree / "biome.json").write_text(declaration(body), encoding="utf-8")
     paths: list[Path] = []
     for name, content in manifests.items():
         path = tree / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(content), encoding="utf-8")
         paths.append(path)
-    generated = tree / "generated.json"
-    with pytest.MonkeyPatch.context() as patched:
-        patched.setattr(
-            sys, "stdin", io.StringIO("".join(f"{path}\0" for path in paths))
-        )
-        status = biome_config.main([
-            *("--org", str(ORG_FILE), "--domains", str(DOMAINS_FILE)),
-            *("--nursery", str(NURSERY_FILE), "--out", str(generated)),
-            *("--declaration", str(declared)),
-        ])
-    out, err = capfd.readouterr()
-    return status, out, err, generated
+    return tree, paths
 
 
 @pytest.mark.parametrize(
@@ -963,14 +965,17 @@ def test_an_org_config_it_cannot_read_is_refused_by_name(
 
 
 def test_a_conforming_react_repository_generates(
-    capfd: pytest.CaptureFixture[str],
+    capfd: pytest.CaptureFixture[str], piped: Callable[[list[Path]], None]
 ) -> None:
     """The MA shape: one claim, one matching dependency."""
-    status, out, _err, path = invoke(
+    tree, manifests = declared(
         {"linter": {"domains": {"react": "all"}}},
         {"apps/web/package.json": {"dependencies": {"react": "19.2.8"}}},
-        capfd=capfd,
     )
+    piped(manifests)
+    status = biome_config.main(generating(tree, tree / "generated.json"))
+    out, _err = capfd.readouterr()
+    path = tree / "generated.json"
     assert status == 0
     assert "react" in out
     generated = decoded.load_json(path.read_text(encoding="utf-8"))
@@ -980,36 +985,46 @@ def test_a_conforming_react_repository_generates(
 
 
 def test_a_repository_with_no_declaration_and_no_framework_generates(
-    capfd: pytest.CaptureFixture[str],
+    capfd: pytest.CaptureFixture[str], piped: Callable[[list[Path]], None]
 ) -> None:
     """The canon itself must keep working with no biome.json at all."""
-    status, _out, _err, path = invoke(None, {}, capfd=capfd)
+    tree, manifests = declared(None, {})
+    piped(manifests)
+    status = biome_config.main(generating(tree, tree / "generated.json"))
+    _out, _err = capfd.readouterr()
+    path = tree / "generated.json"
     assert status == 0
     assert path.is_file()
 
 
 def test_an_undeclared_framework_fails_with_the_manifest_named(
-    capfd: pytest.CaptureFixture[str],
+    capfd: pytest.CaptureFixture[str], piped: Callable[[list[Path]], None]
 ) -> None:
     """Lowering by silence, refused, with the evidence in the message."""
-    status, _out, err, path = invoke(
-        None,
-        {"apps/web/package.json": {"dependencies": {"react": "19.2.8"}}},
-        capfd=capfd,
+    tree, manifests = declared(
+        None, {"apps/web/package.json": {"dependencies": {"react": "19.2.8"}}}
     )
+    piped(manifests)
+    status = biome_config.main(generating(tree, tree / "generated.json"))
+    _out, err = capfd.readouterr()
+    path = tree / "generated.json"
     assert status == 1
     assert "react" in err
     assert "apps/web/package.json" in err
     assert not path.exists()
 
 
-def test_a_declaration_carrying_rules_fails(capfd: pytest.CaptureFixture[str]) -> None:
+def test_a_declaration_carrying_rules_fails(
+    capfd: pytest.CaptureFixture[str], piped: Callable[[list[Path]], None]
+) -> None:
     """No config is written when the declaration is refused."""
-    status, _out, err, path = invoke(
-        {"linter": {"rules": {"correctness": {"noNodejsModules": "off"}}}},
-        {},
-        capfd=capfd,
+    tree, manifests = declared(
+        {"linter": {"rules": {"correctness": {"noNodejsModules": "off"}}}}, {}
     )
+    piped(manifests)
+    status = biome_config.main(generating(tree, tree / "generated.json"))
+    _out, err = capfd.readouterr()
+    path = tree / "generated.json"
     assert status == 1
     assert "linter.rules" in err
     assert not path.exists()
@@ -1047,25 +1062,19 @@ NO_ENTRIES: list[dict[str, object]] = []
 NODE_OFF = {"rules": {"correctness": {"noNodejsModules": "off"}}}
 
 
-def generate_main(
-    tree: Path, generated: Path, *extra: str, capfd: pytest.CaptureFixture[str]
-) -> tuple[int, str, str]:
-    """Run the generator's entry point with a tree's declaration.
+def generating(tree: Path, generated: Path, *extra: str) -> list[str]:
+    """Spell the generator's argv with a tree's declaration.
 
     Returns:
-        The finished call.
+        The argv.
 
     """
-    with pytest.MonkeyPatch.context() as patched:
-        patched.setattr(sys, "stdin", io.StringIO(""))
-        status = biome_config.main([
-            *("--org", str(ORG_FILE), "--domains", str(DOMAINS_FILE)),
-            *("--nursery", str(NURSERY_FILE), "--out", str(generated)),
-            *("--declaration", str(tree / "biome.json")),
-            *extra,
-        ])
-    out, err = capfd.readouterr()
-    return status, out, err
+    return [
+        *("--org", str(ORG_FILE), "--domains", str(DOMAINS_FILE)),
+        *("--nursery", str(NURSERY_FILE), "--out", str(generated)),
+        *("--declaration", str(tree / "biome.json")),
+        *extra,
+    ]
 
 
 def node_tsconfig(types: list[str]) -> str:
@@ -1112,10 +1121,12 @@ def resolved(types: object) -> dict[str, object]:
 
 def test_only_the_node_project_gets_an_override() -> None:
     """apps/a declares node, apps/b does not: one entry, for apps/a/**."""
-    entries = biome_config.node_overrides({
-        "apps/a/tsconfig.json": resolved(["node"]),
-        "apps/b/tsconfig.json": resolved(["vite/client", "geojson"]),
-    })
+    entries = biome_config.node_overrides(
+        {
+            "apps/a/tsconfig.json": resolved(["node"]),
+            "apps/b/tsconfig.json": resolved(["vite/client", "geojson"]),
+        }
+    )
     expected: list[dict[str, object]] = [
         {"includes": ["apps/a/**"], "linter": NODE_OFF},
     ]
@@ -1198,7 +1209,7 @@ def test_the_rule_stays_on_at_the_top_level() -> None:
 
 
 def test_a_repository_stating_the_rule_is_still_refused(
-    capfd: pytest.CaptureFixture[str],
+    capfd: pytest.CaptureFixture[str], piped: Callable[[list[Path]], None]
 ) -> None:
     """The repository writes nothing: its own override is refused as before."""
     stated: tuple[object, ...] = (
@@ -1213,35 +1224,31 @@ def test_a_repository_stating_the_rule_is_still_refused(
         node = json.dumps(resolved(["node"]))
         shown.write_text(node, encoding="utf-8")
         generated = tree / "generated.json"
-        status, out, err = generate_main(
-            tree,
-            generated,
-            "--tsconfig",
-            "apps/a/tsconfig.json",
-            str(shown),
-            capfd=capfd,
+        piped([])
+        status = biome_config.main(
+            generating(
+                tree, generated, "--tsconfig", "apps/a/tsconfig.json", str(shown)
+            )
         )
+        out, err = capfd.readouterr()
         assert status == 1
         assert "says more than a repository may say" in err
         assert not generated.exists()
 
 
 def test_a_resolved_file_that_is_not_json_is_refused_by_its_tsconfig(
-    capfd: pytest.CaptureFixture[str],
+    capfd: pytest.CaptureFixture[str], piped: Callable[[list[Path]], None]
 ) -> None:
     """The task hands over tsc's output; garbage there is named, not crashed on."""
     tree = Path(tempfile.mkdtemp())
     resolved = tree / "resolved.json"
     resolved.write_text("{", encoding="utf-8")
     generated = tree / "generated.json"
-    status, out, err = generate_main(
-        tree,
-        generated,
-        "--tsconfig",
-        "apps/a/tsconfig.json",
-        str(resolved),
-        capfd=capfd,
+    piped([])
+    status = biome_config.main(
+        generating(tree, generated, "--tsconfig", "apps/a/tsconfig.json", str(resolved))
     )
+    out, err = capfd.readouterr()
     assert status == 1
     lines = err.splitlines()
     assert (
@@ -1286,7 +1293,9 @@ def show_configs(
 # two files. Measured without `--only`, which turns a rule on whatever
 # the config says.
 def test_the_node_project_is_clean_and_the_other_is_a_finding(
-    capfd: pytest.CaptureFixture[str], env: support.Env
+    capfd: pytest.CaptureFixture[str],
+    env: support.Env,
+    piped: Callable[[list[Path]], None],
 ) -> None:
     """apps/a declares node and passes; apps/b does not and is reported."""
     biome = support.tool("biome")
@@ -1307,7 +1316,9 @@ def test_the_node_project_is_clean_and_the_other_is_a_finding(
         subprocess.run([git, "init", "-q"], cwd=tree, env=environ, check=True)
         pairs = show_configs(tree, environ, ("a", "b"))
         generated = tree / "biome-org.generated.json"
-        status, out, err = generate_main(tree, generated, *pairs, capfd=capfd)
+        piped([])
+        status = biome_config.main(generating(tree, generated, *pairs))
+        out, err = capfd.readouterr()
         assert status == 0, err
         assert "noNodejsModules off in 1 Node project(s)" in out
         report = tree / "report.json"
