@@ -7,8 +7,9 @@ generated crate names:
   cargo's bucket for its length, whatever its case: two spellings
   that differ only in case share a record, and two names that differ
   otherwise never do.
-- Refusal (R): `main` answers any argument list with a URL (0) or its
-  own usage or empty-name refusal (2), and never raises.
+- Refusal (R): `main` answers any argument list but its help with a
+  URL (0), its empty-name refusal (2) or argparse's usage error (exit
+  2), and never raises anything else.
 
 Run by `test:python-properties` under the belt's Hypothesis profile;
 the ordinary suite (`mise run test`) never imports this file.
@@ -22,6 +23,7 @@ from hypothesis import strategies as st
 
 from belt import crates_index as ci
 from belt.typed_hypothesis import given
+from tests import support
 
 # crates.io names: ASCII letters, digits, `-` and `_`, letter first.
 NAME = st.from_regex(r"[A-Za-z][A-Za-z0-9_-]{0,63}", fullmatch=True)
@@ -66,14 +68,17 @@ def test_distinct_crates_distinct_records(one: str, two: str) -> None:
 
 
 # Any argument list gets an answer by name.
-@given(st.lists(st.text(max_size=20), max_size=3))
+@given(st.lists(st.text(max_size=20).filter(support.not_help), max_size=3))
 @example(URL_AND_EMPTY)
 @example(URL_ONLY)
 def test_main_answers_any_argv(argv: list[str]) -> None:
     """A URL and 0, or a refusal on stderr and 2."""
     out, err = io.StringIO(), io.StringIO()
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-        status = ci.main(argv)
+        try:
+            status = ci.main(argv)
+        except SystemExit as ended:
+            status = ended.code
     assert status in {0, 2}
     if status == 0:
         assert out.getvalue().startswith(ci.INDEX)

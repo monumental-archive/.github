@@ -70,6 +70,11 @@ class Report:
     findings: tuple[Finding, ...]
 
 
+NO_REPORT = (
+    "stele wrote no report: it refused before judging (its reason is in its own step)"
+)
+
+
 def title(index: int, conditions: list[str]) -> str:
     """Name a certificate's issue.
 
@@ -93,7 +98,22 @@ def filed_title(index: int) -> re.Pattern[str]:
 
 
 def read_report(path: Path) -> Report:
-    """Read stele's report, every finding decoded where it is read.
+    """Read stele's report file, every finding decoded where it is read.
+
+    Returns:
+        The report's log and findings.
+
+    Raises:
+        FindingsError: no file, or what `report_of` refuses in it.
+
+    """
+    if not path.is_file():
+        raise FindingsError(NO_REPORT)
+    return report_of(path.read_bytes())
+
+
+def report_of(content: bytes) -> Report:
+    """Decode stele's report from its bytes.
 
     Returns:
         The report's log and findings.
@@ -104,16 +124,12 @@ def read_report(path: Path) -> Report:
             subject is not a CT index.
 
     """
-    if not path.is_file() or path.stat().st_size == 0:
-        msg = (
-            "stele wrote no report: it refused before judging"
-            " (its reason is in its own step)"
-        )
-        raise FindingsError(msg)
+    if not content:
+        raise FindingsError(NO_REPORT)
     # Not UTF-8, past the parser's digit limit or its depth: each was a
     # traceback, exit 1, until prop_certificate_issues.py read bytes (#1557).
     try:
-        report = decoded.load_json(path.read_bytes())
+        report = decoded.load_json(content)
     except decoded.UndecodableError as err:
         msg = f"stele's report is not JSON: {err}"
         raise FindingsError(msg) from err

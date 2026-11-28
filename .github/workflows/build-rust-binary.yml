@@ -132,7 +132,7 @@ jobs:
           UNTRUSTED_TARGETS: ${{ inputs.targets }}
         # One derivation, its runner table and its tests (#1385).
         run: |
-          "${ORG_PYTHON}" -I .org-canon/belt matrix targets rust-binary \
+          "${ORG_PYTHON}" -I .org-canon/belt matrix targets rust-binary -- \
             "${UNTRUSTED_TARGETS}" >> "${GITHUB_OUTPUT}"
   build:
     name: Build and smoke ${{ matrix.target }}

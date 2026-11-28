@@ -196,7 +196,7 @@ def test_a_major_that_is_not_a_number(stranger: str, data: st.DataObject) -> Non
         patched.setenv("MISE_TASK_NAME", "")
         patched.setenv("ORG_FINDINGS", "")
         patched.setattr(sys, "argv", ["matrix.py"])
-        code = matrix.main(["pgrx-images", request])
+        code = matrix.main(["pgrx-images", "--", request])
     out, err = stdout.getvalue(), stderr.getvalue()
     assert (code, out, err) == (
         1,
@@ -209,7 +209,8 @@ def test_a_major_that_is_not_a_number(stranger: str, data: st.DataObject) -> Non
 @given(st.sampled_from(["go-binary", "rust-binary", None]), st.text())
 def test_plans_or_refuses(cls: str | None, request: str) -> None:
     """Exit 0 with outputs, or 1 with one error line and no output."""
-    argv = ["targets", cls, request] if cls else ["pgrx-images", request]
+    # The workflows pass the caller's text after `--`, so no request is an option.
+    argv = ["targets", cls, "--", request] if cls else ["pgrx-images", "--", request]
     stdout, stderr = io.StringIO(), io.StringIO()
     with (
         pytest.MonkeyPatch.context() as patched,

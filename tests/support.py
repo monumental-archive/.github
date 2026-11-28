@@ -208,6 +208,23 @@ IDENTITY_NAME = "hermetic harness"
 IDENTITY_EMAIL = "harness@example.invalid"
 
 
+def not_help(word: str) -> bool:
+    """Say whether a drawn argument is no spelling of argparse's `-h`.
+
+    Every belt parser has `-h`, which prints the help and exits 0: a
+    property drawing any argument list draws its own help otherwise.
+    `-h` leads a bundle of short flags, and `--help` takes any prefix
+    of two dashes and an `h`.
+
+    Returns:
+        True when argparse reads the word as anything but the help.
+
+    """
+    return not (
+        word.startswith("-h") or (word.startswith("--h") and "--help".startswith(word))
+    )
+
+
 class MissingToolError(RuntimeError):
     """A tool a test needs is not on the search path (#1684)."""
 

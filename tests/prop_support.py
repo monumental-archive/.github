@@ -19,17 +19,17 @@ from hypothesis import example
 from hypothesis import strategies as st
 
 from belt.typed_hypothesis import given
-from tests import support as he
+from tests import support
 
 IDENTITY = {
     "GIT_EDITOR": "true",
-    "GIT_AUTHOR_NAME": he.IDENTITY_NAME,
-    "GIT_AUTHOR_EMAIL": he.IDENTITY_EMAIL,
-    "GIT_COMMITTER_NAME": he.IDENTITY_NAME,
-    "GIT_COMMITTER_EMAIL": he.IDENTITY_EMAIL,
+    "GIT_AUTHOR_NAME": support.IDENTITY_NAME,
+    "GIT_AUTHOR_EMAIL": support.IDENTITY_EMAIL,
+    "GIT_COMMITTER_NAME": support.IDENTITY_NAME,
+    "GIT_COMMITTER_EMAIL": support.IDENTITY_EMAIL,
 }
 NAME = st.one_of(
-    st.sampled_from(sorted(he.INHERITED)),
+    st.sampled_from(sorted(support.INHERITED)),
     st.sampled_from(["HOME", "VERSION", "GIT_DIR", "GIT_INDEX_FILE", *IDENTITY]),
     st.from_regex(r"[A-Z][A-Z0-9_]{0,10}", fullmatch=True),
 )
@@ -58,10 +58,13 @@ def test_only_the_allow_list_reaches_it(
             patched.delenv(name)
         for name, value in environ.items():
             patched.setenv(name, value)
-        got = he.env(home, **overrides)
+        got = support.environment(home, **overrides)
     # ORG_CANON_DIR is the package's canon, set for every fixture.
     allowed = (
-        set(he.INHERITED) | {"HOME", "ORG_CANON_DIR"} | set(IDENTITY) | set(overrides)
+        set(support.INHERITED)
+        | {"HOME", "ORG_CANON_DIR"}
+        | set(IDENTITY)
+        | set(overrides)
     )
     assert set(got) <= allowed
     for name, value in overrides.items():
@@ -69,7 +72,7 @@ def test_only_the_allow_list_reaches_it(
     for name, value in IDENTITY.items():
         if name not in overrides:
             assert got[name] == value
-    for name in he.INHERITED:
+    for name in support.INHERITED:
         if name not in overrides:
             assert got.get(name) == environ.get(name)
     if "HOME" not in overrides:

@@ -26,7 +26,6 @@ the ordinary suite (`mise run test`) never imports this file.
 """
 
 import json
-from pathlib import Path
 
 from hypothesis import example
 from hypothesis import strategies as st
@@ -34,7 +33,6 @@ from hypothesis import strategies as st
 from belt import decoded
 from belt.rekor_monitor import certificate_issues
 from belt.typed_hypothesis import given
-from belt.typed_pytest import fixture
 
 INDEX = st.integers(0, 10**12)
 CONDITIONS = st.lists(st.text(max_size=20), max_size=4)
@@ -170,32 +168,15 @@ def test_own_index_only(index: int, other: int, conditions: list[str]) -> None:
         )
 
 
-class ReportReading:
-    """Whatever the report file holds: a grouping, or the refusal."""
-
-    def __init__(self, tmp_path: Path) -> None:
-        """Hold one scratch report file for the test's examples."""
-        self.path = Path(str(tmp_path)) / "report.json"
-
-
-@fixture
-def report_reading(tmp_path: Path) -> ReportReading:
-    """Give each row its own ReportReading."""
-    return ReportReading(tmp_path)
-
-
 @given(REPORT)
 @example(NOT_AN_OBJECT)
 @example(NUMBER_SUBJECT)
 @example(NOT_A_LIST)
-def test_refuses_by_name_or_groups_every_finding(
-    report_reading: ReportReading, report: object
-) -> None:
+def test_refuses_by_name_or_groups_every_finding(report: object) -> None:
     """Only FindingsError escapes; a grouping holds each finding once."""
-    report_reading.path.write_text(dumps(report), encoding="utf-8")
     try:
         grouped = certificate_issues.by_certificate(
-            certificate_issues.read_report(report_reading.path)
+            certificate_issues.report_of(dumps(report).encode())
         )
     except certificate_issues.FindingsError:
         return
@@ -212,13 +193,10 @@ def test_refuses_by_name_or_groups_every_finding(
 @example(DEEP)
 @example(b"\xff")
 @example(b"1" * 5000)
-def test_any_bytes_refused_by_name(
-    report_reading: ReportReading, content: bytes
-) -> None:
-    """Whatever bytes the file holds: a report, or FindingsError."""
-    report_reading.path.write_bytes(content)
+def test_any_bytes_refused_by_name(content: bytes) -> None:
+    """Whatever bytes the report holds: a report, or FindingsError."""
     try:
-        certificate_issues.read_report(report_reading.path)
+        certificate_issues.report_of(content)
     except certificate_issues.FindingsError:
         return
 

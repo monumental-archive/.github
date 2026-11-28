@@ -60,20 +60,35 @@ class Report:
     missing: str | None
 
 
+NO_REPORT = "stele wrote no report"
+
+
 def read_report(path: Path) -> Report:
-    """Read stele's report.
+    """Read stele's report file.
 
     Returns:
         Its facts and finding count, or why it could not be read.
 
     """
-    if not path.is_file() or path.stat().st_size == 0:
-        return Report({}, 0, "stele wrote no report")
+    if not path.is_file():
+        return Report({}, 0, NO_REPORT)
+    return report_of(path.read_bytes())
+
+
+def report_of(raw: bytes) -> Report:
+    """Read stele's report from its file's bytes.
+
+    Returns:
+        Its facts and finding count, or why it could not be read.
+
+    """
+    if not raw:
+        return Report({}, 0, NO_REPORT)
     # Every way the file is not stele's report shape is one refusal:
     # not strict JSON (nested past the parser's depth was a traceback
     # until prop_verdict.py, #1557), or a field of the wrong kind.
     try:
-        doc = decoded.as_object(decoded.load_json(path.read_bytes()), "the report")
+        doc = decoded.as_object(decoded.load_json(raw), "the report")
         if doc.get("target") != TARGET:
             return Report({}, 0, f"the report is not stele's {TARGET} report")
         facts = read_facts(doc.get("facts"))

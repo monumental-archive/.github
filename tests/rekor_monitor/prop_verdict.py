@@ -23,7 +23,6 @@ the ordinary suite (`mise run test`) never imports this file.
 """
 
 import json
-from pathlib import Path
 from typing import TypedDict
 
 from hypothesis import example
@@ -31,7 +30,6 @@ from hypothesis import strategies as st
 
 from belt.rekor_monitor import verdict
 from belt.typed_hypothesis import given
-from belt.typed_pytest import fixture
 
 # Past the JSON parser's depth: a RecursionError, not a ValueError.
 DEEP = b"[" * 100_000
@@ -205,28 +203,13 @@ CLEAN_EXIT: Reported = {
 }
 
 
-class Scratch:
-    """One scratch report file for a test's examples."""
-
-    def __init__(self, tmp_path: Path) -> None:
-        """Hold the scratch file."""
-        self.path = Path(str(tmp_path)) / "report.json"
-
-
-@fixture
-def scratch(tmp_path: Path) -> Scratch:
-    """Give each row its own Scratch."""
-    return Scratch(tmp_path)
-
-
 @given(CONTENT)
 @example(DEEP)
 @example(b"\xff")
 @example(b'{"target": "assert signer-certificates", "facts": [1]}')
-def test_never_raises(scratch: Scratch, content: bytes) -> None:
+def test_never_raises(content: bytes) -> None:
     """Only a Report comes back; a report it could not read names why."""
-    scratch.path.write_bytes(content)
-    report = verdict.read_report(scratch.path)
+    report = verdict.report_of(content)
     assert isinstance(report, verdict.Report)
     if report.missing is not None:
         assert (report.facts, report.findings) == ({}, 0)
@@ -260,14 +243,13 @@ def test_table_holds(leg: Leg) -> None:
 
 @given(REPORTED)
 @example(CLEAN_EXIT)
-def test_finding_is_red(scratch: Scratch, leg: Reported) -> None:
+def test_finding_is_red(leg: Reported) -> None:
     """Whatever the exit code, saved or not, whatever the facts."""
     doc: dict[str, object] = {
         "target": verdict.TARGET,
         "findings": leg["findings"],
         "facts": leg["facts"],
     }
-    scratch.path.write_text(json.dumps(doc), encoding="utf-8")
-    report = verdict.read_report(scratch.path)
+    report = verdict.report_of(json.dumps(doc).encode())
     red, _ = verdict.judge(leg["code"], report, saved=leg["saved"])
     assert red

@@ -122,7 +122,7 @@ jobs:
           UNTRUSTED_MAJORS: ${{ inputs.pg-majors }}
         # One derivation and its tests (#1385).
         run: |
-          "${ORG_PYTHON}" -I .org-canon/belt matrix pgrx-images "${UNTRUSTED_MAJORS}" >> "${GITHUB_OUTPUT}"
+          "${ORG_PYTHON}" -I .org-canon/belt matrix pgrx-images -- "${UNTRUSTED_MAJORS}" >> "${GITHUB_OUTPUT}"
   image:
     name: Assemble and prove the pg${{ matrix.pg }} artifact image
     needs: plan

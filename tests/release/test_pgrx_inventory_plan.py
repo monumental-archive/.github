@@ -146,7 +146,7 @@ def test_the_shipped_step_calls_the_helper() -> None:
     """The run: is the call alone, from the canon tree."""
     assert step()["run"] == (
         '"${ORG_PYTHON}" -I .org-canon/belt inventory-plan'
-        ' "${UNTRUSTED_CRATE_DIR}" "${PG}"\n'
+        ' -- "${UNTRUSTED_CRATE_DIR}" "${PG}"\n'
     )
 
 

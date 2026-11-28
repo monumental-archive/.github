@@ -97,7 +97,19 @@ def read_checkpoint(path: Path) -> Checkpoint:
         Its next index, tree size and head time, or why they could not be read.
 
     """
-    if not path.is_file() or path.stat().st_size == 0:
+    if not path.is_file():
+        return Checkpoint(None, None, None, "no checkpoint file")
+    return checkpoint_of(path.read_bytes())
+
+
+def checkpoint_of(raw: bytes) -> Checkpoint:
+    """Read a checkpoint from its file's bytes, refusing by name.
+
+    Returns:
+        Its next index, tree size and head time, or why they could not be read.
+
+    """
+    if not raw:
         return Checkpoint(None, None, None, "no checkpoint file")
     # Not strict JSON (a `next` of Infinity, JSON nested past the parser's
     # depth), a field that is not an integer, or a timestamp past the
@@ -105,7 +117,7 @@ def read_checkpoint(path: Path) -> Checkpoint:
     # traceback until prop_gain.py (#1557), and each is one refusal.
     # decoded.UndecodableError is a ValueError.
     try:
-        return decode_checkpoint(path.read_bytes())
+        return decode_checkpoint(raw)
     except ValueError, OverflowError, OSError:
         return Checkpoint(None, None, None, "the checkpoint file could not be read")
 

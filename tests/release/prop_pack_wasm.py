@@ -208,7 +208,7 @@ def test_packs_or_refuses(package_json: str) -> None:
         patched.setattr(sys, "argv", ["pack_wasm.py"])
         patched.setattr(pack, "npm", npm)
         patched.chdir(tmp)
-        code = pack.main(env)
+        code = pack.main([], env=env)
     out = out.getvalue()
     if code != 0:
         assert code == 1

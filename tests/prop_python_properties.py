@@ -21,6 +21,8 @@ task's own body.
 
 from __future__ import annotations
 
+import contextlib
+import io
 import os
 import sys
 from pathlib import Path
@@ -33,13 +35,13 @@ from hypothesis import strategies as st
 from belt import findings, property_profiles, python_properties
 from belt.typed_hypothesis import given
 from belt.typed_pytest import fixture
+from tests import support
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
 GATE = "test:python-properties"
 AUDIT = "audit:python-properties"
-USAGE = "usage: belt python-properties gate|audit FILE..."
 
 
 class Shapes:
@@ -270,17 +272,23 @@ def unlabelled(word: str) -> bool:
 # Arguments and shards, the run itself a stand-in.
 @given(
     st.one_of(
-        st.lists(st.text(max_size=6), max_size=1),
-        st.lists(st.text(max_size=6).filter(unlabelled), min_size=2, max_size=4),
+        st.lists(st.text(max_size=6).filter(support.not_help), max_size=1),
+        st.lists(
+            st.text(max_size=6).filter(unlabelled).filter(support.not_help),
+            min_size=2,
+            max_size=4,
+        ),
     )
 )
 def test_a_usage_error_is_two(argv: list[str]) -> None:
-    """R: exit 2 with the usage line, and nothing run."""
-    with pytest.MonkeyPatch.context() as patched:
-        lines = said(patched)
+    """R: argparse's exit 2 with its usage, and nothing run."""
+    err = io.StringIO()
+    with pytest.MonkeyPatch.context() as patched, contextlib.redirect_stderr(err):
         patched.setattr(python_properties, "run", nothing_run)
-        status = python_properties.main(argv)
-    assert (status, lines) == (2, [USAGE])
+        with pytest.raises(SystemExit) as ended:
+            python_properties.main(argv)
+    assert ended.value.code == 2
+    assert err.getvalue().startswith("usage: belt python-properties ")
 
 
 @given(

@@ -655,3 +655,35 @@ def test_malformed_command_lines(
     assert (ended.value.code, out) == (2, "")
     assert err.startswith("usage: belt matrix "), err
     assert err.splitlines()[-1] == error
+
+
+# The workflows pass the caller's text after `--`: a request that reads
+# as an option is a request, refused by name, never argparse's help.
+@pytest.mark.parametrize(
+    ("argv", "error"),
+    [
+        pytest.param(
+            ["targets", "go-binary", "--", "-h"],
+            "::error::matrix: unknown target -h; canon targets only (<goos>-<goarch>)",
+            id="targets",
+        ),
+        pytest.param(
+            ["pgrx-images", "--", "-h"],
+            "::error::matrix: -h is not a PG major",
+            id="pgrx-images",
+        ),
+    ],
+)
+def test_a_request_that_reads_as_an_option_is_refused(
+    argv: list[str],
+    error: str,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`-h` after `--`: exit 1 naming it, no plan and no help."""
+    monkeypatch.setenv("MISE_TASK_NAME", "")
+    monkeypatch.setenv("ORG_FINDINGS", "")
+    monkeypatch.setattr(sys, "argv", ["matrix"])
+    status = matrix.main(argv)
+    out, err = capfd.readouterr()
+    assert (status, out, err) == (1, "", f"{error}\n")

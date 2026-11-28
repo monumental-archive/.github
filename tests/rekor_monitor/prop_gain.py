@@ -29,7 +29,6 @@ from hypothesis import strategies as st
 
 from belt.rekor_monitor import gain, verdict
 from belt.typed_hypothesis import given
-from belt.typed_pytest import fixture
 
 # Past the JSON parser's depth: a RecursionError, not a ValueError.
 DEEP = b"[" * 100_000
@@ -139,32 +138,6 @@ def doc(point: tuple[int, int, int]) -> bytes:
     return json.dumps(checkpoint).encode()
 
 
-class Scratch:
-    """Two scratch checkpoint files for a test's examples."""
-
-    def __init__(self, tmp_path: Path) -> None:
-        """Hold the scratch files."""
-        self.start = Path(str(tmp_path)) / "run-start.json"
-        self.end = Path(str(tmp_path)) / "checkpoint.json"
-
-
-@fixture
-def scratch_state(tmp_path: Path) -> Scratch:
-    """Give each row its own Scratch."""
-    return Scratch(tmp_path)
-
-
-def read(path: Path, content: bytes) -> gain.Checkpoint:
-    """Write a checkpoint file and read it back.
-
-    Returns:
-        The Checkpoint the helper read.
-
-    """
-    path.write_bytes(content)
-    return gain.read_checkpoint(path)
-
-
 @given(CONTENT, CONTENT, KEPT)
 @example(DEEP, DEEP, "true")
 @example(
@@ -177,19 +150,17 @@ def read(path: Path, content: bytes) -> gain.Checkpoint:
     b'{"next": 1, "treeHead": {"treeSize": 2, "timestamp": 1e300}}',
     "true",
 )
-def test_never_raises(
-    scratch_state: Scratch, start: bytes, end: bytes, kept: str
-) -> None:
+def test_never_raises(start: bytes, end: bytes, kept: str) -> None:
     """Read, judged and written; unreadable names why."""
-    first = read(scratch_state.start, start)
-    last = read(scratch_state.end, end)
+    first = gain.checkpoint_of(start)
+    last = gain.checkpoint_of(end)
     for point in (first, last):
         assert isinstance(point, gain.Checkpoint)
         fields = (point.next, point.size, point.when)
         if point.missing is None:
             assert None not in fields
         else:
-            assert read == (None, None, None)
+            assert fields == (None, None, None)
     outcome = gain.judge(first, kept, last)
     if last.missing is not None:
         assert outcome.red
@@ -202,12 +173,12 @@ def test_never_raises(
 @example((5, 10, 0), (6, 10, 0))
 @example((5, 10, 0), (6, 11, 0))
 def test_gained_exactly_when_advanced(
-    scratch_state: Scratch, start: tuple[int, int, int], end: tuple[int, int, int]
+    start: tuple[int, int, int], end: tuple[int, int, int]
 ) -> None:
     """Green exactly when advanced and the count fell."""
     (start_next, start_size, _), (end_next, end_size, end_ms) = start, end
-    first = read(scratch_state.start, doc(start))
-    last = read(scratch_state.end, doc(end))
+    first = gain.checkpoint_of(doc(start))
+    last = gain.checkpoint_of(doc(end))
     outcome = gain.judge(first, "true", last)
     if end_size == end_next:
         assert outcome == gain.Outcome(red=False, why=gain.AT_HEAD)
@@ -216,28 +187,24 @@ def test_gained_exactly_when_advanced(
     fell = (end_size - end_next) < (start_size - start_next)
     assert outcome.red == (not (advanced and fell)), outcome.why
     # The head's time is not a position: moving it changes nothing.
-    moved = read(scratch_state.end, doc((end_next, end_size, end_ms // 2)))
+    moved = gain.checkpoint_of(doc((end_next, end_size, end_ms // 2)))
     assert gain.judge(first, "true", moved) == outcome
 
 
 @given(CONTENT, KEPT, POSITION, MILLIS)
-def test_head_is_caught_up(
-    scratch_state: Scratch, start: bytes, kept: str, size: int, millis: int
-) -> None:
+def test_head_is_caught_up(start: bytes, kept: str, size: int, millis: int) -> None:
     """At the head: green, whatever the start."""
-    first = read(scratch_state.start, start)
-    last = read(scratch_state.end, doc((size, size, millis)))
+    first = gain.checkpoint_of(start)
+    last = gain.checkpoint_of(doc((size, size, millis)))
     outcome = gain.judge(first, kept, last)
     assert outcome == gain.Outcome(red=False, why=gain.AT_HEAD)
 
 
 @given(CONTENT, POINT)
-def test_founding_run_is_green(
-    scratch_state: Scratch, start: bytes, end: tuple[int, int, int]
-) -> None:
+def test_founding_run_is_green(start: bytes, end: tuple[int, int, int]) -> None:
     """No checkpoint kept at the start: green."""
-    first = read(scratch_state.start, start)
-    last = read(scratch_state.end, doc(end))
+    first = gain.checkpoint_of(start)
+    last = gain.checkpoint_of(doc(end))
     assert not gain.judge(first, "false", last).red
 
 
