@@ -1381,6 +1381,46 @@ REAL_CONFIG = CONFIG
 SUB_ADD = "core/ReplaceBinaryOperator_Sub_Add"
 
 
+def under_tools(tree: Path) -> list[str]:
+    """Spell the leg's run under the real tools, installed by name.
+
+    `mise exec`, at the canon's root, installs the named tools from the
+    canon's own lock where they are missing and puts them first on
+    PATH: these rows are the only ones that need them (the owner's
+    ruling on #1432), so no other gate row installs them.
+
+    Returns:
+        The argv: mise exec, then the leg, in the fixture.
+
+    """
+    return [
+        hermetic.tool("mise"),
+        "-C",
+        str(BELT.parent),
+        "exec",
+        *TOOLS,
+        "--",
+        BASH,
+        "-c",
+        'cd "$0" && exec "$@"',
+        str(tree),
+        BASH,
+        str(SCRIPT),
+    ]
+
+
+# The mise settings `mise exec` reads, where the suite has them.
+MISE_VARS = (
+    "MISE_TRUSTED_CONFIG_PATHS",
+    "MISE_LOCKED",
+    "MISE_GLOBAL_CONFIG_FILE",
+    "MISE_DATA_DIR",
+    "MISE_CACHE_DIR",
+)
+# The real tools these rows run, by the names the canon pins them under.
+TOOLS = ("pipx:cosmic-ray",)
+
+
 class RealDiff(unittest.TestCase):
     """The leg's diff mode, end to end, with the real cosmic-ray (#1432)."""
 
@@ -1398,12 +1438,13 @@ class RealDiff(unittest.TestCase):
         self.base = self.commit("base")
         self.env = hermetic.env(MISE_TASK_NAME="ci:mutants") | {
             "PATH": os.environ["PATH"],
+            # What `mise exec` at the canon's root needs from the gate:
+            # its trust and its lock rule, named one by one.
+            **{k: os.environ[k] for k in MISE_VARS if k in os.environ},
             "ORG_BELT_DIR": str(BELT),
             "ORG_PYTHON": sys.executable,
             "MUTANTS_DIFF": "1",
         }
-        # The real tool, or the row is red by name.
-        hermetic.tool("cosmic-ray")
 
     def write(self, path: str, text: str) -> None:
         """Write one file of the fixture."""
@@ -1434,7 +1475,7 @@ class RealDiff(unittest.TestCase):
 
         """
         return subprocess.run(
-            [BASH, str(SCRIPT)],
+            under_tools(self.tree),
             cwd=self.tree,
             env=self.env | {"ORG_MUTANTS_BASE": self.base if base is None else base},
             capture_output=True,
@@ -1535,7 +1576,7 @@ class RealDiff(unittest.TestCase):
         """A shard whose share of the change is empty measures nothing."""
         self.change("done = True", "done = True  # touched")
         done = subprocess.run(
-            [BASH, str(SCRIPT)],
+            under_tools(self.tree),
             cwd=self.tree,
             env=self.env | {"ORG_MUTANTS_BASE": self.base, "MUTANTS_SHARD": "1/2"},
             capture_output=True,

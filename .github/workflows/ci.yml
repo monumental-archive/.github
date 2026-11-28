@@ -382,17 +382,15 @@ jobs:
 
       # THE MUTATION TOOLS A ROW RUNS, BY NAME (#1432). The belt pins
       # cargo-mutants, gomu and cosmic-ray lazy, so the install above
-      # skips them. A `ci:mutants` row installs its language's; the
-      # canon's test rows install what its real-tool fixture rows run
-      # (mise/test_mutants_python.py, the owner's ruling on #1432).
-      # Before the cache save below, so the default branch keeps them.
+      # skips them. A `ci:mutants` row installs its language's, before
+      # the cache save below, so the default branch keeps them. The
+      # canon's real-tool fixture rows install theirs by name with
+      # `mise exec` (the owner's ruling on #1432); no other row does.
       # StrykerJS is the repository's, from its own lockfile (#1358).
       - name: Install the mutation tools this row runs, by name
-        if: >-
-          ${{ matrix.leg == 'mutants' && matrix.language
-          || matrix.leg == 'test' && hashFiles('mise/test_mutants_python.py') != '' }}
+        if: ${{ matrix.leg == 'mutants' && matrix.language }}
         env:
-          LANGUAGES: ${{ matrix.leg == 'mutants' && matrix.language || 'python' }}
+          LANGUAGES: ${{ matrix.language }}
         run: bash .org-canon/mise/mutation-install.sh "${LANGUAGES}"
 
       # unattested-path: the write half of the tool cache restored
