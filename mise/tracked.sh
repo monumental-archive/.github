@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 # The one producer of the tracked-file list (#1986). Sourced, never run:
 # mise/findings.sh sources it, so BASH_ENV delivers it to every task
-# body and to every bash a body starts. mise/tracked.py is the same
+# body and to every bash a body starts. belt/tracked.py is the same
 # producer for Python.
 #
 #   org_tracked [<pathspec>…]

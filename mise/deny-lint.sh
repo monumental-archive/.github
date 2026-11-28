@@ -76,11 +76,11 @@ lint_root() {
     org_finding "${dir%/}" "Cargo.lock present but no deny.toml — copy scaffold/deny.toml from the canon"
     return 1
   }
-  "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${belt}/deny_advisories.py" "${config}" || return 1
+  "${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${belt%/*}/belt" deny-advisories "${config}" || return 1
   cargo fetch --locked --manifest-path "${manifest}" || return 1
   cargo deny --manifest-path "${manifest}" --config "${config}" \
     check bans licenses sources || return 1
-  variants=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" "${belt}/deny_skips.py" "${config}") || return 1
+  variants=$("${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I "${belt%/*}/belt" deny-skips "${config}") || return 1
   while IFS=$'\t' read -r name variant; do
     [[ -n ${name} ]] || continue
     if cargo deny --manifest-path "${manifest}" --config "${variant}" \

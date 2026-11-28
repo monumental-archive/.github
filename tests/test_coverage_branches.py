@@ -1,0 +1,543 @@
+"""Table tests for the Rust branch-coverage floor (#1359).
+
+`audit:coverage-branches` holds the `rust-branches` line of
+`.coverage-floor` on the Monday cron, measured by
+`mise/coverage-measure.sh`'s `rust-branches` leg on the repository's
+dated nightly; `coverage:adopt` writes that line. The bodies under test
+are the tasks' own `run` strings, read out of mise/config.toml with
+decoded.load_toml and run by bash in a planted git tree, and they call
+the real measurement script, the real `coverage_floor.py` and the real
+`pgrx-env.sh`. Only `cargo` and `rustup` are stubs: cargo answers
+`metadata` with a workspace holding no extension and `llvm-cov` with
+the numbers the row planted, and logs every `llvm-cov` call with the
+toolchain it ran under, so a row can assert which flags reached it.
+
+Each row asserts the message, not just the exit status: a planted row
+scored on exit alone can pass for the wrong reason.
+"""
+
+import os
+import subprocess
+import tempfile
+from decimal import Decimal
+from pathlib import Path
+from typing import TypedDict, Unpack
+
+import pytest
+
+from belt import coverage_floor as cf
+from belt import decoded, gate_cache_key
+from belt.typed_pytest import fixture
+from tests import support
+
+CANON = support.CANON
+BELT = CANON / "mise"
+BASH = support.tool("bash")
+GIT = support.tool("git")
+
+NIGHTLY = "nightly-2026-07-20"
+
+# The directory digests of the stand-in `rustc` (#1877): the stable
+# leg's, with no RUSTUP_TOOLCHAIN, and the declared nightly's.
+STABLE = gate_cache_key.directory_digest(support.rustc_verbose("stable"))
+NIGHTLY_DIR = gate_cache_key.directory_digest(support.rustc_verbose(NIGHTLY))
+
+BRANCH_RUN = f"{NIGHTLY} llvm-cov --workspace --locked --branch --json --summary-only"
+SKIP = "audit:coverage-branches: no rust-branches line in .coverage-floor, skipped\n"
+
+# The rust leg's floor, measured 82.0 minus the band; the branch line
+# beside it, measured 72.0 minus the band. Both hold to the derived-state
+# law, each a floor of its own (#2143).
+MAIN = """\
+# band: 2
+# derived: v1.0.0
+# legs: rust
+# rust measured: 82.0
+rust 80.0
+"""
+BRANCH = """\
+# rust-branches measured: 72.0
+rust-branches 70.0
+"""
+
+# cargo: `metadata` is a workspace with no pgrx extension, so the shared
+# provisioning returns after one call; `llvm-cov show-env` answers as
+# cargo-llvm-cov 0.9.1 does, unlogged; every other `llvm-cov` logs its
+# argv and the toolchain it ran under, and prints the planted totals.
+# With `--branch` it reports branches; without, branches read as an
+# uninstrumented run does (count 0, measured on stable 1.97.1). With
+# `--lcov` (the line leg's `report`, #1528, #1653) it writes the report
+# to `--output-path` instead, the planted line figure as lines hit of
+# 100 found. Each logged call also writes the directory it was started
+# with to `<log>.target`, cargo-llvm-cov's own default when
+# CARGO_TARGET_DIR is unset (#1877).
+CARGO = """\
+#!/usr/bin/env bash
+case "$1" in
+  metadata)
+    printf '{"packages": [], "workspace_members": [], "workspace_root": "%s",' "${PWD}"
+    printf ' "target_directory": "%s/target"}\\n' "${PWD}"
+    ;;
+  llvm-cov)
+    if [[ $2 == show-env ]]; then
+      echo "export LLVM_PROFILE_FILE='${CARGO_TARGET_DIR}/tree-%p-%8m.profraw'"
+      exit 0
+    fi
+    echo "${RUSTUP_TOOLCHAIN:-stable} $*" >> "${STUB_LOG}"
+    echo "${CARGO_TARGET_DIR:-${PWD}/target/llvm-cov-target}" >> "${STUB_LOG}.target"
+    if [[ " $* " == *" --lcov "* ]]; then
+      out=""
+      while [[ $# -gt 0 ]]; do
+        [[ $1 == --output-path ]] && out=$2
+        shift
+      done
+      printf 'SF:a.rs\\nLF:100\\nLH:%s\\nend_of_record\\n' "${STUB_LINES%.*}" > "${out}"
+      exit 0
+    fi
+    if [[ " $* " == *" --branch "* ]]; then
+      count=${STUB_BR_COUNT} pct=${STUB_BR}
+    else
+      count=0 pct=0
+    fi
+    printf '{"data": [{"totals": {"lines": {"percent": %s},' "${STUB_LINES}"
+    printf ' "branches": {"count": %s, "percent": %s}}}]}\\n' "${count}" "${pct}"
+    ;;
+  *) exit 1 ;;
+esac
+"""
+
+# rustup: the stable toolchain and the planted nightly both carry
+# llvm-tools; `toolchain list` names the nightly only when it is planted.
+RUSTUP = """\
+#!/usr/bin/env bash
+case "$1 $2" in
+  "component list") echo "llvm-tools-x86_64-unknown-linux-gnu" ;;
+  "toolchain list")
+    echo "1.99.1-x86_64-unknown-linux-gnu"
+    [[ -z ${STUB_INSTALLED} ]] || echo "${STUB_INSTALLED}-x86_64-unknown-linux-gnu"
+    ;;
+  *) exit 1 ;;
+esac
+"""
+
+
+def measuring_step(task: str) -> str:
+    """Read the step of a coverage task that measures (#1667).
+
+    `coverage:adopt` is a run list: create the floor, `test` by
+    reference, then the measurement, which is the step these rows run.
+
+    Returns:
+        The task's script, or its run list's last one.
+
+    """
+    belt = decoded.load_toml((BELT / "config.toml").read_text(encoding="utf-8"))
+    tasks = decoded.as_object(belt["tasks"], "the belt's [tasks]")
+    run = decoded.as_object(tasks[task], task)["run"]
+    if isinstance(run, str):
+        return run
+    steps = decoded.as_array(run, f"{task}'s run")
+    return decoded.as_str(steps[-1], f"{task}'s last step")
+
+
+# What a row that names none of them plants.
+PLANT_DEFAULTS: Plant = {
+    "floor": MAIN + BRANCH,
+    "cargo_toml": True,
+    "branches": "75.5",
+    "count": "40",
+    "lines": "90.0",
+    "toolchain": NIGHTLY,
+    "installed": NIGHTLY,
+    "exclude": "",
+    "plant_old": "",
+}
+
+
+def run_task(
+    task: str,
+    *,
+    env: support.Env,
+    rustc: support.Rustc,
+    **options: Unpack[Plant],
+) -> tuple[subprocess.CompletedProcess[str], Path]:
+    """Run one task's body in a planted Rust tree with stub tools.
+
+    Returns:
+        The finished process, and the temporary directory holding the
+        tree (`tree/`) and the cargo log (`llvm-cov.log`).
+
+    """
+    facts: Plant = {**PLANT_DEFAULTS, **options}
+    tmp = Path(tempfile.mkdtemp())
+    tree = tmp / "tree"
+    stubs = tmp / "stubs"
+    tree.mkdir()
+    stubs.mkdir()
+    for name, text in (("cargo", CARGO), ("rustup", RUSTUP)):
+        (stubs / name).write_text(text, encoding="utf-8")
+        (stubs / name).chmod(0o755)
+    rustc(stubs)
+    log = tmp / "llvm-cov.log"
+    log.touch()
+    (tmp / "llvm-cov.log.target").touch()
+
+    tracked = []
+    if facts["cargo_toml"]:
+        (tree / "Cargo.toml").write_text("[workspace]\n", encoding="utf-8")
+        tracked.append("Cargo.toml")
+        # What the test task's measured `cargo test` left (#1653): this
+        # run's marker and one profile.
+        (tmp / "run" / "rust").mkdir(parents=True)
+        profiles = tree / "target" / f"llvm-cov-target-{STABLE}"
+        profiles.mkdir(parents=True)
+        (profiles / "tree-1-1.profraw").write_text("", encoding="utf-8")
+    if facts["plant_old"]:
+        # Another compiler's directories, full (#1877): cargo-llvm-cov's
+        # own default and one named for the digest `plant_old`.
+        for name in ("llvm-cov-target", f"llvm-cov-target-{facts['plant_old']}"):
+            (tree / "target" / name).mkdir(parents=True)
+            (tree / "target" / name / "old-compiler-test").write_text("", "utf-8")
+    if facts["floor"] is not None:
+        (tree / ".coverage-floor").write_text(facts["floor"], encoding="utf-8")
+        tracked.append(".coverage-floor")
+
+    # The stubs stand in for the Rust toolchain, so rustup's own selection
+    # is left out of the fixture as well (#1514: the rest is hermetic).
+    environ = {k: v for k, v in env().items() if not k.startswith("RUSTUP_")}
+    environ |= {
+        "ORG_BELT_DIR": str(BELT),
+        "PATH": f"{stubs}{os.pathsep}{environ.get('PATH', '')}",
+        "STUB_LOG": str(log),
+        "STUB_BR": facts["branches"],
+        "STUB_BR_COUNT": facts["count"],
+        "STUB_LINES": facts["lines"],
+        "STUB_INSTALLED": facts["installed"] or "",
+        "COVERAGE_EXCLUDE": facts["exclude"],
+        "ORG_COVERAGE_RUN": str(tmp / "run"),
+        # Outside the tree, as the gate job names it (#1628).
+        "ORG_COVERAGE_REPORTS": str(tmp / "reports"),
+    }
+    if facts["toolchain"] is not None:
+        environ["FUZZ_TOOLCHAIN"] = facts["toolchain"]
+    subprocess.run([GIT, "init", "-q"], cwd=tree, env=environ, check=True)
+    if tracked:
+        subprocess.run([GIT, "add", *tracked], cwd=tree, env=environ, check=True)
+    as_mise = support.task_run(task, measuring_step(task))
+    done = subprocess.run(
+        as_mise.argv,
+        cwd=tree,
+        env=environ | as_mise.env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return done, tmp
+
+
+# The line leg's one call, its report in the row's reports directory:
+# it renders the test task's own measured run (#1653).
+LINE_RUN = "stable llvm-cov report --lcov --output-path <reports>/lcov.info"
+
+# What a row expects of the call log (or of the parse's problems), named
+# so each expected list carries its element type.
+EMPTY: list[str] = []
+LINE_ONLY: list[str] = [LINE_RUN]
+BRANCH_ONLY: list[str] = [BRANCH_RUN]
+LINE_THEN_BRANCH: list[str] = [LINE_RUN, BRANCH_RUN]
+
+
+class Plant(TypedDict, total=False):
+    """The facts a row may plant: `run_task`'s keyword parameters."""
+
+    floor: str | None
+    cargo_toml: bool
+    branches: str
+    count: str
+    lines: str
+    toolchain: str | None
+    installed: str | None
+    exclude: str
+    plant_old: str
+
+
+class BranchCase:
+    """Runs a task and removes the planted tree afterwards."""
+
+    def __init__(self, tmp_path: Path) -> None:
+        """Give the row's scratch directories one home, removed after it."""
+        self.tmp = tmp_path
+
+
+@fixture
+def branch_case(tmp_path: Path) -> BranchCase:
+    """Give each row its own BranchCase.
+
+    Returns:
+        The row's BranchCase.
+
+    """
+    return BranchCase(tmp_path)
+
+
+def branch_case_run_task(
+    task: str, *, env: support.Env, rustc: support.Rustc, **plant: Unpack[Plant]
+) -> tuple[subprocess.CompletedProcess[str], Path, list[str]]:
+    """Run a task and schedule its tree for removal.
+
+    Returns:
+        The finished process, the planted tree, and one line per
+        `cargo llvm-cov` call: the toolchain, then its arguments,
+        the reports directory written as `<reports>`.
+
+    """
+    done, tmp = run_task(task, **plant, env=env, rustc=rustc)
+    log = (tmp / "llvm-cov.log").read_text(encoding="utf-8")
+    calls = log.replace(str(tmp / "reports"), "<reports>").splitlines()
+    return done, tmp / "tree", calls
+
+
+TASK = "audit:coverage-branches"
+
+
+@pytest.mark.usefixtures("branch_case")
+def test_a_floor_held(env: support.Env, rustc: support.Rustc) -> None:
+    """A measurement at or above the line holds it, by name."""
+    done, _, calls = branch_case_run_task(TASK, env=env, rustc=rustc)
+    assert done.returncode == 0, done.stderr
+    assert (
+        done.stdout
+        == "audit:coverage-branches: rust-branches holds its floor 70.0 (75.5%)\n"
+    )
+    assert calls == BRANCH_ONLY
+
+
+@pytest.mark.usefixtures("branch_case")
+def test_below_the_floor_reds_by_name(env: support.Env, rustc: support.Rustc) -> None:
+    """One tenth below the line is red, naming the leg and both numbers."""
+    done, _, _ = branch_case_run_task(TASK, branches="69.9", env=env, rustc=rustc)
+    assert done.returncode == 1
+    assert not done.stdout
+    assert (
+        "audit:coverage-branches: rust-branches: 69.9% is below"
+        " its derived floor 70.0%\n"
+    ) in done.stderr
+
+
+@pytest.mark.usefixtures("branch_case")
+def test_no_such_line_skips_clean(env: support.Env, rustc: support.Rustc) -> None:
+    """A floor with no rust-branches line measures nothing at all."""
+    done, _, calls = branch_case_run_task(TASK, floor=MAIN, env=env, rustc=rustc)
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == SKIP
+    assert calls == EMPTY
+
+
+@pytest.mark.usefixtures("branch_case")
+def test_no_floor_file_skips_clean(env: support.Env, rustc: support.Rustc) -> None:
+    """A repository that adopted no floor owes no branch figure either."""
+    done, _, calls = branch_case_run_task(TASK, floor=None, env=env, rustc=rustc)
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == SKIP
+    assert calls == EMPTY
+
+
+@pytest.mark.usefixtures("branch_case")
+def test_no_cargo_toml_skips_clean(env: support.Env, rustc: support.Rustc) -> None:
+    """A tree with no Cargo.toml has no Rust branch to measure."""
+    done, _, calls = branch_case_run_task(TASK, cargo_toml=False, env=env, rustc=rustc)
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == "audit:coverage-branches: no Cargo.toml, skipped\n"
+    assert calls == EMPTY
+
+
+@pytest.mark.usefixtures("branch_case")
+def test_coverage_exclude_is_refused_as_the_rust_leg_refuses_it(
+    env: support.Env, rustc: support.Rustc
+) -> None:
+    """The removed variable reds the branch run by name, before any run (#1653)."""
+    done, _, calls = branch_case_run_task(
+        TASK, exclude="lab-wasm lab-cli", env=env, rustc=rustc
+    )
+    assert done.returncode == 1, done.stderr
+    assert (
+        "audit:coverage-branches: COVERAGE_EXCLUDE is set (lab-wasm lab-cli) —"
+        " it is removed (#1653):\n  the rust leg measures what the test task's"
+        " own command builds, so the command\n"
+    ) in done.stderr
+    assert calls == EMPTY
+
+
+@pytest.mark.usefixtures("branch_case")
+def test_an_undeclared_nightly_reds_by_name(
+    env: support.Env, rustc: support.Rustc
+) -> None:
+    """A committed line with no FUZZ_TOOLCHAIN cannot be held, and says so."""
+    done, _, calls = branch_case_run_task(TASK, toolchain=None, env=env, rustc=rustc)
+    assert done.returncode == 1
+    assert (
+        "audit:coverage-branches: FUZZ_TOOLCHAIN is not declared — Rust branch"
+        " coverage needs a nightly\n"
+    ) in done.stderr
+    assert calls == EMPTY
+
+
+@pytest.mark.usefixtures("branch_case")
+def test_a_declared_nightly_not_installed_reds_by_name(
+    env: support.Env, rustc: support.Rustc
+) -> None:
+    """The nightly rides the pin; a missing one is never installed mid-run."""
+    done, _, calls = branch_case_run_task(TASK, installed=None, env=env, rustc=rustc)
+    assert done.returncode == 1
+    assert (
+        f"audit:coverage-branches: FUZZ_TOOLCHAIN='{NIGHTLY}' is declared but"
+        " not installed\n"
+    ) in done.stderr
+    assert calls == EMPTY
+
+
+@pytest.mark.usefixtures("branch_case")
+def test_no_branches_counted_is_refused(env: support.Env, rustc: support.Rustc) -> None:
+    """Count 0 is an uninstrumented run's shape, never a 0% to compare."""
+    done, _, _ = branch_case_run_task(
+        TASK, count="0", branches="0", env=env, rustc=rustc
+    )
+    assert done.returncode == 1
+    assert (
+        "audit:coverage-branches: the Rust report counted no branches (count '0') — a\n"
+    ) in done.stderr
+
+
+@pytest.mark.usefixtures("branch_case")
+def test_a_typed_line_is_refused_as_drift(
+    env: support.Env, rustc: support.Rustc
+) -> None:
+    """A rust-branches number typed over its record reds before measuring."""
+    typed = MAIN + "# rust-branches measured: 72.0\nrust-branches 60.0\n"
+    done, _, calls = branch_case_run_task(TASK, floor=typed, env=env, rustc=rustc)
+    assert done.returncode == 1
+    assert (
+        "rust-branches floor 60.0 disagrees with its own record: measured"
+        " 72.0 under band 2 and the cap 90 derives 70.0."
+    ) in done.stderr
+    assert calls == EMPTY
+
+
+@pytest.mark.usefixtures("branch_case")
+def test_check_measures_lines_on_stable_beside_a_branch_line(
+    env: support.Env, rustc: support.Rustc
+) -> None:
+    """A committed rust-branches line changes nothing the gate runs."""
+    done, tree, calls = branch_case_run_task("coverage:check", env=env, rustc=rustc)
+    assert done.returncode == 0, done.stderr
+    assert (
+        "coverage:check: rust leg holds its floor 80.0 (90%)\n"
+        f"coverage:check: upload {tree.parent / 'reports' / 'lcov.info'}\n"
+    ) == done.stdout
+    assert calls == LINE_ONLY
+
+
+@pytest.mark.usefixtures("branch_case")
+def test_adopt_with_the_nightly_writes_a_derived_line(
+    env: support.Env, rustc: support.Rustc
+) -> None:
+    """Both legs measured; the file parses with the branch line derived."""
+    done, tree, calls = branch_case_run_task(
+        "coverage:adopt", floor=None, branches="73.48", env=env, rustc=rustc
+    )
+    assert done.returncode == 0, done.stderr
+    assert (
+        "coverage-floor: adopted .coverage-floor: rust 88.0 (measured 90.0),"
+        " rust-branches 71.4 (measured 73.4)\n"
+    ) in done.stdout
+    parsed, problems = cf.parse((tree / ".coverage-floor").read_text(encoding="utf-8"))
+    assert problems == EMPTY
+    if parsed is None:
+        pytest.fail("the adopted .coverage-floor did not parse")
+    assert (
+        cf.Held(Decimal("71.4"), Decimal("73.4"), None)
+        == parsed.floors["rust-branches"]
+    )
+    assert calls == LINE_THEN_BRANCH
+
+
+@pytest.mark.usefixtures("branch_case")
+def test_adopt_without_the_nightly_writes_no_line(
+    env: support.Env, rustc: support.Rustc
+) -> None:
+    """No FUZZ_TOOLCHAIN: the rust leg only, and the reason printed."""
+    done, tree, calls = branch_case_run_task(
+        "coverage:adopt", floor=None, toolchain=None, env=env, rustc=rustc
+    )
+    assert done.returncode == 0, done.stderr
+    assert (
+        "coverage:adopt: no FUZZ_TOOLCHAIN declared, so no rust-branches line"
+        " (branch coverage needs the dated nightly)\n"
+    ) in done.stdout
+    text = (tree / ".coverage-floor").read_text(encoding="utf-8")
+    assert "rust-branches" not in text
+    assert calls == LINE_ONLY
+
+
+@pytest.mark.usefixtures("branch_case")
+def test_adopt_cannot_lower_the_branch_line(
+    env: support.Env, rustc: support.Rustc
+) -> None:
+    """Below its floor, nothing is written."""
+    done, tree, _ = branch_case_run_task(
+        "coverage:adopt", branches="69.9", env=env, rustc=rustc
+    )
+    assert done.returncode == 1
+    assert (
+        "coverage:adopt: rust-branches: measured 69.9% is below its floor 70.0%."
+        in done.stderr
+    )
+    assert (tree / ".coverage-floor").read_text(encoding="utf-8") == MAIN + BRANCH
+
+
+def targets(tree: Path) -> list[str]:
+    """Read the directory each logged `cargo llvm-cov` call started in.
+
+    Returns:
+        One per call, in order.
+
+    """
+    log = tree.parent / "llvm-cov.log.target"
+    return log.read_text(encoding="utf-8").splitlines()
+
+
+@pytest.mark.usefixtures("branch_case")
+def test_the_nightly_leg_measures_into_the_nightlys_directory(
+    env: support.Env, rustc: support.Rustc
+) -> None:
+    """Never the stable leg's: on main it was unset, so the same one."""
+    done, tree, calls = branch_case_run_task(
+        "audit:coverage-branches", env=env, rustc=rustc
+    )
+    assert done.returncode == 0, done.stderr
+    assert calls == BRANCH_ONLY
+    target = tree.resolve() / "target"
+    (nightly,) = targets(tree)
+    assert str(target / f"llvm-cov-target-{NIGHTLY_DIR}") == nightly
+    assert str(target / f"llvm-cov-target-{STABLE}") != nightly
+
+
+@pytest.mark.usefixtures("branch_case")
+def test_a_pre_filled_directory_is_never_measured_into(
+    env: support.Env, rustc: support.Rustc
+) -> None:
+    """Another compiler's directories, planted full: neither is this run's.
+
+    On main the nightly leg measured into `target/llvm-cov-target`,
+    the directory planted full here.
+    """
+    other = gate_cache_key.directory_digest(support.rustc_verbose("1.97.1"))
+    done, tree, _ = branch_case_run_task(
+        "audit:coverage-branches", plant_old=other, env=env, rustc=rustc
+    )
+    assert done.returncode == 0, done.stderr
+    target = tree.resolve() / "target"
+    planted = {target / "llvm-cov-target", target / f"llvm-cov-target-{other}"}
+    (used,) = targets(tree)
+    assert Path(used) not in planted
+    assert not (Path(used) / "old-compiler-test").exists()

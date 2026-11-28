@@ -1,7 +1,7 @@
 # The gate's shards and what each heavy lint costs (#2049).
 #
 # ci.yml runs the lint leg on `shards` runners side by side, and
-# mise/gate_shard.py deals the `lint:*` tasks among them, longest first,
+# belt/gate_shard.py deals the `lint:*` tasks among them, longest first,
 # so the heaviest lints land on different runners. A lint's cost is its
 # row's `seconds` in a tree where one of its `when` pathspecs (git's
 # default meaning; absent = every tree) names a tracked file, and
@@ -12,12 +12,12 @@
 # when this was measured (2026-11-23, every lint sharing one four-core
 # runner), rounded. They decide only which lints share a runner, never
 # whether one runs: a stale figure costs balance, not coverage.
-# mise/test_gate_shard.py holds every row to a lint the belt defines. A
+# tests/test_gate_shard.py holds every row to a lint the belt defines. A
 # repository's own lint is unlisted and weighs `lint.default`.
 
 # The canon's DEFAULTS (#2160). How a repository's work is split and
 # sharded is the repository's own content, in its tracked root
-# `shards.toml` (mise/gate_shard.py reads it, in the plan only); these
+# `shards.toml` (belt/gate_shard.py reads it, in the plan only); these
 # are what a repository gets for anything its file does not name. The
 # lint leg's shards; one runner per test or properties task, so no test
 # count lives here; and one count per language for repo-mutants.yml and
@@ -29,12 +29,13 @@ lint = 4
 ceiling = 128
 
 # Rust and Go four, round-robin (edtf #107 set Rust's from its first
-# run); Python 48 (cosmic-ray judges a mutant per suite run);
+# run); Python four, a share of the modules each, mutmut's baseline
+# paid once per shard (#2177; set from its first run);
 # TypeScript eight, StrykerJS given a share of the files (#2153).
 [shards.mutants]
 rust = 4
 go = 4
-python = 48
+python = 4
 typescript = 8
 
 # The Monday properties at a random seed: Python by position, eight
@@ -102,71 +103,3 @@ when = ["*.sql"]
 
 [lint.cost."lint:biome"]
 seconds = 23
-
-# What each test file costs, for the test shards (#2054): the seconds a
-# file took on the gate's runner (main's gate run 45101495123, four test
-# shards of four workers each), by its path from the repository root.
-# mise/unittest_guarded.py deals a root's files longest first over these,
-# so the slowest files land on different shards; a file not listed weighs
-# `test.default`. Like the lint costs they decide balance only, never
-# whether a file runs, and mise/test_gate_shard.py holds every row to a
-# tracked test file.
-[test]
-default = 2
-
-[test.cost]
-"mise/test_gate_tools.py" = 46
-"mise/test_mutants_python.py" = 46
-"mise/test_python_types.py" = 34
-"mise/test_coverage_typescript.py" = 31
-"mise/test_python_properties.py" = 31
-"mise/test_coverage_tasks.py" = 29
-"mise/test_pgrx_test.py" = 29
-"release/test_generate_pgrx_upgrade.py" = 29
-"mise/test_measured.py" = 27
-"mise/test_mutants_go.py" = 25
-"mise/test_mutants_rust.py" = 23
-"mise/test_coverage_go_rust.py" = 22
-# PR #2174's gate run 46082363673 (test 2/4): its rows on a real
-# database (#2163); unittest's durations leave out the image start.
-"mise/test_plpgsql_coverage.py" = 22
-"mise/test_standing_issue.py" = 21
-"mise/test_rust_lint.py" = 17
-"mise/test_audit_badges.py" = 16
-"mise/test_coverage_branches.py" = 15
-"mise/test_typescript_properties.py" = 14
-"mise/test_pgrx_env.py" = 13
-"mise/test_unittest_guarded.py" = 13
-"mise/test_hermetic.py" = 12
-"mise/test_task_contract.py" = 12
-"release/test_job_installs.py" = 11
-"mise/test_coverage_fuzz.py" = 10
-"mise/test_break_check.py" = 9
-"mise/test_coverage_go_branches.py" = 9
-"mise/test_prepush_hook.py" = 8
-"release/test_coverage_figures.py" = 8
-"mise/test_bestpractices_stub.py" = 7
-"mise/test_pg_schema.py" = 7
-"mise/test_semver_audit.py" = 7
-"mise/test_mutants_typescript.py" = 6
-"settings/test_repo_baseline.py" = 6
-"mise/test_belt_link_hook.py" = 5
-"mise/test_deny_lint.py" = 5
-"mise/test_derive_badges.py" = 5
-"release/test_pgrx_images.py" = 5
-"release/test_registry.py" = 5
-"release/test_release_guards.py" = 5
-"mise/test_fuzz_search.py" = 4
-"release/test_pack_wasm.py" = 4
-"release/test_upgrade_script.py" = 4
-"mise/test_findings.py" = 3
-"mise/test_git_decoy.py" = 3
-"mise/test_pg_clippy.py" = 3
-"mise/test_pg_upgrade_path.py" = 3
-"mise/test_pinact_findings.py" = 3
-"release/test_security_release.py" = 3
-"mise/test_audit_legs.py" = 2
-"release/test_mint_doi.py" = 2
-"release/test_pgrx_build.py" = 2
-"release/test_pgrx_inventory_plan.py" = 2
-"release/test_prepare_release.py" = 2

@@ -17,4 +17,4 @@
 # block no issue names yet carries its class and `#1352 unassigned`.
 #
 # Generated from the tree by the lint's own counter
-# (mise/embedded_shell.py), never typed.
+# (belt/embedded_shell.py), never typed.

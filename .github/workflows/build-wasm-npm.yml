@@ -121,10 +121,10 @@ jobs:
 
       - name: Read the caller's pinned build inputs
         # The caller's config decides the versions; the canon decides
-        # which tools (#1333). One reader, release/caller_pins.py.
+        # which tools (#1333). One reader, belt/release/caller_pins.py.
         id: pins
         run: |
-          "${ORG_PYTHON}" .org-canon/release/caller_pins.py install \
+          "${ORG_PYTHON}" -I .org-canon/belt caller-pins install \
             --input-of "the wasm-npm class" \
             rust wasm-pack node >> "${GITHUB_OUTPUT}"
       - name: Install mise and the caller's pinned toolchain
@@ -139,7 +139,7 @@ jobs:
           cache: false
           # Only what this job's steps call (#1333): the release path is
           # uncached, so every tool in scope is paid for on every run.
-          # release/test_job_installs.py holds the list to the calls.
+          # tests/release/test_job_installs.py holds the list to the calls.
           install_args: ${{ steps.pins.outputs.install }}
 
       - name: Assert the caller pinned its build inputs
@@ -202,12 +202,12 @@ jobs:
         # hashed, signed and verified are the bytes that ship. The
         # repository and the version are refused before packing (npm
         # provenance E422, found by the v0.14.1 run).
-        # release/pack_wasm.py, which says why.
+        # belt/release/pack_wasm.py, which says why.
         id: pack
         env:
           UNTRUSTED_VERSION: ${{ inputs.version }}
           UNTRUSTED_CRATE_DIR: ${{ inputs.crate-dir }}
-        run: '"${ORG_PYTHON}" .org-canon/release/pack_wasm.py'
+        run: '"${ORG_PYTHON}" -I .org-canon/belt pack-wasm'
       - name: Emit the inventory plan (which package this artifact ships)
         # The artifact-to-package mapping exists with certainty exactly
         # once — here, where the tarball was just packed from the crate

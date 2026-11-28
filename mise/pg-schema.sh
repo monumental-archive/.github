@@ -76,7 +76,7 @@ if [[ ${mode} == check ]]; then
   for target in "${targets[@]}"; do
     snapshot="${target#*:*:*:}"
     org_tracked_has "${snapshot}" || {
-      "${ORG_PYTHON}" "${belt}/pg_schema.py" check /dev/null "${snapshot}" || missing=1
+      "${ORG_PYTHON}" -I "${belt%/*}/belt" pg-schema check /dev/null "${snapshot}" || missing=1
     }
   done
   [[ ${missing} -eq 0 ]] || exit 1
@@ -91,7 +91,7 @@ command -v cargo-pgrx > /dev/null || {
 org_pgrx_darwin_prepare "${majors}"
 # Every major's pin checked before anything compiles (#1940).
 installed=$(mise ls "aqua:theseus-rs/postgresql-binaries" --json)
-"${ORG_PYTHON}" "${belt}/pgrx_postgres.py" --majors "${majors}" <<< "${installed}" > /dev/null
+"${ORG_PYTHON}" -I "${belt%/*}/belt" pgrx-postgres --majors "${majors}" <<< "${installed}" > /dev/null
 
 # The raw output lands under the target directory cargo already ignores,
 # where a reader can open it after a red.
@@ -112,7 +112,7 @@ for target in "${targets[@]}"; do
   org_pgrx_major "${major}" cargo pgrx schema "pg${major}" --package "${name}" \
     --manifest-path "${dir}/Cargo.toml" \
     --no-default-features --features "pg${major}" --out "${raw}"
-  if "${ORG_PYTHON}" "${belt}/pg_schema.py" "${mode}" "${raw}" "${snapshot}"; then
+  if "${ORG_PYTHON}" -I "${belt%/*}/belt" pg-schema "${mode}" "${raw}" "${snapshot}"; then
     done_list="${done_list} ${name}(pg${major})"
   else
     failed=1

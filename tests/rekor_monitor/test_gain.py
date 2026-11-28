@@ -1,0 +1,567 @@
+"""`belt gain`, one row per outcome of a run (#1967, #1339).
+
+Each row calls the helper's `main` in this process with the gaining
+job's arguments, the row's environment in place for the call (#1673,
+#1699), and asserts the exit status and what was recorded: a behind
+outcome appends one finding to ORG_FINDINGS, read back by the belt's
+strict reader over `json.loads`; a green one appends nothing.
+
+The checkpoints are stele v0.24.0's own files, captured from
+ctfe.sigstore.dev/2022 on 2026-11-17 (testdata/SOURCE.md): one at the
+head it verified, one 25,905 entries behind it. A row that needs another
+position edits `next` or `treeHead.treeSize` of a copy in code. The legs'
+reports are the budget run's own, its `stopped` fact edited per row.
+"""
+
+from __future__ import annotations
+
+import json
+import shutil
+import sys
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from belt import decoded
+from belt.rekor_monitor import gain
+from belt.typed_pytest import fixture
+
+if TYPE_CHECKING:
+    import pytest
+
+    from tests import support
+
+COMMAND = "gain"
+
+DATA = Path(__file__).resolve().parent / "testdata"
+
+MESSAGE = "the signer-identity watch is behind"
+NEXT = "Checkpoint next index (everything before it is judged): "
+HEAD = "Checkpoint signed tree head: "
+STARTED = "Entries outstanding when this run started: "
+NOW = "Entries outstanding now: "
+THIS_RUN = "This run: "
+# The budget run's stopped fact, verbatim, and the reason a throttled
+# leg gives.
+BUDGET = (
+    "budget: ctlog: the run's budget ended waiting 5s on ctlog: get-entries"
+    " 448196522..448206521: the log or the transport failed, which says"
+    " nothing about its entries: context deadline exceeded"
+)
+THROTTLED = "throttled: ctlog: HTTP 429 from the log"
+
+# checkpoint-budget.json: next 448,196,522 of a verified 448,222,427.
+BEHIND_NEXT = 448196522
+BEHIND_SIZE = 448222427
+LEGS = 14
+
+
+def checkpoint(name: str = "checkpoint-budget.json", **edits: int) -> dict[str, object]:
+    """Read a captured checkpoint, `next` or `size` edited.
+
+    Returns:
+        The checkpoint document.
+
+    """
+    text = (DATA / name).read_text(encoding="utf-8")
+    doc = decoded.as_object(decoded.load_json(text), name)
+    if "next" in edits:
+        doc["next"] = edits["next"]
+    if "size" in edits:
+        tree_head(doc)["treeSize"] = edits["size"]
+    return doc
+
+
+def tree_head(doc: dict[str, object]) -> dict[str, object]:
+    """Reach a checkpoint's signed tree head, to edit it in place.
+
+    Returns:
+        The `treeHead` object.
+
+    """
+    return decoded.as_object(doc["treeHead"], "treeHead")
+
+
+def report(stopped: str | None) -> dict[str, object]:
+    """Make one leg's report: the budget run's, its `stopped` fact edited.
+
+    Returns:
+        The report; None removes the fact.
+
+    """
+    text = (DATA / "report-budget.json").read_text(encoding="utf-8")
+    doc = decoded.as_object(decoded.load_json(text), "report-budget.json")
+    facts = [
+        decoded.as_object(f, "a fact") for f in decoded.as_array(doc["facts"], "facts")
+    ]
+    kept = [f for f in facts if f["name"] != "stopped"]
+    if stopped is not None:
+        kept.append({"name": "stopped", "value": stopped})
+    doc["facts"] = kept
+    return doc
+
+
+def expect(*text: str) -> list[str]:
+    """Write the lines a row expects, typed.
+
+    Returns:
+        The lines, in order.
+
+    """
+    return list(text)
+
+
+class Rows:
+    """The run's two checkpoints, the legs' reports, and the helper run."""
+
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
+        """Lay out a run that did not advance, every leg stopped by its budget."""
+        self.make_env = env
+        self.dir = Path(str(tmp_path))
+        self.start = self.dir / "run-start.json"
+        self.end = self.dir / "checkpoint.json"
+        self.reports = self.dir / "reports"
+        self.reports.mkdir()
+        self.findings = self.dir / "findings" / "gaining-0.jsonl"
+        write(self.start, checkpoint())
+        write(self.end, checkpoint())
+        self.legs([BUDGET] * LEGS)
+        self.env = self.make_env(ORG_FINDINGS=str(self.findings))
+
+    def legs(self, stops: list[str | None]) -> None:
+        """Lay out one downloaded report per leg, as download-artifact does."""
+        shutil.rmtree(self.reports, ignore_errors=True)
+        self.reports.mkdir()
+        for leg, stopped in enumerate(stops, start=1):
+            write(self.reports / f"watch-report-{leg}" / "report.json", report(stopped))
+
+    def arguments(self, kept: str, legs: int = LEGS) -> list[str]:
+        """Build the gaining job's command line.
+
+        Returns:
+            The arguments after the program name.
+
+        """
+        return [
+            "--start",
+            str(self.start),
+            "--start-kept",
+            kept,
+            "--checkpoint",
+            str(self.end),
+            "--reports",
+            str(self.reports),
+            "--legs",
+            str(legs),
+        ]
+
+    def enter(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        kept: str = "true",
+        legs: int = LEGS,
+    ) -> list[str]:
+        """Set the gaining job's world for the helper's main, in this process.
+
+        Returns:
+            The argv the run is given.
+
+        """
+        argv = self.arguments(kept, legs)
+        # The gaining job runs `belt gain` with no mise task around it,
+        # so the finding writer names the command (#1934).
+        monkeypatch.setattr(sys, "argv", [COMMAND, *argv])
+        for name, value in self.env.items():
+            monkeypatch.setenv(name, value)
+        return argv
+
+    def recorded(self) -> list[dict[str, object]]:
+        """Read back every record the helper appended.
+
+        Returns:
+            Each record, decoded by decoded.load_json (strict `json.loads`).
+
+        """
+        if not self.findings.exists():
+            return []
+        lines = self.findings.read_text(encoding="utf-8").splitlines()
+        return [
+            decoded.as_object(decoded.load_json(line), "a record") for line in lines
+        ]
+
+    def detail(self) -> list[str]:
+        """Read the one behind record's detail, asserting its frame.
+
+        Returns:
+            The detail lines.
+
+        """
+        records = self.recorded()
+        assert len(records) == 1, records
+        record = records[0]
+        frame: dict[str, object] = {
+            k: record[k] for k in ("v", "task", "subject", "message")
+        }
+        expected: dict[str, object] = {
+            "v": 1,
+            "task": COMMAND,
+            "subject": "",
+            "message": MESSAGE,
+        }
+        assert frame == expected
+        return [
+            decoded.as_str(s, "a line")
+            for s in decoded.as_array(record["detail"], "detail")
+        ]
+
+
+@fixture
+def rows_state(tmp_path: Path, env: support.Env) -> Rows:
+    """Give each row its own Rows.
+
+    Returns:
+        The row's Rows.
+
+    """
+    return Rows(tmp_path, env=env)
+
+
+def write(path: Path, doc: dict[str, object]) -> None:
+    """Write a checkpoint or report where the helper reads it."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(doc), encoding="utf-8")
+
+
+def test_did_not_advance(
+    rows_state: Rows, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Not advanced: red, the detail lines in order, the reason counted."""
+    argv = rows_state.enter(monkeypatch)
+    status = gain.main(argv)
+    err = capfd.readouterr().err
+    assert status == 1, err
+    why = "the checkpoint did not advance in this run (next 448196522)"
+    assert rows_state.detail() == expect(
+        f"{NEXT}448,196,522",
+        f"{HEAD}448,222,427 at 2026-11-17T18:32:08Z",
+        f"{STARTED}25,905",
+        f"{NOW}25,905",
+        f"{THIS_RUN}{why}",
+        f"14 legs: {BUDGET}",
+    )
+    assert f"::error::gain: {MESSAGE}\n" in err
+    assert f"  {THIS_RUN}{why}\n" in err
+
+
+def test_advanced_not_gaining(
+    rows_state: Rows, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Advanced, but the log grew faster: red, both counts (green before #1967)."""
+    grown = checkpoint(next=BEHIND_NEXT + 1000, size=BEHIND_SIZE + 5000)
+    write(rows_state.end, grown)
+    argv = rows_state.enter(monkeypatch)
+    status = gain.main(argv)
+    err = capfd.readouterr().err
+    assert status == 1, err
+    lines = rows_state.detail()
+    assert lines[2:4] == expect(f"{STARTED}25,905", f"{NOW}29,905")
+    assert lines[4] == (
+        f"{THIS_RUN}advanced but not gaining: outstanding 25,905 at the start,"
+        " 29,905 now"
+    )
+
+
+def test_advanced_outstanding_equal(
+    rows_state: Rows, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Advanced, outstanding exactly as at the start: not smaller, red."""
+    level = checkpoint(next=BEHIND_NEXT + 1000, size=BEHIND_SIZE + 1000)
+    write(rows_state.end, level)
+    argv = rows_state.enter(monkeypatch)
+    status = gain.main(argv)
+    err = capfd.readouterr().err
+    assert status == 1, err
+    assert rows_state.detail()[3] == f"{NOW}25,905"
+
+
+def test_no_newest_checkpoint(
+    rows_state: Rows, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No checkpoint at all (before the founding run): red, named."""
+    rows_state.start.unlink()
+    rows_state.end.unlink()
+    argv = rows_state.enter(monkeypatch, kept="false")
+    status = gain.main(argv)
+    err = capfd.readouterr().err
+    assert status == 1, err
+    missing = "unknown: no checkpoint file"
+    assert rows_state.detail()[:5] == expect(
+        f"{NEXT}{missing}",
+        f"{HEAD}{missing}",
+        f"{STARTED}none counted: this run founded the checkpoint",
+        f"{NOW}{missing}",
+        f"{THIS_RUN}the newest checkpoint: no checkpoint file",
+    )
+
+
+def test_start_not_kept(
+    rows_state: Rows, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The start job did not finish: red, the count named unknown."""
+    argv = rows_state.enter(monkeypatch, kept="")
+    status = gain.main(argv)
+    err = capfd.readouterr().err
+    assert status == 1, err
+    lines = rows_state.detail()
+    assert lines[2] == f"{STARTED}unknown: the start job did not finish"
+    assert lines[4] == (
+        f"{THIS_RUN}the checkpoint the run started from was not kept"
+        " (the start job did not finish)"
+    )
+
+
+def test_kept_but_not_restored(
+    rows_state: Rows, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The start was kept but its copy is gone: red, named."""
+    rows_state.start.unlink()
+    argv = rows_state.enter(monkeypatch)
+    status = gain.main(argv)
+    err = capfd.readouterr().err
+    assert status == 1, err
+    assert rows_state.detail()[4] == (
+        f"{THIS_RUN}the checkpoint the run started from was not kept"
+        " (no checkpoint file)"
+    )
+
+
+def test_two_reasons_counted(
+    rows_state: Rows, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Three stopped for one reason, two for another: counts 3 and 2."""
+    rows_state.legs([THROTTLED, BUDGET, THROTTLED, BUDGET, THROTTLED])
+    argv = rows_state.enter(monkeypatch, legs=5)
+    status = gain.main(argv)
+    err = capfd.readouterr().err
+    assert status == 1, err
+    assert rows_state.detail()[5:] == expect(
+        f"3 legs: {THROTTLED}", f"2 legs: {BUDGET}"
+    )
+
+
+def test_missing_report_is_counted(
+    rows_state: Rows, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Twelve reports for fourteen legs: two counted as "no report"."""
+    rows_state.legs([THROTTLED] * 12)
+    argv = rows_state.enter(monkeypatch)
+    status = gain.main(argv)
+    err = capfd.readouterr().err
+    assert status == 1, err
+    assert rows_state.detail()[5:] == expect(
+        f"12 legs: {THROTTLED}", "2 legs: no report"
+    )
+
+
+def test_empty_report_is_no_report(
+    rows_state: Rows, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A leg whose stele wrote nothing hands on an empty file: no report."""
+    rows_state.legs([THROTTLED] * 13)
+    empty = rows_state.reports / "watch-report-14" / "report.json"
+    empty.parent.mkdir()
+    empty.write_text("", encoding="utf-8")
+    argv = rows_state.enter(monkeypatch)
+    status = gain.main(argv)
+    err = capfd.readouterr().err
+    assert status == 1, err
+    assert rows_state.detail()[5:] == expect(
+        f"13 legs: {THROTTLED}", "1 leg: no report"
+    )
+
+
+def test_report_without_stopped_fact(
+    rows_state: Rows, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A report with no `stopped` fact: named, never dropped."""
+    rows_state.legs([None] * LEGS)
+    argv = rows_state.enter(monkeypatch)
+    status = gain.main(argv)
+    err = capfd.readouterr().err
+    assert status == 1, err
+    assert rows_state.detail()[5:] == expect("14 legs: no reason given")
+
+
+def test_report_at_the_head(
+    rows_state: Rows, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A leg that judged to the head gave no reason: said so."""
+    rows_state.legs([])
+    at_head = rows_state.reports / "watch-report-1" / "report.json"
+    write(
+        at_head,
+        decoded.as_object(
+            decoded.load_json((DATA / "report-pass.json").read_bytes()), "pass"
+        ),
+    )
+    argv = rows_state.enter(monkeypatch)
+    status = gain.main(argv)
+    err = capfd.readouterr().err
+    assert status == 1, err
+    assert rows_state.detail()[5:] == expect(
+        "13 legs: no report", "1 leg: judged to the head of the log"
+    )
+
+
+def test_unreadable_report(
+    rows_state: Rows, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A report that is not stele's: the reader's own reason."""
+    rows_state.legs([BUDGET] * 13)
+    bad = rows_state.reports / "watch-report-14" / "report.json"
+    bad.parent.mkdir()
+    bad.write_text("[", encoding="utf-8")
+    argv = rows_state.enter(monkeypatch)
+    status = gain.main(argv)
+    err = capfd.readouterr().err
+    assert status == 1, err
+    assert rows_state.detail()[5:] == expect(
+        f"13 legs: {BUDGET}", "1 leg: the report could not be read"
+    )
+
+
+def test_no_reports_directory(
+    rows_state: Rows, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No report reached the job at all: every leg counted."""
+    shutil.rmtree(rows_state.reports)
+    argv = rows_state.enter(monkeypatch)
+    status = gain.main(argv)
+    err = capfd.readouterr().err
+    assert status == 1, err
+    assert rows_state.detail()[5:] == expect("14 legs: no report")
+
+
+def test_gaining(
+    rows_state: Rows, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Advanced, outstanding smaller than at the start: green."""
+    write(rows_state.end, checkpoint(next=BEHIND_NEXT + 10000))
+    argv = rows_state.enter(monkeypatch)
+    status = gain.main(argv)
+    out, err = capfd.readouterr()
+    assert status == 0, err
+    assert rows_state.recorded() == list[dict[str, object]]()
+    assert "gain: green: gaining: outstanding 25,905 at the start, 15,905 now" in out
+
+
+def test_caught_up(
+    rows_state: Rows, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Newest checkpoint at its head: green, whatever the start."""
+    write(rows_state.end, checkpoint("checkpoint-pass.json"))
+    argv = rows_state.enter(monkeypatch, kept="")
+    status = gain.main(argv)
+    out, err = capfd.readouterr()
+    assert status == 0, err
+    assert rows_state.recorded() == list[dict[str, object]]()
+    assert "gain: the newest checkpoint: next index 448221522" in out
+    assert "gain: green: judged to the head of the log" in out
+
+
+def test_founded(
+    rows_state: Rows, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No checkpoint at the start: no earlier count, by name, green."""
+    rows_state.start.unlink()
+    argv = rows_state.enter(monkeypatch, kept="false")
+    status = gain.main(argv)
+    out, err = capfd.readouterr()
+    assert status == 0, err
+    assert rows_state.recorded() == list[dict[str, object]]()
+    assert (
+        "gain: green: advanced to 448196522; no earlier count, this run founded it"
+        in out
+    )
+
+
+def test_a_checkpoint_field_that_is_not_an_integer(
+    rows_state: Rows, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """next, treeSize or timestamp of another kind: named unreadable."""
+    rows: dict[str, tuple[str, object]] = {
+        "next as text": ("next", "448196522"),
+        "next as a boolean": ("next", True),
+        "a tree size with a fraction": ("treeSize", 448222427.5),
+        "a timestamp as text": ("timestamp", "1794940328655"),
+    }
+    for field, value in rows.values():
+        rows_state.findings.unlink(missing_ok=True)
+        doc = checkpoint()
+        if field == "next":
+            doc["next"] = value
+        else:
+            tree_head(doc)[field] = value
+        write(rows_state.end, doc)
+        argv = rows_state.enter(monkeypatch)
+        status = gain.main(argv)
+        err = capfd.readouterr().err
+        assert status == 1, err
+        assert rows_state.detail()[4] == (
+            f"{THIS_RUN}the newest checkpoint: the checkpoint file could not be read"
+        )
+
+
+def test_next_infinity_is_unreadable(
+    rows_state: Rows, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A `next` of Infinity: named unreadable, never a traceback (#1557)."""
+    text = json.dumps(checkpoint())
+    rows_state.end.write_text(
+        text.replace(f'"next": {BEHIND_NEXT}', '"next": Infinity'),
+        encoding="utf-8",
+    )
+    argv = rows_state.enter(monkeypatch)
+    status = gain.main(argv)
+    err = capfd.readouterr().err
+    assert status == 1, err
+    assert (
+        rows_state.detail()[0]
+        == f"{NEXT}unknown: the checkpoint file could not be read"
+    )
+
+
+def test_timestamp_out_of_range_is_unreadable(
+    rows_state: Rows, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A head time past the platform's range: named, never a traceback.
+
+    prop_gain.py's shrunk example (#1557): the start's timestamp
+    9.223372036854776e+21.
+    """
+    doc = checkpoint()
+    tree_head(doc)["timestamp"] = 9.223372036854776e21
+    write(rows_state.start, doc)
+    argv = rows_state.enter(monkeypatch)
+    status = gain.main(argv)
+    err = capfd.readouterr().err
+    assert status == 1, err
+    assert rows_state.detail()[4] == (
+        f"{THIS_RUN}the checkpoint the run started from was not kept"
+        " (the checkpoint file could not be read)"
+    )
+
+
+def test_nested_past_the_parser_is_unreadable(
+    rows_state: Rows, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """JSON nested past the parser's depth: named, never a traceback."""
+    rows_state.end.write_bytes(b"[" * 100_000)
+    argv = rows_state.enter(monkeypatch)
+    status = gain.main(argv)
+    err = capfd.readouterr().err
+    assert status == 1, err
+    assert (
+        rows_state.detail()[4]
+        == f"{THIS_RUN}the newest checkpoint: the checkpoint file could not be read"
+    )
+    assert f"::error::gain: {MESSAGE}\n" in err

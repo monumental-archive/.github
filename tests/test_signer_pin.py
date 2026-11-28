@@ -1,0 +1,463 @@
+"""lint:signer-pin holds the signer identity to one statement (#317).
+
+The signer was stated twice: in every `uses:` line that calls sign.yml,
+and in security/signer.pin, which the verifier read. The two had no
+Renovate manager in common, so a signer bump moved them on separate
+branches, each red against the other until a human joined them, and
+the gate stuck. #317 deleted the file and made the `uses:` lines the
+single statement; the lint now refuses the second copy coming back,
+and any workflow that still reads it.
+
+Each row runs the task's own `run` body, read from mise/config.toml,
+in a planted git tree, with the belt as ORG_BELT_DIR and this
+repository as ORG_CANON_DIR, so the identity it reads is the real one.
+The `Branches` rows call belt/signer_pin.py's `main` in this process,
+one per branch, each message asserted whole (#1911).
+"""
+
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+import pytest
+
+from belt import decoded, signer_pin
+from belt.typed_pytest import fixture
+from tests import support
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+BELT = support.MISE
+CANON = BELT.parent
+BASH = support.tool("bash")
+GIT = support.tool("git")
+SHA = "0123456789abcdef0123456789abcdef01234567"
+OTHER = "fedcba9876543210fedcba9876543210fedcba98"
+TASK = "lint:signer-pin"
+CANON_NAME = "monumental-archive/.github"
+
+
+@fixture
+def _task(as_task: Callable[[str], None]) -> None:
+    """Run every row as the task does, recording no finding."""
+    as_task(TASK)
+
+
+pytestmark = pytest.mark.usefixtures("_task")
+
+
+def body() -> str:
+    """Read lint:signer-pin's run body from the belt's config.
+
+    Returns:
+        The bash the task runs.
+
+    """
+    config = decoded.load_toml((BELT / "config.toml").read_bytes())
+    tasks = decoded.as_object(config["tasks"], "the belt's [tasks]")
+    task = decoded.as_object(tasks["lint:signer-pin"], "lint:signer-pin")
+    return decoded.as_str(task["run"], "lint:signer-pin's run")
+
+
+def signer() -> str:
+    """Read the signer workflow the identity declares.
+
+    Returns:
+        The `signer-workflow` field of security/identity.toml.
+
+    """
+    identity = decoded.load_toml((CANON / "security" / "identity.toml").read_bytes())
+    return decoded.as_str(identity["signer-workflow"], "signer-workflow")
+
+
+def workflow(extra: str = "") -> str:
+    """Render a workflow whose one job calls the signer at SHA.
+
+    Returns:
+        The workflow text.
+
+    """
+    return f"on: push\njobs:\n  sign:\n    uses: {signer()}@{SHA} # main\n" + extra
+
+
+def lint(
+    files: dict[str, str], *, env: support.Env
+) -> subprocess.CompletedProcess[str]:
+    """Run the task's body in a git tree tracking these files.
+
+    Returns:
+        The completed process.
+
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        tree = root / "repo"
+        tree.mkdir()
+        environ = env(
+            root / "home",
+            ORG_BELT_DIR=str(BELT),
+            ORG_CANON_DIR=str(CANON),
+            ORG_PYTHON=sys.executable,
+        )
+        for name, text in files.items():
+            path = tree / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+        subprocess.run([GIT, "init", "-q"], cwd=tree, env=environ, check=True)
+        subprocess.run([GIT, "add", "--", *files], cwd=tree, env=environ, check=True)
+        as_mise = support.task_run("lint:signer-pin", body())
+        return subprocess.run(
+            as_mise.argv,
+            cwd=tree,
+            env=environ | as_mise.env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+
+# The `uses:` lines are the signer identity, and nothing else is (#317).
+def test_the_uses_lines_alone_pass(env: support.Env) -> None:
+    """The baseline: one digest, no pin file."""
+    done = lint({".github/workflows/sign.yml": workflow()}, env=env)
+    assert done.returncode == 0, done.stderr
+    assert f"lint:signer-pin: all signer references agree on {SHA}\n" == done.stdout
+
+
+def test_no_workflows_is_skipped_by_name(env: support.Env) -> None:
+    """No tracked workflow, an untracked one beside: the task skips."""
+    done = lint({"README": "x\n"}, env=env)
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == "lint:signer-pin: no workflows, skipped\n"
+
+
+def test_a_pin_file_beside_them_is_refused(env: support.Env) -> None:
+    """security/signer.pin back, even agreeing, is the second copy."""
+    done = lint(
+        {
+            ".github/workflows/sign.yml": workflow(),
+            "security/signer.pin": f"{SHA}\n",
+        },
+        env=env,
+    )
+    assert done.returncode == 1
+    assert (
+        "lint:signer-pin: security/signer.pin exists — the second copy of the"
+        " signer identity was deleted (#316 finding 2)\n"
+    ) in done.stderr
+
+
+def test_a_workflow_reading_the_pin_is_refused(env: support.Env) -> None:
+    """A step still reading the deleted file is named."""
+    step = "      - run: cat security/signer.pin\n"
+    reader = workflow("  verify:\n    steps:\n" + step)
+    done = lint({".github/workflows/sign.yml": reader}, env=env)
+    assert done.returncode == 1
+    assert (
+        "lint:signer-pin: workflows read security/signer.pin (on a non-comment"
+        " line) but the file is deleted"
+    ) in done.stderr
+
+
+def literal_message(*found: str) -> list[str]:
+    """Build the literal finding's lines.
+
+    Returns:
+        Its lines.
+
+    """
+    return [
+        (
+            "lint:signer-pin: hand-written --signer-digest literal — nothing"
+            " bumps it, so it drifts from the uses: pin the certificate will"
+            " carry (#314):"
+        ),
+        *(f"  {line}" for line in found),
+        f"  derive it instead: uses: {CANON_NAME}/.github/actions/verify-signed",
+        "  ($/.github/actions/verify-signed from a canon-owned workflow)",
+    ]
+
+
+class Branches:
+    """Each branch of the helper, its whole message asserted."""
+
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
+        """Plant an empty repository: the pin is asked of git (#2013)."""
+        self.make_env = env
+        self.tree = tmp_path
+        self.env = self.make_env(MISE_TASK_NAME=TASK)
+        self.git("init", "-q")
+
+    def git(self, *args: str) -> None:
+        """Run git in the planted tree."""
+        subprocess.run([GIT, *args], cwd=self.tree, env=self.env, check=True)
+
+    def plant(self, name: str, text: str | bytes, *, track: bool = True) -> str:
+        """Write one file into the tree, and track it unless told not to.
+
+        Returns:
+            Its path from the tree's top.
+
+        """
+        path = self.tree / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if isinstance(text, bytes):
+            path.write_bytes(text)
+        else:
+            path.write_text(text, encoding="utf-8")
+        if track:
+            self.git("add", "--", name)
+        return name
+
+    def enter(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Stand in the planted tree as the task's main meets it."""
+        for name, value in self.env.items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.chdir(self.tree)
+
+    @staticmethod
+    def signed(*files: str) -> list[str]:
+        """Name these workflows with the real signer.
+
+        Returns:
+            The arguments that check them.
+
+        """
+        return [CANON_NAME, signer(), *files]
+
+
+@fixture
+def branches(tmp_path: Path, env: support.Env) -> Branches:
+    """Give each row its own Branches.
+
+    Returns:
+        The row's Branches.
+
+    """
+    return Branches(tmp_path, env=env)
+
+
+def test_agreeing_references_pass(
+    branches: Branches,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every reference at one digest, across files: ok, the digest named."""
+    one = branches.plant("a.yml", workflow())
+    two = branches.plant("b.yaml", workflow(f"  x:\n    uses: {signer()}@{SHA}\n"))
+    branches.enter(monkeypatch)
+    status = signer_pin.main(branches.signed(one, two))
+    out, err = capfd.readouterr()
+    assert status == 0, err
+    want = [f"lint:signer-pin: all signer references agree on {SHA}"]
+    assert want == out.splitlines()
+    assert not err
+
+
+def test_no_reference_is_skipped_by_name(
+    branches: Branches,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No signer reference, and its dots are literal: skipped."""
+    near = signer().replace(".github", "xgithub", 1)
+    rel = branches.plant("a.yml", f"x: {near}@{SHA}\n")
+    branches.enter(monkeypatch)
+    status = signer_pin.main(branches.signed(rel))
+    out, err = capfd.readouterr()
+    assert status == 0, err
+    want = ["lint:signer-pin: no signer references, skipped"]
+    assert want == out.splitlines()
+
+
+def test_two_digests_are_red(
+    branches: Branches,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two digests, even on one line: each named once, sorted."""
+    line = f"x: {signer()}@{SHA} {signer()}@{OTHER} {signer()}@{SHA}\n"
+    rel = branches.plant("a.yml", line)
+    branches.enter(monkeypatch)
+    status = signer_pin.main(branches.signed(rel))
+    _out, err = capfd.readouterr()
+    assert status == signer_pin.EXIT_RED
+    want = [
+        (
+            "lint:signer-pin: sign.yml pinned at more than one digest — a tree"
+            " states the trusted signer once:"
+        ),
+        f"  {signer()}@{SHA}",
+        f"  {signer()}@{OTHER}",
+        (
+            "  a partial bump left the tree disagreeing with itself; move every"
+            " uses: line together"
+        ),
+    ]
+    assert want == err.splitlines()
+
+
+def test_a_literal_in_one_file_is_red_without_its_name(
+    branches: Branches,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One file searched: grep -n's `line:text`, no file name."""
+    rel = branches.plant("a.yml", f"a\n  run: v --signer-digest  {SHA}")
+    branches.enter(monkeypatch)
+    status = signer_pin.main(branches.signed(rel))
+    _out, err = capfd.readouterr()
+    assert status == signer_pin.EXIT_RED
+    found = f"2:  run: v --signer-digest  {SHA}"
+    assert literal_message(found) == err.splitlines()
+
+
+def test_literals_in_two_files_are_red_with_their_names(
+    branches: Branches,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two files searched: `file:line:text`, ahead of the pin file."""
+    one = branches.plant("a.yml", workflow())
+    two = branches.plant("b.yml", f"x: --signer-digest\t{OTHER}\n")
+    branches.plant(signer_pin.PIN_FILE, f"{SHA}\n")
+    branches.enter(monkeypatch)
+    status = signer_pin.main(branches.signed(one, two))
+    _out, err = capfd.readouterr()
+    assert status == signer_pin.EXIT_RED
+    found = f"{two}:1:x: --signer-digest\t{OTHER}"
+    assert literal_message(found) == err.splitlines()
+
+
+def test_the_pin_file_is_red(
+    branches: Branches,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The pin file back, agreeing or not: red, the split explained."""
+    rel = branches.plant("a.yml", workflow())
+    branches.plant(signer_pin.PIN_FILE, f"{SHA}\n")
+    branches.enter(monkeypatch)
+    status = signer_pin.main(branches.signed(rel))
+    _out, err = capfd.readouterr()
+    assert status == signer_pin.EXIT_RED
+    want = [
+        (
+            "lint:signer-pin: security/signer.pin exists — the second copy of"
+            " the signer identity was deleted (#316 finding 2)"
+        ),
+        (
+            "  the uses: lines are the single statement of the trusted signer;"
+            " verifiers derive from them"
+        ),
+        (
+            "  (a standalone pin file has no Renovate manager the first-party"
+            " group can match, so it"
+        ),
+        (
+            "  bumps on a separate branch that can never pass this lint — the"
+            " two-branch split)"
+        ),
+    ]
+    assert want == err.splitlines()
+
+
+def test_an_untracked_pin_file_is_no_second_copy(
+    branches: Branches,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """On disk and untracked, the pin states nothing: green (#2013)."""
+    rel = branches.plant("a.yml", workflow())
+    branches.plant(signer_pin.PIN_FILE, f"{SHA}\n", track=False)
+    branches.enter(monkeypatch)
+    status = signer_pin.main(branches.signed(rel))
+    out, err = capfd.readouterr()
+    assert status == 0, err
+    want = [f"lint:signer-pin: all signer references agree on {SHA}"]
+    assert want == out.splitlines()
+
+
+def test_readers_are_red_and_named(
+    branches: Branches,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Readers on non-comment lines named; a comment is not a reader."""
+    one = branches.plant("a.yml", workflow("      - run: cat security/signer.pin\n"))
+    prose = branches.plant("b.yml", workflow("# security/signer.pin is gone\n"))
+    two = branches.plant("c.yml", "x: security/signer.pin\n")
+    branches.enter(monkeypatch)
+    status = signer_pin.main(branches.signed(one, prose, two))
+    _out, err = capfd.readouterr()
+    assert status == signer_pin.EXIT_RED
+    want = [
+        (
+            "lint:signer-pin: workflows read security/signer.pin (on a"
+            " non-comment line) but the file is deleted (#316 finding 2) —"
+            f" derive from the sign.yml uses: pin instead:{one}\\n{two}"
+        ),
+    ]
+    assert want == err.splitlines()
+
+
+def test_not_utf8_is_an_error(
+    branches: Branches,
+    capfd: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A workflow that is not UTF-8 is refused by name, exit 2."""
+    rel = branches.plant("bad.yml", b"on: \xff\n")
+    branches.enter(monkeypatch)
+    status = signer_pin.main(branches.signed(rel))
+    _out, err = capfd.readouterr()
+    assert status == signer_pin.EXIT_ERROR
+    assert err.startswith(f"lint:signer-pin: {rel}: cannot be read as UTF-8:"), err
+
+
+@pytest.mark.parametrize(
+    ("argv", "error"),
+    [
+        pytest.param(
+            [],
+            (
+                "belt signer-pin: error: the following arguments are required: "
+                "OWNER/REPO, SIGNER-WORKFLOW, WORKFLOW"
+            ),
+            id="nothing",
+        ),
+        pytest.param(
+            [CANON_NAME, signer()],
+            "belt signer-pin: error: the following arguments are required: WORKFLOW",
+            id="[CANON_NAME, signer()]",
+        ),
+        pytest.param(
+            ["/x", signer(), "a.yml"],
+            "belt signer-pin: error: argument OWNER/REPO: '/x' is not OWNER/REPO",
+            id='["/x", signer(), "a.yml"]',
+        ),
+        pytest.param(
+            ["x/", signer(), "a.yml"],
+            "belt signer-pin: error: argument OWNER/REPO: 'x/' is not OWNER/REPO",
+            id='["x/", signer(), "a.yml"]',
+        ),
+        pytest.param(
+            [CANON_NAME, "", "a.yml"],
+            "belt signer-pin: error: the signer workflow is empty",
+            id='[CANON_NAME, "", "a.yml"]',
+        ),
+    ],
+)
+def test_usage_errors(
+    argv: list[str], error: str, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """No workflow, an empty owner, repo or signer: argparse's exit 2 and its error."""
+    with pytest.raises(SystemExit) as ended:
+        signer_pin.main(argv)
+    out, err = capfd.readouterr()
+    assert (ended.value.code, out) == (2, "")
+    assert err.startswith("usage: belt signer-pin "), err
+    assert err.splitlines()[-1] == error

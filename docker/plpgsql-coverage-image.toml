@@ -1,7 +1,7 @@
 # The database the PL/pgSQL coverage leg's own tests run on (#2163),
 # digest-pinned: the org's database image, which carries plpgsql_check's
 # files and loads it only where a test start preloads it (#2106). The
-# rows in mise/test_plpgsql_coverage.py that need a real Postgres start
+# rows in tests/test_plpgsql_coverage.py that need a real Postgres start
 # this image with the profiler on; every other row answers from a stub
 # psql. The gate pulls it, an approved cost (#2163, 2026-11-28).
 #

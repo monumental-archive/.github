@@ -118,7 +118,7 @@ org__fuzz_measure_rust() {
     org_finding "" "cargo metadata named no target_directory for fuzz/ — nowhere to build into"
     return 1
   fi
-  compiler=$("${ORG_PYTHON:?}" "${belt}/gate_cache_key.py" digest) || return 1
+  compiler=$("${ORG_PYTHON:?}" -I "${belt}/../belt" gate-cache-key digest) || return 1
   build="${dir}/coverage-${compiler}"
   # cargo fuzz coverage writes its profiles under fuzz/coverage/<target>/
   # and offers no other place; a directory this call made is removed

@@ -1,5 +1,5 @@
 # When the gate needs each belt tool (#1410). One row per key in
-# config.toml's [tools]; mise/gate_tools.py reads it against
+# config.toml's [tools]; belt/gate_tools.py reads it against
 # `git ls-files` and the gate job installs what it names.
 #
 #   tasks  the gate tasks that call the tool (`ci`'s lint:* wildcard,
@@ -10,7 +10,7 @@
 #   for    install dependencies: needed whenever one of these is
 #   run    the commands the tool puts on PATH, where not its key's name
 #
-# The rows are derived, not remembered: mise/test_gate_tools.py reads
+# The rows are derived, not remembered: tests/test_gate_tools.py reads
 # every gate task and the belt scripts it runs, and fails when a task
 # calls a tool missing here, or one whose `when` misses a pathspec the
 # task's guard tests. A call before a task's first "skipped" exit, or a
@@ -138,8 +138,8 @@ tasks = [
 ]
 
 [tools.yq]
-# mise/embedded_shell.py reads every run: value through
-# mise/workflow_yaml.py (#1846), one yq call per selected file: the
+# belt/embedded_shell.py reads every run: value through
+# belt/workflow_yaml.py (#1846), one yq call per selected file: the
 # action lints' selection (action-files.sh) and, for the ceiling, the
 # workflow templates. lint:task-shell runs the same helper, so the
 # derivation, which reads a helper whole, counts it too.
@@ -244,9 +244,8 @@ when = []
 [tools."aqua:astral-sh/uv"]
 # No gate task runs it; mise installs every pipx: tool through it.
 for = [
-  "pipx:coverage",
-  "pipx:hypothesis",
   "pipx:mypy",
+  "pipx:pytest",
   "pipx:reuse",
   "pipx:sqlfluff",
   "pipx:yamllint",
@@ -342,11 +341,6 @@ when = ["*.sql", "scaffold/"]
 tasks = ["break:check"]
 when = ["*/Cargo.toml", "Cargo.toml"]
 
-[tools."pipx:cosmic-ray"]
-# audit:mutants only, and pinned lazy: no bare install builds it (#1771).
-tasks = []
-when = []
-
 [tools."cargo:cargo-mutants"]
 # audit:mutants only, and pinned lazy: no bare install builds it (#1355).
 tasks = []
@@ -389,23 +383,29 @@ tasks = ["lint:editorconfig", "lint:scaffold-assembly"]
 tasks = ["lint:scaffold-assembly", "lint:yaml"]
 when = ["*.yaml", "*.yml", "scaffold/"]
 
-[tools."pipx:coverage"]
-# coverage:check's python leg (#1331): the same guard as
-# cargo-llvm-cov's row, so the same wider half.
-tasks = ["coverage:check"]
-when = ["*.py", "Cargo.toml", "go.mod", "package.json"]
-
-[tools."pipx:hypothesis"]
-# test:python-properties (#1332): its guard is a tracked prop_*.py, and
-# git's default pathspec lets `*` cross a slash. lint:python-types
-# (#1604) types a property file against Hypothesis's own venv, so its
-# guard, any tracked .py or .pyi, installs it too.
+[tools."pipx:pytest"]
+# The pytest venv (#2177): coverage:check's python leg reads coverage
+# from it (#1331), with the same guard as cargo-llvm-cov's row, so the
+# same wider half; test:python-properties runs its pytest and
+# Hypothesis (#1332), its guard a tracked prop_*.py, and git's default
+# pathspec lets `*` cross a slash; lint:python-types (#1604) types a
+# property file against this venv, so its guard, any tracked .py or
+# .pyi, installs it too.
 tasks = [
+  "coverage:check",
   "lint:python-types",
   "lint:scaffold-assembly",
   "test:python-properties",
 ]
-when = ["*.py", "*.pyi", "*prop_*.py", "scaffold/"]
+when = [
+  "*.py",
+  "*.pyi",
+  "*prop_*.py",
+  "Cargo.toml",
+  "go.mod",
+  "package.json",
+  "scaffold/",
+]
 
 [tools."pipx:mypy"]
 # lint:python-types (#1604): its guard is a tracked .py or .pyi.

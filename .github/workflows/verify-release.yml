@@ -246,7 +246,7 @@ jobs:
 
       # stele is a belt tool (pinned, locked, provenance verified at lock
       # time). A named list keeps the job cold: only the tools the job
-      # runs (#1333), held to its calls by release/test_job_installs.py —
+      # runs (#1333), held to its calls by tests/release/test_job_installs.py —
       # stele in every mode, and for the source and verdict modes the jq
       # that reads the source verdict's asset name and the cosign `stele
       # emit source-vsa` signs through. One step per job, so bytes mode

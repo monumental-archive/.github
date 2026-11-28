@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Write the generated biome config a repository is checked against. Org
-# canon — the mechanism is mise/biome_config.py; this script hands it
+# canon — the mechanism is belt/biome_config.py; this script hands it
 # what the repository states.
 #
 # ONE derivation site, two callers: lint:biome and fix:biome have to see
@@ -38,6 +38,7 @@ unset org__here
 org_task "lint:biome"
 : "${ORG_PYTHON:?unset — the belt Python (CI: the canon action; local: the belt [env])}"
 : "${ORG_BELT_DIR:?unset — the belt directory (the belt [env] computes it)}"
+: "${ORG_CANON_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
 
 generated=${1:?usage: biome-generate.sh <generated config path>}
 
@@ -59,7 +60,7 @@ for cfg in ${cfgs[@]+"${cfgs[@]}"}; do
   projects+=(--tsconfig "${cfg}" "${resolved}/${n}.json")
 done
 org_tracked ':!vendor/**' "package.json" "*/package.json" \
-  | "${ORG_PYTHON}" "${ORG_BELT_DIR}/biome_config.py" \
+  | "${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt" biome-config \
     --org "${ORG_BELT_DIR}/biome-org.json" \
     --domains "${ORG_BELT_DIR}/biome-domains.tsv" \
     --nursery "${ORG_BELT_DIR}/biome-nursery-domains.tsv" \

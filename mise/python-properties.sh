@@ -5,19 +5,19 @@
 # so the two tasks find the same files the same way (#1332).
 #
 # The subject is every tracked `prop_*.py`. Those files sit beside the
-# `test_*.py` suites they extend and are written as `unittest.TestCase`
-# classes using `@given`; a repository's own `test` task never collects
-# them, so its ordinary suites stay stdlib and run with nothing
-# installed. The gate half also holds that line: a tracked Python file
-# that is not a property file and imports Hypothesis is red by name.
+# `test_*.py` suites they extend and are pytest tests using `@given`
+# (#2177); a repository's own `test` task never collects them, so its
+# ordinary suites run without Hypothesis. The gate half also holds that
+# line: a tracked Python file that is not a property file and imports
+# Hypothesis is red by name.
 #
 # ORG_SHARD=k/n passes through to the runner, which takes that shard
 # of the files listed here (#1631, #2160): the audit runs eight legs,
 # and a repository's shards.toml may shard the gate's.
 #
-# THE INTERPRETER IS THE TOOL VENV'S, asserted to be the belt's pin.
-# The properties import the repository's own helpers, which the gate's
-# `test` runs on `python3`; a Hypothesis venv uv built on an interpreter
+# THE INTERPRETER IS THE PYTEST TOOL VENV'S, asserted to be the belt's
+# pin. The properties import the repository's own helpers, which the
+# gate's `test` runs on `python3`; a venv uv built on an interpreter
 # of its own (the hidden-Python trap the belt's UV_* env exists for)
 # would test them on a different Python, silently.
 set -euo pipefail
@@ -41,7 +41,7 @@ case "${profile}" in
 esac
 # The task this script reports for, where mise named none (#1934).
 org_task "${label}"
-belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
+: "${ORG_CANON_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lefthook run post-checkout)}"
 
 # git's default pathspec lets `*` cross a slash, so this lists every
 # `prop_*.py` at any depth; the loop keeps the ones whose NAME starts
@@ -66,13 +66,13 @@ if [[ ${profile} == gate ]]; then
   ordinary=()
   for f in ${python[@]+"${python[@]}"}; do
     case ${f} in
-      */prop_*.py | prop_*.py | mise/python_properties.py | mise/typed_hypothesis.py) ;;
+      */prop_*.py | prop_*.py | belt/property_profiles.py | belt/typed_hypothesis.py) ;;
       *) ordinary+=("${f}") ;;
     esac
   done
   leaks=""
   if [[ -n ${ordinary[0]+set} ]]; then
-    leaks=$(printf '%s\0' "${ordinary[@]}" | xargs -0 "${ORG_PYTHON}" "${belt}/hypothesis_imports.py")
+    leaks=$(printf '%s\0' "${ordinary[@]}" | xargs -0 "${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt" hypothesis-imports)
   fi
   if [[ -n ${leaks} ]]; then
     detail=()
@@ -86,13 +86,13 @@ if [[ ${profile} == gate ]]; then
   # is typed `Callable[..., None]`, which the belt's mypy reds on every
   # property, and the typed one also refuses a strategy that does not
   # match its parameter.
-  untyped=$(printf '%s\0' "${args[@]}" | xargs -0 "${ORG_PYTHON}" "${belt}/hypothesis_imports.py" --given)
+  untyped=$(printf '%s\0' "${args[@]}" | xargs -0 "${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt" hypothesis-imports --given)
   if [[ -n ${untyped} ]]; then
     detail=()
     while IFS= read -r file; do detail+=("${file}"); done <<< "${untyped}"
     org_finding "" "these take given from hypothesis, not the belt's typed one:" \
       "${detail[@]}" \
-      "write: from typed_hypothesis import given"
+      "write: from belt.typed_hypothesis import given"
     exit 1
   fi
 fi
@@ -101,8 +101,8 @@ fi
 # belt's one check asks both (tool_python.py, #1788). The first call
 # names the interpreter the properties run on; the second, with
 # `--site`, has that venv import the package, and its directory is not
-# needed here.
-venv_python=$("${ORG_PYTHON}" "${belt}/tool_python.py" "${label}" hypothesis) || exit 1
-"${ORG_PYTHON}" "${belt}/tool_python.py" "${label}" hypothesis --site hypothesis > /dev/null || exit 1
+# needed here. The runner is the belt's command, on that interpreter.
+venv_python=$("${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt" tool-python "${label}" pytest) || exit 1
+"${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt" tool-python "${label}" pytest --site hypothesis > /dev/null || exit 1
 
-"${venv_python}" "${belt}/python_properties.py" "${profile}" "${args[@]}"
+"${venv_python}" -I "${ORG_CANON_DIR}/belt" python-properties "${profile}" "${args[@]}"

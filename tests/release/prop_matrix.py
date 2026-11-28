@@ -1,0 +1,230 @@
+"""matrix.py, the release jobs' matrix derivation, on any request.
+
+The properties of `test_matrix.py`'s fixed rows (#1556), over generated
+comma-separated requests, split as the shell split them (spaces removed,
+the first line only, a trailing comma dropped):
+
+- V: spaces anywhere in a request, a trailing comma, a second line and
+  the order of the fields do not change the set of legs planned, and
+  each leg is planned in the order requested — for both per-target
+  classes and for the pgrx majors.
+- V: a field the table does not know is refused by name — the first
+  such field, spaces removed — whatever known fields surround it; for
+  the majors, a field that is not a number is refused by name the same
+  way.
+- R: on any request text at all, `main` plans (exit 0, outputs on
+  stdout) or refuses (exit 1, one `::error::` line, nothing on stdout).
+
+Run by `test:python-properties` under the belt's Hypothesis profile;
+the ordinary suite (`mise run test`) never imports this file.
+"""
+
+import contextlib
+import io
+import sys
+
+import pytest
+from hypothesis import example
+from hypothesis import strategies as st
+
+from belt import decoded
+from belt.release import matrix
+from belt.typed_hypothesis import given
+from belt.workflow_command import escape_data
+
+
+def escaped(text: str) -> str:
+    """Write the caller's text as the writer prints it.
+
+    A character UTF-8 cannot carry becomes its backslash escape
+    (#1984), then the runner's escaping applies (#1660).
+
+    Returns:
+        The text as it appears in the `::error::` line.
+
+    """
+    return escape_data(text.encode("utf-8", "backslashreplace").decode("utf-8"))
+
+
+CLASS = st.sampled_from(sorted(matrix.TARGETS))
+MAJOR = st.integers(10, 99).map(str)
+# A field nobody tabled: no comma, newline or space (those are the
+# splitter's), and not a known target.
+KNOWN = {t for runners, _ in matrix.TARGETS.values() for t in runners}
+
+
+def untabled(field: str) -> bool:
+    """Say whether no class tables the field as a target.
+
+    Returns:
+        True for a field nobody tabled.
+
+    """
+    return field not in KNOWN
+
+
+def not_digits(field: str) -> bool:
+    """Say whether the field is anything but ASCII digits.
+
+    Returns:
+        True for a field that is not a number.
+
+    """
+    return not (field.isascii() and field.isdigit())
+
+
+STRANGER = st.text(
+    st.characters(exclude_characters=", \n"), min_size=1, max_size=12
+).filter(untabled)
+
+
+def spaced(data: st.DataObject, fields: list[str]) -> str:
+    """Write fields as a caller might: spaces anywhere, maybe a tail.
+
+    Returns:
+        The request text.
+
+    """
+    out: list[str] = []
+    for field in fields:
+        text = field
+        cut = data.draw(st.lists(st.integers(0, len(field)), max_size=3))
+        for i in sorted(cut, reverse=True):
+            text = f"{text[:i]}{' ' * data.draw(st.integers(1, 2))}{text[i:]}"
+        out.append(text)
+    text = ",".join(out)
+    if data.draw(st.booleans()):
+        text += ","
+    if data.draw(st.booleans()):
+        text += "\n" + data.draw(st.text(max_size=10))
+    return text
+
+
+def expected(stdout: str) -> list[object]:
+    """Read the `expected=` output.
+
+    Returns:
+        The planned legs, in order.
+
+    """
+    line = next(x for x in stdout.splitlines() if x.startswith("expected="))
+    return decoded.as_array(
+        decoded.load_json(line.removeprefix("expected=")), "expected"
+    )
+
+
+# V: spaces, a tail and order move nothing but the order of legs.
+@given(CLASS, st.data())
+def test_targets(cls: str, data: st.DataObject) -> None:
+    """Every requested target is a leg, in the order requested."""
+    runners = sorted(matrix.TARGETS[cls][0])
+    fields = data.draw(st.permutations(runners)).copy()
+    fields = fields[: data.draw(st.integers(1, len(fields)))]
+    request = spaced(data, fields)
+    stdout, stderr = io.StringIO(), io.StringIO()
+    with (
+        pytest.MonkeyPatch.context() as patched,
+        contextlib.redirect_stdout(stdout),
+        contextlib.redirect_stderr(stderr),
+    ):
+        patched.setenv("MISE_TASK_NAME", "")
+        patched.setenv("ORG_FINDINGS", "")
+        patched.setattr(sys, "argv", ["matrix.py"])
+        code = matrix.main(["targets", cls, request])
+    out, err = stdout.getvalue(), stderr.getvalue()
+    assert code == 0, err
+    assert expected(out) == fields
+
+
+@given(st.lists(MAJOR, min_size=1, max_size=5, unique=True), st.data())
+def test_majors(majors: list[str], data: st.DataObject) -> None:
+    """Every requested major is a cell, in the order requested."""
+    stdout, stderr = io.StringIO(), io.StringIO()
+    with (
+        pytest.MonkeyPatch.context() as patched,
+        contextlib.redirect_stdout(stdout),
+        contextlib.redirect_stderr(stderr),
+    ):
+        patched.setenv("MISE_TASK_NAME", "")
+        patched.setenv("ORG_FINDINGS", "")
+        patched.setattr(sys, "argv", ["matrix.py"])
+        code = matrix.main(["pgrx-images", spaced(data, majors)])
+    out, err = stdout.getvalue(), stderr.getvalue()
+    assert code == 0, err
+    assert expected(out) == majors
+
+
+# V: the first field nobody tabled is the one the refusal names.
+@given(CLASS, STRANGER, st.data())
+@example("go-binary", "linux-386", None)
+def test_unknown_target(cls: str, stranger: str, data: st.DataObject | None) -> None:
+    """Known fields around it do not hide it."""
+    runners, hint = matrix.TARGETS[cls]
+    known = sorted(runners)
+    before = data.draw(st.lists(st.sampled_from(known), max_size=2)) if data else []
+    after = data.draw(st.lists(st.sampled_from(known), max_size=2)) if data else []
+    request = ",".join([*before, stranger, *after])
+    stdout, stderr = io.StringIO(), io.StringIO()
+    with (
+        pytest.MonkeyPatch.context() as patched,
+        contextlib.redirect_stdout(stdout),
+        contextlib.redirect_stderr(stderr),
+    ):
+        patched.setenv("MISE_TASK_NAME", "")
+        patched.setenv("ORG_FINDINGS", "")
+        patched.setattr(sys, "argv", ["matrix.py"])
+        code = matrix.main(["targets", cls, request])
+    out, err = stdout.getvalue(), stderr.getvalue()
+    assert (code, out, err) == (
+        1,
+        "",
+        f"::error::matrix.py: unknown target {escaped(stranger)}; {hint}\n",
+    )
+
+
+@given(STRANGER.filter(not_digits), st.data())
+def test_a_major_that_is_not_a_number(stranger: str, data: st.DataObject) -> None:
+    """A field that is not ASCII digits is refused by name."""
+    before = data.draw(st.lists(MAJOR, max_size=2, unique=True))
+    request = ",".join([*before, stranger])
+    stdout, stderr = io.StringIO(), io.StringIO()
+    with (
+        pytest.MonkeyPatch.context() as patched,
+        contextlib.redirect_stdout(stdout),
+        contextlib.redirect_stderr(stderr),
+    ):
+        patched.setenv("MISE_TASK_NAME", "")
+        patched.setenv("ORG_FINDINGS", "")
+        patched.setattr(sys, "argv", ["matrix.py"])
+        code = matrix.main(["pgrx-images", "--", request])
+    out, err = stdout.getvalue(), stderr.getvalue()
+    assert (code, out, err) == (
+        1,
+        "",
+        f"::error::matrix.py: {escaped(stranger)} is not a PG major\n",
+    )
+
+
+# R: any request text is planned or refused by name.
+@given(st.sampled_from(["go-binary", "rust-binary", None]), st.text())
+def test_plans_or_refuses(cls: str | None, request: str) -> None:
+    """Exit 0 with outputs, or 1 with one error line and no output."""
+    # The workflows pass the caller's text after `--`, so no request is an option.
+    argv = ["targets", cls, "--", request] if cls else ["pgrx-images", "--", request]
+    stdout, stderr = io.StringIO(), io.StringIO()
+    with (
+        pytest.MonkeyPatch.context() as patched,
+        contextlib.redirect_stdout(stdout),
+        contextlib.redirect_stderr(stderr),
+    ):
+        patched.setenv("MISE_TASK_NAME", "")
+        patched.setenv("ORG_FINDINGS", "")
+        patched.setattr(sys, "argv", ["matrix.py"])
+        code = matrix.main(argv)
+    out, err = stdout.getvalue(), stderr.getvalue()
+    if code == 0:
+        assert out.startswith("matrix="), out
+    else:
+        assert (code, out) == (1, "")
+        assert err.startswith("::error::matrix.py: "), err
+        assert err.count("\n") == 1, err

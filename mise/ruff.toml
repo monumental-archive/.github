@@ -83,20 +83,14 @@ ignore = [
 ]
 
 [lint.per-file-ignores]
-# The two rules that encode PYTEST's idiom, off for stdlib unittest
-# files. Same shape as the formatter-incompatible list above — two
-# halves of one tool contradicting each other, not a preference. PT009
-# demands a bare `assert` in place of `self.assertEqual`, and PT027
-# `pytest.raises` in place of `self.assertRaises`; taking either means
-# taking pytest, which is a belt tool the org does not have and refused
-# to add on #364's reasoning (a test framework is a further thing to
-# port). Bare asserts would then trip S101 in turn, so this is the one
-# arrangement that lets `ALL` and `unittest` coexist. Nothing is
-# weakened for a repo that DOES use pytest: neither rule fires on a
-# pytest-style test in the first place. `prop_*.py` is the same idiom:
-# Hypothesis properties written as `unittest.TestCase` classes (#1332).
-"**/test_*.py" = ["PT009", "PT027"]
-"**/prop_*.py" = ["PT009", "PT027"]
+# Tests assert with a bare `assert`, pytest's idiom (#2177), and under
+# `ALL` a bare assert trips S101, which is written for production code
+# that `python -O` would strip it from. A test is never run that way,
+# so S101 is off for test and property files only, and nowhere else.
+# PT009 and PT027 stay on: a `self.assertEqual` or `self.assertRaises`
+# is red, so a suite cannot keep the unittest idiom beside pytest's.
+"**/test_*.py" = ["S101"]
+"**/prop_*.py" = ["S101"]
 
 [format]
 docstring-code-format = true

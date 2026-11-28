@@ -108,7 +108,7 @@ fi
 
 # Reasons first: cheap, and a malformed exclusion is red whatever the run
 # would have found.
-"${ORG_PYTHON}" "${belt}/mutants_rust.py" reasons "${config}"
+"${ORG_PYTHON}" -I "${belt%/*}/belt" mutants-rust reasons "${config}"
 
 skips=$(git grep -n -e 'mutants::skip' -- ':!vendor/**' '*.rs' || true)
 if [[ -n ${skips} ]]; then
@@ -121,7 +121,7 @@ fi
 # The site records, and the exclusion each one stands for: a malformed
 # record is red here, before anything is built, as a reason is.
 records=$(git grep -n -F -e '// mutants:equivalent' -- ':!vendor/**' '*.rs' || true)
-derived=$("${ORG_PYTHON}" "${belt}/mutants_rust.py" records <<< "${records}")
+derived=$("${ORG_PYTHON}" -I "${belt%/*}/belt" mutants-rust records <<< "${records}")
 excludes=()
 while IFS= read -r pattern; do
   if [[ -n ${pattern} ]]; then excludes+=(--exclude-re "${pattern}"); fi
@@ -140,7 +140,7 @@ command -v cargo-mutants > /dev/null || {
 # Assigned one step each: an empty here-string from a failed derivation
 # would read as a workspace with nothing to mutate.
 metadata=$(cargo metadata --no-deps --format-version 1 --locked)
-surface=$("${ORG_PYTHON}" "${belt}/gate_surface.py" <<< "${metadata}")
+surface=$("${ORG_PYTHON}" -I "${belt%/*}/belt" gate-surface <<< "${metadata}")
 
 plain=()
 pgrx=()
@@ -155,7 +155,7 @@ done <<< "${surface}"
 
 # The crate's default major: the one `pgNN` its `default` feature names.
 default_major() {
-  "${ORG_PYTHON}" "${belt}/mutants_rust.py" default-major "$1" <<< "${metadata}"
+  "${ORG_PYTHON}" -I "${belt%/*}/belt" mutants-rust default-major "$1" <<< "${metadata}"
 }
 
 # The status survives the cleanup, and a run that died before its last
@@ -188,7 +188,7 @@ mutate() {
     cargo mutants --list "${sharding[@]}" ${excludes[@]+"${excludes[@]}"} "$@" > "${out}/here.txt"
     here="${out}/here.txt"
   fi
-  "${ORG_PYTHON}" "${belt}/mutants_rust.py" plan --name "${name}" --where "${where}" --dir "${out}" \
+  "${ORG_PYTHON}" -I "${belt%/*}/belt" mutants-rust plan --name "${name}" --where "${where}" --dir "${out}" \
     --all "${out}/all.txt" --listed "${out}/listed.txt" --here "${here}"
   printf 'run\t%s\t%s\n' "${name}" "${out}" >> "${runs}"
   [[ ! -e ${out}/empty ]] || return 0
@@ -251,5 +251,5 @@ if [[ ${#plain[@]} -eq 0 && ${#pgrx[@]} -eq 0 ]]; then
   exit 1
 fi
 
-"${ORG_PYTHON}" "${belt}/mutants_rust.py" verdict "${scratch}" --where "${where}" --shard "${shard:-whole}"
+"${ORG_PYTHON}" -I "${belt%/*}/belt" mutants-rust verdict "${scratch}" --where "${where}" --shard "${shard:-whole}"
 org_done=1

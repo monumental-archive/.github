@@ -14,7 +14,7 @@
 # number is the largest claim in its range: if every merged change
 # declares its own break, the number is right.
 #
-# THE DECLARATION is mise/declared_break.py's: `type!:`/`type(scope)!:`
+# THE DECLARATION is belt/declared_break.py's: `type!:`/`type(scope)!:`
 # in the title, or a BREAKING CHANGE footer in the body read as the
 # release engine reads it (#1924). Declared, nothing is measured.
 #
@@ -72,7 +72,7 @@ manifests=() && org_tracked_read manifests ':!vendor/**' "Cargo.toml" "*/Cargo.t
   exit 0
 }
 
-declaration=$("${ORG_PYTHON}" "${belt}/declared_break.py")
+declaration=$("${ORG_PYTHON}" -I "${belt%/*}/belt" declared-break)
 if [[ ${declaration} == declared ]]; then
   echo "${label}: declared breaking, nothing to hold"
   exit 0

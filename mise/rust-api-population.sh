@@ -35,7 +35,7 @@
 
 org_rust_api_population() {
   local metadata=$1 surface where record spec kind majors _dir crate target library
-  surface=$("${ORG_PYTHON:?unset}" "${ORG_BELT_DIR:?unset}/gate_surface.py" <<< "${metadata}") || return 1
+  surface=$("${ORG_PYTHON:?unset}" -I "${ORG_CANON_DIR:?unset}/belt" gate-surface <<< "${metadata}") || return 1
   where=$(jq -r '
     .workspace_members as $ids
     | .packages[]

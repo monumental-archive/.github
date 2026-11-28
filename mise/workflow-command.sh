@@ -6,13 +6,13 @@
 # that echoed `::error::${x}` with text it did not write (a manifest
 # field, a tag, a file name, a registry's answer) let a newline in that
 # text end the command and begin a line of the text's author's choosing,
-# itself a workflow command if they liked. mise/workflow_command.py is
+# itself a workflow command if they liked. belt/workflow_command.py is
 # the Python writer; this is the same writer for bash, escaping exactly
 # as the runner unescapes: `%`, CR and LF as `%25`, `%0D` and `%0A`.
 #
 # A site whose message is a literal with no expansion may echo it as it
 # is; a site that expands anything goes through these functions
-# (mise/test_workflow_command_sh.py holds that law).
+# (tests/test_workflow_command_sh.py holds that law).
 #
 # Each function prints one line to stdout; redirect the call (`>&2`)
 # for a site that writes to stderr. The message is every argument,

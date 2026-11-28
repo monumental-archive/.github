@@ -108,7 +108,7 @@ own work and adds the task that runs it to its row.
 
 | # | Property | What breaks without it | Mechanism | Issue |
 |---|---|---|---|---|
-| 1 | Fails when any behaviour changes | covered lines nothing checks | mutation testing, weekly | Python: `audit:mutants` (cosmic-ray, in place; adopt with a root `cosmic-ray.toml`) [#1354] [#1771], Rust: `audit:mutants` (cargo-mutants; adopt with `.cargo/mutants.toml`) [#1355], Go: `audit:mutants` (gomu; adopt with an empty root `.gomuignore`) [#1356], TypeScript [#1358] |
+| 1 | Fails when any behaviour changes | covered lines nothing checks | mutation testing, weekly | Python: `audit:mutants` (mutmut, in process; adopt with a root `setup.cfg` `[mutmut]`) [#1354] [#2177], Rust: `audit:mutants` (cargo-mutants; adopt with `.cargo/mutants.toml`) [#1355], Go: `audit:mutants` (gomu; adopt with an empty root `.gomuignore`) [#1356], TypeScript [#1358] |
 | 2 | Takes every decision both ways | the untaken `else` | branch coverage | Python [#1331], Rust [#1359], TypeScript [#1357], PL/pgSQL (`plpgsql-branches`, plpgsql_check in the repository's test stack; adopt with one teardown call per test database, every database's report merged [#2163], branches held over one database [#2169]; its static check of every function body, every check on, rides the same report [#1605]) [#1547], Go: `audit:coverage-go-branches` (gobco's condition coverage, the `go-branches` floor; [tooling verdict][go-branches]) [#1546] |
 | 3 | Varies its inputs | the input nobody wrote down | property and fuzz testing | Rust, Go and Python exist (`lint:fuzz-build`, `audit:fuzz`, `audit:go-fuzz`; Rust proptest in the repository's own `test` task, at the belt's seed in the gate, `lint:rust-properties` and `audit:rust-properties`, [#1930]; Hypothesis in `prop_*.py` files, `test:python-properties` and `audit:python-properties`, [#1332]); TypeScript in `*.prop.test.*` files (fast-check, the repository's own; `test:typescript-properties` and `audit:typescript-properties`, [#1549]) |
 | 4 | Asserts the exact outcome | tests green for the wrong reason | a written rule; property 1's mechanism catches a breach | this section |
@@ -129,7 +129,7 @@ own work and adds the task that runs it to its row.
 [#1547]: https://github.com/monumental-archive/.github/issues/1547
 [#1549]: https://github.com/monumental-archive/.github/issues/1549
 [#1605]: https://github.com/monumental-archive/.github/issues/1605
-[#1771]: https://github.com/monumental-archive/.github/issues/1771
+[#2177]: https://github.com/monumental-archive/.github/issues/2177
 [#1930]: https://github.com/monumental-archive/.github/issues/1930
 [#2163]: https://github.com/monumental-archive/.github/issues/2163
 [#2169]: https://github.com/monumental-archive/.github/issues/2169
@@ -139,16 +139,19 @@ own work and adds the task that runs it to its row.
 
 ### A helper's logic is tested in-process
 
-A helper's logic is tested in the process that runs the tests: its
-tests import it and call its functions, and `main(argv)` where the
-command line is the unit. Running the helper as a script stays, as
-one end-to-end row per helper that holds the script contract: it
-starts, reads its arguments and exits with the documented status,
-which only a real process can show.
+Belt Python is tested in the process that runs the tests, and only
+there ([#2177]): a test imports the module and calls its functions,
+or its `main(argv)` with pytest's `capsys` and `monkeypatch` where the
+command line is the unit. A test starts a process only when the
+process is not belt Python: git, stele, a shell task body, a tool. One
+row, `tests/test_launcher.py`, runs the launcher itself, for what only
+a real process shows: dispatch, `-I` and the exit status.
 
-An in-process row skips an interpreter start, 0.06 s on the runner
-([#1766]), and its failure names the function. Nothing in the gate
-checks it.
+Coverage and mutation see only what runs in the test's process:
+mutmut's map is one baseline run's, and a function only a child
+process reaches is a `no tests` mutant, which `audit:mutants` holds
+red. An in-process row also skips an interpreter start, 0.06 s on the
+runner ([#1766]), and its failure names the function.
 
 [#1766]: https://github.com/monumental-archive/.github/issues/1766
 
@@ -206,12 +209,15 @@ belt's `measured`:
 
 ```toml
 [tasks.test]
-run = '"${ORG_BELT_DIR}/measured" python3 -m unittest discover'
+run = '"${ORG_BELT_DIR}/measured" pytest'
 ```
 
 With a `.coverage-floor` in the tree, `measured` adds the measurement
 to the command's own environment, merging and never replacing, and
-`coverage:check` reads what the run measured after it ends. Without a
+`coverage:check` reads what the run measured after it ends. Python is
+measured in a pytest run (`pytest …` or `python3 -m pytest …`), which
+`measured` runs under coverage from the belt's pytest venv (#2177);
+any other Python command measures no Python. Without a
 floor it runs the command unchanged. A suite that does not run through
 `measured` measures nothing, and a floor whose record names that leg
 is red by name.

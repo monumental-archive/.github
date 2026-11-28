@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # The body of `audit:mutants` (#1336, property 1), delivered so the task
 # body stays under lint:task-shell's ceiling (#1544). Org canon. One leg
-# per language, each its own delivered file (mise/mutants-<language>.sh),
-# so a language is ONE added `leg` line below; mise/test_task_contract.py
-# holds every leg file to exactly one line here.
+# per language, each its own delivered file (mise/mutants-<language>.sh,
+# or the belt's `mutants-<language>` command where the leg is Python's
+# own, #2177), so a language is ONE added `leg` line below;
+# tests/test_task_contract.py holds every leg to exactly one line here.
 #
 # EVERY LEG RUNS, THEN THE RED ONES ARE NAMED: one language's survivors
 # must not hide another's. Unset, MUTANTS_LEG runs every leg; set, it
@@ -26,14 +27,19 @@ ran=""
 leg() {
   [[ -z ${MUTANTS_LEG:-} || ${MUTANTS_LEG} == "$1" ]] || return 0
   ran+=" $1"
-  bash "${belt}/mutants-$1.sh" || red+=" $1"
+  if [[ -f ${belt}/mutants-$1.sh ]]; then
+    bash "${belt}/mutants-$1.sh" || red+=" $1"
+  else
+    "${ORG_PYTHON:?unset — the belt Python}" -I "${ORG_CANON_DIR:?unset — no belt}/belt" \
+      "mutants-$1" || red+=" $1"
+  fi
 }
 leg go
 leg python
 leg rust
 leg typescript
 if [[ -n ${MUTANTS_LEG:-} && -z ${ran} ]]; then
-  org_finding "" "MUTANTS_LEG='${MUTANTS_LEG}' names no leg (mise/mutants-<language>.sh)"
+  org_finding "" "MUTANTS_LEG='${MUTANTS_LEG}' names no leg (mise/mutants-<language>.sh or belt mutants-<language>)"
   exit 1
 fi
 if [[ -n ${red} ]]; then

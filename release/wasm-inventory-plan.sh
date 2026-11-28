@@ -9,7 +9,7 @@
 #
 # Run from the caller's checkout. Inputs: UNTRUSTED_CRATE_DIR, and
 # PLAN_DOC_PREFIX, which the step states where the producer join
-# (mise/plan_producers.py) reads it. Writes plan/plan.json and one
+# (belt/plan_producers.py) reads it. Writes plan/plan.json and one
 # notice per planned inventory.
 set -euo pipefail
 : "${UNTRUSTED_CRATE_DIR:?}"

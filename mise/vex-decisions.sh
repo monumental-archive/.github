@@ -33,7 +33,7 @@ here="$(dirname "${BASH_SOURCE[0]}")"
 files=()
 if [[ -n ${BEFORE:-} ]] && git cat-file -e "${BEFORE}^{commit}" 2> /dev/null; then
   mode=() none="no changed statements"
-  list=$("${ORG_PYTHON}" "${here}/vex_one_per_merge.py" --list "${BEFORE}..")
+  list=$("${ORG_PYTHON}" -I "${here}/../belt" vex-one-per-merge --list "${BEFORE}..")
   while IFS= read -r file; do
     [[ -n ${file} ]] && files+=("${file}")
   done <<< "${list}"

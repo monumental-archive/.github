@@ -1,0 +1,570 @@
+"""The verdict half of audit:mutants' Go leg (#1356), called by mutants-go.sh.
+
+The shell half runs gomu, one file at a time, from a scratch directory
+holding what this reads:
+
+- `all.tsv`: every package — import path, directory, its Go files —
+  and `shard.tsv`, the packages this shard mutated;
+- `files.tsv`: the mutated population, import path and absolute file,
+  generated files already removed;
+- `cover.out`: the shard's packages' own coverage profile (`set` mode);
+- `reports/*.json`: the JSON report of gomu v0.3.0, one per file;
+- `gomu.log`: gomu's console output, and `runs.log`: a line per file
+  whose run failed outright;
+- `records.txt`: `git grep -n` of every `//mutants:equivalent` comment.
+
+Each gomu result is classed by its `status`:
+
+- KILLED and TIMED_OUT are killed;
+- NOT_VIABLE is counted on its own and is never killed: gomu's compile
+  check rejected the mutant, so no test was asked anything. It counts
+  only when the error is the compiler's, naming a `.go` file and line;
+  any other failure of the check (a shim, a missing toolchain) was not a
+  judgement of the mutant, and is red as not judged;
+- SURVIVED on a line no test executes is NOT COVERED — gomu takes no
+  coverage, so this is where that verdict is made, keyed on the
+  report's file and line against the profile's executed blocks;
+- SURVIVED on a covered line is explained by a record at its site of
+  its type, or is a survivor;
+- ERROR, or any other status, was not judged, and is red.
+
+A RECORD is `//mutants:equivalent <type> <reason>`, either trailing the
+mutant's line (code before the comment: its site is that line) or alone
+on the line directly above it (its site is the next line). It explains
+every covered survivor of its type at its site. It is red, by name, when
+it gives no type or no reason, when it is in no mutated file, and — in
+the shard that mutated its file — when the survivor at its site is of
+another type, when that survivor is NOT COVERED (untested is not
+equivalent: only a test fixes it), or when nothing survives there at all
+(stale: the mutant is now killed, or gone).
+
+EXCLUDED IS THE WHOLE POPULATION'S: the number of well-formed records in
+mutated files, the same figure in every shard, because the totals across
+shards take it once (mutation-totals.sh refuses shards that disagree).
+Each record is held to its site in the one shard that mutated its file.
+
+Prints each survivor and one summary line; writes `go.tsv` for the
+totals when a summary directory is given and the run judged everything
+it was given. Exit 1 on any red.
+
+`build-go` is the shell half's other question, asked before gomu runs:
+is the Go gomu was built with (`go version -m`) older than the `go` it
+runs under? gomu reads export data with the importer it was built with,
+so an older build cannot read the newer toolchain's (the v0.3.0 release
+binary, built with Go 1.24.13, panicked on every import against Go
+1.27). An unreadable build version is refused the same way. Prints the
+refusal and exits 1, or exits 0 silently.
+"""
+
+import argparse
+import re
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from belt import decoded, findings, typed_std
+
+# The leg's language: the subject of its findings, as the shell half's
+# label names it (`audit:mutants: go`).
+LANGUAGE = "go"
+
+MARK = "//mutants:equivalent"
+KILLED = frozenset({"KILLED", "TIMED_OUT"})
+SKIPPED = ("(error:", "(execution error:")
+# A Go release as `go version` spells it: go1.27, go1.27.4, go1.28rc1.
+GO_RELEASE = re.compile(r"go(\d+)\.(\d+)(?:\.(\d+))?")
+# A compiler error names its place: `file.go:LINE:COL: message`.
+COMPILER = re.compile(r"\.go:\d+:\d+: ")
+
+
+@dataclass
+class Record:
+    """One `//mutants:equivalent` comment."""
+
+    path: str
+    line: int
+    site: int
+    kind: str
+    reason: str
+    used: bool = False
+
+    @property
+    def sound(self) -> bool:
+        """Whether it names a type and gives a reason."""
+        return bool(self.kind and self.reason)
+
+    @property
+    def spelled(self) -> str:
+        """Its location and mark, as every message about it begins."""
+        return f"{self.path}:{self.line}: {MARK}"
+
+
+@dataclass
+class Verdict:
+    """What one shard found."""
+
+    killed: int = 0
+    not_viable: int = 0
+    total: int = 0
+    survived: list[str] = field(default_factory=list)
+    not_covered: list[str] = field(default_factory=list)
+    red: list[str] = field(default_factory=list)
+    unjudged: list[str] = field(default_factory=list)
+    # (file, line) to each survivor there: its type, and whether a test runs it.
+    at_site: dict[tuple[str, int], list[tuple[str, bool]]] = field(default_factory=dict)
+
+    @property
+    def green(self) -> bool:
+        """Whether nothing is unexplained."""
+        return not (self.survived or self.not_covered or self.red or self.unjudged)
+
+
+@dataclass
+class Shard:
+    """The scratch directory's tables, read once."""
+
+    root: str
+    packages: dict[str, str]
+    population: set[str]
+    mine: set[str]
+    covered: dict[str, list[range]]
+    records: list[Record]
+
+
+@dataclass(frozen=True)
+class Mutant:
+    """One mutant as gomu's report names it."""
+
+    # The absolute file, as gomu spells it.
+    file: str
+    line: int
+    column: int
+    kind: str
+
+
+@dataclass(frozen=True)
+class Result:
+    """One mutant's result: its status and the check's error, if any."""
+
+    mutant: Mutant
+    status: str
+    error: str
+
+
+@dataclass(frozen=True)
+class Report:
+    """One of gomu's JSON reports: the mutants it counted, and each result."""
+
+    counted: int
+    results: tuple[Result, ...]
+
+
+class Args(argparse.Namespace):
+    """The command's arguments, each a string: `judge`'s, or `build-go`'s."""
+
+    mode: str
+    label: str
+    where: str
+    shard: str
+    root: str
+    scratch: str
+    summary_dir: str
+    gomu: str
+    built: str
+    running: str
+
+
+def parse_args(argv: list[str]) -> Args:
+    """Read the shell half's arguments.
+
+    Returns:
+        The parsed arguments.
+
+    """
+    parser = argparse.ArgumentParser(
+        prog="belt mutants-go", description="Judge a shard of Go mutants"
+    )
+    modes = parser.add_subparsers(dest="mode", required=True)
+    judging = modes.add_parser("judge", help="judge one shard's reports")
+    for name in ("label", "where", "shard", "root", "scratch", "summary-dir"):
+        judging.add_argument(f"--{name}", required=True)
+    building = modes.add_parser("build-go", help="refuse a gomu built by an older Go")
+    for name in ("label", "gomu", "built", "running"):
+        building.add_argument(f"--{name}", required=True)
+    return parser.parse_args(argv, namespace=Args())
+
+
+def read_result(item: object, where: str) -> Result:
+    """Decode one entry of a report's `results`.
+
+    Returns:
+        The result; a missing or empty `error` reads as "".
+
+    """
+    result = decoded.as_object(item, where)
+    mutant = decoded.as_object(result.get("mutant"), f"{where}.mutant")
+    error = result.get("error")
+    return Result(
+        mutant=Mutant(
+            file=decoded.as_str(mutant.get("filePath"), f"{where}.mutant.filePath"),
+            line=decoded.as_int(mutant.get("line"), f"{where}.mutant.line"),
+            column=decoded.as_int(mutant.get("column"), f"{where}.mutant.column"),
+            kind=decoded.as_str(mutant.get("type"), f"{where}.mutant.type"),
+        ),
+        status=decoded.as_str(result.get("status"), f"{where}.status"),
+        error=decoded.as_str(error, f"{where}.error") if error else "",
+    )
+
+
+def read_report(source: bytes) -> Report:
+    """Decode one of gomu's JSON reports.
+
+    A missing or empty `results` is none, and a missing `totalMutants`
+    is 0, as gomu leaves them out; any field of another shape is refused
+    by name, through `decoded`'s readers.
+
+    Returns:
+        The report.
+
+    """
+    data = decoded.as_object(decoded.load_json(source), "the report")
+    results = data.get("results")
+    counted = data.get("totalMutants", 0)
+    return Report(
+        counted=decoded.as_int(counted, "totalMutants"),
+        results=tuple(
+            read_result(item, f"results[{index}]")
+            for index, item in enumerate(
+                decoded.as_array(results, "results") if results else []
+            )
+        ),
+    )
+
+
+def rows(path: Path) -> list[list[str]]:
+    """Read a tab-separated file.
+
+    Returns:
+        Its non-empty lines, split on tabs.
+
+    """
+    text = path.read_text(encoding="utf-8")
+    return [line.split("\t") for line in text.splitlines() if line]
+
+
+def relative(path: str, root: str) -> str:
+    """Spell a path from the repository root.
+
+    Returns:
+        The path relative to `root`; the root itself is "".
+
+    """
+    if path == root:
+        return ""
+    return path.removeprefix(root.rstrip("/") + "/")
+
+
+def read_records(scratch: Path) -> list[Record]:
+    """Parse every `//mutants:equivalent` comment `git grep -n` found.
+
+    Returns:
+        One record per comment, malformed ones included.
+
+    """
+    found = []
+    text = (scratch / "records.txt").read_text(encoding="utf-8")
+    for hit in text.splitlines():
+        path, number, content = hit.split(":", 2)
+        before, _, after = content.partition(MARK)
+        words = after.split(None, 1)
+        line = int(number)
+        found.append(
+            Record(
+                path=path,
+                line=line,
+                site=line if before.strip() else line + 1,
+                kind=words[0] if words else "",
+                reason=words[1].strip() if len(words) > 1 else "",
+            )
+        )
+    return found
+
+
+def read_coverage(scratch: Path, packages: dict[str, str]) -> dict[str, list[range]]:
+    """Read the profile's executed blocks, keyed by file from the root.
+
+    `packages` maps an import path to its directory from the root; the
+    profile names a file by its import path. A block with count 0 was
+    not executed and is dropped.
+
+    Returns:
+        File to the line ranges of blocks a test executed.
+
+    """
+    covered: dict[str, list[range]] = {}
+    text = (scratch / "cover.out").read_text(encoding="utf-8")
+    for entry in text.splitlines():
+        if not entry or entry.startswith("mode:"):
+            continue
+        spec, _statements, count = entry.rsplit(" ", 2)
+        name, span = spec.rsplit(":", 1)
+        package, _, base = name.rpartition("/")
+        directory = packages.get(package)
+        if int(count) == 0 or directory is None:
+            continue
+        start, end = span.split(",")
+        path = f"{directory}/{base}" if directory else base
+        block = range(int(start.split(".")[0]), int(end.split(".")[0]) + 1)
+        covered.setdefault(path, []).append(block)
+    return covered
+
+
+def read_shard(args: Args) -> Shard:
+    """Read the scratch directory's tables.
+
+    Returns:
+        The shard's population, coverage and records.
+
+    """
+    scratch = Path(args.scratch)
+    root = args.root
+    packages = {r[0]: relative(r[1], root) for r in rows(scratch / "all.tsv")}
+    mutated = {s[0] for s in rows(scratch / "shard.tsv")}
+    files = rows(scratch / "files.tsv")
+    return Shard(
+        root=root,
+        packages=packages,
+        population={relative(r[1], root) for r in files},
+        mine={relative(r[1], root) for r in files if r[0] in mutated},
+        covered=read_coverage(scratch, packages),
+        records=read_records(scratch),
+    )
+
+
+def class_survivor(shard: Shard, verdict: Verdict, mutant: Mutant, site: str) -> None:
+    """Class one SURVIVED mutant: not covered, explained, or a survivor."""
+    path = relative(mutant.file, shard.root)
+    line = mutant.line
+    runs = any(line in block for block in shard.covered.get(path, []))
+    verdict.at_site.setdefault((path, line), []).append((mutant.kind, runs))
+    if not runs:
+        verdict.not_covered.append(site)
+        return
+    matched = [
+        r
+        for r in shard.records
+        if r.sound and (r.path, r.site, r.kind) == (path, line, mutant.kind)
+    ]
+    for r in matched:
+        r.used = True
+    if not matched:
+        verdict.survived.append(site)
+
+
+def class_report(shard: Shard, verdict: Verdict, report: Path) -> None:
+    """Class every result in one of gomu's JSON reports.
+
+    A report that is not gomu's shape is not judged, by name.
+    """
+    try:
+        data = read_report(report.read_bytes())
+    except decoded.UndecodableError as err:
+        verdict.unjudged.append(f"{report.name}: {err}")
+        return
+    results = data.results
+    counted = data.counted
+    if counted != len(results):
+        verdict.unjudged.append(
+            f"{report.name}: gomu counted {counted} mutants and reported {len(results)}"
+        )
+    for result in results:
+        verdict.total += 1
+        mutant = result.mutant
+        path = relative(mutant.file, shard.root)
+        site = f"{path}:{mutant.line}:{mutant.column} {mutant.kind}"
+        status = result.status
+        if status in KILLED:
+            verdict.killed += 1
+        elif status == "NOT_VIABLE" and COMPILER.search(result.error):
+            verdict.not_viable += 1
+        elif status == "NOT_VIABLE":
+            reason = (result.error or "no error given").splitlines()[0]
+            verdict.unjudged.append(f"NOT_VIABLE: {site} — not the compiler: {reason}")
+        elif status == "SURVIVED":
+            class_survivor(shard, verdict, mutant, site)
+        else:
+            verdict.unjudged.append(f"{status}: {site} — gomu did not judge it")
+
+
+def malformed(shard: Shard) -> list[str]:
+    """Hold every record to its form, in every shard alike.
+
+    Returns:
+        One message per record that cannot explain anything.
+
+    """
+    found = []
+    for r in shard.records:
+        if r.path not in shard.population:
+            found.append(f"{r.spelled} is in no mutated file")
+        elif not r.kind:
+            found.append(f"{r.spelled} names no mutator")
+        elif not r.reason:
+            found.append(f"{r.spelled} {r.kind} gives no reason")
+    return found
+
+
+def unmatched(shard: Shard, verdict: Verdict) -> list[str]:
+    """Hold each sound record in this shard's files to its site.
+
+    Returns:
+        One message per record that explained nothing here.
+
+    """
+    found = []
+    for r in shard.records:
+        if r.used or not r.sound or r.path not in shard.mine:
+            continue
+        here = verdict.at_site.get((r.path, r.site), [])
+        named = f"{r.spelled} {r.kind}"
+        if any(kind == r.kind and not runs for kind, runs in here):
+            found.append(
+                f"{named} records a mutant no test runs — untested is not"
+                " equivalent; only a test fixes it"
+            )
+        elif here:
+            kinds = ", ".join(sorted({kind for kind, _ in here}))
+            found.append(f"{named} names {r.kind}, but what survives here is {kinds}")
+        else:
+            found.append(
+                f"{named} is stale: nothing survives at line {r.site} — delete it"
+            )
+    return found
+
+
+def report(args: Args, verdict: Verdict, excluded: int) -> None:
+    """Print the survivors, the reds and the summary line; write go.tsv."""
+    label = args.label
+    for site in verdict.survived:
+        print(f"{label}: survived: {site}")
+    for site in verdict.not_covered:
+        print(f"{label}: not covered: {site}")
+    for line in verdict.unjudged:
+        findings.finding(LANGUAGE, f"not judged: {line}")
+    for line in verdict.red:
+        findings.finding(LANGUAGE, line)
+    shard = args.where.removeprefix(", ")
+    scope = f" {shard}:" if shard else ""
+    print(
+        f"{label}:{scope} {verdict.total} mutants, {verdict.killed} killed,"
+        f" {len(verdict.survived)} survived, {len(verdict.not_covered)} not covered,"
+        f" {verdict.not_viable} not viable, {excluded} excluded"
+    )
+    if args.summary_dir and not verdict.unjudged:
+        red = len(verdict.survived) + len(verdict.not_covered)
+        Path(args.summary_dir).mkdir(parents=True, exist_ok=True)
+        Path(args.summary_dir, "go.tsv").write_text(
+            f"{args.shard}\t{verdict.total}\t{verdict.killed}\t{red}"
+            f"\t{excluded}\twhole\n",
+            encoding="utf-8",
+        )
+    if not verdict.green:
+        findings.finding(
+            LANGUAGE,
+            "red — delete code a survivor proves redundant, kill each survivor"
+            " with an assertion, add a test for each line no test runs, or"
+            " record an equivalent mutant at its site:"
+            f" {MARK} <type> <reason>",
+        )
+
+
+def release(spelled: str) -> tuple[int, int, int] | None:
+    """Read a Go release from `go version`'s spelling.
+
+    Returns:
+        (major, minor, patch), a missing patch as 0; None when unreadable.
+
+    """
+    found = GO_RELEASE.fullmatch(spelled) or GO_RELEASE.match(spelled)
+    if not found:
+        return None
+    major, minor = typed_std.group(found, 1), typed_std.group(found, 2)
+    patch = typed_std.group(found, 3)
+    return int(major or 0), int(minor or 0), int(patch or 0)
+
+
+def older(built: str, running: str) -> bool:
+    """Whether gomu's build Go cannot read the running Go's export data.
+
+    Returns:
+        True when `built` is unreadable or an earlier release than
+        `running`; False when equal or later.
+
+    """
+    have, need = release(built), release(running)
+    return have is None or (need is not None and have < need)
+
+
+def build_go(args: Args) -> int:
+    """Refuse a gomu built with an older Go than the toolchain it runs under.
+
+    Returns:
+        0 when it may run, 1 after printing the refusal.
+
+    """
+    if not older(args.built, args.running):
+        return 0
+    spelled = args.built or "an unreadable Go"
+    findings.finding(
+        LANGUAGE,
+        f"{args.gomu} was built with {spelled}, older than the"
+        f" {args.running} it runs under —",
+        [
+            (
+                "it cannot read this toolchain's export data; rebuild it with the"
+                " repository's go:"
+            ),
+            "  mise install go:github.com/sivchari/gomu/cmd/gomu",
+        ],
+    )
+    return 1
+
+
+def report_number(path: Path) -> int:
+    """Order the reports as the shell half numbered them.
+
+    Returns:
+        The number the report is named by.
+
+    """
+    return int(path.stem)
+
+
+def main(argv: list[str]) -> int:
+    """Judge one shard, or answer `build-go`.
+
+    Returns:
+        0 when nothing is unexplained, 1 otherwise.
+
+    """
+    args = parse_args(argv)
+    if args.mode == "build-go":
+        return build_go(args)
+    scratch = Path(args.scratch)
+    shard = read_shard(args)
+    verdict = Verdict()
+
+    log = (scratch / "gomu.log").read_text(encoding="utf-8")
+    verdict.unjudged.extend(
+        line.strip() for line in log.splitlines() if any(s in line for s in SKIPPED)
+    )
+    runs = (scratch / "runs.log").read_text(encoding="utf-8")
+    verdict.unjudged.extend(runs.splitlines())
+
+    verdict.red.extend(malformed(shard))
+    for path in sorted((scratch / "reports").glob("*.json"), key=report_number):
+        class_report(shard, verdict, path)
+    verdict.red.extend(unmatched(shard, verdict))
+
+    excluded = sum(1 for r in shard.records if r.sound and r.path in shard.population)
+    report(args, verdict, excluded)
+    return 0 if verdict.green else 1

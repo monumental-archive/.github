@@ -63,7 +63,7 @@ case "${1:-}" in
         "(branch coverage needs the dated nightly)"
     fi
     ! org_tracked_has go.mod || legs+=$'\n'$("${belt}/coverage-go-branches.sh" "${label}")
-    "${ORG_PYTHON}" "${belt}/coverage_floor.py" write \
+    "${ORG_PYTHON}" -I "${belt%/*}/belt" coverage-floor write \
       --provenance "${label}" --adopt <<< "${legs}"
     ;;
   *)

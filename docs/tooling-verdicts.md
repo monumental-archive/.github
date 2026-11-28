@@ -32,7 +32,7 @@ honestly blocked on.
 | cargo-llvm-cov + `.coverage-floor` ratchet | Derived coverage floor in the gate (`coverage:check`), measured on the repository's own `test` run through `measured` and rendered by `cargo llvm-cov report` (#1653), re-derived by the release path, codecov badge feed off-gate; Rust branches as a floor of their own (`rust-branches`, #1359), measured with `--branch` on the repo's dated nightly and held by the Monday audit (`audit:coverage-branches`), never the gate |
 | coverage.py (`pipx:` backend via aqua-backed uv) | The `python` and `python-branches` legs of the same ratchet (#1331): the repository's own `test` task run under coverage, child processes included, statements and branches |
 | vitest's own coverage provider (the repository's, not the belt's) | The `typescript` and `typescript-branches` legs of the same ratchet (#1357): the repository's vitest under the provider its lockfile pins, lines and branches; the belt pins neither |
-| plpgsql_check (present in the org's database image, loaded only where a consumer's tests start the image with it preloaded; the belt pins nothing) | The `plpgsql` and `plpgsql-branches` legs of the same ratchet (#1547): `mise/plpgsql_coverage.py` reads the profiler's statement and branch coverage in each test database's teardown, through the repository's own `psql` or the client the call names, and merges every database's report (#2163) |
+| plpgsql_check (present in the org's database image, loaded only where a consumer's tests start the image with it preloaded; the belt pins nothing) | The `plpgsql` and `plpgsql-branches` legs of the same ratchet (#1547): `belt/plpgsql_coverage.py` reads the profiler's statement and branch coverage in each test database's teardown, through the repository's own `psql` or the client the call names, and merges every database's report (#2163) |
 | Hypothesis (`pipx:` backend via aqua-backed uv) | Python property testing (#1332): every tracked `prop_*.py`, fixed seed in the gate (`test:python-properties`), random seed and wider bounds on the Monday cron (`audit:python-properties`) |
 | fast-check (the repository's, not the belt's) | TypeScript property testing (#1549): every tracked `*.prop.test.{ts,tsx,mts,cts}` under the repository's own vitest, fixed seed in the gate (`test:typescript-properties`), random seed and 10,000 runs on the Monday cron (`audit:typescript-properties`), no per-test time limit in either (#2144); `lint:typescript-properties` refuses an import outside a property file, a restated seed or run count, and a time a property sets itself; the belt pins neither tool |
 | proptest (the repository's, not the belt's) | Rust property testing (#1930): the repository's own `test` task draws from seed 1 in the gate (the belt's `[env]` sets `PROPTEST_RNG_SEED`), and from a fresh printed seed on the nightly run (`audit:rust-properties`); `lint:rust-properties` refuses a locked proptest below 1.7.0, which ignores the variable; the belt pins nothing |
@@ -40,7 +40,7 @@ honestly blocked on.
 | reuse (`pipx:` backend via aqua-backed uv) | REUSE-spec compliance in the gate (`lint:reuse`), pre-registration |
 | uv (`aqua:astral-sh/uv`) | The installer behind every `pipx:` belt tool; carries the org's release-age floor into Python |
 | jq (`aqua:jqlang/jq`) | JSON on the command line for eleven belt tasks, one of them in the gate |
-| yq (`aqua:mikefarah/yq`) | The one YAML parser the canon's laws read a workflow or an action through, by `mise/workflow_yaml.py` (#1840) |
+| yq (`aqua:mikefarah/yq`) | The one YAML parser the canon's laws read a workflow or an action through, by `belt/workflow_yaml.py` (#1840) |
 | pinact (`aqua:suzuki-shunsuke/pinact`) | The version-comment half of the pinning convention: `lint:action-pins` offline, `audit:action-pins` online, `fix:actions` |
 | lychee (`aqua:lycheeverse/lychee`) | Link liveness over tracked markdown (`audit:links` — network, Monday cron, per repo since #681), org policy in the canon's `mise/lychee.toml` |
 | biome (`aqua:biomejs/biome`) | JS/TS/JSON lint + format + assist in the gate (`lint:biome`) at `preset: "all"`, nursery included, domains from the repo's own `biome.json` and applied to nursery too (`lint:biome-domains`). **On this tool the pinned binary is the authority and the published docs are the cross-check, not the other way round:** biome's own configuration reference documents neither `linter.domains` nor `assist.actions.preset`, both of which exist in the 2.5.7 schema and both of which the org's config uses. Measure, then cite. Two stable rules are excluded — `complexity/useLiteralKeys`, a mechanical contradiction with the org's `noPropertyAccessFromIndexSignature` tsc dial (#759), the same class as clippy's `arbitrary_source_item_ordering` in #701, and `style/noTernary`, whose remedy does not exist in expression position (#767). Four more are off for TEST FILES only, through the org's one `overrides` entry — `style/noMagicNumbers` and `performance/useTopLevelRegex`, because in a test the literal IS the specification (#783), `complexity/noExcessiveLinesPerFunction`, because a `describe` callback's span is the sum of its tests (#804), and `performance/noAwaitInLoops` — 2026-11-26 (#2117): the override holds the rules that judge production cost or shape, and a test's steps are ordered on purpose; outside tests the rule stays on; the glob list is closed, measured from every JS/TS file in the org, and a repository cannot widen it. One nursery rule is off beside them — `nursery/noConditionalExpect`, 8 findings and 8 false positives on its first real tree, one of them in production code, with an expiry at [biomejs/biome#11455](https://github.com/biomejs/biome/issues/11455) (#788). |
@@ -58,16 +58,16 @@ honestly blocked on.
 | cargo-machete (`github:` backend, upstream sha256s) | Unused Rust dependencies in the gate (`lint:machete`, static) — proven first in a consumer |
 | cargo-semver-checks (`github:` backend, TOFU checksum) | Public API vs published baseline (`audit:semver` — network, Monday cron, per repo), and vs a pull request's base (`break:check`, the gate's test leg, #1906) — proven first in a consumer |
 | cargo-mutants (`cargo:` backend, compiled `--locked`, pinned `lazy`) | Rust mutation testing (`audit:mutants`' Rust leg — its own weekly workflow, `repo-mutants.yml`, never the gate or the audit): no unexplained surviving mutant, never a score; adoption is a tracked `.cargo/mutants.toml`; an equivalent mutant is recorded at its site, `// mutants:equivalent <mutation>: <reason>`, from which the leg derives the exclusion (#1355, #1987) — proven first on release-lab |
-| cosmic-ray (`pipx:` backend, belt Python, pinned `lazy`) | Python mutation testing (`audit:mutants`' Python leg — its own jobs in `repo-mutants.yml`, never the gate or the audit): no unexplained surviving mutant; adoption is a tracked root `cosmic-ray.toml`, each exclusion a `# pragma: no mutate -- <reason>` on the mutant's line; mutates the tracked file in place, one mutant at a time, against the test files coverage shows reaching it (#1771; mutmut refused, #1354) |
+| pytest, with pytest-xdist, coverage, Hypothesis and mutmut (one `pipx:pytest` venv, every package pinned exact) | Python's test runner (#2177): the canon's suite and every repository's `test` run pytest under the belt's `mise/pytest.toml` (`-c`, every warning an error), measured by `measured`; mutmut is `audit:mutants`' Python leg (its own jobs in `repo-mutants.yml`, never the gate or the audit): no unexplained surviving mutant; adoption is a tracked `setup.cfg` `[mutmut]` section, each exclusion a `# pragma: no mutate -- <reason>` on the mutant's line; mutmut keeps its own map of which tests reach each function from one baseline run and judges each mutant by those alone; a mutant no test reaches in process is red (#2177, superseding cosmic-ray, #1771) |
 | StrykerJS (the repository's own, from its lockfile; the belt pins nothing) | TypeScript mutation testing (`audit:mutants`' TypeScript leg — its own jobs in `repo-mutants.yml`, never the gate or the audit): no unexplained surviving mutant; adoption is a tracked root `stryker.config.json`, each exclusion a `// Stryker disable next-line <Mutator>: <reason>` at its site; run `--inPlace` (#1358) — proven first on monumental-archive |
-| `lint:test-adoption` (the belt's own rule, `mise/testing_adoption.py`; no tool) | Adoption is required, not opt-in (#1910): the four mutation legs and `coverage:check` skip clean where their file is absent, so the gate requires the file — a repository that ships Rust (a `Cargo.toml` outside `vendor/` and `fuzz/`), Go (a root `go.mod`), Python (a `*.py` that is not `test_*.py`, `prop_*.py` or `conftest.py`) or TypeScript (a source that is not a declaration, test or spec) tracks that language's mutation file above and a `.coverage-floor`, red by name otherwise; file names only, nothing opened; what each file holds stays its leg's business |
+| `lint:test-adoption` (the belt's own rule, `belt/testing_adoption.py`; no tool) | Adoption is required, not opt-in (#1910): the four mutation legs and `coverage:check` skip clean where their file is absent, so the gate requires the file — a repository that ships Rust (a `Cargo.toml` outside `vendor/` and `fuzz/`), Go (a root `go.mod`), Python (a `*.py` that is not `test_*.py`, `prop_*.py` or `conftest.py`) or TypeScript (a source that is not a declaration, test or spec) tracks that language's mutation file above and a `.coverage-floor`, red by name otherwise; file names only, nothing opened; what each file holds stays its leg's business |
 | cargo-auditable (`github:rust-secure-code/cargo-auditable`, repo-side pin, upstream sha256s) | Release build input of every class that ships a Rust binary (#1334), prebuilt where the `cargo:` backend compiled it per job (187–252 s on edtf v1.3.5). Not `aqua:`: mise's baked registry has no entry (mise 2026.11.6: `no aqua-registry found for rust-secure-code/cargo-auditable`). `mise lock` at 0.7.7 records, for all four platforms, checksums equal to upstream's `.tar.xz.sha256` files (measured 2026-11-17); on Linux mise selects the `unknown-linux-gnu` asset, not musl. A locked install took 2.9 s. Reopen when a mise release's baked aqua registry carries the package |
 | sqlfluff (`pipx:` backend via aqua-backed uv) | SQL lint in the gate (`lint:sql`, all core rules, dialect postgres) + `fix:sql` — proven first in monumental-archive-db |
-| shellcheck + shfmt over mise task bodies (`mise/belt_shell.py`) | The third shell surface in the gate (`lint:belt-shell`) at the delivered level (`enable=all`, SC2310 held off, #1997), this file's own tasks included — plus `fix:belt-shell` |
+| shellcheck + shfmt over mise task bodies (`belt/belt_shell.py`) | The third shell surface in the gate (`lint:belt-shell`) at the delivered level (`enable=all`, SC2310 held off, #1997), this file's own tasks included — plus `fix:belt-shell` |
 | clippy (rustup component of the repo's own pin) | Rust lint in the gate (`lint:rust`): every group at deny, restriction minus thirteen named contradictions, `-D warnings`, org knobs in the canon's `mise/clippy.toml`, every member of every workspace the tree tracks (a cargo-fuzz crate is its own) linted as its own package, workspace by workspace (#2004) — plus `fix:rust` |
 | rustfmt (rustup component of the repo's own pin) | Rust format check in the gate (`lint:rust`, same task): the canon's `mise/rustfmt.toml` at rustfmt's **stable** maximum, `style_edition` pinned, over every workspace the tree tracks (#2004) — plus `fix:rust` |
-| a second pinned `rust` toolchain (`core:rust`, repo-side) | The declared minimum compiled in the gate (`lint:msrv`): every crate declaring `rust-version` is built at a pin of exactly that version, and `mise/msrv_plan.py` holds `Cargo.toml` and `mise.toml` in agreement about which version that is |
-| `aqua:theseus-rs/postgresql-binaries` (repo-side, one pin per major) | A real Postgres for the gate: the pgrx extension compiles (`lint:pg-clippy`) and its suite runs at every declared major (`test:pgrx`), with `mise/pgrx_postgres.py` holding the crate's `pgNN` features and the repository's pins in agreement |
+| a second pinned `rust` toolchain (`core:rust`, repo-side) | The declared minimum compiled in the gate (`lint:msrv`): every crate declaring `rust-version` is built at a pin of exactly that version, and `belt/msrv_plan.py` holds `Cargo.toml` and `mise.toml` in agreement about which version that is |
+| `aqua:theseus-rs/postgresql-binaries` (repo-side, one pin per major) | A real Postgres for the gate: the pgrx extension compiles (`lint:pg-clippy`) and its suite runs at every declared major (`test:pgrx`), with `belt/pgrx_postgres.py` holding the crate's `pgNN` features and the repository's pins in agreement |
 | `github:unicode-org/icu` (repo-side, macOS only, TOFU checksum) | ICU's headers for building a pgrx extension on a Mac: the prebuilt Postgres is configured `--with-icu` and ships the dylibs without the headers, and pgrx binds every Postgres header from 0.19.3. `mise/pgrx-env.sh` adds them per Postgres major, and holds one release per ICU major the pinned Postgres builds name: the single-table form for one, the array form for more (#1774) |
 | a canon-written check, no tool (`mise/vendored.sh`, bash) | Every tracked file under any `vendor/` directory pinned byte for byte to an upstream commit (`lint:vendored`), against the `PINNED.toml` beside it — the other half of every `:!vendor/**` in the belt |
 
@@ -500,7 +500,7 @@ repository edits.
 when it depends on `pgrx` **and** carries `pgNN` features; its majors are
 those features. So `CLIPPY_EXCLUDE = "edtf-postgres"` — the line that hid
 the crate for forty releases — is deleted rather than corrected, in both
-repositories, and `mise/gate_surface.py` is the single reader that
+repositories, and `belt/gate_surface.py` is the single reader that
 `lint:rust`, `lint:msrv`, `lint:pg-clippy`, `test:pgrx` and `fix:rust` all
 consume. Four copies of that answer would have drifted; the exclusion was
 the first copy to.
@@ -794,7 +794,7 @@ a `skip`/`skip-tree` entry that matches nothing, so an exception written
 for an upstream lag outlives it by however long nobody looks — the
 failure `#[expect]` exists to prevent. `lint:deny` removes each declared
 skip in turn and re-runs; a variant that still passes proves its entry is
-dead and the gate names it. `mise/deny_skips.py` emits the variants, by
+dead and the gate names it. `belt/deny_skips.py` emits the variants, by
 line-based removal rather than a TOML round trip, because the comment on
 a skip IS the decision and a serialiser drops it. It found a real one on
 its first run: release-lab had a `pgrx` skip subsumed by `pgrx-tests`.
@@ -924,7 +924,7 @@ than by reading them.
 now end `|| true` with the reason beside them. Isolated rather than
 guessed: the version collector matches 17 and exits 0, the run-URL
 collector matches nothing and exits 1, because the docs cite no Actions
-runs today. Since #1911 the walk is `mise/citations.py`, whose
+runs today. Since #1911 the walk is `belt/citations.py`, whose
 collectors are regular expressions with no exit status to mistake, so
 the `|| true` went with the shell.
 
@@ -985,7 +985,7 @@ workflow and action files by hand, line by line from indentation, and
 each hand reader was a guess at the grammar patched shape by shape
 (#1352, #1396, #1431, #1837). Measured 2026-11-20 at `cfcffe29` against
 a real parser over the canon's 49 workflows, 181 jobs and 562 steps:
-`release/test_job_installs.py`'s `steps()` missed no real step, and
+`tests/release/test_job_installs.py`'s `steps()` missed no real step, and
 returned 184 things that were not steps, in 50 jobs (every entry of a
 `needs:` list sits at a step's indent), and 13 single-quoted `run:`
 values with their quotes on. #1837 was a 40-line step body no law read,
@@ -996,9 +996,9 @@ reader.
 yq 4.54.3 is pinned from the aqua registry (`mise tool yq` resolves the
 short name to `aqua:mikefarah/yq`), its release publishes `checksums`
 with a signature bundle, and the lock records cosign provenance for all
-seven platforms. `mise/workflow_yaml.py` reads through it and nothing
+seven platforms. `belt/workflow_yaml.py` reads through it and nothing
 else does: `document(path)` is `yq -o=json '.'` decoded by
-`mise/decoded.py`, a file yq cannot parse is a `ValueError` carrying
+`belt/decoded.py`, a file yq cannot parse is a `ValueError` carrying
 yq's message, and `runs(path)` places every `run:` value (line, style,
 the text after folding and chomping, name, shell, path, alias) by one
 expression. The probe, on a scratch workflow holding a commented block
@@ -1175,7 +1175,7 @@ checked it.
 That file is gone — stele#148 replaced the join with `stele assert
 permissions`, and the adoption reason went with it. Re-adjudicated
 2026-08-20 and **kept**: the belt's own helpers are Python
-(`mise/deny_skips.py`, `mise/embedded_shell.py`), so the language a
+(`belt/deny_skips.py`, `belt/embedded_shell.py`), so the language a
 belt tool must cover is still in the tree, and a universal layer that
 dropped Python because the canon's own count fell from three files to
 two would have to re-adopt it for the first adopter who writes one.
@@ -1231,7 +1231,7 @@ Three settings are not preferences:
   a comment left behind is itself red (`unused-noqa`), so there is
   no state between "rules on" and "comments gone". The rules code
   CAN pass stay on — `shell=True` (`S602`, `S604`, `S605`) and the
-  partial-path pair (`S606`, `S607`) — and `mise/test_ruff_config.py`
+  partial-path pair (`S606`, `S607`) — and `tests/test_ruff_config.py`
   plants a red row for `S602` and `S607` by rule name, and a clean
   one for a helper passing a constant and a given path.
 - **`target-version = "py39"` is a fact, not an aspiration.** The belt
@@ -1433,7 +1433,7 @@ off, which is the thing this whole layer exists to prevent (#694).
 So the two halves are split by who can honestly state them. The repo
 writes `biome.json` carrying `linter.domains` and nothing else, values
 `"all"` and nothing else, over the eleven domains that are identity;
-`mise/biome_config.py` merges it with the org's rules and writes every
+`belt/biome_config.py` merges it with the org's rules and writes every
 `"none"` itself. A repo cannot write `"none"`, cannot name `project`,
 `types` or `test`, cannot carry a rule or an `overrides` block, and
 cannot stay silent about a framework its own package.json declares —
@@ -1530,7 +1530,7 @@ biome lint --write src    # the rule at its default, on the .js form
 ```
 
 with the 2026-11-26 flags file, which did not yet name the flag.
-`mise/test_import_extensions.py` keeps the fixture in the suite: the
+`tests/test_import_extensions.py` keeps the fixture in the suite: the
 `.ts` form clean in `lint:biome` and `lint:types`, the `.js` form red
 in `lint:biome` naming the rule.
 
@@ -1851,7 +1851,7 @@ silently and widen to hide new findings in the same file. On
 monumental-archive one file-wide `noUnresolvedImports` ignore
 suppressed nothing for three months, and its twin hid a finding under
 a false reason. `lint:biome` now refuses all three forms before biome
-runs: `mise/biome_suppressions.py` reads the tracked list biome is
+runs: `belt/biome_suppressions.py` reads the tracked list biome is
 handed, comments only — the form in a string, a template literal or a
 regex is not a suppression — and names each file and line. The answer
 is a one-line `biome-ignore` above the line the finding lands on,
@@ -2248,7 +2248,7 @@ Proven by running 2.4.1:
   hides a finding (a bare one before the first statement ignores the
   module, and `ignore-without-code` does not fire on it); and
   `typing.no_type_check`, silent even under `disallow_any_decorated`.
-  `mise/python_types_seams.py` names each, read with `tokenize` and
+  `belt/python_types_seams.py` names each, read with `tokenize` and
   `ast` so the text in a string is not a finding. No suppression is
   left (owner, #1604): a coded `# type: ignore[<code>]` is red too,
   since mypy reds it only once it suppresses nothing, and while it
@@ -2261,10 +2261,10 @@ Proven by running 2.4.1:
   package) and is imported by it. A file reaching a sibling root names
   it from its own `__file__` with a `sys.path` entry, which holds under
   every runner and inside mutmut's copy; a law row in
-  `mise/test_helper_imports.py` refuses a load by path. mypy follows
+  `tests/test_helper_imports.py` refuses a load by path. mypy follows
   neither a script's own directory nor that entry, so `python-types.sh`
   passes the roots as `MYPYPATH`, derived from the tracked files by
-  `mise/python_roots.py` and never listed in the delivered config.
+  `belt/python_roots.py` and never listed in the delivered config.
 - Two files that would be one module stop mypy ("Duplicate module");
   `python_roots.py` refuses them by name first, and
   `explicit_package_bases` keeps every other file's module name its
@@ -2279,7 +2279,7 @@ Proven by running 2.4.1:
 the strict config reds the decorator expression (`disallow_any_expr`,
 191 on `301cf46`) and the decorated test (`disallow_any_decorated`,
 197). Neither is the property's fault, and neither flag comes off:
-`mise/typed_hypothesis.py` gives `given` an exact type instead, one
+`belt/typed_hypothesis.py` gives `given` an exact type instead, one
 overload per arity, each strategy's value type tied to its parameter
 after `self` and the decorated test taking `self` alone. Every `@given`
 in the canon's 54 property files is that shape (positional strategies
@@ -2326,9 +2326,9 @@ Coverage counts a line as covered when a test runs it, whether or not
 any test would notice a change to it, and Go's own coverage has no
 branch figure either (gobco's condition figure, below, answers that
 half since #1546). The leg
-(`mise/mutants-go.sh`, its verdict in `mise/mutants_go.py`) runs on the
+(`mise/mutants-go.sh`, its verdict in `belt/mutants_go.py`) runs on the
 Monday cron, never in `ci` and never on a pull request, because the run
-repeats the suite once per mutant; `mise/test_task_contract.py` holds
+repeats the suite once per mutant; `tests/test_task_contract.py` holds
 `ci` to reaching no audit task.
 
 *Three candidates, measured on stele* (`9a4923d`, Go 1.27.4, the real
@@ -2366,7 +2366,7 @@ rewrites the working tree in place, one mutant at a time — a job killed
 mid-run leaves a mutated file behind.
 
 *What the leg does for gomu, each measured from its v0.3.0 source and
-held by a stub row* (`mise/test_mutants_go.py`; no row runs gomu):
+held by a stub row* (`tests/test_mutants_go.py`; no row runs gomu):
 
 - **Adoption is a tracked root `.gomuignore` with no pattern.** gomu
   has no config file; `.gomuignore` is the one file it reads. A pattern
@@ -2527,7 +2527,7 @@ release-lab:
   `cargo clean` removes it.
 
 The first `measured` call in a run cleans the workspace (`cargo
-llvm-cov clean --workspace`, #2061) through `mise/once.py`, under an
+llvm-cov clean --workspace`, #2061) through `belt/once.py`, under an
 exclusive lock on its marker, a directory in the run's directory: a
 second call in the same run keeps the first one's work, and a call
 starting beside the first waits for the clean to finish. Each pgrx
@@ -2594,7 +2594,7 @@ statement coverage read it as 90.0% and saw one of the three.
 `a && b` (4/6), the very gap the issue named.
 
 *What the leg does for gobco* (`mise/coverage-go-branches.sh`, held by
-stub rows in `mise/test_coverage_go_branches.py`; no row runs gobco). A
+stub rows in `tests/test_coverage_go_branches.py`; no row runs gobco). A
 helper of its own rather than a selector of `coverage-measure.sh`: the
 gate's tool derivation (#1410) reads every call in a script a gate task
 runs, and `coverage:check` runs that one, so a gobco call there would
@@ -2895,7 +2895,7 @@ path without aqua, and the belt's first use of it. Like biome and
 golangci-lint this tool is **unprovable in the canon** (no Rust
 tracked; `lint:machete` skips clean here) and is exercised first in a
 consumer; only the task's file list is held here, by planted rows that
-run the real tool (`mise/test_machete.py`, #2008). *Reopen:* an
+run the real tool (`tests/test_machete.py`, #2008). *Reopen:* an
 aqua-registry package appearing (move the pin), or machete growing a
 no-write metadata mode (reconsider precision).
 
@@ -3071,8 +3071,8 @@ Measured 2026-11-20 on Python 3.15.2:
   started with `-S` and its own `PYTHONPATH`: baseline green first
   time, 34 mutants, all judged, the child-only function's mutants
   killed. Two canon helpers against their own test files:
-  `mise/squash_message.py` 52 mutants, 47 killed, 5 survived, 24 s;
-  `mise/subject_budget.py` 577, 429 killed, 148 survived, 139 s. The
+  `belt/squash_message.py` 52 mutants, 47 killed, 5 survived, 24 s;
+  `belt/subject_budget.py` 577, 429 killed, 148 survived, 139 s. The
   tree was clean after both. The leg itself reproduced the first on
   the Mac, judging each mutant against the test files coverage shows
   reaching its line: 52, 47, 5, in 80 s.
@@ -3121,6 +3121,50 @@ naming rule, and 1,403 mutants sit in helpers with none).
 *Reopen:* a cosmic-ray release that stops mutating in place, or a tool
 that judges flat scripts with sharding of its own.
 
+*Superseded* by the verdict below (#2177): the belt is a package, so
+mutmut judges it.
+
+**pytest as Python's test runner; mutmut over the belt package**
+(#2177, overruling the "stdlib only (#364)" rule, which cited a bash
+standup that never weighed a Python test framework). The belt's Python
+is one package, `belt/`, run one way, `"${ORG_PYTHON}" -I
+"${ORG_CANON_DIR}/belt" <command>`, every command's arguments read by
+argparse. Its tests are one root, `tests/`, run in process by pytest
+under the belt's `mise/pytest.toml` (`-c`, maximum strictness, every
+warning an error). No belt Python runs in a child process: mutmut does
+not follow children (#2177's probe: a helper reached only through a
+child left all 27 of its mutants `no tests`; called in process, 27 of
+29 were killed and the 2 survivors were a real gap). A shell body run
+as a process may start `belt <command>`, and that command's code is
+tested in process too.
+
+- **The venv.** pytest 9.2.0, pytest-xdist 3.8.0, coverage 7.17.4,
+  Hypothesis 6.170.17 and mutmut 3.8.1, one `pipx:pytest` tool, every
+  package exact: mutmut and the properties run pytest in their own
+  process, and pytest imports Hypothesis.
+- **Coverage.** `measured` rewrites a `pytest …` or `<python> -m pytest
+  …` command to run under coverage from that venv; any other command
+  measures no Python. The start-up hook that carried coverage into
+  children is gone with the children.
+- **Mutation.** mutmut mutates a copy of `belt/` (`setup.cfg`'s
+  `[mutmut]`), keeps its own map of which tests reach each function
+  from one baseline run, and judges each mutant by those alone, so the
+  per-file map cosmic-ray needed is gone too. A mutant no test reaches
+  in process (`no tests`) is red by name.
+- **Lint.** `tests/` and `belt/` carry no suppression: no `# ruff:
+  ignore`, no `# fmt: skip`, no `# type: ignore`. The one ignore in the
+  config is S101 for test and property files, pytest's bare `assert`.
+  Each fixture is typed `belt.typed_pytest.fixture`, never wrapped.
+
+Removed with the flat shape: the belt's own runner
+(`unittest_guarded.py`), the start-up hook (`startup_hook.py`), the
+cosmic-ray leg and its map, and `hermetic.py`'s subprocess fixtures
+(now `tests/support.py` and the conftest's environment, which every
+test runs in).
+
+*Reopen:* a test that needs belt Python in a child to observe what it
+tests, or a mutation tool that follows children.
+
 **StrykerJS as `audit:mutants`' TypeScript leg** (#1358, under the
 testing standard of #1336; the shape is the other legs'). The measure
 is no unexplained surviving mutant, never a score. Measured 2026-11-19 on
@@ -3138,7 +3182,7 @@ devDependencies beside its runner plugin, the way its test runner is;
 the leg runs `node_modules/.bin/stryker`.
 
 What the leg does, each measured on 10.1.1 and held by a stub row
-(`mise/test_mutants_typescript.py`; no row runs StrykerJS):
+(`tests/test_mutants_typescript.py`; no row runs StrykerJS):
 
 - **Adoption is a tracked root `stryker.config.json`.** It names the
   paths to mutate, so a repository adopts its service-free code first.
@@ -3549,7 +3593,7 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
   and `UV_INDEX_STRATEGY = "first-index"`, and PyPI's own hashes, which
   uv checks at download; a pinned hash per wheel is not available
   through this backend. The profiles are the belt's
-  (`mise/python_properties.py`): the gate derandomizes with a bounded
+  (`belt/python_properties.py`): the gate derandomizes with a bounded
   `max_examples`, no example database and no deadline, so two runs print
   the same bytes; the cron takes a random seed it prints first. A test
   restating a bound is refused. *Reopen:* an aqua package, or a `pipx:`
@@ -3793,8 +3837,8 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
   **Amended 2026-08-20 (#576):** the clause that used to sit here — two
   helpers, "no unit-testable corpus of its own" — was true of a
   100-line skip emitter and a shell extractor and stopped being true
-  with `mise/subject_budget.py`, 700 lines of manager walks, template
-  resolution and budget arithmetic. It now has `mise/test_subject_budget.py`,
+  with `belt/subject_budget.py`, 700 lines of manager walks, template
+  resolution and budget arithmetic. It now has `tests/test_subject_budget.py`,
   42 stdlib-`unittest` table tests reached by the gate through the
   ordinary `ci` contract (a repo-level `mise.toml` defining `test`,
   which `ci` collects optionally). Nothing joins the belt to run them:
@@ -3830,7 +3874,7 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
   and the gate enforced a number below what the tests prove: measured
   94.9 without the flag against 95.4 with it, 0.5 points and 51
   statements. Both are closed by making the floor DERIVED STATE —
-  `mise/coverage_floor.py` re-derives it at every release as
+  `belt/coverage_floor.py` re-derives it at every release as
   `measured - 2`, it only rises, a release measuring below
   `floor + band` fails loudly, and a hand edit that disagrees with the
   file's own record is refused as drift rather than repaired (since
@@ -3840,7 +3884,7 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
   and the release path so the two cannot enforce and derive from
   different flags. Adoption stays opt-in and is now a measurement
   (`mise run coverage:adopt`), not a guess. Tested the way #576's
-  helper is: `mise/test_coverage_floor.py`, 33 table rows over every
+  helper is: `tests/test_coverage_floor.py`, 33 table rows over every
   guard branch in both directions, mutation-checked with seven
   deliberate defects (the drift check disabled, the ratchet disabled,
   the ratchet loosened by a band, `--adopt` honoured everywhere,
@@ -3856,7 +3900,7 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
   adopted — and the line it draws is:
   - **In the gate, deterministically:** every pure decision. The
     predecessor search over a recorded forge listing
-    (`release/test_generate_pgrx_upgrade.py`, including the three tag
+    (`tests/release/test_generate_pgrx_upgrade.py`, including the three tag
     histories an import can arrive with); the derive-notes input
     contract and `prepare-release.sh`'s own tree refusals
     (`test_prepare_release.py`); the upgrade-script generator's whole
@@ -3968,7 +4012,7 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
   repository's `node_modules` under the coverage provider the same
   lockfile pins (`@vitest/coverage-v8` or `-istanbul`), printing
   `typescript <lines>` and `typescript-branches <branches>`; the floor
-  holds both. `mise/coverage_js_runner.py` reads the runner and the
+  holds both. `belt/coverage_js_runner.py` reads the runner and the
   provider from the lockfile (pnpm, npm, yarn or bun), so the version
   is the repository's. A lockfile with vitest and no provider reds with
   the remedy (add the provider at vitest's version), two providers red
@@ -4023,7 +4067,7 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
   so the reading is taken inside it: the repository's `test` command
   runs through `mise/measured`, which sets `ORG_PLPGSQL_COVERAGE`
   naming a directory of reports, and the repository's teardown calls
-  `mise/plpgsql_coverage.py collect <conninfo>` before it stops each
+  `belt plpgsql-coverage collect <conninfo>` before it stops each
   database; the leg then calls `totals` on the reports the teardowns
   wrote. A report written is the leg's answer; the leg searches no
   file. **Amended 2026-11-28 (#2163): every test database, merged.**
@@ -4358,7 +4402,7 @@ one. *Reopen:* a repository vendoring Go modules or crates (#121).
   (tsc is native), and the PyPI wrapper downloads Node and pyright at
   run time. *Reopen:* a native, checksummed pyright release.
 - **The gate's guess at a repository's own tools** (#1410, #1785) —
-  `mise/gate_tools.py` reads a repository's own task bodies with a
+  `belt/gate_tools.py` reads a repository's own task bodies with a
   regex to see which belt tools they call, and disables the rest; a
   call it misses is "command not found" in that repository's gate.
   The design that removes the guess is mise's `lazy` tools: the
@@ -4451,7 +4495,7 @@ was bash: does the reason still hold? Measured against this tree, item
 by item. The in-scope test was #398's own: an exception survives only
 if its reason is about the rule, never about reach.
 
-- **`SHELLCHECK_EXCLUDE` (mise/embedded_shell.py) — kept, reason
+- **`SHELLCHECK_EXCLUDE` (belt/embedded_shell.py) — kept, reason
   re-measured live.** The premise "no shell in `run:` blocks" did not
   arrive: 98 multi-line `run:` blocks remain in the canon's workflows,
   deliberately — the port moved *logic* to stele and left

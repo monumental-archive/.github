@@ -1,0 +1,334 @@
+"""Run belt/release/source_archive.py, the source-archive build, on a stub git.
+
+#1384 moved the step "Build the archive twice and prove determinism"
+out of build-source-archive.yml into the helper, refusals unchanged.
+
+WHAT RUNS. The command's `main`, called in this process (#1698, #2177),
+with a stub `git` first on PATH. The stub answers `archive` by copying
+the row's planted .tar.gz for each call in turn (the first build, then
+the check build) to the `-o` path, and `ls-files` with the row's count
+of tracked paths. The archives are real gzip tarballs, so the helper
+counts real entries.
+"""
+
+import gzip
+import hashlib
+import io
+import itertools
+import os
+import sys
+import tarfile
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Protocol
+
+import pytest
+
+from belt import workflow_yaml
+from belt.release import source_archive
+from belt.typed_pytest import fixture
+from tests import support
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+# The builds of the tagged tree a release makes and compares.
+BUILDS = 2
+
+CANON = support.CANON
+WORKFLOW = CANON / ".github" / "workflows" / "build-source-archive.yml"
+# The job runs the command from its `.org-canon` link to this tree.
+STEP = '"${ORG_PYTHON}" -I .org-canon/belt source-archive'
+COMMAND = "source-archive"
+VERSION = "1.3.4"
+
+GIT_STUB = """#!/usr/bin/env bash
+# Stub `git`: `archive ... -o OUT REF` copies the next planted archive;
+# `ls-files` prints STUB_TRACKED lines; STUB_FAIL fails `archive`.
+set -euo pipefail
+printf '%s\\n' "$*" >> "${STUB_LOG}"
+case $1 in
+  ls-files) for ((i = 0; i < STUB_TRACKED; i++)); do echo "file${i}"; done ;;
+  archive)
+    if [[ -n ${STUB_FAIL} ]]; then echo "fatal: not a valid object" >&2; exit 128; fi
+    n=$(cat "${STUB_COUNTER}" 2> /dev/null || echo 0)
+    echo $((n + 1)) > "${STUB_COUNTER}"
+    out=""
+    while [[ $# -gt 0 ]]; do
+      if [[ $1 == -o ]]; then out=$2; fi
+      shift
+    done
+    cp "${STUB_PLANTED}/${n}.tar.gz" "${out}"
+    ;;
+  *) echo "git stub: refusing $*" >&2; exit 2 ;;
+esac
+"""
+
+
+@fixture
+def _outside_mise(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Name the helper by its command, as a run outside mise does (#1934).
+
+    An in-process call reads argv, whatever task runs this suite; an
+    empty ORG_FINDINGS records nothing (unset on a runner records to the
+    job's file, #1976).
+    """
+    monkeypatch.setattr(sys, "argv", ["source-archive"])
+    monkeypatch.delenv("MISE_TASK_NAME", raising=False)
+    monkeypatch.setenv("ORG_FINDINGS", "")
+
+
+pytestmark = pytest.mark.usefixtures("_outside_mise")
+
+
+def tarball(entries: int, salt: str = "") -> bytes:
+    """Make a gzip tarball with a number of file entries.
+
+    Returns:
+        Its bytes, identical for identical arguments.
+
+    """
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as tar:
+        for i in range(entries):
+            data = f"{salt}{i}\n".encode()
+            info = tarfile.TarInfo(f"p/file{i}")
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+    return gzip.compress(buf.getvalue(), mtime=0)
+
+
+@dataclass
+class Run:
+    """What the helper did."""
+
+    returncode: int
+    stdout: str
+    stderr: str
+    git: list[str]
+    shipped: list[str]
+
+
+@dataclass
+class Archiving:
+    """One release laid out: where the stub logs and the helper ships."""
+
+    git_log: Path
+    dist: Path
+
+    def ran(self, status: int, said: tuple[str, str]) -> Run:
+        """Read what the command's run did.
+
+        Returns:
+            Its status, output, the git log and what dist/ holds.
+
+        """
+        out, err = said
+        log, dist = self.git_log, self.dist
+        return Run(
+            status,
+            out,
+            err,
+            log.read_text().splitlines() if log.exists() else [],
+            sorted(p.name for p in dist.iterdir()) if dist.is_dir() else [],
+        )
+
+
+class Archive(Protocol):
+    """What the `archive` fixture hands a row."""
+
+    def __call__(
+        self,
+        archives: tuple[bytes, bytes],
+        tracked: int,
+        repo: str = ...,
+        *,
+        fail: bool = ...,
+    ) -> Archiving:
+        """Run archive."""
+        ...
+
+
+@fixture
+def archive(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    canon: support.Canon,
+    env: support.Env,
+) -> Archive:
+    """Lay out two planted builds and a tracked count for the command.
+
+    Returns:
+        A function that lays out one release and returns it.
+
+    """
+    made = itertools.count()
+
+    def lay_out(
+        archives: tuple[bytes, bytes],
+        tracked: int,
+        repo: str = "monumental-archive/edtf",
+        *,
+        fail: bool = False,
+    ) -> Archiving:
+        tmp = tmp_path / f"archive{next(made)}"
+        stubs, planted, work = tmp / "bin", tmp / "planted", tmp / "work"
+        for p in (stubs, planted, work):
+            p.mkdir(parents=True)
+        (stubs / "git").write_text(GIT_STUB)
+        (stubs / "git").chmod(0o755)
+        canon(work / ".org-canon")
+        for i, data in enumerate(archives):
+            (planted / f"{i}.tar.gz").write_bytes(data)
+        log = tmp / "git.log"
+        environ = env(
+            PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}",
+            VERSION=VERSION,
+            GITHUB_REPOSITORY=repo,
+            STUB_LOG=str(log),
+            STUB_COUNTER=str(tmp / "counter"),
+            STUB_PLANTED=str(planted),
+            STUB_TRACKED=str(tracked),
+            STUB_FAIL="1" if fail else "",
+        )
+        for name, value in environ.items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.chdir(work)
+        monkeypatch.setattr(sys, "argv", [COMMAND])
+        return Archiving(log, work / "dist")
+
+    return lay_out
+
+
+def sha(data: bytes) -> str:
+    """Hash planted bytes.
+
+    Returns:
+        The hex sha256.
+
+    """
+    return hashlib.sha256(data).hexdigest()
+
+
+# The job runs the helper these rows run.
+def test_the_shipped_step_calls_the_helper() -> None:
+    """The canon tree is linked first, and the run: is the call alone."""
+    document = workflow_yaml.document(WORKFLOW)
+    ((before, step),) = [
+        (job[:i], s)
+        for job in map(workflow_yaml.steps, workflow_yaml.jobs(document).values())
+        for i, s in enumerate(job)
+        if s.get("name") == "Build the archive twice and prove determinism"
+    ]
+    # Under the belt's Python (#1543), on one line.
+    assert step["run"] == STEP
+    used: list[object] = [s.get("uses") for s in before]
+    assert "$/.github/actions/canon" in used
+
+
+# Two equal builds of the tagged tree pass.
+def test_two_equal_builds_ship_one_archive(
+    capfd: pytest.CaptureFixture[str], archive: Archive
+) -> None:
+    """Both builds archive the tag under the release's prefix."""
+    data = tarball(5)
+    archiving = archive((data, data), tracked=5)
+    status = source_archive.main([])
+    run = archiving.ran(status, capfd.readouterr())
+    assert run.returncode == 0, run.stdout + run.stderr
+    base = f"edtf-{VERSION}"
+    assert f"::notice::{base}.tar.gz: 5 entries, digest {sha(data)}\n" == run.stdout
+    shipped: list[str] = [f"{base}.tar.gz"]
+    assert shipped == run.shipped
+    archives = [x for x in run.git if x.startswith("archive")]
+    assert len(archives) == BUILDS
+    assert (
+        f"archive --format=tar.gz --prefix={base}/ -o dist/{base}.tar.gz v{VERSION}"
+    ) == archives[0]
+    assert archives[1].endswith(f"/{base}.check.tar.gz v{VERSION}")
+
+
+def test_a_dot_repository_gets_a_visible_name(
+    capfd: pytest.CaptureFixture[str], archive: Archive
+) -> None:
+    """The .github repository's asset is github-<version>.tar.gz."""
+    data = tarball(2)
+    archiving = archive((data, data), tracked=2, repo="monumental-archive/.github")
+    status = source_archive.main([])
+    run = archiving.ran(status, capfd.readouterr())
+    assert run.returncode == 0, run.stdout + run.stderr
+    shipped: list[str] = [f"github-{VERSION}.tar.gz"]
+    assert shipped == run.shipped
+
+
+def test_more_than_half_the_tracked_files_is_enough(
+    capfd: pytest.CaptureFixture[str], archive: Archive
+) -> None:
+    """Four entries for seven tracked files: 4 > 7 // 2."""
+    data = tarball(4)
+    archiving = archive((data, data), tracked=7)
+    status = source_archive.main([])
+    run = archiving.ran(status, capfd.readouterr())
+    assert run.returncode == 0, run.stdout + run.stderr
+
+
+# One row per refusal, each message asserted.
+def test_two_builds_that_differ_are_refused(
+    capfd: pytest.CaptureFixture[str], archive: Archive
+) -> None:
+    """The archive is not reproducible, so nothing can check it."""
+    a, b = tarball(5), tarball(5, salt="x")
+    archiving = archive((a, b), tracked=5)
+    status = source_archive.main([])
+    run = archiving.ran(status, capfd.readouterr())
+    assert run.returncode == 1
+    assert (
+        f"::error::source-archive: source archive is not deterministic"
+        f" ({sha(a)} vs {sha(b)})\n"
+    ) == run.stderr
+    assert "ls-files" not in run.git
+
+
+def test_half_the_tracked_files_is_refused(
+    capfd: pytest.CaptureFixture[str], archive: Archive
+) -> None:
+    """Three entries for seven tracked files: 3 <= 7 // 2."""
+    data = tarball(3)
+    archiving = archive((data, data), tracked=7)
+    status = source_archive.main([])
+    run = archiving.ran(status, capfd.readouterr())
+    assert run.returncode == 1
+    assert (
+        run.stderr
+        == "::error::source-archive: archive lists 3 entries for 7 tracked files\n"
+    )
+
+
+def test_an_empty_archive_is_refused(
+    capfd: pytest.CaptureFixture[str], archive: Archive
+) -> None:
+    """No entries at all is a truncated stream."""
+    data = tarball(0)
+    archiving = archive((data, data), tracked=4)
+    status = source_archive.main([])
+    run = archiving.ran(status, capfd.readouterr())
+    assert run.returncode == 1
+    assert (
+        run.stderr
+        == "::error::source-archive: archive lists 0 entries for 4 tracked files\n"
+    )
+
+
+def test_a_failing_git_fails_the_step_with_its_status(
+    capfd: pytest.CaptureFixture[str], archive: Archive
+) -> None:
+    """A tag git cannot archive: git's run.returncode and message.
+
+    git's message is its own stderr, which the call reads.
+    """
+    data = tarball(1)
+    archiving = archive((data, data), tracked=1, fail=True)
+    status = source_archive.main([])
+    run = archiving.ran(status, capfd.readouterr())
+    assert run.returncode == support.GIT_FATAL
+    assert run.stderr == "fatal: not a valid object\n"
+    assert not run.stdout

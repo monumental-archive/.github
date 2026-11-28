@@ -29,11 +29,15 @@ shared lives here and nowhere else. Five layers:
 2. **The toolbelt** (`mise/`): `config.toml` + `mise.lock`, and beside
    them the configs of the tools only the belt runs — `clippy.toml`,
    `rustfmt.toml`, `pinact.yaml`, `typos.toml`, `ruff.toml`, `mypy.ini`,
+   `pytest.toml`,
    `biome-org.json` (+ `biome-domains.tsv`,
    `biome-nursery-domains.tsv`), `yamllint.yaml`,
    `rumdl.toml`, `sqlfluff.cfg`, `lychee.toml`, `taplo-org.toml`,
    `shellcheckrc` —
-   plus the helpers tasks call. Those configs are DELIVERED, never
+   plus the shell helpers tasks call. The belt's Python is one package,
+   `belt/` at the tree root, run one way,
+   `"${ORG_PYTHON}" -I "${ORG_CANON_DIR}/belt" <command>`, and tested in
+   process by pytest under `tests/` (#2177). Those configs are DELIVERED, never
    copied: `ORG_BELT_DIR` is computed once in the belt's `[env]` and
    every task passes the file to its tool, so no repo carries a second
    copy that can drift (#445). The
@@ -124,11 +128,11 @@ shared lives here and nowhere else. Five layers:
 - Every `uses:` pinned to a full commit SHA with a trailing version
   comment. Reusable-workflow callers pin this repo by SHA too.
 - Belt linters lint **tracked files only**, listed by `org_tracked`
-  (`mise/tracked.sh`; `tracked()` in `mise/tracked.py`) and read
+  (`mise/tracked.sh`; `tracked()` in `belt/tracked.py`) and read
   NUL-safely, never by a tool's own directory walker — lefthook caches
   remote configs inside `.git/`, and walkers find them (#1986).
   Whether a repository has a file is asked the same way:
-  `org_tracked_has` (`has()` in `mise/tracked.py`), never `[[ -f ]]`,
+  `org_tracked_has` (`has()` in `belt/tracked.py`), never `[[ -f ]]`,
   and a git that cannot answer ends the task rather than reading as
   absent (#2013).
 - Belt linters guard for applicability and skip clean: a linter that

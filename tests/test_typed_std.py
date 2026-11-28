@@ -1,0 +1,425 @@
+"""typed_std.py's two readers, row by row (#1676).
+
+`group`: a matched group, an optional group that did not take part, a
+named group and group 0. `stdin_text`: standard input with text, and a
+process started with none, in process and as a real process whose
+descriptor 0 is closed. `urlopen` (#1682): urllib's answer and an
+opener's, read through `Response`; an answer that is not one, refused
+by name; and the law that no other tracked file opens a URL itself.
+"""
+
+import ast
+import io
+import re
+import urllib.request
+from typing import TYPE_CHECKING, Self, override
+
+import pytest
+
+from belt import call_names, typed_std
+from belt.typed_pytest import fixture
+from tests import support
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
+
+HERE = support.MISE
+CANON = HERE.parent
+BASH = support.tool("bash")
+URL = "https://example.invalid/x"
+# The calls typeshed answers as `Any`, made only in typed_std.py.
+OPENS = frozenset({"urllib.request.urlopen", "urllib.request.OpenerDirector.open"})
+OPENER = "urllib.request.OpenerDirector"
+BUILD = "urllib.request.build_opener"
+HOME = "belt/typed_std.py"
+VERSION = re.compile(r"v(?P<major>\d+)\.(\d+)(-(?P<pre>\w+))?")
+
+
+class Group:
+    """The group's text by its span, or None, never Any."""
+
+    def __init__(self) -> None:
+        """Match one version with no pre-release part."""
+        found = VERSION.fullmatch("v1.70")
+        if found is None:
+            pytest.fail("the row's pattern did not match its text")
+        self.match = found
+
+
+@fixture
+def group_state() -> Group:
+    """Give each row its own Group.
+
+    Returns:
+        The row's Group.
+
+    """
+    return Group()
+
+
+def test_a_matched_group(group_state: Group) -> None:
+    """A numbered group that took part: its text."""
+    assert typed_std.group(group_state.match, 2) == "70"
+
+
+def test_an_unmatched_optional_group(group_state: Group) -> None:
+    """An optional group that did not take part: None."""
+    assert typed_std.group(group_state.match, 3) is None
+    assert typed_std.group(group_state.match, "pre") is None
+
+
+def test_a_named_group(group_state: Group) -> None:
+    """A group by its name."""
+    assert typed_std.group(group_state.match, "major") == "1"
+
+
+def test_group_zero(group_state: Group) -> None:
+    """The whole match, by default and by number."""
+    assert typed_std.group(group_state.match) == "v1.70"
+    assert typed_std.group(group_state.match, 0) == "v1.70"
+
+
+@pytest.mark.usefixtures("group_state")
+def test_an_empty_group_is_text() -> None:
+    """A group that took part and matched nothing is "", not None."""
+    found = re.match(r"(a*)b", "b")
+    if found is None:
+        pytest.fail("the row's pattern did not match its text")
+    group = typed_std.group(found, 1)
+    assert group is not None
+    assert not group
+
+
+# All of standard input, or the one refusal.
+def test_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Standard input's text, read to its end."""
+    monkeypatch.setattr("sys.stdin", io.StringIO("one\ntwo\n"))
+    assert typed_std.stdin_text() == "one\ntwo\n"
+
+
+def test_absent_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No standard input (sys.stdin is None): refused by name."""
+    monkeypatch.setattr("sys.stdin", None)
+    with pytest.raises(typed_std.NoStdinError) as caught:
+        typed_std.stdin_text()
+    assert str(caught.value) == "no standard input: the process was started without one"
+
+
+class Answer:
+    """An HTTP answer with exactly what `Response` names."""
+
+    def __init__(self, status: int, body: bytes, ctype: str) -> None:
+        """Hold the answer's status, body and Content-Type."""
+        self.status = status
+        self.body = body
+        self.ctype = ctype
+
+    def read(self) -> bytes:
+        """Read the body.
+
+        Returns:
+            The body.
+
+        """
+        return self.body
+
+    def getheader(self, name: str, default: str | None = None) -> str | None:
+        """Read the one header this answer carries.
+
+        Returns:
+            The Content-Type, or `default` for any other name.
+
+        """
+        return self.ctype if name == "Content-Type" else default
+
+    def __enter__(self) -> Self:
+        """Enter.
+
+        Returns:
+            The answer.
+
+        """
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        """Leave; nothing to close."""
+
+
+class Opener(urllib.request.OpenerDirector):
+    """An opener that answers one canned value and records the request."""
+
+    def __init__(self, answer: object) -> None:
+        """Hold the answer every open gives."""
+        super().__init__()
+        self.answer = answer
+        self.asked: list[tuple[str, float | None]] = []
+
+    @override
+    def open(
+        self,
+        fullurl: str | urllib.request.Request,
+        data: object = None,
+        timeout: float | None = None,
+    ) -> object:
+        """Answer the canned value.
+
+        Returns:
+            It.
+
+        """
+        url = fullurl if isinstance(fullurl, str) else fullurl.full_url
+        del data
+        self.asked.append((url, timeout))
+        return self.answer
+
+
+# One HTTP answer, typed; never `Any`.
+def test_urllib_s_answer_is_returned_and_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No opener: urllib's default opener answers, with the timeout."""
+    answer = Answer(200, b"body", "text/plain")
+    timeouts: list[float] = []
+
+    def opened(
+        opener: urllib.request.OpenerDirector,
+        request: urllib.request.Request,
+        *,
+        timeout: float,
+    ) -> Answer:
+        del opener, request
+        timeouts.append(timeout)
+        return answer
+
+    monkeypatch.setattr(urllib.request.OpenerDirector, "open", opened)
+    got = typed_std.urlopen(urllib.request.Request(URL), timeout=7)
+    assert (got.status, got.read(), got.getheader("Content-Type")) == (
+        200,
+        b"body",
+        "text/plain",
+    )
+    want: list[float] = [7]
+    assert want == timeouts
+
+
+def test_an_opener_s_answer_is_used() -> None:
+    """An opener handed in answers instead of urllib's default."""
+    opener = Opener(Answer(201, b"made", "application/json"))
+    got = typed_std.urlopen(urllib.request.Request(URL), timeout=3, opener=opener)
+    assert (got.status, got.read()) == (201, b"made")
+    want: list[tuple[str, float | None]] = [(URL, 3)]
+    assert want == opener.asked
+
+
+def test_an_answer_that_is_not_a_response_is_refused() -> None:
+    """Refused by name, the URL and what came back named."""
+    with pytest.raises(typed_std.NotAResponseError) as caught:
+        typed_std.urlopen(urllib.request.Request(URL), timeout=1, opener=Opener(None))
+    assert f"{URL} answered NoneType, not an HTTP response" == str(caught.value)
+
+
+def receivers(tree: ast.AST, qualify: Callable[[ast.expr], str | None]) -> set[str]:
+    """Spell every expression that holds an opener, as written.
+
+    Returns:
+        Each assignment target whose value builds an opener, whose
+        annotation is OpenerDirector, or whose value names one of those.
+
+    """
+    held: set[str] = set()
+    for _ in range(2):
+        for node in ast.walk(tree):
+            if isinstance(node, ast.AnnAssign) and qualify(node.annotation) == OPENER:
+                # A class's field is read as `self.<field>`.
+                name = ast.unparse(node.target)
+                held.update({name, f"self.{name}"})
+            if not isinstance(node, (ast.Assign, ast.AnnAssign)) or node.value is None:
+                continue
+            value = node.value
+            builds = any(
+                isinstance(n, ast.Call) and qualify(n.func) == BUILD
+                for n in ast.walk(value)
+            )
+            names = any(ast.unparse(n) in held for n in ast.walk(value))
+            if builds or names:
+                targets = (
+                    node.targets if isinstance(node, ast.Assign) else [node.target]
+                )
+                held.update(ast.unparse(t) for t in targets)
+    return held
+
+
+def opener_held(
+    receiver: ast.expr, held: set[str], qualify: Callable[[ast.expr], str | None]
+) -> bool:
+    """Say whether `.open` is called on an opener.
+
+    Returns:
+        True for a receiver the file holds an opener in, or one it builds.
+
+    """
+    if ast.unparse(receiver) in held:
+        return True
+    return isinstance(receiver, ast.Call) and qualify(receiver.func) == BUILD
+
+
+def opens(text: str) -> list[int]:
+    """Find the lines that open a URL themselves.
+
+    Returns:
+        The line of each call to urlopen, OpenerDirector.open, or `.open`
+        on an opener the file builds or annotates, in order.
+
+    """
+    tree = ast.parse(text)
+    qualify = call_names.qualifier(tree)
+    held = receivers(tree, qualify)
+    found: list[int] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if qualify(func) in OPENS or (
+            isinstance(func, ast.Attribute)
+            and func.attr == "open"
+            and opener_held(func.value, held, qualify)
+        ):
+            found.append(node.lineno)
+    return sorted(found)
+
+
+# No tracked file but typed_std.py opens a URL itself (#1682).
+def test_the_tree_holds_the_law() -> None:
+    """Every tracked Python file opens URLs through typed_std."""
+    root = CANON
+    listed = support.tracked(root, "*.py")
+    breaches = [
+        f"{path}:{line}: opens a URL outside {HOME}"
+        for path in listed
+        if path != HOME
+        for line in opens((root / path).read_text(encoding="utf-8"))
+    ]
+    none: list[str] = []
+    assert none == breaches
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "import urllib.request\nurllib.request.urlopen(r)\n",
+        "import urllib.request as u\nu.urlopen(r)\n",
+        "from urllib.request import urlopen as go\ngo(r)\n",
+        "import urllib.request\nurllib.request.OpenerDirector.open(o, r)\n",
+        "import urllib.request\nurllib.request.build_opener().open(r)\n",
+        "import urllib.request\no = urllib.request.build_opener()\no.open(r)\n",
+        (
+            "import urllib.request\n"
+            "class Z:\n"
+            "    a: urllib.request.OpenerDirector\n"
+            "    def f(self, r):\n"
+            "        opener = self.a if r else self.a\n"
+            "        opener.open(r)\n"
+        ),
+    ],
+)
+def test_each_spelling_is_an_open(text: str) -> None:
+    """Planted: every way a file can open a URL itself is found."""
+    assert opens(text), text
+
+
+def test_the_typed_opener_and_a_file_are_not_opens() -> None:
+    """Planted: typed_std's urlopen, a path's open, and open() pass."""
+    text = (
+        "import typed_std\nfrom pathlib import Path\n"
+        "typed_std.urlopen(r, timeout=1, opener=o)\n"
+        "Path('x').open()\nopen('x')\n"
+    )
+    none: list[int] = []
+    assert none == opens(text)
+
+
+# The one place a request is built, for http and https only (#2177).
+def builds(text: str) -> list[int]:
+    """Find the lines that build a urllib request themselves.
+
+    Returns:
+        The line of each call to urllib.request.Request, in order.
+
+    """
+    tree = ast.parse(text)
+    qualify = call_names.qualifier(tree)
+    return sorted(
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and qualify(node.func) == "urllib.request.Request"
+    )
+
+
+def test_no_belt_module_builds_a_request_itself() -> None:
+    """Every belt module builds its requests through typed_std.request."""
+    listed = support.tracked(CANON, "belt/*.py", "belt/**/*.py")
+    breaches = [
+        f"{path}:{line}: builds a request outside {HOME}"
+        for path in listed
+        if path != HOME
+        for line in builds((CANON / path).read_text(encoding="utf-8"))
+    ]
+    none: list[str] = []
+    assert none == breaches
+
+
+def test_each_spelling_is_a_build() -> None:
+    """Planted: the attribute and the imported name are both found."""
+    lines: list[int] = [2, 4]
+    text = (
+        "import urllib.request\nurllib.request.Request(u)\n"
+        "from urllib.request import Request as R\nR(u)\n"
+    )
+    assert builds(text) == lines
+
+
+@pytest.mark.parametrize("url", ["https://a.invalid/x?y=1", "http://127.0.0.1:9/x"])
+def test_an_http_url_is_built_as_it_was_given(url: str) -> None:
+    """An https or http URL: built with its data, headers and method."""
+    built = typed_std.request(url, data=b"d", headers={"X-A": "1"}, method="PUT")
+    assert (built.full_url, built.data, built.get_method()) == (url, b"d", "PUT")
+    assert built.get_header("X-a") == "1"
+
+
+@pytest.mark.parametrize(
+    "url", ["file:///etc/passwd", "ftp://a.invalid/x", "a.invalid/x", ""]
+)
+def test_any_other_url_is_refused_by_name(url: str) -> None:
+    """Another scheme, or none: refused, naming the URL, never opened."""
+    with pytest.raises(typed_std.NotHttpError) as refused:
+        typed_std.request(url)
+    assert str(refused.value) == f"{url} is not an http or https URL"
+
+
+def test_a_tool_on_path_is_its_absolute_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Asked as the process starts: the PATH of the moment, absolute."""
+    tool = tmp_path / "planted-tool"
+    tool.write_text("#!/bin/sh\n", encoding="utf-8")
+    tool.chmod(0o755)
+    monkeypatch.setenv("PATH", str(tmp_path))
+    assert typed_std.on_path("planted-tool") == str(tool)
+
+
+def test_a_tool_off_path_is_its_bare_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Not found: the bare name, so the start fails by the tool's own name."""
+    monkeypatch.setenv("PATH", str(tmp_path))
+    assert typed_std.on_path("no-such-tool") == "no-such-tool"
+
+
+def test_a_handed_environment_s_path_is_the_one_searched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The PATH the process is given, not this process's, as subprocess reads it."""
+    tool = tmp_path / "planted-tool"
+    tool.write_text("#!/bin/sh\n", encoding="utf-8")
+    tool.chmod(0o755)
+    monkeypatch.setenv("PATH", "/nonexistent")
+    assert typed_std.on_path("planted-tool", {"PATH": str(tmp_path)}) == str(tool)

@@ -92,9 +92,9 @@ jobs:
 
       - name: Enumerate every pinned digest
         id: plan
-        # One derivation and its tests: release/matrix.py (#1385).
+        # One derivation and its tests: belt/release/matrix.py (#1385).
         run: |
-          "${ORG_PYTHON}" release/matrix.py base-images docker/pgrx-base-images.toml \
+          "${ORG_PYTHON}" -I belt matrix base-images docker/pgrx-base-images.toml \
             >> "${GITHUB_OUTPUT}"
 
       # This job's findings records, for the report job (#1933).
@@ -219,7 +219,7 @@ jobs:
   # job (#1966): for each red job of a run on the default branch, one
   # issue titled "red: <job> (<workflow>)" and labelled red-check holds
   # its findings and each red leg's log tail; the next run with every
-  # leg green or skipped closes it. mise/standing_issue.py has the
+  # leg green or skipped closes it. belt/standing_issue.py has the
   # outcomes. Only `needs:` names the jobs above, so it grows with them.
   report:
     name: Report red jobs
@@ -265,7 +265,7 @@ jobs:
           REF: ${{ github.ref }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
-          "${ORG_PYTHON}" .org-canon/mise/standing_issue.py --workflow "${WORKFLOW}" \
+          "${ORG_PYTHON}" -I .org-canon/belt standing-issue --workflow "${WORKFLOW}" \
             --run-id "${RUN_ID}" --ref "${REF}" \
             --default-branch "${DEFAULT_BRANCH}" \
             --findings "${RUNNER_TEMP}/findings"

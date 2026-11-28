@@ -1,0 +1,983 @@
+"""Rows for `measured`, the belt command a test task runs through (#1667).
+
+Draft, unpushed: the rows #1667's Done-when names for `measured` itself.
+"""
+
+import os
+import shutil
+import signal
+import subprocess
+import tempfile
+from pathlib import Path
+
+import pytest
+
+from belt import gate_cache_key
+from belt.typed_pytest import fixture
+from tests import support
+
+# The calls a run of two makes, each asking for the venv.
+CALLS = 2
+
+# A status the command exits with, for measured to pass back.
+CHILD_STATUS = 7
+
+BELT = support.MISE
+MEASURED = BELT / "measured"
+GIT = support.tool("git")
+SH = support.tool("sh")
+# What a process gains by being exec'd through a bash script rather than
+# directly: the shell's own bookkeeping, and macOS's text encoding,
+# which the system adds to every process. Nothing a caller passes.
+SHELL_ADDED = frozenset({"PWD", "OLDPWD", "SHLVL", "_", "__CF_USER_TEXT_ENCODING"})
+# What a row expects to differ: nothing.
+NOTHING: dict[str, str] = {}
+ENV = support.tool("env")
+# The child prints its environment NUL-separated, so a row compares it
+# whole, values with newlines included.
+DUMP = [ENV, "-0"]
+
+
+def environment(dump: str) -> dict[str, str]:
+    """Read an `env -0` listing.
+
+    Returns:
+        Each variable's value by name.
+
+    """
+    pairs = (entry.partition("=") for entry in dump.split("\0") if entry)
+    return {name: value for name, _, value in pairs}
+
+
+def plant(root: Path, *, floor: bool, env: support.Env) -> Path:
+    """Make a git tree, with or without a `.coverage-floor`.
+
+    Returns:
+        The tree.
+
+    """
+    tree = root / "tree"
+    tree.mkdir()
+    subprocess.run([GIT, "init", "-q", str(tree)], check=True, env=env())
+    if floor:
+        (tree / ".coverage-floor").write_text("python 50.0\n")
+    return tree
+
+
+def track(tree: Path, *names: str, env: support.Env) -> None:
+    """Add planted files to the tree's index: `measured` asks git (#2013)."""
+    subprocess.run([GIT, "add", *names], cwd=tree, check=True, env=env())
+
+
+def unchanged(given: dict[str, str], seen: dict[str, str]) -> dict[str, str]:
+    """Compare what a child saw with what it was given.
+
+    Returns:
+        Every variable that was added, changed or dropped, beyond the
+        shell's own bookkeeping; empty when the environment came
+        through unchanged.
+
+    """
+    names = (set(given) | set(seen)) - SHELL_ADDED
+    return {n: seen.get(n, "<dropped>") for n in names if given.get(n) != seen.get(n)}
+
+
+def run(
+    tree: Path, argv: list[str], *, make_env: support.Env, **env: str
+) -> subprocess.CompletedProcess[str]:
+    """Run `measured` with argv in the tree.
+
+    Returns:
+        The finished process, text mode.
+
+    """
+    return subprocess.run(
+        [str(MEASURED), *argv],
+        cwd=tree,
+        env=make_env(**env),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+
+
+# Without a floor, or outside a measured run, `measured` is `exec "$@"`.
+def test_no_floor_leaves_the_environment_unchanged(env: support.Env) -> None:
+    """A run directory but no floor: the child sees exactly what was passed."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = plant(Path(tmp), floor=False, env=env)
+        given = {"ORG_COVERAGE_RUN": str(Path(tmp) / "run"), "PYTHONPATH": "src"}
+        out = run(tree, DUMP, **given, make_env=env)
+        assert out.returncode == 0, out.stderr
+        seen = environment(out.stdout)
+        assert unchanged(env(**given), seen) == NOTHING
+
+
+def test_no_run_directory_leaves_the_environment_unchanged(env: support.Env) -> None:
+    """A floor but no run directory (outside mise): nothing is added."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = plant(Path(tmp), floor=True, env=env)
+        out = run(tree, DUMP, PYTHONPATH="src", make_env=env)
+        assert out.returncode == 0, out.stderr
+        seen = environment(out.stdout)
+        assert unchanged(env(PYTHONPATH="src"), seen) == NOTHING
+
+
+def test_the_exit_status_is_the_commands(env: support.Env) -> None:
+    """Exec, not a wrapper: the status comes back unchanged."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = plant(Path(tmp), floor=False, env=env)
+        out = run(tree, [SH, "-c", f"exit {CHILD_STATUS}"], make_env=env)
+        assert out.returncode == CHILD_STATUS
+
+
+def test_a_signal_is_the_commands(env: support.Env) -> None:
+    """A command killed by a signal is reported killed by that signal."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = plant(Path(tmp), floor=False, env=env)
+        out = run(tree, [SH, "-c", "kill -TERM $$"], make_env=env)
+        assert out.returncode == -signal.SIGTERM
+
+
+def test_no_command_is_refused(env: support.Env) -> None:
+    """`measured` with nothing to run says how it is used."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = plant(Path(tmp), floor=False, env=env)
+        out = run(tree, [], make_env=env)
+        assert out.returncode == support.USAGE
+        assert "measured: no command" in out.stderr
+
+
+# With a floor and a run directory the measurement is merged in.
+def measured_env(tmp: str, *, env: support.Env, **given: str) -> dict[str, str]:
+    """Run the dump through `measured` in a floored tree.
+
+    Returns:
+        The child's environment.
+
+    """
+    tree = plant(Path(tmp), floor=True, env=env)
+    out = run(
+        tree, DUMP, ORG_COVERAGE_RUN=str(Path(tmp) / "run"), **given, make_env=env
+    )
+    assert out.returncode == 0, out.stderr
+    return environment(out.stdout)
+
+
+# The belt's interpreter, a stub: asked for the pytest tool venv
+# (`-I <belt> tool-python measured pytest`), it answers the venv's
+# interpreter, itself a stub printing the argv it was exec'd with,
+# NUL-separated; TOOL_REFUSED has it refuse instead, as tool_python
+# does for a venv on another Python (#1788).
+BELT_PYTHON = """#!/bin/sh
+echo "$*" >> "{log}"
+if [ -n "${{TOOL_REFUSED:-}}" ]; then
+  echo "test: $TOOL_REFUSED" >&2
+  exit 1
+fi
+echo "{venv}"
+"""
+VENV_PYTHON = """#!/bin/sh
+printf '%s\\0' "$0" "$@"
+"""
+
+
+def pytest_run(
+    tmp: str, argv: list[str], *, env: support.Env, **given: str
+) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
+    """Run `measured` in a floored tree, the belt's Python a stub.
+
+    Returns:
+        The finished process, the venv's planted interpreter and the
+        log of what the belt's was asked.
+
+    """
+    tree = Path(tmp) / "tree"
+    if not tree.exists():
+        tree = plant(Path(tmp), floor=True, env=env)
+    bin_dir = Path(tmp) / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    venv, log = bin_dir / "venv-python", Path(tmp) / "asked"
+    venv.write_text(VENV_PYTHON, encoding="utf-8")
+    belt = bin_dir / "belt-python"
+    belt.write_text(BELT_PYTHON.format(log=log, venv=venv), encoding="utf-8")
+    for stub in (venv, belt):
+        stub.chmod(0o755)
+    out = run(
+        tree,
+        argv,
+        ORG_COVERAGE_RUN=str(Path(tmp) / "run"),
+        ORG_PYTHON=str(belt),
+        **given,
+        make_env=env,
+    )
+    return out, venv, log
+
+
+def rewritten(tmp: str, venv: Path, *rest: str) -> list[str]:
+    """Name the argv a pytest run is exec'd as, under coverage.
+
+    Returns:
+        The venv's interpreter running coverage over pytest and `rest`.
+
+    """
+    rc = f"--rcfile={Path(tmp) / 'run' / 'coverage.rc'}"
+    return [str(venv), "-m", "coverage", "run", rc, "-m", "pytest", *rest]
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [["pytest", "-q", "tests"], ["python3", "-m", "pytest", "-q", "tests"]],
+    ids=["pytest", "python3 -m pytest"],
+)
+def test_a_pytest_run_runs_under_coverage(argv: list[str], env: support.Env) -> None:
+    """`pytest …` or `<python> -m pytest …`: the venv's coverage runs it (#2177)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        out, venv, log = pytest_run(tmp, argv, env=env)
+        assert out.returncode == 0, out.stderr
+        assert out.stdout.split("\0")[:-1] == rewritten(tmp, venv, "-q", "tests")
+        belt = support.CANON / "belt"
+        assert log.read_text(encoding="utf-8") == (
+            f"-I {belt} tool-python measured pytest\n"
+        )
+
+
+def test_any_other_command_measures_no_python(env: support.Env) -> None:
+    """`sh -c …` is no pytest run: exec'd as it is, the venv never asked."""
+    with tempfile.TemporaryDirectory() as tmp:
+        argv = [SH, "-c", 'printf %s "$PYTHONPATH"']
+        out, _venv, log = pytest_run(tmp, argv, PYTHONPATH="src", env=env)
+        assert (out.returncode, out.stdout) == (0, "src"), out.stderr
+        assert not log.exists()
+        assert not (Path(tmp) / "run" / "coverage.rc").exists()
+
+
+def test_the_rc_file_names_the_run_and_the_root(env: support.Env) -> None:
+    """The run's rc file: its data file in the run, the tree as source."""
+    with tempfile.TemporaryDirectory() as tmp:
+        out, _venv, _log = pytest_run(tmp, ["pytest"], env=env)
+        assert out.returncode == 0, out.stderr
+        rc = (Path(tmp) / "run" / "coverage.rc").read_text()
+        tree = (Path(tmp) / "tree").resolve()
+        assert f"source = {tree}\n" in rc
+        assert f"data_file = {Path(tmp) / 'run' / 'python'}/.coverage\n" in rc
+        assert "branch = true\n" in rc
+        assert "omit =\n    */test_*.py\n    */prop_*.py\n" in rc
+
+
+def test_the_rc_file_is_written_once_per_run(env: support.Env) -> None:
+    """A second call in the run reads the first one's file, never rewrites it."""
+    with tempfile.TemporaryDirectory() as tmp:
+        first, _venv, _log = pytest_run(tmp, ["pytest"], env=env)
+        assert first.returncode == 0, first.stderr
+        rc = Path(tmp) / "run" / "coverage.rc"
+        rc.write_text(rc.read_text() + "# the first call's\n")
+        second, _venv, log = pytest_run(tmp, ["pytest"], env=env)
+        assert second.returncode == 0, second.stderr
+        assert rc.read_text().endswith("# the first call's\n")
+        assert len(log.read_text(encoding="utf-8").splitlines()) == CALLS
+
+
+def test_a_refused_venv_runs_nothing(env: support.Env) -> None:
+    """The venv's check refuses: measured exits 1 with its words, and no suite."""
+    with tempfile.TemporaryDirectory() as tmp:
+        refused = "coverage runs on 'no interpreter'"
+        out, _venv, _log = pytest_run(tmp, ["pytest"], TOOL_REFUSED=refused, env=env)
+        assert (out.returncode, out.stdout) == (1, "")
+        assert out.stderr == f"test: {refused}\n"
+
+
+def test_a_task_plpgsql_report_is_kept(env: support.Env) -> None:
+    """An ORG_PLPGSQL_COVERAGE the task set is not replaced."""
+    with tempfile.TemporaryDirectory() as tmp:
+        seen = measured_env(tmp, ORG_PLPGSQL_COVERAGE="/own/reports", env=env)
+        assert seen["ORG_PLPGSQL_COVERAGE"] == "/own/reports"
+
+
+def test_the_plpgsql_reports_land_in_the_run_directory(env: support.Env) -> None:
+    """Unset by the task, the reports directory is the run's (#2163)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        seen = measured_env(tmp, env=env)
+        assert (
+            str(Path(tmp) / "run" / "plpgsql-coverage") == seen["ORG_PLPGSQL_COVERAGE"]
+        )
+        # Created by the teardown's collect, never by measured: a run
+        # that collected nothing leaves no directory to read.
+        assert not (Path(tmp) / "run" / "plpgsql-coverage").exists()
+
+
+def test_it_runs_under_sh(env: support.Env) -> None:
+    """Named from an `sh -c` line, as a task with `shell = "sh -c"` does."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = plant(Path(tmp), floor=True, env=env)
+        line = f'"{MEASURED}" sh -c \'printf %s "$PYTHONPATH"\''
+        out = subprocess.run(
+            [SH, "-c", line],
+            cwd=tree,
+            env=env(ORG_COVERAGE_RUN=str(Path(tmp) / "run"), PYTHONPATH="src"),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=60,
+        )
+        assert (out.returncode, out.stdout) == (0, "src"), out.stderr
+
+
+def dead_pid() -> int:
+    """Start a process and wait for it to end.
+
+    Returns:
+        A pid no process holds any more.
+
+    """
+    done = subprocess.run(
+        [SH, "-c", "echo $$"], capture_output=True, text=True, check=True
+    )
+    return int(done.stdout)
+
+
+# The first call in a run removes run directories whose mise is gone.
+def test_a_dead_run_is_removed_and_a_live_one_kept(env: support.Env) -> None:
+    """A sibling for a dead pid goes; one for a live pid stays."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = plant(Path(tmp), floor=True, env=env)
+        dead = Path(tmp) / f"org-coverage-{dead_pid()}"
+        live = Path(tmp) / f"org-coverage-{os.getpid()}"
+        for old in (dead, live):
+            (old / "python").mkdir(parents=True)
+        this = Path(tmp) / f"org-coverage-{dead_pid()}"
+        out = run(tree, [SH, "-c", "true"], ORG_COVERAGE_RUN=str(this), make_env=env)
+        assert out.returncode == 0, out.stderr
+        assert not dead.exists(), "a dead run's directory was left"
+        assert live.exists(), "a live run's directory was removed"
+        assert this.is_dir(), "this run's directory was not made"
+
+
+GO_COVER = "-cover -coverpkg=./... -covermode=atomic -exec={belt}/go-test-exec"
+GO_REFUSAL = (
+    "which would measure Go a second way or\n"
+    "  replace the measurement's own (#1651); drop it: the go leg measures every\n"
+    "  go test with -cover -coverpkg=./... -covermode=atomic into the run\n"
+)
+
+
+# In a tree with go.mod, the cover flags join the command's GOFLAGS (#1651).
+def go_run(
+    tmp: str, argv: list[str], *, env: support.Env, **given: str
+) -> tuple[Path, str, int]:
+    """Run `measured` in a floored Go tree.
+
+    Returns:
+        The run's directory, and what the command printed or refused.
+
+    """
+    tree = plant(Path(tmp), floor=True, env=env)
+    (tree / "go.mod").write_text("module example.com/x\n", encoding="utf-8")
+    track(tree, "go.mod", env=env)
+    run_dir = Path(tmp) / "run"
+    out = run(tree, argv, ORG_COVERAGE_RUN=str(run_dir), **given, make_env=env)
+    return run_dir, out.stdout + out.stderr, out.returncode
+
+
+def test_the_tasks_own_goflags_are_kept_in_front(env: support.Env) -> None:
+    """The task's -trimpath stays; the cover flags and the program follow."""
+    with tempfile.TemporaryDirectory() as tmp:
+        run_dir, out, status = go_run(tmp, DUMP, GOFLAGS="-trimpath", env=env)
+        assert status == 0, out
+        seen = environment(out)
+        assert "-trimpath " + GO_COVER.format(belt=BELT) == seen["GOFLAGS"]
+        assert str(run_dir / "go") == seen["GOCOVERDIR"]
+        assert (run_dir / "go").is_dir()
+
+
+def test_no_go_mod_leaves_goflags_alone(env: support.Env) -> None:
+    """A tree that is not Go is handed no Go flag."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = plant(Path(tmp), floor=True, env=env)
+        out = run(
+            tree,
+            DUMP,
+            ORG_COVERAGE_RUN=str(Path(tmp) / "run"),
+            GOFLAGS="-x",
+            make_env=env,
+        )
+        assert out.returncode == 0, out.stderr
+        seen = environment(out.stdout)
+        assert seen["GOFLAGS"] == "-x"
+        assert "GOCOVERDIR" not in seen
+
+
+@pytest.mark.parametrize(
+    ("argv", "given", "named"),
+    [
+        (
+            ["go", "test", "./...", "-coverprofile=x.out"],
+            {},
+            "-coverprofile=x.out on its go test",
+        ),
+        ([SH, "-c", "go test --cover ./..."], {}, "--cover on its go test"),
+        (
+            [SH, "-c", "go vet ./... && /usr/local/go/bin/go test -exec=x ./..."],
+            {},
+            "-exec=x on its go test",
+        ),
+        (
+            ["go", "test", "./..."],
+            {"GOFLAGS": "-covermode=set"},
+            "-covermode=set is in GOFLAGS",
+        ),
+        (
+            ["go", "test", "./..."],
+            {"GOCOVERDIR": "/elsewhere"},
+            "the environment's GOCOVERDIR is set (GOCOVERDIR=/elsewhere)",
+        ),
+    ],
+)
+def test_a_measuring_flag_of_the_tasks_own_is_refused(
+    argv: list[str], given: dict[str, str], named: str, env: support.Env
+) -> None:
+    """On its `go test`, in either spelling, or already in GOFLAGS."""
+    with tempfile.TemporaryDirectory() as tmp:
+        _, out, status = go_run(tmp, argv, **given, env=env)
+        assert status == 1, out
+        assert f"measured: {named}, {GO_REFUSAL}" == out
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "find . -name go.mod -exec true \\; ; printf ok",
+        "printf ok; exit 0; go test ./... -args -cover",
+    ],
+)
+def test_words_outside_a_go_test_are_not_go_flags(line: str, env: support.Env) -> None:
+    """`find -exec` and an `-args` tail are the command's, not go's."""
+    with tempfile.TemporaryDirectory() as tmp:
+        _, out, status = go_run(tmp, [SH, "-c", line], env=env)
+        assert status == 0, out
+        assert out == "ok"
+
+
+# A stand-in cargo, enough to follow the Rust mechanism (#1653): it logs
+# each call with the CARGO_TARGET_DIR it was started with, answers `cargo
+# metadata` with the planted tree's target directory, and `llvm-cov
+# show-env` as cargo-llvm-cov 0.9.1 does: the profile path is under the
+# CARGO_TARGET_DIR it is given, or under `target/` without one (probed on
+# release-lab). STUB_NO_TARGET answers a metadata with no target
+# directory; STUB_CLEAN_SECONDS makes `llvm-cov clean` take that long and
+# log its end.
+CARGO = """#!/usr/bin/env bash
+echo "$* | CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-}" >> "${STUB_LOG}"
+case "$1 ${2:-}" in
+  "metadata --no-deps")
+    if [[ -n ${STUB_NO_TARGET:-} ]]; then
+      echo '{"packages": []}'
+    else
+      printf '{"target_directory": "%s/target"}\\n' "${PWD}"
+    fi
+    ;;
+  "llvm-cov show-env")
+    dir=${CARGO_TARGET_DIR:-${PWD}/target}
+    echo "export LLVM_PROFILE_FILE='${dir}/tree-%p-%8m.profraw'"
+    echo "export RUSTC_WRAPPER=/stub/cargo-llvm-cov"
+    echo "export CARGO_LLVM_COV_TARGET_DIR=${dir}"
+    ;;
+  "llvm-cov clean")
+    # cargo refuses an untagged directory; cargo-llvm-cov says so as a
+    # warning and exits 0 (#2070).
+    if [[ -n ${STUB_REFUSE_UNTAGGED:-} && ! -f ${CARGO_TARGET_DIR}/CACHEDIR.TAG ]]; then
+      echo "warning: process didn't exit successfully:" \\
+        "\\`cargo clean\\` (exit status: 101)" >&2
+    fi
+    if [[ -n ${STUB_CLEAN_SECONDS:-} ]]; then
+      sleep "${STUB_CLEAN_SECONDS}"
+      echo "clean ended" >> "${STUB_LOG}"
+    fi
+    ;;
+  *) ;;
+esac
+"""
+# The directory digest of the stand-in `rustc` the rows run beside
+# (#1877), under the `stable` toolchain they set.
+STABLE = gate_cache_key.directory_digest(support.rustc_verbose("stable"))
+
+# What a row expects when the stand-in cargo was never called.
+NO_CALLS: list[str] = []
+RUST_REFUSAL = (
+    "which would measure Rust a second way or\n"
+    "  replace the measurement's own (#1653); drop it: the rust leg measures every\n"
+    "  cargo the test command starts, instrumented into a target directory of its own\n"
+)
+
+
+# A test command that runs cargo llvm-cov itself, after a plain test.
+CARGO_THEN_LLVM_COV = [SH, "-c", "cargo test && cargo llvm-cov --lcov"]
+
+
+# In a tree with Cargo.toml the command's own cargo is instrumented (#1653).
+def rust_run(
+    tmp: str,
+    argv: list[str],
+    *,
+    run_name: str = "run",
+    env: support.Env,
+    rustc: support.Rustc,
+    **given: str,
+) -> tuple[Path, subprocess.CompletedProcess[str], list[str]]:
+    """Run `measured` in a floored Rust tree, beside a stand-in cargo.
+
+    Returns:
+        The tree, the finished process, and cargo's log of calls.
+
+    """
+    base = Path(tmp)
+    tree = base / "tree"
+    if not tree.exists():
+        tree = plant(base, floor=True, env=env)
+        (tree / "Cargo.toml").write_text("[workspace]\n", encoding="utf-8")
+        track(tree, "Cargo.toml", env=env)
+        stubs = base / "stubs"
+        stubs.mkdir()
+        (stubs / "cargo").write_text(CARGO, encoding="utf-8")
+        (stubs / "cargo").chmod(0o755)
+        rustc(stubs)
+    log = base / "cargo.log"
+    path = f"{base / 'stubs'}{os.pathsep}{os.environ['PATH']}"
+    out = run(
+        tree,
+        argv,
+        ORG_COVERAGE_RUN=str(base / run_name),
+        PATH=path,
+        STUB_LOG=str(log),
+        **({"RUSTUP_TOOLCHAIN": "stable"} | given),
+        make_env=env,
+    )
+    calls = log.read_text().splitlines() if log.exists() else []
+    return tree.resolve(), out, calls
+
+
+def test_the_target_directory_is_set_before_show_env_is_asked(
+    env: support.Env, rustc: support.Rustc
+) -> None:
+    """`<target>/llvm-cov-target-<digest>`, exported, then show-env under it."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tree, out, calls = rust_run(tmp, DUMP, env=env, rustc=rustc)
+        assert out.returncode == 0, out.stderr
+        seen = environment(out.stdout)
+        target = f"{tree}/target/llvm-cov-target-{STABLE}"
+        assert target == seen["CARGO_TARGET_DIR"]
+        assert f"{target}/tree-%p-%8m.profraw" == seen["LLVM_PROFILE_FILE"]
+        assert seen["RUSTC_WRAPPER"] == "/stub/cargo-llvm-cov"
+        assert f"llvm-cov show-env --sh | CARGO_TARGET_DIR={target}" in calls
+
+
+def test_old_profiles_are_cleaned_once_per_run(
+    env: support.Env, rustc: support.Rustc
+) -> None:
+    """Two calls in one run clean once; the next run cleans again.
+
+    The first run has ended before the next starts: its directory is
+    gone, so its claim on the build directory has lapsed (#2062).
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        calls: list[str] = []
+        for run_name in ("run", "run", "next"):
+            if run_name == "next":
+                shutil.rmtree(Path(tmp) / "run")
+            _, out, calls = rust_run(tmp, DUMP, run_name=run_name, env=env, rustc=rustc)
+            assert out.returncode == 0, out.stderr
+        target = f"{Path(tmp).resolve()}/tree/target/llvm-cov-target-{STABLE}"
+        cleaned = [c for c in calls if c.startswith("llvm-cov clean")]
+        twice: list[str] = [
+            f"llvm-cov clean --workspace | CARGO_TARGET_DIR={target}"
+        ] * 2
+        assert twice == cleaned
+
+
+def test_a_directory_another_live_run_holds_is_refused(
+    env: support.Env, rustc: support.Rustc
+) -> None:
+    """The planted row (#2062): another live run's claim ends the call.
+
+    On main the second run cleaned the first one's profiles and ran
+    its suite into the same directory.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        tree, out, _ = rust_run(tmp, DUMP, env=env, rustc=rustc)
+        assert out.returncode == 0, out.stderr
+        target = tree / "target" / f"llvm-cov-target-{STABLE}"
+        other = Path(tmp).resolve() / f"org-coverage-{os.getpid()}"
+        other.mkdir()
+        (target / ".org-coverage-owner").write_text(f"{other}\n")
+        (Path(tmp) / "cargo.log").unlink()
+        _, out, calls = rust_run(
+            tmp, ["cargo", "test"], run_name="next", env=env, rustc=rustc
+        )
+        assert out.returncode == 1, out.stderr
+        assert (
+            f"{target} is being measured by another run ({other});"
+            " wait for it to finish\n"
+        ) in out.stderr
+        started = [c for c in calls if c.startswith(("llvm-cov clean", "test"))]
+        assert started == NO_CALLS
+        assert f"{other}\n" == (target / ".org-coverage-owner").read_text()
+
+
+def test_the_build_directory_is_tagged_before_its_clean(
+    env: support.Env, rustc: support.Rustc
+) -> None:
+    """The planted row (#2070): cargo cleans only a tagged directory.
+
+    On main the claim made the directory untagged, cargo refused the
+    clean, cargo-llvm-cov warned and exited 0, and the run went on
+    measuring beside the previous build's executables.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        tree, out, calls = rust_run(
+            tmp, ["cargo", "test"], STUB_REFUSE_UNTAGGED="1", env=env, rustc=rustc
+        )
+        assert out.returncode == 0, out.stderr
+        assert "didn't exit successfully" not in out.stderr
+        target = tree / "target" / f"llvm-cov-target-{STABLE}"
+        assert (target / "CACHEDIR.TAG").is_file()
+        assert f"test | CARGO_TARGET_DIR={target}" in calls
+
+
+def test_a_refused_clean_ends_the_call(env: support.Env, rustc: support.Rustc) -> None:
+    """A clean cargo refused is red by name, and nothing is built."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tree, out, calls = rust_run(
+            tmp,
+            ["cargo", "test"],
+            STUB_REFUSE_UNTAGGED="1",
+            run_name="plant",
+            env=env,
+            rustc=rustc,
+        )
+        target = tree / "target" / f"llvm-cov-target-{STABLE}"
+        (target / "CACHEDIR.TAG").unlink()
+        # The claim tags it again: plant the refusal after the claim.
+        (target / ".org-coverage-owner").unlink()
+        stub = Path(tmp) / "stubs" / "cargo"
+        stub.write_text(
+            stub.read_text().replace("! -f ${CARGO_TARGET_DIR}", "-n x || ! -f x"),
+            encoding="utf-8",
+        )
+        (Path(tmp) / "cargo.log").unlink()
+        _, out, calls = rust_run(
+            tmp,
+            ["cargo", "test"],
+            STUB_REFUSE_UNTAGGED="1",
+            run_name="next",
+            env=env,
+            rustc=rustc,
+        )
+        assert out.returncode == 1, out.stderr
+        assert f"the workspace clean of {target} did not happen" in out.stderr
+        built: list[str] = [c for c in calls if c.startswith("test")]
+        assert built == NO_CALLS
+
+
+def test_a_call_beside_the_first_waits_for_its_clean(
+    env: support.Env, rustc: support.Rustc
+) -> None:
+    """Two calls in one run, side by side: both build after the clean (#2061).
+
+    On main the second call found the marker the first had just made
+    and went on without waiting, so it built while the clean ran; with
+    a workspace clean, the clean would delete what it built.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        # Plant the tree and its stubs; this call measures nothing.
+        rust_run(tmp, [SH, "-c", "true"], run_name="plant", env=env, rustc=rustc)
+        base = Path(tmp)
+        # The planting run has ended: its claim lapses (#2062).
+        shutil.rmtree(base / "plant")
+        log = base / "cargo.log"
+        log.unlink()
+        environ = env(
+            ORG_COVERAGE_RUN=str(base / "run"),
+            PATH=f"{base / 'stubs'}{os.pathsep}{os.environ['PATH']}",
+            STUB_LOG=str(log),
+            STUB_CLEAN_SECONDS="1",
+            RUSTUP_TOOLCHAIN="stable",
+        )
+        calls = [
+            subprocess.Popen(
+                [str(MEASURED), SH, "-c", f"cargo test --{name}"],
+                cwd=base / "tree",
+                env=environ,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            for name in ("first", "second")
+        ]
+        for call in calls:
+            _, err = call.communicate(timeout=60)
+            assert call.wait() == 0, err
+        lines = [ln.split(" | ")[0] for ln in log.read_text().splitlines()]
+        cleans = [ln for ln in lines if ln.startswith("llvm-cov clean")]
+        assert len(cleans) == 1, lines
+        ended = lines.index("clean ended")
+        for name in ("first", "second"):
+            assert lines.index(f"test --{name}") > ended, lines
+
+
+def test_two_compilers_measure_into_two_directories(
+    env: support.Env, rustc: support.Rustc
+) -> None:
+    """Two `rustc` differing only in `release:`: two directories (#1877).
+
+    On main both exported `<target>/llvm-cov-target`, so a bump's
+    executables landed beside the old compiler's and the report read
+    both.
+    """
+    seen = []
+    for release in ("1.97.1", "1.100.0"):
+        with tempfile.TemporaryDirectory() as tmp:
+            tree, out, _ = rust_run(
+                tmp, DUMP, RUSTUP_TOOLCHAIN=release, env=env, rustc=rustc
+            )
+            assert out.returncode == 0, out.stderr
+            verbose = support.rustc_verbose(release)
+            digest = gate_cache_key.directory_digest(verbose)
+            target = environment(out.stdout)["CARGO_TARGET_DIR"]
+            assert f"{tree}/target/llvm-cov-target-{digest}" == target
+            seen.append(target.rsplit("/", 1)[1])
+    assert seen[0] != seen[1]
+
+
+def test_no_cargo_toml_is_handed_no_rust_environment(env: support.Env) -> None:
+    """A floored tree that is not Rust: no cargo is asked anything."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = plant(Path(tmp), floor=True, env=env)
+        out = run(tree, DUMP, ORG_COVERAGE_RUN=str(Path(tmp) / "run"), make_env=env)
+        assert out.returncode == 0, out.stderr
+        seen = environment(out.stdout)
+        assert "CARGO_TARGET_DIR" not in seen
+        assert "LLVM_PROFILE_FILE" not in seen
+
+
+def test_a_metadata_with_no_target_directory_is_refused(
+    env: support.Env, rustc: support.Rustc
+) -> None:
+    """Nowhere to measure into: refused by name, and nothing runs."""
+    with tempfile.TemporaryDirectory() as tmp:
+        _, out, calls = rust_run(
+            tmp, [SH, "-c", "echo ran"], STUB_NO_TARGET="1", env=env, rustc=rustc
+        )
+        assert out.returncode == 1
+        assert out.stderr == (
+            "measured: cargo metadata named no target_directory — nowhere to"
+            " measure Rust into\n"
+        )
+        assert not out.stdout
+        assert "show-env" not in "\n".join(calls)
+
+
+@pytest.mark.parametrize(
+    ("argv", "given", "named"),
+    [
+        (
+            DUMP,
+            {"CARGO_TARGET_DIR": "/own"},
+            "the environment's CARGO_TARGET_DIR is set (CARGO_TARGET_DIR=/own)",
+        ),
+        (
+            DUMP,
+            {"RUSTC_WRAPPER": "sccache"},
+            "the environment's RUSTC_WRAPPER is set (RUSTC_WRAPPER=sccache)",
+        ),
+        (
+            DUMP,
+            {"LLVM_PROFILE_FILE": "/own/%p.profraw"},
+            (
+                "the environment's LLVM_PROFILE_FILE is set"
+                " (LLVM_PROFILE_FILE=/own/%p.profraw)"
+            ),
+        ),
+        (CARGO_THEN_LLVM_COV, {}, "cargo llvm-cov is in the test command"),
+        (
+            ["/usr/bin/cargo", "+nightly", "llvm-cov", "test"],
+            {},
+            "cargo llvm-cov is in the test command",
+        ),
+        (
+            ["/opt/bin/cargo-llvm-cov", "llvm-cov", "test"],
+            {},
+            "/opt/bin/cargo-llvm-cov is in the test command",
+        ),
+    ],
+)
+def test_a_task_that_measures_itself_is_refused(
+    argv: list[str],
+    given: dict[str, str],
+    named: str,
+    env: support.Env,
+    rustc: support.Rustc,
+) -> None:
+    """Item 10's four, by message, before cargo is asked anything."""
+    with tempfile.TemporaryDirectory() as tmp:
+        _, out, calls = rust_run(tmp, argv, **given, env=env, rustc=rustc)
+        assert out.returncode == 1, out.stderr
+        assert f"measured: {named}, {RUST_REFUSAL}" == out.stderr
+        assert calls == NO_CALLS
+
+
+def test_llvm_cov_outside_a_cargo_is_not_refused(
+    env: support.Env, rustc: support.Rustc
+) -> None:
+    """A word `llvm-cov` no cargo starts is the command's own."""
+    with tempfile.TemporaryDirectory() as tmp:
+        _, out, _ = rust_run(tmp, [SH, "-c", "echo llvm-cov"], env=env, rustc=rustc)
+        assert out.returncode == 0, out.stderr
+        assert out.stdout == "llvm-cov\n"
+
+
+# A package manager that prints the command it was handed, NUL-separated.
+PNPM = """\
+#!/bin/sh
+printf '%s\\0' pnpm "$@"
+"""
+LOCK = (
+    "lockfileVersion: '9.0'\npackages:\n"
+    "  vitest@4.1.12:\n    resolution: {integrity: stub}\n"
+    "  '@vitest/coverage-v8@4.1.12':\n    resolution: {integrity: stub}\n"
+)
+
+
+class VitestMeasured:
+    """In a vitest tree the run itself carries the coverage flags (#2105)."""
+
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
+        """Give the row's scratch directories one home, removed after it."""
+        self.make_env = env
+        self.tmp = tmp_path
+
+    def vitest_run(
+        self, argv: list[str], *, floor: bool = True, calls: int = 1
+    ) -> tuple[Path, subprocess.CompletedProcess[str]]:
+        """Run `measured` `calls` times in one run of a pnpm vitest tree.
+
+        Returns:
+            The run's directory and the last call's process.
+
+        """
+        tmp = tempfile.mkdtemp(dir=self.tmp)
+        base = Path(tmp)
+        tree = plant(base, floor=floor, env=self.make_env)
+        (tree / "package.json").write_text("{}", encoding="utf-8")
+        (tree / "pnpm-lock.yaml").write_text(LOCK, encoding="utf-8")
+        track(tree, "package.json", "pnpm-lock.yaml", env=self.make_env)
+        stubs = base / "stubs"
+        stubs.mkdir()
+        (stubs / "pnpm").write_text(PNPM, encoding="utf-8")
+        (stubs / "pnpm").chmod(0o755)
+        run_dir = base / "run"
+        path = f"{stubs}{os.pathsep}{os.environ['PATH']}"
+        out = run(
+            tree, argv, ORG_COVERAGE_RUN=str(run_dir), PATH=path, make_env=self.make_env
+        )
+        for _ in range(calls - 1):
+            out = run(
+                tree,
+                argv,
+                ORG_COVERAGE_RUN=str(run_dir),
+                PATH=path,
+                make_env=self.make_env,
+            )
+        return run_dir, out
+
+
+@fixture
+def vitest_measured(tmp_path: Path, env: support.Env) -> VitestMeasured:
+    """Give each row its own VitestMeasured.
+
+    Returns:
+        The row's VitestMeasured.
+
+    """
+    return VitestMeasured(tmp_path, env=env)
+
+
+def execd(out: subprocess.CompletedProcess[str]) -> list[str]:
+    """Read the command the stub was exec'd as.
+
+    Returns:
+        Its words.
+
+    """
+    return out.stdout.split("\0")[:-1]
+
+
+def test_the_run_carries_the_flags_and_the_run_directory(
+    vitest_measured: VitestMeasured,
+) -> None:
+    """`pnpm exec vitest run` gains the five flags, reports in the run."""
+    run_dir, out = vitest_measured.vitest_run(["pnpm", "exec", "vitest", "run"])
+    assert out.returncode == 0, out.stderr
+    want: list[str] = [
+        "pnpm",
+        "exec",
+        "vitest",
+        "run",
+        "--coverage.enabled=true",
+        "--coverage.provider=v8",
+        "--coverage.reporter=json-summary",
+        "--coverage.reporter=lcov",
+        f"--coverage.reportsDirectory={run_dir}/typescript",
+    ]
+    assert want == execd(out)
+    assert (run_dir / "typescript").is_dir()
+
+
+def test_no_floor_leaves_the_command_unchanged(vitest_measured: VitestMeasured) -> None:
+    """Without a floor it is `exec "$@"`."""
+    _, out = vitest_measured.vitest_run(["pnpm", "exec", "vitest", "run"], floor=False)
+    assert out.returncode == 0, out.stderr
+    want: list[str] = ["pnpm", "exec", "vitest", "run"]
+    assert want == execd(out)
+
+
+@pytest.mark.parametrize(
+    "argv", [["pnpm", "exec", "vitest", "list"], ["pnpm", "run", "lint"]]
+)
+def test_what_is_not_a_run_is_unchanged(
+    vitest_measured: VitestMeasured, argv: list[str]
+) -> None:
+    """`vitest list`, or a command with no vitest argument."""
+    run_dir, out = vitest_measured.vitest_run(argv)
+    assert out.returncode == 0, out.stderr
+    assert argv == execd(out)
+    assert not (run_dir / "typescript").exists()
+
+
+def test_a_coverage_flag_of_its_own_is_refused(vitest_measured: VitestMeasured) -> None:
+    """`--coverage.enabled`: refused by name, nothing run."""
+    _, out = vitest_measured.vitest_run([
+        "pnpm",
+        "exec",
+        "vitest",
+        "run",
+        "--coverage.enabled",
+    ])
+    assert out.returncode == 1
+    assert not out.stdout
+    assert (
+        "measured: --coverage.enabled is on the vitest run, which would"
+        " measure TypeScript a second way"
+    ) in out.stderr
+
+
+def test_a_second_run_in_one_test_run_is_refused(
+    vitest_measured: VitestMeasured,
+) -> None:
+    """The leg measures one suite: the second call is refused by name."""
+    _, out = vitest_measured.vitest_run(["pnpm", "exec", "vitest", "run"], calls=2)
+    assert out.returncode == 1
+    assert not out.stdout
+    assert (
+        "  the leg measures one suite; a repository with several uses vitest projects\n"
+    ) in out.stderr

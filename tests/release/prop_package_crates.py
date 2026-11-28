@@ -1,0 +1,152 @@
+"""package_crates.py's verified-then-unverified packaging, on any bytes.
+
+The property of `test_build_rust_crate.py`'s fixed rows (#1556), over
+generated workspaces. `cargo` is replaced in-process: the verified run
+writes the verified members' crates, the `--no-verify` run writes every
+member's — the verified ones again, each maybe changed — and the
+crates.io member list names every member.
+
+- V: any byte difference in a verified crate between the two runs — a
+  flipped bit, a byte added, a byte lost — is a refusal naming that
+  crate and both digests, and every crate whose bytes did not move goes
+  unnamed; with no difference the step packages, and an excluded
+  member's crate, never verified, is never compared.
+
+Run by `test:python-properties` under the belt's Hypothesis profile;
+the ordinary suite (`mise run test`) never imports this file.
+"""
+
+import hashlib
+import tempfile
+from typing import Protocol
+
+import pytest
+from hypothesis import example
+from hypothesis import strategies as st
+
+from belt.release import package_crates as crates
+from belt.typed_hypothesis import given
+
+MEMBER = st.from_regex(r"[a-z][a-z0-9_-]{0,8}", fullmatch=True)
+# Each member's version, the verified run's crates, the unverified
+# run's crates (by crate file name), and the verified crates whose
+# bytes moved.
+Workspace = tuple[dict[str, str], dict[str, bytes], dict[str, bytes], set[str]]
+
+
+def changed(draws: st.DataObject, data: bytes) -> bytes:
+    """Change some bytes: flip a bit, add a byte, or lose one.
+
+    Returns:
+        Bytes that differ from `data`.
+
+    """
+    how = draws.draw(st.sampled_from(["flip", "add", "lose"] if data else ["add"]))
+    if how == "add":
+        at = draws.draw(st.integers(0, len(data)))
+        return data[:at] + bytes([draws.draw(st.integers(0, 255))]) + data[at:]
+    at = draws.draw(st.integers(0, len(data) - 1))
+    if how == "lose":
+        return data[:at] + data[at + 1 :]
+    bit = 1 << draws.draw(st.integers(0, 7))
+    return data[:at] + bytes([data[at] ^ bit]) + data[at + 1 :]
+
+
+def workspaces(draws: st.DataObject) -> Workspace:
+    """Draw members, which are excluded, and each run's bytes.
+
+    Returns:
+        Each member's version, the verified run's crates, the
+        unverified run's crates (by crate file name), and the verified
+        crates whose bytes moved.
+
+    """
+    members = draws.draw(st.lists(MEMBER, min_size=2, max_size=5, unique=True))
+    versions = {m: f"0.{i}.0" for i, m in enumerate(members)}
+    excluded = set(
+        draws.draw(
+            st.lists(st.sampled_from(members), min_size=1, max_size=len(members) - 1)
+        )
+    )
+    first: dict[str, bytes] = {}
+    second: dict[str, bytes] = {}
+    moved: set[str] = set()
+    for m in members:
+        crate = f"{m}-{versions[m]}.crate"
+        data = draws.draw(st.binary(max_size=24))
+        again = data
+        if m not in excluded:
+            first[crate] = data
+            if draws.draw(st.booleans()):
+                again = changed(draws, data)
+                moved.add(crate)
+        second[crate] = again
+    return versions, first, second, moved
+
+
+class FakeCargo(Protocol):
+    """What the `fake_cargo` fixture hands a row."""
+
+    def __call__(self, *_: str) -> None:
+        """Run fake_cargo."""
+        ...
+
+
+def fake_cargo(drawn: Workspace) -> FakeCargo:
+    """Stand a `cargo package` in: each run writes the next drawn crates.
+
+    Returns:
+        The stand-in.
+
+    """
+    _, first, second, _ = drawn
+    runs = iter([first, second])
+
+    def cargo(*_: str) -> None:
+        for name, data in next(runs).items():
+            (crates.PACKAGE / name).write_bytes(data)
+
+    return cargo
+
+
+def digest(data: bytes) -> str:
+    """Hash bytes as the step does.
+
+    Returns:
+        The sha256, hex.
+
+    """
+    return hashlib.sha256(data).hexdigest()
+
+
+# One verified crate whose one bit moved, beside an excluded one.
+ONE_BIT: Workspace = (
+    {"a": "0.0.0", "b": "0.1.0"},
+    {"a-0.0.0.crate": b"\x00"},
+    {"a-0.0.0.crate": b"\x01", "b-0.1.0.crate": b""},
+    {"a-0.0.0.crate"},
+)
+
+
+# V: a verified crate's bytes may not move, by so much as a bit.
+@given(st.data())
+@example(None)
+def test_refused_exactly_on_moved_bytes(data: st.DataObject | None) -> None:
+    """Each moved crate is named with both digests; no other is."""
+    drawn = workspaces(data) if data else ONE_BIT
+    _, first, second, moved = drawn
+    with (
+        tempfile.TemporaryDirectory() as tmp,
+        pytest.MonkeyPatch.context() as patched,
+    ):
+        patched.setattr(crates, "cargo", fake_cargo(drawn))
+        patched.setattr(crates, "published", lambda: list(drawn[0].items()))
+        patched.chdir(tmp)
+        crates.PACKAGE.mkdir(parents=True)
+        refused = crates.package(" --exclude x")
+    want = [
+        f"{name} changed when packaged again without verifying:"
+        f" {digest(first[name])} verified, {digest(second[name])} now"
+        for name in sorted(moved)
+    ]
+    assert refused == want

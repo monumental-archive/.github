@@ -97,8 +97,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         # Only a release that types its entries hands its manifest on;
         # an untyped one keeps the whole-release comparison (stele#185).
-        # The design and its tests: release/repro_resolve.py (#1386).
-        run: '"${ORG_PYTHON}" .org-canon/release/repro_resolve.py'
+        # The design and its tests: belt/release/repro_resolve.py (#1386).
+        run: '"${ORG_PYTHON}" -I .org-canon/belt repro-resolve'
   # The genuine article: the class workflow itself, pointed at the tag.
   # One job per class because `uses:` takes no expressions; exactly one
   # runs, and compare takes whichever produced subjects.
@@ -190,7 +190,7 @@ jobs:
           cache: false
           # Only what this job's steps call (#1333): the release path is
           # uncached, so every tool in scope is paid for on every run.
-          # release/test_job_installs.py holds the list to the calls.
+          # tests/release/test_job_installs.py holds the list to the calls.
           install_args: github:monumental-archive/stele
 
       - name: Compare rebuilt digests with the published ones
@@ -305,6 +305,6 @@ jobs:
           # must be seen.
           COMPARE: ${{ steps.compare.outcome }}
         # The wording, and why a verdict names its scope: the design and
-        # its tests are release/repro_issue.py (#1262, #1386).
-        run: '"${ORG_PYTHON}" .org-canon/release/repro_issue.py'
+        # its tests are belt/release/repro_issue.py (#1262, #1386).
+        run: '"${ORG_PYTHON}" -I .org-canon/belt repro-issue'
 ...

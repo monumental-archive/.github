@@ -233,7 +233,7 @@ jobs:
           cache: false
           # Only what this job's steps call (#1333): the release path is
           # uncached, so every tool in scope is paid for on every run.
-          # release/test_job_installs.py holds the list to the calls.
+          # tests/release/test_job_installs.py holds the list to the calls.
           install_args: jq github:monumental-archive/stele
 
       # By pattern, not by name: every build class uploads its assets as
@@ -373,6 +373,6 @@ jobs:
         # A published release converges instead of clobbering (#316),
         # judged on the build subjects its manifest types (stele#156); a
         # rehearsal stays a draft and records why (#597). The design and
-        # its tests: release/attach_publish.py (#1386).
-        run: '"${ORG_PYTHON}" .org-canon/release/attach_publish.py'
+        # its tests: belt/release/attach_publish.py (#1386).
+        run: '"${ORG_PYTHON}" -I .org-canon/belt attach-publish'
 ...

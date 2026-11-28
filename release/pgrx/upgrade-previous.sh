@@ -27,7 +27,7 @@ writers="$(cd "${here}/../../mise" && pwd -P)"
 # of workflow commands (#1660), in this tree.
 # shellcheck source=mise/findings.sh
 . "${writers}/findings.sh"
-prev=$("${ORG_PYTHON}" "${here}/previous_release.py" fetch \
+prev=$("${ORG_PYTHON}" -I "${here}/../../belt" previous-release fetch \
   --repo "${GITHUB_REPOSITORY}" --version "${UNTRUSTED_VERSION}" \
   --crate-dir "${UNTRUSTED_CRATE_DIR}" --pg "${PG}" --arch "${ARCH}" \
   --tarball /tmp/prev.tar.gz --dest /tmp/prevroot)

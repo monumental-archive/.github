@@ -1,0 +1,121 @@
+"""source_archive.py, the source-archive build, on any repository name.
+
+The property of `test_source_archive.py`'s fixed rows (#1556), over
+generated owners, repository names and versions. `git` is replaced
+in-process: `archive` writes one fixed tarball, `ls-files` lists as
+many paths as it holds.
+
+- V: the asset is dist/<name>-<VERSION>.tar.gz, archived under the
+  prefix <name>-<VERSION>/ from the tag v<VERSION>, where <name> is the
+  repository's name after the owner with exactly one leading dot
+  stripped: `.github` ships `github`, `..x` ships `.x`, and a name with
+  no leading dot ships as it is.
+
+Run by `test:python-properties` under the belt's Hypothesis profile;
+the ordinary suite (`mise run test`) never imports this file.
+"""
+
+import io
+import tarfile
+import tempfile
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+import pytest
+from hypothesis import example
+from hypothesis import strategies as st
+
+from belt.release import source_archive as source
+from belt.typed_hypothesis import given
+
+if TYPE_CHECKING:
+    from tests import support
+
+# The git calls one build makes.
+BUILD_CALLS = 2
+
+# GitHub's own alphabets: an owner is letters, digits and hyphens; a
+# repository name adds dots and underscores, and is never `.` or `..`.
+OWNER = st.from_regex(r"[A-Za-z0-9][A-Za-z0-9-]{0,10}", fullmatch=True)
+
+
+def not_dots(name: str) -> bool:
+    """Say whether a repository name is anything but `.` or `..`.
+
+    Returns:
+        True for a name GitHub allows.
+
+    """
+    return name not in {".", ".."}
+
+
+NAME = st.from_regex(r"[A-Za-z0-9._-]{1,12}", fullmatch=True).filter(not_dots)
+VERSION = st.from_regex(
+    r"[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}(-[a-z0-9.]{1,6})?", fullmatch=True
+)
+
+
+def tarball() -> bytes:
+    """Make one small gzip tarball, the same bytes every call.
+
+    Returns:
+        Its bytes.
+
+    """
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz", compresslevel=1) as tar:
+        for i in range(2):
+            info = tarfile.TarInfo(f"p/file{i}")
+            info.mtime = 0
+            tar.addfile(info, io.BytesIO(b""))
+    return buf.getvalue()
+
+
+ARCHIVE = tarball()
+
+
+def fake_git() -> tuple[support.Tool, list[list[str]]]:
+    """Stand a `git` in: `ls-files` lists two files, `archive` writes one.
+
+    Returns:
+        The stand-in, and every `git archive` call's arguments.
+
+    """
+    calls: list[list[str]] = []
+
+    def git(*args: str) -> str:
+        if args[0] == "ls-files":
+            return "a\nb\n"
+        calls.append(list(args))
+        Path(args[args.index("-o") + 1]).write_bytes(ARCHIVE)
+        return ""
+
+    return git, calls
+
+
+# V: the name after the owner, one leading dot stripped.
+@given(OWNER, NAME, VERSION)
+@example("monumental-archive", ".github", "1.70.2")
+@example("o", "..x", "1.0.0")
+@example("o", "x.", "1.0.0")
+def test_one_leading_dot_stripped(owner: str, name: str, version: str) -> None:
+    """The asset, its prefix and the tag follow the stripped name."""
+    shipped = name.removeprefix(".")
+    base = f"{shipped}-{version}"
+    git, calls = fake_git()
+    with (
+        tempfile.TemporaryDirectory() as tmp,
+        pytest.MonkeyPatch.context() as patched,
+    ):
+        patched.setattr(source, "git", git)
+        patched.chdir(tmp)
+        env = {"VERSION": version, "GITHUB_REPOSITORY": f"{owner}/{name}"}
+        notice = source.build(env)
+        dist = sorted(p.name for p in (Path(tmp) / "dist").iterdir())
+    want: list[str] = [f"{base}.tar.gz"]
+    assert dist == want
+    assert notice.startswith(f"{base}.tar.gz: "), notice
+    assert len(calls) == BUILD_CALLS
+    for call in calls:
+        assert f"--prefix={base}/" in call
+        assert call[-1] == f"v{version}"

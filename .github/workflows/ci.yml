@@ -71,7 +71,7 @@ permissions:
 # there, saved back under the new key, carried every version ever used
 # forward (#1285, #1330), so the default branch takes an exact hit or
 # builds clean. Off it, nothing restored is ever saved, so nothing
-# carried over is written back. release/test_gate_caches.py holds each
+# carried over is written back. tests/release/test_gate_caches.py holds each
 # cache step in ci.yml to this.
 env:
   ORG_GATE_CACHE_SAVE: >-
@@ -83,7 +83,7 @@ env:
   # (src/config-hash.ts MISE_CONFIG_FILE_PATTERNS, in its order, at the
   # workspace root where the action runs). The workflow's hashFiles walks
   # and digests them exactly as the action's own glob.hashFiles does, so
-  # mise/gate_cache_key.py renders the key the action rendered, and then
+  # belt/gate_cache_key.py renders the key the action rendered, and then
   # adds the belt's lockfile, which these globs never reach (#1414).
   ORG_MISE_CONFIG_GLOBS: |-
     .config/mise/conf.d/*.toml
@@ -165,17 +165,17 @@ jobs:
           # a recorded leg no job will measure is red here, by name. The
           # majors go as the plan wrote them, JSON for the helper's one
           # decoder to read: no shell takes them apart (#1880).
-          "${ORG_PYTHON}" .org-canon/mise/coverage_floor.py planned \
+          "${ORG_PYTHON}" -I .org-canon/belt coverage-floor planned \
             --majors-json "${majors}"
 
       # The gate's matrix, one row per runner (#2049, #2160): the lint
       # leg's shards, then one row per test or properties task and per
       # shard of one, as the repository splits its own work (its tasks)
-      # and shards it (its tracked shards.toml). mise/gate_shard.py says
+      # and shards it (its tracked shards.toml). belt/gate_shard.py says
       # how; a defect in the file is red here, by name.
       - name: Plan the gate's shards
         id: shards
-        run: '"${ORG_PYTHON}" .org-canon/mise/gate_shard.py plan >> "${GITHUB_OUTPUT}"'
+        run: '"${ORG_PYTHON}" -I .org-canon/belt gate-shard plan >> "${GITHUB_OUTPUT}"'
   # Everything the gate runs except the extension's own suite, which the
   # `pgrx` legs below run one major each. This was the job named `ci`;
   # that name now belongs to the final job, because `ci / ci` is the one
@@ -196,7 +196,7 @@ jobs:
   # each compile the workspace shared one runner's four cores: the lint
   # leg took 9m12s on release-lab and 6m00s on edtf, and the canon's
   # test suite is 611 CPU-seconds on four cores. The plan job lays out
-  # one row per runner (mise/gate_shard.py plan): the lint shards, each
+  # one row per runner (belt/gate_shard.py plan): the lint shards, each
   # running its share of `lint:*` dealt longest first; then, as the
   # REPOSITORY splits and shards its own work (#2160), one row per task
   # in `test`'s closure and per shard of one, each shard named by
@@ -265,7 +265,7 @@ jobs:
           ORG_QUEUE_GROUP: ${{ github.event.merge_group.head_sha }}
           ORG_QUEUE_REF: ${{ github.event.merge_group.head_ref }}
           ORG_QUEUE_TOKEN: ${{ github.token }}
-        run: '"${ORG_PYTHON}" .org-canon/mise/queue_head.py'
+        run: '"${ORG_PYTHON}" -I .org-canon/belt queue-head'
 
       # The Rust toolchains live INSIDE the directory the tool cache
       # below restores (#1165). mise installs rust through rustup, and
@@ -288,18 +288,18 @@ jobs:
       # installed all 34 belt tools in every repository, then 29 of 74
       # lints skipped on stele. mise/gate-tools.toml says when each tool
       # is needed — derived from the tasks and held to them by
-      # mise/test_gate_tools.py — and the helper disables the rest
+      # tests/test_gate_tools.py — and the helper disables the rest
       # (MISE_DISABLE_TOOLS): not installed, not auto-installed by
       # `mise run`, not on PATH, so a lint that needs one reds by name.
       # The caller's own config installs exactly as it did, and no tool
       # it pins is ever disabled. Local runs are unchanged: nothing sets
       # it there.
       - name: Leave out the belt tools this tree does not need
-        run: '"${ORG_PYTHON}" .org-canon/mise/gate_tools.py disable'
+        run: '"${ORG_PYTHON}" -I .org-canon/belt gate-tools disable'
 
       # The tool cache's name (#1406): the key jdx/mise-action v5.2.7
       # rendered when it restored and saved this cache itself, reproduced
-      # by mise/gate_cache_key.py and pinned by its test to a key the
+      # by belt/gate_cache_key.py and pinned by its test to a key the
       # action logged, then `-b` and the sha256 of the delivered belt's
       # mise.lock (#1414), so a belt tool bump names a new cache.
       # A tree that leaves belt tools out (#1410) ends it in `-off` and
@@ -322,7 +322,7 @@ jobs:
         id: tool-key
         env:
           ORG_MISE_CONFIG_HASH: ${{ hashFiles(env.ORG_MISE_CONFIG_GLOBS) }}
-        run: '"${ORG_PYTHON}" .org-canon/mise/gate_cache_key.py tool mise-v2 .org-canon'
+        run: '"${ORG_PYTHON}" -I .org-canon/belt gate-cache-key tool mise-v2 .org-canon'
 
       # unattested-path: this gate signs and publishes nothing, so the
       # cold-build rule (#117, docs/release.md) permits caches exactly
@@ -348,7 +348,7 @@ jobs:
       # Staleness is not the exposure: mise installs what mise.lock
       # pins, and a restored directory only spares it the download, so
       # an older cache is a slower run, never a different one. The key
-      # names what is installed (mise/gate_cache_key.py): the mise
+      # names what is installed (belt/gate_cache_key.py): the mise
       # configs mise-action's globs find at the workspace root — on the
       # canon's own gate, mise/config.toml then mise.toml — and the
       # delivered belt's .org-canon/mise/mise.lock (#1414). #660
@@ -462,7 +462,7 @@ jobs:
         if: ${{ matrix.leg != 'properties' && hashFiles('Cargo.lock') != '' }}
         env:
           ORG_CANON_REF: ${{ steps.canon.outputs.ref }}
-        run: '"${ORG_PYTHON}" .org-canon/mise/gate_cache_key.py cargo --canon-ref "${ORG_CANON_REF}"'
+        run: '"${ORG_PYTHON}" -I .org-canon/belt gate-cache-key cargo --canon-ref "${ORG_CANON_REF}"'
 
       # unattested-path: same standing as the Go caches above — this
       # gate signs and publishes nothing, cargo checks every registry
@@ -573,8 +573,8 @@ jobs:
           PR_BODY: ${{ github.event.pull_request.body }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         # The composition, the title's own-reference refusal (#800) and
-        # the CRLF body (#880): mise/squash_message.py (#1386).
-        run: '"${ORG_PYTHON}" .org-canon/mise/squash_message.py'
+        # the CRLF body (#880): belt/squash_message.py (#1386).
+        run: '"${ORG_PYTHON}" -I .org-canon/belt squash-message'
       # (no blank line above: lint:shell-embedded captures trailing
       # blanks into the run: block and shfmt refuses them)
       # This leg's belt task, `ci:lint`, `ci:test` or `ci:properties`
@@ -600,9 +600,9 @@ jobs:
           ORG_GATE_COVERAGE_RUN: >-
             ${{ matrix.leg == 'test' && matrix.task != 'ci:test'
             && format('{0}/coverage-run', runner.temp) || '' }}
-          # Where each shard writes what it ran (#2160, mise/shard.py).
+          # Where each shard writes what it ran (#2160, belt/shard.py).
           ORG_SHARD_REPORTS: ${{ runner.temp }}/shard-reports
-        run: '"${ORG_PYTHON}" .org-canon/mise/gate_shard.py run "${LEG}" "${TASK}" "${SHARD}" "${OF}"'
+        run: '"${ORG_PYTHON}" -I .org-canon/belt gate-shard run "${LEG}" "${TASK}" "${SHARD}" "${OF}"'
 
       # A SPLIT TEST ROW'S MEASUREMENT, KEPT FOR THE COVERAGE JOB (#2049,
       # #2160): the run directory every measured command of this row
@@ -615,7 +615,7 @@ jobs:
       # directory of its own only when its pattern matches two or more,
       # so the coverage job merges every match flat and the row's
       # directory comes from the artifact, the same for one row or
-      # many; mise/coverage_merge.py reads one directory per row. A row
+      # many; belt/coverage_merge.py reads one directory per row. A row
       # that measured nothing stages nothing and uploads none.
       - name: Stage this test row's coverage data under its artifact's name
         if: ${{ matrix.leg == 'test' && matrix.task != 'ci:test' }}
@@ -636,7 +636,7 @@ jobs:
           retention-days: 1
 
       # WHAT EACH SHARD RAN, KEPT FOR THE UNION (#2160): one report per
-      # runner that took a share (mise/shard.py). A shard that wrote none
+      # runner that took a share (belt/shard.py). A shard that wrote none
       # is named by the coverage job's union check, never passed.
       - name: Keep this shard's report of what it ran
         if: ${{ matrix.leg != 'lint' && matrix.of > 1 }}
@@ -768,14 +768,14 @@ jobs:
       # toolchains and four Postgres majors it never ran. The caller's
       # config decides the versions, the canon decides which tools
       # (#1333): the first Rust, cargo-pgrx, and the one Postgres entry
-      # at this leg's major. release/test_job_installs.py holds the list
+      # at this leg's major. tests/release/test_job_installs.py holds the list
       # to the calls of pgrx-test.sh and pgrx-env.sh.
       - name: Read the caller's pinned build inputs
         id: pins
         env:
           ORG_PGRX_MAJOR: ${{ matrix.major }}
         run: |
-          "${ORG_PYTHON}" .org-canon/release/caller_pins.py install \
+          "${ORG_PYTHON}" -I .org-canon/belt caller-pins install \
             --input-of "every pgrx leg of the gate" \
             --major "postgresql-binaries=${ORG_PGRX_MAJOR}" \
             rust cargo-pgrx >> "${GITHUB_OUTPUT}"
@@ -786,7 +786,7 @@ jobs:
       # pin bump names a new cache while the prefix still finds the last
       # one and installs only what moved. ORG_TOOL_INSTALL is the
       # install step's install_args, word for word
-      # (release/test_gate_caches.py). Move `v1` when the cache's
+      # (tests/release/test_gate_caches.py). Move `v1` when the cache's
       # CONTENTS must change and its key would not (#1165).
       - name: Name the tool cache
         id: tool-key
@@ -795,7 +795,7 @@ jobs:
           ORG_PGRX_MAJOR: ${{ matrix.major }}
           ORG_TOOL_INSTALL: jq aqua:taiki-e/cargo-llvm-cov ${{ steps.pins.outputs.install }}
         run: |
-          "${ORG_PYTHON}" .org-canon/mise/gate_cache_key.py tool "mise-pgrx-v1-pg${ORG_PGRX_MAJOR}" \
+          "${ORG_PYTHON}" -I .org-canon/belt gate-cache-key tool "mise-pgrx-v1-pg${ORG_PGRX_MAJOR}" \
             .org-canon --install "${ORG_TOOL_INSTALL}"
       # unattested-path: this gate signs and publishes nothing, so the
       # cold-build rule (#117, docs/release.md) permits the tool cache
@@ -841,7 +841,7 @@ jobs:
         id: rustc
         env:
           ORG_CANON_REF: ${{ steps.canon.outputs.ref }}
-        run: '"${ORG_PYTHON}" .org-canon/mise/gate_cache_key.py cargo --canon-ref "${ORG_CANON_REF}"'
+        run: '"${ORG_PYTHON}" -I .org-canon/belt gate-cache-key cargo --canon-ref "${ORG_CANON_REF}"'
 
       # unattested-path: this gate signs and publishes nothing, so the
       # cold-build rule (#117, docs/release.md) permits the cargo cache
@@ -926,11 +926,11 @@ jobs:
   # #2160). A split test leg measures each task and each shard on its own
   # runner, and no row can judge a floor that belongs to the whole
   # suite, so each keeps its run directory and this job gathers them
-  # into one (mise/coverage_merge.py) and runs coverage:check over it,
+  # into one (belt/coverage_merge.py) and runs coverage:check over it,
   # its depends skipped: the rows ran `test`. It writes the reports and
   # figures the test leg writes when it is one runner. And every shard's
   # report of what it ran is held here to its task's whole population,
-  # each item exactly once (mise/shard.py). Skipped where no leg is
+  # each item exactly once (belt/shard.py). Skipped where no leg is
   # split; the floor step skipped where the test leg is one runner,
   # which judges its own floor.
   coverage:
@@ -957,13 +957,13 @@ jobs:
       # The gate job's tool selection and cache name, so this job
       # restores the entry the gate's test leg saved (#1406, #1410).
       - name: Leave out the belt tools this tree does not need
-        run: '"${ORG_PYTHON}" .org-canon/mise/gate_tools.py disable'
+        run: '"${ORG_PYTHON}" -I .org-canon/belt gate-tools disable'
 
       - name: Name the tool cache
         id: tool-key
         env:
           ORG_MISE_CONFIG_HASH: ${{ hashFiles(env.ORG_MISE_CONFIG_GLOBS) }}
-        run: '"${ORG_PYTHON}" .org-canon/mise/gate_cache_key.py tool mise-v2 .org-canon'
+        run: '"${ORG_PYTHON}" -I .org-canon/belt gate-cache-key tool mise-v2 .org-canon'
 
       # unattested-path: the gate's tool cache, on the gate job's
       # standing (#1406): this job signs and publishes nothing, restores
@@ -1004,7 +1004,7 @@ jobs:
       - name: Every shard's share is its task's whole population
         env:
           REPORTS: ${{ runner.temp }}/shard-reports
-        run: '"${ORG_PYTHON}" .org-canon/mise/gate_shard.py union "${REPORTS}"'
+        run: '"${ORG_PYTHON}" -I .org-canon/belt gate-shard union "${REPORTS}"'
 
       - name: Gather every test row's coverage data
         if: ${{ needs.plan.outputs.test-split == 'true' }}
@@ -1021,7 +1021,7 @@ jobs:
         env:
           ROWS: ${{ runner.temp }}/coverage-rows
           RUN: ${{ runner.temp }}/coverage-run
-        run: '"${ORG_PYTHON}" .org-canon/mise/coverage_merge.py "${ROWS}" "${RUN}"'
+        run: '"${ORG_PYTHON}" -I .org-canon/belt coverage-merge "${ROWS}" "${RUN}"'
 
       - name: Judge the floor over every row
         if: ${{ needs.plan.outputs.test-split == 'true' }}
@@ -1080,7 +1080,7 @@ jobs:
         # Prints what the jobs above computed, one name/result pair at a
         # time; the pgrx legs may be skipped only when none were planned,
         # and the coverage job only when no leg was split.
-        # Every branch is a row in mise/test_gate_verdict.py (#1386).
+        # Every branch is a row in tests/test_gate_verdict.py (#1386).
         run: |
           set -euo pipefail
           status=0
@@ -1109,7 +1109,7 @@ jobs:
   # needs a tool it lacked hung it for its 30 minutes on every push to
   # main. Now it installs nothing and runs no task: the number the
   # badge shows is the number the gate enforced, from one run.
-  # release/test_job_installs.py holds it to that.
+  # tests/release/test_job_installs.py holds it to that.
   #
   # IT READS NO JOB OUTPUT (#1740). The gate is a matrix, and a matrix
   # job has one set of outputs for all its legs, so no output could say

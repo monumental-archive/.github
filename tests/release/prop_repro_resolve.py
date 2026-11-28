@@ -1,0 +1,155 @@
+"""repro_resolve.py's manifest reader, on any JSON.
+
+The properties of `test_repro_resolve.py`'s fixed rows (#1556), over
+generated evidence manifests:
+
+- V: `first_entry_name` reads the first entry and only the first: what
+  follows it, and the order of what follows it, never moves the answer,
+  and the answer is the first entry's `name` as `jq -r` prints it
+  (a string as itself, null or false as nothing, anything else as its
+  JSON), or nothing where the first entry is not an object.
+- R: on any JSON document and any text, it answers or refuses by name
+  (`StepError`); it never dies with anything else.
+
+Run by `test:python-properties` under the belt's Hypothesis profile;
+the ordinary suite (`mise run test`) never imports this file.
+"""
+
+import json
+import os
+import tempfile
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from hypothesis import example
+from hypothesis import strategies as st
+
+from belt import decoded
+from belt.release import repro_resolve as resolve
+from belt.typed_hypothesis import given
+
+if TYPE_CHECKING:
+    import random
+
+# A JSON scalar: JSON has no NaN or Infinity, and the manifest is read
+# strictly (#1676), so a float that is not finite is not one.
+SCALAR: st.SearchStrategy[object] = st.one_of(
+    st.none(),
+    st.booleans(),
+    st.integers(),
+    st.floats(allow_nan=False, allow_infinity=False),
+    st.text(),
+)
+
+
+def nested(inner: st.SearchStrategy[object]) -> st.SearchStrategy[object]:
+    """Wrap values in an array or an object.
+
+    Returns:
+        The strategy one level deeper.
+
+    """
+    arrays: st.SearchStrategy[object] = st.lists(inner, max_size=3)
+    objects: st.SearchStrategy[object] = st.dictionaries(
+        st.text(max_size=6), inner, max_size=3
+    )
+    return arrays | objects
+
+
+JSON: st.SearchStrategy[object] = st.recursive(SCALAR, nested, max_leaves=12)
+SUBJECT: st.SearchStrategy[object] = st.just("build-subject")
+ENTRY: st.SearchStrategy[dict[str, object]] = st.fixed_dictionaries(
+    {}, optional={"name": JSON, "type": SUBJECT | JSON}
+)
+# A manifest whose entries are anything.
+ENTRIES: st.SearchStrategy[dict[str, object]] = st.fixed_dictionaries(
+    {}, optional={"entries": SCALAR | JSON}
+)
+# Entries that are not a list.
+ENTRIES_TRUE: dict[str, object] = {"entries": True}
+ENTRIES_OBJECT: dict[str, object] = {"entries": {"a": 1}}
+
+
+def written(text: str) -> Path:
+    """Write text to a fresh scratch file; the caller unlinks it.
+
+    Returns:
+        Its path.
+
+    """
+    fd, name = tempfile.mkstemp(suffix=".json")
+    os.close(fd)
+    path = Path(name)
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def read(doc: object) -> str:
+    """Read one manifest's first entry name.
+
+    Returns:
+        The answer.
+
+    """
+    path = written(json.dumps(doc))
+    try:
+        return resolve.first_entry_name(path)
+    finally:
+        path.unlink()
+
+
+def model(first: object) -> str:
+    """Say what `jq -r '.entries[0].name // empty'` prints for one entry.
+
+    Returns:
+        The name as text, or nothing.
+
+    """
+    if not decoded.is_object(first):
+        return ""
+    name = first.get("name")
+    if name is None or name is False:
+        return ""
+    return name if isinstance(name, str) else json.dumps(name)
+
+
+# V: the first entry decides; the rest, in any order, do not.
+@given(ENTRY | JSON, st.lists(ENTRY | JSON, max_size=4), st.randoms())
+def test_the_rest_never_moves_it(
+    first: object, rest: list[object], shuffle: random.Random
+) -> None:
+    """Same first entry, any tail in any order: the same answer."""
+    alone = read({"entries": [first]})
+    assert alone == model(first)
+    shuffle.shuffle(rest)
+    assert read({"entries": [first, *rest]}) == alone
+
+
+# R: answered or refused by name on anything.
+@given(ENTRIES | JSON)
+@example(ENTRIES_TRUE)
+@example(ENTRIES_OBJECT)
+def test_any_json(doc: object) -> None:
+    """Any JSON document: an answer, or the step's own refusal."""
+    read_text(json.dumps(doc))
+
+
+@given(st.text())
+def test_any_text(text: str) -> None:
+    """Any text: an answer, or the step's own refusal."""
+    read_text(text)
+
+
+def read_text(text: str) -> None:
+    """Hold one manifest's reading to a str or a StepError."""
+    path = written(text)
+    try:
+        name = resolve.first_entry_name(path)
+    except resolve.StepError as refused:
+        said = str(refused)
+    else:
+        assert isinstance(name, str)
+        return
+    finally:
+        path.unlink()
+    assert said.startswith(f"{path} is not "), said

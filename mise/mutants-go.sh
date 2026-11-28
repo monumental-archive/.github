@@ -165,7 +165,7 @@ fi
 # refusal are mutants_go.py's (`build-go`); the go calls stay here.
 built=$(go version -m "${gomu_bin}" | awk 'NR == 1 { print $2 }')
 running=$(go env GOVERSION)
-"${ORG_PYTHON}" "${belt}/mutants_go.py" build-go --label "${label}" --gomu "${gomu_bin}" \
+"${ORG_PYTHON}" -I "${belt%/*}/belt" mutants-go build-go --label "${label}" --gomu "${gomu_bin}" \
   --built "${built}" --running "${running}"
 
 root=$(pwd -P)
@@ -247,7 +247,7 @@ done < "${scratch}/shard.tsv"
 
 git grep -n -e '//mutants:equivalent' -- ':!vendor/**' '*.go' > "${scratch}/records.txt" || true
 
-"${ORG_PYTHON}" "${belt}/mutants_go.py" \
+"${ORG_PYTHON}" -I "${belt%/*}/belt" mutants-go judge \
   --label "${label}" --where "${where}" --shard "${shard:-whole}" \
   --root "${root}" --scratch "${scratch}" --summary-dir "${MUTANTS_SUMMARY_DIR:-}"
 org_done=1

@@ -120,7 +120,7 @@ while IFS=$'\t' read -r crate target library kind crate_majors; do
 
   # The record's URL is the belt's one index rule, shared with the
   # crates publisher (#1383), so the two can never read different paths.
-  url=$("${ORG_PYTHON}" "${belt}/crates_index.py" url "${crate}")
+  url=$("${ORG_PYTHON}" -I "${belt%/*}/belt" crates-index url "${crate}")
   # curl's own exit is not the verdict: the status is. No answer at all
   # writes 000, which is red like every status but 200 and 404.
   code=$(curl --silent --output /dev/null --write-out '%{http_code}' \

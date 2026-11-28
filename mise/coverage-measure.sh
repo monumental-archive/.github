@@ -164,7 +164,8 @@ if [[ ${legs} == reports ]]; then
     # A floor that records its legs names each one this run lost (#1666),
     # which is the case a repository most needs named; the generic line
     # is for a floor with no record.
-    "${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/coverage_floor.py" hold --label "${label}" --job gate < /dev/null || exit 1
+    "${ORG_PYTHON}" -I "$(dirname "${BASH_SOURCE[0]}")/../belt" \
+      coverage-floor hold --label "${label}" --job gate < /dev/null || exit 1
     org_finding "" "no leg was measured — a check that reads nothing must not pass"
     exit 1
   fi
@@ -227,7 +228,7 @@ if [[ -n ${in_tree} ]]; then
 fi
 ts_runner=""
 if [[ -n ${tracked_js[0]+set} ]]; then
-  ts_runner=$("${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/coverage_js_runner.py" "${tracked_js[@]}") || exit 1
+  ts_runner=$("${ORG_PYTHON}" -I "$(dirname "${BASH_SOURCE[0]}")/../belt" coverage-js-runner runner "${tracked_js[@]}") || exit 1
 fi
 # The leg measures the repository's own `test` task (#1357 item 2), so a
 # vitest tree with no `test` task has no suite the gate runs: it skips
@@ -242,7 +243,7 @@ fi
 # (ORG_COVERAGE_DISCOVER, coverage:adopt) probes plpgsql wherever a
 # `test` task exists: the suite's run is how a PL/pgSQL leg is first
 # found and recorded.
-recorded=$("${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/coverage_floor.py" legs 2> /dev/null) || recorded=""
+recorded=$("${ORG_PYTHON}" -I "$(dirname "${BASH_SOURCE[0]}")/../belt" coverage-floor legs 2> /dev/null) || recorded=""
 test_task=${python_test}
 if [[ -z ${test_task} && -n ${ORG_COVERAGE_DISCOVER:-} ]]; then
   test_task=$(mise tasks info test --json 2> /dev/null) || test_task=""
@@ -331,7 +332,7 @@ pgrx_surface() {
   metadata=$(cargo metadata --no-deps --format-version 1 --locked) || exit 1
   workspace_root=$(jq -r '.workspace_root // empty' <<< "${metadata}") || exit 1
   target_directory=$(jq -r '.target_directory // empty' <<< "${metadata}") || exit 1
-  surface=$("${ORG_PYTHON}" "${belt_dir}/gate_surface.py" <<< "${metadata}") || exit 1
+  surface=$("${ORG_PYTHON}" -I "${belt_dir}/../belt" gate-surface <<< "${metadata}") || exit 1
   while IFS=$'\t' read -r record spec kind majors dir; do
     [[ ${record} == crate && ${kind} == pgrx ]] || continue
     pgrx_names="${pgrx_names} ${spec%@*}"
@@ -555,7 +556,7 @@ if org_tracked_has Cargo.toml && [[ ${legs} == rust-branches ]]; then
   # to `target/llvm-cov-target`, where the stable leg's executables are,
   # and reports both. Named for the nightly's `rustc -vV` as the stable
   # leg's is for its own (rust-coverage-env.sh), so the two never meet.
-  compiler=$(RUSTUP_TOOLCHAIN="${FUZZ_TOOLCHAIN}" "${ORG_PYTHON}" "${belt_dir}/gate_cache_key.py" digest) || exit 1
+  compiler=$(RUSTUP_TOOLCHAIN="${FUZZ_TOOLCHAIN}" "${ORG_PYTHON}" -I "${belt_dir}/../belt" gate-cache-key digest) || exit 1
   if [[ -z ${target_directory} ]]; then
     org_finding "" "cargo metadata named no target_directory — nowhere to measure Rust into"
     exit 1
@@ -589,7 +590,7 @@ fi
 # would hold a floor over less than it says.
 py_report() {
   local out missing
-  if out=$(coverage "$@" 2>&1); then
+  if out=$("${py_venv}" -m coverage "$@" 2>&1); then
     [[ -z ${out} ]] || printf '%s\n' "${out}" >&2
     return 0
   fi
@@ -610,21 +611,20 @@ run=${ORG_COVERAGE_RUN:-}
 
 if [[ -n ${python_test} && ${legs} =~ ^(all|python)$ ]]; then
   # coverage.py's data from the repository's own `test` run (#1331,
-  # #1667): every python3 the suite started under `measured` loaded the
-  # belt's start-up hook and wrote here. The discovery roots stay where
-  # the repository wrote them; the belt never restates them.
-  if ! command -v coverage > /dev/null; then
-    org_finding "" "tracked Python and a test task, but coverage is missing —" \
-      "the belt pins pipx:coverage; run: mise install"
-    exit 1
-  fi
+  # #1667, #2177): the pytest run `measured` rewrote ran under coverage
+  # and wrote here. The discovery roots stay where the repository wrote
+  # them; the belt never restates them. coverage is read from the pytest
+  # tool venv, asked of the belt's one check (tool_python.py).
+  py_venv=$("${ORG_PYTHON}" -I "$(dirname "${BASH_SOURCE[0]}")/../belt" tool-python "${label}: python" pytest) || exit 1
   data=("${run:-/nonexistent}"/python/.coverage*)
   if [[ -z ${run} || ! -f ${run}/coverage.rc || ! -e ${data[0]} ]]; then
     # No figure, and the floor's record decides whether that is red
     # (#1666): its remedy names `measured`.
     echo "${label}: python: the test run measured no Python — its test command runs" >&2
     cat >&2 << 'REMEDY'
-  through "${ORG_BELT_DIR}/measured" (#1667), or no suite ran under mise
+  pytest through "${ORG_BELT_DIR}/measured" (#1667, #2177): `measured pytest …` or
+  `measured python3 -m pytest …`; any other Python command is not measured,
+  or no suite ran under mise
 REMEDY
   else
     # The rc file `measured` wrote for this run: its data file, its
@@ -632,7 +632,7 @@ REMEDY
     # under.
     rc_file="${run}/coverage.rc"
     # --keep: the run's data stays for any other reader in the same run.
-    if ! coverage combine --keep --rcfile="${rc_file}" --quiet >&2; then
+    if ! "${py_venv}" -m coverage combine --keep --rcfile="${rc_file}" --quiet >&2; then
       org_finding "" "the test task ran no measured Python — a measurement" \
         "that reads nothing must not become a floor"
       exit 1
@@ -711,7 +711,7 @@ if [[ -n ${run} && ${legs} =~ ^(all|plpgsql)$ && -d ${run}/plpgsql-coverage ]]; 
   # merge, the reading and every refusal are plpgsql_coverage.py's. No
   # report is no plpgsql figure, and the floor's record decides whether
   # that is red.
-  "${ORG_PYTHON}" "$(dirname "${BASH_SOURCE[0]}")/plpgsql_coverage.py" \
+  "${ORG_PYTHON}" -I "$(dirname "${BASH_SOURCE[0]}")/../belt" plpgsql-coverage \
     totals "${label}" "${run}/plpgsql-coverage" || exit 1
 fi
 org_done=1

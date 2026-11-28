@@ -11,7 +11,7 @@
 # nothing noticed, because the floor sat far enough below the ceiling
 # that the headroom became a landing zone.
 #
-# The ratchet law lives in mise/coverage_floor.py, with the drift check
+# The ratchet law lives in belt/coverage_floor.py, with the drift check
 # `coverage:check` runs, so there is one definition of "the floor never
 # falls" rather than a release-time copy of it. If a leg measures below
 # its floor — the line the gate already held, so a merged pull request
@@ -70,7 +70,7 @@ belt="$(cd "$(dirname "${BASH_SOURCE[0]}")/../mise" && pwd)"
 # otherwise it says why, and measures the way the gate does. Either way
 # the figure is coverage-measure.sh's own, and coverage_floor.py judges
 # it below by one law.
-figures="$(dirname "${BASH_SOURCE[0]}")/coverage_figures.py"
+figures=(-I "$(dirname "${BASH_SOURCE[0]}")/../belt" coverage-figures)
 sha=$(git rev-parse HEAD)
 
 # One artifact's figures: the gate job's (no argument) or one pgrx job's
@@ -88,12 +88,12 @@ read_figures() { # usage: read_figures [pgrx-pg<major>]
   artifact_name="coverage-figures-${leg:+${leg}-}${sha}"
   api="repos/${GITHUB_REPOSITORY}/actions"
   if choice=$(gh api "${api}/artifacts?name=${artifact_name}&per_page=100" \
-    | "${ORG_PYTHON}" "${figures}" choose "${sha}" ${leg:+"${leg}"}); then
+    | "${ORG_PYTHON}" "${figures[@]}" choose "${sha}" ${leg:+"${leg}"}); then
     read -r artifact run <<< "${choice}"
-    if where=$(gh api "${api}/runs/${run}" | "${ORG_PYTHON}" "${figures}" judge "${sha}"); then
+    if where=$(gh api "${api}/runs/${run}" | "${ORG_PYTHON}" "${figures[@]}" judge "${sha}"); then
       zip=$(mktemp)
       if gh api "${api}/artifacts/${artifact}/zip" > "${zip}" \
-        && read_legs=$("${ORG_PYTHON}" "${figures}" figures "${sha}" ${leg:+"${leg}"} < "${zip}"); then
+        && read_legs=$("${ORG_PYTHON}" "${figures[@]}" figures "${sha}" ${leg:+"${leg}"} < "${zip}"); then
         echo "release:coverage-floor: read ${artifact_name} from ${where}" >&2
       else
         read_legs=""
@@ -148,6 +148,6 @@ if [[ -n ${majors} ]]; then
   fi
   legs+=$'\n'${pgrx_legs}
 fi
-"${ORG_PYTHON}" "${belt}/coverage_floor.py" write --provenance "v${VERSION}" <<< "${legs}"
+"${ORG_PYTHON}" -I "${belt%/*}/belt" coverage-floor write --provenance "v${VERSION}" <<< "${legs}"
 
 emit "files=.coverage-floor"

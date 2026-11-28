@@ -60,7 +60,7 @@ belt="${ORG_BELT_DIR:?unset — no belt (CI: MISE_GLOBAL_CONFIG_FILE; local: lef
 locks=() && org_tracked_read locks pnpm-lock.yaml package-lock.json yarn.lock bun.lock
 pins=""
 if [[ -n ${locks[0]+set} ]]; then
-  pins=$(printf '%s\0' "${locks[@]}" | xargs -0 python3 "${belt}/typescript_properties.py" locked)
+  pins=$(printf '%s\0' "${locks[@]}" | xargs -0 python3 -I "${belt%/*}/belt" typescript-properties locked)
 fi
 grep -qx fast-check <<< "${pins}" || {
   echo "${label}: no fast-check in a tracked lockfile, skipped"
@@ -73,7 +73,7 @@ if [[ ${profile} == lint ]]; then
     echo "${label}: no TypeScript or JavaScript tracked, skipped"
     exit 0
   }
-  findings=$(printf '%s\0' "${sources[@]}" | xargs -0 python3 "${belt}/typescript_properties.py" lint) || {
+  findings=$(printf '%s\0' "${sources[@]}" | xargs -0 python3 -I "${belt%/*}/belt" typescript-properties lint) || {
     detail=()
     while IFS= read -r finding; do detail+=("${finding}"); done <<< "${findings}"
     org_finding "" "properties live in *.prop.test.* files and take the belt's bounds:" \
@@ -115,7 +115,7 @@ done
 scratch=$(mktemp -d)
 rc=0
 trap 'rc=$?; rm -rf "${scratch}"; [[ -n ${org_done:-} || ${rc} -ne 0 ]] || rc=1; exit "${rc}"' EXIT
-printf '%s\0' "${files[@]}" | python3 "${belt}/typescript_properties.py" stage "${scratch}" ${config:+"${config}"}
+printf '%s\0' "${files[@]}" | python3 -I "${belt%/*}/belt" typescript-properties stage "${scratch}" ${config:+"${config}"}
 
 args=("${files[@]}")
 
@@ -133,7 +133,7 @@ if [[ ${profile} == gate ]]; then
     sed 's/^/  /' "${scratch}/list.log" >&2
     exit 1
   }
-  leaked=$(python3 "${belt}/typescript_properties.py" collected "${scratch}/collected.json" "${args[@]}") || {
+  leaked=$(python3 -I "${belt%/*}/belt" typescript-properties collected "${scratch}/collected.json" "${args[@]}") || {
     detail=()
     while IFS= read -r line; do detail+=("  ${line}"); done <<< "${leaked}"
     org_finding "" "the repository's own vitest run collects these property files," \
@@ -153,7 +153,7 @@ fi
 # property file from the k-th, and the shard reports what it kept for
 # the gate's union check. The collection check above holds every file.
 if [[ -n ${ORG_SHARD:-} && ${ORG_SHARD} != 1/1 ]]; then
-  python3 "${belt}/typescript_properties.py" share "${files[@]}" > "${scratch}/share" || exit 2
+  python3 -I "${belt%/*}/belt" typescript-properties share "${files[@]}" > "${scratch}/share" || exit 2
   args=()
   while IFS= read -r -d '' file; do
     args+=("${file}")
@@ -185,7 +185,8 @@ fi
 # config that passes with no tests, or for a file no project includes;
 # the report is the proof each ran, and the seeded list that it ran
 # under the belt's seed.
-missing=$(python3 "${belt}/typescript_properties.py" verify "${scratch}/report.json" "${scratch}/seeded" "${args[@]}") || {
+missing=$(python3 -I "${belt%/*}/belt" typescript-properties verify \
+  "${scratch}/report.json" "${scratch}/seeded" "${args[@]}") || {
   detail=()
   while IFS= read -r line; do detail+=("${line}"); done <<< "${missing}"
   org_finding "" "not every property file ran:" \

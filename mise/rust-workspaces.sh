@@ -4,7 +4,7 @@
 #
 #   <array>=() && org_rust_workspace_roots <array>
 #
-# Fills the named array with mise/rust_workspaces.py's roots: one
+# Fills the named array with belt/rust_workspaces.py's roots: one
 # manifest path per workspace in the tree, relative to its top, the root
 # Cargo.toml first when there is one and the rest sorted. A task that
 # runs cargo runs it once per element, `--manifest-path "${root}"`.
@@ -22,7 +22,7 @@ org_rust_workspace_roots() {
   local org__into=$1 org__list org__i=0
   org__list=$(mktemp) || return 1
   if ! "${ORG_PYTHON:?${ORG_PYTHON_UNSET:-unset}}" \
-    "${ORG_BELT_DIR:?unset}/rust_workspaces.py" roots > "${org__list}"; then
+    -I "${ORG_CANON_DIR:?unset}/belt" rust-workspaces roots > "${org__list}"; then
     rm -- "${org__list}"
     return 1
   fi

@@ -1,0 +1,427 @@
+"""Belt task bodies start their helpers under the belt's Python (#1582).
+
+Inside `mise run`, `python3` is whatever the REPOSITORY pins, so a belt
+task that starts `python3 -I "${ORG_CANON_DIR}/belt" <command>` runs the
+belt under the repository's interpreter. #1543 closed this for workflow
+steps and the belt's shell scripts; these rows hold the task bodies to
+the same law: belt Python starts one way, the launcher under the belt's
+interpreter, `"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}" -I
+"${ORG_CANON_DIR}/belt" <command>` (#2177), the refusal riding the
+expansion so no body gains a line. A tracked `.py` started as a file is
+red under any interpreter.
+
+Then the behaviour, under a real mise: a scratch repository that pins a
+different Python (stub interpreters, each printing its own name) runs a
+belt task's helper under the belt's and its own task under its own; and
+with the belt's interpreter absent, the task refuses with the one
+command that installs it.
+"""
+
+from __future__ import annotations
+
+import pathlib
+import re
+import shutil
+import subprocess
+from pathlib import Path
+
+from belt import decoded, typed_std
+from belt.typed_pytest import fixture
+from tests import support
+
+# A lower bound that keeps the law from passing vacuously.
+MANY_BODIES = 30
+
+CANON = support.CANON
+BELT = CANON / "mise" / "config.toml"
+
+# The one start: the interpreter, refusing an empty one by the belt's
+# own message.
+GUARDED = '"${ORG_PYTHON:?${ORG_PYTHON_UNSET}}"'
+# The launcher, and the one way to start it (#2177).
+PACKAGE = "belt"
+LAUNCHER = f'{GUARDED} -I "${{ORG_CANON_DIR}}/{PACKAGE}"'
+LAUNCHED = re.compile(re.escape(GUARDED) + r"\s+-I\s+$")
+GUARDED_START = re.compile(re.escape(GUARDED) + r"\s+$")
+INTERPRETER = re.compile(r"(?<![\w./$-])(python[\d.]*)(?:\s+-I)?\s+$")
+COMMAND_POSITION = re.compile(r"(?:^|[;&|(]|\$\()\s*$")
+# A shell word: a quoted string whole, or a run of anything that does
+# not end a word or a command.
+WORD = re.compile(r"\"[^\"]*\"|'[^']*'|[^\s;|&()<>]+")
+ASSIGNMENT = re.compile(r"^\s*(?:local\s+)?(\w+)=(\S+)")
+VARIABLE = re.compile(r"\$\{?(\w+)\}?")
+
+
+def git() -> str:
+    """Find git.
+
+    Returns:
+        Its path; a missing git is red by name (support.tool).
+
+    """
+    return support.tool("git")
+
+
+def tracked_helpers() -> set[str]:
+    """Name every tracked Python file by its file name.
+
+    Returns:
+        The names of the canon's tracked `*.py`.
+
+    """
+    return {pathlib.Path(p).name for p in support.tracked(CANON, "*.py")}
+
+
+def bodies(text: str) -> dict[str, str]:
+    """Read every task's `run` from a mise config.
+
+    Returns:
+        Task name to its body, a list of commands joined by newlines.
+
+    """
+    out: dict[str, str] = {}
+    tasks = decoded.as_object(decoded.load_toml(text).get("tasks", {}), "tasks")
+    for name, task in tasks.items():
+        run = task.get("run") if decoded.is_object(task) else None
+        if isinstance(run, str):
+            out[name] = run
+        elif decoded.is_array(run):
+            out[name] = "\n".join(r for r in run if isinstance(r, str))
+    return out
+
+
+def resolve(word: str, assigned: dict[str, str]) -> str:
+    """Name the file a word points at, through the body's own variables.
+
+    Returns:
+        The word's last path component, quotes removed and each variable
+        the body assigns replaced by its value.
+
+    """
+
+    def value(m: re.Match[str]) -> str:
+        return assigned.get(typed_std.group(m, 1) or "", typed_std.group(m) or "")
+
+    return VARIABLE.sub(value, word.strip("\"'")).rsplit("/", 1)[-1]
+
+
+def helper_starts(rel: str, task: str, body: str, tracked: set[str]) -> list[str]:
+    """Name each start of belt Python that is not the launcher's one way.
+
+    The launcher, or a tracked helper file, is started where it stands
+    after an interpreter's name, or in a command's place (a line's first
+    word, or after `;`, `|`, `&`, `(` or `$(`), where its own first line
+    picks the interpreter. Anywhere else it is an argument; `python3 -c`
+    starts no file.
+
+    Returns:
+        One line per such start, naming the config, task and command.
+
+    """
+    lines = [
+        ln
+        for ln in body.replace("\\\n", " ").splitlines()
+        if not ln.lstrip().startswith("#")
+    ]
+    assigned: dict[str, str] = {}
+    for ln in lines:
+        m = ASSIGNMENT.match(ln)
+        if m:
+            key, value = typed_std.group(m, 1) or "", typed_std.group(m, 2) or ""
+            assigned.setdefault(key, value.strip("\"'"))
+    out: list[str] = []
+    for line in lines:
+        words = list(WORD.finditer(line))
+        for at, word in enumerate(words):
+            name = resolve(word.group(0), assigned)
+            if name not in tracked | {PACKAGE} or re.match(r"\w+=", word.group(0)):
+                continue
+            before = line[: word.start()]
+            launcher = name == PACKAGE
+            if launcher and LAUNCHED.search(before):
+                continue
+            command = (
+                (words[at + 1].group(0) if at + 1 < len(words) else "<command>")
+                if launcher
+                else name.removesuffix(".py").replace("_", "-")
+            )
+            interpreter = INTERPRETER.search(before)
+            if GUARDED_START.search(before):
+                how = "without -I" if launcher else "as a file"
+            elif interpreter:
+                how = f"with the repository's {interpreter.group(1)}"
+            elif COMMAND_POSITION.search(before):
+                how = "by its own first line"
+            else:
+                continue
+            out.append(
+                f"{rel} {task}: starts belt {command} {how};"
+                f" run it as {LAUNCHER} {command} (#1582)"
+            )
+    return out
+
+
+def findings(texts: dict[str, str], tracked: set[str]) -> list[str]:
+    """Hold every task body of each config to the one way to start a helper.
+
+    Returns:
+        Every red line, config by config, task by task.
+
+    """
+    out: list[str] = []
+    for rel, text in texts.items():
+        for task, body in bodies(text).items():
+            out += helper_starts(rel, task, body, tracked)
+    return out
+
+
+# The law: every belt task body starts belt Python the launcher's way.
+def test_every_belt_task_starts_its_helpers_under_org_python() -> None:
+    """The tree: no belt task starts a tracked helper any other way."""
+    none: list[str] = []
+    assert none == findings(
+        {"mise/config.toml": BELT.read_text("utf-8")}, tracked_helpers()
+    )
+
+
+def test_the_scan_reaches_the_helper_starts() -> None:
+    """Not vacuous: the belt starts the launcher its way, many times."""
+    text = BELT.read_text("utf-8")
+    assert {
+        "gate_surface.py",
+        "belt_shell.py",
+        "coverage_floor.py",
+    } <= tracked_helpers()
+    guarded = [b for b in bodies(text).values() if LAUNCHER in b]
+    assert len(guarded) >= MANY_BODIES
+
+
+def test_a_python3_start_is_named() -> None:
+    """Planted: the shape every belt task had before #1582."""
+    text = (
+        "[tasks.\"lint:x\"]\nrun = '''\n"
+        'python3 -I "${ORG_CANON_DIR}/belt" gate-surface --exclude ""\n'
+        'plan=$(python3 -I "${ORG_CANON_DIR}/belt" msrv-plan \\\n  --x y)\n'
+        "'''\n"
+    )
+    want: list[str] = [
+        (
+            "mise/config.toml lint:x: starts belt gate-surface with the"
+            f" repository's python3; run it as {LAUNCHER} gate-surface (#1582)"
+        ),
+        (
+            "mise/config.toml lint:x: starts belt msrv-plan with the"
+            f" repository's python3; run it as {LAUNCHER} msrv-plan (#1582)"
+        ),
+    ]
+    assert want == findings(
+        {"mise/config.toml": text}, {"gate_surface.py", "msrv_plan.py"}
+    )
+
+
+def test_a_start_through_a_variable_is_named() -> None:
+    """Planted: the helper's path is in a variable the body assigns."""
+    text = (
+        "[tasks.\"lint:deny\"]\nrun = '''\n"
+        'helper="${ORG_BELT_DIR}/deny_skips.py"\n'
+        'variants=$(python3 "${helper}" deny.toml)\n'
+        "'''\n"
+    )
+    want: list[str] = [
+        (
+            "mise/config.toml lint:deny: starts belt deny-skips with the"
+            f" repository's python3; run it as {LAUNCHER} deny-skips (#1582)"
+        )
+    ]
+    assert want == findings({"mise/config.toml": text}, {"deny_skips.py"})
+
+
+def test_a_start_by_first_line_is_named() -> None:
+    """Planted: a helper executed by its own `#!` line, in a pipe."""
+    text = (
+        '[tasks."lint:y"]\n'
+        "run = ['git ls-files | \"${ORG_BELT_DIR}/subject_budget.py\"']\n"
+    )
+    want: list[str] = [
+        (
+            "mise/config.toml lint:y: starts belt subject-budget by its own"
+            f" first line; run it as {LAUNCHER} subject-budget (#1582)"
+        )
+    ]
+    assert want == findings({"mise/config.toml": text}, {"subject_budget.py"})
+
+
+def test_a_file_or_a_launcher_without_isolation_is_named() -> None:
+    """Planted: the belt's interpreter, but not the launcher's one way."""
+    text = (
+        "[tasks.\"lint:w\"]\nrun = '''\n"
+        f'{GUARDED} "${{ORG_BELT_DIR}}/gate_surface.py" --exclude ""\n'
+        f'{GUARDED} "${{ORG_CANON_DIR}}/belt" msrv-plan\n'
+        "'''\n"
+    )
+    want: list[str] = [
+        (
+            "mise/config.toml lint:w: starts belt gate-surface as a file;"
+            f" run it as {LAUNCHER} gate-surface (#1582)"
+        ),
+        (
+            "mise/config.toml lint:w: starts belt msrv-plan without -I;"
+            f" run it as {LAUNCHER} msrv-plan (#1582)"
+        ),
+    ]
+    assert want == findings({"mise/config.toml": text}, {"gate_surface.py"})
+
+
+def test_the_launcher_inline_code_and_arguments_pass() -> None:
+    """Only a start of belt Python outside the launcher's way is red."""
+    text = (
+        "[tasks.\"lint:z\"]\nrun = '''\n"
+        f"{LAUNCHER} gate-surface --helper registry.py\n"
+        "actual=$(python3 -c 'import sys; print(sys.version)')\n"
+        "python3 caller-build.py\n"
+        "# python3 -I belt registry\n"
+        "'''\n"
+    )
+    none: list[str] = []
+    assert none == findings(
+        {"mise/config.toml": text}, {"gate_surface.py", "registry.py"}
+    )
+
+
+def mise() -> str:
+    """Find mise.
+
+    Returns:
+        Its path; a missing mise is red by name (support.tool).
+
+    """
+    return support.tool("mise")
+
+
+def belt_version() -> str:
+    """Read the belt's Python pin from its file.
+
+    Returns:
+        The version `[tools]` pins.
+
+    """
+    config = decoded.load_toml(BELT.read_text("utf-8"))
+    tools = decoded.as_object(config["tools"], "tools")
+    return decoded.as_str(tools["python"], "tools.python")
+
+
+# Each stub drains its stdin first: a helper reads a pipe, and one that
+# never does SIGPIPEs the writer under pipefail.
+STUB = '#!/bin/sh\ncat > /dev/null\necho "{who} $*"\n'
+
+
+class AScratchRepositoryPinningItsOwnPython:
+    """The real belt under a real mise, in a repository that pins Python."""
+
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
+        """Plant the repository, an empty config dir and the two stubs."""
+        self.make_env = env
+        self.tmp = tmp_path
+        self.repo = self.tmp / "repo"
+        self.repo.mkdir()
+        self.own = belt_version().rsplit(".", 1)[0] + ".0"
+        assert self.own != belt_version()
+        (self.repo / "mise.toml").write_text(
+            f'[tools]\npython = "{self.own}"\n\n[tasks.own]\nrun = "python3 own.py"\n',
+            encoding="utf-8",
+        )
+        (self.tmp / "config").mkdir()
+        self.data = self.tmp / "data"
+        for who, version in (("belt", belt_version()), ("repo", self.own)):
+            bindir = self.data / "installs" / "python" / version / "bin"
+            bindir.mkdir(parents=True)
+            (bindir / "python3").write_text(STUB.format(who=who), encoding="utf-8")
+            (bindir / "python3").chmod(0o755)
+        environ = self.make_env(self.tmp)
+        subprocess.run(
+            [git(), "init", "-q", "."], cwd=self.repo, env=environ, check=True
+        )
+
+    def run_task(self, task: str) -> subprocess.CompletedProcess[str]:
+        """Run one task in the repository, the belt delivered as in CI.
+
+        Returns:
+            The run.
+
+        """
+        env = self.make_env(
+            self.tmp,
+            ORG_PYTHON="",
+            MISE_GLOBAL_CONFIG_FILE=str(BELT),
+            MISE_CONFIG_DIR=str(self.tmp / "config"),
+            MISE_DATA_DIR=str(self.data),
+            MISE_CACHE_DIR=str(self.tmp / "cache"),
+            MISE_STATE_DIR=str(self.tmp / "state"),
+            MISE_TRUSTED_CONFIG_PATHS=f"{self.tmp}:{CANON}",
+            MISE_OFFLINE="1",
+            MISE_AUTO_INSTALL="0",
+            MISE_TASK_RUN_AUTO_INSTALL="0",
+            MISE_YES="1",
+        )
+        return subprocess.run(
+            [mise(), "run", "--output", "interleave", task],
+            cwd=self.repo,
+            env=env,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=120,
+        )
+
+
+@fixture
+def a_scratch_repository_pinning_its_own_python(
+    tmp_path: Path, env: support.Env
+) -> AScratchRepositoryPinningItsOwnPython:
+    """Give each row its own AScratchRepositoryPinningItsOwnPython.
+
+    Returns:
+        The row's AScratchRepositoryPinningItsOwnPython.
+
+    """
+    return AScratchRepositoryPinningItsOwnPython(tmp_path, env=env)
+
+
+def test_a_belt_task_runs_its_helper_under_the_belts_python(
+    a_scratch_repository_pinning_its_own_python: AScratchRepositoryPinningItsOwnPython,
+) -> None:
+    """The belt's stub answers, never the repository's."""
+    done = a_scratch_repository_pinning_its_own_python.run_task("lint:subject-budget")
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert f"belt -I {CANON / 'belt'} subject-budget\n" in done.stdout
+    assert "repo " not in done.stdout
+
+
+def test_the_own_task_keeps_the_pinned_python(
+    a_scratch_repository_pinning_its_own_python: AScratchRepositoryPinningItsOwnPython,
+) -> None:
+    """PATH is untouched: the repository's task gets what it pins."""
+    done = a_scratch_repository_pinning_its_own_python.run_task("own")
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "repo own.py\n" in done.stdout
+    assert "belt " not in done.stdout
+
+
+def test_an_absent_belt_python_is_refused_with_its_install(
+    a_scratch_repository_pinning_its_own_python: AScratchRepositoryPinningItsOwnPython,
+) -> None:
+    """Never installed beside the repository's: red, naming the fix."""
+    shutil.rmtree(
+        a_scratch_repository_pinning_its_own_python.data
+        / "installs"
+        / "python"
+        / belt_version()
+    )
+    done = a_scratch_repository_pinning_its_own_python.run_task("lint:subject-budget")
+    assert done.returncode != 0, done.stdout
+    assert (
+        "ORG_PYTHON: unset — the belt Python is not installed here; run:"
+        f" mise install python@{belt_version()} (CI: the canon action)"
+    ) in done.stderr
+    assert "repo " not in done.stdout

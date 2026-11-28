@@ -1,0 +1,1095 @@
+"""Table tests for audit:mutants' Go leg, mise/mutants-go.sh + .py (#1356).
+
+The leg runs for real in a planted git tree — a module with two
+packages, `a` and `b`, whose files and `//mutants:equivalent` comments
+are real tracked files, because the leg reads them with `git grep` —
+with `go` and `gomu` as stubs. No row runs gomu: the Mac it was chosen
+on ran out of memory under a real run, and the first real run is the
+audit job's.
+
+`go` answers `env GOROOT` with the planted GOROOT, `list` with the
+planted package table, and `test` (the baseline coverage run) by
+writing the planted profile and printing the planted log. The planted
+GOROOT holds the real `go`; a second `go`, standing in for mise's shim,
+is first on PATH, so the row that asserts which `go` gomu saw is red if
+the leg stops putting the real toolchain first.
+
+`gomu` logs its arguments, its working directory and the `go` it
+resolves, copies the planted JSON report for the file it is given into
+its working directory as `mutation-report.json` — the shape gomu v0.3.0
+writes, read from its source — and writes `.gomu_history.json` there,
+as the real one does whatever `--incremental` says. Every row asserts
+the exact output, so a row cannot pass by stopping somewhere else.
+
+GIT ENVIRONMENT IS SCRUBBED (#857): git exports GIT_DIR to hooks run in
+a linked worktree, and a fixture that inherited it would write into the
+caller's index when this suite runs from the pre-push hook.
+"""
+
+import json
+import os
+import subprocess
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+import pytest
+
+from belt import decoded, mutants_go
+from belt.typed_pytest import fixture
+from tests import support
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+# The gomu runs a leg over the planted module makes.
+GOMU_RUNS = 2
+
+# The task that runs the helper, whose name its findings carry (#1934).
+TASK = "audit:mutants"
+
+
+@fixture
+def _task(as_task: Callable[[str], None]) -> None:
+    """Run every row as the task does, recording no finding."""
+    as_task(TASK)
+
+
+pytestmark = pytest.mark.usefixtures("_task")
+
+
+BELT = support.MISE
+SCRIPT = BELT / "mutants-go.sh"
+BASH = support.tool("bash")
+
+GIT = support.tool("git")
+LABEL = "audit:mutants: go"
+MODULE = "example.com/p"
+RED_TAIL = (
+    f"{LABEL}: red — delete code a survivor proves redundant, kill each"
+    " survivor with an assertion, add a test for each line no test"
+    " runs, or record an equivalent mutant at its site:"
+    " //mutants:equivalent <type> <reason>\n"
+)
+
+REAL_GO_STUB = """#!/usr/bin/env bash
+printf 'go %s\\n' "$*" >> "${PLANT_LOG}"
+case "$*" in
+  "env GOROOT") printf '%s\\n' "${PLANT_GOROOT}" ;;
+  "env GOVERSION") printf '%s\\n' "${PLANT_GO:-go1.27.4}" ;;
+  "version -m "*)
+    printf '%s: %s\\n' "$3" "${PLANT_GOMU_GO:-go1.27.4}"
+    [[ -z ${PLANT_GOMU_TAIL:-} ]] \\
+      || head -c "${PLANT_GOMU_TAIL}" /dev/zero | tr '\\0' '\\n'
+    ;;
+  list*) cat "${PLANT_LIST}" ;;
+  test*)
+    for a in "$@"; do
+      [[ ${a} != -coverprofile=* ]] || cp "${PLANT_COVER}" "${a#-coverprofile=}"
+    done
+    cat "${PLANT_BASELINE}"
+    exit "${PLANT_TEST_STATUS:-0}"
+    ;;
+  *) exit 99 ;;
+esac
+"""
+SHIM_GO_STUB = """#!/usr/bin/env bash
+case "$1" in
+  env) printf '%s\\n' "${PLANT_GOROOT}" ;;
+  *) echo "shim go called: $*" >&2; exit 1 ;;
+esac
+"""
+GOMU_STUB = """#!/usr/bin/env bash
+printf 'gomu %s\\n' "$*" >> "${PLANT_LOG}"
+printf 'cwd %s\\n' "$(pwd -P)" >> "${PLANT_LOG}"
+printf 'sees %s\\n' "$(command -v go)" >> "${PLANT_LOG}"
+# gomu v0.3.0's FindIgnoreFile (internal/ignore/parser.go): from the
+# target, or its directory when the target is a file, walk up to the
+# first directory holding a .gomuignore; a relative target resolves
+# against the CWD first (filepath.Abs).
+dir=$2
+[[ -d ${dir} ]] || dir=$(dirname "${dir}")
+[[ ${dir} == /* ]] || dir="${PWD}/${dir}"
+while [[ ! -f ${dir}/.gomuignore && ${dir} != / ]]; do dir=$(dirname "${dir}"); done
+found="${dir}/.gomuignore"
+[[ ! -f ${found} ]] || printf 'ignore %s\\n' "${found}" >> "${PLANT_LOG}"
+base=$(basename "$2" .go)
+[[ ! -f ${PLANT_REPORTS}/${base}.log ]] || cat "${PLANT_REPORTS}/${base}.log"
+json="${PLANT_REPORTS}/${base}.json"
+[[ ! -f ${json} ]] || cp "${json}" mutation-report.json
+echo '{}' > .gomu_history.json
+exit "${PLANT_GOMU_STATUS:-0}"
+"""
+
+COMPILE_ERROR = (
+    "Compilation failed: compilation error: # example.com/p/a\n"
+    "./a.go:9:9: missing return\n"
+)
+SHIM_ERROR = (
+    "Compilation failed: compilation error: mise ERROR No version is set for shim: go\n"
+)
+MISE_STUB = """#!/usr/bin/env bash
+case "$*" in
+  "which gomu") printf '%s\\n' "${PLANT_REAL_GOMU}" ;;
+  *) echo "mise ERROR shim refused: $*" >&2; exit 2 ;;
+esac
+"""
+
+A_GO = """package a
+
+func Add(x, y int) int {
+\treturn x + y
+}
+
+func Sign(x int) int {
+\tif x < 0 {
+\t\treturn -1
+\t}
+\treturn 1
+}
+"""
+ABOVE = "\t//mutants:equivalent conditional zero takes either branch\n\tif x < 0 {"
+IF_LINE = "\tif x < 0 {"
+B_GO = """package b
+
+func Twice(x int) int {
+\treturn x * 2
+}
+"""
+
+
+def clean_env(*, env: support.Env) -> dict[str, str]:
+    """Copy the environment without git's own variables.
+
+    Returns:
+        os.environ minus every GIT_* key.
+
+    """
+    return env(MISE_TASK_NAME=TASK)
+
+
+def summary_line(counts: tuple[int, int, int, int, int, int]) -> str:
+    """Spell the leg's summary line for a whole (unsharded) run.
+
+    `counts` is mutants, killed, survived, not covered, not viable,
+    excluded.
+
+    Returns:
+        The line, newline included.
+
+    """
+    total, killed, survived, uncovered, viable, excluded = counts
+    return (
+        f"{LABEL}: {total} mutants, {killed} killed, {survived} survived,"
+        f" {uncovered} not covered, {viable} not viable, {excluded} excluded\n"
+    )
+
+
+def measuring(count: int = 2) -> str:
+    """Spell the coverage line for a whole run.
+
+    Returns:
+        The line, newline included.
+
+    """
+    return f"{LABEL}: measuring coverage of {count} package(s)\n"
+
+
+class Planted:
+    """A planted module, a real GOROOT, a shim first on PATH, stub gomu."""
+
+    def __init__(self, tmp_path: Path, *, env: support.Env) -> None:
+        """Plant the module, the stubs and the default answers."""
+        self.make_env = env
+        self.tmp = tmp_path
+        self.tree = self.tmp / "tree"
+        (self.tree / "a").mkdir(parents=True)
+        (self.tree / "b").mkdir()
+        self.goroot = self.tmp / "goroot"
+        (self.goroot / "bin").mkdir(parents=True)
+        shims = self.tmp / "shims"
+        shims.mkdir()
+        self.shims = shims
+        for path, body in {
+            self.goroot / "bin" / "go": REAL_GO_STUB,
+            shims / "go": SHIM_GO_STUB,
+            shims / "gomu": GOMU_STUB,
+        }.items():
+            path.write_text(body, encoding="utf-8")
+            path.chmod(0o755)
+        self.reports = self.tmp / "reports"
+        self.reports.mkdir()
+        # (package, line) to the `error` gomu writes for that mutant.
+        self.errors: dict[tuple[str, int], str] = {}
+        self.summary = self.tmp / "summary"
+        self.summary.mkdir()
+        self.log = self.tmp / "log"
+        self.log.touch()
+        self.listing = self.tmp / "list"
+        self.cover = self.tmp / "cover.out"
+        self.baseline = self.tmp / "baseline"
+        self.env = clean_env(env=self.make_env) | {
+            "PATH": f"{shims}{os.pathsep}{os.environ['PATH']}",
+            "ORG_BELT_DIR": str(BELT),
+            "PLANT_GOROOT": str(self.goroot),
+            "PLANT_LOG": str(self.log),
+            "PLANT_LIST": str(self.listing),
+            "PLANT_COVER": str(self.cover),
+            "PLANT_BASELINE": str(self.baseline),
+            "PLANT_REPORTS": str(self.reports),
+        }
+        self.git("init", "-q")
+        root = self.tree.resolve()
+        self.root = root
+        self.listing.write_text(
+            f"{MODULE}/a\t{root}/a\ta.go\n{MODULE}/b\t{root}/b\tb.go\n",
+            encoding="utf-8",
+        )
+        self.cover_lines(a=[(3, 5, 1), (7, 12, 1)], b=[(3, 5, 1)])
+        self.baseline.write_text(
+            f"ok  \t{MODULE}/a\t0.5s\tcoverage: 100.0% of statements\n"
+            f"ok  \t{MODULE}/b\t12.3s\tcoverage: 100.0% of statements\n",
+            encoding="utf-8",
+        )
+        self.write("go.mod", f"module {MODULE}\n")
+        self.write("a/a.go", A_GO)
+        self.write("b/b.go", B_GO)
+
+    def git(self, *args: str) -> None:
+        """Run git in the planted tree, scrubbed of the caller's git state."""
+        subprocess.run(
+            [GIT, *args], cwd=self.tree, env=clean_env(env=self.make_env), check=True
+        )
+
+    def write(self, name: str, text: str) -> None:
+        """Write and track one file in the planted tree."""
+        (self.tree / name).write_text(text, encoding="utf-8")
+        self.git("add", name)
+
+    def adopt(
+        self, ignore: str = "# no patterns: records live at their sites\n"
+    ) -> None:
+        """Track the adoption file at the root."""
+        self.write(".gomuignore", ignore)
+
+    def cover_lines(self, **files: list[tuple[int, int, int]]) -> None:
+        """Plant the profile: per package, (first line, last line, count)."""
+        lines = ["mode: set"]
+        for pkg, blocks in files.items():
+            lines.extend(
+                f"{MODULE}/{pkg}/{pkg}.go:{first}.1,{last}.2 1 {count}"
+                for first, last, count in blocks
+            )
+        self.cover.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    def report(
+        self, pkg: str, *results: tuple[str, int, str], total: int | None = None
+    ) -> None:
+        """Plant gomu's report for one file: (status, line, type) per mutant."""
+        body = {
+            "totalFiles": 1,
+            "processedFiles": 1,
+            "totalMutants": len(results) if total is None else total,
+            "results": [
+                {
+                    "mutant": {
+                        "id": f"{pkg}-{i}",
+                        "filePath": f"{self.root}/{pkg}/{pkg}.go",
+                        "line": line,
+                        "column": 9,
+                        "type": kind,
+                    },
+                    "status": status,
+                    "error": self.errors.get((pkg, line), ""),
+                }
+                for i, (status, line, kind) in enumerate(results)
+            ],
+        }
+        (self.reports / f"{pkg}.json").write_text(json.dumps(body), encoding="utf-8")
+
+    def clean_reports(self) -> None:
+        """Plant an all-killed report for both packages."""
+        self.report("a", ("KILLED", 4, "arithmetic"), ("KILLED", 8, "conditional"))
+        self.report("b", ("KILLED", 4, "arithmetic"))
+
+    def run_leg(self) -> subprocess.CompletedProcess[str]:
+        """Run the leg in the planted tree.
+
+        Returns:
+            The completed process.
+
+        """
+        return subprocess.run(
+            [BASH, str(SCRIPT)],
+            cwd=self.tree,
+            env=self.env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def calls(self, prefix: str) -> list[str]:
+        """Read the stub log's lines that start with `prefix`.
+
+        Returns:
+            The matching lines.
+
+        """
+        lines = self.log.read_text(encoding="utf-8").splitlines()
+        return [line for line in lines if line.startswith(prefix)]
+
+
+@fixture
+def planted(tmp_path: Path, env: support.Env) -> Planted:
+    """Give each row its own Planted.
+
+    Returns:
+        The row's Planted.
+
+    """
+    return Planted(tmp_path, env=env)
+
+
+def test_no_gomuignore_skips_clean_by_name(planted: Planted) -> None:
+    """Without the adoption file nothing runs, and the totals hear so."""
+    planted.env["MUTANTS_SUMMARY_DIR"] = str(planted.summary)
+    got = planted.run_leg()
+    assert got.returncode == 0, got.stderr
+    assert got.stdout == f"{LABEL}: no .gomuignore tracked, skipped\n"
+    assert not got.stderr
+    assert not planted.log.read_text(encoding="utf-8")
+    assert (planted.summary / "go.tsv").read_text(
+        encoding="utf-8"
+    ) == "whole\tskipped\n"
+
+
+def test_a_pattern_in_the_root_gomuignore_is_red_by_name(planted: Planted) -> None:
+    """A pattern drops whole files from the run and the count."""
+    planted.adopt("# reason\nb/\n")
+    got = planted.run_leg()
+    assert got.returncode == 1
+    assert not got.stdout
+    assert got.stderr == (
+        f"{LABEL}: pattern in .gomuignore:2: b/\n"
+        "  a .gomuignore pattern drops whole files from the run and the count;\n"
+        "  record an equivalent mutant at its site instead:"
+        " //mutants:equivalent <type> <reason>\n"
+    )
+    none: list[str] = []
+    assert planted.calls("gomu") == none
+
+
+def test_a_pattern_in_a_nested_gomuignore_is_red_by_name(planted: Planted) -> None:
+    """Gomu walks up from each file, so a nested file applies too."""
+    planted.adopt()
+    planted.write("a/.gomuignore", "a.go\n")
+    got = planted.run_leg()
+    assert got.returncode == 1
+    assert f"{LABEL}: pattern in a/.gomuignore:1: a.go\n" in got.stderr
+    none: list[str] = []
+    assert planted.calls("gomu") == none
+
+
+def test_clean_run_is_green_with_the_summary(planted: Planted) -> None:
+    """Killed and timed out are killed; not viable is its own count."""
+    planted.adopt()
+    planted.errors["a", 9] = COMPILE_ERROR
+    planted.report(
+        "a",
+        ("KILLED", 4, "arithmetic"),
+        ("TIMED_OUT", 8, "conditional"),
+        ("NOT_VIABLE", 9, "return"),
+    )
+    planted.report("b", ("KILLED", 4, "arithmetic"))
+    got = planted.run_leg()
+    assert got.returncode == 0, got.stderr
+    assert got.stdout == measuring() + summary_line((4, 3, 0, 0, 1, 0))
+    assert not got.stderr
+
+
+def test_one_survivor_is_red_with_file_and_line(planted: Planted) -> None:
+    """A covered survivor is named with its site and mutator."""
+    planted.adopt()
+    planted.report("a", ("KILLED", 4, "arithmetic"), ("SURVIVED", 8, "boundary_value"))
+    planted.report("b", ("KILLED", 4, "arithmetic"))
+    got = planted.run_leg()
+    assert got.returncode == 1
+    assert got.stdout == (
+        measuring()
+        + f"{LABEL}: survived: a/a.go:8:9 boundary_value\n"
+        + summary_line((3, 2, 1, 0, 0, 0))
+    )
+    assert got.stderr == RED_TAIL
+
+
+def test_a_survivor_no_test_runs_is_not_covered(planted: Planted) -> None:
+    """Gomu says SURVIVED; the profile says no test executed the line."""
+    planted.adopt()
+    planted.cover_lines(a=[(3, 5, 1), (7, 12, 0)], b=[(3, 5, 1)])
+    planted.report("a", ("KILLED", 4, "arithmetic"), ("SURVIVED", 9, "return"))
+    planted.report("b", ("KILLED", 4, "arithmetic"))
+    got = planted.run_leg()
+    assert got.returncode == 1
+    assert got.stdout == (
+        measuring()
+        + f"{LABEL}: not covered: a/a.go:9:9 return\n"
+        + summary_line((3, 2, 0, 1, 0, 0))
+    )
+    assert got.stderr == RED_TAIL
+
+
+def test_an_error_result_is_not_judged(planted: Planted) -> None:
+    """Gomu's ERROR is a mutant nobody asked a test about."""
+    planted.adopt()
+    planted.report("a", ("KILLED", 4, "arithmetic"), ("ERROR", 8, "branch"))
+    planted.report("b", ("KILLED", 4, "arithmetic"))
+    got = planted.run_leg()
+    assert got.returncode == 1
+    assert got.stderr == (
+        f"{LABEL}: not judged: ERROR: a/a.go:8:9 branch — gomu did not judge it\n"
+        + RED_TAIL
+    )
+
+
+def test_a_count_gomu_did_not_report_is_not_judged(planted: Planted) -> None:
+    """Mutants counted but missing from results were never run."""
+    planted.adopt()
+    planted.report("a", ("KILLED", 4, "arithmetic"), total=5)
+    planted.report("b", ("KILLED", 4, "arithmetic"))
+    got = planted.run_leg()
+    assert got.returncode == 1
+    assert got.stderr == (
+        f"{LABEL}: not judged: 1.json: gomu counted 5 mutants and reported 1\n"
+        + RED_TAIL
+    )
+
+
+def test_a_file_gomu_skipped_with_an_error_is_red(planted: Planted) -> None:
+    """Gomu prints "(error: ...)" for a file it skipped, and exits 0."""
+    planted.adopt()
+    planted.clean_reports()
+    (planted.reports / "b.log").write_text(
+        "[1/1] b.go (error: parse failed)\n", encoding="utf-8"
+    )
+    (planted.reports / "b.json").unlink()
+    got = planted.run_leg()
+    assert got.returncode == 1
+    assert got.stderr == (
+        f"{LABEL}: not judged: [1/1] b.go (error: parse failed)\n"
+        f"{LABEL}: not judged: b/b.go: gomu wrote no report\n" + RED_TAIL
+    )
+
+
+def test_a_failing_gomu_shows_its_own_output_once(planted: Planted) -> None:
+    """Exit 2 on every file, as on stele's first run: the cause is shown."""
+    planted.adopt()
+    planted.env["PLANT_GOMU_STATUS"] = "2"
+    (planted.reports / "a.log").write_text(
+        "panic: boom\ngoroutine 1 [running]:\n", encoding="utf-8"
+    )
+    (planted.reports / "b.log").write_text("panic: boom\n", encoding="utf-8")
+    got = planted.run_leg()
+    assert got.returncode == 1
+    assert got.stderr == (
+        f"{LABEL}: gomu ({planted.shims}/gomu) exited 2 on a/a.go; its output:\n"
+        "    panic: boom\n"
+        "    goroutine 1 [running]:\n"
+        f"{LABEL}: not judged: a/a.go: gomu exited 2\n"
+        f"{LABEL}: not judged: b/b.go: gomu exited 2\n" + RED_TAIL
+    )
+
+
+def test_the_verdict_counts_results_never_the_reports_totals(planted: Planted) -> None:
+    """The report said killedMutants 0 beside nine KILLED results (0.3.0)."""
+    planted.adopt()
+    planted.clean_reports()
+    text = (planted.reports / "a.json").read_text(encoding="utf-8")
+    body = decoded.as_object(decoded.load_json(text), "a.json")
+    body |= {"killedMutants": 0, "statistics": {"killed": 0, "survived": 9}}
+    (planted.reports / "a.json").write_text(json.dumps(body), encoding="utf-8")
+    got = planted.run_leg()
+    assert got.returncode == 0, got.stderr
+    assert got.stdout == measuring() + summary_line((3, 3, 0, 0, 0, 0))
+
+
+def test_not_viable_counts_only_a_compiler_error(planted: Planted) -> None:
+    """A compile check that failed for a reason of its own judged nothing."""
+    planted.adopt()
+    planted.errors["a", 9] = SHIM_ERROR
+    planted.report("a", ("KILLED", 4, "arithmetic"), ("NOT_VIABLE", 9, "return"))
+    planted.report("b", ("KILLED", 4, "arithmetic"))
+    got = planted.run_leg()
+    assert got.returncode == 1
+    assert summary_line((3, 2, 0, 0, 0, 0)) in got.stdout
+    assert got.stderr == (
+        f"{LABEL}: not judged: NOT_VIABLE: a/a.go:9:9 return — not the"
+        " compiler: Compilation failed: compilation error: mise ERROR No"
+        " version is set for shim: go\n" + RED_TAIL
+    )
+
+
+def test_a_report_of_the_wrong_shape_is_not_judged(planted: Planted) -> None:
+    """Each field the verdict reads is refused by name, never a crash."""
+    mutant = '"filePath": "/x", "line": 4, "column": 9, "type": "t"'
+    rows = (
+        ("[]", "the report is not an object"),
+        ('{"results": "x"}', "results is not a list"),
+        ('{"totalMutants": "1"}', "totalMutants is not an integer"),
+        ('{"results": [5]}', "results[0] is not an object"),
+        ('{"results": [{"mutant": 3}]}', "results[0].mutant is not an object"),
+        (
+            '{"results": [{"mutant": {"line": 4}}]}',
+            "results[0].mutant.filePath is not a string",
+        ),
+        (
+            '{"results": [{"mutant": {"filePath": "/x", "line": true}}]}',
+            "results[0].mutant.line is not an integer",
+        ),
+        (
+            '{"results": [{"mutant": {"filePath": "/x", "line": 4}}]}',
+            "results[0].mutant.column is not an integer",
+        ),
+        (
+            '{"results": [{"mutant": {"filePath": "/x", "line": 4, "column": 9}}]}',
+            "results[0].mutant.type is not a string",
+        ),
+        (
+            f'{{"results": [{{"mutant": {{{mutant}}}}}]}}',
+            "results[0].status is not a string",
+        ),
+        (
+            f'{{"results": [{{"mutant": {{{mutant}}},"status": "","error": 1}}]}}',
+            "results[0].error is not a string",
+        ),
+        ('{"results": [], "results": []}', 'duplicate key "results"'),
+    )
+    planted.adopt()
+    planted.report("b", ("KILLED", 4, "arithmetic"))
+    for text, why in rows:
+        (planted.reports / "a.json").write_text(text, encoding="utf-8")
+        got = planted.run_leg()
+        assert got.returncode == 1
+        assert got.stderr == f"{LABEL}: not judged: 1.json: {why}\n" + RED_TAIL
+
+
+def test_a_red_baseline_is_red_before_any_mutant(planted: Planted) -> None:
+    """A suite that already fails cannot judge a mutant."""
+    planted.adopt()
+    planted.clean_reports()
+    planted.env["PLANT_TEST_STATUS"] = "1"
+    planted.baseline.write_text("FAIL\texample.com/p/a\n", encoding="utf-8")
+    got = planted.run_leg()
+    assert got.returncode == 1
+    assert got.stderr == (
+        "FAIL\texample.com/p/a\n"
+        f"{LABEL}: the suite fails before any mutant (go test exited 1)\n"
+    )
+    none: list[str] = []
+    assert planted.calls("gomu") == none
+
+
+class Records(Planted):
+    """`//mutants:equivalent <type> <reason>` at the site, and only there."""
+
+    def survive_at_sign(self, line: int, kind: str = "conditional") -> None:
+        """Plant one covered survivor in a/a.go."""
+        self.report("a", ("KILLED", 4, "arithmetic"), ("SURVIVED", line, kind))
+        self.report("b", ("KILLED", 4, "arithmetic"))
+
+
+@fixture
+def records(tmp_path: Path, env: support.Env) -> Records:
+    """Give each row its own Records.
+
+    Returns:
+        The row's Records.
+
+    """
+    return Records(tmp_path, env=env)
+
+
+def test_a_record_above_the_line_explains_it_and_is_counted(records: Records) -> None:
+    """The comment on the line above names the type and says why."""
+    records.adopt()
+    records.write(
+        "a/a.go",
+        A_GO.replace(IF_LINE, ABOVE),
+    )
+    records.survive_at_sign(9)
+    got = records.run_leg()
+    assert got.returncode == 0, got.stderr
+    assert got.stdout == measuring() + summary_line((3, 2, 0, 0, 0, 1))
+
+
+def test_a_trailing_record_explains_its_own_line(records: Records) -> None:
+    """Code before the comment: the record's site is its own line."""
+    records.adopt()
+    records.write(
+        "a/a.go",
+        A_GO.replace(
+            "\tif x < 0 {",
+            "\tif x < 0 { //mutants:equivalent conditional zero is either",
+        ),
+    )
+    records.survive_at_sign(8)
+    got = records.run_leg()
+    assert got.returncode == 0, got.stderr
+    assert summary_line((3, 2, 0, 0, 0, 1)) in got.stdout
+
+
+def test_a_record_with_no_reason_is_red(records: Records) -> None:
+    """An exclusion that does not say why explains nothing."""
+    records.adopt()
+    records.write(
+        "a/a.go",
+        A_GO.replace(
+            "\tif x < 0 {", "\t//mutants:equivalent conditional\n\tif x < 0 {"
+        ),
+    )
+    records.survive_at_sign(9)
+    got = records.run_leg()
+    assert got.returncode == 1
+    assert f"{LABEL}: survived: a/a.go:9:9 conditional\n" in got.stdout
+    assert got.stderr == (
+        f"{LABEL}: a/a.go:8: //mutants:equivalent conditional gives no reason\n"
+        + RED_TAIL
+    )
+
+
+def test_a_record_of_the_wrong_type_is_red(records: Records) -> None:
+    """The record must name the surviving mutant's type."""
+    records.adopt()
+    records.write(
+        "a/a.go",
+        A_GO.replace(
+            "\tif x < 0 {",
+            "\t//mutants:equivalent branch the sign is total\n\tif x < 0 {",
+        ),
+    )
+    records.survive_at_sign(9)
+    got = records.run_leg()
+    assert got.returncode == 1
+    assert got.stderr == (
+        f"{LABEL}: a/a.go:8: //mutants:equivalent branch names branch,"
+        " but what survives here is conditional\n" + RED_TAIL
+    )
+
+
+def test_a_stale_record_is_red(records: Records) -> None:
+    """A record whose mutant is now killed, or gone, must be deleted."""
+    records.adopt()
+    records.write(
+        "a/a.go",
+        A_GO.replace(IF_LINE, ABOVE),
+    )
+    records.clean_reports()
+    got = records.run_leg()
+    assert got.returncode == 1
+    assert got.stderr == (
+        f"{LABEL}: a/a.go:8: //mutants:equivalent conditional is stale:"
+        " nothing survives at line 9 — delete it\n" + RED_TAIL
+    )
+
+
+def test_a_record_on_a_not_covered_mutant_is_still_red(records: Records) -> None:
+    """Untested is not equivalent: only a test fixes it."""
+    records.adopt()
+    records.cover_lines(a=[(3, 5, 1), (7, 13, 0)], b=[(3, 5, 1)])
+    records.write(
+        "a/a.go",
+        A_GO.replace(IF_LINE, ABOVE),
+    )
+    records.survive_at_sign(9)
+    got = records.run_leg()
+    assert got.returncode == 1
+    assert f"{LABEL}: not covered: a/a.go:9:9 conditional\n" in got.stdout
+    assert got.stderr == (
+        f"{LABEL}: a/a.go:8: //mutants:equivalent conditional records a mutant"
+        " no test runs — untested is not equivalent; only a test fixes it\n" + RED_TAIL
+    )
+
+
+def test_gomu_runs_with_the_real_go_first_on_path(planted: Planted) -> None:
+    """A shim first on PATH is put behind the toolchain's own go."""
+    planted.adopt()
+    planted.clean_reports()
+    got = planted.run_leg()
+    assert got.returncode == 0, got.stderr
+    want = {f"sees {planted.goroot}/bin/go"}
+    seen = set(planted.calls("sees"))
+    assert seen == want
+
+
+def test_gomu_is_called_per_file_non_incremental_with_one_worker(
+    planted: Planted,
+) -> None:
+    """Each file, absolute; the timeout from the package's own test time."""
+    planted.adopt()
+    planted.clean_reports()
+    got = planted.run_leg()
+    assert got.returncode == 0, got.stderr
+    tail = "--incremental=false --output json --fail-on-gate=false"
+    want = [
+        f"gomu run {planted.root}/a/a.go --workers 1 --timeout 30 {tail}",
+        f"gomu run {planted.root}/b/b.go --workers 1 --timeout 124 {tail}",
+    ]
+    assert planted.calls("gomu") == want
+
+
+def test_gomu_finds_the_root_gomuignore_from_the_scratch_directory(
+    planted: Planted,
+) -> None:
+    """The absolute file path, not the CWD, leads gomu to the adoption file."""
+    planted.adopt()
+    planted.clean_reports()
+    got = planted.run_leg()
+    assert got.returncode == 0, got.stderr
+    want = [f"ignore {planted.root}/.gomuignore"] * 2
+    assert planted.calls("ignore") == want
+    assert f"cwd {planted.root}" not in planted.calls("cwd")
+
+
+def test_a_mise_shim_is_resolved_to_the_binary(planted: Planted) -> None:
+    """The binary runs, not the shim, so its go children see real go."""
+    planted.adopt()
+    planted.clean_reports()
+    misebin = planted.tmp / "misebin"
+    misebin.mkdir()
+    (misebin / "mise").write_text(MISE_STUB, encoding="utf-8")
+    (misebin / "mise").chmod(0o755)
+    (misebin / "gomu").symlink_to(misebin / "mise")
+    planted.env["PATH"] = f"{misebin}{os.pathsep}{planted.env['PATH']}"
+    planted.env["PLANT_REAL_GOMU"] = f"{planted.shims}/gomu"
+    got = planted.run_leg()
+    assert got.returncode == 0, got.stderr
+    assert len(planted.calls("gomu run")) == GOMU_RUNS
+
+
+def test_a_gomu_built_with_an_older_go_is_refused(planted: Planted) -> None:
+    """The v0.3.0 release binary (Go 1.24.13) under Go 1.27 is red."""
+    planted.adopt()
+    planted.clean_reports()
+    planted.env["PLANT_GOMU_GO"] = "go1.24.13"
+    got = planted.run_leg()
+    assert got.returncode == 1
+    assert not got.stdout
+    assert got.stderr == (
+        f"{LABEL}: {planted.shims}/gomu was built with go1.24.13, older than the"
+        " go1.27.4 it runs under —\n"
+        "  it cannot read this toolchain's export data; rebuild it with the"
+        " repository's go:\n"
+        "    mise install go:github.com/sivchari/gomu/cmd/gomu\n"
+    )
+    none: list[str] = []
+    assert planted.calls("gomu") == none
+
+
+def test_a_gomu_built_with_the_same_go_runs(planted: Planted) -> None:
+    """Equal build and toolchain versions pass the check."""
+    planted.adopt()
+    planted.clean_reports()
+    planted.env |= {"PLANT_GOMU_GO": "go1.27.4", "PLANT_GO": "go1.27.4"}
+    got = planted.run_leg()
+    assert got.returncode == 0, got.stderr
+
+
+def test_a_long_build_report_is_read_to_the_end(planted: Planted) -> None:
+    """A `version -m` past a pipe buffer cannot kill the leg (#1637).
+
+    The check reads only the first line; a reader that stopped
+    there closed the pipe on a go still writing its dependency
+    list, and pipefail turned the SIGPIPE into a silent 141.
+    """
+    planted.adopt()
+    planted.clean_reports()
+    planted.env["PLANT_GOMU_TAIL"] = "200000"
+    got = planted.run_leg()
+    assert got.returncode == 0, got.stderr
+    assert not got.stderr
+    assert len(planted.calls("gomu run")) == GOMU_RUNS
+
+
+def test_nothing_gomu_writes_lands_in_the_tree(planted: Planted) -> None:
+    """History and report go to a scratch directory, never the tree."""
+    planted.adopt()
+    planted.clean_reports()
+    got = planted.run_leg()
+    assert got.returncode == 0, got.stderr
+    for cwd in planted.calls("cwd"):
+        assert cwd != f"cwd {planted.root}"
+    assert not (planted.tree / ".gomu_history.json").exists()
+    assert not (planted.tree / "mutation-report.json").exists()
+
+
+def test_a_generated_file_is_not_mutated(planted: Planted) -> None:
+    """Go's generated-code marker keeps a file out of the population."""
+    planted.adopt()
+    planted.write("b/b.go", "// Code generated by hand. DO NOT EDIT.\n\n" + B_GO)
+    planted.clean_reports()
+    got = planted.run_leg()
+    assert got.returncode == 0, got.stderr
+    assert len(planted.calls("gomu")) == 1
+    assert summary_line((2, 2, 0, 0, 0, 0)) in got.stdout
+
+
+def test_a_shard_mutates_its_packages_and_writes_its_counts(planted: Planted) -> None:
+    """Shard 1/2 is package b alone; excluded is the whole tree's."""
+    planted.adopt()
+    planted.write(
+        "a/a.go",
+        A_GO.replace(IF_LINE, ABOVE),
+    )
+    planted.report("b", ("KILLED", 4, "arithmetic"), ("SURVIVED", 4, "return"))
+    planted.env |= {"MUTANTS_SHARD": "1/2", "MUTANTS_SUMMARY_DIR": str(planted.summary)}
+    got = planted.run_leg()
+    assert got.returncode == 1
+    assert got.stdout == (
+        f"{LABEL}: measuring coverage of 1 package(s), shard 1/2\n"
+        f"{LABEL}: survived: b/b.go:4:9 return\n"
+        f"{LABEL}: shard 1/2: 2 mutants, 1 killed, 1 survived,"
+        " 0 not covered, 0 not viable, 1 excluded\n"
+    )
+    assert len(planted.calls("gomu")) == 1
+    assert (planted.summary / "go.tsv").read_text(
+        encoding="utf-8"
+    ) == "1/2\t2\t1\t1\t1\twhole\n"
+
+
+def test_a_malformed_shard_is_red(planted: Planted) -> None:
+    """A typo must not read as "run everything"."""
+    planted.adopt()
+    planted.env["MUTANTS_SHARD"] = "2/2"
+    got = planted.run_leg()
+    assert got.returncode == 1
+    assert got.stderr == f"{LABEL}: MUTANTS_SHARD='2/2' is not k/n with k < n\n"
+
+
+# The comparison `build-go` makes: older or unreadable is refused.
+def test_an_older_build_is_refused() -> None:
+    """The v0.3.0 release binary under Go 1.27; a patch behind too."""
+    assert mutants_go.older("go1.24.13", "go1.27.4")
+    assert mutants_go.older("go1.27.3", "go1.27.4")
+
+
+def test_an_equal_build_runs() -> None:
+    """The go: backend builds with the running go: equal."""
+    assert not mutants_go.older("go1.27.4", "go1.27.4")
+    assert not mutants_go.older("go1.27", "go1.27.0")
+
+
+def test_a_newer_build_runs() -> None:
+    """A newer importer reads older export data."""
+    assert not mutants_go.older("go1.28.0", "go1.27.4")
+
+
+def test_an_unreadable_build_is_refused() -> None:
+    """No version, or one `go version` would not print, is not trusted."""
+    assert mutants_go.older("", "go1.27.4")
+    assert mutants_go.older("devel +abc123", "go1.27.4")
+
+
+class Main:
+    """The verdict half over a planted scratch directory, in this process.
+
+    The scratch directory is what mutants-go.sh leaves for the helper:
+    package `a` holds `a.go`, lines 3-5 covered and 9 not.
+    """
+
+    def __init__(self, tmp_path: Path) -> None:
+        """Plant the scratch tables for one package and an empty report."""
+        self.root = Path(str(tmp_path), "tree")
+        self.scratch = Path(str(tmp_path), "scratch")
+        (self.scratch / "reports").mkdir(parents=True)
+        package = f"{MODULE}/a\t{self.root}/a\ta.go\n"
+        self.write("all.tsv", package)
+        self.write("shard.tsv", package)
+        self.write("files.tsv", f"{MODULE}/a\t{self.root}/a/a.go\n")
+        self.write("cover.out", f"mode: set\n{MODULE}/a/a.go:3.1,5.2 1 1\n")
+        for name in ("gomu.log", "runs.log", "records.txt"):
+            self.write(name, "")
+        self.summary = Path(str(tmp_path), "summary")
+
+    def write(self, name: str, text: str) -> None:
+        """Write one file of the scratch directory."""
+        (self.scratch / name).write_text(text, encoding="utf-8")
+
+    def results(self, *rows: tuple[str, int, str]) -> None:
+        """Plant gomu's report for a.go: (status, line, type) per mutant."""
+        body = {
+            "totalMutants": len(rows),
+            "results": [
+                {
+                    "mutant": {
+                        "filePath": f"{self.root}/a/a.go",
+                        "line": line,
+                        "column": 9,
+                        "type": kind,
+                    },
+                    "status": status,
+                }
+                for status, line, kind in rows
+            ],
+        }
+        self.write("reports/1.json", json.dumps(body))
+
+    def judge(self) -> list[str]:
+        """Spell main's argv as the shell half does, its summary dir planted.
+
+        Returns:
+            The argv.
+
+        """
+        return [
+            "judge",
+            "--label",
+            LABEL,
+            "--where",
+            "",
+            "--shard",
+            "whole",
+            "--root",
+            str(self.root),
+            "--scratch",
+            str(self.scratch),
+            "--summary-dir",
+            str(self.summary),
+        ]
+
+
+@fixture
+def main_state(tmp_path: Path) -> Main:
+    """Give each row its own Main.
+
+    Returns:
+        The row's Main.
+
+    """
+    return Main(tmp_path)
+
+
+def line(*counts: int) -> str:
+    """Spell the summary line.
+
+    Returns:
+        Total, killed, survived, not covered, not viable, excluded.
+
+    """
+    total, killed, survived, uncovered, viable, excluded = counts
+    return (
+        f"{LABEL}: {total} mutants, {killed} killed, {survived} survived,"
+        f" {uncovered} not covered, {viable} not viable, {excluded} excluded\n"
+    )
+
+
+def test_a_clean_shard_is_green_and_writes_its_counts(
+    main_state: Main, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Every mutant killed: exit 0, the summary, go.tsv."""
+    main_state.results(("KILLED", 4, "arithmetic"), ("TIMED_OUT", 5, "branch"))
+    status = mutants_go.main(main_state.judge())
+    out, err = capfd.readouterr()
+    assert (status, out, err) == (0, line(2, 2, 0, 0, 0, 0), "")
+    assert (main_state.summary / "go.tsv").read_text(
+        encoding="utf-8"
+    ) == "whole\t2\t2\t0\t0\twhole\n"
+
+
+def test_a_covered_survivor_and_an_uncovered_one_are_red(
+    main_state: Main, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Survived on line 4 is a survivor; on line 9 it is not covered."""
+    main_state.results(("SURVIVED", 4, "arithmetic"), ("SURVIVED", 9, "return"))
+    status = mutants_go.main(main_state.judge())
+    out, err = capfd.readouterr()
+    assert status == 1
+    assert out == (
+        f"{LABEL}: survived: a/a.go:4:9 arithmetic\n"
+        f"{LABEL}: not covered: a/a.go:9:9 return\n" + line(2, 0, 1, 1, 0, 0)
+    )
+    assert err == RED_TAIL
+
+
+def test_a_record_at_the_site_explains_its_survivor(
+    main_state: Main, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A sound record of the survivor's type, trailing its line, is excluded."""
+    main_state.results(("SURVIVED", 4, "arithmetic"), ("KILLED", 5, "branch"))
+    main_state.write(
+        "records.txt",
+        "a/a.go:4:\treturn x + y //mutants:equivalent arithmetic same value\n",
+    )
+    status = mutants_go.main(main_state.judge())
+    out, err = capfd.readouterr()
+    assert (status, out, err) == (0, line(2, 1, 0, 0, 0, 1), "")
+
+
+def test_a_malformed_and_a_stale_record_are_red_by_name(
+    main_state: Main, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """No reason is malformed; a sound record over nothing is stale."""
+    main_state.results(("KILLED", 4, "arithmetic"))
+    main_state.write(
+        "records.txt",
+        "a/a.go:3://mutants:equivalent arithmetic\n"
+        "a/a.go:5:\tx++ //mutants:equivalent branch why\n",
+    )
+    status = mutants_go.main(main_state.judge())
+    err = capfd.readouterr().err
+    assert status == 1
+    assert err == (
+        f"{LABEL}: a/a.go:3: //mutants:equivalent arithmetic gives no reason\n"
+        f"{LABEL}: a/a.go:5: //mutants:equivalent branch is stale: nothing"
+        " survives at line 5 — delete it\n" + RED_TAIL
+    )
+
+
+def test_a_skipped_file_and_a_failed_run_are_not_judged(
+    main_state: Main, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """The skip line gomu printed and the shell's failed-run line, each named."""
+    main_state.results(("KILLED", 4, "arithmetic"))
+    main_state.write("gomu.log", "  a.go (error: no package)\n")
+    main_state.write("runs.log", "a/a.go: gomu exited 2\n")
+    status = mutants_go.main(main_state.judge())
+    err = capfd.readouterr().err
+    assert status == 1
+    assert err == (
+        f"{LABEL}: not judged: a.go (error: no package)\n"
+        f"{LABEL}: not judged: a/a.go: gomu exited 2\n" + RED_TAIL
+    )
+    assert not (main_state.summary / "go.tsv").exists()
+
+
+@pytest.mark.usefixtures("main_state")
+def test_build_go_refuses_an_older_gomu(capfd: pytest.CaptureFixture[str]) -> None:
+    """`build-go` names the gomu, both Go releases and the rebuild."""
+    status = mutants_go.main([
+        "build-go",
+        "--label",
+        LABEL,
+        "--gomu",
+        "/bin/gomu",
+        "--built",
+        "go1.24.13",
+        "--running",
+        "go1.27.4",
+    ])
+    err = capfd.readouterr().err
+    assert status == 1
+    assert err == (
+        f"{LABEL}: /bin/gomu was built with go1.24.13, older than the go1.27.4"
+        " it runs under —\n"
+        "  it cannot read this toolchain's export data; rebuild it with the"
+        " repository's go:\n"
+        "    mise install go:github.com/sivchari/gomu/cmd/gomu\n"
+    )
+
+
+@pytest.mark.usefixtures("main_state")
+def test_build_go_passes_an_equal_gomu_silently(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """The same release: exit 0, nothing printed."""
+    argv = ["build-go", "--label", LABEL, "--gomu", "g", "--built", "go1.27"]
+    status = mutants_go.main([*argv, "--running", "go1.27.0"])
+    out, err = capfd.readouterr()
+    assert (status, out, err) == (0, "", "")

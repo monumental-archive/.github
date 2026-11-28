@@ -1,0 +1,99 @@
+"""lint:dco reads every sign-off trailer to the end (#1637).
+
+The task asks whether a commit's sign-off names its author. It once
+asked with `git log | grep "^Signed-off-by:" | grep -qF "<email>"`:
+the last reader stopped at its first match, the trailer grep was then
+killed writing the rest, and pipefail called a signed-off commit
+unsigned. The trailers are captured now and the address is matched
+against the captured text.
+
+The rows run the task's own `run` body, read from mise/config.toml, in
+a planted git tree whose `origin/main` is its first commit.
+"""
+
+import re
+import subprocess
+import tempfile
+from pathlib import Path
+
+from belt import decoded
+from tests import support
+
+BELT = support.MISE
+BASH = support.tool("bash")
+GIT = support.tool("git")
+SIGN_OFF = f"Signed-off-by: {support.IDENTITY_NAME} <{support.IDENTITY_EMAIL}>"
+
+
+def body() -> str:
+    """Read lint:dco's run body from the belt's config.
+
+    Returns:
+        The bash the task runs.
+
+    """
+    config = decoded.load_toml((BELT / "config.toml").read_bytes())
+    tasks = decoded.as_object(config["tasks"], "the belt's [tasks]")
+    task = decoded.as_object(tasks["lint:dco"], "lint:dco")
+    return decoded.as_str(task["run"], "lint:dco's run")
+
+
+def run(message: str, *, env: support.Env) -> subprocess.CompletedProcess[str]:
+    """Run the task over one planted commit carrying this message.
+
+    Returns:
+        The finished process.
+
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        environ = env(root / "home")
+
+        def git(*args: str, stdin: str | None = None) -> None:
+            subprocess.run(
+                [GIT, *args], cwd=root, env=environ, input=stdin, text=True, check=True
+            )
+
+        git("init", "-q")
+        git("commit", "-q", "--allow-empty", "-m", "base")
+        git("update-ref", "refs/remotes/origin/main", "HEAD")
+        git("commit", "-q", "--allow-empty", "-F", "-", stdin=message)
+        as_mise = support.task_run("lint:dco", body())
+        return subprocess.run(
+            as_mise.argv,
+            cwd=root,
+            env=environ | as_mise.env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+
+# The author's own sign-off is found wherever the trailers run on.
+def test_a_sign_off_ahead_of_many_trailers_is_found(env: support.Env) -> None:
+    """The author's sign-off, then 4,000 more: the commit is signed.
+
+    Measured on main before the fix: the trailer grep, killed
+    writing past the first match, red the commit 50 runs in 50. A
+    long message after one sign-off does not fire it (the trailer
+    grep writes once), so the row plants trailers.
+    """
+    others = "".join(
+        f"Signed-off-by: Co {n} <co{n}@example.invalid>\n" for n in range(4000)
+    )
+    done = run(f"fix: planted\n\n{SIGN_OFF}\n{others}", env=env)
+    assert not done.stderr
+    assert done.returncode == 0
+
+
+def test_a_commit_without_the_authors_sign_off_is_red(env: support.Env) -> None:
+    """Another person's sign-off is not the author's."""
+    done = run(
+        "fix: planted\n\nSigned-off-by: Other <other@example.invalid>\n", env=env
+    )
+    assert done.returncode == 1
+    assert re.search(
+        r"^lint:dco: commits missing a sign-off matching their author:"
+        r" [0-9a-f]{8}\n  fix with: git commit -s",
+        done.stderr,
+    )

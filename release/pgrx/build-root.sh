@@ -25,7 +25,7 @@ apt-get update -qq
 # also upgrades the server, so the suite would pass against a server the
 # image does not contain. Textually identical to the install in
 # release/generate-pgrx-upgrade.sh, asserted by
-# release/test_generate_pgrx_upgrade.py.
+# tests/release/test_generate_pgrx_upgrade.py.
 server=$(dpkg-query -W -f="\${Version}" "postgresql-${PG}")
 if ! apt-cache show "postgresql-server-dev-${PG}=${server}" > /dev/null 2>&1; then
   msg="image ${BUILD_IMAGE} carries server ${server}; the apt repository"
