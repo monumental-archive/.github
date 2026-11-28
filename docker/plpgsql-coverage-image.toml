@@ -16,4 +16,4 @@
 # preset.
 
 # renovate: plpgsql-coverage-image
-image = "ghcr.io/monumental-archive/monumental-archive-db:latest@sha256:fb14ff4579f57872d61a0a0a2992a6f77ed23ab8cd63427ef1d67529fe58d2cd"
+image = "ghcr.io/monumental-archive/monumental-archive-db:latest@sha256:37257a504da3c65d729bc43224dea64920e5e9b1244addb880cf5a9038bdc06f"
